@@ -1,0 +1,51 @@
+"""FastAPI routes for session execution."""
+
+from __future__ import annotations
+
+import json
+from fastapi import APIRouter, Depends, HTTPException, Request
+from sse_starlette.sse import EventSourceResponse
+from pydantic import BaseModel
+
+from agent.application.runtime.cancellation import CancellationTokenSource
+from agent.infrastructure.paths import validate_session_id
+
+router = APIRouter(prefix="/sessions", tags=["sessions"])
+
+class TurnRequest(BaseModel):
+    query: str
+    system_prompt: str | None = None
+
+from agent.interfaces.api.dependencies import get_agent_factory
+
+@router.post("/{session_id}/turns")
+async def run_turn(session_id: str, turn_req: TurnRequest, request: Request, factory=Depends(get_agent_factory)):
+    """Run a single turn and stream the response events via SSE."""
+    try:
+        session_id = validate_session_id(session_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    agent = factory(session_id=session_id)
+    await agent.initialize()
+    cancel_source = CancellationTokenSource()
+
+    async def event_generator():
+        try:
+            async for event in agent.run_turn(session_id=session_id, query=turn_req.query, cancellation_token=cancel_source.token):
+                # Check for client disconnect
+                if await request.is_disconnected():
+                    cancel_source.cancel("Client disconnected")
+                    break
+
+                yield {
+                    "event": event.type,
+                    "data": json.dumps(event.to_dict(), ensure_ascii=False)
+                }
+        except Exception as e:
+            yield {
+                "event": "error",
+                "data": json.dumps({"error": str(e)}, ensure_ascii=False)
+            }
+
+    return EventSourceResponse(event_generator())

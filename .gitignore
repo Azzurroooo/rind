@@ -1,0 +1,52 @@
+# Python & Environment
+__pycache__/
+*.py[cod]
+*$py.class
+venv/
+env/
+.venv/
+.venv-build/
+.env
+node_modules/
+
+# Project specific
+# Runtime data defaults to TANGERINE_HOME or ~/.tangerine.
+.tangerine/
+sessions/
+build/
+dist/
+release/
+packaging/vendor/
+
+# Testing & Cache
+.pytest_cache/
+.coverage
+.tox/
+
+# IDEs
+.vscode/
+.idea/
+
+# Local Notes (Optional, keep if you don't want them tracked)
+/1.png
+/1.txt
+/PRODUCT_PLAN.md
+/cheer.txt
+/poem.txt
+/session_index.json
+/test_image.py
+/test_pdf.py
+/*.pdf
+plan/
+claude_code_system_prompt_analysis.md
+claude_code_system_prompt_cn.md
+prompt.txt
+test_web.py
+test.txt
+src/
+.claude/
+AGENTS.md
+ARCHITECTURE_REFACTOR_GUIDE.md
+.docs/
+figs/
+.codex/

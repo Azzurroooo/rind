@@ -1,0 +1,14 @@
+{
+  "name": "tangerine-rind-frontend-cli",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "tangerine": "bin/tangerine.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "terminal-kit": "^3.1.2"
+  }
+}
