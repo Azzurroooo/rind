@@ -65,13 +65,13 @@ async def test_async_session_store_facade(temp_session_dir):
     assert len(messages) == 11 # 1 user + 5 assistant + 5 system
 
 
-def test_resolve_session_root_uses_tangerine_home(monkeypatch, tmp_path):
-    tangerine_home = tmp_path / ".tangerine"
-    monkeypatch.setenv("TANGERINE_HOME", str(tangerine_home))
+def test_resolve_session_root_uses_rind_home(monkeypatch, tmp_path):
+    rind_home = tmp_path / ".rind"
+    monkeypatch.setenv("RIND_HOME", str(rind_home))
 
     root = AsyncJsonlSessionStore.resolve_session_root()
 
-    assert root == os.path.abspath(str(tangerine_home / "sessions"))
+    assert root == os.path.abspath(str(rind_home / "sessions"))
 
 
 def test_resolve_session_root_uses_explicit_session_dir(tmp_path):

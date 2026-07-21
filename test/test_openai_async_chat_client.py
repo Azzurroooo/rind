@@ -133,7 +133,7 @@ async def test_openai_async_client_adds_stable_prompt_cache_key():
     await client.create([{**messages[0]}, {"role": "user", "content": "second"}])
     second_key = mock_openai.chat.completions.create.call_args.kwargs["prompt_cache_key"]
 
-    assert first_key.startswith("tangerine:")
+    assert first_key.startswith("rind:")
     assert first_key == second_key
 
 

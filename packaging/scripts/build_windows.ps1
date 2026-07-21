@@ -8,7 +8,7 @@ Set-StrictMode -Version Latest
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 
 $Root = (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path
-$DistDir = Join-Path $Root "dist\tangerine"
+$DistDir = Join-Path $Root "dist\rind"
 $ReleaseDir = Join-Path $Root "release"
 $BuildVenvDir = Join-Path $Root ".venv-build"
 $BuildPython = Join-Path $BuildVenvDir "Scripts\python.exe"
@@ -20,7 +20,7 @@ function Write-Step($Message) {
     Write-Host "==> $Message" -ForegroundColor Cyan
 }
 
-function Get-TangerineVersion() {
+function Get-RindVersion() {
     Push-Location $Root
     try {
         return (python -c "from agent.version import __version__; print(__version__)").Trim()
@@ -39,7 +39,7 @@ function Get-GitInstallerUrl() {
     try {
         $Release = Invoke-RestMethod `
             -Uri "https://api.github.com/repos/git-for-windows/git/releases/latest" `
-            -Headers @{ "User-Agent" = "tangerine-rind-build-script" }
+            -Headers @{ "User-Agent" = "rind-build-script" }
         $Asset = $Release.assets |
             Where-Object { $_.name -match '^Git-[0-9].*-64-bit\.exe$' } |
             Select-Object -First 1
@@ -102,7 +102,7 @@ function Copy-Templates() {
 Write-Step "Preparing build"
 New-Item -ItemType Directory -Force -Path $ReleaseDir | Out-Null
 
-$Version = Get-TangerineVersion
+$Version = Get-RindVersion
 Write-Host "Version: $Version"
 
 Ensure-BuildVenv
@@ -110,21 +110,21 @@ Ensure-BuildVenv
 Write-Step "Building PyInstaller one-folder"
 Push-Location $Root
 try {
-    & $BuildPython -m PyInstaller packaging\pyinstaller\tangerine.spec --clean --noconfirm
+    & $BuildPython -m PyInstaller packaging\pyinstaller\rind.spec --clean --noconfirm
 }
 finally {
     Pop-Location
 }
 
-if (-not (Test-Path (Join-Path $DistDir "tangerine.exe"))) {
-    throw "PyInstaller did not produce dist\tangerine\tangerine.exe"
+if (-not (Test-Path (Join-Path $DistDir "rind.exe"))) {
+    throw "PyInstaller did not produce dist\rind\rind.exe"
 }
 
 Copy-Templates
 
 Write-Step "Smoke testing executable"
-& (Join-Path $DistDir "tangerine.exe") --version
-& (Join-Path $DistDir "tangerine.exe") --help | Out-Null
+& (Join-Path $DistDir "rind.exe") --version
+& (Join-Path $DistDir "rind.exe") --help | Out-Null
 
 if ($SkipInstaller) {
     Write-Host "Skipping installer build."
@@ -142,19 +142,19 @@ if (-not $Iscc) {
 $GitInstallerUrl = Get-GitInstallerUrl
 
 Write-Step "Building Inno Setup installer"
-$env:TANGERINE_VERSION = $Version
-$env:TANGERINE_GIT_INSTALLER_URL = $GitInstallerUrl
+$env:RIND_VERSION = $Version
+$env:RIND_GIT_INSTALLER_URL = $GitInstallerUrl
 Push-Location $Root
 try {
-    & $Iscc packaging\inno\TangerineRindSetup.iss
+    & $Iscc packaging\inno\RindSetup.iss
 }
 finally {
     Pop-Location
-    Remove-Item Env:TANGERINE_VERSION -ErrorAction SilentlyContinue
-    Remove-Item Env:TANGERINE_GIT_INSTALLER_URL -ErrorAction SilentlyContinue
+    Remove-Item Env:RIND_VERSION -ErrorAction SilentlyContinue
+    Remove-Item Env:RIND_GIT_INSTALLER_URL -ErrorAction SilentlyContinue
 }
 
-$Installer = Join-Path $ReleaseDir "TangerineRindSetup-$Version.exe"
+$Installer = Join-Path $ReleaseDir "RindSetup-$Version.exe"
 if (Test-Path $Installer) {
     Write-Host ""
     Write-Host "Built installer: $Installer" -ForegroundColor Green

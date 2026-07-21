@@ -148,22 +148,22 @@ def test_context_built_is_quiet_in_debug_mode() -> None:
         raise AssertionError(f"Expected no debug context output, got: {output.getvalue()!r}")
 
 
-def test_context_built_warns_on_tangerine_truncation() -> None:
+def test_context_built_warns_on_rind_truncation() -> None:
     renderer, output = make_renderer()
 
     renderer.handle(
         ContextBuiltEvent(
             message_count=8,
             decisions={
-                "tangerine_docs_truncated": True,
-                "tangerine_docs_truncated_scopes": ["user", "project"],
+                "rind_docs_truncated": True,
+                "rind_docs_truncated_scopes": ["user", "project"],
             },
         )
     )
 
     text = output.getvalue()
-    if "Warning: TANGERINE.md truncated for context: user, project" not in text:
-        raise AssertionError(f"Expected TANGERINE truncation warning, got: {text!r}")
+    if "Warning: RIND.md truncated for context: user, project" not in text:
+        raise AssertionError(f"Expected RIND truncation warning, got: {text!r}")
 
 
 def test_token_stats_updated_output() -> None:
@@ -265,7 +265,7 @@ def main() -> int:
     test_skill_activation_deduplicates_within_turn()
     test_context_built_is_quiet_in_normal_mode()
     test_context_built_is_quiet_in_debug_mode()
-    test_context_built_warns_on_tangerine_truncation()
+    test_context_built_warns_on_rind_truncation()
     test_token_stats_updated_output()
     test_token_stats_tolerates_invalid_numeric_values()
     test_debug_tool_requested_shows_truncated_args()

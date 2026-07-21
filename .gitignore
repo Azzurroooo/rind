@@ -10,8 +10,8 @@ env/
 node_modules/
 
 # Project specific
-# Runtime data defaults to TANGERINE_HOME or ~/.tangerine.
-.tangerine/
+# Runtime data defaults to RIND_HOME or ~/.rind.
+.rind/
 sessions/
 build/
 dist/

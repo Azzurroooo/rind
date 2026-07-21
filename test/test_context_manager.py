@@ -360,21 +360,21 @@ async def test_context_manager_ignores_plan_provider_and_reports_skill_error_typ
 
 
 @pytest.mark.asyncio
-async def test_context_manager_reports_tangerine_provider_error() -> None:
-    def broken_tangerine_provider():
+async def test_context_manager_reports_rind_provider_error() -> None:
+    def broken_rind_provider():
         raise RuntimeError("bad docs")
 
     session = QueryOnlySession([
         {"role": "system", "content": "sys"},
         {"role": "user", "content": "hello"},
     ])
-    manager = ContextManager(tangerine_doc_provider=broken_tangerine_provider)
+    manager = ContextManager(rind_doc_provider=broken_rind_provider)
 
     result = await manager.build_messages_async(session=session)
 
     assert result.messages == session._messages
-    assert result.decisions["tangerine_docs_injected"] is False
-    assert result.decisions["tangerine_docs_error_type"] == "RuntimeError"
+    assert result.decisions["rind_docs_injected"] is False
+    assert result.decisions["rind_docs_error_type"] == "RuntimeError"
 
 
 @pytest.mark.asyncio
@@ -416,7 +416,7 @@ def main() -> int:
         await test_context_manager_generation_mismatch_falls_back_to_local_estimate()
         await test_context_manager_compact_usage_does_not_act_as_anchor()
         await test_context_manager_ignores_plan_provider_and_reports_skill_error_type()
-        await test_context_manager_reports_tangerine_provider_error()
+        await test_context_manager_reports_rind_provider_error()
         await test_context_manager_new_tool_append_does_not_change_old_tool_content()
 
     asyncio.run(_run_all())

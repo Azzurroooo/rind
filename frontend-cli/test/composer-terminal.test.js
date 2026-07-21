@@ -68,9 +68,9 @@ test("composer places menu after wrapped input rows", () => {
 });
 
 test("composer uses placeholder text without moving the empty input cursor", () => {
-  const frame = prepareComposerFrame({ prompt: "\n  › ", placeholder: "Ask Tangerine Rind", inputText: "", cursorIndex: 0 }, 24);
+  const frame = prepareComposerFrame({ prompt: "\n  › ", placeholder: "Ask Rind", inputText: "", cursorIndex: 0 }, 24);
 
-  assert.equal(frame.text, "\n  › Ask Tangerine Rind");
+  assert.equal(frame.text, "\n  › Ask Rind");
   assert.equal(frame.cursorRow, 1);
   assert.equal(frame.cursorColumn, 4);
 });

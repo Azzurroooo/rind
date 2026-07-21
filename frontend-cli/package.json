@@ -1,9 +1,9 @@
 {
-  "name": "tangerine-rind-frontend-cli",
+  "name": "rind-frontend-cli",
   "private": true,
   "type": "module",
   "bin": {
-    "tangerine": "bin/tangerine.js"
+    "rind": "bin/rind.js"
   },
   "engines": {
     "node": ">=18"

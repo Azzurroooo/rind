@@ -111,7 +111,7 @@ async def test_context_manager_injects_active_skill_body() -> None:
 
 
 @pytest.mark.asyncio
-async def test_context_manager_injects_tangerine_docs_before_transient_and_skill() -> None:
+async def test_context_manager_injects_rind_docs_before_transient_and_skill() -> None:
     skill = _skill()
     session = QueryOnlySession([
         {"role": "system", "content": "sys"},
@@ -122,14 +122,14 @@ async def test_context_manager_injects_tangerine_docs_before_transient_and_skill
     def docs_provider():
         return (
             [{"role": "system", "content": "\n\n--- project-doc ---\n\nproject guidance"}],
-            {"tangerine_docs_injected_chars": 16},
-            {"tangerine_docs_injected": True},
+            {"rind_docs_injected_chars": 16},
+            {"rind_docs_injected": True},
         )
 
     manager = ContextManager(
         skill_repository=StaticSkillRepository([skill]),
         skill_selector=SkillSelector(),
-        tangerine_doc_provider=docs_provider,
+        rind_doc_provider=docs_provider,
     )
 
     result = await manager.build_messages_async(
@@ -144,7 +144,7 @@ async def test_context_manager_injects_tangerine_docs_before_transient_and_skill
     assert contents[2] == "init guidance"
     assert "Active skill instructions:" in contents[3]
     assert contents[4] == "please use $demo"
-    assert result.decisions["tangerine_docs_injected"] is True
+    assert result.decisions["rind_docs_injected"] is True
     assert result.decisions["skill_injection_applied"] is True
 
 
@@ -186,7 +186,7 @@ def main() -> int:
         await test_context_manager_does_not_inject_when_no_skills()
         await test_context_manager_skips_index_without_active_body()
         await test_context_manager_injects_active_skill_body()
-        await test_context_manager_injects_tangerine_docs_before_transient_and_skill()
+        await test_context_manager_injects_rind_docs_before_transient_and_skill()
         await test_context_manager_does_not_parse_user_trigger()
         test_context_manager_selects_active_skills_for_turn_explicitly()
 

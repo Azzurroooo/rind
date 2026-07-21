@@ -48,12 +48,12 @@ def test_system_info_uses_detected_shell_backend(monkeypatch):
     assert f"Shell Executable: {shell_path}" in info
 
 
-def test_system_prompt_contains_tangerine_doc_rules():
+def test_system_prompt_contains_rind_doc_rules():
     text = prompts.SYSTEM_PROMPT
 
-    assert "TANGERINE.md Context Docs" in text
+    assert "RIND.md Context Docs" in text
     assert "32 KiB byte budget" in text
-    assert "Never create, update, delete, or rename any `TANGERINE.md`" in text
+    assert "Never create, update, delete, or rename any `RIND.md`" in text
     assert "not automatically updated memory" in text
 
 
@@ -68,23 +68,23 @@ def test_system_prompt_describes_path_roots():
 
     assert "cd` commands affect subsequent `bash` calls only" in text
     assert "file tools still resolve relative paths from the Current Working Directory" in text
-    assert "Project-level `TANGERINE.md` and project skills are rooted at the Current Working Directory" in text
+    assert "Project-level `RIND.md` and project skills are rooted at the Current Working Directory" in text
 
 
-def test_tangerine_init_prompt_scopes_project_file():
-    prompt = prompts.build_tangerine_init_prompt("project", r"C:\repo\TANGERINE.md")
+def test_rind_init_prompt_scopes_project_file():
+    prompt = prompts.build_rind_init_prompt("project", r"C:\repo\RIND.md")
 
-    assert "project-level Tangerine Rind context document" in prompt
-    assert r"C:\repo\TANGERINE.md" in prompt
+    assert "project-level Rind context document" in prompt
+    assert r"C:\repo\RIND.md" in prompt
     assert "Explore the project lightly before writing" in prompt
-    assert "Do not modify the other TANGERINE.md level." in prompt
+    assert "Do not modify the other RIND.md level." in prompt
     assert "32 KiB byte budget" in prompt
 
 
-def test_tangerine_init_prompt_scopes_user_file():
-    prompt = prompts.build_tangerine_init_prompt("user", r"C:\Users\me\.tangerine\TANGERINE.md")
+def test_rind_init_prompt_scopes_user_file():
+    prompt = prompts.build_rind_init_prompt("user", r"C:\Users\me\.rind\RIND.md")
 
-    assert "user-level Tangerine Rind context document" in prompt
+    assert "user-level Rind context document" in prompt
     assert "Do not copy project facts into the user-level file." in prompt
     assert "Do not invent preferences." in prompt
-    assert r"C:\Users\me\.tangerine\TANGERINE.md" in prompt
+    assert r"C:\Users\me\.rind\RIND.md" in prompt

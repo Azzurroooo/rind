@@ -19,7 +19,7 @@ COMMAND_INFOS = (
     SlashCommandInfo("doctor", "Run local setup diagnostics", "/doctor"),
     SlashCommandInfo("sessions", "List recent sessions", "/sessions [limit]"),
     SlashCommandInfo("skill", "List skills", "/skill [list]"),
-    SlashCommandInfo("init", "Draft TANGERINE.md", "/init [project|user]"),
+    SlashCommandInfo("init", "Draft RIND.md", "/init [project|user]"),
     SlashCommandInfo("plan", "Show active plan summary", "/plan"),
     SlashCommandInfo("compact", "Compact current session context", "/compact"),
     SlashCommandInfo("model", "Show or change the active model", "/model | /model set <model>"),
@@ -180,19 +180,19 @@ async def handle_init(context: SlashCommandContext, args: list[str]) -> SlashCom
     if scope not in {"project", "user"}:
         return SlashCommandResult("Usage: /init [project|user]")
 
-    from agent.infrastructure.tangerine_docs import resolve_project_doc_path, resolve_user_doc_path
-    from agent.prompts import build_tangerine_init_prompt
+    from agent.infrastructure.rind_docs import resolve_project_doc_path, resolve_user_doc_path
+    from agent.prompts import build_rind_init_prompt
 
     target = resolve_project_doc_path() if scope == "project" else resolve_user_doc_path()
-    prompt = build_tangerine_init_prompt(scope, str(target))
+    prompt = build_rind_init_prompt(scope, str(target))
     return SlashCommandResult(
-        text=f"Initializing {scope} TANGERINE.md: {target}",
-        run_turn_input=f"Initialize {scope} TANGERINE.md at {target}",
+        text=f"Initializing {scope} RIND.md: {target}",
+        run_turn_input=f"Initialize {scope} RIND.md at {target}",
         transient_system_messages=[
             {
                 "role": "system",
                 "content": prompt,
-                "_context_kind": "tangerine_init",
+                "_context_kind": "rind_init",
             }
         ],
     )
@@ -298,7 +298,7 @@ async def handle_draft(context: SlashCommandContext, args: list[str]) -> str | S
 
 
 async def handle_login(context: SlashCommandContext, args: list[str]) -> str:
-    return "Login/config setup is not implemented yet.\nCreate settings.json under TANGERINE_HOME, or ~/.tangerine when TANGERINE_HOME is unset."
+    return "Login/config setup is not implemented yet.\nCreate settings.json under RIND_HOME, or ~/.rind when RIND_HOME is unset."
 
 
 async def handle_config(context: SlashCommandContext, args: list[str]) -> SlashCommandResult:

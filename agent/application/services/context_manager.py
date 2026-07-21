@@ -29,7 +29,7 @@ class ContextManager:
         skill_selector=None,
         plan_context_provider=None,
         active_skill_char_limit: int = 12000,
-        tangerine_doc_provider=None,
+        rind_doc_provider=None,
     ):
         self._estimator = estimator or ContextEstimator()
         self._hot_message_limit = max(1, int(hot_message_limit))
@@ -37,7 +37,7 @@ class ContextManager:
         self._skill_selector = skill_selector
         self._plan_context_provider = plan_context_provider
         self._active_skill_char_limit = max(0, int(active_skill_char_limit))
-        self._tangerine_doc_provider = tangerine_doc_provider
+        self._rind_doc_provider = rind_doc_provider
 
     async def build_messages_async(
         self,
@@ -52,10 +52,10 @@ class ContextManager:
         budget = self._estimator.budget
         full_messages = persisted_messages + pending
         plan_stats, plan_decisions = self._empty_plan_context()
-        tangerine_messages, tangerine_stats, tangerine_decisions = self._build_tangerine_doc_messages()
+        rind_messages, rind_stats, rind_decisions = self._build_rind_doc_messages()
         skill_messages, skill_stats, skill_decisions = self._build_skill_messages(active_skill_matches)
         extra_system_messages = (
-            tangerine_messages
+            rind_messages
             + self._valid_system_messages(transient_system_messages)
             + skill_messages
         )
@@ -102,7 +102,7 @@ class ContextManager:
             "budget": budget.to_dict(),
             **auto_compact_status,
             **plan_stats,
-            **tangerine_stats,
+            **rind_stats,
             **skill_stats,
         }
         decisions = {
@@ -115,7 +115,7 @@ class ContextManager:
             "compact_required": final_estimate.over_hard_limit,
             "auto_compact_token_limit_reached": auto_compact_status["auto_compact_token_limit_reached"],
             **plan_decisions,
-            **tangerine_decisions,
+            **rind_decisions,
             **skill_decisions,
         }
         return ContextBuildResult(messages=final_messages, stats=stats, decisions=decisions)
@@ -317,30 +317,30 @@ class ContextManager:
         }
         return stats, decisions
 
-    def _build_tangerine_doc_messages(self) -> tuple[list[dict], dict, dict]:
+    def _build_rind_doc_messages(self) -> tuple[list[dict], dict, dict]:
         stats = {
-            "tangerine_docs_user_exists": False,
-            "tangerine_docs_project_exists": False,
-            "tangerine_docs_user_bytes": 0,
-            "tangerine_docs_project_bytes": 0,
-            "tangerine_docs_user_injected_bytes": 0,
-            "tangerine_docs_project_injected_bytes": 0,
-            "tangerine_docs_injected_chars": 0,
+            "rind_docs_user_exists": False,
+            "rind_docs_project_exists": False,
+            "rind_docs_user_bytes": 0,
+            "rind_docs_project_bytes": 0,
+            "rind_docs_user_injected_bytes": 0,
+            "rind_docs_project_injected_bytes": 0,
+            "rind_docs_injected_chars": 0,
         }
         decisions = {
-            "tangerine_docs_injected": False,
-            "tangerine_docs_truncated": False,
-            "tangerine_docs_truncated_scopes": [],
-            "tangerine_docs_user_path": None,
-            "tangerine_docs_project_path": None,
-            "tangerine_docs_error_type": None,
+            "rind_docs_injected": False,
+            "rind_docs_truncated": False,
+            "rind_docs_truncated_scopes": [],
+            "rind_docs_user_path": None,
+            "rind_docs_project_path": None,
+            "rind_docs_error_type": None,
         }
-        if not self._tangerine_doc_provider:
+        if not self._rind_doc_provider:
             return [], stats, decisions
         try:
-            messages, provider_stats, provider_decisions = self._tangerine_doc_provider()
+            messages, provider_stats, provider_decisions = self._rind_doc_provider()
         except Exception as exc:
-            decisions["tangerine_docs_error_type"] = type(exc).__name__
+            decisions["rind_docs_error_type"] = type(exc).__name__
             return [], stats, decisions
         stats.update(provider_stats if isinstance(provider_stats, dict) else {})
         decisions.update(provider_decisions if isinstance(provider_decisions, dict) else {})

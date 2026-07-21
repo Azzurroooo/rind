@@ -46,7 +46,7 @@ def test_config_reload_reads_settings_json(tmp_path, monkeypatch):
         ),
         encoding="utf-8",
     )
-    monkeypatch.setenv("TANGERINE_SETTINGS_PATH", str(path))
+    monkeypatch.setenv("RIND_SETTINGS_PATH", str(path))
 
     Config.reload()
 
@@ -72,7 +72,7 @@ def test_config_does_not_expose_internal_budget_settings(tmp_path, monkeypatch):
         ),
         encoding="utf-8",
     )
-    monkeypatch.setenv("TANGERINE_SETTINGS_PATH", str(path))
+    monkeypatch.setenv("RIND_SETTINGS_PATH", str(path))
 
     Config.reload()
 
@@ -83,7 +83,7 @@ def test_config_does_not_expose_internal_budget_settings(tmp_path, monkeypatch):
 
 def test_config_validate_reports_settings_path_when_api_key_missing(tmp_path, monkeypatch):
     path = tmp_path / "missing.json"
-    monkeypatch.setenv("TANGERINE_SETTINGS_PATH", str(path))
+    monkeypatch.setenv("RIND_SETTINGS_PATH", str(path))
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
 
     Config.reload()
@@ -101,7 +101,7 @@ def test_config_get_async_client_uses_loaded_settings(tmp_path, monkeypatch):
         json.dumps({"apiKey": "settings-key", "baseUrl": "https://example.com/v1"}),
         encoding="utf-8",
     )
-    monkeypatch.setenv("TANGERINE_SETTINGS_PATH", str(path))
+    monkeypatch.setenv("RIND_SETTINGS_PATH", str(path))
     Config.reload()
 
     with patch("agent.infrastructure.config.settings.AsyncOpenAI") as mock_async_openai:
@@ -111,7 +111,7 @@ def test_config_get_async_client_uses_loaded_settings(tmp_path, monkeypatch):
     assert kwargs["api_key"] == "settings-key"
     assert kwargs["base_url"] == "https://example.com/v1"
     user_agent = kwargs["default_headers"]["User-Agent"]
-    assert user_agent.startswith("tangerine/0.2.0 (")
+    assert user_agent.startswith("rind/0.2.0 (")
     assert "; " in user_agent
     assert ") " in user_agent
 
@@ -122,7 +122,7 @@ def test_config_set_model_updates_settings_json(tmp_path, monkeypatch):
         json.dumps({"model": "old-model", "apiKey": "settings-key"}),
         encoding="utf-8",
     )
-    monkeypatch.setenv("TANGERINE_SETTINGS_PATH", str(path))
+    monkeypatch.setenv("RIND_SETTINGS_PATH", str(path))
     Config.reload()
 
     settings = Config.set_model("new-model")
@@ -137,7 +137,7 @@ def test_config_set_model_updates_settings_json(tmp_path, monkeypatch):
 def test_config_set_model_rejects_empty_model(tmp_path, monkeypatch):
     path = tmp_path / "settings.json"
     path.write_text(json.dumps({"model": "old-model"}), encoding="utf-8")
-    monkeypatch.setenv("TANGERINE_SETTINGS_PATH", str(path))
+    monkeypatch.setenv("RIND_SETTINGS_PATH", str(path))
     Config.reload()
 
     with pytest.raises(ValueError, match="Model name"):

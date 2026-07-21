@@ -1,23 +1,23 @@
-#define MyAppName "Tangerine Rind"
-#define MyAppExeName "tangerine.exe"
-#define MyAppPublisher "Tangerine Rind"
-#define MyAppVersion GetEnv("TANGERINE_VERSION")
+#define MyAppName "Rind"
+#define MyAppExeName "rind.exe"
+#define MyAppPublisher "Rind"
+#define MyAppVersion GetEnv("RIND_VERSION")
 #if MyAppVersion == ""
   #define MyAppVersion "0.2.0"
 #endif
-#define GitInstallerUrl GetEnv("TANGERINE_GIT_INSTALLER_URL")
+#define GitInstallerUrl GetEnv("RIND_GIT_INSTALLER_URL")
 
 [Setup]
-AppId={{E6DC2990-40F4-4702-883A-685DF877467F}
+AppId={{6A8C6D27-1B13-4D2F-9A70-2EE7C91F4B45}
 AppName={#MyAppName}
 AppVersion={#MyAppVersion}
 AppPublisher={#MyAppPublisher}
-DefaultDirName={localappdata}\Programs\Tangerine Rind
+DefaultDirName={localappdata}\Programs\Rind
 DefaultGroupName={#MyAppName}
 DisableProgramGroupPage=yes
 PrivilegesRequired=lowest
 OutputDir=..\..\release
-OutputBaseFilename=TangerineRindSetup-{#MyAppVersion}
+OutputBaseFilename=RindSetup-{#MyAppVersion}
 Compression=lzma2/fast
 SolidCompression=no
 WizardStyle=modern
@@ -26,9 +26,9 @@ ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 
 [Files]
-Source: "..\..\dist\tangerine\tangerine.exe"; DestDir: "{app}"; Flags: ignoreversion; Components: core
-Source: "..\..\dist\tangerine\_internal\*"; DestDir: "{app}\_internal"; Flags: ignoreversion recursesubdirs createallsubdirs; Components: core
-Source: "..\..\dist\tangerine\templates\*"; DestDir: "{app}\templates"; Flags: ignoreversion recursesubdirs createallsubdirs; Components: core
+Source: "..\..\dist\rind\rind.exe"; DestDir: "{app}"; Flags: ignoreversion; Components: core
+Source: "..\..\dist\rind\_internal\*"; DestDir: "{app}\_internal"; Flags: ignoreversion recursesubdirs createallsubdirs; Components: core
+Source: "..\..\dist\rind\templates\*"; DestDir: "{app}\templates"; Flags: ignoreversion recursesubdirs createallsubdirs; Components: core
 
 [Types]
 Name: "full"; Description: "Full installation"
@@ -36,14 +36,14 @@ Name: "compact"; Description: "Compact installation"
 Name: "custom"; Description: "Custom installation"; Flags: iscustom
 
 [Components]
-Name: "core"; Description: "Tangerine Rind CLI"; Types: full compact custom; Flags: fixed
+Name: "core"; Description: "Rind CLI"; Types: full compact custom; Flags: fixed
 
 [Tasks]
-Name: "add_tangerine_path"; Description: "Add Tangerine Rind to user PATH"; Flags: checkedonce
+Name: "add_rind_path"; Description: "Add Rind to user PATH"; Flags: checkedonce
 
 [Icons]
-Name: "{group}\Tangerine Rind"; Filename: "{app}\{#MyAppExeName}"
-Name: "{group}\Uninstall Tangerine Rind"; Filename: "{uninstallexe}"
+Name: "{group}\Rind"; Filename: "{app}\{#MyAppExeName}"
+Name: "{group}\Uninstall Rind"; Filename: "{uninstallexe}"
 
 [Registry]
 Root: HKCU; Subkey: "Environment"; ValueType: expandsz; ValueName: "Path"; ValueData: "{code:AddPaths|{app}}"; Check: AnyPathTaskSelected()
@@ -108,14 +108,14 @@ var
   PathValue: String;
 begin
   PathValue := CurrentUserPath();
-  if WizardIsTaskSelected('add_tangerine_path') then
+  if WizardIsTaskSelected('add_rind_path') then
     PathValue := AddPath(PathValue, ExpandConstant('{app}'));
   Result := PathValue;
 end;
 
 function AnyPathTaskSelected(): Boolean;
 begin
-  Result := WizardIsTaskSelected('add_tangerine_path');
+  Result := WizardIsTaskSelected('add_rind_path');
 end;
 
 function RemovePath(PathValue, Dir: String): String;
@@ -217,7 +217,7 @@ end;
 
 function GitInstallInfPath(): String;
 begin
-  Result := ExpandConstant('{tmp}\tangerine-git-install-options.inf');
+  Result := ExpandConstant('{tmp}\rind-git-install-options.inf');
 end;
 
 procedure WriteGitInstallInf();
@@ -273,7 +273,7 @@ begin
       else
         Error := Format('Could not download Git for Windows from %s. %s', [GitInstallerUrl, GetExceptionMessage]);
       Log(Error);
-      SuppressibleMsgBox(Error + #13#10#13#10 + 'Tangerine Rind will continue installing and can fall back to PowerShell.', mbInformation, MB_OK, IDOK);
+      SuppressibleMsgBox(Error + #13#10#13#10 + 'Rind will continue installing and can fall back to PowerShell.', mbInformation, MB_OK, IDOK);
       Result := True;
       Exit;
     end;
@@ -285,7 +285,7 @@ begin
   if not FileExists(InstallerPath) then
   begin
     Log('Git installer was not found after download: ' + InstallerPath);
-    SuppressibleMsgBox('The Git installer was not found after download. Tangerine Rind will continue installing.', mbInformation, MB_OK, IDOK);
+    SuppressibleMsgBox('The Git installer was not found after download. Rind will continue installing.', mbInformation, MB_OK, IDOK);
     Result := True;
     Exit;
   end;
@@ -294,14 +294,14 @@ begin
   if not Exec(InstallerPath, '/SP- /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /LOADINF="' + GitInstallInfPath() + '"',
     '', SW_SHOW, ewWaitUntilTerminated, ResultCode) then
   begin
-    SuppressibleMsgBox('Git for Windows could not be started. Tangerine Rind will continue installing.', mbInformation, MB_OK, IDOK);
+    SuppressibleMsgBox('Git for Windows could not be started. Rind will continue installing.', mbInformation, MB_OK, IDOK);
     Result := True;
     Exit;
   end;
 
   if ResultCode <> 0 then
   begin
-    SuppressibleMsgBox(Format('Git for Windows installer exited with code %d. Tangerine Rind will continue installing.', [ResultCode]),
+    SuppressibleMsgBox(Format('Git for Windows installer exited with code %d. Rind will continue installing.', [ResultCode]),
       mbInformation, MB_OK, IDOK);
     Result := True;
     Exit;
@@ -317,7 +317,7 @@ begin
   ProfileDir := ExpandConstant('{%USERPROFILE}');
   if ProfileDir = '' then
     ProfileDir := ExpandConstant('{userprofile}');
-  Result := AddBackslash(ProfileDir) + '.tangerine';
+  Result := AddBackslash(ProfileDir) + '.rind';
 end;
 
 function UserSettingsPath(): String;
@@ -371,7 +371,7 @@ begin
     GitOptionPage := CreateInputOptionPage(
       wpSelectTasks,
       'Git for Windows',
-      'Install Git for a richer Tangerine Rind programming experience',
+      'Install Git for a richer Rind programming experience',
       'Git was not detected on this computer. Installing the full official Git for Windows is recommended because it provides Git plus a richer command-line toolchain for coding tasks.',
       True,
       False);

@@ -1,8 +1,8 @@
 <p align="center">
-  <img src="assets/tangerine.svg" alt="Tangerine Rind logo" width="104" />
+  <img src="assets/rind.svg" alt="Rind logo" width="104" />
 </p>
 
-<h1 align="center">Tangerine Rind</h1>
+<h1 align="center">Rind</h1>
 
 <p align="center">
   一个精巧、标准、可恢复的 Python Agent 运行时，面向真实的本地编码工作流。
@@ -18,11 +18,11 @@
   <img src="https://img.shields.io/badge/Interface-CLI-informational.svg" alt="CLI interface" />
 </p>
 
-## Tangerine Rind 是什么？
+## Rind 是什么？
 
-Tangerine Rind 是一个标准 Python 版本的自主编码 Agent 实现。它既可以作为本地 CLI 工具直接使用，也希望成为一个足够清晰的参考样本：展示一个 Agent 运行时可以如何被拆解、组织、持久化和恢复。
+Rind 是一个标准 Python 版本的自主编码 Agent 实现。它既可以作为本地 CLI 工具直接使用，也希望成为一个足够清晰的参考样本：展示一个 Agent 运行时可以如何被拆解、组织、持久化和恢复。
 
-这个项目的基本判断是：Agent 不必先成为庞大的框架，才能成为可靠的工具。Tangerine Rind 尽量保持结构清楚、工具契约克制、运行状态可追踪。从上下文压缩到工具执行，每个部件都以尽可能小的形式实现，同时不牺牲交互体验和工程可维护性。
+这个项目的基本判断是：Agent 不必先成为庞大的框架，才能成为可靠的工具。Rind 尽量保持结构清楚、工具契约克制、运行状态可追踪。从上下文压缩到工具执行，每个部件都以尽可能小的形式实现，同时不牺牲交互体验和工程可维护性。
 
 ## 设计理念
 
@@ -53,8 +53,8 @@ Tangerine Rind 是一个标准 Python 版本的自主编码 Agent 实现。它�
 ### 安装
 
 ```bash
-git clone https://github.com/Azzurroooo/tangerine-rind.git
-cd tangerine-rind
+git clone https://github.com/Azzurroooo/rind.git
+cd rind
 
 python -m venv .venv
 ```
@@ -75,7 +75,7 @@ pip install -r requirements-runtime.txt
 
 ### 配置
 
-Tangerine Rind 设置了 `TANGERINE_HOME` 时会把用户级数据放在该目录，否则放在 `~/.tangerine`。默认 settings 路径是 `<用户级目录>/settings.json`；sessions、user skills 和 user `TANGERINE.md` 使用同一个用户级目录语义。也可以使用 `OPENAI_API_KEY`、`OPENAI_API_BASE`、`DEFAULT_MODEL` 等环境变量。
+Rind 设置了 `RIND_HOME` 时会把用户级数据放在该目录，否则放在 `~/.rind`。默认 settings 路径是 `<用户级目录>/settings.json`；sessions、user skills 和 user `RIND.md` 使用同一个用户级目录语义。也可以使用 `OPENAI_API_KEY`、`OPENAI_API_BASE`、`DEFAULT_MODEL` 等环境变量。
 
 最小 `settings.json` 示例：
 
@@ -115,7 +115,7 @@ python main.py --session <session-id>
 实验性 JS 前端 CLI：
 
 ```bash
-node frontend-cli/bin/tangerine.js
+node frontend-cli/bin/rind.js
 ```
 
 它会通过 JSONL stdio 启动无头 Python runtime，让终端输入与渲染留在 Node.js 进程中。原有 Python CLI 仍然可以通过 `python main.py` 使用。
@@ -133,11 +133,11 @@ node frontend-cli/bin/tangerine.js
 
 在交互式 CLI 中，斜杠命令可用于诊断、会话管理、模型切换和状态查看。输入工具栏会展示当前会话、模型、工作目录和关键提示。
 
-项目级 `TANGERINE.md` 和项目级 skills 以启动 Tangerine Rind 时的当前工作目录为根目录。
+项目级 `RIND.md` 和项目级 skills 以启动 Rind 时的当前工作目录为根目录。
 
 ## 架构
 
-Tangerine Rind 使用分层结构，并在运行时核心与基础设施适配器之间遵循依赖倒置。
+Rind 使用分层结构，并在运行时核心与基础设施适配器之间遵循依赖倒置。
 
 ```text
 agent/
@@ -177,7 +177,7 @@ pytest test/ -q
 
 ## 展望
 
-Tangerine Rind 关注的是：在保持足够简单、可读、可测试的前提下，Agent 系统还能走多远。后续探索会围绕三个方向展开：
+Rind 关注的是：在保持足够简单、可读、可测试的前提下，Agent 系统还能走多远。后续探索会围绕三个方向展开：
 
 - 如何让 Agent 的能力增长不必伴随过多机制膨胀。
 - 如何探索 Agent 的全新呈现方式，让工作过程更可观察、更连续、更平静。

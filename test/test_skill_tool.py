@@ -29,7 +29,7 @@ def test_skill_create_project_scope(tmp_path: Path, monkeypatch) -> None:
         )
     )
 
-    skill_file = tmp_path / ".tangerine" / "skills" / "demo-skill" / "SKILL.md"
+    skill_file = tmp_path / ".rind" / "skills" / "demo-skill" / "SKILL.md"
     if not result.get("ok"):
         raise AssertionError(f"Expected success, got: {result}")
     if Path(result["data"]["path"]) != skill_file:
@@ -64,8 +64,8 @@ def test_skill_create_project_scope_uses_cwd_not_parent_git_root(tmp_path: Path,
         )
     )
 
-    skill_file = nested / ".tangerine" / "skills" / "cwd-skill" / "SKILL.md"
-    parent_skill_file = project / ".tangerine" / "skills" / "cwd-skill" / "SKILL.md"
+    skill_file = nested / ".rind" / "skills" / "cwd-skill" / "SKILL.md"
+    parent_skill_file = project / ".rind" / "skills" / "cwd-skill" / "SKILL.md"
     if not result.get("ok"):
         raise AssertionError(f"Expected success, got: {result}")
     if Path(result["data"]["path"]) != skill_file:
@@ -93,7 +93,7 @@ def test_skill_create_user_scope(tmp_path: Path, monkeypatch) -> None:
         )
     )
 
-    skill_file = home / ".tangerine" / "skills" / "user_skill" / "SKILL.md"
+    skill_file = home / ".rind" / "skills" / "user_skill" / "SKILL.md"
     if not result.get("ok"):
         raise AssertionError(f"Expected success, got: {result}")
     if Path(result["data"]["path"]) != skill_file:
@@ -102,12 +102,12 @@ def test_skill_create_user_scope(tmp_path: Path, monkeypatch) -> None:
         raise AssertionError(f"Expected user skill file to exist: {skill_file}")
 
 
-def test_skill_create_user_scope_uses_tangerine_home(tmp_path: Path, monkeypatch) -> None:
-    tangerine_home = tmp_path / "tangerine-home"
+def test_skill_create_user_scope_uses_rind_home(tmp_path: Path, monkeypatch) -> None:
+    rind_home = tmp_path / "rind-home"
     workspace = tmp_path / "workspace"
     workspace.mkdir()
     monkeypatch.chdir(workspace)
-    monkeypatch.setenv("TANGERINE_HOME", str(tangerine_home))
+    monkeypatch.setenv("RIND_HOME", str(rind_home))
 
     result = _payload(
         skill_create(
@@ -118,11 +118,11 @@ def test_skill_create_user_scope_uses_tangerine_home(tmp_path: Path, monkeypatch
         )
     )
 
-    skill_file = tangerine_home / "skills" / "portable_skill" / "SKILL.md"
+    skill_file = rind_home / "skills" / "portable_skill" / "SKILL.md"
     if not result.get("ok"):
         raise AssertionError(f"Expected success, got: {result}")
     if Path(result["data"]["path"]) != skill_file:
-        raise AssertionError(f"Unexpected TANGERINE_HOME skill path: {result}")
+        raise AssertionError(f"Unexpected RIND_HOME skill path: {result}")
     if not skill_file.exists():
         raise AssertionError(f"Expected user skill file to exist: {skill_file}")
 
@@ -164,7 +164,7 @@ def test_skill_create_overwrite_policy(tmp_path: Path, monkeypatch) -> None:
     if not overwritten.get("ok"):
         raise AssertionError(f"Expected overwrite success, got: {overwritten}")
 
-    skill_file = tmp_path / ".tangerine" / "skills" / "demo" / "SKILL.md"
+    skill_file = tmp_path / ".rind" / "skills" / "demo" / "SKILL.md"
     parsed = parse_skill_markdown(skill_file.read_text(encoding="utf-8"), str(skill_file), "demo", "project")
     if parsed.description != "Second":
         raise AssertionError(f"Expected overwritten description, got: {parsed}")
@@ -211,7 +211,7 @@ def main() -> int:
         test_skill_create_project_scope,
         test_skill_create_project_scope_uses_cwd_not_parent_git_root,
         test_skill_create_user_scope,
-        test_skill_create_user_scope_uses_tangerine_home,
+        test_skill_create_user_scope_uses_rind_home,
         test_skill_create_rejects_invalid_inputs,
         test_skill_create_overwrite_policy,
     ]

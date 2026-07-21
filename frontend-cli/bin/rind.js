@@ -49,7 +49,7 @@ import {
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(scriptDir, "..", "..");
-const python = process.env.TANGERINE_PYTHON || "python";
+const python = process.env.RIND_PYTHON || "python";
 const cliArgs = process.argv.slice(2);
 
 if (cliArgs.some((arg) => arg === "--version" || arg === "--help" || arg === "-h")) {

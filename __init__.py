@@ -1,4 +1,4 @@
-"""tangerine-rind package exports."""
+"""rind package exports."""
 
 from agent.infrastructure.config import Config
 from agent.infrastructure.tools.impl import TOOLS, TOOL_SCHEMAS

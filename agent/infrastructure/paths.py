@@ -9,11 +9,11 @@ from pathlib import Path
 _SESSION_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$")
 
 
-def resolve_tangerine_home() -> Path:
-    override = os.getenv("TANGERINE_HOME", "").strip()
+def resolve_rind_home() -> Path:
+    override = os.getenv("RIND_HOME", "").strip()
     if override:
         return Path(override).expanduser().resolve()
-    return (Path.home() / ".tangerine").resolve()
+    return (Path.home() / ".rind").resolve()
 
 
 def resolve_project_root(cwd: Path | None = None) -> Path:

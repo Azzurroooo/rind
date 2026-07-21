@@ -5,7 +5,7 @@ from agent.interfaces.api.routes_session import router as session_router
 from agent.bootstrap.container import build_basic_agent_dependencies
 
 def create_app() -> FastAPI:
-    app = FastAPI(title="Tangerine Rind API", version="1.0.0")
+    app = FastAPI(title="Rind API", version="1.0.0")
 
     # In a real app, agent_factory would build a new runtime for each session.
     # Here we just wrap the DI container's creation.

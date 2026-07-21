@@ -1,4 +1,4 @@
-"""Domain objects and helpers for Tangerine Rind skills."""
+"""Domain objects and helpers for Rind skills."""
 
 from __future__ import annotations
 

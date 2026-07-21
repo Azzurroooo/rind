@@ -83,9 +83,9 @@ def test_load_settings_falls_back_to_env_when_file_missing(tmp_path, monkeypatch
 
 
 def test_load_settings_uses_env_path_override(tmp_path, monkeypatch):
-    path = tmp_path / "tangerine-settings.json"
+    path = tmp_path / "rind-settings.json"
     path.write_text(json.dumps({"apiKey": "path-key"}), encoding="utf-8")
-    monkeypatch.setenv("TANGERINE_SETTINGS_PATH", str(path))
+    monkeypatch.setenv("RIND_SETTINGS_PATH", str(path))
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
 
     settings = load_settings()
@@ -108,12 +108,12 @@ def test_load_settings_empty_reasoning_effort_does_not_fallback_to_env(tmp_path,
 
 def test_ensure_user_settings_template_creates_neutral_template(tmp_path, monkeypatch):
     monkeypatch.setattr(Path, "home", lambda: tmp_path)
-    monkeypatch.delenv("TANGERINE_SETTINGS_PATH", raising=False)
-    monkeypatch.delenv("TANGERINE_HOME", raising=False)
+    monkeypatch.delenv("RIND_SETTINGS_PATH", raising=False)
+    monkeypatch.delenv("RIND_HOME", raising=False)
 
     path = ensure_user_settings_template()
 
-    assert path == tmp_path / ".tangerine" / "settings.json"
+    assert path == tmp_path / ".rind" / "settings.json"
     data = json.loads(path.read_text(encoding="utf-8"))
     assert set(data) == set(DEFAULT_SETTINGS_TEMPLATE) == {"model", "apiKey", "baseUrl", "reasoningEffort"}
     assert data["apiKey"] == ""
@@ -121,23 +121,23 @@ def test_ensure_user_settings_template_creates_neutral_template(tmp_path, monkey
     assert data["reasoningEffort"] == "xhigh"
 
 
-def test_default_settings_path_uses_tangerine_home(tmp_path, monkeypatch):
-    tangerine_home = tmp_path / "portable-home"
-    monkeypatch.setenv("TANGERINE_HOME", str(tangerine_home))
-    monkeypatch.delenv("TANGERINE_SETTINGS_PATH", raising=False)
+def test_default_settings_path_uses_rind_home(tmp_path, monkeypatch):
+    rind_home = tmp_path / "portable-home"
+    monkeypatch.setenv("RIND_HOME", str(rind_home))
+    monkeypatch.delenv("RIND_SETTINGS_PATH", raising=False)
 
     path = ensure_user_settings_template()
 
-    assert path == tangerine_home / "settings.json"
+    assert path == rind_home / "settings.json"
     assert path.exists()
 
 
 def test_ensure_user_settings_template_skips_custom_settings_path(tmp_path, monkeypatch):
-    monkeypatch.setenv("TANGERINE_SETTINGS_PATH", str(tmp_path / "custom.json"))
+    monkeypatch.setenv("RIND_SETTINGS_PATH", str(tmp_path / "custom.json"))
     monkeypatch.setattr(Path, "home", lambda: tmp_path)
 
     assert ensure_user_settings_template() is None
-    assert not (tmp_path / ".tangerine").exists()
+    assert not (tmp_path / ".rind").exists()
 
 
 def test_save_settings_patch_preserves_existing_values(tmp_path):
@@ -183,7 +183,7 @@ def test_build_default_user_agent_uses_windows_terminal(monkeypatch):
     monkeypatch.delenv("TERM_PROGRAM", raising=False)
     monkeypatch.delenv("TERM", raising=False)
 
-    assert build_default_user_agent() == "tangerine/0.2.0 (Windows 11; AMD64) WindowsTerminal"
+    assert build_default_user_agent() == "rind/0.2.0 (Windows 11; AMD64) WindowsTerminal"
 
 
 def test_build_default_user_agent_uses_term_program_version(monkeypatch):
@@ -195,7 +195,7 @@ def test_build_default_user_agent_uses_term_program_version(monkeypatch):
     monkeypatch.setenv("TERM_PROGRAM_VERSION", "1.99.0")
     monkeypatch.setenv("TERM", "xterm-256color")
 
-    assert build_default_user_agent() == "tangerine/0.2.0 (Darwin 25.0.0; arm64) vscode/1.99.0"
+    assert build_default_user_agent() == "rind/0.2.0 (Darwin 25.0.0; arm64) vscode/1.99.0"
 
 
 def test_build_default_user_agent_sanitizes_terminal_token(monkeypatch):
@@ -206,4 +206,4 @@ def test_build_default_user_agent_sanitizes_terminal_token(monkeypatch):
     monkeypatch.setenv("TERM_PROGRAM", "bad\rname")
     monkeypatch.setenv("TERM_PROGRAM_VERSION", "1 2")
 
-    assert build_default_user_agent() == "tangerine/0.2.0 (Linux 6.1; x86_64) bad_name/1_2"
+    assert build_default_user_agent() == "rind/0.2.0 (Linux 6.1; x86_64) bad_name/1_2"

@@ -6,7 +6,7 @@ from pathlib import Path
 import re
 
 from agent.domain import tool_error, tool_ok
-from agent.infrastructure.paths import resolve_tangerine_home, resolve_project_root
+from agent.infrastructure.paths import resolve_rind_home, resolve_project_root
 
 _SKILL_NAME_PATTERN = re.compile(r"^[a-zA-Z0-9_-]+$")
 
@@ -19,7 +19,7 @@ def skill_create(
     scope: str = "project",
     overwrite: bool = False,
 ) -> str:
-    """Create a well-formed Tangerine Rind SKILL.md in the project or user skill directory."""
+    """Create a well-formed Rind SKILL.md in the project or user skill directory."""
     try:
         normalized_name = name.strip() if isinstance(name, str) else ""
         if not normalized_name or normalized_name in {".", ".."} or not _SKILL_NAME_PATTERN.fullmatch(normalized_name):
@@ -51,9 +51,9 @@ def skill_create(
 
         normalized_triggers = _normalize_triggers(triggers)
         root = (
-            resolve_project_root() / ".tangerine" / "skills"
+            resolve_project_root() / ".rind" / "skills"
             if normalized_scope == "project"
-            else resolve_tangerine_home() / "skills"
+            else resolve_rind_home() / "skills"
         )
         skill_dir = (root / normalized_name).resolve()
         skill_file = skill_dir / "SKILL.md"

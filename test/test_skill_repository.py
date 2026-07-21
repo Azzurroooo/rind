@@ -13,8 +13,8 @@ from agent.infrastructure.skills import SkillRepository
 def test_skill_repository_scans_and_overrides(tmp_path: Path) -> None:
     project_root = tmp_path / "project"
     user_home = tmp_path / "home"
-    project_skill_dir = project_root / ".tangerine" / "skills"
-    user_skill_dir = user_home / ".tangerine" / "skills"
+    project_skill_dir = project_root / ".rind" / "skills"
+    user_skill_dir = user_home / ".rind" / "skills"
 
     (user_skill_dir / "demo").mkdir(parents=True)
     (user_skill_dir / "demo" / "SKILL.md").write_text(
@@ -81,10 +81,10 @@ This skill has no frontmatter.
         raise AssertionError(f"Unexpected warnings for fallback skill: {fallback.warnings}")
 
 
-def test_skill_repository_uses_tangerine_home_for_user_skills(tmp_path: Path, monkeypatch) -> None:
-    tangerine_home = tmp_path / "tangerine-home"
+def test_skill_repository_uses_rind_home_for_user_skills(tmp_path: Path, monkeypatch) -> None:
+    rind_home = tmp_path / "rind-home"
     project_root = tmp_path / "project"
-    user_skill_dir = tangerine_home / "skills"
+    user_skill_dir = rind_home / "skills"
     project_root.mkdir()
     (user_skill_dir / "demo").mkdir(parents=True)
     (user_skill_dir / "demo" / "SKILL.md").write_text(
@@ -99,13 +99,13 @@ triggers: []
         encoding="utf-8",
     )
     monkeypatch.chdir(project_root)
-    monkeypatch.setenv("TANGERINE_HOME", str(tangerine_home))
+    monkeypatch.setenv("RIND_HOME", str(rind_home))
 
     repo = SkillRepository()
     skill = repo.get_skill("demo")
 
     if not skill or skill.source != "user":
-        raise AssertionError(f"Expected user skill from TANGERINE_HOME, got: {skill}")
+        raise AssertionError(f"Expected user skill from RIND_HOME, got: {skill}")
     if Path(skill.path) != user_skill_dir / "demo" / "SKILL.md":
         raise AssertionError(f"Unexpected skill path: {skill.path}")
 

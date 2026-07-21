@@ -9,7 +9,7 @@ from agent.application.runtime.async_turn_runner import AsyncTurnRunner
 from agent.application.runtime.message_stream_parser import MessageStreamParser
 from agent.application.ports.async_session_store import AsyncSessionStore
 from agent.infrastructure.config import Config
-from agent.infrastructure.tangerine_docs import build_tangerine_doc_context
+from agent.infrastructure.rind_docs import build_rind_doc_context
 from agent.infrastructure.llm.openai_async_chat_client import AsyncOpenAIChatClient
 from agent.infrastructure.persistence.async_jsonl_session_store import AsyncJsonlSessionStore
 from agent.infrastructure.plans import PlanContextProvider
@@ -64,7 +64,7 @@ def build_basic_agent_dependencies(
             skill_repository=skill_repository,
             skill_selector=skill_selector,
             plan_context_provider=plan_context_provider,
-            tangerine_doc_provider=build_tangerine_doc_context,
+            rind_doc_provider=build_rind_doc_context,
         ),
         debug=debug,
     )

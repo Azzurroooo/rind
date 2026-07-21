@@ -30,7 +30,7 @@ def test_version_does_not_validate_config(tmp_path) -> None:
     bad_settings = tmp_path / "settings.json"
     bad_settings.write_text("{", encoding="utf-8")
     env = os.environ.copy()
-    env["TANGERINE_SETTINGS_PATH"] = str(bad_settings)
+    env["RIND_SETTINGS_PATH"] = str(bad_settings)
 
     result = subprocess.run(
         [sys.executable, "main.py", "--version"],
@@ -42,14 +42,14 @@ def test_version_does_not_validate_config(tmp_path) -> None:
 
     if result.returncode != 0:
         raise AssertionError(f"Expected --version to succeed, got: {result.stderr}")
-    if "tangerine " not in result.stdout:
+    if "rind " not in result.stdout:
         raise AssertionError(f"Expected version output, got: {result.stdout}")
 
 
 def test_doctor_runs_without_api_key(tmp_path) -> None:
     env = os.environ.copy()
     env.pop("OPENAI_API_KEY", None)
-    env["TANGERINE_SETTINGS_PATH"] = str(tmp_path / "missing.json")
+    env["RIND_SETTINGS_PATH"] = str(tmp_path / "missing.json")
 
     result = subprocess.run(
         [sys.executable, "main.py", "--doctor"],
@@ -73,7 +73,7 @@ def test_doctor_reports_invalid_settings_json(tmp_path) -> None:
     bad_settings = tmp_path / "settings.json"
     bad_settings.write_text("{", encoding="utf-8")
     env = os.environ.copy()
-    env["TANGERINE_SETTINGS_PATH"] = str(bad_settings)
+    env["RIND_SETTINGS_PATH"] = str(bad_settings)
 
     result = subprocess.run(
         [sys.executable, "main.py", "--doctor"],
@@ -97,7 +97,7 @@ def test_session_rejects_invalid_id_before_config_validation(tmp_path) -> None:
     bad_settings = tmp_path / "settings.json"
     bad_settings.write_text("{", encoding="utf-8")
     env = os.environ.copy()
-    env["TANGERINE_SETTINGS_PATH"] = str(bad_settings)
+    env["RIND_SETTINGS_PATH"] = str(bad_settings)
 
     result = subprocess.run(
         [sys.executable, "main.py", "--session", "../escape"],

@@ -1,4 +1,4 @@
-"""JSONL stdio adapter for the headless Tangerine Rind runtime."""
+"""JSONL stdio adapter for the headless Rind runtime."""
 
 from __future__ import annotations
 
@@ -389,7 +389,7 @@ class StdioRuntimeServer:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Tangerine Rind headless runtime server")
+    parser = argparse.ArgumentParser(description="Rind headless runtime server")
     parser.add_argument("--debug", action="store_true")
     parser.add_argument("--allow-unsafe-bash", action="store_true")
     parser.add_argument("--session", type=str, default=None)

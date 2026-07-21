@@ -210,14 +210,14 @@ async def test_async_runtime_facade_passes_transient_system_messages():
     events = [
         event
         async for event in facade.run_turn(
-            query="Initialize project TANGERINE.md",
+            query="Initialize project RIND.md",
             transient_system_messages=prompt_messages,
         )
     ]
 
     assert isinstance(events[0], TurnStartedEvent)
     assert runner.received == prompt_messages
-    assert session.persisted == [("user", "Initialize project TANGERINE.md", {})]
+    assert session.persisted == [("user", "Initialize project RIND.md", {})]
 
 
 @pytest.mark.asyncio

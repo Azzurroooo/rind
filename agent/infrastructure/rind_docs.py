@@ -1,25 +1,25 @@
-"""TANGERINE.md context document loading."""
+"""RIND.md context document loading."""
 
 from __future__ import annotations
 
 from pathlib import Path
 
-from agent.infrastructure.paths import resolve_tangerine_home, resolve_project_root
+from agent.infrastructure.paths import resolve_rind_home, resolve_project_root
 
 
-TANGERINE_DOC_NAME = "TANGERINE.md"
-TANGERINE_DOC_BYTE_LIMIT = 32 * 1024
+RIND_DOC_NAME = "RIND.md"
+RIND_DOC_BYTE_LIMIT = 32 * 1024
 
 
 def resolve_user_doc_path() -> Path:
-    return resolve_tangerine_home() / TANGERINE_DOC_NAME
+    return resolve_rind_home() / RIND_DOC_NAME
 
 
 def resolve_project_doc_path(cwd: Path | None = None) -> Path:
-    return resolve_project_root(cwd) / TANGERINE_DOC_NAME
+    return resolve_project_root(cwd) / RIND_DOC_NAME
 
 
-def build_tangerine_doc_context(cwd: Path | None = None) -> tuple[list[dict], dict, dict]:
+def build_rind_doc_context(cwd: Path | None = None) -> tuple[list[dict], dict, dict]:
     docs = [
         _read_doc("user", resolve_user_doc_path()),
         _read_doc("project", resolve_project_doc_path(cwd)),
@@ -35,7 +35,7 @@ def build_tangerine_doc_context(cwd: Path | None = None) -> tuple[list[dict], di
         {
             "role": "system",
             "content": content,
-            "_context_kind": "tangerine_docs",
+            "_context_kind": "rind_docs",
         }
     ], stats, decisions
 
@@ -60,8 +60,8 @@ def _read_doc(scope: str, path: Path) -> dict:
         return doc
 
     raw_bytes = len(raw)
-    truncated = raw_bytes > TANGERINE_DOC_BYTE_LIMIT
-    clipped = raw[:TANGERINE_DOC_BYTE_LIMIT] if truncated else raw
+    truncated = raw_bytes > RIND_DOC_BYTE_LIMIT
+    clipped = raw[:RIND_DOC_BYTE_LIMIT] if truncated else raw
     text = clipped.decode("utf-8", errors="ignore" if truncated else "replace")
     doc.update(
         {
@@ -78,8 +78,8 @@ def _render_doc(doc: dict) -> str:
     warning = ""
     if doc["truncated"]:
         warning = (
-            f"[warning] {doc['scope']} TANGERINE.md exceeded "
-            f"{TANGERINE_DOC_BYTE_LIMIT} bytes and was truncated before injection.\n\n"
+            f"[warning] {doc['scope']} RIND.md exceeded "
+            f"{RIND_DOC_BYTE_LIMIT} bytes and was truncated before injection.\n\n"
         )
     return f"\n\n--- {doc['scope']}-doc ---\n\n{warning}{doc['content']}"
 
@@ -87,13 +87,13 @@ def _render_doc(doc: dict) -> str:
 def _build_stats(docs: list[dict], injected_docs: list[dict]) -> dict:
     by_scope = {doc["scope"]: doc for doc in docs}
     return {
-        "tangerine_docs_user_exists": bool(by_scope["user"]["exists"]),
-        "tangerine_docs_project_exists": bool(by_scope["project"]["exists"]),
-        "tangerine_docs_user_bytes": int(by_scope["user"]["raw_bytes"]),
-        "tangerine_docs_project_bytes": int(by_scope["project"]["raw_bytes"]),
-        "tangerine_docs_user_injected_bytes": int(by_scope["user"]["injected_bytes"]),
-        "tangerine_docs_project_injected_bytes": int(by_scope["project"]["injected_bytes"]),
-        "tangerine_docs_injected_chars": sum(len(doc["content"]) for doc in injected_docs),
+        "rind_docs_user_exists": bool(by_scope["user"]["exists"]),
+        "rind_docs_project_exists": bool(by_scope["project"]["exists"]),
+        "rind_docs_user_bytes": int(by_scope["user"]["raw_bytes"]),
+        "rind_docs_project_bytes": int(by_scope["project"]["raw_bytes"]),
+        "rind_docs_user_injected_bytes": int(by_scope["user"]["injected_bytes"]),
+        "rind_docs_project_injected_bytes": int(by_scope["project"]["injected_bytes"]),
+        "rind_docs_injected_chars": sum(len(doc["content"]) for doc in injected_docs),
     }
 
 
@@ -102,10 +102,10 @@ def _build_decisions(docs: list[dict], injected_docs: list[dict]) -> dict:
     error_type = next((doc["error_type"] for doc in docs if doc["error_type"]), None)
     by_scope = {doc["scope"]: doc for doc in docs}
     return {
-        "tangerine_docs_injected": bool(injected_docs),
-        "tangerine_docs_truncated": bool(truncated_scopes),
-        "tangerine_docs_truncated_scopes": truncated_scopes,
-        "tangerine_docs_user_path": by_scope["user"]["path"],
-        "tangerine_docs_project_path": by_scope["project"]["path"],
-        "tangerine_docs_error_type": error_type,
+        "rind_docs_injected": bool(injected_docs),
+        "rind_docs_truncated": bool(truncated_scopes),
+        "rind_docs_truncated_scopes": truncated_scopes,
+        "rind_docs_user_path": by_scope["user"]["path"],
+        "rind_docs_project_path": by_scope["project"]["path"],
+        "rind_docs_error_type": error_type,
     }

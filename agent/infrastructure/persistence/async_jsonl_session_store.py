@@ -24,7 +24,7 @@ from agent.infrastructure.persistence.session_meta import (
     sync_session_counts,
 )
 from agent.infrastructure.paths import (
-    resolve_tangerine_home,
+    resolve_rind_home,
     resolve_project_root,
     resolve_session_base,
     validate_session_id,
@@ -94,14 +94,14 @@ class AsyncJsonlSessionStore(AsyncSessionStore):
         return datetime.now(timezone.utc).isoformat()
 
     @classmethod
-    def default_tangerine_home(cls) -> str:
-        return str(resolve_tangerine_home())
+    def default_rind_home(cls) -> str:
+        return str(resolve_rind_home())
 
     @classmethod
     def resolve_session_root(cls, session_dir: str | None = None) -> str:
         if session_dir:
             return os.path.abspath(os.path.expanduser(session_dir))
-        return os.path.join(cls.default_tangerine_home(), "sessions")
+        return os.path.join(cls.default_rind_home(), "sessions")
 
     def _resolve_workspace_root(self) -> str:
         return os.path.normcase(os.path.realpath(str(resolve_project_root())))
@@ -111,7 +111,7 @@ class AsyncJsonlSessionStore(AsyncSessionStore):
         if self._session_dir:
             self._index_path = os.path.join(self._session_root, "index.json")
         else:
-            self._index_path = os.path.join(self.default_tangerine_home(), "session_index.json")
+            self._index_path = os.path.join(self.default_rind_home(), "session_index.json")
 
         os.makedirs(self._session_root, exist_ok=True)
         if self._index_path:

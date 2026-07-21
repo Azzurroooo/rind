@@ -346,7 +346,7 @@ def test_models_list_failure_returns_protocol_error(capsys, monkeypatch):
 def test_model_set_updates_settings_runtime_and_session(capsys, tmp_path, monkeypatch):
     path = tmp_path / "settings.json"
     path.write_text(json.dumps({"model": "old-model", "apiKey": "secret-value"}), encoding="utf-8")
-    monkeypatch.setenv("TANGERINE_SETTINGS_PATH", str(path))
+    monkeypatch.setenv("RIND_SETTINGS_PATH", str(path))
     Config.reload()
 
     class Session(_Session):

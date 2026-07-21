@@ -429,7 +429,7 @@ async def test_config_does_not_leak_api_key(monkeypatch) -> None:
     monkeypatch.setattr(Config, "OPENAI_API_BASE", "https://example.com/v1")
     monkeypatch.setattr(Config, "DEFAULT_MODEL", "test-model")
     monkeypatch.setattr(Config, "MODEL_REASONING_EFFORT", "xhigh")
-    monkeypatch.setattr(Config, "SETTINGS_PATH", r"C:\Users\admin\.tangerine\settings.json")
+    monkeypatch.setattr(Config, "SETTINGS_PATH", r"C:\Users\admin\.rind\settings.json")
     monkeypatch.setattr(Config, "SETTINGS_EXISTS", True)
 
     result = await SlashCommandRouter().execute("/config", _context())
@@ -444,11 +444,11 @@ async def test_config_does_not_leak_api_key(monkeypatch) -> None:
 
 
 @pytest.mark.asyncio
-async def test_login_mentions_tangerine_home() -> None:
+async def test_login_mentions_rind_home() -> None:
     result = await SlashCommandRouter().execute("/login", _context())
 
-    assert "TANGERINE_HOME" in result.text
-    assert "~/.tangerine" in result.text
+    assert "RIND_HOME" in result.text
+    assert "~/.rind" in result.text
 
 
 @pytest.mark.asyncio
@@ -489,7 +489,7 @@ async def test_model_set_updates_settings_and_active_runtime(tmp_path, monkeypat
         json.dumps({"model": "model_a", "apiKey": "secret-value"}),
         encoding="utf-8",
     )
-    monkeypatch.setenv("TANGERINE_SETTINGS_PATH", str(path))
+    monkeypatch.setenv("RIND_SETTINGS_PATH", str(path))
     Config.reload()
     runtime = FakeRuntime()
     context = SlashCommandContext(runtime=runtime, session=FakeSession(), debug=True)
@@ -636,7 +636,7 @@ async def test_draft_rejects_invalid_args() -> None:
 
 @pytest.mark.asyncio
 async def test_skill_lists_project_skill(tmp_path, monkeypatch) -> None:
-    skill_dir = tmp_path / ".tangerine" / "skills" / "demo"
+    skill_dir = tmp_path / ".rind" / "skills" / "demo"
     skill_dir.mkdir(parents=True)
     (skill_dir / "SKILL.md").write_text(
         "---\nname: demo\ndescription: Demo skill\ntriggers: []\n---\n\nBody\n",
@@ -654,10 +654,10 @@ async def test_skill_lists_project_skill(tmp_path, monkeypatch) -> None:
 
 
 @pytest.mark.asyncio
-async def test_skill_lists_user_skill_from_tangerine_home(tmp_path, monkeypatch) -> None:
-    tangerine_home = tmp_path / "tangerine-home"
+async def test_skill_lists_user_skill_from_rind_home(tmp_path, monkeypatch) -> None:
+    rind_home = tmp_path / "rind-home"
     workspace = tmp_path / "workspace"
-    skill_dir = tangerine_home / "skills" / "demo"
+    skill_dir = rind_home / "skills" / "demo"
     workspace.mkdir()
     skill_dir.mkdir(parents=True)
     (skill_dir / "SKILL.md").write_text(
@@ -665,7 +665,7 @@ async def test_skill_lists_user_skill_from_tangerine_home(tmp_path, monkeypatch)
         encoding="utf-8",
     )
     monkeypatch.chdir(workspace)
-    monkeypatch.setenv("TANGERINE_HOME", str(tangerine_home))
+    monkeypatch.setenv("RIND_HOME", str(rind_home))
 
     result = await SlashCommandRouter().execute("/skill", _context())
 
@@ -678,8 +678,8 @@ async def test_skill_lists_user_skill_from_tangerine_home(tmp_path, monkeypatch)
 async def test_skill_lists_project_skill_from_cwd_not_parent_git_root(tmp_path, monkeypatch) -> None:
     project = tmp_path / "project"
     nested = project / "src"
-    nested_skill_dir = nested / ".tangerine" / "skills" / "nested"
-    parent_skill_dir = project / ".tangerine" / "skills" / "parent"
+    nested_skill_dir = nested / ".rind" / "skills" / "nested"
+    parent_skill_dir = project / ".rind" / "skills" / "parent"
     nested_skill_dir.mkdir(parents=True)
     parent_skill_dir.mkdir(parents=True)
     (project / ".git").mkdir()
@@ -709,14 +709,14 @@ async def test_init_project_returns_turn_payload(tmp_path, monkeypatch) -> None:
 
     result = await SlashCommandRouter().execute("/init", _context())
 
-    assert "Initializing project TANGERINE.md" in result.text
-    assert result.run_turn_input.startswith("Initialize project TANGERINE.md")
-    assert str(project / "TANGERINE.md") in result.run_turn_input
+    assert "Initializing project RIND.md" in result.text
+    assert result.run_turn_input.startswith("Initialize project RIND.md")
+    assert str(project / "RIND.md") in result.run_turn_input
     assert result.transient_system_messages
     prompt = result.transient_system_messages[0]["content"]
-    assert "project-level Tangerine Rind context document" in prompt
-    assert str(project / "TANGERINE.md") in prompt
-    assert "Do not modify the other TANGERINE.md level." in prompt
+    assert "project-level Rind context document" in prompt
+    assert str(project / "RIND.md") in prompt
+    assert "Do not modify the other RIND.md level." in prompt
 
 
 @pytest.mark.asyncio
@@ -729,25 +729,25 @@ async def test_init_project_uses_cwd_not_parent_git_root(tmp_path, monkeypatch) 
 
     result = await SlashCommandRouter().execute("/init project", _context())
 
-    assert str(nested / "TANGERINE.md") in result.run_turn_input
-    assert str(project / "TANGERINE.md") not in result.run_turn_input
+    assert str(nested / "RIND.md") in result.run_turn_input
+    assert str(project / "RIND.md") not in result.run_turn_input
     prompt = result.transient_system_messages[0]["content"]
-    assert str(nested / "TANGERINE.md") in prompt
+    assert str(nested / "RIND.md") in prompt
 
 
 @pytest.mark.asyncio
 async def test_init_user_returns_turn_payload(tmp_path, monkeypatch) -> None:
     user_home = tmp_path / "home"
     user_home.mkdir()
-    monkeypatch.setenv("TANGERINE_HOME", str(user_home))
+    monkeypatch.setenv("RIND_HOME", str(user_home))
 
     result = await SlashCommandRouter().execute("/init user", _context())
 
-    assert "Initializing user TANGERINE.md" in result.text
-    assert result.run_turn_input.startswith("Initialize user TANGERINE.md")
-    assert str(user_home / "TANGERINE.md") in result.run_turn_input
+    assert "Initializing user RIND.md" in result.text
+    assert result.run_turn_input.startswith("Initialize user RIND.md")
+    assert str(user_home / "RIND.md") in result.run_turn_input
     prompt = result.transient_system_messages[0]["content"]
-    assert "user-level Tangerine Rind context document" in prompt
+    assert "user-level Rind context document" in prompt
     assert "Do not copy project facts into the user-level file." in prompt
 
 
@@ -839,9 +839,9 @@ async def test_chat_cli_init_runs_runtime_with_transient_prompt(tmp_path, monkey
 
     assert should_exit is False
     assert runtime.called is True
-    assert runtime.query.startswith("Initialize project TANGERINE.md")
+    assert runtime.query.startswith("Initialize project RIND.md")
     assert runtime.transient_system_messages
-    assert "project-level Tangerine Rind context document" in runtime.transient_system_messages[0]["content"]
+    assert "project-level Rind context document" in runtime.transient_system_messages[0]["content"]
 
 
 def main() -> int:

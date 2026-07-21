@@ -21,7 +21,7 @@ from agent.version import __version__
 class HeaderProfile:
     """Runtime product profile for the startup header."""
 
-    name: str = "Tangerine Rind"
+    name: str = "Rind"
     version: str = __version__
     mark: str = ">_"
     tagline: str = "Ready for engineering work"
@@ -74,12 +74,12 @@ def _shortcut_line(*, profile: HeaderProfile) -> Text:
 
 def _header_profile(default_version: str) -> HeaderProfile:
     return HeaderProfile(
-        name=_env_text("TANGERINE_HEADER_NAME", "Tangerine Rind"),
-        version=_env_text("TANGERINE_HEADER_VERSION", default_version),
-        mark=_env_text("TANGERINE_HEADER_MARK", ">_"),
-        tagline=_env_text("TANGERINE_HEADER_TAGLINE", "Ready for engineering work"),
-        accent=_env_text("TANGERINE_HEADER_ACCENT", "#3ecfbd"),
-        command_hint=_env_text("TANGERINE_HEADER_COMMAND_HINT", "Type /help"),
+        name=_env_text("RIND_HEADER_NAME", "Rind"),
+        version=_env_text("RIND_HEADER_VERSION", default_version),
+        mark=_env_text("RIND_HEADER_MARK", ">_"),
+        tagline=_env_text("RIND_HEADER_TAGLINE", "Ready for engineering work"),
+        accent=_env_text("RIND_HEADER_ACCENT", "#3ecfbd"),
+        command_hint=_env_text("RIND_HEADER_COMMAND_HINT", "Type /help"),
     )
 
 

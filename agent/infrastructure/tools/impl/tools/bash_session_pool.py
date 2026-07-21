@@ -12,7 +12,7 @@ from pathlib import Path
 
 SHELL_UNAVAILABLE_MESSAGE = (
     "No supported shell backend was found. Install Git for Windows, set "
-    "TANGERINE_BASH_PATH to bash.exe, or enable PowerShell."
+    "RIND_BASH_PATH to bash.exe, or enable PowerShell."
 )
 
 
@@ -37,7 +37,7 @@ class BashSessionPool:
         """Detect the available shell executable."""
         system = platform.system()
         if system == "Windows":
-            configured = os.getenv("TANGERINE_BASH_PATH", "").strip()
+            configured = os.getenv("RIND_BASH_PATH", "").strip()
             if configured and Path(configured).is_file():
                 return configured, self._backend_for_shell_path(Path(configured)), None
             for candidate in self._windows_bash_candidates():

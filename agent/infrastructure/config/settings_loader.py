@@ -1,4 +1,4 @@
-"""Load user-level Tangerine Rind settings."""
+"""Load user-level Rind settings."""
 
 from __future__ import annotations
 
@@ -10,11 +10,11 @@ from pathlib import Path
 from typing import Any
 import uuid
 
-from agent.infrastructure.paths import resolve_tangerine_home
+from agent.infrastructure.paths import resolve_rind_home
 from agent.version import __version__
 
 
-_USER_AGENT_PRODUCT = "tangerine"
+_USER_AGENT_PRODUCT = "rind"
 
 
 def build_default_user_agent() -> str:
@@ -81,10 +81,10 @@ class AppSettings:
 
 
 def default_settings_path() -> Path:
-    override = os.getenv("TANGERINE_SETTINGS_PATH", "").strip()
+    override = os.getenv("RIND_SETTINGS_PATH", "").strip()
     if override:
         return Path(override).expanduser()
-    return resolve_tangerine_home() / "settings.json"
+    return resolve_rind_home() / "settings.json"
 
 
 def load_settings(path: str | Path | None = None) -> AppSettings:
@@ -103,7 +103,7 @@ def load_settings(path: str | Path | None = None) -> AppSettings:
 
 
 def ensure_user_settings_template() -> Path | None:
-    if os.getenv("TANGERINE_SETTINGS_PATH", "").strip():
+    if os.getenv("RIND_SETTINGS_PATH", "").strip():
         return None
     settings_path = default_settings_path()
     settings_path.parent.mkdir(parents=True, exist_ok=True)

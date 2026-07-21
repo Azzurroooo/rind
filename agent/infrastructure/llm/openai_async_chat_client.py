@@ -208,7 +208,7 @@ class AsyncOpenAIChatClient(AsyncChatClient):
         digest = hashlib.sha256(
             json.dumps(payload, ensure_ascii=False, sort_keys=True, default=str).encode("utf-8")
         ).hexdigest()[:24]
-        return f"tangerine:{digest}"
+        return f"rind:{digest}"
 
     def _should_retry_without_reasoning_effort(self, exc: Exception) -> bool:
         text = str(exc).lower()

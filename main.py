@@ -6,8 +6,8 @@ from types import SimpleNamespace
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Tangerine Rind CLI")
-    parser.add_argument("--version", action="version", version=f"tangerine {__version__}")
+    parser = argparse.ArgumentParser(description="Rind CLI")
+    parser.add_argument("--version", action="version", version=f"rind {__version__}")
     parser.add_argument("--debug", action="store_true", help="Enable debug mode (non-streaming output)")
     parser.add_argument("--allow-unsafe-bash", action="store_true", help="Allow potentially dangerous shell commands")
     parser.add_argument("--session", type=str, default=None, help="Session ID to load")

@@ -14,11 +14,11 @@ from agent.bootstrap import container
 @pytest.mark.asyncio
 async def test_build_dependencies_does_not_create_project_sessions(monkeypatch, tmp_path) -> None:
     workspace = tmp_path / "workspace"
-    tangerine_home = tmp_path / "home" / ".tangerine"
+    rind_home = tmp_path / "home" / ".rind"
     workspace.mkdir()
 
     monkeypatch.chdir(workspace)
-    monkeypatch.setenv("TANGERINE_HOME", str(tangerine_home))
+    monkeypatch.setenv("RIND_HOME", str(rind_home))
     monkeypatch.setattr(container.Config, "get_async_client", classmethod(lambda cls: object()))
 
     deps = container.build_basic_agent_dependencies()
@@ -26,8 +26,8 @@ async def test_build_dependencies_does_not_create_project_sessions(monkeypatch, 
 
     if (workspace / "sessions").exists():
         raise AssertionError("Did not expect project-local sessions directory")
-    if not (tangerine_home / "sessions").exists():
-        raise AssertionError("Expected user-level Tangerine Rind sessions directory")
+    if not (rind_home / "sessions").exists():
+        raise AssertionError("Expected user-level Rind sessions directory")
 
 
 def main() -> int:

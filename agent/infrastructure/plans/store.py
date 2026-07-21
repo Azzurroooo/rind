@@ -13,8 +13,8 @@ from typing import Any
 from agent.infrastructure.paths import resolve_session_base as resolve_checked_session_base
 from agent.infrastructure.paths import validate_session_id
 
-_ACTIVE_SESSION_ROOT: ContextVar[str | None] = ContextVar("tangerine_plan_session_root", default=None)
-_ACTIVE_SESSION_ID: ContextVar[str | None] = ContextVar("tangerine_plan_session_id", default=None)
+_ACTIVE_SESSION_ROOT: ContextVar[str | None] = ContextVar("rind_plan_session_root", default=None)
+_ACTIVE_SESSION_ID: ContextVar[str | None] = ContextVar("rind_plan_session_id", default=None)
 
 
 def now_iso() -> str:

@@ -78,11 +78,11 @@ class CliStatusRenderer:
 
     def _handle_context_built(self, event: ContextBuiltEvent) -> None:
         decisions = event.decisions if isinstance(event.decisions, dict) else {}
-        if not decisions.get("tangerine_docs_truncated"):
+        if not decisions.get("rind_docs_truncated"):
             return
-        scopes = decisions.get("tangerine_docs_truncated_scopes")
+        scopes = decisions.get("rind_docs_truncated_scopes")
         scope_text = ", ".join(str(scope) for scope in scopes) if isinstance(scopes, list) else "unknown"
-        self._print_status(f"Warning: TANGERINE.md truncated for context: {scope_text}", style="yellow")
+        self._print_status(f"Warning: RIND.md truncated for context: {scope_text}", style="yellow")
 
     def _handle_skill_activated(self, event: SkillActivatedEvent) -> None:
         skill_name = event.skill_name or "unknown"

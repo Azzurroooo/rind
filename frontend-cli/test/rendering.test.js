@@ -46,7 +46,7 @@ test("startupText includes resume preview when provided", () => {
     }),
     [
       `┌${"─".repeat(78)}┐`,
-      "│ Tangerine Rind workbench online                                              │",
+      "│ Rind workbench online                                                        │",
       "│ model m1 · session s1                                                        │",
       "│ E:\\project                                                                   │",
       `└${"─".repeat(78)}┘`,
@@ -114,10 +114,10 @@ test("prompt and turn status copy match the compact terminal UI", () => {
       "  › ",
     ].join("\n"),
   );
-  assert.equal(promptPlaceholderText(), "Ask Tangerine Rind to do anything");
+  assert.equal(promptPlaceholderText(), "Ask Rind to do anything");
   assert.equal(answerPromptText(), "\n  › ");
   assert.equal(answerPlaceholderText(), "Type your answer");
-  assert.equal(inputHintText("Ask Tangerine Rind to do anything"), "Ask Tangerine Rind to do anything");
+  assert.equal(inputHintText("Ask Rind to do anything"), "Ask Rind to do anything");
   assert.equal(clearInputHintText(), "\x1b[K");
   assert.equal(queuedInputText(), "• Queued follow-up\n  ↳ runs after the current turn");
   assert.equal(
@@ -138,14 +138,14 @@ test("prompt and turn status copy match the compact terminal UI", () => {
 
 test("promptText includes only model and working directory above the input", () => {
   assert.equal(
-    promptText({ model: "glm-5.1", cwd: "E:\\code\\agent\\tangerine-rind-ts-cli-process-split" }, {
+    promptText({ model: "glm-5.1", cwd: "E:\\code\\agent\\rind-ts-cli-process-split" }, {
       context_usage_percent: 0.125,
       cache_hit_rate: 0.75,
       output_tokens: 1200,
     }),
     [
       "",
-      "  glm-5.1 · E:\\code\\agent\\tangerine-rind-ts-cli-process-split",
+      "  glm-5.1 · E:\\code\\agent\\rind-ts-cli-process-split",
       `  ${"─".repeat(78)}`,
       "  › ",
     ].join("\n"),
@@ -493,13 +493,13 @@ test("slashDisplayText renders sessions, skills, and config payloads", () => {
         name: "demo",
         source: "project",
         description: "Demo skill",
-        path: "E:\\project\\.tangerine\\skills\\demo\\SKILL.md",
+        path: "E:\\project\\.rind\\skills\\demo\\SKILL.md",
       }],
     }),
     [
       "• Skills",
       "  · demo [project] Demo skill",
-      "  ↳ E:\\project\\.tangerine\\skills\\demo\\SKILL.md",
+      "  ↳ E:\\project\\.rind\\skills\\demo\\SKILL.md",
     ].join("\n"),
   );
   assert.equal(
@@ -545,25 +545,25 @@ test("slashResultText prefers structured display and falls back to raw text", ()
   assert.equal(slashResultText(null), "");
 });
 
-test("contextBuiltLine warns only when Tangerine Rind docs are truncated", () => {
+test("contextBuiltLine warns only when Rind docs are truncated", () => {
   assert.equal(contextBuiltLine({ decisions: {} }), "");
   assert.equal(
     contextBuiltLine({
       decisions: {
-        tangerine_docs_truncated: true,
-        tangerine_docs_truncated_scopes: ["user", "project"],
+        rind_docs_truncated: true,
+        rind_docs_truncated_scopes: ["user", "project"],
       },
     }),
-    "• Context trimmed\n  ↳ TANGERINE.md: user, project",
+    "• Context trimmed\n  ↳ RIND.md: user, project",
   );
   assert.match(
     contextBuiltLine({
       decisions: {
-        tangerine_docs_truncated: true,
-        tangerine_docs_truncated_scopes: ["x".repeat(120)],
+        rind_docs_truncated: true,
+        rind_docs_truncated_scopes: ["x".repeat(120)],
       },
     }),
-    /\n  ↳ TANGERINE\.md: x{93}\.\.\.$/,
+    /\n  ↳ RIND\.md: x{93}\.\.\.$/,
   );
 });
 

@@ -24,7 +24,7 @@ export function promptActivityLine(state = {}) {
 }
 
 export function promptPlaceholderText() {
-  return "Ask Tangerine Rind to do anything";
+  return "Ask Rind to do anything";
 }
 
 export function userInputText(text) {
@@ -186,13 +186,13 @@ export function modelUsageText() {
 
 export function contextBuiltLine(event) {
   const decisions = event.decisions && typeof event.decisions === "object" ? event.decisions : {};
-  if (!decisions.tangerine_docs_truncated) {
+  if (!decisions.rind_docs_truncated) {
     return "";
   }
-  const scopes = Array.isArray(decisions.tangerine_docs_truncated_scopes)
-    ? decisions.tangerine_docs_truncated_scopes.join(", ")
+  const scopes = Array.isArray(decisions.rind_docs_truncated_scopes)
+    ? decisions.rind_docs_truncated_scopes.join(", ")
     : "unknown";
-  return `${accent("•")} ${bold("Context trimmed")}\n${dim(detailLine(`TANGERINE.md: ${clipSingleLine(scopes, 96)}`))}`;
+  return `${accent("•")} ${bold("Context trimmed")}\n${dim(detailLine(`RIND.md: ${clipSingleLine(scopes, 96)}`))}`;
 }
 
 export function unknownCommandText() {
@@ -775,7 +775,7 @@ function startupBannerText(info) {
   const cwd = middleClip(info.cwd || process.cwd(), width - 4);
   return [
     startupBannerBorder("┌", "┐", width),
-    startupBannerLine(`${bold("Tangerine Rind")} ${dim("workbench online")}`, width),
+    startupBannerLine(`${bold("Rind")} ${dim("workbench online")}`, width),
     startupBannerLine(modelLine, width),
     startupBannerLine(cwd, width),
     startupBannerBorder("└", "┘", width),

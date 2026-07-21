@@ -220,7 +220,7 @@ _TOOL_SCHEMA_META: dict[str, dict[str, Any]] = {
         },
     },
     "skill_create": {
-        "description": "创建格式正确的 Tangerine Rind Skill。自动写入当前目录 .tangerine/skills/<name>/SKILL.md 或用户级 TANGERINE_HOME/skills/<name>/SKILL.md，并生成稳定的 frontmatter。",
+        "description": "创建格式正确的 Rind Skill。自动写入当前目录 .rind/skills/<name>/SKILL.md 或用户级 RIND_HOME/skills/<name>/SKILL.md，并生成稳定的 frontmatter。",
         "param_descriptions": {
             "name": "Skill 名称。只能包含字母、数字、下划线和连字符。",
             "description": "Skill 的简短说明，写入 frontmatter，用于上下文中的 skill index。",

@@ -1,8 +1,8 @@
 <p align="center">
-  <img src="assets/tangerine.svg" alt="Tangerine Rind logo" width="104" />
+  <img src="assets/rind.svg" alt="Rind logo" width="104" />
 </p>
 
-<h1 align="center">Tangerine Rind</h1>
+<h1 align="center">Rind</h1>
 
 <p align="center">
   A compact Python agent runtime for coding workflows, built around clarity, resumability, and small composable tools.
@@ -18,15 +18,15 @@
   <img src="https://img.shields.io/badge/Interface-CLI-informational.svg" alt="CLI interface" />
 </p>
 
-## What is Tangerine Rind?
+## What is Rind?
 
-Tangerine Rind is a standard Python implementation of an autonomous coding agent. It is designed to be useful as a local CLI tool, but also readable enough to serve as a reference implementation for how an agent runtime can be assembled.
+Rind is a standard Python implementation of an autonomous coding agent. It is designed to be useful as a local CLI tool, but also readable enough to serve as a reference implementation for how an agent runtime can be assembled.
 
-The project takes a restrained position: an agent should not become a large framework before it becomes a reliable instrument. Tangerine Rind keeps the structure explicit, the tool contracts small, and the runtime state recoverable. From context compaction to tool execution, each part is implemented in the smallest form that preserves a good working experience.
+The project takes a restrained position: an agent should not become a large framework before it becomes a reliable instrument. Rind keeps the structure explicit, the tool contracts small, and the runtime state recoverable. From context compaction to tool execution, each part is implemented in the smallest form that preserves a good working experience.
 
 ## Design Principles
 
-- **Subtract before adding**: Tangerine Rind favors fewer concepts, smaller modules, and explicit boundaries. New abstractions are introduced only when they reduce real complexity.
+- **Subtract before adding**: Rind favors fewer concepts, smaller modules, and explicit boundaries. New abstractions are introduced only when they reduce real complexity.
 - **Small tools, clear contracts**: Shell, file, web, PDF, plan, and skill tools are exposed through compact interfaces and predictable result shapes.
 - **Context is runtime state**: Context estimation, compaction, and tool-result normalization are treated as first-class runtime responsibilities, not as prompt afterthoughts.
 - **Local-first continuity**: Sessions, messages, tool calls, and compactions are persisted as append-only local records so work can resume after interruption.
@@ -53,8 +53,8 @@ The project takes a restrained position: an agent should not become a large fram
 ### Install
 
 ```bash
-git clone https://github.com/Azzurroooo/tangerine-rind.git
-cd tangerine-rind
+git clone https://github.com/Azzurroooo/rind.git
+cd rind
 
 python -m venv .venv
 ```
@@ -75,7 +75,7 @@ pip install -r requirements-runtime.txt
 
 ### Configure
 
-Tangerine Rind stores user-level data under `TANGERINE_HOME` when set, otherwise under `~/.tangerine`. The default settings path is `<user-dir>/settings.json`; sessions, user skills, and user `TANGERINE.md` live in the same user-level directory. You can also use environment variables such as `OPENAI_API_KEY`, `OPENAI_API_BASE`, and `DEFAULT_MODEL`.
+Rind stores user-level data under `RIND_HOME` when set, otherwise under `~/.rind`. The default settings path is `<user-dir>/settings.json`; sessions, user skills, and user `RIND.md` live in the same user-level directory. You can also use environment variables such as `OPENAI_API_KEY`, `OPENAI_API_BASE`, and `DEFAULT_MODEL`.
 
 Minimal `settings.json` example:
 
@@ -115,7 +115,7 @@ python main.py --session <session-id>
 Experimental JS frontend CLI:
 
 ```bash
-node frontend-cli/bin/tangerine.js
+node frontend-cli/bin/rind.js
 ```
 
 This starts a headless Python runtime over JSONL stdio and keeps terminal input/rendering in Node.js. The existing Python CLI remains available through `python main.py`.
@@ -133,11 +133,11 @@ This starts a headless Python runtime over JSONL stdio and keeps terminal input/
 
 Inside the CLI, slash commands provide local controls for diagnostics, sessions, model selection, and status inspection. The input toolbar shows the active session, model, working directory, and key hints.
 
-Project-level `TANGERINE.md` and project skills are resolved from the current working directory where Tangerine Rind is launched.
+Project-level `RIND.md` and project skills are resolved from the current working directory where Rind is launched.
 
 ## Architecture
 
-Tangerine Rind follows a layered structure with dependency inversion between the runtime core and infrastructure adapters.
+Rind follows a layered structure with dependency inversion between the runtime core and infrastructure adapters.
 
 ```text
 agent/
@@ -177,7 +177,7 @@ The tests cover runtime events, context budgets, compaction, session persistence
 
 ## Direction
 
-Tangerine Rind is an exploration of how far agent systems can go while remaining small enough to understand. Its future work is guided by three questions:
+Rind is an exploration of how far agent systems can go while remaining small enough to understand. Its future work is guided by three questions:
 
 - How can an agent become more capable without accumulating unnecessary mechanism?
 - What new interfaces and presentations can make agent work more inspectable, continuous, and calm?

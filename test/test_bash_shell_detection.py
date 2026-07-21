@@ -11,10 +11,10 @@ from agent.infrastructure.tools.impl.tools.bash_runner import BashRunner
 from agent.infrastructure.tools.impl.tools.bash_session_pool import BashSessionPool
 
 
-def test_detect_shell_prefers_tangerine_bash_path(tmp_path, monkeypatch):
+def test_detect_shell_prefers_rind_bash_path(tmp_path, monkeypatch):
     bash_path = tmp_path / "bash.exe"
     bash_path.write_text("", encoding="utf-8")
-    monkeypatch.setenv("TANGERINE_BASH_PATH", str(bash_path))
+    monkeypatch.setenv("RIND_BASH_PATH", str(bash_path))
 
     pool = BashSessionPool()
 
@@ -27,9 +27,9 @@ def test_detect_shell_uses_bundled_portable_git(tmp_path, monkeypatch):
     bash_path = app_dir / "portable-git" / "bin" / "bash.exe"
     bash_path.parent.mkdir(parents=True)
     bash_path.write_text("", encoding="utf-8")
-    monkeypatch.delenv("TANGERINE_BASH_PATH", raising=False)
+    monkeypatch.delenv("RIND_BASH_PATH", raising=False)
     monkeypatch.setattr(bash_session_pool.platform, "system", lambda: "Windows")
-    monkeypatch.setattr(bash_session_pool.sys, "executable", str(app_dir / "tangerine.exe"))
+    monkeypatch.setattr(bash_session_pool.sys, "executable", str(app_dir / "rind.exe"))
     monkeypatch.setattr(bash_session_pool.shutil, "which", lambda name: None)
 
     pool = BashSessionPool()
@@ -43,9 +43,9 @@ def test_detect_shell_uses_bundled_portable_git_usr_bin(tmp_path, monkeypatch):
     bash_path = app_dir / "portable-git" / "usr" / "bin" / "bash.exe"
     bash_path.parent.mkdir(parents=True)
     bash_path.write_text("", encoding="utf-8")
-    monkeypatch.delenv("TANGERINE_BASH_PATH", raising=False)
+    monkeypatch.delenv("RIND_BASH_PATH", raising=False)
     monkeypatch.setattr(bash_session_pool.platform, "system", lambda: "Windows")
-    monkeypatch.setattr(bash_session_pool.sys, "executable", str(app_dir / "tangerine.exe"))
+    monkeypatch.setattr(bash_session_pool.sys, "executable", str(app_dir / "rind.exe"))
     monkeypatch.setattr(bash_session_pool.shutil, "which", lambda name: None)
 
     pool = BashSessionPool()
@@ -57,9 +57,9 @@ def test_detect_shell_uses_bundled_portable_git_usr_bin(tmp_path, monkeypatch):
 def test_detect_shell_falls_back_to_powershell_on_windows(tmp_path, monkeypatch):
     powershell_path = tmp_path / "powershell.exe"
     powershell_path.write_text("", encoding="utf-8")
-    monkeypatch.delenv("TANGERINE_BASH_PATH", raising=False)
+    monkeypatch.delenv("RIND_BASH_PATH", raising=False)
     monkeypatch.setattr(bash_session_pool.platform, "system", lambda: "Windows")
-    monkeypatch.setattr(bash_session_pool.sys, "executable", str(tmp_path / "tangerine.exe"))
+    monkeypatch.setattr(bash_session_pool.sys, "executable", str(tmp_path / "rind.exe"))
     monkeypatch.setattr(
         bash_session_pool.shutil,
         "which",
@@ -80,9 +80,9 @@ def test_detect_shell_falls_back_to_powershell_on_windows(tmp_path, monkeypatch)
 
 
 def test_detect_shell_reports_missing_backend_on_windows(tmp_path, monkeypatch):
-    monkeypatch.delenv("TANGERINE_BASH_PATH", raising=False)
+    monkeypatch.delenv("RIND_BASH_PATH", raising=False)
     monkeypatch.setattr(bash_session_pool.platform, "system", lambda: "Windows")
-    monkeypatch.setattr(bash_session_pool.sys, "executable", str(tmp_path / "tangerine.exe"))
+    monkeypatch.setattr(bash_session_pool.sys, "executable", str(tmp_path / "rind.exe"))
     monkeypatch.setattr(bash_session_pool.shutil, "which", lambda name: None)
     monkeypatch.setattr(
         BashSessionPool,

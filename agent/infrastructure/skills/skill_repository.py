@@ -1,11 +1,11 @@
-"""Filesystem-backed Tangerine Rind skill repository."""
+"""Filesystem-backed Rind skill repository."""
 
 from __future__ import annotations
 
 from pathlib import Path
 
 from agent.domain.skills import Skill, parse_skill_markdown
-from agent.infrastructure.paths import resolve_tangerine_home, resolve_project_root
+from agent.infrastructure.paths import resolve_rind_home, resolve_project_root
 
 
 class SkillRepository:
@@ -19,8 +19,8 @@ class SkillRepository:
         user_skill_dir: str | None = None,
     ):
         project_base = Path(project_root).expanduser().resolve() if project_root else resolve_project_root()
-        user_base = Path(user_home).expanduser().resolve() / ".tangerine" if user_home else resolve_tangerine_home()
-        self._project_skill_dir = Path(project_skill_dir).expanduser().resolve() if project_skill_dir else project_base / ".tangerine" / "skills"
+        user_base = Path(user_home).expanduser().resolve() / ".rind" if user_home else resolve_rind_home()
+        self._project_skill_dir = Path(project_skill_dir).expanduser().resolve() if project_skill_dir else project_base / ".rind" / "skills"
         self._user_skill_dir = Path(user_skill_dir).expanduser().resolve() if user_skill_dir else user_base / "skills"
 
     def list_skills(self) -> list[Skill]:
