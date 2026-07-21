@@ -7,7 +7,7 @@ os.chdir(PROJECT_ROOT)
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from agent.application.services import ToolResultNormalizer
+from agent.application import ToolResultNormalizer
 
 
 def test_small_output_is_not_truncated() -> None:

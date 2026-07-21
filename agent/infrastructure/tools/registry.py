@@ -5,7 +5,7 @@ from __future__ import annotations
 import inspect
 from typing import Any, Callable
 
-from .impl import TOOLS, TOOL_SCHEMAS
+from .builtin import TOOLS, TOOL_SCHEMAS
 
 
 class DefaultToolRegistry:

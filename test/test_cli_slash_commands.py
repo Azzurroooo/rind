@@ -16,7 +16,7 @@ if str(PROJECT_ROOT) not in sys.path:
 from agent.interfaces.cli.chat_cli import ChatCLI
 from agent.interfaces.cli.ui import GitPromptStatus
 from agent.interfaces.cli.commands import SlashCommandContext, SlashCommandRouter
-from agent.application.runtime.cancellation import CancellationTokenSource
+from agent.domain.cancellation import CancellationTokenSource
 from agent.infrastructure.config import Config
 
 

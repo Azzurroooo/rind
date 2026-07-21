@@ -7,7 +7,7 @@ import shlex
 from dataclasses import dataclass
 from typing import Any, Awaitable, Callable
 
-from agent.application.runtime.cancellation import CancellationToken
+from agent.domain.cancellation import CancellationToken
 
 
 @dataclass(slots=True)

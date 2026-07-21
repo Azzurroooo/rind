@@ -12,8 +12,8 @@ os.chdir(PROJECT_ROOT)
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from agent.infrastructure.tools.impl.tools.bash import bash, kill_shell
-from agent.infrastructure.tools.impl.tools.bash_session_pool import BashSessionPool
+from agent.infrastructure.tools.builtin.shell.tool import bash, kill_shell
+from agent.infrastructure.tools.builtin.shell.session_pool import BashSessionPool
 
 @pytest.fixture
 def temp_dir(tmp_path: Path) -> Path:

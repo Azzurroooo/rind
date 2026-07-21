@@ -12,9 +12,10 @@ os.chdir(PROJECT_ROOT)
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from agent.application.services import CompactionService
+from agent.application import CompactionService
 from agent.domain.compaction import COMPACT_CONTINUATION_USER_CONTENT
-from agent.infrastructure.plans.store import set_active_session_context
+from agent.infrastructure.planning import PlanContextProvider
+from agent.infrastructure.planning.store import set_active_session_context
 
 
 class FakeSession:
@@ -192,7 +193,9 @@ async def test_compaction_service_appends_active_plan_snapshot_before_persist() 
     with tempfile.TemporaryDirectory() as temp_dir:
         base = _set_plan_context(Path(temp_dir), _active_plan())
         session = FakeSession()
-        record = await CompactionService().compact_async(
+        record = await CompactionService(
+            plan_snapshot_provider=PlanContextProvider().build_snapshot,
+        ).compact_async(
             session=session,
             context_messages=await session.load_messages(),
             chat_client=SuccessfulClient(),
@@ -222,7 +225,9 @@ async def test_compaction_service_skips_plan_snapshot_without_active_plan() -> N
     with tempfile.TemporaryDirectory() as temp_dir:
         _set_plan_context(Path(temp_dir), _active_plan(status="completed"))
         session = FakeSession()
-        record = await CompactionService().compact_async(
+        record = await CompactionService(
+            plan_snapshot_provider=PlanContextProvider().build_snapshot,
+        ).compact_async(
             session=session,
             context_messages=await session.load_messages(),
             chat_client=SuccessfulClient(),
@@ -241,7 +246,9 @@ async def test_compaction_service_ignores_corrupt_plan_snapshot() -> None:
     with tempfile.TemporaryDirectory() as temp_dir:
         _set_plan_context(Path(temp_dir), "{bad json")
         session = FakeSession()
-        record = await CompactionService().compact_async(
+        record = await CompactionService(
+            plan_snapshot_provider=PlanContextProvider().build_snapshot,
+        ).compact_async(
             session=session,
             context_messages=await session.load_messages(),
             chat_client=SuccessfulClient(),

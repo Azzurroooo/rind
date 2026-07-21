@@ -9,8 +9,8 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from agent.domain import parse_skill_markdown
-from agent.infrastructure.tools.impl import TOOL_SCHEMAS, TOOLS
-from agent.infrastructure.tools.impl.tools.skill import skill_create
+from agent.infrastructure.tools.builtin import TOOL_SCHEMAS, TOOLS
+from agent.infrastructure.tools.builtin.skill import skill_create
 
 
 def _payload(result: str) -> dict:

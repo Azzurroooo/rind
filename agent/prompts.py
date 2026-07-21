@@ -2,7 +2,7 @@ import os
 import platform
 from datetime import date
 
-from agent.infrastructure.tools.impl.tools.bash_session_pool import BashSessionPool
+from agent.infrastructure.tools.builtin.shell.session_pool import BashSessionPool
 
 
 def _detect_shell_display() -> tuple[str, str]:

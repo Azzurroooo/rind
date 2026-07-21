@@ -9,7 +9,7 @@ graph TB
     C["interfaces/cli/ (命令行界面)"]
     D["interfaces/api/ (REST API 接口)"]
     E["runtime/ (运行时编排)"]
-    F["services/ (领域服务)"]
+    F["context/ + tools/ (应用服务)"]
     G["ports/ (端口/接口)"]
     H["events.py (领域事件)"]
     I["tool_payload.py (工具载荷)"]
@@ -93,19 +93,19 @@ sequenceDiagram
 ```mermaid
 graph LR
     A[用户] --> B[Chat CLI]
-    B --> C[AsyncRuntimeFacade]
-    C --> D[AsyncTurnRunner]
+    B --> C[AgentRuntime]
+    C --> D[TurnRunner]
     D --> E[ContextManager]
-    D --> F[AsyncChatClient]
+    D --> F[ChatClient]
     F --> G[OpenAIAsyncClient]
     D --> H[MessageStreamParser]
-    D --> I[AsyncToolCallProcessor]
+    D --> I[ToolCallProcessor]
     I --> J[ToolExecutor]
     J --> K[Bash Tool]
     J --> L[File Ops Tool]
     J --> M[Web Tool]
     J --> N[Skill Tool]
-    D --> O[AsyncJsonlSessionStore]
+    D --> O[JsonlSessionStore]
 ```
 
 ## 超详细数据流图 (代码级)
@@ -117,11 +117,11 @@ sequenceDiagram
     participant CLI as ChatCLI
     participant Renderer as StreamingRenderer
     participant StatusRenderer as StatusRenderer
-    participant TurnRunner as AsyncTurnRunner
+    participant TurnRunner as TurnRunner
     participant ContextManager as ContextManager
-    participant SessionStore as AsyncJsonlSessionStore
-    participant ChatClient as AsyncChatClient
-    participant ToolProcessor as AsyncToolCallProcessor
+    participant SessionStore as JsonlSessionStore
+    participant ChatClient as ChatClient
+    participant ToolProcessor as ToolCallProcessor
     participant ToolExecutor as ToolExecutor
     participant Tool as 具体工具实现
 
@@ -236,7 +236,8 @@ sequenceDiagram
 
 2. **应用层 (Application)**
    - Runtime：回合调度、工具处理流程
-   - Services：压缩、上下文管理、Token 用量
+   - Context：压缩、上下文管理、Token 用量
+   - Tools：工具执行、调用编排和结果归一化
    - Ports：接口契约抽象
 
 3. **领域层 (Domain)**

@@ -142,14 +142,16 @@ Rind 使用分层结构，并在运行时核心与基础设施适配器之间遵
 ```text
 agent/
 ├── application/
-│   ├── runtime/       # 异步运行时门面、turn runner、stream pump、工具调用处理
-│   ├── services/      # 上下文管理、压缩、token 使用、技能选择
+│   ├── runtime/       # Agent runtime、turn runner、流解析与泵送
+│   ├── context/       # 上下文管理、估算、压缩和 token 使用
+│   ├── tools/         # 工具执行、处理、保护策略和结果归一化
 │   └── ports/         # Chat client、会话存储、工具注册表抽象
+├── domain/            # 事件、取消、规划和工具契约
 ├── infrastructure/
 │   ├── llm/           # OpenAI 兼容异步 Chat Client
 │   ├── persistence/   # append-only 会话记录与仓储
-│   ├── plans/         # DAG 计划模型、存储、调度和上下文注入
-│   └── tools/impl/    # Bash、文件、网页、PDF、计划和技能工具
+│   ├── planning/      # DAG 计划存储、操作、调度和上下文注入
+│   └── tools/builtin/ # Shell、文件、网页、PDF、计划和技能工具
 └── interfaces/
     ├── cli/           # 交互式 CLI、斜杠命令、状态 UI
     ├── runtime_server/# 无头 runtime 的 JSONL stdio 适配器

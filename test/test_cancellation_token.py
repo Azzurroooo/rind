@@ -9,7 +9,7 @@ os.chdir(PROJECT_ROOT)
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from agent.application.runtime.cancellation import (
+from agent.domain.cancellation import (
     CancellationToken,
     CancellationTokenSource,
     create_child_token

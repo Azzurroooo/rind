@@ -7,8 +7,8 @@ os.chdir(PROJECT_ROOT)
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from agent.application.services import ContextBudget, ContextEstimator
-from agent.application.services.context_estimator import (
+from agent.application import ContextBudget, ContextEstimator
+from agent.application.context.estimator import (
     DEFAULT_AUTO_COMPACT_TOKEN_LIMIT_PERCENT,
     DEFAULT_CONTEXT_WINDOW_TOKENS,
 )

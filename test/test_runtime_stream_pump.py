@@ -11,7 +11,7 @@ os.chdir(PROJECT_ROOT)
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from agent.application.runtime.async_turn_runner import AsyncTurnRunner
+from agent.application.runtime.turn_runner import TurnRunner
 from agent.domain.events import (
     AssistantDeltaEvent,
     AssistantMessageCompletedEvent,
@@ -30,7 +30,7 @@ def make_runner(mock_parser):
     mock_session.now_iso.return_value = "2026-05-08T00:00:00Z"
     mock_session.persist_message = AsyncMock()
 
-    runner = AsyncTurnRunner(
+    runner = TurnRunner(
         chat_client=mock_client,
         tool_processor=MagicMock(),
         stream_parser=mock_parser,

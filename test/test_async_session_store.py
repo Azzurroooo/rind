@@ -14,7 +14,7 @@ os.chdir(PROJECT_ROOT)
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from agent.infrastructure.persistence.async_jsonl_session_store import AsyncJsonlSessionStore
+from agent.infrastructure.persistence.jsonl_session_store import JsonlSessionStore
 from agent.infrastructure.persistence.session_files import SessionFiles
 from agent.domain.compaction import COMPACT_CONTINUATION_USER_CONTENT
 
@@ -26,7 +26,7 @@ def temp_session_dir():
 
 @pytest.mark.asyncio
 async def test_async_session_store_facade(temp_session_dir):
-    async_store = AsyncJsonlSessionStore(session_dir=temp_session_dir)
+    async_store = JsonlSessionStore(session_dir=temp_session_dir)
 
     await async_store.initialize()
 
@@ -69,7 +69,7 @@ def test_resolve_session_root_uses_rind_home(monkeypatch, tmp_path):
     rind_home = tmp_path / ".rind"
     monkeypatch.setenv("RIND_HOME", str(rind_home))
 
-    root = AsyncJsonlSessionStore.resolve_session_root()
+    root = JsonlSessionStore.resolve_session_root()
 
     assert root == os.path.abspath(str(rind_home / "sessions"))
 
@@ -77,7 +77,7 @@ def test_resolve_session_root_uses_rind_home(monkeypatch, tmp_path):
 def test_resolve_session_root_uses_explicit_session_dir(tmp_path):
     session_dir = tmp_path / "custom_sessions"
 
-    root = AsyncJsonlSessionStore.resolve_session_root(str(session_dir))
+    root = JsonlSessionStore.resolve_session_root(str(session_dir))
 
     assert root == os.path.abspath(str(session_dir))
 
@@ -87,7 +87,7 @@ async def test_session_store_rejects_invalid_session_ids(temp_session_dir, tmp_p
     invalid_ids = ["../escape", r"a\b", "a/b", "bad id", "C:drive", "..", ""]
 
     for session_id in invalid_ids:
-        store = AsyncJsonlSessionStore(session_dir=temp_session_dir, session_id=session_id)
+        store = JsonlSessionStore(session_dir=temp_session_dir, session_id=session_id)
         with pytest.raises(ValueError, match="Invalid session id"):
             await store.initialize()
 
@@ -103,7 +103,7 @@ async def test_session_workspace_root_uses_cwd_not_parent_git_root(tmp_path, mon
     (project / ".git").mkdir()
     monkeypatch.chdir(nested)
 
-    store = AsyncJsonlSessionStore(session_dir=str(session_root))
+    store = JsonlSessionStore(session_dir=str(session_root))
     await store.initialize()
 
     meta_path = session_root / store.session_id / "meta.json"
@@ -116,7 +116,7 @@ async def test_session_workspace_root_uses_cwd_not_parent_git_root(tmp_path, mon
 async def test_resume_latest_and_recent_sessions_ignore_invalid_index_ids(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     session_root = tmp_path / "sessions"
-    store = AsyncJsonlSessionStore(session_dir=str(session_root), session_id="valid_session")
+    store = JsonlSessionStore(session_dir=str(session_root), session_id="valid_session")
     await store.initialize()
 
     meta = json.loads((session_root / "valid_session" / "meta.json").read_text(encoding="utf-8"))
@@ -141,7 +141,7 @@ async def test_resume_latest_and_recent_sessions_ignore_invalid_index_ids(tmp_pa
         encoding="utf-8",
     )
 
-    resumed = AsyncJsonlSessionStore(session_dir=str(session_root), resume_latest=True)
+    resumed = JsonlSessionStore(session_dir=str(session_root), resume_latest=True)
     await resumed.initialize()
     recent = await resumed.list_recent_sessions(limit=10)
 
@@ -228,7 +228,7 @@ def test_session_files_write_json_removes_tmp_on_replace_failure(monkeypatch, tm
 
 @pytest.mark.asyncio
 async def test_persist_tool_call_writes_model_content(temp_session_dir):
-    store = AsyncJsonlSessionStore(session_dir=temp_session_dir, system_prompt="sys")
+    store = JsonlSessionStore(session_dir=temp_session_dir, system_prompt="sys")
     await store.initialize()
     await store.persist_message("assistant", "", meta={"tool_calls": [{"id": "call_1", "name": "bash"}]})
     await store.persist_tool_call(
@@ -256,7 +256,7 @@ async def test_persist_tool_call_writes_model_content(temp_session_dir):
 
 @pytest.mark.asyncio
 async def test_message_projector_deduplicates_tool_messages(temp_session_dir):
-    store = AsyncJsonlSessionStore(session_dir=temp_session_dir, system_prompt="sys")
+    store = JsonlSessionStore(session_dir=temp_session_dir, system_prompt="sys")
     await store.initialize()
     await store.persist_message("assistant", "", meta={"tool_calls": [{"id": "call_1", "name": "bash"}]})
     await store.persist_tool_call(
@@ -283,7 +283,7 @@ async def test_message_projector_deduplicates_tool_messages(temp_session_dir):
 
 @pytest.mark.asyncio
 async def test_get_messages_slice_recovers_missing_tool_message_from_record(temp_session_dir):
-    store = AsyncJsonlSessionStore(session_dir=temp_session_dir, system_prompt="sys")
+    store = JsonlSessionStore(session_dir=temp_session_dir, system_prompt="sys")
     await store.initialize()
     await store.persist_message("assistant", "", meta={"tool_calls": [{"id": "call_1", "name": "bash"}]})
     await store.persist_tool_call(
@@ -320,7 +320,7 @@ async def test_get_messages_slice_recovers_missing_tool_message_from_record(temp
 
 @pytest.mark.asyncio
 async def test_get_messages_slice_skips_interrupted_tool_call(temp_session_dir):
-    store = AsyncJsonlSessionStore(session_dir=temp_session_dir, system_prompt="sys")
+    store = JsonlSessionStore(session_dir=temp_session_dir, system_prompt="sys")
     await store.initialize()
     await store.persist_message(
         "assistant", "", meta={"tool_calls": [{"id": "call_1", "name": "bash"}]}
@@ -333,7 +333,7 @@ async def test_get_messages_slice_skips_interrupted_tool_call(temp_session_dir):
 
 @pytest.mark.asyncio
 async def test_get_messages_slice_matches_numeric_tool_ids_as_strings(temp_session_dir):
-    store = AsyncJsonlSessionStore(session_dir=temp_session_dir, system_prompt="sys")
+    store = JsonlSessionStore(session_dir=temp_session_dir, system_prompt="sys")
     await store.initialize()
     await store.persist_message("assistant", "", meta={"tool_calls": [{"id": 123, "name": "bash"}]})
     await store.persist_tool_call(
@@ -358,7 +358,7 @@ async def test_get_messages_slice_matches_numeric_tool_ids_as_strings(temp_sessi
 
 @pytest.mark.asyncio
 async def test_get_messages_slice_uses_projection_cache_until_files_change(temp_session_dir):
-    store = AsyncJsonlSessionStore(session_dir=temp_session_dir, system_prompt="sys")
+    store = JsonlSessionStore(session_dir=temp_session_dir, system_prompt="sys")
     await store.initialize()
     await store.persist_message("user", "first")
 
@@ -399,7 +399,7 @@ async def test_get_messages_slice_uses_projection_cache_until_files_change(temp_
 
 @pytest.mark.asyncio
 async def test_get_messages_slice_rejects_tool_record_without_model_content(temp_session_dir):
-    store = AsyncJsonlSessionStore(session_dir=temp_session_dir, system_prompt="sys")
+    store = JsonlSessionStore(session_dir=temp_session_dir, system_prompt="sys")
     await store.initialize()
     await store.persist_message("assistant", "", meta={"tool_calls": [{"id": "legacy", "name": "bash"}]})
     session_base = Path(temp_session_dir) / store.session_id
@@ -422,7 +422,7 @@ async def test_get_messages_slice_rejects_tool_record_without_model_content(temp
 
 @pytest.mark.asyncio
 async def test_persist_tool_call_requires_model_content(temp_session_dir):
-    store = AsyncJsonlSessionStore(session_dir=temp_session_dir, system_prompt="sys")
+    store = JsonlSessionStore(session_dir=temp_session_dir, system_prompt="sys")
     await store.initialize()
 
     with pytest.raises(ValueError, match="model_content"):
@@ -457,14 +457,14 @@ async def test_legacy_session_schema_is_rejected(temp_session_dir):
         encoding="utf-8",
     )
 
-    store = AsyncJsonlSessionStore(session_dir=temp_session_dir, session_id=session_id)
+    store = JsonlSessionStore(session_dir=temp_session_dir, session_id=session_id)
     with pytest.raises(ValueError, match="Unsupported legacy session schema"):
         await store.initialize()
 
 
 @pytest.mark.asyncio
 async def test_persist_compaction_appends_boundary_without_rewriting_messages(temp_session_dir):
-    store = AsyncJsonlSessionStore(session_dir=temp_session_dir, system_prompt="sys")
+    store = JsonlSessionStore(session_dir=temp_session_dir, system_prompt="sys")
     await store.initialize()
     await store.persist_message("user", "old question")
     await store.persist_message("assistant", "old answer")
@@ -511,7 +511,7 @@ async def test_persist_compaction_appends_boundary_without_rewriting_messages(te
 
 @pytest.mark.asyncio
 async def test_persist_compaction_projects_minimal_replacement_boundary(temp_session_dir):
-    store = AsyncJsonlSessionStore(session_dir=temp_session_dir, system_prompt="sys")
+    store = JsonlSessionStore(session_dir=temp_session_dir, system_prompt="sys")
     await store.initialize()
     await store.persist_message("user", "old question")
     await store.persist_message("assistant", "old answer")
@@ -566,7 +566,7 @@ async def test_persist_compaction_projects_minimal_replacement_boundary(temp_ses
 
 @pytest.mark.asyncio
 async def test_orphan_compaction_record_does_not_compact_context(temp_session_dir):
-    store = AsyncJsonlSessionStore(session_dir=temp_session_dir, system_prompt="sys")
+    store = JsonlSessionStore(session_dir=temp_session_dir, system_prompt="sys")
     await store.initialize()
     await store.persist_message("user", "keep this question")
     session_base = Path(temp_session_dir) / store.session_id
@@ -590,7 +590,7 @@ async def test_orphan_compaction_record_does_not_compact_context(temp_session_di
 
 @pytest.mark.asyncio
 async def test_unmatched_compact_boundary_does_not_truncate_context(temp_session_dir):
-    store = AsyncJsonlSessionStore(session_dir=temp_session_dir, system_prompt="sys")
+    store = JsonlSessionStore(session_dir=temp_session_dir, system_prompt="sys")
     await store.initialize()
     await store.persist_message("user", "before broken boundary")
     await store.persist_message("assistant", "", meta={"kind": "compact_boundary", "compact_id": "missing"})
@@ -609,7 +609,7 @@ async def test_unmatched_compact_boundary_does_not_truncate_context(temp_session
 
 @pytest.mark.asyncio
 async def test_invalid_compaction_record_does_not_truncate_context(temp_session_dir):
-    store = AsyncJsonlSessionStore(session_dir=temp_session_dir, system_prompt="sys")
+    store = JsonlSessionStore(session_dir=temp_session_dir, system_prompt="sys")
     await store.initialize()
     await store.persist_message("user", "before invalid compact")
     session_base = Path(temp_session_dir) / store.session_id
@@ -640,7 +640,7 @@ async def test_invalid_compaction_record_does_not_truncate_context(temp_session_
 
 @pytest.mark.asyncio
 async def test_latest_valid_compact_boundary_survives_newer_broken_boundary(temp_session_dir):
-    store = AsyncJsonlSessionStore(session_dir=temp_session_dir, system_prompt="sys")
+    store = JsonlSessionStore(session_dir=temp_session_dir, system_prompt="sys")
     await store.initialize()
     await store.persist_message("user", "old compacted question")
     record = await store.persist_compaction(
@@ -681,7 +681,7 @@ async def test_latest_valid_compact_boundary_survives_newer_broken_boundary(temp
 
 @pytest.mark.asyncio
 async def test_sampling_usage_and_compact_generation_meta(temp_session_dir):
-    store = AsyncJsonlSessionStore(session_dir=temp_session_dir, system_prompt="sys")
+    store = JsonlSessionStore(session_dir=temp_session_dir, system_prompt="sys")
     await store.initialize()
 
     usage = {
@@ -719,7 +719,7 @@ async def test_sampling_usage_and_compact_generation_meta(temp_session_dir):
 
 @pytest.mark.asyncio
 async def test_sampling_usage_keeps_latest_assistant_usage_when_compact_usage_arrives(temp_session_dir):
-    store = AsyncJsonlSessionStore(session_dir=temp_session_dir, system_prompt="sys")
+    store = JsonlSessionStore(session_dir=temp_session_dir, system_prompt="sys")
     await store.initialize()
 
     assistant_usage = {
@@ -763,7 +763,7 @@ async def test_sampling_usage_keeps_latest_assistant_usage_when_compact_usage_ar
 
 @pytest.mark.asyncio
 async def test_update_model_persists_session_meta(temp_session_dir):
-    store = AsyncJsonlSessionStore(session_dir=temp_session_dir, model="old-model", system_prompt="sys")
+    store = JsonlSessionStore(session_dir=temp_session_dir, model="old-model", system_prompt="sys")
     await store.initialize()
 
     await store.update_model("new-model")
@@ -776,7 +776,7 @@ async def test_update_model_persists_session_meta(temp_session_dir):
 
 @pytest.mark.asyncio
 async def test_resume_repairs_stale_meta_counts(temp_session_dir):
-    store = AsyncJsonlSessionStore(session_dir=temp_session_dir, system_prompt="sys")
+    store = JsonlSessionStore(session_dir=temp_session_dir, system_prompt="sys")
     await store.initialize()
     await store.persist_message("user", "hello")
     await store.persist_message("assistant", "", meta={"tool_calls": [{"id": "call_1", "name": "bash"}]})
@@ -798,7 +798,7 @@ async def test_resume_repairs_stale_meta_counts(temp_session_dir):
     meta["tool_call_count"] = 0
     meta_path.write_text(json.dumps(meta), encoding="utf-8")
 
-    resumed = AsyncJsonlSessionStore(session_dir=temp_session_dir, session_id=store.session_id)
+    resumed = JsonlSessionStore(session_dir=temp_session_dir, session_id=store.session_id)
     await resumed.initialize()
 
     repaired = json.loads(meta_path.read_text(encoding="utf-8"))
@@ -808,7 +808,7 @@ async def test_resume_repairs_stale_meta_counts(temp_session_dir):
 
 @pytest.mark.asyncio
 async def test_resume_repairs_invalid_meta_counts(temp_session_dir):
-    store = AsyncJsonlSessionStore(session_dir=temp_session_dir, system_prompt="sys")
+    store = JsonlSessionStore(session_dir=temp_session_dir, system_prompt="sys")
     await store.initialize()
     await store.persist_message("user", "hello")
 
@@ -819,7 +819,7 @@ async def test_resume_repairs_invalid_meta_counts(temp_session_dir):
     meta["tool_call_count"] = "also bad"
     meta_path.write_text(json.dumps(meta), encoding="utf-8")
 
-    resumed = AsyncJsonlSessionStore(session_dir=temp_session_dir, session_id=store.session_id)
+    resumed = JsonlSessionStore(session_dir=temp_session_dir, session_id=store.session_id)
     await resumed.initialize()
 
     repaired = json.loads(meta_path.read_text(encoding="utf-8"))
@@ -829,7 +829,7 @@ async def test_resume_repairs_invalid_meta_counts(temp_session_dir):
 
 @pytest.mark.asyncio
 async def test_resume_normalizes_auto_compact_window_meta(temp_session_dir):
-    store = AsyncJsonlSessionStore(session_dir=temp_session_dir, system_prompt="sys")
+    store = JsonlSessionStore(session_dir=temp_session_dir, system_prompt="sys")
     await store.initialize()
 
     session_base = Path(temp_session_dir) / store.session_id
@@ -838,7 +838,7 @@ async def test_resume_normalizes_auto_compact_window_meta(temp_session_dir):
     meta["auto_compact_window"] = {"ordinal": "bad"}
     meta_path.write_text(json.dumps(meta), encoding="utf-8")
 
-    resumed = AsyncJsonlSessionStore(session_dir=temp_session_dir, session_id=store.session_id)
+    resumed = JsonlSessionStore(session_dir=temp_session_dir, session_id=store.session_id)
     await resumed.initialize()
 
     repaired = json.loads(meta_path.read_text(encoding="utf-8"))
@@ -903,7 +903,7 @@ def main() -> int:
                 monkeypatch.undo()
 
     asyncio.run(_run_all())
-    print("AsyncJsonlSessionStore tests passed.")
+    print("JsonlSessionStore tests passed.")
     return 0
 
 

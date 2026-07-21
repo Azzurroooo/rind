@@ -149,7 +149,7 @@ async def handle_skill(context: SlashCommandContext, args: list[str]) -> str | S
     if args and args[0].lower() != "list":
         return "Usage: /skill or /skill list"
     try:
-        from agent.infrastructure.skills.skill_repository import SkillRepository
+        from agent.infrastructure.skills.repository import SkillRepository
 
         skills = SkillRepository(project_root=str(Path.cwd())).list_skills()
     except Exception as exc:
@@ -200,8 +200,8 @@ async def handle_init(context: SlashCommandContext, args: list[str]) -> SlashCom
 
 async def handle_plan(context: SlashCommandContext, args: list[str]) -> str:
     try:
-        from agent.infrastructure.plans.store import load_plan_if_exists
-        from agent.infrastructure.plans.state_summary import render_compact_plan_summary
+        from agent.infrastructure.planning.store import load_plan_if_exists
+        from agent.infrastructure.planning.summary import render_compact_plan_summary
 
         plan = load_plan_if_exists()
         summary = render_compact_plan_summary(plan) if plan else ""

@@ -8,8 +8,8 @@ os.chdir(PROJECT_ROOT)
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from agent.infrastructure.plans import PlanContextProvider
-from agent.infrastructure.plans.state_summary import render_compact_plan_summary
+from agent.infrastructure.planning import PlanContextProvider
+from agent.infrastructure.planning.summary import render_compact_plan_summary
 
 
 def _write_plan(base: Path, plan: dict) -> None:

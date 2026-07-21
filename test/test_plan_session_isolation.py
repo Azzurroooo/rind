@@ -11,9 +11,9 @@ os.chdir(PROJECT_ROOT)
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from agent.infrastructure.persistence.async_jsonl_session_store import AsyncJsonlSessionStore
-from agent.infrastructure.plans import PlanContextProvider
-from agent.infrastructure.tools.impl.tools.plan import plan_create
+from agent.infrastructure.persistence.jsonl_session_store import JsonlSessionStore
+from agent.infrastructure.planning import PlanContextProvider
+from agent.infrastructure.tools.builtin.planning import plan_create
 
 
 def _payload(raw: str) -> dict:
@@ -34,7 +34,7 @@ async def test_plan_context_is_task_local_for_concurrent_sessions(tmp_path: Path
     session_root = tmp_path / "sessions"
 
     async def worker(session_id: str, title: str) -> tuple[dict, list[dict], dict]:
-        session = AsyncJsonlSessionStore(
+        session = JsonlSessionStore(
             session_dir=str(session_root),
             session_id=session_id,
             system_prompt="sys",

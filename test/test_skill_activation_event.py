@@ -10,7 +10,7 @@ os.chdir(PROJECT_ROOT)
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from agent.application.runtime.async_turn_runner import AsyncTurnRunner
+from agent.application.runtime.turn_runner import TurnRunner
 from agent.domain import ParsedToolCall, Skill, SkillMatch
 from agent.domain.events import AssistantDeltaEvent, ContextBuiltEvent, SkillActivatedEvent
 
@@ -94,7 +94,7 @@ async def test_skill_activation_event_precedes_assistant_delta() -> None:
     context_manager = FakeContextManager([SkillMatch(skill=skill, reason="explicit_dollar_name", score=100)])
     session = FakeSession("please use $demo")
 
-    runner = AsyncTurnRunner(
+    runner = TurnRunner(
         chat_client=mock_client,
         tool_processor=MagicMock(),
         stream_parser=mock_parser,
@@ -154,7 +154,7 @@ async def test_skill_activation_event_emitted_once_per_turn() -> None:
     mock_processor = MagicMock()
     mock_processor.execute = execute
 
-    runner = AsyncTurnRunner(
+    runner = TurnRunner(
         chat_client=mock_client,
         tool_processor=mock_processor,
         stream_parser=mock_parser,
@@ -196,7 +196,7 @@ async def test_plain_trigger_does_not_emit_skill_activation_event() -> None:
     context_manager = FakeContextManager([])
     session = FakeSession("demo trigger")
 
-    runner = AsyncTurnRunner(
+    runner = TurnRunner(
         chat_client=mock_client,
         tool_processor=MagicMock(),
         stream_parser=mock_parser,

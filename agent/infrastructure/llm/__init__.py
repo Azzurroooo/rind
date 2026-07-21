@@ -1,5 +1,5 @@
 """LLM client adapters."""
 
-from .openai_async_chat_client import AsyncOpenAIChatClient
+from .openai_chat_client import OpenAIChatClient
 
-__all__ = ["AsyncOpenAIChatClient"]
+__all__ = ["OpenAIChatClient"]

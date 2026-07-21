@@ -14,8 +14,8 @@ os.chdir(PROJECT_ROOT)
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from agent.application.runtime.async_runtime_facade import AsyncRuntimeFacade
-from agent.application.runtime.async_turn_runner import AsyncTurnRunner
+from agent.application.runtime.runtime import AgentRuntime
+from agent.application.runtime.turn_runner import TurnRunner
 from agent.domain import ParsedToolCall
 from agent.domain.events import (
     AssistantDeltaEvent,
@@ -29,9 +29,9 @@ from agent.domain.events import (
     TurnCancelledEvent,
     TurnFailedEvent
 )
-from agent.application.runtime.cancellation import CancellationTokenSource
-from agent.application.services import ContextBudget, ContextEstimator, ContextManager
-from agent.application.services.context_estimator import DEFAULT_CONTEXT_WINDOW_TOKENS
+from agent.domain.cancellation import CancellationTokenSource
+from agent.application import ContextBudget, ContextEstimator, ContextManager
+from agent.application.context.estimator import DEFAULT_CONTEXT_WINDOW_TOKENS
 from agent.domain.compaction import COMPACT_CONTINUATION_USER_CONTENT
 
 @pytest.mark.asyncio
@@ -44,7 +44,7 @@ async def test_async_turn_runner_cancellation():
 
     mock_client.stream = mock_stream
 
-    runner = AsyncTurnRunner(
+    runner = TurnRunner(
         chat_client=mock_client,
         tool_processor=MagicMock(),
         stream_parser=MagicMock(),
@@ -87,7 +87,7 @@ async def test_async_turn_runner_stream_cancelled_error_is_cancelled_event():
     mock_session = MagicMock()
     mock_session.now_iso.return_value = "2026-05-08T00:00:00Z"
 
-    runner = AsyncTurnRunner(
+    runner = TurnRunner(
         chat_client=mock_client,
         tool_processor=MagicMock(),
         stream_parser=mock_parser,
@@ -128,7 +128,7 @@ async def test_async_turn_runner_cancelled_error_prefers_token_reason():
     mock_session = MagicMock()
     mock_session.now_iso.return_value = "2026-05-08T00:00:00Z"
 
-    runner = AsyncTurnRunner(
+    runner = TurnRunner(
         chat_client=mock_client,
         tool_processor=MagicMock(),
         stream_parser=mock_parser,
@@ -165,7 +165,7 @@ async def test_async_runtime_facade_emits_turn_started_first():
             yield TurnCompletedEvent(turn_id=turn_id)
 
     session = FakeSession()
-    facade = AsyncRuntimeFacade(turn_runner=FakeRunner(), session_store=session)
+    facade = AgentRuntime(turn_runner=FakeRunner(), session_store=session)
 
     events = [event async for event in facade.run_turn(query="hello")]
 
@@ -205,7 +205,7 @@ async def test_async_runtime_facade_passes_transient_system_messages():
     prompt_messages = [{"role": "system", "content": "init prompt"}]
     runner = FakeRunner()
     session = FakeSession()
-    facade = AsyncRuntimeFacade(turn_runner=runner, session_store=session)
+    facade = AgentRuntime(turn_runner=runner, session_store=session)
 
     events = [
         event
@@ -244,7 +244,7 @@ async def test_async_runtime_facade_initializes_session_once_for_concurrent_turn
             yield TurnCompletedEvent(turn_id=turn_id)
 
     session = FakeSession()
-    facade = AsyncRuntimeFacade(turn_runner=FakeRunner(), session_store=session)
+    facade = AgentRuntime(turn_runner=FakeRunner(), session_store=session)
 
     async def run_query(query: str):
         return [event async for event in facade.run_turn(query=query)]
@@ -273,7 +273,7 @@ async def test_async_runtime_facade_manual_compact_uses_runner():
 
     session = FakeSession()
     runner = FakeRunner()
-    facade = AsyncRuntimeFacade(turn_runner=runner, session_store=session)
+    facade = AgentRuntime(turn_runner=runner, session_store=session)
 
     record = await facade.compact_context(reason="manual")
 
@@ -303,7 +303,7 @@ async def test_async_runtime_facade_set_model_updates_runner_and_session():
 
     session = FakeSession()
     runner = FakeRunner()
-    facade = AsyncRuntimeFacade(turn_runner=runner, session_store=session)
+    facade = AgentRuntime(turn_runner=runner, session_store=session)
 
     result = await facade.set_model("new-model")
 
@@ -362,7 +362,7 @@ async def test_async_turn_runner_emits_tool_requested_before_tool_execution():
     mock_processor = MagicMock()
     mock_processor.execute = execute
 
-    runner = AsyncTurnRunner(
+    runner = TurnRunner(
         chat_client=mock_client,
         tool_processor=mock_processor,
         stream_parser=mock_parser,
@@ -405,7 +405,7 @@ async def test_async_turn_runner_passes_transient_system_messages_to_context():
             return "2026-05-08T00:00:00Z"
 
     prompt_messages = [{"role": "system", "content": "init prompt"}]
-    runner = AsyncTurnRunner(
+    runner = TurnRunner(
         chat_client=mock_client,
         tool_processor=MagicMock(),
         stream_parser=mock_parser,
@@ -481,7 +481,7 @@ async def test_async_turn_runner_fails_after_tool_persist_failure():
     mock_processor = MagicMock()
     mock_processor.execute = execute
 
-    runner = AsyncTurnRunner(
+    runner = TurnRunner(
         chat_client=mock_client,
         tool_processor=mock_processor,
         stream_parser=mock_parser,
@@ -549,7 +549,7 @@ async def test_async_turn_runner_emits_and_persists_sampling_usage():
             self.usages.append(dict(usage))
 
     session = FakeSession()
-    runner = AsyncTurnRunner(
+    runner = TurnRunner(
         chat_client=mock_client,
         tool_processor=MagicMock(),
         stream_parser=mock_parser,
@@ -607,7 +607,7 @@ async def test_async_turn_runner_usage_persistence_failure_does_not_fail_turn():
             raise OSError("meta write failed")
 
     session = FakeSession()
-    runner = AsyncTurnRunner(
+    runner = TurnRunner(
         chat_client=mock_client,
         tool_processor=MagicMock(),
         stream_parser=mock_parser,
@@ -659,7 +659,7 @@ async def test_async_turn_runner_usage_tolerates_bad_context_stats():
             self.usages.append(dict(usage))
 
     session = FakeSession()
-    runner = AsyncTurnRunner(
+    runner = TurnRunner(
         chat_client=mock_client,
         tool_processor=MagicMock(),
         stream_parser=mock_parser,
@@ -694,7 +694,7 @@ async def test_async_turn_runner_retry_error_emits_visible_failure():
     mock_session = MagicMock()
     mock_session.now_iso.return_value = "2026-05-08T00:00:00Z"
 
-    runner = AsyncTurnRunner(
+    runner = TurnRunner(
         chat_client=mock_client,
         tool_processor=MagicMock(),
         stream_parser=mock_parser,
@@ -785,7 +785,7 @@ async def test_async_turn_runner_auto_compacts_before_sampling():
 
     chat_client = FakeChatClient()
     session = FakeSession()
-    runner = AsyncTurnRunner(
+    runner = TurnRunner(
         chat_client=chat_client,
         tool_processor=MagicMock(),
         stream_parser=mock_parser,
@@ -880,7 +880,7 @@ async def test_async_turn_runner_compacts_when_hard_limit_is_required():
 
     chat_client = FakeChatClient()
     session = FakeSession()
-    runner = AsyncTurnRunner(
+    runner = TurnRunner(
         chat_client=chat_client,
         tool_processor=MagicMock(),
         stream_parser=mock_parser,
@@ -958,7 +958,7 @@ async def test_async_turn_runner_mid_turn_compact_does_not_preserve_raw_tail():
 
     chat_client = FakeChatClient()
     session = FakeSession()
-    runner = AsyncTurnRunner(
+    runner = TurnRunner(
         chat_client=chat_client,
         tool_processor=MagicMock(),
         stream_parser=MagicMock(),
@@ -997,7 +997,7 @@ async def test_async_turn_runner_mid_turn_compact_does_not_preserve_raw_tail():
 
 
 def test_compact_continuation_boundary_rejects_system_assistant_only():
-    runner = AsyncTurnRunner(
+    runner = TurnRunner(
         chat_client=MagicMock(),
         tool_processor=MagicMock(),
         stream_parser=MagicMock(),
@@ -1014,7 +1014,7 @@ def test_compact_continuation_boundary_rejects_system_assistant_only():
 
 
 def test_compact_continuation_boundary_accepts_user_assistant_handoff():
-    runner = AsyncTurnRunner(
+    runner = TurnRunner(
         chat_client=MagicMock(),
         tool_processor=MagicMock(),
         stream_parser=MagicMock(),
@@ -1032,7 +1032,7 @@ def test_compact_continuation_boundary_accepts_user_assistant_handoff():
 
 
 def test_model_boundary_rejects_naked_tool():
-    runner = AsyncTurnRunner(
+    runner = TurnRunner(
         chat_client=MagicMock(),
         tool_processor=MagicMock(),
         stream_parser=MagicMock(),
@@ -1050,7 +1050,7 @@ def test_model_boundary_rejects_naked_tool():
 
 
 def test_model_boundary_rejects_incomplete_tool_call_tail():
-    runner = AsyncTurnRunner(
+    runner = TurnRunner(
         chat_client=MagicMock(),
         tool_processor=MagicMock(),
         stream_parser=MagicMock(),
@@ -1077,7 +1077,7 @@ def test_model_boundary_rejects_incomplete_tool_call_tail():
 
 
 def test_model_boundary_accepts_completed_tool_call():
-    runner = AsyncTurnRunner(
+    runner = TurnRunner(
         chat_client=MagicMock(),
         tool_processor=MagicMock(),
         stream_parser=MagicMock(),
@@ -1174,7 +1174,7 @@ async def test_context_length_recovery_hard_limit_is_turn_local():
     )
     parser = MagicMock()
     parser.consume_async_stream = AsyncMock(return_value=("", [], None))
-    runner = AsyncTurnRunner(
+    runner = TurnRunner(
         chat_client=FailingThenSuccessfulChatClient(),
         tool_processor=MagicMock(),
         stream_parser=parser,

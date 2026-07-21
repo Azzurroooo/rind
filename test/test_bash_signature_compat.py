@@ -10,7 +10,7 @@ os.chdir(PROJECT_ROOT)
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from agent.infrastructure.tools.impl.tools.bash import bash
+from agent.infrastructure.tools.builtin.shell.tool import bash
 
 class TestBashSignatureCompat(unittest.TestCase):
     # This verifies the bash tool signature stays callable with current defaults.

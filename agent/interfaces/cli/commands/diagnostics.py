@@ -181,9 +181,9 @@ def _session_root(session) -> Path | None:
         return Path(str(raw_root)).expanduser()
     raw_dir = getattr(session, "_session_dir", None)
     try:
-        from agent.infrastructure.persistence.async_jsonl_session_store import AsyncJsonlSessionStore
+        from agent.infrastructure.persistence.jsonl_session_store import JsonlSessionStore
 
-        return Path(AsyncJsonlSessionStore.resolve_session_root(str(raw_dir) if raw_dir else None))
+        return Path(JsonlSessionStore.resolve_session_root(str(raw_dir) if raw_dir else None))
     except Exception:
         return Path(str(raw_dir)).expanduser() if raw_dir else None
 

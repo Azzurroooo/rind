@@ -9,8 +9,8 @@ os.chdir(PROJECT_ROOT)
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from agent.application.services import ContextBudget, ContextEstimate, ContextEstimator, ContextManager
-from agent.application.services.context_estimator import DEFAULT_CONTEXT_WINDOW_TOKENS
+from agent.application import ContextBudget, ContextEstimate, ContextEstimator, ContextManager
+from agent.application.context.estimator import DEFAULT_CONTEXT_WINDOW_TOKENS
 
 class QueryOnlySession:
     def __init__(self, messages):

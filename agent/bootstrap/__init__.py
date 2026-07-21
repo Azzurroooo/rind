@@ -1,5 +1,5 @@
 """Application bootstrap and composition helpers."""
 
-from .container import build_basic_agent_dependencies
+from .container import AgentContainer, build_agent_container
 
-__all__ = ["build_basic_agent_dependencies"]
+__all__ = ["AgentContainer", "build_agent_container"]

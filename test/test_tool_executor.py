@@ -7,7 +7,7 @@ os.chdir(PROJECT_ROOT)
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from agent.application.tool_executor import ToolExecutor
+from agent.application.tools.executor import ToolExecutor
 from agent.infrastructure.tools.registry import DefaultToolRegistry
 
 

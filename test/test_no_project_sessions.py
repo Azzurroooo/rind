@@ -21,8 +21,8 @@ async def test_build_dependencies_does_not_create_project_sessions(monkeypatch, 
     monkeypatch.setenv("RIND_HOME", str(rind_home))
     monkeypatch.setattr(container.Config, "get_async_client", classmethod(lambda cls: object()))
 
-    deps = container.build_basic_agent_dependencies()
-    await deps["session"].initialize()
+    deps = container.build_agent_container()
+    await deps.session_store.initialize()
 
     if (workspace / "sessions").exists():
         raise AssertionError("Did not expect project-local sessions directory")

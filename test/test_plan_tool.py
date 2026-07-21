@@ -10,7 +10,7 @@ os.chdir(PROJECT_ROOT)
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from agent.infrastructure.tools.impl.tools.plan import (
+from agent.infrastructure.tools.builtin.planning import (
     plan_add_step,
     plan_close,
     plan_create,
@@ -21,8 +21,8 @@ from agent.infrastructure.tools.impl.tools.plan import (
     plan_update_meta,
     plan_update_step,
 )
-from agent.infrastructure.tools.impl import TOOLS, TOOL_SCHEMAS
-from agent.infrastructure.plans import store as plan_store
+from agent.infrastructure.tools.builtin import TOOLS, TOOL_SCHEMAS
+from agent.infrastructure.planning import store as plan_store
 
 @pytest.fixture(autouse=True)
 def setup_session(tmp_path: Path):

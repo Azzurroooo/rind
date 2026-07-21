@@ -1,5 +1,5 @@
 """Persistence adapters."""
 
-from .async_jsonl_session_store import AsyncJsonlSessionStore
+from .jsonl_session_store import JsonlSessionStore
 
-__all__ = ["AsyncJsonlSessionStore"]
+__all__ = ["JsonlSessionStore"]

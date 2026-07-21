@@ -11,8 +11,8 @@ import signal
 import sys
 from typing import Any
 
-from agent.application.runtime.cancellation import CancellationTokenSource
-from agent.bootstrap import build_basic_agent_dependencies
+from agent.bootstrap import build_agent_container
+from agent.domain.cancellation import CancellationTokenSource
 from agent.domain.events import UserQuestionRequestedEvent
 from agent.infrastructure.config import Config
 from agent.infrastructure.paths import validate_session_id
@@ -417,13 +417,13 @@ async def async_main(argv: list[str] | None = None) -> int:
         print(f"Configuration error: {exc}", file=sys.stderr)
         return 1
 
-    dependencies = build_basic_agent_dependencies(
+    container = build_agent_container(
         debug=args.debug,
         session_dir=args.session_dir,
         session_id=args.session,
         resume_latest=args.resume_latest,
     )
-    server = StdioRuntimeServer(dependencies["runtime"], dependencies["session"], debug=args.debug)
+    server = StdioRuntimeServer(container.runtime, container.session_store, debug=args.debug)
     return await server.run()
 
 

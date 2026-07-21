@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 from pathlib import Path
 
-from agent.application.runtime.cancellation import CancellationTokenSource
+from agent.domain.cancellation import CancellationTokenSource
 from agent.domain.events import RuntimeEvent, UserQuestionRequestedEvent
 from agent.version import __version__
 from agent.interfaces.cli.commands.completer import SlashCommandCompleter

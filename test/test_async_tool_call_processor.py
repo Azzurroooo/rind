@@ -10,8 +10,8 @@ if str(PROJECT_ROOT) not in sys.path:
 
 import pytest
 
-from agent.application.runtime.async_tool_call_processor import AsyncToolCallProcessor
-from agent.application.runtime.cancellation import CancellationTokenSource
+from agent.application.tools.processor import ToolCallProcessor
+from agent.domain.cancellation import CancellationTokenSource
 from agent.domain import ParsedToolCall
 from agent.domain.events import FileChangeEvent, ToolCallStartedEvent, ToolResultEvent, UserQuestionRequestedEvent
 from agent.domain.tool_result import ToolExecutionResult
@@ -120,7 +120,7 @@ class FailingToolMessagePersistSession(FakeSession):
 async def test_bash_cancellation_token_is_not_persisted_in_tool_args() -> None:
     executor = FakeToolExecutor()
     session = FakeSession()
-    processor = AsyncToolCallProcessor(tool_executor=executor)
+    processor = ToolCallProcessor(tool_executor=executor)
     cancel_source = CancellationTokenSource()
     call = ParsedToolCall(
         call_id="call_1",
@@ -155,7 +155,7 @@ async def test_bash_cancellation_token_is_not_persisted_in_tool_args() -> None:
 async def test_sync_tool_receives_cancellation_token_without_persisting_private_args() -> None:
     executor = FakeSyncToolExecutor()
     session = FakeSession()
-    processor = AsyncToolCallProcessor(tool_executor=executor)
+    processor = ToolCallProcessor(tool_executor=executor)
     cancel_source = CancellationTokenSource()
     call = ParsedToolCall(call_id="call_sync", name="read_file", raw_args='{"file_path":"demo.txt"}')
 
@@ -180,7 +180,7 @@ async def test_sync_tool_receives_cancellation_token_without_persisting_private_
 
 @pytest.mark.asyncio
 async def test_invalid_tool_args_emit_failed_result_without_started_event() -> None:
-    processor = AsyncToolCallProcessor(tool_executor=FakeToolExecutor())
+    processor = ToolCallProcessor(tool_executor=FakeToolExecutor())
     session = FakeSession()
     call = ParsedToolCall(
         call_id="call_bad",
@@ -205,7 +205,7 @@ async def test_invalid_tool_args_emit_failed_result_without_started_event() -> N
 
 @pytest.mark.asyncio
 async def test_successful_tool_persists_result_directly() -> None:
-    processor = AsyncToolCallProcessor(tool_executor=FakeToolExecutor())
+    processor = ToolCallProcessor(tool_executor=FakeToolExecutor())
     session = FakeSession()
     call = ParsedToolCall(
         call_id="call_1",
@@ -234,7 +234,7 @@ async def test_successful_tool_persists_result_directly() -> None:
 
 @pytest.mark.asyncio
 async def test_write_file_success_emits_file_change_before_result() -> None:
-    processor = AsyncToolCallProcessor(tool_executor=FakeToolExecutor())
+    processor = ToolCallProcessor(tool_executor=FakeToolExecutor())
     session = FakeSession()
     call = ParsedToolCall(
         call_id="call_write",
@@ -261,7 +261,7 @@ async def test_write_file_success_emits_file_change_before_result() -> None:
 
 @pytest.mark.asyncio
 async def test_edit_file_success_emits_file_change_lines_from_args() -> None:
-    processor = AsyncToolCallProcessor(tool_executor=FakeToolExecutor())
+    processor = ToolCallProcessor(tool_executor=FakeToolExecutor())
     session = FakeSession()
     call = ParsedToolCall(
         call_id="call_edit",
@@ -287,7 +287,7 @@ async def test_edit_file_success_emits_file_change_lines_from_args() -> None:
 @pytest.mark.asyncio
 async def test_file_change_is_not_emitted_for_failed_empty_or_non_file_tools() -> None:
     session = FakeSession()
-    failed_processor = AsyncToolCallProcessor(tool_executor=FakeFailingToolExecutor())
+    failed_processor = ToolCallProcessor(tool_executor=FakeFailingToolExecutor())
     failed_call = ParsedToolCall(
         call_id="call_failed",
         name="edit_file",
@@ -297,14 +297,14 @@ async def test_file_change_is_not_emitted_for_failed_empty_or_non_file_tools() -
     if any(isinstance(event, FileChangeEvent) for event in failed_events):
         raise AssertionError(f"Did not expect file_change for failed edit_file, got: {failed_events}")
 
-    payload_error_processor = AsyncToolCallProcessor(tool_executor=FakeToolPayloadErrorExecutor())
+    payload_error_processor = ToolCallProcessor(tool_executor=FakeToolPayloadErrorExecutor())
     payload_error_events = [
         event async for event in payload_error_processor.execute(session=FakeSession(), tool_calls=[failed_call])
     ]
     if any(isinstance(event, FileChangeEvent) for event in payload_error_events):
         raise AssertionError(f"Did not expect file_change for ok:false tool payload, got: {payload_error_events}")
 
-    processor = AsyncToolCallProcessor(tool_executor=FakeToolExecutor())
+    processor = ToolCallProcessor(tool_executor=FakeToolExecutor())
     empty_call = ParsedToolCall(
         call_id="call_empty",
         name="write_file",
@@ -322,7 +322,7 @@ async def test_file_change_is_not_emitted_for_failed_empty_or_non_file_tools() -
 
 @pytest.mark.asyncio
 async def test_tool_result_event_reports_persist_failure() -> None:
-    processor = AsyncToolCallProcessor(tool_executor=FakeToolExecutor())
+    processor = ToolCallProcessor(tool_executor=FakeToolExecutor())
     session = FailingToolCallPersistSession()
     call = ParsedToolCall(
         call_id="call_1",
@@ -350,7 +350,7 @@ async def test_tool_result_event_reports_persist_failure() -> None:
 
 @pytest.mark.asyncio
 async def test_tool_result_event_reports_tool_message_persist_failure() -> None:
-    processor = AsyncToolCallProcessor(tool_executor=FakeToolExecutor())
+    processor = ToolCallProcessor(tool_executor=FakeToolExecutor())
     session = FailingToolMessagePersistSession()
     call = ParsedToolCall(
         call_id="call_1",
@@ -379,7 +379,7 @@ async def test_tool_result_event_reports_tool_message_persist_failure() -> None:
 @pytest.mark.asyncio
 async def test_async_tool_processor_limits_repeated_empty_bash_output() -> None:
     executor = FakeEmptyBashOutputExecutor()
-    processor = AsyncToolCallProcessor(tool_executor=executor)
+    processor = ToolCallProcessor(tool_executor=executor)
     session = FakeSession()
     calls = [
         ParsedToolCall(call_id=f"call_{idx}", name="bash_output", raw_args='{"bg_id":"bg_123"}')
@@ -417,7 +417,7 @@ async def test_async_tool_processor_limits_repeated_empty_bash_output() -> None:
 async def test_async_tool_processor_resets_empty_bash_output_count_on_real_output() -> None:
     executor = FakeEmptyBashOutputExecutor()
     executor.output_by_call[3] = "ready"
-    processor = AsyncToolCallProcessor(tool_executor=executor)
+    processor = ToolCallProcessor(tool_executor=executor)
     session = FakeSession()
     calls = [
         ParsedToolCall(call_id=f"call_{idx}", name="bash_output", raw_args='{"bg_id":"bg_reset"}')
@@ -449,7 +449,7 @@ async def test_ask_user_question_with_responder_emits_question_and_persists_answ
         seen_questions.append(event)
         return "thorough"
 
-    processor = AsyncToolCallProcessor(
+    processor = ToolCallProcessor(
         tool_executor=FakeToolExecutor(),
         user_question_responder=responder,
     )
@@ -495,7 +495,7 @@ async def test_ask_user_question_with_responder_emits_question_and_persists_answ
 @pytest.mark.asyncio
 async def test_ask_user_question_without_responder_emits_question_then_unsupported_failure() -> None:
     session = FakeSession()
-    processor = AsyncToolCallProcessor(tool_executor=FakeToolExecutor())
+    processor = ToolCallProcessor(tool_executor=FakeToolExecutor())
     call = ParsedToolCall(
         call_id="call_question",
         name="ask_user_question",
@@ -519,7 +519,7 @@ async def test_ask_user_question_without_responder_emits_question_then_unsupport
 @pytest.mark.asyncio
 async def test_ask_user_question_empty_answer_fails_without_fake_answer() -> None:
     session = FakeSession()
-    processor = AsyncToolCallProcessor(
+    processor = ToolCallProcessor(
         tool_executor=FakeToolExecutor(),
         user_question_responder=lambda event: "  ",
     )
@@ -546,7 +546,7 @@ async def test_ask_user_question_interrupted_input_fails_without_cancelling_turn
     def responder(event: UserQuestionRequestedEvent) -> str:
         raise KeyboardInterrupt
 
-    processor = AsyncToolCallProcessor(
+    processor = ToolCallProcessor(
         tool_executor=FakeToolExecutor(),
         user_question_responder=responder,
     )
@@ -579,7 +579,7 @@ def main() -> int:
     asyncio.run(test_tool_result_event_reports_tool_message_persist_failure())
     asyncio.run(test_async_tool_processor_limits_repeated_empty_bash_output())
     asyncio.run(test_async_tool_processor_resets_empty_bash_output_count_on_real_output())
-    print("AsyncToolCallProcessor tests passed.")
+    print("ToolCallProcessor tests passed.")
     return 0
 
 

@@ -9,7 +9,7 @@ if str(PROJECT_ROOT) not in sys.path:
 
 import pytest
 
-from agent.application.services import ContextManager, SkillSelector
+from agent.application import ContextManager, SkillSelector
 from agent.domain import Skill, SkillMatch
 
 

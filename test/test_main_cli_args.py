@@ -3,6 +3,7 @@ import subprocess
 import sys
 import tempfile
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -141,7 +142,11 @@ def test_main_returns_130_on_keyboard_interrupt() -> None:
         patch("agent.infrastructure.config.Config.ensure_user_settings_template"),
         patch("agent.infrastructure.config.Config.reload"),
         patch("agent.infrastructure.config.Config.validate"),
-        patch("agent.bootstrap.build_basic_agent_dependencies", return_value={"cli": InterruptingCli()}),
+        patch(
+            "agent.bootstrap.build_agent_container",
+            return_value=SimpleNamespace(runtime=object(), session_store=object()),
+        ),
+        patch("agent.interfaces.cli.ChatCLI", return_value=InterruptingCli()),
     ):
         result = main_module.main()
 

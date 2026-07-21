@@ -6,9 +6,9 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from agent.infrastructure.tools.impl.tools import bash_session_pool
-from agent.infrastructure.tools.impl.tools.bash_runner import BashRunner
-from agent.infrastructure.tools.impl.tools.bash_session_pool import BashSessionPool
+from agent.infrastructure.tools.builtin.shell import session_pool as bash_session_pool
+from agent.infrastructure.tools.builtin.shell.runner import BashRunner
+from agent.infrastructure.tools.builtin.shell.session_pool import BashSessionPool
 
 
 def test_detect_shell_prefers_rind_bash_path(tmp_path, monkeypatch):

@@ -15,11 +15,11 @@ os.chdir(PROJECT_ROOT)
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from agent.application.runtime.cancellation import CancellationTokenSource
-from agent.infrastructure.tools.impl.tools.bash import bash, bash_output, kill_shell
+from agent.domain.cancellation import CancellationTokenSource
+from agent.infrastructure.tools.builtin.shell.tool import bash, bash_output, kill_shell
 
 
-bash_module = importlib.import_module("agent.infrastructure.tools.impl.tools.bash")
+bash_module = importlib.import_module("agent.infrastructure.tools.builtin.shell.tool")
 
 
 def parse_payload(raw: str) -> dict:

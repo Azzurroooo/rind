@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from typing import Any
 
-from agent.application.services.message_boundary import validate_compact_handoff_boundary
 from agent.domain.compaction import COMPACT_CONTINUATION_USER_CONTENT
+from agent.domain.message_boundary import validate_compact_handoff_boundary
 
 
 def project_messages(

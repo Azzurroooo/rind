@@ -7,7 +7,7 @@ os.chdir(PROJECT_ROOT)
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from agent.application.services import SkillSelector
+from agent.application import SkillSelector
 from agent.domain import Skill
 
 

@@ -5,8 +5,8 @@ import pytest
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-from agent.application.services.context_estimator import ContextBudget, ContextEstimator
-from agent.application.services.context_manager import ContextManager
+from agent.application.context.estimator import ContextBudget, ContextEstimator
+from agent.application.context.manager import ContextManager
 
 
 class MockSession:

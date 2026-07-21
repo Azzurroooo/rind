@@ -142,14 +142,16 @@ Rind follows a layered structure with dependency inversion between the runtime c
 ```text
 agent/
 ├── application/
-│   ├── runtime/       # Async runtime facade, turn runner, stream pump, tool-call processor
-│   ├── services/      # Context manager, compaction, token usage, skill selection
+│   ├── runtime/       # Agent runtime, turn runner, stream parsing and pumping
+│   ├── context/       # Context manager, estimation, compaction, token usage
+│   ├── tools/         # Tool execution, processing, guards, result normalization
 │   └── ports/         # Chat client, session store, tool registry abstractions
+├── domain/            # Events, cancellation, planning and tool contracts
 ├── infrastructure/
 │   ├── llm/           # OpenAI-compatible async chat client
 │   ├── persistence/   # Append-only session records and repositories
-│   ├── plans/         # DAG plan model, store, scheduler, context injection
-│   └── tools/impl/    # Bash, file, web, PDF, plan, and skill tools
+│   ├── planning/      # DAG plan storage, operations, scheduling, context injection
+│   └── tools/builtin/ # Shell, file, web, PDF, plan, and skill tools
 └── interfaces/
     ├── cli/           # Interactive CLI, slash commands, status UI
     ├── runtime_server/# JSONL stdio adapter for headless runtime use

@@ -8,8 +8,8 @@ os.chdir(PROJECT_ROOT)
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from agent.application.runtime.cancellation import CancellationTokenSource
-from agent.infrastructure.tools.impl.tools import pdf_ops, web
+from agent.domain.cancellation import CancellationTokenSource
+from agent.infrastructure.tools.builtin import pdf as pdf_ops, web
 
 
 def parse_payload(raw: str) -> dict:

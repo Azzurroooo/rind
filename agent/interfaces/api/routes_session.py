@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from sse_starlette.sse import EventSourceResponse
 from pydantic import BaseModel
 
-from agent.application.runtime.cancellation import CancellationTokenSource
+from agent.domain.cancellation import CancellationTokenSource
 from agent.infrastructure.paths import validate_session_id
 
 router = APIRouter(prefix="/sessions", tags=["sessions"])

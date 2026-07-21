@@ -37,8 +37,9 @@ def main() -> int:
             print(f"Session error: {exc}", file=sys.stderr)
             return 1
 
-    from agent.bootstrap import build_basic_agent_dependencies
+    from agent.bootstrap import build_agent_container
     from agent.infrastructure.config import Config
+    from agent.interfaces.cli import ChatCLI
 
     try:
         Config.ensure_user_settings_template()
@@ -51,13 +52,13 @@ def main() -> int:
     if args.allow_unsafe_bash:
         os.environ["AGENT_ALLOW_UNSAFE_BASH"] = "1"
     try:
-        dependencies = build_basic_agent_dependencies(
+        container = build_agent_container(
             debug=args.debug,
             session_dir=args.session_dir,
             session_id=args.session,
             resume_latest=args.resume_latest,
         )
-        dependencies["cli"].start()
+        ChatCLI(runtime=container.runtime, session=container.session_store, debug=args.debug).start()
     except KeyboardInterrupt:
         print("\nInterrupted.", file=sys.stderr)
         return 130

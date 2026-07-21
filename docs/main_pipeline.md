@@ -10,7 +10,7 @@ sequenceDiagram
     participant Args as argparse (参数解析)
     participant Doctor as Doctor (诊断)
     participant Config as Config (配置)
-    participant Container as build_basic_agent_dependencies
+    participant Container as build_agent_container
     participant CLI as ChatCLI
 
     User->>Main: python main.py [参数]
@@ -59,23 +59,23 @@ sequenceDiagram
     end
 
     Note over Main: 第 6 阶段：构建依赖容器 (line 54-59)
-    Main->>Container: build_basic_agent_dependencies()
+    Main->>Container: build_agent_container()
 
     Note over Container: 初始化基础设施 (line 33-57)
-    Container->>Container: AsyncJsonlSessionStore
+    Container->>Container: JsonlSessionStore
     Container->>Container: DefaultToolRegistry
     Container->>Container: ToolExecutor
-    Container->>Container: AsyncOpenAIChatClient (注入 reasoning_effort)
+    Container->>Container: OpenAIChatClient (注入 reasoning_effort)
     Container->>Container: PlanContextProvider
     Container->>Container: SkillRepository
     Container->>Container: SkillSelector
-    Container->>Container: AsyncToolCallProcessor
+    Container->>Container: ToolCallProcessor
     Container->>Container: MessageStreamParser
 
     Note over Container: 初始化应用层 (line 58-81)
     Container->>Container: ContextManager (包含 ContextBudget)
-    Container->>Container: AsyncTurnRunner
-    Container->>Container: AsyncRuntimeFacade
+    Container->>Container: TurnRunner
+    Container->>Container: AgentRuntime
 
     Note over Container: 初始化接口层 (line 83)
     Container->>Container: ChatCLI
@@ -135,23 +135,23 @@ Config.validate()                        # 验证配置
 如果使用 `--allow-unsafe-bash`，设置 `AGENT_ALLOW_UNSAFE_BASH=1`
 
 ### 6. 依赖容器构建（Line 54-59）
-调用 `build_basic_agent_dependencies()`，按以下顺序初始化：
+调用 `build_agent_container()`，按以下顺序初始化：
 
 1. **基础设施层**：
-   - AsyncJsonlSessionStore（会话持久化）
+   - JsonlSessionStore（会话持久化）
    - DefaultToolRegistry（工具注册表）
    - ToolExecutor（工具执行器）
-   - AsyncOpenAIChatClient（LLM 客户端）
+   - OpenAIChatClient（LLM 客户端）
    - PlanContextProvider（计划上下文）
    - SkillRepository（技能仓库）
    - SkillSelector（技能选择器）
-   - AsyncToolCallProcessor（工具处理器）
+   - ToolCallProcessor（工具处理器）
    - MessageStreamParser（消息流解析器）
 
 2. **应用层**：
    - ContextManager（上下文管理器）
-   - AsyncTurnRunner（回合执行器）
-   - AsyncRuntimeFacade（外观层）
+   - TurnRunner（回合执行器）
+   - AgentRuntime（运行时入口）
 
 3. **接口层**：
    - ChatCLI（命令行界面）

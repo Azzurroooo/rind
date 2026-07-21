@@ -2,6 +2,7 @@
 
 from .tool_payload import ParsedToolCall, looks_like_tool_payload, parse_tool_args
 from .tool_result import ToolExecutionResult, tool_cancelled, tool_error, tool_ok
+from .cancellation import CancellationToken, CancellationTokenSource
 from .events import (
     RuntimeEvent,
     event_meta,
@@ -50,6 +51,8 @@ __all__ = [
     "TurnFailedEvent",
     "TurnCancelledEvent",
     "ToolExecutionResult",
+    "CancellationToken",
+    "CancellationTokenSource",
     "Skill",
     "SkillMatch",
     "parse_skill_markdown",

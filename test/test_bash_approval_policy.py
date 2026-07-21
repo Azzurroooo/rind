@@ -1,6 +1,6 @@
 import unittest
 
-from agent.infrastructure.tools.impl.tools.bash_policy import BashPolicy
+from agent.infrastructure.tools.builtin.shell.policy import BashPolicy
 
 class TestBashApprovalPolicy(unittest.TestCase):
     def test_forbidden_commands(self):

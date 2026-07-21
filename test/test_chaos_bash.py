@@ -11,7 +11,7 @@ os.chdir(PROJECT_ROOT)
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from agent.infrastructure.tools.impl.tools.bash import bash, _RUNNER
+from agent.infrastructure.tools.builtin.shell.tool import bash, _RUNNER
 
 
 def _python_command(code: str) -> str:
@@ -20,7 +20,7 @@ def _python_command(code: str) -> str:
         return f'python -c "{escaped_code}"'
     executable = str(sys.executable).replace('"', '\\"')
     return f'"{executable}" -c "{escaped_code}"'
-from agent.application.runtime.cancellation import CancellationTokenSource
+from agent.domain.cancellation import CancellationTokenSource
 
 
 def run(coro):

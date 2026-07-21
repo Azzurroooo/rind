@@ -1,7 +1,7 @@
 import unittest
 from pathlib import Path
 
-from agent.infrastructure.tools.impl.tools.bash_session_pool import BashSessionPool
+from agent.infrastructure.tools.builtin.shell.session_pool import BashSessionPool
 
 class TestBashSessionIsolation(unittest.TestCase):
     def test_session_isolation(self):
