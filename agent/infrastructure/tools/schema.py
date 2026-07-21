@@ -92,23 +92,3 @@ def build_function_schema(
             },
         },
     }
-
-
-def build_tool_schemas(
-    tools: dict[str, Callable],
-    meta: dict[str, dict[str, Any]],
-) -> list[dict[str, Any]]:
-    schemas: list[dict[str, Any]] = []
-    for name, func in tools.items():
-        tool_meta = meta.get(name)
-        if not tool_meta:
-            raise ValueError(f"Missing schema meta for tool: {name}")
-        schemas.append(
-            build_function_schema(
-                name=name,
-                func=func,
-                description=tool_meta["description"],
-                param_descriptions=tool_meta.get("param_descriptions"),
-            )
-        )
-    return schemas

@@ -9,7 +9,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from agent.domain import parse_skill_markdown
-from agent.infrastructure.tools.builtin import TOOL_SCHEMAS, TOOLS
+from agent.infrastructure.tools import DefaultToolRegistry
 from agent.infrastructure.tools.builtin.skill import skill_create
 
 
@@ -171,10 +171,11 @@ def test_skill_create_overwrite_policy(tmp_path: Path, monkeypatch) -> None:
 
 
 def test_skill_create_schema_registered() -> None:
-    if "skill_create" not in TOOLS:
-        raise AssertionError("Expected skill_create in TOOLS.")
+    registry = DefaultToolRegistry()
+    if not registry.has("skill_create"):
+        raise AssertionError("Expected skill_create in the default tool registry.")
 
-    schema = next((item for item in TOOL_SCHEMAS if item["function"]["name"] == "skill_create"), None)
+    schema = next((item for item in registry.schemas if item["function"]["name"] == "skill_create"), None)
     if schema is None:
         raise AssertionError("Expected skill_create schema.")
 

@@ -3,8 +3,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
-
 from agent.application.context import CompactionService, ContextEstimator, ContextManager
 from agent.application.ports.session_store import SessionStore
 from agent.application.runtime import AgentRuntime, MessageStreamParser, TurnRunner
@@ -41,7 +39,6 @@ class AgentContainer:
 
 def build_agent_container(
     *,
-    tools: list[dict[str, Any]] | None = None,
     debug: bool = False,
     session_dir: str | None = None,
     session_id: str | None = None,
@@ -56,7 +53,7 @@ def build_agent_container(
         model=model,
         system_prompt=SYSTEM_PROMPT,
     )
-    tool_registry = DefaultToolRegistry(schemas=tools)
+    tool_registry = DefaultToolRegistry()
     tool_executor = ToolExecutor(registry=tool_registry)
     tool_result_normalizer = ToolResultNormalizer()
     tool_processor = ToolCallProcessor(

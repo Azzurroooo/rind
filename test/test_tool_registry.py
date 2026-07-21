@@ -1,0 +1,81 @@
+"""Tool catalog and registry dispatch tests."""
+
+from __future__ import annotations
+
+import sys
+from pathlib import Path
+
+import pytest
+
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+from agent.infrastructure.tools import DefaultToolRegistry, ToolSpec
+
+
+def _spec(name: str, handler) -> ToolSpec:
+    return ToolSpec(name=name, handler=handler, description=f"{name} test tool.")
+
+
+@pytest.mark.asyncio
+async def test_registry_dispatches_sync_and_async_tools() -> None:
+    def sync_tool(value: str) -> str:
+        return f"sync:{value}"
+
+    async def async_tool(value: str) -> str:
+        return f"async:{value}"
+
+    registry = DefaultToolRegistry((_spec("sync_tool", sync_tool), _spec("async_tool", async_tool)))
+
+    assert registry.is_async("sync_tool") is False
+    assert registry.call("sync_tool", {"value": "one"}) == "sync:one"
+    assert registry.is_async("async_tool") is True
+    assert await registry.call_async("async_tool", {"value": "two"}) == "async:two"
+
+
+def test_registry_filters_undeclared_private_args_and_forwards_declared_token() -> None:
+    def public_tool(value: str) -> str:
+        return value
+
+    def token_tool(value: str, _cancellation_token=None):
+        return _cancellation_token
+
+    marker = object()
+    registry = DefaultToolRegistry(
+        (_spec("public_tool", public_tool), _spec("token_tool", token_tool))
+    )
+
+    assert registry.call("public_tool", {"value": "ok", "_cancellation_token": marker}) == "ok"
+    assert registry.call("token_tool", {"value": "ok", "_cancellation_token": marker}) is marker
+
+
+def test_registry_forwards_all_arguments_to_kwargs_handler() -> None:
+    def kwargs_tool(**kwargs):
+        return kwargs
+
+    registry = DefaultToolRegistry((_spec("kwargs_tool", kwargs_tool),))
+
+    assert registry.call("kwargs_tool", {"value": "ok", "_cancellation_token": "token"}) == {
+        "value": "ok",
+        "_cancellation_token": "token",
+    }
+
+
+def test_explicitly_empty_catalog_stays_empty() -> None:
+    registry = DefaultToolRegistry(())
+
+    assert registry.schemas == []
+    assert registry.has("read_file") is False
+
+
+def test_duplicate_tool_names_are_rejected() -> None:
+    def first() -> str:
+        return "first"
+
+    def second() -> str:
+        return "second"
+
+    with pytest.raises(ValueError, match="Duplicate tool name: duplicate"):
+        DefaultToolRegistry((_spec("duplicate", first), _spec("duplicate", second)))

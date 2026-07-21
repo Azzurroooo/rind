@@ -8,7 +8,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from agent.application.tools.executor import ToolExecutor
-from agent.infrastructure.tools.registry import DefaultToolRegistry
+from agent.infrastructure.tools import DefaultToolRegistry, ToolSpec
 
 
 class FakeRegistry:
@@ -47,8 +47,10 @@ def test_default_registry_filters_private_args_unless_declared() -> None:
 
     marker = object()
     registry = DefaultToolRegistry(
-        tool_map={"public_tool": public_tool, "token_tool": token_tool},
-        schemas=[],
+        specs=(
+            ToolSpec(name="public_tool", handler=public_tool, description="Public test tool."),
+            ToolSpec(name="token_tool", handler=token_tool, description="Token test tool."),
+        ),
     )
 
     if registry.call("public_tool", {"value": "ok", "_cancellation_token": marker}) != "ok":

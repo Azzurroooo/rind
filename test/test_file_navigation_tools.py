@@ -9,7 +9,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from agent.domain.cancellation import CancellationTokenSource
-from agent.infrastructure.tools.builtin import TOOL_SCHEMAS
+from agent.infrastructure.tools import DefaultToolRegistry
 from agent.infrastructure.tools.builtin.files.operations import glob as glob_tool
 from agent.infrastructure.tools.builtin.files.operations import grep, list_files, read_file
 from agent.infrastructure.tools.builtin.pdf import read_pdf
@@ -188,7 +188,7 @@ def test_read_pdf_expands_user_home_before_format_validation(tmp_path: Path, mon
 
 
 def test_schema_includes_glob_and_grep_output_mode_enum() -> None:
-    schemas = {item["function"]["name"]: item["function"] for item in TOOL_SCHEMAS}
+    schemas = {item["function"]["name"]: item["function"] for item in DefaultToolRegistry().schemas}
     if "glob" not in schemas:
         raise AssertionError("Expected glob tool schema.")
     output_mode = schemas["grep"]["parameters"]["properties"].get("output_mode") or {}
@@ -200,7 +200,7 @@ def test_schema_includes_glob_and_grep_output_mode_enum() -> None:
 
 
 def test_schema_includes_ask_user_question_with_only_question_required() -> None:
-    schemas = {item["function"]["name"]: item["function"] for item in TOOL_SCHEMAS}
+    schemas = {item["function"]["name"]: item["function"] for item in DefaultToolRegistry().schemas}
     schema = schemas.get("ask_user_question")
     if not schema:
         raise AssertionError("Expected ask_user_question tool schema.")

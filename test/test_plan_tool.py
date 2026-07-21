@@ -21,7 +21,7 @@ from agent.infrastructure.tools.builtin.planning import (
     plan_update_meta,
     plan_update_step,
 )
-from agent.infrastructure.tools.builtin import TOOLS, TOOL_SCHEMAS
+from agent.infrastructure.tools import DefaultToolRegistry
 from agent.infrastructure.planning import store as plan_store
 
 @pytest.fixture(autouse=True)
@@ -263,9 +263,10 @@ def test_iterative_plan_tools(tmp_path: Path) -> None:
 
 
 def test_plan_schema_excludes_observation_and_metrics() -> None:
-    if "plan_record_observation" in TOOLS:
+    registry = DefaultToolRegistry()
+    if registry.has("plan_record_observation"):
         raise AssertionError("plan_record_observation should not be registered.")
-    schemas = {item["function"]["name"]: item["function"] for item in TOOL_SCHEMAS}
+    schemas = {item["function"]["name"]: item["function"] for item in registry.schemas}
     if "plan_record_observation" in schemas:
         raise AssertionError("plan_record_observation schema should not be registered.")
     for name in ("plan_create", "plan_update_meta"):

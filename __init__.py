@@ -1,6 +1,6 @@
 """rind package exports."""
 
 from agent.infrastructure.config import Config
-from agent.infrastructure.tools.builtin import TOOLS, TOOL_SCHEMAS
+from agent.infrastructure.tools.builtin import TOOL_SPECS
 
-__all__ = ["Config", "TOOLS", "TOOL_SCHEMAS"]
+__all__ = ["Config", "TOOL_SPECS"]
