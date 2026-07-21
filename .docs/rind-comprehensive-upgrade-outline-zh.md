@@ -4,6 +4,7 @@
 
 - 文档状态：升级总纲
 - 基线日期：2026-07-21
+- 结构基线：`05964b7`（`refactor: reorganize agent package structure`）
 - 适用范围：Python 运行时、Node CLI、工具系统、会话持久化、上下文管理、资源加载、配置、Windows 分发和测试体系
 - 核心约束：严格遵守根目录 `AGENTS.md`，优先高内聚、低耦合、显式副作用、准确命名、小函数和最小可行实现
 
@@ -110,9 +111,12 @@ Claude Code 的公开仓库包含 README、插件、Hook、配置样例和详细
 Rind 已具备后续演进所需的主要骨架：
 
 - Python 异步 turn runtime 和流式事件。
-- application、domain、infrastructure、interfaces 分层。
+- application、domain、infrastructure、interfaces 分层，并由架构测试约束依赖向内。
+- `agent/application/` 已按 `runtime`、`context`、`tools` 和 `ports` 分包，旧 `application/services` 已移除。
+- `agent/infrastructure/tools/` 已收敛为 `registry.py`、`schema.py` 与 `builtin/`，旧 `tools/impl` 已移除。
+- `build_agent_container()` 返回冻结的 `AgentContainer`，核心运行时依赖在 composition root 中显式组装。
 - 结构化 `tool_ok` / `tool_error` 结果。
-- append-only JSONL 会话、工具调用和 compaction 记录。
+- append-only JSONL 会话、工具调用和 compaction 记录，以及按消息、工具调用、压缩、索引和文件职责拆分的 persistence 模块。
 - 自动与手动上下文压缩、上下文超长恢复。
 - shell 前后台任务、文件工具、Web、PDF、plan 和 skill。
 - stdio runtime server 与 Node CLI。
@@ -122,19 +126,42 @@ Rind 已具备后续演进所需的主要骨架：
 
 这些能力说明升级应以收敛和强化为主，而不是重新搭建 agent framework。
 
-### 4.2 当前需要优先处理的结构信号
+### 4.2 当前目录职责
+
+当前代码结构以职责而不是同步/异步实现方式命名，核心边界如下：
+
+| 当前路径 | 当前职责 |
+| --- | --- |
+| `agent/bootstrap/` | composition root；构建并返回 `AgentContainer` |
+| `agent/application/runtime/` | `AgentRuntime` facade、turn lifecycle、model stream pump/parser |
+| `agent/application/context/` | 上下文装配、预算估算、compaction 与 handoff |
+| `agent/application/tools/` | 工具执行、调用处理、结果归一化、文件变更事件和轮询保护 |
+| `agent/application/ports/` | chat client、session store 和 tool registry 协议 |
+| `agent/application/skill_selection.py` | turn-scoped skill 选择 |
+| `agent/domain/` | 事件、取消、消息边界、工具载荷/结果、planning 与 skill 领域模型 |
+| `agent/infrastructure/config/`、`agent/infrastructure/llm/` | 设置加载和 OpenAI adapter |
+| `agent/infrastructure/persistence/` | JSONL store facade、repositories、projection、meta 与 session files |
+| `agent/infrastructure/planning/`、`agent/infrastructure/skills/` | plan 控制状态和 skill 资源仓库 |
+| `agent/infrastructure/paths.py`、`agent/infrastructure/rind_docs.py` | Rind 路径解析和项目/用户指导加载 |
+| `agent/infrastructure/tools/builtin/` | 内置 files、shell、Web、PDF、planning、skill 与 user-question 工具 |
+| `agent/interfaces/cli/`、`agent/interfaces/api/`、`agent/interfaces/runtime_server/` | Python fallback CLI、HTTP API 与 stdio JSONL adapter |
+| `frontend-cli/` | Node 交互入口、输入状态和终端渲染 |
+| `packaging/`、`test/` | Windows 分发与 Python/Node 回归测试 |
+
+路径迁移后不再恢复 `application/services`、`infrastructure/plans`、`infrastructure/tools/impl` 或 `async_*` 文件命名；后续工作直接在上述边界内演进。
+
+### 4.3 当前需要优先处理的结构信号
 
 以下是本次基线检查发现的高价值收敛点：
 
 | 信号 | 当前表现 | 升级方向 |
 | --- | --- | --- |
-| 文件体积 | 多个 Python 文件超过 400 行；两个测试文件超过 800 行；Node 入口和 rendering 文件超过 900 行 | 按真实职责拆分，禁止为了拆分而增加空壳层 |
 | 双 CLI | Python `ChatCLI` 与 Node CLI 均包含交互、状态和渲染逻辑 | 业务状态统一在 runtime/protocol；前端只保留展示与输入职责 |
 | 配置状态 | `Config` 使用可变 class attributes，设置加载与 OpenAI client 构造绑定 | 改为不可变配置快照和显式 provider factory |
 | 工具描述 | handler、schema、执行模式和输出策略分散 | 一个 `ToolSpec` 作为工具唯一描述 |
 | 权限模型 | 主要依赖 shell 危险模式检测与全局 unsafe 开关 | 建立通用 `allow / ask / deny` 纯函数策略 |
 | 环境变量 | 仍存在 `AGENT_ALLOW_UNSAFE_BASH`、`AGENT_SESSION_ROOT`、`AGENT_SESSION_ID` | 统一为 `RIND_*`，移除内部旧前缀 |
-| 会话访问 | 某些运行时操作需要读取完整 message slice | 提供增量读取和索引，避免长会话重复扫描 |
+| 会话访问 | persistence 已拆分 repository，但 `JsonlSessionStore` facade 和某些运行时操作仍会读取完整 message slice | 提供增量读取和轻索引，避免长会话重复扫描 |
 | 运行中输入 | Node CLI 只能排队完整后续 turn，不能在下一次采样前纠正当前方向 | 增加小型 steering/follow-up 队列，语义归 runtime 所有 |
 | 流式队列 | model stream 使用无界 `asyncio.Queue` | 使用小型有界合并队列，持久事实与终态不可丢失 |
 | 防御式调用 | 跨层使用较多 `getattr`、`callable` 和宽泛异常吞掉 | 在端口边界明确能力，best-effort 行为必须可观测 |
@@ -142,7 +169,7 @@ Rind 已具备后续演进所需的主要骨架：
 | 扩展能力 | Skill 已有，Prompt Template、MCP 和 Hook 尚未统一 | 先统一小型资源加载；Hook/MCP 仅在真实用例出现后实现 |
 | 项目资源 | `RIND.md` 和 Skill 有清楚路径，但缺少统一来源诊断与 trust | 只统一 Context、Skill、Prompt Template 和设置，不建设 Package Manager |
 
-### 4.3 与现有 `.docs` 的关系
+### 4.4 与现有 `.docs` 的关系
 
 本大纲吸收并统一现有的异步运行时、context compaction、工具清理、CLI 稳定性、Windows 打包和健壮性计划。后续实施时：
 
@@ -186,19 +213,17 @@ Rind 应采用这些行为边界，但不照搬 Pi 的大型 Extension API、Pac
 ### 6.1 分层边界
 
 ```text
-Interactive CLI / Headless CLI / API
-                |
-        versioned JSONL events
-                |
-          Runtime Facade
-                |
-      Input Queue + Agent Loop
-                |
-  Context -> Model -> Tool Loop -> Persistence
-                |
- Provider | Tool Catalog | Permission | Session | Resources
-                |
-      local bounded adapters
+frontend-cli | interfaces/cli | interfaces/runtime_server | interfaces/api
+                               |
+                    versioned RuntimeEvent / JSONL
+                               |
+             application/runtime/AgentRuntime + TurnRunner
+                               |
+      Input Queue + Context -> Model -> ToolCallProcessor
+                               |
+       application ports + append-only session facts
+                               |
+ config | llm | persistence | planning | skills | builtin tools
 ```
 
 ### 6.2 权威状态来源
@@ -217,9 +242,8 @@ Interactive CLI / Headless CLI / API
 
 ### 6.3 新实体数量控制
 
-建议只引入以下跨模块实体：
+当前 `AgentContainer` 已替代匿名依赖字典，不再另建语义重复的 `RuntimeDependencies`。后续建议只引入以下跨模块实体：
 
-- `RuntimeDependencies`：替代 composition root 返回的匿名字典。
 - `ToolSpec`：统一 handler、schema、side-effect class、permission key 和 output policy。
 - `PermissionDecision`：`allow`、`ask`、`deny` 加原因与可选建议规则。
 - `QueuedInput`：区分 steering 与 follow-up，记录顺序、来源和是否已投递。
@@ -227,22 +251,6 @@ Interactive CLI / Headless CLI / API
 现有 session schema 应直接演进，不平行新增另一套会话实体。其余局部数据优先使用局部变量、现有 dataclass 或小型字典，不创建通用 manager、service locator 或事件总线。
 
 ## 7. 升级工作流 A：代码逻辑精简与边界收敛
-
-### A0.1 拆分超长模块
-
-- 优先级：P0
-- 目标：满足 `AGENTS.md` 的 Python 文件目标和硬上限，同时降低变更冲突。
-- 首批对象：
-  - `bash_runner.py`
-  - `file_ops.py`
-  - `async_jsonl_session_store.py`
-  - `chat_cli.py`
-  - `context_manager.py`
-  - `async_tool_call_processor.py`
-  - 超过 800 行的 Python 测试文件
-- 拆分原则：按进程生命周期、文件读写、记录投影、输入处理等真实职责拆分。
-- 禁止事项：只为降低行数增加转发类、空 repository 或一行 wrapper。
-- 验收：生产 Python 文件目标不超过 400 行，任何 Python 文件不得超过 800 行；公开行为和测试结果不变。
 
 ### A0.2 建立唯一工具描述 `ToolSpec`
 
@@ -256,13 +264,15 @@ Interactive CLI / Headless CLI / API
   - 文件变更信息由工具结果直接返回，不在 processor 中根据工具名重建。
 - 验收：新增工具只修改一个注册位置；未知工具、参数错误和执行错误仍统一输出 `tool_error`。
 
-### A0.3 显式 composition root
+### A0.3 巩固显式 composition root
 
-- 优先级：P0
-- 当前问题：`build_basic_agent_dependencies()` 返回 `dict[str, object]`，调用方依赖字符串 key。
-- 最小实现：使用 frozen `RuntimeDependencies`，只暴露实际消费者需要的字段。
-- 同步清理：把函数内延迟 import 移到正常模块边界，只有真实启动性能收益时才保留 lazy import。
-- 验收：无字符串 key 访问；CLI、stdio server 和 API 使用同一个构造入口。
+- 优先级：P0（类型化 composition root 的结构基线已完成，剩余工作是收口）
+- 当前状态：`build_agent_container()` 已返回 frozen、slotted `AgentContainer`；runtime、session、context、compaction、tool 与 provider 依赖显式共享，界面对象不进入 container。
+- 剩余工作：
+  - 保持 `main.py`、stdio server 和 API 通过同一个 `build_agent_container()` 构造运行时。
+  - 界面层只围绕 `container.runtime` 与 `container.session_store` 构造 adapter，不向 container 回塞 renderer 或输入状态。
+  - 把配置快照和 provider client factory 从可变 `Config` 边界中拆出；仅在 `--help`、`--version`、`--doctor` 等轻命令有明确收益时保留 lazy import。
+- 验收：无匿名依赖字典或字符串 key 访问；不存在第二个 `RuntimeDependencies` 类型；composition root 测试继续验证核心对象共享关系。
 
 ### A0.4 收紧异常与 best-effort 边界
 
@@ -278,7 +288,7 @@ Interactive CLI / Headless CLI / API
 
 - 优先级：P1
 - 合并已有重复的整数解析、dict/attr 读取、取消检查、CJK/token 估算和格式化逻辑。
-- 每个 helper 必须归属于明确领域，例如 `context/token_estimation.py`，不得创建无边界的 `utils.py`。
+- 每个 helper 必须归属于明确领域，例如 `agent/application/context/estimator.py`，不得创建无边界的 `utils.py`。
 - 验收：重复实现删除；调用点名称表达领域含义。
 
 ## 8. 升级工作流 B：稳定运行时协议
@@ -941,7 +951,7 @@ Hook 与 MCP 均为 P3。出现真实需求时先选择更合适的一种，不�
 
 包含：
 
-- A0.1-A0.4 超长模块、`ToolSpec`、composition root 和异常边界收敛。
+- A0.2/A0.4 处理 `ToolSpec` 和异常边界；A0.3 只收口现有 `AgentContainer` composition root。
 - G0.1 不可变配置快照。
 - J0.1 性能基线与 J0.2 轻命令启动瘦身。
 - 记录当前 RuntimeEvent、stdio JSONL、session schema 和 CLI golden fixtures。
@@ -998,9 +1008,8 @@ Hook 与 MCP 均为 P3。出现真实需求时先选择更合适的一种，不�
 
 | ID | 工作项 | 用户价值 | 复杂度 | 建议阶段 |
 | --- | --- | --- | --- | --- |
-| A0.1 | 超长模块拆分 | 中 | 中 | 0 |
 | A0.2 | ToolSpec | 高 | 中 | 0 |
-| A0.3 | RuntimeDependencies | 中 | 低 | 0 |
+| A0.3 | `AgentContainer` composition root 收口 | 中 | 低 | 0 |
 | G0.1 | 不可变配置 | 高 | 中 | 0 |
 | B0.1 | 协议版本化 | 高 | 中 | 1 |
 | B0.3 | 背压与有界队列 | 高 | 中 | 1 |
@@ -1032,25 +1041,34 @@ Hook 与 MCP 均为 P3。出现真实需求时先选择更合适的一种，不�
 | 当前路径 | 主要升级方向 |
 | --- | --- |
 | `main.py` | 轻量参数分发、headless 入口、避免重依赖启动 |
-| `agent/bootstrap/container.py` | `RuntimeDependencies`、配置快照、provider/tool/permission wiring |
-| `agent/domain/events.py` | versioned RuntimeEvent、sequence、IDs、queue 与 terminal states |
-| `agent/application/runtime/async_turn_runner.py` | 缩短 turn loop，处理 steering/follow-up，抽离 retry/compaction 纯策略 |
-| `agent/application/runtime/model_stream_pump.py` | 有界合并队列、背压和取消 |
-| `agent/application/runtime/async_tool_call_processor.py` | 依赖 ToolSpec、permission 和 loop guard；删除工具名特判 |
-| `agent/application/services/context_manager.py` | 固定装配顺序、增量 session API、context diagnostics |
-| `agent/application/services/compaction_service.py` | source ranges、phase、tail preservation、边界 contract |
+| `agent/bootstrap/container.py` | 保持 `AgentContainer` 为唯一 composition root；接入配置快照、provider/tool/permission wiring |
+| `agent/domain/events.py` | versioned `RuntimeEvent`、sequence、IDs、queue 与 terminal states |
+| `agent/domain/cancellation.py`、`agent/domain/message_boundary.py` | 保持取消与模型消息边界为无基础设施依赖的领域规则 |
+| `agent/application/runtime/runtime.py` | session-bound facade、steering/follow-up 队列和明确 capability |
+| `agent/application/runtime/turn_runner.py` | 缩短 turn loop，处理 queued input，抽离 retry/compaction 纯策略 |
+| `agent/application/runtime/stream_pump.py`、`agent/application/runtime/stream_parser.py` | 有界 delta 合并、背压、取消与稳定解析 |
+| `agent/application/tools/processor.py` | 依赖 `ToolSpec`、permission 和 loop guard；删除工具名特判 |
+| `agent/application/tools/executor.py`、`agent/application/tools/result_normalizer.py` | 统一同步/异步执行和结构化 `tool_ok` / `tool_error` 结果 |
+| `agent/application/tools/change_events.py`、`agent/application/tools/polling_guard.py` | 让文件变更来自工具结果；保持循环保护为独立有界策略 |
+| `agent/application/skill_selection.py` | 保持 turn-scoped skill 选择，不把资源读取逻辑搬入 runtime |
+| `agent/application/context/manager.py` | 固定装配顺序、增量 session API、context diagnostics |
+| `agent/application/context/compaction.py`、`agent/application/context/handoff.py` | source ranges、phase、tail preservation、deterministic handoff 与边界 contract |
+| `agent/application/context/estimator.py`、`agent/application/context/token_usage.py` | provider usage 对齐、预算与 cache-friendly token 估算 |
+| `agent/application/ports/` | 明确 chat/session/tool 能力，删除 runtime 的 `getattr` 探测 |
 | `agent/infrastructure/config/` | immutable settings、layering、provider capability |
-| `agent/infrastructure/persistence/` | 加固 schema 2.0、single writer、轻索引、repair、migration、复制式 fork |
-| `agent/infrastructure/tools/registry.py` | ToolSpec catalog 与预计算调用信息 |
-| `agent/infrastructure/tools/impl/tools/bash_*` | ProcessSupervisor、权限、ring buffer、process tree cleanup |
-| `agent/infrastructure/tools/impl/tools/file_ops.py` | read/search/apply_patch/atomic write/preimage check |
-| `agent/infrastructure/plans/` | 显式 session context，移除环境变量定位 |
-| `agent/infrastructure/skills/` | 保持显式 `$skill-name`，增加 trust、来源诊断和 mtime cache |
+| `agent/infrastructure/persistence/jsonl_session_store.py` | 保持 facade；协调 single writer、repair、migration、增量读取和复制式 fork |
+| `agent/infrastructure/persistence/*_repository.py`、`agent/infrastructure/persistence/message_projector.py`、`agent/infrastructure/persistence/session_files.py`、`agent/infrastructure/persistence/session_meta.py` | 分别承载记录访问、投影、文件布局和 meta 规则，避免逻辑回流 store facade |
+| `agent/infrastructure/tools/registry.py`、`agent/infrastructure/tools/schema.py` | `ToolSpec` catalog、schema 构建与预计算调用信息 |
+| `agent/infrastructure/tools/builtin/__init__.py` | 从分散的 `TOOLS`/`_TOOL_SCHEMA_META` 演进到唯一 catalog 注册点 |
+| `agent/infrastructure/tools/builtin/shell/` | ProcessSupervisor、权限、ring buffer、process tree cleanup |
+| `agent/infrastructure/tools/builtin/files/` | read/search/apply_patch/atomic write/preimage check |
+| `agent/infrastructure/planning/` | 显式 session context，移除环境变量定位；只持久化控制状态 |
+| `agent/infrastructure/skills/`、`agent/infrastructure/rind_docs.py` | 保持显式 `$skill-name`，增加 trust、来源诊断和 mtime cache |
 | `agent/interfaces/runtime_server/stdio.py` | 协议握手、capability、steering/follow-up、durable replay、headless control |
 | `agent/interfaces/cli/` | fallback/debug UI，slash result 展示，不保存业务状态 |
-| `frontend-cli/` | 输入、队列和 rendering state；移除业务分支；拆分超长文件 |
+| `frontend-cli/` | 输入、队列和 rendering state；移除业务分支 |
 | `packaging/` | doctor smoke、可选依赖、包体积基准 |
-| `test/` | 按模块拆分超长测试，增加 queue、permission、contract、repair 和平台边界 |
+| `test/` | 增加 queue、permission、contract、repair 和平台边界测试 |
 
 ## 23. 每个实施 PR 的硬性约束
 
