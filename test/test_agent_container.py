@@ -11,22 +11,43 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from agent.bootstrap import AgentContainer, build_agent_container
-from agent.bootstrap import container as container_module
+from agent.infrastructure.config import AppSettings
 
 
-def test_container_explicitly_shares_production_dependencies(monkeypatch) -> None:
-    monkeypatch.setattr(
-        container_module.Config,
-        "get_async_client",
-        classmethod(lambda cls: object()),
-    )
+class FakeProviderClientFactory:
+    def __init__(self) -> None:
+        self.client = object()
 
+    def create_async_client(self):
+        return self.client
+
+
+def test_container_explicitly_shares_production_dependencies() -> None:
     cache_dir = PROJECT_ROOT / ".pytest_cache"
     cache_dir.mkdir(exist_ok=True)
+    settings = AppSettings(
+        settings_path=cache_dir / "settings.json",
+        settings_exists=True,
+        model="test-model",
+        api_key="test-key",
+        base_url="https://example.com/v1",
+        reasoning_effort="high",
+        user_agent="test-agent",
+    )
+    provider_client_factory = FakeProviderClientFactory()
+
     with tempfile.TemporaryDirectory(dir=cache_dir) as session_dir:
-        container = build_agent_container(session_dir=session_dir)
+        container = build_agent_container(
+            settings=settings,
+            provider_client_factory=provider_client_factory,
+            session_dir=session_dir,
+        )
 
         assert isinstance(container, AgentContainer)
+        assert container.settings is settings
+        assert container.provider_client_factory is provider_client_factory
+        assert container.chat_client._client is provider_client_factory.client
+        assert container.chat_client.model == "test-model"
         assert container.runtime._turn_runner is container.turn_runner
         assert container.runtime._session_store is container.session_store
         assert container.turn_runner._tool_processor is container.tool_processor

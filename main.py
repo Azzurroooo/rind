@@ -38,13 +38,13 @@ def main() -> int:
             return 1
 
     from agent.bootstrap import build_agent_container
-    from agent.infrastructure.config import Config
+    from agent.infrastructure.config import Config, validate_settings
     from agent.interfaces.cli import ChatCLI
 
     try:
         Config.ensure_user_settings_template()
-        Config.reload()
-        Config.validate()
+        settings = Config.reload()
+        validate_settings(settings)
     except ValueError as exc:
         print(f"Configuration error: {exc}", file=sys.stderr)
         return 1
@@ -53,6 +53,7 @@ def main() -> int:
         os.environ["AGENT_ALLOW_UNSAFE_BASH"] = "1"
     try:
         container = build_agent_container(
+            settings=settings,
             debug=args.debug,
             session_dir=args.session_dir,
             session_id=args.session,

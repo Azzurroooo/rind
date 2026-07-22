@@ -9,12 +9,13 @@ import json
 import os
 import signal
 import sys
+from collections.abc import Callable
 from typing import Any
 
 from agent.bootstrap import build_agent_container
 from agent.domain.cancellation import CancellationTokenSource
 from agent.domain.events import UserQuestionRequestedEvent
-from agent.infrastructure.config import Config
+from agent.infrastructure.config import Config, validate_settings
 from agent.infrastructure.paths import validate_session_id
 from agent.interfaces.cli.commands import SlashCommandContext, SlashCommandResult, SlashCommandRouter
 from agent.interfaces.cli.commands.model_control import set_active_model
@@ -44,10 +45,20 @@ def configure_stdio_server_signals() -> None:
 
 
 class StdioRuntimeServer:
-    def __init__(self, runtime, session, debug: bool = False):
+    def __init__(
+        self,
+        runtime,
+        session,
+        debug: bool = False,
+        *,
+        model_client_factory: Callable[[], Any] | None = None,
+        default_model: str = "",
+    ):
         self._runtime = runtime
         self._session = session
         self._debug = debug
+        self._model_client_factory = model_client_factory
+        self._default_model = str(default_model or "").strip()
         self._slash_router = SlashCommandRouter()
         self._writer = JsonlWriter()
         self._requests: asyncio.Queue[dict[str, Any] | None] = asyncio.Queue()
@@ -160,11 +171,13 @@ class StdioRuntimeServer:
         await self._respond(request, record)
 
     async def _list_models(self, request: dict[str, Any]) -> None:
-        client = Config.get_async_client()
+        if self._model_client_factory is None:
+            raise RuntimeError("Model listing is unavailable.")
+        client = self._model_client_factory()
         try:
             models = await self._fetch_model_ids(client)
             current_model = self._current_model()
-            default_model = str(Config.DEFAULT_MODEL or "").strip()
+            default_model = self._default_model
             merged = self._merge_models(models, current_model)
         finally:
             await self._close_client(client)
@@ -184,6 +197,7 @@ class StdioRuntimeServer:
             await self._respond_error(request, "model.set requires model.", "InvalidRequest")
             return
         result = await set_active_model(self._runtime, self._session, model)
+        self._default_model = str(result.get("new_default") or self._default_model).strip()
         await self._respond(request, result)
 
     async def _fetch_model_ids(self, client: Any) -> list[str]:
@@ -204,7 +218,7 @@ class StdioRuntimeServer:
 
     def _current_model(self) -> str:
         session_model = str(getattr(self._session, "model", "") or "").strip()
-        return session_model or str(Config.DEFAULT_MODEL or "").strip()
+        return session_model or self._default_model
 
     def _merge_models(self, models: list[str], current_model: str) -> list[str]:
         seen: set[str] = set()
@@ -411,19 +425,26 @@ async def async_main(argv: list[str] | None = None) -> int:
 
     try:
         Config.ensure_user_settings_template()
-        Config.reload()
-        Config.validate()
+        settings = Config.reload()
+        validate_settings(settings)
     except ValueError as exc:
         print(f"Configuration error: {exc}", file=sys.stderr)
         return 1
 
     container = build_agent_container(
+        settings=settings,
         debug=args.debug,
         session_dir=args.session_dir,
         session_id=args.session,
         resume_latest=args.resume_latest,
     )
-    server = StdioRuntimeServer(container.runtime, container.session_store, debug=args.debug)
+    server = StdioRuntimeServer(
+        container.runtime,
+        container.session_store,
+        debug=args.debug,
+        model_client_factory=container.provider_client_factory.create_async_client,
+        default_model=container.settings.model,
+    )
     return await server.run()
 
 

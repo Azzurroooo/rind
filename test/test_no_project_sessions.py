@@ -9,6 +9,12 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from agent.bootstrap import container
+from agent.infrastructure.config import AppSettings
+
+
+class FakeProviderClientFactory:
+    def create_async_client(self):
+        return object()
 
 
 @pytest.mark.asyncio
@@ -19,9 +25,20 @@ async def test_build_dependencies_does_not_create_project_sessions(monkeypatch, 
 
     monkeypatch.chdir(workspace)
     monkeypatch.setenv("RIND_HOME", str(rind_home))
-    monkeypatch.setattr(container.Config, "get_async_client", classmethod(lambda cls: object()))
+    settings = AppSettings(
+        settings_path=rind_home / "settings.json",
+        settings_exists=True,
+        model="test-model",
+        api_key="test-key",
+        base_url="https://example.com/v1",
+        reasoning_effort="",
+        user_agent="test-agent",
+    )
 
-    deps = container.build_agent_container()
+    deps = container.build_agent_container(
+        settings=settings,
+        provider_client_factory=FakeProviderClientFactory(),
+    )
     await deps.session_store.initialize()
 
     if (workspace / "sessions").exists():

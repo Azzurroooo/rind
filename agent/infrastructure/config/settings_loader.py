@@ -80,6 +80,13 @@ class AppSettings:
     user_agent: str = DEFAULT_USER_AGENT
 
 
+def validate_settings(settings: AppSettings) -> None:
+    if not settings.api_key:
+        raise ValueError(
+            f"OpenAI apiKey is required. Create {settings.settings_path} or set OPENAI_API_KEY."
+        )
+
+
 def default_settings_path() -> Path:
     override = os.getenv("RIND_SETTINGS_PATH", "").strip()
     if override:

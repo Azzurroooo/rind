@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+
 from agent.application.context import CompactionService, ContextEstimator, ContextManager
 from agent.application.ports.session_store import SessionStore
 from agent.application.runtime import AgentRuntime, MessageStreamParser, TurnRunner
 from agent.application.skill_selection import SkillSelector
 from agent.application.tools import ToolCallProcessor, ToolExecutor, ToolResultNormalizer
-from agent.infrastructure.config import Config
-from agent.infrastructure.llm import OpenAIChatClient
+from agent.infrastructure.config import AppSettings, load_settings
+from agent.infrastructure.llm import OpenAIChatClient, OpenAIClientFactory
 from agent.infrastructure.persistence import JsonlSessionStore
 from agent.infrastructure.planning import PlanContextProvider
 from agent.infrastructure.rind_docs import build_rind_doc_context
@@ -20,6 +21,8 @@ from agent.prompts import SYSTEM_PROMPT
 
 @dataclass(frozen=True, slots=True)
 class AgentContainer:
+    settings: AppSettings
+    provider_client_factory: OpenAIClientFactory
     chat_client: OpenAIChatClient
     session_store: SessionStore
     tool_registry: DefaultToolRegistry
@@ -39,13 +42,17 @@ class AgentContainer:
 
 def build_agent_container(
     *,
+    settings: AppSettings | None = None,
+    provider_client_factory: OpenAIClientFactory | None = None,
     debug: bool = False,
     session_dir: str | None = None,
     session_id: str | None = None,
     resume_latest: bool = False,
 ) -> AgentContainer:
     """Build the production runtime dependency graph explicitly."""
-    model = Config.DEFAULT_MODEL
+    settings = settings or load_settings()
+    provider_client_factory = provider_client_factory or OpenAIClientFactory(settings)
+    model = settings.model
     session_store: SessionStore = JsonlSessionStore(
         session_dir=session_dir,
         session_id=session_id,
@@ -61,9 +68,9 @@ def build_agent_container(
         tool_result_normalizer=tool_result_normalizer,
     )
     chat_client = OpenAIChatClient(
-        async_client=Config.get_async_client(),
+        async_client=provider_client_factory.create_async_client(),
         model=model,
-        reasoning_effort=Config.MODEL_REASONING_EFFORT,
+        reasoning_effort=settings.reasoning_effort,
     )
     stream_parser = MessageStreamParser()
     context_estimator = ContextEstimator()
@@ -91,6 +98,8 @@ def build_agent_container(
     )
     runtime = AgentRuntime(turn_runner=turn_runner, session_store=session_store)
     return AgentContainer(
+        settings=settings,
+        provider_client_factory=provider_client_factory,
         chat_client=chat_client,
         session_store=session_store,
         tool_registry=tool_registry,

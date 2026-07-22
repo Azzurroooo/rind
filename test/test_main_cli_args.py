@@ -141,7 +141,7 @@ def test_main_returns_130_on_keyboard_interrupt() -> None:
         patch.object(sys, "argv", ["main.py"]),
         patch("agent.infrastructure.config.Config.ensure_user_settings_template"),
         patch("agent.infrastructure.config.Config.reload"),
-        patch("agent.infrastructure.config.Config.validate"),
+        patch("agent.infrastructure.config.validate_settings"),
         patch(
             "agent.bootstrap.build_agent_container",
             return_value=SimpleNamespace(runtime=object(), session_store=object()),

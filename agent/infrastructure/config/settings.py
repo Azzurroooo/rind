@@ -1,8 +1,12 @@
 """配置模块"""
 
-from agent.infrastructure.llm.client_factory import OpenAIClientFactory
-
-from .settings_loader import AppSettings, ensure_user_settings_template, load_settings, save_settings_patch
+from .settings_loader import (
+    AppSettings,
+    ensure_user_settings_template,
+    load_settings,
+    save_settings_patch,
+    validate_settings,
+)
 
 
 _SETTINGS = load_settings()
@@ -22,8 +26,7 @@ class Config:
 
     @classmethod
     def validate(cls):
-        if not cls.OPENAI_API_KEY:
-            raise ValueError(f"OpenAI apiKey is required. Create {cls.SETTINGS_PATH} or set OPENAI_API_KEY.")
+        validate_settings(cls.SETTINGS)
         return True
 
     @classmethod
@@ -50,11 +53,3 @@ class Config:
             raise ValueError("Model name is required.")
         save_settings_patch({"model": clean})
         return cls.reload()
-
-    @classmethod
-    def get_client(cls):
-        return OpenAIClientFactory(cls.SETTINGS).create_client()
-
-    @classmethod
-    def get_async_client(cls):
-        return OpenAIClientFactory(cls.SETTINGS).create_async_client()

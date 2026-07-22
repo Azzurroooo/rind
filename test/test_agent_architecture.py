@@ -51,3 +51,33 @@ def test_legacy_structure_is_removed() -> None:
         "infrastructure/tools/impl",
     )
     assert not [path for path in legacy_paths if (AGENT_ROOT / path).exists()]
+
+
+def test_runtime_dependencies_type_is_not_reintroduced() -> None:
+    definitions: list[str] = []
+    for path in AGENT_ROOT.rglob("*.py"):
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ClassDef) and node.name == "RuntimeDependencies":
+                definitions.append(str(path.relative_to(PROJECT_ROOT)))
+    assert not definitions, f"RuntimeDependencies duplicates AgentContainer: {definitions}"
+
+
+def test_runtime_entrypoints_use_the_shared_composition_root() -> None:
+    entrypoints = (
+        PROJECT_ROOT / "main.py",
+        AGENT_ROOT / "interfaces" / "runtime_server" / "stdio.py",
+        AGENT_ROOT / "interfaces" / "api" / "main.py",
+    )
+    missing: list[str] = []
+    for path in entrypoints:
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        calls_builder = any(
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Name)
+            and node.func.id == "build_agent_container"
+            for node in ast.walk(tree)
+        )
+        if not calls_builder:
+            missing.append(str(path.relative_to(PROJECT_ROOT)))
+    assert not missing, f"Runtime entrypoints bypass composition root: {missing}"

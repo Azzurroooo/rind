@@ -280,7 +280,7 @@ def test_slash_execute_exposes_cancellation_token_to_interrupt(capsys):
     assert message["result"]["display"] is None
 
 
-def test_models_list_returns_unique_sorted_models_and_current_marker(capsys, monkeypatch):
+def test_models_list_returns_unique_sorted_models_and_current_marker(capsys):
     class Models:
         def list(self):
             return _AsyncModelList([_Model("z-model"), _Model("m1"), _Model("a-model"), _Model("z-model")])
@@ -289,9 +289,12 @@ def test_models_list_returns_unique_sorted_models_and_current_marker(capsys, mon
         models = Models()
 
     async def run():
-        monkeypatch.setattr(Config, "DEFAULT_MODEL", "default-model")
-        monkeypatch.setattr(Config, "get_async_client", classmethod(lambda cls: Client()))
-        server = StdioRuntimeServer(_Runtime(), _Session())
+        server = StdioRuntimeServer(
+            _Runtime(),
+            _Session(),
+            model_client_factory=Client,
+            default_model="default-model",
+        )
         await server._list_models({"id": 9, "method": "models.list", "params": {}})
 
     asyncio.run(run())
@@ -303,7 +306,7 @@ def test_models_list_returns_unique_sorted_models_and_current_marker(capsys, mon
     assert result["models"] == ["a-model", "m1", "z-model"]
 
 
-def test_models_list_includes_current_model_when_missing(capsys, monkeypatch):
+def test_models_list_includes_current_model_when_missing(capsys):
     class Models:
         def list(self):
             return _AsyncModelList([_Model("a-model"), _Model("b-model")])
@@ -312,9 +315,12 @@ def test_models_list_includes_current_model_when_missing(capsys, monkeypatch):
         models = Models()
 
     async def run():
-        monkeypatch.setattr(Config, "DEFAULT_MODEL", "default-model")
-        monkeypatch.setattr(Config, "get_async_client", classmethod(lambda cls: Client()))
-        server = StdioRuntimeServer(_Runtime(), _Session())
+        server = StdioRuntimeServer(
+            _Runtime(),
+            _Session(),
+            model_client_factory=Client,
+            default_model="default-model",
+        )
         await server._list_models({"id": 10, "method": "models.list", "params": {}})
 
     asyncio.run(run())
@@ -323,7 +329,7 @@ def test_models_list_includes_current_model_when_missing(capsys, monkeypatch):
     assert message["result"]["models"] == ["m1", "a-model", "b-model"]
 
 
-def test_models_list_failure_returns_protocol_error(capsys, monkeypatch):
+def test_models_list_failure_returns_protocol_error(capsys):
     class Models:
         def list(self):
             raise RuntimeError("models endpoint unavailable")
@@ -332,8 +338,7 @@ def test_models_list_failure_returns_protocol_error(capsys, monkeypatch):
         models = Models()
 
     async def run():
-        monkeypatch.setattr(Config, "get_async_client", classmethod(lambda cls: Client()))
-        server = StdioRuntimeServer(_Runtime(), _Session())
+        server = StdioRuntimeServer(_Runtime(), _Session(), model_client_factory=Client)
         await server._dispatch({"id": 11, "method": "models.list", "params": {}})
 
     asyncio.run(run())
@@ -361,9 +366,9 @@ def test_model_set_updates_settings_runtime_and_session(capsys, tmp_path, monkey
         session = Session()
         server = StdioRuntimeServer(runtime, session)
         await server._set_model({"id": 12, "method": "model.set", "params": {"model": "new-model"}})
-        return runtime, session
+        return runtime, session, server
 
-    runtime, session = asyncio.run(run())
+    runtime, session, server = asyncio.run(run())
     message = json.loads(capsys.readouterr().out)
     data = json.loads(path.read_text(encoding="utf-8"))
 
@@ -372,6 +377,7 @@ def test_model_set_updates_settings_runtime_and_session(capsys, tmp_path, monkey
     assert message["result"]["model"] == "new-model"
     assert runtime.model == "new-model"
     assert session.model == "new-model"
+    assert server._default_model == "new-model"
     assert data["model"] == "new-model"
     assert data["apiKey"] == "secret-value"
 
