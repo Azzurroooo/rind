@@ -20,6 +20,13 @@ from agent.infrastructure.paths import validate_session_id
 from agent.interfaces.cli.commands import SlashCommandContext, SlashCommandResult, SlashCommandRouter
 from agent.interfaces.cli.commands.model_control import set_active_model
 from agent.interfaces.cli.ui.resume_preview import render_resume_preview
+from agent.interfaces.runtime_server.protocol import (
+    CAPABILITIES,
+    PROTOCOL_VERSION,
+    error_message,
+    event_envelope,
+    response_message,
+)
 
 
 class JsonlWriter:
@@ -65,6 +72,7 @@ class StdioRuntimeServer:
         self._pending_answers: dict[str, asyncio.Future[str]] = {}
         self._current_cancel: CancellationTokenSource | None = None
         self._initialized = False
+        self._sequence = 0
         self._install_question_responder()
 
     async def run(self) -> int:
@@ -119,6 +127,8 @@ class StdioRuntimeServer:
             {
                 "session_id": getattr(self._session, "session_id", None),
                 "model": getattr(self._session, "model", None),
+                "protocol_version": PROTOCOL_VERSION,
+                "capabilities": list(CAPABILITIES),
                 "resume_preview": await self._resume_preview(),
                 "slash_commands": self._slash_command_infos(),
             },
@@ -154,14 +164,26 @@ class StdioRuntimeServer:
 
         cancel_source = CancellationTokenSource()
         self._current_cancel = cancel_source
+        turn_session_id = ""
+        turn_id = ""
         try:
             async for event in self._runtime.run_turn(
                 query=query,
                 cancellation_token=cancel_source.token,
                 transient_system_messages=transient_system_messages,
             ):
-                await self._send_event(event.to_dict())
-            await self._respond(request, {"ok": True})
+                event_data = event.to_dict()
+                turn_session_id = turn_session_id or str(event_data.get("session_id") or "")
+                turn_id = turn_id or str(event_data.get("turn_id") or "")
+                await self._send_event(event_data)
+            await self._respond(
+                request,
+                {
+                    "ok": True,
+                    "session_id": turn_session_id or str(getattr(self._session, "session_id", "") or ""),
+                    "turn_id": turn_id,
+                },
+            )
         finally:
             self._current_cancel = None
             cancel_source.dispose()
@@ -387,19 +409,14 @@ class StdioRuntimeServer:
             self._pending_answers.pop(event.tool_call_id, None)
 
     async def _respond(self, request: dict[str, Any], result: Any) -> None:
-        await self._writer.send({"kind": "response", "id": request.get("id"), "result": result})
+        await self._writer.send(response_message(request, result))
 
     async def _respond_error(self, request: dict[str, Any], message: str, error_type: str) -> None:
-        await self._writer.send(
-            {
-                "kind": "response",
-                "id": request.get("id"),
-                "error": {"type": error_type, "message": message},
-            }
-        )
+        await self._writer.send(error_message(request, message, error_type))
 
     async def _send_event(self, event: dict[str, Any]) -> None:
-        await self._writer.send({"kind": "event", "event": event})
+        self._sequence += 1
+        await self._writer.send(event_envelope(event, self._sequence))
 
 
 def build_parser() -> argparse.ArgumentParser:

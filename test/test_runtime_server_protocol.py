@@ -17,6 +17,7 @@ from agent.interfaces.runtime_server.stdio import (
     configure_stdio_server_signals,
     configure_utf8_stdio,
 )
+from agent.interfaces.runtime_server.protocol import event_envelope
 from agent.infrastructure.config import Config
 
 
@@ -77,7 +78,7 @@ def test_question_response_completes_pending_future():
         task = asyncio.create_task(server._answer_user_question(event))
         await asyncio.sleep(0)
         await server._receive_user_answer(
-            {"id": 1, "method": "user_question.respond", "params": {"tool_call_id": "call-1", "answer": "yes"}}
+            {"request_id": 1, "method": "user_question.respond", "params": {"tool_call_id": "call-1", "answer": "yes"}}
         )
         return await task
 
@@ -90,6 +91,73 @@ def test_jsonl_writer_uses_compact_json(capsys):
 
     asyncio.run(run())
     assert capsys.readouterr().out == '{"kind":"event","event":{"type":"turn_completed"}}\n'
+
+
+def test_runtime_events_use_versioned_envelope(capsys):
+    async def run():
+        server = StdioRuntimeServer(_Runtime(), _Session())
+        await server._send_event(
+            {
+                "type": "assistant_delta",
+                "ts": "1700000000.0",
+                "session_id": "s1",
+                "turn_id": "t1",
+                "text": "hello",
+            }
+        )
+        await server._send_event(
+            {
+                "type": "turn_completed",
+                "ts": "1700000001.0",
+                "session_id": "s1",
+                "turn_id": "t1",
+            }
+        )
+
+    asyncio.run(run())
+
+    messages = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
+    assert [message["sequence"] for message in messages] == [1, 2]
+    assert messages[0]["event_type"] == "assistant_delta"
+    assert messages[0]["timestamp"] == "1700000000.0"
+    assert messages[0]["session_id"] == "s1"
+    assert messages[0]["turn_id"] == "t1"
+    assert messages[0]["event"]["text"] == "hello"
+
+
+def test_golden_event_fixture_matches_python_envelope():
+    fixture = PROJECT_ROOT / "test" / "fixtures" / "runtime_protocol.golden.jsonl"
+    messages = [json.loads(line) for line in fixture.read_text(encoding="utf-8").splitlines()]
+
+    assert [event_envelope(message["event"], message["sequence"]) for message in messages] == messages
+
+
+def test_turn_response_contains_session_and_turn_ids(capsys):
+    class Runtime(_Runtime):
+        async def run_turn(self, **_kwargs):
+            yield type(
+                "Event",
+                (),
+                {
+                    "to_dict": lambda _self: {
+                        "type": "turn_started",
+                        "ts": "1700000000.0",
+                        "session_id": "s1",
+                        "turn_id": "t1",
+                    }
+                },
+            )()
+
+    async def run():
+        server = StdioRuntimeServer(Runtime(), _Session())
+        await server._run_turn({"request_id": 21, "method": "turn.start", "params": {"input": "hello"}})
+
+    asyncio.run(run())
+
+    messages = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
+    assert messages[0]["event_type"] == "turn_started"
+    assert messages[1]["request_id"] == 21
+    assert messages[1]["result"] == {"ok": True, "session_id": "s1", "turn_id": "t1"}
 
 
 def test_initialize_response_includes_resume_preview_when_history_exists(capsys):
@@ -106,12 +174,15 @@ def test_initialize_response_includes_resume_preview_when_history_exists(capsys)
 
     async def run():
         server = StdioRuntimeServer(_Runtime(), Session())
-        await server._initialize({"id": 7, "method": "initialize", "params": {}})
+        await server._initialize({"request_id": 7, "method": "initialize", "params": {}})
 
     asyncio.run(run())
 
     message = json.loads(capsys.readouterr().out)
     result = message["result"]
+    assert message["request_id"] == 7
+    assert result["protocol_version"] == "1"
+    assert result["capabilities"] == ["events", "turns", "slash_commands", "models", "compaction", "user_questions"]
     assert result["session_id"] == "s1"
     assert result["model"] == "m1"
     assert "Resumed session s1" in result["resume_preview"]
@@ -122,7 +193,7 @@ def test_initialize_response_includes_resume_preview_when_history_exists(capsys)
 def test_slash_execute_reuses_cli_router(capsys):
     async def run():
         server = StdioRuntimeServer(_Runtime(), _Session())
-        await server._execute_slash({"id": 8, "method": "slash.execute", "params": {"input": "/compact"}})
+        await server._execute_slash({"request_id": 8, "method": "slash.execute", "params": {"input": "/compact"}})
 
     asyncio.run(run())
 
@@ -138,7 +209,7 @@ def test_slash_execute_reuses_cli_router(capsys):
 def test_slash_execute_non_compact_does_not_reset_context_usage(capsys):
     async def run():
         server = StdioRuntimeServer(_Runtime(), _Session())
-        await server._execute_slash({"id": 14, "method": "slash.execute", "params": {"input": "/help"}})
+        await server._execute_slash({"request_id": 14, "method": "slash.execute", "params": {"input": "/help"}})
 
     asyncio.run(run())
 
@@ -152,7 +223,7 @@ def test_readonly_status_slash_responds_without_main_queue(capsys):
         server = StdioRuntimeServer(_Runtime(), _Session(), debug=True)
         server._initialized = True
         handled = await server._handle_control_message(
-            {"id": 15, "method": "slash.execute", "params": {"input": "/status"}}
+            {"request_id": 15, "method": "slash.execute", "params": {"input": "/status"}}
         )
         await asyncio.sleep(0)
         queued = server._requests.empty()
@@ -174,7 +245,7 @@ def test_readonly_doctor_slash_responds_without_main_queue(capsys):
         server = StdioRuntimeServer(_Runtime(), _Session())
         server._initialized = True
         handled = await server._handle_control_message(
-            {"id": 16, "method": "slash.execute", "params": {"input": "/doctor"}}
+            {"request_id": 16, "method": "slash.execute", "params": {"input": "/doctor"}}
         )
         await asyncio.sleep(0)
         return handled, server._requests.empty()
@@ -195,7 +266,7 @@ def test_readonly_slash_does_not_replace_current_cancel(capsys):
         current = CancellationTokenSource()
         server._current_cancel = current
         handled = await server._handle_control_message(
-            {"id": 17, "method": "slash.execute", "params": {"input": "/status"}}
+            {"request_id": 17, "method": "slash.execute", "params": {"input": "/status"}}
         )
         await asyncio.sleep(0)
         same_source = server._current_cancel is current
@@ -213,7 +284,7 @@ def test_non_readonly_slash_stays_on_main_queue(capsys):
     async def run():
         server = StdioRuntimeServer(_Runtime(), _Session())
         server._initialized = True
-        message = {"id": 18, "method": "slash.execute", "params": {"input": "/help"}}
+        message = {"request_id": 18, "method": "slash.execute", "params": {"input": "/help"}}
         handled = await server._handle_control_message(message)
         if not handled:
             await server._requests.put(message)
@@ -232,10 +303,10 @@ def test_readonly_slash_usage_errors_return_immediately(capsys):
         server = StdioRuntimeServer(_Runtime(), _Session())
         server._initialized = True
         await server._handle_control_message(
-            {"id": 19, "method": "slash.execute", "params": {"input": "/status bad"}}
+            {"request_id": 19, "method": "slash.execute", "params": {"input": "/status bad"}}
         )
         await server._handle_control_message(
-            {"id": 20, "method": "slash.execute", "params": {"input": "/doctor extra"}}
+            {"request_id": 20, "method": "slash.execute", "params": {"input": "/doctor extra"}}
         )
         await asyncio.sleep(0)
 
@@ -263,7 +334,7 @@ def test_slash_execute_exposes_cancellation_token_to_interrupt(capsys):
         runtime = Runtime()
         server = StdioRuntimeServer(runtime, _Session())
         task = asyncio.create_task(
-            server._execute_slash({"id": 13, "method": "slash.execute", "params": {"input": "/compact"}})
+            server._execute_slash({"request_id": 13, "method": "slash.execute", "params": {"input": "/compact"}})
         )
         await runtime.started.wait()
         server._interrupt_current()
@@ -295,7 +366,7 @@ def test_models_list_returns_unique_sorted_models_and_current_marker(capsys):
             model_client_factory=Client,
             default_model="default-model",
         )
-        await server._list_models({"id": 9, "method": "models.list", "params": {}})
+        await server._list_models({"request_id": 9, "method": "models.list", "params": {}})
 
     asyncio.run(run())
 
@@ -321,7 +392,7 @@ def test_models_list_includes_current_model_when_missing(capsys):
             model_client_factory=Client,
             default_model="default-model",
         )
-        await server._list_models({"id": 10, "method": "models.list", "params": {}})
+        await server._list_models({"request_id": 10, "method": "models.list", "params": {}})
 
     asyncio.run(run())
 
@@ -339,7 +410,7 @@ def test_models_list_failure_returns_protocol_error(capsys):
 
     async def run():
         server = StdioRuntimeServer(_Runtime(), _Session(), model_client_factory=Client)
-        await server._dispatch({"id": 11, "method": "models.list", "params": {}})
+        await server._dispatch({"request_id": 11, "method": "models.list", "params": {}})
 
     asyncio.run(run())
 
@@ -365,7 +436,7 @@ def test_model_set_updates_settings_runtime_and_session(capsys, tmp_path, monkey
         runtime = _Runtime()
         session = Session()
         server = StdioRuntimeServer(runtime, session)
-        await server._set_model({"id": 12, "method": "model.set", "params": {"model": "new-model"}})
+        await server._set_model({"request_id": 12, "method": "model.set", "params": {"model": "new-model"}})
         return runtime, session, server
 
     runtime, session, server = asyncio.run(run())

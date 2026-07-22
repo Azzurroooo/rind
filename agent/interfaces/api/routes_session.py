@@ -9,6 +9,8 @@ from pydantic import BaseModel
 
 from agent.domain.cancellation import CancellationTokenSource
 from agent.infrastructure.paths import validate_session_id
+from agent.interfaces.api.dependencies import get_agent_factory
+from agent.interfaces.runtime_server.protocol import event_envelope
 
 router = APIRouter(prefix="/sessions", tags=["sessions"])
 
@@ -16,7 +18,6 @@ class TurnRequest(BaseModel):
     query: str
     system_prompt: str | None = None
 
-from agent.interfaces.api.dependencies import get_agent_factory
 
 @router.post("/{session_id}/turns")
 async def run_turn(session_id: str, turn_req: TurnRequest, request: Request, factory=Depends(get_agent_factory)):
@@ -31,6 +32,7 @@ async def run_turn(session_id: str, turn_req: TurnRequest, request: Request, fac
     cancel_source = CancellationTokenSource()
 
     async def event_generator():
+        sequence = 0
         try:
             async for event in agent.run_turn(session_id=session_id, query=turn_req.query, cancellation_token=cancel_source.token):
                 # Check for client disconnect
@@ -38,10 +40,9 @@ async def run_turn(session_id: str, turn_req: TurnRequest, request: Request, fac
                     cancel_source.cancel("Client disconnected")
                     break
 
-                yield {
-                    "event": event.type,
-                    "data": json.dumps(event.to_dict(), ensure_ascii=False)
-                }
+                sequence += 1
+                envelope = event_envelope(event.to_dict(), sequence)
+                yield {"event": envelope["event_type"], "data": json.dumps(envelope, ensure_ascii=False)}
         except Exception as e:
             yield {
                 "event": "error",

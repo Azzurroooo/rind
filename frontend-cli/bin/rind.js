@@ -11,6 +11,7 @@ import { createCompactContextState } from "../lib/compact-context-state.js";
 import { createComposerTerminal, withTerminalCursorHidden } from "../lib/composer-terminal.js";
 import { createLineEditor } from "../lib/line-editor.js";
 import { buildRuntimeEnv } from "../lib/runtime-env.js";
+import { createRuntimeRequest, runtimeEventType, runtimeRequestId } from "../lib/runtime-protocol.js";
 import { createInputHistory } from "../lib/input-history.js";
 import { isInputClosed } from "../lib/input-errors.js";
 import { sigintAction } from "../lib/interrupt-state.js";
@@ -439,7 +440,7 @@ function request(method, params = {}) {
       return;
     }
     pending.set(id, { resolve, reject });
-    runtime.stdin.write(JSON.stringify({ id, method, params }) + "\n", (error) => {
+    runtime.stdin.write(JSON.stringify(createRuntimeRequest(id, method, params)) + "\n", (error) => {
       if (!error) {
         return;
       }
@@ -536,7 +537,7 @@ function receive(line) {
     return;
   }
   if (message.kind === "event") {
-    void renderEvent(message.event).catch((error) => {
+    void renderEvent(message).catch((error) => {
       if (!runtimeClosing) {
         writeErrorOutput(`${error instanceof Error ? error.message : String(error)}\n`);
       }
@@ -545,11 +546,11 @@ function receive(line) {
 }
 
 function finishRequest(message) {
-  const callbacks = pending.get(message.id);
+  const callbacks = pending.get(runtimeRequestId(message));
   if (!callbacks) {
     return;
   }
-  pending.delete(message.id);
+  pending.delete(runtimeRequestId(message));
   if (message.error) {
     callbacks.reject(new Error(message.error.message || "Runtime request failed"));
   } else {
@@ -557,11 +558,19 @@ function finishRequest(message) {
   }
 }
 
-async function renderEvent(event) {
+async function renderEvent(message) {
   if (runtimeClosing) {
     return;
   }
-  switch (event.type) {
+  const event = message?.event;
+  const eventType = runtimeEventType(message);
+  if (!event || typeof event !== "object") {
+    if (cliArgs.includes("--debug")) {
+      writeErrorOutput(`Ignoring runtime event without payload: ${eventType || "unknown"}\n`);
+    }
+    return;
+  }
+  switch (eventType) {
     case "assistant_delta":
       assistantRenderer.append(event.text || "");
       return;
@@ -641,7 +650,9 @@ async function renderEvent(event) {
       resetTurnTools();
       return;
     default:
-      return;
+      if (cliArgs.includes("--debug")) {
+        writeErrorOutput(`Ignoring unknown runtime event: ${eventType || "unknown"}\n`);
+      }
   }
 }
 

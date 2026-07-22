@@ -1,0 +1,2 @@
+{"kind":"event","sequence":1,"event_type":"turn_started","timestamp":"2026-01-01T00:00:00Z","session_id":"session-1","turn_id":"turn-1","event":{"type":"turn_started","ts":"2026-01-01T00:00:00Z","event_id":"event-1","session_id":"session-1","turn_id":"turn-1","user_message_chars":5}}
+{"kind":"event","sequence":2,"event_type":"assistant_delta","timestamp":"2026-01-01T00:00:01Z","session_id":"session-1","turn_id":"turn-1","event":{"type":"assistant_delta","ts":"2026-01-01T00:00:01Z","event_id":"event-2","session_id":"session-1","turn_id":"turn-1","text":"hello"}}
