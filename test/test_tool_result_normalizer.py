@@ -134,6 +134,7 @@ def test_tool_result_normalizer_compresses_empty_bash_output_poll() -> None:
             "suggested_next_wait_ms": 30000,
             "timestamp": "2026-06-03T00:00:00Z",
         },
+        "meta": {"truncated": False, "total_bytes": 0, "total_lines": 0},
     }
 
     result = normalizer.normalize(payload)
@@ -142,6 +143,7 @@ def test_tool_result_normalizer_compresses_empty_bash_output_poll() -> None:
     assert '"status": "running"' in result.model_content
     assert '"no_new_output": true' in result.model_content
     assert '"suggested_next_wait_ms": 30000' in result.model_content
+    assert '"total_bytes": 0' in result.model_content
     assert "stdout" not in result.model_content
     assert "stderr" not in result.model_content
     assert "timestamp" not in result.model_content

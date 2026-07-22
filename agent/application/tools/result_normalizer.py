@@ -40,8 +40,6 @@ class NormalizedToolResult:
 class ToolResultNormalizer:
     """Render one tool result into bounded terminal, model, and disk projections."""
 
-    format_version = "tool_result_v2"
-
     def __init__(
         self,
         max_tokens: int = 10000,
@@ -269,7 +267,10 @@ class ToolResultNormalizer:
             compact_data["wait_ms"] = data.get("wait_ms")
         if "elapsed_ms" in data:
             compact_data["elapsed_ms"] = data.get("elapsed_ms")
-        return {"ok": True, "tool": "bash_output", "data": compact_data}
+        compact = {"ok": True, "tool": "bash_output", "data": compact_data}
+        if isinstance(value.get("meta"), dict):
+            compact["meta"] = value["meta"]
+        return compact
 
     def _canonicalize(self, value: Any) -> Any:
         if isinstance(value, dict):

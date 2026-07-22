@@ -16,6 +16,70 @@ from agent.domain.cancellation import CancellationToken
 from .session_pool import ShellState
 
 
+_HEAD_LIMIT = 10000
+_TAIL_LIMIT = 10000
+_OUTPUT_TRUNCATED = "\n\n...[OUTPUT TRUNCATED]...\n\n"
+
+
+@dataclass(slots=True)
+class _StreamCapture:
+    head: list[str] = field(default_factory=list)
+    tail: deque[str] = field(default_factory=deque)
+    char_count: int = 0
+    tail_chars: int = 0
+    byte_count: int = 0
+    newline_count: int = 0
+    last_byte: int | None = None
+
+    @property
+    def line_count(self) -> int:
+        return self.newline_count + int(self.byte_count > 0 and self.last_byte != 10)
+
+    @property
+    def truncated(self) -> bool:
+        return self.char_count > _HEAD_LIMIT + _TAIL_LIMIT
+
+    def append(self, raw: bytes, text: str) -> None:
+        if raw:
+            self.byte_count += len(raw)
+            self.newline_count += raw.count(b"\n")
+            self.last_byte = raw[-1]
+        if not text:
+            return
+
+        previous_chars = self.char_count
+        self.char_count += len(text)
+        head_space = max(0, _HEAD_LIMIT - previous_chars)
+        if head_space:
+            self.head.append(text[:head_space])
+            text = text[head_space:]
+        if not text:
+            return
+
+        self.tail.append(text)
+        self.tail_chars += len(text)
+        overflow = self.tail_chars - _TAIL_LIMIT
+        while overflow > 0:
+            first = self.tail[0]
+            if len(first) <= overflow:
+                self.tail.popleft()
+                self.tail_chars -= len(first)
+                overflow -= len(first)
+            else:
+                self.tail[0] = first[overflow:]
+                self.tail_chars -= overflow
+                overflow = 0
+
+    def render(self) -> str:
+        head = "".join(self.head)
+        if self.char_count <= _HEAD_LIMIT:
+            return head
+        tail = "".join(self.tail)
+        if not self.truncated:
+            return head + tail
+        return head + _OUTPUT_TRUNCATED + tail
+
+
 @dataclass
 class _BgProc:
     """In-flight state for a background process."""
@@ -26,12 +90,8 @@ class _BgProc:
     cwd: str
     shell_backend: str
     shell_executable: str | None
-    stdout_head: list[str] = field(default_factory=list)
-    stdout_tail: deque = field(default_factory=lambda: deque(maxlen=10000))
-    stdout_len: list[int] = field(default_factory=lambda: [0])
-    stderr_head: list[str] = field(default_factory=list)
-    stderr_tail: deque = field(default_factory=lambda: deque(maxlen=10000))
-    stderr_len: list[int] = field(default_factory=lambda: [0])
+    stdout: _StreamCapture = field(default_factory=_StreamCapture)
+    stderr: _StreamCapture = field(default_factory=_StreamCapture)
     stdout_cursor: int = 0
     stderr_cursor: int = 0
     sequence: int = 0
@@ -47,8 +107,6 @@ class BashRunner:
 
     def __init__(self, timeout: int = 120):
         self.timeout = timeout
-        self.HEAD_LIMIT = 10000
-        self.TAIL_LIMIT = 10000
         self.MIN_WAIT_MS = 1000
         self.MAX_WAIT_MS = 60000
         self.BACKGROUND_OUTPUT_MIN_WAIT_MS = 5000
@@ -104,42 +162,10 @@ class BashRunner:
             shell_cmd.extend(["-c", command])
         return shell_cmd
 
-    def _build_output(self, head: list[str], tail: deque, total_len: int) -> str:
-        if total_len <= self.HEAD_LIMIT:
-            return "".join(head)
-        if total_len <= self.HEAD_LIMIT + self.TAIL_LIMIT:
-            return "".join(head) + "".join(tail)
-        return "".join(head) + "\n\n...[OUTPUT TRUNCATED]...\n\n" + "".join(tail)
-
-    def _append_chunk(
-        self,
-        chunk: str,
-        head: list[str],
-        tail: deque,
-        length: list[int],
-        updated_event: asyncio.Event | None = None,
-    ) -> None:
-        clen = len(chunk)
-        cur = length[0]
-        length[0] += clen
-        space = self.HEAD_LIMIT - cur
-        if space > 0:
-            if clen <= space:
-                head.append(chunk)
-            else:
-                head.append(chunk[:space])
-                tail.extend(chunk[space:])
-        else:
-            tail.extend(chunk)
-        if updated_event and chunk:
-            updated_event.set()
-
     async def _read_stream(
         self,
         stream: asyncio.StreamReader,
-        head: list[str],
-        tail: deque,
-        length: list[int],
+        capture: _StreamCapture,
         updated_event: asyncio.Event | None = None,
     ) -> None:
         decoder = codecs.getincrementaldecoder("utf-8")("replace")
@@ -148,9 +174,13 @@ class BashRunner:
             if not raw:
                 flushed = decoder.decode(b"", True)
                 if flushed:
-                    self._append_chunk(flushed, head, tail, length, updated_event)
+                    capture.append(b"", flushed)
+                    if updated_event:
+                        updated_event.set()
                 break
-            self._append_chunk(decoder.decode(raw, False), head, tail, length, updated_event)
+            capture.append(raw, decoder.decode(raw, False))
+            if updated_event:
+                updated_event.set()
 
     def _clamp_wait_ms(self, wait_ms: int | float | str | None, default: int) -> int:
         try:
@@ -192,9 +222,19 @@ class BashRunner:
         return delta, next_cursor, truncated
 
     def _full_output(self, bg: _BgProc) -> tuple[str, str]:
-        stdout = self._build_output(bg.stdout_head, bg.stdout_tail, bg.stdout_len[0])
-        stderr = self._build_output(bg.stderr_head, bg.stderr_tail, bg.stderr_len[0])
-        return stdout, stderr
+        return bg.stdout.render(), bg.stderr.render()
+
+    def _output_meta(
+        self,
+        stdout: _StreamCapture,
+        stderr: _StreamCapture,
+        preview_truncated: bool = False,
+    ) -> dict:
+        return {
+            "truncated": stdout.truncated or stderr.truncated or preview_truncated,
+            "total_bytes": stdout.byte_count + stderr.byte_count,
+            "total_lines": stdout.line_count + stderr.line_count,
+        }
 
     def _delta_output(self, bg: _BgProc, max_output_chars: int) -> tuple[str, str, bool]:
         stdout, stderr = self._full_output(bg)
@@ -214,7 +254,6 @@ class BashRunner:
         stderr: str,
         wait_ms: int,
         elapsed_ms: int,
-        truncated: bool = False,
         no_new_output: bool = False,
     ) -> dict:
         running = bg.exit_code is None
@@ -235,7 +274,6 @@ class BashRunner:
             "sequence": bg.sequence,
             "wait_ms": wait_ms,
             "elapsed_ms": elapsed_ms,
-            "truncated": bool(truncated),
             "empty_observation_count": bg.empty_observation_count,
             "suggested_next_wait_ms": self._suggested_next_wait_ms(bg.empty_observation_count),
         }
@@ -277,15 +315,11 @@ class BashRunner:
                 env=state.env,
             )
 
-            stdout_head: list[str] = []
-            stdout_tail: deque = deque(maxlen=self.TAIL_LIMIT)
-            stdout_len: list[int] = [0]
-            stderr_head: list[str] = []
-            stderr_tail: deque = deque(maxlen=self.TAIL_LIMIT)
-            stderr_len: list[int] = [0]
+            stdout = _StreamCapture()
+            stderr = _StreamCapture()
 
-            t_out = asyncio.create_task(self._read_stream(process.stdout, stdout_head, stdout_tail, stdout_len))
-            t_err = asyncio.create_task(self._read_stream(process.stderr, stderr_head, stderr_tail, stderr_len))
+            t_out = asyncio.create_task(self._read_stream(process.stdout, stdout))
+            t_err = asyncio.create_task(self._read_stream(process.stderr, stderr))
 
             timeout_msg = ""
             wait_task = asyncio.create_task(process.wait())
@@ -321,22 +355,26 @@ class BashRunner:
             await asyncio.gather(t_out, t_err, return_exceptions=True)
             await self._settle_tasks(tasks_to_wait)
 
-            stdout_final = self._build_output(stdout_head, stdout_tail, stdout_len[0])
-            stderr_final = self._build_output(stderr_head, stderr_tail, stderr_len[0])
+            stdout_final = stdout.render()
+            stderr_final = stderr.render()
 
             if timeout_msg:
                 stderr_final += timeout_msg
 
             return ToolExecutionResult(
                 status="ok",
-                result_str=tool_ok("bash", {
-                    "stdout": stdout_final.strip(),
-                    "stderr": stderr_final.strip(),
-                    "exit_code": process.returncode if process.returncode is not None else -1,
-                    "cwd": state.cwd,
-                    "shell_backend": state.shell_backend,
-                    "shell_executable": state.shell_executable,
-                }),
+                result_str=tool_ok(
+                    "bash",
+                    {
+                        "stdout": stdout_final.strip(),
+                        "stderr": stderr_final.strip(),
+                        "exit_code": process.returncode if process.returncode is not None else -1,
+                        "cwd": state.cwd,
+                        "shell_backend": state.shell_backend,
+                        "shell_executable": state.shell_executable,
+                    },
+                    meta=self._output_meta(stdout, stderr),
+                ),
                 exit_code=process.returncode if process.returncode is not None else -1,
             )
 
@@ -385,18 +423,14 @@ class BashRunner:
                 t_out = asyncio.create_task(
                     self._read_stream(
                         process.stdout,
-                        bg.stdout_head,
-                        bg.stdout_tail,
-                        bg.stdout_len,
+                        bg.stdout,
                         bg.updated_event,
                     )
                 )
                 t_err = asyncio.create_task(
                     self._read_stream(
                         process.stderr,
-                        bg.stderr_head,
-                        bg.stderr_tail,
-                        bg.stderr_len,
+                        bg.stderr,
                         bg.updated_event,
                     )
                 )
@@ -435,22 +469,30 @@ class BashRunner:
                 await self.kill_background_wait(bg.bg_id)
                 return ToolExecutionResult(
                     status="ok",
-                    result_str=tool_ok("bash", {
-                        "stdout": "",
-                        "stderr": f"[PROCESS TERMINATED: Command cancelled: {cancellation_token.reason}]",
-                        "exit_code": -1,
-                        "cwd": state.cwd,
-                        "shell_backend": state.shell_backend,
-                        "shell_executable": state.shell_executable,
-                        "status": "cancelled",
-                    }),
+                    result_str=tool_ok(
+                        "bash",
+                        {
+                            "stdout": "",
+                            "stderr": f"[PROCESS TERMINATED: Command cancelled: {cancellation_token.reason}]",
+                            "exit_code": -1,
+                            "cwd": state.cwd,
+                            "shell_backend": state.shell_backend,
+                            "shell_executable": state.shell_executable,
+                            "status": "cancelled",
+                        },
+                        meta=self._output_meta(bg.stdout, bg.stderr),
+                    ),
                     exit_code=-1,
                 )
             if bg.exit_code is not None:
                 self._bg.pop(bg.bg_id, None)
                 return ToolExecutionResult(
                     status="ok",
-                    result_str=tool_ok("bash", self._completed_bash_payload(bg)),
+                    result_str=tool_ok(
+                        "bash",
+                        self._completed_bash_payload(bg),
+                        meta=self._output_meta(bg.stdout, bg.stderr),
+                    ),
                     exit_code=bg.exit_code,
                 )
             stdout, stderr, truncated = self._delta_output(bg, self._clamp_output_chars(20000))
@@ -460,7 +502,6 @@ class BashRunner:
                 stderr=stderr,
                 wait_ms=wait_ms,
                 elapsed_ms=elapsed_ms,
-                truncated=truncated,
                 no_new_output=not stdout and not stderr,
             )
             payload.update(
@@ -471,7 +512,14 @@ class BashRunner:
                     "shell_executable": state.shell_executable,
                 }
             )
-            return ToolExecutionResult(status="ok", result_str=tool_ok("bash", payload))
+            return ToolExecutionResult(
+                status="ok",
+                result_str=tool_ok(
+                    "bash",
+                    payload,
+                    meta=self._output_meta(bg.stdout, bg.stderr, truncated),
+                ),
+            )
         except asyncio.CancelledError:
             if bg is not None:
                 await self.kill_background_wait(bg.bg_id)
@@ -614,7 +662,6 @@ class BashRunner:
             stderr=stderr,
             wait_ms=wait_ms,
             elapsed_ms=elapsed_ms,
-            truncated=truncated,
             no_new_output=no_new_output,
         )
         if bg.exit_code is not None:
@@ -622,7 +669,11 @@ class BashRunner:
 
         return ToolExecutionResult(
             status="ok",
-            result_str=tool_ok("bash_output", payload),
+            result_str=tool_ok(
+                "bash_output",
+                payload,
+                meta=self._output_meta(bg.stdout, bg.stderr, truncated),
+            ),
             exit_code=bg.exit_code if bg.exit_code is not None else -1,
         )
 

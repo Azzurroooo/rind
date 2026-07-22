@@ -56,6 +56,9 @@ def test_echo() -> None:
         raise AssertionError(f"Expected stdout to contain hello, got: {data}")
     if "cwd" not in data:
         raise AssertionError(f"Expected cwd in data, got: {data}")
+    meta = payload.get("meta") or {}
+    if meta.get("truncated") is not False or meta.get("total_lines") != 1:
+        raise AssertionError(f"Expected exact output metadata, got: {payload}")
 
 def test_cd_and_cwd(temp_dir: Path) -> None:
     payload = assert_ok(parse_payload(run(bash(f"cd {str(temp_dir)}"))))
