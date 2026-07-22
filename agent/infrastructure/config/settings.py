@@ -1,5 +1,6 @@
 """配置模块"""
-from openai import OpenAI, AsyncOpenAI
+
+from agent.infrastructure.llm.client_factory import OpenAIClientFactory
 
 from .settings_loader import AppSettings, ensure_user_settings_template, load_settings, save_settings_patch
 
@@ -51,23 +52,9 @@ class Config:
         return cls.reload()
 
     @classmethod
-    def get_client(cls) -> OpenAI:
-        return OpenAI(
-            api_key=cls.OPENAI_API_KEY,
-            base_url=cls.OPENAI_API_BASE,
-            default_headers=cls._default_headers(),
-        )
+    def get_client(cls):
+        return OpenAIClientFactory(cls.SETTINGS).create_client()
 
     @classmethod
-    def get_async_client(cls) -> AsyncOpenAI:
-        return AsyncOpenAI(
-            api_key=cls.OPENAI_API_KEY,
-            base_url=cls.OPENAI_API_BASE,
-            default_headers=cls._default_headers(),
-        )
-
-    @classmethod
-    def _default_headers(cls) -> dict[str, str] | None:
-        if not cls.OPENAI_USER_AGENT:
-            return None
-        return {"User-Agent": cls.OPENAI_USER_AGENT}
+    def get_async_client(cls):
+        return OpenAIClientFactory(cls.SETTINGS).create_async_client()

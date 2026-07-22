@@ -69,7 +69,7 @@ DEFAULT_SETTINGS_TEMPLATE = {
 }
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class AppSettings:
     settings_path: Path
     settings_exists: bool

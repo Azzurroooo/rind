@@ -10,6 +10,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from agent.infrastructure.config.settings import Config
+from agent.infrastructure.llm import OpenAIClientFactory
 
 
 @pytest.fixture(autouse=True)
@@ -95,17 +96,17 @@ def test_config_validate_reports_settings_path_when_api_key_missing(tmp_path, mo
     assert "apiKey" in str(exc.value)
 
 
-def test_config_get_async_client_uses_loaded_settings(tmp_path, monkeypatch):
+def test_openai_client_factory_uses_loaded_settings(tmp_path, monkeypatch):
     path = tmp_path / "settings.json"
     path.write_text(
         json.dumps({"apiKey": "settings-key", "baseUrl": "https://example.com/v1"}),
         encoding="utf-8",
     )
     monkeypatch.setenv("RIND_SETTINGS_PATH", str(path))
-    Config.reload()
+    settings = Config.reload()
 
-    with patch("agent.infrastructure.config.settings.AsyncOpenAI") as mock_async_openai:
-        Config.get_async_client()
+    with patch("agent.infrastructure.llm.client_factory.AsyncOpenAI") as mock_async_openai:
+        OpenAIClientFactory(settings).create_async_client()
 
     kwargs = mock_async_openai.call_args.kwargs
     assert kwargs["api_key"] == "settings-key"
