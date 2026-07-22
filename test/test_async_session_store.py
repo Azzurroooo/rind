@@ -258,9 +258,8 @@ async def test_persist_tool_call_writes_model_content(temp_session_dir):
         ts_end=store.now_iso(),
         result_payload=json.dumps({"ok": True, "tool": "bash", "data": "raw result"}),
         model_content="fixed model content",
-        model_content_format="tool_result_v1",
-        model_content_policy={"version": "tool_result_v1"},
-        artifact_ref=None,
+        model_content_format="tool_result_v2",
+        model_content_policy={"truncated": False},
     )
     await store.persist_message("tool", "", tool_call_id="call_1", tool_name="bash")
 
@@ -268,6 +267,7 @@ async def test_persist_tool_call_writes_model_content(temp_session_dir):
     messages = await store.get_messages_slice()
 
     assert records[0]["model_content"] == "fixed model content"
+    assert "artifact_ref" not in records[0]
     tool_message = next(message for message in messages if message.get("role") == "tool")
     assert tool_message["content"] == "fixed model content"
 
@@ -286,9 +286,8 @@ async def test_message_projector_deduplicates_tool_messages(temp_session_dir):
         ts_end=store.now_iso(),
         result_payload=json.dumps({"ok": True, "tool": "bash", "data": "raw result"}),
         model_content="fixed model content",
-        model_content_format="tool_result_v1",
-        model_content_policy={"version": "tool_result_v1"},
-        artifact_ref=None,
+        model_content_format="tool_result_v2",
+        model_content_policy={"truncated": False},
     )
     await store.persist_message("tool", "", tool_call_id="call_1", tool_name="bash")
 
@@ -347,9 +346,8 @@ async def test_get_messages_slice_recovers_missing_tool_message_from_record(temp
         ts_end=store.now_iso(),
         result_payload=json.dumps({"ok": True, "tool": "bash", "data": "raw result"}),
         model_content="recovered model content",
-        model_content_format="tool_result_v1",
-        model_content_policy={"version": "tool_result_v1"},
-        artifact_ref=None,
+        model_content_format="tool_result_v2",
+        model_content_policy={"truncated": False},
     )
 
     messages = await store.get_messages_slice()
@@ -397,9 +395,8 @@ async def test_get_messages_slice_matches_numeric_tool_ids_as_strings(temp_sessi
         ts_end=store.now_iso(),
         result_payload=json.dumps({"ok": True, "tool": "bash", "data": "raw result"}),
         model_content="numeric id content",
-        model_content_format="tool_result_v1",
-        model_content_policy={"version": "tool_result_v1"},
-        artifact_ref=None,
+        model_content_format="tool_result_v2",
+        model_content_policy={"truncated": False},
     )
 
     messages = await store.get_messages_slice()
@@ -578,9 +575,8 @@ async def test_persist_compaction_projects_minimal_replacement_boundary(temp_ses
         ts_end=store.now_iso(),
         result_payload=json.dumps({"ok": True, "tool": "bash", "data": "raw result"}),
         model_content="tool model content",
-        model_content_format="tool_result_v1",
-        model_content_policy={"version": "tool_result_v1"},
-        artifact_ref=None,
+        model_content_format="tool_result_v2",
+        model_content_policy={"truncated": False},
     )
     await store.persist_message("tool", "", tool_call_id="call_1", tool_name="bash")
     before = await store.load_messages()

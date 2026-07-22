@@ -30,7 +30,7 @@ from agent.domain.events import (
 from agent.application.tools.executor import ToolExecutor
 from agent.application.tools.change_events import build_file_change_event
 from agent.application.tools.polling_guard import BashOutputPollingGuard
-from agent.application.tools.result_normalizer import ToolResultNormalizer
+from agent.application.tools.result_normalizer import NormalizedToolResult, ToolResultNormalizer
 from agent.domain.cancellation import CancellationToken
 
 UserQuestionResponder = Callable[[UserQuestionRequestedEvent], str | Awaitable[str]]
@@ -120,6 +120,12 @@ class ToolCallProcessor:
                         )
 
             ts_end = session.now_iso()
+            normalized_result = self._tool_result_normalizer.normalize(
+                outcome.result,
+                tool_name=call.name,
+                status=outcome.status,
+                error_type=outcome.error_type,
+            )
             try:
                 await self._persist_tool_result(
                     session=session,
@@ -127,7 +133,7 @@ class ToolCallProcessor:
                     parsed_args=parsed_args,
                     ts_start=ts_start,
                     ts_end=ts_end,
-                    tool_result_str=outcome.result,
+                    normalized_result=normalized_result,
                 )
                 persist_error = None
             except asyncio.CancelledError:
@@ -138,6 +144,12 @@ class ToolCallProcessor:
                     status="failed",
                     error_type="PersistenceError",
                     result=tool_error(call.name, f"Failed to persist tool result: {exc}", "PersistenceError"),
+                )
+                normalized_result = self._tool_result_normalizer.normalize(
+                    outcome.result,
+                    tool_name=call.name,
+                    status=outcome.status,
+                    error_type=outcome.error_type,
                 )
 
             duration_ms = int((time.perf_counter() - started_at) * 1000)
@@ -156,7 +168,7 @@ class ToolCallProcessor:
                 tool_call_id=call.call_id,
                 tool_name=call.name,
                 status=outcome.status,
-                result=outcome.result,
+                result=normalized_result.terminal_content,
                 error_type=outcome.error_type,
                 error_source="persistence" if persist_error is not None else "tool",
                 duration_ms=duration_ms,
@@ -333,9 +345,8 @@ class ToolCallProcessor:
         parsed_args: dict,
         ts_start: str,
         ts_end: str,
-        tool_result_str: str,
+        normalized_result: NormalizedToolResult,
     ) -> None:
-        normalized_result = self._tool_result_normalizer.normalize(tool_result_str)
         await session.persist_tool_call(
             call.call_id,
             call.name,
@@ -343,11 +354,10 @@ class ToolCallProcessor:
             call.raw_args,
             ts_start,
             ts_end,
-            tool_result_str,
+            normalized_result.persisted_content,
             model_content=normalized_result.model_content,
             model_content_format=normalized_result.model_content_format,
             model_content_policy=normalized_result.model_content_policy,
-            artifact_ref=normalized_result.artifact_ref,
         )
         await session.persist_message("tool", "", tool_call_id=call.call_id, tool_name=call.name)
 

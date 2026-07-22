@@ -54,7 +54,6 @@ class SessionStore(Protocol):
         model_content: str,
         model_content_format: str | None = None,
         model_content_policy: dict[str, Any] | None = None,
-        artifact_ref: str | None = None,
     ) -> None:
         """Persist tool call execution details asynchronously."""
         ...

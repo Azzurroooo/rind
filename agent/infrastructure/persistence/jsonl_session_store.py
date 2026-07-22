@@ -383,7 +383,6 @@ class JsonlSessionStore(SessionStore):
         model_content: str,
         model_content_format: str | None = None,
         model_content_policy: dict[str, Any] | None = None,
-        artifact_ref: str | None = None,
     ) -> None:
         async with self._write_lock:
             def _persist():
@@ -400,7 +399,6 @@ class JsonlSessionStore(SessionStore):
                     model_content=model_content,
                     model_content_format=model_content_format,
                     model_content_policy=model_content_policy,
-                    artifact_ref=artifact_ref,
                 )
                 self._invalidate_projection_cache()
                 self._tool_call_count += 1

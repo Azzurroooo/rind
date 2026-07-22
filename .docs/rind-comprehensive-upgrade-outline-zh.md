@@ -452,16 +452,15 @@ frontend-cli | interfaces/cli | interfaces/runtime_server | interfaces/api
   - 工具结果直接携带修改文件、行数和 diff 摘要。
 - 验收：文件被外部修改时拒绝覆盖并返回可恢复错误。
 
-### D0.3 输出截断与 artifact spill
+### D0.3 分层输出截断
 
 - 优先级：P0
-- 借鉴：OpenCode `tool/truncate.ts` 和 Codex output truncation。
-- 最小实现：
-  - terminal preview、model content 和磁盘 artifact 使用不同上限。
-  - 超限输出写入 `RIND_HOME/artifacts/<session>/<tool-call>`。
-  - tool result 返回 artifact ref、总字节数、总行数和建议读取方式。
-  - artifact 有 TTL 清理，不进入 Git。
-- 验收：100 MB 输出不会进入模型上下文或常驻内存；用户仍能定位完整结果。
+  - 借鉴：OpenCode `tool/truncate.ts` 和 Codex output truncation。
+  - 最小实现：
+    - terminal preview、model content 和持久化结果分别使用 8 KiB、40K 字符/10K token、64 KiB 上限。
+    - tool result 返回有界头尾预览、总字节数、总行数和缩小查询范围的建议。
+    - 超出部分直接丢弃；需要完整输出时显式分页或重定向到用户选择的文件。
+  - 验收：100 MB 输出不会进入模型上下文、持久化记录或常驻内存；终端结果明确标示截断。
 
 ### D0.4 单一 ProcessSupervisor
 

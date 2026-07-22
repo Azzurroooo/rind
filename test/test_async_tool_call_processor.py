@@ -49,6 +49,17 @@ class FakeFailingToolExecutor:
         return ToolExecutionResult(status="error", error_msg="failed", error_type="ToolFailed")
 
 
+class FakeLargeToolExecutor:
+    def is_async_tool(self, name: str) -> bool:
+        return True
+
+    async def execute_async(self, name: str, args: dict, raw_args: str | None = None):
+        return ToolExecutionResult(
+            status="ok",
+            result_str=json.dumps({"ok": True, "tool": name, "data": "x" * 100_000}),
+        )
+
+
 class FakeToolPayloadErrorExecutor:
     def is_async_tool(self, name: str) -> bool:
         return True
@@ -226,10 +237,31 @@ async def test_successful_tool_persists_result_directly() -> None:
     persisted_result = args[-1]
     if '"ok": true' not in persisted_result or '"tool": "demo_tool"' not in persisted_result:
         raise AssertionError(f"Expected standardized tool payload, got: {persisted_result}")
-    if kwargs.get("model_content_format") != "tool_result_v1":
+    if kwargs.get("model_content_format") != "tool_result_v2":
         raise AssertionError(f"Expected model_content_format, got: {kwargs}")
-    if kwargs.get("artifact_ref") is not None:
-        raise AssertionError(f"Expected artifact_ref None, got: {kwargs}")
+    if "artifact_ref" in kwargs:
+        raise AssertionError(f"Did not expect artifact_ref, got: {kwargs}")
+
+
+@pytest.mark.asyncio
+async def test_large_tool_result_uses_bounded_event_model_and_persistence_content() -> None:
+    processor = ToolCallProcessor(tool_executor=FakeLargeToolExecutor())
+    session = FakeSession()
+    call = ParsedToolCall(call_id="call_large", name="demo_tool", raw_args="{}")
+
+    events = [event async for event in processor.execute(session=session, tool_calls=[call])]
+
+    result_event = next(event for event in events if isinstance(event, ToolResultEvent))
+    persisted_args, persisted_kwargs = session.persisted_tool_calls[0]
+    persisted_result = persisted_args[-1]
+    model_content = persisted_kwargs["model_content"]
+    assert len(result_event.result.encode("utf-8")) <= 8 * 1024
+    assert len(model_content) <= 40000
+    assert len(persisted_result.encode("utf-8")) <= 64 * 1024
+    assert len(result_event.result) < len(model_content) < len(persisted_result)
+    assert json.loads(result_event.result)["meta"]["truncated"] is True
+    assert json.loads(model_content)["meta"]["truncated"] is True
+    assert json.loads(persisted_result)["meta"]["truncated"] is True
 
 
 @pytest.mark.asyncio
