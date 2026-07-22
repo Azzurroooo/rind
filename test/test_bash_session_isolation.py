@@ -3,7 +3,7 @@ from pathlib import Path
 
 from agent.infrastructure.tools.builtin.shell.session_pool import ShellSessionPool
 
-class TestBashSessionIsolation(unittest.TestCase):
+class TestShellSessionIsolation(unittest.TestCase):
     def test_session_isolation(self):
         pool = ShellSessionPool()
 
@@ -23,6 +23,7 @@ class TestBashSessionIsolation(unittest.TestCase):
         self.assertNotEqual(s2_updated.cwd, "/tmp/s1")
 
         # Reset state
+        pool.close("session_1")
         pool.close("session_1")
         s1_reset = pool.get_state("session_1")
         self.assertNotEqual(s1_reset.cwd, "/tmp/s1")

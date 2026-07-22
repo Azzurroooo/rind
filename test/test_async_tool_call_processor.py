@@ -1,3 +1,4 @@
+import asyncio
 import os
 import json
 import sys
@@ -13,7 +14,13 @@ import pytest
 from agent.application.tools.processor import ToolCallProcessor
 from agent.domain.cancellation import CancellationTokenSource
 from agent.domain import ParsedToolCall
-from agent.domain.events import FileChangeEvent, ToolCallStartedEvent, ToolResultEvent, UserQuestionRequestedEvent
+from agent.domain.events import (
+    FileChangeEvent,
+    ToolCallStartedEvent,
+    ToolProgressEvent,
+    ToolResultEvent,
+    UserQuestionRequestedEvent,
+)
 from agent.domain.tool_result import ToolExecutionResult
 
 
@@ -68,6 +75,25 @@ class FakeToolPayloadErrorExecutor:
         return ToolExecutionResult(
             status="ok",
             result_str='{"ok":false,"tool":"edit_file","error":"old_str not found","error_type":"OldStrNotFound"}',
+        )
+
+
+class FakeShellStateExecutor:
+    def __init__(self, status: str, delay: float = 0) -> None:
+        self.status = status
+        self.delay = delay
+
+    def is_async_tool(self, name: str) -> bool:
+        return True
+
+    async def execute_async(self, name: str, args: dict, raw_args: str | None = None):
+        if self.delay:
+            await asyncio.sleep(self.delay)
+        return ToolExecutionResult(
+            status="ok",
+            result_str=json.dumps(
+                {"ok": True, "tool": name, "data": {"status": self.status}}
+            ),
         )
 
 
@@ -150,6 +176,8 @@ async def test_bash_cancellation_token_is_not_persisted_in_tool_args() -> None:
 
     if "_cancellation_token" not in executor.received_args:
         raise AssertionError(f"Expected execution args to include cancellation token, got: {executor.received_args}")
+    if executor.received_args.get("_session_id") != session.session_id:
+        raise AssertionError(f"Expected execution args to include session ID, got: {executor.received_args}")
     if not any(isinstance(event, ToolResultEvent) for event in events):
         raise AssertionError(f"Expected tool result event, got: {events}")
     result_events = [event for event in events if isinstance(event, ToolResultEvent)]
@@ -181,6 +209,8 @@ async def test_sync_tool_receives_cancellation_token_without_persisting_private_
 
     if executor.received_args.get("_cancellation_token") is not cancel_source.token:
         raise AssertionError(f"Expected sync execution args to include cancellation token, got: {executor.received_args}")
+    if executor.received_args.get("_session_id") != session.session_id:
+        raise AssertionError(f"Expected sync execution args to include session ID, got: {executor.received_args}")
     result_events = [event for event in events if isinstance(event, ToolResultEvent)]
     if len(result_events) != 1 or result_events[0].status != "completed":
         raise AssertionError(f"Expected completed sync tool result, got: {events}")
@@ -241,6 +271,39 @@ async def test_successful_tool_persists_result_directly() -> None:
         raise AssertionError(f"Expected model_content_format, got: {kwargs}")
     if "artifact_ref" in kwargs:
         raise AssertionError(f"Did not expect artifact_ref, got: {kwargs}")
+
+
+@pytest.mark.asyncio
+async def test_shell_tool_emits_periodic_progress_before_result() -> None:
+    processor = ToolCallProcessor(
+        tool_executor=FakeShellStateExecutor("completed", delay=0.04)
+    )
+    processor.HEARTBEAT_INTERVAL = 0.01
+    call = ParsedToolCall(call_id="call_slow", name="bash", raw_args='{"command":"sleep"}')
+
+    events = [event async for event in processor.execute(session=FakeSession(), tool_calls=[call])]
+
+    assert isinstance(events[0], ToolCallStartedEvent)
+    assert any(isinstance(event, ToolProgressEvent) for event in events[1:-1])
+    assert isinstance(events[-1], ToolResultEvent)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("process_status", "event_status", "error_type"),
+    [("cancelled", "cancelled", "Cancelled"), ("timed_out", "timed_out", "Timeout")],
+)
+async def test_shell_terminal_state_sets_tool_result_status(
+    process_status: str, event_status: str, error_type: str
+) -> None:
+    processor = ToolCallProcessor(tool_executor=FakeShellStateExecutor(process_status))
+    call = ParsedToolCall(call_id="call_state", name="bash", raw_args='{"command":"test"}')
+
+    events = [event async for event in processor.execute(session=FakeSession(), tool_calls=[call])]
+    result = next(event for event in events if isinstance(event, ToolResultEvent))
+
+    assert result.status == event_status
+    assert result.error_type == error_type
 
 
 @pytest.mark.asyncio
@@ -335,6 +398,11 @@ async def test_file_change_is_not_emitted_for_failed_empty_or_non_file_tools() -
     ]
     if any(isinstance(event, FileChangeEvent) for event in payload_error_events):
         raise AssertionError(f"Did not expect file_change for ok:false tool payload, got: {payload_error_events}")
+    payload_error_result = next(
+        event for event in payload_error_events if isinstance(event, ToolResultEvent)
+    )
+    if payload_error_result.status != "failed" or payload_error_result.error_type != "OldStrNotFound":
+        raise AssertionError(f"Expected ok:false payload to fail, got: {payload_error_result}")
 
     processor = ToolCallProcessor(tool_executor=FakeToolExecutor())
     empty_call = ParsedToolCall(
@@ -607,6 +675,9 @@ def main() -> int:
     asyncio.run(test_sync_tool_receives_cancellation_token_without_persisting_private_args())
     asyncio.run(test_invalid_tool_args_emit_failed_result_without_started_event())
     asyncio.run(test_successful_tool_persists_result_directly())
+    asyncio.run(test_shell_tool_emits_periodic_progress_before_result())
+    asyncio.run(test_shell_terminal_state_sets_tool_result_status("cancelled", "cancelled", "Cancelled"))
+    asyncio.run(test_shell_terminal_state_sets_tool_result_status("timed_out", "timed_out", "Timeout"))
     asyncio.run(test_tool_result_event_reports_persist_failure())
     asyncio.run(test_tool_result_event_reports_tool_message_persist_failure())
     asyncio.run(test_async_tool_processor_limits_repeated_empty_bash_output())

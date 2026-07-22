@@ -18,7 +18,7 @@ class FakeShellPool:
 
 
 def test_system_info_omits_start_time(monkeypatch):
-    monkeypatch.setattr(prompts, "BashSessionPool", lambda: FakeShellPool("bash", "/bin/bash"))
+    monkeypatch.setattr(prompts, "ShellSessionPool", lambda: FakeShellPool("bash", "/bin/bash"))
 
     info = prompts.get_system_info()
 
@@ -27,7 +27,7 @@ def test_system_info_omits_start_time(monkeypatch):
 
 
 def test_system_info_includes_current_date_without_time(monkeypatch):
-    monkeypatch.setattr(prompts, "BashSessionPool", lambda: FakeShellPool("bash", "/bin/bash"))
+    monkeypatch.setattr(prompts, "ShellSessionPool", lambda: FakeShellPool("bash", "/bin/bash"))
 
     today = date.today().isoformat()
     info = prompts.get_system_info()
@@ -40,7 +40,7 @@ def test_system_info_includes_current_date_without_time(monkeypatch):
 
 def test_system_info_uses_detected_shell_backend(monkeypatch):
     shell_path = r"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe"
-    monkeypatch.setattr(prompts, "BashSessionPool", lambda: FakeShellPool("powershell", shell_path))
+    monkeypatch.setattr(prompts, "ShellSessionPool", lambda: FakeShellPool("powershell", shell_path))
 
     info = prompts.get_system_info()
 

@@ -2,11 +2,11 @@ import os
 import platform
 from datetime import date
 
-from agent.infrastructure.tools.builtin.shell.session_pool import BashSessionPool
+from agent.infrastructure.tools.builtin.shell.session_pool import ShellSessionPool
 
 
 def _detect_shell_display() -> tuple[str, str]:
-    pool = BashSessionPool()
+    pool = ShellSessionPool()
     shell_type = {
         "bash": "Bash",
         "sh": "POSIX sh",

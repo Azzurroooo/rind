@@ -105,7 +105,7 @@ TOOL_SPECS: tuple[ToolSpec, ...] = (
     ToolSpec(
         name="bash",
         handler=bash,
-        description="执行 Shell 命令。支持 cd 保持目录状态。run_in_background=false 时前台运行直到完成或超时；run_in_background=true 时先等待 wait_ms，短任务直接返回结果，仍在运行才返回 bg_id 供 bash_output 后续等待。",
+        description="执行 Shell 命令。支持 cd 保持目录状态，并返回 running、completed、failed、cancelled 或 timed_out 状态。run_in_background=false 时前台运行直到完成或超时；run_in_background=true 时先等待 wait_ms，短任务直接返回结果，仍在运行才返回 bg_id 供 bash_output 后续等待。",
         param_descriptions={
             "command": "要执行的命令",
             "run_in_background": "允许命令在等待窗口后挂起为后台任务。默认 False。",
@@ -115,7 +115,7 @@ TOOL_SPECS: tuple[ToolSpec, ...] = (
     ToolSpec(
         name="bash_output",
         handler=bash_output,
-        description="阻塞等待并读取后台进程的增量输出，或终止它。默认等待 wait_ms 直到有新 stdout/stderr、进程完成或超时；no_new_output=true 表示没有新信息，应按 suggested_next_wait_ms 再查。若返回 RepeatedEmptyPoll，应停止继续轮询并把 bg_id 告诉用户，提示稍后可继续查看。",
+        description="阻塞等待并读取后台进程的增量输出，或终止整个进程树。默认等待 wait_ms 直到有新 stdout/stderr、进程完成或超时；no_new_output=true 表示没有新信息，应按 suggested_next_wait_ms 再查。若返回 RepeatedEmptyPoll，应停止继续轮询并把 bg_id 告诉用户，提示稍后可继续查看。",
         param_descriptions={
             "bg_id": "后台进程 ID（bash 返回的 bg_id）",
             "kill": "设为 true 可终止该进程。默认 False（仅读取输出）。",

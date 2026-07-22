@@ -14,7 +14,6 @@ from agent.domain import (
     ParsedToolCall,
     PersistenceError,
     ToolEventStatus,
-    looks_like_tool_payload,
     parse_tool_args,
     tool_cancelled,
     tool_error,
@@ -23,6 +22,7 @@ from agent.domain import (
 from agent.domain.events import (
     RuntimeEvent,
     ToolCallStartedEvent,
+    ToolProgressEvent,
     ToolResultEvent,
     UserQuestionRequestedEvent,
     event_meta,
@@ -34,6 +34,7 @@ from agent.application.tools.result_normalizer import NormalizedToolResult, Tool
 from agent.domain.cancellation import CancellationToken
 
 UserQuestionResponder = Callable[[UserQuestionRequestedEvent], str | Awaitable[str]]
+_HEARTBEAT_TOOLS = frozenset({"bash", "bash_output"})
 
 
 @dataclass(slots=True)
@@ -45,6 +46,8 @@ class _ToolCallOutcome:
 
 class ToolCallProcessor:
     """Executes parsed tool calls and yields runtime events."""
+
+    HEARTBEAT_INTERVAL = 10.0
 
     def __init__(
         self,
@@ -112,12 +115,40 @@ class ToolCallProcessor:
                         yield question_event
                         outcome = await self._run_user_question(question_event)
                     else:
-                        outcome = await self._run_tool_call(
+                        tool_execution = self._run_tool_call(
                             call=call,
                             parsed_args=parsed_args,
+                            session_id=session.session_id or "default",
                             cancellation_token=cancellation_token,
                             empty_bash_output_counts=empty_bash_output_counts,
                         )
+                        if call.name not in _HEARTBEAT_TOOLS:
+                            outcome = await tool_execution
+                        else:
+                            execution = asyncio.create_task(tool_execution)
+                            try:
+                                while not execution.done():
+                                    done, _ = await asyncio.wait(
+                                        [execution], timeout=self.HEARTBEAT_INTERVAL
+                                    )
+                                    if done:
+                                        break
+                                    elapsed_seconds = max(
+                                        1, round(time.perf_counter() - started_at)
+                                    )
+                                    yield ToolProgressEvent(
+                                        **event_meta(session, turn_id),
+                                        tool_call_id=call.call_id,
+                                        tool_name=call.name,
+                                        payload={
+                                            "message": f"still running ({elapsed_seconds}s)"
+                                        },
+                                    )
+                                outcome = await execution
+                            finally:
+                                if not execution.done():
+                                    execution.cancel()
+                                    await asyncio.gather(execution, return_exceptions=True)
 
             ts_end = session.now_iso()
             normalized_result = self._tool_result_normalizer.normalize(
@@ -184,16 +215,19 @@ class ToolCallProcessor:
         *,
         call: ParsedToolCall,
         parsed_args: dict,
+        session_id: str,
         cancellation_token: CancellationToken | None,
         empty_bash_output_counts: dict[str, int],
     ) -> _ToolCallOutcome:
         try:
+            execution_args = {
+                **parsed_args,
+                "_session_id": session_id,
+                "_cancellation_token": cancellation_token,
+            }
             if self._tool_executor.is_async_tool(call.name):
-                execution_args = {**parsed_args, "_cancellation_token": cancellation_token}
                 result = await self._tool_executor.execute_async(call.name, execution_args, call.raw_args)
             else:
-                execution_args = {**parsed_args, "_cancellation_token": cancellation_token}
-
                 def _sync_run():
                     return self._tool_executor.execute_sync(call.name, execution_args, call.raw_args)
 
@@ -201,12 +235,14 @@ class ToolCallProcessor:
 
             if result.status == "ok":
                 tool_result_str = result.result_str
-                if not looks_like_tool_payload(tool_result_str):
+                payload = _load_tool_payload(tool_result_str)
+                if payload is None:
                     tool_result_str = tool_ok(call.name, tool_result_str)
-                if _is_cancelled_tool_payload(tool_result_str):
+                payload_status = _classify_tool_payload(payload) if payload else None
+                if payload_status:
                     return _ToolCallOutcome(
-                        status="cancelled",
-                        error_type="Cancelled",
+                        status=payload_status[0],
+                        error_type=payload_status[1],
                         result=tool_result_str,
                     )
                 self._polling_guard.record_observation(
@@ -362,16 +398,37 @@ class ToolCallProcessor:
         await session.persist_message("tool", "", tool_call_id=call.call_id, tool_name=call.name)
 
 
-def _is_cancelled_tool_payload(value: str) -> bool:
+def _load_tool_payload(value: str) -> dict | None:
+    if not value or not value.lstrip().startswith("{"):
+        return None
     try:
         payload = json.loads(value)
     except (TypeError, ValueError):
-        return False
-    return isinstance(payload, dict) and payload.get("ok") is False and payload.get("error_type") == "Cancelled"
+        return None
+    if isinstance(payload, dict) and "ok" in payload and "tool" in payload:
+        return payload
+    return None
+
+
+def _classify_tool_payload(payload: dict) -> tuple[ToolEventStatus, str] | None:
+    if payload.get("ok") is False:
+        error_type = payload.get("error_type")
+        if not isinstance(error_type, str) or not error_type:
+            error_type = "ToolExecutionError"
+        return _classify_tool_error(error_type), error_type
+    data = payload.get("data")
+    status = data.get("status") if isinstance(data, dict) else None
+    if status == "cancelled":
+        return "cancelled", "Cancelled"
+    if status == "timed_out":
+        return "timed_out", "Timeout"
+    return None
 
 
 def _classify_tool_error(error_type: str) -> ToolEventStatus:
     normalized = error_type.lower()
+    if normalized == "cancelled":
+        return "cancelled"
     if normalized in {"toolnotfound", "notfound", "userquestionunsupported"}:
         return "unavailable"
     if "timeout" in normalized or normalized in {"deadlineexceeded"}:

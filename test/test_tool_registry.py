@@ -79,3 +79,15 @@ def test_duplicate_tool_names_are_rejected() -> None:
 
     with pytest.raises(ValueError, match="Duplicate tool name: duplicate"):
         DefaultToolRegistry((_spec("duplicate", first), _spec("duplicate", second)))
+
+
+def test_shell_schemas_hide_runtime_session_context() -> None:
+    registry = DefaultToolRegistry()
+    schemas = {schema["function"]["name"]: schema for schema in registry.schemas}
+
+    for name in ("bash", "bash_output", "kill_shell"):
+        properties = schemas[name]["function"]["parameters"]["properties"]
+        assert "session_id" not in properties
+        assert "_session_id" not in properties
+    assert schemas["kill_shell"]["function"]["parameters"]["properties"] == {}
+    assert registry.is_async("kill_shell") is True

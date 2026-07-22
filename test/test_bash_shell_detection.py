@@ -99,7 +99,7 @@ def test_detect_shell_reports_missing_backend_on_windows(tmp_path, monkeypatch):
     assert "No supported shell backend" in (state.shell_error or "")
 
 
-def test_bash_runner_builds_powershell_command(tmp_path):
+def test_process_supervisor_builds_powershell_command(tmp_path):
     state = bash_session_pool.ShellState(
         cwd=str(tmp_path),
         env={},
@@ -113,7 +113,7 @@ def test_bash_runner_builds_powershell_command(tmp_path):
     assert command[-1] == "Write-Output hello"
 
 
-def test_bash_runner_returns_clear_error_when_shell_missing(tmp_path):
+def test_process_supervisor_returns_clear_error_when_shell_missing(tmp_path):
     state = bash_session_pool.ShellState(
         cwd=str(tmp_path),
         env={},
@@ -146,7 +146,7 @@ class _CompletedProcess:
         return None
 
 
-def test_bash_runner_detaches_child_stdin(tmp_path, monkeypatch):
+def test_process_supervisor_detaches_child_stdin(tmp_path, monkeypatch):
     calls = []
 
     async def fake_create_subprocess_exec(*_args, **kwargs):
