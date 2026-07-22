@@ -12,6 +12,7 @@ import sys
 from collections.abc import Callable
 from typing import Any
 
+from agent.application.runtime import InputQueueError
 from agent.bootstrap import build_agent_container
 from agent.domain.cancellation import CancellationTokenSource
 from agent.domain.events import UserQuestionRequestedEvent
@@ -350,6 +351,12 @@ class StdioRuntimeServer:
 
     async def _handle_control_message(self, message: dict[str, Any]) -> bool:
         method = str(message.get("method") or "")
+        if method == "turn.steer":
+            await self._submit_queued_input(message, self._runtime.submit_steering)
+            return True
+        if method == "turn.follow_up":
+            await self._submit_queued_input(message, self._runtime.submit_follow_up)
+            return True
         if method == "turn.interrupt":
             self._interrupt_current()
             await self._respond(message, {"ok": True})
@@ -361,6 +368,16 @@ class StdioRuntimeServer:
             await self._execute_readonly_slash(message)
             return True
         return False
+
+    async def _submit_queued_input(self, message: dict[str, Any], submit: Callable[[str], Any]) -> None:
+        params = message.get("params") if isinstance(message.get("params"), dict) else {}
+        text = params.get("input") if isinstance(params.get("input"), str) else ""
+        try:
+            result = submit(text)
+        except InputQueueError as exc:
+            await self._respond_error(message, str(exc), exc.error_type)
+            return
+        await self._respond(message, result)
 
     def _is_readonly_slash_request(self, message: dict[str, Any]) -> bool:
         params = message.get("params") if isinstance(message.get("params"), dict) else {}
@@ -404,6 +421,9 @@ class StdioRuntimeServer:
         )
 
     def _interrupt_current(self) -> None:
+        discard_inputs = getattr(self._runtime, "discard_pending_inputs", None)
+        if callable(discard_inputs):
+            discard_inputs()
         if self._current_cancel and not self._current_cancel.token.is_cancelled:
             self._current_cancel.cancel("User interrupted")
         for future in self._pending_answers.values():

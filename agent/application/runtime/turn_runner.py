@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 import logging
 import time
+from collections.abc import Awaitable, Callable
 from typing import AsyncIterator
 import openai
 from tenacity import RetryError
@@ -82,6 +84,7 @@ class TurnRunner:
         cancellation_token: CancellationToken | None = None,
         turn_id: str = "",
         transient_system_messages: list[dict] | None = None,
+        take_steering: Callable[[], str | None | Awaitable[str | None]] | None = None,
     ) -> AsyncIterator[RuntimeEvent]:
         """Run the main conversation loop for a user turn asynchronously, yielding events."""
 
@@ -247,32 +250,41 @@ class TurnRunner:
                     )
                     return
 
-                if not parsed_tool_calls:
-                    break
-                sampling_index += 1
+                if parsed_tool_calls:
+                    sampling_index += 1
 
-                await self._persist_message(
-                    session,
-                    "assistant",
-                    "",
-                    meta={"tool_calls": [{"id": item.call_id, "name": item.name} for item in parsed_tool_calls]},
-                )
-
-                for call in parsed_tool_calls:
-                    yield ToolRequestedEvent(
-                        **event_meta(session, turn_id),
-                        tool_call_id=call.call_id,
-                        tool_name=call.name,
-                        args_preview=call.raw_args[:500],
+                    await self._persist_message(
+                        session,
+                        "assistant",
+                        "",
+                        meta={"tool_calls": [{"id": item.call_id, "name": item.name} for item in parsed_tool_calls]},
                     )
 
-                async for event in self._tool_processor.execute(
-                    session=session,
-                    tool_calls=parsed_tool_calls,
-                    cancellation_token=cancellation_token,
-                    turn_id=turn_id,
-                ):
-                    yield event
+                    for call in parsed_tool_calls:
+                        yield ToolRequestedEvent(
+                            **event_meta(session, turn_id),
+                            tool_call_id=call.call_id,
+                            tool_name=call.name,
+                            args_preview=call.raw_args[:500],
+                        )
+
+                    async for event in self._tool_processor.execute(
+                        session=session,
+                        tool_calls=parsed_tool_calls,
+                        cancellation_token=cancellation_token,
+                        turn_id=turn_id,
+                    ):
+                        yield event
+
+                if cancellation_token and cancellation_token.is_cancelled:
+                    continue
+
+                steering = await self._next_steering(take_steering)
+                if steering is not None:
+                    await self._persist_message(session, "user", steering)
+
+                if not parsed_tool_calls and steering is None:
+                    break
 
             yield TurnCompletedEvent(
                 **event_meta(session, turn_id),
@@ -387,6 +399,17 @@ class TurnRunner:
             logger.debug("Session does not expose optional sampling persistence.", exc_info=True)
             return
         await self._best_effort(operation, usage)
+
+    async def _next_steering(
+        self,
+        take_steering: Callable[[], str | None | Awaitable[str | None]] | None,
+    ) -> str | None:
+        if take_steering is None:
+            return None
+        result = take_steering()
+        if inspect.isawaitable(result):
+            result = await result
+        return str(result) if result is not None else None
 
     def _validate_compact_context(self, context) -> None:
         messages = list(context.messages)

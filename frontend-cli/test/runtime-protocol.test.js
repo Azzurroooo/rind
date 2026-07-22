@@ -6,6 +6,7 @@ import {
   createRuntimeRequest,
   runtimeEventType,
   runtimeRequestId,
+  turnInputMethod,
 } from "../lib/runtime-protocol.js";
 
 test("runtime requests use request_id", () => {
@@ -29,4 +30,10 @@ test("runtime protocol recognizes the shared golden event fixture", () => {
 
   assert.deepEqual(messages.map(runtimeEventType), ["turn_started", "assistant_delta"]);
   assert.deepEqual(messages.map((message) => message.sequence), [1, 2]);
+});
+
+test("active input routes to follow-up without a client-side turn queue", () => {
+  assert.equal(turnInputMethod(false), "turn.start");
+  assert.equal(turnInputMethod(true), "turn.follow_up");
+  assert.equal(turnInputMethod(false), "turn.start");
 });

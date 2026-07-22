@@ -11,6 +11,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from agent.domain.cancellation import CancellationTokenSource
+from agent.application.runtime import InputQueueError
 from agent.interfaces.runtime_server.stdio import (
     JsonlWriter,
     StdioRuntimeServer,
@@ -196,6 +197,9 @@ def test_initialize_response_includes_resume_preview_when_history_exists(capsys)
         "compaction",
         "user_questions",
         "durable_replay",
+        "steering",
+        "follow_up",
+        "input_queue",
     ]
     assert result["session_id"] == "s1"
     assert result["model"] == "m1"
@@ -331,6 +335,141 @@ def test_non_readonly_slash_stays_on_main_queue(capsys):
     assert handled is False
     assert queued["params"]["input"] == "/help"
     assert capsys.readouterr().out == ""
+
+
+def test_turn_input_controls_respond_without_main_queue(capsys):
+    class Runtime(_Runtime):
+        def __init__(self):
+            super().__init__()
+            self.submitted = []
+
+        def submit_steering(self, text):
+            self.submitted.append(("steering", text))
+            return {"accepted": True, "mode": "steering", "pending": 1}
+
+        def submit_follow_up(self, text):
+            self.submitted.append(("follow_up", text))
+            return {"accepted": True, "mode": "follow_up", "pending": 2}
+
+    async def run():
+        runtime = Runtime()
+        server = StdioRuntimeServer(runtime, _Session())
+        steering_handled = await server._handle_control_message(
+            {"request_id": 31, "method": "turn.steer", "params": {"input": "change direction"}}
+        )
+        follow_up_handled = await server._handle_control_message(
+            {"request_id": 32, "method": "turn.follow_up", "params": {"input": "next task"}}
+        )
+        return runtime, server, steering_handled, follow_up_handled
+
+    runtime, server, steering_handled, follow_up_handled = asyncio.run(run())
+    messages = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
+
+    assert steering_handled is True
+    assert follow_up_handled is True
+    assert server._requests.empty()
+    assert runtime.submitted == [("steering", "change direction"), ("follow_up", "next task")]
+    assert messages[0]["result"] == {"accepted": True, "mode": "steering", "pending": 1}
+    assert messages[1]["result"] == {"accepted": True, "mode": "follow_up", "pending": 2}
+
+
+def test_turn_input_control_rejection_is_structured_protocol_error(capsys):
+    class Runtime(_Runtime):
+        def submit_steering(self, _text):
+            raise InputQueueError("steering queue is full", "InputQueueFull")
+
+    async def run():
+        server = StdioRuntimeServer(Runtime(), _Session())
+        return await server._handle_control_message(
+            {"request_id": 33, "method": "turn.steer", "params": {"input": "change"}}
+        )
+
+    assert asyncio.run(run()) is True
+    message = json.loads(capsys.readouterr().out)
+    assert message["request_id"] == 33
+    assert message["error"] == {"type": "InputQueueFull", "message": "steering queue is full"}
+
+
+def test_interrupt_discards_runtime_inputs_without_returning_them(capsys):
+    class Runtime(_Runtime):
+        def __init__(self):
+            super().__init__()
+            self.discard_calls = 0
+
+        def discard_pending_inputs(self):
+            self.discard_calls += 1
+
+    async def run():
+        runtime = Runtime()
+        server = StdioRuntimeServer(runtime, _Session())
+        current = CancellationTokenSource()
+        server._current_cancel = current
+        handled = await server._handle_control_message(
+            {"request_id": 34, "method": "turn.interrupt", "params": {}}
+        )
+        cancelled = current.token.is_cancelled
+        current.dispose()
+        return runtime, handled, cancelled
+
+    runtime, handled, cancelled = asyncio.run(run())
+    message = json.loads(capsys.readouterr().out)
+
+    assert handled is True
+    assert cancelled is True
+    assert runtime.discard_calls == 1
+    assert message["result"] == {"ok": True}
+
+
+def test_turn_input_control_is_handled_while_run_turn_is_blocked(capsys):
+    class Runtime(_Runtime):
+        def __init__(self):
+            super().__init__()
+            self.started = asyncio.Event()
+            self.release = asyncio.Event()
+            self.submitted = []
+
+        async def run_turn(self, **_kwargs):
+            self.started.set()
+            await self.release.wait()
+            yield type(
+                "Event",
+                (),
+                {
+                    "to_dict": lambda _self: {
+                        "type": "turn_completed",
+                        "ts": "1700000000.0",
+                        "session_id": "s1",
+                        "turn_id": "t1",
+                    }
+                },
+            )()
+
+        def submit_follow_up(self, text):
+            self.submitted.append(text)
+            return {"accepted": True, "mode": "follow_up", "pending": 1}
+
+    async def run():
+        runtime = Runtime()
+        server = StdioRuntimeServer(runtime, _Session())
+        turn_task = asyncio.create_task(
+            server._run_turn({"request_id": 35, "method": "turn.start", "params": {"input": "hello"}})
+        )
+        await runtime.started.wait()
+        handled = await server._handle_control_message(
+            {"request_id": 36, "method": "turn.follow_up", "params": {"input": "continue"}}
+        )
+        assert not turn_task.done()
+        runtime.release.set()
+        await turn_task
+        return runtime, handled
+
+    runtime, handled = asyncio.run(run())
+    messages = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
+
+    assert handled is True
+    assert runtime.submitted == ["continue"]
+    assert messages[0]["request_id"] == 36
+    assert messages[0]["result"]["mode"] == "follow_up"
 
 
 def test_readonly_slash_usage_errors_return_immediately(capsys):

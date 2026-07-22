@@ -9,3 +9,7 @@ export function runtimeRequestId(message) {
 export function runtimeEventType(message) {
   return message?.event_type || message?.event?.type || "";
 }
+
+export function turnInputMethod(activeTurn) {
+  return activeTurn ? "turn.follow_up" : "turn.start";
+}

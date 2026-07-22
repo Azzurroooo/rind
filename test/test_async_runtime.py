@@ -161,7 +161,7 @@ async def test_async_runtime_facade_emits_turn_started_first():
             return "2026-05-08T00:00:00Z"
 
     class FakeRunner:
-        async def run_turn(self, session, cancellation_token=None, turn_id=""):
+        async def run_turn(self, session, cancellation_token=None, turn_id="", take_steering=None):
             yield TurnCompletedEvent(turn_id=turn_id)
 
     session = FakeSession()
@@ -198,7 +198,7 @@ async def test_async_runtime_persists_terminal_turn_state():
             return "2026-05-08T00:00:00Z"
 
     class FakeRunner:
-        async def run_turn(self, session, cancellation_token=None, turn_id=""):
+        async def run_turn(self, session, cancellation_token=None, turn_id="", take_steering=None):
             yield TurnCompletedEvent(turn_id=turn_id, ts="2026-05-08T00:00:01Z")
 
     session = FakeSession()
@@ -235,7 +235,7 @@ async def test_async_runtime_facade_passes_transient_system_messages():
         def __init__(self):
             self.received = None
 
-        async def run_turn(self, session, cancellation_token=None, turn_id="", transient_system_messages=None):
+        async def run_turn(self, session, cancellation_token=None, turn_id="", transient_system_messages=None, take_steering=None):
             self.received = transient_system_messages
             yield TurnCompletedEvent(turn_id=turn_id)
 
@@ -277,7 +277,7 @@ async def test_async_runtime_facade_initializes_session_once_for_concurrent_turn
             return "2026-05-08T00:00:00Z"
 
     class FakeRunner:
-        async def run_turn(self, session, cancellation_token=None, turn_id=""):
+        async def run_turn(self, session, cancellation_token=None, turn_id="", take_steering=None):
             yield TurnCompletedEvent(turn_id=turn_id)
 
     session = FakeSession()

@@ -13,6 +13,9 @@ CAPABILITIES = (
     "compaction",
     "user_questions",
     "durable_replay",
+    "steering",
+    "follow_up",
+    "input_queue",
 )
 
 DURABLE_EVENT_TYPES = frozenset(

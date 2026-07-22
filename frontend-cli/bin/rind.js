@@ -11,11 +11,11 @@ import { createCompactContextState } from "../lib/compact-context-state.js";
 import { createComposerTerminal, withTerminalCursorHidden } from "../lib/composer-terminal.js";
 import { createLineEditor } from "../lib/line-editor.js";
 import { buildRuntimeEnv } from "../lib/runtime-env.js";
-import { createRuntimeRequest, runtimeEventType, runtimeRequestId } from "../lib/runtime-protocol.js";
+import { createRuntimeRequest, runtimeEventType, runtimeRequestId, turnInputMethod } from "../lib/runtime-protocol.js";
 import { createInputHistory } from "../lib/input-history.js";
 import { isInputClosed } from "../lib/input-errors.js";
 import { sigintAction } from "../lib/interrupt-state.js";
-import { isReadonlySlashCommand } from "../lib/slash-command-mode.js";
+import { isReadonlySlashCommand, steeringCommandText } from "../lib/slash-command-mode.js";
 import { createModelMenuState } from "../lib/model-menu-state.js";
 import { createSlashMenuState } from "../lib/slash-menu-state.js";
 import {
@@ -90,8 +90,6 @@ let slashCommands = [];
 let turnTools = { completed: 0, failed: 0 };
 let promptPaused = false;
 let pendingInputPrefill = "";
-let queuedTurns = 0;
-let turnQueue = Promise.resolve();
 let redrawActiveInput = null;
 let redrawActiveActivity = null;
 let suspendActiveInput = null;
@@ -152,7 +150,10 @@ process.on("SIGINT", handleSigint);
 try {
   const info = await request("initialize");
   sessionInfo = { cwd: process.cwd(), ...(info || {}) };
-  slashCommands = normalizeSlashCommands(info?.slash_commands);
+  slashCommands = normalizeSlashCommands([
+    ...(Array.isArray(info?.slash_commands) ? info.slash_commands : []),
+    { name: "steer", description: "Redirect the active turn", usage: "/steer <text>" },
+  ]);
   if (process.stdin.isTTY) {
     emitKeypressEvents(process.stdin);
     process.stdin.on("keypress", handleKeypress);
@@ -205,6 +206,11 @@ async function handleCommand(text) {
   }
   if (!text.startsWith("/")) {
     return false;
+  }
+  const steering = steeringCommandText(text);
+  if (steering !== null) {
+    submitSteering(steering, text);
+    return true;
   }
   await runSlashCommand(text);
   return true;
@@ -334,27 +340,45 @@ function modelSetResultText(result, model) {
 }
 
 function submitTurn(text, extra = {}) {
-  const wasRunning = activeTurn || activeCompact || queuedTurns > 0;
-  if (wasRunning) {
+  const method = turnInputMethod(activeTurn);
+  if (method === "turn.follow_up") {
     logOutput(queuedInputText(text));
+    void submitQueuedInput(method, text, text);
+    return;
   }
-  queuedTurns += 1;
-  if (!wasRunning) {
-    refreshInputState();
+  startTurn(text, extra);
+}
+
+function submitSteering(text, originalInput) {
+  void submitQueuedInput("turn.steer", text, originalInput);
+}
+
+async function submitQueuedInput(method, text, originalInput) {
+  try {
+    await request(method, { input: text });
+  } catch (error) {
+    handleSubmissionError(error, originalInput);
   }
-  const task = turnQueue.then(
-    () => runQueuedTurn(text, extra),
-    () => runQueuedTurn(text, extra),
-  );
-  turnQueue = task.catch((error) => {
-    if (!runtimeClosing) {
-      writeErrorOutput(`${error instanceof Error ? error.message : String(error)}\n`);
-    }
-  });
+}
+
+function handleSubmissionError(error, text) {
+  restoreInputText(text);
+  if (!runtimeClosing) {
+    writeErrorOutput(`${error instanceof Error ? error.message : String(error)}\n`);
+  }
+}
+
+function restoreInputText(text) {
+  pendingInputPrefill = String(text || "");
+  if (redrawActiveInput) {
+    const prefill = pendingInputPrefill;
+    pendingInputPrefill = "";
+    redrawActiveInput(prefill);
+  }
 }
 
 function inputState() {
-  const running = activeTurn || activeCompact || queuedTurns > 0;
+  const running = activeTurn || activeCompact;
   return {
     running,
     label: activeCompact ? "Compacting" : "Working",
@@ -384,7 +408,7 @@ function redrawInput() {
 }
 
 function updateActivityTimer() {
-  if (activeTurn || activeCompact || queuedTurns > 0) {
+  if (activeTurn || activeCompact) {
     if (!activityStartedAt) {
       activityStartedAt = Date.now();
     }
@@ -413,8 +437,7 @@ function clearActivityTimer() {
   activityStartedAt = 0;
 }
 
-async function runQueuedTurn(text, extra = {}) {
-  queuedTurns = Math.max(0, queuedTurns - 1);
+function startTurn(text, extra = {}) {
   if (runtimeClosing) {
     return;
   }
@@ -422,6 +445,11 @@ async function runQueuedTurn(text, extra = {}) {
   assistantHeaderShown = false;
   resetTurnTools();
   resumeInput();
+  refreshInputState();
+  void runTurn(text, extra).catch((error) => handleSubmissionError(error, text));
+}
+
+async function runTurn(text, extra = {}) {
   try {
     await request("turn.start", { input: text, ...extra });
   } finally {
@@ -622,7 +650,7 @@ async function renderEvent(message) {
     case "token_stats_updated":
       closeAssistant();
       latestStats = event.stats && typeof event.stats === "object" ? event.stats : {};
-      if (!activeTurn && queuedTurns === 0) {
+      if (!activeTurn) {
         redrawInput();
       }
       return;
