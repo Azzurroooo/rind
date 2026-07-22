@@ -26,7 +26,7 @@ class ShellState:
     shell_backend: str = "bash"
 
 
-class BashSessionPool:
+class ShellSessionPool:
     """Manages isolated shell states per session."""
 
     def __init__(self):
@@ -87,7 +87,6 @@ class BashSessionPool:
             )
         return self._states[session_id]
 
-    def reset_state(self, session_id: str) -> None:
-        """Reset the shell state for a session."""
-        if session_id in self._states:
-            del self._states[session_id]
+    def close(self, session_id: str) -> None:
+        """Close a shell state if it exists."""
+        self._states.pop(session_id, None)

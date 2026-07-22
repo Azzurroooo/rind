@@ -7,8 +7,8 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from agent.infrastructure.tools.builtin.shell import session_pool as bash_session_pool
-from agent.infrastructure.tools.builtin.shell.runner import BashRunner
-from agent.infrastructure.tools.builtin.shell.session_pool import BashSessionPool
+from agent.infrastructure.tools.builtin.shell.supervisor import ProcessSupervisor
+from agent.infrastructure.tools.builtin.shell.session_pool import ShellSessionPool
 
 
 def test_detect_shell_prefers_rind_bash_path(tmp_path, monkeypatch):
@@ -16,7 +16,7 @@ def test_detect_shell_prefers_rind_bash_path(tmp_path, monkeypatch):
     bash_path.write_text("", encoding="utf-8")
     monkeypatch.setenv("RIND_BASH_PATH", str(bash_path))
 
-    pool = BashSessionPool()
+    pool = ShellSessionPool()
 
     assert pool._default_executable == str(bash_path)
     assert pool._default_backend == "bash"
@@ -32,7 +32,7 @@ def test_detect_shell_uses_bundled_portable_git(tmp_path, monkeypatch):
     monkeypatch.setattr(bash_session_pool.sys, "executable", str(app_dir / "rind.exe"))
     monkeypatch.setattr(bash_session_pool.shutil, "which", lambda name: None)
 
-    pool = BashSessionPool()
+    pool = ShellSessionPool()
 
     assert pool._default_executable == str(bash_path)
     assert pool._default_backend == "bash"
@@ -48,7 +48,7 @@ def test_detect_shell_uses_bundled_portable_git_usr_bin(tmp_path, monkeypatch):
     monkeypatch.setattr(bash_session_pool.sys, "executable", str(app_dir / "rind.exe"))
     monkeypatch.setattr(bash_session_pool.shutil, "which", lambda name: None)
 
-    pool = BashSessionPool()
+    pool = ShellSessionPool()
 
     assert pool._default_executable == str(bash_path)
     assert pool._default_backend == "bash"
@@ -66,12 +66,12 @@ def test_detect_shell_falls_back_to_powershell_on_windows(tmp_path, monkeypatch)
         lambda name: str(powershell_path) if name in {"pwsh", "powershell", "powershell.exe"} else None,
     )
     monkeypatch.setattr(
-        BashSessionPool,
+        ShellSessionPool,
         "_windows_bash_candidates",
         lambda self: [tmp_path / "missing" / "bash.exe"],
     )
 
-    pool = BashSessionPool()
+    pool = ShellSessionPool()
     state = pool.get_state("fallback")
 
     assert state.shell_executable == str(powershell_path)
@@ -85,13 +85,13 @@ def test_detect_shell_reports_missing_backend_on_windows(tmp_path, monkeypatch):
     monkeypatch.setattr(bash_session_pool.sys, "executable", str(tmp_path / "rind.exe"))
     monkeypatch.setattr(bash_session_pool.shutil, "which", lambda name: None)
     monkeypatch.setattr(
-        BashSessionPool,
+        ShellSessionPool,
         "_windows_bash_candidates",
         lambda self: [tmp_path / "missing" / "bash.exe"],
     )
-    monkeypatch.setattr(BashSessionPool, "_detect_powershell", lambda self: None)
+    monkeypatch.setattr(ShellSessionPool, "_detect_powershell", lambda self: None)
 
-    pool = BashSessionPool()
+    pool = ShellSessionPool()
     state = pool.get_state("missing")
 
     assert state.shell_executable is None
@@ -106,7 +106,7 @@ def test_bash_runner_builds_powershell_command(tmp_path):
         shell_executable=r"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe",
         shell_backend="powershell",
     )
-    command = BashRunner(timeout=1)._build_shell_cmd("Write-Output hello", state)
+    command = ProcessSupervisor(timeout=1)._build_shell_cmd("Write-Output hello", state)
 
     assert command[0].endswith("powershell.exe")
     assert "-Command" in command
@@ -121,7 +121,7 @@ def test_bash_runner_returns_clear_error_when_shell_missing(tmp_path):
         shell_error="No supported shell backend was found.",
         shell_backend="unavailable",
     )
-    result = asyncio.run(BashRunner(timeout=1).run("echo hello", state))
+    result = asyncio.run(ProcessSupervisor(timeout=1).run("echo hello", state, "test"))
 
     assert result.status == "error"
     assert result.error_type == "RuntimeError"
@@ -134,6 +134,7 @@ class _EmptyStream:
 
 
 class _CompletedProcess:
+    pid = 123
     stdout = _EmptyStream()
     stderr = _EmptyStream()
     returncode = 0
@@ -158,12 +159,12 @@ def test_bash_runner_detaches_child_stdin(tmp_path, monkeypatch):
         env={},
         shell_executable="bash",
     )
-    runner = BashRunner(timeout=1)
+    supervisor = ProcessSupervisor(timeout=1)
 
     async def run():
-        await runner.run("echo hello", state)
-        bg = await runner._spawn_background("echo hello", state, "session_1")
-        await asyncio.gather(*bg._tasks, return_exceptions=True)
+        await supervisor.run("echo hello", state, "session_1")
+        bg = await supervisor._spawn("echo hello", state, "session_1", True)
+        await bg.finished.wait()
 
     asyncio.run(run())
 

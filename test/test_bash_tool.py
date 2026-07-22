@@ -13,7 +13,6 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from agent.infrastructure.tools.builtin.shell.tool import bash, kill_shell
-from agent.infrastructure.tools.builtin.shell.session_pool import BashSessionPool
 
 @pytest.fixture
 def temp_dir(tmp_path: Path) -> Path:
@@ -74,7 +73,7 @@ def test_cd_and_cwd(temp_dir: Path) -> None:
 
 def test_kill_shell_resets(temp_dir: Path) -> None:
     assert_ok(parse_payload(run(bash(f"cd {str(temp_dir)}"))))
-    payload = assert_ok(parse_payload(kill_shell()))
+    payload = assert_ok(parse_payload(run(kill_shell())))
     if payload.get("tool") != "kill_shell":
         raise AssertionError(f"Expected tool=kill_shell, got: {payload}")
     payload = assert_ok(parse_payload(run(bash("cd ."))))

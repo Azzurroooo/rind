@@ -1,20 +1,23 @@
 from __future__ import annotations
 
+import atexit
+
 from agent.domain import tool_error, tool_ok
 from agent.domain.cancellation import CancellationToken
-from .session_pool import BashSessionPool
+from .session_pool import ShellSessionPool
 from .policy import BashPolicy
-from .runner import BashRunner
+from .supervisor import ProcessSupervisor
 
-_POOL = BashSessionPool()
-_RUNNER = BashRunner(timeout=120)
+_POOL = ShellSessionPool()
+_SUPERVISOR = ProcessSupervisor(timeout=120)
+atexit.register(_SUPERVISOR.close_now)
 
 
 async def bash(
     command: str,
-    session_id: str = "default",
     run_in_background: bool = False,
     wait_ms: int = 10000,
+    _session_id: str = "default",
     _cancellation_token: CancellationToken | None = None,
 ) -> str:
     """Execute a bash command. Use run_in_background=true for long-running commands like servers."""
@@ -36,18 +39,23 @@ async def bash(
             meta={"command": command[:500]},
         )
 
-    state = _POOL.get_state(session_id)
+    state = _POOL.get_state(_session_id)
 
     if run_in_background:
-        result = await _RUNNER.run_background_with_initial_wait(
+        result = await _SUPERVISOR.run_background(
             command,
             state,
-            session_id=session_id,
+            session_id=_session_id,
             wait_ms=wait_ms,
             cancellation_token=_cancellation_token,
         )
     else:
-        result = await _RUNNER.run(command, state, cancellation_token=_cancellation_token)
+        result = await _SUPERVISOR.run(
+            command,
+            state,
+            session_id=_session_id,
+            cancellation_token=_cancellation_token,
+        )
 
     if result.status == "ok":
         return result.result_str
@@ -60,6 +68,7 @@ async def bash_output(
     kill: bool = False,
     wait_ms: int = 15000,
     max_output_chars: int = 20000,
+    _session_id: str = "default",
     _cancellation_token: CancellationToken | None = None,
 ) -> str:
     """
@@ -70,10 +79,11 @@ async def bash_output(
     :param max_output_chars: Maximum chars returned per stdout/stderr delta
     """
     if kill:
-        result = await _RUNNER.kill_background_wait(bg_id)
+        result = await _SUPERVISOR.cancel_background(bg_id, _session_id)
     else:
-        result = await _RUNNER.read_background_wait(
+        result = await _SUPERVISOR.read_background(
             bg_id,
+            _session_id,
             wait_ms=wait_ms,
             max_output_chars=max_output_chars,
             cancellation_token=_cancellation_token,
@@ -85,8 +95,8 @@ async def bash_output(
         return tool_error("bash_output", result.error_msg, result.error_type)
 
 
-def kill_shell(session_id: str = "default") -> str:
+async def kill_shell(_session_id: str = "default") -> str:
     """Reset the Shell session and kill all its background processes."""
-    _RUNNER.kill_session_backgrounds(session_id)
-    _POOL.reset_state(session_id)
+    await _SUPERVISOR.close_session(_session_id)
+    _POOL.close(_session_id)
     return tool_ok("kill_shell", "Shell session reset. All background processes killed.")

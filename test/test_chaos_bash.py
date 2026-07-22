@@ -10,8 +10,8 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from agent.domain.cancellation import CancellationTokenSource
-from agent.infrastructure.tools.builtin.shell.runner import _StreamCapture
-from agent.infrastructure.tools.builtin.shell.tool import _RUNNER, bash
+from agent.infrastructure.tools.builtin.shell.capture import StreamCapture
+from agent.infrastructure.tools.builtin.shell.tool import _SUPERVISOR, bash
 
 
 def _python_command(code: str) -> str:
@@ -47,7 +47,7 @@ def test_bash_truncation_large_output(monkeypatch):
 
 
 def test_stream_capture_discards_100_mib_without_growing_retained_text():
-    capture = _StreamCapture()
+    capture = StreamCapture()
     raw = b"A" * 4095 + b"\n"
     text = raw.decode()
 
@@ -62,11 +62,26 @@ def test_stream_capture_discards_100_mib_without_growing_retained_text():
     assert len(capture.render()) < 21000
     assert capture.truncated is True
 
+
+def test_stream_capture_delta_survives_tail_rollover():
+    capture = StreamCapture()
+    capture.append(b"A" * 10000, "A" * 10000)
+    capture.append(b"B" * 20000, "B" * 20000)
+
+    _, cursor, truncated = capture.delta(0, 40000)
+    capture.append(b"C" * 1000, "C" * 1000)
+    delta, next_cursor, next_truncated = capture.delta(cursor, 40000)
+
+    assert truncated is True
+    assert delta == "C" * 1000
+    assert next_cursor == 31000
+    assert next_truncated is False
+
 def test_bash_timeout(monkeypatch):
     """Test that a stuck process is killed after timeout."""
     # Temporarily reduce timeout for the test
-    original_timeout = _RUNNER.timeout
-    _RUNNER.timeout = 1
+    original_timeout = _SUPERVISOR.timeout
+    _SUPERVISOR.timeout = 1
 
     try:
         # Sleep for 3 seconds, which exceeds the 1 second timeout
@@ -76,7 +91,7 @@ def test_bash_timeout(monkeypatch):
         assert parsed["ok"] is True
         assert "PROCESS TERMINATED: Command timed out" in parsed["data"]["stderr"]
     finally:
-        _RUNNER.timeout = original_timeout
+        _SUPERVISOR.timeout = original_timeout
 
 
 async def _run_cancelled_bash():
@@ -89,7 +104,7 @@ async def _run_cancelled_bash():
     asyncio.create_task(cancel_soon())
     res = await bash(
         "python3 -c \"import time; time.sleep(3)\"",
-        session_id="chaos_cancel",
+        _session_id="chaos_cancel",
         _cancellation_token=source.token,
     )
     pending = [
@@ -110,6 +125,7 @@ def test_bash_cancellation_settles_internal_tasks():
 def main() -> int:
     test_bash_truncation_large_output(None)
     test_stream_capture_discards_100_mib_without_growing_retained_text()
+    test_stream_capture_delta_survives_tail_rollover()
     test_bash_timeout(None)
     test_bash_cancellation_settles_internal_tasks()
     print("Chaos bash tests passed.")

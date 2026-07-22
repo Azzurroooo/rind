@@ -1,11 +1,11 @@
 import unittest
 from pathlib import Path
 
-from agent.infrastructure.tools.builtin.shell.session_pool import BashSessionPool
+from agent.infrastructure.tools.builtin.shell.session_pool import ShellSessionPool
 
 class TestBashSessionIsolation(unittest.TestCase):
     def test_session_isolation(self):
-        pool = BashSessionPool()
+        pool = ShellSessionPool()
 
         # State creation
         s1 = pool.get_state("session_1")
@@ -23,7 +23,7 @@ class TestBashSessionIsolation(unittest.TestCase):
         self.assertNotEqual(s2_updated.cwd, "/tmp/s1")
 
         # Reset state
-        pool.reset_state("session_1")
+        pool.close("session_1")
         s1_reset = pool.get_state("session_1")
         self.assertNotEqual(s1_reset.cwd, "/tmp/s1")
 
