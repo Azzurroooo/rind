@@ -163,8 +163,10 @@ def _build_assistant_tool_calls(
         if not tc_id:
             raise ValueError("Invalid tool call message: missing tool call id.")
         tc_record = tool_map.get(tc_id)
-        raw_args = tc_record.get("raw_args") if isinstance(tc_record, dict) else ""
-        if not raw_args:
+        if not isinstance(tc_record, dict):
+            continue
+        raw_args = tc_record.get("raw_args")
+        if raw_args is None:
             continue
         tool_calls.append(
             {"id": tc_id, "type": "function", "function": {"name": tc_name, "arguments": raw_args}}

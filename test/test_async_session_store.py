@@ -17,6 +17,7 @@ if str(PROJECT_ROOT) not in sys.path:
 from agent.infrastructure.persistence.jsonl_session_store import JsonlSessionStore
 from agent.infrastructure.persistence.session_files import SessionFiles
 from agent.domain.compaction import COMPACT_CONTINUATION_USER_CONTENT
+from agent.domain.message_boundary import validate_model_message_boundary
 
 @pytest.fixture
 def temp_session_dir():
@@ -279,6 +280,40 @@ async def test_message_projector_deduplicates_tool_messages(temp_session_dir):
 
     assert len(tool_messages) == 1
     assert tool_messages[0] == {"role": "tool", "tool_call_id": "call_1", "content": "fixed model content"}
+
+
+@pytest.mark.asyncio
+async def test_get_messages_slice_preserves_empty_tool_arguments(temp_session_dir):
+    store = JsonlSessionStore(session_dir=temp_session_dir, system_prompt="sys")
+    await store.initialize()
+    await store.persist_message("user", "run the tool")
+    await store.persist_message("assistant", "", meta={"tool_calls": [{"id": "call_1", "name": "list_files"}]})
+    await store.persist_tool_call(
+        call_id="call_1",
+        name="list_files",
+        parsed_args={},
+        raw_args="",
+        ts_start=store.now_iso(),
+        ts_end=store.now_iso(),
+        result_payload=json.dumps({"ok": True, "tool": "list_files", "data": "empty"}),
+        model_content="empty result",
+    )
+    await store.persist_message("tool", "", tool_call_id="call_1", tool_name="list_files")
+
+    messages = await store.get_messages_slice()
+
+    assert messages[2] == {
+        "role": "assistant",
+        "tool_calls": [
+            {
+                "id": "call_1",
+                "type": "function",
+                "function": {"name": "list_files", "arguments": ""},
+            }
+        ],
+    }
+    assert messages[3] == {"role": "tool", "tool_call_id": "call_1", "content": "empty result"}
+    assert validate_model_message_boundary(messages).ok
 
 
 @pytest.mark.asyncio
