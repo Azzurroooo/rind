@@ -1,3 +1,4 @@
+import hashlib
 import json
 import os
 import shutil
@@ -106,6 +107,8 @@ def test_read_file_paginates_with_encoding_and_next_offset(tmp_path: Path) -> No
     for key, value in expected.items():
         if payload["meta"].get(key) != value:
             raise AssertionError(f"Expected meta[{key}]={value}, got: {payload}")
+    if payload["meta"].get("sha256") != hashlib.sha256(file_path.read_bytes()).hexdigest():
+        raise AssertionError(f"Expected complete-file SHA-256, got: {payload}")
 
     next_page = assert_ok(read_file(str(file_path), offset=payload["meta"]["next_offset"], limit=2))
     if "   4 | four" not in next_page["data"] or next_page["meta"].get("truncated") is not False:
@@ -138,6 +141,18 @@ def test_read_file_rejects_invalid_offset_and_honors_limit_cap(tmp_path: Path) -
     payload = assert_ok(read_file(str(file_path), limit=5000))
     if payload["meta"].get("limit") != 2000:
         raise AssertionError(f"Expected capped read limit, got: {payload}")
+
+
+def test_read_file_returns_sha256_for_empty_file(tmp_path: Path) -> None:
+    file_path = tmp_path / "empty.txt"
+    file_path.write_bytes(b"")
+
+    payload = assert_ok(read_file(str(file_path)))
+
+    if payload["meta"].get("sha256") != hashlib.sha256(b"").hexdigest():
+        raise AssertionError(f"Expected empty-file SHA-256, got: {payload}")
+    if payload["meta"].get("truncated") is not False:
+        raise AssertionError(f"Expected complete empty-file read, got: {payload}")
 
 
 def test_sync_file_tools_return_cancelled_payload(tmp_path: Path) -> None:
@@ -186,6 +201,7 @@ def main() -> int:
         test_read_file_paginates_with_encoding_and_next_offset,
         test_read_file_rejects_missing_directory_binary_encoding_and_large_files,
         test_read_file_rejects_invalid_offset_and_honors_limit_cap,
+        test_read_file_returns_sha256_for_empty_file,
         test_sync_file_tools_return_cancelled_payload,
     ]
     for test in tests:

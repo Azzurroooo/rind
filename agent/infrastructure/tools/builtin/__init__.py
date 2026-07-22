@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from ..spec import ToolSpec
-from .files import edit_file, glob, grep, read_file, write_file
+from .files import apply_patch, edit_file, glob, grep, read_file, write_file
 from .pdf import read_pdf
 from .planning import (
     plan_add_step,
@@ -36,7 +36,7 @@ TOOL_SPECS: tuple[ToolSpec, ...] = (
     ToolSpec(
         name="read_file",
         handler=read_file,
-        description="读取 UTF-8 文本文件的指定行范围，返回行号、截断状态和下一次 offset。",
+        description="读取 UTF-8 文本文件的指定行范围，返回行号、截断状态、下一次 offset 和完整文件 SHA-256。",
         param_descriptions={
             "path": "文件绝对或相对路径",
             "offset": "起始行号（默认 1）",
@@ -57,18 +57,29 @@ TOOL_SPECS: tuple[ToolSpec, ...] = (
     ToolSpec(
         name="write_file",
         handler=write_file,
-        description="写入内容到文件（警告：此操作会完全覆盖原文件。修改已有大文件时请使用 edit_file）",
-        param_descriptions={"file_path": "文件路径", "content": "内容"},
+        description="原子新建 UTF-8 文本文件，或在 expected_sha256 匹配时完整覆盖已有文件。",
+        param_descriptions={
+            "file_path": "文件绝对或相对路径",
+            "content": "完整文件内容",
+            "expected_sha256": "覆盖已有文件时必填，必须使用最近一次 read_file 返回的 sha256；新建文件时省略。",
+        },
     ),
     ToolSpec(
         name="edit_file",
         handler=edit_file,
-        description="精准替换文件中的文本块 (Search and Replace)。适用于修改已有文件，避免输出整个文件。必须保证 old_str 与文件中的文本完全一致（包括空格和缩进）。如果匹配到多处，将拒绝替换。",
+        description="在 expected_sha256 匹配时原子替换已有 UTF-8 文件中的唯一文本块。old_str 必须与文件内容完全一致。",
         param_descriptions={
             "file_path": "文件绝对或相对路径",
             "old_str": "需要被替换的原文块。建议包含上下文以确保唯一。",
             "new_str": "用来替换 old_str 的新文本块。",
+            "expected_sha256": "必填，必须使用最近一次 read_file 返回的 sha256。",
         },
+    ),
+    ToolSpec(
+        name="apply_patch",
+        handler=apply_patch,
+        description="严格应用 Codex *** Begin Patch 格式的多文件补丁。支持 Add File、Update File、Delete File；Update/Delete 段必须紧跟 *** Expected SHA256 指令。不支持 move、模糊匹配或 unified diff。",
+        param_descriptions={"patch": "完整的 Codex 格式 patch 字符串；修改或删除已有文件时嵌入 read_file 返回的 SHA-256。"},
     ),
     ToolSpec(
         name="glob",

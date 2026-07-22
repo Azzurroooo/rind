@@ -1,5 +1,7 @@
-"""文件操作工具定义。"""
+"""文件导航工具定义。"""
 
+import hashlib
+import io
 import json
 from pathlib import Path
 import shutil
@@ -14,7 +16,7 @@ _SKIP_DIRS = frozenset({
     "dist", "build", ".mypy_cache", ".pytest_cache", ".tox",
     ".hg", ".svn", "site-packages",
 })
-_READ_MAX_FILE_SIZE = 10 * 1024 * 1024
+MAX_TEXT_FILE_SIZE = 10 * 1024 * 1024
 _READ_MAX_LIMIT = 2000
 _MAX_LINE_CHARS = 2000
 
@@ -93,20 +95,20 @@ def read_file(
 
     try:
         size_bytes = file_path.stat().st_size
-        if size_bytes > _READ_MAX_FILE_SIZE:
+        if size_bytes > MAX_TEXT_FILE_SIZE:
             return tool_error(
                 "read_file",
-                f"文件过大（>{_READ_MAX_FILE_SIZE // (1024 * 1024)}MB），请先使用 grep 定位内容。",
+                f"文件过大（>{MAX_TEXT_FILE_SIZE // (1024 * 1024)}MB），请先使用 grep 定位内容。",
                 "FileTooLarge",
                 meta={"path": str(file_path), "size_bytes": size_bytes},
             )
 
-        with file_path.open("rb") as binary_file:
-            sample = binary_file.read(8192)
+        raw_content = file_path.read_bytes()
+        sample = raw_content[:8192]
         if _looks_binary(sample):
             return tool_error("read_file", f"二进制文件不可按文本读取: {path}", "BinaryFile")
         try:
-            sample.decode("utf-8")
+            text_content = raw_content.decode("utf-8")
         except UnicodeDecodeError:
             return tool_error("read_file", f"文件不是有效的 UTF-8 文本: {path}", "InvalidEncoding")
 
@@ -115,7 +117,7 @@ def read_file(
         selected: list[tuple[int, str]] = []
         has_more = False
         last_line = 0
-        with file_path.open("r", encoding="utf-8", errors="strict") as text_file:
+        with io.StringIO(text_content) as text_file:
             for line_no, line in enumerate(text_file, start=1):
                 last_line = line_no
                 if line_no < offset:
@@ -129,7 +131,7 @@ def read_file(
                 if line_no % 1000 == 0 and (cancelled := _cancelled("read_file", _cancellation_token)):
                     return cancelled
 
-        if offset > last_line:
+        if offset > last_line and not (offset == 1 and last_line == 0):
             return tool_error(
                 "read_file",
                 f"起始行 {offset} 超出文件总行数 ({last_line} 行)。",
@@ -137,7 +139,7 @@ def read_file(
                 meta={"path": str(file_path), "offset": offset},
             )
 
-        shown_end = selected[-1][0]
+        shown_end = selected[-1][0] if selected else 0
         output = [f"Showing lines {offset} to {shown_end}:"]
         output.extend(f"{line_no:4d} | {text}" for line_no, text in selected)
         return tool_ok(
@@ -150,6 +152,7 @@ def read_file(
                 "truncated": has_more,
                 "next_offset": shown_end + 1 if has_more else None,
                 "encoding": "utf-8",
+                "sha256": hashlib.sha256(raw_content).hexdigest(),
             },
         )
     except PermissionError:
@@ -158,50 +161,6 @@ def read_file(
         return tool_error("read_file", f"文件不是有效的 UTF-8 文本: {path}", "InvalidEncoding")
     except OSError as exc:
         return tool_error("read_file", f"读取文件失败: {exc}", "ReadError")
-
-
-def write_file(file_path: str, content: str) -> str:
-    try:
-        path = Path(file_path).expanduser().resolve()
-        is_overwrite = path.exists()
-        action = "覆盖" if is_overwrite else "新建"
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(content, encoding="utf-8")
-        message = f"成功{action}文件: {path} ({len(content)} 字符)"
-        if is_overwrite:
-            message += "\n[警告] 原文件已被完全覆盖。如果这不是你的本意，请使用 edit_file 进行局部修改。"
-        return tool_ok("write_file", message, meta={"file_path": str(path), "action": action, "chars": len(content)})
-    except Exception as exc:
-        return tool_error("write_file", f"写入错误: {exc}", type(exc).__name__)
-
-
-def edit_file(file_path: str, old_str: str, new_str: str) -> str:
-    try:
-        path = Path(file_path).expanduser().resolve()
-        if not path.exists():
-            return tool_error("edit_file", f"文件不存在: {file_path}", "NotFound")
-        if not path.is_file():
-            return tool_error("edit_file", f"路径不是文件: {file_path}", "NotAFile")
-        if path.stat().st_size > _READ_MAX_FILE_SIZE:
-            return tool_error("edit_file", "文件过大（>10MB），无法进行全量读取编辑。", "FileTooLarge")
-
-        content = path.read_text(encoding="utf-8")
-        if old_str not in content:
-            return tool_error("edit_file", "编辑失败：在文件中找不到指定的 old_str。请先使用 read_file 查看确切内容。", "OldStrNotFound")
-        count = content.count(old_str)
-        if count > 1:
-            return tool_error(
-                "edit_file",
-                f"编辑失败：找到 {count} 处匹配的 old_str。请提供唯一的上下文。",
-                "OldStrNotUnique",
-                meta={"count": count},
-            )
-
-        path.write_text(content.replace(old_str, new_str), encoding="utf-8")
-        return tool_ok("edit_file", f"成功：在 {file_path} 中完成了文本替换。", meta={"file_path": str(path)})
-    except Exception as exc:
-        return tool_error("edit_file", f"编辑错误: {exc}", type(exc).__name__)
-
 
 def glob(
     pattern: str,
