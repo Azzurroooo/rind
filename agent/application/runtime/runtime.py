@@ -101,10 +101,12 @@ class AgentRuntime:
                     code=type(exc).__name__,
                 ) from exc
 
-        yield TurnStartedEvent(
+        started_event = TurnStartedEvent(
             **event_meta(self._session_store, turn_id),
             user_message_chars=len(query or ""),
         )
+        await self._persist_turn_state(started_event)
+        yield started_event
 
         runner_kwargs = {
             "session": self._session_store,
@@ -115,4 +117,21 @@ class AgentRuntime:
             runner_kwargs["transient_system_messages"] = transient_system_messages
 
         async for event in self._turn_runner.run_turn(**runner_kwargs):
+            if event.type in {"turn_completed", "turn_failed", "turn_cancelled"}:
+                await self._persist_turn_state(event)
             yield event
+
+    async def _persist_turn_state(self, event: RuntimeEvent) -> None:
+        persist = getattr(self._session_store, "persist_turn_state", None)
+        if not callable(persist):
+            return
+        try:
+            status = "running" if event.type == "turn_started" else event.type.removeprefix("turn_")
+            await persist(event.turn_id, status, event.ts)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            raise PersistenceError(
+                f"Failed to persist turn state: {exc}",
+                code=type(exc).__name__,
+            ) from exc

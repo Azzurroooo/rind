@@ -101,6 +101,14 @@ class SessionStore(Protocol):
         """Get the latest ordinary assistant sampling usage sample."""
         ...
 
+    async def persist_turn_state(self, turn_id: str, status: str, ts: str) -> None:
+        """Persist the latest turn state."""
+        ...
+
+    async def get_turn_state(self) -> dict[str, Any] | None:
+        """Get the latest persisted turn state."""
+        ...
+
     async def get_compact_generation(self) -> int:
         """Get the current compact generation counter."""
         ...

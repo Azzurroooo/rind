@@ -106,6 +106,8 @@ class StdioRuntimeServer:
                 await self._initialize(request)
             elif method == "turn.start":
                 await self._run_turn(request)
+            elif method == "session.replay":
+                await self._replay(request)
             elif method == "compact":
                 await self._compact(request)
             elif method == "models.list":
@@ -151,6 +153,27 @@ class StdioRuntimeServer:
             return ""
         messages = await get_messages()
         return render_resume_preview(messages, session_id=getattr(self._session, "session_id", None))
+
+    async def _turn_state(self) -> dict[str, Any] | None:
+        get_state = getattr(self._session, "get_turn_state", None)
+        if not callable(get_state):
+            return None
+        state = await get_state()
+        return dict(state) if isinstance(state, dict) else None
+
+    async def _replay(self, request: dict[str, Any]) -> None:
+        get_messages = getattr(self._session, "get_messages_slice", None)
+        if not callable(get_messages):
+            await self._respond(request, {"messages": [], "turn_state": await self._turn_state()})
+            return
+        params = request.get("params") if isinstance(request.get("params"), dict) else {}
+        start = params.get("start") if isinstance(params.get("start"), int) else None
+        end = params.get("end") if isinstance(params.get("end"), int) else None
+        if start is None and end is None:
+            messages = await get_messages()
+        else:
+            messages = await get_messages(start=start, end=end)
+        await self._respond(request, {"messages": messages, "turn_state": await self._turn_state()})
 
     async def _run_turn(self, request: dict[str, Any]) -> None:
         params = request.get("params") if isinstance(request.get("params"), dict) else {}

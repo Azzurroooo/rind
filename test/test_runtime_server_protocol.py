@@ -119,6 +119,7 @@ def test_runtime_events_use_versioned_envelope(capsys):
     messages = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
     assert [message["sequence"] for message in messages] == [1, 2]
     assert messages[0]["event_type"] == "assistant_delta"
+    assert messages[0]["durability"] == "incremental"
     assert messages[0]["timestamp"] == "1700000000.0"
     assert messages[0]["session_id"] == "s1"
     assert messages[0]["turn_id"] == "t1"
@@ -130,6 +131,11 @@ def test_golden_event_fixture_matches_python_envelope():
     messages = [json.loads(line) for line in fixture.read_text(encoding="utf-8").splitlines()]
 
     assert [event_envelope(message["event"], message["sequence"]) for message in messages] == messages
+
+
+def test_event_envelope_separates_durable_and_incremental_events():
+    assert event_envelope({"type": "assistant_delta"}, 1)["durability"] == "incremental"
+    assert event_envelope({"type": "tool_result"}, 2)["durability"] == "durable"
 
 
 def test_turn_response_contains_session_and_turn_ids(capsys):
@@ -182,12 +188,41 @@ def test_initialize_response_includes_resume_preview_when_history_exists(capsys)
     result = message["result"]
     assert message["request_id"] == 7
     assert result["protocol_version"] == "1"
-    assert result["capabilities"] == ["events", "turns", "slash_commands", "models", "compaction", "user_questions"]
+    assert result["capabilities"] == [
+        "events",
+        "turns",
+        "slash_commands",
+        "models",
+        "compaction",
+        "user_questions",
+        "durable_replay",
+    ]
     assert result["session_id"] == "s1"
     assert result["model"] == "m1"
     assert "Resumed session s1" in result["resume_preview"]
     assert "- user: hello" in result["resume_preview"]
     assert any(command["name"] == "status" for command in result["slash_commands"])
+
+
+def test_session_replay_returns_projected_messages_and_turn_state(capsys):
+    class Session(_Session):
+        async def get_messages_slice(self, start=None, end=None):
+            return [{"role": "user", "content": "hello"}][slice(start, end)]
+
+        async def get_turn_state(self):
+            return {"turn_id": "t1", "status": "completed", "ts": "now"}
+
+    async def run():
+        server = StdioRuntimeServer(_Runtime(), Session())
+        await server._replay({"request_id": 23, "method": "session.replay", "params": {}})
+
+    asyncio.run(run())
+
+    message = json.loads(capsys.readouterr().out)
+    assert message["result"] == {
+        "messages": [{"role": "user", "content": "hello"}],
+        "turn_state": {"turn_id": "t1", "status": "completed", "ts": "now"},
+    }
 
 
 def test_slash_execute_reuses_cli_router(capsys):

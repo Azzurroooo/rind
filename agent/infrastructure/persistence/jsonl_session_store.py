@@ -497,6 +497,31 @@ class JsonlSessionStore(SessionStore):
 
         return await asyncio.to_thread(_get)
 
+    async def persist_turn_state(self, turn_id: str, status: str, ts: str) -> None:
+        clean_turn_id = str(turn_id or "").strip()
+        clean_status = str(status or "").strip()
+        if not clean_turn_id or not clean_status:
+            raise ValueError("Turn state requires turn_id and status.")
+        async with self._write_lock:
+            def _persist():
+                if not self._session_meta:
+                    return
+                self._session_meta["turn_state"] = {
+                    "turn_id": clean_turn_id,
+                    "status": clean_status,
+                    "ts": str(ts or self.now_iso()),
+                }
+                self._persist_meta_sync()
+
+            await asyncio.to_thread(_persist)
+
+    async def get_turn_state(self) -> dict[str, Any] | None:
+        def _get():
+            state = self._session_meta.get("turn_state") if isinstance(self._session_meta, dict) else None
+            return dict(state) if isinstance(state, dict) else None
+
+        return await asyncio.to_thread(_get)
+
     async def get_compact_generation(self) -> int:
         def _get():
             return int(self._auto_compact_window_sync().get("ordinal") or 1)

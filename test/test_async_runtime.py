@@ -178,6 +178,43 @@ async def test_async_runtime_facade_emits_turn_started_first():
 
 
 @pytest.mark.asyncio
+async def test_async_runtime_persists_terminal_turn_state():
+    class FakeSession:
+        session_id = "session_1"
+
+        def __init__(self):
+            self.states = []
+
+        async def initialize(self):
+            return None
+
+        async def persist_message(self, role, content, **kwargs):
+            return None
+
+        async def persist_turn_state(self, turn_id, status, ts):
+            self.states.append((turn_id, status, ts))
+
+        def now_iso(self):
+            return "2026-05-08T00:00:00Z"
+
+    class FakeRunner:
+        async def run_turn(self, session, cancellation_token=None, turn_id=""):
+            yield TurnCompletedEvent(turn_id=turn_id, ts="2026-05-08T00:00:01Z")
+
+    session = FakeSession()
+    events = [
+        event
+        async for event in AgentRuntime(FakeRunner(), session).run_turn(query="hello")
+    ]
+
+    assert isinstance(events[-1], TurnCompletedEvent)
+    assert session.states == [
+        (events[0].turn_id, "running", events[0].ts),
+        (events[-1].turn_id, "completed", "2026-05-08T00:00:01Z"),
+    ]
+
+
+@pytest.mark.asyncio
 async def test_async_runtime_facade_passes_transient_system_messages():
     class FakeSession:
         session_id = "session_1"

@@ -66,6 +66,23 @@ async def test_async_session_store_facade(temp_session_dir):
     assert len(messages) == 11 # 1 user + 5 assistant + 5 system
 
 
+@pytest.mark.asyncio
+async def test_async_session_store_persists_and_reloads_turn_state(temp_session_dir):
+    store = JsonlSessionStore(session_dir=temp_session_dir)
+    await store.initialize()
+
+    await store.persist_turn_state("turn-1", "completed", "2026-05-08T00:00:00Z")
+    assert await store.get_turn_state() == {
+        "turn_id": "turn-1",
+        "status": "completed",
+        "ts": "2026-05-08T00:00:00Z",
+    }
+
+    resumed = JsonlSessionStore(session_dir=temp_session_dir, session_id=store.session_id)
+    await resumed.initialize()
+    assert await resumed.get_turn_state() == await store.get_turn_state()
+
+
 def test_resolve_session_root_uses_rind_home(monkeypatch, tmp_path):
     rind_home = tmp_path / ".rind"
     monkeypatch.setenv("RIND_HOME", str(rind_home))

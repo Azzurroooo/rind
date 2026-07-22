@@ -12,7 +12,24 @@ CAPABILITIES = (
     "models",
     "compaction",
     "user_questions",
+    "durable_replay",
 )
+
+DURABLE_EVENT_TYPES = frozenset(
+    {
+        "turn_started",
+        "assistant_message_completed",
+        "tool_requested",
+        "tool_result",
+        "turn_completed",
+        "turn_failed",
+        "turn_cancelled",
+    }
+)
+
+
+def event_durability(event: dict[str, Any]) -> str:
+    return "durable" if event.get("type") in DURABLE_EVENT_TYPES else "incremental"
 
 
 def event_envelope(event: dict[str, Any], sequence: int) -> dict[str, Any]:
@@ -21,6 +38,7 @@ def event_envelope(event: dict[str, Any], sequence: int) -> dict[str, Any]:
         "kind": "event",
         "sequence": sequence,
         "event_type": str(event.get("type") or ""),
+        "durability": event_durability(event),
         "timestamp": str(event.get("ts") or ""),
         "session_id": str(event.get("session_id") or ""),
         "turn_id": str(event.get("turn_id") or ""),
