@@ -3,10 +3,14 @@
 from __future__ import annotations
 
 import json
+import logging
 import math
 import re
 from dataclasses import dataclass, field
 from typing import Any
+
+
+logger = logging.getLogger(__name__)
 
 
 _PREFERRED_KEYS = (
@@ -145,7 +149,7 @@ class ToolResultNormalizer:
             try:
                 return len(self._tokenizer.encode(text, disallowed_special=()))
             except Exception:
-                pass
+                logger.debug("Tokenizer failed; using heuristic tool-result estimate.", exc_info=True)
         divisor = 1.5 if self._cjk_pattern.search(text) else 3.5
         return int(math.ceil(len(text) / divisor))
 

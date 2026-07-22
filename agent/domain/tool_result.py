@@ -7,6 +7,8 @@ import json
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
+from .errors import FailureStatus
+
 
 @dataclass(slots=True)
 class ToolExecutionResult:
@@ -15,6 +17,7 @@ class ToolExecutionResult:
     result_str: str = ""
     error_msg: str = ""
     error_type: str = ""
+    failure_status: FailureStatus | None = None
     exit_code: int = 0
     metadata: dict[str, Any] = field(default_factory=dict)
 

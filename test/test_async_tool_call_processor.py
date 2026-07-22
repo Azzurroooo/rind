@@ -197,8 +197,8 @@ async def test_invalid_tool_args_emit_failed_result_without_started_event() -> N
     if len(result_events) != 1:
         raise AssertionError(f"Expected one result event, got: {events}")
     result = result_events[0]
-    if result.status != "failed" or result.error_type != "ToolArgsJSONError":
-        raise AssertionError(f"Expected failed parse result, got: {result}")
+    if result.status != "rejected" or result.error_type != "ToolArgsJSONError":
+        raise AssertionError(f"Expected rejected parse result, got: {result}")
     if result.turn_id != "turn_1":
         raise AssertionError(f"Expected turn_id to be propagated, got: {result.turn_id}")
 
@@ -340,7 +340,7 @@ async def test_tool_result_event_reports_persist_failure() -> None:
         raise AssertionError(f"Expected one result event, got: {events}")
     result = result_events[0]
     payload = json.loads(result.result)
-    if result.status != "failed" or result.error_type != "OSError":
+    if result.status != "failed" or result.error_type != "PersistenceError":
         raise AssertionError(f"Expected failed persist result, got: {result}")
     if payload.get("ok") is not False or "Failed to persist tool result" not in payload.get("error", ""):
         raise AssertionError(f"Expected structured persist failure payload, got: {payload}")
@@ -368,7 +368,7 @@ async def test_tool_result_event_reports_tool_message_persist_failure() -> None:
         raise AssertionError(f"Expected one result event, got: {events}")
     result = result_events[0]
     payload = json.loads(result.result)
-    if result.status != "failed" or result.error_type != "OSError":
+    if result.status != "failed" or result.error_type != "PersistenceError":
         raise AssertionError(f"Expected failed message persist result, got: {result}")
     if payload.get("ok") is not False or "Failed to persist tool result" not in payload.get("error", ""):
         raise AssertionError(f"Expected structured persist failure payload, got: {payload}")
@@ -409,8 +409,8 @@ async def test_async_tool_processor_limits_repeated_empty_bash_output() -> None:
     error = blocked.get("error", "")
     if "bg_123" not in error or "Stop calling bash_output" not in error or "user" not in error:
         raise AssertionError(f"Expected blocked poll to tell the model to stop and return bg_id, got: {blocked}")
-    if result_events[-1].status != "failed":
-        raise AssertionError(f"Expected failed result event for blocked poll, got: {result_events[-1]}")
+        if result_events[-1].status != "rejected":
+            raise AssertionError(f"Expected rejected result event for blocked poll, got: {result_events[-1]}")
 
 
 @pytest.mark.asyncio
@@ -508,8 +508,8 @@ async def test_ask_user_question_without_responder_emits_question_then_unsupport
         raise AssertionError(f"Expected started/question/result events, got: {events}")
     result_event = events[-1]
     payload = json.loads(result_event.result)
-    if result_event.status != "failed" or result_event.error_type != "UserQuestionUnsupported":
-        raise AssertionError(f"Expected unsupported failure event, got: {result_event}")
+    if result_event.status != "unavailable" or result_event.error_type != "UserQuestionUnsupported":
+        raise AssertionError(f"Expected unsupported unavailable event, got: {result_event}")
     if payload.get("ok") is not False or payload.get("error_type") != "UserQuestionUnsupported":
         raise AssertionError(f"Expected structured unsupported payload, got: {payload}")
     if len(session.persisted_tool_calls) != 1 or len(session.persisted_messages) != 1:
@@ -560,8 +560,8 @@ async def test_ask_user_question_interrupted_input_fails_without_cancelling_turn
 
     result_event = [event for event in events if isinstance(event, ToolResultEvent)][-1]
     payload = json.loads(result_event.result)
-    if result_event.status != "failed" or result_event.error_type != "KeyboardInterrupt":
-        raise AssertionError(f"Expected interrupted-input failure, got: {result_event}")
+    if result_event.status != "cancelled" or result_event.error_type != "KeyboardInterrupt":
+        raise AssertionError(f"Expected interrupted-input cancellation, got: {result_event}")
     if payload.get("ok") is not False or payload.get("error_type") != "KeyboardInterrupt":
         raise AssertionError(f"Expected structured interrupted-input payload, got: {payload}")
     if len(session.persisted_tool_calls) != 1 or len(session.persisted_messages) != 1:

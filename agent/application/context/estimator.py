@@ -3,9 +3,13 @@
 from __future__ import annotations
 
 import json
+import logging
 import math
 import re
 from dataclasses import asdict, dataclass
+
+
+logger = logging.getLogger(__name__)
 
 
 DEFAULT_CONTEXT_WINDOW_TOKENS = 200000
@@ -142,7 +146,7 @@ class ContextEstimator:
                 tokens = len(self._tokenizer.encode(payload, disallowed_special=()))
                 return tokens, chars
             except Exception:
-                pass
+                logger.debug("Tokenizer failed; using heuristic context estimate.", exc_info=True)
 
         if self._cjk_pattern.search(payload):
             tokens = int(math.ceil(chars / 1.5))

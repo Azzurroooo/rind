@@ -2,6 +2,15 @@
 
 from .tool_payload import ParsedToolCall, looks_like_tool_payload, parse_tool_args
 from .tool_result import ToolExecutionResult, tool_cancelled, tool_error, tool_ok
+from .errors import (
+    BoundaryError,
+    FailureStatus,
+    PersistenceError,
+    ProviderError,
+    RenderingError,
+    ToolBoundaryError,
+    ToolEventStatus,
+)
 from .cancellation import CancellationToken, CancellationTokenSource
 from .events import (
     RuntimeEvent,
@@ -51,6 +60,13 @@ __all__ = [
     "TurnFailedEvent",
     "TurnCancelledEvent",
     "ToolExecutionResult",
+    "BoundaryError",
+    "FailureStatus",
+    "PersistenceError",
+    "ProviderError",
+    "RenderingError",
+    "ToolBoundaryError",
+    "ToolEventStatus",
     "CancellationToken",
     "CancellationTokenSource",
     "Skill",

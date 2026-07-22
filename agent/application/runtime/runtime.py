@@ -9,6 +9,7 @@ from typing import AsyncIterator
 from agent.application.ports.session_store import SessionStore
 from agent.application.runtime.turn_runner import TurnRunner
 from agent.domain.cancellation import CancellationToken
+from agent.domain.errors import PersistenceError
 from agent.domain.events import RuntimeEvent, TurnStartedEvent, event_meta
 
 
@@ -28,7 +29,15 @@ class AgentRuntime:
         async with self._initialize_lock:
             if self._initialized:
                 return
-            await self._session_store.initialize()
+            try:
+                await self._session_store.initialize()
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                raise PersistenceError(
+                    f"Failed to initialize session store: {exc}",
+                    code=type(exc).__name__,
+                ) from exc
             self._initialized = True
 
     def set_retry_callback(self, callback) -> None:
@@ -37,29 +46,27 @@ class AgentRuntime:
 
     def set_user_question_responder(self, responder) -> None:
         """Set a callback invoked when ask_user_question needs a user answer."""
-        set_responder = getattr(self._turn_runner, "set_user_question_responder", None)
-        if callable(set_responder):
-            set_responder(responder)
+        self._turn_runner.set_user_question_responder(responder)
 
     async def set_model(self, model: str) -> dict[str, bool]:
         """Switch the active chat model and persist the session metadata when supported."""
         await self.initialize()
-        set_model = getattr(self._turn_runner, "set_model", None)
-        runtime_updated = bool(set_model(model)) if callable(set_model) else False
-        session_updated = False
-        update_model = getattr(self._session_store, "update_model", None)
-        if callable(update_model):
-            await update_model(model)
-            session_updated = True
-        return {"runtime": runtime_updated, "session": session_updated}
+        runtime_updated = bool(self._turn_runner.set_model(model))
+        try:
+            await self._session_store.update_model(model)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+                raise PersistenceError(
+                    f"Failed to persist model update: {exc}",
+                    code=type(exc).__name__,
+            ) from exc
+        return {"runtime": runtime_updated, "session": True}
 
     async def compact_context(self, reason: str = "manual", cancellation_token: CancellationToken | None = None) -> dict:
         """Manually compact the current session through the turn runner."""
         await self.initialize()
-        compact = getattr(self._turn_runner, "compact_context", None)
-        if not callable(compact):
-            raise RuntimeError("Compact is not supported by this runtime.")
-        return await compact(
+        return await self._turn_runner.compact_context(
             self._session_store,
             reason=reason,
             phase="manual",
@@ -84,7 +91,15 @@ class AgentRuntime:
         turn_id = uuid.uuid4().hex
 
         if query:
-            await self._session_store.persist_message("user", query)
+            try:
+                await self._session_store.persist_message("user", query)
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                raise PersistenceError(
+                    f"Failed to persist user message: {exc}",
+                    code=type(exc).__name__,
+                ) from exc
 
         yield TurnStartedEvent(
             **event_meta(self._session_store, turn_id),

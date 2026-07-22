@@ -10,8 +10,14 @@ from __future__ import annotations
 
 import time
 import uuid
+import logging
 from dataclasses import dataclass, field, asdict
 from typing import Any, Literal
+
+from .errors import ToolEventStatus, FailureStatus
+
+
+logger = logging.getLogger(__name__)
 
 
 def make_event_id() -> str:
@@ -25,6 +31,7 @@ def event_meta(session: Any = None, turn_id: str = "") -> dict[str, str]:
     try:
         ts = now_iso() if callable(now_iso) else ""
     except Exception:
+        logger.debug("Best-effort event timestamp lookup failed.", exc_info=True)
         ts = ""
     if not isinstance(ts, str) or not ts:
         ts = str(time.time())
@@ -146,9 +153,10 @@ class ToolResultEvent(RuntimeEvent):
     type: Literal["tool_result"] = "tool_result"
     tool_call_id: str = ""
     tool_name: str = ""
-    status: Literal["completed", "failed"] = "completed"
+    status: ToolEventStatus = "completed"
     result: str = ""
     error_type: str = ""
+    error_source: str = ""
     duration_ms: int = 0
 
 
@@ -192,6 +200,8 @@ class TurnFailedEvent(RuntimeEvent):
     type: Literal["turn_failed"] = "turn_failed"
     error: str = ""
     error_type: str = ""
+    status: FailureStatus = "failed"
+    error_source: str = "runtime"
 
 
 @dataclass(slots=True)

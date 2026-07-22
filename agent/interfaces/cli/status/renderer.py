@@ -22,6 +22,7 @@ from agent.domain.events import (
     TurnFailedEvent,
     TurnStartedEvent,
 )
+from agent.domain.errors import RenderingError
 from agent.interfaces.cli.formatting import clip_text, escaped_newlines
 
 from .activity import tool_activity_summary
@@ -45,28 +46,36 @@ class CliStatusRenderer:
 
     def handle(self, event: RuntimeEvent) -> None:
         """Render a runtime event if it is relevant to CLI status."""
-        if isinstance(event, TurnStartedEvent):
-            self._handle_turn_started(event)
-        elif isinstance(event, ContextBuiltEvent):
-            self._handle_context_built(event)
-        elif isinstance(event, SkillActivatedEvent):
-            self._handle_skill_activated(event)
-        elif isinstance(event, ToolRequestedEvent):
-            self._handle_tool_requested(event)
-        elif isinstance(event, ToolCallStartedEvent):
-            self._handle_tool_started(event)
-        elif isinstance(event, ToolProgressEvent):
-            self._handle_tool_progress(event)
-        elif isinstance(event, ToolResultEvent):
-            self._handle_tool_result(event)
-        elif isinstance(event, TokenStatsUpdatedEvent):
-            self._handle_token_stats(event)
-        elif isinstance(event, TurnCompletedEvent):
-            self._handle_turn_completed(event)
-        elif isinstance(event, TurnFailedEvent):
-            self._handle_turn_failed(event)
-        elif isinstance(event, TurnCancelledEvent):
-            self._handle_turn_cancelled(event)
+        try:
+            if isinstance(event, TurnStartedEvent):
+                self._handle_turn_started(event)
+            elif isinstance(event, ContextBuiltEvent):
+                self._handle_context_built(event)
+            elif isinstance(event, SkillActivatedEvent):
+                self._handle_skill_activated(event)
+            elif isinstance(event, ToolRequestedEvent):
+                self._handle_tool_requested(event)
+            elif isinstance(event, ToolCallStartedEvent):
+                self._handle_tool_started(event)
+            elif isinstance(event, ToolProgressEvent):
+                self._handle_tool_progress(event)
+            elif isinstance(event, ToolResultEvent):
+                self._handle_tool_result(event)
+            elif isinstance(event, TokenStatsUpdatedEvent):
+                self._handle_token_stats(event)
+            elif isinstance(event, TurnCompletedEvent):
+                self._handle_turn_completed(event)
+            elif isinstance(event, TurnFailedEvent):
+                self._handle_turn_failed(event)
+            elif isinstance(event, TurnCancelledEvent):
+                self._handle_turn_cancelled(event)
+        except RenderingError:
+            raise
+        except Exception as exc:
+            raise RenderingError(
+                f"Failed to render {event.type} event: {exc}",
+                error_type=type(exc).__name__,
+            ) from exc
 
     def _handle_turn_started(self, event: TurnStartedEvent) -> None:
         self._state = TurnDisplayState(turn_id=event.turn_id)
@@ -144,11 +153,13 @@ class CliStatusRenderer:
         state.duration_ms = event.duration_ms
         state.error_type = event.error_type or ""
         duration = _format_duration(event.duration_ms)
-        if event.status == "failed":
+        if event.status != "completed":
             error = f" ({state.error_type})" if state.error_type else ""
             detail = _tool_error_detail(event.result)
             suffix = f": {detail}" if detail else ""
-            self._print_status(f"Tool: {state.name} failed in {duration}{error}{suffix}", style="red")
+            label = event.status.replace("_", " ")
+            style = "yellow" if event.status == "cancelled" else "red"
+            self._print_status(f"Tool: {state.name} {label} in {duration}{error}{suffix}", style=style)
             return
         self._print_status(f"Tool: {state.name} completed in {duration}")
 
@@ -166,7 +177,8 @@ class CliStatusRenderer:
         message = event.error or "unknown"
         if self._debug and event.error_type:
             message = f"{message} ({event.error_type})"
-        self._print_status(f"[Error] Turn failed: {message}", style="red")
+        detail = f" [{event.status}]" if event.status != "failed" else ""
+        self._print_status(f"[Error] Turn failed{detail}: {message}", style="red")
 
     def _handle_turn_cancelled(self, event: TurnCancelledEvent) -> None:
         self._print_status(f"[Cancelled] Turn cancelled: {event.reason or 'unknown'}", style="yellow")
@@ -199,7 +211,7 @@ class CliStatusRenderer:
 
     def _tool_counts(self) -> tuple[int, int]:
         completed = sum(1 for item in self._state.tools.values() if item.status == "completed")
-        failed = sum(1 for item in self._state.tools.values() if item.status == "failed")
+        failed = sum(1 for item in self._state.tools.values() if item.status != "completed")
         return completed, failed
 
     def _print_debug(self, message: str) -> None:

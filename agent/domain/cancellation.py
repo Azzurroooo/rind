@@ -3,7 +3,11 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from typing import Callable
+
+
+logger = logging.getLogger(__name__)
 
 
 class CancellationToken:
@@ -71,7 +75,7 @@ class CancellationToken:
             try:
                 callback()
             except Exception:
-                pass
+                logger.debug("Cancellation callback failed.", exc_info=True)
 
 
 class CancellationTokenSource:

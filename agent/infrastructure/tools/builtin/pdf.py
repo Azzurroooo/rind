@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 
 from agent.domain.cancellation import CancellationToken
@@ -10,6 +11,9 @@ from agent.domain import tool_cancelled, tool_error, tool_ok
 _MAX_PAGES_PER_CALL = 30
 _TEXT_THRESHOLD = 50  # chars — below this, page is considered scanned/image
 _IMAGE_THRESHOLD = 10  # images — above this, page is treated as scanned even with text
+
+
+logger = logging.getLogger(__name__)
 
 
 class _PdfCancelled(Exception):
@@ -191,7 +195,7 @@ def _extract_single_page(
         except _PdfCancelled:
             raise
         except Exception:
-            pass
+            logger.debug("Fast PDF extraction failed; falling back to OCR.", exc_info=True)
 
     return _ocr_page(doc, page_idx, cancellation_token=cancellation_token)
 

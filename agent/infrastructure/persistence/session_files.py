@@ -5,7 +5,11 @@ from __future__ import annotations
 import json
 import os
 import uuid
+import logging
 from filelock import FileLock, Timeout
+
+
+logger = logging.getLogger(__name__)
 
 class SessionFiles:
     def __init__(self):
@@ -79,4 +83,4 @@ class SessionFiles:
             if os.path.exists(path):
                 os.unlink(path)
         except Exception:
-            pass
+            logger.debug("Best-effort temporary session file cleanup failed.", exc_info=True)

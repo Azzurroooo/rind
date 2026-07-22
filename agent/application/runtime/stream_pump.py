@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from dataclasses import dataclass, field
 from typing import Any, AsyncIterator, Awaitable, Callable
 
@@ -13,6 +14,9 @@ from agent.application.runtime.stream_parser import MessageStreamParser
 from agent.domain.cancellation import CancellationToken
 from agent.domain import ParsedToolCall
 from agent.domain.events import AssistantDeltaEvent, RuntimeEvent, TokenStatsUpdatedEvent, event_meta
+
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -49,7 +53,7 @@ async def pump_model_stream_events(
             normalized_usage = _normalize_usage(
                 usage,
                 context_stats,
-                model=getattr(session, "model", None),
+                model=_session_model(session) if usage is not None else None,
             )
             if normalized_usage:
                 await persist_sampling_usage(session, normalized_usage)
@@ -78,8 +82,10 @@ async def pump_model_stream_events(
             consume_task.cancel()
             try:
                 await consume_task
-            except (asyncio.CancelledError, Exception):
-                pass
+            except asyncio.CancelledError:
+                logger.debug("Cancelled model stream consumer during cleanup.", exc_info=True)
+            except Exception:
+                logger.debug("Model stream consumer cleanup failed.", exc_info=True)
 
     consume_task.result()
 
@@ -123,3 +129,10 @@ def _positive_int_or_default(value: Any, default: int) -> int:
     except (TypeError, ValueError):
         return default
     return parsed if parsed > 0 else default
+
+
+def _session_model(session: SessionStore) -> str | None:
+    try:
+        return session.model
+    except AttributeError:
+        return None

@@ -2,11 +2,17 @@
 
 from __future__ import annotations
 
+import asyncio
+import logging
 from dataclasses import dataclass, field
 
 from agent.domain.skills import render_active_skill_instructions
+from agent.domain.errors import PersistenceError
 
 from .estimator import ContextEstimator
+
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(slots=True)
@@ -47,7 +53,15 @@ class ContextManager:
         transient_system_messages: list[dict] | None = None,
         allow_rescue: bool = False,
     ) -> ContextBuildResult:
-        persisted_messages = [dict(message) for message in await session.get_messages_slice()]
+        try:
+            persisted_messages = [dict(message) for message in await session.get_messages_slice()]
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            raise PersistenceError(
+                f"Failed to load session messages: {exc}",
+                error_type=type(exc).__name__,
+            ) from exc
         pending = [dict(message) for message in (pending_messages or [])]
         budget = self._estimator.budget
         full_messages = persisted_messages + pending
@@ -128,7 +142,7 @@ class ContextManager:
             usage=usage,
             current_tokens=final_estimate.estimated_input_tokens,
             compact_generation=compact_generation,
-            model=getattr(session, "model", None),
+            model=_session_model(session),
         )
 
         if anchor["usable"]:
@@ -159,14 +173,12 @@ class ContextManager:
         }
 
     async def _get_compact_generation(self, session) -> int:
-        get_generation = getattr(session, "get_compact_generation", None)
-        if callable(get_generation):
-            try:
-                generation = self._positive_int_or_none(await get_generation())
-                if generation is not None:
-                    return generation
-            except Exception:
-                pass
+        try:
+            generation = self._positive_int_or_none(await session.get_compact_generation())
+            if generation is not None:
+                return generation
+        except Exception:
+            logger.debug("Best-effort compact generation lookup failed.", exc_info=True)
         return 1
 
     def _resolve_usage_anchor(
@@ -233,14 +245,12 @@ class ContextManager:
         return result
 
     async def _get_latest_assistant_sampling_usage(self, session) -> dict:
-        get_usage = getattr(session, "get_latest_assistant_sampling_usage", None)
-        if callable(get_usage):
-            try:
-                usage = await get_usage()
-                if isinstance(usage, dict):
-                    return dict(usage)
-            except Exception:
-                return {}
+        try:
+            usage = await session.get_latest_assistant_sampling_usage()
+            if isinstance(usage, dict):
+                return dict(usage)
+        except Exception:
+            logger.debug("Best-effort sampling usage lookup failed.", exc_info=True)
         return {}
 
     def _positive_int_or_none(self, value) -> int | None:
@@ -295,6 +305,7 @@ class ContextManager:
             skills = list(self._skill_repository.list_skills())
             return list(self._skill_selector.select(user_message, skills))
         except Exception:
+            logger.debug("Best-effort skill selection failed.", exc_info=True)
             return []
 
     def _build_plan_messages(self) -> tuple[list[dict], dict, dict]:
@@ -469,3 +480,10 @@ class ContextManager:
             return False
         content = message.get("content", "")
         return isinstance(content, str) and bool(content.strip())
+
+
+def _session_model(session) -> str | None:
+    try:
+        return session.model
+    except AttributeError:
+        return None

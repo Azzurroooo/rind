@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from pathlib import Path
 
 from agent.domain.cancellation import CancellationTokenSource
@@ -31,6 +32,9 @@ from prompt_toolkit.key_binding import KeyBindings
 from rich.console import Console
 
 _TURN_CANCEL_GRACE_SECONDS = 1.0
+
+
+logger = logging.getLogger(__name__)
 
 
 class ChatCLI:
@@ -412,8 +416,10 @@ class ChatCLI:
         except TimeoutError:
             task.cancel()
             self._event_loop.run_until_complete(asyncio.gather(task, return_exceptions=True))
-        except (asyncio.CancelledError, Exception):
-            pass
+        except asyncio.CancelledError:
+            logger.debug("Interrupted turn task cancelled during cleanup.", exc_info=True)
+        except Exception:
+            logger.debug("Interrupted turn cleanup failed.", exc_info=True)
 
     def _is_slash_command(self, text: str) -> bool:
         return text.lstrip().startswith("/")
@@ -511,15 +517,25 @@ class ChatCLI:
             TokenStatsUpdatedEvent,
         )
 
-        if isinstance(event, AssistantDeltaEvent):
-            self._streaming_renderer.append(event.text)
-        elif isinstance(event, AssistantMessageCompletedEvent):
-            self._streaming_renderer.finish_message()
-        elif isinstance(event, TokenStatsUpdatedEvent):
-            self._latest_usage = dict(event.stats) if isinstance(event.stats, dict) else None
-            self._status_renderer.handle(event)
-        else:
-            self._status_renderer.handle(event)
+        from agent.domain.errors import RenderingError
+
+        try:
+            if isinstance(event, AssistantDeltaEvent):
+                self._streaming_renderer.append(event.text)
+            elif isinstance(event, AssistantMessageCompletedEvent):
+                self._streaming_renderer.finish_message()
+            elif isinstance(event, TokenStatsUpdatedEvent):
+                self._latest_usage = dict(event.stats) if isinstance(event.stats, dict) else None
+                self._status_renderer.handle(event)
+            else:
+                self._status_renderer.handle(event)
+        except RenderingError:
+            raise
+        except Exception as exc:
+            raise RenderingError(
+                f"Failed to render {event.type} event: {exc}",
+                error_type=type(exc).__name__,
+            ) from exc
 
     def _on_retry(self, attempt: int, exception: Exception) -> None:
         self._streaming_renderer.show_retry(attempt, exception)

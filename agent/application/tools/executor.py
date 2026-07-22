@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import traceback
+import asyncio
 
 from agent.application.ports.tool_registry import ToolRegistry
 from agent.domain.tool_result import ToolExecutionResult
@@ -24,7 +25,8 @@ class ToolExecutor:
             return ToolExecutionResult(
                 status="error",
                 error_msg=f"Unknown tool: {name}",
-                error_type="ToolNotFound"
+                error_type="ToolNotFound",
+                failure_status="unavailable",
             )
         try:
             result = self._registry.call(name, args)
@@ -38,7 +40,21 @@ class ToolExecutor:
                 status="error",
                 error_msg=str(exc),
                 error_type=type(exc).__name__,
+                failure_status="rejected",
                 metadata=meta
+            )
+        except asyncio.CancelledError:
+            raise
+        except (TimeoutError, asyncio.TimeoutError) as exc:
+            meta = {"traceback": traceback.format_exc()[-4000:]}
+            if raw_args:
+                meta["raw_args"] = raw_args[:2000]
+            return ToolExecutionResult(
+                status="error",
+                error_msg=str(exc),
+                error_type=type(exc).__name__,
+                failure_status="timed_out",
+                metadata=meta,
             )
         except Exception as exc:
             meta = {"traceback": traceback.format_exc()[-4000:]}
@@ -48,6 +64,7 @@ class ToolExecutor:
                 status="error",
                 error_msg=str(exc),
                 error_type=type(exc).__name__,
+                failure_status="failed",
                 metadata=meta
             )
 
@@ -57,7 +74,8 @@ class ToolExecutor:
             return ToolExecutionResult(
                 status="error",
                 error_msg=f"Unknown tool: {name}",
-                error_type="ToolNotFound"
+                error_type="ToolNotFound",
+                failure_status="unavailable",
             )
         try:
             result = await self._registry.call_async(name, args)
@@ -71,7 +89,21 @@ class ToolExecutor:
                 status="error",
                 error_msg=str(exc),
                 error_type=type(exc).__name__,
+                failure_status="rejected",
                 metadata=meta
+            )
+        except asyncio.CancelledError:
+            raise
+        except (TimeoutError, asyncio.TimeoutError) as exc:
+            meta = {"traceback": traceback.format_exc()[-4000:]}
+            if raw_args:
+                meta["raw_args"] = raw_args[:2000]
+            return ToolExecutionResult(
+                status="error",
+                error_msg=str(exc),
+                error_type=type(exc).__name__,
+                failure_status="timed_out",
+                metadata=meta,
             )
         except Exception as exc:
             meta = {"traceback": traceback.format_exc()[-4000:]}
@@ -81,5 +113,6 @@ class ToolExecutor:
                 status="error",
                 error_msg=str(exc),
                 error_type=type(exc).__name__,
+                failure_status="failed",
                 metadata=meta
             )

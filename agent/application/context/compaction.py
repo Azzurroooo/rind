@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -11,10 +12,14 @@ from typing import Any
 
 from agent.domain.cancellation import CancellationToken
 from agent.domain.compaction import COMPACT_CONTINUATION_USER_CONTENT
+from agent.domain.errors import PersistenceError
 
 from .estimator import DEFAULT_CONTEXT_WINDOW_TOKENS
 from .handoff import CompactionHandoffBuilder
 from .token_usage import normalize_sampling_usage
+
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(slots=True)
@@ -76,12 +81,17 @@ class CompactionService:
                 "type": type(exc).__name__,
                 "message": str(exc),
             }
+            if hasattr(exc, "status"):
+                record["fallback_error"]["status"] = str(exc.status)
 
         self._append_active_plan_snapshot(record)
-        persist = getattr(session, "persist_compaction", None)
-        if callable(persist):
-            return await persist(record)
-        return record
+        try:
+            return await session.persist_compaction(record)
+        except Exception as exc:
+            raise PersistenceError(
+                f"Failed to persist compaction boundary: {exc}",
+                code=type(exc).__name__,
+            ) from exc
 
     def build_compaction(
         self,
@@ -182,35 +192,29 @@ class CompactionService:
         return [{"role": "system", "content": system}, {"role": "user", "content": user}]
 
     async def _load_raw_messages(self, session, fallback: list[dict[str, Any]]) -> list[dict[str, Any]]:
-        load = getattr(session, "load_messages", None)
-        if callable(load):
-            try:
-                messages = await load()
-                if isinstance(messages, list):
-                    return [dict(item) for item in messages if isinstance(item, dict)]
-            except Exception:
-                pass
+        try:
+            messages = await session.load_messages()
+            if isinstance(messages, list):
+                return [dict(item) for item in messages if isinstance(item, dict)]
+        except Exception:
+            logger.debug("Best-effort compaction message load failed.", exc_info=True)
         return [dict(item) for item in fallback if isinstance(item, dict)]
 
     async def _load_tool_records(self, session) -> list[dict[str, Any]]:
-        get_records = getattr(session, "get_tool_records", None)
-        if callable(get_records):
-            try:
-                records = await get_records()
-                if isinstance(records, list):
-                    return [dict(item) for item in records if isinstance(item, dict)]
-            except Exception:
-                pass
+        try:
+            records = await session.get_tool_records()
+            if isinstance(records, list):
+                return [dict(item) for item in records if isinstance(item, dict)]
+        except Exception:
+            logger.debug("Best-effort compaction tool-record load failed.", exc_info=True)
         return []
 
     async def _load_latest_compaction(self, session) -> dict[str, Any] | None:
-        get_latest = getattr(session, "get_latest_compaction", None)
-        if callable(get_latest):
-            try:
-                latest = await get_latest()
-                return dict(latest) if isinstance(latest, dict) else None
-            except Exception:
-                return None
+        try:
+            latest = await session.get_latest_compaction()
+            return dict(latest) if isinstance(latest, dict) else None
+        except Exception:
+            logger.debug("Best-effort latest compaction load failed.", exc_info=True)
         return None
 
     def _append_active_plan_snapshot(self, record: dict[str, Any]) -> None:
@@ -231,6 +235,7 @@ class CompactionService:
         try:
             return str(self.plan_snapshot_provider() or "").strip()
         except Exception:
+            logger.debug("Best-effort plan snapshot failed.", exc_info=True)
             return ""
 
     def _assistant_content(self, response: Any) -> str:
@@ -263,11 +268,8 @@ class CompactionService:
         return parsed if parsed > 0 else default
 
     async def _try_persist_sampling_usage(self, session, usage: dict[str, Any]) -> dict[str, str] | None:
-        persist_usage = getattr(session, "persist_sampling_usage", None)
-        if not callable(persist_usage):
-            return None
         try:
-            await persist_usage(usage)
+            await session.persist_sampling_usage(usage)
         except Exception as exc:
             return {"type": type(exc).__name__, "message": str(exc)}
         return None

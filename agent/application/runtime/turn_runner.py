@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import time
 from typing import AsyncIterator
 import openai
@@ -15,6 +16,7 @@ from agent.application.ports.session_store import SessionStore
 from agent.application.runtime.stream_pump import ModelStreamResult, pump_model_stream_events
 from agent.application.tools.processor import ToolCallProcessor
 from agent.domain.cancellation import CancellationToken
+from agent.domain.errors import BoundaryError, PersistenceError, ProviderError
 from agent.domain.events import (
     RuntimeEvent,
     AssistantDeltaEvent,
@@ -30,6 +32,9 @@ from agent.domain.events import (
 from agent.domain.message_boundary import validate_compact_handoff_boundary, validate_model_message_boundary
 
 from .stream_parser import MessageStreamParser
+
+
+logger = logging.getLogger(__name__)
 
 
 def _compact_diagnostics(phase_detail: str | None) -> dict | None:
@@ -61,20 +66,14 @@ class TurnRunner:
 
     def set_retry_callback(self, callback) -> None:
         """Set a callback invoked on LLM API retries: (attempt: int, exception: Exception) -> None."""
-        if hasattr(self._chat_client, "on_retry"):
-            self._chat_client.on_retry = callback
+        self._chat_client.set_retry_callback(callback)
 
     def set_user_question_responder(self, responder) -> None:
         """Set the callback used when ask_user_question needs a user answer."""
-        set_responder = getattr(self._tool_processor, "set_user_question_responder", None)
-        if callable(set_responder):
-            set_responder(responder)
+        self._tool_processor.set_user_question_responder(responder)
 
     def set_model(self, model: str) -> bool:
-        set_model = getattr(self._chat_client, "set_model", None)
-        if not callable(set_model):
-            return False
-        set_model(model)
+        self._chat_client.set_model(model)
         return True
 
     async def run_turn(
@@ -109,9 +108,9 @@ class TurnRunner:
                     allow_rescue=force_rescue_next_build,
                 )
                 force_rescue_next_build = False
-                context_stats = context.stats if isinstance(getattr(context, "stats", None), dict) else {}
-                context_decisions = context.decisions if isinstance(getattr(context, "decisions", None), dict) else {}
-                context_messages = context.messages if isinstance(getattr(context, "messages", None), list) else []
+                context_stats = dict(context.stats)
+                context_decisions = dict(context.decisions)
+                context_messages = list(context.messages)
                 yield ContextBuiltEvent(
                     **event_meta(session, turn_id),
                     message_count=len(context_messages),
@@ -146,9 +145,9 @@ class TurnRunner:
                         transient_system_messages=transient_system_messages,
                         cancellation_token=cancellation_token,
                     )
-                    context_stats = context.stats if isinstance(getattr(context, "stats", None), dict) else {}
-                    context_decisions = context.decisions if isinstance(getattr(context, "decisions", None), dict) else {}
-                    context_messages = context.messages if isinstance(getattr(context, "messages", None), list) else []
+                    context_stats = dict(context.stats)
+                    context_decisions = dict(context.decisions)
+                    context_messages = list(context.messages)
                     yield ContextBuiltEvent(
                         **event_meta(session, turn_id),
                         message_count=len(context_messages),
@@ -184,12 +183,33 @@ class TurnRunner:
                     parsed_tool_calls = stream_result.tool_calls
 
                     if content_text:
-                        await session.persist_message("assistant", content_text)
+                        await self._persist_message(session, "assistant", content_text)
                         yield AssistantMessageCompletedEvent(
                             **event_meta(session, turn_id),
                             content_chars=len(content_text),
                         )
 
+                except ProviderError as e:
+                    if e.code == "context_length_exceeded":
+                        context_length_recovery_count += 1
+                        if context_length_recovery_count == 1:
+                            await self._run_compact(
+                                session=session,
+                                context_messages=context_messages,
+                                context_stats=context_stats,
+                                reason="context_length_error",
+                                phase="mid_turn",
+                                phase_detail="context_length_recovery",
+                                active_skill_matches=turn_active_skill_matches,
+                                transient_system_messages=transient_system_messages,
+                                cancellation_token=cancellation_token,
+                            )
+                        else:
+                            self._context_manager.reduce_hard_limit(factor=0.8)
+                            force_rescue_next_build = True
+                        continue
+                    yield self._failed_event(session, turn_id, e)
+                    return
                 except openai.BadRequestError as e:
                     if "context_length_exceeded" in str(e) or "maximum context length" in str(e).lower():
                         context_length_recovery_count += 1
@@ -209,7 +229,12 @@ class TurnRunner:
                             self._context_manager.reduce_hard_limit(factor=0.8)
                             force_rescue_next_build = True
                         continue
-                    raise
+                    yield self._failed_event(
+                        session,
+                        turn_id,
+                        ProviderError(str(e), status="rejected", error_type=type(e).__name__),
+                    )
+                    return
                 except RetryError as e:
                     error_msg = f"\n\n[APIUnavailableError: The AI provider is currently unreachable after multiple retries. Error: {e.last_attempt.exception()}]"
                     yield AssistantDeltaEvent(**event_meta(session, turn_id), text=error_msg)
@@ -217,6 +242,8 @@ class TurnRunner:
                         **event_meta(session, turn_id),
                         error=error_msg,
                         error_type="RetryError",
+                        status="unavailable",
+                        error_source="provider",
                     )
                     return
 
@@ -224,7 +251,8 @@ class TurnRunner:
                     break
                 sampling_index += 1
 
-                await session.persist_message(
+                await self._persist_message(
+                    session,
                     "assistant",
                     "",
                     meta={"tool_calls": [{"id": item.call_id, "name": item.name} for item in parsed_tool_calls]},
@@ -253,6 +281,28 @@ class TurnRunner:
 
         except asyncio.CancelledError as e:
             yield self._cancelled_event(session, turn_id, cancellation_token, fallback=str(e))
+        except BoundaryError as e:
+            yield self._failed_event(session, turn_id, e)
+        except (asyncio.TimeoutError, TimeoutError, openai.APITimeoutError) as e:
+            yield self._failed_event(
+                session,
+                turn_id,
+                ProviderError(str(e), status="timed_out", error_type=type(e).__name__),
+            )
+        except (openai.APIConnectionError, openai.RateLimitError, openai.InternalServerError) as e:
+            yield self._failed_event(
+                session,
+                turn_id,
+                ProviderError(str(e), status="unavailable", error_type=type(e).__name__),
+            )
+        except openai.APIStatusError as e:
+            status_code = getattr(e, "status_code", None)
+            status = "rejected" if status_code in {400, 401, 403, 404, 409, 422} else "unavailable"
+            yield self._failed_event(
+                session,
+                turn_id,
+                ProviderError(str(e), status=status, error_type=type(e).__name__),
+            )
         except Exception as e:
             yield TurnFailedEvent(
                 **event_meta(session, turn_id),
@@ -270,8 +320,8 @@ class TurnRunner:
         cancellation_token: CancellationToken | None = None,
     ) -> dict:
         context = await self._build_context(session, active_skill_matches=None)
-        stats = context.stats if isinstance(getattr(context, "stats", None), dict) else {}
-        messages = context.messages if isinstance(getattr(context, "messages", None), list) else []
+        stats = dict(context.stats)
+        messages = list(context.messages)
         record = await self._compaction_service.compact_async(
             session=session,
             context_messages=messages,
@@ -331,12 +381,15 @@ class TurnRunner:
         )
 
     async def _persist_sampling_usage(self, session: SessionStore, usage: dict) -> None:
-        persist_usage = getattr(session, "persist_sampling_usage", None)
-        if callable(persist_usage):
-            await self._best_effort(persist_usage, usage)
+        try:
+            operation = session.persist_sampling_usage
+        except AttributeError:
+            logger.debug("Session does not expose optional sampling persistence.", exc_info=True)
+            return
+        await self._best_effort(operation, usage)
 
     def _validate_compact_context(self, context) -> None:
-        messages = context.messages if isinstance(getattr(context, "messages", None), list) else []
+        messages = list(context.messages)
         result = validate_compact_handoff_boundary(messages)
         if not result.ok:
             raise RuntimeError(f"Compact produced an invalid continuation boundary: {result.reason}")
@@ -347,8 +400,10 @@ class TurnRunner:
     async def _best_effort(self, operation, *args) -> None:
         try:
             await operation(*args)
+        except asyncio.CancelledError:
+            raise
         except Exception:
-            pass
+            logger.debug("Best-effort runtime operation failed.", exc_info=True)
 
     def _compact_phase_detail(self, sampling_index: int, compact_required: bool) -> str | None:
         if compact_required:
@@ -358,22 +413,18 @@ class TurnRunner:
         return None
 
     def _snapshot_context_hard_limit(self):
-        snapshot = getattr(self._context_manager, "snapshot_hard_limit", None)
-        if callable(snapshot):
-            return snapshot()
-        estimator = getattr(self._context_manager, "_estimator", None)
-        budget = getattr(estimator, "budget", None)
-        return getattr(budget, "hard_limit_tokens", None)
+        try:
+            return self._context_manager.snapshot_hard_limit()
+        except AttributeError:
+            return None
 
     def _restore_context_hard_limit(self, hard_limit) -> None:
-        restore = getattr(self._context_manager, "restore_hard_limit", None)
-        if callable(restore):
-            restore(hard_limit)
+        if hard_limit is None:
             return
-        estimator = getattr(self._context_manager, "_estimator", None)
-        budget = getattr(estimator, "budget", None)
-        if budget is not None and hasattr(budget, "hard_limit_tokens"):
-            budget.hard_limit_tokens = hard_limit
+        try:
+            self._context_manager.restore_hard_limit(hard_limit)
+        except AttributeError:
+            return
 
     def _cancelled_event(
         self,
@@ -387,19 +438,18 @@ class TurnRunner:
         return TurnCancelledEvent(**event_meta(session, turn_id), reason=reason)
 
     async def _resolve_turn_active_skills(self, session: SessionStore) -> list:
-        selector = getattr(self._context_manager, "select_active_skills_for_turn", None)
-        if not callable(selector):
-            return []
         user_message = await self._latest_user_content(session)
         try:
-            return list(selector(user_message))
+            return list(self._context_manager.select_active_skills_for_turn(user_message))
         except Exception:
+            logger.debug("Best-effort skill selection failed.", exc_info=True)
             return []
 
     async def _latest_user_content(self, session: SessionStore) -> str:
         try:
             messages = await session.get_messages_slice()
         except Exception:
+            logger.debug("Best-effort latest-user lookup failed.", exc_info=True)
             return ""
         for message in reversed(messages):
             if not isinstance(message, dict) or message.get("role") != "user":
@@ -407,3 +457,23 @@ class TurnRunner:
             content = message.get("content", "")
             return content if isinstance(content, str) else ""
         return ""
+
+    async def _persist_message(self, session: SessionStore, role: str, content: str, **kwargs) -> None:
+        try:
+            await session.persist_message(role, content, **kwargs)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            raise PersistenceError(
+                f"Failed to persist {role} message: {exc}",
+                code=type(exc).__name__,
+            ) from exc
+
+    def _failed_event(self, session: SessionStore, turn_id: str, error: BoundaryError) -> TurnFailedEvent:
+        return TurnFailedEvent(
+            **event_meta(session, turn_id),
+            error=str(error),
+            error_type=error.error_type,
+            status=error.status,
+            error_source=error.source,
+        )

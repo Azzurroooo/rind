@@ -3,13 +3,23 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import time
 from dataclasses import dataclass
 from collections.abc import Awaitable, Callable
 from typing import AsyncIterator, Any
 
 from agent.application.ports.session_store import SessionStore
-from agent.domain import ParsedToolCall, looks_like_tool_payload, parse_tool_args, tool_error, tool_ok
+from agent.domain import (
+    ParsedToolCall,
+    PersistenceError,
+    ToolEventStatus,
+    looks_like_tool_payload,
+    parse_tool_args,
+    tool_cancelled,
+    tool_error,
+    tool_ok,
+)
 from agent.domain.events import (
     RuntimeEvent,
     ToolCallStartedEvent,
@@ -28,7 +38,7 @@ UserQuestionResponder = Callable[[UserQuestionRequestedEvent], str | Awaitable[s
 
 @dataclass(slots=True)
 class _ToolCallOutcome:
-    status: str
+    status: ToolEventStatus
     result: str
     error_type: str = ""
 
@@ -73,7 +83,7 @@ class ToolCallProcessor:
 
             if parse_error:
                 outcome = _ToolCallOutcome(
-                    status="failed",
+                    status="rejected",
                     error_type="ToolArgsJSONError",
                     result=tool_error(
                         call.name,
@@ -85,7 +95,7 @@ class ToolCallProcessor:
             else:
                 blocked_poll = self._polling_guard.pre_guard(call.name, parsed_args, empty_bash_output_counts)
                 if blocked_poll:
-                    outcome = _ToolCallOutcome(status="failed", error_type="RepeatedEmptyPoll", result=blocked_poll)
+                    outcome = _ToolCallOutcome(status="rejected", error_type="RepeatedEmptyPoll", result=blocked_poll)
                 else:
                     yield ToolCallStartedEvent(
                         **event_meta(session, turn_id),
@@ -120,12 +130,14 @@ class ToolCallProcessor:
                     tool_result_str=outcome.result,
                 )
                 persist_error = None
+            except asyncio.CancelledError:
+                raise
             except Exception as exc:
                 persist_error = exc
                 outcome = _ToolCallOutcome(
                     status="failed",
-                    error_type=type(exc).__name__,
-                    result=tool_error(call.name, f"Failed to persist tool result: {exc}", type(exc).__name__),
+                    error_type="PersistenceError",
+                    result=tool_error(call.name, f"Failed to persist tool result: {exc}", "PersistenceError"),
                 )
 
             duration_ms = int((time.perf_counter() - started_at) * 1000)
@@ -146,10 +158,14 @@ class ToolCallProcessor:
                 status=outcome.status,
                 result=outcome.result,
                 error_type=outcome.error_type,
+                error_source="persistence" if persist_error is not None else "tool",
                 duration_ms=duration_ms,
             )
             if persist_error is not None:
-                raise RuntimeError(f"Failed to persist tool result for {call.call_id}: {persist_error}") from persist_error
+                raise PersistenceError(
+                    f"Failed to persist tool result for {call.call_id}: {persist_error}",
+                    code=type(persist_error).__name__,
+                ) from persist_error
 
     async def _run_tool_call(
         self,
@@ -175,6 +191,12 @@ class ToolCallProcessor:
                 tool_result_str = result.result_str
                 if not looks_like_tool_payload(tool_result_str):
                     tool_result_str = tool_ok(call.name, tool_result_str)
+                if _is_cancelled_tool_payload(tool_result_str):
+                    return _ToolCallOutcome(
+                        status="cancelled",
+                        error_type="Cancelled",
+                        result=tool_result_str,
+                    )
                 self._polling_guard.record_observation(
                     call.name,
                     tool_result_str,
@@ -183,11 +205,19 @@ class ToolCallProcessor:
                 return _ToolCallOutcome(status="completed", result=tool_result_str)
 
             error_type = result.error_type or "ToolExecutionError"
+            if result.status == "cancelled":
+                return _ToolCallOutcome(
+                    status="cancelled",
+                    error_type=error_type,
+                    result=result.result_str or tool_cancelled(call.name, result.error_msg),
+                )
             return _ToolCallOutcome(
-                status="failed",
+                status=result.failure_status or _classify_tool_error(error_type),
                 error_type=error_type,
                 result=tool_error(call.name, result.error_msg, error_type),
             )
+        except asyncio.CancelledError:
+            raise
         except Exception as exc:
             error_type = type(exc).__name__
             return _ToolCallOutcome(
@@ -219,7 +249,7 @@ class ToolCallProcessor:
     async def _run_user_question(self, event: UserQuestionRequestedEvent) -> _ToolCallOutcome:
         if not event.question:
             return _ToolCallOutcome(
-                status="failed",
+                status="rejected",
                 error_type="InvalidUserQuestion",
                 result=tool_error(
                     "ask_user_question",
@@ -229,7 +259,7 @@ class ToolCallProcessor:
             )
         if self._user_question_responder is None:
             return _ToolCallOutcome(
-                status="failed",
+                status="unavailable",
                 error_type="UserQuestionUnsupported",
                 result=tool_error(
                     "ask_user_question",
@@ -243,7 +273,7 @@ class ToolCallProcessor:
                 answer_value = await answer_value
         except (KeyboardInterrupt, EOFError) as exc:
             return _ToolCallOutcome(
-                status="failed",
+                status="cancelled",
                 error_type=type(exc).__name__,
                 result=tool_error(
                     "ask_user_question",
@@ -251,6 +281,8 @@ class ToolCallProcessor:
                     type(exc).__name__,
                 ),
             )
+        except asyncio.CancelledError:
+            raise
         except Exception as exc:
             return _ToolCallOutcome(
                 status="failed",
@@ -318,3 +350,22 @@ class ToolCallProcessor:
             artifact_ref=normalized_result.artifact_ref,
         )
         await session.persist_message("tool", "", tool_call_id=call.call_id, tool_name=call.name)
+
+
+def _is_cancelled_tool_payload(value: str) -> bool:
+    try:
+        payload = json.loads(value)
+    except (TypeError, ValueError):
+        return False
+    return isinstance(payload, dict) and payload.get("ok") is False and payload.get("error_type") == "Cancelled"
+
+
+def _classify_tool_error(error_type: str) -> ToolEventStatus:
+    normalized = error_type.lower()
+    if normalized in {"toolnotfound", "notfound", "userquestionunsupported"}:
+        return "unavailable"
+    if "timeout" in normalized or normalized in {"deadlineexceeded"}:
+        return "timed_out"
+    if normalized in {"toolargsjsonerror", "invaliduserquestion", "typeerror", "valueerror"}:
+        return "rejected"
+    return "failed"

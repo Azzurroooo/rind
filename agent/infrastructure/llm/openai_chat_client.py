@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import logging
 import os
 from typing import Any, AsyncIterator
 import openai
@@ -18,6 +19,10 @@ from tenacity import (
 
 from agent.application.ports.chat_client import ChatClient
 from agent.domain.cancellation import CancellationToken
+from agent.domain.errors import ProviderError
+
+
+logger = logging.getLogger(__name__)
 
 
 class OpenAIChatClient(ChatClient):
@@ -43,9 +48,15 @@ class OpenAIChatClient(ChatClient):
         self._reasoning_effort_disabled = False
         self._prompt_cache_key_disabled = False
 
+    def set_retry_callback(self, callback) -> None:
+        self.on_retry = callback
+
     def _before_sleep_log(self, retry_state: RetryCallState):
         if self.on_retry and retry_state.outcome and retry_state.outcome.failed:
-            self.on_retry(retry_state.attempt_number, retry_state.outcome.exception())
+            try:
+                self.on_retry(retry_state.attempt_number, retry_state.outcome.exception())
+            except Exception:
+                logger.debug("Best-effort provider retry callback failed.", exc_info=True)
 
     @property
     def _retry_decorator(self):
@@ -91,7 +102,12 @@ class OpenAIChatClient(ChatClient):
                 cancellation_token,
             )
 
-        return await _do_create()
+        try:
+            return await _do_create()
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            raise self._provider_error(exc) from exc
 
     async def stream(
         self,
@@ -124,7 +140,12 @@ class OpenAIChatClient(ChatClient):
                 cancellation_token,
             )
 
-        stream_response = await _do_connect()
+        try:
+            stream_response = await _do_connect()
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            raise self._provider_error(exc) from exc
 
         # Now consume the stream chunks with cancellation checks
         try:
@@ -132,8 +153,50 @@ class OpenAIChatClient(ChatClient):
                 if cancellation_token and cancellation_token.is_cancelled:
                     raise asyncio.CancelledError(cancellation_token.reason)
                 yield chunk
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            raise self._provider_error(exc) from exc
         finally:
-            await self._close_stream(stream_response)
+            try:
+                await self._close_stream(stream_response)
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                raise self._provider_error(exc) from exc
+
+    def _provider_error(self, exc: Exception) -> ProviderError:
+        if isinstance(exc, ProviderError):
+            return exc
+        error_type = type(exc).__name__
+        text = str(exc)
+        lowered = text.lower()
+        if "context_length_exceeded" in lowered or "maximum context length" in lowered:
+            return ProviderError(
+                text,
+                status="rejected",
+                error_type=error_type,
+                code="context_length_exceeded",
+            )
+        if isinstance(exc, (asyncio.TimeoutError, TimeoutError, openai.APITimeoutError)):
+            status = "timed_out"
+        elif isinstance(exc, openai.APIStatusError):
+            status_code = getattr(exc, "status_code", None)
+            if status_code in {400, 401, 403, 404, 409, 422}:
+                status = "rejected"
+            elif status_code in {408, 504}:
+                status = "timed_out"
+            elif status_code == 429 or isinstance(status_code, int) and status_code >= 500:
+                status = "unavailable"
+            else:
+                status = "failed"
+        elif isinstance(exc, (openai.APIConnectionError, openai.RateLimitError, openai.InternalServerError)):
+            status = "unavailable"
+        elif type(exc).__name__ == "RetryError":
+            status = "unavailable"
+        else:
+            status = "failed"
+        return ProviderError(text, status=status, error_type=error_type)
 
     async def _close_stream(self, stream_response: Any) -> None:
         close = getattr(stream_response, "aclose", None) or getattr(stream_response, "close", None)

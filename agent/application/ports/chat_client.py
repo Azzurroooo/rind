@@ -32,3 +32,11 @@ class ChatClient(Protocol):
         Yields provider-specific chunk objects (e.g. ChatCompletionChunk).
         """
         ...
+
+    def set_model(self, model: str) -> None:
+        """Set the active provider model."""
+        ...
+
+    def set_retry_callback(self, callback) -> None:
+        """Set the provider retry observer."""
+        ...
