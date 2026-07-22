@@ -1,19 +1,20 @@
-"""文件操作工具定义"""
-from collections import deque
-import fnmatch
-from pathlib import Path
-import re
+"""文件操作工具定义。"""
 
-from agent.domain.cancellation import CancellationToken
+import json
+from pathlib import Path
+import shutil
+import subprocess
+
 from agent.domain import tool_cancelled, tool_error, tool_ok
+from agent.domain.cancellation import CancellationToken
+
 
 _SKIP_DIRS = frozenset({
     ".git", "node_modules", "venv", ".venv", "__pycache__",
     "dist", "build", ".mypy_cache", ".pytest_cache", ".tox",
     ".hg", ".svn", "site-packages",
 })
-_GREP_MAX_FILE_SIZE = 5 * 1024 * 1024  # 5 MB
-_READ_LARGE_FILE_SIZE = 10 * 1024 * 1024  # 10 MB
+_READ_MAX_FILE_SIZE = 10 * 1024 * 1024
 _READ_MAX_LIMIT = 2000
 _MAX_LINE_CHARS = 2000
 
@@ -24,13 +25,17 @@ def _cancelled(tool_name: str, token: CancellationToken | None) -> str | None:
     return None
 
 
-class _ToolCancelled(Exception):
-    pass
-
-
-def _raise_if_cancelled(token: CancellationToken | None) -> None:
-    if token and token.is_cancelled:
-        raise _ToolCancelled
+def _existing_path(tool_name: str, raw_path: str) -> tuple[Path, str | None]:
+    try:
+        path = Path(raw_path).expanduser().resolve()
+        path.stat()
+    except FileNotFoundError:
+        return Path(raw_path), tool_error(tool_name, f"路径不存在: {raw_path}", "NotFound")
+    except PermissionError:
+        return Path(raw_path), tool_error(tool_name, f"无权访问路径: {raw_path}", "PermissionDenied")
+    except OSError as exc:
+        return Path(raw_path), tool_error(tool_name, f"无法访问路径: {raw_path}: {exc}", "PathAccessError")
+    return path, None
 
 
 def _is_skipped_path(path: Path) -> bool:
@@ -42,16 +47,7 @@ def _relative_path(file_path: Path, root: Path) -> str:
     try:
         return file_path.relative_to(base).as_posix()
     except ValueError:
-        return file_path.name
-
-
-def _format_size(size: int) -> str:
-    value = float(size)
-    for unit in ["B", "KB", "MB", "GB"]:
-        if value < 1024:
-            return f"{value:.1f} {unit}"
-        value /= 1024
-    return f"{value:.1f} TB"
+        return file_path.as_posix()
 
 
 def _clip_text(text: str, limit: int = _MAX_LINE_CHARS) -> str:
@@ -60,199 +56,191 @@ def _clip_text(text: str, limit: int = _MAX_LINE_CHARS) -> str:
     return text[:limit] + f"...(truncated:{len(text)})"
 
 
+def _looks_binary(sample: bytes) -> bool:
+    if b"\x00" in sample:
+        return True
+    controls = sum(byte < 32 and byte not in {9, 10, 12, 13} for byte in sample)
+    return bool(sample) and controls / len(sample) > 0.1
+
+
 def read_file(
-    file_path: str,
+    path: str,
     offset: int = 1,
     limit: int = 1000,
-    include_total: bool = False,
     _cancellation_token: CancellationToken | None = None,
 ) -> str:
-    """
-    读取文件内容，支持分页和行号显示。
-    :param file_path: 文件路径
-    :param offset: 起始行号 (默认 1)
-    :param limit: 读取最大行数 (默认 1000)
-    :param include_total: 是否继续扫描到 EOF 以返回精确总行数 (默认 False)
-    """
+    if cancelled := _cancelled("read_file", _cancellation_token):
+        return cancelled
+
+    file_path, error = _existing_path("read_file", path)
+    if error:
+        return error
+    if not file_path.is_file():
+        return tool_error("read_file", f"路径不是文件: {path}", "NotAFile")
+
     try:
-        if cancelled := _cancelled("read_file", _cancellation_token):
-            return cancelled
-        path = Path(file_path).expanduser().resolve()
-        if not path.exists():
-            return tool_error("read_file", f"文件不存在: {file_path}", "NotFound")
-        if not path.is_file():
-            return tool_error("read_file", f"路径不是文件: {file_path}", "NotAFile")
         offset = int(offset)
+    except (TypeError, ValueError, OverflowError):
+        return tool_error("read_file", "offset 必须是整数。", "InvalidOffset")
+    try:
         requested_limit = int(limit)
-        if offset < 1:
-            return tool_error("read_file", "offset 必须 >= 1。", "InvalidOffset")
-        if requested_limit < 1:
-            return tool_error("read_file", "limit 必须 >= 1。", "InvalidLimit")
+    except (TypeError, ValueError, OverflowError):
+        return tool_error("read_file", "limit 必须是整数。", "InvalidLimit")
+    if offset < 1:
+        return tool_error("read_file", "offset 必须 >= 1。", "InvalidOffset")
+    if requested_limit < 1:
+        return tool_error("read_file", "limit 必须 >= 1。", "InvalidLimit")
 
-        effective_limit = min(requested_limit, _READ_MAX_LIMIT)
-        limit_clamped = requested_limit != effective_limit
-        file_size = path.stat().st_size
-        large_file = file_size > _READ_LARGE_FILE_SIZE
-
-        selected: list[tuple[int, str]] = []
-        end_line = offset + effective_limit - 1
-        total_lines = 0
-        total_lines_exact = True
-        with open(path, "r", encoding="utf-8", errors="replace") as f:
-            for line_no, line in enumerate(f, start=1):
-                if line_no % 1000 == 0:
-                    if cancelled := _cancelled("read_file", _cancellation_token):
-                        return cancelled
-                total_lines = line_no
-                if offset <= line_no <= end_line:
-                    selected.append((line_no, _clip_text(line.rstrip("\n").rstrip("\r"))))
-                if not include_total and line_no > end_line:
-                    total_lines_exact = False
-                    break
-
-        if offset > total_lines:
+    try:
+        size_bytes = file_path.stat().st_size
+        if size_bytes > _READ_MAX_FILE_SIZE:
             return tool_error(
                 "read_file",
-                f"起始行 {offset} 超出文件总行数 ({total_lines} 行)。",
-                "OffsetOutOfRange",
-                meta={"file_path": str(path), "offset": offset, "total_lines": total_lines},
+                f"文件过大（>{_READ_MAX_FILE_SIZE // (1024 * 1024)}MB），请先使用 grep 定位内容。",
+                "FileTooLarge",
+                meta={"path": str(file_path), "size_bytes": size_bytes},
             )
 
-        shown_start = selected[0][0] if selected else offset
-        shown_end = selected[-1][0] if selected else offset - 1
-        truncated = shown_end < total_lines or not total_lines_exact
-        next_offset = shown_end + 1 if truncated else None
-        total_label = str(total_lines) if total_lines_exact else f"at least {total_lines}"
-        output = [f"Showing lines {shown_start} to {shown_end} of {total_label}:"]
-        for line_no, line in selected:
-            output.append(f"{line_no:4d} | {line}")
+        with file_path.open("rb") as binary_file:
+            sample = binary_file.read(8192)
+        if _looks_binary(sample):
+            return tool_error("read_file", f"二进制文件不可按文本读取: {path}", "BinaryFile")
+        try:
+            sample.decode("utf-8")
+        except UnicodeDecodeError:
+            return tool_error("read_file", f"文件不是有效的 UTF-8 文本: {path}", "InvalidEncoding")
 
+        effective_limit = min(requested_limit, _READ_MAX_LIMIT)
+        end_line = offset + effective_limit - 1
+        selected: list[tuple[int, str]] = []
+        has_more = False
+        last_line = 0
+        with file_path.open("r", encoding="utf-8", errors="strict") as text_file:
+            for line_no, line in enumerate(text_file, start=1):
+                last_line = line_no
+                if line_no < offset:
+                    if line_no % 1000 == 0 and (cancelled := _cancelled("read_file", _cancellation_token)):
+                        return cancelled
+                    continue
+                if line_no > end_line:
+                    has_more = True
+                    break
+                selected.append((line_no, _clip_text(line.rstrip("\r\n"))))
+                if line_no % 1000 == 0 and (cancelled := _cancelled("read_file", _cancellation_token)):
+                    return cancelled
+
+        if offset > last_line:
+            return tool_error(
+                "read_file",
+                f"起始行 {offset} 超出文件总行数 ({last_line} 行)。",
+                "OffsetOutOfRange",
+                meta={"path": str(file_path), "offset": offset},
+            )
+
+        shown_end = selected[-1][0]
+        output = [f"Showing lines {offset} to {shown_end}:"]
+        output.extend(f"{line_no:4d} | {text}" for line_no, text in selected)
         return tool_ok(
             "read_file",
             "\n".join(output),
             meta={
-                "file_path": str(path),
-                "size_bytes": file_size,
-                "large_file": large_file,
-                "include_total": bool(include_total),
+                "path": str(file_path),
                 "offset": offset,
                 "limit": effective_limit,
-                "requested_limit": requested_limit,
-                "limit_clamped": limit_clamped,
-                "shown_start": shown_start,
-                "shown_end": shown_end,
-                "total_lines": total_lines,
-                "total_lines_exact": total_lines_exact,
-                "truncated": truncated,
-                "next_offset": next_offset,
+                "truncated": has_more,
+                "next_offset": shown_end + 1 if has_more else None,
+                "encoding": "utf-8",
             },
         )
-    except Exception as e:
-        return tool_error("read_file", f"读取错误: {e}", type(e).__name__)
+    except PermissionError:
+        return tool_error("read_file", f"无权读取文件: {path}", "PermissionDenied")
+    except UnicodeDecodeError:
+        return tool_error("read_file", f"文件不是有效的 UTF-8 文本: {path}", "InvalidEncoding")
+    except OSError as exc:
+        return tool_error("read_file", f"读取文件失败: {exc}", "ReadError")
+
 
 def write_file(file_path: str, content: str) -> str:
     try:
         path = Path(file_path).expanduser().resolve()
-
         is_overwrite = path.exists()
         action = "覆盖" if is_overwrite else "新建"
-
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(content, encoding="utf-8")
-
-        msg = f"成功{action}文件: {path} ({len(content)} 字符)"
+        message = f"成功{action}文件: {path} ({len(content)} 字符)"
         if is_overwrite:
-            msg += "\n[警告] 原文件已被完全覆盖。如果这不是你的本意，请使用 edit_file 进行局部修改。"
+            message += "\n[警告] 原文件已被完全覆盖。如果这不是你的本意，请使用 edit_file 进行局部修改。"
+        return tool_ok("write_file", message, meta={"file_path": str(path), "action": action, "chars": len(content)})
+    except Exception as exc:
+        return tool_error("write_file", f"写入错误: {exc}", type(exc).__name__)
 
-        return tool_ok("write_file", msg, meta={"file_path": str(path), "action": action, "chars": len(content)})
-    except Exception as e:
-        return tool_error("write_file", f"写入错误: {e}", type(e).__name__)
 
 def edit_file(file_path: str, old_str: str, new_str: str) -> str:
-    """
-    精确替换文件中的某一段文本 (Search and Replace)。
-    """
     try:
         path = Path(file_path).expanduser().resolve()
         if not path.exists():
             return tool_error("edit_file", f"文件不存在: {file_path}", "NotFound")
         if not path.is_file():
             return tool_error("edit_file", f"路径不是文件: {file_path}", "NotAFile")
-
-        if path.stat().st_size > 10 * 1024 * 1024:
-            return tool_error("edit_file", "文件过大（>10MB），无法进行全量读取编辑。请考虑使用 Bash 命令或其他方式处理。", "FileTooLarge")
+        if path.stat().st_size > _READ_MAX_FILE_SIZE:
+            return tool_error("edit_file", "文件过大（>10MB），无法进行全量读取编辑。", "FileTooLarge")
 
         content = path.read_text(encoding="utf-8")
-
         if old_str not in content:
-            return tool_error("edit_file", "编辑失败：在文件中找不到指定的 old_str (搜索文本)。请确保完全匹配（包括空格、缩进和换行符）。建议先使用 read_file 查看确切的内容。", "OldStrNotFound")
-
+            return tool_error("edit_file", "编辑失败：在文件中找不到指定的 old_str。请先使用 read_file 查看确切内容。", "OldStrNotFound")
         count = content.count(old_str)
         if count > 1:
             return tool_error(
                 "edit_file",
-                f"编辑失败：找到 {count} 处匹配的 old_str。为了安全起见，old_str 必须在文件中唯一存在。请在 old_str 中包含更多的上下文行（比如上一行和下一行）以确保唯一性。",
+                f"编辑失败：找到 {count} 处匹配的 old_str。请提供唯一的上下文。",
                 "OldStrNotUnique",
                 meta={"count": count},
             )
 
-        new_content = content.replace(old_str, new_str)
-        path.write_text(new_content, encoding="utf-8")
+        path.write_text(content.replace(old_str, new_str), encoding="utf-8")
         return tool_ok("edit_file", f"成功：在 {file_path} 中完成了文本替换。", meta={"file_path": str(path)})
-    except Exception as e:
-        return tool_error("edit_file", f"编辑错误: {e}", type(e).__name__)
+    except Exception as exc:
+        return tool_error("edit_file", f"编辑错误: {exc}", type(exc).__name__)
+
 
 def glob(
     pattern: str,
     path: str = ".",
     max_results: int = 100,
-    offset: int = 0,
     _cancellation_token: CancellationToken | None = None,
 ) -> str:
-    """
-    Find files by glob pattern and return compact file entries with sizes.
-    """
+    if cancelled := _cancelled("glob", _cancellation_token):
+        return cancelled
+    search_path, error = _existing_path("glob", path)
+    if error:
+        return error
+    if not search_path.is_dir():
+        return tool_error("glob", f"路径不是目录: {path}", "NotADirectory")
+    if not isinstance(pattern, str) or not pattern:
+        return tool_error("glob", "pattern 不能为空。", "InvalidPattern")
     try:
-        if cancelled := _cancelled("glob", _cancellation_token):
-            return cancelled
-        search_path = Path(path).expanduser().resolve()
-        if not search_path.exists():
-            return tool_error("glob", f"Directory does not exist: {path}", "NotFound")
-        if not search_path.is_dir():
-            return tool_error("glob", f"Path is not a directory: {path}", "NotADirectory")
+        max_results = int(max_results)
+    except (TypeError, ValueError, OverflowError):
+        return tool_error("glob", "max_results 必须是整数。", "InvalidMaxResults")
+    if max_results < 1:
+        return tool_error("glob", "max_results 必须 >= 1。", "InvalidMaxResults")
 
-        offset = max(0, int(offset))
-        max_results = max(0, int(max_results))
+    try:
         results: list[dict[str, object]] = []
-        seen = 0
         truncated = False
-
         for index, file_path in enumerate(sorted(search_path.rglob(pattern), key=lambda item: item.as_posix().lower())):
-            if index % 200 == 0:
-                if cancelled := _cancelled("glob", _cancellation_token):
-                    return cancelled
+            if index % 200 == 0 and (cancelled := _cancelled("glob", _cancellation_token)):
+                return cancelled
             if not file_path.is_file() or _is_skipped_path(file_path):
-                continue
-            try:
-                stat = file_path.stat()
-            except Exception:
-                continue
-
-            if seen < offset:
-                seen += 1
                 continue
             if len(results) >= max_results:
                 truncated = True
                 break
-            size = int(stat.st_size)
-            results.append(
-                {
-                    "path": _relative_path(file_path, search_path),
-                    "size_bytes": size,
-                    "size_label": _format_size(size),
-                }
-            )
-            seen += 1
+            try:
+                size_bytes = file_path.stat().st_size
+            except PermissionError:
+                return tool_error("glob", f"无权访问文件: {file_path}", "PermissionDenied")
+            results.append({"path": _relative_path(file_path, search_path), "size_bytes": int(size_bytes)})
 
         return tool_ok(
             "glob",
@@ -261,287 +249,131 @@ def glob(
                 "path": str(search_path),
                 "pattern": pattern,
                 "count": len(results),
-                "offset": offset,
                 "max_results": max_results,
                 "truncated": truncated,
-                "next_offset": offset + len(results) if truncated else None,
             },
         )
-    except Exception as e:
-        return tool_error("glob", f"Glob error: {e}", type(e).__name__)
+    except ValueError as exc:
+        return tool_error("glob", f"无效的 glob 模式: {exc}", "InvalidPattern")
+    except PermissionError:
+        return tool_error("glob", f"无权读取目录: {path}", "PermissionDenied")
+    except OSError as exc:
+        return tool_error("glob", f"查找文件失败: {exc}", "GlobError")
+
+
+def _rg_command(rg: str, pattern: str, search_path: Path, file_glob: str) -> list[str]:
+    command = [rg, "--json", "--color", "never", "--glob", file_glob]
+    for skipped in _SKIP_DIRS:
+        command.extend(("--glob", f"!**/{skipped}/**"))
+    command.extend(("--", pattern, str(search_path)))
+    return command
+
+
+def _rg_result_path(raw_path: str, search_path: Path) -> str:
+    candidate = Path(raw_path)
+    if not candidate.is_absolute():
+        base = search_path if search_path.is_dir() else search_path.parent
+        candidate = base / candidate
+    return _relative_path(candidate, search_path)
+
+
+def _rg_error(stderr: str) -> str:
+    lowered = stderr.lower()
+    if "permission" in lowered or "access is denied" in lowered:
+        return "PermissionDenied"
+    if "regex" in lowered or "pattern" in lowered:
+        return "InvalidPattern"
+    return "GrepError"
 
 
 def grep(
     pattern: str,
     path: str = ".",
-    glob_pattern: str = "**/*",
-    case_sensitive: bool = False,
+    glob: str = "**/*",
     max_results: int = 50,
-    output_mode: str = "files_with_matches",
-    offset: int = 0,
-    context: int = 0,
     _cancellation_token: CancellationToken | None = None,
 ) -> str:
-    """
-    Search for a regex pattern in files.
-    """
+    if cancelled := _cancelled("grep", _cancellation_token):
+        return cancelled
+    search_path, error = _existing_path("grep", path)
+    if error:
+        return error
+    if not isinstance(pattern, str) or not pattern:
+        return tool_error("grep", "pattern 不能为空。", "InvalidPattern")
+    if not isinstance(glob, str) or not glob:
+        return tool_error("grep", "glob 不能为空。", "InvalidPattern")
     try:
-        if cancelled := _cancelled("grep", _cancellation_token):
-            return cancelled
-        if output_mode not in {"files_with_matches", "content", "count"}:
-            return tool_error("grep", f"Invalid output_mode: {output_mode}", "InvalidOutputMode")
+        max_results = int(max_results)
+    except (TypeError, ValueError, OverflowError):
+        return tool_error("grep", "max_results 必须是整数。", "InvalidMaxResults")
+    if max_results < 1:
+        return tool_error("grep", "max_results 必须 >= 1。", "InvalidMaxResults")
 
-        search_path = Path(path).expanduser().resolve()
-        if not search_path.exists():
-            return tool_error("grep", f"Path does not exist: {path}", "NotFound")
+    rg = shutil.which("rg")
+    if not rg:
+        return tool_error("grep", "未找到 rg 可执行文件。", "RgUnavailable")
 
-        flags = 0 if case_sensitive else re.IGNORECASE
-        try:
-            regex = re.compile(pattern, flags)
-        except re.error as e:
-            return tool_error("grep", f"Invalid regex pattern: {e}", "InvalidRegex")
-
-        max_results = max(0, int(max_results))
-        offset = max(0, int(offset))
-        context = max(0, int(context))
-        results: list[object] = []
-        seen = 0
-        truncated = False
-        skipped_large_files = 0
-
-        if search_path.is_file():
-            files_to_search = [search_path]
-        else:
-            files_to_search = sorted(search_path.rglob(glob_pattern), key=lambda item: item.as_posix().lower())
-
-        for file_index, file_path in enumerate(files_to_search):
-            if file_index % 100 == 0:
-                if cancelled := _cancelled("grep", _cancellation_token):
-                    return cancelled
-            if truncated:
-                break
-
-            if not file_path.is_file():
-                continue
-
-            if _is_skipped_path(file_path):
-                continue
-
+    process: subprocess.Popen[str] | None = None
+    results: list[dict[str, object]] = []
+    truncated = False
+    try:
+        process = subprocess.Popen(
+            _rg_command(rg, pattern, search_path, glob),
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+        )
+        assert process.stdout is not None
+        for raw_line in process.stdout:
+            if cancelled := _cancelled("grep", _cancellation_token):
+                process.kill()
+                process.wait()
+                return cancelled
             try:
-                if file_path.stat().st_size > _GREP_MAX_FILE_SIZE:
-                    skipped_large_files += 1
-                    continue
-
-                rel_path = _relative_path(file_path, search_path)
-                if output_mode == "files_with_matches":
-                    with open(file_path, "r", encoding="utf-8", errors="replace") as f:
-                        for line_no, line in enumerate(f, start=1):
-                            if line_no % 1000 == 0:
-                                if cancelled := _cancelled("grep", _cancellation_token):
-                                    return cancelled
-                            if regex.search(line):
-                                seen, truncated = _append_paged(results, rel_path, seen, offset, max_results)
-                                break
-                    continue
-
-                if output_mode == "count":
-                    count = 0
-                    with open(file_path, "r", encoding="utf-8", errors="replace") as f:
-                        for line_no, line in enumerate(f, start=1):
-                            if line_no % 1000 == 0:
-                                if cancelled := _cancelled("grep", _cancellation_token):
-                                    return cancelled
-                            if regex.search(line):
-                                count += 1
-                    if count:
-                        seen, truncated = _append_paged(results, {"file": rel_path, "count": count}, seen, offset, max_results)
-                    continue
-
-                for record in _grep_content_records(file_path, rel_path, regex, context, _cancellation_token):
-                    seen, truncated = _append_paged(results, record, seen, offset, max_results)
-                    if truncated:
-                        break
-            except _ToolCancelled:
-                if cancelled := _cancelled("grep", _cancellation_token):
-                    return cancelled
-                return tool_cancelled("grep")
-            except Exception:
+                event = json.loads(raw_line)
+            except json.JSONDecodeError:
                 continue
+            if event.get("type") != "match":
+                continue
+            if len(results) >= max_results:
+                truncated = True
+                process.terminate()
+                break
+            data = event.get("data") or {}
+            path_data = data.get("path") or {}
+            raw_path = path_data.get("text") or ""
+            line_data = data.get("lines") or {}
+            results.append(
+                {
+                    "file": _rg_result_path(raw_path, search_path),
+                    "line": int(data.get("line_number") or 0),
+                    "text": _clip_text(str(line_data.get("text") or "").rstrip("\r\n")),
+                }
+            )
 
+        stderr = process.stderr.read() if process.stderr is not None else ""
+        return_code = process.wait()
+        if return_code not in (0, 1) and not truncated:
+            return tool_error("grep", stderr.strip() or "rg 搜索失败。", _rg_error(stderr))
         return tool_ok(
             "grep",
             results,
             meta={
                 "pattern": pattern,
                 "path": str(search_path),
-                "glob_pattern": glob_pattern,
-                "output_mode": output_mode,
-                "matches": len(results),
-                "offset": offset,
+                "glob": glob,
+                "count": len(results),
                 "max_results": max_results,
                 "truncated": truncated,
-                "next_offset": offset + len(results) if truncated else None,
-                "skipped_large_files": skipped_large_files,
             },
         )
-    except Exception as e:
-        return tool_error("grep", f"Grep error: {e}", type(e).__name__)
-
-
-def _append_paged(results: list, item: object, seen: int, offset: int, max_results: int) -> tuple[int, bool]:
-    seen += 1
-    if seen <= offset:
-        return seen, False
-    if len(results) >= max_results:
-        return seen, True
-    results.append(item)
-    return seen, False
-
-
-def _grep_content_records(
-    file_path: Path,
-    rel_path: str,
-    regex: re.Pattern,
-    context: int,
-    cancellation_token: CancellationToken | None = None,
-):
-    if context <= 0:
-        with open(file_path, "r", encoding="utf-8", errors="replace") as handle:
-            for line_no, line in enumerate(handle, start=1):
-                if line_no % 1000 == 0:
-                    _raise_if_cancelled(cancellation_token)
-                text = line.rstrip("\n").rstrip("\r")
-                if regex.search(text):
-                    yield {"file": rel_path, "line": line_no, "text": _clip_text(text.strip(), 500)}
-        return
-
-    before_window: deque[tuple[int, str]] = deque(maxlen=context)
-    pending: deque[dict[str, object]] = deque()
-    with open(file_path, "r", encoding="utf-8", errors="replace") as handle:
-        for line_no, line in enumerate(handle, start=1):
-            if line_no % 1000 == 0:
-                _raise_if_cancelled(cancellation_token)
-            text = line.rstrip("\n").rstrip("\r")
-
-            for _ in range(len(pending)):
-                record = pending.popleft()
-                after = record["after"]
-                assert isinstance(after, list)
-                after.append((line_no, text))
-                remaining = int(record["remaining_after"]) - 1
-                record["remaining_after"] = remaining
-                if remaining <= 0:
-                    yield _finalize_grep_record(record)
-                else:
-                    pending.append(record)
-
-            if regex.search(text):
-                pending.append(
-                    {
-                        "file": rel_path,
-                        "line": line_no,
-                        "text": text,
-                        "before": list(before_window),
-                        "after": [],
-                        "remaining_after": context,
-                    }
-                )
-
-            before_window.append((line_no, text))
-
-        while pending:
-            yield _finalize_grep_record(pending.popleft())
-
-
-def _format_grep_context(lines, *, match: bool) -> list[dict[str, object]]:
-    return [
-        {"line": line_no, "text": _clip_text(text.strip(), 500), "match": match}
-        for line_no, text in lines
-    ]
-
-
-def _finalize_grep_record(record: dict[str, object]) -> dict[str, object]:
-    line_no = int(record["line"])
-    text = str(record["text"])
-    before = record["before"]
-    after = record["after"]
-    assert isinstance(before, list)
-    assert isinstance(after, list)
-    return {
-        "file": record["file"],
-        "line": line_no,
-        "text": _clip_text(text.strip(), 500),
-        "context": [
-            *_format_grep_context(before, match=False),
-            {"line": line_no, "text": _clip_text(text.strip(), 500), "match": True},
-            *_format_grep_context(after, match=False),
-        ],
-    }
-
-
-def _build_tree(
-    path: Path,
-    prefix: str = "",
-    depth: int = 0,
-    max_depth: int = 2,
-    pattern: str = "*",
-    include_hidden: bool = False,
-) -> tuple:
-    try:
-        items = [
-            item
-            for item in sorted(path.iterdir(), key=lambda x: (not x.is_dir(), x.name))
-            if include_hidden or not item.name.startswith(".")
-        ]
-    except PermissionError:
-        return [f"{prefix}└── [权限拒绝]"], 0, 0
-    lines, files, dirs = [], 0, 0
-    for i, item in enumerate(items):
-        is_last = i == len(items) - 1
-        conn = "└── " if is_last else "├── "
-        ext = "    " if is_last else "│   "
-        if item.is_dir():
-            lines.append(f"{prefix}{conn}📁 {item.name}/")
-            if depth < max_depth - 1:
-                sub, f, d = _build_tree(item, prefix + ext, depth + 1, max_depth, pattern, include_hidden)
-                lines.extend(sub)
-                dirs += 1 + d
-                files += f
-            else:
-                dirs += 1
-        else:
-            if not fnmatch.fnmatch(item.name, pattern):
-                continue
-            lines.append(f"{prefix}{conn}📄 {item.name} ({_format_size(item.stat().st_size)})")
-            files += 1
-    return lines, files, dirs
-
-def list_files(
-    directory: str = ".",
-    pattern: str = "*",
-    recursive: bool = True,
-    max_depth: int = 2,
-    include_hidden: bool = False,
-) -> str:
-    try:
-        path = Path(directory).expanduser().resolve()
-        if not path.exists():
-            return tool_error("list_files", f"目录不存在: {directory}", "NotFound")
-        if not path.is_dir():
-            return tool_error("list_files", f"不是目录: {directory}", "NotADirectory")
-        if not recursive:
-            result = []
-            for f in sorted(path.glob(pattern)):
-                if f.name.startswith(".") and not include_hidden:
-                    continue
-                if f.is_file(): result.append(f"📄 {f.name} ({_format_size(f.stat().st_size)})")
-                else: result.append(f"📁 {f.name}/")
-            return tool_ok("list_files", "\n".join(result) or "没有找到文件", meta={"directory": str(path), "recursive": False, "pattern": pattern, "include_hidden": bool(include_hidden)})
-        lines, f, d = _build_tree(path, max_depth=max_depth, pattern=pattern, include_hidden=bool(include_hidden))
-        return tool_ok(
-            "list_files",
-            "\n".join([f"📁 {path}/"] + lines + ["", f"总计: {d} 个文件夹, {f} 个文件"]),
-            meta={"directory": str(path), "recursive": True, "pattern": pattern, "include_hidden": bool(include_hidden)},
-        )
-    except Exception as e:
-        return tool_error("list_files", f"错误: {e}", type(e).__name__)
+    except FileNotFoundError:
+        return tool_error("grep", "未找到 rg 可执行文件。", "RgUnavailable")
+    except OSError as exc:
+        return tool_error("grep", f"无法启动 rg: {exc}", "GrepError")
+    finally:
+        if process is not None and process.poll() is None:
+            process.kill()
+            process.wait()

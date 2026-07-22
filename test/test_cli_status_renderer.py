@@ -70,7 +70,7 @@ def test_tool_requested_shows_file_path_summary() -> None:
         ToolRequestedEvent(
             tool_call_id="call_1",
             tool_name="read_file",
-            args_preview='{"file_path":"agent/interfaces/cli/chat_cli.py"}',
+            args_preview='{"path":"agent/interfaces/cli/chat_cli.py"}',
         )
     )
 

@@ -34,8 +34,10 @@ def _tool_detail(name: str, args: dict[str, Any]) -> str:
     if name == "bash_output":
         bg_id = single_line(args.get("bg_id"))
         return f"bg {bg_id}" if bg_id else ""
-    if name in {"read_file", "write_file", "edit_file"}:
+    if name in {"write_file", "edit_file"}:
         return single_line(args.get("file_path"))
+    if name == "read_file":
+        return single_line(args.get("path"))
     if name == "glob":
         pattern = single_line(args.get("pattern"))
         path = single_line(args.get("path"))
@@ -44,8 +46,6 @@ def _tool_detail(name: str, args: dict[str, Any]) -> str:
         pattern = single_line(args.get("pattern"))
         path = single_line(args.get("path")) or "."
         return f"{pattern} in {path}" if pattern else path
-    if name == "list_files":
-        return single_line(args.get("directory")) or single_line(args.get("pattern"))
     for key in ("path", "file_path", "query", "url", "command"):
         value = single_line(args.get(key))
         if value:

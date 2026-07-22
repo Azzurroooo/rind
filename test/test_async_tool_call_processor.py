@@ -157,7 +157,7 @@ async def test_sync_tool_receives_cancellation_token_without_persisting_private_
     session = FakeSession()
     processor = ToolCallProcessor(tool_executor=executor)
     cancel_source = CancellationTokenSource()
-    call = ParsedToolCall(call_id="call_sync", name="read_file", raw_args='{"file_path":"demo.txt"}')
+    call = ParsedToolCall(call_id="call_sync", name="read_file", raw_args='{"path":"demo.txt"}')
 
     events = [
         event
@@ -174,7 +174,7 @@ async def test_sync_tool_receives_cancellation_token_without_persisting_private_
     if len(result_events) != 1 or result_events[0].status != "completed":
         raise AssertionError(f"Expected completed sync tool result, got: {events}")
     persisted_args = session.persisted_tool_calls[0][0][2]
-    if persisted_args != {"file_path": "demo.txt"}:
+    if persisted_args != {"path": "demo.txt"}:
         raise AssertionError(f"Expected persisted args to exclude private token, got: {persisted_args}")
 
 
@@ -313,7 +313,7 @@ async def test_file_change_is_not_emitted_for_failed_empty_or_non_file_tools() -
     non_file_call = ParsedToolCall(
         call_id="call_read",
         name="read_file",
-        raw_args='{"file_path":"demo.txt"}',
+        raw_args='{"path":"demo.txt"}',
     )
     events = [event async for event in processor.execute(session=FakeSession(), tool_calls=[empty_call, non_file_call])]
     if any(isinstance(event, FileChangeEvent) for event in events):

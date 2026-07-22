@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from ..spec import ToolSpec
-from .files import edit_file, glob, grep, list_files, read_file, write_file
+from .files import edit_file, glob, grep, read_file, write_file
 from .pdf import read_pdf
 from .planning import (
     plan_add_step,
@@ -36,12 +36,11 @@ TOOL_SPECS: tuple[ToolSpec, ...] = (
     ToolSpec(
         name="read_file",
         handler=read_file,
-        description="读取文本文件内容，支持行号和范围读取。小文件可直接读取；大文件应先用 glob/grep 定位后通过 offset/limit 读取局部范围。",
+        description="读取 UTF-8 文本文件的指定行范围，返回行号、截断状态和下一次 offset。",
         param_descriptions={
-            "file_path": "文件绝对或相对路径",
+            "path": "文件绝对或相对路径",
             "offset": "起始行号（默认 1）",
             "limit": "最多读取的行数（默认 1000 行，最大 2000 行；超过会被截断）",
-            "include_total": "是否继续扫描到 EOF 以返回精确总行数。默认 False，仅读取请求页和一行 lookahead。",
         },
     ),
     ToolSpec(
@@ -72,18 +71,6 @@ TOOL_SPECS: tuple[ToolSpec, ...] = (
         },
     ),
     ToolSpec(
-        name="list_files",
-        handler=list_files,
-        description="列出目录中的文件（树形结构）",
-        param_descriptions={
-            "directory": "目录路径",
-            "pattern": "文件匹配模式",
-            "recursive": "是否递归",
-            "max_depth": "最大深度",
-            "include_hidden": "是否包含点开头的隐藏文件和目录。默认 False。",
-        },
-    ),
-    ToolSpec(
         name="glob",
         handler=glob,
         description="按 glob 模式快速查找文件路径，并返回文件大小。适合在读取文件内容前定位候选文件。",
@@ -91,25 +78,17 @@ TOOL_SPECS: tuple[ToolSpec, ...] = (
             "pattern": "文件匹配模式，如 **/*.py、src/**/*.ts。",
             "path": "搜索目录。默认为当前目录 .。",
             "max_results": "最大返回文件数。默认 100。",
-            "offset": "分页偏移：跳过前 N 个匹配文件。默认 0。",
         },
     ),
     ToolSpec(
         name="grep",
         handler=grep,
-        description="在文件中搜索正则表达式模式 (Search)。默认只返回匹配文件列表；需要具体行内容时使用 output_mode=content。",
+        description="使用 rg 在文件中搜索模式，返回匹配文件、行号和文本。达到上限时返回截断状态。",
         param_descriptions={
-            "pattern": "要搜索的正则表达式 (Python re syntax)",
+            "pattern": "要搜索的正则表达式（rg 语法）",
             "path": "搜索的根目录 (默认为当前目录 .)",
-            "glob_pattern": "文件匹配模式 (如 **/*.py, src/*.ts)。默认为 **/*。",
-            "case_sensitive": "是否区分大小写 (默认为 False)",
+            "glob": "文件匹配模式 (如 **/*.py, src/*.ts)。默认为 **/*。",
             "max_results": "最大返回结果数 (默认为 50)",
-            "output_mode": {
-                "description": "输出模式：files_with_matches 只返回匹配文件；content 返回匹配行；count 返回每个文件的匹配次数。",
-                "enum": ["files_with_matches", "content", "count"],
-            },
-            "offset": "分页偏移：跳过当前 output_mode 下的前 N 个输出项。默认为 0。",
-            "context": "content 模式下每个命中行前后附带的上下文行数。默认为 0。",
         },
     ),
     ToolSpec(
