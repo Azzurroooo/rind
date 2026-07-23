@@ -1,4 +1,4 @@
-import { graphemes, wrapTextCells } from "./text-width.js";
+import { graphemes, textWidth, wrapTextCells } from "./text-width.js";
 
 const HISTORY_LIMIT = 100;
 const UNDO_LIMIT = 100;
@@ -224,27 +224,28 @@ export function createLineEditor(initialValue = "") {
     const current = visual.lines[visual.index];
     const targetIndex = visual.index + delta;
     const target = visual.lines[targetIndex];
-    const currentColumn = cursorColumn - current.startColumn;
-    const currentMax = visualLineMaxColumn(visual.lines, visual.index);
-    const targetMax = visualLineMaxColumn(visual.lines, targetIndex);
+    const currentColumn = visualColumn(current, cursorColumn - current.startColumn);
+    const desiredColumn = preferredVisualColumn ?? currentColumn;
+    const targetOffset = visualOffset(target, desiredColumn);
+    const targetColumn = visualColumn(target, targetOffset);
     cursorLine = target.line;
-    cursorColumn = target.startColumn + verticalTargetColumn(currentColumn, currentMax, targetMax);
+    cursorColumn = target.startColumn + targetOffset;
+    preferredVisualColumn = targetColumn === desiredColumn ? null : desiredColumn;
     return "move";
   }
 
   function visualLineState() {
     const visualLines = [];
+    const contentWidth = Math.max(1, viewportWidth - INPUT_PREFIX_WIDTH);
     for (const [lineIndex, text] of lines.entries()) {
-      const firstWidth = lineIndex === 0
-        ? Math.max(1, viewportWidth - INPUT_PREFIX_WIDTH)
-        : viewportWidth;
-      const chunks = wrapTextCells(text, firstWidth, viewportWidth);
+      const chunks = wrapTextCells(text, contentWidth, contentWidth);
       for (const chunk of chunks) {
         visualLines.push({
           line: lineIndex,
           startColumn: chunk.startColumn,
           length: chunk.length,
           allowsEnd: chunk.allowsEnd,
+          text: chunk.text,
         });
       }
       const lastChunk = chunks.at(-1);
@@ -254,6 +255,7 @@ export function createLineEditor(initialValue = "") {
           startColumn: lastChunk.startColumn + lastChunk.length,
           length: 0,
           allowsEnd: true,
+          text: "",
         });
       }
     }
@@ -273,28 +275,24 @@ export function createLineEditor(initialValue = "") {
     return { lines: visualLines, index };
   }
 
-  function visualLineMaxColumn(visualLines, index) {
-    const visualLine = visualLines[index];
-    return visualLine.allowsEnd ? visualLine.length : Math.max(0, visualLine.length - 1);
+  function visualColumn(visualLine, offset) {
+    return textWidth(graphemes(visualLine.text).slice(0, offset).join(""));
   }
 
-  function verticalTargetColumn(current, currentMax, targetMax) {
-    const cursorInMiddle = current < currentMax;
-    const targetTooShort = targetMax < current;
-    if (preferredVisualColumn === null || cursorInMiddle) {
-      if (targetTooShort) {
-        preferredVisualColumn = current;
-        return targetMax;
+  function visualOffset(visualLine, targetColumn) {
+    const chars = graphemes(visualLine.text);
+    const maxOffset = visualLine.allowsEnd ? chars.length : Math.max(0, chars.length - 1);
+    let offset = 0;
+    let column = 0;
+    while (offset < maxOffset) {
+      const nextWidth = textWidth(chars[offset]);
+      if (column + nextWidth > targetColumn) {
+        break;
       }
-      preferredVisualColumn = null;
-      return current;
+      column += nextWidth;
+      offset += 1;
     }
-    if (targetTooShort || targetMax < preferredVisualColumn) {
-      return targetMax;
-    }
-    const target = preferredVisualColumn;
-    preferredVisualColumn = null;
-    return target;
+    return offset;
   }
 
   function moveToLineStart() {

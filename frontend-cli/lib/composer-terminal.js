@@ -32,41 +32,44 @@ export function prepareComposerFrame(frame = {}, columns = DEFAULT_COLUMNS) {
 
 function wrapInputLines(prefix, text, columns) {
   const logicalLines = String(text || "").split("\n");
+  const prefixWidth = textWidth(prefix);
+  const continuationPrefix = " ".repeat(prefixWidth);
+  const contentWidth = Math.max(1, columns - prefixWidth);
   const lines = [];
   for (const [index, logicalLine] of logicalLines.entries()) {
-    const linePrefix = index === 0 ? prefix : "";
+    const linePrefix = index === 0 ? prefix : continuationPrefix;
     if (logicalLine.includes("\x1b")) {
-      lines.push(...wrapLine(linePrefix, logicalLine, columns));
+      lines.push(...wrapLine(
+        linePrefix,
+        continuationPrefix,
+        logicalLine,
+        contentWidth,
+      ));
       continue;
     }
-    const chunks = wrapTextCells(
-      logicalLine,
-      Math.max(1, columns - textWidth(linePrefix)),
-      columns,
-    );
-    lines.push(...chunks.map((chunk, chunkIndex) => `${chunkIndex === 0 ? linePrefix : ""}${chunk.text}`));
+    const chunks = wrapTextCells(logicalLine, contentWidth, contentWidth);
+    lines.push(...chunks.map((chunk, chunkIndex) => (
+      `${chunkIndex === 0 ? linePrefix : continuationPrefix}${chunk.text}`
+    )));
   }
   return lines.length ? lines : [String(prefix || "")];
 }
 
 function visualCursor(prefix, input, position, columns, inputLines) {
   const logicalLines = String(input).split("\n");
-  const width = Math.max(1, columns);
+  const prefixWidth = textWidth(prefix);
+  const continuationPrefix = " ".repeat(prefixWidth);
+  const contentWidth = Math.max(1, columns - prefixWidth);
   const visualLines = [];
   for (const [lineIndex, logicalLine] of logicalLines.entries()) {
-    const prefixWidth = lineIndex === 0 ? textWidth(prefix) : 0;
-    const chunks = wrapTextCells(
-      logicalLine,
-      Math.max(1, width - prefixWidth),
-      width,
-    );
-    for (const [chunkIndex, chunk] of chunks.entries()) {
+    const chunks = wrapTextCells(logicalLine, contentWidth, contentWidth);
+    for (const chunk of chunks) {
       visualLines.push({
         startColumn: chunk.startColumn,
         length: chunk.length,
         allowsEnd: chunk.allowsEnd,
         line: lineIndex,
-        prefixWidth: lineIndex === 0 && chunkIndex === 0 ? prefixWidth : 0,
+        prefixWidth,
       });
     }
     const lastChunk = chunks.at(-1);
@@ -76,7 +79,7 @@ function visualCursor(prefix, input, position, columns, inputLines) {
         length: 0,
         allowsEnd: true,
         line: lineIndex,
-        prefixWidth: 0,
+        prefixWidth,
       });
     }
   }
@@ -93,7 +96,7 @@ function visualCursor(prefix, input, position, columns, inputLines) {
     }
   }
   while (inputLines.length <= row) {
-    inputLines.push("");
+    inputLines.push(continuationPrefix);
   }
   const visualLine = visualLines[row];
   const text = graphemes(logicalLines[position.line])
@@ -105,12 +108,12 @@ function visualCursor(prefix, input, position, columns, inputLines) {
   };
 }
 
-function wrapLine(prefix, text, columns) {
+function wrapLine(prefix, continuationPrefix, text, contentWidth) {
   const lines = [];
   let line = "";
   let width = 0;
   let activeStyle = "";
-  for (const segment of displaySegments(`${prefix || ""}${text || ""}`)) {
+  for (const segment of displaySegments(text)) {
     const sgr = segment.match(SGR_SEQUENCE);
     if (sgr) {
       line += segment;
@@ -124,15 +127,15 @@ function wrapLine(prefix, text, columns) {
       continue;
     }
     const segmentWidth = textWidth(segment);
-    if (width > 0 && width + segmentWidth > columns) {
-      lines.push(line);
+    if (width > 0 && width + segmentWidth > contentWidth) {
+      lines.push(`${lines.length ? continuationPrefix : prefix}${line}`);
       line = activeStyle;
       width = 0;
     }
     line += segment;
     width += segmentWidth;
   }
-  lines.push(line);
+  lines.push(`${lines.length ? continuationPrefix : prefix}${line}`);
   return lines;
 }
 
@@ -196,5 +199,5 @@ function wrapRenderedLines(text, columns) {
   if (lines.at(-1) === "") {
     lines.pop();
   }
-  return lines.flatMap((line) => wrapLine("", line, columns));
+  return lines.flatMap((line) => wrapLine("", "", line, columns));
 }

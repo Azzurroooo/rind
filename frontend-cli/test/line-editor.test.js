@@ -140,12 +140,21 @@ test("line editor preserves the preferred column across short lines", () => {
   assert.deepEqual(editor.cursorPosition(), { line: 0, column: 6 });
 });
 
+test("line editor preserves terminal cell columns across wide lines", () => {
+  const editor = createLineEditor("abcd\n你你你\nabcd");
+
+  editor.handleKey("", { name: "up" });
+  assert.deepEqual(editor.cursorPosition(), { line: 1, column: 2 });
+  editor.handleKey("", { name: "up" });
+  assert.deepEqual(editor.cursorPosition(), { line: 0, column: 4 });
+});
+
 test("line editor navigates soft-wrapped visual lines", () => {
   const editor = createLineEditor("abcdefghij");
   editor.setViewportWidth(8);
 
   editor.handleKey("", { name: "up" });
-  assert.deepEqual(editor.cursorPosition(), { line: 0, column: 3 });
+  assert.deepEqual(editor.cursorPosition(), { line: 0, column: 6 });
   editor.handleKey("", { name: "down" });
   assert.deepEqual(editor.cursorPosition(), { line: 0, column: 10 });
 });
@@ -158,7 +167,7 @@ test("line editor keeps wide-character wrapping aligned with the composer", () =
 
   editor.handleKey("", { name: "down" });
 
-  assert.deepEqual(editor.cursorPosition(), { line: 0, column: 2 });
+  assert.deepEqual(editor.cursorPosition(), { line: 0, column: 1 });
 });
 
 test("line editor includes the virtual row after a full-width ending", () => {
@@ -167,7 +176,7 @@ test("line editor includes the virtual row after a full-width ending", () => {
 
   editor.handleKey("", { name: "up" });
 
-  assert.deepEqual(editor.cursorPosition(), { line: 0, column: 2 });
+  assert.deepEqual(editor.cursorPosition(), { line: 0, column: 6 });
 });
 
 test("line editor supports word deletion, undo, and bracketed paste events", () => {

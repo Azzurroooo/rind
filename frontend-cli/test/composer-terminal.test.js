@@ -33,8 +33,8 @@ test("composer wraps long ascii input and tracks cursor position", () => {
     cursor: { line: 0, column: 10 },
   }, 8);
 
-  assert.equal(frame.lines.join("\n"), "\n  › abcd\nefghij");
-  assert.equal(frame.cursorRow, 2);
+  assert.equal(frame.lines.join("\n"), "\n  › abcd\n    efgh\n    ij");
+  assert.equal(frame.cursorRow, 3);
   assert.equal(frame.cursorColumn, 6);
 });
 
@@ -45,9 +45,21 @@ test("composer wraps wide input without splitting characters", () => {
     cursor: { line: 0, column: 4 },
   }, 8);
 
-  assert.equal(frame.lines.join("\n"), "\n  › 你好\n吗abc");
+  assert.equal(frame.lines.join("\n"), "\n  › 你好\n    吗ab\n    c");
   assert.equal(frame.cursorRow, 2);
-  assert.equal(frame.cursorColumn, 3);
+  assert.equal(frame.cursorColumn, 7);
+});
+
+test("composer aligns emoji continuation rows and cursor cells", () => {
+  const frame = prepareComposerFrame({
+    prompt: "\n  › ",
+    inputText: "ab🙂你cd",
+    cursor: { line: 0, column: 5 },
+  }, 10);
+
+  assert.equal(frame.lines.join("\n"), "\n  › ab🙂你\n    cd");
+  assert.equal(frame.cursorRow, 2);
+  assert.equal(frame.cursorColumn, 5);
 });
 
 test("composer keeps cursor stable at the terminal boundary", () => {
@@ -57,9 +69,9 @@ test("composer keeps cursor stable at the terminal boundary", () => {
     cursor: { line: 0, column: 4 },
   }, 8);
 
-  assert.equal(frame.lines.join("\n"), "\n  › abcd\n");
+  assert.equal(frame.lines.join("\n"), "\n  › abcd\n    ");
   assert.equal(frame.cursorRow, 2);
-  assert.equal(frame.cursorColumn, 0);
+  assert.equal(frame.cursorColumn, 4);
 });
 
 test("composer places menu after wrapped input rows", () => {
@@ -73,14 +85,15 @@ test("composer places menu after wrapped input rows", () => {
   assert.equal(frame.lines.join("\n"), [
     "",
     "  › abcd",
-    "efghij",
+    "    efgh",
+    "    ij",
     "  Comman",
     "d deck",
     "  › /hel",
     "p",
   ].join("\n"));
-  assert.equal(frame.lines.length, 7);
-  assert.equal(frame.focusRow, 5);
+  assert.equal(frame.lines.length, 8);
+  assert.equal(frame.focusRow, 6);
 });
 
 test("composer uses placeholder text without moving the empty input cursor", () => {
@@ -104,8 +117,8 @@ test("composer wraps styled placeholders without counting ANSI sequences", () =>
     cursor: { line: 0, column: 0 },
   }, 24);
 
-  assert.deepEqual(frame.lines.map(stripAnsi), ["", "  › Ask Rind to do anyth", "ing"]);
-  assert.match(frame.lines[2], /^\x1b\[2m/);
+  assert.deepEqual(frame.lines.map(stripAnsi), ["", "  › Ask Rind to do anyth", "    ing"]);
+  assert.match(frame.lines[2], /^ {4}\x1b\[2m/);
   assert.equal(frame.cursorRow, 1);
   assert.equal(frame.cursorColumn, 4);
 });
@@ -118,8 +131,8 @@ test("composer preserves a style that follows an SGR reset", () => {
     cursor: { line: 0, column: 0 },
   }, 8);
 
-  assert.deepEqual(frame.lines.map(stripAnsi), ["", "  › abcd", "efghij"]);
-  assert.match(frame.lines[2], /^\x1b\[0;31m/);
+  assert.deepEqual(frame.lines.map(stripAnsi), ["", "  › abcd", "    efgh", "    ij"]);
+  assert.match(frame.lines[2], /^ {4}\x1b\[0;31m/);
 });
 
 test("composer keeps a cursor before an early-wrapped wide character", () => {
@@ -140,8 +153,8 @@ test("composer adds a cursor row when input fills the last column", () => {
     cursor: { line: 0, column: 8 },
   }, 6);
 
-  assert.equal(frame.cursorRow, 3);
-  assert.equal(frame.cursorColumn, 0);
+  assert.equal(frame.cursorRow, 5);
+  assert.equal(frame.cursorColumn, 4);
 });
 
 test("composer renders explicit newlines and positions the cursor", () => {
@@ -151,9 +164,21 @@ test("composer renders explicit newlines and positions the cursor", () => {
     cursor: { line: 1, column: 3 },
   }, 24);
 
-  assert.equal(frame.lines.join("\n"), "\n  › first\nsecond");
+  assert.equal(frame.lines.join("\n"), "\n  › first\n    second");
   assert.equal(frame.cursorRow, 2);
-  assert.equal(frame.cursorColumn, 3);
+  assert.equal(frame.cursorColumn, 7);
+});
+
+test("composer indents empty logical input lines", () => {
+  const frame = prepareComposerFrame({
+    prompt: "\n  › ",
+    inputText: "first\n\nthird",
+    cursor: { line: 1, column: 0 },
+  }, 24);
+
+  assert.equal(frame.lines.join("\n"), "\n  › first\n    \n    third");
+  assert.equal(frame.cursorRow, 2);
+  assert.equal(frame.cursorColumn, 4);
 });
 
 test("composer counts wrapped rows before a multiline cursor", () => {
@@ -163,7 +188,7 @@ test("composer counts wrapped rows before a multiline cursor", () => {
     cursor: { line: 1, column: 3 },
   }, 8);
 
-  assert.equal(frame.lines.join("\n"), "\n  › abcd\nefghij\nsecond");
-  assert.equal(frame.cursorRow, 3);
-  assert.equal(frame.cursorColumn, 3);
+  assert.equal(frame.lines.join("\n"), "\n  › abcd\n    efgh\n    ij\n    seco\n    nd");
+  assert.equal(frame.cursorRow, 4);
+  assert.equal(frame.cursorColumn, 7);
 });
