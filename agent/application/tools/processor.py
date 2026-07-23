@@ -28,7 +28,7 @@ from agent.domain.events import (
     event_meta,
 )
 from agent.application.tools.executor import ToolExecutor
-from agent.application.tools.change_events import build_file_change_event
+from agent.application.tools.change_events import build_file_change_events
 from agent.application.tools.polling_guard import BashOutputPollingGuard
 from agent.application.tools.result_normalizer import NormalizedToolResult, ToolResultNormalizer
 from agent.domain.cancellation import CancellationToken
@@ -184,15 +184,14 @@ class ToolCallProcessor:
                 )
 
             duration_ms = int((time.perf_counter() - started_at) * 1000)
-            file_change_event = build_file_change_event(
+            file_change_events = build_file_change_events(
                 session=session,
                 turn_id=turn_id,
                 call=call,
-                parsed_args=parsed_args,
                 status=outcome.status,
                 result=outcome.result,
             )
-            if file_change_event is not None:
+            for file_change_event in file_change_events:
                 yield file_change_event
             yield ToolResultEvent(
                 **event_meta(session, turn_id),

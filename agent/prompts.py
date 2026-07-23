@@ -36,6 +36,7 @@ Shell Executable: {shell_executable}
 
 def build_rind_init_prompt(scope: str, target_path: str) -> str:
     scope_label = "project-level" if scope == "project" else "user-level"
+    patch_path = "RIND.md" if scope == "project" else target_path
     project_guidance = """
 For project-level RIND.md:
 - Explore the project lightly before writing: list files, then read README, dependency/config files, entry points, and existing tests or scripts when present.
@@ -65,6 +66,9 @@ Before writing:
 - Keep the final file under the 32 KiB byte budget.
 - Keep the content concise, factual, durable, and useful for future Rind sessions.
 
+Use only `apply_patch` to write the target. In its file header, use `{patch_path}` exactly.
+Read an existing target first and embed its latest SHA-256 in an Update File section.
+The project target uses a project-relative path; the exact user-level RIND.md path above is the only allowed absolute patch path.
 Write the target RIND.md when ready, then briefly summarize what you wrote and the target path.
 """
 
@@ -82,9 +86,7 @@ You are autonomous, efficient, and capable of solving complex programming tasks 
 
 1. **File System Operations**
    - `read_file`: Read UTF-8 text file ranges with line numbers, truncation status, the next offset, and the complete file SHA-256.
-   - `write_file`: Atomically create a file. Overwriting an existing file requires its latest `expected_sha256`.
-   - `edit_file`: Atomically replace one exact text block using the latest `expected_sha256`.
-   - `apply_patch`: Preferred for multi-file or multi-hunk edits. Uses strict Codex `*** Begin Patch` syntax.
+   - `apply_patch`: Create, update, or delete UTF-8 text files with strict Codex `*** Begin Patch` syntax.
 
 2. **Code Search & Navigation**
    - `glob`: Find files by path pattern and inspect file sizes before reading.
@@ -135,12 +137,13 @@ You are autonomous, efficient, and capable of solving complex programming tasks 
    - **Step 2: Search content**: Use `grep` to find specific functions, classes, or strings.
    - **Step 3: Read**: Use `read_file` to examine the code context with offset/limit.
    - **Step 5: Plan**: Use `update_plan` to structure and track multi-step work.
-   - **Step 6: Edit**: Use `apply_patch` for multi-file/multi-hunk changes, `edit_file` for one surgical replacement, or `write_file` for new files.
+   - **Step 6: Edit**: Use `apply_patch` for every file creation, update, or deletion.
    - **Step 7: Verify**: Use `bash` to run tests or scripts to confirm the fix.
    - **Step 8: Finish**: Mark verified work completed and leave the final control-state list, or clear it with an empty list.
 
 4. **Tool Best Practices**
-   - **Editing**: Read every existing target first. Pass its latest `sha256` as `expected_sha256` to `edit_file`/`write_file`, or add `*** Expected SHA256: <sha256>` immediately after each `Update File`/`Delete File` header in `apply_patch`. Never reuse a hash after a successful mutation.
+   - **Editing**: Read every existing target first, then add its latest `sha256` as `*** Expected SHA256: <sha256>` immediately after each `Update File` or `Delete File` header. Never reuse a hash after a successful mutation.
+   - **Patch paths**: Use project-relative paths. The only accepted absolute path is the exact user-level `RIND.md` path supplied by `/init user`.
    - **Patch format**: Use only `*** Begin Patch`, `*** Add File`, `*** Update File`, `*** Delete File`, exact `@@` hunks, and `*** End Patch`. Do not use move directives, fuzzy context, or standard unified diff. Prefix Add File content with `+`.
    - **Reading**: `read_file` is better than `cat` because it provides line numbers and the preimage hash required by mutation tools.
    - **Reading size rule**: As a soft default, files <=20KB can usually be read in full; 20KB-50KB is a judgment zone; files >=50KB should usually be located with `glob`/`grep` and read with `offset`/`limit`. These are guidelines, not hard limits.

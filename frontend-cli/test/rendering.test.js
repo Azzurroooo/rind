@@ -651,21 +651,21 @@ test("toolResultLine renders compact success state", () => {
   );
 });
 
-test("toolResultLine appends inline file change diff for successful file tools", () => {
+test("toolResultLine appends inline apply_patch file changes", () => {
   assert.equal(
     toolResultLine({
-      tool_name: "edit_file",
+      tool_name: "apply_patch",
       status: "completed",
       duration_ms: 35,
-    }, {
-      file_path: "frontend-cli/lib/rendering.js",
-      lines: [
-        { kind: "removed", text: "const oldValue = 1;" },
-        { kind: "added", text: "const newValue = 2;" },
-      ],
-    }),
+    }, [{
+        file_path: "frontend-cli/lib/rendering.js",
+        lines: [
+          { kind: "removed", text: "const oldValue = 1;" },
+          { kind: "added", text: "const newValue = 2;" },
+        ],
+      }]),
     [
-      "✓ Tool · Called file edit in 35ms",
+      "✓ Tool · Called patch in 35ms",
       "  ↳ frontend-cli/lib/rendering.js",
       "    - const oldValue = 1;",
       "    + const newValue = 2;",
@@ -679,15 +679,15 @@ test("toolResultLine clips long file change lines", () => {
   try {
     assert.equal(
       toolResultLine({
-        tool_name: "write_file",
+        tool_name: "apply_patch",
         status: "completed",
         duration_ms: 10,
-      }, {
+      }, [{
         file_path: "E:\\deep\\path\\created-file.md",
         lines: [{ kind: "added", text: "x".repeat(60) }],
-      }),
+      }]),
       [
-        "✓ Tool · Called write file in 10ms",
+        "✓ Tool · Called patch in 10ms",
         "  ↳ E:\\deep\\...file.md",
         `    + ${"x".repeat(31)}...`,
       ].join("\n"),
@@ -697,41 +697,47 @@ test("toolResultLine clips long file change lines", () => {
   }
 });
 
-test("toolResultLine truncates long file change blocks", () => {
-  const lines = Array.from({ length: 22 }, (_, index) => ({
+test("toolResultLine aggregates paths under one global file change limit", () => {
+  const firstLines = Array.from({ length: 12 }, (_, index) => ({
     kind: "added",
-    text: `line ${index + 1}`,
+    text: `first ${index + 1}`,
+  }));
+  const secondLines = Array.from({ length: 12 }, (_, index) => ({
+    kind: "removed",
+    text: `second ${index + 1}`,
   }));
 
   const output = toolResultLine({
-    tool_name: "write_file",
+    tool_name: "apply_patch",
     status: "completed",
     duration_ms: 10,
-  }, {
-    file_path: "demo.txt",
-    lines,
-  });
+  }, [
+    { file_path: "first.txt", lines: firstLines },
+    { file_path: "nested/second.txt", lines: secondLines },
+  ]);
 
-  assert.match(output, /\n    \+ line 20\n    … 2 more changed lines$/);
-  assert.doesNotMatch(output, /line 21/);
+  assert.match(output, /\n  ↳ first\.txt\n/);
+  assert.match(output, /\n  ↳ nested\/second\.txt\n/);
+  assert.match(output, /\n    - second 8\n    … 4 more changed lines$/);
+  assert.doesNotMatch(output, /second 9/);
 });
 
 test("toolResultLine ignores file change details for failed tools", () => {
   assert.equal(
     toolResultLine({
-      tool_name: "edit_file",
+      tool_name: "apply_patch",
       status: "failed",
-      error_type: "OldStrNotFound",
+      error_type: "PatchMismatch",
       duration_ms: 20,
       result: '{"ok":false,"error":"not found"}',
-    }, {
+    }, [{
       file_path: "demo.txt",
       lines: [
         { kind: "removed", text: "old" },
         { kind: "added", text: "new" },
       ],
-    }),
-    "× Tool · file edit failed in 20ms (OldStrNotFound)\n  ↳ not found",
+    }]),
+    "× Tool · patch failed in 20ms (PatchMismatch)\n  ↳ not found",
   );
 });
 

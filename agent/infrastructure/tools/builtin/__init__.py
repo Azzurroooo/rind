@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from ..spec import ToolSpec
-from .files import apply_patch, edit_file, glob, grep, read_file, write_file
+from .files import apply_patch, glob, grep, read_file
 from .pdf import read_pdf
 from .planning import update_plan
 from .shell import bash, bash_output
@@ -45,31 +45,10 @@ TOOL_SPECS: tuple[ToolSpec, ...] = (
         },
     ),
     ToolSpec(
-        name="write_file",
-        handler=write_file,
-        description="原子新建 UTF-8 文本文件，或在 expected_sha256 匹配时完整覆盖已有文件。",
-        param_descriptions={
-            "file_path": "文件绝对或相对路径",
-            "content": "完整文件内容",
-            "expected_sha256": "覆盖已有文件时必填，必须使用最近一次 read_file 返回的 sha256；新建文件时省略。",
-        },
-    ),
-    ToolSpec(
-        name="edit_file",
-        handler=edit_file,
-        description="在 expected_sha256 匹配时原子替换已有 UTF-8 文件中的唯一文本块。old_str 必须与文件内容完全一致。",
-        param_descriptions={
-            "file_path": "文件绝对或相对路径",
-            "old_str": "需要被替换的原文块。建议包含上下文以确保唯一。",
-            "new_str": "用来替换 old_str 的新文本块。",
-            "expected_sha256": "必填，必须使用最近一次 read_file 返回的 sha256。",
-        },
-    ),
-    ToolSpec(
         name="apply_patch",
         handler=apply_patch,
-        description="严格应用 Codex *** Begin Patch 格式的多文件补丁。支持 Add File、Update File、Delete File；Update/Delete 段必须紧跟 *** Expected SHA256 指令。不支持 move、模糊匹配或 unified diff。",
-        param_descriptions={"patch": "完整的 Codex 格式 patch 字符串；修改或删除已有文件时嵌入 read_file 返回的 SHA-256。"},
+        description="严格应用 Codex *** Begin Patch 格式的多文件补丁。项目文件必须使用相对路径，唯一允许的绝对路径是用户级 RIND.md；Update/Delete 段必须紧跟 *** Expected SHA256 指令。不支持 move、模糊匹配或 unified diff。",
+        param_descriptions={"patch": "完整的 Codex 格式 patch 字符串；修改或删除已有文件时嵌入最近一次 read_file 返回的 SHA-256。"},
     ),
     ToolSpec(
         name="glob",

@@ -1,4 +1,4 @@
-"""Version-checked, atomic UTF-8 file mutation tools."""
+"""Version-checked, atomic UTF-8 patch application."""
 
 from __future__ import annotations
 
@@ -12,6 +12,7 @@ import stat
 import tempfile
 
 from agent.domain import tool_error, tool_ok
+from agent.infrastructure.rind_docs import resolve_user_doc_path
 
 from .operations import MAX_TEXT_FILE_SIZE
 
@@ -50,31 +51,30 @@ class _Mutation:
     mode: int | None
 
 
-def _normalize_sha256(value: object, *, required: bool) -> str | None:
+def _normalize_sha256(value: object) -> str:
     if value is None or value == "":
-        if required:
-            raise _MutationError(
-                "修改已有文件前必须提供 read_file 返回的 expected_sha256。",
-                "PreimageRequired",
-            )
-        return None
+        raise _MutationError(
+            "修改已有文件前必须提供 read_file 返回的 expected_sha256。",
+            "PreimageRequired",
+        )
     if not isinstance(value, str) or not _SHA256_PATTERN.fullmatch(value):
         raise _MutationError("expected_sha256 必须是 64 位十六进制 SHA-256。", "InvalidExpectedSha256")
     return value.lower()
 
 
-def _resolve_path(raw_path: object) -> Path:
-    if not isinstance(raw_path, str) or not raw_path.strip():
-        raise _MutationError("文件路径不能为空。", "InvalidPath")
-    try:
-        return Path(raw_path).expanduser().resolve()
-    except (OSError, RuntimeError, ValueError) as exc:
-        raise _MutationError(f"无效的文件路径: {raw_path}: {exc}", "InvalidPath") from exc
-
-
 def _resolve_patch_path(raw_path: str) -> Path:
     candidate = Path(raw_path)
-    if not raw_path or candidate.is_absolute() or candidate.drive or ".." in candidate.parts:
+    if not raw_path:
+        raise _MutationError("Patch 路径不能为空。", "InvalidPath")
+    if candidate.is_absolute() or candidate.drive:
+        try:
+            user_doc = resolve_user_doc_path().resolve()
+        except (OSError, RuntimeError, ValueError) as exc:
+            raise _MutationError(f"无法解析用户级 RIND.md 路径: {exc}", "InvalidPath") from exc
+        if os.path.normcase(str(candidate)) != os.path.normcase(str(user_doc)):
+            raise _MutationError(f"Patch 路径必须是项目内的相对路径: {raw_path}", "InvalidPath")
+        return user_doc
+    if ".." in candidate.parts:
         raise _MutationError(f"Patch 路径必须是项目内的相对路径: {raw_path}", "InvalidPath")
     root = Path.cwd().resolve()
     try:
@@ -92,7 +92,7 @@ def _read_existing(path: Path, expected_sha256: object) -> tuple[bytes, str, int
         raise _MutationError(f"文件不存在: {path}", "NotFound")
     if not path.is_file():
         raise _MutationError(f"路径不是文件: {path}", "NotAFile")
-    expected = _normalize_sha256(expected_sha256, required=True)
+    expected = _normalize_sha256(expected_sha256)
     try:
         raw = path.read_bytes()
         mode = stat.S_IMODE(path.stat().st_mode)
@@ -233,59 +233,20 @@ def _file_meta(mutation: _Mutation) -> dict[str, object]:
     }
 
 
-def _success(tool_name: str, mutations: list[_Mutation]) -> str:
+def _success(mutations: list[_Mutation]) -> str:
     return tool_ok(
-        tool_name,
+        "apply_patch",
         f"成功修改 {len(mutations)} 个文件。",
         meta={"files": [_file_meta(mutation) for mutation in mutations]},
     )
 
 
-def _failure(tool_name: str, exc: Exception, fallback_type: str) -> str:
+def _failure(exc: Exception) -> str:
     if isinstance(exc, _MutationError):
-        return tool_error(tool_name, str(exc), exc.error_type, meta=exc.meta)
+        return tool_error("apply_patch", str(exc), exc.error_type, meta=exc.meta)
     if isinstance(exc, PermissionError):
-        return tool_error(tool_name, f"文件操作无权限: {exc}", "PermissionDenied")
-    return tool_error(tool_name, f"文件操作失败: {exc}", fallback_type)
-
-
-def write_file(file_path: str, content: str, expected_sha256: str | None = None) -> str:
-    """Create a UTF-8 file, or atomically replace a version-checked existing file."""
-    try:
-        if not isinstance(content, str):
-            raise _MutationError("content 必须是字符串。", "InvalidContent")
-        path = _resolve_path(file_path)
-        if path.exists():
-            before, _, mode = _read_existing(path, expected_sha256)
-        else:
-            supplied = _normalize_sha256(expected_sha256, required=False)
-            if supplied is not None:
-                raise _MutationError(f"预期文件存在，但目标不存在: {path}", "PreimageMismatch")
-            before, mode = None, None
-        mutation = _Mutation(path, before, content.encode("utf-8"), mode)
-        _commit_mutations([mutation])
-        return _success("write_file", [mutation])
-    except Exception as exc:
-        return _failure("write_file", exc, "WriteError")
-
-
-def edit_file(file_path: str, old_str: str, new_str: str, expected_sha256: str) -> str:
-    """Replace one exact text occurrence in a version-checked UTF-8 file."""
-    try:
-        if not isinstance(old_str, str) or not old_str or not isinstance(new_str, str):
-            raise _MutationError("old_str 必须是非空字符串，new_str 必须是字符串。", "InvalidContent")
-        path = _resolve_path(file_path)
-        before, text, mode = _read_existing(path, expected_sha256)
-        count = text.count(old_str)
-        if count == 0:
-            raise _MutationError("在文件中找不到指定的 old_str。", "OldStrNotFound")
-        if count > 1:
-            raise _MutationError(f"找到 {count} 处匹配的 old_str，请提供唯一上下文。", "OldStrNotUnique", {"count": count})
-        mutation = _Mutation(path, before, text.replace(old_str, new_str).encode("utf-8"), mode)
-        _commit_mutations([mutation])
-        return _success("edit_file", [mutation])
-    except Exception as exc:
-        return _failure("edit_file", exc, "EditError")
+        return tool_error("apply_patch", f"文件操作无权限: {exc}", "PermissionDenied")
+    return tool_error("apply_patch", f"文件操作失败: {exc}", "PatchApplyError")
 
 
 def _parse_patch(patch: object) -> list[_PatchOperation]:
@@ -321,7 +282,7 @@ def _parse_patch(patch: object) -> list[_PatchOperation]:
         if action in {"update", "delete"}:
             if index >= len(lines) - 1 or not lines[index].startswith("*** Expected SHA256: "):
                 raise _MutationError(f"{raw_path} 缺少 *** Expected SHA256 指令。", "PreimageRequired")
-            expected = _normalize_sha256(lines[index][len("*** Expected SHA256: "):], required=True)
+            expected = _normalize_sha256(lines[index][len("*** Expected SHA256: "):])
             index += 1
 
         if action == "add":
@@ -415,6 +376,6 @@ def apply_patch(patch: str) -> str:
     try:
         mutations = _plan_patch(_parse_patch(patch))
         _commit_mutations(mutations)
-        return _success("apply_patch", mutations)
+        return _success(mutations)
     except Exception as exc:
-        return _failure("apply_patch", exc, "PatchApplyError")
+        return _failure(exc)

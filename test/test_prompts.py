@@ -51,6 +51,10 @@ def test_system_info_uses_detected_shell_backend(monkeypatch):
 def test_system_prompt_contains_rind_doc_rules():
     text = prompts.SYSTEM_PROMPT
 
+    assert "`apply_patch`" in text
+    assert "`write_file`" not in text
+    assert "`edit_file`" not in text
+    assert "only accepted absolute path is the exact user-level `RIND.md` path" in text
     assert "RIND.md Context Docs" in text
     assert "32 KiB byte budget" in text
     assert "Never create, update, delete, or rename any `RIND.md`" in text
@@ -79,6 +83,8 @@ def test_rind_init_prompt_scopes_project_file():
     assert "Explore the project lightly before writing" in prompt
     assert "Do not modify the other RIND.md level." in prompt
     assert "32 KiB byte budget" in prompt
+    assert "Use only `apply_patch`" in prompt
+    assert "use `RIND.md` exactly" in prompt
 
 
 def test_rind_init_prompt_scopes_user_file():
@@ -88,3 +94,5 @@ def test_rind_init_prompt_scopes_user_file():
     assert "Do not copy project facts into the user-level file." in prompt
     assert "Do not invent preferences." in prompt
     assert r"C:\Users\me\.rind\RIND.md" in prompt
+    assert "Use only `apply_patch`" in prompt
+    assert "use `C:\\Users\\me\\.rind\\RIND.md` exactly" in prompt
