@@ -506,10 +506,13 @@ function flushAssistantText(text = "", options = {}) {
 }
 
 function writeUserInput(text) {
+  const line = userInputText(text);
+  if (!line) {
+    return;
+  }
   flushAssistantText(assistantStreamBuffer.flush(), { redraw: false });
   closeOpenAssistantOutputLine();
-  const line = userInputText(text);
-  process.stdout.write(line ? outputBlockText(line, outputStarted) : "\n");
+  process.stdout.write(outputBlockText(line, outputStarted));
   outputStarted = true;
 }
 
@@ -899,7 +902,7 @@ function completeTtyInput(session, value, writeUser, lineText = "", displayValue
   const writeAction = () => {
     if (writeUser) {
       writeUserInput(displayValue);
-    } else if (lineText) {
+    } else if (lineText && String(value || "").trim()) {
       process.stdout.write("\n");
     }
   };
