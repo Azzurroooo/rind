@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { createComposerTerminal, prepareComposerFrame } from "../lib/composer-terminal.js";
+import { prepareComposerFrame } from "../lib/composer-terminal.js";
+import { stripAnsi } from "../lib/text-width.js";
 
 const prompt = [
   "",
@@ -12,9 +13,9 @@ const prompt = [
 ].join("\n");
 
 test("composer keeps activity above model and working directory", () => {
-  const frame = prepareComposerFrame({ prompt, inputText: "hello", cursorIndex: 5 }, 40);
+  const frame = prepareComposerFrame({ prompt, inputText: "hello", cursor: { line: 0, column: 5 } }, 40);
 
-  assert.deepEqual(frame.text.split("\n"), [
+  assert.deepEqual(frame.lines, [
     "",
     "  ◓ Working (1s) ctrl+c interrupt",
     "  model-a · E:\\project",
@@ -26,25 +27,37 @@ test("composer keeps activity above model and working directory", () => {
 });
 
 test("composer wraps long ascii input and tracks cursor position", () => {
-  const frame = prepareComposerFrame({ prompt: "\n  › ", inputText: "abcdefghij", cursorIndex: 10 }, 8);
+  const frame = prepareComposerFrame({
+    prompt: "\n  › ",
+    inputText: "abcdefghij",
+    cursor: { line: 0, column: 10 },
+  }, 8);
 
-  assert.equal(frame.text, "\n  › abcd\nefghij");
+  assert.equal(frame.lines.join("\n"), "\n  › abcd\nefghij");
   assert.equal(frame.cursorRow, 2);
   assert.equal(frame.cursorColumn, 6);
 });
 
 test("composer wraps wide input without splitting characters", () => {
-  const frame = prepareComposerFrame({ prompt: "\n  › ", inputText: "你好吗abc", cursorIndex: 4 }, 8);
+  const frame = prepareComposerFrame({
+    prompt: "\n  › ",
+    inputText: "你好吗abc",
+    cursor: { line: 0, column: 4 },
+  }, 8);
 
-  assert.equal(frame.text, "\n  › 你好\n吗abc");
+  assert.equal(frame.lines.join("\n"), "\n  › 你好\n吗abc");
   assert.equal(frame.cursorRow, 2);
   assert.equal(frame.cursorColumn, 3);
 });
 
 test("composer keeps cursor stable at the terminal boundary", () => {
-  const frame = prepareComposerFrame({ prompt: "\n  › ", inputText: "abcd", cursorIndex: 4 }, 8);
+  const frame = prepareComposerFrame({
+    prompt: "\n  › ",
+    inputText: "abcd",
+    cursor: { line: 0, column: 4 },
+  }, 8);
 
-  assert.equal(frame.text, "\n  › abcd\n");
+  assert.equal(frame.lines.join("\n"), "\n  › abcd\n");
   assert.equal(frame.cursorRow, 2);
   assert.equal(frame.cursorColumn, 0);
 });
@@ -53,63 +66,104 @@ test("composer places menu after wrapped input rows", () => {
   const frame = prepareComposerFrame({
     prompt: "\n  › ",
     inputText: "abcdefghij",
-    cursorIndex: 10,
+    cursor: { line: 0, column: 10 },
     menuText: "  Command deck\n  › /help",
   }, 8);
 
-  assert.equal(frame.text, [
+  assert.equal(frame.lines.join("\n"), [
     "",
     "  › abcd",
     "efghij",
-    "  Command deck",
-    "  › /help",
+    "  Comman",
+    "d deck",
+    "  › /hel",
+    "p",
   ].join("\n"));
-  assert.equal(frame.endRow, 4);
+  assert.equal(frame.lines.length, 7);
+  assert.equal(frame.focusRow, 5);
 });
 
 test("composer uses placeholder text without moving the empty input cursor", () => {
-  const frame = prepareComposerFrame({ prompt: "\n  › ", placeholder: "Ask Rind", inputText: "", cursorIndex: 0 }, 24);
+  const frame = prepareComposerFrame({
+    prompt: "\n  › ",
+    placeholder: "Ask Rind",
+    inputText: "",
+    cursor: { line: 0, column: 0 },
+  }, 24);
 
-  assert.equal(frame.text, "\n  › Ask Rind");
+  assert.equal(frame.lines.join("\n"), "\n  › Ask Rind");
   assert.equal(frame.cursorRow, 1);
   assert.equal(frame.cursorColumn, 4);
 });
 
-test("composer terminal clears previous block before redraw and restores cursor", () => {
-  const writes = [];
-  const moves = [];
-  const output = {
-    columns: 8,
-    write(value) {
-      writes.push(value);
-    },
-  };
-  const terminal = {
-    width: 8,
-    up(value) {
-      moves.push(["up", value]);
-    },
-    down(value) {
-      moves.push(["down", value]);
-    },
-    column(value) {
-      moves.push(["column", value]);
-    },
-    eraseDisplayBelow() {
-      moves.push(["erase"]);
-    },
-  };
-  const composer = createComposerTerminal({ output, terminal });
+test("composer wraps styled placeholders without counting ANSI sequences", () => {
+  const frame = prepareComposerFrame({
+    prompt: "\n  › ",
+    placeholder: "\x1b[2mAsk Rind to do anything\x1b[0m",
+    inputText: "",
+    cursor: { line: 0, column: 0 },
+  }, 24);
 
-  composer.render({ prompt: "\n  › ", inputText: "abcdefghij", cursorIndex: 10 });
-  composer.render({ prompt: "\n  › ", inputText: "abc", cursorIndex: 3 });
+  assert.deepEqual(frame.lines.map(stripAnsi), ["", "  › Ask Rind to do anyth", "ing"]);
+  assert.match(frame.lines[2], /^\x1b\[2m/);
+  assert.equal(frame.cursorRow, 1);
+  assert.equal(frame.cursorColumn, 4);
+});
 
-  assert.deepEqual(writes, ["\n  › abcd\nefghij", "\n  › abc"]);
-  assert.deepEqual(moves, [
-    ["column", 7],
-    ["up", 2],
-    ["column", 1],
-    ["erase"],
-    ["column", 8],
-  ]);
+test("composer preserves a style that follows an SGR reset", () => {
+  const frame = prepareComposerFrame({
+    prompt: "\n  › ",
+    placeholder: "\x1b[0;31mabcdefghij\x1b[0m",
+    inputText: "",
+    cursor: { line: 0, column: 0 },
+  }, 8);
+
+  assert.deepEqual(frame.lines.map(stripAnsi), ["", "  › abcd", "efghij"]);
+  assert.match(frame.lines[2], /^\x1b\[0;31m/);
+});
+
+test("composer keeps a cursor before an early-wrapped wide character", () => {
+  const frame = prepareComposerFrame({
+    prompt: "\n  › ",
+    inputText: "a你bc好d",
+    cursor: { line: 0, column: 1 },
+  }, 6);
+
+  assert.equal(frame.cursorRow, 1);
+  assert.equal(frame.cursorColumn, 5);
+});
+
+test("composer adds a cursor row when input fills the last column", () => {
+  const frame = prepareComposerFrame({
+    prompt: "\n  › ",
+    inputText: "abcdefgh",
+    cursor: { line: 0, column: 8 },
+  }, 6);
+
+  assert.equal(frame.cursorRow, 3);
+  assert.equal(frame.cursorColumn, 0);
+});
+
+test("composer renders explicit newlines and positions the cursor", () => {
+  const frame = prepareComposerFrame({
+    prompt: "\n  › ",
+    inputText: "first\nsecond",
+    cursor: { line: 1, column: 3 },
+  }, 24);
+
+  assert.equal(frame.lines.join("\n"), "\n  › first\nsecond");
+  assert.equal(frame.cursorRow, 2);
+  assert.equal(frame.cursorColumn, 3);
+});
+
+test("composer counts wrapped rows before a multiline cursor", () => {
+  const frame = prepareComposerFrame({
+    prompt: "\n  › ",
+    inputText: "abcdefghij\nsecond",
+    cursor: { line: 1, column: 3 },
+  }, 8);
+
+  assert.equal(frame.lines.join("\n"), "\n  › abcd\nefghij\nsecond");
+  assert.equal(frame.cursorRow, 3);
+  assert.equal(frame.cursorColumn, 3);
 });

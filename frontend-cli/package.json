@@ -7,8 +7,5 @@
   },
   "engines": {
     "node": ">=18"
-  },
-  "dependencies": {
-    "terminal-kit": "^3.1.2"
   }
 }

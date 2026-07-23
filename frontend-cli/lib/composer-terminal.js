@@ -1,120 +1,163 @@
-import terminalKit from "terminal-kit";
-
-import { graphemes, textWidth } from "./text-width.js";
+import { graphemes, stripAnsi, textWidth, wrapTextCells } from "./text-width.js";
 
 const DEFAULT_COLUMNS = 80;
 const INPUT_MARKER = "\n  › ";
-
-export function createComposerTerminal(options = {}) {
-  const output = options.output || process.stdout;
-  const terminal = options.terminal || terminalKit.terminal;
-  let rendered = false;
-  let cursorRow = 0;
-
-  return {
-    render(frame = {}) {
-      clear();
-      const prepared = prepareComposerFrame(frame, output.columns || terminal.width);
-      output.write(prepared.text);
-      moveRows(terminal, prepared.endRow - prepared.cursorRow);
-      terminal.column(prepared.cursorColumn + 1);
-      cursorRow = prepared.cursorRow;
-      rendered = true;
-    },
-    clear,
-    dispose: clear,
-  };
-
-  function clear() {
-    if (!rendered) {
-      return;
-    }
-    if (cursorRow > 0) {
-      terminal.up(cursorRow);
-    }
-    terminal.column(1);
-    terminal.eraseDisplayBelow();
-    rendered = false;
-    cursorRow = 0;
-  }
-}
-
-export function withTerminalCursorHidden(action, terminal = terminalKit.terminal) {
-  terminal.hideCursor();
-  try {
-    action();
-  } finally {
-    terminal.hideCursor(false);
-  }
-}
+const ANSI_SEQUENCE = /\x1b\[[0-?]*[ -/]*[@-~]/g;
+const SGR_SEQUENCE = /^\x1b\[([0-9;]*)m$/;
 
 export function prepareComposerFrame(frame = {}, columns = DEFAULT_COLUMNS) {
   const width = terminalColumns(columns);
   const block = splitPromptBlock(frame.prompt);
   const input = String(frame.inputText || "");
   const display = input || String(frame.placeholder || "");
-  const cursor = visualPosition(block.prefix, input, frame.cursorIndex, width);
-  const leadingLines = splitRenderedLines(block.leading);
-  const inputLines = wrappedInputLines(block.prefix, display, width, cursor.row + 1);
-  const menuLines = splitRenderedLines(frame.menuText);
-  const trailingLines = splitRenderedLines(block.trailing);
+  const position = cursorPosition(frame, input);
+  const leadingLines = wrapRenderedLines(block.leading, width);
+  const inputLines = wrapInputLines(block.prefix, display, width);
+  const cursor = visualCursor(block.prefix, input, position, width, inputLines);
+  const menuLines = wrapRenderedLines(frame.menuText, width);
+  const trailingLines = wrapRenderedLines(block.trailing, width);
   const lines = [...leadingLines, ...inputLines, ...menuLines, ...trailingLines];
-  const endRow = Math.max(0, lines.length - 1);
+  const cursorRow = leadingLines.length + cursor.row;
+  const selectedMenuRow = menuLines.findIndex((line) => stripAnsi(line).startsWith("  › "));
 
   return {
-    text: lines.join("\n"),
-    cursorRow: leadingLines.length + cursor.row,
+    lines,
+    cursorRow,
     cursorColumn: cursor.column,
-    endRow,
+    focusRow: selectedMenuRow === -1
+      ? cursorRow
+      : leadingLines.length + inputLines.length + selectedMenuRow,
   };
 }
 
-function moveRows(terminal, delta) {
-  if (delta > 0) {
-    terminal.up(delta);
-  } else if (delta < 0) {
-    terminal.down(-delta);
+function wrapInputLines(prefix, text, columns) {
+  const logicalLines = String(text || "").split("\n");
+  const lines = [];
+  for (const [index, logicalLine] of logicalLines.entries()) {
+    const linePrefix = index === 0 ? prefix : "";
+    if (logicalLine.includes("\x1b")) {
+      lines.push(...wrapLine(linePrefix, logicalLine, columns));
+      continue;
+    }
+    const chunks = wrapTextCells(
+      logicalLine,
+      Math.max(1, columns - textWidth(linePrefix)),
+      columns,
+    );
+    lines.push(...chunks.map((chunk, chunkIndex) => `${chunkIndex === 0 ? linePrefix : ""}${chunk.text}`));
   }
+  return lines.length ? lines : [String(prefix || "")];
 }
 
-function wrappedInputLines(prefix, text, columns, minRows) {
+function visualCursor(prefix, input, position, columns, inputLines) {
+  const logicalLines = String(input).split("\n");
+  const width = Math.max(1, columns);
+  const visualLines = [];
+  for (const [lineIndex, logicalLine] of logicalLines.entries()) {
+    const prefixWidth = lineIndex === 0 ? textWidth(prefix) : 0;
+    const chunks = wrapTextCells(
+      logicalLine,
+      Math.max(1, width - prefixWidth),
+      width,
+    );
+    for (const [chunkIndex, chunk] of chunks.entries()) {
+      visualLines.push({
+        startColumn: chunk.startColumn,
+        length: chunk.length,
+        allowsEnd: chunk.allowsEnd,
+        line: lineIndex,
+        prefixWidth: lineIndex === 0 && chunkIndex === 0 ? prefixWidth : 0,
+      });
+    }
+    const lastChunk = chunks.at(-1);
+    if (lineIndex === logicalLines.length - 1 && !lastChunk.allowsEnd) {
+      visualLines.push({
+        startColumn: lastChunk.startColumn + lastChunk.length,
+        length: 0,
+        allowsEnd: true,
+        line: lineIndex,
+        prefixWidth: 0,
+      });
+    }
+  }
+
+  let row = visualLines.length - 1;
+  for (const [index, visualLine] of visualLines.entries()) {
+    if (visualLine.line !== position.line) {
+      continue;
+    }
+    const offset = position.column - visualLine.startColumn;
+    if (offset >= 0 && (offset < visualLine.length || (visualLine.allowsEnd && offset === visualLine.length))) {
+      row = index;
+      break;
+    }
+  }
+  while (inputLines.length <= row) {
+    inputLines.push("");
+  }
+  const visualLine = visualLines[row];
+  const text = graphemes(logicalLines[position.line])
+    .slice(visualLine.startColumn, position.column)
+    .join("");
+  return {
+    row,
+    column: visualLine.prefixWidth + textWidth(text),
+  };
+}
+
+function wrapLine(prefix, text, columns) {
   const lines = [];
-  let line = String(prefix || "");
-  let width = textWidth(line);
-  for (const segment of graphemes(text)) {
+  let line = "";
+  let width = 0;
+  let activeStyle = "";
+  for (const segment of displaySegments(`${prefix || ""}${text || ""}`)) {
+    const sgr = segment.match(SGR_SEQUENCE);
+    if (sgr) {
+      line += segment;
+      const codes = (sgr[1] || "0").split(";").map((code) => code || "0");
+      const resetIndex = codes.lastIndexOf("0");
+      activeStyle = resetIndex === codes.length - 1
+        ? ""
+        : resetIndex >= 0
+          ? segment
+          : `${activeStyle}${segment}`;
+      continue;
+    }
     const segmentWidth = textWidth(segment);
-    if (width + segmentWidth > columns && width > 0) {
+    if (width > 0 && width + segmentWidth > columns) {
       lines.push(line);
-      line = "";
+      line = activeStyle;
       width = 0;
     }
     line += segment;
     width += segmentWidth;
   }
   lines.push(line);
-  while (lines.length < minRows) {
-    lines.push("");
-  }
   return lines;
 }
 
-function visualPosition(prefix, text, cursor, columns) {
-  const total = textWidth(prefix) + cursorCellWidth(text, cursor);
+function displaySegments(value) {
+  const text = String(value || "");
+  const segments = [];
+  let position = 0;
+  for (const match of text.matchAll(ANSI_SEQUENCE)) {
+    segments.push(...graphemes(text.slice(position, match.index)), match[0]);
+    position = match.index + match[0].length;
+  }
+  segments.push(...graphemes(text.slice(position)));
+  return segments;
+}
+
+function cursorPosition(frame, input) {
+  const lines = String(input).split("\n");
+  const line = Math.min(lines.length - 1, Math.max(0, Math.floor(Number(frame.cursor?.line) || 0)));
   return {
-    row: Math.floor(total / columns),
-    column: total % columns,
+    line,
+    column: Math.min(
+      graphemes(lines[line]).length,
+      Math.max(0, Math.floor(Number(frame.cursor?.column) || 0)),
+    ),
   };
-}
-
-function cursorCellWidth(text, cursor) {
-  return graphemes(text)
-    .slice(0, cursorIndex(cursor))
-    .reduce((width, segment) => width + textWidth(segment), 0);
-}
-
-function cursorIndex(cursor) {
-  const value = Number(cursor);
-  return Number.isFinite(value) && value > 0 ? Math.floor(value) : 0;
 }
 
 function terminalColumns(columns) {
@@ -144,7 +187,7 @@ function splitPromptBlock(prompt) {
   };
 }
 
-function splitRenderedLines(text) {
+function wrapRenderedLines(text, columns) {
   const value = String(text || "");
   if (!value) {
     return [];
@@ -153,5 +196,5 @@ function splitRenderedLines(text) {
   if (lines.at(-1) === "") {
     lines.pop();
   }
-  return lines;
+  return lines.flatMap((line) => wrapLine("", line, columns));
 }

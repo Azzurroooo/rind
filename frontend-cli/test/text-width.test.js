@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { clipCells, graphemes, middleClipCells, textWidth } from "../lib/text-width.js";
+import { clipCells, graphemes, middleClipCells, textWidth, wrapTextCells } from "../lib/text-width.js";
 
 test("text width treats keycap emoji as one grapheme and two cells", () => {
   assert.deepEqual(graphemes("9️⃣a"), ["9️⃣", "a"]);
@@ -16,4 +16,17 @@ test("clipCells does not split emoji sequences", () => {
 
 test("middleClipCells preserves whole emoji at both ends", () => {
   assert.equal(middleClipCells("9️⃣abcdef🔟", 9), "9️⃣a...f🔟");
+});
+
+test("wrapTextCells preserves cursor ownership before wide characters", () => {
+  const chunks = wrapTextCells("a你bc好d", 2, 6);
+
+  assert.deepEqual(
+    chunks.map(({ text, startColumn, allowsEnd }) => ({ text, startColumn, allowsEnd })),
+    [
+      { text: "a", startColumn: 0, allowsEnd: true },
+      { text: "你bc好", startColumn: 1, allowsEnd: false },
+      { text: "d", startColumn: 5, allowsEnd: true },
+    ],
+  );
 });

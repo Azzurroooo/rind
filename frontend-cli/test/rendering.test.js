@@ -6,7 +6,6 @@ import {
   answerPromptText,
   answerPlaceholderText,
   cancelledText,
-  clearInputHintText,
   commandResultText,
   contextBuiltLine,
   errorLine,
@@ -35,6 +34,7 @@ import {
   unknownCommandText,
   userInputText,
 } from "../lib/rendering.js";
+import { textWidth } from "../lib/text-width.js";
 
 test("startupText includes resume preview when provided", () => {
   assert.equal(
@@ -118,7 +118,6 @@ test("prompt and turn status copy match the compact terminal UI", () => {
   assert.equal(answerPromptText(), "\n  › ");
   assert.equal(answerPlaceholderText(), "Type your answer");
   assert.equal(inputHintText("Ask Rind to do anything"), "Ask Rind to do anything");
-  assert.equal(clearInputHintText(), "\x1b[K");
   assert.equal(queuedInputText(), "• Queued follow-up\n  ↳ runs after the current turn");
   assert.equal(
     queuedInputText("next question"),
@@ -720,6 +719,21 @@ test("toolResultLine aggregates paths under one global file change limit", () =>
   assert.match(output, /\n  ↳ nested\/second\.txt\n/);
   assert.match(output, /\n    - second 8\n    … 4 more changed lines$/);
   assert.doesNotMatch(output, /second 9/);
+});
+
+test("promptText stays within a narrow terminal", () => {
+  const originalColumns = process.stdout.columns;
+  process.stdout.columns = 40;
+  try {
+    const text = promptText({
+      model: "a-very-long-model-name",
+      cwd: "E:\\a\\very\\long\\working\\directory\\for\\the\\test",
+    });
+
+    assert.ok(text.split("\n").every((line) => textWidth(line) <= 40));
+  } finally {
+    process.stdout.columns = originalColumns;
+  }
 });
 
 test("toolResultLine ignores file change details for failed tools", () => {

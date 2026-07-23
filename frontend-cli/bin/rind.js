@@ -1,23 +1,24 @@
 #!/usr/bin/env node
 
 import { spawn, spawnSync } from "node:child_process";
-import { createInterface, emitKeypressEvents } from "node:readline";
+import { createInterface } from "node:readline";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { AssistantRenderer } from "../lib/assistant-renderer.js";
 import { createAssistantStreamBuffer } from "../lib/assistant-stream-buffer.js";
 import { createCompactContextState } from "../lib/compact-context-state.js";
-import { createComposerTerminal, withTerminalCursorHidden } from "../lib/composer-terminal.js";
+import { prepareComposerFrame } from "../lib/composer-terminal.js";
 import { createLineEditor } from "../lib/line-editor.js";
 import { buildRuntimeEnv } from "../lib/runtime-env.js";
 import { createRuntimeRequest, runtimeEventType, runtimeRequestId, turnInputMethod } from "../lib/runtime-protocol.js";
-import { createInputHistory } from "../lib/input-history.js";
 import { isInputClosed } from "../lib/input-errors.js";
 import { sigintAction } from "../lib/interrupt-state.js";
 import { isReadonlySlashCommand, steeringCommandText } from "../lib/slash-command-mode.js";
 import { createModelMenuState } from "../lib/model-menu-state.js";
 import { createSlashMenuState } from "../lib/slash-menu-state.js";
+import { parseTerminalKey } from "../lib/terminal-key.js";
+import { createTerminalUI } from "../lib/terminal-ui.js";
 import {
   answerPromptText,
   answerPlaceholderText,
@@ -90,9 +91,6 @@ let slashCommands = [];
 let turnTools = { completed: 0, failed: 0 };
 let promptPaused = false;
 let pendingInputPrefill = "";
-let redrawActiveInput = null;
-let redrawActiveActivity = null;
-let suspendActiveInput = null;
 let assistantOutputLineOpen = false;
 let assistantHeaderShown = false;
 let outputStarted = false;
@@ -103,7 +101,11 @@ const promptResumeWaiters = [];
 const assistantStreamBuffer = createAssistantStreamBuffer();
 const assistantRenderer = new AssistantRenderer((text) => writeOutput(text));
 const compactContextState = createCompactContextState();
-const inputHistory = createInputHistory();
+const terminalUi = process.stdin.isTTY && process.stdout.isTTY
+  ? createTerminalUI({ input: process.stdin, output: process.stdout, render: renderActiveInput })
+  : null;
+const promptEditor = createLineEditor();
+let activeInputSession = null;
 let runtimeStdoutBuffer = "";
 
 const runtime = spawn(
@@ -154,9 +156,11 @@ try {
     ...(Array.isArray(info?.slash_commands) ? info.slash_commands : []),
     { name: "steer", description: "Redirect the active turn", usage: "/steer <text>" },
   ]);
-  if (process.stdin.isTTY) {
-    emitKeypressEvents(process.stdin);
-    process.stdin.on("keypress", handleKeypress);
+  if (terminalUi) {
+    terminalUi.start({
+      onInput: handleTerminalInput,
+      onPaste: handleTerminalPaste,
+    });
   } else {
     input = createInterface({
       input: process.stdin,
@@ -166,7 +170,6 @@ try {
     });
     process.stdin.on("data", handleStdinData);
   }
-  resumeInput();
   logOutput(startupText(info));
   await promptLoop();
 } catch (error) {
@@ -217,15 +220,15 @@ async function handleCommand(text) {
 }
 
 async function runSlashCommand(text) {
-  if (isBareModelCommand(text) && process.stdin.isTTY) {
+  if (isBareModelCommand(text) && terminalUi) {
     await runModelSelector();
     return;
   }
-  if (isCompactCommand(text) && process.stdin.isTTY) {
+  if (isCompactCommand(text) && terminalUi) {
     startCompactCommand();
     return;
   }
-  if (isReadonlySlashCommand(text) && process.stdin.isTTY) {
+  if (isReadonlySlashCommand(text) && terminalUi) {
     startReadonlySlashCommand(text);
     return;
   }
@@ -370,10 +373,10 @@ function handleSubmissionError(error, text) {
 
 function restoreInputText(text) {
   pendingInputPrefill = String(text || "");
-  if (redrawActiveInput) {
-    const prefill = pendingInputPrefill;
+  if (activeInputSession?.editor) {
+    activeInputSession.editor.setInput(pendingInputPrefill);
     pendingInputPrefill = "";
-    redrawActiveInput(prefill);
+    redrawInput();
   }
 }
 
@@ -401,10 +404,11 @@ function resetContextUsage() {
   redrawInput();
 }
 
-function redrawInput() {
-  if (inputActive && process.stdout.isTTY && !runtimeClosing && redrawActiveInput) {
-    withTerminalCursorHidden(() => redrawActiveInput());
+function redrawInput(force = false) {
+  if (!inputActive || runtimeClosing || !terminalUi) {
+    return;
   }
+  terminalUi.requestRender(force);
 }
 
 function updateActivityTimer() {
@@ -417,9 +421,7 @@ function updateActivityTimer() {
     }
     activityTimer = setInterval(() => {
       activityFrame += 1;
-      if (inputActive && process.stdout.isTTY && !runtimeClosing && redrawActiveActivity) {
-        withTerminalCursorHidden(() => redrawActiveActivity());
-      }
+      redrawInput();
     }, 300);
     activityTimer.unref?.();
     return;
@@ -444,7 +446,6 @@ function startTurn(text, extra = {}) {
   activeTurn = true;
   assistantHeaderShown = false;
   resetTurnTools();
-  resumeInput();
   refreshInputState();
   void runTurn(text, extra).catch((error) => handleSubmissionError(error, text));
 }
@@ -488,7 +489,7 @@ function logOutput(text) {
 }
 
 function writeOutput(text) {
-  const holdPartialLine = inputActive && process.stdout.isTTY;
+  const holdPartialLine = inputActive && Boolean(terminalUi);
   flushAssistantText(assistantStreamBuffer.push(text, holdPartialLine));
 }
 
@@ -518,22 +519,11 @@ function writeErrorOutput(text) {
 }
 
 function withSuspendedPrompt(action, options = {}) {
-  const shouldRedraw =
-    inputActive && process.stdout.isTTY && !runtimeClosing && suspendActiveInput && redrawActiveInput;
-  if (!shouldRedraw) {
+  if (!terminalUi || !inputActive || runtimeClosing) {
     action();
     return;
   }
-  withTerminalCursorHidden(() => {
-    suspendActiveInput();
-    try {
-      action();
-    } finally {
-      if (options.redraw !== false) {
-        redrawActiveInput();
-      }
-    }
-  });
+  terminalUi.withSuspended(action, { render: options.redraw !== false });
 }
 
 function closeOpenAssistantOutputLine() {
@@ -727,33 +717,26 @@ function selectAnswer(raw, options) {
 }
 
 function ask(prompt, placeholder = "") {
-  const currentPrompt = promptValue(prompt);
-  if (!process.stdout.isTTY) {
+  if (!terminalUi) {
     if (!input) {
       return Promise.reject(new Error("Input is not available"));
     }
-    return askLine(currentPrompt);
+    return askLine(promptValue(prompt));
   }
-  if (!placeholder || placeholder === answerPlaceholderText()) {
-    return askTtyLine(currentPrompt);
-  }
-  return askTtyPrompt(prompt, placeholder);
+  return askTtyInput(prompt, placeholder);
 }
 
 function askLine(prompt) {
   return new Promise((resolve, reject) => {
-    const cleanup = (resume = true) => {
+    const cleanup = () => {
       inputActive = false;
       input.off("close", onClose);
       if (cancelActiveInput === onCancel) {
         cancelActiveInput = null;
       }
-      if (resume) {
-        resumeInput();
-      }
     };
     const onClose = () => {
-      cleanup(false);
+      cleanup();
       reject(new Error("Input closed"));
     };
     const onCancel = () => {
@@ -771,221 +754,181 @@ function askLine(prompt) {
   });
 }
 
-function askTtyLine(prompt) {
+function askTtyInput(prompt, placeholder) {
   return new Promise((resolve) => {
-    const editor = createLineEditor();
-    const composer = createComposerTerminal();
-    const cleanup = (clear = true) => {
-      inputActive = false;
-      redrawActiveInput = null;
-      redrawActiveActivity = null;
-      suspendActiveInput = null;
-      process.stdin.off("keypress", onKeypress);
-      if (clear) {
-        composer.clear();
-      }
-      if (cancelActiveInput === onCancel) {
-        cancelActiveInput = null;
-      }
-      resumeInput();
-    };
-    const onKeypress = (chunk, key = {}) => {
-      if (isCtrlC(key)) {
-        return;
-      }
-      if (key.name === "return" || key.name === "enter") {
-        cleanup(false);
-        process.stdout.write("\n");
-        resolve(editor.input());
-        return;
-      }
-      if (editor.handleKey(chunk, key)) {
-        render();
-      }
-    };
-    const onCancel = () => {
-      cleanup();
-      resolve("");
-    };
-    const render = () => {
-      closeOpenAssistantOutputLine();
-      composer.render({
-        prompt,
-        inputText: editor.input(),
-        cursorIndex: editor.cursor(),
-      });
-    };
-    cancelActiveInput = onCancel;
-    inputActive = true;
-    redrawActiveInput = (prefill) => {
-      if (typeof prefill === "string") {
-        editor.setInput(prefill);
-      }
-      render();
-    };
-    suspendActiveInput = composer.clear;
-    process.stdin.on("keypress", onKeypress);
-    render();
-    applyInputPrefill();
-  });
-}
-function askTtyPrompt(prompt, placeholder) {
-  return new Promise((resolve) => {
-    const editor = createLineEditor(pendingInputPrefill);
-    const menuState = createSlashMenuState(slashCommands);
-    const composer = createComposerTerminal();
+    clearAssistantLineForInput();
+    const mode = placeholder && placeholder !== answerPlaceholderText() ? "prompt" : "line";
+    const initialInput = pendingInputPrefill;
+    const editor = mode === "prompt" ? promptEditor : createLineEditor(initialInput);
+    if (mode === "prompt") {
+      editor.setInput(initialInput);
+    }
+    editor.setViewportWidth(process.stdout.columns || 80);
+    const menuState = mode === "prompt" ? createSlashMenuState(slashCommands) : null;
     pendingInputPrefill = "";
-    const cleanup = () => {
-      inputActive = false;
-      process.stdin.off("keypress", onKeypress);
-      composer.clear();
-      if (cancelActiveInput === onCancel) {
-        cancelActiveInput = null;
-      }
-      redrawActiveInput = null;
-      redrawActiveActivity = null;
-      suspendActiveInput = null;
-      resumeInput();
-    };
-    const onKeypress = (chunk, key = {}) => {
-      if (isCtrlC(key)) {
-        return;
-      }
-      if (key.name === "return" || key.name === "enter") {
-        syncMenu();
-        const command = menuState.selectedCommand();
-        const answer = command ? `/${command.name}` : editor.input();
-        inputHistory.add(answer);
-        cleanup();
-        writeUserInput(answer);
-        resolve(answer);
-        return;
-      }
-      const menuOpen = syncMenu().length > 0;
-      if (menuOpen) {
-        if (key.name === "escape" || key.name === "up" || key.name === "down") {
-          if (menuState.handleKey("", key)) {
-            renderPrompt();
-            return;
-          }
-        }
-      } else if (key.name === "up") {
-        editor.setInput(inputHistory.previous(editor.input()));
-        renderPrompt();
-        return;
-      } else if (key.name === "down") {
-        editor.setInput(inputHistory.next(editor.input()));
-        renderPrompt();
-        return;
-      }
-      const editResult = editor.handleKey(chunk, key);
-      if (editResult) {
-        if (editResult === "edit") {
-          inputHistory.reset();
-        }
-        renderPrompt();
-      }
-    };
-    const onCancel = () => {
-      cleanup();
-      resolve("");
-    };
-    process.stdin.resume();
-    process.stdin.on("keypress", onKeypress);
-    cancelActiveInput = onCancel;
+    const session = { mode, prompt, placeholder, editor, menuState, resolve };
+    activeInputSession = session;
     inputActive = true;
-    redrawActiveInput = (prefill) => {
-      if (typeof prefill === "string") {
-        editor.setInput(prefill);
-      }
-      renderPrompt();
-    };
-    redrawActiveActivity = renderPrompt;
-    suspendActiveInput = composer.clear;
-    renderPrompt();
-
-    function renderPrompt() {
-      closeOpenAssistantOutputLine();
-      composer.render({
-        prompt: promptValue(prompt),
-        inputText: editor.input(),
-        cursorIndex: editor.cursor(),
-        placeholder: inputHintText(placeholder),
-        menuText: slashMenuText(syncMenu(), menuState.selectedIndex()).trimEnd(),
-      });
-    }
-
-    function syncMenu() {
-      menuState.setInput(editor.input());
-      return menuState.matches();
-    }
+    cancelActiveInput = () => completeTtyInput(session, "", false);
+    redrawInput(true);
   });
 }
+
+function clearAssistantLineForInput() {
+  if (!assistantOutputLineOpen) {
+    return;
+  }
+  if (terminalUi) {
+    terminalUi.withSuspended(closeOpenAssistantOutputLine, { render: false });
+  } else {
+    closeOpenAssistantOutputLine();
+  }
+}
+
+function renderActiveInput(width = process.stdout.columns || 80) {
+  const session = activeInputSession;
+  if (!session) {
+    return { lines: [], cursorRow: 0, cursorColumn: 0 };
+  }
+  if (session.mode === "model") {
+    return prepareComposerFrame({
+      prompt: mainPromptText(),
+      inputText: session.inputText,
+      cursor: { line: 0, column: session.inputText.length },
+      menuText: modelMenuText(session.modelState.items(), session.modelState.selectedIndex()).trimEnd(),
+    }, width);
+  }
+  session.editor.setViewportWidth(width);
+  const matches = session.menuState ? syncSlashMenu(session) : [];
+  return prepareComposerFrame({
+    prompt: promptValue(session.prompt),
+    inputText: session.editor.input(),
+    cursor: session.editor.cursorPosition(),
+    placeholder: session.mode === "prompt" ? inputHintText(session.placeholder) : "",
+    menuText: session.menuState ? slashMenuText(matches, session.menuState.selectedIndex()).trimEnd() : "",
+  }, width);
+}
+
+function syncSlashMenu(session) {
+  session.menuState.setInput(session.editor.input());
+  return session.menuState.matches();
+}
+
+function handleTerminalInput(raw = "") {
+  const event = parseTerminalKey(raw);
+  if (!event) {
+    return;
+  }
+  if (event.ctrl && event.name === "c") {
+    handleSigint();
+    return;
+  }
+  const session = activeInputSession;
+  if (!session) {
+    return;
+  }
+  if (session.mode === "model") {
+    handleModelInput(session, event);
+    return;
+  }
+  const key = event;
+  const matches = session.menuState ? syncSlashMenu(session) : [];
+  const menuKey = !key.ctrl && !key.alt && !key.shift && ["escape", "up", "down"].includes(key.name);
+  if (session.menuState && matches.length && menuKey) {
+    if (session.menuState.handleKey("", key)) {
+      redrawInput();
+      return;
+    }
+  }
+  const result = session.editor.handleInput(key);
+  if (result === "submit") {
+    submitTtyInput(session);
+    return;
+  }
+  if (result) {
+    redrawInput();
+  }
+}
+
+function handleTerminalPaste(text) {
+  const session = activeInputSession;
+  if (!session || session.mode === "model") {
+    return;
+  }
+  session.editor.handleInput({ kind: "paste", text });
+  redrawInput();
+}
+
+function handleModelInput(session, key) {
+  const modified = key.ctrl || key.alt || key.shift;
+  if (!modified && (key.name === "enter" || key.name === "return")) {
+    const model = session.modelState.selectedModel()?.name || "";
+    completeTtyInput(session, model, Boolean(model), "", model ? `/model set ${model}` : "");
+    return;
+  }
+  if (!modified && key.name === "escape") {
+    completeTtyInput(session, "", false);
+    return;
+  }
+  if (!modified && session.modelState.handleKey(key)) {
+    redrawInput();
+  }
+}
+
+function submitTtyInput(session) {
+  if (session.menuState) {
+    syncSlashMenu(session);
+  }
+  const command = session.menuState?.selectedCommand();
+  const value = command ? `/${command.name}` : session.editor.input();
+  if (session.mode === "prompt") {
+    session.editor.addToHistory(value);
+  }
+  completeTtyInput(session, value, session.mode === "prompt", session.mode === "line" ? "\n" : "");
+}
+
+function completeTtyInput(session, value, writeUser, lineText = "", displayValue = value) {
+  if (activeInputSession !== session) {
+    return;
+  }
+  activeInputSession = null;
+  inputActive = false;
+  if (cancelActiveInput) {
+    cancelActiveInput = null;
+  }
+  const writeAction = () => {
+    if (writeUser) {
+      writeUserInput(displayValue);
+    } else if (lineText) {
+      process.stdout.write("\n");
+    }
+  };
+  if (terminalUi) {
+    terminalUi.withSuspended(writeAction, { render: false });
+  } else {
+    writeAction();
+  }
+  session.resolve(value);
+}
+
 function askModelMenu(models, currentModel) {
   return new Promise((resolve) => {
+    clearAssistantLineForInput();
     const state = createModelMenuState(models, currentModel);
     if (!state.items().length) {
       resolve("");
       return;
     }
-    const composer = createComposerTerminal();
-    const inputText = "/model";
-    const cleanup = () => {
-      inputActive = false;
-      process.stdin.off("keypress", onKeypress);
-      composer.clear();
-      if (cancelActiveInput === onCancel) {
-        cancelActiveInput = null;
-      }
-      redrawActiveInput = null;
-      redrawActiveActivity = null;
-      suspendActiveInput = null;
-      resumeInput();
+    const session = {
+      mode: "model",
+      inputText: "/model",
+      modelState: state,
+      resolve,
     };
-    const onKeypress = (chunk, key = {}) => {
-      if (isCtrlC(key)) {
-        return;
-      }
-      if (key.name === "return" || key.name === "enter") {
-        const model = state.selectedModel()?.name || "";
-        cleanup();
-        if (model) {
-          writeUserInput(`/model set ${model}`);
-        }
-        resolve(model);
-        return;
-      }
-      if (key.name === "escape") {
-        cleanup();
-        resolve("");
-        return;
-      }
-      if (state.handleKey(key)) {
-        renderPrompt();
-      }
-    };
-    const onCancel = () => {
-      cleanup();
-      resolve("");
-    };
-    process.stdin.resume();
-    process.stdin.on("keypress", onKeypress);
-    cancelActiveInput = onCancel;
+    activeInputSession = session;
     inputActive = true;
-    redrawActiveInput = renderPrompt;
-    redrawActiveActivity = renderPrompt;
-    suspendActiveInput = composer.clear;
-    renderPrompt();
-
-    function renderPrompt() {
-      closeOpenAssistantOutputLine();
-      composer.render({
-        prompt: mainPromptText(),
-        inputText,
-        cursorIndex: inputText.length,
-        menuText: modelMenuText(state.items(), state.selectedIndex()).trimEnd(),
-      });
-    }
+    cancelActiveInput = () => completeTtyInput(session, "", false);
+    redrawInput(true);
   });
 }
 
@@ -1055,10 +998,6 @@ function applyInputPrefill() {
   }
   const text = pendingInputPrefill;
   pendingInputPrefill = "";
-  if (redrawActiveInput) {
-    redrawActiveInput(text);
-    return;
-  }
   input.write(text);
 }
 
@@ -1085,37 +1024,15 @@ function interruptTurn() {
   void request("turn.interrupt").catch(() => {});
 }
 
-function handleKeypress(text, key) {
-  if (isCtrlC(key)) {
-    handleSigint();
-  }
-}
-
 function handleStdinData(chunk) {
   if (Buffer.from(chunk).includes(3)) {
     handleSigint();
   }
 }
 
-function isCtrlC(key) {
-  return Boolean(key?.ctrl && key.name === "c");
-}
-
 function exitFromSignal() {
   forceCloseRuntime();
   scheduleProcessExit(0, 0);
-}
-
-function resumeInput() {
-  if (runtimeClosing) {
-    return;
-  }
-  try {
-    process.stdin.setRawMode?.(true);
-    process.stdin.resume();
-  } catch {
-    // Ignore stdin implementations that cannot be resumed after close.
-  }
 }
 
 function closeAssistant() {
@@ -1215,7 +1132,6 @@ function scheduleProcessExit(code, delayMs) {
 
 function closeInput() {
   cancelInput();
-  process.stdin.off("keypress", handleKeypress);
   process.stdin.off("data", handleStdinData);
   if (input) {
     const current = input;
@@ -1226,10 +1142,9 @@ function closeInput() {
       // Ignore readline close races during signal shutdown.
     }
   }
-  try {
-    process.stdin.setRawMode?.(false);
-  } catch {
-    // Some stdin implementations expose setRawMode but reject after close.
+  if (terminalUi) {
+    terminalUi.stop();
+  } else {
+    process.stdin.pause();
   }
-  process.stdin.pause();
 }

@@ -18,6 +18,44 @@ export function textWidth(value) {
   return graphemes(stripAnsi(value)).reduce((width, segment) => width + segmentWidth(segment), 0);
 }
 
+export function wrapTextCells(value, firstWidth, continuationWidth = firstWidth) {
+  const chars = graphemes(value);
+  if (!chars.length) {
+    return [{
+      text: "",
+      startColumn: 0,
+      length: 0,
+      allowsEnd: true,
+    }];
+  }
+
+  const chunks = [];
+  let startColumn = 0;
+  let availableWidth = positiveWidth(firstWidth);
+  const nextLineWidth = positiveWidth(continuationWidth);
+  while (startColumn < chars.length) {
+    let endColumn = startColumn;
+    let width = 0;
+    while (endColumn < chars.length) {
+      const nextWidth = segmentWidth(chars[endColumn]);
+      if (width > 0 && width + nextWidth > availableWidth) {
+        break;
+      }
+      width += nextWidth;
+      endColumn += 1;
+    }
+    chunks.push({
+      text: chars.slice(startColumn, endColumn).join(""),
+      startColumn,
+      length: endColumn - startColumn,
+      allowsEnd: width < availableWidth,
+    });
+    startColumn = endColumn;
+    availableWidth = nextLineWidth;
+  }
+  return chunks;
+}
+
 export function clipCells(value, maxWidth) {
   const text = String(value || "");
   if (textWidth(text) <= maxWidth) {
@@ -80,6 +118,11 @@ function segmentWidth(segment) {
     return 2;
   }
   return Array.from(text).some((char) => isWideCodePoint(char.codePointAt(0))) ? 2 : 1;
+}
+
+function positiveWidth(value) {
+  const width = Number(value);
+  return Number.isFinite(width) && width > 0 ? Math.floor(width) : 1;
 }
 
 function isZeroWidth(text) {

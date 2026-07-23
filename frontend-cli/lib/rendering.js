@@ -96,10 +96,6 @@ export function inputHintText(placeholder) {
   return text ? dim(text) : "";
 }
 
-export function clearInputHintText() {
-  return "\x1b[K";
-}
-
 export function slashMenuText(items, selectedIndex = 0) {
   const visible = menuWindow(items, selectedIndex);
   if (!visible.items.length) {
@@ -887,7 +883,7 @@ function composerWidth() {
   if (!Number.isFinite(columns) || columns <= 0) {
     return MAX_COMPOSER_WIDTH;
   }
-  return Math.max(44, Math.min(MAX_COMPOSER_WIDTH, columns - 4));
+  return Math.max(1, Math.min(MAX_COMPOSER_WIDTH, columns - 4));
 }
 
 function styled(text, code) {
