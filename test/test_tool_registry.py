@@ -85,9 +85,9 @@ def test_shell_schemas_hide_runtime_session_context() -> None:
     registry = DefaultToolRegistry()
     schemas = {schema["function"]["name"]: schema for schema in registry.schemas}
 
-    for name in ("bash", "bash_output", "kill_shell"):
+    for name in ("bash", "bash_output"):
         properties = schemas[name]["function"]["parameters"]["properties"]
         assert "session_id" not in properties
         assert "_session_id" not in properties
-    assert schemas["kill_shell"]["function"]["parameters"]["properties"] == {}
-    assert registry.is_async("kill_shell") is True
+    assert "kill_shell" not in schemas
+    assert registry.has("kill_shell") is False

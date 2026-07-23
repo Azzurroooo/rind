@@ -3,7 +3,6 @@ import json
 import os
 import shutil
 import sys
-import io
 import pytest
 from pathlib import Path
 
@@ -12,7 +11,7 @@ os.chdir(PROJECT_ROOT)
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from agent.infrastructure.tools.builtin.shell.tool import bash, kill_shell
+from agent.infrastructure.tools.builtin.shell.tool import bash
 
 @pytest.fixture
 def temp_dir(tmp_path: Path) -> Path:
@@ -60,35 +59,17 @@ def test_echo() -> None:
         raise AssertionError(f"Expected exact output metadata, got: {payload}")
 
 def test_cd_and_cwd(temp_dir: Path) -> None:
-    payload = assert_ok(parse_payload(run(bash(f"cd {str(temp_dir)}"))))
+    sid = f"test_cd_{temp_dir.name}"
+    payload = assert_ok(parse_payload(run(bash(f"cd {str(temp_dir)}", _session_id=sid))))
     data = payload.get("data") or {}
     expected = os.path.abspath(str(temp_dir))
     if data.get("cwd") != expected:
         raise AssertionError(f"Expected cwd={expected}, got: {data}")
-    payload = assert_ok(parse_payload(run(bash("cd .."))))
+    payload = assert_ok(parse_payload(run(bash("cd ..", _session_id=sid))))
     data = payload.get("data") or {}
     expected_parent = os.path.abspath(str(temp_dir.parent))
     if data.get("cwd") != expected_parent:
         raise AssertionError(f"Expected cwd={expected_parent}, got: {data}")
-
-def test_kill_shell_resets(temp_dir: Path) -> None:
-    assert_ok(parse_payload(run(bash(f"cd {str(temp_dir)}"))))
-    payload = assert_ok(parse_payload(run(kill_shell())))
-    if payload.get("tool") != "kill_shell":
-        raise AssertionError(f"Expected tool=kill_shell, got: {payload}")
-    payload = assert_ok(parse_payload(run(bash("cd ."))))
-    data = payload.get("data") or {}
-    expected = os.path.abspath(os.getcwd())
-    if data.get("cwd") != expected:
-        raise AssertionError(f"Expected cwd reset to {expected}, got: {data}")
-
-def run_with_input(input_text: str, func):
-    original_stdin = sys.stdin
-    try:
-        sys.stdin = io.StringIO(input_text)
-        return func()
-    finally:
-        sys.stdin = original_stdin
 
 def test_confirmable_requires_confirmation() -> None:
     # In Phase 2, confirmable commands without unsafe mode will return an error
@@ -124,7 +105,6 @@ def main() -> int:
     try:
         test_echo()
         test_cd_and_cwd(temp_dir)
-        test_kill_shell_resets(temp_dir)
         set_env(None)
         set_env(None)
         test_confirmable_requires_confirmation()

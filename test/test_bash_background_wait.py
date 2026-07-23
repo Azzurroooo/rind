@@ -16,7 +16,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from agent.domain.cancellation import CancellationTokenSource
-from agent.infrastructure.tools.builtin.shell.tool import bash, bash_output, kill_shell
+from agent.infrastructure.tools.builtin.shell.tool import bash, bash_output
 
 
 bash_module = importlib.import_module("agent.infrastructure.tools.builtin.shell.tool")
@@ -64,42 +64,32 @@ async def start_background(sid: str, code: str, wait_ms: int = 1000) -> dict:
     return data
 
 
-async def cleanup_session(sid: str) -> None:
-    await kill_shell(_session_id=sid)
-
-
 @pytest.mark.asyncio
 async def test_bash_background_initial_wait_returns_completed_result() -> None:
     sid = session_id("initial_wait")
-    try:
-        command = shell_quote_python("print('done', flush=True)", sid)
-        data = assert_ok(await bash(command, _session_id=sid, run_in_background=True, wait_ms=5000))
+    command = shell_quote_python("print('done', flush=True)", sid)
+    data = assert_ok(await bash(command, _session_id=sid, run_in_background=True, wait_ms=5000))
 
-        assert data.get("exit_code") == 0
-        assert "done" in (data.get("stdout") or "")
-        assert "bg_id" not in data
-    finally:
-        await cleanup_session(sid)
+    assert data.get("exit_code") == 0
+    assert "done" in (data.get("stdout") or "")
+    assert "bg_id" not in data
 
 
 @pytest.mark.asyncio
 async def test_bash_foreground_ignores_wait_ms() -> None:
     sid = session_id("foreground_wait")
-    try:
-        command = shell_quote_python(
-            "import time; time.sleep(1.2); print('done', flush=True)",
-            sid,
-        )
-        started = time.monotonic()
-        data = assert_ok(await bash(command, _session_id=sid, run_in_background=False, wait_ms=1000))
-        elapsed = time.monotonic() - started
+    command = shell_quote_python(
+        "import time; time.sleep(1.2); print('done', flush=True)",
+        sid,
+    )
+    started = time.monotonic()
+    data = assert_ok(await bash(command, _session_id=sid, run_in_background=False, wait_ms=1000))
+    elapsed = time.monotonic() - started
 
-        assert elapsed >= 1.0
-        assert data.get("exit_code") == 0
-        assert "done" in (data.get("stdout") or "")
-        assert "bg_id" not in data
-    finally:
-        await cleanup_session(sid)
+    assert elapsed >= 1.0
+    assert data.get("exit_code") == 0
+    assert "done" in (data.get("stdout") or "")
+    assert "bg_id" not in data
 
 
 @pytest.mark.asyncio
@@ -124,7 +114,6 @@ async def test_bash_output_wait_returns_when_new_output_arrives() -> None:
     finally:
         if bg_id:
             await bash_output(bg_id, kill=True, _session_id=sid)
-        await cleanup_session(sid)
 
 
 @pytest.mark.asyncio
@@ -148,7 +137,6 @@ async def test_bash_output_wait_no_new_output() -> None:
     finally:
         if bg_id:
             await bash_output(bg_id, kill=True, _session_id=sid)
-        await cleanup_session(sid)
 
 
 @pytest.mark.asyncio
@@ -166,7 +154,6 @@ async def test_bash_output_clamps_short_wait_to_minimum() -> None:
     finally:
         if bg_id:
             await bash_output(bg_id, kill=True, _session_id=sid)
-        await cleanup_session(sid)
 
 
 @pytest.mark.asyncio
@@ -184,7 +171,6 @@ async def test_bash_output_clamps_large_wait_to_maximum_without_long_sleep() -> 
     finally:
         if bg_id:
             await bash_output(bg_id, kill=True, _session_id=sid)
-        await cleanup_session(sid)
 
 
 @pytest.mark.asyncio
@@ -208,20 +194,16 @@ async def test_bash_output_returns_delta_only() -> None:
     finally:
         if bg_id:
             await bash_output(bg_id, kill=True, _session_id=sid)
-        await cleanup_session(sid)
 
 
 @pytest.mark.asyncio
 async def test_bash_output_reports_done_and_exit_code() -> None:
     sid = session_id("done_exit")
-    try:
-        bg = await start_background(sid, "import time, sys; time.sleep(1.6); sys.exit(7)")
-        data = assert_ok(await bash_output(bg["bg_id"], wait_ms=5000, _session_id=sid))
+    bg = await start_background(sid, "import time, sys; time.sleep(1.6); sys.exit(7)")
+    data = assert_ok(await bash_output(bg["bg_id"], wait_ms=5000, _session_id=sid))
 
-        assert data.get("status") == "failed"
-        assert data.get("exit_code") == 7
-    finally:
-        await cleanup_session(sid)
+    assert data.get("status") == "failed"
+    assert data.get("exit_code") == 7
 
 
 @pytest.mark.asyncio
@@ -246,7 +228,6 @@ async def test_bash_output_kill_settles_background_tasks() -> None:
 
     assert data.get("status") == "cancelled"
     assert pending == []
-    await cleanup_session(sid)
 
 
 @pytest.mark.asyncio
@@ -258,33 +239,30 @@ async def test_bash_background_initial_wait_cancellation_kills_process() -> None
         await asyncio.sleep(0.1)
         source.cancel("test interrupt")
 
-    try:
-        asyncio.create_task(cancel_soon())
-        command = shell_quote_python("import time; time.sleep(10)", sid)
-        data = assert_ok(
-            await bash(
-                command,
-                _session_id=sid,
-                run_in_background=True,
-                wait_ms=5000,
-                _cancellation_token=source.token,
-            )
+    asyncio.create_task(cancel_soon())
+    command = shell_quote_python("import time; time.sleep(10)", sid)
+    data = assert_ok(
+        await bash(
+            command,
+            _session_id=sid,
+            run_in_background=True,
+            wait_ms=5000,
+            _cancellation_token=source.token,
         )
-        pending = [
-            task for task in asyncio.all_tasks()
-            if task is not asyncio.current_task() and not task.done()
-        ]
+    )
+    pending = [
+        task for task in asyncio.all_tasks()
+        if task is not asyncio.current_task() and not task.done()
+    ]
 
-        assert data.get("status") == "cancelled"
-        assert "PROCESS TERMINATED: Command cancelled: test interrupt" in (data.get("stderr") or "")
-        assert not [
-            bg_id
-            for bg_id, bg in bash_module._SUPERVISOR._processes.items()
-            if getattr(bg, "session_id", None) == sid
-        ]
-        assert pending == []
-    finally:
-        await cleanup_session(sid)
+    assert data.get("status") == "cancelled"
+    assert "PROCESS TERMINATED: Command cancelled: test interrupt" in (data.get("stderr") or "")
+    assert not [
+        bg_id
+        for bg_id, bg in bash_module._SUPERVISOR._processes.items()
+        if getattr(bg, "session_id", None) == sid
+    ]
+    assert pending == []
 
 
 @pytest.mark.asyncio
@@ -320,7 +298,6 @@ async def test_bash_output_wait_cancellation_kills_process() -> None:
     finally:
         if bg_id:
             await bash_output(bg_id, kill=True, _session_id=sid)
-        await cleanup_session(sid)
 
 
 def main() -> int:

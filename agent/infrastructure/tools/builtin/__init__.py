@@ -6,7 +6,7 @@ from ..spec import ToolSpec
 from .files import apply_patch, edit_file, glob, grep, read_file, write_file
 from .pdf import read_pdf
 from .planning import update_plan
-from .shell import bash, bash_output, kill_shell
+from .shell import bash, bash_output
 from .skill import skill_create
 from .user_question import ask_user_question
 from .web import fetch_web_page, search_web
@@ -113,7 +113,6 @@ TOOL_SPECS: tuple[ToolSpec, ...] = (
             "max_output_chars": "单次返回 stdout/stderr 增量的最大字符数，默认 20000，最大 40000。",
         },
     ),
-    ToolSpec(name="kill_shell", handler=kill_shell, description="重置 Shell 会话状态"),
     ToolSpec(
         name="update_plan",
         handler=update_plan,

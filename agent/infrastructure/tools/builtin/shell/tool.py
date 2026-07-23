@@ -93,10 +93,3 @@ async def bash_output(
         return result.result_str
     else:
         return tool_error("bash_output", result.error_msg, result.error_type)
-
-
-async def kill_shell(_session_id: str = "default") -> str:
-    """Reset the Shell session and kill all its background processes."""
-    await _SUPERVISOR.close_session(_session_id)
-    _POOL.close(_session_id)
-    return tool_ok("kill_shell", "Shell session reset. All background processes killed.")
