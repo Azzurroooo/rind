@@ -10,19 +10,30 @@ if str(PROJECT_ROOT) not in sys.path:
 from agent.prompts import SYSTEM_PROMPT
 
 
-def test_system_prompt_plan_control_state_only() -> None:
-    forbidden = [
-        "plan_record_observation",
-        "Record experiment, backtest, or validation observations",
-        "call `plan_record_observation`",
-    ]
-    for text in forbidden:
-        if text in SYSTEM_PROMPT:
-            raise AssertionError(f"Unexpected prompt text: {text}")
-    if "Plan records task control state only" not in SYSTEM_PROMPT:
-        raise AssertionError("Expected control-state-only plan rule in system prompt.")
+def test_system_prompt_describes_single_update_plan_protocol() -> None:
+    assert "`update_plan`" in SYSTEM_PROMPT
+    assert "complete list" in SYSTEM_PROMPT
+    for status in ("pending", "in_progress", "completed", "cancelled"):
+        assert status in SYSTEM_PROMPT
+    assert "at most one" in SYSTEM_PROMPT
+    assert "Plan records task control state only" in SYSTEM_PROMPT
+    assert "Do not introduce a `blocked` status" in SYSTEM_PROMPT
 
 
-if __name__ == "__main__":
-    test_system_prompt_plan_control_state_only()
-    print("Plan prompt tests passed.")
+def test_system_prompt_has_no_legacy_plan_protocol() -> None:
+    forbidden = tuple(
+        "plan_" + suffix
+        for suffix in (
+            "create",
+            "get",
+            "add_step",
+            "update_meta",
+            "update_step",
+            "link_dependency",
+            "reorder",
+            "next",
+            "close",
+            "record_observation",
+        )
+    ) + ("D" + "AG", "expected" + "_version")
+    assert not [value for value in forbidden if value in SYSTEM_PROMPT]

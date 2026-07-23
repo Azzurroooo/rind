@@ -201,10 +201,10 @@ async def handle_init(context: SlashCommandContext, args: list[str]) -> SlashCom
 async def handle_plan(context: SlashCommandContext, args: list[str]) -> str:
     try:
         from agent.infrastructure.planning.store import load_plan_if_exists
-        from agent.infrastructure.planning.summary import render_compact_plan_summary
+        from agent.infrastructure.planning.summary import render_plan_summary
 
         plan = load_plan_if_exists()
-        summary = render_compact_plan_summary(plan) if plan else ""
+        summary = render_plan_summary(plan or [])
     except FileNotFoundError:
         summary = ""
     except Exception as exc:

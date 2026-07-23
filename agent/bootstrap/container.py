@@ -12,7 +12,7 @@ from agent.application.tools import ToolCallProcessor, ToolExecutor, ToolResultN
 from agent.infrastructure.config import AppSettings, load_settings
 from agent.infrastructure.llm import OpenAIChatClient, OpenAIClientFactory
 from agent.infrastructure.persistence import JsonlSessionStore
-from agent.infrastructure.planning import PlanContextProvider
+from agent.infrastructure.planning import build_plan_snapshot
 from agent.infrastructure.rind_docs import build_rind_doc_context
 from agent.infrastructure.skills import SkillRepository
 from agent.infrastructure.tools import DefaultToolRegistry
@@ -33,7 +33,6 @@ class AgentContainer:
     context_estimator: ContextEstimator
     skill_repository: SkillRepository
     skill_selector: SkillSelector
-    plan_context_provider: PlanContextProvider
     context_manager: ContextManager
     compaction_service: CompactionService
     turn_runner: TurnRunner
@@ -76,16 +75,14 @@ def build_agent_container(
     context_estimator = ContextEstimator()
     skill_repository = SkillRepository()
     skill_selector = SkillSelector(max_active_skills=2)
-    plan_context_provider = PlanContextProvider(char_limit=2200)
     context_manager = ContextManager(
         estimator=context_estimator,
         skill_repository=skill_repository,
         skill_selector=skill_selector,
-        plan_context_provider=plan_context_provider,
         rind_doc_provider=build_rind_doc_context,
     )
     compaction_service = CompactionService(
-        plan_snapshot_provider=plan_context_provider.build_snapshot,
+        plan_snapshot_provider=build_plan_snapshot,
     )
     turn_runner = TurnRunner(
         chat_client=chat_client,
@@ -110,7 +107,6 @@ def build_agent_container(
         context_estimator=context_estimator,
         skill_repository=skill_repository,
         skill_selector=skill_selector,
-        plan_context_provider=plan_context_provider,
         context_manager=context_manager,
         compaction_service=compaction_service,
         turn_runner=turn_runner,

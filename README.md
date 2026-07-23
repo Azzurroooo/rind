@@ -39,7 +39,7 @@ The project takes a restrained position: an agent should not become a large fram
 - OpenAI-compatible async chat client with configurable model, base URL, and reasoning effort.
 - Append-only JSONL session storage for messages, tool calls, compactions, and session metadata.
 - Runtime context management with budget estimation, automatic compaction, context-length rescue, and normalized tool outputs.
-- DAG-based planning tool for tracking dependent work items across turns.
+- Lightweight session-local `update_plan` tool for tracking multi-step work across turns.
 - Built-in tools for shell execution, file operations, web retrieval, PDF handling, planning, and skill discovery.
 - Headless JSONL runtime server and experimental JS frontend CLI for separating terminal input/rendering from the Python agent loop.
 
@@ -150,7 +150,7 @@ agent/
 ├── infrastructure/
 │   ├── llm/           # OpenAI-compatible async chat client
 │   ├── persistence/   # Append-only session records and repositories
-│   ├── planning/      # DAG plan storage, operations, scheduling, context injection
+│   ├── planning/      # Session-local plan storage and compact snapshots
 │   └── tools/builtin/ # Shell, file, web, PDF, plan, and skill tools
 └── interfaces/
     ├── cli/           # Interactive CLI, slash commands, status UI
@@ -175,7 +175,7 @@ Run the test suite:
 pytest test/ -q
 ```
 
-The tests cover runtime events, context budgets, compaction, session persistence, resume behavior, tool result normalization, planning, skills, CLI rendering, and slash commands.
+The tests cover runtime events, context budgets, compaction, session persistence, resume behavior, tool result normalization, lightweight plans, skills, CLI rendering, and slash commands.
 
 ## Direction
 

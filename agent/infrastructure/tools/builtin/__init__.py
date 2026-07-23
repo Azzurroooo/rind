@@ -5,17 +5,7 @@ from __future__ import annotations
 from ..spec import ToolSpec
 from .files import apply_patch, edit_file, glob, grep, read_file, write_file
 from .pdf import read_pdf
-from .planning import (
-    plan_add_step,
-    plan_close,
-    plan_create,
-    plan_get,
-    plan_link_dependency,
-    plan_next,
-    plan_reorder,
-    plan_update_meta,
-    plan_update_step,
-)
+from .planning import update_plan
 from .shell import bash, bash_output, kill_shell
 from .skill import skill_create
 from .user_question import ask_user_question
@@ -125,93 +115,28 @@ TOOL_SPECS: tuple[ToolSpec, ...] = (
     ),
     ToolSpec(name="kill_shell", handler=kill_shell, description="重置 Shell 会话状态"),
     ToolSpec(
-        name="plan_create",
-        handler=plan_create,
-        description="创建一个 DAG 计划（支持并行步骤与阻塞），可携带长期目标、约束和指标。不要直接编辑 plan.json。",
+        name="update_plan",
+        handler=update_plan,
+        description=(
+            "维护多步骤任务的轻量计划。每次调用必须提交完整列表，数组顺序就是展示和执行优先顺序；"
+            "只保存控制状态，不记录事实总结。状态只能是 pending、in_progress、completed 或 cancelled，"
+            "最多一个 in_progress；完成工作并验证后再标记 completed。"
+        ),
         param_descriptions={
-            "title": "计划标题",
-            "goal": "计划目标",
-            "steps": "步骤数组，每项含 title/depends_on/priority 等字段",
-            "expected_version": "可选版本号。已有计划时用于乐观锁校验。",
-            "objectives": "可选长期目标数组，如 annual_return >= 0.10。",
-            "constraints": "可选约束数组，如 max_drawdown <= 0.12。",
+            "plan": {
+                "description": "完整计划列表；传入空数组可清空当前计划。",
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "step": {"type": "string", "minLength": 1},
+                        "status": {"type": "string", "enum": ["pending", "in_progress", "completed", "cancelled"]},
+                    },
+                    "required": ["step", "status"],
+                    "additionalProperties": False,
+                },
+            }
         },
-    ),
-    ToolSpec(
-        name="plan_get",
-        handler=plan_get,
-        description="读取当前会话计划。",
-        param_descriptions={"plan_id": "可选计划 ID，用于校验读取对象。"},
-    ),
-    ToolSpec(
-        name="plan_add_step",
-        handler=plan_add_step,
-        description="向当前 active plan 追加一个新步骤。用于长期迭代任务中新实验、新假设或后续修复。必须使用 expected_version，不要直接编辑 plan.json。",
-        param_descriptions={
-            "title": "新增步骤标题，必填且非空",
-            "description": "步骤说明",
-            "step_id": "可选步骤 ID；不填则自动生成",
-            "depends_on": "依赖的已有步骤 ID 数组",
-            "priority": "优先级，数字越大越优先",
-            "owner": "负责人或执行者标签",
-            "acceptance": "验收标准",
-            "expected_version": "必填版本号，用于乐观锁",
-        },
-    ),
-    ToolSpec(
-        name="plan_update_meta",
-        handler=plan_update_meta,
-        description="更新当前 active plan 的长期目标、目标指标和约束。必须使用 expected_version，不要直接编辑 plan.json。",
-        param_descriptions={
-            "expected_version": "必填版本号，用于乐观锁",
-            "goal": "可选新的全局目标文本",
-            "objectives": "可选目标数组，整体替换 objectives",
-            "constraints": "可选约束数组，整体替换 constraints",
-        },
-    ),
-    ToolSpec(
-        name="plan_update_step",
-        handler=plan_update_step,
-        description="更新步骤状态或字段（严格状态机 + 乐观锁）。",
-        param_descriptions={
-            "step_id": "步骤 ID",
-            "patch": "变更对象（如 status/blocked_reason/priority 等）",
-            "expected_version": "必填版本号，用于乐观锁",
-        },
-    ),
-    ToolSpec(
-        name="plan_link_dependency",
-        handler=plan_link_dependency,
-        description="更新步骤依赖关系并校验环路。",
-        param_descriptions={
-            "step_id": "步骤 ID",
-            "depends_on": "依赖步骤 ID 数组",
-            "expected_version": "必填版本号，用于乐观锁",
-        },
-    ),
-    ToolSpec(
-        name="plan_reorder",
-        handler=plan_reorder,
-        description="重排步骤展示顺序（不改变依赖）。",
-        param_descriptions={
-            "step_orders": "完整的步骤 ID 顺序数组",
-            "expected_version": "必填版本号，用于乐观锁",
-        },
-    ),
-    ToolSpec(
-        name="plan_next",
-        handler=plan_next,
-        description="获取下一步建议或并行可执行集合。",
-        param_descriptions={
-            "mode": {"description": "ready|focus|blocked_report", "enum": ["ready", "focus", "blocked_report"]},
-            "expected_version": "可选版本号，用于一致性校验",
-        },
-    ),
-    ToolSpec(
-        name="plan_close",
-        handler=plan_close,
-        description="在所有步骤完成后关闭计划。只更新计划状态，不生成事实总结。",
-        param_descriptions={"expected_version": "必填版本号，用于乐观锁"},
     ),
     ToolSpec(
         name="skill_create",

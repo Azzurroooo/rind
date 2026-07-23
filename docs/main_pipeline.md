@@ -66,7 +66,6 @@ sequenceDiagram
     Container->>Container: DefaultToolRegistry
     Container->>Container: ToolExecutor
     Container->>Container: OpenAIChatClient (注入 reasoning_effort)
-    Container->>Container: PlanContextProvider
     Container->>Container: SkillRepository
     Container->>Container: SkillSelector
     Container->>Container: ToolCallProcessor
@@ -142,14 +141,13 @@ Config.validate()                        # 验证配置
    - DefaultToolRegistry（工具注册表）
    - ToolExecutor（工具执行器）
    - OpenAIChatClient（LLM 客户端）
-   - PlanContextProvider（计划上下文）
    - SkillRepository（技能仓库）
    - SkillSelector（技能选择器）
    - ToolCallProcessor（工具处理器）
    - MessageStreamParser（消息流解析器）
 
 2. **应用层**：
-   - ContextManager（上下文管理器）
+   - ContextManager（上下文管理器；普通回合不读取计划文件）
    - TurnRunner（回合执行器）
    - AgentRuntime（运行时入口）
 

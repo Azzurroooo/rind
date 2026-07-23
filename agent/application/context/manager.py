@@ -33,7 +33,6 @@ class ContextManager:
         hot_message_limit: int = 6,
         skill_repository=None,
         skill_selector=None,
-        plan_context_provider=None,
         active_skill_char_limit: int = 12000,
         rind_doc_provider=None,
     ):
@@ -41,7 +40,6 @@ class ContextManager:
         self._hot_message_limit = max(1, int(hot_message_limit))
         self._skill_repository = skill_repository
         self._skill_selector = skill_selector
-        self._plan_context_provider = plan_context_provider
         self._active_skill_char_limit = max(0, int(active_skill_char_limit))
         self._rind_doc_provider = rind_doc_provider
 
@@ -65,7 +63,6 @@ class ContextManager:
         pending = [dict(message) for message in (pending_messages or [])]
         budget = self._estimator.budget
         full_messages = persisted_messages + pending
-        plan_stats, plan_decisions = self._empty_plan_context()
         rind_messages, rind_stats, rind_decisions = self._build_rind_doc_messages()
         skill_messages, skill_stats, skill_decisions = self._build_skill_messages(active_skill_matches)
         extra_system_messages = (
@@ -115,7 +112,6 @@ class ContextManager:
             "context_usage_percent": context_usage_percent,
             "budget": budget.to_dict(),
             **auto_compact_status,
-            **plan_stats,
             **rind_stats,
             **skill_stats,
         }
@@ -128,7 +124,6 @@ class ContextManager:
             "over_system_budget": final_estimate.system_tokens >= budget.system_budget_tokens,
             "compact_required": final_estimate.over_hard_limit,
             "auto_compact_token_limit_reached": auto_compact_status["auto_compact_token_limit_reached"],
-            **plan_decisions,
             **rind_decisions,
             **skill_decisions,
         }
@@ -307,26 +302,6 @@ class ContextManager:
         except Exception:
             logger.debug("Best-effort skill selection failed.", exc_info=True)
             return []
-
-    def _build_plan_messages(self) -> tuple[list[dict], dict, dict]:
-        stats, decisions = self._empty_plan_context()
-        return [], stats, decisions
-
-    def _empty_plan_context(self) -> tuple[dict, dict]:
-        stats = {
-            "plan_summary_chars": 0,
-            "plan_open": False,
-            "plan_step_count": 0,
-            "plan_unfinished_step_count": 0,
-        }
-        decisions = {
-            "plan_summary_injected": False,
-            "plan_id": None,
-            "plan_version": None,
-            "plan_state": "none",
-            "plan_error_type": None,
-        }
-        return stats, decisions
 
     def _build_rind_doc_messages(self) -> tuple[list[dict], dict, dict]:
         stats = {

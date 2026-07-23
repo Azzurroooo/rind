@@ -18,6 +18,7 @@ from agent.infrastructure.persistence.jsonl_session_store import JsonlSessionSto
 from agent.infrastructure.persistence.session_files import SessionFiles
 from agent.domain.compaction import COMPACT_CONTINUATION_USER_CONTENT
 from agent.domain.message_boundary import validate_model_message_boundary
+from agent.infrastructure.tools.builtin.planning import update_plan
 
 @pytest.fixture
 def temp_session_dir():
@@ -330,6 +331,36 @@ async def test_get_messages_slice_preserves_empty_tool_arguments(temp_session_di
     }
     assert messages[3] == {"role": "tool", "tool_call_id": "call_1", "content": "empty result"}
     assert validate_model_message_boundary(messages).ok
+
+
+@pytest.mark.asyncio
+async def test_update_plan_tool_args_are_projected_into_next_context(temp_session_dir):
+    store = JsonlSessionStore(session_dir=temp_session_dir, system_prompt="sys")
+    await store.initialize()
+    plan = [{"step": "Run plan projector regression", "status": "in_progress"}]
+    tool_result = update_plan(plan)
+    raw_args = json.dumps({"plan": plan}, ensure_ascii=False)
+
+    await store.persist_message("user", "track this work")
+    await store.persist_message("assistant", "", meta={"tool_calls": [{"id": "plan_1", "name": "update_plan"}]})
+    await store.persist_tool_call(
+        call_id="plan_1",
+        name="update_plan",
+        parsed_args={"plan": plan},
+        raw_args=raw_args,
+        ts_start=store.now_iso(),
+        ts_end=store.now_iso(),
+        result_payload=tool_result,
+        model_content=tool_result,
+    )
+    await store.persist_message("tool", "", tool_call_id="plan_1", tool_name="update_plan")
+
+    messages = await store.get_messages_slice()
+    assistant = next(message for message in messages if message.get("role") == "assistant" and message.get("tool_calls"))
+    tool = next(message for message in messages if message.get("role") == "tool")
+    arguments = assistant["tool_calls"][0]["function"]["arguments"]
+    assert json.loads(arguments) == {"plan": plan}
+    assert json.loads(tool["content"])["data"] == "Plan updated"
 
 
 @pytest.mark.asyncio

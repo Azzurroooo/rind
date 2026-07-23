@@ -39,7 +39,7 @@ Rind 是一个标准 Python 版本的自主编码 Agent 实现。它既可以作
 - OpenAI 兼容的异步 Chat Client，支持配置模型、base URL 和 reasoning effort。
 - 基于 JSONL 的 append-only 会话存储，记录消息、工具调用、压缩结果和会话元数据。
 - 运行时上下文管理，包含预算估算、自动压缩、上下文长度救援和工具结果归一化。
-- 基于 DAG 的计划工具，用于跨轮次追踪带依赖关系的任务。
+- 轻量的 session-local `update_plan` 工具，用于跨轮次追踪多步骤任务。
 - 内置 Shell、文件、网页、PDF、计划和技能发现等工具。
 - 无头 JSONL runtime server 和实验性 JS 前端 CLI，用于把终端输入/渲染与 Python Agent 主循环分离。
 
@@ -150,7 +150,7 @@ agent/
 ├── infrastructure/
 │   ├── llm/           # OpenAI 兼容异步 Chat Client
 │   ├── persistence/   # append-only 会话记录与仓储
-│   ├── planning/      # DAG 计划存储、操作、调度和上下文注入
+│   ├── planning/      # session-local 计划存储和 compact 快照
 │   └── tools/builtin/ # Shell、文件、网页、PDF、计划和技能工具
 └── interfaces/
     ├── cli/           # 交互式 CLI、斜杠命令、状态 UI

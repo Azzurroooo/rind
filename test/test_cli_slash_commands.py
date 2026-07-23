@@ -770,6 +770,31 @@ async def test_plan_without_active_plan_is_clear(monkeypatch) -> None:
 
 
 @pytest.mark.asyncio
+async def test_plan_renders_v2_items_in_order(tmp_path: Path, monkeypatch) -> None:
+    session_base = tmp_path / "session_1"
+    session_base.mkdir()
+    (session_base / "plan.json").write_text(
+        json.dumps(
+            {
+                "schema_version": "2.0",
+                "plan": [
+                    {"step": "first", "status": "completed"},
+                    {"step": "second", "status": "pending"},
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("AGENT_SESSION_ROOT", str(tmp_path))
+    monkeypatch.setenv("AGENT_SESSION_ID", "session_1")
+
+    result = await SlashCommandRouter().execute("/plan", _context())
+
+    assert result.text.startswith("Active plan:\n- [completed] first\n- [pending] second")
+    assert "Progress: completed=1, in_progress=0, pending=1, cancelled=0" in result.text
+
+
+@pytest.mark.asyncio
 async def test_chat_cli_slash_command_does_not_call_runtime() -> None:
     runtime = FakeRuntime()
     cli = ChatCLI(runtime=runtime, session=FakeSession())

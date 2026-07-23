@@ -14,7 +14,7 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from agent.application import CompactionService
 from agent.domain.compaction import COMPACT_CONTINUATION_USER_CONTENT
-from agent.infrastructure.planning import PlanContextProvider
+from agent.infrastructure.planning import build_plan_snapshot
 from agent.infrastructure.planning.store import set_active_session_context
 
 
@@ -40,17 +40,13 @@ class FakeSession:
         return dict(record)
 
 
-def _active_plan(title: str = "Refactor plan context", version: int = 7, status: str = "active") -> dict:
+def _active_plan() -> dict:
     return {
-        "plan_id": "p1",
-        "title": title,
-        "goal": "Move plan state to compact handoff.",
-        "status": status,
-        "version": version,
-        "steps": [
-            {"step_id": "s1", "title": "Inspect context builder", "status": "completed", "order": 0},
-            {"step_id": "s2", "title": "Append compact snapshot", "status": "in_progress", "order": 1},
-            {"step_id": "s3", "title": "Update tests", "status": "pending", "order": 2},
+        "schema_version": "2.0",
+        "plan": [
+            {"step": "Inspect context builder", "status": "completed"},
+            {"step": "Append compact snapshot", "status": "in_progress"},
+            {"step": "Update tests", "status": "pending"},
         ],
     }
 
@@ -194,7 +190,7 @@ async def test_compaction_service_appends_active_plan_snapshot_before_persist() 
         base = _set_plan_context(Path(temp_dir), _active_plan())
         session = FakeSession()
         record = await CompactionService(
-            plan_snapshot_provider=PlanContextProvider().build_snapshot,
+            plan_snapshot_provider=build_plan_snapshot,
         ).compact_async(
             session=session,
             context_messages=await session.load_messages(),
@@ -205,28 +201,36 @@ async def test_compaction_service_appends_active_plan_snapshot_before_persist() 
         assert record["handoff_message"]["content"] == persisted_content
         assert persisted_content.startswith("LLM compact handoff")
         assert "Plan state at compact boundary:" in persisted_content
-        assert "Active plan summary:" in persisted_content
-        assert "Refactor plan context (version 7)" in persisted_content
-        assert "Current focus: s2 - Append compact snapshot" in persisted_content
+        assert "Active plan:" in persisted_content
+        assert "[completed] Inspect context builder" in persisted_content
+        assert "[in_progress] Append compact snapshot" in persisted_content
+        assert "Progress: completed=1, in_progress=1, pending=1, cancelled=0" in persisted_content
 
         (base / "plan.json").write_text(
-            json.dumps(_active_plan(title="Changed later", version=8), ensure_ascii=False),
+            json.dumps({"schema_version": "2.0", "plan": [{"step": "Changed later", "status": "pending"}]}, ensure_ascii=False),
             encoding="utf-8",
         )
         assert session.records[-1]["handoff_message"]["content"] == persisted_content
 
 
 @pytest.mark.asyncio
-async def test_compaction_service_skips_plan_snapshot_without_active_plan() -> None:
+@pytest.mark.parametrize(
+    "plan",
+    [
+        {"schema_version": "2.0", "plan": []},
+        {"schema_version": "1.1", "status": "active", "steps": []},
+    ],
+)
+async def test_compaction_service_skips_plan_snapshot_without_active_plan(plan) -> None:
     class SuccessfulClient:
         async def create(self, *args, **kwargs):
             return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content="LLM compact handoff"))])
 
     with tempfile.TemporaryDirectory() as temp_dir:
-        _set_plan_context(Path(temp_dir), _active_plan(status="completed"))
+        _set_plan_context(Path(temp_dir), plan)
         session = FakeSession()
         record = await CompactionService(
-            plan_snapshot_provider=PlanContextProvider().build_snapshot,
+            plan_snapshot_provider=build_plan_snapshot,
         ).compact_async(
             session=session,
             context_messages=await session.load_messages(),
@@ -247,7 +251,7 @@ async def test_compaction_service_ignores_corrupt_plan_snapshot() -> None:
         _set_plan_context(Path(temp_dir), "{bad json")
         session = FakeSession()
         record = await CompactionService(
-            plan_snapshot_provider=PlanContextProvider().build_snapshot,
+            plan_snapshot_provider=build_plan_snapshot,
         ).compact_async(
             session=session,
             context_messages=await session.load_messages(),
