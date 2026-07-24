@@ -61,6 +61,15 @@ def test_system_prompt_contains_rind_doc_rules():
     assert "not automatically updated memory" in text
 
 
+def test_system_prompt_shows_apply_patch_example_and_failure_checks():
+    text = prompts.SYSTEM_PROMPT
+
+    assert "*** Begin Patch" in text
+    assert "*** Expected SHA256: <sha256 from read_file>" in text
+    assert "start every `Update File` hunk with `@@`" in text
+    assert "keep explanations outside the patch" in text
+
+
 def test_system_prompt_strongly_limits_emojis():
     text = prompts.SYSTEM_PROMPT
 
