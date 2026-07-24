@@ -16,6 +16,7 @@ import { isInputClosed } from "../lib/input-errors.js";
 import { sigintAction } from "../lib/interrupt-state.js";
 import { isReadonlySlashCommand, steeringCommandText } from "../lib/slash-command-mode.js";
 import { createModelMenuState } from "../lib/model-menu-state.js";
+import { createChoiceMenuState } from "../lib/choice-menu-state.js";
 import { createSlashMenuState } from "../lib/slash-menu-state.js";
 import { parseTerminalKey } from "../lib/terminal-key.js";
 import { createTerminalUI } from "../lib/terminal-ui.js";
@@ -32,6 +33,7 @@ import {
   interruptText,
   modelListErrorText,
   modelMenuText,
+  choiceMenuText,
   outputBlockText,
   promptPlaceholderText,
   promptText,
@@ -697,11 +699,13 @@ async function answerQuestion(event) {
   closeAssistant();
   logOutput(questionText(event));
   try {
-    const raw = (await ask(answerPromptText(), answerPlaceholderText())).trim();
+    const options = Array.isArray(event.options) ? event.options : [];
+    const answer = terminalUi && options.length
+      ? await askChoiceMenu(event)
+      : selectAnswer((await ask(answerPromptText(), answerPlaceholderText())).trim(), options);
     if (interruptRequested || runtimeClosing) {
       return;
     }
-    const answer = selectAnswer(raw, event.options || []);
     await request("user_question.respond", {
       tool_call_id: event.tool_call_id,
       answer,
@@ -801,6 +805,14 @@ function renderActiveInput(width = process.stdout.columns || 80) {
       menuText: modelMenuText(session.modelState.items(), session.modelState.selectedIndex()).trimEnd(),
     }, width);
   }
+  if (session.mode === "choice") {
+    return prepareComposerFrame({
+      prompt: mainPromptText(),
+      inputText: session.question,
+      cursor: { line: 0, column: session.question.length },
+      menuText: choiceMenuText(session.choiceState.options(), session.choiceState.selectedIndex(), session.recommended).trimEnd(),
+    }, width);
+  }
   session.editor.setViewportWidth(width);
   const matches = session.menuState ? syncSlashMenu(session) : [];
   return prepareComposerFrame({
@@ -834,6 +846,10 @@ function handleTerminalInput(raw = "") {
     handleModelInput(session, event);
     return;
   }
+  if (session.mode === "choice") {
+    handleChoiceInput(session, event);
+    return;
+  }
   const key = event;
   const matches = session.menuState ? syncSlashMenu(session) : [];
   const menuKey = !key.ctrl && !key.alt && !key.shift && ["escape", "up", "down"].includes(key.name);
@@ -855,7 +871,7 @@ function handleTerminalInput(raw = "") {
 
 function handleTerminalPaste(text) {
   const session = activeInputSession;
-  if (!session || session.mode === "model") {
+  if (!session || session.mode === "model" || session.mode === "choice") {
     return;
   }
   session.editor.handleInput({ kind: "paste", text });
@@ -933,6 +949,39 @@ function askModelMenu(models, currentModel) {
     cancelActiveInput = () => completeTtyInput(session, "", false);
     redrawInput(true);
   });
+}
+
+function askChoiceMenu(event) {
+  return new Promise((resolve) => {
+    clearAssistantLineForInput();
+    const state = createChoiceMenuState(event.options, event.recommended);
+    const session = {
+      mode: "choice",
+      question: String(event.question || "Input required"),
+      choiceState: state,
+      recommended: event.recommended || "",
+      resolve,
+    };
+    activeInputSession = session;
+    inputActive = true;
+    cancelActiveInput = () => completeTtyInput(session, "", false);
+    redrawInput(true);
+  });
+}
+
+function handleChoiceInput(session, key) {
+  const modified = key.ctrl || key.alt || key.shift;
+  if (!modified && (key.name === "enter" || key.name === "return")) {
+    completeTtyInput(session, session.choiceState.selectedOption(), false);
+    return;
+  }
+  if (!modified && key.name === "escape") {
+    completeTtyInput(session, "", false);
+    return;
+  }
+  if (!modified && session.choiceState.handleKey(key)) {
+    redrawInput();
+  }
 }
 
 function normalizeSlashCommands(commands) {
