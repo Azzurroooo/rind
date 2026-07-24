@@ -62,6 +62,58 @@ class CompletingRunner:
 
 
 @pytest.mark.asyncio
+async def test_runtime_switch_session_updates_model_and_clears_pending_inputs():
+    class SwitchableSession(RecordingSession):
+        def __init__(self):
+            super().__init__()
+            self.session_id = "session_1"
+            self.model = "model-1"
+
+        async def switch_session(self, session_id):
+            self.session_id = session_id
+            self.model = "model-2"
+            return {
+                "session_id": session_id,
+                "model": self.model,
+                "usage": {"context_usage_percent": 0.25},
+            }
+
+    class SwitchableRunner(CompletingRunner):
+        def __init__(self):
+            super().__init__()
+            self.model = "model-1"
+
+        def set_model(self, model):
+            self.model = model
+
+    session = SwitchableSession()
+    runner = SwitchableRunner()
+    runtime = AgentRuntime(runner, session)
+    await runtime.initialize()
+    runtime._steering_queue.append("old steering")
+    runtime._follow_up_queue.append("old follow-up")
+
+    result = await runtime.switch_session("session_2")
+
+    assert result["session_id"] == "session_2"
+    assert session.session_id == "session_2"
+    assert runner.model == "model-2"
+    assert runtime.input_queue_counts() == {"steering": 0, "follow_up": 0}
+
+
+@pytest.mark.asyncio
+async def test_runtime_switch_session_rejects_active_turn():
+    runtime = AgentRuntime(CompletingRunner(), RecordingSession())
+    stream = runtime.run_turn(query="active")
+    await anext(stream)
+
+    with pytest.raises(RuntimeError, match="turn is active"):
+        await runtime.switch_session("session-2")
+
+    await stream.aclose()
+
+
+@pytest.mark.asyncio
 async def test_runtime_input_queue_validation_and_independent_limits():
     runtime = AgentRuntime(CompletingRunner(), RecordingSession())
 

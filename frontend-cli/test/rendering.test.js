@@ -15,6 +15,8 @@ import {
   interruptText,
   modelListErrorText,
   modelMenuText,
+  sessionMenuText,
+  sessionSwitchedText,
   modelUsageText,
   outputBlockText,
   promptText,
@@ -835,6 +837,25 @@ test("choiceMenuText keeps the selected option visible", () => {
       "",
     ].join("\n"),
   );
+});
+
+test("sessionMenuText renders a selectable session deck", () => {
+  const text = sessionMenuText(["s1 · Current · now", "s2 · Older · yesterday"], 1);
+  assert.match(text, /Sessions/);
+  assert.match(text, /s2 · Older · yesterday/);
+  assert.match(text, /enter confirm/);
+});
+
+test("sessionSwitchedText renders target context and model", () => {
+  const text = sessionSwitchedText({
+    session_id: "s2",
+    model: "model-b",
+    resume_preview: "Resumed session s2\n- user: target task",
+  });
+  assert.match(text, /Session switched/);
+  assert.match(text, /s2/);
+  assert.match(text, /model-b/);
+  assert.match(text, /You/);
 });
 
 test("AssistantRenderer removes markdown markers at message boundary", () => {

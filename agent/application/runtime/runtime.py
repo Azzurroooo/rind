@@ -97,6 +97,42 @@ class AgentRuntime:
             ) from exc
         return {"runtime": runtime_updated, "session": True}
 
+    async def switch_session(self, session_id: str) -> dict[str, object]:
+        """Rebind the runtime to an existing session while it is idle."""
+        await self.initialize()
+        if self._accepting_inputs or self._active_turn_id:
+            raise RuntimeError("Cannot switch sessions while a turn is active.")
+
+        async with self._turn_lock:
+            if self._accepting_inputs or self._active_turn_id:
+                raise RuntimeError("Cannot switch sessions while a turn is active.")
+            switch = getattr(self._session_store, "switch_session", None)
+            if not callable(switch):
+                raise RuntimeError("Session switching is unsupported by this session store.")
+            self.discard_pending_inputs()
+            try:
+                result = await switch(session_id)
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                raise PersistenceError(
+                    f"Failed to switch session: {exc}",
+                    code=type(exc).__name__,
+                ) from exc
+
+            target_model = str(
+                (result.get("model") if isinstance(result, dict) else None)
+                or getattr(self._session_store, "model", None)
+                or ""
+            ).strip()
+            if target_model:
+                self._turn_runner.set_model(target_model)
+            self.discard_pending_inputs()
+            return dict(result) if isinstance(result, dict) else {
+                "session_id": getattr(self._session_store, "session_id", None),
+                "model": target_model,
+            }
+
     async def compact_context(self, reason: str = "manual", cancellation_token: CancellationToken | None = None) -> dict:
         """Manually compact the current session through the turn runner."""
         await self.initialize()

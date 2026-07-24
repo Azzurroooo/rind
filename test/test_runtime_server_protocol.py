@@ -200,6 +200,7 @@ def test_initialize_response_includes_resume_preview_when_history_exists(capsys)
         "steering",
         "follow_up",
         "input_queue",
+        "session_switch",
     ]
     assert result["session_id"] == "s1"
     assert result["model"] == "m1"
@@ -227,6 +228,53 @@ def test_session_replay_returns_projected_messages_and_turn_state(capsys):
         "messages": [{"role": "user", "content": "hello"}],
         "turn_state": {"turn_id": "t1", "status": "completed", "ts": "now"},
     }
+
+
+def test_session_switch_returns_target_metadata_and_preview(capsys):
+    class Runtime(_Runtime):
+        async def switch_session(self, session_id):
+            self.switched = session_id
+            return {
+                "session_id": session_id,
+                "model": "target-model",
+                "usage": {"context_usage_percent": 0.4},
+                "assistant_usage": {"context_usage_percent": 0.3},
+            }
+
+    class Session(_Session):
+        async def get_messages_slice(self):
+            return [{"role": "user", "content": "target history"}]
+
+    async def run():
+        runtime = Runtime()
+        await StdioRuntimeServer(runtime, Session())._switch_session(
+            {"request_id": 24, "method": "session.switch", "params": {"session_id": "target"}}
+        )
+
+    asyncio.run(run())
+
+    message = json.loads(capsys.readouterr().out)
+    assert message["result"]["session_id"] == "target"
+    assert message["result"]["model"] == "target-model"
+    assert message["result"]["usage"] == {"context_usage_percent": 0.3}
+    assert "target history" in message["result"]["resume_preview"]
+
+
+def test_session_switch_rejects_invalid_request_and_unsupported_runtime(capsys):
+    async def run():
+        server = StdioRuntimeServer(_Runtime(), _Session())
+        await server._dispatch(
+            {"request_id": 25, "method": "session.switch", "params": {}}
+        )
+        await server._dispatch(
+            {"request_id": 26, "method": "session.switch", "params": {"session_id": "target"}}
+        )
+
+    asyncio.run(run())
+
+    messages = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
+    assert messages[0]["error"]["type"] == "InvalidRequest"
+    assert messages[1]["error"]["type"] == "UnsupportedOperation"
 
 
 def test_slash_execute_reuses_cli_router(capsys):

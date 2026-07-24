@@ -34,6 +34,8 @@ import {
   modelListErrorText,
   modelMenuText,
   choiceMenuText,
+  sessionMenuText,
+  sessionSwitchedText,
   outputBlockText,
   promptPlaceholderText,
   promptText,
@@ -230,12 +232,61 @@ async function runSlashCommand(text) {
     startCompactCommand();
     return;
   }
+  if (isBareSessionsCommand(text) && terminalUi) {
+    await runSessionsSelector();
+    return;
+  }
   if (isReadonlySlashCommand(text) && terminalUi) {
     startReadonlySlashCommand(text);
     return;
   }
   const result = await request("slash.execute", { input: text });
   await applySlashResult(result);
+}
+
+async function runSessionsSelector() {
+  let result;
+  try {
+    result = await request("slash.execute", { input: "/sessions" });
+  } catch (error) {
+    logOutput(`Command failed: ${error instanceof Error ? error.message : String(error)}`);
+    return;
+  }
+  const sessions = Array.isArray(result?.display?.sessions) ? result.display.sessions : [];
+  if (!sessions.length) {
+    await applySlashResult(result);
+    return;
+  }
+  const currentId = String(result?.display?.current_session_id || sessionInfo.session_id || "");
+  const options = sessions.map((session) => sessionMenuOption(session));
+  const currentIndex = sessions.findIndex((session) => String(session?.id || "") === currentId);
+  const selected = await askSessionMenu(options, sessions, currentIndex);
+  if (!selected || runtimeClosing || selected.id === currentId) {
+    return;
+  }
+  try {
+    const update = await request("session.switch", { session_id: selected.id });
+    sessionInfo = {
+      ...sessionInfo,
+      session_id: update?.session_id || selected.id,
+      model: update?.model || sessionInfo.model,
+      resume_preview: update?.resume_preview || "",
+    };
+    latestStats = update?.usage && typeof update.usage === "object" ? update.usage : {};
+    compactContextState.clear();
+    logOutput(sessionSwitchedText(sessionInfo));
+    redrawInput();
+  } catch (error) {
+    logOutput(`Session switch failed: ${error instanceof Error ? error.message : String(error)}`);
+  }
+}
+
+function sessionMenuOption(session) {
+  const id = singleLineText(session?.id) || "unknown";
+  const title = singleLineText(session?.title);
+  const updated = singleLineText(session?.updated_at);
+  const marker = session?.current ? "current" : "";
+  return [id, title, updated, marker].filter(Boolean).join(" · ");
 }
 
 async function applySlashResult(result) {
@@ -813,6 +864,14 @@ function renderActiveInput(width = process.stdout.columns || 80) {
       menuText: choiceMenuText(session.choiceState.options(), session.choiceState.selectedIndex(), session.recommended).trimEnd(),
     }, width);
   }
+  if (session.mode === "sessions") {
+    return prepareComposerFrame({
+      prompt: mainPromptText(),
+      inputText: session.inputText,
+      cursor: { line: 0, column: session.inputText.length },
+      menuText: sessionMenuText(session.choiceState.options(), session.choiceState.selectedIndex()).trimEnd(),
+    }, width);
+  }
   session.editor.setViewportWidth(width);
   const matches = session.menuState ? syncSlashMenu(session) : [];
   return prepareComposerFrame({
@@ -850,6 +909,10 @@ function handleTerminalInput(raw = "") {
     handleChoiceInput(session, event);
     return;
   }
+  if (session.mode === "sessions") {
+    handleSessionInput(session, event);
+    return;
+  }
   const key = event;
   const matches = session.menuState ? syncSlashMenu(session) : [];
   const menuKey = !key.ctrl && !key.alt && !key.shift && ["escape", "up", "down"].includes(key.name);
@@ -871,7 +934,7 @@ function handleTerminalInput(raw = "") {
 
 function handleTerminalPaste(text) {
   const session = activeInputSession;
-  if (!session || session.mode === "model" || session.mode === "choice") {
+  if (!session || session.mode === "model" || session.mode === "choice" || session.mode === "sessions") {
     return;
   }
   session.editor.handleInput({ kind: "paste", text });
@@ -969,6 +1032,24 @@ function askChoiceMenu(event) {
   });
 }
 
+function askSessionMenu(options, sessions, currentIndex) {
+  return new Promise((resolve) => {
+    clearAssistantLineForInput();
+    const state = createChoiceMenuState(options, options[currentIndex] || "");
+    const session = {
+      mode: "sessions",
+      inputText: "/sessions",
+      choiceState: state,
+      sessions,
+      resolve,
+    };
+    activeInputSession = session;
+    inputActive = true;
+    cancelActiveInput = () => completeTtyInput(session, null, false);
+    redrawInput(true);
+  });
+}
+
 function handleChoiceInput(session, key) {
   const modified = key.ctrl || key.alt || key.shift;
   if (!modified && (key.name === "enter" || key.name === "return")) {
@@ -977,6 +1058,22 @@ function handleChoiceInput(session, key) {
   }
   if (!modified && key.name === "escape") {
     completeTtyInput(session, "", false);
+    return;
+  }
+  if (!modified && session.choiceState.handleKey(key)) {
+    redrawInput();
+  }
+}
+
+function handleSessionInput(session, key) {
+  const modified = key.ctrl || key.alt || key.shift;
+  if (!modified && (key.name === "enter" || key.name === "return")) {
+    const index = session.choiceState.selectedIndex();
+    completeTtyInput(session, session.sessions[index] || null, false);
+    return;
+  }
+  if (!modified && key.name === "escape") {
+    completeTtyInput(session, null, false);
     return;
   }
   if (!modified && session.choiceState.handleKey(key)) {
@@ -1013,6 +1110,10 @@ function singleWord(value) {
 
 function isBareModelCommand(value) {
   return String(value || "").trim().toLowerCase() === "/model";
+}
+
+function isBareSessionsCommand(value) {
+  return String(value || "").trim().toLowerCase() === "/sessions";
 }
 
 function isCompactCommand(value) {

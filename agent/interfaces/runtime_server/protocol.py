@@ -16,6 +16,7 @@ CAPABILITIES = (
     "steering",
     "follow_up",
     "input_queue",
+    "session_switch",
 )
 
 DURABLE_EVENT_TYPES = frozenset(

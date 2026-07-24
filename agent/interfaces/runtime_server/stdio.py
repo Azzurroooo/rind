@@ -115,6 +115,8 @@ class StdioRuntimeServer:
                 await self._list_models(request)
             elif method == "model.set":
                 await self._set_model(request)
+            elif method == "session.switch":
+                await self._switch_session(request)
             elif method == "slash.execute":
                 await self._execute_slash(request)
             else:
@@ -245,6 +247,34 @@ class StdioRuntimeServer:
         result = await set_active_model(self._runtime, self._session, model)
         self._default_model = str(result.get("new_default") or self._default_model).strip()
         await self._respond(request, result)
+
+    async def _switch_session(self, request: dict[str, Any]) -> None:
+        params = request.get("params") if isinstance(request.get("params"), dict) else {}
+        raw_session_id = params.get("session_id")
+        if not isinstance(raw_session_id, str) or not raw_session_id.strip():
+            await self._respond_error(request, "session.switch requires session_id.", "InvalidRequest")
+            return
+        try:
+            session_id = validate_session_id(raw_session_id)
+        except ValueError as exc:
+            await self._respond_error(request, str(exc), "InvalidRequest")
+            return
+        switch = getattr(self._runtime, "switch_session", None)
+        if not callable(switch):
+            await self._respond_error(request, "Session switching is unavailable.", "UnsupportedOperation")
+            return
+        result = await switch(session_id)
+        self._default_model = str(result.get("model") or self._default_model).strip()
+        usage = result.get("assistant_usage") or result.get("usage")
+        await self._respond(
+            request,
+            {
+                "session_id": result.get("session_id") or getattr(self._session, "session_id", None),
+                "model": result.get("model") or getattr(self._session, "model", None),
+                "usage": usage if isinstance(usage, dict) else None,
+                "resume_preview": await self._resume_preview(),
+            },
+        )
 
     async def _fetch_model_ids(self, client: Any) -> list[str]:
         response = client.models.list()

@@ -131,11 +131,19 @@ export function modelMenuText(items, selectedIndex = 0) {
 }
 
 export function choiceMenuText(options, selectedIndex = 0, recommended = "") {
+  return choiceMenuTextWithTitle(options, selectedIndex, recommended, "Choices");
+}
+
+export function sessionMenuText(options, selectedIndex = 0) {
+  return choiceMenuTextWithTitle(options, selectedIndex, "", "Sessions");
+}
+
+function choiceMenuTextWithTitle(options, selectedIndex = 0, recommended = "", title = "Choices") {
   const visible = menuWindow(options, selectedIndex);
   if (!visible.items.length) {
     return "";
   }
-  const lines = [dim(choiceMenuTitle(visible))];
+  const lines = [dim(choiceMenuTitle(visible, title))];
   for (const [index, option] of visible.items.entries()) {
     const active = index === visible.activeIndex;
     const marker = active ? accent("›") : dim("·");
@@ -148,11 +156,25 @@ export function choiceMenuText(options, selectedIndex = 0, recommended = "") {
   return `${lines.join("\n")}\n`;
 }
 
-function choiceMenuTitle(visible) {
+function choiceMenuTitle(visible, title = "Choices") {
   if (visible.total <= visible.items.length) {
-    return "  Choices";
+    return `  ${title}`;
   }
-  return `  Choices ${visible.start + 1}-${visible.start + visible.items.length}/${visible.total}`;
+  return `  ${title} ${visible.start + 1}-${visible.start + visible.items.length}/${visible.total}`;
+}
+
+export function sessionSwitchedText(info = {}) {
+  const sessionId = singleLine(info.session_id) || "unknown";
+  const model = singleLine(info.model);
+  const preview = resumePreviewText(info.resume_preview);
+  const lines = [`${green("✓")} ${bold("Session switched")}`, dim(detailLine(sessionId))];
+  if (model) {
+    lines.push(dim(detailLine(`model ${model}`)));
+  }
+  if (preview) {
+    lines.push("", `${accent("•")} ${bold("Recent context")}`, preview);
+  }
+  return lines.join("\n");
 }
 
 export function modelListErrorText(error, currentModel = "") {

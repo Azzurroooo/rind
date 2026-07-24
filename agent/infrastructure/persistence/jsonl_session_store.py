@@ -171,11 +171,18 @@ class JsonlSessionStore(SessionStore):
             raise ValueError(f"Session data corrupted or missing meta.json for id: {session_id}")
         if str(meta.get("schema_version") or "") != "2.0":
             raise ValueError("Unsupported legacy session schema; start a new session.")
+        if str(meta.get("session_id") or session_id) != session_id:
+            raise ValueError(f"Session data corrupted: meta.json id does not match {session_id}")
+        for key in ("messages", "tool_calls"):
+            if not os.path.isfile(self._session_paths[key]):
+                raise ValueError(f"Session data corrupted or missing {key}.jsonl for id: {session_id}")
 
         self._setup_repos()
         self._invalidate_projection_cache()
 
         self._session_meta = meta
+        configured_model = str(meta.get("model") or "").strip()
+        self._model = configured_model or self._model
         original_window = self._session_meta.get("auto_compact_window")
         normalized_window = normalize_auto_compact_window(original_window)
         self._session_meta["auto_compact_window"] = normalized_window
@@ -192,6 +199,79 @@ class JsonlSessionStore(SessionStore):
         )
         if counts_changed or original_window != normalized_window:
             self._persist_meta_sync(meta.get("updated_at"))
+        self._last_preview = self._latest_assistant_preview_sync()
+
+    def _latest_assistant_preview_sync(self) -> str:
+        messages = self._msg_repo.load_messages() if self._msg_repo else []
+        for message in reversed(messages):
+            if not isinstance(message, dict) or message.get("role") != "assistant":
+                continue
+            content = message.get("content")
+            if isinstance(content, str) and content:
+                return content[:200]
+        return ""
+
+    def _validate_existing_session_sync(self, session_id: str) -> str:
+        clean = validate_session_id(session_id)
+        paths = self._get_session_paths(clean)
+        if not os.path.isdir(paths["base"]):
+            raise ValueError(f"Session not found: {clean}")
+        meta = self._files.load_json(paths["meta"])
+        if not isinstance(meta, dict):
+            raise ValueError(f"Session data corrupted or missing meta.json for id: {clean}")
+        if str(meta.get("schema_version") or "") != "2.0":
+            raise ValueError("Unsupported legacy session schema; start a new session.")
+        if str(meta.get("session_id") or clean) != clean:
+            raise ValueError(f"Session data corrupted: meta.json id does not match {clean}")
+        for key in ("messages", "tool_calls"):
+            if not os.path.isfile(paths[key]):
+                raise ValueError(f"Session data corrupted or missing {key}.jsonl for id: {clean}")
+        return clean
+
+    def _switch_session_sync(self, session_id: str) -> None:
+        self._setup_paths()
+        clean = self._validate_existing_session_sync(session_id)
+        previous = {
+            "session_id": self._session_id,
+            "session_paths": self._session_paths,
+            "session_meta": self._session_meta,
+            "message_count": self._message_count,
+            "tool_call_count": self._tool_call_count,
+            "last_preview": self._last_preview,
+            "cache_key": self._projected_messages_cache_key,
+            "cache": self._projected_messages_cache,
+            "model": self._model,
+            "msg_repo": self._msg_repo,
+            "tool_repo": self._tool_repo,
+            "compaction_repo": self._compaction_repo,
+        }
+        try:
+            self._load_session(clean)
+        except Exception:
+            self._session_id = previous["session_id"]
+            self._session_paths = previous["session_paths"]
+            self._session_meta = previous["session_meta"]
+            self._message_count = previous["message_count"]
+            self._tool_call_count = previous["tool_call_count"]
+            self._last_preview = previous["last_preview"]
+            self._projected_messages_cache_key = previous["cache_key"]
+            self._projected_messages_cache = previous["cache"]
+            self._model = previous["model"]
+            self._msg_repo = previous["msg_repo"]
+            self._tool_repo = previous["tool_repo"]
+            self._compaction_repo = previous["compaction_repo"]
+            raise
+
+    def _session_info_sync(self) -> dict[str, Any]:
+        meta = self._session_meta if isinstance(self._session_meta, dict) else {}
+        latest = meta.get("latest_sampling_usage")
+        assistant = meta.get("latest_assistant_sampling_usage")
+        return {
+            "session_id": self._session_id,
+            "model": self._model,
+            "usage": copy.deepcopy(latest) if isinstance(latest, dict) else None,
+            "assistant_usage": copy.deepcopy(assistant) if isinstance(assistant, dict) else None,
+        }
 
     def _find_latest_session_id(self) -> str | None:
         index_data = self._index_repo.load_index()
@@ -330,6 +410,18 @@ class JsonlSessionStore(SessionStore):
                 from agent.infrastructure.planning.store import set_active_session_context
 
                 set_active_session_context(str(self._session_root), str(self._session_id))
+
+    async def switch_session(self, session_id: str) -> dict[str, Any]:
+        """Switch to an existing session without creating a new one."""
+        async with self._write_lock:
+            await asyncio.to_thread(self._switch_session_sync, session_id)
+            await asyncio.to_thread(self._initialize_history_sync)
+
+            if self._session_root and self._session_id:
+                from agent.infrastructure.planning.store import set_active_session_context
+
+                set_active_session_context(str(self._session_root), str(self._session_id))
+            return await asyncio.to_thread(self._session_info_sync)
 
     async def update_model(self, model: str) -> None:
         clean = str(model or "").strip()

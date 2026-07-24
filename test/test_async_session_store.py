@@ -114,6 +114,56 @@ async def test_session_store_rejects_invalid_session_ids(temp_session_dir, tmp_p
 
 
 @pytest.mark.asyncio
+async def test_switch_session_rebinds_store_and_restores_target_state(temp_session_dir):
+    first = JsonlSessionStore(session_dir=temp_session_dir, session_id="first", model="model-a")
+    await first.initialize()
+    await first.persist_message("user", "first message")
+    await first.persist_sampling_usage({"sampling_kind": "assistant", "input_tokens": 10})
+
+    second = JsonlSessionStore(session_dir=temp_session_dir, session_id="second", model="model-b")
+    await second.initialize()
+    await second.persist_message("user", "second message")
+    await second.persist_sampling_usage({"sampling_kind": "assistant", "input_tokens": 20})
+
+    result = await first.switch_session("second")
+
+    assert first.session_id == "second"
+    assert first.model == "model-b"
+    assert result["session_id"] == "second"
+    assert result["model"] == "model-b"
+    assert result["usage"]["input_tokens"] == 20
+    assert [message["content"] for message in await first.get_messages_slice() if message["role"] == "user"] == [
+        "second message"
+    ]
+
+
+@pytest.mark.asyncio
+async def test_switch_session_does_not_create_missing_target(temp_session_dir):
+    store = JsonlSessionStore(session_dir=temp_session_dir, session_id="first")
+    await store.initialize()
+
+    with pytest.raises(ValueError, match="Session not found"):
+        await store.switch_session("missing")
+
+    assert store.session_id == "first"
+    assert not (Path(temp_session_dir) / "missing").exists()
+
+
+@pytest.mark.asyncio
+async def test_switch_session_rejects_corrupt_target_and_keeps_current(temp_session_dir):
+    store = JsonlSessionStore(session_dir=temp_session_dir, session_id="first")
+    await store.initialize()
+    corrupt = Path(temp_session_dir) / "corrupt"
+    corrupt.mkdir()
+    (corrupt / "meta.json").write_text("{broken", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="Corrupted JSON file"):
+        await store.switch_session("corrupt")
+
+    assert store.session_id == "first"
+
+
+@pytest.mark.asyncio
 async def test_session_workspace_root_uses_cwd_not_parent_git_root(tmp_path, monkeypatch):
     project = tmp_path / "project"
     nested = project / "src"
