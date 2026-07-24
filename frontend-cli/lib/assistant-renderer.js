@@ -1,5 +1,9 @@
+import { graphemes, textWidth } from "./text-width.js";
+
 const INLINE_TOKEN_RE = /(\[[^\]]+\]\([^)]+\)|`[^`]+`|\*\*[^*]+\*\*)/g;
 const PLAIN_TEXT_RE = /[`*#>|\[]/;
+const CONTENT_PREFIX = "  ";
+const ANSI_SEQUENCE = /\x1b\[[0-?]*[ -/]*[@-~]/g;
 
 export class AssistantRenderer {
   constructor(write, options = {}) {
@@ -8,6 +12,9 @@ export class AssistantRenderer {
     this.pending = "";
     this.inCodeBlock = false;
     this.lineOpen = false;
+    this.atLineStart = true;
+    this.visibleColumn = 0;
+    this.columns = options.columns;
   }
 
   append(text) {
@@ -30,7 +37,7 @@ export class AssistantRenderer {
       this.pending = "";
     }
     if (this.lineOpen) {
-      this.write("\n");
+      this.writeText("\n");
       this.lineOpen = false;
     }
   }
@@ -78,18 +85,87 @@ export class AssistantRenderer {
     const opening = !this.inCodeBlock;
     this.inCodeBlock = opening;
     const label = opening ? line.trim().slice(3).trim().slice(0, 32) : "";
-    this.writeStyled(dim(opening ? codeOpenLabel(label) : "  └ end", this.color), newline);
+    this.writeStyled(dim(opening ? codeOpenLabel(label) : "└ end", this.color), newline);
   }
 
   writePlain(text, newline) {
-    this.write(text + (newline ? "\n" : ""));
+    this.writeText(text + (newline ? "\n" : ""));
     this.lineOpen = Boolean(text) && !newline;
   }
 
   writeStyled(text, newline) {
-    this.write(text + (newline ? "\n" : ""));
+    this.writeText(text + (newline ? "\n" : ""));
     this.lineOpen = Boolean(text) && !newline;
   }
+
+  writeText(text) {
+    const parts = String(text || "").split(/(\r\n|\r|\n)/);
+    const maxWidth = Math.max(1, Math.floor(Number(this.columns ?? process.stdout.columns ?? 80) || 80));
+    const prefixWidth = textWidth(CONTENT_PREFIX);
+    let output = "";
+    for (const part of parts) {
+      if (!part) {
+        continue;
+      }
+      if (part === "\r\n" || part === "\r" || part === "\n") {
+        if (this.atLineStart) {
+          output += CONTENT_PREFIX;
+        }
+        output += part;
+        this.atLineStart = true;
+        this.visibleColumn = 0;
+        continue;
+      }
+      for (const segment of ansiSegments(part)) {
+        if (segment.ansi) {
+          if (this.atLineStart) {
+            output += CONTENT_PREFIX;
+            this.atLineStart = false;
+            this.visibleColumn = prefixWidth;
+          }
+          output += segment.text;
+          continue;
+        }
+        for (const grapheme of graphemes(segment.text)) {
+          const segmentWidth = textWidth(grapheme);
+          if (this.atLineStart) {
+            output += CONTENT_PREFIX;
+            this.atLineStart = false;
+            this.visibleColumn = prefixWidth;
+          }
+          if (
+            segmentWidth > 0
+            && this.visibleColumn > prefixWidth
+            && this.visibleColumn + segmentWidth > maxWidth
+          ) {
+            output += `\n${CONTENT_PREFIX}`;
+            this.visibleColumn = prefixWidth;
+          }
+          output += grapheme;
+          this.visibleColumn += segmentWidth;
+        }
+      }
+    }
+    if (output) {
+      this.write(output);
+    }
+  }
+}
+
+function ansiSegments(value) {
+  const segments = [];
+  let position = 0;
+  for (const match of value.matchAll(ANSI_SEQUENCE)) {
+    if (match.index > position) {
+      segments.push({ text: value.slice(position, match.index), ansi: false });
+    }
+    segments.push({ text: match[0], ansi: true });
+    position = match.index + match[0].length;
+  }
+  if (position < value.length) {
+    segments.push({ text: value.slice(position), ansi: false });
+  }
+  return segments;
 }
 
 function renderMarkdownishLine(line, color) {
@@ -166,7 +242,7 @@ function parseTableRow(line) {
 }
 
 function codeOpenLabel(label) {
-  return label ? `  ┌ code ${label}` : "  ┌ code";
+  return label ? `┌ code ${label}` : "┌ code";
 }
 
 function styled(text, color, style) {

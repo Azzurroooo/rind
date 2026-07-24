@@ -828,7 +828,7 @@ test("AssistantRenderer removes markdown markers at message boundary", () => {
   renderer.append("现在是 **2026年6月11日**，路径是 `frontend-cli`。");
   renderer.finish();
 
-  assert.equal(output, "现在是 2026年6月11日，路径是 frontend-cli。\n");
+  assert.equal(output, "  现在是 2026年6月11日，路径是 frontend-cli。\n");
 });
 
 test("AssistantRenderer renders headings and lists without raw markdown prefixes", () => {
@@ -840,7 +840,7 @@ test("AssistantRenderer renders headings and lists without raw markdown prefixes
   renderer.append("## 🔟 标题\n- **重点** 9️⃣ 项\n");
   renderer.finish();
 
-  assert.equal(output, "🔟 标题\n• 重点 9️⃣ 项\n");
+  assert.equal(output, "  🔟 标题\n  • 重点 9️⃣ 项\n");
 });
 
 test("AssistantRenderer renders code fences as compact labels", () => {
@@ -852,7 +852,7 @@ test("AssistantRenderer renders code fences as compact labels", () => {
   renderer.append("```sh\necho hi\n```\n");
   renderer.finish();
 
-  assert.equal(output, "  ┌ code sh\necho hi\n  └ end\n");
+  assert.equal(output, "  ┌ code sh\n  echo hi\n  └ end\n");
 });
 
 test("AssistantRenderer renders markdown links as readable text", () => {
@@ -864,7 +864,19 @@ test("AssistantRenderer renders markdown links as readable text", () => {
   renderer.append("See [docs](https://example.com) and [**guide**](file.md).\n");
   renderer.finish();
 
-  assert.equal(output, "See docs (https://example.com) and guide (file.md).\n");
+  assert.equal(output, "  See docs (https://example.com) and guide (file.md).\n");
+});
+
+test("AssistantRenderer prefixes visual continuation lines", () => {
+  let output = "";
+  const renderer = new AssistantRenderer((text) => {
+    output += text;
+  }, { color: false, columns: 12 });
+
+  renderer.append("abcdefghijklmnop");
+  renderer.finish();
+
+  assert.equal(output, "  abcdefghij\n  klmnop\n");
 });
 
 test("AssistantRenderer applies ansi styles when color is enabled", () => {
