@@ -20,6 +20,7 @@ import {
   promptText,
   promptPlaceholderText,
   questionText,
+  choiceMenuText,
   queuedInputText,
   skillLine,
   slashDisplayText,
@@ -791,32 +792,49 @@ test("turnCompletedLine renders duration and tool summary", () => {
 test("status helpers render question, skill, and errors", () => {
   assert.equal(
     questionText({ question: "Pick one", options: ["A", "B"], recommended: "A" }),
-    [
-      "• Choice required",
-      "",
-      "  Pick one",
-      "",
-      "  › 1. A · recommended",
-      "    2. B",
-      "",
-      "  enter number or custom answer · ctrl+c to interrupt",
-    ].join("\n"),
+    ["• Choice required", "", "  Pick one"].join("\n"),
   );
   assert.equal(
     questionText({ question: "Explain" }),
-    [
-      "• Choice required",
-      "",
-      "  Explain",
-      "",
-      "  enter to submit answer · ctrl+c to interrupt",
-    ].join("\n"),
+    ["• Choice required", "", "  Explain"].join("\n"),
   );
-  assert.match(questionText({ question: "q".repeat(120) }), /\n  q{73}\.\.\.\n/);
-  assert.match(questionText({ question: "Pick", options: ["x".repeat(120)] }), /\n    1\. x{67}\.\.\.\n/);
+  assert.match(questionText({ question: "q".repeat(120) }), /\n  q{73}\.\.\.$/);
   assert.equal(skillLine({ skill_name: "debugging" }), "• Using skill debugging");
   assert.equal(errorLine("failed"), "× Turn failed\n  ↳ failed");
   assert.equal(errorLine(""), "× Turn failed");
+});
+
+test("choiceMenuText marks the selected option and the recommendation", () => {
+  assert.equal(
+    choiceMenuText(["A", "B"], 1, "A"),
+    [
+      "  Choices",
+      `  · A${" ".repeat(34)}recommended`,
+      "  › B",
+      "    ↑↓ select · enter confirm · esc cancel",
+      "",
+    ].join("\n"),
+  );
+});
+
+test("choiceMenuText keeps the selected option visible", () => {
+  const options = Array.from({ length: 10 }, (_, index) => `option-${index}`);
+  assert.equal(
+    choiceMenuText(options, 9),
+    [
+      "  Choices 3-10/10",
+      "  · option-2",
+      "  · option-3",
+      "  · option-4",
+      "  · option-5",
+      "  · option-6",
+      "  · option-7",
+      "  · option-8",
+      "  › option-9",
+      "    ↑↓ select · enter confirm · esc cancel",
+      "",
+    ].join("\n"),
+  );
 });
 
 test("AssistantRenderer removes markdown markers at message boundary", () => {

@@ -130,6 +130,31 @@ export function modelMenuText(items, selectedIndex = 0) {
   return `${lines.join("\n")}\n`;
 }
 
+export function choiceMenuText(options, selectedIndex = 0, recommended = "") {
+  const visible = menuWindow(options, selectedIndex);
+  if (!visible.items.length) {
+    return "";
+  }
+  const lines = [dim(choiceMenuTitle(visible))];
+  for (const [index, option] of visible.items.entries()) {
+    const active = index === visible.activeIndex;
+    const marker = active ? accent("›") : dim("·");
+    const label = clipSingleLine(option, 60);
+    const name = active ? bold(label) : dim(label);
+    const suffix = option === recommended ? dim("recommended") : "";
+    lines.push(`  ${marker} ${padRight(name, 34)} ${suffix}`.trimEnd());
+  }
+  lines.push(dim("    ↑↓ select · enter confirm · esc cancel"));
+  return `${lines.join("\n")}\n`;
+}
+
+function choiceMenuTitle(visible) {
+  if (visible.total <= visible.items.length) {
+    return "  Choices";
+  }
+  return `  Choices ${visible.start + 1}-${visible.start + visible.items.length}/${visible.total}`;
+}
+
 export function modelListErrorText(error, currentModel = "") {
   const lines = [`${accent("•")} ${bold("Model list unavailable")}`];
   const current = clipSingleLine(currentModel, 96);
@@ -246,21 +271,11 @@ export function errorLine(error) {
 }
 
 export function questionText(event = {}) {
-  const options = Array.isArray(event.options) ? event.options : [];
-  const lines = [
+  return [
     `${accent("•")} ${bold("Choice required")}`,
     "",
     `  ${clipSingleLine(event.question || "Input required", 76)}`,
-  ];
-  if (options.length) {
-    lines.push("");
-  }
-  for (const [index, option] of options.entries()) {
-    lines.push(questionOptionLine(option, index, event.recommended));
-  }
-  lines.push("");
-  lines.push(dim(questionFooter(options)));
-  return lines.join("\n");
+  ].join("\n");
 }
 
 function toolDetail(name, args) {
@@ -809,18 +824,6 @@ function startupBannerWidth() {
     return MAX_STARTUP_BANNER_WIDTH;
   }
   return Math.max(44, Math.min(MAX_STARTUP_BANNER_WIDTH, columns - 2));
-}
-
-function questionOptionLine(option, index, recommended) {
-  const marker = option === recommended ? bold("›") : " ";
-  const suffix = option === recommended ? dim(" · recommended") : "";
-  return `  ${marker} ${index + 1}. ${clipSingleLine(option, 70)}${suffix}`;
-}
-
-function questionFooter(options) {
-  return options.length
-    ? "  enter number or custom answer · ctrl+c to interrupt"
-    : "  enter to submit answer · ctrl+c to interrupt";
 }
 
 function helpRow(leftKey, leftText, rightKey, rightText) {
