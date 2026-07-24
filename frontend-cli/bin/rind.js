@@ -7,6 +7,9 @@ import { fileURLToPath } from "node:url";
 
 import { AssistantRenderer } from "../lib/assistant-renderer.js";
 import { createAssistantStreamBuffer } from "../lib/assistant-stream-buffer.js";
+import { createActivityModel } from "../lib/activity-model.js";
+import { classifyTool } from "../lib/activity-classifier.js";
+import { renderDebugActivity, renderLedgerRow, renderLiveDock, renderOutcomeLine, renderSummaryLine } from "../lib/activity-renderer.js";
 import { createCompactContextState } from "../lib/compact-context-state.js";
 import { prepareComposerFrame } from "../lib/composer-terminal.js";
 import { createLineEditor } from "../lib/line-editor.js";
@@ -22,10 +25,8 @@ import { createTerminalUI } from "../lib/terminal-ui.js";
 import {
   answerPromptText,
   answerPlaceholderText,
-  cancelledText,
   commandResultText,
   contextBuiltLine,
-  errorLine,
   helpText,
   assistantHeaderText,
   inputHintText,
@@ -41,11 +42,6 @@ import {
   slashMenuText,
   skillLine,
   startupText,
-  toolProgressLine,
-  toolRequestedLine,
-  toolResultLine,
-  toolStartedLine,
-  turnCompletedLine,
   userInputText,
 } from "../lib/rendering.js";
 
@@ -83,12 +79,10 @@ let runtimeKillTimer = null;
 let processExitTimer = null;
 let cancelActiveInput = null;
 const pending = new Map();
-const announcedTools = new Set();
-const pendingFileChanges = new Map();
 let sessionInfo = {};
 let latestStats = {};
 let slashCommands = [];
-let turnTools = { completed: 0, failed: 0 };
+const activityModel = createActivityModel();
 let promptPaused = false;
 let pendingInputPrefill = "";
 let assistantOutputLineOpen = false;
@@ -440,12 +434,10 @@ function clearActivityTimer() {
 }
 
 function startTurn(text, extra = {}) {
-  if (runtimeClosing) {
-    return;
-  }
+  if (runtimeClosing) return;
   activeTurn = true;
   assistantHeaderShown = false;
-  resetTurnTools();
+  activityModel.reset();
   refreshInputState();
   void runTurn(text, extra).catch((error) => handleSubmissionError(error, text));
 }
@@ -522,7 +514,8 @@ function writeErrorOutput(text) {
 }
 
 function withSuspendedPrompt(action, options = {}) {
-  if (!terminalUi || !inputActive || runtimeClosing) {
+  const dynamicActivity = activeTurn || activeCompact || activityModel.hasActive();
+  if (!terminalUi || runtimeClosing || (!inputActive && !dynamicActivity)) {
     action();
     return;
   }
@@ -595,101 +588,79 @@ async function renderEvent(message) {
     case "assistant_delta":
       assistantRenderer.append(event.text || "");
       return;
+    case "turn_started":
+      activityModel.handle({ ...event, type: eventType });
+      redrawInput(true);
+      return;
     case "context_built": {
-      if (compactContextState.handleContextBuilt(event)) {
-        resetContextUsage();
-      }
+      if (compactContextState.handleContextBuilt(event)) resetContextUsage();
       const line = contextBuiltLine(event);
-      if (line) {
-        closeAssistant();
-        logOutput(line);
-      }
+      if (line) { closeAssistant(); logOutput(line); }
       return;
     }
     case "tool_requested":
-      closeAssistant();
-      if (event.tool_call_id) {
-        announcedTools.add(event.tool_call_id);
-      }
-      logOutput(toolRequestedLine(event));
-      return;
     case "tool_call_started":
-      closeAssistant();
-      if (event.tool_call_id && announcedTools.has(event.tool_call_id)) {
-        return;
-      }
-      logOutput(toolStartedLine(event));
-      return;
-    case "tool_result":
-      closeAssistant();
-      const fileChanges = pendingFileChanges.get(event.tool_call_id);
-      pendingFileChanges.delete(event.tool_call_id);
-      recordToolResult(event);
-      logOutput(toolResultLine(event, fileChanges));
-      return;
+    case "tool_progress":
     case "file_change":
-      if (event.tool_call_id) {
-        const fileChanges = pendingFileChanges.get(event.tool_call_id) || [];
-        fileChanges.push(event);
-        pendingFileChanges.set(event.tool_call_id, fileChanges);
+    case "tool_result":
+    case "user_question_requested": {
+      const activityEvent = { ...event, type: eventType };
+      if (eventType === "tool_result" && !["inspect", "search"].includes(classifyTool(event.tool_name, event.args_preview))) flushActivityLedger();
+      const result = activityModel.handle(activityEvent);
+      if (cliArgs.includes("--debug")) writeErrorOutput(String(renderDebugActivity(activityEvent)) + "\n");
+      if (eventType === "tool_result") {
+        if (result.committed) {
+          closeAssistant();
+          logOutput(renderLedgerRow(result.entry, process.stdout.columns || 80));
+        }
+      } else if (eventType === "user_question_requested") {
+        await answerQuestion(event);
       }
-      return;
-    case "tool_progress": {
-      closeAssistant();
-      const line = toolProgressLine(event);
-      if (line) {
-        logOutput(line);
-      }
+      redrawInput(true);
       return;
     }
     case "token_stats_updated":
       closeAssistant();
       latestStats = event.stats && typeof event.stats === "object" ? event.stats : {};
-      if (!activeTurn) {
-        redrawInput();
-      }
+      if (!activeTurn) redrawInput();
       return;
     case "skill_activated":
       closeAssistant();
       logOutput(skillLine(event));
       return;
-    case "user_question_requested":
-      await answerQuestion(event);
-      return;
     case "turn_failed":
       compactContextState.clear();
+      flushActivityLedger();
+      activityModel.reset();
       closeAssistant();
-      logOutput(errorLine(event.error));
+      logOutput(renderOutcomeLine("note", "turn", "fail", event.duration_ms || 0, event.error || "turn failed", process.stdout.columns || 80));
       return;
     case "turn_cancelled":
       compactContextState.clear();
+      flushActivityLedger();
+      activityModel.reset();
       closeAssistant();
-      logOutput(cancelledText());
+      logOutput(renderOutcomeLine("note", "turn", "stop", event.duration_ms || 0, event.reason || "turn cancelled", process.stdout.columns || 80));
       return;
     case "turn_completed":
       compactContextState.clear();
+      flushActivityLedger();
       closeAssistant();
-      logOutput(turnCompletedLine(event, turnTools));
-      resetTurnTools();
+      logOutput(renderSummaryLine(activityModel.summary(event.duration_ms)));
+      activityModel.reset();
       return;
     default:
-      if (cliArgs.includes("--debug")) {
-        writeErrorOutput(`Ignoring unknown runtime event: ${eventType || "unknown"}\n`);
-      }
+      if (cliArgs.includes("--debug")) writeErrorOutput("Ignoring unknown runtime event: " + (eventType || "unknown") + "\n");
   }
 }
 
-function recordToolResult(event) {
-  if (event.status === "failed") {
-    turnTools.failed += 1;
-    return;
-  }
-  turnTools.completed += 1;
-}
 
-function resetTurnTools() {
-  turnTools = { completed: 0, failed: 0 };
-  pendingFileChanges.clear();
+function flushActivityLedger() {
+  const width = process.stdout.columns || 80;
+  for (const entry of activityModel.flushPending()) {
+    closeAssistant();
+    logOutput(renderLedgerRow(entry, width));
+  }
 }
 
 async function answerQuestion(event) {
@@ -790,26 +761,35 @@ function clearAssistantLineForInput() {
 
 function renderActiveInput(width = process.stdout.columns || 80) {
   const session = activeInputSession;
+  let frame;
   if (!session) {
-    return { lines: [], cursorRow: 0, cursorColumn: 0 };
-  }
-  if (session.mode === "model") {
-    return prepareComposerFrame({
+    frame = { lines: [], cursorRow: 0, cursorColumn: 0 };
+  } else if (session.mode === "model") {
+    frame = prepareComposerFrame({
       prompt: mainPromptText(),
       inputText: session.inputText,
       cursor: { line: 0, column: session.inputText.length },
       menuText: modelMenuText(session.modelState.items(), session.modelState.selectedIndex()).trimEnd(),
     }, width);
+  } else {
+    session.editor.setViewportWidth(width);
+    const matches = session.menuState ? syncSlashMenu(session) : [];
+    frame = prepareComposerFrame({
+      prompt: promptValue(session.prompt),
+      inputText: session.editor.input(),
+      cursor: session.editor.cursorPosition(),
+      placeholder: session.mode === "prompt" ? inputHintText(session.placeholder) : "",
+      menuText: session.menuState ? slashMenuText(matches, session.menuState.selectedIndex()).trimEnd() : "",
+    }, width);
   }
-  session.editor.setViewportWidth(width);
-  const matches = session.menuState ? syncSlashMenu(session) : [];
-  return prepareComposerFrame({
-    prompt: promptValue(session.prompt),
-    inputText: session.editor.input(),
-    cursor: session.editor.cursorPosition(),
-    placeholder: session.mode === "prompt" ? inputHintText(session.placeholder) : "",
-    menuText: session.menuState ? slashMenuText(matches, session.menuState.selectedIndex()).trimEnd() : "",
-  }, width);
+  const activeActivities = activityModel.active();
+  const live = activeActivities[0]
+    ? { ...activeActivities[0], runningCount: Math.min(activeActivities.length, 4) }
+    : (activeCompact ? { kind: "note", target: "compacting", startedAt: activityStartedAt, durationMs: 0 } : null);
+  if (!live) return frame;
+  const line = renderLiveDock(live, width);
+  if (!frame.lines.length) return { lines: [line], cursorRow: 0, cursorColumn: line.length };
+  return { ...frame, lines: [line, ...frame.lines], cursorRow: frame.cursorRow + 1, focusRow: typeof frame.focusRow === "number" ? frame.focusRow + 1 : undefined };
 }
 
 function syncSlashMenu(session) {
