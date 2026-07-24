@@ -84,6 +84,15 @@ def test_system_prompt_describes_path_roots():
     assert "Project-level `RIND.md` and project skills are rooted at the Current Working Directory" in text
 
 
+def test_system_prompt_requires_parallel_independent_tool_calls():
+    text = prompts.SYSTEM_PROMPT
+
+    assert "independent" in text
+    assert "in parallel in the same response" in text
+    assert "reduce round trips and improve efficiency" in text
+    assert "dependent calls sequentially" in text
+
+
 def test_rind_init_prompt_scopes_project_file():
     prompt = prompts.build_rind_init_prompt("project", r"C:\repo\RIND.md")
 
