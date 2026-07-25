@@ -56,7 +56,15 @@ class AgentRuntime:
                     f"Failed to initialize session store: {exc}",
                     code=type(exc).__name__,
                 ) from exc
+            self._sync_turn_runner_model()
             self._initialized = True
+
+    def _sync_turn_runner_model(self) -> str:
+        model = str(getattr(self._session_store, "model", None) or "").strip()
+        set_model = getattr(self._turn_runner, "set_model", None)
+        if model and callable(set_model):
+            set_model(model)
+        return model
 
     def set_retry_callback(self, callback) -> None:
         """Set a callback invoked on LLM API retries: (attempt: int, exception: Exception) -> None."""
@@ -120,13 +128,7 @@ class AgentRuntime:
                     code=type(exc).__name__,
                 ) from exc
 
-            target_model = str(
-                (result.get("model") if isinstance(result, dict) else None)
-                or getattr(self._session_store, "model", None)
-                or ""
-            ).strip()
-            if target_model:
-                self._turn_runner.set_model(target_model)
+            target_model = self._sync_turn_runner_model()
             self.discard_pending_inputs()
             return dict(result) if isinstance(result, dict) else {
                 "session_id": getattr(self._session_store, "session_id", None),

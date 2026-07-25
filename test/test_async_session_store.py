@@ -138,6 +138,18 @@ async def test_switch_session_rebinds_store_and_restores_target_state(temp_sessi
 
 
 @pytest.mark.asyncio
+async def test_resume_session_uses_model_from_meta_over_constructor_default(temp_session_dir):
+    original = JsonlSessionStore(session_dir=temp_session_dir, session_id="session", model="settings-model")
+    await original.initialize()
+    await original.update_model("meta-model")
+
+    resumed = JsonlSessionStore(session_dir=temp_session_dir, session_id="session", model="settings-model")
+    await resumed.initialize()
+
+    assert resumed.model == "meta-model"
+
+
+@pytest.mark.asyncio
 async def test_switch_session_does_not_create_missing_target(temp_session_dir):
     store = JsonlSessionStore(session_dir=temp_session_dir, session_id="first")
     await store.initialize()

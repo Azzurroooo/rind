@@ -245,7 +245,6 @@ class StdioRuntimeServer:
             await self._respond_error(request, "model.set requires model.", "InvalidRequest")
             return
         result = await set_active_model(self._runtime, self._session, model)
-        self._default_model = str(result.get("new_default") or self._default_model).strip()
         await self._respond(request, result)
 
     async def _switch_session(self, request: dict[str, Any]) -> None:
@@ -264,7 +263,6 @@ class StdioRuntimeServer:
             await self._respond_error(request, "Session switching is unavailable.", "UnsupportedOperation")
             return
         result = await switch(session_id)
-        self._default_model = str(result.get("model") or self._default_model).strip()
         usage = result.get("assistant_usage") or result.get("usage")
         await self._respond(
             request,

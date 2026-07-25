@@ -483,7 +483,7 @@ async def test_doctor_rejects_extra_args() -> None:
 
 
 @pytest.mark.asyncio
-async def test_model_set_updates_settings_and_active_runtime(tmp_path, monkeypatch) -> None:
+async def test_model_set_updates_session_without_changing_default_settings(tmp_path, monkeypatch) -> None:
     path = tmp_path / "settings.json"
     path.write_text(
         json.dumps({"model": "model_a", "apiKey": "secret-value"}),
@@ -492,18 +492,25 @@ async def test_model_set_updates_settings_and_active_runtime(tmp_path, monkeypat
     monkeypatch.setenv("RIND_SETTINGS_PATH", str(path))
     Config.reload()
     runtime = FakeRuntime()
-    context = SlashCommandContext(runtime=runtime, session=FakeSession(), debug=True)
+    session = FakeSession()
+
+    async def update_model(model):
+        session.model = model
+
+    session.update_model = update_model
+    context = SlashCommandContext(runtime=runtime, session=session, debug=True)
 
     result = await SlashCommandRouter().execute("/model set model_b", context)
     data = json.loads(path.read_text(encoding="utf-8"))
 
-    assert "Model updated." in result.text
-    assert "previous default: model_a" in result.text
-    assert "new default: model_b" in result.text
+    assert "Session model updated." in result.text
+    assert "session model: model_b" in result.text
+    assert "default model: model_a (unchanged)" in result.text
     assert "active session: updated" in result.text
-    assert data["model"] == "model_b"
+    assert data["model"] == "model_a"
     assert data["apiKey"] == "secret-value"
-    assert Config.DEFAULT_MODEL == "model_b"
+    assert Config.DEFAULT_MODEL == "model_a"
+    assert session.model == "model_b"
     assert runtime.model == "model_b"
     assert "secret-value" not in result.text
 

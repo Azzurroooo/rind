@@ -22,13 +22,15 @@ async def set_active_model(runtime: Any, session: Any, model: str) -> dict[str, 
     if clean is None:
         raise ValueError("Model name is required.")
 
-    previous = Config.DEFAULT_MODEL
-    Config.set_model(clean)
+    default_model = str(Config.DEFAULT_MODEL or "").strip()
     active = await _update_active_model(runtime, session, clean)
     return {
-        "model": Config.DEFAULT_MODEL,
-        "previous_default": previous,
-        "new_default": Config.DEFAULT_MODEL,
+        "model": clean,
+        "session_model": clean,
+        "default_model": default_model,
+        "previous_default": default_model,
+        "new_default": default_model,
+        "default_updated": False,
         "runtime": active["runtime"],
         "session": active["session"],
         "active_updated": active["runtime"] or active["session"],

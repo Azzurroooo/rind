@@ -253,17 +253,18 @@ async def handle_model(context: SlashCommandContext, args: list[str]) -> str:
     if model is None:
         return "Usage: /model set <model>"
 
-    previous = display_value(Config.DEFAULT_MODEL)
     try:
         result = await set_active_model(context.runtime, context.session, model)
         active_updated = bool(result.get("active_updated"))
     except Exception as exc:
         return f"Command failed: {exc}"
 
+    session_model = display_value(result.get("session_model") or result.get("model") or model)
+    default_model = display_value(result.get("default_model") or Config.DEFAULT_MODEL)
     lines = [
-        "Model updated.",
-        f"- previous default: {previous}",
-        f"- new default: {Config.DEFAULT_MODEL}",
+        "Session model updated.",
+        f"- session model: {session_model}",
+        f"- default model: {default_model} (unchanged)",
     ]
     if active_updated:
         lines.append("- active session: updated")

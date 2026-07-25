@@ -378,14 +378,14 @@ async function runModelSelector() {
 }
 
 function modelSetResultText(result, model) {
-  const previous = singleLineText(result?.previous_default);
-  const next = singleLineText(result?.new_default || result?.model || model);
-  const lines = ["Model updated."];
-  if (previous) {
-    lines.push(`- previous default: ${previous}`);
+  const sessionModel = singleLineText(result?.session_model || result?.model || model);
+  const defaultModel = singleLineText(result?.default_model);
+  const lines = ["Session model updated."];
+  if (sessionModel) {
+    lines.push(`- session model: ${sessionModel}`);
   }
-  if (next) {
-    lines.push(`- new default: ${next}`);
+  if (defaultModel) {
+    lines.push(`- default model: ${defaultModel} (unchanged)`);
   }
   if (result?.active_updated || result?.runtime || result?.session) {
     lines.push("- active session: updated");

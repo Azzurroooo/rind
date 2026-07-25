@@ -295,6 +295,29 @@ async def test_async_runtime_facade_initializes_session_once_for_concurrent_turn
 
 
 @pytest.mark.asyncio
+async def test_async_runtime_initialization_binds_loaded_session_model():
+    class FakeSession:
+        model = "meta-model"
+
+        async def initialize(self):
+            return None
+
+    class FakeRunner:
+        def __init__(self):
+            self.model = "settings-model"
+
+        def set_model(self, model):
+            self.model = model
+
+    runner = FakeRunner()
+    runtime = AgentRuntime(runner, FakeSession())
+
+    await runtime.initialize()
+
+    assert runner.model == "meta-model"
+
+
+@pytest.mark.asyncio
 async def test_async_runtime_facade_manual_compact_uses_runner():
     class FakeSession:
         async def initialize(self):

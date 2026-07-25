@@ -247,17 +247,20 @@ def test_session_switch_returns_target_metadata_and_preview(capsys):
 
     async def run():
         runtime = Runtime()
-        await StdioRuntimeServer(runtime, Session())._switch_session(
+        server = StdioRuntimeServer(runtime, Session(), default_model="default-model")
+        await server._switch_session(
             {"request_id": 24, "method": "session.switch", "params": {"session_id": "target"}}
         )
+        return server
 
-    asyncio.run(run())
+    server = asyncio.run(run())
 
     message = json.loads(capsys.readouterr().out)
     assert message["result"]["session_id"] == "target"
     assert message["result"]["model"] == "target-model"
     assert message["result"]["usage"] == {"context_usage_percent": 0.3}
     assert "target history" in message["result"]["resume_preview"]
+    assert server._default_model == "default-model"
 
 
 def test_session_switch_rejects_invalid_request_and_unsupported_runtime(capsys):
@@ -641,7 +644,7 @@ def test_models_list_failure_returns_protocol_error(capsys):
     assert message["error"]["message"] == "models endpoint unavailable"
 
 
-def test_model_set_updates_settings_runtime_and_session(capsys, tmp_path, monkeypatch):
+def test_model_set_updates_session_without_changing_settings(capsys, tmp_path, monkeypatch):
     path = tmp_path / "settings.json"
     path.write_text(json.dumps({"model": "old-model", "apiKey": "secret-value"}), encoding="utf-8")
     monkeypatch.setenv("RIND_SETTINGS_PATH", str(path))
@@ -657,7 +660,7 @@ def test_model_set_updates_settings_runtime_and_session(capsys, tmp_path, monkey
     async def run():
         runtime = _Runtime()
         session = Session()
-        server = StdioRuntimeServer(runtime, session)
+        server = StdioRuntimeServer(runtime, session, default_model="old-model")
         await server._set_model({"request_id": 12, "method": "model.set", "params": {"model": "new-model"}})
         return runtime, session, server
 
@@ -668,10 +671,13 @@ def test_model_set_updates_settings_runtime_and_session(capsys, tmp_path, monkey
     assert message["result"]["runtime"] is True
     assert message["result"]["session"] is True
     assert message["result"]["model"] == "new-model"
+    assert message["result"]["session_model"] == "new-model"
+    assert message["result"]["default_model"] == "old-model"
+    assert message["result"]["default_updated"] is False
     assert runtime.model == "new-model"
     assert session.model == "new-model"
-    assert server._default_model == "new-model"
-    assert data["model"] == "new-model"
+    assert server._default_model == "old-model"
+    assert data["model"] == "old-model"
     assert data["apiKey"] == "secret-value"
 
 
