@@ -167,7 +167,7 @@ export function sessionSwitchedText(info = {}) {
   const sessionId = singleLine(info.session_id) || "unknown";
   const model = singleLine(info.model);
   const preview = resumePreviewText(info.resume_preview);
-  const lines = [`${green("✓")} ${bold("Session switched")}`, dim(detailLine(sessionId))];
+  const lines = [startupBannerText(info), "", `${green("✓")} ${bold("Session switched")}`, dim(detailLine(sessionId))];
   if (model) {
     lines.push(dim(detailLine(`model ${model}`)));
   }

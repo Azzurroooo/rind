@@ -850,8 +850,11 @@ test("sessionSwitchedText renders target context and model", () => {
   const text = sessionSwitchedText({
     session_id: "s2",
     model: "model-b",
+    cwd: "E:\\project",
     resume_preview: "Resumed session s2\n- user: target task",
   });
+  assert.match(text, /Rind workbench online/);
+  assert.match(text, /model model-b · session s2/);
   assert.match(text, /Session switched/);
   assert.match(text, /s2/);
   assert.match(text, /model-b/);
