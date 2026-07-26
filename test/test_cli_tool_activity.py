@@ -18,8 +18,9 @@ def test_tool_activity_summary_for_grep() -> None:
     assert tool_activity_summary("grep", '{"pattern":"TODO","path":"agent"}') == "grep: TODO in agent"
 
 
-def test_tool_activity_summary_for_apply_patch_has_no_legacy_file_path_detail() -> None:
-    assert tool_activity_summary("apply_patch", '{"patch":"*** Begin Patch"}') == "apply_patch"
+def test_tool_activity_summary_for_file_mutations() -> None:
+    assert tool_activity_summary("write_file", '{"file_path":"new.txt"}') == "write_file: new.txt"
+    assert tool_activity_summary("edit_file", '{"file_path":"src/app.py"}') == "edit_file: src/app.py"
 
 
 def test_tool_activity_summary_for_invalid_args_falls_back_to_name() -> None:
@@ -35,7 +36,7 @@ def test_tool_activity_summary_truncates_long_detail() -> None:
 def main() -> int:
     test_tool_activity_summary_for_bash_command()
     test_tool_activity_summary_for_grep()
-    test_tool_activity_summary_for_apply_patch_has_no_legacy_file_path_detail()
+    test_tool_activity_summary_for_file_mutations()
     test_tool_activity_summary_for_invalid_args_falls_back_to_name()
     test_tool_activity_summary_truncates_long_detail()
     print("CLI tool activity tests passed.")

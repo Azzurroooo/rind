@@ -675,16 +675,14 @@ async function renderEvent(message) {
       return;
     case "tool_result":
       closeAssistant();
-      const fileChanges = pendingFileChanges.get(event.tool_call_id);
+      const fileChange = pendingFileChanges.get(event.tool_call_id);
       pendingFileChanges.delete(event.tool_call_id);
       recordToolResult(event);
-      logOutput(toolResultLine(event, fileChanges));
+      logOutput(toolResultLine(event, fileChange));
       return;
     case "file_change":
       if (event.tool_call_id) {
-        const fileChanges = pendingFileChanges.get(event.tool_call_id) || [];
-        fileChanges.push(event);
-        pendingFileChanges.set(event.tool_call_id, fileChanges);
+        pendingFileChanges.set(event.tool_call_id, event);
       }
       return;
     case "tool_progress": {

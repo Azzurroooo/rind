@@ -34,8 +34,8 @@ def _tool_detail(name: str, args: dict[str, Any]) -> str:
     if name == "bash_output":
         bg_id = single_line(args.get("bg_id"))
         return f"bg {bg_id}" if bg_id else ""
-    if name == "apply_patch":
-        return ""
+    if name in {"write_file", "edit_file"}:
+        return single_line(args.get("file_path"))
     if name == "read_file":
         return single_line(args.get("path"))
     if name == "glob":

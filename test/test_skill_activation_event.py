@@ -137,7 +137,7 @@ async def test_skill_activation_event_emitted_once_per_turn() -> None:
         on_content_async = args[1]
         await on_content_async("Hello")
         if consume_count == 1:
-            return "Hello", [ParsedToolCall(call_id="call_1", name="apply_patch", raw_args="{}")]
+            return "Hello", [ParsedToolCall(call_id="call_1", name="write_file", raw_args="{}")]
         return "Hello", []
 
     mock_parser = MagicMock()

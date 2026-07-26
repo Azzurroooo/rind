@@ -255,7 +255,7 @@ export function toolStartedLine(event) {
   return `${accent("•")} ${bold("Tool")} ${dim("·")} ${toolActiveVerb(name)} ${toolLabel(name)}`;
 }
 
-export function toolResultLine(event, fileChanges) {
+export function toolResultLine(event, fileChange) {
   const name = event.tool_name || "unknown";
   const label = toolLabel(name);
   const duration = formatDuration(event.duration_ms);
@@ -270,7 +270,7 @@ export function toolResultLine(event, fileChanges) {
     ? `${red("×")} ${bold("Tool")} ${dim("·")} ${label} exited ${result.exitCode} in ${duration}`
     : `${green("✓")} ${bold("Tool")} ${dim("·")} ${completedToolText(name, label)} in ${duration}`;
   const output = result.output;
-  return [line, output ? dim(detailLine(output)) : "", fileChangeLines(fileChanges)]
+  return [line, output ? dim(detailLine(output)) : "", fileChangeLine(fileChange)]
     .filter(Boolean)
     .join("\n");
 }
@@ -586,7 +586,7 @@ function toolLabel(name) {
     return "command output";
   }
   const labels = {
-    apply_patch: "patch",
+    edit_file: "file edit",
     read_file: "file read",
     search_files: "file search",
     view_image: "image",
@@ -660,35 +660,23 @@ function progressMessage(payload) {
   return "";
 }
 
-function fileChangeLines(fileChanges) {
-  const files = (Array.isArray(fileChanges) ? fileChanges : [fileChanges])
-    .filter((fileChange) => fileChange && typeof fileChange === "object")
-    .map((fileChange) => ({
-      path: middleClip(fileChange.file_path, fileChangePathWidth()),
-      changes: Array.isArray(fileChange.lines)
-        ? fileChange.lines.filter((line) => line?.kind === "added" || line?.kind === "removed")
-        : [],
-    }))
-    .filter((fileChange) => fileChange.changes.length);
-  if (!files.length) {
+function fileChangeLine(fileChange) {
+  if (!fileChange || typeof fileChange !== "object") {
     return "";
   }
-
-  const lines = [];
-  let shownCount = 0;
-  const totalCount = files.reduce((total, fileChange) => total + fileChange.changes.length, 0);
-  for (const fileChange of files) {
-    if (shownCount >= MAX_FILE_CHANGE_LINES) {
-      break;
-    }
-    lines.push(`${dim("  ↳")} ${fileChange.path}`);
-    const available = MAX_FILE_CHANGE_LINES - shownCount;
-    for (const change of fileChange.changes.slice(0, available)) {
-      lines.push(fileChangeDiffLine(change));
-      shownCount += 1;
-    }
+  const changes = Array.isArray(fileChange.lines)
+    ? fileChange.lines.filter((line) => line?.kind === "added" || line?.kind === "removed")
+    : [];
+  if (!changes.length) {
+    return "";
   }
-  const hidden = totalCount - shownCount;
+  const path = middleClip(fileChange.file_path, fileChangePathWidth());
+  const shown = changes.slice(0, MAX_FILE_CHANGE_LINES);
+  const lines = [`${dim("  ↳")} ${path}`];
+  for (const change of shown) {
+    lines.push(fileChangeDiffLine(change));
+  }
+  const hidden = changes.length - shown.length;
   if (hidden > 0) {
     lines.push(dim(`    … ${hidden} more changed lines`));
   }

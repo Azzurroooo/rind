@@ -51,23 +51,21 @@ def test_system_info_uses_detected_shell_backend(monkeypatch):
 def test_system_prompt_contains_rind_doc_rules():
     text = prompts.SYSTEM_PROMPT
 
-    assert "`apply_patch`" in text
-    assert "`write_file`" not in text
-    assert "`edit_file`" not in text
-    assert "only accepted absolute path is the exact user-level `RIND.md` path" in text
+    assert "`write_file`" in text
+    assert "`edit_file`" in text
+    assert "`apply_patch`" not in text
     assert "RIND.md Context Docs" in text
     assert "32 KiB byte budget" in text
     assert "Never create, update, delete, or rename any `RIND.md`" in text
     assert "not automatically updated memory" in text
 
 
-def test_system_prompt_shows_apply_patch_example_and_failure_checks():
+def test_system_prompt_describes_file_mutation_contracts():
     text = prompts.SYSTEM_PROMPT
 
-    assert "*** Begin Patch" in text
-    assert "*** Expected SHA256: <sha256 from read_file>" in text
-    assert "start every `Update File` hunk with `@@`" in text
-    assert "keep explanations outside the patch" in text
+    assert "Atomically create a UTF-8 text file" in text
+    assert "Atomically replace one exact text block" in text
+    assert "Never reuse a hash after a successful mutation" in text
 
 
 def test_system_prompt_strongly_limits_emojis():
@@ -101,8 +99,8 @@ def test_rind_init_prompt_scopes_project_file():
     assert "Explore the project lightly before writing" in prompt
     assert "Do not modify the other RIND.md level." in prompt
     assert "32 KiB byte budget" in prompt
-    assert "Use only `apply_patch`" in prompt
-    assert "use `RIND.md` exactly" in prompt
+    assert "Use `write_file` when the target does not exist" in prompt
+    assert "use `edit_file` with its latest SHA-256" in prompt
 
 
 def test_rind_init_prompt_scopes_user_file():
@@ -112,5 +110,5 @@ def test_rind_init_prompt_scopes_user_file():
     assert "Do not copy project facts into the user-level file." in prompt
     assert "Do not invent preferences." in prompt
     assert r"C:\Users\me\.rind\RIND.md" in prompt
-    assert "Use only `apply_patch`" in prompt
-    assert "use `C:\\Users\\me\\.rind\\RIND.md` exactly" in prompt
+    assert "Use `write_file` when the target does not exist" in prompt
+    assert "use `edit_file` with its latest SHA-256" in prompt
