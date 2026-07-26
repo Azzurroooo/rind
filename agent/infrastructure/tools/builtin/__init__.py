@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from ..spec import ToolSpec
 from .files import apply_patch, glob, grep, read_file
-from .pdf import read_pdf
 from .planning import update_plan
 from .shell import bash, bash_output
 from .skill import skill_create
@@ -31,17 +30,6 @@ TOOL_SPECS: tuple[ToolSpec, ...] = (
             "path": "文件绝对或相对路径",
             "offset": "起始行号（默认 1）",
             "limit": "最多读取的行数（默认 1000 行，最大 2000 行；超过会被截断）",
-        },
-    ),
-    ToolSpec(
-        name="read_pdf",
-        handler=read_pdf,
-        description="解析PDF文件内容，支持文字版和扫描版PDF。提取结构化文本（标题、段落）、表格（Markdown格式）。分页返回，每次最多30页。扫描版PDF自动使用OCR。",
-        param_descriptions={
-            "file_path": "PDF文件路径",
-            "start_page": "起始页码（默认1）",
-            "end_page": "结束页码（默认到文件末尾，每次最多30页）",
-            "force_ocr": "强制使用OCR（用于编码异常的文字PDF，默认False）",
         },
     ),
     ToolSpec(

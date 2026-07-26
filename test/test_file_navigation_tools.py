@@ -14,7 +14,6 @@ from agent.domain.cancellation import CancellationTokenSource
 from agent.infrastructure.tools import DefaultToolRegistry
 from agent.infrastructure.tools.builtin.files.operations import glob as glob_tool
 from agent.infrastructure.tools.builtin.files.operations import grep, read_file
-from agent.infrastructure.tools.builtin.pdf import read_pdf
 
 
 def parse_payload(raw: str) -> dict:
@@ -165,20 +164,12 @@ def test_sync_file_tools_return_cancelled_payload(tmp_path: Path) -> None:
     assert_error(grep("needle", path=str(tmp_path), _cancellation_token=source.token), "Cancelled")
 
 
-def test_read_pdf_expands_user_home_before_format_validation(tmp_path: Path, monkeypatch) -> None:
-    home = tmp_path / "home"
-    home.mkdir()
-    write(home / "sample.txt", "not a pdf\n")
-    monkeypatch.setenv("HOME", str(home))
-    monkeypatch.setenv("USERPROFILE", str(home))
-
-    assert_error(read_pdf("~/sample.txt"), "InvalidFormat")
-
-
 def test_schema_exposes_only_minimal_file_navigation_fields() -> None:
     schemas = {item["function"]["name"]: item["function"] for item in DefaultToolRegistry().schemas}
     if "list_files" in schemas:
         raise AssertionError("list_files should not be registered")
+    if "read_pdf" in schemas:
+        raise AssertionError("read_pdf should not be registered")
     expected = {
         "read_file": {"path", "offset", "limit"},
         "glob": {"pattern", "path", "max_results"},

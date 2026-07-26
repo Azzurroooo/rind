@@ -27,7 +27,7 @@ The project takes a restrained position: an agent should not become a large fram
 ## Design Principles
 
 - **Subtract before adding**: Rind favors fewer concepts, smaller modules, and explicit boundaries. New abstractions are introduced only when they reduce real complexity.
-- **Small tools, clear contracts**: Shell, file, web, PDF, plan, and skill tools are exposed through compact interfaces and predictable result shapes.
+- **Small tools, clear contracts**: Shell, file, web, plan, and skill tools are exposed through compact interfaces and predictable result shapes.
 - **Context is runtime state**: Context estimation, compaction, and tool-result normalization are treated as first-class runtime responsibilities, not as prompt afterthoughts.
 - **Local-first continuity**: Sessions, messages, tool calls, and compactions are persisted as append-only local records so work can resume after interruption.
 - **Standard Python over framework gravity**: The codebase uses ordinary Python modules, dependency inversion, async orchestration, and focused services instead of a heavy plugin framework.
@@ -40,7 +40,7 @@ The project takes a restrained position: an agent should not become a large fram
 - Append-only JSONL session storage for messages, tool calls, compactions, and session metadata.
 - Runtime context management with budget estimation, automatic compaction, context-length rescue, and normalized tool outputs.
 - Lightweight session-local `update_plan` tool for tracking multi-step work across turns.
-- Built-in tools for shell execution, file operations, web retrieval, PDF handling, planning, and skill discovery.
+- Built-in tools for shell execution, file operations, web retrieval, planning, and skill discovery.
 - Headless JSONL runtime server and experimental JS frontend CLI for separating terminal input/rendering from the Python agent loop.
 
 ## Quick Start
@@ -151,7 +151,7 @@ agent/
 │   ├── llm/           # OpenAI-compatible async chat client
 │   ├── persistence/   # Append-only session records and repositories
 │   ├── planning/      # Session-local plan storage and compact snapshots
-│   └── tools/builtin/ # Shell, file, web, PDF, plan, and skill tools
+│   └── tools/builtin/ # Shell, file, web, plan, and skill tools
 └── interfaces/
     ├── cli/           # Interactive CLI, slash commands, status UI
     ├── runtime_server/# JSONL stdio adapter for headless runtime use

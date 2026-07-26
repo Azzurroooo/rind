@@ -9,7 +9,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from agent.domain.cancellation import CancellationTokenSource
-from agent.infrastructure.tools.builtin import pdf as pdf_ops, web
+from agent.infrastructure.tools.builtin import web
 
 
 def parse_payload(raw: str) -> dict:
@@ -58,14 +58,13 @@ def test_search_web_clamps_max_results() -> None:
         raise AssertionError(f"Expected one match, got: {payload}")
 
 
-def test_sync_web_and_pdf_tools_return_cancelled_payload() -> None:
+def test_sync_web_tools_return_cancelled_payload() -> None:
     source = CancellationTokenSource()
     source.cancel("unit test")
 
     for raw in (
         web.search_web("query", _cancellation_token=source.token),
         web.fetch_web_page("https://example.test", _cancellation_token=source.token),
-        pdf_ops.read_pdf("missing.pdf", _cancellation_token=source.token),
     ):
         payload = parse_payload(raw)
         if payload.get("ok") is not False or payload.get("error_type") != "Cancelled":
@@ -75,7 +74,7 @@ def test_sync_web_and_pdf_tools_return_cancelled_payload() -> None:
 def main() -> int:
     test_search_web_rejects_empty_query()
     test_search_web_clamps_max_results()
-    test_sync_web_and_pdf_tools_return_cancelled_payload()
+    test_sync_web_tools_return_cancelled_payload()
     print("Web tool tests passed.")
     return 0
 

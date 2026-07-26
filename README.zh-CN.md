@@ -27,7 +27,7 @@ Rind 是一个标准 Python 版本的自主编码 Agent 实现。它既可以作
 ## 设计理念
 
 - **先做减法，再做加法**：优先减少概念、模块和隐式状态。只有当抽象确实降低复杂度时，才引入新的抽象。
-- **小工具，清晰契约**：Shell、文件、网页、PDF、计划和技能等工具都通过紧凑接口暴露，返回结构尽量稳定可预测。
+- **小工具，清晰契约**：Shell、文件、网页、计划和技能等工具都通过紧凑接口暴露，返回结构尽量稳定可预测。
 - **把上下文当作运行时状态**：上下文估算、自动压缩和工具结果归一化不是提示词附属品，而是运行时的核心职责。
 - **本地优先，可持续恢复**：会话、消息、工具调用、压缩记录和元数据都以 append-only 的本地记录保存，便于中断后继续工作。
 - **标准 Python，而非框架惯性**：项目使用普通 Python 模块、依赖倒置、异步编排和聚焦的服务层，避免把简单问题包裹进过重的框架。
@@ -40,7 +40,7 @@ Rind 是一个标准 Python 版本的自主编码 Agent 实现。它既可以作
 - 基于 JSONL 的 append-only 会话存储，记录消息、工具调用、压缩结果和会话元数据。
 - 运行时上下文管理，包含预算估算、自动压缩、上下文长度救援和工具结果归一化。
 - 轻量的 session-local `update_plan` 工具，用于跨轮次追踪多步骤任务。
-- 内置 Shell、文件、网页、PDF、计划和技能发现等工具。
+- 内置 Shell、文件、网页、计划和技能发现等工具。
 - 无头 JSONL runtime server 和实验性 JS 前端 CLI，用于把终端输入/渲染与 Python Agent 主循环分离。
 
 ## 快速开始
@@ -151,7 +151,7 @@ agent/
 │   ├── llm/           # OpenAI 兼容异步 Chat Client
 │   ├── persistence/   # append-only 会话记录与仓储
 │   ├── planning/      # session-local 计划存储和 compact 快照
-│   └── tools/builtin/ # Shell、文件、网页、PDF、计划和技能工具
+│   └── tools/builtin/ # Shell、文件、网页、计划和技能工具
 └── interfaces/
     ├── cli/           # 交互式 CLI、斜杠命令、状态 UI
     ├── runtime_server/# 无头 runtime 的 JSONL stdio 适配器
