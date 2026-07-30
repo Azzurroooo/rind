@@ -13,7 +13,15 @@ from agent.application.ports.session_store import SessionStore
 from agent.application.runtime.stream_parser import MessageStreamParser
 from agent.domain.cancellation import CancellationToken
 from agent.domain import ParsedToolCall
-from agent.domain.events import AssistantDeltaEvent, RuntimeEvent, TokenStatsUpdatedEvent, event_meta
+from agent.domain.events import (
+    AssistantDeltaEvent,
+    RuntimeEvent,
+    TokenStatsUpdatedEvent,
+    ToolInputDeltaEvent,
+    ToolInputEndedEvent,
+    ToolInputStartedEvent,
+    event_meta,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -44,8 +52,43 @@ async def pump_model_stream_events(
             async def _on_content_async(text: str) -> None:
                 await event_queue.put(AssistantDeltaEvent(**event_meta(session, turn_id), text=text))
 
+            async def _on_tool_input_started_async(call_id: str, name: str) -> None:
+                await event_queue.put(
+                    ToolInputStartedEvent(
+                        **event_meta(session, turn_id),
+                        tool_call_id=call_id,
+                        tool_name=name,
+                    )
+                )
+
+            async def _on_tool_input_delta_async(call_id: str, name: str, delta: str) -> None:
+                await event_queue.put(
+                    ToolInputDeltaEvent(
+                        **event_meta(session, turn_id),
+                        tool_call_id=call_id,
+                        tool_name=name,
+                        delta=delta,
+                    )
+                )
+
+            async def _on_tool_input_ended_async(call_id: str, name: str) -> None:
+                await event_queue.put(
+                    ToolInputEndedEvent(
+                        **event_meta(session, turn_id),
+                        tool_call_id=call_id,
+                        tool_name=name,
+                    )
+                )
+
             content, calls, usage = _normalize_parsed_stream_result(
-                await stream_parser.consume_async_stream(stream_response, _on_content_async, cancellation_token)
+                await stream_parser.consume_async_stream(
+                    stream_response,
+                    _on_content_async,
+                    cancellation_token,
+                    _on_tool_input_started_async,
+                    _on_tool_input_delta_async,
+                    _on_tool_input_ended_async,
+                )
             )
             result.content = content
             result.tool_calls = list(calls)

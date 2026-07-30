@@ -121,6 +121,31 @@ class ToolRequestedEvent(RuntimeEvent):
 
 
 @dataclass(slots=True)
+class ToolInputStartedEvent(RuntimeEvent):
+    """Fired when the model starts streaming a tool call input."""
+    type: Literal["tool_input_started"] = "tool_input_started"
+    tool_call_id: str = ""
+    tool_name: str = ""
+
+
+@dataclass(slots=True)
+class ToolInputDeltaEvent(RuntimeEvent):
+    """Fired when a tool call input fragment is received."""
+    type: Literal["tool_input_delta"] = "tool_input_delta"
+    tool_call_id: str = ""
+    tool_name: str = ""
+    delta: str = ""
+
+
+@dataclass(slots=True)
+class ToolInputEndedEvent(RuntimeEvent):
+    """Fired when the model finishes streaming a tool call input."""
+    type: Literal["tool_input_ended"] = "tool_input_ended"
+    tool_call_id: str = ""
+    tool_name: str = ""
+
+
+@dataclass(slots=True)
 class ToolCallStartedEvent(RuntimeEvent):
     """Fired when a tool execution is about to begin."""
     type: Literal["tool_call_started"] = "tool_call_started"

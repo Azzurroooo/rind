@@ -229,7 +229,7 @@ async def test_turn_runner_injects_one_fifo_steering_after_tool_chain_per_sampli
             return empty_stream()
 
     class Parser:
-        async def consume_async_stream(self, _stream, on_content, _cancellation_token):
+        async def consume_async_stream(self, _stream, on_content, _cancellation_token, *_callbacks):
             content, calls, usage = responses.popleft()
             await on_content(content)
             return content, calls, usage

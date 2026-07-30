@@ -16,7 +16,10 @@ class MessageStreamParser:
         self,
         response: AsyncIterator[Any],
         on_content_async: Callable[[str], Any],
-        cancellation_token: CancellationToken | None = None
+        cancellation_token: CancellationToken | None = None,
+        on_tool_input_started_async: Callable[[str, str], Any] | None = None,
+        on_tool_input_delta_async: Callable[[str, str, str], Any] | None = None,
+        on_tool_input_ended_async: Callable[[str, str], Any] | None = None,
     ) -> tuple[str, list[ParsedToolCall], Any | None]:
         """Consume a streaming response asynchronously, reassembling text and tool calls."""
         text_parts: list[str] = []
@@ -42,14 +45,31 @@ class MessageStreamParser:
                 for item in delta.tool_calls:
                     index = item.index
                     while len(merged_tool_calls) <= index:
-                        merged_tool_calls.append({"id": "", "name": "", "arguments": ""})
+                        merged_tool_calls.append(
+                            {"id": "", "name": "", "arguments": "", "started": False, "emitted": 0}
+                        )
+                    call = merged_tool_calls[index]
                     if item.id:
-                        merged_tool_calls[index]["id"] = item.id
+                        call["id"] = item.id
                     if item.function:
                         if item.function.name:
-                            merged_tool_calls[index]["name"] = item.function.name
+                            call["name"] = item.function.name
                         if item.function.arguments:
-                            merged_tool_calls[index]["arguments"] += item.function.arguments
+                            call["arguments"] += item.function.arguments
+                    if call["id"] and call["name"] and not call["started"]:
+                        call["started"] = True
+                        if on_tool_input_started_async:
+                            await on_tool_input_started_async(call["id"], call["name"])
+                    if call["started"]:
+                        pending = call["arguments"][call["emitted"] :]
+                        if pending and on_tool_input_delta_async:
+                            await on_tool_input_delta_async(call["id"], call["name"], pending)
+                        call["emitted"] = len(call["arguments"])
+
+        if on_tool_input_ended_async:
+            for item in merged_tool_calls:
+                if item["started"]:
+                    await on_tool_input_ended_async(item["id"], item["name"])
 
         calls = [
             ParsedToolCall(call_id=item["id"], name=item["name"], raw_args=item["arguments"])

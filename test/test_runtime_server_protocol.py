@@ -136,6 +136,7 @@ def test_golden_event_fixture_matches_python_envelope():
 
 def test_event_envelope_separates_durable_and_incremental_events():
     assert event_envelope({"type": "assistant_delta"}, 1)["durability"] == "incremental"
+    assert event_envelope({"type": "tool_input_delta"}, 2)["durability"] == "incremental"
     assert event_envelope({"type": "tool_result"}, 2)["durability"] == "durable"
 
 
@@ -201,6 +202,7 @@ def test_initialize_response_includes_resume_preview_when_history_exists(capsys)
         "follow_up",
         "input_queue",
         "session_switch",
+        "tool_input_stream",
     ]
     assert result["session_id"] == "s1"
     assert result["model"] == "m1"

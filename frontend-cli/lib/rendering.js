@@ -308,7 +308,7 @@ function toolDetail(name, args) {
     const bgId = clipSingleLine(args.bg_id, 96);
     return bgId ? `bg ${bgId}` : "";
   }
-  for (const key of ["file_path", "path", "query", "url", "command"]) {
+  for (const key of ["file_path", "path", "query", "url"]) {
     const value = clipSingleLine(args[key], 96);
     if (value) {
       return value;

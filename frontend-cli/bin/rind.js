@@ -659,9 +659,25 @@ async function renderEvent(message) {
       }
       return;
     }
+    case "tool_input_started":
+      closeAssistant();
+      if (event.tool_call_id) {
+        if (announcedTools.has(event.tool_call_id)) {
+          return;
+        }
+        announcedTools.add(event.tool_call_id);
+      }
+      logOutput(toolStartedLine(event));
+      return;
+    case "tool_input_delta":
+    case "tool_input_ended":
+      return;
     case "tool_requested":
       closeAssistant();
       if (event.tool_call_id) {
+        if (announcedTools.has(event.tool_call_id)) {
+          return;
+        }
         announcedTools.add(event.tool_call_id);
       }
       logOutput(toolRequestedLine(event));
@@ -711,11 +727,13 @@ async function renderEvent(message) {
       compactContextState.clear();
       closeAssistant();
       logOutput(errorLine(event.error));
+      resetTurnTools();
       return;
     case "turn_cancelled":
       compactContextState.clear();
       closeAssistant();
       logOutput(cancelledText());
+      resetTurnTools();
       return;
     case "turn_completed":
       compactContextState.clear();
@@ -740,6 +758,7 @@ function recordToolResult(event) {
 
 function resetTurnTools() {
   turnTools = { completed: 0, failed: 0 };
+  announcedTools.clear();
   pendingFileChanges.clear();
 }
 

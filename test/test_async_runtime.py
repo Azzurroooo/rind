@@ -21,6 +21,9 @@ from agent.domain.events import (
     AssistantDeltaEvent,
     AssistantMessageCompletedEvent,
     ContextBuiltEvent,
+    ToolInputDeltaEvent,
+    ToolInputEndedEvent,
+    ToolInputStartedEvent,
     ToolRequestedEvent,
     ToolResultEvent,
     TokenStatsUpdatedEvent,
@@ -388,8 +391,16 @@ async def test_async_turn_runner_emits_tool_requested_before_tool_execution():
 
     async def mock_consume(*args, **kwargs):
         on_content_async = args[1]
+        on_tool_input_started_async = args[3]
+        on_tool_input_delta_async = args[4]
+        on_tool_input_ended_async = args[5]
         item = calls.pop(0)
         await on_content_async(item["content"])
+        if item["calls"]:
+            call = item["calls"][0]
+            await on_tool_input_started_async(call.call_id, call.name)
+            await on_tool_input_delta_async(call.call_id, call.name, call.raw_args)
+            await on_tool_input_ended_async(call.call_id, call.name)
         return item["content"], item["calls"]
 
     mock_parser = MagicMock()
@@ -434,8 +445,18 @@ async def test_async_turn_runner_emits_tool_requested_before_tool_execution():
     async for event in runner.run_turn(FakeSession(), turn_id="turn_1"):
         events.append(event)
 
+    input_started_index = next(
+        index for index, event in enumerate(events) if isinstance(event, ToolInputStartedEvent)
+    )
+    input_delta_index = next(
+        index for index, event in enumerate(events) if isinstance(event, ToolInputDeltaEvent)
+    )
+    input_ended_index = next(
+        index for index, event in enumerate(events) if isinstance(event, ToolInputEndedEvent)
+    )
     requested_index = next(index for index, event in enumerate(events) if isinstance(event, ToolRequestedEvent))
     result_index = next(index for index, event in enumerate(events) if isinstance(event, ToolResultEvent))
+    assert input_started_index < input_delta_index < input_ended_index < requested_index < result_index
     assert requested_index < result_index
     assert events[requested_index].args_preview == '{"command":"date"}'
     assert events[requested_index].turn_id == "turn_1"

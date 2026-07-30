@@ -17,6 +17,7 @@ CAPABILITIES = (
     "follow_up",
     "input_queue",
     "session_switch",
+    "tool_input_stream",
 )
 
 DURABLE_EVENT_TYPES = frozenset(

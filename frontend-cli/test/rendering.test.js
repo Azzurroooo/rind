@@ -599,6 +599,53 @@ test("toolRequestedLine shows non-shell details as metadata", () => {
   );
 });
 
+test("toolRequestedLine keeps large file content out of the status", () => {
+  const line = toolRequestedLine({
+    tool_name: "write_file",
+    args_preview: JSON.stringify({
+      file_path: "notes.txt",
+      content: "secret content that must stay out of the status",
+    }),
+  });
+
+  assert.equal(line, "• Tool · Calling write file\n  ↳ notes.txt");
+  assert.doesNotMatch(line, /secret content/);
+});
+
+test("toolRequestedLine keeps edit text out of the status", () => {
+  const line = toolRequestedLine({
+    tool_name: "edit_file",
+    args_preview: JSON.stringify({
+      file_path: "notes.txt",
+      old_str: "old secret",
+      new_str: "new secret",
+    }),
+  });
+
+  assert.equal(line, "• Tool · Calling file edit\n  ↳ notes.txt");
+  assert.doesNotMatch(line, /secret/);
+});
+
+test("toolRequestedLine does not expose generic command arguments", () => {
+  assert.equal(
+    toolRequestedLine({
+      tool_name: "custom_tool",
+      args_preview: JSON.stringify({ command: "hidden command" }),
+    }),
+    "• Tool · Calling custom tool",
+  );
+});
+
+test("toolRequestedLine keeps the tool name when arguments are incomplete", () => {
+  assert.equal(
+    toolRequestedLine({
+      tool_name: "write_file",
+      args_preview: '{"file_path":"notes.txt","content":"unfinished',
+    }),
+    "• Tool · Calling write file",
+  );
+});
+
 test("toolStartedLine renders fallback running state", () => {
   assert.equal(toolStartedLine({ tool_name: "bash" }), "• Tool · Running command");
   assert.equal(toolStartedLine({ tool_name: "bash_output" }), "• Tool · Reading command output");

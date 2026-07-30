@@ -16,6 +16,9 @@ from agent.domain.events import (
     AssistantDeltaEvent,
     AssistantMessageCompletedEvent,
     ContextBuiltEvent,
+    ToolInputDeltaEvent,
+    ToolInputEndedEvent,
+    ToolInputStartedEvent,
     TurnCompletedEvent,
 )
 
@@ -134,10 +137,49 @@ async def test_async_turn_runner_cancels_stream_consumer_when_closed_early():
     await asyncio.wait_for(consumer_cancelled.wait(), timeout=1)
 
 
+@pytest.mark.asyncio
+async def test_async_turn_runner_forwards_tool_input_before_stream_completes():
+    input_started = asyncio.Event()
+    finish_stream = asyncio.Event()
+
+    async def mock_consume(*args, **kwargs):
+        on_started = args[3]
+        on_delta = args[4]
+        on_ended = args[5]
+        await on_started("call_1", "write_file")
+        await on_delta("call_1", "write_file", '{"file_path":"notes.txt"')
+        input_started.set()
+        await finish_stream.wait()
+        await on_ended("call_1", "write_file")
+        return "", []
+
+    mock_parser = MagicMock()
+    mock_parser.consume_async_stream = mock_consume
+    runner, mock_session = make_runner(mock_parser)
+    events = []
+
+    async def collect_events():
+        async for event in runner.run_turn(mock_session):
+            events.append(event)
+
+    task = asyncio.create_task(collect_events())
+    await asyncio.wait_for(input_started.wait(), timeout=1)
+    await asyncio.sleep(0)
+
+    assert any(isinstance(event, ToolInputStartedEvent) for event in events)
+    assert any(isinstance(event, ToolInputDeltaEvent) for event in events)
+    assert not any(isinstance(event, ToolInputEndedEvent) for event in events)
+
+    finish_stream.set()
+    await asyncio.wait_for(task, timeout=1)
+    assert any(isinstance(event, ToolInputEndedEvent) for event in events)
+
+
 def main() -> int:
     asyncio.run(test_async_turn_runner_stream())
     asyncio.run(test_async_turn_runner_yields_delta_before_stream_completes())
     asyncio.run(test_async_turn_runner_cancels_stream_consumer_when_closed_early())
+    asyncio.run(test_async_turn_runner_forwards_tool_input_before_stream_completes())
     print("Runtime stream pump tests passed.")
     return 0
 
