@@ -261,6 +261,58 @@ async def test_async_runtime_facade_passes_transient_system_messages():
 
 
 @pytest.mark.asyncio
+async def test_async_runtime_continues_active_goal_until_terminal_status():
+    class GoalSession:
+        session_id = "goal-session"
+
+        def __init__(self):
+            self.goal = {"objective": "finish the release", "status": "active"}
+            self.persisted = []
+
+        async def initialize(self):
+            return None
+
+        async def persist_message(self, role, content, **kwargs):
+            self.persisted.append((role, content, kwargs))
+
+        async def persist_turn_state(self, turn_id, status, ts):
+            return None
+
+        async def get_goal(self):
+            return dict(self.goal)
+
+        async def set_goal_status(self, status):
+            self.goal["status"] = status
+            return dict(self.goal)
+
+        def now_iso(self):
+            return "2026-05-08T00:00:00Z"
+
+    class GoalRunner:
+        def __init__(self, session):
+            self.session = session
+            self.calls = []
+
+        async def run_turn(self, session, transient_system_messages=None, **_kwargs):
+            self.calls.append(transient_system_messages)
+            if len(self.calls) == 2:
+                await self.session.set_goal_status("complete")
+            yield TurnCompletedEvent(turn_id="goal-turn")
+
+    session = GoalSession()
+    runner = GoalRunner(session)
+    events = [
+        event
+        async for event in AgentRuntime(runner, session, goal_enabled=True).run_turn(query="start")
+    ]
+
+    assert len(runner.calls) == 2
+    assert all(messages and "finish the release" in messages[-1]["content"] for messages in runner.calls)
+    assert isinstance(events[-1], TurnCompletedEvent)
+    assert session.goal["status"] == "complete"
+
+
+@pytest.mark.asyncio
 async def test_async_runtime_facade_initializes_session_once_for_concurrent_turns():
     class FakeSession:
         session_id = "session_1"

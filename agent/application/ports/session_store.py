@@ -116,6 +116,22 @@ class SessionStore(Protocol):
         """Get the latest persisted turn state."""
         ...
 
+    async def get_goal(self) -> dict[str, str] | None:
+        """Get the active session goal, if one exists."""
+        ...
+
+    async def set_goal(self, objective: str) -> dict[str, str]:
+        """Create or replace the active session goal."""
+        ...
+
+    async def set_goal_status(self, status: str) -> dict[str, str]:
+        """Update an existing session goal status."""
+        ...
+
+    async def clear_goal(self) -> None:
+        """Remove the active session goal."""
+        ...
+
     async def get_compact_generation(self) -> int:
         """Get the current compact generation counter."""
         ...

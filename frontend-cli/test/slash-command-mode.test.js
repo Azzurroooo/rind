@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { isReadonlySlashCommand, steeringCommandText } from "../lib/slash-command-mode.js";
+import { isReadonlySlashCommand, parseGoalCommand, steeringCommandText } from "../lib/slash-command-mode.js";
 
 test("readonly slash commands keep the prompt responsive", () => {
   assert.equal(isReadonlySlashCommand("/status"), true);
@@ -24,4 +24,16 @@ test("steer commands extract only their direction text", () => {
   assert.equal(steeringCommandText("/steer"), "");
   assert.equal(steeringCommandText("/steering elsewhere"), null);
   assert.equal(steeringCommandText("hello"), null);
+});
+
+test("goal commands distinguish control actions from objectives", () => {
+  assert.deepEqual(parseGoalCommand("/goal"), { action: "get" });
+  assert.deepEqual(parseGoalCommand("/goal pause"), { action: "pause" });
+  assert.deepEqual(parseGoalCommand(" /GOAL resume "), { action: "resume" });
+  assert.deepEqual(parseGoalCommand("/goal clear"), { action: "clear" });
+  assert.deepEqual(parseGoalCommand("/goal finish the release"), {
+    action: "set",
+    objective: "finish the release",
+  });
+  assert.equal(parseGoalCommand("/goals now"), null);
 });

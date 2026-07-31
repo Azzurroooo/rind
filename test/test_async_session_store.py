@@ -203,6 +203,37 @@ async def test_switch_session_rejects_corrupt_target_and_keeps_current(temp_sess
 
 
 @pytest.mark.asyncio
+async def test_session_store_persists_goal_lifecycle(temp_session_dir):
+    store = JsonlSessionStore(session_dir=temp_session_dir, session_id="goal-session")
+    await store.initialize()
+
+    assert await store.get_goal() is None
+    goal = await store.set_goal("finish the release")
+    assert goal == {"objective": "finish the release", "status": "active"}
+    assert await store.set_goal_status("paused") == {"objective": "finish the release", "status": "paused"}
+
+    resumed = JsonlSessionStore(session_dir=temp_session_dir, session_id="goal-session")
+    await resumed.initialize()
+    assert await resumed.get_goal() == {"objective": "finish the release", "status": "paused"}
+
+    await resumed.clear_goal()
+    assert await resumed.get_goal() is None
+
+
+@pytest.mark.asyncio
+async def test_session_store_rejects_corrupt_goal_metadata(temp_session_dir):
+    store = JsonlSessionStore(session_dir=temp_session_dir, session_id="goal-session")
+    await store.initialize()
+    meta_path = Path(temp_session_dir) / "goal-session" / "meta.json"
+    meta = json.loads(meta_path.read_text(encoding="utf-8"))
+    meta["goal"] = {"objective": "missing status"}
+    meta_path.write_text(json.dumps(meta), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="Corrupted goal"):
+        await JsonlSessionStore(session_dir=temp_session_dir, session_id="goal-session").initialize()
+
+
+@pytest.mark.asyncio
 async def test_session_workspace_root_uses_cwd_not_parent_git_root(tmp_path, monkeypatch):
     project = tmp_path / "project"
     nested = project / "src"

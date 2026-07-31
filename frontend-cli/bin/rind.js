@@ -14,7 +14,7 @@ import { buildRuntimeEnv } from "../lib/runtime-env.js";
 import { createRuntimeRequest, runtimeEventType, runtimeRequestId, turnInputMethod } from "../lib/runtime-protocol.js";
 import { isInputClosed } from "../lib/input-errors.js";
 import { sigintAction } from "../lib/interrupt-state.js";
-import { isReadonlySlashCommand, steeringCommandText } from "../lib/slash-command-mode.js";
+import { isReadonlySlashCommand, parseGoalCommand, steeringCommandText } from "../lib/slash-command-mode.js";
 import { createModelMenuState } from "../lib/model-menu-state.js";
 import { createChoiceMenuState } from "../lib/choice-menu-state.js";
 import { createSlashMenuState } from "../lib/slash-menu-state.js";
@@ -28,6 +28,8 @@ import {
   commandResultText,
   contextBuiltLine,
   errorLine,
+  goalCommandText,
+  goalText,
   helpText,
   assistantHeaderText,
   inputHintText,
@@ -170,6 +172,7 @@ try {
   slashCommands = normalizeSlashCommands([
     ...(Array.isArray(info?.slash_commands) ? info.slash_commands : []),
     { name: "steer", description: "Redirect the active turn", usage: "/steer <text>" },
+    { name: "goal", description: "Start or control a persistent goal", usage: "/goal [pause|resume|clear|objective]" },
   ]);
   if (terminalUi) {
     terminalUi.start({
@@ -228,6 +231,11 @@ async function handleCommand(text) {
   if (!text.startsWith("/")) {
     return false;
   }
+  const goal = parseGoalCommand(text);
+  if (goal) {
+    await runGoalCommand(goal);
+    return true;
+  }
   const steering = steeringCommandText(text);
   if (steering !== null) {
     submitSteering(steering, text);
@@ -258,6 +266,59 @@ async function runSlashCommand(text) {
   await applySlashResult(result);
 }
 
+async function runGoalCommand(command) {
+  if (command.action === "set" && activeTurn) {
+    logOutput(commandResultText("Goal not started", "pause or finish the active turn first"));
+    return;
+  }
+  try {
+    if (command.action === "set") {
+      const result = await request("goal.set", { objective: command.objective });
+      updateGoalState(result?.goal);
+      logOutput(goalCommandText(result?.goal, "set"));
+      startTurn(command.objective);
+      return;
+    }
+    if (command.action === "clear") {
+      const result = await request("goal.clear");
+      updateGoalState(result?.goal || null);
+      logOutput(goalCommandText(null, "clear"));
+      return;
+    }
+    if (command.action === "pause" || command.action === "resume") {
+      const result = await request("goal.status", { status: command.action === "resume" ? "active" : "paused" });
+      updateGoalState(result?.goal);
+      logOutput(goalCommandText(result?.goal, command.action));
+      if (command.action === "resume" && !activeTurn) {
+        startTurn("", { goal_continuation: true });
+      }
+      return;
+    }
+    const result = await request("goal.get");
+    updateGoalState(result?.goal || null);
+    logOutput(goalCommandText(result?.goal || null));
+  } catch (error) {
+    logOutput(`Goal command failed: ${error instanceof Error ? error.message : String(error)}`);
+  }
+}
+
+function updateGoalState(goal) {
+  sessionInfo = { ...sessionInfo, goal: goal && typeof goal === "object" ? goal : null };
+  redrawInput();
+}
+
+async function refreshGoalState() {
+  if (!Array.isArray(sessionInfo.capabilities) || !sessionInfo.capabilities.includes("goals")) {
+    return;
+  }
+  try {
+    const result = await request("goal.get");
+    updateGoalState(result?.goal || null);
+  } catch {
+    // The turn result remains usable when a late state refresh races shutdown.
+  }
+}
+
 async function runSessionsSelector() {
   let result;
   try {
@@ -286,6 +347,7 @@ async function runSessionsSelector() {
       session_id: update?.session_id || selected.id,
       model: update?.model || sessionInfo.model,
       resume_preview: update?.resume_preview || "",
+      goal: update?.goal || null,
       background_count: 0,
     };
     latestStats = update?.usage && typeof update.usage === "object" ? update.usage : {};
@@ -816,6 +878,7 @@ async function runTurn(text, extra = {}) {
   try {
     await request("turn.start", { input: text, ...extra });
   } finally {
+    void refreshGoalState();
     activeTurn = false;
     interruptRequested = false;
     closeAssistant();
@@ -1013,7 +1076,13 @@ async function renderEvent(message) {
       const plan = event.tool_name === "update_plan" && event.status === "completed"
         ? parsePlanInput(planInput)
         : null;
-      logOutput(plan ? planUpdatedLine(plan) : toolResultLine(event, fileChange));
+      const goal = event.tool_name === "update_goal" && event.status === "completed"
+        ? parseToolData(event.result)
+        : null;
+      if (goal?.status) {
+        updateGoalState(goal);
+      }
+      logOutput(goal?.status ? goalText(goal) : plan ? planUpdatedLine(plan) : toolResultLine(event, fileChange));
       return;
     case "file_change":
       if (event.tool_call_id) {

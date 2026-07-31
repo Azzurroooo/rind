@@ -12,6 +12,7 @@ from agent.application.runtime.turn_runner import TurnRunner
 from agent.domain.cancellation import CancellationToken
 from agent.domain.errors import PersistenceError
 from agent.domain.events import RuntimeEvent, TurnStartedEvent, event_meta
+from agent.prompts import build_goal_prompt
 
 
 MAX_QUEUED_INPUTS = 4
@@ -29,7 +30,7 @@ class InputQueueError(ValueError):
 class AgentRuntime:
     """Facade exposing asynchronous entry points for session-bound turns."""
 
-    def __init__(self, turn_runner: TurnRunner, session_store: SessionStore):
+    def __init__(self, turn_runner: TurnRunner, session_store: SessionStore, goal_enabled: bool = False):
         self._turn_runner = turn_runner
         self._session_store = session_store
         self._initialized = False
@@ -39,6 +40,7 @@ class AgentRuntime:
         self._accepting_inputs = False
         self._steering_queue: deque[str] = deque()
         self._follow_up_queue: deque[str] = deque()
+        self._goal_enabled = bool(goal_enabled)
 
     async def initialize(self) -> None:
         """Initialize or load the session state. Safe to call multiple times."""
@@ -104,6 +106,50 @@ class AgentRuntime:
                     code=type(exc).__name__,
             ) from exc
         return {"runtime": runtime_updated, "session": True}
+
+    async def get_goal(self) -> dict[str, str] | None:
+        await self.initialize()
+        if not self._goal_enabled:
+            raise RuntimeError("Goal support is unavailable.")
+        getter = getattr(self._session_store, "get_goal", None)
+        if not callable(getter):
+            raise RuntimeError("Goal support is unavailable.")
+        goal = await getter()
+        return dict(goal) if isinstance(goal, dict) else None
+
+    async def set_goal(self, objective: str) -> dict[str, str]:
+        await self.initialize()
+        if not self._goal_enabled:
+            raise RuntimeError("Goal support is unavailable.")
+        if self._accepting_inputs or self._active_turn_id:
+            raise RuntimeError("Cannot replace a goal while a turn is active.")
+        async with self._turn_lock:
+            if self._accepting_inputs or self._active_turn_id:
+                raise RuntimeError("Cannot replace a goal while a turn is active.")
+            setter = getattr(self._session_store, "set_goal", None)
+            if not callable(setter):
+                raise RuntimeError("Goal support is unavailable.")
+            goal = await setter(objective)
+            return dict(goal)
+
+    async def set_goal_status(self, status: str) -> dict[str, str]:
+        await self.initialize()
+        if not self._goal_enabled:
+            raise RuntimeError("Goal support is unavailable.")
+        setter = getattr(self._session_store, "set_goal_status", None)
+        if not callable(setter):
+            raise RuntimeError("Goal support is unavailable.")
+        goal = await setter(status)
+        return dict(goal)
+
+    async def clear_goal(self) -> None:
+        await self.initialize()
+        if not self._goal_enabled:
+            raise RuntimeError("Goal support is unavailable.")
+        clear = getattr(self._session_store, "clear_goal", None)
+        if not callable(clear):
+            raise RuntimeError("Goal support is unavailable.")
+        await clear()
 
     async def switch_session(self, session_id: str) -> dict[str, object]:
         """Rebind the runtime to an existing session while it is idle."""
@@ -176,17 +222,27 @@ class AgentRuntime:
                 await self._persist_turn_state(started_event)
                 yield started_event
 
-                runner_kwargs = {
-                    "session": self._session_store,
-                    "cancellation_token": cancellation_token,
-                    "turn_id": turn_id,
-                    "take_steering": self._take_steering,
-                }
-                if transient_system_messages:
-                    runner_kwargs["transient_system_messages"] = transient_system_messages
-
                 total_duration_ms = 0
                 while True:
+                    runner_kwargs = {
+                        "session": self._session_store,
+                        "cancellation_token": cancellation_token,
+                        "turn_id": turn_id,
+                        "take_steering": self._take_steering,
+                    }
+                    context_messages = list(transient_system_messages or [])
+                    goal = await self._current_goal()
+                    if goal and goal.get("status") == "active":
+                        context_messages.append(
+                            {
+                                "role": "system",
+                                "content": build_goal_prompt(goal["objective"]),
+                                "_context_kind": "goal",
+                            }
+                        )
+                    if context_messages:
+                        runner_kwargs["transient_system_messages"] = context_messages
+
                     terminal_event = None
                     async for event in self._turn_runner.run_turn(**runner_kwargs):
                         if event.type in {"turn_completed", "turn_failed", "turn_cancelled"}:
@@ -204,6 +260,13 @@ class AgentRuntime:
                         if follow_up is not None:
                             await self._persist_message("user", follow_up)
                             continue
+                        if await self._goal_is_active():
+                            continue
+
+                    if terminal_event.type == "turn_failed":
+                        await self._stop_active_goal("blocked")
+                    elif terminal_event.type == "turn_cancelled":
+                        await self._stop_active_goal("paused")
 
                     if terminal_event.type == "turn_completed":
                         terminal_event.duration_ms = total_duration_ms
@@ -217,6 +280,27 @@ class AgentRuntime:
                 self._accepting_inputs = False
                 self._active_turn_id = ""
                 self.discard_pending_inputs()
+
+    async def _current_goal(self) -> dict[str, str] | None:
+        if not self._goal_enabled:
+            return None
+        getter = getattr(self._session_store, "get_goal", None)
+        if not callable(getter):
+            return None
+        goal = await getter()
+        return dict(goal) if isinstance(goal, dict) else None
+
+    async def _goal_is_active(self) -> bool:
+        goal = await self._current_goal()
+        return bool(goal and goal.get("status") == "active")
+
+    async def _stop_active_goal(self, status: str) -> None:
+        goal = await self._current_goal()
+        if not goal or goal.get("status") != "active":
+            return
+        setter = getattr(self._session_store, "set_goal_status", None)
+        if callable(setter):
+            await setter(status)
 
     def _submit_input(self, mode: str, text: str, queue: deque[str]) -> dict[str, object]:
         value = str(text or "").strip()

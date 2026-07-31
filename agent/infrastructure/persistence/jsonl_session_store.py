@@ -31,6 +31,7 @@ from agent.infrastructure.paths import (
     validate_session_id,
 )
 from agent.domain import looks_like_tool_payload
+from agent.domain.goal import normalize_goal, normalize_goal_objective, normalize_goal_status
 
 
 def _valid_session_id_value(value: object) -> bool:
@@ -192,6 +193,8 @@ class JsonlSessionStore(SessionStore):
         self._invalidate_projection_cache()
 
         self._session_meta = meta
+        if "goal" in self._session_meta:
+            self._session_meta["goal"] = normalize_goal(self._session_meta.get("goal"))
         configured_model = str(meta.get("model") or "").strip()
         self._model = configured_model or self._model
         original_window = self._session_meta.get("auto_compact_window")
@@ -282,6 +285,7 @@ class JsonlSessionStore(SessionStore):
             "model": self._model,
             "usage": copy.deepcopy(latest) if isinstance(latest, dict) else None,
             "assistant_usage": copy.deepcopy(assistant) if isinstance(assistant, dict) else None,
+            "goal": copy.deepcopy(meta.get("goal")) if isinstance(meta.get("goal"), dict) else None,
         }
 
     def _find_latest_session_id(self) -> str | None:
@@ -650,6 +654,51 @@ class JsonlSessionStore(SessionStore):
             return dict(state) if isinstance(state, dict) else None
 
         return await asyncio.to_thread(_get)
+
+    async def get_goal(self) -> dict[str, str] | None:
+        def _get():
+            goal = self._session_meta.get("goal") if isinstance(self._session_meta, dict) else None
+            return dict(goal) if isinstance(goal, dict) else None
+
+        return await asyncio.to_thread(_get)
+
+    async def set_goal(self, objective: str) -> dict[str, str]:
+        normalized = normalize_goal_objective(objective)
+        async with self._write_lock:
+            def _persist():
+                if not self._session_meta:
+                    raise RuntimeError("Session is not initialized.")
+                goal = {"objective": normalized, "status": "active"}
+                self._session_meta["goal"] = goal
+                self._persist_meta_sync()
+                return dict(goal)
+
+            return await asyncio.to_thread(_persist)
+
+    async def set_goal_status(self, status: str) -> dict[str, str]:
+        normalized_status = normalize_goal_status(status)
+        async with self._write_lock:
+            def _persist():
+                if not self._session_meta:
+                    raise RuntimeError("Session is not initialized.")
+                goal = normalize_goal(self._session_meta.get("goal"))
+                if goal is None:
+                    raise ValueError("No active goal exists.")
+                goal["status"] = normalized_status
+                self._session_meta["goal"] = goal
+                self._persist_meta_sync()
+                return dict(goal)
+
+            return await asyncio.to_thread(_persist)
+
+    async def clear_goal(self) -> None:
+        async with self._write_lock:
+            def _persist():
+                if self._session_meta is not None:
+                    self._session_meta.pop("goal", None)
+                    self._persist_meta_sync()
+
+            await asyncio.to_thread(_persist)
 
     async def get_compact_generation(self) -> int:
         def _get():

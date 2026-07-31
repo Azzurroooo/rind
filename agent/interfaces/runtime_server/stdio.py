@@ -66,6 +66,7 @@ class StdioRuntimeServer:
         default_model: str = "",
         background_list: Callable[[str], Any] | None = None,
         background_output: Callable[..., Any] | None = None,
+        goal_enabled: bool = False,
     ):
         self._runtime = runtime
         self._session = session
@@ -74,6 +75,7 @@ class StdioRuntimeServer:
         self._default_model = str(default_model or "").strip()
         self._background_list = background_list
         self._background_output = background_output
+        self._goal_enabled = bool(goal_enabled)
         self._slash_router = SlashCommandRouter()
         self._writer = JsonlWriter()
         self._requests: asyncio.Queue[dict[str, Any] | None] = asyncio.Queue()
@@ -128,6 +130,14 @@ class StdioRuntimeServer:
                 await self._list_backgrounds(request)
             elif method == "background.output":
                 await self._background_output_request(request)
+            elif method == "goal.get":
+                await self._goal_get(request)
+            elif method == "goal.set":
+                await self._goal_set(request)
+            elif method == "goal.status":
+                await self._goal_status(request)
+            elif method == "goal.clear":
+                await self._goal_clear(request)
             elif method == "slash.execute":
                 await self._execute_slash(request)
             else:
@@ -138,16 +148,19 @@ class StdioRuntimeServer:
     async def _initialize(self, request: dict[str, Any]) -> None:
         await self._runtime.initialize()
         self._initialized = True
+        result = {
+            "session_id": getattr(self._session, "session_id", None),
+            "model": getattr(self._session, "model", None),
+            "protocol_version": PROTOCOL_VERSION,
+            "capabilities": list(CAPABILITIES) + (["goals"] if self._goal_enabled else []),
+            "resume_preview": await self._resume_preview(),
+            "slash_commands": self._slash_command_infos(),
+        }
+        if self._goal_enabled:
+            result["goal"] = await self._runtime.get_goal()
         await self._respond(
             request,
-            {
-                "session_id": getattr(self._session, "session_id", None),
-                "model": getattr(self._session, "model", None),
-                "protocol_version": PROTOCOL_VERSION,
-                "capabilities": list(CAPABILITIES),
-                "resume_preview": await self._resume_preview(),
-                "slash_commands": self._slash_command_infos(),
-            },
+            result,
         )
 
     def _slash_command_infos(self) -> list[dict[str, Any]]:
@@ -192,9 +205,18 @@ class StdioRuntimeServer:
     async def _run_turn(self, request: dict[str, Any]) -> None:
         params = request.get("params") if isinstance(request.get("params"), dict) else {}
         query = str(params.get("input") or params.get("query") or "").strip()
-        if not query:
+        goal_continuation = params.get("goal_continuation") is True
+        if not query and not goal_continuation:
             await self._respond_error(request, "turn.start requires input.", "InvalidRequest")
             return
+        if goal_continuation:
+            if not self._goal_enabled:
+                await self._respond_error(request, "Goal support is unavailable.", "UnsupportedOperation")
+                return
+            goal = await self._runtime.get_goal()
+            if not goal or goal.get("status") != "active":
+                await self._respond_error(request, "No active goal to continue.", "InvalidRequest")
+                return
         transient_system_messages = params.get("transient_system_messages")
         if not isinstance(transient_system_messages, list):
             transient_system_messages = None
@@ -275,15 +297,70 @@ class StdioRuntimeServer:
             return
         result = await switch(session_id)
         usage = result.get("assistant_usage") or result.get("usage")
+        response = {
+            "session_id": result.get("session_id") or getattr(self._session, "session_id", None),
+            "model": result.get("model") or getattr(self._session, "model", None),
+            "usage": usage if isinstance(usage, dict) else None,
+            "resume_preview": await self._resume_preview(),
+        }
+        if self._goal_enabled:
+            response["goal"] = result.get("goal")
         await self._respond(
             request,
-            {
-                "session_id": result.get("session_id") or getattr(self._session, "session_id", None),
-                "model": result.get("model") or getattr(self._session, "model", None),
-                "usage": usage if isinstance(usage, dict) else None,
-                "resume_preview": await self._resume_preview(),
-            },
+            response,
         )
+
+    async def _goal_get(self, request: dict[str, Any]) -> None:
+        if not self._goal_enabled:
+            await self._respond_error(request, "Goal support is unavailable.", "UnsupportedOperation")
+            return
+        await self._respond(request, {"goal": await self._runtime.get_goal()})
+
+    async def _goal_set(self, request: dict[str, Any]) -> None:
+        if not self._goal_enabled:
+            await self._respond_error(request, "Goal support is unavailable.", "UnsupportedOperation")
+            return
+        params = request.get("params") if isinstance(request.get("params"), dict) else {}
+        objective = params.get("objective")
+        if not isinstance(objective, str) or not objective.strip():
+            await self._respond_error(request, "goal.set requires objective.", "InvalidRequest")
+            return
+        try:
+            goal = await self._runtime.set_goal(objective)
+        except Exception as exc:
+            await self._respond_error(request, str(exc), type(exc).__name__)
+            return
+        await self._respond(request, {"goal": goal})
+
+    async def _goal_status(self, request: dict[str, Any]) -> None:
+        if not self._goal_enabled:
+            await self._respond_error(request, "Goal support is unavailable.", "UnsupportedOperation")
+            return
+        params = request.get("params") if isinstance(request.get("params"), dict) else {}
+        status = params.get("status")
+        if status not in {"active", "paused"}:
+            await self._respond_error(request, "goal.status requires active or paused.", "InvalidRequest")
+            return
+        try:
+            goal = await self._runtime.set_goal_status(status)
+        except Exception as exc:
+            await self._respond_error(request, str(exc), type(exc).__name__)
+            return
+        if status == "paused":
+            self._interrupt_current()
+        await self._respond(request, {"goal": goal})
+
+    async def _goal_clear(self, request: dict[str, Any]) -> None:
+        if not self._goal_enabled:
+            await self._respond_error(request, "Goal support is unavailable.", "UnsupportedOperation")
+            return
+        try:
+            await self._runtime.clear_goal()
+        except Exception as exc:
+            await self._respond_error(request, str(exc), type(exc).__name__)
+            return
+        self._interrupt_current()
+        await self._respond(request, {"goal": None})
 
     async def _fetch_model_ids(self, client: Any) -> list[str]:
         response = client.models.list()
@@ -408,6 +485,15 @@ class StdioRuntimeServer:
             return True
         if method == "background.output":
             await self._background_output_request(message)
+            return True
+        if method == "goal.get":
+            await self._goal_get(message)
+            return True
+        if method == "goal.status":
+            await self._goal_status(message)
+            return True
+        if method == "goal.clear":
+            await self._goal_clear(message)
             return True
         if method == "slash.execute" and self._initialized and self._is_readonly_slash_request(message):
             await self._execute_readonly_slash(message)
@@ -597,6 +683,7 @@ async def async_main(argv: list[str] | None = None) -> int:
         session_dir=args.session_dir,
         session_id=args.session,
         resume_latest=args.resume_latest,
+        enable_goal=True,
     )
     server = StdioRuntimeServer(
         container.runtime,
@@ -606,6 +693,7 @@ async def async_main(argv: list[str] | None = None) -> int:
         default_model=container.settings.model,
         background_list=background_list,
         background_output=background_output,
+        goal_enabled=True,
     )
     try:
         return await server.run()

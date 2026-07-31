@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from ..spec import ToolSpec
 from .files import edit_file, glob, grep, read_file, write_file
+from .goal import create_goal_tool_spec
 from .planning import update_plan
 from .shell import bash, bash_output
 from .skill import skill_create
@@ -147,4 +148,4 @@ TOOL_SPECS: tuple[ToolSpec, ...] = (
 )
 
 
-__all__ = ["TOOL_SPECS"]
+__all__ = ["TOOL_SPECS", "create_goal_tool_spec"]

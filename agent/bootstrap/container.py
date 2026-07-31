@@ -16,6 +16,7 @@ from agent.infrastructure.planning import build_plan_snapshot
 from agent.infrastructure.rind_docs import build_rind_doc_context
 from agent.infrastructure.skills import SkillRepository
 from agent.infrastructure.tools import DefaultToolRegistry
+from agent.infrastructure.tools.builtin import TOOL_SPECS, create_goal_tool_spec
 from agent.prompts import SYSTEM_PROMPT
 
 
@@ -47,6 +48,7 @@ def build_agent_container(
     session_dir: str | None = None,
     session_id: str | None = None,
     resume_latest: bool = False,
+    enable_goal: bool = False,
 ) -> AgentContainer:
     """Build the production runtime dependency graph explicitly."""
     settings = settings or load_settings()
@@ -59,7 +61,10 @@ def build_agent_container(
         model=model,
         system_prompt=SYSTEM_PROMPT,
     )
-    tool_registry = DefaultToolRegistry()
+    tool_specs = list(TOOL_SPECS)
+    if enable_goal:
+        tool_specs.append(create_goal_tool_spec(session_store.set_goal_status))
+    tool_registry = DefaultToolRegistry(tool_specs)
     tool_executor = ToolExecutor(registry=tool_registry)
     tool_result_normalizer = ToolResultNormalizer()
     tool_processor = ToolCallProcessor(
@@ -93,7 +98,11 @@ def build_agent_container(
         compaction_service=compaction_service,
         debug=debug,
     )
-    runtime = AgentRuntime(turn_runner=turn_runner, session_store=session_store)
+    runtime = AgentRuntime(
+        turn_runner=turn_runner,
+        session_store=session_store,
+        goal_enabled=enable_goal,
+    )
     return AgentContainer(
         settings=settings,
         provider_client_factory=provider_client_factory,

@@ -10,6 +10,8 @@ import {
   commandResultText,
   contextBuiltLine,
   errorLine,
+  goalCommandText,
+  goalText,
   helpText,
   assistantHeaderText,
   inputHintText,
@@ -610,6 +612,17 @@ test("toolRequestedLine shows non-shell details as metadata", () => {
   );
 });
 
+test("startupText shows an active goal without changing the empty-goal banner", () => {
+  const text = startupText({
+    model: "m1",
+    session_id: "s1",
+    goal: { objective: "finish the release", status: "active" },
+  });
+  assert.match(text, /Goal · active/);
+  assert.match(text, /finish the release/);
+  assert.match(text, /\/goal resume/);
+});
+
 test("prompt shows background task count after cwd with monitor hint", () => {
   const text = promptText({ model: "m1", cwd: "E:\\project", background_count: 2 });
   assert.match(text, /m1 · E:\\project · \[bg:2\] \(ctrl\+b monitor\)/);
@@ -985,6 +998,12 @@ test("sessionSwitchedText renders target context and model", () => {
   assert.match(text, /s2/);
   assert.match(text, /model-b/);
   assert.match(text, /You/);
+});
+
+test("goal rendering keeps status and objective visible", () => {
+  assert.match(goalText({ objective: "ship it", status: "complete" }), /Goal · complete/);
+  assert.match(goalCommandText({ objective: "ship it", status: "paused" }, "pause"), /Goal paused/);
+  assert.match(goalCommandText(null, "clear"), /No active goal/);
 });
 
 test("AssistantRenderer removes markdown markers at message boundary", () => {

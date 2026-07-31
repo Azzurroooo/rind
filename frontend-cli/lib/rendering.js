@@ -6,8 +6,10 @@ const MAX_FILE_CHANGE_LINES = 20;
 
 export function startupText(info = {}) {
   const header = startupBannerText(info);
+  const goal = goalText(info.goal, true);
   const preview = resumePreviewText(info.resume_preview);
-  return preview ? `${header}\n\n${accent("•")} ${bold("Recent context")}\n${preview}` : header;
+  const sections = [header, goal, preview ? `${accent("•")} ${bold("Recent context")}\n${preview}` : ""];
+  return sections.filter(Boolean).join("\n\n");
 }
 
 export function promptText(info = {}, _stats = {}, state = {}) {
@@ -211,15 +213,50 @@ function choiceMenuTitle(visible, title = "Choices") {
 export function sessionSwitchedText(info = {}) {
   const sessionId = singleLine(info.session_id) || "unknown";
   const model = singleLine(info.model);
+  const goal = goalText(info.goal, true);
   const preview = resumePreviewText(info.resume_preview);
   const lines = [startupBannerText(info), "", `${green("✓")} ${bold("Session switched")}`, dim(detailLine(sessionId))];
   if (model) {
     lines.push(dim(detailLine(`model ${model}`)));
   }
+  if (goal) {
+    lines.push("", goal);
+  }
   if (preview) {
     lines.push("", `${accent("•")} ${bold("Recent context")}`, preview);
   }
   return lines.join("\n");
+}
+
+export function goalText(goal, includeHint = false) {
+  if (!goal || typeof goal !== "object") {
+    return "";
+  }
+  const status = singleLine(goal.status) || "unknown";
+  const objective = clipSingleLine(goal.objective, 96);
+  const lines = [`${accent("•")} ${bold("Goal")} · ${status}`];
+  if (objective) {
+    lines.push(dim(detailLine(objective)));
+  }
+  if (includeHint && status === "active") {
+    lines.push(dim(detailLine("resume manually with /goal resume")));
+  }
+  return lines.join("\n");
+}
+
+export function goalCommandText(goal, action = "get") {
+  const labels = {
+    get: "Goal status",
+    set: "Goal started",
+    pause: "Goal paused",
+    resume: "Goal resumed",
+    clear: "Goal cleared",
+  };
+  const label = labels[action] || "Goal updated";
+  if (!goal) {
+    return commandResultText(label, "No active goal");
+  }
+  return commandResultText(label, `${goal.status} · ${clipSingleLine(goal.objective, 80)}`);
 }
 
 export function modelListErrorText(error, currentModel = "") {

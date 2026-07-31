@@ -168,6 +168,40 @@ def test_turn_response_contains_session_and_turn_ids(capsys):
     assert messages[1]["result"] == {"ok": True, "session_id": "s1", "turn_id": "t1"}
 
 
+def test_goal_continuation_allows_empty_turn_input(capsys):
+    class Runtime(_Runtime):
+        async def get_goal(self):
+            return {"objective": "finish the release", "status": "active"}
+
+        async def run_turn(self, **_kwargs):
+            yield type(
+                "Event",
+                (),
+                {
+                    "to_dict": lambda _self: {
+                        "type": "turn_completed",
+                        "session_id": "s1",
+                        "turn_id": "goal-turn",
+                    }
+                },
+            )()
+
+    async def run():
+        server = StdioRuntimeServer(Runtime(), _Session(), goal_enabled=True)
+        await server._run_turn(
+            {
+                "request_id": 22,
+                "method": "turn.start",
+                "params": {"input": "", "goal_continuation": True},
+            }
+        )
+
+    asyncio.run(run())
+
+    messages = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
+    assert messages[-1]["result"] == {"ok": True, "session_id": "s1", "turn_id": "goal-turn"}
+
+
 def test_initialize_response_includes_resume_preview_when_history_exists(capsys):
     class Session:
         session_id = "s1"
@@ -210,6 +244,57 @@ def test_initialize_response_includes_resume_preview_when_history_exists(capsys)
     assert "Resumed session s1" in result["resume_preview"]
     assert "- user: hello" in result["resume_preview"]
     assert any(command["name"] == "status" for command in result["slash_commands"])
+
+
+def test_initialize_goal_capability_returns_session_goal(capsys):
+    class Runtime(_Runtime):
+        async def get_goal(self):
+            return {"objective": "finish the release", "status": "active"}
+
+    async def run():
+        server = StdioRuntimeServer(Runtime(), _Session(), goal_enabled=True)
+        await server._initialize({"request_id": 9, "method": "initialize", "params": {}})
+
+    asyncio.run(run())
+
+    result = json.loads(capsys.readouterr().out)["result"]
+    assert "goals" in result["capabilities"]
+    assert result["goal"] == {"objective": "finish the release", "status": "active"}
+
+
+def test_goal_control_requests_update_and_clear_state(capsys):
+    class Runtime(_Runtime):
+        def __init__(self):
+            super().__init__()
+            self.goal = None
+
+        async def get_goal(self):
+            return self.goal
+
+        async def set_goal(self, objective):
+            self.goal = {"objective": objective, "status": "active"}
+            return self.goal
+
+        async def set_goal_status(self, status):
+            self.goal["status"] = status
+            return self.goal
+
+        async def clear_goal(self):
+            self.goal = None
+
+    async def run():
+        runtime = Runtime()
+        server = StdioRuntimeServer(runtime, _Session(), goal_enabled=True)
+        await server._goal_set({"request_id": 10, "params": {"objective": "ship it"}})
+        await server._goal_status({"request_id": 11, "params": {"status": "paused"}})
+        await server._goal_clear({"request_id": 12, "params": {}})
+
+    asyncio.run(run())
+
+    messages = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
+    assert messages[0]["result"]["goal"] == {"objective": "ship it", "status": "active"}
+    assert messages[1]["result"]["goal"]["status"] == "paused"
+    assert messages[2]["result"]["goal"] is None
 
 
 def test_session_replay_returns_projected_messages_and_turn_state(capsys):
