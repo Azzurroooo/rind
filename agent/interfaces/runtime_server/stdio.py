@@ -17,6 +17,10 @@ from agent.domain.cancellation import CancellationTokenSource
 from agent.domain.events import UserQuestionRequestedEvent
 from agent.infrastructure.config import Config, validate_settings
 from agent.infrastructure.paths import validate_session_id
+from agent.infrastructure.tools.builtin.shell.tool import (
+    list_backgrounds as background_list,
+    snapshot_background as background_output,
+)
 from agent.interfaces.cli.commands import SlashCommandContext, SlashCommandResult, SlashCommandRouter
 from agent.interfaces.cli.commands.model_control import set_active_model
 from agent.interfaces.cli.ui.resume_preview import render_resume_preview
@@ -60,12 +64,16 @@ class StdioRuntimeServer:
         *,
         model_client_factory: Callable[[], Any] | None = None,
         default_model: str = "",
+        background_list: Callable[[str], Any] | None = None,
+        background_output: Callable[..., Any] | None = None,
     ):
         self._runtime = runtime
         self._session = session
         self._debug = debug
         self._model_client_factory = model_client_factory
         self._default_model = str(default_model or "").strip()
+        self._background_list = background_list
+        self._background_output = background_output
         self._slash_router = SlashCommandRouter()
         self._writer = JsonlWriter()
         self._requests: asyncio.Queue[dict[str, Any] | None] = asyncio.Queue()
@@ -116,6 +124,10 @@ class StdioRuntimeServer:
                 await self._set_model(request)
             elif method == "session.switch":
                 await self._switch_session(request)
+            elif method == "background.list":
+                await self._list_backgrounds(request)
+            elif method == "background.output":
+                await self._background_output_request(request)
             elif method == "slash.execute":
                 await self._execute_slash(request)
             else:
@@ -391,10 +403,74 @@ class StdioRuntimeServer:
         if method == "user_question.respond":
             await self._receive_user_answer(message)
             return True
+        if method == "background.list":
+            await self._list_backgrounds(message)
+            return True
+        if method == "background.output":
+            await self._background_output_request(message)
+            return True
         if method == "slash.execute" and self._initialized and self._is_readonly_slash_request(message):
             await self._execute_readonly_slash(message)
             return True
         return False
+
+    async def _list_backgrounds(self, request: dict[str, Any]) -> None:
+        if self._background_list is None:
+            await self._respond_error(
+                request,
+                "Background monitoring is unavailable.",
+                "UnsupportedOperation",
+            )
+            return
+        try:
+            tasks = self._background_list(self._session_id())
+            if inspect.isawaitable(tasks):
+                tasks = await tasks
+            if not isinstance(tasks, list):
+                raise TypeError("Background list must be a list.")
+            await self._respond(request, {"tasks": tasks})
+        except Exception as exc:
+            await self._respond_error(request, str(exc), type(exc).__name__)
+
+    async def _background_output_request(self, request: dict[str, Any]) -> None:
+        if self._background_output is None:
+            await self._respond_error(
+                request,
+                "Background monitoring is unavailable.",
+                "UnsupportedOperation",
+            )
+            return
+        params = request.get("params") if isinstance(request.get("params"), dict) else {}
+        bg_id = params.get("bg_id")
+        if not isinstance(bg_id, str) or not bg_id.strip():
+            await self._respond_error(request, "background.output requires bg_id.", "InvalidRequest")
+            return
+        max_output_chars = params.get("max_output_chars", 20000)
+        if isinstance(max_output_chars, bool) or not isinstance(max_output_chars, int):
+            await self._respond_error(
+                request,
+                "background.output max_output_chars must be an integer.",
+                "InvalidRequest",
+            )
+            return
+        try:
+            task = self._background_output(
+                bg_id.strip(),
+                max_output_chars=max_output_chars,
+                _session_id=self._session_id(),
+            )
+            if inspect.isawaitable(task):
+                task = await task
+            if not isinstance(task, dict):
+                raise TypeError("Background output must be an object.")
+            await self._respond(request, {"task": task})
+        except LookupError as exc:
+            await self._respond_error(request, str(exc), "NotFound")
+        except Exception as exc:
+            await self._respond_error(request, str(exc), type(exc).__name__)
+
+    def _session_id(self) -> str:
+        return str(getattr(self._session, "session_id", "default") or "default")
 
     async def _submit_queued_input(self, message: dict[str, Any], submit: Callable[[str], Any]) -> None:
         params = message.get("params") if isinstance(message.get("params"), dict) else {}
@@ -528,6 +604,8 @@ async def async_main(argv: list[str] | None = None) -> int:
         debug=args.debug,
         model_client_factory=container.provider_client_factory.create_async_client,
         default_model=container.settings.model,
+        background_list=background_list,
+        background_output=background_output,
     )
     return await server.run()
 

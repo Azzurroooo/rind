@@ -85,3 +85,22 @@ async def bash_output(
         return result.result_str
     else:
         return tool_error("bash_output", result.error_msg, result.error_type)
+
+
+async def list_backgrounds(_session_id: str = "default") -> list[dict[str, object]]:
+    return await _SUPERVISOR.list_backgrounds(_session_id)
+
+
+async def snapshot_background(
+    bg_id: str,
+    max_output_chars: int = 20000,
+    _session_id: str = "default",
+) -> dict[str, object]:
+    snapshot = await _SUPERVISOR.snapshot_background(
+        bg_id,
+        _session_id,
+        max_output_chars=max_output_chars,
+    )
+    if snapshot is None:
+        raise LookupError(f"No background process: {bg_id}")
+    return snapshot

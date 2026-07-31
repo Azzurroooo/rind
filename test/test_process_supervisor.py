@@ -124,6 +124,27 @@ async def test_background_limit_and_ttl_are_enforced(tmp_path: Path) -> None:
     assert ttl_supervisor._processes == {}
 
 
+@pytest.mark.asyncio
+async def test_background_snapshot_reads_cumulative_output_without_consuming_delta(tmp_path: Path) -> None:
+    state = ShellSessionPool().get_state("snapshot")
+    script = tmp_path / "snapshot.py"
+    script.write_text("import time\nprint('tick', flush=True)\ntime.sleep(5)\n", encoding="utf-8")
+    supervisor = ProcessSupervisor()
+
+    result = await supervisor.run_background(
+        _script_command(state, script), state, "snapshot", wait_ms=1000
+    )
+    bg_id = _payload(result)["data"]["bg_id"]
+    before = await supervisor.snapshot_background(bg_id, "snapshot")
+    listed = await supervisor.list_backgrounds("snapshot")
+    after = await supervisor.snapshot_background(bg_id, "snapshot")
+
+    assert before and "tick" in before["stdout"]
+    assert listed[0]["bg_id"] == bg_id
+    assert after and after["stdout"] == before["stdout"]
+    await supervisor.close_session("snapshot")
+
+
 def test_process_group_spawn_options_cover_both_platforms(monkeypatch) -> None:
     monkeypatch.setattr(process_tree, "WINDOWS", False)
     assert process_tree.spawn_group_args() == {"start_new_session": True}

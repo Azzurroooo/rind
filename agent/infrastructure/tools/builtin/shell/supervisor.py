@@ -211,6 +211,36 @@ class ProcessSupervisor:
         await self._terminate(record, "cancelled")
         return cancelled_result("bash_output", record)
 
+    async def list_backgrounds(self, session_id: str) -> list[dict[str, object]]:
+        await self._expire_backgrounds()
+        return [
+            self._background_info(record)
+            for record in self._processes.values()
+            if record.background and record.session_id == session_id
+        ]
+
+    async def snapshot_background(
+        self,
+        process_id: str,
+        session_id: str,
+        max_output_chars: int = 20000,
+    ) -> dict[str, object] | None:
+        await self._expire_backgrounds()
+        record = self._processes.get(process_id)
+        if not record or not record.background or record.session_id != session_id:
+            return None
+        max_output_chars = self._clamp(
+            max_output_chars, 20000, 1, self.MAX_OUTPUT_CHARS
+        )
+        stdout, stdout_truncated = self._snapshot_output(record.stdout.render(), max_output_chars)
+        stderr, stderr_truncated = self._snapshot_output(record.stderr.render(), max_output_chars)
+        return {
+            **self._background_info(record),
+            "stdout": stdout,
+            "stderr": stderr,
+            "truncated": stdout_truncated or stderr_truncated or record.stdout.truncated or record.stderr.truncated,
+        }
+
     async def close_session(self, session_id: str) -> None:
         records = [
             record for record in self._processes.values() if record.session_id == session_id
@@ -388,6 +418,19 @@ class ProcessSupervisor:
 
     def _background_count(self) -> int:
         return sum(record.background for record in self._processes.values())
+
+    def _background_info(self, record: ProcessRecord) -> dict[str, object]:
+        return {
+            "bg_id": record.process_id,
+            "status": record.status,
+            "exit_code": record.exit_code if record.exit_code is not None else -1,
+            "cwd": record.cwd,
+        }
+
+    def _snapshot_output(self, output: str, max_chars: int) -> tuple[str, bool]:
+        if len(output) <= max_chars:
+            return output, False
+        return output[-max_chars:], True
 
     def _build_shell_cmd(self, command: str, state: ShellState) -> list[str]:
         if not state.shell_executable:

@@ -18,6 +18,7 @@ CAPABILITIES = (
     "input_queue",
     "session_switch",
     "tool_input_stream",
+    "background_monitor",
 )
 
 DURABLE_EVENT_TYPES = frozenset(

@@ -23,6 +23,7 @@ import { createTerminalUI } from "../lib/terminal-ui.js";
 import {
   answerPromptText,
   answerPlaceholderText,
+  backgroundMonitorText,
   cancelledText,
   commandResultText,
   contextBuiltLine,
@@ -91,6 +92,14 @@ const announcedTools = new Set();
 const pendingFileChanges = new Map();
 let sessionInfo = {};
 let latestStats = {};
+const backgroundTasks = new Map();
+const pendingBackgroundCommands = new Map();
+let backgroundRefreshTimer = null;
+let backgroundListInFlight = null;
+let backgroundMonitorTimer = null;
+let backgroundMonitorPollInFlight = false;
+let backgroundMonitor = null;
+let monitorInputWasActive = false;
 let slashCommands = [];
 let turnTools = { completed: 0, failed: 0 };
 let promptPaused = false;
@@ -173,6 +182,9 @@ try {
       removeHistoryDuplicates: true,
     });
     process.stdin.on("data", handleStdinData);
+  }
+  if (terminalUi) {
+    void refreshBackgroundTasks().catch(() => {});
   }
   logOutput(startupText(info));
   await promptLoop();
@@ -266,16 +278,19 @@ async function runSessionsSelector() {
   }
   try {
     const update = await request("session.switch", { session_id: selected.id });
+    clearBackgroundTasks();
     sessionInfo = {
       ...sessionInfo,
       session_id: update?.session_id || selected.id,
       model: update?.model || sessionInfo.model,
       resume_preview: update?.resume_preview || "",
+      background_count: 0,
     };
     latestStats = update?.usage && typeof update.usage === "object" ? update.usage : {};
     compactContextState.clear();
     logOutput(sessionSwitchedText(sessionInfo));
     redrawInput();
+    void refreshBackgroundTasks().catch(() => {});
   } catch (error) {
     logOutput(`Session switch failed: ${error instanceof Error ? error.message : String(error)}`);
   }
@@ -445,6 +460,257 @@ function inputState() {
 
 function mainPromptText() {
   return promptText(sessionInfo, latestStats, inputState());
+}
+
+function refreshBackgroundTasks() {
+  if (!terminalUi || runtimeClosing) {
+    return Promise.resolve();
+  }
+  if (backgroundListInFlight) {
+    return backgroundListInFlight;
+  }
+  backgroundListInFlight = request("background.list")
+    .then((result) => {
+      const tasks = Array.isArray(result?.tasks) ? result.tasks : [];
+      const ids = new Set();
+      for (const task of tasks) {
+        const bgId = String(task?.bg_id || "").trim();
+        if (!bgId) {
+          continue;
+        }
+        ids.add(bgId);
+        backgroundTasks.set(bgId, {
+          ...(backgroundTasks.get(bgId) || {}),
+          ...task,
+          bg_id: bgId,
+        });
+      }
+      for (const bgId of backgroundTasks.keys()) {
+        if (!ids.has(bgId) && backgroundTasks.get(bgId)?.status === "running") {
+          backgroundTasks.delete(bgId);
+        }
+      }
+      updateBackgroundCount();
+      if (backgroundMonitor) {
+        backgroundMonitor.selectedIndex = clampBackgroundIndex(backgroundMonitor.selectedIndex);
+        redrawInput();
+      }
+    })
+    .finally(() => {
+      backgroundListInFlight = null;
+    });
+  return backgroundListInFlight;
+}
+
+function updateBackgroundCount() {
+  const count = [...backgroundTasks.values()].filter((task) => task.status === "running").length;
+  if (Number(sessionInfo.background_count) !== count) {
+    sessionInfo = { ...sessionInfo, background_count: count };
+    redrawInput();
+  }
+  if (count > 0) {
+    startBackgroundRefresh();
+  } else {
+    stopBackgroundRefresh();
+  }
+}
+
+function startBackgroundRefresh() {
+  if (backgroundRefreshTimer || runtimeClosing) {
+    return;
+  }
+  backgroundRefreshTimer = setInterval(() => {
+    void refreshBackgroundTasks().catch(() => {});
+  }, 1000);
+  backgroundRefreshTimer.unref?.();
+}
+
+function stopBackgroundRefresh() {
+  if (!backgroundRefreshTimer) {
+    return;
+  }
+  clearInterval(backgroundRefreshTimer);
+  backgroundRefreshTimer = null;
+}
+
+function clearBackgroundTasks() {
+  backgroundTasks.clear();
+  pendingBackgroundCommands.clear();
+  stopBackgroundRefresh();
+  updateBackgroundCount();
+}
+
+function recordBackgroundCommand(event) {
+  if (event?.tool_name !== "bash" || !event.tool_call_id) {
+    return;
+  }
+  const args = parsePreviewObject(event.args_preview);
+  if (args.command) {
+    pendingBackgroundCommands.set(event.tool_call_id, String(args.command));
+  }
+}
+
+function recordBackgroundResult(event) {
+  const data = parseToolData(event?.result);
+  const bgId = String(data?.bg_id || "").trim();
+  if (!bgId) {
+    return;
+  }
+  const previous = backgroundTasks.get(bgId) || {};
+  const command = pendingBackgroundCommands.get(event.tool_call_id) || previous.command || "";
+  backgroundTasks.set(bgId, { ...previous, ...data, bg_id: bgId, command });
+  if (event.tool_call_id) {
+    pendingBackgroundCommands.delete(event.tool_call_id);
+  }
+  updateBackgroundCount();
+  void pollBackgroundMonitor();
+}
+
+function parsePreviewObject(value) {
+  if (value && typeof value === "object") {
+    return value;
+  }
+  try {
+    const parsed = JSON.parse(String(value || ""));
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+function parseToolData(value) {
+  const parsed = parsePreviewObject(value);
+  return parsed.data && typeof parsed.data === "object" ? parsed.data : {};
+}
+
+function enterBackgroundMonitor() {
+  if (backgroundMonitor || runtimeClosing) {
+    return;
+  }
+  monitorInputWasActive = inputActive;
+  backgroundMonitor = { selectedIndex: 0 };
+  inputActive = true;
+  redrawInput(true);
+  void refreshBackgroundTasks()
+    .then(() => {
+      if (!backgroundMonitor) {
+        return;
+      }
+      if (!backgroundTasks.size) {
+        exitBackgroundMonitor();
+        logOutput("No background tasks.");
+        return;
+      }
+      backgroundMonitor.selectedIndex = clampBackgroundIndex(backgroundMonitor.selectedIndex);
+      startBackgroundMonitorPolling();
+      void pollBackgroundMonitor();
+      redrawInput(true);
+    })
+    .catch((error) => {
+      if (!backgroundMonitor || runtimeClosing) {
+        return;
+      }
+      exitBackgroundMonitor();
+      logOutput(`Background monitor failed: ${error instanceof Error ? error.message : String(error)}`);
+    });
+}
+
+function exitBackgroundMonitor() {
+  stopBackgroundMonitorPolling();
+  backgroundMonitor = null;
+  inputActive = monitorInputWasActive;
+  redrawInput(true);
+}
+
+function startBackgroundMonitorPolling() {
+  if (backgroundMonitorTimer) {
+    return;
+  }
+  backgroundMonitorTimer = setInterval(() => {
+    void pollBackgroundMonitor();
+  }, 500);
+  backgroundMonitorTimer.unref?.();
+}
+
+function stopBackgroundMonitorPolling() {
+  if (!backgroundMonitorTimer) {
+    return;
+  }
+  clearInterval(backgroundMonitorTimer);
+  backgroundMonitorTimer = null;
+}
+
+async function pollBackgroundMonitor() {
+  if (!backgroundMonitor || backgroundMonitorPollInFlight || runtimeClosing) {
+    return;
+  }
+  const tasks = [...backgroundTasks.values()];
+  if (!tasks.length) {
+    return;
+  }
+  backgroundMonitor.selectedIndex = clampBackgroundIndex(backgroundMonitor.selectedIndex);
+  const selected = tasks[backgroundMonitor.selectedIndex];
+  if (!selected?.bg_id) {
+    return;
+  }
+  backgroundMonitorPollInFlight = true;
+  try {
+    const result = await request("background.output", {
+      bg_id: selected.bg_id,
+      max_output_chars: 20000,
+    });
+    if (result?.task && typeof result.task === "object") {
+      backgroundTasks.set(selected.bg_id, {
+        ...selected,
+        ...result.task,
+        command: selected.command || "",
+      });
+      updateBackgroundCount();
+      redrawInput();
+    }
+  } catch {
+    // The list refresh will reconcile expired tasks without interrupting the prompt.
+  } finally {
+    backgroundMonitorPollInFlight = false;
+  }
+}
+
+function clampBackgroundIndex(index) {
+  const count = backgroundTasks.size;
+  if (!count) {
+    return 0;
+  }
+  return Math.min(count - 1, Math.max(0, Number(index) || 0));
+}
+
+function moveBackgroundSelection(delta) {
+  const count = backgroundTasks.size;
+  if (!backgroundMonitor || !count) {
+    return;
+  }
+  const current = clampBackgroundIndex(backgroundMonitor.selectedIndex);
+  backgroundMonitor.selectedIndex = (current + delta + count) % count;
+  void pollBackgroundMonitor();
+  redrawInput();
+}
+
+function backgroundMonitorFrame(width) {
+  const tasks = [...backgroundTasks.values()];
+  const selectedIndex = clampBackgroundIndex(backgroundMonitor?.selectedIndex);
+  const text = backgroundMonitorText(
+    tasks,
+    selectedIndex,
+    tasks[selectedIndex],
+    Math.max(20, Number(width) - 4),
+  );
+  const lines = text.split("\n");
+  const selectedRow = tasks.length ? 2 + selectedIndex : Math.max(0, lines.length - 1);
+  return {
+    lines,
+    cursorRow: Math.min(selectedRow, Math.max(0, lines.length - 1)),
+    cursorColumn: 0,
+    focusRow: Math.min(selectedRow, Math.max(0, lines.length - 1)),
+  };
 }
 
 function refreshInputState() {
@@ -674,6 +940,7 @@ async function renderEvent(message) {
       return;
     case "tool_requested":
       closeAssistant();
+      recordBackgroundCommand(event);
       if (event.tool_call_id) {
         if (announcedTools.has(event.tool_call_id)) {
           return;
@@ -693,6 +960,7 @@ async function renderEvent(message) {
       closeAssistant();
       const fileChange = pendingFileChanges.get(event.tool_call_id);
       pendingFileChanges.delete(event.tool_call_id);
+      recordBackgroundResult(event);
       recordToolResult(event);
       logOutput(toolResultLine(event, fileChange));
       return;
@@ -760,6 +1028,7 @@ function resetTurnTools() {
   turnTools = { completed: 0, failed: 0 };
   announcedTools.clear();
   pendingFileChanges.clear();
+  pendingBackgroundCommands.clear();
 }
 
 async function answerQuestion(event) {
@@ -861,6 +1130,9 @@ function clearAssistantLineForInput() {
 }
 
 function renderActiveInput(width = process.stdout.columns || 80) {
+  if (backgroundMonitor) {
+    return backgroundMonitorFrame(width);
+  }
   const session = activeInputSession;
   if (!session) {
     return { lines: [], cursorRow: 0, cursorColumn: 0 };
@@ -914,6 +1186,14 @@ function handleTerminalInput(raw = "") {
     handleSigint();
     return;
   }
+  if (backgroundMonitor) {
+    handleBackgroundMonitorInput(event);
+    return;
+  }
+  if (event.ctrl && event.name === "b") {
+    enterBackgroundMonitor();
+    return;
+  }
   const session = activeInputSession;
   if (!session) {
     return;
@@ -950,12 +1230,37 @@ function handleTerminalInput(raw = "") {
 }
 
 function handleTerminalPaste(text) {
+  if (backgroundMonitor) {
+    return;
+  }
   const session = activeInputSession;
   if (!session || session.mode === "model" || session.mode === "choice" || session.mode === "sessions") {
     return;
   }
   session.editor.handleInput({ kind: "paste", text });
   redrawInput();
+}
+
+function handleBackgroundMonitorInput(key) {
+  const modified = key.ctrl || key.alt || key.shift;
+  if (!modified && key.name === "escape") {
+    exitBackgroundMonitor();
+    return;
+  }
+  if (key.ctrl && key.name === "b") {
+    exitBackgroundMonitor();
+    return;
+  }
+  if (modified) {
+    return;
+  }
+  if (key.name === "up" || key.text === "k") {
+    moveBackgroundSelection(-1);
+    return;
+  }
+  if (key.name === "down" || key.text === "j") {
+    moveBackgroundSelection(1);
+  }
 }
 
 function handleModelInput(session, key) {
@@ -1217,6 +1522,8 @@ function closeRuntime() {
   }
   runtimeClosing = true;
   clearActivityTimer();
+  stopBackgroundRefresh();
+  stopBackgroundMonitorPolling();
   if (runtime.exitCode === null && !runtime.killed) {
     if (runtime.stdin.writable) {
       runtime.stdin.end(JSON.stringify({ id: nextId++, method: "shutdown", params: {} }) + "\n");
@@ -1230,6 +1537,8 @@ function forceCloseRuntime() {
   runtimeClosing = true;
   clearActivityTimer();
   clearRuntimeKillTimer();
+  stopBackgroundRefresh();
+  stopBackgroundMonitorPolling();
   closeInput();
   killRuntime();
 }
@@ -1257,6 +1566,8 @@ async function shutdownRuntime() {
   }
   runtimeClosing = true;
   clearActivityTimer();
+  stopBackgroundRefresh();
+  stopBackgroundMonitorPolling();
   scheduleRuntimeKill();
   try {
     await request("shutdown");

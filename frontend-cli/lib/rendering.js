@@ -55,6 +55,7 @@ export function helpText(commands = []) {
     helpRow("↑ / ↓", "history", "← / →", "move cursor"),
     helpRow("home / end", "line edges", "del / backspace", "edit text"),
     helpRow("ctrl+c", "interrupt or quit", "?", "show shortcuts"),
+    helpRow("ctrl+b", "background tasks", "esc", "close monitor"),
     "",
     `${accent("•")} Command deck`,
     ...commandDeckText(commands),
@@ -143,6 +144,43 @@ export function choiceMenuText(options, selectedIndex = 0, recommended = "") {
 
 export function sessionMenuText(options, selectedIndex = 0) {
   return choiceMenuTextWithTitle(options, selectedIndex, "", "Sessions");
+}
+
+export function backgroundMonitorText(tasks = [], selectedIndex = 0, selectedTask = null, width = 76) {
+  const items = Array.isArray(tasks) ? tasks : [];
+  const lines = [bold("Background tasks"), dim("  ↑↓/j/k select · esc/ctrl+b close")];
+  if (!items.length) {
+    lines.push(dim("  No background tasks."));
+    return lines.join("\n");
+  }
+  for (const [index, task] of items.entries()) {
+    const active = index === selectedIndex;
+    const marker = active ? accent("›") : dim("·");
+    const status = singleLine(task?.status) || "unknown";
+    const bgId = singleLine(task?.bg_id) || "unknown";
+    const command = clipSingleLine(task?.command, Math.max(12, width - 34));
+    lines.push(`  ${marker} ${padRight(bgId, 12)} ${padRight(status, 10)} ${dim(command)}`.trimEnd());
+  }
+  lines.push("");
+  const task = selectedTask || items[selectedIndex];
+  if (!task) {
+    return lines.join("\n");
+  }
+  const heading = `${singleLine(task.bg_id) || "unknown"} · ${singleLine(task.status) || "unknown"}`;
+  lines.push(dim(`  ${heading}`));
+  const rawOutput = [task.stdout, task.stderr]
+    .filter((value) => String(value || ""))
+    .join("\n")
+  const visibleOutput = rawOutput ? rawOutput.split(/\r?\n/).slice(-18) : [];
+  if (!rawOutput) {
+    lines.push(dim("  (no output)"));
+  } else {
+    lines.push(...visibleOutput.map((line) => `  ${clipSingleLine(line, width)}`));
+  }
+  if (task.truncated) {
+    lines.push(dim("  … output truncated"));
+  }
+  return lines.join("\n");
 }
 
 function choiceMenuTextWithTitle(options, selectedIndex = 0, recommended = "", title = "Choices") {
@@ -898,20 +936,24 @@ function visibleLength(text) {
 }
 
 function promptHeaderLine(info) {
+  const backgroundCount = Number(info.background_count);
+  const backgroundHint = backgroundCount > 0
+    ? " · " + dim("[bg:" + backgroundCount + "] (ctrl+b monitor)")
+    : "";
   const model = singleLine(info.model);
   const cwd = middleClip(info.cwd, 56);
   const width = composerWidth();
   if (model && cwd) {
     const separator = " · ";
-    const pathWidth = width - visibleLength(model) - visibleLength(separator);
+    const pathWidth = width - visibleLength(model) - visibleLength(separator) - visibleLength(backgroundHint);
     if (pathWidth > 0) {
-      return `  ${promptModel(clipSingleLine(model, width))}${dim(separator)}${promptPath(clipSingleLine(cwd, pathWidth))}`;
+      return `  ${promptModel(clipSingleLine(model, width))}${dim(separator)}${promptPath(clipSingleLine(cwd, pathWidth))}${backgroundHint}`;
     }
   }
   if (model) {
-    return `  ${promptModel(clipSingleLine(model, width))}`;
+    return `  ${promptModel(clipSingleLine(model, width))}${backgroundHint}`;
   }
-  return cwd ? `  ${promptPath(clipSingleLine(cwd, width))}` : "";
+  return cwd ? `  ${promptPath(clipSingleLine(cwd, width))}${backgroundHint}` : "";
 }
 
 function composerWidth() {

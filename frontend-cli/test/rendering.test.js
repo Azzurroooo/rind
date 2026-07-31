@@ -5,6 +5,7 @@ import { AssistantRenderer } from "../lib/assistant-renderer.js";
 import {
   answerPromptText,
   answerPlaceholderText,
+  backgroundMonitorText,
   cancelledText,
   commandResultText,
   contextBuiltLine,
@@ -237,6 +238,7 @@ test("helpText renders compact shortcuts and commands", () => {
       "  ↑ / ↓        history              ← / →          move cursor",
       "  home / end   line edges           del / backspace edit text",
       "  ctrl+c       interrupt or quit    ?              show shortcuts",
+      "  ctrl+b       background tasks     esc            close monitor",
       "",
       "• Command deck",
       "  /status  /sessions  /skill  /init  /plan  /compact",
@@ -258,6 +260,7 @@ test("helpText renders compact shortcuts and commands", () => {
       "  ↑ / ↓        history              ← / →          move cursor",
       "  home / end   line edges           del / backspace edit text",
       "  ctrl+c       interrupt or quit    ?              show shortcuts",
+      "  ctrl+b       background tasks     esc            close monitor",
       "",
       "• Command deck",
       "  /status         /help           /clear          /exit",
@@ -604,6 +607,24 @@ test("toolRequestedLine shows non-shell details as metadata", () => {
     }),
     "• Tool · Calling file read\n  ↳ frontend-cli/lib/rendering.js",
   );
+});
+
+test("prompt shows background task count after cwd with monitor hint", () => {
+  const text = promptText({ model: "m1", cwd: "E:\\project", background_count: 2 });
+  assert.match(text, /m1 · E:\\project · \[bg:2\] \(ctrl\+b monitor\)/);
+});
+
+test("background monitor renders selection and latest output", () => {
+  const text = backgroundMonitorText(
+    [
+      { bg_id: "bg_1", status: "running", command: "server", stdout: "tick-1\ntick-2" },
+      { bg_id: "bg_2", status: "completed", command: "build", stdout: "done" },
+    ],
+    0,
+  );
+  assert.match(text, /› bg_1/);
+  assert.match(text, /tick-2/);
+  assert.match(text, /bg_2/);
 });
 
 test("toolRequestedLine keeps large file content out of the status", () => {

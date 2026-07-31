@@ -203,6 +203,7 @@ def test_initialize_response_includes_resume_preview_when_history_exists(capsys)
         "input_queue",
         "session_switch",
         "tool_input_stream",
+        "background_monitor",
     ]
     assert result["session_id"] == "s1"
     assert result["model"] == "m1"
@@ -330,6 +331,57 @@ def test_readonly_status_slash_responds_without_main_queue(capsys):
     assert "Session: s1" in message["result"]["text"]
     assert message["result"]["display"]["type"] == "status"
     assert message["result"]["display"]["session"] == "s1"
+
+
+def test_background_requests_use_control_callbacks(capsys):
+    async def list_backgrounds(session_id):
+        assert session_id == "s1"
+        return [{"bg_id": "bg_1", "status": "running"}]
+
+    async def snapshot_background(bg_id, *, max_output_chars, _session_id):
+        assert (bg_id, max_output_chars, _session_id) == ("bg_1", 100, "s1")
+        return {"bg_id": bg_id, "status": "running", "stdout": "tick"}
+
+    async def run():
+        server = StdioRuntimeServer(
+            _Runtime(),
+            _Session(),
+            background_list=list_backgrounds,
+            background_output=snapshot_background,
+        )
+        assert await server._handle_control_message(
+            {"request_id": 30, "method": "background.list", "params": {}}
+        )
+        assert await server._handle_control_message(
+            {
+                "request_id": 31,
+                "method": "background.output",
+                "params": {"bg_id": "bg_1", "max_output_chars": 100},
+            }
+        )
+
+    asyncio.run(run())
+
+    messages = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
+    assert messages[0]["result"] == {"tasks": [{"bg_id": "bg_1", "status": "running"}]}
+    assert messages[1]["result"]["task"]["stdout"] == "tick"
+
+
+def test_background_output_rejects_invalid_request(capsys):
+    async def run():
+        server = StdioRuntimeServer(
+            _Runtime(),
+            _Session(),
+            background_output=lambda *_args, **_kwargs: {},
+        )
+        await server._handle_control_message(
+            {"request_id": 32, "method": "background.output", "params": {"bg_id": ""}}
+        )
+
+    asyncio.run(run())
+
+    message = json.loads(capsys.readouterr().out)
+    assert message["error"]["type"] == "InvalidRequest"
 
 
 def test_readonly_doctor_slash_responds_without_main_queue(capsys):
