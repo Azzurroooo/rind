@@ -131,8 +131,15 @@ test("prompt and turn status copy match the compact terminal UI", () => {
   assert.equal(cancelledText(), "• Interrupted\n  ↳ session preserved; resume with -c");
   assert.equal(userInputText("hello"), "› You\n  hello");
   assert.equal(userInputText("first\r\nsecond"), "› You\n  first\n  second");
+  const originalColumns = process.stdout.columns;
+  process.stdout.columns = 12;
+  try {
+    assert.equal(userInputText("abcdefghijklmnop"), "› You\n  abcdefghij\n  klmnop");
+  } finally {
+    process.stdout.columns = originalColumns;
+  }
   assert.equal(userInputText(""), "");
-  assert.equal(assistantHeaderText(), "• Assistant");
+  assert.equal(assistantHeaderText(), "♬ Assistant");
   assert.equal(outputBlockText("• Working"), "• Working\n");
   assert.equal(outputBlockText("• Working", true), "\n• Working\n");
   assert.equal(outputBlockText(""), "");
@@ -688,6 +695,30 @@ test("toolResultLine renders compact success state", () => {
       result: JSON.stringify({ ok: true, data: { message: "Background process started: npm run dev" } }),
     }),
     "✓ Tool · Ran command in 35ms\n  ↳ Background process started: npm run dev",
+  );
+  assert.equal(
+    toolResultLine({
+      tool_name: "bash",
+      status: "completed",
+      duration_ms: 1050,
+      result: JSON.stringify({
+        ok: true,
+        data: { status: "running", stdout: "tick-0", exit_code: -1, bg_id: "bg_123" },
+      }),
+    }),
+    "• Tool · command running in background in 1.05s\n  ↳ tick-0",
+  );
+  assert.equal(
+    toolResultLine({
+      tool_name: "bash_output",
+      status: "completed",
+      duration_ms: 5050,
+      result: JSON.stringify({
+        ok: true,
+        data: { status: "running", stdout: "tick-1\ntick-2", exit_code: -1, bg_id: "bg_123" },
+      }),
+    }),
+    "• Tool · command output read; command still running in background in 5.05s\n  ↳ tick-1 tick-2",
   );
   assert.equal(
     toolResultLine({

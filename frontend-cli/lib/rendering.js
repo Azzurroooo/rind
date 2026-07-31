@@ -1,4 +1,4 @@
-import { clipCells, middleClipCells, textWidth } from "./text-width.js";
+import { clipCells, middleClipCells, textWidth, wrapTextCells } from "./text-width.js";
 
 const MAX_STARTUP_BANNER_WIDTH = 80;
 const MAX_COMPOSER_WIDTH = 78;
@@ -29,11 +29,18 @@ export function promptPlaceholderText() {
 
 export function userInputText(text) {
   const lines = messageLines(text);
-  return lines.length ? `${accent("›")} ${bold("You")}\n${lines.map((line) => `  ${line}`).join("\n")}` : "";
+  if (!lines.length) {
+    return "";
+  }
+  const contentWidth = userInputContentWidth();
+  const physicalLines = lines.flatMap((line) => (
+    wrapTextCells(line, contentWidth, contentWidth).map((chunk) => `  ${chunk.text}`)
+  ));
+  return `${accent("›")} ${bold("You")}\n${physicalLines.join("\n")}`;
 }
 
 export function assistantHeaderText() {
-  return `${accent("•")} ${bold("Assistant")}`;
+  return `${accent("♬")} ${bold("Assistant")}`;
 }
 
 export function outputBlockText(text, leading = false) {
@@ -266,6 +273,16 @@ export function toolResultLine(event, fileChange) {
     return detail ? `${line}\n${dim(detailLine(detail))}` : line;
   }
   const result = toolResultSummary(event.result);
+  if (result.status === "running" && (name === "bash" || name === "bash_output")) {
+    const runningText = name === "bash_output"
+      ? "command output read; command still running in background"
+      : "command running in background";
+    const line = `${accent("•")} ${bold("Tool")} ${dim("·")} ${runningText} in ${duration}`;
+    const output = result.output;
+    return [line, output ? dim(detailLine(output)) : "", fileChangeLine(fileChange)]
+      .filter(Boolean)
+      .join("\n");
+  }
   const line = result.exitCode
     ? `${red("×")} ${bold("Tool")} ${dim("·")} ${label} exited ${result.exitCode} in ${duration}`
     : `${green("✓")} ${bold("Tool")} ${dim("·")} ${completedToolText(name, label)} in ${duration}`;
@@ -637,6 +654,7 @@ function toolResultSummary(result) {
   const payload = parseJsonObject(result);
   const data = payload.data && typeof payload.data === "object" ? payload.data : {};
   return {
+    status: singleLine(data.status).toLowerCase(),
     exitCode: nonZeroExitCode(data.exit_code),
     output: clipSingleLine(data.stdout || data.stderr || data.message, 120),
   };
@@ -723,6 +741,11 @@ function singleLine(value) {
 function messageLines(value) {
   const text = String(value || "").replace(/\r/g, "").trim();
   return text ? text.split("\n").map((line) => line.trimEnd()) : [];
+}
+
+function userInputContentWidth() {
+  const columns = Number(process.stdout.columns);
+  return Number.isFinite(columns) && columns > 0 ? Math.max(1, Math.floor(columns - 2)) : 78;
 }
 
 function formatDuration(durationMs) {
