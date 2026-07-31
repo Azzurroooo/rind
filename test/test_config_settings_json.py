@@ -112,7 +112,7 @@ def test_openai_client_factory_uses_loaded_settings(tmp_path, monkeypatch):
     assert kwargs["api_key"] == "settings-key"
     assert kwargs["base_url"] == "https://example.com/v1"
     user_agent = kwargs["default_headers"]["User-Agent"]
-    assert user_agent.startswith("rind/0.2.0 (")
+    assert user_agent.startswith("rind/0.3.0 (")
     assert "; " in user_agent
     assert ") " in user_agent
 

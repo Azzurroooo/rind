@@ -6,6 +6,7 @@ import asyncio
 import copy
 import json
 import os
+import shutil
 import uuid
 from typing import Any
 from datetime import datetime, timezone
@@ -40,6 +41,16 @@ def _valid_session_id_value(value: object) -> bool:
     except ValueError:
         return False
     return True
+
+
+def _has_conversation_messages(session: dict[str, Any]) -> bool:
+    size = session.get("size")
+    if not isinstance(size, dict):
+        return True
+    try:
+        return int(size.get("messages") or 0) > 1
+    except (TypeError, ValueError):
+        return True
 
 
 class JsonlSessionStore(SessionStore):
@@ -278,7 +289,11 @@ class JsonlSessionStore(SessionStore):
         sessions = index_data.get("sessions", [])
         if not sessions:
             return None
-        sessions = [s for s in sessions if isinstance(s, dict) and s.get("updated_at")]
+        sessions = [
+            s
+            for s in sessions
+            if isinstance(s, dict) and s.get("updated_at") and _has_conversation_messages(s)
+        ]
         if not sessions:
             return None
 
@@ -411,6 +426,27 @@ class JsonlSessionStore(SessionStore):
 
                 set_active_session_context(str(self._session_root), str(self._session_id))
 
+    async def discard_if_empty(self) -> None:
+        async with self._write_lock:
+            await asyncio.to_thread(self._discard_if_empty_sync)
+
+    def _discard_if_empty_sync(self) -> None:
+        if not self._session_id or not self._session_paths:
+            return
+        messages = self._msg_repo.load_messages() if self._msg_repo else []
+        if any(
+            message.get("role") == "user" and str(message.get("content") or "").strip()
+            for message in messages
+            if isinstance(message, dict)
+        ):
+            return
+        base = self._session_paths.get("base")
+        if not base or not os.path.isdir(base):
+            return
+        if self._index_repo:
+            self._index_repo.remove_session(self._session_id)
+        shutil.rmtree(base)
+
     async def switch_session(self, session_id: str) -> dict[str, Any]:
         """Switch to an existing session without creating a new one."""
         async with self._write_lock:
@@ -536,7 +572,10 @@ class JsonlSessionStore(SessionStore):
             sessions = [
                 s
                 for s in sessions
-                if isinstance(s, dict) and s.get("updated_at") and _valid_session_id_value(s.get("id"))
+                if isinstance(s, dict)
+                and s.get("updated_at")
+                and _valid_session_id_value(s.get("id"))
+                and _has_conversation_messages(s)
             ]
             sessions.sort(key=lambda s: s.get("updated_at") or "", reverse=True)
             return sessions[:limit]

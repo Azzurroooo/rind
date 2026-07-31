@@ -39,3 +39,17 @@ class SessionIndexRepository:
                 sessions.append(entry)
             index_data["sessions"] = sessions
             self._files.write_json(self._index_path, index_data)
+
+    def remove_session(self, session_id: str) -> None:
+        if not self._index_path:
+            return
+
+        lock = self._files._get_lock_for_path(self._index_path)
+        with lock:
+            index_data = self.load_index()
+            sessions = index_data.get("sessions", [])
+            remaining = [session for session in sessions if session.get("id") != session_id]
+            if len(remaining) == len(sessions):
+                return
+            index_data["sessions"] = remaining
+            self._files.write_json(self._index_path, index_data)

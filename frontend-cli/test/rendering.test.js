@@ -16,6 +16,7 @@ import {
   interruptText,
   modelListErrorText,
   modelMenuText,
+  planUpdatedLine,
   sessionMenuText,
   sessionSwitchedText,
   modelUsageText,
@@ -750,6 +751,38 @@ test("toolResultLine renders compact success state", () => {
     }),
     "⊘ Tool · command exited 1 in 25ms\n  ↳ not found",
   );
+});
+
+test("planUpdatedLine renders each plan status with its dedicated icon", () => {
+  assert.equal(
+    planUpdatedLine([
+      { step: "pending step", status: "pending" },
+      { step: "active step", status: "in_progress" },
+      { step: "done step", status: "completed" },
+      { step: "cancelled step", status: "cancelled" },
+    ]),
+    [
+      "◉ Plan updated",
+      "  ○ pending step",
+      "  ◐ active step",
+      "  ● done step",
+      "  ⊖ cancelled step",
+    ].join("\n"),
+  );
+});
+
+test("planUpdatedLine renders an empty plan and clips long steps", () => {
+  assert.equal(planUpdatedLine([]), "◉ Plan cleared");
+  const originalColumns = process.stdout.columns;
+  process.stdout.columns = 30;
+  try {
+    assert.equal(
+      planUpdatedLine([{ step: "x".repeat(80), status: "pending" }]),
+      `◉ Plan updated\n  ○ ${"x".repeat(21)}...`,
+    );
+  } finally {
+    process.stdout.columns = originalColumns;
+  }
 });
 
 test("toolResultLine appends inline file change diff for successful file tools", () => {

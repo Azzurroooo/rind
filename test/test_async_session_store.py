@@ -68,6 +68,33 @@ async def test_async_session_store_facade(temp_session_dir):
 
 
 @pytest.mark.asyncio
+async def test_empty_session_is_removed_with_index_entry(temp_session_dir):
+    store = JsonlSessionStore(session_dir=temp_session_dir)
+    await store.initialize()
+    session_base = Path(temp_session_dir) / store.session_id
+
+    await store.discard_if_empty()
+
+    assert not session_base.exists()
+    index = json.loads((Path(temp_session_dir) / "index.json").read_text(encoding="utf-8"))
+    assert not any(entry.get("id") == store.session_id for entry in index["sessions"])
+
+
+@pytest.mark.asyncio
+async def test_session_with_user_message_is_kept(temp_session_dir):
+    store = JsonlSessionStore(session_dir=temp_session_dir)
+    await store.initialize()
+    await store.persist_message("user", "keep this session")
+    session_base = Path(temp_session_dir) / store.session_id
+
+    await store.discard_if_empty()
+
+    assert session_base.exists()
+    index = json.loads((Path(temp_session_dir) / "index.json").read_text(encoding="utf-8"))
+    assert any(entry.get("id") == store.session_id for entry in index["sessions"])
+
+
+@pytest.mark.asyncio
 async def test_async_session_store_persists_and_reloads_turn_state(temp_session_dir):
     store = JsonlSessionStore(session_dir=temp_session_dir)
     await store.initialize()
@@ -199,6 +226,10 @@ async def test_resume_latest_and_recent_sessions_ignore_invalid_index_ids(tmp_pa
     session_root = tmp_path / "sessions"
     store = JsonlSessionStore(session_dir=str(session_root), session_id="valid_session")
     await store.initialize()
+    await store.persist_message("user", "keep this session")
+
+    empty = JsonlSessionStore(session_dir=str(session_root), session_id="empty_session")
+    await empty.initialize()
 
     meta = json.loads((session_root / "valid_session" / "meta.json").read_text(encoding="utf-8"))
     index_path = session_root / "index.json"
@@ -212,8 +243,15 @@ async def test_resume_latest_and_recent_sessions_ignore_invalid_index_ids(tmp_pa
                         "workspace_root": meta["workspace_root"],
                     },
                     {
+                        "id": "empty_session",
+                        "updated_at": "2099-01-01T00:00:00+00:00",
+                        "size": {"messages": 1, "tool_calls": 0},
+                        "workspace_root": meta["workspace_root"],
+                    },
+                    {
                         "id": "valid_session",
                         "updated_at": "2026-01-01T00:00:00+00:00",
+                        "size": {"messages": 2, "tool_calls": 0},
                         "workspace_root": meta["workspace_root"],
                     },
                 ]

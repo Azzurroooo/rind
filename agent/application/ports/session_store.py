@@ -27,6 +27,10 @@ class SessionStore(Protocol):
         """Initialize or load the session state."""
         ...
 
+    async def discard_if_empty(self) -> None:
+        """Remove the active session when it has no conversation messages."""
+        ...
+
     async def switch_session(self, session_id: str) -> dict[str, Any]:
         """Switch this store instance to an existing session."""
         ...

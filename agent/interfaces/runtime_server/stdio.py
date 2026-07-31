@@ -607,7 +607,10 @@ async def async_main(argv: list[str] | None = None) -> int:
         background_list=background_list,
         background_output=background_output,
     )
-    return await server.run()
+    try:
+        return await server.run()
+    finally:
+        await container.session_store.discard_if_empty()
 
 
 def main(argv: list[str] | None = None) -> int:

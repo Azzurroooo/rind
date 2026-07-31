@@ -34,6 +34,7 @@ import {
   interruptText,
   modelListErrorText,
   modelMenuText,
+  planUpdatedLine,
   choiceMenuText,
   sessionMenuText,
   sessionSwitchedText,
@@ -90,6 +91,7 @@ let cancelActiveInput = null;
 const pending = new Map();
 const announcedTools = new Set();
 const pendingFileChanges = new Map();
+const pendingPlanInputs = new Map();
 let sessionInfo = {};
 let latestStats = {};
 const backgroundTasks = new Map();
@@ -578,6 +580,47 @@ function parsePreviewObject(value) {
   }
 }
 
+function rememberPlanInputStart(event) {
+  if (event.tool_name === "update_plan" && event.tool_call_id) {
+    pendingPlanInputs.set(event.tool_call_id, "");
+  }
+}
+
+function appendPlanInput(event) {
+  if (event.tool_name !== "update_plan" || !event.tool_call_id) {
+    return;
+  }
+  const current = pendingPlanInputs.get(event.tool_call_id);
+  if (current === undefined) {
+    return;
+  }
+  pendingPlanInputs.set(event.tool_call_id, current + String(event.delta || ""));
+}
+
+function rememberPlanInputPreview(event) {
+  if (event.tool_name !== "update_plan" || !event.tool_call_id) {
+    return;
+  }
+  const current = pendingPlanInputs.get(event.tool_call_id);
+  if (!current) {
+    pendingPlanInputs.set(event.tool_call_id, String(event.args_preview || ""));
+  }
+}
+
+function takePlanInput(event) {
+  if (event.tool_name !== "update_plan" || !event.tool_call_id) {
+    return "";
+  }
+  const value = pendingPlanInputs.get(event.tool_call_id) || "";
+  pendingPlanInputs.delete(event.tool_call_id);
+  return value;
+}
+
+function parsePlanInput(value) {
+  const args = parsePreviewObject(value);
+  return Array.isArray(args.plan) ? args.plan : null;
+}
+
 function parseToolData(value) {
   const parsed = parsePreviewObject(value);
   return parsed.data && typeof parsed.data === "object" ? parsed.data : {};
@@ -927,6 +970,7 @@ async function renderEvent(message) {
     }
     case "tool_input_started":
       closeAssistant();
+      rememberPlanInputStart(event);
       if (event.tool_call_id) {
         if (announcedTools.has(event.tool_call_id)) {
           return;
@@ -936,10 +980,13 @@ async function renderEvent(message) {
       logOutput(toolStartedLine(event));
       return;
     case "tool_input_delta":
+      appendPlanInput(event);
+      return;
     case "tool_input_ended":
       return;
     case "tool_requested":
       closeAssistant();
+      rememberPlanInputPreview(event);
       recordBackgroundCommand(event);
       if (event.tool_call_id) {
         if (announcedTools.has(event.tool_call_id)) {
@@ -960,9 +1007,13 @@ async function renderEvent(message) {
       closeAssistant();
       const fileChange = pendingFileChanges.get(event.tool_call_id);
       pendingFileChanges.delete(event.tool_call_id);
+      const planInput = takePlanInput(event);
       recordBackgroundResult(event);
       recordToolResult(event);
-      logOutput(toolResultLine(event, fileChange));
+      const plan = event.tool_name === "update_plan" && event.status === "completed"
+        ? parsePlanInput(planInput)
+        : null;
+      logOutput(plan ? planUpdatedLine(plan) : toolResultLine(event, fileChange));
       return;
     case "file_change":
       if (event.tool_call_id) {
@@ -1028,6 +1079,7 @@ function resetTurnTools() {
   turnTools = { completed: 0, failed: 0 };
   announcedTools.clear();
   pendingFileChanges.clear();
+  pendingPlanInputs.clear();
   pendingBackgroundCommands.clear();
 }
 
@@ -1506,8 +1558,12 @@ function handleStdinData(chunk) {
 }
 
 function exitFromSignal() {
-  forceCloseRuntime();
-  scheduleProcessExit(0, 0);
+  if (runtimeClosing) {
+    forceCloseRuntime();
+    scheduleProcessExit(0, 0);
+    return;
+  }
+  void shutdownRuntime();
 }
 
 function closeAssistant() {

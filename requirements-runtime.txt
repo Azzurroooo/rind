@@ -1,13 +1,10 @@
 requests>=2.31.0
 beautifulsoup4>=4.12.0
-urllib3>=2.0.0
 curl_cffi>=0.15.0
 trafilatura>=1.8.0
 rich>=13.7.0
 prompt_toolkit>=3.0.0
 openai>=1.0.0
-fastapi>=0.110.0
-sse-starlette>=2.0.0
 filelock>=3.13.0
 tiktoken>=0.6.0
 tenacity>=8.2.0

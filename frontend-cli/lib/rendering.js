@@ -330,6 +330,22 @@ export function toolResultLine(event, fileChange) {
     .join("\n");
 }
 
+export function planUpdatedLine(plan) {
+  const items = Array.isArray(plan) ? plan : [];
+  if (!items.length) {
+    return `${green("◉")} ${bold("Plan cleared")}`;
+  }
+
+  const lines = [`${green("◉")} ${bold("Plan updated")}`];
+  for (const item of items) {
+    const step = clipSingleLine(item?.step, detailTextWidth());
+    if (step) {
+      lines.push(`  ${planStatusIcon(item?.status)} ${step}`);
+    }
+  }
+  return lines.join("\n");
+}
+
 export function toolProgressLine(event) {
   const name = event.tool_name || "tool";
   const message = progressMessage(event.payload);
@@ -743,7 +759,7 @@ function fileChangeDiffLine(change) {
   const added = change.kind === "added";
   const marker = added ? "+" : "-";
   const style = added ? green : red;
-  return `${dim(`    ${marker} `)}${style(clipCells(change.text, fileChangeTextWidth()))}`;
+  return `${dim(`    ${marker} `)}${style(clipCells(change.text, detailTextWidth()))}`;
 }
 
 function fileChangePathWidth() {
@@ -754,12 +770,25 @@ function fileChangePathWidth() {
   return Math.max(18, Math.min(48, columns - 32));
 }
 
-function fileChangeTextWidth() {
+function detailTextWidth() {
   const columns = Number(process.stdout.columns);
   if (!Number.isFinite(columns) || columns <= 0) {
     return 96;
   }
   return Math.max(12, Math.min(96, columns - 6));
+}
+
+function planStatusIcon(status) {
+  switch (status) {
+    case "in_progress":
+      return accent("◐");
+    case "completed":
+      return green("●");
+    case "cancelled":
+      return dim("⊖");
+    default:
+      return dim("○");
+  }
 }
 
 function clipSingleLine(value, maxLength) {
