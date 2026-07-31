@@ -2,11 +2,10 @@
 
 from __future__ import annotations
 
-import os
 import re
 from typing import Literal
 
-ApprovalStatus = Literal["allow", "deny", "needs_approval"]
+BashPolicyStatus = Literal["allow", "deny"]
 
 
 class BashPolicy:
@@ -23,7 +22,7 @@ class BashPolicy:
         return None
 
     @classmethod
-    def classify(cls, command: str) -> tuple[ApprovalStatus, str | None]:
+    def classify(cls, command: str) -> tuple[BashPolicyStatus, str | None]:
         """Classify a command's safety level."""
 
         # 1. Check absolutely forbidden commands
@@ -39,23 +38,4 @@ class BashPolicy:
         if forbidden_reason:
             return "deny", forbidden_reason
 
-        # 2. Check confirmable commands
-        confirmable_patterns = [
-            (r"\brm\b", "Detected rm command."),
-            (r"\bdel\b.*\s/([qs]|s)\b", "Detected Windows del with recursive/silent flags."),
-            (r"\brmdir\b.*\s/([qs]|s)\b", "Detected Windows rmdir with recursive/silent flags."),
-            (r"\bRemove-Item\b.*-Recurse\b", "Detected PowerShell recursive removal."),
-        ]
-
-        confirm_reason = BashPolicy._match_patterns(command, confirmable_patterns)
-        if confirm_reason:
-            if BashPolicy._unsafe_mode_enabled():
-                return "allow", "Unsafe mode enabled."
-            return "needs_approval", confirm_reason
-
         return "allow", None
-
-    @staticmethod
-    def _unsafe_mode_enabled() -> bool:
-        value = os.getenv("AGENT_ALLOW_UNSAFE_BASH", "")
-        return value.strip().lower() in {"1", "true", "yes", "on"}

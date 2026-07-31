@@ -174,16 +174,15 @@ class ProcessSupervisor:
         )
         max_output_chars = self._clamp(max_output_chars, 20000, 1, self.MAX_OUTPUT_CHARS)
         started = time.monotonic()
-        stdout, stderr, truncated = delta_output(record, max_output_chars)
-        if not stdout and not stderr and not record.finished.is_set():
+        if not record.finished.is_set():
             outcome = await self._wait(
-                record, wait_ms / 1000, cancellation_token, stop_on_output=True
+                record, wait_ms / 1000, cancellation_token
             )
             if outcome == "cancelled":
                 self._processes.pop(process_id, None)
                 await self._terminate(record, "cancelled")
                 return cancelled_result("bash_output", record)
-            stdout, stderr, truncated = delta_output(record, max_output_chars)
+        stdout, stderr, truncated = delta_output(record, max_output_chars)
 
         payload = background_payload(
             record,
@@ -272,7 +271,6 @@ class ProcessSupervisor:
         finally:
             await self._settle_readers(record)
             record.finished.set()
-            record.updated.set()
 
     async def _read_stream(
         self,
@@ -284,36 +282,30 @@ class ProcessSupervisor:
         while raw := await stream.read(4096):
             capture.append(raw, decoder.decode(raw, False))
             record.last_output_at = time.monotonic()
-            record.updated.set()
         flushed = decoder.decode(b"", True)
         if flushed:
             capture.append(b"", flushed)
             record.last_output_at = time.monotonic()
-            record.updated.set()
 
     async def _wait(
         self,
         record: ProcessRecord,
         timeout: float,
         cancellation_token: CancellationToken | None,
-        stop_on_output: bool = False,
-    ) -> Literal["finished", "output", "cancelled", "deadline"]:
+    ) -> Literal["finished", "cancelled", "deadline"]:
         if record.finished.is_set():
             return "finished"
         if cancellation_token and cancellation_token.is_cancelled:
             return "cancelled"
 
         tasks = {"finished": asyncio.create_task(record.finished.wait())}
-        if stop_on_output:
-            record.updated.clear()
-            tasks["output"] = asyncio.create_task(record.updated.wait())
         if cancellation_token:
             tasks["cancelled"] = asyncio.create_task(cancellation_token.wait())
         try:
             done, _ = await asyncio.wait(
                 tasks.values(), timeout=timeout, return_when=asyncio.FIRST_COMPLETED
             )
-            for name in ("cancelled", "finished", "output"):
+            for name in ("cancelled", "finished"):
                 if name in tasks and tasks[name] in done:
                     return name
             return "deadline"

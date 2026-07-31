@@ -6,7 +6,6 @@ import argparse
 import asyncio
 import inspect
 import json
-import os
 import signal
 import sys
 from collections.abc import Callable
@@ -493,7 +492,6 @@ class StdioRuntimeServer:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Rind headless runtime server")
     parser.add_argument("--debug", action="store_true")
-    parser.add_argument("--allow-unsafe-bash", action="store_true")
     parser.add_argument("--session", type=str, default=None)
     parser.add_argument("-c", "--resume-latest", action="store_true")
     parser.add_argument("--session-dir", type=str, default=None)
@@ -502,8 +500,6 @@ def build_parser() -> argparse.ArgumentParser:
 
 async def async_main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
-    if args.allow_unsafe_bash:
-        os.environ["AGENT_ALLOW_UNSAFE_BASH"] = "1"
     if args.session is not None:
         try:
             args.session = validate_session_id(args.session)

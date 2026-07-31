@@ -129,7 +129,6 @@ node frontend-cli/bin/rind.js
 | `python main.py --session <id>` | 按 ID 恢复指定会话。 |
 | `python main.py --debug` | 关闭流式输出，并显示更详细的运行时与工具诊断信息。 |
 | `python main.py --doctor` | 检查本地配置，不需要有效 API Key。 |
-| `python main.py --allow-unsafe-bash` | 允许执行默认安全策略会阻止的 Shell 命令。 |
 
 在交互式 CLI 中，斜杠命令可用于诊断、会话管理、模型切换和状态查看。输入工具栏会展示当前会话、模型、工作目录和关键提示。
 

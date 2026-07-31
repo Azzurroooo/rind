@@ -31,14 +31,6 @@ async def bash(
             meta={"command": command[:500]},
         )
 
-    if status == "needs_approval":
-        return tool_error(
-            "bash",
-            f"Potentially dangerous command requires user approval: {reason}",
-            "CommandRequiresApproval",
-            meta={"command": command[:500]},
-        )
-
     state = _POOL.get_state(_session_id)
 
     if run_in_background:
@@ -75,7 +67,7 @@ async def bash_output(
     Read output from a background process, or terminate it.
     :param bg_id: Background process ID returned by bash(run_in_background=true)
     :param kill: Set to true to terminate the process (default false = read only)
-    :param wait_ms: Time to wait for new output/completion before returning
+    :param wait_ms: Time to wait for completion or timeout before returning accumulated output
     :param max_output_chars: Maximum chars returned per stdout/stderr delta
     """
     if kill:

@@ -79,12 +79,7 @@
     else 验证成功
     end
 
-    Note over Main: 第 5 阶段：处理环境变量 (line 51-52)
-    alt --allow-unsafe-bash
-        Main-&gt;&gt;Main: 设置 AGENT_ALLOW_UNSAFE_BASH=1
-    end
-
-    Note over Main: 第 6 阶段：构建依赖容器 (line 54-59)
+    Note over Main: 第 5 阶段：构建依赖容器 (line 51-56)
     Main-&gt;&gt;Container: build_basic_agent_dependencies()
 
     Note over Container: 初始化基础设施 (line 33-57)
@@ -132,7 +127,6 @@
 <ul>
 <li><code>--version</code> - 显示版本号</li>
 <li><code>--debug</code> - 调试模式</li>
-<li><code>--allow-unsafe-bash</code> - 允许危险的 shell 命令</li>
 <li><code>--session</code> - 指定 Session ID</li>
 <li><code>-c, --resume-latest</code> - 恢复最近的会话</li>
 <li><code>--session-dir</code> - 会话存储目录</li>
@@ -151,9 +145,7 @@
 <pre data-role="codeBlock" data-info="python" class="language-python python"><code>Config<span class="token punctuation">.</span>ensure_user_settings_template<span class="token punctuation">(</span><span class="token punctuation">)</span>  <span class="token comment"># 确保 settings.json 存在</span>
 Config<span class="token punctuation">.</span><span class="token builtin">reload</span><span class="token punctuation">(</span><span class="token punctuation">)</span>                          <span class="token comment"># 重新加载配置</span>
 Config<span class="token punctuation">.</span>validate<span class="token punctuation">(</span><span class="token punctuation">)</span>                        <span class="token comment"># 验证配置</span>
-</code></pre><h3 id="5-环境变量设置line-51-52">5. 环境变量设置（Line 51-52） </h3>
-<p>如果使用 <code>--allow-unsafe-bash</code>，设置 <code>AGENT_ALLOW_UNSAFE_BASH=1</code></p>
-<h3 id="6-依赖容器构建line-54-59">6. 依赖容器构建（Line 54-59） </h3>
+</code></pre><h3 id="5-依赖容器构建line-51-56">5. 依赖容器构建（Line 51-56） </h3>
 <p>调用 <code>build_basic_agent_dependencies()</code>，按以下顺序初始化：</p>
 <ol>
 <li>

@@ -1,6 +1,7 @@
 import asyncio
 import json
 import os
+import shlex
 import shutil
 import sys
 import pytest
@@ -11,7 +12,7 @@ os.chdir(PROJECT_ROOT)
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from agent.infrastructure.tools.builtin.shell.tool import bash
+from agent.infrastructure.tools.builtin.shell.tool import _POOL, bash
 
 @pytest.fixture
 def temp_dir(tmp_path: Path) -> Path:
@@ -40,12 +41,6 @@ def assert_error(payload: dict, error_type: str) -> dict:
         raise AssertionError(f"Expected error_type={error_type}, got: {payload}")
     return payload
 
-def set_env(value: str | None) -> None:
-    if value is None:
-        os.environ.pop("AGENT_ALLOW_UNSAFE_BASH", None)
-    else:
-        os.environ["AGENT_ALLOW_UNSAFE_BASH"] = value
-
 def test_echo() -> None:
     payload = assert_ok(parse_payload(run(bash("echo hello"))))
     data = payload.get("data") or {}
@@ -71,29 +66,25 @@ def test_cd_and_cwd(temp_dir: Path) -> None:
     if data.get("cwd") != expected_parent:
         raise AssertionError(f"Expected cwd={expected_parent}, got: {data}")
 
-def test_confirmable_requires_confirmation() -> None:
-    # In Phase 2, confirmable commands without unsafe mode will return an error
-    # instead of blocking with input().
-    set_env(None)
-    payload = assert_error(parse_payload(run(bash("rm __bash_tool_should_not_run__"))), "CommandRequiresApproval")
-    if payload.get("tool") != "bash":
-        raise AssertionError(f"Expected tool=bash, got: {payload}")
-
 def test_forbidden_blocked() -> None:
     payload = assert_error(parse_payload(run(bash("shutdown -h now"))), "DangerousCommandBlocked")
     if payload.get("tool") != "bash":
         raise AssertionError(f"Expected tool=bash, got: {payload}")
 
-def test_dangerous_allowed(temp_dir: Path) -> None:
-    def call():
-        return parse_payload(run(bash(f"rm -rf {str(temp_dir)}")))
-    os.environ["AGENT_ALLOW_UNSAFE_BASH"] = "1"
-    try:
-        payload = assert_ok(call())
-        if payload.get("tool") != "bash":
-            raise AssertionError(f"Expected tool=bash, got: {payload}")
-    finally:
-        os.environ.pop("AGENT_ALLOW_UNSAFE_BASH", None)
+def test_rm_allowed_by_default(temp_dir: Path) -> None:
+    target = temp_dir / "delete-me.txt"
+    target.write_text("delete", encoding="utf-8")
+    session_id = f"test_rm_{temp_dir.name}"
+    state = _POOL.get_state(session_id)
+    if state.shell_backend == "powershell":
+        command = f"rm -Force '{str(target).replace("'", "''")}'"
+    else:
+        command = f"rm -f {shlex.quote(target.as_posix())}"
+    payload = assert_ok(parse_payload(run(bash(command, _session_id=session_id))))
+    if payload.get("tool") != "bash":
+        raise AssertionError(f"Expected tool=bash, got: {payload}")
+    if target.exists():
+        raise AssertionError("Expected rm to execute by default")
 
 def main() -> int:
     temp_dir = PROJECT_ROOT / "test" / "__bash_tool_tmp__"
@@ -101,23 +92,14 @@ def main() -> int:
         shutil.rmtree(temp_dir, ignore_errors=True)
     temp_dir.mkdir(parents=True, exist_ok=True)
 
-    original_env = os.environ.get("AGENT_ALLOW_UNSAFE_BASH")
     try:
         test_echo()
         test_cd_and_cwd(temp_dir)
-        set_env(None)
-        set_env(None)
-        test_confirmable_requires_confirmation()
         test_forbidden_blocked()
-        set_env("1")
-        test_dangerous_allowed(temp_dir)
+        test_rm_allowed_by_default(temp_dir)
         print("All bash tool tests passed.")
         return 0
     finally:
-        if original_env is None:
-            os.environ.pop("AGENT_ALLOW_UNSAFE_BASH", None)
-        else:
-            os.environ["AGENT_ALLOW_UNSAFE_BASH"] = original_env
         try:
             shutil.rmtree(temp_dir, ignore_errors=True)
         except Exception:

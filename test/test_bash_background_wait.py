@@ -93,23 +93,23 @@ async def test_bash_foreground_ignores_wait_ms() -> None:
 
 
 @pytest.mark.asyncio
-async def test_bash_output_wait_returns_when_new_output_arrives() -> None:
+async def test_bash_output_waits_until_deadline_with_continuous_output() -> None:
     sid = session_id("wait_output")
     bg_id = ""
     try:
         bg = await start_background(
             sid,
-            "import time; time.sleep(1.8); print('ready', flush=True); time.sleep(3)",
+            "import time; [(print(f'line{i}', flush=True), time.sleep(0.3)) for i in range(8)]; time.sleep(10)",
         )
         bg_id = bg["bg_id"]
         started = time.monotonic()
         data = assert_ok(await bash_output(bg_id, wait_ms=5000, _session_id=sid))
         elapsed = time.monotonic() - started
 
-        assert elapsed < 4.5
+        assert elapsed >= 4.5
         assert data.get("status") == "running"
         assert data.get("delta") is True
-        assert "ready" in (data.get("stdout") or "")
+        assert "line" in (data.get("stdout") or "")
         assert data.get("no_new_output") is False
     finally:
         if bg_id:
@@ -157,11 +157,11 @@ async def test_bash_output_clamps_short_wait_to_minimum() -> None:
 
 
 @pytest.mark.asyncio
-async def test_bash_output_clamps_large_wait_to_maximum_without_long_sleep() -> None:
+async def test_bash_output_clamps_large_wait_to_maximum() -> None:
     sid = session_id("large_wait_clamp")
     bg_id = ""
     try:
-        bg = await start_background(sid, "import time; time.sleep(1.4); print('ready', flush=True); time.sleep(10)")
+        bg = await start_background(sid, "import time; time.sleep(1.4); print('ready', flush=True)")
         bg_id = bg["bg_id"]
         data = assert_ok(await bash_output(bg_id, wait_ms=999999, _session_id=sid))
 
@@ -181,7 +181,7 @@ async def test_bash_output_returns_delta_only() -> None:
         bg = await start_background(
             sid,
             "import time; time.sleep(1.6); print('one', flush=True); "
-            "time.sleep(1.6); print('two', flush=True); time.sleep(2)",
+            "time.sleep(5); print('two', flush=True); time.sleep(2)",
         )
         bg_id = bg["bg_id"]
         first = assert_ok(await bash_output(bg_id, wait_ms=5000, _session_id=sid))
@@ -199,11 +199,18 @@ async def test_bash_output_returns_delta_only() -> None:
 @pytest.mark.asyncio
 async def test_bash_output_reports_done_and_exit_code() -> None:
     sid = session_id("done_exit")
-    bg = await start_background(sid, "import time, sys; time.sleep(1.6); sys.exit(7)")
+    bg = await start_background(
+        sid,
+        "import time, sys; time.sleep(1.6); print('done', flush=True); sys.exit(7)",
+    )
+    started = time.monotonic()
     data = assert_ok(await bash_output(bg["bg_id"], wait_ms=5000, _session_id=sid))
+    elapsed = time.monotonic() - started
 
+    assert elapsed < 4.5
     assert data.get("status") == "failed"
     assert data.get("exit_code") == 7
+    assert data.get("stdout") == "done"
 
 
 @pytest.mark.asyncio
@@ -304,10 +311,10 @@ def main() -> int:
     async def _run_all():
         await test_bash_background_initial_wait_returns_completed_result()
         await test_bash_foreground_ignores_wait_ms()
-        await test_bash_output_wait_returns_when_new_output_arrives()
+        await test_bash_output_waits_until_deadline_with_continuous_output()
         await test_bash_output_wait_no_new_output()
         await test_bash_output_clamps_short_wait_to_minimum()
-        await test_bash_output_clamps_large_wait_to_maximum_without_long_sleep()
+        await test_bash_output_clamps_large_wait_to_maximum()
         await test_bash_output_returns_delta_only()
         await test_bash_output_reports_done_and_exit_code()
         await test_bash_output_reports_not_found()

@@ -129,7 +129,6 @@ This starts a headless Python runtime over JSONL stdio and keeps terminal input/
 | `python main.py --session <id>` | Resume a specific session by ID. |
 | `python main.py --debug` | Disable streaming and show detailed runtime/tool diagnostics. |
 | `python main.py --doctor` | Check local setup without requiring a valid API key. |
-| `python main.py --allow-unsafe-bash` | Allow shell commands that are blocked by the default safety policy. |
 
 Inside the CLI, slash commands provide local controls for diagnostics, sessions, model selection, and status inspection. The input toolbar shows the active session, model, working directory, and key hints.
 

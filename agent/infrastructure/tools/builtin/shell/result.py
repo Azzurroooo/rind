@@ -116,7 +116,6 @@ def delta_output(record: ProcessRecord, max_chars: int) -> tuple[str, str, bool]
     stderr, record.stderr_cursor, stderr_truncated = record.stderr.delta(
         record.stderr_cursor, max_chars
     )
-    record.updated.clear()
     return stdout, stderr, stdout_truncated or stderr_truncated
 
 

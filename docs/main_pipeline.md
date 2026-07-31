@@ -53,12 +53,7 @@ sequenceDiagram
     else 验证成功
     end
 
-    Note over Main: 第 5 阶段：处理环境变量 (line 51-52)
-    alt --allow-unsafe-bash
-        Main->>Main: 设置 AGENT_ALLOW_UNSAFE_BASH=1
-    end
-
-    Note over Main: 第 6 阶段：构建依赖容器 (line 54-59)
+    Note over Main: 第 5 阶段：构建依赖容器 (line 51-56)
     Main->>Container: build_agent_container()
 
     Note over Container: 初始化基础设施 (line 33-57)
@@ -108,7 +103,6 @@ sequenceDiagram
 解析所有命令行参数：
 - `--version` - 显示版本号
 - `--debug` - 调试模式
-- `--allow-unsafe-bash` - 允许危险的 shell 命令
 - `--session` - 指定 Session ID
 - `-c, --resume-latest` - 恢复最近的会话
 - `--session-dir` - 会话存储目录
@@ -130,10 +124,7 @@ Config.reload()                          # 重新加载配置
 Config.validate()                        # 验证配置
 ```
 
-### 5. 环境变量设置（Line 51-52）
-如果使用 `--allow-unsafe-bash`，设置 `AGENT_ALLOW_UNSAFE_BASH=1`
-
-### 6. 依赖容器构建（Line 54-59）
+### 5. 依赖容器构建（Line 51-56）
 调用 `build_agent_container()`，按以下顺序初始化：
 
 1. **基础设施层**：

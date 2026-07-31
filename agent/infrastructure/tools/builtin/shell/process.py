@@ -32,7 +32,6 @@ class ProcessRecord:
     empty_observation_count: int = 0
     exit_code: int | None = None
     last_output_at: float = field(default_factory=time.monotonic)
-    updated: asyncio.Event = field(default_factory=asyncio.Event)
     finished: asyncio.Event = field(default_factory=asyncio.Event)
     readers: tuple[asyncio.Task[None], asyncio.Task[None]] | None = None
     monitor: asyncio.Task[None] | None = None

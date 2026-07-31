@@ -87,7 +87,7 @@ TOOL_SPECS: tuple[ToolSpec, ...] = (
     ToolSpec(
         name="bash_output",
         handler=bash_output,
-        description="阻塞等待并读取后台进程的增量输出，或终止整个进程树。默认等待 wait_ms 直到有新 stdout/stderr、进程完成或超时；no_new_output=true 表示没有新信息，应按 suggested_next_wait_ms 再查。若返回 RepeatedEmptyPoll，应停止继续轮询并把 bg_id 告诉用户，提示稍后可继续查看。",
+        description="阻塞等待并读取后台进程的增量输出，或终止整个进程树。后台进程运行时始终等待到进程完成或 wait_ms 到期，再一次性返回等待期间累积的输出；no_new_output=true 表示本次没有可返回的新信息，应按 suggested_next_wait_ms 再查。若返回 RepeatedEmptyPoll，应停止继续轮询并把 bg_id 告诉用户，提示稍后可继续查看。",
         param_descriptions={
             "bg_id": "后台进程 ID（bash 返回的 bg_id）",
             "kill": "设为 true 可终止该进程。默认 False（仅读取输出）。",

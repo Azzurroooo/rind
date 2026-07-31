@@ -2,7 +2,7 @@ import unittest
 
 from agent.infrastructure.tools.builtin.shell.policy import BashPolicy
 
-class TestBashApprovalPolicy(unittest.TestCase):
+class TestBashPolicy(unittest.TestCase):
     def test_forbidden_commands(self):
         status, reason = BashPolicy.classify("format C:")
         self.assertEqual(status, "deny")
@@ -11,14 +11,17 @@ class TestBashApprovalPolicy(unittest.TestCase):
         status, reason = BashPolicy.classify("sudo reboot")
         self.assertEqual(status, "deny")
 
-    def test_confirmable_commands(self):
-        # We assume unsafe mode is disabled by default for testing
-        import os
-        os.environ["AGENT_ALLOW_UNSAFE_BASH"] = "0"
-
-        status, reason = BashPolicy.classify("rm -rf /tmp/test")
-        self.assertEqual(status, "needs_approval")
-        self.assertIn("rm", reason.lower())
+    def test_destructive_commands_are_allowed(self):
+        for command in (
+            "rm -rf /tmp/test",
+            "del /s /q temp",
+            "rmdir /s /q temp",
+            "Remove-Item -Recurse output",
+        ):
+            with self.subTest(command=command):
+                status, reason = BashPolicy.classify(command)
+                self.assertEqual(status, "allow")
+                self.assertIsNone(reason)
 
     def test_safe_commands(self):
         status, reason = BashPolicy.classify("ls -la")
