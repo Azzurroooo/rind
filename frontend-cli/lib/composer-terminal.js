@@ -1,7 +1,7 @@
 import { graphemes, stripAnsi, textWidth, wrapTextCells } from "./text-width.js";
 
 const DEFAULT_COLUMNS = 80;
-const INPUT_MARKER = "\n  › ";
+const INPUT_MARKER = "\n  ▷ ";
 const ANSI_SEQUENCE = /\x1b\[[0-?]*[ -/]*[@-~]/g;
 const SGR_SEQUENCE = /^\x1b\[([0-9;]*)m$/;
 

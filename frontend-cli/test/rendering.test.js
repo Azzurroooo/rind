@@ -57,8 +57,8 @@ test("startupText includes resume preview when provided", () => {
       "",
       "• Recent context",
       "  Resumed session s1",
-      "› You · hello",
-      "• Assistant · hi",
+      "▷ You · hello",
+      "◁ Assistant · hi",
     ].join("\n"),
   );
 });
@@ -68,7 +68,7 @@ test("startupText clips long resume preview lines", () => {
     resume_preview: `user: ${"x".repeat(120)}`,
   });
 
-  assert.match(text, /› You · x{69}\.\.\./);
+  assert.match(text, /▷ You · x{69}\.\.\./);
 });
 
 test("startupText clips resume preview without splitting keycap emoji", () => {
@@ -76,7 +76,7 @@ test("startupText clips resume preview without splitting keycap emoji", () => {
     resume_preview: `user: ${"x".repeat(68)}9️⃣ tail`,
   });
 
-  assert.match(text, /› You · x{68}\.\.\./);
+  assert.match(text, /▷ You · x{68}\.\.\./);
   assert.doesNotMatch(text, /9\uFE0F\.\.\./);
   assert.doesNotMatch(text, /9\u20E3/);
 });
@@ -115,11 +115,11 @@ test("prompt and turn status copy match the compact terminal UI", () => {
     [
       "",
       `  ${"─".repeat(78)}`,
-      "  › ",
+      "  ▷ ",
     ].join("\n"),
   );
   assert.equal(promptPlaceholderText(), "Ask Rind to do anything");
-  assert.equal(answerPromptText(), "\n  › ");
+  assert.equal(answerPromptText(), "\n  ▷ ");
   assert.equal(answerPlaceholderText(), "Type your answer");
   assert.equal(inputHintText("Ask Rind to do anything"), "Ask Rind to do anything");
   assert.equal(queuedInputText(), "• Queued follow-up\n  ↳ runs after the current turn");
@@ -130,17 +130,17 @@ test("prompt and turn status copy match the compact terminal UI", () => {
   assert.match(queuedInputText(`${"x".repeat(100)}\nsecond line`), /\n  ↳ x{93}\.\.\.\n/);
   assert.equal(interruptText(), "• Interrupt requested\n  ↳ ctrl+c again to quit");
   assert.equal(cancelledText(), "• Interrupted\n  ↳ session preserved; resume with -c");
-  assert.equal(userInputText("hello"), "› You\n  hello");
-  assert.equal(userInputText("first\r\nsecond"), "› You\n  first\n  second");
+  assert.equal(userInputText("hello"), "▷ You\n  hello");
+  assert.equal(userInputText("first\r\nsecond"), "▷ You\n  first\n  second");
   const originalColumns = process.stdout.columns;
   process.stdout.columns = 12;
   try {
-    assert.equal(userInputText("abcdefghijklmnop"), "› You\n  abcdefghij\n  klmnop");
+    assert.equal(userInputText("abcdefghijklmnop"), "▷ You\n  abcdefghij\n  klmnop");
   } finally {
     process.stdout.columns = originalColumns;
   }
   assert.equal(userInputText(""), "");
-  assert.equal(assistantHeaderText(), "♬ Assistant");
+  assert.equal(assistantHeaderText(), "◁ Assistant");
   assert.equal(outputBlockText("• Working"), "• Working\n");
   assert.equal(outputBlockText("• Working", true), "\n• Working\n");
   assert.equal(outputBlockText(""), "");
@@ -157,7 +157,7 @@ test("promptText includes only model and working directory above the input", () 
       "",
       "  glm-5.1 · E:\\code\\agent\\rind-ts-cli-process-split",
       `  ${"─".repeat(78)}`,
-      "  › ",
+      "  ▷ ",
     ].join("\n"),
   );
 });
@@ -180,7 +180,7 @@ test("promptText keeps the activity line separate from the input chrome", () => 
       "",
       "  ◓ Working (1s) ctrl+c interrupt",
       `  ${"─".repeat(78)}`,
-      "  › ",
+      "  ▷ ",
     ].join("\n"),
   );
 });
@@ -226,7 +226,7 @@ test("promptText omits footer shortcuts and session metrics", () => {
 
   assert.doesNotMatch(text, /shortcuts|commands|enter send|ctrl\+c quit/);
   assert.doesNotMatch(text, /Context|cached|output/);
-  assert.equal(text.split("\n").at(-1), "  › ");
+  assert.equal(text.split("\n").at(-1), "  ▷ ");
 });
 
 test("helpText renders compact shortcuts and commands", () => {
@@ -467,7 +467,7 @@ test("slashDisplayText renders doctor payloads with textual state", () => {
       "• Doctor · 1 fail · 1 warn",
       "  ✓ ok    Python · 3.12.0",
       "  ! warn  Git · not found on PATH",
-      "  × fail  API key · unset",
+      "  ⊘ fail  API key · unset",
       "",
       "• Next steps",
       "  ↳ Set apiKey in settings.json.",
@@ -585,7 +585,7 @@ test("toolRequestedLine shows bash command", () => {
       tool_name: "bash",
       args_preview: '{"command":"date"}',
     }),
-    "• Tool · Running command\n  $ date",
+    "◌ Tool · Running command\n  $ date",
   );
 });
 
@@ -605,7 +605,7 @@ test("toolRequestedLine shows non-shell details as metadata", () => {
       tool_name: "read_file",
       args_preview: '{"path":"frontend-cli/lib/rendering.js"}',
     }),
-    "• Tool · Calling file read\n  ↳ frontend-cli/lib/rendering.js",
+    "◌ Tool · Calling file read\n  ↳ frontend-cli/lib/rendering.js",
   );
 });
 
@@ -636,7 +636,7 @@ test("toolRequestedLine keeps large file content out of the status", () => {
     }),
   });
 
-  assert.equal(line, "• Tool · Calling write file\n  ↳ notes.txt");
+  assert.equal(line, "◌ Tool · Calling write file\n  ↳ notes.txt");
   assert.doesNotMatch(line, /secret content/);
 });
 
@@ -650,7 +650,7 @@ test("toolRequestedLine keeps edit text out of the status", () => {
     }),
   });
 
-  assert.equal(line, "• Tool · Calling file edit\n  ↳ notes.txt");
+  assert.equal(line, "◌ Tool · Calling file edit\n  ↳ notes.txt");
   assert.doesNotMatch(line, /secret/);
 });
 
@@ -660,7 +660,7 @@ test("toolRequestedLine does not expose generic command arguments", () => {
       tool_name: "custom_tool",
       args_preview: JSON.stringify({ command: "hidden command" }),
     }),
-    "• Tool · Calling custom tool",
+    "◌ Tool · Calling custom tool",
   );
 });
 
@@ -670,15 +670,15 @@ test("toolRequestedLine keeps the tool name when arguments are incomplete", () =
       tool_name: "write_file",
       args_preview: '{"file_path":"notes.txt","content":"unfinished',
     }),
-    "• Tool · Calling write file",
+    "◌ Tool · Calling write file",
   );
 });
 
 test("toolStartedLine renders fallback running state", () => {
-  assert.equal(toolStartedLine({ tool_name: "bash" }), "• Tool · Running command");
-  assert.equal(toolStartedLine({ tool_name: "bash_output" }), "• Tool · Reading command output");
-  assert.equal(toolStartedLine({ tool_name: "web_search" }), "• Tool · Calling web search");
-  assert.equal(toolStartedLine({ tool_name: "custom_tool" }), "• Tool · Calling custom tool");
+  assert.equal(toolStartedLine({ tool_name: "bash" }), "◌ Tool · Running command");
+  assert.equal(toolStartedLine({ tool_name: "bash_output" }), "◌ Tool · Reading command output");
+  assert.equal(toolStartedLine({ tool_name: "web_search" }), "◌ Tool · Calling web search");
+  assert.equal(toolStartedLine({ tool_name: "custom_tool" }), "◌ Tool · Calling custom tool");
 });
 
 test("toolResultLine renders compact success state", () => {
@@ -689,7 +689,7 @@ test("toolResultLine renders compact success state", () => {
       duration_ms: 1250,
       result: JSON.stringify({ ok: true, data: { stdout: "hello\nworld", stderr: "", exit_code: 0 } }),
     }),
-    "✓ Tool · Ran command in 1.25s\n  ↳ hello world",
+    "◉ Tool · Ran command in 1.25s\n  ↳ hello world",
   );
   assert.equal(
     toolResultLine({
@@ -697,7 +697,7 @@ test("toolResultLine renders compact success state", () => {
       status: "completed",
       duration_ms: 20,
     }),
-    "✓ Tool · Called image in 20ms",
+    "◉ Tool · Called image in 20ms",
   );
   assert.equal(
     toolResultLine({
@@ -706,7 +706,7 @@ test("toolResultLine renders compact success state", () => {
       duration_ms: 25,
       result: JSON.stringify({ ok: true, data: { stdout: "", stderr: "warning" } }),
     }),
-    "✓ Tool · Ran command in 25ms\n  ↳ warning",
+    "◉ Tool · Ran command in 25ms\n  ↳ warning",
   );
   assert.equal(
     toolResultLine({
@@ -715,7 +715,7 @@ test("toolResultLine renders compact success state", () => {
       duration_ms: 35,
       result: JSON.stringify({ ok: true, data: { message: "Background process started: npm run dev" } }),
     }),
-    "✓ Tool · Ran command in 35ms\n  ↳ Background process started: npm run dev",
+    "◉ Tool · Ran command in 35ms\n  ↳ Background process started: npm run dev",
   );
   assert.equal(
     toolResultLine({
@@ -727,7 +727,7 @@ test("toolResultLine renders compact success state", () => {
         data: { status: "running", stdout: "tick-0", exit_code: -1, bg_id: "bg_123" },
       }),
     }),
-    "• Tool · command running in background in 1.05s\n  ↳ tick-0",
+    "◌ Tool · command running in background in 1.05s\n  ↳ tick-0",
   );
   assert.equal(
     toolResultLine({
@@ -739,7 +739,7 @@ test("toolResultLine renders compact success state", () => {
         data: { status: "running", stdout: "tick-1\ntick-2", exit_code: -1, bg_id: "bg_123" },
       }),
     }),
-    "• Tool · command output read; command still running in background in 5.05s\n  ↳ tick-1 tick-2",
+    "◌ Tool · command output read; command still running in background in 5.05s\n  ↳ tick-1 tick-2",
   );
   assert.equal(
     toolResultLine({
@@ -748,7 +748,7 @@ test("toolResultLine renders compact success state", () => {
       duration_ms: 25,
       result: JSON.stringify({ ok: true, data: { stdout: "", stderr: "not found", exit_code: 1 } }),
     }),
-    "× Tool · command exited 1 in 25ms\n  ↳ not found",
+    "⊘ Tool · command exited 1 in 25ms\n  ↳ not found",
   );
 });
 
@@ -766,7 +766,7 @@ test("toolResultLine appends inline file change diff for successful file tools",
       ],
     }),
     [
-      "✓ Tool · Called file edit in 35ms",
+      "◉ Tool · Called file edit in 35ms",
       "  ↳ frontend-cli/lib/rendering.js",
       "    - const oldValue = 1;",
       "    + const newValue = 2;",
@@ -788,7 +788,7 @@ test("toolResultLine clips long file change lines", () => {
         lines: [{ kind: "added", text: "x".repeat(60) }],
       }),
       [
-        "✓ Tool · Called write file in 10ms",
+        "◉ Tool · Called write file in 10ms",
         "  ↳ E:\\deep\\...file.md",
         `    + ${"x".repeat(31)}...`,
       ].join("\n"),
@@ -847,7 +847,7 @@ test("toolResultLine ignores file change details for failed tools", () => {
         { kind: "added", text: "new" },
       ],
     }),
-    "× Tool · file edit failed in 20ms (OldStrNotFound)\n  ↳ not found",
+    "⊘ Tool · file edit failed in 20ms (OldStrNotFound)\n  ↳ not found",
   );
 });
 
@@ -860,7 +860,7 @@ test("toolResultLine includes compact failure detail", () => {
       duration_ms: 50,
       result: '{"ok":false,"error":"command timed out\\ntry again"}',
     }),
-    "× Tool · command failed in 50ms (Timeout)\n  ↳ command timed out try again",
+    "⊘ Tool · command failed in 50ms (Timeout)\n  ↳ command timed out try again",
   );
 });
 
@@ -870,7 +870,7 @@ test("toolProgressLine renders compact progress messages", () => {
       tool_name: "bash",
       payload: { message: "waiting\nfor output" },
     }),
-    "• Tool · command\n  ↳ waiting for output",
+    "◌ Tool · command\n  ↳ waiting for output",
   );
   assert.equal(toolProgressLine({ tool_name: "bash", payload: { stdout: "ignored" } }), "");
 });
@@ -895,8 +895,8 @@ test("status helpers render question, skill, and errors", () => {
   );
   assert.match(questionText({ question: "q".repeat(120) }), /\n  q{73}\.\.\.$/);
   assert.equal(skillLine({ skill_name: "debugging" }), "• Using skill debugging");
-  assert.equal(errorLine("failed"), "× Turn failed\n  ↳ failed");
-  assert.equal(errorLine(""), "× Turn failed");
+  assert.equal(errorLine("failed"), "⊘ Turn failed\n  ↳ failed");
+  assert.equal(errorLine(""), "⊘ Turn failed");
 });
 
 test("choiceMenuText marks the selected option and the recommendation", () => {

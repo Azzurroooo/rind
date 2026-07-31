@@ -36,11 +36,11 @@ export function userInputText(text) {
   const physicalLines = lines.flatMap((line) => (
     wrapTextCells(line, contentWidth, contentWidth).map((chunk) => `  ${chunk.text}`)
   ));
-  return `${accent("›")} ${bold("You")}\n${physicalLines.join("\n")}`;
+  return `${accent("▷")} ${bold("You")}\n${physicalLines.join("\n")}`;
 }
 
 export function assistantHeaderText() {
-  return `${accent("♬")} ${bold("Assistant")}`;
+  return `${accent("◁")} ${bold("Assistant")}`;
 }
 
 export function outputBlockText(text, leading = false) {
@@ -92,7 +92,7 @@ export function slashResultText(result, commands = []) {
 }
 
 export function answerPromptText() {
-  return `\n  ${accent("›")} `;
+  return `\n  ${accent("▷")} `;
 }
 
 export function answerPlaceholderText() {
@@ -291,13 +291,13 @@ export function toolRequestedLine(event) {
   const name = event.tool_name || "unknown";
   const detail = toolDetail(name, parseJsonObject(event.args_preview));
   const label = toolLabel(name);
-  const line = `${accent("•")} ${bold("Tool")} ${dim("·")} ${toolActiveVerb(name)} ${label}`;
+  const line = `${accent("◌")} ${bold("Tool")} ${dim("·")} ${toolActiveVerb(name)} ${label}`;
   return detail ? `${line}\n${dim(toolDetailLine(name, detail))}` : line;
 }
 
 export function toolStartedLine(event) {
   const name = event.tool_name || "tool";
-  return `${accent("•")} ${bold("Tool")} ${dim("·")} ${toolActiveVerb(name)} ${toolLabel(name)}`;
+  return `${accent("◌")} ${bold("Tool")} ${dim("·")} ${toolActiveVerb(name)} ${toolLabel(name)}`;
 }
 
 export function toolResultLine(event, fileChange) {
@@ -307,7 +307,7 @@ export function toolResultLine(event, fileChange) {
   if (event.status === "failed") {
     const suffix = event.error_type ? ` (${event.error_type})` : "";
     const detail = toolErrorDetail(event.result);
-    const line = `${red("×")} ${bold("Tool")} ${dim("·")} ${label} failed in ${duration}${suffix}`;
+    const line = `${red("⊘")} ${bold("Tool")} ${dim("·")} ${label} failed in ${duration}${suffix}`;
     return detail ? `${line}\n${dim(detailLine(detail))}` : line;
   }
   const result = toolResultSummary(event.result);
@@ -315,15 +315,15 @@ export function toolResultLine(event, fileChange) {
     const runningText = name === "bash_output"
       ? "command output read; command still running in background"
       : "command running in background";
-    const line = `${accent("•")} ${bold("Tool")} ${dim("·")} ${runningText} in ${duration}`;
+    const line = `${accent("◌")} ${bold("Tool")} ${dim("·")} ${runningText} in ${duration}`;
     const output = result.output;
     return [line, output ? dim(detailLine(output)) : "", fileChangeLine(fileChange)]
       .filter(Boolean)
       .join("\n");
   }
   const line = result.exitCode
-    ? `${red("×")} ${bold("Tool")} ${dim("·")} ${label} exited ${result.exitCode} in ${duration}`
-    : `${green("✓")} ${bold("Tool")} ${dim("·")} ${completedToolText(name, label)} in ${duration}`;
+    ? `${red("⊘")} ${bold("Tool")} ${dim("·")} ${label} exited ${result.exitCode} in ${duration}`
+    : `${green("◉")} ${bold("Tool")} ${dim("·")} ${completedToolText(name, label)} in ${duration}`;
   const output = result.output;
   return [line, output ? dim(detailLine(output)) : "", fileChangeLine(fileChange)]
     .filter(Boolean)
@@ -333,7 +333,7 @@ export function toolResultLine(event, fileChange) {
 export function toolProgressLine(event) {
   const name = event.tool_name || "tool";
   const message = progressMessage(event.payload);
-  return message ? `${accent("•")} ${bold("Tool")} ${dim("·")} ${toolLabel(name)}\n${dim(`  ↳ ${message}`)}` : "";
+  return message ? `${accent("◌")} ${bold("Tool")} ${dim("·")} ${toolLabel(name)}\n${dim(`  ↳ ${message}`)}` : "";
 }
 
 export function skillLine(event) {
@@ -343,8 +343,8 @@ export function skillLine(event) {
 export function errorLine(error) {
   const detail = clipSingleLine(error, 120);
   return detail
-    ? `${red("×")} ${bold("Turn failed")}\n${dim(detailLine(detail))}`
-    : `${red("×")} ${bold("Turn failed")}`;
+    ? `${red("⊘")} ${bold("Turn failed")}\n${dim(detailLine(detail))}`
+    : `${red("⊘")} ${bold("Turn failed")}`;
 }
 
 export function questionText(event = {}) {
@@ -589,7 +589,7 @@ function doctorMarker(status) {
     return green("✓");
   }
   if (status === "fail") {
-    return red("×");
+    return red("⊘");
   }
   return accent("!");
 }
@@ -855,7 +855,7 @@ function resumePreviewLine(line) {
   const message = line.match(/^-?\s*(user|assistant):\s*(.*)$/i);
   if (message) {
     const role = message[1].toLowerCase();
-    const marker = role === "user" ? accent("›") : dim("•");
+    const marker = role === "user" ? accent("▷") : dim("◁");
     const label = role === "user" ? "You" : "Assistant";
     return `${marker} ${label} ${dim("·")} ${clipSingleLine(message[2], 72)}`;
   }
@@ -913,7 +913,7 @@ function inputPromptFrame(header = "", state = {}) {
     lines.push(header);
   }
   lines.push(inputDivider());
-  lines.push("  › ");
+  lines.push("  ▷ ");
   return lines.join("\n");
 }
 
