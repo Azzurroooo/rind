@@ -3,11 +3,11 @@
       <meta charset="utf-8">
       <meta name="viewport" content="width=device-width, initial-scale=1.0">
 
-      <link rel="stylesheet" href="file:///c:\Users\admin\.vscode\extensions\shd101wyy.markdown-preview-enhanced-0.8.30\crossnote\dependencies\katex\katex.min.css">
+      <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.47/dist/katex.min.css">
 
 
 
-      <script type="text/javascript" src="file:///c:\Users\admin\.vscode\extensions\shd101wyy.markdown-preview-enhanced-0.8.30\crossnote\dependencies\mermaid\mermaid.min.js" charset="UTF-8"></script>
+      <script src="https://cdn.jsdelivr.net/npm/mermaid@11.15.0/dist/mermaid.min.js"></script>
 
 
 
@@ -27,200 +27,497 @@
     <body for="html-export">
       <div class="crossnote markdown-preview  ">
 
-<h1 id="mainpy-完整数据流图"><a href="http://Main.py">Main.py</a> 完整数据流图 </h1>
-<h2 id="完整启动流程-mermaid-图">完整启动流程 Mermaid 图 </h2>
+<h1 id="rind-主流程与运行时数据流">Rind 主流程与运行时数据流 </h1>
+<blockquote>
+<p>本文描述当前实现从 CLI/API 启动、构建 runtime，到一次 turn、工具循环、持久化、取消和退出的完整路径。它与 <code>docs/architecture.md</code> 的关系是：architecture 说明静态结构，本文件说明时间顺序和状态变化。</p>
+</blockquote>
+<h2 id="1-入口总览">1. 入口总览 </h2>
+<div class="mermaid">flowchart TD
+    User["用户"]
+    Main["main.py"]
+    Args["argparse\n--version --debug --session -c --session-dir --doctor"]
+    Doctor["build_doctor_report()"]
+    Validate["validate_session_id()"]
+    Config["Config.ensure_user_settings_template()\nConfig.reload()\nvalidate_settings()"]
+    Build["build_agent_container()"]
+    CLI["ChatCLI(runtime, session, debug).start()"]
+    Exit0["return 0"]
+    Exit1["return 1\nconfiguration/session/doctor error"]
+    Exit130["return 130\nKeyboardInterrupt"]
+
+    User --&gt; Main --&gt; Args
+    Args --&gt;|--doctor| Doctor --&gt; Exit1
+    Args --&gt;|normal mode| Validate --&gt; Config --&gt; Build --&gt; CLI
+    Config --&gt;|ValueError| Exit1
+    Validate --&gt;|invalid id| Exit1
+    CLI --&gt;|normal exit| Exit0
+    CLI --&gt;|Ctrl+C| Exit130
+</div><p><code>--doctor</code> 在构建完整 Agent 之前执行诊断并退出；普通启动才会初始化 settings、构建 container 和 CLI。<code>main.py</code> 当前直接把 <code>container.runtime</code> 与 <code>container.session_store</code> 传给 <code>ChatCLI</code>。</p>
+<h2 id="2-frontend-cli--ts_cli-启动全流程">2. frontend-cli / ts_cli 启动全流程 </h2>
+<p>仓库没有单独的 <code>ts_cli</code> 实现；当前对应的终端入口是 <code>frontend-cli/bin/rind.js</code>。它与 <code>python main.py</code> 是两条不同的启动路径：前者负责 Node 终端体验，后者负责 Python CLI；<code>frontend-cli</code> 的交互模式通过 stdio runtime 子进程复用 Python 应用核心。</p>
 <div class="mermaid">sequenceDiagram
     autonumber
-    participant User as 用户
+    participant Shell as Shell / npm bin
+    participant Node as frontend-cli/bin/rind.js
+    participant Env as runtime-env.js
+    participant Py as Python child process
+    participant Stdio as agent.interfaces.runtime_server.stdio
+    participant Protocol as JSONL protocol
+    participant TTY as terminal-ui / readline
+    participant Render as state + rendering modules
+
+    Shell-&gt;&gt;Node: node bin/rind.js [args]
+    Node-&gt;&gt;Node: resolve scriptDir, repoRoot, RIND_PYTHON
+
+    alt --help / --version / -h
+        Node-&gt;&gt;Env: buildRuntimeEnv(repoRoot)
+        Node-&gt;&gt;Py: spawnSync(python, main.py, stdio=inherit)
+        Py--&gt;&gt;Shell: help/version + exit code
+    else interactive runtime
+        Node-&gt;&gt;Env: buildRuntimeEnv(repoRoot)
+        Env--&gt;&gt;Node: PYTHONPATH + UTF-8 environment
+        Node-&gt;&gt;Py: spawn(python, -c runtimeBootstrap, cliArgs)
+        Note over Node,Py: stdin=pipe, stdout=pipe, stderr=pipe
+        Py-&gt;&gt;Stdio: runpy.run_module(...stdio, __main__)
+        Stdio--&gt;&gt;Node: process stdout JSONL
+        Stdio--&gt;&gt;Node: process stderr diagnostics
+        Node-&gt;&gt;Node: attach line buffer, exit handler, SIGINT handler
+        Node-&gt;&gt;Protocol: request(initialize)
+        Protocol-&gt;&gt;Stdio: {request_id, method, params}\nJSONL line
+        Stdio--&gt;&gt;Protocol: initialize result + capabilities + resume preview
+        Protocol--&gt;&gt;Node: sessionInfo / slash commands
+        alt process.stdin.isTTY &amp;&amp; process.stdout.isTTY
+            Node-&gt;&gt;TTY: createTerminalUI().start()
+            TTY--&gt;&gt;Node: key/paste events
+        else non-TTY
+            Node-&gt;&gt;TTY: createInterface(readline)
+            TTY--&gt;&gt;Node: line/data events
+        end
+        Node-&gt;&gt;Render: startupText(info)
+        Node-&gt;&gt;Node: promptLoop()
+    end
+</div><h3 id="21-python-child-的启动细节">2.1 Python child 的启动细节 </h3>
+<p><code>rind.js</code> 不执行 <code>python main.py</code> 进入交互模式，而是构造一段 <code>runtimeBootstrap</code>：</p>
+<pre data-role="codeBlock" data-info="python" class="language-python python"><code><span class="token keyword keyword-import">import</span> os<span class="token punctuation">,</span> runpy<span class="token punctuation">,</span> sys
+repo <span class="token operator">=</span> os<span class="token punctuation">.</span>path<span class="token punctuation">.</span>abspath<span class="token punctuation">(</span>REPO_ROOT<span class="token punctuation">)</span>
+cwd <span class="token operator">=</span> os<span class="token punctuation">.</span>path<span class="token punctuation">.</span>abspath<span class="token punctuation">(</span>os<span class="token punctuation">.</span>getcwd<span class="token punctuation">(</span><span class="token punctuation">)</span><span class="token punctuation">)</span>
+blocked <span class="token operator">=</span> <span class="token punctuation">{</span>os<span class="token punctuation">.</span>path<span class="token punctuation">.</span>normcase<span class="token punctuation">(</span>repo<span class="token punctuation">)</span><span class="token punctuation">,</span> os<span class="token punctuation">.</span>path<span class="token punctuation">.</span>normcase<span class="token punctuation">(</span>cwd<span class="token punctuation">)</span><span class="token punctuation">}</span>
+sys<span class="token punctuation">.</span>path <span class="token operator">=</span> <span class="token punctuation">[</span>repo<span class="token punctuation">]</span> <span class="token operator">+</span> <span class="token punctuation">[</span>p <span class="token keyword keyword-for">for</span> p <span class="token keyword keyword-in">in</span> sys<span class="token punctuation">.</span>path <span class="token keyword keyword-if">if</span> p <span class="token keyword keyword-and">and</span> os<span class="token punctuation">.</span>path<span class="token punctuation">.</span>normcase<span class="token punctuation">(</span>os<span class="token punctuation">.</span>path<span class="token punctuation">.</span>abspath<span class="token punctuation">(</span>p<span class="token punctuation">)</span><span class="token punctuation">)</span> <span class="token keyword keyword-not">not</span> <span class="token keyword keyword-in">in</span> blocked<span class="token punctuation">]</span>
+runpy<span class="token punctuation">.</span>run_module<span class="token punctuation">(</span><span class="token string">"agent.interfaces.runtime_server.stdio"</span><span class="token punctuation">,</span> run_name<span class="token operator">=</span><span class="token string">"__main__"</span><span class="token punctuation">)</span>
+</code></pre><p>这样做的作用是：</p>
+<ul>
+<li>以仓库根目录作为 Python import 根；</li>
+<li>从 <code>sys.path</code> 中去掉可能遮蔽仓库模块的 repo/cwd 项；</li>
+<li>直接启动 JSONL <code>StdioRuntimeServer</code>，不启动 Python <code>ChatCLI</code>；</li>
+<li>将 Node 终端 UI 与 Python AgentRuntime 解耦。</li>
+</ul>
+<h3 id="22-stdio-server-子进程启动">2.2 stdio server 子进程启动 </h3>
+<div class="mermaid">sequenceDiagram
+    autonumber
+    participant Child as Python child
+    participant Main as stdio.main()
+    participant Args as build_parser()
+    participant Config as Config
+    participant Container as build_agent_container()
+    participant Server as StdioRuntimeServer
+    participant Store as SessionStore
+    Child-&gt;&gt;Main: module __main__
+    Main-&gt;&gt;Main: configure signals + UTF-8 stdio
+    Main-&gt;&gt;Args: parse debug/session/resume/session-dir
+    Args--&gt;&gt;Main: runtime server args
+    Main-&gt;&gt;Main: validate session id
+    Main-&gt;&gt;Config: ensure template -&gt; reload -&gt; validate
+    Config--&gt;&gt;Main: AppSettings
+    Main-&gt;&gt;Container: build_agent_container(enable_goal=true)
+    Container--&gt;&gt;Main: AgentContainer
+    Main-&gt;&gt;Server: runtime + session + model/background callbacks
+    Server-&gt;&gt;Server: run() and dispatch JSONL stdin
+    Server--&gt;&gt;Main: exit code
+    Main-&gt;&gt;Store: discard_if_empty() in finally
+    Main--&gt;&gt;Child: return code
+</div><p>stdio server 不创建 Python <code>ChatCLI</code>；它把 container 的 runtime 交给 <code>StdioRuntimeServer</code>，默认启用 goal，并注册 background list/output callbacks。</p>
+<h3 id="23-stdio-管道和-request-multiplex">2.3 stdio 管道和 request multiplex </h3>
+<div class="mermaid">flowchart LR
+    NodeRequest["rind.js request(method, params)"]
+    Pending["pending: Map&lt;request_id, resolve/reject&gt;"]
+    JSONOut["JSON.stringify(request) + \\n"]
+    PyIn["Python stdin"]
+    Server["StdioRuntimeServer\nrequest reader + dispatcher"]
+    PyOut["Python stdout JSONL"]
+    Buffer["runtimeStdoutBuffer\n按换行拆分完整消息"]
+    Receive["receive(line)"]
+    Response["response request_id\nresolve pending"]
+    Event["event envelope\nsequence/durability/type"]
+    State["turn/tool/plan/background state"]
+    UI["rendering + terminal frame"]
+
+    NodeRequest --&gt; Pending --&gt; JSONOut --&gt; PyIn --&gt; Server
+    Server --&gt; PyOut --&gt; Buffer --&gt; Receive
+    Receive --&gt; Response --&gt; Pending
+    Receive --&gt; Event --&gt; State --&gt; UI
+</div><p>request response 与 event 共用 stdout；<code>request_id</code> 只用于匹配 response，event 通过 <code>event_type</code> 或 <code>event.type</code> 分发。Node 端必须保留未完整接收的尾行，防止一次 data chunk 恰好落在 JSONL 行中间。</p>
+<h3 id="24-frontend-cli-进入-prompt-loop-后的状态">2.4 frontend-cli 进入 prompt loop 后的状态 </h3>
+<div class="mermaid">stateDiagram-v2
+    [*] --&gt; Spawned: Python child spawned
+    Spawned --&gt; Initializing: request(initialize)
+    Initializing --&gt; PromptReady: result + startup render
+    PromptReady --&gt; ReadingInput: TTY UI / readline
+    ReadingInput --&gt; PromptReady: empty input / local command
+    ReadingInput --&gt; TurnActive: turn.start
+    ReadingInput --&gt; ControlRequest: slash / model / session / goal
+    ControlRequest --&gt; PromptReady: result rendered
+    TurnActive --&gt; ToolActive: tool_started/requested
+    ToolActive --&gt; QuestionActive: user_question_requested
+    QuestionActive --&gt; ToolActive: user_question.respond
+    ToolActive --&gt; TurnActive: tool_result / continuation
+    TurnActive --&gt; PromptReady: turn_completed
+    TurnActive --&gt; PromptReady: turn_failed / turn_cancelled
+    TurnActive --&gt; TurnActive: turn.follow_up / steering
+    ReadingInput --&gt; ShuttingDown: SIGINT / EOF
+    TurnActive --&gt; ShuttingDown: SIGINT -&gt; turn.interrupt
+    PromptReady --&gt; ShuttingDown: exit / runtime shutdown
+    ShuttingDown --&gt; [*]: close stdin, end pipe, kill fallback, exit code
+</div><h2 id="3-启动与依赖组装顺序">3. 启动与依赖组装顺序 </h2>
+<div class="mermaid">sequenceDiagram
+    autonumber
+    participant User as 用户/进程
     participant Main as main.py
-    participant Args as argparse (参数解析)
-    participant Doctor as Doctor (诊断)
-    participant Config as Config (配置)
-    participant Container as build_basic_agent_dependencies
+    participant Args as argparse
+    participant Config as Config
+    participant Factory as OpenAIClientFactory
+    participant Store as JsonlSessionStore
+    participant Tools as Registry/Executor/Processor
+    participant Context as ContextManager
+    participant Runner as TurnRunner
+    participant Runtime as AgentRuntime
     participant CLI as ChatCLI
 
-    User-&gt;&gt;Main: python main.py [参数]
+    User-&gt;&gt;Main: python main.py [args]
+    Main-&gt;&gt;Args: parse_args()
+    Args--&gt;&gt;Main: debug/session/resume/session_dir/doctor
 
-    Note over Main: 第 1 阶段：参数解析 (line 9-17)
-    Main-&gt;&gt;Args: argparse.ArgumentParser()
-    Args--&gt;&gt;Main: args 对象
+    alt --doctor
+        Main-&gt;&gt;Main: build_doctor_report()
+        Main--&gt;&gt;User: report.text + exit code
+    else normal startup
+        Main-&gt;&gt;Main: validate_session_id(session)
+        Main-&gt;&gt;Config: ensure_user_settings_template()
+        Main-&gt;&gt;Config: reload()
+        Main-&gt;&gt;Config: validate_settings(settings)
+        Config--&gt;&gt;Main: AppSettings
 
-    Note over Main: 第 2 阶段：检查 Doctor 模式 (line 19-29)
-    alt --doctor 参数存在
-        Main-&gt;&gt;Doctor: build_doctor_report()
-        Doctor--&gt;&gt;Main: 诊断报告
-        Main-&gt;&gt;User: 打印诊断报告
-        Main-&gt;&gt;User: 退出程序
-    else 正常模式继续
+        Main-&gt;&gt;Factory: create(settings)
+        Main-&gt;&gt;Store: JsonlSessionStore(session_dir, session_id, resume_latest)
+        Main-&gt;&gt;Tools: TOOL_SPECS -&gt; DefaultToolRegistry -&gt; ToolExecutor
+        Tools-&gt;&gt;Tools: ToolResultNormalizer + ToolCallProcessor
+        Main-&gt;&gt;Factory: create_async_client()
+        Main-&gt;&gt;Context: ContextEstimator + SkillRepository + SkillSelector + RIND provider
+        Main-&gt;&gt;Runner: MessageStreamParser + ContextManager + CompactionService
+        Runner-&gt;&gt;Runtime: AgentRuntime(turn_runner, session_store, goal_enabled)
+        Main-&gt;&gt;CLI: ChatCLI(runtime, session, debug)
+        CLI--&gt;&gt;User: prompt / startup preview
     end
+</div><h3 id="container-内的对象连接">Container 内的对象连接 </h3>
+<div class="mermaid">flowchart LR
+    Settings["AppSettings"] --&gt; Factory["OpenAIClientFactory"] --&gt; Client["OpenAIChatClient"]
+    Store["JsonlSessionStore"] --&gt; Runtime["AgentRuntime"]
+    Registry["DefaultToolRegistry"] --&gt; Executor["ToolExecutor"] --&gt; Processor["ToolCallProcessor"]
+    Processor --&gt; Runner["TurnRunner"]
+    Client --&gt; Runner
+    Parser["MessageStreamParser"] --&gt; Runner
+    Context["ContextManager"] --&gt; Runner
+    Compact["CompactionService"] --&gt; Runner
+    Runner --&gt; Runtime
+</div><h2 id="4-cli-交互循环">4. CLI 交互循环 </h2>
+<div class="mermaid">sequenceDiagram
+    participant User as 用户
+    participant CLI as ChatCLI
+    participant Commands as SlashCommandRouter
+    participant Runtime as AgentRuntime
+    participant UI as StreamingRenderer/StatusRenderer
+    participant Input as Question responder
 
-    Note over Main: 第 3 阶段：验证 Session ID (line 31-38)
-    alt --session 参数存在
-        Main-&gt;&gt;Main: validate_session_id()
-        alt 验证失败
-            Main-&gt;&gt;User: 打印 Session error
-            Main-&gt;&gt;User: 返回 1 (退出)
-        else 验证成功
+    loop interactive prompt
+        CLI-&gt;&gt;User: 显示 prompt、model、cwd、状态
+        User-&gt;&gt;CLI: 文本输入或 /command
+        alt slash command
+            CLI-&gt;&gt;Commands: parse + dispatch
+            alt readonly command
+                Commands--&gt;&gt;CLI: immediate display payload
+            else turn/control command
+                Commands-&gt;&gt;Runtime: compact/model/session/goal 或 turn request
+            end
+            CLI-&gt;&gt;UI: render command result
+        else normal input
+            CLI-&gt;&gt;Runtime: run_turn(query)
+            Runtime--&gt;&gt;CLI: RuntimeEvent stream
+            CLI-&gt;&gt;UI: render event
+            alt ask_user_question
+                Runtime--&gt;&gt;Input: question event
+                Input--&gt;&gt;Runtime: answer response
+            end
+        end
+    end
+</div><p>前端 <code>frontend-cli/bin/rind.js</code> 是另一条 CLI 外壳：它启动 Python stdio runtime 子进程，发送 JSONL request，使用 <code>runtime-protocol.js</code> 解析 envelope，并将事件交给输入状态、后台任务状态和 <code>rendering.js</code>。</p>
+<h2 id="5-一次普通-turn-的完整时序">5. 一次普通 turn 的完整时序 </h2>
+<div class="mermaid">sequenceDiagram
+    autonumber
+    participant CLI as ChatCLI / frontend-cli
+    participant Runtime as AgentRuntime
+    participant Store as SessionStore
+    participant Runner as TurnRunner
+    participant Context as ContextManager
+    participant LLM as OpenAIChatClient
+    participant Pump as stream_pump
+    participant Processor as ToolCallProcessor
+    participant Executor as ToolExecutor
+    participant Tool as builtin tool
+    participant UI as event renderer
+
+    CLI-&gt;&gt;Runtime: run_turn(query, cancellation_token)
+    Runtime-&gt;&gt;Runtime: acquire turn lock\nset active_turn_id / accepting_inputs
+    Runtime-&gt;&gt;Store: initialize()
+    Runtime-&gt;&gt;Store: persist_message(user, query)
+    Runtime--&gt;&gt;UI: turn_started
+    Runtime-&gt;&gt;Runner: run_turn(session, turn_id)
+
+    loop model/tool continuation
+        Runner-&gt;&gt;Context: resolve active skills
+        Context-&gt;&gt;Store: list messages + metadata
+        Context-&gt;&gt;Context: inject system/RIND/skills/transient messages
+        Context-&gt;&gt;Context: estimate tokens and compute decisions
+        Context--&gt;&gt;Runner: ContextBuildResult
+        Runner--&gt;&gt;UI: context_built / skill_activated
+
+        alt compact required
+            Runner-&gt;&gt;Context: run compact(reason, phase)
+            Context-&gt;&gt;Store: read history + persist compaction/handoff
+            Context--&gt;&gt;Runner: rebuilt context
+            Runner--&gt;&gt;UI: context_built
+        end
+
+        Runner-&gt;&gt;LLM: stream(messages, tool_schemas)
+        loop provider chunks
+            LLM--&gt;&gt;Pump: chunk
+            Pump-&gt;&gt;Runner: assistant_delta / tool_input_delta
+            Runner--&gt;&gt;UI: incremental event
+        end
+
+        alt assistant message without tools
+            Runner-&gt;&gt;Store: persist_message(assistant)
+        else assistant requests tools
+            Runner-&gt;&gt;Store: persist_message(assistant tool call)
+            Runner--&gt;&gt;UI: tool_requested
+            Runner-&gt;&gt;Processor: process_tool_calls(tool calls)
+            loop each tool call
+                Processor--&gt;&gt;UI: tool_started
+                Processor-&gt;&gt;Executor: execute_tool(name, args)
+                Executor-&gt;&gt;Tool: invoke
+                Tool--&gt;&gt;Executor: result/error
+                Executor--&gt;&gt;Processor: normalized ToolResult
+                alt ask_user_question
+                    Processor--&gt;&gt;CLI: question event
+                    CLI--&gt;&gt;Processor: answer
+                end
+                Processor-&gt;&gt;Store: persist_tool_call()
+                Processor-&gt;&gt;Store: persist_message(tool result)
+                Processor--&gt;&gt;Runner: tool_result / file_changed
+                Runner--&gt;&gt;UI: event
+            end
         end
     end
 
-    Note over Main: 第 4 阶段：初始化配置 (line 44-49)
-    Main-&gt;&gt;Config: ensure_user_settings_template()
-    Config-&gt;&gt;Config: 检查 settings.json 是否存在
-    Config--&gt;&gt;Main: 路径（可能创建了默认模版）
-
-    Main-&gt;&gt;Config: reload()
-    Config-&gt;&gt;Config: 从 settings.json 加载配置
-
-    Main-&gt;&gt;Config: validate()
-    alt 验证失败
-        Main-&gt;&gt;User: 打印 Configuration error
-        Main-&gt;&gt;User: 返回 1 (退出)
-    else 验证成功
+    Runner-&gt;&gt;Store: persist sampling usage
+    Runner--&gt;&gt;Runtime: turn_completed / failed / cancelled
+    Runtime-&gt;&gt;Store: persist_turn_state(terminal event)
+    alt follow-up queued
+        Runtime-&gt;&gt;Store: persist_message(user follow-up)
+        Runtime-&gt;&gt;Runner: continue next turn cycle
+    else active goal continuation
+        Runtime-&gt;&gt;Runner: continue with goal prompt
+    else terminal
+        Runtime--&gt;&gt;CLI: terminal event
+        Runtime-&gt;&gt;Runtime: clear active turn and queues
     end
+</div><h2 id="6-上下文-compact-和错误恢复">6. 上下文、compact 和错误恢复 </h2>
+<div class="mermaid">flowchart TD
+    Build["ContextManager.build_context()"]
+    History["SessionStore.list_messages()"]
+    Docs["RIND docs provider"]
+    Skills["SkillSelector + SkillRepository"]
+    Estimate["ContextEstimator / ContextBudget"]
+    Decision["stats + decisions"]
+    Compact["CompactionService"]
+    Handoff["compact handoff / summary / boundary"]
+    Rebuild["rebuild context"]
+    Stream["LLM stream"]
+    Error["ProviderError / BadRequestError\ncontext_length_exceeded"]
+    Rescue["reduce hard limit\nforce rescue next build"]
 
-    Note over Main: 第 5 阶段：构建依赖容器 (line 51-56)
-    Main-&gt;&gt;Container: build_basic_agent_dependencies()
+    Build --&gt; History
+    Build --&gt; Docs
+    Build --&gt; Skills
+    Build --&gt; Estimate
+    History --&gt; Decision
+    Docs --&gt; Decision
+    Skills --&gt; Decision
+    Estimate --&gt; Decision
+    Decision --&gt;|compact_required| Compact
+    Compact --&gt; Handoff --&gt; Rebuild --&gt; Stream
+    Decision --&gt;|within budget| Stream
+    Stream --&gt; Error
+    Error --&gt;|first occurrence| Compact
+    Error --&gt;|repeated| Rescue --&gt; Build
+</div><p>恢复顺序是：第一次 context length error 触发 mid-turn compact；再次失败则降低 context hard limit，并要求下一次 build 走 rescue。非 context length 的 provider error 直接转换为 <code>turn_failed</code>。</p>
+<h2 id="7-工具执行与持久化顺序">7. 工具执行与持久化顺序 </h2>
+<div class="mermaid">sequenceDiagram
+    participant Runner as TurnRunner
+    participant Processor as ToolCallProcessor
+    participant Executor as ToolExecutor
+    participant Registry as DefaultToolRegistry
+    participant Builtin as shell/files/web/skill/goal/planning/question
+    participant Store as SessionStore
+    participant Event as RuntimeEvent stream
 
-    Note over Container: 初始化基础设施 (line 33-57)
-    Container-&gt;&gt;Container: AsyncJsonlSessionStore
-    Container-&gt;&gt;Container: DefaultToolRegistry
-    Container-&gt;&gt;Container: ToolExecutor
-    Container-&gt;&gt;Container: AsyncOpenAIChatClient (注入 reasoning_effort)
-    Container-&gt;&gt;Container: SkillRepository
-    Container-&gt;&gt;Container: SkillSelector
-    Container-&gt;&gt;Container: AsyncToolCallProcessor
-    Container-&gt;&gt;Container: MessageStreamParser
-
-    Note over Container: 初始化应用层 (line 58-81)
-    Container-&gt;&gt;Container: ContextManager (包含 ContextBudget)
-    Container-&gt;&gt;Container: AsyncTurnRunner
-    Container-&gt;&gt;Container: AsyncRuntimeFacade
-
-    Note over Container: 初始化接口层 (line 83)
-    Container-&gt;&gt;Container: ChatCLI
-
-    Container--&gt;&gt;Main: 返回依赖字典 { "cli": ChatCLI, ... }
-
-    Note over Main: 第 7 阶段：启动 CLI (line 60)
-    Main-&gt;&gt;CLI: cli.start()
-
-    Note over CLI: 进入交互式模式
-    loop 主聊天循环
-        CLI-&gt;&gt;User: 等待用户输入
-        User-&gt;&gt;CLI: 输入消息
-
-        CLI-&gt;&gt;CLI: 执行完整回合
-
-        CLI-&gt;&gt;User: 实时展示
-    end
-
-    alt 用户按 Ctrl+C
-        CLI-&gt;&gt;User: 打印 "Interrupted."
-        CLI-&gt;&gt;User: 返回 130
-    else 正常结束
-        CLI-&gt;&gt;User: 返回 0
-    end
-</div><h2 id="各阶段详细说明">各阶段详细说明 </h2>
-<h3 id="1-参数解析line-9-17">1. 参数解析（Line 9-17） </h3>
-<p>解析所有命令行参数：</p>
+    Runner-&gt;&gt;Processor: process_tool_calls()
+    Processor-&gt;&gt;Registry: resolve tool name
+    Registry--&gt;&gt;Executor: ToolSpec / callable
+    Processor-&gt;&gt;Executor: execute(args)
+    Executor-&gt;&gt;Builtin: invoke sync or async tool
+    Builtin--&gt;&gt;Executor: ToolResult / error
+    Executor--&gt;&gt;Processor: normalized result
+    Processor-&gt;&gt;Store: persist_tool_call(call, result)
+    Processor-&gt;&gt;Store: persist_message(tool result)
+    Processor--&gt;&gt;Event: tool_started / progress / result
+    Processor--&gt;&gt;Event: file_changed or user_question when applicable
+    Event--&gt;&gt;Runner: result becomes next context input
+</div><p>内置工具目录：</p>
 <ul>
-<li><code>--version</code> - 显示版本号</li>
-<li><code>--debug</code> - 调试模式</li>
-<li><code>--session</code> - 指定 Session ID</li>
-<li><code>-c, --resume-latest</code> - 恢复最近的会话</li>
-<li><code>--session-dir</code> - 会话存储目录</li>
-<li><code>--doctor</code> - 运行诊断</li>
+<li><code>builtin/shell/</code>：<code>tool.py</code>、<code>session_pool.py</code>、<code>supervisor.py</code>、<code>process.py</code>、<code>capture.py</code>、<code>policy.py</code>、<code>process_tree.py</code>、<code>result.py</code>；</li>
+<li><code>builtin/files/</code>：文件读取、写入、编辑和变更记录；</li>
+<li><code>builtin/web.py</code>：网络检索/访问工具；</li>
+<li><code>builtin/skill.py</code>：技能查询和激活；</li>
+<li><code>builtin/goal.py</code>、<code>builtin/planning.py</code>：goal/plan 控制；</li>
+<li><code>builtin/user_question.py</code>：将用户问答桥接到 runtime responder。</li>
 </ul>
-<h3 id="2-doctor-模式line-19-29">2. Doctor 模式（Line 19-29） </h3>
-<p>如果使用 <code>--doctor</code>：</p>
-<ul>
-<li>构建诊断报告</li>
-<li>打印报告</li>
-<li>退出程序</li>
-</ul>
-<h3 id="3-session-id-验证line-31-38">3. Session ID 验证（Line 31-38） </h3>
-<p>验证 Session ID 格式是否合法</p>
-<h3 id="4-配置初始化line-44-49">4. 配置初始化（Line 44-49） </h3>
-<pre data-role="codeBlock" data-info="python" class="language-python python"><code>Config<span class="token punctuation">.</span>ensure_user_settings_template<span class="token punctuation">(</span><span class="token punctuation">)</span>  <span class="token comment"># 确保 settings.json 存在</span>
-Config<span class="token punctuation">.</span><span class="token builtin">reload</span><span class="token punctuation">(</span><span class="token punctuation">)</span>                          <span class="token comment"># 重新加载配置</span>
-Config<span class="token punctuation">.</span>validate<span class="token punctuation">(</span><span class="token punctuation">)</span>                        <span class="token comment"># 验证配置</span>
-</code></pre><h3 id="5-依赖容器构建line-51-56">5. 依赖容器构建（Line 51-56） </h3>
-<p>调用 <code>build_basic_agent_dependencies()</code>，按以下顺序初始化：</p>
-<ol>
-<li>
-<p><strong>基础设施层</strong>：</p>
-<ul>
-<li>AsyncJsonlSessionStore（会话持久化）</li>
-<li>DefaultToolRegistry（工具注册表）</li>
-<li>ToolExecutor（工具执行器）</li>
-<li>AsyncOpenAIChatClient（LLM 客户端）</li>
-<li>SkillRepository（技能仓库）</li>
-<li>SkillSelector（技能选择器）</li>
-<li>AsyncToolCallProcessor（工具处理器）</li>
-<li>MessageStreamParser（消息流解析器）</li>
-</ul>
-</li>
-<li>
-<p><strong>应用层</strong>：</p>
-<ul>
-<li>ContextManager（上下文管理器）</li>
-<li>AsyncTurnRunner（回合执行器）</li>
-<li>AsyncRuntimeFacade（外观层）</li>
-</ul>
-</li>
-<li>
-<p><strong>接口层</strong>：</p>
-<ul>
-<li>ChatCLI（命令行界面）</li>
-</ul>
-</li>
-</ol>
-<h3 id="7-cli-启动line-60">7. CLI 启动（Line 60） </h3>
-<p>调用 <code>cli.start()</code>，进入交互式聊天模式</p>
-<h2 id="异常处理">异常处理 </h2>
-<h3 id="keyboardinterruptctrlc">KeyboardInterrupt（Ctrl+C） </h3>
-<pre data-role="codeBlock" data-info="python" class="language-python python"><code><span class="token keyword keyword-except">except</span> KeyboardInterrupt<span class="token punctuation">:</span>
-    <span class="token keyword keyword-print">print</span><span class="token punctuation">(</span><span class="token string">"\nInterrupted."</span><span class="token punctuation">,</span> <span class="token builtin">file</span><span class="token operator">=</span>sys<span class="token punctuation">.</span>stderr<span class="token punctuation">)</span>
-    <span class="token keyword keyword-return">return</span> <span class="token number">130</span>
-</code></pre><ul>
-<li>捕获中断</li>
-<li>打印退出信息</li>
-<li>返回状态码 130（标准中断码）</li>
-</ul>
-<h3 id="配置错误">配置错误 </h3>
-<pre data-role="codeBlock" data-info="python" class="language-python python"><code><span class="token keyword keyword-except">except</span> ValueError <span class="token keyword keyword-as">as</span> exc<span class="token punctuation">:</span>
-    <span class="token keyword keyword-print">print</span><span class="token punctuation">(</span><span class="token string-interpolation"><span class="token string">f"Configuration error: </span><span class="token interpolation"><span class="token punctuation">{</span>exc<span class="token punctuation">}</span></span><span class="token string">"</span></span><span class="token punctuation">,</span> <span class="token builtin">file</span><span class="token operator">=</span>sys<span class="token punctuation">.</span>stderr<span class="token punctuation">)</span>
-    <span class="token keyword keyword-return">return</span> <span class="token number">1</span>
-</code></pre><ul>
-<li>捕获配置异常</li>
-<li>打印错误信息</li>
-<li>返回状态码 1</li>
-</ul>
-<h2 id="退出码">退出码 </h2>
+<h2 id="8-session-控制请求和退出">8. Session、控制请求和退出 </h2>
+<div class="mermaid">flowchart LR
+    Request["CLI slash / API / stdio request"]
+    Router["runtime request router / CLI router"]
+    Runtime["AgentRuntime"]
+    Store["JsonlSessionStore"]
+    State["session meta\nmodel · goal · turn state · usage"]
+    History["JSONL history\nmessages/tool_calls/compactions"]
+    Terminal["terminal response/event"]
+
+    Request --&gt; Router --&gt; Runtime
+    Runtime --&gt; Store
+    Store --&gt; State
+    Store --&gt; History
+    Runtime --&gt; Terminal
+</div><p>控制请求的主要行为：</p>
 <table>
 <thead>
 <tr>
-<th>状态码</th>
-<th>含义</th>
+<th>请求</th>
+<th>runtime 行为</th>
+<th>是否进入主 turn 队列</th>
 </tr>
 </thead>
 <tbody>
 <tr>
-<td>0</td>
-<td>成功</td>
+<td><code>initialize</code></td>
+<td>初始化 session、返回 resume preview/capabilities</td>
+<td>否</td>
 </tr>
 <tr>
-<td>1</td>
-<td>配置错误 / Session 错误 / 诊断失败</td>
+<td><code>turn.start</code></td>
+<td>启动一次 turn</td>
+<td>是</td>
 </tr>
 <tr>
-<td>130</td>
-<td>用户中断（Ctrl+C）</td>
+<td><code>turn.interrupt</code></td>
+<td>取消 token、丢弃 pending input</td>
+<td>否</td>
+</tr>
+<tr>
+<td><code>turn.steer</code></td>
+<td>加入当前 turn steering queue</td>
+<td>否</td>
+</tr>
+<tr>
+<td><code>turn.follow_up</code></td>
+<td>加入后续 turn queue</td>
+<td>否</td>
+</tr>
+<tr>
+<td><code>compact</code></td>
+<td>调用 <code>compact_context()</code></td>
+<td>控制路径</td>
+</tr>
+<tr>
+<td><code>model.set</code></td>
+<td>更新 runtime client 与 session metadata</td>
+<td>控制路径</td>
+</tr>
+<tr>
+<td><code>session.switch</code></td>
+<td>idle 时切换 session 并返回 preview</td>
+<td>控制路径</td>
+</tr>
+<tr>
+<td><code>goal.*</code></td>
+<td>读取、设置、更新或清除 goal</td>
+<td>控制路径</td>
+</tr>
+<tr>
+<td><code>slash.execute</code></td>
+<td>readonly 命令立即响应，其余复用 CLI router</td>
+<td>取决于命令</td>
 </tr>
 </tbody>
 </table>
+<h2 id="9-失败和退出路径">9. 失败和退出路径 </h2>
+<ul>
+<li>参数解析失败：argparse 自己输出错误并退出；</li>
+<li>session id 非法：<code>main.py</code> 输出 <code>Session error</code>，返回 <code>1</code>；</li>
+<li>settings 无效：输出 <code>Configuration error</code>，返回 <code>1</code>；</li>
+<li>session 初始化/持久化失败：runtime 转换为 <code>PersistenceError</code>，产生失败事件；</li>
+<li>provider 非 context 错误：产生 <code>turn_failed</code>；</li>
+<li>context 超限：compact -&gt; hard-limit rescue -&gt; 仍失败才终止；</li>
+<li>cancellation：产生 <code>turn_cancelled</code>，清理 active turn 和 pending queues；</li>
+<li>CLI Ctrl+C：<code>ChatCLI</code> 清理运行时后返回 <code>130</code>；</li>
+<li>正常退出：返回 <code>0</code>。</li>
+</ul>
+<h2 id="10-从入口跟读代码的路径">10. 从入口跟读代码的路径 </h2>
+<pre data-role="codeBlock" data-info="text" class="language-text text"><code>main.py
+  -&gt; agent/bootstrap/container.py
+     -&gt; agent/application/runtime/runtime.py
+        -&gt; agent/application/runtime/turn_runner.py
+           -&gt; agent/application/context/manager.py
+           -&gt; agent/application/runtime/stream_pump.py
+           -&gt; agent/application/tools/processor.py
+              -&gt; agent/application/tools/executor.py
+                 -&gt; agent/infrastructure/tools/builtin/*
+           -&gt; agent/infrastructure/persistence/jsonl_session_store.py
 
+CLI output:
+  agent/interfaces/cli/chat_cli.py
+    -&gt; agent/interfaces/cli/status/*
+    -&gt; agent/interfaces/cli/ui/*
+
+stdio/API output:
+  agent/interfaces/runtime_server/stdio.py
+    -&gt; agent/interfaces/runtime_server/protocol.py
+  agent/interfaces/api/routes_session.py
+    -&gt; SSE envelope
+
+Node terminal client:
+  frontend-cli/bin/rind.js
+    -&gt; frontend-cli/lib/runtime-protocol.js
+    -&gt; frontend-cli/lib/*state.js / input modules
+    -&gt; frontend-cli/lib/rendering.js
+</code></pre>
       </div>
 
 
