@@ -6,6 +6,8 @@ import sys
 import tempfile
 from pathlib import Path
 
+import pytest
+
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
@@ -57,3 +59,53 @@ def test_container_explicitly_shares_production_dependencies() -> None:
         assert container.tool_processor._tool_result_normalizer is container.tool_result_normalizer
         assert container.context_manager._estimator is container.context_estimator
         assert not hasattr(container, "cli")
+
+
+def test_container_filters_tools_before_building_registry_and_schema() -> None:
+    cache_dir = PROJECT_ROOT / ".pytest_cache"
+    cache_dir.mkdir(exist_ok=True)
+    settings = AppSettings(
+        settings_path=cache_dir / "settings.json",
+        settings_exists=True,
+        model="test-model",
+        api_key="test-key",
+        base_url="https://example.com/v1",
+        reasoning_effort="high",
+        user_agent="test-agent",
+    )
+
+    with tempfile.TemporaryDirectory(dir=cache_dir) as session_dir:
+        container = build_agent_container(
+            settings=settings,
+            provider_client_factory=FakeProviderClientFactory(),
+            session_dir=session_dir,
+            enabled_tools=("read_file",),
+        )
+
+        assert container.tool_registry.has("read_file") is True
+        assert container.tool_registry.has("bash") is False
+        assert [schema["function"]["name"] for schema in container.tool_registry.schemas] == ["read_file"]
+        assert container.turn_runner._tool_schemas == container.tool_registry.schemas
+
+
+def test_container_rejects_unknown_enabled_tools() -> None:
+    cache_dir = PROJECT_ROOT / ".pytest_cache"
+    cache_dir.mkdir(exist_ok=True)
+    settings = AppSettings(
+        settings_path=cache_dir / "settings.json",
+        settings_exists=True,
+        model="test-model",
+        api_key="test-key",
+        base_url="https://example.com/v1",
+        reasoning_effort="high",
+        user_agent="test-agent",
+    )
+
+    with tempfile.TemporaryDirectory(dir=cache_dir) as session_dir:
+        with pytest.raises(ValueError, match=r"Unknown enabled tool\(s\): missing_tool"):
+            build_agent_container(
+                settings=settings,
+                provider_client_factory=FakeProviderClientFactory(),
+                session_dir=session_dir,
+                enabled_tools=("missing_tool",),
+            )
