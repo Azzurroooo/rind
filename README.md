@@ -150,9 +150,10 @@ agent/
 │   ├── llm/           # OpenAI-compatible async chat client
 │   ├── persistence/   # Append-only session records and repositories
 │   ├── planning/      # Session-local plan storage and compact snapshots
-│   └── tools/builtin/ # Shell, file, web, plan, and skill tools
+│   └── tools/builtin/ # ToolSpec implementations and build_builtin_tool_specs catalog
 └── interfaces/
     ├── cli/           # Interactive CLI, slash commands, status UI
+    │   └── commands/features/ # Feature-local slash command registrations
     ├── runtime_server/# JSONL stdio adapter for headless runtime use
     └── api/           # FastAPI session streaming adapter
 frontend-cli/          # Experimental Node.js terminal input/rendering process

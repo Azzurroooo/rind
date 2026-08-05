@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Collection
 from dataclasses import dataclass
 
 from agent.application.context import CompactionService, ContextEstimator, ContextManager
@@ -16,7 +17,7 @@ from agent.infrastructure.planning import build_plan_snapshot
 from agent.infrastructure.rind_docs import build_rind_doc_context
 from agent.infrastructure.skills import SkillRepository
 from agent.infrastructure.tools import DefaultToolRegistry
-from agent.infrastructure.tools.builtin import TOOL_SPECS, create_goal_tool_spec
+from agent.infrastructure.tools.builtin import build_builtin_tool_specs
 from agent.prompts import SYSTEM_PROMPT
 
 
@@ -49,6 +50,7 @@ def build_agent_container(
     session_id: str | None = None,
     resume_latest: bool = False,
     enable_goal: bool = False,
+    enabled_tools: Collection[str] | None = None,
 ) -> AgentContainer:
     """Build the production runtime dependency graph explicitly."""
     settings = settings or load_settings()
@@ -61,9 +63,19 @@ def build_agent_container(
         model=model,
         system_prompt=SYSTEM_PROMPT,
     )
-    tool_specs = list(TOOL_SPECS)
-    if enable_goal:
-        tool_specs.append(create_goal_tool_spec(session_store.set_goal_status))
+    catalog = build_builtin_tool_specs(
+        enable_goal=enable_goal,
+        set_goal_status=session_store.set_goal_status if enable_goal else None,
+    )
+    if enabled_tools is None:
+        tool_specs = catalog
+    else:
+        requested = set(enabled_tools)
+        known = {spec.name for spec in catalog}
+        unknown = sorted(requested - known)
+        if unknown:
+            raise ValueError(f"Unknown enabled tool(s): {', '.join(unknown)}")
+        tool_specs = tuple(spec for spec in catalog if spec.name in requested)
     tool_registry = DefaultToolRegistry(tool_specs)
     tool_executor = ToolExecutor(registry=tool_registry)
     tool_result_normalizer = ToolResultNormalizer()

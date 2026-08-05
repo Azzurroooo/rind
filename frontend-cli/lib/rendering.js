@@ -51,17 +51,19 @@ export function outputBlockText(text, leading = false) {
 }
 
 export function helpText(commands = []) {
-  return [
+  const lines = [
     `${accent("•")} Controls`,
     helpRow("enter", "send message", "/", "open commands"),
     helpRow("↑ / ↓", "history", "← / →", "move cursor"),
     helpRow("home / end", "line edges", "del / backspace", "edit text"),
     helpRow("ctrl+c", "interrupt or quit", "?", "show shortcuts"),
     helpRow("ctrl+b", "background tasks", "esc", "close monitor"),
-    "",
-    `${accent("•")} Command deck`,
-    ...commandDeckText(commands),
-  ].join("\n");
+  ];
+  const commandRows = commandDeckText(commands);
+  if (commandRows.length) {
+    lines.push("", `${accent("•")} Command deck`, ...commandRows);
+  }
+  return lines.join("\n");
 }
 
 export function slashDisplayText(display, commands = []) {
@@ -428,11 +430,7 @@ function toolDetail(name, args) {
 function commandDeckText(commands) {
   const items = Array.isArray(commands) ? commands : [];
   if (!items.length) {
-    return [
-      dim("  /status  /sessions  /skill  /init  /plan  /compact"),
-      dim("  /model set <name>  /draft  /doctor  /config  /login"),
-      dim("  /clear  /exit"),
-    ];
+    return [];
   }
   const names = items.map((command) => `/${clipSingleLine(command?.name, 22)}`);
   const lines = [];

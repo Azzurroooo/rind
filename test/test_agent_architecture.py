@@ -22,11 +22,12 @@ _KNOWN_INTERFACE_INFRASTRUCTURE_IMPORTS = {
     "agent/interfaces/cli/commands/diagnostics.py -> agent.infrastructure.config",
     "agent/interfaces/cli/commands/diagnostics.py -> agent.infrastructure.config.settings_loader",
     "agent/interfaces/cli/commands/diagnostics.py -> agent.infrastructure.persistence.jsonl_session_store",
-    "agent/interfaces/cli/commands/handlers.py -> agent.infrastructure.config",
-    "agent/interfaces/cli/commands/handlers.py -> agent.infrastructure.rind_docs",
-    "agent/interfaces/cli/commands/handlers.py -> agent.infrastructure.skills.repository",
-    "agent/interfaces/cli/commands/handlers.py -> agent.infrastructure.planning.store",
-    "agent/interfaces/cli/commands/handlers.py -> agent.infrastructure.planning.summary",
+    "agent/interfaces/cli/commands/features/config.py -> agent.infrastructure.config",
+    "agent/interfaces/cli/commands/features/init.py -> agent.infrastructure.rind_docs",
+    "agent/interfaces/cli/commands/features/model.py -> agent.infrastructure.config",
+    "agent/interfaces/cli/commands/features/plan.py -> agent.infrastructure.planning.store",
+    "agent/interfaces/cli/commands/features/plan.py -> agent.infrastructure.planning.summary",
+    "agent/interfaces/cli/commands/features/skill.py -> agent.infrastructure.skills.repository",
     "agent/interfaces/cli/commands/model_control.py -> agent.infrastructure.config",
 }
 
@@ -35,8 +36,8 @@ _KNOWN_INTERFACE_PRIVATE_FIELD_READS = {
     "agent/interfaces/cli/chat_cli.py -> _session_root",
     "agent/interfaces/cli/commands/diagnostics.py -> _session_root",
     "agent/interfaces/cli/commands/diagnostics.py -> _session_dir",
-    "agent/interfaces/cli/commands/handlers.py -> _session_paths",
-    "agent/interfaces/cli/commands/handlers.py -> _session_root",
+    "agent/interfaces/cli/commands/features/draft.py -> _session_paths",
+    "agent/interfaces/cli/commands/features/draft.py -> _session_root",
 }
 
 

@@ -7,6 +7,7 @@ import re
 
 from agent.domain import tool_error, tool_ok
 from agent.infrastructure.paths import resolve_rind_home, resolve_project_root
+from agent.infrastructure.tools.spec import ToolSpec
 
 _SKILL_NAME_PATTERN = re.compile(r"^[a-zA-Z0-9_-]+$")
 
@@ -129,3 +130,20 @@ def _render_skill_markdown(name: str, description: str, body: str, triggers: lis
 def _quote_yaml_string(value: str) -> str:
     escaped = value.replace("\\", "\\\\").replace('"', '\\"')
     return f'"{escaped}"'
+
+
+TOOL_SPECS = (
+    ToolSpec(
+        name="skill_create",
+        handler=skill_create,
+        description="创建格式正确的 Rind Skill。自动写入当前目录 .rind/skills/<name>/SKILL.md 或用户级 RIND_HOME/skills/<name>/SKILL.md，并生成稳定的 frontmatter。",
+        param_descriptions={
+            "name": "Skill 名称。只能包含字母、数字、下划线和连字符。",
+            "description": "Skill 的简短说明，写入 frontmatter，用于上下文中的 skill index。",
+            "body": "SKILL.md 正文指令内容。",
+            "triggers": "可选触发短语列表。为空时写入 triggers: []。",
+            "scope": {"description": "写入范围：project 写到当前项目，user 写到用户目录。默认 project。", "enum": ["project", "user"]},
+            "overwrite": "是否覆盖已存在的 SKILL.md。默认 False。",
+        },
+    ),
+)

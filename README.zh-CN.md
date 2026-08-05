@@ -150,9 +150,10 @@ agent/
 │   ├── llm/           # OpenAI 兼容异步 Chat Client
 │   ├── persistence/   # append-only 会话记录与仓储
 │   ├── planning/      # session-local 计划存储和 compact 快照
-│   └── tools/builtin/ # Shell、文件、网页、计划和技能工具
+│   └── tools/builtin/ # ToolSpec 实现与 build_builtin_tool_specs catalog
 └── interfaces/
     ├── cli/           # 交互式 CLI、斜杠命令、状态 UI
+    │   └── commands/features/ # 按功能注册 slash command
     ├── runtime_server/# 无头 runtime 的 JSONL stdio 适配器
     └── api/           # FastAPI 会话流式适配器
 frontend-cli/          # 实验性 Node.js 终端输入/渲染进程

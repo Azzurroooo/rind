@@ -11,7 +11,7 @@ flowchart TB
 
     subgraph Interfaces["agent/interfaces · 输入输出适配层"]
         CLI["cli/\nChatCLI"]
-        Commands["cli/commands/\nrouter · handlers · status"]
+        Commands["cli/commands/\nrouter · features · status"]
         CLIUI["cli/ui/ + cli/status/\n输入、流式渲染、状态面板"]
         API["api/\nmain · dependencies · routes_session"]
         Stdio["runtime_server/\nstdio · protocol"]
@@ -35,7 +35,7 @@ flowchart TB
         Config["config/\nAppSettings · settings loader"]
         LLM["llm/\nOpenAIClientFactory · OpenAIChatClient"]
         Persist["persistence/\nJsonlSessionStore + repositories"]
-        ToolInfra["tools/\nregistry · schema · builtin tools"]
+        ToolInfra["tools/\nregistry · schema · builtin catalogs/tools"]
         SkillInfra["skills/\nSkillRepository"]
         Plan["planning/ + rind_docs.py\nplan context 与 RIND 文档"]
         Paths["paths.py\nsession/path validation"]
@@ -142,6 +142,23 @@ flowchart LR
 `build_agent_container()` 的实际创建顺序是：settings/provider factory -> session store -> tool registry/executor/normalizer/processor -> LLM client -> stream parser -> context estimator/skill components/context manager -> compaction service -> turn runner -> runtime。
 
 `AgentContainer` 是 dataclass facade，保存运行时需要的对象；`main.py` 只取 `container.runtime` 和 `container.session_store` 创建 `ChatCLI`。API、stdio 使用同一 composition root，不应自行复制这一组装流程。
+
+### 能力注册边界
+
+```mermaid
+flowchart LR
+    CompositionRoot["bootstrap/container.py\nAgentContainer"] --> ToolCatalog["build_builtin_tool_specs"]
+    ToolCatalog --> ToolRegistry["DefaultToolRegistry"]
+    ToolRegistry --> Runtime["AgentRuntime / TurnRunner"]
+    Cli["ChatCLI"] --> CommandRouter["SlashCommandRouter"]
+    Stdio["stdio JSONL"] --> CommandRouter
+    CommandCatalog["commands/features/build_command_infos"] --> CommandRouter
+    Stdio -->|initialize.slash_commands| Frontend["frontend-cli"]
+```
+
+- `agent/infrastructure/tools/builtin/__init__.py` 只按固定顺序组合各工具模块的 `TOOL_SPECS`；`AgentContainer` 在构造 registry 前筛选 `enabled_tools`。
+- `agent/interfaces/cli/commands/features/` 是 slash command 的唯一内置 catalog。每个功能模块提供自己的 `SlashCommandInfo` 和 handler，router 负责校验名称、alias 和分发。
+- `ChatCLI` 与 stdio 都从 router 读取注册结果；frontend-cli 只消费 `initialize.slash_commands` 生成菜单、帮助和补全，不维护另一份命令目录。
 
 ## 3. 一次 turn 的运行时结构
 
@@ -345,42 +362,58 @@ flowchart LR
 ```mermaid
 flowchart TB
     Command["rind / node frontend-cli/bin/rind.js"]
-    Entry["rind.js\n解析 process.argv 与 scriptDir/repoRoot"]
+    Bin["bin/rind.js\n薄入口：调用 runFrontendCli()"]
+    PublicEntry["lib/frontend-cli.js\n公开 runFrontendCli(cliArgs)"]
+    App["frontend-cli-implementation.js\n应用编排与共享 state"]
     Fast["--help / --version\nspawnSync(python, main.py, stdio: inherit)"]
-    Env["buildRuntimeEnv()\nRIND_PYTHON · PYTHONPATH · PYTHONUTF8 · PYTHONIOENCODING"]
+    RuntimeClient["runtime-client.js\nspawn Python + JSONL request/event"]
+    Env["runtime-env.js\nPYTHONPATH + UTF-8 env"]
     Bootstrap["runtimeBootstrap Python -c\nrunpy.run_module(agent.interfaces.runtime_server.stdio)"]
     Child["Python StdioRuntimeServer\nstdin/stdout/stderr pipes"]
-    ServerBoot["stdio.main / async_main\nUTF-8 + signal + args + Config + container"]
-    Request["request()\nrequest_id + pending Map + JSONL write"]
-    Reader["stdout line buffer\nJSON.parse -> receive()"]
-    Protocol["runtime-protocol.js\nrequest id / event type"]
-    State["rind.js state\nturn · tool · plan · goal · background · question"]
-    TTY["TTY terminal UI\nline editor + menus + render loop"]
-    Plain["non-TTY fallback\nreadline + stdin data"]
-    Render["rendering.js + assistant renderer"]
-    Shutdown["SIGINT / shutdown\ninterrupt -> shutdown request -> close/kill"]
+    ServerBoot["stdio.main / async_main\nsignal + args + Config + container"]
+    Turn["turn-controller.js\nturn.start / follow_up / steer / interrupt"]
+    Commands["command-controller.js\nslash command 分类与结果应用"]
+    Input["input-controller.js\nTTY/non-TTY prompt、菜单、按键"]
+    Events["event-controller.js\nassistant/tool/plan/goal/question events"]
+    Background["background-controller.js\nbackground list + monitor"]
+    Render["rendering.js + assistant-renderer.js\n终端文本与 Markdown 输出"]
+    TTY["terminal-ui.js\n动态帧与光标控制"]
+    Plain["readline fallback\n重定向/非 TTY 输入"]
+    Shutdown["SIGINT / shutdown\ninterrupt -> shutdown -> close/kill"]
 
-    Command --> Entry
-    Entry -->|help/version| Fast
-    Entry -->|interactive| Env --> Bootstrap --> Child
-    Child --> ServerBoot --> Stdio
-    Entry --> Request
-    Request --> Child
-    Child --> Reader --> Protocol --> State
-    State --> Render
-    Entry --> TTY
-    Entry --> Plain
-    TTY --> State
-    Plain --> State
-    State --> Shutdown
-    Shutdown --> Child
+    Command --> Bin --> PublicEntry --> App
+    App -->|help/version| Fast
+    App --> RuntimeClient
+    RuntimeClient --> Env --> Bootstrap --> Child --> ServerBoot --> Stdio
+    RuntimeClient --> Events
+    App --> Turn
+    App --> Commands
+    App --> Input
+    App --> Background
+    Input --> TTY
+    Input --> Plain
+    Commands --> Turn
+    Turn --> RuntimeClient
+    Background --> RuntimeClient
+    Events --> Render
+    Events --> Input
+    Shutdown --> Turn
+    Shutdown --> RuntimeClient
 ```
 
 ### frontend-cli 文件职责
 
 | 文件 | 启动链中的职责 |
 | --- | --- |
-| `bin/rind.js` | 进程启动、Python child process、JSONL multiplex、prompt loop、command dispatch、事件状态和 shutdown；当前是最大的编排入口 |
+| `bin/rind.js` | 薄启动入口，只导入 `runFrontendCli()` 并传入 CLI 参数 |
+| `lib/frontend-cli.js` | frontend-cli 公开入口，转发到实际应用编排 |
+| `lib/frontend-cli-implementation.js` | 应用层装配：repoRoot、快速路径、initialize、controllers、共享 state、shutdown |
+| `lib/runtime-client.js` | Python child process、stdout JSONL 分包、request pending、event 转发、shutdown/kill |
+| `lib/turn-controller.js` | turn.start、turn.follow_up、turn.steer、interrupt 和 turn 生命周期状态 |
+| `lib/command-controller.js` | 普通文本、slash command、本地交互命令、slash result 应用 |
+| `lib/input-controller.js` | TTY/non-TTY prompt、line editor、菜单、暂停/恢复、用户问题输入 |
+| `lib/event-controller.js` | assistant 流式输出、工具事件、plan/goal、user question、turn 结束状态 |
+| `lib/background-controller.js` | background task 列表、结果合并、monitor 进入/退出与轮询 |
 | `lib/runtime-env.js` | 为 Python child 构造 `PYTHONPATH`、UTF-8 和环境变量 |
 | `lib/runtime-protocol.js` | 创建 request、读取 request id、识别 event type、选择 `turn.start`/`turn.follow_up` |
 | `lib/terminal-ui.js` | TTY 动态帧、光标和外部输出暂停/恢复 |
@@ -388,7 +421,7 @@ flowchart TB
 | `lib/*-state.js` | compact、model、slash、choice、interrupt 等局部交互状态 |
 | `lib/rendering.js`、`assistant-renderer.js` | startup、prompt、tool/status、markdown assistant 输出 |
 
-启动后存在两条输入模式：TTY 使用 `createTerminalUI()` 和终端按键状态机；非 TTY 使用 Node `readline` 与 stdin data listener。两条路径共享 `submitTurn()`、`request()`、runtime event 分发和最终 shutdown。
+启动后存在两条输入模式：TTY 通过 `input-controller` 调用 `createTerminalUI()`、line editor 和菜单状态；非 TTY 通过 Node `readline` 与 stdin data listener。两条路径共享 `turn-controller`、`command-controller`、`runtime-client`、runtime event 分发和最终 shutdown。
 
 ## 9. 当前目录结构
 
@@ -434,8 +467,8 @@ flowchart TB
 │   │   └── runtime_server/                # stdio server 与 versioned protocol
 │   └── prompts.py                         # SYSTEM_PROMPT 与 goal prompt
 ├── frontend-cli/
-│   ├── bin/rind.js                        # Python runtime client 与交互状态编排
-│   ├── lib/                               # protocol、输入、状态、渲染纯模块
+│   ├── bin/rind.js                        # 薄 Node 启动入口
+│   ├── lib/                               # runtime client、controllers、protocol、输入、状态、渲染模块
 │   └── test/
 ├── sessions/                              # 运行时 session artifact
 └── test/                                  # Python 单元、协议和集成测试
@@ -453,4 +486,4 @@ flowchart TB
 6. `agent/application/tools/processor.py` 与 `tools/executor.py`：理解工具结果、问答、文件变化和持久化。
 7. `agent/infrastructure/persistence/jsonl_session_store.py`：理解 session 文件与 repositories。
 8. `agent/interfaces/runtime_server/stdio.py`、`api/routes_session.py`、`cli/chat_cli.py`：理解三种输出和控制入口。
-9. `frontend-cli/bin/rind.js`、`lib/runtime-protocol.js`、`lib/rendering.js`：理解 Node CLI 如何消费 runtime 事件。
+9. `frontend-cli/bin/rind.js`、`lib/frontend-cli-implementation.js`、`lib/runtime-client.js`、`lib/*-controller.js`：理解 Node CLI 如何启动 Python runtime、路由输入并消费事件。
