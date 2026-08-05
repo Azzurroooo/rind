@@ -18,6 +18,7 @@ from agent.interfaces.runtime_server.stdio import (
     configure_stdio_server_signals,
     configure_utf8_stdio,
 )
+from agent.interfaces.cli.commands import SlashCommandInfo, SlashCommandRouter
 from agent.interfaces.runtime_server.protocol import event_envelope
 from agent.infrastructure.config import Config
 
@@ -260,6 +261,25 @@ def test_initialize_goal_capability_returns_session_goal(capsys):
     result = json.loads(capsys.readouterr().out)["result"]
     assert "goals" in result["capabilities"]
     assert result["goal"] == {"objective": "finish the release", "status": "active"}
+
+
+def test_initialize_exposes_only_the_registered_command_catalog(capsys):
+    async def handle_custom(_context, _args):
+        return "custom"
+
+    async def run():
+        server = StdioRuntimeServer(_Runtime(), _Session())
+        server._slash_router = SlashCommandRouter(
+            (SlashCommandInfo("custom", "Custom command", "/custom", handler=handle_custom),)
+        )
+        await server._initialize({"request_id": 10, "method": "initialize", "params": {}})
+
+    asyncio.run(run())
+
+    result = json.loads(capsys.readouterr().out)["result"]
+    assert result["slash_commands"] == [
+        {"name": "custom", "description": "Custom command", "usage": "/custom", "aliases": []}
+    ]
 
 
 def test_goal_control_requests_update_and_clear_state(capsys):

@@ -242,11 +242,6 @@ test("helpText renders compact shortcuts and commands", () => {
       "  home / end   line edges           del / backspace edit text",
       "  ctrl+c       interrupt or quit    ?              show shortcuts",
       "  ctrl+b       background tasks     esc            close monitor",
-      "",
-      "• Command deck",
-      "  /status  /sessions  /skill  /init  /plan  /compact",
-      "  /model set <name>  /draft  /doctor  /config  /login",
-      "  /clear  /exit",
     ].join("\n"),
   );
   assert.equal(
