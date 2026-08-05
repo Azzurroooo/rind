@@ -15,7 +15,7 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from agent.interfaces.cli.chat_cli import ChatCLI
 from agent.interfaces.cli.ui import GitPromptStatus
-from agent.interfaces.cli.commands import SlashCommandContext, SlashCommandRouter
+from agent.interfaces.cli.commands import SlashCommandContext, SlashCommandInfo, SlashCommandRouter
 from agent.domain.cancellation import CancellationTokenSource
 from agent.infrastructure.config import Config
 
@@ -192,6 +192,50 @@ def test_router_exposes_command_descriptions() -> None:
     assert usages["sessions"] == "/sessions [limit]"
     assert usages["draft"] == "/draft | /draft use | /draft clear"
     assert usages["init"] == "/init [project|user]"
+
+
+def test_router_accepts_a_custom_command_catalog() -> None:
+    async def handle_custom(context, args):
+        return "custom"
+
+    router = SlashCommandRouter(
+        (
+            SlashCommandInfo(
+                "custom",
+                "Custom command",
+                "/custom",
+                handler=handle_custom,
+            ),
+        )
+    )
+
+    assert [info.name for info in router.command_infos()] == ["custom"]
+
+
+def test_router_rejects_duplicate_command_names_and_aliases() -> None:
+    async def handle_command(context, args):
+        return "ok"
+
+    with pytest.raises(ValueError, match="Duplicate command name: status"):
+        SlashCommandRouter(
+            (
+                SlashCommandInfo("status", "Status", handler=handle_command),
+                SlashCommandInfo("status", "Other status", handler=handle_command),
+            )
+        )
+
+    with pytest.raises(ValueError, match="Duplicate command alias: x"):
+        SlashCommandRouter(
+            (
+                SlashCommandInfo("one", "One", aliases=("x",), handler=handle_command),
+                SlashCommandInfo("two", "Two", aliases=("x",), handler=handle_command),
+            )
+        )
+
+
+def test_router_rejects_commands_without_handlers() -> None:
+    with pytest.raises(ValueError, match="Command handler is required: status"):
+        SlashCommandRouter((SlashCommandInfo("status", "Status"),))
 
 
 @pytest.mark.asyncio
