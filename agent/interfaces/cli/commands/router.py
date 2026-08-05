@@ -56,7 +56,7 @@ class SlashCommandRouter:
         self._validate_commands()
 
     def command_names(self) -> list[str]:
-        return sorted(info.name for info in self._command_infos)
+        return sorted(self._commands_by_name)
 
     def command_infos(self) -> list[SlashCommandInfo]:
         return sorted(self._command_infos, key=lambda info: info.name)

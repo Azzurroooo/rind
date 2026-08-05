@@ -23,7 +23,7 @@ def build_builtin_tool_specs(
 ) -> tuple[ToolSpec, ...]:
     specs = list(FILE_TOOL_SPECS)
     if enable_user_question:
-        specs.insert(0, USER_QUESTION_TOOL_SPECS[0])
+        specs[0:0] = USER_QUESTION_TOOL_SPECS
     specs.extend(SHELL_TOOL_SPECS)
     specs.extend(PLANNING_TOOL_SPECS)
     specs.extend(SKILL_TOOL_SPECS)

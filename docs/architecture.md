@@ -108,6 +108,23 @@ graph LR
     D --> O[JsonlSessionStore]
 ```
 
+## 能力注册边界
+
+```mermaid
+graph LR
+    CompositionRoot[bootstrap/container.py\nAgentContainer] --> ToolCatalog[build_builtin_tool_specs]
+    ToolCatalog --> ToolRegistry[DefaultToolRegistry]
+    ToolRegistry --> Runtime[AgentRuntime / TurnRunner]
+    Cli[ChatCLI] --> CommandRouter[SlashCommandRouter]
+    Stdio[stdio JSONL] --> CommandRouter
+    CommandCatalog[commands/features/build_command_infos] --> CommandRouter
+    Stdio -->|initialize.slash_commands| Frontend[frontend-cli]
+```
+
+- `agent/infrastructure/tools/builtin/__init__.py` 只按固定顺序组合各工具模块的 `TOOL_SPECS`；`AgentContainer` 在构造 registry 前筛选 `enabled_tools`。
+- `agent/interfaces/cli/commands/features/` 是 slash command 的唯一内置 catalog。每个功能模块同时提供自己的 `SlashCommandInfo` 和 handler，router 负责校验名称、alias 和分发。
+- `ChatCLI` 与 stdio 都从 router 读取注册结果；frontend-cli 仅消费 `initialize.slash_commands` 生成菜单、帮助和补全，不维护另一份命令目录。
+
 ## 超详细数据流图 (代码级)
 
 ```mermaid
@@ -219,10 +236,12 @@ sequenceDiagram
 ### 整体架构分层
 ```
 ├── agent/
-│   ├── interfaces/        # 接口层：CLI 和 API 入口
+│   ├── interfaces/        # 接口层：CLI、API 和 stdio 入口
+│   │   └── cli/commands/   # router 与按功能拆分的 features catalog
 │   ├── application/       # 应用层：业务逻辑和编排
 │   ├── domain/            # 领域层：核心模型和事件
 │   ├── infrastructure/    # 基础设施层：外部依赖实现
+│   │   └── tools/builtin/  # 工具实现与 build_builtin_tool_specs catalog
 │   ├── bootstrap/         # 引导层：依赖注入容器
 │   └── prompts.py         # 系统提示词
 ├── main.py                # 程序入口
