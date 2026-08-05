@@ -169,11 +169,7 @@ process.on("SIGINT", handleSigint);
 try {
   const info = await request("initialize");
   sessionInfo = { cwd: process.cwd(), ...(info || {}) };
-  slashCommands = normalizeSlashCommands([
-    ...(Array.isArray(info?.slash_commands) ? info.slash_commands : []),
-    { name: "steer", description: "Redirect the active turn", usage: "/steer <text>" },
-    { name: "goal", description: "Start or control a persistent goal", usage: "/goal [pause|resume|clear|objective]" },
-  ]);
+  slashCommands = normalizeSlashCommands(info?.slash_commands);
   if (terminalUi) {
     terminalUi.start({
       onInput: handleTerminalInput,
