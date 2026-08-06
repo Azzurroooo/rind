@@ -76,6 +76,9 @@ def initialize_team_project(
     enclosing = _find_project_root(root.parent)
     if enclosing is not None:
         raise ValueError(f"Team projects cannot be nested: {enclosing} is already a Team project.")
+    descendant = _find_descendant_project_root(root)
+    if descendant is not None:
+        raise ValueError(f"Team projects cannot be nested: {descendant} is already a Team project.")
     main_agent_id = _clean_id(main_agent_id, "main_agent_id")
     project_id = _clean_id(project_id or root.name, "project_id")
     project_name = _clean_text(name or root.name, "name")
@@ -191,16 +194,16 @@ def load_team_project(project_root: str | Path) -> TeamProject:
 
 
 def discover_agent(cwd: str | Path | None = None) -> ResolvedAgent | None:
-    """Resolve the agent that owns this exact directory.
-
-    An agent is its directory: running inside `agents/<id>/` is what makes a
-    session that agent. Nothing else resolves -- not the project root, not a
-    subdirectory of the agent. Those are ordinary Rind sessions.
-    """
+    """Resolve the manifest-bearing agent that owns this exact directory."""
     start = Path(cwd or Path.cwd()).expanduser().resolve()
     if not (start / AITEAM_DIR / AGENT_MANIFEST).is_file():
         return None
-    return ResolvedAgent(load_agent_capsule(start), find_team_project(start))
+    capsule = load_agent_capsule(start)
+    team_root = _find_team_root(start)
+    if team_root is None:
+        return ResolvedAgent(capsule, None)
+    _validate_team_agent_capsule(capsule, team_root)
+    return ResolvedAgent(capsule, load_team_project(team_root))
 
 
 def find_team_project(cwd: str | Path | None = None) -> TeamProject | None:
@@ -275,6 +278,40 @@ def _find_project_root(start: Path) -> Path | None:
         if (path / AITEAM_DIR / PROJECT_MANIFEST).is_file():
             return path
     return None
+
+
+def _find_descendant_project_root(root: Path) -> Path | None:
+    for manifest in root.glob(f"**/{AITEAM_DIR}/{PROJECT_MANIFEST}"):
+        project_root = manifest.parent.parent.resolve()
+        if project_root != root:
+            return project_root
+    return None
+
+
+def _find_team_root(start: Path) -> Path | None:
+    for path in (start, *start.parents):
+        team_dir = path / AITEAM_DIR
+        if (team_dir / PROJECT_MANIFEST).is_file() or (team_dir / ORGANIZATION_MANIFEST).is_file():
+            return path
+    return None
+
+
+def _validate_team_agent_capsule(capsule: AgentCapsule, project_root: Path) -> None:
+    team_dir = project_root / AITEAM_DIR
+    missing = [
+        path
+        for path in (team_dir / PROJECT_MANIFEST, team_dir / ORGANIZATION_MANIFEST)
+        if not path.is_file()
+    ]
+    if missing:
+        raise ValueError(f"Incomplete Team project: missing {missing[0]}")
+    expected_parent = project_root / "agents"
+    if capsule.workspace_root.parent != expected_parent:
+        raise ValueError(f"Team agent must be located directly in {expected_parent}: {capsule.workspace_root}")
+    if capsule.agent_id != capsule.workspace_root.name:
+        raise ValueError(
+            f"Team agent id must match its directory name: {capsule.agent_id} != {capsule.workspace_root.name}"
+        )
 
 
 def _manifest_paths(spec: dict[str, Any], path: tuple[str, ...], base: Path, *, require_files: bool = True) -> list[Path]:

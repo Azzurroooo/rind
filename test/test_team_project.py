@@ -1,4 +1,6 @@
 from pathlib import Path
+import re
+import shutil
 import sqlite3
 import sys
 
@@ -62,6 +64,7 @@ def test_discover_agent_requires_the_exact_agent_directory(tmp_path: Path) -> No
     assert discover_agent(tmp_path) is None
     assert discover_agent(tmp_path / "agents") is None
     assert discover_agent(tmp_path / "shared") is None
+    assert discover_agent(tmp_path / "agents" / "ghost") is None
     assert discover_agent(agent_dir / "work") is None
     assert discover_agent(agent_dir / ".aiteam") is None
     assert discover_agent(agent_dir / ".aiteam" / "prompts") is None
@@ -78,6 +81,64 @@ def test_team_project_cannot_be_created_inside_another_team_project(tmp_path: Pa
     ):
         with pytest.raises(ValueError, match="cannot be nested"):
             initialize_team_project(nested)
+
+
+def test_team_project_cannot_contain_another_team_project(tmp_path: Path) -> None:
+    nested = tmp_path / "deep" / "inside" / "team"
+    nested.mkdir(parents=True)
+    initialize_team_project(nested)
+
+    with pytest.raises(ValueError, match=re.escape(str(nested.resolve()))):
+        initialize_team_project(tmp_path)
+
+
+def test_discover_agent_rejects_team_capsule_outside_agents_root(tmp_path: Path) -> None:
+    initialize_team_project(tmp_path)
+    source = tmp_path / "agents" / "main-agent" / ".aiteam"
+    scratch = tmp_path / "scratch"
+    shutil.copytree(source, scratch / ".aiteam")
+
+    with pytest.raises(ValueError, match="must be located directly"):
+        discover_agent(scratch)
+
+
+def test_discover_agent_rejects_team_capsule_with_mismatched_directory_id(tmp_path: Path) -> None:
+    initialize_team_project(tmp_path)
+    agent_dir = tmp_path / "agents" / "main-agent"
+    manifest = agent_dir / ".aiteam" / "agent.yaml"
+    manifest.write_text(
+        manifest.read_text(encoding="utf-8").replace("id: main-agent", "id: other-agent"),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="must match its directory name"):
+        discover_agent(agent_dir)
+
+
+def test_discover_agent_does_not_require_organization_registration(tmp_path: Path) -> None:
+    initialize_team_project(tmp_path)
+    source = tmp_path / "agents" / "main-agent" / ".aiteam"
+    agent_dir = tmp_path / "agents" / "researcher"
+    shutil.copytree(source, agent_dir / ".aiteam")
+    manifest = agent_dir / ".aiteam" / "agent.yaml"
+    manifest.write_text(
+        manifest.read_text(encoding="utf-8").replace("id: main-agent", "id: researcher"),
+        encoding="utf-8",
+    )
+
+    resolved = discover_agent(agent_dir)
+
+    assert resolved.agent_id == "researcher"
+    assert resolved.project_id == tmp_path.name
+
+
+@pytest.mark.parametrize("missing_name", ("project.yaml", "organization.yaml"))
+def test_discover_agent_rejects_incomplete_team_project(tmp_path: Path, missing_name: str) -> None:
+    initialize_team_project(tmp_path)
+    (tmp_path / ".aiteam" / missing_name).unlink()
+
+    with pytest.raises(ValueError, match="Incomplete Team project"):
+        discover_agent(tmp_path / "agents" / "main-agent")
 
 
 def test_team_project_rejects_organization_workspace_escape(tmp_path: Path) -> None:

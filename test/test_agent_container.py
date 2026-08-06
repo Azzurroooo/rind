@@ -5,6 +5,7 @@ from __future__ import annotations
 import sys
 import tempfile
 from pathlib import Path
+import shutil
 
 import pytest
 
@@ -213,3 +214,27 @@ def test_container_resolves_team_agent_capsule_context_from_workspace(tmp_path, 
     assert container.session_store._session_type == "direct_agent_chat"
     assert container.skill_repository._project_skill_dir == (workspace / ".aiteam" / "skills").resolve()
     assert "main agent" in container.session_store.system_prompt.lower()
+
+
+def test_container_rejects_invalid_team_agent_capsule(tmp_path, monkeypatch) -> None:
+    initialize_team_project(tmp_path, project_id="quant-project")
+    source = tmp_path / "agents" / "main-agent" / ".aiteam"
+    scratch = tmp_path / "scratch"
+    shutil.copytree(source, scratch / ".aiteam")
+    monkeypatch.chdir(scratch)
+    settings = AppSettings(
+        settings_path=tmp_path / "settings.json",
+        settings_exists=True,
+        model="test-model",
+        api_key="test-key",
+        base_url="https://example.com/v1",
+        reasoning_effort="high",
+        user_agent="test-agent",
+    )
+
+    with pytest.raises(ValueError, match="must be located directly"):
+        build_agent_container(
+            settings=settings,
+            provider_client_factory=FakeProviderClientFactory(),
+            session_dir=str(tmp_path / "sessions"),
+        )
