@@ -14,6 +14,7 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from agent.bootstrap import AgentContainer, build_agent_container
 from agent.infrastructure.config import AppSettings
+from agent.infrastructure.team import initialize_team_project
 
 
 class FakeProviderClientFactory:
@@ -142,3 +143,33 @@ def test_container_rejects_unknown_enabled_tools() -> None:
                 session_dir=session_dir,
                 enabled_tools=("missing_tool",),
             )
+
+
+def test_container_resolves_team_agent_capsule_context(tmp_path, monkeypatch) -> None:
+    initialize_team_project(tmp_path, project_id="quant-project")
+    monkeypatch.chdir(tmp_path)
+    settings = AppSettings(
+        settings_path=tmp_path / "settings.json",
+        settings_exists=True,
+        model="test-model",
+        api_key="test-key",
+        base_url="https://example.com/v1",
+        reasoning_effort="high",
+        user_agent="test-agent",
+    )
+
+    container = build_agent_container(
+        settings=settings,
+        provider_client_factory=FakeProviderClientFactory(),
+        session_dir=str(tmp_path / "sessions"),
+        agent_id="main-agent",
+    )
+
+    workspace = tmp_path / "agents" / "main-agent" / "workspace"
+    assert Path.cwd() == workspace.resolve()
+    assert container.session_store._workspace_root == str(workspace.resolve())
+    assert container.session_store._project_id == "quant-project"
+    assert container.session_store._owner_agent_id == "main-agent"
+    assert container.session_store._session_type == "direct_agent_chat"
+    assert container.skill_repository._project_skill_dir == (workspace / ".aiteam" / "skills").resolve()
+    assert "main agent" in container.session_store.system_prompt.lower()

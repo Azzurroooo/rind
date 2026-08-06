@@ -35,8 +35,15 @@ def new_session_meta(
     model: str | None,
     cwd: str,
     workspace_root: str,
+    project_id: str | None = None,
+    owner_agent_id: str | None = None,
+    session_type: str | None = None,
+    task_id: str | None = None,
+    parent_session_id: str | None = None,
+    created_by: str | None = None,
+    status: str = "active",
 ) -> dict[str, Any]:
-    return {
+    meta = {
         "schema_version": "2.0",
         "session_id": session_id,
         "title": "Untitled",
@@ -49,6 +56,18 @@ def new_session_meta(
         "tool_call_count": 0,
         "auto_compact_window": default_auto_compact_window(),
     }
+    for key, value in {
+        "project_id": project_id,
+        "owner_agent_id": owner_agent_id,
+        "session_type": session_type or "standalone_project",
+        "task_id": task_id,
+        "parent_session_id": parent_session_id,
+        "created_by": created_by,
+        "status": status or "active",
+    }.items():
+        if value is not None:
+            meta[key] = value
+    return meta
 
 
 def sync_session_counts(meta: dict[str, Any], *, message_count: int, tool_call_count: int) -> bool:

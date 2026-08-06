@@ -385,6 +385,10 @@ class OrganizationCoordinator:
             session_dir=self._session_dir,
             enabled_tools=config.enabled_tools or None,
             enable_user_question=config.question_policy == "allow",
+            workspace_root=agent.workspace_root,
+            owner_agent_id=agent.id,
+            session_type="delegated_task",
+            created_by=message.sender_id,
         )
         transient_system_messages = [
             {

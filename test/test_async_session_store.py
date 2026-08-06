@@ -252,6 +252,129 @@ async def test_session_workspace_root_uses_cwd_not_parent_git_root(tmp_path, mon
 
 
 @pytest.mark.asyncio
+async def test_session_records_agent_binding_and_indexes_it(tmp_path):
+    session_root = tmp_path / "sessions"
+    workspace = tmp_path / "agents" / "factor-agent" / "workspace"
+    workspace.mkdir(parents=True)
+
+    store = JsonlSessionStore(
+        session_dir=str(session_root),
+        session_id="factor_session",
+        workspace_root=str(workspace),
+        project_id="quant-project",
+        owner_agent_id="factor-agent",
+        session_type="direct_agent_chat",
+    )
+    await store.initialize()
+
+    meta = json.loads((session_root / "factor_session" / "meta.json").read_text(encoding="utf-8"))
+    assert meta["project_id"] == "quant-project"
+    assert meta["owner_agent_id"] == "factor-agent"
+    assert meta["session_type"] == "direct_agent_chat"
+    assert meta["workspace_root"] == os.path.normcase(os.path.realpath(str(workspace)))
+    index = json.loads((session_root / "index.json").read_text(encoding="utf-8"))
+    assert index["sessions"][0]["owner_agent_id"] == "factor-agent"
+
+
+@pytest.mark.asyncio
+async def test_session_rejects_mismatched_agent_binding(tmp_path):
+    session_root = tmp_path / "sessions"
+    first_workspace = tmp_path / "agents" / "factor-agent" / "workspace"
+    second_workspace = tmp_path / "agents" / "main-agent" / "workspace"
+    first_workspace.mkdir(parents=True)
+    second_workspace.mkdir(parents=True)
+
+    first = JsonlSessionStore(
+        session_dir=str(session_root),
+        session_id="team_session",
+        workspace_root=str(first_workspace),
+        owner_agent_id="factor-agent",
+        session_type="direct_agent_chat",
+    )
+    await first.initialize()
+
+    second = JsonlSessionStore(
+        session_dir=str(session_root),
+        session_id="team_session",
+        workspace_root=str(second_workspace),
+        owner_agent_id="main-agent",
+        session_type="direct_agent_chat",
+    )
+    with pytest.raises(ValueError, match="immutable"):
+        await second.initialize()
+
+
+@pytest.mark.asyncio
+async def test_session_allows_different_creation_metadata_for_same_agent_binding(tmp_path):
+    session_root = tmp_path / "sessions"
+    workspace = tmp_path / "agents" / "factor-agent" / "workspace"
+    workspace.mkdir(parents=True)
+
+    first = JsonlSessionStore(
+        session_dir=str(session_root),
+        session_id="factor_session",
+        workspace_root=str(workspace),
+        project_id="quant-project",
+        owner_agent_id="factor-agent",
+        session_type="delegated_task",
+        parent_session_id="bootstrap",
+        created_by="main-agent",
+    )
+    await first.initialize()
+
+    second = JsonlSessionStore(
+        session_dir=str(session_root),
+        session_id="factor_session",
+        workspace_root=str(workspace),
+        project_id="quant-project",
+        owner_agent_id="factor-agent",
+        session_type="delegated_task",
+        parent_session_id="other-bootstrap",
+        created_by="review-agent",
+    )
+    await second.initialize()
+
+    meta = json.loads((session_root / "factor_session" / "meta.json").read_text(encoding="utf-8"))
+    assert meta["created_by"] == "main-agent"
+    assert meta["parent_session_id"] == "bootstrap"
+
+
+@pytest.mark.asyncio
+async def test_handoff_archives_bootstrap_and_switches_to_agent_session(tmp_path, monkeypatch):
+    project = tmp_path / "project"
+    workspace = project / "agents" / "main-agent" / "workspace"
+    session_root = tmp_path / "sessions"
+    workspace.mkdir(parents=True)
+    monkeypatch.chdir(project)
+
+    store = JsonlSessionStore(session_dir=str(session_root), session_id="bootstrap", system_prompt="sys")
+    await store.initialize()
+    await store.persist_message("user", "create a team")
+
+    info = await store.handoff_to_agent_session(
+        session_id="main_agent_session",
+        workspace_root=str(workspace),
+        system_prompt="team sys",
+        project_id="quant-project",
+        owner_agent_id="main-agent",
+    )
+
+    old_meta = json.loads((session_root / "bootstrap" / "meta.json").read_text(encoding="utf-8"))
+    new_meta = json.loads((session_root / "main_agent_session" / "meta.json").read_text(encoding="utf-8"))
+    messages = (session_root / "main_agent_session" / "messages.jsonl").read_text(encoding="utf-8")
+    assert info["session_id"] == "main_agent_session"
+    assert store.session_id == "main_agent_session"
+    assert old_meta["session_type"] == "team_bootstrap"
+    assert old_meta["status"] == "archived"
+    assert old_meta["resumable"] is False
+    assert old_meta["successor_session_id"] == "main_agent_session"
+    assert new_meta["owner_agent_id"] == "main-agent"
+    assert new_meta["parent_session_id"] == "bootstrap"
+    assert new_meta["workspace_root"] == os.path.normcase(os.path.realpath(str(workspace)))
+    assert "team sys" in messages
+
+
+@pytest.mark.asyncio
 async def test_resume_latest_and_recent_sessions_ignore_invalid_index_ids(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     session_root = tmp_path / "sessions"

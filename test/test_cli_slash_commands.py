@@ -18,6 +18,7 @@ from agent.interfaces.cli.ui import GitPromptStatus
 from agent.interfaces.cli.commands import SlashCommandContext, SlashCommandInfo, SlashCommandRouter
 from agent.domain.cancellation import CancellationTokenSource
 from agent.infrastructure.config import Config
+from agent.infrastructure.persistence.jsonl_session_store import JsonlSessionStore
 from agent.application.organization import Agent, AgentConfig, InMemoryOrganizationStore
 
 
@@ -212,7 +213,7 @@ def test_router_exposes_command_descriptions() -> None:
     assert usages["sessions"] == "/sessions [limit]"
     assert usages["draft"] == "/draft | /draft use | /draft clear"
     assert usages["init"] == "/init [project|user]"
-    assert usages["team"].startswith("/team list")
+    assert usages["team"].startswith("/team create")
 
 
 def test_router_accepts_a_custom_command_catalog() -> None:
@@ -368,6 +369,29 @@ async def test_team_command_lists_sends_pauses_resumes_and_shows_agents() -> Non
     assert "Agent factor: Factor" in shown.text
     assert "Recent messages:" in shown.text
     assert shown.display["type"] == "team_agent_detail"
+
+
+@pytest.mark.asyncio
+async def test_team_create_initializes_project_and_hands_off_session(tmp_path, monkeypatch) -> None:
+    monkeypatch.chdir(tmp_path)
+    session = JsonlSessionStore(session_dir=str(tmp_path / "sessions"), session_id="bootstrap", system_prompt="sys")
+    await session.initialize()
+
+    result = await SlashCommandRouter().execute("/team create quant-project", _context(session=session))
+
+    workspace = tmp_path / "agents" / "main-agent" / "workspace"
+    new_meta = json.loads((tmp_path / "sessions" / session.session_id / "meta.json").read_text(encoding="utf-8"))
+    old_meta = json.loads((tmp_path / "sessions" / "bootstrap" / "meta.json").read_text(encoding="utf-8"))
+    assert result.display["type"] == "team_create"
+    assert result.display["project_id"] == "quant-project"
+    assert Path.cwd() == workspace.resolve()
+    assert (tmp_path / ".aiteam" / "project.yaml").is_file()
+    assert (workspace / ".aiteam" / "agent.yaml").is_file()
+    assert new_meta["workspace_root"] == os.path.normcase(os.path.realpath(str(workspace)))
+    assert new_meta["project_id"] == "quant-project"
+    assert new_meta["owner_agent_id"] == "main-agent"
+    assert old_meta["session_type"] == "team_bootstrap"
+    assert old_meta["successor_session_id"] == session.session_id
 
 
 @pytest.mark.asyncio

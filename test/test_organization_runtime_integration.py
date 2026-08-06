@@ -77,6 +77,10 @@ async def test_coordinator_builds_real_runtime_with_worker_tool_visibility_and_m
             "session_dir": "sessions",
             "enabled_tools": ("read_file",),
             "enable_user_question": False,
+            "workspace_root": "factor",
+            "owner_agent_id": "factor",
+            "session_type": "delegated_task",
+            "created_by": "main",
         }
     ]
     assert f"message_id: {message.id}" in runtime.query

@@ -7,13 +7,17 @@ from agent.application.organization import OrganizationCoordinator
 from ..router import SlashCommandContext, SlashCommandInfo, SlashCommandResult
 
 
-USAGE = "/team list | /team send <agent> <message> | /team pause <agent> | /team resume <agent> | /team show [agent]"
+USAGE = "/team create [project-id] | /team list | /team send <agent> <message> | /team pause <agent> | /team resume <agent> | /team show [agent]"
 
 
 async def handle_team(context: SlashCommandContext, args: list[str]) -> str | SlashCommandResult:
     if not args:
         return f"Usage: {USAGE}"
     action = args[0].lower()
+    if action == "create":
+        if len(args) > 2:
+            return f"Usage: {USAGE}"
+        return await _team_create(context, args[1] if len(args) == 2 else None)
     store = _organization_store(context)
     if action == "list":
         if len(args) != 1:
@@ -36,6 +40,28 @@ async def handle_team(context: SlashCommandContext, args: list[str]) -> str | Sl
             return f"Usage: {USAGE}"
         return _team_show(store, args[1] if len(args) == 2 else None)
     return f"Usage: {USAGE}"
+
+
+async def _team_create(context: SlashCommandContext, project_id: str | None) -> SlashCommandResult:
+    create_team = getattr(context.session, "create_team_project", None)
+    if not callable(create_team):
+        return SlashCommandResult("Team project creation is not supported by this session store.")
+    created = await create_team(project_id=project_id)
+    text = (
+        f"Team project created: {created['project_id']}\n"
+        f"Switched to {created['default_agent']} session: {created['session_id']}\n"
+        f"Workspace: {created['workspace_root']}"
+    )
+    return SlashCommandResult(
+        text,
+        display={
+            "type": "team_create",
+            "project_id": created["project_id"],
+            "default_agent": created["default_agent"],
+            "workspace_root": created["workspace_root"],
+            "session_id": created["session_id"],
+        },
+    )
 
 
 def _organization_store(context: SlashCommandContext):

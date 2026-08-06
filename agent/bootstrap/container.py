@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from collections.abc import Collection
 from dataclasses import dataclass
 
@@ -52,8 +53,34 @@ def build_agent_container(
     enable_goal: bool = False,
     enable_user_question: bool = True,
     enabled_tools: Collection[str] | None = None,
+    system_prompt: str | None = None,
+    workspace_root: str | None = None,
+    project_id: str | None = None,
+    owner_agent_id: str | None = None,
+    session_type: str | None = None,
+    task_id: str | None = None,
+    parent_session_id: str | None = None,
+    created_by: str | None = None,
+    skill_project_dir: str | None = None,
+    agent_id: str | None = None,
 ) -> AgentContainer:
     """Build the production runtime dependency graph explicitly."""
+    if agent_id or not workspace_root:
+        from agent.infrastructure.team import discover_agent
+
+        agent_context = discover_agent(agent_id=agent_id)
+        if agent_context is not None:
+            os.chdir(agent_context.workspace_root)
+            agent_prompt = agent_context.capsule.system_prompt.strip()
+            if system_prompt is None and agent_prompt:
+                system_prompt = f"{SYSTEM_PROMPT}\n\n{agent_prompt}"
+            workspace_root = workspace_root or str(agent_context.workspace_root)
+            project_id = project_id if project_id is not None else agent_context.project_id
+            owner_agent_id = owner_agent_id or agent_context.agent_id
+            session_type = session_type or "direct_agent_chat"
+            skill_project_dir = skill_project_dir or str(agent_context.capsule.manifest_path.parent / "skills")
+    elif workspace_root:
+        os.chdir(os.path.abspath(os.path.expanduser(workspace_root)))
     settings = settings or load_settings()
     provider_client_factory = provider_client_factory or OpenAIClientFactory(settings)
     model = settings.model
@@ -62,7 +89,14 @@ def build_agent_container(
         session_id=session_id,
         resume_latest=resume_latest,
         model=model,
-        system_prompt=SYSTEM_PROMPT,
+        system_prompt=system_prompt or SYSTEM_PROMPT,
+        workspace_root=workspace_root,
+        project_id=project_id,
+        owner_agent_id=owner_agent_id,
+        session_type=session_type,
+        task_id=task_id,
+        parent_session_id=parent_session_id,
+        created_by=created_by,
     )
     catalog = build_builtin_tool_specs(
         enable_goal=enable_goal,
@@ -92,7 +126,7 @@ def build_agent_container(
     )
     stream_parser = MessageStreamParser()
     context_estimator = ContextEstimator()
-    skill_repository = SkillRepository()
+    skill_repository = SkillRepository(project_skill_dir=skill_project_dir)
     skill_selector = SkillSelector(max_active_skills=2)
     context_manager = ContextManager(
         estimator=context_estimator,

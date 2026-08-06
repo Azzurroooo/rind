@@ -66,12 +66,26 @@ class JsonlSessionStore(SessionStore):
         resume_latest: bool = False,
         model: str | None = None,
         system_prompt: str = "",
+        workspace_root: str | None = None,
+        project_id: str | None = None,
+        owner_agent_id: str | None = None,
+        session_type: str | None = None,
+        task_id: str | None = None,
+        parent_session_id: str | None = None,
+        created_by: str | None = None,
     ):
         self._session_dir = session_dir
         self._session_id = session_id
         self._resume_latest = resume_latest
         self._model = model
         self._system_prompt = system_prompt
+        self._workspace_root = workspace_root
+        self._project_id = project_id
+        self._owner_agent_id = owner_agent_id
+        self._session_type = session_type
+        self._task_id = task_id
+        self._parent_session_id = parent_session_id
+        self._created_by = created_by
 
         self._session_root = None
         self._index_path = None
@@ -125,7 +139,25 @@ class JsonlSessionStore(SessionStore):
         return os.path.join(cls.default_rind_home(), "sessions")
 
     def _resolve_workspace_root(self) -> str:
+        if self._workspace_root:
+            return os.path.normcase(os.path.realpath(os.path.abspath(os.path.expanduser(self._workspace_root))))
         return os.path.normcase(os.path.realpath(str(resolve_project_root())))
+
+    def _expected_binding(self) -> dict[str, str | None]:
+        return {
+            "project_id": self._project_id,
+            "owner_agent_id": self._owner_agent_id,
+            "session_type": self._session_type,
+            "workspace_root": self._resolve_workspace_root() if self._workspace_root else None,
+        }
+
+    def _validate_session_binding(self, meta: dict[str, Any]) -> None:
+        for key, expected in self._expected_binding().items():
+            if expected is None:
+                continue
+            current = meta.get(key)
+            if current != expected:
+                raise ValueError(f"Session {key} is immutable and does not match the requested agent context.")
 
     def _setup_paths(self):
         self._session_root = self.resolve_session_root(self._session_dir)
@@ -180,6 +212,12 @@ class JsonlSessionStore(SessionStore):
             model=self.model,
             cwd=os.getcwd(),
             workspace_root=self._resolve_workspace_root(),
+            project_id=self._project_id,
+            owner_agent_id=self._owner_agent_id,
+            session_type=self._session_type,
+            task_id=self._task_id,
+            parent_session_id=self._parent_session_id,
+            created_by=self._created_by,
         )
         self._files.write_json(self._session_paths["meta"], self._session_meta)
         self._update_index()
@@ -194,6 +232,7 @@ class JsonlSessionStore(SessionStore):
             raise ValueError("Unsupported legacy session schema; start a new session.")
         if str(meta.get("session_id") or session_id) != session_id:
             raise ValueError(f"Session data corrupted: meta.json id does not match {session_id}")
+        self._validate_session_binding(meta)
         for key in ("messages", "tool_calls"):
             if not os.path.isfile(self._session_paths[key]):
                 raise ValueError(f"Session data corrupted or missing {key}.jsonl for id: {session_id}")
@@ -285,6 +324,40 @@ class JsonlSessionStore(SessionStore):
             self._compaction_repo = previous["compaction_repo"]
             raise
 
+    def _handoff_to_agent_session_sync(
+        self,
+        *,
+        session_id: str,
+        workspace_root: str,
+        system_prompt: str,
+        project_id: str | None,
+        owner_agent_id: str,
+        session_type: str,
+        created_by: str,
+    ) -> dict[str, Any]:
+        self._setup_paths()
+        clean = validate_session_id(session_id)
+        if os.path.isdir(self._get_session_paths(clean)["base"]):
+            raise ValueError(f"Session already exists: {clean}")
+        previous_id = self._session_id
+        if self._session_meta and self._session_paths:
+            self._session_meta["session_type"] = "team_bootstrap"
+            self._session_meta["status"] = "archived"
+            self._session_meta["resumable"] = False
+            self._session_meta["successor_session_id"] = clean
+            self._persist_meta_sync()
+        self._system_prompt = system_prompt
+        self._workspace_root = workspace_root
+        self._project_id = project_id
+        self._owner_agent_id = owner_agent_id
+        self._session_type = session_type
+        self._task_id = None
+        self._parent_session_id = previous_id
+        self._created_by = created_by
+        self._create_session(clean)
+        self._initialize_history_sync()
+        return self._session_info_sync()
+
     def _session_info_sync(self) -> dict[str, Any]:
         meta = self._session_meta if isinstance(self._session_meta, dict) else {}
         latest = meta.get("latest_sampling_usage")
@@ -295,6 +368,14 @@ class JsonlSessionStore(SessionStore):
             "usage": copy.deepcopy(latest) if isinstance(latest, dict) else None,
             "assistant_usage": copy.deepcopy(assistant) if isinstance(assistant, dict) else None,
             "goal": copy.deepcopy(meta.get("goal")) if isinstance(meta.get("goal"), dict) else None,
+            "project_id": meta.get("project_id"),
+            "owner_agent_id": meta.get("owner_agent_id"),
+            "workspace_root": meta.get("workspace_root"),
+            "session_type": meta.get("session_type"),
+            "task_id": meta.get("task_id"),
+            "parent_session_id": meta.get("parent_session_id"),
+            "created_by": meta.get("created_by"),
+            "status": meta.get("status"),
         }
 
     def _find_latest_session_id(self) -> str | None:
@@ -344,6 +425,13 @@ class JsonlSessionStore(SessionStore):
             "size": {"messages": self._message_count, "tool_calls": self._tool_call_count},
             "preview": self._last_preview,
             "workspace_root": self._session_meta.get("workspace_root"),
+            "project_id": self._session_meta.get("project_id"),
+            "owner_agent_id": self._session_meta.get("owner_agent_id"),
+            "session_type": self._session_meta.get("session_type"),
+            "task_id": self._session_meta.get("task_id"),
+            "parent_session_id": self._session_meta.get("parent_session_id"),
+            "created_by": self._session_meta.get("created_by"),
+            "status": self._session_meta.get("status"),
         }
         self._index_repo.update_index(entry)
 
@@ -471,6 +559,62 @@ class JsonlSessionStore(SessionStore):
 
                 set_active_session_context(str(self._session_root), str(self._session_id))
             return await asyncio.to_thread(self._session_info_sync)
+
+    async def handoff_to_agent_session(
+        self,
+        *,
+        session_id: str,
+        workspace_root: str,
+        system_prompt: str,
+        project_id: str | None,
+        owner_agent_id: str,
+        session_type: str = "direct_agent_chat",
+        created_by: str = "team_create",
+    ) -> dict[str, Any]:
+        async with self._write_lock:
+            result = await asyncio.to_thread(
+                self._handoff_to_agent_session_sync,
+                session_id=session_id,
+                workspace_root=workspace_root,
+                system_prompt=system_prompt,
+                project_id=project_id,
+                owner_agent_id=owner_agent_id,
+                session_type=session_type,
+                created_by=created_by,
+            )
+            if self._session_root and self._session_id:
+                from agent.infrastructure.planning.store import set_active_session_context
+
+                set_active_session_context(str(self._session_root), str(self._session_id))
+            return result
+
+    async def create_team_project(self, *, project_id: str | None = None) -> dict[str, Any]:
+        from agent.infrastructure.team import initialize_team_project, load_agent_capsule
+
+        project = initialize_team_project(resolve_project_root(), project_id=project_id)
+        capsule = load_agent_capsule(project.agents[project.default_agent])
+        session_id = self._new_agent_session_id(capsule.agent_id)
+        os.chdir(capsule.workspace_root)
+        agent_prompt = capsule.system_prompt.strip()
+        system_prompt = f"{self._system_prompt}\n\n{agent_prompt}" if agent_prompt else self._system_prompt
+        await self.handoff_to_agent_session(
+            session_id=session_id,
+            workspace_root=str(capsule.workspace_root),
+            system_prompt=system_prompt,
+            project_id=project.project_id,
+            owner_agent_id=capsule.agent_id,
+        )
+        return {
+            "project_id": project.project_id,
+            "default_agent": capsule.agent_id,
+            "workspace_root": str(capsule.workspace_root),
+            "session_id": session_id,
+        }
+
+    def _new_agent_session_id(self, agent_id: str) -> str:
+        stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        suffix = uuid.uuid4().hex[:8]
+        return f"{agent_id}_{stamp}_{suffix}"
 
     async def update_model(self, model: str) -> None:
         clean = str(model or "").strip()
