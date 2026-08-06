@@ -254,7 +254,7 @@ async def test_session_workspace_root_uses_cwd_not_parent_git_root(tmp_path, mon
 @pytest.mark.asyncio
 async def test_session_records_agent_binding_and_indexes_it(tmp_path):
     session_root = tmp_path / "sessions"
-    workspace = tmp_path / "agents" / "factor-agent" / "workspace"
+    workspace = tmp_path / "agents" / "factor-agent"
     workspace.mkdir(parents=True)
 
     store = JsonlSessionStore(
@@ -279,8 +279,8 @@ async def test_session_records_agent_binding_and_indexes_it(tmp_path):
 @pytest.mark.asyncio
 async def test_session_rejects_mismatched_agent_binding(tmp_path):
     session_root = tmp_path / "sessions"
-    first_workspace = tmp_path / "agents" / "factor-agent" / "workspace"
-    second_workspace = tmp_path / "agents" / "main-agent" / "workspace"
+    first_workspace = tmp_path / "agents" / "factor-agent"
+    second_workspace = tmp_path / "agents" / "main-agent"
     first_workspace.mkdir(parents=True)
     second_workspace.mkdir(parents=True)
 
@@ -307,7 +307,7 @@ async def test_session_rejects_mismatched_agent_binding(tmp_path):
 @pytest.mark.asyncio
 async def test_session_allows_different_creation_metadata_for_same_agent_binding(tmp_path):
     session_root = tmp_path / "sessions"
-    workspace = tmp_path / "agents" / "factor-agent" / "workspace"
+    workspace = tmp_path / "agents" / "factor-agent"
     workspace.mkdir(parents=True)
 
     first = JsonlSessionStore(

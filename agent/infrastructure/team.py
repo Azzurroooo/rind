@@ -78,7 +78,7 @@ def initialize_team_project(
     project_name = _clean_text(name or root.name, "name")
 
     team_dir = root / AITEAM_DIR
-    main_workspace = root / "agents" / main_agent_id / "workspace"
+    main_workspace = root / "agents" / main_agent_id
     conflicts = [
         path
         for path in (
@@ -224,7 +224,7 @@ def _organization_manifest(main_agent_id: str) -> dict[str, Any]:
         "default_agent": main_agent_id,
         "agents": {
             main_agent_id: {
-                "workspace": f"agents/{main_agent_id}/workspace",
+                "workspace": f"agents/{main_agent_id}",
                 "organization_role": "root",
                 "status": "active",
             }

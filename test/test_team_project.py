@@ -14,7 +14,7 @@ from agent.infrastructure.team import discover_agent, initialize_team_project, l
 def test_initialize_team_project_creates_main_agent_capsule(tmp_path: Path) -> None:
     project = initialize_team_project(tmp_path, project_id="quant-project", name="Quant Project")
 
-    main_workspace = tmp_path / "agents" / "main-agent" / "workspace"
+    main_workspace = tmp_path / "agents" / "main-agent"
     assert project.project_id == "quant-project"
     assert project.default_agent == "main-agent"
     assert project.agents["main-agent"] == main_workspace.resolve()
@@ -36,7 +36,7 @@ def test_initialize_team_project_creates_main_agent_capsule(tmp_path: Path) -> N
 
 def test_load_agent_capsule_reads_manifest_prompt_and_workspace_paths(tmp_path: Path) -> None:
     initialize_team_project(tmp_path)
-    workspace = tmp_path / "agents" / "main-agent" / "workspace"
+    workspace = tmp_path / "agents" / "main-agent"
 
     capsule = load_agent_capsule(workspace)
 
@@ -51,15 +51,18 @@ def test_load_agent_capsule_reads_manifest_prompt_and_workspace_paths(tmp_path: 
     assert capsule.readonly_roots == ((workspace / ".aiteam").resolve(),)
 
 
-def test_discover_agent_only_uses_current_workspace_or_children(tmp_path: Path) -> None:
+def test_discover_agent_only_uses_current_agent_directory_or_children(tmp_path: Path) -> None:
     initialize_team_project(tmp_path)
-    workspace = tmp_path / "agents" / "main-agent" / "workspace"
+    agent_dir = tmp_path / "agents" / "main-agent"
 
+    # The directory is the selector: only an agent directory opens an agent,
+    # and the project root never falls back to default_agent.
     assert discover_agent(tmp_path) is None
     assert discover_agent(tmp_path / "agents") is None
-    assert discover_agent(workspace.parent) is None
-    assert discover_agent(workspace).agent_id == "main-agent"
-    assert discover_agent(workspace / "work").workspace_root == workspace.resolve()
+    assert discover_agent(tmp_path / "shared") is None
+    assert discover_agent(agent_dir).agent_id == "main-agent"
+    assert discover_agent(agent_dir / "work").workspace_root == agent_dir.resolve()
+    assert discover_agent(agent_dir / ".aiteam" / "prompts").workspace_root == agent_dir.resolve()
 
 
 def test_team_project_rejects_organization_workspace_escape(tmp_path: Path) -> None:

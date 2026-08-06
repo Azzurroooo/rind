@@ -379,7 +379,7 @@ async def test_team_create_initializes_project_without_handoff(tmp_path, monkeyp
 
     result = await SlashCommandRouter().execute("/team create quant-project", _context(session=session))
 
-    workspace = tmp_path / "agents" / "main-agent" / "workspace"
+    workspace = tmp_path / "agents" / "main-agent"
     meta = json.loads((tmp_path / "sessions" / "bootstrap" / "meta.json").read_text(encoding="utf-8"))
     assert result.display["type"] == "team_create"
     assert result.display["project_id"] == "quant-project"

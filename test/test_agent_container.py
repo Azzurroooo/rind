@@ -145,7 +145,7 @@ def test_container_rejects_unknown_enabled_tools() -> None:
             )
 
 
-def test_container_does_not_resolve_team_agent_outside_workspace(tmp_path, monkeypatch) -> None:
+def test_container_does_not_resolve_team_agent_outside_an_agent_directory(tmp_path, monkeypatch) -> None:
     initialize_team_project(tmp_path, project_id="quant-project")
     monkeypatch.chdir(tmp_path)
     settings = AppSettings(
@@ -170,21 +170,21 @@ def test_container_does_not_resolve_team_agent_outside_workspace(tmp_path, monke
     assert container.session_store._owner_agent_id is None
     assert container.session_store._session_type is None
 
-    monkeypatch.chdir(tmp_path / "agents" / "main-agent")
+    monkeypatch.chdir(tmp_path / "agents")
     container = build_agent_container(
         settings=settings,
         provider_client_factory=FakeProviderClientFactory(),
-        session_dir=str(tmp_path / "sessions-agent-root"),
+        session_dir=str(tmp_path / "sessions-agents-root"),
     )
 
-    assert Path.cwd() == (tmp_path / "agents" / "main-agent").resolve()
+    assert Path.cwd() == (tmp_path / "agents").resolve()
     assert container.session_store._workspace_root is None
     assert container.session_store._owner_agent_id is None
 
 
 def test_container_resolves_team_agent_capsule_context_from_workspace(tmp_path, monkeypatch) -> None:
     initialize_team_project(tmp_path, project_id="quant-project")
-    workspace = tmp_path / "agents" / "main-agent" / "workspace"
+    workspace = tmp_path / "agents" / "main-agent"
     monkeypatch.chdir(workspace)
     settings = AppSettings(
         settings_path=tmp_path / "settings.json",
