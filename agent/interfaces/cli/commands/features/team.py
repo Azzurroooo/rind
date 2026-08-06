@@ -49,7 +49,7 @@ async def _team_create(context: SlashCommandContext, project_id: str | None) -> 
     created = await create_team(project_id=project_id)
     text = (
         f"Team project created: {created['project_id']}\n"
-        f"Switched to {created['default_agent']} session: {created['session_id']}\n"
+        f"Default agent: {created['default_agent']}\n"
         f"Workspace: {created['workspace_root']}"
     )
     return SlashCommandResult(
@@ -59,7 +59,6 @@ async def _team_create(context: SlashCommandContext, project_id: str | None) -> 
             "project_id": created["project_id"],
             "default_agent": created["default_agent"],
             "workspace_root": created["workspace_root"],
-            "session_id": created["session_id"],
         },
     )
 

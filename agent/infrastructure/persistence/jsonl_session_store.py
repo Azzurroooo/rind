@@ -324,40 +324,6 @@ class JsonlSessionStore(SessionStore):
             self._compaction_repo = previous["compaction_repo"]
             raise
 
-    def _handoff_to_agent_session_sync(
-        self,
-        *,
-        session_id: str,
-        workspace_root: str,
-        system_prompt: str,
-        project_id: str | None,
-        owner_agent_id: str,
-        session_type: str,
-        created_by: str,
-    ) -> dict[str, Any]:
-        self._setup_paths()
-        clean = validate_session_id(session_id)
-        if os.path.isdir(self._get_session_paths(clean)["base"]):
-            raise ValueError(f"Session already exists: {clean}")
-        previous_id = self._session_id
-        if self._session_meta and self._session_paths:
-            self._session_meta["session_type"] = "team_bootstrap"
-            self._session_meta["status"] = "archived"
-            self._session_meta["resumable"] = False
-            self._session_meta["successor_session_id"] = clean
-            self._persist_meta_sync()
-        self._system_prompt = system_prompt
-        self._workspace_root = workspace_root
-        self._project_id = project_id
-        self._owner_agent_id = owner_agent_id
-        self._session_type = session_type
-        self._task_id = None
-        self._parent_session_id = previous_id
-        self._created_by = created_by
-        self._create_session(clean)
-        self._initialize_history_sync()
-        return self._session_info_sync()
-
     def _session_info_sync(self) -> dict[str, Any]:
         meta = self._session_meta if isinstance(self._session_meta, dict) else {}
         latest = meta.get("latest_sampling_usage")
@@ -560,61 +526,15 @@ class JsonlSessionStore(SessionStore):
                 set_active_session_context(str(self._session_root), str(self._session_id))
             return await asyncio.to_thread(self._session_info_sync)
 
-    async def handoff_to_agent_session(
-        self,
-        *,
-        session_id: str,
-        workspace_root: str,
-        system_prompt: str,
-        project_id: str | None,
-        owner_agent_id: str,
-        session_type: str = "direct_agent_chat",
-        created_by: str = "team_create",
-    ) -> dict[str, Any]:
-        async with self._write_lock:
-            result = await asyncio.to_thread(
-                self._handoff_to_agent_session_sync,
-                session_id=session_id,
-                workspace_root=workspace_root,
-                system_prompt=system_prompt,
-                project_id=project_id,
-                owner_agent_id=owner_agent_id,
-                session_type=session_type,
-                created_by=created_by,
-            )
-            if self._session_root and self._session_id:
-                from agent.infrastructure.planning.store import set_active_session_context
-
-                set_active_session_context(str(self._session_root), str(self._session_id))
-            return result
-
     async def create_team_project(self, *, project_id: str | None = None) -> dict[str, Any]:
-        from agent.infrastructure.team import initialize_team_project, load_agent_capsule
+        from agent.infrastructure.team import initialize_team_project
 
         project = initialize_team_project(resolve_project_root(), project_id=project_id)
-        capsule = load_agent_capsule(project.agents[project.default_agent])
-        session_id = self._new_agent_session_id(capsule.agent_id)
-        os.chdir(capsule.workspace_root)
-        agent_prompt = capsule.system_prompt.strip()
-        system_prompt = f"{self._system_prompt}\n\n{agent_prompt}" if agent_prompt else self._system_prompt
-        await self.handoff_to_agent_session(
-            session_id=session_id,
-            workspace_root=str(capsule.workspace_root),
-            system_prompt=system_prompt,
-            project_id=project.project_id,
-            owner_agent_id=capsule.agent_id,
-        )
         return {
             "project_id": project.project_id,
-            "default_agent": capsule.agent_id,
-            "workspace_root": str(capsule.workspace_root),
-            "session_id": session_id,
+            "default_agent": project.default_agent,
+            "workspace_root": str(project.agents[project.default_agent]),
         }
-
-    def _new_agent_session_id(self, agent_id: str) -> str:
-        stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        suffix = uuid.uuid4().hex[:8]
-        return f"{agent_id}_{stamp}_{suffix}"
 
     async def update_model(self, model: str) -> None:
         clean = str(model or "").strip()

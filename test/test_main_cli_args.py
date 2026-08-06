@@ -154,12 +154,12 @@ def test_main_returns_130_on_keyboard_interrupt() -> None:
         raise AssertionError(f"Expected Ctrl+C exit code 130, got: {result}")
 
 
-def test_main_agent_flag_resolves_capsule_and_passes_session_binding(tmp_path, monkeypatch) -> None:
+def test_main_agent_flag_is_passed_to_container_from_workspace(tmp_path, monkeypatch) -> None:
     import main as main_module
     from agent.infrastructure.team import initialize_team_project
 
     initialize_team_project(tmp_path, project_id="quant-project")
-    monkeypatch.chdir(tmp_path)
+    monkeypatch.chdir(tmp_path / "agents" / "main-agent" / "workspace")
     captured = {}
 
     class NoopCli:

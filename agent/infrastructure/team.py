@@ -191,25 +191,15 @@ def discover_agent(cwd: str | Path | None = None, *, agent_id: str | None = None
     start = Path(cwd or Path.cwd()).expanduser().resolve()
     explicit_agent = str(agent_id or "").strip()
     project = find_team_project(start)
-    if explicit_agent:
-        if project is None:
-            raise ValueError("--agent requires a Team project.")
-        workspace = project.agents.get(explicit_agent)
-        if workspace is None:
-            raise ValueError(f"Unknown team agent: {explicit_agent}")
-        return ResolvedAgent(load_agent_capsule(workspace), project)
-
-    direct = _direct_capsule_workspace(start)
-    if direct is not None:
-        return ResolvedAgent(load_agent_capsule(direct), project)
-
-    upward = _find_upward_agent_workspace(start)
-    if upward is not None:
-        return ResolvedAgent(load_agent_capsule(upward), project)
-
-    if project is not None:
-        return ResolvedAgent(load_agent_capsule(project.agents[project.default_agent]), project)
-    return None
+    workspace = _find_agent_workspace(start)
+    if workspace is None:
+        if explicit_agent:
+            raise ValueError("--agent requires the current path to be inside that agent workspace.")
+        return None
+    capsule = load_agent_capsule(workspace)
+    if explicit_agent and capsule.agent_id != explicit_agent:
+        raise ValueError(f"Current agent workspace is {capsule.agent_id}, not {explicit_agent}.")
+    return ResolvedAgent(capsule, project)
 
 
 def find_team_project(cwd: str | Path | None = None) -> TeamProject | None:
@@ -285,13 +275,13 @@ def _organization_agents(project_root: Path, organization: dict[str, Any]) -> di
 def _direct_capsule_workspace(path: Path) -> Path | None:
     if (path / AITEAM_DIR / AGENT_MANIFEST).is_file():
         return path
-    nested = path / "workspace" / AITEAM_DIR / AGENT_MANIFEST
-    if nested.is_file():
-        return path / "workspace"
     return None
 
 
-def _find_upward_agent_workspace(start: Path) -> Path | None:
+def _find_agent_workspace(start: Path) -> Path | None:
+    direct = _direct_capsule_workspace(start)
+    if direct is not None:
+        return direct
     for path in start.parents:
         direct = _direct_capsule_workspace(path)
         if direct is not None:

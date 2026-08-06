@@ -338,42 +338,6 @@ async def test_session_allows_different_creation_metadata_for_same_agent_binding
     assert meta["created_by"] == "main-agent"
     assert meta["parent_session_id"] == "bootstrap"
 
-
-@pytest.mark.asyncio
-async def test_handoff_archives_bootstrap_and_switches_to_agent_session(tmp_path, monkeypatch):
-    project = tmp_path / "project"
-    workspace = project / "agents" / "main-agent" / "workspace"
-    session_root = tmp_path / "sessions"
-    workspace.mkdir(parents=True)
-    monkeypatch.chdir(project)
-
-    store = JsonlSessionStore(session_dir=str(session_root), session_id="bootstrap", system_prompt="sys")
-    await store.initialize()
-    await store.persist_message("user", "create a team")
-
-    info = await store.handoff_to_agent_session(
-        session_id="main_agent_session",
-        workspace_root=str(workspace),
-        system_prompt="team sys",
-        project_id="quant-project",
-        owner_agent_id="main-agent",
-    )
-
-    old_meta = json.loads((session_root / "bootstrap" / "meta.json").read_text(encoding="utf-8"))
-    new_meta = json.loads((session_root / "main_agent_session" / "meta.json").read_text(encoding="utf-8"))
-    messages = (session_root / "main_agent_session" / "messages.jsonl").read_text(encoding="utf-8")
-    assert info["session_id"] == "main_agent_session"
-    assert store.session_id == "main_agent_session"
-    assert old_meta["session_type"] == "team_bootstrap"
-    assert old_meta["status"] == "archived"
-    assert old_meta["resumable"] is False
-    assert old_meta["successor_session_id"] == "main_agent_session"
-    assert new_meta["owner_agent_id"] == "main-agent"
-    assert new_meta["parent_session_id"] == "bootstrap"
-    assert new_meta["workspace_root"] == os.path.normcase(os.path.realpath(str(workspace)))
-    assert "team sys" in messages
-
-
 @pytest.mark.asyncio
 async def test_resume_latest_and_recent_sessions_ignore_invalid_index_ids(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)

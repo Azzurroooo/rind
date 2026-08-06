@@ -372,7 +372,7 @@ async def test_team_command_lists_sends_pauses_resumes_and_shows_agents() -> Non
 
 
 @pytest.mark.asyncio
-async def test_team_create_initializes_project_and_hands_off_session(tmp_path, monkeypatch) -> None:
+async def test_team_create_initializes_project_without_handoff(tmp_path, monkeypatch) -> None:
     monkeypatch.chdir(tmp_path)
     session = JsonlSessionStore(session_dir=str(tmp_path / "sessions"), session_id="bootstrap", system_prompt="sys")
     await session.initialize()
@@ -380,18 +380,22 @@ async def test_team_create_initializes_project_and_hands_off_session(tmp_path, m
     result = await SlashCommandRouter().execute("/team create quant-project", _context(session=session))
 
     workspace = tmp_path / "agents" / "main-agent" / "workspace"
-    new_meta = json.loads((tmp_path / "sessions" / session.session_id / "meta.json").read_text(encoding="utf-8"))
-    old_meta = json.loads((tmp_path / "sessions" / "bootstrap" / "meta.json").read_text(encoding="utf-8"))
+    meta = json.loads((tmp_path / "sessions" / "bootstrap" / "meta.json").read_text(encoding="utf-8"))
     assert result.display["type"] == "team_create"
     assert result.display["project_id"] == "quant-project"
-    assert Path.cwd() == workspace.resolve()
+    assert result.display["default_agent"] == "main-agent"
+    assert "session_id" not in result.display
+    assert "Switched to" not in result.text
+    assert session.session_id == "bootstrap"
+    assert Path.cwd() == tmp_path.resolve()
     assert (tmp_path / ".aiteam" / "project.yaml").is_file()
+    assert (tmp_path / ".aiteam" / "organization.yaml").is_file()
     assert (workspace / ".aiteam" / "agent.yaml").is_file()
-    assert new_meta["workspace_root"] == os.path.normcase(os.path.realpath(str(workspace)))
-    assert new_meta["project_id"] == "quant-project"
-    assert new_meta["owner_agent_id"] == "main-agent"
-    assert old_meta["session_type"] == "team_bootstrap"
-    assert old_meta["successor_session_id"] == session.session_id
+    assert meta["session_type"] == "standalone_project"
+    assert meta["status"] == "active"
+    assert "successor_session_id" not in meta
+    assert "project_id" not in meta
+    assert "owner_agent_id" not in meta
 
 
 @pytest.mark.asyncio

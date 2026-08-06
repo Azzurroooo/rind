@@ -145,9 +145,69 @@ def test_container_rejects_unknown_enabled_tools() -> None:
             )
 
 
-def test_container_resolves_team_agent_capsule_context(tmp_path, monkeypatch) -> None:
+def test_container_does_not_resolve_team_agent_outside_workspace(tmp_path, monkeypatch) -> None:
     initialize_team_project(tmp_path, project_id="quant-project")
     monkeypatch.chdir(tmp_path)
+    settings = AppSettings(
+        settings_path=tmp_path / "settings.json",
+        settings_exists=True,
+        model="test-model",
+        api_key="test-key",
+        base_url="https://example.com/v1",
+        reasoning_effort="high",
+        user_agent="test-agent",
+    )
+
+    container = build_agent_container(
+        settings=settings,
+        provider_client_factory=FakeProviderClientFactory(),
+        session_dir=str(tmp_path / "sessions"),
+    )
+
+    assert Path.cwd() == tmp_path.resolve()
+    assert container.session_store._workspace_root is None
+    assert container.session_store._project_id is None
+    assert container.session_store._owner_agent_id is None
+    assert container.session_store._session_type is None
+
+    monkeypatch.chdir(tmp_path / "agents" / "main-agent")
+    container = build_agent_container(
+        settings=settings,
+        provider_client_factory=FakeProviderClientFactory(),
+        session_dir=str(tmp_path / "sessions-agent-root"),
+    )
+
+    assert Path.cwd() == (tmp_path / "agents" / "main-agent").resolve()
+    assert container.session_store._workspace_root is None
+    assert container.session_store._owner_agent_id is None
+
+
+def test_container_rejects_agent_flag_outside_matching_workspace(tmp_path, monkeypatch) -> None:
+    initialize_team_project(tmp_path, project_id="quant-project")
+    monkeypatch.chdir(tmp_path)
+    settings = AppSettings(
+        settings_path=tmp_path / "settings.json",
+        settings_exists=True,
+        model="test-model",
+        api_key="test-key",
+        base_url="https://example.com/v1",
+        reasoning_effort="high",
+        user_agent="test-agent",
+    )
+
+    with pytest.raises(ValueError, match="inside that agent workspace"):
+        build_agent_container(
+            settings=settings,
+            provider_client_factory=FakeProviderClientFactory(),
+            session_dir=str(tmp_path / "sessions"),
+            agent_id="main-agent",
+        )
+
+
+def test_container_resolves_team_agent_capsule_context_from_workspace(tmp_path, monkeypatch) -> None:
+    initialize_team_project(tmp_path, project_id="quant-project")
+    workspace = tmp_path / "agents" / "main-agent" / "workspace"
+    monkeypatch.chdir(workspace)
     settings = AppSettings(
         settings_path=tmp_path / "settings.json",
         settings_exists=True,
@@ -165,7 +225,6 @@ def test_container_resolves_team_agent_capsule_context(tmp_path, monkeypatch) ->
         agent_id="main-agent",
     )
 
-    workspace = tmp_path / "agents" / "main-agent" / "workspace"
     assert Path.cwd() == workspace.resolve()
     assert container.session_store._workspace_root == str(workspace.resolve())
     assert container.session_store._project_id == "quant-project"

@@ -70,7 +70,6 @@ def build_agent_container(
 
         agent_context = discover_agent(agent_id=agent_id)
         if agent_context is not None:
-            os.chdir(agent_context.workspace_root)
             agent_prompt = agent_context.capsule.system_prompt.strip()
             if system_prompt is None and agent_prompt:
                 system_prompt = f"{SYSTEM_PROMPT}\n\n{agent_prompt}"
