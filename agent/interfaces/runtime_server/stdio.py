@@ -655,7 +655,6 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Rind headless runtime server")
     parser.add_argument("--debug", action="store_true")
     parser.add_argument("--session", type=str, default=None)
-    parser.add_argument("--agent", type=str, default=None)
     parser.add_argument("-c", "--resume-latest", action="store_true")
     parser.add_argument("--session-dir", type=str, default=None)
     return parser
@@ -686,7 +685,6 @@ async def async_main(argv: list[str] | None = None) -> int:
             session_id=args.session,
             resume_latest=args.resume_latest,
             enable_goal=True,
-            agent_id=args.agent,
         )
     except ValueError as exc:
         print(f"Startup error: {exc}", file=sys.stderr)

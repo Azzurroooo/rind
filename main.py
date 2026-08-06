@@ -10,7 +10,6 @@ def main() -> int:
     parser.add_argument("--version", action="version", version=f"rind {__version__}")
     parser.add_argument("--debug", action="store_true", help="Enable debug mode (non-streaming output)")
     parser.add_argument("--session", type=str, default=None, help="Session ID to load")
-    parser.add_argument("--agent", type=str, default=None, help="Team agent ID to open")
     parser.add_argument("-c", "--resume-latest", action="store_true", help="Resume the latest session if available")
     parser.add_argument("--session-dir", type=str, default=None, help="Session storage directory")
     parser.add_argument("--doctor", action="store_true", help="Run local setup diagnostics and exit")
@@ -56,7 +55,6 @@ def main() -> int:
             session_dir=args.session_dir,
             session_id=args.session,
             resume_latest=args.resume_latest,
-            agent_id=args.agent,
         )
         ChatCLI(runtime=container.runtime, session=container.session_store, debug=args.debug).start()
     except ValueError as exc:

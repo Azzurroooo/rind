@@ -60,21 +60,6 @@ def test_discover_agent_only_uses_current_workspace_or_children(tmp_path: Path) 
     assert discover_agent(workspace.parent) is None
     assert discover_agent(workspace).agent_id == "main-agent"
     assert discover_agent(workspace / "work").workspace_root == workspace.resolve()
-    assert discover_agent(workspace, agent_id="main-agent").workspace_root == workspace.resolve()
-
-
-def test_discover_agent_rejects_explicit_agent_outside_matching_workspace(tmp_path: Path) -> None:
-    initialize_team_project(tmp_path)
-    workspace = tmp_path / "agents" / "main-agent" / "workspace"
-
-    with pytest.raises(ValueError, match="inside that agent workspace"):
-        discover_agent(tmp_path, agent_id="main-agent")
-    with pytest.raises(ValueError, match="inside that agent workspace"):
-        discover_agent(tmp_path / "agents", agent_id="main-agent")
-    with pytest.raises(ValueError, match="inside that agent workspace"):
-        discover_agent(workspace.parent, agent_id="main-agent")
-    with pytest.raises(ValueError, match="not other"):
-        discover_agent(workspace, agent_id="other")
 
 
 def test_team_project_rejects_organization_workspace_escape(tmp_path: Path) -> None:

@@ -182,28 +182,6 @@ def test_container_does_not_resolve_team_agent_outside_workspace(tmp_path, monke
     assert container.session_store._owner_agent_id is None
 
 
-def test_container_rejects_agent_flag_outside_matching_workspace(tmp_path, monkeypatch) -> None:
-    initialize_team_project(tmp_path, project_id="quant-project")
-    monkeypatch.chdir(tmp_path)
-    settings = AppSettings(
-        settings_path=tmp_path / "settings.json",
-        settings_exists=True,
-        model="test-model",
-        api_key="test-key",
-        base_url="https://example.com/v1",
-        reasoning_effort="high",
-        user_agent="test-agent",
-    )
-
-    with pytest.raises(ValueError, match="inside that agent workspace"):
-        build_agent_container(
-            settings=settings,
-            provider_client_factory=FakeProviderClientFactory(),
-            session_dir=str(tmp_path / "sessions"),
-            agent_id="main-agent",
-        )
-
-
 def test_container_resolves_team_agent_capsule_context_from_workspace(tmp_path, monkeypatch) -> None:
     initialize_team_project(tmp_path, project_id="quant-project")
     workspace = tmp_path / "agents" / "main-agent" / "workspace"
@@ -222,7 +200,6 @@ def test_container_resolves_team_agent_capsule_context_from_workspace(tmp_path, 
         settings=settings,
         provider_client_factory=FakeProviderClientFactory(),
         session_dir=str(tmp_path / "sessions"),
-        agent_id="main-agent",
     )
 
     assert Path.cwd() == workspace.resolve()

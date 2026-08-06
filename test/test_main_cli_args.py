@@ -27,6 +27,21 @@ def test_resume_mode_flag_is_removed() -> None:
         raise AssertionError(f"Expected argparse unknown-flag error, got: {combined}")
 
 
+def test_agent_flag_is_removed() -> None:
+    result = subprocess.run(
+        [sys.executable, "main.py", "--agent", "main-agent"],
+        cwd=PROJECT_ROOT,
+        capture_output=True,
+        text=True,
+    )
+
+    if result.returncode == 0:
+        raise AssertionError("Expected main.py to reject the removed --agent flag.")
+    combined = f"{result.stdout}\n{result.stderr}"
+    if "unrecognized arguments: --agent main-agent" not in combined:
+        raise AssertionError(f"Expected argparse unknown-flag error, got: {combined}")
+
+
 def test_version_does_not_validate_config(tmp_path) -> None:
     bad_settings = tmp_path / "settings.json"
     bad_settings.write_text("{", encoding="utf-8")
@@ -154,38 +169,9 @@ def test_main_returns_130_on_keyboard_interrupt() -> None:
         raise AssertionError(f"Expected Ctrl+C exit code 130, got: {result}")
 
 
-def test_main_agent_flag_is_passed_to_container_from_workspace(tmp_path, monkeypatch) -> None:
-    import main as main_module
-    from agent.infrastructure.team import initialize_team_project
-
-    initialize_team_project(tmp_path, project_id="quant-project")
-    monkeypatch.chdir(tmp_path / "agents" / "main-agent" / "workspace")
-    captured = {}
-
-    class NoopCli:
-        def start(self):
-            return None
-
-    def build_container(**kwargs):
-        captured.update(kwargs)
-        return SimpleNamespace(runtime=object(), session_store=object())
-
-    with (
-        patch.object(sys, "argv", ["main.py", "--agent", "main-agent"]),
-        patch("agent.infrastructure.config.Config.ensure_user_settings_template"),
-        patch("agent.infrastructure.config.Config.reload"),
-        patch("agent.infrastructure.config.validate_settings"),
-        patch("agent.bootstrap.build_agent_container", side_effect=build_container),
-        patch("agent.interfaces.cli.ChatCLI", return_value=NoopCli()),
-    ):
-        result = main_module.main()
-
-    assert result == 0
-    assert captured["agent_id"] == "main-agent"
-
-
 def main() -> int:
     test_resume_mode_flag_is_removed()
+    test_agent_flag_is_removed()
     with tempfile.TemporaryDirectory() as temp_dir:
         test_version_does_not_validate_config(Path(temp_dir))
     with tempfile.TemporaryDirectory() as temp_dir:

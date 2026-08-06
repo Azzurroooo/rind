@@ -187,19 +187,13 @@ def load_team_project(project_root: str | Path) -> TeamProject:
     )
 
 
-def discover_agent(cwd: str | Path | None = None, *, agent_id: str | None = None) -> ResolvedAgent | None:
+def discover_agent(cwd: str | Path | None = None) -> ResolvedAgent | None:
     start = Path(cwd or Path.cwd()).expanduser().resolve()
-    explicit_agent = str(agent_id or "").strip()
     project = find_team_project(start)
     workspace = _find_agent_workspace(start)
     if workspace is None:
-        if explicit_agent:
-            raise ValueError("--agent requires the current path to be inside that agent workspace.")
         return None
-    capsule = load_agent_capsule(workspace)
-    if explicit_agent and capsule.agent_id != explicit_agent:
-        raise ValueError(f"Current agent workspace is {capsule.agent_id}, not {explicit_agent}.")
-    return ResolvedAgent(capsule, project)
+    return ResolvedAgent(load_agent_capsule(workspace), project)
 
 
 def find_team_project(cwd: str | Path | None = None) -> TeamProject | None:
@@ -272,20 +266,10 @@ def _organization_agents(project_root: Path, organization: dict[str, Any]) -> di
     return agents
 
 
-def _direct_capsule_workspace(path: Path) -> Path | None:
-    if (path / AITEAM_DIR / AGENT_MANIFEST).is_file():
-        return path
-    return None
-
-
 def _find_agent_workspace(start: Path) -> Path | None:
-    direct = _direct_capsule_workspace(start)
-    if direct is not None:
-        return direct
-    for path in start.parents:
-        direct = _direct_capsule_workspace(path)
-        if direct is not None:
-            return direct
+    for path in (start, *start.parents):
+        if (path / AITEAM_DIR / AGENT_MANIFEST).is_file():
+            return path
     return None
 
 

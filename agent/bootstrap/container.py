@@ -62,24 +62,23 @@ def build_agent_container(
     parent_session_id: str | None = None,
     created_by: str | None = None,
     skill_project_dir: str | None = None,
-    agent_id: str | None = None,
 ) -> AgentContainer:
     """Build the production runtime dependency graph explicitly."""
-    if agent_id or not workspace_root:
+    if workspace_root:
+        os.chdir(os.path.abspath(os.path.expanduser(workspace_root)))
+    else:
         from agent.infrastructure.team import discover_agent
 
-        agent_context = discover_agent(agent_id=agent_id)
+        agent_context = discover_agent()
         if agent_context is not None:
             agent_prompt = agent_context.capsule.system_prompt.strip()
             if system_prompt is None and agent_prompt:
                 system_prompt = f"{SYSTEM_PROMPT}\n\n{agent_prompt}"
-            workspace_root = workspace_root or str(agent_context.workspace_root)
+            workspace_root = str(agent_context.workspace_root)
             project_id = project_id if project_id is not None else agent_context.project_id
             owner_agent_id = owner_agent_id or agent_context.agent_id
             session_type = session_type or "direct_agent_chat"
             skill_project_dir = skill_project_dir or str(agent_context.capsule.manifest_path.parent / "skills")
-    elif workspace_root:
-        os.chdir(os.path.abspath(os.path.expanduser(workspace_root)))
     settings = settings or load_settings()
     provider_client_factory = provider_client_factory or OpenAIClientFactory(settings)
     model = settings.model
