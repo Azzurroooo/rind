@@ -16,6 +16,7 @@ from .plan import COMMAND as PLAN_COMMAND
 from .sessions import COMMAND as SESSIONS_COMMAND
 from .skill import COMMAND as SKILL_COMMAND
 from .status import COMMAND as STATUS_COMMAND
+from .team import COMMAND as TEAM_COMMAND
 from ..router import SlashCommandInfo
 
 
@@ -25,6 +26,7 @@ def build_command_infos() -> tuple[SlashCommandInfo, ...]:
     commands.extend(
         (
             STATUS_COMMAND,
+            TEAM_COMMAND,
             DOCTOR_COMMAND,
             SESSIONS_COMMAND,
             SKILL_COMMAND,

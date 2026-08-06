@@ -18,6 +18,7 @@ from agent.interfaces.cli.ui import GitPromptStatus
 from agent.interfaces.cli.commands import SlashCommandContext, SlashCommandInfo, SlashCommandRouter
 from agent.domain.cancellation import CancellationTokenSource
 from agent.infrastructure.config import Config
+from agent.application.organization import Agent, AgentConfig, InMemoryOrganizationStore
 
 
 @pytest.fixture(autouse=True)
@@ -113,6 +114,23 @@ def _context(session=None):
     return SlashCommandContext(runtime=FakeRuntime(), session=session or FakeSession(), debug=True)
 
 
+def _team_session() -> FakeSession:
+    store = InMemoryOrganizationStore()
+    store.save_agent_config(AgentConfig(id="factor_config", display_name="Factor", system_prompt="Research."))
+    store.save_agent(
+        Agent(
+            id="factor",
+            config_id="factor_config",
+            display_name="Factor",
+            session_id="factor_session",
+            workspace_root="factor",
+        )
+    )
+    session = FakeSession()
+    session.organization_store = store
+    return session
+
+
 @pytest.mark.asyncio
 async def test_help_returns_command_list() -> None:
     result = await SlashCommandRouter().execute("/help", _context())
@@ -177,6 +195,7 @@ def test_router_exposes_sorted_command_names() -> None:
     assert "help" in names
     assert "status" in names
     assert "sessions" in names
+    assert "team" in names
 
 
 def test_router_exposes_command_descriptions() -> None:
@@ -189,9 +208,11 @@ def test_router_exposes_command_descriptions() -> None:
     assert descriptions["model"] == "Show or change the active model"
     assert descriptions["clear"] == "Clear terminal output"
     assert descriptions["draft"] == "Show, reuse, or clear saved input draft"
+    assert descriptions["team"] == "Operate organization agents"
     assert usages["sessions"] == "/sessions [limit]"
     assert usages["draft"] == "/draft | /draft use | /draft clear"
     assert usages["init"] == "/init [project|user]"
+    assert usages["team"].startswith("/team list")
 
 
 def test_router_accepts_a_custom_command_catalog() -> None:
@@ -318,6 +339,35 @@ async def test_unknown_command_returns_friendly_error() -> None:
 
     assert "Unknown command: /missing" in result.text
     assert "/help" in result.text
+
+
+@pytest.mark.asyncio
+async def test_team_command_lists_sends_pauses_resumes_and_shows_agents() -> None:
+    session = _team_session()
+    router = SlashCommandRouter()
+
+    listed = await router.execute("/team list", _context(session=session))
+    assert "Team agents:" in listed.text
+    assert "factor | Factor | idle" in listed.text
+    assert listed.display["type"] == "team"
+
+    sent = await router.execute('/team send factor "run value research"', _context(session=session))
+    message_id = sent.display["message"]["id"]
+    assert sent.text == f"Queued message {message_id} to factor."
+    assert sent.display["delivery"]["status"] == "pending"
+
+    paused = await router.execute("/team pause factor", _context(session=session))
+    assert paused.text == "Paused agent factor."
+    assert paused.display["agent"]["status"] == "paused"
+
+    resumed = await router.execute("/team resume factor", _context(session=session))
+    assert resumed.text == "Resumed agent factor."
+    assert resumed.display["agent"]["status"] == "idle"
+
+    shown = await router.execute("/team show factor", _context(session=session))
+    assert "Agent factor: Factor" in shown.text
+    assert "Recent messages:" in shown.text
+    assert shown.display["type"] == "team_agent_detail"
 
 
 @pytest.mark.asyncio
@@ -929,6 +979,7 @@ def main() -> int:
     asyncio.run(test_help_reports_unknown_command())
     asyncio.run(test_help_rejects_too_many_args())
     asyncio.run(test_unknown_command_returns_friendly_error())
+    asyncio.run(test_team_command_lists_sends_pauses_resumes_and_shows_agents())
     asyncio.run(test_status_shows_session_model_debug_and_message_count())
     asyncio.run(test_status_shows_latest_sampling_usage())
     asyncio.run(test_status_labels_assistant_and_compact_usage_separately())

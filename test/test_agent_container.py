@@ -88,6 +88,39 @@ def test_container_filters_tools_before_building_registry_and_schema() -> None:
         assert container.turn_runner._tool_schemas == container.tool_registry.schemas
 
 
+def test_container_can_disable_user_question_tool_for_worker_agents() -> None:
+    cache_dir = PROJECT_ROOT / ".pytest_cache"
+    cache_dir.mkdir(exist_ok=True)
+    settings = AppSettings(
+        settings_path=cache_dir / "settings.json",
+        settings_exists=True,
+        model="test-model",
+        api_key="test-key",
+        base_url="https://example.com/v1",
+        reasoning_effort="high",
+        user_agent="test-agent",
+    )
+
+    with tempfile.TemporaryDirectory(dir=cache_dir) as session_dir:
+        default_container = build_agent_container(
+            settings=settings,
+            provider_client_factory=FakeProviderClientFactory(),
+            session_dir=session_dir,
+        )
+        worker_container = build_agent_container(
+            settings=settings,
+            provider_client_factory=FakeProviderClientFactory(),
+            session_dir=session_dir,
+            enable_user_question=False,
+        )
+
+        assert default_container.tool_registry.has("ask_user_question") is True
+        assert worker_container.tool_registry.has("ask_user_question") is False
+        assert "ask_user_question" not in {
+            schema["function"]["name"] for schema in worker_container.tool_registry.schemas
+        }
+
+
 def test_container_rejects_unknown_enabled_tools() -> None:
     cache_dir = PROJECT_ROOT / ".pytest_cache"
     cache_dir.mkdir(exist_ok=True)

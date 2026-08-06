@@ -50,6 +50,7 @@ def build_agent_container(
     session_id: str | None = None,
     resume_latest: bool = False,
     enable_goal: bool = False,
+    enable_user_question: bool = True,
     enabled_tools: Collection[str] | None = None,
 ) -> AgentContainer:
     """Build the production runtime dependency graph explicitly."""
@@ -65,6 +66,7 @@ def build_agent_container(
     )
     catalog = build_builtin_tool_specs(
         enable_goal=enable_goal,
+        enable_user_question=enable_user_question,
         set_goal_status=session_store.set_goal_status if enable_goal else None,
     )
     if enabled_tools is None:
