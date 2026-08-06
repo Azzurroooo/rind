@@ -73,6 +73,9 @@ def initialize_team_project(
     root = Path(project_root).expanduser().resolve()
     if not root.is_dir():
         raise ValueError(f"Project root does not exist: {root}")
+    enclosing = _find_project_root(root.parent)
+    if enclosing is not None:
+        raise ValueError(f"Team projects cannot be nested: {enclosing} is already a Team project.")
     main_agent_id = _clean_id(main_agent_id, "main_agent_id")
     project_id = _clean_id(project_id or root.name, "project_id")
     project_name = _clean_text(name or root.name, "name")
@@ -188,20 +191,21 @@ def load_team_project(project_root: str | Path) -> TeamProject:
 
 
 def discover_agent(cwd: str | Path | None = None) -> ResolvedAgent | None:
+    """Resolve the agent that owns this exact directory.
+
+    An agent is its directory: running inside `agents/<id>/` is what makes a
+    session that agent. Nothing else resolves -- not the project root, not a
+    subdirectory of the agent. Those are ordinary Rind sessions.
+    """
     start = Path(cwd or Path.cwd()).expanduser().resolve()
-    project = find_team_project(start)
-    workspace = _find_agent_workspace(start)
-    if workspace is None:
+    if not (start / AITEAM_DIR / AGENT_MANIFEST).is_file():
         return None
-    return ResolvedAgent(load_agent_capsule(workspace), project)
+    return ResolvedAgent(load_agent_capsule(start), find_team_project(start))
 
 
 def find_team_project(cwd: str | Path | None = None) -> TeamProject | None:
-    start = Path(cwd or Path.cwd()).expanduser().resolve()
-    for path in (start, *start.parents):
-        if (path / AITEAM_DIR / PROJECT_MANIFEST).is_file():
-            return load_team_project(path)
-    return None
+    root = _find_project_root(Path(cwd or Path.cwd()).expanduser().resolve())
+    return load_team_project(root) if root is not None else None
 
 
 def _project_manifest(project_id: str, name: str, main_agent_id: str) -> dict[str, Any]:
@@ -266,9 +270,9 @@ def _organization_agents(project_root: Path, organization: dict[str, Any]) -> di
     return agents
 
 
-def _find_agent_workspace(start: Path) -> Path | None:
+def _find_project_root(start: Path) -> Path | None:
     for path in (start, *start.parents):
-        if (path / AITEAM_DIR / AGENT_MANIFEST).is_file():
+        if (path / AITEAM_DIR / PROJECT_MANIFEST).is_file():
             return path
     return None
 

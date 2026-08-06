@@ -51,18 +51,33 @@ def test_load_agent_capsule_reads_manifest_prompt_and_workspace_paths(tmp_path: 
     assert capsule.readonly_roots == ((workspace / ".aiteam").resolve(),)
 
 
-def test_discover_agent_only_uses_current_agent_directory_or_children(tmp_path: Path) -> None:
+def test_discover_agent_requires_the_exact_agent_directory(tmp_path: Path) -> None:
     initialize_team_project(tmp_path)
     agent_dir = tmp_path / "agents" / "main-agent"
 
-    # The directory is the selector: only an agent directory opens an agent,
-    # and the project root never falls back to default_agent.
+    # Agents and directories are one to one. Running in agents/<id> is what
+    # makes a session that agent; every other path is a plain Rind session.
+    assert discover_agent(agent_dir).agent_id == "main-agent"
+    assert discover_agent(agent_dir).workspace_root == agent_dir.resolve()
     assert discover_agent(tmp_path) is None
     assert discover_agent(tmp_path / "agents") is None
     assert discover_agent(tmp_path / "shared") is None
-    assert discover_agent(agent_dir).agent_id == "main-agent"
-    assert discover_agent(agent_dir / "work").workspace_root == agent_dir.resolve()
-    assert discover_agent(agent_dir / ".aiteam" / "prompts").workspace_root == agent_dir.resolve()
+    assert discover_agent(agent_dir / "work") is None
+    assert discover_agent(agent_dir / ".aiteam") is None
+    assert discover_agent(agent_dir / ".aiteam" / "prompts") is None
+
+
+def test_team_project_cannot_be_created_inside_another_team_project(tmp_path: Path) -> None:
+    initialize_team_project(tmp_path)
+
+    for nested in (
+        tmp_path / "agents",
+        tmp_path / "agents" / "main-agent",
+        tmp_path / "agents" / "main-agent" / "work",
+        tmp_path / "shared" / "artifacts",
+    ):
+        with pytest.raises(ValueError, match="cannot be nested"):
+            initialize_team_project(nested)
 
 
 def test_team_project_rejects_organization_workspace_escape(tmp_path: Path) -> None:

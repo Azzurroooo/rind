@@ -170,16 +170,20 @@ def test_container_does_not_resolve_team_agent_outside_an_agent_directory(tmp_pa
     assert container.session_store._owner_agent_id is None
     assert container.session_store._session_type is None
 
-    monkeypatch.chdir(tmp_path / "agents")
-    container = build_agent_container(
-        settings=settings,
-        provider_client_factory=FakeProviderClientFactory(),
-        session_dir=str(tmp_path / "sessions-agents-root"),
-    )
+    # A subdirectory of an agent is a plain session, not that agent.
+    for index, cwd in enumerate((tmp_path / "agents", tmp_path / "agents" / "main-agent" / "work")):
+        monkeypatch.chdir(cwd)
+        container = build_agent_container(
+            settings=settings,
+            provider_client_factory=FakeProviderClientFactory(),
+            session_dir=str(tmp_path / f"sessions-outside-{index}"),
+        )
 
-    assert Path.cwd() == (tmp_path / "agents").resolve()
-    assert container.session_store._workspace_root is None
-    assert container.session_store._owner_agent_id is None
+        assert Path.cwd() == cwd.resolve()
+        assert container.session_store._workspace_root is None
+        assert container.session_store._project_id is None
+        assert container.session_store._owner_agent_id is None
+        assert container.session_store._session_type is None
 
 
 def test_container_resolves_team_agent_capsule_context_from_workspace(tmp_path, monkeypatch) -> None:
