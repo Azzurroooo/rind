@@ -13,6 +13,7 @@ from typing import Any
 from agent.domain.cancellation import CancellationToken
 from agent.domain.compaction import COMPACT_CONTINUATION_USER_CONTENT
 from agent.domain.errors import PersistenceError
+from agent.prompts import build_compact_prompt
 
 from .estimator import DEFAULT_CONTEXT_WINDOW_TOKENS
 from .handoff import CompactionHandoffBuilder
@@ -59,8 +60,10 @@ class CompactionService:
             strategy="deterministic_fallback",
         )
         try:
+            corpus = self.build_compression_corpus(context_messages)
+            payload = json.dumps(corpus, ensure_ascii=False, sort_keys=True, default=str)
             response = await chat_client.create(
-                messages=self._build_compact_prompt(self.build_compression_corpus(context_messages)),
+                messages=build_compact_prompt(self._limit_prompt_payload(payload)),
                 tools=None,
                 cancellation_token=cancellation_token,
             )
@@ -162,34 +165,6 @@ class CompactionService:
                 continue
             corpus.append(handoff_builder.strip_internal_fields(message))
         return corpus
-
-    def _build_compact_prompt(self, corpus_messages: list[dict[str, Any]]) -> list[dict[str, str]]:
-        payload = json.dumps(corpus_messages, ensure_ascii=False, sort_keys=True, default=str)
-        payload = self._limit_prompt_payload(payload)
-        system = (
-            "You are compacting a coding-agent conversation into a source-bound handoff. "
-            "Do not invent facts. Preserve concrete user goals, completed work, pending work, "
-            "files, commands, tests, tool results, constraints, risks, and next steps. "
-            "The handoff will replace the full prior context, so include any in-progress "
-            "tool loop state and do not assume raw tool messages remain visible. Write concise Markdown."
-        )
-        user = (
-            "Create a compact handoff for the following compression corpus. "
-            "The handoff will replace the full prior context after a compact boundary. "
-            "If a tool loop is in progress, summarize the tool call intent, tool result, "
-            "and required continuation.\n\n"
-            "Required sections:\n"
-            "- Current goal\n"
-            "- Completed work\n"
-            "- Pending work\n"
-            "- In-progress continuation state\n"
-            "- Files, commands, and tests\n"
-            "- Key tool results\n"
-            "- User preferences and constraints\n"
-            "- Risks and next checks\n\n"
-            f"Compression corpus JSON:\n{payload}"
-        )
-        return [{"role": "system", "content": system}, {"role": "user", "content": user}]
 
     async def _load_raw_messages(self, session, fallback: list[dict[str, Any]]) -> list[dict[str, Any]]:
         try:

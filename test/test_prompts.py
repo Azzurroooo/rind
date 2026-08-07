@@ -112,3 +112,14 @@ def test_rind_init_prompt_scopes_user_file():
     assert r"C:\Users\me\.rind\RIND.md" in prompt
     assert "Use `write_file` when the target does not exist" in prompt
     assert "use `edit_file` with its latest SHA-256" in prompt
+
+
+def test_compact_prompt_has_stable_handoff_instructions():
+    messages = prompts.build_compact_prompt('[{"role":"user","content":"finish task"}]')
+
+    assert [message["role"] for message in messages] == ["system", "user"]
+    assert "Do not invent facts." in messages[0]["content"]
+    assert "Required sections:" in messages[1]["content"]
+    assert "- Current goal" in messages[1]["content"]
+    assert "- Risks and next checks" in messages[1]["content"]
+    assert 'Compression corpus JSON:\n[{"role":"user","content":"finish task"}]' in messages[1]["content"]

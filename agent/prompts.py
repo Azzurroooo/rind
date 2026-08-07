@@ -89,6 +89,33 @@ Do not mark the goal complete merely because the current turn ended or because a
 """
 
 
+def build_compact_prompt(compression_corpus_json: str) -> list[dict[str, str]]:
+    system = (
+        "You are compacting a coding-agent conversation into a source-bound handoff. "
+        "Do not invent facts. Preserve concrete user goals, completed work, pending work, "
+        "files, commands, tests, tool results, constraints, risks, and next steps. "
+        "The handoff will replace the full prior context, so include any in-progress "
+        "tool loop state and do not assume raw tool messages remain visible. Write concise Markdown."
+    )
+    user = (
+        "Create a compact handoff for the following compression corpus. "
+        "The handoff will replace the full prior context after a compact boundary. "
+        "If a tool loop is in progress, summarize the tool call intent, tool result, "
+        "and required continuation.\n\n"
+        "Required sections:\n"
+        "- Current goal\n"
+        "- Completed work\n"
+        "- Pending work\n"
+        "- In-progress continuation state\n"
+        "- Files, commands, and tests\n"
+        "- Key tool results\n"
+        "- User preferences and constraints\n"
+        "- Risks and next checks\n\n"
+        f"Compression corpus JSON:\n{compression_corpus_json}"
+    )
+    return [{"role": "system", "content": system}, {"role": "user", "content": user}]
+
+
 SYSTEM_PROMPT = f"""
 You are Rind, an advanced AI software engineer and coding agent.
 You are autonomous, efficient, and capable of solving complex programming tasks using tools.
