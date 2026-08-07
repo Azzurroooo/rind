@@ -2,122 +2,101 @@ import os
 import sys
 from pathlib import Path
 
+import pytest
+
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 os.chdir(PROJECT_ROOT)
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
+from agent.domain.skills import SkillMetadata
 from agent.infrastructure.skills import SkillRepository
 
 
-def test_skill_repository_scans_and_overrides(tmp_path: Path) -> None:
-    project_root = tmp_path / "project"
-    user_home = tmp_path / "home"
-    project_skill_dir = project_root / ".rind" / "skills"
-    user_skill_dir = user_home / ".rind" / "skills"
-
-    (user_skill_dir / "demo").mkdir(parents=True)
-    (user_skill_dir / "demo" / "SKILL.md").write_text(
-        """---
-name: demo
-description: user demo skill
-triggers:
-  - user trigger
----
-
-# Demo
-User body.
-""",
+def _write_skill(root: Path, name: str, description: str, body: str = "Body") -> Path:
+    skill_file = root / name / "SKILL.md"
+    skill_file.parent.mkdir(parents=True)
+    skill_file.write_text(
+        f"---\nname: {name}\ndescription: {description}\ntriggers: [legacy]\n---\n\n{body}\n",
         encoding="utf-8",
     )
+    return skill_file
 
-    (project_skill_dir / "demo").mkdir(parents=True)
-    (project_skill_dir / "demo" / "SKILL.md").write_text(
-        """---
-name: demo
-description: project demo skill
-triggers:
-  - project trigger
----
 
-# Demo
-Project body.
-""",
-        encoding="utf-8",
+def test_skill_repository_scans_metadata_and_applies_scope_overrides(tmp_path: Path, monkeypatch) -> None:
+    user = tmp_path / "user"
+    project = tmp_path / "project"
+    agent = tmp_path / "agent"
+    _write_skill(user, "shared", "user version", "user body")
+    _write_skill(project, "shared", "project version", "project body")
+    _write_skill(agent, "shared", "agent version", "agent body")
+    _write_skill(project, "project-only", "project only")
+
+    repository = SkillRepository(
+        user_skill_dir=str(user),
+        project_skill_dir=str(project),
+        agent_skill_dir=str(agent),
+    )
+    monkeypatch.setattr(
+        "agent.infrastructure.skills.repository.parse_skill_markdown",
+        lambda *args, **kwargs: pytest.fail("metadata scan must not load skill bodies"),
     )
 
-    (project_skill_dir / "fallback").mkdir(parents=True)
-    (project_skill_dir / "fallback" / "SKILL.md").write_text(
-        """
-# Fallback
-This skill has no frontmatter.
-""".lstrip(),
-        encoding="utf-8",
-    )
+    skills = repository.list_skills()
 
-    repo = SkillRepository(
-        project_root=str(project_root),
-        user_home=str(user_home),
-        project_skill_dir=str(project_skill_dir),
-        user_skill_dir=str(user_skill_dir),
-    )
-
-    skills = repo.list_skills()
-    if [skill.name for skill in skills] != ["demo", "fallback"]:
-        raise AssertionError(f"Unexpected skill names: {[skill.name for skill in skills]}")
-
-    demo = repo.get_skill("DEMO")
-    if not demo or demo.description != "project demo skill" or demo.source != "project":
-        raise AssertionError(f"Expected project override, got: {demo}")
-    if "project trigger" not in demo.triggers:
-        raise AssertionError(f"Expected project triggers, got: {demo.triggers}")
-
-    fallback = repo.get_skill("fallback")
-    if not fallback or not fallback.description:
-        raise AssertionError(f"Expected fallback description, got: {fallback}")
-    if fallback.source != "project":
-        raise AssertionError(f"Expected project source, got: {fallback.source}")
-    if fallback.warnings:
-        raise AssertionError(f"Unexpected warnings for fallback skill: {fallback.warnings}")
+    assert [(skill.name, skill.scope, skill.description) for skill in skills] == [
+        ("project-only", "project", "project only"),
+        ("shared", "agent", "agent version"),
+    ]
 
 
-def test_skill_repository_uses_rind_home_for_user_skills(tmp_path: Path, monkeypatch) -> None:
-    rind_home = tmp_path / "rind-home"
-    project_root = tmp_path / "project"
-    user_skill_dir = rind_home / "skills"
-    project_root.mkdir()
-    (user_skill_dir / "demo").mkdir(parents=True)
-    (user_skill_dir / "demo" / "SKILL.md").write_text(
-        """---
-name: demo
-description: home demo skill
-triggers: []
----
+def test_skill_repository_loads_full_body_only_on_demand(tmp_path: Path) -> None:
+    root = tmp_path / "skills"
+    skill_file = _write_skill(root, "demo", "Demo skill", "# Demo\nUse the full body.")
+    repository = SkillRepository(project_skill_dir=str(root), user_skill_dir=str(tmp_path / "user"))
 
-# Demo
-""",
-        encoding="utf-8",
-    )
-    monkeypatch.chdir(project_root)
-    monkeypatch.setenv("RIND_HOME", str(rind_home))
+    metadata = repository.get_skill("DEMO")
+    loaded = repository.load_skill("demo")
 
-    repo = SkillRepository()
-    skill = repo.get_skill("demo")
-
-    if not skill or skill.source != "user":
-        raise AssertionError(f"Expected user skill from RIND_HOME, got: {skill}")
-    if Path(skill.path) != user_skill_dir / "demo" / "SKILL.md":
-        raise AssertionError(f"Unexpected skill path: {skill.path}")
+    assert metadata is not None
+    assert metadata.scope == "project"
+    assert metadata.path == str(skill_file)
+    assert loaded is not None
+    assert loaded.body == "# Demo\nUse the full body."
 
 
-def main() -> int:
-    import tempfile
+def test_skill_repository_excludes_invalid_frontmatter_and_nested_skills(tmp_path: Path) -> None:
+    root = tmp_path / "skills"
+    _write_skill(root / "group", "nested", "must not be discovered")
+    mismatched = root / "wrong" / "SKILL.md"
+    mismatched.parent.mkdir(parents=True)
+    mismatched.write_text("---\nname: other\ndescription: Wrong\n---\n\nBody\n", encoding="utf-8")
+    missing_description = root / "missing" / "SKILL.md"
+    missing_description.parent.mkdir(parents=True)
+    missing_description.write_text("---\nname: missing\n---\n\nBody\n", encoding="utf-8")
 
-    with tempfile.TemporaryDirectory() as temp_dir:
-        test_skill_repository_scans_and_overrides(Path(temp_dir))
-    print("Skill repository tests passed.")
-    return 0
+    repository = SkillRepository(project_skill_dir=str(root), user_skill_dir=str(tmp_path / "user"))
+
+    assert repository.list_skills() == []
+    assert repository.load_skill("nested") is None
 
 
-if __name__ == "__main__":
-    raise SystemExit(main())
+def test_skill_repository_rejects_empty_body_when_loading(tmp_path: Path) -> None:
+    root = tmp_path / "skills"
+    _write_skill(root, "empty", "Empty", "")
+    repository = SkillRepository(project_skill_dir=str(root), user_skill_dir=str(tmp_path / "user"))
+
+    assert repository.get_skill("empty") is not None
+    with pytest.raises(ValueError, match="body cannot be empty"):
+        repository.load_skill("empty")
+
+
+def test_skill_repository_does_not_load_a_metadata_path_outside_its_scope(tmp_path: Path, monkeypatch) -> None:
+    root = tmp_path / "skills"
+    outside = _write_skill(tmp_path / "outside", "escaped", "Escaped")
+    repository = SkillRepository(project_skill_dir=str(root), user_skill_dir=str(tmp_path / "user"))
+    metadata = SkillMetadata(name="escaped", description="Escaped", path=str(outside), scope="project")
+    monkeypatch.setattr(repository, "get_skill", lambda _name: metadata)
+
+    with pytest.raises(ValueError, match="scope root"):
+        repository.load_skill("escaped")

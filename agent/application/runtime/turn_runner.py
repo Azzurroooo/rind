@@ -12,10 +12,11 @@ import openai
 from tenacity import RetryError
 
 from agent.application.context.compaction import CompactionService
-from agent.application.context.manager import ContextManager
+from agent.application.context.manager import ContextBuildResult, ContextManager
 from agent.application.ports.chat_client import ChatClient
 from agent.application.ports.session_store import SessionStore
 from agent.application.runtime.stream_pump import ModelStreamResult, pump_model_stream_events
+from agent.application.skill_selection import SkillTurnCoordinator
 from agent.application.tools.processor import ToolCallProcessor
 from agent.domain.cancellation import CancellationToken
 from agent.domain.errors import BoundaryError, PersistenceError, ProviderError
@@ -24,7 +25,6 @@ from agent.domain.events import (
     AssistantDeltaEvent,
     AssistantMessageCompletedEvent,
     ContextBuiltEvent,
-    SkillActivatedEvent,
     ToolRequestedEvent,
     TurnCompletedEvent,
     TurnFailedEvent,
@@ -56,6 +56,7 @@ class TurnRunner:
         tool_schemas: list[dict],
         context_manager: ContextManager,
         compaction_service: CompactionService | None = None,
+        skill_repository=None,
         debug: bool = False,
     ):
         self._chat_client = chat_client
@@ -64,6 +65,10 @@ class TurnRunner:
         self._tool_schemas = tool_schemas
         self._context_manager = context_manager
         self._compaction_service = compaction_service or CompactionService()
+        self._skill_repository = skill_repository
+        self._skill_turn_coordinator = (
+            SkillTurnCoordinator(skill_repository) if skill_repository is not None else None
+        )
         self._debug = debug
 
     def set_retry_callback(self, callback) -> None:
@@ -91,8 +96,6 @@ class TurnRunner:
         turn_started_at = time.perf_counter()
         original_hard_limit = self._snapshot_context_hard_limit()
         try:
-            emitted_skill_names: set[str] = set()
-            turn_active_skill_matches: list | None = None
             sampling_index = 0
             force_rescue_next_build = False
             context_length_recovery_count = 0
@@ -101,12 +104,8 @@ class TurnRunner:
                     yield self._cancelled_event(session, turn_id, cancellation_token)
                     return
 
-                if turn_active_skill_matches is None:
-                    turn_active_skill_matches = await self._resolve_turn_active_skills(session)
-
                 context = await self._build_context(
                     session,
-                    turn_active_skill_matches,
                     transient_system_messages=transient_system_messages,
                     allow_rescue=force_rescue_next_build,
                 )
@@ -120,31 +119,16 @@ class TurnRunner:
                     stats=dict(context_stats),
                     decisions=dict(context_decisions),
                 )
-                for item in context_decisions.get("active_skills") or []:
-                    skill_name = str(item.get("name") or "")
-                    skill_key = skill_name.lower()
-                    if not skill_key or skill_key in emitted_skill_names:
-                        continue
-                    emitted_skill_names.add(skill_key)
-                    yield SkillActivatedEvent(
-                        **event_meta(session, turn_id),
-                        skill_name=skill_name,
-                        reason=str(item.get("reason") or ""),
-                        score=int(item.get("score") or 0),
-                        source=str(item.get("source") or ""),
-                        path=str(item.get("path") or ""),
-                    )
-
                 compact_required = bool(context_decisions.get("compact_required"))
                 if context_decisions.get("auto_compact_token_limit_reached") or compact_required:
                     context = await self._run_compact(
                         session=session,
                         context_messages=context_messages,
                         context_stats=context_stats,
+                        context_decisions=context_decisions,
                         reason="auto",
                         phase="mid_turn",
                         phase_detail=self._compact_phase_detail(sampling_index, compact_required),
-                        active_skill_matches=turn_active_skill_matches,
                         transient_system_messages=transient_system_messages,
                         cancellation_token=cancellation_token,
                     )
@@ -200,10 +184,10 @@ class TurnRunner:
                                 session=session,
                                 context_messages=context_messages,
                                 context_stats=context_stats,
+                                context_decisions=context_decisions,
                                 reason="context_length_error",
                                 phase="mid_turn",
                                 phase_detail="context_length_recovery",
-                                active_skill_matches=turn_active_skill_matches,
                                 transient_system_messages=transient_system_messages,
                                 cancellation_token=cancellation_token,
                             )
@@ -221,10 +205,10 @@ class TurnRunner:
                                 session=session,
                                 context_messages=context_messages,
                                 context_stats=context_stats,
+                                context_decisions=context_decisions,
                                 reason="context_length_error",
                                 phase="mid_turn",
                                 phase_detail="context_length_recovery",
-                                active_skill_matches=turn_active_skill_matches,
                                 transient_system_messages=transient_system_messages,
                                 cancellation_token=cancellation_token,
                             )
@@ -281,7 +265,10 @@ class TurnRunner:
 
                 steering = await self._next_steering(take_steering)
                 if steering is not None:
-                    await self._persist_message(session, "user", steering)
+                    if self._skill_turn_coordinator is not None:
+                        await self._skill_turn_coordinator.persist_user_input(session, steering)
+                    else:
+                        await self._persist_message(session, "user", steering)
 
                 if not parsed_tool_calls and steering is None:
                     break
@@ -331,9 +318,10 @@ class TurnRunner:
         phase: str = "manual",
         cancellation_token: CancellationToken | None = None,
     ) -> dict:
-        context = await self._build_context(session, active_skill_matches=None)
-        stats = dict(context.stats)
-        messages = list(context.messages)
+        context = await self._build_context(session)
+        compaction_context = await self._compaction_context(session, context)
+        stats = dict(compaction_context.stats)
+        messages = list(compaction_context.messages)
         record = await self._compaction_service.compact_async(
             session=session,
             context_messages=messages,
@@ -343,7 +331,8 @@ class TurnRunner:
             context_stats=stats,
             cancellation_token=cancellation_token,
         )
-        context = await self._build_context(session, active_skill_matches=None)
+        await self._sync_skill_catalog(session)
+        context = await self._build_context(session)
         self._validate_compact_context(context)
         return record
 
@@ -353,43 +342,69 @@ class TurnRunner:
         session: SessionStore,
         context_messages: list[dict],
         context_stats: dict,
+        context_decisions: dict | None = None,
         reason: str,
         phase: str,
         phase_detail: str | None = None,
-        active_skill_matches: list | None = None,
         transient_system_messages: list[dict] | None = None,
         cancellation_token: CancellationToken | None = None,
     ):
+        current_context = ContextBuildResult(
+            messages=context_messages,
+            stats=context_stats,
+            decisions=context_decisions or {},
+        )
+        compaction_context = await self._compaction_context(
+            session,
+            current_context,
+            transient_system_messages=transient_system_messages,
+        )
         await self._compaction_service.compact_async(
             session=session,
-            context_messages=context_messages,
+            context_messages=compaction_context.messages,
             chat_client=self._chat_client,
             reason=reason,
             phase=phase,
             diagnostics=_compact_diagnostics(phase_detail),
-            context_stats=context_stats,
+            context_stats=compaction_context.stats,
             cancellation_token=cancellation_token,
         )
+        await self._sync_skill_catalog(session)
         context = await self._build_context(
             session,
-            active_skill_matches=active_skill_matches,
             transient_system_messages=transient_system_messages,
         )
         self._validate_compact_context(context)
         return context
 
+    async def _compaction_context(
+        self,
+        session: SessionStore,
+        context,
+        *,
+        transient_system_messages: list[dict] | None = None,
+    ):
+        decisions = context.decisions if isinstance(context.decisions, dict) else {}
+        if not decisions.get("skill_catalog_injected"):
+            return context
+        return await self._build_context(
+            session,
+            transient_system_messages=transient_system_messages,
+            include_skill_catalog=False,
+        )
+
     async def _build_context(
         self,
         session: SessionStore,
-        active_skill_matches: list | None,
         transient_system_messages: list[dict] | None = None,
         allow_rescue: bool = False,
+        include_skill_catalog: bool = True,
     ):
         return await self._context_manager.build_messages_async(
             session=session,
-            active_skill_matches=active_skill_matches,
             transient_system_messages=transient_system_messages,
             allow_rescue=allow_rescue,
+            include_skill_catalog=include_skill_catalog,
         )
 
     async def _persist_sampling_usage(self, session: SessionStore, usage: dict) -> None:
@@ -460,26 +475,19 @@ class TurnRunner:
         reason = cancellation_token.reason if cancellation_token and cancellation_token.reason else fallback
         return TurnCancelledEvent(**event_meta(session, turn_id), reason=reason)
 
-    async def _resolve_turn_active_skills(self, session: SessionStore) -> list:
-        user_message = await self._latest_user_content(session)
+    async def _sync_skill_catalog(self, session: SessionStore) -> None:
+        if self._skill_repository is None:
+            return
+        setter = getattr(session, "set_skill_catalog", None)
+        if not callable(setter):
+            return
         try:
-            return list(self._context_manager.select_active_skills_for_turn(user_message))
+            entries = [skill.to_catalog_entry() for skill in self._skill_repository.list_skills()]
+            await setter(entries)
+        except asyncio.CancelledError:
+            raise
         except Exception:
-            logger.debug("Best-effort skill selection failed.", exc_info=True)
-            return []
-
-    async def _latest_user_content(self, session: SessionStore) -> str:
-        try:
-            messages = await session.get_messages_slice()
-        except Exception:
-            logger.debug("Best-effort latest-user lookup failed.", exc_info=True)
-            return ""
-        for message in reversed(messages):
-            if not isinstance(message, dict) or message.get("role") != "user":
-                continue
-            content = message.get("content", "")
-            return content if isinstance(content, str) else ""
-        return ""
+            logger.debug("Best-effort Skill catalog refresh failed.", exc_info=True)
 
     async def _persist_message(self, session: SessionStore, role: str, content: str, **kwargs) -> None:
         try:

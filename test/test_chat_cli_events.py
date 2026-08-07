@@ -316,6 +316,11 @@ def test_chat_cli_seeds_input_history_from_user_messages() -> None:
             {"role": "system", "content": "sys"},
             {"role": "user", "content": "first question"},
             {"role": "assistant", "content": "answer"},
+            {
+                "role": "user",
+                "content": "<skill_content>private body</skill_content>",
+                "_rind_meta": {"kind": "skill_snapshot"},
+            },
             {"role": "user", "content": "first question"},
             {"role": "user", "content": "second question"},
         ]

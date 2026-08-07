@@ -39,6 +39,14 @@ class SessionStore(Protocol):
         """Update the model recorded for the active session."""
         ...
 
+    async def get_skill_catalog(self) -> list[dict[str, str]]:
+        """Return the persisted effective Skill metadata catalog."""
+        ...
+
+    async def set_skill_catalog(self, entries: list[dict[str, str]]) -> None:
+        """Persist the effective Skill metadata catalog without changing activity timestamps."""
+        ...
+
     async def persist_message(
         self,
         role: str,

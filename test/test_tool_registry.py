@@ -103,9 +103,10 @@ def test_builtin_catalog_preserves_default_tool_order() -> None:
         "glob",
         "grep",
         "bash",
-        "bash_output",
-        "update_plan",
-        "skill_create",
+            "bash_output",
+            "update_plan",
+            "skill",
+            "skill_create",
         "search_web",
         "fetch_web_page",
     ]

@@ -13,7 +13,6 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from agent.domain.events import (
     ContextBuiltEvent,
-    SkillActivatedEvent,
     ToolCallStartedEvent,
     ToolProgressEvent,
     ToolRequestedEvent,
@@ -114,18 +113,6 @@ def test_tool_failed_output_includes_error_detail() -> None:
     text = output.getvalue()
     if "Tool: bash failed in 50ms (ToolExecutionError): command not found" not in text:
         raise AssertionError(f"Expected failed detail line, got: {text!r}")
-
-
-def test_skill_activation_deduplicates_within_turn() -> None:
-    renderer, output = make_renderer()
-
-    event = SkillActivatedEvent(skill_name="poem-writer", reason="explicit_dollar_name")
-    renderer.handle(event)
-    renderer.handle(event)
-
-    text = output.getvalue()
-    if text.count("Skill: poem-writer") != 1:
-        raise AssertionError(f"Expected one skill line, got: {text!r}")
 
 
 def test_context_built_is_quiet_in_normal_mode() -> None:
@@ -262,7 +249,6 @@ def main() -> int:
     test_tool_requested_shows_file_path_summary()
     test_tool_lifecycle_failed_output()
     test_tool_failed_output_includes_error_detail()
-    test_skill_activation_deduplicates_within_turn()
     test_context_built_is_quiet_in_normal_mode()
     test_context_built_is_quiet_in_debug_mode()
     test_context_built_warns_on_rind_truncation()

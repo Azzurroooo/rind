@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from typing import Any, Awaitable, Callable
 
 from agent.domain.cancellation import CancellationToken
+from agent.application.skill_selection import SkillInvocationParser
 
 
 @dataclass(slots=True)
@@ -33,7 +34,6 @@ class SlashCommandResult:
 
 Handler = Callable[[SlashCommandContext, list[str]], str | SlashCommandResult | Awaitable[str | SlashCommandResult]]
 
-
 @dataclass(frozen=True, slots=True)
 class SlashCommandInfo:
     name: str
@@ -51,6 +51,7 @@ class SlashCommandRouter:
             from .features import build_command_infos
 
             command_infos = build_command_infos()
+        self._skill_invocation_parser = SkillInvocationParser()
         self._command_infos = tuple(command_infos)
         self._commands_by_name: dict[str, SlashCommandInfo] = {}
         self._validate_commands()
@@ -63,6 +64,9 @@ class SlashCommandRouter:
 
     async def execute(self, raw_input: str, context: SlashCommandContext) -> SlashCommandResult:
         try:
+            invocations = self._skill_invocation_parser.parse(raw_input or "")
+            if invocations and invocations[0].syntax == "slash":
+                return SlashCommandResult(run_turn_input=raw_input)
             name, args = self._parse(raw_input)
             info = self._commands_by_name.get(name)
             if info is None:

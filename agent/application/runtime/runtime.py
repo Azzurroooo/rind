@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import uuid
 from collections import deque
 from typing import AsyncIterator
 
 from agent.application.ports.session_store import SessionStore
+from agent.application.skill_selection import SkillTurnCoordinator
 from agent.application.runtime.turn_runner import TurnRunner
 from agent.domain.cancellation import CancellationToken
 from agent.domain.errors import PersistenceError
@@ -17,6 +19,8 @@ from agent.prompts import build_goal_prompt
 
 MAX_QUEUED_INPUTS = 4
 MAX_QUEUED_INPUT_CHARS = 8_000
+
+logger = logging.getLogger(__name__)
 
 
 class InputQueueError(ValueError):
@@ -30,7 +34,13 @@ class InputQueueError(ValueError):
 class AgentRuntime:
     """Facade exposing asynchronous entry points for session-bound turns."""
 
-    def __init__(self, turn_runner: TurnRunner, session_store: SessionStore, goal_enabled: bool = False):
+    def __init__(
+        self,
+        turn_runner: TurnRunner,
+        session_store: SessionStore,
+        goal_enabled: bool = False,
+        skill_repository=None,
+    ):
         self._turn_runner = turn_runner
         self._session_store = session_store
         self._initialized = False
@@ -41,6 +51,10 @@ class AgentRuntime:
         self._steering_queue: deque[str] = deque()
         self._follow_up_queue: deque[str] = deque()
         self._goal_enabled = bool(goal_enabled)
+        self._skill_repository = skill_repository
+        self._skill_turn_coordinator = (
+            SkillTurnCoordinator(skill_repository) if skill_repository is not None else None
+        )
 
     async def initialize(self) -> None:
         """Initialize or load the session state. Safe to call multiple times."""
@@ -58,8 +72,26 @@ class AgentRuntime:
                     f"Failed to initialize session store: {exc}",
                     code=type(exc).__name__,
                 ) from exc
+            await self._sync_skill_catalog()
             self._sync_turn_runner_model()
             self._initialized = True
+
+    async def _sync_skill_catalog(self) -> None:
+        if self._skill_repository is None:
+            return
+        setter = getattr(self._session_store, "set_skill_catalog", None)
+        if not callable(setter):
+            return
+        try:
+            entries = [skill.to_catalog_entry() for skill in self._skill_repository.list_skills()]
+        except Exception:
+            logger.warning("Skill catalog scan failed; retaining the previous catalog.", exc_info=True)
+            return
+        try:
+            await setter(entries)
+        except Exception:
+            logger.debug("Skill catalog persistence failed; retaining the previous catalog.", exc_info=True)
+            return
 
     def _sync_turn_runner_model(self) -> str:
         model = str(getattr(self._session_store, "model", None) or "").strip()
@@ -71,6 +103,11 @@ class AgentRuntime:
     def set_retry_callback(self, callback) -> None:
         """Set a callback invoked on LLM API retries: (attempt: int, exception: Exception) -> None."""
         self._turn_runner.set_retry_callback(callback)
+
+    @property
+    def skill_repository(self):
+        """Expose the resolved repository to read-only interface commands."""
+        return self._skill_repository
 
     def set_user_question_responder(self, responder) -> None:
         """Set a callback invoked when ask_user_question needs a user answer."""
@@ -213,7 +250,7 @@ class AgentRuntime:
             self.discard_pending_inputs()
             try:
                 if query:
-                    await self._persist_message("user", query)
+                    await self._persist_user_input(query)
 
                 started_event = TurnStartedEvent(
                     **event_meta(self._session_store, turn_id),
@@ -258,7 +295,7 @@ class AgentRuntime:
                     if terminal_event.type == "turn_completed" and not self._is_cancelled(cancellation_token):
                         follow_up = self._take_follow_up()
                         if follow_up is not None:
-                            await self._persist_message("user", follow_up)
+                            await self._persist_user_input(follow_up)
                             continue
                         if await self._goal_is_active():
                             continue
@@ -339,9 +376,28 @@ class AgentRuntime:
     def _is_cancelled(self, cancellation_token: CancellationToken | None) -> bool:
         return bool(cancellation_token and cancellation_token.is_cancelled)
 
-    async def _persist_message(self, role: str, content: str) -> None:
+    async def _persist_user_input(self, content: str) -> None:
+        if self._skill_turn_coordinator is not None:
+            try:
+                await self._skill_turn_coordinator.persist_user_input(self._session_store, content)
+                return
+            except asyncio.CancelledError:
+                raise
+            except ValueError:
+                raise
+            except Exception as exc:
+                raise PersistenceError(
+                    f"Failed to persist user input: {exc}",
+                    code=type(exc).__name__,
+                ) from exc
+        await self._persist_message("user", content)
+
+    async def _persist_message(self, role: str, content: str, meta: dict | None = None) -> None:
         try:
-            await self._session_store.persist_message(role, content)
+            if meta is None:
+                await self._session_store.persist_message(role, content)
+            else:
+                await self._session_store.persist_message(role, content, meta=meta)
         except asyncio.CancelledError:
             raise
         except Exception as exc:

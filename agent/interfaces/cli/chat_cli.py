@@ -188,10 +188,10 @@ class ChatCLI:
                 print("\n再见！👋")
                 break
 
-            if user_input.lower() in {"quit", "exit", "q"}:
+            if user_input.strip().lower() in {"quit", "exit", "q"}:
                 print("再见！👋")
                 break
-            if not user_input:
+            if not user_input.strip():
                 continue
             if self._is_slash_command(user_input):
                 try:
@@ -240,7 +240,7 @@ class ChatCLI:
             )
         prefill = self._pending_input_prefill
         self._pending_input_prefill = ""
-        return self._prompt_session.prompt(prompt_message(), default=prefill).strip()
+        return self._prompt_session.prompt(prompt_message(), default=prefill)
 
     async def _answer_user_question(self, event: UserQuestionRequestedEvent) -> str:
         self._flush_assistant_for_status()
@@ -281,6 +281,9 @@ class ChatCLI:
         seen = set()
         for message in messages[-40:]:
             if not isinstance(message, dict) or message.get("role") != "user":
+                continue
+            metadata = message.get("_rind_meta") or message.get("meta")
+            if isinstance(metadata, dict) and metadata.get("kind") == "skill_snapshot":
                 continue
             content = str(message.get("content") or "").strip()
             if not content or content in seen:

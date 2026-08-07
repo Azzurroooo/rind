@@ -15,7 +15,6 @@ from agent.domain.events import (
     AssistantDeltaEvent,
     ContextBuiltEvent,
     FileChangeEvent,
-    SkillActivatedEvent,
     TokenStatsUpdatedEvent,
     ToolRequestedEvent,
     ToolProgressEvent,
@@ -89,25 +88,6 @@ class TestRuntimeEvents(unittest.TestCase):
         event = TurnCompletedEvent()
         self.assertTrue(isinstance(event, RuntimeEvent))
         self.assertEqual(event.type, "turn_completed")
-
-    def test_skill_activated_event_round_trip(self):
-        event = SkillActivatedEvent(
-            ts="2026-05-19T00:00:00Z",
-            skill_name="demo",
-            reason="explicit_dollar_name",
-            score=100,
-            source="project",
-            path="/tmp/demo/SKILL.md",
-        )
-
-        event_dict = event.to_dict()
-        self.assertEqual(event_dict["type"], "skill_activated")
-        self.assertEqual(event_dict["skill_name"], "demo")
-        restored = RuntimeEvent.from_dict(event_dict)
-
-        self.assertTrue(isinstance(restored, SkillActivatedEvent))
-        self.assertEqual(restored.skill_name, "demo")
-        self.assertEqual(restored.reason, "explicit_dollar_name")
 
     def test_user_question_requested_event_round_trip(self):
         event = UserQuestionRequestedEvent(

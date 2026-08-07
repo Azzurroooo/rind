@@ -169,6 +169,43 @@ def test_turn_response_contains_session_and_turn_ids(capsys):
     assert messages[1]["result"] == {"ok": True, "session_id": "s1", "turn_id": "t1"}
 
 
+def test_turn_start_preserves_original_input_text(capsys):
+    class Runtime(_Runtime):
+        def __init__(self):
+            super().__init__()
+            self.received_query = None
+
+        async def run_turn(self, **kwargs):
+            self.received_query = kwargs["query"]
+            yield type(
+                "Event",
+                (),
+                {
+                    "to_dict": lambda _self: {
+                        "type": "turn_completed",
+                        "session_id": "s1",
+                        "turn_id": "t1",
+                    }
+                },
+            )()
+
+    runtime = Runtime()
+
+    async def run():
+        server = StdioRuntimeServer(runtime, _Session())
+        await server._run_turn(
+            {
+                "request_id": 23,
+                "method": "turn.start",
+                "params": {"input": "  preserve surrounding text  "},
+            }
+        )
+
+    asyncio.run(run())
+
+    assert runtime.received_query == "  preserve surrounding text  "
+
+
 def test_goal_continuation_allows_empty_turn_input(capsys):
     class Runtime(_Runtime):
         async def get_goal(self):

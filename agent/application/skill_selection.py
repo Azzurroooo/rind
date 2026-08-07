@@ -1,36 +1,90 @@
-"""Deterministic explicit selection of active skills for a user message."""
+"""Deterministic parsing of explicit Skill invocation syntax."""
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 import re
 
-from agent.domain.skills import Skill, SkillMatch
+from agent.domain.skills import LoadedSkill, render_skill_content
 
 
-class SkillSelector:
-    """Select skills only when the user explicitly writes $skill-name."""
+_DOLLAR_MENTION_PATTERN = re.compile(r"\$([A-Za-z0-9_-]+)")
+_SLASH_PREFIX_PATTERN = re.compile(r"^\s*/skill:([A-Za-z0-9_-]+)(?=\s|$)", re.IGNORECASE)
 
-    def __init__(self, max_active_skills: int = 2):
-        self._max_active_skills = max(0, int(max_active_skills))
 
-    def select(self, user_message: str, skills: list[Skill]) -> list[SkillMatch]:
-        if self._max_active_skills <= 0 or not user_message or not skills:
+@dataclass(frozen=True, slots=True)
+class SkillInvocation:
+    name: str
+    syntax: str
+
+
+class SkillInvocationParser:
+    """Parse only explicit /skill:name and $skill-name forms."""
+
+    def parse(self, user_message: str) -> list[SkillInvocation]:
+        if not isinstance(user_message, str) or not user_message:
             return []
 
-        requested_names = [item.lower() for item in re.findall(r"\$([a-zA-Z0-9_-]+)", user_message)]
-        skill_by_name = {skill.name.lower(): skill for skill in skills}
-        matches: list[SkillMatch] = []
+        invocations: list[SkillInvocation] = []
         seen: set[str] = set()
+        slash_match = _SLASH_PREFIX_PATTERN.match(user_message)
+        if slash_match:
+            name = slash_match.group(1)
+            key = name.lower()
+            seen.add(key)
+            invocations.append(SkillInvocation(name=name, syntax="slash"))
 
-        for name in requested_names:
-            if name in seen:
+        for match in _DOLLAR_MENTION_PATTERN.finditer(user_message):
+            name = match.group(1)
+            key = name.lower()
+            if key in seen:
                 continue
-            skill = skill_by_name.get(name)
-            if not skill:
-                continue
-            seen.add(name)
-            matches.append(SkillMatch(skill=skill, reason="explicit_dollar_name", score=100))
-            if len(matches) >= self._max_active_skills:
-                break
+            seen.add(key)
+            invocations.append(SkillInvocation(name=name, syntax="dollar"))
+        return invocations
 
-        return matches
+
+class SkillTurnCoordinator:
+    """Resolve explicit Skill mentions and persist their immutable snapshots."""
+
+    def __init__(self, repository, parser: SkillInvocationParser | None = None):
+        self._repository = repository
+        self._parser = parser or SkillInvocationParser()
+
+    async def persist_user_input(self, session, text: str) -> list[SkillInvocation]:
+        invocations = self._parser.parse(text)
+        loaded: list[tuple[SkillInvocation, LoadedSkill]] = []
+        for invocation in invocations:
+            skill = self._repository.load_skill(invocation.name)
+            if skill is None:
+                if invocation.syntax == "slash":
+                    raise ValueError(f"Unknown Skill: {invocation.name}")
+                continue
+            loaded.append((invocation, skill))
+
+        mention_meta = None
+        if loaded:
+            mention_meta = {
+                "kind": "user_prompt",
+                "skill_invocations": [
+                    {"name": skill.name, "syntax": invocation.syntax}
+                    for invocation, skill in loaded
+                ],
+            }
+        if mention_meta is None:
+            await session.persist_message("user", text)
+        else:
+            await session.persist_message("user", text, meta=mention_meta)
+        for invocation, skill in loaded:
+            await session.persist_message(
+                "user",
+                render_skill_content(skill),
+                meta={
+                    "kind": "skill_snapshot",
+                    "name": skill.name,
+                    "scope": skill.scope,
+                    "path": skill.path,
+                    "syntax": invocation.syntax,
+                },
+            )
+        return [invocation for invocation, _skill in loaded]

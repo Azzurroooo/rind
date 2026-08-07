@@ -5,7 +5,6 @@ import {
   errorLine,
   goalText,
   planUpdatedLine,
-  skillLine,
   toolProgressLine,
   toolRequestedLine,
   toolResultLine,
@@ -118,10 +117,6 @@ export function createEventController({
         if (!state.activeTurn) {
           output.redraw?.();
         }
-        return;
-      case "skill_activated":
-        output.closeAssistant?.();
-        output.log?.(skillLine(event));
         return;
       case "user_question_requested":
         await input.answerQuestion?.(event);

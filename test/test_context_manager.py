@@ -334,17 +334,15 @@ async def test_context_manager_compact_usage_does_not_act_as_anchor() -> None:
 
 @pytest.mark.asyncio
 async def test_context_manager_does_not_inject_plan_and_reports_skill_error_type() -> None:
-    class BrokenSkillRepository:
-        def list_skills(self):
+    class BrokenCatalogSession(QueryOnlySession):
+        async def get_skill_catalog(self):
             raise RuntimeError("bad skills")
 
-    session = QueryOnlySession([
+    session = BrokenCatalogSession([
         {"role": "system", "content": "sys"},
         {"role": "user", "content": "hello"},
     ])
-    manager = ContextManager(
-        skill_repository=BrokenSkillRepository(),
-    )
+    manager = ContextManager()
 
     result = await manager.build_messages_async(session=session)
 

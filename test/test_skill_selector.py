@@ -2,79 +2,74 @@ import os
 import sys
 from pathlib import Path
 
+import pytest
+
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 os.chdir(PROJECT_ROOT)
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from agent.application import SkillSelector
-from agent.domain import Skill
+from agent.application import SkillInvocationParser, SkillTurnCoordinator
+from agent.infrastructure.skills import SkillRepository
 
 
-def _skill(name: str, triggers: list[str] | None = None) -> Skill:
-    return Skill(
-        name=name,
-        description=f"{name} description",
-        body=f"{name} body",
-        path=f"/tmp/{name}/SKILL.md",
-        triggers=triggers or [],
-    )
+class RecordingSession:
+    def __init__(self):
+        self.messages = []
+
+    async def persist_message(self, role, content, **kwargs):
+        self.messages.append({"role": role, "content": content, **kwargs})
 
 
-def test_skill_selector_prefers_explicit_dollar_name() -> None:
-    selector = SkillSelector(max_active_skills=2)
-    skills = [_skill("skill-creator", ["create skill"]), _skill("reviewer", ["review code"])]
+def _repository(tmp_path: Path) -> SkillRepository:
+    root = tmp_path / "skills"
+    for name in ("alpha", "beta"):
+        skill_file = root / name / "SKILL.md"
+        skill_file.parent.mkdir(parents=True)
+        skill_file.write_text(
+            f"---\nname: {name}\ndescription: {name} description\n---\n\n{name} body\n",
+            encoding="utf-8",
+        )
+    return SkillRepository(project_skill_dir=str(root), user_skill_dir=str(tmp_path / "user"))
 
-    matches = selector.select("Please use $skill-creator to create skill docs.", skills)
 
-    if len(matches) != 1:
-        raise AssertionError(f"Expected one match, got: {matches}")
-    match = matches[0]
-    if match.skill.name != "skill-creator" or match.reason != "explicit_dollar_name" or match.score != 100:
-        raise AssertionError(f"Unexpected explicit match: {match}")
+def test_skill_invocation_parser_preserves_first_occurrence_order_and_deduplicates() -> None:
+    invocations = SkillInvocationParser().parse(" /skill:beta solve this with $alpha and $beta and $unknown")
 
-
-def test_skill_selector_uses_explicit_order_and_limit() -> None:
-    selector = SkillSelector(max_active_skills=2)
-    skills = [
-        _skill("alpha", ["shared trigger"]),
-        _skill("beta", ["shared trigger"]),
-        _skill("gamma", ["shared trigger"]),
+    assert [(item.name, item.syntax) for item in invocations] == [
+        ("beta", "slash"),
+        ("alpha", "dollar"),
+        ("unknown", "dollar"),
     ]
 
-    matches = selector.select("Use $beta then $alpha and $gamma.", skills)
 
-    if [match.skill.name for match in matches] != ["beta", "alpha"]:
-        raise AssertionError(f"Expected explicit user order up to limit, got: {matches}")
-    if [match.reason for match in matches] != ["explicit_dollar_name", "explicit_dollar_name"]:
-        raise AssertionError(f"Unexpected match reasons: {matches}")
+@pytest.mark.asyncio
+async def test_unknown_slash_skill_fails_before_the_user_message_is_persisted(tmp_path: Path) -> None:
+    session = RecordingSession()
+    coordinator = SkillTurnCoordinator(_repository(tmp_path))
 
+    with pytest.raises(ValueError, match="Unknown Skill: missing"):
+        await coordinator.persist_user_input(session, "/skill:missing do work")
 
-def test_skill_selector_ignores_plain_names_and_triggers() -> None:
-    selector = SkillSelector(max_active_skills=2)
-    skills = [_skill("alpha", ["shared trigger"]), _skill("beta", ["other trigger"])]
-
-    matches = selector.select("Use alpha and shared trigger.", skills)
-
-    if matches:
-        raise AssertionError(f"Expected no implicit matches, got: {matches}")
+    assert session.messages == []
 
 
-def test_skill_selector_can_disable_active_skills() -> None:
-    selector = SkillSelector(max_active_skills=0)
-    matches = selector.select("Use $alpha", [_skill("alpha")])
-    if matches:
-        raise AssertionError(f"Expected no matches when disabled, got: {matches}")
+@pytest.mark.asyncio
+async def test_explicit_skill_snapshots_follow_the_original_user_message(tmp_path: Path) -> None:
+    session = RecordingSession()
+    coordinator = SkillTurnCoordinator(_repository(tmp_path))
 
+    invocations = await coordinator.persist_user_input(session, "/skill:beta solve with $alpha and $unknown")
 
-def main() -> int:
-    test_skill_selector_prefers_explicit_dollar_name()
-    test_skill_selector_uses_explicit_order_and_limit()
-    test_skill_selector_ignores_plain_names_and_triggers()
-    test_skill_selector_can_disable_active_skills()
-    print("Skill selector tests passed.")
-    return 0
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())
+    assert [(item.name, item.syntax) for item in invocations] == [("beta", "slash"), ("alpha", "dollar")]
+    assert [message["content"] for message in session.messages[:1]] == ["/skill:beta solve with $alpha and $unknown"]
+    assert session.messages[0]["meta"]["skill_invocations"] == [
+        {"name": "beta", "syntax": "slash"},
+        {"name": "alpha", "syntax": "dollar"},
+    ]
+    assert [message["meta"]["kind"] for message in session.messages[1:]] == [
+        "skill_snapshot",
+        "skill_snapshot",
+    ]
+    assert "beta body" in session.messages[1]["content"]
+    assert "alpha body" in session.messages[2]["content"]

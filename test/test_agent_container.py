@@ -212,7 +212,8 @@ def test_container_resolves_team_agent_capsule_context_from_workspace(tmp_path, 
     assert container.session_store._project_id == "quant-project"
     assert container.session_store._owner_agent_id == "main-agent"
     assert container.session_store._session_type == "direct_agent_chat"
-    assert container.skill_repository._project_skill_dir == (workspace / ".aiteam" / "skills").resolve()
+    assert container.skill_repository._project_skill_dir == (tmp_path / ".rind" / "skills").resolve()
+    assert container.skill_repository._agent_skill_dir == (workspace / ".aiteam" / "skills").resolve()
     assert "main agent" in container.session_store.system_prompt.lower()
 
 

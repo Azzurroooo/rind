@@ -11,7 +11,6 @@ from rich.console import Console
 from agent.domain.events import (
     ContextBuiltEvent,
     RuntimeEvent,
-    SkillActivatedEvent,
     ToolCallStartedEvent,
     ToolProgressEvent,
     ToolRequestedEvent,
@@ -51,8 +50,6 @@ class CliStatusRenderer:
                 self._handle_turn_started(event)
             elif isinstance(event, ContextBuiltEvent):
                 self._handle_context_built(event)
-            elif isinstance(event, SkillActivatedEvent):
-                self._handle_skill_activated(event)
             elif isinstance(event, ToolRequestedEvent):
                 self._handle_tool_requested(event)
             elif isinstance(event, ToolCallStartedEvent):
@@ -92,19 +89,6 @@ class CliStatusRenderer:
         scopes = decisions.get("rind_docs_truncated_scopes")
         scope_text = ", ".join(str(scope) for scope in scopes) if isinstance(scopes, list) else "unknown"
         self._print_status(f"Warning: RIND.md truncated for context: {scope_text}", style="yellow")
-
-    def _handle_skill_activated(self, event: SkillActivatedEvent) -> None:
-        skill_name = event.skill_name or "unknown"
-        skill_key = skill_name.lower()
-        if skill_key in self._state.activated_skills:
-            return
-        self._state.activated_skills.add(skill_key)
-        if self._debug:
-            detail = f" reason={event.reason}" if event.reason else ""
-            self._print_debug(f"skill activated: {skill_name}{detail}")
-            return
-        reason = f" ({event.reason})" if event.reason else ""
-        self._print_status(f"Skill: {skill_name}{reason}")
 
     def _handle_tool_requested(self, event: ToolRequestedEvent) -> None:
         state = self._get_tool_state(event.tool_call_id, event.tool_name)

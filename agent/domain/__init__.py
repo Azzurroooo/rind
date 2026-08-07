@@ -29,13 +29,19 @@ from .events import (
     ToolProgressEvent,
     ToolResultEvent,
     FileChangeEvent,
-    SkillActivatedEvent,
     TurnStartedEvent,
     TurnCompletedEvent,
     TurnFailedEvent,
     TurnCancelledEvent,
 )
-from .skills import Skill, SkillMatch, parse_skill_markdown, render_active_skill_instructions
+from .skills import (
+    LoadedSkill,
+    SkillMetadata,
+    parse_skill_markdown,
+    parse_skill_metadata,
+    render_available_skills,
+    render_skill_content,
+)
 
 __all__ = [
     "ParsedToolCall",
@@ -60,7 +66,6 @@ __all__ = [
     "ToolProgressEvent",
     "ToolResultEvent",
     "FileChangeEvent",
-    "SkillActivatedEvent",
     "TurnStartedEvent",
     "TurnCompletedEvent",
     "TurnFailedEvent",
@@ -75,8 +80,10 @@ __all__ = [
     "ToolEventStatus",
     "CancellationToken",
     "CancellationTokenSource",
-    "Skill",
-    "SkillMatch",
+    "SkillMetadata",
+    "LoadedSkill",
     "parse_skill_markdown",
-    "render_active_skill_instructions",
+    "parse_skill_metadata",
+    "render_available_skills",
+    "render_skill_content",
 ]

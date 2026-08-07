@@ -391,10 +391,6 @@ export function toolProgressLine(event) {
   return message ? `${accent("◌")} ${bold("Tool")} ${dim("·")} ${toolLabel(name)}\n${dim(`  ↳ ${message}`)}` : "";
 }
 
-export function skillLine(event) {
-  return `${accent("•")} ${bold("Using skill")} ${dim(event.skill_name || "unknown")}`;
-}
-
 export function errorLine(error) {
   const detail = clipSingleLine(error, 120);
   return detail
@@ -566,9 +562,9 @@ function slashSkillsText(display) {
       continue;
     }
     const name = clipSingleLine(skill.name, 30);
-    const source = clipSingleLine(skill.source, 18);
+    const scope = clipSingleLine(skill.scope, 18);
     const description = clipSingleLine(skill.description, slashDescriptionWidth());
-    lines.push(`  ${dim("·")} ${bold(name)}${source ? dim(` [${source}]`) : ""}${description ? dim(` ${description}`) : ""}`);
+    lines.push(`  ${dim("·")} ${bold(name)}${scope ? dim(` [${scope}]`) : ""}${description ? dim(` ${description}`) : ""}`);
     const path = middleClip(skill.path, slashContentWidth());
     if (path) {
       lines.push(slashDetailLine(path));

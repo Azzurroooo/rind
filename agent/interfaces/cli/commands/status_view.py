@@ -65,9 +65,20 @@ async def _message_count(session) -> str:
     if not callable(get_messages):
         return "unknown"
     try:
-        return str(len(await get_messages()))
+        messages = await get_messages()
+        return str(sum(1 for message in messages if not _is_skill_snapshot(message)))
     except Exception:
         return "unknown"
+
+
+def _is_skill_snapshot(message: object) -> bool:
+    if not isinstance(message, dict):
+        return False
+    for metadata_key in ("_rind_meta", "meta"):
+        metadata = message.get(metadata_key)
+        if isinstance(metadata, dict) and metadata.get("kind") == "skill_snapshot":
+            return True
+    return False
 
 
 def _git_status_display() -> dict | None:

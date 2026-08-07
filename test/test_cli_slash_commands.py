@@ -19,6 +19,7 @@ from agent.interfaces.cli.commands import SlashCommandContext, SlashCommandInfo,
 from agent.domain.cancellation import CancellationTokenSource
 from agent.infrastructure.config import Config
 from agent.infrastructure.persistence.jsonl_session_store import JsonlSessionStore
+from agent.infrastructure.skills.repository import SkillRepository
 from agent.application.organization import Agent, AgentConfig, InMemoryOrganizationStore
 
 
@@ -410,6 +411,26 @@ async def test_status_shows_session_model_debug_and_message_count() -> None:
     assert result.display["type"] == "status"
     assert result.display["session"] == "session_1"
     assert result.display["debug"] is True
+
+
+@pytest.mark.asyncio
+async def test_status_excludes_skill_snapshot_messages_from_count() -> None:
+    class SnapshotSession(FakeSession):
+        async def get_messages_slice(self):
+            return [
+                {"role": "system", "content": "sys"},
+                {"role": "user", "content": "hello"},
+                {
+                    "role": "user",
+                    "content": "<skill_content>private body</skill_content>",
+                    "_rind_meta": {"kind": "skill_snapshot"},
+                },
+            ]
+
+    result = await SlashCommandRouter().execute("/status", _context(SnapshotSession()))
+
+    assert result.display["messages"] == "2"
+    assert "Messages: 2" in result.text
 
 
 @pytest.mark.asyncio
@@ -827,6 +848,54 @@ async def test_skill_lists_project_skill_from_cwd_not_parent_git_root(tmp_path, 
     assert "nested [project]" in result.text
     assert "Nested skill" in result.text
     assert "parent [project]" not in result.text
+
+
+@pytest.mark.asyncio
+async def test_skill_list_rescans_without_updating_session_catalog(tmp_path, monkeypatch) -> None:
+    monkeypatch.chdir(tmp_path)
+    skill_dir = tmp_path / ".rind" / "skills" / "first"
+    skill_dir.mkdir(parents=True)
+    (skill_dir / "SKILL.md").write_text(
+        "---\nname: first\ndescription: First skill\n---\n\nBody\n",
+        encoding="utf-8",
+    )
+    repository = SkillRepository(project_root=str(tmp_path), user_skill_dir=str(tmp_path / "user-skills"))
+
+    class CatalogSession(FakeSession):
+        def __init__(self):
+            self.catalog = [{"name": "first", "description": "First skill", "scope": "project"}]
+            self.set_calls = 0
+
+        async def get_skill_catalog(self):
+            return list(self.catalog)
+
+        async def set_skill_catalog(self, entries):
+            self.set_calls += 1
+            self.catalog = list(entries)
+
+    session = CatalogSession()
+    runtime = FakeRuntime()
+    runtime.skill_repository = repository
+    context = SlashCommandContext(runtime=runtime, session=session, debug=True)
+    router = SlashCommandRouter()
+
+    first = await router.execute("/skill list", context)
+    assert "first [project]" in first.text
+    assert session.set_calls == 0
+
+    new_skill_dir = tmp_path / ".rind" / "skills" / "second"
+    new_skill_dir.mkdir(parents=True)
+    (new_skill_dir / "SKILL.md").write_text(
+        "---\nname: second\ndescription: Second skill\n---\n\nBody\n",
+        encoding="utf-8",
+    )
+
+    second = await router.execute("/skill", context)
+
+    assert "first [project]" in second.text
+    assert "second [project]" in second.text
+    assert [entry["name"] for entry in session.catalog] == ["first"]
+    assert session.set_calls == 0
 
 
 @pytest.mark.asyncio

@@ -9,7 +9,6 @@ from dataclasses import dataclass
 from agent.application.context import CompactionService, ContextEstimator, ContextManager
 from agent.application.ports.session_store import SessionStore
 from agent.application.runtime import AgentRuntime, MessageStreamParser, TurnRunner
-from agent.application.skill_selection import SkillSelector
 from agent.application.tools import ToolCallProcessor, ToolExecutor, ToolResultNormalizer
 from agent.infrastructure.config import AppSettings, load_settings
 from agent.infrastructure.llm import OpenAIChatClient, OpenAIClientFactory
@@ -35,7 +34,6 @@ class AgentContainer:
     stream_parser: MessageStreamParser
     context_estimator: ContextEstimator
     skill_repository: SkillRepository
-    skill_selector: SkillSelector
     context_manager: ContextManager
     compaction_service: CompactionService
     turn_runner: TurnRunner
@@ -64,7 +62,15 @@ def build_agent_container(
     skill_project_dir: str | None = None,
 ) -> AgentContainer:
     """Build the production runtime dependency graph explicitly."""
+    skill_project_root = None
+    skill_agent_dir = None
     if workspace_root:
+        from agent.infrastructure.team import discover_agent
+
+        explicit_agent_context = discover_agent(workspace_root)
+        if explicit_agent_context is not None and explicit_agent_context.project is not None:
+            skill_project_root = str(explicit_agent_context.project.project_root)
+            skill_agent_dir = str(explicit_agent_context.capsule.manifest_path.parent / "skills")
         os.chdir(os.path.abspath(os.path.expanduser(workspace_root)))
     else:
         from agent.infrastructure.team import discover_agent
@@ -78,7 +84,9 @@ def build_agent_container(
             project_id = project_id if project_id is not None else agent_context.project_id
             owner_agent_id = owner_agent_id or agent_context.agent_id
             session_type = session_type or "direct_agent_chat"
-            skill_project_dir = skill_project_dir or str(agent_context.capsule.manifest_path.parent / "skills")
+            if agent_context.project is not None:
+                skill_project_root = str(agent_context.project.project_root)
+                skill_agent_dir = str(agent_context.capsule.manifest_path.parent / "skills")
     settings = settings or load_settings()
     provider_client_factory = provider_client_factory or OpenAIClientFactory(settings)
     model = settings.model
@@ -96,10 +104,16 @@ def build_agent_container(
         parent_session_id=parent_session_id,
         created_by=created_by,
     )
+    skill_repository = SkillRepository(
+        project_root=skill_project_root,
+        project_skill_dir=skill_project_dir,
+        agent_skill_dir=skill_agent_dir,
+    )
     catalog = build_builtin_tool_specs(
         enable_goal=enable_goal,
         enable_user_question=enable_user_question,
         set_goal_status=session_store.set_goal_status if enable_goal else None,
+        skill_repository=skill_repository,
     )
     if enabled_tools is None:
         tool_specs = catalog
@@ -124,14 +138,7 @@ def build_agent_container(
     )
     stream_parser = MessageStreamParser()
     context_estimator = ContextEstimator()
-    skill_repository = SkillRepository(project_skill_dir=skill_project_dir)
-    skill_selector = SkillSelector(max_active_skills=2)
-    context_manager = ContextManager(
-        estimator=context_estimator,
-        skill_repository=skill_repository,
-        skill_selector=skill_selector,
-        rind_doc_provider=build_rind_doc_context,
-    )
+    context_manager = ContextManager(estimator=context_estimator, rind_doc_provider=build_rind_doc_context)
     compaction_service = CompactionService(
         plan_snapshot_provider=build_plan_snapshot,
     )
@@ -142,12 +149,14 @@ def build_agent_container(
         tool_schemas=tool_registry.schemas,
         context_manager=context_manager,
         compaction_service=compaction_service,
+        skill_repository=skill_repository,
         debug=debug,
     )
     runtime = AgentRuntime(
         turn_runner=turn_runner,
         session_store=session_store,
         goal_enabled=enable_goal,
+        skill_repository=skill_repository,
     )
     return AgentContainer(
         settings=settings,
@@ -161,7 +170,6 @@ def build_agent_container(
         stream_parser=stream_parser,
         context_estimator=context_estimator,
         skill_repository=skill_repository,
-        skill_selector=skill_selector,
         context_manager=context_manager,
         compaction_service=compaction_service,
         turn_runner=turn_runner,

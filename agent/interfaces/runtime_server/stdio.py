@@ -204,9 +204,12 @@ class StdioRuntimeServer:
 
     async def _run_turn(self, request: dict[str, Any]) -> None:
         params = request.get("params") if isinstance(request.get("params"), dict) else {}
-        query = str(params.get("input") or params.get("query") or "").strip()
+        raw_query = params.get("input")
+        if raw_query is None:
+            raw_query = params.get("query")
+        query = str(raw_query or "")
         goal_continuation = params.get("goal_continuation") is True
-        if not query and not goal_continuation:
+        if not query.strip() and not goal_continuation:
             await self._respond_error(request, "turn.start requires input.", "InvalidRequest")
             return
         if goal_continuation:

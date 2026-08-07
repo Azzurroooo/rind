@@ -1,130 +1,189 @@
-"""Skill authoring tools."""
+"""Skill loading and authoring tools."""
 
 from __future__ import annotations
 
 from pathlib import Path
-import re
 
-from agent.domain import tool_error, tool_ok
-from agent.infrastructure.paths import resolve_rind_home, resolve_project_root
+from agent.domain import render_skill_content, tool_error, tool_ok
+from agent.domain.skills import SKILL_NAME_PATTERN
+from agent.infrastructure.skills import SkillRepository
 from agent.infrastructure.tools.spec import ToolSpec
 
-_SKILL_NAME_PATTERN = re.compile(r"^[a-zA-Z0-9_-]+$")
+
+def skill(name: str, _repository: SkillRepository | None = None) -> str:
+    """Load one effective Skill by name."""
+    normalized_name = _normalize_name(name)
+    if not normalized_name:
+        return tool_error("skill", "Invalid Skill name.", "InvalidSkillName", meta={"name": name})
+    repository = _repository if _repository is not None else SkillRepository()
+    try:
+        loaded = repository.load_skill(normalized_name)
+    except Exception as exc:
+        return tool_error("skill", f"Failed to load Skill: {exc}", type(exc).__name__)
+    if loaded is None:
+        return tool_error("skill", f"Skill not found: {normalized_name}", "SkillNotFound", meta={"name": normalized_name})
+    return tool_ok(
+        "skill",
+        {
+            "name": loaded.name,
+            "scope": loaded.scope,
+            "path": loaded.path,
+            "base_directory": str(Path(loaded.path).parent),
+            "content": render_skill_content(loaded),
+        },
+    )
 
 
 def skill_create(
     name: str,
     description: str,
     body: str,
-    triggers: list[str] | None = None,
     scope: str = "project",
     overwrite: bool = False,
+    _repository: SkillRepository | None = None,
 ) -> str:
-    """Create a well-formed Rind SKILL.md in the project or user skill directory."""
-    try:
-        normalized_name = name.strip() if isinstance(name, str) else ""
-        if not normalized_name or normalized_name in {".", ".."} or not _SKILL_NAME_PATTERN.fullmatch(normalized_name):
-            return tool_error(
-                "skill_create",
-                "Invalid skill name. Use only letters, numbers, underscores, and hyphens.",
-                "InvalidSkillName",
-                meta={"name": name},
-            )
-
-        normalized_scope = scope.strip().lower() if isinstance(scope, str) else ""
-        if normalized_scope not in {"project", "user"}:
-            return tool_error(
-                "skill_create",
-                "Invalid scope. Expected 'project' or 'user'.",
-                "InvalidScope",
-                meta={"scope": scope},
-            )
-
-        normalized_description = description.strip() if isinstance(description, str) else ""
-        if not normalized_description:
-            return tool_error("skill_create", "description cannot be empty.", "ValidationError")
-        if "\n" in normalized_description or "\r" in normalized_description:
-            return tool_error("skill_create", "description must be a single line.", "ValidationError")
-
-        normalized_body = body.strip() if isinstance(body, str) else ""
-        if not normalized_body:
-            return tool_error("skill_create", "body cannot be empty.", "ValidationError")
-
-        normalized_triggers = _normalize_triggers(triggers)
-        root = (
-            resolve_project_root() / ".rind" / "skills"
-            if normalized_scope == "project"
-            else resolve_rind_home() / "skills"
-        )
-        skill_dir = (root / normalized_name).resolve()
-        skill_file = skill_dir / "SKILL.md"
-
-        if skill_file.exists() and not overwrite:
-            return tool_error(
-                "skill_create",
-                f"Skill already exists: {skill_file}",
-                "SkillAlreadyExists",
-                meta={"path": str(skill_file), "scope": normalized_scope},
-            )
-
-        skill_dir.mkdir(parents=True, exist_ok=True)
-        content = _render_skill_markdown(
-            name=normalized_name,
-            description=normalized_description,
-            body=normalized_body,
-            triggers=normalized_triggers,
-        )
-        skill_file.write_text(content, encoding="utf-8")
-
-        return tool_ok(
+    """Create a standard Rind SKILL.md in one explicit scope."""
+    normalized_name = _normalize_name(name)
+    if not normalized_name:
+        return tool_error(
             "skill_create",
-            {
-                "path": str(skill_file),
-                "scope": normalized_scope,
-                "name": normalized_name,
-                "overwritten": bool(overwrite),
-                "triggers": normalized_triggers,
-            },
+            "Invalid Skill name. Use only letters, numbers, underscores, and hyphens.",
+            "InvalidSkillName",
+            meta={"name": name},
+        )
+    normalized_scope = str(scope or "").strip().lower()
+    if normalized_scope not in {"project", "user", "agent"}:
+        return tool_error(
+            "skill_create",
+            "Invalid scope. Expected 'project', 'user', or 'agent'.",
+            "InvalidScope",
+            meta={"scope": scope},
+        )
+    normalized_description = str(description or "").strip()
+    if not normalized_description:
+        return tool_error("skill_create", "description cannot be empty.", "ValidationError")
+    if "\n" in normalized_description or "\r" in normalized_description:
+        return tool_error("skill_create", "description must be a single line.", "ValidationError")
+    normalized_body = str(body or "").strip()
+    if not normalized_body:
+        return tool_error("skill_create", "body cannot be empty.", "ValidationError")
+
+    repository = _repository if _repository is not None else SkillRepository()
+    try:
+        root = repository.skill_root(normalized_scope)
+    except ValueError as exc:
+        return tool_error("skill_create", str(exc), "InvalidScope", meta={"scope": normalized_scope})
+    except Exception as exc:
+        return tool_error("skill_create", f"Failed to resolve Skill scope: {exc}", type(exc).__name__)
+
+    root = root.resolve()
+    skill_dir = root / normalized_name
+    if skill_dir.is_symlink():
+        return tool_error("skill_create", f"Skill path is a symbolic link: {skill_dir}", "InvalidSkillPath")
+    skill_dir = skill_dir.resolve()
+    try:
+        skill_dir.relative_to(root)
+    except ValueError:
+        return tool_error("skill_create", "Skill path escapes its scope root.", "InvalidSkillPath")
+    skill_file = skill_dir / "SKILL.md"
+    if skill_file.is_symlink():
+        return tool_error("skill_create", f"SKILL.md is a symbolic link: {skill_file}", "InvalidSkillPath")
+    if skill_file.exists() and not overwrite:
+        return tool_error(
+            "skill_create",
+            f"Skill already exists: {skill_file}",
+            "SkillAlreadyExists",
+            meta={"path": str(skill_file), "scope": normalized_scope},
+        )
+    try:
+        skill_dir.mkdir(parents=True, exist_ok=True)
+        skill_file.write_text(
+            _render_skill_markdown(normalized_name, normalized_description, normalized_body),
+            encoding="utf-8",
         )
     except Exception as exc:
-        return tool_error("skill_create", f"Failed to create skill: {exc}", type(exc).__name__)
+        return tool_error("skill_create", f"Failed to create Skill: {exc}", type(exc).__name__)
+    return tool_ok(
+        "skill_create",
+        {
+            "path": str(skill_file),
+            "scope": normalized_scope,
+            "name": normalized_name,
+            "overwritten": bool(overwrite),
+        },
+    )
 
 
-def _normalize_triggers(triggers: list[str] | None) -> list[str]:
-    if triggers is None:
-        return []
-    if not isinstance(triggers, list):
-        raise ValueError("triggers must be a list of strings.")
+def build_skill_tool_specs(repository: SkillRepository | None = None) -> tuple[ToolSpec, ...]:
+    if repository is None:
+        return TOOL_SPECS
+    return _build_skill_tool_specs(repository)
 
-    normalized: list[str] = []
-    seen: set[str] = set()
-    for item in triggers:
-        value = str(item).strip()
-        if not value:
-            continue
-        if "\n" in value or "\r" in value:
-            raise ValueError("trigger entries must be single-line strings.")
-        key = value.lower()
-        if key in seen:
-            continue
-        seen.add(key)
-        normalized.append(value)
+
+def _build_skill_tool_specs(repository: SkillRepository | None) -> tuple[ToolSpec, ...]:
+    def load_skill(name: str) -> str:
+        return skill(name, _repository=repository)
+
+    def create_skill(
+        name: str,
+        description: str,
+        body: str,
+        scope: str = "project",
+        overwrite: bool = False,
+    ) -> str:
+        return skill_create(
+            name=name,
+            description=description,
+            body=body,
+            scope=scope,
+            overwrite=overwrite,
+            _repository=repository,
+        )
+
+    return (
+        ToolSpec(
+            name="skill",
+            handler=load_skill,
+            description="Load a specialized Skill from the available Skill catalog when its workflow matches the current task.",
+            param_descriptions={"name": "Skill 名称，必须匹配当前可用 Skill 清单中的名称。"},
+        ),
+        ToolSpec(
+            name="skill_create",
+            handler=create_skill,
+            description="创建格式正确的 Rind Skill。Skill 正文只会在显式加载时进入上下文。",
+            param_descriptions={
+                "name": "Skill 名称。只能包含字母、数字、下划线和连字符。",
+                "description": "Skill 的单行摘要，用于 session Skill catalog。",
+                "body": "SKILL.md 正文指令内容。",
+                "scope": {
+                    "description": "写入范围。agent 仅在当前 Agent workspace 中可用。默认 project。",
+                    "enum": ["project", "user", "agent"],
+                },
+                "overwrite": "是否覆盖已存在的 SKILL.md。默认 False。",
+            },
+        ),
+    )
+
+
+def _normalize_name(value: str) -> str:
+    normalized = str(value or "").strip()
+    if not normalized or normalized in {".", ".."} or not SKILL_NAME_PATTERN.fullmatch(normalized):
+        return ""
     return normalized
 
 
-def _render_skill_markdown(name: str, description: str, body: str, triggers: list[str]) -> str:
-    lines = [
-        "---",
-        f"name: {_quote_yaml_string(name)}",
-        f"description: {_quote_yaml_string(description)}",
-    ]
-    if triggers:
-        lines.append("triggers:")
-        lines.extend(f"  - {_quote_yaml_string(trigger)}" for trigger in triggers)
-    else:
-        lines.append("triggers: []")
-    lines.extend(["---", "", body.rstrip(), ""])
-    return "\n".join(lines)
+def _render_skill_markdown(name: str, description: str, body: str) -> str:
+    return "\n".join(
+        [
+            "---",
+            f"name: {_quote_yaml_string(name)}",
+            f"description: {_quote_yaml_string(description)}",
+            "---",
+            "",
+            body.rstrip(),
+            "",
+        ]
+    )
 
 
 def _quote_yaml_string(value: str) -> str:
@@ -132,18 +191,4 @@ def _quote_yaml_string(value: str) -> str:
     return f'"{escaped}"'
 
 
-TOOL_SPECS = (
-    ToolSpec(
-        name="skill_create",
-        handler=skill_create,
-        description="创建格式正确的 Rind Skill。自动写入当前目录 .rind/skills/<name>/SKILL.md 或用户级 RIND_HOME/skills/<name>/SKILL.md，并生成稳定的 frontmatter。",
-        param_descriptions={
-            "name": "Skill 名称。只能包含字母、数字、下划线和连字符。",
-            "description": "Skill 的简短说明，写入 frontmatter，用于上下文中的 skill index。",
-            "body": "SKILL.md 正文指令内容。",
-            "triggers": "可选触发短语列表。为空时写入 triggers: []。",
-            "scope": {"description": "写入范围：project 写到当前项目，user 写到用户目录。默认 project。", "enum": ["project", "user"]},
-            "overwrite": "是否覆盖已存在的 SKILL.md。默认 False。",
-        },
-    ),
-)
+TOOL_SPECS = _build_skill_tool_specs(None)

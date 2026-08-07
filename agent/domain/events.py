@@ -202,17 +202,6 @@ class TokenStatsUpdatedEvent(RuntimeEvent):
 
 
 @dataclass(slots=True)
-class SkillActivatedEvent(RuntimeEvent):
-    """Fired when a skill is selected and injected into the model context."""
-    type: Literal["skill_activated"] = "skill_activated"
-    skill_name: str = ""
-    reason: str = ""
-    score: int = 0
-    source: str = ""
-    path: str = ""
-
-
-@dataclass(slots=True)
 class TurnCompletedEvent(RuntimeEvent):
     """Fired when an entire turn (including all tool executions and LLM generation) completes successfully."""
     type: Literal["turn_completed"] = "turn_completed"

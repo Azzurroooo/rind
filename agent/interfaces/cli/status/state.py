@@ -25,4 +25,3 @@ class TurnDisplayState:
 
     turn_id: str = ""
     tools: dict[str, ToolDisplayState] = field(default_factory=dict)
-    activated_skills: set[str] = field(default_factory=set)

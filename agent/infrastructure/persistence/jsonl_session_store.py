@@ -22,6 +22,7 @@ from agent.infrastructure.persistence.session_meta import (
     default_auto_compact_window,
     new_session_meta,
     normalize_auto_compact_window,
+    normalize_skill_catalog,
     sync_session_counts,
 )
 from agent.infrastructure.paths import (
@@ -249,7 +250,7 @@ class JsonlSessionStore(SessionStore):
         normalized_window = normalize_auto_compact_window(original_window)
         self._session_meta["auto_compact_window"] = normalized_window
         self._message_count = (
-            len(self._msg_repo.load_messages()) if self._msg_repo else int(meta.get("message_count") or 0)
+            self._count_persisted_messages_sync() if self._msg_repo else int(meta.get("message_count") or 0)
         )
         self._tool_call_count = (
             len(self._tool_repo.load_tool_calls()) if self._tool_repo else int(meta.get("tool_call_count") or 0)
@@ -272,6 +273,18 @@ class JsonlSessionStore(SessionStore):
             if isinstance(content, str) and content:
                 return content[:200]
         return ""
+
+    def _count_persisted_messages_sync(self) -> int:
+        messages = self._msg_repo.load_messages() if self._msg_repo else []
+        return sum(
+            1
+            for message in messages
+            if isinstance(message, dict)
+            and not (
+                isinstance(message.get("meta"), dict)
+                and message["meta"].get("kind") in {"skill_snapshot", "skill_catalog"}
+            )
+        )
 
     def _validate_existing_session_sync(self, session_id: str) -> str:
         clean = validate_session_id(session_id)
@@ -505,6 +518,10 @@ class JsonlSessionStore(SessionStore):
             message.get("role") == "user" and str(message.get("content") or "").strip()
             for message in messages
             if isinstance(message, dict)
+            and not (
+                isinstance(message.get("meta"), dict)
+                and message["meta"].get("kind") in {"skill_snapshot", "skill_catalog"}
+            )
         ):
             return
         base = self._session_paths.get("base")
@@ -551,6 +568,28 @@ class JsonlSessionStore(SessionStore):
 
             await asyncio.to_thread(_persist)
 
+    async def get_skill_catalog(self) -> list[dict[str, str]]:
+        async with self._write_lock:
+            return await asyncio.to_thread(
+                lambda: normalize_skill_catalog(
+                    self._session_meta.get("skill_catalog") if isinstance(self._session_meta, dict) else []
+                )
+            )
+
+    async def set_skill_catalog(self, entries: list[dict[str, str]]) -> None:
+        normalized = normalize_skill_catalog(entries)
+        async with self._write_lock:
+            def _persist():
+                if not self._session_meta or not self._session_paths:
+                    return
+                current = normalize_skill_catalog(self._session_meta.get("skill_catalog"))
+                if "skill_catalog" in self._session_meta and current == normalized:
+                    return
+                self._session_meta["skill_catalog"] = normalized
+                self._persist_meta_sync(self._session_meta.get("updated_at"))
+
+            await asyncio.to_thread(_persist)
+
     async def persist_message(
         self,
         role: str,
@@ -565,10 +604,20 @@ class JsonlSessionStore(SessionStore):
                     return
                 self._msg_repo.persist_message(self.now_iso(), role, content, tool_call_id, tool_name, meta)
                 self._invalidate_projection_cache()
-                self._message_count += 1
+                is_context_record = isinstance(meta, dict) and meta.get("kind") in {
+                    "skill_snapshot",
+                    "skill_catalog",
+                }
+                if not is_context_record:
+                    self._message_count += 1
                 if role == "assistant" and content:
                     self._last_preview = content[:200]
-                if role == "user" and self._session_meta and self._session_meta.get("title") in {None, "", "Untitled"}:
+                if (
+                    role == "user"
+                    and not is_context_record
+                    and self._session_meta
+                    and self._session_meta.get("title") in {None, "", "Untitled"}
+                ):
                     self._session_meta["title"] = (content or "")[:40]
                 if self._session_meta:
                     self._session_meta["message_count"] = self._message_count

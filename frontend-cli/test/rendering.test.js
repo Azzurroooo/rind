@@ -28,7 +28,6 @@ import {
   questionText,
   choiceMenuText,
   queuedInputText,
-  skillLine,
   slashDisplayText,
   slashMenuText,
   slashResultText,
@@ -501,7 +500,7 @@ test("slashDisplayText renders sessions, skills, and config payloads", () => {
       type: "skills",
       skills: [{
         name: "demo",
-        source: "project",
+        scope: "project",
         description: "Demo skill",
         path: "E:\\project\\.rind\\skills\\demo\\SKILL.md",
       }],
@@ -533,7 +532,7 @@ test("slashDisplayText clips long slash command fields", () => {
     type: "skills",
     skills: [{
       name: "debugging",
-      source: "project",
+      scope: "project",
       description: "x".repeat(140),
       path: `E:\\${"deep\\".repeat(20)}SKILL.md`,
     }],
@@ -925,7 +924,7 @@ test("turnCompletedLine renders duration and tool summary", () => {
   assert.equal(turnCompletedLine({ duration_ms: 0 }), "─ Worked for 0ms");
 });
 
-test("status helpers render question, skill, and errors", () => {
+test("status helpers render question and errors", () => {
   assert.equal(
     questionText({ question: "Pick one", options: ["A", "B"], recommended: "A" }),
     ["• Choice required", "", "  Pick one"].join("\n"),
@@ -935,7 +934,6 @@ test("status helpers render question, skill, and errors", () => {
     ["• Choice required", "", "  Explain"].join("\n"),
   );
   assert.match(questionText({ question: "q".repeat(120) }), /\n  q{73}\.\.\.$/);
-  assert.equal(skillLine({ skill_name: "debugging" }), "• Using skill debugging");
   assert.equal(errorLine("failed"), "⊘ Turn failed\n  ↳ failed");
   assert.equal(errorLine(""), "⊘ Turn failed");
 });

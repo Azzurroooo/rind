@@ -45,6 +45,9 @@ def resume_visible_messages(messages: list[dict]) -> list[dict[str, str]]:
             continue
         role = str(message.get("role") or "")
         content = str(message.get("content") or "")
+        metadata = message.get("_rind_meta")
+        if isinstance(metadata, dict) and metadata.get("kind") == "skill_snapshot":
+            continue
         if role not in RESUME_VISIBLE_ROLES or not content.strip():
             continue
         visible.append({"role": role, "content": content})

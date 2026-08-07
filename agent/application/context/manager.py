@@ -6,7 +6,7 @@ import asyncio
 import logging
 from dataclasses import dataclass, field
 
-from agent.domain.skills import render_active_skill_instructions
+from agent.domain.skills import render_available_skills
 from agent.domain.errors import PersistenceError
 
 from .estimator import ContextEstimator
@@ -31,25 +31,21 @@ class ContextManager:
         self,
         estimator: ContextEstimator | None = None,
         hot_message_limit: int = 6,
-        skill_repository=None,
-        skill_selector=None,
-        active_skill_char_limit: int = 12000,
+        skill_catalog_char_limit: int = 8000,
         rind_doc_provider=None,
     ):
         self._estimator = estimator or ContextEstimator()
         self._hot_message_limit = max(1, int(hot_message_limit))
-        self._skill_repository = skill_repository
-        self._skill_selector = skill_selector
-        self._active_skill_char_limit = max(0, int(active_skill_char_limit))
+        self._skill_catalog_char_limit = max(0, int(skill_catalog_char_limit))
         self._rind_doc_provider = rind_doc_provider
 
     async def build_messages_async(
         self,
         session,
         pending_messages: list[dict] | None = None,
-        active_skill_matches: list | None = None,
         transient_system_messages: list[dict] | None = None,
         allow_rescue: bool = False,
+        include_skill_catalog: bool = True,
     ) -> ContextBuildResult:
         try:
             persisted_messages = [dict(message) for message in await session.get_messages_slice()]
@@ -64,7 +60,14 @@ class ContextManager:
         budget = self._estimator.budget
         full_messages = persisted_messages + pending
         rind_messages, rind_stats, rind_decisions = self._build_rind_doc_messages()
-        skill_messages, skill_stats, skill_decisions = self._build_skill_messages(active_skill_matches)
+        if include_skill_catalog:
+            skill_messages, skill_stats, skill_decisions = await self._build_skill_catalog_messages(session)
+        else:
+            skill_messages, skill_stats, skill_decisions = [], {"skill_count": 0, "skill_index_chars": 0}, {
+                "skills_available": False,
+                "skill_catalog_injected": False,
+                "skill_error_type": None,
+            }
         extra_system_messages = (
             rind_messages
             + self._valid_system_messages(transient_system_messages)
@@ -76,7 +79,13 @@ class ContextManager:
         messages = list(full_messages)
         hot_message_count = min(
             self._hot_message_limit,
-            len([message for message in full_messages if self._is_conversation_message(message)]),
+            len(
+                [
+                    message
+                    for message in full_messages
+                    if self._is_conversation_message(message) and not self._is_skill_snapshot(message)
+                ]
+            ),
         )
 
         final_messages = [self._strip_internal_fields(message) for message in messages]
@@ -293,16 +302,6 @@ class ContextManager:
     def _strip_internal_fields(self, message: dict) -> dict:
         return {key: value for key, value in dict(message).items() if not key.startswith("_")}
 
-    def select_active_skills_for_turn(self, user_message: str) -> list:
-        if not self._skill_repository or not self._skill_selector:
-            return []
-        try:
-            skills = list(self._skill_repository.list_skills())
-            return list(self._skill_selector.select(user_message, skills))
-        except Exception:
-            logger.debug("Best-effort skill selection failed.", exc_info=True)
-            return []
-
     def _build_rind_doc_messages(self) -> tuple[list[dict], dict, dict]:
         stats = {
             "rind_docs_user_exists": False,
@@ -332,67 +331,51 @@ class ContextManager:
         decisions.update(provider_decisions if isinstance(provider_decisions, dict) else {})
         return self._valid_system_messages(messages), stats, decisions
 
-    def _build_skill_messages(self, active_skill_matches: list | None = None) -> tuple[list[dict], dict, dict]:
+    async def _build_skill_catalog_messages(self, session) -> tuple[list[dict], dict, dict]:
         stats = {
             "skill_count": 0,
-            "active_skill_count": 0,
             "skill_index_chars": 0,
-            "active_skill_chars": 0,
         }
         decisions = {
             "skills_available": False,
-            "active_skills": [],
-            "skill_injection_applied": False,
+            "skill_catalog_injected": False,
             "skill_error_type": None,
         }
-        if not self._skill_repository:
+        getter = getattr(session, "get_skill_catalog", None)
+        if not callable(getter):
             return [], stats, decisions
 
         try:
-            skills = list(self._skill_repository.list_skills())
+            entries = list(await getter())
         except Exception as exc:
             decisions["skill_error_type"] = type(exc).__name__
             return [], stats, decisions
-        if not skills:
+        if not entries:
             return [], stats, decisions
 
-        active_matches = list(active_skill_matches or [])
-        messages: list[dict] = []
-
-        active_content = ""
-        if active_matches:
-            active_content = render_active_skill_instructions(active_matches, self._active_skill_char_limit)
-            if active_content:
-                messages.append(
-                    {
-                        "role": "system",
-                        "content": active_content,
-                        "_context_kind": "skill_instruction",
-                    }
-                )
+        content = render_available_skills(entries, self._skill_catalog_char_limit)
+        messages = (
+            [
+                {
+                    "role": "system",
+                    "content": content,
+                    "_context_kind": "skill_catalog",
+                }
+            ]
+            if content
+            else []
+        )
 
         stats.update(
             {
-                "skill_count": len(skills),
-                "active_skill_count": len(active_matches),
-                "skill_index_chars": 0,
-                "active_skill_chars": len(active_content),
+                "skill_count": len(entries),
+                "skill_index_chars": len(content),
             }
         )
         decisions.update(
             {
                 "skills_available": True,
-                "active_skills": [
-                    {
-                        "name": match.skill.name,
-                        "reason": match.reason,
-                        "score": match.score,
-                        "source": match.skill.source,
-                        "path": match.skill.path,
-                    }
-                    for match in active_matches
-                ],
-                "skill_injection_applied": bool(messages),
+                "skill_catalog_injected": bool(messages),
             }
         )
         return messages, stats, decisions
@@ -455,6 +438,10 @@ class ContextManager:
             return False
         content = message.get("content", "")
         return isinstance(content, str) and bool(content.strip())
+
+    def _is_skill_snapshot(self, message: dict) -> bool:
+        metadata = message.get("_rind_meta") or message.get("meta")
+        return isinstance(metadata, dict) and metadata.get("kind") == "skill_snapshot"
 
 
 def _session_model(session) -> str | None:

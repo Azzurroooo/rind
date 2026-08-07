@@ -51,7 +51,11 @@ def project_messages(
                 built_messages.append({"role": "assistant", "content": message.get("content")})
             continue
         if role in {"system", "user", "assistant"}:
-            built_messages.append({"role": role, "content": message.get("content", "")})
+            projected = {"role": role, "content": message.get("content", "")}
+            metadata = message.get("meta")
+            if isinstance(metadata, dict) and metadata.get("kind") == "skill_snapshot":
+                projected["_rind_meta"] = {"kind": "skill_snapshot"}
+            built_messages.append(projected)
 
     if not built_messages:
         return [{"role": "system", "content": system_prompt}]
