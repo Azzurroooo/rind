@@ -188,6 +188,7 @@ def test_container_does_not_resolve_team_agent_outside_an_agent_directory(tmp_pa
 
 
 def test_container_resolves_team_agent_capsule_context_from_workspace(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("RIND_HOME", str(tmp_path / "rind_home"))
     initialize_team_project(tmp_path, project_id="quant-project")
     workspace = tmp_path / "agents" / "main-agent"
     monkeypatch.chdir(workspace)
@@ -215,6 +216,10 @@ def test_container_resolves_team_agent_capsule_context_from_workspace(tmp_path, 
     assert container.skill_repository._project_skill_dir == (tmp_path / ".rind" / "skills").resolve()
     assert container.skill_repository._agent_skill_dir == (workspace / ".aiteam" / "skills").resolve()
     assert "main agent" in container.session_store.system_prompt.lower()
+    assert container.runtime.team_context.project_id == "quant-project"
+    assert container.runtime.team_context.current_agent_id == "main-agent"
+    assert container.runtime.team_store.root == (tmp_path / "rind_home" / "teams" / "quant-project").resolve()
+    assert not container.runtime.team_store.root.exists()
 
 
 def test_container_rejects_invalid_team_agent_capsule(tmp_path, monkeypatch) -> None:

@@ -40,6 +40,8 @@ class AgentRuntime:
         session_store: SessionStore,
         goal_enabled: bool = False,
         skill_repository=None,
+        team_context=None,
+        team_store=None,
     ):
         self._turn_runner = turn_runner
         self._session_store = session_store
@@ -52,6 +54,8 @@ class AgentRuntime:
         self._follow_up_queue: deque[str] = deque()
         self._goal_enabled = bool(goal_enabled)
         self._skill_repository = skill_repository
+        self.team_context = team_context
+        self.team_store = team_store
         self._skill_turn_coordinator = (
             SkillTurnCoordinator(skill_repository) if skill_repository is not None else None
         )

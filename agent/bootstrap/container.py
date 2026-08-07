@@ -64,11 +64,13 @@ def build_agent_container(
     """Build the production runtime dependency graph explicitly."""
     skill_project_root = None
     skill_agent_dir = None
+    resolved_team_agent = None
     if workspace_root:
         from agent.infrastructure.team import discover_agent
 
         explicit_agent_context = discover_agent(workspace_root)
         if explicit_agent_context is not None and explicit_agent_context.project is not None:
+            resolved_team_agent = explicit_agent_context
             skill_project_root = str(explicit_agent_context.project.project_root)
             skill_agent_dir = str(explicit_agent_context.capsule.manifest_path.parent / "skills")
         os.chdir(os.path.abspath(os.path.expanduser(workspace_root)))
@@ -77,6 +79,8 @@ def build_agent_container(
 
         agent_context = discover_agent()
         if agent_context is not None:
+            if agent_context.project is not None:
+                resolved_team_agent = agent_context
             agent_prompt = agent_context.capsule.system_prompt.strip()
             if system_prompt is None and agent_prompt:
                 system_prompt = f"{SYSTEM_PROMPT}\n\n{agent_prompt}"
@@ -109,6 +113,31 @@ def build_agent_container(
         project_skill_dir=skill_project_dir,
         agent_skill_dir=skill_agent_dir,
     )
+    team_context = None
+    team_store = None
+    if resolved_team_agent is not None:
+        from agent.application.organization import TeamMember, TeamRuntimeContext
+        from agent.infrastructure.persistence.json_team_state_store import JsonTeamStateStore
+
+        project = resolved_team_agent.project
+        members = tuple(
+            TeamMember(
+                agent_id=agent_id,
+                display_name=(
+                    resolved_team_agent.capsule.name
+                    if agent_id == resolved_team_agent.agent_id
+                    else agent_id
+                ),
+                workspace_root=str(workspace),
+            )
+            for agent_id, workspace in sorted(project.agents.items())
+        )
+        team_context = TeamRuntimeContext(
+            project_id=project.project_id,
+            current_agent_id=resolved_team_agent.agent_id,
+            members=members,
+        )
+        team_store = JsonTeamStateStore(project)
     catalog = build_builtin_tool_specs(
         enable_goal=enable_goal,
         enable_user_question=enable_user_question,
@@ -157,6 +186,8 @@ def build_agent_container(
         session_store=session_store,
         goal_enabled=enable_goal,
         skill_repository=skill_repository,
+        team_context=team_context,
+        team_store=team_store,
     )
     return AgentContainer(
         settings=settings,

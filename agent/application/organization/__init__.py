@@ -1,27 +1,25 @@
-"""Minimal organization-layer primitives for asynchronous agent collaboration."""
+"""Dynamic Team coordination primitives."""
 
-from .coordinator import InMemoryOrganizationStore, OrganizationCoordinator, OrganizationMessageContext
+from .coordinator import OrganizationCoordinator
 from .models import (
-    Agent,
-    AgentConfig,
+    AgentRuntimeState,
     ArtifactRef,
     Delivery,
     Message,
     OrganizationEvent,
-    TurnRecord,
+    TeamMember,
+    TeamRuntimeContext,
     utc_now,
 )
 
 __all__ = [
-    "Agent",
-    "AgentConfig",
+    "AgentRuntimeState",
     "ArtifactRef",
     "Delivery",
-    "InMemoryOrganizationStore",
     "Message",
     "OrganizationCoordinator",
     "OrganizationEvent",
-    "OrganizationMessageContext",
-    "TurnRecord",
+    "TeamMember",
+    "TeamRuntimeContext",
     "utc_now",
 ]

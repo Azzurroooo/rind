@@ -97,8 +97,6 @@ class JsonlSessionStore(SessionStore):
         self._last_preview = ""
         self._projected_messages_cache_key = None
         self._projected_messages_cache = None
-        self._organization_store = None
-
         self._files = SessionFiles()
         self._msg_repo = None
         self._tool_repo = None
@@ -117,14 +115,6 @@ class JsonlSessionStore(SessionStore):
     @property
     def system_prompt(self) -> str:
         return self._system_prompt
-
-    @property
-    def organization_store(self):
-        if self._organization_store is None:
-            from agent.infrastructure.persistence.json_organization_store import JsonOrganizationStore
-
-            self._organization_store = JsonOrganizationStore()
-        return self._organization_store
 
     def now_iso(self) -> str:
         return datetime.now(timezone.utc).isoformat()

@@ -1,7 +1,6 @@
 from pathlib import Path
 import re
 import shutil
-import sqlite3
 import sys
 
 import pytest
@@ -22,7 +21,6 @@ def test_initialize_team_project_creates_main_agent_capsule(tmp_path: Path) -> N
     assert project.agents["main-agent"] == main_workspace.resolve()
     assert (tmp_path / ".aiteam" / "project.yaml").is_file()
     assert (tmp_path / ".aiteam" / "organization.yaml").is_file()
-    assert (tmp_path / ".aiteam" / "state.db").is_file()
     assert (main_workspace / ".aiteam" / "agent.yaml").is_file()
     assert (main_workspace / ".aiteam" / "origin.lock.yaml").is_file()
     assert (main_workspace / "memory").is_dir()
@@ -30,10 +28,8 @@ def test_initialize_team_project_creates_main_agent_capsule(tmp_path: Path) -> N
     assert (main_workspace / "outputs").is_dir()
     assert (tmp_path / "shared" / "artifacts").is_dir()
 
-    with sqlite3.connect(tmp_path / ".aiteam" / "state.db") as db:
-        rows = dict(db.execute("SELECT key, value FROM state_meta").fetchall())
-    assert rows["project_id"] == "quant-project"
-    assert rows["default_agent"] == "main-agent"
+    assert not (tmp_path / ".aiteam" / "state.db").exists()
+    assert "state_backend" not in (tmp_path / ".aiteam" / "project.yaml").read_text(encoding="utf-8")
 
 
 def test_load_agent_capsule_reads_manifest_prompt_and_workspace_paths(tmp_path: Path) -> None:
@@ -164,3 +160,11 @@ def test_initialize_team_project_refuses_existing_team_files(tmp_path: Path) -> 
 
     with pytest.raises(ValueError, match="already exists"):
         initialize_team_project(tmp_path)
+
+
+def test_initialize_team_project_rejects_existing_user_runtime_namespace(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("RIND_HOME", str(tmp_path / "rind_home"))
+    (tmp_path / "rind_home" / "teams" / "quant-project").mkdir(parents=True)
+
+    with pytest.raises(ValueError, match="runtime state already exists"):
+        initialize_team_project(tmp_path, project_id="quant-project")

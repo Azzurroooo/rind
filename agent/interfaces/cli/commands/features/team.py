@@ -1,4 +1,4 @@
-"""Minimal team slash command for organization control."""
+"""Team commands scoped to a registered Team Agent runtime."""
 
 from __future__ import annotations
 
@@ -18,27 +18,29 @@ async def handle_team(context: SlashCommandContext, args: list[str]) -> str | Sl
         if len(args) > 2:
             return f"Usage: {USAGE}"
         return await _team_create(context, args[1] if len(args) == 2 else None)
-    store = _organization_store(context)
+
+    team_context, store = _team_context(context)
+    coordinator = OrganizationCoordinator(store, agent_ids=(member.agent_id for member in team_context.members))
     if action == "list":
         if len(args) != 1:
             return f"Usage: {USAGE}"
-        return _team_list(store)
+        return _team_list(team_context, store)
     if action == "send":
         if len(args) < 3:
             return f"Usage: {USAGE}"
-        return await _team_send(store, args[1], " ".join(args[2:]))
+        return await _team_send(coordinator, store, args[1], " ".join(args[2:]))
     if action == "pause":
         if len(args) != 2:
             return f"Usage: {USAGE}"
-        return _team_status(store, args[1], "paused")
+        return _team_status(coordinator, team_context, args[1], "paused")
     if action == "resume":
         if len(args) != 2:
             return f"Usage: {USAGE}"
-        return _team_status(store, args[1], "idle")
+        return _team_status(coordinator, team_context, args[1], "idle")
     if action == "show":
         if len(args) > 2:
             return f"Usage: {USAGE}"
-        return _team_show(store, args[1] if len(args) == 2 else None)
+        return _team_show(team_context, coordinator, store, args[1] if len(args) == 2 else None)
     return f"Usage: {USAGE}"
 
 
@@ -63,28 +65,35 @@ async def _team_create(context: SlashCommandContext, project_id: str | None) -> 
     )
 
 
-def _organization_store(context: SlashCommandContext):
-    for owner in (context.session, context.runtime):
-        store = getattr(owner, "organization_store", None)
-        if store is not None:
-            return store
-    raise RuntimeError("Team store is not configured for this session.")
+def _team_context(context: SlashCommandContext):
+    team_context = getattr(context.runtime, "team_context", None)
+    store = getattr(context.runtime, "team_store", None)
+    if team_context is None or store is None:
+        raise ValueError("Team commands require a registered Team Agent runtime.")
+    if team_context.get_member(team_context.current_agent_id) is None:
+        raise ValueError(f"Team commands require a registered Team Agent: {team_context.current_agent_id}")
+    return team_context, store
 
 
-def _team_list(store) -> SlashCommandResult:
-    agents = store.list_agents()
-    if not agents:
-        return SlashCommandResult("No team agents.", display={"type": "team", "agents": []})
+def _team_list(team_context, store) -> SlashCommandResult:
+    agents = [_agent_display(team_context, store, member.agent_id) for member in team_context.members]
     lines = ["Team agents:"]
-    display_agents = []
-    for agent in agents:
-        lines.append(f"- {agent.id} | {agent.display_name} | {agent.status} | session={agent.session_id}")
-        display_agents.append(_agent_display(agent))
-    return SlashCommandResult(chr(10).join(lines), display={"type": "team", "agents": display_agents})
+    lines.extend(
+        f"- {agent['id']} | {agent['display_name']} | {agent['status']}"
+        for agent in agents
+    )
+    return SlashCommandResult(
+        "\n".join(lines),
+        display={"type": "team", "agents": agents},
+    )
 
 
-async def _team_send(store, recipient_id: str, body: str) -> SlashCommandResult:
-    coordinator = OrganizationCoordinator(store)
+async def _team_send(
+    coordinator: OrganizationCoordinator,
+    store,
+    recipient_id: str,
+    body: str,
+) -> SlashCommandResult:
     message = await coordinator.send_message(sender_id="user", recipient_id=recipient_id, body=body)
     text = f"Queued message {message.id} to {recipient_id}."
     return SlashCommandResult(
@@ -97,51 +106,47 @@ async def _team_send(store, recipient_id: str, body: str) -> SlashCommandResult:
     )
 
 
-def _team_status(store, agent_id: str, status: str) -> SlashCommandResult:
-    agent = store.update_agent_status(agent_id, status)
+def _team_status(coordinator: OrganizationCoordinator, team_context, agent_id: str, status: str) -> SlashCommandResult:
+    state = coordinator.set_agent_status(agent_id, status)
     verb = "Paused" if status == "paused" else "Resumed"
     return SlashCommandResult(
-        f"{verb} agent {agent.id}.",
-        display={"type": "team_agent", "agent": _agent_display(agent)},
+        f"{verb} agent {agent_id}.",
+        display={"type": "team_agent", "agent": _agent_display(team_context, coordinator.store, agent_id, state=state)},
     )
 
 
-def _team_show(store, agent_id: str | None) -> SlashCommandResult:
+def _team_show(team_context, coordinator: OrganizationCoordinator, store, agent_id: str | None) -> SlashCommandResult:
     if agent_id:
-        agent = store.require_agent(agent_id)
-        messages = store.list_messages(agent_id=agent.id, limit=8)
-        turns = store.list_turns(agent_id=agent.id)[-8:]
+        coordinator.require_agent(agent_id)
+        messages = store.list_messages(agent_id=agent_id, limit=8)
+        agent = _agent_display(team_context, store, agent_id)
         lines = [
-            f"Agent {agent.id}: {agent.display_name}",
-            f"Status: {agent.status}",
-            f"Session: {agent.session_id}",
-            f"Workspace: {agent.workspace_root}",
+            f"Agent {agent['id']}: {agent['display_name']}",
+            f"Status: {agent['status']}",
+            f"Workspace: {agent['workspace_root']}",
             "Recent messages:",
         ]
         lines.extend(_message_lines(messages))
-        lines.append("Recent turns:")
-        lines.extend(_turn_lines(turns))
         return SlashCommandResult(
-            chr(10).join(lines),
+            "\n".join(lines),
             display={
                 "type": "team_agent_detail",
-                "agent": _agent_display(agent),
+                "agent": agent,
                 "messages": [message.to_dict() for message in messages],
-                "turns": [turn.to_dict() for turn in turns],
             },
         )
     messages = store.list_messages(limit=8)
-    turns = store.list_turns()[-8:]
+    deliveries = store.list_deliveries()
     lines = ["Recent team messages:"]
     lines.extend(_message_lines(messages))
-    lines.append("Recent team turns:")
-    lines.extend(_turn_lines(turns))
+    lines.append("Pending deliveries:")
+    lines.extend(_delivery_lines(deliveries))
     return SlashCommandResult(
-        chr(10).join(lines),
+        "\n".join(lines),
         display={
             "type": "team_recent",
             "messages": [message.to_dict() for message in messages],
-            "turns": [turn.to_dict() for turn in turns],
+            "deliveries": [delivery.to_dict() for delivery in deliveries],
         },
     )
 
@@ -155,23 +160,22 @@ def _message_lines(messages) -> list[str]:
     ]
 
 
-def _turn_lines(turns) -> list[str]:
-    if not turns:
+def _delivery_lines(deliveries) -> list[str]:
+    if not deliveries:
         return ["- none"]
-    return [f"- {turn.turn_id} | {turn.agent_id} | {turn.message_id} | {turn.status}" for turn in turns]
+    return [f"- {delivery.message_id} -> {delivery.recipient_id} | {delivery.status}" for delivery in deliveries]
 
 
-def _agent_display(agent) -> dict:
+def _agent_display(team_context, store, agent_id: str, *, state=None) -> dict:
+    member = team_context.get_member(agent_id)
+    if member is None:
+        raise ValueError(f"Agent is not a Team member: {agent_id}")
+    current = state or store.get_agent_state(agent_id)
     return {
-        "id": agent.id,
-        "config_id": agent.config_id,
-        "display_name": agent.display_name,
-        "session_id": agent.session_id,
-        "workspace_root": agent.workspace_root,
-        "supervisor_id": agent.supervisor_id,
-        "status": agent.status,
-        "created_at": agent.created_at,
-        "updated_at": agent.updated_at,
+        "id": agent_id,
+        "display_name": member.display_name,
+        "workspace_root": member.workspace_root,
+        "status": current.status,
     }
 
 

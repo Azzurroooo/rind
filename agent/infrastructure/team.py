@@ -4,18 +4,18 @@ from __future__ import annotations
 
 import json
 import shutil
-import sqlite3
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+
+from agent.infrastructure.paths import resolve_rind_home
 
 
 AITEAM_DIR = ".aiteam"
 AGENT_MANIFEST = "agent.yaml"
 PROJECT_MANIFEST = "project.yaml"
 ORGANIZATION_MANIFEST = "organization.yaml"
-STATE_DB = "state.db"
 
 
 @dataclass(frozen=True, slots=True)
@@ -40,7 +40,6 @@ class TeamProject:
     default_agent: str
     agents_root: Path
     shared_root: Path
-    state_backend: Path
     agents: dict[str, Path]
 
 
@@ -82,6 +81,9 @@ def initialize_team_project(
     main_agent_id = _clean_id(main_agent_id, "main_agent_id")
     project_id = _clean_id(project_id or root.name, "project_id")
     project_name = _clean_text(name or root.name, "name")
+    state_root = team_state_root(project_id)
+    if state_root.exists():
+        raise ValueError(f"Team runtime state already exists for project_id {project_id}: {state_root}")
 
     team_dir = root / AITEAM_DIR
     main_workspace = root / "agents" / main_agent_id
@@ -123,7 +125,6 @@ def initialize_team_project(
         _write_text(main_workspace / AITEAM_DIR / "prompts" / "system.md", "You are the main agent for this Team project.\n")
         _write_text(main_workspace / AITEAM_DIR / "prompts" / "role.md", "Coordinate work, keep boundaries clear, and publish stable outputs to shared artifacts.\n")
         _write_text(main_workspace / AITEAM_DIR / "prompts" / "methodology.md", "Prefer small verifiable steps, explicit messages, and concise artifacts.\n")
-        _init_state_db(team_dir / STATE_DB, project_id=project_id, default_agent=main_agent_id)
     except Exception:
         _cleanup_created(created)
         raise
@@ -177,7 +178,6 @@ def load_team_project(project_root: str | Path) -> TeamProject:
     default_agent = _clean_id(spec.get("default_agent") or organization.get("default_agent"), "default_agent")
     agents_root = _resolve_manifest_path(root / AITEAM_DIR, spec.get("agents_root") or "../agents")
     shared_root = _resolve_manifest_path(root / AITEAM_DIR, spec.get("shared_root") or "../shared")
-    state_backend = _resolve_manifest_path(root / AITEAM_DIR, spec.get("state_backend") or "./state.db")
     agents = _organization_agents(root, organization)
     if default_agent not in agents:
         raise ValueError(f"Default agent is not registered: {default_agent}")
@@ -188,7 +188,6 @@ def load_team_project(project_root: str | Path) -> TeamProject:
         default_agent=default_agent,
         agents_root=agents_root,
         shared_root=shared_root,
-        state_backend=state_backend,
         agents=agents,
     )
 
@@ -211,6 +210,11 @@ def find_team_project(cwd: str | Path | None = None) -> TeamProject | None:
     return load_team_project(root) if root is not None else None
 
 
+def team_state_root(project_id: str) -> Path:
+    """Return the user-scoped runtime directory for a Team project."""
+    return (resolve_rind_home() / "teams" / _clean_id(project_id, "project_id")).resolve()
+
+
 def _project_manifest(project_id: str, name: str, main_agent_id: str) -> dict[str, Any]:
     return {
         "api_version": "aiteam/v1",
@@ -221,7 +225,6 @@ def _project_manifest(project_id: str, name: str, main_agent_id: str) -> dict[st
             "default_agent": main_agent_id,
             "shared_root": "../shared",
             "agents_root": "../agents",
-            "state_backend": "./state.db",
         },
     }
 
@@ -338,15 +341,6 @@ def _resolve_manifest_path(base: Path, value: object) -> Path:
     if not candidate.is_absolute():
         candidate = base / candidate
     return candidate.resolve()
-
-
-def _init_state_db(path: Path, *, project_id: str, default_agent: str) -> None:
-    with sqlite3.connect(path) as db:
-        db.execute("CREATE TABLE IF NOT EXISTS state_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)")
-        db.executemany(
-            "INSERT OR REPLACE INTO state_meta(key, value) VALUES(?, ?)",
-            (("schema_version", "1"), ("project_id", project_id), ("default_agent", default_agent)),
-        )
 
 
 def _write_yaml(path: Path, data: dict[str, Any]) -> None:
