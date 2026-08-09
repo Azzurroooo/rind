@@ -181,6 +181,44 @@ async def test_async_runtime_facade_emits_turn_started_first():
 
 
 @pytest.mark.asyncio
+async def test_async_runtime_holds_the_workspace_lock_for_the_entire_turn():
+    events = []
+
+    class FakeSession:
+        session_id = "session_1"
+
+        async def initialize(self):
+            return None
+
+        async def persist_message(self, role, content, **kwargs):
+            return None
+
+        def now_iso(self):
+            return "2026-05-08T00:00:00Z"
+
+    class TrackingLock:
+        async def __aenter__(self):
+            events.append("entered")
+            return self
+
+        async def __aexit__(self, exc_type, exc, traceback):
+            events.append("released")
+
+    class FakeRunner:
+        async def run_turn(self, session, cancellation_token=None, turn_id="", take_steering=None):
+            assert events == ["entered"]
+            events.append("running")
+            yield TurnCompletedEvent(turn_id=turn_id)
+
+    runtime = AgentRuntime(FakeRunner(), FakeSession(), workspace_lock=TrackingLock())
+
+    completed = [event async for event in runtime.run_turn(query="hello")]
+
+    assert isinstance(completed[-1], TurnCompletedEvent)
+    assert events == ["entered", "running", "released"]
+
+
+@pytest.mark.asyncio
 async def test_async_runtime_persists_terminal_turn_state():
     class FakeSession:
         session_id = "session_1"

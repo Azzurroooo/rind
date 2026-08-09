@@ -19,10 +19,8 @@ from agent.interfaces.cli.commands import SlashCommandContext, SlashCommandInfo,
 from agent.domain.cancellation import CancellationTokenSource
 from agent.infrastructure.config import Config
 from agent.infrastructure.persistence.jsonl_session_store import JsonlSessionStore
-from agent.infrastructure.persistence.json_team_state_store import JsonTeamStateStore
 from agent.infrastructure.skills.repository import SkillRepository
 from agent.infrastructure.team import initialize_team_project
-from agent.application.organization import TeamMember, TeamRuntimeContext
 
 
 @pytest.fixture(autouse=True)
@@ -57,14 +55,12 @@ class FakeSession:
 
 
 class FakeRuntime:
-    def __init__(self, team_context=None, team_store=None):
+    def __init__(self):
         self.called = False
         self.compact_called = False
         self.model = None
         self.query = None
         self.transient_system_messages = None
-        self.team_context = team_context
-        self.team_store = team_store
 
     def run_turn(self, query=None, cancellation_token=None, transient_system_messages=None):
         self.called = True
@@ -118,25 +114,6 @@ class EmptyStream:
 
 def _context(session=None, runtime=None):
     return SlashCommandContext(runtime=runtime or FakeRuntime(), session=session or FakeSession(), debug=True)
-
-
-def _team_session(tmp_path: Path, monkeypatch):
-    monkeypatch.setenv("RIND_HOME", str(tmp_path / "rind_home"))
-    project_root = tmp_path / "team-project"
-    project_root.mkdir()
-    project = initialize_team_project(project_root, project_id="quant-project")
-    team_context = TeamRuntimeContext(
-        project_id=project.project_id,
-        current_agent_id="main-agent",
-        members=(
-            TeamMember(
-                agent_id="main-agent",
-                display_name="Main Agent",
-                workspace_root=str(project.agents["main-agent"]),
-            ),
-        ),
-    )
-    return FakeSession(), FakeRuntime(team_context, JsonTeamStateStore(project))
 
 
 @pytest.mark.asyncio
@@ -216,7 +193,7 @@ def test_router_exposes_command_descriptions() -> None:
     assert descriptions["model"] == "Show or change the active model"
     assert descriptions["clear"] == "Clear terminal output"
     assert descriptions["draft"] == "Show, reuse, or clear saved input draft"
-    assert descriptions["team"] == "Operate organization agents"
+    assert descriptions["team"] == "Create a Team project"
     assert usages["sessions"] == "/sessions [limit]"
     assert usages["draft"] == "/draft | /draft use | /draft clear"
     assert usages["init"] == "/init [project|user]"
@@ -350,84 +327,6 @@ async def test_unknown_command_returns_friendly_error() -> None:
 
 
 @pytest.mark.asyncio
-async def test_team_command_lists_sends_pauses_resumes_and_shows_agents(tmp_path, monkeypatch) -> None:
-    session, runtime = _team_session(tmp_path, monkeypatch)
-    router = SlashCommandRouter()
-
-    context = _context(session=session, runtime=runtime)
-    listed = await router.execute("/team list", context)
-    assert "Team agents:" in listed.text
-    assert "main-agent | Main Agent | idle" in listed.text
-    assert listed.display["type"] == "team"
-
-    sent = await router.execute('/team send main-agent "run value research"', context)
-    message_id = sent.display["message"]["id"]
-    assert sent.text == f"Queued message {message_id} to main-agent."
-    assert sent.display["delivery"]["status"] == "pending"
-
-    paused = await router.execute("/team pause main-agent", context)
-    assert paused.text == "Paused agent main-agent."
-    assert paused.display["agent"]["status"] == "paused"
-
-    resumed = await router.execute("/team resume main-agent", context)
-    assert resumed.text == "Resumed agent main-agent."
-    assert resumed.display["agent"]["status"] == "idle"
-
-    shown = await router.execute("/team show main-agent", context)
-    assert "Agent main-agent: Main Agent" in shown.text
-    assert "Recent messages:" in shown.text
-    assert shown.display["type"] == "team_agent_detail"
-
-
-@pytest.mark.asyncio
-async def test_team_commands_are_unavailable_from_project_root(tmp_path, monkeypatch) -> None:
-    monkeypatch.chdir(tmp_path)
-    session = JsonlSessionStore(session_dir=str(tmp_path / "sessions"), session_id="plain", system_prompt="sys")
-    await session.initialize()
-    await session.create_team_project(project_id="quant-project")
-
-    result = await SlashCommandRouter().execute("/team list", _context(session=session))
-
-    assert "registered Team Agent runtime" in result.text
-
-
-@pytest.mark.asyncio
-async def test_team_list_does_not_create_runtime_state(tmp_path, monkeypatch) -> None:
-    session, runtime = _team_session(tmp_path, monkeypatch)
-
-    result = await SlashCommandRouter().execute("/team list", _context(session=session, runtime=runtime))
-
-    assert result.display["type"] == "team"
-    assert not runtime.team_store.root.exists()
-
-
-@pytest.mark.asyncio
-async def test_team_commands_reject_unregistered_capsule_context(tmp_path, monkeypatch) -> None:
-    monkeypatch.setenv("RIND_HOME", str(tmp_path / "rind_home"))
-    project_root = tmp_path / "team-project"
-    project_root.mkdir()
-    project = initialize_team_project(project_root, project_id="quant-project")
-    runtime = FakeRuntime(
-        TeamRuntimeContext(
-            project_id=project.project_id,
-            current_agent_id="researcher",
-            members=(
-                TeamMember(
-                    agent_id="main-agent",
-                    display_name="Main Agent",
-                    workspace_root=str(project.agents["main-agent"]),
-                ),
-            ),
-        ),
-        JsonTeamStateStore(project),
-    )
-
-    result = await SlashCommandRouter().execute("/team list", _context(runtime=runtime))
-
-    assert "registered Team Agent: researcher" in result.text
-
-
-@pytest.mark.asyncio
 async def test_team_create_initializes_project_without_handoff(tmp_path, monkeypatch) -> None:
     monkeypatch.chdir(tmp_path)
     session = JsonlSessionStore(session_dir=str(tmp_path / "sessions"), session_id="bootstrap", system_prompt="sys")
@@ -439,16 +338,15 @@ async def test_team_create_initializes_project_without_handoff(tmp_path, monkeyp
     meta = json.loads((tmp_path / "sessions" / "bootstrap" / "meta.json").read_text(encoding="utf-8"))
     assert result.display["type"] == "team_create"
     assert result.display["project_id"] == "quant-project"
-    assert result.display["default_agent"] == "main-agent"
+    assert result.display["main_agent"] == "main-agent"
     assert "session_id" not in result.display
     assert "Switched to" not in result.text
     assert session.session_id == "bootstrap"
     assert Path.cwd() == tmp_path.resolve()
     assert (tmp_path / ".aiteam" / "project.yaml").is_file()
-    assert (tmp_path / ".aiteam" / "organization.yaml").is_file()
+    assert not (tmp_path / ".aiteam" / "organization.yaml").exists()
     assert (workspace / ".aiteam" / "agent.yaml").is_file()
     assert meta["session_type"] == "standalone_project"
-    assert meta["status"] == "active"
     assert "successor_session_id" not in meta
     assert "project_id" not in meta
     assert "owner_agent_id" not in meta
@@ -1131,7 +1029,6 @@ def main() -> int:
     asyncio.run(test_help_reports_unknown_command())
     asyncio.run(test_help_rejects_too_many_args())
     asyncio.run(test_unknown_command_returns_friendly_error())
-    asyncio.run(test_team_command_lists_sends_pauses_resumes_and_shows_agents())
     asyncio.run(test_status_shows_session_model_debug_and_message_count())
     asyncio.run(test_status_shows_latest_sampling_usage())
     asyncio.run(test_status_labels_assistant_and_compact_usage_separately())

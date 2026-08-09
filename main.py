@@ -5,11 +5,24 @@ from types import SimpleNamespace
 from agent.version import __version__
 
 
+def _validate_agent_assertion(agent_id: str | None) -> None:
+    if agent_id is None:
+        return
+    from agent.infrastructure.team import discover_agent
+
+    resolved = discover_agent()
+    if resolved is None:
+        raise ValueError("--agent requires the current directory to be a valid Agent workspace.")
+    if resolved.agent_id != agent_id:
+        raise ValueError(f"--agent {agent_id!r} does not match the current Agent: {resolved.agent_id!r}.")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Rind CLI")
     parser.add_argument("--version", action="version", version=f"rind {__version__}")
     parser.add_argument("--debug", action="store_true", help="Enable debug mode (non-streaming output)")
     parser.add_argument("--session", type=str, default=None, help="Session ID to load")
+    parser.add_argument("--agent", type=str, default=None, help="Assert the current Agent Capsule identity")
     parser.add_argument("-c", "--resume-latest", action="store_true", help="Resume the latest session if available")
     parser.add_argument("--session-dir", type=str, default=None, help="Session storage directory")
     parser.add_argument("--doctor", action="store_true", help="Run local setup diagnostics and exit")
@@ -35,6 +48,11 @@ def main() -> int:
         except ValueError as exc:
             print(f"Session error: {exc}", file=sys.stderr)
             return 1
+    try:
+        _validate_agent_assertion(args.agent)
+    except ValueError as exc:
+        print(f"Startup error: {exc}", file=sys.stderr)
+        return 1
 
     from agent.bootstrap import build_agent_container
     from agent.infrastructure.config import Config, validate_settings

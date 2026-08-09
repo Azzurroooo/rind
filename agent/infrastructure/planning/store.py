@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import uuid
+from contextlib import contextmanager
 from contextvars import ContextVar
 from pathlib import Path
 from typing import Any
@@ -24,6 +25,18 @@ def set_active_session_context(session_root: str, session_id: str) -> None:
         return
     _ACTIVE_SESSION_ROOT.set(root)
     _ACTIVE_SESSION_ID.set(validate_session_id(sid))
+
+
+@contextmanager
+def preserve_active_session_context():
+    """Restore the caller's plan target after a nested runtime finishes."""
+    root_token = _ACTIVE_SESSION_ROOT.set(_ACTIVE_SESSION_ROOT.get())
+    id_token = _ACTIVE_SESSION_ID.set(_ACTIVE_SESSION_ID.get())
+    try:
+        yield
+    finally:
+        _ACTIVE_SESSION_ROOT.reset(root_token)
+        _ACTIVE_SESSION_ID.reset(id_token)
 
 
 def resolve_session_base() -> tuple[Path, str]:

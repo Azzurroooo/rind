@@ -116,6 +116,25 @@ def build_compact_prompt(compression_corpus_json: str) -> list[dict[str, str]]:
     return [{"role": "system", "content": system}, {"role": "user", "content": user}]
 
 
+def build_delegate_execute_prompt() -> str:
+    return (
+        "You are executing a delegated task inside your own Agent Capsule. Inspect the current "
+        "workspace before acting. Keep private work in this workspace and publish reusable, stable "
+        "results under the project shared directory. Do not ask the user questions and do not delegate "
+        "again. Finish with one JSON object containing status ('completed' or 'blocked'), summary, and "
+        "published_paths."
+    )
+
+
+def build_delegate_inspect_prompt() -> str:
+    return (
+        "You are inspecting your own Agent Capsule for a parent Agent. Read the current workspace and "
+        "the project shared directory, but do not modify files or run commands that write. Do not ask the "
+        "user questions and do not delegate. Finish with one JSON object containing status ('completed' "
+        "or 'blocked'), summary, and published_paths."
+    )
+
+
 SYSTEM_PROMPT = f"""
 You are Rind, an advanced AI software engineer and coding agent.
 You are autonomous, efficient, and capable of solving complex programming tasks using tools.

@@ -75,11 +75,11 @@ class ShellSessionPool:
         candidate = Path("C:/Windows/System32/WindowsPowerShell/v1.0/powershell.exe")
         return str(candidate) if candidate.is_file() else None
 
-    def get_state(self, session_id: str) -> ShellState:
+    def get_state(self, session_id: str, workspace_root: str | None = None) -> ShellState:
         """Get or create the shell state for a session."""
         if session_id not in self._states:
             self._states[session_id] = ShellState(
-                cwd=os.getcwd(),
+                cwd=os.path.abspath(os.path.expanduser(workspace_root or os.getcwd())),
                 env=os.environ.copy(),
                 shell_executable=self._default_executable,
                 shell_error=self._default_error,

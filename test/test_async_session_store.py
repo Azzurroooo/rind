@@ -305,7 +305,7 @@ async def test_session_rejects_mismatched_agent_binding(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_session_allows_different_creation_metadata_for_same_agent_binding(tmp_path):
+async def test_session_keeps_its_original_delegation_parent(tmp_path):
     session_root = tmp_path / "sessions"
     workspace = tmp_path / "agents" / "factor-agent"
     workspace.mkdir(parents=True)
@@ -318,7 +318,6 @@ async def test_session_allows_different_creation_metadata_for_same_agent_binding
         owner_agent_id="factor-agent",
         session_type="delegated_task",
         parent_session_id="bootstrap",
-        created_by="main-agent",
     )
     await first.initialize()
 
@@ -330,12 +329,10 @@ async def test_session_allows_different_creation_metadata_for_same_agent_binding
         owner_agent_id="factor-agent",
         session_type="delegated_task",
         parent_session_id="other-bootstrap",
-        created_by="review-agent",
     )
     await second.initialize()
 
     meta = json.loads((session_root / "factor_session" / "meta.json").read_text(encoding="utf-8"))
-    assert meta["created_by"] == "main-agent"
     assert meta["parent_session_id"] == "bootstrap"
 
 @pytest.mark.asyncio

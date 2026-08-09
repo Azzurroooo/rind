@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 from collections.abc import Collection
 from dataclasses import dataclass
 
@@ -56,41 +55,30 @@ def build_agent_container(
     project_id: str | None = None,
     owner_agent_id: str | None = None,
     session_type: str | None = None,
-    task_id: str | None = None,
     parent_session_id: str | None = None,
-    created_by: str | None = None,
     skill_project_dir: str | None = None,
+    lock_workspace: bool = True,
 ) -> AgentContainer:
     """Build the production runtime dependency graph explicitly."""
     skill_project_root = None
     skill_agent_dir = None
     resolved_team_agent = None
-    if workspace_root:
-        from agent.infrastructure.team import discover_agent
+    from agent.infrastructure.team import discover_agent
 
-        explicit_agent_context = discover_agent(workspace_root)
-        if explicit_agent_context is not None and explicit_agent_context.project is not None:
-            resolved_team_agent = explicit_agent_context
-            skill_project_root = str(explicit_agent_context.project.project_root)
-            skill_agent_dir = str(explicit_agent_context.capsule.manifest_path.parent / "skills")
-        os.chdir(os.path.abspath(os.path.expanduser(workspace_root)))
-    else:
-        from agent.infrastructure.team import discover_agent
-
-        agent_context = discover_agent()
-        if agent_context is not None:
-            if agent_context.project is not None:
-                resolved_team_agent = agent_context
-            agent_prompt = agent_context.capsule.system_prompt.strip()
-            if system_prompt is None and agent_prompt:
-                system_prompt = f"{SYSTEM_PROMPT}\n\n{agent_prompt}"
-            workspace_root = str(agent_context.workspace_root)
-            project_id = project_id if project_id is not None else agent_context.project_id
-            owner_agent_id = owner_agent_id or agent_context.agent_id
-            session_type = session_type or "direct_agent_chat"
-            if agent_context.project is not None:
-                skill_project_root = str(agent_context.project.project_root)
-                skill_agent_dir = str(agent_context.capsule.manifest_path.parent / "skills")
+    agent_context = discover_agent(workspace_root) if workspace_root else discover_agent()
+    if agent_context is not None:
+        if agent_context.project is not None:
+            resolved_team_agent = agent_context
+        agent_prompt = agent_context.capsule.system_prompt.strip()
+        if system_prompt is None and agent_prompt:
+            system_prompt = f"{SYSTEM_PROMPT}\n\n{agent_prompt}"
+        workspace_root = str(agent_context.workspace_root)
+        project_id = project_id if project_id is not None else agent_context.project_id
+        owner_agent_id = owner_agent_id or agent_context.agent_id
+        session_type = session_type or "direct_agent_chat"
+        if agent_context.project is not None:
+            skill_project_root = str(agent_context.project.project_root)
+            skill_agent_dir = str(agent_context.capsule.manifest_path.parent / "skills")
     settings = settings or load_settings()
     provider_client_factory = provider_client_factory or OpenAIClientFactory(settings)
     model = settings.model
@@ -104,45 +92,59 @@ def build_agent_container(
         project_id=project_id,
         owner_agent_id=owner_agent_id,
         session_type=session_type,
-        task_id=task_id,
         parent_session_id=parent_session_id,
-        created_by=created_by,
     )
     skill_repository = SkillRepository(
         project_root=skill_project_root,
         project_skill_dir=skill_project_dir,
         agent_skill_dir=skill_agent_dir,
     )
-    team_context = None
-    team_store = None
+    runtime_system_messages: list[dict] = []
+    delegate_handler = None
+    agent_create_project = None
+    workspace_lock = None
+    allowed_roots = None
     if resolved_team_agent is not None:
-        from agent.application.organization import TeamMember, TeamRuntimeContext
-        from agent.infrastructure.persistence.json_team_state_store import JsonTeamStateStore
+        from agent.infrastructure.team import WorkspaceLock, render_team_agent_catalog
 
         project = resolved_team_agent.project
-        members = tuple(
-            TeamMember(
-                agent_id=agent_id,
-                display_name=(
-                    resolved_team_agent.capsule.name
-                    if agent_id == resolved_team_agent.agent_id
-                    else agent_id
-                ),
-                workspace_root=str(workspace),
+        allowed_roots = (str(resolved_team_agent.workspace_root), str(project.shared_root))
+        if lock_workspace:
+            workspace_lock = WorkspaceLock(project.project_id, resolved_team_agent.agent_id)
+        if resolved_team_agent.agent_id == project.main_agent:
+            agent_create_project = project
+            catalog_text = render_team_agent_catalog(project)
+            main_agent_guidance = (
+                "Use delegate for specialized Team work. Treat delegate results as concise explanations and "
+                "verify published shared artifacts when evidence matters. Do not read another Agent's private "
+                "workspace directly."
             )
-            for agent_id, workspace in sorted(project.agents.items())
-        )
-        team_context = TeamRuntimeContext(
-            project_id=project.project_id,
-            current_agent_id=resolved_team_agent.agent_id,
-            members=members,
-        )
-        team_store = JsonTeamStateStore(project)
+            runtime_system_messages.append(
+                {
+                    "role": "system",
+                    "content": f"{main_agent_guidance}\n\n{catalog_text}" if catalog_text else main_agent_guidance,
+                    "_context_kind": "team_agent_catalog",
+                }
+            )
+            from agent.bootstrap.delegation import TeamDelegator
+
+            delegator = TeamDelegator(
+                project=project,
+                parent_session=session_store,
+                settings=settings,
+                provider_client_factory=provider_client_factory,
+                session_dir=session_dir,
+            )
+            delegate_handler = delegator.delegate
     catalog = build_builtin_tool_specs(
         enable_goal=enable_goal,
         enable_user_question=enable_user_question,
         set_goal_status=session_store.set_goal_status if enable_goal else None,
         skill_repository=skill_repository,
+        delegate_handler=delegate_handler,
+        agent_create_project=agent_create_project,
+        workspace_root=workspace_root,
+        allowed_roots=allowed_roots,
     )
     if enabled_tools is None:
         tool_specs = catalog
@@ -186,8 +188,8 @@ def build_agent_container(
         session_store=session_store,
         goal_enabled=enable_goal,
         skill_repository=skill_repository,
-        team_context=team_context,
-        team_store=team_store,
+        runtime_system_messages=runtime_system_messages,
+        workspace_lock=workspace_lock,
     )
     return AgentContainer(
         settings=settings,

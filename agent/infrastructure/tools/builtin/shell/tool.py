@@ -19,6 +19,7 @@ async def bash(
     wait_ms: int = 10000,
     _session_id: str = "default",
     _cancellation_token: CancellationToken | None = None,
+    _workspace_root: str | None = None,
 ) -> str:
     """Execute a bash command. Use run_in_background=true for long-running commands like servers."""
     status, reason = BashPolicy.classify(command)
@@ -31,7 +32,7 @@ async def bash(
             meta={"command": command[:500]},
         )
 
-    state = _POOL.get_state(_session_id)
+    state = _POOL.get_state(_session_id, workspace_root=_workspace_root)
 
     if run_in_background:
         result = await _SUPERVISOR.run_background(

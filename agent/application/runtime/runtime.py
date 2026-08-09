@@ -6,6 +6,7 @@ import asyncio
 import logging
 import uuid
 from collections import deque
+from contextlib import asynccontextmanager
 from typing import AsyncIterator
 
 from agent.application.ports.session_store import SessionStore
@@ -40,8 +41,8 @@ class AgentRuntime:
         session_store: SessionStore,
         goal_enabled: bool = False,
         skill_repository=None,
-        team_context=None,
-        team_store=None,
+        runtime_system_messages: list[dict] | None = None,
+        workspace_lock=None,
     ):
         self._turn_runner = turn_runner
         self._session_store = session_store
@@ -54,8 +55,8 @@ class AgentRuntime:
         self._follow_up_queue: deque[str] = deque()
         self._goal_enabled = bool(goal_enabled)
         self._skill_repository = skill_repository
-        self.team_context = team_context
-        self.team_store = team_store
+        self._runtime_system_messages = tuple(dict(message) for message in (runtime_system_messages or []))
+        self._workspace_lock = workspace_lock
         self._skill_turn_coordinator = (
             SkillTurnCoordinator(skill_repository) if skill_repository is not None else None
         )
@@ -164,7 +165,7 @@ class AgentRuntime:
             raise RuntimeError("Goal support is unavailable.")
         if self._accepting_inputs or self._active_turn_id:
             raise RuntimeError("Cannot replace a goal while a turn is active.")
-        async with self._turn_lock:
+        async with self._workspace_lock_guard(), self._turn_lock:
             if self._accepting_inputs or self._active_turn_id:
                 raise RuntimeError("Cannot replace a goal while a turn is active.")
             setter = getattr(self._session_store, "set_goal", None)
@@ -247,7 +248,7 @@ class AgentRuntime:
         for constructing one facade per session.
         """
         await self.initialize()
-        async with self._turn_lock:
+        async with self._workspace_lock_guard(), self._turn_lock:
             turn_id = uuid.uuid4().hex
             self._active_turn_id = turn_id
             self._accepting_inputs = True
@@ -271,7 +272,8 @@ class AgentRuntime:
                         "turn_id": turn_id,
                         "take_steering": self._take_steering,
                     }
-                    context_messages = list(transient_system_messages or [])
+                    context_messages = [dict(message) for message in self._runtime_system_messages]
+                    context_messages.extend(dict(message) for message in (transient_system_messages or []))
                     goal = await self._current_goal()
                     if goal and goal.get("status") == "active":
                         context_messages.append(
@@ -379,6 +381,14 @@ class AgentRuntime:
 
     def _is_cancelled(self, cancellation_token: CancellationToken | None) -> bool:
         return bool(cancellation_token and cancellation_token.is_cancelled)
+
+    @asynccontextmanager
+    async def _workspace_lock_guard(self):
+        if self._workspace_lock is None:
+            yield
+            return
+        async with self._workspace_lock:
+            yield
 
     async def _persist_user_input(self, content: str) -> None:
         if self._skill_turn_coordinator is not None:

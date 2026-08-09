@@ -216,10 +216,68 @@ def test_container_resolves_team_agent_capsule_context_from_workspace(tmp_path, 
     assert container.skill_repository._project_skill_dir == (tmp_path / ".rind" / "skills").resolve()
     assert container.skill_repository._agent_skill_dir == (workspace / ".aiteam" / "skills").resolve()
     assert "main agent" in container.session_store.system_prompt.lower()
-    assert container.runtime.team_context.project_id == "quant-project"
-    assert container.runtime.team_context.current_agent_id == "main-agent"
-    assert container.runtime.team_store.root == (tmp_path / "rind_home" / "teams" / "quant-project").resolve()
-    assert not container.runtime.team_store.root.exists()
+    assert container.tool_registry.has("delegate") is True
+    assert container.tool_registry.has("agent_create") is True
+    assert "Use delegate for specialized Team work" in container.runtime._runtime_system_messages[0]["content"]
+    assert not (tmp_path / "rind_home" / "teams").exists()
+
+
+def test_explicit_team_workspace_does_not_change_process_cwd(tmp_path, monkeypatch) -> None:
+    initialize_team_project(tmp_path, project_id="quant-project")
+    workspace = tmp_path / "agents" / "main-agent"
+    monkeypatch.chdir(tmp_path)
+    settings = AppSettings(
+        settings_path=tmp_path / "settings.json",
+        settings_exists=True,
+        model="test-model",
+        api_key="test-key",
+        base_url="https://example.com/v1",
+        reasoning_effort="high",
+        user_agent="test-agent",
+    )
+
+    container = build_agent_container(
+        settings=settings,
+        provider_client_factory=FakeProviderClientFactory(),
+        session_dir=str(tmp_path / "sessions"),
+        workspace_root=str(workspace),
+    )
+
+    assert Path.cwd() == tmp_path.resolve()
+    assert container.session_store._workspace_root == str(workspace.resolve())
+
+
+def test_secondary_team_agent_cannot_delegate_or_create_agents(tmp_path) -> None:
+    initialize_team_project(tmp_path, project_id="quant-project")
+    main_workspace = tmp_path / "agents" / "main-agent"
+    secondary_workspace = tmp_path / "agents" / "researcher"
+    shutil.copytree(main_workspace, secondary_workspace)
+    manifest = secondary_workspace / ".aiteam" / "agent.yaml"
+    manifest.write_text(
+        manifest.read_text(encoding="utf-8")
+        .replace("id: main-agent", "id: researcher")
+        .replace("name: Main Agent", "name: Researcher"),
+        encoding="utf-8",
+    )
+    settings = AppSettings(
+        settings_path=tmp_path / "settings.json",
+        settings_exists=True,
+        model="test-model",
+        api_key="test-key",
+        base_url="https://example.com/v1",
+        reasoning_effort="high",
+        user_agent="test-agent",
+    )
+
+    container = build_agent_container(
+        settings=settings,
+        provider_client_factory=FakeProviderClientFactory(),
+        session_dir=str(tmp_path / "sessions"),
+        workspace_root=str(secondary_workspace),
+    )
+
+    assert container.tool_registry.has("delegate") is False
+    assert container.tool_registry.has("agent_create") is False
 
 
 def test_container_rejects_invalid_team_agent_capsule(tmp_path, monkeypatch) -> None:

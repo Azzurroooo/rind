@@ -27,7 +27,7 @@ def test_resume_mode_flag_is_removed() -> None:
         raise AssertionError(f"Expected argparse unknown-flag error, got: {combined}")
 
 
-def test_agent_flag_is_removed() -> None:
+def test_agent_flag_is_a_strict_cwd_assertion() -> None:
     result = subprocess.run(
         [sys.executable, "main.py", "--agent", "main-agent"],
         cwd=PROJECT_ROOT,
@@ -36,10 +36,42 @@ def test_agent_flag_is_removed() -> None:
     )
 
     if result.returncode == 0:
-        raise AssertionError("Expected main.py to reject the removed --agent flag.")
+        raise AssertionError("Expected --agent to reject a non-Agent current directory.")
     combined = f"{result.stdout}\n{result.stderr}"
-    if "unrecognized arguments: --agent main-agent" not in combined:
-        raise AssertionError(f"Expected argparse unknown-flag error, got: {combined}")
+    if "--agent requires the current directory to be a valid Agent workspace." not in combined:
+        raise AssertionError(f"Expected strict Agent workspace error, got: {combined}")
+
+    import main as main_module
+
+    with patch("agent.infrastructure.team.discover_agent", return_value=SimpleNamespace(agent_id="main-agent")):
+        main_module._validate_agent_assertion("main-agent")
+
+    with patch("agent.infrastructure.team.discover_agent", return_value=SimpleNamespace(agent_id="other")):
+        try:
+            main_module._validate_agent_assertion("main-agent")
+        except ValueError as exc:
+            if "does not match the current Agent" not in str(exc):
+                raise AssertionError(f"Expected mismatch error, got: {exc}") from exc
+        else:
+            raise AssertionError("Expected --agent to reject an identity mismatch.")
+
+
+def test_agent_flag_accepts_only_the_current_capsule(tmp_path, monkeypatch) -> None:
+    from agent.infrastructure.team import initialize_team_project
+    import main as main_module
+
+    initialize_team_project(tmp_path, project_id="quant-project")
+    monkeypatch.chdir(tmp_path / "agents" / "main-agent")
+
+    main_module._validate_agent_assertion("main-agent")
+
+    try:
+        main_module._validate_agent_assertion("other")
+    except ValueError as exc:
+        if "does not match the current Agent" not in str(exc):
+            raise AssertionError(f"Expected mismatch error, got: {exc}") from exc
+    else:
+        raise AssertionError("Expected --agent to reject a different Capsule id.")
 
 
 def test_version_does_not_validate_config(tmp_path) -> None:
@@ -171,7 +203,7 @@ def test_main_returns_130_on_keyboard_interrupt() -> None:
 
 def main() -> int:
     test_resume_mode_flag_is_removed()
-    test_agent_flag_is_removed()
+    test_agent_flag_is_a_strict_cwd_assertion()
     with tempfile.TemporaryDirectory() as temp_dir:
         test_version_does_not_validate_config(Path(temp_dir))
     with tempfile.TemporaryDirectory() as temp_dir:
