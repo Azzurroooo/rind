@@ -218,7 +218,7 @@ def _next_steps(checks: list[DoctorCheck]) -> list[str]:
     steps = []
     names = {check.name: check for check in checks if check.status in {"fail", "warn"}}
     if "API key" in names:
-        steps.append("Set apiKey in settings.json or export OPENAI_API_KEY.")
+        steps.append("Set apiKey in ~/.rind/settings.json.")
     settings_check = names.get("Settings")
     if settings_check and "invalid:" in settings_check.detail:
         steps.append("Fix settings.json syntax or replace it with the default template.")

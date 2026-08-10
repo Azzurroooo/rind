@@ -17,22 +17,26 @@ from agent.infrastructure.config.settings_loader import (
 )
 
 
+def write_settings(home: Path, data: dict) -> Path:
+    path = home / ".rind" / "settings.json"
+    path.parent.mkdir()
+    path.write_text(json.dumps(data), encoding="utf-8")
+    return path
+
+
 def test_load_settings_reads_user_json(tmp_path, monkeypatch):
-    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
-    path = tmp_path / "settings.json"
-    path.write_text(
-        json.dumps(
-            {
-                "model": "gpt-5.5",
-                "apiKey": "secret-key",
-                "baseUrl": "https://openai945.cn/",
-                "reasoningEffort": "xhigh",
-            }
-        ),
-        encoding="utf-8",
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    path = write_settings(
+        tmp_path,
+        {
+            "model": "gpt-5.5",
+            "apiKey": "secret-key",
+            "baseUrl": "https://openai945.cn/",
+            "reasoningEffort": "xhigh",
+        },
     )
 
-    settings = load_settings(path)
+    settings = load_settings()
 
     assert settings.settings_path == path
     assert settings.settings_exists is True
@@ -42,24 +46,20 @@ def test_load_settings_reads_user_json(tmp_path, monkeypatch):
     assert settings.reasoning_effort == "xhigh"
 
 
-def test_load_settings_ignores_legacy_internal_budget_fields(tmp_path):
-    path = tmp_path / "settings.json"
-    path.write_text(
-        json.dumps(
-            {
-                "model": "gpt-5.5",
-                "apiKey": "secret-key",
-                "baseUrl": "https://openai945.cn/",
-                "reasoningEffort": "xhigh",
-                "contextWindow": 128000,
-                "autoCompactTokenLimitPercent": 90,
-                "autoCompactEnabled": False,
-            }
-        ),
-        encoding="utf-8",
+def test_load_settings_ignores_legacy_internal_budget_fields(tmp_path, monkeypatch):
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    write_settings(
+        tmp_path,
+        {
+            "model": "gpt-5.5",
+            "apiKey": "secret-key",
+            "contextWindow": 128000,
+            "autoCompactTokenLimitPercent": 90,
+            "autoCompactEnabled": False,
+        },
     )
 
-    settings = load_settings(path)
+    settings = load_settings()
 
     assert settings.model == "gpt-5.5"
     assert not hasattr(settings, "context_window")
@@ -67,93 +67,58 @@ def test_load_settings_ignores_legacy_internal_budget_fields(tmp_path):
     assert not hasattr(settings, "auto_compact_enabled")
 
 
-def test_load_settings_falls_back_to_env_when_file_missing(tmp_path, monkeypatch):
-    monkeypatch.setenv("OPENAI_API_KEY", "env-key")
-    monkeypatch.setenv("OPENAI_API_BASE", "https://env-base/v1")
-    monkeypatch.setenv("DEFAULT_MODEL", "env-model")
-    monkeypatch.setenv("MODEL_REASONING_EFFORT", "high")
+def test_load_settings_uses_defaults_when_file_missing(tmp_path, monkeypatch):
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
 
-    settings = load_settings(tmp_path / "missing.json")
+    settings = load_settings()
 
     assert settings.settings_exists is False
-    assert settings.model == "env-model"
-    assert settings.api_key == "env-key"
-    assert settings.base_url == "https://env-base/v1"
-    assert settings.reasoning_effort == "high"
+    assert settings.settings_path == tmp_path / ".rind" / "settings.json"
+    assert settings.model == DEFAULT_MODEL
+    assert settings.api_key == ""
+    assert settings.base_url == DEFAULT_BASE_URL
+    assert settings.reasoning_effort == ""
 
 
-def test_load_settings_uses_env_path_override(tmp_path, monkeypatch):
-    path = tmp_path / "rind-settings.json"
-    path.write_text(json.dumps({"apiKey": "path-key"}), encoding="utf-8")
-    monkeypatch.setenv("RIND_SETTINGS_PATH", str(path))
-    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+def test_load_settings_ignores_environment_configuration(tmp_path, monkeypatch):
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    monkeypatch.setenv("RIND_HOME", str(tmp_path / "other-home"))
+    monkeypatch.setenv("RIND_SETTINGS_PATH", str(tmp_path / "other-settings.json"))
+    monkeypatch.setenv("OPENAI_API_KEY", "must-not-be-used")
+    monkeypatch.setenv("OPENAI_API_BASE", "https://must-not-be-used.example/v1")
+    monkeypatch.setenv("DEFAULT_MODEL", "must-not-be-used")
+    monkeypatch.setenv("MODEL_REASONING_EFFORT", "must-not-be-used")
+    path = write_settings(tmp_path, {"apiKey": ""})
 
     settings = load_settings()
 
     assert settings.settings_path == path
-    assert settings.api_key == "path-key"
-    assert settings.model == DEFAULT_MODEL
+    assert settings.api_key == ""
     assert settings.base_url == DEFAULT_BASE_URL
-
-
-def test_load_settings_empty_reasoning_effort_does_not_fallback_to_env(tmp_path, monkeypatch):
-    path = tmp_path / "settings.json"
-    path.write_text(json.dumps({"apiKey": "key", "reasoningEffort": ""}), encoding="utf-8")
-    monkeypatch.setenv("MODEL_REASONING_EFFORT", "xhigh")
-
-    settings = load_settings(path)
-
+    assert settings.model == DEFAULT_MODEL
     assert settings.reasoning_effort == ""
 
 
-def test_ensure_user_settings_template_creates_neutral_template(tmp_path, monkeypatch):
+def test_ensure_user_settings_template_creates_shared_template(tmp_path, monkeypatch):
     monkeypatch.setattr(Path, "home", lambda: tmp_path)
-    monkeypatch.delenv("RIND_SETTINGS_PATH", raising=False)
-    monkeypatch.delenv("RIND_HOME", raising=False)
+    monkeypatch.setenv("RIND_HOME", str(tmp_path / "ignored"))
+    monkeypatch.setenv("RIND_SETTINGS_PATH", str(tmp_path / "ignored.json"))
 
     path = ensure_user_settings_template()
 
     assert path == tmp_path / ".rind" / "settings.json"
     data = json.loads(path.read_text(encoding="utf-8"))
-    assert set(data) == set(DEFAULT_SETTINGS_TEMPLATE) == {"model", "apiKey", "baseUrl", "reasoningEffort"}
-    assert data["apiKey"] == ""
-    assert data["baseUrl"] == ""
-    assert data["reasoningEffort"] == "xhigh"
+    assert data == DEFAULT_SETTINGS_TEMPLATE
 
 
-def test_default_settings_path_uses_rind_home(tmp_path, monkeypatch):
-    rind_home = tmp_path / "portable-home"
-    monkeypatch.setenv("RIND_HOME", str(rind_home))
-    monkeypatch.delenv("RIND_SETTINGS_PATH", raising=False)
-
-    path = ensure_user_settings_template()
-
-    assert path == rind_home / "settings.json"
-    assert path.exists()
-
-
-def test_ensure_user_settings_template_skips_custom_settings_path(tmp_path, monkeypatch):
-    monkeypatch.setenv("RIND_SETTINGS_PATH", str(tmp_path / "custom.json"))
+def test_save_settings_patch_updates_shared_settings(tmp_path, monkeypatch):
     monkeypatch.setattr(Path, "home", lambda: tmp_path)
-
-    assert ensure_user_settings_template() is None
-    assert not (tmp_path / ".rind").exists()
-
-
-def test_save_settings_patch_preserves_existing_values(tmp_path):
-    path = tmp_path / "settings.json"
-    path.write_text(
-        json.dumps(
-            {
-                "model": "old-model",
-                "apiKey": "secret-key",
-                "baseUrl": "https://example.com/v1",
-            }
-        ),
-        encoding="utf-8",
+    path = write_settings(
+        tmp_path,
+        {"model": "old-model", "apiKey": "secret-key", "baseUrl": "https://example.com/v1"},
     )
 
-    settings = save_settings_patch({"model": "new-model"}, path)
+    settings = save_settings_patch({"model": "new-model"})
     data = json.loads(path.read_text(encoding="utf-8"))
 
     assert settings.model == "new-model"
@@ -162,17 +127,16 @@ def test_save_settings_patch_preserves_existing_values(tmp_path):
     assert data["baseUrl"] == "https://example.com/v1"
 
 
-def test_save_settings_patch_creates_missing_settings_file(tmp_path):
-    path = tmp_path / "nested" / "settings.json"
+def test_save_settings_patch_creates_shared_settings_file(tmp_path, monkeypatch):
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
 
-    settings = save_settings_patch({"model": "new-model"}, path)
+    settings = save_settings_patch({"model": "new-model"})
+    path = tmp_path / ".rind" / "settings.json"
     data = json.loads(path.read_text(encoding="utf-8"))
 
     assert settings.settings_exists is True
     assert settings.model == "new-model"
-    assert set(data) == set(DEFAULT_SETTINGS_TEMPLATE)
-    assert data["model"] == "new-model"
-    assert "apiKey" in data
+    assert data["apiKey"] == ""
 
 
 def test_build_default_user_agent_uses_windows_terminal(monkeypatch):

@@ -12,6 +12,17 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 
+def _shared_settings_path(home: Path) -> Path:
+    return home / ".rind" / "settings.json"
+
+
+def _subprocess_env(home: Path) -> dict[str, str]:
+    env = os.environ.copy()
+    env["HOME"] = str(home)
+    env["USERPROFILE"] = str(home)
+    return env
+
+
 def test_resume_mode_flag_is_removed() -> None:
     result = subprocess.run(
         [sys.executable, "main.py", "--resume-mode", "summary"],
@@ -75,10 +86,10 @@ def test_agent_flag_accepts_only_the_current_capsule(tmp_path, monkeypatch) -> N
 
 
 def test_version_does_not_validate_config(tmp_path) -> None:
-    bad_settings = tmp_path / "settings.json"
+    bad_settings = _shared_settings_path(tmp_path)
+    bad_settings.parent.mkdir()
     bad_settings.write_text("{", encoding="utf-8")
-    env = os.environ.copy()
-    env["RIND_SETTINGS_PATH"] = str(bad_settings)
+    env = _subprocess_env(tmp_path)
 
     result = subprocess.run(
         [sys.executable, "main.py", "--version"],
@@ -95,9 +106,7 @@ def test_version_does_not_validate_config(tmp_path) -> None:
 
 
 def test_doctor_runs_without_api_key(tmp_path) -> None:
-    env = os.environ.copy()
-    env.pop("OPENAI_API_KEY", None)
-    env["RIND_SETTINGS_PATH"] = str(tmp_path / "missing.json")
+    env = _subprocess_env(tmp_path)
 
     result = subprocess.run(
         [sys.executable, "main.py", "--doctor"],
@@ -118,10 +127,10 @@ def test_doctor_runs_without_api_key(tmp_path) -> None:
 
 
 def test_doctor_reports_invalid_settings_json(tmp_path) -> None:
-    bad_settings = tmp_path / "settings.json"
+    bad_settings = _shared_settings_path(tmp_path)
+    bad_settings.parent.mkdir()
     bad_settings.write_text("{", encoding="utf-8")
-    env = os.environ.copy()
-    env["RIND_SETTINGS_PATH"] = str(bad_settings)
+    env = _subprocess_env(tmp_path)
 
     result = subprocess.run(
         [sys.executable, "main.py", "--doctor"],
@@ -142,10 +151,10 @@ def test_doctor_reports_invalid_settings_json(tmp_path) -> None:
 
 
 def test_session_rejects_invalid_id_before_config_validation(tmp_path) -> None:
-    bad_settings = tmp_path / "settings.json"
+    bad_settings = _shared_settings_path(tmp_path)
+    bad_settings.parent.mkdir()
     bad_settings.write_text("{", encoding="utf-8")
-    env = os.environ.copy()
-    env["RIND_SETTINGS_PATH"] = str(bad_settings)
+    env = _subprocess_env(tmp_path)
 
     result = subprocess.run(
         [sys.executable, "main.py", "--session", "../escape"],

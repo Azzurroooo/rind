@@ -902,9 +902,10 @@ def test_models_list_failure_returns_protocol_error(capsys):
 
 
 def test_model_set_updates_session_without_changing_settings(capsys, tmp_path, monkeypatch):
-    path = tmp_path / "settings.json"
+    path = tmp_path / ".rind" / "settings.json"
+    path.parent.mkdir()
     path.write_text(json.dumps({"model": "old-model", "apiKey": "secret-value"}), encoding="utf-8")
-    monkeypatch.setenv("RIND_SETTINGS_PATH", str(path))
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
     Config.reload()
 
     class Session(_Session):

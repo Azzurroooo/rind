@@ -1,13 +1,13 @@
 import { app, BrowserWindow, dialog, ipcMain } from "electron"
 import log from "electron-log/main"
 import windowState from "electron-window-state"
+import { randomUUID } from "node:crypto"
+import { mkdir, readFile, rename, unlink, writeFile } from "node:fs/promises"
 import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
-import { readFile, writeFile } from "node:fs/promises"
 
-import type { RuntimeEvent, RuntimeSnapshot } from "../preload/types"
+import type { DesktopSettings, DesktopSettingsPatch, RuntimeEvent, RuntimeSnapshot } from "../preload/types"
 import {
-  getWorkspaceRoot,
   getRuntimeSnapshot,
   initializeRuntime,
   requestRuntime,
@@ -37,13 +37,96 @@ const allowedRuntimeMethods = new Set([
 let mainWindow: BrowserWindow | undefined
 let quitting = false
 let configuredWorkspace = ""
+const maxSettingLength = 4096
 
 function configPath() {
   return join(app.getPath("userData"), "desktop-settings.json")
 }
 
-function runtimeHome() {
-  return join(app.getPath("userData"), "rind-data")
+function runtimeSettingsPath() {
+  return join(app.getPath("home"), ".rind", "settings.json")
+}
+
+function asObject(value: unknown) {
+  return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : null
+}
+
+function asTrimmedString(value: unknown) {
+  return typeof value === "string" ? value.trim() : ""
+}
+
+async function readJsonObject(path: string) {
+  try {
+    const value = asObject(JSON.parse(await readFile(path, "utf8")))
+    if (!value) throw new Error("Expected a JSON object.")
+    return value
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return {}
+    const message = error instanceof Error ? error.message : String(error)
+    throw new Error(`Cannot read Rind settings at ${path}: ${message}`)
+  }
+}
+
+async function writeJsonObject(path: string, value: Record<string, unknown>) {
+  await mkdir(dirname(path), { recursive: true })
+  const temporaryPath = `${path}.${randomUUID()}.tmp`
+  try {
+    await writeFile(temporaryPath, JSON.stringify(value, null, 2) + "\n", "utf8")
+    await rename(temporaryPath, path)
+  } finally {
+    await unlink(temporaryPath).catch(() => undefined)
+  }
+}
+
+function publicSettings(data: Record<string, unknown>): DesktopSettings {
+  return {
+    model: asTrimmedString(data.model),
+    baseUrl: asTrimmedString(data.baseUrl),
+    reasoningEffort: asTrimmedString(data.reasoningEffort),
+    hasApiKey: Boolean(asTrimmedString(data.apiKey)),
+  }
+}
+
+function validateSettingsPatch(value: unknown): DesktopSettingsPatch {
+  const input = asObject(value)
+  if (!input) throw new Error("Settings must be an object.")
+  const patch: DesktopSettingsPatch = {}
+  const keys: Array<keyof DesktopSettingsPatch> = ["apiKey", "model", "baseUrl", "reasoningEffort"]
+  for (const key of keys) {
+    if (!Object.hasOwn(input, key)) continue
+    if (typeof input[key] !== "string") throw new Error(`${key} must be a string.`)
+    const setting = input[key].trim()
+    if (setting.length > maxSettingLength) throw new Error(`${key} is too long.`)
+    patch[key] = setting
+  }
+  if (patch.baseUrl) {
+    let url: URL
+    try {
+      url = new URL(patch.baseUrl)
+    } catch {
+      throw new Error("baseUrl must be a valid HTTP URL.")
+    }
+    if (url.protocol !== "http:" && url.protocol !== "https:") {
+      throw new Error("baseUrl must be a valid HTTP URL.")
+    }
+  }
+  return patch
+}
+
+async function loadRuntimeSettings() {
+  return publicSettings(await readJsonObject(runtimeSettingsPath()))
+}
+
+async function saveRuntimeSettings(value: unknown) {
+  const patch = validateSettingsPatch(value)
+  const path = runtimeSettingsPath()
+  const data = await readJsonObject(path)
+  for (const [key, setting] of Object.entries(patch)) {
+    if (key === "apiKey" && !setting) continue
+    data[key] = setting
+  }
+  await writeJsonObject(path, data)
+  return publicSettings(data)
 }
 
 async function loadWorkspace() {
@@ -56,7 +139,7 @@ async function loadWorkspace() {
 }
 
 async function saveWorkspace(workspace: string) {
-  await writeFile(configPath(), JSON.stringify({ workspace }, null, 2) + "\n", "utf8")
+  await writeJsonObject(configPath(), { workspace })
 }
 
 async function selectWorkspace() {
@@ -66,8 +149,8 @@ async function selectWorkspace() {
   const workspace = result.filePaths[0]
   await saveWorkspace(workspace)
   configuredWorkspace = workspace
-  if (getWorkspaceRoot()) await shutdownRuntime()
-  startRuntime(workspace, runtimeHome())
+  await shutdownRuntime()
+  startRuntime(workspace)
   return workspace
 }
 
@@ -76,7 +159,7 @@ function registerIpc() {
   ipcMain.handle("runtime-restart", async () => {
     if (!configuredWorkspace) throw new Error("Choose a workspace before starting Rind.")
     await shutdownRuntime()
-    startRuntime(configuredWorkspace, runtimeHome())
+    startRuntime(configuredWorkspace)
   })
   ipcMain.handle("runtime-shutdown", () => shutdownRuntime())
   ipcMain.handle("runtime-request", (_event, method: unknown, params: unknown) => {
@@ -85,6 +168,15 @@ function registerIpc() {
     }
     const safeParams = params && typeof params === "object" ? params as Record<string, unknown> : {}
     return requestRuntime(method, safeParams)
+  })
+  ipcMain.handle("settings-get", () => loadRuntimeSettings())
+  ipcMain.handle("settings-save", async (_event, settings: unknown) => {
+    const saved = await saveRuntimeSettings(settings)
+    if (configuredWorkspace) {
+      await shutdownRuntime()
+      startRuntime(configuredWorkspace)
+    }
+    return saved
   })
   ipcMain.handle("open-directory", () => selectWorkspace())
   ipcMain.handle("app-quit", () => app.quit())
@@ -146,7 +238,7 @@ if (!hasLock) {
     subscribeRuntimeEvents(notifyRuntimeEvent)
     registerIpc()
     createMainWindow()
-    if (configuredWorkspace) startRuntime(configuredWorkspace, runtimeHome())
+    if (configuredWorkspace) startRuntime(configuredWorkspace)
   })
 
   app.on("window-all-closed", () => {

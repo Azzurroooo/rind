@@ -75,7 +75,7 @@ pip install -r requirements-runtime.txt
 
 ### Configure
 
-Rind stores user-level data under `RIND_HOME` when set, otherwise under `~/.rind`. The default settings path is `<user-dir>/settings.json`; sessions, user skills, and user `RIND.md` live in the same user-level directory. You can also use environment variables such as `OPENAI_API_KEY`, `OPENAI_API_BASE`, and `DEFAULT_MODEL`.
+Rind reads API configuration only from `~/.rind/settings.json`. Desktop and CLI share this exact file. `RIND_HOME` may still control runtime data such as sessions, but never API configuration.
 
 Minimal `settings.json` example:
 

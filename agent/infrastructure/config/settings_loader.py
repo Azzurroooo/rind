@@ -10,7 +10,6 @@ from pathlib import Path
 from typing import Any
 import uuid
 
-from agent.infrastructure.paths import resolve_rind_home
 from agent.version import __version__
 
 
@@ -83,35 +82,30 @@ class AppSettings:
 def validate_settings(settings: AppSettings) -> None:
     if not settings.api_key:
         raise ValueError(
-            f"OpenAI apiKey is required. Create {settings.settings_path} or set OPENAI_API_KEY."
+            f"OpenAI apiKey is required. Set apiKey in {settings.settings_path}."
         )
 
 
 def default_settings_path() -> Path:
-    override = os.getenv("RIND_SETTINGS_PATH", "").strip()
-    if override:
-        return Path(override).expanduser()
-    return resolve_rind_home() / "settings.json"
+    return (Path.home() / ".rind" / "settings.json").resolve()
 
 
-def load_settings(path: str | Path | None = None) -> AppSettings:
-    settings_path = Path(path).expanduser() if path else default_settings_path()
+def load_settings() -> AppSettings:
+    settings_path = default_settings_path()
     data = _read_json_object(settings_path) if settings_path.exists() else {}
 
     return AppSettings(
         settings_path=settings_path,
         settings_exists=settings_path.exists(),
-        model=_string(data, "model") or os.getenv("DEFAULT_MODEL", "").strip() or DEFAULT_MODEL,
-        api_key=_configured_or_env(data, "apiKey", "OPENAI_API_KEY"),
-        base_url=_string(data, "baseUrl") or os.getenv("OPENAI_API_BASE", "").strip() or DEFAULT_BASE_URL,
-        reasoning_effort=_configured_or_env(data, "reasoningEffort", "MODEL_REASONING_EFFORT"),
+        model=_string(data, "model") or DEFAULT_MODEL,
+        api_key=_string(data, "apiKey"),
+        base_url=_string(data, "baseUrl") or DEFAULT_BASE_URL,
+        reasoning_effort=_string(data, "reasoningEffort"),
         user_agent=DEFAULT_USER_AGENT,
     )
 
 
 def ensure_user_settings_template() -> Path | None:
-    if os.getenv("RIND_SETTINGS_PATH", "").strip():
-        return None
     settings_path = default_settings_path()
     settings_path.parent.mkdir(parents=True, exist_ok=True)
     if not settings_path.exists():
@@ -122,14 +116,14 @@ def ensure_user_settings_template() -> Path | None:
     return settings_path
 
 
-def save_settings_patch(patch: dict[str, Any], path: str | Path | None = None) -> AppSettings:
+def save_settings_patch(patch: dict[str, Any]) -> AppSettings:
     if not isinstance(patch, dict):
         raise ValueError("Settings patch must be a JSON object")
-    settings_path = Path(path).expanduser() if path else default_settings_path()
+    settings_path = default_settings_path()
     data = _read_json_object(settings_path) if settings_path.exists() else dict(DEFAULT_SETTINGS_TEMPLATE)
     data.update(patch)
     _write_json_object(settings_path, data)
-    return load_settings(settings_path)
+    return load_settings()
 
 
 def _read_json_object(path: Path) -> dict[str, Any]:
@@ -158,9 +152,3 @@ def _string(data: dict[str, Any], key: str) -> str:
     if value is None:
         return ""
     return str(value).strip()
-
-
-def _configured_or_env(data: dict[str, Any], key: str, env_key: str) -> str:
-    if key in data:
-        return _string(data, key)
-    return os.getenv(env_key, "").strip()

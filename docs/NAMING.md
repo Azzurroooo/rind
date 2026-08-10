@@ -17,10 +17,9 @@ Inno Setup, documentation, and tests. New code must use these names exactly.
 | Node.js package | `rind-frontend-cli` |
 | Windows installer | `RindSetup-{version}.exe` |
 
-Supported runtime environment variables include:
+`~/.rind/settings.json` is the only API configuration source. Supported runtime environment variables include:
 
 - `RIND_HOME`
-- `RIND_SETTINGS_PATH`
 - `RIND_BASH_PATH`
 - `RIND_PYTHON`
 - `RIND_HEADER_NAME`

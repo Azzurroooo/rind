@@ -27,6 +27,7 @@ type PendingRequest = {
 const listeners = new Set<(snapshot: RuntimeSnapshot) => void>()
 const eventListeners = new Set<(event: RuntimeEvent) => void>()
 const pending = new Map<string, PendingRequest>()
+const maxStderrChars = 4096
 let child: ChildProcessWithoutNullStreams | undefined
 let requestSequence = 0
 let workspaceRoot = ""
@@ -43,6 +44,16 @@ function rejectPending(error: Error) {
     request.reject(error)
     pending.delete(requestId)
   }
+}
+
+function appendStderr(current: string, chunk: unknown) {
+  return `${current}${String(chunk)}`.slice(-maxStderrChars)
+}
+
+function runtimeExitError(code: number | null, signal: NodeJS.Signals | null, stderr: string) {
+  const status = signal ? `signal ${signal}` : `code ${code ?? "unknown"}`
+  const detail = stderr.trim().split(/\r?\n/).filter(Boolean).at(-1)
+  return new Error(detail ? `Runtime exited unexpectedly (${status}): ${detail}` : `Runtime exited unexpectedly (${status}).`)
 }
 
 function handleLine(line: string) {
@@ -90,37 +101,45 @@ function runtimeLaunch() {
   return { command: python, args: [join(repoRoot, "main.py")] }
 }
 
-export function startRuntime(nextWorkspace: string, rindHome: string) {
+export function startRuntime(nextWorkspace: string) {
   if (child) return
   workspaceRoot = nextWorkspace
   setSnapshot({ status: "starting" })
   const launch = runtimeLaunch()
   const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "../../..")
+  const environment: NodeJS.ProcessEnv = {
+    ...process.env,
+    PYTHONIOENCODING: "utf-8",
+    PYTHONPATH: process.env.PYTHONPATH ? `${repoRoot}${delimiter}${process.env.PYTHONPATH}` : repoRoot,
+    PYTHONUTF8: "1",
+  }
   const current = spawn(launch.command, [...launch.args, "app-server", "--stdio", "--cwd", workspaceRoot], {
     cwd: workspaceRoot,
-    env: {
-      ...process.env,
-      PYTHONIOENCODING: "utf-8",
-      PYTHONPATH: process.env.PYTHONPATH ? `${repoRoot}${delimiter}${process.env.PYTHONPATH}` : repoRoot,
-      PYTHONUTF8: "1",
-      RIND_HOME: rindHome,
-    },
+    env: environment,
     stdio: ["pipe", "pipe", "pipe"],
     windowsHide: true,
   })
   child = current
+  let stderr = ""
   createInterface({ input: current.stdout }).on("line", handleLine)
-  current.stderr.on("data", (chunk) => log.warn("runtime stderr", String(chunk).trimEnd()))
+  current.stderr.on("data", (chunk) => {
+    stderr = appendStderr(stderr, chunk)
+    log.warn("runtime stderr", String(chunk).trimEnd())
+  })
   current.once("error", (error) => {
     if (child !== current) return
-    setSnapshot({ status: "error", message: error.message })
-    rejectPending(error)
+    child = undefined
+    const runtimeError = new Error(`Runtime could not start: ${error.message}`)
+    setSnapshot({ status: "error", message: runtimeError.message })
+    rejectPending(runtimeError)
   })
   current.once("exit", (code, signal) => {
     if (child !== current) return
     child = undefined
-    rejectPending(new Error(`Runtime exited (code=${code ?? "null"}, signal=${signal ?? "null"}).`))
-    if (snapshot.status !== "error") setSnapshot({ status: "stopped" })
+    const error = runtimeExitError(code, signal, stderr)
+    rejectPending(error)
+    if (code === 0) setSnapshot({ status: "stopped" })
+    else setSnapshot({ status: "error", message: error.message })
   })
   void initializeRuntime().catch(() => undefined)
 }
@@ -151,7 +170,7 @@ export async function initializeRuntime() {
     return result
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
-    setSnapshot({ status: "error", message })
+    if (snapshot.status !== "error") setSnapshot({ status: "error", message })
     throw error
   }
 }

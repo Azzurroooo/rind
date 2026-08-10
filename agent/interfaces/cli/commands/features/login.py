@@ -4,7 +4,7 @@ from ..router import SlashCommandContext, SlashCommandInfo
 
 
 async def handle_login(context: SlashCommandContext, args: list[str]) -> str:
-    return "Login/config setup is not implemented yet.\nCreate settings.json under RIND_HOME, or ~/.rind when RIND_HOME is unset."
+    return "Login/config setup is not implemented yet.\nSet apiKey in ~/.rind/settings.json."
 
 
 COMMAND = SlashCommandInfo(

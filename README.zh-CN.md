@@ -75,7 +75,7 @@ pip install -r requirements-runtime.txt
 
 ### 配置
 
-Rind 设置了 `RIND_HOME` 时会把用户级数据放在该目录，否则放在 `~/.rind`。默认 settings 路径是 `<用户级目录>/settings.json`；sessions、user skills 和 user `RIND.md` 使用同一个用户级目录语义。也可以使用 `OPENAI_API_KEY`、`OPENAI_API_BASE`、`DEFAULT_MODEL` 等环境变量。
+Rind 的 API 配置只读取 `~/.rind/settings.json`，Desktop 与 CLI 使用同一个文件。`RIND_HOME` 仍可控制 session 等运行数据，但不会影响 API 配置。
 
 最小 `settings.json` 示例：
 

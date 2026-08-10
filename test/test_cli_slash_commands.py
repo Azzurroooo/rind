@@ -540,11 +540,11 @@ async def test_config_does_not_leak_api_key(monkeypatch) -> None:
 
 
 @pytest.mark.asyncio
-async def test_login_mentions_rind_home() -> None:
+async def test_login_mentions_shared_settings_path() -> None:
     result = await SlashCommandRouter().execute("/login", _context())
 
-    assert "RIND_HOME" in result.text
     assert "~/.rind" in result.text
+    assert "settings.json" in result.text
 
 
 @pytest.mark.asyncio
@@ -580,12 +580,13 @@ async def test_doctor_rejects_extra_args() -> None:
 
 @pytest.mark.asyncio
 async def test_model_set_updates_session_without_changing_default_settings(tmp_path, monkeypatch) -> None:
-    path = tmp_path / "settings.json"
+    path = tmp_path / ".rind" / "settings.json"
+    path.parent.mkdir()
     path.write_text(
         json.dumps({"model": "model_a", "apiKey": "secret-value"}),
         encoding="utf-8",
     )
-    monkeypatch.setenv("RIND_SETTINGS_PATH", str(path))
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
     Config.reload()
     runtime = FakeRuntime()
     session = FakeSession()

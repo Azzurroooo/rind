@@ -22,6 +22,14 @@ button:disabled { cursor: not-allowed; opacity: .5; }
 .connection-error { color: #fecaca; background: #991b1b; }
 .workspace { color: #a1a1aa; font-size: 13px; overflow: hidden; }
 .workspace span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.settings-dialog { width: min(460px, calc(100vw - 32px)); padding: 0; border: 1px solid #52525b; border-radius: 6px; color: #e7e5e4; background: #202024; }
+.settings-dialog::backdrop { background: rgb(0 0 0 / 65%); }
+.settings-dialog form { display: grid; gap: 12px; padding: 18px; }
+.settings-heading, .settings-actions { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.settings-dialog label { display: grid; gap: 5px; color: #d4d4d8; font-size: 13px; }
+.settings-dialog input { width: 100%; min-height: 34px; padding: 7px 9px; border: 1px solid #52525b; border-radius: 4px; color: #f4f4f5; background: #18181b; }
+.settings-dialog .subtle { margin: -5px 0 0; }
+.settings-actions { justify-content: flex-end; margin-top: 4px; }
 .layout { display: grid; min-height: 0; grid-template-columns: 240px minmax(0, 1fr); }
 .sidebar { min-height: 0; padding: 12px; border-right: 1px solid #3f3f46; overflow: auto; background: #1c1c20; }
 .sidebar-heading { justify-content: space-between; margin-bottom: 10px; color: #d4d4d8; font-size: 13px; font-weight: 600; }

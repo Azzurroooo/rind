@@ -19,6 +19,10 @@ const api: DesktopApi = {
       return () => ipcRenderer.removeListener("runtime-event", handler)
     },
   },
+  settings: {
+    get: () => ipcRenderer.invoke("settings-get"),
+    save: (patch) => ipcRenderer.invoke("settings-save", patch),
+  },
   openDirectory: () => ipcRenderer.invoke("open-directory"),
   quit: () => ipcRenderer.invoke("app-quit"),
 }

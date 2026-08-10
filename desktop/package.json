@@ -7,7 +7,7 @@
   "main": "./out/main/index.js",
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "test": "node --test scripts/*.test.mjs",
+    "test": "node --test --test-concurrency=1 scripts/*.test.mjs",
     "dev": "electron-vite dev",
     "build": "electron-vite build",
     "preview": "electron-vite preview",

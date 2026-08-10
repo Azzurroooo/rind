@@ -1,6 +1,6 @@
 import "./style.css"
 
-import type { RuntimeEvent, RuntimeMethod, RuntimeSnapshot } from "../preload/types"
+import type { DesktopSettings, RuntimeEvent, RuntimeMethod, RuntimeSnapshot } from "../preload/types"
 
 type SessionSummary = {
   id: string
@@ -26,6 +26,10 @@ type Question = {
 
 type AppState = {
   runtime: RuntimeSnapshot
+  settings: DesktopSettings
+  settingsOpen: boolean
+  settingsSaving: boolean
+  settingsAutoOpened: boolean
   sessionId: string
   model: string
   models: string[]
@@ -44,6 +48,10 @@ if (!root) throw new Error("Renderer root is missing.")
 
 const state: AppState = {
   runtime: { status: "stopped" },
+  settings: { model: "", baseUrl: "", reasoningEffort: "", hasApiKey: false },
+  settingsOpen: false,
+  settingsSaving: false,
+  settingsAutoOpened: false,
   sessionId: "",
   model: "",
   models: [],
@@ -58,7 +66,7 @@ root.innerHTML = `
   <div class="app-shell">
     <header class="topbar">
       <div class="identity"><span class="brand">Rind</span><span id="connection" class="connection">Stopped</span></div>
-      <div class="workspace" title="Current workspace"><span id="workspace-label">No workspace selected</span><button id="choose-workspace" type="button">Workspace</button></div>
+      <div class="workspace" title="Current workspace"><span id="workspace-label">No workspace selected</span><button id="choose-workspace" type="button">Workspace</button><button id="open-settings" type="button">Settings</button></div>
     </header>
     <main class="layout">
       <aside class="sidebar" aria-label="Sessions">
@@ -87,6 +95,17 @@ root.innerHTML = `
         </form>
       </section>
     </main>
+    <dialog id="settings-dialog" class="settings-dialog">
+      <form id="settings-form" method="dialog">
+        <div class="settings-heading"><strong>Runtime settings</strong><button id="close-settings" type="button" title="Close settings">Close</button></div>
+        <label>API key<input id="settings-api-key" type="password" autocomplete="new-password" placeholder="Leave blank to keep the current key" /></label>
+        <p id="settings-key-status" class="subtle"></p>
+        <label>Base URL<input id="settings-base-url" type="url" placeholder="https://api.openai.com/v1" /></label>
+        <label>Model<input id="settings-model" type="text" placeholder="Default model" /></label>
+        <label>Reasoning effort<input id="settings-reasoning" type="text" placeholder="xhigh" /></label>
+        <div class="settings-actions"><button id="cancel-settings" type="button">Cancel</button><button id="save-settings" type="submit">Save</button></div>
+      </form>
+    </dialog>
   </div>
 `
 
@@ -104,6 +123,14 @@ const send = requiredElement<HTMLButtonElement>("send")
 const steer = requiredElement<HTMLButtonElement>("steer")
 const interrupt = requiredElement<HTMLButtonElement>("interrupt")
 const retry = requiredElement<HTMLButtonElement>("retry")
+const settingsDialog = requiredElement<HTMLDialogElement>("settings-dialog")
+const settingsForm = requiredElement<HTMLFormElement>("settings-form")
+const settingsApiKey = requiredElement<HTMLInputElement>("settings-api-key")
+const settingsBaseUrl = requiredElement<HTMLInputElement>("settings-base-url")
+const settingsModel = requiredElement<HTMLInputElement>("settings-model")
+const settingsReasoning = requiredElement<HTMLInputElement>("settings-reasoning")
+const settingsKeyStatus = requiredElement("settings-key-status")
+const saveSettingsButton = requiredElement<HTMLButtonElement>("save-settings")
 
 function requiredElement<T extends HTMLElement = HTMLElement>(id: string) {
   const element = document.getElementById(id) as T | null
@@ -125,7 +152,29 @@ function render() {
   renderModels()
   renderMessages()
   renderQuestion()
+  renderSettings()
   renderControls()
+}
+
+function renderSettings() {
+  if (state.settingsOpen && !settingsDialog.open) settingsDialog.showModal()
+  if (!state.settingsOpen && settingsDialog.open) settingsDialog.close()
+  settingsKeyStatus.textContent = state.settings.hasApiKey ? "An API key is available." : "No API key is configured."
+  saveSettingsButton.disabled = state.settingsSaving
+  saveSettingsButton.textContent = state.settingsSaving ? "Saving..." : "Save"
+}
+
+function populateSettingsForm() {
+  settingsApiKey.value = ""
+  settingsBaseUrl.value = state.settings.baseUrl
+  settingsModel.value = state.settings.model
+  settingsReasoning.value = state.settings.reasoningEffort
+}
+
+function openSettings() {
+  state.settingsOpen = true
+  populateSettingsForm()
+  render()
 }
 
 function renderSessions() {
@@ -237,6 +286,10 @@ async function request(method: RuntimeMethod, params: Record<string, unknown> = 
   }
 }
 
+function runAction(action: () => Promise<unknown>) {
+  void action().catch(() => undefined)
+}
+
 async function loadSessions() {
   const result = asRecord(await request("session.list", { limit: 30 }))
   state.sessions = Array.isArray(result.sessions) ? result.sessions.filter(isSession) : []
@@ -271,6 +324,22 @@ async function loadModels() {
     state.model = typeof result.current_model === "string" ? result.current_model : state.model
   } catch {
     state.models = state.model ? [state.model] : []
+  }
+}
+
+async function loadSettings() {
+  try {
+    state.settings = await window.api.settings.get()
+    if (!state.settings.hasApiKey && !state.settingsAutoOpened) {
+      state.settingsAutoOpened = true
+      state.notice = "Configure the shared ~/.rind/settings.json before using the runtime."
+      openSettings()
+    } else {
+      render()
+    }
+  } catch (error) {
+    state.notice = error instanceof Error ? error.message : String(error)
+    render()
   }
 }
 
@@ -327,9 +396,9 @@ function handleRuntimeEvent(envelope: RuntimeEvent) {
         recommended: typeof event.recommended === "string" ? event.recommended : undefined,
       }
       break
-    case "turn_failed": appendMessage("error", String(event.error || "Turn failed"), String(event.error_source || "Runtime error")); finishTurn(envelope.turnId); void loadSessions().then(render); break
-    case "turn_cancelled": appendMessage("tool", String(event.reason || "Stopped"), "Turn cancelled"); finishTurn(envelope.turnId); void loadSessions().then(render); break
-    case "turn_completed": finishTurn(envelope.turnId); void loadSessions().then(render); break
+    case "turn_failed": appendMessage("error", String(event.error || "Turn failed"), String(event.error_source || "Runtime error")); finishTurn(envelope.turnId); runAction(async () => { await loadSessions(); render() }); break
+    case "turn_cancelled": appendMessage("tool", String(event.reason || "Stopped"), "Turn cancelled"); finishTurn(envelope.turnId); runAction(async () => { await loadSessions(); render() }); break
+    case "turn_completed": finishTurn(envelope.turnId); runAction(async () => { await loadSessions(); render() }); break
   }
   render()
 }
@@ -339,7 +408,7 @@ function finishTurn(turnId: string) {
   if (state.question?.turnId === turnId) state.question = undefined
 }
 
-requiredElement<HTMLFormElement>("composer").addEventListener("submit", (event) => { event.preventDefault(); void sendPrompt() })
+requiredElement<HTMLFormElement>("composer").addEventListener("submit", (event) => { event.preventDefault(); runAction(sendPrompt) })
 
 async function sendPrompt() {
   const input = prompt.value.trim()
@@ -351,17 +420,51 @@ async function sendPrompt() {
   await request(active ? "turn.follow_up" : "turn.start", { input })
 }
 
-steer.addEventListener("click", () => { const input = prompt.value.trim(); if (input) { prompt.value = ""; void request("turn.steer", { input }) } })
-interrupt.addEventListener("click", () => void request("turn.interrupt"))
-requiredElement("choose-workspace").addEventListener("click", () => void window.api.openDirectory())
-requiredElement("new-session").addEventListener("click", () => void createSession())
-requiredElement("compact").addEventListener("click", () => void request("compact"))
-retry.addEventListener("click", () => void window.api.runtime.restart())
-modelSelect.addEventListener("change", () => { const model = modelSelect.value; if (model) void request("model.set", { model }).then(() => { state.model = model; render() }) })
-sessionList.addEventListener("click", (event) => { const target = (event.target as HTMLElement).closest<HTMLButtonElement>("[data-session-id]"); if (target?.dataset.sessionId) void switchSession(target.dataset.sessionId) })
-questionPanel.addEventListener("click", (event) => { const target = (event.target as HTMLElement).closest<HTMLButtonElement>("[data-answer]"); if (target?.dataset.answer) void answerQuestion(target.dataset.answer) })
-questionPanel.addEventListener("submit", (event) => { event.preventDefault(); const answer = requiredElement<HTMLInputElement>("question-answer").value.trim(); if (answer) void answerQuestion(answer) })
-messageStream.addEventListener("click", (event) => { const target = (event.target as HTMLElement).closest<HTMLButtonElement>(".copy-code"); const copy = target?.dataset.copy; if (copy) void navigator.clipboard.writeText(copy) })
+steer.addEventListener("click", () => {
+  const input = prompt.value.trim()
+  if (!input) return
+  prompt.value = ""
+  runAction(() => request("turn.steer", { input }))
+})
+interrupt.addEventListener("click", () => runAction(() => request("turn.interrupt")))
+requiredElement("choose-workspace").addEventListener("click", () => runAction(window.api.openDirectory))
+requiredElement("open-settings").addEventListener("click", () => openSettings())
+requiredElement("new-session").addEventListener("click", () => runAction(createSession))
+requiredElement("compact").addEventListener("click", () => runAction(() => request("compact")))
+retry.addEventListener("click", () => runAction(window.api.runtime.restart))
+modelSelect.addEventListener("change", () => {
+  const model = modelSelect.value
+  if (!model) return
+  runAction(async () => {
+    await request("model.set", { model })
+    state.model = model
+    render()
+  })
+})
+settingsForm.addEventListener("submit", (event) => { event.preventDefault(); runAction(saveSettings) })
+requiredElement("close-settings").addEventListener("click", () => { state.settingsOpen = false; render() })
+requiredElement("cancel-settings").addEventListener("click", () => { state.settingsOpen = false; render() })
+settingsDialog.addEventListener("cancel", () => { state.settingsOpen = false; render() })
+sessionList.addEventListener("click", (event) => {
+  const target = (event.target as HTMLElement).closest<HTMLButtonElement>("[data-session-id]")
+  const nextSessionId = target?.dataset.sessionId
+  if (nextSessionId) runAction(() => switchSession(nextSessionId))
+})
+questionPanel.addEventListener("click", (event) => {
+  const target = (event.target as HTMLElement).closest<HTMLButtonElement>("[data-answer]")
+  const answer = target?.dataset.answer
+  if (answer) runAction(() => answerQuestion(answer))
+})
+questionPanel.addEventListener("submit", (event) => {
+  event.preventDefault()
+  const answer = requiredElement<HTMLInputElement>("question-answer").value.trim()
+  if (answer) runAction(() => answerQuestion(answer))
+})
+messageStream.addEventListener("click", (event) => {
+  const target = (event.target as HTMLElement).closest<HTMLButtonElement>(".copy-code")
+  const copy = target?.dataset.copy
+  if (copy) runAction(() => navigator.clipboard.writeText(copy))
+})
 
 async function createSession() {
   const result = asRecord(await request("session.new"))
@@ -389,6 +492,35 @@ async function answerQuestion(answer: string) {
   render()
 }
 
+async function saveSettings() {
+  const apiKey = settingsApiKey.value.trim()
+  if (!state.settings.hasApiKey && !apiKey) {
+    state.notice = "Enter an API key to start the runtime."
+    render()
+    settingsApiKey.focus()
+    return
+  }
+  state.settingsSaving = true
+  state.notice = "Saving settings and restarting the runtime..."
+  render()
+  try {
+    state.settings = await window.api.settings.save({
+      ...(apiKey ? { apiKey } : {}),
+      model: settingsModel.value.trim(),
+      baseUrl: settingsBaseUrl.value.trim(),
+      reasoningEffort: settingsReasoning.value.trim(),
+    })
+    state.settingsOpen = false
+    state.settingsAutoOpened = true
+    state.notice = "Settings saved."
+  } catch (error) {
+    state.notice = error instanceof Error ? error.message : String(error)
+  } finally {
+    state.settingsSaving = false
+    render()
+  }
+}
+
 const unsubscribeStatus = window.api.runtime.subscribe((snapshot) => {
   state.runtime = snapshot
   if (snapshot.status === "starting") {
@@ -400,7 +532,14 @@ const unsubscribeStatus = window.api.runtime.subscribe((snapshot) => {
     state.bootstrapped = false
     state.notice = "Starting runtime..."
   }
-  if (snapshot.status === "error") state.notice = snapshot.message || "Runtime is unavailable."
+  if (snapshot.status === "error") {
+    state.notice = snapshot.message || "Runtime is unavailable."
+    if (!state.settingsAutoOpened && snapshot.message?.includes("Configuration error")) {
+      state.settingsAutoOpened = true
+      openSettings()
+      return
+    }
+  }
   render()
   if (snapshot.status === "ready" && !state.bootstrapped) {
     state.bootstrapped = true
@@ -413,3 +552,4 @@ if (state.runtime.status !== "stopped") {
   state.bootstrapped = true
   void window.api.runtime.initialize().then(bootstrap).catch(() => { state.bootstrapped = false; render() })
 }
+void loadSettings()

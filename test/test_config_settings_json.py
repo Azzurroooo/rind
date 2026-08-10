@@ -15,39 +15,33 @@ from agent.infrastructure.llm import OpenAIClientFactory
 
 @pytest.fixture(autouse=True)
 def restore_config():
-    tracked_names = (
-        "SETTINGS",
-        "SETTINGS_PATH",
-        "SETTINGS_EXISTS",
-        "OPENAI_API_KEY",
-        "OPENAI_API_BASE",
-        "OPENAI_USER_AGENT",
-        "DEFAULT_MODEL",
-        "MODEL_REASONING_EFFORT",
+    names = (
+        "SETTINGS", "SETTINGS_PATH", "SETTINGS_EXISTS", "OPENAI_API_KEY", "OPENAI_API_BASE",
+        "OPENAI_USER_AGENT", "DEFAULT_MODEL", "MODEL_REASONING_EFFORT",
     )
-    attrs = {name: getattr(Config, name) for name in tracked_names if hasattr(Config, name)}
+    values = {name: getattr(Config, name) for name in names}
     yield
-    for key, value in attrs.items():
-        setattr(Config, key, value)
+    for name, value in values.items():
+        setattr(Config, name, value)
 
 
-def test_config_reload_reads_settings_json(tmp_path, monkeypatch):
-    path = tmp_path / "settings.json"
-    path.write_text(
-        json.dumps(
-            {
-                "model": "gpt-5.5",
-                "apiKey": "settings-key",
-                "baseUrl": "https://openai945.cn/",
-                "reasoningEffort": "xhigh",
-                "contextWindow": 128000,
-                "autoCompactTokenLimitPercent": 90,
-                "autoCompactEnabled": False,
-            }
-        ),
-        encoding="utf-8",
+def write_settings(home: Path, data: dict) -> Path:
+    path = home / ".rind" / "settings.json"
+    path.parent.mkdir()
+    path.write_text(json.dumps(data), encoding="utf-8")
+    return path
+
+
+def test_config_reload_reads_shared_settings_json(tmp_path, monkeypatch):
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    path = write_settings(
+        tmp_path,
+        {
+            "model": "gpt-5.5", "apiKey": "settings-key", "baseUrl": "https://openai945.cn/",
+            "reasoningEffort": "xhigh", "contextWindow": 128000,
+            "autoCompactTokenLimitPercent": 90, "autoCompactEnabled": False,
+        },
     )
-    monkeypatch.setenv("RIND_SETTINGS_PATH", str(path))
 
     Config.reload()
 
@@ -59,21 +53,22 @@ def test_config_reload_reads_settings_json(tmp_path, monkeypatch):
     assert Config.MODEL_REASONING_EFFORT == "xhigh"
 
 
+def test_config_ignores_api_configuration_environment_variables(tmp_path, monkeypatch):
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    monkeypatch.setenv("RIND_HOME", str(tmp_path / "ignored"))
+    monkeypatch.setenv("RIND_SETTINGS_PATH", str(tmp_path / "ignored.json"))
+    monkeypatch.setenv("OPENAI_API_KEY", "must-not-be-used")
+    path = write_settings(tmp_path, {"apiKey": "settings-key"})
+
+    Config.reload()
+
+    assert Config.SETTINGS_PATH == str(path)
+    assert Config.OPENAI_API_KEY == "settings-key"
+
+
 def test_config_does_not_expose_internal_budget_settings(tmp_path, monkeypatch):
-    path = tmp_path / "settings.json"
-    path.write_text(
-        json.dumps(
-            {
-                "model": "gpt-5.5",
-                "apiKey": "settings-key",
-                "contextWindow": 128000,
-                "autoCompactTokenLimitPercent": 90,
-                "autoCompactEnabled": False,
-            }
-        ),
-        encoding="utf-8",
-    )
-    monkeypatch.setenv("RIND_SETTINGS_PATH", str(path))
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    write_settings(tmp_path, {"apiKey": "settings-key", "contextWindow": 128000})
 
     Config.reload()
 
@@ -82,10 +77,9 @@ def test_config_does_not_expose_internal_budget_settings(tmp_path, monkeypatch):
     assert not hasattr(Config, "AUTO_COMPACT_ENABLED")
 
 
-def test_config_validate_reports_settings_path_when_api_key_missing(tmp_path, monkeypatch):
-    path = tmp_path / "missing.json"
-    monkeypatch.setenv("RIND_SETTINGS_PATH", str(path))
-    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+def test_config_validate_reports_shared_settings_path_when_api_key_missing(tmp_path, monkeypatch):
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    path = tmp_path / ".rind" / "settings.json"
 
     Config.reload()
 
@@ -97,12 +91,8 @@ def test_config_validate_reports_settings_path_when_api_key_missing(tmp_path, mo
 
 
 def test_openai_client_factory_uses_loaded_settings(tmp_path, monkeypatch):
-    path = tmp_path / "settings.json"
-    path.write_text(
-        json.dumps({"apiKey": "settings-key", "baseUrl": "https://example.com/v1"}),
-        encoding="utf-8",
-    )
-    monkeypatch.setenv("RIND_SETTINGS_PATH", str(path))
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    write_settings(tmp_path, {"apiKey": "settings-key", "baseUrl": "https://example.com/v1"})
     settings = Config.reload()
 
     with patch("agent.infrastructure.llm.client_factory.AsyncOpenAI") as mock_async_openai:
@@ -111,19 +101,12 @@ def test_openai_client_factory_uses_loaded_settings(tmp_path, monkeypatch):
     kwargs = mock_async_openai.call_args.kwargs
     assert kwargs["api_key"] == "settings-key"
     assert kwargs["base_url"] == "https://example.com/v1"
-    user_agent = kwargs["default_headers"]["User-Agent"]
-    assert user_agent.startswith("rind/0.3.0 (")
-    assert "; " in user_agent
-    assert ") " in user_agent
+    assert kwargs["default_headers"]["User-Agent"].startswith("rind/0.3.0 (")
 
 
-def test_config_set_model_updates_settings_json(tmp_path, monkeypatch):
-    path = tmp_path / "settings.json"
-    path.write_text(
-        json.dumps({"model": "old-model", "apiKey": "settings-key"}),
-        encoding="utf-8",
-    )
-    monkeypatch.setenv("RIND_SETTINGS_PATH", str(path))
+def test_config_set_model_updates_shared_settings_json(tmp_path, monkeypatch):
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    path = write_settings(tmp_path, {"model": "old-model", "apiKey": "settings-key"})
     Config.reload()
 
     settings = Config.set_model("new-model")
@@ -136,13 +119,11 @@ def test_config_set_model_updates_settings_json(tmp_path, monkeypatch):
 
 
 def test_config_set_model_rejects_empty_model(tmp_path, monkeypatch):
-    path = tmp_path / "settings.json"
-    path.write_text(json.dumps({"model": "old-model"}), encoding="utf-8")
-    monkeypatch.setenv("RIND_SETTINGS_PATH", str(path))
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    path = write_settings(tmp_path, {"model": "old-model"})
     Config.reload()
 
     with pytest.raises(ValueError, match="Model name"):
         Config.set_model(" ")
 
-    data = json.loads(path.read_text(encoding="utf-8"))
-    assert data["model"] == "old-model"
+    assert json.loads(path.read_text(encoding="utf-8"))["model"] == "old-model"

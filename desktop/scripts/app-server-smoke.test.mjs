@@ -1,6 +1,6 @@
 import assert from "node:assert/strict"
 import { spawn } from "node:child_process"
-import { mkdtemp, rm } from "node:fs/promises"
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
 import { once } from "node:events"
 import { dirname, join, resolve } from "node:path"
 import readline from "node:readline"
@@ -11,14 +11,16 @@ import { fileURLToPath } from "node:url"
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..")
 
 test("app-server supports desktop session lifecycle over JSONL", async () => {
-  const rindHome = await mkdtemp(join(tmpdir(), "rind-desktop-smoke-"))
+  const home = await mkdtemp(join(tmpdir(), "rind-desktop-smoke-"))
+  const rindHome = join(home, ".rind")
+  await mkdir(rindHome, { recursive: true })
+  await writeFile(join(rindHome, "settings.json"), JSON.stringify({ apiKey: "desktop-smoke-key" }), "utf8")
   const runtime = spawn(process.env.RIND_PYTHON || "python", ["main.py", "app-server", "--stdio", "--cwd", repoRoot], {
     cwd: repoRoot,
     env: {
       ...process.env,
-      OPENAI_API_KEY: "desktop-smoke-key",
-      RIND_HOME: rindHome,
-      RIND_SETTINGS_PATH: join(rindHome, "settings.json"),
+      HOME: home,
+      USERPROFILE: home,
     },
     stdio: ["pipe", "pipe", "pipe"],
     windowsHide: true,
@@ -77,6 +79,6 @@ test("app-server supports desktop session lifecycle over JSONL", async () => {
   } finally {
     if (runtime.exitCode === null) runtime.kill()
     lines.close()
-    await rm(rindHome, { recursive: true, force: true })
+    await rm(home, { recursive: true, force: true })
   }
 })
