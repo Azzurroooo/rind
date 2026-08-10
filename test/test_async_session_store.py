@@ -189,6 +189,20 @@ async def test_switch_session_does_not_create_missing_target(temp_session_dir):
 
 
 @pytest.mark.asyncio
+async def test_create_session_rebinds_store_and_indexes_new_session(temp_session_dir):
+    store = JsonlSessionStore(session_dir=temp_session_dir, session_id="first", model="model-a")
+    await store.initialize()
+    await store.persist_message("user", "existing message")
+
+    result = await store.create_session()
+
+    assert result["session_id"] != "first"
+    assert store.session_id == result["session_id"]
+    assert [message for message in await store.get_messages_slice() if message["role"] != "system"] == []
+    assert (Path(temp_session_dir) / result["session_id"] / "meta.json").is_file()
+
+
+@pytest.mark.asyncio
 async def test_switch_session_rejects_corrupt_target_and_keeps_current(temp_session_dir):
     store = JsonlSessionStore(session_dir=temp_session_dir, session_id="first")
     await store.initialize()

@@ -521,6 +521,20 @@ class JsonlSessionStore(SessionStore):
                 set_active_session_context(str(self._session_root), str(self._session_id))
             return await asyncio.to_thread(self._session_info_sync)
 
+    async def create_session(self) -> dict[str, Any]:
+        """Create and bind a new session without changing its storage format."""
+        async with self._write_lock:
+            await asyncio.to_thread(self._setup_paths)
+            await asyncio.to_thread(self._discard_if_empty_sync)
+            await asyncio.to_thread(self._create_session, None)
+            await asyncio.to_thread(self._initialize_history_sync)
+
+            if self._session_root and self._session_id:
+                from agent.infrastructure.planning.store import set_active_session_context
+
+                set_active_session_context(str(self._session_root), str(self._session_id))
+            return await asyncio.to_thread(self._session_info_sync)
+
     async def create_team_project(self, *, project_id: str | None = None) -> dict[str, Any]:
         from agent.infrastructure.team import initialize_team_project
 

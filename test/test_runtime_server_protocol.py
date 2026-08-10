@@ -288,6 +288,8 @@ def test_initialize_response_includes_resume_preview_when_history_exists(capsys)
         "steering",
         "follow_up",
         "input_queue",
+        "session_list",
+        "session_create",
         "session_switch",
         "tool_input_stream",
     ]
@@ -437,6 +439,51 @@ def test_session_switch_rejects_invalid_request_and_unsupported_runtime(capsys):
     messages = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
     assert messages[0]["error"]["type"] == "InvalidRequest"
     assert messages[1]["error"]["type"] == "UnsupportedOperation"
+
+
+def test_session_list_returns_recent_sessions_and_current_id(capsys):
+    class Session(_Session):
+        async def list_recent_sessions(self, limit=10):
+            assert limit == 3
+            return [{"id": "session-1", "title": "First"}]
+
+    async def run():
+        server = StdioRuntimeServer(_Runtime(), Session())
+        await server._dispatch(
+            {"request_id": 27, "method": "session.list", "params": {"limit": 3}}
+        )
+
+    asyncio.run(run())
+
+    message = json.loads(capsys.readouterr().out)
+    assert message["result"] == {
+        "sessions": [{"id": "session-1", "title": "First"}],
+        "current_session_id": "s1",
+    }
+
+
+def test_session_new_returns_new_metadata_and_preview(capsys):
+    class Runtime(_Runtime):
+        async def create_session(self):
+            return {"session_id": "new-session", "model": "new-model"}
+
+    class Session(_Session):
+        async def get_messages_slice(self):
+            return []
+
+    async def run():
+        server = StdioRuntimeServer(Runtime(), Session())
+        await server._dispatch({"request_id": 28, "method": "session.new", "params": {}})
+
+    asyncio.run(run())
+
+    message = json.loads(capsys.readouterr().out)
+    assert message["result"] == {
+        "session_id": "new-session",
+        "model": "new-model",
+        "usage": None,
+        "resume_preview": "",
+    }
 
 
 def test_slash_execute_reuses_cli_router(capsys):

@@ -223,6 +223,36 @@ class AgentRuntime:
                 "model": target_model,
             }
 
+    async def create_session(self) -> dict[str, object]:
+        """Create and bind a new session while the runtime is idle."""
+        await self.initialize()
+        if self._accepting_inputs or self._active_turn_id:
+            raise RuntimeError("Cannot create a session while a turn is active.")
+
+        async with self._turn_lock:
+            if self._accepting_inputs or self._active_turn_id:
+                raise RuntimeError("Cannot create a session while a turn is active.")
+            create = getattr(self._session_store, "create_session", None)
+            if not callable(create):
+                raise RuntimeError("Session creation is unsupported by this session store.")
+            self.discard_pending_inputs()
+            try:
+                result = await create()
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                raise PersistenceError(
+                    f"Failed to create session: {exc}",
+                    code=type(exc).__name__,
+                ) from exc
+
+            target_model = self._sync_turn_runner_model()
+            self.discard_pending_inputs()
+            return dict(result) if isinstance(result, dict) else {
+                "session_id": getattr(self._session_store, "session_id", None),
+                "model": target_model,
+            }
+
     async def compact_context(self, reason: str = "manual", cancellation_token: CancellationToken | None = None) -> dict:
         """Manually compact the current session through the turn runner."""
         await self.initialize()

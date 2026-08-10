@@ -145,6 +145,10 @@ class StdioRuntimeServer:
                 await self._set_model(request)
             elif method == "session.switch":
                 await self._switch_session(request)
+            elif method == "session.list":
+                await self._list_sessions(request)
+            elif method == "session.new":
+                await self._new_session(request)
             elif method == "background.list":
                 await self._list_backgrounds(request)
             elif method == "background.output":
@@ -339,6 +343,42 @@ class StdioRuntimeServer:
             request,
             response,
         )
+
+    async def _list_sessions(self, request: dict[str, Any]) -> None:
+        params = request.get("params") if isinstance(request.get("params"), dict) else {}
+        limit = params.get("limit", 20)
+        if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 100:
+            await self._respond_error(request, "session.list limit must be an integer from 1 to 100.", "InvalidRequest")
+            return
+        list_sessions = getattr(self._session, "list_recent_sessions", None)
+        if not callable(list_sessions):
+            await self._respond_error(request, "Session listing is unavailable.", "UnsupportedOperation")
+            return
+        sessions = await list_sessions(limit=limit)
+        await self._respond(
+            request,
+            {
+                "sessions": sessions,
+                "current_session_id": getattr(self._session, "session_id", None),
+            },
+        )
+
+    async def _new_session(self, request: dict[str, Any]) -> None:
+        create = getattr(self._runtime, "create_session", None)
+        if not callable(create):
+            await self._respond_error(request, "Session creation is unavailable.", "UnsupportedOperation")
+            return
+        result = await create()
+        usage = result.get("assistant_usage") or result.get("usage")
+        response = {
+            "session_id": result.get("session_id") or getattr(self._session, "session_id", None),
+            "model": result.get("model") or getattr(self._session, "model", None),
+            "usage": usage if isinstance(usage, dict) else None,
+            "resume_preview": await self._resume_preview(),
+        }
+        if self._goal_enabled:
+            response["goal"] = result.get("goal")
+        await self._respond(request, response)
 
     async def _goal_get(self, request: dict[str, Any]) -> None:
         if not self._goal_enabled:

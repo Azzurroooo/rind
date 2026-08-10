@@ -114,6 +114,36 @@ async def test_runtime_switch_session_rejects_active_turn():
 
 
 @pytest.mark.asyncio
+async def test_runtime_create_session_updates_model_and_clears_pending_inputs():
+    class NewSession(RecordingSession):
+        async def create_session(self):
+            self.session_id = "session_2"
+            self.model = "model-2"
+            return {"session_id": self.session_id, "model": self.model}
+
+    class ModelRunner(CompletingRunner):
+        def __init__(self):
+            super().__init__()
+            self.model = "model-1"
+
+        def set_model(self, model):
+            self.model = model
+
+    session = NewSession()
+    runner = ModelRunner()
+    runtime = AgentRuntime(runner, session)
+    await runtime.initialize()
+    runtime._steering_queue.append("old steering")
+    runtime._follow_up_queue.append("old follow-up")
+
+    result = await runtime.create_session()
+
+    assert result == {"session_id": "session_2", "model": "model-2"}
+    assert runner.model == "model-2"
+    assert runtime.input_queue_counts() == {"steering": 0, "follow_up": 0}
+
+
+@pytest.mark.asyncio
 async def test_runtime_input_queue_validation_and_independent_limits():
     runtime = AgentRuntime(CompletingRunner(), RecordingSession())
 

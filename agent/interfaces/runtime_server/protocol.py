@@ -16,6 +16,8 @@ CAPABILITIES = (
     "steering",
     "follow_up",
     "input_queue",
+    "session_list",
+    "session_create",
     "session_switch",
     "tool_input_stream",
     "background_monitor",

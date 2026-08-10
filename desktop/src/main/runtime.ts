@@ -1,16 +1,21 @@
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process"
 import { createInterface } from "node:readline"
-import { dirname, join } from "node:path"
+import { delimiter, dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
 import log from "electron-log/main"
 
-import type { RuntimeSnapshot } from "../preload/types"
+import type { RuntimeEvent, RuntimeSnapshot } from "../preload/types"
 
-type RuntimeResponse = {
-  kind?: string
-  request_id?: string
+type RuntimeMessage = {
+  kind?: "response" | "event"
+  request_id?: string | number
   result?: unknown
-  error?: { message?: string }
+  error?: { message?: string; type?: string }
+  event?: Record<string, unknown>
+  event_type?: string
+  sequence?: number
+  session_id?: string
+  turn_id?: string
 }
 
 type PendingRequest = {
@@ -20,13 +25,15 @@ type PendingRequest = {
 }
 
 const listeners = new Set<(snapshot: RuntimeSnapshot) => void>()
+const eventListeners = new Set<(event: RuntimeEvent) => void>()
 const pending = new Map<string, PendingRequest>()
 let child: ChildProcessWithoutNullStreams | undefined
 let requestSequence = 0
+let workspaceRoot = ""
 let snapshot: RuntimeSnapshot = { status: "stopped" }
 
 function setSnapshot(next: RuntimeSnapshot) {
-  snapshot = next
+  snapshot = { ...next, workspace: workspaceRoot || undefined }
   for (const listener of listeners) listener(snapshot)
 }
 
@@ -39,41 +46,69 @@ function rejectPending(error: Error) {
 }
 
 function handleLine(line: string) {
-  let message: RuntimeResponse
+  let message: RuntimeMessage
   try {
-    message = JSON.parse(line) as RuntimeResponse
+    message = JSON.parse(line) as RuntimeMessage
   } catch {
     log.warn("runtime emitted invalid JSON", line)
     return
   }
 
-  if (message.kind !== "response" || !message.request_id) return
-  const request = pending.get(message.request_id)
+  if (message.kind === "event" && message.event) {
+    for (const listener of eventListeners) listener({
+      type: String(message.event_type || message.event.type || ""),
+      sequence: Number(message.sequence || 0),
+      sessionId: String(message.session_id || ""),
+      turnId: String(message.turn_id || ""),
+      event: message.event,
+    })
+    return
+  }
+  if (message.kind !== "response" || message.request_id === undefined) return
+  const requestId = String(message.request_id)
+  const request = pending.get(requestId)
   if (!request) return
-  pending.delete(message.request_id)
+  pending.delete(requestId)
   clearTimeout(request.timer)
   if (message.error) {
-    request.reject(new Error(message.error.message || "Runtime request failed."))
+    const error = new Error(message.error.message || "Runtime request failed.")
+    error.name = message.error.type || "RuntimeError"
+    request.reject(error)
     return
   }
   request.resolve(message.result)
 }
 
-function fakeRuntimePath() {
-  return join(dirname(fileURLToPath(import.meta.url)), "../../scripts/fake-runtime.mjs")
+function runtimeLaunch() {
+  const configuredPath = process.env.RIND_RUNTIME_PATH
+  if (configuredPath) return { command: configuredPath, args: [] }
+  if (!process.env.ELECTRON_RENDERER_URL) {
+    return { command: join(process.resourcesPath, "runtime", "rind-runtime.exe"), args: [] }
+  }
+  const python = process.env.RIND_PYTHON || (process.platform === "win32" ? "python" : "python3")
+  const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "../../..")
+  return { command: python, args: [join(repoRoot, "main.py")] }
 }
 
-export function startRuntime() {
+export function startRuntime(nextWorkspace: string, rindHome: string) {
   if (child) return
+  workspaceRoot = nextWorkspace
   setSnapshot({ status: "starting" })
-  child = spawn(process.execPath, [fakeRuntimePath()], {
-    cwd: dirname(fakeRuntimePath()),
-    env: { ...process.env, ELECTRON_RUN_AS_NODE: "1" },
+  const launch = runtimeLaunch()
+  const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "../../..")
+  const current = spawn(launch.command, [...launch.args, "app-server", "--stdio", "--cwd", workspaceRoot], {
+    cwd: workspaceRoot,
+    env: {
+      ...process.env,
+      PYTHONIOENCODING: "utf-8",
+      PYTHONPATH: process.env.PYTHONPATH ? `${repoRoot}${delimiter}${process.env.PYTHONPATH}` : repoRoot,
+      PYTHONUTF8: "1",
+      RIND_HOME: rindHome,
+    },
     stdio: ["pipe", "pipe", "pipe"],
     windowsHide: true,
   })
-
-  const current = child
+  child = current
   createInterface({ input: current.stdout }).on("line", handleLine)
   current.stderr.on("data", (chunk) => log.warn("runtime stderr", String(chunk).trimEnd()))
   current.once("error", (error) => {
@@ -84,12 +119,13 @@ export function startRuntime() {
   current.once("exit", (code, signal) => {
     if (child !== current) return
     child = undefined
-    rejectPending(new Error(`Runtime exited before replying (code=${code ?? "null"}, signal=${signal ?? "null"}).`))
+    rejectPending(new Error(`Runtime exited (code=${code ?? "null"}, signal=${signal ?? "null"}).`))
     if (snapshot.status !== "error") setSnapshot({ status: "stopped" })
   })
+  void initializeRuntime().catch(() => undefined)
 }
 
-function request(method: string, params: Record<string, unknown> = {}) {
+function request(method: string, params: Record<string, unknown> = {}, timeoutMs = 30_000) {
   if (!child?.stdin.writable) return Promise.reject(new Error("Runtime is not running."))
   const requestId = `desktop-${++requestSequence}`
   const message = JSON.stringify({ request_id: requestId, method, params }) + "\n"
@@ -97,7 +133,7 @@ function request(method: string, params: Record<string, unknown> = {}) {
     const timer = setTimeout(() => {
       pending.delete(requestId)
       reject(new Error(`Runtime request timed out: ${method}.`))
-    }, 5000)
+    }, timeoutMs)
     pending.set(requestId, { resolve, reject, timer })
     child?.stdin.write(message, (error) => {
       if (!error) return
@@ -120,6 +156,11 @@ export async function initializeRuntime() {
   }
 }
 
+export function requestRuntime(method: string, params: Record<string, unknown> = {}) {
+  const timeout = method === "turn.start" || method === "slash.execute" ? 15 * 60_000 : 30_000
+  return request(method, params, timeout)
+}
+
 export async function shutdownRuntime() {
   const current = child
   if (!current) {
@@ -127,10 +168,11 @@ export async function shutdownRuntime() {
     return { ok: true }
   }
   try {
-    await request("shutdown")
+    await request("shutdown", {}, 5_000)
   } finally {
     if (child === current) current.kill()
     child = undefined
+    rejectPending(new Error("Runtime stopped."))
     setSnapshot({ status: "stopped" })
   }
   return { ok: true }
@@ -140,4 +182,17 @@ export function subscribeRuntime(listener: (snapshot: RuntimeSnapshot) => void) 
   listeners.add(listener)
   listener(snapshot)
   return () => listeners.delete(listener)
+}
+
+export function subscribeRuntimeEvents(listener: (event: RuntimeEvent) => void) {
+  eventListeners.add(listener)
+  return () => eventListeners.delete(listener)
+}
+
+export function getWorkspaceRoot() {
+  return workspaceRoot
+}
+
+export function getRuntimeSnapshot() {
+  return snapshot
 }
