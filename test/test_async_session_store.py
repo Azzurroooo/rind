@@ -398,6 +398,39 @@ async def test_resume_latest_and_recent_sessions_ignore_invalid_index_ids(tmp_pa
     assert not (tmp_path / "escape").exists()
 
 
+@pytest.mark.asyncio
+async def test_list_recent_sessions_only_returns_current_workspace(tmp_path):
+    session_root = tmp_path / "sessions"
+    workspace_a = tmp_path / "workspace-a"
+    workspace_b = tmp_path / "workspace-b"
+    workspace_a.mkdir()
+    workspace_b.mkdir()
+
+    store_a = JsonlSessionStore(
+        session_dir=str(session_root),
+        session_id="session_a",
+        workspace_root=str(workspace_a),
+    )
+    await store_a.initialize()
+    await store_a.persist_message("user", "session in workspace a")
+    await store_a.persist_message("assistant", "reply in workspace a")
+
+    store_b = JsonlSessionStore(
+        session_dir=str(session_root),
+        session_id="session_b",
+        workspace_root=str(workspace_b),
+    )
+    await store_b.initialize()
+    await store_b.persist_message("user", "session in workspace b")
+    await store_b.persist_message("assistant", "reply in workspace b")
+
+    recent_a = await store_a.list_recent_sessions(limit=10)
+    recent_b = await store_b.list_recent_sessions(limit=10)
+
+    assert [item["id"] for item in recent_a] == ["session_a"]
+    assert [item["id"] for item in recent_b] == ["session_b"]
+
+
 def test_session_files_read_jsonl_waits_for_active_writer(tmp_path):
     path = tmp_path / "messages.jsonl"
     files = SessionFiles()

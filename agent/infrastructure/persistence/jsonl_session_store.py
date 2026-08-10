@@ -352,19 +352,24 @@ class JsonlSessionStore(SessionStore):
             return None
 
         scoped = []
-        current_root = os.path.normcase(os.path.realpath(os.path.abspath(self._resolve_workspace_root())))
         for session in sessions:
-            entry_root = session.get("workspace_root")
-            if isinstance(entry_root, str) and entry_root.strip():
-                session_root = os.path.normcase(os.path.realpath(os.path.abspath(entry_root)))
-                if current_root == session_root:
-                    session_id = session.get("id")
-                    if isinstance(session_id, str) and self._is_supported_session_id(session_id):
-                        scoped.append(session)
+            if not self._matches_current_workspace(session):
+                continue
+            session_id = session.get("id")
+            if isinstance(session_id, str) and self._is_supported_session_id(session_id):
+                scoped.append(session)
         if not scoped:
             return None
         scoped.sort(key=lambda s: s.get("updated_at") or "")
         return scoped[-1].get("id")
+
+    def _matches_current_workspace(self, entry: dict[str, Any]) -> bool:
+        entry_root = entry.get("workspace_root")
+        if not isinstance(entry_root, str) or not entry_root.strip():
+            return False
+        session_root = os.path.normcase(os.path.realpath(os.path.abspath(entry_root)))
+        current_root = os.path.normcase(os.path.realpath(os.path.abspath(self._resolve_workspace_root())))
+        return session_root == current_root
 
     def _is_supported_session_id(self, session_id: str) -> bool:
         try:
@@ -694,6 +699,7 @@ class JsonlSessionStore(SessionStore):
                 and s.get("updated_at")
                 and _valid_session_id_value(s.get("id"))
                 and _has_conversation_messages(s)
+                and self._matches_current_workspace(s)
             ]
             sessions.sort(key=lambda s: s.get("updated_at") or "", reverse=True)
             return sessions[:limit]
