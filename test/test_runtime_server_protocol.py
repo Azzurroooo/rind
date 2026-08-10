@@ -131,8 +131,23 @@ def test_runtime_events_use_versioned_envelope(capsys):
 def test_golden_event_fixture_matches_python_envelope():
     fixture = PROJECT_ROOT / "test" / "fixtures" / "runtime_protocol.golden.jsonl"
     messages = [json.loads(line) for line in fixture.read_text(encoding="utf-8").splitlines()]
+    events = [message for message in messages if message["kind"] == "event"]
+    responses = [message for message in messages if message["kind"] == "response"]
 
-    assert [event_envelope(message["event"], message["sequence"]) for message in messages] == messages
+    assert [event_envelope(message["event"], message["sequence"]) for message in events] == events
+    assert [message["sequence"] for message in events] == [1, 2, 3, 4, 5]
+    assert responses == [
+        {
+            "kind": "response",
+            "request_id": "turn-1",
+            "result": {"ok": True, "session_id": "session-1", "turn_id": "turn-1"},
+        },
+        {
+            "kind": "response",
+            "request_id": "interrupt-2",
+            "error": {"type": "TurnNotActive", "message": "No active turn to interrupt."},
+        },
+    ]
 
 
 def test_event_envelope_separates_durable_and_incremental_events():
@@ -275,7 +290,6 @@ def test_initialize_response_includes_resume_preview_when_history_exists(capsys)
         "input_queue",
         "session_switch",
         "tool_input_stream",
-        "background_monitor",
     ]
     assert result["session_id"] == "s1"
     assert result["model"] == "m1"

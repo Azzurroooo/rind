@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import argparse
 import asyncio
 import inspect
 import json
@@ -12,15 +11,9 @@ from collections.abc import Callable
 from typing import Any
 
 from agent.application.runtime import InputQueueError
-from agent.bootstrap import build_agent_container
 from agent.domain.cancellation import CancellationTokenSource
 from agent.domain.events import UserQuestionRequestedEvent
-from agent.infrastructure.config import Config, validate_settings
 from agent.infrastructure.paths import validate_session_id
-from agent.infrastructure.tools.builtin.shell.tool import (
-    list_backgrounds as background_list,
-    snapshot_background as background_output,
-)
 from agent.interfaces.cli.commands import SlashCommandContext, SlashCommandResult, SlashCommandRouter
 from agent.interfaces.cli.commands.model_control import set_active_model
 from agent.interfaces.cli.ui.resume_preview import render_resume_preview
@@ -83,6 +76,9 @@ class StdioRuntimeServer:
         self._current_cancel: CancellationTokenSource | None = None
         self._initialized = False
         self._sequence = 0
+        self._stopping = False
+        self._shutdown_request: dict[str, Any] | None = None
+        self._shutdown_response_sent = False
         self._install_question_responder()
 
     async def run(self) -> int:
@@ -102,12 +98,35 @@ class StdioRuntimeServer:
         while True:
             request = await self._requests.get()
             if request is None:
+                await self._respond_to_shutdown()
                 return 0
             method = str(request.get("method") or "")
             if method == "shutdown":
-                await self._respond(request, {"ok": True})
-                return 0
+                self._begin_shutdown(request)
+                continue
+            if self._stopping:
+                await self._respond_error(
+                    request,
+                    "Runtime is shutting down.",
+                    "ServerStopping",
+                )
+                continue
             await self._dispatch(request)
+
+    def _begin_shutdown(self, request: dict[str, Any] | None = None) -> bool:
+        if self._stopping:
+            return False
+        self._stopping = True
+        self._shutdown_request = request
+        self._interrupt_current()
+        self._requests.put_nowait(None)
+        return True
+
+    async def _respond_to_shutdown(self) -> None:
+        if self._shutdown_request is None or self._shutdown_response_sent:
+            return
+        self._shutdown_response_sent = True
+        await self._respond(self._shutdown_request, {"ok": True})
 
     async def _dispatch(self, request: dict[str, Any]) -> None:
         method = str(request.get("method") or "")
@@ -152,7 +171,7 @@ class StdioRuntimeServer:
             "session_id": getattr(self._session, "session_id", None),
             "model": getattr(self._session, "model", None),
             "protocol_version": PROTOCOL_VERSION,
-            "capabilities": list(CAPABILITIES) + (["goals"] if self._goal_enabled else []),
+            "capabilities": self._capabilities(),
             "resume_preview": await self._resume_preview(),
             "slash_commands": self._slash_command_infos(),
         }
@@ -162,6 +181,14 @@ class StdioRuntimeServer:
             request,
             result,
         )
+
+    def _capabilities(self) -> list[str]:
+        capabilities = list(CAPABILITIES)
+        if self._background_list is None or self._background_output is None:
+            capabilities.remove("background_monitor")
+        if self._goal_enabled:
+            capabilities.append("goals")
+        return capabilities
 
     def _slash_command_infos(self) -> list[dict[str, Any]]:
         return [
@@ -452,24 +479,51 @@ class StdioRuntimeServer:
         while True:
             line = await asyncio.to_thread(sys.stdin.readline)
             if line == "":
-                await self._requests.put(None)
+                self._begin_shutdown()
                 return
-            message = self._parse_line(line)
-            if message is None:
+            message, parse_error = self._parse_line(line)
+            if parse_error is not None:
+                await self._respond_error({}, parse_error, "ParseError")
+                continue
+            request_error = self._validate_request(message)
+            if request_error is not None:
+                await self._respond_error(message, request_error, "InvalidRequest")
                 continue
             if await self._handle_control_message(message):
                 continue
             await self._requests.put(message)
 
-    def _parse_line(self, line: str) -> dict[str, Any] | None:
+    def _parse_line(self, line: str) -> tuple[dict[str, Any], str | None]:
         try:
             value = json.loads(line)
         except json.JSONDecodeError:
-            return None
-        return value if isinstance(value, dict) else None
+            return {}, "Invalid JSON request."
+        if not isinstance(value, dict):
+            return {}, "JSONL request must be an object."
+        return value, None
+
+    def _validate_request(self, request: dict[str, Any]) -> str | None:
+        request_id = request.get("request_id")
+        if isinstance(request_id, bool) or request_id is None:
+            return "request_id is required."
+        if isinstance(request_id, str) and not request_id.strip():
+            return "request_id must not be empty."
+        if not isinstance(request_id, str | int | float):
+            return "request_id must be a string or number."
+        method = request.get("method")
+        if not isinstance(method, str) or not method.strip():
+            return "method is required."
+        params = request.get("params")
+        if params is not None and not isinstance(params, dict):
+            return "params must be an object."
+        return None
 
     async def _handle_control_message(self, message: dict[str, Any]) -> bool:
         method = str(message.get("method") or "")
+        if method == "shutdown":
+            if not self._begin_shutdown(message):
+                await self._respond_error(message, "Runtime is shutting down.", "ServerStopping")
+            return True
         if method == "turn.steer":
             await self._submit_queued_input(message, self._runtime.submit_steering)
             return True
@@ -477,7 +531,9 @@ class StdioRuntimeServer:
             await self._submit_queued_input(message, self._runtime.submit_follow_up)
             return True
         if method == "turn.interrupt":
-            self._interrupt_current()
+            if not self._interrupt_current():
+                await self._respond_error(message, "No active turn to interrupt.", "TurnNotActive")
+                return True
             await self._respond(message, {"ok": True})
             return True
         if method == "user_question.respond":
@@ -612,16 +668,20 @@ class StdioRuntimeServer:
             },
         )
 
-    def _interrupt_current(self) -> None:
+    def _interrupt_current(self) -> bool:
+        interrupted = False
         discard_inputs = getattr(self._runtime, "discard_pending_inputs", None)
         if callable(discard_inputs):
             discard_inputs()
         if self._current_cancel and not self._current_cancel.token.is_cancelled:
             self._current_cancel.cancel("User interrupted")
+            interrupted = True
         for future in self._pending_answers.values():
             if not future.done():
                 future.set_result("")
+                interrupted = True
         self._pending_answers.clear()
+        return interrupted
 
     async def _receive_user_answer(self, message: dict[str, Any]) -> None:
         params = message.get("params") if isinstance(message.get("params"), dict) else {}
@@ -654,64 +714,10 @@ class StdioRuntimeServer:
         await self._writer.send(event_envelope(event, self._sequence))
 
 
-def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Rind headless runtime server")
-    parser.add_argument("--debug", action="store_true")
-    parser.add_argument("--session", type=str, default=None)
-    parser.add_argument("-c", "--resume-latest", action="store_true")
-    parser.add_argument("--session-dir", type=str, default=None)
-    return parser
-
-
-async def async_main(argv: list[str] | None = None) -> int:
-    args = build_parser().parse_args(argv)
-    if args.session is not None:
-        try:
-            args.session = validate_session_id(args.session)
-        except ValueError as exc:
-            print(f"Session error: {exc}", file=sys.stderr)
-            return 1
-
-    try:
-        Config.ensure_user_settings_template()
-        settings = Config.reload()
-        validate_settings(settings)
-    except ValueError as exc:
-        print(f"Configuration error: {exc}", file=sys.stderr)
-        return 1
-
-    try:
-        container = build_agent_container(
-            settings=settings,
-            debug=args.debug,
-            session_dir=args.session_dir,
-            session_id=args.session,
-            resume_latest=args.resume_latest,
-            enable_goal=True,
-        )
-    except ValueError as exc:
-        print(f"Startup error: {exc}", file=sys.stderr)
-        return 1
-    server = StdioRuntimeServer(
-        container.runtime,
-        container.session_store,
-        debug=args.debug,
-        model_client_factory=container.provider_client_factory.create_async_client,
-        default_model=container.settings.model,
-        background_list=background_list,
-        background_output=background_output,
-        goal_enabled=True,
-    )
-    try:
-        return await server.run()
-    finally:
-        await container.session_store.discard_if_empty()
-
-
 def main(argv: list[str] | None = None) -> int:
-    configure_stdio_server_signals()
-    configure_utf8_stdio()
-    return asyncio.run(async_main(argv))
+    from agent.interfaces.runtime_server.app_server import main as app_server_main
+
+    return app_server_main(argv, server_class=StdioRuntimeServer)
 
 
 if __name__ == "__main__":

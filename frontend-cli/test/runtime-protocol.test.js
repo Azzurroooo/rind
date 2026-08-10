@@ -27,9 +27,18 @@ test("runtime protocol reads response and event metadata", () => {
 test("runtime protocol recognizes the shared golden event fixture", () => {
   const fixture = readFileSync(new URL("../../test/fixtures/runtime_protocol.golden.jsonl", import.meta.url), "utf8");
   const messages = fixture.trim().split("\n").map((line) => JSON.parse(line));
+  const events = messages.filter((message) => message.kind === "event");
+  const responses = messages.filter((message) => message.kind === "response");
 
-  assert.deepEqual(messages.map(runtimeEventType), ["turn_started", "assistant_delta"]);
-  assert.deepEqual(messages.map((message) => message.sequence), [1, 2]);
+  assert.deepEqual(events.map(runtimeEventType), [
+    "turn_started",
+    "assistant_delta",
+    "tool_requested",
+    "tool_result",
+    "turn_completed",
+  ]);
+  assert.deepEqual(events.map((message) => message.sequence), [1, 2, 3, 4, 5]);
+  assert.deepEqual(responses.map(runtimeRequestId), ["turn-1", "interrupt-2"]);
 });
 
 test("active input routes to follow-up without a client-side turn queue", () => {

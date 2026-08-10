@@ -16,9 +16,10 @@ _SESSION_PRIVATE_FIELDS = {"_session_paths", "_session_root", "_session_dir"}
 # are fixed; adding a new entry should fail this test instead of extending it.
 _KNOWN_INTERFACE_INFRASTRUCTURE_IMPORTS = {
     "agent/interfaces/api/routes_session.py -> agent.infrastructure.paths",
-    "agent/interfaces/runtime_server/stdio.py -> agent.infrastructure.config",
     "agent/interfaces/runtime_server/stdio.py -> agent.infrastructure.paths",
-    "agent/interfaces/runtime_server/stdio.py -> agent.infrastructure.tools.builtin.shell.tool",
+    "agent/interfaces/runtime_server/app_server.py -> agent.infrastructure.config",
+    "agent/interfaces/runtime_server/app_server.py -> agent.infrastructure.paths",
+    "agent/interfaces/runtime_server/app_server.py -> agent.infrastructure.tools.builtin.shell.tool",
     "agent/interfaces/cli/commands/diagnostics.py -> agent.infrastructure.config",
     "agent/interfaces/cli/commands/diagnostics.py -> agent.infrastructure.config.settings_loader",
     "agent/interfaces/cli/commands/diagnostics.py -> agent.infrastructure.persistence.jsonl_session_store",
@@ -139,7 +140,7 @@ def test_runtime_dependencies_type_is_not_reintroduced() -> None:
 def test_runtime_entrypoints_use_the_shared_composition_root() -> None:
     entrypoints = (
         PROJECT_ROOT / "main.py",
-        AGENT_ROOT / "interfaces" / "runtime_server" / "stdio.py",
+        AGENT_ROOT / "interfaces" / "runtime_server" / "app_server.py",
         AGENT_ROOT / "interfaces" / "api" / "main.py",
     )
     missing: list[str] = []

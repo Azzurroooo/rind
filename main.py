@@ -17,7 +17,14 @@ def _validate_agent_assertion(agent_id: str | None) -> None:
         raise ValueError(f"--agent {agent_id!r} does not match the current Agent: {resolved.agent_id!r}.")
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
+    arguments = list(sys.argv[1:] if argv is None else argv)
+    if arguments[:1] == ["app-server"]:
+        from agent.interfaces.runtime_server.app_server import main as app_server_main
+        from agent.interfaces.runtime_server.stdio import StdioRuntimeServer
+
+        return app_server_main(arguments[1:], server_class=StdioRuntimeServer)
+
     parser = argparse.ArgumentParser(description="Rind CLI")
     parser.add_argument("--version", action="version", version=f"rind {__version__}")
     parser.add_argument("--debug", action="store_true", help="Enable debug mode (non-streaming output)")
@@ -26,7 +33,7 @@ def main() -> int:
     parser.add_argument("-c", "--resume-latest", action="store_true", help="Resume the latest session if available")
     parser.add_argument("--session-dir", type=str, default=None, help="Session storage directory")
     parser.add_argument("--doctor", action="store_true", help="Run local setup diagnostics and exit")
-    args = parser.parse_args()
+    args = parser.parse_args(arguments)
 
     if args.doctor:
         from agent.interfaces.cli.commands.diagnostics import build_doctor_report
