@@ -18,3 +18,12 @@ test("buildRuntimeEnv pins Python stdio to UTF-8", () => {
   assert.equal(env.PYTHONPATH, `${repoRoot}${path.delimiter}existing`);
   assert.equal(env.PATH, "bin");
 });
+
+test("buildRuntimeEnv preserves packaged runtime environment and accepts RIND_HOME", () => {
+  const env = buildRuntimeEnv("repo", { PATH: "bin", PYTHONPATH: "existing" }, {
+    sourceRuntime: false,
+    rindHome: "user-data",
+  });
+
+  assert.deepEqual(env, { PATH: "bin", PYTHONPATH: "existing", RIND_HOME: "user-data" });
+});

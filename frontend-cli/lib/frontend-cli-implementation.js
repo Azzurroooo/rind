@@ -49,9 +49,10 @@ export async function runFrontendCliApp(cliArgs = process.argv.slice(2)) {
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(scriptDir, "..", "..");
 const python = process.env.RIND_PYTHON || "python";
+const runtimePath = process.env.RIND_RUNTIME_PATH || "";
 
 if (cliArgs.some((arg) => arg === "--version" || arg === "--help" || arg === "-h")) {
-  process.exit(runHelpVersion({ python, repoRoot, cliArgs }));
+  process.exit(runHelpVersion({ python, repoRoot, runtimePath, cliArgs }));
 }
 
 let activeTurn = false;
@@ -85,6 +86,7 @@ let activeInputSession = null;
 const runtimeClient = createRuntimeClient({
   python,
   repoRoot,
+  runtimePath,
   cliArgs,
   onMessage: (message) => void renderEvent(message).catch((error) => {
     if (!runtimeClosing) {
@@ -92,8 +94,11 @@ const runtimeClient = createRuntimeClient({
     }
   }),
   onStderr: (chunk) => writeErrorOutput(chunk),
-  onExit: (code) => {
-    process.exitCode = runtimeClosing ? 0 : code ?? 1;
+  onExit: (code, signal, { error }) => {
+    if (!runtimeClosing) {
+      writeErrorOutput(`Runtime stopped (${signal || (code ?? "startup failure")}): ${error.message}. Restart Rind to continue.\n`);
+    }
+    process.exitCode = runtimeClosing ? 0 : (code || 1);
     closeInput();
     if (runtimeClosing) {
       scheduleProcessExit(process.exitCode ?? 0, 0);
