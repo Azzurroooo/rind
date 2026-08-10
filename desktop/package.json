@@ -1,0 +1,28 @@
+{
+  "name": "@rind/desktop",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "license": "MIT",
+  "main": "./out/main/index.js",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "node --test scripts/*.test.mjs",
+    "dev": "electron-vite dev",
+    "build": "electron-vite build",
+    "preview": "electron-vite preview",
+    "package": "electron-builder --config electron-builder.config.ts"
+  },
+  "dependencies": {
+    "electron-log": "^5.4.3",
+    "electron-window-state": "^5.0.3"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.0",
+    "electron": "42.3.3",
+    "electron-builder": "26.15.2",
+    "electron-vite": "^5.0.0",
+    "typescript": "~5.6.2",
+    "vite": "^6.0.0"
+  }
+}

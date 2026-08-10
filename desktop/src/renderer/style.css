@@ -1,0 +1,66 @@
+:root {
+  color-scheme: dark;
+  font-family: system-ui, sans-serif;
+  color: #f4f4f5;
+  background: #18181b;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  min-width: 320px;
+  min-height: 100vh;
+  margin: 0;
+}
+
+.shell {
+  display: grid;
+  min-height: 100vh;
+  place-content: center;
+  gap: 12px;
+  padding: 32px;
+  text-align: center;
+}
+
+.brand {
+  color: #a1a1aa;
+  font-size: 14px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+h1 {
+  margin: 0;
+  font-size: 28px;
+  font-weight: 600;
+}
+
+.status,
+.message {
+  margin: 0;
+  color: #a1a1aa;
+}
+
+.status-ready {
+  color: #86efac;
+}
+
+.status-error {
+  color: #fca5a5;
+}
+
+button {
+  min-height: 36px;
+  padding: 0 16px;
+  border: 1px solid #52525b;
+  border-radius: 6px;
+  color: #f4f4f5;
+  background: #27272a;
+  cursor: pointer;
+}
+
+button:hover {
+  background: #3f3f46;
+}
