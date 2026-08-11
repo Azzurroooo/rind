@@ -1,12 +1,13 @@
 import { app, BrowserWindow, dialog, ipcMain } from "electron"
 import log from "electron-log/main"
 import windowState from "electron-window-state"
-import { randomUUID } from "node:crypto"
-import { mkdir, readFile, rename, unlink, writeFile } from "node:fs/promises"
 import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
 
 import type { DesktopSettings, DesktopSettingsPatch, RuntimeEvent, RuntimeSnapshot } from "../preload/types"
+import { asObject, readJsonObject, writeJsonObject } from "./json-store"
+import { listProjectFiles, previewProjectFile } from "./project-files"
+import { DesktopProjectStore, samePath } from "./projects"
 import {
   getRuntimeSnapshot,
   initializeRuntime,
@@ -47,35 +48,12 @@ function runtimeSettingsPath() {
   return join(app.getPath("home"), ".rind", "settings.json")
 }
 
-function asObject(value: unknown) {
-  return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : null
+function sessionIndexPath() {
+  return join(app.getPath("home"), ".rind", "session_index.json")
 }
 
 function asTrimmedString(value: unknown) {
   return typeof value === "string" ? value.trim() : ""
-}
-
-async function readJsonObject(path: string) {
-  try {
-    const value = asObject(JSON.parse(await readFile(path, "utf8")))
-    if (!value) throw new Error("Expected a JSON object.")
-    return value
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return {}
-    const message = error instanceof Error ? error.message : String(error)
-    throw new Error(`Cannot read Rind settings at ${path}: ${message}`)
-  }
-}
-
-async function writeJsonObject(path: string, value: Record<string, unknown>) {
-  await mkdir(dirname(path), { recursive: true })
-  const temporaryPath = `${path}.${randomUUID()}.tmp`
-  try {
-    await writeFile(temporaryPath, JSON.stringify(value, null, 2) + "\n", "utf8")
-    await rename(temporaryPath, path)
-  } finally {
-    await unlink(temporaryPath).catch(() => undefined)
-  }
 }
 
 function publicSettings(data: Record<string, unknown>): DesktopSettings {
@@ -129,35 +107,47 @@ async function saveRuntimeSettings(value: unknown) {
   return publicSettings(data)
 }
 
-async function loadWorkspace() {
-  try {
-    const raw = JSON.parse(await readFile(configPath(), "utf8")) as { workspace?: unknown }
-    return typeof raw.workspace === "string" ? raw.workspace : ""
-  } catch {
-    return ""
-  }
+function projectStore() {
+  return new DesktopProjectStore(configPath(), sessionIndexPath())
 }
 
-async function saveWorkspace(workspace: string) {
-  await writeJsonObject(configPath(), { workspace })
-}
-
-async function selectWorkspace() {
+async function chooseProject() {
   if (!mainWindow) return null
   const result = await dialog.showOpenDialog(mainWindow, { properties: ["openDirectory"] })
   if (result.canceled || !result.filePaths[0]) return null
-  const workspace = result.filePaths[0]
-  await saveWorkspace(workspace)
-  configuredWorkspace = workspace
+  const overview = await projectStore().add(result.filePaths[0])
+  await activateProject(overview.activeProjectPath)
+  return overview
+}
+
+async function activateProject(path: string) {
+  const overview = await projectStore().select(path)
+  configuredWorkspace = overview.activeProjectPath
   await shutdownRuntime()
-  startRuntime(workspace)
-  return workspace
+  startRuntime(configuredWorkspace)
+  return overview
+}
+
+async function startActiveProject() {
+  const overview = await projectStore().overview()
+  const active = overview.projects.find((project) => project.path === overview.activeProjectPath)
+  configuredWorkspace = active?.path || ""
+  if (active?.available) startRuntime(active.path)
+  return overview
+}
+
+async function requireActiveProject() {
+  if (!configuredWorkspace || !(await projectStore().isActive(configuredWorkspace))) {
+    throw new Error("Choose a registered project before browsing files.")
+  }
+  return configuredWorkspace
 }
 
 function registerIpc() {
   ipcMain.handle("runtime-initialize", () => initializeRuntime())
   ipcMain.handle("runtime-restart", async () => {
     if (!configuredWorkspace) throw new Error("Choose a workspace before starting Rind.")
+    await projectStore().select(configuredWorkspace)
     await shutdownRuntime()
     startRuntime(configuredWorkspace)
   })
@@ -178,12 +168,42 @@ function registerIpc() {
     }
     return saved
   })
-  ipcMain.handle("open-directory", () => selectWorkspace())
+  ipcMain.handle("projects-get", () => projectStore().overview())
+  ipcMain.handle("projects-add", () => chooseProject())
+  ipcMain.handle("projects-select", (_event, path: unknown) => {
+    if (typeof path !== "string") throw new Error("Project path must be a string.")
+    return activateProject(path)
+  })
+  ipcMain.handle("projects-remove", async (_event, path: unknown) => {
+    if (typeof path !== "string") throw new Error("Project path must be a string.")
+    const overview = await projectStore().remove(path)
+    if (samePath(configuredWorkspace, path)) {
+      await shutdownRuntime()
+      configuredWorkspace = ""
+      await startActiveProject()
+    }
+    return overview
+  })
+  ipcMain.handle("projects-layout-update", (_event, patch: unknown) => {
+    const input = asObject(patch)
+    if (!input) throw new Error("Layout settings must be an object.")
+    return projectStore().updateLayout({
+      sidebarCollapsed: input.sidebarCollapsed as boolean | undefined,
+      filesOpen: input.filesOpen as boolean | undefined,
+      filePanelWidth: input.filePanelWidth as number | undefined,
+    })
+  })
+  ipcMain.handle("projects-sessions", (_event, path: unknown, offset: unknown, limit: unknown) => {
+    if (typeof path !== "string") throw new Error("Project path must be a string.")
+    return projectStore().sessions(path, Number(offset), Number(limit))
+  })
+  ipcMain.handle("project-files-list", async (_event, path: unknown) => listProjectFiles(await requireActiveProject(), path))
+  ipcMain.handle("project-files-preview", async (_event, path: unknown) => previewProjectFile(await requireActiveProject(), path))
   ipcMain.handle("app-quit", () => app.quit())
 }
 
 function createMainWindow() {
-  const state = windowState({ defaultWidth: 1200, defaultHeight: 800 })
+  const state = windowState({ defaultWidth: 1320, defaultHeight: 860 })
   const win = new BrowserWindow({
     x: state.x,
     y: state.y,
@@ -233,12 +253,11 @@ if (!hasLock) {
     log.initialize()
     app.setName("Rind")
     app.setAppUserModelId(appId)
-    configuredWorkspace = await loadWorkspace()
+    await startActiveProject()
     subscribeRuntime(notifyRuntime)
     subscribeRuntimeEvents(notifyRuntimeEvent)
     registerIpc()
     createMainWindow()
-    if (configuredWorkspace) startRuntime(configuredWorkspace)
   })
 
   app.on("window-all-closed", () => {

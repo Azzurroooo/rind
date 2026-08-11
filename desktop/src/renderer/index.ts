@@ -1,9 +1,19 @@
 import "./style.css"
 
-import type { DesktopSettings, RuntimeEvent, RuntimeMethod, RuntimeSnapshot } from "../preload/types"
+import type {
+  DesktopFileListing,
+  DesktopFilePreview,
+  DesktopProject,
+  DesktopSessionSummary,
+  DesktopSettings,
+  RuntimeEvent,
+  RuntimeMethod,
+  RuntimeSnapshot,
+} from "../preload/types"
 import {
   addUserMessage,
   clipLine,
+  conversationFromReplay,
   createConversation,
   formatDuration,
   reduceEvent,
@@ -11,14 +21,7 @@ import {
   type ConversationState,
   type Entry,
   type ToolEntry,
-} from "./stream-model"
-
-type SessionSummary = {
-  id: string
-  title?: string
-  updated_at?: string
-  preview?: string
-}
+} from "./timeline-model"
 
 type AppState = {
   runtime: RuntimeSnapshot
@@ -29,7 +32,19 @@ type AppState = {
   sessionId: string
   model: string
   models: string[]
-  sessions: SessionSummary[]
+  projects: DesktopProject[]
+  activeProjectPath: string
+  sessionPages: Record<string, DesktopSessionSummary[]>
+  sessionTotals: Record<string, number>
+  sidebarCollapsed: boolean
+  filesOpen: boolean
+  filePanelWidth: number
+  expandedProjects: Set<string>
+  expandedDirectories: Set<string>
+  fileListings: Record<string, DesktopFileListing>
+  filePreview?: DesktopFilePreview
+  drafts: Record<string, string>
+  createDraftWhenReady: boolean
   conversation: ConversationState
   expandedTools: Set<string>
   notice: string
@@ -38,6 +53,7 @@ type AppState = {
 
 const root = document.querySelector<HTMLElement>("#app")
 if (!root) throw new Error("Renderer root is missing.")
+const appRoot: HTMLElement = root
 
 const state: AppState = {
   runtime: { status: "stopped" },
@@ -48,14 +64,25 @@ const state: AppState = {
   sessionId: "",
   model: "",
   models: [],
-  sessions: [],
+  projects: [],
+  activeProjectPath: "",
+  sessionPages: {},
+  sessionTotals: {},
+  sidebarCollapsed: false,
+  filesOpen: false,
+  filePanelWidth: 340,
+  expandedProjects: new Set(),
+  expandedDirectories: new Set([""]),
+  fileListings: {},
+  drafts: {},
+  createDraftWhenReady: false,
   conversation: createConversation(),
   expandedTools: new Set(),
-  notice: "Choose a workspace to begin.",
+  notice: "Add a project to begin.",
   bootstrapped: false,
 }
 
-root.innerHTML = `
+appRoot.innerHTML = `
   <div class="app-shell">
     <header class="topbar">
       <div class="identity">
@@ -63,20 +90,24 @@ root.innerHTML = `
         <span id="connection" class="connection"><span class="status-pip"></span><span id="connection-text">Stopped</span></span>
       </div>
       <div class="workspace">
-        <span id="workspace-label" class="workspace-path" title="">No workspace selected</span>
-        <button id="choose-workspace" type="button" class="ghost-button">Change</button>
+        <label class="project-control"><select id="project-select" aria-label="Active project"></select></label>
+        <button id="add-project" type="button" class="ghost-button">Add project</button>
         <button id="open-settings" type="button" class="ghost-button">Settings</button>
       </div>
     </header>
     <main class="layout">
-      <aside class="sidebar" aria-label="Sessions">
-        <div class="sidebar-heading"><span>Sessions</span><button id="new-session" type="button" class="ghost-button" title="New session">+ New</button></div>
-        <div id="session-list" class="session-list"></div>
+      <aside class="sidebar" aria-label="Projects and sessions">
+        <div class="sidebar-actions">
+          <button id="new-session" type="button" class="primary-button" title="Start a new chat in the active project">New chat</button>
+          <button id="collapse-sidebar" type="button" class="ghost-button" title="Collapse sidebar" aria-label="Collapse sidebar">Collapse</button>
+        </div>
+        <div class="sidebar-heading"><span>Projects</span><button id="sidebar-add-project" type="button" class="ghost-button" title="Add project">Add</button></div>
+        <div id="project-list" class="project-list"></div>
       </aside>
       <section class="conversation">
         <div class="conversation-head">
           <div class="conversation-title"><strong id="session-title">New session</strong><span id="session-id" class="subtle"></span></div>
-          <button id="compact" type="button" class="ghost-button" title="Compact context now">Compact</button>
+          <div class="conversation-actions"><button id="toggle-files" type="button" class="ghost-button" title="Browse active project files">Files</button><button id="compact" type="button" class="ghost-button" title="Compact context now">Compact</button></div>
         </div>
         <div id="notice" class="notice" role="status" hidden><span id="notice-text"></span><button id="retry" type="button" class="ghost-button" hidden>Restart runtime</button></div>
         <div class="stream-wrap">
@@ -95,6 +126,12 @@ root.innerHTML = `
           </div>
         </form>
       </section>
+      <aside id="file-panel" class="file-panel" aria-label="Project files" hidden>
+        <div id="file-resize-handle" class="file-resize-handle" role="separator" aria-label="Resize file panel" aria-orientation="vertical"></div>
+        <div class="file-panel-head"><strong>Files</strong><button id="close-files" type="button" class="ghost-button" title="Close files">Close</button></div>
+        <div id="file-tree" class="file-tree"></div>
+        <section id="file-preview" class="file-preview"><p class="subtle">Select a file to preview.</p></section>
+      </aside>
     </main>
     <dialog id="settings-dialog" class="settings-dialog">
       <form id="settings-form" method="dialog">
@@ -112,8 +149,8 @@ root.innerHTML = `
 
 const connection = requiredElement("connection")
 const connectionText = requiredElement("connection-text")
-const workspaceLabel = requiredElement("workspace-label")
-const sessionList = requiredElement("session-list")
+const projectSelect = requiredElement<HTMLSelectElement>("project-select")
+const projectList = requiredElement("project-list")
 const sessionTitle = requiredElement("session-title")
 const sessionIdLabel = requiredElement("session-id")
 const modelSelect = requiredElement<HTMLSelectElement>("model-select")
@@ -127,6 +164,13 @@ const prompt = requiredElement<HTMLTextAreaElement>("prompt")
 const send = requiredElement<HTMLButtonElement>("send")
 const steer = requiredElement<HTMLButtonElement>("steer")
 const interrupt = requiredElement<HTMLButtonElement>("interrupt")
+const filePanel = requiredElement("file-panel")
+const fileResizeHandle = requiredElement("file-resize-handle")
+const fileTree = requiredElement("file-tree")
+const filePreview = requiredElement("file-preview")
+const filesToggle = requiredElement<HTMLButtonElement>("toggle-files")
+const newSessionButton = requiredElement<HTMLButtonElement>("new-session")
+const sidebarCollapseButton = requiredElement<HTMLButtonElement>("collapse-sidebar")
 const settingsDialog = requiredElement<HTMLDialogElement>("settings-dialog")
 const settingsForm = requiredElement<HTMLFormElement>("settings-form")
 const settingsApiKey = requiredElement<HTMLInputElement>("settings-api-key")
@@ -138,6 +182,7 @@ const saveSettingsButton = requiredElement<HTMLButtonElement>("save-settings")
 
 let workingTimer: ReturnType<typeof setInterval> | undefined
 let lastRenderedEntries = 0
+let fileResizeStart: { pointerId: number; x: number; width: number } | undefined
 
 function requiredElement<T extends HTMLElement = HTMLElement>(id: string) {
   const element = document.getElementById(id) as T | null
@@ -149,18 +194,25 @@ function render() {
   const { runtime, conversation } = state
   connectionText.textContent = runtime.status === "ready" ? "Connected" : titleCase(runtime.status)
   connection.className = `connection connection-${runtime.status}`
-  workspaceLabel.textContent = runtime.workspace || "No workspace selected"
-  workspaceLabel.title = runtime.workspace || ""
-  const current = state.sessions.find((item) => item.id === state.sessionId)
+  appRoot.classList.toggle("sidebar-collapsed", state.sidebarCollapsed)
+  appRoot.classList.toggle("files-open", state.filesOpen)
+  appRoot.style.setProperty("--file-panel-width", `${state.filePanelWidth}px`)
+  newSessionButton.title = activeProject()?.available ? `Start a new chat in ${activeProject()?.name}` : "Choose a project for a new chat"
+  sidebarCollapseButton.textContent = state.sidebarCollapsed ? ">>" : "<<"
+  sidebarCollapseButton.title = state.sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"
+  sidebarCollapseButton.setAttribute("aria-label", sidebarCollapseButton.title)
+  const current = allSessions().find((item) => item.id === state.sessionId)
   sessionTitle.textContent = current?.title || (state.sessionId ? "Session" : "New session")
   sessionIdLabel.textContent = state.sessionId || ""
   noticeText.textContent = state.notice || runtime.message || ""
   retry.hidden = !runtime.workspace || (runtime.status !== "error" && runtime.status !== "stopped")
   notice.hidden = !noticeText.textContent && retry.hidden
-  renderSessions()
+  renderProjectControl()
+  renderProjects()
   renderModels()
   renderStream()
   renderComposer()
+  renderFiles()
   renderSettings()
   syncWorkingTimer()
 }
@@ -173,25 +225,107 @@ function renderSettings() {
   saveSettingsButton.textContent = state.settingsSaving ? "Saving..." : "Save"
 }
 
-function renderSessions() {
-  sessionList.replaceChildren()
-  if (!state.sessions.length) {
-    sessionList.textContent = state.runtime.status === "ready" ? "No saved sessions yet" : ""
+function activeProject() {
+  return state.projects.find((project) => project.path === state.activeProjectPath)
+}
+
+function projectSessions(project: DesktopProject) {
+  return state.sessionPages[project.path] || project.sessions
+}
+
+function allSessions() {
+  return state.projects.flatMap(projectSessions)
+}
+
+function renderProjectControl() {
+  projectSelect.replaceChildren()
+  if (!state.projects.length) {
+    const option = new Option("No project selected", "")
+    option.disabled = true
+    option.selected = true
+    projectSelect.add(option)
+    projectSelect.disabled = true
     return
   }
-  for (const item of state.sessions) {
-    const button = document.createElement("button")
-    button.type = "button"
-    button.className = `session-item${item.id === state.sessionId ? " selected" : ""}`
-    button.dataset.sessionId = item.id
-    const when = item.updated_at ? relativeTime(item.updated_at) : ""
-    button.innerHTML = `
+  for (const project of state.projects) {
+    const option = new Option(project.available ? project.name : `${project.name} (missing)`, project.path)
+    option.disabled = !project.available
+    option.selected = project.path === state.activeProjectPath
+    projectSelect.add(option)
+  }
+  projectSelect.disabled = Boolean(state.conversation.activeTurnId)
+  projectSelect.value = state.activeProjectPath
+}
+
+function renderProjects() {
+  projectList.replaceChildren()
+  if (!state.projects.length) {
+    projectList.innerHTML = `<div class="sidebar-empty"><strong>No projects</strong><span>Add a folder to start a chat.</span></div>`
+    return
+  }
+  for (const project of state.projects) {
+    const expanded = state.expandedProjects.has(project.path) || project.path === state.activeProjectPath
+    const sessions = projectSessions(project)
+    const total = state.sessionTotals[project.path] ?? project.totalSessions
+    const projectNode = document.createElement("section")
+    projectNode.className = `project-item${project.path === state.activeProjectPath ? " selected" : ""}${expanded ? " expanded" : ""}`
+    projectNode.innerHTML = `
+      <div class="project-row">
+        <button type="button" class="project-trigger" data-project-path="${escapeAttribute(project.path)}" title="${escapeAttribute(project.path)}">
+          <span class="project-name">${escapeHtml(project.name)}</span>
+          <span class="project-path">${escapeHtml(project.path)}</span>
+        </button>
+        <button type="button" class="project-remove ghost-button" data-remove-project="${escapeAttribute(project.path)}" title="Remove project from Desktop">Remove</button>
+      </div>
+      ${project.available ? "" : `<p class="project-missing">Folder is unavailable.</p>`}
+      ${expanded ? `<div class="project-sessions">${sessions.map(renderProjectSession).join("")}${sessions.length < total ? `<button type="button" class="show-more ghost-button" data-show-more="${escapeAttribute(project.path)}">View more sessions</button>` : ""}</div>` : ""}
+    `
+    projectList.append(projectNode)
+  }
+}
+
+function renderProjectSession(item: DesktopSessionSummary) {
+  const when = item.updatedAt ? relativeTime(item.updatedAt) : ""
+  return `
+    <button type="button" class="session-item${item.id === state.sessionId ? " selected" : ""}" data-session-id="${escapeAttribute(item.id)}">
       <span class="session-item-title">${escapeHtml(item.title || "Untitled")}</span>
       <small>${escapeHtml(clipLine(item.preview || "", 48))}</small>
       <small class="session-item-meta">${escapeHtml(when)}</small>
-    `
-    sessionList.append(button)
+    </button>
+  `
+}
+
+function renderFiles() {
+  const project = activeProject()
+  filePanel.hidden = !state.filesOpen
+  filesToggle.disabled = !project?.available
+  filesToggle.textContent = state.filesOpen ? "Hide files" : "Files"
+  if (!state.filesOpen || !project?.available) return
+  fileTree.innerHTML = renderDirectory("")
+  const preview = state.filePreview
+  if (!preview) {
+    filePreview.innerHTML = `<p class="subtle">Select a file to preview.</p>`
+  } else if (preview.kind === "text") {
+    filePreview.innerHTML = `<div class="file-preview-head"><strong>${escapeHtml(preview.name)}</strong><small>${formatFileSize(preview.size)}${preview.truncated ? " · truncated" : ""}</small></div><pre><code>${escapeHtml(preview.content || "")}</code></pre>`
+  } else if (preview.kind === "image") {
+    filePreview.innerHTML = `<div class="file-preview-head"><strong>${escapeHtml(preview.name)}</strong><small>${formatFileSize(preview.size)}</small></div><img src="${escapeAttribute(preview.dataUrl || "")}" alt="${escapeAttribute(preview.name)}" />`
+  } else {
+    filePreview.innerHTML = `<div class="file-preview-head"><strong>${escapeHtml(preview.name)}</strong><small>${formatFileSize(preview.size)}</small></div><p class="subtle">${escapeHtml(preview.message || "This file cannot be previewed.")}</p>`
   }
+}
+
+function renderDirectory(path: string, depth = 0): string {
+  const listing = state.fileListings[path]
+  if (!listing) return path ? "" : `<p class="subtle">Loading files…</p>`
+  const rows = listing.entries.map((entry) => {
+    if (entry.kind === "file") {
+      return `<button type="button" class="file-row${state.filePreview?.path === entry.path ? " selected" : ""}" data-preview-file="${escapeAttribute(entry.path)}" style="--file-indent:${depth * 14}px">${escapeHtml(entry.name)}</button>`
+    }
+    const expanded = state.expandedDirectories.has(entry.path)
+    return `<div class="file-directory"><button type="button" class="file-row directory" data-toggle-directory="${escapeAttribute(entry.path)}" style="--file-indent:${depth * 14}px">${expanded ? "Hide" : "Show"} ${escapeHtml(entry.name)}</button>${expanded ? renderDirectory(entry.path, depth + 1) : ""}</div>`
+  })
+  const warning = listing.truncated ? `<p class="file-truncated">Only the first 500 items are shown.</p>` : ""
+  return `<div class="file-branch">${rows.join("")}${warning}</div>`
 }
 
 function renderModels() {
@@ -308,7 +442,7 @@ function syncWorkingTimer() {
 }
 
 function renderComposer() {
-  const ready = state.runtime.status === "ready"
+  const ready = state.runtime.status === "ready" && activeProject()?.available === true
   const active = Boolean(state.conversation.activeTurnId)
   prompt.disabled = !ready
   send.disabled = !ready
@@ -374,37 +508,48 @@ async function request(method: RuntimeMethod, params: Record<string, unknown> = 
 }
 
 function runAction(action: () => Promise<unknown>) {
-  void action().catch(() => undefined)
+  void action().catch((error) => {
+    state.notice = error instanceof Error ? error.message : String(error)
+    render()
+  })
 }
 
 async function loadSessions() {
-  const result = asRecord(await request("session.list", { limit: 30 }))
-  state.sessions = Array.isArray(result.sessions) ? result.sessions.filter(isSession) : []
-  state.sessionId = typeof result.current_session_id === "string" ? result.current_session_id : state.sessionId
+  applyOverview(await window.api.projects.get())
 }
 
-function isSession(value: unknown): value is SessionSummary {
-  return Boolean(value && typeof value === "object" && typeof (value as SessionSummary).id === "string")
+function applyOverview(overview: Awaited<ReturnType<typeof window.api.projects.get>>) {
+  const nextPages: Record<string, DesktopSessionSummary[]> = {}
+  const nextTotals: Record<string, number> = {}
+  for (const project of overview.projects) {
+    nextPages[project.path] = mergeSessions(project.sessions, state.sessionPages[project.path] || [])
+    nextTotals[project.path] = project.totalSessions
+  }
+  state.projects = overview.projects
+  state.activeProjectPath = overview.activeProjectPath
+  state.sidebarCollapsed = overview.sidebarCollapsed
+  state.filesOpen = overview.filesOpen
+  state.filePanelWidth = overview.filePanelWidth
+  state.sessionPages = nextPages
+  state.sessionTotals = nextTotals
+  if (state.activeProjectPath) state.expandedProjects.add(state.activeProjectPath)
+}
+
+function mergeSessions(primary: DesktopSessionSummary[], secondary: DesktopSessionSummary[]) {
+  const sessions = new Map<string, DesktopSessionSummary>()
+  for (const session of [...primary, ...secondary]) sessions.set(session.id, session)
+  return [...sessions.values()].sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))
 }
 
 async function loadReplay() {
   const result = asRecord(await request("session.replay"))
-  const messages = Array.isArray(result.messages) ? result.messages.filter(isStoredMessage) : []
-  const entries: Entry[] = messages.map((message, index) => ({
-    kind: message.role === "assistant" ? "assistant" : "user",
-    id: `replay-${index}`,
-    content: String(message.content || ""),
-  }))
-  state.conversation = { ...createConversation(), entries }
+  const messages = Array.isArray(result.messages) ? result.messages : []
+  state.conversation = conversationFromReplay(messages)
   state.expandedTools = new Set()
   const turnState = asRecord(result.turn_state)
   if (turnState.status === "running" && typeof turnState.turn_id === "string") {
     state.conversation = { ...state.conversation, activeTurnId: turnState.turn_id, turnStartedAt: Date.now() }
   }
-}
-
-function isStoredMessage(value: unknown): value is { role: string; content?: unknown } {
-  return Boolean(value && typeof value === "object" && ["user", "assistant"].includes(String((value as { role?: unknown }).role)))
 }
 
 async function loadModels() {
@@ -444,6 +589,11 @@ async function bootstrap(result: unknown) {
   state.sessionId = typeof initialize.session_id === "string" ? initialize.session_id : state.sessionId
   state.model = typeof initialize.model === "string" ? initialize.model : state.model
   await refreshSession()
+  if (state.filesOpen && activeProject()?.available) await loadDirectory("")
+  if (state.createDraftWhenReady) {
+    state.createDraftWhenReady = false
+    await createSession()
+  }
 }
 
 function handleRuntimeEvent(envelope: RuntimeEvent) {
@@ -461,7 +611,10 @@ function autoGrowPrompt() {
 
 requiredElement<HTMLFormElement>("composer").addEventListener("submit", (event) => { event.preventDefault(); runAction(sendPrompt) })
 
-prompt.addEventListener("input", autoGrowPrompt)
+prompt.addEventListener("input", () => {
+  if (state.activeProjectPath) state.drafts[state.activeProjectPath] = prompt.value
+  autoGrowPrompt()
+})
 prompt.addEventListener("keydown", (event) => {
   if (event.key === "Enter" && !event.shiftKey && !event.isComposing) {
     event.preventDefault()
@@ -477,17 +630,21 @@ document.addEventListener("keydown", (event) => {
 async function sendPrompt() {
   const input = prompt.value.trim()
   if (!input) return
+  if (!state.activeProjectPath) {
+    state.notice = "Choose a project before sending a message."
+    render()
+    return
+  }
   prompt.value = ""
+  state.drafts[state.activeProjectPath] = ""
   autoGrowPrompt()
   if (input.startsWith("/")) {
     runAction(() => runSlash(input))
     return
   }
   const active = Boolean(state.conversation.activeTurnId)
-  if (!active) {
-    state.conversation = addUserMessage(state.conversation, input)
-    render()
-  }
+  state.conversation = addUserMessage(state.conversation, input)
+  render()
   await request(active ? "turn.follow_up" : "turn.start", { input })
 }
 
@@ -522,6 +679,7 @@ steer.addEventListener("click", () => {
   const input = prompt.value.trim()
   if (!input) return
   prompt.value = ""
+  if (state.activeProjectPath) state.drafts[state.activeProjectPath] = ""
   autoGrowPrompt()
   runAction(() => request("turn.steer", { input }))
 })
@@ -535,9 +693,13 @@ messageStream.addEventListener("scroll", () => {
   const nearBottom = messageStream.scrollHeight - messageStream.scrollTop - messageStream.clientHeight < 80
   if (nearBottom) jumpLatest.hidden = true
 })
-requiredElement("choose-workspace").addEventListener("click", () => runAction(window.api.openDirectory))
+requiredElement("add-project").addEventListener("click", () => runAction(addProject))
+requiredElement("sidebar-add-project").addEventListener("click", () => runAction(addProject))
 requiredElement("open-settings").addEventListener("click", () => openSettings())
-requiredElement("new-session").addEventListener("click", () => runAction(createSession))
+requiredElement("new-session").addEventListener("click", () => runAction(startNewChat))
+requiredElement("collapse-sidebar").addEventListener("click", () => runAction(toggleSidebar))
+requiredElement("close-files").addEventListener("click", () => runAction(() => setFilesOpen(false)))
+filesToggle.addEventListener("click", () => runAction(() => setFilesOpen(!state.filesOpen)))
 requiredElement("compact").addEventListener("click", () => runAction(() => request("compact")))
 modelSelect.addEventListener("change", () => {
   const model = modelSelect.value
@@ -552,10 +714,66 @@ settingsForm.addEventListener("submit", (event) => { event.preventDefault(); run
 requiredElement("close-settings").addEventListener("click", () => { state.settingsOpen = false; render() })
 requiredElement("cancel-settings").addEventListener("click", () => { state.settingsOpen = false; render() })
 settingsDialog.addEventListener("cancel", () => { state.settingsOpen = false; render() })
-sessionList.addEventListener("click", (event) => {
-  const target = (event.target as HTMLElement).closest<HTMLButtonElement>("[data-session-id]")
-  const nextSessionId = target?.dataset.sessionId
+projectSelect.addEventListener("change", () => {
+  if (projectSelect.value) runAction(() => selectProject(projectSelect.value))
+})
+projectList.addEventListener("click", (event) => {
+  const target = event.target as HTMLElement
+  const projectPath = target.closest<HTMLButtonElement>("[data-project-path]")?.dataset.projectPath
+  if (projectPath) {
+    runAction(() => selectProject(projectPath))
+    return
+  }
+  const removeProjectPath = target.closest<HTMLButtonElement>("[data-remove-project]")?.dataset.removeProject
+  if (removeProjectPath) {
+    runAction(() => removeProject(removeProjectPath))
+    return
+  }
+  const moreProjectPath = target.closest<HTMLButtonElement>("[data-show-more]")?.dataset.showMore
+  if (moreProjectPath) {
+    runAction(() => loadMoreSessions(moreProjectPath))
+    return
+  }
+  const sessionButton = (event.target as HTMLElement).closest<HTMLButtonElement>("[data-session-id]")
+  const nextSessionId = sessionButton?.dataset.sessionId
   if (nextSessionId) runAction(() => switchSession(nextSessionId))
+})
+fileTree.addEventListener("click", (event) => {
+  const target = event.target as HTMLElement
+  const directoryPath = target.closest<HTMLButtonElement>("[data-toggle-directory]")?.dataset.toggleDirectory
+  if (directoryPath !== undefined) {
+    runAction(() => toggleDirectory(directoryPath))
+    return
+  }
+  const filePath = target.closest<HTMLButtonElement>("[data-preview-file]")?.dataset.previewFile
+  if (filePath) runAction(() => previewFile(filePath))
+})
+fileResizeHandle.addEventListener("pointerdown", (event) => {
+  if (!state.filesOpen) return
+  fileResizeStart = { pointerId: event.pointerId, x: event.clientX, width: state.filePanelWidth }
+  fileResizeHandle.setPointerCapture(event.pointerId)
+  document.body.classList.add("resizing-files")
+  event.preventDefault()
+})
+fileResizeHandle.addEventListener("pointermove", (event) => {
+  if (!fileResizeStart || fileResizeStart.pointerId !== event.pointerId) return
+  const width = fileResizeStart.width + fileResizeStart.x - event.clientX
+  state.filePanelWidth = Math.max(240, Math.min(560, Math.round(width)))
+  render()
+})
+fileResizeHandle.addEventListener("pointerup", (event) => {
+  if (!fileResizeStart || fileResizeStart.pointerId !== event.pointerId) return
+  fileResizeHandle.releasePointerCapture(event.pointerId)
+  fileResizeStart = undefined
+  document.body.classList.remove("resizing-files")
+  runAction(async () => {
+    applyOverview(await window.api.projects.updateLayout({ filePanelWidth: state.filePanelWidth }))
+    render()
+  })
+})
+fileResizeHandle.addEventListener("lostpointercapture", () => {
+  fileResizeStart = undefined
+  document.body.classList.remove("resizing-files")
 })
 messageStream.addEventListener("click", (event) => {
   const target = event.target as HTMLElement
@@ -593,7 +811,151 @@ function openSettings() {
   render()
 }
 
+function resetProjectView() {
+  state.sessionId = ""
+  state.conversation = createConversation()
+  state.expandedTools = new Set()
+  state.expandedDirectories = new Set([""])
+  state.fileListings = {}
+  state.filePreview = undefined
+  lastRenderedEntries = 0
+}
+
+function restoreProjectDraft() {
+  prompt.value = state.drafts[state.activeProjectPath] || ""
+  autoGrowPrompt()
+}
+
+async function addProject(createDraft = false) {
+  const overview = await window.api.projects.add()
+  if (!overview) return
+  applyOverview(overview)
+  resetProjectView()
+  state.createDraftWhenReady = createDraft
+  restoreProjectDraft()
+  state.notice = createDraft ? "Project added. Preparing a new chat..." : "Project added."
+  render()
+  if (state.filesOpen) await loadDirectory("")
+}
+
+async function selectProject(path: string) {
+  if (path === state.activeProjectPath) {
+    state.expandedProjects.add(path)
+    render()
+    return
+  }
+  if (state.conversation.activeTurnId) {
+    state.notice = "Stop the active turn before changing projects."
+    render()
+    return
+  }
+  if (state.activeProjectPath) state.drafts[state.activeProjectPath] = prompt.value
+  const overview = await window.api.projects.select(path)
+  applyOverview(overview)
+  resetProjectView()
+  restoreProjectDraft()
+  state.notice = "Switching project..."
+  render()
+  if (state.filesOpen) await loadDirectory("")
+}
+
+async function removeProject(path: string) {
+  const project = state.projects.find((item) => item.path === path)
+  if (!project) return
+  if (state.conversation.activeTurnId && path === state.activeProjectPath) {
+    state.notice = "Stop the active turn before removing its project."
+    render()
+    return
+  }
+  if (!window.confirm(`Remove ${project.name} from Rind Desktop? Its folder and sessions will be kept.`)) return
+  const wasActive = path === state.activeProjectPath
+  const overview = await window.api.projects.remove(path)
+  applyOverview(overview)
+  delete state.drafts[path]
+  if (wasActive) {
+    resetProjectView()
+    restoreProjectDraft()
+  }
+  state.notice = "Project removed from Desktop."
+  render()
+  if (state.filesOpen && activeProject()?.available) await loadDirectory("")
+}
+
+async function startNewChat() {
+  const project = activeProject()
+  if (!project?.available) {
+    await addProject(true)
+    return
+  }
+  if (state.conversation.activeTurnId) {
+    state.notice = "Stop the active turn before starting a new chat."
+    render()
+    return
+  }
+  if (state.runtime.status !== "ready") {
+    state.createDraftWhenReady = true
+    state.notice = "The new chat will open when the runtime is ready."
+    render()
+    return
+  }
+  await createSession()
+}
+
+async function toggleSidebar() {
+  applyOverview(await window.api.projects.updateLayout({ sidebarCollapsed: !state.sidebarCollapsed }))
+  render()
+}
+
+async function setFilesOpen(open: boolean) {
+  if (open && !activeProject()?.available) {
+    state.notice = "Choose an available project before browsing files."
+    render()
+    return
+  }
+  applyOverview(await window.api.projects.updateLayout({ filesOpen: open }))
+  render()
+  if (open) await loadDirectory("")
+}
+
+async function loadMoreSessions(path: string) {
+  const loaded = state.sessionPages[path] || []
+  const result = await window.api.projects.sessions(path, loaded.length, 20)
+  state.sessionPages[path] = mergeSessions(loaded, result.sessions)
+  state.sessionTotals[path] = result.total
+  render()
+}
+
+async function loadDirectory(path: string) {
+  const listing = await window.api.files.list(path)
+  state.fileListings = { ...state.fileListings, [path]: listing }
+  render()
+}
+
+async function toggleDirectory(path: string) {
+  const expanded = new Set(state.expandedDirectories)
+  if (expanded.has(path)) {
+    expanded.delete(path)
+  } else {
+    expanded.add(path)
+    if (!state.fileListings[path]) await loadDirectory(path)
+  }
+  state.expandedDirectories = expanded
+  render()
+}
+
+async function previewFile(path: string) {
+  state.filePreview = await window.api.files.preview(path)
+  render()
+}
+
+function formatFileSize(size: number) {
+  if (size < 1024) return `${size} B`
+  if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KB`
+  return `${(size / (1024 * 1024)).toFixed(1)} MB`
+}
+
 async function createSession() {
+  if (!activeProject()?.available || state.runtime.status !== "ready") return
   const result = asRecord(await request("session.new"))
   state.sessionId = String(result.session_id || "")
   state.model = String(result.model || state.model)
@@ -604,6 +966,8 @@ async function createSession() {
 
 async function switchSession(nextSessionId: string) {
   if (nextSessionId === state.sessionId || state.conversation.activeTurnId) return
+  const project = activeProject()
+  if (!project || !projectSessions(project).some((session) => session.id === nextSessionId)) return
   const result = asRecord(await request("session.switch", { session_id: nextSessionId }))
   state.sessionId = String(result.session_id || nextSessionId)
   state.model = String(result.model || state.model)
@@ -651,10 +1015,7 @@ async function saveSettings() {
 const unsubscribeStatus = window.api.runtime.subscribe((snapshot) => {
   state.runtime = snapshot
   if (snapshot.status === "starting") {
-    state.sessionId = ""
-    state.sessions = []
-    state.conversation = createConversation()
-    state.expandedTools = new Set()
+    resetProjectView()
     state.bootstrapped = false
     state.notice = "Starting runtime..."
   }
@@ -678,4 +1039,9 @@ if (state.runtime.status !== "stopped") {
   state.bootstrapped = true
   void window.api.runtime.initialize().then(bootstrap).catch(() => { state.bootstrapped = false; render() })
 }
+runAction(async () => {
+  await loadSessions()
+  render()
+  if (state.filesOpen && activeProject()?.available) await loadDirectory("")
+})
 void loadSettings()

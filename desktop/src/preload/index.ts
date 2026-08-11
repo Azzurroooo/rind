@@ -23,7 +23,18 @@ const api: DesktopApi = {
     get: () => ipcRenderer.invoke("settings-get"),
     save: (patch) => ipcRenderer.invoke("settings-save", patch),
   },
-  openDirectory: () => ipcRenderer.invoke("open-directory"),
+  projects: {
+    get: () => ipcRenderer.invoke("projects-get"),
+    add: () => ipcRenderer.invoke("projects-add"),
+    select: (path) => ipcRenderer.invoke("projects-select", path),
+    remove: (path) => ipcRenderer.invoke("projects-remove", path),
+    updateLayout: (patch) => ipcRenderer.invoke("projects-layout-update", patch),
+    sessions: (path, offset, limit) => ipcRenderer.invoke("projects-sessions", path, offset, limit),
+  },
+  files: {
+    list: (path = "") => ipcRenderer.invoke("project-files-list", path),
+    preview: (path) => ipcRenderer.invoke("project-files-preview", path),
+  },
   quit: () => ipcRenderer.invoke("app-quit"),
 }
 

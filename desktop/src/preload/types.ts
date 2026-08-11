@@ -43,6 +43,54 @@ export type DesktopSettingsPatch = {
   reasoningEffort?: string
 }
 
+export type DesktopSessionSummary = {
+  id: string
+  title: string
+  preview: string
+  updatedAt: string
+  workspaceRoot: string
+}
+
+export type DesktopProject = {
+  path: string
+  name: string
+  available: boolean
+  sessions: DesktopSessionSummary[]
+  totalSessions: number
+}
+
+export type DesktopProjectOverview = {
+  projects: DesktopProject[]
+  activeProjectPath: string
+  sidebarCollapsed: boolean
+  filesOpen: boolean
+  filePanelWidth: number
+}
+
+export type DesktopFileNode = {
+  name: string
+  path: string
+  kind: "directory" | "file"
+}
+
+export type DesktopFileListing = {
+  path: string
+  entries: DesktopFileNode[]
+  truncated: boolean
+}
+
+export type DesktopFilePreview = {
+  path: string
+  name: string
+  kind: "text" | "image" | "unsupported"
+  size: number
+  content?: string
+  dataUrl?: string
+  mimeType?: string
+  truncated?: boolean
+  message?: string
+}
+
 export type DesktopApi = {
   runtime: {
     initialize: () => Promise<unknown>
@@ -56,7 +104,18 @@ export type DesktopApi = {
     get: () => Promise<DesktopSettings>
     save: (patch: DesktopSettingsPatch) => Promise<DesktopSettings>
   }
-  openDirectory: () => Promise<string | null>
+  projects: {
+    get: () => Promise<DesktopProjectOverview>
+    add: () => Promise<DesktopProjectOverview | null>
+    select: (path: string) => Promise<DesktopProjectOverview>
+    remove: (path: string) => Promise<DesktopProjectOverview>
+    updateLayout: (patch: { sidebarCollapsed?: boolean; filesOpen?: boolean; filePanelWidth?: number }) => Promise<DesktopProjectOverview>
+    sessions: (path: string, offset: number, limit: number) => Promise<{ sessions: DesktopSessionSummary[]; total: number }>
+  }
+  files: {
+    list: (path?: string) => Promise<DesktopFileListing>
+    preview: (path: string) => Promise<DesktopFilePreview>
+  }
   quit: () => Promise<void>
 }
 

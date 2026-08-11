@@ -5,12 +5,13 @@ import {
   addUserMessage,
   boundText,
   clipLine,
+  conversationFromReplay,
   createConversation,
   formatDuration,
   maxEntries,
   reduceEvent,
   relativeTime,
-} from "../src/renderer/stream-model.ts"
+} from "../src/renderer/timeline-model.ts"
 
 function event(type, data = {}, turnId = "turn-1") {
   return { type, sequence: 1, sessionId: "session", turnId, event: data }
@@ -25,6 +26,44 @@ test("assistant deltas accumulate into one entry per turn", () => {
   assert.equal(assistants.length, 1)
   assert.equal(assistants[0].content, "Hello world")
   assert.equal(state.activeTurnId, "turn-1")
+})
+
+test("completion without content preserves streamed assistant text", () => {
+  let state = createConversation()
+  state = reduceEvent(state, event("turn_started"))
+  state = reduceEvent(state, event("assistant_delta", { text: "Streamed response" }))
+  state = reduceEvent(state, event("assistant_message_completed", { content_chars: 17 }))
+  const assistant = state.entries.find((entry) => entry.kind === "assistant")
+  assert.equal(assistant.content, "Streamed response")
+})
+
+test("assistant text remains chronological around a tool call", () => {
+  let state = createConversation()
+  state = reduceEvent(state, event("turn_started"))
+  state = reduceEvent(state, event("assistant_delta", { text: "I will inspect it." }))
+  state = reduceEvent(state, event("tool_requested", { tool_call_id: "call-1", tool_name: "read_file", args_preview: "README.md" }))
+  state = reduceEvent(state, event("tool_result", { tool_call_id: "call-1", tool_name: "read_file", status: "completed", result: "done" }))
+  state = reduceEvent(state, event("assistant_delta", { text: "The file is ready." }))
+  assert.deepEqual(state.entries.map((entry) => entry.kind), ["assistant", "tool", "assistant"])
+  assert.equal(state.entries[0].content, "I will inspect it.")
+  assert.equal(state.entries[2].content, "The file is ready.")
+})
+
+test("replay preserves tool calls and results between assistant messages", () => {
+  const state = conversationFromReplay([
+    { role: "user", content: "Inspect the project" },
+    {
+      role: "assistant",
+      content: "Checking now.",
+      tool_calls: [{ id: "call-1", function: { name: "read_file", arguments: "{\"path\":\"README.md\"}" } }],
+    },
+    { role: "tool", tool_call_id: "call-1", content: "contents" },
+    { role: "assistant", content: "The README is present." },
+  ])
+  assert.deepEqual(state.entries.map((entry) => entry.kind), ["user", "assistant", "tool", "assistant"])
+  const tool = state.entries[2]
+  assert.equal(tool.kind, "tool")
+  assert.equal(tool.output, "contents")
 })
 
 test("tool lifecycle correlates by tool_call_id into a single row", () => {
