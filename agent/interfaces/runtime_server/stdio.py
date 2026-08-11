@@ -7,6 +7,7 @@ import inspect
 import json
 import signal
 import sys
+import threading
 from collections.abc import Callable
 from typing import Any
 
@@ -82,12 +83,26 @@ class StdioRuntimeServer:
         self._install_question_responder()
 
     async def run(self) -> int:
-        reader = asyncio.create_task(self._read_stdin())
-        try:
-            return await self._serve()
-        finally:
-            reader.cancel()
-            await asyncio.gather(reader, return_exceptions=True)
+        self._start_stdin_pump()
+        return await self._serve()
+
+    def _start_stdin_pump(self) -> None:
+        # A daemon thread keeps a blocked stdin read from holding the interpreter
+        # open after shutdown; asyncio.to_thread workers are joined at exit.
+        loop = asyncio.get_running_loop()
+
+        def _pump() -> None:
+            while not self._stopping:
+                line = sys.stdin.readline()
+                if line == "":
+                    break
+                asyncio.run_coroutine_threadsafe(self._ingest_line(line), loop)
+            asyncio.run_coroutine_threadsafe(self._ingest_eof(), loop)
+
+        threading.Thread(target=_pump, name="rind-stdin-pump", daemon=True).start()
+
+    async def _ingest_eof(self) -> None:
+        self._begin_shutdown()
 
     def _install_question_responder(self) -> None:
         set_responder = getattr(self._runtime, "set_user_question_responder", None)
@@ -515,23 +530,18 @@ class StdioRuntimeServer:
             self._current_cancel = None
             cancel_source.dispose()
 
-    async def _read_stdin(self) -> None:
-        while True:
-            line = await asyncio.to_thread(sys.stdin.readline)
-            if line == "":
-                self._begin_shutdown()
-                return
-            message, parse_error = self._parse_line(line)
-            if parse_error is not None:
-                await self._respond_error({}, parse_error, "ParseError")
-                continue
-            request_error = self._validate_request(message)
-            if request_error is not None:
-                await self._respond_error(message, request_error, "InvalidRequest")
-                continue
-            if await self._handle_control_message(message):
-                continue
-            await self._requests.put(message)
+    async def _ingest_line(self, line: str) -> None:
+        message, parse_error = self._parse_line(line)
+        if parse_error is not None:
+            await self._respond_error({}, parse_error, "ParseError")
+            return
+        request_error = self._validate_request(message)
+        if request_error is not None:
+            await self._respond_error(message, request_error, "InvalidRequest")
+            return
+        if await self._handle_control_message(message):
+            return
+        await self._requests.put(message)
 
     def _parse_line(self, line: str) -> tuple[dict[str, Any], str | None]:
         try:

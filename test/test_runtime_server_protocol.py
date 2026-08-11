@@ -2,6 +2,7 @@ import asyncio
 import json
 import os
 import signal
+import subprocess
 import sys
 from pathlib import Path
 
@@ -973,3 +974,41 @@ def test_configure_stdio_server_signals_ignores_console_sigint(monkeypatch):
     configure_stdio_server_signals()
 
     assert calls == [(signal.SIGINT, signal.SIG_IGN)]
+
+
+def test_app_server_process_exits_after_shutdown(tmp_path):
+    home = tmp_path / "home"
+    workspace = tmp_path / "workspace"
+    (home / ".rind").mkdir(parents=True)
+    workspace.mkdir()
+    (home / ".rind" / "settings.json").write_text(json.dumps({"apiKey": "test-key"}), encoding="utf-8")
+
+    env = dict(os.environ)
+    env["HOME"] = str(home)
+    env["USERPROFILE"] = str(home)
+    process = subprocess.Popen(
+        [sys.executable, "main.py", "app-server", "--stdio", "--cwd", str(workspace)],
+        cwd=PROJECT_ROOT,
+        env=env,
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        encoding="utf-8",
+    )
+    try:
+        assert process.stdin and process.stdout
+        process.stdin.write(json.dumps({"request_id": "init", "method": "initialize"}) + "\n")
+        process.stdin.flush()
+        initialize = json.loads(process.stdout.readline())
+        assert initialize.get("kind") == "response", initialize
+
+        process.stdin.write(json.dumps({"request_id": "bye", "method": "shutdown"}) + "\n")
+        process.stdin.flush()
+        shutdown = json.loads(process.stdout.readline())
+        assert shutdown.get("result") == {"ok": True}, shutdown
+
+        process.wait(timeout=20)
+        assert process.returncode == 0
+    finally:
+        process.kill()
