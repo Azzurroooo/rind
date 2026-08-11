@@ -17,7 +17,7 @@ import {
   createConversation,
   fileMutationPreview,
   formatDuration,
-  latestPlan,
+  activePlan,
   reduceEvent,
   relativeTime,
   type ConversationState,
@@ -57,6 +57,8 @@ type AppState = {
   expandedTools: Set<string>
   revealedTools: Set<string>
   planCollapsed: boolean
+  displayedPlanId: string
+  dismissedPlanErrors: Set<string>
   composerMenuOpen: boolean
   notice: string
   bootstrapped: boolean
@@ -95,6 +97,8 @@ const state: AppState = {
   expandedTools: new Set(),
   revealedTools: new Set(),
   planCollapsed: false,
+  displayedPlanId: "",
+  dismissedPlanErrors: new Set(),
   composerMenuOpen: false,
   notice: "Add a project to begin.",
   bootstrapped: false,
@@ -133,23 +137,25 @@ appRoot.innerHTML = `
           <div id="message-stream" class="message-stream" aria-live="polite"></div>
           <button id="jump-latest" type="button" class="jump-latest" hidden>Jump to latest</button>
         </div>
-        <section id="plan-dock" class="plan-dock" aria-label="Plan progress" hidden></section>
-        <form id="composer" class="composer">
-          <textarea id="prompt" rows="2" placeholder="Message Rind — Enter to send, Shift+Enter for a new line" aria-label="Message Rind"></textarea>
-          <div class="composer-footer">
-            <div class="composer-menu-wrap">
-              <button id="composer-menu-trigger" type="button" class="composer-menu-trigger" title="More chat actions" aria-label="More chat actions" aria-haspopup="menu" aria-expanded="false">+</button>
-              <div id="composer-menu" class="composer-menu" role="menu" hidden><button id="compact-context" type="button" role="menuitem">Compact context</button></div>
+        <div class="composer-region">
+          <section id="plan-dock" class="plan-dock" aria-label="Plan progress" hidden></section>
+          <form id="composer" class="composer">
+            <textarea id="prompt" rows="2" placeholder="Message Rind — Enter to send, Shift+Enter for a new line" aria-label="Message Rind"></textarea>
+            <div class="composer-footer">
+              <div class="composer-menu-wrap">
+                <button id="composer-menu-trigger" type="button" class="composer-menu-trigger" title="More chat actions" aria-label="More chat actions" aria-haspopup="menu" aria-expanded="false">+</button>
+                <div id="composer-menu" class="composer-menu" role="menu" hidden><button id="compact-context" type="button" role="menuitem">Compact context</button></div>
+              </div>
+              <label class="model-control" title="Active model"><select id="model-select" aria-label="Model"></select></label>
+              <label class="project-control" title="Active project"><select id="project-select" aria-label="Active project"></select></label>
+              <span id="context-meter" class="context-meter" hidden></span>
+              <span class="composer-spacer"></span>
+              <button id="steer" type="button" class="ghost-button" title="Steer the running turn with this message">Steer</button>
+              <button id="interrupt" type="button" class="ghost-button danger" title="Stop the running turn (Esc)">Stop</button>
+              <button id="send" type="submit" class="primary-button">Send</button>
             </div>
-            <label class="model-control" title="Active model"><select id="model-select" aria-label="Model"></select></label>
-            <label class="project-control" title="Active project"><select id="project-select" aria-label="Active project"></select></label>
-            <span id="context-meter" class="context-meter" hidden></span>
-            <span class="composer-spacer"></span>
-            <button id="steer" type="button" class="ghost-button" title="Steer the running turn with this message">Steer</button>
-            <button id="interrupt" type="button" class="ghost-button danger" title="Stop the running turn (Esc)">Stop</button>
-            <button id="send" type="submit" class="primary-button">Send</button>
-          </div>
-        </form>
+          </form>
+        </div>
       </section>
       <aside id="file-panel" class="file-panel" aria-label="Project files">
         <div id="file-resize-handle" class="file-resize-handle" role="separator" aria-label="Resize file panel" aria-orientation="vertical"></div>
@@ -525,11 +531,17 @@ function renderToolValue(value: unknown): string {
 
 function renderPlanDock() {
   const scrollTop = planDock.querySelector<HTMLElement>(".plan-dock-content")?.scrollTop || 0
-  const plan = latestPlan(state.conversation)
+  const plan = visiblePlan(state.conversation)
   if (!plan) {
     planDock.hidden = true
     planDock.replaceChildren()
+    state.displayedPlanId = ""
+    state.planCollapsed = false
     return
+  }
+  if (state.displayedPlanId !== plan.id) {
+    state.displayedPlanId = plan.id
+    state.planCollapsed = false
   }
   const progress = planProgress(plan)
   const collapsed = state.planCollapsed
@@ -555,6 +567,17 @@ function renderPlanDock() {
   `
   const content = planDock.querySelector<HTMLElement>(".plan-dock-content")
   if (content) content.scrollTop = scrollTop
+}
+
+function visiblePlan(conversation: ConversationState): PlanEntry | undefined {
+  const plan = activePlan(conversation)
+  if (!plan || !(plan.error || plan.status === "error")) return plan
+  const key = planErrorKey(state.viewedSessionId, plan)
+  return key && state.dismissedPlanErrors.has(key) ? undefined : plan
+}
+
+function planErrorKey(sessionId: string, plan: PlanEntry) {
+  return sessionId && plan.id ? `${sessionId}:${plan.id}` : ""
 }
 
 function planProgress(plan: PlanEntry) {
@@ -683,6 +706,12 @@ function resetConversationPresentation() {
   state.expandedTools = new Set()
   state.revealedTools = new Set()
   state.planCollapsed = false
+  state.displayedPlanId = ""
+  const plan = activePlan(state.conversation)
+  if (plan && (plan.error || plan.status === "error")) {
+    const key = planErrorKey(state.viewedSessionId, plan)
+    if (key) state.dismissedPlanErrors.add(key)
+  }
   lastRenderedEntries = 0
 }
 

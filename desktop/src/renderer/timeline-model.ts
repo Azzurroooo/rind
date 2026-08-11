@@ -72,7 +72,12 @@ export function reduceEvent(state: ConversationState, envelope: RuntimeEvent): C
   const event = envelope.event
   const turnId = envelope.turnId
   switch (envelope.type) {
-    case "turn_started": return { ...closeAssistant(state), activeTurnId: turnId, turnStartedAt: Date.now() }
+    case "turn_started": return {
+      ...closeAssistant(state),
+      activeTurnId: turnId,
+      turnStartedAt: Date.now(),
+      ...(state.plan && (state.plan.error || state.plan.status === "error") ? { plan: undefined } : {}),
+    }
     case "assistant_delta": return appendAssistantDelta(state, turnId, asString(event.text))
     case "assistant_message_completed": return completeAssistant(state, turnId, asString(event.content))
     case "plan_updated": return reducePlanSnapshot(state, envelope)
@@ -151,6 +156,14 @@ export function conversationFromReplay(messages: unknown[]): ConversationState {
 
 export function latestPlan(state: ConversationState): PlanEntry | undefined {
   return state.plan
+}
+
+export function activePlan(state: ConversationState): PlanEntry | undefined {
+  const plan = state.plan
+  if (!plan) return undefined
+  if (plan.error || plan.status === "error") return plan
+  if (!state.activeTurnId) return undefined
+  return plan.steps.some((step) => step.status === "pending" || step.status === "in_progress") ? plan : undefined
 }
 
 function appendAssistantDelta(state: ConversationState, turnId: string, text: string): ConversationState {

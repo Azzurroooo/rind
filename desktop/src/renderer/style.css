@@ -172,7 +172,7 @@ button:disabled { cursor: not-allowed; opacity: 0.45; }
   height: 100%;
   min-width: 0;
   min-height: 0;
-  grid-template-rows: auto auto minmax(0, 1fr) auto auto;
+  grid-template-rows: auto auto minmax(0, 1fr) auto;
   overflow: hidden;
   background: var(--bg-base);
 }
@@ -407,6 +407,7 @@ pre code {
 .file-diff-empty { padding: 2px 10px; color: var(--text-faint); font-family: var(--font-mono); font-size: 11.5px; }
 
 .plan-dock { display: grid; width: min(var(--stream-width), calc(100% - 32px)); height: 224px; min-height: 40px; margin: 0 auto 2px; grid-template-rows: 40px minmax(0, 1fr); border: 1px solid var(--border-strong); border-radius: var(--radius); background: var(--bg-raised); overflow: hidden; transition: height 220ms cubic-bezier(.2, .8, .2, 1), border-color 180ms ease; }
+.plan-dock[hidden] { display: none; }
 .plan-dock-trigger { display: flex; align-items: center; gap: 7px; width: 100%; min-height: 40px; padding: 7px 10px; border: 0; color: var(--text-base); background: transparent; text-align: left; }
 .plan-dock-trigger:hover { background: var(--bg-hover); }
 .plan-progress { flex: none; color: var(--text-faint); font-family: var(--font-mono); font-size: 11px; font-variant-numeric: tabular-nums; }
@@ -509,9 +510,18 @@ pre code {
 
 /* ---------- composer ---------- */
 
+.composer-region {
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  align-items: center;
+  min-width: 0;
+  min-height: 0;
+  width: 100%;
+  background: var(--bg-base);
+}
+
 .composer {
-  grid-row: 5;
-  align-self: end;
   margin: 0 auto;
   padding: 10px 16px 14px;
   width: 100%;

@@ -3,6 +3,7 @@ import test from "node:test"
 
 import {
   addUserMessage,
+  activePlan,
   boundText,
   clipLine,
   conversationFromReplay,
@@ -180,12 +181,44 @@ test("latest plan selects the current progress snapshot", () => {
   assert.deepEqual(latestPlan(state)?.steps.map((step) => step.status), ["completed", "in_progress"])
 })
 
+test("active plan hides completed and cancelled snapshots", () => {
+  let state = createConversation()
+  state = reduceEvent(state, event("plan_updated", {
+    tool_call_id: "plan-1",
+    plan: [{ step: "Inspect", status: "completed" }, { step: "Cleanup", status: "cancelled" }],
+  }))
+  assert.equal(activePlan(state), undefined)
+})
+
+test("active plan keeps pending, running, and error snapshots visible", () => {
+  let state = createConversation()
+  state = reduceEvent(state, event("turn_started"))
+  state = reduceEvent(state, event("plan_updated", {
+    tool_call_id: "plan-1",
+    plan: [{ step: "Inspect", status: "pending" }],
+  }))
+  assert.equal(activePlan(state)?.steps[0].status, "pending")
+
+  state = reduceEvent(state, event("tool_result", {
+    tool_call_id: "plan-1",
+    tool_name: "update_plan",
+    status: "error",
+    error_type: "RuntimeError",
+    result: JSON.stringify({ ok: false, tool: "update_plan", error: "Unable to continue" }),
+  }))
+  assert.equal(activePlan(state)?.status, "error")
+
+  state = reduceEvent(state, event("turn_started", {}, "turn-2"))
+  assert.equal(activePlan(state), undefined)
+})
+
 test("replay reconstructs structured tool arguments and plans", () => {
   const state = conversationFromReplay([
     { role: "assistant", tool_calls: [{ id: "plan-1", function: { name: "update_plan", arguments: JSON.stringify({ plan: [{ step: "Ship", status: "pending" }] }) } }] },
     { role: "tool", tool_call_id: "plan-1", content: JSON.stringify({ ok: true, tool: "update_plan", data: "Plan updated" }) },
   ])
   assert.equal(latestPlan(state)?.status, "completed")
+  assert.equal(activePlan(state), undefined)
 })
 
 test("file mutation previews expose bounded plus and minus source", () => {
