@@ -23,6 +23,7 @@ import {
   type PlanEntry,
   type ToolEntry,
 } from "./timeline-model"
+import { renderMarkdown } from "./markdown"
 
 type AppState = {
   runtime: RuntimeSnapshot
@@ -40,8 +41,7 @@ type AppState = {
   sidebarOpen: boolean
   sidebarWidth: number
   filesOpen: boolean
-  fileTreeWidth: number
-  filePreviewWidth: number
+  filePanelWidth: number
   expandedProjects: Set<string>
   expandedDirectories: Set<string>
   fileListings: Record<string, DesktopFileListing>
@@ -50,6 +50,7 @@ type AppState = {
   createDraftWhenReady: boolean
   conversation: ConversationState
   expandedTools: Set<string>
+  composerMenuOpen: boolean
   notice: string
   bootstrapped: boolean
 }
@@ -74,8 +75,7 @@ const state: AppState = {
   sidebarOpen: true,
   sidebarWidth: 248,
   filesOpen: false,
-  fileTreeWidth: 240,
-  filePreviewWidth: 420,
+  filePanelWidth: 480,
   expandedProjects: new Set(),
   expandedDirectories: new Set([""]),
   fileListings: {},
@@ -83,6 +83,7 @@ const state: AppState = {
   createDraftWhenReady: false,
   conversation: createConversation(),
   expandedTools: new Set(),
+  composerMenuOpen: false,
   notice: "Add a project to begin.",
   bootstrapped: false,
 }
@@ -112,7 +113,7 @@ appRoot.innerHTML = `
       <section class="conversation">
         <div class="conversation-head">
           <div class="conversation-title"><strong id="session-title">New session</strong><span id="session-id" class="subtle"></span></div>
-          <div class="conversation-actions"><button id="toggle-sidebar" type="button" class="ghost-button" title="Toggle projects sidebar" aria-label="Toggle projects sidebar">Projects</button><button id="toggle-files" type="button" class="ghost-button" title="Browse active project files">Files</button><button id="compact" type="button" class="ghost-button" title="Compact context now">Compact</button></div>
+          <div class="conversation-actions"><button id="toggle-sidebar" type="button" class="ghost-button" title="Toggle projects sidebar" aria-label="Toggle projects sidebar">Projects</button><button id="toggle-files" type="button" class="ghost-button" title="Browse active project files">Files</button></div>
         </div>
         <div id="notice" class="notice" role="status" hidden><span id="notice-text"></span><button id="retry" type="button" class="ghost-button" hidden>Restart runtime</button></div>
         <div class="stream-wrap">
@@ -122,6 +123,10 @@ appRoot.innerHTML = `
         <form id="composer" class="composer">
           <textarea id="prompt" rows="2" placeholder="Message Rind — Enter to send, Shift+Enter for a new line" aria-label="Message Rind"></textarea>
           <div class="composer-footer">
+            <div class="composer-menu-wrap">
+              <button id="composer-menu-trigger" type="button" class="composer-menu-trigger" title="More chat actions" aria-label="More chat actions" aria-haspopup="menu" aria-expanded="false">+</button>
+              <div id="composer-menu" class="composer-menu" role="menu" hidden><button id="compact-context" type="button" role="menuitem">Compact context</button></div>
+            </div>
             <label class="model-control" title="Active model"><select id="model-select" aria-label="Model"></select></label>
             <label class="project-control" title="Active project"><select id="project-select" aria-label="Active project"></select></label>
             <span id="context-meter" class="context-meter" hidden></span>
@@ -137,7 +142,6 @@ appRoot.innerHTML = `
         <div class="file-panel-head"><strong>Files</strong><button id="close-files" type="button" class="ghost-button" title="Close files">Close</button></div>
         <div class="file-workspace">
           <section id="file-preview" class="file-preview"><p class="subtle">Select a file to preview.</p></section>
-          <div id="file-preview-resize-handle" class="file-preview-resize-handle" role="separator" aria-label="Resize file preview" aria-orientation="vertical"></div>
           <div id="file-tree" class="file-tree"></div>
         </div>
       </aside>
@@ -174,11 +178,13 @@ const prompt = requiredElement<HTMLTextAreaElement>("prompt")
 const send = requiredElement<HTMLButtonElement>("send")
 const steer = requiredElement<HTMLButtonElement>("steer")
 const interrupt = requiredElement<HTMLButtonElement>("interrupt")
+const composerMenuTrigger = requiredElement<HTMLButtonElement>("composer-menu-trigger")
+const composerMenu = requiredElement("composer-menu")
+const compactContext = requiredElement<HTMLButtonElement>("compact-context")
 const sidebar = requiredElement("sidebar")
 const sidebarResizeHandle = requiredElement("sidebar-resize-handle")
 const filePanel = requiredElement("file-panel")
 const fileResizeHandle = requiredElement("file-resize-handle")
-const filePreviewResizeHandle = requiredElement("file-preview-resize-handle")
 const fileTree = requiredElement("file-tree")
 const filePreview = requiredElement("file-preview")
 const filesToggle = requiredElement<HTMLButtonElement>("toggle-files")
@@ -195,7 +201,7 @@ const saveSettingsButton = requiredElement<HTMLButtonElement>("save-settings")
 
 let workingTimer: ReturnType<typeof setInterval> | undefined
 let lastRenderedEntries = 0
-let resizeStart: { target: "sidebar" | "files" | "preview"; pointerId: number; x: number; width: number; lastWidth: number; wideFiles: boolean } | undefined
+let resizeStart: { target: "sidebar" | "files"; pointerId: number; x: number; width: number; lastWidth: number } | undefined
 
 function requiredElement<T extends HTMLElement = HTMLElement>(id: string) {
   const element = document.getElementById(id) as T | null
@@ -206,9 +212,7 @@ function requiredElement<T extends HTMLElement = HTMLElement>(id: string) {
 function render() {
   const { runtime, conversation } = state
   const wideFiles = usesWideFileLayout()
-  const filesWidth = state.filesOpen
-    ? state.filePreview && wideFiles ? state.fileTreeWidth + state.filePreviewWidth + 8 : state.fileTreeWidth
-    : 0
+  const filesWidth = state.filesOpen ? state.filePanelWidth : 0
   connectionText.textContent = runtime.status === "ready" ? "Connected" : titleCase(runtime.status)
   connection.className = `connection connection-${runtime.status}`
   appRoot.classList.toggle("sidebar-open", state.sidebarOpen)
@@ -217,8 +221,6 @@ function render() {
   appRoot.classList.toggle("file-preview-open", Boolean(state.filePreview))
   appRoot.style.setProperty("--sidebar-panel-width", `${state.sidebarOpen ? state.sidebarWidth : 0}px`)
   appRoot.style.setProperty("--files-panel-width", `${filesWidth}px`)
-  appRoot.style.setProperty("--file-tree-width", `${state.fileTreeWidth}px`)
-  appRoot.style.setProperty("--file-preview-width", `${state.filePreviewWidth}px`)
   sidebar.setAttribute("aria-hidden", String(!state.sidebarOpen))
   sidebar.inert = !state.sidebarOpen
   filePanel.setAttribute("aria-hidden", String(!state.filesOpen))
@@ -521,33 +523,14 @@ function renderComposer() {
   send.title = active ? "Queue as follow-up for the running turn" : "Send message"
   steer.disabled = !ready || !active
   interrupt.disabled = !ready || !active
+  composerMenuTrigger.disabled = !ready || !state.sessionId
+  composerMenuTrigger.setAttribute("aria-expanded", String(state.composerMenuOpen))
+  composerMenu.hidden = !state.composerMenuOpen
+  compactContext.disabled = !ready || !state.sessionId
   const percent = state.conversation.contextUsagePercent
   contextMeter.hidden = percent === null
   contextMeter.textContent = percent === null ? "" : `${Math.round(percent * 100)}% ctx`
   contextMeter.classList.toggle("context-hot", percent !== null && percent >= 0.8)
-}
-
-function renderMarkdown(value: string): string {
-  const chunks = value.split(/```(\w*)\n?([\s\S]*?)(?:```|$)/g)
-  const parts: string[] = []
-  for (let index = 0; index < chunks.length; index += 1) {
-    if (index % 3 === 0) {
-      parts.push(renderInline(chunks[index]))
-    } else if (index % 3 === 2) {
-      const language = chunks[index - 1]
-      const code = chunks[index]
-      parts.push(`<pre><div class="code-head"><span>${escapeHtml(language || "code")}</span><button class="copy-code" type="button" data-copy="${escapeAttribute(code)}">Copy</button></div><code>${escapeHtml(code)}</code></pre>`)
-    }
-  }
-  return parts.join("")
-}
-
-function renderInline(text: string): string {
-  return escapeHtml(text)
-    .replace(/`([^`\n]+)`/g, "<code>$1</code>")
-    .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
-    .replace(/\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/g, '<a href="$2" target="_blank" rel="noreferrer">$1</a>')
-    .replace(/\n/g, "<br>")
 }
 
 function titleCase(value: string) {
@@ -601,8 +584,7 @@ function applyOverview(overview: Awaited<ReturnType<typeof window.api.projects.g
   state.sidebarOpen = overview.sidebarOpen
   state.sidebarWidth = overview.sidebarWidth
   state.filesOpen = overview.filesOpen
-  state.fileTreeWidth = overview.fileTreeWidth
-  state.filePreviewWidth = overview.filePreviewWidth
+  state.filePanelWidth = overview.filePanelWidth
   state.sessionPages = nextPages
   state.sessionTotals = nextTotals
   if (state.activeProjectPath) state.expandedProjects.add(state.activeProjectPath)
@@ -705,8 +687,20 @@ prompt.addEventListener("keydown", (event) => {
   }
 })
 document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape" && state.composerMenuOpen) {
+    state.composerMenuOpen = false
+    render()
+    prompt.focus()
+    return
+  }
   if (event.key === "Escape" && state.conversation.activeTurnId && !state.settingsOpen) {
     runAction(() => request("turn.interrupt"))
+  }
+})
+document.addEventListener("pointerdown", (event) => {
+  if (state.composerMenuOpen && !(event.target as HTMLElement).closest(".composer-menu-wrap")) {
+    state.composerMenuOpen = false
+    render()
   }
 })
 
@@ -789,7 +783,18 @@ requiredElement("new-session").addEventListener("click", () => runAction(startNe
 sidebarToggle.addEventListener("click", () => runAction(toggleSidebar))
 requiredElement("close-files").addEventListener("click", () => runAction(() => setFilesOpen(false)))
 filesToggle.addEventListener("click", () => runAction(() => setFilesOpen(!state.filesOpen)))
-requiredElement("compact").addEventListener("click", () => runAction(() => request("compact")))
+composerMenuTrigger.addEventListener("click", () => {
+  state.composerMenuOpen = !state.composerMenuOpen
+  render()
+})
+compactContext.addEventListener("click", () => {
+  state.composerMenuOpen = false
+  render()
+  runAction(async () => {
+    await request("compact")
+    prompt.focus()
+  })
+})
 modelSelect.addEventListener("change", () => {
   const model = modelSelect.value
   if (!model) return
@@ -845,7 +850,6 @@ filePreview.addEventListener("click", (event) => {
 })
 startResize(sidebarResizeHandle, "sidebar")
 startResize(fileResizeHandle, "files")
-startResize(filePreviewResizeHandle, "preview")
 messageStream.addEventListener("click", (event) => {
   const target = event.target as HTMLElement
   const toggle = target.closest<HTMLButtonElement>("[data-toggle-tool]")
@@ -1041,28 +1045,25 @@ async function createSession() {
 function usesWideFileLayout() {
   if (!state.filesOpen || !state.filePreview || window.innerWidth < 1180) return false
   const sidebarWidth = state.sidebarOpen ? state.sidebarWidth : 0
-  return window.innerWidth - sidebarWidth - state.fileTreeWidth - state.filePreviewWidth - 8 >= 440
+  return state.filePanelWidth >= 520 && window.innerWidth - sidebarWidth - state.filePanelWidth >= 440
 }
 
-function startResize(handle: HTMLElement, target: "sidebar" | "files" | "preview") {
+function startResize(handle: HTMLElement, target: "sidebar" | "files") {
   handle.addEventListener("pointerdown", (event) => {
     if ((target === "sidebar" && !state.sidebarOpen) || (target !== "sidebar" && !state.filesOpen)) return
-    if (target === "preview" && !usesWideFileLayout()) return
-    const width = target === "sidebar" ? state.sidebarWidth : target === "files" ? (usesWideFileLayout() ? state.filePreviewWidth + state.fileTreeWidth : state.fileTreeWidth) : state.filePreviewWidth
-    resizeStart = { target, pointerId: event.pointerId, x: event.clientX, width, lastWidth: width, wideFiles: usesWideFileLayout() }
+    const width = target === "sidebar" ? state.sidebarWidth : state.filePanelWidth
+    resizeStart = { target, pointerId: event.pointerId, x: event.clientX, width, lastWidth: width }
     handle.setPointerCapture(event.pointerId)
     document.body.classList.add("resizing-panel")
     event.preventDefault()
   })
   handle.addEventListener("pointermove", (event) => {
     if (!resizeStart || resizeStart.target !== target || resizeStart.pointerId !== event.pointerId) return
-    const delta = target === "sidebar" || target === "preview" ? event.clientX - resizeStart.x : resizeStart.x - event.clientX
+    const delta = target === "sidebar" ? event.clientX - resizeStart.x : resizeStart.x - event.clientX
     const width = Math.round(resizeStart.width + delta)
     resizeStart.lastWidth = width
     if (target === "sidebar") state.sidebarWidth = Math.max(0, Math.min(420, width))
-    else if (target === "preview") state.filePreviewWidth = Math.max(0, Math.min(760, width))
-    else if (resizeStart.wideFiles) state.filePreviewWidth = Math.max(320, Math.min(760, width - state.fileTreeWidth))
-    else state.fileTreeWidth = Math.max(0, Math.min(420, width))
+    else state.filePanelWidth = Math.max(0, Math.min(900, width))
     render()
   })
   handle.addEventListener("pointerup", (event) => finishResize(handle, event))
@@ -1071,7 +1072,7 @@ function startResize(handle: HTMLElement, target: "sidebar" | "files" | "preview
 
 function finishResize(handle: HTMLElement, event: PointerEvent) {
   if (!resizeStart || resizeStart.pointerId !== event.pointerId) return
-  const { target, wideFiles, lastWidth } = resizeStart
+  const { target, lastWidth } = resizeStart
   handle.releasePointerCapture(event.pointerId)
   resizeStart = undefined
   document.body.classList.remove("resizing-panel")
@@ -1080,19 +1081,10 @@ function finishResize(handle: HTMLElement, event: PointerEvent) {
       const sidebarOpen = state.sidebarWidth >= 160
       state.sidebarWidth = Math.max(180, state.sidebarWidth || 248)
       applyOverview(await window.api.projects.updateLayout({ sidebarOpen, sidebarWidth: state.sidebarWidth }))
-    } else if (target === "preview") {
-      state.filePreviewWidth = Math.max(320, state.filePreviewWidth || 420)
-      applyOverview(await window.api.projects.updateLayout({ filePreviewWidth: state.filePreviewWidth }))
     } else {
-      const requestedPreviewWidth = wideFiles ? lastWidth - state.fileTreeWidth : 0
-      const currentWidth = wideFiles ? requestedPreviewWidth + state.fileTreeWidth : state.fileTreeWidth
-      const filesOpen = wideFiles && requestedPreviewWidth < 160 ? true : currentWidth >= 160
-      if (wideFiles && requestedPreviewWidth < 160) {
-        state.filePreview = undefined
-        state.filePreviewWidth = 420
-      } else if (wideFiles) state.filePreviewWidth = Math.max(320, state.filePreviewWidth || 420)
-      else state.fileTreeWidth = Math.max(180, state.fileTreeWidth || 240)
-      applyOverview(await window.api.projects.updateLayout({ filesOpen, fileTreeWidth: state.fileTreeWidth, filePreviewWidth: state.filePreviewWidth }))
+      const filesOpen = lastWidth >= 240
+      state.filePanelWidth = Math.max(280, state.filePanelWidth || 480)
+      applyOverview(await window.api.projects.updateLayout({ filesOpen, filePanelWidth: state.filePanelWidth }))
     }
     render()
   })

@@ -191,8 +191,7 @@ function registerIpc() {
       sidebarOpen: input.sidebarOpen as boolean | undefined,
       sidebarWidth: input.sidebarWidth as number | undefined,
       filesOpen: input.filesOpen as boolean | undefined,
-      fileTreeWidth: input.fileTreeWidth as number | undefined,
-      filePreviewWidth: input.filePreviewWidth as number | undefined,
+      filePanelWidth: input.filePanelWidth as number | undefined,
     })
   })
   ipcMain.handle("projects-sessions", (_event, path: unknown, offset: unknown, limit: unknown) => {
