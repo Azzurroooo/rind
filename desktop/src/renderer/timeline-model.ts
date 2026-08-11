@@ -137,6 +137,14 @@ export function conversationFromReplay(messages: unknown[]): ConversationState {
   return state
 }
 
+export function latestPlan(state: ConversationState): PlanEntry | undefined {
+  for (let index = state.entries.length - 1; index >= 0; index -= 1) {
+    const entry = state.entries[index]
+    if (entry.kind === "plan") return entry
+  }
+  return undefined
+}
+
 function appendAssistantDelta(state: ConversationState, turnId: string, text: string): ConversationState {
   if (!text) return state
   const current = state.entries.at(-1)

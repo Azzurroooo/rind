@@ -8,6 +8,7 @@ import {
   conversationFromReplay,
   createConversation,
   formatDuration,
+  latestPlan,
   maxEntries,
   parseToolResult,
   reduceEvent,
@@ -124,6 +125,17 @@ test("plan updates become chronological progress snapshots", () => {
   const plan = state.entries[1]
   assert.equal(plan.kind, "plan")
   assert.deepEqual(plan.steps.map((step) => step.status), ["completed", "in_progress"])
+})
+
+test("latest plan selects the current progress snapshot", () => {
+  let state = createConversation()
+  state = reduceEvent(state, event("tool_requested", {
+    tool_call_id: "plan-1", tool_name: "update_plan", arguments: { plan: [{ step: "Inspect", status: "in_progress" }] },
+  }))
+  state = reduceEvent(state, event("tool_requested", {
+    tool_call_id: "plan-2", tool_name: "update_plan", arguments: { plan: [{ step: "Inspect", status: "completed" }, { step: "Implement", status: "in_progress" }] },
+  }))
+  assert.deepEqual(latestPlan(state)?.steps.map((step) => step.status), ["completed", "in_progress"])
 })
 
 test("replay reconstructs structured tool arguments and plans", () => {

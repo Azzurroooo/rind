@@ -172,7 +172,7 @@ button:disabled { cursor: not-allowed; opacity: 0.45; }
   height: 100%;
   min-width: 0;
   min-height: 0;
-  grid-template-rows: auto auto minmax(0, 1fr) auto;
+  grid-template-rows: auto auto minmax(0, 1fr) auto auto;
   overflow: hidden;
   background: var(--bg-base);
 }
@@ -303,6 +303,7 @@ pre code {
   margin-bottom: 2px;
   border-left: 2px solid var(--border);
   font-size: 12.5px;
+  transition: margin-bottom 180ms ease, border-color 180ms ease;
 }
 .ledger-row:hover { border-left-color: var(--border-strong); }
 .ledger-row.open { margin-bottom: 10px; border-left-color: var(--accent-dim); }
@@ -319,8 +320,16 @@ pre code {
   text-align: left;
   color: var(--text-weak);
   background: transparent;
+  transition: color 160ms ease, background-color 160ms ease;
 }
 .ledger-trigger:hover:not(:disabled) { background: var(--bg-hover); color: var(--text-base); }
+.ledger-row.open .ledger-trigger { background: var(--bg-hover); color: var(--text-base); }
+.ledger-row.tool-pending .ledger-trigger { opacity: 0.72; }
+.ledger-row.tool-running .ledger-trigger {
+  background: linear-gradient(100deg, transparent 30%, rgb(245 184 61 / 10%) 50%, transparent 70%);
+  background-size: 220% 100%;
+  animation: ledger-running 1.6s ease-in-out infinite;
+}
 
 .pip-running { background: var(--accent); animation: pip-pulse 1.1s ease-in-out infinite; }
 .pip-done { background: var(--ok); }
@@ -329,6 +338,11 @@ pre code {
 @keyframes pip-pulse {
   0%, 100% { opacity: 1; box-shadow: 0 0 0 0 rgb(245 184 61 / 35%); }
   50% { opacity: 0.55; box-shadow: 0 0 0 4px rgb(245 184 61 / 0%); }
+}
+
+@keyframes ledger-running {
+  0%, 100% { background-position: 100% 0; }
+  50% { background-position: 0 0; }
 }
 
 .ledger-verb { flex: none; color: var(--text-base); font-family: var(--font-mono); font-size: 12px; }
@@ -351,7 +365,7 @@ pre code {
   border-right: 1.5px solid var(--text-faint);
   border-bottom: 1.5px solid var(--text-faint);
   transform: rotate(45deg);
-  transition: transform 0.15s ease;
+  transition: transform 180ms cubic-bezier(.2, .8, .2, 1);
 }
 .ledger-row.open .ledger-chevron { transform: rotate(225deg); }
 
@@ -365,6 +379,9 @@ pre code {
 }
 .ledger-output code { display: block; padding: 8px 10px; font-family: var(--font-mono); font-size: 12px; line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; }
 
+.tool-detail-shell { display: grid; grid-template-rows: 0fr; opacity: 0; transition: grid-template-rows 220ms cubic-bezier(.2, .8, .2, 1), opacity 150ms ease; }
+.tool-detail-clip { min-height: 0; overflow: hidden; }
+.ledger-row.open .tool-detail-shell { grid-template-rows: 1fr; opacity: 1; }
 .tool-details { margin: 2px 8px 8px 24px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--bg-inset); }
 .tool-detail-section { display: grid; gap: 5px; padding: 8px 10px; border-bottom: 1px solid var(--border); }
 .tool-detail-section:last-child { border-bottom: none; }
@@ -374,10 +391,17 @@ pre code {
 .tool-detail-error { color: var(--err); }
 .tool-detail-error small { color: var(--text-faint); font-family: var(--font-mono); }
 
-.plan-card { margin: 6px 0 12px; padding: 9px 11px; border: 1px solid var(--border-strong); border-radius: var(--radius); background: var(--bg-raised); }
-.plan-card-head { display: flex; align-items: center; gap: 7px; color: var(--text-base); font-size: 12px; }
-.plan-card-head > span:last-child { margin-left: auto; color: var(--text-faint); font-size: 11px; }
-.plan-steps { display: grid; gap: 6px; margin: 9px 0 0; padding: 0; list-style: none; }
+.plan-dock { width: min(var(--stream-width), calc(100% - 32px)); margin: 0 auto 2px; border: 1px solid var(--border-strong); border-radius: var(--radius); background: var(--bg-raised); overflow: hidden; }
+.plan-dock-trigger { display: flex; align-items: center; gap: 7px; width: 100%; min-height: 38px; padding: 7px 10px; border: 0; color: var(--text-base); background: transparent; text-align: left; }
+.plan-dock-trigger:hover { background: var(--bg-hover); }
+.plan-progress { flex: none; color: var(--text-faint); font-family: var(--font-mono); font-size: 11px; font-variant-numeric: tabular-nums; }
+.plan-preview { min-width: 0; overflow: hidden; color: var(--text-faint); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+.plan-chevron { flex: none; width: 7px; height: 7px; margin-left: auto; border-right: 1.5px solid var(--text-faint); border-bottom: 1.5px solid var(--text-faint); transform: rotate(225deg); transition: transform 180ms cubic-bezier(.2, .8, .2, 1); }
+.plan-dock.collapsed .plan-chevron { transform: rotate(45deg); }
+.plan-dock-body { display: grid; grid-template-rows: 1fr; opacity: 1; transition: grid-template-rows 220ms cubic-bezier(.2, .8, .2, 1), opacity 150ms ease; }
+.plan-dock.collapsed .plan-dock-body { grid-template-rows: 0fr; opacity: 0; }
+.plan-dock-content { min-height: 0; max-height: 230px; overflow: auto; padding: 0 10px 9px; scrollbar-width: thin; scrollbar-color: var(--border-strong) transparent; }
+.plan-steps { display: grid; gap: 6px; margin: 2px 0 0; padding: 0; list-style: none; }
 .plan-step { display: grid; grid-template-columns: 14px minmax(0, 1fr); gap: 7px; align-items: start; color: var(--text-weak); font-size: 12px; line-height: 1.4; }
 .plan-step > span:first-child { width: 12px; height: 12px; margin-top: 2px; border: 1px solid var(--border-strong); border-radius: 50%; }
 .plan-completed > span:first-child { border-color: var(--ok); background: var(--ok); }
@@ -470,7 +494,7 @@ pre code {
 /* ---------- composer ---------- */
 
 .composer {
-  grid-row: 4;
+  grid-row: 5;
   align-self: end;
   margin: 0 auto;
   padding: 10px 16px 14px;
@@ -706,8 +730,8 @@ pre code {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .pip-running, .connection-starting .status-pip { animation: none; }
-  .ledger-chevron { transition: none; }
+  .pip-running, .connection-starting .status-pip, .ledger-row.tool-running .ledger-trigger { animation: none; }
+  .ledger-chevron, .plan-chevron, .tool-detail-shell, .plan-dock-body { transition: none; }
 }
 
 /* ---------- resizable workspace panels ---------- */
@@ -781,8 +805,8 @@ body { min-height: 0; }
   scrollbar-width: thin;
   scrollbar-color: var(--border-strong) transparent;
 }
-.composer textarea::-webkit-scrollbar, .message-stream::-webkit-scrollbar, .project-list::-webkit-scrollbar, .file-tree::-webkit-scrollbar, .file-preview::-webkit-scrollbar, .ledger-output::-webkit-scrollbar { width: 8px; height: 8px; }
-.composer textarea::-webkit-scrollbar-thumb, .message-stream::-webkit-scrollbar-thumb, .project-list::-webkit-scrollbar-thumb, .file-tree::-webkit-scrollbar-thumb, .file-preview::-webkit-scrollbar-thumb, .ledger-output::-webkit-scrollbar-thumb { border: 2px solid transparent; border-radius: 5px; background: var(--border-strong); background-clip: padding-box; }
+.composer textarea::-webkit-scrollbar, .message-stream::-webkit-scrollbar, .project-list::-webkit-scrollbar, .file-tree::-webkit-scrollbar, .file-preview::-webkit-scrollbar, .ledger-output::-webkit-scrollbar, .plan-dock-content::-webkit-scrollbar { width: 8px; height: 8px; }
+.composer textarea::-webkit-scrollbar-thumb, .message-stream::-webkit-scrollbar-thumb, .project-list::-webkit-scrollbar-thumb, .file-tree::-webkit-scrollbar-thumb, .file-preview::-webkit-scrollbar-thumb, .ledger-output::-webkit-scrollbar-thumb, .plan-dock-content::-webkit-scrollbar-thumb { border: 2px solid transparent; border-radius: 5px; background: var(--border-strong); background-clip: padding-box; }
 .project-control select { max-width: 210px; min-height: 26px; padding: 2px 6px; border: 1px solid transparent; border-radius: var(--radius); color: var(--text-weak); background: transparent; font-size: 12px; }
 .project-control select:hover:not(:disabled) { border-color: var(--border-strong); color: var(--text-base); }
 

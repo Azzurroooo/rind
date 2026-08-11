@@ -16,6 +16,7 @@ import {
   conversationFromReplay,
   createConversation,
   formatDuration,
+  latestPlan,
   reduceEvent,
   relativeTime,
   type ConversationState,
@@ -50,6 +51,8 @@ type AppState = {
   createDraftWhenReady: boolean
   conversation: ConversationState
   expandedTools: Set<string>
+  revealedTools: Set<string>
+  planCollapsed: boolean
   composerMenuOpen: boolean
   notice: string
   bootstrapped: boolean
@@ -83,6 +86,8 @@ const state: AppState = {
   createDraftWhenReady: false,
   conversation: createConversation(),
   expandedTools: new Set(),
+  revealedTools: new Set(),
+  planCollapsed: false,
   composerMenuOpen: false,
   notice: "Add a project to begin.",
   bootstrapped: false,
@@ -120,6 +125,7 @@ appRoot.innerHTML = `
           <div id="message-stream" class="message-stream" aria-live="polite"></div>
           <button id="jump-latest" type="button" class="jump-latest" hidden>Jump to latest</button>
         </div>
+        <section id="plan-dock" class="plan-dock" aria-label="Plan progress" hidden></section>
         <form id="composer" class="composer">
           <textarea id="prompt" rows="2" placeholder="Message Rind — Enter to send, Shift+Enter for a new line" aria-label="Message Rind"></textarea>
           <div class="composer-footer">
@@ -170,6 +176,7 @@ const sessionIdLabel = requiredElement("session-id")
 const modelSelect = requiredElement<HTMLSelectElement>("model-select")
 const messageStream = requiredElement("message-stream")
 const jumpLatest = requiredElement<HTMLButtonElement>("jump-latest")
+const planDock = requiredElement("plan-dock")
 const notice = requiredElement("notice")
 const noticeText = requiredElement("notice-text")
 const retry = requiredElement<HTMLButtonElement>("retry")
@@ -201,6 +208,7 @@ const saveSettingsButton = requiredElement<HTMLButtonElement>("save-settings")
 
 let workingTimer: ReturnType<typeof setInterval> | undefined
 let lastRenderedEntries = 0
+let toolPinSequence = 0
 let resizeStart: { target: "sidebar" | "files"; pointerId: number; x: number; width: number; lastWidth: number } | undefined
 
 function requiredElement<T extends HTMLElement = HTMLElement>(id: string) {
@@ -239,6 +247,7 @@ function render() {
   renderProjectControl()
   renderProjects()
   renderModels()
+  renderPlanDock()
   renderStream()
   renderComposer()
   renderFiles()
@@ -374,20 +383,21 @@ function renderModels() {
 function renderStream() {
   const stickToBottom = messageStream.scrollHeight - messageStream.scrollTop - messageStream.clientHeight < 80
   const { conversation } = state
-  if (!conversation.entries.length && !conversation.question) {
+  const entries = conversation.entries.filter((entry) => entry.kind !== "plan")
+  if (!entries.length && !conversation.question) {
     messageStream.innerHTML = state.runtime.status === "ready"
       ? `<div class="stream-empty"><p>No messages yet.</p><p class="subtle">Ask Rind to inspect, change, or explain something in this workspace.</p></div>`
       : ""
   } else {
-    messageStream.innerHTML = conversation.entries.map(renderEntry).join("") + renderQuestion() + renderWorking()
+    messageStream.innerHTML = entries.map(renderEntry).join("") + renderQuestion() + renderWorking()
   }
   if (stickToBottom) {
     messageStream.scrollTop = messageStream.scrollHeight
     jumpLatest.hidden = true
-  } else if (conversation.entries.length > lastRenderedEntries) {
+  } else if (entries.length > lastRenderedEntries) {
     jumpLatest.hidden = false
   }
-  lastRenderedEntries = conversation.entries.length
+  lastRenderedEntries = entries.length
 }
 
 function renderEntry(entry: Entry): string {
@@ -399,7 +409,7 @@ function renderEntry(entry: Entry): string {
     case "tool":
       return renderTool(entry)
     case "plan":
-      return renderPlan(entry)
+      return ""
     case "file":
       return `<div class="ledger-row ledger-file"><span class="status-pip pip-done"></span><span class="ledger-verb">Edited</span><code class="ledger-arg">${escapeHtml(entry.filePath)}</code></div>`
     case "error":
@@ -411,14 +421,15 @@ function renderEntry(entry: Entry): string {
 
 function renderTool(tool: ToolEntry): string {
   const open = state.expandedTools.has(tool.id)
+  const revealed = open || state.revealedTools.has(tool.id)
   const pip = tool.status === "running" || tool.status === "pending"
     ? "pip-running"
     : tool.status === "error" ? "pip-error" : "pip-done"
   const duration = formatDuration(tool.durationMs)
   const body = renderToolDetails(tool)
   return `
-    <div class="ledger-row${open ? " open" : ""}" data-tool-id="${escapeAttribute(tool.id)}">
-      <button type="button" class="ledger-trigger" data-toggle-tool="${escapeAttribute(tool.id)}" ${body ? "" : "disabled"}>
+    <div class="ledger-row tool-${tool.status}${open ? " open" : ""}" data-tool-id="${escapeAttribute(tool.id)}">
+      <button type="button" class="ledger-trigger" data-toggle-tool="${escapeAttribute(tool.id)}" aria-expanded="${body ? String(open) : "false"}" ${body ? "" : "disabled"}>
         <span class="status-pip ${pip}"></span>
         <span class="ledger-verb">${escapeHtml(tool.toolName)}</span>
         ${tool.argsPreview ? `<code class="ledger-arg">${escapeHtml(tool.argsPreview)}</code>` : ""}
@@ -426,7 +437,7 @@ function renderTool(tool: ToolEntry): string {
         ${duration ? `<span class="ledger-duration">${duration}</span>` : ""}
         ${body ? `<span class="ledger-chevron" aria-hidden="true"></span>` : ""}
       </button>
-      ${open && body ? body : ""}
+      ${body && revealed ? `<div class="tool-detail-shell" aria-hidden="${String(!open)}"><div class="tool-detail-clip">${body}</div></div>` : ""}
     </div>
   `
 }
@@ -462,16 +473,46 @@ function renderToolValue(value: unknown): string {
   return `<span class="tool-detail-value">${Object.entries(asRecord(value)).map(([key, item]) => `<span class="tool-detail-row"><span>${escapeHtml(key)}</span>${renderToolValue(item)}</span>`).join("")}</span>`
 }
 
-function renderPlan(plan: PlanEntry): string {
-  const pip = plan.status === "error" ? "pip-error" : plan.status === "running" || plan.status === "pending" ? "pip-running" : "pip-done"
-  const duration = formatDuration(plan.durationMs)
-  return `
-    <article class="plan-card${plan.status === "error" ? " plan-error" : ""}">
-      <div class="plan-card-head"><span class="status-pip ${pip}"></span><strong>Plan</strong>${duration ? `<span>${escapeHtml(duration)}</span>` : ""}</div>
-      <ol class="plan-steps">${plan.steps.map((step) => `<li class="plan-step plan-${escapeAttribute(step.status)}"><span aria-hidden="true"></span><span>${escapeHtml(step.step)}</span></li>`).join("")}</ol>
-      ${plan.error ? `<p class="plan-error-text">${escapeHtml(plan.error)}</p>` : ""}
-    </article>
+function renderPlanDock() {
+  const plan = latestPlan(state.conversation)
+  if (!plan) {
+    planDock.hidden = true
+    planDock.replaceChildren()
+    return
+  }
+  const progress = planProgress(plan)
+  const collapsed = state.planCollapsed
+  const preview = plan.steps.find((step) => step.status === "in_progress")
+    ?? plan.steps.find((step) => step.status === "pending")
+    ?? plan.steps.at(-1)
+  planDock.hidden = false
+  planDock.className = `plan-dock${collapsed ? " collapsed" : ""}${progress.status === "error" ? " plan-error" : ""}`
+  planDock.innerHTML = `
+    <button type="button" class="plan-dock-trigger" data-toggle-plan aria-expanded="${String(!collapsed)}">
+      <span class="status-pip ${progress.pip}"></span>
+      <strong>Plan</strong>
+      <span class="plan-progress">${progress.completed}/${plan.steps.length}</span>
+      ${preview ? `<span class="plan-preview">${escapeHtml(clipLine(preview.step, 72))}</span>` : ""}
+      <span class="plan-chevron" aria-hidden="true"></span>
+    </button>
+    <div class="plan-dock-body" aria-hidden="${String(collapsed)}">
+      <div class="plan-dock-content">
+        <ol class="plan-steps">${plan.steps.map((step) => `<li class="plan-step plan-${escapeAttribute(step.status)}"><span aria-hidden="true"></span><span>${escapeHtml(step.step)}</span></li>`).join("")}</ol>
+        ${plan.error ? `<p class="plan-error-text">${escapeHtml(plan.error)}</p>` : ""}
+      </div>
+    </div>
   `
+}
+
+function planProgress(plan: PlanEntry) {
+  const completed = plan.steps.filter((step) => step.status === "completed").length
+  const settled = plan.steps.filter((step) => step.status === "completed" || step.status === "cancelled").length
+  const status = plan.error || plan.status === "error"
+    ? "error"
+    : plan.steps.some((step) => step.status === "in_progress")
+      ? "running"
+      : settled === plan.steps.length ? "completed" : "pending"
+  return { completed, status, pip: status === "error" ? "pip-error" : status === "completed" ? "pip-done" : "pip-running" }
 }
 
 function renderQuestion(): string {
@@ -601,6 +642,7 @@ async function loadReplay() {
   const messages = Array.isArray(result.messages) ? result.messages : []
   state.conversation = conversationFromReplay(messages)
   state.expandedTools = new Set()
+  state.revealedTools = new Set()
   const turnState = asRecord(result.turn_state)
   if (turnState.status === "running" && typeof turnState.turn_id === "string") {
     state.conversation = { ...state.conversation, activeTurnId: turnState.turn_id, turnStartedAt: Date.now() }
@@ -850,16 +892,34 @@ filePreview.addEventListener("click", (event) => {
 })
 startResize(sidebarResizeHandle, "sidebar")
 startResize(fileResizeHandle, "files")
+planDock.addEventListener("click", (event) => {
+  if (!(event.target as HTMLElement).closest("[data-toggle-plan]")) return
+  state.planCollapsed = !state.planCollapsed
+  render()
+})
 messageStream.addEventListener("click", (event) => {
   const target = event.target as HTMLElement
   const toggle = target.closest<HTMLButtonElement>("[data-toggle-tool]")
   if (toggle?.dataset.toggleTool) {
     const id = toggle.dataset.toggleTool
-    const next = new Set(state.expandedTools)
-    if (next.has(id)) next.delete(id)
-    else next.add(id)
-    state.expandedTools = next
+    const headerOffset = toolHeaderOffset(id)
+    if (state.expandedTools.has(id)) {
+      const next = new Set(state.expandedTools)
+      next.delete(id)
+      state.expandedTools = next
+      render()
+      keepToolHeaderVisible(id, headerOffset)
+      return
+    }
+    state.revealedTools.add(id)
     render()
+    requestAnimationFrame(() => {
+      const next = new Set(state.expandedTools)
+      next.add(id)
+      state.expandedTools = next
+      render()
+      keepToolHeaderVisible(id, headerOffset)
+    })
     return
   }
   const copy = target.closest<HTMLButtonElement>(".copy-code")
@@ -877,6 +937,34 @@ messageStream.addEventListener("submit", (event) => {
   if (input) runAction(() => answerQuestion(input))
 })
 
+function toolHeaderOffset(id: string) {
+  const trigger = findToolTrigger(id)
+  if (!trigger) return 12
+  const stream = messageStream.getBoundingClientRect()
+  const header = trigger.getBoundingClientRect()
+  const offset = header.top - stream.top
+  return offset >= 8 && header.bottom <= stream.bottom - 8 ? offset : 12
+}
+
+function keepToolHeaderVisible(id: string, targetOffset: number) {
+  const sequence = ++toolPinSequence
+  const pin = () => {
+    if (sequence !== toolPinSequence) return
+    const trigger = findToolTrigger(id)
+    if (!trigger) return
+    const currentOffset = trigger.getBoundingClientRect().top - messageStream.getBoundingClientRect().top
+    messageStream.scrollTop += currentOffset - targetOffset
+  }
+  requestAnimationFrame(pin)
+  window.setTimeout(pin, 160)
+  window.setTimeout(pin, 300)
+}
+
+function findToolTrigger(id: string) {
+  return [...messageStream.querySelectorAll<HTMLButtonElement>("[data-toggle-tool]")]
+    .find((button) => button.dataset.toggleTool === id)
+}
+
 function openSettings() {
   state.settingsOpen = true
   settingsApiKey.value = ""
@@ -890,6 +978,8 @@ function resetProjectView() {
   state.sessionId = ""
   state.conversation = createConversation()
   state.expandedTools = new Set()
+  state.revealedTools = new Set()
+  state.planCollapsed = false
   state.expandedDirectories = new Set([""])
   state.fileListings = {}
   state.filePreview = undefined
@@ -1039,6 +1129,8 @@ async function createSession() {
   state.model = String(result.model || state.model)
   state.conversation = createConversation()
   state.expandedTools = new Set()
+  state.revealedTools = new Set()
+  state.planCollapsed = false
   await refreshSession()
 }
 
@@ -1100,6 +1192,8 @@ async function switchSession(nextSessionId: string) {
   state.sessionId = String(result.session_id || nextSessionId)
   state.model = String(result.model || state.model)
   state.expandedTools = new Set()
+  state.revealedTools = new Set()
+  state.planCollapsed = false
   await refreshSession()
 }
 
