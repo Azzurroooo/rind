@@ -34,6 +34,7 @@ type AppState = {
   settingsSaving: boolean
   settingsAutoOpened: boolean
   runtimeSessionId: string
+  runtimeTurnPending: boolean
   viewedSessionId: string
   conversationCache: Record<string, ConversationState>
   model: string
@@ -72,6 +73,7 @@ const state: AppState = {
   settingsSaving: false,
   settingsAutoOpened: false,
   runtimeSessionId: "",
+  runtimeTurnPending: false,
   viewedSessionId: "",
   conversationCache: {},
   model: "",
@@ -450,7 +452,8 @@ function renderTool(tool: ToolEntry): string {
     ? "pip-running"
     : tool.status === "error" ? "pip-error" : "pip-done"
   const duration = formatDuration(tool.durationMs)
-  const body = renderToolDetails(tool)
+  const diff = fileMutationPreview(tool.toolName, tool.arguments)
+  const body = renderToolDetails(tool, Boolean(diff))
   return `
     <div class="ledger-row tool-${tool.status}${open ? " open" : ""}" data-tool-id="${escapeAttribute(tool.id)}">
       <button type="button" class="ledger-trigger" data-toggle-tool="${escapeAttribute(tool.id)}" aria-expanded="${body ? String(open) : "false"}" ${body ? "" : "disabled"}>
@@ -461,14 +464,14 @@ function renderTool(tool: ToolEntry): string {
         ${duration ? `<span class="ledger-duration">${duration}</span>` : ""}
         ${body ? `<span class="ledger-chevron" aria-hidden="true"></span>` : ""}
       </button>
+      ${diff ? renderFileMutationPreview(diff) : ""}
       ${body && revealed ? `<div class="tool-detail-shell" aria-hidden="${String(!open)}"><div class="tool-detail-clip">${body}</div></div>` : ""}
     </div>
   `
 }
 
-function renderToolDetails(tool: ToolEntry): string {
-  const diff = fileMutationPreview(tool.toolName, tool.arguments)
-  const inputs = Object.entries(tool.arguments).filter(([key]) => !diff || !["content", "old_str", "new_str", "expected_sha256"].includes(key)).map(([key, value]) => `
+function renderToolDetails(tool: ToolEntry, hasMutationPreview: boolean): string {
+  const inputs = Object.entries(tool.arguments).filter(([key]) => !hasMutationPreview || !["file_path", "content", "old_str", "new_str", "expected_sha256"].includes(key)).map(([key, value]) => `
     <div class="tool-detail-row"><span>${escapeHtml(key)}</span>${renderToolValue(value)}</div>
   `).join("")
   const result = tool.result
@@ -477,7 +480,7 @@ function renderToolDetails(tool: ToolEntry): string {
     : result?.ok === true && result.data !== undefined
       ? `<section class="tool-detail-section"><span>Result</span>${renderToolValue(result.data)}</section>`
       : ""
-  const resultMeta = diff ? Object.fromEntries(Object.entries(result?.meta || {}).filter(([key]) => key !== "files")) : result?.meta
+  const resultMeta = hasMutationPreview ? Object.fromEntries(Object.entries(result?.meta || {}).filter(([key]) => key !== "files")) : result?.meta
   const meta = resultMeta && Object.keys(resultMeta).length
     ? `<section class="tool-detail-section"><span>Details</span>${renderToolValue(resultMeta)}</section>`
     : ""
@@ -487,20 +490,26 @@ function renderToolDetails(tool: ToolEntry): string {
   const error = !result?.error && tool.errorType
     ? `<section class="tool-detail-section tool-detail-error"><strong>${escapeHtml(tool.errorType)}</strong></section>`
     : ""
-  const preview = diff ? renderFileMutationPreview(diff) : ""
-  const content = preview || inputs || outcome || meta || fallback || error
-  return content ? `<div class="tool-details">${preview}${inputs ? `<section class="tool-detail-section"><span>Input</span>${inputs}</section>` : ""}${outcome}${error}${meta}${fallback}</div>` : ""
+  const content = inputs || outcome || meta || fallback || error
+  return content ? `<div class="tool-details">${inputs ? `<section class="tool-detail-section"><span>Input</span>${inputs}</section>` : ""}${outcome}${error}${meta}${fallback}</div>` : ""
 }
 
 function renderFileMutationPreview(diff: ReturnType<typeof fileMutationPreview>): string {
   if (!diff) return ""
+  const removed = diff.removed.filter((line) => line !== "…").length
+  const added = diff.added.filter((line) => line !== "…").length
+  const capped = diff.removed.includes("…") || diff.added.includes("…")
   const rows = [
     ...diff.removed.map((line) => `<div class="file-diff-line file-diff-removed"><span>-</span><code>${escapeHtml(line || " ")}</code></div>`),
     ...diff.added.map((line) => `<div class="file-diff-line file-diff-added"><span>+</span><code>${escapeHtml(line || " ")}</code></div>`),
   ].join("")
   return `
-    <section class="tool-detail-section file-diff-preview">
-      <span>Preview${diff.filePath ? ` · ${escapeHtml(diff.filePath)}` : ""}</span>
+    <section class="file-diff-preview" aria-label="File change preview">
+      <div class="file-diff-head">
+        <span class="file-diff-label">Changed</span>
+        ${diff.filePath ? `<code class="file-diff-path">${escapeHtml(diff.filePath)}</code>` : ""}
+        <span class="file-diff-stats">${added ? `<span class="file-diff-added-count">+${added}</span>` : ""}${removed ? `<span class="file-diff-removed-count">-${removed}</span>` : ""}${capped ? `<span class="file-diff-capped">Capped</span>` : ""}</span>
+      </div>
       <div class="file-diff-lines">${rows || `<div class="file-diff-empty">Empty file</div>`}</div>
     </section>
   `
@@ -515,6 +524,7 @@ function renderToolValue(value: unknown): string {
 }
 
 function renderPlanDock() {
+  const scrollTop = planDock.querySelector<HTMLElement>(".plan-dock-content")?.scrollTop || 0
   const plan = latestPlan(state.conversation)
   if (!plan) {
     planDock.hidden = true
@@ -543,6 +553,8 @@ function renderPlanDock() {
       </div>
     </div>
   `
+  const content = planDock.querySelector<HTMLElement>(".plan-dock-content")
+  if (content) content.scrollTop = scrollTop
 }
 
 function planProgress(plan: PlanEntry) {
@@ -600,17 +612,23 @@ function renderComposer() {
   const ready = state.runtime.status === "ready" && activeProject()?.available === true
   const active = runtimeTurnActive()
   const readOnly = !isViewingRuntime()
-  prompt.disabled = !ready || readOnly
-  prompt.placeholder = readOnly ? "Return to the current task to send a message" : "Message Rind — Enter to send, Shift+Enter for a new line"
-  send.disabled = !ready || readOnly
-  send.textContent = readOnly ? "Viewing" : active ? "Queue" : "Send"
-  send.title = readOnly ? "Return to the current task before sending" : active ? "Queue as follow-up for the running turn" : "Send message"
-  steer.disabled = !ready || !active || readOnly
-  interrupt.disabled = !ready || !active || readOnly
-  composerMenuTrigger.disabled = !ready || !state.runtimeSessionId || readOnly
+  const starting = state.runtimeTurnPending && !runtimeConversation().activeTurnId
+  const controllingTurn = Boolean(runtimeConversation().activeTurnId)
+  prompt.disabled = !ready || readOnly || starting
+  prompt.placeholder = readOnly
+    ? "Return to the current task to send a message"
+    : starting ? "Starting task..." : "Message Rind — Enter to send, Shift+Enter for a new line"
+  send.disabled = !ready || readOnly || starting
+  send.textContent = readOnly ? "Viewing" : starting ? "Starting..." : active ? "Queue" : "Send"
+  send.title = readOnly
+    ? "Return to the current task before sending"
+    : starting ? "Waiting for the task to start" : active ? "Queue as follow-up for the running turn" : "Send message"
+  steer.disabled = !ready || !controllingTurn || readOnly
+  interrupt.disabled = !ready || !controllingTurn || readOnly
+  composerMenuTrigger.disabled = !ready || !state.runtimeSessionId || readOnly || active
   composerMenuTrigger.setAttribute("aria-expanded", String(state.composerMenuOpen))
   composerMenu.hidden = !state.composerMenuOpen
-  compactContext.disabled = !ready || !state.runtimeSessionId || readOnly
+  compactContext.disabled = !ready || !state.runtimeSessionId || readOnly || active
   const percent = state.conversation.contextUsagePercent
   contextMeter.hidden = percent === null
   contextMeter.textContent = percent === null ? "" : `${Math.round(percent * 100)}% ctx`
@@ -650,7 +668,7 @@ function runtimeConversation() {
 }
 
 function runtimeTurnActive() {
-  return Boolean(runtimeConversation().activeTurnId)
+  return state.runtimeTurnPending || Boolean(runtimeConversation().activeTurnId)
 }
 
 function setConversationFor(sessionId: string, conversation: ConversationState) {
@@ -795,6 +813,9 @@ async function bootstrap(result: unknown) {
 }
 
 function handleRuntimeEvent(envelope: RuntimeEvent) {
+  if (envelope.type === "turn_started" || envelope.type === "turn_completed" || envelope.type === "turn_failed" || envelope.type === "turn_cancelled") {
+    state.runtimeTurnPending = false
+  }
   if (envelope.sessionId && envelope.sessionId !== state.runtimeSessionId) {
     adoptRuntimeSession(envelope.sessionId)
     runAction(loadSessions)
@@ -871,12 +892,25 @@ async function sendPrompt() {
   const active = runtimeTurnActive()
   state.conversation = addUserMessage(state.conversation, input)
   render()
-  const result = asRecord(await request(active ? "turn.follow_up" : "turn.start", { input }))
+  const result = active
+    ? asRecord(await request("turn.follow_up", { input }))
+    : await startTurn(input)
   if (typeof result.session_id === "string" && result.session_id) {
     adoptRuntimeSession(result.session_id)
     await loadSessions()
   }
   render()
+}
+
+async function startTurn(input: string) {
+  state.runtimeTurnPending = true
+  render()
+  try {
+    return asRecord(await request("turn.start", { input }))
+  } finally {
+    state.runtimeTurnPending = false
+    render()
+  }
 }
 
 async function runSlash(input: string) {
@@ -897,7 +931,7 @@ async function runSlash(input: string) {
   const followUp = typeof result.run_turn_input === "string" ? result.run_turn_input.trim() : ""
   if (followUp) {
     state.conversation = addUserMessage(state.conversation, followUp)
-    const turn = asRecord(await request("turn.start", { input: followUp }))
+    const turn = await startTurn(followUp)
     if (typeof turn.session_id === "string" && turn.session_id) adoptRuntimeSession(turn.session_id)
   }
   render()
@@ -1086,6 +1120,7 @@ function openSettings() {
 
 function resetProjectView() {
   state.runtimeSessionId = ""
+  state.runtimeTurnPending = false
   state.viewedSessionId = ""
   state.conversationCache = {}
   state.conversation = createConversation()
@@ -1102,6 +1137,11 @@ function restoreProjectDraft() {
 }
 
 async function addProject(createDraft = false) {
+  if (runtimeTurnActive()) {
+    state.notice = "Stop the active turn before changing projects."
+    render()
+    return
+  }
   const overview = await window.api.projects.add()
   if (!overview) return
   applyOverview(overview)
@@ -1374,6 +1414,7 @@ async function saveSettings() {
 
 const unsubscribeStatus = window.api.runtime.subscribe((snapshot) => {
   state.runtime = snapshot
+  if (snapshot.status !== "ready") state.runtimeTurnPending = false
   if (snapshot.status === "starting") {
     resetProjectView()
     state.bootstrapped = false

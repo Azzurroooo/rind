@@ -76,7 +76,14 @@ export function reduceEvent(state: ConversationState, envelope: RuntimeEvent): C
     case "assistant_delta": return appendAssistantDelta(state, turnId, asString(event.text))
     case "assistant_message_completed": return completeAssistant(state, turnId, asString(event.content))
     case "plan_updated": return reducePlanSnapshot(state, envelope)
-    case "tool_requested": return reduceTool(state, envelope, () => ({ status: "pending", toolName: asString(event.tool_name), argsPreview: toolArgumentPreview(asString(event.tool_name), asRecord(event.arguments), asString(event.args_preview)) }))
+    case "tool_requested": return reduceTool(state, envelope, (tool) => ({
+      status: "pending",
+      toolName: asString(event.tool_name),
+      ...(tool.kind === "tool" ? {
+        arguments: asRecord(event.arguments),
+        argsPreview: toolArgumentPreview(asString(event.tool_name), asRecord(event.arguments), asString(event.args_preview)),
+      } : {}),
+    }))
     case "tool_input_started": return reduceTool(state, envelope, () => ({ status: "pending", toolName: asString(event.tool_name) }))
     case "tool_input_delta": return reduceTool(state, envelope, (tool) => ({
       toolName: tool.toolName || asString(event.tool_name),
@@ -168,13 +175,13 @@ function completeAssistant(state: ConversationState, turnId: string, content: st
 type ToolUpdate = Partial<ToolEntry & Pick<PlanEntry, "error">>
 
 function reducePlanSnapshot(state: ConversationState, envelope: RuntimeEvent): ConversationState {
-  const closed = closeAssistant(state)
+  const toolCallId = asString(envelope.event.tool_call_id)
+  const closed = removeToolCall(closeAssistant(state), toolCallId)
   const plan = envelope.event.plan
   if (!Array.isArray(plan)) return closed
   if (!plan.length) return { ...closed, plan: undefined }
   const steps = planSteps("update_plan", { plan })
   if (!steps) return closed
-  const toolCallId = asString(envelope.event.tool_call_id)
   const previous = closed.plan
   return {
     ...closed,
@@ -190,6 +197,11 @@ function reducePlanSnapshot(state: ConversationState, envelope: RuntimeEvent): C
       durationMs: 0,
     },
   }
+}
+
+function removeToolCall(state: ConversationState, toolCallId: string): ConversationState {
+  if (!toolCallId || !state.entries.some((entry) => entry.kind === "tool" && entry.toolCallId === toolCallId)) return state
+  return { ...state, entries: state.entries.filter((entry) => entry.kind !== "tool" || entry.toolCallId !== toolCallId) }
 }
 
 function reduceTool(state: ConversationState, envelope: RuntimeEvent, update: (tool: ToolEntry | PlanEntry) => ToolUpdate): ConversationState {

@@ -75,6 +75,7 @@ class StdioRuntimeServer:
         self._requests: asyncio.Queue[dict[str, Any] | None] = asyncio.Queue()
         self._pending_answers: dict[str, asyncio.Future[str]] = {}
         self._current_cancel: CancellationTokenSource | None = None
+        self._queued_turn_starts = 0
         self._initialized = False
         self._sequence = 0
         self._stopping = False
@@ -268,52 +269,55 @@ class StdioRuntimeServer:
         await self._respond(request, {"messages": messages, "turn_state": await self._turn_state()})
 
     async def _run_turn(self, request: dict[str, Any]) -> None:
-        params = request.get("params") if isinstance(request.get("params"), dict) else {}
-        raw_query = params.get("input")
-        if raw_query is None:
-            raw_query = params.get("query")
-        query = str(raw_query or "")
-        goal_continuation = params.get("goal_continuation") is True
-        if not query.strip() and not goal_continuation:
-            await self._respond_error(request, "turn.start requires input.", "InvalidRequest")
-            return
-        if goal_continuation:
-            if not self._goal_enabled:
-                await self._respond_error(request, "Goal support is unavailable.", "UnsupportedOperation")
-                return
-            goal = await self._runtime.get_goal()
-            if not goal or goal.get("status") != "active":
-                await self._respond_error(request, "No active goal to continue.", "InvalidRequest")
-                return
-        transient_system_messages = params.get("transient_system_messages")
-        if not isinstance(transient_system_messages, list):
-            transient_system_messages = None
-
-        cancel_source = CancellationTokenSource()
-        self._current_cancel = cancel_source
-        turn_session_id = ""
-        turn_id = ""
         try:
-            async for event in self._runtime.run_turn(
-                query=query,
-                cancellation_token=cancel_source.token,
-                transient_system_messages=transient_system_messages,
-            ):
-                event_data = event.to_dict()
-                turn_session_id = turn_session_id or str(event_data.get("session_id") or "")
-                turn_id = turn_id or str(event_data.get("turn_id") or "")
-                await self._send_event(event_data)
-            await self._respond(
-                request,
-                {
-                    "ok": True,
-                    "session_id": turn_session_id or str(getattr(self._session, "session_id", "") or ""),
-                    "turn_id": turn_id,
-                },
-            )
+            params = request.get("params") if isinstance(request.get("params"), dict) else {}
+            raw_query = params.get("input")
+            if raw_query is None:
+                raw_query = params.get("query")
+            query = str(raw_query or "")
+            goal_continuation = params.get("goal_continuation") is True
+            if not query.strip() and not goal_continuation:
+                await self._respond_error(request, "turn.start requires input.", "InvalidRequest")
+                return
+            if goal_continuation:
+                if not self._goal_enabled:
+                    await self._respond_error(request, "Goal support is unavailable.", "UnsupportedOperation")
+                    return
+                goal = await self._runtime.get_goal()
+                if not goal or goal.get("status") != "active":
+                    await self._respond_error(request, "No active goal to continue.", "InvalidRequest")
+                    return
+            transient_system_messages = params.get("transient_system_messages")
+            if not isinstance(transient_system_messages, list):
+                transient_system_messages = None
+
+            cancel_source = CancellationTokenSource()
+            self._current_cancel = cancel_source
+            turn_session_id = ""
+            turn_id = ""
+            try:
+                async for event in self._runtime.run_turn(
+                    query=query,
+                    cancellation_token=cancel_source.token,
+                    transient_system_messages=transient_system_messages,
+                ):
+                    event_data = event.to_dict()
+                    turn_session_id = turn_session_id or str(event_data.get("session_id") or "")
+                    turn_id = turn_id or str(event_data.get("turn_id") or "")
+                    await self._send_event(event_data)
+                await self._respond(
+                    request,
+                    {
+                        "ok": True,
+                        "session_id": turn_session_id or str(getattr(self._session, "session_id", "") or ""),
+                        "turn_id": turn_id,
+                    },
+                )
+            finally:
+                self._current_cancel = None
+                cancel_source.dispose()
         finally:
-            self._current_cancel = None
-            cancel_source.dispose()
+            self._queued_turn_starts = max(0, self._queued_turn_starts - 1)
 
     async def _compact(self, request: dict[str, Any]) -> None:
         record = await self._runtime.compact_context(reason="manual")
@@ -562,6 +566,8 @@ class StdioRuntimeServer:
             return
         if await self._handle_control_message(message):
             return
+        if message.get("method") == "turn.start":
+            self._queued_turn_starts += 1
         await self._requests.put(message)
 
     def _parse_line(self, line: str) -> tuple[dict[str, Any], str | None]:
@@ -621,6 +627,9 @@ class StdioRuntimeServer:
                 await self._replay(message)
             except Exception as exc:
                 await self._respond_error(message, str(exc), type(exc).__name__)
+            return True
+        if method == "session.switch" and (self._current_cancel is not None or self._queued_turn_starts):
+            await self._respond_error(message, "Cannot switch sessions while a turn is running.", "TurnActive")
             return True
         if method == "goal.get":
             await self._goal_get(message)

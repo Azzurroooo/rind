@@ -839,6 +839,81 @@ def test_readonly_session_replay_is_handled_while_run_turn_is_blocked(capsys):
     }
 
 
+def test_session_switch_is_rejected_while_run_turn_is_blocked(capsys):
+    class Runtime(_Runtime):
+        def __init__(self):
+            super().__init__()
+            self.started = asyncio.Event()
+            self.release = asyncio.Event()
+            self.switched: list[str] = []
+
+        async def run_turn(self, **_kwargs):
+            self.started.set()
+            await self.release.wait()
+            yield type(
+                "Event",
+                (),
+                {
+                    "to_dict": lambda _self: {
+                        "type": "turn_completed",
+                        "ts": "1700000000.0",
+                        "session_id": "s1",
+                        "turn_id": "t1",
+                    }
+                },
+            )()
+
+        async def switch_session(self, session_id):
+            self.switched.append(session_id)
+            return {"session_id": session_id}
+
+    async def run():
+        runtime = Runtime()
+        server = StdioRuntimeServer(runtime, _Session())
+        turn_task = asyncio.create_task(
+            server._run_turn({"request_id": 39, "method": "turn.start", "params": {"input": "hello"}})
+        )
+        await runtime.started.wait()
+        handled = await server._handle_control_message(
+            {"request_id": 40, "method": "session.switch", "params": {"session_id": "archived"}}
+        )
+        assert not turn_task.done()
+        runtime.release.set()
+        await turn_task
+        return runtime, handled
+
+    runtime, handled = asyncio.run(run())
+    messages = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
+    response = next(message for message in messages if message.get("request_id") == 40)
+
+    assert handled is True
+    assert runtime.switched == []
+    assert response["error"] == {
+        "message": "Cannot switch sessions while a turn is running.",
+        "type": "TurnActive",
+    }
+
+
+def test_session_switch_is_rejected_while_turn_start_is_queued(capsys):
+    async def run():
+        server = StdioRuntimeServer(_Runtime(), _Session())
+        await server._ingest_line(
+            json.dumps({"request_id": 41, "method": "turn.start", "params": {"input": "hello"}})
+        )
+        handled = await server._handle_control_message(
+            {"request_id": 42, "method": "session.switch", "params": {"session_id": "archived"}}
+        )
+        return server, handled
+
+    server, handled = asyncio.run(run())
+    messages = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
+    response = next(message for message in messages if message.get("request_id") == 42)
+
+    assert handled is True
+    assert server._queued_turn_starts == 1
+    assert response["error"]["type"] == "TurnActive"
+
+
 def test_readonly_slash_usage_errors_return_immediately(capsys):
     async def run():
         server = StdioRuntimeServer(_Runtime(), _Session())

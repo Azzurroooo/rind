@@ -390,9 +390,15 @@ pre code {
 .tool-detail-value { display: grid; gap: 4px; min-width: 0; color: var(--text-base); font-family: var(--font-mono); font-size: 11.5px; line-height: 1.45; white-space: pre-wrap; overflow-wrap: anywhere; }
 .tool-detail-error { color: var(--err); }
 .tool-detail-error small { color: var(--text-faint); font-family: var(--font-mono); }
-.file-diff-preview { gap: 7px; padding: 0; }
-.file-diff-preview > span { padding: 8px 10px 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.file-diff-lines { max-height: 300px; overflow: auto; padding: 0 0 8px; scrollbar-width: thin; scrollbar-color: var(--border-strong) transparent; }
+.file-diff-preview { display: grid; margin: 2px 8px 8px 24px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--bg-inset); overflow: hidden; }
+.file-diff-head { display: flex; align-items: center; gap: 8px; min-width: 0; min-height: 32px; padding: 6px 10px; border-bottom: 1px solid var(--border); }
+.file-diff-label { flex: none; color: var(--text-faint); font-size: 10.5px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; }
+.file-diff-path { min-width: 0; overflow: hidden; color: var(--text-weak); font-family: var(--font-mono); font-size: 11.5px; text-overflow: ellipsis; white-space: nowrap; }
+.file-diff-stats { display: inline-flex; flex: none; gap: 6px; margin-left: auto; font-family: var(--font-mono); font-size: 11px; font-variant-numeric: tabular-nums; }
+.file-diff-added-count { color: #8acfa2; }
+.file-diff-removed-count { color: #e58b83; }
+.file-diff-capped { color: var(--text-faint); }
+.file-diff-lines { max-height: 280px; overflow: auto; padding: 0 0 8px; scrollbar-width: thin; scrollbar-color: var(--border-strong) transparent; }
 .file-diff-line { display: grid; grid-template-columns: 20px minmax(0, 1fr); min-height: 18px; padding: 1px 10px; font-family: var(--font-mono); font-size: 11.5px; line-height: 1.45; }
 .file-diff-line > span { color: inherit; text-align: center; }
 .file-diff-line code { min-width: 0; color: inherit; font: inherit; white-space: pre-wrap; overflow-wrap: anywhere; }
@@ -400,16 +406,17 @@ pre code {
 .file-diff-added { color: #8acfa2; background: rgb(94 185 135 / 12%); }
 .file-diff-empty { padding: 2px 10px; color: var(--text-faint); font-family: var(--font-mono); font-size: 11.5px; }
 
-.plan-dock { width: min(var(--stream-width), calc(100% - 32px)); margin: 0 auto 2px; border: 1px solid var(--border-strong); border-radius: var(--radius); background: var(--bg-raised); overflow: hidden; }
-.plan-dock-trigger { display: flex; align-items: center; gap: 7px; width: 100%; min-height: 38px; padding: 7px 10px; border: 0; color: var(--text-base); background: transparent; text-align: left; }
+.plan-dock { display: grid; width: min(var(--stream-width), calc(100% - 32px)); height: 224px; min-height: 40px; margin: 0 auto 2px; grid-template-rows: 40px minmax(0, 1fr); border: 1px solid var(--border-strong); border-radius: var(--radius); background: var(--bg-raised); overflow: hidden; transition: height 220ms cubic-bezier(.2, .8, .2, 1), border-color 180ms ease; }
+.plan-dock-trigger { display: flex; align-items: center; gap: 7px; width: 100%; min-height: 40px; padding: 7px 10px; border: 0; color: var(--text-base); background: transparent; text-align: left; }
 .plan-dock-trigger:hover { background: var(--bg-hover); }
 .plan-progress { flex: none; color: var(--text-faint); font-family: var(--font-mono); font-size: 11px; font-variant-numeric: tabular-nums; }
 .plan-preview { min-width: 0; overflow: hidden; color: var(--text-faint); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
 .plan-chevron { flex: none; width: 7px; height: 7px; margin-left: auto; border-right: 1.5px solid var(--text-faint); border-bottom: 1.5px solid var(--text-faint); transform: rotate(225deg); transition: transform 180ms cubic-bezier(.2, .8, .2, 1); }
+.plan-dock.collapsed { height: 40px; grid-template-rows: 40px 0fr; }
 .plan-dock.collapsed .plan-chevron { transform: rotate(45deg); }
-.plan-dock-body { display: grid; grid-template-rows: 1fr; opacity: 1; transition: grid-template-rows 220ms cubic-bezier(.2, .8, .2, 1), opacity 150ms ease; }
-.plan-dock.collapsed .plan-dock-body { grid-template-rows: 0fr; opacity: 0; }
-.plan-dock-content { min-height: 0; max-height: 230px; overflow: auto; padding: 0 10px 9px; scrollbar-width: thin; scrollbar-color: var(--border-strong) transparent; }
+.plan-dock-body { min-height: 0; overflow: hidden; opacity: 1; transition: opacity 150ms ease; }
+.plan-dock.collapsed .plan-dock-body { opacity: 0; }
+.plan-dock-content { height: 100%; min-height: 0; overflow: auto; padding: 0 10px 9px; scrollbar-width: thin; scrollbar-color: var(--border-strong) transparent; }
 .plan-steps { display: grid; gap: 6px; margin: 2px 0 0; padding: 0; list-style: none; }
 .plan-step { display: grid; grid-template-columns: 14px minmax(0, 1fr); gap: 7px; align-items: start; color: var(--text-weak); font-size: 12px; line-height: 1.4; }
 .plan-step > span:first-child { width: 12px; height: 12px; margin-top: 2px; border: 1px solid var(--border-strong); border-radius: 50%; }
@@ -761,7 +768,7 @@ pre code {
 
 @media (prefers-reduced-motion: reduce) {
   .pip-running, .connection-starting .status-pip, .ledger-row.tool-running .ledger-trigger { animation: none; }
-  .ledger-chevron, .plan-chevron, .tool-detail-shell, .plan-dock-body { transition: none; }
+  .ledger-chevron, .plan-chevron, .tool-detail-shell, .plan-dock, .plan-dock-body { transition: none; }
 }
 
 /* ---------- resizable workspace panels ---------- */

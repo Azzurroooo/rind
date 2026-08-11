@@ -84,6 +84,25 @@ test("tool lifecycle correlates by tool_call_id into a single row", () => {
   assert.equal(tools[0].durationMs, 120)
 })
 
+test("tool requests backfill structured arguments after streamed input", () => {
+  let state = createConversation()
+  state = reduceEvent(state, event("tool_input_started", { tool_call_id: "edit-1", tool_name: "edit_file" }))
+  state = reduceEvent(state, event("tool_requested", {
+    tool_call_id: "edit-1",
+    tool_name: "edit_file",
+    arguments: { file_path: "src/app.py", old_str: "old", new_str: "new" },
+  }))
+  const tool = state.entries.find((entry) => entry.kind === "tool")
+  assert.equal(tool?.kind, "tool")
+  if (!tool || tool.kind !== "tool") return
+  assert.deepEqual(tool.arguments, { file_path: "src/app.py", old_str: "old", new_str: "new" })
+  assert.deepEqual(fileMutationPreview(tool.toolName, tool.arguments), {
+    filePath: "src/app.py",
+    removed: ["old"],
+    added: ["new"],
+  })
+})
+
 test("tool errors surface error status and type", () => {
   let state = createConversation()
   state = reduceEvent(state, event("tool_result", { tool_call_id: "c", tool_name: "read_file", error_type: "NotFound", result: "missing" }))
@@ -136,6 +155,17 @@ test("live plan snapshots do not depend on tool-request arguments", () => {
   state = reduceEvent(state, event("plan_updated", {
     tool_call_id: "plan-1", plan: [{ step: "Inspect", status: "in_progress" }],
   }))
+  assert.deepEqual(latestPlan(state)?.steps, [{ step: "Inspect", status: "in_progress" }])
+})
+
+test("plan snapshots remove streamed placeholder tools", () => {
+  let state = createConversation()
+  state = reduceEvent(state, event("tool_input_started", { tool_call_id: "plan-1" }))
+  assert.deepEqual(state.entries.map((entry) => entry.kind), ["tool"])
+  state = reduceEvent(state, event("plan_updated", {
+    tool_call_id: "plan-1", plan: [{ step: "Inspect", status: "in_progress" }],
+  }))
+  assert.deepEqual(state.entries, [])
   assert.deepEqual(latestPlan(state)?.steps, [{ step: "Inspect", status: "in_progress" }])
 })
 
