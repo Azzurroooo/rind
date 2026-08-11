@@ -45,16 +45,6 @@ def _valid_session_id_value(value: object) -> bool:
     return True
 
 
-def _has_conversation_messages(session: dict[str, Any]) -> bool:
-    size = session.get("size")
-    if not isinstance(size, dict):
-        return True
-    try:
-        return int(size.get("messages") or 0) > 1
-    except (TypeError, ValueError):
-        return True
-
-
 class JsonlSessionStore(SessionStore):
     """
     Asynchronous JsonlSessionStore that uses specific repositories for each domain concept.
@@ -90,6 +80,7 @@ class JsonlSessionStore(SessionStore):
         self._session_meta = None
         self._message_count = 0
         self._tool_call_count = 0
+        self._has_user_message = False
         self._last_preview = ""
         self._projected_messages_cache_key = None
         self._projected_messages_cache = None
@@ -146,15 +137,16 @@ class JsonlSessionStore(SessionStore):
             if current != expected:
                 raise ValueError(f"Session {key} is immutable and does not match the requested agent context.")
 
-    def _setup_paths(self):
+    def _setup_paths(self, create_directories: bool = False) -> None:
         self._session_root = self.resolve_session_root(self._session_dir)
         if self._session_dir:
             self._index_path = os.path.join(self._session_root, "index.json")
         else:
             self._index_path = os.path.join(self.default_rind_home(), "session_index.json")
 
-        os.makedirs(self._session_root, exist_ok=True)
-        if self._index_path:
+        if create_directories:
+            os.makedirs(self._session_root, exist_ok=True)
+        if create_directories and self._index_path:
             os.makedirs(os.path.dirname(self._index_path), exist_ok=True)
 
         self._index_repo = SessionIndexRepository(self._files, self._index_path)
@@ -192,6 +184,7 @@ class JsonlSessionStore(SessionStore):
         now = self.now_iso()
         self._message_count = 0
         self._tool_call_count = 0
+        self._has_user_message = False
 
         self._session_meta = new_session_meta(
             session_id=session_id,
@@ -205,7 +198,19 @@ class JsonlSessionStore(SessionStore):
             parent_session_id=self._parent_session_id,
         )
         self._files.write_json(self._session_paths["meta"], self._session_meta)
-        self._update_index()
+
+    def _bind_draft_sync(self) -> None:
+        self._session_id = None
+        self._session_paths = {}
+        self._session_meta = None
+        self._message_count = 0
+        self._tool_call_count = 0
+        self._has_user_message = False
+        self._last_preview = ""
+        self._msg_repo = None
+        self._tool_repo = None
+        self._compaction_repo = None
+        self._invalidate_projection_cache()
 
     def _load_session(self, session_id: str) -> None:
         self._session_id = session_id
@@ -239,6 +244,7 @@ class JsonlSessionStore(SessionStore):
         self._tool_call_count = (
             len(self._tool_repo.load_tool_calls()) if self._tool_repo else int(meta.get("tool_call_count") or 0)
         )
+        self._has_user_message = self._has_user_message_sync()
         counts_changed = sync_session_counts(
             self._session_meta,
             message_count=self._message_count,
@@ -262,6 +268,18 @@ class JsonlSessionStore(SessionStore):
         messages = self._msg_repo.load_messages() if self._msg_repo else []
         return sum(
             1
+            for message in messages
+            if isinstance(message, dict)
+            and not (
+                isinstance(message.get("meta"), dict)
+                and message["meta"].get("kind") in {"skill_snapshot", "skill_catalog"}
+            )
+        )
+
+    def _has_user_message_sync(self) -> bool:
+        messages = self._msg_repo.load_messages() if self._msg_repo else []
+        return any(
+            message.get("role") == "user" and str(message.get("content") or "").strip()
             for message in messages
             if isinstance(message, dict)
             and not (
@@ -303,6 +321,7 @@ class JsonlSessionStore(SessionStore):
             "msg_repo": self._msg_repo,
             "tool_repo": self._tool_repo,
             "compaction_repo": self._compaction_repo,
+            "has_user_message": self._has_user_message,
         }
         try:
             self._load_session(clean)
@@ -319,6 +338,7 @@ class JsonlSessionStore(SessionStore):
             self._msg_repo = previous["msg_repo"]
             self._tool_repo = previous["tool_repo"]
             self._compaction_repo = previous["compaction_repo"]
+            self._has_user_message = previous["has_user_message"]
             raise
 
     def _session_info_sync(self) -> dict[str, Any]:
@@ -336,6 +356,7 @@ class JsonlSessionStore(SessionStore):
             "workspace_root": meta.get("workspace_root"),
             "session_type": meta.get("session_type"),
             "parent_session_id": meta.get("parent_session_id"),
+            "draft": self._session_id is None,
         }
 
     def _find_latest_session_id(self) -> str | None:
@@ -346,7 +367,9 @@ class JsonlSessionStore(SessionStore):
         sessions = [
             s
             for s in sessions
-            if isinstance(s, dict) and s.get("updated_at") and _has_conversation_messages(s)
+            if isinstance(s, dict)
+            and s.get("updated_at")
+            and self._index_entry_has_user_message_sync(s)
         ]
         if not sessions:
             return None
@@ -362,6 +385,24 @@ class JsonlSessionStore(SessionStore):
             return None
         scoped.sort(key=lambda s: s.get("updated_at") or "")
         return scoped[-1].get("id")
+
+    def _index_entry_has_user_message_sync(self, entry: dict[str, Any]) -> bool:
+        marker = entry.get("has_user_message")
+        if isinstance(marker, bool):
+            return marker
+        session_id = entry.get("id")
+        if not isinstance(session_id, str) or not self._is_supported_session_id(session_id):
+            return False
+        messages = self._files.read_jsonl(self._get_session_paths(session_id)["messages"])
+        has_user_message = any(
+            message.get("role") == "user" and str(message.get("content") or "").strip()
+            for message in messages
+            if isinstance(message, dict)
+        )
+        entry["has_user_message"] = has_user_message
+        if self._index_repo:
+            self._index_repo.update_index(entry)
+        return has_user_message
 
     def _matches_current_workspace(self, entry: dict[str, Any]) -> bool:
         entry_root = entry.get("workspace_root")
@@ -383,6 +424,11 @@ class JsonlSessionStore(SessionStore):
         if not self._index_repo or not self._session_meta:
             return
 
+        if not self._has_user_message:
+            if self._session_id:
+                self._index_repo.remove_session(self._session_id)
+            return
+
         entry = {
             "id": self._session_id,
             "title": self._session_meta.get("title", "Untitled"),
@@ -394,6 +440,7 @@ class JsonlSessionStore(SessionStore):
             "owner_agent_id": self._session_meta.get("owner_agent_id"),
             "session_type": self._session_meta.get("session_type"),
             "parent_session_id": self._session_meta.get("parent_session_id"),
+            "has_user_message": True,
         }
         self._index_repo.update_index(entry)
 
@@ -466,9 +513,11 @@ class JsonlSessionStore(SessionStore):
                 return
             raise ValueError("No existing session found to resume.")
 
-        self._create_session(None)
+        self._bind_draft_sync()
 
     def _initialize_history_sync(self):
+        if not self._msg_repo:
+            return
         messages = self._msg_repo.load_messages() if self._msg_repo else []
         has_system = any(isinstance(m, dict) and m.get("role") == "system" for m in messages)
         if not has_system and self._system_prompt:
@@ -479,15 +528,27 @@ class JsonlSessionStore(SessionStore):
                 self._session_meta["message_count"] = self._message_count
             self._persist_meta_sync()
 
+    def _materialize_draft_sync(self) -> None:
+        if self._session_id is not None:
+            return
+        self._setup_paths(create_directories=True)
+        self._create_session(None)
+        self._initialize_history_sync()
+        from agent.infrastructure.planning.store import set_active_session_context
+
+        set_active_session_context(str(self._session_root), str(self._session_id))
+
     async def initialize(self) -> None:
         async with self._write_lock:
             await asyncio.to_thread(self._ensure_session_sync)
             await asyncio.to_thread(self._initialize_history_sync)
 
-            if self._session_root and self._session_id:
-                from agent.infrastructure.planning.store import set_active_session_context
+            from agent.infrastructure.planning.store import clear_active_session_context, set_active_session_context
 
+            if self._session_root and self._session_id:
                 set_active_session_context(str(self._session_root), str(self._session_id))
+            else:
+                clear_active_session_context()
 
     async def discard_if_empty(self) -> None:
         async with self._write_lock:
@@ -527,17 +588,13 @@ class JsonlSessionStore(SessionStore):
             return await asyncio.to_thread(self._session_info_sync)
 
     async def create_session(self) -> dict[str, Any]:
-        """Create and bind a new session without changing its storage format."""
+        """Bind a new in-memory draft without creating persistent session files."""
         async with self._write_lock:
             await asyncio.to_thread(self._setup_paths)
-            await asyncio.to_thread(self._discard_if_empty_sync)
-            await asyncio.to_thread(self._create_session, None)
-            await asyncio.to_thread(self._initialize_history_sync)
+            await asyncio.to_thread(self._bind_draft_sync)
+            from agent.infrastructure.planning.store import clear_active_session_context
 
-            if self._session_root and self._session_id:
-                from agent.infrastructure.planning.store import set_active_session_context
-
-                set_active_session_context(str(self._session_root), str(self._session_id))
+            clear_active_session_context()
             return await asyncio.to_thread(self._session_info_sync)
 
     async def create_team_project(self, *, project_id: str | None = None) -> dict[str, Any]:
@@ -597,16 +654,22 @@ class JsonlSessionStore(SessionStore):
     ) -> None:
         async with self._write_lock:
             def _persist():
-                if not self._msg_repo:
-                    return
-                self._msg_repo.persist_message(self.now_iso(), role, content, tool_call_id, tool_name, meta)
-                self._invalidate_projection_cache()
                 is_context_record = isinstance(meta, dict) and meta.get("kind") in {
                     "skill_snapshot",
                     "skill_catalog",
                 }
+                if self._session_id is None:
+                    if role != "user" or not str(content or "").strip() or is_context_record:
+                        return
+                    self._materialize_draft_sync()
+                if not self._msg_repo:
+                    return
+                self._msg_repo.persist_message(self.now_iso(), role, content, tool_call_id, tool_name, meta)
+                self._invalidate_projection_cache()
                 if not is_context_record:
                     self._message_count += 1
+                if role == "user" and not is_context_record and str(content or "").strip():
+                    self._has_user_message = True
                 if role == "assistant" and content:
                     self._last_preview = content[:200]
                 if (
@@ -621,6 +684,10 @@ class JsonlSessionStore(SessionStore):
                 self._persist_meta_sync()
 
             await asyncio.to_thread(_persist)
+            if self._session_root and self._session_id:
+                from agent.infrastructure.planning.store import set_active_session_context
+
+                set_active_session_context(str(self._session_root), str(self._session_id))
 
     async def persist_tool_call(
         self,
@@ -698,7 +765,7 @@ class JsonlSessionStore(SessionStore):
                 if isinstance(s, dict)
                 and s.get("updated_at")
                 and _valid_session_id_value(s.get("id"))
-                and _has_conversation_messages(s)
+                and self._index_entry_has_user_message_sync(s)
                 and self._matches_current_workspace(s)
             ]
             sessions.sort(key=lambda s: s.get("updated_at") or "", reverse=True)
@@ -787,7 +854,7 @@ class JsonlSessionStore(SessionStore):
         async with self._write_lock:
             def _persist():
                 if not self._session_meta:
-                    raise RuntimeError("Session is not initialized.")
+                    raise RuntimeError("Send a message before setting a goal for this draft session.")
                 goal = {"objective": normalized, "status": "active"}
                 self._session_meta["goal"] = goal
                 self._persist_meta_sync()
@@ -830,7 +897,7 @@ class JsonlSessionStore(SessionStore):
         async with self._write_lock:
             def _persist():
                 if not self._compaction_repo or not self._msg_repo:
-                    return dict(compaction)
+                    raise RuntimeError("Send a message before compacting this draft session.")
                 candidate = dict(compaction)
                 candidate.setdefault("id", uuid.uuid4().hex)
                 candidate.setdefault("created_at", self.now_iso())

@@ -27,6 +27,12 @@ def set_active_session_context(session_root: str, session_id: str) -> None:
     _ACTIVE_SESSION_ID.set(validate_session_id(sid))
 
 
+def clear_active_session_context() -> None:
+    """Clear the plan target while a session is still an in-memory draft."""
+    _ACTIVE_SESSION_ROOT.set(None)
+    _ACTIVE_SESSION_ID.set(None)
+
+
 @contextmanager
 def preserve_active_session_context():
     """Restore the caller's plan target after a nested runtime finishes."""

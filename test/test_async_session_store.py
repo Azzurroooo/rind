@@ -32,6 +32,12 @@ async def test_async_session_store_facade(temp_session_dir):
 
     await async_store.initialize()
 
+    assert async_store.session_id is None
+    assert list(Path(temp_session_dir).iterdir()) == []
+
+    # The first real user input materializes the draft.
+    await async_store.persist_message("user", "Hello World")
+
     assert async_store.session_id is not None
     session_base = Path(temp_session_dir) / async_store.session_id
     meta = json.loads((session_base / "meta.json").read_text(encoding="utf-8"))
@@ -43,9 +49,6 @@ async def test_async_session_store_facade(temp_session_dir):
         assert not (session_base / removed).exists()
     assert not (session_base / ("snap" + "shots")).exists()
     assert not (session_base / "compactions.jsonl").exists()
-
-    # Test persistence
-    await async_store.persist_message("user", "Hello World")
 
     # Load and verify
     messages = await async_store.load_messages()
@@ -71,13 +74,11 @@ async def test_async_session_store_facade(temp_session_dir):
 async def test_empty_session_is_removed_with_index_entry(temp_session_dir):
     store = JsonlSessionStore(session_dir=temp_session_dir)
     await store.initialize()
-    session_base = Path(temp_session_dir) / store.session_id
 
     await store.discard_if_empty()
 
-    assert not session_base.exists()
-    index = json.loads((Path(temp_session_dir) / "index.json").read_text(encoding="utf-8"))
-    assert not any(entry.get("id") == store.session_id for entry in index["sessions"])
+    assert store.session_id is None
+    assert list(Path(temp_session_dir).iterdir()) == []
 
 
 @pytest.mark.asyncio
@@ -98,6 +99,7 @@ async def test_session_with_user_message_is_kept(temp_session_dir):
 async def test_async_session_store_persists_and_reloads_turn_state(temp_session_dir):
     store = JsonlSessionStore(session_dir=temp_session_dir)
     await store.initialize()
+    await store.persist_message("user", "initialize session state")
 
     await store.persist_turn_state("turn-1", "completed", "2026-05-08T00:00:00Z")
     assert await store.get_turn_state() == {
@@ -189,17 +191,18 @@ async def test_switch_session_does_not_create_missing_target(temp_session_dir):
 
 
 @pytest.mark.asyncio
-async def test_create_session_rebinds_store_and_indexes_new_session(temp_session_dir):
+async def test_create_session_rebinds_store_to_a_draft(temp_session_dir):
     store = JsonlSessionStore(session_dir=temp_session_dir, session_id="first", model="model-a")
     await store.initialize()
     await store.persist_message("user", "existing message")
 
     result = await store.create_session()
 
-    assert result["session_id"] != "first"
-    assert store.session_id == result["session_id"]
+    assert result["session_id"] is None
+    assert result["draft"] is True
+    assert store.session_id is None
     assert [message for message in await store.get_messages_slice() if message["role"] != "system"] == []
-    assert (Path(temp_session_dir) / result["session_id"] / "meta.json").is_file()
+    assert [path.name for path in Path(temp_session_dir).iterdir() if path.is_dir()] == ["first"]
 
 
 @pytest.mark.asyncio
@@ -258,6 +261,7 @@ async def test_session_workspace_root_uses_cwd_not_parent_git_root(tmp_path, mon
 
     store = JsonlSessionStore(session_dir=str(session_root))
     await store.initialize()
+    await store.persist_message("user", "initialize workspace")
 
     meta_path = session_root / store.session_id / "meta.json"
     meta = json.loads(meta_path.read_text(encoding="utf-8"))
@@ -280,6 +284,7 @@ async def test_session_records_agent_binding_and_indexes_it(tmp_path):
         session_type="direct_agent_chat",
     )
     await store.initialize()
+    await store.persist_message("user", "bind this session")
 
     meta = json.loads((session_root / "factor_session" / "meta.json").read_text(encoding="utf-8"))
     assert meta["project_id"] == "quant-project"
@@ -395,6 +400,10 @@ async def test_resume_latest_and_recent_sessions_ignore_invalid_index_ids(tmp_pa
 
     assert resumed.session_id == "valid_session"
     assert [item["id"] for item in recent] == ["valid_session"]
+    repaired_index = json.loads(index_path.read_text(encoding="utf-8"))
+    repaired = {entry["id"]: entry for entry in repaired_index["sessions"] if entry.get("id") != "../escape"}
+    assert repaired["empty_session"]["has_user_message"] is False
+    assert repaired["valid_session"]["has_user_message"] is True
     assert not (tmp_path / "escape").exists()
 
 
@@ -509,7 +518,7 @@ def test_session_files_write_json_removes_tmp_on_replace_failure(monkeypatch, tm
 
 @pytest.mark.asyncio
 async def test_persist_tool_call_writes_model_content(temp_session_dir):
-    store = JsonlSessionStore(session_dir=temp_session_dir, system_prompt="sys")
+    store = JsonlSessionStore(session_dir=temp_session_dir, session_id="tool-content", system_prompt="sys")
     await store.initialize()
     await store.persist_message("assistant", "", meta={"tool_calls": [{"id": "call_1", "name": "bash"}]})
     await store.persist_tool_call(
@@ -537,7 +546,7 @@ async def test_persist_tool_call_writes_model_content(temp_session_dir):
 
 @pytest.mark.asyncio
 async def test_message_projector_deduplicates_tool_messages(temp_session_dir):
-    store = JsonlSessionStore(session_dir=temp_session_dir, system_prompt="sys")
+    store = JsonlSessionStore(session_dir=temp_session_dir, session_id="tool-dedup", system_prompt="sys")
     await store.initialize()
     await store.persist_message("assistant", "", meta={"tool_calls": [{"id": "call_1", "name": "bash"}]})
     await store.persist_tool_call(
@@ -600,10 +609,10 @@ async def test_update_plan_tool_args_are_projected_into_next_context(temp_sessio
     store = JsonlSessionStore(session_dir=temp_session_dir, system_prompt="sys")
     await store.initialize()
     plan = [{"step": "Run plan projector regression", "status": "in_progress"}]
-    tool_result = update_plan(plan)
     raw_args = json.dumps({"plan": plan}, ensure_ascii=False)
 
     await store.persist_message("user", "track this work")
+    tool_result = update_plan(plan)
     await store.persist_message("assistant", "", meta={"tool_calls": [{"id": "plan_1", "name": "update_plan"}]})
     await store.persist_tool_call(
         call_id="plan_1",
@@ -627,7 +636,7 @@ async def test_update_plan_tool_args_are_projected_into_next_context(temp_sessio
 
 @pytest.mark.asyncio
 async def test_get_messages_slice_recovers_missing_tool_message_from_record(temp_session_dir):
-    store = JsonlSessionStore(session_dir=temp_session_dir, system_prompt="sys")
+    store = JsonlSessionStore(session_dir=temp_session_dir, session_id="tool-recovery", system_prompt="sys")
     await store.initialize()
     await store.persist_message("assistant", "", meta={"tool_calls": [{"id": "call_1", "name": "bash"}]})
     await store.persist_tool_call(
@@ -676,7 +685,7 @@ async def test_get_messages_slice_skips_interrupted_tool_call(temp_session_dir):
 
 @pytest.mark.asyncio
 async def test_get_messages_slice_matches_numeric_tool_ids_as_strings(temp_session_dir):
-    store = JsonlSessionStore(session_dir=temp_session_dir, system_prompt="sys")
+    store = JsonlSessionStore(session_dir=temp_session_dir, session_id="numeric-tool", system_prompt="sys")
     await store.initialize()
     await store.persist_message("assistant", "", meta={"tool_calls": [{"id": 123, "name": "bash"}]})
     await store.persist_tool_call(
@@ -741,7 +750,7 @@ async def test_get_messages_slice_uses_projection_cache_until_files_change(temp_
 
 @pytest.mark.asyncio
 async def test_get_messages_slice_rejects_tool_record_without_model_content(temp_session_dir):
-    store = JsonlSessionStore(session_dir=temp_session_dir, system_prompt="sys")
+    store = JsonlSessionStore(session_dir=temp_session_dir, session_id="legacy-tool", system_prompt="sys")
     await store.initialize()
     await store.persist_message("assistant", "", meta={"tool_calls": [{"id": "legacy", "name": "bash"}]})
     session_base = Path(temp_session_dir) / store.session_id
@@ -764,7 +773,7 @@ async def test_get_messages_slice_rejects_tool_record_without_model_content(temp
 
 @pytest.mark.asyncio
 async def test_persist_tool_call_requires_model_content(temp_session_dir):
-    store = JsonlSessionStore(session_dir=temp_session_dir, system_prompt="sys")
+    store = JsonlSessionStore(session_dir=temp_session_dir, session_id="missing-tool", system_prompt="sys")
     await store.initialize()
 
     with pytest.raises(ValueError, match="model_content"):
@@ -1022,7 +1031,7 @@ async def test_latest_valid_compact_boundary_survives_newer_broken_boundary(temp
 
 @pytest.mark.asyncio
 async def test_sampling_usage_and_compact_generation_meta(temp_session_dir):
-    store = JsonlSessionStore(session_dir=temp_session_dir, system_prompt="sys")
+    store = JsonlSessionStore(session_dir=temp_session_dir, session_id="sampling-meta", system_prompt="sys")
     await store.initialize()
 
     usage = {
@@ -1060,7 +1069,7 @@ async def test_sampling_usage_and_compact_generation_meta(temp_session_dir):
 
 @pytest.mark.asyncio
 async def test_sampling_usage_keeps_latest_assistant_usage_when_compact_usage_arrives(temp_session_dir):
-    store = JsonlSessionStore(session_dir=temp_session_dir, system_prompt="sys")
+    store = JsonlSessionStore(session_dir=temp_session_dir, session_id="sampling-history", system_prompt="sys")
     await store.initialize()
 
     assistant_usage = {
@@ -1104,7 +1113,7 @@ async def test_sampling_usage_keeps_latest_assistant_usage_when_compact_usage_ar
 
 @pytest.mark.asyncio
 async def test_update_model_persists_session_meta(temp_session_dir):
-    store = JsonlSessionStore(session_dir=temp_session_dir, model="old-model", system_prompt="sys")
+    store = JsonlSessionStore(session_dir=temp_session_dir, session_id="model-update", model="old-model", system_prompt="sys")
     await store.initialize()
 
     await store.update_model("new-model")
@@ -1170,7 +1179,7 @@ async def test_resume_repairs_invalid_meta_counts(temp_session_dir):
 
 @pytest.mark.asyncio
 async def test_resume_normalizes_auto_compact_window_meta(temp_session_dir):
-    store = JsonlSessionStore(session_dir=temp_session_dir, system_prompt="sys")
+    store = JsonlSessionStore(session_dir=temp_session_dir, session_id="compact-window", system_prompt="sys")
     await store.initialize()
 
     session_base = Path(temp_session_dir) / store.session_id

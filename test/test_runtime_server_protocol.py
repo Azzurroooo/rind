@@ -481,6 +481,7 @@ def test_session_new_returns_new_metadata_and_preview(capsys):
     message = json.loads(capsys.readouterr().out)
     assert message["result"] == {
         "session_id": "new-session",
+        "draft": False,
         "model": "new-model",
         "usage": None,
         "resume_preview": "",

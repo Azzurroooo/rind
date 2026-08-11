@@ -60,13 +60,16 @@ test("app-server supports desktop session lifecycle over JSONL", async () => {
     assert.equal(initialize.result.protocol_version, "1")
     assert.ok(initialize.result.capabilities.includes("session_list"))
     assert.ok(initialize.result.capabilities.includes("session_create"))
+    assert.equal(initialize.result.session_id, null)
+    assert.equal(initialize.result.draft, true)
 
     const listed = await request("sessions", "session.list", { limit: 10 })
     assert.equal(listed.error, undefined)
     assert.ok(Array.isArray(listed.result.sessions))
 
     const created = await request("new", "session.new")
-    assert.match(created.result.session_id, /^\d{8}_\d{6}_[a-f0-9]{8}$/)
+    assert.equal(created.result.session_id, null)
+    assert.equal(created.result.draft, true)
 
     const replay = await request("replay", "session.replay")
     assert.equal(replay.error, undefined)

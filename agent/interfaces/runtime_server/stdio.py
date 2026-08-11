@@ -188,6 +188,7 @@ class StdioRuntimeServer:
         self._initialized = True
         result = {
             "session_id": getattr(self._session, "session_id", None),
+            "draft": getattr(self._session, "session_id", None) is None,
             "model": getattr(self._session, "model", None),
             "protocol_version": PROTOCOL_VERSION,
             "capabilities": self._capabilities(),
@@ -348,6 +349,7 @@ class StdioRuntimeServer:
         usage = result.get("assistant_usage") or result.get("usage")
         response = {
             "session_id": result.get("session_id") or getattr(self._session, "session_id", None),
+            "draft": result.get("draft") is True,
             "model": result.get("model") or getattr(self._session, "model", None),
             "usage": usage if isinstance(usage, dict) else None,
             "resume_preview": await self._resume_preview(),
@@ -387,6 +389,7 @@ class StdioRuntimeServer:
         usage = result.get("assistant_usage") or result.get("usage")
         response = {
             "session_id": result.get("session_id") or getattr(self._session, "session_id", None),
+            "draft": result.get("draft") is True,
             "model": result.get("model") or getattr(self._session, "model", None),
             "usage": usage if isinstance(usage, dict) else None,
             "resume_preview": await self._resume_preview(),
