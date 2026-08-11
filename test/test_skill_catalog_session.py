@@ -1,4 +1,3 @@
-import json
 import os
 import sys
 from pathlib import Path
@@ -37,7 +36,7 @@ def _write_skill(root: Path, name: str, description: str) -> None:
 
 
 @pytest.mark.asyncio
-async def test_runtime_initialization_persists_only_metadata_catalog(tmp_path: Path) -> None:
+async def test_runtime_initialization_keeps_skill_catalog_in_memory_for_draft(tmp_path: Path) -> None:
     project_skills = tmp_path / "project" / ".rind" / "skills"
     _write_skill(project_skills, "demo", "Demo skill")
     repository = SkillRepository(
@@ -48,27 +47,20 @@ async def test_runtime_initialization_persists_only_metadata_catalog(tmp_path: P
     runtime = AgentRuntime(MinimalRunner(), session, skill_repository=repository)
 
     await runtime.initialize()
-    meta_path = Path(session._session_paths["meta"])
-    meta = json.loads(meta_path.read_text(encoding="utf-8"))
-
-    assert meta["skill_catalog"] == [{"name": "demo", "description": "Demo skill", "scope": "project"}]
-    assert "Body" not in json.dumps(meta)
-    assert session._message_count == 1
+    assert session.session_id is None
+    assert await session.get_skill_catalog() == []
+    assert not (tmp_path / "sessions").exists()
 
 
 @pytest.mark.asyncio
-async def test_catalog_update_does_not_change_activity_timestamp_or_message_count(tmp_path: Path) -> None:
+async def test_catalog_update_does_not_materialize_draft(tmp_path: Path) -> None:
     session = JsonlSessionStore(session_dir=str(tmp_path / "sessions"), system_prompt="system")
     await session.initialize()
-    meta_path = Path(session._session_paths["meta"])
-    before = json.loads(meta_path.read_text(encoding="utf-8"))
 
     await session.set_skill_catalog([{"name": "demo", "description": "Demo", "scope": "project"}])
-    after = json.loads(meta_path.read_text(encoding="utf-8"))
 
-    assert after["updated_at"] == before["updated_at"]
-    assert after["message_count"] == before["message_count"]
-    assert after["skill_catalog"] == [{"name": "demo", "description": "Demo", "scope": "project"}]
+    assert session.session_id is None
+    assert not (tmp_path / "sessions").exists()
 
 
 @pytest.mark.asyncio

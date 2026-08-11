@@ -188,9 +188,11 @@ function registerIpc() {
     const input = asObject(patch)
     if (!input) throw new Error("Layout settings must be an object.")
     return projectStore().updateLayout({
-      sidebarCollapsed: input.sidebarCollapsed as boolean | undefined,
+      sidebarOpen: input.sidebarOpen as boolean | undefined,
+      sidebarWidth: input.sidebarWidth as number | undefined,
       filesOpen: input.filesOpen as boolean | undefined,
-      filePanelWidth: input.filePanelWidth as number | undefined,
+      fileTreeWidth: input.fileTreeWidth as number | undefined,
+      filePreviewWidth: input.filePreviewWidth as number | undefined,
     })
   })
   ipcMain.handle("projects-sessions", (_event, path: unknown, offset: unknown, limit: unknown) => {

@@ -22,12 +22,13 @@ test("project registry migrates the legacy workspace and pages its sessions", as
     const configFile = join(directory, "desktop-settings.json")
     const sessionIndexFile = join(directory, "session_index.json")
     await Promise.all([mkdir(firstProject), mkdir(secondProject)])
-    await writeFile(configFile, JSON.stringify({ workspace: firstProject }), "utf8")
+    await writeFile(configFile, JSON.stringify({ workspace: firstProject, sidebarCollapsed: true, filePanelWidth: 300 }), "utf8")
     await writeFile(sessionIndexFile, JSON.stringify({
       sessions: [
-        { id: "old", workspace_root: firstProject, title: "Old", updated_at: "2026-01-01T00:00:00Z" },
-        { id: "new", workspace_root: firstProject, title: "New", updated_at: "2026-02-01T00:00:00Z" },
-        { id: "other", workspace_root: secondProject, title: "Other", updated_at: "2026-03-01T00:00:00Z" },
+        { id: "old", workspace_root: firstProject, title: "Old", updated_at: "2026-01-01T00:00:00Z", has_user_message: true },
+        { id: "new", workspace_root: firstProject, title: "New", updated_at: "2026-02-01T00:00:00Z", has_user_message: true },
+        { id: "empty", workspace_root: firstProject, title: "Empty", updated_at: "2026-04-01T00:00:00Z", has_user_message: false },
+        { id: "other", workspace_root: secondProject, title: "Other", updated_at: "2026-03-01T00:00:00Z", has_user_message: true },
       ],
     }), "utf8")
 
@@ -35,6 +36,10 @@ test("project registry migrates the legacy workspace and pages its sessions", as
     const migrated = await store.overview()
     assert.equal(migrated.projects.length, 1)
     assert.equal(migrated.activeProjectPath, firstProject)
+    assert.equal(migrated.sidebarOpen, false)
+    assert.equal(migrated.sidebarWidth, 248)
+    assert.equal(migrated.fileTreeWidth, 300)
+    assert.equal(migrated.filePreviewWidth, 420)
     assert.deepEqual(migrated.projects[0].sessions.map((session) => session.id), ["new", "old"])
 
     await store.add(secondProject)

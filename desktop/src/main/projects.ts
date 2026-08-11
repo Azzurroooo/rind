@@ -11,9 +11,11 @@ const maxSessionPageLimit = 50
 type StoredProjectState = {
   projects: string[]
   activeProjectPath: string
-  sidebarCollapsed: boolean
+  sidebarOpen: boolean
+  sidebarWidth: number
   filesOpen: boolean
-  filePanelWidth: number
+  fileTreeWidth: number
+  filePreviewWidth: number
 }
 
 export class DesktopProjectStore {
@@ -34,9 +36,11 @@ export class DesktopProjectStore {
     return {
       projects,
       activeProjectPath: state.activeProjectPath,
-      sidebarCollapsed: state.sidebarCollapsed,
+      sidebarOpen: state.sidebarOpen,
+      sidebarWidth: state.sidebarWidth,
       filesOpen: state.filesOpen,
-      filePanelWidth: state.filePanelWidth,
+      fileTreeWidth: state.fileTreeWidth,
+      filePreviewWidth: state.filePreviewWidth,
     }
   }
 
@@ -68,14 +72,14 @@ export class DesktopProjectStore {
     return this.overview()
   }
 
-  async updateLayout(patch: { sidebarCollapsed?: boolean; filesOpen?: boolean; filePanelWidth?: number }) {
+  async updateLayout(patch: { sidebarOpen?: boolean; sidebarWidth?: number; filesOpen?: boolean; fileTreeWidth?: number; filePreviewWidth?: number }) {
     const state = await this.readState()
     const next = { ...state }
-    if (typeof patch.sidebarCollapsed === "boolean") next.sidebarCollapsed = patch.sidebarCollapsed
+    if (typeof patch.sidebarOpen === "boolean") next.sidebarOpen = patch.sidebarOpen
+    if (typeof patch.sidebarWidth === "number" && Number.isFinite(patch.sidebarWidth)) next.sidebarWidth = validSidebarWidth(patch.sidebarWidth)
     if (typeof patch.filesOpen === "boolean") next.filesOpen = patch.filesOpen
-    if (typeof patch.filePanelWidth === "number" && Number.isFinite(patch.filePanelWidth)) {
-      next.filePanelWidth = Math.max(240, Math.min(560, Math.round(patch.filePanelWidth)))
-    }
+    if (typeof patch.fileTreeWidth === "number" && Number.isFinite(patch.fileTreeWidth)) next.fileTreeWidth = validFileTreeWidth(patch.fileTreeWidth)
+    if (typeof patch.filePreviewWidth === "number" && Number.isFinite(patch.filePreviewWidth)) next.filePreviewWidth = validFilePreviewWidth(patch.filePreviewWidth)
     await this.writeState(next)
     return this.overview()
   }
@@ -87,6 +91,7 @@ export class DesktopProjectStore {
     const safeOffset = Number.isInteger(offset) && offset >= 0 ? offset : 0
     const safeLimit = Number.isInteger(limit) ? Math.max(1, Math.min(maxSessionPageLimit, limit)) : sessionPageLimit
     const sessions = (await this.readSessionIndex())
+      .filter((session) => session.hasUserMessage)
       .filter((session) => samePath(session.workspaceRoot, projectPath))
       .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))
     return { sessions: sessions.slice(safeOffset, safeOffset + safeLimit), total: sessions.length }
@@ -100,6 +105,7 @@ export class DesktopProjectStore {
   private async projectSummary(path: string): Promise<DesktopProject> {
     const available = await isDirectory(path)
     const sessions = (await this.readSessionIndex())
+      .filter((session) => session.hasUserMessage)
       .filter((session) => samePath(session.workspaceRoot, path))
       .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))
     return {
@@ -121,9 +127,11 @@ export class DesktopProjectStore {
     const state: StoredProjectState = {
       projects,
       activeProjectPath,
-      sidebarCollapsed: raw.sidebarCollapsed === true,
+      sidebarOpen: raw.sidebarOpen === undefined ? raw.sidebarCollapsed !== true : raw.sidebarOpen === true,
+      sidebarWidth: validSidebarWidth(raw.sidebarWidth),
       filesOpen: raw.filesOpen === true,
-      filePanelWidth: validPanelWidth(raw.filePanelWidth),
+      fileTreeWidth: validFileTreeWidth(raw.fileTreeWidth ?? raw.filePanelWidth),
+      filePreviewWidth: validFilePreviewWidth(raw.filePreviewWidth),
     }
     if (needsMigration(raw, state)) await this.writeState(state)
     return state
@@ -133,9 +141,11 @@ export class DesktopProjectStore {
     await writeJsonObject(this.configFile, {
       projects: state.projects,
       activeProjectPath: state.activeProjectPath,
-      sidebarCollapsed: state.sidebarCollapsed,
+      sidebarOpen: state.sidebarOpen,
+      sidebarWidth: state.sidebarWidth,
       filesOpen: state.filesOpen,
-      filePanelWidth: state.filePanelWidth,
+      fileTreeWidth: state.fileTreeWidth,
+      filePreviewWidth: state.filePreviewWidth,
     })
   }
 
@@ -154,6 +164,7 @@ export class DesktopProjectStore {
         preview: typeof session.preview === "string" ? session.preview : "",
         updatedAt: typeof session.updated_at === "string" ? session.updated_at : "",
         workspaceRoot: storedPath(workspaceRoot),
+        hasUserMessage: session.has_user_message === true,
       }]
     })
   }
@@ -162,15 +173,19 @@ export class DesktopProjectStore {
 function needsMigration(raw: Record<string, unknown>, state: StoredProjectState) {
   return raw.workspace !== undefined
     || raw.activeProjectPath !== state.activeProjectPath
-    || raw.sidebarCollapsed !== state.sidebarCollapsed
+    || raw.sidebarOpen !== state.sidebarOpen
+    || raw.sidebarWidth !== state.sidebarWidth
+    || raw.sidebarCollapsed !== undefined
     || raw.filesOpen !== state.filesOpen
-    || raw.filePanelWidth !== state.filePanelWidth
+    || raw.fileTreeWidth !== state.fileTreeWidth
+    || raw.filePreviewWidth !== state.filePreviewWidth
+    || raw.filePanelWidth !== undefined
     || JSON.stringify(raw.projects) !== JSON.stringify(state.projects)
 }
 
-function validPanelWidth(value: unknown) {
-  return typeof value === "number" && Number.isFinite(value) ? Math.max(240, Math.min(560, Math.round(value))) : 340
-}
+function validSidebarWidth(value: unknown) { return typeof value === "number" && Number.isFinite(value) ? Math.max(180, Math.min(420, Math.round(value))) : 248 }
+function validFileTreeWidth(value: unknown) { return typeof value === "number" && Number.isFinite(value) ? Math.max(180, Math.min(420, Math.round(value))) : 240 }
+function validFilePreviewWidth(value: unknown) { return typeof value === "number" && Number.isFinite(value) ? Math.max(320, Math.min(760, Math.round(value))) : 420 }
 
 function storedPath(path: string) {
   return resolve(path.trim())

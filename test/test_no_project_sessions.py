@@ -43,8 +43,8 @@ async def test_build_dependencies_does_not_create_project_sessions(monkeypatch, 
 
     if (workspace / "sessions").exists():
         raise AssertionError("Did not expect project-local sessions directory")
-    if not (rind_home / "sessions").exists():
-        raise AssertionError("Expected user-level Rind sessions directory")
+    if rind_home.exists():
+        raise AssertionError("Draft initialization must not create the user-level Rind directory")
 
 
 def main() -> int:

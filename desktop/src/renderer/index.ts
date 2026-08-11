@@ -37,9 +37,11 @@ type AppState = {
   activeProjectPath: string
   sessionPages: Record<string, DesktopSessionSummary[]>
   sessionTotals: Record<string, number>
-  sidebarCollapsed: boolean
+  sidebarOpen: boolean
+  sidebarWidth: number
   filesOpen: boolean
-  filePanelWidth: number
+  fileTreeWidth: number
+  filePreviewWidth: number
   expandedProjects: Set<string>
   expandedDirectories: Set<string>
   fileListings: Record<string, DesktopFileListing>
@@ -69,9 +71,11 @@ const state: AppState = {
   activeProjectPath: "",
   sessionPages: {},
   sessionTotals: {},
-  sidebarCollapsed: false,
+  sidebarOpen: true,
+  sidebarWidth: 248,
   filesOpen: false,
-  filePanelWidth: 340,
+  fileTreeWidth: 240,
+  filePreviewWidth: 420,
   expandedProjects: new Set(),
   expandedDirectories: new Set([""]),
   fileListings: {},
@@ -91,16 +95,16 @@ appRoot.innerHTML = `
         <span id="connection" class="connection"><span class="status-pip"></span><span id="connection-text">Stopped</span></span>
       </div>
       <div class="workspace">
-        <label class="project-control"><select id="project-select" aria-label="Active project"></select></label>
+        <span id="workspace-path" class="workspace-path">No project selected</span>
         <button id="add-project" type="button" class="ghost-button">Add project</button>
         <button id="open-settings" type="button" class="ghost-button">Settings</button>
       </div>
     </header>
     <main class="layout">
-      <aside class="sidebar" aria-label="Projects and sessions">
+      <aside id="sidebar" class="sidebar" aria-label="Projects and sessions">
+        <div id="sidebar-resize-handle" class="sidebar-resize-handle" role="separator" aria-label="Resize projects sidebar" aria-orientation="vertical"></div>
         <div class="sidebar-actions">
           <button id="new-session" type="button" class="primary-button" title="Start a new chat in the active project">New chat</button>
-          <button id="collapse-sidebar" type="button" class="ghost-button" title="Collapse sidebar" aria-label="Collapse sidebar">Collapse</button>
         </div>
         <div class="sidebar-heading"><span>Projects</span><button id="sidebar-add-project" type="button" class="ghost-button" title="Add project">Add</button></div>
         <div id="project-list" class="project-list"></div>
@@ -108,7 +112,7 @@ appRoot.innerHTML = `
       <section class="conversation">
         <div class="conversation-head">
           <div class="conversation-title"><strong id="session-title">New session</strong><span id="session-id" class="subtle"></span></div>
-          <div class="conversation-actions"><button id="toggle-files" type="button" class="ghost-button" title="Browse active project files">Files</button><button id="compact" type="button" class="ghost-button" title="Compact context now">Compact</button></div>
+          <div class="conversation-actions"><button id="toggle-sidebar" type="button" class="ghost-button" title="Toggle projects sidebar" aria-label="Toggle projects sidebar">Projects</button><button id="toggle-files" type="button" class="ghost-button" title="Browse active project files">Files</button><button id="compact" type="button" class="ghost-button" title="Compact context now">Compact</button></div>
         </div>
         <div id="notice" class="notice" role="status" hidden><span id="notice-text"></span><button id="retry" type="button" class="ghost-button" hidden>Restart runtime</button></div>
         <div class="stream-wrap">
@@ -116,9 +120,10 @@ appRoot.innerHTML = `
           <button id="jump-latest" type="button" class="jump-latest" hidden>Jump to latest</button>
         </div>
         <form id="composer" class="composer">
-          <textarea id="prompt" rows="1" placeholder="Message Rind — Enter to send, Shift+Enter for a new line" aria-label="Message Rind"></textarea>
+          <textarea id="prompt" rows="2" placeholder="Message Rind — Enter to send, Shift+Enter for a new line" aria-label="Message Rind"></textarea>
           <div class="composer-footer">
             <label class="model-control" title="Active model"><select id="model-select" aria-label="Model"></select></label>
+            <label class="project-control" title="Active project"><select id="project-select" aria-label="Active project"></select></label>
             <span id="context-meter" class="context-meter" hidden></span>
             <span class="composer-spacer"></span>
             <button id="steer" type="button" class="ghost-button" title="Steer the running turn with this message">Steer</button>
@@ -127,11 +132,14 @@ appRoot.innerHTML = `
           </div>
         </form>
       </section>
-      <aside id="file-panel" class="file-panel" aria-label="Project files" hidden>
+      <aside id="file-panel" class="file-panel" aria-label="Project files">
         <div id="file-resize-handle" class="file-resize-handle" role="separator" aria-label="Resize file panel" aria-orientation="vertical"></div>
         <div class="file-panel-head"><strong>Files</strong><button id="close-files" type="button" class="ghost-button" title="Close files">Close</button></div>
-        <div id="file-tree" class="file-tree"></div>
-        <section id="file-preview" class="file-preview"><p class="subtle">Select a file to preview.</p></section>
+        <div class="file-workspace">
+          <section id="file-preview" class="file-preview"><p class="subtle">Select a file to preview.</p></section>
+          <div id="file-preview-resize-handle" class="file-preview-resize-handle" role="separator" aria-label="Resize file preview" aria-orientation="vertical"></div>
+          <div id="file-tree" class="file-tree"></div>
+        </div>
       </aside>
     </main>
     <dialog id="settings-dialog" class="settings-dialog">
@@ -151,6 +159,7 @@ appRoot.innerHTML = `
 const connection = requiredElement("connection")
 const connectionText = requiredElement("connection-text")
 const projectSelect = requiredElement<HTMLSelectElement>("project-select")
+const workspacePath = requiredElement("workspace-path")
 const projectList = requiredElement("project-list")
 const sessionTitle = requiredElement("session-title")
 const sessionIdLabel = requiredElement("session-id")
@@ -165,13 +174,16 @@ const prompt = requiredElement<HTMLTextAreaElement>("prompt")
 const send = requiredElement<HTMLButtonElement>("send")
 const steer = requiredElement<HTMLButtonElement>("steer")
 const interrupt = requiredElement<HTMLButtonElement>("interrupt")
+const sidebar = requiredElement("sidebar")
+const sidebarResizeHandle = requiredElement("sidebar-resize-handle")
 const filePanel = requiredElement("file-panel")
 const fileResizeHandle = requiredElement("file-resize-handle")
+const filePreviewResizeHandle = requiredElement("file-preview-resize-handle")
 const fileTree = requiredElement("file-tree")
 const filePreview = requiredElement("file-preview")
 const filesToggle = requiredElement<HTMLButtonElement>("toggle-files")
 const newSessionButton = requiredElement<HTMLButtonElement>("new-session")
-const sidebarCollapseButton = requiredElement<HTMLButtonElement>("collapse-sidebar")
+const sidebarToggle = requiredElement<HTMLButtonElement>("toggle-sidebar")
 const settingsDialog = requiredElement<HTMLDialogElement>("settings-dialog")
 const settingsForm = requiredElement<HTMLFormElement>("settings-form")
 const settingsApiKey = requiredElement<HTMLInputElement>("settings-api-key")
@@ -183,7 +195,7 @@ const saveSettingsButton = requiredElement<HTMLButtonElement>("save-settings")
 
 let workingTimer: ReturnType<typeof setInterval> | undefined
 let lastRenderedEntries = 0
-let fileResizeStart: { pointerId: number; x: number; width: number } | undefined
+let resizeStart: { target: "sidebar" | "files" | "preview"; pointerId: number; x: number; width: number; lastWidth: number; wideFiles: boolean } | undefined
 
 function requiredElement<T extends HTMLElement = HTMLElement>(id: string) {
   const element = document.getElementById(id) as T | null
@@ -193,15 +205,29 @@ function requiredElement<T extends HTMLElement = HTMLElement>(id: string) {
 
 function render() {
   const { runtime, conversation } = state
+  const wideFiles = usesWideFileLayout()
+  const filesWidth = state.filesOpen
+    ? state.filePreview && wideFiles ? state.fileTreeWidth + state.filePreviewWidth + 8 : state.fileTreeWidth
+    : 0
   connectionText.textContent = runtime.status === "ready" ? "Connected" : titleCase(runtime.status)
   connection.className = `connection connection-${runtime.status}`
-  appRoot.classList.toggle("sidebar-collapsed", state.sidebarCollapsed)
+  appRoot.classList.toggle("sidebar-open", state.sidebarOpen)
   appRoot.classList.toggle("files-open", state.filesOpen)
-  appRoot.style.setProperty("--file-panel-width", `${state.filePanelWidth}px`)
+  appRoot.classList.toggle("files-wide", wideFiles)
+  appRoot.classList.toggle("file-preview-open", Boolean(state.filePreview))
+  appRoot.style.setProperty("--sidebar-panel-width", `${state.sidebarOpen ? state.sidebarWidth : 0}px`)
+  appRoot.style.setProperty("--files-panel-width", `${filesWidth}px`)
+  appRoot.style.setProperty("--file-tree-width", `${state.fileTreeWidth}px`)
+  appRoot.style.setProperty("--file-preview-width", `${state.filePreviewWidth}px`)
+  sidebar.setAttribute("aria-hidden", String(!state.sidebarOpen))
+  sidebar.inert = !state.sidebarOpen
+  filePanel.setAttribute("aria-hidden", String(!state.filesOpen))
+  filePanel.inert = !state.filesOpen
   newSessionButton.title = activeProject()?.available ? `Start a new chat in ${activeProject()?.name}` : "Choose a project for a new chat"
-  sidebarCollapseButton.textContent = state.sidebarCollapsed ? ">>" : "<<"
-  sidebarCollapseButton.title = state.sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"
-  sidebarCollapseButton.setAttribute("aria-label", sidebarCollapseButton.title)
+  sidebarToggle.textContent = state.sidebarOpen ? "Hide projects" : "Projects"
+  sidebarToggle.title = state.sidebarOpen ? "Hide projects sidebar" : "Show projects sidebar"
+  workspacePath.textContent = activeProject()?.path || "No project selected"
+  workspacePath.title = activeProject()?.path || ""
   const current = allSessions().find((item) => item.id === state.sessionId)
   sessionTitle.textContent = current?.title || (state.sessionId ? "Session" : "New session")
   sessionIdLabel.textContent = state.sessionId || ""
@@ -298,20 +324,19 @@ function renderProjectSession(item: DesktopSessionSummary) {
 
 function renderFiles() {
   const project = activeProject()
-  filePanel.hidden = !state.filesOpen
   filesToggle.disabled = !project?.available
   filesToggle.textContent = state.filesOpen ? "Hide files" : "Files"
   if (!state.filesOpen || !project?.available) return
   fileTree.innerHTML = renderDirectory("")
   const preview = state.filePreview
   if (!preview) {
-    filePreview.innerHTML = `<p class="subtle">Select a file to preview.</p>`
+    filePreview.innerHTML = ""
   } else if (preview.kind === "text") {
-    filePreview.innerHTML = `<div class="file-preview-head"><strong>${escapeHtml(preview.name)}</strong><small>${formatFileSize(preview.size)}${preview.truncated ? " · truncated" : ""}</small></div><pre><code>${escapeHtml(preview.content || "")}</code></pre>`
+    filePreview.innerHTML = `<div class="file-preview-head"><button type="button" class="ghost-button" data-close-preview title="Back to files">Back</button><strong>${escapeHtml(preview.name)}</strong><small>${formatFileSize(preview.size)}${preview.truncated ? " · truncated" : ""}</small></div><pre><code>${escapeHtml(preview.content || "")}</code></pre>`
   } else if (preview.kind === "image") {
-    filePreview.innerHTML = `<div class="file-preview-head"><strong>${escapeHtml(preview.name)}</strong><small>${formatFileSize(preview.size)}</small></div><img src="${escapeAttribute(preview.dataUrl || "")}" alt="${escapeAttribute(preview.name)}" />`
+    filePreview.innerHTML = `<div class="file-preview-head"><button type="button" class="ghost-button" data-close-preview title="Back to files">Back</button><strong>${escapeHtml(preview.name)}</strong><small>${formatFileSize(preview.size)}</small></div><img src="${escapeAttribute(preview.dataUrl || "")}" alt="${escapeAttribute(preview.name)}" />`
   } else {
-    filePreview.innerHTML = `<div class="file-preview-head"><strong>${escapeHtml(preview.name)}</strong><small>${formatFileSize(preview.size)}</small></div><p class="subtle">${escapeHtml(preview.message || "This file cannot be previewed.")}</p>`
+    filePreview.innerHTML = `<div class="file-preview-head"><button type="button" class="ghost-button" data-close-preview title="Back to files">Back</button><strong>${escapeHtml(preview.name)}</strong><small>${formatFileSize(preview.size)}</small></div><p class="subtle">${escapeHtml(preview.message || "This file cannot be previewed.")}</p>`
   }
 }
 
@@ -341,7 +366,7 @@ function renderModels() {
     modelSelect.append(option)
   }
   if (previous && choices.includes(previous)) modelSelect.value = previous
-  modelSelect.disabled = state.runtime.status !== "ready" || !choices.length
+  modelSelect.disabled = state.runtime.status !== "ready" || !choices.length || Boolean(state.conversation.activeTurnId)
 }
 
 function renderStream() {
@@ -573,9 +598,11 @@ function applyOverview(overview: Awaited<ReturnType<typeof window.api.projects.g
   }
   state.projects = overview.projects
   state.activeProjectPath = overview.activeProjectPath
-  state.sidebarCollapsed = overview.sidebarCollapsed
+  state.sidebarOpen = overview.sidebarOpen
+  state.sidebarWidth = overview.sidebarWidth
   state.filesOpen = overview.filesOpen
-  state.filePanelWidth = overview.filePanelWidth
+  state.fileTreeWidth = overview.fileTreeWidth
+  state.filePreviewWidth = overview.filePreviewWidth
   state.sessionPages = nextPages
   state.sessionTotals = nextTotals
   if (state.activeProjectPath) state.expandedProjects.add(state.activeProjectPath)
@@ -643,6 +670,10 @@ async function bootstrap(result: unknown) {
 }
 
 function handleRuntimeEvent(envelope: RuntimeEvent) {
+  if (envelope.sessionId && envelope.sessionId !== state.sessionId) {
+    state.sessionId = envelope.sessionId
+    runAction(loadSessions)
+  }
   state.conversation = reduceEvent(state.conversation, envelope)
   if (envelope.type === "turn_completed" || envelope.type === "turn_failed" || envelope.type === "turn_cancelled") {
     runAction(async () => { await loadSessions(); render() })
@@ -651,8 +682,14 @@ function handleRuntimeEvent(envelope: RuntimeEvent) {
 }
 
 function autoGrowPrompt() {
+  const style = window.getComputedStyle(prompt)
+  const lineHeight = Number.parseFloat(style.lineHeight) || 21
+  const verticalPadding = (Number.parseFloat(style.paddingTop) || 0) + (Number.parseFloat(style.paddingBottom) || 0)
+  const minimum = lineHeight * 2 + verticalPadding
+  const maximum = lineHeight * 7 + verticalPadding
   prompt.style.height = "auto"
-  prompt.style.height = `${Math.min(prompt.scrollHeight, 220)}px`
+  prompt.style.height = `${Math.max(minimum, Math.min(prompt.scrollHeight, maximum))}px`
+  prompt.style.overflowY = prompt.scrollHeight > maximum ? "auto" : "hidden"
 }
 
 requiredElement<HTMLFormElement>("composer").addEventListener("submit", (event) => { event.preventDefault(); runAction(sendPrompt) })
@@ -691,7 +728,12 @@ async function sendPrompt() {
   const active = Boolean(state.conversation.activeTurnId)
   state.conversation = addUserMessage(state.conversation, input)
   render()
-  await request(active ? "turn.follow_up" : "turn.start", { input })
+  const result = asRecord(await request(active ? "turn.follow_up" : "turn.start", { input }))
+  if (typeof result.session_id === "string" && result.session_id) {
+    state.sessionId = result.session_id
+    await loadSessions()
+  }
+  render()
 }
 
 async function runSlash(input: string) {
@@ -712,7 +754,8 @@ async function runSlash(input: string) {
   const followUp = typeof result.run_turn_input === "string" ? result.run_turn_input.trim() : ""
   if (followUp) {
     state.conversation = addUserMessage(state.conversation, followUp)
-    await request("turn.start", { input: followUp })
+    const turn = asRecord(await request("turn.start", { input: followUp }))
+    if (typeof turn.session_id === "string" && turn.session_id) state.sessionId = turn.session_id
   }
   render()
 }
@@ -743,7 +786,7 @@ requiredElement("add-project").addEventListener("click", () => runAction(addProj
 requiredElement("sidebar-add-project").addEventListener("click", () => runAction(addProject))
 requiredElement("open-settings").addEventListener("click", () => openSettings())
 requiredElement("new-session").addEventListener("click", () => runAction(startNewChat))
-requiredElement("collapse-sidebar").addEventListener("click", () => runAction(toggleSidebar))
+sidebarToggle.addEventListener("click", () => runAction(toggleSidebar))
 requiredElement("close-files").addEventListener("click", () => runAction(() => setFilesOpen(false)))
 filesToggle.addEventListener("click", () => runAction(() => setFilesOpen(!state.filesOpen)))
 requiredElement("compact").addEventListener("click", () => runAction(() => request("compact")))
@@ -794,33 +837,15 @@ fileTree.addEventListener("click", (event) => {
   const filePath = target.closest<HTMLButtonElement>("[data-preview-file]")?.dataset.previewFile
   if (filePath) runAction(() => previewFile(filePath))
 })
-fileResizeHandle.addEventListener("pointerdown", (event) => {
-  if (!state.filesOpen) return
-  fileResizeStart = { pointerId: event.pointerId, x: event.clientX, width: state.filePanelWidth }
-  fileResizeHandle.setPointerCapture(event.pointerId)
-  document.body.classList.add("resizing-files")
-  event.preventDefault()
-})
-fileResizeHandle.addEventListener("pointermove", (event) => {
-  if (!fileResizeStart || fileResizeStart.pointerId !== event.pointerId) return
-  const width = fileResizeStart.width + fileResizeStart.x - event.clientX
-  state.filePanelWidth = Math.max(240, Math.min(560, Math.round(width)))
-  render()
-})
-fileResizeHandle.addEventListener("pointerup", (event) => {
-  if (!fileResizeStart || fileResizeStart.pointerId !== event.pointerId) return
-  fileResizeHandle.releasePointerCapture(event.pointerId)
-  fileResizeStart = undefined
-  document.body.classList.remove("resizing-files")
-  runAction(async () => {
-    applyOverview(await window.api.projects.updateLayout({ filePanelWidth: state.filePanelWidth }))
+filePreview.addEventListener("click", (event) => {
+  if ((event.target as HTMLElement).closest("[data-close-preview]")) {
+    state.filePreview = undefined
     render()
-  })
+  }
 })
-fileResizeHandle.addEventListener("lostpointercapture", () => {
-  fileResizeStart = undefined
-  document.body.classList.remove("resizing-files")
-})
+startResize(sidebarResizeHandle, "sidebar")
+startResize(fileResizeHandle, "files")
+startResize(filePreviewResizeHandle, "preview")
 messageStream.addEventListener("click", (event) => {
   const target = event.target as HTMLElement
   const toggle = target.closest<HTMLButtonElement>("[data-toggle-tool]")
@@ -921,6 +946,9 @@ async function removeProject(path: string) {
   if (wasActive) {
     resetProjectView()
     restoreProjectDraft()
+    if (!activeProject()?.available && state.filesOpen) {
+      applyOverview(await window.api.projects.updateLayout({ filesOpen: false }))
+    }
   }
   state.notice = "Project removed from Desktop."
   render()
@@ -948,7 +976,7 @@ async function startNewChat() {
 }
 
 async function toggleSidebar() {
-  applyOverview(await window.api.projects.updateLayout({ sidebarCollapsed: !state.sidebarCollapsed }))
+  applyOverview(await window.api.projects.updateLayout({ sidebarOpen: !state.sidebarOpen }))
   render()
 }
 
@@ -1009,6 +1037,68 @@ async function createSession() {
   state.expandedTools = new Set()
   await refreshSession()
 }
+
+function usesWideFileLayout() {
+  if (!state.filesOpen || !state.filePreview || window.innerWidth < 1180) return false
+  const sidebarWidth = state.sidebarOpen ? state.sidebarWidth : 0
+  return window.innerWidth - sidebarWidth - state.fileTreeWidth - state.filePreviewWidth - 8 >= 440
+}
+
+function startResize(handle: HTMLElement, target: "sidebar" | "files" | "preview") {
+  handle.addEventListener("pointerdown", (event) => {
+    if ((target === "sidebar" && !state.sidebarOpen) || (target !== "sidebar" && !state.filesOpen)) return
+    if (target === "preview" && !usesWideFileLayout()) return
+    const width = target === "sidebar" ? state.sidebarWidth : target === "files" ? (usesWideFileLayout() ? state.filePreviewWidth + state.fileTreeWidth : state.fileTreeWidth) : state.filePreviewWidth
+    resizeStart = { target, pointerId: event.pointerId, x: event.clientX, width, lastWidth: width, wideFiles: usesWideFileLayout() }
+    handle.setPointerCapture(event.pointerId)
+    document.body.classList.add("resizing-panel")
+    event.preventDefault()
+  })
+  handle.addEventListener("pointermove", (event) => {
+    if (!resizeStart || resizeStart.target !== target || resizeStart.pointerId !== event.pointerId) return
+    const delta = target === "sidebar" || target === "preview" ? event.clientX - resizeStart.x : resizeStart.x - event.clientX
+    const width = Math.round(resizeStart.width + delta)
+    resizeStart.lastWidth = width
+    if (target === "sidebar") state.sidebarWidth = Math.max(0, Math.min(420, width))
+    else if (target === "preview") state.filePreviewWidth = Math.max(0, Math.min(760, width))
+    else if (resizeStart.wideFiles) state.filePreviewWidth = Math.max(320, Math.min(760, width - state.fileTreeWidth))
+    else state.fileTreeWidth = Math.max(0, Math.min(420, width))
+    render()
+  })
+  handle.addEventListener("pointerup", (event) => finishResize(handle, event))
+  handle.addEventListener("lostpointercapture", () => { resizeStart = undefined; document.body.classList.remove("resizing-panel") })
+}
+
+function finishResize(handle: HTMLElement, event: PointerEvent) {
+  if (!resizeStart || resizeStart.pointerId !== event.pointerId) return
+  const { target, wideFiles, lastWidth } = resizeStart
+  handle.releasePointerCapture(event.pointerId)
+  resizeStart = undefined
+  document.body.classList.remove("resizing-panel")
+  runAction(async () => {
+    if (target === "sidebar") {
+      const sidebarOpen = state.sidebarWidth >= 160
+      state.sidebarWidth = Math.max(180, state.sidebarWidth || 248)
+      applyOverview(await window.api.projects.updateLayout({ sidebarOpen, sidebarWidth: state.sidebarWidth }))
+    } else if (target === "preview") {
+      state.filePreviewWidth = Math.max(320, state.filePreviewWidth || 420)
+      applyOverview(await window.api.projects.updateLayout({ filePreviewWidth: state.filePreviewWidth }))
+    } else {
+      const requestedPreviewWidth = wideFiles ? lastWidth - state.fileTreeWidth : 0
+      const currentWidth = wideFiles ? requestedPreviewWidth + state.fileTreeWidth : state.fileTreeWidth
+      const filesOpen = wideFiles && requestedPreviewWidth < 160 ? true : currentWidth >= 160
+      if (wideFiles && requestedPreviewWidth < 160) {
+        state.filePreview = undefined
+        state.filePreviewWidth = 420
+      } else if (wideFiles) state.filePreviewWidth = Math.max(320, state.filePreviewWidth || 420)
+      else state.fileTreeWidth = Math.max(180, state.fileTreeWidth || 240)
+      applyOverview(await window.api.projects.updateLayout({ filesOpen, fileTreeWidth: state.fileTreeWidth, filePreviewWidth: state.filePreviewWidth }))
+    }
+    render()
+  })
+}
+
+window.addEventListener("resize", () => render())
 
 async function switchSession(nextSessionId: string) {
   if (nextSessionId === state.sessionId || state.conversation.activeTurnId) return

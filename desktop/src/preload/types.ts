@@ -49,6 +49,7 @@ export type DesktopSessionSummary = {
   preview: string
   updatedAt: string
   workspaceRoot: string
+  hasUserMessage: boolean
 }
 
 export type DesktopProject = {
@@ -62,9 +63,11 @@ export type DesktopProject = {
 export type DesktopProjectOverview = {
   projects: DesktopProject[]
   activeProjectPath: string
-  sidebarCollapsed: boolean
+  sidebarOpen: boolean
+  sidebarWidth: number
   filesOpen: boolean
-  filePanelWidth: number
+  fileTreeWidth: number
+  filePreviewWidth: number
 }
 
 export type DesktopFileNode = {
@@ -109,7 +112,7 @@ export type DesktopApi = {
     add: () => Promise<DesktopProjectOverview | null>
     select: (path: string) => Promise<DesktopProjectOverview>
     remove: (path: string) => Promise<DesktopProjectOverview>
-    updateLayout: (patch: { sidebarCollapsed?: boolean; filesOpen?: boolean; filePanelWidth?: number }) => Promise<DesktopProjectOverview>
+    updateLayout: (patch: { sidebarOpen?: boolean; sidebarWidth?: number; filesOpen?: boolean; fileTreeWidth?: number; filePreviewWidth?: number }) => Promise<DesktopProjectOverview>
     sessions: (path: string, offset: number, limit: number) => Promise<{ sessions: DesktopSessionSummary[]; total: number }>
   }
   files: {
