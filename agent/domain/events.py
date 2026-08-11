@@ -118,6 +118,7 @@ class ToolRequestedEvent(RuntimeEvent):
     tool_call_id: str = ""
     tool_name: str = ""
     args_preview: str = ""
+    arguments: dict[str, Any] | None = None
 
 
 @dataclass(slots=True)

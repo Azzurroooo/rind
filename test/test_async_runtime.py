@@ -549,6 +549,7 @@ async def test_async_turn_runner_emits_tool_requested_before_tool_execution():
     assert input_started_index < input_delta_index < input_ended_index < requested_index < result_index
     assert requested_index < result_index
     assert events[requested_index].args_preview == '{"command":"date"}'
+    assert events[requested_index].arguments == {"command": "date"}
     assert events[requested_index].turn_id == "turn_1"
 
 

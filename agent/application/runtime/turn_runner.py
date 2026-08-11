@@ -32,6 +32,7 @@ from agent.domain.events import (
     event_meta,
 )
 from agent.domain.message_boundary import validate_compact_handoff_boundary, validate_model_message_boundary
+from agent.domain.tool_payload import parse_tool_args
 
 from .stream_parser import MessageStreamParser
 
@@ -245,11 +246,13 @@ class TurnRunner:
                     )
 
                     for call in parsed_tool_calls:
+                        parsed_args, _ = parse_tool_args(call.raw_args)
                         yield ToolRequestedEvent(
                             **event_meta(session, turn_id),
                             tool_call_id=call.call_id,
                             tool_name=call.name,
                             args_preview=call.raw_args[:500],
+                            arguments=parsed_args,
                         )
 
                     async for event in self._tool_processor.execute(

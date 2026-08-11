@@ -20,6 +20,7 @@ import {
   relativeTime,
   type ConversationState,
   type Entry,
+  type PlanEntry,
   type ToolEntry,
 } from "./timeline-model"
 
@@ -370,6 +371,8 @@ function renderEntry(entry: Entry): string {
       return `<article class="turn-assistant">${renderMarkdown(entry.content)}</article>`
     case "tool":
       return renderTool(entry)
+    case "plan":
+      return renderPlan(entry)
     case "file":
       return `<div class="ledger-row ledger-file"><span class="status-pip pip-done"></span><span class="ledger-verb">Edited</span><code class="ledger-arg">${escapeHtml(entry.filePath)}</code></div>`
     case "error":
@@ -385,7 +388,7 @@ function renderTool(tool: ToolEntry): string {
     ? "pip-running"
     : tool.status === "error" ? "pip-error" : "pip-done"
   const duration = formatDuration(tool.durationMs)
-  const body = tool.output || tool.errorType
+  const body = renderToolDetails(tool)
   return `
     <div class="ledger-row${open ? " open" : ""}" data-tool-id="${escapeAttribute(tool.id)}">
       <button type="button" class="ledger-trigger" data-toggle-tool="${escapeAttribute(tool.id)}" ${body ? "" : "disabled"}>
@@ -396,8 +399,51 @@ function renderTool(tool: ToolEntry): string {
         ${duration ? `<span class="ledger-duration">${duration}</span>` : ""}
         ${body ? `<span class="ledger-chevron" aria-hidden="true"></span>` : ""}
       </button>
-      ${open && body ? `<pre class="ledger-output"><code>${escapeHtml(tool.output || tool.errorType)}</code></pre>` : ""}
+      ${open && body ? body : ""}
     </div>
+  `
+}
+
+function renderToolDetails(tool: ToolEntry): string {
+  const inputs = Object.entries(tool.arguments).map(([key, value]) => `
+    <div class="tool-detail-row"><span>${escapeHtml(key)}</span>${renderToolValue(value)}</div>
+  `).join("")
+  const result = tool.result
+  const outcome = result?.ok === false
+    ? `<section class="tool-detail-section tool-detail-error"><strong>${escapeHtml(result.error || "Tool failed")}</strong>${result.errorType ? `<small>${escapeHtml(result.errorType)}</small>` : ""}</section>`
+    : result?.ok === true && result.data !== undefined
+      ? `<section class="tool-detail-section"><span>Result</span>${renderToolValue(result.data)}</section>`
+      : ""
+  const meta = result && Object.keys(result.meta).length
+    ? `<section class="tool-detail-section"><span>Details</span>${renderToolValue(result.meta)}</section>`
+    : ""
+  const fallback = !result || result.ok === null
+    ? (tool.output ? `<pre class="ledger-output"><code>${escapeHtml(tool.output)}</code></pre>` : "")
+    : ""
+  const error = !result?.error && tool.errorType
+    ? `<section class="tool-detail-section tool-detail-error"><strong>${escapeHtml(tool.errorType)}</strong></section>`
+    : ""
+  const content = inputs || outcome || meta || fallback || error
+  return content ? `<div class="tool-details">${inputs ? `<section class="tool-detail-section"><span>Input</span>${inputs}</section>` : ""}${outcome}${error}${meta}${fallback}</div>` : ""
+}
+
+function renderToolValue(value: unknown): string {
+  if (value === null || value === undefined) return `<code class="tool-detail-value">None</code>`
+  if (typeof value === "string") return `<code class="tool-detail-value">${escapeHtml(value)}</code>`
+  if (typeof value === "number" || typeof value === "boolean") return `<code class="tool-detail-value">${escapeHtml(String(value))}</code>`
+  if (Array.isArray(value)) return `<span class="tool-detail-value">${value.map(renderToolValue).join("")}</span>`
+  return `<span class="tool-detail-value">${Object.entries(asRecord(value)).map(([key, item]) => `<span class="tool-detail-row"><span>${escapeHtml(key)}</span>${renderToolValue(item)}</span>`).join("")}</span>`
+}
+
+function renderPlan(plan: PlanEntry): string {
+  const pip = plan.status === "error" ? "pip-error" : plan.status === "running" || plan.status === "pending" ? "pip-running" : "pip-done"
+  const duration = formatDuration(plan.durationMs)
+  return `
+    <article class="plan-card${plan.status === "error" ? " plan-error" : ""}">
+      <div class="plan-card-head"><span class="status-pip ${pip}"></span><strong>Plan</strong>${duration ? `<span>${escapeHtml(duration)}</span>` : ""}</div>
+      <ol class="plan-steps">${plan.steps.map((step) => `<li class="plan-step plan-${escapeAttribute(step.status)}"><span aria-hidden="true"></span><span>${escapeHtml(step.step)}</span></li>`).join("")}</ol>
+      ${plan.error ? `<p class="plan-error-text">${escapeHtml(plan.error)}</p>` : ""}
+    </article>
   `
 }
 

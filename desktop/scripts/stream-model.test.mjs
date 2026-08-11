@@ -9,6 +9,7 @@ import {
   createConversation,
   formatDuration,
   maxEntries,
+  parseToolResult,
   reduceEvent,
   relativeTime,
 } from "../src/renderer/timeline-model.ts"
@@ -89,6 +90,51 @@ test("tool errors surface error status and type", () => {
   assert.equal(tool.errorType, "NotFound")
 })
 
+test("tool results retain structured output instead of only a JSON blob", () => {
+  let state = createConversation()
+  state = reduceEvent(state, event("tool_requested", {
+    tool_call_id: "read-1", tool_name: "read_file", arguments: { path: "README.md" },
+  }))
+  state = reduceEvent(state, event("tool_result", {
+    tool_call_id: "read-1", tool_name: "read_file", result: JSON.stringify({
+      ok: true, tool: "read_file", data: { path: "README.md", lines: 18 }, meta: { truncated: false },
+    }),
+  }))
+  const tool = state.entries.find((entry) => entry.kind === "tool")
+  assert.deepEqual(tool.arguments, { path: "README.md" })
+  assert.equal(tool.result.ok, true)
+  assert.deepEqual(tool.result.data, { path: "README.md", lines: 18 })
+  assert.equal(tool.argsPreview, "README.md")
+})
+
+test("plan updates become chronological progress snapshots", () => {
+  let state = createConversation()
+  state = reduceEvent(state, event("assistant_delta", { text: "I will make a plan." }))
+  state = reduceEvent(state, event("tool_requested", {
+    tool_call_id: "plan-1", tool_name: "update_plan", arguments: { plan: [
+      { step: "Inspect", status: "completed" },
+      { step: "Implement", status: "in_progress" },
+    ] },
+  }))
+  state = reduceEvent(state, event("tool_result", {
+    tool_call_id: "plan-1", tool_name: "update_plan", result: JSON.stringify({ ok: true, tool: "update_plan", data: "Plan updated" }),
+  }))
+  state = reduceEvent(state, event("assistant_delta", { text: "Starting implementation." }))
+  assert.deepEqual(state.entries.map((entry) => entry.kind), ["assistant", "plan", "assistant"])
+  const plan = state.entries[1]
+  assert.equal(plan.kind, "plan")
+  assert.deepEqual(plan.steps.map((step) => step.status), ["completed", "in_progress"])
+})
+
+test("replay reconstructs structured tool arguments and plans", () => {
+  const state = conversationFromReplay([
+    { role: "assistant", tool_calls: [{ id: "plan-1", function: { name: "update_plan", arguments: JSON.stringify({ plan: [{ step: "Ship", status: "pending" }] }) } }] },
+    { role: "tool", tool_call_id: "plan-1", content: JSON.stringify({ ok: true, tool: "update_plan", data: "Plan updated" }) },
+  ])
+  assert.equal(state.entries[0].kind, "plan")
+  assert.equal(state.entries[0].status, "completed")
+})
+
 test("turn completion clears active turn and settles running tools", () => {
   let state = createConversation()
   state = reduceEvent(state, event("turn_started"))
@@ -143,4 +189,5 @@ test("helper formatting stays compact", () => {
   assert.equal(formatDuration(65_000), "1m5s")
   assert.equal(boundText("abcd", 3).includes("[Output truncated]"), true)
   assert.equal(relativeTime("not a date"), "")
+  assert.equal(parseToolResult('{"ok":false,"tool":"bash","error":"failed","error_type":"ExitCode"}').errorType, "ExitCode")
 })
