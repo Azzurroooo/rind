@@ -15,6 +15,7 @@ from agent.domain.events import (
     AssistantDeltaEvent,
     ContextBuiltEvent,
     FileChangeEvent,
+    PlanUpdatedEvent,
     TokenStatsUpdatedEvent,
     ToolRequestedEvent,
     ToolProgressEvent,
@@ -73,6 +74,10 @@ class TestRuntimeEvents(unittest.TestCase):
                 tool_name="bash",
                 args_preview='{"command":"date"}',
                 arguments={"command": "date"},
+            ),
+            PlanUpdatedEvent(
+                tool_call_id="plan_1",
+                plan=[{"step": "Inspect", "status": "in_progress"}],
             ),
             ToolResultEvent(tool_call_id="call_1", tool_name="bash", status="failed", error_type="Boom"),
             FileChangeEvent(

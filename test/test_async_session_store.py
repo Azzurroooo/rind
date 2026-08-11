@@ -440,6 +440,31 @@ async def test_list_recent_sessions_only_returns_current_workspace(tmp_path):
     assert [item["id"] for item in recent_b] == ["session_b"]
 
 
+@pytest.mark.asyncio
+async def test_reading_another_session_does_not_rebind_the_active_session(tmp_path):
+    session_root = tmp_path / "sessions"
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    active = JsonlSessionStore(
+        session_dir=str(session_root),
+        session_id="active_session",
+        workspace_root=str(workspace),
+    )
+    other = JsonlSessionStore(
+        session_dir=str(session_root),
+        session_id="other_session",
+        workspace_root=str(workspace),
+    )
+    await active.initialize()
+    await other.initialize()
+    await other.persist_message("user", "history from the other session")
+
+    messages = await active.get_messages_for_session("other_session")
+
+    assert active.session_id == "active_session"
+    assert any(message.get("content") == "history from the other session" for message in messages)
+
+
 def test_session_files_read_jsonl_waits_for_active_writer(tmp_path):
     path = tmp_path / "messages.jsonl"
     files = SessionFiles()

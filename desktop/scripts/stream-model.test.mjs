@@ -7,6 +7,7 @@ import {
   clipLine,
   conversationFromReplay,
   createConversation,
+  fileMutationPreview,
   formatDuration,
   latestPlan,
   maxEntries,
@@ -108,7 +109,7 @@ test("tool results retain structured output instead of only a JSON blob", () => 
   assert.equal(tool.argsPreview, "README.md")
 })
 
-test("plan updates become chronological progress snapshots", () => {
+test("plan updates stay separate from chronological message entries", () => {
   let state = createConversation()
   state = reduceEvent(state, event("assistant_delta", { text: "I will make a plan." }))
   state = reduceEvent(state, event("tool_requested", {
@@ -121,10 +122,21 @@ test("plan updates become chronological progress snapshots", () => {
     tool_call_id: "plan-1", tool_name: "update_plan", result: JSON.stringify({ ok: true, tool: "update_plan", data: "Plan updated" }),
   }))
   state = reduceEvent(state, event("assistant_delta", { text: "Starting implementation." }))
-  assert.deepEqual(state.entries.map((entry) => entry.kind), ["assistant", "plan", "assistant"])
-  const plan = state.entries[1]
-  assert.equal(plan.kind, "plan")
+  assert.deepEqual(state.entries.map((entry) => entry.kind), ["assistant", "assistant"])
+  const plan = latestPlan(state)
   assert.deepEqual(plan.steps.map((step) => step.status), ["completed", "in_progress"])
+})
+
+test("live plan snapshots do not depend on tool-request arguments", () => {
+  let state = createConversation()
+  state = reduceEvent(state, event("tool_requested", {
+    tool_call_id: "plan-1", tool_name: "update_plan", args_preview: "streamed later",
+  }))
+  assert.equal(latestPlan(state), undefined)
+  state = reduceEvent(state, event("plan_updated", {
+    tool_call_id: "plan-1", plan: [{ step: "Inspect", status: "in_progress" }],
+  }))
+  assert.deepEqual(latestPlan(state)?.steps, [{ step: "Inspect", status: "in_progress" }])
 })
 
 test("latest plan selects the current progress snapshot", () => {
@@ -143,8 +155,27 @@ test("replay reconstructs structured tool arguments and plans", () => {
     { role: "assistant", tool_calls: [{ id: "plan-1", function: { name: "update_plan", arguments: JSON.stringify({ plan: [{ step: "Ship", status: "pending" }] }) } }] },
     { role: "tool", tool_call_id: "plan-1", content: JSON.stringify({ ok: true, tool: "update_plan", data: "Plan updated" }) },
   ])
-  assert.equal(state.entries[0].kind, "plan")
-  assert.equal(state.entries[0].status, "completed")
+  assert.equal(latestPlan(state)?.status, "completed")
+})
+
+test("file mutation previews expose bounded plus and minus source", () => {
+  assert.deepEqual(fileMutationPreview("edit_file", {
+    file_path: "src/app.py",
+    old_str: "old\nline",
+    new_str: "new\nline",
+  }), {
+    filePath: "src/app.py",
+    removed: ["old", "line"],
+    added: ["new", "line"],
+  })
+  assert.deepEqual(fileMutationPreview("write_file", {
+    file_path: "README.md",
+    content: "hello",
+  }), {
+    filePath: "README.md",
+    removed: [],
+    added: ["hello"],
+  })
 })
 
 test("turn completion clears active turn and settles running tools", () => {

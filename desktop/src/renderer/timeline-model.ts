@@ -38,7 +38,6 @@ export type Entry =
   | { kind: "user"; id: string; content: string }
   | { kind: "assistant"; id: string; content: string; turnId: string }
   | ToolEntry
-  | PlanEntry
   | { kind: "file"; id: string; filePath: string }
   | { kind: "error"; id: string; content: string; source: string }
   | { kind: "notice"; id: string; content: string; label: string }
@@ -49,6 +48,7 @@ export type ConversationState = {
   turnStartedAt: number
   question?: Question
   contextUsagePercent: number | null
+  plan?: PlanEntry
   openAssistantId: string
   nextEntryId: number
 }
@@ -75,6 +75,7 @@ export function reduceEvent(state: ConversationState, envelope: RuntimeEvent): C
     case "turn_started": return { ...closeAssistant(state), activeTurnId: turnId, turnStartedAt: Date.now() }
     case "assistant_delta": return appendAssistantDelta(state, turnId, asString(event.text))
     case "assistant_message_completed": return completeAssistant(state, turnId, asString(event.content))
+    case "plan_updated": return reducePlanSnapshot(state, envelope)
     case "tool_requested": return reduceTool(state, envelope, () => ({ status: "pending", toolName: asString(event.tool_name), argsPreview: toolArgumentPreview(asString(event.tool_name), asRecord(event.arguments), asString(event.args_preview)) }))
     case "tool_input_started": return reduceTool(state, envelope, () => ({ status: "pending", toolName: asString(event.tool_name) }))
     case "tool_input_delta": return reduceTool(state, envelope, (tool) => ({
@@ -89,8 +90,12 @@ export function reduceEvent(state: ConversationState, envelope: RuntimeEvent): C
     case "tool_result": return reduceTool(state, envelope, (tool) => {
       const result = parseToolResult(asString(event.result) || (tool.kind === "tool" ? tool.output : ""))
       const errorType = asString(event.error_type) || result.errorType
+      const status = asString(event.status) === "error" || errorType || result.ok === false ? "error" : "completed"
+      if (tool.kind === "plan") {
+        return { status, error: result.error, errorType, durationMs: asInt(event.duration_ms) }
+      }
       return {
-        status: asString(event.status) === "error" || errorType || result.ok === false ? "error" : "completed",
+        status,
         output: result.raw, result, errorType, durationMs: asInt(event.duration_ms), error: result.error,
       }
     })
@@ -138,11 +143,7 @@ export function conversationFromReplay(messages: unknown[]): ConversationState {
 }
 
 export function latestPlan(state: ConversationState): PlanEntry | undefined {
-  for (let index = state.entries.length - 1; index >= 0; index -= 1) {
-    const entry = state.entries[index]
-    if (entry.kind === "plan") return entry
-  }
-  return undefined
+  return state.plan
 }
 
 function appendAssistantDelta(state: ConversationState, turnId: string, text: string): ConversationState {
@@ -166,18 +167,47 @@ function completeAssistant(state: ConversationState, turnId: string, content: st
 
 type ToolUpdate = Partial<ToolEntry & Pick<PlanEntry, "error">>
 
+function reducePlanSnapshot(state: ConversationState, envelope: RuntimeEvent): ConversationState {
+  const closed = closeAssistant(state)
+  const plan = envelope.event.plan
+  if (!Array.isArray(plan)) return closed
+  if (!plan.length) return { ...closed, plan: undefined }
+  const steps = planSteps("update_plan", { plan })
+  if (!steps) return closed
+  const toolCallId = asString(envelope.event.tool_call_id)
+  const previous = closed.plan
+  return {
+    ...closed,
+    plan: {
+      kind: "plan",
+      id: previous?.id || `plan-${toolCallId || closed.nextEntryId}`,
+      toolCallId,
+      toolName: "update_plan",
+      status: "pending",
+      steps,
+      error: "",
+      errorType: "",
+      durationMs: 0,
+    },
+  }
+}
+
 function reduceTool(state: ConversationState, envelope: RuntimeEvent, update: (tool: ToolEntry | PlanEntry) => ToolUpdate): ConversationState {
   const closed = closeAssistant(state)
   const toolCallId = asString(envelope.event.tool_call_id)
   const toolName = asString(envelope.event.tool_name) || "Tool"
-  const existing = toolCallId ? closed.entries.find((entry): entry is ToolEntry | PlanEntry => (entry.kind === "tool" || entry.kind === "plan") && entry.toolCallId === toolCallId) : undefined
-  if (existing) return replaceEntry(closed, existing.id, { ...existing, ...update(existing) } as Entry)
+  if (closed.plan && toolCallId && closed.plan.toolCallId === toolCallId) {
+    return { ...closed, plan: { ...closed.plan, ...update(closed.plan) } as PlanEntry }
+  }
+  const existing = toolCallId ? closed.entries.find((entry): entry is ToolEntry => entry.kind === "tool" && entry.toolCallId === toolCallId) : undefined
+  if (existing) return replaceEntry(closed, existing.id, { ...existing, ...update(existing) } as ToolEntry)
   const argumentsValue = asRecord(envelope.event.arguments)
   const steps = planSteps(toolName, argumentsValue)
   if (steps) {
     const plan: PlanEntry = { kind: "plan", id: "", toolCallId, toolName: "update_plan", status: "pending", steps, error: "", errorType: "", durationMs: 0 }
-    return appendEntry(closed, { ...plan, ...update(plan) } as PlanEntry)
+    return { ...closed, plan: { ...plan, ...update(plan), id: `plan-${toolCallId || closed.nextEntryId}` } as PlanEntry }
   }
+  if (toolName === "update_plan") return closed
   const empty: ToolEntry = { kind: "tool", id: "", toolCallId, toolName, argsPreview: toolArgumentPreview(toolName, argumentsValue, asString(envelope.event.args_preview)), arguments: argumentsValue, status: "pending", output: "", errorType: "", durationMs: 0 }
   return appendEntry(closed, { ...empty, ...update(empty) } as ToolEntry)
 }
@@ -190,21 +220,32 @@ function appendReplayTool(state: ConversationState, value: unknown): Conversatio
   const toolName = asString(functionInfo.name) || "Tool"
   const argumentsValue = parseArguments(asString(functionInfo.arguments))
   const steps = planSteps(toolName, argumentsValue)
-  if (steps) return appendEntry(state, { kind: "plan", id: "", toolCallId, toolName: "update_plan", status: "completed", steps, error: "", errorType: "", durationMs: 0 })
+  if (steps) return { ...state, plan: { kind: "plan", id: `plan-${toolCallId}`, toolCallId, toolName: "update_plan", status: "completed", steps, error: "", errorType: "", durationMs: 0 } }
+  if (toolName === "update_plan") return Array.isArray(argumentsValue.plan) ? { ...state, plan: undefined } : state
   return appendEntry(state, { kind: "tool", id: "", toolCallId, toolName, argsPreview: toolArgumentPreview(toolName, argumentsValue, asString(functionInfo.arguments)), arguments: argumentsValue, status: "completed", output: "", errorType: "", durationMs: 0 })
 }
 
 function completeReplayTool(state: ConversationState, record: Record<string, unknown>): ConversationState {
   const toolCallId = asString(record.tool_call_id)
   if (!toolCallId) return state
-  const existing = state.entries.find((entry): entry is ToolEntry | PlanEntry => (entry.kind === "tool" || entry.kind === "plan") && entry.toolCallId === toolCallId)
   const result = parseToolResult(asString(record.content))
+  if (state.plan?.toolCallId === toolCallId) return {
+    ...state,
+    plan: {
+      ...state.plan,
+      status: result.ok === false ? "error" : "completed",
+      error: result.error,
+      errorType: result.errorType,
+    },
+  }
+  const existing = state.entries.find((entry): entry is ToolEntry => entry.kind === "tool" && entry.toolCallId === toolCallId)
   if (existing) return replaceEntry(state, existing.id, {
     ...existing,
-    ...(existing.kind === "tool" ? { output: result.raw, result } : { error: result.error }),
+    output: result.raw,
+    result,
     status: result.ok === false ? "error" : "completed",
     errorType: result.errorType,
-  } as Entry)
+  } as ToolEntry)
   return appendEntry(state, { kind: "tool", id: "", toolCallId, toolName: asString(record.tool_name) || "Tool", argsPreview: "", arguments: {}, status: result.ok === false ? "error" : "completed", output: result.raw, result, errorType: result.errorType, durationMs: 0 })
 }
 
@@ -228,8 +269,8 @@ function finishTurn(state: ConversationState, turnId: string): ConversationState
 }
 
 function markRunningTools(state: ConversationState, status: ToolStatus): ConversationState {
-  if (!state.entries.some((entry) => (entry.kind === "tool" || entry.kind === "plan") && (entry.status === "running" || entry.status === "pending"))) return state
-  return { ...state, entries: state.entries.map((entry) => (entry.kind === "tool" || entry.kind === "plan") && (entry.status === "running" || entry.status === "pending") ? { ...entry, status } : entry) }
+  if (!state.entries.some((entry) => entry.kind === "tool" && (entry.status === "running" || entry.status === "pending"))) return state
+  return { ...state, entries: state.entries.map((entry) => entry.kind === "tool" && (entry.status === "running" || entry.status === "pending") ? { ...entry, status } : entry) }
 }
 
 function trimEntries(entries: Entry[]) { return entries.length > maxEntries ? entries.slice(entries.length - maxEntries) : entries }
@@ -272,6 +313,41 @@ function planSteps(toolName: string, argumentsValue: Record<string, unknown>): P
 export function toolArgumentPreview(toolName: string, argumentsValue: Record<string, unknown>, fallback = ""): string {
   const key = ["path", "file_path", "command", "query", "pattern", "task", "objective", "url"].find((name) => typeof argumentsValue[name] === "string")
   return clipLine(key ? asString(argumentsValue[key]) : fallback || (Object.keys(argumentsValue).length ? JSON.stringify(argumentsValue) : ""), 120)
+}
+
+export type FileMutationPreview = {
+  filePath: string
+  removed: string[]
+  added: string[]
+}
+
+export function fileMutationPreview(toolName: string, argumentsValue: Record<string, unknown>): FileMutationPreview | undefined {
+  const filePath = asString(argumentsValue.file_path)
+  if (toolName === "edit_file") {
+    const oldText = argumentsValue.old_str
+    const newText = argumentsValue.new_str
+    if (typeof oldText !== "string" || typeof newText !== "string") return undefined
+    return { filePath, removed: previewDiffLines(oldText), added: previewDiffLines(newText) }
+  }
+  if (toolName === "write_file" && typeof argumentsValue.content === "string") {
+    return { filePath, removed: [], added: previewDiffLines(argumentsValue.content) }
+  }
+  return undefined
+}
+
+function previewDiffLines(value: string): string[] {
+  const source = value.replace(/\r\n?/g, "\n").split("\n")
+  const lines: string[] = []
+  let chars = 0
+  for (const line of source) {
+    if (lines.length >= 120 || chars + line.length > 12_000) {
+      lines.push("…")
+      break
+    }
+    lines.push(line)
+    chars += line.length
+  }
+  return lines
 }
 
 export function clipLine(value: string, limit: number) { const line = value.replace(/\s+/g, " ").trim(); return line.length > limit ? `${line.slice(0, limit - 1)}…` : line }

@@ -782,6 +782,63 @@ def test_turn_input_control_is_handled_while_run_turn_is_blocked(capsys):
     assert messages[0]["result"]["mode"] == "follow_up"
 
 
+def test_readonly_session_replay_is_handled_while_run_turn_is_blocked(capsys):
+    class Runtime(_Runtime):
+        def __init__(self):
+            super().__init__()
+            self.started = asyncio.Event()
+            self.release = asyncio.Event()
+
+        async def run_turn(self, **_kwargs):
+            self.started.set()
+            await self.release.wait()
+            yield type(
+                "Event",
+                (),
+                {
+                    "to_dict": lambda _self: {
+                        "type": "turn_completed",
+                        "ts": "1700000000.0",
+                        "session_id": "s1",
+                        "turn_id": "t1",
+                    }
+                },
+            )()
+
+    class Session(_Session):
+        async def get_messages_for_session(self, session_id, start=None, end=None):
+            assert session_id == "archived"
+            assert start is None
+            assert end is None
+            return [{"role": "user", "content": "archived history"}]
+
+    async def run():
+        runtime = Runtime()
+        server = StdioRuntimeServer(runtime, Session())
+        turn_task = asyncio.create_task(
+            server._run_turn({"request_id": 37, "method": "turn.start", "params": {"input": "hello"}})
+        )
+        await runtime.started.wait()
+        handled = await server._handle_control_message(
+            {"request_id": 38, "method": "session.replay", "params": {"session_id": "archived"}}
+        )
+        assert not turn_task.done()
+        runtime.release.set()
+        await turn_task
+        return handled
+
+    handled = asyncio.run(run())
+    messages = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
+    replay = next(message for message in messages if message.get("request_id") == 38)
+
+    assert handled is True
+    assert replay["result"] == {
+        "messages": [{"role": "user", "content": "archived history"}],
+        "turn_state": None,
+        "session_id": "archived",
+    }
+
+
 def test_readonly_slash_usage_errors_return_immediately(capsys):
     async def run():
         server = StdioRuntimeServer(_Runtime(), _Session())

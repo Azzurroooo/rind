@@ -151,8 +151,8 @@ class JsonlSessionStore(SessionStore):
 
         self._index_repo = SessionIndexRepository(self._files, self._index_path)
 
-    def _get_session_paths(self, session_id: str) -> dict:
-        base = str(resolve_session_base(self._session_root, session_id))
+    def _get_session_paths(self, session_id: str, session_root: str | None = None) -> dict:
+        base = str(resolve_session_base(session_root or self._session_root, session_id))
         return {
             "base": base,
             "meta": os.path.join(base, "meta.json"),
@@ -751,6 +751,41 @@ class JsonlSessionStore(SessionStore):
                 allowed_roles = set(roles)
                 built_messages = [message for message in built_messages if message.get("role") in allowed_roles]
             return [dict(message) for message in built_messages[slice(start, end)]]
+
+        return await asyncio.to_thread(_get)
+
+    async def get_messages_for_session(
+        self,
+        session_id: str,
+        start: int | None = None,
+        end: int | None = None,
+        roles: list[str] | None = None,
+    ) -> list[dict[str, Any]]:
+        """Project another persisted session without rebinding this store."""
+        def _get():
+            clean = validate_session_id(session_id)
+            session_root = self.resolve_session_root(self._session_dir)
+            paths = self._get_session_paths(clean, session_root)
+            if not os.path.isdir(paths["base"]):
+                raise ValueError(f"Session not found: {clean}")
+            meta = self._files.load_json(paths["meta"])
+            if not isinstance(meta, dict):
+                raise ValueError(f"Session data corrupted or missing meta.json for id: {clean}")
+            if str(meta.get("schema_version") or "") != "2.0":
+                raise ValueError("Unsupported legacy session schema; start a new session.")
+            if str(meta.get("session_id") or clean) != clean:
+                raise ValueError(f"Session data corrupted: meta.json id does not match {clean}")
+            self._validate_session_binding(meta)
+            for key in ("messages", "tool_calls"):
+                if not os.path.isfile(paths[key]):
+                    raise ValueError(f"Session data corrupted or missing {key}.jsonl for id: {clean}")
+            messages = MessageRepository(self._files, paths["messages"]).load_messages()
+            tool_records = ToolCallRepository(self._files, paths["tool_calls"], looks_like_tool_payload).load_tool_calls()
+            compactions = CompactionRepository(self._files, paths["compactions"]).load_compactions()
+            projected = project_messages(messages, tool_records, compactions, self._system_prompt)
+            if roles:
+                projected = [message for message in projected if message.get("role") in set(roles)]
+            return [dict(message) for message in projected[slice(start, end)]]
 
         return await asyncio.to_thread(_get)
 

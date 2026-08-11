@@ -21,6 +21,7 @@ from agent.domain.events import (
     AssistantDeltaEvent,
     AssistantMessageCompletedEvent,
     ContextBuiltEvent,
+    PlanUpdatedEvent,
     ToolInputDeltaEvent,
     ToolInputEndedEvent,
     ToolInputStartedEvent,
@@ -551,6 +552,62 @@ async def test_async_turn_runner_emits_tool_requested_before_tool_execution():
     assert events[requested_index].args_preview == '{"command":"date"}'
     assert events[requested_index].arguments == {"command": "date"}
     assert events[requested_index].turn_id == "turn_1"
+
+
+@pytest.mark.asyncio
+async def test_async_turn_runner_emits_plan_snapshot_before_plan_execution():
+    mock_client = AsyncMock()
+
+    async def mock_stream(*_args, **_kwargs):
+        yield MagicMock()
+
+    mock_client.stream = mock_stream
+    calls = [
+        {"content": "Planning", "calls": [ParsedToolCall(call_id="plan_1", name="update_plan", raw_args='{"plan":[{"step":"Inspect","status":"in_progress"}]}')]},
+        {"content": "Done", "calls": []},
+    ]
+
+    async def mock_consume(*args, **_kwargs):
+        on_content_async = args[1]
+        item = calls.pop(0)
+        await on_content_async(item["content"])
+        return item["content"], item["calls"]
+
+    mock_parser = MagicMock()
+    mock_parser.consume_async_stream = mock_consume
+    mock_context = MagicMock()
+    mock_context.build_messages_async = AsyncMock(return_value=MagicMock(messages=[], stats={}, decisions={}))
+    mock_context.select_active_skills_for_turn = None
+
+    class FakeSession:
+        session_id = "session_1"
+
+        def now_iso(self):
+            return "2026-05-08T00:00:00Z"
+
+        async def persist_message(self, *_args, **_kwargs):
+            return None
+
+    async def execute(*_args, **kwargs):
+        yield ToolResultEvent(tool_call_id="plan_1", tool_name="update_plan", status="completed", turn_id=kwargs.get("turn_id", ""))
+
+    processor = MagicMock()
+    processor.execute = execute
+    runner = TurnRunner(
+        chat_client=mock_client,
+        tool_processor=processor,
+        stream_parser=mock_parser,
+        tool_schemas=[],
+        context_manager=mock_context,
+    )
+
+    events = [event async for event in runner.run_turn(FakeSession(), turn_id="turn_1")]
+    requested_index = next(index for index, event in enumerate(events) if isinstance(event, ToolRequestedEvent))
+    plan_index = next(index for index, event in enumerate(events) if isinstance(event, PlanUpdatedEvent))
+    result_index = next(index for index, event in enumerate(events) if isinstance(event, ToolResultEvent))
+
+    assert requested_index < plan_index < result_index
+    assert events[plan_index].plan == [{"step": "Inspect", "status": "in_progress"}]
 
 
 @pytest.mark.asyncio

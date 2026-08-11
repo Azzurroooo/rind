@@ -25,6 +25,7 @@ from agent.domain.events import (
     AssistantDeltaEvent,
     AssistantMessageCompletedEvent,
     ContextBuiltEvent,
+    PlanUpdatedEvent,
     ToolRequestedEvent,
     TurnCompletedEvent,
     TurnFailedEvent,
@@ -254,6 +255,12 @@ class TurnRunner:
                             args_preview=call.raw_args[:500],
                             arguments=parsed_args,
                         )
+                        if call.name == "update_plan" and isinstance(parsed_args.get("plan"), list):
+                            yield PlanUpdatedEvent(
+                                **event_meta(session, turn_id),
+                                tool_call_id=call.call_id,
+                                plan=parsed_args["plan"],
+                            )
 
                     async for event in self._tool_processor.execute(
                         session=session,

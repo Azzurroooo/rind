@@ -122,6 +122,14 @@ class ToolRequestedEvent(RuntimeEvent):
 
 
 @dataclass(slots=True)
+class PlanUpdatedEvent(RuntimeEvent):
+    """Fired when update_plan publishes a new task-progress snapshot."""
+    type: Literal["plan_updated"] = "plan_updated"
+    tool_call_id: str = ""
+    plan: list[dict[str, str]] = field(default_factory=list)
+
+
+@dataclass(slots=True)
 class ToolInputStartedEvent(RuntimeEvent):
     """Fired when the model starts streaming a tool call input."""
     type: Literal["tool_input_started"] = "tool_input_started"

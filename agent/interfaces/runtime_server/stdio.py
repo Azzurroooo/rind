@@ -236,13 +236,31 @@ class StdioRuntimeServer:
         return dict(state) if isinstance(state, dict) else None
 
     async def _replay(self, request: dict[str, Any]) -> None:
+        params = request.get("params") if isinstance(request.get("params"), dict) else {}
+        start = params.get("start") if isinstance(params.get("start"), int) else None
+        end = params.get("end") if isinstance(params.get("end"), int) else None
+        requested_session_id = params.get("session_id")
+        if requested_session_id is not None:
+            if not isinstance(requested_session_id, str) or not requested_session_id.strip():
+                await self._respond_error(request, "session.replay session_id must be a non-empty string.", "InvalidRequest")
+                return
+            try:
+                session_id = validate_session_id(requested_session_id)
+            except ValueError as exc:
+                await self._respond_error(request, str(exc), "InvalidRequest")
+                return
+            if session_id != getattr(self._session, "session_id", None):
+                get_messages_for_session = getattr(self._session, "get_messages_for_session", None)
+                if not callable(get_messages_for_session):
+                    await self._respond_error(request, "Read-only session replay is unavailable.", "UnsupportedOperation")
+                    return
+                messages = await get_messages_for_session(session_id, start=start, end=end)
+                await self._respond(request, {"messages": messages, "turn_state": None, "session_id": session_id})
+                return
         get_messages = getattr(self._session, "get_messages_slice", None)
         if not callable(get_messages):
             await self._respond(request, {"messages": [], "turn_state": await self._turn_state()})
             return
-        params = request.get("params") if isinstance(request.get("params"), dict) else {}
-        start = params.get("start") if isinstance(params.get("start"), int) else None
-        end = params.get("end") if isinstance(params.get("end"), int) else None
         if start is None and end is None:
             messages = await get_messages()
         else:
@@ -597,6 +615,12 @@ class StdioRuntimeServer:
             return True
         if method == "background.output":
             await self._background_output_request(message)
+            return True
+        if method == "session.replay":
+            try:
+                await self._replay(message)
+            except Exception as exc:
+                await self._respond_error(message, str(exc), type(exc).__name__)
             return True
         if method == "goal.get":
             await self._goal_get(message)
