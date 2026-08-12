@@ -980,7 +980,10 @@ startResize(fileResizeHandle, "files")
 planDock.addEventListener("click", (event) => {
   if (!(event.target as HTMLElement).closest("[data-toggle-plan]")) return
   state.planDock.collapsed = !state.planDock.collapsed
-  render()
+  planDockShell.classList.toggle("collapsed", state.planDock.collapsed)
+  const trigger = planDock.querySelector<HTMLButtonElement>("[data-toggle-plan]")
+  trigger?.setAttribute("aria-expanded", String(!state.planDock.collapsed))
+  planDock.querySelector<HTMLElement>(".plan-dock-body")?.setAttribute("aria-hidden", String(state.planDock.collapsed))
 })
 messageStream.addEventListener("click", (event) => {
   const target = event.target as HTMLElement
@@ -992,18 +995,21 @@ messageStream.addEventListener("click", (event) => {
       const next = new Set(state.expandedTools)
       next.delete(id)
       state.expandedTools = next
-      render()
+      setToolExpanded(id, false)
       keepToolHeaderVisible(id, headerOffset)
       return
     }
     state.revealedTools.add(id)
     render()
     requestAnimationFrame(() => {
-      const next = new Set(state.expandedTools)
-      next.add(id)
-      state.expandedTools = next
-      render()
-      keepToolHeaderVisible(id, headerOffset)
+      requestAnimationFrame(() => {
+        if (!state.revealedTools.has(id)) return
+        const next = new Set(state.expandedTools)
+        next.add(id)
+        state.expandedTools = next
+        setToolExpanded(id, true)
+        keepToolHeaderVisible(id, headerOffset)
+      })
     })
     return
   }
@@ -1048,6 +1054,15 @@ function keepToolHeaderVisible(id: string, targetOffset: number) {
 function findToolTrigger(id: string) {
   return [...messageStream.querySelectorAll<HTMLButtonElement>("[data-toggle-tool]")]
     .find((button) => button.dataset.toggleTool === id)
+}
+
+function setToolExpanded(id: string, expanded: boolean) {
+  const trigger = findToolTrigger(id)
+  const row = trigger?.closest<HTMLElement>("[data-tool-id]")
+  if (!row) return
+  row.classList.toggle("open", expanded)
+  trigger?.setAttribute("aria-expanded", String(expanded))
+  row.querySelector<HTMLElement>(".tool-detail-shell")?.setAttribute("aria-hidden", String(!expanded))
 }
 
 function openSettings() {

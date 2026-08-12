@@ -381,7 +381,7 @@ pre code {
 }
 .ledger-output code { display: block; padding: 8px 10px; font-family: var(--font-mono); font-size: 12px; line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; }
 
-.tool-detail-shell { display: grid; grid-template-rows: 0fr; opacity: 0; transform: translateY(-5px); transition: grid-template-rows 280ms cubic-bezier(.22, 1, .36, 1), opacity 180ms ease, transform 280ms cubic-bezier(.22, 1, .36, 1); will-change: grid-template-rows, opacity, transform; }
+.tool-detail-shell { display: grid; grid-template-rows: 0fr; opacity: 0; transform: translateY(-5px); transition: grid-template-rows 360ms cubic-bezier(.16, 1, .3, 1), opacity 220ms ease, transform 360ms cubic-bezier(.16, 1, .3, 1); will-change: grid-template-rows, opacity, transform; }
 .tool-detail-clip { min-height: 0; overflow: hidden; }
 .ledger-row.open .tool-detail-shell { grid-template-rows: 1fr; opacity: 1; transform: translateY(0); }
 .tool-details { margin: 2px 8px 8px 24px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--bg-inset); }
