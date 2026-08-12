@@ -298,11 +298,23 @@ function activeProject() {
 }
 
 function viewedProject() {
-  return state.projects.find((project) => project.path === state.viewedProjectPath)
+  return projectForPath(state.viewedProjectPath)
 }
 
 function chatProject() {
-  return state.projects.find((project) => project.path === state.chatProjectPath)
+  return projectForPath(state.chatProjectPath)
+}
+
+function projectForPath(path: string) {
+  return state.projects.find((project) => samePath(project.path, path))
+}
+
+function samePath(left: string, right: string) {
+  const normalize = (value: string) => value.replace(/\\/g, "/").replace(/\/+$/, "") || "/"
+  const normalizedLeft = normalize(left)
+  const normalizedRight = normalize(right)
+  const isWindowsPath = /^[A-Za-z]:\//.test(normalizedLeft) || normalizedLeft.startsWith("//")
+  return isWindowsPath ? normalizedLeft.toLocaleLowerCase() === normalizedRight.toLocaleLowerCase() : normalizedLeft === normalizedRight
 }
 
 function runtimeIdForSession(sessionId: string) {
@@ -341,7 +353,7 @@ function renderProjectControl() {
   for (const project of state.projects) {
     const option = new Option(project.available ? project.name : `${project.name} (missing)`, project.path)
     option.disabled = !project.available
-    option.selected = project.path === state.chatProjectPath
+    option.selected = samePath(project.path, state.chatProjectPath)
     projectSelect.add(option)
   }
   projectSelect.disabled = false
@@ -355,11 +367,11 @@ function renderProjects() {
     return
   }
   for (const project of state.projects) {
-    const expanded = state.expandedProjects.has(project.path) || project.path === state.viewedProjectPath
+    const expanded = state.expandedProjects.has(project.path) || samePath(project.path, state.viewedProjectPath)
     const sessions = projectSessions(project)
     const total = state.sessionTotals[project.path] ?? project.totalSessions
     const projectNode = document.createElement("section")
-    projectNode.className = `project-item${project.path === state.viewedProjectPath ? " selected" : ""}${expanded ? " expanded" : ""}`
+    projectNode.className = `project-item${samePath(project.path, state.viewedProjectPath) ? " selected" : ""}${expanded ? " expanded" : ""}`
     projectNode.innerHTML = `
       <div class="project-row">
         <button type="button" class="project-trigger" data-project-path="${escapeAttribute(project.path)}" title="${escapeAttribute(project.path)}">
@@ -740,8 +752,8 @@ function applyOverview(overview: Awaited<ReturnType<typeof window.api.projects.g
     nextTotals[project.path] = project.totalSessions
   }
   state.projects = overview.projects
-  if (!state.chatProjectPath || !state.projects.some((project) => project.path === state.chatProjectPath)) state.chatProjectPath = overview.activeProjectPath
-  if (!state.viewedProjectPath || !state.projects.some((project) => project.path === state.viewedProjectPath)) state.viewedProjectPath = state.chatProjectPath
+  state.chatProjectPath = projectForPath(state.chatProjectPath)?.path || overview.activeProjectPath
+  state.viewedProjectPath = projectForPath(state.viewedProjectPath)?.path || state.chatProjectPath
   state.sidebarOpen = overview.sidebarOpen
   state.sidebarWidth = overview.sidebarWidth
   state.filesOpen = overview.filesOpen
@@ -1232,7 +1244,7 @@ async function removeProject(path: string) {
   const overview = await window.api.projects.remove(path)
   applyOverview(overview)
   delete state.drafts[path]
-  if (path === state.viewedProjectPath) {
+  if (samePath(path, state.viewedProjectPath)) {
     state.viewedProjectPath = overview.activeProjectPath
     state.chatProjectPath = overview.activeProjectPath
     resetProjectView()
@@ -1376,16 +1388,18 @@ window.addEventListener("resize", () => render())
 async function switchSession(nextSessionId: string) {
   const session = allSessions().find((item) => item.id === nextSessionId)
   if (!session) return
+  const project = projectForPath(session.workspaceRoot)
+  if (!project) return
   const runtimeId = runtimeIdForSession(nextSessionId)
   showCachedSession(nextSessionId)
   state.viewedSessionId = nextSessionId
-  state.viewedProjectPath = session.workspaceRoot
-  state.chatProjectPath = session.workspaceRoot
+  state.viewedProjectPath = project.path
+  state.chatProjectPath = project.path
   state.viewedRuntimeId = state.runtimeWorkers[runtimeId] ? runtimeId : ""
   state.expandedDirectories = new Set([""])
   state.fileListings = {}
   state.filePreview = undefined
-  await window.api.projects.select(session.workspaceRoot)
+  applyOverview(await window.api.projects.select(project.path))
   render()
   if (!state.conversationCache[nextSessionId] || state.conversation.entries.length === 0) await loadReplay(nextSessionId)
   if (state.filesOpen && viewedProject()?.available) await loadDirectory("")
@@ -1407,7 +1421,7 @@ async function selectChatProject(path: string) {
   state.filePreview = undefined
   resetConversationPresentation()
   restoreProjectDraft()
-  await window.api.projects.select(path)
+  applyOverview(await window.api.projects.select(path))
   if (state.filesOpen && project.available) await loadDirectory("")
   render()
 }
@@ -1425,10 +1439,13 @@ async function returnToRuntimeSession(runtimeId: string) {
   const sessionId = state.runtimeSessionIds[runtimeId]
   const session = allSessions().find((item) => item.id === sessionId)
   if (!session) return
+  const project = projectForPath(session.workspaceRoot)
+  if (!project) return
   showCachedSession(sessionId)
-  state.viewedProjectPath = session.workspaceRoot
-  state.chatProjectPath = session.workspaceRoot
+  state.viewedProjectPath = project.path
+  state.chatProjectPath = project.path
   state.viewedRuntimeId = runtimeId
+  applyOverview(await window.api.projects.select(project.path))
   render()
 }
 
