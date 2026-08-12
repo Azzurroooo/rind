@@ -210,6 +210,10 @@ const saveSettingsButton = requiredElement<HTMLButtonElement>("save-settings")
 let workingTimer: ReturnType<typeof setInterval> | undefined
 let lastRenderedEntries = 0
 let toolPinSequence = 0
+let renderFrame: number | undefined
+let renderTimer: ReturnType<typeof setTimeout> | undefined
+let toolAnimationUntil = 0
+const toolOpenRequests = new Map<string, number>()
 let resizeStart: { target: "sidebar" | "files"; pointerId: number; x: number; width: number; lastWidth: number } | undefined
 
 function requiredElement<T extends HTMLElement = HTMLElement>(id: string) {
@@ -423,12 +427,29 @@ function renderStream() {
   const stickToBottom = messageStream.scrollHeight - messageStream.scrollTop - messageStream.clientHeight < 80
   const { conversation } = state
   const entries = conversation.entries
+  const previousDetails = new Map<string, HTMLElement>()
+  for (const row of messageStream.querySelectorAll<HTMLElement>("[data-tool-id]")) {
+    const id = row.dataset.toolId
+    const detail = row.querySelector<HTMLElement>(".tool-detail-shell")
+    if (id && detail) previousDetails.set(id, detail)
+  }
   if (!entries.length && !conversation.question) {
     messageStream.innerHTML = state.runtime.status === "ready"
       ? `<div class="stream-empty"><p>No messages yet.</p><p class="subtle">Ask Rind to inspect, change, or explain something in this workspace.</p></div>`
       : ""
   } else {
     messageStream.innerHTML = entries.map(renderEntry).join("") + renderQuestion() + renderWorking()
+  }
+  for (const row of messageStream.querySelectorAll<HTMLElement>("[data-tool-id]")) {
+    const id = row.dataset.toolId
+    const nextDetail = row.querySelector<HTMLElement>(".tool-detail-shell")
+    const previousDetail = id ? previousDetails.get(id) : undefined
+    if (!nextDetail || !previousDetail) continue
+    const nextClip = nextDetail.querySelector<HTMLElement>(".tool-detail-clip")
+    const previousClip = previousDetail.querySelector<HTMLElement>(".tool-detail-clip")
+    if (nextClip && previousClip) previousClip.innerHTML = nextClip.innerHTML
+    previousDetail.setAttribute("aria-hidden", nextDetail.getAttribute("aria-hidden") || "true")
+    nextDetail.replaceWith(previousDetail)
   }
   if (stickToBottom) {
     messageStream.scrollTop = messageStream.scrollHeight
@@ -621,6 +642,8 @@ function setConversationFor(sessionId: string, conversation: ConversationState) 
 function resetConversationPresentation() {
   state.expandedTools = new Set()
   state.revealedTools = new Set()
+  toolOpenRequests.clear()
+  toolAnimationUntil = 0
   state.planDock.collapsed = false
   state.planDock.displayedPlanId = ""
   dismissPlanError(state.conversation, state.viewedSessionId, state.planDock)
@@ -764,9 +787,32 @@ function handleRuntimeEvent(envelope: RuntimeEvent) {
   const sessionId = envelope.sessionId || state.runtimeSessionId || state.viewedSessionId
   if (sessionId) setConversationFor(sessionId, reduceEvent(conversationFor(sessionId), envelope))
   if (envelope.type === "turn_completed" || envelope.type === "turn_failed" || envelope.type === "turn_cancelled") {
-    runAction(async () => { await loadSessions(); render() })
+    runAction(async () => {
+      await loadSessions()
+      if (sessionId === state.viewedSessionId) render()
+      else renderCurrentTask()
+    })
   }
-  render()
+  if (sessionId === state.viewedSessionId) scheduleRender()
+  else renderCurrentTask()
+}
+
+function scheduleRender() {
+  const animationDelay = toolAnimationUntil - performance.now()
+  if (animationDelay > 0) {
+    if (renderTimer === undefined) {
+      renderTimer = setTimeout(() => {
+        renderTimer = undefined
+        scheduleRender()
+      }, animationDelay)
+    }
+    return
+  }
+  if (renderFrame !== undefined) return
+  renderFrame = requestAnimationFrame(() => {
+    renderFrame = undefined
+    render()
+  })
 }
 
 function autoGrowPrompt() {
@@ -992,6 +1038,8 @@ messageStream.addEventListener("click", (event) => {
     const id = toggle.dataset.toggleTool
     const headerOffset = toolHeaderOffset(id)
     if (state.expandedTools.has(id)) {
+      toolOpenRequests.set(id, (toolOpenRequests.get(id) || 0) + 1)
+      toolAnimationUntil = performance.now() + 380
       const next = new Set(state.expandedTools)
       next.delete(id)
       state.expandedTools = next
@@ -999,11 +1047,14 @@ messageStream.addEventListener("click", (event) => {
       keepToolHeaderVisible(id, headerOffset)
       return
     }
+    const requestId = (toolOpenRequests.get(id) || 0) + 1
+    toolOpenRequests.set(id, requestId)
+    toolAnimationUntil = performance.now() + 380
     state.revealedTools.add(id)
     render()
     requestAnimationFrame(() => {
       requestAnimationFrame(() => {
-        if (!state.revealedTools.has(id)) return
+        if (!state.revealedTools.has(id) || toolOpenRequests.get(id) !== requestId) return
         const next = new Set(state.expandedTools)
         next.add(id)
         state.expandedTools = next
