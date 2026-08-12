@@ -16,6 +16,7 @@ import {
   reduceEvent,
   relativeTime,
 } from "../src/renderer/timeline-model.ts"
+import { composerRegionMarkup } from "../src/renderer/composer-region.ts"
 
 function event(type, data = {}, turnId = "turn-1") {
   return { type, sequence: 1, sessionId: "session", turnId, event: data }
@@ -296,4 +297,11 @@ test("helper formatting stays compact", () => {
   assert.equal(boundText("abcd", 3).includes("[Output truncated]"), true)
   assert.equal(relativeTime("not a date"), "")
   assert.equal(parseToolResult('{"ok":false,"tool":"bash","error":"failed","error_type":"ExitCode"}').errorType, "ExitCode")
+})
+
+test("composer region keeps plan dock above a persistent input form", () => {
+  const markup = composerRegionMarkup()
+  assert.equal(markup.indexOf('class="composer-region"') < markup.indexOf('id="plan-dock-shell"'), true)
+  assert.equal(markup.indexOf('id="plan-dock-shell"') < markup.indexOf('id="composer"'), true)
+  assert.match(markup, /id="prompt" rows="2"/)
 })

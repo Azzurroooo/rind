@@ -1,5 +1,13 @@
 import "./style.css"
 
+import {
+  composerRegionMarkup,
+  dismissPlanError,
+  renderComposer,
+  renderPlanDock,
+  type PlanDockPresentation,
+} from "./composer-region"
+
 import type {
   DesktopFileListing,
   DesktopFilePreview,
@@ -17,12 +25,10 @@ import {
   createConversation,
   fileMutationPreview,
   formatDuration,
-  activePlan,
   reduceEvent,
   relativeTime,
   type ConversationState,
   type Entry,
-  type PlanEntry,
   type ToolEntry,
 } from "./timeline-model"
 import { renderMarkdown } from "./markdown"
@@ -56,9 +62,7 @@ type AppState = {
   conversation: ConversationState
   expandedTools: Set<string>
   revealedTools: Set<string>
-  planCollapsed: boolean
-  displayedPlanId: string
-  dismissedPlanErrors: Set<string>
+  planDock: PlanDockPresentation
   composerMenuOpen: boolean
   notice: string
   bootstrapped: boolean
@@ -96,9 +100,7 @@ const state: AppState = {
   conversation: createConversation(),
   expandedTools: new Set(),
   revealedTools: new Set(),
-  planCollapsed: false,
-  displayedPlanId: "",
-  dismissedPlanErrors: new Set(),
+  planDock: { collapsed: false, displayedPlanId: "", dismissedPlanErrors: new Set() },
   composerMenuOpen: false,
   notice: "Add a project to begin.",
   bootstrapped: false,
@@ -137,25 +139,7 @@ appRoot.innerHTML = `
           <div id="message-stream" class="message-stream" aria-live="polite"></div>
           <button id="jump-latest" type="button" class="jump-latest" hidden>Jump to latest</button>
         </div>
-        <div class="composer-region">
-          <section id="plan-dock" class="plan-dock" aria-label="Plan progress" hidden></section>
-          <form id="composer" class="composer">
-            <textarea id="prompt" rows="2" placeholder="Message Rind — Enter to send, Shift+Enter for a new line" aria-label="Message Rind"></textarea>
-            <div class="composer-footer">
-              <div class="composer-menu-wrap">
-                <button id="composer-menu-trigger" type="button" class="composer-menu-trigger" title="More chat actions" aria-label="More chat actions" aria-haspopup="menu" aria-expanded="false">+</button>
-                <div id="composer-menu" class="composer-menu" role="menu" hidden><button id="compact-context" type="button" role="menuitem">Compact context</button></div>
-              </div>
-              <label class="model-control" title="Active model"><select id="model-select" aria-label="Model"></select></label>
-              <label class="project-control" title="Active project"><select id="project-select" aria-label="Active project"></select></label>
-              <span id="context-meter" class="context-meter" hidden></span>
-              <span class="composer-spacer"></span>
-              <button id="steer" type="button" class="ghost-button" title="Steer the running turn with this message">Steer</button>
-              <button id="interrupt" type="button" class="ghost-button danger" title="Stop the running turn (Esc)">Stop</button>
-              <button id="send" type="submit" class="primary-button">Send</button>
-            </div>
-          </form>
-        </div>
+        ${composerRegionMarkup()}
       </section>
       <aside id="file-panel" class="file-panel" aria-label="Project files">
         <div id="file-resize-handle" class="file-resize-handle" role="separator" aria-label="Resize file panel" aria-orientation="vertical"></div>
@@ -191,6 +175,7 @@ const sessionIdLabel = requiredElement("session-id")
 const modelSelect = requiredElement<HTMLSelectElement>("model-select")
 const messageStream = requiredElement("message-stream")
 const jumpLatest = requiredElement<HTMLButtonElement>("jump-latest")
+const planDockShell = requiredElement("plan-dock-shell")
 const planDock = requiredElement("plan-dock")
 const notice = requiredElement("notice")
 const noticeText = requiredElement("notice-text")
@@ -263,9 +248,26 @@ function render() {
   renderCurrentTask()
   renderProjects()
   renderModels()
-  renderPlanDock()
+  renderPlanDock(
+    { shell: planDockShell, dock: planDock },
+    state.conversation,
+    state.viewedSessionId,
+    state.planDock,
+  )
   renderStream()
-  renderComposer()
+  renderComposer(
+    { prompt, send, steer, interrupt, menuTrigger: composerMenuTrigger, menu: composerMenu, compactContext, contextMeter },
+    {
+      ready: state.runtime.status === "ready" && activeProject()?.available === true,
+      active: runtimeTurnActive(),
+      readOnly: !isViewingRuntime(),
+      starting: state.runtimeTurnPending && !runtimeConversation().activeTurnId,
+      controllingTurn: Boolean(runtimeConversation().activeTurnId),
+      runtimeSessionId: state.runtimeSessionId,
+      composerMenuOpen: state.composerMenuOpen,
+      contextUsagePercent: state.conversation.contextUsagePercent,
+    },
+  )
   renderFiles()
   renderSettings()
   syncWorkingTimer()
@@ -529,68 +531,6 @@ function renderToolValue(value: unknown): string {
   return `<span class="tool-detail-value">${Object.entries(asRecord(value)).map(([key, item]) => `<span class="tool-detail-row"><span>${escapeHtml(key)}</span>${renderToolValue(item)}</span>`).join("")}</span>`
 }
 
-function renderPlanDock() {
-  const scrollTop = planDock.querySelector<HTMLElement>(".plan-dock-content")?.scrollTop || 0
-  const plan = visiblePlan(state.conversation)
-  if (!plan) {
-    planDock.hidden = true
-    planDock.replaceChildren()
-    state.displayedPlanId = ""
-    state.planCollapsed = false
-    return
-  }
-  if (state.displayedPlanId !== plan.id) {
-    state.displayedPlanId = plan.id
-    state.planCollapsed = false
-  }
-  const progress = planProgress(plan)
-  const collapsed = state.planCollapsed
-  const preview = plan.steps.find((step) => step.status === "in_progress")
-    ?? plan.steps.find((step) => step.status === "pending")
-    ?? plan.steps.at(-1)
-  planDock.hidden = false
-  planDock.className = `plan-dock${collapsed ? " collapsed" : ""}${progress.status === "error" ? " plan-error" : ""}`
-  planDock.innerHTML = `
-    <button type="button" class="plan-dock-trigger" data-toggle-plan aria-expanded="${String(!collapsed)}">
-      <span class="status-pip ${progress.pip}"></span>
-      <strong>Plan</strong>
-      <span class="plan-progress">${progress.completed}/${plan.steps.length}</span>
-      ${preview ? `<span class="plan-preview">${escapeHtml(clipLine(preview.step, 72))}</span>` : ""}
-      <span class="plan-chevron" aria-hidden="true"></span>
-    </button>
-    <div class="plan-dock-body" aria-hidden="${String(collapsed)}">
-      <div class="plan-dock-content">
-        <ol class="plan-steps">${plan.steps.map((step) => `<li class="plan-step plan-${escapeAttribute(step.status)}"><span aria-hidden="true"></span><span>${escapeHtml(step.step)}</span></li>`).join("")}</ol>
-        ${plan.error ? `<p class="plan-error-text">${escapeHtml(plan.error)}</p>` : ""}
-      </div>
-    </div>
-  `
-  const content = planDock.querySelector<HTMLElement>(".plan-dock-content")
-  if (content) content.scrollTop = scrollTop
-}
-
-function visiblePlan(conversation: ConversationState): PlanEntry | undefined {
-  const plan = activePlan(conversation)
-  if (!plan || !(plan.error || plan.status === "error")) return plan
-  const key = planErrorKey(state.viewedSessionId, plan)
-  return key && state.dismissedPlanErrors.has(key) ? undefined : plan
-}
-
-function planErrorKey(sessionId: string, plan: PlanEntry) {
-  return sessionId && plan.id ? `${sessionId}:${plan.id}` : ""
-}
-
-function planProgress(plan: PlanEntry) {
-  const completed = plan.steps.filter((step) => step.status === "completed").length
-  const settled = plan.steps.filter((step) => step.status === "completed" || step.status === "cancelled").length
-  const status = plan.error || plan.status === "error"
-    ? "error"
-    : plan.steps.some((step) => step.status === "in_progress")
-      ? "running"
-      : settled === plan.steps.length ? "completed" : "pending"
-  return { completed, status, pip: status === "error" ? "pip-error" : status === "completed" ? "pip-done" : "pip-running" }
-}
-
 function renderQuestion(): string {
   const question = state.conversation.question
   if (!question) return ""
@@ -629,33 +569,6 @@ function syncWorkingTimer() {
     clearInterval(workingTimer)
     workingTimer = undefined
   }
-}
-
-function renderComposer() {
-  const ready = state.runtime.status === "ready" && activeProject()?.available === true
-  const active = runtimeTurnActive()
-  const readOnly = !isViewingRuntime()
-  const starting = state.runtimeTurnPending && !runtimeConversation().activeTurnId
-  const controllingTurn = Boolean(runtimeConversation().activeTurnId)
-  prompt.disabled = !ready || readOnly || starting
-  prompt.placeholder = readOnly
-    ? "Return to the current task to send a message"
-    : starting ? "Starting task..." : "Message Rind — Enter to send, Shift+Enter for a new line"
-  send.disabled = !ready || readOnly || starting
-  send.textContent = readOnly ? "Viewing" : starting ? "Starting..." : active ? "Queue" : "Send"
-  send.title = readOnly
-    ? "Return to the current task before sending"
-    : starting ? "Waiting for the task to start" : active ? "Queue as follow-up for the running turn" : "Send message"
-  steer.disabled = !ready || !controllingTurn || readOnly
-  interrupt.disabled = !ready || !controllingTurn || readOnly
-  composerMenuTrigger.disabled = !ready || !state.runtimeSessionId || readOnly || active
-  composerMenuTrigger.setAttribute("aria-expanded", String(state.composerMenuOpen))
-  composerMenu.hidden = !state.composerMenuOpen
-  compactContext.disabled = !ready || !state.runtimeSessionId || readOnly || active
-  const percent = state.conversation.contextUsagePercent
-  contextMeter.hidden = percent === null
-  contextMeter.textContent = percent === null ? "" : `${Math.round(percent * 100)}% ctx`
-  contextMeter.classList.toggle("context-hot", percent !== null && percent >= 0.8)
 }
 
 function titleCase(value: string) {
@@ -705,13 +618,9 @@ function setConversationFor(sessionId: string, conversation: ConversationState) 
 function resetConversationPresentation() {
   state.expandedTools = new Set()
   state.revealedTools = new Set()
-  state.planCollapsed = false
-  state.displayedPlanId = ""
-  const plan = activePlan(state.conversation)
-  if (plan && (plan.error || plan.status === "error")) {
-    const key = planErrorKey(state.viewedSessionId, plan)
-    if (key) state.dismissedPlanErrors.add(key)
-  }
+  state.planDock.collapsed = false
+  state.planDock.displayedPlanId = ""
+  dismissPlanError(state.conversation, state.viewedSessionId, state.planDock)
   lastRenderedEntries = 0
 }
 
@@ -1067,7 +976,7 @@ startResize(sidebarResizeHandle, "sidebar")
 startResize(fileResizeHandle, "files")
 planDock.addEventListener("click", (event) => {
   if (!(event.target as HTMLElement).closest("[data-toggle-plan]")) return
-  state.planCollapsed = !state.planCollapsed
+  state.planDock.collapsed = !state.planDock.collapsed
   render()
 })
 messageStream.addEventListener("click", (event) => {
