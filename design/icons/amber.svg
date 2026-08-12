@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120" role="img" aria-label="Rind">
+  <defs>
+    <mask id="knockout">
+      <rect x="0" y="0" width="120" height="120" fill="black" />
+      <rect x="10" y="10" width="100" height="100" rx="22" fill="white" />
+      <line x1="75" y1="10" x2="10" y2="75" stroke="black" stroke-width="9" stroke-linecap="round" />
+    </mask>
+  </defs>
+  <rect x="0" y="0" width="120" height="120" fill="#f5c451" mask="url(#knockout)" />
+</svg>

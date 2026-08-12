@@ -1,0 +1,36 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120" role="img" aria-label="Rind">
+  <defs>
+    <filter id="cb" x="-40%" y="-40%" width="180%" height="180%">
+      <feGaussianBlur stdDeviation="6" />
+    </filter>
+    <clipPath id="tc"><rect x="10" y="10" width="100" height="100" rx="22" /></clipPath>
+    <style>
+      .cut { stroke-dasharray: 110; stroke-dashoffset: 110; animation: peel 3.2s cubic-bezier(.6,.05,.25,1) infinite; }
+      .core-fill, .core-glow { opacity: 0; animation: reveal 3.2s ease-out infinite; }
+      @keyframes peel {
+        0%, 6%   { stroke-dashoffset: 110; }
+        38%      { stroke-dashoffset: 0; }
+        72%      { stroke-dashoffset: 0; }
+        88%      { stroke-dashoffset: 110; }
+        100%     { stroke-dashoffset: 110; }
+      }
+      @keyframes reveal {
+        0%, 16%  { opacity: 0; }
+        42%, 72% { opacity: 1; }
+        88%,100% { opacity: 0; }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        .cut { animation: none; stroke-dashoffset: 0; }
+        .core-fill { animation: none; opacity: 1; }
+        .core-glow { animation: none; opacity: 0.5; }
+      }
+    </style>
+  </defs>
+  <rect x="10" y="10" width="100" height="100" rx="22" fill="#0b1115" stroke="#5fd7ff" stroke-width="2.5" />
+  <g clip-path="url(#tc)">
+    <rect x="10" y="10" width="100" height="100" fill="#13242b" />
+    <polygon class="core-fill" points="75,10 110,10 110,110 10,110 10,75" fill="#f5c451" />
+    <polygon class="core-glow" points="75,10 110,10 110,110 10,110 10,75" fill="#f5c451" filter="url(#cb)" />
+    <line class="cut" x1="75" y1="10" x2="10" y2="75" stroke="#5fd7ff" stroke-width="3.5" stroke-linecap="round" />
+  </g>
+</svg>

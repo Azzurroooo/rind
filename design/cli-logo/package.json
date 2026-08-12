@@ -1,0 +1,11 @@
+{
+  "name": "rind-cli-logo",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Terminal-rendered Rind mark via half-block cells and ANSI 256-colour.",
+  "main": "logo.js",
+  "scripts": {
+    "demo": "node demo.js"
+  }
+}

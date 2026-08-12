@@ -1,0 +1,650 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Rind — mark & wordmark</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+<style>
+  :root {
+    --shell: #0b1115;
+    --rind: #13242b;
+    --rind-mid: #1f3d4a;
+    --accent: #5fd7ff;
+    --core: #f5c451;
+    --core-soft: rgba(245, 196, 81, 0.55);
+    --paper: #e6f0f2;
+    --dim: #6b828c;
+    --hair: rgba(95, 215, 255, 0.16);
+    --grid: rgba(230, 240, 242, 0.06);
+  }
+
+  * { box-sizing: border-box; }
+
+  html, body { margin: 0; padding: 0; }
+
+  body {
+    background: var(--shell);
+    color: var(--paper);
+    font-family: "Space Grotesk", system-ui, sans-serif;
+    font-size: 16px;
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+    background-image:
+      linear-gradient(var(--grid) 1px, transparent 1px),
+      linear-gradient(90deg, var(--grid) 1px, transparent 1px);
+    background-size: 48px 48px;
+    background-position: -1px -1px;
+  }
+
+  .mono { font-family: "JetBrains Mono", ui-monospace, monospace; }
+
+  .page {
+    max-width: 1080px;
+    margin: 0 auto;
+    padding: 64px 32px 96px;
+  }
+
+  /* ---- meta strip ---- */
+  .meta {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    font-family: "JetBrains Mono", monospace;
+    font-size: 12px;
+    letter-spacing: 0.04em;
+    color: var(--dim);
+    border-bottom: 1px solid var(--hair);
+    padding-bottom: 14px;
+    margin-bottom: 72px;
+  }
+  .meta b { color: var(--accent); font-weight: 500; }
+
+  /* ---- hero ---- */
+  .hero {
+    display: grid;
+    gap: 40px;
+    margin-bottom: 120px;
+  }
+
+  .lockup {
+    display: flex;
+    align-items: center;
+    gap: 28px;
+    flex-wrap: wrap;
+  }
+
+  .mark {
+    width: 132px;
+    height: 132px;
+    flex: none;
+    overflow: visible;
+  }
+
+  .wordblock { display: flex; flex-direction: column; gap: 6px; }
+
+  .wordmark {
+    font-weight: 700;
+    font-size: clamp(56px, 12vw, 112px);
+    line-height: 0.9;
+    letter-spacing: -0.045em;
+    color: var(--paper);
+    margin: 0;
+  }
+  .wordmark .dot {
+    display: inline-block;
+    width: 0.12em;
+    height: 0.12em;
+    background: var(--core);
+    margin-left: 0.06em;
+    transform: translateY(-0.06em);
+    box-shadow: 0 0 18px var(--core-soft);
+  }
+
+  .tag {
+    font-family: "JetBrains Mono", monospace;
+    font-size: 13px;
+    letter-spacing: 0.22em;
+    text-transform: uppercase;
+    color: var(--dim);
+  }
+  .tag .pin { color: var(--accent); }
+
+  .lede {
+    max-width: 46ch;
+    color: var(--paper);
+    font-size: 19px;
+    line-height: 1.45;
+    margin: 8px 0 0;
+  }
+  .lede em {
+    font-style: normal;
+    color: var(--accent);
+  }
+  .lede .warm {
+    color: var(--core);
+  }
+
+  /* ---- section frame ---- */
+  section { margin-bottom: 112px; }
+
+  .eyebrow {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    font-family: "JetBrains Mono", monospace;
+    font-size: 12px;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: var(--dim);
+    margin-bottom: 28px;
+  }
+  .eyebrow .rule { flex: 1; height: 1px; background: var(--hair); }
+
+  h2 {
+    font-size: clamp(28px, 4vw, 40px);
+    font-weight: 600;
+    letter-spacing: -0.025em;
+    margin: 0 0 14px;
+    line-height: 1.1;
+  }
+  h2 .warm { color: var(--core); }
+
+  .section-copy {
+    max-width: 52ch;
+    color: var(--dim);
+    font-size: 16px;
+    margin: 0 0 36px;
+  }
+
+  /* ---- anatomy / section diagram ---- */
+  .anatomy {
+    display: grid;
+    grid-template-columns: 1.1fr 1fr;
+    gap: 48px;
+    align-items: center;
+  }
+  .diagram {
+    position: relative;
+    aspect-ratio: 1 / 1;
+    width: 100%;
+    max-width: 460px;
+  }
+  .diagram svg { width: 100%; height: 100%; overflow: visible; }
+
+  .legend { display: grid; gap: 22px; }
+  .legend .row {
+    display: grid;
+    grid-template-columns: 18px 1fr;
+    gap: 14px;
+    align-items: start;
+  }
+  .legend .swatch {
+    width: 14px; height: 14px;
+    border-radius: 3px;
+    margin-top: 5px;
+  }
+  .legend .swatch.shell { background: var(--rind); box-shadow: inset 0 0 0 1px var(--accent); }
+  .legend .swatch.core { background: var(--core); box-shadow: 0 0 12px var(--core-soft); }
+  .legend .swatch.cut { background: var(--accent); box-shadow: 0 0 12px rgba(95,215,255,0.5); }
+
+  .legend .name {
+    font-family: "JetBrains Mono", monospace;
+    font-size: 13px;
+    color: var(--paper);
+    letter-spacing: 0.04em;
+  }
+  .legend .name b { color: var(--accent); font-weight: 500; }
+  .legend .desc { color: var(--dim); font-size: 14px; margin-top: 2px; }
+
+  /* ---- variants ---- */
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 18px;
+  }
+  .cell {
+    background: var(--rind);
+    border: 1px solid var(--hair);
+    border-radius: 14px;
+    aspect-ratio: 4 / 3;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 14px;
+    padding: 24px;
+    position: relative;
+  }
+  .cell .label {
+    position: absolute;
+    top: 12px; left: 14px;
+    font-family: "JetBrains Mono", monospace;
+    font-size: 11px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--dim);
+  }
+  .cell.light { background: #eef3f5; color: var(--shell); }
+  .cell.dark-flat { background: var(--shell); }
+  .cell .mark { width: 64px; height: 64px; }
+  .cell .mini-word {
+    font-weight: 700;
+    font-size: 30px;
+    letter-spacing: -0.04em;
+  }
+  .favicons {
+    display: flex;
+    gap: 16px;
+    align-items: flex-end;
+  }
+  .favicons .mark { width: 48px; height: 48px; }
+  .favicons .mark.s32 { width: 32px; height: 32px; }
+  .favicons .mark.s16 { width: 16px; height: 16px; }
+
+  /* ---- in context ---- */
+  .terminal {
+    background: #060a0d;
+    border: 1px solid var(--hair);
+    border-radius: 14px;
+    overflow: hidden;
+    box-shadow: 0 30px 80px rgba(0,0,0,0.5);
+  }
+  .termbar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 11px 14px;
+    background: #0c1419;
+    border-bottom: 1px solid var(--hair);
+    font-family: "JetBrains Mono", monospace;
+    font-size: 12px;
+    color: var(--dim);
+  }
+  .termbar .dot-r { width: 11px; height: 11px; border-radius: 50%; background: #2a3a44; }
+  .termbar .title { margin-left: 8px; }
+  .term-body {
+    padding: 40px 32px 28px;
+    display: flex;
+    flex-direction: column;
+    gap: 18px;
+    align-items: flex-start;
+  }
+  .term-body .mark { width: 54px; height: 54px; }
+  .term-body .startup {
+    font-family: "JetBrains Mono", monospace;
+    font-size: 14px;
+    color: var(--paper);
+    line-height: 1.7;
+  }
+  .term-body .startup b { color: var(--paper); font-weight: 700; }
+  .term-body .startup .d { color: var(--dim); }
+  .term-body .startup .a { color: var(--accent); }
+  .term-body .startup .sep { color: var(--rind-mid); letter-spacing: -0.1em; }
+  .term-body .prompt {
+    font-family: "JetBrains Mono", monospace;
+    font-size: 14px;
+    color: var(--dim);
+    margin-top: 6px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+  }
+  .term-body .prompt .chev { color: var(--accent); }
+  .cursor {
+    display: inline-block;
+    width: 8px; height: 16px;
+    background: var(--accent);
+    animation: blink 1.1s steps(2, end) infinite;
+    vertical-align: middle;
+  }
+
+  /* ---- footer ---- */
+  footer {
+    margin-top: 96px;
+    padding-top: 28px;
+    border-top: 1px solid var(--hair);
+    display: flex;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 12px;
+    font-family: "JetBrains Mono", monospace;
+    font-size: 12px;
+    color: var(--dim);
+    letter-spacing: 0.04em;
+  }
+  footer .swatches { display: flex; gap: 6px; }
+  footer .swatches i {
+    width: 14px; height: 14px; border-radius: 3px; display: inline-block;
+  }
+
+  /* ---- mark animation ---- */
+  .cut-line {
+    stroke-dasharray: 110;
+    stroke-dashoffset: 110;
+    animation: peel 1.1s 0.25s cubic-bezier(.6,.05,.25,1) forwards;
+  }
+  .core-fill {
+    opacity: 0;
+    animation: reveal 0.9s 0.55s ease-out forwards;
+  }
+  .core-glow {
+    opacity: 0;
+    animation: glow 1.2s 0.55s ease-out forwards;
+  }
+
+  @keyframes peel { to { stroke-dashoffset: 0; } }
+  @keyframes reveal { to { opacity: 1; } }
+  @keyframes glow {
+    0% { opacity: 0; }
+    60% { opacity: 0.9; }
+    100% { opacity: 0.5; }
+  }
+  @keyframes blink { 50% { opacity: 0; } }
+
+  @media (prefers-reduced-motion: reduce) {
+    .cut-line, .core-fill, .core-glow { animation: none; stroke-dashoffset: 0; opacity: 1; }
+    .core-glow { opacity: 0.5; }
+    .cursor { animation: none; }
+  }
+
+  @media (max-width: 720px) {
+    .page { padding: 40px 20px 64px; }
+    .anatomy { grid-template-columns: 1fr; gap: 32px; }
+    .grid { grid-template-columns: repeat(2, 1fr); }
+    .lockup { gap: 20px; }
+    .mark.hero-mark { width: 96px; height: 96px; }
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 3px;
+  }
+</style>
+</head>
+<body>
+<main class="page">
+
+  <div class="meta">
+    <span><b>Rind</b> · identity study</span>
+    <span>mark · wordmark · system</span>
+  </div>
+
+  <!-- ============ HERO ============ -->
+  <header class="hero">
+    <div class="lockup">
+      <!-- primary mark -->
+      <svg class="mark hero-mark" viewBox="0 0 120 120" role="img" aria-label="Rind mark">
+        <defs>
+          <filter id="coreBlur" x="-40%" y="-40%" width="180%" height="180%">
+            <feGaussianBlur stdDeviation="6" />
+          </filter>
+          <clipPath id="tileClip"><rect x="10" y="10" width="100" height="100" rx="22" /></clipPath>
+        </defs>
+
+        <!-- shell base tile -->
+        <rect x="10" y="10" width="100" height="100" rx="22"
+              fill="#0b1115" stroke="#5fd7ff" stroke-width="2.5" />
+
+        <g clip-path="url(#tileClip)">
+          <!-- before the cut, the whole interior is one rind -->
+          <rect x="10" y="10" width="100" height="100" fill="#13242b" />
+          <!-- core (warm), revealed only as the cut opens -->
+          <polygon class="core-fill" points="75,10 110,10 110,110 10,110 10,75" fill="#f5c451" />
+          <polygon class="core-glow" points="75,10 110,10 110,110 10,110 10,75" fill="#f5c451" filter="url(#coreBlur)" />
+          <!-- the cut -->
+          <line class="cut-line" x1="75" y1="10" x2="10" y2="75"
+                stroke="#5fd7ff" stroke-width="3.5" stroke-linecap="round" />
+        </g>
+      </svg>
+
+      <div class="wordblock">
+        <p class="tag"><span class="pin">›</span>&nbsp;&nbsp;workbench online</p>
+        <h1 class="wordmark">Rind</h1>
+      </div>
+    </div>
+
+    <p class="lede">
+      A terminal-native AI agent. The <em>shell</em> is yours to drive;
+      the <span class="warm">core</span> thinks alongside you.
+      One mark, cut open to show what is inside.
+    </p>
+  </header>
+
+  <!-- ============ ANATOMY ============ -->
+  <section>
+    <div class="eyebrow">anatomy <span class="rule"></span> <span class="mono">section view</span></div>
+    <h2>A rind, <span class="warm">sectioned</span>.</h2>
+    <p class="section-copy">
+      The mark is a cross-section. A cold shell, a warm core, and the cut
+      where you reach in. Nothing decorative — each part is named after the
+      job it does in the product.
+    </p>
+
+    <div class="anatomy">
+      <div class="diagram">
+        <svg viewBox="0 0 460 460" role="img" aria-label="Mark anatomy">
+          <defs>
+            <filter id="bigBlur" x="-40%" y="-40%" width="180%" height="180%">
+              <feGaussianBlur stdDeviation="14" />
+            </filter>
+            <clipPath id="bigTile"><rect x="90" y="90" width="280" height="280" rx="56" /></clipPath>
+          </defs>
+
+          <!-- core glow -->
+          <g clip-path="url(#bigTile)">
+            <polygon points="300,90 370,90 370,370 90,370 90,220" fill="#f5c451" filter="url(#bigBlur)" opacity="0.45" />
+          </g>
+
+          <rect x="90" y="90" width="280" height="280" rx="56"
+                fill="#0b1115" stroke="#5fd7ff" stroke-width="5" />
+
+          <g clip-path="url(#bigTile)">
+            <polygon points="300,90 370,90 370,370 90,370 90,220" fill="#f5c451" />
+            <polygon points="90,90 300,90 90,220" fill="#13242b" />
+            <line x1="300" y1="90" x2="90" y2="220" stroke="#5fd7ff" stroke-width="7" stroke-linecap="round" />
+
+            <!-- annotation pins -->
+            <circle cx="150" cy="150" r="4" fill="#5fd7ff" />
+            <circle cx="300" cy="300" r="4" fill="#5fd7ff" />
+            <circle cx="200" cy="155" r="4" fill="#5fd7ff" />
+          </g>
+
+          <!-- callout lines -->
+          <g stroke="#6b828c" stroke-width="1.25" fill="none">
+            <path d="M150,150 L40,90" />
+            <path d="M300,300 L420,360" />
+            <path d="M200,155 L420,90" />
+          </g>
+          <g font-family="JetBrains Mono, monospace" font-size="15" fill="#e6f0f2">
+            <text x="40" y="78" text-anchor="start">shell</text>
+            <text x="40" y="96" text-anchor="start" fill="#6b828c" font-size="12">the terminal you drive</text>
+
+            <text x="420" y="378" text-anchor="end">core</text>
+            <text x="420" y="396" text-anchor="end" fill="#6b828c" font-size="12">the agent that thinks</text>
+
+            <text x="420" y="78" text-anchor="end">the cut</text>
+            <text x="420" y="96" text-anchor="end" fill="#6b828c" font-size="12">where you reach in</text>
+          </g>
+        </svg>
+      </div>
+
+      <div class="legend">
+        <div class="row">
+          <span class="swatch shell"></span>
+          <div>
+            <div class="name"><b>shell</b> · #13242B</div>
+            <div class="desc">The cold outer wall — your terminal, your keys, your control.</div>
+          </div>
+        </div>
+        <div class="row">
+          <span class="swatch core"></span>
+          <div>
+            <div class="name"><b>core</b> · #F5C451</div>
+            <div class="desc">The warm interior — the model doing the actual work.</div>
+          </div>
+        </div>
+        <div class="row">
+          <span class="swatch cut"></span>
+          <div>
+            <div class="name"><b>cut</b> · #5FD7FF</div>
+            <div class="desc">The accent edge where shell meets core. Also a cursor.</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ VARIANTS ============ -->
+  <section>
+    <div class="eyebrow">system <span class="rule"></span> <span class="mono">variants</span></div>
+    <h2>One mark, <span class="warm">many grounds</span>.</h2>
+    <p class="section-copy">
+      Built to survive the places a CLI lives: a dark terminal, a light docs
+      page, a 16-pixel browser tab.
+    </p>
+
+    <div class="grid">
+      <div class="cell dark-flat">
+        <span class="label">primary</span>
+        <svg class="mark" viewBox="0 0 120 120" aria-hidden="true">
+          <rect x="10" y="10" width="100" height="100" rx="22" fill="#0b1115" stroke="#5fd7ff" stroke-width="2.5"/>
+          <clipPath id="vPrimary"><rect x="10" y="10" width="100" height="100" rx="22"/></clipPath>
+          <g clip-path="url(#vPrimary)">
+            <polygon points="75,10 110,10 110,110 10,110 10,75" fill="#f5c451"/>
+            <polygon points="10,10 75,10 10,75" fill="#13242b"/>
+            <line x1="75" y1="10" x2="10" y2="75" stroke="#5fd7ff" stroke-width="3.5" stroke-linecap="round"/>
+          </g>
+        </svg>
+        <span class="mini-word" style="color:var(--paper)">Rind</span>
+      </div>
+
+      <div class="cell dark-flat">
+        <span class="label">mark · dark</span>
+        <svg class="mark" viewBox="0 0 120 120" aria-hidden="true">
+          <rect x="10" y="10" width="100" height="100" rx="22" fill="#0b1115" stroke="#5fd7ff" stroke-width="2.5"/>
+          <clipPath id="vm1"><rect x="10" y="10" width="100" height="100" rx="22"/></clipPath>
+          <g clip-path="url(#vm1)">
+            <polygon points="75,10 110,10 110,110 10,110 10,75" fill="#f5c451"/>
+            <polygon points="10,10 75,10 10,75" fill="#13242b"/>
+            <line x1="75" y1="10" x2="10" y2="75" stroke="#5fd7ff" stroke-width="3.5" stroke-linecap="round"/>
+          </g>
+        </svg>
+      </div>
+
+      <div class="cell light">
+        <span class="label">inverted</span>
+        <svg class="mark" viewBox="0 0 120 120" aria-hidden="true">
+          <rect x="10" y="10" width="100" height="100" rx="22" fill="#eef3f5" stroke="#0b1115" stroke-width="2.5"/>
+          <clipPath id="vm2"><rect x="10" y="10" width="100" height="100" rx="22"/></clipPath>
+          <g clip-path="url(#vm2)">
+            <polygon points="75,10 110,10 110,110 10,110 10,75" fill="#0b1115"/>
+            <polygon points="10,10 75,10 10,75" fill="#9fb4bd"/>
+            <line x1="75" y1="10" x2="10" y2="75" stroke="#0b1115" stroke-width="3.5" stroke-linecap="round"/>
+          </g>
+        </svg>
+        <span class="mini-word" style="color:var(--shell)">Rind</span>
+      </div>
+
+      <div class="cell">
+        <span class="label">monochrome</span>
+        <svg class="mark" viewBox="0 0 120 120" aria-hidden="true">
+          <rect x="10" y="10" width="100" height="100" rx="22" fill="none" stroke="#e6f0f2" stroke-width="2.5"/>
+          <clipPath id="vm3"><rect x="10" y="10" width="100" height="100" rx="22"/></clipPath>
+          <g clip-path="url(#vm3)">
+            <polygon points="75,10 110,10 110,110 10,110 10,75" fill="#e6f0f2"/>
+            <line x1="75" y1="10" x2="10" y2="75" stroke="#0b1115" stroke-width="3.5" stroke-linecap="round"/>
+          </g>
+        </svg>
+      </div>
+
+      <div class="cell dark-flat">
+        <span class="label">favicon</span>
+        <div class="favicons">
+          <svg class="mark" viewBox="0 0 120 120" aria-hidden="true">
+            <rect x="10" y="10" width="100" height="100" rx="22" fill="#0b1115" stroke="#5fd7ff" stroke-width="4"/>
+            <clipPath id="vf1"><rect x="10" y="10" width="100" height="100" rx="22"/></clipPath>
+            <g clip-path="url(#vf1)">
+              <polygon points="75,10 110,10 110,110 10,110 10,75" fill="#f5c451"/>
+              <polygon points="10,10 75,10 10,75" fill="#13242b"/>
+              <line x1="75" y1="10" x2="10" y2="75" stroke="#5fd7ff" stroke-width="6" stroke-linecap="round"/>
+            </g>
+          </svg>
+          <svg class="mark s32" viewBox="0 0 120 120" aria-hidden="true">
+            <rect x="10" y="10" width="100" height="100" rx="22" fill="#0b1115" stroke="#5fd7ff" stroke-width="5"/>
+            <clipPath id="vf2"><rect x="10" y="10" width="100" height="100" rx="22"/></clipPath>
+            <g clip-path="url(#vf2)">
+              <polygon points="75,10 110,10 110,110 10,110 10,75" fill="#f5c451"/>
+              <line x1="75" y1="10" x2="10" y2="75" stroke="#5fd7ff" stroke-width="7" stroke-linecap="round"/>
+            </g>
+          </svg>
+          <svg class="mark s16" viewBox="0 0 120 120" aria-hidden="true">
+            <rect x="10" y="10" width="100" height="100" rx="22" fill="#f5c451"/>
+            <line x1="75" y1="10" x2="10" y2="75" stroke="#0b1115" stroke-width="9" stroke-linecap="round"/>
+          </svg>
+        </div>
+      </div>
+
+      <div class="cell dark-flat">
+        <span class="label">wordmark</span>
+        <span class="mini-word" style="color:var(--paper)">Rind<span style="color:var(--core)">.</span></span>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ IN CONTEXT ============ -->
+  <section>
+    <div class="eyebrow">in context <span class="rule"></span> <span class="mono">startup</span></div>
+    <h2>Where it <span class="warm">lives</span>.</h2>
+    <p class="section-copy">
+      The mark was drawn for the first thing you see when Rind boots.
+      Here it is, doing that job.
+    </p>
+
+    <div class="terminal">
+      <div class="termbar">
+        <span class="dot-r"></span><span class="dot-r"></span><span class="dot-r"></span>
+        <span class="title">rind — workbench</span>
+      </div>
+      <div class="term-body">
+        <svg class="mark" viewBox="0 0 120 120" aria-hidden="true">
+          <rect x="10" y="10" width="100" height="100" rx="22" fill="#0b1115" stroke="#5fd7ff" stroke-width="3"/>
+          <clipPath id="vt"><rect x="10" y="10" width="100" height="100" rx="22"/></clipPath>
+          <g clip-path="url(#vt)">
+            <polygon points="75,10 110,10 110,110 10,110 10,75" fill="#f5c451"/>
+            <polygon points="10,10 75,10 10,75" fill="#13242b"/>
+            <line x1="75" y1="10" x2="10" y2="75" stroke="#5fd7ff" stroke-width="4" stroke-linecap="round"/>
+          </g>
+        </svg>
+        <div class="startup">
+          <div><b>Rind</b> <span class="d">workbench online</span></div>
+          <div class="d">glm-5.1 · E:\code\agent1\rind</div>
+          <div class="sep">──────────────────────────────────────────────────────────────────────────────────</div>
+          <div class="prompt">
+            <span class="chev">›</span>
+            <span>Ask Rind to do anything</span>
+            <span class="cursor"></span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <footer>
+    <span>palette · space grotesk + jetbrains mono</span>
+    <span class="swatches">
+      <i style="background:#0b1115"></i>
+      <i style="background:#13242b"></i>
+      <i style="background:#5fd7ff"></i>
+      <i style="background:#f5c451"></i>
+      <i style="background:#e6f0f2"></i>
+    </span>
+    <span>cut by hand for rind</span>
+  </footer>
+
+</main>
+</body>
+</html>

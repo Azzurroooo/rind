@@ -1,0 +1,187 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Rind — animated favicon (minimal)</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+<style>
+  :root {
+    --shell: #0b1115;
+    --core: #f5c451;
+    --line: #0b1115;
+    --paper: #e6f0f2;
+    --dim: #6b828c;
+    --hair: #1f3d4a;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    background: var(--shell);
+    color: var(--paper);
+    font-family: "Space Grotesk", system-ui, sans-serif;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 56px 24px;
+    gap: 44px;
+  }
+
+  .meta {
+    font-family: "JetBrains Mono", monospace;
+    font-size: 12px;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: var(--dim);
+    border-bottom: 1px solid var(--hair);
+    padding-bottom: 12px;
+    width: 100%;
+    max-width: 520px;
+    text-align: center;
+  }
+  .meta b { color: var(--core); font-weight: 500; }
+
+  .stage svg {
+    width: 200px;
+    height: 200px;
+    display: block;
+    filter: drop-shadow(0 18px 40px rgba(245, 196, 81, 0.18));
+  }
+
+  .label {
+    text-align: center;
+    margin-top: 14px;
+  }
+  .label h1 {
+    font-size: 22px;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+    margin: 0 0 6px;
+  }
+  .label p {
+    color: var(--dim);
+    font-size: 14px;
+    margin: 0;
+    font-family: "JetBrains Mono", monospace;
+  }
+  .label .swatch { color: var(--core); }
+
+  .sizes {
+    display: flex;
+    align-items: flex-end;
+    gap: 36px;
+    justify-content: center;
+  }
+  .sizes .col {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 10px;
+  }
+  .sizes svg { display: block; }
+  .sizes .px {
+    font-family: "JetBrains Mono", monospace;
+    font-size: 11px;
+    color: var(--dim);
+    letter-spacing: 0.08em;
+  }
+
+  /* the repeating slash, clipped to the rounded tile so its round caps never
+     break the icon's outline */
+  .slash {
+    stroke-dasharray: 110;
+    stroke-dashoffset: 110;
+    animation: slash 3s cubic-bezier(.6, .05, .25, 1) infinite;
+  }
+  @keyframes slash {
+    0%, 4%    { stroke-dashoffset: 110; opacity: 1; }
+    40%       { stroke-dashoffset: 0;   opacity: 1; }
+    72%       { stroke-dashoffset: 0;   opacity: 1; }
+    84%       { opacity: 0; }
+    85%       { stroke-dashoffset: 110; opacity: 0; }
+    100%      { stroke-dashoffset: 110; opacity: 1; }
+  }
+
+  footer {
+    font-family: "JetBrains Mono", monospace;
+    font-size: 12px;
+    color: var(--dim);
+    letter-spacing: 0.04em;
+    max-width: 520px;
+    text-align: center;
+    line-height: 1.7;
+  }
+  footer code {
+    color: var(--paper);
+    background: rgba(245, 196, 81, 0.08);
+    padding: 1px 6px;
+    border-radius: 4px;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .slash { animation: none; stroke-dashoffset: 0; }
+  }
+</style>
+</head>
+<body>
+
+  <!-- shared clip: the rounded amber tile. every slash line is clipped to it,
+       so round end-caps terminate exactly on the tile edge instead of poking
+       past the icon outline. -->
+  <svg width="0" height="0" aria-hidden="true" style="position:absolute">
+    <defs>
+      <clipPath id="favCut"><rect x="10" y="10" width="100" height="100" rx="22" /></clipPath>
+    </defs>
+  </svg>
+
+  <div class="meta"><b>Rind</b> · animated favicon &nbsp;·&nbsp; minimal variant</div>
+
+  <div class="stage">
+    <svg viewBox="0 0 120 120" role="img" aria-label="Rind animated mark">
+      <rect x="10" y="10" width="100" height="100" rx="22" fill="#f5c451" />
+      <line class="slash" x1="75" y1="10" x2="10" y2="75"
+            stroke="#0b1115" stroke-width="9" stroke-linecap="round"
+            clip-path="url(#favCut)" />
+    </svg>
+    <div class="label">
+      <h1>amber, cut open</h1>
+      <p>a single <span class="swatch">#F5C451</span> tile, slashed by <code style="color:var(--paper);background:rgba(230,240,242,0.06);padding:1px 5px;border-radius:3px">#0B1115</code></p>
+    </div>
+  </div>
+
+  <div class="sizes">
+    <div class="col">
+      <svg viewBox="0 0 120 120" width="64" height="64" aria-hidden="true">
+        <rect x="10" y="10" width="100" height="100" rx="22" fill="#f5c451" />
+        <line class="slash" x1="75" y1="10" x2="10" y2="75" stroke="#0b1115" stroke-width="9" stroke-linecap="round" clip-path="url(#favCut)" />
+      </svg>
+      <span class="px">64</span>
+    </div>
+    <div class="col">
+      <svg viewBox="0 0 120 120" width="32" height="32" aria-hidden="true">
+        <rect x="10" y="10" width="100" height="100" rx="22" fill="#f5c451" />
+        <line class="slash" x1="75" y1="10" x2="10" y2="75" stroke="#0b1115" stroke-width="9" stroke-linecap="round" clip-path="url(#favCut)" />
+      </svg>
+      <span class="px">32</span>
+    </div>
+    <div class="col">
+      <svg viewBox="0 0 120 120" width="16" height="16" aria-hidden="true">
+        <rect x="10" y="10" width="100" height="100" rx="22" fill="#f5c451" />
+        <line class="slash" x1="75" y1="10" x2="10" y2="75" stroke="#0b1115" stroke-width="9" stroke-linecap="round" clip-path="url(#favCut)" />
+      </svg>
+      <span class="px">16</span>
+    </div>
+  </div>
+
+  <footer>
+    one amber tile, one dark slash, looping — caps clipped to the tile so the
+    outline stays a clean rounded square. line colour is the minimal favicon's
+    cut (<code>#0B1115</code>).
+  </footer>
+
+</body>
+</html>

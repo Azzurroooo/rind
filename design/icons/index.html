@@ -1,0 +1,173 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Rind — icons</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+<style>
+  :root {
+    --shell: #0b1115;
+    --rind: #13242b;
+    --hair: #1f3d4a;
+    --accent: #5fd7ff;
+    --core: #f5c451;
+    --paper: #e6f0f2;
+    --dim: #6b828c;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    background:
+      radial-gradient(circle at 18% 12%, rgba(95,215,255,0.05), transparent 40%),
+      radial-gradient(circle at 82% 80%, rgba(245,196,81,0.05), transparent 40%),
+      var(--shell);
+    color: var(--paper);
+    font-family: "Space Grotesk", system-ui, sans-serif;
+    padding: 56px 28px 80px;
+    line-height: 1.5;
+  }
+  .wrap { max-width: 980px; margin: 0 auto; }
+
+  .meta {
+    display: flex; justify-content: space-between; align-items: baseline;
+    font-family: "JetBrains Mono", monospace; font-size: 12px;
+    letter-spacing: 0.04em; color: var(--dim);
+    border-bottom: 1px solid var(--hair); padding-bottom: 14px; margin-bottom: 64px;
+  }
+  .meta b { color: var(--accent); font-weight: 500; }
+
+  h1 { font-size: clamp(40px, 7vw, 64px); font-weight: 700; letter-spacing: -0.04em; margin: 0 0 8px; }
+  .hero { margin-bottom: 88px; }
+  .hero p { color: var(--dim); margin: 0; max-width: 46ch; }
+  .hero p em { font-style: normal; color: var(--accent); }
+  .hero p .warm { color: var(--core); }
+
+  section { margin-bottom: 80px; }
+  .eyebrow {
+    display: flex; align-items: center; gap: 12px;
+    font-family: "JetBrains Mono", monospace; font-size: 12px;
+    letter-spacing: 0.18em; text-transform: uppercase; color: var(--dim);
+    margin-bottom: 22px;
+  }
+  .eyebrow .rule { flex: 1; height: 1px; background: var(--hair); }
+  h2 { font-size: clamp(24px, 3.4vw, 32px); font-weight: 600; letter-spacing: -0.02em; margin: 0 0 10px; }
+  h2 .warm { color: var(--core); }
+  h2 .cool { color: var(--accent); }
+  .section-copy { color: var(--dim); max-width: 60ch; margin: 0 0 28px; font-size: 15px; }
+
+  .lead-row { display: flex; gap: 32px; align-items: center; margin-bottom: 28px; flex-wrap: wrap; }
+  .lead-row img { width: 132px; height: 132px; display: block; }
+  .lead-row .note { font-family: "JetBrains Mono", monospace; font-size: 13px; color: var(--dim); }
+  .lead-row .note b { color: var(--paper); font-weight: 500; }
+
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 16px; }
+  .cell {
+    background: var(--rind); border: 1px solid var(--hair); border-radius: 14px;
+    padding: 22px; display: flex; flex-direction: column; align-items: center; gap: 10px;
+  }
+  .cell img { display: block; }
+  .cell .name { font-family: "JetBrains Mono", monospace; font-size: 12px; color: var(--dim); }
+  .cell .name b { color: var(--paper); font-weight: 500; }
+  .pixel { image-rendering: pixelated; }
+
+  .anim-stage {
+    background: var(--rind); border: 1px solid var(--hair); border-radius: 18px;
+    padding: 56px; display: flex; justify-content: center; align-items: center;
+  }
+  .anim-stage img { width: 200px; height: 200px; display: block; }
+
+  .files {
+    font-family: "JetBrains Mono", monospace; font-size: 13px; color: var(--dim);
+    display: grid; grid-template-columns: repeat(2, 1fr); gap: 4px 28px;
+  }
+  .files b { color: var(--paper); font-weight: 500; }
+
+  footer {
+    margin-top: 64px; padding-top: 24px; border-top: 1px solid var(--hair);
+    display: flex; justify-content: space-between; flex-wrap: wrap; gap: 12px;
+    font-family: "JetBrains Mono", monospace; font-size: 12px; color: var(--dim);
+  }
+  footer .swatches { display: flex; gap: 6px; }
+  footer .swatches i { width: 14px; height: 14px; border-radius: 3px; display: inline-block; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="meta">
+    <span><b>Rind</b> · icons</span>
+    <span>amber · color · animated</span>
+  </div>
+
+  <div class="hero">
+    <h1>Rind</h1>
+    <p>Two icon sets from one mark: pure <span class="warm">amber</span> with the cut knocked out, and the full <em>cyan-and-amber</em> build. Plus the cut, animated.</p>
+  </div>
+
+  <section>
+    <div class="eyebrow">amber <span class="rule"></span> <span>single colour</span></div>
+    <h2>Just <span class="warm">amber</span>, knocked through.</h2>
+    <p class="section-copy">A single amber tile with the cut as a transparent gap — not a line on top. Stays legible at every size, which is why it owns the smallest favicons.</p>
+    <div class="lead-row">
+      <img src="amber.svg" alt="Rind amber master" />
+      <div class="note"><b>amber.svg</b><br/>scalable master<br/>transparent cut + corners</div>
+    </div>
+    <div class="grid">
+      <div class="cell"><img class="pixel" src="amber-16.png" width="64" height="64" alt=""/><div class="name"><b>16</b></div></div>
+      <div class="cell"><img class="pixel" src="amber-32.png" width="64" height="64" alt=""/><div class="name"><b>32</b></div></div>
+      <div class="cell"><img src="amber-48.png" width="72" height="72" alt=""/><div class="name"><b>48</b></div></div>
+      <div class="cell"><img src="amber-192.png" width="96" height="96" alt=""/><div class="name"><b>192</b></div></div>
+      <div class="cell"><img src="amber-512.png" width="112" height="112" alt=""/><div class="name"><b>512</b></div></div>
+    </div>
+  </section>
+
+  <section>
+    <div class="eyebrow">color <span class="rule"></span> <span>cyan + amber</span></div>
+    <h2>The full <span class="cool">cut</span>, in colour.</h2>
+    <p class="section-copy">Cold shell, warm core, cyan cut with a soft glow — the complete mark where there are enough pixels to carry the detail.</p>
+    <div class="lead-row">
+      <img src="color.svg" alt="Rind color master" />
+      <div class="note"><b>color.svg</b><br/>scalable master<br/>shell · core · cut · glow</div>
+    </div>
+    <div class="grid">
+      <div class="cell"><img class="pixel" src="color-16.png" width="64" height="64" alt=""/><div class="name"><b>16</b></div></div>
+      <div class="cell"><img class="pixel" src="color-32.png" width="64" height="64" alt=""/><div class="name"><b>32</b></div></div>
+      <div class="cell"><img src="color-48.png" width="72" height="72" alt=""/><div class="name"><b>48</b></div></div>
+      <div class="cell"><img src="color-192.png" width="96" height="96" alt=""/><div class="name"><b>192</b></div></div>
+      <div class="cell"><img src="color-512.png" width="112" height="112" alt=""/><div class="name"><b>512</b></div></div>
+    </div>
+  </section>
+
+  <section>
+    <div class="eyebrow">animated <span class="rule"></span> <span>the cut opens</span></div>
+    <h2>Colour, <span class="warm">cut open</span>.</h2>
+    <p class="section-copy">The colour icon with the slash as motion — the cut sweeps in and the core glows through, then resets. Loops forever; honours <code style="font-family:'JetBrains Mono',monospace;color:var(--accent)">prefers-reduced-motion</code>.</p>
+    <div class="anim-stage">
+      <img src="color-animated.svg" alt="Rind animated icon" />
+    </div>
+  </section>
+
+  <section>
+    <div class="eyebrow">files <span class="rule"></span> <span>in this folder</span></div>
+    <div class="files">
+      <span><b>amber.svg</b> + <b>amber-{16,32,48,192,512}.png</b></span>
+      <span><b>color.svg</b> + <b>color-{16,32,48,192,512}.png</b></span>
+      <span><b>color-animated.svg</b> — animated</span>
+      <span><b>raster.html</b> / <b>generate-pngs.mjs</b> — regen</span>
+    </div>
+  </section>
+
+  <footer>
+    <span>palette · space grotesk + jetbrains mono</span>
+    <span class="swatches">
+      <i style="background:#0b1115"></i><i style="background:#13242b"></i><i style="background:#5fd7ff"></i><i style="background:#f5c451"></i><i style="background:#e6f0f2"></i>
+    </span>
+    <span>rind · icons</span>
+  </footer>
+
+</div>
+</body>
+</html>
