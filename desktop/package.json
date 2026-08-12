@@ -15,7 +15,8 @@
   },
   "dependencies": {
     "electron-log": "^5.4.3",
-    "electron-window-state": "^5.0.3"
+    "electron-window-state": "^5.0.3",
+    "highlight.js": "^11.11.2"
   },
   "devDependencies": {
     "@types/node": "^22.15.0",

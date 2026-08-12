@@ -17,6 +17,7 @@ import {
   relativeTime,
 } from "../src/renderer/timeline-model.ts"
 import { composerRegionMarkup } from "../src/renderer/composer-region.ts"
+import { highlightFile } from "../src/renderer/syntax-highlight.ts"
 
 function event(type, data = {}, turnId = "turn-1") {
   return { type, sequence: 1, sessionId: "session", turnId, event: data }
@@ -304,4 +305,14 @@ test("composer region keeps plan dock above a persistent input form", () => {
   assert.equal(markup.indexOf('class="composer-region"') < markup.indexOf('id="plan-dock-shell"'), true)
   assert.equal(markup.indexOf('id="plan-dock-shell"') < markup.indexOf('id="composer"'), true)
   assert.match(markup, /id="prompt" rows="2"/)
+})
+
+test("file syntax highlighting escapes unknown files and colors known files", () => {
+  const javascript = highlightFile("app.ts", "const answer = 42")
+  assert.equal(javascript.language, "typescript")
+  assert.match(javascript.html, /hljs-keyword/)
+
+  const plain = highlightFile("notes.txt", "<not markup>")
+  assert.equal(plain.language, "text")
+  assert.equal(plain.html, "&lt;not markup&gt;")
 })

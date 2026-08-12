@@ -32,6 +32,7 @@ import {
   type ToolEntry,
 } from "./timeline-model"
 import { renderMarkdown } from "./markdown"
+import { highlightFile } from "./syntax-highlight"
 
 type AppState = {
   runtime: RuntimeSnapshot
@@ -379,7 +380,8 @@ function renderFiles() {
   if (!preview) {
     filePreview.innerHTML = ""
   } else if (preview.kind === "text") {
-    filePreview.innerHTML = `<div class="file-preview-head"><button type="button" class="ghost-button" data-close-preview title="Back to files">Back</button><strong>${escapeHtml(preview.name)}</strong><small>${formatFileSize(preview.size)}${preview.truncated ? " · truncated" : ""}</small></div><pre><code>${escapeHtml(preview.content || "")}</code></pre>`
+    const highlighted = highlightFile(preview.name, preview.content || "")
+    filePreview.innerHTML = `<div class="file-preview-head"><button type="button" class="ghost-button" data-close-preview title="Back to files">Back</button><strong>${escapeHtml(preview.name)}</strong><small>${escapeHtml(highlighted.language)} · ${formatFileSize(preview.size)}${preview.truncated ? " · truncated" : ""}</small></div><pre><code class="hljs language-${escapeAttribute(highlighted.language)}">${highlighted.html}</code></pre>`
   } else if (preview.kind === "image") {
     filePreview.innerHTML = `<div class="file-preview-head"><button type="button" class="ghost-button" data-close-preview title="Back to files">Back</button><strong>${escapeHtml(preview.name)}</strong><small>${formatFileSize(preview.size)}</small></div><img src="${escapeAttribute(preview.dataUrl || "")}" alt="${escapeAttribute(preview.name)}" />`
   } else {
@@ -395,7 +397,8 @@ function renderDirectory(path: string, depth = 0): string {
       return `<button type="button" class="file-row${state.filePreview?.path === entry.path ? " selected" : ""}" data-preview-file="${escapeAttribute(entry.path)}" style="--file-indent:${depth * 14}px">${escapeHtml(entry.name)}</button>`
     }
     const expanded = state.expandedDirectories.has(entry.path)
-    return `<div class="file-directory"><button type="button" class="file-row directory" data-toggle-directory="${escapeAttribute(entry.path)}" style="--file-indent:${depth * 14}px">${expanded ? "Hide" : "Show"} ${escapeHtml(entry.name)}</button>${expanded ? renderDirectory(entry.path, depth + 1) : ""}</div>`
+    const action = expanded ? "Collapse" : "Expand"
+    return `<div class="file-directory${expanded ? " expanded" : ""}"><button type="button" class="file-row directory" data-toggle-directory="${escapeAttribute(entry.path)}" aria-expanded="${String(expanded)}" aria-label="${escapeAttribute(`${action} ${entry.name}`)}" style="--file-indent:${depth * 14}px"><span class="file-chevron" aria-hidden="true"></span><span>${escapeHtml(entry.name)}</span></button>${expanded ? renderDirectory(entry.path, depth + 1) : ""}</div>`
   })
   const warning = listing.truncated ? `<p class="file-truncated">Only the first 500 items are shown.</p>` : ""
   return `<div class="file-branch">${rows.join("")}${warning}</div>`
