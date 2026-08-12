@@ -12,6 +12,7 @@ import type {
   DesktopFileListing,
   DesktopFilePreview,
   DesktopProject,
+  DesktopRecentSession,
   DesktopSessionSummary,
   DesktopSettings,
   RuntimeEvent,
@@ -52,6 +53,8 @@ type AppState = {
   model: string
   models: string[]
   projects: DesktopProject[]
+  recentSessions: DesktopRecentSession[]
+  pendingRecentSessionIds: Set<string>
   sessionPages: Record<string, DesktopSessionSummary[]>
   sessionTotals: Record<string, number>
   sidebarOpen: boolean
@@ -93,6 +96,8 @@ const state: AppState = {
   model: "",
   models: [],
   projects: [],
+  recentSessions: [],
+  pendingRecentSessionIds: new Set(),
   sessionPages: {},
   sessionTotals: {},
   sidebarOpen: true,
@@ -130,7 +135,10 @@ appRoot.innerHTML = `
         <div class="sidebar-actions">
           <button id="new-session" type="button" class="primary-button" title="Start a new chat in the active project">New chat</button>
         </div>
-        <div id="current-task" class="current-task" hidden></div>
+        <section id="recent-sessions" class="recent-sessions" hidden>
+          <div class="sidebar-heading"><span>Recent</span></div>
+          <div id="recent-list" class="recent-list"></div>
+        </section>
         <div class="sidebar-heading"><span>Projects</span><button id="sidebar-add-project" type="button" class="ghost-button" title="Add project">Add</button></div>
         <div id="project-list" class="project-list"></div>
       </aside>
@@ -174,7 +182,8 @@ const connectionText = requiredElement("connection-text")
 const projectSelect = requiredElement<HTMLSelectElement>("project-select")
 const workspacePath = requiredElement("workspace-path")
 const projectList = requiredElement("project-list")
-const currentTask = requiredElement("current-task")
+const recentSessions = requiredElement("recent-sessions")
+const recentList = requiredElement("recent-list")
 const sessionTitle = requiredElement("session-title")
 const sessionIdLabel = requiredElement("session-id")
 const modelSelect = requiredElement<HTMLSelectElement>("model-select")
@@ -250,14 +259,14 @@ function render() {
   sidebarToggle.title = state.sidebarOpen ? "Hide projects sidebar" : "Show projects sidebar"
   workspacePath.textContent = viewedProject()?.path || "No project selected"
   workspacePath.title = viewedProject()?.path || ""
-  const current = allSessions().find((item) => item.id === state.viewedSessionId)
+  const current = knownSessions().find((item) => item.id === state.viewedSessionId)
   sessionTitle.textContent = current?.title || (state.viewedSessionId ? "Session" : "New session")
   sessionIdLabel.textContent = state.viewedSessionId || ""
   noticeText.textContent = state.notice || runtime.message || ""
   retry.hidden = !currentRuntimeId() || runtime.status !== "error"
   notice.hidden = !noticeText.textContent && retry.hidden
   renderProjectControl()
-  renderCurrentTask()
+  renderRecentSessions()
   renderProjects()
   renderModels()
   renderPlanDock(
@@ -340,6 +349,12 @@ function allSessions() {
   return state.projects.flatMap(projectSessions)
 }
 
+function knownSessions() {
+  const sessions = new Map<string, DesktopSessionSummary>()
+  for (const session of [...state.recentSessions, ...allSessions()]) sessions.set(session.id, session)
+  return [...sessions.values()]
+}
+
 function renderProjectControl() {
   projectSelect.replaceChildren()
   if (!state.projects.length) {
@@ -399,21 +414,30 @@ function renderProjectSession(item: DesktopSessionSummary) {
   `
 }
 
-function renderCurrentTask() {
-  const running = Object.entries(state.runtimeWorkers).filter(([id, snapshot]) => snapshot.status === "ready" && runtimeTurnActive(id))
-  if (!running.length) {
-    currentTask.hidden = true
-    currentTask.replaceChildren()
+function renderRecentSessions() {
+  if (!state.recentSessions.length) {
+    recentSessions.hidden = true
+    recentList.replaceChildren()
     return
   }
-  const items = running.map(([runtimeId]) => {
-    const sessionId = state.runtimeSessionIds[runtimeId]
-    const session = allSessions().find((item) => item.id === sessionId)
-    return { runtimeId, sessionId, title: session?.title || latestUserMessage(conversationFor(sessionId)) || "Current task" }
+  const items = [...state.recentSessions].sort((left, right) => {
+    const leftRunning = runtimeTurnActive(runtimeIdForSession(left.id))
+    const rightRunning = runtimeTurnActive(runtimeIdForSession(right.id))
+    return Number(rightRunning) - Number(leftRunning) || right.lastInteractedAt.localeCompare(left.lastInteractedAt)
   })
-  currentTask.hidden = false
-  currentTask.innerHTML = `
-    ${items.map((item) => `<button type="button" class="current-task-trigger${item.sessionId === state.viewedSessionId ? " selected" : ""}" data-return-runtime="${escapeAttribute(item.runtimeId)}" title="Return to the running task"><span class="status-pip pip-running"></span><span>${escapeHtml(clipLine(item.title, 80))}</span></button>`).join("")}
+  recentSessions.hidden = false
+  recentList.innerHTML = items.map(renderRecentSession).join("")
+}
+
+function renderRecentSession(item: DesktopRecentSession) {
+  const running = runtimeTurnActive(runtimeIdForSession(item.id))
+  const when = item.lastInteractedAt ? relativeTime(item.lastInteractedAt) : ""
+  return `
+    <button type="button" class="session-item${item.id === state.viewedSessionId ? " selected" : ""}${running ? " running" : ""}" data-session-id="${escapeAttribute(item.id)}" title="${escapeAttribute(item.title || "Untitled")}">
+      <span class="session-item-title">${running ? `<span class="status-pip pip-running"></span>` : ""}<span class="session-item-title-text">${escapeHtml(item.title || "Untitled")}</span></span>
+      <small>${escapeHtml(clipLine(item.preview || "", 48))}</small>
+      <small class="session-item-meta">${escapeHtml(when)}</small>
+    </button>
   `
 }
 
@@ -702,14 +726,6 @@ function adoptRuntimeSession(runtimeId: string, sessionId: string) {
   }
 }
 
-function latestUserMessage(conversation: ConversationState) {
-  for (let index = conversation.entries.length - 1; index >= 0; index -= 1) {
-    const entry = conversation.entries[index]
-    if (entry.kind === "user" && entry.content.trim()) return entry.content
-  }
-  return ""
-}
-
 async function request(method: RuntimeMethod, params: Record<string, unknown> = {}, runtimeId = currentRuntimeId()) {
   try {
     return await window.api.runtime.request(runtimeId, method, params)
@@ -742,6 +758,7 @@ function runAction(action: () => Promise<unknown>) {
 
 async function loadSessions() {
   applyOverview(await window.api.projects.get())
+  await flushRecentSessions()
 }
 
 function applyOverview(overview: Awaited<ReturnType<typeof window.api.projects.get>>) {
@@ -752,6 +769,7 @@ function applyOverview(overview: Awaited<ReturnType<typeof window.api.projects.g
     nextTotals[project.path] = project.totalSessions
   }
   state.projects = overview.projects
+  state.recentSessions = overview.recentSessions
   state.chatProjectPath = projectForPath(state.chatProjectPath)?.path || overview.activeProjectPath
   state.viewedProjectPath = projectForPath(state.viewedProjectPath)?.path || state.chatProjectPath
   state.sidebarOpen = overview.sidebarOpen
@@ -830,6 +848,7 @@ function handleRuntimeEvent(envelope: RuntimeEvent) {
   if (envelope.sessionId) {
     adoptRuntimeSession(runtimeId, envelope.sessionId)
     runAction(loadSessions)
+    if (envelope.type === "turn_started") runAction(() => recordRecentSession(envelope.sessionId))
   }
   const sessionId = envelope.sessionId || state.runtimeSessionIds[runtimeId] || ""
   if (sessionId) setConversationFor(sessionId, reduceEvent(conversationFor(sessionId), envelope))
@@ -837,7 +856,7 @@ function handleRuntimeEvent(envelope: RuntimeEvent) {
     runAction(async () => {
       await loadSessions()
       if (sessionId === state.viewedSessionId) render()
-      else renderCurrentTask()
+      else renderRecentSessions()
     })
   }
   if (sessionId === state.viewedSessionId) scheduleRender()
@@ -933,6 +952,7 @@ async function sendPrompt() {
     state.viewedSessionId = result.session_id
     state.viewedProjectPath = project.path
     await loadSessions()
+    await recordRecentSession(result.session_id)
   }
   render()
 }
@@ -977,7 +997,11 @@ async function runSlash(input: string) {
   if (followUp) {
     state.conversation = addUserMessage(state.conversation, followUp)
     const turn = await startTurn(followUp, runtimeId)
-    if (typeof turn.session_id === "string" && turn.session_id) adoptRuntimeSession(runtimeId, turn.session_id)
+    if (typeof turn.session_id === "string" && turn.session_id) {
+      adoptRuntimeSession(runtimeId, turn.session_id)
+      await loadSessions()
+      await recordRecentSession(turn.session_id)
+    }
   }
   render()
 }
@@ -1067,9 +1091,9 @@ projectList.addEventListener("click", (event) => {
   const nextSessionId = sessionButton?.dataset.sessionId
   if (nextSessionId) runAction(() => switchSession(nextSessionId))
 })
-currentTask.addEventListener("click", (event) => {
-  const runtimeId = (event.target as HTMLElement).closest<HTMLElement>("[data-return-runtime]")?.dataset.returnRuntime
-  if (runtimeId) runAction(() => returnToRuntimeSession(runtimeId))
+recentList.addEventListener("click", (event) => {
+  const nextSessionId = (event.target as HTMLElement).closest<HTMLButtonElement>("[data-session-id]")?.dataset.sessionId
+  if (nextSessionId) runAction(() => switchSession(nextSessionId))
 })
 fileTree.addEventListener("click", (event) => {
   const target = event.target as HTMLElement
@@ -1171,6 +1195,20 @@ function keepToolHeaderVisible(id: string, targetOffset: number) {
 function findToolTrigger(id: string) {
   return [...messageStream.querySelectorAll<HTMLButtonElement>("[data-toggle-tool]")]
     .find((button) => button.dataset.toggleTool === id)
+}
+
+async function recordRecentSession(sessionId: string) {
+  if (!sessionId) return
+  state.pendingRecentSessionIds.add(sessionId)
+  await flushRecentSessions()
+}
+
+async function flushRecentSessions() {
+  for (const sessionId of state.pendingRecentSessionIds) {
+    const overview = await window.api.projects.markRecent(sessionId)
+    applyOverview(overview)
+    if (overview.recentSessions.some((session) => session.id === sessionId)) state.pendingRecentSessionIds.delete(sessionId)
+  }
 }
 
 function setToolExpanded(id: string, expanded: boolean) {
@@ -1385,7 +1423,7 @@ function finishResize(handle: HTMLElement, event: PointerEvent) {
 window.addEventListener("resize", () => render())
 
 async function switchSession(nextSessionId: string) {
-  const session = allSessions().find((item) => item.id === nextSessionId)
+  const session = knownSessions().find((item) => item.id === nextSessionId)
   if (!session) return
   const project = projectForPath(session.workspaceRoot)
   if (!project) return
@@ -1432,20 +1470,6 @@ function showCachedSession(sessionId: string) {
   state.conversation = cache[sessionId] || createConversation()
   state.conversationCache = cache
   resetConversationPresentation()
-}
-
-async function returnToRuntimeSession(runtimeId: string) {
-  const sessionId = state.runtimeSessionIds[runtimeId]
-  const session = allSessions().find((item) => item.id === sessionId)
-  if (!session) return
-  const project = projectForPath(session.workspaceRoot)
-  if (!project) return
-  showCachedSession(sessionId)
-  state.viewedProjectPath = project.path
-  state.chatProjectPath = project.path
-  state.viewedRuntimeId = runtimeId
-  applyOverview(await window.api.projects.select(project.path))
-  render()
 }
 
 function createRuntimeId(prefix: string) {

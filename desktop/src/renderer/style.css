@@ -652,24 +652,19 @@ pre code {
 .sidebar-actions .primary-button { min-width: 0; }
 
 .project-list { display: grid; gap: 5px; }
-.current-task { margin: -3px 0 12px; }
-.current-task-trigger {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  width: 100%;
-  min-height: 32px;
-  padding: 6px 8px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  overflow: hidden;
-  color: var(--text-weak);
-  background: var(--bg-inset);
-  text-align: left;
-  transition: border-color 160ms ease, background-color 160ms ease, color 160ms ease;
+.recent-sessions { min-width: 0; margin: -2px 0 12px; }
+.recent-sessions .sidebar-heading { margin-bottom: 4px; }
+.recent-list {
+  display: grid;
+  gap: 1px;
+  max-height: min(38vh, 320px);
+  overflow: auto;
+  padding-right: 2px;
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-strong) transparent;
 }
-.current-task-trigger:hover, .current-task-trigger.selected { border-color: var(--accent-dim); color: var(--text-base); background: var(--accent-wash); }
-.current-task-trigger > span:last-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
+.recent-list .session-item { padding: 5px 7px; }
+.recent-list .session-item-title { font-size: 12px; }
 .project-item { min-width: 0; }
 .project-row { display: flex; align-items: center; gap: 2px; }
 .project-trigger {
@@ -868,8 +863,8 @@ body { min-height: 0; }
   scrollbar-width: thin;
   scrollbar-color: var(--border-strong) transparent;
 }
-.composer textarea::-webkit-scrollbar, .message-stream::-webkit-scrollbar, .project-list::-webkit-scrollbar, .file-tree::-webkit-scrollbar, .file-preview::-webkit-scrollbar, .ledger-output::-webkit-scrollbar, .plan-dock-content::-webkit-scrollbar, .file-diff-lines::-webkit-scrollbar { width: 8px; height: 8px; }
-.composer textarea::-webkit-scrollbar-thumb, .message-stream::-webkit-scrollbar-thumb, .project-list::-webkit-scrollbar-thumb, .file-tree::-webkit-scrollbar-thumb, .file-preview::-webkit-scrollbar-thumb, .ledger-output::-webkit-scrollbar-thumb, .plan-dock-content::-webkit-scrollbar-thumb, .file-diff-lines::-webkit-scrollbar-thumb { border: 2px solid transparent; border-radius: 5px; background: var(--border-strong); background-clip: padding-box; }
+.composer textarea::-webkit-scrollbar, .message-stream::-webkit-scrollbar, .recent-list::-webkit-scrollbar, .project-list::-webkit-scrollbar, .file-tree::-webkit-scrollbar, .file-preview::-webkit-scrollbar, .ledger-output::-webkit-scrollbar, .plan-dock-content::-webkit-scrollbar, .file-diff-lines::-webkit-scrollbar { width: 8px; height: 8px; }
+.composer textarea::-webkit-scrollbar-thumb, .message-stream::-webkit-scrollbar-thumb, .recent-list::-webkit-scrollbar-thumb, .project-list::-webkit-scrollbar-thumb, .file-tree::-webkit-scrollbar-thumb, .file-preview::-webkit-scrollbar-thumb, .ledger-output::-webkit-scrollbar-thumb, .plan-dock-content::-webkit-scrollbar-thumb, .file-diff-lines::-webkit-scrollbar-thumb { border: 2px solid transparent; border-radius: 5px; background: var(--border-strong); background-clip: padding-box; }
 .project-control select { max-width: 210px; min-height: 26px; padding: 2px 6px; border: 1px solid transparent; border-radius: var(--radius); color: var(--text-weak); background: transparent; font-size: 12px; }
 .project-control select:hover:not(:disabled) { border-color: var(--border-strong); color: var(--text-base); }
 

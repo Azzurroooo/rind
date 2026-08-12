@@ -1,12 +1,23 @@
 import { readFile, realpath, stat } from "node:fs/promises"
 import { basename, dirname, join, resolve } from "node:path"
 
-import type { DesktopProject, DesktopProjectOverview, DesktopSessionSummary } from "../preload/types"
+import type { DesktopProject, DesktopProjectOverview, DesktopRecentSession, DesktopSessionSummary } from "../preload/types"
 import { asObject, readJsonObject, writeJsonObject } from "./json-store.ts"
 
 const recentSessionLimit = 5
+const recentDesktopSessionLimit = 10
 const sessionPageLimit = 20
 const maxSessionPageLimit = 50
+
+type StoredRecentSession = {
+  session_id: string
+  last_interacted_at: string
+}
+
+type RecentRecords = {
+  sessions: StoredRecentSession[]
+  needsCleanup: boolean
+}
 
 type StoredProjectState = {
   projects: string[]
@@ -20,20 +31,25 @@ type StoredProjectState = {
 export class DesktopProjectStore {
   private readonly configFile: string
   private readonly sessionIndexFile: string
+  private readonly recentSessionsFile: string
+  private recentWrite = Promise.resolve()
 
   constructor(
     configFile: string,
     sessionIndexFile: string,
+    recentSessionsFile: string,
   ) {
     this.configFile = configFile
     this.sessionIndexFile = sessionIndexFile
+    this.recentSessionsFile = recentSessionsFile
   }
 
   async overview(): Promise<DesktopProjectOverview> {
-    const state = await this.readState()
-    const projects = await Promise.all(state.projects.map((path) => this.projectSummary(path)))
+    const [state, sessions] = await Promise.all([this.readState(), this.readSessionIndex()])
+    const projects = await Promise.all(state.projects.map((path) => this.projectSummary(path, sessions)))
     return {
       projects,
+      recentSessions: await this.recentSessions(state.projects, sessions),
       activeProjectPath: state.activeProjectPath,
       sidebarOpen: state.sidebarOpen,
       sidebarWidth: state.sidebarWidth,
@@ -94,6 +110,27 @@ export class DesktopProjectStore {
     return { sessions: sessions.slice(safeOffset, safeOffset + safeLimit), total: sessions.length }
   }
 
+  async markRecent(sessionId: string): Promise<DesktopProjectOverview> {
+    const next = this.recentWrite.then(() => this.markRecentNow(sessionId))
+    this.recentWrite = next.then(() => undefined, () => undefined)
+    return next
+  }
+
+  private async markRecentNow(sessionId: string): Promise<DesktopProjectOverview> {
+    const cleanId = sessionId.trim()
+    if (!cleanId) return this.overview()
+    const [state, sessions] = await Promise.all([this.readState(), this.readSessionIndex()])
+    const session = sessions.find((item) => item.id === cleanId && this.sessionBelongsToProjects(item, state.projects))
+    if (!session) return this.overview()
+    const recent = await this.readRecentRecords()
+    const next = [{ session_id: session.id, last_interacted_at: new Date().toISOString() }]
+    for (const item of this.normalizeRecentRecords(recent.sessions, state.projects, sessions)) {
+      if (item.session_id !== session.id) next.push(item)
+    }
+    await this.writeRecentRecords(next.slice(0, recentDesktopSessionLimit))
+    return this.overview()
+  }
+
   async isActive(path: string) {
     const state = await this.readState()
     return Boolean(state.activeProjectPath && samePath(state.activeProjectPath, path))
@@ -103,16 +140,12 @@ export class DesktopProjectStore {
     const cleanId = sessionId.trim()
     if (!cleanId) return undefined
     const state = await this.readState()
-    const projects = new Set(state.projects.map((path) => process.platform === "win32" ? path.toLocaleLowerCase() : path))
-    return (await this.readSessionIndex()).find((session) => {
-      const workspace = process.platform === "win32" ? session.workspaceRoot.toLocaleLowerCase() : session.workspaceRoot
-      return session.id === cleanId && session.hasUserMessage && projects.has(workspace)
-    })
+    return (await this.readSessionIndex()).find((session) => session.id === cleanId && this.sessionBelongsToProjects(session, state.projects))
   }
 
-  private async projectSummary(path: string): Promise<DesktopProject> {
+  private async projectSummary(path: string, sessions: DesktopSessionSummary[]): Promise<DesktopProject> {
     const available = await isDirectory(path)
-    const sessions = (await this.readSessionIndex())
+    const projectSessions = sessions
       .filter((session) => session.hasUserMessage)
       .filter((session) => samePath(session.workspaceRoot, path))
       .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))
@@ -120,8 +153,8 @@ export class DesktopProjectStore {
       path,
       name: basename(path) || path,
       available,
-      sessions: sessions.slice(0, recentSessionLimit),
-      totalSessions: sessions.length,
+      sessions: projectSessions.slice(0, recentSessionLimit),
+      totalSessions: projectSessions.length,
     }
   }
 
@@ -180,6 +213,54 @@ export class DesktopProjectStore {
         ? session.hasUserMessage
         : await hasPersistedUserMessage(dirname(this.sessionIndexFile), session.id),
     }))).then((items) => items.map(({ hasUserMessageMarker: _marker, ...session }) => session))
+  }
+
+  private sessionBelongsToProjects(session: DesktopSessionSummary, projects: string[]) {
+    return session.hasUserMessage && projects.some((path) => samePath(path, session.workspaceRoot))
+  }
+
+  private async recentSessions(projects: string[], sessions: DesktopSessionSummary[]): Promise<DesktopRecentSession[]> {
+    const records = await this.readRecentRecords()
+    const normalized = this.normalizeRecentRecords(records.sessions, projects, sessions)
+    if (records.needsCleanup || JSON.stringify(records.sessions) !== JSON.stringify(normalized)) await this.writeRecentRecords(normalized)
+    const byId = new Map(sessions.map((session) => [session.id, session]))
+    return normalized.flatMap((record) => {
+      const session = byId.get(record.session_id)
+      return session ? [{ ...session, lastInteractedAt: record.last_interacted_at }] : []
+    })
+  }
+
+  private async readRecentRecords(): Promise<RecentRecords> {
+    const raw = await readJsonObject(this.recentSessionsFile)
+    if (!Array.isArray(raw.sessions)) return { sessions: [], needsCleanup: raw.sessions !== undefined }
+    let needsCleanup = false
+    const sessions = raw.sessions.flatMap((value) => {
+      const session = asObject(value)
+      const sessionId = typeof session?.session_id === "string" ? session.session_id.trim() : ""
+      const lastInteractedAt = typeof session?.last_interacted_at === "string" ? session.last_interacted_at : ""
+      if (sessionId && Number.isFinite(Date.parse(lastInteractedAt))) return [{ session_id: sessionId, last_interacted_at: lastInteractedAt }]
+      needsCleanup = true
+      return []
+    })
+    return { sessions, needsCleanup }
+  }
+
+  private normalizeRecentRecords(records: StoredRecentSession[], projects: string[], sessions: DesktopSessionSummary[]) {
+    const sessionsById = new Map(sessions.map((session) => [session.id, session]))
+    const newestBySession = new Map<string, StoredRecentSession>()
+    for (const record of records) {
+      const session = sessionsById.get(record.session_id)
+      if (!session || !this.sessionBelongsToProjects(session, projects)) continue
+      const previous = newestBySession.get(record.session_id)
+      if (!previous || record.last_interacted_at > previous.last_interacted_at) newestBySession.set(record.session_id, record)
+    }
+    return [...newestBySession.values()]
+      .sort((left, right) => right.last_interacted_at.localeCompare(left.last_interacted_at) || left.session_id.localeCompare(right.session_id))
+      .slice(0, recentDesktopSessionLimit)
+  }
+
+  private async writeRecentRecords(sessions: StoredRecentSession[]) {
+    await writeJsonObject(this.recentSessionsFile, { sessions })
   }
 }
 

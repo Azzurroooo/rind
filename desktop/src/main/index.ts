@@ -38,6 +38,7 @@ const allowedRuntimeMethods = new Set([
   "slash.execute",
 ])
 let mainWindow: BrowserWindow | undefined
+let desktopProjectStore: DesktopProjectStore | undefined
 let quitting = false
 let runtimeShutdownComplete = false
 const maxSettingLength = 4096
@@ -52,6 +53,10 @@ function runtimeSettingsPath() {
 
 function sessionIndexPath() {
   return join(app.getPath("home"), ".rind", "session_index.json")
+}
+
+function recentSessionsPath() {
+  return join(app.getPath("home"), ".rind", "desktop", "recent-sessions.json")
 }
 
 function asTrimmedString(value: unknown) {
@@ -110,7 +115,8 @@ async function saveRuntimeSettings(value: unknown) {
 }
 
 function projectStore() {
-  return new DesktopProjectStore(configPath(), sessionIndexPath())
+  desktopProjectStore ||= new DesktopProjectStore(configPath(), sessionIndexPath(), recentSessionsPath())
+  return desktopProjectStore
 }
 
 async function chooseProject() {
@@ -167,6 +173,10 @@ function registerIpc() {
     if (typeof path !== "string") throw new Error("Project path must be a string.")
     const overview = await projectStore().remove(path)
     return overview
+  })
+  ipcMain.handle("projects-mark-recent", (_event, sessionId: unknown) => {
+    if (typeof sessionId !== "string") throw new Error("Session id must be a string.")
+    return projectStore().markRecent(sessionId)
   })
   ipcMain.handle("projects-layout-update", (_event, patch: unknown) => {
     const input = asObject(patch)

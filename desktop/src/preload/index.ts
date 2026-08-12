@@ -29,6 +29,7 @@ const api: DesktopApi = {
     add: () => ipcRenderer.invoke("projects-add"),
     select: (path) => ipcRenderer.invoke("projects-select", path),
     remove: (path) => ipcRenderer.invoke("projects-remove", path),
+    markRecent: (sessionId) => ipcRenderer.invoke("projects-mark-recent", sessionId),
     updateLayout: (patch) => ipcRenderer.invoke("projects-layout-update", patch),
     sessions: (path, offset, limit) => ipcRenderer.invoke("projects-sessions", path, offset, limit),
   },

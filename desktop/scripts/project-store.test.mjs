@@ -21,6 +21,7 @@ test("project registry migrates the legacy workspace and pages its sessions", as
     const secondProject = join(directory, "second")
     const configFile = join(directory, "desktop-settings.json")
     const sessionIndexFile = join(directory, "session_index.json")
+    const recentSessionsFile = join(directory, "desktop", "recent-sessions.json")
     await Promise.all([mkdir(firstProject), mkdir(secondProject), mkdir(join(directory, "sessions", "legacy"), { recursive: true })])
     await writeFile(join(directory, "sessions", "legacy", "messages.jsonl"), `${JSON.stringify({ role: "user", content: "Keep this legacy session" })}\n`, "utf8")
     await writeFile(configFile, JSON.stringify({ workspace: firstProject, sidebarCollapsed: true, filePanelWidth: 300 }), "utf8")
@@ -34,7 +35,7 @@ test("project registry migrates the legacy workspace and pages its sessions", as
       ],
     }), "utf8")
 
-    const store = new DesktopProjectStore(configFile, sessionIndexFile)
+    const store = new DesktopProjectStore(configFile, sessionIndexFile, recentSessionsFile)
     const migrated = await store.overview()
     assert.equal(migrated.projects.length, 1)
     assert.equal(migrated.activeProjectPath, firstProject)
@@ -52,5 +53,62 @@ test("project registry migrates the legacy workspace and pages its sessions", as
     assert.deepEqual(remaining.projects.map((project) => project.path), [secondProject])
     assert.equal(remaining.activeProjectPath, secondProject)
     assert.equal((await readFile(sessionIndexFile, "utf8")).includes("\"old\""), true)
+  })
+})
+
+test("recent sessions keep only persisted sessions from registered projects", async () => {
+  await withTempDirectory(async (directory) => {
+    const project = join(directory, "project")
+    const otherProject = join(directory, "other")
+    const configFile = join(directory, "desktop-settings.json")
+    const sessionIndexFile = join(directory, "session_index.json")
+    const recentSessionsFile = join(directory, "desktop", "recent-sessions.json")
+    await Promise.all([mkdir(project), mkdir(otherProject)])
+    await writeFile(configFile, JSON.stringify({ projects: [project], activeProjectPath: project }), "utf8")
+
+    const sessions = Array.from({ length: 12 }, (_value, index) => ({
+      id: `recent-${String(index).padStart(2, "0")}`,
+      workspace_root: project,
+      title: `Recent ${index}`,
+      preview: `Message ${index}`,
+      updated_at: `2026-03-${String(index + 1).padStart(2, "0")}T00:00:00Z`,
+      has_user_message: true,
+    }))
+    sessions.push(
+      { id: "empty", workspace_root: project, title: "Empty", updated_at: "2026-04-01T00:00:00Z", has_user_message: false },
+      { id: "other", workspace_root: otherProject, title: "Other", updated_at: "2026-04-02T00:00:00Z", has_user_message: true },
+    )
+    await writeFile(sessionIndexFile, JSON.stringify({ sessions }), "utf8")
+    await mkdir(join(directory, "desktop"), { recursive: true })
+    await writeFile(recentSessionsFile, JSON.stringify({
+      sessions: [
+        ...Array.from({ length: 12 }, (_value, index) => ({
+          session_id: `recent-${String(index).padStart(2, "0")}`,
+          last_interacted_at: `2026-05-${String(index + 1).padStart(2, "0")}T00:00:00Z`,
+        })),
+        { session_id: "recent-01", last_interacted_at: "2020-01-01T00:00:00Z" },
+        { session_id: "empty", last_interacted_at: "2026-06-01T00:00:00Z" },
+        { session_id: "other", last_interacted_at: "2026-06-02T00:00:00Z" },
+        { session_id: "missing", last_interacted_at: "2026-06-03T00:00:00Z" },
+        { session_id: "", last_interacted_at: "not-a-date" },
+      ],
+    }), "utf8")
+
+    const store = new DesktopProjectStore(configFile, sessionIndexFile, recentSessionsFile)
+    const overview = await store.overview()
+    assert.equal(overview.recentSessions.length, 10)
+    assert.deepEqual(overview.recentSessions.map((session) => session.id), [
+      "recent-11", "recent-10", "recent-09", "recent-08", "recent-07",
+      "recent-06", "recent-05", "recent-04", "recent-03", "recent-02",
+    ])
+    const cleaned = JSON.parse(await readFile(recentSessionsFile, "utf8"))
+    assert.equal(cleaned.sessions.length, 10)
+    assert.equal(cleaned.sessions.some((session) => ["empty", "other", "missing"].includes(session.session_id)), false)
+
+    const refreshed = await store.markRecent("recent-02")
+    assert.equal(refreshed.recentSessions[0].id, "recent-02")
+    assert.equal(refreshed.recentSessions.length, 10)
+    const afterInvalidMark = await store.markRecent("empty")
+    assert.equal(afterInvalidMark.recentSessions[0].id, "recent-02")
   })
 })
