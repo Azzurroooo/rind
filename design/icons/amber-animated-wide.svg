@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120" role="img" aria-label="Rind amber animated mark with wide cut">
+  <defs>
+    <mask id="cutout">
+      <rect x="0" y="0" width="120" height="120" fill="black" />
+      <rect x="10" y="10" width="100" height="100" rx="22" fill="white" />
+      <line class="cut" x1="75" y1="10" x2="10" y2="75" stroke="black" stroke-width="18" stroke-linecap="round" />
+    </mask>
+    <style>
+      .cut {
+        stroke-dasharray: 110;
+        stroke-dashoffset: 110;
+        animation: peel 2.4s cubic-bezier(.6,.05,.25,1) infinite;
+      }
+      @keyframes peel {
+        0%, 5%   { stroke-dashoffset: 110; opacity: 1; }
+        36%      { stroke-dashoffset: 0; opacity: 1; }
+        68%      { stroke-dashoffset: 0; opacity: 1; }
+        84%      { stroke-dashoffset: 110; opacity: 1; }
+        100%     { stroke-dashoffset: 110; opacity: 1; }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        .cut { animation: none; stroke-dashoffset: 0; }
+      }
+    </style>
+  </defs>
+  <rect x="0" y="0" width="120" height="120" fill="#f5c451" mask="url(#cutout)" />
+</svg>

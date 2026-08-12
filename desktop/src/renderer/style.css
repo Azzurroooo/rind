@@ -516,6 +516,7 @@ pre code {
   font-size: 12.5px;
   font-variant-numeric: tabular-nums;
 }
+.working-mark { display: block; flex: none; width: 16px; height: 16px; }
 
 /* jump-to-latest pill */
 .jump-latest {

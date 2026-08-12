@@ -1,5 +1,6 @@
 import "./style.css"
 import brandMarkUrl from "./assets/brand-mark.svg"
+import workingMarkUrl from "./assets/working-mark.svg"
 
 import {
   composerRegionMarkup,
@@ -653,7 +654,7 @@ function renderWorking(): string {
   const { conversation } = state
   if (!conversation.activeTurnId) return ""
   const elapsed = conversation.turnStartedAt ? Math.max(0, Math.round((Date.now() - conversation.turnStartedAt) / 1000)) : 0
-  return `<div class="working"><span class="status-pip pip-running"></span><span id="working-label">Working… ${elapsed}s</span></div>`
+  return `<div class="working"><img class="working-mark" src="${workingMarkUrl}" alt="" aria-hidden="true" /><span id="working-label">Working… ${elapsed}s</span></div>`
 }
 
 function syncWorkingTimer() {
