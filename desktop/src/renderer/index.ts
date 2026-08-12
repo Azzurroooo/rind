@@ -367,7 +367,7 @@ function renderProjects() {
     return
   }
   for (const project of state.projects) {
-    const expanded = state.expandedProjects.has(project.path) || samePath(project.path, state.viewedProjectPath)
+    const expanded = state.expandedProjects.has(project.path)
     const sessions = projectSessions(project)
     const total = state.sessionTotals[project.path] ?? project.totalSessions
     const projectNode = document.createElement("section")
@@ -760,7 +760,6 @@ function applyOverview(overview: Awaited<ReturnType<typeof window.api.projects.g
   state.filePanelWidth = overview.filePanelWidth
   state.sessionPages = nextPages
   state.sessionTotals = nextTotals
-  if (state.viewedProjectPath) state.expandedProjects.add(state.viewedProjectPath)
 }
 
 function mergeSessions(primary: DesktopSessionSummary[], secondary: DesktopSessionSummary[]) {
