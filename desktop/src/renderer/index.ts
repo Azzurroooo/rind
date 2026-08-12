@@ -44,6 +44,7 @@ type AppState = {
   runtimeWorkers: Record<string, RuntimeSnapshot>
   runtimeSessionIds: Record<string, string>
   runtimeTurnPending: Record<string, boolean>
+  runtimeStarting: Record<string, boolean>
   viewedSessionId: string
   viewedProjectPath: string
   chatProjectPath: string
@@ -87,6 +88,7 @@ const state: AppState = {
   runtimeWorkers: {},
   runtimeSessionIds: {},
   runtimeTurnPending: {},
+  runtimeStarting: {},
   viewedSessionId: "",
   viewedProjectPath: "",
   chatProjectPath: "",
@@ -246,6 +248,7 @@ function render() {
   const filesWidth = state.filesOpen ? state.filePanelWidth : 0
   connectionText.textContent = runtimeStatusLabel(runtime.status)
   connection.className = `connection connection-${runtime.status}`
+  connection.hidden = Boolean(state.runtimeStarting[runtimeId])
   appRoot.classList.toggle("sidebar-open", state.sidebarOpen)
   appRoot.classList.toggle("files-open", state.filesOpen)
   appRoot.classList.toggle("files-wide", wideFiles)
@@ -284,7 +287,7 @@ function render() {
       ready: chatProject()?.available === true && state.settings.hasApiKey,
       active: runtimeTurnActive(),
       readOnly: false,
-      starting: Boolean(state.runtimeTurnPending[runtimeId]),
+      starting: Boolean(state.runtimeStarting[runtimeId]),
       controllingTurn: Boolean(runtimeConversation().activeTurnId),
       runtimeSessionId: state.viewedSessionId,
       composerMenuOpen: state.composerMenuOpen,
@@ -741,14 +744,20 @@ async function request(method: RuntimeMethod, params: Record<string, unknown> = 
 async function ensureRuntime(runtimeId: string, workspace: string, sessionId?: string) {
   const current = state.runtimeWorkers[runtimeId]
   if (current?.status === "ready") return runtimeId
-  if (!current || current.status === "stopped" || current.status === "error") {
-    state.runtimeWorkers[runtimeId] = await window.api.runtime.start(runtimeId, workspace, sessionId)
+  state.runtimeStarting[runtimeId] = true
+  render()
+  try {
+    if (!current || current.status === "stopped" || current.status === "error") {
+      state.runtimeWorkers[runtimeId] = await window.api.runtime.start(runtimeId, workspace, sessionId)
+      render()
+    }
+    await window.api.runtime.initialize(runtimeId)
+    state.runtimeWorkers[runtimeId] = { ...state.runtimeWorkers[runtimeId], status: "ready", runtimeId, workspace, sessionId }
+    return runtimeId
+  } finally {
+    state.runtimeStarting[runtimeId] = false
     render()
   }
-  await window.api.runtime.initialize(runtimeId)
-  state.runtimeWorkers[runtimeId] = { ...state.runtimeWorkers[runtimeId], status: "ready", runtimeId, workspace, sessionId }
-  render()
-  return runtimeId
 }
 
 function runAction(action: () => Promise<unknown>) {

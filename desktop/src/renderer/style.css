@@ -552,6 +552,14 @@ pre code {
 .composer textarea::placeholder { color: var(--text-faint); }
 .composer textarea:disabled { opacity: 1; color: var(--text-weak); }
 
+#send { display: inline-grid; min-width: 64px; grid-template-columns: 1fr; place-items: center; }
+#send .send-label, #send .send-spinner { grid-area: 1 / 1; }
+#send .send-spinner { display: none; width: 13px; height: 13px; border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%; animation: send-spin 720ms linear infinite; }
+#send.is-starting { color: var(--text-faint); background: var(--bg-hover); }
+#send.is-starting .send-label { visibility: hidden; }
+#send.is-starting .send-spinner { display: block; }
+@keyframes send-spin { to { transform: rotate(360deg); } }
+
 .composer-footer {
   display: flex;
   align-items: center;
@@ -788,7 +796,7 @@ pre code {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .pip-running, .connection-starting .status-pip, .ledger-row.tool-running .ledger-trigger { animation: none; }
+  .pip-running, .connection-starting .status-pip, .ledger-row.tool-running .ledger-trigger, #send .send-spinner { animation: none; }
   .ledger-chevron, .plan-chevron, .file-chevron, .tool-detail-shell, .plan-dock-shell, .plan-dock, .plan-dock-body { transition: none; }
 }
 

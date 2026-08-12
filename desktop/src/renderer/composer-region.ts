@@ -52,7 +52,7 @@ export function composerRegionMarkup() {
           <span class="composer-spacer"></span>
           <button id="steer" type="button" class="ghost-button" title="Steer the running turn with this message">Steer</button>
           <button id="interrupt" type="button" class="ghost-button danger" title="Stop the running turn (Esc)">Stop</button>
-          <button id="send" type="submit" class="primary-button">Send</button>
+          <button id="send" type="submit" class="primary-button"><span class="send-label">Send</span><span class="send-spinner" aria-hidden="true"></span></button>
         </div>
       </form>
     </div>
@@ -112,12 +112,15 @@ export function dismissPlanError(conversation: ConversationState, sessionId: str
 }
 
 export function renderComposer(elements: ComposerElements, view: ComposerView) {
-  elements.prompt.disabled = !view.ready || view.readOnly || view.starting
+  elements.prompt.disabled = !view.ready || view.readOnly
   elements.prompt.placeholder = view.readOnly
     ? "Return to the current task to send a message"
-    : view.starting ? "Starting task..." : "Message Rind — Enter to send, Shift+Enter for a new line"
+    : "Message Rind — Enter to send, Shift+Enter for a new line"
   elements.send.disabled = !view.ready || view.readOnly || view.starting
-  elements.send.textContent = view.readOnly ? "Viewing" : view.starting ? "Starting..." : view.active ? "Queue" : "Send"
+  const label = elements.send.querySelector<HTMLElement>(".send-label")
+  if (label) label.textContent = view.readOnly ? "Viewing" : view.active ? "Queue" : "Send"
+  elements.send.classList.toggle("is-starting", view.starting)
+  elements.send.setAttribute("aria-busy", String(view.starting))
   elements.send.title = view.readOnly
     ? "Return to the current task before sending"
     : view.starting ? "Waiting for the task to start" : view.active ? "Queue as follow-up for the running turn" : "Send message"

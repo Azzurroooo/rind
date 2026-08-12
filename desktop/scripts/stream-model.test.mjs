@@ -305,6 +305,7 @@ test("composer region keeps plan dock above a persistent input form", () => {
   assert.equal(markup.indexOf('class="composer-region"') < markup.indexOf('id="plan-dock-shell"'), true)
   assert.equal(markup.indexOf('id="plan-dock-shell"') < markup.indexOf('id="composer"'), true)
   assert.match(markup, /id="prompt" rows="2"/)
+  assert.match(markup, /class="send-spinner"/)
 })
 
 test("file syntax highlighting escapes unknown files and colors known files", () => {
