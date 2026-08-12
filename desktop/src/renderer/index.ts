@@ -108,7 +108,7 @@ const state: AppState = {
   revealedTools: new Set(),
   planDock: { collapsed: false, displayedPlanId: "", dismissedPlanErrors: new Set() },
   composerMenuOpen: false,
-  notice: "Add a project to begin.",
+  notice: "",
 }
 
 appRoot.innerHTML = `
