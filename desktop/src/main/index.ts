@@ -205,6 +205,8 @@ function registerIpc() {
 
 function createMainWindow() {
   const state = windowState({ defaultWidth: 1320, defaultHeight: 860 })
+  const isMac = process.platform === "darwin"
+  const isWin = process.platform === "win32"
   const win = new BrowserWindow({
     x: state.x,
     y: state.y,
@@ -213,6 +215,16 @@ function createMainWindow() {
     show: false,
     title: "Rind",
     autoHideMenuBar: true,
+    backgroundColor: "#1a1a1f",
+    icon: join(root, "../../resources/icon.png"),
+    ...(isMac && {
+      titleBarStyle: "hidden",
+      trafficLightPosition: { x: 14, y: 15 },
+    }),
+    ...(isWin && {
+      titleBarStyle: "hidden",
+      titleBarOverlay: { color: "#1a1a1f", symbolColor: "#c9c9cf", height: 46 },
+    }),
     webPreferences: {
       preload: join(root, "../preload/index.js"),
       contextIsolation: true,

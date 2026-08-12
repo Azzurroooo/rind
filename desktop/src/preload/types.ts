@@ -132,6 +132,7 @@ export type DesktopApi = {
     preview: (projectPath: string, path: string) => Promise<DesktopFilePreview>
   }
   quit: () => Promise<void>
+  platform: string
 }
 
 declare global {

@@ -41,6 +41,7 @@ const api: DesktopApi = {
     preview: (projectPath, path) => ipcRenderer.invoke("project-files-preview", projectPath, path),
   },
   quit: () => ipcRenderer.invoke("app-quit"),
+  platform: process.platform,
 }
 
 contextBridge.exposeInMainWorld("api", api)

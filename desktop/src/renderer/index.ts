@@ -1,4 +1,5 @@
 import "./style.css"
+import brandMarkUrl from "./assets/brand-mark.svg"
 
 import {
   composerRegionMarkup,
@@ -78,6 +79,7 @@ type AppState = {
 const root = document.querySelector<HTMLElement>("#app")
 if (!root) throw new Error("Renderer root is missing.")
 const appRoot: HTMLElement = root
+document.body.dataset.platform = window.api.platform
 
 const state: AppState = {
   runtime: { status: "stopped" },
@@ -122,7 +124,10 @@ appRoot.innerHTML = `
   <div class="app-shell">
     <header class="topbar">
       <div class="identity">
-        <span class="brand">Rind</span>
+        <div class="brand-group">
+          <img class="brand-mark" src="${brandMarkUrl}" alt="" aria-hidden="true" />
+          <span class="brand">Rind</span>
+        </div>
         <span id="connection" class="connection"><span class="status-pip"></span><span id="connection-text">Stopped</span></span>
       </div>
       <div class="workspace">
@@ -506,9 +511,8 @@ function renderStream() {
     if (id && detail) previousDetails.set(id, detail)
   }
   if (!entries.length && !conversation.question) {
-    messageStream.innerHTML = state.runtime.status === "ready"
-      ? `<div class="stream-empty"><p>No messages yet.</p><p class="subtle">Ask Rind to inspect, change, or explain something in this workspace.</p></div>`
-      : ""
+    const ready = state.runtime.status === "ready"
+    messageStream.innerHTML = `<div class="stream-empty"><img class="stream-empty-mark" src="${brandMarkUrl}" alt="" aria-hidden="true" /><p>No messages yet</p><p class="subtle">${ready ? "Ask Rind to inspect, change, or explain something in this workspace." : "Pick a project and start a runtime to begin."}</p></div>`
   } else {
     messageStream.innerHTML = entries.map(renderEntry).join("") + renderQuestion() + renderWorking()
   }

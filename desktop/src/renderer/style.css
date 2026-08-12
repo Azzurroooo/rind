@@ -81,10 +81,22 @@ button:disabled { cursor: not-allowed; opacity: 0.45; }
   padding: 0 14px;
   border-bottom: 1px solid var(--border);
   background: var(--bg-raised);
+  -webkit-app-region: drag;
 }
+
+.topbar button,
+.topbar select,
+.topbar input,
+.topbar .brand-mark,
+.topbar .connection { -webkit-app-region: no-drag; }
+
+body[data-platform="win32"] .topbar { padding-right: 142px; }
+body[data-platform="darwin"] .topbar { padding-left: 80px; }
 
 .identity, .workspace { display: flex; align-items: center; gap: 10px; min-width: 0; }
 
+.brand-group { display: flex; align-items: center; gap: 7px; min-width: 0; }
+.brand-mark { display: block; flex: none; width: 20px; height: 20px; }
 .brand { color: var(--accent); font-weight: 700; letter-spacing: 0.02em; }
 
 .connection {
@@ -219,8 +231,19 @@ button:disabled { cursor: not-allowed; opacity: 0.45; }
 }
 .message-stream > * { max-width: var(--stream-width); margin-left: auto; margin-right: auto; }
 
-.stream-empty { padding: 48px 0; text-align: center; color: var(--text-weak); }
-.stream-empty .subtle { font-family: var(--font-ui); font-size: 12.5px; white-space: normal; }
+.stream-empty {
+  min-height: 70vh;
+  padding: 24px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  color: var(--text-weak);
+}
+.stream-empty-mark { width: 96px; height: 96px; margin-bottom: 20px; opacity: 0.9; }
+.stream-empty p { margin: 0; }
+.stream-empty .subtle { margin-top: 6px; font-family: var(--font-ui); font-size: 12.5px; white-space: normal; }
 
 /* user bubble: right-aligned, warm tint — the only boxed message */
 .turn-user { display: flex; justify-content: flex-end; margin-bottom: 14px; }
@@ -777,6 +800,8 @@ pre code {
 
 @media (max-width: 760px) {
   .topbar { gap: 8px; padding-inline: 8px; }
+  body[data-platform="win32"] .topbar { padding-right: 142px; }
+  body[data-platform="darwin"] .topbar { padding-left: 80px; }
   .connection { display: none; }
   .workspace { gap: 4px; }
   .workspace .ghost-button { padding-inline: 6px; }

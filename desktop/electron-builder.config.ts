@@ -11,10 +11,18 @@ const config: Configuration = {
   files: ["out/**/*", "resources/**/*"],
   win: {
     target: ["nsis"],
+    icon: "resources/icon.png",
   },
   nsis: {
     oneClick: true,
     perMachine: false,
+  },
+  mac: {
+    icon: "resources/icon.png",
+  },
+  linux: {
+    target: ["AppImage"],
+    icon: "resources/icon.png",
   },
 }
 
