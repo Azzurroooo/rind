@@ -55,7 +55,7 @@ function sessionIndexPath() {
   return join(app.getPath("home"), ".rind", "session_index.json")
 }
 
-function recentSessionsPath() {
+function legacyRecentSessionsPath() {
   return join(app.getPath("home"), ".rind", "desktop", "recent-sessions.json")
 }
 
@@ -115,7 +115,7 @@ async function saveRuntimeSettings(value: unknown) {
 }
 
 function projectStore() {
-  desktopProjectStore ||= new DesktopProjectStore(configPath(), sessionIndexPath(), recentSessionsPath())
+  desktopProjectStore ||= new DesktopProjectStore(configPath(), sessionIndexPath(), legacyRecentSessionsPath())
   return desktopProjectStore
 }
 

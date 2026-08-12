@@ -1,4 +1,4 @@
-import { readFile, realpath, stat } from "node:fs/promises"
+import { readFile, realpath, stat, unlink } from "node:fs/promises"
 import { basename, dirname, join, resolve } from "node:path"
 
 import type { DesktopProject, DesktopProjectOverview, DesktopRecentSession, DesktopSessionSummary } from "../preload/types"
@@ -14,14 +14,10 @@ type StoredRecentSession = {
   last_interacted_at: string
 }
 
-type RecentRecords = {
-  sessions: StoredRecentSession[]
-  needsCleanup: boolean
-}
-
 type StoredProjectState = {
   projects: string[]
   activeProjectPath: string
+  recentSessions: StoredRecentSession[]
   sidebarOpen: boolean
   sidebarWidth: number
   filesOpen: boolean
@@ -31,17 +27,17 @@ type StoredProjectState = {
 export class DesktopProjectStore {
   private readonly configFile: string
   private readonly sessionIndexFile: string
-  private readonly recentSessionsFile: string
+  private readonly legacyRecentSessionsFile: string
   private recentWrite = Promise.resolve()
 
   constructor(
     configFile: string,
     sessionIndexFile: string,
-    recentSessionsFile: string,
+    legacyRecentSessionsFile: string,
   ) {
     this.configFile = configFile
     this.sessionIndexFile = sessionIndexFile
-    this.recentSessionsFile = recentSessionsFile
+    this.legacyRecentSessionsFile = legacyRecentSessionsFile
   }
 
   async overview(): Promise<DesktopProjectOverview> {
@@ -49,7 +45,7 @@ export class DesktopProjectStore {
     const projects = await Promise.all(state.projects.map((path) => this.projectSummary(path, sessions)))
     return {
       projects,
-      recentSessions: await this.recentSessions(state.projects, sessions),
+      recentSessions: await this.recentSessions(state, sessions),
       activeProjectPath: state.activeProjectPath,
       sidebarOpen: state.sidebarOpen,
       sidebarWidth: state.sidebarWidth,
@@ -122,12 +118,11 @@ export class DesktopProjectStore {
     const [state, sessions] = await Promise.all([this.readState(), this.readSessionIndex()])
     const session = sessions.find((item) => item.id === cleanId && this.sessionBelongsToProjects(item, state.projects))
     if (!session) return this.overview()
-    const recent = await this.readRecentRecords()
     const next = [{ session_id: session.id, last_interacted_at: new Date().toISOString() }]
-    for (const item of this.normalizeRecentRecords(recent.sessions, state.projects, sessions)) {
+    for (const item of this.normalizeRecentRecords(state.recentSessions, state.projects, sessions)) {
       if (item.session_id !== session.id) next.push(item)
     }
-    await this.writeRecentRecords(next.slice(0, recentDesktopSessionLimit))
+    await this.writeState({ ...state, recentSessions: next.slice(0, recentDesktopSessionLimit) })
     return this.overview()
   }
 
@@ -160,6 +155,7 @@ export class DesktopProjectStore {
 
   private async readState(): Promise<StoredProjectState> {
     const raw = await readJsonObject(this.configFile)
+    const legacyRecentSessions = await this.readLegacyRecentSessions()
     const rawProjects = Array.isArray(raw.projects) ? raw.projects.filter((item): item is string => typeof item === "string") : []
     const legacyWorkspace = typeof raw.workspace === "string" ? raw.workspace : ""
     const projects = uniquePaths([...rawProjects, legacyWorkspace].filter(Boolean).map(storedPath))
@@ -168,12 +164,19 @@ export class DesktopProjectStore {
     const state: StoredProjectState = {
       projects,
       activeProjectPath,
+      recentSessions: mergeRecentRecords([
+        ...parseRecentRecords(raw.recentSessions),
+        ...(legacyRecentSessions || []),
+      ]),
       sidebarOpen: raw.sidebarOpen === undefined ? raw.sidebarCollapsed !== true : raw.sidebarOpen === true,
       sidebarWidth: validSidebarWidth(raw.sidebarWidth),
       filesOpen: raw.filesOpen === true,
       filePanelWidth: validFilePanelWidth(storedFilePanelWidth(raw)),
     }
-    if (needsMigration(raw, state)) await this.writeState(state)
+    if (needsMigration(raw, state) || legacyRecentSessions) {
+      await this.writeState(state)
+      if (legacyRecentSessions) await unlink(this.legacyRecentSessionsFile)
+    }
     return state
   }
 
@@ -181,6 +184,7 @@ export class DesktopProjectStore {
     await writeJsonObject(this.configFile, {
       projects: state.projects,
       activeProjectPath: state.activeProjectPath,
+      recentSessions: state.recentSessions,
       sidebarOpen: state.sidebarOpen,
       sidebarWidth: state.sidebarWidth,
       filesOpen: state.filesOpen,
@@ -219,10 +223,11 @@ export class DesktopProjectStore {
     return session.hasUserMessage && projects.some((path) => samePath(path, session.workspaceRoot))
   }
 
-  private async recentSessions(projects: string[], sessions: DesktopSessionSummary[]): Promise<DesktopRecentSession[]> {
-    const records = await this.readRecentRecords()
-    const normalized = this.normalizeRecentRecords(records.sessions, projects, sessions)
-    if (records.needsCleanup || JSON.stringify(records.sessions) !== JSON.stringify(normalized)) await this.writeRecentRecords(normalized)
+  private async recentSessions(state: StoredProjectState, sessions: DesktopSessionSummary[]): Promise<DesktopRecentSession[]> {
+    const normalized = this.normalizeRecentRecords(state.recentSessions, state.projects, sessions)
+    if (JSON.stringify(state.recentSessions) !== JSON.stringify(normalized)) {
+      await this.writeState({ ...state, recentSessions: normalized })
+    }
     const byId = new Map(sessions.map((session) => [session.id, session]))
     return normalized.flatMap((record) => {
       const session = byId.get(record.session_id)
@@ -230,19 +235,14 @@ export class DesktopProjectStore {
     })
   }
 
-  private async readRecentRecords(): Promise<RecentRecords> {
-    const raw = await readJsonObject(this.recentSessionsFile)
-    if (!Array.isArray(raw.sessions)) return { sessions: [], needsCleanup: raw.sessions !== undefined }
-    let needsCleanup = false
-    const sessions = raw.sessions.flatMap((value) => {
-      const session = asObject(value)
-      const sessionId = typeof session?.session_id === "string" ? session.session_id.trim() : ""
-      const lastInteractedAt = typeof session?.last_interacted_at === "string" ? session.last_interacted_at : ""
-      if (sessionId && Number.isFinite(Date.parse(lastInteractedAt))) return [{ session_id: sessionId, last_interacted_at: lastInteractedAt }]
-      needsCleanup = true
-      return []
-    })
-    return { sessions, needsCleanup }
+  private async readLegacyRecentSessions(): Promise<StoredRecentSession[] | undefined> {
+    try {
+      await stat(this.legacyRecentSessionsFile)
+    } catch {
+      return undefined
+    }
+    const raw = await readJsonObject(this.legacyRecentSessionsFile)
+    return parseRecentRecords(raw.sessions)
   }
 
   private normalizeRecentRecords(records: StoredRecentSession[], projects: string[], sessions: DesktopSessionSummary[]) {
@@ -259,14 +259,12 @@ export class DesktopProjectStore {
       .slice(0, recentDesktopSessionLimit)
   }
 
-  private async writeRecentRecords(sessions: StoredRecentSession[]) {
-    await writeJsonObject(this.recentSessionsFile, { sessions })
-  }
 }
 
 function needsMigration(raw: Record<string, unknown>, state: StoredProjectState) {
   return raw.workspace !== undefined
     || raw.activeProjectPath !== state.activeProjectPath
+    || JSON.stringify(raw.recentSessions) !== JSON.stringify(state.recentSessions)
     || raw.sidebarOpen !== state.sidebarOpen
     || raw.sidebarWidth !== state.sidebarWidth
     || raw.sidebarCollapsed !== undefined
@@ -275,6 +273,27 @@ function needsMigration(raw: Record<string, unknown>, state: StoredProjectState)
     || raw.fileTreeWidth !== undefined
     || raw.filePreviewWidth !== undefined
     || JSON.stringify(raw.projects) !== JSON.stringify(state.projects)
+}
+
+function parseRecentRecords(value: unknown): StoredRecentSession[] {
+  if (!Array.isArray(value)) return []
+  return value.flatMap((item) => {
+    const session = asObject(item)
+    const sessionId = typeof session?.session_id === "string" ? session.session_id.trim() : ""
+    const lastInteractedAt = typeof session?.last_interacted_at === "string" ? session.last_interacted_at : ""
+    if (sessionId && Number.isFinite(Date.parse(lastInteractedAt))) return [{ session_id: sessionId, last_interacted_at: lastInteractedAt }]
+    return []
+  })
+}
+
+function mergeRecentRecords(records: StoredRecentSession[]) {
+  const newestBySession = new Map<string, StoredRecentSession>()
+  for (const record of records) {
+    const previous = newestBySession.get(record.session_id)
+    if (!previous || record.last_interacted_at > previous.last_interacted_at) newestBySession.set(record.session_id, record)
+  }
+  return [...newestBySession.values()]
+    .sort((left, right) => right.last_interacted_at.localeCompare(left.last_interacted_at) || left.session_id.localeCompare(right.session_id))
 }
 
 function validSidebarWidth(value: unknown) { return typeof value === "number" && Number.isFinite(value) ? Math.max(180, Math.min(420, Math.round(value))) : 248 }

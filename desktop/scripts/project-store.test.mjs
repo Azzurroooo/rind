@@ -21,7 +21,6 @@ test("project registry migrates the legacy workspace and pages its sessions", as
     const secondProject = join(directory, "second")
     const configFile = join(directory, "desktop-settings.json")
     const sessionIndexFile = join(directory, "session_index.json")
-    const recentSessionsFile = join(directory, "desktop", "recent-sessions.json")
     await Promise.all([mkdir(firstProject), mkdir(secondProject), mkdir(join(directory, "sessions", "legacy"), { recursive: true })])
     await writeFile(join(directory, "sessions", "legacy", "messages.jsonl"), `${JSON.stringify({ role: "user", content: "Keep this legacy session" })}\n`, "utf8")
     await writeFile(configFile, JSON.stringify({ workspace: firstProject, sidebarCollapsed: true, filePanelWidth: 300 }), "utf8")
@@ -35,7 +34,7 @@ test("project registry migrates the legacy workspace and pages its sessions", as
       ],
     }), "utf8")
 
-    const store = new DesktopProjectStore(configFile, sessionIndexFile, recentSessionsFile)
+    const store = new DesktopProjectStore(configFile, sessionIndexFile, join(directory, "desktop", "recent-sessions.json"))
     const migrated = await store.overview()
     assert.equal(migrated.projects.length, 1)
     assert.equal(migrated.activeProjectPath, firstProject)
@@ -101,14 +100,34 @@ test("recent sessions keep only persisted sessions from registered projects", as
       "recent-11", "recent-10", "recent-09", "recent-08", "recent-07",
       "recent-06", "recent-05", "recent-04", "recent-03", "recent-02",
     ])
-    const cleaned = JSON.parse(await readFile(recentSessionsFile, "utf8"))
-    assert.equal(cleaned.sessions.length, 10)
-    assert.equal(cleaned.sessions.some((session) => ["empty", "other", "missing"].includes(session.session_id)), false)
-
     const refreshed = await store.markRecent("recent-02")
     assert.equal(refreshed.recentSessions[0].id, "recent-02")
     assert.equal(refreshed.recentSessions.length, 10)
     const afterInvalidMark = await store.markRecent("empty")
     assert.equal(afterInvalidMark.recentSessions[0].id, "recent-02")
+    const stored = JSON.parse(await readFile(configFile, "utf8"))
+    assert.equal(stored.recentSessions.length, 10)
+    assert.equal(stored.recentSessions[0].session_id, "recent-02")
+    await assert.rejects(() => readFile(recentSessionsFile, "utf8"), { code: "ENOENT" })
+  })
+})
+
+test("recent sessions migrate into desktop settings", async () => {
+  await withTempDirectory(async (directory) => {
+    const project = join(directory, "project")
+    const configFile = join(directory, "desktop-settings.json")
+    const sessionIndexFile = join(directory, "session_index.json")
+    const recentSessionsFile = join(directory, "desktop", "recent-sessions.json")
+    await mkdir(project)
+    await writeFile(configFile, JSON.stringify({ projects: [project], activeProjectPath: project }), "utf8")
+    await writeFile(sessionIndexFile, JSON.stringify({ sessions: [{ id: "session-1", workspace_root: project, title: "Session", updated_at: "2026-06-01T00:00:00Z", has_user_message: true }] }), "utf8")
+    await mkdir(join(directory, "desktop"), { recursive: true })
+    await writeFile(recentSessionsFile, JSON.stringify({ sessions: [{ session_id: "session-1", last_interacted_at: "2026-06-02T00:00:00Z" }] }), "utf8")
+
+    const store = new DesktopProjectStore(configFile, sessionIndexFile, recentSessionsFile)
+    const overview = await store.overview()
+    assert.equal(overview.recentSessions[0].id, "session-1")
+    assert.deepEqual(JSON.parse(await readFile(configFile, "utf8")).recentSessions, [{ session_id: "session-1", last_interacted_at: "2026-06-02T00:00:00Z" }])
+    await assert.rejects(() => readFile(recentSessionsFile, "utf8"), { code: "ENOENT" })
   })
 })
