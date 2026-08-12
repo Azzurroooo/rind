@@ -651,7 +651,7 @@ pre code {
 }
 .sidebar-actions .primary-button { min-width: 0; }
 
-.project-list { display: grid; gap: 5px; }
+.project-list { display: grid; align-content: start; gap: 5px; }
 .recent-sessions { min-width: 0; margin: -2px 0 12px; }
 .recent-sessions .sidebar-heading { margin-bottom: 4px; }
 .recent-list {
@@ -811,14 +811,16 @@ body { min-height: 0; }
 .sidebar {
   position: relative;
   display: grid;
-  grid-template-rows: auto auto auto minmax(0, 1fr);
+  grid-template-rows: auto minmax(0, 1fr);
   min-width: 0;
   padding: 10px;
   overflow: hidden;
   transition: padding 220ms cubic-bezier(.2, .8, .2, 1), border-color 220ms ease;
 }
 .sidebar > :not(.sidebar-resize-handle) { min-width: 180px; transition: opacity 140ms ease; }
-.project-list { min-height: 0; overflow: auto; padding-right: 2px; scrollbar-width: thin; scrollbar-color: var(--border-strong) transparent; }
+.sidebar-body { display: flex; min-width: 0; min-height: 0; flex-direction: column; gap: 0; overflow: auto; padding-right: 2px; scrollbar-width: thin; scrollbar-color: var(--border-strong) transparent; }
+.sidebar-body > * { flex: none; }
+.project-list { overflow: visible; padding-right: 0; }
 #app:not(.sidebar-open) .sidebar { padding-inline: 0; border-color: transparent; pointer-events: none; }
 #app:not(.sidebar-open) .sidebar > :not(.sidebar-resize-handle) { opacity: 0; visibility: hidden; }
 
