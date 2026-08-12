@@ -228,6 +228,7 @@ function requiredElement<T extends HTMLElement = HTMLElement>(id: string) {
 
 function render() {
   const runtime = currentRuntimeSnapshot()
+  const runtimeId = currentRuntimeId()
   state.runtime = runtime
   const { conversation } = state
   const wideFiles = usesWideFileLayout()
@@ -272,7 +273,7 @@ function render() {
       ready: chatProject()?.available === true && state.settings.hasApiKey,
       active: runtimeTurnActive(),
       readOnly: false,
-      starting: runtime.status === "starting" || Boolean(state.runtimeTurnPending[currentRuntimeId()]),
+      starting: Boolean(state.runtimeTurnPending[runtimeId]),
       controllingTurn: Boolean(runtimeConversation().activeTurnId),
       runtimeSessionId: state.viewedSessionId,
       composerMenuOpen: state.composerMenuOpen,
@@ -1203,8 +1204,14 @@ async function addProject(createDraft = false) {
   resetProjectView()
   state.chatProjectPath = overview.activeProjectPath
   state.viewedProjectPath = overview.activeProjectPath
+  if (createDraft) {
+    state.filesOpen = false
+    state.filePreview = undefined
+    state.fileListings = {}
+    applyOverview(await window.api.projects.updateLayout({ filesOpen: false }))
+  }
   restoreProjectDraft()
-  state.notice = createDraft ? "Project added. New chat is ready." : "Project added."
+  state.notice = ""
   render()
   if (state.filesOpen) await loadDirectory("")
 }
@@ -1247,11 +1254,15 @@ async function startNewChat() {
   }
   state.viewedSessionId = ""
   state.viewedRuntimeId = ""
+  state.filesOpen = false
+  state.filePreview = undefined
+  state.fileListings = {}
   state.draftRuntimeIds[state.chatProjectPath] = createRuntimeId("draft")
   state.conversation = createConversation()
   resetConversationPresentation()
   restoreProjectDraft()
-  state.notice = "New chat"
+  state.notice = ""
+  applyOverview(await window.api.projects.updateLayout({ filesOpen: false }))
   render()
 }
 
