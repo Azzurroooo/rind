@@ -99,6 +99,17 @@ export class DesktopProjectStore {
     return Boolean(state.activeProjectPath && samePath(state.activeProjectPath, path))
   }
 
+  async findSession(sessionId: string) {
+    const cleanId = sessionId.trim()
+    if (!cleanId) return undefined
+    const state = await this.readState()
+    const projects = new Set(state.projects.map((path) => process.platform === "win32" ? path.toLocaleLowerCase() : path))
+    return (await this.readSessionIndex()).find((session) => {
+      const workspace = process.platform === "win32" ? session.workspaceRoot.toLocaleLowerCase() : session.workspaceRoot
+      return session.id === cleanId && session.hasUserMessage && projects.has(workspace)
+    })
+  }
+
   private async projectSummary(path: string): Promise<DesktopProject> {
     const available = await isDirectory(path)
     const sessions = (await this.readSessionIndex())

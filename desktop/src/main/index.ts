@@ -8,10 +8,12 @@ import type { DesktopSettings, DesktopSettingsPatch, RuntimeEvent, RuntimeSnapsh
 import { asObject, readJsonObject, writeJsonObject } from "./json-store"
 import { listProjectFiles, previewProjectFile } from "./project-files"
 import { DesktopProjectStore, samePath } from "./projects"
+import { replaySession } from "./session-replay"
 import {
-  getRuntimeSnapshot,
+  getRuntimeSnapshots,
   initializeRuntime,
   requestRuntime,
+  shutdownAllRuntimes,
   shutdownRuntime,
   startRuntime,
   subscribeRuntime,
@@ -37,7 +39,6 @@ const allowedRuntimeMethods = new Set([
 ])
 let mainWindow: BrowserWindow | undefined
 let quitting = false
-let configuredWorkspace = ""
 const maxSettingLength = 4096
 
 function configPath() {
@@ -115,73 +116,65 @@ async function chooseProject() {
   if (!mainWindow) return null
   const result = await dialog.showOpenDialog(mainWindow, { properties: ["openDirectory"] })
   if (result.canceled || !result.filePaths[0]) return null
-  const overview = await projectStore().add(result.filePaths[0])
-  await activateProject(overview.activeProjectPath)
-  return overview
+  return projectStore().add(result.filePaths[0])
 }
 
-async function activateProject(path: string) {
-  const overview = await projectStore().select(path)
-  configuredWorkspace = overview.activeProjectPath
-  await shutdownRuntime()
-  startRuntime(configuredWorkspace)
-  return overview
-}
-
-async function startActiveProject() {
+async function requireProject(path: unknown) {
+  if (typeof path !== "string" || !path.trim()) throw new Error("Project path is required.")
   const overview = await projectStore().overview()
-  const active = overview.projects.find((project) => project.path === overview.activeProjectPath)
-  configuredWorkspace = active?.path || ""
-  if (active?.available) startRuntime(active.path)
-  return overview
-}
-
-async function requireActiveProject() {
-  if (!configuredWorkspace || !(await projectStore().isActive(configuredWorkspace))) {
-    throw new Error("Choose a registered project before browsing files.")
-  }
-  return configuredWorkspace
+  const project = overview.projects.find((item) => samePath(item.path, path))
+  if (!project) throw new Error("Choose a registered project before browsing files.")
+  if (!project.available) throw new Error("The selected project folder is unavailable.")
+  return project.path
 }
 
 function registerIpc() {
-  ipcMain.handle("runtime-initialize", () => initializeRuntime())
-  ipcMain.handle("runtime-restart", async () => {
-    if (!configuredWorkspace) throw new Error("Choose a workspace before starting Rind.")
-    await projectStore().select(configuredWorkspace)
-    await shutdownRuntime()
-    startRuntime(configuredWorkspace)
+  ipcMain.handle("runtime-start", async (_event, runtimeId: unknown, workspace: unknown, sessionId: unknown) => {
+    const projectPath = await requireProject(workspace)
+    if (typeof runtimeId !== "string" || !runtimeId.trim()) throw new Error("Runtime id is required.")
+    return startRuntime(runtimeId, projectPath, typeof sessionId === "string" && sessionId ? sessionId : undefined)
   })
-  ipcMain.handle("runtime-shutdown", () => shutdownRuntime())
-  ipcMain.handle("runtime-request", (_event, method: unknown, params: unknown) => {
+  ipcMain.handle("runtime-initialize", (_event, runtimeId: unknown) => {
+    if (typeof runtimeId !== "string") throw new Error("Runtime id is required.")
+    return initializeRuntime(runtimeId)
+  })
+  ipcMain.handle("runtime-restart", async (_event, runtimeId: unknown, workspace: unknown, sessionId: unknown) => {
+    if (typeof runtimeId !== "string" || !runtimeId.trim()) throw new Error("Runtime id is required.")
+    const projectPath = await requireProject(workspace)
+    await shutdownRuntime(runtimeId)
+    startRuntime(runtimeId, projectPath, typeof sessionId === "string" && sessionId ? sessionId : undefined)
+    await initializeRuntime(runtimeId)
+    const snapshot = getRuntimeSnapshots().find((item) => item.runtimeId === runtimeId)
+    if (!snapshot) throw new Error("Runtime failed to restart.")
+    return snapshot
+  })
+  ipcMain.handle("runtime-shutdown", (_event, runtimeId: unknown) => {
+    if (typeof runtimeId !== "string") throw new Error("Runtime id is required.")
+    return shutdownRuntime(runtimeId)
+  })
+  ipcMain.handle("runtime-shutdown-all", () => shutdownAllRuntimes())
+  ipcMain.handle("runtime-request", (_event, runtimeId: unknown, method: unknown, params: unknown) => {
+    if (typeof runtimeId !== "string" || !runtimeId.trim()) throw new Error("Runtime id is required.")
     if (typeof method !== "string" || !allowedRuntimeMethods.has(method)) {
       throw new Error("Runtime method is not available to the desktop client.")
     }
     const safeParams = params && typeof params === "object" ? params as Record<string, unknown> : {}
-    return requestRuntime(method, safeParams)
+    return requestRuntime(runtimeId, method, safeParams)
   })
   ipcMain.handle("settings-get", () => loadRuntimeSettings())
   ipcMain.handle("settings-save", async (_event, settings: unknown) => {
     const saved = await saveRuntimeSettings(settings)
-    if (configuredWorkspace) {
-      await shutdownRuntime()
-      startRuntime(configuredWorkspace)
-    }
     return saved
   })
   ipcMain.handle("projects-get", () => projectStore().overview())
   ipcMain.handle("projects-add", () => chooseProject())
   ipcMain.handle("projects-select", (_event, path: unknown) => {
     if (typeof path !== "string") throw new Error("Project path must be a string.")
-    return activateProject(path)
+    return projectStore().select(path)
   })
   ipcMain.handle("projects-remove", async (_event, path: unknown) => {
     if (typeof path !== "string") throw new Error("Project path must be a string.")
     const overview = await projectStore().remove(path)
-    if (samePath(configuredWorkspace, path)) {
-      await shutdownRuntime()
-      configuredWorkspace = ""
-      await startActiveProject()
-    }
     return overview
   })
   ipcMain.handle("projects-layout-update", (_event, patch: unknown) => {
@@ -198,8 +191,14 @@ function registerIpc() {
     if (typeof path !== "string") throw new Error("Project path must be a string.")
     return projectStore().sessions(path, Number(offset), Number(limit))
   })
-  ipcMain.handle("project-files-list", async (_event, path: unknown) => listProjectFiles(await requireActiveProject(), path))
-  ipcMain.handle("project-files-preview", async (_event, path: unknown) => previewProjectFile(await requireActiveProject(), path))
+  ipcMain.handle("sessions-replay", async (_event, sessionId: unknown) => {
+    if (typeof sessionId !== "string") throw new Error("Session id must be a string.")
+    const session = await projectStore().findSession(sessionId)
+    if (!session) throw new Error("Session is not registered in Rind Desktop.")
+    return replaySession(join(app.getPath("home"), ".rind"), sessionId, session.workspaceRoot)
+  })
+  ipcMain.handle("project-files-list", async (_event, projectPath: unknown, path: unknown) => listProjectFiles(await requireProject(projectPath), path))
+  ipcMain.handle("project-files-preview", async (_event, projectPath: unknown, path: unknown) => previewProjectFile(await requireProject(projectPath), path))
   ipcMain.handle("app-quit", () => app.quit())
 }
 
@@ -225,7 +224,7 @@ function createMainWindow() {
   if (rendererUrl) void win.loadURL(new URL("index.html", rendererUrl).toString())
   else void win.loadFile(join(root, "../renderer/index.html"))
   win.once("ready-to-show", () => win.show())
-  win.webContents.once("did-finish-load", () => notifyRuntime(getRuntimeSnapshot()))
+  win.webContents.once("did-finish-load", () => getRuntimeSnapshots().forEach(notifyRuntime))
   win.on("closed", () => {
     if (mainWindow === win) mainWindow = undefined
   })
@@ -254,7 +253,6 @@ if (!hasLock) {
     log.initialize()
     app.setName("Rind")
     app.setAppUserModelId(appId)
-    await startActiveProject()
     subscribeRuntime(notifyRuntime)
     subscribeRuntimeEvents(notifyRuntimeEvent)
     registerIpc()
@@ -273,6 +271,6 @@ if (!hasLock) {
     if (quitting) return
     event.preventDefault()
     quitting = true
-    void shutdownRuntime().finally(() => app.quit())
+    void shutdownAllRuntimes().finally(() => app.quit())
   })
 }

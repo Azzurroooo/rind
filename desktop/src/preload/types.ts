@@ -2,11 +2,14 @@ export type RuntimeStatus = "starting" | "ready" | "error" | "stopped"
 
 export type RuntimeSnapshot = {
   status: RuntimeStatus
+  runtimeId?: string
   message?: string
   workspace?: string
+  sessionId?: string
 }
 
 export type RuntimeEvent = {
+  runtimeId: string
   type: string
   sequence: number
   sessionId: string
@@ -95,10 +98,12 @@ export type DesktopFilePreview = {
 
 export type DesktopApi = {
   runtime: {
-    initialize: () => Promise<unknown>
-    restart: () => Promise<void>
-    request: (method: RuntimeMethod, params?: Record<string, unknown>) => Promise<unknown>
-    shutdown: () => Promise<unknown>
+    start: (runtimeId: string, workspace: string, sessionId?: string) => Promise<RuntimeSnapshot>
+    initialize: (runtimeId: string) => Promise<unknown>
+    restart: (runtimeId: string, workspace: string, sessionId?: string) => Promise<RuntimeSnapshot>
+    request: (runtimeId: string, method: RuntimeMethod, params?: Record<string, unknown>) => Promise<unknown>
+    shutdown: (runtimeId: string) => Promise<unknown>
+    shutdownAll: () => Promise<unknown>
     subscribe: (listener: (snapshot: RuntimeSnapshot) => void) => () => void
     subscribeEvents: (listener: (event: RuntimeEvent) => void) => () => void
   }
@@ -114,9 +119,12 @@ export type DesktopApi = {
     updateLayout: (patch: { sidebarOpen?: boolean; sidebarWidth?: number; filesOpen?: boolean; filePanelWidth?: number }) => Promise<DesktopProjectOverview>
     sessions: (path: string, offset: number, limit: number) => Promise<{ sessions: DesktopSessionSummary[]; total: number }>
   }
+  sessions: {
+    replay: (sessionId: string) => Promise<{ messages: unknown[]; sessionId: string }>
+  }
   files: {
-    list: (path?: string) => Promise<DesktopFileListing>
-    preview: (path: string) => Promise<DesktopFilePreview>
+    list: (projectPath: string, path?: string) => Promise<DesktopFileListing>
+    preview: (projectPath: string, path: string) => Promise<DesktopFilePreview>
   }
   quit: () => Promise<void>
 }

@@ -40,14 +40,18 @@ type AppState = {
   settingsOpen: boolean
   settingsSaving: boolean
   settingsAutoOpened: boolean
-  runtimeSessionId: string
-  runtimeTurnPending: boolean
+  runtimeWorkers: Record<string, RuntimeSnapshot>
+  runtimeSessionIds: Record<string, string>
+  runtimeTurnPending: Record<string, boolean>
   viewedSessionId: string
+  viewedProjectPath: string
+  chatProjectPath: string
+  viewedRuntimeId: string
+  draftRuntimeIds: Record<string, string>
   conversationCache: Record<string, ConversationState>
   model: string
   models: string[]
   projects: DesktopProject[]
-  activeProjectPath: string
   sessionPages: Record<string, DesktopSessionSummary[]>
   sessionTotals: Record<string, number>
   sidebarOpen: boolean
@@ -59,14 +63,12 @@ type AppState = {
   fileListings: Record<string, DesktopFileListing>
   filePreview?: DesktopFilePreview
   drafts: Record<string, string>
-  createDraftWhenReady: boolean
   conversation: ConversationState
   expandedTools: Set<string>
   revealedTools: Set<string>
   planDock: PlanDockPresentation
   composerMenuOpen: boolean
   notice: string
-  bootstrapped: boolean
 }
 
 const root = document.querySelector<HTMLElement>("#app")
@@ -79,14 +81,18 @@ const state: AppState = {
   settingsOpen: false,
   settingsSaving: false,
   settingsAutoOpened: false,
-  runtimeSessionId: "",
-  runtimeTurnPending: false,
+  runtimeWorkers: {},
+  runtimeSessionIds: {},
+  runtimeTurnPending: {},
   viewedSessionId: "",
+  viewedProjectPath: "",
+  chatProjectPath: "",
+  viewedRuntimeId: "",
+  draftRuntimeIds: {},
   conversationCache: {},
   model: "",
   models: [],
   projects: [],
-  activeProjectPath: "",
   sessionPages: {},
   sessionTotals: {},
   sidebarOpen: true,
@@ -97,14 +103,12 @@ const state: AppState = {
   expandedDirectories: new Set([""]),
   fileListings: {},
   drafts: {},
-  createDraftWhenReady: false,
   conversation: createConversation(),
   expandedTools: new Set(),
   revealedTools: new Set(),
   planDock: { collapsed: false, displayedPlanId: "", dismissedPlanErrors: new Set() },
   composerMenuOpen: false,
   notice: "Add a project to begin.",
-  bootstrapped: false,
 }
 
 appRoot.innerHTML = `
@@ -223,7 +227,9 @@ function requiredElement<T extends HTMLElement = HTMLElement>(id: string) {
 }
 
 function render() {
-  const { runtime, conversation } = state
+  const runtime = currentRuntimeSnapshot()
+  state.runtime = runtime
+  const { conversation } = state
   const wideFiles = usesWideFileLayout()
   const filesWidth = state.filesOpen ? state.filePanelWidth : 0
   connectionText.textContent = runtime.status === "ready" ? "Connected" : titleCase(runtime.status)
@@ -238,16 +244,16 @@ function render() {
   sidebar.inert = !state.sidebarOpen
   filePanel.setAttribute("aria-hidden", String(!state.filesOpen))
   filePanel.inert = !state.filesOpen
-  newSessionButton.title = activeProject()?.available ? `Start a new chat in ${activeProject()?.name}` : "Choose a project for a new chat"
+  newSessionButton.title = chatProject()?.available ? `Start a new chat in ${chatProject()?.name}` : "Choose a project for a new chat"
   sidebarToggle.textContent = state.sidebarOpen ? "Hide projects" : "Projects"
   sidebarToggle.title = state.sidebarOpen ? "Hide projects sidebar" : "Show projects sidebar"
-  workspacePath.textContent = activeProject()?.path || "No project selected"
-  workspacePath.title = activeProject()?.path || ""
+  workspacePath.textContent = viewedProject()?.path || "No project selected"
+  workspacePath.title = viewedProject()?.path || ""
   const current = allSessions().find((item) => item.id === state.viewedSessionId)
   sessionTitle.textContent = current?.title || (state.viewedSessionId ? "Session" : "New session")
   sessionIdLabel.textContent = state.viewedSessionId || ""
   noticeText.textContent = state.notice || runtime.message || ""
-  retry.hidden = !runtime.workspace || (runtime.status !== "error" && runtime.status !== "stopped")
+  retry.hidden = !currentRuntimeId() || (runtime.status !== "error" && runtime.status !== "stopped")
   notice.hidden = !noticeText.textContent && retry.hidden
   renderProjectControl()
   renderCurrentTask()
@@ -263,12 +269,12 @@ function render() {
   renderComposer(
     { prompt, send, steer, interrupt, menuTrigger: composerMenuTrigger, menu: composerMenu, compactContext, contextMeter },
     {
-      ready: state.runtime.status === "ready" && activeProject()?.available === true,
+      ready: chatProject()?.available === true && state.settings.hasApiKey,
       active: runtimeTurnActive(),
-      readOnly: !isViewingRuntime(),
-      starting: state.runtimeTurnPending && !runtimeConversation().activeTurnId,
+      readOnly: false,
+      starting: runtime.status === "starting" || Boolean(state.runtimeTurnPending[currentRuntimeId()]),
       controllingTurn: Boolean(runtimeConversation().activeTurnId),
-      runtimeSessionId: state.runtimeSessionId,
+      runtimeSessionId: state.viewedSessionId,
       composerMenuOpen: state.composerMenuOpen,
       contextUsagePercent: state.conversation.contextUsagePercent,
     },
@@ -287,7 +293,30 @@ function renderSettings() {
 }
 
 function activeProject() {
-  return state.projects.find((project) => project.path === state.activeProjectPath)
+  return viewedProject()
+}
+
+function viewedProject() {
+  return state.projects.find((project) => project.path === state.viewedProjectPath)
+}
+
+function chatProject() {
+  return state.projects.find((project) => project.path === state.chatProjectPath)
+}
+
+function runtimeIdForSession(sessionId: string) {
+  return Object.entries(state.runtimeSessionIds).find(([, id]) => id === sessionId)?.[0] || sessionId
+}
+
+function currentRuntimeId() {
+  if (state.viewedRuntimeId) return state.viewedRuntimeId
+  if (state.viewedSessionId) return runtimeIdForSession(state.viewedSessionId)
+  const projectPath = state.chatProjectPath || state.viewedProjectPath
+  return state.draftRuntimeIds[projectPath] || `draft:${projectPath}`
+}
+
+function currentRuntimeSnapshot() {
+  return state.runtimeWorkers[currentRuntimeId()] || { status: "stopped" as const }
 }
 
 function projectSessions(project: DesktopProject) {
@@ -311,11 +340,11 @@ function renderProjectControl() {
   for (const project of state.projects) {
     const option = new Option(project.available ? project.name : `${project.name} (missing)`, project.path)
     option.disabled = !project.available
-    option.selected = project.path === state.activeProjectPath
+    option.selected = project.path === state.chatProjectPath
     projectSelect.add(option)
   }
-  projectSelect.disabled = runtimeTurnActive() || !isViewingRuntime()
-  projectSelect.value = state.activeProjectPath
+  projectSelect.disabled = false
+  projectSelect.value = state.chatProjectPath
 }
 
 function renderProjects() {
@@ -325,11 +354,11 @@ function renderProjects() {
     return
   }
   for (const project of state.projects) {
-    const expanded = state.expandedProjects.has(project.path) || project.path === state.activeProjectPath
+    const expanded = state.expandedProjects.has(project.path) || project.path === state.viewedProjectPath
     const sessions = projectSessions(project)
     const total = state.sessionTotals[project.path] ?? project.totalSessions
     const projectNode = document.createElement("section")
-    projectNode.className = `project-item${project.path === state.activeProjectPath ? " selected" : ""}${expanded ? " expanded" : ""}`
+    projectNode.className = `project-item${project.path === state.viewedProjectPath ? " selected" : ""}${expanded ? " expanded" : ""}`
     projectNode.innerHTML = `
       <div class="project-row">
         <button type="button" class="project-trigger" data-project-path="${escapeAttribute(project.path)}" title="${escapeAttribute(project.path)}">
@@ -347,9 +376,9 @@ function renderProjects() {
 
 function renderProjectSession(item: DesktopSessionSummary) {
   const when = item.updatedAt ? relativeTime(item.updatedAt) : ""
-  const running = item.id === state.runtimeSessionId && runtimeTurnActive()
+  const running = runtimeTurnActive(runtimeIdForSession(item.id))
   return `
-    <button type="button" class="session-item${item.id === state.viewedSessionId ? " selected" : ""}${running ? " running" : ""}" data-session-id="${escapeAttribute(item.id)}">
+    <button type="button" class="session-item${item.id === state.viewedSessionId ? " selected" : ""}${running ? " running" : ""}" data-session-id="${escapeAttribute(item.id)}" data-session-project="${escapeAttribute(item.workspaceRoot)}">
       <span class="session-item-title">${running ? `<span class="status-pip pip-running"></span>` : ""}<span class="session-item-title-text">${escapeHtml(item.title || "Untitled")}</span></span>
       <small>${escapeHtml(clipLine(item.preview || "", 48))}</small>
       <small class="session-item-meta">${escapeHtml(when)}</small>
@@ -358,24 +387,25 @@ function renderProjectSession(item: DesktopSessionSummary) {
 }
 
 function renderCurrentTask() {
-  if (!runtimeTurnActive()) {
+  const running = Object.entries(state.runtimeWorkers).filter(([id, snapshot]) => snapshot.status === "ready" && runtimeTurnActive(id))
+  if (!running.length) {
     currentTask.hidden = true
     currentTask.replaceChildren()
     return
   }
-  const activeSession = allSessions().find((item) => item.id === state.runtimeSessionId)
-  const title = activeSession?.title || latestUserMessage(runtimeConversation()) || "Current task"
+  const items = running.map(([runtimeId]) => {
+    const sessionId = state.runtimeSessionIds[runtimeId]
+    const session = allSessions().find((item) => item.id === sessionId)
+    return { runtimeId, sessionId, title: session?.title || latestUserMessage(conversationFor(sessionId)) || "Current task" }
+  })
   currentTask.hidden = false
   currentTask.innerHTML = `
-    <button type="button" class="current-task-trigger${isViewingRuntime() ? " selected" : ""}" data-return-runtime title="Return to the running task">
-      <span class="status-pip pip-running"></span>
-      <span>${escapeHtml(clipLine(title, 80))}</span>
-    </button>
+    ${items.map((item) => `<button type="button" class="current-task-trigger${item.sessionId === state.viewedSessionId ? " selected" : ""}" data-return-runtime="${escapeAttribute(item.runtimeId)}" title="Return to the running task"><span class="status-pip pip-running"></span><span>${escapeHtml(clipLine(item.title, 80))}</span></button>`).join("")}
   `
 }
 
 function renderFiles() {
-  const project = activeProject()
+  const project = viewedProject()
   filesToggle.disabled = !project?.available
   filesToggle.textContent = state.filesOpen ? "Hide files" : "Files"
   if (!state.filesOpen || !project?.available) return
@@ -420,7 +450,7 @@ function renderModels() {
     modelSelect.append(option)
   }
   if (previous && choices.includes(previous)) modelSelect.value = previous
-  modelSelect.disabled = state.runtime.status !== "ready" || !choices.length || runtimeTurnActive() || !isViewingRuntime()
+  modelSelect.disabled = currentRuntimeSnapshot().status !== "ready" || !choices.length || runtimeTurnActive()
 }
 
 function renderStream() {
@@ -613,10 +643,6 @@ function asRecord(value: unknown) {
   return value && typeof value === "object" ? value as Record<string, unknown> : {}
 }
 
-function isViewingRuntime() {
-  return state.viewedSessionId === state.runtimeSessionId
-}
-
 function conversationFor(sessionId: string) {
   return sessionId === state.viewedSessionId
     ? state.conversation
@@ -624,11 +650,12 @@ function conversationFor(sessionId: string) {
 }
 
 function runtimeConversation() {
-  return conversationFor(state.runtimeSessionId)
+  return conversationFor(state.viewedSessionId)
 }
 
-function runtimeTurnActive() {
-  return state.runtimeTurnPending || Boolean(runtimeConversation().activeTurnId)
+function runtimeTurnActive(runtimeId = currentRuntimeId()) {
+  const sessionId = state.runtimeSessionIds[runtimeId]
+  return Boolean(state.runtimeTurnPending[runtimeId] || (sessionId && conversationFor(sessionId).activeTurnId))
 }
 
 function setConversationFor(sessionId: string, conversation: ConversationState) {
@@ -650,19 +677,13 @@ function resetConversationPresentation() {
   lastRenderedEntries = 0
 }
 
-function adoptRuntimeSession(sessionId: string) {
-  if (!sessionId || sessionId === state.runtimeSessionId) return
-  const previousSessionId = state.runtimeSessionId
-  const previousConversation = conversationFor(previousSessionId)
-  state.runtimeSessionId = sessionId
-  if (state.viewedSessionId === previousSessionId) {
+function adoptRuntimeSession(runtimeId: string, sessionId: string) {
+  if (!runtimeId || !sessionId) return
+  state.runtimeSessionIds[runtimeId] = sessionId
+  if (!state.viewedSessionId) {
     state.viewedSessionId = sessionId
-    state.conversation = previousConversation
-    return
+    state.viewedRuntimeId = runtimeId
   }
-  const cache = { ...state.conversationCache, [sessionId]: previousConversation }
-  delete cache[previousSessionId]
-  state.conversationCache = cache
 }
 
 function latestUserMessage(conversation: ConversationState) {
@@ -673,14 +694,27 @@ function latestUserMessage(conversation: ConversationState) {
   return ""
 }
 
-async function request(method: RuntimeMethod, params: Record<string, unknown> = {}) {
+async function request(method: RuntimeMethod, params: Record<string, unknown> = {}, runtimeId = currentRuntimeId()) {
   try {
-    return await window.api.runtime.request(method, params)
+    return await window.api.runtime.request(runtimeId, method, params)
   } catch (error) {
     state.notice = error instanceof Error ? error.message : String(error)
     render()
     throw error
   }
+}
+
+async function ensureRuntime(runtimeId: string, workspace: string, sessionId?: string) {
+  const current = state.runtimeWorkers[runtimeId]
+  if (current?.status === "ready") return runtimeId
+  if (!current || current.status === "stopped" || current.status === "error") {
+    state.runtimeWorkers[runtimeId] = await window.api.runtime.start(runtimeId, workspace, sessionId)
+    render()
+  }
+  await window.api.runtime.initialize(runtimeId)
+  state.runtimeWorkers[runtimeId] = { ...state.runtimeWorkers[runtimeId], status: "ready", runtimeId, workspace, sessionId }
+  render()
+  return runtimeId
 }
 
 function runAction(action: () => Promise<unknown>) {
@@ -702,14 +736,15 @@ function applyOverview(overview: Awaited<ReturnType<typeof window.api.projects.g
     nextTotals[project.path] = project.totalSessions
   }
   state.projects = overview.projects
-  state.activeProjectPath = overview.activeProjectPath
+  if (!state.chatProjectPath || !state.projects.some((project) => project.path === state.chatProjectPath)) state.chatProjectPath = overview.activeProjectPath
+  if (!state.viewedProjectPath || !state.projects.some((project) => project.path === state.viewedProjectPath)) state.viewedProjectPath = state.chatProjectPath
   state.sidebarOpen = overview.sidebarOpen
   state.sidebarWidth = overview.sidebarWidth
   state.filesOpen = overview.filesOpen
   state.filePanelWidth = overview.filePanelWidth
   state.sessionPages = nextPages
   state.sessionTotals = nextTotals
-  if (state.activeProjectPath) state.expandedProjects.add(state.activeProjectPath)
+  if (state.viewedProjectPath) state.expandedProjects.add(state.viewedProjectPath)
 }
 
 function mergeSessions(primary: DesktopSessionSummary[], secondary: DesktopSessionSummary[]) {
@@ -719,13 +754,12 @@ function mergeSessions(primary: DesktopSessionSummary[], secondary: DesktopSessi
 }
 
 async function loadReplay(sessionId = state.viewedSessionId) {
-  const result = asRecord(await request("session.replay", sessionId && sessionId !== state.runtimeSessionId ? { session_id: sessionId } : {}))
+  if (!sessionId) return
+  const result = await window.api.sessions.replay(sessionId)
   const messages = Array.isArray(result.messages) ? result.messages : []
   let conversation = conversationFromReplay(messages)
-  const turnState = asRecord(result.turn_state)
-  if (sessionId === state.runtimeSessionId && turnState.status === "running" && typeof turnState.turn_id === "string") {
-    conversation = { ...conversation, activeTurnId: turnState.turn_id, turnStartedAt: Date.now() }
-  }
+  const runtimeId = runtimeIdForSession(sessionId)
+  if (runtimeTurnActive(runtimeId)) conversation = { ...conversation, ...conversationFor(sessionId), activeTurnId: conversationFor(sessionId).activeTurnId }
   setConversationFor(sessionId, conversation)
   if (sessionId === state.viewedSessionId) resetConversationPresentation()
 }
@@ -743,6 +777,7 @@ async function loadModels() {
 async function loadSettings() {
   try {
     state.settings = await window.api.settings.get()
+    if (!state.model) state.model = state.settings.model
     if (!state.settings.hasApiKey && !state.settingsAutoOpened) {
       state.settingsAutoOpened = true
       state.notice = "Configure the shared ~/.rind/settings.json before using the runtime."
@@ -757,34 +792,31 @@ async function loadSettings() {
 }
 
 async function refreshSession() {
-  await Promise.all([loadSessions(), loadReplay(), loadModels()])
+  await Promise.all([loadSessions(), state.viewedSessionId ? loadReplay() : Promise.resolve(), loadModels()])
   state.notice = ""
   render()
 }
 
 async function bootstrap(result: unknown) {
   const initialize = asRecord(result)
-  const sessionId = typeof initialize.session_id === "string" ? initialize.session_id : state.runtimeSessionId
-  adoptRuntimeSession(sessionId)
-  if (!state.viewedSessionId) state.viewedSessionId = sessionId
+  const runtimeId = state.viewedRuntimeId || currentRuntimeId()
+  const sessionId = typeof initialize.session_id === "string" ? initialize.session_id : state.runtimeSessionIds[runtimeId] || ""
+  adoptRuntimeSession(runtimeId, sessionId)
   state.model = typeof initialize.model === "string" ? initialize.model : state.model
   await refreshSession()
-  if (state.filesOpen && activeProject()?.available) await loadDirectory("")
-  if (state.createDraftWhenReady) {
-    state.createDraftWhenReady = false
-    await createSession()
-  }
+  if (state.filesOpen && viewedProject()?.available) await loadDirectory("")
 }
 
 function handleRuntimeEvent(envelope: RuntimeEvent) {
+  const runtimeId = envelope.runtimeId
   if (envelope.type === "turn_started" || envelope.type === "turn_completed" || envelope.type === "turn_failed" || envelope.type === "turn_cancelled") {
-    state.runtimeTurnPending = false
+    state.runtimeTurnPending[runtimeId] = false
   }
-  if (envelope.sessionId && envelope.sessionId !== state.runtimeSessionId) {
-    adoptRuntimeSession(envelope.sessionId)
+  if (envelope.sessionId) {
+    adoptRuntimeSession(runtimeId, envelope.sessionId)
     runAction(loadSessions)
   }
-  const sessionId = envelope.sessionId || state.runtimeSessionId || state.viewedSessionId
+  const sessionId = envelope.sessionId || state.runtimeSessionIds[runtimeId] || ""
   if (sessionId) setConversationFor(sessionId, reduceEvent(conversationFor(sessionId), envelope))
   if (envelope.type === "turn_completed" || envelope.type === "turn_failed" || envelope.type === "turn_cancelled") {
     runAction(async () => {
@@ -794,7 +826,7 @@ function handleRuntimeEvent(envelope: RuntimeEvent) {
     })
   }
   if (sessionId === state.viewedSessionId) scheduleRender()
-  else renderCurrentTask()
+  else render()
 }
 
 function scheduleRender() {
@@ -829,7 +861,7 @@ function autoGrowPrompt() {
 requiredElement<HTMLFormElement>("composer").addEventListener("submit", (event) => { event.preventDefault(); runAction(sendPrompt) })
 
 prompt.addEventListener("input", () => {
-  if (state.activeProjectPath) state.drafts[state.activeProjectPath] = prompt.value
+  if (state.chatProjectPath) state.drafts[state.chatProjectPath] = prompt.value
   autoGrowPrompt()
 })
 prompt.addEventListener("keydown", (event) => {
@@ -845,7 +877,7 @@ document.addEventListener("keydown", (event) => {
     prompt.focus()
     return
   }
-  if (event.key === "Escape" && runtimeTurnActive() && isViewingRuntime() && !state.settingsOpen) {
+  if (event.key === "Escape" && runtimeTurnActive() && !state.settingsOpen) {
     runAction(() => request("turn.interrupt"))
   }
 })
@@ -859,48 +891,59 @@ document.addEventListener("pointerdown", (event) => {
 async function sendPrompt() {
   const input = prompt.value.trim()
   if (!input) return
-  if (!isViewingRuntime()) {
-    state.notice = "Return to the current task before sending a message."
-    render()
-    return
-  }
-  if (!state.activeProjectPath) {
+  const project = chatProject()
+  if (!project?.available) {
     state.notice = "Choose a project before sending a message."
     render()
     return
   }
   prompt.value = ""
-  state.drafts[state.activeProjectPath] = ""
+  state.drafts[state.chatProjectPath] = ""
   autoGrowPrompt()
   if (input.startsWith("/")) {
     runAction(() => runSlash(input))
     return
   }
-  const active = runtimeTurnActive()
+  const runtimeId = currentRuntimeId()
+  await ensureRuntime(runtimeId, project.path, state.viewedSessionId || undefined)
+  state.viewedRuntimeId = runtimeId
+  const active = runtimeTurnActive(runtimeId)
   state.conversation = addUserMessage(state.conversation, input)
   render()
   const result = active
-    ? asRecord(await request("turn.follow_up", { input }))
-    : await startTurn(input)
+    ? asRecord(await request("turn.follow_up", { input }, runtimeId))
+    : await startTurn(input, runtimeId)
   if (typeof result.session_id === "string" && result.session_id) {
-    adoptRuntimeSession(result.session_id)
+    adoptRuntimeSession(runtimeId, result.session_id)
+    state.viewedSessionId = result.session_id
+    state.viewedProjectPath = project.path
     await loadSessions()
   }
   render()
 }
 
-async function startTurn(input: string) {
-  state.runtimeTurnPending = true
+async function startTurn(input: string, runtimeId = currentRuntimeId()) {
+  state.runtimeTurnPending[runtimeId] = true
   render()
   try {
-    return asRecord(await request("turn.start", { input }))
+    return asRecord(await request("turn.start", { input }, runtimeId))
   } finally {
-    state.runtimeTurnPending = false
+    state.runtimeTurnPending[runtimeId] = false
     render()
   }
 }
 
 async function runSlash(input: string) {
+  const project = chatProject()
+  if (!project?.available) {
+    state.notice = "Choose a project before running a command."
+    render()
+    return
+  }
+  const runtimeId = currentRuntimeId()
+  await ensureRuntime(runtimeId, project.path, state.viewedSessionId || undefined)
+  state.viewedRuntimeId = runtimeId
+  await loadModels()
   const result = asRecord(await request("slash.execute", { input }))
   const text = asRecordText(result.text)
   if (text) {
@@ -918,8 +961,8 @@ async function runSlash(input: string) {
   const followUp = typeof result.run_turn_input === "string" ? result.run_turn_input.trim() : ""
   if (followUp) {
     state.conversation = addUserMessage(state.conversation, followUp)
-    const turn = await startTurn(followUp)
-    if (typeof turn.session_id === "string" && turn.session_id) adoptRuntimeSession(turn.session_id)
+    const turn = await startTurn(followUp, runtimeId)
+    if (typeof turn.session_id === "string" && turn.session_id) adoptRuntimeSession(runtimeId, turn.session_id)
   }
   render()
 }
@@ -932,12 +975,17 @@ steer.addEventListener("click", () => {
   const input = prompt.value.trim()
   if (!input) return
   prompt.value = ""
-  if (state.activeProjectPath) state.drafts[state.activeProjectPath] = ""
+  if (state.chatProjectPath) state.drafts[state.chatProjectPath] = ""
   autoGrowPrompt()
   runAction(() => request("turn.steer", { input }))
 })
 interrupt.addEventListener("click", () => runAction(() => request("turn.interrupt")))
-retry.addEventListener("click", () => runAction(window.api.runtime.restart))
+retry.addEventListener("click", () => runAction(async () => {
+  const project = chatProject()
+  const runtimeId = currentRuntimeId()
+  if (!project?.available) return
+  await window.api.runtime.restart(runtimeId, project.path, state.viewedSessionId || undefined)
+}))
 jumpLatest.addEventListener("click", () => {
   messageStream.scrollTop = messageStream.scrollHeight
   jumpLatest.hidden = true
@@ -979,13 +1027,13 @@ requiredElement("close-settings").addEventListener("click", () => { state.settin
 requiredElement("cancel-settings").addEventListener("click", () => { state.settingsOpen = false; render() })
 settingsDialog.addEventListener("cancel", () => { state.settingsOpen = false; render() })
 projectSelect.addEventListener("change", () => {
-  if (projectSelect.value) runAction(() => selectProject(projectSelect.value))
+  if (projectSelect.value) runAction(() => selectChatProject(projectSelect.value))
 })
 projectList.addEventListener("click", (event) => {
   const target = event.target as HTMLElement
   const projectPath = target.closest<HTMLButtonElement>("[data-project-path]")?.dataset.projectPath
   if (projectPath) {
-    runAction(() => selectProject(projectPath))
+    runAction(() => toggleProject(projectPath))
     return
   }
   const removeProjectPath = target.closest<HTMLButtonElement>("[data-remove-project]")?.dataset.removeProject
@@ -1003,7 +1051,8 @@ projectList.addEventListener("click", (event) => {
   if (nextSessionId) runAction(() => switchSession(nextSessionId))
 })
 currentTask.addEventListener("click", (event) => {
-  if ((event.target as HTMLElement).closest("[data-return-runtime]")) runAction(returnToRuntimeSession)
+  const runtimeId = (event.target as HTMLElement).closest<HTMLElement>("[data-return-runtime]")?.dataset.returnRuntime
+  if (runtimeId) runAction(() => returnToRuntimeSession(runtimeId))
 })
 fileTree.addEventListener("click", (event) => {
   const target = event.target as HTMLElement
@@ -1126,9 +1175,8 @@ function openSettings() {
 }
 
 function resetProjectView() {
-  state.runtimeSessionId = ""
-  state.runtimeTurnPending = false
   state.viewedSessionId = ""
+  state.viewedRuntimeId = ""
   state.conversationCache = {}
   state.conversation = createConversation()
   resetConversationPresentation()
@@ -1139,62 +1187,42 @@ function resetProjectView() {
 }
 
 function restoreProjectDraft() {
-  prompt.value = state.drafts[state.activeProjectPath] || ""
+  prompt.value = state.drafts[state.chatProjectPath] || ""
   autoGrowPrompt()
 }
 
 async function addProject(createDraft = false) {
-  if (runtimeTurnActive()) {
-    state.notice = "Stop the active turn before changing projects."
-    render()
-    return
-  }
   const overview = await window.api.projects.add()
   if (!overview) return
   applyOverview(overview)
   resetProjectView()
-  state.createDraftWhenReady = createDraft
+  state.chatProjectPath = overview.activeProjectPath
+  state.viewedProjectPath = overview.activeProjectPath
   restoreProjectDraft()
-  state.notice = createDraft ? "Project added. Preparing a new chat..." : "Project added."
+  state.notice = createDraft ? "Project added. New chat is ready." : "Project added."
   render()
   if (state.filesOpen) await loadDirectory("")
 }
 
-async function selectProject(path: string) {
-  if (path === state.activeProjectPath) {
-    state.expandedProjects.add(path)
-    render()
-    return
-  }
-  if (runtimeTurnActive()) {
-    state.notice = "Stop the active turn before changing projects."
-    render()
-    return
-  }
-  if (state.activeProjectPath) state.drafts[state.activeProjectPath] = prompt.value
-  const overview = await window.api.projects.select(path)
-  applyOverview(overview)
-  resetProjectView()
-  restoreProjectDraft()
-  state.notice = "Switching project..."
+async function toggleProject(path: string) {
+  const project = state.projects.find((item) => item.path === path)
+  if (!project) return
+  if (state.expandedProjects.has(path)) state.expandedProjects.delete(path)
+  else state.expandedProjects.add(path)
+  state.notice = ""
   render()
-  if (state.filesOpen) await loadDirectory("")
 }
 
 async function removeProject(path: string) {
   const project = state.projects.find((item) => item.path === path)
   if (!project) return
-  if (runtimeTurnActive() && path === state.activeProjectPath) {
-    state.notice = "Stop the active turn before removing its project."
-    render()
-    return
-  }
   if (!window.confirm(`Remove ${project.name} from Rind Desktop? Its folder and sessions will be kept.`)) return
-  const wasActive = path === state.activeProjectPath
   const overview = await window.api.projects.remove(path)
   applyOverview(overview)
   delete state.drafts[path]
-  if (wasActive) {
+  if (path === state.viewedProjectPath) {
+    state.viewedProjectPath = overview.activeProjectPath
+    state.chatProjectPath = overview.activeProjectPath
     resetProjectView()
     restoreProjectDraft()
     if (!activeProject()?.available && state.filesOpen) {
@@ -1207,23 +1235,19 @@ async function removeProject(path: string) {
 }
 
 async function startNewChat() {
-  const project = activeProject()
+  const project = chatProject()
   if (!project?.available) {
     await addProject(true)
     return
   }
-  if (runtimeTurnActive()) {
-    state.notice = "Stop the active turn before starting a new chat."
-    render()
-    return
-  }
-  if (state.runtime.status !== "ready") {
-    state.createDraftWhenReady = true
-    state.notice = "The new chat will open when the runtime is ready."
-    render()
-    return
-  }
-  await createSession()
+  state.viewedSessionId = ""
+  state.viewedRuntimeId = ""
+  state.draftRuntimeIds[state.chatProjectPath] = createRuntimeId("draft")
+  state.conversation = createConversation()
+  resetConversationPresentation()
+  restoreProjectDraft()
+  state.notice = "New chat"
+  render()
 }
 
 async function toggleSidebar() {
@@ -1232,7 +1256,7 @@ async function toggleSidebar() {
 }
 
 async function setFilesOpen(open: boolean) {
-  if (open && !activeProject()?.available) {
+  if (open && !viewedProject()?.available) {
     state.notice = "Choose an available project before browsing files."
     render()
     return
@@ -1251,7 +1275,9 @@ async function loadMoreSessions(path: string) {
 }
 
 async function loadDirectory(path: string) {
-  const listing = await window.api.files.list(path)
+  const project = viewedProject()
+  if (!project) return
+  const listing = await window.api.files.list(project.path, path)
   state.fileListings = { ...state.fileListings, [path]: listing }
   render()
 }
@@ -1269,7 +1295,9 @@ async function toggleDirectory(path: string) {
 }
 
 async function previewFile(path: string) {
-  state.filePreview = await window.api.files.preview(path)
+  const project = viewedProject()
+  if (!project) return
+  state.filePreview = await window.api.files.preview(project.path, path)
   render()
 }
 
@@ -1277,18 +1305,6 @@ function formatFileSize(size: number) {
   if (size < 1024) return `${size} B`
   if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KB`
   return `${(size / (1024 * 1024)).toFixed(1)} MB`
-}
-
-async function createSession() {
-  if (!activeProject()?.available || state.runtime.status !== "ready") return
-  const result = asRecord(await request("session.new"))
-  state.runtimeSessionId = String(result.session_id || "")
-  state.viewedSessionId = state.runtimeSessionId
-  state.model = String(result.model || state.model)
-  state.conversationCache = {}
-  state.conversation = createConversation()
-  resetConversationPresentation()
-  await refreshSession()
 }
 
 function usesWideFileLayout() {
@@ -1342,28 +1358,42 @@ function finishResize(handle: HTMLElement, event: PointerEvent) {
 window.addEventListener("resize", () => render())
 
 async function switchSession(nextSessionId: string) {
-  if (nextSessionId === state.viewedSessionId && isViewingRuntime()) return
-  const project = activeProject()
-  if (!project || !projectSessions(project).some((session) => session.id === nextSessionId)) return
-  if (runtimeTurnActive()) {
-    if (nextSessionId === state.runtimeSessionId) {
-      await returnToRuntimeSession()
-      return
-    }
-    showCachedSession(nextSessionId)
-    render()
-    await loadReplay(nextSessionId)
-    if (state.viewedSessionId === nextSessionId) render()
-    return
-  }
-  const result = asRecord(await request("session.switch", { session_id: nextSessionId }))
-  state.runtimeSessionId = String(result.session_id || nextSessionId)
-  state.viewedSessionId = state.runtimeSessionId
-  state.model = String(result.model || state.model)
-  state.conversationCache = {}
+  const session = allSessions().find((item) => item.id === nextSessionId)
+  if (!session) return
+  const runtimeId = runtimeIdForSession(nextSessionId)
+  showCachedSession(nextSessionId)
+  state.viewedSessionId = nextSessionId
+  state.viewedProjectPath = session.workspaceRoot
+  state.chatProjectPath = session.workspaceRoot
+  state.viewedRuntimeId = state.runtimeWorkers[runtimeId] ? runtimeId : ""
+  state.expandedDirectories = new Set([""])
+  state.fileListings = {}
+  state.filePreview = undefined
+  await window.api.projects.select(session.workspaceRoot)
+  render()
+  if (!state.conversationCache[nextSessionId] || state.conversation.entries.length === 0) await loadReplay(nextSessionId)
+  if (state.filesOpen && viewedProject()?.available) await loadDirectory("")
+  render()
+}
+
+async function selectChatProject(path: string) {
+  const project = state.projects.find((item) => item.path === path)
+  if (!project) return
+  if (state.chatProjectPath) state.drafts[state.chatProjectPath] = prompt.value
+  state.chatProjectPath = project.path
+  state.viewedProjectPath = project.path
+  state.viewedSessionId = ""
+  state.viewedRuntimeId = ""
+  state.draftRuntimeIds[path] = createRuntimeId("draft")
   state.conversation = createConversation()
+  state.expandedDirectories = new Set([""])
+  state.fileListings = {}
+  state.filePreview = undefined
   resetConversationPresentation()
-  await refreshSession()
+  restoreProjectDraft()
+  await window.api.projects.select(path)
+  if (state.filesOpen && project.available) await loadDirectory("")
+  render()
 }
 
 function showCachedSession(sessionId: string) {
@@ -1375,19 +1405,29 @@ function showCachedSession(sessionId: string) {
   resetConversationPresentation()
 }
 
-async function returnToRuntimeSession() {
-  if (isViewingRuntime()) return
-  showCachedSession(state.runtimeSessionId)
+async function returnToRuntimeSession(runtimeId: string) {
+  const sessionId = state.runtimeSessionIds[runtimeId]
+  const session = allSessions().find((item) => item.id === sessionId)
+  if (!session) return
+  showCachedSession(sessionId)
+  state.viewedProjectPath = session.workspaceRoot
+  state.chatProjectPath = session.workspaceRoot
+  state.viewedRuntimeId = runtimeId
   render()
 }
 
+function createRuntimeId(prefix: string) {
+  return `${prefix}:${Date.now().toString(36)}:${Math.random().toString(36).slice(2, 8)}`
+}
+
 async function answerQuestion(answer: string) {
-  if (!isViewingRuntime()) return
+  const runtimeId = currentRuntimeId()
+  if (!runtimeTurnActive(runtimeId)) return
   const question = state.conversation.question
   if (!question) return
   state.conversation = { ...state.conversation, question: undefined }
   render()
-  await request("user_question.respond", { tool_call_id: question.toolCallId, answer })
+  await request("user_question.respond", { tool_call_id: question.toolCallId, answer }, runtimeId)
 }
 
 async function saveSettings() {
@@ -1420,13 +1460,11 @@ async function saveSettings() {
 }
 
 const unsubscribeStatus = window.api.runtime.subscribe((snapshot) => {
-  state.runtime = snapshot
-  if (snapshot.status !== "ready") state.runtimeTurnPending = false
-  if (snapshot.status === "starting") {
-    resetProjectView()
-    state.bootstrapped = false
-    state.notice = "Starting runtime..."
-  }
+  const runtimeId = snapshot.runtimeId || ""
+  if (!runtimeId) return
+  state.runtimeWorkers[runtimeId] = snapshot
+  if (snapshot.sessionId) adoptRuntimeSession(runtimeId, snapshot.sessionId)
+  if (snapshot.status !== "ready") state.runtimeTurnPending[runtimeId] = false
   if (snapshot.status === "error") {
     state.notice = snapshot.message || "Runtime is unavailable."
     if (!state.settingsAutoOpened && snapshot.message?.includes("Configuration error")) {
@@ -1436,20 +1474,12 @@ const unsubscribeStatus = window.api.runtime.subscribe((snapshot) => {
     }
   }
   render()
-  if (snapshot.status === "ready" && !state.bootstrapped) {
-    state.bootstrapped = true
-    void window.api.runtime.initialize().then(bootstrap).catch(() => { state.bootstrapped = false; render() })
-  }
 })
 const unsubscribeEvents = window.api.runtime.subscribeEvents(handleRuntimeEvent)
 window.addEventListener("beforeunload", () => { unsubscribeStatus(); unsubscribeEvents() }, { once: true })
-if (state.runtime.status !== "stopped") {
-  state.bootstrapped = true
-  void window.api.runtime.initialize().then(bootstrap).catch(() => { state.bootstrapped = false; render() })
-}
 runAction(async () => {
   await loadSessions()
   render()
-  if (state.filesOpen && activeProject()?.available) await loadDirectory("")
+  if (state.filesOpen && viewedProject()?.available) await loadDirectory("")
 })
 void loadSettings()

@@ -4,10 +4,12 @@ import type { DesktopApi, RuntimeEvent, RuntimeSnapshot } from "./types"
 
 const api: DesktopApi = {
   runtime: {
-    initialize: () => ipcRenderer.invoke("runtime-initialize"),
-    restart: () => ipcRenderer.invoke("runtime-restart"),
-    request: (method, params = {}) => ipcRenderer.invoke("runtime-request", method, params),
-    shutdown: () => ipcRenderer.invoke("runtime-shutdown"),
+    start: (runtimeId, workspace, sessionId) => ipcRenderer.invoke("runtime-start", runtimeId, workspace, sessionId),
+    initialize: (runtimeId) => ipcRenderer.invoke("runtime-initialize", runtimeId),
+    restart: (runtimeId, workspace, sessionId) => ipcRenderer.invoke("runtime-restart", runtimeId, workspace, sessionId),
+    request: (runtimeId, method, params = {}) => ipcRenderer.invoke("runtime-request", runtimeId, method, params),
+    shutdown: (runtimeId) => ipcRenderer.invoke("runtime-shutdown", runtimeId),
+    shutdownAll: () => ipcRenderer.invoke("runtime-shutdown-all"),
     subscribe: (listener) => {
       const handler = (_event: Electron.IpcRendererEvent, snapshot: RuntimeSnapshot) => listener(snapshot)
       ipcRenderer.on("runtime-status", handler)
@@ -31,9 +33,12 @@ const api: DesktopApi = {
     updateLayout: (patch) => ipcRenderer.invoke("projects-layout-update", patch),
     sessions: (path, offset, limit) => ipcRenderer.invoke("projects-sessions", path, offset, limit),
   },
+  sessions: {
+    replay: (sessionId) => ipcRenderer.invoke("sessions-replay", sessionId),
+  },
   files: {
-    list: (path = "") => ipcRenderer.invoke("project-files-list", path),
-    preview: (path) => ipcRenderer.invoke("project-files-preview", path),
+    list: (projectPath, path = "") => ipcRenderer.invoke("project-files-list", projectPath, path),
+    preview: (projectPath, path) => ipcRenderer.invoke("project-files-preview", projectPath, path),
   },
   quit: () => ipcRenderer.invoke("app-quit"),
 }
