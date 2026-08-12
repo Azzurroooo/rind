@@ -100,7 +100,6 @@ export type DesktopApi = {
   runtime: {
     start: (runtimeId: string, workspace: string, sessionId?: string) => Promise<RuntimeSnapshot>
     initialize: (runtimeId: string) => Promise<unknown>
-    restart: (runtimeId: string, workspace: string, sessionId?: string) => Promise<RuntimeSnapshot>
     request: (runtimeId: string, method: RuntimeMethod, params?: Record<string, unknown>) => Promise<unknown>
     shutdown: (runtimeId: string) => Promise<unknown>
     shutdownAll: () => Promise<unknown>

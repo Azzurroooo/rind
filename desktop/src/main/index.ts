@@ -39,6 +39,7 @@ const allowedRuntimeMethods = new Set([
 ])
 let mainWindow: BrowserWindow | undefined
 let quitting = false
+let runtimeShutdownComplete = false
 const maxSettingLength = 4096
 
 function configPath() {
@@ -137,16 +138,6 @@ function registerIpc() {
   ipcMain.handle("runtime-initialize", (_event, runtimeId: unknown) => {
     if (typeof runtimeId !== "string") throw new Error("Runtime id is required.")
     return initializeRuntime(runtimeId)
-  })
-  ipcMain.handle("runtime-restart", async (_event, runtimeId: unknown, workspace: unknown, sessionId: unknown) => {
-    if (typeof runtimeId !== "string" || !runtimeId.trim()) throw new Error("Runtime id is required.")
-    const projectPath = await requireProject(workspace)
-    await shutdownRuntime(runtimeId)
-    startRuntime(runtimeId, projectPath, typeof sessionId === "string" && sessionId ? sessionId : undefined)
-    await initializeRuntime(runtimeId)
-    const snapshot = getRuntimeSnapshots().find((item) => item.runtimeId === runtimeId)
-    if (!snapshot) throw new Error("Runtime failed to restart.")
-    return snapshot
   })
   ipcMain.handle("runtime-shutdown", (_event, runtimeId: unknown) => {
     if (typeof runtimeId !== "string") throw new Error("Runtime id is required.")
@@ -268,9 +259,13 @@ if (!hasLock) {
   })
 
   app.on("before-quit", (event) => {
-    if (quitting) return
+    if (runtimeShutdownComplete) return
     event.preventDefault()
+    if (quitting) return
     quitting = true
-    void shutdownAllRuntimes().finally(() => app.quit())
+    void shutdownAllRuntimes().finally(() => {
+      runtimeShutdownComplete = true
+      app.quit()
+    })
   })
 }

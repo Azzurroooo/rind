@@ -22,6 +22,17 @@ input.on("line", (line) => {
     process.exit(0)
     return
   }
+  if (request.method === "emit") {
+    const type = String(request.params?.type ?? "")
+    output({
+      kind: "event",
+      event_type: type,
+      event: { type },
+      sequence: 1,
+    })
+    output({ kind: "response", request_id: request.request_id, result: { ok: true } })
+    return
+  }
   output({
     kind: "response",
     request_id: request.request_id,

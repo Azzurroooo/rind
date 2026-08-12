@@ -6,7 +6,6 @@ const api: DesktopApi = {
   runtime: {
     start: (runtimeId, workspace, sessionId) => ipcRenderer.invoke("runtime-start", runtimeId, workspace, sessionId),
     initialize: (runtimeId) => ipcRenderer.invoke("runtime-initialize", runtimeId),
-    restart: (runtimeId, workspace, sessionId) => ipcRenderer.invoke("runtime-restart", runtimeId, workspace, sessionId),
     request: (runtimeId, method, params = {}) => ipcRenderer.invoke("runtime-request", runtimeId, method, params),
     shutdown: (runtimeId) => ipcRenderer.invoke("runtime-shutdown", runtimeId),
     shutdownAll: () => ipcRenderer.invoke("runtime-shutdown-all"),

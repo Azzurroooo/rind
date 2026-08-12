@@ -139,7 +139,7 @@ appRoot.innerHTML = `
           <div class="conversation-title"><strong id="session-title">New session</strong><span id="session-id" class="subtle"></span></div>
           <div class="conversation-actions"><button id="toggle-sidebar" type="button" class="ghost-button" title="Toggle projects sidebar" aria-label="Toggle projects sidebar">Projects</button><button id="toggle-files" type="button" class="ghost-button" title="Browse active project files">Files</button></div>
         </div>
-        <div id="notice" class="notice" role="status" hidden><span id="notice-text"></span><button id="retry" type="button" class="ghost-button" hidden>Restart runtime</button></div>
+        <div id="notice" class="notice" role="status" hidden><span id="notice-text"></span><button id="retry" type="button" class="ghost-button" hidden>Retry</button></div>
         <div class="stream-wrap">
           <div id="message-stream" class="message-stream" aria-live="polite"></div>
           <button id="jump-latest" type="button" class="jump-latest" hidden>Jump to latest</button>
@@ -232,7 +232,7 @@ function render() {
   const { conversation } = state
   const wideFiles = usesWideFileLayout()
   const filesWidth = state.filesOpen ? state.filePanelWidth : 0
-  connectionText.textContent = runtime.status === "ready" ? "Connected" : titleCase(runtime.status)
+  connectionText.textContent = runtimeStatusLabel(runtime.status)
   connection.className = `connection connection-${runtime.status}`
   appRoot.classList.toggle("sidebar-open", state.sidebarOpen)
   appRoot.classList.toggle("files-open", state.filesOpen)
@@ -253,7 +253,7 @@ function render() {
   sessionTitle.textContent = current?.title || (state.viewedSessionId ? "Session" : "New session")
   sessionIdLabel.textContent = state.viewedSessionId || ""
   noticeText.textContent = state.notice || runtime.message || ""
-  retry.hidden = !currentRuntimeId() || (runtime.status !== "error" && runtime.status !== "stopped")
+  retry.hidden = !currentRuntimeId() || runtime.status !== "error"
   notice.hidden = !noticeText.textContent && retry.hidden
   renderProjectControl()
   renderCurrentTask()
@@ -625,8 +625,11 @@ function syncWorkingTimer() {
   }
 }
 
-function titleCase(value: string) {
-  return value ? value[0].toUpperCase() + value.slice(1) : value
+function runtimeStatusLabel(status: RuntimeSnapshot["status"]) {
+  if (status === "starting") return "Preparing"
+  if (status === "ready") return "Ready"
+  if (status === "error") return "Needs attention"
+  return "Idle"
 }
 
 function escapeHtml(value: string) {
@@ -984,7 +987,9 @@ retry.addEventListener("click", () => runAction(async () => {
   const project = chatProject()
   const runtimeId = currentRuntimeId()
   if (!project?.available) return
-  await window.api.runtime.restart(runtimeId, project.path, state.viewedSessionId || undefined)
+  await ensureRuntime(runtimeId, project.path, state.viewedSessionId || undefined)
+  state.notice = ""
+  render()
 }))
 jumpLatest.addEventListener("click", () => {
   messageStream.scrollTop = messageStream.scrollHeight
@@ -1439,7 +1444,7 @@ async function saveSettings() {
     return
   }
   state.settingsSaving = true
-  state.notice = "Saving settings and restarting the runtime..."
+  state.notice = "Saving settings..."
   render()
   try {
     state.settings = await window.api.settings.save({
