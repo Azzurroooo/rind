@@ -97,6 +97,9 @@ class TurnRunner:
 
         turn_started_at = time.perf_counter()
         original_hard_limit = self._snapshot_context_hard_limit()
+        trace_setter = getattr(self._chat_client, "set_trace_session_id_provider", None)
+        if callable(trace_setter):
+            trace_setter(lambda: str(getattr(session, "session_id", "") or ""))
         try:
             sampling_index = 0
             force_rescue_next_build = False

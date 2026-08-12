@@ -7,7 +7,7 @@ import hashlib
 import json
 import logging
 import os
-from typing import Any, AsyncIterator
+from typing import Any, AsyncIterator, Callable
 import openai
 from tenacity import (
     retry,
@@ -20,6 +20,7 @@ from tenacity import (
 from agent.application.ports.chat_client import ChatClient
 from agent.domain.cancellation import CancellationToken
 from agent.domain.errors import ProviderError
+from agent.infrastructure.llm.llm_trace import make_trace
 
 
 logger = logging.getLogger(__name__)
@@ -35,6 +36,11 @@ class OpenAIChatClient(ChatClient):
         self._reasoning_effort_disabled = False
         self._prompt_cache_key_disabled = False
         self.on_retry = None  # Callback function: def on_retry(attempt: int, exception: Exception)
+        self._trace_session_id_provider: Callable[[], str] | None = None
+
+    def set_trace_session_id_provider(self, provider: Callable[[], str] | None) -> None:
+        """TEMPORARY: install a provider returning the active session id for LLM tracing."""
+        self._trace_session_id_provider = provider
 
     @property
     def model(self) -> str:
@@ -79,6 +85,9 @@ class OpenAIChatClient(ChatClient):
         tools: list[dict] | None = None,
         cancellation_token: CancellationToken | None = None,
     ) -> Any:
+        trace = make_trace(self._trace_session_id_provider, label="create")
+        if trace:
+            trace.request(self._trace_payload(messages, tools, stream=False))
 
         @self._retry_decorator
         async def _do_create():
@@ -103,10 +112,18 @@ class OpenAIChatClient(ChatClient):
             )
 
         try:
-            return await _do_create()
+            result = await _do_create()
+            if trace:
+                trace.response(result)
+                trace.end("completed")
+            return result
         except asyncio.CancelledError:
+            if trace:
+                trace.end("cancelled")
             raise
         except Exception as exc:
+            if trace:
+                trace.end("error", str(exc))
             raise self._provider_error(exc) from exc
 
     async def stream(
@@ -115,6 +132,9 @@ class OpenAIChatClient(ChatClient):
         tools: list[dict] | None = None,
         cancellation_token: CancellationToken | None = None,
     ) -> AsyncIterator[Any]:
+        trace = make_trace(self._trace_session_id_provider, label="stream")
+        if trace:
+            trace.request(self._trace_payload(messages, tools, stream=True))
 
         # We need to retry the initial connection, but not the entire stream
         # once it starts yielding chunks.
@@ -143,27 +163,62 @@ class OpenAIChatClient(ChatClient):
         try:
             stream_response = await _do_connect()
         except asyncio.CancelledError:
+            if trace:
+                trace.end("cancelled")
             raise
         except Exception as exc:
+            if trace:
+                trace.end("connect_error", str(exc))
             raise self._provider_error(exc) from exc
 
-        # Now consume the stream chunks with cancellation checks
+        # Now consume the stream chunks with cancellation checks. Each chunk is
+        # recorded BEFORE it is yielded upstream so the trace reflects the raw
+        # provider output that the runtime then acted on.
+        ended = False
         try:
             async for chunk in stream_response:
                 if cancellation_token and cancellation_token.is_cancelled:
+                    ended = True
+                    if trace:
+                        trace.end("cancelled")
                     raise asyncio.CancelledError(cancellation_token.reason)
+                if trace:
+                    trace.response_chunk(chunk)
                 yield chunk
         except asyncio.CancelledError:
+            if not ended and trace:
+                trace.end("cancelled")
+                ended = True
             raise
         except Exception as exc:
+            if trace:
+                trace.end("stream_error", str(exc))
+            ended = True
             raise self._provider_error(exc) from exc
         finally:
+            if trace and not ended:
+                trace.end("completed")
             try:
                 await self._close_stream(stream_response)
             except asyncio.CancelledError:
                 raise
             except Exception as exc:
                 raise self._provider_error(exc) from exc
+
+    def _trace_payload(self, messages: list[dict], tools: list[dict] | None, *, stream: bool) -> dict[str, Any]:
+        payload: dict[str, Any] = {
+            "model": self._model,
+            "messages": messages,
+            "tools": tools or [],
+            "tool_choice": "auto" if tools else None,
+            "stream": stream,
+            "reasoning_effort": self._reasoning_effort,
+            "reasoning_effort_disabled": self._reasoning_effort_disabled,
+            "prompt_cache_key_disabled": self._prompt_cache_key_disabled,
+        }
+        if stream:
+            payload["stream_options"] = {"include_usage": True}
+        return payload
 
     def _provider_error(self, exc: Exception) -> ProviderError:
         if isinstance(exc, ProviderError):

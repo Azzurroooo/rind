@@ -8,10 +8,16 @@ export function resolveRuntimeLaunch({ python, repoRoot, runtimePath = "", cliAr
   const executable = runtimePath
     ? { command: runtimePath, args: [] }
     : { command: python, args: [path.join(repoRoot, "main.py")] };
+  const traceFlag = isTraceLlmEnvSet() ? ["--trace-llm"] : [];
   return {
     command: executable.command,
-    args: [...executable.args, "app-server", "--stdio", ...cliArgs],
+    args: [...executable.args, "app-server", "--stdio", ...traceFlag, ...cliArgs],
   };
+}
+
+const TRACE_TRUTHY = new Set(["1", "true", "yes", "on"]);
+export function isTraceLlmEnvSet() {
+  return TRACE_TRUTHY.has(String(process.env.RIND_TRACE_LLM || "").trim().toLowerCase());
 }
 
 export function runHelpVersion({ python, repoRoot, runtimePath = "", cliArgs, cwd = process.cwd() }) {

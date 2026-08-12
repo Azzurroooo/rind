@@ -27,6 +27,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--session", type=str, default=None)
     parser.add_argument("-c", "--resume-latest", action="store_true")
     parser.add_argument("--session-dir", type=str, default=None)
+    parser.add_argument(
+        "--trace-llm",
+        action="store_true",
+        help="Record every LLM request/response under <session>/_llm_trace/ (debug).",
+    )
     return parser
 
 
@@ -45,6 +50,8 @@ def _write_startup_error(label: str, exc: Exception, debug: bool) -> None:
 
 async def async_main(argv: list[str] | None = None, *, server_class: type[Any]) -> int:
     args = build_parser().parse_args(argv)
+    if args.trace_llm:
+        os.environ["RIND_TRACE_LLM"] = "1"
     try:
         workspace_root = _resolve_workspace_root(args.cwd)
     except ValueError as exc:
