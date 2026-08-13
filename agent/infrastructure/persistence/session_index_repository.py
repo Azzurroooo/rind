@@ -2,9 +2,15 @@
 
 from __future__ import annotations
 
+import logging
 import os
 from typing import Any
+from filelock import Timeout
 from agent.infrastructure.persistence.session_files import SessionFiles
+
+
+logger = logging.getLogger(__name__)
+
 
 class SessionIndexRepository:
     def __init__(self, files: SessionFiles, index_path: str):
@@ -25,31 +31,37 @@ class SessionIndexRepository:
         if not self._index_path:
             return
 
-        lock = self._files._get_lock_for_path(self._index_path)
-        with lock:
-            index_data = self.load_index()
-            sessions = index_data.get("sessions", [])
-            updated = False
-            for i, s in enumerate(sessions):
-                if s.get("id") == entry.get("id"):
-                    sessions[i] = entry
-                    updated = True
-                    break
-            if not updated:
-                sessions.append(entry)
-            index_data["sessions"] = sessions
-            self._files.write_json(self._index_path, index_data)
+        try:
+            lock = self._files._get_lock_for_path(self._index_path)
+            with lock:
+                index_data = self.load_index()
+                sessions = index_data.get("sessions", [])
+                updated = False
+                for i, session in enumerate(sessions):
+                    if session.get("id") == entry.get("id"):
+                        sessions[i] = entry
+                        updated = True
+                        break
+                if not updated:
+                    sessions.append(entry)
+                index_data["sessions"] = sessions
+                self._files.write_json(self._index_path, index_data)
+        except (OSError, RuntimeError, Timeout, ValueError) as exc:
+            logger.warning("Failed to update session index %s: %s", self._index_path, exc)
 
     def remove_session(self, session_id: str) -> None:
         if not self._index_path:
             return
 
-        lock = self._files._get_lock_for_path(self._index_path)
-        with lock:
-            index_data = self.load_index()
-            sessions = index_data.get("sessions", [])
-            remaining = [session for session in sessions if session.get("id") != session_id]
-            if len(remaining) == len(sessions):
-                return
-            index_data["sessions"] = remaining
-            self._files.write_json(self._index_path, index_data)
+        try:
+            lock = self._files._get_lock_for_path(self._index_path)
+            with lock:
+                index_data = self.load_index()
+                sessions = index_data.get("sessions", [])
+                remaining = [session for session in sessions if session.get("id") != session_id]
+                if len(remaining) == len(sessions):
+                    return
+                index_data["sessions"] = remaining
+                self._files.write_json(self._index_path, index_data)
+        except (OSError, RuntimeError, Timeout, ValueError) as exc:
+            logger.warning("Failed to remove session from index %s: %s", self._index_path, exc)

@@ -7,6 +7,7 @@ import sys
 import json
 import threading
 import time
+import logging
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -16,6 +17,8 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from agent.infrastructure.persistence.jsonl_session_store import JsonlSessionStore
 from agent.infrastructure.persistence.session_files import SessionFiles
+from agent.infrastructure.persistence.session_index_repository import SessionIndexRepository
+import agent.infrastructure.persistence.session_files as session_files
 from agent.domain.compaction import COMPACT_CONTINUATION_USER_CONTENT
 from agent.domain.message_boundary import validate_model_message_boundary
 from agent.infrastructure.tools.builtin.planning import update_plan
@@ -539,6 +542,126 @@ def test_session_files_write_json_removes_tmp_on_replace_failure(monkeypatch, tm
 
     leftovers = list(tmp_path.glob("meta.json.*.tmp"))
     assert leftovers == []
+
+
+def test_session_files_write_json_retries_windows_file_conflicts(monkeypatch, tmp_path):
+    path = tmp_path / "meta.json"
+    files = SessionFiles()
+    real_replace = os.replace
+    attempts = 0
+    delays = []
+
+    class FileConflictError(OSError):
+        winerror = 32
+
+    def replace_after_conflicts(src, dst):
+        nonlocal attempts
+        if str(dst) == str(path):
+            attempts += 1
+            if attempts < 3:
+                raise FileConflictError("file in use")
+        return real_replace(src, dst)
+
+    monkeypatch.setattr(os, "replace", replace_after_conflicts)
+    monkeypatch.setattr(session_files.time, "sleep", delays.append)
+
+    files.write_json(str(path), {"schema_version": "2.0"})
+
+    assert json.loads(path.read_text(encoding="utf-8")) == {"schema_version": "2.0"}
+    assert attempts == 3
+    assert delays == [0.05, 0.1]
+
+
+def test_session_files_write_json_cleans_up_after_windows_file_conflicts(monkeypatch, tmp_path):
+    path = tmp_path / "meta.json"
+    files = SessionFiles()
+    attempts = 0
+    delays = []
+
+    class FileConflictError(OSError):
+        winerror = 5
+
+    def always_conflict(src, dst):
+        nonlocal attempts
+        if str(dst) == str(path):
+            attempts += 1
+            raise FileConflictError("access denied")
+        return os.replace(src, dst)
+
+    monkeypatch.setattr(os, "replace", always_conflict)
+    monkeypatch.setattr(session_files.time, "sleep", delays.append)
+
+    with pytest.raises(FileConflictError, match="access denied"):
+        files.write_json(str(path), {"schema_version": "2.0"})
+
+    assert attempts == 5
+    assert delays == [0.05, 0.1, 0.2, 0.4]
+    assert list(tmp_path.glob("meta.json.*.tmp")) == []
+
+
+def test_session_index_write_failure_is_logged_and_ignored(monkeypatch, tmp_path, caplog):
+    path = tmp_path / "session_index.json"
+    files = SessionFiles()
+    repository = SessionIndexRepository(files, str(path))
+
+    def fail_write(path, data):
+        raise PermissionError("access denied")
+
+    monkeypatch.setattr(files, "write_json", fail_write)
+
+    with caplog.at_level(logging.WARNING, logger="agent.infrastructure.persistence.session_index_repository"):
+        repository.update_index({"id": "session-1"})
+
+    assert "Failed to update session index" in caplog.text
+
+
+def test_session_index_remove_failure_is_logged_and_ignored(monkeypatch, tmp_path, caplog):
+    path = tmp_path / "session_index.json"
+    path.write_text(json.dumps({"sessions": [{"id": "session-1"}]}), encoding="utf-8")
+    files = SessionFiles()
+    repository = SessionIndexRepository(files, str(path))
+
+    def fail_write(path, data):
+        raise PermissionError("access denied")
+
+    monkeypatch.setattr(files, "write_json", fail_write)
+
+    with caplog.at_level(logging.WARNING, logger="agent.infrastructure.persistence.session_index_repository"):
+        repository.remove_session("session-1")
+
+    assert "Failed to remove session from index" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_session_index_failure_does_not_block_tool_call_persistence(temp_session_dir, monkeypatch, caplog):
+    store = JsonlSessionStore(session_dir=temp_session_dir, session_id="index-failure")
+    await store.initialize()
+    await store.persist_message("user", "Persist this tool call")
+    index_path = store._index_path
+    real_write_json = store._files.write_json
+
+    def fail_index_write(path, data):
+        if path == index_path:
+            raise PermissionError("access denied")
+        real_write_json(path, data)
+
+    monkeypatch.setattr(store._files, "write_json", fail_index_write)
+
+    with caplog.at_level(logging.WARNING, logger="agent.infrastructure.persistence.session_index_repository"):
+        await store.persist_tool_call(
+            call_id="call_1",
+            name="fetch_web_page",
+            parsed_args={"url": "https://example.com"},
+            raw_args='{"url":"https://example.com"}',
+            ts_start=store.now_iso(),
+            ts_end=store.now_iso(),
+            result_payload='{"ok":true}',
+            model_content="tool result",
+        )
+
+    records = await store.get_tool_records()
+    assert records[-1]["id"] == "call_1"
+    assert "Failed to update session index" in caplog.text
 
 
 @pytest.mark.asyncio

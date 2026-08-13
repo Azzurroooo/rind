@@ -6,6 +6,7 @@ import json
 import os
 import uuid
 import logging
+import time
 from filelock import FileLock, Timeout
 
 
@@ -43,13 +44,23 @@ class SessionFiles:
                     json.dump(data, f, ensure_ascii=False, indent=2)
                     f.flush()
                     os.fsync(f.fileno())
-                os.replace(tmp, path)
+                self._replace_with_retry(tmp, path)
         except Timeout as e:
             self._remove_tmp(tmp)
             raise RuntimeError(f"Session is currently in use by another process. Failed to acquire lock for: {path}") from e
         except Exception:
             self._remove_tmp(tmp)
             raise
+
+    def _replace_with_retry(self, source: str, destination: str) -> None:
+        for delay in (0.05, 0.1, 0.2, 0.4, None):
+            try:
+                os.replace(source, destination)
+                return
+            except OSError as exc:
+                if getattr(exc, "winerror", None) not in {5, 32, 33} or delay is None:
+                    raise
+                time.sleep(delay)
 
     def append_jsonl(self, path: str, data: dict) -> None:
         line = json.dumps(data, ensure_ascii=False)
