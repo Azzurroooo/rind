@@ -16,7 +16,8 @@ const config: Configuration = {
     output: "dist",
     buildResources: "resources",
   },
-  files: ["out/**/*", "resources/**/*"],
+  files: ["out/**/*"],
+  extraResources: [{ from: "resources/runtime", to: "runtime" }],
   win: {
     target: ["nsis"],
     icon: "resources/icon.png",

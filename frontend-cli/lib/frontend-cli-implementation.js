@@ -3,6 +3,7 @@
 import { createInterface } from "node:readline";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { createRequire } from "node:module";
 
 import { AssistantRenderer } from "./assistant-renderer.js";
 import { createAssistantStreamBuffer } from "./assistant-stream-buffer.js";
@@ -49,7 +50,23 @@ export async function runFrontendCliApp(cliArgs = process.argv.slice(2)) {
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(scriptDir, "..", "..");
 const python = process.env.RIND_PYTHON || "python";
-const runtimePath = process.env.RIND_RUNTIME_PATH || "";
+const runtimePath = process.env.RIND_RUNTIME_PATH || resolveInstalledRuntime();
+
+function resolveInstalledRuntime() {
+  const packageNames = {
+    win32: "@rind-ai/runtime-win32-x64",
+    linux: "@rind-ai/runtime-linux-x64",
+    darwin: process.arch === "arm64" ? "@rind-ai/runtime-darwin-arm64" : "@rind-ai/runtime-darwin-x64",
+  };
+  const packageName = packageNames[process.platform];
+  if (!packageName) return "";
+  try {
+    const packageRoot = path.dirname(createRequire(import.meta.url).resolve(`${packageName}/package.json`));
+    return path.join(packageRoot, "bin", process.platform === "win32" ? "rind-runtime.exe" : "rind-runtime");
+  } catch {
+    return "";
+  }
+}
 
 if (cliArgs.some((arg) => arg === "--version" || arg === "--help" || arg === "-h")) {
   process.exit(runHelpVersion({ python, repoRoot, runtimePath, cliArgs }));

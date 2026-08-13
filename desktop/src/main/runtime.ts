@@ -151,7 +151,8 @@ function runtimeLaunch() {
   const configuredPath = process.env.RIND_RUNTIME_PATH
   if (configuredPath) return { command: configuredPath, args: [] }
   if (!process.env.ELECTRON_RENDERER_URL) {
-    return { command: join(process.resourcesPath, "runtime", "rind-runtime.exe"), args: [] }
+    const executable = process.platform === "win32" ? "rind-runtime.exe" : "rind-runtime"
+    return { command: join(process.resourcesPath, "runtime", executable), args: [] }
   }
   const python = process.env.RIND_PYTHON || (process.platform === "win32" ? "python" : "python3")
   const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "../../..")
@@ -182,12 +183,14 @@ export function startRuntime(id: string, workspace: string, sessionId?: string) 
   setSnapshot(worker, { status: "starting" })
   const launch = runtimeLaunch()
   const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "../../..")
-  const environment: NodeJS.ProcessEnv = {
-    ...process.env,
-    PYTHONIOENCODING: "utf-8",
-    PYTHONPATH: process.env.PYTHONPATH ? `${repoRoot}${delimiter}${process.env.PYTHONPATH}` : repoRoot,
-    PYTHONUTF8: "1",
-  }
+  const environment: NodeJS.ProcessEnv = launch.command === (process.env.RIND_PYTHON || (process.platform === "win32" ? "python" : "python3"))
+    ? {
+        ...process.env,
+        PYTHONIOENCODING: "utf-8",
+        PYTHONPATH: process.env.PYTHONPATH ? `${repoRoot}${delimiter}${process.env.PYTHONPATH}` : repoRoot,
+        PYTHONUTF8: "1",
+      }
+    : process.env
   const args = [...launch.args, "app-server", "--stdio", "--cwd", workspace]
   if (sessionId) args.push("--session", sessionId)
   const current = spawn(launch.command, args, {

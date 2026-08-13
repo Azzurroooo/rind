@@ -1,0 +1,128 @@
+name: Build and publish Rind release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      source_ref:
+        description: "Source branch, tag, or commit to package"
+        required: true
+        default: "main"
+      publish_npm:
+        description: "Publish npm packages (requires NPM_TOKEN)"
+        required: true
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+env:
+  DISTRIBUTION_REPOSITORY: Azzurroooo/rind-distribution
+  SOURCE_REF: ${{ github.event_name == 'workflow_dispatch' && inputs.source_ref || github.ref }}
+
+jobs:
+  desktop:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            target: windows-x64
+          - os: macos-13
+            target: macos-x64
+          - os: macos-14
+            target: macos-arm64
+          - os: ubuntu-latest
+            target: linux-x64
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.SOURCE_REF }}
+          path: rind
+      - uses: actions/checkout@v4
+        with:
+          repository: ${{ env.DISTRIBUTION_REPOSITORY }}
+          path: rind-distribution
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Build desktop and runtime
+        working-directory: rind-distribution
+        run: python scripts/release.py package --target ${{ matrix.target }} --source ../rind
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rind-${{ matrix.target }}
+          path: rind-distribution/artifacts
+
+  npm:
+    needs: desktop
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.SOURCE_REF }}
+          path: rind
+      - uses: actions/checkout@v4
+        with:
+          repository: ${{ env.DISTRIBUTION_REPOSITORY }}
+          path: rind-distribution
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          registry-url: "https://registry.npmjs.org"
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: rind-*
+          path: rind-distribution/artifacts
+          merge-multiple: true
+      - name: Assemble npm packages
+        working-directory: rind-distribution
+        run: python scripts/release.py npm --source ../rind --pack
+      - name: Publish npm packages
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.publish_npm }}
+        working-directory: rind-distribution
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: RIND_ALLOW_NPM_PUBLISH=1 python scripts/release.py npm --source ../rind --publish
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rind-npm
+          path: rind-distribution/artifacts/npm
+
+  release:
+    needs: [desktop, npm]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.SOURCE_REF }}
+          path: rind
+      - uses: actions/checkout@v4
+        with:
+          repository: ${{ env.DISTRIBUTION_REPOSITORY }}
+          path: rind-distribution
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: rind-*
+          path: rind-distribution/artifacts
+          merge-multiple: true
+      - name: Create checksums
+        working-directory: rind-distribution
+        run: python scripts/release.py checksums --source ../rind
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: Rind ${{ github.ref_name }}
+          files: |
+            rind-distribution/artifacts/release/*/*
+            rind-distribution/artifacts/npm/*/*.tgz
