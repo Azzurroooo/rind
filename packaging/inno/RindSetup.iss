@@ -2,9 +2,6 @@
 #define MyAppExeName "rind.exe"
 #define MyAppPublisher "Rind"
 #define MyAppVersion GetEnv("RIND_VERSION")
-#if MyAppVersion == ""
-  #define MyAppVersion "0.3.0"
-#endif
 #define GitInstallerUrl GetEnv("RIND_GIT_INSTALLER_URL")
 
 [Setup]
