@@ -21,6 +21,7 @@ permissions:
 env:
   DISTRIBUTION_REPOSITORY: Azzurroooo/rind-distribution
   SOURCE_REF: ${{ github.event_name == 'workflow_dispatch' && inputs.source_ref || github.ref }}
+  RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.source_ref || github.ref_name }}
 
 jobs:
   desktop:
@@ -30,7 +31,7 @@ jobs:
         include:
           - os: windows-latest
             target: windows-x64
-          - os: macos-13
+          - os: macos-15-intel
             target: macos-x64
           - os: macos-14
             target: macos-arm64
@@ -121,8 +122,7 @@ jobs:
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ github.ref_name }}
-          name: Rind ${{ github.ref_name }}
+          tag_name: ${{ env.RELEASE_TAG }}
+          name: Rind ${{ env.RELEASE_TAG }}
           files: |
             rind-distribution/artifacts/release/*/*
-            rind-distribution/artifacts/npm/*/*.tgz
