@@ -20,6 +20,7 @@ packaging/vendor/
 
 # Testing & Cache
 .pytest_cache/
+.pytest-basetemp/
 .coverage
 .tox/
 
@@ -45,7 +46,9 @@ test_web.py
 test.txt
 src/
 .claude/
+.agents/
 AGENTS.md
+CLAUDE.md
 ARCHITECTURE_REFACTOR_GUIDE.md
 .docs/
 figs/
