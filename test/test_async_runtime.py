@@ -848,6 +848,8 @@ async def test_async_turn_runner_usage_persistence_failure_does_not_fail_turn():
 
     assert any(isinstance(event, TokenStatsUpdatedEvent) for event in events)
     assert any(isinstance(event, AssistantMessageCompletedEvent) for event in events)
+    completed_event = next(event for event in events if isinstance(event, AssistantMessageCompletedEvent))
+    assert completed_event.content == "Done"
     assert isinstance(events[-1], TurnCompletedEvent)
     assert not any(isinstance(event, TurnFailedEvent) for event in events)
     assert session.messages == [(("assistant", "Done"), {})]

@@ -10,7 +10,7 @@ from typing import Any
 
 from agent.domain import AssistantMessageCompletedEvent, TurnCancelledEvent, TurnFailedEvent, tool_cancelled, tool_error, tool_ok
 from agent.domain.cancellation import CancellationToken
-from agent.infrastructure.team import TeamProject, WorkspaceBusyError, WorkspaceLock, resolve_team_agent
+from agent.infrastructure.team import TeamProject, resolve_team_agent
 from agent.infrastructure.planning.store import preserve_active_session_context
 from agent.prompts import build_delegate_execute_prompt, build_delegate_inspect_prompt
 
@@ -63,13 +63,9 @@ class TeamDelegator:
         if not isinstance(parent_session_id, str) or not parent_session_id:
             return tool_error("delegate", "Parent Session is unavailable.", "SessionUnavailable")
 
-        try:
-            async with WorkspaceLock(self._project.project_id, target.agent_id):
-                if normalized_mode == "inspect":
-                    return await self._run_inspect(target, normalized_task, cancellation_token)
-                return await self._run_execute(target, normalized_task, parent_session_id, cancellation_token)
-        except WorkspaceBusyError as exc:
-            return tool_error("delegate", str(exc), "WorkspaceBusy", meta={"agent_id": target.agent_id})
+        if normalized_mode == "inspect":
+            return await self._run_inspect(target, normalized_task, cancellation_token)
+        return await self._run_execute(target, normalized_task, parent_session_id, cancellation_token)
 
     async def _run_execute(self, target, task: str, parent_session_id: str, cancellation_token: CancellationToken | None) -> str:
         with preserve_active_session_context():

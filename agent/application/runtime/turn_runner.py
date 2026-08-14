@@ -178,6 +178,7 @@ class TurnRunner:
                         await self._persist_message(session, "assistant", content_text)
                         yield AssistantMessageCompletedEvent(
                             **event_meta(session, turn_id),
+                            content=content_text,
                             content_chars=len(content_text),
                         )
 

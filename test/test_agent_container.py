@@ -219,6 +219,7 @@ def test_container_resolves_team_agent_capsule_context_from_workspace(tmp_path, 
     assert container.tool_registry.has("delegate") is True
     assert container.tool_registry.has("agent_create") is True
     assert "Use delegate for specialized Team work" in container.runtime._runtime_system_messages[0]["content"]
+    assert "They share that Agent's workspace" in container.runtime._runtime_system_messages[0]["content"]
     assert not (tmp_path / "rind_home" / "teams").exists()
 
 

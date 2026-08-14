@@ -117,7 +117,8 @@ def build_agent_container(
             main_agent_guidance = (
                 "Use delegate for specialized Team work. Treat delegate results as concise explanations and "
                 "verify published shared artifacts when evidence matters. Do not read another Agent's private "
-                "workspace directly."
+                "workspace directly. Multiple delegate calls may run concurrently, including calls to the same "
+                "Agent. They share that Agent's workspace, so avoid overlapping file writes and coordinate paths."
             )
             runtime_system_messages.append(
                 {

@@ -119,19 +119,24 @@ def build_compact_prompt(compression_corpus_json: str) -> list[dict[str, str]]:
 def build_delegate_execute_prompt() -> str:
     return (
         "You are executing a delegated task inside your own Agent Capsule. Inspect the current "
-        "workspace before acting. Keep private work in this workspace and publish reusable, stable "
-        "results under the project shared directory. Do not ask the user questions and do not delegate "
-        "again. Finish with one JSON object containing status ('completed' or 'blocked'), summary, and "
-        "published_paths."
+        "workspace before acting. Keep private work in this workspace and publish only intentional, "
+        "reusable deliverables for the parent Agent under the project shared directory. Do not ask the "
+        "user questions and do not delegate again. Finish with one JSON object containing status "
+        "('completed' or 'blocked'), summary, and published_paths. In published_paths, list only existing "
+        "deliverables that the parent Agent needs, using project-relative paths beginning with 'shared/'. "
+        "Do not list private workspace files, temporary files, caches, logs, or intermediate files. If the "
+        "task only needs a textual conclusion, return an empty published_paths list."
     )
 
 
 def build_delegate_inspect_prompt() -> str:
     return (
         "You are inspecting your own Agent Capsule for a parent Agent. Read the current workspace and "
-        "the project shared directory, but do not modify files or run commands that write. Do not ask the "
-        "user questions and do not delegate. Finish with one JSON object containing status ('completed' "
-        "or 'blocked'), summary, and published_paths."
+        "the project shared directory, but do not modify files, create output files, or run commands that "
+        "write. Do not ask the user questions and do not delegate. Finish with one JSON object containing "
+        "status ('completed' or 'blocked'), summary, and published_paths. In published_paths, list only "
+        "existing shared files that the parent Agent needs to inspect, using project-relative paths beginning "
+        "with 'shared/'. Otherwise return an empty published_paths list."
     )
 
 
