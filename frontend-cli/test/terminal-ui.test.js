@@ -218,7 +218,7 @@ test("appends new frame lines with a newline instead of cursor down", async () =
   ui.stop();
 });
 
-test("uses a clean redraw when the frame shrinks", async () => {
+test("clears only the stale tail when the frame shrinks", async () => {
   const input = new TestInput();
   const output = new TestOutput();
   const scheduler = createScheduler();
@@ -243,7 +243,7 @@ test("uses a clean redraw when the frame shrinks", async () => {
   scheduler.advance(0);
 
   assert.match(output.writes[0], /\x1b\[J/);
-  assert.match(output.writes.join(""), /one/);
+  assert.doesNotMatch(output.writes.join(""), /\x1b\[2Kone/);
   ui.stop();
 });
 
@@ -304,7 +304,48 @@ test("keeps the input cursor and selected menu item visible", async () => {
   ui.stop();
 });
 
-test("suspends and restores the dynamic frame around external output", async () => {
+test("keeps a fixed input prefix while the focused monitor rows scroll", async () => {
+  const input = new TestInput();
+  const output = new TestOutput();
+  output.rows = 4;
+  const scheduler = createScheduler();
+  let focusRow = 3;
+  const ui = createTerminalUI({
+    input,
+    output,
+    now: scheduler.now,
+    setTimeout: scheduler.setTimeout,
+    clearTimeout: scheduler.clearTimeout,
+    render: () => ({
+      lines: ["status", "input", "tab", "item 1", "item 2", "item 3"],
+      cursorRow: 1,
+      cursorColumn: 5,
+      focusRow,
+      fixedPrefixRows: 2,
+    }),
+  });
+
+  ui.start();
+  await Promise.resolve();
+  scheduler.advance(0);
+  const initialFrame = output.writes.find((value) => value.includes("\x1b[?2026h"));
+  assert.match(stripAnsi(initialFrame), /status/);
+  assert.match(stripAnsi(initialFrame), /input/);
+  output.writes = [];
+
+  focusRow = 5;
+  ui.requestRender(true);
+  await Promise.resolve();
+  scheduler.advance(0);
+
+  const frame = output.writes[0];
+  assert.match(stripAnsi(frame), /item 3/);
+  assert.doesNotMatch(frame, /\x1b\[2Kinput/);
+  assert.doesNotMatch(frame, /\x1b\[2Kstatus/);
+  ui.stop();
+});
+
+test("prints external output above the frame in a single atomic write", async () => {
   const input = new TestInput();
   const output = new TestOutput();
   const scheduler = createScheduler();
@@ -327,12 +368,120 @@ test("suspends and restores the dynamic frame around external output", async () 
     output.write("assistant output\n");
     frame = "prompt updated";
   });
-  assert.match(output.writes[0], /\x1b\[J/);
-  assert.match(output.writes[1], /assistant output/);
+  assert.equal(output.writes.length, 1);
+  const write = output.writes[0];
+  const eraseIndex = write.indexOf("\x1b[J");
+  const logIndex = write.indexOf("assistant output");
+  const frameIndex = write.indexOf("prompt updated");
+  assert.ok(eraseIndex !== -1 && logIndex > eraseIndex && frameIndex > logIndex);
 
   await Promise.resolve();
   scheduler.advance(16);
-  assert.match(output.writes.at(-1), /prompt updated/);
+  assert.equal(output.writes.length, 1);
+  ui.stop();
+});
+
+test("atomic output write starts the frame on a fresh line without a trailing newline", async () => {
+  const input = new TestInput();
+  const output = new TestOutput();
+  const scheduler = createScheduler();
+  const ui = createTerminalUI({
+    input,
+    output,
+    now: scheduler.now,
+    setTimeout: scheduler.setTimeout,
+    clearTimeout: scheduler.clearTimeout,
+    render: () => ({ lines: ["prompt"], cursorRow: 0, cursorColumn: 6 }),
+  });
+
+  ui.start();
+  await Promise.resolve();
+  scheduler.advance(0);
+  output.writes = [];
+
+  ui.withSuspended(() => output.write("partial"));
+  assert.equal(output.writes.length, 1);
+  assert.match(output.writes[0], /partial\n/);
+  assert.match(output.writes[0], /\r\x1b\[2Kprompt/);
+  ui.stop();
+});
+
+test("nested suspended writes coalesce into a single atomic write", async () => {
+  const input = new TestInput();
+  const output = new TestOutput();
+  const scheduler = createScheduler();
+  const ui = createTerminalUI({
+    input,
+    output,
+    now: scheduler.now,
+    setTimeout: scheduler.setTimeout,
+    clearTimeout: scheduler.clearTimeout,
+    render: () => ({ lines: ["prompt"], cursorRow: 0, cursorColumn: 6 }),
+  });
+
+  ui.start();
+  await Promise.resolve();
+  scheduler.advance(0);
+  output.writes = [];
+
+  ui.withSuspended(() => {
+    output.write("outer\n");
+    ui.withSuspended(() => output.write("inner\n"));
+  });
+  assert.equal(output.writes.length, 1);
+  const write = output.writes[0];
+  assert.match(write, /outer/);
+  assert.match(write, /inner/);
+  assert.equal((write.match(/prompt/g) || []).length, 1);
+  ui.stop();
+});
+
+test("suspended write without repaint erases the frame and leaves it cleared", async () => {
+  const input = new TestInput();
+  const output = new TestOutput();
+  const scheduler = createScheduler();
+  const ui = createTerminalUI({
+    input,
+    output,
+    now: scheduler.now,
+    setTimeout: scheduler.setTimeout,
+    clearTimeout: scheduler.clearTimeout,
+    render: () => ({ lines: ["prompt"], cursorRow: 0, cursorColumn: 6 }),
+  });
+
+  ui.start();
+  await Promise.resolve();
+  scheduler.advance(0);
+  output.writes = [];
+
+  ui.withSuspended(() => output.write("echo\n"), { render: false });
+  assert.equal(output.writes.length, 1);
+  assert.match(output.writes[0], /echo/);
+  assert.doesNotMatch(output.writes[0], /\x1b\[2Kprompt/);
+  ui.stop();
+});
+
+test("full-screen clear sequences pass through and drop the frame", async () => {
+  const input = new TestInput();
+  const output = new TestOutput();
+  const scheduler = createScheduler();
+  const ui = createTerminalUI({
+    input,
+    output,
+    now: scheduler.now,
+    setTimeout: scheduler.setTimeout,
+    clearTimeout: scheduler.clearTimeout,
+    render: () => ({ lines: ["prompt"], cursorRow: 0, cursorColumn: 6 }),
+  });
+
+  ui.start();
+  await Promise.resolve();
+  scheduler.advance(0);
+  output.writes = [];
+
+  ui.withSuspended(() => output.write("\x1b[2J\x1b[H"));
+  assert.equal(output.writes.length, 1);
+  assert.match(output.writes[0], /\x1b\[2J/);
   ui.stop();
 });
 

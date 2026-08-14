@@ -142,6 +142,21 @@ export function modelMenuText(items, selectedIndex = 0) {
   return `${lines.join("\n")}\n`;
 }
 
+export function taskMonitorTabs(page = "background", backgroundCount = 0, delegateCount = 0, width = 76) {
+  const background = Math.max(0, Math.floor(Number(backgroundCount) || 0));
+  const delegates = Math.max(0, Math.floor(Number(delegateCount) || 0));
+  const tabs = [
+    { page: "background", label: `Background [${background}]` },
+    { page: "delegates", label: `Delegates [${delegates}]` },
+  ].map((tab) => tab.page === page
+    ? bold(accent(`› ${tab.label}`))
+    : dim(`  ${tab.label}`));
+  const inline = tabs.join("    ");
+  return textWidth(inline) <= Math.max(1, Number(width) || 76)
+    ? inline
+    : tabs.join("\n");
+}
+
 export function choiceMenuText(options, selectedIndex = 0, recommended = "") {
   return choiceMenuTextWithTitle(options, selectedIndex, recommended, "Choices");
 }
@@ -152,7 +167,7 @@ export function sessionMenuText(options, selectedIndex = 0) {
 
 export function backgroundMonitorText(tasks = [], selectedIndex = 0, selectedTask = null, width = 76) {
   const items = Array.isArray(tasks) ? tasks : [];
-  const lines = [bold("Background tasks"), dim("  ←→ page · ↑↓/j/k select · esc/ctrl+b close")];
+  const lines = [dim("  ←→ page · ↑↓/j/k select · esc/ctrl+b close")];
   if (!items.length) {
     lines.push(dim("  No background tasks."));
     return lines.join("\n");
@@ -189,7 +204,7 @@ export function backgroundMonitorText(tasks = [], selectedIndex = 0, selectedTas
 
 export function delegateMonitorText(delegates = [], selectedIndex = 0, selectedDelegate = null, width = 76) {
   const items = Array.isArray(delegates) ? delegates : [];
-  const lines = [bold("Delegates"), dim("  ←→ page · ↑↓/j/k select · esc/ctrl+b close")];
+  const lines = [dim("  ←→ page · ↑↓/j/k select · esc/ctrl+b close")];
   if (!items.length) {
     lines.push(dim("  No delegates."));
     return lines.join("\n");
@@ -1036,23 +1051,31 @@ function visibleLength(text) {
 
 function promptHeaderLine(info) {
   const backgroundCount = Number(info.background_count);
-  const backgroundHint = backgroundCount > 0
-    ? " · " + dim("[bg:" + backgroundCount + "] (ctrl+b monitor)")
+  const delegateCount = Number(info.delegate_count);
+  const taskHints = [];
+  if (backgroundCount > 0) {
+    taskHints.push(`[bg:${backgroundCount}]`);
+  }
+  if (delegateCount > 0) {
+    taskHints.push(`[delegate:${delegateCount}]`);
+  }
+  const taskHint = taskHints.length
+    ? " · " + dim(`${taskHints.join(" ")} (ctrl+b monitor)`)
     : "";
   const model = singleLine(info.model);
   const cwd = middleClip(info.cwd, 56);
   const width = composerWidth();
   if (model && cwd) {
     const separator = " · ";
-    const pathWidth = width - visibleLength(model) - visibleLength(separator) - visibleLength(backgroundHint);
+    const pathWidth = width - visibleLength(model) - visibleLength(separator) - visibleLength(taskHint);
     if (pathWidth > 0) {
-      return `  ${promptModel(clipSingleLine(model, width))}${dim(separator)}${promptPath(clipSingleLine(cwd, pathWidth))}${backgroundHint}`;
+      return `  ${promptModel(clipSingleLine(model, width))}${dim(separator)}${promptPath(clipSingleLine(cwd, pathWidth))}${taskHint}`;
     }
   }
   if (model) {
-    return `  ${promptModel(clipSingleLine(model, width))}${backgroundHint}`;
+    return `  ${promptModel(clipSingleLine(model, width))}${taskHint}`;
   }
-  return cwd ? `  ${promptPath(clipSingleLine(cwd, width))}${backgroundHint}` : "";
+  return cwd ? `  ${promptPath(clipSingleLine(cwd, width))}${taskHint}` : "";
 }
 
 function composerWidth() {

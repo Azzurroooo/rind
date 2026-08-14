@@ -33,6 +33,7 @@ import {
   slashMenuText,
   slashResultText,
   startupText,
+  taskMonitorTabs,
   toolProgressLine,
   toolRequestedLine,
   toolResultLine,
@@ -633,6 +634,20 @@ test("prompt shows background task count after cwd with monitor hint", () => {
   assert.match(text, /m1 · E:\\project · \[bg:2\] \(ctrl\+b monitor\)/);
 });
 
+test("prompt shows delegate count after background count", () => {
+  const text = promptText({ model: "m1", cwd: "E:\\project", background_count: 2, delegate_count: 1 });
+  assert.match(text, /m1 · E:\\project · \[bg:2\] \[delegate:1\] \(ctrl\+b monitor\)/);
+  const delegateOnly = promptText({ model: "m1", cwd: "E:\\project", delegate_count: 1 });
+  assert.match(delegateOnly, /m1 · E:\\project · \[delegate:1\] \(ctrl\+b monitor\)/);
+});
+
+test("task monitor tabs mark the active page and fit narrow widths", () => {
+  const tabs = taskMonitorTabs("delegates", 2, 1, 80);
+  assert.match(tabs, /› Delegates \[1\]/);
+  assert.match(tabs, /Background \[2\]/);
+  assert.equal(taskMonitorTabs("background", 2, 1, 20).split("\n").length, 2);
+});
+
 test("background monitor renders selection and latest output", () => {
   const text = backgroundMonitorText(
     [
@@ -651,7 +666,8 @@ test("delegate monitor renders the selected task and summary", () => {
     [{ agent_id: "builder-agent", status: "completed", task: "build it", summary: "created dist" }],
     0,
   );
-  assert.match(text, /Delegates/);
+  assert.match(text, /↑↓\/j\/k select/);
+  assert.doesNotMatch(text, /^Delegates$/m);
   assert.match(text, /builder-agent/);
   assert.match(text, /task: build it/);
   assert.match(text, /created dist/);

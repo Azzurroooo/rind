@@ -10,6 +10,7 @@ const DEFAULT_COLUMNS = 80;
 const DEFAULT_ROWS = 24;
 const DEFAULT_INPUT_TIMEOUT_MS = 10;
 const DEFAULT_RENDER_INTERVAL_MS = 16;
+const FULL_SCREEN_CLEAR = /\x1b\[(?:2|3)J|\x1bc/;
 
 export function createTerminalUI(options = {}) {
   const input = options.input || process.stdin;
@@ -34,7 +35,7 @@ export function createTerminalUI(options = {}) {
   let renderMicrotaskQueued = false;
   let lastRenderAt = 0;
   let hasRendered = false;
-  let suspended = 0;
+  let capturing = false;
   let previousLines = [];
   let previousWidth = 0;
   let previousHeight = 0;
@@ -253,7 +254,7 @@ export function createTerminalUI(options = {}) {
   }
 
   function scheduleRender(force) {
-    if (!renderRequested || suspended > 0 || !started) {
+    if (!renderRequested || !started) {
       return;
     }
     if (force) {
@@ -272,7 +273,7 @@ export function createTerminalUI(options = {}) {
   }
 
   function flushRender() {
-    if (!renderRequested || suspended > 0 || !started) {
+    if (!renderRequested || !started) {
       return;
     }
     renderRequested = false;
@@ -309,8 +310,16 @@ export function createTerminalUI(options = {}) {
   }
 
   function renderFull(frame) {
-    const lines = frame.lines;
     let buffer = SYNCHRONIZED_OUTPUT_START;
+    buffer += frameBody(frame);
+    buffer += SYNCHRONIZED_OUTPUT_END;
+    write(buffer);
+    commitFrame(frame);
+  }
+
+  function frameBody(frame) {
+    const lines = frame.lines;
+    let buffer = "";
     for (let index = 0; index < lines.length; index += 1) {
       if (index > 0) {
         buffer += "\r\n";
@@ -320,23 +329,31 @@ export function createTerminalUI(options = {}) {
       buffer += LINE_RESET;
     }
     buffer += cursorSequence(frame.cursor, lines.length - 1, lines.length ? visibleLineWidth(lines.at(-1)) : 0);
-    buffer += SYNCHRONIZED_OUTPUT_END;
-    write(buffer);
-    previousLines = lines;
+    return buffer;
+  }
+
+  function commitFrame(frame) {
+    previousLines = frame.lines;
     previousWidth = frame.width;
     previousHeight = rows();
     cursor = frame.cursor;
     rendered = true;
+    lastRenderAt = now();
+    hasRendered = true;
+  }
+
+  function resetFrameState() {
+    previousLines = [];
+    previousWidth = 0;
+    previousHeight = 0;
+    cursor = { row: 0, column: 0 };
+    rendered = false;
   }
 
   function renderDiff(frame) {
     const nextLines = frame.lines;
-    if (previousLines.length > nextLines.length) {
-      clearFrame();
-      renderFull(frame);
-      return;
-    }
     const appendedLines = nextLines.length > previousLines.length;
+    const shrinking = nextLines.length < previousLines.length;
     let firstChanged = -1;
     let lastChanged = -1;
     const lineCount = Math.max(previousLines.length, nextLines.length);
@@ -369,7 +386,14 @@ export function createTerminalUI(options = {}) {
         buffer += nextLines[index] || "";
         buffer += LINE_RESET;
       }
-      buffer += cursorSequence(frame.cursor, Math.max(0, renderEnd), visibleLineWidth(nextLines[renderEnd] || ""));
+      const currentRow = renderEnd >= firstChanged ? renderEnd : firstRenderRow;
+      const currentColumn = renderEnd >= firstChanged
+        ? visibleLineWidth(nextLines[renderEnd] || "")
+        : 0;
+      if (shrinking) {
+        buffer += "\x1b[J";
+      }
+      buffer += cursorSequence(frame.cursor, currentRow, currentColumn);
       buffer += SYNCHRONIZED_OUTPUT_END;
       write(buffer);
     } else {
@@ -411,41 +435,67 @@ export function createTerminalUI(options = {}) {
     buffer += "\r\x1b[J";
     buffer += SYNCHRONIZED_OUTPUT_END;
     write(buffer);
-    previousLines = [];
-    previousWidth = 0;
-    previousHeight = 0;
-    cursor = { row: 0, column: 0 };
-    rendered = false;
+    resetFrameState();
   }
 
-  function suspend() {
-    suspended += 1;
-    if (suspended === 1) {
-      clearFrame();
-    }
-    let resumed = false;
-    return () => {
-      if (resumed) {
-        return;
-      }
-      resumed = true;
-      suspended = Math.max(0, suspended - 1);
-      if (suspended === 0 && renderRequested) {
-        queueRenderMicrotask(false);
-      }
-    };
-  }
-
+  // Emits external output above the live frame as ONE terminal write: erase
+  // the old frame, print the payload, repaint the frame beneath it. A single
+  // write means terminals never paint an intermediate blank frame, so logs
+  // streaming beside a live composer or monitor cannot flicker — even where
+  // synchronized-output mode (2026) is unsupported, e.g. ConPTY.
   function withSuspended(action, options = {}) {
-    const resume = suspend();
-    try {
+    if (capturing) {
       return action();
-    } finally {
-      resume();
+    }
+    if (!started || !rendered) {
+      const result = action();
       if (options.render !== false) {
         requestRender();
       }
+      return result;
     }
+    capturing = true;
+    const originalWrite = output.write;
+    let payload = "";
+    output.write = (chunk) => {
+      payload += Buffer.isBuffer(chunk) ? chunk.toString("utf8") : String(chunk ?? "");
+      return true;
+    };
+    let result;
+    try {
+      result = action();
+    } finally {
+      output.write = originalWrite;
+      capturing = false;
+    }
+    printAboveFrame(payload, options.render !== false);
+    return result;
+  }
+
+  function printAboveFrame(payload, repaint) {
+    if (FULL_SCREEN_CLEAR.test(payload)) {
+      write(payload);
+      resetFrameState();
+      return;
+    }
+    if (!payload && repaint) {
+      return;
+    }
+    const width = columns();
+    const height = rows();
+    const frame = fitFrame(normalizeFrame(renderFrame(width, height), width), height);
+    let buffer = SYNCHRONIZED_OUTPUT_START;
+    buffer += moveRows(-cursor.row);
+    buffer += "\r\x1b[J";
+    buffer += payload.endsWith("\n") || !payload ? payload : `${payload}\n`;
+    if (repaint && frame.lines.length) {
+      buffer += `\r${frameBody(frame)}`;
+      commitFrame(frame);
+    } else {
+      resetFrameState();
+    }
+    buffer += SYNCHRONIZED_OUTPUT_END;
+    write(buffer);
   }
 
   return {
@@ -522,13 +572,29 @@ function normalizeFrame(frame, fallbackWidth = DEFAULT_COLUMNS) {
     column: clampInteger(frame?.cursorColumn, 0, fallbackColumn, fallbackColumn),
   };
   const focusRow = clampInteger(frame?.focusRow, 0, Math.max(0, lines.length - 1), row);
-  return { lines, width, cursor, focusRow };
+  const fixedPrefixRows = clampInteger(frame?.fixedPrefixRows, 0, lines.length, 0);
+  return { lines, width, cursor, focusRow, fixedPrefixRows };
 }
 
 function fitFrame(frame, height) {
   const lineCount = finitePositive(height, DEFAULT_ROWS);
   if (frame.lines.length <= lineCount) {
     return frame;
+  }
+  if (frame.fixedPrefixRows > 0 && frame.fixedPrefixRows < lineCount && frame.focusRow >= frame.fixedPrefixRows) {
+    const focusLineCount = lineCount - frame.fixedPrefixRows;
+    const focusStart = Math.min(
+      Math.max(frame.fixedPrefixRows, frame.focusRow - focusLineCount + 1),
+      frame.lines.length - focusLineCount,
+    );
+    return {
+      ...frame,
+      lines: [
+        ...frame.lines.slice(0, frame.fixedPrefixRows),
+        ...frame.lines.slice(focusStart, focusStart + focusLineCount),
+      ],
+      focusRow: frame.fixedPrefixRows + frame.focusRow - focusStart,
+    };
   }
   const firstFocusRow = Math.min(frame.cursor.row, frame.focusRow);
   const lastFocusRow = Math.max(frame.cursor.row, frame.focusRow);

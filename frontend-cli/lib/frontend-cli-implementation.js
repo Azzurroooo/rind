@@ -382,6 +382,7 @@ async function runSessionsSelector() {
       resume_preview: update?.resume_preview || "",
       goal: update?.goal || null,
       background_count: 0,
+      delegate_count: 0,
     };
     latestStats = update?.usage && typeof update.usage === "object" ? update.usage : {};
     compactContextState.clear();
@@ -724,9 +725,25 @@ function clearAssistantLineForInput() {
 }
 
 function renderActiveInput(width = process.stdout.columns || 80) {
-  if (taskMonitorController.isMonitoring()) {
-    return taskMonitorController.frame(width);
+  const inputFrame = renderInputSession(width);
+  if (!taskMonitorController.isMonitoring()) {
+    return inputFrame;
   }
+  const monitorFrame = taskMonitorController.frame(width);
+  const monitorOffset = inputFrame.lines.length;
+  const focusRow = monitorFrame.focusRow === undefined
+    ? monitorOffset
+    : monitorOffset + monitorFrame.focusRow;
+  return {
+    lines: [...inputFrame.lines, ...monitorFrame.lines],
+    cursorRow: inputFrame.cursorRow,
+    cursorColumn: inputFrame.cursorColumn,
+    focusRow,
+    fixedPrefixRows: monitorOffset,
+  };
+}
+
+function renderInputSession(width) {
   const session = activeInputSession;
   if (!session) {
     return { lines: [], cursorRow: 0, cursorColumn: 0 };

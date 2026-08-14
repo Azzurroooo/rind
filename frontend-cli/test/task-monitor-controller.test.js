@@ -85,10 +85,12 @@ test("task monitor tracks delegate status and renders its page", () => {
     sessionInfo: {},
     inputActive: false,
   };
+  const redraws = [];
   const controller = createTaskMonitorController({
     request: async () => ({ tasks: [] }),
     terminalUi: true,
     state,
+    redraw: (force) => redraws.push(Boolean(force)),
   });
 
   controller.recordDelegateRequest({
@@ -96,12 +98,15 @@ test("task monitor tracks delegate status and renders its page", () => {
     tool_call_id: "delegate-1",
     args_preview: JSON.stringify({ agent_id: "weather-agent", task: "check the forecast" }),
   });
+  assert.equal(state.sessionInfo.delegate_count, 1);
+  assert.equal(redraws.at(-1), false);
   controller.recordDelegateResult({
     tool_name: "delegate",
     tool_call_id: "delegate-1",
     status: "completed",
     result: JSON.stringify({ data: { status: "completed", summary: "sunny" } }),
   });
+  assert.equal(state.sessionInfo.delegate_count, 0);
 
   const frame = controller.frame(80);
   assert.match(frame.lines.join("\n"), /Delegates/);
@@ -133,10 +138,13 @@ test("task monitor switches pages with horizontal keys", async () => {
 
   controller.enterMonitor();
   await new Promise((resolve) => setImmediate(resolve));
-  assert.match(controller.frame(80).lines.join("\n"), /Background tasks/);
+  assert.match(controller.frame(80).lines.join("\n"), /Background \[1\]/);
+  assert.match(controller.frame(80).lines[0], /› Background \[1\]/);
+  assert.match(controller.frame(80).lines[0], /Delegates \[1\]/);
   controller.handleInput({ name: "right", ctrl: false, alt: false, shift: false });
   assert.match(controller.frame(80).lines.join("\n"), /Delegates/);
+  assert.match(controller.frame(80).lines[0], /› Delegates \[1\]/);
   controller.handleInput({ name: "left", ctrl: false, alt: false, shift: false });
-  assert.match(controller.frame(80).lines.join("\n"), /Background tasks/);
+  assert.match(controller.frame(80).lines.join("\n"), /Background \[1\]/);
   controller.stop();
 });

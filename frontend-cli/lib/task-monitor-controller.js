@@ -1,4 +1,4 @@
-import { backgroundMonitorText, delegateMonitorText } from "./rendering.js";
+import { backgroundMonitorText, delegateMonitorText, taskMonitorTabs } from "./rendering.js";
 
 const PAGES = ["background", "delegates"];
 
@@ -50,7 +50,7 @@ export function createTaskMonitorController({
             monitor.page = otherPage(monitor.page);
             monitor.selectedIndex = 0;
           }
-          redraw(true);
+          redraw();
         }
       })
       .finally(() => {
@@ -60,12 +60,20 @@ export function createTaskMonitorController({
   }
 
   function updateCount() {
-    const count = [...tasks.values()].filter((task) => task.status === "running").length;
-    if (Number(state.sessionInfo?.background_count) !== count) {
-      state.sessionInfo = { ...state.sessionInfo, background_count: count };
+    const backgroundCount = [...tasks.values()].filter((task) => task.status === "running").length;
+    const delegateCount = [...delegates.values()].filter((delegate) => delegate.status === "running").length;
+    if (
+      Number(state.sessionInfo?.background_count) !== backgroundCount
+      || Number(state.sessionInfo?.delegate_count) !== delegateCount
+    ) {
+      state.sessionInfo = {
+        ...state.sessionInfo,
+        background_count: backgroundCount,
+        delegate_count: delegateCount,
+      };
       redraw();
     }
-    if (count > 0) {
+    if (backgroundCount > 0) {
       startRefresh();
     } else {
       stopRefresh();
@@ -100,9 +108,10 @@ export function createTaskMonitorController({
 
   function clearDelegates() {
     delegates.clear();
+    updateCount();
     if (monitor?.page === "delegates") {
       monitor.selectedIndex = 0;
-      redraw(true);
+      redraw();
     }
   }
 
@@ -148,9 +157,10 @@ export function createTaskMonitorController({
       status: "running",
       summary: "",
     });
+    updateCount();
     if (monitor?.page === "delegates") {
       monitor.selectedIndex = clampIndex(monitor.selectedIndex);
-      redraw(true);
+      redraw();
     }
   }
 
@@ -167,8 +177,9 @@ export function createTaskMonitorController({
     const status = String(data.status || event.status || "completed").trim();
     const summary = String(data.summary || "").trim();
     delegates.set(event.tool_call_id, { ...previous, status, summary });
+    updateCount();
     if (monitor?.page === "delegates") {
-      redraw(true);
+      redraw();
     }
   }
 
@@ -196,7 +207,7 @@ export function createTaskMonitorController({
         monitor.selectedIndex = clampIndex(monitor.selectedIndex);
         startMonitorPolling();
         void pollMonitor();
-        redraw(true);
+        redraw();
       })
       .catch((error) => {
         if (!monitor || state.runtimeClosing) {
@@ -290,7 +301,7 @@ export function createTaskMonitorController({
     monitor.pageChanged = true;
     monitor.selectedIndex = clampIndex(monitor.selectedIndex);
     void pollMonitor();
-    redraw(true);
+    redraw();
   }
 
   function handleInput(key) {
@@ -329,15 +340,17 @@ export function createTaskMonitorController({
     const page = monitor?.page || initialPage();
     const list = pageItems(page);
     const selectedIndex = clampIndex(monitor?.selectedIndex, page);
+    const contentWidth = Math.max(20, Number(width) - 4);
+    const tabs = taskMonitorTabs(page, tasks.size, delegates.size, contentWidth).split("\n");
     const text = page === "delegates"
-      ? delegateMonitorText(list, selectedIndex, list[selectedIndex], Math.max(20, Number(width) - 4))
-      : backgroundMonitorText(list, selectedIndex, list[selectedIndex], Math.max(20, Number(width) - 4));
-    const lines = text.split("\n");
-    const selectedRow = list.length ? 2 + selectedIndex : Math.max(0, lines.length - 1);
+      ? delegateMonitorText(list, selectedIndex, list[selectedIndex], contentWidth)
+      : backgroundMonitorText(list, selectedIndex, list[selectedIndex], contentWidth);
+    const lines = [...tabs, ...text.split("\n")];
+    const selectedRow = list.length
+      ? tabs.length + 1 + selectedIndex
+      : Math.max(0, lines.length - 1);
     return {
       lines,
-      cursorRow: Math.min(selectedRow, Math.max(0, lines.length - 1)),
-      cursorColumn: 0,
       focusRow: Math.min(selectedRow, Math.max(0, lines.length - 1)),
     };
   }
