@@ -1,0 +1,142 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+
+import { createTaskMonitorController } from "../lib/task-monitor-controller.js";
+
+test("task monitor merges background commands and results", () => {
+  const state = {
+    runtimeClosing: false,
+    sessionInfo: { background_count: 0 },
+    inputActive: false,
+  };
+  const redraws = [];
+  const controller = createTaskMonitorController({
+    request: async () => ({ tasks: [] }),
+    terminalUi: true,
+    state,
+    redraw: (force) => redraws.push(Boolean(force)),
+  });
+
+  controller.recordCommand({
+    tool_name: "bash",
+    tool_call_id: "call-1",
+    args_preview: '{"command":"sleep 1 &"}',
+  });
+  controller.recordResult({
+    tool_call_id: "call-1",
+    result: '{"bg_id":"bg-1","status":"running","output":""}',
+  });
+
+  assert.equal(state.sessionInfo.background_count, 1);
+  assert.equal(redraws.length > 0, true);
+  controller.clear();
+  assert.equal(state.sessionInfo.background_count, 0);
+  controller.stop();
+});
+
+test("task monitor unwraps normalized background data", () => {
+  const state = {
+    runtimeClosing: false,
+    sessionInfo: { background_count: 0 },
+    inputActive: false,
+  };
+  const controller = createTaskMonitorController({
+    request: async () => ({ tasks: [] }),
+    terminalUi: true,
+    state,
+  });
+
+  controller.recordResult({
+    tool_call_id: "call-3",
+    result: JSON.stringify({
+      ok: true,
+      tool: "bash",
+      data: { bg_id: "bg-2", status: "running", output: "" },
+    }),
+  });
+
+  assert.equal(state.sessionInfo.background_count, 1);
+  controller.stop();
+});
+
+test("task monitor ignores malformed events and handles monitor keys", async () => {
+  const state = {
+    runtimeClosing: false,
+    sessionInfo: {},
+    inputActive: false,
+  };
+  const controller = createTaskMonitorController({
+    request: async (method) => method === "background.list" ? { tasks: [] } : {},
+    terminalUi: true,
+    state,
+  });
+
+  controller.recordCommand({ tool_name: "edit", tool_call_id: "call-2", args_preview: "not json" });
+  controller.recordResult({ tool_call_id: "call-2", result: "not json" });
+  await controller.refresh();
+  assert.equal(controller.isMonitoring(), false);
+  assert.equal(controller.handleInput({ name: "escape" }), true);
+  controller.stop();
+});
+
+test("task monitor tracks delegate status and renders its page", () => {
+  const state = {
+    runtimeClosing: false,
+    sessionInfo: {},
+    inputActive: false,
+  };
+  const controller = createTaskMonitorController({
+    request: async () => ({ tasks: [] }),
+    terminalUi: true,
+    state,
+  });
+
+  controller.recordDelegateRequest({
+    tool_name: "delegate",
+    tool_call_id: "delegate-1",
+    args_preview: JSON.stringify({ agent_id: "weather-agent", task: "check the forecast" }),
+  });
+  controller.recordDelegateResult({
+    tool_name: "delegate",
+    tool_call_id: "delegate-1",
+    status: "completed",
+    result: JSON.stringify({ data: { status: "completed", summary: "sunny" } }),
+  });
+
+  const frame = controller.frame(80);
+  assert.match(frame.lines.join("\n"), /Delegates/);
+  assert.match(frame.lines.join("\n"), /weather-agent/);
+  assert.match(frame.lines.join("\n"), /sunny/);
+  controller.clearDelegates();
+  assert.doesNotMatch(controller.frame(80).lines.join("\n"), /weather-agent/);
+  controller.stop();
+});
+
+test("task monitor switches pages with horizontal keys", async () => {
+  const state = {
+    runtimeClosing: false,
+    sessionInfo: {},
+    inputActive: false,
+  };
+  const controller = createTaskMonitorController({
+    request: async (method) => method === "background.list"
+      ? { tasks: [{ bg_id: "bg-1", status: "running", command: "server" }] }
+      : {},
+    terminalUi: true,
+    state,
+  });
+  controller.recordDelegateRequest({
+    tool_name: "delegate",
+    tool_call_id: "delegate-2",
+    args_preview: '{"agent_id":"builder-agent","task":"build it"}',
+  });
+
+  controller.enterMonitor();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.match(controller.frame(80).lines.join("\n"), /Background tasks/);
+  controller.handleInput({ name: "right", ctrl: false, alt: false, shift: false });
+  assert.match(controller.frame(80).lines.join("\n"), /Delegates/);
+  controller.handleInput({ name: "left", ctrl: false, alt: false, shift: false });
+  assert.match(controller.frame(80).lines.join("\n"), /Background tasks/);
+  controller.stop();
+});

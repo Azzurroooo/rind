@@ -9,6 +9,7 @@ import {
   cancelledText,
   commandResultText,
   contextBuiltLine,
+  delegateMonitorText,
   errorLine,
   goalCommandText,
   goalText,
@@ -240,7 +241,7 @@ test("helpText renders compact shortcuts and commands", () => {
       "  ↑ / ↓        history              ← / →          move cursor",
       "  home / end   line edges           del / backspace edit text",
       "  ctrl+c       interrupt or quit    ?              show shortcuts",
-      "  ctrl+b       background tasks     esc            close monitor",
+      "  ctrl+b       task monitor         esc            close monitor",
     ].join("\n"),
   );
   assert.equal(
@@ -257,7 +258,7 @@ test("helpText renders compact shortcuts and commands", () => {
       "  ↑ / ↓        history              ← / →          move cursor",
       "  home / end   line edges           del / backspace edit text",
       "  ctrl+c       interrupt or quit    ?              show shortcuts",
-      "  ctrl+b       background tasks     esc            close monitor",
+      "  ctrl+b       task monitor         esc            close monitor",
       "",
       "• Command deck",
       "  /status         /help           /clear          /exit",
@@ -586,6 +587,16 @@ test("toolRequestedLine shows bash command", () => {
   );
 });
 
+test("toolRequestedLine shows delegate agent", () => {
+  assert.equal(
+    toolRequestedLine({
+      tool_name: "delegate",
+      args_preview: '{"agent_id":"weather-agent","task":"check the forecast"}',
+    }),
+    "◌ Tool · Calling delegate\n  ↳ agent: weather-agent",
+  );
+});
+
 test("toolRequestedLine clips long details", () => {
   const line = toolRequestedLine({
     tool_name: "bash",
@@ -633,6 +644,17 @@ test("background monitor renders selection and latest output", () => {
   assert.match(text, /› bg_1/);
   assert.match(text, /tick-2/);
   assert.match(text, /bg_2/);
+});
+
+test("delegate monitor renders the selected task and summary", () => {
+  const text = delegateMonitorText(
+    [{ agent_id: "builder-agent", status: "completed", task: "build it", summary: "created dist" }],
+    0,
+  );
+  assert.match(text, /Delegates/);
+  assert.match(text, /builder-agent/);
+  assert.match(text, /task: build it/);
+  assert.match(text, /created dist/);
 });
 
 test("toolRequestedLine keeps large file content out of the status", () => {

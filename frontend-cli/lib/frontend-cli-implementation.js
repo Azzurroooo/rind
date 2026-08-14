@@ -13,7 +13,7 @@ import { createLineEditor } from "./line-editor.js";
 import { createRuntimeClient, runHelpVersion } from "./runtime-client.js";
 import { createTurnController } from "./turn-controller.js";
 import { createCommandController } from "./command-controller.js";
-import { createBackgroundController } from "./background-controller.js";
+import { createTaskMonitorController } from "./task-monitor-controller.js";
 import { createEventController } from "./event-controller.js";
 import { createInputController } from "./input-controller.js";
 import { isInputClosed } from "./input-errors.js";
@@ -191,7 +191,7 @@ const commandController = createCommandController({
     exit: () => process.exit(0),
   },
 });
-const backgroundController = createBackgroundController({
+const taskMonitorController = createTaskMonitorController({
   request,
   terminalUi: Boolean(terminalUi),
   state: {
@@ -225,7 +225,7 @@ const eventController = createEventController({
     debug: cliArgs.includes("--debug"),
   },
   input: { answerQuestion },
-  background: backgroundController,
+  monitor: taskMonitorController,
   output: {
     assistantAppend: (text) => assistantRenderer.append(text),
     handleContextBuilt: (event) => compactContextState.handleContextBuilt(event),
@@ -285,7 +285,7 @@ try {
     process.stdin.on("data", handleStdinData);
   }
   if (terminalUi) {
-    void backgroundController.refresh().catch(() => {});
+    void taskMonitorController.refresh().catch(() => {});
   }
   logOutput(startupText(info));
   await inputController.promptLoop();
@@ -374,7 +374,7 @@ async function runSessionsSelector() {
   }
   try {
     const update = await request("session.switch", { session_id: selected.id });
-    backgroundController.clear();
+    taskMonitorController.clear();
     sessionInfo = {
       ...sessionInfo,
       session_id: update?.session_id || selected.id,
@@ -387,7 +387,7 @@ async function runSessionsSelector() {
     compactContextState.clear();
     logOutput(sessionSwitchedText(sessionInfo));
     redrawInput();
-    void backgroundController.refresh().catch(() => {});
+    void taskMonitorController.refresh().catch(() => {});
   } catch (error) {
     logOutput(`Session switch failed: ${error instanceof Error ? error.message : String(error)}`);
   }
@@ -724,8 +724,8 @@ function clearAssistantLineForInput() {
 }
 
 function renderActiveInput(width = process.stdout.columns || 80) {
-  if (backgroundController.isMonitoring()) {
-    return backgroundController.frame(width);
+  if (taskMonitorController.isMonitoring()) {
+    return taskMonitorController.frame(width);
   }
   const session = activeInputSession;
   if (!session) {
@@ -780,12 +780,12 @@ function handleTerminalInput(raw = "") {
     handleSigint();
     return;
   }
-  if (backgroundController.isMonitoring()) {
-    backgroundController.handleInput(event);
+  if (taskMonitorController.isMonitoring()) {
+    taskMonitorController.handleInput(event);
     return;
   }
   if (event.ctrl && event.name === "b") {
-    backgroundController.enterMonitor();
+    taskMonitorController.enterMonitor();
     return;
   }
   const session = activeInputSession;
@@ -824,7 +824,7 @@ function handleTerminalInput(raw = "") {
 }
 
 function handleTerminalPaste(text) {
-  if (backgroundController.isMonitoring()) {
+  if (taskMonitorController.isMonitoring()) {
     return;
   }
   const session = activeInputSession;
@@ -1042,7 +1042,7 @@ function closeRuntime() {
   }
   runtimeClosing = true;
   clearActivityTimer();
-  backgroundController.stop();
+  taskMonitorController.stop();
   void runtimeClient.shutdown();
   closeInput();
 }
@@ -1050,7 +1050,7 @@ function closeRuntime() {
 function forceCloseRuntime() {
   runtimeClosing = true;
   clearActivityTimer();
-  backgroundController.stop();
+  taskMonitorController.stop();
   closeInput();
   runtimeClient.forceShutdown();
 }
@@ -1067,7 +1067,7 @@ async function shutdownRuntime() {
   }
   runtimeClosing = true;
   clearActivityTimer();
-  backgroundController.stop();
+  taskMonitorController.stop();
   try {
     await runtimeClient.shutdown();
   } catch {
