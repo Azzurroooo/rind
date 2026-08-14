@@ -70,6 +70,22 @@ async def test_async_turn_runner_stream():
 
 
 @pytest.mark.asyncio
+async def test_async_turn_runner_persists_reasoning_content():
+    mock_parser = MagicMock()
+    mock_parser.consume_async_stream = AsyncMock(return_value=("Answer", [], None, "Private reasoning"))
+    runner, mock_session = make_runner(mock_parser)
+
+    events = [event async for event in runner.run_turn(mock_session)]
+
+    mock_session.persist_message.assert_awaited_once_with(
+        "assistant",
+        "Answer",
+        reasoning_content="Private reasoning",
+    )
+    assert any(isinstance(event, AssistantMessageCompletedEvent) for event in events)
+
+
+@pytest.mark.asyncio
 async def test_async_turn_runner_yields_delta_before_stream_completes():
     delta_sent = asyncio.Event()
     finish_stream = asyncio.Event()
@@ -177,6 +193,7 @@ async def test_async_turn_runner_forwards_tool_input_before_stream_completes():
 
 def main() -> int:
     asyncio.run(test_async_turn_runner_stream())
+    asyncio.run(test_async_turn_runner_persists_reasoning_content())
     asyncio.run(test_async_turn_runner_yields_delta_before_stream_completes())
     asyncio.run(test_async_turn_runner_cancels_stream_consumer_when_closed_early())
     asyncio.run(test_async_turn_runner_forwards_tool_input_before_stream_completes())

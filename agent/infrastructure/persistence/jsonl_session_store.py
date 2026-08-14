@@ -651,6 +651,7 @@ class JsonlSessionStore(SessionStore):
         tool_call_id: str | None = None,
         tool_name: str | None = None,
         meta: dict[str, Any] | None = None,
+        reasoning_content: str | None = None,
     ) -> None:
         async with self._write_lock:
             def _persist():
@@ -664,7 +665,15 @@ class JsonlSessionStore(SessionStore):
                     self._materialize_draft_sync()
                 if not self._msg_repo:
                     return
-                self._msg_repo.persist_message(self.now_iso(), role, content, tool_call_id, tool_name, meta)
+                self._msg_repo.persist_message(
+                    self.now_iso(),
+                    role,
+                    content,
+                    tool_call_id,
+                    tool_name,
+                    meta,
+                    reasoning_content,
+                )
                 self._invalidate_projection_cache()
                 if not is_context_record:
                     self._message_count += 1

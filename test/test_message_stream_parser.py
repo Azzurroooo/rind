@@ -74,10 +74,13 @@ def test_message_stream_parser_returns_final_usage_chunk() -> None:
         async def on_content(text):
             parts.append(text)
 
-        content, calls, usage = await MessageStreamParser().consume_async_stream(_stream_with_usage(), on_content)
+        content, calls, usage, reasoning_content = await MessageStreamParser().consume_async_stream(
+            _stream_with_usage(), on_content
+        )
         assert content == "hello"
         assert calls == []
         assert usage.prompt_tokens == 10
+        assert reasoning_content is None
         assert parts == ["hello"]
 
     asyncio.run(_run())
@@ -99,7 +102,7 @@ def test_message_stream_parser_streams_tool_input_lifecycle() -> None:
         async def on_ended(call_id, name):
             events.append(("ended", call_id, name))
 
-        content, calls, usage = await MessageStreamParser().consume_async_stream(
+        content, calls, usage, reasoning_content = await MessageStreamParser().consume_async_stream(
             _stream_with_tool_input(),
             on_content,
             on_tool_input_started_async=on_started,
@@ -109,6 +112,7 @@ def test_message_stream_parser_streams_tool_input_lifecycle() -> None:
 
         assert content == ""
         assert usage is None
+        assert reasoning_content is None
         assert [(event[0], event[1], event[2]) for event in events] == [
             ("started", "call_1", "write_file"),
             ("delta", "call_1", "write_file"),
@@ -122,9 +126,66 @@ def test_message_stream_parser_streams_tool_input_lifecycle() -> None:
     asyncio.run(_run())
 
 
+def test_message_stream_parser_reassembles_reasoning_content() -> None:
+    async def stream():
+        yield SimpleNamespace(
+            choices=[
+                SimpleNamespace(
+                    delta=SimpleNamespace(content=None, reasoning_content="first ", tool_calls=None),
+                )
+            ],
+            usage=None,
+        )
+        yield SimpleNamespace(
+            choices=[
+                SimpleNamespace(
+                    delta=SimpleNamespace(content="answer", reasoning_content="second", tool_calls=None),
+                )
+            ],
+            usage=None,
+        )
+
+    async def _run():
+        content, calls, usage, reasoning_content = await MessageStreamParser().consume_async_stream(
+            stream(),
+            lambda _text: asyncio.sleep(0),
+        )
+
+        assert content == "answer"
+        assert calls == []
+        assert usage is None
+        assert reasoning_content == "first second"
+
+    asyncio.run(_run())
+
+
+def test_message_stream_parser_preserves_empty_reasoning_content() -> None:
+    async def stream():
+        yield SimpleNamespace(
+            choices=[
+                SimpleNamespace(
+                    delta=SimpleNamespace(content=None, reasoning_content="", tool_calls=None),
+                )
+            ],
+            usage=None,
+        )
+
+    async def _run():
+        _content, _calls, _usage, reasoning_content = await MessageStreamParser().consume_async_stream(
+            stream(),
+            lambda _text: asyncio.sleep(0),
+        )
+
+        assert reasoning_content == ""
+
+    asyncio.run(_run())
+
+
 def main() -> int:
     test_message_stream_parser_returns_final_usage_chunk()
     test_message_stream_parser_streams_tool_input_lifecycle()
+    test_message_stream_parser_reassembles_reasoning_content()
+    test_message_stream_parser_preserves_empty_reasoning_content()
     print("MessageStreamParser tests passed.")
     return 0
 

@@ -45,13 +45,21 @@ def project_messages(
         if role == "assistant" and _has_tool_calls_meta(message):
             tool_calls = _build_assistant_tool_calls(message["meta"]["tool_calls"], tool_map)
             if tool_calls:
-                built_messages.append({"role": "assistant", "tool_calls": tool_calls})
+                assistant = {"role": "assistant", "tool_calls": tool_calls}
+                if message.get("content"):
+                    assistant["content"] = message["content"]
+                _add_reasoning_content(assistant, message)
+                built_messages.append(assistant)
                 built_messages.extend(_missing_tool_messages(tool_calls, tool_map, emitted_tool_call_ids))
-            if message.get("content"):
-                built_messages.append({"role": "assistant", "content": message.get("content")})
+            elif message.get("content") or _has_reasoning_content(message):
+                assistant = {"role": "assistant", "content": message.get("content", "")}
+                _add_reasoning_content(assistant, message)
+                built_messages.append(assistant)
             continue
         if role in {"system", "user", "assistant"}:
             projected = {"role": role, "content": message.get("content", "")}
+            if role == "assistant":
+                _add_reasoning_content(projected, message)
             metadata = message.get("meta")
             if isinstance(metadata, dict) and metadata.get("kind") == "skill_snapshot":
                 projected["_rind_meta"] = {"kind": "skill_snapshot"}
@@ -154,6 +162,15 @@ def _has_valid_handoff(record: dict[str, Any]) -> bool:
 def _has_tool_calls_meta(message: dict[str, Any]) -> bool:
     meta = message.get("meta")
     return isinstance(meta, dict) and bool(meta.get("tool_calls"))
+
+
+def _has_reasoning_content(message: dict[str, Any]) -> bool:
+    return isinstance(message.get("reasoning_content"), str)
+
+
+def _add_reasoning_content(projected: dict[str, Any], message: dict[str, Any]) -> None:
+    if _has_reasoning_content(message):
+        projected["reasoning_content"] = message["reasoning_content"]
 
 
 def _build_assistant_tool_calls(

@@ -173,9 +173,26 @@ class TurnRunner:
 
                     content_text = stream_result.content
                     parsed_tool_calls = stream_result.tool_calls
+                    reasoning_content = stream_result.reasoning_content
+
+                    if content_text or parsed_tool_calls or reasoning_content is not None:
+                        persist_kwargs = {}
+                        if parsed_tool_calls:
+                            persist_kwargs["meta"] = {
+                                "tool_calls": [
+                                    {"id": item.call_id, "name": item.name} for item in parsed_tool_calls
+                                ]
+                            }
+                        if reasoning_content is not None:
+                            persist_kwargs["reasoning_content"] = reasoning_content
+                        await self._persist_message(
+                            session,
+                            "assistant",
+                            content_text,
+                            **persist_kwargs,
+                        )
 
                     if content_text:
-                        await self._persist_message(session, "assistant", content_text)
                         yield AssistantMessageCompletedEvent(
                             **event_meta(session, turn_id),
                             content=content_text,
@@ -242,13 +259,6 @@ class TurnRunner:
 
                 if parsed_tool_calls:
                     sampling_index += 1
-
-                    await self._persist_message(
-                        session,
-                        "assistant",
-                        "",
-                        meta={"tool_calls": [{"id": item.call_id, "name": item.name} for item in parsed_tool_calls]},
-                    )
 
                     for call in parsed_tool_calls:
                         parsed_args, _ = parse_tool_args(call.raw_args)

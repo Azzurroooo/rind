@@ -19,6 +19,7 @@ class MessageRepository:
         tool_call_id: str | None = None,
         tool_name: str | None = None,
         meta: dict | None = None,
+        reasoning_content: str | None = None,
     ) -> None:
         msg = {"id": uuid.uuid4().hex, "ts": ts, "role": role, "content": content or ""}
         if tool_call_id:
@@ -27,6 +28,8 @@ class MessageRepository:
             msg["tool_name"] = tool_name
         if meta:
             msg["meta"] = meta
+        if reasoning_content is not None:
+            msg["reasoning_content"] = reasoning_content
         self._files.append_jsonl(self._path, msg)
 
     def load_messages(self) -> list[dict[str, Any]]:

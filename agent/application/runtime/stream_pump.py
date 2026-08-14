@@ -31,6 +31,7 @@ logger = logging.getLogger(__name__)
 class ModelStreamResult:
     content: str = ""
     tool_calls: list[ParsedToolCall] = field(default_factory=list)
+    reasoning_content: str | None = None
 
 
 async def pump_model_stream_events(
@@ -80,7 +81,7 @@ async def pump_model_stream_events(
                     )
                 )
 
-            content, calls, usage = _normalize_parsed_stream_result(
+            content, calls, usage, reasoning_content = _normalize_parsed_stream_result(
                 await stream_parser.consume_async_stream(
                     stream_response,
                     _on_content_async,
@@ -92,6 +93,7 @@ async def pump_model_stream_events(
             )
             result.content = content
             result.tool_calls = list(calls)
+            result.reasoning_content = reasoning_content
 
             normalized_usage = _normalize_usage(
                 usage,
@@ -133,13 +135,23 @@ async def pump_model_stream_events(
     consume_task.result()
 
 
-def _normalize_parsed_stream_result(parsed: Any) -> tuple[str, list[ParsedToolCall], Any | None]:
-    if isinstance(parsed, tuple) and len(parsed) == 3:
+def _normalize_parsed_stream_result(
+    parsed: Any,
+) -> tuple[str, list[ParsedToolCall], Any | None, str | None]:
+    if isinstance(parsed, tuple) and len(parsed) == 4:
+        content, calls, usage, reasoning_content = parsed
+    elif isinstance(parsed, tuple) and len(parsed) == 3:
         content, calls, usage = parsed
+        reasoning_content = None
     else:
         content, calls = parsed
         usage = None
-    return str(content or ""), list(calls or []), usage
+        reasoning_content = None
+    return str(content or ""), list(calls or []), usage, _normalize_reasoning_content(reasoning_content)
+
+
+def _normalize_reasoning_content(value: Any) -> str | None:
+    return value if isinstance(value, str) else None
 
 
 def _normalize_usage(usage: Any, context_stats: dict[str, Any], model: str | None = None) -> dict[str, Any]:

@@ -753,6 +753,62 @@ async def test_get_messages_slice_preserves_empty_tool_arguments(temp_session_di
 
 
 @pytest.mark.asyncio
+async def test_message_projector_replays_reasoning_content_with_empty_value(temp_session_dir):
+    store = JsonlSessionStore(session_dir=temp_session_dir, system_prompt="sys")
+    await store.initialize()
+    await store.persist_message("user", "continue")
+    await store.persist_message("assistant", "answer", reasoning_content="")
+
+    raw_messages = await store.load_messages()
+    projected_messages = await store.get_messages_slice()
+
+    assert raw_messages[-1]["reasoning_content"] == ""
+    assert projected_messages[-1] == {
+        "role": "assistant",
+        "content": "answer",
+        "reasoning_content": "",
+    }
+
+
+@pytest.mark.asyncio
+async def test_message_projector_replays_reasoning_content_with_tool_calls(temp_session_dir):
+    store = JsonlSessionStore(session_dir=temp_session_dir, system_prompt="sys")
+    await store.initialize()
+    await store.persist_message("user", "inspect the repository")
+    await store.persist_message(
+        "assistant",
+        "I will inspect it.",
+        meta={"tool_calls": [{"id": "call_1", "name": "list_files"}]},
+        reasoning_content="Need inspect files first.",
+    )
+    await store.persist_tool_call(
+        call_id="call_1",
+        name="list_files",
+        parsed_args={},
+        raw_args="{}",
+        ts_start=store.now_iso(),
+        ts_end=store.now_iso(),
+        result_payload=json.dumps({"ok": True}),
+        model_content="[]",
+    )
+
+    messages = await store.get_messages_slice()
+
+    assert messages[2] == {
+        "role": "assistant",
+        "content": "I will inspect it.",
+        "reasoning_content": "Need inspect files first.",
+        "tool_calls": [
+            {
+                "id": "call_1",
+                "type": "function",
+                "function": {"name": "list_files", "arguments": "{}"},
+            }
+        ],
+    }
+
+
+@pytest.mark.asyncio
 async def test_update_plan_tool_args_are_projected_into_next_context(temp_session_dir):
     store = JsonlSessionStore(session_dir=temp_session_dir, system_prompt="sys")
     await store.initialize()

@@ -20,9 +20,11 @@ class MessageStreamParser:
         on_tool_input_started_async: Callable[[str, str], Any] | None = None,
         on_tool_input_delta_async: Callable[[str, str, str], Any] | None = None,
         on_tool_input_ended_async: Callable[[str, str], Any] | None = None,
-    ) -> tuple[str, list[ParsedToolCall], Any | None]:
-        """Consume a streaming response asynchronously, reassembling text and tool calls."""
+    ) -> tuple[str, list[ParsedToolCall], Any | None, str | None]:
+        """Consume a streaming response asynchronously, reassembling model output."""
         text_parts: list[str] = []
+        reasoning_parts: list[str] = []
+        reasoning_seen = False
         merged_tool_calls: list[dict] = []
         usage = None
 
@@ -41,6 +43,10 @@ class MessageStreamParser:
             if delta.content:
                 await on_content_async(delta.content)
                 text_parts.append(delta.content)
+            reasoning_delta = getattr(delta, "reasoning_content", None)
+            if reasoning_delta is not None:
+                reasoning_seen = True
+                reasoning_parts.append(str(reasoning_delta))
             if delta.tool_calls:
                 for item in delta.tool_calls:
                     index = item.index
@@ -76,4 +82,5 @@ class MessageStreamParser:
             for item in merged_tool_calls
             if item["id"] and item["name"]
         ]
-        return "".join(text_parts), calls, usage
+        reasoning_content = "".join(reasoning_parts) if reasoning_seen else None
+        return "".join(text_parts), calls, usage, reasoning_content

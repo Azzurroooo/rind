@@ -58,6 +58,7 @@ class SessionStore(Protocol):
         tool_call_id: str | None = None,
         tool_name: str | None = None,
         meta: dict[str, Any] | None = None,
+        reasoning_content: str | None = None,
     ) -> None:
         """Persist a single chat message asynchronously."""
         ...
