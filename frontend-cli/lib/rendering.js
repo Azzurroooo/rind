@@ -57,7 +57,7 @@ export function helpText(commands = []) {
     helpRow("↑ / ↓", "history", "← / →", "move cursor"),
     helpRow("home / end", "line edges", "del / backspace", "edit text"),
     helpRow("ctrl+c", "interrupt or quit", "?", "show shortcuts"),
-    helpRow("ctrl+b", "background tasks", "esc", "close monitor"),
+    helpRow("ctrl+b", "task monitor", "esc", "close monitor"),
   ];
   const commandRows = commandDeckText(commands);
   if (commandRows.length) {
@@ -152,7 +152,7 @@ export function sessionMenuText(options, selectedIndex = 0) {
 
 export function backgroundMonitorText(tasks = [], selectedIndex = 0, selectedTask = null, width = 76) {
   const items = Array.isArray(tasks) ? tasks : [];
-  const lines = [bold("Background tasks"), dim("  ↑↓/j/k select · esc/ctrl+b close")];
+  const lines = [bold("Background tasks"), dim("  ←→ page · ↑↓/j/k select · esc/ctrl+b close")];
   if (!items.length) {
     lines.push(dim("  No background tasks."));
     return lines.join("\n");
@@ -183,6 +183,39 @@ export function backgroundMonitorText(tasks = [], selectedIndex = 0, selectedTas
   }
   if (task.truncated) {
     lines.push(dim("  … output truncated"));
+  }
+  return lines.join("\n");
+}
+
+export function delegateMonitorText(delegates = [], selectedIndex = 0, selectedDelegate = null, width = 76) {
+  const items = Array.isArray(delegates) ? delegates : [];
+  const lines = [bold("Delegates"), dim("  ←→ page · ↑↓/j/k select · esc/ctrl+b close")];
+  if (!items.length) {
+    lines.push(dim("  No delegates."));
+    return lines.join("\n");
+  }
+  for (const [index, delegate] of items.entries()) {
+    const active = index === selectedIndex;
+    const marker = active ? accent("›") : dim("·");
+    const agent = padRight(clipSingleLine(delegate?.agent_id, 28), 28);
+    const status = padRight(clipSingleLine(delegate?.status, 10), 10);
+    const task = clipSingleLine(delegate?.task, Math.max(12, width - 44));
+    lines.push(`  ${marker} ${agent} ${status} ${dim(task)}`.trimEnd());
+  }
+  lines.push("");
+  const delegate = selectedDelegate || items[selectedIndex];
+  if (!delegate) {
+    return lines.join("\n");
+  }
+  const heading = `${singleLine(delegate.agent_id) || "unknown"} · ${singleLine(delegate.status) || "unknown"}`;
+  lines.push(dim(`  ${heading}`));
+  const task = clipSingleLine(delegate.task, width);
+  if (task) {
+    lines.push(dim(`  task: ${task}`));
+  }
+  const summary = clipSingleLine(delegate.summary, width);
+  if (summary) {
+    lines.push(dim(`  ↳ ${summary}`));
   }
   return lines.join("\n");
 }
@@ -413,6 +446,9 @@ function toolDetail(name, args) {
   if (name === "bash_output") {
     const bgId = clipSingleLine(args.bg_id, 96);
     return bgId ? `bg ${bgId}` : "";
+  }
+  if (name === "delegate") {
+    return clipSingleLine(args.agent_id, 96);
   }
   for (const key of ["file_path", "path", "query", "url"]) {
     const value = clipSingleLine(args[key], 96);
@@ -673,6 +709,9 @@ function modelMenuTitle(visible) {
 }
 
 function toolDetailLine(name, detail) {
+  if (name === "delegate") {
+    return `  ↳ agent: ${detail}`;
+  }
   return name === "bash" ? `  $ ${detail}` : `  ↳ ${detail}`;
 }
 

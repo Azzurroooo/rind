@@ -1,6 +1,8 @@
-import { backgroundMonitorText } from "./rendering.js";
+import { backgroundMonitorText, delegateMonitorText } from "./rendering.js";
 
-export function createBackgroundController({
+const PAGES = ["background", "delegates"];
+
+export function createTaskMonitorController({
   request,
   state,
   redraw = () => {},
@@ -9,6 +11,7 @@ export function createBackgroundController({
 }) {
   const tasks = new Map();
   const pendingCommands = new Map();
+  const delegates = new Map();
   let refreshTimer = null;
   let listInFlight = null;
   let monitorTimer = null;
@@ -43,6 +46,10 @@ export function createBackgroundController({
         updateCount();
         if (monitor) {
           monitor.selectedIndex = clampIndex(monitor.selectedIndex);
+          if (!pageItems(monitor.page).length && pageItems(otherPage(monitor.page)).length) {
+            monitor.page = otherPage(monitor.page);
+            monitor.selectedIndex = 0;
+          }
           redraw(true);
         }
       })
@@ -86,8 +93,17 @@ export function createBackgroundController({
   function clear() {
     tasks.clear();
     pendingCommands.clear();
+    delegates.clear();
     stopRefresh();
     updateCount();
+  }
+
+  function clearDelegates() {
+    delegates.clear();
+    if (monitor?.page === "delegates") {
+      monitor.selectedIndex = 0;
+      redraw(true);
+    }
   }
 
   function recordCommand(event) {
@@ -117,12 +133,51 @@ export function createBackgroundController({
     void pollMonitor();
   }
 
+  function recordDelegateRequest(event) {
+    if (event?.tool_name !== "delegate" || !event.tool_call_id) {
+      return;
+    }
+    const args = parseObject(event.args_preview);
+    const agentId = String(args.agent_id || "").trim();
+    if (!agentId) {
+      return;
+    }
+    delegates.set(event.tool_call_id, {
+      agent_id: agentId,
+      task: String(args.task || "").trim(),
+      status: "running",
+      summary: "",
+    });
+    if (monitor?.page === "delegates") {
+      monitor.selectedIndex = clampIndex(monitor.selectedIndex);
+      redraw(true);
+    }
+  }
+
+  function recordDelegateResult(event) {
+    if (event?.tool_name !== "delegate" || !event.tool_call_id) {
+      return;
+    }
+    const previous = delegates.get(event.tool_call_id);
+    if (!previous) {
+      return;
+    }
+    const parsed = parseObject(event.result);
+    const data = parsed.data && typeof parsed.data === "object" ? parsed.data : parsed;
+    const status = String(data.status || event.status || "completed").trim();
+    const summary = String(data.summary || "").trim();
+    delegates.set(event.tool_call_id, { ...previous, status, summary });
+    if (monitor?.page === "delegates") {
+      redraw(true);
+    }
+  }
+
   function enterMonitor() {
     if (monitor || state.runtimeClosing) {
       return;
     }
     monitorInputWasActive = state.inputActive;
-    monitor = { selectedIndex: 0 };
+    monitor = { page: initialPage(), selectedIndex: 0, pageChanged: false };
     state.inputActive = true;
     redraw(true);
     void refresh()
@@ -130,10 +185,13 @@ export function createBackgroundController({
         if (!monitor) {
           return;
         }
-        if (!tasks.size) {
+        if (!tasks.size && !delegates.size) {
           exitMonitor();
-          log("No background tasks.");
+          log("No background tasks or delegates.");
           return;
+        }
+        if (!monitor.pageChanged) {
+          monitor.page = initialPage();
         }
         monitor.selectedIndex = clampIndex(monitor.selectedIndex);
         startMonitorPolling();
@@ -145,7 +203,7 @@ export function createBackgroundController({
           return;
         }
         exitMonitor();
-        log(`Background monitor failed: ${error instanceof Error ? error.message : String(error)}`);
+        log(`Task monitor failed: ${error instanceof Error ? error.message : String(error)}`);
       });
   }
 
@@ -175,10 +233,10 @@ export function createBackgroundController({
   }
 
   async function pollMonitor() {
-    if (!monitor || monitorPollInFlight || state.runtimeClosing) {
+    if (!monitor || monitor.page !== "background" || monitorPollInFlight || state.runtimeClosing) {
       return;
     }
-    const available = [...tasks.values()];
+    const available = pageItems("background");
     if (!available.length) {
       return;
     }
@@ -210,14 +268,29 @@ export function createBackgroundController({
   }
 
   function moveSelection(delta) {
-    const count = tasks.size;
-    if (!monitor || !count) {
+    if (!monitor) {
+      return;
+    }
+    const count = pageItems(monitor.page).length;
+    if (!count) {
       return;
     }
     const current = clampIndex(monitor.selectedIndex);
     monitor.selectedIndex = (current + delta + count) % count;
     void pollMonitor();
     redraw();
+  }
+
+  function switchPage(delta) {
+    if (!monitor) {
+      return;
+    }
+    const current = PAGES.indexOf(monitor.page);
+    monitor.page = PAGES[(current + delta + PAGES.length) % PAGES.length];
+    monitor.pageChanged = true;
+    monitor.selectedIndex = clampIndex(monitor.selectedIndex);
+    void pollMonitor();
+    redraw(true);
   }
 
   function handleInput(key) {
@@ -228,6 +301,14 @@ export function createBackgroundController({
     }
     if (key.ctrl && key.name === "b") {
       exitMonitor();
+      return true;
+    }
+    if (!modified && key.name === "left") {
+      switchPage(-1);
+      return true;
+    }
+    if (!modified && key.name === "right") {
+      switchPage(1);
       return true;
     }
     if (modified) {
@@ -245,14 +326,12 @@ export function createBackgroundController({
   }
 
   function frame(width) {
-    const list = [...tasks.values()];
-    const selectedIndex = clampIndex(monitor?.selectedIndex);
-    const text = backgroundMonitorText(
-      list,
-      selectedIndex,
-      list[selectedIndex],
-      Math.max(20, Number(width) - 4),
-    );
+    const page = monitor?.page || initialPage();
+    const list = pageItems(page);
+    const selectedIndex = clampIndex(monitor?.selectedIndex, page);
+    const text = page === "delegates"
+      ? delegateMonitorText(list, selectedIndex, list[selectedIndex], Math.max(20, Number(width) - 4))
+      : backgroundMonitorText(list, selectedIndex, list[selectedIndex], Math.max(20, Number(width) - 4));
     const lines = text.split("\n");
     const selectedRow = list.length ? 2 + selectedIndex : Math.max(0, lines.length - 1);
     return {
@@ -269,12 +348,36 @@ export function createBackgroundController({
     monitor = null;
     pendingCommands.clear();
     tasks.clear();
+    delegates.clear();
+  }
+
+  function pageItems(page) {
+    return page === "delegates" ? [...delegates.values()] : [...tasks.values()];
+  }
+
+  function initialPage() {
+    return tasks.size ? "background" : "delegates";
+  }
+
+  function otherPage(page) {
+    return page === "delegates" ? "background" : "delegates";
+  }
+
+  function clampIndex(index, page = monitor?.page || "background") {
+    const count = pageItems(page).length;
+    if (!count) {
+      return 0;
+    }
+    return Math.min(count - 1, Math.max(0, Number(index) || 0));
   }
 
   return {
     refresh,
     recordCommand,
     recordResult,
+    recordDelegateRequest,
+    recordDelegateResult,
+    clearDelegates,
     enterMonitor,
     exitMonitor,
     handleInput,
@@ -284,14 +387,6 @@ export function createBackgroundController({
     isMonitoring: () => Boolean(monitor),
     moveSelection,
   };
-
-  function clampIndex(index) {
-    const count = tasks.size;
-    if (!count) {
-      return 0;
-    }
-    return Math.min(count - 1, Math.max(0, Number(index) || 0));
-  }
 }
 
 function parseObject(value) {
