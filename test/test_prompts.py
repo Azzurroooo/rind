@@ -77,8 +77,9 @@ def test_system_prompt_strongly_limits_emojis():
 def test_system_prompt_describes_path_roots():
     text = prompts.SYSTEM_PROMPT
 
-    assert "cd` commands affect subsequent `bash` calls only" in text
-    assert "file tools still resolve relative paths from the Current Working Directory" in text
+    assert "cd` only affects that command" in text
+    assert "use `cd <dir> && <command>` when a command must run in another directory" in text
+    assert "File tools always resolve relative paths from the Current Working Directory" in text
     assert "Project-level `RIND.md` and project skills are rooted at the Current Working Directory" in text
 
 

@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 import codecs
-import os
 import time
 import uuid
 from typing import Literal
@@ -17,7 +16,6 @@ from .process_tree import kill_tree_now, spawn_group_args, terminate_tree, wait_
 from .result import (
     background_payload,
     cancelled_result,
-    cd_result,
     completed_result,
     delta_output,
     error_result,
@@ -55,9 +53,6 @@ class ProcessSupervisor:
         session_id: str,
         cancellation_token: CancellationToken | None = None,
     ) -> ToolExecutionResult:
-        cd_result = self._handle_cd(command, state)
-        if cd_result:
-            return cd_result
         record: ProcessRecord | None = None
         try:
             record = await self._spawn(command, state, session_id, background=False)
@@ -89,9 +84,6 @@ class ProcessSupervisor:
         wait_ms: int = 10000,
         cancellation_token: CancellationToken | None = None,
     ) -> ToolExecutionResult:
-        cd_result = self._handle_cd(command, state)
-        if cd_result:
-            return cd_result
         await self._expire_backgrounds()
         if self._background_count() >= self.max_background_processes:
             return ToolExecutionResult(
@@ -403,18 +395,6 @@ class ProcessSupervisor:
             ),
             return_exceptions=True,
         )
-
-    def _handle_cd(self, command: str, state: ShellState) -> ToolExecutionResult | None:
-        if not command.strip().startswith("cd "):
-            return None
-        target = command.strip()[3:].strip()
-        if target.startswith("~"):
-            target = os.path.expanduser(target)
-        path = os.path.abspath(os.path.join(state.cwd, target))
-        if os.path.isdir(path):
-            state.cwd = path
-            return cd_result(state, f"Changed directory to: {path}", 0)
-        return cd_result(state, f"cd: no such file or directory: {target}", 1)
 
     def _background_count(self) -> int:
         return sum(record.background for record in self._processes.values())

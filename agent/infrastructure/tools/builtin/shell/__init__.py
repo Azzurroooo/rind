@@ -36,7 +36,7 @@ def _specs(bash_handler, bash_output_handler) -> tuple[ToolSpec, ...]:
         ToolSpec(
             name="bash",
             handler=bash_handler,
-            description="执行 Shell 命令。支持 cd 保持目录状态，并返回 running、completed、failed、cancelled 或 timed_out 状态。run_in_background=false 时前台运行直到完成或超时；run_in_background=true 时先等待 wait_ms，短任务直接返回结果，仍在运行才返回 bg_id 供 bash_output 后续等待。",
+            description="执行 Shell 命令。每次调用从当前项目工作目录启动；cd 只在本次命令内生效，如需切换目录后继续执行请使用 cd <dir> && <command>。返回 running、completed、failed、cancelled 或 timed_out 状态。run_in_background=false 时前台运行直到完成或超时；run_in_background=true 时先等待 wait_ms，短任务直接返回结果，仍在运行才返回 bg_id 供 bash_output 后续等待。",
             param_descriptions={
                 "command": "要执行的命令",
                 "run_in_background": "允许命令在等待窗口后挂起为后台任务。默认 False。",

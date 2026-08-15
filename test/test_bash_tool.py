@@ -53,18 +53,47 @@ def test_echo() -> None:
     if meta.get("truncated") is not False or meta.get("total_lines") != 1:
         raise AssertionError(f"Expected exact output metadata, got: {payload}")
 
-def test_cd_and_cwd(temp_dir: Path) -> None:
+def test_cd_is_scoped_to_one_command(temp_dir: Path) -> None:
     sid = f"test_cd_{temp_dir.name}"
-    payload = assert_ok(parse_payload(run(bash(f"cd {str(temp_dir)}", _session_id=sid))))
+    state = _POOL.get_state(sid)
+    if state.shell_backend == "powershell":
+        quoted_dir = str(temp_dir).replace("'", "''")
+        in_dir_command = f"Set-Location -LiteralPath '{quoted_dir}'; (Get-Location).Path"
+        cwd_command = "(Get-Location).Path"
+    else:
+        in_dir_command = f"cd -- {shlex.quote(temp_dir.as_posix())} && pwd"
+        cwd_command = "pwd"
+
+    payload = assert_ok(parse_payload(run(bash(in_dir_command, _session_id=sid))))
     data = payload.get("data") or {}
-    expected = os.path.abspath(str(temp_dir))
+    stdout = (data.get("stdout") or "").strip()
+    if temp_dir.name not in stdout:
+        raise AssertionError(f"Expected command to run in {temp_dir}, got: {data}")
+
+    payload = assert_ok(parse_payload(run(bash(cwd_command, _session_id=sid))))
+    data = payload.get("data") or {}
+    stdout = (data.get("stdout") or "").strip()
+    if temp_dir.name in stdout:
+        raise AssertionError(f"Expected the next command to use the session cwd, got: {data}")
+    expected = os.path.abspath(str(PROJECT_ROOT))
     if data.get("cwd") != expected:
-        raise AssertionError(f"Expected cwd={expected}, got: {data}")
-    payload = assert_ok(parse_payload(run(bash("cd ..", _session_id=sid))))
+        raise AssertionError(f"Expected stable cwd={expected}, got: {data}")
+
+
+def test_missing_cd_is_reported_by_shell(temp_dir: Path) -> None:
+    sid = f"test_missing_cd_{temp_dir.name}"
+    missing_dir = temp_dir / "does-not-exist"
+    state = _POOL.get_state(sid)
+    if state.shell_backend == "powershell":
+        quoted_dir = str(missing_dir).replace("'", "''")
+        command = f"Set-Location -LiteralPath '{quoted_dir}'"
+    else:
+        command = f"cd -- {shlex.quote(missing_dir.as_posix())}"
+
+    payload = assert_ok(parse_payload(run(bash(command, _session_id=sid))))
     data = payload.get("data") or {}
-    expected_parent = os.path.abspath(str(temp_dir.parent))
-    if data.get("cwd") != expected_parent:
-        raise AssertionError(f"Expected cwd={expected_parent}, got: {data}")
+    if data.get("status") != "failed" or not data.get("stderr"):
+        raise AssertionError(f"Expected shell cd failure, got: {data}")
 
 def test_forbidden_blocked() -> None:
     payload = assert_error(parse_payload(run(bash("shutdown -h now"))), "DangerousCommandBlocked")

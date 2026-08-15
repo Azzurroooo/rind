@@ -4,28 +4,6 @@ from agent.domain import tool_ok
 from agent.domain.tool_result import ToolExecutionResult
 
 from .process import ProcessRecord
-from .session_pool import ShellState
-
-
-def cd_result(state: ShellState, message: str, exit_code: int) -> ToolExecutionResult:
-    return ToolExecutionResult(
-        status="ok",
-        result_str=tool_ok(
-            "bash",
-            {
-                "status": "completed" if exit_code == 0 else "failed",
-                "stdout": message if exit_code == 0 else "",
-                "stderr": message if exit_code else "",
-                "exit_code": exit_code,
-                "cwd": state.cwd,
-                "shell_backend": state.shell_backend,
-                "shell_executable": state.shell_executable,
-            },
-        ),
-        exit_code=exit_code,
-    )
-
-
 def completed_result(
     tool: str,
     record: ProcessRecord,
