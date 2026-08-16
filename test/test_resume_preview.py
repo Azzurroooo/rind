@@ -7,7 +7,7 @@ os.chdir(PROJECT_ROOT)
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from agent.interfaces.cli.ui.resume_preview import render_resume_preview, resume_visible_messages
+from agent.runtime.server.resume_preview import render_resume_preview, resume_visible_messages
 
 
 def test_resume_preview_shows_last_messages_and_hides_older_content() -> None:

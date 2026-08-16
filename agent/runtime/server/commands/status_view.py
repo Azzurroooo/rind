@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from agent.interfaces.cli.formatting import display_value, nonnegative_int
+from agent.runtime.server.commands.formatting import display_value, nonnegative_int
 
 from .router import SlashCommandContext
 
@@ -83,7 +83,7 @@ def _is_skill_snapshot(message: object) -> bool:
 
 def _git_status_display() -> dict | None:
     try:
-        from agent.interfaces.cli.ui import GitPromptStatusProvider
+        from agent.runtime.server.commands.git_status import GitPromptStatusProvider
 
         status = GitPromptStatusProvider(ttl_seconds=0).current()
     except Exception:

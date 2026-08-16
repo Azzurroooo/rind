@@ -12,34 +12,11 @@ INTERFACES_ROOT = AGENT_ROOT / "interfaces"
 
 _SESSION_PRIVATE_FIELDS = {"_session_paths", "_session_root", "_session_dir"}
 
-# Temporary baselines. Stage 2 will remove these entries as the boundary leaks
-# are fixed; adding a new entry should fail this test instead of extending it.
 _KNOWN_INTERFACE_INFRASTRUCTURE_IMPORTS = {
     "agent/interfaces/api/routes_session.py -> agent.infrastructure.paths",
-    "agent/interfaces/runtime_server/stdio.py -> agent.infrastructure.paths",
-    "agent/interfaces/runtime_server/app_server.py -> agent.infrastructure.config",
-    "agent/interfaces/runtime_server/app_server.py -> agent.infrastructure.paths",
-    "agent/interfaces/runtime_server/app_server.py -> agent.infrastructure.tools.builtin.shell.tool",
-    "agent/interfaces/cli/commands/diagnostics.py -> agent.infrastructure.config",
-    "agent/interfaces/cli/commands/diagnostics.py -> agent.infrastructure.config.settings_loader",
-    "agent/interfaces/cli/commands/diagnostics.py -> agent.infrastructure.persistence.jsonl_session_store",
-    "agent/interfaces/cli/commands/features/config.py -> agent.infrastructure.config",
-    "agent/interfaces/cli/commands/features/init.py -> agent.infrastructure.rind_docs",
-    "agent/interfaces/cli/commands/features/model.py -> agent.infrastructure.config",
-    "agent/interfaces/cli/commands/features/plan.py -> agent.infrastructure.planning.store",
-    "agent/interfaces/cli/commands/features/plan.py -> agent.infrastructure.planning.summary",
-    "agent/interfaces/cli/commands/features/skill.py -> agent.infrastructure.skills.repository",
-    "agent/interfaces/cli/commands/model_control.py -> agent.infrastructure.config",
 }
 
-_KNOWN_INTERFACE_PRIVATE_FIELD_READS = {
-    "agent/interfaces/cli/chat_cli.py -> _session_paths",
-    "agent/interfaces/cli/chat_cli.py -> _session_root",
-    "agent/interfaces/cli/commands/diagnostics.py -> _session_root",
-    "agent/interfaces/cli/commands/diagnostics.py -> _session_dir",
-    "agent/interfaces/cli/commands/features/draft.py -> _session_paths",
-    "agent/interfaces/cli/commands/features/draft.py -> _session_root",
-}
+_KNOWN_INTERFACE_PRIVATE_FIELD_READS: set[str] = set()
 
 
 def _absolute_imports(path: Path) -> set[str]:
@@ -84,8 +61,12 @@ def _interface_private_field_reads() -> set[str]:
 
 
 def _assert_layer_excludes(layer: str, forbidden: tuple[str, ...]) -> None:
+    _assert_path_excludes(AGENT_ROOT / layer, forbidden)
+
+
+def _assert_path_excludes(root: Path, forbidden: tuple[str, ...]) -> None:
     violations: list[str] = []
-    for path in (AGENT_ROOT / layer).rglob("*.py"):
+    for path in root.rglob("*.py"):
         for imported in _absolute_imports(path):
             if imported.startswith(forbidden):
                 violations.append(f"{path.relative_to(PROJECT_ROOT)} -> {imported}")
@@ -104,6 +85,13 @@ def test_layer_dependencies_point_inward() -> None:
     _assert_layer_excludes("infrastructure", ("agent.interfaces", "agent.bootstrap"))
 
 
+def test_runtime_core_does_not_depend_on_server_or_adapters() -> None:
+    _assert_path_excludes(
+        AGENT_ROOT / "runtime" / "core",
+        ("agent.infrastructure", "agent.interfaces", "agent.bootstrap", "agent.runtime.server"),
+    )
+
+
 def test_interface_infrastructure_imports_do_not_grow() -> None:
     current = _interface_infrastructure_imports()
     unexpected = current - _KNOWN_INTERFACE_INFRASTRUCTURE_IMPORTS
@@ -120,7 +108,7 @@ def test_legacy_structure_is_removed() -> None:
     legacy_paths = (
         "application/services",
         "application/tool_executor.py",
-        "application/runtime/cancellation.py",
+        "runtime/core/cancellation.py",
         "infrastructure/plans",
         "infrastructure/tools/impl",
     )
@@ -139,8 +127,7 @@ def test_runtime_dependencies_type_is_not_reintroduced() -> None:
 
 def test_runtime_entrypoints_use_the_shared_composition_root() -> None:
     entrypoints = (
-        PROJECT_ROOT / "main.py",
-        AGENT_ROOT / "interfaces" / "runtime_server" / "app_server.py",
+        AGENT_ROOT / "runtime" / "server" / "app_server.py",
         AGENT_ROOT / "interfaces" / "api" / "main.py",
     )
     missing: list[str] = []
@@ -155,3 +142,9 @@ def test_runtime_entrypoints_use_the_shared_composition_root() -> None:
         if not calls_builder:
             missing.append(str(path.relative_to(PROJECT_ROOT)))
     assert not missing, f"Runtime entrypoints bypass composition root: {missing}"
+
+
+def test_main_delegates_to_runtime_server() -> None:
+    source = (PROJECT_ROOT / "main.py").read_text(encoding="utf-8")
+    assert "agent.runtime.server.app_server" in source
+    assert "build_agent_container" not in source

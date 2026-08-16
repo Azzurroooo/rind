@@ -9,7 +9,7 @@ os.chdir(PROJECT_ROOT)
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from agent.application.runtime.stream_parser import MessageStreamParser
+from agent.runtime.core.stream_parser import MessageStreamParser
 
 
 async def _stream_with_usage():

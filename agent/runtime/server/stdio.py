@@ -11,16 +11,18 @@ import threading
 from collections.abc import Callable
 from typing import Any
 
-from agent.application.runtime import InputQueueError
+from agent.runtime.core import InputQueueError
 from agent.domain.cancellation import CancellationTokenSource
 from agent.domain.events import UserQuestionRequestedEvent
 from agent.infrastructure.paths import validate_session_id
-from agent.interfaces.cli.commands import SlashCommandContext, SlashCommandResult, SlashCommandRouter
-from agent.interfaces.cli.commands.model_control import set_active_model
-from agent.interfaces.cli.ui.resume_preview import render_resume_preview
-from agent.interfaces.runtime_server.protocol import (
+from agent.runtime.server.commands import SlashCommandContext, SlashCommandResult, SlashCommandRouter
+from agent.runtime.server.commands.model_control import set_active_model
+from agent.runtime.server.resume_preview import render_resume_preview
+from agent.runtime.server.protocol import (
     CAPABILITIES,
+    CORE_METHODS,
     PROTOCOL_VERSION,
+    RuntimeMethod,
     error_message,
     event_envelope,
     response_message,
@@ -117,7 +119,7 @@ class StdioRuntimeServer:
                 await self._respond_to_shutdown()
                 return 0
             method = str(request.get("method") or "")
-            if method == "shutdown":
+            if method == RuntimeMethod.SHUTDOWN:
                 self._begin_shutdown(request)
                 continue
             if self._stopping:
@@ -147,37 +149,37 @@ class StdioRuntimeServer:
     async def _dispatch(self, request: dict[str, Any]) -> None:
         method = str(request.get("method") or "")
         try:
-            if method == "initialize":
+            if method == RuntimeMethod.INITIALIZE:
                 await self._initialize(request)
-            elif method == "turn.start":
+            elif method == RuntimeMethod.SESSION_PROMPT:
                 await self._run_turn(request)
-            elif method == "session.replay":
+            elif method == RuntimeMethod.SESSION_REPLAY:
                 await self._replay(request)
-            elif method == "compact":
+            elif method == RuntimeMethod.RIND_SESSION_COMPACT:
                 await self._compact(request)
-            elif method == "models.list":
+            elif method == RuntimeMethod.MODEL_LIST:
                 await self._list_models(request)
-            elif method == "model.set":
+            elif method == RuntimeMethod.MODEL_SET:
                 await self._set_model(request)
-            elif method == "session.switch":
+            elif method == RuntimeMethod.SESSION_SWITCH:
                 await self._switch_session(request)
-            elif method == "session.list":
+            elif method == RuntimeMethod.SESSION_LIST:
                 await self._list_sessions(request)
-            elif method == "session.new":
+            elif method == RuntimeMethod.SESSION_NEW:
                 await self._new_session(request)
-            elif method == "background.list":
+            elif method == RuntimeMethod.RIND_BACKGROUND_LIST:
                 await self._list_backgrounds(request)
-            elif method == "background.output":
+            elif method == RuntimeMethod.RIND_BACKGROUND_OUTPUT:
                 await self._background_output_request(request)
-            elif method == "goal.get":
+            elif method == RuntimeMethod.RIND_GOAL_GET:
                 await self._goal_get(request)
-            elif method == "goal.set":
+            elif method == RuntimeMethod.RIND_GOAL_SET:
                 await self._goal_set(request)
-            elif method == "goal.status":
+            elif method == RuntimeMethod.RIND_GOAL_STATUS:
                 await self._goal_status(request)
-            elif method == "goal.clear":
+            elif method == RuntimeMethod.RIND_GOAL_CLEAR:
                 await self._goal_clear(request)
-            elif method == "slash.execute":
+            elif method == RuntimeMethod.RIND_COMMAND_EXECUTE:
                 await self._execute_slash(request)
             else:
                 await self._respond_error(request, f"Unknown method: {method}", "MethodNotFound")
@@ -193,8 +195,9 @@ class StdioRuntimeServer:
             "model": getattr(self._session, "model", None),
             "protocol_version": PROTOCOL_VERSION,
             "capabilities": self._capabilities(),
+            "methods": self._methods(),
             "resume_preview": await self._resume_preview(),
-            "slash_commands": self._slash_command_infos(),
+            "commands": self._slash_command_infos(),
         }
         if self._goal_enabled:
             result["goal"] = await self._runtime.get_goal()
@@ -205,11 +208,26 @@ class StdioRuntimeServer:
 
     def _capabilities(self) -> list[str]:
         capabilities = list(CAPABILITIES)
-        if self._background_list is None or self._background_output is None:
-            capabilities.remove("background_monitor")
+        if self._background_list is not None and self._background_output is not None:
+            capabilities.append("rind/backgrounds")
         if self._goal_enabled:
-            capabilities.append("goals")
+            capabilities.append("rind/goals")
         return capabilities
+
+    def _methods(self) -> list[str]:
+        methods = list(CORE_METHODS)
+        if self._background_list is not None and self._background_output is not None:
+            methods.extend((RuntimeMethod.RIND_BACKGROUND_LIST, RuntimeMethod.RIND_BACKGROUND_OUTPUT))
+        if self._goal_enabled:
+            methods.extend(
+                (
+                    RuntimeMethod.RIND_GOAL_GET,
+                    RuntimeMethod.RIND_GOAL_SET,
+                    RuntimeMethod.RIND_GOAL_STATUS,
+                    RuntimeMethod.RIND_GOAL_CLEAR,
+                )
+            )
+        return methods
 
     def _slash_command_infos(self) -> list[dict[str, Any]]:
         return [
@@ -243,7 +261,7 @@ class StdioRuntimeServer:
         requested_session_id = params.get("session_id")
         if requested_session_id is not None:
             if not isinstance(requested_session_id, str) or not requested_session_id.strip():
-                await self._respond_error(request, "session.replay session_id must be a non-empty string.", "InvalidRequest")
+                await self._respond_error(request, "session/replay requires a non-empty session_id.", "InvalidRequest")
                 return
             try:
                 session_id = validate_session_id(requested_session_id)
@@ -277,7 +295,7 @@ class StdioRuntimeServer:
             query = str(raw_query or "")
             goal_continuation = params.get("goal_continuation") is True
             if not query.strip() and not goal_continuation:
-                await self._respond_error(request, "turn.start requires input.", "InvalidRequest")
+                await self._respond_error(request, "session/prompt requires input.", "InvalidRequest")
                 return
             if goal_continuation:
                 if not self._goal_enabled:
@@ -347,7 +365,7 @@ class StdioRuntimeServer:
         params = request.get("params") if isinstance(request.get("params"), dict) else {}
         model = str(params.get("model") or "").strip()
         if not model:
-            await self._respond_error(request, "model.set requires model.", "InvalidRequest")
+            await self._respond_error(request, "model/set requires model.", "InvalidRequest")
             return
         result = await set_active_model(self._runtime, self._session, model)
         await self._respond(request, result)
@@ -356,7 +374,7 @@ class StdioRuntimeServer:
         params = request.get("params") if isinstance(request.get("params"), dict) else {}
         raw_session_id = params.get("session_id")
         if not isinstance(raw_session_id, str) or not raw_session_id.strip():
-            await self._respond_error(request, "session.switch requires session_id.", "InvalidRequest")
+            await self._respond_error(request, "session/switch requires session_id.", "InvalidRequest")
             return
         try:
             session_id = validate_session_id(raw_session_id)
@@ -387,7 +405,7 @@ class StdioRuntimeServer:
         params = request.get("params") if isinstance(request.get("params"), dict) else {}
         limit = params.get("limit", 20)
         if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 100:
-            await self._respond_error(request, "session.list limit must be an integer from 1 to 100.", "InvalidRequest")
+            await self._respond_error(request, "session/list limit must be an integer from 1 to 100.", "InvalidRequest")
             return
         list_sessions = getattr(self._session, "list_recent_sessions", None)
         if not callable(list_sessions):
@@ -433,7 +451,7 @@ class StdioRuntimeServer:
         params = request.get("params") if isinstance(request.get("params"), dict) else {}
         objective = params.get("objective")
         if not isinstance(objective, str) or not objective.strip():
-            await self._respond_error(request, "goal.set requires objective.", "InvalidRequest")
+            await self._respond_error(request, "rind/goal/set requires objective.", "InvalidRequest")
             return
         try:
             goal = await self._runtime.set_goal(objective)
@@ -449,7 +467,7 @@ class StdioRuntimeServer:
         params = request.get("params") if isinstance(request.get("params"), dict) else {}
         status = params.get("status")
         if status not in {"active", "paused"}:
-            await self._respond_error(request, "goal.status requires active or paused.", "InvalidRequest")
+            await self._respond_error(request, "rind/goal/status requires active or paused.", "InvalidRequest")
             return
         try:
             goal = await self._runtime.set_goal_status(status)
@@ -566,7 +584,7 @@ class StdioRuntimeServer:
             return
         if await self._handle_control_message(message):
             return
-        if message.get("method") == "turn.start":
+        if message.get("method") == RuntimeMethod.SESSION_PROMPT:
             self._queued_turn_starts += 1
         await self._requests.put(message)
 
@@ -580,6 +598,8 @@ class StdioRuntimeServer:
         return value, None
 
     def _validate_request(self, request: dict[str, Any]) -> str | None:
+        if request.get("kind") != "request":
+            return 'kind must be "request".'
         request_id = request.get("request_id")
         if isinstance(request_id, bool) or request_id is None:
             return "request_id is required."
@@ -597,50 +617,50 @@ class StdioRuntimeServer:
 
     async def _handle_control_message(self, message: dict[str, Any]) -> bool:
         method = str(message.get("method") or "")
-        if method == "shutdown":
+        if method == RuntimeMethod.SHUTDOWN:
             if not self._begin_shutdown(message):
                 await self._respond_error(message, "Runtime is shutting down.", "ServerStopping")
             return True
-        if method == "turn.steer":
+        if method == RuntimeMethod.RIND_SESSION_STEER:
             await self._submit_queued_input(message, self._runtime.submit_steering)
             return True
-        if method == "turn.follow_up":
+        if method == RuntimeMethod.RIND_SESSION_FOLLOW_UP:
             await self._submit_queued_input(message, self._runtime.submit_follow_up)
             return True
-        if method == "turn.interrupt":
+        if method == RuntimeMethod.SESSION_CANCEL:
             if not self._interrupt_current():
                 await self._respond_error(message, "No active turn to interrupt.", "TurnNotActive")
                 return True
             await self._respond(message, {"ok": True})
             return True
-        if method == "user_question.respond":
+        if method == RuntimeMethod.RIND_USER_QUESTION_RESPOND:
             await self._receive_user_answer(message)
             return True
-        if method == "background.list":
+        if method == RuntimeMethod.RIND_BACKGROUND_LIST:
             await self._list_backgrounds(message)
             return True
-        if method == "background.output":
+        if method == RuntimeMethod.RIND_BACKGROUND_OUTPUT:
             await self._background_output_request(message)
             return True
-        if method == "session.replay":
+        if method == RuntimeMethod.SESSION_REPLAY:
             try:
                 await self._replay(message)
             except Exception as exc:
                 await self._respond_error(message, str(exc), type(exc).__name__)
             return True
-        if method == "session.switch" and (self._current_cancel is not None or self._queued_turn_starts):
+        if method == RuntimeMethod.SESSION_SWITCH and (self._current_cancel is not None or self._queued_turn_starts):
             await self._respond_error(message, "Cannot switch sessions while a turn is running.", "TurnActive")
             return True
-        if method == "goal.get":
+        if method == RuntimeMethod.RIND_GOAL_GET:
             await self._goal_get(message)
             return True
-        if method == "goal.status":
+        if method == RuntimeMethod.RIND_GOAL_STATUS:
             await self._goal_status(message)
             return True
-        if method == "goal.clear":
+        if method == RuntimeMethod.RIND_GOAL_CLEAR:
             await self._goal_clear(message)
             return True
-        if method == "slash.execute" and self._initialized and self._is_readonly_slash_request(message):
+        if method == RuntimeMethod.RIND_COMMAND_EXECUTE and self._initialized and self._is_readonly_slash_request(message):
             await self._execute_readonly_slash(message)
             return True
         return False
@@ -674,13 +694,13 @@ class StdioRuntimeServer:
         params = request.get("params") if isinstance(request.get("params"), dict) else {}
         bg_id = params.get("bg_id")
         if not isinstance(bg_id, str) or not bg_id.strip():
-            await self._respond_error(request, "background.output requires bg_id.", "InvalidRequest")
+            await self._respond_error(request, "rind/background/output requires bg_id.", "InvalidRequest")
             return
         max_output_chars = params.get("max_output_chars", 20000)
         if isinstance(max_output_chars, bool) or not isinstance(max_output_chars, int):
             await self._respond_error(
                 request,
-                "background.output max_output_chars must be an integer.",
+                "rind/background/output max_output_chars must be an integer.",
                 "InvalidRequest",
             )
             return
@@ -801,7 +821,7 @@ class StdioRuntimeServer:
 
 
 def main(argv: list[str] | None = None) -> int:
-    from agent.interfaces.runtime_server.app_server import main as app_server_main
+    from agent.runtime.server.app_server import main as app_server_main
 
     return app_server_main(argv, server_class=StdioRuntimeServer)
 

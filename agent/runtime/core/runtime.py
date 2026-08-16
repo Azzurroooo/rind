@@ -11,7 +11,7 @@ from typing import AsyncIterator
 
 from agent.application.ports.session_store import SessionStore
 from agent.application.skill_selection import SkillTurnCoordinator
-from agent.application.runtime.turn_runner import TurnRunner
+from agent.runtime.core.turn_runner import TurnRunner
 from agent.domain.cancellation import CancellationToken
 from agent.domain.errors import PersistenceError
 from agent.domain.events import RuntimeEvent, TurnStartedEvent, event_meta

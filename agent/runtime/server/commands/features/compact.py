@@ -1,6 +1,6 @@
 """Context compaction slash command."""
 
-from agent.interfaces.cli.formatting import display_value
+from agent.runtime.server.commands.formatting import display_value
 
 from ..router import SlashCommandContext, SlashCommandInfo, SlashCommandResult
 

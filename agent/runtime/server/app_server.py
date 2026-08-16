@@ -109,7 +109,7 @@ async def async_main(argv: list[str] | None = None, *, server_class: type[Any]) 
 
 
 def main(argv: list[str] | None = None, *, server_class: type[Any]) -> int:
-    from agent.interfaces.runtime_server.stdio import (
+    from agent.runtime.server.stdio import (
         configure_stdio_server_signals,
         configure_utf8_stdio,
     )

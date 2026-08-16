@@ -14,8 +14,8 @@ os.chdir(PROJECT_ROOT)
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from agent.application.runtime.runtime import AgentRuntime
-from agent.application.runtime.turn_runner import TurnRunner
+from agent.runtime.core.runtime import AgentRuntime
+from agent.runtime.core.turn_runner import TurnRunner
 from agent.domain import ParsedToolCall
 from agent.domain.events import (
     AssistantDeltaEvent,

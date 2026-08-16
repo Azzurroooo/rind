@@ -15,7 +15,7 @@ from agent.application.context.compaction import CompactionService
 from agent.application.context.manager import ContextBuildResult, ContextManager
 from agent.application.ports.chat_client import ChatClient
 from agent.application.ports.session_store import SessionStore
-from agent.application.runtime.stream_pump import ModelStreamResult, pump_model_stream_events
+from agent.runtime.core.stream_pump import ModelStreamResult, pump_model_stream_events
 from agent.application.skill_selection import SkillTurnCoordinator
 from agent.application.tools.processor import ToolCallProcessor
 from agent.domain.cancellation import CancellationToken

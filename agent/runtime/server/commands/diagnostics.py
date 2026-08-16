@@ -10,7 +10,7 @@ import shutil
 import subprocess
 import sys
 
-from agent.interfaces.cli.formatting import tail_clip_text
+from agent.runtime.server.commands.formatting import tail_clip_text
 
 from .router import SlashCommandContext
 

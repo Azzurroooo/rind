@@ -10,8 +10,8 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from agent.domain.cancellation import CancellationTokenSource
-from agent.interfaces.runtime_server.app_server import async_main
-from agent.interfaces.runtime_server.stdio import StdioRuntimeServer
+from agent.runtime.server.app_server import async_main
+from agent.runtime.server.stdio import StdioRuntimeServer
 
 
 class _Session:
@@ -75,7 +75,11 @@ def test_invalid_json_and_invalid_request_return_structured_errors(monkeypatch, 
     monkeypatch.setattr(
         sys,
         "stdin",
-        io.StringIO('not-json\n{"request_id":"bad-params","method":"initialize","params":[]}\n'),
+        io.StringIO(
+            'not-json\n'
+            '{"kind":"request","request_id":"bad-params","method":"initialize","params":[]}\n'
+            '{"request_id":"missing-kind","method":"initialize","params":{}}\n'
+        ),
     )
 
     assert asyncio.run(StdioRuntimeServer(_Runtime(), _Session()).run()) == 0
@@ -92,6 +96,11 @@ def test_invalid_json_and_invalid_request_return_structured_errors(monkeypatch, 
             "request_id": "bad-params",
             "error": {"type": "InvalidRequest", "message": "params must be an object."},
         },
+        {
+            "kind": "response",
+            "request_id": "missing-kind",
+            "error": {"type": "InvalidRequest", "message": 'kind must be "request".'},
+        },
     ]
 
 
@@ -99,7 +108,7 @@ def test_eof_cancels_an_active_turn_and_exits(monkeypatch, capsys):
     async def run():
         runtime = _BlockingRuntime()
         standard_input = _BlockingInput(
-            '{"request_id":"turn-1","method":"turn.start","params":{"input":"hello"}}\n'
+            '{"kind":"request","request_id":"turn-1","method":"session/prompt","params":{"input":"hello"}}\n'
         )
         monkeypatch.setattr(sys, "stdin", standard_input)
         server_task = asyncio.create_task(StdioRuntimeServer(runtime, _Session()).run())
@@ -110,7 +119,7 @@ def test_eof_cancels_an_active_turn_and_exits(monkeypatch, capsys):
     assert asyncio.run(run()) == 0
 
     messages = _messages(capsys)
-    assert messages[0]["event_type"] == "turn_cancelled"
+    assert messages[0]["method"] == "session/update"
     assert messages[1]["request_id"] == "turn-1"
     assert messages[1]["result"]["ok"] is True
 
@@ -121,7 +130,7 @@ def test_shutdown_and_repeated_shutdown_each_receive_one_response(capsys):
         server = StdioRuntimeServer(runtime, _Session())
         serve_task = asyncio.create_task(server._serve())
         await server._requests.put(
-            {"request_id": "turn-1", "method": "turn.start", "params": {"input": "hello"}}
+            {"request_id": "turn-1", "method": "session/prompt", "params": {"input": "hello"}}
         )
         await runtime.started.wait()
         assert await server._handle_control_message(
@@ -149,10 +158,10 @@ def test_repeated_interrupt_returns_recoverable_error(capsys):
         server._current_cancel = cancel_source
         try:
             await server._handle_control_message(
-                {"request_id": "interrupt-1", "method": "turn.interrupt", "params": {}}
+                {"request_id": "interrupt-1", "method": "session/cancel", "params": {}}
             )
             await server._handle_control_message(
-                {"request_id": "interrupt-2", "method": "turn.interrupt", "params": {}}
+                {"request_id": "interrupt-2", "method": "session/cancel", "params": {}}
             )
         finally:
             cancel_source.dispose()

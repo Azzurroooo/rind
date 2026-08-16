@@ -1,6 +1,6 @@
 """Session list slash command."""
 
-from agent.interfaces.cli.formatting import clip_text, display_value, nonnegative_int, single_line
+from agent.runtime.server.commands.formatting import clip_text, display_value, nonnegative_int, single_line
 
 from ..router import SlashCommandContext, SlashCommandInfo, SlashCommandResult
 
@@ -25,7 +25,7 @@ async def handle_sessions(context: SlashCommandContext, args: list[str]) -> str 
                 "sessions": [],
                 "current_session_id": current_id,
                 "limit": limit,
-                "resume_command": "python main.py --session <id>",
+                "resume_command": "/sessions",
             },
         )
 
@@ -54,7 +54,7 @@ async def handle_sessions(context: SlashCommandContext, args: list[str]) -> str 
                 "preview": single_line(item.get("preview")),
             }
         )
-    lines.append("Resume with: python main.py --session <id>")
+    lines.append("Use /sessions to switch sessions.")
     return SlashCommandResult(
         "\n".join(lines),
         display={
@@ -62,7 +62,7 @@ async def handle_sessions(context: SlashCommandContext, args: list[str]) -> str 
             "sessions": display_sessions,
             "current_session_id": current_id,
             "limit": limit,
-            "resume_command": "python main.py --session <id>",
+            "resume_command": "/sessions",
         },
     )
 

@@ -57,7 +57,7 @@ async def test_run_turn_streams_versioned_event_envelope() -> None:
 
     assert event["kind"] == "event"
     assert event["sequence"] == 1
-    assert event["event_type"] == "turn_started"
-    assert event["timestamp"] == "2026-01-01T00:00:00Z"
+    assert event["method"] == "session/update"
+    assert event["event"]["type"] == "turn_started"
     assert event["session_id"] == "s1"
     assert event["turn_id"] == "t1"

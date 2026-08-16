@@ -10,7 +10,7 @@ from typing import Any, AsyncIterator, Awaitable, Callable
 from agent.application.context.estimator import DEFAULT_CONTEXT_WINDOW_TOKENS
 from agent.application.context.token_usage import attach_context_anchor, normalize_sampling_usage
 from agent.application.ports.session_store import SessionStore
-from agent.application.runtime.stream_parser import MessageStreamParser
+from agent.runtime.core.stream_parser import MessageStreamParser
 from agent.domain.cancellation import CancellationToken
 from agent.domain import ParsedToolCall
 from agent.domain.events import (

@@ -10,7 +10,7 @@ from pydantic import BaseModel
 from agent.domain.cancellation import CancellationTokenSource
 from agent.infrastructure.paths import validate_session_id
 from agent.interfaces.api.dependencies import get_agent_factory
-from agent.interfaces.runtime_server.protocol import event_envelope
+from agent.runtime.server.protocol import event_envelope
 
 router = APIRouter(prefix="/sessions", tags=["sessions"])
 
@@ -42,7 +42,7 @@ async def run_turn(session_id: str, turn_req: TurnRequest, request: Request, fac
 
                 sequence += 1
                 envelope = event_envelope(event.to_dict(), sequence)
-                yield {"event": envelope["event_type"], "data": json.dumps(envelope, ensure_ascii=False)}
+                yield {"event": str(envelope["event"].get("type") or "session_update"), "data": json.dumps(envelope, ensure_ascii=False)}
         except Exception as e:
             yield {
                 "event": "error",

@@ -1,9 +1,7 @@
 import asyncio
-import io
 import json
 import os
 import sys
-from contextlib import redirect_stdout
 from pathlib import Path
 
 import pytest
@@ -13,9 +11,8 @@ os.chdir(PROJECT_ROOT)
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from agent.interfaces.cli.chat_cli import ChatCLI
-from agent.interfaces.cli.ui import GitPromptStatus
-from agent.interfaces.cli.commands import SlashCommandContext, SlashCommandInfo, SlashCommandRouter
+from agent.runtime.server.commands import SlashCommandContext, SlashCommandInfo, SlashCommandRouter
+from agent.runtime.server.commands.git_status import GitPromptStatus
 from agent.domain.cancellation import CancellationTokenSource
 from agent.infrastructure.config import Config
 from agent.infrastructure.persistence.jsonl_session_store import JsonlSessionStore
@@ -279,7 +276,7 @@ async def test_sessions_lists_recent_sessions_with_current_marker() -> None:
     assert "session_2 (current)" in result.text
     assert "4 msg, 1 tool" in result.text
     assert "latest answer" in result.text
-    assert "python main.py --session <id>" in result.text
+    assert "/sessions" in result.text
     assert result.display is not None
     assert result.display["type"] == "sessions"
     assert result.display["sessions"][0]["current"] is True
@@ -296,7 +293,7 @@ async def test_sessions_reports_no_recent_sessions() -> None:
         "sessions": [],
         "current_session_id": "session_1",
         "limit": 8,
-        "resume_command": "python main.py --session <id>",
+        "resume_command": "/sessions",
     }
 
 
@@ -402,7 +399,7 @@ async def test_status_shows_git_branch(monkeypatch) -> None:
         def current(self):
             return GitPromptStatus(branch="main", dirty=True)
 
-    monkeypatch.setattr("agent.interfaces.cli.ui.GitPromptStatusProvider", FakeGitProvider)
+    monkeypatch.setattr("agent.runtime.server.commands.git_status.GitPromptStatusProvider", FakeGitProvider)
 
     result = await SlashCommandRouter().execute("/status", _context())
 
@@ -946,81 +943,6 @@ async def test_plan_renders_v2_items_in_order(tmp_path: Path, monkeypatch) -> No
     assert "Progress: completed=1, in_progress=0, pending=1, cancelled=0" in result.text
 
 
-@pytest.mark.asyncio
-async def test_chat_cli_slash_command_does_not_call_runtime() -> None:
-    runtime = FakeRuntime()
-    cli = ChatCLI(runtime=runtime, session=FakeSession())
-    output = io.StringIO()
-
-    with redirect_stdout(output):
-        should_exit = await cli._run_slash_command_async("/help")
-
-    assert should_exit is False
-    assert runtime.called is False
-    assert "Commands" in output.getvalue()
-
-
-@pytest.mark.asyncio
-async def test_chat_cli_clear_command_clears_console_without_runtime() -> None:
-    runtime = FakeRuntime()
-    cli = ChatCLI(runtime=runtime, session=FakeSession())
-    called = []
-
-    cli._console.clear = lambda: called.append(True)
-
-    should_exit = await cli._run_slash_command_async("/clear")
-
-    assert should_exit is False
-    assert runtime.called is False
-    assert called == [True]
-
-
-@pytest.mark.asyncio
-async def test_chat_cli_draft_use_sets_next_prompt_prefill(tmp_path) -> None:
-    class DraftSession(FakeSession):
-        _session_paths = {"base": str(tmp_path / "session_1")}
-
-    base = tmp_path / "session_1"
-    base.mkdir()
-    (base / "input_draft.txt").write_text("continue this prompt", encoding="utf-8")
-    cli = ChatCLI(runtime=FakeRuntime(), session=DraftSession())
-
-    should_exit = await cli._run_slash_command_async("/draft use")
-
-    assert should_exit is False
-    assert cli._pending_input_prefill == "continue this prompt"
-
-
-@pytest.mark.asyncio
-async def test_chat_cli_normal_turn_still_calls_runtime() -> None:
-    runtime = FakeRuntime()
-    cli = ChatCLI(runtime=runtime, session=FakeSession())
-
-    await cli._run_turn_async("hello")
-
-    assert runtime.called is True
-
-
-@pytest.mark.asyncio
-async def test_chat_cli_init_runs_runtime_with_transient_prompt(tmp_path, monkeypatch) -> None:
-    project = tmp_path / "project"
-    project.mkdir()
-    (project / ".git").mkdir()
-    monkeypatch.chdir(project)
-    runtime = FakeRuntime()
-    cli = ChatCLI(runtime=runtime, session=FakeSession())
-
-    output = io.StringIO()
-    with redirect_stdout(output):
-        should_exit = await cli._run_slash_command_async("/init project")
-
-    assert should_exit is False
-    assert runtime.called is True
-    assert runtime.query.startswith("Initialize project RIND.md")
-    assert runtime.transient_system_messages
-    assert "project-level Rind context document" in runtime.transient_system_messages[0]["content"]
-
-
 def main() -> int:
     test_router_exposes_sorted_command_names()
     test_router_exposes_command_descriptions()
@@ -1041,9 +963,6 @@ def main() -> int:
     asyncio.run(test_clear_rejects_extra_args())
     asyncio.run(test_draft_rejects_invalid_args())
     asyncio.run(test_exit_requests_cli_exit())
-    asyncio.run(test_chat_cli_slash_command_does_not_call_runtime())
-    asyncio.run(test_chat_cli_clear_command_clears_console_without_runtime())
-    asyncio.run(test_chat_cli_normal_turn_still_calls_runtime())
     print("CLI slash command tests passed.")
     return 0
 

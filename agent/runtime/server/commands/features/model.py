@@ -1,6 +1,6 @@
 """Model selection slash command."""
 
-from agent.interfaces.cli.formatting import display_value
+from agent.runtime.server.commands.formatting import display_value
 
 from ..model_control import normalize_model_name, set_active_model
 from ..router import SlashCommandContext, SlashCommandInfo
