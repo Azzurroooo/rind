@@ -1,4 +1,5 @@
 import { backgroundMonitorText, delegateMonitorText, taskMonitorTabs } from "./rendering.js";
+import { runtimeMethods } from "./runtime-protocol.js";
 
 const PAGES = ["background", "delegates"];
 
@@ -26,7 +27,7 @@ export function createTaskMonitorController({
     if (listInFlight) {
       return listInFlight;
     }
-    listInFlight = request("background.list")
+    listInFlight = request(runtimeMethods.backgroundList)
       .then((result) => {
         const listed = Array.isArray(result?.tasks) ? result.tasks : [];
         const ids = new Set();
@@ -258,7 +259,7 @@ export function createTaskMonitorController({
     }
     monitorPollInFlight = true;
     try {
-      const result = await request("background.output", {
+      const result = await request(runtimeMethods.backgroundOutput, {
         bg_id: selected.bg_id,
         max_output_chars: 20000,
       });

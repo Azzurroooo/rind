@@ -26,7 +26,7 @@ input.on("line", (line) => {
     const type = String(request.params?.type ?? "")
     output({
       kind: "event",
-      event_type: type,
+      method: "session/update",
       event: { type },
       sequence: 1,
     })

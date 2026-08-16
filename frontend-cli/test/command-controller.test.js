@@ -8,7 +8,7 @@ test("command controller separates text, steering, goal, and slash commands", as
   const logs = [];
   const turn = {
     submit: (...args) => calls.push({ method: "turn.submit", args }),
-    submitSteering: (...args) => calls.push({ method: "turn.steer", args }),
+    submitSteering: (...args) => calls.push({ method: "rind/session/steer", args }),
   };
   const controller = createCommandController({
     request: async (method, params) => {
@@ -30,9 +30,9 @@ test("command controller separates text, steering, goal, and slash commands", as
   assert.equal(await controller.handle("/status"), true);
   await controller.handle("?");
 
-  assert.equal(calls[0].method, "turn.steer");
+  assert.equal(calls[0].method, "rind/session/steer");
   assert.equal(calls[1].method, "goal");
-  assert.equal(calls[2].method, "slash.execute");
+  assert.equal(calls[2].method, "rind/command/execute");
   assert.equal(logs.length, 2);
 });
 

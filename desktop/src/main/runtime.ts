@@ -4,7 +4,7 @@ import { delimiter, dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
 import log from "electron-log/main"
 
-import type { RuntimeEvent, RuntimeSnapshot } from "../preload/types"
+import { runtimeMethods, type RuntimeEvent, type RuntimeMethod, type RuntimeSnapshot } from "../preload/types"
 
 type RuntimeMessage = {
   kind?: "response" | "event"
@@ -12,7 +12,6 @@ type RuntimeMessage = {
   result?: unknown
   error?: { message?: string; type?: string }
   event?: Record<string, unknown>
-  event_type?: string
   sequence?: number
   session_id?: string
   turn_id?: string
@@ -109,7 +108,7 @@ function handleLine(worker: RuntimeWorker, line: string) {
   }
 
   if (message.kind === "event" && message.event) {
-    const type = String(message.event_type || message.event.type || "")
+    const type = String(message.event.type || "")
     if (type === "turn_started") {
       worker.turnActive = true
       worker.idleEligible = false
@@ -230,10 +229,10 @@ export function startRuntime(id: string, workspace: string, sessionId?: string) 
   return worker.snapshot
 }
 
-function request(worker: RuntimeWorker, method: string, params: Record<string, unknown> = {}, timeoutMs = 30_000) {
+function request(worker: RuntimeWorker, method: RuntimeMethod | "initialize" | "shutdown", params: Record<string, unknown> = {}, timeoutMs = 30_000) {
   if (!worker.child?.stdin.writable) return Promise.reject(new Error("Runtime is not running."))
   const requestId = `desktop-${++worker.requestSequence}`
-  const message = JSON.stringify({ request_id: requestId, method, params }) + "\n"
+  const message = JSON.stringify({ kind: "request", request_id: requestId, method, params }) + "\n"
   return new Promise<unknown>((resolve, reject) => {
     const timer = setTimeout(() => {
       worker.pending.delete(requestId)
@@ -276,15 +275,15 @@ async function initializeWorker(worker: RuntimeWorker) {
   }
 }
 
-export function requestRuntime(id: string, method: string, params: Record<string, unknown> = {}) {
+export function requestRuntime(id: string, method: RuntimeMethod, params: Record<string, unknown> = {}) {
   const worker = workers.get(id)
   if (!worker) return Promise.reject(new Error(`Runtime worker does not exist: ${id}`))
   touchWorker(worker)
-  if (method === "turn.start" || method === "turn.follow_up") {
+  if (method === runtimeMethods.sessionPrompt || method === runtimeMethods.sessionFollowUp) {
     worker.turnActive = true
     worker.idleEligible = false
   }
-  const timeout = method === "turn.start" || method === "slash.execute" ? 15 * 60_000 : 30_000
+  const timeout = method === runtimeMethods.sessionPrompt || method === runtimeMethods.commandExecute ? 15 * 60_000 : 30_000
   return request(worker, method, params, timeout)
 }
 

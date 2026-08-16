@@ -1,9 +1,9 @@
-import { turnInputMethod } from "./runtime-protocol.js";
+import { runtimeMethods, turnInputMethod } from "./runtime-protocol.js";
 
 export function createTurnController({ request, state, output, refreshGoalState = () => {}, onTurnStart = () => {} }) {
   function submit(text, extra = {}) {
     const method = turnInputMethod(state.activeTurn);
-    if (method === "turn.follow_up") {
+    if (method === runtimeMethods.sessionFollowUp) {
       output.logQueuedInput(text);
       void submitQueuedInput(method, text, text);
       return;
@@ -12,7 +12,7 @@ export function createTurnController({ request, state, output, refreshGoalState 
   }
 
   function submitSteering(text, originalInput) {
-    void submitQueuedInput("turn.steer", text, originalInput);
+    void submitQueuedInput(runtimeMethods.sessionSteer, text, originalInput);
   }
 
   async function submitQueuedInput(method, text, originalInput) {
@@ -44,7 +44,7 @@ export function createTurnController({ request, state, output, refreshGoalState 
 
   async function run(text, extra = {}) {
     try {
-      await request("turn.start", { input: text, ...extra });
+      await request(runtimeMethods.sessionPrompt, { input: text, ...extra });
     } finally {
       void refreshGoalState();
       state.activeTurn = false;
@@ -59,7 +59,7 @@ export function createTurnController({ request, state, output, refreshGoalState 
     output.cancelInput();
     output.closeAssistant();
     output.logInterrupt();
-    void request("turn.interrupt").catch(() => {});
+    void request(runtimeMethods.sessionCancel).catch(() => {});
   }
 
   function reset() {

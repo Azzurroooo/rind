@@ -2,7 +2,7 @@ import { spawn, spawnSync } from "node:child_process";
 import path from "node:path";
 
 import { buildRuntimeEnv } from "./runtime-env.js";
-import { createRuntimeRequest, runtimeRequestId } from "./runtime-protocol.js";
+import { createRuntimeRequest, runtimeMethods, runtimeRequestId } from "./runtime-protocol.js";
 
 export function resolveRuntimeLaunch({ python, repoRoot, runtimePath = "", cliArgs = [] }) {
   const executable = runtimePath
@@ -149,7 +149,7 @@ export function createRuntimeClient({
     }
     closing = true;
     scheduleKill();
-    return request("shutdown").catch(() => {
+    return request(runtimeMethods.shutdown).catch(() => {
       forceShutdown();
     }).finally(() => {
       if (child.stdin.writable) {

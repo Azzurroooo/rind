@@ -7,6 +7,7 @@ import {
   helpText,
   slashResultText,
 } from "./rendering.js";
+import { runtimeMethods } from "./runtime-protocol.js";
 
 export function createCommandController({
   request,
@@ -54,7 +55,7 @@ export function createCommandController({
       input.startReadonlySlashCommand?.(text);
       return;
     }
-    const result = await request("slash.execute", { input: text });
+    const result = await request(runtimeMethods.commandExecute, { input: text });
     await applyResult(result);
   }
 

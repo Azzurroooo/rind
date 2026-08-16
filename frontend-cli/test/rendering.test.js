@@ -168,13 +168,20 @@ test("promptText includes only model and working directory above the input", () 
 
 test("promptText colors model and working directory with separate hierarchy", () => {
   const originalIsTty = process.stdout.isTTY;
+  const originalNoColor = process.env.NO_COLOR;
   process.stdout.isTTY = true;
+  delete process.env.NO_COLOR;
   try {
     const line = promptText({ model: "glm-5.1", cwd: "E:\\project" }).split("\n")[1];
 
     assert.match(line, /^  \x1b\[1;38;5;81mglm-5\.1\x1b\[0m\x1b\[2m · \x1b\[0m\x1b\[38;5;110mE:\\project\x1b\[0m$/);
   } finally {
     process.stdout.isTTY = originalIsTty;
+    if (originalNoColor === undefined) {
+      delete process.env.NO_COLOR;
+    } else {
+      process.env.NO_COLOR = originalNoColor;
+    }
   }
 });
 test("promptText keeps the activity line separate from the input chrome", () => {
@@ -487,14 +494,14 @@ test("slashDisplayText renders sessions, skills, and config payloads", () => {
         tool_calls: 1,
         preview: "latest answer",
       }],
-      resume_command: "python main.py --session <id>",
+      resume_command: "/sessions",
     }),
     [
       "• Recent sessions",
       "  › session_2 current · 2026-06-02T01:02:03+00:00",
       "  ↳ Current task · 4 msg, 1 tool",
       "  ↳ latest answer",
-      "  ↳ resume: python main.py --session <id>",
+      "  ↳ resume: /sessions",
     ].join("\n"),
   );
   assert.equal(

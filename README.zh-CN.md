@@ -88,49 +88,27 @@ Rind 的 API 配置只读取 `~/.rind/settings.json`，Desktop 与 CLI 使用同
 }
 ```
 
-启动前可以先运行诊断：
-
-```bash
-python main.py --doctor
-```
-
 ### 运行
 
-```bash
-python main.py
-```
-
-恢复最近一次本地会话：
-
-```bash
-python main.py -c
-```
-
-恢复指定会话：
-
-```bash
-python main.py --session <session-id>
-```
-
-实验性 JS 前端 CLI：
+Node 前端 CLI：
 
 ```bash
 node frontend-cli/bin/rind.js
 ```
 
-它会通过 JSONL stdio 启动无头 Python runtime，让终端输入与渲染留在 Node.js 进程中。原有 Python CLI 仍然可以通过 `python main.py` 使用。
+Desktop 应用：
 
-## CLI 命令
+```bash
+npm --prefix desktop run dev
+```
 
-| 命令 | 说明 |
-| --- | --- |
-| `python main.py` | 启动一个新的交互式 Agent 会话。 |
-| `python main.py -c` | 恢复最近一次本地会话。 |
-| `python main.py --session <id>` | 按 ID 恢复指定会话。 |
-| `python main.py --debug` | 关闭流式输出，并显示更详细的运行时与工具诊断信息。 |
-| `python main.py --doctor` | 检查本地配置，不需要有效 API Key。 |
+Python 入口是两个界面共用的无头 Runtime Package：
 
-在交互式 CLI 中，斜杠命令可用于诊断、会话管理、模型切换和状态查看。输入工具栏会展示当前会话、模型、工作目录和关键提示。
+```bash
+python main.py app-server --stdio --cwd .
+```
+
+Runtime Package 通过统一 JSONL 协议服务两个界面，会话、模型、goal、后台任务、slash command 和 turn 控制都由该协议处理，Python 不再提供独立交互 UI。
 
 项目级 `RIND.md` 和项目级 skills 以启动 Rind 时的当前工作目录为根目录。
 
@@ -140,8 +118,10 @@ Rind 使用分层结构，并在运行时核心与基础设施适配器之间遵
 
 ```text
 agent/
+├── runtime/
+│   ├── core/          # Agent runtime、turn runner、流解析与泵送
+│   └── server/        # JSONL server facade、协议与 runtime commands
 ├── application/
-│   ├── runtime/       # Agent runtime、turn runner、流解析与泵送
 │   ├── context/       # 上下文管理、估算、压缩和 token 使用
 │   ├── tools/         # 工具执行、处理、保护策略和结果归一化
 │   └── ports/         # Chat client、会话存储、工具注册表抽象
@@ -154,7 +134,7 @@ agent/
 └── interfaces/
     ├── cli/           # 交互式 CLI、斜杠命令、状态 UI
     │   └── commands/features/ # 按功能注册 slash command
-    ├── runtime_server/# 无头 runtime 的 JSONL stdio 适配器
+    ├── runtime/server/# 无头 runtime 的 JSONL stdio 适配器
     └── api/           # FastAPI 会话流式适配器
 frontend-cli/          # 实验性 Node.js 终端输入/渲染进程
 ```

@@ -25,7 +25,7 @@ function createHarness({ activeTurn = false } = {}) {
   let resolveRequest;
   const request = (method, params) => {
     calls.push({ method, params });
-    if (method === "turn.start") {
+    if (method === "session/prompt") {
       return new Promise((resolve) => {
         resolveRequest = resolve;
       });
@@ -44,7 +44,7 @@ test("turn controller starts a turn and clears active state when it settles", as
   const harness = createHarness();
   harness.controller.submit("hello");
   assert.equal(harness.state.activeTurn, true);
-  assert.equal(harness.calls[0].method, "turn.start");
+  assert.equal(harness.calls[0].method, "session/prompt");
   assert.deepEqual(harness.calls[0].params, { input: "hello" });
 
   harness.resolveRequest();
@@ -59,8 +59,8 @@ test("active turns send follow-ups and steering through the same controller", as
   await new Promise((resolve) => setImmediate(resolve));
 
   assert.deepEqual(harness.calls.map(({ method, params }) => ({ method, params })), [
-    { method: "turn.follow_up", params: { input: "follow up" } },
-    { method: "turn.steer", params: { input: "focus on tests" } },
+    { method: "rind/session/follow_up", params: { input: "follow up" } },
+    { method: "rind/session/steer", params: { input: "focus on tests" } },
   ]);
   assert.deepEqual(harness.logs.slice(0, 1), ["queued:follow up"]);
 });
@@ -71,6 +71,6 @@ test("interrupt marks the turn and sends an interrupt request", async () => {
   await new Promise((resolve) => setImmediate(resolve));
 
   assert.equal(harness.state.interruptRequested, true);
-  assert.equal(harness.calls[0].method, "turn.interrupt");
+  assert.equal(harness.calls[0].method, "session/cancel");
   assert.deepEqual(harness.logs.slice(0, 3), ["cancel-input", "close-assistant", "interrupt"]);
 });

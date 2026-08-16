@@ -4,7 +4,7 @@ import windowState from "electron-window-state"
 import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
 
-import type { DesktopSettings, DesktopSettingsPatch, RuntimeEvent, RuntimeSnapshot } from "../preload/types"
+import { runtimeMethods, type DesktopSettings, type DesktopSettingsPatch, type RuntimeEvent, type RuntimeMethod, type RuntimeSnapshot } from "../preload/types"
 import { asObject, readJsonObject, writeJsonObject } from "./json-store"
 import { listProjectFiles, previewProjectFile } from "./project-files"
 import { DesktopProjectStore, samePath } from "./projects"
@@ -22,21 +22,11 @@ import {
 
 const appId = "ai.rind.desktop"
 const root = dirname(fileURLToPath(import.meta.url))
-const allowedRuntimeMethods = new Set([
-  "session.list",
-  "session.new",
-  "session.switch",
-  "session.replay",
-  "turn.start",
-  "turn.steer",
-  "turn.follow_up",
-  "turn.interrupt",
-  "user_question.respond",
-  "models.list",
-  "model.set",
-  "compact",
-  "slash.execute",
-])
+const allowedRuntimeMethods = new Set<RuntimeMethod>(Object.values(runtimeMethods) as RuntimeMethod[])
+
+function isRuntimeMethod(method: string): method is RuntimeMethod {
+  return allowedRuntimeMethods.has(method as RuntimeMethod)
+}
 let mainWindow: BrowserWindow | undefined
 let desktopProjectStore: DesktopProjectStore | undefined
 let quitting = false
@@ -152,7 +142,7 @@ function registerIpc() {
   ipcMain.handle("runtime-shutdown-all", () => shutdownAllRuntimes())
   ipcMain.handle("runtime-request", (_event, runtimeId: unknown, method: unknown, params: unknown) => {
     if (typeof runtimeId !== "string" || !runtimeId.trim()) throw new Error("Runtime id is required.")
-    if (typeof method !== "string" || !allowedRuntimeMethods.has(method)) {
+    if (typeof method !== "string" || !isRuntimeMethod(method)) {
       throw new Error("Runtime method is not available to the desktop client.")
     }
     const safeParams = params && typeof params === "object" ? params as Record<string, unknown> : {}

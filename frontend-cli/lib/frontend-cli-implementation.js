@@ -11,6 +11,7 @@ import { createCompactContextState } from "./compact-context-state.js";
 import { prepareComposerFrame } from "./composer-terminal.js";
 import { createLineEditor } from "./line-editor.js";
 import { createRuntimeClient, runHelpVersion } from "./runtime-client.js";
+import { runtimeMethods } from "./runtime-protocol.js";
 import { createTurnController } from "./turn-controller.js";
 import { createCommandController } from "./command-controller.js";
 import { createTaskMonitorController } from "./task-monitor-controller.js";
@@ -278,9 +279,9 @@ const inputController = createInputController({
 process.on("SIGINT", handleSigint);
 
 try {
-  const info = await request("initialize");
+  const info = await request(runtimeMethods.initialize);
   sessionInfo = { cwd: process.cwd(), ...(info || {}) };
-  slashCommands = commandController.normalizeCommands(info?.slash_commands);
+  slashCommands = commandController.normalizeCommands(info?.commands);
   if (terminalUi) {
     inputController.start();
   } else {
@@ -314,20 +315,20 @@ async function runGoalCommand(command) {
   }
   try {
     if (command.action === "set") {
-      const result = await request("goal.set", { objective: command.objective });
+      const result = await request(runtimeMethods.goalSet, { objective: command.objective });
       updateGoalState(result?.goal);
       logOutput(goalCommandText(result?.goal, "set"));
       turnController.submit(command.objective);
       return;
     }
     if (command.action === "clear") {
-      const result = await request("goal.clear");
+      const result = await request(runtimeMethods.goalClear);
       updateGoalState(result?.goal || null);
       logOutput(goalCommandText(null, "clear"));
       return;
     }
     if (command.action === "pause" || command.action === "resume") {
-      const result = await request("goal.status", { status: command.action === "resume" ? "active" : "paused" });
+      const result = await request(runtimeMethods.goalStatus, { status: command.action === "resume" ? "active" : "paused" });
       updateGoalState(result?.goal);
       logOutput(goalCommandText(result?.goal, command.action));
       if (command.action === "resume" && !turnState.activeTurn) {
@@ -335,7 +336,7 @@ async function runGoalCommand(command) {
       }
       return;
     }
-    const result = await request("goal.get");
+    const result = await request(runtimeMethods.goalGet);
     updateGoalState(result?.goal || null);
     logOutput(goalCommandText(result?.goal || null));
   } catch (error) {
@@ -349,11 +350,11 @@ function updateGoalState(goal) {
 }
 
 async function refreshGoalState() {
-  if (!Array.isArray(sessionInfo.capabilities) || !sessionInfo.capabilities.includes("goals")) {
+  if (!Array.isArray(sessionInfo.capabilities) || !sessionInfo.capabilities.includes("rind/goals")) {
     return;
   }
   try {
-    const result = await request("goal.get");
+    const result = await request(runtimeMethods.goalGet);
     updateGoalState(result?.goal || null);
   } catch {
     // The turn result remains usable when a late state refresh races shutdown.
@@ -363,7 +364,7 @@ async function refreshGoalState() {
 async function runSessionsSelector() {
   let result;
   try {
-    result = await request("slash.execute", { input: "/sessions" });
+    result = await request(runtimeMethods.commandExecute, { input: "/sessions" });
   } catch (error) {
     logOutput(`Command failed: ${error instanceof Error ? error.message : String(error)}`);
     return;
@@ -381,7 +382,7 @@ async function runSessionsSelector() {
     return;
   }
   try {
-    const update = await request("session.switch", { session_id: selected.id });
+    const update = await request(runtimeMethods.sessionSwitch, { session_id: selected.id });
     taskMonitorController.clear();
     sessionInfo = {
       ...sessionInfo,
@@ -419,7 +420,7 @@ function startReadonlySlashCommand(text) {
 }
 
 async function runReadonlySlashCommand(text) {
-  const result = await request("slash.execute", { input: text });
+  const result = await request(runtimeMethods.commandExecute, { input: text });
   await commandController.applyResult(result);
 }
 
@@ -440,7 +441,7 @@ function startCompactCommand() {
 
 async function runCompactCommand() {
   try {
-    const result = await request("slash.execute", { input: "/compact" });
+    const result = await request(runtimeMethods.commandExecute, { input: "/compact" });
     await commandController.applyResult(result);
   } finally {
     activeCompact = false;
@@ -452,7 +453,7 @@ async function runCompactCommand() {
 async function runModelSelector() {
   let result;
   try {
-    result = await request("models.list");
+    result = await request(runtimeMethods.modelList);
   } catch (error) {
     logOutput(modelListErrorText(error instanceof Error ? error.message : String(error), sessionInfo.model));
     return;
@@ -465,7 +466,7 @@ async function runModelSelector() {
   }
 
   try {
-    const update = await request("model.set", { model: selected });
+    const update = await request(runtimeMethods.modelSet, { model: selected });
     sessionInfo = { ...sessionInfo, model: update?.model || selected };
     logOutput(modelSetResultText(update, selected));
   } catch (error) {
@@ -639,7 +640,7 @@ async function answerQuestion(event) {
     if (interruptRequested || runtimeClosing) {
       return;
     }
-    await request("user_question.respond", {
+    await request(runtimeMethods.userQuestionRespond, {
       tool_call_id: event.tool_call_id,
       answer,
     });

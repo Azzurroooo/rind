@@ -88,49 +88,27 @@ Minimal `settings.json` example:
 }
 ```
 
-Run diagnostics before starting a session:
-
-```bash
-python main.py --doctor
-```
-
 ### Run
 
-```bash
-python main.py
-```
-
-Resume the latest local session:
-
-```bash
-python main.py -c
-```
-
-Resume a specific session:
-
-```bash
-python main.py --session <session-id>
-```
-
-Experimental JS frontend CLI:
+Node frontend CLI:
 
 ```bash
 node frontend-cli/bin/rind.js
 ```
 
-This starts a headless Python runtime over JSONL stdio and keeps terminal input/rendering in Node.js. The existing Python CLI remains available through `python main.py`.
+Desktop app:
 
-## CLI Commands
+```bash
+npm --prefix desktop run dev
+```
 
-| Command | Description |
-| --- | --- |
-| `python main.py` | Start a new interactive agent session. |
-| `python main.py -c` | Resume the latest local session. |
-| `python main.py --session <id>` | Resume a specific session by ID. |
-| `python main.py --debug` | Disable streaming and show detailed runtime/tool diagnostics. |
-| `python main.py --doctor` | Check local setup without requiring a valid API key. |
+The Python entrypoint is the headless Runtime Package used by both surfaces:
 
-Inside the CLI, slash commands provide local controls for diagnostics, sessions, model selection, and status inspection. The input toolbar shows the active session, model, working directory, and key hints.
+```bash
+python main.py app-server --stdio --cwd .
+```
+
+The Runtime Package exposes one JSONL protocol to both surfaces. Session switching, model selection, goals, background tasks, slash commands, and turn control are handled through that protocol; Python does not provide a separate interactive UI.
 
 Project-level `RIND.md` and project skills are resolved from the current working directory where Rind is launched.
 
@@ -140,8 +118,10 @@ Rind follows a layered structure with dependency inversion between the runtime c
 
 ```text
 agent/
+├── runtime/
+│   ├── core/          # Agent runtime, turn runner, stream parsing and pumping
+│   └── server/        # JSONL server façade, protocol, and runtime commands
 ├── application/
-│   ├── runtime/       # Agent runtime, turn runner, stream parsing and pumping
 │   ├── context/       # Context manager, estimation, compaction, token usage
 │   ├── tools/         # Tool execution, processing, guards, result normalization
 │   └── ports/         # Chat client, session store, tool registry abstractions
@@ -154,7 +134,7 @@ agent/
 └── interfaces/
     ├── cli/           # Interactive CLI, slash commands, status UI
     │   └── commands/features/ # Feature-local slash command registrations
-    ├── runtime_server/# JSONL stdio adapter for headless runtime use
+    ├── runtime/server/# JSONL stdio adapter for headless runtime use
     └── api/           # FastAPI session streaming adapter
 frontend-cli/          # Experimental Node.js terminal input/rendering process
 ```

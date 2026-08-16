@@ -4,22 +4,24 @@ import { readFileSync } from "node:fs";
 
 import {
   createRuntimeRequest,
+  runtimeMethods,
   runtimeEventType,
   runtimeRequestId,
   turnInputMethod,
 } from "../lib/runtime-protocol.js";
 
 test("runtime requests use request_id", () => {
-  assert.deepEqual(createRuntimeRequest(4, "turn.start", { input: "hello" }), {
+  assert.deepEqual(createRuntimeRequest(4, runtimeMethods.sessionPrompt, { input: "hello" }), {
+    kind: "request",
     request_id: 4,
-    method: "turn.start",
+    method: runtimeMethods.sessionPrompt,
     params: { input: "hello" },
   });
 });
 
 test("runtime protocol reads response and event metadata", () => {
   assert.equal(runtimeRequestId({ request_id: 4 }), 4);
-  assert.equal(runtimeEventType({ event_type: "turn_completed", event: {} }), "turn_completed");
+  assert.equal(runtimeEventType({ event: {} }), "");
   assert.equal(runtimeEventType({ event: { type: "turn_started" } }), "turn_started");
   assert.equal(runtimeEventType({ event: { type: "unknown" }, extra: true }), "unknown");
 });
@@ -42,7 +44,7 @@ test("runtime protocol recognizes the shared golden event fixture", () => {
 });
 
 test("active input routes to follow-up without a client-side turn queue", () => {
-  assert.equal(turnInputMethod(false), "turn.start");
-  assert.equal(turnInputMethod(true), "turn.follow_up");
-  assert.equal(turnInputMethod(false), "turn.start");
+  assert.equal(turnInputMethod(false), "session/prompt");
+  assert.equal(turnInputMethod(true), "rind/session/follow_up");
+  assert.equal(turnInputMethod(false), "session/prompt");
 });

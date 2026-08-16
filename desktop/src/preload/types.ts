@@ -17,20 +17,23 @@ export type RuntimeEvent = {
   event: Record<string, unknown>
 }
 
-export type RuntimeMethod =
-  | "session.list"
-  | "session.new"
-  | "session.switch"
-  | "session.replay"
-  | "turn.start"
-  | "turn.steer"
-  | "turn.follow_up"
-  | "turn.interrupt"
-  | "user_question.respond"
-  | "models.list"
-  | "model.set"
-  | "compact"
-  | "slash.execute"
+export const runtimeMethods = {
+  sessionList: "session/list",
+  sessionNew: "session/new",
+  sessionSwitch: "session/switch",
+  sessionReplay: "session/replay",
+  sessionPrompt: "session/prompt",
+  sessionSteer: "rind/session/steer",
+  sessionFollowUp: "rind/session/follow_up",
+  sessionCancel: "session/cancel",
+  userQuestionRespond: "rind/user-question/respond",
+  modelList: "model/list",
+  modelSet: "model/set",
+  sessionCompact: "rind/session/compact",
+  commandExecute: "rind/command/execute",
+} as const
+
+export type RuntimeMethod = typeof runtimeMethods[keyof typeof runtimeMethods]
 
 export type DesktopSettings = {
   model: string
