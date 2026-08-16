@@ -19,6 +19,7 @@ export type ComposerElements = {
   menuTrigger: HTMLButtonElement
   menu: HTMLElement
   compactContext: HTMLButtonElement
+  slashCommandMenu: HTMLElement
   contextMeter: HTMLElement
 }
 
@@ -30,6 +31,7 @@ export type ComposerView = {
   controllingTurn: boolean
   runtimeSessionId: string
   composerMenuOpen: boolean
+  compacting: boolean
   contextUsagePercent: number | null
 }
 
@@ -40,11 +42,14 @@ export function composerRegionMarkup() {
         <section id="plan-dock" class="plan-dock" aria-label="Plan progress"></section>
       </div>
       <form id="composer" class="composer">
-        <textarea id="prompt" rows="2" placeholder="Message Rind — Enter to send, Shift+Enter for a new line" aria-label="Message Rind"></textarea>
+        <div class="prompt-wrap">
+          <div id="slash-command-menu" class="slash-command-menu" role="listbox" aria-label="Slash commands" hidden></div>
+          <textarea id="prompt" rows="2" placeholder="Message Rind — Enter to send, Shift+Enter for a new line" aria-label="Message Rind" aria-controls="slash-command-menu" aria-expanded="false" autocomplete="off"></textarea>
+        </div>
         <div class="composer-footer">
           <div class="composer-menu-wrap">
             <button id="composer-menu-trigger" type="button" class="composer-menu-trigger" title="More chat actions" aria-label="More chat actions" aria-haspopup="menu" aria-expanded="false">+</button>
-            <div id="composer-menu" class="composer-menu" role="menu" hidden><button id="compact-context" type="button" role="menuitem">Compact context</button></div>
+            <div id="composer-menu" class="composer-menu" role="menu" hidden><button id="compact-context" type="button" role="menuitem"><span class="compact-label">Compact context</span></button></div>
           </div>
           <label class="model-control" title="Active model"><select id="model-select" aria-label="Model"></select></label>
           <label class="project-control" title="Active project"><select id="project-select" aria-label="Active project"></select></label>
@@ -112,24 +117,31 @@ export function dismissPlanError(conversation: ConversationState, sessionId: str
 }
 
 export function renderComposer(elements: ComposerElements, view: ComposerView) {
-  elements.prompt.disabled = !view.ready || view.readOnly
-  elements.prompt.placeholder = view.readOnly
+  const unavailable = !view.ready || view.readOnly || view.compacting
+  elements.prompt.disabled = unavailable
+  elements.prompt.placeholder = view.compacting
+    ? "Compacting context..."
+    : view.readOnly
     ? "Return to the current task to send a message"
     : "Message Rind — Enter to send, Shift+Enter for a new line"
-  elements.send.disabled = !view.ready || view.readOnly || view.starting
+  elements.send.disabled = unavailable || view.starting
   const label = elements.send.querySelector<HTMLElement>(".send-label")
-  if (label) label.textContent = view.readOnly ? "Viewing" : view.active ? "Queue" : "Send"
+  if (label) label.textContent = view.compacting ? "Compacting" : view.readOnly ? "Viewing" : view.active ? "Queue" : "Send"
   elements.send.classList.toggle("is-starting", view.starting)
   elements.send.setAttribute("aria-busy", String(view.starting))
-  elements.send.title = view.readOnly
+  elements.send.title = view.compacting
+    ? "Context compaction is in progress"
+    : view.readOnly
     ? "Return to the current task before sending"
     : view.starting ? "Waiting for the task to start" : view.active ? "Queue as follow-up for the running turn" : "Send message"
   elements.steer.disabled = !view.ready || !view.controllingTurn || view.readOnly
   elements.interrupt.disabled = !view.ready || !view.controllingTurn || view.readOnly
-  elements.menuTrigger.disabled = !view.ready || !view.runtimeSessionId || view.readOnly || view.active
+  elements.menuTrigger.disabled = !view.ready || !view.runtimeSessionId || view.readOnly || view.active || view.compacting
   elements.menuTrigger.setAttribute("aria-expanded", String(view.composerMenuOpen))
   elements.menu.hidden = !view.composerMenuOpen
-  elements.compactContext.disabled = !view.ready || !view.runtimeSessionId || view.readOnly || view.active
+  elements.compactContext.disabled = !view.ready || !view.runtimeSessionId || view.readOnly || view.active || view.compacting
+  const compactLabel = elements.compactContext.querySelector<HTMLElement>(".compact-label")
+  if (compactLabel) compactLabel.textContent = view.compacting ? "Compacting..." : "Compact context"
   elements.contextMeter.hidden = view.contextUsagePercent === null
   elements.contextMeter.textContent = view.contextUsagePercent === null ? "" : `${Math.round(view.contextUsagePercent * 100)}% ctx`
   elements.contextMeter.classList.toggle("context-hot", view.contextUsagePercent !== null && view.contextUsagePercent >= 0.8)

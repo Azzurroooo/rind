@@ -41,6 +41,7 @@ export type Entry =
   | { kind: "file"; id: string; filePath: string }
   | { kind: "error"; id: string; content: string; source: string }
   | { kind: "notice"; id: string; content: string; label: string }
+  | { kind: "command"; id: string; command: string; content: string; display?: Record<string, unknown> }
 export type Question = { toolCallId: string; turnId: string; question: string; options: string[]; recommended?: string }
 export type ConversationState = {
   entries: Entry[]
@@ -66,6 +67,15 @@ export function boundText(value: string, limit = maxEntryChars) {
 
 export function addUserMessage(state: ConversationState, content: string): ConversationState {
   return appendEntry(closeAssistant(state), { kind: "user", id: "", content: boundText(content) })
+}
+
+export function addCommandResult(
+  state: ConversationState,
+  command: string,
+  content: string,
+  display?: Record<string, unknown>,
+): ConversationState {
+  return appendEntry(closeAssistant(state), { kind: "command", id: "", command, content: boundText(content), display })
 }
 
 export function reduceEvent(state: ConversationState, envelope: RuntimeEvent): ConversationState {

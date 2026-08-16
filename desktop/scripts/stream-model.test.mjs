@@ -4,6 +4,7 @@ import test from "node:test"
 import {
   addUserMessage,
   activePlan,
+  addCommandResult,
   boundText,
   clipLine,
   conversationFromReplay,
@@ -32,6 +33,13 @@ test("assistant deltas accumulate into one entry per turn", () => {
   assert.equal(assistants.length, 1)
   assert.equal(assistants[0].content, "Hello world")
   assert.equal(state.activeTurnId, "turn-1")
+})
+
+test("slash command output stays outside the persisted conversation timeline", () => {
+  const state = addCommandResult(createConversation(), "/status", "Session is ready.", { type: "status", session: "s1" })
+  assert.equal(state.entries.length, 1)
+  assert.equal(state.entries[0].kind, "command")
+  assert.equal(state.entries[0].content, "Session is ready.")
 })
 
 test("completion without content preserves streamed assistant text", () => {
@@ -305,6 +313,8 @@ test("composer region keeps plan dock above a persistent input form", () => {
   assert.equal(markup.indexOf('class="composer-region"') < markup.indexOf('id="plan-dock-shell"'), true)
   assert.equal(markup.indexOf('id="plan-dock-shell"') < markup.indexOf('id="composer"'), true)
   assert.match(markup, /id="prompt" rows="2"/)
+  assert.match(markup, /id="slash-command-menu" class="slash-command-menu" role="listbox"/)
+  assert.match(markup, /aria-controls="slash-command-menu"/)
   assert.match(markup, /class="send-spinner"/)
 })
 

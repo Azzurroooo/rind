@@ -13,8 +13,7 @@ export async function replaySession(rindHome: string, sessionId: string, project
   }
   const messages = await readJsonLines(join(base, "messages.jsonl"))
   const tools = await readJsonLines(join(base, "tool_calls.jsonl"))
-  const compactions = await readJsonLines(join(base, "compactions.jsonl"))
-  return { sessionId: cleanId, messages: projectMessages(messages, tools, compactions) }
+  return { sessionId: cleanId, messages: projectMessages(messages, tools) }
 }
 
 async function readJson(path: string): Promise<JsonObject> {
@@ -42,12 +41,12 @@ async function readJsonLines(path: string): Promise<JsonObject[]> {
   })
 }
 
-function projectMessages(messages: JsonObject[], tools: JsonObject[], compactions: JsonObject[]) {
-  const compact = latestCompaction(messages, compactions)
-  const source = compact ? compactMessages(messages, compact) : messages
+function projectMessages(messages: JsonObject[], tools: JsonObject[]) {
   const toolMap = new Map(tools.map((item) => [String(item.id || ""), item]))
   const projected: JsonObject[] = []
-  for (const message of source) {
+  for (const message of messages) {
+    // Compaction boundaries alter the model's continuation context, not the user's transcript.
+    if (asObject(message.meta)?.kind === "compact_boundary") continue
     const role = message.role
     if (role === "tool") {
       const tool = toolMap.get(String(message.tool_call_id || ""))
@@ -72,32 +71,6 @@ function projectMessages(messages: JsonObject[], tools: JsonObject[], compaction
     if (role === "system" || role === "user") projected.push({ role, content: String(message.content || "") })
   }
   return projected
-}
-
-function latestCompaction(messages: JsonObject[], compactions: JsonObject[]) {
-  const valid = compactions.filter((item) => {
-    const handoff = asObject(item.handoff_message)
-    return handoff?.role === "assistant" && typeof handoff.content === "string"
-  })
-  for (let index = messages.length - 1; index >= 0; index -= 1) {
-    const meta = asObject(messages[index].meta)
-    if (meta?.kind !== "compact_boundary") continue
-    const match = valid.find((item) => String(item.id || "") === String(meta.compact_id || ""))
-    if (match) return { index, record: match }
-  }
-  return undefined
-}
-
-function compactMessages(messages: JsonObject[], compact: { index: number; record: JsonObject }) {
-  const system = messages.slice(0, compact.index).filter((item) => item.role === "system")
-  const handoff = asObject(compact.record.handoff_message)
-  const continuation = asObject(compact.record.continuation_user_message)
-  return [
-    ...system,
-    { role: "user", content: String(continuation?.content || "Continue from the compacted context.") },
-    { role: "assistant", content: String(handoff?.content || "") },
-    ...messages.slice(compact.index + 1).filter((item) => asObject(item.meta)?.kind !== "compact_boundary"),
-  ]
 }
 
 function asObject(value: unknown): JsonObject | undefined {

@@ -24,6 +24,7 @@ import type {
 import { runtimeMethods } from "../preload/types"
 import {
   addUserMessage,
+  addCommandResult,
   clipLine,
   conversationFromReplay,
   createConversation,
@@ -37,6 +38,15 @@ import {
 } from "./timeline-model"
 import { renderMarkdown } from "./markdown"
 import { highlightFile } from "./syntax-highlight"
+import { renderCommandResult } from "./command-results"
+import {
+  commandPrefill,
+  fallbackSlashCommands,
+  isExactSlashCommand,
+  parseSlashCommands,
+  slashCommandMenu as buildSlashCommandMenu,
+  type SlashCommand,
+} from "./slash-commands"
 
 type AppState = {
   runtime: RuntimeSnapshot
@@ -75,6 +85,10 @@ type AppState = {
   revealedTools: Set<string>
   planDock: PlanDockPresentation
   composerMenuOpen: boolean
+  compacting: boolean
+  slashCommands: SlashCommand[]
+  slashMenuOpen: boolean
+  slashMenuActiveIndex: number
   notice: string
 }
 
@@ -119,6 +133,10 @@ const state: AppState = {
   revealedTools: new Set(),
   planDock: { collapsed: false, displayedPlanId: "", dismissedPlanErrors: new Set() },
   composerMenuOpen: false,
+  compacting: false,
+  slashCommands: fallbackSlashCommands,
+  slashMenuOpen: false,
+  slashMenuActiveIndex: 0,
   notice: "",
 }
 
@@ -213,6 +231,7 @@ const interrupt = requiredElement<HTMLButtonElement>("interrupt")
 const composerMenuTrigger = requiredElement<HTMLButtonElement>("composer-menu-trigger")
 const composerMenu = requiredElement("composer-menu")
 const compactContext = requiredElement<HTMLButtonElement>("compact-context")
+const slashCommandMenu = requiredElement("slash-command-menu")
 const sidebar = requiredElement("sidebar")
 const sidebarResizeHandle = requiredElement("sidebar-resize-handle")
 const filePanel = requiredElement("file-panel")
@@ -289,7 +308,7 @@ function render() {
   )
   renderStream()
   renderComposer(
-    { prompt, send, steer, interrupt, menuTrigger: composerMenuTrigger, menu: composerMenu, compactContext, contextMeter },
+    { prompt, send, steer, interrupt, menuTrigger: composerMenuTrigger, menu: composerMenu, compactContext, slashCommandMenu, contextMeter },
     {
       ready: chatProject()?.available === true && state.settings.hasApiKey,
       active: runtimeTurnActive(),
@@ -298,9 +317,11 @@ function render() {
       controllingTurn: Boolean(runtimeConversation().activeTurnId),
       runtimeSessionId: state.viewedSessionId,
       composerMenuOpen: state.composerMenuOpen,
+      compacting: state.compacting,
       contextUsagePercent: state.conversation.contextUsagePercent,
     },
   )
+  renderSlashCommandMenu()
   renderFiles()
   renderSettings()
   syncWorkingTimer()
@@ -552,6 +573,8 @@ function renderEntry(entry: Entry): string {
       return `<div class="stream-card card-error"><div class="card-label">${escapeHtml(entry.source)}</div><div class="card-body">${escapeHtml(entry.content)}</div></div>`
     case "notice":
       return `<div class="stream-card card-notice"><div class="card-label">${escapeHtml(entry.label)}</div><div class="card-body">${escapeHtml(entry.content)}</div></div>`
+    case "command":
+      return renderCommandResult(entry)
   }
 }
 
@@ -757,7 +780,7 @@ async function ensureRuntime(runtimeId: string, workspace: string, sessionId?: s
       state.runtimeWorkers[runtimeId] = await window.api.runtime.start(runtimeId, workspace, sessionId)
       render()
     }
-    await window.api.runtime.initialize(runtimeId)
+    applyRuntimeInitialization(runtimeId, await window.api.runtime.initialize(runtimeId))
     state.runtimeWorkers[runtimeId] = { ...state.runtimeWorkers[runtimeId], status: "ready", runtimeId, workspace, sessionId }
     return runtimeId
   } finally {
@@ -841,20 +864,13 @@ async function loadSettings() {
   }
 }
 
-async function refreshSession() {
-  await Promise.all([loadSessions(), state.viewedSessionId ? loadReplay() : Promise.resolve(), loadModels()])
-  state.notice = ""
-  render()
-}
-
-async function bootstrap(result: unknown) {
+function applyRuntimeInitialization(runtimeId: string, result: unknown) {
   const initialize = asRecord(result)
-  const runtimeId = state.viewedRuntimeId || currentRuntimeId()
   const sessionId = typeof initialize.session_id === "string" ? initialize.session_id : state.runtimeSessionIds[runtimeId] || ""
   adoptRuntimeSession(runtimeId, sessionId)
   state.model = typeof initialize.model === "string" ? initialize.model : state.model
-  await refreshSession()
-  if (state.filesOpen && viewedProject()?.available) await loadDirectory("")
+  const commands = parseSlashCommands(initialize.commands)
+  if (commands.length) state.slashCommands = commands
 }
 
 function handleRuntimeEvent(envelope: RuntimeEvent) {
@@ -909,19 +925,109 @@ function autoGrowPrompt() {
   prompt.style.overflowY = prompt.scrollHeight > maximum ? "auto" : "hidden"
 }
 
+function setPrompt(value: string, focus = false) {
+  prompt.value = value
+  if (state.chatProjectPath) state.drafts[state.chatProjectPath] = value
+  autoGrowPrompt()
+  renderSlashCommandMenu()
+  if (focus) prompt.focus()
+}
+
+function renderSlashCommandMenu() {
+  if (prompt.disabled) {
+    closeSlashCommandMenu()
+    return
+  }
+  const menu = buildSlashCommandMenu(state.slashCommands, prompt.value)
+  if (!menu) {
+    state.slashMenuOpen = false
+    slashCommandMenu.hidden = true
+    slashCommandMenu.replaceChildren()
+    prompt.setAttribute("aria-expanded", "false")
+    prompt.removeAttribute("aria-activedescendant")
+    return
+  }
+  state.slashMenuOpen = true
+  prompt.setAttribute("aria-expanded", "true")
+  if (!menu.commands.length) {
+    slashCommandMenu.innerHTML = `<p class="slash-command-empty">No matching command</p>`
+    slashCommandMenu.hidden = false
+    prompt.removeAttribute("aria-activedescendant")
+    return
+  }
+  state.slashMenuActiveIndex = Math.min(state.slashMenuActiveIndex, menu.commands.length - 1)
+  const active = menu.commands[state.slashMenuActiveIndex]
+  prompt.setAttribute("aria-activedescendant", `slash-command-${active.name}`)
+  slashCommandMenu.innerHTML = menu.commands.map((command, index) => `
+    <button
+      id="slash-command-${escapeAttribute(command.name)}"
+      type="button"
+      class="slash-command-option${index === state.slashMenuActiveIndex ? " selected" : ""}"
+      role="option"
+      aria-selected="${String(index === state.slashMenuActiveIndex)}"
+      data-slash-command="${escapeAttribute(command.name)}"
+    >
+      <span class="slash-command-main"><code>/${escapeHtml(command.name)}</code><span>${escapeHtml(command.description)}</span></span>
+      <span class="slash-command-usage">${escapeHtml(command.usage)}</span>
+    </button>
+  `).join("")
+  slashCommandMenu.hidden = false
+}
+
+function closeSlashCommandMenu() {
+  state.slashMenuOpen = false
+  state.slashMenuActiveIndex = 0
+  slashCommandMenu.hidden = true
+  slashCommandMenu.replaceChildren()
+  prompt.setAttribute("aria-expanded", "false")
+  prompt.removeAttribute("aria-activedescendant")
+}
+
+function selectSlashCommand(command: SlashCommand) {
+  if (!command) return
+  setPrompt(commandPrefill(command), true)
+  closeSlashCommandMenu()
+}
+
 requiredElement<HTMLFormElement>("composer").addEventListener("submit", (event) => { event.preventDefault(); runAction(sendPrompt) })
 
 prompt.addEventListener("input", () => {
   if (state.chatProjectPath) state.drafts[state.chatProjectPath] = prompt.value
   autoGrowPrompt()
+  renderSlashCommandMenu()
 })
 prompt.addEventListener("keydown", (event) => {
+  const menu = buildSlashCommandMenu(state.slashCommands, prompt.value)
+  if (state.slashMenuOpen && menu && menu.commands.length) {
+    if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+      event.preventDefault()
+      const offset = event.key === "ArrowDown" ? 1 : -1
+      state.slashMenuActiveIndex = (state.slashMenuActiveIndex + offset + menu.commands.length) % menu.commands.length
+      renderSlashCommandMenu()
+      return
+    }
+    if (event.key === "Tab" || (event.key === "Enter" && !event.shiftKey && !isExactSlashCommand(state.slashCommands, prompt.value))) {
+      event.preventDefault()
+      selectSlashCommand(menu.commands[state.slashMenuActiveIndex] || menu.commands[0])
+      return
+    }
+  }
+  if (event.key === "Escape" && state.slashMenuOpen) {
+    event.preventDefault()
+    closeSlashCommandMenu()
+    return
+  }
   if (event.key === "Enter" && !event.shiftKey && !event.isComposing) {
     event.preventDefault()
     runAction(sendPrompt)
   }
 })
 document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape" && state.slashMenuOpen) {
+    event.preventDefault()
+    closeSlashCommandMenu()
+    return
+  }
   if (event.key === "Escape" && state.composerMenuOpen) {
     state.composerMenuOpen = false
     render()
@@ -937,6 +1043,7 @@ document.addEventListener("pointerdown", (event) => {
     state.composerMenuOpen = false
     render()
   }
+  if (state.slashMenuOpen && !(event.target as HTMLElement).closest(".prompt-wrap")) closeSlashCommandMenu()
 })
 
 async function sendPrompt() {
@@ -951,6 +1058,7 @@ async function sendPrompt() {
   prompt.value = ""
   state.drafts[state.chatProjectPath] = ""
   autoGrowPrompt()
+  closeSlashCommandMenu()
   if (input.startsWith("/")) {
     runAction(() => runSlash(input))
     return
@@ -996,37 +1104,73 @@ async function runSlash(input: string) {
     return
   }
   const runtimeId = currentRuntimeId()
-  await ensureRuntime(runtimeId, project.path, state.viewedSessionId || undefined)
-  state.viewedRuntimeId = runtimeId
-  await loadModels()
-  const result = asRecord(await request(runtimeMethods.commandExecute, { input }))
-  const text = asRecordText(result.text)
-  if (text) {
-    state.conversation = {
-      ...state.conversation,
-      entries: [...state.conversation.entries, { kind: "notice", id: `slash-${Date.now()}`, label: input, content: text }],
-    }
+  const compacting = /^\/compact\s*$/i.test(input)
+  if (compacting) {
+    state.compacting = true
+    render()
   }
-  const prefill = typeof result.prompt_prefill === "string" ? result.prompt_prefill : ""
-  if (prefill) {
-    prompt.value = prefill
-    autoGrowPrompt()
+  try {
+    await ensureRuntime(runtimeId, project.path, state.viewedSessionId || undefined)
+    state.viewedRuntimeId = runtimeId
+    await loadModels()
+    const result = asRecord(await request(runtimeMethods.commandExecute, { input }))
+    const commands = parseSlashCommands(asRecord(result.display).commands)
+    if (commands.length) state.slashCommands = commands
+    const text = asRecordText(result.text)
+    if (compacting && text.startsWith("Compact complete.")) {
+      await loadReplay()
+      state.notice = "Context compacted. Session history remains visible."
+    } else if (text) {
+      state.conversation = addCommandResult(state.conversation, input, text, asRecord(result.display))
+    }
+    const prefill = typeof result.prompt_prefill === "string" ? result.prompt_prefill : ""
+    if (prefill) setPrompt(prefill, true)
+    const nextPrompt = result.next_prompt && typeof result.next_prompt === "object"
+      ? result.next_prompt as Record<string, unknown>
+      : null
+    const followUp = typeof nextPrompt?.input === "string" ? nextPrompt.input.trim() : ""
+    if (followUp) {
+      state.conversation = addUserMessage(state.conversation, followUp)
+      const turn = await startTurn(followUp, runtimeId, nextPrompt?.transient_system_messages)
+      if (typeof turn.session_id === "string" && turn.session_id) {
+        adoptRuntimeSession(runtimeId, turn.session_id)
+        await loadSessions()
+        await recordRecentSession(turn.session_id)
+      }
+    }
+  } finally {
+    state.compacting = false
+    render()
+  }
+}
+
+async function compactCurrentSession() {
+  const project = chatProject()
+  if (!project?.available || !state.viewedSessionId) return
+  const runtimeId = currentRuntimeId()
+  state.compacting = true
+  render()
+  try {
+    await ensureRuntime(runtimeId, project.path, state.viewedSessionId)
+    state.viewedRuntimeId = runtimeId
+    const record = asRecord(await request(runtimeMethods.sessionCompact, {}, runtimeId))
+    await loadReplay()
+    state.notice = compactNotice(record)
+  } finally {
+    state.compacting = false
+    render()
     prompt.focus()
   }
-  const nextPrompt = result.next_prompt && typeof result.next_prompt === "object"
-    ? result.next_prompt as Record<string, unknown>
-    : null
-  const followUp = typeof nextPrompt?.input === "string" ? nextPrompt.input.trim() : ""
-  if (followUp) {
-    state.conversation = addUserMessage(state.conversation, followUp)
-    const turn = await startTurn(followUp, runtimeId, nextPrompt?.transient_system_messages)
-    if (typeof turn.session_id === "string" && turn.session_id) {
-      adoptRuntimeSession(runtimeId, turn.session_id)
-      await loadSessions()
-      await recordRecentSession(turn.session_id)
-    }
+}
+
+function compactNotice(record: Record<string, unknown>) {
+  const source = asRecord(record.source)
+  const start = source.message_start_index
+  const end = source.message_end_index_exclusive
+  if (typeof start === "number" && typeof end === "number") {
+    return `Context compacted from messages ${start + 1}-${end}. Session history remains visible.`
   }
-  render()
+  return "Context compacted. Session history remains visible."
 }
 
 function asRecordText(value: unknown): string {
@@ -1072,10 +1216,20 @@ composerMenuTrigger.addEventListener("click", () => {
 compactContext.addEventListener("click", () => {
   state.composerMenuOpen = false
   render()
-  runAction(async () => {
-    await request(runtimeMethods.sessionCompact)
-    prompt.focus()
-  })
+  runAction(compactCurrentSession)
+})
+slashCommandMenu.addEventListener("pointermove", (event) => {
+  const commandName = (event.target as HTMLElement).closest<HTMLButtonElement>("[data-slash-command]")?.dataset.slashCommand
+  if (!commandName) return
+  const index = buildSlashCommandMenu(state.slashCommands, prompt.value)?.commands.findIndex((command) => command.name === commandName) ?? -1
+  if (index < 0 || index === state.slashMenuActiveIndex) return
+  state.slashMenuActiveIndex = index
+  renderSlashCommandMenu()
+})
+slashCommandMenu.addEventListener("click", (event) => {
+  const commandName = (event.target as HTMLElement).closest<HTMLButtonElement>("[data-slash-command]")?.dataset.slashCommand
+  const command = state.slashCommands.find((item) => item.name === commandName)
+  if (command) selectSlashCommand(command)
 })
 modelSelect.addEventListener("change", () => {
   const model = modelSelect.value
@@ -1180,6 +1334,12 @@ messageStream.addEventListener("click", (event) => {
   const copy = target.closest<HTMLButtonElement>(".copy-code")
   if (copy?.dataset.copy) {
     runAction(() => navigator.clipboard.writeText(copy.dataset.copy || ""))
+    return
+  }
+  const commandName = target.closest<HTMLButtonElement>("[data-command-prefill]")?.dataset.commandPrefill
+  if (commandName) {
+    const command = state.slashCommands.find((item) => item.name === commandName)
+    if (command) selectSlashCommand(command)
     return
   }
   const answer = target.closest<HTMLButtonElement>("[data-answer]")?.dataset.answer
