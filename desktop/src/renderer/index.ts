@@ -131,7 +131,7 @@ const state: AppState = {
   conversation: createConversation(),
   expandedTools: new Set(),
   revealedTools: new Set(),
-  planDock: { collapsed: false, displayedPlanId: "", dismissedPlanErrors: new Set() },
+  planDock: { collapsed: false, sessionId: "", dismissedPlanErrors: new Set() },
   composerMenuOpen: false,
   compacting: false,
   slashCommands: fallbackSlashCommands,
@@ -740,13 +740,15 @@ function setConversationFor(sessionId: string, conversation: ConversationState) 
   state.conversationCache = { ...state.conversationCache, [sessionId]: conversation }
 }
 
-function resetConversationPresentation() {
+function resetConversationPresentation(resetPlanDock = true) {
   state.expandedTools = new Set()
   state.revealedTools = new Set()
   toolOpenRequests.clear()
   toolAnimationUntil = 0
-  state.planDock.collapsed = false
-  state.planDock.displayedPlanId = ""
+  if (resetPlanDock) {
+    state.planDock.collapsed = false
+    state.planDock.sessionId = ""
+  }
   dismissPlanError(state.conversation, state.viewedSessionId, state.planDock)
   lastRenderedEntries = 0
 }
@@ -834,7 +836,7 @@ async function loadReplay(sessionId = state.viewedSessionId) {
   const runtimeId = runtimeIdForSession(sessionId)
   if (runtimeTurnActive(runtimeId)) conversation = { ...conversation, ...conversationFor(sessionId), activeTurnId: conversationFor(sessionId).activeTurnId }
   setConversationFor(sessionId, conversation)
-  if (sessionId === state.viewedSessionId) resetConversationPresentation()
+  if (sessionId === state.viewedSessionId) resetConversationPresentation(false)
 }
 
 async function loadModels() {

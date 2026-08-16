@@ -17,7 +17,7 @@ import {
   reduceEvent,
   relativeTime,
 } from "../src/renderer/timeline-model.ts"
-import { composerRegionMarkup } from "../src/renderer/composer-region.ts"
+import { composerRegionMarkup, syncPlanDockSession } from "../src/renderer/composer-region.ts"
 import { highlightFile } from "../src/renderer/syntax-highlight.ts"
 
 function event(type, data = {}, turnId = "turn-1") {
@@ -316,6 +316,14 @@ test("composer region keeps plan dock above a persistent input form", () => {
   assert.match(markup, /id="slash-command-menu" class="slash-command-menu" role="listbox"/)
   assert.match(markup, /aria-controls="slash-command-menu"/)
   assert.match(markup, /class="send-spinner"/)
+})
+
+test("plan dock keeps a manual collapse through plan updates but resets for another session", () => {
+  const presentation = { collapsed: true, sessionId: "session-1", dismissedPlanErrors: new Set() }
+  syncPlanDockSession(presentation, "session-1")
+  assert.equal(presentation.collapsed, true)
+  syncPlanDockSession(presentation, "session-2")
+  assert.equal(presentation.collapsed, false)
 })
 
 test("file syntax highlighting escapes unknown files and colors known files", () => {

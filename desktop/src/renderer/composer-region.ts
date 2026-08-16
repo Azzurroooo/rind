@@ -2,7 +2,7 @@ import { activePlan, clipLine, type ConversationState, type PlanEntry } from "./
 
 export type PlanDockPresentation = {
   collapsed: boolean
-  displayedPlanId: string
+  sessionId: string
   dismissedPlanErrors: Set<string>
 }
 
@@ -71,17 +71,12 @@ export function renderPlanDock(
   presentation: PlanDockPresentation,
 ) {
   const scrollTop = elements.dock.querySelector<HTMLElement>(".plan-dock-content")?.scrollTop || 0
+  syncPlanDockSession(presentation, sessionId)
   const plan = visiblePlan(conversation, sessionId, presentation)
   if (!plan) {
     elements.shell.hidden = true
     elements.dock.replaceChildren()
-    presentation.displayedPlanId = ""
-    presentation.collapsed = false
     return
-  }
-  if (presentation.displayedPlanId !== plan.id) {
-    presentation.displayedPlanId = plan.id
-    presentation.collapsed = false
   }
   const progress = planProgress(plan)
   const preview = plan.steps.find((step) => step.status === "in_progress")
@@ -108,6 +103,12 @@ export function renderPlanDock(
   `
   const content = elements.dock.querySelector<HTMLElement>(".plan-dock-content")
   if (content) content.scrollTop = scrollTop
+}
+
+export function syncPlanDockSession(presentation: PlanDockPresentation, sessionId: string) {
+  if (presentation.sessionId === sessionId) return
+  presentation.sessionId = sessionId
+  presentation.collapsed = false
 }
 
 export function dismissPlanError(conversation: ConversationState, sessionId: string, presentation: PlanDockPresentation) {
