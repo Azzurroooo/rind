@@ -36,6 +36,36 @@ test("command controller separates text, steering, goal, and slash commands", as
   assert.equal(logs.length, 2);
 });
 
+test("readonly slash commands do not wait for their background result", async () => {
+  let release;
+  const pending = new Promise((resolve) => {
+    release = resolve;
+  });
+  let started = 0;
+  let completed = false;
+  const controller = createCommandController({
+    request: async () => ({}),
+    turn: { submit() {}, submitSteering() {} },
+    input: {
+      isTerminal: true,
+      startReadonlySlashCommand: () => {
+        started += 1;
+        return pending;
+      },
+    },
+  });
+
+  const handling = controller.handle("/status").then(() => {
+    completed = true;
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.equal(started, 1);
+  assert.equal(completed, true);
+  release();
+  await handling;
+});
+
 test("command normalization keeps aliases and ignores invalid names", () => {
   const controller = createCommandController({
     request: async () => ({}),

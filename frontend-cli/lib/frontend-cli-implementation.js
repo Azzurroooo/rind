@@ -100,6 +100,14 @@ const terminalUi = process.stdin.isTTY && process.stdout.isTTY
   : null;
 const promptEditor = createLineEditor();
 let activeInputSession = null;
+
+function suspendPrompt(action, options = {}) {
+  if (!terminalUi || runtimeClosing) {
+    return action();
+  }
+  return terminalUi.withSuspended(action, { render: options.redraw !== false });
+}
+
 const runtimeClient = createRuntimeClient({
   python,
   repoRoot,
@@ -182,7 +190,7 @@ const commandController = createCommandController({
   },
   output: {
     log: logOutput,
-    clearScreen: () => withSuspendedPrompt(() => console.clear()),
+    clearScreen: () => suspendPrompt(() => console.clear()),
     resetContextUsage,
     setInputPrefill: (value) => {
       pendingInputPrefill = value;
@@ -553,7 +561,7 @@ function clearActivityTimer() {
 
 function logOutput(text) {
   flushAssistantText(assistantStreamBuffer.flush(), { redraw: true });
-  withSuspendedPrompt(() => {
+  suspendPrompt(() => {
     closeOpenAssistantOutputLine();
     process.stdout.write(outputBlockText(text, outputStarted));
     outputStarted = true;
@@ -570,7 +578,7 @@ function flushAssistantText(text = "", options = {}) {
   if (!output) {
     return;
   }
-  withSuspendedPrompt(() => {
+  suspendPrompt(() => {
     writeAssistantHeader();
     process.stdout.write(output);
     assistantOutputLineOpen = output ? !output.endsWith("\n") : assistantOutputLineOpen;
@@ -590,15 +598,8 @@ function writeUserInput(text) {
 
 function writeErrorOutput(text) {
   flushAssistantText(assistantStreamBuffer.flush(), { redraw: true });
-  withSuspendedPrompt(() => process.stderr.write(String(text || "")));
-}
-
-function withSuspendedPrompt(action, options = {}) {
-  if (!terminalUi || !inputActive || runtimeClosing) {
-    action();
-    return;
-  }
-  terminalUi.withSuspended(action, { render: options.redraw !== false });
+  const stream = terminalUi && !runtimeClosing ? process.stdout : process.stderr;
+  suspendPrompt(() => stream.write(String(text || "")));
 }
 
 function closeOpenAssistantOutputLine() {
@@ -717,11 +718,7 @@ function clearAssistantLineForInput() {
   if (!assistantOutputLineOpen) {
     return;
   }
-  if (terminalUi) {
-    terminalUi.withSuspended(closeOpenAssistantOutputLine, { render: false });
-  } else {
-    closeOpenAssistantOutputLine();
-  }
+  suspendPrompt(closeOpenAssistantOutputLine, { redraw: false });
 }
 
 function renderActiveInput(width = process.stdout.columns || 80) {
@@ -896,11 +893,7 @@ function completeTtyInput(session, value, writeUser, lineText = "", displayValue
       process.stdout.write("\n");
     }
   };
-  if (terminalUi) {
-    terminalUi.withSuspended(writeAction, { render: false });
-  } else {
-    writeAction();
-  }
+  suspendPrompt(writeAction, { redraw: false });
   session.resolve(value);
 }
 

@@ -447,13 +447,10 @@ export function createTerminalUI(options = {}) {
     if (capturing) {
       return action();
     }
-    if (!started || !rendered) {
-      const result = action();
-      if (options.render !== false) {
-        requestRender();
-      }
-      return result;
+    if (!started) {
+      return action();
     }
+    const repaint = options.render !== false;
     capturing = true;
     const originalWrite = output.write;
     let payload = "";
@@ -468,7 +465,21 @@ export function createTerminalUI(options = {}) {
       output.write = originalWrite;
       capturing = false;
     }
-    printAboveFrame(payload, options.render !== false);
+
+    if (FULL_SCREEN_CLEAR.test(payload)) {
+      write(payload);
+      resetFrameState();
+      return result;
+    }
+    if (!rendered) {
+      write(payload);
+      if (repaint) {
+        requestRender(true);
+      }
+      return result;
+    }
+
+    printAboveFrame(payload, repaint);
     return result;
   }
 
@@ -479,6 +490,7 @@ export function createTerminalUI(options = {}) {
       return;
     }
     if (!payload && repaint) {
+      requestRender(true);
       return;
     }
     const width = columns();
@@ -496,6 +508,9 @@ export function createTerminalUI(options = {}) {
     }
     buffer += SYNCHRONIZED_OUTPUT_END;
     write(buffer);
+    if (repaint && !frame.lines.length) {
+      requestRender(true);
+    }
   }
 
   return {

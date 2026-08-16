@@ -381,6 +381,132 @@ test("prints external output above the frame in a single atomic write", async ()
   ui.stop();
 });
 
+test("repaints after async output when the initial frame is not committed", async () => {
+  const input = new TestInput();
+  const output = new TestOutput();
+  const scheduler = createScheduler();
+  const ui = createTerminalUI({
+    input,
+    output,
+    now: scheduler.now,
+    setTimeout: scheduler.setTimeout,
+    clearTimeout: scheduler.clearTimeout,
+    render: () => ({ lines: ["prompt"], cursorRow: 0, cursorColumn: 6 }),
+  });
+
+  ui.start();
+  await Promise.resolve();
+  output.writes = [];
+
+  ui.withSuspended(() => output.write("status result\n"));
+  assert.equal(output.writes.length, 1);
+  assert.match(output.writes[0], /status result/);
+
+  await Promise.resolve();
+  scheduler.advance(0);
+  assert.match(output.writes.join(""), /prompt/);
+  ui.stop();
+});
+
+test("repaints async output before the next input after the current frame is cleared", async () => {
+  const input = new TestInput();
+  const output = new TestOutput();
+  const scheduler = createScheduler();
+  let showPrompt = true;
+  const ui = createTerminalUI({
+    input,
+    output,
+    now: scheduler.now,
+    setTimeout: scheduler.setTimeout,
+    clearTimeout: scheduler.clearTimeout,
+    render: () => ({
+      lines: showPrompt ? ["prompt"] : [],
+      cursorRow: 0,
+      cursorColumn: showPrompt ? 6 : 0,
+    }),
+  });
+
+  ui.start();
+  await Promise.resolve();
+  scheduler.advance(0);
+  output.writes = [];
+
+  showPrompt = false;
+  ui.withSuspended(() => output.write("submitted /status\n"), { render: false });
+  output.writes = [];
+
+  showPrompt = true;
+  ui.withSuspended(() => output.write("status result\n"));
+  assert.equal(output.writes.length, 1);
+  assert.match(output.writes[0], /status result/);
+
+  await Promise.resolve();
+  scheduler.advance(0);
+  assert.match(output.writes.join(""), /prompt/);
+  ui.stop();
+});
+
+test("repaints after output when the committed frame temporarily disappears", async () => {
+  const input = new TestInput();
+  const output = new TestOutput();
+  const scheduler = createScheduler();
+  let renderCount = 0;
+  const ui = createTerminalUI({
+    input,
+    output,
+    now: scheduler.now,
+    setTimeout: scheduler.setTimeout,
+    clearTimeout: scheduler.clearTimeout,
+    render: () => {
+      renderCount += 1;
+      return renderCount === 2
+        ? { lines: [], cursorRow: 0, cursorColumn: 0 }
+        : { lines: ["prompt"], cursorRow: 0, cursorColumn: 6 };
+    },
+  });
+
+  ui.start();
+  await Promise.resolve();
+  scheduler.advance(0);
+  output.writes = [];
+
+  ui.withSuspended(() => output.write("status result\n"));
+  assert.match(output.writes.join(""), /status result/);
+
+  await Promise.resolve();
+  scheduler.advance(0);
+  assert.match(output.writes.join(""), /prompt/);
+  ui.stop();
+});
+
+test("repaints when suspended output is written outside the captured stream", async () => {
+  const input = new TestInput();
+  const output = new TestOutput();
+  const scheduler = createScheduler();
+  let frame = "prompt";
+  const ui = createTerminalUI({
+    input,
+    output,
+    now: scheduler.now,
+    setTimeout: scheduler.setTimeout,
+    clearTimeout: scheduler.clearTimeout,
+    render: () => ({ lines: [frame], cursorRow: 0, cursorColumn: frame.length }),
+  });
+
+  ui.start();
+  await Promise.resolve();
+  scheduler.advance(0);
+  output.writes = [];
+
+  frame = "prompt updated";
+  ui.withSuspended(() => {});
+  await Promise.resolve();
+  scheduler.advance(0);
+
+  assert.match(output.writes.join(""), /prompt updated/);
+  ui.stop();
+});
+
 test("atomic output write starts the frame on a fresh line without a trailing newline", async () => {
   const input = new TestInput();
   const output = new TestOutput();
