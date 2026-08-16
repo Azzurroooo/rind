@@ -1344,6 +1344,11 @@ messageStream.addEventListener("click", (event) => {
     if (command) selectSlashCommand(command)
     return
   }
+  const commandSessionId = target.closest<HTMLButtonElement>("[data-command-session-id]")?.dataset.commandSessionId
+  if (commandSessionId) {
+    runAction(() => switchSession(commandSessionId))
+    return
+  }
   const answer = target.closest<HTMLButtonElement>("[data-answer]")?.dataset.answer
   if (answer) runAction(() => answerQuestion(answer))
 })
@@ -1609,7 +1614,11 @@ window.addEventListener("resize", () => render())
 
 async function switchSession(nextSessionId: string) {
   const session = knownSessions().find((item) => item.id === nextSessionId)
-  if (!session) return
+  if (!session) {
+    state.notice = "This session is unavailable in the registered Desktop projects."
+    render()
+    return
+  }
   const project = projectForPath(session.workspaceRoot)
   if (!project) return
   const runtimeId = runtimeIdForSession(nextSessionId)

@@ -26,10 +26,11 @@ test("command results escape structured display fields and keep unknown output r
   const html = renderCommandResult({
     command: "/status",
     content: "<b>runtime text</b>",
-    display: { type: "sessions", sessions: [{ title: "<unsafe>", messages: 2 }] },
+    display: { type: "sessions", sessions: [{ id: "session-1", title: "<unsafe>", messages: 2 }] },
   })
   assert.match(html, /&lt;unsafe&gt;/)
   assert.match(html, /2 messages/)
+  assert.match(html, /data-command-session-id="session-1"/)
 
   const fallback = renderCommandResult({ command: "/unknown", content: "<b>runtime text</b>", display: { type: "other" } })
   assert.match(fallback, /&lt;b&gt;runtime text&lt;\/b&gt;/)

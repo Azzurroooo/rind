@@ -67,9 +67,16 @@ function renderSessionsDisplay(display: Record<string, unknown>) {
   const sessions = recordList(display.sessions)
   if (!sessions.length) return `<div class="command-display-empty">No recent sessions</div>`
   return `<div class="command-display command-session-list">${sessions.map((session) => {
+    const id = displayText(session.id)
     const title = displayText(session.title) || "Untitled"
     const metadata = [displayText(session.updated_at), Number.isFinite(session.messages) ? `${session.messages} messages` : "", Number.isFinite(session.tool_calls) ? `${session.tool_calls} tools` : ""].filter(Boolean).join(" | ")
-    return `<div class="command-session${session.current === true ? " current" : ""}"><strong>${escapeHtml(title)}</strong><small>${escapeHtml(metadata)}</small>${session.preview ? `<span>${escapeHtml(displayText(session.preview))}</span>` : ""}</div>`
+    const current = session.current === true
+    const state = current ? " current" : ""
+    const action = id ? ` type="button" data-command-session-id="${escapeAttribute(id)}"${current ? ' aria-current="page"' : ""}` : ""
+    const content = `<strong>${escapeHtml(title)}</strong><small>${escapeHtml(metadata)}</small>${session.preview ? `<span>${escapeHtml(displayText(session.preview))}</span>` : ""}`
+    return id
+      ? `<button class="command-session${state}"${action}>${content}</button>`
+      : `<div class="command-session${state}">${content}</div>`
   }).join("")}</div>`
 }
 
