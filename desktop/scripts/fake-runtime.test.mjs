@@ -48,7 +48,7 @@ test("fake runtime handles protocol responses and exits on shutdown", async () =
     {
       kind: "response",
       request_id: "initialize",
-      result: { protocol_version: "stage1-fake" },
+      result: { protocol_version: "2", capabilities: ["sessions"], methods: ["session/prompt"] },
     },
     {
       kind: "response",

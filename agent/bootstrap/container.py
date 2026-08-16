@@ -7,7 +7,7 @@ from dataclasses import dataclass
 
 from agent.application.context import CompactionService, ContextEstimator, ContextManager
 from agent.application.ports.session_store import SessionStore
-from agent.application.runtime import AgentRuntime, MessageStreamParser, TurnRunner
+from agent.runtime.core import AgentRuntime, MessageStreamParser, TurnRunner
 from agent.application.tools import ToolCallProcessor, ToolExecutor, ToolResultNormalizer
 from agent.infrastructure.config import AppSettings, load_settings
 from agent.infrastructure.llm import OpenAIChatClient, OpenAIClientFactory

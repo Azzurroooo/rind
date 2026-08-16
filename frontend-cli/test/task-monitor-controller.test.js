@@ -66,7 +66,7 @@ test("task monitor ignores malformed events and handles monitor keys", async () 
     inputActive: false,
   };
   const controller = createTaskMonitorController({
-    request: async (method) => method === "background.list" ? { tasks: [] } : {},
+    request: async (method) => method === "rind/background/list" ? { tasks: [] } : {},
     terminalUi: true,
     state,
   });
@@ -124,7 +124,7 @@ test("task monitor switches pages with horizontal keys", async () => {
     inputActive: false,
   };
   const controller = createTaskMonitorController({
-    request: async (method) => method === "background.list"
+    request: async (method) => method === "rind/background/list"
       ? { tasks: [{ bg_id: "bg-1", status: "running", command: "server" }] }
       : {},
     terminalUi: true,

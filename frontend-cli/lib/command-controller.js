@@ -7,6 +7,12 @@ import {
   helpText,
   slashResultText,
 } from "./rendering.js";
+import { runtimeMethods } from "./runtime-protocol.js";
+
+const LOCAL_COMMANDS = Object.freeze([
+  { name: "clear", description: "Clear terminal output" },
+  { name: "exit", description: "Exit Rind", aliases: ["quit"] },
+]);
 
 export function createCommandController({
   request,
@@ -33,6 +39,16 @@ export function createCommandController({
       turn.submitSteering(steering, text);
       return true;
     }
+    if (isLocalCommand(text, "clear")) {
+      output.clearScreen?.();
+      return true;
+    }
+    if (isLocalCommand(text, "exit") || isLocalCommand(text, "quit")) {
+      output.log?.("Goodbye.");
+      await output.shutdown?.();
+      output.exit?.();
+      return true;
+    }
     await runSlashCommand(text);
     return true;
   }
@@ -54,32 +70,22 @@ export function createCommandController({
       input.startReadonlySlashCommand?.(text);
       return;
     }
-    const result = await request("slash.execute", { input: text });
+    const result = await request(runtimeMethods.commandExecute, { input: text });
     await applyResult(result);
   }
 
   async function applyResult(result = {}) {
-    if (result.clear_screen) {
-      output.clearScreen?.();
-    }
     const text = slashResultText(result, state.slashCommands || []);
     if (text) {
       output.log?.(text);
     }
-    if (result.context_usage_reset) {
-      output.resetContextUsage?.();
+    if (result.prompt_prefill) {
+      output.setInputPrefill?.(result.prompt_prefill);
     }
-    if (result.input_prefill) {
-      output.setInputPrefill?.(result.input_prefill);
-    }
-    if (result.run_turn_input) {
-      turn.submit(result.run_turn_input, {
-        transient_system_messages: result.transient_system_messages,
+    if (result.next_prompt?.input) {
+      turn.submit(result.next_prompt.input, {
+        transient_system_messages: result.next_prompt.transient_system_messages,
       });
-    }
-    if (result.should_exit) {
-      await output.shutdown?.();
-      output.exit?.();
     }
   }
 
@@ -105,7 +111,12 @@ export function createCommandController({
     return items.sort((left, right) => left.name.localeCompare(right.name));
   }
 
-  return { handle, normalizeCommands, applyResult };
+  return {
+    handle,
+    normalizeCommands,
+    localCommands: () => LOCAL_COMMANDS.flatMap((command) => normalizeCommands([command])),
+    applyResult,
+  };
 }
 
 function singleWord(value) {
@@ -115,6 +126,10 @@ function singleWord(value) {
 
 function isBareModelCommand(value) {
   return String(value || "").trim().toLowerCase() === "/model";
+}
+
+function isLocalCommand(value, name) {
+  return String(value || "").trim().toLowerCase() === `/${name}`;
 }
 
 function isBareSessionsCommand(value) {

@@ -5,6 +5,7 @@ trafilatura>=1.8.0
 rich>=13.7.0
 prompt_toolkit>=3.0.0
 openai>=1.0.0
+socksio>=1.0.0
 filelock>=3.13.0
 tiktoken>=0.6.0
 tenacity>=8.2.0

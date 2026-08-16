@@ -20,7 +20,7 @@ import { composerRegionMarkup } from "../src/renderer/composer-region.ts"
 import { highlightFile } from "../src/renderer/syntax-highlight.ts"
 
 function event(type, data = {}, turnId = "turn-1") {
-  return { type, sequence: 1, sessionId: "session", turnId, event: data }
+  return { type, sequence: 1, durability: "incremental", sessionId: "session", turnId, event: data }
 }
 
 test("assistant deltas accumulate into one entry per turn", () => {

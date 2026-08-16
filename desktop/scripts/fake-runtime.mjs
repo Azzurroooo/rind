@@ -13,7 +13,11 @@ input.on("line", (line) => {
   }
 
   if (request.method === "initialize") {
-    output({ kind: "response", request_id: request.request_id, result: { protocol_version: "stage1-fake" } })
+    output({
+      kind: "response",
+      request_id: request.request_id,
+      result: { protocol_version: "2", capabilities: ["sessions"], methods: ["session/prompt"] },
+    })
     return
   }
   if (request.method === "shutdown") {
@@ -26,9 +30,12 @@ input.on("line", (line) => {
     const type = String(request.params?.type ?? "")
     output({
       kind: "event",
-      event_type: type,
+      method: "session/update",
       event: { type },
       sequence: 1,
+      durability: "incremental",
+      session_id: "fake-session",
+      turn_id: "fake-turn",
     })
     output({ kind: "response", request_id: request.request_id, result: { ok: true } })
     return

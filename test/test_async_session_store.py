@@ -36,6 +36,8 @@ async def test_async_session_store_facade(temp_session_dir):
     await async_store.initialize()
 
     assert async_store.session_id is None
+    assert Path(async_store.session_root) == Path(temp_session_dir)
+    assert async_store.session_base_path is None
     assert list(Path(temp_session_dir).iterdir()) == []
 
     # The first real user input materializes the draft.
@@ -43,6 +45,7 @@ async def test_async_session_store_facade(temp_session_dir):
 
     assert async_store.session_id is not None
     session_base = Path(temp_session_dir) / async_store.session_id
+    assert Path(async_store.session_base_path) == session_base
     meta = json.loads((session_base / "meta.json").read_text(encoding="utf-8"))
     assert meta["schema_version"] == "2.0"
     assert (session_base / "messages.jsonl").exists()

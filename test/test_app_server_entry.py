@@ -20,7 +20,7 @@ def test_app_server_command_delegates_to_stdio_entry(monkeypatch):
         received.append((argv, server_class))
         return 17
 
-    monkeypatch.setattr("agent.interfaces.runtime_server.app_server.main", fake_app_server)
+    monkeypatch.setattr("agent.runtime.server.app_server.main", fake_app_server)
 
     assert rind_main.main(["app-server", "--stdio", "--cwd", "workspace"]) == 17
     assert received[0][0] == ["--stdio", "--cwd", "workspace"]
@@ -49,7 +49,7 @@ def test_app_server_stdio_subprocess_smoke(tmp_path, entrypoint):
         command = [
             sys.executable,
             "-c",
-            "import runpy; runpy.run_module('agent.interfaces.runtime_server.stdio', run_name='__main__')",
+            "import runpy; runpy.run_module('agent.runtime.server.stdio', run_name='__main__')",
         ]
     process = subprocess.Popen(
         [
@@ -70,10 +70,10 @@ def test_app_server_stdio_subprocess_smoke(tmp_path, entrypoint):
     assert process.stdout is not None
     assert process.stderr is not None
     try:
-        process.stdin.write('{"request_id":"initialize-1","method":"initialize","params":{}}\n')
+        process.stdin.write('{"kind":"request","request_id":"initialize-1","method":"initialize","params":{}}\n')
         process.stdin.flush()
         initialize = json.loads(process.stdout.readline())
-        process.stdin.write('{"request_id":"shutdown-1","method":"shutdown","params":{}}\n')
+        process.stdin.write('{"kind":"request","request_id":"shutdown-1","method":"shutdown","params":{}}\n')
         process.stdin.flush()
         shutdown = json.loads(process.stdout.readline())
         process.stdin.close()
@@ -88,7 +88,7 @@ def test_app_server_stdio_subprocess_smoke(tmp_path, entrypoint):
     assert remaining_stdout == ""
     assert initialize["kind"] == "response"
     assert initialize["request_id"] == "initialize-1"
-    assert initialize["result"]["protocol_version"] == "1"
+    assert initialize["result"]["protocol_version"] == "2"
     assert shutdown == {
         "kind": "response",
         "request_id": "shutdown-1",

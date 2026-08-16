@@ -21,6 +21,7 @@ import type {
   RuntimeMethod,
   RuntimeSnapshot,
 } from "../preload/types"
+import { runtimeMethods } from "../preload/types"
 import {
   addUserMessage,
   clipLine,
@@ -815,7 +816,7 @@ async function loadReplay(sessionId = state.viewedSessionId) {
 
 async function loadModels() {
   try {
-    const result = asRecord(await request("models.list"))
+    const result = asRecord(await request(runtimeMethods.modelList))
     state.models = Array.isArray(result.models) ? result.models.filter((model): model is string => typeof model === "string") : []
     state.model = typeof result.current_model === "string" ? result.current_model : state.model
   } catch {
@@ -928,7 +929,7 @@ document.addEventListener("keydown", (event) => {
     return
   }
   if (event.key === "Escape" && runtimeTurnActive() && !state.settingsOpen) {
-    runAction(() => request("turn.interrupt"))
+    runAction(() => request(runtimeMethods.sessionCancel))
   }
 })
 document.addEventListener("pointerdown", (event) => {
@@ -961,7 +962,7 @@ async function sendPrompt() {
   state.conversation = addUserMessage(state.conversation, input)
   render()
   const result = active
-    ? asRecord(await request("turn.follow_up", { input }, runtimeId))
+    ? asRecord(await request(runtimeMethods.sessionFollowUp, { input }, runtimeId))
     : await startTurn(input, runtimeId)
   if (typeof result.session_id === "string" && result.session_id) {
     adoptRuntimeSession(runtimeId, result.session_id)
@@ -973,11 +974,14 @@ async function sendPrompt() {
   render()
 }
 
-async function startTurn(input: string, runtimeId = currentRuntimeId()) {
+async function startTurn(input: string, runtimeId = currentRuntimeId(), transientSystemMessages?: unknown) {
   state.runtimeTurnPending[runtimeId] = true
   render()
   try {
-    return asRecord(await request("turn.start", { input }, runtimeId))
+    return asRecord(await request(runtimeMethods.sessionPrompt, {
+      input,
+      ...(Array.isArray(transientSystemMessages) ? { transient_system_messages: transientSystemMessages } : {}),
+    }, runtimeId))
   } finally {
     state.runtimeTurnPending[runtimeId] = false
     render()
@@ -995,7 +999,7 @@ async function runSlash(input: string) {
   await ensureRuntime(runtimeId, project.path, state.viewedSessionId || undefined)
   state.viewedRuntimeId = runtimeId
   await loadModels()
-  const result = asRecord(await request("slash.execute", { input }))
+  const result = asRecord(await request(runtimeMethods.commandExecute, { input }))
   const text = asRecordText(result.text)
   if (text) {
     state.conversation = {
@@ -1003,16 +1007,19 @@ async function runSlash(input: string) {
       entries: [...state.conversation.entries, { kind: "notice", id: `slash-${Date.now()}`, label: input, content: text }],
     }
   }
-  const prefill = typeof result.input_prefill === "string" ? result.input_prefill : ""
+  const prefill = typeof result.prompt_prefill === "string" ? result.prompt_prefill : ""
   if (prefill) {
     prompt.value = prefill
     autoGrowPrompt()
     prompt.focus()
   }
-  const followUp = typeof result.run_turn_input === "string" ? result.run_turn_input.trim() : ""
+  const nextPrompt = result.next_prompt && typeof result.next_prompt === "object"
+    ? result.next_prompt as Record<string, unknown>
+    : null
+  const followUp = typeof nextPrompt?.input === "string" ? nextPrompt.input.trim() : ""
   if (followUp) {
     state.conversation = addUserMessage(state.conversation, followUp)
-    const turn = await startTurn(followUp, runtimeId)
+    const turn = await startTurn(followUp, runtimeId, nextPrompt?.transient_system_messages)
     if (typeof turn.session_id === "string" && turn.session_id) {
       adoptRuntimeSession(runtimeId, turn.session_id)
       await loadSessions()
@@ -1032,9 +1039,9 @@ steer.addEventListener("click", () => {
   prompt.value = ""
   if (state.chatProjectPath) state.drafts[state.chatProjectPath] = ""
   autoGrowPrompt()
-  runAction(() => request("turn.steer", { input }))
+  runAction(() => request(runtimeMethods.sessionSteer, { input }))
 })
-interrupt.addEventListener("click", () => runAction(() => request("turn.interrupt")))
+interrupt.addEventListener("click", () => runAction(() => request(runtimeMethods.sessionCancel)))
 retry.addEventListener("click", () => runAction(async () => {
   const project = chatProject()
   const runtimeId = currentRuntimeId()
@@ -1066,7 +1073,7 @@ compactContext.addEventListener("click", () => {
   state.composerMenuOpen = false
   render()
   runAction(async () => {
-    await request("compact")
+    await request(runtimeMethods.sessionCompact)
     prompt.focus()
   })
 })
@@ -1074,7 +1081,7 @@ modelSelect.addEventListener("change", () => {
   const model = modelSelect.value
   if (!model) return
   runAction(async () => {
-    await request("model.set", { model })
+    await request(runtimeMethods.modelSet, { model })
     state.model = model
     render()
   })
@@ -1499,7 +1506,7 @@ async function answerQuestion(answer: string) {
   if (!question) return
   state.conversation = { ...state.conversation, question: undefined }
   render()
-  await request("user_question.respond", { tool_call_id: question.toolCallId, answer }, runtimeId)
+  await request(runtimeMethods.userQuestionRespond, { tool_call_id: question.toolCallId, answer }, runtimeId)
 }
 
 async function saveSettings() {

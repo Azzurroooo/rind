@@ -12,25 +12,62 @@ export type RuntimeEvent = {
   runtimeId: string
   type: string
   sequence: number
+  durability: "durable" | "incremental"
   sessionId: string
   turnId: string
   event: Record<string, unknown>
 }
 
-export type RuntimeMethod =
-  | "session.list"
-  | "session.new"
-  | "session.switch"
-  | "session.replay"
-  | "turn.start"
-  | "turn.steer"
-  | "turn.follow_up"
-  | "turn.interrupt"
-  | "user_question.respond"
-  | "models.list"
-  | "model.set"
-  | "compact"
-  | "slash.execute"
+export const runtimeProtocolVersion = "2"
+
+export const runtimeMethods = {
+  sessionList: "session/list",
+  sessionNew: "session/new",
+  sessionSwitch: "session/switch",
+  sessionReplay: "session/replay",
+  sessionPrompt: "session/prompt",
+  sessionSteer: "rind/session/steer",
+  sessionFollowUp: "rind/session/follow_up",
+  sessionCancel: "session/cancel",
+  userQuestionRespond: "rind/user-question/respond",
+  modelList: "model/list",
+  modelSet: "model/set",
+  sessionCompact: "rind/session/compact",
+  commandExecute: "rind/command/execute",
+} as const
+
+export type RuntimeMethod = typeof runtimeMethods[keyof typeof runtimeMethods]
+export type RuntimeLifecycleMethod = "initialize" | "shutdown"
+export type RuntimeServerMethod = RuntimeMethod | RuntimeLifecycleMethod
+
+export type RuntimeRequestEnvelope = {
+  kind: "request"
+  request_id: string | number
+  method: RuntimeServerMethod
+  params: Record<string, unknown>
+}
+
+export type RuntimeError = {
+  type: string
+  message: string
+}
+
+export type RuntimeResponseEnvelope = {
+  kind: "response"
+  request_id: string | number
+  result?: unknown
+  error?: RuntimeError
+}
+
+export type RuntimeEventEnvelope = {
+  kind: "event"
+  method: "session/update"
+  sequence: number
+  durability: "durable" | "incremental"
+  session_id: string
+  turn_id: string
+  event: Record<string, unknown>
+}
 
 export type DesktopSettings = {
   model: string

@@ -4,24 +4,55 @@ import { readFileSync } from "node:fs";
 
 import {
   createRuntimeRequest,
+  isRuntimeEvent,
+  isRuntimeResponse,
+  requireRuntimeInitialization,
+  runtimeMethods,
+  runtimeProtocolVersion,
   runtimeEventType,
   runtimeRequestId,
   turnInputMethod,
 } from "../lib/runtime-protocol.js";
 
 test("runtime requests use request_id", () => {
-  assert.deepEqual(createRuntimeRequest(4, "turn.start", { input: "hello" }), {
+  assert.deepEqual(createRuntimeRequest(4, runtimeMethods.sessionPrompt, { input: "hello" }), {
+    kind: "request",
     request_id: 4,
-    method: "turn.start",
+    method: runtimeMethods.sessionPrompt,
     params: { input: "hello" },
   });
 });
 
 test("runtime protocol reads response and event metadata", () => {
   assert.equal(runtimeRequestId({ request_id: 4 }), 4);
-  assert.equal(runtimeEventType({ event_type: "turn_completed", event: {} }), "turn_completed");
+  assert.equal(runtimeEventType({ event: {} }), "");
   assert.equal(runtimeEventType({ event: { type: "turn_started" } }), "turn_started");
   assert.equal(runtimeEventType({ event: { type: "unknown" }, extra: true }), "unknown");
+});
+
+test("runtime protocol validates response, event, and initialization schemas", () => {
+  assert.equal(isRuntimeResponse({ kind: "response", request_id: 4, result: {} }), true);
+  assert.equal(isRuntimeResponse({ kind: "response", request_id: null, result: {} }), false);
+  assert.equal(isRuntimeEvent({
+    kind: "event",
+    method: "session/update",
+    sequence: 1,
+    durability: "incremental",
+    session_id: "s1",
+    turn_id: "t1",
+    event: { type: "assistant_delta" },
+  }), true);
+  assert.equal(isRuntimeEvent({ kind: "event", event: { type: "assistant_delta" } }), false);
+  assert.deepEqual(requireRuntimeInitialization({
+    protocol_version: runtimeProtocolVersion,
+    capabilities: [],
+    methods: [],
+  }), {
+    protocol_version: runtimeProtocolVersion,
+    capabilities: [],
+    methods: [],
+  });
+  assert.throws(() => requireRuntimeInitialization({ protocol_version: "1" }), /Unsupported Runtime protocol/);
 });
 
 test("runtime protocol recognizes the shared golden event fixture", () => {
@@ -42,7 +73,7 @@ test("runtime protocol recognizes the shared golden event fixture", () => {
 });
 
 test("active input routes to follow-up without a client-side turn queue", () => {
-  assert.equal(turnInputMethod(false), "turn.start");
-  assert.equal(turnInputMethod(true), "turn.follow_up");
-  assert.equal(turnInputMethod(false), "turn.start");
+  assert.equal(turnInputMethod(false), "session/prompt");
+  assert.equal(turnInputMethod(true), "rind/session/follow_up");
+  assert.equal(turnInputMethod(false), "session/prompt");
 });

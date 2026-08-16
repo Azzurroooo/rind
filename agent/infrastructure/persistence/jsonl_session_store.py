@@ -103,6 +103,17 @@ class JsonlSessionStore(SessionStore):
     def system_prompt(self) -> str:
         return self._system_prompt
 
+    @property
+    def session_root(self) -> str:
+        return str(self._session_root or self.resolve_session_root(self._session_dir))
+
+    @property
+    def session_base_path(self) -> str | None:
+        if not self._session_id:
+            return None
+        base = self._session_paths.get("base")
+        return str(base or resolve_session_base(self.session_root, self._session_id))
+
     def now_iso(self) -> str:
         return datetime.now(timezone.utc).isoformat()
 

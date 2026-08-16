@@ -15,12 +15,12 @@
 <p align="center">
   <img src="https://img.shields.io/badge/Python-3.12+-blue.svg" alt="Python 3.12+" />
   <img src="https://img.shields.io/badge/Architecture-layered-success.svg" alt="Layered architecture" />
-  <img src="https://img.shields.io/badge/Interface-CLI-informational.svg" alt="CLI interface" />
+  <img src="https://img.shields.io/badge/Surfaces-CLI%20%2B%20Desktop-informational.svg" alt="CLI and Desktop surfaces" />
 </p>
 
 ## What is Rind?
 
-Rind is a standard Python implementation of an autonomous coding agent. It is designed to be useful as a local CLI tool, but also readable enough to serve as a reference implementation for how an agent runtime can be assembled.
+Rind is a lightweight coding agent with two product surfaces: a Node.js frontend CLI and an Electron desktop app. Both use the same Python Runtime Package, which is also readable enough to serve as a reference implementation for a compact agent runtime.
 
 The project takes a restrained position: an agent should not become a large framework before it becomes a reliable instrument. Rind keeps the structure explicit, the tool contracts small, and the runtime state recoverable. From context compaction to tool execution, each part is implemented in the smallest form that preserves a good working experience.
 
@@ -31,17 +31,17 @@ The project takes a restrained position: an agent should not become a large fram
 - **Context is runtime state**: Context estimation, compaction, and tool-result normalization are treated as first-class runtime responsibilities, not as prompt afterthoughts.
 - **Local-first continuity**: Sessions, messages, tool calls, and compactions are persisted as append-only local records so work can resume after interruption.
 - **Standard Python over framework gravity**: The codebase uses ordinary Python modules, dependency inversion, async orchestration, and focused services instead of a heavy plugin framework.
-- **Good defaults, visible mechanics**: The CLI aims to feel direct and practical while still making model, session, cwd, status, and diagnostics visible when they matter.
+- **Good defaults, visible mechanics**: Both surfaces keep model, session, workspace, status, and diagnostics visible when they matter.
 
 ## Capabilities
 
-- Interactive coding-agent CLI with streaming output, slash commands, session resume, status rendering, and setup diagnostics.
+- Frontend CLI and Desktop experiences with streaming output, slash commands, session resume, status rendering, and setup diagnostics.
 - OpenAI-compatible async chat client with configurable model, base URL, and reasoning effort.
 - Append-only JSONL session storage for messages, tool calls, compactions, and session metadata.
 - Runtime context management with budget estimation, automatic compaction, context-length rescue, and normalized tool outputs.
 - Lightweight session-local `update_plan` tool for tracking multi-step work across turns.
 - Built-in tools for shell execution, file operations, web retrieval, planning, and skill discovery.
-- Headless JSONL runtime server and experimental JS frontend CLI for separating terminal input/rendering from the Python agent loop.
+- One headless JSONL Runtime Server shared by both surfaces; Python has no interactive CLI.
 
 ## Quick Start
 
@@ -88,49 +88,27 @@ Minimal `settings.json` example:
 }
 ```
 
-Run diagnostics before starting a session:
-
-```bash
-python main.py --doctor
-```
-
 ### Run
 
-```bash
-python main.py
-```
-
-Resume the latest local session:
-
-```bash
-python main.py -c
-```
-
-Resume a specific session:
-
-```bash
-python main.py --session <session-id>
-```
-
-Experimental JS frontend CLI:
+Frontend CLI:
 
 ```bash
 node frontend-cli/bin/rind.js
 ```
 
-This starts a headless Python runtime over JSONL stdio and keeps terminal input/rendering in Node.js. The existing Python CLI remains available through `python main.py`.
+Desktop app:
 
-## CLI Commands
+```bash
+npm --prefix desktop run dev
+```
 
-| Command | Description |
-| --- | --- |
-| `python main.py` | Start a new interactive agent session. |
-| `python main.py -c` | Resume the latest local session. |
-| `python main.py --session <id>` | Resume a specific session by ID. |
-| `python main.py --debug` | Disable streaming and show detailed runtime/tool diagnostics. |
-| `python main.py --doctor` | Check local setup without requiring a valid API key. |
+The Python entrypoint is the headless Runtime Package used by both surfaces:
 
-Inside the CLI, slash commands provide local controls for diagnostics, sessions, model selection, and status inspection. The input toolbar shows the active session, model, working directory, and key hints.
+```bash
+python main.py app-server --stdio --cwd .
+```
+
+The Runtime Package exposes one JSONL protocol to both surfaces. Session switching, model selection, goals, background tasks, slash commands, and turn control are handled through that protocol; Python does not provide a separate interactive UI.
 
 Project-level `RIND.md` and project skills are resolved from the current working directory where Rind is launched.
 
@@ -140,8 +118,10 @@ Rind follows a layered structure with dependency inversion between the runtime c
 
 ```text
 agent/
+├── runtime/
+│   ├── core/          # Agent runtime, turn runner, stream parsing and pumping
+│   └── server/        # JSONL server façade, protocol, and runtime commands
 ├── application/
-│   ├── runtime/       # Agent runtime, turn runner, stream parsing and pumping
 │   ├── context/       # Context manager, estimation, compaction, token usage
 │   ├── tools/         # Tool execution, processing, guards, result normalization
 │   └── ports/         # Chat client, session store, tool registry abstractions
@@ -151,15 +131,11 @@ agent/
 │   ├── persistence/   # Append-only session records and repositories
 │   ├── planning/      # Session-local plan storage and compact snapshots
 │   └── tools/builtin/ # ToolSpec implementations and build_builtin_tool_specs catalog
-└── interfaces/
-    ├── cli/           # Interactive CLI, slash commands, status UI
-    │   └── commands/features/ # Feature-local slash command registrations
-    ├── runtime_server/# JSONL stdio adapter for headless runtime use
-    └── api/           # FastAPI session streaming adapter
-frontend-cli/          # Experimental Node.js terminal input/rendering process
+frontend-cli/          # Node.js terminal Surface
+desktop/               # Electron desktop Surface
 ```
 
-Runtime and persistence boundaries are documented in [`docs/runtime-and-persistence.md`](docs/runtime-and-persistence.md).
+Runtime and persistence boundaries are documented in [`docs/architecture.md`](docs/architecture.md).
 
 ## Development
 
@@ -175,7 +151,7 @@ Run the test suite:
 pytest test/ -q
 ```
 
-The tests cover runtime events, context budgets, compaction, session persistence, resume behavior, tool result normalization, lightweight plans, skills, CLI rendering, and slash commands.
+The tests cover runtime events, context budgets, compaction, session persistence, resume behavior, tool result normalization, plans, skills, protocol handling, and Surface rendering.
 
 ## Direction
 
