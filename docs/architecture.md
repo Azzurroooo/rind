@@ -14,7 +14,6 @@ flowchart TB
     Bootstrap["agent/bootstrap/container.py"] --> Core
     Bootstrap --> Infrastructure["agent/infrastructure\nLLM、持久化、工具、配置"]
     Infrastructure -. implements .-> Application
-    API["agent/interfaces/api\n可选 HTTP/SSE adapter"] --> Core
 ```
 
 - `domain` 只包含领域模型和标准库逻辑。
@@ -22,9 +21,9 @@ flowchart TB
 - `runtime/core` 是执行核心，拥有 turn 生命周期、输入队列和事件流。
 - `runtime/server` 是统一 Server facade，负责协议分发、能力声明、session/model/goal/background 控制和可复用 command catalog。
 - `infrastructure` 实现 LLM、JSONL session store、工具注册、配置和 workspace 集成。
-- `bootstrap` 是唯一生产组合根；Server 和 API 都通过 `build_agent_container()` 获取依赖。
+- `bootstrap` 是唯一生产组合根；Server 通过 `build_agent_container()` 获取依赖。
 
-`runtime/core` 不导入 `runtime/server`、`interfaces`、`bootstrap` 或具体 infrastructure。Server 与 core 在同一个进程内直接调用，没有内部 RPC 或重复的 runtime dependency object。
+`runtime/core` 不导入 `runtime/server`、`bootstrap` 或具体 infrastructure。Server 与 core 在同一个进程内直接调用，没有内部 RPC 或重复的 runtime dependency object。
 
 ## Runtime Package
 

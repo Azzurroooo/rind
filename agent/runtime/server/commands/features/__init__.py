@@ -2,12 +2,10 @@
 
 from __future__ import annotations
 
-from .clear import COMMAND as CLEAR_COMMAND
 from .compact import COMMAND as COMPACT_COMMAND
 from .config import COMMAND as CONFIG_COMMAND
 from .doctor import COMMAND as DOCTOR_COMMAND
 from .draft import COMMAND as DRAFT_COMMAND
-from .exit import COMMAND as EXIT_COMMAND
 from .help import build_help_command
 from .init import COMMAND as INIT_COMMAND
 from .login import COMMAND as LOGIN_COMMAND
@@ -34,11 +32,9 @@ def build_command_infos() -> tuple[SlashCommandInfo, ...]:
             PLAN_COMMAND,
             COMPACT_COMMAND,
             MODEL_COMMAND,
-            CLEAR_COMMAND,
             DRAFT_COMMAND,
             LOGIN_COMMAND,
             CONFIG_COMMAND,
-            EXIT_COMMAND,
         )
     )
     return tuple(commands)

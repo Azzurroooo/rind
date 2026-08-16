@@ -1,4 +1,4 @@
-"""Help text rendering for CLI slash commands."""
+"""Help text rendering for runtime slash commands."""
 
 from __future__ import annotations
 
@@ -9,7 +9,6 @@ HELP_GROUPS = (
     ("Operate", ("status", "plan", "draft", "compact")),
     ("Explore", ("sessions", "skill", "help")),
     ("Configure", ("model", "config", "doctor", "login")),
-    ("Terminal", ("clear", "exit")),
 )
 
 

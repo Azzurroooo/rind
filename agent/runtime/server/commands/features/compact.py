@@ -25,7 +25,6 @@ async def handle_compact(context: SlashCommandContext, args: list[str]) -> Slash
                 f"- tool calls: {tool_count}",
             ]
         ),
-        context_usage_reset=True,
     )
 
 

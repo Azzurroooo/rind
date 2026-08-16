@@ -4,18 +4,17 @@ import { delimiter, dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
 import log from "electron-log/main"
 
-import { runtimeMethods, type RuntimeEvent, type RuntimeMethod, type RuntimeSnapshot } from "../preload/types"
-
-type RuntimeMessage = {
-  kind?: "response" | "event"
-  request_id?: string | number
-  result?: unknown
-  error?: { message?: string; type?: string }
-  event?: Record<string, unknown>
-  sequence?: number
-  session_id?: string
-  turn_id?: string
-}
+import {
+  runtimeMethods,
+  runtimeProtocolVersion,
+  type RuntimeEvent,
+  type RuntimeEventEnvelope,
+  type RuntimeMethod,
+  type RuntimeRequestEnvelope,
+  type RuntimeResponseEnvelope,
+  type RuntimeServerMethod,
+  type RuntimeSnapshot,
+} from "../preload/types"
 
 type PendingRequest = {
   resolve: (value: unknown) => void
@@ -99,15 +98,15 @@ function runtimeExitError(code: number | null, signal: NodeJS.Signals | null, st
 }
 
 function handleLine(worker: RuntimeWorker, line: string) {
-  let message: RuntimeMessage
+  let message: unknown
   try {
-    message = JSON.parse(line) as RuntimeMessage
+    message = JSON.parse(line)
   } catch {
     log.warn("runtime emitted invalid JSON", line)
     return
   }
 
-  if (message.kind === "event" && message.event) {
+  if (isRuntimeEventEnvelope(message)) {
     const type = String(message.event.type || "")
     if (type === "turn_started") {
       worker.turnActive = true
@@ -120,15 +119,16 @@ function handleLine(worker: RuntimeWorker, line: string) {
     for (const listener of eventListeners) listener({
       runtimeId: worker.id,
       type,
-      sequence: Number(message.sequence || 0),
-      sessionId: String(message.session_id || worker.sessionId || ""),
-      turnId: String(message.turn_id || ""),
+      sequence: message.sequence,
+      durability: message.durability,
+      sessionId: message.session_id || worker.sessionId || "",
+      turnId: message.turn_id,
       event: message.event,
     })
     if (type === "turn_completed" || type === "turn_failed" || type === "turn_cancelled") scheduleIdleShutdown(worker)
     return
   }
-  if (message.kind !== "response" || message.request_id === undefined) return
+  if (!isRuntimeResponseEnvelope(message)) return
   const requestId = String(message.request_id)
   const request = worker.pending.get(requestId)
   if (!request) return
@@ -229,17 +229,17 @@ export function startRuntime(id: string, workspace: string, sessionId?: string) 
   return worker.snapshot
 }
 
-function request(worker: RuntimeWorker, method: RuntimeMethod | "initialize" | "shutdown", params: Record<string, unknown> = {}, timeoutMs = 30_000) {
+function request(worker: RuntimeWorker, method: RuntimeServerMethod, params: Record<string, unknown> = {}, timeoutMs = 30_000) {
   if (!worker.child?.stdin.writable) return Promise.reject(new Error("Runtime is not running."))
   const requestId = `desktop-${++worker.requestSequence}`
-  const message = JSON.stringify({ kind: "request", request_id: requestId, method, params }) + "\n"
+  const message: RuntimeRequestEnvelope = { kind: "request", request_id: requestId, method, params }
   return new Promise<unknown>((resolve, reject) => {
     const timer = setTimeout(() => {
       worker.pending.delete(requestId)
       reject(new Error(`Runtime request timed out: ${method}.`))
     }, timeoutMs)
     worker.pending.set(requestId, { resolve, reject, timer })
-    worker.child?.stdin.write(message, (error) => {
+    worker.child?.stdin.write(`${JSON.stringify(message)}\n`, (error) => {
       if (!error) return
       clearTimeout(timer)
       worker.pending.delete(requestId)
@@ -263,11 +263,10 @@ export async function initializeRuntime(id: string) {
 
 async function initializeWorker(worker: RuntimeWorker) {
   try {
-    const result = await request(worker, "initialize")
-    const initialized = result && typeof result === "object" ? result as Record<string, unknown> : undefined
-    if (initialized && typeof initialized.session_id === "string" && initialized.session_id) worker.sessionId = initialized.session_id
+    const initialized = requireRuntimeInitialization(await request(worker, "initialize"))
+    if (typeof initialized.session_id === "string" && initialized.session_id) worker.sessionId = initialized.session_id
     setSnapshot(worker, { status: "ready" })
-    return result
+    return initialized
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
     if (worker.snapshot.status !== "error") setSnapshot(worker, { status: "error", message })
@@ -352,4 +351,47 @@ export function subscribeRuntimeEvents(listener: (event: RuntimeEvent) => void) 
 
 export function getRuntimeSnapshots() {
   return [...workers.values()].map((worker) => worker.snapshot)
+}
+
+function isRuntimeResponseEnvelope(message: unknown): message is RuntimeResponseEnvelope {
+  const value = asRecord(message)
+  return value?.kind === "response"
+    && isRequestId(value.request_id)
+    && (Object.hasOwn(value, "result") || isRuntimeError(value.error))
+}
+
+function isRuntimeEventEnvelope(message: unknown): message is RuntimeEventEnvelope {
+  const value = asRecord(message)
+  return value?.kind === "event"
+    && value.method === "session/update"
+    && Number.isInteger(value.sequence)
+    && (value.durability === "durable" || value.durability === "incremental")
+    && typeof value.session_id === "string"
+    && typeof value.turn_id === "string"
+    && asRecord(value.event) !== undefined
+}
+
+function requireRuntimeInitialization(result: unknown): Record<string, unknown> {
+  const value = asRecord(result)
+  if (!value || value.protocol_version !== runtimeProtocolVersion) {
+    const received = value ? String(value.protocol_version || "missing") : "invalid"
+    throw new Error(`Unsupported Runtime protocol version: ${received}.`)
+  }
+  if (!Array.isArray(value.capabilities) || !Array.isArray(value.methods)) {
+    throw new Error("Runtime initialization response is missing capabilities or methods.")
+  }
+  return value
+}
+
+function isRequestId(value: unknown): value is string | number {
+  return (typeof value === "string" && value.trim().length > 0) || (typeof value === "number" && Number.isFinite(value))
+}
+
+function isRuntimeError(value: unknown): value is { type: string; message: string } {
+  const error = asRecord(value)
+  return error !== undefined && typeof error.type === "string" && typeof error.message === "string"
+}
+
+function asRecord(value: unknown): Record<string, unknown> | undefined {
+  return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : undefined
 }

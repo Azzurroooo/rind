@@ -11,7 +11,7 @@ import { createCompactContextState } from "./compact-context-state.js";
 import { prepareComposerFrame } from "./composer-terminal.js";
 import { createLineEditor } from "./line-editor.js";
 import { createRuntimeClient, runHelpVersion } from "./runtime-client.js";
-import { runtimeMethods } from "./runtime-protocol.js";
+import { requireRuntimeInitialization, runtimeMethods } from "./runtime-protocol.js";
 import { createTurnController } from "./turn-controller.js";
 import { createCommandController } from "./command-controller.js";
 import { createTaskMonitorController } from "./task-monitor-controller.js";
@@ -192,7 +192,6 @@ const commandController = createCommandController({
   output: {
     log: logOutput,
     clearScreen: () => suspendPrompt(() => console.clear()),
-    resetContextUsage,
     setInputPrefill: (value) => {
       pendingInputPrefill = value;
     },
@@ -279,9 +278,12 @@ const inputController = createInputController({
 process.on("SIGINT", handleSigint);
 
 try {
-  const info = await request(runtimeMethods.initialize);
+  const info = requireRuntimeInitialization(await request(runtimeMethods.initialize));
   sessionInfo = { cwd: process.cwd(), ...(info || {}) };
-  slashCommands = commandController.normalizeCommands(info?.commands);
+  slashCommands = [
+    ...commandController.normalizeCommands(info?.commands),
+    ...commandController.localCommands(),
+  ];
   if (terminalUi) {
     inputController.start();
   } else {

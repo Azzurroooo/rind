@@ -20,6 +20,16 @@ class SessionStore(Protocol):
     def system_prompt(self) -> str:
         ...
 
+    @property
+    def session_root(self) -> str:
+        """Return the canonical root used to persist sessions."""
+        ...
+
+    @property
+    def session_base_path(self) -> str | None:
+        """Return the active session directory when a session is bound."""
+        ...
+
     def now_iso(self) -> str:
         ...
 

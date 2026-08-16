@@ -15,12 +15,12 @@
 <p align="center">
   <img src="https://img.shields.io/badge/Python-3.12+-blue.svg" alt="Python 3.12+" />
   <img src="https://img.shields.io/badge/Architecture-layered-success.svg" alt="Layered architecture" />
-  <img src="https://img.shields.io/badge/Interface-CLI-informational.svg" alt="CLI interface" />
+  <img src="https://img.shields.io/badge/Surfaces-CLI%20%2B%20Desktop-informational.svg" alt="CLI 与 Desktop 界面" />
 </p>
 
 ## Rind 是什么？
 
-Rind 是一个标准 Python 版本的自主编码 Agent 实现。它既可以作为本地 CLI 工具直接使用，也希望成为一个足够清晰的参考样本：展示一个 Agent 运行时可以如何被拆解、组织、持久化和恢复。
+Rind 是一个轻量编码 Agent，提供 Node.js 前端 CLI 和 Electron Desktop 两个产品界面。二者共享同一套 Python Runtime Package；该实现也可作为理解紧凑 Agent 运行时的参考样本。
 
 这个项目的基本判断是：Agent 不必先成为庞大的框架，才能成为可靠的工具。Rind 尽量保持结构清楚、工具契约克制、运行状态可追踪。从上下文压缩到工具执行，每个部件都以尽可能小的形式实现，同时不牺牲交互体验和工程可维护性。
 
@@ -31,17 +31,17 @@ Rind 是一个标准 Python 版本的自主编码 Agent 实现。它既可以作
 - **把上下文当作运行时状态**：上下文估算、自动压缩和工具结果归一化不是提示词附属品，而是运行时的核心职责。
 - **本地优先，可持续恢复**：会话、消息、工具调用、压缩记录和元数据都以 append-only 的本地记录保存，便于中断后继续工作。
 - **标准 Python，而非框架惯性**：项目使用普通 Python 模块、依赖倒置、异步编排和聚焦的服务层，避免把简单问题包裹进过重的框架。
-- **默认好用，机制可见**：CLI 追求直接可用，同时在需要时展示模型、会话、工作目录、状态和诊断信息。
+- **默认好用，机制可见**：两个界面都在需要时展示模型、会话、工作目录、状态和诊断信息。
 
 ## 能力概览
 
-- 交互式编码 Agent CLI，支持流式输出、斜杠命令、会话恢复、状态渲染和本地诊断。
+- 前端 CLI 和 Desktop 界面，支持流式输出、斜杠命令、会话恢复、状态渲染和本地诊断。
 - OpenAI 兼容的异步 Chat Client，支持配置模型、base URL 和 reasoning effort。
 - 基于 JSONL 的 append-only 会话存储，记录消息、工具调用、压缩结果和会话元数据。
 - 运行时上下文管理，包含预算估算、自动压缩、上下文长度救援和工具结果归一化。
 - 轻量的 session-local `update_plan` 工具，用于跨轮次追踪多步骤任务。
 - 内置 Shell、文件、网页、计划和技能发现等工具。
-- 无头 JSONL runtime server 和实验性 JS 前端 CLI，用于把终端输入/渲染与 Python Agent 主循环分离。
+- 唯一的无头 JSONL Runtime Server 为两个界面服务；Python 不再提供交互式 CLI。
 
 ## 快速开始
 
@@ -131,15 +131,11 @@ agent/
 │   ├── persistence/   # append-only 会话记录与仓储
 │   ├── planning/      # session-local 计划存储和 compact 快照
 │   └── tools/builtin/ # ToolSpec 实现与 build_builtin_tool_specs catalog
-└── interfaces/
-    ├── cli/           # 交互式 CLI、斜杠命令、状态 UI
-    │   └── commands/features/ # 按功能注册 slash command
-    ├── runtime/server/# 无头 runtime 的 JSONL stdio 适配器
-    └── api/           # FastAPI 会话流式适配器
-frontend-cli/          # 实验性 Node.js 终端输入/渲染进程
+frontend-cli/          # Node.js 终端 Surface
+desktop/               # Electron Desktop Surface
 ```
 
-运行时与持久化边界见 [`docs/runtime-and-persistence.md`](docs/runtime-and-persistence.md)。
+运行时与持久化边界见 [`docs/architecture.md`](docs/architecture.md)。
 
 ## 开发
 
@@ -155,7 +151,7 @@ pip install -r requirements.txt
 pytest test/ -q
 ```
 
-测试覆盖运行时事件、上下文预算、压缩、会话持久化、恢复行为、工具结果归一化、计划、技能、CLI 渲染和斜杠命令。
+测试覆盖运行时事件、上下文预算、压缩、会话持久化、恢复行为、工具结果归一化、计划、技能、协议处理和 Surface 渲染。
 
 ## 展望
 

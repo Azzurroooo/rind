@@ -974,11 +974,14 @@ async function sendPrompt() {
   render()
 }
 
-async function startTurn(input: string, runtimeId = currentRuntimeId()) {
+async function startTurn(input: string, runtimeId = currentRuntimeId(), transientSystemMessages?: unknown) {
   state.runtimeTurnPending[runtimeId] = true
   render()
   try {
-    return asRecord(await request(runtimeMethods.sessionPrompt, { input }, runtimeId))
+    return asRecord(await request(runtimeMethods.sessionPrompt, {
+      input,
+      ...(Array.isArray(transientSystemMessages) ? { transient_system_messages: transientSystemMessages } : {}),
+    }, runtimeId))
   } finally {
     state.runtimeTurnPending[runtimeId] = false
     render()
@@ -1004,16 +1007,19 @@ async function runSlash(input: string) {
       entries: [...state.conversation.entries, { kind: "notice", id: `slash-${Date.now()}`, label: input, content: text }],
     }
   }
-  const prefill = typeof result.input_prefill === "string" ? result.input_prefill : ""
+  const prefill = typeof result.prompt_prefill === "string" ? result.prompt_prefill : ""
   if (prefill) {
     prompt.value = prefill
     autoGrowPrompt()
     prompt.focus()
   }
-  const followUp = typeof result.run_turn_input === "string" ? result.run_turn_input.trim() : ""
+  const nextPrompt = result.next_prompt && typeof result.next_prompt === "object"
+    ? result.next_prompt as Record<string, unknown>
+    : null
+  const followUp = typeof nextPrompt?.input === "string" ? nextPrompt.input.trim() : ""
   if (followUp) {
     state.conversation = addUserMessage(state.conversation, followUp)
-    const turn = await startTurn(followUp, runtimeId)
+    const turn = await startTurn(followUp, runtimeId, nextPrompt?.transient_system_messages)
     if (typeof turn.session_id === "string" && turn.session_id) {
       adoptRuntimeSession(runtimeId, turn.session_id)
       await loadSessions()

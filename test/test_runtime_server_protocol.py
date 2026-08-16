@@ -20,7 +20,7 @@ from agent.runtime.server.stdio import (
     configure_utf8_stdio,
 )
 from agent.runtime.server.commands import SlashCommandInfo, SlashCommandRouter
-from agent.runtime.server.protocol import CAPABILITIES, CORE_METHODS, RuntimeMethod, event_envelope
+from agent.runtime.server.protocol import CAPABILITIES, CORE_METHODS, RuntimeMethod, event_envelope, validate_request
 from agent.infrastructure.config import Config
 
 
@@ -154,6 +154,14 @@ def test_event_envelope_separates_durable_and_incremental_events():
     assert event_envelope({"type": "assistant_delta"}, 1)["durability"] == "incremental"
     assert event_envelope({"type": "tool_input_delta"}, 2)["durability"] == "incremental"
     assert event_envelope({"type": "tool_result"}, 2)["durability"] == "durable"
+
+
+def test_request_validation_requires_the_standard_envelope() -> None:
+    assert validate_request({"kind": "request", "request_id": 1, "method": "initialize"}) is None
+    assert validate_request({"request_id": 1, "method": "initialize"}) == 'kind must be "request".'
+    assert validate_request({"kind": "request", "request_id": None, "method": "initialize"}) == "request_id is required."
+    assert validate_request({"kind": "request", "request_id": 1, "method": "", "params": {}}) == "method is required."
+    assert validate_request({"kind": "request", "request_id": 1, "method": "initialize", "params": []}) == "params must be an object."
 
 
 def test_turn_response_contains_session_and_turn_ids(capsys):
@@ -482,10 +490,7 @@ def test_slash_execute_reuses_cli_router(capsys):
 
     message = json.loads(capsys.readouterr().out)
     result = message["result"]
-    assert result["should_exit"] is False
-    assert result["clear_screen"] is False
-    assert result["context_usage_reset"] is True
-    assert result["display"] is None
+    assert set(result) == {"text"}
     assert result["text"].startswith("Compact complete.")
 
 
@@ -497,7 +502,6 @@ def test_slash_execute_non_compact_does_not_reset_context_usage(capsys):
     asyncio.run(run())
 
     message = json.loads(capsys.readouterr().out)
-    assert message["result"]["context_usage_reset"] is False
     assert message["result"]["display"]["type"] == "help"
 
 
@@ -948,8 +952,7 @@ def test_slash_execute_exposes_cancellation_token_to_interrupt(capsys):
     assert runtime.received_token.is_cancelled is True
     message = json.loads(capsys.readouterr().out)
     assert message["result"]["text"] == "Compact cancelled."
-    assert message["result"]["context_usage_reset"] is False
-    assert message["result"]["display"] is None
+    assert set(message["result"]) == {"text"}
 
 
 def test_models_list_returns_unique_sorted_models_and_current_marker(capsys):

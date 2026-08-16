@@ -17,14 +17,16 @@ async def handle_init(context: SlashCommandContext, args: list[str]) -> SlashCom
     prompt = build_rind_init_prompt(scope, str(target))
     return SlashCommandResult(
         text=f"Initializing {scope} RIND.md: {target}",
-        run_turn_input=f"Initialize {scope} RIND.md at {target}",
-        transient_system_messages=[
-            {
-                "role": "system",
-                "content": prompt,
-                "_context_kind": "rind_init",
-            }
-        ],
+        next_prompt={
+            "input": f"Initialize {scope} RIND.md at {target}",
+            "transient_system_messages": [
+                {
+                    "role": "system",
+                    "content": prompt,
+                    "_context_kind": "rind_init",
+                }
+            ],
+        },
     )
 
 

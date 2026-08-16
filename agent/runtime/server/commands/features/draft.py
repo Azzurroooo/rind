@@ -15,7 +15,7 @@ async def handle_draft(context: SlashCommandContext, args: list[str]) -> str | S
         draft = _read_draft(path)
         if draft is None:
             return "No saved input draft."
-        return SlashCommandResult("Draft loaded into the next prompt.", input_prefill=draft)
+        return SlashCommandResult("Draft loaded into the next prompt.", prompt_prefill=draft)
     if path is None or not path.exists():
         return "No saved input draft."
     draft = _read_draft(path)
@@ -50,14 +50,8 @@ def _read_draft(path: Path | None) -> str | None:
 
 
 def _session_base_path(session) -> Path | None:
-    paths = getattr(session, "_session_paths", None)
-    if isinstance(paths, dict) and paths.get("base"):
-        return Path(str(paths["base"]))
-    root = getattr(session, "_session_root", None)
-    session_id = getattr(session, "session_id", None)
-    if root and session_id:
-        return Path(str(root)) / str(session_id)
-    return None
+    path = getattr(session, "session_base_path", None)
+    return Path(str(path)) if path else None
 
 
 COMMAND = SlashCommandInfo(

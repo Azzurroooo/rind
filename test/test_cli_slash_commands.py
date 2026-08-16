@@ -123,11 +123,8 @@ async def test_help_returns_command_list() -> None:
     assert "Show session status" in result.text
     assert "/doctor" in result.text
     assert "/skill" in result.text
-    assert "/clear" in result.text
     assert "/draft" in result.text
-    assert "alias: /quit" in result.text
     assert "Use `/help <command>` for usage." in result.text
-    assert result.should_exit is False
     assert result.display is not None
     assert result.display["type"] == "help"
     assert any(command["name"] == "status" for command in result.display["commands"])
@@ -144,15 +141,6 @@ async def test_help_returns_command_specific_usage() -> None:
     assert result.display is not None
     assert result.display["type"] == "help"
     assert result.display["command"]["name"] == "model"
-
-
-@pytest.mark.asyncio
-async def test_help_accepts_command_alias() -> None:
-    result = await SlashCommandRouter().execute("/help quit", _context())
-
-    assert result.text.startswith("# /exit")
-    assert "Aliases" in result.text
-    assert "/quit" in result.text
 
 
 @pytest.mark.asyncio
@@ -188,7 +176,8 @@ def test_router_exposes_command_descriptions() -> None:
     assert [info.name for info in infos] == sorted(descriptions)
     assert descriptions["status"] == "Show session status"
     assert descriptions["model"] == "Show or change the active model"
-    assert descriptions["clear"] == "Clear terminal output"
+    assert "clear" not in descriptions
+    assert "exit" not in descriptions
     assert descriptions["draft"] == "Show, reuse, or clear saved input draft"
     assert descriptions["team"] == "Create a Team project"
     assert usages["sessions"] == "/sessions [limit]"
@@ -547,7 +536,7 @@ async def test_login_mentions_shared_settings_path() -> None:
 @pytest.mark.asyncio
 async def test_doctor_reports_setup_without_leaking_api_key(monkeypatch, tmp_path) -> None:
     class SessionWithRoot(FakeSession):
-        _session_root = tmp_path / "sessions"
+        session_root = tmp_path / "sessions"
 
     monkeypatch.setattr(Config, "OPENAI_API_KEY", "secret-value")
     monkeypatch.setattr(Config, "OPENAI_API_BASE", "https://example.com/v1")
@@ -648,33 +637,9 @@ async def test_compact_passes_cancellation_token_to_runtime() -> None:
 
 
 @pytest.mark.asyncio
-async def test_exit_requests_cli_exit() -> None:
-    result = await SlashCommandRouter().execute("/exit", _context())
-
-    assert result.should_exit is True
-
-
-@pytest.mark.asyncio
-async def test_clear_requests_screen_clear() -> None:
-    result = await SlashCommandRouter().execute("/clear", _context())
-
-    assert result.clear_screen is True
-    assert result.should_exit is False
-    assert result.text == ""
-
-
-@pytest.mark.asyncio
-async def test_clear_rejects_extra_args() -> None:
-    result = await SlashCommandRouter().execute("/clear now", _context())
-
-    assert result.clear_screen is False
-    assert result.text == "Usage: /clear"
-
-
-@pytest.mark.asyncio
 async def test_draft_shows_saved_input_draft(tmp_path) -> None:
     class DraftSession(FakeSession):
-        _session_paths = {"base": str(tmp_path / "session_1")}
+        session_base_path = tmp_path / "session_1"
 
     base = tmp_path / "session_1"
     base.mkdir()
@@ -690,7 +655,7 @@ async def test_draft_shows_saved_input_draft(tmp_path) -> None:
 @pytest.mark.asyncio
 async def test_draft_reports_missing_draft(tmp_path) -> None:
     class DraftSession(FakeSession):
-        _session_paths = {"base": str(tmp_path / "session_1")}
+        session_base_path = tmp_path / "session_1"
 
     result = await SlashCommandRouter().execute("/draft", _context(session=DraftSession()))
 
@@ -700,7 +665,7 @@ async def test_draft_reports_missing_draft(tmp_path) -> None:
 @pytest.mark.asyncio
 async def test_draft_clear_removes_saved_input_draft(tmp_path) -> None:
     class DraftSession(FakeSession):
-        _session_paths = {"base": str(tmp_path / "session_1")}
+        session_base_path = tmp_path / "session_1"
 
     base = tmp_path / "session_1"
     base.mkdir()
@@ -716,7 +681,7 @@ async def test_draft_clear_removes_saved_input_draft(tmp_path) -> None:
 @pytest.mark.asyncio
 async def test_draft_use_loads_saved_input_draft(tmp_path) -> None:
     class DraftSession(FakeSession):
-        _session_paths = {"base": str(tmp_path / "session_1")}
+        session_base_path = tmp_path / "session_1"
 
     base = tmp_path / "session_1"
     base.mkdir()
@@ -725,7 +690,7 @@ async def test_draft_use_loads_saved_input_draft(tmp_path) -> None:
     result = await SlashCommandRouter().execute("/draft use", _context(session=DraftSession()))
 
     assert result.text == "Draft loaded into the next prompt."
-    assert result.input_prefill == "continue this prompt"
+    assert result.prompt_prefill == "continue this prompt"
 
 
 @pytest.mark.asyncio
@@ -859,10 +824,10 @@ async def test_init_project_returns_turn_payload(tmp_path, monkeypatch) -> None:
     result = await SlashCommandRouter().execute("/init", _context())
 
     assert "Initializing project RIND.md" in result.text
-    assert result.run_turn_input.startswith("Initialize project RIND.md")
-    assert str(project / "RIND.md") in result.run_turn_input
-    assert result.transient_system_messages
-    prompt = result.transient_system_messages[0]["content"]
+    assert result.next_prompt["input"].startswith("Initialize project RIND.md")
+    assert str(project / "RIND.md") in result.next_prompt["input"]
+    assert result.next_prompt["transient_system_messages"]
+    prompt = result.next_prompt["transient_system_messages"][0]["content"]
     assert "project-level Rind context document" in prompt
     assert str(project / "RIND.md") in prompt
     assert "Do not modify the other RIND.md level." in prompt
@@ -878,9 +843,9 @@ async def test_init_project_uses_cwd_not_parent_git_root(tmp_path, monkeypatch) 
 
     result = await SlashCommandRouter().execute("/init project", _context())
 
-    assert str(nested / "RIND.md") in result.run_turn_input
-    assert str(project / "RIND.md") not in result.run_turn_input
-    prompt = result.transient_system_messages[0]["content"]
+    assert str(nested / "RIND.md") in result.next_prompt["input"]
+    assert str(project / "RIND.md") not in result.next_prompt["input"]
+    prompt = result.next_prompt["transient_system_messages"][0]["content"]
     assert str(nested / "RIND.md") in prompt
 
 
@@ -893,9 +858,9 @@ async def test_init_user_returns_turn_payload(tmp_path, monkeypatch) -> None:
     result = await SlashCommandRouter().execute("/init user", _context())
 
     assert "Initializing user RIND.md" in result.text
-    assert result.run_turn_input.startswith("Initialize user RIND.md")
-    assert str(user_home / "RIND.md") in result.run_turn_input
-    prompt = result.transient_system_messages[0]["content"]
+    assert result.next_prompt["input"].startswith("Initialize user RIND.md")
+    assert str(user_home / "RIND.md") in result.next_prompt["input"]
+    prompt = result.next_prompt["transient_system_messages"][0]["content"]
     assert "user-level Rind context document" in prompt
     assert "Do not copy project facts into the user-level file." in prompt
 
@@ -905,7 +870,7 @@ async def test_init_rejects_invalid_scope() -> None:
     result = await SlashCommandRouter().execute("/init all", _context())
 
     assert result.text == "Usage: /init [project|user]"
-    assert result.run_turn_input == ""
+    assert result.next_prompt is None
 
 
 @pytest.mark.asyncio
@@ -948,7 +913,6 @@ def main() -> int:
     test_router_exposes_command_descriptions()
     asyncio.run(test_help_returns_command_list())
     asyncio.run(test_help_returns_command_specific_usage())
-    asyncio.run(test_help_accepts_command_alias())
     asyncio.run(test_help_reports_unknown_command())
     asyncio.run(test_help_rejects_too_many_args())
     asyncio.run(test_unknown_command_returns_friendly_error())
@@ -959,10 +923,7 @@ def main() -> int:
     asyncio.run(test_model_rejects_invalid_set_args())
     asyncio.run(test_compact_calls_runtime_compact_context())
     asyncio.run(test_compact_passes_cancellation_token_to_runtime())
-    asyncio.run(test_clear_requests_screen_clear())
-    asyncio.run(test_clear_rejects_extra_args())
     asyncio.run(test_draft_rejects_invalid_args())
-    asyncio.run(test_exit_requests_cli_exit())
     print("CLI slash command tests passed.")
     return 0
 

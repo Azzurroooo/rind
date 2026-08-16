@@ -2,7 +2,13 @@ import { spawn, spawnSync } from "node:child_process";
 import path from "node:path";
 
 import { buildRuntimeEnv } from "./runtime-env.js";
-import { createRuntimeRequest, runtimeMethods, runtimeRequestId } from "./runtime-protocol.js";
+import {
+  createRuntimeRequest,
+  isRuntimeEvent,
+  isRuntimeResponse,
+  runtimeMethods,
+  runtimeRequestId,
+} from "./runtime-protocol.js";
 
 export function resolveRuntimeLaunch({ python, repoRoot, runtimePath = "", cliArgs = [] }) {
   const executable = runtimePath
@@ -120,11 +126,11 @@ export function createRuntimeClient({
     } catch {
       return;
     }
-    if (message.kind === "response") {
+    if (isRuntimeResponse(message)) {
       finishRequest(message);
       return;
     }
-    if (message.kind === "event") {
+    if (isRuntimeEvent(message)) {
       handleEvent(message);
     }
   }

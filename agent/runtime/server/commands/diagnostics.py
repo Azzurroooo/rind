@@ -1,4 +1,4 @@
-"""Read-only CLI diagnostics for common setup problems."""
+"""Read-only runtime diagnostics for common setup problems."""
 
 from __future__ import annotations
 
@@ -176,16 +176,8 @@ def _settings_path_guess() -> str:
 
 
 def _session_root(session) -> Path | None:
-    raw_root = getattr(session, "_session_root", None)
-    if raw_root:
-        return Path(str(raw_root)).expanduser()
-    raw_dir = getattr(session, "_session_dir", None)
-    try:
-        from agent.infrastructure.persistence.jsonl_session_store import JsonlSessionStore
-
-        return Path(JsonlSessionStore.resolve_session_root(str(raw_dir) if raw_dir else None))
-    except Exception:
-        return Path(str(raw_dir)).expanduser() if raw_dir else None
+    root = getattr(session, "session_root", None)
+    return Path(str(root)).expanduser() if root else None
 
 
 def _nearest_existing_parent(path: Path) -> Path | None:

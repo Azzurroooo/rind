@@ -26,6 +26,7 @@ from agent.runtime.server.protocol import (
     error_message,
     event_envelope,
     response_message,
+    validate_request,
 )
 
 
@@ -556,19 +557,7 @@ class StdioRuntimeServer:
         except asyncio.CancelledError:
             if not cancel_source.token.is_cancelled:
                 raise
-            await self._respond(
-                request,
-                {
-                    "text": "Compact cancelled.",
-                    "should_exit": False,
-                    "clear_screen": False,
-                    "input_prefill": "",
-                    "run_turn_input": "",
-                    "transient_system_messages": None,
-                    "context_usage_reset": False,
-                    "display": None,
-                },
-            )
+            await self._respond(request, SlashCommandResult("Compact cancelled.").to_dict())
         finally:
             self._current_cancel = None
             cancel_source.dispose()
@@ -578,7 +567,7 @@ class StdioRuntimeServer:
         if parse_error is not None:
             await self._respond_error({}, parse_error, "ParseError")
             return
-        request_error = self._validate_request(message)
+        request_error = validate_request(message)
         if request_error is not None:
             await self._respond_error(message, request_error, "InvalidRequest")
             return
@@ -596,24 +585,6 @@ class StdioRuntimeServer:
         if not isinstance(value, dict):
             return {}, "JSONL request must be an object."
         return value, None
-
-    def _validate_request(self, request: dict[str, Any]) -> str | None:
-        if request.get("kind") != "request":
-            return 'kind must be "request".'
-        request_id = request.get("request_id")
-        if isinstance(request_id, bool) or request_id is None:
-            return "request_id is required."
-        if isinstance(request_id, str) and not request_id.strip():
-            return "request_id must not be empty."
-        if not isinstance(request_id, str | int | float):
-            return "request_id must be a string or number."
-        method = request.get("method")
-        if not isinstance(method, str) or not method.strip():
-            return "method is required."
-        params = request.get("params")
-        if params is not None and not isinstance(params, dict):
-            return "params must be an object."
-        return None
 
     async def _handle_control_message(self, message: dict[str, Any]) -> bool:
         method = str(message.get("method") or "")
@@ -760,19 +731,7 @@ class StdioRuntimeServer:
             await self._respond_error(request, str(exc), type(exc).__name__)
 
     async def _respond_slash_result(self, request: dict[str, Any], result: SlashCommandResult) -> None:
-        await self._respond(
-            request,
-            {
-                "text": result.text,
-                "should_exit": result.should_exit,
-                "clear_screen": result.clear_screen,
-                "input_prefill": result.input_prefill,
-                "run_turn_input": result.run_turn_input,
-                "transient_system_messages": result.transient_system_messages,
-                "context_usage_reset": result.context_usage_reset,
-                "display": result.display,
-            },
-        )
+        await self._respond(request, result.to_dict())
 
     def _interrupt_current(self) -> bool:
         interrupted = False

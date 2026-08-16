@@ -12,10 +12,13 @@ export type RuntimeEvent = {
   runtimeId: string
   type: string
   sequence: number
+  durability: "durable" | "incremental"
   sessionId: string
   turnId: string
   event: Record<string, unknown>
 }
+
+export const runtimeProtocolVersion = "2"
 
 export const runtimeMethods = {
   sessionList: "session/list",
@@ -34,6 +37,37 @@ export const runtimeMethods = {
 } as const
 
 export type RuntimeMethod = typeof runtimeMethods[keyof typeof runtimeMethods]
+export type RuntimeLifecycleMethod = "initialize" | "shutdown"
+export type RuntimeServerMethod = RuntimeMethod | RuntimeLifecycleMethod
+
+export type RuntimeRequestEnvelope = {
+  kind: "request"
+  request_id: string | number
+  method: RuntimeServerMethod
+  params: Record<string, unknown>
+}
+
+export type RuntimeError = {
+  type: string
+  message: string
+}
+
+export type RuntimeResponseEnvelope = {
+  kind: "response"
+  request_id: string | number
+  result?: unknown
+  error?: RuntimeError
+}
+
+export type RuntimeEventEnvelope = {
+  kind: "event"
+  method: "session/update"
+  sequence: number
+  durability: "durable" | "incremental"
+  session_id: string
+  turn_id: string
+  event: Record<string, unknown>
+}
 
 export type DesktopSettings = {
   model: string

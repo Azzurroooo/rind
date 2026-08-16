@@ -23,16 +23,25 @@ class SlashCommandContext:
 @dataclass(slots=True)
 class SlashCommandResult:
     text: str = ""
-    should_exit: bool = False
-    clear_screen: bool = False
-    input_prefill: str = ""
-    run_turn_input: str = ""
-    transient_system_messages: list[dict] | None = None
-    context_usage_reset: bool = False
     display: dict[str, Any] | None = None
+    prompt_prefill: str = ""
+    next_prompt: dict[str, Any] | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        result: dict[str, Any] = {"text": self.text}
+        if self.display is not None:
+            result["display"] = self.display
+        if self.prompt_prefill:
+            result["prompt_prefill"] = self.prompt_prefill
+        if self.next_prompt is not None:
+            result["next_prompt"] = self.next_prompt
+        return result
 
 
-Handler = Callable[[SlashCommandContext, list[str]], str | SlashCommandResult | Awaitable[str | SlashCommandResult]]
+Handler = Callable[
+    [SlashCommandContext, list[str]],
+    str | SlashCommandResult | Awaitable[str | SlashCommandResult],
+]
 
 @dataclass(frozen=True, slots=True)
 class SlashCommandInfo:
@@ -44,7 +53,7 @@ class SlashCommandInfo:
 
 
 class SlashCommandRouter:
-    """Parse and dispatch CLI slash commands."""
+    """Parse and dispatch runtime slash commands."""
 
     def __init__(self, command_infos: Iterable[SlashCommandInfo] | None = None):
         if command_infos is None:
@@ -66,7 +75,7 @@ class SlashCommandRouter:
         try:
             invocations = self._skill_invocation_parser.parse(raw_input or "")
             if invocations and invocations[0].syntax == "slash":
-                return SlashCommandResult(run_turn_input=raw_input)
+                return SlashCommandResult(next_prompt={"input": raw_input})
             name, args = self._parse(raw_input)
             info = self._commands_by_name.get(name)
             if info is None:
