@@ -17,7 +17,7 @@ import {
   reduceEvent,
   relativeTime,
 } from "../src/renderer/timeline-model.ts"
-import { composerRegionMarkup, syncPlanDockSession } from "../src/renderer/composer-region.ts"
+import { composerRegionMarkup, renderComposer, syncPlanDockSession } from "../src/renderer/composer-region.ts"
 import { highlightFile } from "../src/renderer/syntax-highlight.ts"
 
 function event(type, data = {}, turnId = "turn-1") {
@@ -316,6 +316,45 @@ test("composer region keeps plan dock above a persistent input form", () => {
   assert.match(markup, /id="slash-command-menu" class="slash-command-menu" role="listbox"/)
   assert.match(markup, /aria-controls="slash-command-menu"/)
   assert.match(markup, /class="send-spinner"/)
+})
+
+test("composer exposes slash command work and blocks overlapping input", () => {
+  const sendLabel = { textContent: "" }
+  const compactLabel = { textContent: "" }
+  const elements = {
+    prompt: { disabled: false, placeholder: "", setAttribute() {}, style: {} },
+    send: {
+      disabled: false,
+      title: "",
+      classList: { toggle() {} },
+      setAttribute() {},
+      querySelector: () => sendLabel,
+    },
+    steer: { disabled: false },
+    interrupt: { disabled: false },
+    menuTrigger: { disabled: false, setAttribute() {} },
+    menu: { hidden: false },
+    compactContext: { disabled: false, querySelector: () => compactLabel },
+    slashCommandMenu: {},
+    contextMeter: { hidden: false, textContent: "", classList: { toggle() {} } },
+  }
+  renderComposer(elements, {
+    ready: true,
+    active: false,
+    readOnly: false,
+    starting: false,
+    controllingTurn: false,
+    runtimeSessionId: "session-1",
+    composerMenuOpen: false,
+    compacting: false,
+    slashCommandPending: true,
+    slashCommandInput: "/status",
+    contextUsagePercent: null,
+  })
+  assert.equal(elements.prompt.disabled, true)
+  assert.equal(elements.prompt.placeholder, "Running /status...")
+  assert.equal(sendLabel.textContent, "Running")
+  assert.equal(elements.send.title, "Running /status")
 })
 
 test("plan dock keeps a manual collapse through plan updates but resets for another session", () => {

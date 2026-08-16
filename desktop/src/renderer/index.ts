@@ -86,6 +86,8 @@ type AppState = {
   planDock: PlanDockPresentation
   composerMenuOpen: boolean
   compacting: boolean
+  slashCommandPending: boolean
+  slashCommandInput: string
   slashCommands: SlashCommand[]
   slashMenuOpen: boolean
   slashMenuActiveIndex: number
@@ -134,6 +136,8 @@ const state: AppState = {
   planDock: { collapsed: false, sessionId: "", dismissedPlanErrors: new Set() },
   composerMenuOpen: false,
   compacting: false,
+  slashCommandPending: false,
+  slashCommandInput: "",
   slashCommands: fallbackSlashCommands,
   slashMenuOpen: false,
   slashMenuActiveIndex: 0,
@@ -318,6 +322,8 @@ function render() {
       runtimeSessionId: state.viewedSessionId,
       composerMenuOpen: state.composerMenuOpen,
       compacting: state.compacting,
+      slashCommandPending: state.slashCommandPending,
+      slashCommandInput: state.slashCommandInput,
       contextUsagePercent: state.conversation.contextUsagePercent,
     },
   )
@@ -1049,6 +1055,11 @@ document.addEventListener("pointerdown", (event) => {
 })
 
 async function sendPrompt() {
+  if (state.slashCommandPending) {
+    state.notice = `Running ${state.slashCommandInput || "command"}...`
+    render()
+    return
+  }
   const input = prompt.value.trim()
   if (!input) return
   const project = chatProject()
@@ -1107,15 +1118,16 @@ async function runSlash(input: string) {
   }
   const runtimeId = currentRuntimeId()
   const compacting = /^\/compact\s*$/i.test(input)
+  state.slashCommandPending = true
+  state.slashCommandInput = input
   if (compacting) {
     state.compacting = true
-    render()
   }
+  render()
   try {
     await ensureRuntime(runtimeId, project.path, state.viewedSessionId || undefined)
     state.viewedRuntimeId = runtimeId
-    await loadModels()
-    const result = asRecord(await request(runtimeMethods.commandExecute, { input }))
+    const result = asRecord(await request(runtimeMethods.commandExecute, { input }, runtimeId))
     const commands = parseSlashCommands(asRecord(result.display).commands)
     if (commands.length) state.slashCommands = commands
     const text = asRecordText(result.text)
@@ -1142,6 +1154,8 @@ async function runSlash(input: string) {
     }
   } finally {
     state.compacting = false
+    state.slashCommandPending = false
+    state.slashCommandInput = ""
     render()
   }
 }

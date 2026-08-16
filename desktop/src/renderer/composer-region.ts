@@ -32,6 +32,8 @@ export type ComposerView = {
   runtimeSessionId: string
   composerMenuOpen: boolean
   compacting: boolean
+  slashCommandPending: boolean
+  slashCommandInput: string
   contextUsagePercent: number | null
 }
 
@@ -118,29 +120,36 @@ export function dismissPlanError(conversation: ConversationState, sessionId: str
 }
 
 export function renderComposer(elements: ComposerElements, view: ComposerView) {
-  const unavailable = !view.ready || view.readOnly || view.compacting
+  const unavailable = !view.ready || view.readOnly || view.compacting || view.slashCommandPending
   elements.prompt.disabled = unavailable
-  elements.prompt.placeholder = view.compacting
+  elements.prompt.placeholder = view.slashCommandPending
+    ? `Running ${view.slashCommandInput || "command"}...`
+    : view.compacting
     ? "Compacting context..."
     : view.readOnly
     ? "Return to the current task to send a message"
     : "Message Rind — Enter to send, Shift+Enter for a new line"
   elements.send.disabled = unavailable || view.starting
   const label = elements.send.querySelector<HTMLElement>(".send-label")
-  if (label) label.textContent = view.compacting ? "Compacting" : view.readOnly ? "Viewing" : view.active ? "Queue" : "Send"
-  elements.send.classList.toggle("is-starting", view.starting)
-  elements.send.setAttribute("aria-busy", String(view.starting))
-  elements.send.title = view.compacting
+  if (label) label.textContent = view.slashCommandPending
+    ? "Running"
+    : view.compacting ? "Compacting" : view.readOnly ? "Viewing" : view.active ? "Queue" : "Send"
+  const working = view.starting || view.slashCommandPending
+  elements.send.classList.toggle("is-starting", working)
+  elements.send.setAttribute("aria-busy", String(working))
+  elements.send.title = view.slashCommandPending
+    ? `Running ${view.slashCommandInput || "command"}`
+    : view.compacting
     ? "Context compaction is in progress"
     : view.readOnly
     ? "Return to the current task before sending"
     : view.starting ? "Waiting for the task to start" : view.active ? "Queue as follow-up for the running turn" : "Send message"
   elements.steer.disabled = !view.ready || !view.controllingTurn || view.readOnly
   elements.interrupt.disabled = !view.ready || !view.controllingTurn || view.readOnly
-  elements.menuTrigger.disabled = !view.ready || !view.runtimeSessionId || view.readOnly || view.active || view.compacting
+  elements.menuTrigger.disabled = !view.ready || !view.runtimeSessionId || view.readOnly || view.active || view.compacting || view.slashCommandPending
   elements.menuTrigger.setAttribute("aria-expanded", String(view.composerMenuOpen))
   elements.menu.hidden = !view.composerMenuOpen
-  elements.compactContext.disabled = !view.ready || !view.runtimeSessionId || view.readOnly || view.active || view.compacting
+  elements.compactContext.disabled = !view.ready || !view.runtimeSessionId || view.readOnly || view.active || view.compacting || view.slashCommandPending
   const compactLabel = elements.compactContext.querySelector<HTMLElement>(".compact-label")
   if (compactLabel) compactLabel.textContent = view.compacting ? "Compacting..." : "Compact context"
   elements.contextMeter.hidden = view.contextUsagePercent === null
