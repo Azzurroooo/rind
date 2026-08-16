@@ -1,4 +1,4 @@
-"""Status text rendering for CLI slash commands."""
+"""Status text rendering for runtime slash commands."""
 
 from __future__ import annotations
 

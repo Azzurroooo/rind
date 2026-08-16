@@ -924,7 +924,7 @@ def main() -> int:
     asyncio.run(test_compact_calls_runtime_compact_context())
     asyncio.run(test_compact_passes_cancellation_token_to_runtime())
     asyncio.run(test_draft_rejects_invalid_args())
-    print("CLI slash command tests passed.")
+    print("Runtime Server command tests passed.")
     return 0
 
 
