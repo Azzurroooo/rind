@@ -22,6 +22,23 @@ test("command results render structured help as a usable command entry", () => {
   assert.match(html, /\/model set &lt;model&gt;/)
 })
 
+test("structured Desktop help does not re-display the removed sessions command", () => {
+  const html = renderCommandResult({
+    command: "/help",
+    content: "Commands",
+    display: {
+      type: "help",
+      commands: [
+        { name: "sessions", description: "List recent sessions", usage: "/sessions" },
+        { name: "status", description: "Show status", usage: "/status" },
+      ],
+    },
+  })
+
+  assert.doesNotMatch(html, /data-command-prefill="sessions"/)
+  assert.match(html, /data-command-prefill="status"/)
+})
+
 test("command results escape structured display fields and keep unknown output readable", () => {
   const html = renderCommandResult({
     command: "/status",

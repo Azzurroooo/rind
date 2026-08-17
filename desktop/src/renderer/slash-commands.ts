@@ -10,6 +10,8 @@ export type SlashCommandMenu = {
   commands: SlashCommand[]
 }
 
+const DESKTOP_HIDDEN_COMMANDS = new Set(["sessions"])
+
 export const fallbackSlashCommands: SlashCommand[] = [
   ["compact", "Compact current session context", "/compact"],
   ["config", "Show config guidance", "/config"],
@@ -20,7 +22,6 @@ export const fallbackSlashCommands: SlashCommand[] = [
   ["login", "Show login setup guidance", "/login"],
   ["model", "Show or change the active model", "/model | /model set <model>"],
   ["plan", "Show active plan summary", "/plan"],
-  ["sessions", "List recent sessions", "/sessions [limit]"],
   ["skill", "List skills", "/skill [list]"],
   ["status", "Show session status", "/status"],
   ["team", "Create a Team project", "/team create [project-id]"],
@@ -31,9 +32,20 @@ export function parseSlashCommands(value: unknown): SlashCommand[] {
   const unique = new Map<string, SlashCommand>()
   for (const item of value) {
     const command = asSlashCommand(item)
-    if (command) unique.set(command.name, command)
+    if (command && !isDesktopHiddenSlashCommand(command.name)) unique.set(command.name, command)
   }
   return [...unique.values()].sort((left, right) => left.name.localeCompare(right.name))
+}
+
+export function isDesktopHiddenSlashCommand(name: string) {
+  return DESKTOP_HIDDEN_COMMANDS.has(name.trim().toLocaleLowerCase())
+}
+
+export function desktopSlashCommandNotice(input: string) {
+  const command = input.trim()
+  if (/^\/sessions(?:\s|$)/i.test(command)) return "Use the left sidebar to switch sessions."
+  if (/^\/help\s+\/?sessions(?:\s|$)/i.test(command)) return "Use the left sidebar to switch sessions."
+  return undefined
 }
 
 export function slashCommandMenu(commands: SlashCommand[], input: string): SlashCommandMenu | undefined {

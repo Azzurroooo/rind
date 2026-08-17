@@ -53,8 +53,14 @@ export function composerRegionMarkup() {
             <button id="composer-menu-trigger" type="button" class="composer-menu-trigger" title="More chat actions" aria-label="More chat actions" aria-haspopup="menu" aria-expanded="false">+</button>
             <div id="composer-menu" class="composer-menu" role="menu" hidden><button id="compact-context" type="button" role="menuitem"><span class="compact-label">Compact context</span></button></div>
           </div>
-          <label class="model-control" title="Active model"><select id="model-select" aria-label="Model"></select></label>
-          <label class="project-control" title="Active project"><select id="project-select" aria-label="Active project"></select></label>
+          <div class="composer-select-wrap model-control">
+            <button id="model-menu-trigger" type="button" class="composer-select-trigger" title="Choose model" aria-label="Choose model" aria-haspopup="listbox" aria-controls="model-menu" aria-expanded="false"><span id="model-menu-label" class="composer-select-label">Model</span><span class="composer-select-chevron" aria-hidden="true"></span></button>
+            <div id="model-menu" class="composer-select-menu" role="listbox" aria-label="Models" hidden></div>
+          </div>
+          <div class="composer-select-wrap project-control">
+            <button id="project-menu-trigger" type="button" class="composer-select-trigger" title="Choose working directory" aria-label="Choose working directory" aria-haspopup="listbox" aria-controls="project-menu" aria-expanded="false"><span id="project-menu-label" class="composer-select-label">Working directory</span><span class="composer-select-chevron" aria-hidden="true"></span></button>
+            <div id="project-menu" class="composer-select-menu" role="listbox" aria-label="Working directories" hidden></div>
+          </div>
           <span id="context-meter" class="context-meter" hidden></span>
           <span class="composer-spacer"></span>
           <button id="steer" type="button" class="ghost-button" title="Steer the running turn with this message">Steer</button>

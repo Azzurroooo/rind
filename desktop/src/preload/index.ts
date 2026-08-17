@@ -24,6 +24,9 @@ const api: DesktopApi = {
     get: () => ipcRenderer.invoke("settings-get"),
     save: (patch) => ipcRenderer.invoke("settings-save", patch),
   },
+  models: {
+    list: () => ipcRenderer.invoke("models-list"),
+  },
   projects: {
     get: () => ipcRenderer.invoke("projects-get"),
     add: () => ipcRenderer.invoke("projects-add"),

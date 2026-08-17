@@ -1,4 +1,5 @@
 import { renderMarkdown } from "./markdown.ts"
+import { isDesktopHiddenSlashCommand } from "./slash-commands.ts"
 
 export type CommandResult = {
   command: string
@@ -31,7 +32,8 @@ function renderCommandDisplay(display: Record<string, unknown> | undefined): str
 
 function renderHelpCommandDisplay(display: Record<string, unknown>) {
   const selected = asRecord(display.command)
-  const commands = typeof selected.name === "string" ? [selected] : recordList(display.commands)
+  const commands = (typeof selected.name === "string" ? [selected] : recordList(display.commands))
+    .filter((command) => !isDesktopHiddenSlashCommand(typeof command.name === "string" ? command.name : ""))
   if (!commands.length) return ""
   const heading = typeof selected.name === "string" ? `/${selected.name}` : "Commands"
   return `<div class="command-display"><div class="command-display-title">${escapeHtml(heading)}</div><div class="command-list">${commands.map((command) => {

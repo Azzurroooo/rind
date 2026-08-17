@@ -14,7 +14,7 @@ test("session replay projects persisted messages without starting a runtime", as
   try {
     await mkdir(base, { recursive: true })
     await mkdir(workspace)
-    await writeFile(join(base, "meta.json"), JSON.stringify({ schema_version: "2.0", session_id: sessionId, workspace_root: workspace }), "utf8")
+    await writeFile(join(base, "meta.json"), JSON.stringify({ schema_version: "2.0", session_id: sessionId, workspace_root: workspace, model: "session-model" }), "utf8")
     await writeFile(join(base, "messages.jsonl"), [
       { role: "system", content: "system" },
       { role: "user", content: "inspect this" },
@@ -24,6 +24,7 @@ test("session replay projects persisted messages without starting a runtime", as
     ].map((item) => JSON.stringify(item)).join("\n"), "utf8")
     await writeFile(join(base, "tool_calls.jsonl"), JSON.stringify({ id: "call-1", name: "shell", raw_args: "{\"command\":\"pwd\"}", model_content: "command completed" }) + "\n", "utf8")
     const result = await replaySession(home, sessionId, workspace)
+    assert.equal(result.model, "session-model")
     assert.deepEqual(result.messages.map((message) => message.role), ["system", "user", "assistant", "tool", "assistant"])
     assert.equal(result.messages[2].tool_calls[0].function.name, "shell")
     assert.equal(result.messages[3].content, "command completed")

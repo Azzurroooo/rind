@@ -315,6 +315,12 @@ test("composer region keeps plan dock above a persistent input form", () => {
   assert.match(markup, /id="prompt" rows="2"/)
   assert.match(markup, /id="slash-command-menu" class="slash-command-menu" role="listbox"/)
   assert.match(markup, /aria-controls="slash-command-menu"/)
+  assert.match(markup, /id="model-menu-trigger"/)
+  assert.match(markup, /id="model-menu" class="composer-select-menu" role="listbox"/)
+  assert.match(markup, /id="project-menu-trigger"/)
+  assert.match(markup, /id="project-menu" class="composer-select-menu" role="listbox"/)
+  assert.doesNotMatch(markup, /id="model-select"/)
+  assert.doesNotMatch(markup, /id="project-select"/)
   assert.match(markup, /class="send-spinner"/)
 })
 

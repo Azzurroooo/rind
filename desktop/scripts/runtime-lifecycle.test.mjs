@@ -33,6 +33,9 @@ try {
 
   runtime.startRuntime("lifecycle", workspace)
   await runtime.initializeRuntime("lifecycle")
+  const command = await runtime.requestRuntime("lifecycle", "rind/command/execute", { input: "/status" })
+  assert.deepEqual(command, { input: "/status" }, "slash commands must resolve through the Runtime request path")
+  assert.equal(runtime.getRuntimeSnapshots()[0]?.status, "ready", "slash commands must leave the Runtime ready")
   await runtime.requestRuntime("lifecycle", "emit", { type: "turn_started" })
   await delay(180)
   assert.equal(runtime.getRuntimeSnapshots()[0]?.status, "ready", "active turns must not be auto-shutdown")

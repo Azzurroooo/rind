@@ -26,6 +26,10 @@ input.on("line", (line) => {
     process.exit(0)
     return
   }
+  if (request.method === "rind/command/execute") {
+    output({ kind: "response", request_id: request.request_id, result: { input: request.params?.input ?? "" } })
+    return
+  }
   if (request.method === "emit") {
     const type = String(request.params?.type ?? "")
     output({

@@ -152,6 +152,9 @@ export type DesktopApi = {
     get: () => Promise<DesktopSettings>
     save: (patch: DesktopSettingsPatch) => Promise<DesktopSettings>
   }
+  models: {
+    list: () => Promise<string[]>
+  }
   projects: {
     get: () => Promise<DesktopProjectOverview>
     add: () => Promise<DesktopProjectOverview | null>
@@ -162,7 +165,7 @@ export type DesktopApi = {
     sessions: (path: string, offset: number, limit: number) => Promise<{ sessions: DesktopSessionSummary[]; total: number }>
   }
   sessions: {
-    replay: (sessionId: string) => Promise<{ messages: unknown[]; sessionId: string }>
+    replay: (sessionId: string) => Promise<{ messages: unknown[]; sessionId: string; model: string }>
   }
   files: {
     list: (projectPath: string, path?: string) => Promise<DesktopFileListing>

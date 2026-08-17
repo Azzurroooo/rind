@@ -751,8 +751,15 @@ pre code {
 .slash-command-usage { justify-self: end; overflow: hidden; color: var(--text-faint); font-family: var(--font-mono); font-size: 10.5px; text-align: right; text-overflow: ellipsis; white-space: nowrap; }
 .slash-command-empty { margin: 0; padding: 9px; color: var(--text-faint); font-size: 12px; }
 
-.model-control select {
-  max-width: 190px;
+.composer-select-wrap { position: relative; flex: 0 1 auto; min-width: 0; }
+.model-control { width: min(190px, 28vw); }
+.project-control { width: min(210px, 32vw); }
+.composer-select-trigger {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  min-width: 0;
   min-height: 26px;
   padding: 2px 6px;
   border: 1px solid transparent;
@@ -760,8 +767,65 @@ pre code {
   color: var(--text-weak);
   background: transparent;
   font-size: 12px;
+  text-align: left;
 }
-.model-control select:hover:not(:disabled) { border-color: var(--border-strong); color: var(--text-base); }
+.composer-select-trigger:hover:not(:disabled), .composer-select-trigger[aria-expanded="true"] { border-color: var(--border-strong); color: var(--text-base); background: var(--bg-hover); }
+.composer-select-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.composer-select-chevron {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  margin: 0 2px 3px auto;
+  border-right: 1.5px solid currentColor;
+  border-bottom: 1.5px solid currentColor;
+  opacity: 0.8;
+  transform: rotate(45deg);
+  transition: transform 120ms ease;
+}
+.composer-select-trigger[aria-expanded="true"] .composer-select-chevron { transform: rotate(225deg) translate(-2px, -2px); }
+.composer-select-menu {
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 0;
+  z-index: 10;
+  display: grid;
+  width: max-content;
+  min-width: 176px;
+  max-width: min(360px, calc(100vw - 24px));
+  max-height: min(336px, 44dvh);
+  overflow: auto;
+  padding: 4px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--bg-raised);
+  box-shadow: 0 16px 32px rgb(0 0 0 / 32%), 0 2px 6px rgb(0 0 0 / 24%);
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-strong) transparent;
+}
+.project-control .composer-select-menu { min-width: 230px; }
+.composer-select-menu[hidden] { display: none; }
+.composer-select-option {
+  display: grid;
+  gap: 2px;
+  width: 100%;
+  min-width: 0;
+  min-height: 30px;
+  padding: 5px 7px;
+  border: 0;
+  border-radius: 4px;
+  overflow: hidden;
+  text-align: left;
+  color: var(--text-base);
+  background: transparent;
+  font-size: 12px;
+}
+.composer-select-option:hover:not(:disabled), .composer-select-option.selected { color: var(--text-strong); background: var(--bg-hover); }
+.composer-select-option.selected { box-shadow: inset 2px 0 var(--accent); }
+.composer-select-option-main, .composer-select-option-detail { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.composer-select-option-main { font-weight: 600; }
+.composer-select-option-detail { color: var(--text-faint); font-family: var(--font-mono); font-size: 10.5px; }
+.composer-model-option .composer-select-option-main { font-family: var(--font-mono); font-size: 11.5px; font-weight: 500; }
+.composer-select-empty { margin: 0; padding: 9px; color: var(--text-faint); font-size: 12px; }
 
 .context-meter {
   padding: 2px 8px;
@@ -823,24 +887,38 @@ pre code {
 .recent-list .session-item { padding: 5px 7px; }
 .recent-list .session-item-title { font-size: 12px; }
 .project-item { min-width: 0; }
-.project-row { display: flex; align-items: center; gap: 2px; }
+.project-row { position: relative; min-width: 0; }
 .project-trigger {
+  width: 100%;
   min-width: 0;
-  flex: 1;
-  padding: 7px 8px;
+  padding: 7px 38px 7px 8px;
   border: 1px solid transparent;
   border-radius: var(--radius);
   text-align: left;
   color: var(--text-base);
   background: transparent;
 }
-.project-trigger:hover, .project-item.selected .project-trigger { background: var(--bg-hover); }
-.project-item.selected .project-trigger { border-color: var(--border-strong); }
+.project-trigger:hover { background: var(--bg-hover); }
 .project-name, .project-path { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .project-name { font-size: 12.5px; font-weight: 600; }
 .project-path { margin-top: 2px; color: var(--text-faint); font-family: var(--font-mono); font-size: 10.5px; direction: rtl; text-align: left; }
-.project-remove { flex: none; padding-inline: 6px; color: var(--text-faint); font-size: 10px; }
-.project-remove:hover:not(:disabled) { color: var(--err); }
+.project-menu-wrap { position: absolute; top: 4px; right: 4px; }
+.project-menu-trigger { width: 26px; height: 26px; padding: 0; color: var(--text-faint); font-size: 15px; line-height: 1; }
+.project-menu-trigger:hover:not(:disabled), .project-menu-trigger[aria-expanded="true"] { color: var(--text-strong); background: var(--bg-hover); }
+.project-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  z-index: 10;
+  min-width: 108px;
+  padding: 4px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--bg-raised);
+  box-shadow: 0 8px 24px rgb(0 0 0 / 35%);
+}
+.project-menu button { width: 100%; min-height: 28px; padding: 4px 8px; border: 0; border-radius: 4px; text-align: left; color: var(--err); background: transparent; font-size: 12px; }
+.project-menu button:hover:not(:disabled) { background: var(--bg-hover); }
 .project-missing { margin: 3px 8px 6px; color: var(--err); font-size: 11px; }
 .project-sessions { display: grid; gap: 1px; margin: 2px 0 8px 12px; padding-left: 7px; border-left: 1px solid var(--border); }
 .project-sessions .session-item { padding: 5px 7px; }
@@ -948,8 +1026,8 @@ pre code {
   .command-check small { grid-column: 2; }
   .command-usage { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .command-usage strong { grid-column: 1 / -1; }
-  .model-control select { max-width: 108px; }
-  .workspace .project-control select { max-width: 126px; }
+  .model-control { width: min(108px, 30vw); }
+  .project-control { width: min(126px, 34vw); }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -1032,9 +1110,6 @@ body { min-height: 0; }
 }
 .composer textarea::-webkit-scrollbar, .message-stream::-webkit-scrollbar, .recent-list::-webkit-scrollbar, .project-list::-webkit-scrollbar, .file-tree::-webkit-scrollbar, .file-preview::-webkit-scrollbar, .ledger-output::-webkit-scrollbar, .plan-dock-content::-webkit-scrollbar, .file-diff-lines::-webkit-scrollbar { width: 8px; height: 8px; }
 .composer textarea::-webkit-scrollbar-thumb, .message-stream::-webkit-scrollbar-thumb, .recent-list::-webkit-scrollbar-thumb, .project-list::-webkit-scrollbar-thumb, .file-tree::-webkit-scrollbar-thumb, .file-preview::-webkit-scrollbar-thumb, .ledger-output::-webkit-scrollbar-thumb, .plan-dock-content::-webkit-scrollbar-thumb, .file-diff-lines::-webkit-scrollbar-thumb { border: 2px solid transparent; border-radius: 5px; background: var(--border-strong); background-clip: padding-box; }
-.project-control select { max-width: 210px; min-height: 26px; padding: 2px 6px; border: 1px solid transparent; border-radius: var(--radius); color: var(--text-weak); background: transparent; font-size: 12px; }
-.project-control select:hover:not(:disabled) { border-color: var(--border-strong); color: var(--text-base); }
-
 @media (max-width: 760px) {
   #app .layout, #app.files-open .layout { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); }
   .sidebar { position: fixed; display: grid; top: 46px; bottom: 0; left: 0; width: min(84vw, 320px); z-index: 12; box-shadow: 8px 0 24px rgb(0 0 0 / 28%); transform: translateX(-100%); transition: transform 220ms cubic-bezier(.2, .8, .2, 1); }
@@ -1044,7 +1119,8 @@ body { min-height: 0; }
   #app:not(.files-open) .file-panel { transform: translateX(100%); }
   .file-panel { transition: transform 220ms cubic-bezier(.2, .8, .2, 1), opacity 160ms ease; }
   .sidebar-resize-handle, .file-resize-handle { display: none; }
-  .project-control select { max-width: 115px; }
+  .project-control { width: min(115px, 34vw); }
+  .composer-select-menu { position: fixed; right: 10px; bottom: 54px; left: 10px; width: auto; min-width: 0; max-height: min(300px, 44dvh); }
 }
 
 @media (prefers-reduced-motion: reduce) {

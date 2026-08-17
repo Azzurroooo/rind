@@ -13,7 +13,7 @@ export async function replaySession(rindHome: string, sessionId: string, project
   }
   const messages = await readJsonLines(join(base, "messages.jsonl"))
   const tools = await readJsonLines(join(base, "tool_calls.jsonl"))
-  return { sessionId: cleanId, messages: projectMessages(messages, tools) }
+  return { sessionId: cleanId, model: stringValue(meta.model), messages: projectMessages(messages, tools) }
 }
 
 async function readJson(path: string): Promise<JsonObject> {
@@ -75,6 +75,10 @@ function projectMessages(messages: JsonObject[], tools: JsonObject[]) {
 
 function asObject(value: unknown): JsonObject | undefined {
   return value && typeof value === "object" && !Array.isArray(value) ? value as JsonObject : undefined
+}
+
+function stringValue(value: unknown) {
+  return typeof value === "string" ? value.trim() : ""
 }
 
 function samePath(left: string, right: string) {

@@ -3,10 +3,29 @@ import test from "node:test"
 
 import {
   commandPrefill,
+  desktopSlashCommandNotice,
+  fallbackSlashCommands,
   isExactSlashCommand,
   parseSlashCommands,
   slashCommandMenu,
 } from "../src/renderer/slash-commands.ts"
+
+test("Desktop hides the Runtime sessions command from fallback and Runtime catalogs", () => {
+  assert.equal(fallbackSlashCommands.some((command) => command.name === "sessions"), false)
+  const parsed = parseSlashCommands([
+    { name: "sessions", description: "List recent sessions", usage: "/sessions" },
+    { name: "status", description: "Show status", usage: "/status" },
+  ])
+  assert.deepEqual(parsed.map((command) => command.name), ["status"])
+})
+
+test("Desktop handles removed session commands locally", () => {
+  assert.equal(desktopSlashCommandNotice("/sessions"), "Use the left sidebar to switch sessions.")
+  assert.equal(desktopSlashCommandNotice("/sessions 20"), "Use the left sidebar to switch sessions.")
+  assert.equal(desktopSlashCommandNotice("/help sessions"), "Use the left sidebar to switch sessions.")
+  assert.equal(desktopSlashCommandNotice("/help /sessions"), "Use the left sidebar to switch sessions.")
+  assert.equal(desktopSlashCommandNotice("/help status"), undefined)
+})
 
 const commands = parseSlashCommands([
   { name: "compact", description: "Compact current context", usage: "/compact", aliases: ["compress"] },

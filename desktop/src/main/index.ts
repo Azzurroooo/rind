@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url"
 
 import { runtimeMethods, type DesktopSettings, type DesktopSettingsPatch, type RuntimeEvent, type RuntimeMethod, type RuntimeSnapshot } from "../preload/types"
 import { asObject, readJsonObject, writeJsonObject } from "./json-store"
+import { listAvailableModels } from "./model-catalog"
 import { listProjectFiles, previewProjectFile } from "./project-files"
 import { DesktopProjectStore, samePath } from "./projects"
 import { replaySession } from "./session-replay"
@@ -153,6 +154,7 @@ function registerIpc() {
     const saved = await saveRuntimeSettings(settings)
     return saved
   })
+  ipcMain.handle("models-list", async () => listAvailableModels(await readJsonObject(runtimeSettingsPath())))
   ipcMain.handle("projects-get", () => projectStore().overview())
   ipcMain.handle("projects-add", () => chooseProject())
   ipcMain.handle("projects-select", (_event, path: unknown) => {

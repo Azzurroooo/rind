@@ -39,14 +39,23 @@ import {
 import { renderMarkdown } from "./markdown"
 import { highlightFile } from "./syntax-highlight"
 import { renderCommandResult } from "./command-results"
+import { modelChoices, modelSelectionTarget } from "./composer-select"
 import {
   commandPrefill,
+  desktopSlashCommandNotice,
   fallbackSlashCommands,
   isExactSlashCommand,
   parseSlashCommands,
   slashCommandMenu as buildSlashCommandMenu,
   type SlashCommand,
 } from "./slash-commands"
+import {
+  defaultNewChatProjectPath,
+  projectForPath as findProjectForPath,
+  sameProjectPath as samePath,
+  workingDirectorySelectionEnabled,
+} from "./project-selection"
+import { projectListStructureKey, recentListStructureKey } from "./sidebar-rendering"
 
 type AppState = {
   runtime: RuntimeSnapshot
@@ -68,6 +77,7 @@ type AppState = {
   models: string[]
   projects: DesktopProject[]
   recentSessions: DesktopRecentSession[]
+  fallbackProjectPath: string
   pendingRecentSessionIds: Set<string>
   sessionPages: Record<string, DesktopSessionSummary[]>
   sessionTotals: Record<string, number>
@@ -76,6 +86,7 @@ type AppState = {
   filesOpen: boolean
   filePanelWidth: number
   expandedProjects: Set<string>
+  projectMenuPath: string
   expandedDirectories: Set<string>
   fileListings: Record<string, DesktopFileListing>
   filePreview?: DesktopFilePreview
@@ -91,6 +102,10 @@ type AppState = {
   slashCommands: SlashCommand[]
   slashMenuOpen: boolean
   slashMenuActiveIndex: number
+  modelMenuOpen: boolean
+  modelMenuLoading: boolean
+  modelChanging: boolean
+  projectMenuOpen: boolean
   notice: string
 }
 
@@ -119,6 +134,7 @@ const state: AppState = {
   models: [],
   projects: [],
   recentSessions: [],
+  fallbackProjectPath: "",
   pendingRecentSessionIds: new Set(),
   sessionPages: {},
   sessionTotals: {},
@@ -127,6 +143,7 @@ const state: AppState = {
   filesOpen: false,
   filePanelWidth: 480,
   expandedProjects: new Set(),
+  projectMenuPath: "",
   expandedDirectories: new Set([""]),
   fileListings: {},
   drafts: {},
@@ -141,6 +158,10 @@ const state: AppState = {
   slashCommands: fallbackSlashCommands,
   slashMenuOpen: false,
   slashMenuActiveIndex: 0,
+  modelMenuOpen: false,
+  modelMenuLoading: false,
+  modelChanging: false,
+  projectMenuOpen: false,
   notice: "",
 }
 
@@ -212,14 +233,18 @@ appRoot.innerHTML = `
 
 const connection = requiredElement("connection")
 const connectionText = requiredElement("connection-text")
-const projectSelect = requiredElement<HTMLSelectElement>("project-select")
+const projectMenuTrigger = requiredElement<HTMLButtonElement>("project-menu-trigger")
+const projectMenuLabel = requiredElement("project-menu-label")
+const projectMenu = requiredElement("project-menu")
 const workspacePath = requiredElement("workspace-path")
 const projectList = requiredElement("project-list")
 const recentSessions = requiredElement("recent-sessions")
 const recentList = requiredElement("recent-list")
 const sessionTitle = requiredElement("session-title")
 const sessionIdLabel = requiredElement("session-id")
-const modelSelect = requiredElement<HTMLSelectElement>("model-select")
+const modelMenuTrigger = requiredElement<HTMLButtonElement>("model-menu-trigger")
+const modelMenuLabel = requiredElement("model-menu-label")
+const modelMenu = requiredElement("model-menu")
 const messageStream = requiredElement("message-stream")
 const jumpLatest = requiredElement<HTMLButtonElement>("jump-latest")
 const planDockShell = requiredElement("plan-dock-shell")
@@ -262,6 +287,9 @@ let renderTimer: ReturnType<typeof setTimeout> | undefined
 let toolAnimationUntil = 0
 const toolOpenRequests = new Map<string, number>()
 let resizeStart: { target: "sidebar" | "files"; pointerId: number; x: number; width: number; lastWidth: number } | undefined
+let renderedProjectListStructureKey = ""
+let renderedRecentListStructureKey = ""
+let modelMenuRequestId = 0
 
 function requiredElement<T extends HTMLElement = HTMLElement>(id: string) {
   const element = document.getElementById(id) as T | null
@@ -354,15 +382,7 @@ function chatProject() {
 }
 
 function projectForPath(path: string) {
-  return state.projects.find((project) => samePath(project.path, path))
-}
-
-function samePath(left: string, right: string) {
-  const normalize = (value: string) => value.replace(/\\/g, "/").replace(/\/+$/, "") || "/"
-  const normalizedLeft = normalize(left)
-  const normalizedRight = normalize(right)
-  const isWindowsPath = /^[A-Za-z]:\//.test(normalizedLeft) || normalizedLeft.startsWith("//")
-  return isWindowsPath ? normalizedLeft.toLocaleLowerCase() === normalizedRight.toLocaleLowerCase() : normalizedLeft === normalizedRight
+  return findProjectForPath(state.projects, path)
 }
 
 function runtimeIdForSession(sessionId: string) {
@@ -395,57 +415,83 @@ function knownSessions() {
 }
 
 function renderProjectControl() {
-  projectSelect.replaceChildren()
-  if (!state.projects.length) {
-    const option = new Option("No project selected", "")
-    option.disabled = true
-    option.selected = true
-    projectSelect.add(option)
-    projectSelect.disabled = true
+  const active = chatProject()
+  const canOpen = workingDirectorySelectionEnabled(state.projects.length, state.viewedSessionId)
+  if (!canOpen) state.projectMenuOpen = false
+  projectMenuLabel.textContent = active?.available ? active.name : active ? `${active.name} (missing)` : "Working directory"
+  projectMenuTrigger.title = state.viewedSessionId
+    ? `Session working directory: ${active?.path || "Unavailable"}`
+    : active?.path || "Choose working directory"
+  projectMenuTrigger.disabled = !canOpen
+  projectMenuTrigger.setAttribute("aria-expanded", String(state.projectMenuOpen))
+  projectMenu.hidden = !state.projectMenuOpen
+  if (!state.projectMenuOpen) {
+    projectMenu.replaceChildren()
     return
   }
-  for (const project of state.projects) {
-    const option = new Option(project.available ? project.name : `${project.name} (missing)`, project.path)
-    option.disabled = !project.available
-    option.selected = samePath(project.path, state.chatProjectPath)
-    projectSelect.add(option)
+  if (!state.projects.length) {
+    projectMenu.innerHTML = `<p class="composer-select-empty">No working directories</p>`
+    return
   }
-  projectSelect.disabled = false
-  projectSelect.value = state.chatProjectPath
+  projectMenu.innerHTML = state.projects.map((project) => {
+    const selected = samePath(project.path, state.chatProjectPath)
+    return `<button type="button" class="composer-select-option${selected ? " selected" : ""}" role="option" aria-selected="${String(selected)}" data-project-choice="${escapeAttribute(project.path)}"${project.available ? "" : " disabled"}><span class="composer-select-option-main">${escapeHtml(project.name)}</span><span class="composer-select-option-detail">${escapeHtml(project.available ? project.path : "Folder is unavailable")}</span></button>`
+  }).join("")
 }
 
 function renderProjects() {
+  const structureKey = projectListStructureKey({
+    projects: state.projects,
+    recentSessions: state.recentSessions,
+    sessionPages: state.sessionPages,
+    sessionTotals: state.sessionTotals,
+    expandedProjects: state.expandedProjects,
+    projectMenuPath: state.projectMenuPath,
+    runningSessionIds: runningSessionIds(),
+    viewedSessionId: state.viewedSessionId,
+  })
+  if (structureKey === renderedProjectListStructureKey) {
+    syncSidebarSelection()
+    return
+  }
+  renderedProjectListStructureKey = structureKey
   projectList.replaceChildren()
   if (!state.projects.length) {
     projectList.innerHTML = `<div class="sidebar-empty"><strong>No projects</strong><span>Add a folder to start a chat.</span></div>`
+    syncSidebarSelection()
     return
   }
   for (const project of state.projects) {
     const expanded = state.expandedProjects.has(project.path)
+    const menuOpen = samePath(project.path, state.projectMenuPath)
     const sessions = projectSessions(project)
     const total = state.sessionTotals[project.path] ?? project.totalSessions
     const projectNode = document.createElement("section")
-    projectNode.className = `project-item${samePath(project.path, state.viewedProjectPath) ? " selected" : ""}${expanded ? " expanded" : ""}`
+    projectNode.className = `project-item${expanded ? " expanded" : ""}`
     projectNode.innerHTML = `
       <div class="project-row">
         <button type="button" class="project-trigger" data-project-path="${escapeAttribute(project.path)}" title="${escapeAttribute(project.path)}">
           <span class="project-name">${escapeHtml(project.name)}</span>
           <span class="project-path">${escapeHtml(project.path)}</span>
         </button>
-        <button type="button" class="project-remove ghost-button" data-remove-project="${escapeAttribute(project.path)}" title="Remove project from Desktop">Remove</button>
+        <div class="project-menu-wrap">
+          <button type="button" class="project-menu-trigger ghost-button" data-project-menu="${escapeAttribute(project.path)}" title="Project actions" aria-label="Project actions for ${escapeAttribute(project.name)}" aria-haspopup="menu" aria-expanded="${String(menuOpen)}">...</button>
+          ${menuOpen ? `<div class="project-menu" role="menu"><button type="button" data-remove-project="${escapeAttribute(project.path)}" role="menuitem">Remove</button></div>` : ""}
+        </div>
       </div>
       ${project.available ? "" : `<p class="project-missing">Folder is unavailable.</p>`}
       ${expanded ? `<div class="project-sessions">${sessions.map(renderProjectSession).join("")}${sessions.length < total ? `<button type="button" class="show-more ghost-button" data-show-more="${escapeAttribute(project.path)}">View more sessions</button>` : ""}</div>` : ""}
     `
     projectList.append(projectNode)
   }
+  syncSidebarSelection()
 }
 
 function renderProjectSession(item: DesktopSessionSummary) {
   const when = item.updatedAt ? relativeTime(item.updatedAt) : ""
   const running = runtimeTurnActive(runtimeIdForSession(item.id))
   return `
-    <button type="button" class="session-item${item.id === state.viewedSessionId ? " selected" : ""}${running ? " running" : ""}" data-session-id="${escapeAttribute(item.id)}" data-session-project="${escapeAttribute(item.workspaceRoot)}">
+    <button type="button" class="session-item${running ? " running" : ""}" data-session-id="${escapeAttribute(item.id)}" data-session-project="${escapeAttribute(item.workspaceRoot)}">
       <span class="session-item-title">${running ? `<span class="status-pip pip-running"></span>` : ""}<span class="session-item-title-text">${escapeHtml(item.title || "Untitled")}</span></span>
       <small>${escapeHtml(clipLine(item.preview || "", 48))}</small>
       <small class="session-item-meta">${escapeHtml(when)}</small>
@@ -454,9 +500,25 @@ function renderProjectSession(item: DesktopSessionSummary) {
 }
 
 function renderRecentSessions() {
+  const structureKey = recentListStructureKey({
+    projects: state.projects,
+    recentSessions: state.recentSessions,
+    sessionPages: state.sessionPages,
+    sessionTotals: state.sessionTotals,
+    expandedProjects: state.expandedProjects,
+    projectMenuPath: state.projectMenuPath,
+    runningSessionIds: runningSessionIds(),
+    viewedSessionId: state.viewedSessionId,
+  })
+  if (structureKey === renderedRecentListStructureKey) {
+    syncSidebarSelection()
+    return
+  }
+  renderedRecentListStructureKey = structureKey
   if (!state.recentSessions.length) {
     recentSessions.hidden = true
     recentList.replaceChildren()
+    syncSidebarSelection()
     return
   }
   const items = [...state.recentSessions].sort((left, right) => {
@@ -466,18 +528,37 @@ function renderRecentSessions() {
   })
   recentSessions.hidden = false
   recentList.innerHTML = items.map(renderRecentSession).join("")
+  syncSidebarSelection()
 }
 
 function renderRecentSession(item: DesktopRecentSession) {
   const running = runtimeTurnActive(runtimeIdForSession(item.id))
   const when = item.lastInteractedAt ? relativeTime(item.lastInteractedAt) : ""
   return `
-    <button type="button" class="session-item${item.id === state.viewedSessionId ? " selected" : ""}${running ? " running" : ""}" data-session-id="${escapeAttribute(item.id)}" title="${escapeAttribute(item.title || "Untitled")}">
+    <button type="button" class="session-item${running ? " running" : ""}" data-session-id="${escapeAttribute(item.id)}" title="${escapeAttribute(item.title || "Untitled")}">
       <span class="session-item-title">${running ? `<span class="status-pip pip-running"></span>` : ""}<span class="session-item-title-text">${escapeHtml(item.title || "Untitled")}</span></span>
       <small>${escapeHtml(clipLine(item.preview || "", 48))}</small>
       <small class="session-item-meta">${escapeHtml(when)}</small>
     </button>
   `
+}
+
+function runningSessionIds() {
+  const sessions = new Set<string>()
+  for (const [runtimeId, sessionId] of Object.entries(state.runtimeSessionIds)) {
+    if (sessionId && runtimeTurnActive(runtimeId)) sessions.add(sessionId)
+  }
+  return sessions
+}
+
+function syncSidebarSelection() {
+  const selectedId = state.viewedSessionId
+  for (const button of sidebar.querySelectorAll<HTMLButtonElement>("[data-session-id]")) {
+    const selected = button.dataset.sessionId === selectedId
+    button.classList.toggle("selected", selected)
+    if (selected) button.setAttribute("aria-current", "page")
+    else button.removeAttribute("aria-current")
+  }
 }
 
 function renderFiles() {
@@ -515,18 +596,127 @@ function renderDirectory(path: string, depth = 0): string {
 }
 
 function renderModels() {
-  const previous = modelSelect.value
-  modelSelect.replaceChildren()
-  const choices = state.models.length ? state.models : state.model ? [state.model] : []
-  for (const model of choices) {
-    const option = document.createElement("option")
-    option.value = model
-    option.textContent = model
-    option.selected = model === state.model
-    modelSelect.append(option)
+  const activeModel = displayedModel()
+  const choices = modelChoices(state.models, activeModel)
+  const canOpen = canOpenModelMenu()
+  if (!canOpen) closeModelMenu()
+  modelMenuLabel.textContent = activeModel || (state.modelMenuLoading ? "Loading models..." : "Model")
+  modelMenuTrigger.title = activeModel ? `Choose model: ${activeModel}` : "Choose model"
+  modelMenuTrigger.disabled = !canOpen
+  modelMenuTrigger.setAttribute("aria-expanded", String(state.modelMenuOpen))
+  modelMenuTrigger.setAttribute("aria-busy", String(state.modelMenuLoading || state.modelChanging))
+  modelMenu.hidden = !state.modelMenuOpen
+  if (!state.modelMenuOpen) {
+    modelMenu.replaceChildren()
+    return
   }
-  if (previous && choices.includes(previous)) modelSelect.value = previous
-  modelSelect.disabled = currentRuntimeSnapshot().status !== "ready" || !choices.length || runtimeTurnActive()
+  if (state.modelMenuLoading) {
+    modelMenu.innerHTML = `<p class="composer-select-empty">Loading models...</p>`
+    return
+  }
+  if (!choices.length) {
+    modelMenu.innerHTML = `<p class="composer-select-empty">No models available</p>`
+    return
+  }
+  modelMenu.innerHTML = choices.map((model) => {
+    const selected = model === activeModel
+    return `<button type="button" class="composer-select-option composer-model-option${selected ? " selected" : ""}" role="option" aria-selected="${String(selected)}" data-model-choice="${escapeAttribute(model)}"${state.modelChanging ? " disabled" : ""}><span class="composer-select-option-main">${escapeHtml(model)}</span></button>`
+  }).join("")
+}
+
+function displayedModel() {
+  if (state.viewedSessionId) return state.model || state.settings.model
+  return currentRuntimeSnapshot().status === "ready" ? state.model || state.settings.model : state.settings.model
+}
+
+function canOpenModelMenu() {
+  const target = modelSelectionTarget(currentRuntimeSnapshot().status, runtimeTurnActive())
+  return Boolean(state.settings.hasApiKey && target !== "unavailable" && !state.modelChanging)
+}
+
+function closeModelMenu() {
+  if (state.modelMenuOpen || state.modelMenuLoading) modelMenuRequestId += 1
+  state.modelMenuOpen = false
+  state.modelMenuLoading = false
+}
+
+function closeComposerSelectMenus() {
+  closeModelMenu()
+  state.projectMenuOpen = false
+}
+
+async function toggleModelMenu() {
+  if (!canOpenModelMenu()) return
+  if (state.modelMenuOpen) {
+    closeModelMenu()
+    render()
+    return
+  }
+  const requestId = ++modelMenuRequestId
+  state.modelMenuOpen = true
+  state.modelMenuLoading = true
+  state.projectMenuOpen = false
+  state.composerMenuOpen = false
+  closeSlashCommandMenu()
+  render()
+  try {
+    await loadAvailableModels()
+    if (!isCurrentModelMenuRequest(requestId)) return
+  } catch (error) {
+    if (requestId !== modelMenuRequestId) return
+    state.notice = error instanceof Error ? error.message : String(error)
+    state.modelMenuOpen = false
+  } finally {
+    if (requestId === modelMenuRequestId) {
+      state.modelMenuLoading = false
+      render()
+    }
+  }
+}
+
+function isCurrentModelMenuRequest(requestId: number) {
+  return requestId === modelMenuRequestId && state.modelMenuOpen
+}
+
+async function selectModel(model: string) {
+  if (!model || model === displayedModel() || state.modelChanging) {
+    closeModelMenu()
+    render()
+    return
+  }
+  const runtime = currentRuntimeSnapshot()
+  const target = modelSelectionTarget(runtime.status, runtimeTurnActive())
+  if (target === "unavailable") return
+  const runtimeId = currentRuntimeId()
+  state.modelChanging = true
+  render()
+  try {
+    if (target === "runtime") {
+      const result = asRecord(await request(runtimeMethods.modelSet, { model }, runtimeId))
+      state.model = typeof result.model === "string" && result.model ? result.model : model
+    } else {
+      state.settings = await window.api.settings.save({ model })
+      if (!state.viewedSessionId) state.model = model
+    }
+    state.models = modelChoices(state.models, displayedModel())
+    closeModelMenu()
+  } finally {
+    state.modelChanging = false
+    render()
+  }
+}
+
+function toggleProjectMenu() {
+  if (!workingDirectorySelectionEnabled(state.projects.length, state.viewedSessionId)) {
+    state.projectMenuOpen = false
+    render()
+    return
+  }
+  state.projectMenuOpen = !state.projectMenuOpen
+  closeModelMenu()
+  state.composerMenuOpen = false
+  closeSlashCommandMenu()
+  render()
 }
 
 function renderStream() {
@@ -818,8 +1008,11 @@ function applyOverview(overview: Awaited<ReturnType<typeof window.api.projects.g
   }
   state.projects = overview.projects
   state.recentSessions = overview.recentSessions
-  state.chatProjectPath = projectForPath(state.chatProjectPath)?.path || overview.activeProjectPath
+  state.fallbackProjectPath = overview.activeProjectPath
+  state.chatProjectPath = projectForPath(state.chatProjectPath)?.path
+    || defaultNewChatProjectPath(state.projects, state.recentSessions, state.fallbackProjectPath)
   state.viewedProjectPath = projectForPath(state.viewedProjectPath)?.path || state.chatProjectPath
+  if (!projectForPath(state.projectMenuPath)) state.projectMenuPath = ""
   state.sidebarOpen = overview.sidebarOpen
   state.sidebarWidth = overview.sidebarWidth
   state.filesOpen = overview.filesOpen
@@ -842,17 +1035,14 @@ async function loadReplay(sessionId = state.viewedSessionId) {
   const runtimeId = runtimeIdForSession(sessionId)
   if (runtimeTurnActive(runtimeId)) conversation = { ...conversation, ...conversationFor(sessionId), activeTurnId: conversationFor(sessionId).activeTurnId }
   setConversationFor(sessionId, conversation)
-  if (sessionId === state.viewedSessionId) resetConversationPresentation(false)
+  if (sessionId === state.viewedSessionId) {
+    state.model = result.model
+    resetConversationPresentation(false)
+  }
 }
 
-async function loadModels() {
-  try {
-    const result = asRecord(await request(runtimeMethods.modelList))
-    state.models = Array.isArray(result.models) ? result.models.filter((model): model is string => typeof model === "string") : []
-    state.model = typeof result.current_model === "string" ? result.current_model : state.model
-  } catch {
-    state.models = state.model ? [state.model] : []
-  }
+async function loadAvailableModels() {
+  state.models = await window.api.models.list()
 }
 
 async function loadSettings() {
@@ -1036,10 +1226,31 @@ document.addEventListener("keydown", (event) => {
     closeSlashCommandMenu()
     return
   }
+  if (event.key === "Escape" && state.modelMenuOpen) {
+    event.preventDefault()
+    closeModelMenu()
+    render()
+    modelMenuTrigger.focus()
+    return
+  }
+  if (event.key === "Escape" && state.projectMenuOpen) {
+    event.preventDefault()
+    state.projectMenuOpen = false
+    render()
+    projectMenuTrigger.focus()
+    return
+  }
   if (event.key === "Escape" && state.composerMenuOpen) {
     state.composerMenuOpen = false
     render()
     prompt.focus()
+    return
+  }
+  if (event.key === "Escape" && state.projectMenuPath) {
+    const menuPath = state.projectMenuPath
+    state.projectMenuPath = ""
+    render()
+    projectList.querySelector<HTMLButtonElement>(`[data-project-menu="${CSS.escape(menuPath)}"]`)?.focus()
     return
   }
   if (event.key === "Escape" && runtimeTurnActive() && !state.settingsOpen) {
@@ -1047,8 +1258,16 @@ document.addEventListener("keydown", (event) => {
   }
 })
 document.addEventListener("pointerdown", (event) => {
+  if ((state.modelMenuOpen || state.projectMenuOpen) && !(event.target as HTMLElement).closest(".composer-select-wrap")) {
+    closeComposerSelectMenus()
+    render()
+  }
   if (state.composerMenuOpen && !(event.target as HTMLElement).closest(".composer-menu-wrap")) {
     state.composerMenuOpen = false
+    render()
+  }
+  if (state.projectMenuPath && !(event.target as HTMLElement).closest(".project-menu-wrap")) {
+    state.projectMenuPath = ""
     render()
   }
   if (state.slashMenuOpen && !(event.target as HTMLElement).closest(".prompt-wrap")) closeSlashCommandMenu()
@@ -1115,6 +1334,13 @@ function clearSlashCommandPending() {
 }
 
 async function runSlash(input: string) {
+  const localNotice = desktopSlashCommandNotice(input)
+  if (localNotice) {
+    state.notice = localNotice
+    clearSlashCommandPending()
+    render()
+    return
+  }
   const project = chatProject()
   if (!project?.available) {
     state.notice = "Choose a project before running a command."
@@ -1122,6 +1348,7 @@ async function runSlash(input: string) {
     return
   }
   const runtimeId = currentRuntimeId()
+  const commandSessionId = state.viewedSessionId
   const compacting = /^\/compact\s*$/i.test(input)
   state.slashCommandPending = true
   state.slashCommandInput = input
@@ -1131,25 +1358,30 @@ async function runSlash(input: string) {
   render()
   try {
     await ensureRuntime(runtimeId, project.path, state.viewedSessionId || undefined)
-    state.viewedRuntimeId = runtimeId
+    if (isCurrentSlashView(runtimeId, project.path, commandSessionId)) state.viewedRuntimeId = runtimeId
     const result = asRecord(await request(runtimeMethods.commandExecute, { input }, runtimeId))
     const commands = parseSlashCommands(asRecord(result.display).commands)
     if (commands.length) state.slashCommands = commands
     const text = asRecordText(result.text)
     if (compacting && text.startsWith("Compact complete.")) {
-      await loadReplay()
-      state.notice = "Context compacted. Session history remains visible."
-    } else if (text) {
-      state.conversation = addCommandResult(state.conversation, input, text, asRecord(result.display))
+      await loadReplay(commandSessionId)
+      if (isCurrentSlashView(runtimeId, project.path, commandSessionId)) {
+        state.notice = "Context compacted. Session history remains visible."
+      }
+    } else if (text && canUpdateSlashSession(runtimeId, project.path, commandSessionId)) {
+      setConversationFor(
+        commandSessionId,
+        addCommandResult(conversationFor(commandSessionId), input, text, asRecord(result.display)),
+      )
     }
     const prefill = typeof result.prompt_prefill === "string" ? result.prompt_prefill : ""
-    if (prefill) setPrompt(prefill, true)
+    if (prefill && isCurrentSlashView(runtimeId, project.path, commandSessionId)) setPrompt(prefill, true)
     const nextPrompt = result.next_prompt && typeof result.next_prompt === "object"
       ? result.next_prompt as Record<string, unknown>
       : null
     const followUp = typeof nextPrompt?.input === "string" ? nextPrompt.input.trim() : ""
-    if (followUp) {
-      state.conversation = addUserMessage(state.conversation, followUp)
+    if (followUp && canUpdateSlashSession(runtimeId, project.path, commandSessionId)) {
+      setConversationFor(commandSessionId, addUserMessage(conversationFor(commandSessionId), followUp))
       const turn = await startTurn(followUp, runtimeId, nextPrompt?.transient_system_messages)
       if (typeof turn.session_id === "string" && turn.session_id) {
         adoptRuntimeSession(runtimeId, turn.session_id)
@@ -1162,6 +1394,17 @@ async function runSlash(input: string) {
     clearSlashCommandPending()
     render()
   }
+}
+
+function isCurrentSlashView(runtimeId: string, projectPath: string, sessionId: string) {
+  return currentRuntimeId() === runtimeId
+    && samePath(state.chatProjectPath, projectPath)
+    && state.viewedSessionId === sessionId
+}
+
+function canUpdateSlashSession(runtimeId: string, projectPath: string, sessionId: string) {
+  return isCurrentSlashView(runtimeId, projectPath, sessionId)
+    || Boolean(sessionId && Object.hasOwn(state.conversationCache, sessionId))
 }
 
 async function compactCurrentSession() {
@@ -1230,6 +1473,7 @@ sidebarToggle.addEventListener("click", () => runAction(toggleSidebar))
 requiredElement("close-files").addEventListener("click", () => runAction(() => setFilesOpen(false)))
 filesToggle.addEventListener("click", () => runAction(() => setFilesOpen(!state.filesOpen)))
 composerMenuTrigger.addEventListener("click", () => {
+  closeComposerSelectMenus()
   state.composerMenuOpen = !state.composerMenuOpen
   render()
 })
@@ -1251,24 +1495,40 @@ slashCommandMenu.addEventListener("click", (event) => {
   const command = state.slashCommands.find((item) => item.name === commandName)
   if (command) selectSlashCommand(command)
 })
-modelSelect.addEventListener("change", () => {
-  const model = modelSelect.value
-  if (!model) return
-  runAction(async () => {
-    await request(runtimeMethods.modelSet, { model })
-    state.model = model
-    render()
-  })
+modelMenuTrigger.addEventListener("click", () => runAction(toggleModelMenu))
+modelMenu.addEventListener("click", (event) => {
+  const model = (event.target as HTMLElement).closest<HTMLButtonElement>("[data-model-choice]")?.dataset.modelChoice
+  if (model) runAction(() => selectModel(model))
 })
 settingsForm.addEventListener("submit", (event) => { event.preventDefault(); runAction(saveSettings) })
 requiredElement("close-settings").addEventListener("click", () => { state.settingsOpen = false; render() })
 requiredElement("cancel-settings").addEventListener("click", () => { state.settingsOpen = false; render() })
 settingsDialog.addEventListener("cancel", () => { state.settingsOpen = false; render() })
-projectSelect.addEventListener("change", () => {
-  if (projectSelect.value) runAction(() => selectChatProject(projectSelect.value))
+projectMenuTrigger.addEventListener("click", () => toggleProjectMenu())
+projectMenu.addEventListener("click", (event) => {
+  if (state.viewedSessionId) {
+    state.projectMenuOpen = false
+    render()
+    return
+  }
+  const path = (event.target as HTMLElement).closest<HTMLButtonElement>("[data-project-choice]")?.dataset.projectChoice
+  if (!path || samePath(path, state.chatProjectPath)) {
+    state.projectMenuOpen = false
+    render()
+    return
+  }
+  state.projectMenuOpen = false
+  render()
+  runAction(() => selectChatProject(path))
 })
 projectList.addEventListener("click", (event) => {
   const target = event.target as HTMLElement
+  const menuProjectPath = target.closest<HTMLButtonElement>("[data-project-menu]")?.dataset.projectMenu
+  if (menuProjectPath) {
+    state.projectMenuPath = samePath(menuProjectPath, state.projectMenuPath) ? "" : menuProjectPath
+    render()
+    return
+  }
   const projectPath = target.closest<HTMLButtonElement>("[data-project-path]")?.dataset.projectPath
   if (projectPath) {
     runAction(() => toggleProject(projectPath))
@@ -1276,6 +1536,8 @@ projectList.addEventListener("click", (event) => {
   }
   const removeProjectPath = target.closest<HTMLButtonElement>("[data-remove-project]")?.dataset.removeProject
   if (removeProjectPath) {
+    state.projectMenuPath = ""
+    render()
     runAction(() => removeProject(removeProjectPath))
     return
   }
@@ -1438,6 +1700,7 @@ function openSettings() {
 }
 
 function resetProjectView() {
+  closeComposerSelectMenus()
   state.viewedSessionId = ""
   state.viewedRuntimeId = ""
   state.conversationCache = {}
@@ -1452,6 +1715,10 @@ function resetProjectView() {
 function restoreProjectDraft() {
   prompt.value = state.drafts[state.chatProjectPath] || ""
   autoGrowPrompt()
+}
+
+function resolveNewChatProjectPath() {
+  return defaultNewChatProjectPath(state.projects, state.recentSessions, state.fallbackProjectPath)
 }
 
 async function addProject(createDraft = false) {
@@ -1486,12 +1753,14 @@ async function removeProject(path: string) {
   const project = state.projects.find((item) => item.path === path)
   if (!project) return
   if (!window.confirm(`Remove ${project.name} from Rind Desktop? Its folder and sessions will be kept.`)) return
+  const removesViewedProject = samePath(path, state.viewedProjectPath)
+  const removesChatProject = samePath(path, state.chatProjectPath)
   const overview = await window.api.projects.remove(path)
   applyOverview(overview)
   delete state.drafts[path]
-  if (samePath(path, state.viewedProjectPath)) {
-    state.viewedProjectPath = overview.activeProjectPath
-    state.chatProjectPath = overview.activeProjectPath
+  if (removesViewedProject || removesChatProject) {
+    state.chatProjectPath = resolveNewChatProjectPath()
+    state.viewedProjectPath = state.chatProjectPath
     resetProjectView()
     restoreProjectDraft()
     if (!activeProject()?.available && state.filesOpen) {
@@ -1504,6 +1773,10 @@ async function removeProject(path: string) {
 }
 
 async function startNewChat() {
+  closeComposerSelectMenus()
+  if (state.chatProjectPath) state.drafts[state.chatProjectPath] = prompt.value
+  state.chatProjectPath = resolveNewChatProjectPath()
+  state.viewedProjectPath = state.chatProjectPath
   const project = chatProject()
   if (!project?.available) {
     await addProject(true)
@@ -1511,10 +1784,11 @@ async function startNewChat() {
   }
   state.viewedSessionId = ""
   state.viewedRuntimeId = ""
+  state.model = state.settings.model
   state.filesOpen = false
   state.filePreview = undefined
   state.fileListings = {}
-  state.draftRuntimeIds[state.chatProjectPath] = createRuntimeId("draft")
+  state.draftRuntimeIds[project.path] = createRuntimeId("draft")
   state.conversation = createConversation()
   resetConversationPresentation()
   restoreProjectDraft()
@@ -1639,16 +1913,17 @@ async function switchSession(nextSessionId: string) {
   }
   const project = projectForPath(session.workspaceRoot)
   if (!project) return
+  closeComposerSelectMenus()
   const runtimeId = runtimeIdForSession(nextSessionId)
   showCachedSession(nextSessionId)
   state.viewedSessionId = nextSessionId
+  state.model = ""
   state.viewedProjectPath = project.path
   state.chatProjectPath = project.path
   state.viewedRuntimeId = state.runtimeWorkers[runtimeId] ? runtimeId : ""
   state.expandedDirectories = new Set([""])
   state.fileListings = {}
   state.filePreview = undefined
-  applyOverview(await window.api.projects.select(project.path))
   render()
   if (!state.conversationCache[nextSessionId] || state.conversation.entries.length === 0) await loadReplay(nextSessionId)
   if (state.filesOpen && viewedProject()?.available) await loadDirectory("")
@@ -1656,13 +1931,16 @@ async function switchSession(nextSessionId: string) {
 }
 
 async function selectChatProject(path: string) {
+  if (state.viewedSessionId) return
   const project = state.projects.find((item) => item.path === path)
   if (!project) return
+  closeComposerSelectMenus()
   if (state.chatProjectPath) state.drafts[state.chatProjectPath] = prompt.value
   state.chatProjectPath = project.path
   state.viewedProjectPath = project.path
   state.viewedSessionId = ""
   state.viewedRuntimeId = ""
+  state.model = state.settings.model
   state.draftRuntimeIds[path] = createRuntimeId("draft")
   state.conversation = createConversation()
   state.expandedDirectories = new Set([""])
@@ -1670,7 +1948,6 @@ async function selectChatProject(path: string) {
   state.filePreview = undefined
   resetConversationPresentation()
   restoreProjectDraft()
-  applyOverview(await window.api.projects.select(path))
   if (state.filesOpen && project.available) await loadDirectory("")
   render()
 }
@@ -1710,6 +1987,11 @@ async function saveSettings() {
   state.notice = "Saving settings..."
   render()
   try {
+    const runtimeConfigChanged = Boolean(apiKey)
+      || settingsBaseUrl.value.trim() !== state.settings.baseUrl
+      || settingsModel.value.trim() !== state.settings.model
+      || settingsReasoning.value.trim() !== state.settings.reasoningEffort
+    const hasRunningRuntime = Object.values(state.runtimeWorkers).some((runtime) => runtime.status === "starting" || runtime.status === "ready")
     state.settings = await window.api.settings.save({
       ...(apiKey ? { apiKey } : {}),
       model: settingsModel.value.trim(),
@@ -1718,7 +2000,9 @@ async function saveSettings() {
     })
     state.settingsOpen = false
     state.settingsAutoOpened = true
-    state.notice = "Settings saved."
+    state.notice = runtimeConfigChanged && hasRunningRuntime
+      ? "Settings saved. Existing runtimes keep their current configuration until they restart."
+      : "Settings saved."
   } catch (error) {
     state.notice = error instanceof Error ? error.message : String(error)
   } finally {
