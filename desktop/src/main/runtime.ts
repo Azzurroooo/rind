@@ -282,7 +282,8 @@ export function requestRuntime(id: string, method: RuntimeMethod, params: Record
     worker.turnActive = true
     worker.idleEligible = false
   }
-  const timeout = method === runtimeMethods.sessionPrompt || method === runtimeMethods.commandExecute ? 15 * 60_000 : 30_000
+  const longRunning = method === runtimeMethods.sessionPrompt || method === runtimeMethods.sessionFollowUp
+  const timeout = longRunning ? 15 * 60_000 : 120_000
   return request(worker, method, params, timeout)
 }
 

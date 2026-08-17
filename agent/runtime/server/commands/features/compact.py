@@ -9,7 +9,9 @@ async def handle_compact(context: SlashCommandContext, args: list[str]) -> Slash
     compact_context = getattr(context.runtime, "compact_context", None)
     if not callable(compact_context):
         return "Compact is not supported by this runtime."
-    record = await compact_context(reason="manual", cancellation_token=context.cancellation_token)
+    if getattr(context.runtime, "turn_active", False):
+        return "Cannot compact while a turn is running. Wait for it to finish or interrupt it first."
+    record = await compact_context(reason="manual")
     source = record.get("source") if isinstance(record, dict) else {}
     if not isinstance(source, dict):
         source = {}

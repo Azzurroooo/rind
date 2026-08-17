@@ -79,7 +79,8 @@ class StdioRuntimeServer:
         self._pending_answers: dict[str, asyncio.Future[str]] = {}
         self._current_cancel: CancellationTokenSource | None = None
         self._queued_turn_starts = 0
-        self._initialized = False
+        self._turn_slot = asyncio.Lock()
+        self._dispatch_tasks: set[asyncio.Task] = set()
         self._sequence = 0
         self._stopping = False
         self._shutdown_request: dict[str, Any] | None = None
@@ -117,6 +118,7 @@ class StdioRuntimeServer:
         while True:
             request = await self._requests.get()
             if request is None:
+                await self._cancel_dispatch_tasks()
                 await self._respond_to_shutdown()
                 return 0
             method = str(request.get("method") or "")
@@ -130,7 +132,21 @@ class StdioRuntimeServer:
                     "ServerStopping",
                 )
                 continue
-            await self._dispatch(request)
+            if method == RuntimeMethod.INITIALIZE:
+                # Initialization gates every other method, so keep it serial.
+                await self._dispatch(request)
+                continue
+            # Concurrent dispatch keeps commands and queries responsive while a
+            # turn occupies the runtime; per-resource locks preserve ordering.
+            task = asyncio.create_task(self._dispatch(request))
+            self._dispatch_tasks.add(task)
+            task.add_done_callback(self._dispatch_tasks.discard)
+
+    async def _cancel_dispatch_tasks(self) -> None:
+        for task in self._dispatch_tasks:
+            task.cancel()
+        if self._dispatch_tasks:
+            await asyncio.gather(*self._dispatch_tasks, return_exceptions=True)
 
     def _begin_shutdown(self, request: dict[str, Any] | None = None) -> bool:
         if self._stopping:
@@ -189,7 +205,6 @@ class StdioRuntimeServer:
 
     async def _initialize(self, request: dict[str, Any]) -> None:
         await self._runtime.initialize()
-        self._initialized = True
         result = {
             "session_id": getattr(self._session, "session_id", None),
             "draft": getattr(self._session, "session_id", None) is None,
@@ -310,35 +325,44 @@ class StdioRuntimeServer:
             if not isinstance(transient_system_messages, list):
                 transient_system_messages = None
 
-            cancel_source = CancellationTokenSource()
-            self._current_cancel = cancel_source
-            turn_session_id = ""
-            turn_id = ""
-            try:
-                async for event in self._runtime.run_turn(
-                    query=query,
-                    cancellation_token=cancel_source.token,
-                    transient_system_messages=transient_system_messages,
-                ):
-                    event_data = event.to_dict()
-                    turn_session_id = turn_session_id or str(event_data.get("session_id") or "")
-                    turn_id = turn_id or str(event_data.get("turn_id") or "")
-                    await self._send_event(event_data)
-                await self._respond(
-                    request,
-                    {
-                        "ok": True,
-                        "session_id": turn_session_id or str(getattr(self._session, "session_id", "") or ""),
-                        "turn_id": turn_id,
-                    },
-                )
-            finally:
-                self._current_cancel = None
-                cancel_source.dispose()
+            async with self._turn_slot:
+                cancel_source = CancellationTokenSource()
+                self._current_cancel = cancel_source
+                turn_session_id = ""
+                turn_id = ""
+                try:
+                    async for event in self._runtime.run_turn(
+                        query=query,
+                        cancellation_token=cancel_source.token,
+                        transient_system_messages=transient_system_messages,
+                    ):
+                        event_data = event.to_dict()
+                        turn_session_id = turn_session_id or str(event_data.get("session_id") or "")
+                        turn_id = turn_id or str(event_data.get("turn_id") or "")
+                        await self._send_event(event_data)
+                    await self._respond(
+                        request,
+                        {
+                            "ok": True,
+                            "session_id": turn_session_id or str(getattr(self._session, "session_id", "") or ""),
+                            "turn_id": turn_id,
+                        },
+                    )
+                finally:
+                    if self._current_cancel is cancel_source:
+                        self._current_cancel = None
+                    cancel_source.dispose()
         finally:
             self._queued_turn_starts = max(0, self._queued_turn_starts - 1)
 
     async def _compact(self, request: dict[str, Any]) -> None:
+        if getattr(self._runtime, "turn_active", False):
+            await self._respond_error(
+                request,
+                "Cannot compact context while a turn is active.",
+                "TurnActive",
+            )
+            return
         record = await self._runtime.compact_context(reason="manual")
         await self._respond(request, record)
 
@@ -541,26 +565,15 @@ class StdioRuntimeServer:
     async def _execute_slash(self, request: dict[str, Any]) -> None:
         params = request.get("params") if isinstance(request.get("params"), dict) else {}
         raw_input = str(params.get("input") or "")
-        cancel_source = CancellationTokenSource()
-        self._current_cancel = cancel_source
-        try:
-            result = await self._slash_router.execute(
-                raw_input,
-                SlashCommandContext(
-                    runtime=self._runtime,
-                    session=self._session,
-                    debug=self._debug,
-                    cancellation_token=cancel_source.token,
-                ),
-            )
-            await self._respond_slash_result(request, result)
-        except asyncio.CancelledError:
-            if not cancel_source.token.is_cancelled:
-                raise
-            await self._respond(request, SlashCommandResult("Compact cancelled.").to_dict())
-        finally:
-            self._current_cancel = None
-            cancel_source.dispose()
+        result = await self._slash_router.execute(
+            raw_input,
+            SlashCommandContext(
+                runtime=self._runtime,
+                session=self._session,
+                debug=self._debug,
+            ),
+        )
+        await self._respond_slash_result(request, result)
 
     async def _ingest_line(self, line: str) -> None:
         message, parse_error = self._parse_line(line)
@@ -631,9 +644,6 @@ class StdioRuntimeServer:
         if method == RuntimeMethod.RIND_GOAL_CLEAR:
             await self._goal_clear(message)
             return True
-        if method == RuntimeMethod.RIND_COMMAND_EXECUTE and self._initialized and self._is_readonly_slash_request(message):
-            await self._execute_readonly_slash(message)
-            return True
         return False
 
     async def _list_backgrounds(self, request: dict[str, Any]) -> None:
@@ -703,32 +713,6 @@ class StdioRuntimeServer:
             await self._respond_error(message, str(exc), exc.error_type)
             return
         await self._respond(message, result)
-
-    def _is_readonly_slash_request(self, message: dict[str, Any]) -> bool:
-        params = message.get("params") if isinstance(message.get("params"), dict) else {}
-        raw_input = str(params.get("input") or "").strip()
-        try:
-            name, _args = self._slash_router._parse(raw_input)
-        except ValueError:
-            return False
-        return name in {"status", "doctor"}
-
-    async def _execute_readonly_slash(self, request: dict[str, Any]) -> None:
-        params = request.get("params") if isinstance(request.get("params"), dict) else {}
-        raw_input = str(params.get("input") or "")
-        try:
-            result = await self._slash_router.execute(
-                raw_input,
-                SlashCommandContext(
-                    runtime=self._runtime,
-                    session=self._session,
-                    debug=self._debug,
-                    cancellation_token=None,
-                ),
-            )
-            await self._respond_slash_result(request, result)
-        except Exception as exc:
-            await self._respond_error(request, str(exc), type(exc).__name__)
 
     async def _respond_slash_result(self, request: dict[str, Any], result: SlashCommandResult) -> None:
         await self._respond(request, result.to_dict())

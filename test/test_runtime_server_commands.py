@@ -13,7 +13,6 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from agent.runtime.server.commands import SlashCommandContext, SlashCommandInfo, SlashCommandRouter
 from agent.runtime.server.commands.git_status import GitPromptStatus
-from agent.domain.cancellation import CancellationTokenSource
 from agent.infrastructure.config import Config
 from agent.infrastructure.persistence.jsonl_session_store import JsonlSessionStore
 from agent.infrastructure.skills.repository import SkillRepository
@@ -80,22 +79,6 @@ class FakeRuntime:
     async def set_model(self, model):
         self.model = model
         return {"runtime": True, "session": False}
-
-
-class TokenAwareCompactRuntime:
-    def __init__(self):
-        self.received_token = None
-
-    async def compact_context(self, reason="manual", cancellation_token=None):
-        self.received_token = cancellation_token
-        return {
-            "id": "token_compact_1",
-            "source": {
-                "message_start_index": 0,
-                "message_end_index_exclusive": 1,
-                "tool_call_ids": [],
-            },
-        }
 
 
 class EmptyStream:
@@ -616,24 +599,6 @@ async def test_compact_calls_runtime_compact_context() -> None:
     assert "Compact complete." in result.text
     assert "runtime_compact_1" in result.text
     assert "tool calls: 0" in result.text
-
-
-@pytest.mark.asyncio
-async def test_compact_passes_cancellation_token_to_runtime() -> None:
-    source = CancellationTokenSource()
-    runtime = TokenAwareCompactRuntime()
-    context = SlashCommandContext(
-        runtime=runtime,
-        session=FakeSession(),
-        debug=True,
-        cancellation_token=source.token,
-    )
-
-    result = await SlashCommandRouter().execute("/compact", context)
-
-    assert "Compact complete." in result.text
-    assert "token_compact_1" in result.text
-    assert runtime.received_token is source.token
 
 
 @pytest.mark.asyncio

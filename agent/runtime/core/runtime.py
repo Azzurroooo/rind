@@ -114,6 +114,11 @@ class AgentRuntime:
         """Expose the resolved repository to read-only interface commands."""
         return self._skill_repository
 
+    @property
+    def turn_active(self) -> bool:
+        """Whether a turn is running or queued inputs are still being accepted."""
+        return self._accepting_inputs or bool(self._active_turn_id)
+
     def set_user_question_responder(self, responder) -> None:
         """Set a callback invoked when ask_user_question needs a user answer."""
         self._turn_runner.set_user_question_responder(responder)
@@ -256,12 +261,17 @@ class AgentRuntime:
     async def compact_context(self, reason: str = "manual", cancellation_token: CancellationToken | None = None) -> dict:
         """Manually compact the current session through the turn runner."""
         await self.initialize()
-        return await self._turn_runner.compact_context(
-            self._session_store,
-            reason=reason,
-            phase="manual",
-            cancellation_token=cancellation_token,
-        )
+        if self.turn_active:
+            raise RuntimeError("Cannot compact context while a turn is active.")
+        async with self._workspace_lock_guard(), self._turn_lock:
+            if self.turn_active:
+                raise RuntimeError("Cannot compact context while a turn is active.")
+            return await self._turn_runner.compact_context(
+                self._session_store,
+                reason=reason,
+                phase="manual",
+                cancellation_token=cancellation_token,
+            )
 
     async def run_turn(
         self,

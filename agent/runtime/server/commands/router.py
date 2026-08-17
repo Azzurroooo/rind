@@ -8,7 +8,6 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import Any, Awaitable, Callable
 
-from agent.domain.cancellation import CancellationToken
 from agent.application.skill_selection import SkillInvocationParser
 
 
@@ -17,7 +16,6 @@ class SlashCommandContext:
     runtime: Any
     session: Any
     debug: bool = False
-    cancellation_token: CancellationToken | None = None
 
 
 @dataclass(slots=True)

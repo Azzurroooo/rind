@@ -6,6 +6,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 os.chdir(PROJECT_ROOT)
 if str(PROJECT_ROOT) not in sys.path:
@@ -72,6 +74,54 @@ class _AsyncModelList:
             return next(self._iter)
         except StopIteration:
             raise StopAsyncIteration
+
+
+def _turn_event(event_type: str, turn_id: str = "t1"):
+    return type(
+        "Event",
+        (),
+        {
+            "to_dict": lambda _self: {
+                "type": event_type,
+                "ts": "1700000000.0",
+                "session_id": "s1",
+                "turn_id": turn_id,
+            }
+        },
+    )()
+
+
+class _BlockingTurnRuntime(_Runtime):
+    """Runtime whose turn blocks until released, mirroring a long-running turn."""
+
+    def __init__(self):
+        super().__init__()
+        self.started = asyncio.Event()
+        self.release = asyncio.Event()
+
+    async def run_turn(self, **_kwargs):
+        self.started.set()
+        await self.release.wait()
+        yield _turn_event("turn_completed")
+
+
+def _trace_responses(server: StdioRuntimeServer, responses: list) -> None:
+    writer_send = server._writer.send
+
+    async def trace_send(payload: dict) -> None:
+        await writer_send(payload)
+        if payload.get("kind") == "response":
+            responses.append(payload)
+
+    server._writer.send = trace_send
+
+
+async def _await_response(responses: list, request_id, timeout: float = 10.0) -> None:
+    async def poll() -> None:
+        while not any(message.get("request_id") == request_id for message in responses):
+            await asyncio.sleep(0.01)
+
+    await asyncio.wait_for(poll(), timeout)
 
 
 def test_question_response_completes_pending_future():
@@ -505,26 +555,43 @@ def test_slash_execute_non_compact_does_not_reset_context_usage(capsys):
     assert message["result"]["display"]["type"] == "help"
 
 
-def test_readonly_status_slash_responds_without_main_queue(capsys):
+@pytest.mark.parametrize(
+    ("slash_input", "display_type"),
+    [
+        ("/status", "status"),
+        ("/doctor", "doctor"),
+        ("/help", "help"),
+    ],
+)
+def test_serve_answers_slash_commands_while_a_turn_occupies_the_runtime(slash_input, display_type, capsys):
     async def run():
-        server = StdioRuntimeServer(_Runtime(), _Session(), debug=True)
-        server._initialized = True
-        handled = await server._handle_control_message(
-            {"request_id": 15, "method": "rind/command/execute", "params": {"input": "/status"}}
+        runtime = _BlockingTurnRuntime()
+        server = StdioRuntimeServer(runtime, _Session())
+        responses: list[dict] = []
+        _trace_responses(server, responses)
+        serve = asyncio.create_task(server._serve())
+        server._requests.put_nowait(
+            {"kind": "request", "request_id": 41, "method": "session/prompt", "params": {"input": "hello"}}
         )
-        await asyncio.sleep(0)
-        queued = server._requests.empty()
-        return handled, queued
+        await runtime.started.wait()
+        server._requests.put_nowait(
+            {"kind": "request", "request_id": 42, "method": "rind/command/execute", "params": {"input": slash_input}}
+        )
+        await _await_response(responses, 42)
+        runtime.release.set()
+        await _await_response(responses, 41)
+        server._begin_shutdown()
+        return await asyncio.wait_for(serve, 10)
 
-    handled, queued = asyncio.run(run())
+    assert asyncio.run(run()) == 0
 
-    message = json.loads(capsys.readouterr().out)
-    assert handled is True
-    assert queued is True
-    assert message["result"]["text"].startswith("```text\nStatus:")
-    assert "Session: s1" in message["result"]["text"]
-    assert message["result"]["display"]["type"] == "status"
-    assert message["result"]["display"]["session"] == "s1"
+    messages = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
+    command = next(message for message in messages if message.get("request_id") == 42)
+    prompt = next(message for message in messages if message.get("request_id") == 41)
+
+    assert messages.index(command) < messages.index(prompt)
+    assert command["result"]["display"]["type"] == display_type
+    assert prompt["result"] == {"ok": True, "session_id": "s1", "turn_id": "t1"}
 
 
 def test_background_requests_use_control_callbacks(capsys):
@@ -578,62 +645,68 @@ def test_background_output_rejects_invalid_request(capsys):
     assert message["error"]["type"] == "InvalidRequest"
 
 
-def test_readonly_doctor_slash_responds_without_main_queue(capsys):
+def test_slash_execution_does_not_replace_the_active_turn_cancel_source(capsys):
     async def run():
-        server = StdioRuntimeServer(_Runtime(), _Session())
-        server._initialized = True
-        handled = await server._handle_control_message(
-            {"request_id": 16, "method": "rind/command/execute", "params": {"input": "/doctor"}}
+        runtime = _BlockingTurnRuntime()
+        server = StdioRuntimeServer(runtime, _Session())
+        turn_task = asyncio.create_task(
+            server._run_turn({"kind": "request", "request_id": 43, "method": "session/prompt", "params": {"input": "hello"}})
         )
-        await asyncio.sleep(0)
-        return handled, server._requests.empty()
-
-    handled, queued = asyncio.run(run())
-
-    message = json.loads(capsys.readouterr().out)
-    assert handled is True
-    assert queued is True
-    assert message["result"]["text"].startswith("Doctor:")
-    assert message["result"]["display"]["type"] == "doctor"
-
-
-def test_readonly_slash_does_not_replace_current_cancel(capsys):
-    async def run():
-        server = StdioRuntimeServer(_Runtime(), _Session())
-        server._initialized = True
-        current = CancellationTokenSource()
-        server._current_cancel = current
-        handled = await server._handle_control_message(
-            {"request_id": 17, "method": "rind/command/execute", "params": {"input": "/status"}}
+        await runtime.started.wait()
+        await server._execute_slash(
+            {"kind": "request", "request_id": 44, "method": "rind/command/execute", "params": {"input": "/status"}}
         )
-        await asyncio.sleep(0)
-        same_source = server._current_cancel is current
-        current.dispose()
-        return handled, same_source
+        cancel_still_registered = server._current_cancel is not None
+        runtime.release.set()
+        await turn_task
+        return cancel_still_registered
 
-    handled, same_source = asyncio.run(run())
+    cancel_still_registered = asyncio.run(run())
 
-    assert handled is True
-    assert same_source is True
-    assert json.loads(capsys.readouterr().out)["result"]["text"].startswith("```text\nStatus:")
+    messages = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
+
+    assert cancel_still_registered is True
+    assert messages[0]["result"]["text"].startswith("```text\nStatus:")
+    assert messages[-1]["result"] == {"ok": True, "session_id": "s1", "turn_id": "t1"}
 
 
-def test_non_readonly_slash_stays_on_main_queue(capsys):
+def test_serve_runs_queued_prompts_serially(capsys):
+    class Runtime(_BlockingTurnRuntime):
+        def __init__(self):
+            super().__init__()
+            self.started_turns: list[str] = []
+
+        async def run_turn(self, **kwargs):
+            self.started_turns.append(str(kwargs.get("query")))
+            async for event in super().run_turn(**kwargs):
+                yield event
+
     async def run():
-        server = StdioRuntimeServer(_Runtime(), _Session())
-        server._initialized = True
-        message = {"request_id": 18, "method": "rind/command/execute", "params": {"input": "/help"}}
-        handled = await server._handle_control_message(message)
-        if not handled:
-            await server._requests.put(message)
-        queued = await server._requests.get()
-        return handled, queued
+        runtime = Runtime()
+        server = StdioRuntimeServer(runtime, _Session())
+        responses: list[dict] = []
+        _trace_responses(server, responses)
+        serve = asyncio.create_task(server._serve())
+        server._requests.put_nowait(
+            {"kind": "request", "request_id": 45, "method": "session/prompt", "params": {"input": "first"}}
+        )
+        server._requests.put_nowait(
+            {"kind": "request", "request_id": 46, "method": "session/prompt", "params": {"input": "second"}}
+        )
+        await runtime.started.wait()
+        await asyncio.sleep(0.05)
+        overlapping_turns = list(runtime.started_turns)
+        runtime.release.set()
+        await _await_response(responses, 45)
+        await _await_response(responses, 46)
+        server._begin_shutdown()
+        await asyncio.wait_for(serve, 10)
+        return overlapping_turns, list(runtime.started_turns)
 
-    handled, queued = asyncio.run(run())
+    overlapping_turns, started_turns = asyncio.run(run())
 
-    assert handled is False
-    assert queued["params"]["input"] == "/help"
-    assert capsys.readouterr().out == ""
+    assert overlapping_turns == ["first"]
+    assert started_turns == ["first", "second"]
 
 
 def test_turn_input_controls_respond_without_main_queue(capsys):
@@ -903,17 +976,15 @@ def test_session_switch_is_rejected_while_turn_start_is_queued(capsys):
     assert response["error"]["type"] == "TurnActive"
 
 
-def test_readonly_slash_usage_errors_return_immediately(capsys):
+def test_slash_usage_errors_return_as_command_results(capsys):
     async def run():
         server = StdioRuntimeServer(_Runtime(), _Session())
-        server._initialized = True
-        await server._handle_control_message(
-            {"request_id": 19, "method": "rind/command/execute", "params": {"input": "/status bad"}}
+        await server._execute_slash(
+            {"kind": "request", "request_id": 19, "method": "rind/command/execute", "params": {"input": "/status bad"}}
         )
-        await server._handle_control_message(
-            {"request_id": 20, "method": "rind/command/execute", "params": {"input": "/doctor extra"}}
+        await server._execute_slash(
+            {"kind": "request", "request_id": 20, "method": "rind/command/execute", "params": {"input": "/doctor extra"}}
         )
-        await asyncio.sleep(0)
 
     asyncio.run(run())
 
@@ -922,37 +993,90 @@ def test_readonly_slash_usage_errors_return_immediately(capsys):
     assert messages[1]["result"]["text"] == "Usage: /doctor"
 
 
-def test_slash_execute_exposes_cancellation_token_to_interrupt(capsys):
-    class Runtime(_Runtime):
-        def __init__(self):
-            super().__init__()
-            self.started = asyncio.Event()
-            self.received_token = None
+def test_compact_slash_is_rejected_while_a_turn_is_active(capsys):
+    class Runtime(_BlockingTurnRuntime):
+        @property
+        def turn_active(self) -> bool:
+            return self.started.is_set() and not self.release.is_set()
 
         async def compact_context(self, reason="manual", cancellation_token=None):
-            self.received_token = cancellation_token
-            self.started.set()
-            await cancellation_token.wait()
-            raise asyncio.CancelledError(cancellation_token.reason)
+            raise AssertionError("compact must not run while a turn is active")
 
     async def run():
         runtime = Runtime()
         server = StdioRuntimeServer(runtime, _Session())
-        task = asyncio.create_task(
-            server._execute_slash({"request_id": 13, "method": "rind/command/execute", "params": {"input": "/compact"}})
+        turn_task = asyncio.create_task(
+            server._run_turn({"kind": "request", "request_id": 47, "method": "session/prompt", "params": {"input": "hello"}})
         )
         await runtime.started.wait()
-        server._interrupt_current()
-        await task
-        return runtime
+        await server._execute_slash(
+            {"kind": "request", "request_id": 48, "method": "rind/command/execute", "params": {"input": "/compact"}}
+        )
+        runtime.release.set()
+        await turn_task
 
-    runtime = asyncio.run(run())
+    asyncio.run(run())
 
-    assert runtime.received_token is not None
-    assert runtime.received_token.is_cancelled is True
-    message = json.loads(capsys.readouterr().out)
-    assert message["result"]["text"] == "Compact cancelled."
-    assert set(message["result"]) == {"text"}
+    messages = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
+    compact = next(message for message in messages if message.get("request_id") == 48)
+
+    assert compact["result"]["text"] == (
+        "Cannot compact while a turn is running. Wait for it to finish or interrupt it first."
+    )
+
+
+def test_compact_request_returns_turn_active_error_while_a_turn_is_active(capsys):
+    class Runtime(_BlockingTurnRuntime):
+        @property
+        def turn_active(self) -> bool:
+            return self.started.is_set() and not self.release.is_set()
+
+    async def run():
+        runtime = Runtime()
+        server = StdioRuntimeServer(runtime, _Session())
+        turn_task = asyncio.create_task(
+            server._run_turn({"kind": "request", "request_id": 49, "method": "session/prompt", "params": {"input": "hello"}})
+        )
+        await runtime.started.wait()
+        await server._compact(
+            {"kind": "request", "request_id": 50, "method": "rind/session/compact", "params": {}}
+        )
+        runtime.release.set()
+        await turn_task
+
+    asyncio.run(run())
+
+    messages = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
+    compact = next(message for message in messages if message.get("request_id") == 50)
+
+    assert compact["error"] == {
+        "type": "TurnActive",
+        "message": "Cannot compact context while a turn is active.",
+    }
+
+
+def test_shutdown_cancels_inflight_dispatch_and_exits_promptly(capsys):
+    async def run():
+        runtime = _BlockingTurnRuntime()
+        server = StdioRuntimeServer(runtime, _Session())
+        serve = asyncio.create_task(server._serve())
+        server._requests.put_nowait(
+            {"kind": "request", "request_id": 51, "method": "session/prompt", "params": {"input": "hello"}}
+        )
+        await runtime.started.wait()
+        server._begin_shutdown(
+            {"kind": "request", "request_id": "bye", "method": "shutdown", "params": {}}
+        )
+        return await asyncio.wait_for(serve, 10)
+
+    assert asyncio.run(run()) == 0
+
+    messages = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
+    assert any(
+        message.get("request_id") == "bye" and message.get("result") == {"ok": True}
+        for message in messages
+    )
+    assert not any(message.get("request_id") == 51 for message in messages)
 
 
 def test_models_list_returns_unique_sorted_models_and_current_marker(capsys):
@@ -1107,6 +1231,9 @@ def test_app_server_process_exits_after_shutdown(tmp_path):
     env = dict(os.environ)
     env["HOME"] = str(home)
     env["USERPROFILE"] = str(home)
+    # Keep the child interpreter's user-site packages visible even though HOME
+    # is redirected; otherwise imports installed under the real HOME break.
+    env["PYTHONUSERBASE"] = os.environ.get("PYTHONUSERBASE") or str(Path.home() / ".local")
     process = subprocess.Popen(
         [sys.executable, "main.py", "app-server", "--stdio", "--cwd", str(workspace)],
         cwd=PROJECT_ROOT,

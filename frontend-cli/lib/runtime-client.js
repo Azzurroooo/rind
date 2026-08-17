@@ -26,6 +26,11 @@ export function isTraceLlmEnvSet() {
   return TRACE_TRUTHY.has(String(process.env.RIND_TRACE_LLM || "").trim().toLowerCase());
 }
 
+// Turns stream for as long as the model runs; every other method must answer
+// within a bounded window so a stalled runtime surfaces as an error, not silence.
+const LONG_RUNNING_METHODS = new Set([runtimeMethods.sessionPrompt, runtimeMethods.sessionFollowUp]);
+const REQUEST_TIMEOUT_MS = 120_000;
+
 export function runHelpVersion({ python, repoRoot, runtimePath = "", cliArgs, cwd = process.cwd() }) {
   const executable = runtimePath
     ? { command: runtimePath, args: [] }
@@ -94,8 +99,9 @@ export function createRuntimeClient({
     exitHandled = true;
     clearKillTimer();
     const error = cause || new Error(`Runtime exited with ${signal || code}`);
-    for (const { reject } of pending.values()) {
-      reject(error);
+    for (const entry of pending.values()) {
+      clearRequestTimer(entry);
+      entry.reject(error);
     }
     pending.clear();
     onExit(code, signal, { closing, error });
@@ -108,12 +114,21 @@ export function createRuntimeClient({
         reject(new Error("Runtime stdin is closed. Restart Rind and try again."));
         return;
       }
-      pending.set(id, { resolve, reject });
+      const entry = { resolve, reject };
+      if (!LONG_RUNNING_METHODS.has(method)) {
+        entry.timer = setTimeout(() => {
+          pending.delete(id);
+          reject(new Error(`Runtime request timed out after ${REQUEST_TIMEOUT_MS / 1000}s: ${method}`));
+        }, REQUEST_TIMEOUT_MS);
+        entry.timer.unref?.();
+      }
+      pending.set(id, entry);
       child.stdin.write(JSON.stringify(createRuntimeRequest(id, method, params)) + "\n", (error) => {
         if (!error) {
           return;
         }
         pending.delete(id);
+        clearRequestTimer(entry);
         reject(error);
       });
     });
@@ -142,10 +157,18 @@ export function createRuntimeClient({
       return;
     }
     pending.delete(id);
+    clearRequestTimer(callbacks);
     if (message.error) {
       callbacks.reject(new Error(message.error.message || "Runtime request failed"));
     } else {
       callbacks.resolve(message.result);
+    }
+  }
+
+  function clearRequestTimer(entry) {
+    if (entry.timer) {
+      clearTimeout(entry.timer);
+      entry.timer = null;
     }
   }
 
