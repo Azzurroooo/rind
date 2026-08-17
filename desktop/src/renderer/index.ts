@@ -46,6 +46,7 @@ import {
   fallbackSlashCommands,
   isExactSlashCommand,
   parseSlashCommands,
+  revealSlashCommandOption,
   slashCommandMenu as buildSlashCommandMenu,
   type SlashCommand,
 } from "./slash-commands"
@@ -1172,6 +1173,10 @@ function renderSlashCommandMenu() {
   slashCommandMenu.hidden = false
 }
 
+function revealActiveSlashCommand() {
+  revealSlashCommandOption(slashCommandMenu.querySelector<HTMLElement>(".slash-command-option.selected"))
+}
+
 function closeSlashCommandMenu() {
   state.slashMenuOpen = false
   state.slashMenuActiveIndex = 0
@@ -1202,6 +1207,7 @@ prompt.addEventListener("keydown", (event) => {
       const offset = event.key === "ArrowDown" ? 1 : -1
       state.slashMenuActiveIndex = (state.slashMenuActiveIndex + offset + menu.commands.length) % menu.commands.length
       renderSlashCommandMenu()
+      revealActiveSlashCommand()
       return
     }
     if (event.key === "Tab" || (event.key === "Enter" && !event.shiftKey && !isExactSlashCommand(state.slashCommands, prompt.value))) {
@@ -1489,6 +1495,7 @@ slashCommandMenu.addEventListener("pointermove", (event) => {
   if (index < 0 || index === state.slashMenuActiveIndex) return
   state.slashMenuActiveIndex = index
   renderSlashCommandMenu()
+  revealActiveSlashCommand()
 })
 slashCommandMenu.addEventListener("click", (event) => {
   const commandName = (event.target as HTMLElement).closest<HTMLButtonElement>("[data-slash-command]")?.dataset.slashCommand

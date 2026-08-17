@@ -7,6 +7,7 @@ import {
   fallbackSlashCommands,
   isExactSlashCommand,
   parseSlashCommands,
+  revealSlashCommandOption,
   slashCommandMenu,
 } from "../src/renderer/slash-commands.ts"
 
@@ -48,4 +49,11 @@ test("slash command prefill preserves commands that need arguments", () => {
   assert.equal(isExactSlashCommand(commands, "/compact"), true)
   assert.equal(isExactSlashCommand(commands, "/compress"), true)
   assert.equal(isExactSlashCommand(commands, "/compact now"), false)
+})
+
+test("active slash command is revealed with minimal scrolling", () => {
+  let options
+  revealSlashCommandOption({ scrollIntoView: (next) => { options = next } })
+  assert.deepEqual(options, { block: "nearest", inline: "nearest" })
+  revealSlashCommandOption(null)
 })

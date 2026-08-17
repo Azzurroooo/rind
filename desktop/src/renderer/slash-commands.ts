@@ -69,6 +69,10 @@ export function commandPrefill(command: SlashCommand) {
   return usage && usage !== `/${command.name}` ? `/${command.name} ` : `/${command.name}`
 }
 
+export function revealSlashCommandOption(option: Pick<HTMLElement, "scrollIntoView"> | null | undefined) {
+  option?.scrollIntoView({ block: "nearest", inline: "nearest" })
+}
+
 function asSlashCommand(value: unknown): SlashCommand | undefined {
   if (!value || typeof value !== "object" || Array.isArray(value)) return undefined
   const item = value as Record<string, unknown>
