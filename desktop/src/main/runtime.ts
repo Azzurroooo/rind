@@ -14,7 +14,7 @@ import {
   type RuntimeResponseEnvelope,
   type RuntimeServerMethod,
   type RuntimeSnapshot,
-} from "../preload/types"
+} from "../preload/types.ts"
 
 type PendingRequest = {
   resolve: (value: unknown) => void
@@ -283,7 +283,7 @@ export function requestRuntime(id: string, method: RuntimeMethod, params: Record
     worker.idleEligible = false
   }
   const longRunning = method === runtimeMethods.sessionPrompt || method === runtimeMethods.sessionFollowUp
-  const timeout = longRunning ? 15 * 60_000 : 120_000
+  const timeout = longRunning ? 15 * 60_000 : 30_000
   return request(worker, method, params, timeout)
 }
 

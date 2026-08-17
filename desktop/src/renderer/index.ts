@@ -1109,6 +1109,11 @@ async function startTurn(input: string, runtimeId = currentRuntimeId(), transien
   }
 }
 
+function clearSlashCommandPending() {
+  state.slashCommandPending = false
+  state.slashCommandInput = ""
+}
+
 async function runSlash(input: string) {
   const project = chatProject()
   if (!project?.available) {
@@ -1154,8 +1159,7 @@ async function runSlash(input: string) {
     }
   } finally {
     state.compacting = false
-    state.slashCommandPending = false
-    state.slashCommandInput = ""
+    clearSlashCommandPending()
     render()
   }
 }
@@ -1730,7 +1734,10 @@ const unsubscribeStatus = window.api.runtime.subscribe((snapshot) => {
   if (snapshot.sessionId) adoptRuntimeSession(runtimeId, snapshot.sessionId)
   if (snapshot.status !== "ready") state.runtimeTurnPending[runtimeId] = false
   if (snapshot.status === "error") {
-    state.notice = snapshot.message || "Runtime is unavailable."
+    if (runtimeId === currentRuntimeId()) {
+      clearSlashCommandPending()
+      state.notice = snapshot.message || "Runtime is unavailable."
+    }
     if (!state.settingsAutoOpened && snapshot.message?.includes("Configuration error")) {
       state.settingsAutoOpened = true
       openSettings()

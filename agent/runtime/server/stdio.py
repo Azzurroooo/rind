@@ -79,6 +79,7 @@ class StdioRuntimeServer:
         self._pending_answers: dict[str, asyncio.Future[str]] = {}
         self._current_cancel: CancellationTokenSource | None = None
         self._queued_turn_starts = 0
+        self._initialized = False
         self._turn_slot = asyncio.Lock()
         self._dispatch_tasks: set[asyncio.Task] = set()
         self._sequence = 0
@@ -138,9 +139,12 @@ class StdioRuntimeServer:
                 continue
             # Concurrent dispatch keeps commands and queries responsive while a
             # turn occupies the runtime; per-resource locks preserve ordering.
-            task = asyncio.create_task(self._dispatch(request))
-            self._dispatch_tasks.add(task)
-            task.add_done_callback(self._dispatch_tasks.discard)
+            self._schedule_dispatch(request)
+
+    def _schedule_dispatch(self, request: dict[str, Any]) -> None:
+        task = asyncio.create_task(self._dispatch(request))
+        self._dispatch_tasks.add(task)
+        task.add_done_callback(self._dispatch_tasks.discard)
 
     async def _cancel_dispatch_tasks(self) -> None:
         for task in self._dispatch_tasks:
@@ -217,6 +221,7 @@ class StdioRuntimeServer:
         }
         if self._goal_enabled:
             result["goal"] = await self._runtime.get_goal()
+        self._initialized = True
         await self._respond(
             request,
             result,
@@ -619,6 +624,9 @@ class StdioRuntimeServer:
             return True
         if method == RuntimeMethod.RIND_USER_QUESTION_RESPOND:
             await self._receive_user_answer(message)
+            return True
+        if method == RuntimeMethod.RIND_COMMAND_EXECUTE and self._initialized:
+            self._schedule_dispatch(message)
             return True
         if method == RuntimeMethod.RIND_BACKGROUND_LIST:
             await self._list_backgrounds(message)

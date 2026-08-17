@@ -594,6 +594,77 @@ def test_serve_answers_slash_commands_while_a_turn_occupies_the_runtime(slash_in
     assert prompt["result"] == {"ok": True, "session_id": "s1", "turn_id": "t1"}
 
 
+@pytest.mark.parametrize("slash_input", ["/status", "/doctor", "/help"])
+def test_ingested_slash_commands_use_the_control_lane_after_initialize(slash_input, capsys):
+    async def run():
+        server = StdioRuntimeServer(_Runtime(), _Session())
+        server._initialized = True
+        responses: list[dict] = []
+        _trace_responses(server, responses)
+        await server._ingest_line(
+            json.dumps(
+                {
+                    "kind": "request",
+                    "request_id": 42,
+                    "method": "rind/command/execute",
+                    "params": {"input": slash_input},
+                }
+            )
+        )
+        assert server._requests.empty()
+        await _await_response(responses, 42)
+
+    asyncio.run(run())
+
+    message = json.loads(capsys.readouterr().out)
+    assert message["request_id"] == 42
+    assert message["result"]["display"]["type"] in {"status", "doctor", "help"}
+
+
+def test_ingested_slash_command_bypasses_a_running_turn(capsys):
+    async def run():
+        runtime = _BlockingTurnRuntime()
+        server = StdioRuntimeServer(runtime, _Session())
+        server._initialized = True
+        responses: list[dict] = []
+        _trace_responses(server, responses)
+        serve = asyncio.create_task(server._serve())
+        await server._ingest_line(
+            json.dumps(
+                {
+                    "kind": "request",
+                    "request_id": 41,
+                    "method": "session/prompt",
+                    "params": {"input": "hello"},
+                }
+            )
+        )
+        await runtime.started.wait()
+        await server._ingest_line(
+            json.dumps(
+                {
+                    "kind": "request",
+                    "request_id": 42,
+                    "method": "rind/command/execute",
+                    "params": {"input": "/status"},
+                }
+            )
+        )
+        await _await_response(responses, 42)
+        runtime.release.set()
+        await _await_response(responses, 41)
+        server._begin_shutdown()
+        await asyncio.wait_for(serve, 10)
+
+    asyncio.run(run())
+
+    messages = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
+    command = next(message for message in messages if message.get("request_id") == 42)
+    prompt = next(message for message in messages if message.get("request_id") == 41)
+    assert messages.index(command) < messages.index(prompt)
+    assert command["result"]["display"]["type"] == "status"
+
+
 def test_background_requests_use_control_callbacks(capsys):
     async def list_backgrounds(session_id):
         assert session_id == "s1"
