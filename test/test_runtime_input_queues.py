@@ -38,7 +38,7 @@ class RecordingSession:
     async def persist_message(self, role, content, **kwargs):
         self.messages.append((role, content, kwargs))
 
-    async def persist_turn_state(self, turn_id, status, ts):
+    async def persist_turn_state(self, turn_id, status, ts, recovery_attempt=None):
         self.turn_states.append((turn_id, status, ts))
 
     async def get_messages_slice(self):

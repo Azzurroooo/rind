@@ -184,9 +184,7 @@ def _build_assistant_tool_calls(
         if not tc_id:
             raise ValueError("Invalid tool call message: missing tool call id.")
         tc_record = tool_map.get(tc_id)
-        if not isinstance(tc_record, dict):
-            continue
-        raw_args = tc_record.get("raw_args")
+        raw_args = tc_record.get("raw_args") if isinstance(tc_record, dict) else tc_meta.get("raw_args")
         if raw_args is None:
             continue
         tool_calls.append(
@@ -205,7 +203,10 @@ def _missing_tool_messages(
         tool_call_id = str(tool_call.get("id") or "")
         if not tool_call_id or tool_call_id in emitted_tool_call_ids:
             continue
-        content = _build_tool_content(tool_map.get(tool_call_id))
+        tool_record = tool_map.get(tool_call_id)
+        if not isinstance(tool_record, dict):
+            continue
+        content = _build_tool_content(tool_record)
         missing.append({"role": "tool", "tool_call_id": tool_call_id, "content": content})
         emitted_tool_call_ids.add(tool_call_id)
     return missing

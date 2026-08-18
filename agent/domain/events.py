@@ -104,6 +104,14 @@ class ContextBuiltEvent(RuntimeEvent):
 
 
 @dataclass(slots=True)
+class TurnStepRetryEvent(RuntimeEvent):
+    """Fired when an interrupted model step is being retried."""
+    type: Literal["turn_step_retry"] = "turn_step_retry"
+    attempt: int = 0
+    reason: str = ""
+
+
+@dataclass(slots=True)
 class AssistantMessageCompletedEvent(RuntimeEvent):
     """Fired when the assistant finishes generating a message."""
     type: Literal["assistant_message_completed"] = "assistant_message_completed"

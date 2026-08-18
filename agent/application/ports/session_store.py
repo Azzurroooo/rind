@@ -131,7 +131,13 @@ class SessionStore(Protocol):
         """Get the latest ordinary assistant sampling usage sample."""
         ...
 
-    async def persist_turn_state(self, turn_id: str, status: str, ts: str) -> None:
+    async def persist_turn_state(
+        self,
+        turn_id: str,
+        status: str,
+        ts: str,
+        recovery_attempt: int | None = None,
+    ) -> None:
         """Persist the latest turn state."""
         ...
 

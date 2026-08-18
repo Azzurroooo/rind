@@ -30,15 +30,18 @@ from agent.domain.events import (
     TurnCompletedEvent,
     TurnFailedEvent,
     TurnCancelledEvent,
+    TurnStepRetryEvent,
     event_meta,
 )
 from agent.domain.message_boundary import validate_compact_handoff_boundary, validate_model_message_boundary
+from agent.domain import ParsedToolCall
 from agent.domain.tool_payload import parse_tool_args
 
 from .stream_parser import MessageStreamParser
 
 
 logger = logging.getLogger(__name__)
+MAX_STEP_RECOVERY_ATTEMPTS = 3
 
 
 def _compact_diagnostics(phase_detail: str | None) -> dict | None:
@@ -92,18 +95,30 @@ class TurnRunner:
         turn_id: str = "",
         transient_system_messages: list[dict] | None = None,
         take_steering: Callable[[], str | None | Awaitable[str | None]] | None = None,
+        resume: bool = False,
     ) -> AsyncIterator[RuntimeEvent]:
         """Run the main conversation loop for a user turn asynchronously, yielding events."""
 
         turn_started_at = time.perf_counter()
         original_hard_limit = self._snapshot_context_hard_limit()
         trace_setter = getattr(self._chat_client, "set_trace_session_id_provider", None)
-        if callable(trace_setter):
+        if callable(trace_setter) and not inspect.iscoroutinefunction(trace_setter):
             trace_setter(lambda: str(getattr(session, "session_id", "") or ""))
         try:
             sampling_index = 0
             force_rescue_next_build = False
             context_length_recovery_count = 0
+            initial_recovery_attempt = await self._current_recovery_attempt(session)
+            if resume:
+                pending_tool_calls = await self._pending_tool_calls(session)
+                if pending_tool_calls:
+                    async for event in self._tool_processor.execute(
+                        session=session,
+                        tool_calls=pending_tool_calls,
+                        cancellation_token=cancellation_token,
+                        turn_id=turn_id,
+                    ):
+                        yield event
             while True:
                 if cancellation_token and cancellation_token.is_cancelled:
                     yield self._cancelled_event(session, turn_id, cancellation_token)
@@ -152,25 +167,42 @@ class TurnRunner:
                     raise RuntimeError(f"Invalid model message boundary: {boundary.reason}")
 
                 try:
-                    stream_response = self._chat_client.stream(
-                        messages=context_messages,
-                        tools=self._tool_schemas,
-                        cancellation_token=cancellation_token
-                    )
+                    recovery_attempt = initial_recovery_attempt
+                    initial_recovery_attempt = 0
+                    while True:
+                        stream_response = self._chat_client.stream(
+                            messages=context_messages,
+                            tools=self._tool_schemas,
+                            cancellation_token=cancellation_token,
+                        )
+                        stream_result = ModelStreamResult()
+                        try:
+                            async for event in pump_model_stream_events(
+                                stream_response=stream_response,
+                                stream_parser=self._stream_parser,
+                                session=session,
+                                turn_id=turn_id,
+                                cancellation_token=cancellation_token,
+                                context_stats=context_stats,
+                                persist_sampling_usage=self._persist_sampling_usage,
+                                result=stream_result,
+                            ):
+                                yield event
+                            self._validate_finish_reason(stream_result)
+                            break
+                        except ProviderError as e:
+                            if e.code != "stream_interrupted" or recovery_attempt >= MAX_STEP_RECOVERY_ATTEMPTS:
+                                raise
+                            recovery_attempt += 1
+                            await self._persist_recovery_state(session, turn_id, recovery_attempt)
+                            yield TurnStepRetryEvent(
+                                **event_meta(session, turn_id),
+                                attempt=recovery_attempt,
+                                reason="stream_interrupted",
+                            )
+                            await self._wait_for_recovery(cancellation_token, recovery_attempt)
 
-                    stream_result = ModelStreamResult()
-                    async for event in pump_model_stream_events(
-                        stream_response=stream_response,
-                        stream_parser=self._stream_parser,
-                        session=session,
-                        turn_id=turn_id,
-                        cancellation_token=cancellation_token,
-                        context_stats=context_stats,
-                        persist_sampling_usage=self._persist_sampling_usage,
-                        result=stream_result,
-                    ):
-                        yield event
-
+                    await self._persist_recovery_state(session, turn_id, 0)
                     content_text = stream_result.content
                     parsed_tool_calls = stream_result.tool_calls
                     reasoning_content = stream_result.reasoning_content
@@ -180,7 +212,12 @@ class TurnRunner:
                         if parsed_tool_calls:
                             persist_kwargs["meta"] = {
                                 "tool_calls": [
-                                    {"id": item.call_id, "name": item.name} for item in parsed_tool_calls
+                                    {
+                                        "id": item.call_id,
+                                        "name": item.name,
+                                        "raw_args": item.raw_args,
+                                    }
+                                    for item in parsed_tool_calls
                                 ]
                             }
                         if reasoning_content is not None:
@@ -334,6 +371,94 @@ class TurnRunner:
             )
         finally:
             self._restore_context_hard_limit(original_hard_limit)
+
+    def _validate_finish_reason(self, result: ModelStreamResult) -> None:
+        reason = result.finish_reason
+        if reason in {None, "stop", "tool_calls", "function_call"}:
+            return
+        if reason == "length":
+            raise ProviderError(
+                "The model stopped because its output length limit was reached.",
+                status="rejected",
+                error_type="StreamTruncated",
+                code="stream_truncated",
+            )
+        raise ProviderError(
+            f"The model stream ended with unsupported finish reason: {reason}",
+            status="rejected",
+            error_type="StreamFinishReasonError",
+            code="stream_finish_reason",
+        )
+
+    async def _persist_recovery_state(self, session: SessionStore, turn_id: str, attempt: int) -> None:
+        persist = getattr(session, "persist_turn_state", None)
+        if not inspect.iscoroutinefunction(persist):
+            return
+        await persist(
+            turn_id,
+            "running",
+            session.now_iso(),
+            recovery_attempt=attempt or None,
+        )
+
+    async def _current_recovery_attempt(self, session: SessionStore) -> int:
+        load = getattr(session, "get_turn_state", None)
+        if not inspect.iscoroutinefunction(load):
+            return 0
+        state = await load()
+        value = state.get("recovery_attempt") if isinstance(state, dict) else None
+        return value if isinstance(value, int) and not isinstance(value, bool) and value > 0 else 0
+
+    async def _pending_tool_calls(self, session: SessionStore) -> list[ParsedToolCall]:
+        load_messages = getattr(session, "load_messages", None)
+        load_records = getattr(session, "get_tool_records", None)
+        if not inspect.iscoroutinefunction(load_messages) or not inspect.iscoroutinefunction(load_records):
+            return []
+        messages = await load_messages()
+        metadata = None
+        for message in reversed(messages if isinstance(messages, list) else []):
+            if not isinstance(message, dict):
+                continue
+            if message.get("role") != "assistant":
+                break
+            candidate = message.get("meta")
+            if isinstance(candidate, dict) and isinstance(candidate.get("tool_calls"), list):
+                metadata = candidate["tool_calls"]
+            break
+        if not metadata:
+            return []
+        calls = [
+            ParsedToolCall(
+                call_id=str(item.get("id") or ""),
+                name=str(item.get("name") or ""),
+                raw_args=str(item.get("raw_args") or ""),
+            )
+            for item in metadata
+            if isinstance(item, dict) and item.get("id") and item.get("name") and isinstance(item.get("raw_args"), str)
+        ]
+        if not calls:
+            return []
+        records = await load_records(call_ids=[call.call_id for call in calls])
+        completed = {
+            (str(record.get("id") or ""), str(record.get("name") or ""), str(record.get("raw_args") or ""))
+            for record in records
+            if isinstance(record, dict)
+        }
+        return [call for call in calls if (call.call_id, call.name, call.raw_args) not in completed]
+
+    async def _wait_for_recovery(
+        self,
+        cancellation_token: CancellationToken | None,
+        attempt: int,
+    ) -> None:
+        delay = min(2**attempt, 10)
+        if cancellation_token is None:
+            await asyncio.sleep(delay)
+            return
+        try:
+            await asyncio.wait_for(cancellation_token.wait(), timeout=delay)
+        except asyncio.TimeoutError:
+            return
 
     async def compact_context(
         self,

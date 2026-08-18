@@ -194,7 +194,7 @@ class OpenAIChatClient(ChatClient):
             if trace:
                 trace.end("stream_error", str(exc))
             ended = True
-            raise self._provider_error(exc) from exc
+            raise self._provider_error(exc, code="stream_interrupted") from exc
         finally:
             if trace and not ended:
                 trace.end("completed")
@@ -203,7 +203,7 @@ class OpenAIChatClient(ChatClient):
             except asyncio.CancelledError:
                 raise
             except Exception as exc:
-                raise self._provider_error(exc) from exc
+                raise self._provider_error(exc, code="stream_interrupted") from exc
 
     def _trace_payload(self, messages: list[dict], tools: list[dict] | None, *, stream: bool) -> dict[str, Any]:
         payload: dict[str, Any] = {
@@ -220,7 +220,7 @@ class OpenAIChatClient(ChatClient):
             payload["stream_options"] = {"include_usage": True}
         return payload
 
-    def _provider_error(self, exc: Exception) -> ProviderError:
+    def _provider_error(self, exc: Exception, code: str | None = None) -> ProviderError:
         if isinstance(exc, ProviderError):
             return exc
         error_type = type(exc).__name__
@@ -251,7 +251,7 @@ class OpenAIChatClient(ChatClient):
             status = "unavailable"
         else:
             status = "failed"
-        return ProviderError(text, status=status, error_type=error_type)
+        return ProviderError(text, status=status, error_type=error_type, code=code)
 
     async def _close_stream(self, stream_response: Any) -> None:
         close = getattr(stream_response, "aclose", None) or getattr(stream_response, "close", None)

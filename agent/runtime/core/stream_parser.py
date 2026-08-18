@@ -20,13 +20,14 @@ class MessageStreamParser:
         on_tool_input_started_async: Callable[[str, str], Any] | None = None,
         on_tool_input_delta_async: Callable[[str, str, str], Any] | None = None,
         on_tool_input_ended_async: Callable[[str, str], Any] | None = None,
-    ) -> tuple[str, list[ParsedToolCall], Any | None, str | None]:
+    ) -> tuple[str, list[ParsedToolCall], Any | None, str | None, str | None]:
         """Consume a streaming response asynchronously, reassembling model output."""
         text_parts: list[str] = []
         reasoning_parts: list[str] = []
         reasoning_seen = False
         merged_tool_calls: list[dict] = []
         usage = None
+        finish_reason = None
 
         async for chunk in response:
             if cancellation_token and cancellation_token.is_cancelled:
@@ -39,7 +40,11 @@ class MessageStreamParser:
             if not getattr(chunk, "choices", None):
                 continue
 
-            delta = chunk.choices[0].delta
+            choice = chunk.choices[0]
+            choice_finish_reason = getattr(choice, "finish_reason", None)
+            if choice_finish_reason is not None:
+                finish_reason = str(choice_finish_reason)
+            delta = choice.delta
             if delta.content:
                 await on_content_async(delta.content)
                 text_parts.append(delta.content)
@@ -83,4 +88,4 @@ class MessageStreamParser:
             if item["id"] and item["name"]
         ]
         reasoning_content = "".join(reasoning_parts) if reasoning_seen else None
-        return "".join(text_parts), calls, usage, reasoning_content
+        return "".join(text_parts), calls, usage, reasoning_content, finish_reason

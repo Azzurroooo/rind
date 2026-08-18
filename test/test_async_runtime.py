@@ -233,7 +233,7 @@ async def test_async_runtime_persists_terminal_turn_state():
         async def persist_message(self, role, content, **kwargs):
             return None
 
-        async def persist_turn_state(self, turn_id, status, ts):
+        async def persist_turn_state(self, turn_id, status, ts, recovery_attempt=None):
             self.states.append((turn_id, status, ts))
 
         def now_iso(self):
@@ -314,7 +314,7 @@ async def test_async_runtime_continues_active_goal_until_terminal_status():
         async def persist_message(self, role, content, **kwargs):
             self.persisted.append((role, content, kwargs))
 
-        async def persist_turn_state(self, turn_id, status, ts):
+        async def persist_turn_state(self, turn_id, status, ts, recovery_attempt=None):
             return None
 
         async def get_goal(self):

@@ -13,6 +13,30 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from agent.infrastructure.llm.openai_chat_client import OpenAIChatClient
 from agent.domain.cancellation import CancellationTokenSource
+from agent.domain.errors import ProviderError
+
+
+@pytest.mark.asyncio
+async def test_openai_async_client_marks_stream_iteration_failure_as_recoverable():
+    class BrokenStream:
+        def __aiter__(self):
+            return self
+
+        async def __anext__(self):
+            raise RuntimeError("connection dropped")
+
+        async def aclose(self):
+            return None
+
+    mock_openai = MagicMock()
+    mock_openai.chat.completions.create = AsyncMock(return_value=BrokenStream())
+    client = OpenAIChatClient(mock_openai, "test-model")
+
+    with pytest.raises(ProviderError) as error:
+        async for _ in client.stream([{"role": "user", "content": "hi"}]):
+            pass
+
+    assert error.value.code == "stream_interrupted"
 
 @pytest.mark.asyncio
 async def test_openai_async_client_cancellation():

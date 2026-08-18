@@ -344,6 +344,29 @@ def test_initialize_response_includes_resume_preview_when_history_exists(capsys)
     assert any(command["name"] == "status" for command in result["commands"])
 
 
+def test_session_prompt_resume_passes_recovery_flag_without_input(capsys):
+    class Runtime(_Runtime):
+        def __init__(self):
+            super().__init__()
+            self.run_kwargs = None
+
+        async def run_turn(self, **kwargs):
+            self.run_kwargs = kwargs
+            yield _turn_event("turn_completed", "recover-turn")
+
+    async def run():
+        runtime = Runtime()
+        server = StdioRuntimeServer(runtime, _Session())
+        await server._run_turn({"request_id": 8, "method": "session/prompt", "params": {"resume": True}})
+        return runtime
+
+    runtime = asyncio.run(run())
+    messages = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
+    assert messages[-1]["result"]["ok"] is True
+    assert runtime.run_kwargs["resume"] is True
+    assert runtime.run_kwargs["query"] == ""
+
+
 def test_initialize_goal_capability_returns_session_goal(capsys):
     class Runtime(_Runtime):
         async def get_goal(self):

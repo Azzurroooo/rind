@@ -872,7 +872,13 @@ class JsonlSessionStore(SessionStore):
 
         return await asyncio.to_thread(_get)
 
-    async def persist_turn_state(self, turn_id: str, status: str, ts: str) -> None:
+    async def persist_turn_state(
+        self,
+        turn_id: str,
+        status: str,
+        ts: str,
+        recovery_attempt: int | None = None,
+    ) -> None:
         clean_turn_id = str(turn_id or "").strip()
         clean_status = str(status or "").strip()
         if not clean_turn_id or not clean_status:
@@ -881,11 +887,16 @@ class JsonlSessionStore(SessionStore):
             def _persist():
                 if not self._session_meta:
                     return
-                self._session_meta["turn_state"] = {
+                state = {
                     "turn_id": clean_turn_id,
                     "status": clean_status,
                     "ts": str(ts or self.now_iso()),
                 }
+                if recovery_attempt is not None:
+                    if isinstance(recovery_attempt, bool) or not isinstance(recovery_attempt, int) or recovery_attempt < 1:
+                        raise ValueError("Recovery attempt must be a positive integer.")
+                    state["recovery_attempt"] = recovery_attempt
+                self._session_meta["turn_state"] = state
                 self._persist_meta_sync()
 
             await asyncio.to_thread(_persist)

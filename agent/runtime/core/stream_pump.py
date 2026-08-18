@@ -32,6 +32,7 @@ class ModelStreamResult:
     content: str = ""
     tool_calls: list[ParsedToolCall] = field(default_factory=list)
     reasoning_content: str | None = None
+    finish_reason: str | None = None
 
 
 async def pump_model_stream_events(
@@ -81,7 +82,7 @@ async def pump_model_stream_events(
                     )
                 )
 
-            content, calls, usage, reasoning_content = _normalize_parsed_stream_result(
+            content, calls, usage, reasoning_content, finish_reason = _normalize_parsed_stream_result(
                 await stream_parser.consume_async_stream(
                     stream_response,
                     _on_content_async,
@@ -94,6 +95,7 @@ async def pump_model_stream_events(
             result.content = content
             result.tool_calls = list(calls)
             result.reasoning_content = reasoning_content
+            result.finish_reason = finish_reason
 
             normalized_usage = _normalize_usage(
                 usage,
@@ -137,8 +139,11 @@ async def pump_model_stream_events(
 
 def _normalize_parsed_stream_result(
     parsed: Any,
-) -> tuple[str, list[ParsedToolCall], Any | None, str | None]:
-    if isinstance(parsed, tuple) and len(parsed) == 4:
+) -> tuple[str, list[ParsedToolCall], Any | None, str | None, str | None]:
+    finish_reason = None
+    if isinstance(parsed, tuple) and len(parsed) == 5:
+        content, calls, usage, reasoning_content, finish_reason = parsed
+    elif isinstance(parsed, tuple) and len(parsed) == 4:
         content, calls, usage, reasoning_content = parsed
     elif isinstance(parsed, tuple) and len(parsed) == 3:
         content, calls, usage = parsed
@@ -147,7 +152,13 @@ def _normalize_parsed_stream_result(
         content, calls = parsed
         usage = None
         reasoning_content = None
-    return str(content or ""), list(calls or []), usage, _normalize_reasoning_content(reasoning_content)
+    return (
+        str(content or ""),
+        list(calls or []),
+        usage,
+        _normalize_reasoning_content(reasoning_content),
+        str(finish_reason) if finish_reason is not None else None,
+    )
 
 
 def _normalize_reasoning_content(value: Any) -> str | None:

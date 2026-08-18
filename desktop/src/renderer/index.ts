@@ -1070,6 +1070,10 @@ function applyRuntimeInitialization(runtimeId: string, result: unknown) {
   state.model = typeof initialize.model === "string" ? initialize.model : state.model
   const commands = parseSlashCommands(initialize.commands)
   if (commands.length) state.slashCommands = commands
+  const turnState = asRecord(initialize.turn_state)
+  if (turnState.status === "running" && typeof turnState.turn_id === "string" && turnState.turn_id) {
+    runAction(() => request(runtimeMethods.sessionPrompt, { resume: true }, runtimeId))
+  }
 }
 
 function handleRuntimeEvent(envelope: RuntimeEvent) {

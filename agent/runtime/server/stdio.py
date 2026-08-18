@@ -217,6 +217,7 @@ class StdioRuntimeServer:
             "capabilities": self._capabilities(),
             "methods": self._methods(),
             "resume_preview": await self._resume_preview(),
+            "turn_state": await self._turn_state(),
             "commands": self._slash_command_infos(),
         }
         if self._goal_enabled:
@@ -314,9 +315,13 @@ class StdioRuntimeServer:
             if raw_query is None:
                 raw_query = params.get("query")
             query = str(raw_query or "")
+            resume = params.get("resume") is True
             goal_continuation = params.get("goal_continuation") is True
-            if not query.strip() and not goal_continuation:
+            if not query.strip() and not goal_continuation and not resume:
                 await self._respond_error(request, "session/prompt requires input.", "InvalidRequest")
+                return
+            if resume and (query.strip() or goal_continuation):
+                await self._respond_error(request, "resume cannot include input or goal continuation.", "InvalidRequest")
                 return
             if goal_continuation:
                 if not self._goal_enabled:
@@ -336,11 +341,14 @@ class StdioRuntimeServer:
                 turn_session_id = ""
                 turn_id = ""
                 try:
-                    async for event in self._runtime.run_turn(
-                        query=query,
-                        cancellation_token=cancel_source.token,
-                        transient_system_messages=transient_system_messages,
-                    ):
+                    run_kwargs = {
+                        "query": query,
+                        "cancellation_token": cancel_source.token,
+                        "transient_system_messages": transient_system_messages,
+                    }
+                    if resume:
+                        run_kwargs["resume"] = True
+                    async for event in self._runtime.run_turn(**run_kwargs):
                         event_data = event.to_dict()
                         turn_session_id = turn_session_id or str(event_data.get("session_id") or "")
                         turn_id = turn_id or str(event_data.get("turn_id") or "")

@@ -17,6 +17,7 @@ async def _stream_with_usage():
         choices=[
             SimpleNamespace(
                 delta=SimpleNamespace(content="hello", tool_calls=None),
+                finish_reason="stop",
             )
         ],
         usage=None,
@@ -74,13 +75,14 @@ def test_message_stream_parser_returns_final_usage_chunk() -> None:
         async def on_content(text):
             parts.append(text)
 
-        content, calls, usage, reasoning_content = await MessageStreamParser().consume_async_stream(
+        content, calls, usage, reasoning_content, finish_reason = await MessageStreamParser().consume_async_stream(
             _stream_with_usage(), on_content
         )
         assert content == "hello"
         assert calls == []
         assert usage.prompt_tokens == 10
         assert reasoning_content is None
+        assert finish_reason == "stop"
         assert parts == ["hello"]
 
     asyncio.run(_run())
@@ -102,7 +104,7 @@ def test_message_stream_parser_streams_tool_input_lifecycle() -> None:
         async def on_ended(call_id, name):
             events.append(("ended", call_id, name))
 
-        content, calls, usage, reasoning_content = await MessageStreamParser().consume_async_stream(
+        content, calls, usage, reasoning_content, _finish_reason = await MessageStreamParser().consume_async_stream(
             _stream_with_tool_input(),
             on_content,
             on_tool_input_started_async=on_started,
@@ -146,7 +148,7 @@ def test_message_stream_parser_reassembles_reasoning_content() -> None:
         )
 
     async def _run():
-        content, calls, usage, reasoning_content = await MessageStreamParser().consume_async_stream(
+        content, calls, usage, reasoning_content, _finish_reason = await MessageStreamParser().consume_async_stream(
             stream(),
             lambda _text: asyncio.sleep(0),
         )
@@ -171,7 +173,7 @@ def test_message_stream_parser_preserves_empty_reasoning_content() -> None:
         )
 
     async def _run():
-        _content, _calls, _usage, reasoning_content = await MessageStreamParser().consume_async_stream(
+        _content, _calls, _usage, reasoning_content, _finish_reason = await MessageStreamParser().consume_async_stream(
             stream(),
             lambda _text: asyncio.sleep(0),
         )

@@ -88,6 +88,7 @@ export function reduceEvent(state: ConversationState, envelope: RuntimeEvent): C
       turnStartedAt: Date.now(),
       ...(state.plan && (state.plan.error || state.plan.status === "error") ? { plan: undefined } : {}),
     }
+    case "turn_step_retry": return resetActiveStep(state)
     case "assistant_delta": return appendAssistantDelta(state, turnId, asString(event.text))
     case "assistant_message_completed": return completeAssistant(state, turnId, asString(event.content))
     case "plan_updated": return reducePlanSnapshot(state, envelope)
@@ -184,6 +185,14 @@ function appendAssistantDelta(state: ConversationState, turnId: string, text: st
   }
   const next = appendEntry(closeAssistant(state), { kind: "assistant", id: "", content: boundText(text), turnId })
   return { ...next, openAssistantId: next.entries.at(-1)?.id || "" }
+}
+
+function resetActiveStep(state: ConversationState): ConversationState {
+  const entries = state.entries.filter((entry) => {
+    if (entry.kind === "assistant" && entry.id === state.openAssistantId) return false
+    return entry.kind !== "tool" || (entry.status !== "pending" && entry.status !== "running")
+  })
+  return { ...state, entries, openAssistantId: "" }
 }
 
 function completeAssistant(state: ConversationState, turnId: string, content: string): ConversationState {

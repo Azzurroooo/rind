@@ -118,6 +118,14 @@ async def test_async_session_store_persists_and_reloads_turn_state(temp_session_
     await resumed.initialize()
     assert await resumed.get_turn_state() == await store.get_turn_state()
 
+    await resumed.persist_turn_state("turn-1", "running", "2026-05-08T00:00:01Z", recovery_attempt=2)
+    assert await resumed.get_turn_state() == {
+        "turn_id": "turn-1",
+        "status": "running",
+        "ts": "2026-05-08T00:00:01Z",
+        "recovery_attempt": 2,
+    }
+
 
 def test_resolve_session_root_uses_rind_home(monkeypatch, tmp_path):
     rind_home = tmp_path / ".rind"

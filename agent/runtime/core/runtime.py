@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 import logging
 import uuid
 from collections import deque
@@ -279,6 +280,7 @@ class AgentRuntime:
         query: str | None = None,
         cancellation_token: CancellationToken | None = None,
         transient_system_messages: list[dict] | None = None,
+        resume: bool = False,
     ) -> AsyncIterator[RuntimeEvent]:
         """
         Run a single conversational turn asynchronously, yielding runtime events.
@@ -289,19 +291,30 @@ class AgentRuntime:
         """
         await self.initialize()
         async with self._workspace_lock_guard(), self._turn_lock:
-            turn_id = uuid.uuid4().hex
+            turn_state = await self._session_store.get_turn_state() if resume else None
+            if resume:
+                if not isinstance(turn_state, dict) or turn_state.get("status") != "running":
+                    raise RuntimeError("No recoverable turn is available.")
+                turn_id = str(turn_state.get("turn_id") or "")
+                if not turn_id:
+                    raise RuntimeError("Recoverable turn is missing its turn id.")
+            else:
+                turn_id = uuid.uuid4().hex
             self._active_turn_id = turn_id
             self._accepting_inputs = True
             self.discard_pending_inputs()
             try:
-                if query:
+                if query and not resume:
                     await self._persist_user_input(query)
 
                 started_event = TurnStartedEvent(
                     **event_meta(self._session_store, turn_id),
-                    user_message_chars=len(query or ""),
+                    user_message_chars=0 if resume else len(query or ""),
                 )
-                await self._persist_turn_state(started_event)
+                await self._persist_turn_state(
+                    started_event,
+                    recovery_attempt=turn_state.get("recovery_attempt") if isinstance(turn_state, dict) else None,
+                )
                 yield started_event
 
                 total_duration_ms = 0
@@ -325,6 +338,8 @@ class AgentRuntime:
                         )
                     if context_messages:
                         runner_kwargs["transient_system_messages"] = context_messages
+                    if resume:
+                        runner_kwargs["resume"] = True
 
                     terminal_event = None
                     async for event in self._turn_runner.run_turn(**runner_kwargs):
@@ -460,13 +475,13 @@ class AgentRuntime:
                 code=type(exc).__name__,
             ) from exc
 
-    async def _persist_turn_state(self, event: RuntimeEvent) -> None:
+    async def _persist_turn_state(self, event: RuntimeEvent, recovery_attempt: int | None = None) -> None:
         persist = getattr(self._session_store, "persist_turn_state", None)
-        if not callable(persist):
+        if not inspect.iscoroutinefunction(persist):
             return
         try:
             status = "running" if event.type == "turn_started" else event.type.removeprefix("turn_")
-            await persist(event.turn_id, status, event.ts)
+            await persist(event.turn_id, status, event.ts, recovery_attempt=recovery_attempt)
         except asyncio.CancelledError:
             raise
         except Exception as exc:

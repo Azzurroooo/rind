@@ -34,6 +34,7 @@ from .events import (
     TurnCompletedEvent,
     TurnFailedEvent,
     TurnCancelledEvent,
+    TurnStepRetryEvent,
 )
 from .skills import (
     LoadedSkill,
@@ -72,6 +73,7 @@ __all__ = [
     "TurnCompletedEvent",
     "TurnFailedEvent",
     "TurnCancelledEvent",
+    "TurnStepRetryEvent",
     "ToolExecutionResult",
     "BoundaryError",
     "FailureStatus",

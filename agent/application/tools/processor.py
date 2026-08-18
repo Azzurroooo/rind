@@ -92,8 +92,14 @@ class ToolCallProcessor:
             started_at = time.perf_counter()
             parsed_args, parse_error = parse_tool_args(call.raw_args)
             ts_start = session.now_iso()
+            reused = False
 
-            if parse_error:
+            existing = await self._load_tool_record(session, call)
+            if existing is not None:
+                parsed_args = existing.get("args") if isinstance(existing.get("args"), dict) else parsed_args
+                outcome = self._outcome_from_record(existing)
+                reused = True
+            elif parse_error:
                 outcome = _ToolCallOutcome(
                     status="rejected",
                     error_type="ToolArgsJSONError",
@@ -167,14 +173,15 @@ class ToolCallProcessor:
                 error_type=outcome.error_type,
             )
             try:
-                await self._persist_tool_result(
-                    session=session,
-                    call=call,
-                    parsed_args=parsed_args,
-                    ts_start=ts_start,
-                    ts_end=ts_end,
-                    normalized_result=normalized_result,
-                )
+                if not reused:
+                    await self._persist_tool_result(
+                        session=session,
+                        call=call,
+                        parsed_args=parsed_args,
+                        ts_start=ts_start,
+                        ts_end=ts_end,
+                        normalized_result=normalized_result,
+                    )
                 persist_error = None
             except asyncio.CancelledError:
                 raise
@@ -193,7 +200,7 @@ class ToolCallProcessor:
                 )
 
             duration_ms = int((time.perf_counter() - started_at) * 1000)
-            file_change_event = build_file_change_event(
+            file_change_event = None if reused else build_file_change_event(
                 session=session,
                 turn_id=turn_id,
                 call=call,
@@ -243,16 +250,23 @@ class ToolCallProcessor:
                 tool_name=call.name,
             )
 
-        tasks = [
-            asyncio.create_task(
-                self._run_tool_call(
+        async def _run_or_reuse(call: ParsedToolCall, parsed_args: dict) -> tuple[_ToolCallOutcome, bool]:
+            existing = await self._load_tool_record(session, call)
+            if existing is not None:
+                return self._outcome_from_record(existing), True
+            return (
+                await self._run_tool_call(
                     call=call,
                     parsed_args=parsed_args,
                     session_id=session.session_id or "default",
                     cancellation_token=cancellation_token,
                     empty_bash_output_counts={},
-                )
+                ),
+                False,
             )
+
+        tasks = [
+            asyncio.create_task(_run_or_reuse(call, parsed_args))
             for call, parsed_args, _, _ in prepared
         ]
         try:
@@ -263,7 +277,7 @@ class ToolCallProcessor:
             await asyncio.gather(*tasks, return_exceptions=True)
             raise
 
-        for (call, parsed_args, ts_start, started_at), outcome in zip(prepared, outcomes, strict=True):
+        for (call, parsed_args, ts_start, started_at), (outcome, reused) in zip(prepared, outcomes, strict=True):
             ts_end = session.now_iso()
             normalized_result = self._tool_result_normalizer.normalize(
                 outcome.result,
@@ -272,14 +286,15 @@ class ToolCallProcessor:
                 error_type=outcome.error_type,
             )
             try:
-                await self._persist_tool_result(
-                    session=session,
-                    call=call,
-                    parsed_args=parsed_args,
-                    ts_start=ts_start,
-                    ts_end=ts_end,
-                    normalized_result=normalized_result,
-                )
+                if not reused:
+                    await self._persist_tool_result(
+                        session=session,
+                        call=call,
+                        parsed_args=parsed_args,
+                        ts_start=ts_start,
+                        ts_end=ts_end,
+                        normalized_result=normalized_result,
+                    )
                 persist_error = None
             except asyncio.CancelledError:
                 raise
@@ -327,6 +342,7 @@ class ToolCallProcessor:
                 **parsed_args,
                 "_session_id": session_id,
                 "_cancellation_token": cancellation_token,
+                "_idempotency_key": call.call_id,
             }
             if self._tool_executor.is_async_tool(call.name):
                 result = await self._tool_executor.execute_async(call.name, execution_args, call.raw_args)
@@ -367,6 +383,7 @@ class ToolCallProcessor:
                 error_type=error_type,
                 result=tool_error(call.name, result.error_msg, error_type),
             )
+
         except asyncio.CancelledError:
             raise
         except Exception as exc:
@@ -376,6 +393,34 @@ class ToolCallProcessor:
                 error_type=error_type,
                 result=tool_error(call.name, str(exc), error_type),
             )
+
+    async def _load_tool_record(self, session: SessionStore, call: ParsedToolCall) -> dict[str, Any] | None:
+        loader = getattr(session, "get_tool_records", None)
+        if not callable(loader):
+            return None
+        records = await loader(call_ids=[call.call_id])
+        if not isinstance(records, list):
+            return None
+        for record in reversed(records):
+            if (
+                isinstance(record, dict)
+                and str(record.get("id") or "") == call.call_id
+                and str(record.get("name") or "") == call.name
+                and str(record.get("raw_args") or "") == call.raw_args
+            ):
+                return record
+        return None
+
+    def _outcome_from_record(self, record: dict[str, Any]) -> _ToolCallOutcome:
+        error_type = str(record.get("error_type") or "")
+        status = "completed" if record.get("ok") is True else _classify_tool_error(
+            error_type or "ToolExecutionError"
+        )
+        return _ToolCallOutcome(
+            status=status,
+            error_type=error_type,
+            result=str(record.get("model_content") or ""),
+        )
 
     def _build_user_question_event(
         self,

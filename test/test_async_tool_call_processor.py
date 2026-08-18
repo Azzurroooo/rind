@@ -178,6 +178,8 @@ async def test_bash_cancellation_token_is_not_persisted_in_tool_args() -> None:
         raise AssertionError(f"Expected execution args to include cancellation token, got: {executor.received_args}")
     if executor.received_args.get("_session_id") != session.session_id:
         raise AssertionError(f"Expected execution args to include session ID, got: {executor.received_args}")
+    if executor.received_args.get("_idempotency_key") != "call_1":
+        raise AssertionError(f"Expected call id idempotency key, got: {executor.received_args}")
     if not any(isinstance(event, ToolResultEvent) for event in events):
         raise AssertionError(f"Expected tool result event, got: {events}")
     result_events = [event for event in events if isinstance(event, ToolResultEvent)]
@@ -271,6 +273,35 @@ async def test_successful_tool_persists_result_directly() -> None:
         raise AssertionError(f"Expected model_content_format, got: {kwargs}")
     if "artifact_ref" in kwargs:
         raise AssertionError(f"Did not expect artifact_ref, got: {kwargs}")
+
+
+@pytest.mark.asyncio
+async def test_completed_tool_record_is_reused_without_execution() -> None:
+    class ResumedSession(FakeSession):
+        async def get_tool_records(self, *, call_ids=None, **_kwargs):
+            return [
+                {
+                    "id": "call_1",
+                    "name": "demo_tool",
+                    "raw_args": '{"value":"x"}',
+                    "ok": True,
+                    "error_type": None,
+                    "model_content": '{"ok":true,"tool":"demo_tool","data":"already done"}',
+                    "args": {"value": "x"},
+                }
+            ]
+
+    executor = FakeToolExecutor()
+    session = ResumedSession()
+    call = ParsedToolCall(call_id="call_1", name="demo_tool", raw_args='{"value":"x"}')
+
+    events = [event async for event in ToolCallProcessor(executor).execute(session, [call])]
+
+    assert executor.received_args is None
+    assert not session.persisted_tool_calls
+    result_events = [event for event in events if isinstance(event, ToolResultEvent)]
+    assert len(result_events) == 1
+    assert result_events[0].status == "completed"
 
 
 @pytest.mark.asyncio

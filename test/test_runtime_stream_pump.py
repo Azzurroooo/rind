@@ -20,7 +20,11 @@ from agent.domain.events import (
     ToolInputEndedEvent,
     ToolInputStartedEvent,
     TurnCompletedEvent,
+    TurnFailedEvent,
+    TurnStepRetryEvent,
 )
+from agent.domain.errors import ProviderError
+from agent.domain import ParsedToolCall
 
 
 def make_runner(mock_parser):
@@ -189,6 +193,73 @@ async def test_async_turn_runner_forwards_tool_input_before_stream_completes():
     finish_stream.set()
     await asyncio.wait_for(task, timeout=1)
     assert any(isinstance(event, ToolInputEndedEvent) for event in events)
+
+
+@pytest.mark.asyncio
+async def test_turn_runner_recovers_interrupted_model_step() -> None:
+    parser = MagicMock()
+    parser.consume_async_stream = AsyncMock(
+        side_effect=[
+            ProviderError("connection dropped", status="unavailable", code="stream_interrupted"),
+            ("recovered", [], None, None, "stop"),
+        ]
+    )
+    runner, _session = make_runner(parser)
+    runner._wait_for_recovery = AsyncMock()
+
+    events = [event async for event in runner.run_turn(_session, turn_id="turn_recover")]
+
+    assert sum(isinstance(event, TurnStepRetryEvent) for event in events) == 1
+    assert sum(isinstance(event, AssistantMessageCompletedEvent) for event in events) == 1
+    assert isinstance(events[-1], TurnCompletedEvent)
+    assert parser.consume_async_stream.await_count == 2
+
+
+@pytest.mark.asyncio
+async def test_turn_runner_stops_after_step_recovery_limit() -> None:
+    parser = MagicMock()
+    parser.consume_async_stream = AsyncMock(
+        side_effect=[ProviderError("connection dropped", status="unavailable", code="stream_interrupted")] * 4
+    )
+    runner, session = make_runner(parser)
+    runner._wait_for_recovery = AsyncMock()
+
+    events = [event async for event in runner.run_turn(session, turn_id="turn_exhausted")]
+
+    assert sum(isinstance(event, TurnStepRetryEvent) for event in events) == 3
+    assert isinstance(events[-1], TurnFailedEvent)
+    assert parser.consume_async_stream.await_count == 4
+
+
+@pytest.mark.asyncio
+async def test_turn_runner_rejects_truncated_finish_reason() -> None:
+    parser = MagicMock()
+    parser.consume_async_stream = AsyncMock(return_value=("partial", [], None, None, "length"))
+    runner, session = make_runner(parser)
+
+    events = [event async for event in runner.run_turn(session, turn_id="turn_truncated")]
+
+    assert isinstance(events[-1], TurnFailedEvent)
+    assert events[-1].error_type == "StreamTruncated"
+    session.persist_message.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_turn_runner_recovers_only_latest_assistant_tool_step() -> None:
+    parser = MagicMock()
+    runner, session = make_runner(parser)
+    session.load_messages = AsyncMock(
+        return_value=[
+            {"role": "assistant", "meta": {"tool_calls": [{"id": "old", "name": "bash", "raw_args": "{}"}]}},
+            {"role": "tool", "tool_call_id": "old", "content": ""},
+            {"role": "assistant", "meta": {"tool_calls": [{"id": "current", "name": "bash", "raw_args": "{}"}]}},
+        ]
+    )
+    session.get_tool_records = AsyncMock(return_value=[])
+
+    assert await runner._pending_tool_calls(session) == [
+        ParsedToolCall(call_id="current", name="bash", raw_args="{}")
+    ]
 
 
 def main() -> int:
