@@ -4,6 +4,7 @@ import os
 import signal
 import subprocess
 import sys
+import threading
 from pathlib import Path
 
 import pytest
@@ -1315,7 +1316,7 @@ def test_configure_stdio_server_signals_ignores_console_sigint(monkeypatch):
     assert calls == [(signal.SIGINT, signal.SIG_IGN)]
 
 
-def test_app_server_process_exits_after_shutdown(tmp_path):
+def test_app_server_process_serves_git_backed_commands_and_exits_after_shutdown(tmp_path):
     home = tmp_path / "home"
     workspace = tmp_path / "workspace"
     (home / ".rind").mkdir(parents=True)
@@ -1340,14 +1341,55 @@ def test_app_server_process_exits_after_shutdown(tmp_path):
     )
     try:
         assert process.stdin and process.stdout
+
+        def read_response(timeout=5):
+            result = []
+            reader = threading.Thread(target=lambda: result.append(process.stdout.readline()), daemon=True)
+            reader.start()
+            reader.join(timeout)
+            assert not reader.is_alive(), "Runtime did not return a response in time."
+            return json.loads(result[0])
+
         process.stdin.write(json.dumps({"kind": "request", "request_id": "init", "method": "initialize"}) + "\n")
         process.stdin.flush()
-        initialize = json.loads(process.stdout.readline())
+        initialize = read_response()
         assert initialize.get("kind") == "response", initialize
+
+        process.stdin.write(
+            json.dumps(
+                {
+                    "kind": "request",
+                    "request_id": "status",
+                    "method": "rind/command/execute",
+                    "params": {"input": "/status"},
+                }
+            )
+            + "\n"
+        )
+        process.stdin.flush()
+        status = read_response()
+        assert status.get("request_id") == "status", status
+        assert status.get("result", {}).get("display", {}).get("type") == "status", status
+
+        process.stdin.write(
+            json.dumps(
+                {
+                    "kind": "request",
+                    "request_id": "doctor",
+                    "method": "rind/command/execute",
+                    "params": {"input": "/doctor"},
+                }
+            )
+            + "\n"
+        )
+        process.stdin.flush()
+        doctor = read_response()
+        assert doctor.get("request_id") == "doctor", doctor
+        assert doctor.get("result", {}).get("display", {}).get("type") == "doctor", doctor
 
         process.stdin.write(json.dumps({"kind": "request", "request_id": "bye", "method": "shutdown"}) + "\n")
         process.stdin.flush()
-        shutdown = json.loads(process.stdout.readline())
+        shutdown = read_response()
         assert shutdown.get("result") == {"ok": True}, shutdown
 
         process.wait(timeout=20)

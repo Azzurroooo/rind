@@ -11,6 +11,7 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from agent.infrastructure.config.settings import Config
 from agent.infrastructure.llm import OpenAIClientFactory
+from agent.version import __version__
 
 
 @pytest.fixture(autouse=True)
@@ -101,7 +102,7 @@ def test_openai_client_factory_uses_loaded_settings(tmp_path, monkeypatch):
     kwargs = mock_async_openai.call_args.kwargs
     assert kwargs["api_key"] == "settings-key"
     assert kwargs["base_url"] == "https://example.com/v1"
-    assert kwargs["default_headers"]["User-Agent"].startswith("rind/0.3.0 (")
+    assert kwargs["default_headers"]["User-Agent"].startswith(f"rind/{__version__} (")
 
 
 def test_config_set_model_updates_shared_settings_json(tmp_path, monkeypatch):

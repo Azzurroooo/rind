@@ -1,0 +1,26 @@
+api_version: aiteam/v1
+kind: Agent
+metadata:
+  id: main-agent
+  name: Main Agent
+  description: Default Team entry agent.
+spec:
+  prompts:
+    system:
+      - ./prompts/system.md
+  skills:
+    enabled: []
+  workflows:
+    available: []
+  memory:
+    root: ../memory
+    scope: agent_project
+  filesystem:
+    writable:
+      - ../work
+      - ../outputs
+      - ../memory
+      - ../../../shared
+    readonly:
+      - ..
+      - ../../../shared

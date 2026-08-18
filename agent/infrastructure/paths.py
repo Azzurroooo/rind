@@ -29,15 +29,4 @@ def validate_session_id(session_id: str) -> str:
 
 def resolve_session_base(session_root: str | Path, session_id: str) -> Path:
     root = Path(session_root).expanduser().resolve()
-    base = (root / validate_session_id(session_id)).resolve()
-    if not _is_relative_to(base, root):
-        raise ValueError("Session path escapes the session root.")
-    return base
-
-
-def _is_relative_to(path: Path, root: Path) -> bool:
-    try:
-        path.relative_to(root)
-        return True
-    except ValueError:
-        return False
+    return root / validate_session_id(session_id)

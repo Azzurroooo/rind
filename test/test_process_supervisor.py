@@ -40,6 +40,7 @@ def _script_command(state: ShellState, path: Path, *args: Path) -> str:
 @pytest.mark.asyncio
 async def test_cancel_terminates_descendant_process(tmp_path: Path) -> None:
     marker = tmp_path / "child-finished"
+    started = tmp_path / "child-started"
     child = tmp_path / "child.py"
     child.write_text(
         "import pathlib, time\ntime.sleep(2)\npathlib.Path(__file__).with_name('child-finished').write_text('alive')\n",
@@ -47,24 +48,33 @@ async def test_cancel_terminates_descendant_process(tmp_path: Path) -> None:
     )
     parent = tmp_path / "parent.py"
     parent.write_text(
-        "import subprocess, sys, time\n"
+        "import pathlib, subprocess, sys, time\n"
         "subprocess.Popen([sys.executable, sys.argv[1]])\n"
+        "pathlib.Path(sys.argv[2]).write_text('spawned')\n"
         "print('spawned', flush=True)\n"
         "time.sleep(30)\n",
         encoding="utf-8",
     )
-    pool = ShellSessionPool()
-    state = pool.get_state("tree")
-    command = _script_command(state, parent, child)
+    state = ShellState(
+        cwd=str(tmp_path),
+        env={},
+        shell_executable=sys.executable,
+        shell_backend="bash",
+    )
+    command = (
+        f"import runpy, sys; sys.argv = [{str(parent)!r}, {str(child)!r}, {str(started)!r}]; "
+        f"runpy.run_path({str(parent)!r}, run_name='__main__')"
+    )
     source = CancellationTokenSource()
-
-    async def cancel() -> None:
-        await asyncio.sleep(0.5)
-        source.cancel("test")
-
-    asyncio.create_task(cancel())
     supervisor = ProcessSupervisor(timeout=10)
-    result = await supervisor.run(command, state, "tree", source.token)
+    run = asyncio.create_task(supervisor.run(command, state, "tree", source.token))
+    for _ in range(20):
+        if started.exists():
+            break
+        await asyncio.sleep(0.05)
+    assert started.exists()
+    source.cancel("test")
+    result = await run
 
     assert _payload(result)["data"]["status"] == "cancelled"
     await asyncio.sleep(2)

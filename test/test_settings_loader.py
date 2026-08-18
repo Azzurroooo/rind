@@ -15,6 +15,7 @@ from agent.infrastructure.config.settings_loader import (
     load_settings,
     save_settings_patch,
 )
+from agent.version import __version__
 
 
 def write_settings(home: Path, data: dict) -> Path:
@@ -147,7 +148,7 @@ def test_build_default_user_agent_uses_windows_terminal(monkeypatch):
     monkeypatch.delenv("TERM_PROGRAM", raising=False)
     monkeypatch.delenv("TERM", raising=False)
 
-    assert build_default_user_agent() == "rind/0.3.0 (Windows 11; AMD64) WindowsTerminal"
+    assert build_default_user_agent() == f"rind/{__version__} (Windows 11; AMD64) WindowsTerminal"
 
 
 def test_build_default_user_agent_uses_term_program_version(monkeypatch):
@@ -159,7 +160,7 @@ def test_build_default_user_agent_uses_term_program_version(monkeypatch):
     monkeypatch.setenv("TERM_PROGRAM_VERSION", "1.99.0")
     monkeypatch.setenv("TERM", "xterm-256color")
 
-    assert build_default_user_agent() == "rind/0.3.0 (Darwin 25.0.0; arm64) vscode/1.99.0"
+    assert build_default_user_agent() == f"rind/{__version__} (Darwin 25.0.0; arm64) vscode/1.99.0"
 
 
 def test_build_default_user_agent_sanitizes_terminal_token(monkeypatch):
@@ -170,4 +171,4 @@ def test_build_default_user_agent_sanitizes_terminal_token(monkeypatch):
     monkeypatch.setenv("TERM_PROGRAM", "bad\rname")
     monkeypatch.setenv("TERM_PROGRAM_VERSION", "1 2")
 
-    assert build_default_user_agent() == "rind/0.3.0 (Linux 6.1; x86_64) bad_name/1_2"
+    assert build_default_user_agent() == f"rind/{__version__} (Linux 6.1; x86_64) bad_name/1_2"

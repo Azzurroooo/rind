@@ -103,7 +103,7 @@ async def _run_cancelled_bash():
 
     asyncio.create_task(cancel_soon())
     res = await bash(
-        "python3 -c \"import time; time.sleep(3)\"",
+        _python_command("import time; time.sleep(3)"),
         _session_id="chaos_cancel",
         _cancellation_token=source.token,
     )

@@ -1,6 +1,7 @@
 import asyncio
 import json
 import os
+import subprocess
 import sys
 from pathlib import Path
 
@@ -376,6 +377,24 @@ async def test_status_shows_git_branch(monkeypatch) -> None:
     result = await SlashCommandRouter().execute("/status", _context())
 
     assert "Git: main*" in result.text
+
+
+def test_git_commands_do_not_inherit_runtime_stdin(monkeypatch, tmp_path) -> None:
+    from agent.runtime.server.commands import diagnostics, git_status
+
+    calls = []
+
+    def fake_run(*args, **kwargs):
+        calls.append(kwargs)
+        return type("Completed", (), {"returncode": 0, "stdout": "main\n"})()
+
+    monkeypatch.setattr(git_status.subprocess, "run", fake_run)
+
+    assert git_status._run_git(["rev-parse", "--abbrev-ref", "HEAD"], str(tmp_path)) == "main"
+    assert diagnostics._run_git(["rev-parse", "--abbrev-ref", "HEAD"]) == "main"
+    assert len(calls) == 2
+    assert calls[0]["stdin"] is subprocess.DEVNULL
+    assert calls[1]["stdin"] is subprocess.DEVNULL
 
 
 @pytest.mark.asyncio
