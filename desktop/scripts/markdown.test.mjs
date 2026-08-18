@@ -17,3 +17,16 @@ test("markdown renderer escapes model-provided html and keeps safe links", () =>
   assert.match(html, /href=\"https:\/\/example\.com\/docs\"/)
   assert.match(html, /<code>code<\/code>/)
 })
+
+test("markdown renderer formats completed tables and keeps inline markdown", () => {
+  const html = renderMarkdown("| Name | Value |\n| :--- | ---: |\n| **one** | `two` |")
+  assert.match(html, /<table>[\s\S]*<th style=\"text-align:left\">Name<\/th>/)
+  assert.match(html, /<td style=\"text-align:right\"><code>two<\/code><\/td>/)
+  assert.match(html, /<strong>one<\/strong>/)
+})
+
+test("markdown renderer leaves an incomplete table as text until its separator arrives", () => {
+  const html = renderMarkdown("| Name | Value |")
+  assert.doesNotMatch(html, /<table>/)
+  assert.match(html, /\| Name \| Value \|/)
+})

@@ -1,12 +1,9 @@
-import {
-  isReadonlySlashCommand,
-  parseGoalCommand,
-  steeringCommandText,
-} from "./slash-command-mode.js";
+import { isReadonlySlashCommand, parseGoalCommand, steeringCommandText } from "./slash-command-mode.js";
 import {
   helpText,
   slashResultText,
 } from "./rendering.js";
+import { isRemovedSlashCommand, LOCAL_SLASH_COMMANDS } from "./local-slash-commands.js";
 import { runtimeMethods } from "./runtime-protocol.js";
 
 const LOCAL_COMMANDS = Object.freeze([
@@ -28,6 +25,15 @@ export function createCommandController({
     }
     if (!String(text || "").startsWith("/")) {
       return false;
+    }
+    const localResult = await input.runLocalCommand?.(text);
+    if (localResult) {
+      await applyResult(localResult);
+      return true;
+    }
+    if (isRemovedSlashCommand(text)) {
+      output.log?.(`Unknown command: ${String(text).trim().split(/\s+/, 1)[0]}\nRun /help to see available commands.`);
+      return true;
     }
     const goal = parseGoalCommand(text);
     if (goal) {
@@ -54,8 +60,8 @@ export function createCommandController({
   }
 
   async function runSlashCommand(text) {
-    if (isBareModelCommand(text) && input.isTerminal) {
-      await input.runModelSelector?.();
+    if (isBareModelCommand(text) && input.isTerminal && input.runModelSelector) {
+      await input.runModelSelector();
       return;
     }
     if (isCompactCommand(text) && input.isTerminal) {
@@ -66,8 +72,8 @@ export function createCommandController({
       await input.runSessionsSelector?.();
       return;
     }
-    if (isReadonlySlashCommand(text) && input.isTerminal) {
-      input.startReadonlySlashCommand?.(text);
+    if (isReadonlySlashCommand(text) && input.isTerminal && input.startReadonlySlashCommand) {
+      input.startReadonlySlashCommand(text);
       return;
     }
     const result = await request(runtimeMethods.commandExecute, { input: text });
@@ -96,14 +102,14 @@ export function createCommandController({
     const items = [];
     for (const command of commands) {
       const name = singleWord(command?.name);
-      if (!name) {
+      if (!name || isRemovedSlashCommand(name)) {
         continue;
       }
       const description = String(command.description || "").trim();
       items.push({ name, description });
       for (const alias of command.aliases || []) {
         const aliasName = singleWord(alias);
-        if (aliasName) {
+        if (aliasName && !isRemovedSlashCommand(aliasName)) {
           items.push({ name: aliasName, description: `alias for /${name}` });
         }
       }
@@ -114,7 +120,10 @@ export function createCommandController({
   return {
     handle,
     normalizeCommands,
-    localCommands: () => LOCAL_COMMANDS.flatMap((command) => normalizeCommands([command])),
+    localCommands: () => [
+      ...LOCAL_COMMANDS,
+      ...LOCAL_SLASH_COMMANDS,
+    ].flatMap((command) => normalizeCommands([command])),
     applyResult,
   };
 }

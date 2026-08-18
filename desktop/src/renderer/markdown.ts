@@ -23,6 +23,13 @@ export function renderMarkdown(value: string): string {
       blocks.push(renderCodeBlock(fence[1].trim(), code.join("\n")))
       continue
     }
+    const table = parseTable(lines, index)
+    if (table) {
+      flushParagraph()
+      blocks.push(renderTable(table))
+      index = table.end
+      continue
+    }
     const heading = line.match(/^(#{1,6})\s+(.+?)\s*#*\s*$/)
     if (heading) {
       flushParagraph()
@@ -81,6 +88,75 @@ export function renderMarkdown(value: string): string {
   }
   flushParagraph()
   return blocks.join("")
+}
+
+type TableAlignment = "left" | "center" | "right" | undefined
+
+type MarkdownTable = {
+  headers: string[]
+  alignments: TableAlignment[]
+  rows: string[][]
+  end: number
+}
+
+function parseTable(lines: string[], start: number): MarkdownTable | undefined {
+  if (!lines[start]?.includes("|")) return
+  const headers = splitTableRow(lines[start])
+  const separators = splitTableRow(lines[start + 1] || "")
+  if (!headers.length || separators.length !== headers.length) return
+  const alignments = separators.map(tableAlignment)
+  if (alignments.some((alignment) => alignment === null)) return
+
+  const rows: string[][] = []
+  let end = start + 1
+  while (end + 1 < lines.length && lines[end + 1].trim() && lines[end + 1].includes("|")) {
+    rows.push(splitTableRow(lines[end + 1]))
+    end += 1
+  }
+  return { headers, alignments: alignments as TableAlignment[], rows, end }
+}
+
+function splitTableRow(line: string): string[] {
+  const cells: string[] = []
+  let cell = ""
+  let escaped = false
+  for (const character of line.trim()) {
+    if (escaped) {
+      cell += character
+      escaped = false
+    } else if (character === "\\") {
+      cell += character
+      escaped = true
+    } else if (character === "|") {
+      cells.push(cell.trim())
+      cell = ""
+    } else {
+      cell += character
+    }
+  }
+  cells.push(cell.trim())
+  if (cells[0] === "" && line.trim().startsWith("|")) cells.shift()
+  if (cells.at(-1) === "" && line.trim().endsWith("|")) cells.pop()
+  return cells
+}
+
+function tableAlignment(value: string): TableAlignment | null {
+  const cell = value.trim()
+  if (!/^:?-+:?$/.test(cell)) return null
+  if (cell.startsWith(":") && cell.endsWith(":")) return "center"
+  if (cell.startsWith(":")) return "left"
+  if (cell.endsWith(":")) return "right"
+  return undefined
+}
+
+function renderTable(table: MarkdownTable) {
+  const cell = (tag: "th" | "td", value: string, alignment: TableAlignment) => {
+    const style = alignment ? ` style="text-align:${alignment}"` : ""
+    return `<${tag}${style}>${renderInline(value.replace(/\\\|/g, "|"))}</${tag}>`
+  }
+  const header = table.headers.map((value, index) => cell("th", value, table.alignments[index])).join("")
+  const rows = table.rows.map((row) => `<tr>${table.headers.map((_, index) => cell("td", row[index] || "", table.alignments[index])).join("")}</tr>`).join("")
+  return `<div class="markdown-table-wrap"><table><thead><tr>${header}</tr></thead>${rows ? `<tbody>${rows}</tbody>` : ""}</table></div>`
 }
 
 function renderCodeBlock(language: string, code: string) {
