@@ -10,18 +10,15 @@ export type SlashCommandMenu = {
   commands: SlashCommand[]
 }
 
-const DESKTOP_HIDDEN_COMMANDS = new Set(["sessions"])
+const DESKTOP_HIDDEN_COMMANDS = new Set(["draft", "model", "plan", "sessions"])
 
 export const fallbackSlashCommands: SlashCommand[] = [
   ["compact", "Compact current session context", "/compact"],
   ["config", "Show config guidance", "/config"],
   ["doctor", "Run local setup diagnostics", "/doctor"],
-  ["draft", "Show, reuse, or clear saved input draft", "/draft | /draft use | /draft clear"],
   ["help", "Show commands", "/help [command]"],
   ["init", "Draft RIND.md", "/init [project|user]"],
   ["login", "Show login setup guidance", "/login"],
-  ["model", "Show or change the active model", "/model | /model set <model>"],
-  ["plan", "Show active plan summary", "/plan"],
   ["skill", "List skills", "/skill [list]"],
   ["status", "Show session status", "/status"],
   ["team", "Create a Team project", "/team create [project-id]"],
@@ -45,6 +42,8 @@ export function desktopSlashCommandNotice(input: string) {
   const command = input.trim()
   if (/^\/sessions(?:\s|$)/i.test(command)) return "Use the left sidebar to switch sessions."
   if (/^\/help\s+\/?sessions(?:\s|$)/i.test(command)) return "Use the left sidebar to switch sessions."
+  if (/^\/(?:plan|draft)(?:\s|$)/i.test(command)) return "That command is not available in Desktop."
+  if (/^\/help\s+\/?(?:plan|draft)(?:\s|$)/i.test(command)) return "That command is not available in Desktop."
   return undefined
 }
 
@@ -79,7 +78,10 @@ function asSlashCommand(value: unknown): SlashCommand | undefined {
   const name = typeof item.name === "string" ? item.name.trim().toLocaleLowerCase() : ""
   if (!/^[a-z][a-z0-9_-]*$/.test(name)) return undefined
   const aliases = Array.isArray(item.aliases)
-    ? item.aliases.flatMap((alias) => typeof alias === "string" && /^[a-z][a-z0-9_-]*$/i.test(alias.trim()) ? [alias.trim().toLocaleLowerCase()] : [])
+    ? item.aliases.flatMap((alias) => {
+      const normalized = typeof alias === "string" ? alias.trim().toLocaleLowerCase() : ""
+      return normalized && /^[a-z][a-z0-9_-]*$/.test(normalized) && !isDesktopHiddenSlashCommand(normalized) ? [normalized] : []
+    })
     : []
   return {
     name,

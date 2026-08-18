@@ -63,14 +63,6 @@ test("app-server supports desktop session lifecycle over JSONL", async () => {
     assert.equal(initialize.result.session_id, null)
     assert.equal(initialize.result.draft, true)
 
-    const status = await request("status", "rind/command/execute", { input: "/status" })
-    assert.equal(status.error, undefined)
-    assert.equal(status.result.display.type, "status")
-
-    const doctor = await request("doctor", "rind/command/execute", { input: "/doctor" })
-    assert.equal(doctor.error, undefined)
-    assert.equal(doctor.result.display.type, "doctor")
-
     const listed = await request("sessions", "session/list", { limit: 10 })
     assert.equal(listed.error, undefined)
     assert.ok(Array.isArray(listed.result.sessions))

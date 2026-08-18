@@ -64,33 +64,45 @@ export function createRuntimeClient({
   let killTimer = null;
   let exitHandled = false;
   const pending = new Map();
-  const child = spawn(launch.command, launch.args, {
-    cwd,
-    env: buildRuntimeEnv(repoRoot, process.env, {
-      sourceRuntime: !runtimePath,
-      rindHome,
-    }),
-    stdio: ["pipe", "pipe", "pipe"],
-  });
+  let child = null;
 
-  child.stdout.setEncoding("utf8");
-  child.stdout.on("data", (chunk) => {
-    stdoutBuffer += chunk;
-    const lines = stdoutBuffer.split(/\r?\n/);
-    stdoutBuffer = lines.pop() || "";
-    for (const line of lines) {
-      if (line) {
-        receive(line);
-      }
+  function start() {
+    if (child && !child.killed && child.exitCode === null) {
+      return child;
     }
-  });
-  child.stderr.on("data", (chunk) => onStderr(chunk));
-  child.once("error", (error) => {
-    handleExit(null, null, error);
-  });
-  child.once("exit", (code, signal) => {
-    handleExit(code, signal);
-  });
+    if (closing) {
+      throw new Error("Runtime is shutting down.");
+    }
+    stdoutBuffer = "";
+    exitHandled = false;
+    child = spawn(launch.command, launch.args, {
+      cwd,
+      env: buildRuntimeEnv(repoRoot, process.env, {
+        sourceRuntime: !runtimePath,
+        rindHome,
+      }),
+      stdio: ["pipe", "pipe", "pipe"],
+    });
+    child.stdout.setEncoding("utf8");
+    child.stdout.on("data", (chunk) => {
+      stdoutBuffer += chunk;
+      const lines = stdoutBuffer.split(/\r?\n/);
+      stdoutBuffer = lines.pop() || "";
+      for (const line of lines) {
+        if (line) {
+          receive(line);
+        }
+      }
+    });
+    child.stderr.on("data", (chunk) => onStderr(chunk));
+    child.once("error", (error) => {
+      handleExit(null, null, error);
+    });
+    child.once("exit", (code, signal) => {
+      handleExit(code, signal);
+    });
+    return child;
+  }
 
   function handleExit(code, signal, cause = null) {
     if (exitHandled) {
@@ -104,13 +116,22 @@ export function createRuntimeClient({
       entry.reject(error);
     }
     pending.clear();
+    child = null;
     onExit(code, signal, { closing, error });
   }
 
   function request(method, params = {}) {
     const id = nextId++;
     return new Promise((resolve, reject) => {
-      if (!child.stdin.writable || child.destroyed) {
+      if (!child && !closing) {
+        try {
+          start();
+        } catch (error) {
+          reject(error);
+          return;
+        }
+      }
+      if (!child || !child.stdin.writable || child.destroyed) {
         reject(new Error("Runtime stdin is closed. Restart Rind and try again."));
         return;
       }
@@ -177,11 +198,14 @@ export function createRuntimeClient({
       return Promise.resolve();
     }
     closing = true;
+    if (!child) {
+      return Promise.resolve();
+    }
     scheduleKill();
     return request(runtimeMethods.shutdown).catch(() => {
       forceShutdown();
     }).finally(() => {
-      if (child.stdin.writable) {
+      if (child?.stdin.writable) {
         child.stdin.end();
       }
     });
@@ -190,7 +214,7 @@ export function createRuntimeClient({
   function forceShutdown() {
     closing = true;
     clearKillTimer();
-    if (!child.killed && child.exitCode === null) {
+    if (child && !child.killed && child.exitCode === null) {
       try {
         child.kill("SIGKILL");
       } catch {
@@ -200,7 +224,7 @@ export function createRuntimeClient({
   }
 
   function closeInput() {
-    if (child.stdin.writable) {
+    if (child?.stdin.writable) {
       child.stdin.end();
     }
   }
@@ -220,7 +244,10 @@ export function createRuntimeClient({
   }
 
   return {
-    child,
+    get child() {
+      return child;
+    },
+    start,
     request,
     shutdown,
     forceShutdown,

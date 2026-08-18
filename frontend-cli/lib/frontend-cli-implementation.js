@@ -12,6 +12,7 @@ import { prepareComposerFrame } from "./composer-terminal.js";
 import { createLineEditor } from "./line-editor.js";
 import { createRuntimeClient, runHelpVersion } from "./runtime-client.js";
 import { requireRuntimeInitialization, runtimeMethods } from "./runtime-protocol.js";
+import { executeLocalSlashCommand, loadLocalSettings } from "./local-slash-commands.js";
 import { createTurnController } from "./turn-controller.js";
 import { createCommandController } from "./command-controller.js";
 import { createTaskMonitorController } from "./task-monitor-controller.js";
@@ -79,9 +80,13 @@ let interruptRequested = false;
 let input = null;
 let inputActive = false;
 let runtimeClosing = false;
+let runtimeStarted = false;
+let runtimeInitialized = false;
+let runtimeInitialization = null;
 let processExitTimer = null;
 let cancelActiveInput = null;
 let sessionInfo = {};
+let localSettings = {};
 let latestStats = {};
 let slashCommands = [];
 let turnTools = { completed: 0, failed: 0 };
@@ -121,17 +126,21 @@ const runtimeClient = createRuntimeClient({
   }),
   onStderr: (chunk) => writeErrorOutput(chunk),
   onExit: (code, signal, { error }) => {
+    runtimeStarted = false;
+    runtimeInitialized = false;
+    runtimeInitialization = null;
     if (!runtimeClosing) {
-      writeErrorOutput(`Runtime stopped (${signal || (code ?? "startup failure")}): ${error.message}. Restart Rind to continue.\n`);
-    }
-    process.exitCode = runtimeClosing ? 0 : (code || 1);
-    closeInput();
-    if (runtimeClosing) {
-      scheduleProcessExit(process.exitCode ?? 0, 0);
+      writeErrorOutput(`Runtime stopped (${signal || (code ?? "startup failure")}): ${error.message}. Runtime commands are unavailable until it restarts.\n`);
+    } else {
+      process.exitCode = 0;
+      scheduleProcessExit(0, 0);
     }
   },
 });
-const request = runtimeClient.request;
+async function request(method, params = {}) {
+  await ensureRuntime();
+  return runtimeClient.request(method, params);
+}
 const turnState = {
   get activeTurn() {
     return activeTurn;
@@ -182,7 +191,20 @@ const commandController = createCommandController({
     runModelSelector,
     startCompactCommand,
     runSessionsSelector,
-    startReadonlySlashCommand,
+    runLocalCommand: async (text) => {
+      if (!Object.keys(localSettings).length) {
+        localSettings = await loadLocalSettings();
+      }
+      return executeLocalSlashCommand(text, {
+        settings: localSettings,
+        sessionInfo,
+        cwd: process.cwd(),
+        runtimeStarted,
+        runtimeInitialized,
+        interactive: Boolean(terminalUi),
+        commands: slashCommands,
+      });
+    },
   },
   state: {
     get slashCommands() {
@@ -278,12 +300,9 @@ const inputController = createInputController({
 process.on("SIGINT", handleSigint);
 
 try {
-  const info = requireRuntimeInitialization(await request(runtimeMethods.initialize));
-  sessionInfo = { cwd: process.cwd(), ...(info || {}) };
-  slashCommands = [
-    ...commandController.normalizeCommands(info?.commands),
-    ...commandController.localCommands(),
-  ];
+  localSettings = await loadLocalSettings();
+  sessionInfo = { cwd: process.cwd(), model: localSettings.model };
+  slashCommands = commandController.localCommands();
   if (terminalUi) {
     inputController.start();
   } else {
@@ -295,10 +314,7 @@ try {
     });
     process.stdin.on("data", handleStdinData);
   }
-  if (terminalUi) {
-    void taskMonitorController.refresh().catch(() => {});
-  }
-  logOutput(startupText(info));
+  logOutput(startupText(sessionInfo));
   await inputController.promptLoop();
 } catch (error) {
   closeAssistant();
@@ -308,6 +324,47 @@ try {
   }
 } finally {
   closeRuntime();
+}
+
+async function ensureRuntime() {
+  if (runtimeInitialized) {
+    return sessionInfo;
+  }
+  if (runtimeInitialization) {
+    return runtimeInitialization;
+  }
+  runtimeInitialization = (async () => {
+    runtimeClient.start();
+    runtimeStarted = true;
+    const info = requireRuntimeInitialization(await runtimeClient.request(runtimeMethods.initialize));
+    sessionInfo = { ...sessionInfo, ...(info || {}) };
+    runtimeInitialized = true;
+    slashCommands = mergeSlashCommands(
+      commandController.normalizeCommands(info?.commands),
+      commandController.localCommands(),
+    );
+    redrawInput(true);
+    if (terminalUi) {
+      void taskMonitorController.refresh().catch(() => {});
+    }
+    return sessionInfo;
+  })().catch((error) => {
+    runtimeStarted = Boolean(runtimeClient.child);
+    runtimeInitialized = false;
+    runtimeInitialization = null;
+    throw error;
+  });
+  return runtimeInitialization;
+}
+
+function mergeSlashCommands(...groups) {
+  const byName = new Map();
+  for (const group of groups) {
+    for (const command of group || []) {
+      if (command?.name && !byName.has(command.name)) byName.set(command.name, command);
+    }
+  }
+  return [...byName.values()].sort((left, right) => left.name.localeCompare(right.name));
 }
 
 async function runGoalCommand(command) {
@@ -352,7 +409,7 @@ function updateGoalState(goal) {
 }
 
 async function refreshGoalState() {
-  if (!Array.isArray(sessionInfo.capabilities) || !sessionInfo.capabilities.includes("rind/goals")) {
+  if (!runtimeInitialized || !Array.isArray(sessionInfo.capabilities) || !sessionInfo.capabilities.includes("rind/goals")) {
     return;
   }
   try {
@@ -413,19 +470,6 @@ function sessionMenuOption(session) {
   return [id, title, updated, marker].filter(Boolean).join(" · ");
 }
 
-function startReadonlySlashCommand(text) {
-  void runReadonlySlashCommand(text).catch((error) => {
-    if (!runtimeClosing) {
-      writeErrorOutput(`${error instanceof Error ? error.message : String(error)}\n`);
-    }
-  });
-}
-
-async function runReadonlySlashCommand(text) {
-  const result = await request(runtimeMethods.commandExecute, { input: text });
-  await commandController.applyResult(result);
-}
-
 function startCompactCommand() {
   if (activeCompact) {
     logOutput("Compact is already running.");
@@ -480,19 +524,14 @@ function modelSetResultText(result, model) {
   const sessionModel = singleLineText(result?.session_model || result?.model || model);
   const defaultModel = singleLineText(result?.default_model);
   const lines = ["Session model updated."];
-  if (sessionModel) {
-    lines.push(`- session model: ${sessionModel}`);
-  }
-  if (defaultModel) {
-    lines.push(`- default model: ${defaultModel} (unchanged)`);
-  }
-  if (result?.active_updated || result?.runtime || result?.session) {
-    lines.push("- active session: updated");
-  } else {
-    lines.push("- active session: unchanged; start a new session to use this model");
-  }
+  if (sessionModel) lines.push(`- session model: ${sessionModel}`);
+  if (defaultModel) lines.push(`- default model: ${defaultModel} (unchanged)`);
+  lines.push(result?.active_updated || result?.runtime || result?.session
+    ? "- active session: updated"
+    : "- active session: unchanged; start a new session to use this model");
   return commandResultText(lines[0], lines.slice(1).join(" · "));
 }
+
 
 function restoreInputText(text) {
   pendingInputPrefill = String(text || "");
@@ -863,9 +902,7 @@ function handleModelInput(session, key) {
     completeTtyInput(session, "", false);
     return;
   }
-  if (!modified && session.modelState.handleKey(key)) {
-    redrawInput();
-  }
+  if (!modified && session.modelState.handleKey(key)) redrawInput();
 }
 
 function submitTtyInput(session) {

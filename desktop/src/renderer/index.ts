@@ -1,6 +1,7 @@
 import "./style.css"
 import brandMarkUrl from "./assets/brand-mark.svg"
 import workingMarkUrl from "./assets/working-mark.svg"
+import { PanelLeft, PanelRight, Settings, renderIcon } from "./icons"
 
 import {
   composerRegionMarkup,
@@ -39,6 +40,7 @@ import {
 import { renderMarkdown } from "./markdown"
 import { highlightFile } from "./syntax-highlight"
 import { renderCommandResult } from "./command-results"
+import { executeLocalSlashCommand } from "./local-slash-commands"
 import { modelChoices, modelSelectionTarget } from "./composer-select"
 import {
   commandPrefill,
@@ -74,6 +76,7 @@ type AppState = {
   viewedRuntimeId: string
   draftRuntimeIds: Record<string, string>
   conversationCache: Record<string, ConversationState>
+  sessionModels: Record<string, string>
   model: string
   models: string[]
   projects: DesktopProject[]
@@ -131,6 +134,7 @@ const state: AppState = {
   viewedRuntimeId: "",
   draftRuntimeIds: {},
   conversationCache: {},
+  sessionModels: {},
   model: "",
   models: [],
   projects: [],
@@ -176,10 +180,10 @@ appRoot.innerHTML = `
         </div>
         <span id="connection" class="connection"><span class="status-pip"></span><span id="connection-text">Stopped</span></span>
       </div>
-      <div class="workspace">
-        <span id="workspace-path" class="workspace-path">No project selected</span>
-        <button id="add-project" type="button" class="ghost-button">Add project</button>
-        <button id="open-settings" type="button" class="ghost-button">Settings</button>
+      <div class="topbar-actions">
+        <button id="toggle-sidebar" type="button" class="ghost-button" title="Toggle projects sidebar" aria-label="Toggle projects sidebar" aria-expanded="true">${renderIcon(PanelLeft)}</button>
+        <button id="toggle-files" type="button" class="ghost-button" title="Browse active project files" aria-label="Browse active project files" aria-expanded="false">${renderIcon(PanelRight)}</button>
+        <button id="open-settings" type="button" class="ghost-button" title="Open settings" aria-label="Open settings">${renderIcon(Settings)}</button>
       </div>
     </header>
     <main class="layout">
@@ -198,10 +202,7 @@ appRoot.innerHTML = `
         </div>
       </aside>
       <section class="conversation">
-        <div class="conversation-head">
-          <div class="conversation-title"><strong id="session-title">New session</strong><span id="session-id" class="subtle"></span></div>
-          <div class="conversation-actions"><button id="toggle-sidebar" type="button" class="ghost-button" title="Toggle projects sidebar" aria-label="Toggle projects sidebar">Projects</button><button id="toggle-files" type="button" class="ghost-button" title="Browse active project files">Files</button></div>
-        </div>
+        <div class="conversation-head"><div class="conversation-title"><strong id="session-title">New session</strong><span id="session-id" class="subtle"></span></div></div>
         <div id="notice" class="notice" role="status" hidden><span id="notice-text"></span><button id="retry" type="button" class="ghost-button" hidden>Retry</button></div>
         <div class="stream-wrap">
           <div id="message-stream" class="message-stream" aria-live="polite"></div>
@@ -237,7 +238,6 @@ const connectionText = requiredElement("connection-text")
 const projectMenuTrigger = requiredElement<HTMLButtonElement>("project-menu-trigger")
 const projectMenuLabel = requiredElement("project-menu-label")
 const projectMenu = requiredElement("project-menu")
-const workspacePath = requiredElement("workspace-path")
 const projectList = requiredElement("project-list")
 const recentSessions = requiredElement("recent-sessions")
 const recentList = requiredElement("recent-list")
@@ -319,10 +319,10 @@ function render() {
   filePanel.setAttribute("aria-hidden", String(!state.filesOpen))
   filePanel.inert = !state.filesOpen
   newSessionButton.title = chatProject()?.available ? `Start a new chat in ${chatProject()?.name}` : "Choose a project for a new chat"
-  sidebarToggle.textContent = state.sidebarOpen ? "Hide projects" : "Projects"
-  sidebarToggle.title = state.sidebarOpen ? "Hide projects sidebar" : "Show projects sidebar"
-  workspacePath.textContent = viewedProject()?.path || "No project selected"
-  workspacePath.title = viewedProject()?.path || ""
+  const sidebarLabel = state.sidebarOpen ? "Hide projects sidebar" : "Show projects sidebar"
+  sidebarToggle.title = sidebarLabel
+  sidebarToggle.setAttribute("aria-label", sidebarLabel)
+  sidebarToggle.setAttribute("aria-expanded", String(state.sidebarOpen))
   const current = knownSessions().find((item) => item.id === state.viewedSessionId)
   sessionTitle.textContent = current?.title || (state.viewedSessionId ? "Session" : "New session")
   sessionIdLabel.textContent = state.viewedSessionId || ""
@@ -476,7 +476,7 @@ function renderProjects() {
           <span class="project-path">${escapeHtml(project.path)}</span>
         </button>
         <div class="project-menu-wrap">
-          <button type="button" class="project-menu-trigger ghost-button" data-project-menu="${escapeAttribute(project.path)}" title="Project actions" aria-label="Project actions for ${escapeAttribute(project.name)}" aria-haspopup="menu" aria-expanded="${String(menuOpen)}">...</button>
+          <button type="button" class="project-menu-trigger ghost-button" data-project-menu="${escapeAttribute(project.path)}" title="Project actions" aria-label="Project actions for ${escapeAttribute(project.name)}" aria-haspopup="menu" aria-expanded="${String(menuOpen)}"><svg class="project-menu-icon" viewBox="0 0 16 16" focusable="false" aria-hidden="true"><circle cx="3" cy="8" r="1.3" /><circle cx="8" cy="8" r="1.3" /><circle cx="13" cy="8" r="1.3" /></svg></button>
           ${menuOpen ? `<div class="project-menu" role="menu"><button type="button" data-remove-project="${escapeAttribute(project.path)}" role="menuitem">Remove</button></div>` : ""}
         </div>
       </div>
@@ -565,7 +565,10 @@ function syncSidebarSelection() {
 function renderFiles() {
   const project = viewedProject()
   filesToggle.disabled = !project?.available
-  filesToggle.textContent = state.filesOpen ? "Hide files" : "Files"
+  const filesLabel = state.filesOpen ? "Hide project files" : "Browse active project files"
+  filesToggle.title = filesLabel
+  filesToggle.setAttribute("aria-label", filesLabel)
+  filesToggle.setAttribute("aria-expanded", String(state.filesOpen))
   if (!state.filesOpen || !project?.available) return
   fileTree.innerHTML = renderDirectory("")
   const preview = state.filePreview
@@ -626,7 +629,7 @@ function renderModels() {
 }
 
 function displayedModel() {
-  if (state.viewedSessionId) return state.model || state.settings.model
+  if (state.viewedSessionId) return state.model
   return currentRuntimeSnapshot().status === "ready" ? state.model || state.settings.model : state.settings.model
 }
 
@@ -1037,6 +1040,7 @@ async function loadReplay(sessionId = state.viewedSessionId) {
   if (runtimeTurnActive(runtimeId)) conversation = { ...conversation, ...conversationFor(sessionId), activeTurnId: conversationFor(sessionId).activeTurnId }
   setConversationFor(sessionId, conversation)
   if (sessionId === state.viewedSessionId) {
+    state.sessionModels[sessionId] = result.model
     state.model = result.model
     resetConversationPresentation(false)
   }
@@ -1065,15 +1069,27 @@ async function loadSettings() {
 
 function applyRuntimeInitialization(runtimeId: string, result: unknown) {
   const initialize = asRecord(result)
+  const hadViewedSession = Boolean(state.viewedSessionId)
   const sessionId = typeof initialize.session_id === "string" ? initialize.session_id : state.runtimeSessionIds[runtimeId] || ""
   adoptRuntimeSession(runtimeId, sessionId)
-  state.model = typeof initialize.model === "string" ? initialize.model : state.model
+  if (!hadViewedSession && typeof initialize.model === "string") {
+    state.model = initialize.model
+    if (sessionId) state.sessionModels[sessionId] = initialize.model
+  }
   const commands = parseSlashCommands(initialize.commands)
-  if (commands.length) state.slashCommands = commands
+  if (commands.length) state.slashCommands = mergeSlashCommands(fallbackSlashCommands, commands)
   const turnState = asRecord(initialize.turn_state)
   if (turnState.status === "running" && typeof turnState.turn_id === "string" && turnState.turn_id) {
     runAction(() => request(runtimeMethods.sessionPrompt, { resume: true }, runtimeId))
   }
+}
+
+function mergeSlashCommands(...groups: SlashCommand[][]) {
+  const unique = new Map<string, SlashCommand>()
+  for (const group of groups) {
+    for (const command of group) unique.set(command.name, command)
+  }
+  return [...unique.values()].sort((left, right) => left.name.localeCompare(right.name))
 }
 
 function handleRuntimeEvent(envelope: RuntimeEvent) {
@@ -1351,6 +1367,25 @@ async function runSlash(input: string) {
     render()
     return
   }
+  const localResult = executeLocalSlashCommand(input, {
+    settings: state.settings,
+    runtime: currentRuntimeSnapshot(),
+    sessionId: state.viewedSessionId,
+    projectPath: state.chatProjectPath,
+    commands: state.slashCommands,
+  })
+  if (localResult) {
+    if (state.viewedSessionId && localResult.text) {
+      setConversationFor(
+        state.viewedSessionId,
+        addCommandResult(conversationFor(state.viewedSessionId), input, localResult.text, localResult.display),
+      )
+    } else {
+      state.notice = localResult.text
+    }
+    render()
+    return
+  }
   const project = chatProject()
   if (!project?.available) {
     state.notice = "Choose a project before running a command."
@@ -1371,7 +1406,7 @@ async function runSlash(input: string) {
     if (isCurrentSlashView(runtimeId, project.path, commandSessionId)) state.viewedRuntimeId = runtimeId
     const result = asRecord(await request(runtimeMethods.commandExecute, { input }, runtimeId))
     const commands = parseSlashCommands(asRecord(result.display).commands)
-    if (commands.length) state.slashCommands = commands
+    if (commands.length) state.slashCommands = mergeSlashCommands(fallbackSlashCommands, commands)
     const text = asRecordText(result.text)
     if (compacting && text.startsWith("Compact complete.")) {
       await loadReplay(commandSessionId)
@@ -1475,7 +1510,6 @@ messageStream.addEventListener("scroll", () => {
   const nearBottom = messageStream.scrollHeight - messageStream.scrollTop - messageStream.clientHeight < 80
   if (nearBottom) jumpLatest.hidden = true
 })
-requiredElement("add-project").addEventListener("click", () => runAction(addProject))
 requiredElement("sidebar-add-project").addEventListener("click", () => runAction(addProject))
 requiredElement("open-settings").addEventListener("click", () => openSettings())
 requiredElement("new-session").addEventListener("click", () => runAction(startNewChat))
@@ -1715,6 +1749,7 @@ function resetProjectView() {
   state.viewedSessionId = ""
   state.viewedRuntimeId = ""
   state.conversationCache = {}
+  state.sessionModels = {}
   state.conversation = createConversation()
   resetConversationPresentation()
   state.expandedDirectories = new Set([""])
@@ -1754,10 +1789,34 @@ async function addProject(createDraft = false) {
 async function toggleProject(path: string) {
   const project = state.projects.find((item) => item.path === path)
   if (!project) return
-  if (state.expandedProjects.has(path)) state.expandedProjects.delete(path)
-  else state.expandedProjects.add(path)
+  if (state.expandedProjects.has(path)) {
+    const trigger = [...projectList.querySelectorAll<HTMLButtonElement>("[data-project-path]")]
+      .find((item) => item.dataset.projectPath === path)
+    const sessions = trigger?.closest<HTMLElement>(".project-item")?.querySelector<HTMLElement>(".project-sessions")
+    if (sessions && !sessions.classList.contains("collapsing") && !window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+      await new Promise<void>((resolve) => {
+        const finish = () => {
+          window.clearTimeout(timeoutId)
+          sessions.removeEventListener("animationend", finish)
+          resolve()
+        }
+        sessions.style.height = `${sessions.offsetHeight}px`
+        sessions.classList.add("collapsing")
+        sessions.addEventListener("animationend", finish, { once: true })
+        requestAnimationFrame(() => { sessions.style.height = "0px" })
+        const timeoutId = window.setTimeout(finish, 260)
+      })
+    }
+    state.expandedProjects.delete(path)
+    projectList.classList.add("skip-project-animation")
+  } else {
+    state.expandedProjects.add(path)
+  }
   state.notice = ""
   render()
+  if (projectList.classList.contains("skip-project-animation")) {
+    requestAnimationFrame(() => projectList.classList.remove("skip-project-animation"))
+  }
 }
 
 async function removeProject(path: string) {
@@ -1928,7 +1987,7 @@ async function switchSession(nextSessionId: string) {
   const runtimeId = runtimeIdForSession(nextSessionId)
   showCachedSession(nextSessionId)
   state.viewedSessionId = nextSessionId
-  state.model = ""
+  state.model = state.sessionModels[nextSessionId] || ""
   state.viewedProjectPath = project.path
   state.chatProjectPath = project.path
   state.viewedRuntimeId = state.runtimeWorkers[runtimeId] ? runtimeId : ""

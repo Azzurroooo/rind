@@ -5,11 +5,11 @@ import { renderCommandResult } from "../src/renderer/command-results.ts"
 
 test("command results render structured help as a usable command entry", () => {
   const html = renderCommandResult({
-    command: "/help model",
-    content: "Model help",
+    command: "/help compact",
+    content: "Compact help",
     display: {
       type: "help",
-      command: { name: "model", description: "Choose a model", usage: "/model set <model>" },
+      command: { name: "compact", description: "Compact", usage: "/compact" },
       commands: [
         { name: "compact", description: "Compact", usage: "/compact" },
         { name: "model", description: "Choose a model", usage: "/model set <model>" },
@@ -17,9 +17,9 @@ test("command results render structured help as a usable command entry", () => {
     },
   })
 
-  assert.match(html, /data-command-prefill="model"/)
-  assert.doesNotMatch(html, /data-command-prefill="compact"/)
-  assert.match(html, /\/model set &lt;model&gt;/)
+  assert.match(html, /data-command-prefill="compact"/)
+  assert.doesNotMatch(html, /data-command-prefill="model"/)
+  assert.doesNotMatch(html, /\/model set &lt;model&gt;/)
 })
 
 test("structured Desktop help does not re-display the removed sessions command", () => {

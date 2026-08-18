@@ -1,0 +1,154 @@
+import { readFile } from "node:fs/promises";
+import { homedir } from "node:os";
+import path from "node:path";
+
+const REMOVED_COMMANDS = new Set(["draft", "plan"]);
+
+export const LOCAL_SLASH_COMMANDS = Object.freeze([
+  { name: "config", description: "Show config guidance", usage: "/config" },
+  { name: "doctor", description: "Run local setup diagnostics", usage: "/doctor" },
+  { name: "help", description: "Show commands", usage: "/help [command]" },
+  { name: "login", description: "Show login setup guidance", usage: "/login" },
+  { name: "model", description: "Show or change the active model", usage: "/model | /model set <model>" },
+  { name: "status", description: "Show surface status", usage: "/status" },
+]);
+
+export function isRemovedSlashCommand(value) {
+  const name = String(value || "").trim().replace(/^\//, "").split(/\s+/, 1)[0].toLowerCase();
+  return REMOVED_COMMANDS.has(name);
+}
+
+export async function loadLocalSettings(rindHome = process.env.RIND_HOME || path.join(homedir(), ".rind")) {
+  const settingsPath = path.join(rindHome, "settings.json");
+  let data = {};
+  let settingsExists = false;
+  let error = "";
+  try {
+    data = JSON.parse(await readFile(settingsPath, "utf8"));
+    settingsExists = true;
+    if (!data || typeof data !== "object" || Array.isArray(data)) {
+      throw new Error("settings.json must contain a JSON object");
+    }
+  } catch (cause) {
+    if (!data || typeof data !== "object" || Array.isArray(data)) data = {};
+    if (cause?.code !== "ENOENT") {
+      error = cause instanceof Error ? cause.message : String(cause);
+    }
+  }
+  return {
+    path: settingsPath,
+    exists: settingsExists,
+    error,
+    model: stringValue(data.model) || "gpt-4o-mini",
+    baseUrl: stringValue(data.baseUrl) || "https://api.openai.com/v1",
+    reasoningEffort: stringValue(data.reasoningEffort) || "",
+    hasApiKey: Boolean(stringValue(data.apiKey)),
+  };
+}
+
+export async function executeLocalSlashCommand(input, context = {}) {
+  const match = String(input || "").trim().match(/^\/([^\s]+)(?:\s+([\s\S]*))?$/);
+  if (!match) return null;
+  const name = match[1].toLowerCase();
+  const argument = String(match[2] || "").trim();
+  if (REMOVED_COMMANDS.has(name)) return removedResult(name);
+  if (name === "config") return configResult(context.settings, argument);
+  if (name === "login") return argument ? usageResult("/login") : { text: "Login/config setup is not implemented yet.\nSet apiKey in ~/.rind/settings.json." };
+  if (name === "status") return statusResult(context, argument);
+  if (name === "doctor") return doctorResult(context, argument);
+  if (name === "help") return helpResult(argument, context.commands || []);
+  if (name === "model" && !argument && !context.interactive) return { text: `Model: ${context.settings?.model || "unknown"}` };
+  return null;
+}
+
+function removedResult(name) {
+  return { text: `Unknown command: /${name}\nRun /help to see available commands.` };
+}
+
+function usageResult(usage) {
+  return { text: `Usage: ${usage}` };
+}
+
+function configResult(settings = {}, argument) {
+  if (argument) return usageResult("/config");
+  const apiKey = settings.hasApiKey ? "set" : "unset";
+  const reasoning = settings.reasoningEffort || "unset";
+  const entries = [
+    { label: "settings", value: settings.path || "~/.rind/settings.json", state: settings.exists ? "found" : "missing" },
+    { label: "apiKey", value: apiKey },
+    { label: "baseUrl", value: settings.baseUrl || "https://api.openai.com/v1" },
+    { label: "model", value: settings.model || "unknown" },
+    { label: "reasoningEffort", value: reasoning },
+  ];
+  return {
+    text: [
+      "Config:",
+      `- settings: ${entries[0].value} (${entries[0].state})`,
+      `- apiKey: ${apiKey}`,
+      `- baseUrl: ${entries[2].value}`,
+      `- model: ${entries[3].value}`,
+      `- reasoningEffort: ${reasoning}`,
+    ].join("\n"),
+    display: { type: "config", entries },
+  };
+}
+
+function statusResult(context, argument) {
+  if (argument) return usageResult("/status");
+  const session = String(context.sessionInfo?.session_id || "none");
+  const model = String(context.settings?.model || context.sessionInfo?.model || "unknown");
+  const runtime = context.runtimeInitialized ? "ready" : context.runtimeStarted ? "starting" : "not started";
+  return {
+    text: [
+      "Status:",
+      `Session: ${session}`,
+      `Model: ${model}`,
+      `Runtime: ${runtime}`,
+      "Messages: unknown",
+    ].join("\n"),
+    display: { type: "status", session, model, debug: false, messages: "unknown", runtime },
+  };
+}
+
+function doctorResult(context, argument) {
+  if (argument) return usageResult("/doctor");
+  const settings = context.settings || {};
+  const checks = [
+    check(!settings.error, "Settings", settings.error || (settings.exists ? "found" : "missing")),
+    check(settings.hasApiKey, "API key", settings.hasApiKey ? "set" : "unset"),
+    check(Boolean(settings.model), "Model", settings.model || "unset"),
+    check(Boolean(context.cwd), "Working directory", context.cwd || "unknown"),
+  ];
+  const failures = checks.filter((item) => item.status === "fail").length;
+  const warnings = checks.filter((item) => item.status === "warn").length;
+  return {
+    text: [
+      "Doctor:",
+      ...checks.map((item) => `- [${item.status}] ${item.name}: ${item.detail}`),
+      `Overall: ${failures} failure(s), ${warnings} warning(s).`,
+    ].join("\n"),
+    display: { type: "doctor", checks, failures, warnings, next_steps: [] },
+  };
+}
+
+function check(ok, name, detail) {
+  return { status: ok ? "ok" : "fail", name, detail };
+}
+
+function helpResult(argument, commands) {
+  const name = argument.replace(/^\//, "").toLowerCase();
+  const visible = commands.filter((command) => !isRemovedSlashCommand(command.name) && (!name || command.name === name || command.aliases?.includes(name)));
+  if (name && !visible.length) return { text: `Unknown command: /${name}\nRun /help to see available commands.` };
+  const selected = name ? visible[0] : null;
+  const text = selected
+    ? `/${selected.name}\n${selected.description}\nUsage: ${selected.usage || `/${selected.name}`}`
+    : ["Commands:", ...visible.map((command) => `/${command.name} - ${command.description}`)].join("\n");
+  return {
+    text,
+    display: { type: "help", ...(selected ? { command: selected } : { commands: visible }) },
+  };
+}
+
+function stringValue(value) {
+  return typeof value === "string" ? value.trim() : "";
+}

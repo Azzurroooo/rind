@@ -125,3 +125,34 @@ test("clear and exit remain Surface-local commands", async () => {
   await controller.handle("/quit");
   assert.deepEqual(calls, ["clear", "Goodbye.", "shutdown", "exit"]);
 });
+
+test("local slash results do not call Runtime and removed commands stay local", async () => {
+  const calls = [];
+  const controller = createCommandController({
+    request: async () => {
+      throw new Error("local slash commands must not call Runtime");
+    },
+    turn: { submit() {}, submitSteering() {} },
+    input: {
+      runLocalCommand: async (text) => text === "/status"
+        ? { text: "local status" }
+        : text === "/plan" ? { text: "Unknown command: /plan" } : null,
+    },
+    output: { log: (text) => calls.push(text) },
+  });
+
+  await controller.handle("/status");
+  await controller.handle("/plan");
+  assert.deepEqual(calls, ["local status", "Unknown command: /plan"]);
+});
+
+test("runtime catalog excludes plan and draft", () => {
+  const controller = createCommandController({
+    request: async () => ({}),
+    turn: { submit() {}, submitSteering() {} },
+  });
+  assert.deepEqual(controller.normalizeCommands([
+    { name: "plan", aliases: ["draft"] },
+    { name: "status" },
+  ]), [{ name: "status", description: "" }]);
+});
