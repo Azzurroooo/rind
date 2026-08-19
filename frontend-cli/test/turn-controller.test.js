@@ -13,7 +13,7 @@ function createHarness({ activeTurn = false } = {}) {
     turnTools: { completed: 0, failed: 0 },
   };
   const output = {
-    logQueuedInput: (text) => logs.push(`queued:${text}`),
+    queueInput: (text, mode) => logs.push(`queued:${mode}:${text}`),
     restoreInputText: (text) => logs.push(`restore:${text}`),
     writeError: (text) => logs.push(`error:${text}`),
     refreshInputState: () => logs.push("refresh"),
@@ -52,17 +52,20 @@ test("turn controller starts a turn and clears active state when it settles", as
   assert.equal(harness.state.activeTurn, false);
 });
 
-test("active turns send follow-ups and steering through the same controller", async () => {
+test("active turns steer by default and queue follow-ups explicitly", async () => {
   const harness = createHarness({ activeTurn: true });
-  harness.controller.submit("follow up");
-  harness.controller.submitSteering("focus on tests", "/steer focus on tests");
+  harness.controller.submit("steer now");
+  harness.controller.submitFollowUp("follow up");
   await new Promise((resolve) => setImmediate(resolve));
 
   assert.deepEqual(harness.calls.map(({ method, params }) => ({ method, params })), [
+    { method: "rind/session/steer", params: { input: "steer now" } },
     { method: "rind/session/follow_up", params: { input: "follow up" } },
-    { method: "rind/session/steer", params: { input: "focus on tests" } },
   ]);
-  assert.deepEqual(harness.logs.slice(0, 1), ["queued:follow up"]);
+  assert.deepEqual(harness.logs.slice(0, 2), [
+    "queued:steering:steer now",
+    "queued:follow_up:follow up",
+  ]);
 });
 
 test("interrupt marks the turn and sends an interrupt request", async () => {

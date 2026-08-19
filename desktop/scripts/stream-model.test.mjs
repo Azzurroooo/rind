@@ -312,6 +312,7 @@ test("composer region keeps plan dock above a persistent input form", () => {
   const markup = composerRegionMarkup()
   assert.equal(markup.indexOf('class="composer-region"') < markup.indexOf('id="plan-dock-shell"'), true)
   assert.equal(markup.indexOf('id="plan-dock-shell"') < markup.indexOf('id="composer"'), true)
+  assert.equal(markup.indexOf('id="pending-input-dock"') < markup.indexOf('id="composer"'), true)
   assert.match(markup, /id="prompt" rows="2"/)
   assert.match(markup, /id="slash-command-menu" class="slash-command-menu" role="listbox"/)
   assert.match(markup, /aria-controls="slash-command-menu"/)
@@ -321,6 +322,7 @@ test("composer region keeps plan dock above a persistent input form", () => {
   assert.match(markup, /id="project-menu" class="composer-select-menu" role="listbox"/)
   assert.doesNotMatch(markup, /id="model-select"/)
   assert.doesNotMatch(markup, /id="project-select"/)
+  assert.doesNotMatch(markup, /id="steer"/)
   assert.match(markup, /class="send-spinner"/)
 })
 
@@ -336,7 +338,6 @@ test("composer exposes slash command work and blocks overlapping input", () => {
       setAttribute() {},
       querySelector: () => sendLabel,
     },
-    steer: { disabled: false },
     interrupt: { disabled: false },
     menuTrigger: { disabled: false, setAttribute() {} },
     menu: { hidden: false },

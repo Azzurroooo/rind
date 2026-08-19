@@ -8,6 +8,8 @@ import {
   dismissPlanError,
   renderComposer,
   renderPlanDock,
+  syncPendingInputDock,
+  type PendingInput,
   type PlanDockPresentation,
 } from "./composer-region"
 
@@ -70,6 +72,7 @@ type AppState = {
   runtimeSessionIds: Record<string, string>
   runtimeTurnPending: Record<string, boolean>
   runtimeStarting: Record<string, boolean>
+  pendingInputs: Record<string, PendingInput[]>
   viewedSessionId: string
   viewedProjectPath: string
   chatProjectPath: string
@@ -128,6 +131,7 @@ const state: AppState = {
   runtimeSessionIds: {},
   runtimeTurnPending: {},
   runtimeStarting: {},
+  pendingInputs: {},
   viewedSessionId: "",
   viewedProjectPath: "",
   chatProjectPath: "",
@@ -250,13 +254,13 @@ const messageStream = requiredElement("message-stream")
 const jumpLatest = requiredElement<HTMLButtonElement>("jump-latest")
 const planDockShell = requiredElement("plan-dock-shell")
 const planDock = requiredElement("plan-dock")
+const pendingInputDock = requiredElement("pending-input-dock")
 const notice = requiredElement("notice")
 const noticeText = requiredElement("notice-text")
 const retry = requiredElement<HTMLButtonElement>("retry")
 const contextMeter = requiredElement("context-meter")
 const prompt = requiredElement<HTMLTextAreaElement>("prompt")
 const send = requiredElement<HTMLButtonElement>("send")
-const steer = requiredElement<HTMLButtonElement>("steer")
 const interrupt = requiredElement<HTMLButtonElement>("interrupt")
 const composerMenuTrigger = requiredElement<HTMLButtonElement>("composer-menu-trigger")
 const composerMenu = requiredElement("composer-menu")
@@ -339,9 +343,10 @@ function render() {
     state.viewedSessionId,
     state.planDock,
   )
+  syncPendingInputDock(pendingInputDock, state.pendingInputs[runtimeId] || [], (inputId) => runAction(() => promoteFollowUp(inputId)))
   renderStream()
   renderComposer(
-    { prompt, send, steer, interrupt, menuTrigger: composerMenuTrigger, menu: composerMenu, compactContext, slashCommandMenu, contextMeter },
+    { prompt, send, interrupt, menuTrigger: composerMenuTrigger, menu: composerMenu, compactContext, slashCommandMenu, contextMeter },
     {
       ready: chatProject()?.available === true && state.settings.hasApiKey,
       active: runtimeTurnActive(),
@@ -1084,6 +1089,54 @@ function applyRuntimeInitialization(runtimeId: string, result: unknown) {
   }
 }
 
+function syncCurrentPendingInputs() {
+  syncPendingInputDock(
+    pendingInputDock,
+    state.pendingInputs[currentRuntimeId()] || [],
+    (inputId) => runAction(() => promoteFollowUp(inputId)),
+  )
+}
+
+function addPendingInput(runtimeId: string, input: string, result: Record<string, unknown>) {
+  const inputId = asRecordText(result.input_id)
+  if (!inputId) throw new Error("Runtime accepted queued input without input_id.")
+  const pending = state.pendingInputs[runtimeId] || []
+  state.pendingInputs[runtimeId] = [
+    ...pending,
+    { inputId, input, mode: result.mode === "steering" ? "steering" : "follow_up", promoting: false },
+  ]
+}
+
+function deliverPendingInput(runtimeId: string, inputId: string, sessionId: string) {
+  if (!inputId) return false
+  const pending = state.pendingInputs[runtimeId]
+  const index = pending?.findIndex((item) => item.inputId === inputId) ?? -1
+  if (index < 0 || !pending) return false
+  const input = pending[index]
+  pending.splice(index, 1)
+  if (!pending.length) delete state.pendingInputs[runtimeId]
+  if (sessionId) setConversationFor(sessionId, addUserMessage(conversationFor(sessionId), input.input))
+  return true
+}
+
+async function promoteFollowUp(inputId: string) {
+  const runtimeId = currentRuntimeId()
+  const item = state.pendingInputs[runtimeId]?.find((pending) => pending.inputId === inputId)
+  if (!item || item.mode !== "follow_up" || item.promoting) return
+  item.promoting = true
+  syncCurrentPendingInputs()
+  try {
+    const result = asRecord(await request(runtimeMethods.sessionPromoteFollowUp, { input_id: inputId }, runtimeId))
+    if (asRecordText(result.input_id) !== inputId || result.mode !== "steering") {
+      throw new Error("Runtime returned an invalid queued input promotion.")
+    }
+    item.mode = "steering"
+  } finally {
+    item.promoting = false
+    syncCurrentPendingInputs()
+  }
+}
+
 function mergeSlashCommands(...groups: SlashCommand[][]) {
   const unique = new Map<string, SlashCommand>()
   for (const group of groups) {
@@ -1103,8 +1156,12 @@ function handleRuntimeEvent(envelope: RuntimeEvent) {
     if (envelope.type === "turn_started") runAction(() => recordRecentSession(envelope.sessionId))
   }
   const sessionId = envelope.sessionId || state.runtimeSessionIds[runtimeId] || ""
+  if (envelope.type === "queued_input_delivered") {
+    deliverPendingInput(runtimeId, asRecordText(envelope.event.input_id), sessionId)
+  }
   if (sessionId) setConversationFor(sessionId, reduceEvent(conversationFor(sessionId), envelope))
   if (envelope.type === "turn_completed" || envelope.type === "turn_failed" || envelope.type === "turn_cancelled") {
+    delete state.pendingInputs[runtimeId]
     runAction(async () => {
       await loadSessions()
       if (sessionId === state.viewedSessionId) render()
@@ -1313,11 +1370,11 @@ async function sendPrompt() {
     render()
     return
   }
-  prompt.value = ""
-  state.drafts[state.chatProjectPath] = ""
-  autoGrowPrompt()
-  closeSlashCommandMenu()
   if (input.startsWith("/")) {
+    prompt.value = ""
+    state.drafts[state.chatProjectPath] = ""
+    autoGrowPrompt()
+    closeSlashCommandMenu()
     runAction(() => runSlash(input))
     return
   }
@@ -1325,11 +1382,23 @@ async function sendPrompt() {
   await ensureRuntime(runtimeId, project.path, state.viewedSessionId || undefined)
   state.viewedRuntimeId = runtimeId
   const active = runtimeTurnActive(runtimeId)
+  if (active) {
+    const result = asRecord(await request(runtimeMethods.sessionFollowUp, { input }, runtimeId))
+    addPendingInput(runtimeId, input, result)
+    prompt.value = ""
+    state.drafts[state.chatProjectPath] = ""
+    autoGrowPrompt()
+    closeSlashCommandMenu()
+    syncCurrentPendingInputs()
+    return
+  }
+  prompt.value = ""
+  state.drafts[state.chatProjectPath] = ""
+  autoGrowPrompt()
+  closeSlashCommandMenu()
   state.conversation = addUserMessage(state.conversation, input)
   render()
-  const result = active
-    ? asRecord(await request(runtimeMethods.sessionFollowUp, { input }, runtimeId))
-    : await startTurn(input, runtimeId)
+  const result = await startTurn(input, runtimeId)
   if (typeof result.session_id === "string" && result.session_id) {
     adoptRuntimeSession(runtimeId, result.session_id)
     state.viewedSessionId = result.session_id
@@ -1485,14 +1554,6 @@ function asRecordText(value: unknown): string {
   return typeof value === "string" ? value.trim() : ""
 }
 
-steer.addEventListener("click", () => {
-  const input = prompt.value.trim()
-  if (!input) return
-  prompt.value = ""
-  if (state.chatProjectPath) state.drafts[state.chatProjectPath] = ""
-  autoGrowPrompt()
-  runAction(() => request(runtimeMethods.sessionSteer, { input }))
-})
 interrupt.addEventListener("click", () => runAction(() => request(runtimeMethods.sessionCancel)))
 retry.addEventListener("click", () => runAction(async () => {
   const project = chatProject()
@@ -2086,7 +2147,10 @@ const unsubscribeStatus = window.api.runtime.subscribe((snapshot) => {
   if (!runtimeId) return
   state.runtimeWorkers[runtimeId] = snapshot
   if (snapshot.sessionId) adoptRuntimeSession(runtimeId, snapshot.sessionId)
-  if (snapshot.status !== "ready") state.runtimeTurnPending[runtimeId] = false
+  if (snapshot.status !== "ready") {
+    state.runtimeTurnPending[runtimeId] = false
+    delete state.pendingInputs[runtimeId]
+  }
   if (snapshot.status === "error") {
     if (runtimeId === currentRuntimeId()) {
       clearSlashCommandPending()

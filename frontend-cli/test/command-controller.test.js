@@ -4,12 +4,11 @@ import assert from "node:assert/strict";
 import { createCommandController } from "../lib/command-controller.js";
 import { executeLocalSlashCommand } from "../lib/local-slash-commands.js";
 
-test("command controller separates text, steering, goal, and slash commands", async () => {
+test("command controller separates text, goal, and slash commands", async () => {
   const calls = [];
   const logs = [];
   const turn = {
     submit: (...args) => calls.push({ method: "turn.submit", args }),
-    submitSteering: (...args) => calls.push({ method: "rind/session/steer", args }),
   };
   const controller = createCommandController({
     request: async (method, params) => {
@@ -26,51 +25,24 @@ test("command controller separates text, steering, goal, and slash commands", as
   });
 
   assert.equal(await controller.handle("hello"), false);
-  assert.equal(await controller.handle("/steer use tests"), true);
   assert.equal(await controller.handle("/goal ship it"), true);
   assert.equal(await controller.handle("/status"), true);
+  assert.equal(await controller.handle("/steer use tests"), true);
   await controller.handle("?");
 
-  assert.equal(calls[0].method, "rind/session/steer");
-  assert.equal(calls[1].method, "goal");
-  assert.equal(calls[2].method, "rind/command/execute");
-  assert.equal(logs.length, 2);
-});
-
-test("readonly slash commands do not wait for their background result", async () => {
-  let release;
-  const pending = new Promise((resolve) => {
-    release = resolve;
+  assert.equal(calls[0].method, "goal");
+  assert.equal(calls[1].method, "rind/command/execute");
+  assert.deepEqual(calls[2], {
+    method: "rind/command/execute",
+    params: { input: "/steer use tests" },
   });
-  let started = 0;
-  let completed = false;
-  const controller = createCommandController({
-    request: async () => ({}),
-    turn: { submit() {}, submitSteering() {} },
-    input: {
-      isTerminal: true,
-      startReadonlySlashCommand: () => {
-        started += 1;
-        return pending;
-      },
-    },
-  });
-
-  const handling = controller.handle("/status").then(() => {
-    completed = true;
-  });
-  await new Promise((resolve) => setImmediate(resolve));
-
-  assert.equal(started, 1);
-  assert.equal(completed, true);
-  release();
-  await handling;
+  assert.equal(logs.length, 3);
 });
 
 test("command normalization keeps aliases and ignores invalid names", () => {
   const controller = createCommandController({
     request: async () => ({}),
-    turn: { submit() {}, submitSteering() {} },
+    turn: { submit() {} },
   });
 
   assert.deepEqual(controller.normalizeCommands([
@@ -86,7 +58,7 @@ test("slash result can prefill input and start a follow-up turn", async () => {
   const calls = [];
   const controller = createCommandController({
     request: async () => ({}),
-    turn: { submit: (...args) => calls.push(args), submitSteering() {} },
+    turn: { submit: (...args) => calls.push(args) },
     output: {
       setInputPrefill: (value) => calls.push(["prefill", value]),
       shutdown: async () => calls.push(["shutdown"]),
@@ -113,7 +85,7 @@ test("exit remains a Surface-local command", async () => {
     request: async () => {
       throw new Error("local commands must not call Runtime");
     },
-    turn: { submit() {}, submitSteering() {} },
+    turn: { submit() {} },
     output: {
       log: (text) => calls.push(text),
       shutdown: async () => calls.push("shutdown"),
@@ -131,7 +103,7 @@ test("local slash results do not call Runtime", async () => {
     request: async () => {
       throw new Error("local slash commands must not call Runtime");
     },
-    turn: { submit() {}, submitSteering() {} },
+    turn: { submit() {} },
     input: {
       runLocalCommand: async (text) => text === "/status" ? { text: "local status" } : null,
     },
@@ -145,7 +117,7 @@ test("local slash results do not call Runtime", async () => {
 test("local command catalog stays complete before the runtime starts", async () => {
   const controller = createCommandController({
     request: async () => ({}),
-    turn: { submit() {}, submitSteering() {} },
+    turn: { submit() {} },
   });
   const names = controller.localCommands().map((command) => command.name);
   assert.deepEqual(names, [

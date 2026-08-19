@@ -14,13 +14,19 @@ export type PlanDockElements = {
 export type ComposerElements = {
   prompt: HTMLTextAreaElement
   send: HTMLButtonElement
-  steer: HTMLButtonElement
   interrupt: HTMLButtonElement
   menuTrigger: HTMLButtonElement
   menu: HTMLElement
   compactContext: HTMLButtonElement
   slashCommandMenu: HTMLElement
   contextMeter: HTMLElement
+}
+
+export type PendingInput = {
+  inputId: string
+  input: string
+  mode: "follow_up" | "steering"
+  promoting: boolean
 }
 
 export type ComposerView = {
@@ -43,6 +49,7 @@ export function composerRegionMarkup() {
       <div id="plan-dock-shell" class="plan-dock-shell" hidden>
         <section id="plan-dock" class="plan-dock" aria-label="Plan progress"></section>
       </div>
+      <div id="pending-input-dock" class="pending-input-dock" aria-label="Queued messages" hidden></div>
       <form id="composer" class="composer">
         <div class="prompt-wrap">
           <div id="slash-command-menu" class="slash-command-menu" role="listbox" aria-label="Slash commands" hidden></div>
@@ -63,7 +70,6 @@ export function composerRegionMarkup() {
           </div>
           <span id="context-meter" class="context-meter" hidden></span>
           <span class="composer-spacer"></span>
-          <button id="steer" type="button" class="ghost-button" title="Steer the running turn with this message">Steer</button>
           <button id="interrupt" type="button" class="ghost-button danger" title="Stop the running turn (Esc)">Stop</button>
           <button id="send" type="submit" class="primary-button"><span class="send-label">Send</span><span class="send-spinner" aria-hidden="true"></span></button>
         </div>
@@ -150,7 +156,6 @@ export function renderComposer(elements: ComposerElements, view: ComposerView) {
     : view.readOnly
     ? "Return to the current task before sending"
     : view.starting ? "Waiting for the task to start" : view.active ? "Queue as follow-up for the running turn" : "Send message"
-  elements.steer.disabled = !view.ready || !view.controllingTurn || view.readOnly
   elements.interrupt.disabled = !view.ready || !view.controllingTurn || view.readOnly
   elements.menuTrigger.disabled = !view.ready || !view.runtimeSessionId || view.readOnly || view.active || view.compacting || view.slashCommandPending
   elements.menuTrigger.setAttribute("aria-expanded", String(view.composerMenuOpen))
@@ -161,6 +166,58 @@ export function renderComposer(elements: ComposerElements, view: ComposerView) {
   elements.contextMeter.hidden = view.contextUsagePercent === null
   elements.contextMeter.textContent = view.contextUsagePercent === null ? "" : `${Math.round(view.contextUsagePercent * 100)}% ctx`
   elements.contextMeter.classList.toggle("context-hot", view.contextUsagePercent !== null && view.contextUsagePercent >= 0.8)
+}
+
+export function syncPendingInputDock(
+  dock: HTMLElement,
+  inputs: PendingInput[],
+  onPromote: (inputId: string) => void,
+) {
+  const existing = new Map<string, HTMLElement>()
+  for (const element of dock.querySelectorAll<HTMLElement>("[data-pending-input-id]")) {
+    const inputId = element.dataset.pendingInputId
+    if (inputId) existing.set(inputId, element)
+  }
+
+  for (const [index, input] of inputs.entries()) {
+    let item = existing.get(input.inputId)
+    if (!item) {
+      item = document.createElement("div")
+      item.className = "pending-input-item"
+      item.dataset.pendingInputId = input.inputId
+
+      const content = document.createElement("div")
+      content.className = "pending-input-content"
+      const mode = document.createElement("span")
+      mode.className = "pending-input-mode"
+      const text = document.createElement("span")
+      text.className = "pending-input-text"
+      content.append(mode, text)
+
+      const promote = document.createElement("button")
+      promote.type = "button"
+      promote.className = "ghost-button pending-input-promote"
+      promote.textContent = "Steer"
+      promote.addEventListener("click", () => onPromote(input.inputId))
+      item.append(content, promote)
+    }
+
+    const mode = item.querySelector<HTMLElement>(".pending-input-mode")
+    const text = item.querySelector<HTMLElement>(".pending-input-text")
+    const promote = item.querySelector<HTMLButtonElement>(".pending-input-promote")
+    if (mode) mode.textContent = input.mode === "steering" || input.promoting ? "Steering" : "Queue"
+    if (text) text.textContent = input.input
+    if (promote) {
+      promote.disabled = input.mode === "steering" || input.promoting
+      promote.textContent = input.promoting ? "Steering..." : "Steer"
+      promote.title = input.mode === "steering" ? "Message will steer the next model step" : "Apply this queued message as steering"
+    }
+    if (dock.children[index] !== item) dock.append(item)
+    existing.delete(input.inputId)
+  }
+
+  for (const stale of existing.values()) stale.remove()
+  dock.hidden = inputs.length === 0
 }
 
 function visiblePlan(conversation: ConversationState, sessionId: string, presentation: PlanDockPresentation) {

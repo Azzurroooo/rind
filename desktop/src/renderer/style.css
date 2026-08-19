@@ -453,6 +453,34 @@ pre code {
 .plan-error { border-color: #5a2b24; }
 .plan-error-text { margin: 8px 0 0; color: var(--err); font-size: 11.5px; }
 
+.pending-input-dock {
+  display: grid;
+  flex: none;
+  gap: 4px;
+  width: min(var(--stream-width), calc(100% - 32px));
+  max-height: min(154px, 24dvh);
+  margin: 0 auto;
+  overflow: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-strong) transparent;
+}
+.pending-input-dock[hidden] { display: none; }
+.pending-input-item {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+  min-height: 38px;
+  padding: 6px 8px 6px 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--bg-raised);
+}
+.pending-input-content { display: grid; min-width: 0; grid-template-columns: auto minmax(0, 1fr); gap: 7px; align-items: center; }
+.pending-input-mode { color: var(--accent); font-family: var(--font-mono); font-size: 10.5px; font-variant-numeric: tabular-nums; }
+.pending-input-text { min-width: 0; overflow: hidden; color: var(--text-weak); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+.pending-input-promote { min-width: 52px; min-height: 26px; padding: 3px 8px; }
+
 .ledger-file { display: flex; align-items: center; gap: 8px; padding: 3px 8px; }
 
 /* ---------- stream cards (errors, notices, questions) ---------- */

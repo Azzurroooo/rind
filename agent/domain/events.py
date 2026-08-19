@@ -120,6 +120,15 @@ class AssistantMessageCompletedEvent(RuntimeEvent):
 
 
 @dataclass(slots=True)
+class QueuedInputDeliveredEvent(RuntimeEvent):
+    """Fired after a queued user input is persisted into the active turn."""
+    type: Literal["queued_input_delivered"] = "queued_input_delivered"
+    input_id: str = ""
+    input: str = ""
+    mode: Literal["steering", "follow_up"] = "steering"
+
+
+@dataclass(slots=True)
 class ToolRequestedEvent(RuntimeEvent):
     """Fired when the model requests a tool call."""
     type: Literal["tool_requested"] = "tool_requested"

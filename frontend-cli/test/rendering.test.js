@@ -28,7 +28,6 @@ import {
   promptPlaceholderText,
   questionText,
   choiceMenuText,
-  queuedInputText,
   slashDisplayText,
   slashMenuText,
   slashResultText,
@@ -126,12 +125,6 @@ test("prompt and turn status copy match the compact terminal UI", () => {
   assert.equal(answerPromptText(), "\n  ▷ ");
   assert.equal(answerPlaceholderText(), "Type your answer");
   assert.equal(inputHintText("Ask Rind to do anything"), "Ask Rind to do anything");
-  assert.equal(queuedInputText(), "• Queued follow-up\n  ↳ runs after the current turn");
-  assert.equal(
-    queuedInputText("next question"),
-    "• Queued follow-up\n  ↳ next question\n  ↳ runs after the current turn",
-  );
-  assert.match(queuedInputText(`${"x".repeat(100)}\nsecond line`), /\n  ↳ x{93}\.\.\.\n/);
   assert.equal(interruptText(), "• Interrupt requested\n  ↳ ctrl+c again to quit");
   assert.equal(cancelledText(), "• Interrupted\n  ↳ session preserved; resume with -c");
   assert.equal(userInputText("hello"), "▷ You\n  hello");
@@ -196,6 +189,29 @@ test("promptText keeps the activity line separate from the input chrome", () => 
   );
 });
 
+test("promptText keeps pending input inside the live composer", () => {
+  assert.equal(
+    promptText({ model: "m1", cwd: "E:\\project" }, {}, {
+      running: true,
+      frame: 1,
+      elapsedMs: 1250,
+      pendingInputs: [
+        { input: "refocus tests", mode: "steering" },
+        { input: "then summarize", mode: "follow_up" },
+      ],
+    }),
+    [
+      "",
+      "  ◓ Working (1s) ctrl+c interrupt",
+      "  Steering: refocus tests",
+      "  Queue: then summarize",
+      "  m1 · E:\\project",
+      `  ${"─".repeat(78)}`,
+      "  ▷ ",
+    ].join("\n"),
+  );
+});
+
 test("promptText shows compact activity label while compacting", () => {
   assert.equal(
     promptText({}, {}, { running: true, label: "Compacting", frame: 2, elapsedMs: 2500 }).split("\n")[1],
@@ -245,7 +261,7 @@ test("helpText renders compact shortcuts and commands", () => {
     helpText(),
     [
       "• Controls",
-      "  enter        send message         /              open commands",
+      "  enter        send / steer         tab            queue follow-up",
       "  ↑ / ↓        history              ← / →          move cursor",
       "  home / end   line edges           del / backspace edit text",
       "  ctrl+c       interrupt or quit    ?              show shortcuts",
@@ -262,7 +278,7 @@ test("helpText renders compact shortcuts and commands", () => {
     ]),
     [
       "• Controls",
-      "  enter        send message         /              open commands",
+      "  enter        send / steer         tab            queue follow-up",
       "  ↑ / ↓        history              ← / →          move cursor",
       "  home / end   line edges           del / backspace edit text",
       "  ctrl+c       interrupt or quit    ?              show shortcuts",

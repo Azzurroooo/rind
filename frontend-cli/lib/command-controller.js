@@ -1,4 +1,4 @@
-import { isReadonlySlashCommand, parseGoalCommand, steeringCommandText } from "./slash-command-mode.js";
+import { parseGoalCommand } from "./slash-command-mode.js";
 import {
   helpText,
   slashResultText,
@@ -35,11 +35,6 @@ export function createCommandController({
       await input.runGoalCommand?.(goal);
       return true;
     }
-    const steering = steeringCommandText(text);
-    if (steering !== null) {
-      turn.submitSteering(steering, text);
-      return true;
-    }
     if (isLocalCommand(text, "exit") || isLocalCommand(text, "quit")) {
       output.log?.("Goodbye.");
       await output.shutdown?.();
@@ -61,10 +56,6 @@ export function createCommandController({
     }
     if (isBareSessionsCommand(text) && input.isTerminal) {
       await input.runSessionsSelector?.();
-      return;
-    }
-    if (isReadonlySlashCommand(text) && input.isTerminal && input.startReadonlySlashCommand) {
-      input.startReadonlySlashCommand(text);
       return;
     }
     const result = await request(runtimeMethods.commandExecute, { input: text });

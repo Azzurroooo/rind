@@ -42,7 +42,6 @@ import {
   promptPlaceholderText,
   promptText,
   questionText,
-  queuedInputText,
   slashMenuText,
   startupText,
   userInputText,
@@ -95,6 +94,7 @@ let assistantOutputLineOpen = false;
 let assistantHeaderShown = false;
 let outputStarted = false;
 let promptPaused = false;
+const pendingInputs = [];
 let activityFrame = 0;
 let activityTimer = null;
 let activityStartedAt = 0;
@@ -129,6 +129,7 @@ const runtimeClient = createRuntimeClient({
     runtimeStarted = false;
     runtimeInitialized = false;
     runtimeInitialization = null;
+    clearPendingInputs();
     if (!runtimeClosing) {
       writeErrorOutput(`Runtime stopped (${signal || (code ?? "startup failure")}): ${error.message}. Runtime commands are unavailable until it restarts.\n`);
     } else {
@@ -172,7 +173,7 @@ const turnController = createTurnController({
     assistantHeaderShown = false;
   },
   output: {
-    logQueuedInput: (text) => logOutput(queuedInputText(text)),
+    queueInput: addPendingInput,
     restoreInputText,
     writeError: (text) => writeErrorOutput(`${text}\n`),
     refreshInputState,
@@ -268,6 +269,8 @@ const eventController = createEventController({
     },
     redraw: redrawInput,
     clearCompactContext: () => compactContextState.clear(),
+    deliverQueuedInput,
+    clearQueuedInputs: clearPendingInputs,
     resetTurnTools,
   },
 });
@@ -550,6 +553,28 @@ function restoreInputText(text) {
   }
 }
 
+function addPendingInput(input, mode) {
+  pendingInputs.push({ input, mode });
+  redrawInput();
+}
+
+function deliverQueuedInput(input, mode) {
+  const index = pendingInputs.findIndex((entry) => entry.input === input && entry.mode === mode);
+  if (index === -1) {
+    return;
+  }
+  pendingInputs.splice(index, 1);
+  suspendPrompt(() => writeUserInput(input));
+}
+
+function clearPendingInputs() {
+  if (!pendingInputs.length) {
+    return;
+  }
+  pendingInputs.length = 0;
+  redrawInput();
+}
+
 function inputState() {
   const running = activeTurn || activeCompact;
   return {
@@ -557,6 +582,7 @@ function inputState() {
     label: activeCompact ? "Compacting" : "Working",
     frame: activityFrame,
     elapsedMs: running ? Date.now() - activityStartedAt : 0,
+    pendingInputs,
   };
 }
 
@@ -877,6 +903,10 @@ function handleTerminalInput(raw = "") {
       return;
     }
   }
+  if (session.mode === "prompt" && activeTurn && !key.ctrl && !key.alt && !key.shift && key.name === "tab") {
+    queueTtyInput(session);
+    return;
+  }
   const result = session.editor.handleInput(key);
   if (result === "submit") {
     submitTtyInput(session);
@@ -922,7 +952,22 @@ function submitTtyInput(session) {
   if (session.mode === "prompt") {
     session.editor.addToHistory(value);
   }
-  completeTtyInput(session, value, session.mode === "prompt", session.mode === "line" ? "\n" : "");
+  completeTtyInput(
+    session,
+    value,
+    session.mode === "prompt" && !activeTurn,
+    session.mode === "line" ? "\n" : "",
+  );
+}
+
+function queueTtyInput(session) {
+  const value = session.editor.input();
+  if (!value.trim()) {
+    return;
+  }
+  session.editor.addToHistory(value);
+  completeTtyInput(session, "", false);
+  turnController.submitFollowUp(value);
 }
 
 function completeTtyInput(session, value, writeUser, lineText = "", displayValue = value) {

@@ -17,6 +17,7 @@ test("parses text and control keys", () => {
   });
   assert.equal(parseTerminalKey("\x1f").name, "-");
   assert.equal(parseTerminalKey("\b").name, "backspace");
+  assert.equal(parseTerminalKey("\t").name, "tab");
 });
 
 test("parses legacy and SS3 navigation keys", () => {

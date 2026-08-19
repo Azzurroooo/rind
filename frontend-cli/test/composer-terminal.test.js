@@ -7,22 +7,26 @@ import { stripAnsi } from "../lib/text-width.js";
 const prompt = [
   "",
   "  ◓ Working (1s) ctrl+c interrupt",
+  "  Steering: refocus tests",
+  "  Queue: summarize",
   "  model-a · E:\\project",
   "  ──────────",
   "  ▷ ",
 ].join("\n");
 
-test("composer keeps activity above model and working directory", () => {
+test("composer keeps pending input between activity and session details", () => {
   const frame = prepareComposerFrame({ prompt, inputText: "hello", cursor: { line: 0, column: 5 } }, 40);
 
   assert.deepEqual(frame.lines, [
     "",
     "  ◓ Working (1s) ctrl+c interrupt",
+    "  Steering: refocus tests",
+    "  Queue: summarize",
     "  model-a · E:\\project",
     "  ──────────",
     "  ▷ hello",
   ]);
-  assert.equal(frame.cursorRow, 4);
+  assert.equal(frame.cursorRow, 6);
   assert.equal(frame.cursorColumn, 9);
 });
 

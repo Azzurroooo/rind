@@ -123,19 +123,25 @@ export function createEventController({
       case "user_question_requested":
         await input.answerQuestion?.(event);
         return;
+      case "queued_input_delivered":
+        output.deliverQueuedInput?.(event.input || "", event.mode || "steering");
+        return;
       case "turn_failed":
+        output.clearQueuedInputs?.();
         output.clearCompactContext?.();
         output.closeAssistant?.();
         output.log?.(errorLine(event.error));
         resetTurnState();
         return;
       case "turn_cancelled":
+        output.clearQueuedInputs?.();
         output.clearCompactContext?.();
         output.closeAssistant?.();
         output.log?.(cancelledText());
         resetTurnState();
         return;
       case "turn_completed":
+        output.clearQueuedInputs?.();
         output.clearCompactContext?.();
         output.closeAssistant?.();
         output.log?.(turnCompletedLine(event, toolStats));

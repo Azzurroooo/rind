@@ -24,6 +24,7 @@ from agent.domain.events import (
     RuntimeEvent,
     AssistantDeltaEvent,
     AssistantMessageCompletedEvent,
+    QueuedInputDeliveredEvent,
     ContextBuiltEvent,
     PlanUpdatedEvent,
     ToolRequestedEvent,
@@ -94,7 +95,7 @@ class TurnRunner:
         cancellation_token: CancellationToken | None = None,
         turn_id: str = "",
         transient_system_messages: list[dict] | None = None,
-        take_steering: Callable[[], str | None | Awaitable[str | None]] | None = None,
+        take_steering: Callable[[], str | tuple[str, str] | None | Awaitable[str | tuple[str, str] | None]] | None = None,
         resume: bool = False,
     ) -> AsyncIterator[RuntimeEvent]:
         """Run the main conversation loop for a user turn asynchronously, yielding events."""
@@ -324,14 +325,21 @@ class TurnRunner:
                 if cancellation_token and cancellation_token.is_cancelled:
                     continue
 
-                steering = await self._next_steering(take_steering)
-                if steering is not None:
+                steering_item = await self._next_steering(take_steering)
+                if steering_item is not None:
+                    input_id, steering = steering_item
                     if self._skill_turn_coordinator is not None:
                         await self._skill_turn_coordinator.persist_user_input(session, steering)
                     else:
                         await self._persist_message(session, "user", steering)
+                    yield QueuedInputDeliveredEvent(
+                        **event_meta(session, turn_id),
+                        input_id=input_id,
+                        input=steering,
+                        mode="steering",
+                    )
 
-                if not parsed_tool_calls and steering is None:
+                if not parsed_tool_calls and steering_item is None:
                     break
 
             yield TurnCompletedEvent(
@@ -566,14 +574,18 @@ class TurnRunner:
 
     async def _next_steering(
         self,
-        take_steering: Callable[[], str | None | Awaitable[str | None]] | None,
-    ) -> str | None:
+        take_steering: Callable[[], str | tuple[str, str] | None | Awaitable[str | tuple[str, str] | None]] | None,
+    ) -> tuple[str, str] | None:
         if take_steering is None:
             return None
         result = take_steering()
         if inspect.isawaitable(result):
             result = await result
-        return str(result) if result is not None else None
+        if result is None:
+            return None
+        if isinstance(result, tuple) and len(result) == 2:
+            return str(result[0]), str(result[1])
+        return "", str(result)
 
     def _validate_compact_context(self, context) -> None:
         messages = list(context.messages)

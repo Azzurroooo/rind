@@ -50,6 +50,7 @@ class RuntimeMethod:
     MODEL_SET = "model/set"
     RIND_SESSION_STEER = "rind/session/steer"
     RIND_SESSION_FOLLOW_UP = "rind/session/follow_up"
+    RIND_SESSION_PROMOTE_FOLLOW_UP = "rind/session/promote_follow_up"
     RIND_SESSION_COMPACT = "rind/session/compact"
     RIND_COMMAND_EXECUTE = "rind/command/execute"
     RIND_USER_QUESTION_RESPOND = "rind/user-question/respond"
@@ -75,6 +76,7 @@ CORE_METHODS = (
     RuntimeMethod.MODEL_SET,
     RuntimeMethod.RIND_SESSION_STEER,
     RuntimeMethod.RIND_SESSION_FOLLOW_UP,
+    RuntimeMethod.RIND_SESSION_PROMOTE_FOLLOW_UP,
     RuntimeMethod.RIND_SESSION_COMPACT,
     RuntimeMethod.RIND_COMMAND_EXECUTE,
     RuntimeMethod.RIND_USER_QUESTION_RESPOND,

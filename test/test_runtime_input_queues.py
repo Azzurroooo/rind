@@ -17,6 +17,7 @@ from agent.domain import ParsedToolCall
 from agent.domain.cancellation import CancellationTokenSource
 from agent.domain.events import (
     AssistantDeltaEvent,
+    QueuedInputDeliveredEvent,
     ToolResultEvent,
     TurnCancelledEvent,
     TurnCompletedEvent,
@@ -162,18 +163,21 @@ async def test_runtime_input_queue_validation_and_independent_limits():
         runtime.submit_steering("x" * 8_001)
     assert too_long.value.error_type == "InputTooLong"
 
-    assert runtime.submit_steering("x" * 8_000) == {
-        "accepted": True,
-        "mode": "steering",
-        "pending": 1,
-    }
+    steering_result = runtime.submit_steering("x" * 8_000)
+    assert steering_result["accepted"] is True
+    assert steering_result["mode"] == "steering"
+    assert steering_result["pending"] == 1
+    assert isinstance(steering_result["input_id"], str) and steering_result["input_id"]
     with pytest.raises(InputQueueError) as steering_chars_full:
         runtime.submit_steering("one more character")
     assert steering_chars_full.value.error_type == "InputQueueFull"
 
     for index in range(1, 5):
         result = runtime.submit_follow_up(f"follow-{index}")
-        assert result == {"accepted": True, "mode": "follow_up", "pending": index}
+        assert result["accepted"] is True
+        assert result["mode"] == "follow_up"
+        assert result["pending"] == index
+        assert isinstance(result["input_id"], str) and result["input_id"]
     with pytest.raises(InputQueueError) as follow_up_full:
         runtime.submit_follow_up("follow-5")
     assert follow_up_full.value.error_type == "InputQueueFull"
@@ -181,6 +185,26 @@ async def test_runtime_input_queue_validation_and_independent_limits():
 
     await stream.aclose()
     assert runtime.input_queue_counts() == {"steering": 0, "follow_up": 0}
+
+
+@pytest.mark.asyncio
+async def test_runtime_promotes_a_follow_up_without_copying_or_reordering_it():
+    runtime = AgentRuntime(CompletingRunner(), RecordingSession())
+    stream = runtime.run_turn(query="initial")
+    await anext(stream)
+
+    queued = runtime.submit_follow_up("steer this next")
+    promoted = runtime.promote_follow_up(queued["input_id"])
+
+    assert promoted == {
+        "accepted": True,
+        "input_id": queued["input_id"],
+        "mode": "steering",
+        "pending": 1,
+    }
+    assert runtime.input_queue_counts() == {"steering": 1, "follow_up": 0}
+    assert runtime._steering_queue[0].input_id == queued["input_id"]
+    await stream.aclose()
 
 
 @pytest.mark.asyncio
@@ -203,7 +227,14 @@ async def test_runtime_delivers_follow_ups_fifo_with_one_terminal_event_and_turn
     assert len(runner.calls) == 3
     assert set(runner.calls) == {started.turn_id}
     completed = [event for event in events if isinstance(event, TurnCompletedEvent)]
+    delivered = [event for event in events if isinstance(event, QueuedInputDeliveredEvent)]
     assert len(completed) == 1
+    assert [(event.input, event.mode) for event in delivered] == [
+        ("first follow-up", "follow_up"),
+        ("second follow-up", "follow_up"),
+    ]
+    assert all(event.input_id for event in delivered)
+    assert len({event.input_id for event in delivered}) == 2
     assert completed[0].duration_ms == 3
     assert all(event.turn_id == started.turn_id for event in events)
     assert [state[1] for state in session.turn_states] == ["running", "completed"]
@@ -286,7 +317,7 @@ async def test_turn_runner_injects_one_fifo_steering_after_tool_chain_per_sampli
             await super().persist_message(role, content, **kwargs)
 
     session = OrderedSession()
-    steering = deque(["redirect once", "redirect twice"])
+    steering = deque([("steer-1", "redirect once"), ("steer-2", "redirect twice")])
 
     def take_steering():
         order.append("take_steering")
@@ -309,4 +340,9 @@ async def test_turn_runner_injects_one_fifo_steering_after_tool_chain_per_sampli
     ]
     assert order.count("sample") == 3
     assert order.count("take_steering") == 3
+    assert [(event.input, event.mode) for event in events if isinstance(event, QueuedInputDeliveredEvent)] == [
+        ("redirect once", "steering"),
+        ("redirect twice", "steering"),
+    ]
+    assert [event.input_id for event in events if isinstance(event, QueuedInputDeliveredEvent)] == ["steer-1", "steer-2"]
     assert len([event for event in events if isinstance(event, TurnCompletedEvent)]) == 1

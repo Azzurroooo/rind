@@ -8,6 +8,7 @@ import logging
 import uuid
 from collections import deque
 from contextlib import asynccontextmanager
+from dataclasses import dataclass
 from typing import AsyncIterator
 
 from agent.application.ports.session_store import SessionStore
@@ -15,7 +16,7 @@ from agent.application.skill_selection import SkillTurnCoordinator
 from agent.runtime.core.turn_runner import TurnRunner
 from agent.domain.cancellation import CancellationToken
 from agent.domain.errors import PersistenceError
-from agent.domain.events import RuntimeEvent, TurnStartedEvent, event_meta
+from agent.domain.events import QueuedInputDeliveredEvent, RuntimeEvent, TurnStartedEvent, event_meta
 from agent.prompts import build_goal_prompt
 
 
@@ -31,6 +32,12 @@ class InputQueueError(ValueError):
     def __init__(self, message: str, error_type: str) -> None:
         super().__init__(message)
         self.error_type = error_type
+
+
+@dataclass(slots=True)
+class QueuedInput:
+    input_id: str
+    text: str
 
 
 class AgentRuntime:
@@ -52,8 +59,8 @@ class AgentRuntime:
         self._turn_lock = asyncio.Lock()
         self._active_turn_id = ""
         self._accepting_inputs = False
-        self._steering_queue: deque[str] = deque()
-        self._follow_up_queue: deque[str] = deque()
+        self._steering_queue: deque[QueuedInput] = deque()
+        self._follow_up_queue: deque[QueuedInput] = deque()
         self._goal_enabled = bool(goal_enabled)
         self._skill_repository = skill_repository
         self._runtime_system_messages = tuple(dict(message) for message in (runtime_system_messages or []))
@@ -129,6 +136,34 @@ class AgentRuntime:
 
     def submit_follow_up(self, text: str) -> dict[str, object]:
         return self._submit_input("follow_up", text, self._follow_up_queue)
+
+    def promote_follow_up(self, input_id: str) -> dict[str, object]:
+        value = str(input_id or "").strip()
+        if not self._accepting_inputs or not self._active_turn_id:
+            raise InputQueueError("No active turn accepts queued input.", "TurnNotActive")
+        if not value:
+            raise InputQueueError("input_id must not be empty.", "InvalidRequest")
+        item = next((candidate for candidate in self._follow_up_queue if candidate.input_id == value), None)
+        if item is None:
+            raise InputQueueError("Queued follow-up was not found.", "InputNotPending")
+        if len(self._steering_queue) >= MAX_QUEUED_INPUTS:
+            raise InputQueueError(
+                f"steering queue is full (maximum {MAX_QUEUED_INPUTS}).",
+                "InputQueueFull",
+            )
+        if self._queue_chars(self._steering_queue) + len(item.text) > MAX_QUEUED_INPUT_CHARS:
+            raise InputQueueError(
+                f"steering queue exceeds {MAX_QUEUED_INPUT_CHARS} queued characters.",
+                "InputQueueFull",
+            )
+        self._follow_up_queue.remove(item)
+        self._steering_queue.append(item)
+        return {
+            "accepted": True,
+            "input_id": item.input_id,
+            "mode": "steering",
+            "pending": len(self._steering_queue),
+        }
 
     def discard_pending_inputs(self) -> None:
         self._steering_queue.clear()
@@ -356,7 +391,13 @@ class AgentRuntime:
                     if terminal_event.type == "turn_completed" and not self._is_cancelled(cancellation_token):
                         follow_up = self._take_follow_up()
                         if follow_up is not None:
-                            await self._persist_user_input(follow_up)
+                            await self._persist_user_input(follow_up.text)
+                            yield QueuedInputDeliveredEvent(
+                                **event_meta(self._session_store, turn_id),
+                                input_id=follow_up.input_id,
+                                input=follow_up.text,
+                                mode="follow_up",
+                            )
                             continue
                         if await self._goal_is_active():
                             continue
@@ -400,7 +441,7 @@ class AgentRuntime:
         if callable(setter):
             await setter(status)
 
-    def _submit_input(self, mode: str, text: str, queue: deque[str]) -> dict[str, object]:
+    def _submit_input(self, mode: str, text: str, queue: deque[QueuedInput]) -> dict[str, object]:
         value = str(text or "").strip()
         if not self._accepting_inputs or not self._active_turn_id:
             raise InputQueueError("No active turn accepts queued input.", "TurnNotActive")
@@ -411,7 +452,7 @@ class AgentRuntime:
                 f"{mode} input exceeds {MAX_QUEUED_INPUT_CHARS} characters.",
                 "InputTooLong",
             )
-        if sum(map(len, queue)) + len(value) > MAX_QUEUED_INPUT_CHARS:
+        if self._queue_chars(queue) + len(value) > MAX_QUEUED_INPUT_CHARS:
             raise InputQueueError(
                 f"{mode} queue exceeds {MAX_QUEUED_INPUT_CHARS} queued characters.",
                 "InputQueueFull",
@@ -421,15 +462,21 @@ class AgentRuntime:
                 f"{mode} queue is full (maximum {MAX_QUEUED_INPUTS}).",
                 "InputQueueFull",
             )
-        queue.append(value)
-        return {"accepted": True, "mode": mode, "pending": len(queue)}
+        item = QueuedInput(input_id=uuid.uuid4().hex, text=value)
+        queue.append(item)
+        return {"accepted": True, "input_id": item.input_id, "mode": mode, "pending": len(queue)}
 
-    def _take_steering(self) -> str | None:
+    @staticmethod
+    def _queue_chars(queue: deque[QueuedInput]) -> int:
+        return sum(len(item.text) for item in queue)
+
+    def _take_steering(self) -> tuple[str, str] | None:
         if not self._steering_queue:
             return None
-        return self._steering_queue.popleft()
+        item = self._steering_queue.popleft()
+        return item.input_id, item.text
 
-    def _take_follow_up(self) -> str | None:
+    def _take_follow_up(self) -> QueuedInput | None:
         if not self._follow_up_queue:
             return None
         return self._follow_up_queue.popleft()

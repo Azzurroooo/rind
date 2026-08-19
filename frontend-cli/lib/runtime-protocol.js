@@ -63,10 +63,6 @@ export function runtimeEventType(message) {
   return message?.event?.type || "";
 }
 
-export function turnInputMethod(activeTurn) {
-  return activeTurn ? runtimeMethods.sessionFollowUp : runtimeMethods.sessionPrompt;
-}
-
 function isRequestId(value) {
   return (typeof value === "string" && value.trim()) || (typeof value === "number" && Number.isFinite(value));
 }

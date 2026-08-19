@@ -98,3 +98,28 @@ test("event controller forwards delegate lifecycle to the task monitor", async (
   assert.equal(results.length, 1);
   assert.equal(clears, 1);
 });
+
+test("event controller delivers queued input and clears pending input on terminal events", async () => {
+  const delivered = [];
+  let clears = 0;
+  const controller = createEventController({
+    output: {
+      deliverQueuedInput: (input, mode) => delivered.push({ input, mode }),
+      clearQueuedInputs: () => { clears += 1; },
+      clearCompactContext() {},
+      closeAssistant() {},
+      log() {},
+      resetTurnTools() {},
+    },
+  });
+
+  await controller.handle({ kind: "event", event: {
+    type: "queued_input_delivered",
+    input: "continue with tests",
+    mode: "follow_up",
+  } });
+  await controller.handle({ kind: "event", event: { type: "turn_completed" } });
+
+  assert.deepEqual(delivered, [{ input: "continue with tests", mode: "follow_up" }]);
+  assert.equal(clears, 1);
+});

@@ -1,23 +1,22 @@
-import { runtimeMethods, turnInputMethod } from "./runtime-protocol.js";
+import { runtimeMethods } from "./runtime-protocol.js";
 
 export function createTurnController({ request, state, output, refreshGoalState = () => {}, onTurnStart = () => {} }) {
   function submit(text, extra = {}) {
-    const method = turnInputMethod(state.activeTurn);
-    if (method === runtimeMethods.sessionFollowUp) {
-      output.logQueuedInput(text);
-      void submitQueuedInput(method, text, text);
+    if (state.activeTurn) {
+      void submitQueuedInput(runtimeMethods.sessionSteer, text, text, "steering");
       return;
     }
     start(text, extra);
   }
 
-  function submitSteering(text, originalInput) {
-    void submitQueuedInput(runtimeMethods.sessionSteer, text, originalInput);
+  function submitFollowUp(text, originalInput = text) {
+    void submitQueuedInput(runtimeMethods.sessionFollowUp, text, originalInput, "follow_up");
   }
 
-  async function submitQueuedInput(method, text, originalInput) {
+  async function submitQueuedInput(method, text, originalInput, mode) {
     try {
       await request(method, { input: text });
+      output.queueInput?.(text, mode);
     } catch (error) {
       handleSubmissionError(error, originalInput);
     }
@@ -70,7 +69,7 @@ export function createTurnController({ request, state, output, refreshGoalState 
 
   return {
     submit,
-    submitSteering,
+    submitFollowUp,
     interrupt,
     isActive: () => state.activeTurn,
     reset,

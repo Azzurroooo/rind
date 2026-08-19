@@ -11,7 +11,6 @@ import {
   runtimeProtocolVersion,
   runtimeEventType,
   runtimeRequestId,
-  turnInputMethod,
 } from "../lib/runtime-protocol.js";
 
 test("runtime requests use request_id", () => {
@@ -72,8 +71,7 @@ test("runtime protocol recognizes the shared golden event fixture", () => {
   assert.deepEqual(responses.map(runtimeRequestId), ["turn-1", "interrupt-2"]);
 });
 
-test("active input routes to follow-up without a client-side turn queue", () => {
-  assert.equal(turnInputMethod(false), "session/prompt");
-  assert.equal(turnInputMethod(true), "rind/session/follow_up");
-  assert.equal(turnInputMethod(false), "session/prompt");
+test("runtime protocol exposes separate steering and follow-up methods", () => {
+  assert.equal(runtimeMethods.sessionSteer, "rind/session/steer");
+  assert.equal(runtimeMethods.sessionFollowUp, "rind/session/follow_up");
 });

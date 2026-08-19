@@ -13,6 +13,7 @@ if str(PROJECT_ROOT) not in sys.path:
 from agent.domain.events import (
     RuntimeEvent,
     AssistantDeltaEvent,
+    QueuedInputDeliveredEvent,
     ContextBuiltEvent,
     FileChangeEvent,
     PlanUpdatedEvent,
@@ -69,6 +70,7 @@ class TestRuntimeEvents(unittest.TestCase):
     def test_new_runtime_events_are_serializable(self):
         events = [
             TurnStartedEvent(session_id="session_1", turn_id="turn_1", user_message_chars=5),
+            QueuedInputDeliveredEvent(input_id="queued-1", input="redirect", mode="steering"),
             ToolRequestedEvent(
                 tool_call_id="call_1",
                 tool_name="bash",
@@ -93,6 +95,8 @@ class TestRuntimeEvents(unittest.TestCase):
             self.assertTrue(event_dict["event_id"])
             restored = RuntimeEvent.from_dict(event_dict)
             self.assertEqual(restored.type, event.type)
+            if isinstance(event, QueuedInputDeliveredEvent):
+                self.assertEqual(restored.input_id, "queued-1")
 
     def test_inheritance(self):
         event = TurnCompletedEvent()

@@ -53,7 +53,7 @@ export function outputBlockText(text, leading = false) {
 export function helpText(commands = []) {
   const lines = [
     `${accent("•")} Controls`,
-    helpRow("enter", "send message", "/", "open commands"),
+    helpRow("enter", "send / steer", "tab", "queue follow-up"),
     helpRow("↑ / ↓", "history", "← / →", "move cursor"),
     helpRow("home / end", "line edges", "del / backspace", "edit text"),
     helpRow("ctrl+c", "interrupt or quit", "?", "show shortcuts"),
@@ -320,16 +320,6 @@ export function modelListErrorText(error, currentModel = "") {
     lines.push(dim(detailLine(detail)));
   }
   lines.push(dim(detailLine("use /model set <name> to switch manually")));
-  return lines.join("\n");
-}
-
-export function queuedInputText(text = "") {
-  const preview = clipSingleLine(text, 96);
-  const lines = [`${accent("•")} ${bold("Queued follow-up")}`];
-  if (preview) {
-    lines.push(dim(detailLine(preview)));
-  }
-  lines.push(dim(detailLine("runs after the current turn")));
   return lines.join("\n");
 }
 
@@ -1023,6 +1013,7 @@ function inputPromptFrame(header = "", state = {}) {
   if (activity) {
     lines.push(activity);
   }
+  lines.push(...pendingInputLines(state.pendingInputs));
   if (header) {
     lines.push(header);
   }
@@ -1033,6 +1024,21 @@ function inputPromptFrame(header = "", state = {}) {
 
 function inputDivider() {
   return dim(`  ${"─".repeat(composerWidth())}`);
+}
+
+function pendingInputLines(entries) {
+  if (!Array.isArray(entries)) {
+    return [];
+  }
+  const width = composerWidth();
+  return entries.flatMap((entry) => {
+    const input = singleLine(entry?.input);
+    if (!input) {
+      return [];
+    }
+    const label = entry.mode === "steering" ? "Steering" : "Queue";
+    return dim(`  ${label}: ${clipSingleLine(input, Math.max(1, width - visibleLength(label) - 4))}`);
+  });
 }
 
 function activityFrame(frame) {

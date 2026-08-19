@@ -624,6 +624,9 @@ class StdioRuntimeServer:
         if method == RuntimeMethod.RIND_SESSION_FOLLOW_UP:
             await self._submit_queued_input(message, self._runtime.submit_follow_up)
             return True
+        if method == RuntimeMethod.RIND_SESSION_PROMOTE_FOLLOW_UP:
+            await self._promote_queued_input(message)
+            return True
         if method == RuntimeMethod.SESSION_CANCEL:
             if not self._interrupt_current():
                 await self._respond_error(message, "No active turn to interrupt.", "TurnNotActive")
@@ -725,6 +728,16 @@ class StdioRuntimeServer:
         text = params.get("input") if isinstance(params.get("input"), str) else ""
         try:
             result = submit(text)
+        except InputQueueError as exc:
+            await self._respond_error(message, str(exc), exc.error_type)
+            return
+        await self._respond(message, result)
+
+    async def _promote_queued_input(self, message: dict[str, Any]) -> None:
+        params = message.get("params") if isinstance(message.get("params"), dict) else {}
+        input_id = params.get("input_id") if isinstance(params.get("input_id"), str) else ""
+        try:
+            result = self._runtime.promote_follow_up(input_id)
         except InputQueueError as exc:
             await self._respond_error(message, str(exc), exc.error_type)
             return

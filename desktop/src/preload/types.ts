@@ -28,6 +28,7 @@ export const runtimeMethods = {
   sessionPrompt: "session/prompt",
   sessionSteer: "rind/session/steer",
   sessionFollowUp: "rind/session/follow_up",
+  sessionPromoteFollowUp: "rind/session/promote_follow_up",
   sessionCancel: "session/cancel",
   userQuestionRespond: "rind/user-question/respond",
   modelList: "model/list",

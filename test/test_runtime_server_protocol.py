@@ -204,6 +204,7 @@ def test_golden_event_fixture_matches_python_envelope():
 def test_event_envelope_separates_durable_and_incremental_events():
     assert event_envelope({"type": "assistant_delta"}, 1)["durability"] == "incremental"
     assert event_envelope({"type": "tool_input_delta"}, 2)["durability"] == "incremental"
+    assert event_envelope({"type": "queued_input_delivered"}, 3)["durability"] == "incremental"
     assert event_envelope({"type": "tool_result"}, 2)["durability"] == "durable"
 
 
@@ -812,11 +813,15 @@ def test_turn_input_controls_respond_without_main_queue(capsys):
 
         def submit_steering(self, text):
             self.submitted.append(("steering", text))
-            return {"accepted": True, "mode": "steering", "pending": 1}
+            return {"accepted": True, "input_id": "steer-1", "mode": "steering", "pending": 1}
 
         def submit_follow_up(self, text):
             self.submitted.append(("follow_up", text))
-            return {"accepted": True, "mode": "follow_up", "pending": 2}
+            return {"accepted": True, "input_id": "follow-1", "mode": "follow_up", "pending": 2}
+
+        def promote_follow_up(self, input_id):
+            self.submitted.append(("promote", input_id))
+            return {"accepted": True, "input_id": input_id, "mode": "steering", "pending": 1}
 
     async def run():
         runtime = Runtime()
@@ -827,17 +832,22 @@ def test_turn_input_controls_respond_without_main_queue(capsys):
         follow_up_handled = await server._handle_control_message(
             {"request_id": 32, "method": "rind/session/follow_up", "params": {"input": "next task"}}
         )
-        return runtime, server, steering_handled, follow_up_handled
+        promote_handled = await server._handle_control_message(
+            {"request_id": 33, "method": "rind/session/promote_follow_up", "params": {"input_id": "follow-1"}}
+        )
+        return runtime, server, steering_handled, follow_up_handled, promote_handled
 
-    runtime, server, steering_handled, follow_up_handled = asyncio.run(run())
+    runtime, server, steering_handled, follow_up_handled, promote_handled = asyncio.run(run())
     messages = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
 
     assert steering_handled is True
     assert follow_up_handled is True
+    assert promote_handled is True
     assert server._requests.empty()
-    assert runtime.submitted == [("steering", "change direction"), ("follow_up", "next task")]
-    assert messages[0]["result"] == {"accepted": True, "mode": "steering", "pending": 1}
-    assert messages[1]["result"] == {"accepted": True, "mode": "follow_up", "pending": 2}
+    assert runtime.submitted == [("steering", "change direction"), ("follow_up", "next task"), ("promote", "follow-1")]
+    assert messages[0]["result"] == {"accepted": True, "input_id": "steer-1", "mode": "steering", "pending": 1}
+    assert messages[1]["result"] == {"accepted": True, "input_id": "follow-1", "mode": "follow_up", "pending": 2}
+    assert messages[2]["result"] == {"accepted": True, "input_id": "follow-1", "mode": "steering", "pending": 1}
 
 
 def test_turn_input_control_rejection_is_structured_protocol_error(capsys):
