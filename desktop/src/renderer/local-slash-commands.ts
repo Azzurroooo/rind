@@ -20,18 +20,16 @@ export function executeLocalSlashCommand(input: string, context: LocalSlashConte
   const name = parts[1].toLocaleLowerCase()
   const argument = (parts[2] || "").trim()
 
-  if (name === "plan" || name === "draft") return removedCommand(name)
   if (name === "sessions") return { text: "Use the left sidebar to switch sessions." }
   if (name === "config") return configResult(context.settings)
   if (name === "login") return { text: "Login/config setup is not implemented yet.\nSet apiKey in ~/.rind/settings.json." }
-  if (name === "status") return statusResult(context)
+  if (name === "status") {
+    if (context.runtime.status === "ready") return undefined
+    return statusResult(context)
+  }
   if (name === "doctor") return doctorResult(context)
   if (name === "help") return helpResult(argument, context.commands)
   return undefined
-}
-
-function removedCommand(name: string): LocalSlashResult {
-  return { text: `Unknown command: /${name}\nRun /help to see available commands.` }
 }
 
 function configResult(settings: DesktopSettings): LocalSlashResult {

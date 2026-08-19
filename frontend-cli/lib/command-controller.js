@@ -3,11 +3,10 @@ import {
   helpText,
   slashResultText,
 } from "./rendering.js";
-import { isRemovedSlashCommand, LOCAL_SLASH_COMMANDS } from "./local-slash-commands.js";
+import { LOCAL_SLASH_COMMANDS } from "./local-slash-commands.js";
 import { runtimeMethods } from "./runtime-protocol.js";
 
 const LOCAL_COMMANDS = Object.freeze([
-  { name: "clear", description: "Clear terminal output" },
   { name: "exit", description: "Exit Rind", aliases: ["quit"] },
 ]);
 
@@ -31,10 +30,6 @@ export function createCommandController({
       await applyResult(localResult);
       return true;
     }
-    if (isRemovedSlashCommand(text)) {
-      output.log?.(`Unknown command: ${String(text).trim().split(/\s+/, 1)[0]}\nRun /help to see available commands.`);
-      return true;
-    }
     const goal = parseGoalCommand(text);
     if (goal) {
       await input.runGoalCommand?.(goal);
@@ -43,10 +38,6 @@ export function createCommandController({
     const steering = steeringCommandText(text);
     if (steering !== null) {
       turn.submitSteering(steering, text);
-      return true;
-    }
-    if (isLocalCommand(text, "clear")) {
-      output.clearScreen?.();
       return true;
     }
     if (isLocalCommand(text, "exit") || isLocalCommand(text, "quit")) {
@@ -102,14 +93,14 @@ export function createCommandController({
     const items = [];
     for (const command of commands) {
       const name = singleWord(command?.name);
-      if (!name || isRemovedSlashCommand(name)) {
+      if (!name) {
         continue;
       }
       const description = String(command.description || "").trim();
       items.push({ name, description });
       for (const alias of command.aliases || []) {
         const aliasName = singleWord(alias);
-        if (aliasName && !isRemovedSlashCommand(aliasName)) {
+        if (aliasName) {
           items.push({ name: aliasName, description: `alias for /${name}` });
         }
       }

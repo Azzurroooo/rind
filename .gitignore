@@ -21,6 +21,7 @@ packaging/vendor/
 # Testing & Cache
 .pytest_cache/
 .pytest-basetemp/
+.pytest-*/
 .coverage
 .tox/
 

@@ -213,7 +213,6 @@ const commandController = createCommandController({
   },
   output: {
     log: logOutput,
-    clearScreen: () => suspendPrompt(() => console.clear()),
     setInputPrefill: (value) => {
       pendingInputPrefill = value;
     },
@@ -299,6 +298,12 @@ const inputController = createInputController({
 
 process.on("SIGINT", handleSigint);
 
+function isResumeLaunch(args = []) {
+  return args.some(
+    (arg) => arg === "-c" || arg === "--resume-latest" || arg === "--session" || String(arg).startsWith("--session="),
+  );
+}
+
 try {
   localSettings = await loadLocalSettings();
   sessionInfo = { cwd: process.cwd(), model: localSettings.model };
@@ -313,6 +318,9 @@ try {
       removeHistoryDuplicates: true,
     });
     process.stdin.on("data", handleStdinData);
+  }
+  if (isResumeLaunch(cliArgs)) {
+    await ensureRuntime();
   }
   logOutput(startupText(sessionInfo));
   await inputController.promptLoop();

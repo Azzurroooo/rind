@@ -15,11 +15,8 @@ import { executeLocalSlashCommand } from "../src/renderer/local-slash-commands.t
 test("Desktop hides removed and sidebar-owned commands from fallback and Runtime catalogs", () => {
   assert.equal(fallbackSlashCommands.some((command) => command.name === "sessions"), false)
   assert.equal(fallbackSlashCommands.some((command) => command.name === "model"), false)
-  assert.equal(fallbackSlashCommands.some((command) => command.name === "plan"), false)
-  assert.equal(fallbackSlashCommands.some((command) => command.name === "draft"), false)
   const parsed = parseSlashCommands([
     { name: "sessions", description: "List recent sessions", usage: "/sessions" },
-    { name: "plan", description: "Plan", aliases: ["draft"] },
     { name: "model", description: "Choose a model" },
     { name: "status", description: "Show status", usage: "/status" },
   ])
@@ -32,8 +29,6 @@ test("Desktop handles removed session commands locally", () => {
   assert.equal(desktopSlashCommandNotice("/help sessions"), "Use the left sidebar to switch sessions.")
   assert.equal(desktopSlashCommandNotice("/help /sessions"), "Use the left sidebar to switch sessions.")
   assert.equal(desktopSlashCommandNotice("/help status"), undefined)
-  assert.equal(desktopSlashCommandNotice("/plan"), "That command is not available in Desktop.")
-  assert.equal(desktopSlashCommandNotice("/draft clear"), "That command is not available in Desktop.")
 })
 
 test("Desktop local commands do not require a project or Runtime", () => {
@@ -50,7 +45,6 @@ test("Desktop local commands do not require a project or Runtime", () => {
   const config = executeLocalSlashCommand("/config", context)
   assert.equal(config?.display?.type, "config")
   assert.match(config?.text || "", /apiKey: set/)
-  assert.match(executeLocalSlashCommand("/plan", context)?.text || "", /Unknown command/)
   assert.equal(executeLocalSlashCommand("/model", context), undefined)
 })
 

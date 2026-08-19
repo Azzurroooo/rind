@@ -1,9 +1,0 @@
-api_version: aiteam/v1
-kind: Project
-metadata:
-  id: team
-  name: team
-spec:
-  main_agent: main-agent
-  shared_root: ../shared
-  agents_root: ../agents

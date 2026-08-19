@@ -11,6 +11,8 @@ async def handle_compact(context: SlashCommandContext, args: list[str]) -> Slash
         return "Compact is not supported by this runtime."
     if getattr(context.runtime, "turn_active", False):
         return "Cannot compact while a turn is running. Wait for it to finish or interrupt it first."
+    if not await _has_compactable_conversation(context.session):
+        return "Not enough messages to compact. Send a message first."
     record = await compact_context(reason="manual")
     source = record.get("source") if isinstance(record, dict) else {}
     if not isinstance(source, dict):
@@ -27,6 +29,17 @@ async def handle_compact(context: SlashCommandContext, args: list[str]) -> Slash
                 f"- tool calls: {tool_count}",
             ]
         ),
+    )
+
+
+async def _has_compactable_conversation(session) -> bool:
+    get_messages = getattr(session, "get_messages_slice", None)
+    if not callable(get_messages):
+        return True
+    messages = await get_messages()
+    return any(
+        isinstance(message, dict) and message.get("role") != "system"
+        for message in messages
     )
 
 

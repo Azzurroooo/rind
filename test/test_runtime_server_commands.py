@@ -107,7 +107,6 @@ async def test_help_returns_command_list() -> None:
     assert "Show session status" in result.text
     assert "/doctor" in result.text
     assert "/skill" in result.text
-    assert "/draft" in result.text
     assert "Use `/help <command>` for usage." in result.text
     assert result.display is not None
     assert result.display["type"] == "help"
@@ -162,10 +161,8 @@ def test_router_exposes_command_descriptions() -> None:
     assert descriptions["model"] == "Show or change the active model"
     assert "clear" not in descriptions
     assert "exit" not in descriptions
-    assert descriptions["draft"] == "Show, reuse, or clear saved input draft"
     assert descriptions["team"] == "Create a Team project"
     assert usages["sessions"] == "/sessions [limit]"
-    assert usages["draft"] == "/draft | /draft use | /draft clear"
     assert usages["init"] == "/init [project|user]"
     assert usages["team"].startswith("/team create")
 
@@ -621,67 +618,18 @@ async def test_compact_calls_runtime_compact_context() -> None:
 
 
 @pytest.mark.asyncio
-async def test_draft_shows_saved_input_draft(tmp_path) -> None:
-    class DraftSession(FakeSession):
-        session_base_path = tmp_path / "session_1"
+async def test_compact_returns_friendly_message_for_empty_session() -> None:
+    class EmptySession(FakeSession):
+        async def get_messages_slice(self):
+            return [{"role": "system", "content": "sys"}]
 
-    base = tmp_path / "session_1"
-    base.mkdir()
-    (base / "input_draft.txt").write_text("continue this prompt", encoding="utf-8")
+    runtime = FakeRuntime()
+    context = SlashCommandContext(runtime=runtime, session=EmptySession(), debug=True)
+    result = await SlashCommandRouter().execute("/compact", context)
 
-    result = await SlashCommandRouter().execute("/draft", _context(session=DraftSession()))
+    assert runtime.compact_called is False
+    assert result.text == "Not enough messages to compact. Send a message first."
 
-    assert "Saved input draft:" in result.text
-    assert "input_draft.txt" in result.text
-    assert "continue this prompt" in result.text
-
-
-@pytest.mark.asyncio
-async def test_draft_reports_missing_draft(tmp_path) -> None:
-    class DraftSession(FakeSession):
-        session_base_path = tmp_path / "session_1"
-
-    result = await SlashCommandRouter().execute("/draft", _context(session=DraftSession()))
-
-    assert result.text == "No saved input draft."
-
-
-@pytest.mark.asyncio
-async def test_draft_clear_removes_saved_input_draft(tmp_path) -> None:
-    class DraftSession(FakeSession):
-        session_base_path = tmp_path / "session_1"
-
-    base = tmp_path / "session_1"
-    base.mkdir()
-    path = base / "input_draft.txt"
-    path.write_text("continue this prompt", encoding="utf-8")
-
-    result = await SlashCommandRouter().execute("/draft clear", _context(session=DraftSession()))
-
-    assert result.text == "Saved input draft cleared."
-    assert not path.exists()
-
-
-@pytest.mark.asyncio
-async def test_draft_use_loads_saved_input_draft(tmp_path) -> None:
-    class DraftSession(FakeSession):
-        session_base_path = tmp_path / "session_1"
-
-    base = tmp_path / "session_1"
-    base.mkdir()
-    (base / "input_draft.txt").write_text("continue this prompt", encoding="utf-8")
-
-    result = await SlashCommandRouter().execute("/draft use", _context(session=DraftSession()))
-
-    assert result.text == "Draft loaded into the next prompt."
-    assert result.prompt_prefill == "continue this prompt"
-
-
-@pytest.mark.asyncio
-async def test_draft_rejects_invalid_args() -> None:
-    result = await SlashCommandRouter().execute("/draft clear now", _context())
-
-    assert result.text == "Usage: /draft, /draft use, or /draft clear"
 
 
 @pytest.mark.asyncio
@@ -857,41 +805,6 @@ async def test_init_rejects_invalid_scope() -> None:
     assert result.next_prompt is None
 
 
-@pytest.mark.asyncio
-async def test_plan_without_active_plan_is_clear(monkeypatch) -> None:
-    monkeypatch.delenv("AGENT_SESSION_ROOT", raising=False)
-    monkeypatch.delenv("AGENT_SESSION_ID", raising=False)
-
-    result = await SlashCommandRouter().execute("/plan", _context())
-
-    assert result.text == "No active plan."
-
-
-@pytest.mark.asyncio
-async def test_plan_renders_v2_items_in_order(tmp_path: Path, monkeypatch) -> None:
-    session_base = tmp_path / "session_1"
-    session_base.mkdir()
-    (session_base / "plan.json").write_text(
-        json.dumps(
-            {
-                "schema_version": "2.0",
-                "plan": [
-                    {"step": "first", "status": "completed"},
-                    {"step": "second", "status": "pending"},
-                ],
-            }
-        ),
-        encoding="utf-8",
-    )
-    monkeypatch.setenv("AGENT_SESSION_ROOT", str(tmp_path))
-    monkeypatch.setenv("AGENT_SESSION_ID", "session_1")
-
-    result = await SlashCommandRouter().execute("/plan", _context())
-
-    assert result.text.startswith("Active plan:\n- [completed] first\n- [pending] second")
-    assert "Progress: completed=1, in_progress=0, pending=1, cancelled=0" in result.text
-
-
 def main() -> int:
     test_router_exposes_sorted_command_names()
     test_router_exposes_command_descriptions()
@@ -907,7 +820,6 @@ def main() -> int:
     asyncio.run(test_model_rejects_invalid_set_args())
     asyncio.run(test_compact_calls_runtime_compact_context())
     asyncio.run(test_compact_passes_cancellation_token_to_runtime())
-    asyncio.run(test_draft_rejects_invalid_args())
     print("Runtime Server command tests passed.")
     return 0
 

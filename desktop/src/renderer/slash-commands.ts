@@ -10,7 +10,7 @@ export type SlashCommandMenu = {
   commands: SlashCommand[]
 }
 
-const DESKTOP_HIDDEN_COMMANDS = new Set(["draft", "model", "plan", "sessions"])
+const DESKTOP_HIDDEN_COMMANDS = new Set(["model", "sessions"])
 
 export const fallbackSlashCommands: SlashCommand[] = [
   ["compact", "Compact current session context", "/compact"],
@@ -42,8 +42,6 @@ export function desktopSlashCommandNotice(input: string) {
   const command = input.trim()
   if (/^\/sessions(?:\s|$)/i.test(command)) return "Use the left sidebar to switch sessions."
   if (/^\/help\s+\/?sessions(?:\s|$)/i.test(command)) return "Use the left sidebar to switch sessions."
-  if (/^\/(?:plan|draft)(?:\s|$)/i.test(command)) return "That command is not available in Desktop."
-  if (/^\/help\s+\/?(?:plan|draft)(?:\s|$)/i.test(command)) return "That command is not available in Desktop."
   return undefined
 }
 

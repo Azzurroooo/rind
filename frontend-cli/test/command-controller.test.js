@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import { createCommandController } from "../lib/command-controller.js";
+import { executeLocalSlashCommand } from "../lib/local-slash-commands.js";
 
 test("command controller separates text, steering, goal, and slash commands", async () => {
   const calls = [];
@@ -106,7 +107,7 @@ test("slash result can prefill input and start a follow-up turn", async () => {
   ]);
 });
 
-test("clear and exit remain Surface-local commands", async () => {
+test("exit remains a Surface-local command", async () => {
   const calls = [];
   const controller = createCommandController({
     request: async () => {
@@ -114,19 +115,17 @@ test("clear and exit remain Surface-local commands", async () => {
     },
     turn: { submit() {}, submitSteering() {} },
     output: {
-      clearScreen: () => calls.push("clear"),
       log: (text) => calls.push(text),
       shutdown: async () => calls.push("shutdown"),
       exit: () => calls.push("exit"),
     },
   });
 
-  await controller.handle("/clear");
   await controller.handle("/quit");
-  assert.deepEqual(calls, ["clear", "Goodbye.", "shutdown", "exit"]);
+  assert.deepEqual(calls, ["Goodbye.", "shutdown", "exit"]);
 });
 
-test("local slash results do not call Runtime and removed commands stay local", async () => {
+test("local slash results do not call Runtime", async () => {
   const calls = [];
   const controller = createCommandController({
     request: async () => {
@@ -134,25 +133,46 @@ test("local slash results do not call Runtime and removed commands stay local", 
     },
     turn: { submit() {}, submitSteering() {} },
     input: {
-      runLocalCommand: async (text) => text === "/status"
-        ? { text: "local status" }
-        : text === "/plan" ? { text: "Unknown command: /plan" } : null,
+      runLocalCommand: async (text) => text === "/status" ? { text: "local status" } : null,
     },
     output: { log: (text) => calls.push(text) },
   });
 
   await controller.handle("/status");
-  await controller.handle("/plan");
-  assert.deepEqual(calls, ["local status", "Unknown command: /plan"]);
+  assert.deepEqual(calls, ["local status"]);
 });
 
-test("runtime catalog excludes plan and draft", () => {
+test("local command catalog stays complete before the runtime starts", async () => {
   const controller = createCommandController({
     request: async () => ({}),
     turn: { submit() {}, submitSteering() {} },
   });
-  assert.deepEqual(controller.normalizeCommands([
-    { name: "plan", aliases: ["draft"] },
-    { name: "status" },
-  ]), [{ name: "status", description: "" }]);
+  const names = controller.localCommands().map((command) => command.name);
+  assert.deepEqual(names, [
+    "exit",
+    "quit",
+    "compact",
+    "config",
+    "doctor",
+    "help",
+    "init",
+    "login",
+    "model",
+    "sessions",
+    "skill",
+    "status",
+    "team",
+  ]);
+  for (const name of ["compact", "init", "sessions", "skill", "team"]) {
+    const result = await executeLocalSlashCommand(`/${name}`, {
+      settings: { model: "m" },
+      sessionInfo: {},
+      cwd: ".",
+      runtimeStarted: false,
+      runtimeInitialized: false,
+      interactive: true,
+      commands: [],
+    });
+    assert.equal(result, null, `/${name} must fall through to the runtime`);
+  }
 });

@@ -2,21 +2,19 @@ import { readFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import path from "node:path";
 
-const REMOVED_COMMANDS = new Set(["draft", "plan"]);
-
 export const LOCAL_SLASH_COMMANDS = Object.freeze([
+  { name: "compact", description: "Compact current session context", usage: "/compact" },
   { name: "config", description: "Show config guidance", usage: "/config" },
   { name: "doctor", description: "Run local setup diagnostics", usage: "/doctor" },
   { name: "help", description: "Show commands", usage: "/help [command]" },
+  { name: "init", description: "Draft RIND.md", usage: "/init [project|user]" },
   { name: "login", description: "Show login setup guidance", usage: "/login" },
   { name: "model", description: "Show or change the active model", usage: "/model | /model set <model>" },
+  { name: "sessions", description: "List recent sessions", usage: "/sessions [limit]" },
+  { name: "skill", description: "List skills", usage: "/skill [list]" },
   { name: "status", description: "Show surface status", usage: "/status" },
+  { name: "team", description: "Create a Team project", usage: "/team create [project-id]" },
 ]);
-
-export function isRemovedSlashCommand(value) {
-  const name = String(value || "").trim().replace(/^\//, "").split(/\s+/, 1)[0].toLowerCase();
-  return REMOVED_COMMANDS.has(name);
-}
 
 export async function loadLocalSettings(rindHome = process.env.RIND_HOME || path.join(homedir(), ".rind")) {
   const settingsPath = path.join(rindHome, "settings.json");
@@ -51,18 +49,16 @@ export async function executeLocalSlashCommand(input, context = {}) {
   if (!match) return null;
   const name = match[1].toLowerCase();
   const argument = String(match[2] || "").trim();
-  if (REMOVED_COMMANDS.has(name)) return removedResult(name);
   if (name === "config") return configResult(context.settings, argument);
   if (name === "login") return argument ? usageResult("/login") : { text: "Login/config setup is not implemented yet.\nSet apiKey in ~/.rind/settings.json." };
-  if (name === "status") return statusResult(context, argument);
+  if (name === "status") {
+    if (!argument && context.runtimeInitialized) return null;
+    return statusResult(context, argument);
+  }
   if (name === "doctor") return doctorResult(context, argument);
   if (name === "help") return helpResult(argument, context.commands || []);
   if (name === "model" && !argument && !context.interactive) return { text: `Model: ${context.settings?.model || "unknown"}` };
   return null;
-}
-
-function removedResult(name) {
-  return { text: `Unknown command: /${name}\nRun /help to see available commands.` };
 }
 
 function usageResult(usage) {
@@ -137,7 +133,7 @@ function check(ok, name, detail) {
 
 function helpResult(argument, commands) {
   const name = argument.replace(/^\//, "").toLowerCase();
-  const visible = commands.filter((command) => !isRemovedSlashCommand(command.name) && (!name || command.name === name || command.aliases?.includes(name)));
+  const visible = commands.filter((command) => (!name || command.name === name || command.aliases?.includes(name)));
   if (name && !visible.length) return { text: `Unknown command: /${name}\nRun /help to see available commands.` };
   const selected = name ? visible[0] : null;
   const text = selected
