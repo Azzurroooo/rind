@@ -1031,7 +1031,7 @@ function pendingInputLines(entries) {
     return [];
   }
   const width = composerWidth();
-  return entries.flatMap((entry) => {
+  const lines = entries.flatMap((entry) => {
     const input = singleLine(entry?.input);
     if (!input) {
       return [];
@@ -1039,6 +1039,17 @@ function pendingInputLines(entries) {
     const label = entry.mode === "steering" ? "Steering" : "Queue";
     return dim(`  ${label}: ${clipSingleLine(input, Math.max(1, width - visibleLength(label) - 4))}`);
   });
+  const hints = [];
+  if (entries.some((entry) => entry?.mode === "follow_up")) {
+    hints.push("alt+up recall queue");
+  }
+  if (entries.some((entry) => entry?.mode === "steering")) {
+    hints.push("alt+down recall steer");
+  }
+  if (hints.length) {
+    lines.push(dim(`    ${hints.join(" · ")}`));
+  }
+  return lines;
 }
 
 function activityFrame(frame) {

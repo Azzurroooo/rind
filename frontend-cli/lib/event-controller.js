@@ -124,7 +124,7 @@ export function createEventController({
         await input.answerQuestion?.(event);
         return;
       case "queued_input_delivered":
-        output.deliverQueuedInput?.(event.input || "", event.mode || "steering");
+        output.deliverQueuedInput?.(event.input || "", event.mode || "steering", event.input_id || "");
         return;
       case "turn_failed":
         output.clearQueuedInputs?.();

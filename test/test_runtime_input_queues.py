@@ -208,6 +208,89 @@ async def test_runtime_promotes_a_follow_up_without_copying_or_reordering_it():
 
 
 @pytest.mark.asyncio
+async def test_runtime_retrieves_the_latest_input_from_each_queue_independently():
+    runtime = AgentRuntime(CompletingRunner(), RecordingSession())
+    stream = runtime.run_turn(query="initial")
+    await anext(stream)
+
+    steer_first = runtime.submit_steering("first steer")
+    steer_latest = runtime.submit_steering("latest steer")
+    follow_first = runtime.submit_follow_up("first follow-up")
+    follow_latest = runtime.submit_follow_up("latest follow-up")
+
+    assert runtime.unsteer() == {
+        "retrieved": True,
+        "input_id": steer_latest["input_id"],
+        "input": "latest steer",
+        "mode": "steering",
+        "pending": 1,
+    }
+    assert runtime.dequeue_follow_up() == {
+        "retrieved": True,
+        "input_id": follow_latest["input_id"],
+        "input": "latest follow-up",
+        "mode": "follow_up",
+        "pending": 1,
+    }
+    assert [item.input_id for item in runtime._steering_queue] == [steer_first["input_id"]]
+    assert [item.input_id for item in runtime._follow_up_queue] == [follow_first["input_id"]]
+
+    runtime.unsteer()
+    runtime.dequeue_follow_up()
+    with pytest.raises(InputQueueError, match="No queued steering") as no_steering:
+        runtime.unsteer()
+    assert no_steering.value.error_type == "InputNotPending"
+    with pytest.raises(InputQueueError, match="No queued follow_up") as no_follow_up:
+        runtime.dequeue_follow_up()
+    assert no_follow_up.value.error_type == "InputNotPending"
+
+    await stream.aclose()
+
+
+@pytest.mark.asyncio
+async def test_runtime_retrieves_arbitrary_inputs_by_id_without_reordering_remaining_items():
+    runtime = AgentRuntime(CompletingRunner(), RecordingSession())
+    stream = runtime.run_turn(query="initial")
+    await anext(stream)
+
+    steer_first = runtime.submit_steering("first steer")
+    steer_middle = runtime.submit_steering("middle steer")
+    steer_latest = runtime.submit_steering("latest steer")
+    follow_first = runtime.submit_follow_up("first follow-up")
+    follow_middle = runtime.submit_follow_up("middle follow-up")
+    follow_latest = runtime.submit_follow_up("latest follow-up")
+
+    assert runtime.unsteer(steer_middle["input_id"]) == {
+        "retrieved": True,
+        "input_id": steer_middle["input_id"],
+        "input": "middle steer",
+        "mode": "steering",
+        "pending": 2,
+    }
+    assert runtime.dequeue_follow_up(follow_first["input_id"]) == {
+        "retrieved": True,
+        "input_id": follow_first["input_id"],
+        "input": "first follow-up",
+        "mode": "follow_up",
+        "pending": 2,
+    }
+    assert [item.input_id for item in runtime._steering_queue] == [
+        steer_first["input_id"],
+        steer_latest["input_id"],
+    ]
+    assert [item.input_id for item in runtime._follow_up_queue] == [
+        follow_middle["input_id"],
+        follow_latest["input_id"],
+    ]
+
+    with pytest.raises(InputQueueError, match="Queued steering input was not found") as missing:
+        runtime.unsteer(steer_middle["input_id"])
+    assert missing.value.error_type == "InputNotPending"
+
+    await stream.aclose()
+
+
+@pytest.mark.asyncio
 async def test_runtime_delivers_follow_ups_fifo_with_one_terminal_event_and_turn_id():
     session = RecordingSession()
     runner = CompletingRunner()

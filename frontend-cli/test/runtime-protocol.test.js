@@ -74,4 +74,6 @@ test("runtime protocol recognizes the shared golden event fixture", () => {
 test("runtime protocol exposes separate steering and follow-up methods", () => {
   assert.equal(runtimeMethods.sessionSteer, "rind/session/steer");
   assert.equal(runtimeMethods.sessionFollowUp, "rind/session/follow_up");
+  assert.equal(runtimeMethods.sessionUnsteer, "rind/session/unsteer");
+  assert.equal(runtimeMethods.sessionDequeueFollowUp, "rind/session/dequeue_follow_up");
 });

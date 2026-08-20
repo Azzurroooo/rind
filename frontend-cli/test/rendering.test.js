@@ -205,6 +205,7 @@ test("promptText keeps pending input inside the live composer", () => {
       "  ◓ Working (1s) ctrl+c interrupt",
       "  Steering: refocus tests",
       "  Queue: then summarize",
+      "    alt+up recall queue · alt+down recall steer",
       "  m1 · E:\\project",
       `  ${"─".repeat(78)}`,
       "  ▷ ",

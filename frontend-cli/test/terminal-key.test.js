@@ -38,6 +38,12 @@ test("parses modified navigation and deletion keys", () => {
   const deleted = parseTerminalKey("\x1b[3;3~");
   assert.equal(deleted.name, "delete");
   assert.equal(deleted.alt, true);
+  const dequeue = parseTerminalKey("\x1b[1;3A");
+  assert.equal(dequeue.name, "up");
+  assert.equal(dequeue.alt, true);
+  const unsteer = parseTerminalKey("\x1b[1;3B");
+  assert.equal(unsteer.name, "down");
+  assert.equal(unsteer.alt, true);
 });
 
 test("parses common shifted enter sequences", () => {

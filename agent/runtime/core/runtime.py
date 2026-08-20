@@ -137,6 +137,14 @@ class AgentRuntime:
     def submit_follow_up(self, text: str) -> dict[str, object]:
         return self._submit_input("follow_up", text, self._follow_up_queue)
 
+    def unsteer(self, input_id: str | None = None) -> dict[str, object]:
+        """Retrieve a steering input, defaulting to the most recently queued one."""
+        return self._retrieve_input("steering", self._steering_queue, input_id)
+
+    def dequeue_follow_up(self, input_id: str | None = None) -> dict[str, object]:
+        """Retrieve a follow-up input, defaulting to the most recently queued one."""
+        return self._retrieve_input("follow_up", self._follow_up_queue, input_id)
+
     def promote_follow_up(self, input_id: str) -> dict[str, object]:
         value = str(input_id or "").strip()
         if not self._accepting_inputs or not self._active_turn_id:
@@ -465,6 +473,34 @@ class AgentRuntime:
         item = QueuedInput(input_id=uuid.uuid4().hex, text=value)
         queue.append(item)
         return {"accepted": True, "input_id": item.input_id, "mode": mode, "pending": len(queue)}
+
+    def _retrieve_input(
+        self,
+        mode: str,
+        queue: deque[QueuedInput],
+        input_id: str | None = None,
+    ) -> dict[str, object]:
+        if not self._accepting_inputs or not self._active_turn_id:
+            raise InputQueueError("No active turn accepts queued input.", "TurnNotActive")
+        if not queue:
+            raise InputQueueError(f"No queued {mode} input is available.", "InputNotPending")
+        if input_id is None:
+            item = queue.pop()
+        else:
+            value = str(input_id).strip()
+            if not value:
+                raise InputQueueError("input_id must not be empty.", "InvalidRequest")
+            item = next((candidate for candidate in queue if candidate.input_id == value), None)
+            if item is None:
+                raise InputQueueError(f"Queued {mode} input was not found.", "InputNotPending")
+            queue.remove(item)
+        return {
+            "retrieved": True,
+            "input_id": item.input_id,
+            "input": item.text,
+            "mode": mode,
+            "pending": len(queue),
+        }
 
     @staticmethod
     def _queue_chars(queue: deque[QueuedInput]) -> int:

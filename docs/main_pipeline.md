@@ -75,7 +75,7 @@ sequenceDiagram
     Server-->>Surface: response(session_id, turn_id)
 ```
 
-`session/cancel` 取消当前 token；`rind/session/steer` 和 `rind/session/follow_up` 分别进入当前 turn 的控制队列和后续 turn 队列。`rind/session/compact`、模型、session、goal 和 background 请求不绕过 Server 直接触碰 core。
+`session/cancel` 取消当前 token；`rind/session/steer` 和 `rind/session/follow_up` 分别进入当前 turn 的控制队列和后续 turn 队列。两类队列按 FIFO 投递；`rind/session/unsteer` 与 `rind/session/dequeue_follow_up` 不带 `input_id` 时分别以 LIFO 取回最新输入，带 `input_id` 时按 ID 取回指定输入。`rind/session/compact`、模型、session、goal 和 background 请求不绕过 Server 直接触碰 core。
 
 ## 5. 代码阅读顺序
 

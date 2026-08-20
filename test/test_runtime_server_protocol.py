@@ -823,6 +823,14 @@ def test_turn_input_controls_respond_without_main_queue(capsys):
             self.submitted.append(("promote", input_id))
             return {"accepted": True, "input_id": input_id, "mode": "steering", "pending": 1}
 
+        def unsteer(self, input_id=None):
+            self.submitted.append(("unsteer", input_id or ""))
+            return {"retrieved": True, "input_id": "steer-1", "input": "change direction", "mode": "steering", "pending": 0}
+
+        def dequeue_follow_up(self, input_id=None):
+            self.submitted.append(("dequeue_follow_up", input_id or ""))
+            return {"retrieved": True, "input_id": "follow-1", "input": "next task", "mode": "follow_up", "pending": 0}
+
     async def run():
         runtime = Runtime()
         server = StdioRuntimeServer(runtime, _Session())
@@ -835,25 +843,44 @@ def test_turn_input_controls_respond_without_main_queue(capsys):
         promote_handled = await server._handle_control_message(
             {"request_id": 33, "method": "rind/session/promote_follow_up", "params": {"input_id": "follow-1"}}
         )
-        return runtime, server, steering_handled, follow_up_handled, promote_handled
+        unsteer_handled = await server._handle_control_message(
+            {"request_id": 34, "method": "rind/session/unsteer", "params": {"input_id": "steer-1"}}
+        )
+        dequeue_handled = await server._handle_control_message(
+            {"request_id": 35, "method": "rind/session/dequeue_follow_up", "params": {}}
+        )
+        return runtime, server, steering_handled, follow_up_handled, promote_handled, unsteer_handled, dequeue_handled
 
-    runtime, server, steering_handled, follow_up_handled, promote_handled = asyncio.run(run())
+    runtime, server, steering_handled, follow_up_handled, promote_handled, unsteer_handled, dequeue_handled = asyncio.run(run())
     messages = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
 
     assert steering_handled is True
     assert follow_up_handled is True
     assert promote_handled is True
+    assert unsteer_handled is True
+    assert dequeue_handled is True
     assert server._requests.empty()
-    assert runtime.submitted == [("steering", "change direction"), ("follow_up", "next task"), ("promote", "follow-1")]
+    assert runtime.submitted == [
+        ("steering", "change direction"),
+        ("follow_up", "next task"),
+        ("promote", "follow-1"),
+        ("unsteer", "steer-1"),
+        ("dequeue_follow_up", ""),
+    ]
     assert messages[0]["result"] == {"accepted": True, "input_id": "steer-1", "mode": "steering", "pending": 1}
     assert messages[1]["result"] == {"accepted": True, "input_id": "follow-1", "mode": "follow_up", "pending": 2}
     assert messages[2]["result"] == {"accepted": True, "input_id": "follow-1", "mode": "steering", "pending": 1}
+    assert messages[3]["result"] == {"retrieved": True, "input_id": "steer-1", "input": "change direction", "mode": "steering", "pending": 0}
+    assert messages[4]["result"] == {"retrieved": True, "input_id": "follow-1", "input": "next task", "mode": "follow_up", "pending": 0}
 
 
 def test_turn_input_control_rejection_is_structured_protocol_error(capsys):
     class Runtime(_Runtime):
         def submit_steering(self, _text):
             raise InputQueueError("steering queue is full", "InputQueueFull")
+
+        def unsteer(self, _input_id=None):
+            raise InputQueueError("No queued steering input is available.", "InputNotPending")
 
     async def run():
         server = StdioRuntimeServer(Runtime(), _Session())
@@ -865,6 +892,17 @@ def test_turn_input_control_rejection_is_structured_protocol_error(capsys):
     message = json.loads(capsys.readouterr().out)
     assert message["request_id"] == 33
     assert message["error"] == {"type": "InputQueueFull", "message": "steering queue is full"}
+
+    async def retrieve():
+        server = StdioRuntimeServer(Runtime(), _Session())
+        return await server._handle_control_message(
+            {"request_id": 34, "method": "rind/session/unsteer", "params": {}}
+        )
+
+    assert asyncio.run(retrieve()) is True
+    message = json.loads(capsys.readouterr().out)
+    assert message["request_id"] == 34
+    assert message["error"] == {"type": "InputNotPending", "message": "No queued steering input is available."}
 
 
 def test_interrupt_discards_runtime_inputs_without_returning_them(capsys):

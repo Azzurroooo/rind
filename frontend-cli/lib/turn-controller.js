@@ -15,8 +15,8 @@ export function createTurnController({ request, state, output, refreshGoalState 
 
   async function submitQueuedInput(method, text, originalInput, mode) {
     try {
-      await request(method, { input: text });
-      output.queueInput?.(text, mode);
+      const result = await request(method, { input: text });
+      output.queueInput?.(text, mode, result);
     } catch (error) {
       handleSubmissionError(error, originalInput);
     }

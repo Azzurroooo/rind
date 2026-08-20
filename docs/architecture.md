@@ -49,7 +49,7 @@ agent/runtime/
 
 `initialize`、`shutdown`、`session/new`、`session/list`、`session/switch`、`session/replay`、`session/prompt`、`session/cancel`、`model/list`、`model/set`。
 
-产品扩展使用 `rind/` 命名空间，并由能力声明门控：`rind/session/steer`、`rind/session/follow_up`、`rind/session/compact`、`rind/command/execute`、`rind/user-question/respond`、`rind/goal/*`、`rind/background/*`。
+产品扩展使用 `rind/` 命名空间，并由能力声明门控：`rind/session/steer`、`rind/session/follow_up`、`rind/session/unsteer`、`rind/session/dequeue_follow_up`、`rind/session/compact`、`rind/command/execute`、`rind/user-question/respond`、`rind/goal/*`、`rind/background/*`。两类待输入分别 FIFO 投递；取回方法不带 `input_id` 时各自以 LIFO 取回最新项，带 `input_id` 时可精确移除对应类别中的任意尚未投递项。
 
 事件统一为 `method: "session/update"` 的 envelope，包含 `sequence`、`durability`、session/turn ids 和 `event.type`。增量事件可实时消费，durable 事件用于恢复和状态同步。公共 fixture 位于 `test/fixtures/runtime_protocol.golden.jsonl`。
 

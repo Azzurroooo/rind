@@ -104,7 +104,7 @@ test("event controller delivers queued input and clears pending input on termina
   let clears = 0;
   const controller = createEventController({
     output: {
-      deliverQueuedInput: (input, mode) => delivered.push({ input, mode }),
+      deliverQueuedInput: (input, mode, inputId) => delivered.push({ input, mode, inputId }),
       clearQueuedInputs: () => { clears += 1; },
       clearCompactContext() {},
       closeAssistant() {},
@@ -117,9 +117,10 @@ test("event controller delivers queued input and clears pending input on termina
     type: "queued_input_delivered",
     input: "continue with tests",
     mode: "follow_up",
+    input_id: "queued-1",
   } });
   await controller.handle({ kind: "event", event: { type: "turn_completed" } });
 
-  assert.deepEqual(delivered, [{ input: "continue with tests", mode: "follow_up" }]);
+  assert.deepEqual(delivered, [{ input: "continue with tests", mode: "follow_up", inputId: "queued-1" }]);
   assert.equal(clears, 1);
 });

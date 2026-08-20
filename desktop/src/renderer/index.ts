@@ -343,7 +343,12 @@ function render() {
     state.viewedSessionId,
     state.planDock,
   )
-  syncPendingInputDock(pendingInputDock, state.pendingInputs[runtimeId] || [], (inputId) => runAction(() => promoteFollowUp(inputId)))
+  syncPendingInputDock(
+    pendingInputDock,
+    state.pendingInputs[runtimeId] || [],
+    (inputId) => runAction(() => promoteFollowUp(inputId)),
+    (inputId) => runAction(() => recallPendingInput(inputId)),
+  )
   renderStream()
   renderComposer(
     { prompt, send, interrupt, menuTrigger: composerMenuTrigger, menu: composerMenu, compactContext, slashCommandMenu, contextMeter },
@@ -1094,6 +1099,7 @@ function syncCurrentPendingInputs() {
     pendingInputDock,
     state.pendingInputs[currentRuntimeId()] || [],
     (inputId) => runAction(() => promoteFollowUp(inputId)),
+    (inputId) => runAction(() => recallPendingInput(inputId)),
   )
 }
 
@@ -1103,7 +1109,7 @@ function addPendingInput(runtimeId: string, input: string, result: Record<string
   const pending = state.pendingInputs[runtimeId] || []
   state.pendingInputs[runtimeId] = [
     ...pending,
-    { inputId, input, mode: result.mode === "steering" ? "steering" : "follow_up", promoting: false },
+    { inputId, input, mode: result.mode === "steering" ? "steering" : "follow_up", promoting: false, recalling: false },
   ]
 }
 
@@ -1131,8 +1137,40 @@ async function promoteFollowUp(inputId: string) {
       throw new Error("Runtime returned an invalid queued input promotion.")
     }
     item.mode = "steering"
+    const pending = state.pendingInputs[runtimeId]
+    if (pending) {
+      pending.splice(pending.indexOf(item), 1)
+      pending.push(item)
+    }
   } finally {
     item.promoting = false
+    syncCurrentPendingInputs()
+  }
+}
+
+async function recallPendingInput(inputId: string) {
+  const runtimeId = currentRuntimeId()
+  const pending = state.pendingInputs[runtimeId]
+  const item = pending?.find((candidate) => candidate.inputId === inputId)
+  if (!item || item.promoting || item.recalling) return
+  item.recalling = true
+  syncCurrentPendingInputs()
+  try {
+    const method = item.mode === "steering"
+      ? runtimeMethods.sessionUnsteer
+      : runtimeMethods.sessionDequeueFollowUp
+    const result = asRecord(await request(method, { input_id: item.inputId }, runtimeId))
+    const input = asRecordText(result.input)
+    if (result.retrieved !== true || result.mode !== item.mode || asRecordText(result.input_id) !== item.inputId || !input) {
+      throw new Error("Runtime returned an invalid queued input retrieval.")
+    }
+    const index = pending.findIndex((candidate) => candidate.inputId === item.inputId)
+    if (index < 0) throw new Error("Retrieved input is not present in the local queue.")
+    pending.splice(index, 1)
+    if (!pending.length) delete state.pendingInputs[runtimeId]
+    setPrompt([input, prompt.value].filter((value) => value.trim()).join("\n\n"), true)
+  } finally {
+    item.recalling = false
     syncCurrentPendingInputs()
   }
 }

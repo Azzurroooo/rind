@@ -27,6 +27,7 @@ export type PendingInput = {
   input: string
   mode: "follow_up" | "steering"
   promoting: boolean
+  recalling: boolean
 }
 
 export type ComposerView = {
@@ -172,6 +173,7 @@ export function syncPendingInputDock(
   dock: HTMLElement,
   inputs: PendingInput[],
   onPromote: (inputId: string) => void,
+  onRecall: (inputId: string) => void,
 ) {
   const existing = new Map<string, HTMLElement>()
   for (const element of dock.querySelectorAll<HTMLElement>("[data-pending-input-id]")) {
@@ -194,23 +196,41 @@ export function syncPendingInputDock(
       text.className = "pending-input-text"
       content.append(mode, text)
 
+      const actions = document.createElement("div")
+      actions.className = "pending-input-actions"
       const promote = document.createElement("button")
       promote.type = "button"
       promote.className = "ghost-button pending-input-promote"
       promote.textContent = "Steer"
       promote.addEventListener("click", () => onPromote(input.inputId))
-      item.append(content, promote)
+      const recall = document.createElement("button")
+      recall.type = "button"
+      recall.className = "ghost-button pending-input-recall"
+      recall.textContent = "Recall"
+      recall.addEventListener("click", () => onRecall(input.inputId))
+      actions.append(promote, recall)
+      item.append(content, actions)
     }
 
     const mode = item.querySelector<HTMLElement>(".pending-input-mode")
     const text = item.querySelector<HTMLElement>(".pending-input-text")
     const promote = item.querySelector<HTMLButtonElement>(".pending-input-promote")
+    const recall = item.querySelector<HTMLButtonElement>(".pending-input-recall")
     if (mode) mode.textContent = input.mode === "steering" || input.promoting ? "Steering" : "Queue"
     if (text) text.textContent = input.input
     if (promote) {
-      promote.disabled = input.mode === "steering" || input.promoting
+      promote.hidden = input.mode === "steering"
+      promote.disabled = input.promoting || input.recalling
       promote.textContent = input.promoting ? "Steering..." : "Steer"
-      promote.title = input.mode === "steering" ? "Message will steer the next model step" : "Apply this queued message as steering"
+      promote.title = "Apply this queued message as steering"
+    }
+    if (recall) {
+      recall.hidden = false
+      recall.disabled = input.promoting || input.recalling
+      recall.textContent = input.recalling ? "Recalling..." : "Recall"
+      recall.title = input.mode === "steering"
+        ? "Recall this steering message"
+        : "Recall this queued message"
     }
     if (dock.children[index] !== item) dock.append(item)
     existing.delete(input.inputId)

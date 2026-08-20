@@ -95,6 +95,7 @@ let assistantHeaderShown = false;
 let outputStarted = false;
 let promptPaused = false;
 const pendingInputs = [];
+const retrievingInputModes = new Set();
 let activityFrame = 0;
 let activityTimer = null;
 let activityStartedAt = 0;
@@ -553,18 +554,58 @@ function restoreInputText(text) {
   }
 }
 
-function addPendingInput(input, mode) {
-  pendingInputs.push({ input, mode });
+function addPendingInput(input, mode, result = {}) {
+  const inputId = String(result?.input_id || "").trim();
+  if (!inputId) {
+    throw new Error("Runtime accepted queued input without input_id.");
+  }
+  pendingInputs.push({ inputId, input, mode });
   redrawInput();
 }
 
-function deliverQueuedInput(input, mode) {
-  const index = pendingInputs.findIndex((entry) => entry.input === input && entry.mode === mode);
+function deliverQueuedInput(input, _mode, inputId) {
+  const index = pendingInputs.findIndex((entry) => entry.inputId === inputId);
   if (index === -1) {
     return;
   }
   pendingInputs.splice(index, 1);
   suspendPrompt(() => writeUserInput(input));
+}
+
+async function retrievePendingInput(mode, session) {
+  if (retrievingInputModes.has(mode)) {
+    return;
+  }
+  const entry = [...pendingInputs].reverse().find((item) => item.mode === mode);
+  if (!entry) {
+    return;
+  }
+  retrievingInputModes.add(mode);
+  const method = mode === "steering"
+    ? runtimeMethods.sessionUnsteer
+    : runtimeMethods.sessionDequeueFollowUp;
+  try {
+    const result = await request(method);
+    const inputId = String(result?.input_id || "").trim();
+    const input = String(result?.input || "");
+    if (result?.retrieved !== true || result?.mode !== mode || inputId !== entry.inputId || !input) {
+      throw new Error("Runtime returned an invalid queued input retrieval.");
+    }
+    const index = pendingInputs.findIndex((item) => item.inputId === inputId);
+    if (index === -1) {
+      throw new Error("Retrieved input is not present in the local queue.");
+    }
+    pendingInputs.splice(index, 1);
+    const current = session.editor.input();
+    session.editor.setInput([input, current].filter((value) => value.trim()).join("\n\n"));
+    redrawInput();
+  } catch (error) {
+    if (!runtimeClosing) {
+      writeErrorOutput(`${error instanceof Error ? error.message : String(error)}\n`);
+    }
+  } finally {
+    retrievingInputModes.delete(mode);
+  }
 }
 
 function clearPendingInputs() {
@@ -905,6 +946,14 @@ function handleTerminalInput(raw = "") {
   }
   if (session.mode === "prompt" && activeTurn && !key.ctrl && !key.alt && !key.shift && key.name === "tab") {
     queueTtyInput(session);
+    return;
+  }
+  if (session.mode === "prompt" && key.alt && !key.ctrl && !key.shift && key.name === "up" && pendingInputs.some((item) => item.mode === "follow_up")) {
+    void retrievePendingInput("follow_up", session);
+    return;
+  }
+  if (session.mode === "prompt" && key.alt && !key.ctrl && !key.shift && key.name === "down" && pendingInputs.some((item) => item.mode === "steering")) {
+    void retrievePendingInput("steering", session);
     return;
   }
   const result = session.editor.handleInput(key);
