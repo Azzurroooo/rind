@@ -121,14 +121,22 @@ class ToolCallProcessor:
                         tool_name=call.name,
                     )
                     if call.name == "ask_user_question":
-                        question_event = self._build_user_question_event(
-                            session=session,
-                            turn_id=turn_id,
-                            call=call,
-                            parsed_args=parsed_args,
-                        )
-                        yield question_event
-                        outcome = await self._run_user_question(question_event)
+                        try:
+                            question_event = self._build_user_question_event(
+                                session=session,
+                                turn_id=turn_id,
+                                call=call,
+                                parsed_args=parsed_args,
+                            )
+                        except ValueError as exc:
+                            outcome = _ToolCallOutcome(
+                                status="rejected",
+                                error_type="InvalidUserQuestion",
+                                result=tool_error("ask_user_question", str(exc), "InvalidUserQuestion"),
+                            )
+                        else:
+                            yield question_event
+                            outcome = await self._run_user_question(question_event)
                     else:
                         tool_execution = self._run_tool_call(
                             call=call,
@@ -430,16 +438,17 @@ class ToolCallProcessor:
         call: ParsedToolCall,
         parsed_args: dict,
     ) -> UserQuestionRequestedEvent:
+        question = self._clean_required_text(parsed_args.get("question"))
+        if not question:
+            raise ValueError("ask_user_question requires a non-empty question string.")
+        if "recommended" in parsed_args:
+            raise ValueError("ask_user_question no longer accepts a top-level recommended field.")
         options = self._clean_user_question_options(parsed_args.get("options"))
-        recommended = self._clean_optional_text(parsed_args.get("recommended"))
-        if recommended and options and recommended not in options:
-            recommended = None
         return UserQuestionRequestedEvent(
             **event_meta(session, turn_id),
             tool_call_id=call.call_id,
-            question=self._clean_required_text(parsed_args.get("question")),
+            question=question,
             options=options,
-            recommended=recommended,
         )
 
     async def _run_user_question(self, event: UserQuestionRequestedEvent) -> _ToolCallOutcome:
@@ -507,19 +516,36 @@ class ToolCallProcessor:
             return ""
         return value.strip()
 
-    def _clean_optional_text(self, value: Any) -> str | None:
+    def _clean_user_question_options(self, value: Any) -> list[dict[str, str]] | None:
         if value is None:
             return None
-        text = self._clean_required_text(value)
-        return text or None
-
-    def _clean_user_question_options(self, value: Any) -> list[str] | None:
-        if value is None:
-            return None
-        if not isinstance(value, list):
-            return None
-        cleaned = [item.strip() for item in value if isinstance(item, str) and item.strip()]
-        return cleaned or None
+        if not isinstance(value, list) or not value:
+            raise ValueError("ask_user_question options must be a non-empty array of option objects.")
+        cleaned: list[dict[str, str]] = []
+        labels: set[str] = set()
+        for index, item in enumerate(value):
+            if not isinstance(item, dict):
+                raise ValueError("Each ask_user_question option must be an object.")
+            unknown = set(item) - {"label", "description"}
+            if unknown:
+                raise ValueError(f"ask_user_question options contain unsupported fields: {sorted(unknown)!r}.")
+            label = item.get("label")
+            description = item.get("description")
+            if not isinstance(label, str) or not label.strip():
+                raise ValueError("Each ask_user_question option requires a non-empty label.")
+            if not isinstance(description, str) or not description.strip():
+                raise ValueError("Each ask_user_question option requires a non-empty description.")
+            label = label.strip()
+            if label in labels:
+                raise ValueError(f"ask_user_question option labels must be unique: {label!r}.")
+            labels.add(label)
+            has_recommended_suffix = label.endswith(" (Recommended)")
+            if index == 0 and not has_recommended_suffix:
+                raise ValueError('The first ask_user_question option label must end with " (Recommended)".')
+            if index > 0 and has_recommended_suffix:
+                raise ValueError('Only the first ask_user_question option may end with " (Recommended)".')
+            cleaned.append({"label": label, "description": description.strip()})
+        return cleaned
 
     async def _persist_tool_result(
         self,

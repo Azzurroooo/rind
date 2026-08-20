@@ -185,8 +185,7 @@ class UserQuestionRequestedEvent(RuntimeEvent):
     type: Literal["user_question_requested"] = "user_question_requested"
     tool_call_id: str = ""
     question: str = ""
-    options: list[str] | None = None
-    recommended: str | None = None
+    options: list[dict[str, str]] | None = None
 
 
 @dataclass(slots=True)

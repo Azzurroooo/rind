@@ -584,8 +584,13 @@ pre code {
 .card-question { border-color: #2b4a5f; background: #101c26; }
 .card-question .card-label { color: var(--info); }
 .question-text { margin-bottom: 10px; color: var(--text-strong); font-weight: 500; }
-.question-options { display: flex; flex-wrap: wrap; gap: 6px; }
+.question-options { display: flex; flex-direction: column; gap: 6px; }
 .question-option {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  min-width: 150px;
   min-height: 28px;
   padding: 4px 12px;
   border: 1px solid var(--border-strong);
@@ -594,8 +599,10 @@ pre code {
   background: transparent;
   font-size: 12.5px;
 }
+.question-option strong { color: inherit; font-size: 12.5px; font-weight: 500; }
+.question-option small { color: var(--text-faint); font-size: 10.5px; text-align: left; }
 .question-option:hover { border-color: var(--info); color: var(--text-strong); }
-.question-option.recommended { border-color: var(--info); }
+.question-option.selected { border-color: var(--info); background: rgba(74, 168, 214, 0.08); }
 .question-form { display: flex; gap: 6px; margin-top: 10px; }
 .question-form input {
   min-width: 0;

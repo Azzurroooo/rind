@@ -94,6 +94,18 @@ def test_shell_schemas_hide_runtime_session_context() -> None:
     assert registry.has("kill_shell") is False
 
 
+def test_user_question_schema_describes_structured_options() -> None:
+    schema = next(schema for schema in DefaultToolRegistry().schemas if schema["function"]["name"] == "ask_user_question")
+    options = schema["function"]["parameters"]["properties"]["options"]
+
+    assert options["type"] == "array"
+    assert options["items"]["type"] == "object"
+    assert set(options["items"]["properties"]) == {"label", "description"}
+    assert options["items"]["required"] == ["label", "description"]
+    assert options["items"]["additionalProperties"] is False
+    assert " (Recommended)" in options["description"]
+
+
 def test_builtin_catalog_preserves_default_tool_order() -> None:
     expected = [
         "ask_user_question",

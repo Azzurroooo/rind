@@ -42,7 +42,8 @@ export type Entry =
   | { kind: "error"; id: string; content: string; source: string }
   | { kind: "notice"; id: string; content: string; label: string }
   | { kind: "command"; id: string; command: string; content: string; display?: Record<string, unknown> }
-export type Question = { toolCallId: string; turnId: string; question: string; options: string[]; recommended?: string }
+export type QuestionOption = { label: string; description: string }
+export type Question = { toolCallId: string; turnId: string; question: string; options: QuestionOption[] }
 export type ConversationState = {
   entries: Entry[]
   activeTurnId: string
@@ -129,8 +130,15 @@ export function reduceEvent(state: ConversationState, envelope: RuntimeEvent): C
     case "user_question_requested": return {
       ...closeAssistant(state), question: {
         toolCallId: asString(event.tool_call_id), turnId, question: asString(event.question) || "Question required",
-        options: Array.isArray(event.options) ? event.options.filter((item): item is string => typeof item === "string") : [],
-        recommended: asString(event.recommended) || undefined,
+        options: Array.isArray(event.options) ? event.options.flatMap((item) => {
+          if (!item || typeof item !== "object") return []
+          const option = item as Record<string, unknown>
+          const label = asString(option.label)
+          const description = asString(option.description)
+          return label && description
+            ? [{ label, description }]
+            : []
+        }) : [],
       },
     }
     case "token_stats_updated": {

@@ -1,6 +1,6 @@
-export function createChoiceMenuState(options, recommended = "") {
+export function createChoiceMenuState(options, selectedValue = "") {
   const items = normalizeOptions(options);
-  let selected = items.indexOf(recommended);
+  let selected = items.indexOf(selectedValue);
   if (selected < 0) {
     selected = 0;
   }
