@@ -61,6 +61,14 @@ import {
   workingDirectorySelectionEnabled,
 } from "./project-selection"
 import { projectListStructureKey, recentListStructureKey } from "./sidebar-rendering"
+import {
+  canConfirmQuestion,
+  createQuestionSelection,
+  questionAnswer,
+  selectQuestionOption,
+  updateQuestionInput,
+  type QuestionSelection,
+} from "./question-state"
 
 type AppState = {
   runtime: RuntimeSnapshot
@@ -99,6 +107,7 @@ type AppState = {
   filePreview?: DesktopFilePreview
   drafts: Record<string, string>
   conversation: ConversationState
+  questionSelection?: QuestionSelection
   expandedTools: Set<string>
   revealedTools: Set<string>
   planDock: PlanDockPresentation
@@ -157,6 +166,7 @@ const state: AppState = {
   fileListings: {},
   drafts: {},
   conversation: createConversation(),
+  questionSelection: undefined,
   expandedTools: new Set(),
   revealedTools: new Set(),
   planDock: { collapsed: false, sessionId: "", dismissedPlanErrors: new Set() },
@@ -869,16 +879,26 @@ function renderToolValue(value: unknown): string {
 function renderQuestion(): string {
   const question = state.conversation.question
   if (!question) return ""
+  const selection = questionSelectionFor(question)
+  const customIndex = question.options.length
+  const customSelected = selection.selectedIndex === customIndex
+  const canConfirm = canConfirmQuestion(selection, question.options.length)
   return `
     <div class="stream-card card-question">
       <div class="card-label">Rind asks</div>
       <div class="question-text">${escapeHtml(question.question)}</div>
-      <div class="question-options">${question.options.map((option) => `
-        <button type="button" class="question-option${option === question.recommended ? " recommended" : ""}" data-answer="${escapeAttribute(option)}">${escapeHtml(option)}</button>
-      `).join("")}</div>
+      <div class="question-options">${question.options.map((option, index) => `
+        <button type="button" class="question-option${selection.selectedIndex === index ? " selected" : ""}" data-question-option-index="${index}" aria-pressed="${String(selection.selectedIndex === index)}">
+          <strong>${escapeHtml(option.label)}</strong><small>${escapeHtml(option.description)}</small>
+        </button>
+      `).join("")}
+        <button type="button" class="question-option question-custom${customSelected ? " selected" : ""}" data-question-option-index="${customIndex}" aria-pressed="${String(customSelected)}">
+          <strong>Type your own answer</strong><small>Enter a custom response.</small>
+        </button>
+      </div>
       <form id="question-form" class="question-form">
-        <input id="question-answer" aria-label="Your answer" autocomplete="off" placeholder="Type your own answer" />
-        <button type="submit" class="primary-button">Answer</button>
+        ${customSelected ? `<input id="question-answer" aria-label="Your answer" autocomplete="off" placeholder="Type your own answer" value="${escapeAttribute(selection.customInput)}" />` : ""}
+        <button type="submit" class="primary-button"${canConfirm ? "" : " disabled"}>Confirm</button>
       </form>
     </div>
   `
@@ -931,6 +951,13 @@ function conversationFor(sessionId: string) {
   return sessionId === state.viewedSessionId
     ? state.conversation
     : state.conversationCache[sessionId] || createConversation()
+}
+
+function questionSelectionFor(question: NonNullable<ConversationState["question"]>): QuestionSelection {
+  if (state.questionSelection?.questionId === question.toolCallId) return state.questionSelection
+  const selection = createQuestionSelection(question.toolCallId, question.options.length)
+  state.questionSelection = selection
+  return selection
 }
 
 function runtimeConversation() {
@@ -1773,14 +1800,34 @@ messageStream.addEventListener("click", (event) => {
     runAction(() => switchSession(commandSessionId))
     return
   }
-  const answer = target.closest<HTMLButtonElement>("[data-answer]")?.dataset.answer
-  if (answer) runAction(() => answerQuestion(answer))
+  const questionOption = target.closest<HTMLButtonElement>("[data-question-option-index]")
+  if (questionOption && state.conversation.question) {
+    const index = Number(questionOption.dataset.questionOptionIndex)
+    if (Number.isInteger(index)) {
+      const question = state.conversation.question
+      const selection = questionSelectionFor(question)
+      state.questionSelection = selectQuestionOption(selection, index, question.options.length)
+      render()
+      if (index === question.options.length) requiredElement<HTMLInputElement>("question-answer").focus()
+    }
+  }
+})
+messageStream.addEventListener("input", (event) => {
+  const target = event.target as HTMLElement
+  if (target.id !== "question-answer" || !(target instanceof HTMLInputElement) || !state.conversation.question) return
+  const selection = updateQuestionInput(questionSelectionFor(state.conversation.question), target.value)
+  state.questionSelection = selection
+  const form = requiredElement<HTMLFormElement>("question-form")
+  const confirm = form.querySelector<HTMLButtonElement>("[type=submit]")
+  if (confirm) confirm.disabled = !canConfirmQuestion(selection, state.conversation.question.options.length)
 })
 messageStream.addEventListener("submit", (event) => {
   event.preventDefault()
   if ((event.target as HTMLElement).id !== "question-form") return
-  const input = requiredElement<HTMLInputElement>("question-answer").value.trim()
-  if (input) runAction(() => answerQuestion(input))
+  const question = state.conversation.question
+  if (!question) return
+  const answer = questionAnswer(questionSelectionFor(question), question.options)
+  if (answer) runAction(() => answerQuestion(answer))
 })
 
 function toolHeaderOffset(id: string) {
@@ -2140,6 +2187,7 @@ async function answerQuestion(answer: string) {
   const question = state.conversation.question
   if (!question) return
   state.conversation = { ...state.conversation, question: undefined }
+  state.questionSelection = undefined
   render()
   await request(runtimeMethods.userQuestionRespond, { tool_call_id: question.toolCallId, answer }, runtimeId)
 }

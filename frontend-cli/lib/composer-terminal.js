@@ -13,11 +13,16 @@ export function prepareComposerFrame(frame = {}, columns = DEFAULT_COLUMNS) {
   const position = cursorPosition(frame, input);
   const leadingLines = wrapRenderedLines(block.leading, width);
   const inputLines = wrapInputLines(block.prefix, display, width);
-  const cursor = visualCursor(block.prefix, input, position, width, inputLines);
   const menuLines = wrapRenderedLines(frame.menuText, width);
+  const menuCursor = frame.menuCursor
+    ? resolveMenuCursor(frame.menuCursor, frame.menuText, width)
+    : null;
+  const cursor = menuCursor || visualCursor(block.prefix, input, position, width, inputLines);
   const trailingLines = wrapRenderedLines(block.trailing, width);
   const lines = [...leadingLines, ...inputLines, ...menuLines, ...trailingLines];
-  const cursorRow = leadingLines.length + cursor.row;
+  const cursorRow = menuCursor
+    ? leadingLines.length + inputLines.length + cursor.row
+    : leadingLines.length + cursor.row;
   const selectedMenuRow = menuLines.findIndex((line) => stripAnsi(line).startsWith("  › "));
 
   return {
@@ -27,6 +32,22 @@ export function prepareComposerFrame(frame = {}, columns = DEFAULT_COLUMNS) {
     focusRow: selectedMenuRow === -1
       ? cursorRow
       : leadingLines.length + inputLines.length + selectedMenuRow,
+  };
+}
+
+function resolveMenuCursor(cursor, menuText, columns) {
+  const targetLine = Math.max(0, Math.floor(Number(cursor.line) || 0));
+  const rawLines = String(menuText || "").split("\n");
+  if (rawLines.at(-1) === "") {
+    rawLines.pop();
+  }
+  let row = 0;
+  for (let index = 0; index < targetLine; index += 1) {
+    row += wrapRenderedLines(rawLines[index] || "", columns).length;
+  }
+  return {
+    row,
+    column: Math.max(0, Math.floor(Number(cursor.column) || 0)),
   };
 }
 

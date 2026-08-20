@@ -27,6 +27,7 @@ import {
   promptText,
   promptPlaceholderText,
   questionText,
+  questionMenuFrame,
   choiceMenuText,
   slashDisplayText,
   slashMenuText,
@@ -988,7 +989,7 @@ test("turnCompletedLine renders duration and tool summary", () => {
 
 test("status helpers render question and errors", () => {
   assert.equal(
-    questionText({ question: "Pick one", options: ["A", "B"], recommended: "A" }),
+    questionText({ question: "Pick one", options: ["A", "B"] }),
     ["• Choice required", "", "  Pick one"].join("\n"),
   );
   assert.equal(
@@ -1000,17 +1001,53 @@ test("status helpers render question and errors", () => {
   assert.equal(errorLine(""), "⊘ Turn failed");
 });
 
-test("choiceMenuText marks the selected option and the recommendation", () => {
+test("choiceMenuText marks the selected option", () => {
   assert.equal(
-    choiceMenuText(["A", "B"], 1, "A"),
+    choiceMenuText(["A", "B"], 1),
     [
       "  Choices",
-      `  · A${" ".repeat(34)}recommended`,
+      "  · A",
       "  › B",
       "    ↑↓ select · enter confirm · esc cancel",
       "",
     ].join("\n"),
   );
+});
+
+test("questionMenuFrame shows the active option description and custom entry", () => {
+  assert.match(
+    questionMenuFrame([
+      { label: "Thorough (Recommended)", description: "Use more analysis." },
+      { label: "Fast", description: "Use less analysis." },
+    ], 0).text,
+    /Thorough \(Recommended\)[\s\S]*Use more analysis\./,
+  );
+  assert.match(questionMenuFrame([], 0).text, /Type your own answer/);
+  assert.match(questionMenuFrame([], 0).text, /press Tab to type/);
+});
+
+test("questionMenuFrame renders custom input in its option row", () => {
+  const frame = questionMenuFrame([
+    { label: "Thorough (Recommended)", description: "Use more analysis." },
+  ], 1, "my answer", true);
+
+  assert.match(frame.text, /Type your own answer: my answer/);
+  assert.doesNotMatch(frame.text, /press Tab to type/);
+  assert.equal(frame.cursor.line, 3);
+  assert.ok(frame.cursor.column > 0);
+});
+
+test("questionMenuFrame wraps complete labels and descriptions with distinct formatting", () => {
+  const label = "A very long option label that must remain complete";
+  const description = "A very long description that must remain complete and wrap across terminal lines";
+  const frame = questionMenuFrame([{ label, description }], 0, "", false, undefined, 30);
+  const plain = frame.text.replace(/\x1b\[[0-9;]*m/g, "");
+  const compact = plain.replace(/\s+/g, "");
+
+  assert.match(compact, /Averylongoptionlabelthatmustremaincomplete/);
+  assert.match(compact, /Averylongdescriptionthatmustremaincompleteandwrapacrossterminallines/);
+  assert.match(plain, /↳ A very long/);
+  assert.doesNotMatch(plain, /\.\.\./);
 });
 
 test("choiceMenuText keeps the selected option visible", () => {

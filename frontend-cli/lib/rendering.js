@@ -157,12 +157,69 @@ export function taskMonitorTabs(page = "background", backgroundCount = 0, delega
     : tabs.join("\n");
 }
 
-export function choiceMenuText(options, selectedIndex = 0, recommended = "") {
-  return choiceMenuTextWithTitle(options, selectedIndex, recommended, "Choices");
+export function choiceMenuText(options, selectedIndex = 0) {
+  return choiceMenuTextWithTitle(options, selectedIndex, "Choices");
 }
 
 export function sessionMenuText(options, selectedIndex = 0) {
-  return choiceMenuTextWithTitle(options, selectedIndex, "", "Sessions");
+  return choiceMenuTextWithTitle(options, selectedIndex, "Sessions");
+}
+
+export function questionMenuFrame(
+  options,
+  selectedIndex = 0,
+  customInput = "",
+  editing = false,
+  customLabel = "Type your own answer",
+  width = 76,
+) {
+  const entries = [
+    ...(Array.isArray(options) ? options : []),
+    { label: customLabel, description: "" },
+  ];
+  const visible = menuWindow(entries, selectedIndex);
+  if (!visible.items.length) {
+    return { text: "", cursor: null };
+  }
+  const lines = [dim(choiceMenuTitle(visible, "Answers"))];
+  let cursor = null;
+  for (const [index, option] of visible.items.entries()) {
+    const active = index === visible.activeIndex;
+    const marker = active ? accent("›") : dim("·");
+    const labelLines = wrapQuestionLines(option.label, Math.max(1, width - 4));
+    const labelStyle = active ? bold : dim;
+    for (const [lineIndex, labelLine] of labelLines.entries()) {
+      const prefix = lineIndex === 0 ? `  ${marker} ` : "    ";
+      lines.push(`${prefix}${labelStyle(labelLine)}`);
+    }
+    if (active && editing && option.label === customLabel) {
+      const lastLine = lines.length - 1;
+      const input = clipCells(
+        `: ${String(customInput || "")}`,
+        Math.max(1, width - textWidth(lines[lastLine])),
+      );
+      lines[lastLine] += input;
+      cursor = {
+        line: lastLine,
+        column: textWidth(lines[lastLine]),
+      };
+    }
+    if (option.description) {
+      const descriptionLines = wrapQuestionLines(option.description, Math.max(1, width - 6));
+      for (const [lineIndex, descriptionLine] of descriptionLines.entries()) {
+        lines.push(dim(`${lineIndex === 0 ? "    ↳ " : "      "}${descriptionLine}`));
+      }
+    } else if (option.label === customLabel && !editing) {
+      lines.push(dim("    ↳ press Tab to type"));
+    }
+  }
+  lines.push(dim("    ↑↓ select · enter confirm · esc cancel"));
+  return { text: `${lines.join("\n")}\n`, cursor };
+}
+
+function wrapQuestionLines(value, width) {
+  const text = String(value || "").replace(/\r?\n/g, " ").trim();
+  return wrapTextCells(text, Math.max(1, width), Math.max(1, width)).map((chunk) => chunk.text);
 }
 
 export function backgroundMonitorText(tasks = [], selectedIndex = 0, selectedTask = null, width = 76) {
@@ -235,7 +292,7 @@ export function delegateMonitorText(delegates = [], selectedIndex = 0, selectedD
   return lines.join("\n");
 }
 
-function choiceMenuTextWithTitle(options, selectedIndex = 0, recommended = "", title = "Choices") {
+function choiceMenuTextWithTitle(options, selectedIndex = 0, title = "Choices") {
   const visible = menuWindow(options, selectedIndex);
   if (!visible.items.length) {
     return "";
@@ -246,8 +303,7 @@ function choiceMenuTextWithTitle(options, selectedIndex = 0, recommended = "", t
     const marker = active ? accent("›") : dim("·");
     const label = clipSingleLine(option, 60);
     const name = active ? bold(label) : dim(label);
-    const suffix = option === recommended ? dim("recommended") : "";
-    lines.push(`  ${marker} ${padRight(name, 34)} ${suffix}`.trimEnd());
+    lines.push(`  ${marker} ${name}`);
   }
   lines.push(dim("    ↑↓ select · enter confirm · esc cancel"));
   return `${lines.join("\n")}\n`;

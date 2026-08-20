@@ -586,7 +586,7 @@ async def test_ask_user_question_with_responder_emits_question_and_persists_answ
     call = ParsedToolCall(
         call_id="call_question",
         name="ask_user_question",
-        raw_args='{"question":"Which mode?","options":["fast","thorough"],"recommended":"thorough"}',
+        raw_args='{"question":"Which mode?","options":[{"label":"thorough (Recommended)","description":"Use more analysis."},{"label":"fast","description":"Use less analysis."}]}',
     )
 
     events = [event async for event in processor.execute(session=session, tool_calls=[call], turn_id="turn_q")]
@@ -594,10 +594,11 @@ async def test_ask_user_question_with_responder_emits_question_and_persists_answ
     if [type(event) for event in events] != [ToolCallStartedEvent, UserQuestionRequestedEvent, ToolResultEvent]:
         raise AssertionError(f"Expected started/question/result events, got: {events}")
     question_event = events[1]
-    if question_event.question != "Which mode?" or question_event.options != ["fast", "thorough"]:
+    if question_event.question != "Which mode?" or question_event.options != [
+        {"label": "thorough (Recommended)", "description": "Use more analysis."},
+        {"label": "fast", "description": "Use less analysis."},
+    ]:
         raise AssertionError(f"Expected question event details, got: {question_event}")
-    if question_event.recommended != "thorough":
-        raise AssertionError(f"Expected recommended option, got: {question_event.recommended!r}")
     if seen_questions != [question_event]:
         raise AssertionError(f"Expected responder to receive question event, got: {seen_questions}")
 
@@ -613,8 +614,10 @@ async def test_ask_user_question_with_responder_emits_question_and_persists_answ
     persisted_args = session.persisted_tool_calls[0][0][2]
     if persisted_args != {
         "question": "Which mode?",
-        "options": ["fast", "thorough"],
-        "recommended": "thorough",
+        "options": [
+            {"label": "thorough (Recommended)", "description": "Use more analysis."},
+            {"label": "fast", "description": "Use less analysis."},
+        ],
     }:
         raise AssertionError(f"Expected only model-provided args to persist, got: {persisted_args}")
     message_args, message_kwargs = session.persisted_messages[0]
@@ -696,6 +699,38 @@ async def test_ask_user_question_interrupted_input_fails_without_cancelling_turn
         raise AssertionError(f"Expected structured interrupted-input payload, got: {payload}")
     if len(session.persisted_tool_calls) != 1 or len(session.persisted_messages) != 1:
         raise AssertionError("Expected interrupted input to persist as a failed tool result")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "options, message",
+    [
+        ([{"label": "a", "description": "A"}], "first ask_user_question option label"),
+        ([
+            {"label": "a (Recommended)", "description": "A"},
+            {"label": "b (Recommended)", "description": "B"},
+        ], "Only the first ask_user_question option"),
+        ([
+            {"label": "a (Recommended)", "description": "A"},
+            {"label": "a (Recommended)", "description": "B"},
+        ], "labels must be unique"),
+        ([{"label": "a (Recommended)", "description": "A", "recommended": True}], "unsupported fields"),
+    ],
+)
+async def test_ask_user_question_rejects_invalid_structured_options(options, message: str) -> None:
+    session = FakeSession()
+    processor = ToolCallProcessor(tool_executor=FakeToolExecutor(), user_question_responder=lambda event: "a")
+    call = ParsedToolCall(
+        call_id="call_invalid_question",
+        name="ask_user_question",
+        raw_args=json.dumps({"question": "Choose", "options": options}),
+    )
+
+    events = [event async for event in processor.execute(session=session, tool_calls=[call], turn_id="turn_invalid")]
+
+    assert [type(event) for event in events] == [ToolCallStartedEvent, ToolResultEvent]
+    assert events[-1].status == "rejected"
+    assert message in events[-1].result
 
 
 def main() -> int:

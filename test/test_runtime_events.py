@@ -110,8 +110,10 @@ class TestRuntimeEvents(unittest.TestCase):
             turn_id="turn_1",
             tool_call_id="call_question",
             question="Which mode should I use?",
-            options=["fast", "thorough"],
-            recommended="thorough",
+            options=[
+                {"label": "thorough (Recommended)", "description": "Use more analysis."},
+                {"label": "fast", "description": "Use less analysis."},
+            ],
         )
 
         event_dict = event.to_dict()
@@ -121,8 +123,10 @@ class TestRuntimeEvents(unittest.TestCase):
         self.assertTrue(isinstance(restored, UserQuestionRequestedEvent))
         self.assertEqual(restored.tool_call_id, "call_question")
         self.assertEqual(restored.question, "Which mode should I use?")
-        self.assertEqual(restored.options, ["fast", "thorough"])
-        self.assertEqual(restored.recommended, "thorough")
+        self.assertEqual(restored.options, [
+            {"label": "thorough (Recommended)", "description": "Use more analysis."},
+            {"label": "fast", "description": "Use less analysis."},
+        ])
 
 
 if __name__ == "__main__":

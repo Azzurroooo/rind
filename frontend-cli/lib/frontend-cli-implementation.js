@@ -22,6 +22,7 @@ import { isInputClosed } from "./input-errors.js";
 import { sigintAction } from "./interrupt-state.js";
 import { createModelMenuState } from "./model-menu-state.js";
 import { createChoiceMenuState } from "./choice-menu-state.js";
+import { CUSTOM_ANSWER_LABEL, createQuestionMenuState } from "./question-menu-state.js";
 import { createSlashMenuState } from "./slash-menu-state.js";
 import { parseTerminalKey } from "./terminal-key.js";
 import { createTerminalUI } from "./terminal-ui.js";
@@ -35,7 +36,7 @@ import {
   interruptText,
   modelListErrorText,
   modelMenuText,
-  choiceMenuText,
+  questionMenuFrame,
   sessionMenuText,
   sessionSwitchedText,
   outputBlockText,
@@ -750,9 +751,12 @@ async function answerQuestion(event) {
   logOutput(questionText(event));
   try {
     const options = Array.isArray(event.options) ? event.options : [];
-    const answer = terminalUi && options.length
-      ? await askChoiceMenu(event)
-      : selectAnswer((await ask(answerPromptText(), answerPlaceholderText())).trim(), options);
+    let answer;
+    if (terminalUi) {
+      answer = await askQuestionMenu(event);
+    } else {
+      answer = selectAnswer((await ask(answerPromptText(), answerPlaceholderText())).trim(), options);
+    }
     if (interruptRequested || runtimeClosing) {
       return;
     }
@@ -768,7 +772,8 @@ async function answerQuestion(event) {
 function selectAnswer(raw, options) {
   const index = Number(raw);
   if (Number.isInteger(index) && index >= 1 && index <= options.length) {
-    return options[index - 1];
+    const option = options[index - 1];
+    return typeof option === "string" ? option : String(option?.label || "");
   }
   return raw;
 }
@@ -870,12 +875,22 @@ function renderInputSession(width) {
       menuText: modelMenuText(session.modelState.items(), session.modelState.selectedIndex()).trimEnd(),
     }, width);
   }
-  if (session.mode === "choice") {
+  if (session.mode === "question") {
+    const editing = session.questionState.isEditing();
+    const menu = questionMenuFrame(
+      session.questionState.options(),
+      session.questionState.selectedIndex(),
+      editing ? session.editor.input() : "",
+      editing,
+      CUSTOM_ANSWER_LABEL,
+      width,
+    );
     return prepareComposerFrame({
       prompt: mainPromptText(),
       inputText: session.question,
-      cursor: { line: 0, column: session.question.length },
-      menuText: choiceMenuText(session.choiceState.options(), session.choiceState.selectedIndex(), session.recommended).trimEnd(),
+      cursor: editing ? session.editor.cursorPosition() : { line: 0, column: session.question.length },
+      menuText: menu.text.trimEnd(),
+      menuCursor: editing ? menu.cursor : null,
     }, width);
   }
   if (session.mode === "sessions") {
@@ -927,8 +942,8 @@ function handleTerminalInput(raw = "") {
     handleModelInput(session, event);
     return;
   }
-  if (session.mode === "choice") {
-    handleChoiceInput(session, event);
+  if (session.mode === "question") {
+    handleQuestionInput(session, event);
     return;
   }
   if (session.mode === "sessions") {
@@ -971,7 +986,15 @@ function handleTerminalPaste(text) {
     return;
   }
   const session = activeInputSession;
-  if (!session || session.mode === "model" || session.mode === "choice" || session.mode === "sessions") {
+  if (!session || session.mode === "model" || session.mode === "sessions") {
+    return;
+  }
+  if (session.mode === "question") {
+    if (!session.questionState.isEditing()) {
+      return;
+    }
+    session.editor.handleInput({ kind: "paste", text });
+    redrawInput();
     return;
   }
   session.editor.handleInput({ kind: "paste", text });
@@ -1060,15 +1083,21 @@ function askModelMenu(models, currentModel) {
   });
 }
 
-function askChoiceMenu(event) {
+function askQuestionMenu(event) {
   return new Promise((resolve) => {
     clearAssistantLineForInput();
-    const state = createChoiceMenuState(event.options, event.recommended);
+    const questionOptions = (Array.isArray(event.options) ? event.options : [])
+      .map((option) => ({
+        label: String(option?.label || "").trim(),
+        description: String(option?.description || "").trim(),
+      }))
+      .filter((option) => option.label);
+    const state = createQuestionMenuState(questionOptions);
     const session = {
-      mode: "choice",
+      mode: "question",
       question: String(event.question || "Input required"),
-      choiceState: state,
-      recommended: event.recommended || "",
+      questionState: state,
+      editor: null,
       resolve,
     };
     activeInputSession = session;
@@ -1096,19 +1125,61 @@ function askSessionMenu(options, sessions, currentIndex) {
   });
 }
 
-function handleChoiceInput(session, key) {
+function handleQuestionInput(session, key) {
   const modified = key.ctrl || key.alt || key.shift;
-  if (!modified && (key.name === "enter" || key.name === "return")) {
-    completeTtyInput(session, session.choiceState.selectedOption(), false);
+  if (session.questionState.isEditing()) {
+    if (!modified && key.name === "escape") {
+      completeTtyInput(session, "", false);
+      return;
+    }
+    if (!modified && session.questionState.handleNavigation(key)) {
+      session.editor = null;
+      redrawInput();
+      return;
+    }
+    const result = session.editor.handleInput(key);
+    if (result === "submit") {
+      const answer = session.editor.input().trim();
+      if (answer) {
+        completeTtyInput(session, answer, false);
+      } else {
+        redrawInput();
+      }
+      return;
+    }
+    if (result) {
+      redrawInput();
+    }
+    return;
+  }
+  if (!modified && (key.name === "enter" || key.name === "return" || key.name === "tab")) {
+    if (session.questionState.enterEditing()) {
+      beginQuestionEditing(session);
+      redrawInput();
+      return;
+    }
+    if (key.name === "tab") {
+      return;
+    }
+    completeTtyInput(session, session.questionState.selectedOption()?.label || "", false);
     return;
   }
   if (!modified && key.name === "escape") {
     completeTtyInput(session, "", false);
     return;
   }
-  if (!modified && session.choiceState.handleKey(key)) {
+  if (!modified && session.questionState.handleNavigation(key)) {
+    session.editor = null;
     redrawInput();
   }
+}
+
+function beginQuestionEditing(session) {
+  if (session.editor) {
+    return;
+  }
+  session.editor = createLineEditor();
+  session.editor.setViewportWidth(process.stdout.columns || 80);
 }
 
 function handleSessionInput(session, key) {

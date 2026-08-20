@@ -264,8 +264,16 @@ test("turn completion clears active turn and settles running tools", () => {
 test("turn failure appends an error entry and clears the question", () => {
   let state = createConversation()
   state = reduceEvent(state, event("turn_started"))
-  state = reduceEvent(state, event("user_question_requested", { tool_call_id: "q1", question: "Proceed?", options: ["yes", "no"], recommended: "yes" }))
+  state = reduceEvent(state, event("user_question_requested", {
+    tool_call_id: "q1",
+    question: "Proceed?",
+    options: [
+      { label: "yes (Recommended)", description: "Continue." },
+      { label: "no", description: "Stop." },
+    ],
+  }))
   assert.equal(state.question.question, "Proceed?")
+  assert.deepEqual(state.question.options[0], { label: "yes (Recommended)", description: "Continue." })
   state = reduceEvent(state, event("turn_failed", { error: "boom", error_source: "provider" }))
   assert.equal(state.question, undefined)
   assert.equal(state.activeTurnId, "")
