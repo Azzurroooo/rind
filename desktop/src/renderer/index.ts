@@ -129,6 +129,7 @@ const root = document.querySelector<HTMLElement>("#app")
 if (!root) throw new Error("Renderer root is missing.")
 const appRoot: HTMLElement = root
 document.body.dataset.platform = window.api.platform
+const appVersion = await window.api.version()
 
 const state: AppState = {
   runtime: { status: "stopped" },
@@ -195,6 +196,7 @@ appRoot.innerHTML = `
         <span id="connection" class="connection"><span class="status-pip"></span><span id="connection-text">Stopped</span></span>
       </div>
       <div class="topbar-actions">
+        <span class="app-version" aria-label="Rind version">v${escapeHtml(appVersion)}</span>
         <button id="toggle-sidebar" type="button" class="ghost-button" title="Toggle projects sidebar" aria-label="Toggle projects sidebar" aria-expanded="true">${renderIcon(PanelLeft)}</button>
         <button id="toggle-files" type="button" class="ghost-button" title="Browse active project files" aria-label="Browse active project files" aria-expanded="false">${renderIcon(PanelRight)}</button>
         <button id="open-settings" type="button" class="ghost-button" title="Open settings" aria-label="Open settings">${renderIcon(Settings)}</button>

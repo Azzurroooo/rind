@@ -1025,10 +1025,11 @@ function resumePreviewLine(line) {
 function startupBannerText(info) {
   const width = startupBannerWidth();
   const modelLine = `model ${singleLine(info.model) || "unknown"} · session ${singleLine(info.session_id) || "unknown"}`;
+  const version = singleLine(info.version) || "unknown";
   const cwd = middleClip(info.cwd || process.cwd(), width - 4);
   return [
     startupBannerBorder("┌", "┐", width),
-    startupBannerLine(`${bold("Rind")} ${dim("workbench online")}`, width),
+    startupBannerLine(`${bold("Rind")} ${dim(`v${version}`)}`, width),
     startupBannerLine(modelLine, width),
     startupBannerLine(cwd, width),
     startupBannerBorder("└", "┘", width),

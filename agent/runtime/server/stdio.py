@@ -15,6 +15,7 @@ from agent.runtime.core import InputQueueError
 from agent.domain.cancellation import CancellationTokenSource
 from agent.domain.events import UserQuestionRequestedEvent
 from agent.infrastructure.paths import validate_session_id
+from agent.version import __version__
 from agent.runtime.server.commands import SlashCommandContext, SlashCommandResult, SlashCommandRouter
 from agent.runtime.server.commands.model_control import set_active_model
 from agent.runtime.server.resume_preview import render_resume_preview
@@ -213,6 +214,7 @@ class StdioRuntimeServer:
             "session_id": getattr(self._session, "session_id", None),
             "draft": getattr(self._session, "session_id", None) is None,
             "model": getattr(self._session, "model", None),
+            "version": __version__,
             "protocol_version": PROTOCOL_VERSION,
             "capabilities": self._capabilities(),
             "methods": self._methods(),

@@ -303,12 +303,6 @@ const inputController = createInputController({
 
 process.on("SIGINT", handleSigint);
 
-function isResumeLaunch(args = []) {
-  return args.some(
-    (arg) => arg === "-c" || arg === "--resume-latest" || arg === "--session" || String(arg).startsWith("--session="),
-  );
-}
-
 try {
   localSettings = await loadLocalSettings();
   sessionInfo = { cwd: process.cwd(), model: localSettings.model };
@@ -324,9 +318,7 @@ try {
     });
     process.stdin.on("data", handleStdinData);
   }
-  if (isResumeLaunch(cliArgs)) {
-    await ensureRuntime();
-  }
+  await ensureRuntime();
   logOutput(startupText(sessionInfo));
   await inputController.promptLoop();
 } catch (error) {

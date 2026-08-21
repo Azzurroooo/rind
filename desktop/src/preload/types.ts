@@ -158,6 +158,7 @@ export type DesktopApi = {
   models: {
     list: () => Promise<string[]>
   }
+  version: () => Promise<string>
   projects: {
     get: () => Promise<DesktopProjectOverview>
     add: () => Promise<DesktopProjectOverview | null>

@@ -1,11 +1,7 @@
 import type { Configuration } from "electron-builder"
-import { readFileSync } from "node:fs"
+import { readRindVersion } from "./src/main/version"
 
-const version = readFileSync(new URL("../agent/version.py", import.meta.url), "utf8").match(
-  /^__version__ = "([^"]+)"$/m,
-)?.[1]
-
-if (!version) throw new Error("Rind version is missing from agent/version.py.")
+const version = readRindVersion(new URL("../agent/version.py", import.meta.url))
 
 const config: Configuration = {
   appId: "ai.rind.desktop",

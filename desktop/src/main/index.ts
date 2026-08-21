@@ -10,6 +10,7 @@ import { listAvailableModels } from "./model-catalog"
 import { listProjectFiles, previewProjectFile } from "./project-files"
 import { DesktopProjectStore, samePath } from "./projects"
 import { replaySession } from "./session-replay"
+import { readRindVersion } from "./version"
 import {
   getRuntimeSnapshots,
   initializeRuntime,
@@ -44,6 +45,10 @@ function runtimeSettingsPath() {
 
 function sessionIndexPath() {
   return join(app.getPath("home"), ".rind", "session_index.json")
+}
+
+function appVersion() {
+  return app.isPackaged ? app.getVersion() : readRindVersion(join(app.getAppPath(), "..", "agent", "version.py"))
 }
 
 function legacyRecentSessionsPath() {
@@ -150,6 +155,7 @@ function registerIpc() {
     return requestRuntime(runtimeId, method, safeParams)
   })
   ipcMain.handle("settings-get", () => loadRuntimeSettings())
+  ipcMain.handle("app-version", () => appVersion())
   ipcMain.handle("settings-save", async (_event, settings: unknown) => {
     const saved = await saveRuntimeSettings(settings)
     return saved
