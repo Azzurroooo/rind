@@ -127,6 +127,10 @@ class AgentRuntime:
         """Whether a turn is running or queued inputs are still being accepted."""
         return self._accepting_inputs or bool(self._active_turn_id)
 
+    @property
+    def active_turn_id(self) -> str:
+        return self._active_turn_id
+
     def set_user_question_responder(self, responder) -> None:
         """Set a callback invoked when ask_user_question needs a user answer."""
         self._turn_runner.set_user_question_responder(responder)

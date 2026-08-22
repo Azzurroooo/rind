@@ -17,10 +17,10 @@ def _detect_shell_display() -> tuple[str, str]:
     return shell_type, pool._default_executable or "not found"
 
 
-def get_system_info():
+def get_system_info(cwd: str | os.PathLike[str] | None = None):
     """动态获取系统信息"""
     system = platform.system()
-    cwd = os.getcwd()
+    cwd = os.path.abspath(os.fspath(cwd)) if cwd is not None else os.getcwd()
     current_date = date.today().isoformat()
     shell_type, shell_executable = _detect_shell_display()
 
@@ -140,11 +140,15 @@ def build_delegate_inspect_prompt() -> str:
     )
 
 
-SYSTEM_PROMPT = f"""
+_DEFAULT_SYSTEM_INFO = get_system_info()
+_WORKSPACE_ROOT_MARKER = "__RIND_WORKSPACE_ROOT__"
+
+
+_SYSTEM_PROMPT_TEMPLATE = f"""
 You are Rind, an advanced AI software engineer and coding agent.
 You are autonomous, efficient, and capable of solving complex programming tasks using tools.
 
-{get_system_info()}
+{_DEFAULT_SYSTEM_INFO}
 
 <core_capabilities>
 0. **User Clarification**
@@ -184,7 +188,7 @@ You are autonomous, efficient, and capable of solving complex programming tasks 
 
 <operational_guidelines>
 1. **Path Resolution**
-   - The user's "root directory" is the **Current Working Directory** (`{os.getcwd()}`).
+   - The user's "root directory" is the **Current Working Directory** (`{_WORKSPACE_ROOT_MARKER}`).
    - ALWAYS refer to it as `.` (dot) in commands.
    - Project-level `RIND.md` and project skills are rooted at the Current Working Directory, not a parent Git root.
    - **Windows warning**: in Git Bash, `/` may map to Git installation root, not project root.
@@ -257,3 +261,13 @@ You are autonomous, efficient, and capable of solving complex programming tasks 
    - Treat `RIND.md` as static user-maintained guidance, not automatically updated memory.
 </operational_guidelines>
 """
+
+SYSTEM_PROMPT = _SYSTEM_PROMPT_TEMPLATE.replace(_WORKSPACE_ROOT_MARKER, os.getcwd(), 1)
+
+
+def build_system_prompt(cwd: str | os.PathLike[str] | None = None) -> str:
+    if cwd is None:
+        return SYSTEM_PROMPT
+    workspace_root = os.path.abspath(os.fspath(cwd))
+    prompt = _SYSTEM_PROMPT_TEMPLATE.replace(_WORKSPACE_ROOT_MARKER, workspace_root, 1)
+    return prompt.replace(_DEFAULT_SYSTEM_INFO, get_system_info(workspace_root), 1)

@@ -114,6 +114,14 @@ class JsonlSessionStore(SessionStore):
         base = self._session_paths.get("base")
         return str(base or resolve_session_base(self.session_root, self._session_id))
 
+    @property
+    def workspace_root(self) -> str | None:
+        if isinstance(self._session_meta, dict):
+            value = self._session_meta.get("workspace_root")
+            if isinstance(value, str) and value.strip():
+                return value
+        return self._workspace_root
+
     def now_iso(self) -> str:
         return datetime.now(timezone.utc).isoformat()
 
@@ -126,6 +134,69 @@ class JsonlSessionStore(SessionStore):
         if session_dir:
             return os.path.abspath(os.path.expanduser(session_dir))
         return os.path.join(cls.default_rind_home(), "sessions")
+
+    @classmethod
+    def load_session_metadata(cls, session_id: str, session_dir: str | None = None) -> dict[str, Any]:
+        clean = validate_session_id(session_id)
+        root = cls.resolve_session_root(session_dir)
+        paths = cls._metadata_paths(root, clean)
+        if not os.path.isdir(paths["base"]):
+            raise LookupError(f"Session not found: {clean}")
+        files = SessionFiles()
+        meta = files.load_json(paths["meta"])
+        if not isinstance(meta, dict):
+            raise ValueError(f"Session data corrupted or missing meta.json for id: {clean}")
+        if str(meta.get("schema_version") or "") != "2.0":
+            raise ValueError("Unsupported legacy session schema; start a new session.")
+        if str(meta.get("session_id") or clean) != clean:
+            raise ValueError(f"Session data corrupted: meta.json id does not match {clean}")
+        return meta
+
+    @classmethod
+    def list_session_metadata(
+        cls,
+        session_dir: str | None = None,
+        limit: int = 20,
+        workspace_root: str | None = None,
+    ) -> list[dict[str, Any]]:
+        root = cls.resolve_session_root(session_dir)
+        index_path = (
+            os.path.join(root, "index.json")
+            if session_dir
+            else os.path.join(cls.default_rind_home(), "session_index.json")
+        )
+        files = SessionFiles()
+        index = files.load_json(index_path) or {}
+        entries = index.get("sessions") if isinstance(index, dict) else []
+        if not isinstance(entries, list):
+            return []
+        expected_root = None
+        if workspace_root:
+            expected_root = os.path.normcase(os.path.realpath(os.path.abspath(os.path.expanduser(workspace_root))))
+        result = []
+        for entry in entries:
+            if not isinstance(entry, dict) or not _valid_session_id_value(entry.get("id")):
+                continue
+            if entry.get("has_user_message") is False:
+                continue
+            entry_root = entry.get("workspace_root")
+            if expected_root is not None:
+                if not isinstance(entry_root, str):
+                    continue
+                normalized = os.path.normcase(os.path.realpath(os.path.abspath(entry_root)))
+                if normalized != expected_root:
+                    continue
+            result.append(copy.deepcopy(entry))
+        result.sort(key=lambda item: str(item.get("updated_at") or ""), reverse=True)
+        return result[: max(0, int(limit))]
+
+    @classmethod
+    def _metadata_paths(cls, session_root: str, session_id: str) -> dict[str, str]:
+        base = str(resolve_session_base(session_root, session_id))
+        return {
+            "base": base,
+            "meta": os.path.join(base, "meta.json"),
+        }
 
     def _resolve_workspace_root(self) -> str:
         if self._workspace_root:
@@ -611,7 +682,7 @@ class JsonlSessionStore(SessionStore):
     async def create_team_project(self, *, project_id: str | None = None) -> dict[str, Any]:
         from agent.infrastructure.team import initialize_team_project
 
-        project = initialize_team_project(resolve_project_root(), project_id=project_id)
+        project = initialize_team_project(self._resolve_workspace_root(), project_id=project_id)
         return {
             "project_id": project.project_id,
             "main_agent": project.main_agent,

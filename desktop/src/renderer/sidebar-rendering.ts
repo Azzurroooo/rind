@@ -8,7 +8,6 @@ export type SidebarStructureState = {
   expandedProjects: Iterable<string>
   projectMenuPath: string
   runningSessionIds: Iterable<string>
-  viewedSessionId?: string
 }
 
 export function projectListStructureKey(state: SidebarStructureState) {

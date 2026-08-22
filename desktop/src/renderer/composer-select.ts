@@ -10,7 +10,7 @@ export function modelChoices(models: string[], currentModel: string) {
   return choices
 }
 
-export function modelSelectionTarget(status: "starting" | "ready" | "error" | "stopped", turnActive: boolean) {
-  if (status === "starting" || turnActive) return "unavailable" as const
+export function modelSelectionTarget(status: "starting" | "ready" | "stopping" | "error" | "stopped", turnActive: boolean) {
+  if (status === "starting" || status === "stopping" || turnActive) return "unavailable" as const
   return status === "ready" ? "runtime" as const : "settings" as const
 }

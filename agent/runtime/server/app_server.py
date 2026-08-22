@@ -72,6 +72,41 @@ async def async_main(argv: list[str] | None = None, *, server_class: type[Any]) 
         _write_startup_error("Configuration error", exc, args.debug)
         return 1
 
+    if getattr(server_class, "worker_mode", False):
+        from agent.runtime.server.worker import RuntimeWorker
+
+        worker = None
+        server_started = False
+        try:
+            worker = RuntimeWorker(
+                settings=settings,
+                workspace_root=workspace_root,
+                session_id=args.session,
+                resume_latest=args.resume_latest,
+                session_dir=args.session_dir,
+                debug=args.debug,
+                enable_goal=True,
+            )
+            server = server_class(
+                worker,
+                debug=args.debug,
+                background_list=background_list,
+                background_output=background_output,
+                goal_enabled=True,
+            )
+            server_started = True
+            try:
+                return await server.run()
+            except Exception:
+                server_started = False
+                raise
+        except Exception as exc:
+            _write_startup_error("Runtime error", exc, args.debug)
+            return 1
+        finally:
+            if worker is not None and not server_started:
+                await worker.close()
+
     previous_cwd = Path.cwd()
     container = None
     try:

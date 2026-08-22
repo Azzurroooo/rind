@@ -23,68 +23,34 @@ type PendingRequest = {
 }
 
 type RuntimeWorker = {
-  id: string
-  workspace: string
-  sessionId?: string
   child?: ChildProcessWithoutNullStreams
   pending: Map<string, PendingRequest>
   requestSequence: number
   snapshot: RuntimeSnapshot
   initializing?: Promise<unknown>
   shutdownPromise?: Promise<{ ok: true }>
-  idleTimer?: NodeJS.Timeout
-  turnActive: boolean
-  idleEligible: boolean
 }
 
-const workers = new Map<string, RuntimeWorker>()
 const listeners = new Set<(snapshot: RuntimeSnapshot) => void>()
 const eventListeners = new Set<(event: RuntimeEvent) => void>()
 const maxStderrChars = 4096
-const configuredIdleShutdownDelayMs = Number(process.env.RIND_RUNTIME_IDLE_TIMEOUT_MS)
-const idleShutdownDelayMs = configuredIdleShutdownDelayMs > 0 ? configuredIdleShutdownDelayMs : 10 * 60 * 1000
-
-function workerSnapshot(worker: RuntimeWorker, snapshot: RuntimeSnapshot): RuntimeSnapshot {
-  return { ...snapshot, runtimeId: worker.id, workspace: worker.workspace, sessionId: worker.sessionId }
+const worker: RuntimeWorker = {
+  pending: new Map(),
+  requestSequence: 0,
+  snapshot: { status: "stopped" },
 }
 
-function setSnapshot(worker: RuntimeWorker, next: RuntimeSnapshot) {
-  worker.snapshot = workerSnapshot(worker, next)
+function setSnapshot(next: RuntimeSnapshot) {
+  worker.snapshot = next
   for (const listener of listeners) listener(worker.snapshot)
 }
 
-function rejectPending(worker: RuntimeWorker, error: Error) {
+function rejectPending(error: Error) {
   for (const [requestId, request] of worker.pending) {
     clearTimeout(request.timer)
     request.reject(error)
     worker.pending.delete(requestId)
   }
-}
-
-function clearIdleTimer(worker: RuntimeWorker) {
-  if (!worker.idleTimer) return
-  clearTimeout(worker.idleTimer)
-  worker.idleTimer = undefined
-}
-
-function touchWorker(worker: RuntimeWorker) {
-  clearIdleTimer(worker)
-}
-
-function activateWorker(worker: RuntimeWorker) {
-  touchWorker(worker)
-  worker.idleEligible = false
-}
-
-function scheduleIdleShutdown(worker: RuntimeWorker) {
-  clearIdleTimer(worker)
-  if (!worker.idleEligible || worker.turnActive || worker.pending.size || worker.snapshot.status !== "ready") return
-  worker.idleTimer = setTimeout(() => {
-    worker.idleTimer = undefined
-    if (!worker.idleEligible || worker.turnActive || worker.pending.size || worker.snapshot.status !== "ready") return
-    void shutdownRuntime(worker.id)
-  }, idleShutdownDelayMs)
-  worker.idleTimer.unref?.()
 }
 
 function appendStderr(current: string, chunk: unknown) {
@@ -97,7 +63,7 @@ function runtimeExitError(code: number | null, signal: NodeJS.Signals | null, st
   return new Error(detail ? `Runtime exited unexpectedly (${status}): ${detail}` : `Runtime exited unexpectedly (${status}).`)
 }
 
-function handleLine(worker: RuntimeWorker, line: string) {
+function handleLine(line: string) {
   let message: unknown
   try {
     message = JSON.parse(line)
@@ -108,24 +74,14 @@ function handleLine(worker: RuntimeWorker, line: string) {
 
   if (isRuntimeEventEnvelope(message)) {
     const type = String(message.event.type || "")
-    if (type === "turn_started") {
-      worker.turnActive = true
-      worker.idleEligible = false
-    }
-    if (type === "turn_completed" || type === "turn_failed" || type === "turn_cancelled") {
-      worker.turnActive = false
-      worker.idleEligible = true
-    }
     for (const listener of eventListeners) listener({
-      runtimeId: worker.id,
       type,
       sequence: message.sequence,
       durability: message.durability,
-      sessionId: message.session_id || worker.sessionId || "",
+      sessionId: message.session_id,
       turnId: message.turn_id,
       event: message.event,
     })
-    if (type === "turn_completed" || type === "turn_failed" || type === "turn_cancelled") scheduleIdleShutdown(worker)
     return
   }
   if (!isRuntimeResponseEnvelope(message)) return
@@ -140,15 +96,15 @@ function handleLine(worker: RuntimeWorker, line: string) {
     request.reject(error)
     return
   }
-  const result = message.result && typeof message.result === "object" ? message.result as Record<string, unknown> : undefined
-  if (result && typeof result.session_id === "string" && result.session_id) worker.sessionId = result.session_id
   request.resolve(message.result)
-  scheduleIdleShutdown(worker)
 }
 
 function runtimeLaunch() {
   const configuredPath = process.env.RIND_RUNTIME_PATH
-  if (configuredPath) return { command: configuredPath, args: [] }
+  if (configuredPath) {
+    if (/\.(?:c|m)?js$/i.test(configuredPath)) return { command: process.execPath, args: [configuredPath] }
+    return { command: configuredPath, args: [] }
+  }
   if (!process.env.ELECTRON_RENDERER_URL) {
     const executable = process.platform === "win32" ? "rind-runtime.exe" : "rind-runtime"
     return { command: join(process.resourcesPath, "runtime", executable), args: [] }
@@ -158,31 +114,15 @@ function runtimeLaunch() {
   return { command: python, args: [join(repoRoot, "main.py")] }
 }
 
-function createWorker(id: string, workspace: string, sessionId?: string): RuntimeWorker {
-  return {
-    id,
-    workspace,
-    sessionId,
-    pending: new Map(),
-    requestSequence: 0,
-    snapshot: workerSnapshot({ id, workspace, sessionId } as RuntimeWorker, { status: "stopped" }),
-    turnActive: false,
-    idleEligible: false,
-  }
-}
-
-export function startRuntime(id: string, workspace: string, sessionId?: string) {
-  const existing = workers.get(id)
-  if (existing?.child) return existing.snapshot
-  const worker = existing || createWorker(id, workspace, sessionId)
-  activateWorker(worker)
-  worker.workspace = workspace
-  worker.sessionId = sessionId
-  workers.set(id, worker)
-  setSnapshot(worker, { status: "starting" })
+export function startRuntime(workspace: string) {
+  if (worker.snapshot.status === "stopping") throw new Error("Runtime is shutting down.")
+  if (worker.child && !worker.child.killed && worker.child.exitCode === null) return worker.snapshot
+  if (!workspace) throw new Error("Workspace is required to start the runtime worker.")
+  setSnapshot({ status: "starting" })
   const launch = runtimeLaunch()
   const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "../../..")
-  const environment: NodeJS.ProcessEnv = launch.command === (process.env.RIND_PYTHON || (process.platform === "win32" ? "python" : "python3"))
+  const python = process.env.RIND_PYTHON || (process.platform === "win32" ? "python" : "python3")
+  const environment: NodeJS.ProcessEnv = launch.command === python
     ? {
         ...process.env,
         PYTHONIOENCODING: "utf-8",
@@ -190,18 +130,21 @@ export function startRuntime(id: string, workspace: string, sessionId?: string) 
         PYTHONUTF8: "1",
       }
     : process.env
-  const args = [...launch.args, "app-server", "--stdio", "--cwd", workspace]
-  if (sessionId) args.push("--session", sessionId)
-  const current = spawn(launch.command, args, {
-    cwd: workspace,
-    env: environment,
-    stdio: ["pipe", "pipe", "pipe"],
-    windowsHide: true,
-    shell: process.platform === "win32" && /\.(cmd|bat)$/i.test(launch.command),
-  })
+  const current = spawn(
+    launch.command,
+    [...launch.args, "app-server", "--stdio", "--cwd", workspace],
+    {
+      cwd: workspace,
+      env: environment,
+      stdio: ["pipe", "pipe", "pipe"],
+      windowsHide: true,
+      shell: process.platform === "win32" && /\.(cmd|bat)$/i.test(launch.command),
+    },
+  )
   worker.child = current
+  worker.shutdownPromise = undefined
   let stderr = ""
-  createInterface({ input: current.stdout }).on("line", (line) => handleLine(worker, line))
+  createInterface({ input: current.stdout }).on("line", handleLine)
   current.stderr.on("data", (chunk) => {
     stderr = appendStderr(stderr, chunk)
     log.warn("runtime stderr", String(chunk).trimEnd())
@@ -209,27 +152,21 @@ export function startRuntime(id: string, workspace: string, sessionId?: string) 
   current.once("error", (error) => {
     if (worker.child !== current) return
     worker.child = undefined
-    clearIdleTimer(worker)
-    worker.turnActive = false
-    worker.idleEligible = false
     const runtimeError = new Error(`Runtime could not start: ${error.message}`)
-    setSnapshot(worker, { status: "error", message: runtimeError.message })
-    rejectPending(worker, runtimeError)
+    setSnapshot({ status: "error", message: runtimeError.message })
+    rejectPending(runtimeError)
   })
   current.once("exit", (code, signal) => {
     if (worker.child !== current) return
     worker.child = undefined
-    clearIdleTimer(worker)
-    worker.turnActive = false
-    worker.idleEligible = false
     const error = runtimeExitError(code, signal, stderr)
-    rejectPending(worker, error)
-    setSnapshot(worker, code === 0 ? { status: "stopped" } : { status: "error", message: error.message })
+    rejectPending(error)
+    setSnapshot(code === 0 ? { status: "stopped" } : { status: "error", message: error.message })
   })
   return worker.snapshot
 }
 
-function request(worker: RuntimeWorker, method: RuntimeServerMethod, params: Record<string, unknown> = {}, timeoutMs = 30_000) {
+function request(method: RuntimeServerMethod, params: Record<string, unknown> = {}, timeoutMs = 30_000) {
   if (!worker.child?.stdin.writable) return Promise.reject(new Error("Runtime is not running."))
   const requestId = `desktop-${++worker.requestSequence}`
   const message: RuntimeRequestEnvelope = { kind: "request", request_id: requestId, method, params }
@@ -248,12 +185,9 @@ function request(worker: RuntimeWorker, method: RuntimeServerMethod, params: Rec
   })
 }
 
-export async function initializeRuntime(id: string) {
-  const worker = workers.get(id)
-  if (!worker) throw new Error(`Runtime worker does not exist: ${id}`)
-  activateWorker(worker)
+export async function initializeRuntime() {
   if (worker.initializing) return worker.initializing
-  worker.initializing = initializeWorker(worker)
+  worker.initializing = initializeWorker()
   try {
     return await worker.initializing
   } finally {
@@ -261,63 +195,63 @@ export async function initializeRuntime(id: string) {
   }
 }
 
-async function initializeWorker(worker: RuntimeWorker) {
+async function initializeWorker() {
   try {
-    const initialized = requireRuntimeInitialization(await request(worker, "initialize"))
-    if (typeof initialized.session_id === "string" && initialized.session_id) worker.sessionId = initialized.session_id
-    setSnapshot(worker, { status: "ready" })
+    const initialized = requireRuntimeInitialization(await request("initialize"))
+    setSnapshot({ status: "ready" })
     return initialized
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
-    if (worker.snapshot.status !== "error") setSnapshot(worker, { status: "error", message })
+    if (worker.snapshot.status !== "error") setSnapshot({ status: "error", message })
     throw error
   }
 }
 
-export function requestRuntime(id: string, method: RuntimeMethod, params: Record<string, unknown> = {}) {
-  const worker = workers.get(id)
-  if (!worker) return Promise.reject(new Error(`Runtime worker does not exist: ${id}`))
-  touchWorker(worker)
-  if (method === runtimeMethods.sessionPrompt || method === runtimeMethods.sessionFollowUp) {
-    worker.turnActive = true
-    worker.idleEligible = false
-  }
+export function requestRuntime(method: RuntimeMethod, params: Record<string, unknown> = {}) {
   const longRunning = method === runtimeMethods.sessionPrompt || method === runtimeMethods.sessionFollowUp
-  const timeout = longRunning ? 15 * 60_000 : 30_000
-  return request(worker, method, params, timeout)
+  return request(method, params, longRunning ? 15 * 60_000 : 30_000)
 }
 
-export function shutdownRuntime(id: string) {
-  const worker = workers.get(id)
-  if (!worker) return { ok: true }
+export function shutdownRuntime() {
   if (worker.shutdownPromise) return worker.shutdownPromise
-  worker.shutdownPromise = shutdownWorker(worker)
+  worker.shutdownPromise = shutdownWorker()
   return worker.shutdownPromise
 }
 
-async function shutdownWorker(worker: RuntimeWorker): Promise<{ ok: true }> {
-  clearIdleTimer(worker)
-  worker.idleEligible = false
-  worker.turnActive = false
+async function shutdownWorker(): Promise<{ ok: true }> {
   const current = worker.child
   if (!current) {
-    setSnapshot(worker, { status: "stopped" })
-    workers.delete(worker.id)
+    setSnapshot({ status: "stopped" })
     return { ok: true }
   }
+  setSnapshot({ status: "stopping" })
   try {
-    await request(worker, "shutdown", {}, 5_000)
+    await request("shutdown", {}, 5_000)
   } catch (error) {
     log.warn("runtime shutdown request failed", error)
   } finally {
-    if (worker.child === current) worker.child.kill()
+    if (worker.child === current) current.kill()
     await waitForChildExit(current)
     worker.child = undefined
-    rejectPending(worker, new Error("Runtime stopped."))
-    setSnapshot(worker, { status: "stopped" })
-    workers.delete(worker.id)
+    rejectPending(new Error("Runtime stopped."))
+    setSnapshot({ status: "stopped" })
   }
   return { ok: true }
+}
+
+export function subscribeRuntime(listener: (snapshot: RuntimeSnapshot) => void) {
+  listeners.add(listener)
+  listener(worker.snapshot)
+  return () => listeners.delete(listener)
+}
+
+export function subscribeRuntimeEvents(listener: (event: RuntimeEvent) => void) {
+  eventListeners.add(listener)
+  return () => eventListeners.delete(listener)
+}
+
+export function getRuntimeSnapshot() {
+  return worker.child || worker.snapshot.status !== "stopped" ? worker.snapshot : undefined
 }
 
 function waitForChildExit(child: ChildProcessWithoutNullStreams) {
@@ -333,25 +267,6 @@ function waitForChildExit(child: ChildProcessWithoutNullStreams) {
     const timer = setTimeout(finish, 5_000)
     child.once("close", finish)
   })
-}
-
-export async function shutdownAllRuntimes() {
-  await Promise.allSettled([...workers.keys()].map((id) => shutdownRuntime(id)))
-}
-
-export function subscribeRuntime(listener: (snapshot: RuntimeSnapshot) => void) {
-  listeners.add(listener)
-  for (const worker of workers.values()) listener(worker.snapshot)
-  return () => listeners.delete(listener)
-}
-
-export function subscribeRuntimeEvents(listener: (event: RuntimeEvent) => void) {
-  eventListeners.add(listener)
-  return () => eventListeners.delete(listener)
-}
-
-export function getRuntimeSnapshots() {
-  return [...workers.values()].map((worker) => worker.snapshot)
 }
 
 function isRuntimeResponseEnvelope(message: unknown): message is RuntimeResponseEnvelope {

@@ -29,7 +29,13 @@ logger = logging.getLogger(__name__)
 class OpenAIChatClient(ChatClient):
     """Small wrapper around OpenAI async chat.completions API with resilient retries and cancellation support."""
 
-    def __init__(self, async_client: Any, model: str, reasoning_effort: str | None = None):
+    def __init__(
+        self,
+        async_client: Any,
+        model: str,
+        reasoning_effort: str | None = None,
+        workspace_root: str | None = None,
+    ):
         self._client = async_client
         self._model = model
         self._reasoning_effort = (reasoning_effort or "").strip() or None
@@ -37,6 +43,7 @@ class OpenAIChatClient(ChatClient):
         self._prompt_cache_key_disabled = False
         self.on_retry = None  # Callback function: def on_retry(attempt: int, exception: Exception)
         self._trace_session_id_provider: Callable[[], str] | None = None
+        self._workspace_root = workspace_root
 
     def set_trace_session_id_provider(self, provider: Callable[[], str] | None) -> None:
         """TEMPORARY: install a provider returning the active session id for LLM tracing."""
@@ -319,7 +326,7 @@ class OpenAIChatClient(ChatClient):
         ]
         payload = {
             "model": self._model,
-            "cwd": os.path.normcase(os.path.realpath(os.getcwd())),
+            "cwd": os.path.normcase(os.path.realpath(self._workspace_root or os.getcwd())),
             "system": system_parts,
             "tools": tools,
         }

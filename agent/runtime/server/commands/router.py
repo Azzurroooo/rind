@@ -16,6 +16,7 @@ class SlashCommandContext:
     runtime: Any
     session: Any
     debug: bool = False
+    workspace_root: str | None = None
 
 
 @dataclass(slots=True)

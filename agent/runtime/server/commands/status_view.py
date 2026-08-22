@@ -44,7 +44,7 @@ async def build_status_display(context: SlashCommandContext) -> dict:
         "debug": bool(context.debug),
         "messages": message_count,
     }
-    git_status = await _git_status_display()
+    git_status = await _git_status_display(context.workspace_root)
     if git_status:
         display["git"] = git_status
     assistant_usage = await _latest_assistant_sampling_usage(session)
@@ -83,11 +83,11 @@ def _is_skill_snapshot(message: object) -> bool:
     return False
 
 
-async def _git_status_display() -> dict | None:
+async def _git_status_display(workspace_root: str | None) -> dict | None:
     def _current():
         from agent.runtime.server.commands.git_status import GitPromptStatusProvider
 
-        return GitPromptStatusProvider(ttl_seconds=0).current()
+        return GitPromptStatusProvider(cwd=workspace_root, ttl_seconds=0).current()
 
     try:
         status = await asyncio.to_thread(_current)

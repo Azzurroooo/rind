@@ -73,8 +73,8 @@ def _build_checks(context: SlashCommandContext) -> list[DoctorCheck]:
 
     checks = [
         _python_check(),
-        _working_directory_check(),
-        _git_check(),
+        _working_directory_check(context.workspace_root),
+        _git_check(context.workspace_root),
         _settings_check(config_status),
         _api_key_check(config_status),
         _model_check(config_status),
@@ -100,21 +100,21 @@ def _python_check() -> DoctorCheck:
     return DoctorCheck("fail", "Python", f"{version} (requires 3.12+)")
 
 
-def _working_directory_check() -> DoctorCheck:
-    cwd = Path.cwd()
+def _working_directory_check(workspace_root: str | None) -> DoctorCheck:
+    cwd = Path(workspace_root or Path.cwd())
     if cwd.exists() and cwd.is_dir():
         return DoctorCheck("ok", "Working directory", str(cwd))
     return DoctorCheck("fail", "Working directory", f"{cwd} is not available")
 
 
-def _git_check() -> DoctorCheck:
+def _git_check(workspace_root: str | None) -> DoctorCheck:
     git = shutil.which("git")
     if not git:
         return DoctorCheck("warn", "Git", "not found on PATH")
-    branch = _run_git(["branch", "--show-current"])
+    branch = _run_git(["branch", "--show-current"], workspace_root)
     if branch is None:
         return DoctorCheck("warn", "Git", "not a git worktree")
-    dirty = _run_git(["status", "--short"])
+    dirty = _run_git(["status", "--short"], workspace_root)
     suffix = "clean" if not dirty else f"{len(dirty.splitlines())} change(s)"
     return DoctorCheck("ok", "Git", f"{branch or 'detached HEAD'} ({suffix})")
 
@@ -190,11 +190,11 @@ def _nearest_existing_parent(path: Path) -> Path | None:
     return current
 
 
-def _run_git(args: list[str]) -> str | None:
+def _run_git(args: list[str], workspace_root: str | None = None) -> str | None:
     try:
         result = subprocess.run(
             ["git", *args],
-            cwd=Path.cwd(),
+            cwd=Path(workspace_root or Path.cwd()),
             stdin=subprocess.DEVNULL,
             capture_output=True,
             text=True,

@@ -179,6 +179,18 @@ def test_runtime_events_use_versioned_envelope(capsys):
     assert messages[0]["event"]["text"] == "hello"
 
 
+def test_runtime_event_session_identity_is_bound_to_server_session(capsys):
+    async def run():
+        server = StdioRuntimeServer(_Runtime(), _Session())
+        await server._send_event({"type": "assistant_delta", "session_id": "other", "turn_id": "t1", "text": "hello"})
+
+    asyncio.run(run())
+
+    message = json.loads(capsys.readouterr().out)
+    assert message["session_id"] == "s1"
+    assert message["event"]["session_id"] == "s1"
+
+
 def test_golden_event_fixture_matches_python_envelope():
     fixture = PROJECT_ROOT / "test" / "fixtures" / "runtime_protocol.golden.jsonl"
     messages = [json.loads(line) for line in fixture.read_text(encoding="utf-8").splitlines()]
@@ -458,6 +470,7 @@ def test_session_replay_returns_projected_messages_and_turn_state(capsys):
     assert message["result"] == {
         "messages": [{"role": "user", "content": "hello"}],
         "turn_state": {"turn_id": "t1", "status": "completed", "ts": "now"},
+        "model": "m1",
     }
 
 
@@ -1042,6 +1055,7 @@ def test_readonly_session_replay_is_handled_while_run_turn_is_blocked(capsys):
         "messages": [{"role": "user", "content": "archived history"}],
         "turn_state": None,
         "session_id": "archived",
+        "model": "m1",
     }
 
 
@@ -1403,6 +1417,8 @@ def test_app_server_process_serves_git_backed_commands_and_exits_after_shutdown(
         process.stdin.flush()
         initialize = read_response()
         assert initialize.get("kind") == "response", initialize
+        session_id = initialize["result"]["session_id"]
+        assert isinstance(session_id, str) and session_id
 
         process.stdin.write(
             json.dumps(
@@ -1410,7 +1426,7 @@ def test_app_server_process_serves_git_backed_commands_and_exits_after_shutdown(
                     "kind": "request",
                     "request_id": "status",
                     "method": "rind/command/execute",
-                    "params": {"input": "/status"},
+                    "params": {"session_id": session_id, "input": "/status"},
                 }
             )
             + "\n"
@@ -1426,7 +1442,7 @@ def test_app_server_process_serves_git_backed_commands_and_exits_after_shutdown(
                     "kind": "request",
                     "request_id": "doctor",
                     "method": "rind/command/execute",
-                    "params": {"input": "/doctor"},
+                    "params": {"session_id": session_id, "input": "/doctor"},
                 }
             )
             + "\n"
@@ -1435,6 +1451,21 @@ def test_app_server_process_serves_git_backed_commands_and_exits_after_shutdown(
         doctor = read_response()
         assert doctor.get("request_id") == "doctor", doctor
         assert doctor.get("result", {}).get("display", {}).get("type") == "doctor", doctor
+
+        process.stdin.write(
+            json.dumps(
+                {
+                    "kind": "request",
+                    "request_id": "missing-session",
+                    "method": "session/replay",
+                    "params": {},
+                }
+            )
+            + "\n"
+        )
+        process.stdin.flush()
+        missing_session = read_response()
+        assert missing_session["error"]["type"] == "InvalidRequest", missing_session
 
         process.stdin.write(json.dumps({"kind": "request", "request_id": "bye", "method": "shutdown"}) + "\n")
         process.stdin.flush()

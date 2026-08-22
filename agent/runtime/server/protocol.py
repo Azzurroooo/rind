@@ -65,6 +65,38 @@ class RuntimeMethod:
     SESSION_UPDATE = "session/update"
 
 
+SESSION_SCOPED_METHODS = frozenset(
+    {
+        RuntimeMethod.SESSION_PROMPT,
+        RuntimeMethod.SESSION_REPLAY,
+        RuntimeMethod.SESSION_SWITCH,
+        RuntimeMethod.SESSION_CANCEL,
+        RuntimeMethod.MODEL_SET,
+        RuntimeMethod.RIND_SESSION_STEER,
+        RuntimeMethod.RIND_SESSION_FOLLOW_UP,
+        RuntimeMethod.RIND_SESSION_PROMOTE_FOLLOW_UP,
+        RuntimeMethod.RIND_SESSION_UNSTEER,
+        RuntimeMethod.RIND_SESSION_DEQUEUE_FOLLOW_UP,
+        RuntimeMethod.RIND_SESSION_COMPACT,
+        RuntimeMethod.RIND_COMMAND_EXECUTE,
+        RuntimeMethod.RIND_USER_QUESTION_RESPOND,
+        RuntimeMethod.RIND_BACKGROUND_LIST,
+        RuntimeMethod.RIND_BACKGROUND_OUTPUT,
+        RuntimeMethod.RIND_GOAL_GET,
+        RuntimeMethod.RIND_GOAL_SET,
+        RuntimeMethod.RIND_GOAL_STATUS,
+        RuntimeMethod.RIND_GOAL_CLEAR,
+    }
+)
+
+TURN_SCOPED_METHODS = frozenset(
+    {
+        RuntimeMethod.SESSION_CANCEL,
+        RuntimeMethod.RIND_SESSION_STEER,
+    }
+)
+
+
 CORE_METHODS = (
     RuntimeMethod.INITIALIZE,
     RuntimeMethod.SHUTDOWN,

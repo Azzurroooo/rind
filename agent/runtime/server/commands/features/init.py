@@ -13,7 +13,11 @@ async def handle_init(context: SlashCommandContext, args: list[str]) -> SlashCom
     from agent.infrastructure.rind_docs import resolve_project_doc_path, resolve_user_doc_path
     from agent.prompts import build_rind_init_prompt
 
-    target = resolve_project_doc_path() if scope == "project" else resolve_user_doc_path()
+    target = (
+        resolve_project_doc_path(context.workspace_root)
+        if scope == "project"
+        else resolve_user_doc_path()
+    )
     prompt = build_rind_init_prompt(scope, str(target))
     return SlashCommandResult(
         text=f"Initializing {scope} RIND.md: {target}",

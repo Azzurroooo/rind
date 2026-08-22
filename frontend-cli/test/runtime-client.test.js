@@ -47,6 +47,7 @@ test("runtime exit rejects an in-flight request and reports a recoverable failur
     onExit: (code, signal, details) => resolveExit({ code, signal, details }),
   });
 
+  client.start();
   await assert.rejects(client.request("initialize"), /Runtime (exited|stdin is closed)/);
   const result = await exited;
 
@@ -55,13 +56,14 @@ test("runtime exit rejects an in-flight request and reports a recoverable failur
   assert.match(result.details.error.message, /Runtime exited/);
 });
 
-test("runtime client stays stopped until its first request or explicit start", async () => {
+test("runtime client stays stopped until explicit start", async () => {
   const client = createRuntimeClient({
     python: "unused",
     repoRoot: "unused",
     runtimePath: process.execPath,
   });
   assert.equal(client.child, null);
+  await assert.rejects(client.request("initialize"), /Runtime is not running/);
   client.forceShutdown();
   assert.equal(client.child, null);
 });

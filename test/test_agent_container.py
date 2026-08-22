@@ -13,9 +13,12 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from agent.bootstrap import AgentContainer, build_agent_container
+from agent.application.context import CompactionService
+from agent.application.tools import ToolResultNormalizer
+from agent.bootstrap import AgentContainer, SharedRuntimeResources, build_agent_container
 from agent.infrastructure.config import AppSettings
 from agent.infrastructure.team import initialize_team_project
+from agent.runtime.core import MessageStreamParser
 
 
 class FakeProviderClientFactory:
@@ -61,6 +64,39 @@ def test_container_explicitly_shares_production_dependencies() -> None:
         assert container.tool_processor._tool_result_normalizer is container.tool_result_normalizer
         assert container.context_manager._estimator is container.context_estimator
         assert not hasattr(container, "cli")
+
+
+def test_container_reuses_worker_safe_resources() -> None:
+    cache_dir = PROJECT_ROOT / ".pytest_cache"
+    settings = AppSettings(
+        settings_path=cache_dir / "settings.json",
+        settings_exists=True,
+        model="test-model",
+        api_key="test-key",
+        base_url="https://example.com/v1",
+        reasoning_effort="high",
+        user_agent="test-agent",
+    )
+    provider_client_factory = FakeProviderClientFactory()
+    shared = SharedRuntimeResources(
+        provider_async_client=provider_client_factory.client,
+        tool_result_normalizer=ToolResultNormalizer(),
+        stream_parser=MessageStreamParser(),
+        compaction_service=CompactionService(),
+    )
+
+    with tempfile.TemporaryDirectory() as session_dir:
+        container = build_agent_container(
+            settings=settings,
+            provider_client_factory=provider_client_factory,
+            session_dir=session_dir,
+            shared_resources=shared,
+        )
+
+    assert container.chat_client._client is shared.provider_async_client
+    assert container.tool_processor._tool_result_normalizer is shared.tool_result_normalizer
+    assert container.turn_runner._stream_parser is shared.stream_parser
+    assert container.turn_runner._compaction_service is shared.compaction_service
 
 
 def test_container_filters_tools_before_building_registry_and_schema() -> None:

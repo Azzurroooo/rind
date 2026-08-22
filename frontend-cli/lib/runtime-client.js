@@ -123,16 +123,8 @@ export function createRuntimeClient({
   function request(method, params = {}) {
     const id = nextId++;
     return new Promise((resolve, reject) => {
-      if (!child && !closing) {
-        try {
-          start();
-        } catch (error) {
-          reject(error);
-          return;
-        }
-      }
       if (!child || !child.stdin.writable || child.destroyed) {
-        reject(new Error("Runtime stdin is closed. Restart Rind and try again."));
+        reject(new Error("Runtime is not running. Start it before sending a request."));
         return;
       }
       const entry = { resolve, reject };

@@ -11,7 +11,13 @@ import { createCompactContextState } from "./compact-context-state.js";
 import { prepareComposerFrame } from "./composer-terminal.js";
 import { createLineEditor } from "./line-editor.js";
 import { createRuntimeClient, runHelpVersion } from "./runtime-client.js";
-import { requireRuntimeInitialization, runtimeMethods } from "./runtime-protocol.js";
+import {
+  requireRuntimeInitialization,
+  runtimeMethods,
+  sessionScopedMethods,
+  turnScopedMethods,
+  isRuntimeEventForTurn,
+} from "./runtime-protocol.js";
 import { executeLocalSlashCommand, loadLocalSettings } from "./local-slash-commands.js";
 import { createTurnController } from "./turn-controller.js";
 import { createCommandController } from "./command-controller.js";
@@ -83,12 +89,14 @@ let runtimeClosing = false;
 let runtimeStarted = false;
 let runtimeInitialized = false;
 let runtimeInitialization = null;
+let runtimeFailure = null;
 let processExitTimer = null;
 let cancelActiveInput = null;
 let sessionInfo = {};
 let localSettings = {};
 let latestStats = {};
 let slashCommands = [];
+let activeTurnId = "";
 let turnTools = { completed: 0, failed: 0 };
 let pendingInputPrefill = "";
 let assistantOutputLineOpen = false;
@@ -131,8 +139,12 @@ const runtimeClient = createRuntimeClient({
     runtimeStarted = false;
     runtimeInitialized = false;
     runtimeInitialization = null;
+    activeTurnId = "";
+    activeTurn = false;
+    interruptRequested = false;
     clearPendingInputs();
     if (!runtimeClosing) {
+      runtimeFailure = error;
       writeErrorOutput(`Runtime stopped (${signal || (code ?? "startup failure")}): ${error.message}. Runtime commands are unavailable until it restarts.\n`);
     } else {
       process.exitCode = 0;
@@ -142,7 +154,17 @@ const runtimeClient = createRuntimeClient({
 });
 async function request(method, params = {}) {
   await ensureRuntime();
-  return runtimeClient.request(method, params);
+  const requestParams = { ...params };
+  if (sessionScopedMethods.has(method) && sessionInfo.session_id && !requestParams.session_id) {
+    requestParams.session_id = sessionInfo.session_id;
+  }
+  if (turnScopedMethods.has(method) && activeTurnId && !requestParams.turn_id) {
+    requestParams.turn_id = activeTurnId;
+  }
+  if (method === runtimeMethods.modelList && sessionInfo.session_id && !requestParams.session_id) {
+    requestParams.session_id = sessionInfo.session_id;
+  }
+  return runtimeClient.request(method, requestParams);
 }
 const turnState = {
   get activeTurn() {
@@ -307,6 +329,8 @@ try {
   localSettings = await loadLocalSettings();
   sessionInfo = { cwd: process.cwd(), model: localSettings.model };
   slashCommands = commandController.localCommands();
+  await ensureRuntime();
+  logOutput(startupText(sessionInfo));
   if (terminalUi) {
     inputController.start();
   } else {
@@ -318,8 +342,6 @@ try {
     });
     process.stdin.on("data", handleStdinData);
   }
-  await ensureRuntime();
-  logOutput(startupText(sessionInfo));
   await inputController.promptLoop();
 } catch (error) {
   closeAssistant();
@@ -334,6 +356,9 @@ try {
 async function ensureRuntime() {
   if (runtimeInitialized) {
     return sessionInfo;
+  }
+  if (runtimeFailure) {
+    throw runtimeFailure;
   }
   if (runtimeInitialization) {
     return runtimeInitialization;
@@ -457,6 +482,7 @@ async function runSessionsSelector() {
       background_count: 0,
       delegate_count: 0,
     };
+    activeTurnId = "";
     latestStats = update?.usage && typeof update.usage === "object" ? update.usage : {};
     compactContextState.clear();
     logOutput(sessionSwitchedText(sessionInfo));
@@ -730,7 +756,17 @@ function writeAssistantHeader() {
 }
 
 async function renderEvent(message) {
-  return eventController.handle(message);
+  if (!isRuntimeEventForTurn(message, sessionInfo.session_id, activeTurnId)) {
+    return;
+  }
+  if (message?.event?.type === "turn_started") {
+    activeTurnId = String(message.turn_id || "");
+  }
+  const result = await eventController.handle(message);
+  if (["turn_completed", "turn_failed", "turn_cancelled"].includes(message?.event?.type)) {
+    activeTurnId = "";
+  }
+  return result;
 }
 
 function resetTurnTools() {

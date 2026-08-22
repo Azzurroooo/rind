@@ -30,6 +30,11 @@ class SessionStore(Protocol):
         """Return the active session directory when a session is bound."""
         ...
 
+    @property
+    def workspace_root(self) -> str | None:
+        """Return the workspace bound to this session."""
+        ...
+
     def now_iso(self) -> str:
         ...
 

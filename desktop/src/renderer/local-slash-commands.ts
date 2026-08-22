@@ -20,7 +20,6 @@ export function executeLocalSlashCommand(input: string, context: LocalSlashConte
   const name = parts[1].toLocaleLowerCase()
   const argument = (parts[2] || "").trim()
 
-  if (name === "sessions") return { text: "Use the left sidebar to switch sessions." }
   if (name === "config") return configResult(context.settings)
   if (name === "login") return { text: "Login/config setup is not implemented yet.\nSet apiKey in ~/.rind/settings.json." }
   if (name === "status") {

@@ -11,6 +11,7 @@ import {
   runtimeProtocolVersion,
   runtimeEventType,
   runtimeRequestId,
+  isRuntimeEventForTurn,
 } from "../lib/runtime-protocol.js";
 
 test("runtime requests use request_id", () => {
@@ -27,6 +28,21 @@ test("runtime protocol reads response and event metadata", () => {
   assert.equal(runtimeEventType({ event: {} }), "");
   assert.equal(runtimeEventType({ event: { type: "turn_started" } }), "turn_started");
   assert.equal(runtimeEventType({ event: { type: "unknown" }, extra: true }), "unknown");
+});
+
+test("runtime protocol filters events by session and active turn", () => {
+  const event = (type, sessionId, turnId) => ({
+    event: { type },
+    session_id: sessionId,
+    turn_id: turnId,
+  });
+
+  assert.equal(isRuntimeEventForTurn(event("turn_started", "s1", "t2"), "s1", "t1"), true);
+  assert.equal(isRuntimeEventForTurn(event("assistant_delta", "s1", "t1"), "s1", "t1"), true);
+  assert.equal(isRuntimeEventForTurn(event("assistant_delta", "s1", "old"), "s1", "t1"), false);
+  assert.equal(isRuntimeEventForTurn(event("turn_completed", "s1", "old"), "s1", ""), false);
+  assert.equal(isRuntimeEventForTurn(event("session_status", "s1", ""), "s1", ""), true);
+  assert.equal(isRuntimeEventForTurn(event("assistant_delta", "s2", "t1"), "s1", "t1"), false);
 });
 
 test("runtime protocol validates response, event, and initialization schemas", () => {

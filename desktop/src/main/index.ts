@@ -9,13 +9,11 @@ import { asObject, readJsonObject, writeJsonObject } from "./json-store"
 import { listAvailableModels } from "./model-catalog"
 import { listProjectFiles, previewProjectFile } from "./project-files"
 import { DesktopProjectStore, samePath } from "./projects"
-import { replaySession } from "./session-replay"
 import { readRindVersion } from "./version"
 import {
-  getRuntimeSnapshots,
+  getRuntimeSnapshot,
   initializeRuntime,
   requestRuntime,
-  shutdownAllRuntimes,
   shutdownRuntime,
   startRuntime,
   subscribeRuntime,
@@ -132,27 +130,18 @@ async function requireProject(path: unknown) {
 }
 
 function registerIpc() {
-  ipcMain.handle("runtime-start", async (_event, runtimeId: unknown, workspace: unknown, sessionId: unknown) => {
+  ipcMain.handle("runtime-start", async (_event, workspace: unknown) => {
     const projectPath = await requireProject(workspace)
-    if (typeof runtimeId !== "string" || !runtimeId.trim()) throw new Error("Runtime id is required.")
-    return startRuntime(runtimeId, projectPath, typeof sessionId === "string" && sessionId ? sessionId : undefined)
+    return startRuntime(projectPath)
   })
-  ipcMain.handle("runtime-initialize", (_event, runtimeId: unknown) => {
-    if (typeof runtimeId !== "string") throw new Error("Runtime id is required.")
-    return initializeRuntime(runtimeId)
-  })
-  ipcMain.handle("runtime-shutdown", (_event, runtimeId: unknown) => {
-    if (typeof runtimeId !== "string") throw new Error("Runtime id is required.")
-    return shutdownRuntime(runtimeId)
-  })
-  ipcMain.handle("runtime-shutdown-all", () => shutdownAllRuntimes())
-  ipcMain.handle("runtime-request", (_event, runtimeId: unknown, method: unknown, params: unknown) => {
-    if (typeof runtimeId !== "string" || !runtimeId.trim()) throw new Error("Runtime id is required.")
+  ipcMain.handle("runtime-initialize", () => initializeRuntime())
+  ipcMain.handle("runtime-shutdown", () => shutdownRuntime())
+  ipcMain.handle("runtime-request", (_event, method: unknown, params: unknown) => {
     if (typeof method !== "string" || !isRuntimeMethod(method)) {
       throw new Error("Runtime method is not available to the desktop client.")
     }
     const safeParams = params && typeof params === "object" ? params as Record<string, unknown> : {}
-    return requestRuntime(runtimeId, method, safeParams)
+    return requestRuntime(method, safeParams)
   })
   ipcMain.handle("settings-get", () => loadRuntimeSettings())
   ipcMain.handle("app-version", () => appVersion())
@@ -189,12 +178,6 @@ function registerIpc() {
   ipcMain.handle("projects-sessions", (_event, path: unknown, offset: unknown, limit: unknown) => {
     if (typeof path !== "string") throw new Error("Project path must be a string.")
     return projectStore().sessions(path, Number(offset), Number(limit))
-  })
-  ipcMain.handle("sessions-replay", async (_event, sessionId: unknown) => {
-    if (typeof sessionId !== "string") throw new Error("Session id must be a string.")
-    const session = await projectStore().findSession(sessionId)
-    if (!session) throw new Error("Session is not registered in Rind Desktop.")
-    return replaySession(join(app.getPath("home"), ".rind"), sessionId, session.workspaceRoot)
   })
   ipcMain.handle("project-files-list", async (_event, projectPath: unknown, path: unknown) => listProjectFiles(await requireProject(projectPath), path))
   ipcMain.handle("project-files-preview", async (_event, projectPath: unknown, path: unknown) => previewProjectFile(await requireProject(projectPath), path))
@@ -235,7 +218,10 @@ function createMainWindow() {
   if (rendererUrl) void win.loadURL(new URL("index.html", rendererUrl).toString())
   else void win.loadFile(join(root, "../renderer/index.html"))
   win.once("ready-to-show", () => win.show())
-  win.webContents.once("did-finish-load", () => getRuntimeSnapshots().forEach(notifyRuntime))
+  win.webContents.once("did-finish-load", () => {
+    const snapshot = getRuntimeSnapshot()
+    if (snapshot) notifyRuntime(snapshot)
+  })
   win.on("closed", () => {
     if (mainWindow === win) mainWindow = undefined
   })
@@ -267,6 +253,14 @@ if (!hasLock) {
     subscribeRuntime(notifyRuntime)
     subscribeRuntimeEvents(notifyRuntimeEvent)
     registerIpc()
+    try {
+      const overview = await projectStore().overview()
+      const workspace = overview.activeProjectPath || process.cwd()
+      startRuntime(workspace)
+      await initializeRuntime()
+    } catch (error) {
+      log.warn("runtime worker failed to start", error)
+    }
     createMainWindow()
   })
 
@@ -283,7 +277,7 @@ if (!hasLock) {
     event.preventDefault()
     if (quitting) return
     quitting = true
-    void shutdownAllRuntimes().finally(() => {
+    void shutdownRuntime().finally(() => {
       runtimeShutdownComplete = true
       app.quit()
     })

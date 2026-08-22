@@ -13,6 +13,7 @@ import {
   formatDuration,
   latestPlan,
   maxEntries,
+  mergeReplayConversation,
   parseToolResult,
   reduceEvent,
   relativeTime,
@@ -78,6 +79,31 @@ test("replay preserves tool calls and results between assistant messages", () =>
   const tool = state.entries[2]
   assert.equal(tool.kind, "tool")
   assert.equal(tool.output, "contents")
+})
+
+test("replay restores persisted history while retaining the live turn tail", () => {
+  const replay = conversationFromReplay([
+    { role: "user", content: "Earlier request" },
+    { role: "assistant", content: "Earlier response" },
+    { role: "user", content: "Current request" },
+  ])
+  let live = conversationFromReplay([
+    { role: "user", content: "Current request" },
+  ])
+  live = reduceEvent(live, event("turn_started", {}, "turn-current"))
+  live = reduceEvent(live, event("assistant_delta", { text: "Earlier response" }, "turn-current"))
+  const merged = mergeReplayConversation(replay, live)
+
+  assert.deepEqual(merged.entries.map((entry) => entry.kind), ["user", "assistant", "user", "assistant"])
+  assert.deepEqual(merged.entries.map((entry) => entry.content), [
+    "Earlier request",
+    "Earlier response",
+    "Current request",
+    "Earlier response",
+  ])
+  assert.equal(merged.activeTurnId, "turn-current")
+  assert.equal(new Set(merged.entries.map((entry) => entry.id)).size, merged.entries.length)
+  assert.ok(merged.openAssistantId)
 })
 
 test("tool lifecycle correlates by tool_call_id into a single row", () => {

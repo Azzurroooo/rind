@@ -24,7 +24,7 @@ import type {
   RuntimeMethod,
   RuntimeSnapshot,
 } from "../preload/types"
-import { runtimeMethods } from "../preload/types"
+import { runtimeMethods, sessionScopedMethods, turnScopedMethods } from "../preload/types"
 import {
   addUserMessage,
   addCommandResult,
@@ -33,6 +33,7 @@ import {
   createConversation,
   fileMutationPreview,
   formatDuration,
+  mergeReplayConversation,
   reduceEvent,
   relativeTime,
   type ConversationState,
@@ -76,16 +77,11 @@ type AppState = {
   settingsOpen: boolean
   settingsSaving: boolean
   settingsAutoOpened: boolean
-  runtimeWorkers: Record<string, RuntimeSnapshot>
-  runtimeSessionIds: Record<string, string>
   runtimeTurnPending: Record<string, boolean>
-  runtimeStarting: Record<string, boolean>
   pendingInputs: Record<string, PendingInput[]>
   viewedSessionId: string
   viewedProjectPath: string
   chatProjectPath: string
-  viewedRuntimeId: string
-  draftRuntimeIds: Record<string, string>
   conversationCache: Record<string, ConversationState>
   sessionModels: Record<string, string>
   model: string
@@ -137,16 +133,11 @@ const state: AppState = {
   settingsOpen: false,
   settingsSaving: false,
   settingsAutoOpened: false,
-  runtimeWorkers: {},
-  runtimeSessionIds: {},
   runtimeTurnPending: {},
-  runtimeStarting: {},
   pendingInputs: {},
   viewedSessionId: "",
   viewedProjectPath: "",
   chatProjectPath: "",
-  viewedRuntimeId: "",
-  draftRuntimeIds: {},
   conversationCache: {},
   sessionModels: {},
   model: "",
@@ -316,14 +307,13 @@ function requiredElement<T extends HTMLElement = HTMLElement>(id: string) {
 
 function render() {
   const runtime = currentRuntimeSnapshot()
-  const runtimeId = currentRuntimeId()
   state.runtime = runtime
   const { conversation } = state
   const wideFiles = usesWideFileLayout()
   const filesWidth = state.filesOpen ? state.filePanelWidth : 0
   connectionText.textContent = runtimeStatusLabel(runtime.status)
   connection.className = `connection connection-${runtime.status}`
-  connection.hidden = Boolean(state.runtimeStarting[runtimeId])
+  connection.hidden = runtime.status === "starting"
   appRoot.classList.toggle("sidebar-open", state.sidebarOpen)
   appRoot.classList.toggle("files-open", state.filesOpen)
   appRoot.classList.toggle("files-wide", wideFiles)
@@ -343,7 +333,7 @@ function render() {
   sessionTitle.textContent = current?.title || (state.viewedSessionId ? "Session" : "New session")
   sessionIdLabel.textContent = state.viewedSessionId || ""
   noticeText.textContent = state.notice || runtime.message || ""
-  retry.hidden = !currentRuntimeId() || runtime.status !== "error"
+  retry.hidden = runtime.status !== "error"
   notice.hidden = !noticeText.textContent && retry.hidden
   renderProjectControl()
   renderRecentSessions()
@@ -357,9 +347,9 @@ function render() {
   )
   syncPendingInputDock(
     pendingInputDock,
-    state.pendingInputs[runtimeId] || [],
-    (inputId) => runAction(() => promoteFollowUp(inputId)),
-    (inputId) => runAction(() => recallPendingInput(inputId)),
+    state.pendingInputs[state.viewedSessionId] || [],
+    (inputId) => runAction(() => promoteFollowUp(inputId), state.viewedSessionId),
+    (inputId) => runAction(() => recallPendingInput(inputId), state.viewedSessionId),
   )
   renderStream()
   renderComposer(
@@ -368,7 +358,7 @@ function render() {
       ready: chatProject()?.available === true && state.settings.hasApiKey,
       active: runtimeTurnActive(),
       readOnly: false,
-      starting: Boolean(state.runtimeStarting[runtimeId]),
+      starting: runtime.status === "starting",
       controllingTurn: Boolean(runtimeConversation().activeTurnId),
       runtimeSessionId: state.viewedSessionId,
       composerMenuOpen: state.composerMenuOpen,
@@ -408,19 +398,12 @@ function projectForPath(path: string) {
   return findProjectForPath(state.projects, path)
 }
 
-function runtimeIdForSession(sessionId: string) {
-  return Object.entries(state.runtimeSessionIds).find(([, id]) => id === sessionId)?.[0] || sessionId
-}
-
-function currentRuntimeId() {
-  if (state.viewedRuntimeId) return state.viewedRuntimeId
-  if (state.viewedSessionId) return runtimeIdForSession(state.viewedSessionId)
-  const projectPath = state.chatProjectPath || state.viewedProjectPath
-  return state.draftRuntimeIds[projectPath] || `draft:${projectPath}`
-}
-
 function currentRuntimeSnapshot() {
-  return state.runtimeWorkers[currentRuntimeId()] || { status: "stopped" as const }
+  return state.runtime
+}
+
+function sessionTurnActive(sessionId: string) {
+  return Boolean(sessionId && (state.runtimeTurnPending[sessionId] || conversationFor(sessionId).activeTurnId))
 }
 
 function projectSessions(project: DesktopProject) {
@@ -471,7 +454,6 @@ function renderProjects() {
     expandedProjects: state.expandedProjects,
     projectMenuPath: state.projectMenuPath,
     runningSessionIds: runningSessionIds(),
-    viewedSessionId: state.viewedSessionId,
   })
   if (structureKey === renderedProjectListStructureKey) {
     syncSidebarSelection()
@@ -512,7 +494,7 @@ function renderProjects() {
 
 function renderProjectSession(item: DesktopSessionSummary) {
   const when = item.updatedAt ? relativeTime(item.updatedAt) : ""
-  const running = runtimeTurnActive(runtimeIdForSession(item.id))
+  const running = sessionTurnActive(item.id)
   return `
     <button type="button" class="session-item${running ? " running" : ""}" data-session-id="${escapeAttribute(item.id)}" data-session-project="${escapeAttribute(item.workspaceRoot)}">
       <span class="session-item-title">${running ? `<span class="status-pip pip-running"></span>` : ""}<span class="session-item-title-text">${escapeHtml(item.title || "Untitled")}</span></span>
@@ -531,7 +513,6 @@ function renderRecentSessions() {
     expandedProjects: state.expandedProjects,
     projectMenuPath: state.projectMenuPath,
     runningSessionIds: runningSessionIds(),
-    viewedSessionId: state.viewedSessionId,
   })
   if (structureKey === renderedRecentListStructureKey) {
     syncSidebarSelection()
@@ -545,8 +526,8 @@ function renderRecentSessions() {
     return
   }
   const items = [...state.recentSessions].sort((left, right) => {
-    const leftRunning = runtimeTurnActive(runtimeIdForSession(left.id))
-    const rightRunning = runtimeTurnActive(runtimeIdForSession(right.id))
+    const leftRunning = sessionTurnActive(left.id)
+    const rightRunning = sessionTurnActive(right.id)
     return Number(rightRunning) - Number(leftRunning) || right.lastInteractedAt.localeCompare(left.lastInteractedAt)
   })
   recentSessions.hidden = false
@@ -555,7 +536,7 @@ function renderRecentSessions() {
 }
 
 function renderRecentSession(item: DesktopRecentSession) {
-  const running = runtimeTurnActive(runtimeIdForSession(item.id))
+  const running = sessionTurnActive(item.id)
   const when = item.lastInteractedAt ? relativeTime(item.lastInteractedAt) : ""
   return `
     <button type="button" class="session-item${running ? " running" : ""}" data-session-id="${escapeAttribute(item.id)}" title="${escapeAttribute(item.title || "Untitled")}">
@@ -568,8 +549,8 @@ function renderRecentSession(item: DesktopRecentSession) {
 
 function runningSessionIds() {
   const sessions = new Set<string>()
-  for (const [runtimeId, sessionId] of Object.entries(state.runtimeSessionIds)) {
-    if (sessionId && runtimeTurnActive(runtimeId)) sessions.add(sessionId)
+  for (const session of knownSessions()) {
+    if (sessionTurnActive(session.id)) sessions.add(session.id)
   }
   return sessions
 }
@@ -656,8 +637,13 @@ function displayedModel() {
 }
 
 function canOpenModelMenu() {
-  const target = modelSelectionTarget(currentRuntimeSnapshot().status, runtimeTurnActive())
+  const target = modelSelectionTargetForState()
   return Boolean(state.settings.hasApiKey && target !== "unavailable" && !state.modelChanging)
+}
+
+function modelSelectionTargetForState() {
+  if (!state.viewedSessionId) return "settings" as const
+  return modelSelectionTarget(currentRuntimeSnapshot().status, runtimeTurnActive())
 }
 
 function closeModelMenu() {
@@ -710,16 +696,17 @@ async function selectModel(model: string) {
     render()
     return
   }
-  const runtime = currentRuntimeSnapshot()
-  const target = modelSelectionTarget(runtime.status, runtimeTurnActive())
+  const target = modelSelectionTargetForState()
   if (target === "unavailable") return
-  const runtimeId = currentRuntimeId()
+  const sessionId = state.viewedSessionId
   state.modelChanging = true
   render()
   try {
     if (target === "runtime") {
-      const result = asRecord(await request(runtimeMethods.modelSet, { model }, runtimeId))
-      state.model = typeof result.model === "string" && result.model ? result.model : model
+      const result = asRecord(await requestForSession(runtimeMethods.modelSet, sessionId, { model }))
+      if (state.viewedSessionId === sessionId) {
+        state.model = typeof result.model === "string" && result.model ? result.model : model
+      }
     } else {
       state.settings = await window.api.settings.save({ model })
       if (!state.viewedSessionId) state.model = model
@@ -931,6 +918,7 @@ function syncWorkingTimer() {
 function runtimeStatusLabel(status: RuntimeSnapshot["status"]) {
   if (status === "starting") return "Preparing"
   if (status === "ready") return "Ready"
+  if (status === "stopping") return "Stopping"
   if (status === "error") return "Needs attention"
   return "Idle"
 }
@@ -966,9 +954,8 @@ function runtimeConversation() {
   return conversationFor(state.viewedSessionId)
 }
 
-function runtimeTurnActive(runtimeId = currentRuntimeId()) {
-  const sessionId = state.runtimeSessionIds[runtimeId]
-  return Boolean(state.runtimeTurnPending[runtimeId] || (sessionId && conversationFor(sessionId).activeTurnId))
+function runtimeTurnActive() {
+  return sessionTurnActive(state.viewedSessionId)
 }
 
 function setConversationFor(sessionId: string, conversation: ConversationState) {
@@ -977,6 +964,18 @@ function setConversationFor(sessionId: string, conversation: ConversationState) 
     return
   }
   state.conversationCache = { ...state.conversationCache, [sessionId]: conversation }
+}
+
+function clearRuntimeTurnState() {
+  state.runtimeTurnPending = {}
+  state.pendingInputs = {}
+  state.conversation = { ...state.conversation, activeTurnId: "", turnStartedAt: 0 }
+  state.conversationCache = Object.fromEntries(
+    Object.entries(state.conversationCache).map(([sessionId, conversation]) => [
+      sessionId,
+      { ...conversation, activeTurnId: "", turnStartedAt: 0 },
+    ]),
+  )
 }
 
 function resetConversationPresentation(resetPlanDock = true) {
@@ -992,46 +991,61 @@ function resetConversationPresentation(resetPlanDock = true) {
   lastRenderedEntries = 0
 }
 
-function adoptRuntimeSession(runtimeId: string, sessionId: string) {
-  if (!runtimeId || !sessionId) return
-  state.runtimeSessionIds[runtimeId] = sessionId
-  if (!state.viewedSessionId) {
-    state.viewedSessionId = sessionId
-    state.viewedRuntimeId = runtimeId
+async function request(method: RuntimeMethod, params: Record<string, unknown> = {}) {
+  const requestParams = { ...params }
+  if (sessionScopedMethods.has(method) && state.viewedSessionId && !requestParams.session_id) {
+    requestParams.session_id = state.viewedSessionId
   }
-}
-
-async function request(method: RuntimeMethod, params: Record<string, unknown> = {}, runtimeId = currentRuntimeId()) {
+  const targetSessionId = typeof requestParams.session_id === "string" ? requestParams.session_id : ""
   try {
-    return await window.api.runtime.request(runtimeId, method, params)
+    const turnSessionId = targetSessionId || state.viewedSessionId
+    if (turnScopedMethods.has(method) && turnSessionId && !requestParams.turn_id) {
+      const turnId = conversationFor(turnSessionId).activeTurnId
+      if (turnId) requestParams.turn_id = turnId
+    }
+    return await window.api.runtime.request(method, requestParams)
   } catch (error) {
-    state.notice = error instanceof Error ? error.message : String(error)
-    render()
+    if (!targetSessionId || targetSessionId === state.viewedSessionId) {
+      state.notice = error instanceof Error ? error.message : String(error)
+      render()
+    }
     throw error
   }
 }
 
-async function ensureRuntime(runtimeId: string, workspace: string, sessionId?: string) {
-  const current = state.runtimeWorkers[runtimeId]
-  if (current?.status === "ready") return runtimeId
-  state.runtimeStarting[runtimeId] = true
+async function requestForSession(method: RuntimeMethod, sessionId: string, params: Record<string, unknown> = {}) {
+  const result = await request(method, { ...params, session_id: sessionId })
+  const responseSessionId = asRecordText(asRecord(result).session_id)
+  if (responseSessionId && responseSessionId !== sessionId) {
+    throw new Error(`Runtime returned session ${responseSessionId} for requested session ${sessionId}.`)
+  }
+  return result
+}
+
+async function ensureRuntime() {
+  if (state.runtime.status === "ready") return state.runtime
+  if (state.runtime.status !== "starting") {
+    throw new Error(state.runtime.message || "Runtime is not available. Use Retry to restart it.")
+  }
   render()
   try {
-    if (!current || current.status === "stopped" || current.status === "error") {
-      state.runtimeWorkers[runtimeId] = await window.api.runtime.start(runtimeId, workspace, sessionId)
-      render()
-    }
-    applyRuntimeInitialization(runtimeId, await window.api.runtime.initialize(runtimeId))
-    state.runtimeWorkers[runtimeId] = { ...state.runtimeWorkers[runtimeId], status: "ready", runtimeId, workspace, sessionId }
-    return runtimeId
+    applyRuntimeInitialization(await window.api.runtime.initialize())
+    state.runtime = { status: "ready" }
+    return state.runtime
   } finally {
-    state.runtimeStarting[runtimeId] = false
     render()
   }
 }
 
-function runAction(action: () => Promise<unknown>) {
+async function restartRuntime(workspace: string) {
+  state.runtime = await window.api.runtime.start(workspace)
+  render()
+  return ensureRuntime()
+}
+
+function runAction(action: () => Promise<unknown>, sessionId = "") {
   void action().catch((error) => {
+    if (sessionId && state.viewedSessionId !== sessionId) return
     state.notice = error instanceof Error ? error.message : String(error)
     render()
   })
@@ -1040,6 +1054,33 @@ function runAction(action: () => Promise<unknown>) {
 async function loadSessions() {
   applyOverview(await window.api.projects.get())
   await flushRecentSessions()
+}
+
+async function ensureSession(workspaceRoot: string, requestedSessionId?: string, requestedModel = "") {
+  const currentSessionId = requestedSessionId === undefined ? state.viewedSessionId : requestedSessionId
+  if (currentSessionId) return currentSessionId
+  const created = asRecord(await request(runtimeMethods.sessionNew, { workspace_root: workspaceRoot }))
+  const sessionId = asRecordText(created.session_id)
+  if (!sessionId) throw new Error("Runtime did not create a session.")
+  const selectedModel = requestedModel.trim() || state.model.trim() || state.settings.model.trim()
+  const createdModel = asRecordText(created.model)
+  state.sessionModels[sessionId] = createdModel || selectedModel
+  const bindToView = !state.viewedSessionId && samePath(state.chatProjectPath, workspaceRoot)
+  if (bindToView) {
+    state.viewedSessionId = sessionId
+    state.viewedProjectPath = workspaceRoot
+    state.model = state.sessionModels[sessionId]
+    state.conversation = createConversation()
+  } else {
+    state.conversationCache = { ...state.conversationCache, [sessionId]: createConversation() }
+  }
+  if (selectedModel && selectedModel !== createdModel) {
+    await requestForSession(runtimeMethods.modelSet, sessionId, { model: selectedModel })
+    state.sessionModels[sessionId] = selectedModel
+    if (state.viewedSessionId === sessionId) state.model = selectedModel
+  }
+  await loadSessions()
+  return sessionId
 }
 
 function applyOverview(overview: Awaited<ReturnType<typeof window.api.projects.get>>) {
@@ -1072,15 +1113,37 @@ function mergeSessions(primary: DesktopSessionSummary[], secondary: DesktopSessi
 
 async function loadReplay(sessionId = state.viewedSessionId) {
   if (!sessionId) return
-  const result = await window.api.sessions.replay(sessionId)
+  const session = knownSessions().find((item) => item.id === sessionId)
+  if (!session) return
+  await ensureRuntime()
+  const result = asRecord(await requestForSession(runtimeMethods.sessionReplay, sessionId))
   const messages = Array.isArray(result.messages) ? result.messages : []
-  let conversation = conversationFromReplay(messages)
-  const runtimeId = runtimeIdForSession(sessionId)
-  if (runtimeTurnActive(runtimeId)) conversation = { ...conversation, ...conversationFor(sessionId), activeTurnId: conversationFor(sessionId).activeTurnId }
+  const turnState = asRecord(result.turn_state)
+  const turnId = asRecordText(turnState.turn_id)
+  const wasActive = sessionTurnActive(sessionId)
+  const live = conversationFor(sessionId)
+  const mergeSource = !live.activeTurnId && state.runtimeTurnPending[sessionId] && turnState.status === "running" && turnId
+    ? { ...live, activeTurnId: turnId, turnStartedAt: live.turnStartedAt || Date.now() }
+    : live
+  const conversation = mergeReplayConversation(conversationFromReplay(messages), mergeSource)
   setConversationFor(sessionId, conversation)
+  if (turnState.status === "running" && turnId && !wasActive) {
+    state.runtimeTurnPending[sessionId] = true
+    runAction(async () => {
+      try {
+        await requestForSession(runtimeMethods.sessionPrompt, sessionId, { resume: true })
+      } finally {
+        state.runtimeTurnPending[sessionId] = false
+        if (state.viewedSessionId === sessionId) render()
+      }
+    }, sessionId)
+  }
   if (sessionId === state.viewedSessionId) {
-    state.sessionModels[sessionId] = result.model
-    state.model = result.model
+    const model = asRecordText(result.model)
+    if (model) {
+      state.sessionModels[sessionId] = model
+      state.model = model
+    }
     resetConversationPresentation(false)
   }
 }
@@ -1106,67 +1169,59 @@ async function loadSettings() {
   }
 }
 
-function applyRuntimeInitialization(runtimeId: string, result: unknown) {
+function applyRuntimeInitialization(result: unknown) {
   const initialize = asRecord(result)
-  const hadViewedSession = Boolean(state.viewedSessionId)
-  const sessionId = typeof initialize.session_id === "string" ? initialize.session_id : state.runtimeSessionIds[runtimeId] || ""
-  adoptRuntimeSession(runtimeId, sessionId)
-  if (!hadViewedSession && typeof initialize.model === "string") {
+  if (!state.viewedSessionId && typeof initialize.model === "string") {
     state.model = initialize.model
-    if (sessionId) state.sessionModels[sessionId] = initialize.model
   }
   const commands = parseSlashCommands(initialize.commands)
   if (commands.length) state.slashCommands = mergeSlashCommands(fallbackSlashCommands, commands)
-  const turnState = asRecord(initialize.turn_state)
-  if (turnState.status === "running" && typeof turnState.turn_id === "string" && turnState.turn_id) {
-    runAction(() => request(runtimeMethods.sessionPrompt, { resume: true }, runtimeId))
-  }
 }
 
 function syncCurrentPendingInputs() {
   syncPendingInputDock(
     pendingInputDock,
-    state.pendingInputs[currentRuntimeId()] || [],
-    (inputId) => runAction(() => promoteFollowUp(inputId)),
-    (inputId) => runAction(() => recallPendingInput(inputId)),
+    state.pendingInputs[state.viewedSessionId] || [],
+    (inputId) => runAction(() => promoteFollowUp(inputId), state.viewedSessionId),
+    (inputId) => runAction(() => recallPendingInput(inputId), state.viewedSessionId),
   )
 }
 
-function addPendingInput(runtimeId: string, input: string, result: Record<string, unknown>) {
+function addPendingInput(sessionId: string, input: string, result: Record<string, unknown>) {
   const inputId = asRecordText(result.input_id)
   if (!inputId) throw new Error("Runtime accepted queued input without input_id.")
-  const pending = state.pendingInputs[runtimeId] || []
-  state.pendingInputs[runtimeId] = [
+  const pending = state.pendingInputs[sessionId] || []
+  state.pendingInputs[sessionId] = [
     ...pending,
     { inputId, input, mode: result.mode === "steering" ? "steering" : "follow_up", promoting: false, recalling: false },
   ]
 }
 
-function deliverPendingInput(runtimeId: string, inputId: string, sessionId: string) {
+function deliverPendingInput(sessionId: string, inputId: string) {
   if (!inputId) return false
-  const pending = state.pendingInputs[runtimeId]
+  const pending = state.pendingInputs[sessionId]
   const index = pending?.findIndex((item) => item.inputId === inputId) ?? -1
   if (index < 0 || !pending) return false
   const input = pending[index]
   pending.splice(index, 1)
-  if (!pending.length) delete state.pendingInputs[runtimeId]
+  if (!pending.length) delete state.pendingInputs[sessionId]
   if (sessionId) setConversationFor(sessionId, addUserMessage(conversationFor(sessionId), input.input))
   return true
 }
 
 async function promoteFollowUp(inputId: string) {
-  const runtimeId = currentRuntimeId()
-  const item = state.pendingInputs[runtimeId]?.find((pending) => pending.inputId === inputId)
+  const sessionId = state.viewedSessionId
+  const item = state.pendingInputs[sessionId]?.find((pending) => pending.inputId === inputId)
   if (!item || item.mode !== "follow_up" || item.promoting) return
   item.promoting = true
   syncCurrentPendingInputs()
   try {
-    const result = asRecord(await request(runtimeMethods.sessionPromoteFollowUp, { input_id: inputId }, runtimeId))
+    const result = asRecord(await requestForSession(runtimeMethods.sessionPromoteFollowUp, sessionId, { input_id: inputId }))
     if (asRecordText(result.input_id) !== inputId || result.mode !== "steering") {
       throw new Error("Runtime returned an invalid queued input promotion.")
     }
     item.mode = "steering"
-    const pending = state.pendingInputs[runtimeId]
+    const pending = state.pendingInputs[sessionId]
     if (pending) {
       pending.splice(pending.indexOf(item), 1)
       pending.push(item)
@@ -1178,8 +1233,8 @@ async function promoteFollowUp(inputId: string) {
 }
 
 async function recallPendingInput(inputId: string) {
-  const runtimeId = currentRuntimeId()
-  const pending = state.pendingInputs[runtimeId]
+  const sessionId = state.viewedSessionId
+  const pending = state.pendingInputs[sessionId]
   const item = pending?.find((candidate) => candidate.inputId === inputId)
   if (!item || item.promoting || item.recalling) return
   item.recalling = true
@@ -1188,7 +1243,7 @@ async function recallPendingInput(inputId: string) {
     const method = item.mode === "steering"
       ? runtimeMethods.sessionUnsteer
       : runtimeMethods.sessionDequeueFollowUp
-    const result = asRecord(await request(method, { input_id: item.inputId }, runtimeId))
+    const result = asRecord(await requestForSession(method, sessionId, { input_id: item.inputId }))
     const input = asRecordText(result.input)
     if (result.retrieved !== true || result.mode !== item.mode || asRecordText(result.input_id) !== item.inputId || !input) {
       throw new Error("Runtime returned an invalid queued input retrieval.")
@@ -1196,7 +1251,7 @@ async function recallPendingInput(inputId: string) {
     const index = pending.findIndex((candidate) => candidate.inputId === item.inputId)
     if (index < 0) throw new Error("Retrieved input is not present in the local queue.")
     pending.splice(index, 1)
-    if (!pending.length) delete state.pendingInputs[runtimeId]
+    if (!pending.length) delete state.pendingInputs[sessionId]
     setPrompt([input, prompt.value].filter((value) => value.trim()).join("\n\n"), true)
   } finally {
     item.recalling = false
@@ -1213,30 +1268,40 @@ function mergeSlashCommands(...groups: SlashCommand[][]) {
 }
 
 function handleRuntimeEvent(envelope: RuntimeEvent) {
-  const runtimeId = envelope.runtimeId
-  if (envelope.type === "turn_started" || envelope.type === "turn_completed" || envelope.type === "turn_failed" || envelope.type === "turn_cancelled") {
-    state.runtimeTurnPending[runtimeId] = false
+  const sessionId = envelope.sessionId
+  const eventSessionId = asRecordText(envelope.event.session_id)
+  if (!sessionId || (eventSessionId && eventSessionId !== sessionId)) return
+  const activeTurnId = conversationFor(sessionId).activeTurnId
+  if (
+    envelope.type !== "turn_started"
+    && envelope.turnId
+    && activeTurnId
+    && envelope.turnId !== activeTurnId
+    && !state.runtimeTurnPending[sessionId]
+  ) return
+  const turnStarted = envelope.type === "turn_started"
+  const turnSettled = envelope.type === "turn_completed" || envelope.type === "turn_failed" || envelope.type === "turn_cancelled"
+  if (turnStarted || turnSettled) {
+    state.runtimeTurnPending[sessionId] = turnStarted
   }
-  if (envelope.sessionId) {
-    adoptRuntimeSession(runtimeId, envelope.sessionId)
-    runAction(loadSessions)
-    if (envelope.type === "turn_started") runAction(() => recordRecentSession(envelope.sessionId))
+  if (turnStarted) {
+    runAction(loadSessions, sessionId)
+    runAction(() => recordRecentSession(sessionId), sessionId)
   }
-  const sessionId = envelope.sessionId || state.runtimeSessionIds[runtimeId] || ""
   if (envelope.type === "queued_input_delivered") {
-    deliverPendingInput(runtimeId, asRecordText(envelope.event.input_id), sessionId)
+    deliverPendingInput(sessionId, asRecordText(envelope.event.input_id))
   }
-  if (sessionId) setConversationFor(sessionId, reduceEvent(conversationFor(sessionId), envelope))
-  if (envelope.type === "turn_completed" || envelope.type === "turn_failed" || envelope.type === "turn_cancelled") {
-    delete state.pendingInputs[runtimeId]
+  setConversationFor(sessionId, reduceEvent(conversationFor(sessionId), envelope))
+  if (turnSettled) {
+    delete state.pendingInputs[sessionId]
     runAction(async () => {
       await loadSessions()
       if (sessionId === state.viewedSessionId) render()
       else renderRecentSessions()
-    })
+    }, sessionId)
   }
   if (sessionId === state.viewedSessionId) scheduleRender()
-  else render()
+  else if (turnStarted || turnSettled) render()
 }
 
 function scheduleRender() {
@@ -1336,7 +1401,7 @@ function selectSlashCommand(command: SlashCommand) {
   closeSlashCommandMenu()
 }
 
-requiredElement<HTMLFormElement>("composer").addEventListener("submit", (event) => { event.preventDefault(); runAction(sendPrompt) })
+  requiredElement<HTMLFormElement>("composer").addEventListener("submit", (event) => { event.preventDefault(); runAction(sendPrompt, state.viewedSessionId) })
 
 prompt.addEventListener("input", () => {
   if (state.chatProjectPath) state.drafts[state.chatProjectPath] = prompt.value
@@ -1367,7 +1432,7 @@ prompt.addEventListener("keydown", (event) => {
   }
   if (event.key === "Enter" && !event.shiftKey && !event.isComposing) {
     event.preventDefault()
-    runAction(sendPrompt)
+    runAction(sendPrompt, state.viewedSessionId)
   }
 })
 document.addEventListener("keydown", (event) => {
@@ -1404,7 +1469,7 @@ document.addEventListener("keydown", (event) => {
     return
   }
   if (event.key === "Escape" && runtimeTurnActive() && !state.settingsOpen) {
-    runAction(() => request(runtimeMethods.sessionCancel))
+    runAction(() => request(runtimeMethods.sessionCancel), state.viewedSessionId)
   }
 })
 document.addEventListener("pointerdown", (event) => {
@@ -1442,51 +1507,50 @@ async function sendPrompt() {
     state.drafts[state.chatProjectPath] = ""
     autoGrowPrompt()
     closeSlashCommandMenu()
-    runAction(() => runSlash(input))
+    runAction(() => runSlash(input), state.viewedSessionId)
     return
   }
-  const runtimeId = currentRuntimeId()
-  await ensureRuntime(runtimeId, project.path, state.viewedSessionId || undefined)
-  state.viewedRuntimeId = runtimeId
-  const active = runtimeTurnActive(runtimeId)
+  const projectPath = project.path
+  const requestedSessionId = state.viewedSessionId
+  const requestedModel = state.model || state.settings.model
+  await ensureRuntime()
+  const sessionId = await ensureSession(projectPath, requestedSessionId, requestedModel)
+  const active = sessionTurnActive(sessionId)
   if (active) {
-    const result = asRecord(await request(runtimeMethods.sessionFollowUp, { input }, runtimeId))
-    addPendingInput(runtimeId, input, result)
+    const result = asRecord(await requestForSession(runtimeMethods.sessionFollowUp, sessionId, { input }))
+    addPendingInput(sessionId, input, result)
     prompt.value = ""
-    state.drafts[state.chatProjectPath] = ""
+    state.drafts[projectPath] = ""
     autoGrowPrompt()
     closeSlashCommandMenu()
     syncCurrentPendingInputs()
     return
   }
   prompt.value = ""
-  state.drafts[state.chatProjectPath] = ""
+  state.drafts[projectPath] = ""
   autoGrowPrompt()
   closeSlashCommandMenu()
-  state.conversation = addUserMessage(state.conversation, input)
-  render()
-  const result = await startTurn(input, runtimeId)
+  setConversationFor(sessionId, addUserMessage(conversationFor(sessionId), input))
+  if (state.viewedSessionId === sessionId) render()
+  const result = await startTurn(sessionId, input)
   if (typeof result.session_id === "string" && result.session_id) {
-    adoptRuntimeSession(runtimeId, result.session_id)
-    state.viewedSessionId = result.session_id
-    state.viewedProjectPath = project.path
     await loadSessions()
     await recordRecentSession(result.session_id)
   }
-  render()
+  if (state.viewedSessionId === sessionId) render()
 }
 
-async function startTurn(input: string, runtimeId = currentRuntimeId(), transientSystemMessages?: unknown) {
-  state.runtimeTurnPending[runtimeId] = true
-  render()
+async function startTurn(sessionId: string, input: string, transientSystemMessages?: unknown) {
+  state.runtimeTurnPending[sessionId] = true
+  if (state.viewedSessionId === sessionId) render()
   try {
-    return asRecord(await request(runtimeMethods.sessionPrompt, {
+    return asRecord(await requestForSession(runtimeMethods.sessionPrompt, sessionId, {
       input,
       ...(Array.isArray(transientSystemMessages) ? { transient_system_messages: transientSystemMessages } : {}),
-    }, runtimeId))
+    }))
   } finally {
-    state.runtimeTurnPending[runtimeId] = false
-    render()
+    state.runtimeTurnPending[sessionId] = false
+    if (state.viewedSessionId === sessionId) render()
   }
 }
 
@@ -1528,8 +1592,9 @@ async function runSlash(input: string) {
     render()
     return
   }
-  const runtimeId = currentRuntimeId()
-  const commandSessionId = state.viewedSessionId
+  const projectPath = project.path
+  const requestedSessionId = state.viewedSessionId
+  const requestedModel = state.model || state.settings.model
   const compacting = /^\/compact\s*$/i.test(input)
   state.slashCommandPending = true
   state.slashCommandInput = input
@@ -1538,34 +1603,33 @@ async function runSlash(input: string) {
   }
   render()
   try {
-    await ensureRuntime(runtimeId, project.path, state.viewedSessionId || undefined)
-    if (isCurrentSlashView(runtimeId, project.path, commandSessionId)) state.viewedRuntimeId = runtimeId
-    const result = asRecord(await request(runtimeMethods.commandExecute, { input }, runtimeId))
+    await ensureRuntime()
+    const commandSessionId = await ensureSession(projectPath, requestedSessionId, requestedModel)
+    const result = asRecord(await requestForSession(runtimeMethods.commandExecute, commandSessionId, { input }))
     const commands = parseSlashCommands(asRecord(result.display).commands)
     if (commands.length) state.slashCommands = mergeSlashCommands(fallbackSlashCommands, commands)
     const text = asRecordText(result.text)
     if (compacting && text.startsWith("Compact complete.")) {
       await loadReplay(commandSessionId)
-      if (isCurrentSlashView(runtimeId, project.path, commandSessionId)) {
+      if (isCurrentSlashView(projectPath, commandSessionId)) {
         state.notice = "Context compacted. Session history remains visible."
       }
-    } else if (text && canUpdateSlashSession(runtimeId, project.path, commandSessionId)) {
+    } else if (text && canUpdateSlashSession(projectPath, commandSessionId)) {
       setConversationFor(
         commandSessionId,
         addCommandResult(conversationFor(commandSessionId), input, text, asRecord(result.display)),
       )
     }
     const prefill = typeof result.prompt_prefill === "string" ? result.prompt_prefill : ""
-    if (prefill && isCurrentSlashView(runtimeId, project.path, commandSessionId)) setPrompt(prefill, true)
+    if (prefill && isCurrentSlashView(projectPath, commandSessionId)) setPrompt(prefill, true)
     const nextPrompt = result.next_prompt && typeof result.next_prompt === "object"
       ? result.next_prompt as Record<string, unknown>
       : null
     const followUp = typeof nextPrompt?.input === "string" ? nextPrompt.input.trim() : ""
-    if (followUp && canUpdateSlashSession(runtimeId, project.path, commandSessionId)) {
+    if (followUp && canUpdateSlashSession(projectPath, commandSessionId)) {
       setConversationFor(commandSessionId, addUserMessage(conversationFor(commandSessionId), followUp))
-      const turn = await startTurn(followUp, runtimeId, nextPrompt?.transient_system_messages)
+      const turn = await startTurn(commandSessionId, followUp, nextPrompt?.transient_system_messages)
       if (typeof turn.session_id === "string" && turn.session_id) {
-        adoptRuntimeSession(runtimeId, turn.session_id)
         await loadSessions()
         await recordRecentSession(turn.session_id)
       }
@@ -1577,29 +1641,27 @@ async function runSlash(input: string) {
   }
 }
 
-function isCurrentSlashView(runtimeId: string, projectPath: string, sessionId: string) {
-  return currentRuntimeId() === runtimeId
-    && samePath(state.chatProjectPath, projectPath)
+function isCurrentSlashView(projectPath: string, sessionId: string) {
+  return samePath(state.chatProjectPath, projectPath)
     && state.viewedSessionId === sessionId
 }
 
-function canUpdateSlashSession(runtimeId: string, projectPath: string, sessionId: string) {
-  return isCurrentSlashView(runtimeId, projectPath, sessionId)
+function canUpdateSlashSession(projectPath: string, sessionId: string) {
+  return isCurrentSlashView(projectPath, sessionId)
     || Boolean(sessionId && Object.hasOwn(state.conversationCache, sessionId))
 }
 
 async function compactCurrentSession() {
   const project = chatProject()
   if (!project?.available || !state.viewedSessionId) return
-  const runtimeId = currentRuntimeId()
+  const sessionId = state.viewedSessionId
   state.compacting = true
   render()
   try {
-    await ensureRuntime(runtimeId, project.path, state.viewedSessionId)
-    state.viewedRuntimeId = runtimeId
-    const record = asRecord(await request(runtimeMethods.sessionCompact, {}, runtimeId))
-    await loadReplay()
-    state.notice = compactNotice(record)
+    await ensureRuntime()
+    const record = asRecord(await requestForSession(runtimeMethods.sessionCompact, sessionId))
+    await loadReplay(sessionId)
+    if (state.viewedSessionId === sessionId) state.notice = compactNotice(record)
   } finally {
     state.compacting = false
     render()
@@ -1621,12 +1683,11 @@ function asRecordText(value: unknown): string {
   return typeof value === "string" ? value.trim() : ""
 }
 
-interrupt.addEventListener("click", () => runAction(() => request(runtimeMethods.sessionCancel)))
+interrupt.addEventListener("click", () => runAction(() => request(runtimeMethods.sessionCancel), state.viewedSessionId))
 retry.addEventListener("click", () => runAction(async () => {
   const project = chatProject()
-  const runtimeId = currentRuntimeId()
   if (!project?.available) return
-  await ensureRuntime(runtimeId, project.path, state.viewedSessionId || undefined)
+  await restartRuntime(project.path)
   state.notice = ""
   render()
 }))
@@ -1652,7 +1713,7 @@ composerMenuTrigger.addEventListener("click", () => {
 compactContext.addEventListener("click", () => {
   state.composerMenuOpen = false
   render()
-  runAction(compactCurrentSession)
+    runAction(compactCurrentSession, state.viewedSessionId)
 })
 slashCommandMenu.addEventListener("pointermove", (event) => {
   const commandName = (event.target as HTMLElement).closest<HTMLButtonElement>("[data-slash-command]")?.dataset.slashCommand
@@ -1721,11 +1782,11 @@ projectList.addEventListener("click", (event) => {
   }
   const sessionButton = (event.target as HTMLElement).closest<HTMLButtonElement>("[data-session-id]")
   const nextSessionId = sessionButton?.dataset.sessionId
-  if (nextSessionId) runAction(() => switchSession(nextSessionId))
+  if (nextSessionId) runAction(() => switchSession(nextSessionId), nextSessionId)
 })
 recentList.addEventListener("click", (event) => {
   const nextSessionId = (event.target as HTMLElement).closest<HTMLButtonElement>("[data-session-id]")?.dataset.sessionId
-  if (nextSessionId) runAction(() => switchSession(nextSessionId))
+  if (nextSessionId) runAction(() => switchSession(nextSessionId), nextSessionId)
 })
 fileTree.addEventListener("click", (event) => {
   const target = event.target as HTMLElement
@@ -1799,7 +1860,7 @@ messageStream.addEventListener("click", (event) => {
   }
   const commandSessionId = target.closest<HTMLButtonElement>("[data-command-session-id]")?.dataset.commandSessionId
   if (commandSessionId) {
-    runAction(() => switchSession(commandSessionId))
+    runAction(() => switchSession(commandSessionId), commandSessionId)
     return
   }
   const questionOption = target.closest<HTMLButtonElement>("[data-question-option-index]")
@@ -1829,7 +1890,7 @@ messageStream.addEventListener("submit", (event) => {
   const question = state.conversation.question
   if (!question) return
   const answer = questionAnswer(questionSelectionFor(question), question.options)
-  if (answer) runAction(() => answerQuestion(answer))
+  if (answer) runAction(() => answerQuestion(answer), state.viewedSessionId)
 })
 
 function toolHeaderOffset(id: string) {
@@ -1895,7 +1956,6 @@ function openSettings() {
 function resetProjectView() {
   closeComposerSelectMenus()
   state.viewedSessionId = ""
-  state.viewedRuntimeId = ""
   state.conversationCache = {}
   state.sessionModels = {}
   state.conversation = createConversation()
@@ -2001,12 +2061,10 @@ async function startNewChat() {
     return
   }
   state.viewedSessionId = ""
-  state.viewedRuntimeId = ""
   state.model = state.settings.model
   state.filesOpen = false
   state.filePreview = undefined
   state.fileListings = {}
-  state.draftRuntimeIds[project.path] = createRuntimeId("draft")
   state.conversation = createConversation()
   resetConversationPresentation()
   restoreProjectDraft()
@@ -2042,12 +2100,16 @@ async function loadMoreSessions(path: string) {
 async function loadDirectory(path: string) {
   const project = viewedProject()
   if (!project) return
-  const listing = await window.api.files.list(project.path, path)
+  const projectPath = project.path
+  const listing = await window.api.files.list(projectPath, path)
+  if (!samePath(viewedProject()?.path || "", projectPath)) return
   state.fileListings = { ...state.fileListings, [path]: listing }
   render()
 }
 
 async function toggleDirectory(path: string) {
+  const projectPath = viewedProject()?.path || ""
+  if (!projectPath) return
   const expanded = new Set(state.expandedDirectories)
   if (expanded.has(path)) {
     expanded.delete(path)
@@ -2055,6 +2117,7 @@ async function toggleDirectory(path: string) {
     expanded.add(path)
     if (!state.fileListings[path]) await loadDirectory(path)
   }
+  if (!samePath(viewedProject()?.path || "", projectPath)) return
   state.expandedDirectories = expanded
   render()
 }
@@ -2062,7 +2125,10 @@ async function toggleDirectory(path: string) {
 async function previewFile(path: string) {
   const project = viewedProject()
   if (!project) return
-  state.filePreview = await window.api.files.preview(project.path, path)
+  const projectPath = project.path
+  const preview = await window.api.files.preview(projectPath, path)
+  if (!samePath(viewedProject()?.path || "", projectPath)) return
+  state.filePreview = preview
   render()
 }
 
@@ -2132,18 +2198,17 @@ async function switchSession(nextSessionId: string) {
   const project = projectForPath(session.workspaceRoot)
   if (!project) return
   closeComposerSelectMenus()
-  const runtimeId = runtimeIdForSession(nextSessionId)
   showCachedSession(nextSessionId)
   state.viewedSessionId = nextSessionId
   state.model = state.sessionModels[nextSessionId] || ""
   state.viewedProjectPath = project.path
   state.chatProjectPath = project.path
-  state.viewedRuntimeId = state.runtimeWorkers[runtimeId] ? runtimeId : ""
   state.expandedDirectories = new Set([""])
   state.fileListings = {}
   state.filePreview = undefined
   render()
-  if (!state.conversationCache[nextSessionId] || state.conversation.entries.length === 0) await loadReplay(nextSessionId)
+  await loadReplay(nextSessionId)
+  if (state.viewedSessionId !== nextSessionId) return
   if (state.filesOpen && viewedProject()?.available) await loadDirectory("")
   render()
 }
@@ -2157,9 +2222,7 @@ async function selectChatProject(path: string) {
   state.chatProjectPath = project.path
   state.viewedProjectPath = project.path
   state.viewedSessionId = ""
-  state.viewedRuntimeId = ""
   state.model = state.settings.model
-  state.draftRuntimeIds[path] = createRuntimeId("draft")
   state.conversation = createConversation()
   state.expandedDirectories = new Set([""])
   state.fileListings = {}
@@ -2172,26 +2235,23 @@ async function selectChatProject(path: string) {
 
 function showCachedSession(sessionId: string) {
   if (sessionId === state.viewedSessionId) return
-  const cache = { ...state.conversationCache, [state.viewedSessionId]: state.conversation }
+  const cache = { ...state.conversationCache }
+  if (state.viewedSessionId) cache[state.viewedSessionId] = state.conversation
   state.viewedSessionId = sessionId
   state.conversation = cache[sessionId] || createConversation()
   state.conversationCache = cache
   resetConversationPresentation()
 }
 
-function createRuntimeId(prefix: string) {
-  return `${prefix}:${Date.now().toString(36)}:${Math.random().toString(36).slice(2, 8)}`
-}
-
 async function answerQuestion(answer: string) {
-  const runtimeId = currentRuntimeId()
-  if (!runtimeTurnActive(runtimeId)) return
+  const sessionId = state.viewedSessionId
+  if (!sessionTurnActive(sessionId)) return
   const question = state.conversation.question
   if (!question) return
   state.conversation = { ...state.conversation, question: undefined }
   state.questionSelection = undefined
   render()
-  await request(runtimeMethods.userQuestionRespond, { tool_call_id: question.toolCallId, answer }, runtimeId)
+  await requestForSession(runtimeMethods.userQuestionRespond, sessionId, { tool_call_id: question.toolCallId, answer })
 }
 
 async function saveSettings() {
@@ -2210,7 +2270,7 @@ async function saveSettings() {
       || settingsBaseUrl.value.trim() !== state.settings.baseUrl
       || settingsModel.value.trim() !== state.settings.model
       || settingsReasoning.value.trim() !== state.settings.reasoningEffort
-    const hasRunningRuntime = Object.values(state.runtimeWorkers).some((runtime) => runtime.status === "starting" || runtime.status === "ready")
+    const hasRunningRuntime = state.runtime.status === "starting" || state.runtime.status === "ready"
     state.settings = await window.api.settings.save({
       ...(apiKey ? { apiKey } : {}),
       model: settingsModel.value.trim(),
@@ -2231,19 +2291,13 @@ async function saveSettings() {
 }
 
 const unsubscribeStatus = window.api.runtime.subscribe((snapshot) => {
-  const runtimeId = snapshot.runtimeId || ""
-  if (!runtimeId) return
-  state.runtimeWorkers[runtimeId] = snapshot
-  if (snapshot.sessionId) adoptRuntimeSession(runtimeId, snapshot.sessionId)
+  state.runtime = snapshot
   if (snapshot.status !== "ready") {
-    state.runtimeTurnPending[runtimeId] = false
-    delete state.pendingInputs[runtimeId]
+    clearRuntimeTurnState()
   }
   if (snapshot.status === "error") {
-    if (runtimeId === currentRuntimeId()) {
-      clearSlashCommandPending()
-      state.notice = snapshot.message || "Runtime is unavailable."
-    }
+    clearSlashCommandPending()
+    state.notice = snapshot.message || "Runtime is unavailable."
     if (!state.settingsAutoOpened && snapshot.message?.includes("Configuration error")) {
       state.settingsAutoOpened = true
       openSettings()

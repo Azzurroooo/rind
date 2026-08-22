@@ -173,6 +173,47 @@ export function conversationFromReplay(messages: unknown[]): ConversationState {
   return state
 }
 
+export function mergeReplayConversation(replay: ConversationState, live: ConversationState): ConversationState {
+  const entries = replay.entries.map((entry) => ({ ...entry })) as Entry[]
+  const matched = new Set<number>()
+  const liveEntryIds = new Map<string, string>()
+  let nextEntryId = Math.max(replay.nextEntryId, live.nextEntryId, nextEntryNumber(entries))
+  const liveTurnStart = live.activeTurnId ? activeTurnStart(live.entries, live.activeTurnId) : -1
+  const replayTurnStartIndex = liveTurnStart >= 0 ? replayTurnStart(entries, live.entries[liveTurnStart]) : -1
+
+  for (const [liveIndex, entry] of live.entries.entries()) {
+    const minimumIndex = liveIndex >= liveTurnStart && entry.kind === "assistant" && entry.turnId === live.activeTurnId
+      ? replayTurnStartIndex >= 0 ? replayTurnStartIndex + 1 : entries.length
+      : 0
+    const index = findReplayEntry(entries, entry, matched, minimumIndex)
+    if (index >= 0) {
+      const id = entries[index].id
+      entries[index] = { ...entry, id } as Entry
+      matched.add(index)
+      liveEntryIds.set(entry.id, id)
+      continue
+    }
+    const id = `entry-${nextEntryId++}`
+    entries.push({ ...entry, id } as Entry)
+    matched.add(entries.length - 1)
+    liveEntryIds.set(entry.id, id)
+  }
+
+  const trimmed = entries.length > maxEntries ? entries.slice(entries.length - maxEntries) : entries
+  const openAssistantId = live.openAssistantId ? liveEntryIds.get(live.openAssistantId) || "" : ""
+  return {
+    ...replay,
+    entries: trimmed,
+    activeTurnId: live.activeTurnId || replay.activeTurnId,
+    turnStartedAt: live.activeTurnId ? live.turnStartedAt : replay.turnStartedAt,
+    ...(live.question ? { question: live.question } : {}),
+    contextUsagePercent: live.contextUsagePercent ?? replay.contextUsagePercent,
+    ...(live.plan ? { plan: live.plan } : {}),
+    openAssistantId: openAssistantId && trimmed.some((entry) => entry.id === openAssistantId) ? openAssistantId : "",
+    nextEntryId,
+  }
+}
+
 export function latestPlan(state: ConversationState): PlanEntry | undefined {
   return state.plan
 }
@@ -304,6 +345,53 @@ function completeReplayTool(state: ConversationState, record: Record<string, unk
 function appendEntry(state: ConversationState, entry: Entry): ConversationState {
   const id = entry.id || `entry-${state.nextEntryId}`
   return { ...state, entries: trimEntries([...state.entries, { ...entry, id } as Entry]), nextEntryId: state.nextEntryId + 1 }
+}
+
+function findReplayEntry(entries: Entry[], entry: Entry, matched: Set<number>, minimumIndex = 0) {
+  const fingerprint = entryFingerprint(entry)
+  if (!fingerprint) return -1
+  for (let index = entries.length - 1; index >= minimumIndex; index -= 1) {
+    if (matched.has(index) || entryFingerprint(entries[index]) !== fingerprint) continue
+    return index
+  }
+  return -1
+}
+
+function activeTurnStart(entries: Entry[], turnId: string) {
+  const firstAssistant = entries.findIndex((entry) => entry.kind === "assistant" && entry.turnId === turnId)
+  const from = firstAssistant >= 0 ? firstAssistant - 1 : entries.length - 1
+  for (let index = from; index >= 0; index -= 1) {
+    if (entries[index].kind === "user") return index
+  }
+  return -1
+}
+
+function replayTurnStart(entries: Entry[], liveEntry: Entry) {
+  const fingerprint = entryFingerprint(liveEntry)
+  if (!fingerprint) return -1
+  for (let index = entries.length - 1; index >= 0; index -= 1) {
+    if (entryFingerprint(entries[index]) === fingerprint) return index
+  }
+  return -1
+}
+
+function entryFingerprint(entry: Entry): string {
+  switch (entry.kind) {
+    case "user": return `user:${entry.content}`
+    case "assistant": return `assistant:${entry.content}`
+    case "tool": return entry.toolCallId ? `tool:${entry.toolCallId}` : ""
+    case "file": return `file:${entry.filePath}`
+    case "error": return `error:${entry.source}:${entry.content}`
+    case "notice": return `notice:${entry.label}:${entry.content}`
+    case "command": return `command:${entry.command}:${entry.content}`
+  }
+}
+
+function nextEntryNumber(entries: Entry[]) {
+  return entries.reduce((next, entry) => {
+    const match = /^entry-(\d+)$/.exec(entry.id)
+    return match ? Math.max(next, Number(match[1]) + 1) : next
+  }, 1)
 }
 
 function replaceEntry(state: ConversationState, id: string, next: Entry): ConversationState {

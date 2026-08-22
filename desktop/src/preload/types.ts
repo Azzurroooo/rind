@@ -1,15 +1,11 @@
-export type RuntimeStatus = "starting" | "ready" | "error" | "stopped"
+export type RuntimeStatus = "starting" | "ready" | "stopping" | "error" | "stopped"
 
 export type RuntimeSnapshot = {
   status: RuntimeStatus
-  runtimeId?: string
   message?: string
-  workspace?: string
-  sessionId?: string
 }
 
 export type RuntimeEvent = {
-  runtimeId: string
   type: string
   sequence: number
   durability: "durable" | "incremental"
@@ -37,11 +33,44 @@ export const runtimeMethods = {
   modelSet: "model/set",
   sessionCompact: "rind/session/compact",
   commandExecute: "rind/command/execute",
+  backgroundList: "rind/background/list",
+  backgroundOutput: "rind/background/output",
+  goalGet: "rind/goal/get",
+  goalSet: "rind/goal/set",
+  goalStatus: "rind/goal/status",
+  goalClear: "rind/goal/clear",
 } as const
 
 export type RuntimeMethod = typeof runtimeMethods[keyof typeof runtimeMethods]
 export type RuntimeLifecycleMethod = "initialize" | "shutdown"
 export type RuntimeServerMethod = RuntimeMethod | RuntimeLifecycleMethod
+
+export const sessionScopedMethods = new Set<RuntimeMethod>([
+  runtimeMethods.sessionPrompt,
+  runtimeMethods.sessionReplay,
+  runtimeMethods.sessionSwitch,
+  runtimeMethods.sessionCancel,
+  runtimeMethods.modelSet,
+  runtimeMethods.sessionSteer,
+  runtimeMethods.sessionFollowUp,
+  runtimeMethods.sessionPromoteFollowUp,
+  runtimeMethods.sessionUnsteer,
+  runtimeMethods.sessionDequeueFollowUp,
+  runtimeMethods.sessionCompact,
+  runtimeMethods.commandExecute,
+  runtimeMethods.userQuestionRespond,
+  runtimeMethods.backgroundList,
+  runtimeMethods.backgroundOutput,
+  runtimeMethods.goalGet,
+  runtimeMethods.goalSet,
+  runtimeMethods.goalStatus,
+  runtimeMethods.goalClear,
+])
+
+export const turnScopedMethods = new Set<RuntimeMethod>([
+  runtimeMethods.sessionCancel,
+  runtimeMethods.sessionSteer,
+])
 
 export type RuntimeRequestEnvelope = {
   kind: "request"
@@ -143,11 +172,10 @@ export type DesktopFilePreview = {
 
 export type DesktopApi = {
   runtime: {
-    start: (runtimeId: string, workspace: string, sessionId?: string) => Promise<RuntimeSnapshot>
-    initialize: (runtimeId: string) => Promise<unknown>
-    request: (runtimeId: string, method: RuntimeMethod, params?: Record<string, unknown>) => Promise<unknown>
-    shutdown: (runtimeId: string) => Promise<unknown>
-    shutdownAll: () => Promise<unknown>
+    start: (workspace: string) => Promise<RuntimeSnapshot>
+    initialize: () => Promise<unknown>
+    request: (method: RuntimeMethod, params?: Record<string, unknown>) => Promise<unknown>
+    shutdown: () => Promise<unknown>
     subscribe: (listener: (snapshot: RuntimeSnapshot) => void) => () => void
     subscribeEvents: (listener: (event: RuntimeEvent) => void) => () => void
   }
@@ -167,9 +195,6 @@ export type DesktopApi = {
     markRecent: (sessionId: string) => Promise<DesktopProjectOverview>
     updateLayout: (patch: { sidebarOpen?: boolean; sidebarWidth?: number; filesOpen?: boolean; filePanelWidth?: number }) => Promise<DesktopProjectOverview>
     sessions: (path: string, offset: number, limit: number) => Promise<{ sessions: DesktopSessionSummary[]; total: number }>
-  }
-  sessions: {
-    replay: (sessionId: string) => Promise<{ messages: unknown[]; sessionId: string; model: string }>
   }
   files: {
     list: (projectPath: string, path?: string) => Promise<DesktopFileListing>

@@ -1,0 +1,228 @@
+from __future__ import annotations
+
+import asyncio
+from types import SimpleNamespace
+
+from agent.runtime.server.protocol import RuntimeMethod
+from agent.runtime.server.stdio import WorkerStdioRuntimeServer
+
+
+class _Event:
+    def __init__(self, event_type: str, session_id: str, turn_id: str):
+        self._data = {
+            "type": event_type,
+            "session_id": session_id,
+            "turn_id": turn_id,
+        }
+
+    def to_dict(self):
+        return dict(self._data)
+
+
+class _Store:
+    def __init__(self, session_id: str):
+        self.session_id = session_id
+        self.model = "test-model"
+        self.session_root = "."
+        self.workspace_root = "."
+
+    async def initialize(self):
+        return None
+
+    async def get_messages_slice(self, start=None, end=None):
+        return []
+
+    async def get_turn_state(self):
+        return {"status": "completed", "turn_id": ""}
+
+    async def discard_if_empty(self):
+        return None
+
+
+class _Runtime:
+    def __init__(self, session_id: str):
+        self.session_id = session_id
+        self.started = asyncio.Event()
+        self.release = asyncio.Event()
+        self.cancelled = asyncio.Event()
+        self.active_turn_id = ""
+
+    @property
+    def turn_active(self):
+        return bool(self.active_turn_id)
+
+    def set_user_question_responder(self, _responder):
+        return None
+
+    async def initialize(self):
+        return None
+
+    async def run_turn(self, *, cancellation_token, **_kwargs):
+        turn_id = f"turn-{self.session_id}"
+        self.active_turn_id = turn_id
+        self.started.set()
+        yield _Event("turn_started", self.session_id, turn_id)
+        while not self.release.is_set() and not cancellation_token.is_cancelled:
+            await asyncio.sleep(0)
+        if cancellation_token.is_cancelled:
+            self.cancelled.set()
+            yield _Event("turn_cancelled", self.session_id, turn_id)
+        else:
+            yield _Event("turn_completed", self.session_id, turn_id)
+        self.active_turn_id = ""
+
+
+class _SessionRuntime:
+    def __init__(self, session_id: str):
+        self.session_id = session_id
+        self.workspace_root = "."
+        self.session = _Store(session_id)
+        self.runtime = _Runtime(session_id)
+
+    @property
+    def active_turn_id(self):
+        return self.runtime.active_turn_id
+
+
+class _ModelClient:
+    def __init__(self):
+        self.close_count = 0
+        self.models = self
+
+    def list(self):
+        return _ModelList(("model-a", "model-b"))
+
+    async def close(self):
+        self.close_count += 1
+
+
+class _ModelList:
+    def __init__(self, values):
+        self._values = iter(values)
+
+    def __aiter__(self):
+        return self
+
+    async def __anext__(self):
+        try:
+            return SimpleNamespace(id=next(self._values))
+        except StopIteration as exc:
+            raise StopAsyncIteration from exc
+
+
+class _ProviderFactory:
+    def __init__(self):
+        self.create_count = 0
+
+    def create_async_client(self):
+        self.create_count += 1
+        return _ModelClient()
+
+
+class _Worker:
+    def __init__(self):
+        self.sessions = {session_id: _SessionRuntime(session_id) for session_id in ("A", "B")}
+        self.session_id = "A"
+        self.default_model = "default-model"
+        self.provider_client_factory = _ProviderFactory()
+        self.model_client = _ModelClient()
+        self.registry = SimpleNamespace()
+
+    async def initialize(self):
+        return self.sessions["A"]
+
+    async def session(self, session_id: str):
+        return self.sessions[session_id]
+
+    async def close(self):
+        await self.model_client.close()
+
+
+def _server_with_messages():
+    worker = _Worker()
+    server = WorkerStdioRuntimeServer(worker)
+    messages = []
+
+    async def send(payload):
+        messages.append(payload)
+
+    server._writer.send = send
+    server._initialized = True
+    return worker, server, messages
+
+
+def test_worker_routes_concurrent_sessions_without_crossed_events():
+    async def run():
+        worker, server, messages = _server_with_messages()
+        tasks = [
+            asyncio.create_task(server._dispatch({
+                "request_id": "prompt-A",
+                "method": RuntimeMethod.SESSION_PROMPT,
+                "params": {"session_id": "A", "input": "hello A"},
+            })),
+            asyncio.create_task(server._dispatch({
+                "request_id": "prompt-B",
+                "method": RuntimeMethod.SESSION_PROMPT,
+                "params": {"session_id": "B", "input": "hello B"},
+            })),
+        ]
+        await asyncio.gather(worker.sessions["A"].runtime.started.wait(), worker.sessions["B"].runtime.started.wait())
+        worker.sessions["A"].runtime.release.set()
+        worker.sessions["B"].runtime.release.set()
+        await asyncio.gather(*tasks)
+        return messages
+
+    messages = asyncio.run(run())
+    events = [message for message in messages if message.get("kind") == "event"]
+    responses = {message["request_id"]: message for message in messages if message.get("kind") == "response"}
+
+    assert {event["session_id"] for event in events} == {"A", "B"}
+    assert all(event["turn_id"] == f"turn-{event['session_id']}" for event in events)
+    assert responses["prompt-A"]["result"]["session_id"] == "A"
+    assert responses["prompt-B"]["result"]["session_id"] == "B"
+
+
+def test_worker_model_list_reuses_injected_client():
+    async def run():
+        worker, server, messages = _server_with_messages()
+        await server._dispatch({"request_id": "models-1", "method": RuntimeMethod.MODEL_LIST, "params": {}})
+        await server._dispatch({"request_id": "models-2", "method": RuntimeMethod.MODEL_LIST, "params": {}})
+        return worker, messages
+
+    worker, messages = asyncio.run(run())
+    responses = [message for message in messages if message.get("kind") == "response"]
+    assert len(responses) == 2
+    assert worker.provider_client_factory.create_count == 0
+    assert worker.model_client.close_count == 0
+
+
+def test_worker_shutdown_interrupts_all_active_sessions():
+    async def run():
+        worker, server, messages = _server_with_messages()
+        serve_task = asyncio.create_task(server._serve())
+        server._requests.put_nowait({
+            "request_id": "prompt-A",
+            "method": RuntimeMethod.SESSION_PROMPT,
+            "params": {"session_id": "A", "input": "hello A"},
+        })
+        server._requests.put_nowait({
+            "request_id": "prompt-B",
+            "method": RuntimeMethod.SESSION_PROMPT,
+            "params": {"session_id": "B", "input": "hello B"},
+        })
+        await asyncio.gather(worker.sessions["A"].runtime.started.wait(), worker.sessions["B"].runtime.started.wait())
+        server._begin_shutdown({"request_id": "shutdown", "method": RuntimeMethod.SHUTDOWN})
+        await asyncio.wait_for(serve_task, 2)
+        return worker, messages
+
+    worker, messages = asyncio.run(run())
+    assert worker.sessions["A"].runtime.cancelled.is_set()
+    assert worker.sessions["B"].runtime.cancelled.is_set()
+    assert any(message.get("request_id") == "shutdown" and message.get("result") == {"ok": True} for message in messages)
+    prompt_responses = {
+        message["request_id"]: message
+        for message in messages
+        if message.get("kind") == "response" and message.get("request_id") in {"prompt-A", "prompt-B"}
+    }
+    assert set(prompt_responses) == {"prompt-A", "prompt-B"}
+    assert worker.model_client.close_count == 1

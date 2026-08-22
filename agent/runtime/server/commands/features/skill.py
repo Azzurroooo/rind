@@ -13,7 +13,7 @@ async def handle_skill(context: SlashCommandContext, args: list[str]) -> str | S
         if repository is None:
             from agent.infrastructure.skills.repository import SkillRepository
 
-            repository = SkillRepository(project_root=str(Path.cwd()))
+            repository = SkillRepository(project_root=context.workspace_root or str(Path.cwd()))
         skills = repository.list_skills()
     except Exception as exc:
         return f"Command failed: {exc}"

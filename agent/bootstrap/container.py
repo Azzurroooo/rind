@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Collection
 from dataclasses import dataclass
+from typing import Any
 
 from agent.application.context import CompactionService, ContextEstimator, ContextManager
 from agent.application.ports.session_store import SessionStore
@@ -17,7 +18,17 @@ from agent.infrastructure.rind_docs import build_rind_doc_context
 from agent.infrastructure.skills import SkillRepository
 from agent.infrastructure.tools import DefaultToolRegistry
 from agent.infrastructure.tools.builtin import build_builtin_tool_specs
-from agent.prompts import SYSTEM_PROMPT
+from agent.prompts import build_system_prompt
+
+
+@dataclass(frozen=True, slots=True)
+class SharedRuntimeResources:
+    """Worker-scoped resources without session-bound mutable state."""
+
+    provider_async_client: Any
+    tool_result_normalizer: ToolResultNormalizer
+    stream_parser: MessageStreamParser
+    compaction_service: CompactionService
 
 
 @dataclass(frozen=True, slots=True)
@@ -43,6 +54,7 @@ def build_agent_container(
     *,
     settings: AppSettings | None = None,
     provider_client_factory: OpenAIClientFactory | None = None,
+    provider_async_client=None,
     debug: bool = False,
     session_dir: str | None = None,
     session_id: str | None = None,
@@ -58,6 +70,7 @@ def build_agent_container(
     parent_session_id: str | None = None,
     skill_project_dir: str | None = None,
     lock_workspace: bool = True,
+    shared_resources: SharedRuntimeResources | None = None,
 ) -> AgentContainer:
     """Build the production runtime dependency graph explicitly."""
     skill_project_root = None
@@ -67,12 +80,12 @@ def build_agent_container(
 
     agent_context = discover_agent(workspace_root) if workspace_root else discover_agent()
     if agent_context is not None:
+        workspace_root = str(agent_context.workspace_root)
         if agent_context.project is not None:
             resolved_team_agent = agent_context
         agent_prompt = agent_context.capsule.system_prompt.strip()
         if system_prompt is None and agent_prompt:
-            system_prompt = f"{SYSTEM_PROMPT}\n\n{agent_prompt}"
-        workspace_root = str(agent_context.workspace_root)
+            system_prompt = f"{build_system_prompt(workspace_root)}\n\n{agent_prompt}"
         project_id = project_id if project_id is not None else agent_context.project_id
         owner_agent_id = owner_agent_id or agent_context.agent_id
         session_type = session_type or "direct_agent_chat"
@@ -87,7 +100,7 @@ def build_agent_container(
         session_id=session_id,
         resume_latest=resume_latest,
         model=model,
-        system_prompt=system_prompt or SYSTEM_PROMPT,
+        system_prompt=system_prompt or build_system_prompt(workspace_root),
         workspace_root=workspace_root,
         project_id=project_id,
         owner_agent_id=owner_agent_id,
@@ -158,20 +171,30 @@ def build_agent_container(
         tool_specs = tuple(spec for spec in catalog if spec.name in requested)
     tool_registry = DefaultToolRegistry(tool_specs)
     tool_executor = ToolExecutor(registry=tool_registry)
-    tool_result_normalizer = ToolResultNormalizer()
+    tool_result_normalizer = shared_resources.tool_result_normalizer if shared_resources else ToolResultNormalizer()
     tool_processor = ToolCallProcessor(
         tool_executor=tool_executor,
         tool_result_normalizer=tool_result_normalizer,
     )
     chat_client = OpenAIChatClient(
-        async_client=provider_client_factory.create_async_client(),
+        async_client=(
+            provider_async_client
+            if provider_async_client is not None
+            else shared_resources.provider_async_client
+            if shared_resources is not None
+            else provider_client_factory.create_async_client()
+        ),
         model=model,
         reasoning_effort=settings.reasoning_effort,
+        workspace_root=workspace_root,
     )
-    stream_parser = MessageStreamParser()
+    stream_parser = shared_resources.stream_parser if shared_resources else MessageStreamParser()
     context_estimator = ContextEstimator()
-    context_manager = ContextManager(estimator=context_estimator, rind_doc_provider=build_rind_doc_context)
-    compaction_service = CompactionService(
+    context_manager = ContextManager(
+        estimator=context_estimator,
+        rind_doc_provider=lambda: build_rind_doc_context(workspace_root),
+    )
+    compaction_service = shared_resources.compaction_service if shared_resources else CompactionService(
         plan_snapshot_provider=build_plan_snapshot,
     )
     turn_runner = TurnRunner(

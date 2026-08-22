@@ -13,6 +13,7 @@ export const runtimeMethods = Object.freeze({
   modelSet: "model/set",
   sessionSteer: "rind/session/steer",
   sessionFollowUp: "rind/session/follow_up",
+  sessionPromoteFollowUp: "rind/session/promote_follow_up",
   sessionUnsteer: "rind/session/unsteer",
   sessionDequeueFollowUp: "rind/session/dequeue_follow_up",
   sessionCompact: "rind/session/compact",
@@ -25,6 +26,33 @@ export const runtimeMethods = Object.freeze({
   goalStatus: "rind/goal/status",
   goalClear: "rind/goal/clear",
 });
+
+export const sessionScopedMethods = new Set([
+  runtimeMethods.sessionPrompt,
+  runtimeMethods.sessionReplay,
+  runtimeMethods.sessionSwitch,
+  runtimeMethods.sessionCancel,
+  runtimeMethods.modelSet,
+  runtimeMethods.sessionSteer,
+  runtimeMethods.sessionFollowUp,
+  runtimeMethods.sessionPromoteFollowUp,
+  runtimeMethods.sessionUnsteer,
+  runtimeMethods.sessionDequeueFollowUp,
+  runtimeMethods.sessionCompact,
+  runtimeMethods.commandExecute,
+  runtimeMethods.userQuestionRespond,
+  runtimeMethods.backgroundList,
+  runtimeMethods.backgroundOutput,
+  runtimeMethods.goalGet,
+  runtimeMethods.goalSet,
+  runtimeMethods.goalStatus,
+  runtimeMethods.goalClear,
+]);
+
+export const turnScopedMethods = new Set([
+  runtimeMethods.sessionCancel,
+  runtimeMethods.sessionSteer,
+]);
 
 export function createRuntimeRequest(requestId, method, params = {}) {
   return { kind: "request", request_id: requestId, method, params };
@@ -63,6 +91,18 @@ export function runtimeRequestId(message) {
 
 export function runtimeEventType(message) {
   return message?.event?.type || "";
+}
+
+export function isRuntimeEventForTurn(message, sessionId = "", turnId = "") {
+  const eventSessionId = String(message?.session_id || "");
+  if (sessionId && eventSessionId && eventSessionId !== sessionId) {
+    return false;
+  }
+  if (runtimeEventType(message) === "turn_started") {
+    return Boolean(String(message?.turn_id || ""));
+  }
+  const eventTurnId = String(message?.turn_id || "");
+  return !eventTurnId || Boolean(turnId && eventTurnId === turnId);
 }
 
 function isRequestId(value) {
