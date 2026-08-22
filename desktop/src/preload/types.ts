@@ -17,9 +17,7 @@ export type RuntimeEvent = {
 export const runtimeProtocolVersion = "2"
 
 export const runtimeMethods = {
-  sessionList: "session/list",
   sessionNew: "session/new",
-  sessionSwitch: "session/switch",
   sessionReplay: "session/replay",
   sessionPrompt: "session/prompt",
   sessionSteer: "rind/session/steer",
@@ -48,7 +46,6 @@ export type RuntimeServerMethod = RuntimeMethod | RuntimeLifecycleMethod
 export const sessionScopedMethods = new Set<RuntimeMethod>([
   runtimeMethods.sessionPrompt,
   runtimeMethods.sessionReplay,
-  runtimeMethods.sessionSwitch,
   runtimeMethods.sessionCancel,
   runtimeMethods.modelSet,
   runtimeMethods.sessionSteer,

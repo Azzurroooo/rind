@@ -556,17 +556,24 @@ class JsonlSessionStore(SessionStore):
             self._projection_file_signature(paths.get("compactions")),
         )
 
-    def _projected_messages_sync(self) -> list[dict[str, Any]]:
+    def _projected_messages_sync(self, *, include_ids: bool = False) -> list[dict[str, Any]]:
         key = self._projection_cache_key_sync()
-        if self._projected_messages_cache_key == key and self._projected_messages_cache is not None:
+        if not include_ids and self._projected_messages_cache_key == key and self._projected_messages_cache is not None:
             return copy.deepcopy(self._projected_messages_cache)
 
         messages = self._msg_repo.load_messages() if self._msg_repo else []
         tool_records = self._tool_repo.load_tool_calls() if self._tool_repo else []
         compactions = self._compaction_repo.load_compactions() if self._compaction_repo else []
-        built_messages = project_messages(messages, tool_records, compactions, self._system_prompt)
-        self._projected_messages_cache_key = key
-        self._projected_messages_cache = copy.deepcopy(built_messages)
+        built_messages = project_messages(
+            messages,
+            tool_records,
+            compactions,
+            self._system_prompt,
+            include_ids=include_ids,
+        )
+        if not include_ids:
+            self._projected_messages_cache_key = key
+            self._projected_messages_cache = copy.deepcopy(built_messages)
         return copy.deepcopy(built_messages)
 
     def _auto_compact_window_sync(self) -> dict[str, Any]:
@@ -620,10 +627,11 @@ class JsonlSessionStore(SessionStore):
 
         set_active_session_context(str(self._session_root), str(self._session_id))
 
-    async def initialize(self) -> None:
+    async def initialize(self, *, persist_system_prompt: bool = True) -> None:
         async with self._write_lock:
             await asyncio.to_thread(self._ensure_session_sync)
-            await asyncio.to_thread(self._initialize_history_sync)
+            if persist_system_prompt:
+                await asyncio.to_thread(self._initialize_history_sync)
 
             from agent.infrastructure.planning.store import clear_active_session_context, set_active_session_context
 
@@ -835,9 +843,10 @@ class JsonlSessionStore(SessionStore):
         start: int | None = None,
         end: int | None = None,
         roles: list[str] | None = None,
+        include_ids: bool = False,
     ) -> list[dict[str, Any]]:
         def _get():
-            built_messages = self._projected_messages_sync()
+            built_messages = self._projected_messages_sync(include_ids=include_ids)
             if roles:
                 allowed_roles = set(roles)
                 built_messages = [message for message in built_messages if message.get("role") in allowed_roles]

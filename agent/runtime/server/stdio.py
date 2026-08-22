@@ -15,7 +15,6 @@ from agent.runtime.core import InputQueueError
 from agent.domain.cancellation import CancellationTokenSource
 from agent.domain.events import UserQuestionRequestedEvent
 from agent.infrastructure.paths import validate_session_id
-from agent.infrastructure.planning.store import set_active_session_context
 from agent.version import __version__
 from agent.runtime.server.commands import SlashCommandContext, SlashCommandResult, SlashCommandRouter
 from agent.runtime.server.commands.model_control import set_active_model
@@ -71,6 +70,8 @@ class StdioRuntimeServer:
         goal_enabled: bool = False,
         writer: JsonlWriter | None = None,
         slash_router: SlashCommandRouter | None = None,
+        event_observer: Callable[[dict[str, Any]], Any] | None = None,
+        input_observer: Callable[[dict[str, Any]], Any] | None = None,
     ):
         self._runtime = runtime
         self._session = session
@@ -83,6 +84,8 @@ class StdioRuntimeServer:
         self._goal_enabled = bool(goal_enabled)
         self._slash_router = slash_router or SlashCommandRouter()
         self._writer = writer or JsonlWriter()
+        self._event_observer = event_observer
+        self._input_observer = input_observer
         self._requests: asyncio.Queue[dict[str, Any] | None] = asyncio.Queue()
         self._pending_answers: dict[str, asyncio.Future[str]] = {}
         self._current_cancel: CancellationTokenSource | None = None
@@ -773,6 +776,11 @@ class StdioRuntimeServer:
         except InputQueueError as exc:
             await self._respond_error(message, str(exc), exc.error_type)
             return
+        if self._input_observer is not None and isinstance(result, dict):
+            observed = {**result, "session_id": self._session_id()}
+            callback_result = self._input_observer(observed)
+            if inspect.isawaitable(callback_result):
+                await callback_result
         await self._respond(message, result)
 
     async def _promote_queued_input(self, message: dict[str, Any]) -> None:
@@ -847,6 +855,10 @@ class StdioRuntimeServer:
         event_session_id = str(event.get("session_id") or "")
         if event_session_id != session_id:
             event = {**event, "session_id": session_id}
+        if self._event_observer is not None:
+            callback_result = self._event_observer(event)
+            if inspect.isawaitable(callback_result):
+                await callback_result
         self._sequence += 1
         await self._writer.send(event_envelope(event, self._sequence))
 
@@ -888,7 +900,7 @@ class WorkerStdioRuntimeServer:
         self._slash_router = SlashCommandRouter()
         self._requests: asyncio.Queue[dict[str, Any] | None] = asyncio.Queue()
         self._dispatch_tasks: set[asyncio.Task] = set()
-        self._servers: dict[str, StdioRuntimeServer] = {}
+        self._active_servers: dict[str, StdioRuntimeServer] = {}
         self._initialized = False
         self._stopping = False
         self._shutdown_request: dict[str, Any] | None = None
@@ -920,7 +932,7 @@ class WorkerStdioRuntimeServer:
             if request is None:
                 if not self._stopping:
                     self._stopping = True
-                    for server in list(self._servers.values()):
+                    for server in list(self._active_servers.values()):
                         server._interrupt_current()
                 await self._drain_dispatch_tasks()
                 await self._worker.close()
@@ -965,7 +977,7 @@ class WorkerStdioRuntimeServer:
             return False
         self._stopping = True
         self._shutdown_request = request
-        for server in list(self._servers.values()):
+        for server in list(self._active_servers.values()):
             server._interrupt_current()
         self._requests.put_nowait(None)
         return True
@@ -997,37 +1009,51 @@ class WorkerStdioRuntimeServer:
             if method == RuntimeMethod.MODEL_LIST:
                 await self._list_models(request)
                 return
+            if method == RuntimeMethod.SESSION_REPLAY:
+                await self._replay(request)
+                return
             if method == RuntimeMethod.RIND_COMMAND_EXECUTE:
-                params = request.get("params") if isinstance(request.get("params"), dict) else {}
-                if "session_id" not in params:
-                    session = await self._worker.initialize()
-                    server = await self._server_for(session)
-                    await server._dispatch(request)
-                    return
+                await self._execute_command(request)
+                return
+            if method == RuntimeMethod.MODEL_SET:
+                await self._set_model(request)
+                return
+            if method in {
+                RuntimeMethod.RIND_GOAL_GET,
+                RuntimeMethod.RIND_GOAL_SET,
+                RuntimeMethod.RIND_GOAL_STATUS,
+                RuntimeMethod.RIND_GOAL_CLEAR,
+            }:
+                await self._goal_request(request)
+                return
+            if method in {RuntimeMethod.RIND_BACKGROUND_LIST, RuntimeMethod.RIND_BACKGROUND_OUTPUT}:
+                await self._background_request(request)
+                return
             if method in SESSION_SCOPED_METHODS:
                 session_id = await self._required_session_id(request)
                 if session_id is None:
                     return
-                session = await self._worker.session(session_id)
-                server = await self._server_for(session)
-                if method in TURN_SCOPED_METHODS and not await self._valid_turn(session, request):
+                if method in TURN_SCOPED_METHODS and not await self._valid_turn(session_id, request):
                     return
-                if method in {
-                    RuntimeMethod.RIND_SESSION_STEER,
-                    RuntimeMethod.RIND_SESSION_FOLLOW_UP,
-                    RuntimeMethod.RIND_SESSION_PROMOTE_FOLLOW_UP,
-                    RuntimeMethod.RIND_SESSION_UNSTEER,
-                    RuntimeMethod.RIND_SESSION_DEQUEUE_FOLLOW_UP,
-                    RuntimeMethod.SESSION_CANCEL,
-                    RuntimeMethod.RIND_USER_QUESTION_RESPOND,
-                    RuntimeMethod.RIND_BACKGROUND_LIST,
-                    RuntimeMethod.RIND_BACKGROUND_OUTPUT,
-                    RuntimeMethod.SESSION_REPLAY,
-                }:
-                    handled = await server._handle_control_message(request)
-                    if handled:
+                if method == RuntimeMethod.SESSION_PROMPT:
+                    server = await self._start_server(session_id)
+                    await server._dispatch(request)
+                    await self._release_if_idle(session_id)
+                    return
+                server = self._active_servers.get(session_id)
+                if server is None:
+                    if method in {
+                        RuntimeMethod.RIND_SESSION_COMPACT,
+                    }:
+                        server = await self._start_server(session_id)
+                    else:
+                        await self._respond_error(request, "Session execution is not active.", "TurnNotActive")
                         return
-                await server._dispatch(request)
+                handled = await server._handle_control_message(request)
+                if not handled:
+                    await server._dispatch(request)
+                if method == RuntimeMethod.RIND_SESSION_COMPACT:
+                    await self._release_if_idle(session_id)
                 return
             await self._respond_error(request, f"Unknown method: {method}", "MethodNotFound")
         except LookupError as exc:
@@ -1036,30 +1062,82 @@ class WorkerStdioRuntimeServer:
             await self._respond_error(request, str(exc), type(exc).__name__)
 
     async def _initialize(self, request: dict[str, Any]) -> None:
-        session = await self._worker.initialize()
-        server = await self._server_for(session)
-        await server._initialize(request)
+        info = await self._worker.initialize()
+        result = {
+            "session_id": info["session_id"],
+            "draft": False,
+            "model": info.get("model"),
+            "workspace_root": info.get("workspace_root"),
+            "version": __version__,
+            "protocol_version": PROTOCOL_VERSION,
+            "capabilities": self._capabilities(),
+            "methods": self._methods(),
+            "resume_preview": "" if info.get("message_count", 0) <= 1 else await self._resume_preview(info["session_id"]),
+            "turn_state": info.get("turn_state"),
+            "live_turn": info.get("live_turn"),
+            "commands": self._slash_command_infos(),
+        }
+        if self._goal_enabled:
+            result["goal"] = info.get("goal")
+        await self._respond(request, result)
         self._initialized = True
 
-    async def _server_for(self, session) -> StdioRuntimeServer:
-        set_active_session_context(str(session.session.session_root), session.session_id)
-        server = self._servers.get(session.session_id)
-        if server is None:
-            server = StdioRuntimeServer(
-                session.runtime,
-                session.session,
-                debug=self._debug,
-                model_client_factory=self._worker.provider_client_factory.create_async_client,
-                model_client=self._worker.model_client,
-                default_model=self._worker.default_model,
-                background_list=self._background_list,
-                background_output=self._background_output,
-                goal_enabled=self._goal_enabled,
-                writer=self._writer,
-                slash_router=self._slash_router,
-            )
-            self._servers[session.session_id] = server
+    def _capabilities(self) -> list[str]:
+        capabilities = list(CAPABILITIES)
+        if self._background_list is not None and self._background_output is not None:
+            capabilities.append("rind/backgrounds")
+        if self._goal_enabled:
+            capabilities.append("rind/goals")
+        return capabilities
+
+    def _methods(self) -> list[str]:
+        methods = list(CORE_METHODS)
+        if self._background_list is not None and self._background_output is not None:
+            methods.extend((RuntimeMethod.RIND_BACKGROUND_LIST, RuntimeMethod.RIND_BACKGROUND_OUTPUT))
+        if self._goal_enabled:
+            methods.extend((RuntimeMethod.RIND_GOAL_GET, RuntimeMethod.RIND_GOAL_SET, RuntimeMethod.RIND_GOAL_STATUS, RuntimeMethod.RIND_GOAL_CLEAR))
+        return methods
+
+    def _slash_command_infos(self) -> list[dict[str, Any]]:
+        return [
+            {"name": info.name, "description": info.description, "usage": info.usage, "aliases": list(info.aliases)}
+            for info in self._slash_router.command_infos()
+        ]
+
+    async def _start_server(self, session_id: str) -> StdioRuntimeServer:
+        server = self._active_servers.get(session_id)
+        if server is not None:
+            return server
+        container = await self._worker.start_execution(session_id)
+        server = StdioRuntimeServer(
+            container.runtime,
+            container.session_store,
+            debug=self._debug,
+            model_client_factory=self._worker.provider_client_factory.create_async_client,
+            model_client=self._worker.model_client,
+            default_model=self._worker.default_model,
+            background_list=self._background_list,
+            background_output=self._background_output,
+            goal_enabled=self._goal_enabled,
+            writer=self._writer,
+            slash_router=self._slash_router,
+            event_observer=getattr(self._worker, "update_live_event", None),
+            input_observer=getattr(self._worker, "record_live_input", None),
+        )
+        self._active_servers[session_id] = server
         return server
+
+    async def _release_if_idle(self, session_id: str) -> None:
+        server = self._active_servers.get(session_id)
+        if server is None or server._runtime.turn_active:
+            return
+        self._active_servers.pop(session_id, None)
+        await self._worker.release_execution(session_id)
+
+    async def _resume_preview(self, session_id: str) -> str:
+        replay = await self._worker.repository.replay(session_id, end=20)
+        messages = replay.get("messages") if isinstance(replay, dict) else []
+        return render_resume_preview(messages if isinstance(messages, list) else [], session_id=session_id)
 
     async def _list_sessions(self, request: dict[str, Any]) -> None:
         params = request.get("params") if isinstance(request.get("params"), dict) else {}
@@ -1072,7 +1150,7 @@ class WorkerStdioRuntimeServer:
             if not isinstance(workspace_root, str) or not workspace_root.strip():
                 await self._respond_error(request, "workspace_root must be a non-empty string.", "InvalidRequest")
                 return
-        sessions = await self._worker.registry.list_sessions(limit=limit, workspace_root=workspace_root)
+        sessions = await self._worker.repository.list(limit=limit, workspace_root=workspace_root)
         await self._respond(
             request,
             {
@@ -1087,17 +1165,15 @@ class WorkerStdioRuntimeServer:
         if not isinstance(workspace_root, str) or not workspace_root.strip():
             await self._respond_error(request, "workspace_root must be a non-empty string.", "InvalidRequest")
             return
-        session = await self._worker.create_session(workspace_root)
-        await self._server_for(session)
-        await self._respond(request, self._session_info(session))
+        info = await self._worker.create_session(workspace_root)
+        await self._respond(request, info)
 
     async def _switch_session(self, request: dict[str, Any]) -> None:
         session_id = await self._required_session_id(request)
         if session_id is None:
             return
-        session = await self._worker.session(session_id)
-        await self._server_for(session)
-        await self._respond(request, self._session_info(session))
+        info = await self._worker.session(session_id)
+        await self._respond(request, info)
 
     async def _list_models(self, request: dict[str, Any]) -> None:
         params = request.get("params") if isinstance(request.get("params"), dict) else {}
@@ -1106,20 +1182,161 @@ class WorkerStdioRuntimeServer:
             if not isinstance(session_id, str) or not session_id.strip():
                 await self._respond_error(request, "session_id must be a non-empty string.", "InvalidRequest")
                 return
-            session = await self._worker.session(session_id)
         else:
-            session = await self._worker.initialize()
-        server = await self._server_for(session)
-        await server._list_models(request)
+            session_id = (await self._worker.initialize())["session_id"]
+        info = await self._worker.session(session_id)
+        client = self._worker.model_client
+        models = await self._fetch_model_ids(client)
+        current_model = str(info.get("model") or self._worker.default_model)
+        await self._respond(
+            request,
+            {
+                "models": self._merge_models(models, current_model),
+                "current_model": current_model,
+                "default_model": self._worker.default_model,
+            },
+        )
 
-    def _session_info(self, session) -> dict[str, Any]:
-        return {
-            "session_id": session.session_id,
-            "draft": False,
-            "model": getattr(session.session, "model", None),
-            "workspace_root": session.workspace_root,
-            "turn_state": None,
-        }
+    async def _fetch_model_ids(self, client: Any) -> list[str]:
+        response = client.models.list()
+        if hasattr(response, "__aiter__"):
+            values = [item async for item in response]
+        else:
+            response = await response if inspect.isawaitable(response) else response
+            values = getattr(response, "data", response)
+            values = list(values) if not isinstance(values, list | tuple) else values
+        return [str(item.get("id") if isinstance(item, dict) else getattr(item, "id", "") or "").strip() for item in values]
+
+    def _merge_models(self, models: list[str], current_model: str) -> list[str]:
+        values = sorted({model for model in models if model})
+        if current_model and current_model not in values:
+            values.insert(0, current_model)
+        return values
+
+    async def _replay(self, request: dict[str, Any]) -> None:
+        params = request.get("params") if isinstance(request.get("params"), dict) else {}
+        session_id = await self._required_session_id(request)
+        if session_id is None:
+            return
+        start = params.get("start") if isinstance(params.get("start"), int) else None
+        end = params.get("end") if isinstance(params.get("end"), int) else None
+        replay = getattr(self._worker, "replay", None)
+        if callable(replay):
+            result = await replay(session_id, start=start, end=end)
+        else:
+            result = await self._worker.repository.replay(session_id, start=start, end=end)
+        await self._respond(request, result)
+
+    async def _execute_command(self, request: dict[str, Any]) -> None:
+        params = request.get("params") if isinstance(request.get("params"), dict) else {}
+        session_id = params.get("session_id")
+        if not isinstance(session_id, str) or not session_id.strip():
+            session_id = self._worker.session_id
+        if not isinstance(session_id, str) or not session_id.strip():
+            await self._respond_error(request, "session_id is required for this command.", "InvalidRequest")
+            return
+        raw_input = str(params.get("input") or "").strip()
+        command = raw_input.split(maxsplit=1)[0].lstrip("/").lower() if raw_input else ""
+        needs_execution = command in {"compact", "team"} or (
+            command == "model" and raw_input.lower().startswith("/model set ")
+        )
+        if needs_execution:
+            server = await self._start_server(session_id)
+            await server._dispatch(request)
+            await self._release_if_idle(session_id)
+            return
+        store = await self._worker.repository.open_store(session_id, persist_system_prompt=False)
+        server = StdioRuntimeServer(
+            None,
+            store,
+            debug=self._debug,
+            model_client=self._worker.model_client,
+            default_model=self._worker.default_model,
+            background_list=self._background_list,
+            background_output=self._background_output,
+            goal_enabled=self._goal_enabled,
+            writer=self._writer,
+            slash_router=self._slash_router,
+        )
+        await server._dispatch(request)
+
+    async def _set_model(self, request: dict[str, Any]) -> None:
+        params = request.get("params") if isinstance(request.get("params"), dict) else {}
+        session_id = await self._required_session_id(request)
+        if session_id is None:
+            return
+        model = str(params.get("model") or "").strip()
+        if not model:
+            await self._respond_error(request, "model/set requires model.", "InvalidRequest")
+            return
+        active = self._active_servers.get(session_id)
+        if active is not None:
+            await active._set_model(request)
+            return
+        store = await self._worker.repository.open_store(session_id, persist_system_prompt=False)
+        await store.update_model(model)
+        await self._respond(
+            request,
+            {
+                "model": model,
+                "session_model": model,
+                "default_model": self._worker.default_model,
+                "default_updated": False,
+                "runtime": False,
+                "session": True,
+                "active_updated": True,
+            },
+        )
+
+    async def _goal_request(self, request: dict[str, Any]) -> None:
+        session_id = await self._required_session_id(request)
+        if session_id is None:
+            return
+        active = self._active_servers.get(session_id)
+        if active is not None:
+            await active._dispatch(request)
+            return
+        params = request.get("params") if isinstance(request.get("params"), dict) else {}
+        method = request.get("method")
+        if method == RuntimeMethod.RIND_GOAL_GET:
+            await self._respond(request, {"goal": await self._worker.repository.get_goal(session_id)})
+            return
+        if method == RuntimeMethod.RIND_GOAL_SET:
+            objective = params.get("objective")
+            if not isinstance(objective, str) or not objective.strip():
+                await self._respond_error(request, "rind/goal/set requires objective.", "InvalidRequest")
+                return
+            await self._respond(request, {"goal": await self._worker.repository.set_goal(session_id, objective)})
+            return
+        if method == RuntimeMethod.RIND_GOAL_STATUS:
+            status = params.get("status")
+            if status not in {"active", "paused"}:
+                await self._respond_error(request, "rind/goal/status requires active or paused.", "InvalidRequest")
+                return
+            await self._respond(request, {"goal": await self._worker.repository.set_goal_status(session_id, status)})
+            return
+        await self._worker.repository.clear_goal(session_id)
+        await self._respond(request, {"goal": None})
+
+    async def _background_request(self, request: dict[str, Any]) -> None:
+        session_id = await self._required_session_id(request)
+        if session_id is None:
+            return
+        server = self._active_servers.get(session_id)
+        if server is not None:
+            await server._handle_control_message(request)
+            return
+        store = await self._worker.repository.open_store(session_id, persist_system_prompt=False)
+        server = StdioRuntimeServer(
+            None,
+            store,
+            debug=self._debug,
+            background_list=self._background_list,
+            background_output=self._background_output,
+            writer=self._writer,
+            slash_router=self._slash_router,
+        )
+        await server._handle_control_message(request)
 
     async def _required_session_id(self, request: dict[str, Any]) -> str | None:
         params = request.get("params") if isinstance(request.get("params"), dict) else {}
@@ -1133,10 +1350,13 @@ class WorkerStdioRuntimeServer:
             await self._respond_error(request, str(exc), "InvalidRequest")
             return None
 
-    async def _valid_turn(self, session, request: dict[str, Any]) -> bool:
+    async def _valid_turn(self, session_id: str, request: dict[str, Any]) -> bool:
         params = request.get("params") if isinstance(request.get("params"), dict) else {}
         expected = params.get("turn_id")
-        active = session.active_turn_id
+        server = self._active_servers.get(session_id)
+        active = server._runtime.active_turn_id if server is not None else ""
+        if request.get("method") == RuntimeMethod.SESSION_CANCEL and expected in {None, ""} and active:
+            return True
         if not isinstance(expected, str) or not expected.strip() or not active or expected != active:
             await self._respond_error(request, "The requested turn is no longer active.", "TurnNotActive")
             return False

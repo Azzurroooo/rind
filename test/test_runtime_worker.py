@@ -1,8 +1,12 @@
 from __future__ import annotations
 
 import asyncio
+import tempfile
 from types import SimpleNamespace
+from pathlib import Path
 
+from agent.infrastructure.config import AppSettings
+from agent.runtime.server.worker import RuntimeWorker
 from agent.runtime.server.protocol import RuntimeMethod
 from agent.runtime.server.stdio import WorkerStdioRuntimeServer
 
@@ -72,7 +76,7 @@ class _Runtime:
         self.active_turn_id = ""
 
 
-class _SessionRuntime:
+class _ExecutionContainer:
     def __init__(self, session_id: str):
         self.session_id = session_id
         self.workspace_root = "."
@@ -121,18 +125,26 @@ class _ProviderFactory:
 
 class _Worker:
     def __init__(self):
-        self.sessions = {session_id: _SessionRuntime(session_id) for session_id in ("A", "B")}
+        self.sessions = {session_id: _ExecutionContainer(session_id) for session_id in ("A", "B")}
         self.session_id = "A"
         self.default_model = "default-model"
         self.provider_client_factory = _ProviderFactory()
         self.model_client = _ModelClient()
-        self.registry = SimpleNamespace()
+        self.released = set()
 
     async def initialize(self):
-        return self.sessions["A"]
+        return {"session_id": "A", "model": self.default_model, "workspace_root": "."}
+
+    async def start_execution(self, session_id: str):
+        execution = self.sessions[session_id]
+        return SimpleNamespace(runtime=execution.runtime, session_store=execution.session)
+
+    async def release_execution(self, session_id: str):
+        self.released.add(session_id)
 
     async def session(self, session_id: str):
-        return self.sessions[session_id]
+        execution = self.sessions[session_id]
+        return {"session_id": session_id, "model": execution.session.model, "workspace_root": "."}
 
     async def close(self):
         await self.model_client.close()
@@ -170,9 +182,9 @@ def test_worker_routes_concurrent_sessions_without_crossed_events():
         worker.sessions["A"].runtime.release.set()
         worker.sessions["B"].runtime.release.set()
         await asyncio.gather(*tasks)
-        return messages
+        return worker, messages
 
-    messages = asyncio.run(run())
+    worker, messages = asyncio.run(run())
     events = [message for message in messages if message.get("kind") == "event"]
     responses = {message["request_id"]: message for message in messages if message.get("kind") == "response"}
 
@@ -180,6 +192,7 @@ def test_worker_routes_concurrent_sessions_without_crossed_events():
     assert all(event["turn_id"] == f"turn-{event['session_id']}" for event in events)
     assert responses["prompt-A"]["result"]["session_id"] == "A"
     assert responses["prompt-B"]["result"]["session_id"] == "B"
+    assert worker.released == {"A", "B"}
 
 
 def test_worker_model_list_reuses_injected_client():
@@ -226,3 +239,91 @@ def test_worker_shutdown_interrupts_all_active_sessions():
     }
     assert set(prompt_responses) == {"prompt-A", "prompt-B"}
     assert worker.model_client.close_count == 1
+
+
+def test_replay_does_not_create_active_execution():
+    async def run():
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            workspace = root / "workspace"
+            workspace.mkdir()
+            settings = AppSettings(
+                settings_path=root / "settings.json",
+                settings_exists=True,
+                model="test-model",
+                api_key="test-key",
+                base_url="https://example.com/v1",
+                reasoning_effort="",
+            )
+            worker = RuntimeWorker(
+                settings=settings,
+                workspace_root=str(workspace),
+                session_dir=str(root / "sessions"),
+                enable_goal=False,
+            )
+            server = WorkerStdioRuntimeServer(worker)
+            messages = []
+
+            async def send(payload):
+                messages.append(payload)
+
+            server._writer.send = send
+            await server._dispatch({"request_id": "init", "method": RuntimeMethod.INITIALIZE, "params": {}})
+            session_id = worker.session_id
+            await server._dispatch({
+                "request_id": "replay",
+                "method": RuntimeMethod.SESSION_REPLAY,
+                "params": {"session_id": session_id},
+            })
+            active = worker.execution.active_session_ids()
+            await worker.close()
+            return session_id, active, messages
+
+    session_id, active, messages = asyncio.run(run())
+    assert session_id
+    assert active == set()
+    assert any(message.get("request_id") == "replay" for message in messages)
+
+
+def test_worker_replay_includes_active_live_turn_without_creating_execution():
+    async def run():
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            workspace = root / "workspace"
+            workspace.mkdir()
+            settings = AppSettings(
+                settings_path=root / "settings.json",
+                settings_exists=True,
+                model="test-model",
+                api_key="test-key",
+                base_url="https://example.com/v1",
+                reasoning_effort="",
+            )
+            worker = RuntimeWorker(
+                settings=settings,
+                workspace_root=str(workspace),
+                session_dir=str(root / "sessions"),
+                enable_goal=False,
+            )
+            await worker.initialize()
+            session_id = worker.session_id
+            worker.execution.update_live_event({
+                "type": "turn_started",
+                "session_id": session_id,
+                "turn_id": "turn-live",
+            })
+            worker.execution.update_live_event({
+                "type": "assistant_delta",
+                "session_id": session_id,
+                "turn_id": "turn-live",
+                "text": "streaming",
+            })
+            replay = await worker.replay(session_id)
+            active = worker.execution.active_session_ids()
+            await worker.close()
+            return replay, active
+
+    replay, active = asyncio.run(run())
+    assert replay["live_turn"]["turn_id"] == "turn-live"
+    assert replay["live_turn"]["assistant_text"] == "streaming"
+    assert active == set()

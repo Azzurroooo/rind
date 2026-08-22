@@ -97,6 +97,7 @@ let localSettings = {};
 let latestStats = {};
 let slashCommands = [];
 let activeTurnId = "";
+let lastEventSequence = 0;
 let turnTools = { completed: 0, failed: 0 };
 let pendingInputPrefill = "";
 let assistantOutputLineOpen = false;
@@ -140,6 +141,7 @@ const runtimeClient = createRuntimeClient({
     runtimeInitialized = false;
     runtimeInitialization = null;
     activeTurnId = "";
+    lastEventSequence = 0;
     activeTurn = false;
     interruptRequested = false;
     clearPendingInputs();
@@ -368,6 +370,8 @@ async function ensureRuntime() {
     runtimeStarted = true;
     const info = requireRuntimeInitialization(await runtimeClient.request(runtimeMethods.initialize));
     sessionInfo = { ...sessionInfo, ...(info || {}) };
+    lastEventSequence = 0;
+    restoreLiveTurn(sessionInfo.live_turn);
     runtimeInitialized = true;
     slashCommands = mergeSlashCommands(
       commandController.normalizeCommands(info?.commands),
@@ -483,6 +487,8 @@ async function runSessionsSelector() {
       delegate_count: 0,
     };
     activeTurnId = "";
+    activeTurn = false;
+    restoreLiveTurn(update?.live_turn);
     latestStats = update?.usage && typeof update.usage === "object" ? update.usage : {};
     compactContextState.clear();
     logOutput(sessionSwitchedText(sessionInfo));
@@ -756,17 +762,37 @@ function writeAssistantHeader() {
 }
 
 async function renderEvent(message) {
+  const sequence = Number(message?.sequence);
+  if (!Number.isInteger(sequence) || sequence <= lastEventSequence) {
+    return;
+  }
+  lastEventSequence = sequence;
   if (!isRuntimeEventForTurn(message, sessionInfo.session_id, activeTurnId)) {
     return;
   }
   if (message?.event?.type === "turn_started") {
+    if (activeTurnId && String(message.turn_id || "") !== activeTurnId) {
+      return;
+    }
     activeTurnId = String(message.turn_id || "");
+    activeTurn = Boolean(activeTurnId);
   }
   const result = await eventController.handle(message);
   if (["turn_completed", "turn_failed", "turn_cancelled"].includes(message?.event?.type)) {
     activeTurnId = "";
   }
   return result;
+}
+
+function restoreLiveTurn(value) {
+  if (!value || typeof value !== "object") return;
+  const turnId = String(value.turn_id || "");
+  if (!turnId) return;
+  activeTurnId = turnId;
+  activeTurn = true;
+  assistantHeaderShown = false;
+  const text = String(value.assistant_text || "");
+  if (text) assistantRenderer.append(text);
 }
 
 function resetTurnTools() {

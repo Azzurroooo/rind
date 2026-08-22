@@ -7,11 +7,9 @@ export type SidebarStructureState = {
   sessionTotals: Record<string, number>
   expandedProjects: Iterable<string>
   projectMenuPath: string
-  runningSessionIds: Iterable<string>
 }
 
 export function projectListStructureKey(state: SidebarStructureState) {
-  const runningSessionIds = new Set(state.runningSessionIds)
   const expandedProjects = new Set(state.expandedProjects)
   return JSON.stringify(state.projects.map((project) => {
     const sessions = state.sessionPages[project.path] || project.sessions
@@ -22,26 +20,21 @@ export function projectListStructureKey(state: SidebarStructureState) {
       expanded: expandedProjects.has(project.path),
       menuOpen: sameProjectPath(state.projectMenuPath, project.path),
       total: state.sessionTotals[project.path] ?? project.totalSessions,
-      sessions: sessions.map((session) => sessionStructure(session, runningSessionIds.has(session.id))),
+      sessions: sessions.map((session) => sessionStructure(session)),
     }
   }))
 }
 
 export function recentListStructureKey(state: SidebarStructureState) {
-  const runningSessionIds = new Set(state.runningSessionIds)
   return JSON.stringify([...state.recentSessions]
-    .sort((left, right) => {
-      const leftRunning = runningSessionIds.has(left.id)
-      const rightRunning = runningSessionIds.has(right.id)
-      return Number(rightRunning) - Number(leftRunning) || right.lastInteractedAt.localeCompare(left.lastInteractedAt)
-    })
+    .sort((left, right) => right.lastInteractedAt.localeCompare(left.lastInteractedAt))
     .map((session) => ({
-      ...sessionStructure(session, runningSessionIds.has(session.id)),
+      ...sessionStructure(session),
       lastInteractedAt: session.lastInteractedAt,
     })))
 }
 
-function sessionStructure(session: DesktopSessionSummary, running: boolean) {
+function sessionStructure(session: DesktopSessionSummary) {
   return {
     id: session.id,
     title: session.title,
@@ -49,7 +42,6 @@ function sessionStructure(session: DesktopSessionSummary, running: boolean) {
     updatedAt: session.updatedAt,
     workspaceRoot: session.workspaceRoot,
     hasUserMessage: session.hasUserMessage,
-    running,
   }
 }
 

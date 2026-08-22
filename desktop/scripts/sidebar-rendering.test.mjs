@@ -25,7 +25,6 @@ function state(viewedSessionId = "session-1") {
     sessionTotals: {},
     expandedProjects: new Set([project.path]),
     projectMenuPath: "",
-    runningSessionIds: new Set(),
     viewedSessionId,
   }
 }
@@ -47,14 +46,11 @@ test("sidebar structure keys change for project and expansion changes", () => {
   assert.notEqual(projectListStructureKey(first), projectListStructureKey(collapsed))
 })
 
-test("sidebar structure keys include running, pagination, and menu state", () => {
+test("sidebar structure keys separate running state from structure", () => {
   const first = state()
-  const running = { ...first, runningSessionIds: new Set(["session-1"]) }
   const paged = { ...first, sessionTotals: { "C:/work/project": 3 } }
   const menu = { ...first, projectMenuPath: "C:/work/project" }
 
-  assert.notEqual(projectListStructureKey(first), projectListStructureKey(running))
-  assert.notEqual(recentListStructureKey(first), recentListStructureKey(running))
   assert.notEqual(projectListStructureKey(first), projectListStructureKey(paged))
   assert.notEqual(projectListStructureKey(first), projectListStructureKey(menu))
 })

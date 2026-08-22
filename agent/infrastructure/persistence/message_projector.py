@@ -13,6 +13,7 @@ def project_messages(
     tool_records: list[dict[str, Any]],
     compactions: list[dict[str, Any]],
     system_prompt: str,
+    include_ids: bool = False,
 ) -> list[dict[str, Any]]:
     compact_applied = latest_compact_pair(messages, compactions) is not None
     projected_messages = apply_latest_compact_boundary(messages, compactions)
@@ -32,13 +33,14 @@ def project_messages(
             tool_call_id = message.get("tool_call_id")
             if tool_call_id and str(tool_call_id) in emitted_tool_call_ids:
                 continue
-            built_messages.append(
-                {
-                    "role": "tool",
-                    "tool_call_id": tool_call_id,
-                    "content": _build_tool_content(tool_map.get(str(tool_call_id))),
-                }
-            )
+            projected = {
+                "role": "tool",
+                "tool_call_id": tool_call_id,
+                "content": _build_tool_content(tool_map.get(str(tool_call_id))),
+            }
+            if include_ids and message.get("id"):
+                projected["id"] = str(message["id"])
+            built_messages.append(projected)
             if tool_call_id:
                 emitted_tool_call_ids.add(str(tool_call_id))
             continue
@@ -46,18 +48,24 @@ def project_messages(
             tool_calls = _build_assistant_tool_calls(message["meta"]["tool_calls"], tool_map)
             if tool_calls:
                 assistant = {"role": "assistant", "tool_calls": tool_calls}
+                if include_ids and message.get("id"):
+                    assistant["id"] = str(message["id"])
                 if message.get("content"):
                     assistant["content"] = message["content"]
                 _add_reasoning_content(assistant, message)
                 built_messages.append(assistant)
-                built_messages.extend(_missing_tool_messages(tool_calls, tool_map, emitted_tool_call_ids))
+                built_messages.extend(_missing_tool_messages(tool_calls, tool_map, emitted_tool_call_ids, include_ids))
             elif message.get("content") or _has_reasoning_content(message):
                 assistant = {"role": "assistant", "content": message.get("content", "")}
+                if include_ids and message.get("id"):
+                    assistant["id"] = str(message["id"])
                 _add_reasoning_content(assistant, message)
                 built_messages.append(assistant)
             continue
         if role in {"system", "user", "assistant"}:
             projected = {"role": role, "content": message.get("content", "")}
+            if include_ids and message.get("id"):
+                projected["id"] = str(message["id"])
             if role == "assistant":
                 _add_reasoning_content(projected, message)
             metadata = message.get("meta")
@@ -197,6 +205,7 @@ def _missing_tool_messages(
     tool_calls: list[dict[str, Any]],
     tool_map: dict[str, dict[str, Any]],
     emitted_tool_call_ids: set[str],
+    include_ids: bool = False,
 ) -> list[dict[str, str]]:
     missing: list[dict[str, str]] = []
     for tool_call in tool_calls:
@@ -207,7 +216,10 @@ def _missing_tool_messages(
         if not isinstance(tool_record, dict):
             continue
         content = _build_tool_content(tool_record)
-        missing.append({"role": "tool", "tool_call_id": tool_call_id, "content": content})
+        item = {"role": "tool", "tool_call_id": tool_call_id, "content": content}
+        if include_ids and tool_record.get("id"):
+            item["id"] = str(tool_record["id"])
+        missing.append(item)
         emitted_tool_call_ids.add(tool_call_id)
     return missing
 

@@ -157,14 +157,15 @@ export function conversationFromReplay(messages: unknown[]): ConversationState {
   let state = createConversation()
   for (const message of messages) {
     const record = asRecord(message)
+    const id = asString(record.id)
     const role = asString(record.role)
     if (role === "user") {
-      state = appendEntry(state, { kind: "user", id: "", content: boundText(asString(record.content)) })
+      state = appendEntry(state, { kind: "user", id: id ? `message:${id}` : "", content: boundText(asString(record.content)) })
       continue
     }
     if (role === "assistant") {
       const content = asString(record.content)
-      if (content) state = appendEntry(state, { kind: "assistant", id: "", content: boundText(content), turnId: "" })
+      if (content) state = appendEntry(state, { kind: "assistant", id: id ? `message:${id}` : "", content: boundText(content), turnId: "" })
       for (const toolCall of Array.isArray(record.tool_calls) ? record.tool_calls : []) state = appendReplayTool(state, toolCall)
       continue
     }
@@ -175,43 +176,130 @@ export function conversationFromReplay(messages: unknown[]): ConversationState {
 
 export function mergeReplayConversation(replay: ConversationState, live: ConversationState): ConversationState {
   const entries = replay.entries.map((entry) => ({ ...entry })) as Entry[]
-  const matched = new Set<number>()
-  const liveEntryIds = new Map<string, string>()
+  const hasLiveTurn = Boolean(live.activeTurnId)
+  const persistedIds = new Set(entries.map((entry) => entry.id).filter((id) => id.startsWith("message:") || id.startsWith("tool:")))
+  const persistedTools = new Set(entries.flatMap((entry) => entry.kind === "tool" && entry.toolCallId ? [entry.toolCallId] : []))
+  const liveUsers = live.entries.filter((entry) => entry.kind === "user")
+  const replayUsers = entries.filter((entry) => entry.kind === "user").length
   let nextEntryId = Math.max(replay.nextEntryId, live.nextEntryId, nextEntryNumber(entries))
-  const liveTurnStart = live.activeTurnId ? activeTurnStart(live.entries, live.activeTurnId) : -1
-  const replayTurnStartIndex = liveTurnStart >= 0 ? replayTurnStart(entries, live.entries[liveTurnStart]) : -1
-
-  for (const [liveIndex, entry] of live.entries.entries()) {
-    const minimumIndex = liveIndex >= liveTurnStart && entry.kind === "assistant" && entry.turnId === live.activeTurnId
-      ? replayTurnStartIndex >= 0 ? replayTurnStartIndex + 1 : entries.length
-      : 0
-    const index = findReplayEntry(entries, entry, matched, minimumIndex)
-    if (index >= 0) {
-      const id = entries[index].id
-      entries[index] = { ...entry, id } as Entry
-      matched.add(index)
-      liveEntryIds.set(entry.id, id)
-      continue
-    }
-    const id = `entry-${nextEntryId++}`
+  const liveEntryIds = new Map<string, string>()
+  const pendingUserCount = hasLiveTurn ? Math.max(0, liveUsers.length - replayUsers) : 0
+  const pendingUsers = pendingUserCount ? liveUsers.slice(-pendingUserCount) : []
+  const liveEntries = live.entries.filter((entry) => {
+    if (!hasLiveTurn) return false
+    if (entry.kind === "user") return pendingUsers.includes(entry)
+    if (entry.kind === "tool" && entry.toolCallId && persistedTools.has(entry.toolCallId)) return false
+    if (entry.id && persistedIds.has(entry.id)) return false
+    if (entry.kind === "assistant") return entry.id === live.openAssistantId
+    return true
+  })
+  const usedIds = new Set(entries.map((entry) => entry.id))
+  for (const entry of [...pendingUsers, ...liveEntries]) {
+    const id = entry.id && !usedIds.has(entry.id) ? entry.id : `entry-${nextEntryId++}`
+    usedIds.add(id)
     entries.push({ ...entry, id } as Entry)
-    matched.add(entries.length - 1)
     liveEntryIds.set(entry.id, id)
   }
 
   const trimmed = entries.length > maxEntries ? entries.slice(entries.length - maxEntries) : entries
-  const openAssistantId = live.openAssistantId ? liveEntryIds.get(live.openAssistantId) || "" : ""
+  const openAssistantId = live.openAssistantId ? liveEntryIds.get(live.openAssistantId) || live.openAssistantId : ""
   return {
     ...replay,
     entries: trimmed,
     activeTurnId: live.activeTurnId || replay.activeTurnId,
     turnStartedAt: live.activeTurnId ? live.turnStartedAt : replay.turnStartedAt,
-    ...(live.question ? { question: live.question } : {}),
-    contextUsagePercent: live.contextUsagePercent ?? replay.contextUsagePercent,
-    ...(live.plan ? { plan: live.plan } : {}),
+    ...(hasLiveTurn && live.question ? { question: live.question } : {}),
+    contextUsagePercent: hasLiveTurn ? live.contextUsagePercent ?? replay.contextUsagePercent : replay.contextUsagePercent,
+    ...(hasLiveTurn && live.plan ? { plan: live.plan } : {}),
     openAssistantId: openAssistantId && trimmed.some((entry) => entry.id === openAssistantId) ? openAssistantId : "",
     nextEntryId,
   }
+}
+
+export function mergeLiveConversation(current: ConversationState, snapshot: ConversationState): ConversationState {
+  if (!snapshot.activeTurnId) return current
+  if (!current.activeTurnId || current.activeTurnId !== snapshot.activeTurnId) return snapshot
+  return {
+    ...current,
+    question: current.question || snapshot.question,
+    plan: current.plan || snapshot.plan,
+    contextUsagePercent: current.contextUsagePercent ?? snapshot.contextUsagePercent,
+    turnStartedAt: current.turnStartedAt || snapshot.turnStartedAt,
+  }
+}
+
+export function conversationFromLiveTurn(value: unknown): ConversationState {
+  const snapshot = asRecord(value)
+  const turnId = asString(snapshot.turn_id)
+  if (!turnId) return createConversation()
+  const active = ["running", "waiting_question"].includes(asString(snapshot.status))
+  let state = createConversation()
+  state = reduceEvent(state, {
+    type: "turn_started",
+    sequence: 0,
+    durability: "incremental",
+    sessionId: "",
+    turnId,
+    event: {},
+  })
+  const assistantText = asString(snapshot.assistant_text)
+  if (assistantText) state = reduceEvent(state, {
+    type: "assistant_delta",
+    sequence: 0,
+    durability: "incremental",
+    sessionId: "",
+    turnId,
+    event: { text: assistantText },
+  })
+  const tools = Array.isArray(snapshot.tools) ? snapshot.tools : []
+  for (const tool of tools) {
+    const item = asRecord(tool)
+    const toolCallId = asString(item.tool_call_id)
+    if (!toolCallId) continue
+    const toolName = asString(item.tool_name)
+    state = reduceEvent(state, {
+      type: "tool_requested",
+      sequence: 0,
+      durability: "incremental",
+      sessionId: "",
+      turnId,
+      event: {
+        tool_call_id: toolCallId,
+        tool_name: toolName,
+        args_preview: asString(item.args_preview),
+        arguments: asRecord(item.arguments),
+      },
+    })
+    const status = asString(item.status)
+    if (status === "running") state = reduceEvent(state, eventForLive(turnId, "tool_call_started", item))
+    if (asString(item.output)) state = reduceEvent(state, eventForLive(turnId, "tool_progress", item, { payload: { output: item.output } }))
+    if (status === "completed" || status === "error") state = reduceEvent(state, eventForLive(turnId, "tool_result", item, {
+      result: asString(item.output),
+      status,
+      error_type: asString(item.error_type),
+      duration_ms: item.duration_ms,
+    }))
+  }
+  const files = Array.isArray(snapshot.files) ? snapshot.files : []
+  for (const filePath of files) {
+    if (typeof filePath === "string" && filePath) state = reduceEvent(state, eventForLive(turnId, "file_change", { file_path: filePath }))
+  }
+  if (Array.isArray(snapshot.plan)) {
+    state = reduceEvent(state, eventForLive(turnId, "plan_updated", {
+      tool_call_id: "live-plan",
+      plan: snapshot.plan,
+    }))
+  }
+  const question = asRecord(snapshot.question)
+  if (question.tool_call_id) state = reduceEvent(state, eventForLive(turnId, "user_question_requested", question))
+  const contextPercent = snapshot.context_usage_percent
+  if (typeof contextPercent === "number") state = reduceEvent(state, eventForLive(turnId, "token_stats_updated", { stats: { context_usage_percent: contextPercent } }))
+  if (!active) state = { ...state, activeTurnId: "", turnStartedAt: 0 }
+  return state
+}
+
+function eventForLive(turnId: string, type: string, event: Record<string, unknown>, extra: Record<string, unknown> = {}): RuntimeEvent {
+  return { type, sequence: 0, durability: "incremental", sessionId: "", turnId, event: { ...event, ...extra } }
 }
 
 export function latestPlan(state: ConversationState): PlanEntry | undefined {
@@ -301,7 +389,7 @@ function reduceTool(state: ConversationState, envelope: RuntimeEvent, update: (t
     return { ...closed, plan: { ...plan, ...update(plan), id: `plan-${toolCallId || closed.nextEntryId}` } as PlanEntry }
   }
   if (toolName === "update_plan") return closed
-  const empty: ToolEntry = { kind: "tool", id: "", toolCallId, toolName, argsPreview: toolArgumentPreview(toolName, argumentsValue, asString(envelope.event.args_preview)), arguments: argumentsValue, status: "pending", output: "", errorType: "", durationMs: 0 }
+  const empty: ToolEntry = { kind: "tool", id: toolCallId ? `tool:${toolCallId}` : "", toolCallId, toolName, argsPreview: toolArgumentPreview(toolName, argumentsValue, asString(envelope.event.args_preview)), arguments: argumentsValue, status: "pending", output: "", errorType: "", durationMs: 0 }
   return appendEntry(closed, { ...empty, ...update(empty) } as ToolEntry)
 }
 
@@ -315,7 +403,7 @@ function appendReplayTool(state: ConversationState, value: unknown): Conversatio
   const steps = planSteps(toolName, argumentsValue)
   if (steps) return { ...state, plan: { kind: "plan", id: `plan-${toolCallId}`, toolCallId, toolName: "update_plan", status: "completed", steps, error: "", errorType: "", durationMs: 0 } }
   if (toolName === "update_plan") return Array.isArray(argumentsValue.plan) ? { ...state, plan: undefined } : state
-  return appendEntry(state, { kind: "tool", id: "", toolCallId, toolName, argsPreview: toolArgumentPreview(toolName, argumentsValue, asString(functionInfo.arguments)), arguments: argumentsValue, status: "completed", output: "", errorType: "", durationMs: 0 })
+  return appendEntry(state, { kind: "tool", id: `tool:${toolCallId}`, toolCallId, toolName, argsPreview: toolArgumentPreview(toolName, argumentsValue, asString(functionInfo.arguments)), arguments: argumentsValue, status: "completed", output: "", errorType: "", durationMs: 0 })
 }
 
 function completeReplayTool(state: ConversationState, record: Record<string, unknown>): ConversationState {
@@ -339,52 +427,12 @@ function completeReplayTool(state: ConversationState, record: Record<string, unk
     status: result.ok === false ? "error" : "completed",
     errorType: result.errorType,
   } as ToolEntry)
-  return appendEntry(state, { kind: "tool", id: "", toolCallId, toolName: asString(record.tool_name) || "Tool", argsPreview: "", arguments: {}, status: result.ok === false ? "error" : "completed", output: result.raw, result, errorType: result.errorType, durationMs: 0 })
+  return appendEntry(state, { kind: "tool", id: `tool:${toolCallId}`, toolCallId, toolName: asString(record.tool_name) || "Tool", argsPreview: "", arguments: {}, status: result.ok === false ? "error" : "completed", output: result.raw, result, errorType: result.errorType, durationMs: 0 })
 }
 
 function appendEntry(state: ConversationState, entry: Entry): ConversationState {
   const id = entry.id || `entry-${state.nextEntryId}`
   return { ...state, entries: trimEntries([...state.entries, { ...entry, id } as Entry]), nextEntryId: state.nextEntryId + 1 }
-}
-
-function findReplayEntry(entries: Entry[], entry: Entry, matched: Set<number>, minimumIndex = 0) {
-  const fingerprint = entryFingerprint(entry)
-  if (!fingerprint) return -1
-  for (let index = entries.length - 1; index >= minimumIndex; index -= 1) {
-    if (matched.has(index) || entryFingerprint(entries[index]) !== fingerprint) continue
-    return index
-  }
-  return -1
-}
-
-function activeTurnStart(entries: Entry[], turnId: string) {
-  const firstAssistant = entries.findIndex((entry) => entry.kind === "assistant" && entry.turnId === turnId)
-  const from = firstAssistant >= 0 ? firstAssistant - 1 : entries.length - 1
-  for (let index = from; index >= 0; index -= 1) {
-    if (entries[index].kind === "user") return index
-  }
-  return -1
-}
-
-function replayTurnStart(entries: Entry[], liveEntry: Entry) {
-  const fingerprint = entryFingerprint(liveEntry)
-  if (!fingerprint) return -1
-  for (let index = entries.length - 1; index >= 0; index -= 1) {
-    if (entryFingerprint(entries[index]) === fingerprint) return index
-  }
-  return -1
-}
-
-function entryFingerprint(entry: Entry): string {
-  switch (entry.kind) {
-    case "user": return `user:${entry.content}`
-    case "assistant": return `assistant:${entry.content}`
-    case "tool": return entry.toolCallId ? `tool:${entry.toolCallId}` : ""
-    case "file": return `file:${entry.filePath}`
-    case "error": return `error:${entry.source}:${entry.content}`
-    case "notice": return `notice:${entry.label}:${entry.content}`
-    case "command": return `command:${entry.command}:${entry.content}`
-  }
 }
 
 function nextEntryNumber(entries: Entry[]) {

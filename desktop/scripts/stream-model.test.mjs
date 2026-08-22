@@ -7,10 +7,12 @@ import {
   addCommandResult,
   boundText,
   clipLine,
+  conversationFromLiveTurn,
   conversationFromReplay,
   createConversation,
   fileMutationPreview,
   formatDuration,
+  mergeLiveConversation,
   latestPlan,
   maxEntries,
   mergeReplayConversation,
@@ -104,6 +106,42 @@ test("replay restores persisted history while retaining the live turn tail", () 
   assert.equal(merged.activeTurnId, "turn-current")
   assert.equal(new Set(merged.entries.map((entry) => entry.id)).size, merged.entries.length)
   assert.ok(merged.openAssistantId)
+})
+
+test("live turn snapshot restores an unfinished assistant and tool state", () => {
+  const state = conversationFromLiveTurn({
+    turn_id: "turn-live",
+    status: "running",
+    assistant_text: "Still streaming",
+    tools: [{
+      tool_call_id: "call-live",
+      tool_name: "shell",
+      args_preview: "pwd",
+      status: "running",
+      output: "partial output",
+    }],
+  })
+  assert.equal(state.activeTurnId, "turn-live")
+  assert.equal(state.entries.find((entry) => entry.kind === "assistant")?.content, "Still streaming")
+  const tool = state.entries.find((entry) => entry.kind === "tool")
+  assert.equal(tool.toolCallId, "call-live")
+  assert.equal(tool.status, "running")
+  assert.equal(tool.output, "partial output\n")
+})
+
+test("live snapshot restores a missed question without replacing current stream", () => {
+  let current = createConversation()
+  current = reduceEvent(current, event("turn_started", {}, "turn-live"))
+  current = reduceEvent(current, event("assistant_delta", { text: "Still working" }, "turn-live"))
+  const snapshot = conversationFromLiveTurn({
+    turn_id: "turn-live",
+    status: "running",
+    assistant_text: "Still working",
+    question: { tool_call_id: "question-1", question: "Choose", options: [{ label: "Yes", description: "Proceed" }] },
+  })
+  const merged = mergeLiveConversation(current, snapshot)
+  assert.equal(merged.entries.find((entry) => entry.kind === "assistant")?.content, "Still working")
+  assert.equal(merged.question?.toolCallId, "question-1")
 })
 
 test("tool lifecycle correlates by tool_call_id into a single row", () => {

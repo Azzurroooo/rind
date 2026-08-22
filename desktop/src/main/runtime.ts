@@ -63,7 +63,8 @@ function runtimeExitError(code: number | null, signal: NodeJS.Signals | null, st
   return new Error(detail ? `Runtime exited unexpectedly (${status}): ${detail}` : `Runtime exited unexpectedly (${status}).`)
 }
 
-function handleLine(line: string) {
+function handleLine(source: ChildProcessWithoutNullStreams, line: string) {
+  if (worker.child !== source) return
   let message: unknown
   try {
     message = JSON.parse(line)
@@ -144,7 +145,7 @@ export function startRuntime(workspace: string) {
   worker.child = current
   worker.shutdownPromise = undefined
   let stderr = ""
-  createInterface({ input: current.stdout }).on("line", handleLine)
+  createInterface({ input: current.stdout }).on("line", (line) => handleLine(current, line))
   current.stderr.on("data", (chunk) => {
     stderr = appendStderr(stderr, chunk)
     log.warn("runtime stderr", String(chunk).trimEnd())

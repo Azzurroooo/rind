@@ -107,6 +107,7 @@ class SessionStore(Protocol):
         start: int | None = None,
         end: int | None = None,
         roles: list[str] | None = None,
+        include_ids: bool = False,
     ) -> list[dict[str, Any]]:
         """Get a slice of messages asynchronously."""
         ...
