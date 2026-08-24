@@ -1,5 +1,7 @@
 """RIND.md initialization slash command."""
 
+from pathlib import Path
+
 from ..router import SlashCommandContext, SlashCommandInfo, SlashCommandResult
 
 
@@ -13,8 +15,9 @@ async def handle_init(context: SlashCommandContext, args: list[str]) -> SlashCom
     from agent.infrastructure.rind_docs import resolve_project_doc_path, resolve_user_doc_path
     from agent.prompts import build_rind_init_prompt
 
+    project_root = Path(context.workspace_root) if context.workspace_root else None
     target = (
-        resolve_project_doc_path(context.workspace_root)
+        resolve_project_doc_path(project_root)
         if scope == "project"
         else resolve_user_doc_path()
     )

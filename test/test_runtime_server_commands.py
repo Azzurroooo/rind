@@ -782,6 +782,20 @@ async def test_init_project_uses_cwd_not_parent_git_root(tmp_path, monkeypatch) 
 
 
 @pytest.mark.asyncio
+async def test_init_project_accepts_string_workspace_root(tmp_path, monkeypatch) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    monkeypatch.chdir(tmp_path)
+    context = _context()
+    context.workspace_root = str(workspace)
+
+    result = await SlashCommandRouter().execute("/init project", context)
+
+    assert result.next_prompt is not None
+    assert str(workspace / "RIND.md") in result.next_prompt["input"]
+
+
+@pytest.mark.asyncio
 async def test_init_user_returns_turn_payload(tmp_path, monkeypatch) -> None:
     user_home = tmp_path / "home"
     user_home.mkdir()

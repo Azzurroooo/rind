@@ -79,6 +79,20 @@ test("slash result can prefill input and start a follow-up turn", async () => {
   ]);
 });
 
+test("slash result ignores malformed next prompts", async () => {
+  let submitted = false;
+  const controller = createCommandController({
+    request: async () => ({}),
+    turn: { submit: () => { submitted = true; } },
+    output: { log() {} },
+  });
+
+  await controller.applyResult({ next_prompt: { input: { invalid: true } } });
+  await controller.applyResult({ next_prompt: { input: "   " } });
+
+  assert.equal(submitted, false);
+});
+
 test("exit remains a Surface-local command", async () => {
   const calls = [];
   const controller = createCommandController({

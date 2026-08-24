@@ -70,8 +70,9 @@ export function createCommandController({
     if (result.prompt_prefill) {
       output.setInputPrefill?.(result.prompt_prefill);
     }
-    if (result.next_prompt?.input) {
-      turn.submit(result.next_prompt.input, {
+    const nextPromptInput = result.next_prompt?.input;
+    if (typeof nextPromptInput === "string" && nextPromptInput.trim()) {
+      turn.submit(nextPromptInput, {
         transient_system_messages: result.next_prompt.transient_system_messages,
       });
     }
