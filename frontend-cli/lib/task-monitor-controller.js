@@ -19,6 +19,8 @@ export function createTaskMonitorController({
   let monitorPollInFlight = false;
   let monitor = null;
   let monitorInputWasActive = false;
+  let generation = 0;
+  let pollToken = 0;
 
   function refresh() {
     if (!terminalUi || state.runtimeClosing) {
@@ -27,8 +29,12 @@ export function createTaskMonitorController({
     if (listInFlight) {
       return listInFlight;
     }
-    listInFlight = request(runtimeMethods.backgroundList)
+    const requestGeneration = generation;
+    const promise = request(runtimeMethods.backgroundList)
       .then((result) => {
+        if (requestGeneration !== generation) {
+          return;
+        }
         const listed = Array.isArray(result?.tasks) ? result.tasks : [];
         const ids = new Set();
         for (const task of listed) {
@@ -55,9 +61,12 @@ export function createTaskMonitorController({
         }
       })
       .finally(() => {
-        listInFlight = null;
+        if (listInFlight === promise) {
+          listInFlight = null;
+        }
       });
-    return listInFlight;
+    listInFlight = promise;
+    return promise;
   }
 
   function updateCount() {
@@ -100,6 +109,10 @@ export function createTaskMonitorController({
   }
 
   function clear() {
+    generation += 1;
+    listInFlight = null;
+    pollToken += 1;
+    monitorPollInFlight = false;
     tasks.clear();
     pendingCommands.clear();
     delegates.clear();
@@ -257,13 +270,15 @@ export function createTaskMonitorController({
     if (!selected?.bg_id) {
       return;
     }
+    const requestGeneration = generation;
+    const requestToken = ++pollToken;
     monitorPollInFlight = true;
     try {
       const result = await request(runtimeMethods.backgroundOutput, {
         bg_id: selected.bg_id,
         max_output_chars: 20000,
       });
-      if (result?.task && typeof result.task === "object") {
+      if (requestGeneration === generation && result?.task && typeof result.task === "object") {
         tasks.set(selected.bg_id, {
           ...selected,
           ...result.task,
@@ -275,7 +290,9 @@ export function createTaskMonitorController({
     } catch {
       // Periodic list refresh reconciles expired tasks without interrupting input.
     } finally {
-      monitorPollInFlight = false;
+      if (requestToken === pollToken) {
+        monitorPollInFlight = false;
+      }
     }
   }
 
@@ -357,6 +374,10 @@ export function createTaskMonitorController({
   }
 
   function stop() {
+    generation += 1;
+    listInFlight = null;
+    pollToken += 1;
+    monitorPollInFlight = false;
     stopRefresh();
     stopMonitorPolling();
     monitor = null;

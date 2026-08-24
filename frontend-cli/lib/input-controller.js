@@ -4,11 +4,9 @@ export function createInputController({
   askInput,
   onSubmit = () => {},
   onCommand = async () => false,
-  onSigint = () => {},
   onPaste = () => {},
   onInput = () => {},
   cancelInput = () => {},
-  renderPrompt = () => {},
   prompt = () => "",
   placeholder = () => "",
 }) {
@@ -42,10 +40,6 @@ export function createInputController({
     }
   }
 
-  function ask(promptText, placeholderText) {
-    return askInput(promptText, placeholderText);
-  }
-
   function pause() {
     state.promptPaused = true;
     cancelInput();
@@ -69,10 +63,6 @@ export function createInputController({
     cancelInput();
   }
 
-  function redraw(force = false) {
-    renderPrompt(force);
-  }
-
   function close() {
     cancel();
     terminalUi?.stop();
@@ -81,14 +71,8 @@ export function createInputController({
   return {
     start,
     promptLoop,
-    ask,
     pause,
     resume,
-    cancel,
-    redraw,
     close,
-    handleInput: onInput,
-    handlePaste: onPaste,
-    handleSigint: onSigint,
   };
 }

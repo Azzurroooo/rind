@@ -35,7 +35,6 @@ export function createTurnController({ request, state, output, refreshGoalState 
     }
     state.activeTurn = true;
     state.interruptRequested = false;
-    state.turnTools = { completed: 0, failed: 0 };
     onTurnStart();
     output.refreshInputState();
     void run(text, extra).catch((error) => handleSubmissionError(error, text));
@@ -61,17 +60,9 @@ export function createTurnController({ request, state, output, refreshGoalState 
     void request(runtimeMethods.sessionCancel).catch(() => {});
   }
 
-  function reset() {
-    state.activeTurn = false;
-    state.interruptRequested = false;
-    output.resetTurnTools();
-  }
-
   return {
     submit,
     submitFollowUp,
     interrupt,
-    isActive: () => state.activeTurn,
-    reset,
   };
 }

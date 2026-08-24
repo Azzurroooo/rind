@@ -10,14 +10,12 @@ function createHarness({ activeTurn = false } = {}) {
     activeTurn,
     interruptRequested: false,
     runtimeClosing: false,
-    turnTools: { completed: 0, failed: 0 },
   };
   const output = {
     queueInput: (text, mode) => logs.push(`queued:${mode}:${text}`),
     restoreInputText: (text) => logs.push(`restore:${text}`),
     writeError: (text) => logs.push(`error:${text}`),
     refreshInputState: () => logs.push("refresh"),
-    resetTurnTools: () => logs.push("reset-tools"),
     closeAssistant: () => logs.push("close-assistant"),
     cancelInput: () => logs.push("cancel-input"),
     logInterrupt: () => logs.push("interrupt"),

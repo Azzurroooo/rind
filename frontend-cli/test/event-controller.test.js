@@ -33,12 +33,10 @@ test("event controller forwards assistant deltas and suppresses duplicate tool a
 
 test("event controller emits tool result and resets turn state", async () => {
   const logs = [];
-  let resets = 0;
   const controller = createEventController({
     output: {
       log: (text) => logs.push(text),
       closeAssistant() {},
-      resetTurnTools: () => { resets += 1; },
       clearCompactContext() {},
     },
   });
@@ -56,7 +54,6 @@ test("event controller emits tool result and resets turn state", async () => {
   } });
 
   assert.equal(logs.length, 2);
-  assert.equal(resets, 1);
 });
 
 test("event controller forwards delegate lifecycle to the task monitor", async () => {
@@ -73,7 +70,6 @@ test("event controller forwards delegate lifecycle to the task monitor", async (
       log() {},
       closeAssistant() {},
       clearCompactContext() {},
-      resetTurnTools() {},
     },
   });
 
@@ -109,7 +105,6 @@ test("event controller delivers queued input and clears pending input on termina
       clearCompactContext() {},
       closeAssistant() {},
       log() {},
-      resetTurnTools() {},
     },
   });
 

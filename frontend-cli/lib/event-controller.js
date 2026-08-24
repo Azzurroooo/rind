@@ -160,7 +160,6 @@ export function createEventController({
     pendingFileChanges.clear();
     pendingPlanInputs.clear();
     monitor.clearDelegates?.();
-    output.resetTurnTools?.();
   }
 
   function isAnnounced(event) {
@@ -223,8 +222,6 @@ export function createEventController({
 
   return {
     handle,
-    closeAssistant: () => output.closeAssistant?.(),
-    resetTurnState,
   };
 }
 

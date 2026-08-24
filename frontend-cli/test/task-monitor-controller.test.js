@@ -148,3 +148,27 @@ test("task monitor switches pages with horizontal keys", async () => {
   assert.match(controller.frame(80).lines.join("\n"), /Background \[1\]/);
   controller.stop();
 });
+
+test("task monitor ignores responses from a cleared session", async () => {
+  const state = {
+    runtimeClosing: false,
+    sessionInfo: {},
+    inputActive: false,
+  };
+  let resolveList;
+  const controller = createTaskMonitorController({
+    request: async () => new Promise((resolve) => {
+      resolveList = resolve;
+    }),
+    terminalUi: true,
+    state,
+  });
+
+  const pending = controller.refresh();
+  controller.clear();
+  resolveList({ tasks: [{ bg_id: "stale", status: "running" }] });
+  await pending;
+
+  assert.equal(state.sessionInfo.background_count, 0);
+  controller.stop();
+});
