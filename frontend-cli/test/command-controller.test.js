@@ -79,6 +79,41 @@ test("slash result can prefill input and start a follow-up turn", async () => {
   ]);
 });
 
+test("team blueprint menu selection reuses the slash command path", async () => {
+  const calls = [];
+  const controller = createCommandController({
+    request: async (method, params) => {
+      calls.push({ method, params });
+      return { text: "created" };
+    },
+    turn: { submit() {} },
+    input: {
+      askTeamBlueprint: async (blueprints) => blueprints[1],
+    },
+    output: { log: (text) => calls.push({ log: text }) },
+  });
+
+  await controller.applyResult({
+    text: "Available Team blueprints:",
+    display: {
+      type: "team_blueprints",
+      blueprints: [
+        { id: "research", name: "Research" },
+        { id: "weather", name: "Weather" },
+      ],
+    },
+  });
+
+  assert.deepEqual(calls, [
+    { log: "Available Team blueprints:" },
+    {
+      method: "rind/command/execute",
+      params: { input: "/team blueprint weather" },
+    },
+    { log: "created" },
+  ]);
+});
+
 test("slash result ignores malformed next prompts", async () => {
   let submitted = false;
   const controller = createCommandController({

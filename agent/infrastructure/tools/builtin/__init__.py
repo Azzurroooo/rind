@@ -27,8 +27,9 @@ def build_builtin_tool_specs(
     agent_create_project=None,
     workspace_root: str | None = None,
     allowed_roots: Collection[str] | None = None,
+    shared_root: str | None = None,
 ) -> tuple[ToolSpec, ...]:
-    specs = list(build_file_tool_specs(workspace_root, allowed_roots))
+    specs = list(build_file_tool_specs(workspace_root, allowed_roots, shared_root))
     if enable_user_question:
         specs[0:0] = USER_QUESTION_TOOL_SPECS
     specs.extend(build_shell_tool_specs(workspace_root))

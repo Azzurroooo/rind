@@ -16,18 +16,23 @@ from .operations import glob, grep, read_file
 def build_file_tool_specs(
     workspace_root: str | Path | None = None,
     allowed_roots: Collection[str | Path] | None = None,
+    shared_root: str | Path | None = None,
 ) -> tuple[ToolSpec, ...]:
-    if workspace_root is None and allowed_roots is None:
+    if workspace_root is None and allowed_roots is None and shared_root is None:
         return TOOL_SPECS
     root = Path(workspace_root or Path.cwd()).expanduser().resolve()
     allowed = tuple(Path(path).expanduser().resolve() for path in (allowed_roots or ()))
+    shared = Path(shared_root).expanduser().resolve() if shared_root is not None else None
 
     def resolve_path(tool_name: str, value: str) -> tuple[str | None, str | None]:
         if not isinstance(value, str) or not value.strip():
             return None, tool_error(tool_name, "Path is required.", "InvalidPath")
         candidate = Path(value).expanduser()
         if not candidate.is_absolute():
-            candidate = root / candidate
+            if shared is not None and candidate.parts and candidate.parts[0].casefold() == "shared":
+                candidate = shared.joinpath(*candidate.parts[1:])
+            else:
+                candidate = root / candidate
         candidate = candidate.resolve()
         if allowed and not any(_is_relative_to(candidate, allowed_root) for allowed_root in allowed):
             return None, tool_error(tool_name, f"Path is outside this Agent Capsule: {value}", "WorkspaceBoundary")

@@ -67,6 +67,14 @@ export function createCommandController({
     if (text) {
       output.log?.(text);
     }
+    if (result.display?.type === "team_blueprints" && input.askTeamBlueprint) {
+      const blueprints = Array.isArray(result.display.blueprints) ? result.display.blueprints : [];
+      const selected = await input.askTeamBlueprint(blueprints);
+      if (selected?.id) {
+        await runSlashCommand(`/team blueprint ${selected.id}`);
+      }
+      return;
+    }
     if (result.prompt_prefill) {
       output.setInputPrefill?.(result.prompt_prefill);
     }

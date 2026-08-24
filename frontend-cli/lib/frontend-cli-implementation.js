@@ -162,6 +162,7 @@ const runtimeController = createCliRuntimeController({
   getCompactContextState: () => compactContextState,
   askModelMenu: (...args) => inputActions.askModelMenu(...args),
   askSessionMenu: (...args) => inputActions.askSessionMenu(...args),
+  askTeamBlueprint: (...args) => inputActions.askTeamBlueprint(...args),
   restoreLiveTurn,
   renderHistory,
   clearPendingInputs: (...args) => inputActions.clearPendingInputs(...args),
@@ -439,6 +440,14 @@ function renderInputSession(width) {
     }, width);
   }
   if (session.mode === "sessions") {
+    return prepareComposerFrame({
+      prompt: mainPromptText(),
+      inputText: session.inputText,
+      cursor: { line: 0, column: session.inputText.length },
+      menuText: sessionMenuText(session.choiceState.options(), session.choiceState.selectedIndex()).trimEnd(),
+    }, width);
+  }
+  if (session.mode === "team-blueprints") {
     return prepareComposerFrame({
       prompt: mainPromptText(),
       inputText: session.inputText,

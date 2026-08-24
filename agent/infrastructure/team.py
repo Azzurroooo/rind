@@ -182,35 +182,98 @@ def materialize_team_agent(project: TeamProject, *, agent_id: str, blueprint: st
     """Copy one user Blueprint into a direct child Capsule without a roster entry."""
     clean_id = _clean_id(agent_id, "agent_id")
     blueprint_id = _clean_id(blueprint, "blueprint")
-    blueprint_root = (resolve_rind_home() / "blueprints" / blueprint_id).resolve()
-    if blueprint_root.parent != (resolve_rind_home() / "blueprints").resolve() or not blueprint_root.is_dir():
+    blueprints_root = (resolve_rind_home() / "blueprints").resolve()
+    blueprint_root = (blueprints_root / blueprint_id).resolve()
+    if blueprint_root.parent != blueprints_root or not blueprint_root.is_dir():
         raise ValueError(f"Blueprint not found: {blueprint_id}")
     blueprint_manifest = blueprint_root / AGENT_MANIFEST
     manifest = _require_mapping(_read_yaml(blueprint_manifest), f"Invalid Blueprint manifest: {blueprint_manifest}")
     metadata = _require_mapping(manifest.get("metadata"), "Blueprint metadata is required.")
     metadata["id"] = clean_id
-    target = (project.agents_root / clean_id).resolve()
-    if target.parent != project.agents_root:
-        raise ValueError(f"Invalid Team Agent path: {clean_id}")
-    if target.exists():
-        raise ValueError(f"Agent directory already exists: {target}")
+    return _create_agent_capsule(project, clean_id, manifest, blueprint_root)
 
+
+def initialize_team_agent(project: TeamProject, *, agent_id: str, description: str) -> AgentCapsule:
+    clean_id = _clean_id(agent_id, "agent_id")
+    clean_description = _clean_text(description, "description")
+    name = clean_id.replace("-", " ").replace("_", " ").title()
+    return _create_agent_capsule(project, clean_id, _agent_manifest(clean_id, name, clean_description), allow_empty_target=True)
+
+
+def initialize_team_agents(project: TeamProject) -> dict[str, list[str]]:
+    created: list[str] = []
+    skipped: list[str] = []
+    for path in sorted(project.agents_root.iterdir(), key=lambda item: item.name.lower()):
+        if not path.is_dir():
+            continue
+        agent_dir = path / AITEAM_DIR
+        if agent_dir.exists():
+            skipped.append(path.name)
+            continue
+        initialize_team_agent(project, agent_id=path.name, description=f"Agent for {path.name} tasks.")
+        created.append(path.name)
+    return {"created": created, "skipped": skipped}
+
+
+def list_agent_blueprints() -> list[dict[str, str]]:
+    root = (resolve_rind_home() / "blueprints").resolve()
+    if not root.is_dir():
+        return []
+    result: list[dict[str, str]] = []
+    for path in sorted(root.iterdir(), key=lambda item: item.name.lower()):
+        if not path.is_dir() or not (path / AGENT_MANIFEST).is_file():
+            continue
+        try:
+            manifest = _require_mapping(_read_yaml(path / AGENT_MANIFEST), "Blueprint manifest is required.")
+            metadata = _require_mapping(manifest.get("metadata"), "Blueprint metadata is required.")
+            blueprint_id = _clean_id(path.name, "blueprint")
+            result.append({
+                "id": blueprint_id,
+                "name": str(metadata.get("name") or blueprint_id).strip(),
+                "description": str(metadata.get("description") or "").strip(),
+            })
+        except ValueError:
+            continue
+    return result
+
+
+def _create_agent_capsule(
+    project: TeamProject,
+    agent_id: str,
+    manifest: dict[str, Any],
+    source_root: Path | None = None,
+    allow_empty_target: bool = False,
+) -> AgentCapsule:
+    target = (project.agents_root / agent_id).resolve()
+    if target.parent != project.agents_root:
+        raise ValueError(f"Invalid Team Agent path: {agent_id}")
+    if target.exists() and (not allow_empty_target or any(target.iterdir())):
+        raise ValueError(f"Agent directory already exists: {target}")
+    target_created = not target.exists()
     created: list[Path] = []
     try:
         _mkdir(target / AITEAM_DIR, created)
         _write_yaml(target / AITEAM_DIR / AGENT_MANIFEST, manifest)
-        for name in ("prompts", "skills", "workflows"):
-            source = blueprint_root / name
-            if source.exists():
-                if not source.is_dir():
-                    raise ValueError(f"Blueprint resource is not a directory: {source}")
-                shutil.copytree(source, target / AITEAM_DIR / name)
+        if source_root is None:
+            _mkdir(target / AITEAM_DIR / "prompts", created)
+            description = str(manifest.get("metadata", {}).get("description") or "").strip()
+            _write_text(
+                target / AITEAM_DIR / "prompts" / "system.md",
+                f"You are the {agent_id} Agent in a Team project. Your responsibility is: {description}.\n",
+            )
+        else:
+            for name in ("prompts", "skills", "workflows"):
+                source = source_root / name
+                if source.exists():
+                    if not source.is_dir():
+                        raise ValueError(f"Blueprint resource is not a directory: {source}")
+                    shutil.copytree(source, target / AITEAM_DIR / name)
         for name in ("memory", "work", "outputs"):
             _mkdir(target / name, created)
-        return resolve_team_agent(project, clean_id)
+        return resolve_team_agent(project, agent_id)
     except Exception:
         _cleanup_created(created)
-        if target.exists():
+        if target_created and target.exists():
             shutil.rmtree(target, ignore_errors=True)
         raise
 
@@ -344,14 +407,14 @@ def _project_manifest(project_id: str, name: str, main_agent_id: str) -> dict[st
     }
 
 
-def _agent_manifest(agent_id: str, name: str) -> dict[str, Any]:
+def _agent_manifest(agent_id: str, name: str, description: str = "Default Team entry agent.") -> dict[str, Any]:
     return {
         "api_version": "aiteam/v1",
         "kind": "Agent",
         "metadata": {
             "id": agent_id,
             "name": name,
-            "description": "Default Team entry agent.",
+            "description": description,
         },
         "spec": {
             "prompts": {"system": ["./prompts/system.md"]},

@@ -13,7 +13,7 @@ export const LOCAL_SLASH_COMMANDS = Object.freeze([
   { name: "sessions", description: "List recent sessions", usage: "/sessions [limit]" },
   { name: "skill", description: "List skills", usage: "/skill [list]" },
   { name: "status", description: "Show surface status", usage: "/status" },
-  { name: "team", description: "Create a Team project", usage: "/team create [project-id]" },
+  { name: "team", description: "Manage the current Team", usage: "/team create [project-id] | /team init | /team list | /team blueprint [id] | /team add <description>" },
 ]);
 
 export async function loadLocalSettings(

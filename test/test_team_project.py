@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import shutil
+import json
 import sys
 from pathlib import Path
 
@@ -18,6 +19,9 @@ from agent.infrastructure.team import (
     WorkspaceLock,
     discover_agent,
     initialize_team_project,
+    initialize_team_agent,
+    initialize_team_agents,
+    list_agent_blueprints,
     list_team_agents,
     load_agent_capsule,
     load_team_project,
@@ -25,6 +29,7 @@ from agent.infrastructure.team import (
     resolve_team_agent,
 )
 from agent.infrastructure.tools.builtin.files import build_file_tool_specs
+from agent.infrastructure.tools.builtin.agent_create import create_agent_create_tool_spec
 
 
 def test_initialize_team_project_creates_only_the_minimal_structure(tmp_path: Path) -> None:
@@ -67,13 +72,28 @@ def test_team_file_tools_reject_another_agents_private_workspace(tmp_path: Path)
     manifest.write_text(manifest.read_text(encoding="utf-8").replace("id: main-agent", "id: researcher"), encoding="utf-8")
     shared_file = tmp_path / "shared" / "result.md"
     shared_file.write_text("published", encoding="utf-8")
-    specs = {spec.name: spec.handler for spec in build_file_tool_specs(researcher, (researcher, tmp_path / "shared"))}
+    specs = {
+        spec.name: spec.handler
+        for spec in build_file_tool_specs(
+            researcher,
+            (researcher, tmp_path / "shared"),
+            tmp_path / "shared",
+        )
+    }
 
     denied = specs["read_file"]("../main-agent/.aiteam/agent.yaml")
     allowed = specs["read_file"]("../../shared/result.md")
+    aliased = specs["read_file"]("shared/result.md")
+    globbed = specs["glob"]("*.md", path="shared")
+    searched = specs["grep"]("published", path="shared")
+    escaped = specs["read_file"]("shared/../main-agent/.aiteam/agent.yaml")
 
     assert "WorkspaceBoundary" in denied
     assert "published" in allowed
+    assert "published" in aliased
+    assert "result.md" in globbed
+    assert "result.md" in searched
+    assert "WorkspaceBoundary" in escaped
 
 
 def test_discover_agent_requires_the_exact_agent_directory(tmp_path: Path) -> None:
@@ -171,6 +191,50 @@ def test_materialize_team_agent_from_a_user_blueprint(tmp_path: Path, monkeypatc
     assert capsule.agent_id == "researcher"
     assert (project_root / "agents" / "researcher" / "work").is_dir()
     assert [agent.agent_id for agent in list_team_agents(project)] == ["main-agent", "researcher"]
+
+
+def test_initialize_team_agent_creates_standard_structure(tmp_path: Path) -> None:
+    project = initialize_team_project(tmp_path)
+    capsule = initialize_team_agent(project, agent_id="weather-agent", description="Query weather data.")
+
+    assert capsule.agent_id == "weather-agent"
+    assert (capsule.workspace_root / ".aiteam" / "agent.yaml").is_file()
+    assert (capsule.workspace_root / ".aiteam" / "prompts" / "system.md").read_text(encoding="utf-8").find("Query weather data") >= 0
+    assert (capsule.workspace_root / "memory").is_dir()
+    assert [agent.agent_id for agent in list_team_agents(project)] == ["main-agent", "weather-agent"]
+
+
+def test_agent_create_tool_uses_semantic_description(tmp_path: Path) -> None:
+    project = initialize_team_project(tmp_path)
+    result = create_agent_create_tool_spec(project).handler("weather-agent", "Query weather data.")
+    payload = json.loads(result)
+
+    assert payload["ok"] is True
+    assert payload["data"]["agent_id"] == "weather-agent"
+    assert (tmp_path / "agents" / "weather-agent" / ".aiteam" / "agent.yaml").is_file()
+
+
+def test_initialize_team_agents_only_handles_direct_bare_directories(tmp_path: Path) -> None:
+    project = initialize_team_project(tmp_path)
+    (project.agents_root / "weather-agent").mkdir()
+    (project.agents_root / "plain").mkdir()
+    result = initialize_team_agents(project)
+
+    assert result["created"] == ["plain", "weather-agent"]
+    assert result["skipped"] == ["main-agent"]
+    assert len(list_team_agents(project)) == 3
+
+
+def test_list_agent_blueprints_reads_valid_user_blueprints(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("RIND_HOME", str(tmp_path / "rind-home"))
+    blueprint = tmp_path / "rind-home" / "blueprints" / "weather"
+    blueprint.mkdir(parents=True)
+    (blueprint / "agent.yaml").write_text(
+        "api_version: aiteam/v1\nkind: Agent\nmetadata:\n  id: weather\n  name: Weather\n  description: Weather reports\nspec: {}\n",
+        encoding="utf-8",
+    )
+
+    assert list_agent_blueprints() == [{"id": "weather", "name": "Weather", "description": "Weather reports"}]
 
 
 @pytest.mark.asyncio

@@ -256,6 +256,10 @@ def test_container_resolves_team_agent_capsule_context_from_workspace(tmp_path, 
     assert container.tool_registry.has("agent_create") is True
     assert "Use delegate for specialized Team work" in container.runtime._runtime_system_messages[0]["content"]
     assert "They share that Agent's workspace" in container.runtime._runtime_system_messages[0]["content"]
+    assert "shared/<file>" in container.runtime._runtime_system_messages[0]["content"]
+    (tmp_path / "shared" / "result.md").write_text("published", encoding="utf-8")
+    shared_result = container.tool_registry.call("read_file", {"path": "shared/result.md"})
+    assert "published" in shared_result
     assert not (tmp_path / "rind_home" / "teams").exists()
 
 

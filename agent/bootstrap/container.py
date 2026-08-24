@@ -118,11 +118,13 @@ def build_agent_container(
     agent_create_project = None
     workspace_lock = None
     allowed_roots = None
+    shared_root = None
     if resolved_team_agent is not None:
         from agent.infrastructure.team import WorkspaceLock, render_team_agent_catalog
 
         project = resolved_team_agent.project
         allowed_roots = (str(resolved_team_agent.workspace_root), str(project.shared_root))
+        shared_root = str(project.shared_root)
         if lock_workspace:
             workspace_lock = WorkspaceLock(project.project_id, resolved_team_agent.agent_id)
         if resolved_team_agent.agent_id == project.main_agent:
@@ -132,7 +134,9 @@ def build_agent_container(
                 "Use delegate for specialized Team work. Treat delegate results as concise explanations and "
                 "verify published shared artifacts when evidence matters. Do not read another Agent's private "
                 "workspace directly. Multiple delegate calls may run concurrently, including calls to the same "
-                "Agent. They share that Agent's workspace, so avoid overlapping file writes and coordinate paths."
+                "Agent. They share that Agent's workspace, so avoid overlapping file writes and coordinate paths. "
+                "Published artifacts use the shared/<file> path namespace. File tools resolve shared/<file> "
+                "to the project shared directory; use path=shared when using glob or grep there."
             )
             runtime_system_messages.append(
                 {
@@ -158,6 +162,7 @@ def build_agent_container(
         agent_create_project=agent_create_project,
         workspace_root=workspace_root,
         allowed_roots=allowed_roots,
+        shared_root=shared_root,
     )
     if enabled_tools is None:
         tool_specs = catalog
