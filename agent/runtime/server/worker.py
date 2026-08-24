@@ -257,9 +257,6 @@ class ExecutionCoordinator:
             current["status"] = event_type.removeprefix("turn_")
             current["question"] = None
 
-    def clear_live_turn(self, session_id: str) -> None:
-        self._live.pop(validate_session_id(session_id), None)
-
     async def start(self, session_id: str) -> AgentContainer:
         clean = validate_session_id(session_id)
         async with self._lock:
