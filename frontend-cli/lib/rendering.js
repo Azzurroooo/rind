@@ -4,16 +4,16 @@ const MAX_STARTUP_BANNER_WIDTH = 80;
 const MAX_COMPOSER_WIDTH = 78;
 const MAX_FILE_CHANGE_LINES = 20;
 
-export function startupText(info = {}) {
-  const header = startupBannerText(info);
+export function startupText(info = {}, width) {
+  const header = startupBannerText(info, width);
   const goal = goalText(info.goal, true);
   const preview = resumePreviewText(info.resume_preview);
   const sections = [header, goal, preview ? `${accent("•")} ${bold("Recent context")}\n${preview}` : ""];
   return sections.filter(Boolean).join("\n\n");
 }
 
-export function promptText(info = {}, _stats = {}, state = {}) {
-  return inputPromptFrame(promptHeaderLine(info), state);
+export function promptText(info = {}, _stats = {}, state = {}, frameWidth) {
+  return inputPromptFrame(promptHeaderLine(info, frameWidth), state, frameWidth);
 }
 
 export function promptActivityLine(state = {}) {
@@ -29,12 +29,12 @@ export function promptPlaceholderText() {
   return "Ask Rind to do anything";
 }
 
-export function userInputText(text) {
+export function userInputText(text, width) {
   const lines = messageLines(text);
   if (!lines.length) {
     return "";
   }
-  const contentWidth = userInputContentWidth();
+  const contentWidth = userInputContentWidth(width);
   const physicalLines = lines.flatMap((line) => (
     wrapTextCells(line, contentWidth, contentWidth).map((chunk) => `  ${chunk.text}`)
   ));
@@ -58,6 +58,7 @@ export function helpText(commands = []) {
     helpRow("home / end", "line edges", "del / backspace", "edit text"),
     helpRow("ctrl+c", "interrupt or quit", "?", "show shortcuts"),
     helpRow("ctrl+b", "task monitor", "esc", "close monitor"),
+    helpRow("ctrl+o", "toggle tool detail", "", ""),
   ];
   const commandRows = commandDeckText(commands);
   if (commandRows.length) {
@@ -790,9 +791,6 @@ function toolLabel(name) {
   const labels = {
     edit_file: "file edit",
     read_file: "file read",
-    search_files: "file search",
-    view_image: "image",
-    web_search: "web search",
   };
   return labels[name] || humanToolName(name);
 }
@@ -941,8 +939,8 @@ function messageLines(value) {
   return text ? text.split("\n").map((line) => line.trimEnd()) : [];
 }
 
-function userInputContentWidth() {
-  const columns = Number(process.stdout.columns);
+function userInputContentWidth(width) {
+  const columns = Number(width ?? process.stdout.columns);
   return Number.isFinite(columns) && columns > 0 ? Math.max(1, Math.floor(columns - 2)) : 78;
 }
 
@@ -1022,8 +1020,8 @@ function resumePreviewLine(line) {
   return dim(`  ${clipSingleLine(line, 78)}`);
 }
 
-function startupBannerText(info) {
-  const width = startupBannerWidth();
+function startupBannerText(info, frameWidth) {
+  const width = startupBannerWidth(frameWidth);
   const modelLine = `model ${singleLine(info.model) || "unknown"} · session ${singleLine(info.session_id) || "unknown"}`;
   const version = singleLine(info.version) || "unknown";
   const cwd = middleClip(info.cwd || process.cwd(), width - 4);
@@ -1050,44 +1048,55 @@ function startupBannerLine(text, frameWidth) {
   return `${dim("│")} ${padRight(content, width)} ${dim("│")}`;
 }
 
-function startupBannerWidth() {
-  const columns = Number(process.stdout.columns);
+function startupBannerWidth(frameWidth) {
+  const columns = Number(frameWidth ?? process.stdout.columns);
   if (!Number.isFinite(columns) || columns <= 0) {
     return MAX_STARTUP_BANNER_WIDTH;
   }
   return Math.max(44, Math.min(MAX_STARTUP_BANNER_WIDTH, columns - 2));
 }
 
-function helpRow(leftKey, leftText, rightKey, rightText) {
+function helpRow(leftKey, leftText, rightKey = "", rightText = "") {
   const left = `${padRight(leftKey, 12)} ${leftText}`;
+  if (!rightKey && !rightText) {
+    return dim(`  ${left}`);
+  }
   const right = `${padRight(rightKey, 14)} ${rightText}`;
   return dim(`  ${padRight(left, 33)} ${right}`);
 }
 
-function inputPromptFrame(header = "", state = {}) {
+function inputPromptFrame(header = "", state = {}, frameWidth) {
   const lines = [""];
   const activity = promptActivityLine(state);
   if (activity) {
     lines.push(activity);
   }
-  lines.push(...pendingInputLines(state.pendingInputs));
+  lines.push(...pendingInputLines(state.pendingInputs, frameWidth));
   if (header) {
     lines.push(header);
   }
-  lines.push(inputDivider());
+  lines.push(inputDivider(frameWidth));
   lines.push("  ▷ ");
   return lines.join("\n");
 }
 
-function inputDivider() {
-  return dim(`  ${"─".repeat(composerWidth())}`);
+function inputDivider(frameWidth) {
+  return dim(`  ${"─".repeat(dividerWidth(frameWidth))}`);
 }
 
-function pendingInputLines(entries) {
+function dividerWidth(frameWidth) {
+  const columns = Number(frameWidth ?? process.stdout.columns);
+  if (!Number.isFinite(columns) || columns <= 0) {
+    return MAX_COMPOSER_WIDTH;
+  }
+  return Math.max(1, Math.floor(columns) - 2);
+}
+
+function pendingInputLines(entries, frameWidth) {
   if (!Array.isArray(entries)) {
     return [];
   }
-  const width = composerWidth();
+  const width = composerWidth(frameWidth);
   const lines = entries.flatMap((entry) => {
     const input = singleLine(entry?.input);
     if (!input) {
@@ -1123,7 +1132,7 @@ function visibleLength(text) {
   return textWidth(text);
 }
 
-function promptHeaderLine(info) {
+function promptHeaderLine(info, frameWidth) {
   const backgroundCount = Number(info.background_count);
   const delegateCount = Number(info.delegate_count);
   const taskHints = [];
@@ -1138,7 +1147,7 @@ function promptHeaderLine(info) {
     : "";
   const model = singleLine(info.model);
   const cwd = middleClip(info.cwd, 56);
-  const width = composerWidth();
+  const width = composerWidth(frameWidth);
   if (model && cwd) {
     const separator = " · ";
     const pathWidth = width - visibleLength(model) - visibleLength(separator) - visibleLength(taskHint);
@@ -1152,8 +1161,8 @@ function promptHeaderLine(info) {
   return cwd ? `  ${promptPath(clipSingleLine(cwd, width))}${taskHint}` : "";
 }
 
-function composerWidth() {
-  const columns = Number(process.stdout.columns);
+function composerWidth(frameWidth) {
+  const columns = Number(frameWidth ?? process.stdout.columns);
   if (!Number.isFinite(columns) || columns <= 0) {
     return MAX_COMPOSER_WIDTH;
   }

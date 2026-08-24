@@ -33,6 +33,7 @@ export function createCliState() {
       assistantOutputLineOpen: false,
       assistantHeaderShown: false,
       outputStarted: false,
+      toolDetailsExpanded: false,
       processExitTimer: null,
     },
   };

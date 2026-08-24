@@ -13,10 +13,7 @@ export function createInputController({
   const promptResumeWaiters = [];
 
   function start() {
-    terminalUi?.start({
-      onInput,
-      onPaste,
-    });
+    terminalUi?.start();
   }
 
   async function promptLoop() {

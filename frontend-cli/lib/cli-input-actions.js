@@ -193,6 +193,11 @@ export function createCliInputActions({
       handleSigint();
       return;
     }
+    if (event.ctrl && !event.alt && !event.shift && event.name === "o") {
+      state.display.toolDetailsExpanded = !state.display.toolDetailsExpanded;
+      output.setToolsExpanded?.(state.display.toolDetailsExpanded);
+      return;
+    }
     const monitor = getTaskMonitor();
     if (monitor?.isMonitoring()) {
       monitor.handleInput(event);
@@ -302,10 +307,11 @@ export function createCliInputActions({
     state.input.session = null;
     state.input.active = false;
     cancelActiveInput = null;
-    output.suspendPrompt(() => {
-      if (writeUser) output.writeUserInput(displayValue);
-      else if (lineText && String(value || "").trim()) process.stdout.write("\n");
-    }, { redraw: false });
+    if (writeUser) {
+      output.writeUserInput(displayValue);
+    } else if (!output.terminalUi && lineText && String(value || "").trim()) {
+      process.stdout.write("\n");
+    }
     session.resolve(value);
   }
 

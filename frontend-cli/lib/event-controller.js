@@ -5,10 +5,6 @@ import {
   errorLine,
   goalText,
   planUpdatedLine,
-  toolProgressLine,
-  toolRequestedLine,
-  toolResultLine,
-  toolStartedLine,
   turnCompletedLine,
 } from "./rendering.js";
 
@@ -18,7 +14,6 @@ export function createEventController({
   output = {},
   monitor = {},
 }) {
-  const announcedTools = new Set();
   const pendingFileChanges = new Map();
   const pendingPlanInputs = new Map();
   let toolStats = { completed: 0, failed: 0 };
@@ -53,10 +48,7 @@ export function createEventController({
       case "tool_input_started":
         output.closeAssistant?.();
         rememberPlanInputStart(event);
-        if (isAnnounced(event)) {
-          return;
-        }
-        output.log?.(toolStartedLine(event));
+        output.beginTool?.(event);
         return;
       case "tool_input_delta":
         appendPlanInput(event);
@@ -68,17 +60,11 @@ export function createEventController({
         rememberPlanInputPreview(event);
         monitor.recordCommand?.(event);
         monitor.recordDelegateRequest?.(event);
-        if (isAnnounced(event)) {
-          return;
-        }
-        output.log?.(toolRequestedLine(event));
+        output.beginTool?.(event);
         return;
       case "tool_call_started":
         output.closeAssistant?.();
-        if (alreadyAnnounced(event)) {
-          return;
-        }
-        output.log?.(toolStartedLine(event));
+        output.beginTool?.(event);
         return;
       case "tool_result": {
         output.closeAssistant?.();
@@ -97,7 +83,7 @@ export function createEventController({
         if (goal?.status) {
           output.updateGoal?.(goal);
         }
-        output.log?.(goal?.status ? goalText(goal) : plan ? planUpdatedLine(plan) : toolResultLine(event, fileChange));
+        output.finishTool?.(event, fileChange);
         return;
       }
       case "file_change":
@@ -106,10 +92,10 @@ export function createEventController({
         }
         return;
       case "tool_progress": {
-        output.closeAssistant?.();
-        const line = toolProgressLine(event);
-        if (line) {
-          output.log?.(line);
+        const message = progressMessage(event.payload);
+        if (message) {
+          output.closeAssistant?.();
+          output.updateToolProgress?.(event.tool_call_id, message);
         }
         return;
       }
@@ -154,27 +140,24 @@ export function createEventController({
     }
   }
 
+  function progressMessage(payload) {
+    if (!payload || typeof payload !== "object") {
+      return "";
+    }
+    for (const key of ["message", "status", "text"]) {
+      const value = String(payload[key] || "").trim();
+      if (value) {
+        return value;
+      }
+    }
+    return "";
+  }
+
   function resetTurnState() {
     toolStats = { completed: 0, failed: 0 };
-    announcedTools.clear();
     pendingFileChanges.clear();
     pendingPlanInputs.clear();
     monitor.clearDelegates?.();
-  }
-
-  function isAnnounced(event) {
-    if (!event.tool_call_id) {
-      return false;
-    }
-    if (announcedTools.has(event.tool_call_id)) {
-      return true;
-    }
-    announcedTools.add(event.tool_call_id);
-    return false;
-  }
-
-  function alreadyAnnounced(event) {
-    return Boolean(event.tool_call_id && announcedTools.has(event.tool_call_id));
   }
 
   function recordToolResult(event) {

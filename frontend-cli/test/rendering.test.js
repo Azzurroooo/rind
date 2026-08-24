@@ -235,13 +235,13 @@ test("promptText clips long session status", () => {
   assert.match(statusLine, /\.\.\.$/);
 });
 
-test("promptText keeps composer away from terminal edge", () => {
+test("promptText extends the divider to the terminal's right edge", () => {
   const originalColumns = process.stdout.columns;
   process.stdout.columns = 80;
   try {
     const divider = promptText().split("\n")[1];
 
-    assert.equal(divider.length, 78);
+    assert.equal(divider.length, 80);
   } finally {
     process.stdout.columns = originalColumns;
   }
@@ -268,7 +268,8 @@ test("helpText renders compact shortcuts and commands", () => {
       "  ↑ / ↓        history              ← / →          move cursor",
       "  home / end   line edges           del / backspace edit text",
       "  ctrl+c       interrupt or quit    ?              show shortcuts",
-      "  ctrl+b       task monitor         esc            close monitor",
+            "  ctrl+b       task monitor         esc            close monitor",
+      "  ctrl+o       toggle tool detail",
     ].join("\n"),
   );
   assert.equal(
@@ -285,7 +286,8 @@ test("helpText renders compact shortcuts and commands", () => {
       "  ↑ / ↓        history              ← / →          move cursor",
       "  home / end   line edges           del / backspace edit text",
       "  ctrl+c       interrupt or quit    ?              show shortcuts",
-      "  ctrl+b       task monitor         esc            close monitor",
+            "  ctrl+b       task monitor         esc            close monitor",
+      "  ctrl+o       toggle tool detail",
       "",
       "• Command deck",
       "  /status         /help           /clear          /exit",
@@ -769,7 +771,7 @@ test("toolResultLine renders compact success state", () => {
       status: "completed",
       duration_ms: 20,
     }),
-    "◉ Tool · Called image in 20ms",
+    "◉ Tool · Called view image in 20ms",
   );
   assert.equal(
     toolResultLine({
