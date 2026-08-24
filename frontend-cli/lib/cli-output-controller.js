@@ -4,6 +4,8 @@ import {
   assistantHeaderText,
   outputBlockText,
   promptText,
+  toolResultLine,
+  toolStartedLine,
   userInputText,
 } from "./rendering.js";
 
@@ -152,6 +154,56 @@ export function createCliOutputController({ state, terminalUi }) {
     assistantRenderer.append(text);
   }
 
+  function renderHistory(messages) {
+    suspendPrompt(() => {
+      const pendingTools = new Map();
+      const flushPendingTools = () => {
+        for (const toolName of pendingTools.values()) {
+          log(toolStartedLine({ tool_name: toolName }));
+        }
+        pendingTools.clear();
+      };
+      for (const message of Array.isArray(messages) ? messages : []) {
+        const role = String(message?.role || "");
+        if (role === "user") {
+          flushPendingTools();
+          closeAssistant();
+          writeUserInput(messageText(message?.content));
+          continue;
+        }
+        if (role === "assistant") {
+          flushPendingTools();
+          const content = messageText(message?.content);
+          if (content) {
+            assistantAppend(content);
+            closeAssistant();
+          }
+          for (const call of Array.isArray(message?.tool_calls) ? message.tool_calls : []) {
+            const toolCallId = String(call?.id || "");
+            const toolName = String(call?.function?.name || "tool");
+            if (toolCallId) {
+              pendingTools.set(toolCallId, toolName);
+            }
+          }
+          continue;
+        }
+        if (role === "tool") {
+          const toolCallId = String(message?.tool_call_id || "");
+          const toolName = pendingTools.get(toolCallId) || "tool";
+          pendingTools.delete(toolCallId);
+          log(toolResultLine({
+            tool_call_id: toolCallId,
+            tool_name: toolName,
+            result: messageText(message?.content),
+            status: "completed",
+          }));
+        }
+      }
+      flushPendingTools();
+      closeAssistant();
+    });
+  }
+
   return {
     terminalUi: Boolean(terminalUi),
     suspendPrompt,
@@ -165,5 +217,22 @@ export function createCliOutputController({ state, terminalUi }) {
     closeAssistant,
     clearAssistantLineForInput,
     assistantAppend,
+    renderHistory,
   };
+}
+
+function messageText(content) {
+  if (typeof content === "string") {
+    return content;
+  }
+  if (!Array.isArray(content)) {
+    return "";
+  }
+  return content
+    .map((part) => {
+      if (typeof part === "string") return part;
+      if (part && typeof part === "object" && typeof part.text === "string") return part.text;
+      return "";
+    })
+    .join("");
 }

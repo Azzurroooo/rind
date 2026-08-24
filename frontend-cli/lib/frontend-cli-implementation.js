@@ -93,6 +93,7 @@ const {
   log: logOutput,
   writeError: writeErrorOutput,
   closeAssistant,
+  renderHistory,
 } = outputController;
 
 const runtimeClient = createRuntimeClient({
@@ -162,6 +163,9 @@ const runtimeController = createCliRuntimeController({
   askModelMenu: (...args) => inputActions.askModelMenu(...args),
   askSessionMenu: (...args) => inputActions.askSessionMenu(...args),
   restoreLiveTurn,
+  renderHistory,
+  clearPendingInputs: (...args) => inputActions.clearPendingInputs(...args),
+  closeAssistant,
   refreshInputState,
   updateGoalState,
   log: logOutput,
@@ -202,7 +206,7 @@ commandController = createCommandController({
       return executeLocalSlashCommand(text, {
         settings: sessionState.settings,
         sessionInfo: sessionState.info,
-        cwd: process.cwd(),
+        cwd: sessionState.info.workspace_root || sessionState.info.cwd || process.cwd(),
         runtimeStarted: runtimeState.status === "starting" || runtimeState.status === "ready",
         runtimeInitialized: runtimeState.status === "ready",
         interactive: Boolean(terminalUi),
@@ -317,7 +321,8 @@ try {
   sessionState.info = { cwd: process.cwd(), model: sessionState.settings.model };
   sessionState.commands = commandController.localCommands();
   await runtimeController.ensureRuntime();
-  logOutput(startupText(sessionState.info));
+  logOutput(startupText({ ...sessionState.info, resume_preview: "" }));
+  await runtimeController.restoreSession();
   if (terminalUi) {
     inputController.start();
   } else {

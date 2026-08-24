@@ -14,12 +14,17 @@ export function createCliRuntimeController({
   askModelMenu,
   askSessionMenu,
   restoreLiveTurn,
+  renderHistory = () => {},
+  clearPendingInputs,
+  closeAssistant,
   refreshInputState,
   updateGoalState,
   log,
   writeError,
   redraw,
 }) {
+  let switchGeneration = 0;
+
   async function request(method, params = {}) {
     await ensureRuntime();
     const requestParams = { ...params };
@@ -49,7 +54,6 @@ export function createCliRuntimeController({
       const info = requireInitialization(await client.request(methods.initialize));
       state.session.info = { ...state.session.info, ...(info || {}) };
       state.display.lastEventSequence = 0;
-      restoreLiveTurn(state.session.info.live_turn);
       state.runtime.status = "ready";
       const commandController = getCommands();
       state.session.commands = mergeSlashCommands(
@@ -116,10 +120,74 @@ export function createCliRuntimeController({
     }
   }
 
+  async function restoreSession(sessionId = state.session.info.session_id, options = {}) {
+    const targetId = String(sessionId || "").trim();
+    if (!targetId) {
+      throw new Error("Session ID is required.");
+    }
+    const switching = options.switchSession === true;
+    const switchToken = switching ? ++switchGeneration : 0;
+    const update = switching
+      ? await request(methods.sessionSwitch, { session_id: targetId })
+      : state.session.info;
+    if (switching && (switchToken !== switchGeneration || state.runtime.status === "closing")) {
+      return false;
+    }
+    const switchedId = String(update?.session_id || targetId);
+    if (switchedId !== targetId) {
+      throw new Error("Runtime returned a different session.");
+    }
+    const replay = await request(methods.sessionReplay, { session_id: switchedId });
+    if (switching && (switchToken !== switchGeneration || state.runtime.status === "closing")) {
+      return false;
+    }
+    if (replay?.session_id && String(replay.session_id) !== switchedId) {
+      throw new Error("Runtime replay returned a different session.");
+    }
+
+    const liveTurn = replay?.live_turn || update?.live_turn || null;
+    const turnState = replay?.turn_state || update?.turn_state || null;
+    const usage = update?.usage && typeof update.usage === "object" ? update.usage : {};
+    const workspaceRoot = String(update?.workspace_root || options.workspaceRoot || "").trim();
+    closeAssistant();
+    getTaskMonitor()?.clear();
+    clearPendingInputs();
+    state.session.info = {
+      ...state.session.info,
+      session_id: switchedId,
+      cwd: workspaceRoot || state.session.info.cwd,
+      workspace_root: workspaceRoot || state.session.info.workspace_root,
+      model: replay?.model || update?.model || state.session.info.model,
+      resume_preview: "",
+      goal: update?.goal || null,
+      live_turn: liveTurn,
+      turn_state: turnState,
+      usage,
+      background_count: 0,
+      delegate_count: 0,
+    };
+    state.turn.id = "";
+    state.turn.active = false;
+    state.turn.interruptRequested = false;
+    options.announce?.(state.session.info);
+    renderHistory(replay?.messages);
+    restoreLiveTurn(liveTurn);
+    state.display.stats = usage;
+    getCompactContextState().clear();
+    refreshInputState();
+    redraw();
+    void getTaskMonitor()?.refresh().catch(() => {});
+    return true;
+  }
+
   async function runSessionsSelector() {
+    if (state.turn.active || state.display.activeCompact) {
+      log("Cannot switch sessions while a turn is running.");
+      return;
+    }
     let result;
     try {
-      result = await request(methods.commandExecute, { input: "/sessions" });
+      result = await request(methods.commandExecute, { input: "/sessions 100" });
     } catch (error) {
       log(`Command failed: ${error instanceof Error ? error.message : String(error)}`);
       return;
@@ -133,29 +201,16 @@ export function createCliRuntimeController({
     const options = sessions.map(sessionMenuOption);
     const currentIndex = sessions.findIndex((session) => String(session?.id || "") === currentId);
     const selected = await askSessionMenu(options, sessions, currentIndex);
-    if (!selected || state.runtime.status === "closing" || selected.id === currentId) {
+    const selectedId = String(selected?.id || "");
+    if (!selectedId || state.runtime.status === "closing" || selectedId === currentId) {
       return;
     }
     try {
-      const update = await request(methods.sessionSwitch, { session_id: selected.id });
-      getTaskMonitor()?.clear();
-      state.session.info = {
-        ...state.session.info,
-        session_id: update?.session_id || selected.id,
-        model: update?.model || state.session.info.model,
-        resume_preview: update?.resume_preview || "",
-        goal: update?.goal || null,
-        background_count: 0,
-        delegate_count: 0,
-      };
-      state.turn.id = "";
-      state.turn.active = false;
-      restoreLiveTurn(update?.live_turn);
-      state.display.stats = update?.usage && typeof update.usage === "object" ? update.usage : {};
-      getCompactContextState().clear();
-      log(sessionSwitchedText(state.session.info));
-      redraw();
-      void getTaskMonitor()?.refresh().catch(() => {});
+      await restoreSession(selectedId, {
+        switchSession: true,
+        workspaceRoot: selected?.workspace_root,
+        announce: (info) => log(sessionSwitchedText(info)),
+      });
     } catch (error) {
       log(`Session switch failed: ${error instanceof Error ? error.message : String(error)}`);
     }
@@ -212,6 +267,7 @@ export function createCliRuntimeController({
   return {
     request,
     ensureRuntime,
+    restoreSession,
     runGoalCommand,
     refreshGoalState,
     runSessionsSelector,

@@ -262,7 +262,7 @@ async def test_sessions_reports_no_recent_sessions() -> None:
         "type": "sessions",
         "sessions": [],
         "current_session_id": "session_1",
-        "limit": 8,
+        "limit": 100,
         "resume_command": "/sessions",
     }
 

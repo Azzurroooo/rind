@@ -6,7 +6,7 @@ from ..router import SlashCommandContext, SlashCommandInfo, SlashCommandResult
 
 
 async def handle_sessions(context: SlashCommandContext, args: list[str]) -> str | SlashCommandResult:
-    limit = _parse_limit(args, default=8, maximum=20)
+    limit = _parse_limit(args, default=100, maximum=100)
     if limit is None:
         return "Usage: /sessions [limit]"
     list_sessions = getattr(context.session, "list_recent_sessions", None)
