@@ -900,7 +900,6 @@ class WorkerStdioRuntimeServer:
         self._slash_router = SlashCommandRouter()
         self._requests: asyncio.Queue[dict[str, Any] | None] = asyncio.Queue()
         self._dispatch_tasks: set[asyncio.Task] = set()
-        self._active_servers: dict[str, StdioRuntimeServer] = {}
         self._initialized = False
         self._stopping = False
         self._shutdown_request: dict[str, Any] | None = None
@@ -932,8 +931,8 @@ class WorkerStdioRuntimeServer:
             if request is None:
                 if not self._stopping:
                     self._stopping = True
-                    for server in list(self._active_servers.values()):
-                        server._interrupt_current()
+                    for session_id in self._worker.execution.active_session_ids():
+                        self._worker.execution.interrupt(session_id, "Worker shutting down")
                 await self._drain_dispatch_tasks()
                 await self._worker.close()
                 await self._respond_to_shutdown()
@@ -977,8 +976,8 @@ class WorkerStdioRuntimeServer:
             return False
         self._stopping = True
         self._shutdown_request = request
-        for server in list(self._active_servers.values()):
-            server._interrupt_current()
+        for session_id in self._worker.execution.active_session_ids():
+            self._worker.execution.interrupt(session_id, "Worker shutting down")
         self._requests.put_nowait(None)
         return True
 
@@ -1036,24 +1035,12 @@ class WorkerStdioRuntimeServer:
                 if method in TURN_SCOPED_METHODS and not await self._valid_turn(session_id, request):
                     return
                 if method == RuntimeMethod.SESSION_PROMPT:
-                    server = await self._start_server(session_id)
-                    await server._dispatch(request)
-                    await self._release_if_idle(session_id)
+                    await self._run_turn(session_id, request)
                     return
-                server = self._active_servers.get(session_id)
-                if server is None:
-                    if method in {
-                        RuntimeMethod.RIND_SESSION_COMPACT,
-                    }:
-                        server = await self._start_server(session_id)
-                    else:
-                        await self._respond_error(request, "Session execution is not active.", "TurnNotActive")
-                        return
-                handled = await server._handle_control_message(request)
-                if not handled:
-                    await server._dispatch(request)
                 if method == RuntimeMethod.RIND_SESSION_COMPACT:
-                    await self._release_if_idle(session_id)
+                    await self._compact(session_id, request)
+                    return
+                await self._handle_active_control(session_id, request)
                 return
             await self._respond_error(request, f"Unknown method: {method}", "MethodNotFound")
         except LookupError as exc:
@@ -1104,35 +1091,108 @@ class WorkerStdioRuntimeServer:
             for info in self._slash_router.command_infos()
         ]
 
-    async def _start_server(self, session_id: str) -> StdioRuntimeServer:
-        server = self._active_servers.get(session_id)
-        if server is not None:
-            return server
-        container = await self._worker.start_execution(session_id)
-        server = StdioRuntimeServer(
-            container.runtime,
-            container.session_store,
-            debug=self._debug,
-            model_client_factory=self._worker.provider_client_factory.create_async_client,
-            model_client=self._worker.model_client,
-            default_model=self._worker.default_model,
-            background_list=self._background_list,
-            background_output=self._background_output,
-            goal_enabled=self._goal_enabled,
-            writer=self._writer,
-            slash_router=self._slash_router,
-            event_observer=getattr(self._worker, "update_live_event", None),
-            input_observer=getattr(self._worker, "record_live_input", None),
-        )
-        self._active_servers[session_id] = server
-        return server
-
-    async def _release_if_idle(self, session_id: str) -> None:
-        server = self._active_servers.get(session_id)
-        if server is None or server._runtime.turn_active:
+    async def _run_turn(self, session_id: str, request: dict[str, Any]) -> None:
+        params = request.get("params") if isinstance(request.get("params"), dict) else {}
+        raw_query = params.get("input")
+        if raw_query is None:
+            raw_query = params.get("query")
+        query = str(raw_query or "")
+        resume = params.get("resume") is True
+        goal_continuation = params.get("goal_continuation") is True
+        if not query.strip() and not goal_continuation and not resume:
+            await self._respond_error(request, "session/prompt requires input.", "InvalidRequest")
             return
-        self._active_servers.pop(session_id, None)
-        await self._worker.release_execution(session_id)
+        if resume and (query.strip() or goal_continuation):
+            await self._respond_error(request, "resume cannot include input or goal continuation.", "InvalidRequest")
+            return
+        if goal_continuation:
+            if not self._goal_enabled:
+                await self._respond_error(request, "Goal support is unavailable.", "UnsupportedOperation")
+                return
+            goal = await self._worker.repository.get_goal(session_id)
+            if not goal or goal.get("status") != "active":
+                await self._respond_error(request, "No active goal to continue.", "InvalidRequest")
+                return
+        transient_system_messages = params.get("transient_system_messages")
+        if not isinstance(transient_system_messages, list):
+            transient_system_messages = None
+        turn_session_id = ""
+        turn_id = ""
+        async for event in self._worker.execution.run_turn(
+            session_id,
+            query=query,
+            transient_system_messages=transient_system_messages,
+            resume=resume,
+        ):
+            turn_session_id = turn_session_id or str(event.get("session_id") or "")
+            turn_id = turn_id or str(event.get("turn_id") or "")
+            await self._send_event(event)
+        await self._respond(
+            request,
+            {
+                "ok": True,
+                "session_id": turn_session_id or session_id,
+                "turn_id": turn_id,
+            },
+        )
+
+    async def _compact(self, session_id: str, request: dict[str, Any]) -> None:
+        container = self._worker.execution.active_container(session_id)
+        owns_execution = container is None
+        if owns_execution:
+            container = await self._worker.start_execution(session_id)
+        try:
+            if container.runtime.turn_active:
+                await self._respond_error(request, "Cannot compact context while a turn is active.", "TurnActive")
+                return
+            await self._respond(request, await container.runtime.compact_context(reason="manual"))
+        finally:
+            if owns_execution:
+                await self._worker.release_execution(session_id)
+
+    async def _handle_active_control(self, session_id: str, request: dict[str, Any]) -> None:
+        method = request.get("method")
+        if method == RuntimeMethod.SESSION_CANCEL:
+            if not self._worker.execution.interrupt(session_id):
+                await self._respond_error(request, "No active turn to interrupt.", "TurnNotActive")
+                return
+            await self._respond(request, {"ok": True})
+            return
+        if method == RuntimeMethod.RIND_USER_QUESTION_RESPOND:
+            params = request.get("params") if isinstance(request.get("params"), dict) else {}
+            try:
+                await self._worker.execution.answer_user_question(
+                    session_id,
+                    str(params.get("tool_call_id") or ""),
+                    str(params.get("answer") or "").strip(),
+                )
+            except LookupError as exc:
+                await self._respond_error(request, str(exc), "QuestionNotFound")
+                return
+            await self._respond(request, {"ok": True})
+            return
+        params = request.get("params") if isinstance(request.get("params"), dict) else {}
+        try:
+            if method == RuntimeMethod.RIND_SESSION_STEER:
+                result = self._worker.execution.submit_input(session_id, "steering", str(params.get("input") or ""))
+            elif method == RuntimeMethod.RIND_SESSION_FOLLOW_UP:
+                result = self._worker.execution.submit_input(session_id, "follow_up", str(params.get("input") or ""))
+            elif method == RuntimeMethod.RIND_SESSION_PROMOTE_FOLLOW_UP:
+                result = self._worker.execution.promote_follow_up(session_id, str(params.get("input_id") or ""))
+            elif method == RuntimeMethod.RIND_SESSION_UNSTEER:
+                result = self._worker.execution.retrieve_input(session_id, "steering", params.get("input_id"))
+            elif method == RuntimeMethod.RIND_SESSION_DEQUEUE_FOLLOW_UP:
+                result = self._worker.execution.retrieve_input(session_id, "follow_up", params.get("input_id"))
+            else:
+                await self._respond_error(request, "Session execution is not active.", "TurnNotActive")
+                return
+        except InputQueueError as exc:
+            await self._respond_error(request, str(exc), exc.error_type)
+            return
+        except RuntimeError as exc:
+            await self._respond_error(request, str(exc), "TurnNotActive")
+            return
+        await self._respond(request, result)
 
     async def _resume_preview(self, session_id: str) -> str:
         replay = await self._worker.repository.replay(session_id, end=20)
@@ -1240,25 +1300,28 @@ class WorkerStdioRuntimeServer:
         needs_execution = command in {"compact", "team"} or (
             command == "model" and raw_input.lower().startswith("/model set ")
         )
+        active = self._worker.execution.active_container(session_id)
+        owns_execution = active is None and needs_execution
         if needs_execution:
-            server = await self._start_server(session_id)
-            await server._dispatch(request)
-            await self._release_if_idle(session_id)
-            return
-        store = await self._worker.repository.open_store(session_id, persist_system_prompt=False)
-        server = StdioRuntimeServer(
-            None,
-            store,
-            debug=self._debug,
-            model_client=self._worker.model_client,
-            default_model=self._worker.default_model,
-            background_list=self._background_list,
-            background_output=self._background_output,
-            goal_enabled=self._goal_enabled,
-            writer=self._writer,
-            slash_router=self._slash_router,
+            active = await self._worker.start_execution(session_id)
+        store = active.session_store if active is not None else await self._worker.repository.open_store(
+            session_id,
+            persist_system_prompt=False,
         )
-        await server._dispatch(request)
+        try:
+            result = await self._slash_router.execute(
+                raw_input,
+                SlashCommandContext(
+                    runtime=active.runtime if active is not None else None,
+                    session=store,
+                    debug=self._debug,
+                    workspace_root=getattr(store, "workspace_root", None),
+                ),
+            )
+            await self._respond_slash_result(request, result)
+        finally:
+            if owns_execution:
+                await self._worker.release_execution(session_id)
 
     async def _set_model(self, request: dict[str, Any]) -> None:
         params = request.get("params") if isinstance(request.get("params"), dict) else {}
@@ -1269,32 +1332,43 @@ class WorkerStdioRuntimeServer:
         if not model:
             await self._respond_error(request, "model/set requires model.", "InvalidRequest")
             return
-        active = self._active_servers.get(session_id)
+        active = self._worker.execution.active_container(session_id)
         if active is not None:
-            await active._set_model(request)
+            result = await set_active_model(active.runtime, active.session_store, model)
+            await self._respond(request, result)
             return
         store = await self._worker.repository.open_store(session_id, persist_system_prompt=False)
-        await store.update_model(model)
-        await self._respond(
-            request,
-            {
-                "model": model,
-                "session_model": model,
-                "default_model": self._worker.default_model,
-                "default_updated": False,
-                "runtime": False,
-                "session": True,
-                "active_updated": True,
-            },
-        )
+        await self._respond(request, await set_active_model(None, store, model))
 
     async def _goal_request(self, request: dict[str, Any]) -> None:
         session_id = await self._required_session_id(request)
         if session_id is None:
             return
-        active = self._active_servers.get(session_id)
+        active = self._worker.execution.active_container(session_id)
         if active is not None:
-            await active._dispatch(request)
+            runtime = active.runtime
+            params = request.get("params") if isinstance(request.get("params"), dict) else {}
+            method = request.get("method")
+            if method == RuntimeMethod.RIND_GOAL_GET:
+                await self._respond(request, {"goal": await runtime.get_goal()})
+            elif method == RuntimeMethod.RIND_GOAL_SET:
+                objective = params.get("objective")
+                if not isinstance(objective, str) or not objective.strip():
+                    await self._respond_error(request, "rind/goal/set requires objective.", "InvalidRequest")
+                    return
+                await self._respond(request, {"goal": await runtime.set_goal(objective)})
+            elif method == RuntimeMethod.RIND_GOAL_STATUS:
+                status = params.get("status")
+                if status not in {"active", "paused"}:
+                    await self._respond_error(request, "rind/goal/status requires active or paused.", "InvalidRequest")
+                    return
+                await self._respond(request, {"goal": await runtime.set_goal_status(status)})
+                if status == "paused":
+                    self._worker.execution.interrupt(session_id)
+            else:
+                await runtime.clear_goal()
+                self._worker.execution.interrupt(session_id)
+                await self._respond(request, {"goal": None})
             return
         params = request.get("params") if isinstance(request.get("params"), dict) else {}
         method = request.get("method")
@@ -1322,21 +1396,58 @@ class WorkerStdioRuntimeServer:
         session_id = await self._required_session_id(request)
         if session_id is None:
             return
-        server = self._active_servers.get(session_id)
-        if server is not None:
-            await server._handle_control_message(request)
+        active = self._worker.execution.active_container(session_id)
+        if active is not None:
+            method = request.get("method")
+            if method == RuntimeMethod.RIND_BACKGROUND_LIST:
+                await self._list_backgrounds_for_session(request, session_id)
+            else:
+                await self._background_output_for_session(request, session_id)
             return
-        store = await self._worker.repository.open_store(session_id, persist_system_prompt=False)
-        server = StdioRuntimeServer(
-            None,
-            store,
-            debug=self._debug,
-            background_list=self._background_list,
-            background_output=self._background_output,
-            writer=self._writer,
-            slash_router=self._slash_router,
-        )
-        await server._handle_control_message(request)
+        await self._respond_error(request, "Session execution is not active.", "TurnNotActive")
+
+    async def _list_backgrounds_for_session(self, request: dict[str, Any], session_id: str) -> None:
+        if self._background_list is None:
+            await self._respond_error(request, "Background monitoring is unavailable.", "UnsupportedOperation")
+            return
+        try:
+            tasks = self._background_list(session_id)
+            if inspect.isawaitable(tasks):
+                tasks = await tasks
+            if not isinstance(tasks, list):
+                raise TypeError("Background list must be a list.")
+            await self._respond(request, {"tasks": tasks})
+        except Exception as exc:
+            await self._respond_error(request, str(exc), type(exc).__name__)
+
+    async def _background_output_for_session(self, request: dict[str, Any], session_id: str) -> None:
+        if self._background_output is None:
+            await self._respond_error(request, "Background monitoring is unavailable.", "UnsupportedOperation")
+            return
+        params = request.get("params") if isinstance(request.get("params"), dict) else {}
+        bg_id = params.get("bg_id")
+        if not isinstance(bg_id, str) or not bg_id.strip():
+            await self._respond_error(request, "rind/background/output requires bg_id.", "InvalidRequest")
+            return
+        max_output_chars = params.get("max_output_chars", 20000)
+        if isinstance(max_output_chars, bool) or not isinstance(max_output_chars, int):
+            await self._respond_error(request, "rind/background/output max_output_chars must be an integer.", "InvalidRequest")
+            return
+        try:
+            task = self._background_output(
+                bg_id.strip(),
+                max_output_chars=max_output_chars,
+                _session_id=session_id,
+            )
+            if inspect.isawaitable(task):
+                task = await task
+            if not isinstance(task, dict):
+                raise TypeError("Background output must be an object.")
+            await self._respond(request, {"task": task})
+        except LookupError as exc:
+            await self._respond_error(request, str(exc), "NotFound")
+        except Exception as exc:
+            await self._respond_error(request, str(exc), type(exc).__name__)
 
     async def _required_session_id(self, request: dict[str, Any]) -> str | None:
         params = request.get("params") if isinstance(request.get("params"), dict) else {}
@@ -1353,14 +1464,16 @@ class WorkerStdioRuntimeServer:
     async def _valid_turn(self, session_id: str, request: dict[str, Any]) -> bool:
         params = request.get("params") if isinstance(request.get("params"), dict) else {}
         expected = params.get("turn_id")
-        server = self._active_servers.get(session_id)
-        active = server._runtime.active_turn_id if server is not None else ""
+        active = self._worker.execution.active_turn_id(session_id)
         if request.get("method") == RuntimeMethod.SESSION_CANCEL and expected in {None, ""} and active:
             return True
         if not isinstance(expected, str) or not expected.strip() or not active or expected != active:
             await self._respond_error(request, "The requested turn is no longer active.", "TurnNotActive")
             return False
         return True
+
+    async def _send_event(self, event: dict[str, Any]) -> None:
+        await self._writer.send(event_envelope(event, 0))
 
     async def _ingest_line(self, line: str) -> None:
         try:
@@ -1379,6 +1492,9 @@ class WorkerStdioRuntimeServer:
 
     async def _respond(self, request: dict[str, Any], result: Any) -> None:
         await self._writer.send(response_message(request, result))
+
+    async def _respond_slash_result(self, request: dict[str, Any], result: SlashCommandResult) -> None:
+        await self._respond(request, result.to_dict())
 
     async def _respond_error(self, request: dict[str, Any], message: str, error_type: str) -> None:
         await self._writer.send(error_message(request, message, error_type))

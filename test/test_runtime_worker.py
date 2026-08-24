@@ -130,7 +130,7 @@ class _Worker:
         self.default_model = "default-model"
         self.provider_client_factory = _ProviderFactory()
         self.model_client = _ModelClient()
-        self.released = set()
+        self.execution = _Execution(self)
 
     async def initialize(self):
         return {"session_id": "A", "model": self.default_model, "workspace_root": "."}
@@ -140,7 +140,7 @@ class _Worker:
         return SimpleNamespace(runtime=execution.runtime, session_store=execution.session)
 
     async def release_execution(self, session_id: str):
-        self.released.add(session_id)
+        return None
 
     async def session(self, session_id: str):
         execution = self.sessions[session_id]
@@ -148,6 +148,49 @@ class _Worker:
 
     async def close(self):
         await self.model_client.close()
+
+
+class _Execution:
+    def __init__(self, worker):
+        self.worker = worker
+        self.tokens = {}
+
+    def active_session_ids(self):
+        return {
+            session_id
+            for session_id, execution in self.worker.sessions.items()
+            if execution.runtime.turn_active
+        }
+
+    def active_turn_id(self, session_id):
+        return self.worker.sessions[session_id].runtime.active_turn_id
+
+    def interrupt(self, session_id, _reason=""):
+        runtime = self.worker.sessions[session_id].runtime
+        token = self.tokens.get(session_id)
+        if not runtime.turn_active or token is None:
+            return False
+        token.is_cancelled = True
+        return True
+
+    async def run_turn(self, session_id, *, query, transient_system_messages=None, resume=False):
+        execution = self.worker.sessions[session_id]
+        token = type("Token", (), {"is_cancelled": False})()
+        self.tokens[session_id] = token
+        async for event in execution.runtime.run_turn(
+            query=query,
+            cancellation_token=token,
+            transient_system_messages=transient_system_messages,
+            resume=resume,
+        ):
+            yield event.to_dict()
+        self.tokens.pop(session_id, None)
+
+    def active_container(self, session_id):
+        execution = self.worker.sessions.get(session_id)
+        if execution is None or not execution.runtime.turn_active:
+            return None
+        return SimpleNamespace(runtime=execution.runtime, session_store=execution.session)
 
 
 def _server_with_messages():
@@ -192,7 +235,7 @@ def test_worker_routes_concurrent_sessions_without_crossed_events():
     assert all(event["turn_id"] == f"turn-{event['session_id']}" for event in events)
     assert responses["prompt-A"]["result"]["session_id"] == "A"
     assert responses["prompt-B"]["result"]["session_id"] == "B"
-    assert worker.released == {"A", "B"}
+    assert worker.execution.active_session_ids() == set()
 
 
 def test_worker_model_list_reuses_injected_client():
@@ -207,6 +250,31 @@ def test_worker_model_list_reuses_injected_client():
     assert len(responses) == 2
     assert worker.provider_client_factory.create_count == 0
     assert worker.model_client.close_count == 0
+
+
+def test_compact_does_not_release_an_active_turn():
+    async def run():
+        worker, server, messages = _server_with_messages()
+        prompt = asyncio.create_task(server._dispatch({
+            "request_id": "prompt-A",
+            "method": RuntimeMethod.SESSION_PROMPT,
+            "params": {"session_id": "A", "input": "hello A"},
+        }))
+        await worker.sessions["A"].runtime.started.wait()
+        await server._dispatch({
+            "request_id": "compact-A",
+            "method": RuntimeMethod.RIND_SESSION_COMPACT,
+            "params": {"session_id": "A"},
+        })
+        still_active = worker.sessions["A"].runtime.turn_active
+        worker.sessions["A"].runtime.release.set()
+        await prompt
+        return still_active, messages
+
+    still_active, messages = asyncio.run(run())
+    assert still_active
+    compact = next(message for message in messages if message.get("request_id") == "compact-A")
+    assert compact["error"]["type"] == "TurnActive"
 
 
 def test_worker_shutdown_interrupts_all_active_sessions():

@@ -9,6 +9,8 @@ import json
 import os
 import uuid
 from datetime import datetime
+from dataclasses import dataclass, field
+from collections.abc import AsyncIterator
 from pathlib import Path
 from typing import Any
 
@@ -21,7 +23,18 @@ from agent.infrastructure.persistence import JsonlSessionStore
 from agent.infrastructure.paths import validate_session_id
 from agent.infrastructure.planning import build_plan_snapshot
 from agent.prompts import build_system_prompt
+from agent.domain.cancellation import CancellationTokenSource
+from agent.domain.events import UserQuestionRequestedEvent
 from agent.runtime.core import MessageStreamParser
+
+
+@dataclass(slots=True)
+class _ActiveExecution:
+    container: AgentContainer
+    turn_slot: asyncio.Lock = field(default_factory=asyncio.Lock)
+    current_cancel: CancellationTokenSource | None = None
+    pending_answers: dict[str, asyncio.Future[str]] = field(default_factory=dict)
+    queued_turn_starts: int = 0
 
 
 class SessionRepository:
@@ -91,7 +104,11 @@ class SessionRepository:
 
     async def replay(self, session_id: str, start: int | None = None, end: int | None = None) -> dict[str, Any]:
         info = await self.info(session_id)
-        store = await self.open_store(session_id, info["workspace_root"], persist_system_prompt=False)
+        store = await self._open_store_from_info(
+            session_id,
+            info,
+            persist_system_prompt=False,
+        )
         messages = await store.get_messages_slice(start=start, end=end, include_ids=True)
         return {
             "messages": messages,
@@ -109,6 +126,22 @@ class SessionRepository:
     ):
         clean = validate_session_id(session_id)
         info = await self.info(clean)
+        return await self._open_store_from_info(
+            clean,
+            info,
+            workspace_root=workspace_root,
+            persist_system_prompt=persist_system_prompt,
+        )
+
+    async def _open_store_from_info(
+        self,
+        session_id: str,
+        info: dict[str, Any],
+        *,
+        workspace_root: str | None = None,
+        persist_system_prompt: bool = True,
+    ):
+        clean = validate_session_id(session_id)
         root = _normalize_workspace_root(workspace_root or info["workspace_root"])
         store = JsonlSessionStore(
             session_dir=self.session_dir,
@@ -158,12 +191,24 @@ class ExecutionCoordinator:
         self._debug = debug
         self._enable_goal = enable_goal
         self.session_dir = session_dir
-        self._active: dict[str, AgentContainer] = {}
+        self._active: dict[str, _ActiveExecution] = {}
         self._live: dict[str, dict[str, Any]] = {}
         self._lock = asyncio.Lock()
 
     def active_session_ids(self) -> set[str]:
         return set(self._active)
+
+    def active_container(self, session_id: str) -> AgentContainer | None:
+        clean = validate_session_id(session_id)
+        execution = self._active.get(clean)
+        return execution.container if execution is not None else None
+
+    def active_turn_id(self, session_id: str) -> str:
+        clean = validate_session_id(session_id)
+        execution = self._active.get(clean)
+        if execution is None:
+            return ""
+        return str(getattr(execution.container.runtime, "active_turn_id", "") or "")
 
     def live_turn(self, session_id: str) -> dict[str, Any] | None:
         clean = validate_session_id(session_id)
@@ -257,12 +302,126 @@ class ExecutionCoordinator:
             current["status"] = event_type.removeprefix("turn_")
             current["question"] = None
 
+    async def run_turn(
+        self,
+        session_id: str,
+        *,
+        query: str,
+        transient_system_messages: list[dict[str, Any]] | None = None,
+        resume: bool = False,
+    ) -> AsyncIterator[dict[str, Any]]:
+        clean = validate_session_id(session_id)
+        await self.start(clean)
+        execution = self._active[clean]
+        execution.queued_turn_starts += 1
+        try:
+            async with execution.turn_slot:
+                cancel_source = CancellationTokenSource()
+                execution.current_cancel = cancel_source
+                responder = getattr(execution.container.runtime, "set_user_question_responder", None)
+                if callable(responder):
+                    responder(lambda event: self._answer_user_question(clean, event))
+                try:
+                    run_kwargs: dict[str, Any] = {
+                        "query": query,
+                        "cancellation_token": cancel_source.token,
+                        "transient_system_messages": transient_system_messages,
+                    }
+                    if resume:
+                        run_kwargs["resume"] = True
+                    async for event in execution.container.runtime.run_turn(**run_kwargs):
+                        event_data = event.to_dict()
+                        self.update_live_event(event_data)
+                        yield event_data
+                finally:
+                    if execution.current_cancel is cancel_source:
+                        execution.current_cancel = None
+                    cancel_source.dispose()
+        finally:
+            execution.queued_turn_starts = max(0, execution.queued_turn_starts - 1)
+            await self._release_if_idle(clean, execution)
+
+    def interrupt(self, session_id: str, reason: str = "User interrupted") -> bool:
+        clean = validate_session_id(session_id)
+        execution = self._active.get(clean)
+        if execution is None:
+            return False
+        interrupted = False
+        discard_inputs = getattr(execution.container.runtime, "discard_pending_inputs", None)
+        if callable(discard_inputs):
+            discard_inputs()
+        if execution.current_cancel is not None and not execution.current_cancel.token.is_cancelled:
+            execution.current_cancel.cancel(reason)
+            interrupted = True
+        for future in execution.pending_answers.values():
+            if not future.done():
+                future.set_result("")
+                interrupted = True
+        execution.pending_answers.clear()
+        return interrupted
+
+    def submit_input(self, session_id: str, mode: str, text: str) -> dict[str, Any]:
+        clean = validate_session_id(session_id)
+        execution = self._active.get(clean)
+        if execution is None:
+            raise RuntimeError("Session execution is not active.")
+        submit = (
+            execution.container.runtime.submit_steering
+            if mode == "steering"
+            else execution.container.runtime.submit_follow_up
+        )
+        result = submit(text)
+        if isinstance(result, dict):
+            self.record_live_input(clean, {**result, "session_id": clean, "mode": mode})
+        return result
+
+    def retrieve_input(self, session_id: str, mode: str, input_id: str | None = None) -> dict[str, Any]:
+        clean = validate_session_id(session_id)
+        execution = self._active.get(clean)
+        if execution is None:
+            raise RuntimeError("Session execution is not active.")
+        retrieve = (
+            execution.container.runtime.unsteer
+            if mode == "steering"
+            else execution.container.runtime.dequeue_follow_up
+        )
+        return retrieve(input_id)
+
+    def promote_follow_up(self, session_id: str, input_id: str) -> dict[str, Any]:
+        clean = validate_session_id(session_id)
+        execution = self._active.get(clean)
+        if execution is None:
+            raise RuntimeError("Session execution is not active.")
+        return execution.container.runtime.promote_follow_up(input_id)
+
+    async def answer_user_question(self, session_id: str, tool_call_id: str, answer: str) -> None:
+        clean = validate_session_id(session_id)
+        execution = self._active.get(clean)
+        if execution is None:
+            raise LookupError("No pending user question.")
+        future = execution.pending_answers.pop(tool_call_id, None)
+        if future is None:
+            raise LookupError("No pending user question.")
+        if not future.done():
+            future.set_result(answer)
+
+    async def _answer_user_question(self, session_id: str, event: UserQuestionRequestedEvent) -> str:
+        execution = self._active.get(session_id)
+        if execution is None:
+            return ""
+        future = asyncio.get_running_loop().create_future()
+        execution.pending_answers[event.tool_call_id] = future
+        try:
+            return await future
+        finally:
+            execution.pending_answers.pop(event.tool_call_id, None)
+
     async def start(self, session_id: str) -> AgentContainer:
         clean = validate_session_id(session_id)
         async with self._lock:
             existing = self._active.get(clean)
             if existing is not None:
-                return existing
+                return existing.container
             info = await self._repository.info(clean)
             root = _normalize_workspace_root(info["workspace_root"])
             container = build_agent_container(
@@ -276,17 +435,30 @@ class ExecutionCoordinator:
                 shared_resources=self._shared_resources,
             )
             await container.runtime.initialize()
-            self._active[clean] = container
+            self._active[clean] = _ActiveExecution(container=container)
             return container
+
+    async def _release_if_idle(self, session_id: str, execution: _ActiveExecution) -> None:
+        if execution.current_cancel is not None or execution.queued_turn_starts or execution.container.runtime.turn_active:
+            return
+        async with self._lock:
+            if self._active.get(session_id) is execution:
+                self._active.pop(session_id, None)
+                self._live.pop(session_id, None)
 
     async def release(self, session_id: str) -> None:
         clean = validate_session_id(session_id)
         async with self._lock:
-            self._active.pop(clean, None)
-            self._live.pop(clean, None)
+            execution = self._active.get(clean)
+            if execution is not None:
+                self.interrupt(clean, "Execution released")
+                self._active.pop(clean, None)
+                self._live.pop(clean, None)
 
     async def close(self) -> None:
         async with self._lock:
+            for session_id in list(self._active):
+                self.interrupt(session_id, "Worker shutting down")
             self._active.clear()
             self._live.clear()
 
