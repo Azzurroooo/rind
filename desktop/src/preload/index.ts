@@ -20,11 +20,11 @@ const api: DesktopApi = {
     },
   },
   settings: {
-    get: () => ipcRenderer.invoke("settings-get"),
-    save: (patch) => ipcRenderer.invoke("settings-save", patch),
+    get: (workspace) => ipcRenderer.invoke("settings-get", workspace),
+    save: (patch, workspace) => ipcRenderer.invoke("settings-save", patch, workspace),
   },
   models: {
-    list: () => ipcRenderer.invoke("models-list"),
+    list: (workspace) => ipcRenderer.invoke("models-list", workspace),
   },
   version: () => ipcRenderer.invoke("app-version"),
   projects: {

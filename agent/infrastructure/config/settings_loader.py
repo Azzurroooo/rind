@@ -8,6 +8,7 @@ import os
 import platform
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 import uuid
 
 from agent.version import __version__
@@ -90,10 +91,23 @@ def default_settings_path() -> Path:
     return (Path.home() / ".rind" / "settings.json").resolve()
 
 
-def load_settings() -> AppSettings:
+def project_settings_path(workspace_root: str | Path) -> Path:
+    return Path(workspace_root).expanduser().resolve() / ".rind" / "settings.json"
+
+
+def load_settings(workspace_root: str | Path | None = None) -> AppSettings:
+    if workspace_root:
+        project_path = project_settings_path(workspace_root)
+        project_data = _read_optional_json_object(project_path)
+        if _has_complete_project_settings(project_data):
+            return _build_settings(project_path, project_data)
+
     settings_path = default_settings_path()
     data = _read_json_object(settings_path) if settings_path.exists() else {}
+    return _build_settings(settings_path, data)
 
+
+def _build_settings(settings_path: Path, data: dict[str, Any]) -> AppSettings:
     return AppSettings(
         settings_path=settings_path,
         settings_exists=settings_path.exists(),
@@ -103,6 +117,23 @@ def load_settings() -> AppSettings:
         reasoning_effort=_string(data, "reasoningEffort"),
         user_agent=DEFAULT_USER_AGENT,
     )
+
+
+def _read_optional_json_object(path: Path) -> dict[str, Any]:
+    if not path.exists():
+        return {}
+    try:
+        return _read_json_object(path)
+    except ValueError:
+        return {}
+
+
+def _has_complete_project_settings(data: dict[str, Any]) -> bool:
+    api_key = _string(data, "apiKey")
+    base_url = _string(data, "baseUrl")
+    model = _string(data, "model")
+    parsed = urlparse(base_url)
+    return bool(api_key and model and parsed.scheme in {"http", "https"} and parsed.netloc)
 
 
 def ensure_user_settings_template() -> Path | None:

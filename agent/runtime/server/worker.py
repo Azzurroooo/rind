@@ -7,6 +7,7 @@ import copy
 import inspect
 import json
 import os
+import tempfile
 import uuid
 from datetime import datetime
 from dataclasses import dataclass, field
@@ -22,9 +23,10 @@ from agent.infrastructure.llm import OpenAIClientFactory
 from agent.infrastructure.persistence import JsonlSessionStore
 from agent.infrastructure.paths import validate_session_id
 from agent.infrastructure.planning import build_plan_snapshot
+from agent.infrastructure.team import discover_agent
 from agent.prompts import build_system_prompt
 from agent.domain.cancellation import CancellationTokenSource
-from agent.domain.events import UserQuestionRequestedEvent
+from agent.domain.events import AssistantMessageCompletedEvent, TurnCancelledEvent, TurnFailedEvent, UserQuestionRequestedEvent
 from agent.runtime.core import MessageStreamParser
 
 
@@ -56,14 +58,37 @@ class SessionRepository:
             workspace_root,
         )
 
-    async def create(self, workspace_root: str) -> dict[str, Any]:
+    async def create(
+        self,
+        workspace_root: str,
+        *,
+        project_id: str | None = None,
+        owner_agent_id: str | None = None,
+        session_type: str | None = None,
+        parent_session_id: str | None = None,
+    ) -> dict[str, Any]:
         root = _normalize_workspace_root(workspace_root)
+        agent_context = discover_agent(root)
+        if project_id is None and agent_context:
+            project_id = agent_context.project_id
+        if owner_agent_id is None and agent_context:
+            owner_agent_id = agent_context.agent_id
+        if session_type is None and agent_context:
+            session_type = "direct_agent_chat"
+        system_prompt = build_system_prompt(root)
+        agent_prompt = agent_context.capsule.system_prompt.strip() if agent_context else ""
+        if agent_prompt:
+            system_prompt = f"{system_prompt}\n\n{agent_prompt}"
         store = JsonlSessionStore(
             session_dir=self.session_dir,
             session_id=_new_session_id(),
             model=self._settings.model,
-            system_prompt=build_system_prompt(root),
+            system_prompt=system_prompt,
             workspace_root=root,
+            project_id=project_id,
+            owner_agent_id=owner_agent_id,
+            session_type=session_type,
+            parent_session_id=parent_session_id,
         )
         await store.initialize()
         return {
@@ -96,6 +121,10 @@ class SessionRepository:
             "draft": False,
             "model": str(meta.get("model") or self._settings.model),
             "workspace_root": str(meta.get("workspace_root") or meta.get("cwd") or ""),
+            "project_id": meta.get("project_id"),
+            "owner_agent_id": meta.get("owner_agent_id"),
+            "session_type": meta.get("session_type"),
+            "parent_session_id": meta.get("parent_session_id"),
             "turn_state": meta.get("turn_state") if isinstance(meta.get("turn_state"), dict) else None,
             "goal": meta.get("goal") if isinstance(meta.get("goal"), dict) else None,
             "usage": meta.get("latest_sampling_usage") if isinstance(meta.get("latest_sampling_usage"), dict) else None,
@@ -308,6 +337,7 @@ class ExecutionCoordinator:
         *,
         query: str,
         transient_system_messages: list[dict[str, Any]] | None = None,
+        cancellation_token=None,
         resume: bool = False,
     ) -> AsyncIterator[dict[str, Any]]:
         clean = validate_session_id(session_id)
@@ -316,7 +346,7 @@ class ExecutionCoordinator:
         execution.queued_turn_starts += 1
         try:
             async with execution.turn_slot:
-                cancel_source = CancellationTokenSource()
+                cancel_source = CancellationTokenSource(parent_token=cancellation_token)
                 execution.current_cancel = cancel_source
                 responder = getattr(execution.container.runtime, "set_user_question_responder", None)
                 if callable(responder):
@@ -417,6 +447,16 @@ class ExecutionCoordinator:
             execution.pending_answers.pop(event.tool_call_id, None)
 
     async def start(self, session_id: str) -> AgentContainer:
+        return await self.start_with_options(session_id)
+
+    async def start_with_options(
+        self,
+        session_id: str,
+        *,
+        enable_user_question: bool = True,
+        enabled_tools=None,
+        lock_workspace: bool = True,
+    ) -> AgentContainer:
         clean = validate_session_id(session_id)
         async with self._lock:
             existing = self._active.get(clean)
@@ -431,12 +471,113 @@ class ExecutionCoordinator:
                 session_dir=self.session_dir,
                 session_id=clean,
                 enable_goal=self._enable_goal,
+                enable_user_question=enable_user_question,
+                enabled_tools=enabled_tools,
+                lock_workspace=lock_workspace,
                 workspace_root=root,
+                project_id=info.get("project_id"),
+                owner_agent_id=info.get("owner_agent_id"),
+                session_type=info.get("session_type"),
+                parent_session_id=info.get("parent_session_id"),
                 shared_resources=self._shared_resources,
+                session_runner=self._run_delegated_session,
             )
             await container.runtime.initialize()
             self._active[clean] = _ActiveExecution(container=container)
             return container
+
+    async def _run_delegated_session(
+        self,
+        *,
+        target,
+        project,
+        parent_session_id: str | None,
+        task: str,
+        instruction: str,
+        cancellation_token,
+        persistent: bool,
+        enabled_tools=None,
+    ) -> tuple[dict[str, str], str | None]:
+        if persistent:
+            info = await self._repository.create(
+                str(target.workspace_root),
+                project_id=project.project_id,
+                owner_agent_id=target.agent_id,
+                session_type="delegated_task",
+                parent_session_id=parent_session_id,
+            )
+            session_id = str(info["session_id"])
+            await self.start_with_options(
+                session_id,
+                enable_user_question=False,
+                lock_workspace=False,
+            )
+            return await self._collect_delegated_turn(session_id, task, instruction, cancellation_token), session_id
+
+        from agent.bootstrap import build_agent_container
+        from agent.infrastructure.planning.store import preserve_active_session_context
+
+        with tempfile.TemporaryDirectory(prefix="rind-inspect-") as session_dir:
+            with preserve_active_session_context():
+                container = build_agent_container(
+                    settings=self._settings,
+                    provider_client_factory=self._provider_client_factory,
+                    session_dir=session_dir,
+                    enable_goal=False,
+                    enable_user_question=False,
+                    enabled_tools=enabled_tools,
+                    lock_workspace=False,
+                    workspace_root=str(target.workspace_root),
+                    project_id=project.project_id,
+                    owner_agent_id=target.agent_id,
+                    session_type="inspect",
+                    shared_resources=self._shared_resources,
+                )
+                response = await self._collect_container_turn(
+                    container,
+                    task,
+                    instruction,
+                    cancellation_token,
+                )
+        return response, None
+
+    async def _collect_delegated_turn(self, session_id: str, task: str, instruction: str, cancellation_token) -> dict[str, str]:
+        return await self._collect_events(
+            self.run_turn(
+                session_id,
+                query=task,
+                transient_system_messages=[{"role": "system", "content": instruction, "_context_kind": "delegate"}],
+                cancellation_token=cancellation_token,
+            )
+        )
+
+    async def _collect_container_turn(self, container, task: str, instruction: str, cancellation_token) -> dict[str, str]:
+        return await self._collect_events(
+            container.runtime.run_turn(
+                query=task,
+                cancellation_token=cancellation_token,
+                transient_system_messages=[{"role": "system", "content": instruction, "_context_kind": "delegate"}],
+            )
+        )
+
+    async def _collect_events(self, events) -> dict[str, str]:
+        text = ""
+        terminal: dict[str, str] | None = None
+        async for event in events:
+            event_data = event.to_dict() if hasattr(event, "to_dict") else event
+            event_type = str(event_data.get("type") or "")
+            if event_type == "assistant_message_completed":
+                text = str(event_data.get("content") or "")
+            elif event_type == "turn_cancelled":
+                terminal = {"error": str(event_data.get("reason") or "cancelled"), "error_type": "Cancelled"}
+            elif event_type == "turn_failed":
+                terminal = {
+                    "error": str(event_data.get("error") or "Delegated turn failed."),
+                    "error_type": str(event_data.get("error_type") or "DelegatedTurnFailed"),
+                }
+        if terminal is not None:
+            return terminal
+        return {"content": text}
 
     async def _release_if_idle(self, session_id: str, execution: _ActiveExecution) -> None:
         if execution.current_cancel is not None or execution.queued_turn_starts or execution.container.runtime.turn_active:

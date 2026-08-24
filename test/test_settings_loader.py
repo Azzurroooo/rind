@@ -13,6 +13,7 @@ from agent.infrastructure.config.settings_loader import (
     build_default_user_agent,
     ensure_user_settings_template,
     load_settings,
+    project_settings_path,
     save_settings_patch,
 )
 from agent.version import __version__
@@ -45,6 +46,58 @@ def test_load_settings_reads_user_json(tmp_path, monkeypatch):
     assert settings.api_key == "secret-key"
     assert settings.base_url == "https://openai945.cn/"
     assert settings.reasoning_effort == "xhigh"
+
+
+def test_load_settings_prefers_complete_project_json(tmp_path, monkeypatch):
+    monkeypatch.setattr(Path, "home", lambda: tmp_path / "home")
+    user_home = tmp_path / "home"
+    user_home.mkdir()
+    write_settings(user_home, {
+        "model": "user-model",
+        "apiKey": "user-key",
+        "baseUrl": "https://user.example/v1",
+    })
+    project_path = tmp_path / "project"
+    project_settings = project_path / ".rind" / "settings.json"
+    project_settings.parent.mkdir(parents=True)
+    project_settings.write_text(json.dumps({
+        "model": "project-model",
+        "apiKey": "project-key",
+        "baseUrl": "https://project.example/v1",
+        "reasoningEffort": "high",
+    }), encoding="utf-8")
+
+    settings = load_settings(project_path)
+
+    assert settings.settings_path == project_settings.resolve()
+    assert settings.model == "project-model"
+    assert settings.api_key == "project-key"
+    assert settings.base_url == "https://project.example/v1"
+    assert settings.reasoning_effort == "high"
+
+
+def test_load_settings_falls_back_to_user_json_for_incomplete_project_json(tmp_path, monkeypatch):
+    monkeypatch.setattr(Path, "home", lambda: tmp_path / "home")
+    user_home = tmp_path / "home"
+    user_home.mkdir()
+    user_path = write_settings(user_home, {
+        "model": "user-model",
+        "apiKey": "user-key",
+        "baseUrl": "https://user.example/v1",
+    })
+    project_settings = tmp_path / "project" / ".rind" / "settings.json"
+    project_settings.parent.mkdir(parents=True)
+    project_settings.write_text(json.dumps({"model": "project-model", "apiKey": ""}), encoding="utf-8")
+
+    settings = load_settings(project_settings.parent.parent)
+
+    assert settings.settings_path == user_path
+    assert settings.model == "user-model"
+    assert settings.api_key == "user-key"
+
+
+def test_project_settings_path_does_not_search_parent_directory(tmp_path):
+    assert project_settings_path(tmp_path / "nested") == (tmp_path / "nested" / ".rind" / "settings.json").resolve()
 
 
 def test_load_settings_ignores_legacy_internal_budget_fields(tmp_path, monkeypatch):

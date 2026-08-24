@@ -34,8 +34,8 @@ class Config:
         return ensure_user_settings_template()
 
     @classmethod
-    def reload(cls) -> AppSettings:
-        settings = load_settings()
+    def reload(cls, workspace_root=None) -> AppSettings:
+        settings = load_settings(workspace_root)
         cls.SETTINGS = settings
         cls.SETTINGS_PATH = str(settings.settings_path)
         cls.SETTINGS_EXISTS = settings.settings_exists

@@ -177,11 +177,11 @@ export type DesktopApi = {
     subscribeEvents: (listener: (event: RuntimeEvent) => void) => () => void
   }
   settings: {
-    get: () => Promise<DesktopSettings>
-    save: (patch: DesktopSettingsPatch) => Promise<DesktopSettings>
+    get: (workspace?: string) => Promise<DesktopSettings>
+    save: (patch: DesktopSettingsPatch, workspace?: string) => Promise<DesktopSettings>
   }
   models: {
-    list: () => Promise<string[]>
+    list: (workspace?: string) => Promise<string[]>
   }
   version: () => Promise<string>
   projects: {

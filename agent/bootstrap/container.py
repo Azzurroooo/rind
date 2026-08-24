@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Collection
+from collections.abc import Awaitable, Callable, Collection
 from dataclasses import dataclass
 from typing import Any
 
@@ -71,6 +71,7 @@ def build_agent_container(
     skill_project_dir: str | None = None,
     lock_workspace: bool = True,
     shared_resources: SharedRuntimeResources | None = None,
+    session_runner: Callable[..., Awaitable[Any]] | None = None,
 ) -> AgentContainer:
     """Build the production runtime dependency graph explicitly."""
     skill_project_root = None
@@ -92,7 +93,7 @@ def build_agent_container(
         if agent_context.project is not None:
             skill_project_root = str(agent_context.project.project_root)
             skill_agent_dir = str(agent_context.capsule.manifest_path.parent / "skills")
-    settings = settings or load_settings()
+    settings = settings or load_settings(workspace_root)
     provider_client_factory = provider_client_factory or OpenAIClientFactory(settings)
     model = settings.model
     session_store: SessionStore = JsonlSessionStore(
@@ -145,9 +146,7 @@ def build_agent_container(
             delegator = TeamDelegator(
                 project=project,
                 parent_session=session_store,
-                settings=settings,
-                provider_client_factory=provider_client_factory,
-                session_dir=session_dir,
+                session_runner=session_runner,
             )
             delegate_handler = delegator.delegate
     catalog = build_builtin_tool_specs(

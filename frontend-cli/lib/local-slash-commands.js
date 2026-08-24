@@ -16,8 +16,21 @@ export const LOCAL_SLASH_COMMANDS = Object.freeze([
   { name: "team", description: "Create a Team project", usage: "/team create [project-id]" },
 ]);
 
-export async function loadLocalSettings(rindHome = process.env.RIND_HOME || path.join(homedir(), ".rind")) {
-  const settingsPath = path.join(rindHome, "settings.json");
+export async function loadLocalSettings(
+  rindHome = process.env.RIND_HOME || path.join(homedir(), ".rind"),
+  workspaceRoot = process.cwd(),
+) {
+  const userSettingsPath = path.join(rindHome, "settings.json");
+  const projectSettingsPath = path.resolve(workspaceRoot, ".rind", "settings.json");
+  const project = await readSettingsFile(projectSettingsPath);
+  if (project.exists && isCompleteProjectSettings(project.data)) {
+    return buildLocalSettings(projectSettingsPath, project.data, project.error, project.exists);
+  }
+  const settings = await readSettingsFile(userSettingsPath);
+  return buildLocalSettings(userSettingsPath, settings.data, settings.error, settings.exists);
+}
+
+async function readSettingsFile(settingsPath) {
   let data = {};
   let settingsExists = false;
   let error = "";
@@ -33,15 +46,32 @@ export async function loadLocalSettings(rindHome = process.env.RIND_HOME || path
       error = cause instanceof Error ? cause.message : String(cause);
     }
   }
+  return { data, exists: settingsExists, error };
+}
+
+function buildLocalSettings(settingsPath, data, error, exists) {
   return {
     path: settingsPath,
-    exists: settingsExists,
+    exists,
     error,
     model: stringValue(data.model) || "gpt-4o-mini",
     baseUrl: stringValue(data.baseUrl) || "https://api.openai.com/v1",
     reasoningEffort: stringValue(data.reasoningEffort) || "",
     hasApiKey: Boolean(stringValue(data.apiKey)),
   };
+}
+
+function isCompleteProjectSettings(data) {
+  if (!data || typeof data !== "object" || Array.isArray(data)) return false;
+  const apiKey = stringValue(data.apiKey);
+  const baseUrl = stringValue(data.baseUrl);
+  const model = stringValue(data.model);
+  try {
+    const url = new URL(baseUrl);
+    return Boolean(apiKey && model && url.hostname && (url.protocol === "http:" || url.protocol === "https:"));
+  } catch {
+    return false;
+  }
 }
 
 export async function executeLocalSlashCommand(input, context = {}) {

@@ -201,7 +201,7 @@ commandController = createCommandController({
     runSessionsSelector: runtimeController.runSessionsSelector,
     runLocalCommand: async (text) => {
       if (!Object.keys(sessionState.settings).length) {
-        sessionState.settings = await loadLocalSettings();
+        sessionState.settings = await loadLocalSettings(undefined, sessionState.info.workspace_root || sessionState.info.cwd || process.cwd());
       }
       return executeLocalSlashCommand(text, {
         settings: sessionState.settings,
@@ -317,7 +317,7 @@ inputController = createInputController({
 process.on("SIGINT", handleSigint);
 
 try {
-  sessionState.settings = await loadLocalSettings();
+  sessionState.settings = await loadLocalSettings(undefined, process.cwd());
   sessionState.info = { cwd: process.cwd(), model: sessionState.settings.model };
   sessionState.commands = commandController.localCommands();
   await runtimeController.ensureRuntime();

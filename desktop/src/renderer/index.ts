@@ -1238,12 +1238,12 @@ async function loadReplayNow(sessionId: string) {
 }
 
 async function loadAvailableModels() {
-  state.models = await window.api.models.list()
+  state.models = await window.api.models.list(state.chatProjectPath || state.fallbackProjectPath)
 }
 
 async function loadSettings() {
   try {
-    state.settings = await window.api.settings.get()
+    state.settings = await window.api.settings.get(state.chatProjectPath || state.fallbackProjectPath)
     if (!state.model) state.model = state.settings.model
     if (!state.settings.hasApiKey && !state.settingsAutoOpened) {
       state.settingsAutoOpened = true
@@ -2376,7 +2376,7 @@ async function saveSettings() {
       model: settingsModel.value.trim(),
       baseUrl: settingsBaseUrl.value.trim(),
       reasoningEffort: settingsReasoning.value.trim(),
-    })
+    }, state.chatProjectPath || state.fallbackProjectPath)
     state.settingsOpen = false
     state.settingsAutoOpened = true
     state.notice = runtimeConfigChanged && hasRunningRuntime

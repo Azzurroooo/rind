@@ -8,7 +8,6 @@ import shutil
 import sys
 from contextvars import Context
 from pathlib import Path
-from types import SimpleNamespace
 
 import pytest
 
@@ -74,17 +73,17 @@ async def test_execute_creates_a_target_bound_child_session(tmp_path: Path, monk
         )
     )
 
-    def builder(**kwargs):
+    async def runner(**kwargs):
         captured.append(kwargs)
-        return SimpleNamespace(runtime=runtime, session_store=SimpleNamespace(session_id="child-session"))
+        text = ""
+        async for event in runtime.run_turn(**kwargs):
+            text = event.content
+        return {"content": text}, "child-session"
 
     delegator = TeamDelegator(
         project=project,
         parent_session=_ParentSession(),
-        settings=object(),
-        provider_client_factory=object(),
-        session_dir=str(tmp_path / "sessions"),
-        container_builder=builder,
+        session_runner=runner,
     )
 
     result = json.loads(await delegator.delegate("researcher", "Do the research."))
@@ -97,14 +96,12 @@ async def test_execute_creates_a_target_bound_child_session(tmp_path: Path, monk
         "published_paths": ["shared/result.md"],
         "session_id": "child-session",
     }
-    assert captured[0]["workspace_root"] == str(project_root / "agents" / "researcher")
-    assert captured[0]["project_id"] == "quant-project"
-    assert captured[0]["owner_agent_id"] == "researcher"
-    assert captured[0]["session_type"] == "delegated_task"
+    assert captured[0]["target"].agent_id == "researcher"
+    assert captured[0]["project"].project_id == "quant-project"
     assert captured[0]["parent_session_id"] == "parent-session"
-    assert captured[0]["lock_workspace"] is False
-    assert runtime.calls[0]["query"] == "Do the research."
-    execute_prompt = runtime.calls[0]["transient_system_messages"][0]["content"]
+    assert captured[0]["persistent"] is True
+    assert captured[0]["task"] == "Do the research."
+    execute_prompt = captured[0]["instruction"]
     assert "intentional, reusable deliverables" in execute_prompt
     assert "Do not list private workspace files" in execute_prompt
     assert "empty published_paths list" in execute_prompt
@@ -116,21 +113,17 @@ async def test_inspect_uses_a_temporary_session_and_returns_no_session_id(tmp_pa
     captured: list[dict] = []
     runtime = _ChildRuntime('{"status":"blocked","summary":"Waiting for data.","published_paths":[]}')
 
-    def builder(**kwargs):
+    async def runner(**kwargs):
         captured.append(kwargs)
-        assert Path(kwargs["session_dir"]).is_dir()
-        return SimpleNamespace(
-            runtime=runtime,
-            session_store=SimpleNamespace(session_id="temporary"),
-        )
+        text = ""
+        async for event in runtime.run_turn(**kwargs):
+            text = event.content
+        return {"content": text}, None
 
     delegator = TeamDelegator(
         project=project,
         parent_session=_ParentSession(),
-        settings=object(),
-        provider_client_factory=object(),
-        session_dir=str(tmp_path / "sessions"),
-        container_builder=builder,
+        session_runner=runner,
     )
 
     result = json.loads(await delegator.delegate("researcher", "What is the status?", "inspect"))
@@ -138,13 +131,12 @@ async def test_inspect_uses_a_temporary_session_and_returns_no_session_id(tmp_pa
     assert result["ok"] is True
     assert result["data"]["status"] == "blocked"
     assert "session_id" not in result["data"]
-    assert captured[0]["session_type"] == "inspect"
+    assert captured[0]["persistent"] is False
     assert captured[0]["enabled_tools"] == ("read_file", "glob", "grep", "skill")
-    inspect_prompt = runtime.calls[0]["transient_system_messages"][0]["content"]
+    inspect_prompt = captured[0]["instruction"]
     assert "do not modify files, create output files" in inspect_prompt
     assert "existing shared files" in inspect_prompt
     assert "empty published_paths list" in inspect_prompt
-    assert not Path(captured[0]["session_dir"]).exists()
 
 
 @pytest.mark.asyncio
@@ -153,10 +145,7 @@ async def test_delegate_rejects_the_main_agent_and_unknown_target(tmp_path: Path
     delegator = TeamDelegator(
         project=project,
         parent_session=_ParentSession(),
-        settings=object(),
-        provider_client_factory=object(),
-        session_dir=None,
-        container_builder=lambda **kwargs: None,
+        session_runner=None,
     )
 
     main_result = json.loads(await delegator.delegate("main-agent", "Do it."))
@@ -186,20 +175,17 @@ async def test_delegate_allows_concurrent_calls_to_the_same_agent(tmp_path: Path
     captured: list[dict] = []
     runtime = ConcurrentRuntime()
 
-    def builder(**kwargs):
+    async def runner(**kwargs):
         captured.append(kwargs)
-        return SimpleNamespace(
-            runtime=runtime,
-            session_store=SimpleNamespace(session_id=f"child-{len(captured)}"),
-        )
+        text = ""
+        async for event in runtime.run_turn(**kwargs):
+            text = event.content
+        return {"content": text}, f"child-{len(captured)}"
 
     delegator = TeamDelegator(
         project=project,
         parent_session=_ParentSession(),
-        settings=object(),
-        provider_client_factory=object(),
-        session_dir=None,
-        container_builder=builder,
+        session_runner=runner,
     )
 
     results = await asyncio.wait_for(

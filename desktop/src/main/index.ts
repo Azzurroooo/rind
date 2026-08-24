@@ -9,6 +9,7 @@ import { asObject, readJsonObject, writeJsonObject } from "./json-store"
 import { listAvailableModels } from "./model-catalog"
 import { listProjectFiles, previewProjectFile } from "./project-files"
 import { DesktopProjectStore, samePath } from "./projects"
+import { loadSettingsForWorkspace } from "./runtime-settings"
 import { readRindVersion } from "./version"
 import {
   getRuntimeSnapshot,
@@ -92,11 +93,11 @@ function validateSettingsPatch(value: unknown): DesktopSettingsPatch {
   return patch
 }
 
-async function loadRuntimeSettings() {
-  return publicSettings(await readJsonObject(runtimeSettingsPath()))
+async function loadRuntimeSettings(workspace = "") {
+  return publicSettings(await loadSettingsForWorkspace(runtimeSettingsPath(), workspace))
 }
 
-async function saveRuntimeSettings(value: unknown) {
+async function saveRuntimeSettings(value: unknown, workspace = "") {
   const patch = validateSettingsPatch(value)
   const path = runtimeSettingsPath()
   const data = await readJsonObject(path)
@@ -105,7 +106,7 @@ async function saveRuntimeSettings(value: unknown) {
     data[key] = setting
   }
   await writeJsonObject(path, data)
-  return publicSettings(data)
+  return loadRuntimeSettings(workspace)
 }
 
 function projectStore() {
@@ -143,13 +144,17 @@ function registerIpc() {
     const safeParams = params && typeof params === "object" ? params as Record<string, unknown> : {}
     return requestRuntime(method, safeParams)
   })
-  ipcMain.handle("settings-get", () => loadRuntimeSettings())
+  ipcMain.handle("settings-get", (_event, workspace: unknown) => loadRuntimeSettings(typeof workspace === "string" ? workspace : ""))
   ipcMain.handle("app-version", () => appVersion())
-  ipcMain.handle("settings-save", async (_event, settings: unknown) => {
-    const saved = await saveRuntimeSettings(settings)
+  ipcMain.handle("settings-save", async (_event, settings: unknown, workspace: unknown) => {
+    const saved = await saveRuntimeSettings(settings, typeof workspace === "string" ? workspace : "")
     return saved
   })
-  ipcMain.handle("models-list", async () => listAvailableModels(await readJsonObject(runtimeSettingsPath())))
+  ipcMain.handle("models-list", async (_event, workspace: unknown) => {
+    const projectPath = typeof workspace === "string" ? workspace : ""
+    const settings = await loadSettingsForWorkspace(runtimeSettingsPath(), projectPath)
+    return listAvailableModels(settings)
+  })
   ipcMain.handle("projects-get", () => projectStore().overview())
   ipcMain.handle("projects-add", () => chooseProject())
   ipcMain.handle("projects-select", (_event, path: unknown) => {

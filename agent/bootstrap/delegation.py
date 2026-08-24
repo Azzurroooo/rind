@@ -3,15 +3,12 @@
 from __future__ import annotations
 
 import json
-import tempfile
-from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-from agent.domain import AssistantMessageCompletedEvent, TurnCancelledEvent, TurnFailedEvent, tool_cancelled, tool_error, tool_ok
+from agent.domain import tool_cancelled, tool_error, tool_ok
 from agent.domain.cancellation import CancellationToken
 from agent.infrastructure.team import TeamProject, resolve_team_agent
-from agent.infrastructure.planning.store import preserve_active_session_context
 from agent.prompts import build_delegate_execute_prompt, build_delegate_inspect_prompt
 
 
@@ -26,17 +23,11 @@ class TeamDelegator:
         *,
         project: TeamProject,
         parent_session,
-        settings,
-        provider_client_factory,
-        session_dir: str | None,
-        container_builder: Callable[..., Any] | None = None,
+        session_runner,
     ) -> None:
         self._project = project
         self._parent_session = parent_session
-        self._settings = settings
-        self._provider_client_factory = provider_client_factory
-        self._session_dir = session_dir
-        self._container_builder = container_builder
+        self._session_runner = session_runner
 
     async def delegate(
         self,
@@ -62,78 +53,37 @@ class TeamDelegator:
         parent_session_id = getattr(self._parent_session, "session_id", None)
         if not isinstance(parent_session_id, str) or not parent_session_id:
             return tool_error("delegate", "Parent Session is unavailable.", "SessionUnavailable")
+        if not callable(self._session_runner):
+            return tool_error("delegate", "Worker session execution is unavailable.", "UnsupportedOperation")
 
         if normalized_mode == "inspect":
             return await self._run_inspect(target, normalized_task, cancellation_token)
         return await self._run_execute(target, normalized_task, parent_session_id, cancellation_token)
 
     async def _run_execute(self, target, task: str, parent_session_id: str, cancellation_token: CancellationToken | None) -> str:
-        with preserve_active_session_context():
-            container = self._build_container(
-                workspace_root=str(target.workspace_root),
-                session_dir=self._session_dir,
-                project_id=self._project.project_id,
-                owner_agent_id=target.agent_id,
-                session_type="delegated_task",
-                parent_session_id=parent_session_id,
-                enable_user_question=False,
-                lock_workspace=False,
-            )
-            response = await self._run_child(
-                container,
-                task,
-                build_delegate_execute_prompt(),
-                cancellation_token,
-            )
-        return self._render_result(target.agent_id, response, getattr(container.session_store, "session_id", None))
+        response, session_id = await self._session_runner(
+            target=target,
+            project=self._project,
+            parent_session_id=parent_session_id,
+            task=task,
+            instruction=build_delegate_execute_prompt(),
+            cancellation_token=cancellation_token,
+            persistent=True,
+        )
+        return self._render_result(target.agent_id, response, session_id)
 
     async def _run_inspect(self, target, task: str, cancellation_token: CancellationToken | None) -> str:
-        with preserve_active_session_context(), tempfile.TemporaryDirectory(prefix="rind-inspect-") as session_dir:
-            container = self._build_container(
-                workspace_root=str(target.workspace_root),
-                session_dir=session_dir,
-                project_id=self._project.project_id,
-                owner_agent_id=target.agent_id,
-                session_type="inspect",
-                parent_session_id=None,
-                enable_user_question=False,
-                enabled_tools=("read_file", "glob", "grep", "skill"),
-                lock_workspace=False,
-            )
-            response = await self._run_child(
-                container,
-                task,
-                build_delegate_inspect_prompt(),
-                cancellation_token,
-            )
-        return self._render_result(target.agent_id, response, None)
-
-    def _build_container(self, **kwargs):
-        builder = self._container_builder
-        if builder is None:
-            from agent.bootstrap import build_agent_container
-
-            builder = build_agent_container
-        return builder(
-            settings=self._settings,
-            provider_client_factory=self._provider_client_factory,
-            **kwargs,
-        )
-
-    async def _run_child(self, container, task: str, instruction: str, cancellation_token: CancellationToken | None) -> dict[str, str]:
-        text = ""
-        async for event in container.runtime.run_turn(
-            query=task,
+        response, _ = await self._session_runner(
+            target=target,
+            project=self._project,
+            parent_session_id=None,
+            task=task,
+            instruction=build_delegate_inspect_prompt(),
             cancellation_token=cancellation_token,
-            transient_system_messages=[{"role": "system", "content": instruction, "_context_kind": "delegate"}],
-        ):
-            if isinstance(event, AssistantMessageCompletedEvent):
-                text = event.content
-            elif isinstance(event, TurnCancelledEvent):
-                return {"error": event.reason or "cancelled", "error_type": "Cancelled"}
-            elif isinstance(event, TurnFailedEvent):
-                return {"error": event.error or "Delegated turn failed.", "error_type": event.error_type or "DelegatedTurnFailed"}
-        return {"content": text}
+            persistent=False,
+            enabled_tools=("read_file", "glob", "grep", "skill"),
+        )
+        return self._render_result(target.agent_id, response, None)
 
     def _render_result(self, agent_id: str, response: dict[str, str], session_id: str | None) -> str:
         if "error" in response:

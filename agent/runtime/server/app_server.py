@@ -66,7 +66,7 @@ async def async_main(argv: list[str] | None = None, *, server_class: type[Any]) 
 
     try:
         Config.ensure_user_settings_template()
-        settings = Config.reload()
+        settings = Config.reload(workspace_root)
         validate_settings(settings)
     except Exception as exc:
         _write_startup_error("Configuration error", exc, args.debug)

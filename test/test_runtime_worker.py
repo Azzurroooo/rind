@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 import asyncio
+import json
+import shutil
 import tempfile
 from types import SimpleNamespace
 from pathlib import Path
 
 from agent.infrastructure.config import AppSettings
+from agent.infrastructure.team import initialize_team_project
 from agent.runtime.server.worker import RuntimeWorker
 from agent.runtime.server.protocol import RuntimeMethod
 from agent.runtime.server.stdio import WorkerStdioRuntimeServer
@@ -351,6 +354,95 @@ def test_replay_does_not_create_active_execution():
     assert session_id
     assert active == set()
     assert any(message.get("request_id") == "replay" for message in messages)
+
+
+def test_worker_team_session_binding_matches_execution_context():
+    async def run():
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            initialize_team_project(root, project_id="quant-project")
+            workspace = root / "agents" / "main-agent"
+            settings = AppSettings(
+                settings_path=root / "settings.json",
+                settings_exists=True,
+                model="test-model",
+                api_key="test-key",
+                base_url="https://example.com/v1",
+                reasoning_effort="",
+            )
+            session_dir = root / "sessions"
+            worker = RuntimeWorker(
+                settings=settings,
+                workspace_root=str(workspace),
+                session_dir=str(session_dir),
+                enable_goal=False,
+            )
+            try:
+                info = await worker.initialize()
+                session_id = str(info["session_id"])
+                meta = json.loads((session_dir / session_id / "meta.json").read_text(encoding="utf-8"))
+                messages = (session_dir / session_id / "messages.jsonl").read_text(encoding="utf-8")
+                await worker.start_execution(session_id)
+                return meta, messages
+            finally:
+                await worker.close()
+
+    meta, messages = asyncio.run(run())
+    assert meta["project_id"] == "quant-project"
+    assert meta["owner_agent_id"] == "main-agent"
+    assert meta["session_type"] == "direct_agent_chat"
+    assert "main agent for this Team project" in messages
+
+
+def test_worker_reopens_delegated_session_with_original_binding():
+    async def run():
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            project = initialize_team_project(root, project_id="quant-project")
+            source = root / "agents" / "main-agent"
+            target = root / "agents" / "weather-agent"
+            shutil.copytree(source, target)
+            manifest = target / ".aiteam" / "agent.yaml"
+            manifest.write_text(
+                manifest.read_text(encoding="utf-8")
+                .replace("id: main-agent", "id: weather-agent")
+                .replace("name: Main Agent", "name: Weather Agent"),
+                encoding="utf-8",
+            )
+            settings = AppSettings(
+                settings_path=root / "settings.json",
+                settings_exists=True,
+                model="test-model",
+                api_key="test-key",
+                base_url="https://example.com/v1",
+                reasoning_effort="",
+            )
+            worker = RuntimeWorker(
+                settings=settings,
+                workspace_root=str(source),
+                session_dir=str(root / "sessions"),
+                enable_goal=False,
+            )
+            try:
+                info = await worker.repository.create(
+                    str(target),
+                    project_id=project.project_id,
+                    owner_agent_id="weather-agent",
+                    session_type="delegated_task",
+                    parent_session_id="parent-session",
+                )
+                container = await worker.execution.start_with_options(
+                    info["session_id"],
+                    enable_user_question=False,
+                    lock_workspace=False,
+                )
+                return container
+            finally:
+                await worker.close()
+
+    container = asyncio.run(run())
+    assert container.session_store._session_type == "delegated_task"
+    assert container.tool_registry.has("ask_user_question") is False
 
 
 def test_worker_replay_includes_active_live_turn_without_creating_execution():
