@@ -211,6 +211,7 @@ class ExecutionCoordinator:
         repository: SessionRepository,
         debug: bool,
         enable_goal: bool,
+        enable_user_question: bool,
         session_dir: str | None,
     ):
         self._settings = settings
@@ -219,6 +220,7 @@ class ExecutionCoordinator:
         self._repository = repository
         self._debug = debug
         self._enable_goal = enable_goal
+        self._enable_user_question = enable_user_question
         self.session_dir = session_dir
         self._active: dict[str, _ActiveExecution] = {}
         self._live: dict[str, dict[str, Any]] = {}
@@ -453,7 +455,7 @@ class ExecutionCoordinator:
         self,
         session_id: str,
         *,
-        enable_user_question: bool = True,
+        enable_user_question: bool | None = None,
         enabled_tools=None,
         lock_workspace: bool = True,
     ) -> AgentContainer:
@@ -471,7 +473,9 @@ class ExecutionCoordinator:
                 session_dir=self.session_dir,
                 session_id=clean,
                 enable_goal=self._enable_goal,
-                enable_user_question=enable_user_question,
+                enable_user_question=(
+                    self._enable_user_question if enable_user_question is None else enable_user_question
+                ),
                 enabled_tools=enabled_tools,
                 lock_workspace=lock_workspace,
                 workspace_root=root,
@@ -617,6 +621,7 @@ class RuntimeWorker:
         session_dir: str | None = None,
         debug: bool = False,
         enable_goal: bool = True,
+        enable_user_question: bool = True,
     ):
         self.workspace_root = _normalize_workspace_root(workspace_root)
         self.session_id = session_id
@@ -640,6 +645,7 @@ class RuntimeWorker:
             repository=self.repository,
             debug=debug,
             enable_goal=enable_goal,
+            enable_user_question=enable_user_question,
             session_dir=session_dir,
         )
         self._provider_async_client = provider_async_client

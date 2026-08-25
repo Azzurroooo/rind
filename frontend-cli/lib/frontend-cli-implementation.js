@@ -29,6 +29,7 @@ import { createCliState } from "./cli-state.js";
 import { createCliRuntimeController } from "./cli-runtime-controller.js";
 import { createCliOutputController } from "./cli-output-controller.js";
 import { createCliInputActions } from "./cli-input-actions.js";
+import { cliHelp, oneShotHelp, runOneShot } from "./one-shot.js";
 import { createTui } from "./tui/tui.js";
 import { Container } from "./tui/component.js";
 import { ComposerArea } from "./components/composer-area.js";
@@ -67,8 +68,32 @@ function resolveInstalledRuntime() {
   }
 }
 
+if (cliArgs[0] === "run" && cliArgs.some((arg) => arg === "--help" || arg === "-h")) {
+  process.stdout.write(`${oneShotHelp}\n`);
+  return;
+}
 if (cliArgs.some((arg) => arg === "--version" || arg === "--help" || arg === "-h")) {
+  if (cliArgs.includes("--help") || cliArgs.includes("-h")) {
+    process.stdout.write(`${cliHelp}\n\n`);
+  }
   process.exit(runHelpVersion({ python, repoRoot, runtimePath, cliArgs }));
+}
+
+if (cliArgs[0] === "run") {
+  try {
+    await runOneShot({
+      args: cliArgs,
+      python,
+      repoRoot,
+      runtimePath,
+      stderr: (text) => process.stderr.write(`${text}\n`),
+      stdout: (text) => process.stdout.write(`${text}${String(text).endsWith("\n") ? "" : "\n"}`),
+    });
+  } catch (error) {
+    process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
+    process.exitCode = 2;
+  }
+  return;
 }
 
 const cliState = createCliState();

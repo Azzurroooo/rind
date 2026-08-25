@@ -12,6 +12,7 @@ from typing import Any
 
 from agent.bootstrap import build_agent_container
 from agent.infrastructure.config import Config, validate_settings
+from agent.infrastructure.persistence import JsonlSessionStore
 from agent.infrastructure.paths import validate_session_id
 from agent.infrastructure.tools.builtin.shell.tool import (
     list_backgrounds as background_list,
@@ -27,6 +28,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--session", type=str, default=None)
     parser.add_argument("-c", "--resume-latest", action="store_true")
     parser.add_argument("--session-dir", type=str, default=None)
+    parser.add_argument("--no-user-question", action="store_true", help="Disable the interactive user-question tool")
     parser.add_argument(
         "--trace-llm",
         action="store_true",
@@ -35,8 +37,20 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _resolve_workspace_root(cwd: str | None) -> str:
-    workspace_root = Path(cwd or Path.cwd()).expanduser().resolve()
+def _resolve_workspace_root(cwd: str | None, session: str | None, session_dir: str | None) -> str:
+    workspace_root = Path(cwd).expanduser().resolve() if cwd else None
+    if session:
+        meta = JsonlSessionStore.load_session_metadata(session, session_dir)
+        stored_workspace = str(meta.get("workspace_root") or "").strip()
+        if not stored_workspace:
+            raise ValueError(f"Session has no workspace directory: {session}")
+        session_root = Path(stored_workspace).expanduser().resolve()
+        if not session_root.is_dir():
+            raise ValueError(f"Session workspace directory does not exist: {session_root}")
+        if workspace_root is not None and os.path.normcase(str(workspace_root)) != os.path.normcase(str(session_root)):
+            raise ValueError(f"Session workspace conflicts with --cwd: {session_root} != {workspace_root}")
+        workspace_root = session_root
+    workspace_root = workspace_root or Path.cwd().resolve()
     if not workspace_root.is_dir():
         raise ValueError(f"Workspace directory does not exist: {workspace_root}")
     return str(workspace_root)
@@ -53,8 +67,8 @@ async def async_main(argv: list[str] | None = None, *, server_class: type[Any]) 
     if args.trace_llm:
         os.environ["RIND_TRACE_LLM"] = "1"
     try:
-        workspace_root = _resolve_workspace_root(args.cwd)
-    except ValueError as exc:
+        workspace_root = _resolve_workspace_root(args.cwd, args.session, args.session_dir)
+    except (ValueError, LookupError) as exc:
         _write_startup_error("Startup error", exc, args.debug)
         return 1
     if args.session is not None:
@@ -86,6 +100,7 @@ async def async_main(argv: list[str] | None = None, *, server_class: type[Any]) 
                 session_dir=args.session_dir,
                 debug=args.debug,
                 enable_goal=True,
+                enable_user_question=not args.no_user_question,
             )
             server = server_class(
                 worker,
@@ -118,6 +133,7 @@ async def async_main(argv: list[str] | None = None, *, server_class: type[Any]) 
             session_id=args.session,
             resume_latest=args.resume_latest,
             enable_goal=True,
+            enable_user_question=not args.no_user_question,
             workspace_root=workspace_root,
         )
         server = server_class(
