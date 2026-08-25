@@ -3,7 +3,6 @@ import {
   cancelledText,
   contextBuiltLine,
   errorLine,
-  goalText,
   planUpdatedLine,
   turnCompletedLine,
 } from "./rendering.js";
@@ -82,6 +81,9 @@ export function createEventController({
           : null;
         if (goal?.status) {
           output.updateGoal?.(goal);
+        }
+        if (plan) {
+          output.log?.(() => planUpdatedLine(plan));
         }
         output.finishTool?.(event, fileChange);
         return;
