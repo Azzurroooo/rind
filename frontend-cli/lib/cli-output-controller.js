@@ -233,6 +233,7 @@ export function createCliOutputController({ state, terminalUi, transcript }) {
     const block = new ToolBlock({
       event,
       onRequestRender: () => redraw(),
+      leading: blockCount > 0,
     });
     toolBlocks.set(callId, block);
     appendBlock(block);
@@ -256,7 +257,11 @@ export function createCliOutputController({ state, terminalUi, transcript }) {
       if (!callId) {
         return;
       }
-      block = new ToolBlock({ event, onRequestRender: () => redraw() });
+      block = new ToolBlock({
+        event,
+        onRequestRender: () => redraw(),
+        leading: blockCount > 0,
+      });
       toolBlocks.set(callId, block);
       appendBlock(block);
     }

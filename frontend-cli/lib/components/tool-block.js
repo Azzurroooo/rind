@@ -7,7 +7,7 @@ import {
 const TICKER_TOOLS = new Set(["bash", "bash_output", "delegate", "search_web", "fetch_web_page"]);
 
 export class ToolBlock {
-  constructor({ event, onRequestRender }) {
+  constructor({ event, onRequestRender, leading = false }) {
     this.name = event?.tool_name || "tool";
     this.args = parseToolArguments(event);
     this.phase = "running";
@@ -16,6 +16,7 @@ export class ToolBlock {
     this.fileChange = null;
     this.resultEvent = null;
     this.expanded = false;
+    this.leading = Boolean(leading);
     this.timer = null;
     this.onRequestRender = onRequestRender;
     if (TICKER_TOOLS.has(this.name)) {
@@ -93,22 +94,28 @@ export class ToolBlock {
   }
 
   render(width) {
+    let lines;
     if (this.phase === "running") {
-      return renderToolRunning({
+      lines = renderToolRunning({
         name: this.name,
         args: this.args,
         phase: "running",
         elapsedMs: Date.now() - this.startedAt,
         progressMessage: this.progressMessage,
       }, width);
+    } else {
+      lines = renderToolFinished({
+        name: this.name,
+        args: this.args,
+        phase: "done",
+        expanded: this.expanded,
+        event: this.resultEvent,
+        fileChange: this.fileChange,
+      }, width);
     }
-    return renderToolFinished({
-      name: this.name,
-      args: this.args,
-      phase: "done",
-      expanded: this.expanded,
-      event: this.resultEvent,
-      fileChange: this.fileChange,
-    }, width);
+    if (this.leading && lines.length) {
+      return ["", ...lines];
+    }
+    return lines;
   }
 }

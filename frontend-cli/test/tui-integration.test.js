@@ -186,6 +186,7 @@ test("tool blocks render rich per-tool output and respond to ctrl+o expansion", 
   const harness = createHarness({ columns: 60, rows: 20 });
   harness.tui.start();
 
+  harness.output.writeUserInput("run the edit now");
   const requestEvent = {
     tool_call_id: "call-e1",
     tool_name: "edit_file",
@@ -195,8 +196,13 @@ test("tool blocks render rich per-tool output and respond to ctrl+o expansion", 
   harness.output.beginTool(requestEvent);
   await settle(harness.virtual);
 
-  let joined = harness.virtual.getViewport().join("\n");
+  let viewport = harness.virtual.getViewport();
+  let joined = viewport.join("\n");
   assert.ok(joined.includes("edit src/app.ts"), "running title visible");
+  const userRow = viewport.findIndex((line) => line.includes("run the edit now"));
+  const titleRow = viewport.findIndex((line) => line.includes("edit src/app.ts"));
+  assert.ok(userRow !== -1 && titleRow > userRow, "tool block follows user echo");
+  assert.equal(viewport[titleRow - 1], "", "blank line between user content and tool block");
 
   harness.output.finishTool({
     ...requestEvent,
