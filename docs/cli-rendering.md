@@ -26,11 +26,13 @@ lib/components/
 
 ## 重绘策略
 
-1. 首帧直接输出，不清屏。
-2. 宽度或高度变化 → `\x1b[2J\x1b[H\x1b[3J` 清屏并清 scrollback 后**全量重放**。所有历史内容按新宽度重新折行 —— 这是 resize 后历史重排的实现机制。
+1. 首帧直接输出在既有终端内容之下，不清屏 —— 启动不会抹掉 shell 历史。
+2. 已绘制状态下宽度/高度变化 → `\x1b[2J\x1b[H\x1b[3J` 清屏并清 scrollback 后**全量重放**。所有历史内容按新宽度重新折行 —— 这是 resize 后历史重排的实现机制。
 3. 变更行越过视口顶（`firstChanged < previousViewportTop`）→ 全量重放。
 4. 其余情况增量更新：纯追加走快速路径；缩短时清除尾部多余行。
 5. 视口簿记（`previousViewportTop`、`hardwareCursorRow`、`maxLinesRendered`）保证内容超屏滚动后增量更新仍然落点正确。
+
+调度契约：`requestRender(force)` 中 force 仅表示"跳过 16ms 节流、下一拍立即绘制"，绝不重置 diff 簿记；清屏与否只由 doRender 的几何检查决定。
 
 ## 内容模型
 

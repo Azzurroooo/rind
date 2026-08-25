@@ -30,6 +30,8 @@ export function createTui(options = {}) {
 
   let children = [];
   let renderRequested = false;
+  let renderForceRequested = false;
+  let renderMicrotaskQueued = false;
   let renderTimer = null;
   let lastRenderAt = 0;
 
@@ -175,58 +177,62 @@ export function createTui(options = {}) {
     requestRender();
   }
 
+  // "force" only bypasses the render throttle so the next frame paints on
+  // the following tick. It never resets diff bookkeeping: clearing the
+  // screen is decided by doRender's geometry checks alone, so a burst of
+  // forced repaints at startup can never wipe existing terminal content.
   function requestRender(force = false) {
     if (stopped) {
       return;
     }
+    renderRequested = true;
     if (force === true) {
-      previousLines = [];
-      previousWidth = -1;
-      previousHeight = -1;
-      cursorRow = 0;
-      hardwareCursorRow = 0;
-      maxLinesRendered = 0;
-      previousViewportTop = 0;
+      renderForceRequested = true;
       if (renderTimer !== null) {
         cancelSchedule(renderTimer);
         renderTimer = null;
       }
-      renderRequested = true;
-      queueMicrotask(() => {
-        if (stopped || !renderRequested) {
-          return;
-        }
-        renderRequested = false;
-        lastRenderAt = now();
-        doRender();
-      });
+    } else if (renderMicrotaskQueued || renderTimer !== null) {
       return;
     }
-    if (renderRequested) {
+    queueRenderMicrotask();
+  }
+
+  function queueRenderMicrotask() {
+    if (renderMicrotaskQueued) {
       return;
     }
-    renderRequested = true;
-    queueMicrotask(scheduleRender);
+    renderMicrotaskQueued = true;
+    queueMicrotask(() => {
+      renderMicrotaskQueued = false;
+      scheduleRender();
+    });
   }
 
   function scheduleRender() {
     if (stopped || renderTimer !== null || !renderRequested) {
       return;
     }
-    const elapsed = now() - lastRenderAt;
-    const delay = Math.max(0, minRenderIntervalMs - elapsed);
+    const delay = renderForceRequested
+      ? 0
+      : Math.max(0, minRenderIntervalMs - (now() - lastRenderAt));
     renderTimer = schedule(() => {
       renderTimer = null;
-      if (stopped || !renderRequested) {
-        return;
-      }
-      renderRequested = false;
-      lastRenderAt = now();
-      doRender();
-      if (renderRequested) {
-        scheduleRender();
-      }
+      flushRender();
     }, delay);
+  }
+
+  function flushRender() {
+    if (stopped || !renderRequested) {
+      return;
+    }
+    renderRequested = false;
+    renderForceRequested = false;
+    lastRenderAt = now();
+    doRender();
+    if (renderRequested) {
+      queueRenderMicrotask();
+    }
   }
 
   function doRender() {

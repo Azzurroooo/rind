@@ -213,6 +213,46 @@ test("styled lines carry no styles across rows", async () => {
   tui.stop();
 });
 
+test("startup appends below existing terminal content without clearing", async () => {
+  const virtual = createVirtualOutput({ columns: 20, rows: 6 });
+  const writes = [];
+  const recordingOutput = Object.assign(Object.create(virtual.output), {
+    write(chunk) {
+      writes.push(String(chunk));
+      return virtual.output.write(chunk);
+    },
+  });
+  // Simulate shell history already in the terminal before the CLI starts.
+  virtual.output.write("shell line one\r\nshell line two\r\n");
+  await virtual.flush();
+
+  const input = createVirtualInput();
+  const tui = createTui({
+    input,
+    output: recordingOutput,
+    renderIntervalMs: 0,
+    setTimeout: (fn) => setTimeout(fn, 0),
+    clearTimeout,
+  });
+  tui.addChild(new StaticText("RIND BANNER"));
+  writes.length = 0;
+  tui.start();
+  await settle(virtual);
+
+  assert.ok(!writes.some((w) => w.includes("\x1b[2J")), "startup must not clear the screen");
+  const scroll = virtual.getScrollBuffer();
+  assert.ok(scroll.includes("shell line one"), "pre-existing scrollback preserved");
+  assert.ok(scroll.includes("shell line two"), "pre-existing scrollback preserved");
+  assert.ok(scroll.includes("RIND BANNER"), "banner appended after old content");
+
+  // A forced repaint with unchanged geometry must stay non-destructive.
+  writes.length = 0;
+  tui.requestRender(true);
+  await settle(virtual);
+  assert.ok(!writes.some((w) => w.includes("\x1b[2J")), "force never clears on its own");
+  tui.stop();
+});
+
 test("wide characters are measured correctly on screen", async () => {
   const { tui, virtual } = createHarness({ columns: 20, rows: 6 });
   tui.addChild(new StaticText("你好"));
