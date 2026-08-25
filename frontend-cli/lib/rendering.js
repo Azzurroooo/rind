@@ -1,5 +1,6 @@
 import { clipCells, middleClipCells, textWidth, wrapTextCells } from "./text-width.js";
 import { paint, flavorSwatch } from "./theme.js";
+import { homedir } from "node:os";
 
 const MAX_STARTUP_BANNER_WIDTH = 80;
 const MAX_COMPOSER_WIDTH = 78;
@@ -685,25 +686,45 @@ function slashSkillsText(display) {
   const skills = (Array.isArray(display.skills) ? display.skills : [])
     .filter((skill) => skill && typeof skill === "object");
   const widths = skills.map((skill) => visibleLength(clipSingleLine(skill.name, 30)));
-  const nameWidth = Math.min(26, Math.max(12, ...(widths.length ? widths : [12])));
+  const nameWidth = Math.min(24, Math.max(12, ...(widths.length ? widths : [12])));
+  const scopeWidths = skills.map((skill) => visibleLength(clipSingleLine(skill.scope, 18)));
+  const scopeWidth = Math.max(0, ...(scopeWidths.length ? scopeWidths : [0]));
   const lines = [sectionRule("Skills", skills.length ? `${skills.length} available` : "")];
   if (!skills.length) {
     lines.push(dim("  no skills found"));
+    return lines.join("\n");
   }
   for (const skill of skills) {
     const name = padRight(clipSingleLine(skill.name, 30), nameWidth);
     const scope = clipSingleLine(skill.scope, 18);
+    const tag = scope ? padRight(`[${scope}]`, scopeWidth) : "";
     const description = clipSingleLine(
       skill.description,
-      Math.max(18, slashContentWidth() - nameWidth - (scope ? scope.length + 6 : 0)),
+      Math.max(18, slashContentWidth() - nameWidth - (scopeWidth ? scopeWidth + 4 : 0)),
     );
-    lines.push(`  ${bold(name)}${scope ? dim(`  [${scope}]`) : ""}${description ? `  ${dim(description)}` : ""}`.trimEnd());
-    const path = middleClip(skill.path, slashContentWidth());
-    if (path) {
-      lines.push(dim(`      ${path}`));
+    lines.push(`  ${bold(name)}  ${tag ? dim(tag) : ""}  ${dim(description)}`.trimEnd());
+    const location = prettySkillLocation(skill.path);
+    if (location) {
+      lines.push(dim(`      ${clipSingleLine(location, Math.max(18, slashContentWidth() - 6))}`));
     }
   }
   return lines.join("\n");
+}
+
+// Paths read best compressed: collapse the home directory to "~" and drop the
+// redundant SKILL.md filename that every entry shares.
+function prettySkillLocation(value) {
+  let location = String(value || "").trim();
+  if (!location) {
+    return "";
+  }
+  location = location.replace(/[\\/]+SKILL\.md$/i, "");
+  const home = homedir();
+  if (home && (location === home || location.startsWith(home))) {
+    const rest = location.slice(home.length);
+    location = rest ? `~${rest}` : "~";
+  }
+  return location;
 }
 
 function sessionSizeText(session) {

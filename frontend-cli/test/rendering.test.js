@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { homedir } from "node:os";
+import path from "node:path";
 
 import { AssistantRenderer } from "../lib/assistant-renderer.js";
 import { AssistantMessage } from "../lib/components/assistant-message.js";
@@ -548,7 +550,7 @@ test("slashDisplayText renders sessions, skills, and config payloads", () => {
     [
       `  ── Skills · 1 available ${"─".repeat(70)}`,
       "  demo          [project]  Demo skill",
-      "      E:\\project\\.rind\\skills\\demo\\SKILL.md",
+      "      E:\\project\\.rind\\skills\\demo",
     ].join("\n"),
   );
   assert.equal(
@@ -579,7 +581,18 @@ test("slashDisplayText clips long slash command fields", () => {
   });
 
   assert.match(text, /x{68}\.\.\./);
-  assert.match(text, /E:\\deep\\deep\\deep.*\.\.\..*SKILL\.md$/);
+  assert.match(text, /E:\\deep\\deep\\deep.*\.\.\.$/);
+});
+
+test("skill locations collapse the home directory and drop SKILL.md", () => {
+  const homeSkill = path.join(homedir(), ".rind", "skills", "calc", "SKILL.md");
+  const text = slashDisplayText({
+    type: "skills",
+    skills: [{ name: "calc", scope: "user", description: "math", path: homeSkill }],
+  });
+
+  assert.match(text, /~[\\/]\.rind[\\/]skills[\\/]calc$/m);
+  assert.doesNotMatch(text, /SKILL\.md/);
 });
 
 test("slashResultText prefers structured display and falls back to raw text", () => {
