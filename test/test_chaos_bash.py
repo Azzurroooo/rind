@@ -27,7 +27,7 @@ def run(coro):
 
 
 def test_bash_truncation_large_output(monkeypatch):
-    res = run(bash(_python_command("print('A' * 50000)")))
+    res = run(bash(_python_command("print('A' * 60000)")))
     parsed = json.loads(res)
 
     assert parsed["ok"] is True
@@ -35,15 +35,14 @@ def test_bash_truncation_large_output(monkeypatch):
 
     stdout = parsed["data"]["stdout"]
 
-    assert len(stdout) <= 25000
+    assert len(stdout) <= 50 * 1024
     assert "TRUNCATED" in stdout
     assert stdout.startswith("A" * 100)
     assert stdout.strip().endswith("A" * 100)
-    assert parsed["meta"] == {
-        "truncated": True,
-        "total_bytes": len(("A" * 50000 + os.linesep).encode()),
-        "total_lines": 1,
-    }
+    assert parsed["meta"]["truncated"] is True
+    assert parsed["meta"]["total_bytes"] == len(("A" * 60000 + os.linesep).encode())
+    assert Path(parsed["meta"]["output_path"]).is_file()
+    assert len(Path(parsed["meta"]["output_path"]).read_bytes()) == parsed["meta"]["total_bytes"]
 
 
 def test_stream_capture_discards_100_mib_without_growing_retained_text():
@@ -57,16 +56,16 @@ def test_stream_capture_discards_100_mib_without_growing_retained_text():
     assert capture.byte_count == 100 * 1024 * 1024
     assert capture.line_count == 25600
     assert capture.char_count == 100 * 1024 * 1024
-    assert sum(map(len, capture.head)) == 10000
-    assert capture.tail_chars == 10000
-    assert len(capture.render()) < 21000
+    assert sum(map(len, capture.head)) == 24 * 1024
+    assert capture.tail_chars == 24 * 1024
+    assert len(capture.render()) < 52 * 1024
     assert capture.truncated is True
 
 
 def test_stream_capture_delta_survives_tail_rollover():
     capture = StreamCapture()
-    capture.append(b"A" * 10000, "A" * 10000)
-    capture.append(b"B" * 20000, "B" * 20000)
+    capture.append(b"A" * 30000, "A" * 30000)
+    capture.append(b"B" * 40000, "B" * 40000)
 
     _, cursor, truncated = capture.delta(0, 40000)
     capture.append(b"C" * 1000, "C" * 1000)
@@ -74,7 +73,7 @@ def test_stream_capture_delta_survives_tail_rollover():
 
     assert truncated is True
     assert delta == "C" * 1000
-    assert next_cursor == 31000
+    assert next_cursor == 71000
     assert next_truncated is False
 
 def test_bash_timeout(monkeypatch):

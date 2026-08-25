@@ -4,12 +4,14 @@ import atexit
 
 from agent.domain import tool_error, tool_ok
 from agent.domain.cancellation import CancellationToken
+from agent.infrastructure.persistence import ToolOutputStore
 from .session_pool import ShellSessionPool
 from .policy import BashPolicy
 from .supervisor import ProcessSupervisor
 
 _POOL = ShellSessionPool()
 _SUPERVISOR = ProcessSupervisor(timeout=120)
+_DEFAULT_OUTPUT_STORE = ToolOutputStore()
 atexit.register(_SUPERVISOR.close_now)
 
 
@@ -20,6 +22,8 @@ async def bash(
     _session_id: str = "default",
     _cancellation_token: CancellationToken | None = None,
     _workspace_root: str | None = None,
+    _idempotency_key: str = "",
+    _output_store: ToolOutputStore | None = None,
 ) -> str:
     """Execute a bash command. Use run_in_background=true for long-running commands like servers."""
     status, reason = BashPolicy.classify(command)
@@ -33,12 +37,15 @@ async def bash(
         )
 
     state = _POOL.get_state(_session_id, workspace_root=_workspace_root)
+    output_store = _output_store or _DEFAULT_OUTPUT_STORE
 
     if run_in_background:
         result = await _SUPERVISOR.run_background(
             command,
             state,
             session_id=_session_id,
+            call_id=_idempotency_key,
+            output_store=output_store,
             wait_ms=wait_ms,
             cancellation_token=_cancellation_token,
         )
@@ -47,6 +54,8 @@ async def bash(
             command,
             state,
             session_id=_session_id,
+            call_id=_idempotency_key,
+            output_store=output_store,
             cancellation_token=_cancellation_token,
         )
 

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 from typing import Any
+from urllib.parse import urljoin
 
 from bs4 import BeautifulSoup
 
@@ -26,6 +27,8 @@ except ImportError:
     _HAS_CFFI = False
 
 _SESSION = None
+_MAX_RESPONSE_BYTES = 10 * 1024 * 1024
+_MAX_REDIRECTS = 5
 
 
 def _cancelled(tool_name: str, token: CancellationToken | None) -> str | None:
@@ -255,16 +258,56 @@ def fetch_web_page(url: str, _cancellation_token: CancellationToken | None = Non
 
         session = _get_session()
 
-        # Use curl_cffi session for download (better anti-bot), then pass HTML to trafilatura
-        response = session.get(url, headers={
+        # Keep download/parse memory bounded; extracted content is handled by ToolOutputStore later.
+        headers = {
             "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9",
             "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
-        }, timeout=15)
-        response.raise_for_status()
+        }
+        current_url = url
+        response = None
+        body = bytearray()
+        for redirect_count in range(_MAX_REDIRECTS + 1):
+            response = session.get(
+                current_url,
+                headers=headers,
+                timeout=15,
+                allow_redirects=False,
+                stream=True,
+            )
+            if 300 <= response.status_code < 400:
+                location = response.headers.get("location")
+                if not location or redirect_count >= _MAX_REDIRECTS:
+                    return tool_error("fetch_web_page", "Too many redirects", "TooManyRedirects", meta={"url": url})
+                current_url = urljoin(current_url, location)
+                continue
+            response.raise_for_status()
+            content_length = response.headers.get("content-length")
+            if content_length and int(content_length) > _MAX_RESPONSE_BYTES:
+                return tool_error(
+                    "fetch_web_page",
+                    "Response body exceeds the 10 MiB network limit.",
+                    "ResponseTooLarge",
+                    meta={"url": url, "max_bytes": _MAX_RESPONSE_BYTES},
+                )
+            for chunk in response.iter_content(chunk_size=64 * 1024):
+                if cancelled := _cancelled("fetch_web_page", _cancellation_token):
+                    return cancelled
+                body.extend(chunk)
+                if len(body) > _MAX_RESPONSE_BYTES:
+                    return tool_error(
+                        "fetch_web_page",
+                        "Response body exceeds the 10 MiB network limit.",
+                        "ResponseTooLarge",
+                        meta={"url": url, "max_bytes": _MAX_RESPONSE_BYTES},
+                    )
+            break
+        if response is None:
+            return tool_error("fetch_web_page", "Unable to fetch response", "FetchError", meta={"url": url})
         if cancelled := _cancelled("fetch_web_page", _cancellation_token):
             return cancelled
 
-        html = response.text
+        encoding = getattr(response, "encoding", None) or "utf-8"
+        html = bytes(body).decode(encoding, errors="replace")
         if not html:
             return tool_error("fetch_web_page", "Empty response from server", "EmptyResponse", meta={"url": url})
 
@@ -303,13 +346,10 @@ def fetch_web_page(url: str, _cancellation_token: CancellationToken | None = Non
         # Clean up excessive blank lines
         content = re.sub(r"\n{3,}", "\n\n", content.strip())
 
-        if len(content) > 30000:
-            content = content[:30000] + "\n\n... (Content truncated)"
-
         return tool_ok(
             "fetch_web_page",
             content,
-            meta={"url": url, "truncated": len(content) >= 30000},
+            meta={"url": url},
         )
 
     except Exception as e:

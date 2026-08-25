@@ -31,7 +31,7 @@ class ProcessSupervisor:
     BACKGROUND_OUTPUT_MIN_WAIT_MS = 5000
     BACKGROUND_OUTPUT_MAX_WAIT_MS = 300000
     BACKGROUND_OUTPUT_DEFAULT_WAIT_MS = 15000
-    MAX_OUTPUT_CHARS = 40000
+    MAX_OUTPUT_CHARS = 50 * 1024
     TERMINATION_GRACE_SECONDS = 1.0
     PIPE_IDLE_GRACE_SECONDS = 0.25
 
@@ -52,10 +52,20 @@ class ProcessSupervisor:
         state: ShellState,
         session_id: str,
         cancellation_token: CancellationToken | None = None,
+        *,
+        call_id: str = "",
+        output_store=None,
     ) -> ToolExecutionResult:
         record: ProcessRecord | None = None
         try:
-            record = await self._spawn(command, state, session_id, background=False)
+            record = await self._spawn(
+                command,
+                state,
+                session_id,
+                background=False,
+                call_id=call_id,
+                output_store=output_store,
+            )
             outcome = await self._wait(record, self.timeout, cancellation_token)
             reason = None
             if outcome == "cancelled":
@@ -83,6 +93,9 @@ class ProcessSupervisor:
         session_id: str,
         wait_ms: int = 10000,
         cancellation_token: CancellationToken | None = None,
+        *,
+        call_id: str = "",
+        output_store=None,
     ) -> ToolExecutionResult:
         await self._expire_backgrounds()
         if self._background_count() >= self.max_background_processes:
@@ -95,7 +108,14 @@ class ProcessSupervisor:
         record: ProcessRecord | None = None
         try:
             started = time.monotonic()
-            record = await self._spawn(command, state, session_id, background=True)
+            record = await self._spawn(
+                command,
+                state,
+                session_id,
+                background=True,
+                call_id=call_id,
+                output_store=output_store,
+            )
             wait_ms = self._clamp(
                 wait_ms, 10000, self.MIN_WAIT_MS, self.MAX_WAIT_MS
             )
@@ -249,9 +269,16 @@ class ProcessSupervisor:
         self._processes.clear()
         for record in records:
             kill_tree_now(record.process)
+            record.close_full_output()
 
     async def _spawn(
-        self, command: str, state: ShellState, session_id: str, background: bool
+        self,
+        command: str,
+        state: ShellState,
+        session_id: str,
+        background: bool,
+        call_id: str = "",
+        output_store=None,
     ) -> ProcessRecord:
         process = await asyncio.create_subprocess_exec(
             *self._build_shell_cmd(command, state),
@@ -274,6 +301,8 @@ class ProcessSupervisor:
             expires_at=(
                 time.monotonic() + self.background_ttl_seconds if background else None
             ),
+            call_id=call_id or process_id,
+            output_store=output_store,
         )
         self._processes[process_id] = record
         record.readers = (
@@ -292,6 +321,7 @@ class ProcessSupervisor:
                 await terminate_tree(record.process, self.TERMINATION_GRACE_SECONDS)
         finally:
             await self._settle_readers(record)
+            record.close_full_output()
             record.finished.set()
 
     async def _read_stream(
@@ -302,6 +332,7 @@ class ProcessSupervisor:
     ) -> None:
         decoder = codecs.getincrementaldecoder("utf-8")("replace")
         while raw := await stream.read(4096):
+            record.append_full_output(raw)
             capture.append(raw, decoder.decode(raw, False))
             record.last_output_at = time.monotonic()
         flushed = decoder.decode(b"", True)

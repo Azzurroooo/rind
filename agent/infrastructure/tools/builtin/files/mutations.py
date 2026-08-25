@@ -13,10 +13,8 @@ import tempfile
 
 from agent.domain import tool_error, tool_ok
 
-from .operations import MAX_TEXT_FILE_SIZE
-
-
 _SHA256_PATTERN = re.compile(r"^[0-9a-fA-F]{64}$")
+_MAX_WRITE_FILE_SIZE = 10 * 1024 * 1024
 _DIFF_MAX_LINES = 120
 _DIFF_MAX_CHARS = 12_000
 
@@ -71,7 +69,7 @@ def _read_existing(path: Path, expected_sha256: object) -> tuple[bytes, str, int
         raise _MutationError(f"无权读取文件: {path}", "PermissionDenied") from exc
     except OSError as exc:
         raise _MutationError(f"读取文件失败: {path}: {exc}", "ReadError") from exc
-    if len(raw) > MAX_TEXT_FILE_SIZE:
+    if len(raw) > _MAX_WRITE_FILE_SIZE:
         raise _MutationError("文件过大（>10MB），无法进行全量编辑。", "FileTooLarge")
     try:
         text = raw.decode("utf-8")

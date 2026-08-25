@@ -1,7 +1,6 @@
 """文件导航工具定义。"""
 
 import hashlib
-import io
 import json
 from pathlib import Path
 import shutil
@@ -16,8 +15,8 @@ _SKIP_DIRS = frozenset({
     "dist", "build", ".mypy_cache", ".pytest_cache", ".tox",
     ".hg", ".svn", "site-packages",
 })
-MAX_TEXT_FILE_SIZE = 10 * 1024 * 1024
 _READ_MAX_LIMIT = 2000
+_READ_MAX_BYTES = 50 * 1024
 _MAX_LINE_CHARS = 2000
 
 
@@ -94,30 +93,23 @@ def read_file(
         return tool_error("read_file", "limit 必须 >= 1。", "InvalidLimit")
 
     try:
-        size_bytes = file_path.stat().st_size
-        if size_bytes > MAX_TEXT_FILE_SIZE:
-            return tool_error(
-                "read_file",
-                f"文件过大（>{MAX_TEXT_FILE_SIZE // (1024 * 1024)}MB），请先使用 grep 定位内容。",
-                "FileTooLarge",
-                meta={"path": str(file_path), "size_bytes": size_bytes},
-            )
-
-        raw_content = file_path.read_bytes()
-        sample = raw_content[:8192]
+        with file_path.open("rb") as raw_file:
+            sample = raw_file.read(8192)
+            digest = hashlib.sha256()
+            digest.update(sample)
+            for chunk in iter(lambda: raw_file.read(1024 * 1024), b""):
+                digest.update(chunk)
         if _looks_binary(sample):
             return tool_error("read_file", f"二进制文件不可按文本读取: {path}", "BinaryFile")
-        try:
-            text_content = raw_content.decode("utf-8")
-        except UnicodeDecodeError:
-            return tool_error("read_file", f"文件不是有效的 UTF-8 文本: {path}", "InvalidEncoding")
 
         effective_limit = min(requested_limit, _READ_MAX_LIMIT)
         end_line = offset + effective_limit - 1
         selected: list[tuple[int, str]] = []
         has_more = False
+        line_truncated = False
         last_line = 0
-        with io.StringIO(text_content) as text_file:
+        output_bytes = len(f"Showing lines {offset} to 0:".encode("utf-8"))
+        with file_path.open("r", encoding="utf-8", newline=None) as text_file:
             for line_no, line in enumerate(text_file, start=1):
                 last_line = line_no
                 if line_no < offset:
@@ -127,7 +119,16 @@ def read_file(
                 if line_no > end_line:
                     has_more = True
                     break
-                selected.append((line_no, _clip_text(line.rstrip("\r\n"))))
+                raw_line = line.rstrip("\r\n")
+                clipped = _clip_text(raw_line)
+                if len(clipped) < len(raw_line):
+                    line_truncated = True
+                line_bytes = len(f"{line_no:4d} | {clipped}\n".encode("utf-8"))
+                if selected and output_bytes + line_bytes > _READ_MAX_BYTES:
+                    has_more = True
+                    break
+                selected.append((line_no, clipped))
+                output_bytes += line_bytes
                 if line_no % 1000 == 0 and (cancelled := _cancelled("read_file", _cancellation_token)):
                     return cancelled
 
@@ -149,10 +150,11 @@ def read_file(
                 "path": str(file_path),
                 "offset": offset,
                 "limit": effective_limit,
-                "truncated": has_more,
+                "truncated": has_more or line_truncated,
+                "line_truncated": line_truncated,
                 "next_offset": shown_end + 1 if has_more else None,
                 "encoding": "utf-8",
-                "sha256": hashlib.sha256(raw_content).hexdigest(),
+                "sha256": digest.hexdigest(),
             },
         )
     except PermissionError:
@@ -165,7 +167,7 @@ def read_file(
 def glob(
     pattern: str,
     path: str = ".",
-    max_results: int = 100,
+    max_results: int = 1000,
     _cancellation_token: CancellationToken | None = None,
 ) -> str:
     if cancelled := _cancelled("glob", _cancellation_token):
@@ -249,7 +251,7 @@ def grep(
     pattern: str,
     path: str = ".",
     glob: str = "**/*",
-    max_results: int = 50,
+    max_results: int = 1000,
     _cancellation_token: CancellationToken | None = None,
 ) -> str:
     if cancelled := _cancelled("grep", _cancellation_token):

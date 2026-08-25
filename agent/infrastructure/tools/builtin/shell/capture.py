@@ -4,8 +4,9 @@ from collections import deque
 from dataclasses import dataclass, field
 
 
-_HEAD_LIMIT = 10000
-_TAIL_LIMIT = 10000
+_HEAD_LIMIT = 24 * 1024
+_TAIL_LIMIT = 24 * 1024
+_MAX_LINES = 2000
 _OUTPUT_TRUNCATED = "\n\n...[OUTPUT TRUNCATED]...\n\n"
 
 
@@ -25,7 +26,7 @@ class StreamCapture:
 
     @property
     def truncated(self) -> bool:
-        return self.char_count > _HEAD_LIMIT + _TAIL_LIMIT
+        return self.char_count > _HEAD_LIMIT + _TAIL_LIMIT or self.line_count > _MAX_LINES
 
     def append(self, raw: bytes, text: str) -> None:
         if raw:

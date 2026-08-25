@@ -17,14 +17,20 @@ def build_file_tool_specs(
     workspace_root: str | Path | None = None,
     allowed_roots: Collection[str | Path] | None = None,
     shared_root: str | Path | None = None,
+    session_output_root: str | Path | None = None,
 ) -> tuple[ToolSpec, ...]:
-    if workspace_root is None and allowed_roots is None and shared_root is None:
+    if workspace_root is None and allowed_roots is None and shared_root is None and session_output_root is None:
         return TOOL_SPECS
     root = Path(workspace_root or Path.cwd()).expanduser().resolve()
     allowed = tuple(Path(path).expanduser().resolve() for path in (allowed_roots or ()))
     shared = Path(shared_root).expanduser().resolve() if shared_root is not None else None
+    session_output = Path(session_output_root).expanduser().resolve() if session_output_root is not None else None
 
-    def resolve_path(tool_name: str, value: str) -> tuple[str | None, str | None]:
+    def resolve_path(
+        tool_name: str,
+        value: str,
+        allow_session_output: bool = False,
+    ) -> tuple[str | None, str | None]:
         if not isinstance(value, str) or not value.strip():
             return None, tool_error(tool_name, "Path is required.", "InvalidPath")
         candidate = Path(value).expanduser()
@@ -35,6 +41,8 @@ def build_file_tool_specs(
                 candidate = root / candidate
         candidate = candidate.resolve()
         if allowed and not any(_is_relative_to(candidate, allowed_root) for allowed_root in allowed):
+            if allow_session_output and session_output is not None and _is_relative_to(candidate, session_output):
+                return str(candidate), None
             return None, tool_error(tool_name, f"Path is outside this Agent Capsule: {value}", "WorkspaceBoundary")
         return str(candidate), None
 
@@ -44,7 +52,7 @@ def build_file_tool_specs(
         limit: int = 1000,
         _cancellation_token: CancellationToken | None = None,
     ) -> str:
-        resolved, error = resolve_path("read_file", path)
+        resolved, error = resolve_path("read_file", path, allow_session_output=True)
         return error or read_file(resolved, offset, limit, _cancellation_token)
 
     def scoped_write_file(file_path: str, content: str, expected_sha256: str | None = None) -> str:
@@ -58,7 +66,7 @@ def build_file_tool_specs(
     def scoped_glob(
         pattern: str,
         path: str = ".",
-        max_results: int = 100,
+        max_results: int = 1000,
         _cancellation_token: CancellationToken | None = None,
     ) -> str:
         resolved, error = resolve_path("glob", path)
@@ -68,7 +76,7 @@ def build_file_tool_specs(
         pattern: str,
         path: str = ".",
         glob: str = "**/*",
-        max_results: int = 50,
+        max_results: int = 1000,
         _cancellation_token: CancellationToken | None = None,
     ) -> str:
         resolved, error = resolve_path("grep", path)
@@ -82,11 +90,11 @@ def _specs(read, write, edit, find, search) -> tuple[ToolSpec, ...]:
         ToolSpec(
             name="read_file",
             handler=read,
-            description="读取 UTF-8 文本文件的指定行范围，返回行号、截断状态、下一次 offset 和完整文件 SHA-256。",
+            description="读取 UTF-8 文本文件的指定行范围，单页最多 2000 行和约 50 KiB，返回行号、截断状态、下一次 offset 和完整文件 SHA-256。",
             param_descriptions={
                 "path": "文件绝对或相对路径",
                 "offset": "起始行号（默认 1）",
-                "limit": "最多读取的行数（默认 1000 行，最大 2000 行；超过会被截断）",
+                "limit": "最多读取的行数（默认 1000 行，最大 2000 行；单页约 50 KiB，超过会被截断）",
             },
         ),
         ToolSpec(
@@ -117,7 +125,7 @@ def _specs(read, write, edit, find, search) -> tuple[ToolSpec, ...]:
             param_descriptions={
                 "pattern": "文件匹配模式，如 **/*.py、src/**/*.ts。",
                 "path": "搜索目录。默认为当前目录 .。",
-                "max_results": "最大返回文件数。默认 100。",
+                "max_results": "最大返回文件数。默认 1000。",
             },
         ),
         ToolSpec(
@@ -128,7 +136,7 @@ def _specs(read, write, edit, find, search) -> tuple[ToolSpec, ...]:
                 "pattern": "要搜索的正则表达式（rg 语法）",
                 "path": "搜索的根目录 (默认为当前目录 .)",
                 "glob": "文件匹配模式 (如 **/*.py, src/*.ts)。默认为 **/*。",
-                "max_results": "最大返回结果数。默认 50。",
+                "max_results": "最大返回结果数。默认 1000。",
             },
         ),
     )

@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable, Collection
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
 from agent.application.context import CompactionService, ContextEstimator, ContextManager
@@ -13,6 +14,7 @@ from agent.application.tools import ToolCallProcessor, ToolExecutor, ToolResultN
 from agent.infrastructure.config import AppSettings, load_settings
 from agent.infrastructure.llm import OpenAIChatClient, OpenAIClientFactory
 from agent.infrastructure.persistence import JsonlSessionStore
+from agent.infrastructure.persistence import ToolOutputStore
 from agent.infrastructure.planning import build_plan_snapshot
 from agent.infrastructure.rind_docs import build_rind_doc_context
 from agent.infrastructure.skills import SkillRepository
@@ -29,6 +31,7 @@ class SharedRuntimeResources:
     tool_result_normalizer: ToolResultNormalizer
     stream_parser: MessageStreamParser
     compaction_service: CompactionService
+    tool_output_store: ToolOutputStore = field(default_factory=ToolOutputStore)
 
 
 @dataclass(frozen=True, slots=True)
@@ -95,6 +98,7 @@ def build_agent_container(
             skill_agent_dir = str(agent_context.capsule.manifest_path.parent / "skills")
     settings = settings or load_settings(workspace_root)
     provider_client_factory = provider_client_factory or OpenAIClientFactory(settings)
+    tool_output_store = shared_resources.tool_output_store if shared_resources else ToolOutputStore(session_dir)
     model = settings.model
     session_store: SessionStore = JsonlSessionStore(
         session_dir=session_dir,
@@ -153,6 +157,13 @@ def build_agent_container(
                 session_runner=session_runner,
             )
             delegate_handler = delegator.delegate
+    session_output_root = None
+    if session_id:
+        session_output_root = str(
+            (Path(JsonlSessionStore.resolve_session_root(session_dir)) / str(session_id) / "tool-output")
+            .expanduser()
+            .resolve()
+        )
     catalog = build_builtin_tool_specs(
         enable_goal=enable_goal,
         enable_user_question=enable_user_question,
@@ -163,6 +174,8 @@ def build_agent_container(
         workspace_root=workspace_root,
         allowed_roots=allowed_roots,
         shared_root=shared_root,
+        session_output_root=session_output_root,
+        output_store=tool_output_store,
     )
     if enabled_tools is None:
         tool_specs = catalog
@@ -179,6 +192,7 @@ def build_agent_container(
     tool_processor = ToolCallProcessor(
         tool_executor=tool_executor,
         tool_result_normalizer=tool_result_normalizer,
+        tool_output_store=tool_output_store,
     )
     chat_client = OpenAIChatClient(
         async_client=(

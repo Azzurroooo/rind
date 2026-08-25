@@ -11,7 +11,6 @@ from typing import Any
 @dataclass(frozen=True, slots=True)
 class CompactionHandoffBuilder:
     max_excerpt_chars: int = 1200
-    max_tool_lines: int = 20
 
     def render(self, previous_handoff: str, messages: list[dict[str, Any]], tool_lines: list[str]) -> str:
         last_user = self._last_content(messages, "user")
@@ -39,13 +38,10 @@ class CompactionHandoffBuilder:
             if isinstance(record, dict) and record.get("id")
         }
         lines: list[str] = []
-        for call_id in tool_ids[: self.max_tool_lines]:
+        for call_id in tool_ids:
             record = records.get(call_id, {})
             suffix = f", error_type={record.get('error_type')}" if record.get("error_type") else ""
             lines.append(f"- {call_id}: {record.get('name') or 'unknown'}, ok={record.get('ok')}{suffix}")
-        remaining = len(tool_ids) - len(lines)
-        if remaining > 0:
-            lines.append(f"- ... {remaining} additional tool call(s) omitted from handoff.")
         return lines
 
     def collect_tool_call_ids(self, messages: list[dict[str, Any]]) -> list[str]:

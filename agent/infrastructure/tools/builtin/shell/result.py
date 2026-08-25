@@ -98,13 +98,16 @@ def delta_output(record: ProcessRecord, max_chars: int) -> tuple[str, str, bool]
 
 
 def output_meta(record: ProcessRecord, preview_truncated: bool = False) -> dict:
-    return {
+    meta = {
         "truncated": record.stdout.truncated
         or record.stderr.truncated
         or preview_truncated,
         "total_bytes": record.stdout.byte_count + record.stderr.byte_count,
         "total_lines": record.stdout.line_count + record.stderr.line_count,
     }
+    if record.output_path:
+        meta["output_path"] = record.output_path
+    return meta
 
 
 def display_exit_code(record: ProcessRecord) -> int:

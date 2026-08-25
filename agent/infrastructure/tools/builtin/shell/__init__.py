@@ -8,7 +8,7 @@ from ...spec import ToolSpec
 from .tool import bash, bash_output
 
 
-def build_shell_tool_specs(workspace_root: str | None = None) -> tuple[ToolSpec, ...]:
+def build_shell_tool_specs(workspace_root: str | None = None, output_store=None) -> tuple[ToolSpec, ...]:
     if workspace_root is None:
         return TOOL_SPECS
 
@@ -18,6 +18,8 @@ def build_shell_tool_specs(workspace_root: str | None = None) -> tuple[ToolSpec,
         wait_ms: int = 10000,
         _session_id: str = "default",
         _cancellation_token: CancellationToken | None = None,
+        _idempotency_key: str = "",
+        _output_store=None,
     ) -> str:
         return await bash(
             command,
@@ -26,6 +28,8 @@ def build_shell_tool_specs(workspace_root: str | None = None) -> tuple[ToolSpec,
             _session_id,
             _cancellation_token,
             workspace_root,
+            _idempotency_key,
+            _output_store or output_store,
         )
 
     return _specs(scoped_bash, bash_output)

@@ -114,7 +114,7 @@ def test_read_file_paginates_with_encoding_and_next_offset(tmp_path: Path) -> No
         raise AssertionError(f"Expected next read page, got: {next_page}")
 
 
-def test_read_file_rejects_missing_directory_binary_encoding_and_large_files(tmp_path: Path) -> None:
+def test_read_file_rejects_missing_directory_binary_encoding_and_reads_large_text(tmp_path: Path) -> None:
     assert_error(read_file(str(tmp_path / "missing.txt")), "NotFound")
     assert_error(read_file(str(tmp_path)), "NotAFile")
 
@@ -127,9 +127,10 @@ def test_read_file_rejects_missing_directory_binary_encoding_and_large_files(tmp
     assert_error(read_file(str(invalid_path)), "InvalidEncoding")
 
     large_path = tmp_path / "large.txt"
-    with large_path.open("wb") as handle:
-        handle.truncate(10 * 1024 * 1024 + 1)
-    assert_error(read_file(str(large_path)), "FileTooLarge")
+    large_path.write_text("line\n" + ("x" * (10 * 1024 * 1024)) + "\nend\n", encoding="utf-8")
+    large_payload = assert_ok(read_file(str(large_path), limit=10))
+    assert large_payload["meta"]["truncated"] is True
+    assert len(large_payload["data"].encode("utf-8")) <= 50 * 1024
 
 
 def test_read_file_rejects_invalid_offset_and_honors_limit_cap(tmp_path: Path) -> None:

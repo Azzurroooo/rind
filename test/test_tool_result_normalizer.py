@@ -3,6 +3,8 @@ import os
 import sys
 from pathlib import Path
 
+import pytest
+
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 os.chdir(PROJECT_ROOT)
 if str(PROJECT_ROOT) not in sys.path:
@@ -11,140 +13,116 @@ if str(PROJECT_ROOT) not in sys.path:
 from agent.application import ToolResultNormalizer
 
 
-def test_small_output_reuses_stable_content_for_all_projections() -> None:
-    normalizer = ToolResultNormalizer()
+class MemoryOutputStore:
+    def __init__(self, root: Path):
+        self.root = root
+        self.calls: list[tuple[str, str]] = []
 
-    result = normalizer.normalize('{"ok": true, "tool": "bash", "data": "done"}')
+    async def write(self, session_id: str, call_id: str, content: str) -> str:
+        self.calls.append((session_id, call_id))
+        path = self.root / session_id / f"{call_id}.txt"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(content, encoding="utf-8")
+        return str(path.resolve())
+
+
+@pytest.mark.asyncio
+async def test_small_output_reuses_stable_content_for_all_projections() -> None:
+    result = await ToolResultNormalizer().normalize('{"ok": true, "tool": "bash", "data": "done"}')
 
     expected = '{"ok": true,"tool": "bash","data": "done"}'
     assert result.terminal_content == expected
     assert result.model_content == expected
     assert result.persisted_content == expected
     assert result.model_content_policy == {"truncated": False}
-    assert result.model_content_format == "tool_result_v2"
 
 
-def test_projections_use_distinct_limits_and_preserve_head_tail() -> None:
-    source = json.dumps({"ok": True, "tool": "bash", "data": "head" + "a" * 2000 + "tail"})
-    normalizer = ToolResultNormalizer(
-        terminal_max_bytes=400,
-        persistence_max_bytes=800,
-        max_chars=600,
-        max_tokens=10000,
+@pytest.mark.asyncio
+async def test_large_output_uses_one_absolute_output_path(tmp_path: Path) -> None:
+    source = json.dumps({"ok": True, "tool": "bash", "data": "head" + "a" * 100_000 + "tail"})
+    store = MemoryOutputStore(tmp_path)
+
+    result = await ToolResultNormalizer().normalize(
+        source,
+        tool_name="bash",
+        output_store=store,
+        session_id="session-a",
+        call_id="call-1",
     )
 
-    result = normalizer.normalize(source, tool_name="bash")
-
-    assert len(result.terminal_content.encode("utf-8")) <= 400
-    assert len(result.model_content) <= 600
-    assert len(result.persisted_content.encode("utf-8")) <= 800
-    assert len(result.terminal_content) < len(result.model_content) < len(result.persisted_content)
-    for content in (result.terminal_content, result.model_content, result.persisted_content):
-        payload = json.loads(content)
-        assert payload["meta"] == {
-            "truncated": True,
-            "total_bytes": len(source.encode("utf-8")),
-            "total_lines": 1,
-        }
-        assert "head" in payload["data"]
-        assert "tail" in payload["data"]
-        assert "tool_result_truncated" in payload["data"]
-    assert result.model_content_policy == {
-        "truncated": True,
-        "total_bytes": len(source.encode("utf-8")),
-        "total_lines": 1,
-    }
+    assert store.calls == [("session-a", "call-1")]
+    assert len(result.model_content.encode("utf-8")) <= 50 * 1024
+    assert result.persisted_content == result.model_content
+    payload = json.loads(result.model_content)
+    assert payload["meta"]["truncated"] is True
+    assert Path(payload["meta"]["output_path"]).is_absolute()
+    assert "Output truncated." in payload["data"]
+    assert "Use read_file or bash" in payload["data"]
+    assert "a" * 100_000 in (tmp_path / "session-a" / "call-1.txt").read_text(encoding="utf-8")
 
 
-def test_utf8_byte_limits_and_line_counts_are_exact() -> None:
-    source = "第一行\n" + "界" * 1000 + "\n末行"
-    normalizer = ToolResultNormalizer(
-        terminal_max_bytes=512,
-        persistence_max_bytes=768,
-        max_chars=5000,
-        max_tokens=10000,
+@pytest.mark.asyncio
+async def test_existing_output_path_is_reused_without_duplicate_write() -> None:
+    path = "C:/sessions/session-a/tool-output/call-1.txt"
+    payload = {"ok": True, "tool": "bash", "data": "preview", "meta": {"truncated": True, "output_path": path}}
+
+    result = await ToolResultNormalizer().normalize(payload, tool_name="bash")
+
+    normalized = json.loads(result.model_content)
+    assert normalized["meta"]["output_path"] == path
+    assert "Output truncated." in normalized["data"]
+
+
+@pytest.mark.asyncio
+async def test_preview_respects_utf8_bytes_and_lines(tmp_path: Path) -> None:
+    source = "\n".join("界" * 40 for _ in range(3000))
+    result = await ToolResultNormalizer().normalize(
+        source,
+        tool_name="read_file",
+        output_store=MemoryOutputStore(tmp_path),
+        session_id="session-a",
+        call_id="call-2",
     )
-
-    result = normalizer.normalize(source, tool_name="read_file")
-
-    terminal = json.loads(result.terminal_content)
-    persisted = json.loads(result.persisted_content)
-    assert len(result.terminal_content.encode("utf-8")) <= 512
-    assert len(result.persisted_content.encode("utf-8")) <= 768
-    assert terminal["meta"]["total_bytes"] == len(source.encode("utf-8"))
-    assert terminal["meta"]["total_lines"] == 3
-    assert persisted["meta"] == terminal["meta"]
+    assert len(result.model_content.encode("utf-8")) <= 50 * 1024
+    assert json.loads(result.model_content)["meta"]["total_lines"] == 3000
 
 
-def test_large_input_is_not_sent_whole_to_tokenizer() -> None:
-    class BoundedTokenizer:
-        def encode(self, text: str, disallowed_special=()):
-            assert len(text) <= 40000
-            return list(range(len(text) // 4))
-
-    normalizer = ToolResultNormalizer()
-    normalizer._tokenizer = BoundedTokenizer()
-
-    result = normalizer.normalize("start\n" + "x" * (2 * 1024 * 1024) + "\nend", tool_name="bash")
-
-    assert len(result.terminal_content.encode("utf-8")) <= 8 * 1024
-    assert len(result.model_content) <= 40000
-    assert len(result.persisted_content.encode("utf-8")) <= 64 * 1024
-
-
-def test_error_payload_preserves_error_type() -> None:
-    normalizer = ToolResultNormalizer()
-
-    result = normalizer.normalize(
+@pytest.mark.asyncio
+async def test_error_payload_preserves_error_type() -> None:
+    result = await ToolResultNormalizer().normalize(
         '{"tool": "bash", "ok": false, "error_type": "Timeout", "error": "too slow"}'
     )
-
     assert '"error_type": "Timeout"' in result.model_content
     assert '"error": "too slow"' in result.model_content
 
 
-def test_stable_serialization_for_same_input() -> None:
+@pytest.mark.asyncio
+async def test_stable_serialization_for_same_input() -> None:
     normalizer = ToolResultNormalizer()
-    payload = {"z": 1, "tool": "bash", "ok": True, "data": {"b": 2, "a": 1}}
-
-    first = normalizer.normalize(payload)
-    second = normalizer.normalize({"ok": True, "data": {"a": 1, "b": 2}, "z": 1, "tool": "bash"})
-
+    first = await normalizer.normalize({"z": 1, "tool": "bash", "ok": True, "data": {"b": 2, "a": 1}})
+    second = await normalizer.normalize({"ok": True, "data": {"a": 1, "b": 2}, "z": 1, "tool": "bash"})
     assert first.model_content == second.model_content
 
 
-def test_tool_result_normalizer_compresses_empty_bash_output_poll() -> None:
-    normalizer = ToolResultNormalizer()
-    payload = {
-        "ok": True,
-        "tool": "bash_output",
-        "data": {
-            "bg_id": "bg_123",
-            "status": "running",
-            "stdout": "",
-            "stderr": "",
-            "exit_code": -1,
-            "delta": True,
-            "no_new_output": True,
-            "sequence": 9,
-            "wait_ms": 5000,
-            "elapsed_ms": 5003,
-            "truncated": False,
-            "empty_observation_count": 4,
-            "suggested_next_wait_ms": 30000,
-            "timestamp": "2026-06-03T00:00:00Z",
-        },
-        "meta": {"truncated": False, "total_bytes": 0, "total_lines": 0},
-    }
-
-    result = normalizer.normalize(payload)
-
+@pytest.mark.asyncio
+async def test_empty_bash_output_poll_is_compacted() -> None:
+    result = await ToolResultNormalizer().normalize(
+        {
+            "ok": True,
+            "tool": "bash_output",
+            "data": {
+                "bg_id": "bg_123",
+                "status": "running",
+                "stdout": "",
+                "stderr": "",
+                "no_new_output": True,
+                "empty_observation_count": 4,
+                "suggested_next_wait_ms": 30000,
+            },
+        }
+    )
     assert '"bg_id": "bg_123"' in result.model_content
     assert '"status": "running"' in result.model_content
     assert '"no_new_output": true' in result.model_content
-    assert '"suggested_next_wait_ms": 30000' in result.model_content
-    assert '"total_bytes": 0' in result.model_content
     assert "stdout" not in result.model_content
     assert "stderr" not in result.model_content
-    assert "timestamp" not in result.model_content
-    assert "sequence" not in result.model_content

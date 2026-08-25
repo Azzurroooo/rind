@@ -28,11 +28,13 @@ def build_builtin_tool_specs(
     workspace_root: str | None = None,
     allowed_roots: Collection[str] | None = None,
     shared_root: str | None = None,
+    session_output_root: str | None = None,
+    output_store=None,
 ) -> tuple[ToolSpec, ...]:
-    specs = list(build_file_tool_specs(workspace_root, allowed_roots, shared_root))
+    specs = list(build_file_tool_specs(workspace_root, allowed_roots, shared_root, session_output_root))
     if enable_user_question:
         specs[0:0] = USER_QUESTION_TOOL_SPECS
-    specs.extend(build_shell_tool_specs(workspace_root))
+    specs.extend(build_shell_tool_specs(workspace_root, output_store))
     specs.extend(PLANNING_TOOL_SPECS)
     specs.extend(build_skill_tool_specs(skill_repository))
     if delegate_handler is not None:

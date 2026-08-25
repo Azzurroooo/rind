@@ -20,7 +20,7 @@ from agent.application.tools import ToolResultNormalizer
 from agent.bootstrap import AgentContainer, SharedRuntimeResources, build_agent_container
 from agent.infrastructure.config import AppSettings
 from agent.infrastructure.llm import OpenAIClientFactory
-from agent.infrastructure.persistence import JsonlSessionStore
+from agent.infrastructure.persistence import JsonlSessionStore, ToolOutputStore
 from agent.infrastructure.paths import validate_session_id
 from agent.infrastructure.planning import build_plan_snapshot
 from agent.infrastructure.team import discover_agent
@@ -624,11 +624,13 @@ class RuntimeWorker:
         self._settings = settings
         self._provider_client_factory = OpenAIClientFactory(settings)
         provider_async_client = self._provider_client_factory.create_async_client()
+        tool_output_store = ToolOutputStore(session_dir)
         self._shared_resources = SharedRuntimeResources(
             provider_async_client=provider_async_client,
             tool_result_normalizer=ToolResultNormalizer(),
             stream_parser=MessageStreamParser(),
             compaction_service=CompactionService(plan_snapshot_provider=build_plan_snapshot),
+            tool_output_store=tool_output_store,
         )
         self.repository = SessionRepository(settings=settings, session_dir=session_dir)
         self.execution = ExecutionCoordinator(
@@ -642,6 +644,7 @@ class RuntimeWorker:
         )
         self._provider_async_client = provider_async_client
         self._initialized = False
+        self._tool_output_store = tool_output_store
 
     @property
     def default_model(self) -> str:
@@ -657,6 +660,7 @@ class RuntimeWorker:
 
     async def initialize(self) -> dict[str, Any]:
         if not self._initialized:
+            await self._tool_output_store.cleanup()
             info = await self.repository.initial(
                 self.workspace_root,
                 self.session_id,

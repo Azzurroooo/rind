@@ -53,10 +53,12 @@ class ToolCallProcessor:
         self,
         tool_executor: ToolExecutor,
         tool_result_normalizer: ToolResultNormalizer | None = None,
+        tool_output_store=None,
         user_question_responder: UserQuestionResponder | None = None,
     ):
         self._tool_executor = tool_executor
         self._tool_result_normalizer = tool_result_normalizer or ToolResultNormalizer()
+        self._tool_output_store = tool_output_store
         self._user_question_responder = user_question_responder
         self._polling_guard = BashOutputPollingGuard()
 
@@ -174,11 +176,14 @@ class ToolCallProcessor:
                                     await asyncio.gather(execution, return_exceptions=True)
 
             ts_end = session.now_iso()
-            normalized_result = self._tool_result_normalizer.normalize(
+            normalized_result = await self._tool_result_normalizer.normalize(
                 outcome.result,
                 tool_name=call.name,
                 status=outcome.status,
                 error_type=outcome.error_type,
+                output_store=self._tool_output_store,
+                session_id=session.session_id or "",
+                call_id=call.call_id,
             )
             try:
                 if not reused:
@@ -200,7 +205,7 @@ class ToolCallProcessor:
                     error_type="PersistenceError",
                     result=tool_error(call.name, f"Failed to persist tool result: {exc}", "PersistenceError"),
                 )
-                normalized_result = self._tool_result_normalizer.normalize(
+                normalized_result = await self._tool_result_normalizer.normalize(
                     outcome.result,
                     tool_name=call.name,
                     status=outcome.status,
@@ -287,11 +292,14 @@ class ToolCallProcessor:
 
         for (call, parsed_args, ts_start, started_at), (outcome, reused) in zip(prepared, outcomes, strict=True):
             ts_end = session.now_iso()
-            normalized_result = self._tool_result_normalizer.normalize(
+            normalized_result = await self._tool_result_normalizer.normalize(
                 outcome.result,
                 tool_name=call.name,
                 status=outcome.status,
                 error_type=outcome.error_type,
+                output_store=self._tool_output_store,
+                session_id=session.session_id or "",
+                call_id=call.call_id,
             )
             try:
                 if not reused:
@@ -313,7 +321,7 @@ class ToolCallProcessor:
                     error_type="PersistenceError",
                     result=tool_error("delegate", f"Failed to persist tool result: {exc}", "PersistenceError"),
                 )
-                normalized_result = self._tool_result_normalizer.normalize(
+                normalized_result = await self._tool_result_normalizer.normalize(
                     outcome.result,
                     tool_name=call.name,
                     status=outcome.status,
@@ -351,6 +359,7 @@ class ToolCallProcessor:
                 "_session_id": session_id,
                 "_cancellation_token": cancellation_token,
                 "_idempotency_key": call.call_id,
+                "_output_store": self._tool_output_store,
             }
             if self._tool_executor.is_async_tool(call.name):
                 result = await self._tool_executor.execute_async(call.name, execution_args, call.raw_args)

@@ -28,9 +28,8 @@ class CompactionService:
     """Build compact handoff records with LLM-first and deterministic fallback paths."""
 
     policy_version: str = "compact_boundary_v3"
-    max_excerpt_chars: int = 1200
-    max_tool_lines: int = 20
-    max_compact_prompt_chars: int = 60000
+    max_excerpt_chars: int = 2000
+    max_compact_prompt_chars: int = 100000
     plan_snapshot_provider: Callable[[], str] | None = None
 
     async def compact_async(
@@ -108,7 +107,7 @@ class CompactionService:
         handoff_messages: list[dict[str, Any]] | None = None,
         strategy: str = "manual_deterministic",
     ) -> dict[str, Any]:
-        handoff_builder = CompactionHandoffBuilder(self.max_excerpt_chars, self.max_tool_lines)
+        handoff_builder = CompactionHandoffBuilder(self.max_excerpt_chars)
         created = created_at or self._now()
         boundary_index = handoff_builder.latest_boundary_index(messages)
         source_start = boundary_index + 1 if boundary_index >= 0 else 0
@@ -156,7 +155,7 @@ class CompactionService:
 
     def build_compression_corpus(self, context_messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
         """Return compactable conversation facts, excluding instruction messages."""
-        handoff_builder = CompactionHandoffBuilder(self.max_excerpt_chars, self.max_tool_lines)
+        handoff_builder = CompactionHandoffBuilder(self.max_excerpt_chars)
         corpus: list[dict[str, Any]] = []
         for message in context_messages:
             if not isinstance(message, dict):

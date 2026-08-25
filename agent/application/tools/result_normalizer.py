@@ -3,14 +3,8 @@
 from __future__ import annotations
 
 import json
-import logging
-import math
-import re
-from dataclasses import dataclass, field
-from typing import Any, Callable
-
-
-logger = logging.getLogger(__name__)
+from dataclasses import dataclass
+from typing import Any, Protocol
 
 
 _PREFERRED_KEYS = (
@@ -22,10 +16,14 @@ _PREFERRED_KEYS = (
     "meta",
     "ts",
 )
-_TRUNCATION_MARKER = (
-    "\n\n[tool_result_truncated: rerun with narrower parameters or redirect output "
-    "to a chosen file]\n\n"
-)
+_MAX_PREVIEW_BYTES = 50 * 1024
+_MAX_PREVIEW_LINES = 2_000
+_TRUNCATION_MARKER = "\n\nOutput truncated. Full output is available at {output_path}.\nUse read_file or bash to inspect it.\n"
+
+
+class ToolOutputWriter(Protocol):
+    async def write(self, session_id: str, call_id: str, content: str) -> str:
+        ...
 
 
 @dataclass(slots=True)
@@ -34,7 +32,11 @@ class NormalizedToolResult:
     model_content: str
     persisted_content: str
     model_content_format: str = "tool_result_v2"
-    model_content_policy: dict[str, Any] = field(default_factory=dict)
+    model_content_policy: dict[str, Any] | None = None
+
+    def __post_init__(self) -> None:
+        if self.model_content_policy is None:
+            self.model_content_policy = {}
 
 
 class ToolResultNormalizer:
@@ -42,29 +44,37 @@ class ToolResultNormalizer:
 
     def __init__(
         self,
-        max_tokens: int = 10000,
-        max_chars: int = 40000,
         terminal_max_bytes: int = 8 * 1024,
-        persistence_max_bytes: int = 64 * 1024,
+        max_preview_bytes: int = _MAX_PREVIEW_BYTES,
+        max_preview_lines: int = _MAX_PREVIEW_LINES,
     ):
-        self.max_tokens = max(1, int(max_tokens))
-        self.max_chars = max(1, int(max_chars))
         self.terminal_max_bytes = max(1, int(terminal_max_bytes))
-        self.persistence_max_bytes = max(1, int(persistence_max_bytes))
-        self._tokenizer = self._get_tokenizer()
-        self._cjk_pattern = re.compile(r"[\u4e00-\u9fff\u3400-\u4dbf]")
+        self.max_preview_bytes = max(1, int(max_preview_bytes))
+        self.max_preview_lines = max(1, int(max_preview_lines))
 
-    def normalize(
+    async def normalize(
         self,
         result_payload: Any,
         *,
         tool_name: str = "",
         status: str = "completed",
         error_type: str = "",
+        output_store: ToolOutputWriter | None = None,
+        session_id: str = "",
+        call_id: str = "",
     ) -> NormalizedToolResult:
         rendered = self._render_stable(result_payload)
         total_bytes, total_lines = self._text_metrics(rendered)
         identity = self._projection_identity(rendered, tool_name, status, error_type)
+        existing_path, existing_truncated = self._existing_output_reference(rendered)
+        needs_preview = (
+            total_bytes > self.max_preview_bytes
+            or total_lines > self.max_preview_lines
+            or existing_truncated
+        )
+        output_path = existing_path
+        if needs_preview and not output_path and output_store is not None and session_id and call_id:
+            output_path = await output_store.write(session_id, call_id, rendered)
 
         terminal_content = self._project_by_bytes(
             rendered,
@@ -72,35 +82,28 @@ class ToolResultNormalizer:
             total_bytes,
             total_lines,
             identity,
+            output_path=None,
+            include_notice=False,
         )
-        persisted_content = self._project_by_bytes(
-            rendered,
-            self.persistence_max_bytes,
-            total_bytes,
-            total_lines,
-            identity,
-        )
-        model_content = self._project_for_model(
-            rendered,
-            total_bytes,
-            total_lines,
-            identity,
-        )
-        model_truncated = model_content != rendered
-        policy: dict[str, Any] = {"truncated": model_truncated}
-        if model_truncated:
-            policy.update({"total_bytes": total_bytes, "total_lines": total_lines})
+        if needs_preview:
+            model_content = self._project_for_model(
+                rendered,
+                total_bytes,
+                total_lines,
+                identity,
+                output_path,
+            )
+        else:
+            model_content = rendered
 
         return NormalizedToolResult(
             terminal_content=terminal_content,
             model_content=model_content,
-            persisted_content=persisted_content,
-            model_content_policy=policy,
+            persisted_content=model_content,
+            model_content_policy={"truncated": model_content != rendered},
         )
 
     def _render_stable(self, payload: Any) -> str:
-        if isinstance(payload, str) and len(payload) > self.persistence_max_bytes:
-            return payload
         parsed = self._parse_json(payload)
         if isinstance(parsed, str):
             return parsed
@@ -115,6 +118,9 @@ class ToolResultNormalizer:
         total_bytes: int,
         total_lines: int,
         identity: tuple[bool, str, str],
+        *,
+        output_path: str | None,
+        include_notice: bool,
     ) -> str:
         if total_bytes <= limit:
             return text
@@ -125,6 +131,8 @@ class ToolResultNormalizer:
             identity,
             min(len(text), limit),
             lambda candidate: len(candidate.encode("utf-8")) <= limit,
+            output_path=output_path,
+            include_notice=include_notice,
         )
 
     def _project_for_model(
@@ -133,19 +141,20 @@ class ToolResultNormalizer:
         total_bytes: int,
         total_lines: int,
         identity: tuple[bool, str, str],
+        output_path: str | None,
     ) -> str:
-        if len(text) <= self.max_chars and self._estimate_tokens(text) <= self.max_tokens:
-            return text
         return self._bounded_projection(
             text,
             total_bytes,
             total_lines,
             identity,
-            min(len(text), self.max_chars),
+            min(len(text), self.max_preview_bytes),
             lambda candidate: (
-                len(candidate) <= self.max_chars
-                and self._estimate_tokens(candidate) <= self.max_tokens
+                len(candidate.encode("utf-8")) <= self.max_preview_bytes
+                and self._line_count(candidate) <= self.max_preview_lines
             ),
+            output_path=output_path,
+            include_notice=True,
         )
 
     def _bounded_projection(
@@ -155,11 +164,21 @@ class ToolResultNormalizer:
         total_lines: int,
         identity: tuple[bool, str, str],
         max_preview_chars: int,
-        fits: Callable[[str], bool],
+        fits,
+        *,
+        output_path: str | None,
+        include_notice: bool,
     ) -> str:
         low = 0
         high = max_preview_chars
-        best = self._serialize_projection("", total_bytes, total_lines, identity)
+        best = self._serialize_projection(
+            "",
+            total_bytes,
+            total_lines,
+            identity,
+            output_path=output_path,
+            include_notice=include_notice,
+        )
         while low <= high:
             preview_chars = (low + high) // 2
             candidate = self._serialize_projection(
@@ -167,6 +186,8 @@ class ToolResultNormalizer:
                 total_bytes,
                 total_lines,
                 identity,
+                output_path=output_path,
+                include_notice=include_notice,
             )
             if fits(candidate):
                 best = candidate
@@ -181,21 +202,40 @@ class ToolResultNormalizer:
         total_bytes: int,
         total_lines: int,
         identity: tuple[bool, str, str],
+        *,
+        output_path: str | None,
+        include_notice: bool,
     ) -> str:
         ok, tool_name, error_type = identity
         payload: dict[str, Any] = {"ok": ok, "tool": tool_name}
+        value = preview
+        if include_notice:
+            value += _TRUNCATION_MARKER.format(output_path=output_path or "the output file")
         if ok:
-            payload["data"] = preview
+            payload["data"] = value
         else:
-            payload["error"] = preview
+            payload["error"] = value
             if error_type:
                 payload["error_type"] = error_type
-        payload["meta"] = {
+        meta: dict[str, Any] = {
             "truncated": True,
             "total_bytes": total_bytes,
             "total_lines": total_lines,
         }
+        if output_path:
+            meta["output_path"] = output_path
+        payload["meta"] = meta
         return json.dumps(payload, ensure_ascii=False, separators=(",", ": "))
+
+    def _existing_output_reference(self, rendered: str) -> tuple[str | None, bool]:
+        parsed = self._parse_json(rendered)
+        if not isinstance(parsed, dict):
+            return None, False
+        meta = parsed.get("meta")
+        if not isinstance(meta, dict):
+            return None, False
+        output_path = meta.get("output_path")
+        return (str(output_path) if isinstance(output_path, str) and output_path else None), bool(meta.get("truncated"))
 
     def _projection_identity(
         self,
@@ -204,7 +244,7 @@ class ToolResultNormalizer:
         status: str,
         error_type: str,
     ) -> tuple[bool, str, str]:
-        parsed = self._parse_json(rendered) if len(rendered) <= self.persistence_max_bytes else None
+        parsed = self._parse_json(rendered)
         if isinstance(parsed, dict):
             ok = parsed.get("ok") if isinstance(parsed.get("ok"), bool) else status == "completed"
             name = parsed.get("tool") if isinstance(parsed.get("tool"), str) else tool_name
@@ -217,21 +257,18 @@ class ToolResultNormalizer:
     def _preview(self, text: str, limit: int) -> str:
         if limit <= 0:
             return ""
-        if limit <= len(_TRUNCATION_MARKER):
-            return _TRUNCATION_MARKER[:limit]
-        available = limit - len(_TRUNCATION_MARKER)
+        marker = "\n\n... preview truncated ...\n\n"
+        available = max(1, limit - len(marker))
         head_chars = available // 2
         tail_chars = available - head_chars
-        return text[:head_chars].rstrip() + _TRUNCATION_MARKER + text[-tail_chars:].lstrip()
+        return text[:head_chars].rstrip() + marker + text[-tail_chars:].lstrip()
 
     def _text_metrics(self, text: str) -> tuple[int, int]:
-        chunk_chars = 1024 * 1024
-        total_bytes = sum(
-            len(text[offset : offset + chunk_chars].encode("utf-8"))
-            for offset in range(0, len(text), chunk_chars)
-        )
-        total_lines = text.count("\n") + int(bool(text) and not text.endswith("\n"))
-        return total_bytes, total_lines
+        return len(text.encode("utf-8")), self._line_count(text)
+
+    @staticmethod
+    def _line_count(text: str) -> int:
+        return text.count("\n") + int(bool(text) and not text.endswith("\n"))
 
     def _parse_json(self, payload: Any) -> Any:
         if not isinstance(payload, str):
@@ -284,20 +321,3 @@ class ToolResultNormalizer:
         if isinstance(value, list):
             return [self._canonicalize(item) for item in value]
         return value
-
-    def _estimate_tokens(self, text: str) -> int:
-        if self._tokenizer:
-            try:
-                return len(self._tokenizer.encode(text, disallowed_special=()))
-            except Exception:
-                logger.debug("Tokenizer failed; using heuristic tool-result estimate.", exc_info=True)
-        divisor = 1.5 if self._cjk_pattern.search(text) else 3.5
-        return int(math.ceil(len(text) / divisor))
-
-    def _get_tokenizer(self):
-        try:
-            import tiktoken
-
-            return tiktoken.get_encoding("cl100k_base")
-        except Exception:
-            return None
