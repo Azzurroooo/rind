@@ -66,7 +66,9 @@ test("flavor swatches render in the target flavor regardless of active theme", (
   setTheme("latte");
   const swatch = flavorSwatch("mocha");
   assert.ok(swatch.includes("\x1b[38;2;137;180;250m"), "uses mocha accent blue");
-  assert.ok(swatch.includes("███"));
+  assert.equal(swatch.match(/\x1b\[38;2;/g).length, 8, "shows eight hue cells");
+  assert.ok(/^(█\x1b\[0m)+/.test(swatch.replace(/\x1b\[[0-9;]*m/g, "")) === false || swatch.endsWith("\x1b[0m"));
+  assert.equal(swatch.replace(/\x1b\[[0-9;]*m/g, "").length, 8);
   resetTheme();
 });
 

@@ -121,12 +121,14 @@ export function themeOptions() {
   }));
 }
 
-// Swatch rendered in the target flavor's hues regardless of the active theme.
+// Eight-color preview rendered in the target flavor regardless of active
+// theme: one narrow cell per Catppuccin hue family.
+const SWATCH_ORDER = ["danger", "code", "warning", "success", "fence", "path", "accent", "notice"];
+
 export function flavorSwatch(name) {
   const flavor = FLAVORS[String(name || "").trim().toLowerCase()];
   if (!flavor) {
     return "";
   }
-  const cell = (hex) => wrap(truecolor(hex), "███", true);
-  return [cell(flavor.accent), cell(flavor.success), cell(flavor.danger)].join(" ");
+  return SWATCH_ORDER.map((role) => wrap(truecolor(flavor[role]), "█", true)).join("");
 }

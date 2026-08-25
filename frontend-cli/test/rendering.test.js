@@ -685,7 +685,7 @@ test("themeMenuText renders flavor swatches with current marker", () => {
   const plain = text.replace(/\x1b\[[0-9;]*m/g, "");
   assert.match(plain, /Theme deck/);
   assert.match(plain, /· Latte/);
-  assert.match(plain, /› Mocha\s+███ ███ ███\s+current/);
+  assert.match(plain, /› Mocha\s+████████\s+current/);
   assert.match(plain, /enter use · esc cancel/);
 });
 
