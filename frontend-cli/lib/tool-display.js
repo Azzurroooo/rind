@@ -36,8 +36,8 @@ const COLLAPSED_BODY_CAPS = {
   bash_output: 5,
   edit_file: 20,
   write_file: 20,
-  grep: 15,
-  glob: 20,
+  grep: 0,
+  glob: 0,
   delegate: 1,
 };
 
@@ -81,6 +81,68 @@ export function parseToolResult(result) {
   }
 }
 
+// Blocks created from argless events (bare announce, session replay) can
+// recover their key arguments from the result payload at finish time.
+export function argsFromResult(name, result) {
+  const { data = {}, meta = {} } = resultDataFromRaw(result);
+  const derived = {};
+  const put = (key, value) => {
+    if (value !== undefined && value !== null && value !== "" && derived[key] === undefined) {
+      derived[key] = value;
+    }
+  };
+  switch (name) {
+    case "read_file":
+      put("path", meta.path);
+      break;
+    case "write_file":
+    case "edit_file":
+      put("file_path", Array.isArray(meta.files) ? meta.files[0]?.path : undefined);
+      break;
+    case "glob":
+      put("pattern", meta.pattern);
+      put("path", meta.path);
+      break;
+    case "grep":
+      put("pattern", meta.pattern);
+      put("path", meta.path);
+      put("glob", meta.glob);
+      break;
+    case "search_web":
+      put("query", meta.query);
+      break;
+    case "fetch_web_page":
+      put("url", meta.url);
+      break;
+    case "bash_output":
+      put("bg_id", data.bg_id);
+      break;
+    case "delegate":
+      put("agent_id", data.agent_id);
+      break;
+    case "skill":
+    case "skill_create":
+      put("name", data.name);
+      break;
+    case "agent_create":
+      put("name", data.name);
+      put("agent_id", data.agent_id);
+      break;
+    default:
+      break;
+  }
+  return derived;
+}
+
+function resultDataFromRaw(result) {
+  const payload = parseToolResult(result);
+  return {
+    payload,
+    data: payload.data && typeof payload.data === "object" ? payload.data : {},
+    meta: payload.meta && typeof payload.meta === "object" ? payload.meta : {},
+  };
+}
+
 export function renderToolRunning(context, width) {
   const renderer = TOOL_RENDERERS[context.name] || GENERIC_RENDERER;
   const elapsedSeconds = Math.floor((context.elapsedMs || 0) / 1000);
@@ -109,6 +171,9 @@ export function renderToolFinished(context, width) {
   const produced = renderer.body ? renderer.body(context, width, bodyLimit) : [];
   const normalized = normalizeBody(produced);
   if (!normalized.lines.length) {
+    if (normalized.total > 0) {
+      lines.push(bodyFooter(normalized.total, context.expanded));
+    }
     return lines;
   }
   lines.push(...normalized.lines);
@@ -331,8 +396,17 @@ const BASH_OUTPUT_RENDERER = {
     return `${bold("bg")} ${bgIdArg(context.args.bg_id, width, 10)}`;
   },
   finished(context, width, state) {
-    const main = `${bold("bg")} ${bgIdArg(context.args.bg_id, width, 14)}`;
-    return titleFor(state, main) + durationPart("bash_output", context.event);
+    const { data } = resultData(context);
+    const id = context.args.bg_id || data.bg_id;
+    let main = `${bold("bg")} ${bgIdArg(id, width, 14)}`;
+    if (state.kind === "cancelled") {
+      main += ` ${dim("(cancelled)")}`;
+    }
+    const waitMs = Number(data.wait_ms ?? data.elapsed_ms);
+    const waited = state.kind === "ok" && Number.isFinite(waitMs) && waitMs > 0
+      ? dim(` · waited ${formatDuration(waitMs)}`)
+      : "";
+    return titleFor(state, main) + waited + durationPart("bash_output", context.event);
   },
   body(context, width, limit) {
     return shellOutputLines(context, limit);
@@ -497,7 +571,8 @@ const DELEGATE_RENDERER = {
   finished(context, width, state) {
     const { data } = resultData(context);
     const status = singleLineText(data.status) || (state.kind === "ok" ? "completed" : "");
-    const main = `delegate → ${agentArg(context.args.agent_id, width)}${status ? dim(` · ${status}`) : ""}`;
+    const agentId = context.args.agent_id || data.agent_id;
+    const main = `delegate → ${agentArg(agentId, width)}${status ? dim(` · ${status}`) : ""}`;
     return titleFor(state, main) + durationPart("delegate", context.event);
   },
   body(context, width, limit) {

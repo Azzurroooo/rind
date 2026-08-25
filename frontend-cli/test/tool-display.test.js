@@ -6,6 +6,7 @@ import {
   renderToolFinished,
   parseToolArguments,
   parseToolResult,
+  argsFromResult,
 } from "../lib/tool-display.js";
 import { stripAnsi } from "../lib/text-width.js";
 
@@ -129,27 +130,68 @@ test("write_file falls back to meta diff counts without live file_change", () =>
   assert.match(stripAnsi(lines[0]), /^◉ write docs\/new\.md \(\+4 -0\)$/);
 });
 
-test("grep surfaces match count and lists hits when expanded", () => {
+test("grep collapsed hides listings behind a hint; expanded lists them", () => {
   const result = JSON.stringify({
     ok: true,
     data: [
       { file: "a.ts", line: 3, text: "TODO fix" },
       { file: "b.ts", line: 9, text: "TODO later" },
     ],
-    meta: { pattern: "TODO", count: 42, truncated: true },
+    meta: { pattern: "TODO", count: 42 },
   });
-  const collapsed = renderToolFinished({
-    name: "grep", args: { pattern: "TODO", path: "src" }, phase: "done", expanded: false,
+  const context = {
+    name: "grep", args: { pattern: "TODO", path: "src" }, phase: "done",
     event: { status: "completed", duration_ms: 80, result },
-  }, WIDTH);
-  assert.match(stripAnsi(collapsed[0]), /^◉ grep \/TODO\/ in src · 42 matches$/);
+  };
+  const collapsed = renderToolFinished({ ...context, expanded: false }, WIDTH);
+  const collapsedPlain = collapsed.map(stripAnsi);
+  assert.match(collapsedPlain[0], /^◉ grep \/TODO\/ in src · 42 matches$/);
+  assert.equal(collapsed.length, 2); // title only + hint
+  assert.match(collapsedPlain[1], /\(2 more lines · ctrl\+o to expand\)/);
 
-  const expanded = renderToolFinished({
-    name: "grep", args: { pattern: "TODO", path: "src" }, phase: "done", expanded: true,
-    event: { status: "completed", duration_ms: 80, result },
-  }, WIDTH);
+  const expanded = renderToolFinished({ ...context, expanded: true }, WIDTH);
   const plain = expanded.map(stripAnsi);
   assert.ok(plain.some((line) => line.includes("a.ts:3: TODO fix")));
+});
+
+test("bash_output surfaces bg id and waited time from the result payload", () => {
+  const lines = renderToolFinished({
+    name: "bash_output",
+    args: {},
+    phase: "done",
+    expanded: false,
+    event: {
+      status: "completed",
+      duration_ms: 489,
+      result: JSON.stringify({
+        ok: true,
+        data: { bg_id: "bg_f8e9337e", stdout: "background task done", stderr: "", wait_ms: 3200, elapsed_ms: 3200 },
+      }),
+    },
+  }, WIDTH);
+  const plain = lines.map(stripAnsi);
+  assert.match(plain[0], /^◉ bg bg_f8e9337e · waited 3\.20s · 489ms$/);
+  assert.match(plain[1], /background task done/);
+});
+
+test("argsFromResult recovers key arguments from result payloads", () => {
+  assert.deepEqual(
+    argsFromResult("read_file", JSON.stringify({ meta: { path: "docs/x.md" } })),
+    { path: "docs/x.md" },
+  );
+  assert.deepEqual(
+    argsFromResult("edit_file", JSON.stringify({ meta: { files: [{ path: "a.ts" }] } })),
+    { file_path: "a.ts" },
+  );
+  assert.deepEqual(
+    argsFromResult("search_web", JSON.stringify({ meta: { query: "rind agent", matches: 3 } })),
+    { query: "rind agent" },
+  );
+  assert.deepEqual(
+    argsFromResult("fetch_web_page", JSON.stringify({ meta: { url: "https://x.dev" } })),
+    { url: "https://x.dev" },
+  );
+  assert.deepEqual(argsFromResult("bash", "{}"), {});
 });
 
 test("read_file collapsed hides content; expanded shows numbered lines", () => {

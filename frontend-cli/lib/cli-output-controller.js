@@ -13,6 +13,7 @@ import { TextBlock } from "./components/text-block.js";
 import { DynamicBlock } from "./components/dynamic-block.js";
 import { AssistantMessage } from "./components/assistant-message.js";
 import { ToolBlock } from "./components/tool-block.js";
+import { argsFromResult } from "./tool-display.js";
 
 export function createCliOutputController({ state, terminalUi, transcript }) {
   const streamBuffer = createLegacyStreamBuffer();
@@ -265,6 +266,7 @@ export function createCliOutputController({ state, terminalUi, transcript }) {
       toolBlocks.set(callId, block);
       appendBlock(block);
     }
+    block.enrichArgs({ arguments: argsFromResult(event?.tool_name, event?.result) });
     block.finish(event, fileChange);
   }
 

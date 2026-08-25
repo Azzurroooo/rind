@@ -330,6 +330,29 @@ test("event controller with implementation-style picked output bag still renders
   harness.tui.stop();
 });
 
+test("finish-only blocks recover arguments from result payloads", async () => {
+  const harness = createHarness({ columns: 60, rows: 20 });
+  harness.tui.start();
+
+  // Session-replay path: no tool_requested ever arrived.
+  harness.output.finishTool({
+    tool_call_id: "replay-1",
+    tool_name: "read_file",
+    status: "completed",
+    duration_ms: 6,
+    result: JSON.stringify({
+      ok: true,
+      data: "Showing lines 1 to 1:\n  1 | hello\n",
+      meta: { path: "docs/guide.md" },
+    }),
+  });
+  await settle(harness.virtual);
+  const joined = harness.virtual.getViewport().join("\n");
+  assert.ok(joined.includes("read docs/guide.md"), "path recovered from result meta");
+  assert.ok(!joined.includes("read …"), "no placeholder remains");
+  harness.tui.stop();
+});
+
 test("hardware caret stays hidden while a turn runs and returns when idle", async () => {
   const virtual = createVirtualOutput({ columns: 50, rows: 12 });
   const writes = [];
