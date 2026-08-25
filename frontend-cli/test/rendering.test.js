@@ -60,7 +60,7 @@ test("startupText includes resume preview when provided", () => {
       "│ E:\\project                                                                   │",
       `└${"─".repeat(78)}┘`,
       "",
-      "• Recent context",
+      "◆ Recent context",
       "  Resumed session s1",
       "▷ You · hello",
       "◁ Assistant · hi",
@@ -127,8 +127,8 @@ test("prompt and turn status copy match the compact terminal UI", () => {
   assert.equal(answerPromptText(), "\n  ▷ ");
   assert.equal(answerPlaceholderText(), "Type your answer");
   assert.equal(inputHintText("Ask Rind to do anything"), "Ask Rind to do anything");
-  assert.equal(interruptText(), "• Interrupt requested\n  ↳ ctrl+c again to quit");
-  assert.equal(cancelledText(), "• Interrupted\n  ↳ session preserved; resume with -c");
+  assert.equal(interruptText(), "◆ Interrupt requested\n    ctrl+c again to quit");
+  assert.equal(cancelledText(), "◆ Interrupted\n    session preserved; resume with -c");
   assert.equal(userInputText("hello"), "▷ You\n  hello");
   assert.equal(userInputText("first\r\nsecond"), "▷ You\n  first\n  second");
   const originalColumns = process.stdout.columns;
@@ -263,7 +263,7 @@ test("helpText renders compact shortcuts and commands", () => {
   assert.equal(
     helpText(),
     [
-      "• Controls",
+      `  ── Controls ${"─".repeat(82)}`,
       "  enter        send / steer         tab            queue follow-up",
       "  ↑ / ↓        history              ← / →          move cursor",
       "  home / end   line edges           del / backspace edit text",
@@ -281,7 +281,7 @@ test("helpText renders compact shortcuts and commands", () => {
       { name: "model" },
     ]),
     [
-      "• Controls",
+      `  ── Controls ${"─".repeat(82)}`,
       "  enter        send / steer         tab            queue follow-up",
       "  ↑ / ↓        history              ← / →          move cursor",
       "  home / end   line edges           del / backspace edit text",
@@ -289,8 +289,11 @@ test("helpText renders compact shortcuts and commands", () => {
             "  ctrl+b       task monitor         esc            close monitor",
       "  ctrl+o       toggle tool detail",
       "",
-      "• Command deck",
-      "  /status         /help           /clear          /exit",
+      `  ── Commands · 5 available ${"─".repeat(68)}`,
+      "  /status",
+      "  /help",
+      "  /clear",
+      "  /exit",
       "  /model",
     ].join("\n"),
   );
@@ -380,31 +383,31 @@ test("modelListErrorText renders current model and fallback command", () => {
   assert.equal(
     modelListErrorText("request failed", "model-a"),
     [
-      "• Model list unavailable",
-      "  ↳ current: model-a",
-      "  ↳ request failed",
-      "  ↳ use /model set <name> to switch manually",
+      "◆ Model list unavailable",
+      "    current: model-a",
+      "    request failed",
+      "    use /model set <name> to switch manually",
     ].join("\n"),
   );
 });
 
 test("unknownCommandText points to shortcuts help", () => {
-  assert.equal(unknownCommandText(), "• Unknown command\n  ↳ type / to browse commands or ? for shortcuts");
+  assert.equal(unknownCommandText(), "◆ Unknown command\n    type / to browse commands or ? for shortcuts");
 });
 
 test("modelUsageText renders concrete model command usage", () => {
-  assert.equal(modelUsageText(), "• Model command\n  ↳ /model set <name>");
+  assert.equal(modelUsageText(), "◆ Model command\n    /model set <name>");
 });
 
 test("commandResultText renders a compact success line", () => {
   assert.equal(commandResultText("Model updated: glm-5.1"), "✓ Model updated: glm-5.1");
   assert.equal(
     commandResultText("Compact complete", "id abc123"),
-    "✓ Compact complete\n  ↳ id abc123",
+    "✓ Compact complete — id abc123",
   );
   assert.match(
     commandResultText("x".repeat(120), "y".repeat(120)),
-    /^✓ x{93}\.\.\.\n  ↳ y{93}\.\.\.$/,
+    /^✓ x{93}\.\.\. — y{93}\.\.\.$/,
   );
 });
 
@@ -418,10 +421,11 @@ test("slashDisplayText renders command help payloads", () => {
       ],
     }),
     [
-      "• Commands",
-      "  /status          Show session status",
-      "  /doctor          Run diagnostics",
-      "  ↳ use /help <command> for usage",
+      `  ── Commands · 2 available ${"─".repeat(68)}`,
+      "  /status         Show session status",
+      "  /doctor         Run diagnostics",
+      "",
+      "  use /help <command> for usage",
     ].join("\n"),
   );
   assert.equal(
@@ -435,10 +439,11 @@ test("slashDisplayText renders command help payloads", () => {
       },
     }),
     [
-      "• /model",
-      "  ↳ Show or change the active model",
-      "  ↳ usage: /model | /model set <model>",
-      "  ↳ aliases: /m",
+      `  ── /model ${"─".repeat(84)}`,
+      "  Show or change the active model",
+      "",
+      "  usage     /model | /model set <model>",
+      "  aliases   /m",
     ].join("\n"),
   );
 });
@@ -463,16 +468,17 @@ test("slashDisplayText renders status payloads", () => {
       }],
     }),
     [
-      "• Status",
-      "  ↳ session session_1",
-      "  ↳ model model_a",
-      "  ↳ messages 2 · debug on",
-      "  ↳ git main · dirty",
+      `  ── Status ${"─".repeat(84)}`,
+      "  session     session_1",
+      "  model       model_a",
+      "  messages    2 · debug on",
+      "  git         main · dirty",
       "",
-      "• Last sampling:",
-      "  ↳ input 121.3k / 258.4k · 46.9%",
-      "  ↳ cached 98.7k · 81.4%",
-      "  ↳ output 2.1k",
+      `  ── Last sampling ${"─".repeat(77)}`,
+      "  context     ▮▮▮▮▮▯▯▯▯▯ 46.9%",
+      "  input       121.3k / 258.4k tokens",
+      "  cached      98.7k · 81.4% hit",
+      "  output      2.1k",
     ].join("\n"),
   );
 });
@@ -491,13 +497,13 @@ test("slashDisplayText renders doctor payloads with textual state", () => {
       next_steps: ["Set apiKey in settings.json."],
     }),
     [
-      "• Doctor · 1 fail · 1 warn",
-      "  ✓ ok    Python · 3.12.0",
-      "  ! warn  Git · not found on PATH",
-      "  ⊘ fail  API key · unset",
+      `  ── Doctor · 1 fail · 1 warn ${"─".repeat(66)}`,
+      "  ✓ Python      3.12.0",
+      "  ! Git         not found on PATH",
+      "  ⊘ API key     unset",
       "",
-      "• Next steps",
-      "  ↳ Set apiKey in settings.json.",
+      `  ── Next steps ${"─".repeat(80)}`,
+      "  Set apiKey in settings.json.",
     ].join("\n"),
   );
 });
@@ -518,11 +524,12 @@ test("slashDisplayText renders sessions, skills, and config payloads", () => {
       resume_command: "/sessions",
     }),
     [
-      "• Recent sessions",
-      "  › session_2 current · 2026-06-02T01:02:03+00:00",
-      "  ↳ Current task · 4 msg, 1 tool",
-      "  ↳ latest answer",
-      "  ↳ resume: /sessions",
+      `  ── Sessions · 1 recent ${"─".repeat(71)}`,
+      "  › session_2 · current · 2026-06-02T01:02:03+00:00",
+      "      Current task · 4 msg, 1 tool",
+      "      latest answer",
+      "",
+      "  resume: /sessions",
     ].join("\n"),
   );
   assert.equal(
@@ -536,9 +543,9 @@ test("slashDisplayText renders sessions, skills, and config payloads", () => {
       }],
     }),
     [
-      "• Skills",
-      "  · demo [project] Demo skill",
-      "  ↳ E:\\project\\.rind\\skills\\demo\\SKILL.md",
+      `  ── Skills · 1 available ${"─".repeat(70)}`,
+      "  demo          [project]  Demo skill",
+      "      E:\\project\\.rind\\skills\\demo\\SKILL.md",
     ].join("\n"),
   );
   assert.equal(
@@ -550,9 +557,9 @@ test("slashDisplayText renders sessions, skills, and config payloads", () => {
       ],
     }),
     [
-      "• Config",
-      "  ↳ settings: E:\\project\\settings.json (found)",
-      "  ↳ apiKey: set",
+      `  ── Config · 2 keys ${"─".repeat(75)}`,
+      "  settings          E:\\project\\settings.json  (found)",
+      "  apiKey            set",
     ].join("\n"),
   );
 });
@@ -568,7 +575,7 @@ test("slashDisplayText clips long slash command fields", () => {
     }],
   });
 
-  assert.match(text, /x{73}\.\.\./);
+  assert.match(text, /x{68}\.\.\./);
   assert.match(text, /E:\\deep\\deep\\deep.*\.\.\..*SKILL\.md$/);
 });
 
@@ -578,7 +585,7 @@ test("slashResultText prefers structured display and falls back to raw text", ()
       text: "Raw markdown",
       display: { type: "config", entries: [{ label: "apiKey", value: "unset" }] },
     }),
-    "• Config\n  ↳ apiKey: unset",
+    `  ── Config · 1 key ${"─".repeat(76)}\n  apiKey            unset`,
   );
   assert.equal(slashResultText({ text: "Raw text", display: { type: "unknown" } }), "Raw text");
   assert.equal(slashResultText(null), "");
@@ -593,7 +600,7 @@ test("contextBuiltLine warns only when Rind docs are truncated", () => {
         rind_docs_truncated_scopes: ["user", "project"],
       },
     }),
-    "• Context trimmed\n  ↳ RIND.md: user, project",
+    "◆ Context trimmed\n    RIND.md: user, project",
   );
   assert.match(
     contextBuiltLine({
@@ -602,7 +609,7 @@ test("contextBuiltLine warns only when Rind docs are truncated", () => {
         rind_docs_truncated_scopes: ["x".repeat(120)],
       },
     }),
-    /\n  ↳ RIND\.md: x{93}\.\.\.$/,
+    /\n    RIND\.md: x{93}\.\.\.$/,
   );
 });
 
@@ -993,11 +1000,11 @@ test("turnCompletedLine renders duration and tool summary", () => {
 test("status helpers render question and errors", () => {
   assert.equal(
     questionText({ question: "Pick one", options: ["A", "B"] }),
-    ["• Choice required", "", "  Pick one"].join("\n"),
+    ["◆ Choice required", "", "  Pick one"].join("\n"),
   );
   assert.equal(
     questionText({ question: "Explain" }),
-    ["• Choice required", "", "  Explain"].join("\n"),
+    ["◆ Choice required", "", "  Explain"].join("\n"),
   );
   assert.match(questionText({ question: "q".repeat(120) }), /\n  q{73}\.\.\.$/);
   assert.equal(errorLine("failed"), "⊘ Turn failed\n  ↳ failed");
@@ -1123,7 +1130,7 @@ test("AssistantRenderer renders headings and lists without raw markdown prefixes
   renderer.append("## 🔟 标题\n- **重点** 9️⃣ 项\n");
   renderer.finish();
 
-  assert.equal(output, "  🔟 标题\n  • 重点 9️⃣ 项\n");
+  assert.equal(output, "  🔟 标题\n  – 重点 9️⃣ 项\n");
 });
 
 test("AssistantRenderer renders code fences as compact labels", () => {
@@ -1187,6 +1194,6 @@ test("AssistantRenderer keeps markdown structure markers dim", () => {
   renderer.finish();
 
   assert.match(output, /\x1b\[2m│ \x1b\[0mquote/);
-  assert.match(output, /\x1b\[2m• \x1b\[0mitem/);
+  assert.match(output, /\x1b\[2m– \x1b\[0mitem/);
   assert.doesNotMatch(output, /\x1b\[(1;33|32)m/);
 });

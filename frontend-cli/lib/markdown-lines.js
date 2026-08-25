@@ -14,7 +14,7 @@ export function renderMarkdownishLine(line, color) {
 
   const list = line.match(/^(\s*)([-*+]|\d+\.)\s+(.*)$/);
   if (list) {
-    const marker = /^\d+\.$/.test(list[2]) ? list[2] : "•";
+    const marker = /^\d+\.$/.test(list[2]) ? list[2] : "–";
     return `${list[1]}${dim(`${marker} `, color)}${renderInline(list[3], color)}`;
   }
 

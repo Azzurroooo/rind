@@ -477,7 +477,7 @@ test("list items become bullets once their line completes", async () => {
   harness.output.closeAssistant();
   await settle(harness.virtual);
   const joined = harness.virtual.getViewport().join("\n");
-  assert.ok(joined.includes("• read files"), "list marker rendered");
-  assert.ok(joined.includes("• run commands"), "second list marker rendered");
+  assert.ok(joined.includes("– read files"), "list marker rendered");
+  assert.ok(joined.includes("– run commands"), "second list marker rendered");
   harness.tui.stop();
 });
