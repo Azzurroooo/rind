@@ -1134,7 +1134,7 @@ function promptHeaderLine(info) {
     taskHints.push(`[delegate:${delegateCount}]`);
   }
   const taskHint = taskHints.length
-    ? " · " + dim(`${taskHints.join(" ")} (ctrl+b monitor)`)
+    ? dim(` · ${taskHints.join(" ")} (ctrl+b monitor)`)
     : "";
   const model = singleLine(info.model);
   const cwd = middleClip(info.cwd, 56);

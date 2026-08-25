@@ -149,6 +149,61 @@ test("task monitor switches pages with horizontal keys", async () => {
   controller.stop();
 });
 
+test("task monitor keeps Delegates selected when Background appears during refresh", async () => {
+  const state = {
+    runtimeClosing: false,
+    sessionInfo: {},
+    inputActive: false,
+  };
+  let listed = [];
+  const controller = createTaskMonitorController({
+    request: async () => ({ tasks: listed }),
+    terminalUi: true,
+    state,
+  });
+  controller.recordDelegateRequest({
+    tool_name: "delegate",
+    tool_call_id: "delegate-live",
+    args_preview: '{"agent_id":"researcher","task":"inspect"}',
+  });
+
+  controller.enterMonitor();
+  await new Promise((resolve) => setImmediate(resolve));
+  listed = [{ bg_id: "bg-1", status: "running", command: "server" }];
+  await controller.refresh();
+
+  assert.match(controller.frame(80).lines[0], /› Delegates/);
+  controller.stop();
+});
+
+test("task monitor keeps Background selected when Delegates changes during refresh", async () => {
+  const state = {
+    runtimeClosing: false,
+    sessionInfo: {},
+    inputActive: false,
+  };
+  let listed = [{ bg_id: "bg-1", status: "running", command: "server" }];
+  const controller = createTaskMonitorController({
+    request: async () => ({ tasks: listed }),
+    terminalUi: true,
+    state,
+  });
+  controller.recordDelegateRequest({
+    tool_name: "delegate",
+    tool_call_id: "delegate-live",
+    args_preview: '{"agent_id":"researcher","task":"inspect"}',
+  });
+
+  controller.enterMonitor();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.match(controller.frame(80).lines[0], /› Background/);
+  controller.clearDelegates();
+  await controller.refresh();
+
+  assert.match(controller.frame(80).lines[0], /› Background/);
+  controller.stop();
+});
+
 test("task monitor ignores responses from a cleared session", async () => {
   const state = {
     runtimeClosing: false,

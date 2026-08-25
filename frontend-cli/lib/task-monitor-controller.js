@@ -53,10 +53,6 @@ export function createTaskMonitorController({
         updateCount();
         if (monitor) {
           monitor.selectedIndex = clampIndex(monitor.selectedIndex);
-          if (!pageItems(monitor.page).length && pageItems(otherPage(monitor.page)).length) {
-            monitor.page = otherPage(monitor.page);
-            monitor.selectedIndex = 0;
-          }
           redraw();
         }
       })
@@ -392,10 +388,6 @@ export function createTaskMonitorController({
 
   function initialPage() {
     return tasks.size ? "background" : "delegates";
-  }
-
-  function otherPage(page) {
-    return page === "delegates" ? "background" : "delegates";
   }
 
   function clampIndex(index, page = monitor?.page || "background") {
