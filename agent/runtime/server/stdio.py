@@ -1396,15 +1396,11 @@ class WorkerStdioRuntimeServer:
         session_id = await self._required_session_id(request)
         if session_id is None:
             return
-        active = self._worker.execution.active_container(session_id)
-        if active is not None:
-            method = request.get("method")
-            if method == RuntimeMethod.RIND_BACKGROUND_LIST:
-                await self._list_backgrounds_for_session(request, session_id)
-            else:
-                await self._background_output_for_session(request, session_id)
+        method = request.get("method")
+        if method == RuntimeMethod.RIND_BACKGROUND_LIST:
+            await self._list_backgrounds_for_session(request, session_id)
             return
-        await self._respond_error(request, "Session execution is not active.", "TurnNotActive")
+        await self._background_output_for_session(request, session_id)
 
     async def _list_backgrounds_for_session(self, request: dict[str, Any], session_id: str) -> None:
         if self._background_list is None:

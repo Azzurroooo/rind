@@ -255,6 +255,51 @@ def test_worker_model_list_reuses_injected_client():
     assert worker.model_client.close_count == 0
 
 
+def test_background_monitoring_survives_turn_execution_release():
+    async def run():
+        worker, server, messages = _server_with_messages()
+        server._background_list = lambda session_id: [
+            {"bg_id": "bg-1", "session_id": session_id, "status": "running"}
+        ]
+        server._background_output = lambda bg_id, *, max_output_chars, _session_id: {
+            "bg_id": bg_id,
+            "session_id": _session_id,
+            "status": "running",
+            "stdout": "tick",
+            "max_output_chars": max_output_chars,
+        }
+        worker.sessions["A"].runtime.active_turn_id = ""
+
+        await server._dispatch({
+            "request_id": "background-list",
+            "method": RuntimeMethod.RIND_BACKGROUND_LIST,
+            "params": {"session_id": "A"},
+        })
+        await server._dispatch({
+            "request_id": "background-output",
+            "method": RuntimeMethod.RIND_BACKGROUND_OUTPUT,
+            "params": {"session_id": "A", "bg_id": "bg-1", "max_output_chars": 100},
+        })
+        return messages
+
+    messages = asyncio.run(run())
+    responses = {
+        message["request_id"]: message
+        for message in messages
+        if message.get("kind") == "response"
+    }
+    assert responses["background-list"]["result"] == {
+        "tasks": [{"bg_id": "bg-1", "session_id": "A", "status": "running"}]
+    }
+    assert responses["background-output"]["result"]["task"] == {
+        "bg_id": "bg-1",
+        "session_id": "A",
+        "status": "running",
+        "stdout": "tick",
+        "max_output_chars": 100,
+    }
+
+
 def test_compact_does_not_release_an_active_turn():
     async def run():
         worker, server, messages = _server_with_messages()
