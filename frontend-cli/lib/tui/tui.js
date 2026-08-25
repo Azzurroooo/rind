@@ -45,6 +45,7 @@ export function createTui(options = {}) {
 
   let clearOnShrink = false;
   let cursorVisible = false;
+  let replayRequested = false;
   const inputBuffer = createInputBuffer({
     onSequence: (sequence) => inputHandler?.(sequence),
     onPaste: (payload) => pasteHandler?.(payload),
@@ -177,6 +178,13 @@ export function createTui(options = {}) {
     requestRender();
   }
 
+  // Repaint the entire transcript (viewport + scrollback) with current
+  // component state — used after appearance changes like theme switches.
+  function replayAll() {
+    replayRequested = true;
+    requestRender(true);
+  }
+
   // "force" only bypasses the render throttle so the next frame paints on
   // the following tick. It never resets diff bookkeeping: clearing the
   // screen is decided by doRender's geometry checks alone, so a burst of
@@ -238,6 +246,22 @@ export function createTui(options = {}) {
   function doRender() {
     if (!started || stopped) {
       return;
+    }
+    if (replayRequested) {
+      // Full repaint (e.g. theme switch): drop caches so components restyle,
+      // then reuse the resize machinery — clear screen + scrollback and
+      // replay every line under the active palette.
+      replayRequested = false;
+      for (const child of children) {
+        child.invalidate?.();
+      }
+      previousLines = [];
+      previousWidth = -1;
+      previousHeight = -1;
+      cursorRow = 0;
+      hardwareCursorRow = 0;
+      maxLinesRendered = 0;
+      previousViewportTop = 0;
     }
     const width = columns();
     const height = rows();
@@ -540,6 +564,7 @@ export function createTui(options = {}) {
     start,
     stop,
     requestRender,
+    replayAll,
     addChild,
     removeChild,
     clearChildren,

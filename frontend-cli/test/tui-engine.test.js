@@ -4,6 +4,9 @@ import test from "node:test";
 import { createVirtualOutput, createVirtualInput } from "./helpers/virtual-terminal.js";
 import { createTui, CURSOR_MARKER } from "../lib/tui/tui.js";
 import { Container } from "../lib/tui/component.js";
+import { DynamicBlock } from "../lib/components/dynamic-block.js";
+import { paintRaw } from "../lib/theme.js";
+import { resetTheme, setTheme } from "../lib/theme.js";
 import { textWidth } from "../lib/text-width.js";
 
 function createHarness({ columns = 20, rows = 6 } = {}) {
@@ -250,6 +253,61 @@ test("startup appends below existing terminal content without clearing", async (
   tui.requestRender(true);
   await settle(virtual);
   assert.ok(!writes.some((w) => w.includes("\x1b[2J")), "force never clears on its own");
+  tui.stop();
+});
+
+test("replayAll repaints viewport and scrollback with the active theme", async () => {
+  resetTheme();
+  const virtual = createVirtualOutput({ columns: 30, rows: 6 });
+  const writes = [];
+  const recordingOutput = Object.assign(Object.create(virtual.output), {
+    write(chunk) {
+      writes.push(String(chunk));
+      return virtual.output.write(chunk);
+    },
+  });
+  const block = new DynamicBlock(() => [paintRaw.accent("colored")]);
+  const input = createVirtualInput();
+  const tui = createTui({
+    input,
+    output: recordingOutput,
+    renderIntervalMs: 0,
+    setTimeout: (fn) => setTimeout(fn, 0),
+    clearTimeout,
+  });
+  tui.addChild(block);
+  tui.start();
+  await settle(virtual);
+
+  assert.ok(
+    writes.some((w) => w.includes("\x1b[38;2;137;180;250m")),
+    "mocha accent painted",
+  );
+
+  // Ordinary repaints never clear; only replayAll may.
+  writes.length = 0;
+  tui.requestRender(true);
+  await settle(virtual);
+  assert.ok(!writes.some((w) => w.includes("\x1b[2J")));
+
+  const replayStart = writes.length;
+  setTheme("macchiato");
+  tui.replayAll();
+  await settle(virtual);
+
+  assert.ok(
+    writes.slice(replayStart).some((w) => w.includes("\x1b[2J")),
+    "replay clears the screen",
+  );
+  assert.ok(
+    writes.slice(replayStart).some((w) => w.includes("\x1b[38;2;138;173;244m")),
+    "repainted in new theme",
+  );
+  assert.ok(
+    !writes.slice(replayStart).some((w) => w.includes("\x1b[38;2;137;180;250m")),
+    "old palette gone",
+  );
+  resetTheme();
   tui.stop();
 });
 

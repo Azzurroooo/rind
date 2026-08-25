@@ -60,18 +60,18 @@ export class AssistantMessage {
       return;
     }
     if (this.inCodeBlock) {
-      this.finalize(styled(line, this.color, "codeBlock"));
+      this.pushItem({ kind: "code", raw: line });
       return;
     }
     if (isPlainLine(line)) {
       if (line) {
-        this.finalize(line);
+        this.pushItem({ kind: "plain", raw: line });
       } else {
         this.finalized.push("");
       }
       return;
     }
-    this.finalize(renderMarkdownishLine(line, this.color));
+    this.pushItem({ kind: "markdown", raw: line });
   }
 
   finalizeTable(line) {
@@ -79,21 +79,40 @@ export class AssistantMessage {
     if (!cells.length || cells.every((cell) => /^:?-{3,}:?$/.test(cell.trim()))) {
       return;
     }
-    const rendered = cells.map((cell, index) =>
-      renderInline(cell, this.color, index === 0 ? "tableHeader" : "")
-    );
-    this.finalize(rendered.join(dim(" | ", this.color)));
+    this.pushItem({ kind: "table", raw: line });
   }
 
   finalizeCodeFence(line) {
     const opening = !this.inCodeBlock;
     this.inCodeBlock = opening;
     const label = opening ? line.trim().slice(3).trim().slice(0, 32) : "";
-    this.finalize(dim(opening ? codeOpenLabel(label) : "└ end", this.color));
+    this.pushItem({ kind: "fence", label });
   }
 
-  finalize(logicalLine) {
-    this.finalized.push(String(logicalLine ?? ""));
+  // Items keep the raw source; styling happens per render so theme switches
+  // recolor history without rebuilding blocks.
+  pushItem(item) {
+    this.finalized.push(item);
+  }
+
+  styleItem(item) {
+    switch (item.kind) {
+      case "table": {
+        const cells = parseTableRow(item.raw);
+        const rendered = cells.map((cell, index) =>
+          renderInline(cell, this.color, index === 0 ? "tableHeader" : "")
+        );
+        return rendered.join(dim(" | ", this.color));
+      }
+      case "fence":
+        return dim(item.label ? codeOpenLabel(item.label) : "└ end", this.color);
+      case "code":
+        return styled(item.raw, this.color, "codeBlock");
+      case "plain":
+        return item.raw;
+      default:
+        return renderMarkdownishLine(item.raw, this.color);
+    }
   }
 
   render(width) {
@@ -105,7 +124,8 @@ export class AssistantMessage {
       this.cacheWidth = width;
     }
     while (this.cacheItems.length < this.finalized.length) {
-      const logical = this.finalized[this.cacheItems.length];
+      const item = this.finalized[this.cacheItems.length];
+      const logical = typeof item === "string" ? item : this.styleItem(item);
       this.cacheItems.push(this.wrapLogical(logical, width));
     }
     const lines = [];

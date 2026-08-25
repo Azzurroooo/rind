@@ -32,7 +32,7 @@ lib/components/
 4. 其余情况增量更新：纯追加走快速路径；缩短时清除尾部多余行。
 5. 视口簿记（`previousViewportTop`、`hardwareCursorRow`、`maxLinesRendered`）保证内容超屏滚动后增量更新仍然落点正确。
 
-调度契约：`requestRender(force)` 中 force 仅表示"跳过 16ms 节流、下一拍立即绘制"，绝不重置 diff 簿记；清屏与否只由 doRender 的几何检查决定。
+调度契约：`requestRender(force)` 中 force 仅表示"跳过 16ms 节流、下一拍立即绘制"，绝不重置 diff 簿记；清屏与否只由 doRender 的几何检查决定。`replayAll()` 是唯一的例外入口：使全部组件缓存失效后复用 resize 路径（清屏+scrollback 全量重放），用于主题切换等外观级变更 —— 因此所有块在渲染期取色（AssistantMessage 存原始 markdown、log() 接受 thunk、ToolBlock 每帧重渲）。
 
 ## 内容模型
 

@@ -88,18 +88,36 @@ export function createCliOutputController({ state, terminalUi, transcript }) {
     redraw();
   }
 
+  function lazyLines(buildText, leading) {
+    return new DynamicBlock(() => {
+      const value = String(buildText() ?? "");
+      const body = outputBlockText(value);
+      if (!body.trim()) {
+        return [];
+      }
+      const lines = body.split("\n");
+      while (lines.length > 1 && lines.at(-1) === "") {
+        lines.pop();
+      }
+      return leading ? ["", ...lines] : lines;
+    });
+  }
+
+  // Accepts a string or a thunk so themed content restyles on full repaints.
   function log(text) {
-    const value = String(text ?? "");
-    if (!value.trim()) {
-      return;
-    }
+    const build = typeof text === "function" ? text : () => String(text ?? "");
     if (!terminalUi) {
       flushAssistantText(streamBuffer.flush());
+      const value = String(build() ?? "");
+      if (!value.trim()) {
+        return;
+      }
       process.stdout.write(outputBlockText(value, state.display.outputStarted));
       state.display.outputStarted = true;
       return;
     }
-    appendBlock(new TextBlock(outputBlockText(value), { leading: blockCount > 0 }));
+    const leading = blockCount > 0;
+    appendBlock(lazyLines(build, leading));
   }
 
   function writeOutput(text) {
@@ -158,7 +176,8 @@ export function createCliOutputController({ state, terminalUi, transcript }) {
 
   function ensureAssistantBlocks() {
     if (!assistantMessage) {
-      transcript.addChild(new TextBlock(outputBlockText(assistantHeaderText()), { leading: blockCount > 0 }));
+      const leading = blockCount > 0;
+      transcript.addChild(lazyLines(() => assistantHeaderText(), leading));
       blockCount += 1;
       assistantMessage = new AssistantMessage({ color: true });
       transcript.addChild(assistantMessage);
@@ -355,6 +374,7 @@ export function createCliOutputController({ state, terminalUi, transcript }) {
     setToolsExpanded,
     renderHistory,
     showStartup,
+    replayAll: () => terminalUi?.replayAll?.(),
   };
 }
 

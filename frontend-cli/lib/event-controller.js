@@ -41,7 +41,7 @@ export function createEventController({
         const line = contextBuiltLine(event);
         if (line) {
           output.closeAssistant?.();
-          output.log?.(line);
+          output.log?.(() => line);
         }
         return;
       }
@@ -116,14 +116,14 @@ export function createEventController({
         output.clearQueuedInputs?.();
         output.clearCompactContext?.();
         output.closeAssistant?.();
-        output.log?.(errorLine(event.error));
+        output.log?.(() => errorLine(event.error));
         resetTurnState();
         return;
       case "turn_cancelled":
         output.clearQueuedInputs?.();
         output.clearCompactContext?.();
         output.closeAssistant?.();
-        output.log?.(cancelledText());
+        output.log?.(() => cancelledText());
         resetTurnState();
         return;
       case "turn_completed":

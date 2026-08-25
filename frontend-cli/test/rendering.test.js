@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { AssistantRenderer } from "../lib/assistant-renderer.js";
+import { AssistantMessage } from "../lib/components/assistant-message.js";
+import { resetTheme, setTheme } from "../lib/theme.js";
 import {
   answerPromptText,
   answerPlaceholderText,
@@ -1120,6 +1122,22 @@ test("goal rendering keeps status and objective visible", () => {
   assert.match(goalText({ objective: "ship it", status: "complete" }), /Goal · complete/);
   assert.match(goalCommandText({ objective: "ship it", status: "paused" }, "pause"), /Goal paused/);
   assert.match(goalCommandText(null, "clear"), /No active goal/);
+});
+
+test("AssistantMessage restyles history when the theme changes", () => {
+  resetTheme();
+  const message = new AssistantMessage({ color: true });
+  message.append("## 标题\n- **重点**\n");
+  message.finish();
+  const before = message.render(80).join("\n");
+  assert.ok(before.includes("\x1b[38;2;137;180;250m"), "mocha heading color");
+
+  setTheme("latte");
+  message.invalidate();
+  const after = message.render(80).join("\n");
+  assert.ok(after.includes("\x1b[38;2;30;102;245m"), "latte heading color after repaint");
+  assert.ok(!after.includes("137;180;250"), "old palette gone");
+  resetTheme();
 });
 
 test("AssistantRenderer removes markdown markers at message boundary", () => {

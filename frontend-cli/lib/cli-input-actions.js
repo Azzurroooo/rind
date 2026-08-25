@@ -100,7 +100,7 @@ export function createCliInputActions({
   async function answerQuestion(event) {
     pausePrompt();
     output.closeAssistant();
-    output.log(questionText(event));
+    output.log(() => questionText(event));
     try {
       const options = Array.isArray(event.options) ? event.options : [];
       const answer = output.terminalUi

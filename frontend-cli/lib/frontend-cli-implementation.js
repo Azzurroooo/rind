@@ -212,7 +212,7 @@ turnController = createTurnController({
     refreshInputState,
     closeAssistant,
     cancelInput,
-    logInterrupt: () => logOutput(interruptText()),
+    logInterrupt: () => logOutput(() => interruptText()),
   },
 });
 commandController = createCommandController({
@@ -234,7 +234,7 @@ commandController = createCommandController({
       if (!Object.keys(sessionState.settings).length) {
         sessionState.settings = await loadLocalSettings(undefined, sessionState.info.workspace_root || sessionState.info.cwd || process.cwd());
       }
-      return executeLocalSlashCommand(text, {
+      const result = await executeLocalSlashCommand(text, {
         settings: sessionState.settings,
         sessionInfo: sessionState.info,
         cwd: sessionState.info.workspace_root || sessionState.info.cwd || process.cwd(),
@@ -244,6 +244,10 @@ commandController = createCommandController({
         commands: sessionState.commands,
         persistTheme: (name) => saveCliState({ theme: name }),
       });
+      if (result?.display?.type === "theme" && result.display.changed) {
+        outputController.replayAll();
+      }
+      return result;
     },
   },
   state: {

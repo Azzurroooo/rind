@@ -67,10 +67,8 @@ export function createCommandController({
   }
 
   async function applyResult(result = {}) {
-    const text = slashResultText(result, state.slashCommands || []);
-    if (text) {
-      output.log?.(text);
-    }
+    const text = () => slashResultText(result, state.slashCommands || []);
+    output.log?.(text);
     if (result.display?.type === "team_blueprints" && input.askTeamBlueprint) {
       const blueprints = Array.isArray(result.display.blueprints) ? result.display.blueprints : [];
       const selected = await input.askTeamBlueprint(blueprints);

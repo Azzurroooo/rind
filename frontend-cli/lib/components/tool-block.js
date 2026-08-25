@@ -90,7 +90,8 @@ export class ToolBlock {
   }
 
   invalidate() {
-    this.clearTimer();
+    // No cached render state (blocks restyle every frame); keep the
+    // elapsed-time ticker alive across full repaints.
   }
 
   render(width) {
