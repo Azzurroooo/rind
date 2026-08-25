@@ -1,4 +1,5 @@
 import { clipCells, middleClipCells, textWidth, wrapTextCells } from "./text-width.js";
+import { paint, flavorSwatch } from "./theme.js";
 
 const MAX_STARTUP_BANNER_WIDTH = 80;
 const MAX_COMPOSER_WIDTH = 78;
@@ -86,6 +87,8 @@ export function slashDisplayText(display, commands = []) {
       return slashSkillsText(display);
     case "config":
       return slashConfigText(display);
+    case "theme":
+      return slashThemeText(display);
     default:
       return "";
   }
@@ -714,6 +717,36 @@ function slashConfigText(display) {
   return lines.join("\n");
 }
 
+function slashThemeText(display) {
+  const flavors = Array.isArray(display.flavors) ? display.flavors : [];
+  const current = singleLine(display.current) || "mocha";
+  const meta = display.changed && display.previous
+    ? `${singleLine(display.previous)} → ${current}`
+    : current;
+  const lines = [sectionRule("Theme", meta)];
+  if (!flavors.length) {
+    lines.push(dim(`  active: ${current}`));
+    return lines.join("\n");
+  }
+  const labelWidth = Math.min(
+    16,
+    Math.max(8, ...flavors.map((flavor) => visibleLength(clipSingleLine(flavor?.label, 16)))),
+  );
+  for (const flavor of flavors) {
+    if (!flavor || typeof flavor !== "object") {
+      continue;
+    }
+    const isCurrent = Boolean(flavor.current);
+    const marker = isCurrent ? accent("›") : dim("·");
+    const label = padRight(clipSingleLine(flavor.label || flavor.name, 16), labelWidth);
+    const tag = isCurrent ? dim(" · current") : "";
+    lines.push(`  ${marker} ${isCurrent ? bold(label) : dim(label)}  ${flavorSwatch(flavor.name)}${tag}`);
+  }
+  lines.push("");
+  lines.push(dim("  /theme <latte | frappe | macchiato | mocha>"));
+  return lines.join("\n");
+}
+
 function sectionRule(title, meta = "") {
   const titleText = clipSingleLine(title, 48);
   const metaText = meta ? clipSingleLine(meta, 48) : "";
@@ -757,7 +790,7 @@ function doctorMarker(status) {
   if (status === "fail") {
     return red("⊘");
   }
-  return accent("!");
+  return paint.warning("!");
 }
 
 function menuWindow(items, selectedIndex) {
@@ -1190,37 +1223,30 @@ function composerWidth(frameWidth) {
   return Math.max(1, Math.min(MAX_COMPOSER_WIDTH, columns - 4));
 }
 
-function styled(text, code) {
-  if (!Boolean(process.stdout.isTTY) || process.env.NO_COLOR) {
-    return text;
-  }
-  return `\x1b[${code}m${text}\x1b[0m`;
-}
-
 function bold(text) {
-  return styled(text, "1");
+  return paint.bold(text);
 }
 
 function dim(text) {
-  return styled(text, "2");
+  return paint.dim(text);
 }
 
 function accent(text) {
-  return styled(text, "38;5;81");
+  return paint.accent(text);
 }
 
 function green(text) {
-  return styled(text, "38;5;113");
+  return paint.success(text);
 }
 
 function red(text) {
-  return styled(text, "38;5;203");
+  return paint.danger(text);
 }
 
 function promptModel(text) {
-  return styled(text, "1;38;5;81");
+  return paint.bold(paint.accent(text));
 }
 
 function promptPath(text) {
-  return styled(text, "38;5;110");
+  return paint.path(text);
 }

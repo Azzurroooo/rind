@@ -183,6 +183,7 @@ test("local command catalog stays complete before the runtime starts", async () 
     "skill",
     "status",
     "team",
+    "theme",
   ]);
   for (const name of ["compact", "init", "sessions", "skill", "team"]) {
     const result = await executeLocalSlashCommand(`/${name}`, {

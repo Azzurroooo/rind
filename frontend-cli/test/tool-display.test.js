@@ -108,7 +108,7 @@ test("edit_file title carries diff counts and body renders colored diff with foo
   assert.match(plain[0], /^◉ edit src\/app\.ts \(\+25 -25\)$/);
   assert.equal(plain.length, 22); // title + 20 diff + footer
   assert.match(plain.at(-1), /\(30 more lines · ctrl\+o to expand\)/);
-  assert.ok(lines[1].includes("\x1b[2m    - ") && lines[1].includes("\x1b[38;5;203m"));
+  assert.ok(lines[1].includes("\x1b[2m    - ") && lines[1].includes("\x1b[38;2;243;139;168m"));
 });
 
 test("write_file falls back to meta diff counts without live file_change", () => {

@@ -1,34 +1,24 @@
 import { clipCells } from "./text-width.js";
-
-const ACCENT_CODE = "38;5;81";
-const GREEN_CODE = "38;5;113";
-const RED_CODE = "38;5;203";
-
-function stylize(text, code) {
-  if (!text) {
-    return text;
-  }
-  return `\x1b[${code}m${text}\x1b[0m`;
-}
+import { paintRaw } from "./theme.js";
 
 function accent(text) {
-  return stylize(text, ACCENT_CODE);
+  return paintRaw.accent(text);
 }
 
 function green(text) {
-  return stylize(text, GREEN_CODE);
+  return paintRaw.success(text);
 }
 
 function red(text) {
-  return stylize(text, RED_CODE);
+  return paintRaw.danger(text);
 }
 
 function dim(text) {
-  return text ? `\x1b[2m${text}\x1b[0m` : text;
+  return paintRaw.dim(text);
 }
 
 function bold(text) {
-  return text ? `\x1b[1m${text}\x1b[0m` : text;
+  return paintRaw.bold(text);
 }
 
 const COLLAPSED_BODY_CAPS = {

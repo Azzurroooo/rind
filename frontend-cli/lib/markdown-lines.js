@@ -78,19 +78,24 @@ export function codeOpenLabel(label) {
   return label ? `┌ code ${label}` : "┌ code";
 }
 
+import { paintRaw } from "./theme.js";
+
 export function styled(text, color, style) {
   if (!text || !color || !style) {
     return text;
   }
-  const codes = {
-    codeBlock: "38;5;110",
-    emphasis: "1;38;5;221",
-    heading: "1;38;5;81",
-    inlineCode: "38;5;215",
-    tableHeader: "1;38;5;81",
+  const roles = {
+    codeBlock: "fence",
+    emphasis: "warning",
+    heading: "accent",
+    inlineCode: "code",
+    tableHeader: "accent",
   };
-  const code = codes[style] || codes.emphasis;
-  return `\x1b[${code}m${text}\x1b[0m`;
+  const role = roles[style] || "warning";
+  const painted = paintRaw[role](text);
+  return style === "heading" || style === "tableHeader" || style === "emphasis"
+    ? paintRaw.bold(painted)
+    : painted;
 }
 
 export function dim(text, color) {
