@@ -148,6 +148,24 @@ export function modelMenuText(items, selectedIndex = 0) {
   return `${lines.join("\n")}\n`;
 }
 
+export function themeMenuText(items, selectedIndex = 0) {
+  const visible = menuWindow(items, selectedIndex);
+  if (!visible.items.length) {
+    return "";
+  }
+  const lines = [dim("  Theme deck")];
+  for (const [index, item] of visible.items.entries()) {
+    const active = index === visible.activeIndex;
+    const marker = active ? accent("›") : dim("·");
+    const label = padRight(clipSingleLine(item?.label || item?.name, 16), 12);
+    const name = active ? bold(label) : dim(label);
+    const suffix = item?.current ? dim("current") : "";
+    lines.push(`  ${marker} ${name}  ${flavorSwatch(item?.name)}${suffix ? `  ${suffix}` : ""}`);
+  }
+  lines.push(dim("    ↑↓ select · enter use · esc cancel"));
+  return `${lines.join("\n")}\n`;
+}
+
 export function taskMonitorTabs(page = "background", backgroundCount = 0, delegateCount = 0, width = 76) {
   const background = Math.max(0, Math.floor(Number(backgroundCount) || 0));
   const delegates = Math.max(0, Math.floor(Number(delegateCount) || 0));

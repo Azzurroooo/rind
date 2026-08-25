@@ -34,6 +34,7 @@ import {
   slashResultText,
   startupText,
   taskMonitorTabs,
+  themeMenuText,
   toolProgressLine,
   toolRequestedLine,
   toolResultLine,
@@ -674,6 +675,18 @@ test("prompt shows delegate count after background count", () => {
   assert.match(text, /m1 · E:\\project · \[bg:2\] \[delegate:1\] \(ctrl\+b monitor\)/);
   const delegateOnly = promptText({ model: "m1", cwd: "E:\\project", delegate_count: 1 });
   assert.match(delegateOnly, /m1 · E:\\project · \[delegate:1\] \(ctrl\+b monitor\)/);
+});
+
+test("themeMenuText renders flavor swatches with current marker", () => {
+  const text = themeMenuText([
+    { name: "latte", label: "Latte", current: false },
+    { name: "mocha", label: "Mocha", current: true },
+  ], 1);
+  const plain = text.replace(/\x1b\[[0-9;]*m/g, "");
+  assert.match(plain, /Theme deck/);
+  assert.match(plain, /· Latte/);
+  assert.match(plain, /› Mocha\s+███ ███ ███\s+current/);
+  assert.match(plain, /enter use · esc cancel/);
 });
 
 test("task monitor tabs mark the active page and fit narrow widths", () => {

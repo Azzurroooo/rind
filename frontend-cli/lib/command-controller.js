@@ -25,6 +25,10 @@ export function createCommandController({
     if (!String(text || "").startsWith("/")) {
       return false;
     }
+    if (isBareThemeCommand(text) && input.isTerminal && input.runThemeSelector) {
+      await input.runThemeSelector();
+      return true;
+    }
     const localResult = await input.runLocalCommand?.(text);
     if (localResult) {
       await applyResult(localResult);
@@ -126,6 +130,10 @@ function singleWord(value) {
 
 function isBareModelCommand(value) {
   return String(value || "").trim().toLowerCase() === "/model";
+}
+
+function isBareThemeCommand(value) {
+  return String(value || "").trim().toLowerCase() === "/theme";
 }
 
 function isLocalCommand(value, name) {

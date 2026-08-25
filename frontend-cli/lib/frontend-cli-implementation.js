@@ -35,6 +35,7 @@ import {
   inputHintText,
   interruptText,
   modelMenuText,
+  themeMenuText,
   questionMenuFrame,
   sessionMenuText,
   promptPlaceholderText,
@@ -219,6 +220,12 @@ commandController = createCommandController({
     isTerminal: Boolean(tui),
     runGoalCommand: runtimeController.runGoalCommand,
     runModelSelector: runtimeController.runModelSelector,
+    runThemeSelector: async () => {
+      const selected = await inputActions.askThemeMenu();
+      if (selected) {
+        await commandController.handle(`/theme ${selected}`);
+      }
+    },
     startCompactCommand: runtimeController.startCompactCommand,
     runSessionsSelector: runtimeController.runSessionsSelector,
     runLocalCommand: async (text) => {
@@ -435,6 +442,15 @@ function composeFrame(width = process.stdout.columns || 80) {
       inputText: session.inputText,
       cursor: { line: 0, column: session.inputText.length },
       menuText: modelMenuText(session.modelState.items(), session.modelState.selectedIndex()).trimEnd(),
+    };
+  }
+  if (session.mode === "theme") {
+    return {
+      showCaret,
+      prompt: mainPromptText(width),
+      inputText: session.inputText,
+      cursor: { line: 0, column: session.inputText.length },
+      menuText: themeMenuText(session.themeState.items(), session.themeState.selectedIndex()).trimEnd(),
     };
   }
   if (session.mode === "question") {

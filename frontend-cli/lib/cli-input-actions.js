@@ -1,6 +1,7 @@
 import { createLineEditor } from "./line-editor.js";
 import { createChoiceMenuState } from "./choice-menu-state.js";
 import { createModelMenuState } from "./model-menu-state.js";
+import { createThemeMenuState } from "./theme-menu-state.js";
 import { createQuestionMenuState } from "./question-menu-state.js";
 import { createSlashMenuState } from "./slash-menu-state.js";
 import { runtimeMethods } from "./runtime-protocol.js";
@@ -215,6 +216,10 @@ export function createCliInputActions({
       handleModelInput(session, event);
       return;
     }
+    if (session.mode === "theme") {
+      handleThemeInput(session, event);
+      return;
+    }
     if (session.mode === "question") {
       handleQuestionInput(session, event);
       return;
@@ -262,7 +267,7 @@ export function createCliInputActions({
       return;
     }
     const session = state.input.session;
-    if (!session || session.mode === "model" || session.mode === "sessions") {
+    if (!session || session.mode === "model" || session.mode === "theme" || session.mode === "sessions") {
       return;
     }
     if (session.mode === "question" && !session.questionState.isEditing()) {
@@ -284,6 +289,36 @@ export function createCliInputActions({
       return;
     }
     if (!modified && session.modelState.handleKey(key)) output.redraw();
+  }
+
+  function askThemeMenu() {
+    return new Promise((resolve) => {
+      output.clearAssistantLineForInput();
+      const themeState = createThemeMenuState();
+      if (!themeState.items().length) {
+        resolve("");
+        return;
+      }
+      const session = { mode: "theme", inputText: "/theme", themeState, resolve };
+      state.input.session = session;
+      state.input.active = true;
+      cancelActiveInput = () => completeTtyInput(session, "", false);
+      output.redraw(true);
+    });
+  }
+
+  function handleThemeInput(session, key) {
+    const modified = key.ctrl || key.alt || key.shift;
+    if (!modified && (key.name === "enter" || key.name === "return")) {
+      const theme = session.themeState.selectedTheme()?.name || "";
+      completeTtyInput(session, theme, Boolean(theme), "", theme ? `/theme ${theme}` : "");
+      return;
+    }
+    if (!modified && key.name === "escape") {
+      completeTtyInput(session, "", false);
+      return;
+    }
+    if (!modified && session.themeState.handleKey(key)) output.redraw();
   }
 
   function submitTtyInput(session) {
@@ -466,6 +501,7 @@ export function createCliInputActions({
     handleTerminalInput,
     handleTerminalPaste,
     askModelMenu,
+    askThemeMenu,
     askSessionMenu,
     askTeamBlueprint,
     cancel: () => cancelActiveInput?.(),
