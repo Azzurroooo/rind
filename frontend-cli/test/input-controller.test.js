@@ -7,10 +7,8 @@ test("input controller starts and closes terminal input through one boundary", (
   let started = 0;
   let stopped = 0;
   const terminalUi = {
-    start(options) {
+    start() {
       started += 1;
-      assert.equal(typeof options.onInput, "function");
-      assert.equal(typeof options.onPaste, "function");
     },
     stop() {
       stopped += 1;

@@ -1,27 +1,34 @@
 import { AssistantRenderer } from "./assistant-renderer.js";
-import { createAssistantStreamBuffer } from "./assistant-stream-buffer.js";
 import {
   assistantHeaderText,
   outputBlockText,
   promptText,
+  startupText,
+  toolRequestedLine,
   toolResultLine,
   toolStartedLine,
   userInputText,
 } from "./rendering.js";
+import { TextBlock } from "./components/text-block.js";
+import { DynamicBlock } from "./components/dynamic-block.js";
+import { AssistantMessage } from "./components/assistant-message.js";
+import { ToolBlock } from "./components/tool-block.js";
+import { argsFromResult } from "./tool-display.js";
 
-export function createCliOutputController({ state, terminalUi }) {
-  const streamBuffer = createAssistantStreamBuffer();
-  const assistantRenderer = new AssistantRenderer((text) => writeOutput(text));
+export function createCliOutputController({ state, terminalUi, transcript }) {
+  const streamBuffer = createLegacyStreamBuffer();
+  const legacyRenderer = new AssistantRenderer((text) => writeOutput(text));
+  let assistantMessage = null;
+  let blockCount = 0;
+  const toolBlocks = new Map();
+  const legacyBegunTools = new Set();
 
   function suspendPrompt(action, options = {}) {
-    if (!terminalUi || state.runtime.status === "closing") {
-      return action();
-    }
-    return terminalUi.withSuspended(action, { render: options.redraw !== false });
+    return action();
   }
 
   function redraw(force = false) {
-    if (!state.input.active || state.runtime.status === "closing" || !terminalUi) {
+    if (!terminalUi || state.runtime.status === "closing") {
       return;
     }
     terminalUi.requestRender(force);
@@ -38,8 +45,8 @@ export function createCliOutputController({ state, terminalUi }) {
     };
   }
 
-  function mainPromptText() {
-    return promptText(state.session.info, state.display.stats, inputState());
+  function mainPromptText(frameWidth) {
+    return promptText(state.session.info, state.display.stats, inputState(), frameWidth);
   }
 
   function refreshInputState() {
@@ -75,133 +82,277 @@ export function createCliOutputController({ state, terminalUi }) {
     state.display.activityStartedAt = 0;
   }
 
-  function log(text) {
-    flushAssistantText(streamBuffer.flush(), { redraw: true });
-    suspendPrompt(() => {
-      closeOpenAssistantOutputLine();
-      process.stdout.write(outputBlockText(text, state.display.outputStarted));
-      state.display.outputStarted = true;
+  function appendBlock(component) {
+    transcript.addChild(component);
+    blockCount += 1;
+    redraw();
+  }
+
+  function lazyLines(buildText, leading) {
+    return new DynamicBlock(() => {
+      const value = String(buildText() ?? "");
+      const body = outputBlockText(value);
+      if (!body.trim()) {
+        return [];
+      }
+      const lines = body.split("\n");
+      while (lines.length > 1 && lines.at(-1) === "") {
+        lines.pop();
+      }
+      return leading ? ["", ...lines] : lines;
     });
   }
 
-  function writeOutput(text) {
-    const holdPartialLine = state.input.active && Boolean(terminalUi);
-    flushAssistantText(streamBuffer.push(text, holdPartialLine));
+  // Accepts a string or a thunk so themed content restyles on full repaints.
+  function log(text) {
+    const build = typeof text === "function" ? text : () => String(text ?? "");
+    if (!terminalUi) {
+      flushAssistantText(streamBuffer.flush());
+      const value = String(build() ?? "");
+      if (!value.trim()) {
+        return;
+      }
+      process.stdout.write(outputBlockText(value, state.display.outputStarted));
+      state.display.outputStarted = true;
+      return;
+    }
+    const leading = blockCount > 0;
+    appendBlock(lazyLines(build, leading));
   }
 
-  function flushAssistantText(text = "", options = {}) {
+  function writeOutput(text) {
+    if (!terminalUi) {
+      flushAssistantText(streamBuffer.push(text));
+    }
+  }
+
+  function flushAssistantText(text = "") {
     const output = String(text || "");
     if (!output) {
       return;
     }
-    suspendPrompt(() => {
-      writeAssistantHeader();
-      process.stdout.write(output);
-      state.display.assistantOutputLineOpen = output
-        ? !output.endsWith("\n")
-        : state.display.assistantOutputLineOpen;
-    }, { redraw: options.redraw !== false });
+    process.stdout.write(output);
   }
 
   function writeUserInput(text) {
-    const line = userInputText(text);
-    if (!line) {
+    const value = String(text ?? "");
+    if (!value.trim()) {
       return;
     }
-    flushAssistantText(streamBuffer.flush(), { redraw: false });
-    closeOpenAssistantOutputLine();
-    process.stdout.write(outputBlockText(line, state.display.outputStarted));
-    state.display.outputStarted = true;
+    if (!terminalUi) {
+      flushAssistantText(streamBuffer.flush());
+      const line = userInputText(value);
+      if (!line) {
+        return;
+      }
+      process.stdout.write(outputBlockText(line, state.display.outputStarted));
+      state.display.outputStarted = true;
+      return;
+    }
+    const leading = blockCount > 0;
+    appendBlock(new DynamicBlock((width) => {
+      const rendered = userInputText(value, width);
+      const lines = rendered ? rendered.split("\n") : [];
+      if (leading && lines.length) {
+        lines.unshift("");
+      }
+      while (lines.length > 1 && lines.at(-1) === "") {
+        lines.pop();
+      }
+      return lines;
+    }));
   }
 
   function writeError(text) {
-    flushAssistantText(streamBuffer.flush(), { redraw: true });
-    const stream = terminalUi && state.runtime.status !== "closing" ? process.stdout : process.stderr;
-    suspendPrompt(() => stream.write(String(text || "")));
-  }
-
-  function closeOpenAssistantOutputLine() {
-    if (!state.display.assistantOutputLineOpen) {
+    const value = String(text ?? "");
+    if (!terminalUi || state.runtime.status === "closing") {
+      process.stderr.write(value);
       return;
     }
-    process.stdout.write("\n");
-    state.display.assistantOutputLineOpen = false;
+    appendBlock(new TextBlock(outputBlockText(value), { leading: blockCount > 0 }));
   }
 
-  function writeAssistantHeader() {
-    if (state.display.assistantHeaderShown) {
-      return;
+  function closeOpenAssistantOutputLine() {}
+
+  function ensureAssistantBlocks() {
+    if (!assistantMessage) {
+      const leading = blockCount > 0;
+      transcript.addChild(lazyLines(() => assistantHeaderText(), leading));
+      blockCount += 1;
+      assistantMessage = new AssistantMessage({ color: true });
+      transcript.addChild(assistantMessage);
+      blockCount += 1;
     }
-    process.stdout.write(outputBlockText(assistantHeaderText(), state.display.outputStarted));
-    state.display.outputStarted = true;
-    state.display.assistantHeaderShown = true;
+    return assistantMessage;
   }
 
   function closeAssistant() {
-    assistantRenderer.finish();
+    if (terminalUi) {
+      if (assistantMessage) {
+        assistantMessage.finish();
+        assistantMessage = null;
+      }
+      state.display.assistantHeaderShown = false;
+      return;
+    }
+    legacyRenderer.finish();
     flushAssistantText(streamBuffer.flush());
     state.display.assistantHeaderShown = false;
   }
 
-  function clearAssistantLineForInput() {
-    if (!state.display.assistantOutputLineOpen) {
+  function assistantAppend(text) {
+    if (!terminalUi) {
+      legacyRenderer.append(text);
       return;
     }
-    suspendPrompt(closeOpenAssistantOutputLine, { redraw: false });
+    const message = ensureAssistantBlocks();
+    message.append(text);
+    redraw();
   }
 
-  function assistantAppend(text) {
-    assistantRenderer.append(text);
+  function clearAssistantLineForInput() {
+    if (!terminalUi && state.display.assistantOutputLineOpen) {
+      process.stdout.write("\n");
+      state.display.assistantOutputLineOpen = false;
+    }
+  }
+
+  function showStartup(info) {
+    if (!terminalUi) {
+      return;
+    }
+    const source = { ...info };
+    appendBlock(new DynamicBlock((width) => {
+      const rendered = startupText(source, width);
+      return rendered ? rendered.split("\n") : [];
+    }));
+  }
+
+  function beginTool(event) {
+    const callId = String(event?.tool_call_id || "");
+    if (!terminalUi) {
+      if (!callId) {
+        log(toolStartedLine(event));
+        return;
+      }
+      if (legacyBegunTools.has(callId)) {
+        return;
+      }
+      legacyBegunTools.add(callId);
+      log(event?.args_preview ? toolRequestedLine(event) : toolStartedLine(event));
+      return;
+    }
+    if (!callId) {
+      return;
+    }
+    const existing = toolBlocks.get(callId);
+    if (existing) {
+      existing.enrichArgs(event);
+      return;
+    }
+    const block = new ToolBlock({
+      event,
+      onRequestRender: () => redraw(),
+      leading: blockCount > 0,
+    });
+    toolBlocks.set(callId, block);
+    appendBlock(block);
+  }
+
+  function updateToolProgress(callId, message) {
+    if (!terminalUi) {
+      return;
+    }
+    toolBlocks.get(String(callId || ""))?.setProgress(message);
+  }
+
+  function finishTool(event, fileChange) {
+    if (!terminalUi) {
+      log(toolResultLine(event, fileChange));
+      return;
+    }
+    const callId = String(event?.tool_call_id || "");
+    let block = toolBlocks.get(callId);
+    if (!block) {
+      if (!callId) {
+        return;
+      }
+      block = new ToolBlock({
+        event,
+        onRequestRender: () => redraw(),
+        leading: blockCount > 0,
+      });
+      toolBlocks.set(callId, block);
+      appendBlock(block);
+    }
+    block.enrichArgs({ arguments: argsFromResult(event?.tool_name, event?.result) });
+    block.finish(event, fileChange);
+  }
+
+  function setToolsExpanded(expanded) {
+    if (!terminalUi) {
+      return;
+    }
+    for (const block of toolBlocks.values()) {
+      block.setExpanded(expanded);
+    }
+    redraw();
   }
 
   function renderHistory(messages) {
-    suspendPrompt(() => {
-      const pendingTools = new Map();
-      const flushPendingTools = () => {
-        for (const toolName of pendingTools.values()) {
-          log(toolStartedLine({ tool_name: toolName }));
-        }
-        pendingTools.clear();
-      };
-      for (const message of Array.isArray(messages) ? messages : []) {
-        const role = String(message?.role || "");
-        if (role === "user") {
-          flushPendingTools();
-          closeAssistant();
-          writeUserInput(messageText(message?.content));
-          continue;
-        }
-        if (role === "assistant") {
-          flushPendingTools();
-          const content = messageText(message?.content);
-          if (content) {
-            assistantAppend(content);
-            closeAssistant();
-          }
-          for (const call of Array.isArray(message?.tool_calls) ? message.tool_calls : []) {
-            const toolCallId = String(call?.id || "");
-            const toolName = String(call?.function?.name || "tool");
-            if (toolCallId) {
-              pendingTools.set(toolCallId, toolName);
-            }
-          }
-          continue;
-        }
-        if (role === "tool") {
-          const toolCallId = String(message?.tool_call_id || "");
-          const toolName = pendingTools.get(toolCallId) || "tool";
-          pendingTools.delete(toolCallId);
-          log(toolResultLine({
-            tool_call_id: toolCallId,
-            tool_name: toolName,
-            result: messageText(message?.content),
-            status: "completed",
-          }));
-        }
+    const pendingTools = new Map();
+    const flushPendingTools = () => {
+      for (const [toolCallId, toolName] of pendingTools.entries()) {
+        beginTool({ tool_call_id: toolCallId, tool_name: toolName, args_preview: "" });
+        finishTool({
+          tool_call_id: toolCallId,
+          tool_name: toolName,
+          status: "completed",
+          result: "",
+        });
       }
-      flushPendingTools();
-      closeAssistant();
-    });
+      pendingTools.clear();
+    };
+    for (const message of Array.isArray(messages) ? messages : []) {
+      const role = String(message?.role || "");
+      if (role === "user") {
+        flushPendingTools();
+        closeAssistant();
+        writeUserInput(messageText(message?.content));
+        continue;
+      }
+      if (role === "assistant") {
+        flushPendingTools();
+        const content = messageText(message?.content);
+        if (content) {
+          assistantAppend(content);
+          closeAssistant();
+        }
+        for (const call of Array.isArray(message?.tool_calls) ? message.tool_calls : []) {
+          const toolCallId = String(call?.id || "");
+          const toolName = String(call?.function?.name || "tool");
+          if (toolCallId) {
+            pendingTools.set(toolCallId, toolName);
+          }
+        }
+        continue;
+      }
+      if (role === "tool") {
+        const toolCallId = String(message?.tool_call_id || "");
+        const toolName = pendingTools.get(toolCallId) || "tool";
+        pendingTools.delete(toolCallId);
+        beginTool({ tool_call_id: toolCallId, tool_name: toolName, args_preview: "" });
+        finishTool({
+          tool_call_id: toolCallId,
+          tool_name: toolName,
+          status: "completed",
+          result: messageText(message?.content),
+        });
+      }
+    }
+    flushPendingTools();
+    closeAssistant();
+    redraw(true);
   }
 
   return {
@@ -217,7 +368,30 @@ export function createCliOutputController({ state, terminalUi }) {
     closeAssistant,
     clearAssistantLineForInput,
     assistantAppend,
+    beginTool,
+    updateToolProgress,
+    finishTool,
+    setToolsExpanded,
     renderHistory,
+    showStartup,
+    replayAll: () => terminalUi?.replayAll?.(),
+  };
+}
+
+function createLegacyStreamBuffer() {
+  let pending = "";
+  return {
+    push(text) {
+      pending += String(text || "");
+      const flushed = pending;
+      pending = "";
+      return flushed;
+    },
+    flush() {
+      const flushed = pending;
+      pending = "";
+      return flushed;
+    },
   };
 }
 

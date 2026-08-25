@@ -88,7 +88,7 @@ desktop/src/main/index.ts
      -> python main.py app-server --stdio
 ```
 
-`desktop` 主进程隔离 worker、IPC 和项目状态；renderer 只通过 preload API 访问 runtime。`frontend-cli` 负责 TTY/non-TTY 输入、菜单、文本和 Markdown 渲染。两者都消费同一套方法、事件和能力。
+`desktop` 主进程隔离 worker、IPC 和项目状态；renderer 只通过 preload API 访问 runtime。`frontend-cli` 负责 TTY/non-TTY 输入、菜单、文本和 Markdown 渲染。两者都消费同一套方法、事件和能力。CLI 的 TTY 渲染采用单组件树 + 全缓冲 diff 架构，详见 [`docs/cli-rendering.md`](cli-rendering.md)。
 
 ## 测试边界
 

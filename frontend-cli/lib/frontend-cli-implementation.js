@@ -6,7 +6,6 @@ import { fileURLToPath } from "node:url";
 import { createRequire } from "node:module";
 
 import { createCompactContextState } from "./compact-context-state.js";
-import { prepareComposerFrame } from "./composer-terminal.js";
 import { createRuntimeClient, runHelpVersion } from "./runtime-client.js";
 import {
   requireRuntimeInitialization,
@@ -16,6 +15,8 @@ import {
   isRuntimeEventForTurn,
 } from "./runtime-protocol.js";
 import { executeLocalSlashCommand, loadLocalSettings } from "./local-slash-commands.js";
+import { loadCliState, saveCliState } from "./cli-state-store.js";
+import { setTheme } from "./theme.js";
 import { createTurnController } from "./turn-controller.js";
 import { createCommandController } from "./command-controller.js";
 import { createTaskMonitorController } from "./task-monitor-controller.js";
@@ -28,11 +29,15 @@ import { createCliState } from "./cli-state.js";
 import { createCliRuntimeController } from "./cli-runtime-controller.js";
 import { createCliOutputController } from "./cli-output-controller.js";
 import { createCliInputActions } from "./cli-input-actions.js";
-import { createTerminalUI } from "./terminal-ui.js";
+import { createTui } from "./tui/tui.js";
+import { Container } from "./tui/component.js";
+import { ComposerArea } from "./components/composer-area.js";
+import { MonitorStack } from "./components/monitor-stack.js";
 import {
   inputHintText,
   interruptText,
   modelMenuText,
+  themeMenuText,
   questionMenuFrame,
   sessionMenuText,
   promptPlaceholderText,
@@ -74,16 +79,35 @@ const inputStateData = cliState.input;
 const displayState = cliState.display;
 let input = null;
 const compactContextState = createCompactContextState();
-const terminalUi = process.stdin.isTTY && process.stdout.isTTY
-  ? createTerminalUI({ input: process.stdin, output: process.stdout, render: renderActiveInput })
+const isTty = Boolean(process.stdin.isTTY && process.stdout.isTTY);
+const tui = isTty
+  ? createTui({ input: process.stdin, output: process.stdout })
   : null;
+const transcriptContainer = new Container();
+const composerArea = new ComposerArea((width) => composeFrame(width));
+const monitorStack = new MonitorStack({
+  composer: composerArea,
+  monitor: {
+    isMonitoring: () => Boolean(taskMonitorController?.isMonitoring()),
+    frame: (width) => taskMonitorController?.frame(width),
+  },
+  rows: () => (tui ? tui.rows : 24),
+});
+if (tui) {
+  tui.addChild(transcriptContainer);
+  tui.addChild(monitorStack);
+}
 let inputActions;
 let inputController;
 let eventProcessing = Promise.resolve();
 
+tui?.onData((sequence) => inputActions?.handleTerminalInput(sequence));
+tui?.onPaste((text) => inputActions?.handleTerminalPaste(text));
+
 const outputController = createCliOutputController({
   state: cliState,
-  terminalUi,
+  terminalUi: tui,
+  transcript: transcriptContainer,
 });
 const {
   redraw: redrawInput,
@@ -188,31 +212,42 @@ turnController = createTurnController({
     refreshInputState,
     closeAssistant,
     cancelInput,
-    logInterrupt: () => logOutput(interruptText()),
+    logInterrupt: () => logOutput(() => interruptText()),
   },
 });
 commandController = createCommandController({
   request,
   turn: turnController,
   input: {
-    isTerminal: Boolean(terminalUi),
+    isTerminal: Boolean(tui),
     runGoalCommand: runtimeController.runGoalCommand,
     runModelSelector: runtimeController.runModelSelector,
+    runThemeSelector: async () => {
+      const selected = await inputActions.askThemeMenu();
+      if (selected) {
+        await commandController.handle(`/theme ${selected}`);
+      }
+    },
     startCompactCommand: runtimeController.startCompactCommand,
     runSessionsSelector: runtimeController.runSessionsSelector,
     runLocalCommand: async (text) => {
       if (!Object.keys(sessionState.settings).length) {
         sessionState.settings = await loadLocalSettings(undefined, sessionState.info.workspace_root || sessionState.info.cwd || process.cwd());
       }
-      return executeLocalSlashCommand(text, {
+      const result = await executeLocalSlashCommand(text, {
         settings: sessionState.settings,
         sessionInfo: sessionState.info,
         cwd: sessionState.info.workspace_root || sessionState.info.cwd || process.cwd(),
         runtimeStarted: runtimeState.status === "starting" || runtimeState.status === "ready",
         runtimeInitialized: runtimeState.status === "ready",
-        interactive: Boolean(terminalUi),
+        interactive: Boolean(tui),
         commands: sessionState.commands,
+        persistTheme: (name) => saveCliState({ theme: name }),
       });
+      if (result?.display?.type === "theme" && result.display.changed) {
+        outputController.replayAll();
+      }
+      return result;
     },
   },
   state: {
@@ -231,7 +266,7 @@ commandController = createCommandController({
 });
 taskMonitorController = createTaskMonitorController({
   request,
-  terminalUi: Boolean(terminalUi),
+  terminalUi: Boolean(tui),
   state: {
     get runtimeClosing() {
       return runtimeState.status === "closing";
@@ -266,6 +301,9 @@ const eventController = createEventController({
   monitor: taskMonitorController,
   output: {
     assistantAppend: outputController.assistantAppend,
+    beginTool: (...args) => outputController.beginTool(...args),
+    updateToolProgress: (...args) => outputController.updateToolProgress(...args),
+    finishTool: (...args) => outputController.finishTool(...args),
     handleContextBuilt: (event) => compactContextState.handleContextBuilt(event),
     resetContextUsage,
     closeAssistant,
@@ -293,7 +331,7 @@ inputActions = createCliInputActions({
   handleSigint,
 });
 inputController = createInputController({
-  terminalUi,
+  terminalUi: tui,
   state: {
     get runtimeClosing() {
       return runtimeState.status === "closing";
@@ -318,13 +356,22 @@ inputController = createInputController({
 process.on("SIGINT", handleSigint);
 
 try {
+  const persistedState = loadCliState();
+  if (persistedState.theme) {
+    setTheme(persistedState.theme);
+  }
   sessionState.settings = await loadLocalSettings(undefined, process.cwd());
   sessionState.info = { cwd: process.cwd(), model: sessionState.settings.model };
   sessionState.commands = commandController.localCommands();
   await runtimeController.ensureRuntime();
-  logOutput(startupText({ ...sessionState.info, resume_preview: "" }));
+  const startupInfo = { ...sessionState.info, resume_preview: "" };
+  if (tui) {
+    outputController.showStartup(startupInfo);
+  } else {
+    logOutput(startupText(startupInfo));
+  }
   await runtimeController.restoreSession();
-  if (terminalUi) {
+  if (tui) {
     inputController.start();
   } else {
     input = createInterface({
@@ -389,37 +436,33 @@ function restoreLiveTurn(value) {
   if (text) outputController.assistantAppend(text);
 }
 
-function renderActiveInput(width = process.stdout.columns || 80) {
-  const inputFrame = renderInputSession(width);
-  if (!taskMonitorController.isMonitoring()) {
-    return inputFrame;
-  }
-  const monitorFrame = taskMonitorController.frame(width);
-  const monitorOffset = inputFrame.lines.length;
-  const focusRow = monitorFrame.focusRow === undefined
-    ? monitorOffset
-    : monitorOffset + monitorFrame.focusRow;
-  return {
-    lines: [...inputFrame.lines, ...monitorFrame.lines],
-    cursorRow: inputFrame.cursorRow,
-    cursorColumn: inputFrame.cursorColumn,
-    focusRow,
-    fixedPrefixRows: monitorOffset,
-  };
-}
-
-function renderInputSession(width) {
+function composeFrame(width = process.stdout.columns || 80) {
   const session = inputStateData.session;
   if (!session) {
-    return { lines: [], cursorRow: 0, cursorColumn: 0 };
+    return null;
   }
+  const turnRunning = Boolean(turnStateData.active || displayState.activeCompact);
+  // While a turn runs, the composer is a steering box: keep the hardware
+  // caret hidden so nothing blinks beside the spinner (question editing
+  // still needs a visible caret for its custom-answer field).
+  const showCaret = !turnRunning || session.mode === "question";
   if (session.mode === "model") {
-    return prepareComposerFrame({
-      prompt: mainPromptText(),
+    return {
+      showCaret,
+      prompt: mainPromptText(width),
       inputText: session.inputText,
       cursor: { line: 0, column: session.inputText.length },
       menuText: modelMenuText(session.modelState.items(), session.modelState.selectedIndex()).trimEnd(),
-    }, width);
+    };
+  }
+  if (session.mode === "theme") {
+    return {
+      showCaret,
+      prompt: mainPromptText(width),
+      inputText: session.inputText,
+      cursor: { line: 0, column: session.inputText.length },
+      menuText: themeMenuText(session.themeState.items(), session.themeState.selectedIndex()).trimEnd(),
+    };
   }
   if (session.mode === "question") {
     const editing = session.questionState.isEditing();
@@ -431,41 +474,47 @@ function renderInputSession(width) {
       CUSTOM_ANSWER_LABEL,
       width,
     );
-    return prepareComposerFrame({
-      prompt: mainPromptText(),
+    return {
+      showCaret,
+      prompt: mainPromptText(width),
       inputText: session.question,
       cursor: editing ? session.editor.cursorPosition() : { line: 0, column: session.question.length },
       menuText: menu.text.trimEnd(),
       menuCursor: editing ? menu.cursor : null,
-    }, width);
+    };
   }
   if (session.mode === "sessions") {
-    return prepareComposerFrame({
-      prompt: mainPromptText(),
+    return {
+      showCaret,
+      prompt: mainPromptText(width),
       inputText: session.inputText,
       cursor: { line: 0, column: session.inputText.length },
       menuText: sessionMenuText(session.choiceState.options(), session.choiceState.selectedIndex()).trimEnd(),
-    }, width);
+    };
   }
   if (session.mode === "team-blueprints") {
-    return prepareComposerFrame({
-      prompt: mainPromptText(),
+    return {
+      showCaret,
+      prompt: mainPromptText(width),
       inputText: session.inputText,
       cursor: { line: 0, column: session.inputText.length },
       menuText: sessionMenuText(session.choiceState.options(), session.choiceState.selectedIndex()).trimEnd(),
-    }, width);
+    };
   }
-  session.editor.setViewportWidth(width);
   const matches = session.menuState
     ? (session.menuState.setInput(session.editor.input()), session.menuState.matches())
     : [];
-  return prepareComposerFrame({
-    prompt: typeof session.prompt === "function" ? session.prompt() : session.prompt,
+  if (typeof session.editor.setViewportWidth === "function") {
+    session.editor.setViewportWidth(width);
+  }
+  return {
+    showCaret,
+    prompt: typeof session.prompt === "function" ? session.prompt(width) : session.prompt,
     inputText: session.editor.input(),
     cursor: session.editor.cursorPosition(),
     placeholder: session.mode === "prompt" ? inputHintText(session.placeholder) : "",
     menuText: session.menuState ? slashMenuText(matches, session.menuState.selectedIndex()).trimEnd() : "",
-  }, width);
+  };
 }
 
 function handleSigint() {
@@ -566,7 +615,7 @@ function closeInput() {
       // Ignore readline close races during signal shutdown.
     }
   }
-  if (!terminalUi) {
+  if (!tui) {
     process.stdin.pause();
   }
 }

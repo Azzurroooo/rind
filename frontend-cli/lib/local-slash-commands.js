@@ -1,6 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import path from "node:path";
+import { currentTheme, setTheme, themeNames, themeOptions } from "./theme.js";
 
 export const LOCAL_SLASH_COMMANDS = Object.freeze([
   { name: "compact", description: "Compact current session context", usage: "/compact" },
@@ -14,6 +15,7 @@ export const LOCAL_SLASH_COMMANDS = Object.freeze([
   { name: "skill", description: "List skills", usage: "/skill [list]" },
   { name: "status", description: "Show surface status", usage: "/status" },
   { name: "team", description: "Manage the current Team", usage: "/team create [project-id] | /team init | /team list | /team blueprint [id] | /team add <description>" },
+  { name: "theme", description: "Switch the CLI color theme", usage: "/theme [latte | frappe | macchiato | mocha]" },
 ]);
 
 export async function loadLocalSettings(
@@ -87,6 +89,7 @@ export async function executeLocalSlashCommand(input, context = {}) {
   }
   if (name === "doctor") return doctorResult(context, argument);
   if (name === "help") return helpResult(argument, context.commands || []);
+  if (name === "theme") return themeResult(argument, context);
   if (name === "model" && !argument && !context.interactive) return { text: `Model: ${context.settings?.model || "unknown"}` };
   return null;
 }
@@ -172,6 +175,38 @@ function helpResult(argument, commands) {
   return {
     text,
     display: { type: "help", ...(selected ? { command: selected } : { commands: visible }) },
+  };
+}
+
+function themeResult(argument, context = {}) {
+  const requested = argument.replace(/^\//, "").trim();
+  if (requested) {
+    const previous = currentTheme();
+    const applied = setTheme(requested);
+    if (!applied) {
+      return { text: `Unknown theme "${requested}". Available: ${themeNames().join(", ")}.` };
+    }
+    context.persistTheme?.(applied.name);
+    return {
+      text: `Theme: ${applied.name}`,
+      display: {
+        type: "theme",
+        changed: true,
+        previous: previous.name,
+        current: applied.name,
+        flavors: themeOptions(),
+      },
+    };
+  }
+  const current = currentTheme();
+  return {
+    text: `Theme: ${current.name}`,
+    display: {
+      type: "theme",
+      changed: false,
+      current: current.name,
+      flavors: themeOptions(),
+    },
   };
 }
 

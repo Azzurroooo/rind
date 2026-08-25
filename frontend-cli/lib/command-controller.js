@@ -25,6 +25,10 @@ export function createCommandController({
     if (!String(text || "").startsWith("/")) {
       return false;
     }
+    if (isBareThemeCommand(text) && input.isTerminal && input.runThemeSelector) {
+      await input.runThemeSelector();
+      return true;
+    }
     const localResult = await input.runLocalCommand?.(text);
     if (localResult) {
       await applyResult(localResult);
@@ -63,10 +67,8 @@ export function createCommandController({
   }
 
   async function applyResult(result = {}) {
-    const text = slashResultText(result, state.slashCommands || []);
-    if (text) {
-      output.log?.(text);
-    }
+    const text = () => slashResultText(result, state.slashCommands || []);
+    output.log?.(text);
     if (result.display?.type === "team_blueprints" && input.askTeamBlueprint) {
       const blueprints = Array.isArray(result.display.blueprints) ? result.display.blueprints : [];
       const selected = await input.askTeamBlueprint(blueprints);
@@ -126,6 +128,10 @@ function singleWord(value) {
 
 function isBareModelCommand(value) {
   return String(value || "").trim().toLowerCase() === "/model";
+}
+
+function isBareThemeCommand(value) {
+  return String(value || "").trim().toLowerCase() === "/theme";
 }
 
 function isLocalCommand(value, name) {

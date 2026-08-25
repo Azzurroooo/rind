@@ -74,27 +74,27 @@ export function createCliRuntimeController({
   async function runGoalCommand(command) {
     const turnController = getTurnController();
     if (command.action === "set" && state.turn.active) {
-      log(commandResultText("Goal not started", "pause or finish the active turn first"));
+      log(() => commandResultText("Goal not started", "pause or finish the active turn first"));
       return;
     }
     try {
       if (command.action === "set") {
         const result = await request(methods.goalSet, { objective: command.objective });
         updateGoalState(result?.goal);
-        log(goalCommandText(result?.goal, "set"));
+        log(() => goalCommandText(result?.goal, "set"));
         turnController.submit(command.objective);
         return;
       }
       if (command.action === "clear") {
         const result = await request(methods.goalClear);
         updateGoalState(result?.goal || null);
-        log(goalCommandText(null, "clear"));
+        log(() => goalCommandText(null, "clear"));
         return;
       }
       if (command.action === "pause" || command.action === "resume") {
         const result = await request(methods.goalStatus, { status: command.action === "resume" ? "active" : "paused" });
         updateGoalState(result?.goal);
-        log(goalCommandText(result?.goal, command.action));
+        log(() => goalCommandText(result?.goal, command.action));
         if (command.action === "resume" && !state.turn.active) {
           turnController.submit("", { goal_continuation: true });
         }
@@ -102,7 +102,7 @@ export function createCliRuntimeController({
       }
       const result = await request(methods.goalGet);
       updateGoalState(result?.goal || null);
-      log(goalCommandText(result?.goal || null));
+      log(() => goalCommandText(result?.goal || null));
     } catch (error) {
       log(`Goal command failed: ${error instanceof Error ? error.message : String(error)}`);
     }
@@ -209,7 +209,7 @@ export function createCliRuntimeController({
       await restoreSession(selectedId, {
         switchSession: true,
         workspaceRoot: selected?.workspace_root,
-        announce: (info) => log(sessionSwitchedText(info)),
+        announce: (info) => log(() => sessionSwitchedText(info)),
       });
     } catch (error) {
       log(`Session switch failed: ${error instanceof Error ? error.message : String(error)}`);
@@ -247,7 +247,7 @@ export function createCliRuntimeController({
     try {
       result = await request(methods.modelList);
     } catch (error) {
-      log(modelListErrorText(error instanceof Error ? error.message : String(error), state.session.info.model));
+      log(() => modelListErrorText(error instanceof Error ? error.message : String(error), state.session.info.model));
       return;
     }
     const currentModel = result?.current_model || state.session.info.model || result?.default_model || "";
@@ -258,7 +258,7 @@ export function createCliRuntimeController({
     try {
       const update = await request(methods.modelSet, { model: selected });
       state.session.info = { ...state.session.info, model: update?.model || selected };
-      log(modelSetResultText(update, selected));
+      log(() => modelSetResultText(update, selected));
     } catch (error) {
       log(`Command failed: ${error instanceof Error ? error.message : String(error)}`);
     }

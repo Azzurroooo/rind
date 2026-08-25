@@ -1,6 +1,7 @@
 import { createLineEditor } from "./line-editor.js";
 import { createChoiceMenuState } from "./choice-menu-state.js";
 import { createModelMenuState } from "./model-menu-state.js";
+import { createThemeMenuState } from "./theme-menu-state.js";
 import { createQuestionMenuState } from "./question-menu-state.js";
 import { createSlashMenuState } from "./slash-menu-state.js";
 import { runtimeMethods } from "./runtime-protocol.js";
@@ -99,7 +100,7 @@ export function createCliInputActions({
   async function answerQuestion(event) {
     pausePrompt();
     output.closeAssistant();
-    output.log(questionText(event));
+    output.log(() => questionText(event));
     try {
       const options = Array.isArray(event.options) ? event.options : [];
       const answer = output.terminalUi
@@ -193,6 +194,11 @@ export function createCliInputActions({
       handleSigint();
       return;
     }
+    if (event.ctrl && !event.alt && !event.shift && event.name === "o") {
+      state.display.toolDetailsExpanded = !state.display.toolDetailsExpanded;
+      output.setToolsExpanded?.(state.display.toolDetailsExpanded);
+      return;
+    }
     const monitor = getTaskMonitor();
     if (monitor?.isMonitoring()) {
       monitor.handleInput(event);
@@ -208,6 +214,10 @@ export function createCliInputActions({
     }
     if (session.mode === "model") {
       handleModelInput(session, event);
+      return;
+    }
+    if (session.mode === "theme") {
+      handleThemeInput(session, event);
       return;
     }
     if (session.mode === "question") {
@@ -257,7 +267,7 @@ export function createCliInputActions({
       return;
     }
     const session = state.input.session;
-    if (!session || session.mode === "model" || session.mode === "sessions") {
+    if (!session || session.mode === "model" || session.mode === "theme" || session.mode === "sessions") {
       return;
     }
     if (session.mode === "question" && !session.questionState.isEditing()) {
@@ -281,6 +291,36 @@ export function createCliInputActions({
     if (!modified && session.modelState.handleKey(key)) output.redraw();
   }
 
+  function askThemeMenu() {
+    return new Promise((resolve) => {
+      output.clearAssistantLineForInput();
+      const themeState = createThemeMenuState();
+      if (!themeState.items().length) {
+        resolve("");
+        return;
+      }
+      const session = { mode: "theme", inputText: "/theme", themeState, resolve };
+      state.input.session = session;
+      state.input.active = true;
+      cancelActiveInput = () => completeTtyInput(session, "", false);
+      output.redraw(true);
+    });
+  }
+
+  function handleThemeInput(session, key) {
+    const modified = key.ctrl || key.alt || key.shift;
+    if (!modified && (key.name === "enter" || key.name === "return")) {
+      const theme = session.themeState.selectedTheme()?.name || "";
+      completeTtyInput(session, theme, Boolean(theme), "", theme ? `/theme ${theme}` : "");
+      return;
+    }
+    if (!modified && key.name === "escape") {
+      completeTtyInput(session, "", false);
+      return;
+    }
+    if (!modified && session.themeState.handleKey(key)) output.redraw();
+  }
+
   function submitTtyInput(session) {
     if (session.menuState) syncSlashMenu(session);
     const command = session.menuState?.selectedCommand();
@@ -302,10 +342,11 @@ export function createCliInputActions({
     state.input.session = null;
     state.input.active = false;
     cancelActiveInput = null;
-    output.suspendPrompt(() => {
-      if (writeUser) output.writeUserInput(displayValue);
-      else if (lineText && String(value || "").trim()) process.stdout.write("\n");
-    }, { redraw: false });
+    if (writeUser) {
+      output.writeUserInput(displayValue);
+    } else if (!output.terminalUi && lineText && String(value || "").trim()) {
+      process.stdout.write("\n");
+    }
     session.resolve(value);
   }
 
@@ -460,6 +501,7 @@ export function createCliInputActions({
     handleTerminalInput,
     handleTerminalPaste,
     askModelMenu,
+    askThemeMenu,
     askSessionMenu,
     askTeamBlueprint,
     cancel: () => cancelActiveInput?.(),

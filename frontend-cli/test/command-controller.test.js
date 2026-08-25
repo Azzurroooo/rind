@@ -21,7 +21,7 @@ test("command controller separates text, goal, and slash commands", async () => 
       runGoalCommand: (goal) => calls.push({ method: "goal", goal }),
     },
     state: { slashCommands: [] },
-    output: { log: (text) => logs.push(text) },
+    output: { log: (text) => logs.push(typeof text === "function" ? text() : text) },
   });
 
   assert.equal(await controller.handle("hello"), false);
@@ -90,7 +90,7 @@ test("team blueprint menu selection reuses the slash command path", async () => 
     input: {
       askTeamBlueprint: async (blueprints) => blueprints[1],
     },
-    output: { log: (text) => calls.push({ log: text }) },
+    output: { log: (text) => calls.push({ log: typeof text === "function" ? text() : text }) },
   });
 
   await controller.applyResult({
@@ -136,7 +136,7 @@ test("exit remains a Surface-local command", async () => {
     },
     turn: { submit() {} },
     output: {
-      log: (text) => calls.push(text),
+      log: (text) => calls.push(typeof text === "function" ? text() : text),
       shutdown: async () => calls.push("shutdown"),
       exit: () => calls.push("exit"),
     },
@@ -156,7 +156,7 @@ test("local slash results do not call Runtime", async () => {
     input: {
       runLocalCommand: async (text) => text === "/status" ? { text: "local status" } : null,
     },
-    output: { log: (text) => calls.push(text) },
+    output: { log: (text) => calls.push(typeof text === "function" ? text() : text) },
   });
 
   await controller.handle("/status");
@@ -183,6 +183,7 @@ test("local command catalog stays complete before the runtime starts", async () 
     "skill",
     "status",
     "team",
+    "theme",
   ]);
   for (const name of ["compact", "init", "sessions", "skill", "team"]) {
     const result = await executeLocalSlashCommand(`/${name}`, {

@@ -3,18 +3,23 @@ import assert from "node:assert/strict";
 
 import { createEventController } from "../lib/event-controller.js";
 
-test("event controller forwards assistant deltas and suppresses duplicate tool announcements", async () => {
+test("event controller forwards assistant deltas and every announce event to the output layer", async () => {
   const assistant = [];
-  const logs = [];
+  const begun = [];
   const controller = createEventController({
     output: {
       assistantAppend: (text) => assistant.push(text),
-      log: (text) => logs.push(text),
+      beginTool: (event) => begun.push(event),
       closeAssistant() {},
     },
   });
 
   await controller.handle({ kind: "event", event: { type: "assistant_delta", text: "hello" } });
+  await controller.handle({ kind: "event", event: {
+    type: "tool_input_started",
+    tool_name: "bash",
+    tool_call_id: "call-1",
+  } });
   await controller.handle({ kind: "event", event: {
     type: "tool_requested",
     tool_name: "bash",
@@ -28,16 +33,22 @@ test("event controller forwards assistant deltas and suppresses duplicate tool a
   } });
 
   assert.deepEqual(assistant, ["hello"]);
-  assert.equal(logs.length, 1);
+  // The output layer owns dedup (Map on TTY / Set on legacy stdout); the
+  // controller forwards every announce so late-arriving args can enrich.
+  assert.deepEqual(begun.map((event) => event.type), ["tool_input_started", "tool_requested", "tool_call_started"]);
 });
 
 test("event controller emits tool result and resets turn state", async () => {
-  const logs = [];
+  const finished = [];
+  const completed = [];
   const controller = createEventController({
     output: {
-      log: (text) => logs.push(text),
+      finishTool: (event, fileChange) => finished.push({ event, fileChange }),
+      turnCompleted: undefined,
+      log: (text) => completed.push(text),
       closeAssistant() {},
       clearCompactContext() {},
+      clearQueuedInputs() {},
     },
   });
 
@@ -53,7 +64,9 @@ test("event controller emits tool result and resets turn state", async () => {
     duration_ms: 12,
   } });
 
-  assert.equal(logs.length, 2);
+  assert.equal(finished.length, 1);
+  assert.equal(finished[0].event.tool_call_id, "call-2");
+  assert.equal(completed.length, 1);
 });
 
 test("event controller forwards delegate lifecycle to the task monitor", async () => {

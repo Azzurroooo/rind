@@ -1,19 +1,21 @@
 import { clipCells, middleClipCells, textWidth, wrapTextCells } from "./text-width.js";
+import { paint, flavorSwatch } from "./theme.js";
+import { homedir } from "node:os";
 
 const MAX_STARTUP_BANNER_WIDTH = 80;
 const MAX_COMPOSER_WIDTH = 78;
 const MAX_FILE_CHANGE_LINES = 20;
 
-export function startupText(info = {}) {
-  const header = startupBannerText(info);
+export function startupText(info = {}, width) {
+  const header = startupBannerText(info, width);
   const goal = goalText(info.goal, true);
   const preview = resumePreviewText(info.resume_preview);
-  const sections = [header, goal, preview ? `${accent("•")} ${bold("Recent context")}\n${preview}` : ""];
+  const sections = [header, goal, preview ? `${accent("◆")} ${bold("Recent context")}\n${preview}` : ""];
   return sections.filter(Boolean).join("\n\n");
 }
 
-export function promptText(info = {}, _stats = {}, state = {}) {
-  return inputPromptFrame(promptHeaderLine(info), state);
+export function promptText(info = {}, _stats = {}, state = {}, frameWidth) {
+  return inputPromptFrame(promptHeaderLine(info, frameWidth), state, frameWidth);
 }
 
 export function promptActivityLine(state = {}) {
@@ -29,12 +31,12 @@ export function promptPlaceholderText() {
   return "Ask Rind to do anything";
 }
 
-export function userInputText(text) {
+export function userInputText(text, width) {
   const lines = messageLines(text);
   if (!lines.length) {
     return "";
   }
-  const contentWidth = userInputContentWidth();
+  const contentWidth = userInputContentWidth(width);
   const physicalLines = lines.flatMap((line) => (
     wrapTextCells(line, contentWidth, contentWidth).map((chunk) => `  ${chunk.text}`)
   ));
@@ -52,16 +54,19 @@ export function outputBlockText(text, leading = false) {
 
 export function helpText(commands = []) {
   const lines = [
-    `${accent("•")} Controls`,
+    sectionRule("Controls"),
     helpRow("enter", "send / steer", "tab", "queue follow-up"),
     helpRow("↑ / ↓", "history", "← / →", "move cursor"),
     helpRow("home / end", "line edges", "del / backspace", "edit text"),
     helpRow("ctrl+c", "interrupt or quit", "?", "show shortcuts"),
     helpRow("ctrl+b", "task monitor", "esc", "close monitor"),
+    helpRow("ctrl+o", "toggle tool detail", "", ""),
   ];
-  const commandRows = commandDeckText(commands);
-  if (commandRows.length) {
-    lines.push("", `${accent("•")} Command deck`, ...commandRows);
+  const deckItems = Array.isArray(commands)
+    ? commands.filter((item) => item && typeof item === "object")
+    : [];
+  if (deckItems.length) {
+    lines.push("", sectionRule("Commands", `${deckItems.length} available`), ...commandDeckText(deckItems));
   }
   return lines.join("\n");
 }
@@ -83,6 +88,8 @@ export function slashDisplayText(display, commands = []) {
       return slashSkillsText(display);
     case "config":
       return slashConfigText(display);
+    case "theme":
+      return slashThemeText(display);
     default:
       return "";
   }
@@ -137,6 +144,24 @@ export function modelMenuText(items, selectedIndex = 0) {
     const name = active ? bold(item.name) : dim(item.name);
     const suffix = item.current ? dim("current") : "";
     lines.push(`  ${marker} ${padRight(name, 34)} ${suffix}`.trimEnd());
+  }
+  lines.push(dim("    ↑↓ select · enter use · esc cancel"));
+  return `${lines.join("\n")}\n`;
+}
+
+export function themeMenuText(items, selectedIndex = 0) {
+  const visible = menuWindow(items, selectedIndex);
+  if (!visible.items.length) {
+    return "";
+  }
+  const lines = [dim("  Theme deck")];
+  for (const [index, item] of visible.items.entries()) {
+    const active = index === visible.activeIndex;
+    const marker = active ? accent("›") : dim("·");
+    const label = padRight(clipSingleLine(item?.label || item?.name, 16), 12);
+    const name = active ? bold(label) : dim(label);
+    const suffix = item?.current ? dim("current") : "";
+    lines.push(`  ${marker} ${name}  ${flavorSwatch(item?.name)}${suffix ? `  ${suffix}` : ""}`);
   }
   lines.push(dim("    ↑↓ select · enter use · esc cancel"));
   return `${lines.join("\n")}\n`;
@@ -321,15 +346,16 @@ export function sessionSwitchedText(info = {}) {
   const model = singleLine(info.model);
   const goal = goalText(info.goal, true);
   const preview = resumePreviewText(info.resume_preview);
-  const lines = [startupBannerText(info), "", `${green("✓")} ${bold("Session switched")}`, dim(detailLine(sessionId))];
+  const lines = [startupBannerText(info), "", `${green("✓")} ${bold("Session switched")}`];
+  lines.push(dim(`    session ${sessionId}`));
   if (model) {
-    lines.push(dim(detailLine(`model ${model}`)));
+    lines.push(dim(`    model ${model}`));
   }
   if (goal) {
     lines.push("", goal);
   }
   if (preview) {
-    lines.push("", `${accent("•")} ${bold("Recent context")}`, preview);
+    lines.push("", `${accent("◆")} ${bold("Recent context")}`, preview);
   }
   return lines.join("\n");
 }
@@ -340,12 +366,12 @@ export function goalText(goal, includeHint = false) {
   }
   const status = singleLine(goal.status) || "unknown";
   const objective = clipSingleLine(goal.objective, 96);
-  const lines = [`${accent("•")} ${bold("Goal")} · ${status}`];
+  const lines = [`${accent("◆")} ${bold("Goal")} ${dim(`· ${status}`)}`];
   if (objective) {
-    lines.push(dim(detailLine(objective)));
+    lines.push(dim(`    ${objective}`));
   }
   if (includeHint && status === "active") {
-    lines.push(dim(detailLine("resume manually with /goal resume")));
+    lines.push(dim("    resume manually with /goal resume"));
   }
   return lines.join("\n");
 }
@@ -366,17 +392,14 @@ export function goalCommandText(goal, action = "get") {
 }
 
 export function modelListErrorText(error, currentModel = "") {
-  const lines = [`${accent("•")} ${bold("Model list unavailable")}`];
   const current = clipSingleLine(currentModel, 96);
-  if (current) {
-    lines.push(dim(detailLine(`current: ${current}`)));
-  }
   const detail = clipSingleLine(error, 96);
-  if (detail) {
-    lines.push(dim(detailLine(detail)));
-  }
-  lines.push(dim(detailLine("use /model set <name> to switch manually")));
-  return lines.join("\n");
+  return notice(
+    "Model list unavailable",
+    current ? `current: ${current}` : "",
+    detail,
+    "use /model set <name> to switch manually",
+  );
 }
 
 export function turnCompletedLine(event, tools = { completed: 0, failed: 0 }) {
@@ -388,21 +411,20 @@ export function turnCompletedLine(event, tools = { completed: 0, failed: 0 }) {
 }
 
 export function interruptText() {
-  return `${accent("•")} ${bold("Interrupt requested")}\n${dim(detailLine("ctrl+c again to quit"))}`;
+  return notice("Interrupt requested", "ctrl+c again to quit");
 }
 
 export function cancelledText() {
-  return `${accent("•")} ${bold("Interrupted")}\n${dim(detailLine("session preserved; resume with -c"))}`;
+  return notice("Interrupted", "session preserved; resume with -c");
 }
 
 export function commandResultText(text, detail = "") {
-  const line = `${green("✓")} ${bold(clipSingleLine(text, 96))}`;
   const extra = clipSingleLine(detail, 96);
-  return extra ? `${line}\n${dim(detailLine(extra))}` : line;
+  return `${green("✓")} ${bold(clipSingleLine(text, 96))}${extra ? dim(` — ${extra}`) : ""}`;
 }
 
 export function modelUsageText() {
-  return `${accent("•")} ${bold("Model command")}\n${dim(detailLine("/model set <name>"))}`;
+  return notice("Model command", "/model set <name>");
 }
 
 export function contextBuiltLine(event) {
@@ -413,11 +435,21 @@ export function contextBuiltLine(event) {
   const scopes = Array.isArray(decisions.rind_docs_truncated_scopes)
     ? decisions.rind_docs_truncated_scopes.join(", ")
     : "unknown";
-  return `${accent("•")} ${bold("Context trimmed")}\n${dim(detailLine(`RIND.md: ${clipSingleLine(scopes, 96)}`))}`;
+  return notice("Context trimmed", `RIND.md: ${clipSingleLine(scopes, 96)}`);
 }
 
 export function unknownCommandText() {
-  return `${accent("•")} ${bold("Unknown command")}\n${dim(detailLine("type / to browse commands or ? for shortcuts"))}`;
+  return notice("Unknown command", "type / to browse commands or ? for shortcuts");
+}
+
+function notice(label, ...details) {
+  const lines = [`${accent("◆")} ${bold(label)}`];
+  for (const detail of details.flat()) {
+    if (detail) {
+      lines.push(dim(`    ${detail}`));
+    }
+  }
+  return lines.join("\n");
 }
 
 export function toolRequestedLine(event) {
@@ -494,7 +526,7 @@ export function errorLine(error) {
 
 export function questionText(event = {}) {
   return [
-    `${accent("•")} ${bold("Choice required")}`,
+    `${accent("◆")} ${bold("Choice required")}`,
     "",
     `  ${clipSingleLine(event.question || "Input required", 76)}`,
   ].join("\n");
@@ -522,70 +554,69 @@ function toolDetail(name, args) {
 
 function commandDeckText(commands) {
   const items = Array.isArray(commands) ? commands : [];
-  if (!items.length) {
-    return [];
+  const rows = [];
+  for (const item of items) {
+    if (!item || typeof item !== "object") {
+      continue;
+    }
+    const name = padRight(`/${clipSingleLine(item.name, 22)}`, 16);
+    const description = clipSingleLine(item.description, slashContentWidth() - 20);
+    rows.push(`  ${accent(name)}${dim(description)}`.trimEnd());
   }
-  const names = items.map((command) => `/${clipSingleLine(command?.name, 22)}`);
-  const lines = [];
-  for (let index = 0; index < names.length; index += 4) {
-    const row = names.slice(index, index + 4).map((name) => padRight(name, 14)).join("  ").trimEnd();
-    lines.push(dim(`  ${row}`));
-  }
-  return lines;
+  return rows;
 }
 
 function slashHelpText(display, commands) {
   const command = display.command && typeof display.command === "object" ? display.command : null;
   if (command) {
-    const lines = [`${accent("•")} ${bold(`/${clipSingleLine(command.name, 32)}`)}`];
+    const lines = [sectionRule(`/${clipSingleLine(command.name, 32)}`)];
     const description = clipSingleLine(command.description, slashContentWidth());
     if (description) {
-      lines.push(slashDetailLine(description));
+      lines.push(`  ${description}`);
     }
-    const usage = clipSingleLine(command.usage || `/${command.name}`, slashContentWidth());
-    if (usage) {
-      lines.push(slashDetailLine(`usage: ${usage}`));
-    }
+    lines.push("");
+    lines.push(kvRow("usage", clipSingleLine(command.usage || `/${command.name}`, slashContentWidth() - 14), 10));
     const aliases = slashAliases(command.aliases);
     if (aliases) {
-      lines.push(slashDetailLine(`aliases: ${aliases}`));
+      lines.push(kvRow("aliases", aliases, 10));
     }
     return lines.join("\n");
   }
 
-  const items = Array.isArray(display.commands) && display.commands.length ? display.commands : commands;
-  const lines = [`${accent("•")} ${bold("Commands")}`];
+  const items = (Array.isArray(display.commands) && display.commands.length ? display.commands : commands)
+    .filter((item) => item && typeof item === "object");
+  const lines = [sectionRule("Commands", `${items.length} available`)];
   for (const item of items) {
-    if (!item || typeof item !== "object") {
-      continue;
-    }
-    const name = `/${clipSingleLine(item.name, 22)}`;
-    const description = clipSingleLine(item.description, slashDescriptionWidth());
-    lines.push(`  ${padRight(name, 16)} ${dim(description)}`.trimEnd());
+    const name = padRight(`/${clipSingleLine(item.name, 22)}`, 16);
+    const description = clipSingleLine(item.description, slashContentWidth() - 20);
+    lines.push(`  ${accent(name)}${dim(description)}`.trimEnd());
   }
-  lines.push(slashDetailLine("use /help <command> for usage"));
+  lines.push("");
+  lines.push(dim("  use /help <command> for usage"));
   return lines.join("\n");
 }
 
 function slashStatusText(display) {
-  const lines = [`${accent("•")} ${bold("Status")}`];
-  lines.push(slashDetailLine(`session ${clipSingleLine(display.session, 42)}`));
-  lines.push(slashDetailLine(`model ${clipSingleLine(display.model, 48)}`));
-  lines.push(slashDetailLine(`messages ${singleLine(display.messages) || "unknown"} · debug ${display.debug ? "on" : "off"}`));
+  const lines = [sectionRule("Status")];
+  lines.push(kvRow("session", clipSingleLine(display.session, 48)));
+  lines.push(kvRow("model", clipSingleLine(display.model, 52)));
+  lines.push(kvRow("messages", `${singleLine(display.messages) || "unknown"} · debug ${display.debug ? "on" : "off"}`));
   const git = display.git && typeof display.git === "object" ? display.git : null;
   if (git) {
     const state = git.dirty ? "dirty" : "clean";
-    lines.push(slashDetailLine(`git ${clipSingleLine(git.branch, 48)} · ${state}`));
+    lines.push(kvRow("git", `${clipSingleLine(git.branch, 48)} · ${state}`));
   }
   for (const usage of Array.isArray(display.usage) ? display.usage : []) {
-    lines.push("");
-    lines.push(`${accent("•")} ${bold(clipSingleLine(usage.label || "Usage", 48))}`);
-    const input = usage.context_window_tokens > 0
-      ? `${formatCount(usage.input_tokens)} / ${formatCount(usage.context_window_tokens)}`
-      : formatCount(usage.input_tokens);
-    lines.push(slashDetailLine(`input ${input} · ${formatPercent(usage.context_usage_percent)}`));
-    lines.push(slashDetailLine(`cached ${formatCount(usage.cached_input_tokens)} · ${formatPercent(usage.cache_hit_rate)}`));
-    lines.push(slashDetailLine(`output ${formatCount(usage.output_tokens)}`));
+    lines.push("", sectionRule(sectionLabel(usage.label) || "Sampling"));
+    const windowTokens = Number(usage.context_window_tokens) || 0;
+    if (windowTokens > 0) {
+      lines.push(kvRow("context", `${usageMeter(usage.context_usage_percent)} ${dim(formatPercent(usage.context_usage_percent))}`));
+      lines.push(kvRow("input", `${formatCount(usage.input_tokens)} ${dim(`/ ${formatCount(windowTokens)} tokens`)}`));
+    } else {
+      lines.push(kvRow("input", formatCount(usage.input_tokens)));
+    }
+    lines.push(kvRow("cached", `${formatCount(usage.cached_input_tokens)} ${dim(`· ${formatPercent(usage.cache_hit_rate)} hit`)}`));
+    lines.push(kvRow("output", formatCount(usage.output_tokens)));
   }
   return lines.join("\n");
 }
@@ -596,23 +627,23 @@ function slashDoctorText(display) {
   const summary = failures || warnings
     ? `${failures} fail · ${warnings} warn`
     : "all checks passed";
-  const lines = [`${accent("•")} ${bold("Doctor")} ${dim(`· ${summary}`)}`];
-  for (const check of Array.isArray(display.checks) ? display.checks : []) {
-    if (!check || typeof check !== "object") {
-      continue;
-    }
+  const checks = (Array.isArray(display.checks) ? display.checks : [])
+    .filter((check) => check && typeof check === "object");
+  const widths = checks.map((check) => visibleLength(clipSingleLine(check.name, 28)));
+  const nameWidth = Math.min(24, Math.max(10, ...(widths.length ? widths : [10])));
+  const lines = [sectionRule("Doctor", summary)];
+  for (const check of checks) {
     const status = singleLine(check.status).toLowerCase();
     const marker = doctorMarker(status);
-    const name = clipSingleLine(check.name, slashDoctorNameWidth());
-    const detail = clipSingleLine(check.detail, slashDoctorDetailWidth(name));
-    lines.push(`  ${marker} ${padRight(status || "unknown", 5)} ${name}${detail ? dim(` · ${detail}`) : ""}`);
+    const name = padRight(clipSingleLine(check.name, 28), nameWidth);
+    const detail = clipSingleLine(check.detail, Math.max(12, slashContentWidth() - nameWidth - 8));
+    lines.push(`  ${marker} ${name}  ${dim(detail)}`.trimEnd());
   }
   const nextSteps = Array.isArray(display.next_steps) ? display.next_steps : [];
   if (nextSteps.length) {
-    lines.push("");
-    lines.push(`${accent("•")} ${bold("Next steps")}`);
+    lines.push("", sectionRule("Next steps"));
     for (const step of nextSteps) {
-      lines.push(slashDetailLine(step));
+      lines.push(`  ${dim(clipSingleLine(step, slashContentWidth()))}`);
     }
   }
   return lines.join("\n");
@@ -620,54 +651,80 @@ function slashDoctorText(display) {
 
 function slashSessionsText(display) {
   const sessions = Array.isArray(display.sessions) ? display.sessions : [];
-  const lines = [`${accent("•")} ${bold("Recent sessions")}`];
+  const lines = [sectionRule("Sessions", sessions.length ? `${sessions.length} recent` : "")];
   if (!sessions.length) {
-    lines.push(slashDetailLine("no recent sessions"));
+    lines.push(dim("  no recent sessions"));
   }
   for (const session of sessions) {
     if (!session || typeof session !== "object") {
       continue;
     }
     const marker = session.current ? accent("›") : dim("·");
-    const current = session.current ? dim(" current") : "";
+    const current = session.current ? dim(" · current") : "";
     const id = middleClip(session.id, 32);
     const updated = clipSingleLine(session.updated_at, 28);
     lines.push(`  ${marker} ${id}${current}${updated ? dim(` · ${updated}`) : ""}`);
     const title = clipSingleLine(session.title, slashContentWidth());
     const size = sessionSizeText(session);
-    lines.push(slashDetailLine([title, size].filter(Boolean).join(" · ")));
+    const summary = [title, size].filter(Boolean).join(" · ");
+    if (summary) {
+      lines.push(dim(`      ${summary}`));
+    }
     const preview = clipSingleLine(session.preview, slashContentWidth());
     if (preview) {
-      lines.push(slashDetailLine(preview));
+      lines.push(dim(`      ${preview}`));
     }
   }
   const resume = clipSingleLine(display.resume_command, slashContentWidth());
   if (resume) {
-    lines.push(slashDetailLine(`resume: ${resume}`));
+    lines.push("", dim(`  resume: ${resume}`));
   }
   return lines.join("\n");
 }
 
 function slashSkillsText(display) {
-  const skills = Array.isArray(display.skills) ? display.skills : [];
-  const lines = [`${accent("•")} ${bold("Skills")}`];
+  const skills = (Array.isArray(display.skills) ? display.skills : [])
+    .filter((skill) => skill && typeof skill === "object");
+  const widths = skills.map((skill) => visibleLength(clipSingleLine(skill.name, 30)));
+  const nameWidth = Math.min(24, Math.max(12, ...(widths.length ? widths : [12])));
+  const scopeWidths = skills.map((skill) => visibleLength(clipSingleLine(skill.scope, 18)));
+  const scopeWidth = Math.max(0, ...(scopeWidths.length ? scopeWidths : [0]));
+  const lines = [sectionRule("Skills", skills.length ? `${skills.length} available` : "")];
   if (!skills.length) {
-    lines.push(slashDetailLine("no skills found"));
+    lines.push(dim("  no skills found"));
+    return lines.join("\n");
   }
   for (const skill of skills) {
-    if (!skill || typeof skill !== "object") {
-      continue;
-    }
-    const name = clipSingleLine(skill.name, 30);
+    const name = padRight(clipSingleLine(skill.name, 30), nameWidth);
     const scope = clipSingleLine(skill.scope, 18);
-    const description = clipSingleLine(skill.description, slashDescriptionWidth());
-    lines.push(`  ${dim("·")} ${bold(name)}${scope ? dim(` [${scope}]`) : ""}${description ? dim(` ${description}`) : ""}`);
-    const path = middleClip(skill.path, slashContentWidth());
-    if (path) {
-      lines.push(slashDetailLine(path));
+    const tag = scope ? padRight(`[${scope}]`, scopeWidth) : "";
+    const description = clipSingleLine(
+      skill.description,
+      Math.max(18, slashContentWidth() - nameWidth - (scopeWidth ? scopeWidth + 4 : 0)),
+    );
+    lines.push(`  ${bold(name)}  ${tag ? dim(tag) : ""}  ${dim(description)}`.trimEnd());
+    const location = prettySkillLocation(skill.path);
+    if (location) {
+      lines.push(dim(`      ${clipSingleLine(location, Math.max(18, slashContentWidth() - 6))}`));
     }
   }
   return lines.join("\n");
+}
+
+// Paths read best compressed: collapse the home directory to "~" and drop the
+// redundant SKILL.md filename that every entry shares.
+function prettySkillLocation(value) {
+  let location = String(value || "").trim();
+  if (!location) {
+    return "";
+  }
+  location = location.replace(/[\\/]+SKILL\.md$/i, "");
+  const home = homedir();
+  if (home && (location === home || location.startsWith(home))) {
+    const rest = location.slice(home.length);
+    location = rest ? `~${rest}` : "~";
+  }
+  return location;
 }
 
 function sessionSizeText(session) {
@@ -685,27 +742,76 @@ function optionalNonnegativeNumber(value) {
 }
 
 function slashConfigText(display) {
-  const lines = [`${accent("•")} ${bold("Config")}`];
-  for (const entry of Array.isArray(display.entries) ? display.entries : []) {
-    if (!entry || typeof entry !== "object") {
-      continue;
-    }
+  const entries = (Array.isArray(display.entries) ? display.entries : [])
+    .filter((entry) => entry && typeof entry === "object");
+  const lines = [sectionRule("Config", entries.length ? `${entries.length} ${entries.length === 1 ? "key" : "keys"}` : "")];
+  for (const entry of entries) {
     const label = clipSingleLine(entry.label, 22);
     const rawValue = entry.label === "settings"
-      ? middleClip(entry.value, Math.max(18, slashContentWidth() - visibleLength(label) - 4))
-      : clipSingleLine(entry.value, Math.max(18, slashContentWidth() - visibleLength(label) - 4));
-    const state = entry.state ? ` (${clipSingleLine(entry.state, 18)})` : "";
-    lines.push(slashDetailLine(`${label}: ${rawValue}${state}`));
+      ? middleClip(entry.value, Math.max(18, slashContentWidth() - visibleLength(label) - 6))
+      : clipSingleLine(entry.value, Math.max(18, slashContentWidth() - visibleLength(label) - 6));
+    const state = entry.state ? dim(`  (${clipSingleLine(entry.state, 18)})`) : "";
+    lines.push(`  ${dim(padRight(label, 18))}${rawValue}${state}`.trimEnd());
   }
   return lines.join("\n");
 }
 
-function slashAliases(value) {
-  return Array.isArray(value) ? value.map((alias) => `/${clipSingleLine(alias, 18)}`).join(", ") : "";
+function slashThemeText(display) {
+  const flavors = Array.isArray(display.flavors) ? display.flavors : [];
+  const current = singleLine(display.current) || "mocha";
+  const meta = display.changed && display.previous
+    ? `${singleLine(display.previous)} → ${current}`
+    : current;
+  const lines = [sectionRule("Theme", meta)];
+  if (!flavors.length) {
+    lines.push(dim(`  active: ${current}`));
+    return lines.join("\n");
+  }
+  const labelWidth = Math.min(
+    16,
+    Math.max(8, ...flavors.map((flavor) => visibleLength(clipSingleLine(flavor?.label, 16)))),
+  );
+  for (const flavor of flavors) {
+    if (!flavor || typeof flavor !== "object") {
+      continue;
+    }
+    const isCurrent = Boolean(flavor.current);
+    const marker = isCurrent ? accent("›") : dim("·");
+    const label = padRight(clipSingleLine(flavor.label || flavor.name, 16), labelWidth);
+    const tag = isCurrent ? dim(" · current") : "";
+    lines.push(`  ${marker} ${isCurrent ? bold(label) : dim(label)}  ${flavorSwatch(flavor.name)}${tag}`);
+  }
+  lines.push("");
+  lines.push(dim("  /theme <latte | frappe | macchiato | mocha>"));
+  return lines.join("\n");
 }
 
-function slashDetailLine(value) {
-  return dim(detailLine(clipSingleLine(value, slashContentWidth())));
+function sectionRule(title, meta = "") {
+  const titleText = clipSingleLine(title, 48);
+  const metaText = meta ? clipSingleLine(meta, 48) : "";
+  const head = metaText ? `${titleText} ${dim(`· ${metaText}`)}` : titleText;
+  const fill = Math.max(3, slashContentWidth() - visibleLength(head) - 6);
+  return `  ${dim("──")} ${head} ${dim("─".repeat(fill))}`;
+}
+
+function kvRow(label, value, labelWidth = 12) {
+  return `  ${dim(padRight(label, labelWidth))}${value}`;
+}
+
+function usageMeter(ratio) {
+  const cells = 10;
+  const clamped = Math.max(0, Math.min(1, Number(ratio) || 0));
+  const filled = Math.min(cells, Math.round(clamped * cells));
+  const tone = clamped >= 0.85 ? red : clamped >= 0.6 ? accent : (text) => text;
+  return `${tone("▮".repeat(filled))}${dim("▯".repeat(cells - filled))}`;
+}
+
+function sectionLabel(value) {
+  return singleLine(value).replace(/:\s*$/, "");
+}
+
+function slashAliases(value) {
+  return Array.isArray(value) ? value.map((alias) => `/${clipSingleLine(alias, 18)}`).join(", ") : "";
 }
 
 function slashContentWidth() {
@@ -716,18 +822,6 @@ function slashContentWidth() {
   return Math.max(28, Math.min(96, columns - 6));
 }
 
-function slashDescriptionWidth() {
-  return Math.max(18, slashContentWidth() - 20);
-}
-
-function slashDoctorNameWidth() {
-  return Math.max(10, Math.min(28, slashContentWidth() - 18));
-}
-
-function slashDoctorDetailWidth(name) {
-  return Math.max(12, slashContentWidth() - visibleLength(name) - 12);
-}
-
 function doctorMarker(status) {
   if (status === "ok") {
     return green("✓");
@@ -735,7 +829,7 @@ function doctorMarker(status) {
   if (status === "fail") {
     return red("⊘");
   }
-  return accent("!");
+  return paint.warning("!");
 }
 
 function menuWindow(items, selectedIndex) {
@@ -790,9 +884,6 @@ function toolLabel(name) {
   const labels = {
     edit_file: "file edit",
     read_file: "file read",
-    search_files: "file search",
-    view_image: "image",
-    web_search: "web search",
   };
   return labels[name] || humanToolName(name);
 }
@@ -941,8 +1032,8 @@ function messageLines(value) {
   return text ? text.split("\n").map((line) => line.trimEnd()) : [];
 }
 
-function userInputContentWidth() {
-  const columns = Number(process.stdout.columns);
+function userInputContentWidth(width) {
+  const columns = Number(width ?? process.stdout.columns);
   return Number.isFinite(columns) && columns > 0 ? Math.max(1, Math.floor(columns - 2)) : 78;
 }
 
@@ -1022,8 +1113,8 @@ function resumePreviewLine(line) {
   return dim(`  ${clipSingleLine(line, 78)}`);
 }
 
-function startupBannerText(info) {
-  const width = startupBannerWidth();
+function startupBannerText(info, frameWidth) {
+  const width = startupBannerWidth(frameWidth);
   const modelLine = `model ${singleLine(info.model) || "unknown"} · session ${singleLine(info.session_id) || "unknown"}`;
   const version = singleLine(info.version) || "unknown";
   const cwd = middleClip(info.cwd || process.cwd(), width - 4);
@@ -1050,44 +1141,55 @@ function startupBannerLine(text, frameWidth) {
   return `${dim("│")} ${padRight(content, width)} ${dim("│")}`;
 }
 
-function startupBannerWidth() {
-  const columns = Number(process.stdout.columns);
+function startupBannerWidth(frameWidth) {
+  const columns = Number(frameWidth ?? process.stdout.columns);
   if (!Number.isFinite(columns) || columns <= 0) {
     return MAX_STARTUP_BANNER_WIDTH;
   }
   return Math.max(44, Math.min(MAX_STARTUP_BANNER_WIDTH, columns - 2));
 }
 
-function helpRow(leftKey, leftText, rightKey, rightText) {
+function helpRow(leftKey, leftText, rightKey = "", rightText = "") {
   const left = `${padRight(leftKey, 12)} ${leftText}`;
+  if (!rightKey && !rightText) {
+    return dim(`  ${left}`);
+  }
   const right = `${padRight(rightKey, 14)} ${rightText}`;
   return dim(`  ${padRight(left, 33)} ${right}`);
 }
 
-function inputPromptFrame(header = "", state = {}) {
+function inputPromptFrame(header = "", state = {}, frameWidth) {
   const lines = [""];
   const activity = promptActivityLine(state);
   if (activity) {
     lines.push(activity);
   }
-  lines.push(...pendingInputLines(state.pendingInputs));
+  lines.push(...pendingInputLines(state.pendingInputs, frameWidth));
   if (header) {
     lines.push(header);
   }
-  lines.push(inputDivider());
+  lines.push(inputDivider(frameWidth));
   lines.push("  ▷ ");
   return lines.join("\n");
 }
 
-function inputDivider() {
-  return dim(`  ${"─".repeat(composerWidth())}`);
+function inputDivider(frameWidth) {
+  return dim(`  ${"─".repeat(dividerWidth(frameWidth))}`);
 }
 
-function pendingInputLines(entries) {
+function dividerWidth(frameWidth) {
+  const columns = Number(frameWidth ?? process.stdout.columns);
+  if (!Number.isFinite(columns) || columns <= 0) {
+    return MAX_COMPOSER_WIDTH;
+  }
+  return Math.max(1, Math.floor(columns) - 2);
+}
+
+function pendingInputLines(entries, frameWidth) {
   if (!Array.isArray(entries)) {
     return [];
   }
-  const width = composerWidth();
+  const width = composerWidth(frameWidth);
   const lines = entries.flatMap((entry) => {
     const input = singleLine(entry?.input);
     if (!input) {
@@ -1123,7 +1225,7 @@ function visibleLength(text) {
   return textWidth(text);
 }
 
-function promptHeaderLine(info) {
+function promptHeaderLine(info, frameWidth) {
   const backgroundCount = Number(info.background_count);
   const delegateCount = Number(info.delegate_count);
   const taskHints = [];
@@ -1138,7 +1240,7 @@ function promptHeaderLine(info) {
     : "";
   const model = singleLine(info.model);
   const cwd = middleClip(info.cwd, 56);
-  const width = composerWidth();
+  const width = composerWidth(frameWidth);
   if (model && cwd) {
     const separator = " · ";
     const pathWidth = width - visibleLength(model) - visibleLength(separator) - visibleLength(taskHint);
@@ -1152,45 +1254,38 @@ function promptHeaderLine(info) {
   return cwd ? `  ${promptPath(clipSingleLine(cwd, width))}${taskHint}` : "";
 }
 
-function composerWidth() {
-  const columns = Number(process.stdout.columns);
+function composerWidth(frameWidth) {
+  const columns = Number(frameWidth ?? process.stdout.columns);
   if (!Number.isFinite(columns) || columns <= 0) {
     return MAX_COMPOSER_WIDTH;
   }
   return Math.max(1, Math.min(MAX_COMPOSER_WIDTH, columns - 4));
 }
 
-function styled(text, code) {
-  if (!Boolean(process.stdout.isTTY) || process.env.NO_COLOR) {
-    return text;
-  }
-  return `\x1b[${code}m${text}\x1b[0m`;
-}
-
 function bold(text) {
-  return styled(text, "1");
+  return paint.bold(text);
 }
 
 function dim(text) {
-  return styled(text, "2");
+  return paint.dim(text);
 }
 
 function accent(text) {
-  return styled(text, "38;5;81");
+  return paint.accent(text);
 }
 
 function green(text) {
-  return styled(text, "38;5;113");
+  return paint.success(text);
 }
 
 function red(text) {
-  return styled(text, "38;5;203");
+  return paint.danger(text);
 }
 
 function promptModel(text) {
-  return styled(text, "1;38;5;81");
+  return paint.bold(paint.accent(text));
 }
 
 function promptPath(text) {
-  return styled(text, "38;5;110");
+  return paint.path(text);
 }
