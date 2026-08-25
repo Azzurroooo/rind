@@ -6,12 +6,12 @@ import { requireRuntimeInitialization, runtimeMethods } from "./runtime-protocol
 import { createOneShotProgress } from "./one-shot-progress.js";
 
 export const oneShotHelp = [
-  "Usage: rind run --prompt <text> [--cwd <absolute-path>] [--session <id>]",
+  "Usage: rind run --prompt <text> [--dir <absolute-path>] [--session <id>]",
   "",
   "Runs one prompt without the interactive TTY UI. The final assistant reply is written to stdout.",
   "",
   "Example:",
-  '  rind run --prompt "Summarize the changes in src/" --cwd "E:\\code\\my-project" --session 20260825_101530_ab12cd34',
+  '  rind run --prompt "Summarize the changes in src/" --dir "E:\\code\\my-project" --session 20260825_101530_ab12cd34',
 ].join("\n");
 
 export const cliHelp = [
@@ -24,7 +24,7 @@ export const cliHelp = [
 
 export function parseOneShotArgs(args) {
   if (args[0] !== "run") return null;
-  const result = { cwd: null, session: null, prompt: null, debug: false, traceLlm: false };
+  const result = { dir: null, session: null, prompt: null, debug: false, traceLlm: false };
   for (let index = 1; index < args.length; index += 1) {
     const flag = args[index];
     if (flag === "--debug") {
@@ -35,7 +35,7 @@ export function parseOneShotArgs(args) {
       result.traceLlm = true;
       continue;
     }
-    if (!["--cwd", "--session", "--prompt"].includes(flag)) {
+    if (!["--dir", "--session", "--prompt"].includes(flag)) {
       throw new Error(`Unknown run option: ${flag}`);
     }
     const value = args[index + 1];
@@ -43,13 +43,13 @@ export function parseOneShotArgs(args) {
       throw new Error(`${flag} requires a value.`);
     }
     index += 1;
-    const key = { "--cwd": "cwd", "--session": "session", "--prompt": "prompt" }[flag];
+    const key = { "--dir": "dir", "--session": "session", "--prompt": "prompt" }[flag];
     if (result[key] !== null) throw new Error(`${flag} may only be specified once.`);
     result[key] = value;
   }
   if (!result.prompt?.trim()) throw new Error("--prompt requires a non-empty value.");
-  if (result.cwd && !path.isAbsolute(result.cwd)) {
-    throw new Error("--cwd must be an absolute path.");
+  if (result.dir && !path.isAbsolute(result.dir)) {
+    throw new Error("--dir must be an absolute path.");
   }
   return result;
 }
@@ -115,7 +115,7 @@ export async function runOneShot({ args, python, repoRoot, runtimePath, cwd = pr
   const options = parseOneShotArgs(args);
   if (!options) return false;
   const runtimeArgs = ["--no-user-question"];
-  if (options.cwd) runtimeArgs.push("--cwd", options.cwd);
+  if (options.dir) runtimeArgs.push("--cwd", options.dir);
   if (options.session) runtimeArgs.push("--session", options.session);
   if (options.debug) runtimeArgs.push("--debug");
   if (options.traceLlm) runtimeArgs.push("--trace-llm");
@@ -135,7 +135,7 @@ export async function runOneShot({ args, python, repoRoot, runtimePath, cwd = pr
       python,
       repoRoot,
       runtimePath,
-      cwd: options.cwd || cwd,
+      cwd: options.dir || cwd,
       cliArgs: runtimeArgs,
       onMessage: (message) => {
         const event = message?.event;
@@ -174,10 +174,9 @@ export async function runOneShot({ args, python, repoRoot, runtimePath, cwd = pr
     const responseTurnId = String(result?.turn_id || turnId || "");
     turnId = responseTurnId;
     const finalText = completed || assistant;
-    const workspace = String(sessionInfo.workspace_root || options.cwd || cwd);
     const finishedAt = new Date();
     const logPath = await writeRunLog({
-      workspace,
+      workspace: cwd,
       sessionId,
       turnId,
       model: sessionInfo.model || "",
@@ -198,7 +197,7 @@ export async function runOneShot({ args, python, repoRoot, runtimePath, cwd = pr
     if (sessionInfo) {
       try {
         await writeRunLog({
-          workspace: String(sessionInfo.workspace_root || options.cwd || cwd),
+          workspace: cwd,
           sessionId: String(sessionInfo.session_id || options.session || "unknown"),
           turnId,
           model: sessionInfo.model || "",

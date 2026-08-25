@@ -7,15 +7,15 @@ import path from "node:path";
 import { parseOneShotArgs, promptSlug, runOneShot } from "../lib/one-shot.js";
 
 test("one-shot parser requires run prompt and accepts explicit workspace/session", () => {
-  assert.deepEqual(parseOneShotArgs(["run", "--cwd", "C:/work", "--session", "s1", "--prompt", "hello"]), {
-    cwd: "C:/work",
+  assert.deepEqual(parseOneShotArgs(["run", "--dir", "C:/work", "--session", "s1", "--prompt", "hello"]), {
+    dir: "C:/work",
     session: "s1",
     prompt: "hello",
     debug: false,
     traceLlm: false,
   });
   assert.throws(() => parseOneShotArgs(["run", "--prompt", ""]), /non-empty/);
-  assert.throws(() => parseOneShotArgs(["run", "--cwd", "relative", "--prompt", "hello"]), /absolute/);
+  assert.throws(() => parseOneShotArgs(["run", "--dir", "relative", "--prompt", "hello"]), /absolute/);
   assert.equal(parseOneShotArgs(["hello"]), null);
 });
 
