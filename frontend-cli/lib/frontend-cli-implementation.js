@@ -86,7 +86,7 @@ if (cliArgs[0] === "run") {
       python,
       repoRoot,
       runtimePath,
-      stderr: (text) => process.stderr.write(`${text}\n`),
+      stderr: (text) => process.stderr.write(text),
       stdout: (text) => process.stdout.write(`${text}${String(text).endsWith("\n") ? "" : "\n"}`),
     });
   } catch (error) {

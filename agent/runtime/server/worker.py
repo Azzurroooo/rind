@@ -675,6 +675,7 @@ class RuntimeWorker:
             self.session_id = str(info["session_id"])
             self._initialized = True
         info = await self.repository.info(self.session_id)
+        info["base_url"] = self._provider_client_factory.settings.base_url
         info["live_turn"] = self.execution.live_turn(self.session_id)
         return info
 

@@ -1054,6 +1054,7 @@ class WorkerStdioRuntimeServer:
             "session_id": info["session_id"],
             "draft": False,
             "model": info.get("model"),
+            "base_url": info.get("base_url"),
             "workspace_root": info.get("workspace_root"),
             "version": __version__,
             "protocol_version": PROTOCOL_VERSION,

@@ -3,6 +3,7 @@ import path from "node:path";
 
 import { createRuntimeClient } from "./runtime-client.js";
 import { requireRuntimeInitialization, runtimeMethods } from "./runtime-protocol.js";
+import { createOneShotProgress } from "./one-shot-progress.js";
 
 export const oneShotHelp = [
   "Usage: rind run --prompt <text> [--cwd <absolute-path>] [--session <id>]",
@@ -122,13 +123,14 @@ export async function runOneShot({ args, python, repoRoot, runtimePath, cwd = pr
   let assistant = "";
   let completed = "";
   let turnId = "";
-  let toolCount = 0;
   let status = "failed";
   const startedAt = new Date();
   let sessionInfo = null;
+  const progress = createOneShotProgress({ stderr, stream: process.stderr });
+  let anonymousToolCounter = 0;
   let client;
   try {
-    stderr(`Starting session${options.session ? ` ${options.session}` : ""}...`);
+    progress.begin();
     client = clientFactory({
       python,
       repoRoot,
@@ -141,20 +143,29 @@ export async function runOneShot({ args, python, repoRoot, runtimePath, cwd = pr
         if (message?.turn_id) turnId = String(message.turn_id);
         if (type === "assistant_delta") assistant += String(event.text || "");
         if (type === "assistant_message_completed") completed = String(event.content || "");
-        if (type === "tool_requested") {
-          toolCount += 1;
-          stderr(`Tool: ${String(event.tool_name || "unknown")}`);
+        const toolCallId = String(event?.tool_call_id || "");
+        const trackedId = toolCallId || (type === "tool_requested" ? `anon:${(anonymousToolCounter += 1)}` : "");
+        if (trackedId && (type === "tool_requested" || type === "tool_input_started") && !progress.hasTool(trackedId)) {
+          progress.toolStarted(trackedId, String(event.tool_name || "tool"));
+        }
+        if (trackedId && type === "tool_result") {
+          const failed = Boolean(event.error_type) || ["error", "failed"].includes(String(event.status || ""));
+          progress.toolFinished(trackedId, { ok: !failed, durationMs: Number(event.duration_ms) || 0 });
         }
       },
       onStderr: (text) => {
-        if (options.debug) stderr(String(text).trimEnd());
+        if (options.debug) stderr(`${String(text).trimEnd()}\n`);
       },
     });
     client.start();
     sessionInfo = requireRuntimeInitialization(await client.request(runtimeMethods.initialize));
-    stderr("Running turn...");
     const sessionId = String(sessionInfo.session_id || options.session || "").trim();
     if (!sessionId) throw new Error("Runtime initialization did not return a session_id.");
+    progress.session({
+      sessionId,
+      model: String(sessionInfo.model || ""),
+      baseUrl: String(sessionInfo.base_url || ""),
+    });
     const result = await client.request(runtimeMethods.sessionPrompt, {
       session_id: sessionId,
       input: options.prompt,
@@ -164,6 +175,7 @@ export async function runOneShot({ args, python, repoRoot, runtimePath, cwd = pr
     turnId = responseTurnId;
     const finalText = completed || assistant;
     const workspace = String(sessionInfo.workspace_root || options.cwd || cwd);
+    const finishedAt = new Date();
     const logPath = await writeRunLog({
       workspace,
       sessionId,
@@ -172,16 +184,17 @@ export async function runOneShot({ args, python, repoRoot, runtimePath, cwd = pr
       prompt: options.prompt,
       assistant: finalText,
       status,
-      toolCount,
+      toolCount: progress.toolCount,
       startedAt,
-      finishedAt: new Date(),
+      finishedAt,
     });
+    progress.done(finishedAt - startedAt);
+    progress.note(`log ${logPath}`);
     stdout(finalText);
-    stderr(`Completed. Log written to ${logPath}`);
     return true;
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    stderr(`Run failed: ${message}`);
+    progress.fail(`run failed: ${message}`);
     if (sessionInfo) {
       try {
         await writeRunLog({
@@ -192,13 +205,13 @@ export async function runOneShot({ args, python, repoRoot, runtimePath, cwd = pr
           prompt: options.prompt,
           assistant: completed || assistant,
           status: "failed",
-          toolCount,
+          toolCount: progress.toolCount,
           error: message,
           startedAt,
           finishedAt: new Date(),
         });
       } catch (logError) {
-        stderr(`Log failed: ${logError instanceof Error ? logError.message : String(logError)}`);
+        stderr(`Log failed: ${logError instanceof Error ? logError.message : String(logError)}\n`);
       }
     }
     process.exitCode = 1;
