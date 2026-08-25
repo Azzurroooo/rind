@@ -5,7 +5,7 @@ const FLAVORS = {
   latte: {
     label: "Latte",
     accent: "#1e66f5",
-    success: "#179299",
+    success: "#40a02b",
     danger: "#d20f39",
     warning: "#df8e1d",
     notice: "#8839ef",
@@ -17,7 +17,7 @@ const FLAVORS = {
   frappe: {
     label: "Frappé",
     accent: "#8caaee",
-    success: "#81c8be",
+    success: "#a6d189",
     danger: "#e78284",
     warning: "#e5c890",
     notice: "#ca9ee6",
@@ -29,7 +29,7 @@ const FLAVORS = {
   macchiato: {
     label: "Macchiato",
     accent: "#8aadf4",
-    success: "#8bd5ca",
+    success: "#a6da95",
     danger: "#ed8796",
     warning: "#eed49f",
     notice: "#c6a0f6",
@@ -41,7 +41,7 @@ const FLAVORS = {
   mocha: {
     label: "Mocha",
     accent: "#89b4fa",
-    success: "#94e2d5",
+    success: "#a6e3a1",
     danger: "#f38ba8",
     warning: "#f9e2af",
     notice: "#cba6f7",

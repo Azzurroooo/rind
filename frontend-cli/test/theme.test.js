@@ -42,7 +42,7 @@ test("paint honors the environment and paintRaw always emits truecolor", () => {
     process.stdout.isTTY = false;
     delete process.env.NO_COLOR;
     assert.equal(paint.accent("x"), "x");
-    assert.equal(paintRaw.success("x"), "\x1b[38;2;148;226;213mx\x1b[0m");
+    assert.equal(paintRaw.success("x"), "\x1b[38;2;166;227;161mx\x1b[0m");
 
     process.stdout.isTTY = true;
     assert.equal(paint.danger("x"), "\x1b[38;2;243;139;168mx\x1b[0m");
