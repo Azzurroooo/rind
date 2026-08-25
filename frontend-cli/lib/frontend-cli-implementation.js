@@ -15,6 +15,8 @@ import {
   isRuntimeEventForTurn,
 } from "./runtime-protocol.js";
 import { executeLocalSlashCommand, loadLocalSettings } from "./local-slash-commands.js";
+import { loadCliState, saveCliState } from "./cli-state-store.js";
+import { setTheme } from "./theme.js";
 import { createTurnController } from "./turn-controller.js";
 import { createCommandController } from "./command-controller.js";
 import { createTaskMonitorController } from "./task-monitor-controller.js";
@@ -240,6 +242,7 @@ commandController = createCommandController({
         runtimeInitialized: runtimeState.status === "ready",
         interactive: Boolean(tui),
         commands: sessionState.commands,
+        persistTheme: (name) => saveCliState({ theme: name }),
       });
     },
   },
@@ -349,6 +352,10 @@ inputController = createInputController({
 process.on("SIGINT", handleSigint);
 
 try {
+  const persistedState = loadCliState();
+  if (persistedState.theme) {
+    setTheme(persistedState.theme);
+  }
   sessionState.settings = await loadLocalSettings(undefined, process.cwd());
   sessionState.info = { cwd: process.cwd(), model: sessionState.settings.model };
   sessionState.commands = commandController.localCommands();

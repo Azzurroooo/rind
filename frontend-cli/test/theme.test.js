@@ -13,6 +13,10 @@ import {
   themeOptions,
 } from "../lib/theme.js";
 import { executeLocalSlashCommand } from "../lib/local-slash-commands.js";
+import { cliStatePath, loadCliState, saveCliState } from "../lib/cli-state-store.js";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
 
 test("theme defaults to mocha and validates switches", () => {
   resetTheme();
@@ -89,4 +93,39 @@ test("/theme command lists flavors and applies switches", async () => {
   assert.match(unknown.text, /Unknown theme/);
   assert.equal(currentTheme().name, "macchiato");
   resetTheme();
+});
+
+test("/theme persists only through the injected persistTheme hook", async () => {
+  resetTheme();
+  let persisted = null;
+  const switched = await executeLocalSlashCommand("/theme latte", {
+    persistTheme: (name) => {
+      persisted = name;
+    },
+  });
+  assert.equal(persisted, "latte");
+  assert.equal(switched.display.changed, true);
+
+  const bare = await executeLocalSlashCommand("/theme", {});
+  assert.equal(bare.display.changed, false);
+  resetTheme();
+});
+
+test("cli state store merges patches atomically and tolerates corruption", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "rind-cli-state-"));
+  try {
+    assert.deepEqual(loadCliState(root), {});
+    assert.equal(saveCliState({ theme: "latte" }, root), true);
+    assert.equal(saveCliState({ future: true }, root), true);
+    assert.deepEqual(loadCliState(root), { theme: "latte", future: true });
+    assert.ok(loadCliState(root).theme === "latte");
+
+    await writeFile(path.join(root, "cli-state.json"), "{broken", "utf8");
+    assert.deepEqual(loadCliState(root), {});
+    assert.equal(saveCliState({ theme: "mocha" }, root), true);
+    assert.deepEqual(loadCliState(root), { theme: "mocha" });
+    resetTheme();
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
 });

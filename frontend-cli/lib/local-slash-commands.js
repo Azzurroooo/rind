@@ -89,7 +89,7 @@ export async function executeLocalSlashCommand(input, context = {}) {
   }
   if (name === "doctor") return doctorResult(context, argument);
   if (name === "help") return helpResult(argument, context.commands || []);
-  if (name === "theme") return themeResult(argument);
+  if (name === "theme") return themeResult(argument, context);
   if (name === "model" && !argument && !context.interactive) return { text: `Model: ${context.settings?.model || "unknown"}` };
   return null;
 }
@@ -178,7 +178,7 @@ function helpResult(argument, commands) {
   };
 }
 
-function themeResult(argument) {
+function themeResult(argument, context = {}) {
   const requested = argument.replace(/^\//, "").trim();
   if (requested) {
     const previous = currentTheme();
@@ -186,6 +186,7 @@ function themeResult(argument) {
     if (!applied) {
       return { text: `Unknown theme "${requested}". Available: ${themeNames().join(", ")}.` };
     }
+    context.persistTheme?.(applied.name);
     return {
       text: `Theme: ${applied.name}`,
       display: {
