@@ -154,19 +154,23 @@ test("prompt and turn status copy match the compact terminal UI", () => {
   assert.equal(outputBlockText(""), "");
 });
 
-test("promptText includes only model and working directory above the input", () => {
+test("promptText includes model and working directory above the input", () => {
+  const lines = promptText({ model: "glm-5.1", cwd: "E:\\code\\agent\\rind-ts-cli-process-split" }, {
+    context_usage_percent: 0.125,
+    cache_hit_rate: 0.75,
+    output_tokens: 1200,
+  }).split("\n");
+
+  assert.equal(lines[0], "");
+  assert.match(lines[1], /^  glm-5\.1 · E:\\code\\agent\\rind-ts-cli-process-split {10,}▮▯▯▯▯▯▯▯▯▯ 12\.5%$/);
+  assert.equal(lines[2], `  ${"─".repeat(78)}`);
+  assert.equal(lines[3], "  ▷ ");
+});
+
+test("promptText omits the context meter without usage data", () => {
   assert.equal(
-    promptText({ model: "glm-5.1", cwd: "E:\\code\\agent\\rind-ts-cli-process-split" }, {
-      context_usage_percent: 0.125,
-      cache_hit_rate: 0.75,
-      output_tokens: 1200,
-    }),
-    [
-      "",
-      "  glm-5.1 · E:\\code\\agent\\rind-ts-cli-process-split",
-      `  ${"─".repeat(78)}`,
-      "  ▷ ",
-    ].join("\n"),
+    promptText({ model: "m1", cwd: "E:\\project" }, {}).split("\n")[1],
+    "  m1 · E:\\project",
   );
 });
 
@@ -201,6 +205,18 @@ test("promptText keeps the activity line separate from the input chrome", () => 
     [
       "",
       "  ◓ Working (1s) ctrl+c interrupt",
+      `  ${"─".repeat(78)}`,
+      "  ▷ ",
+    ].join("\n"),
+  );
+});
+
+test("promptText activity line names the running tool action", () => {
+  assert.equal(
+    promptText({}, {}, { running: true, frame: 1, elapsedMs: 1250, detail: "edit src/auth.py" }),
+    [
+      "",
+      "  ◓ Working · edit src/auth.py (1s) ctrl+c interrupt",
       `  ${"─".repeat(78)}`,
       "  ▷ ",
     ].join("\n"),

@@ -17,7 +17,7 @@ import { TextBlock } from "./components/text-block.js";
 import { DynamicBlock } from "./components/dynamic-block.js";
 import { AssistantMessage } from "./components/assistant-message.js";
 import { ToolBlock } from "./components/tool-block.js";
-import { argsFromResult } from "./tool-display.js";
+import { argsFromResult, toolActivityText } from "./tool-display.js";
 
 export function createCliOutputController({ state, terminalUi, transcript }) {
   const streamBuffer = createLegacyStreamBuffer();
@@ -48,10 +48,22 @@ export function createCliOutputController({ state, terminalUi, transcript }) {
         : state.display.goalChasing
           ? "Goal-Chasing"
           : "Working",
+      detail: running && !state.display.activeCompact ? runningToolDetail() : "",
       frame: state.display.activityFrame,
       elapsedMs: running ? Date.now() - state.display.activityStartedAt : 0,
       pendingInputs: state.input.pending,
     };
+  }
+
+  // Latest still-running tool call names the current action in the activity line.
+  function runningToolDetail() {
+    let current = null;
+    for (const block of toolBlocks.values()) {
+      if (block.phase === "running") {
+        current = block;
+      }
+    }
+    return current ? toolActivityText(current.name, current.args) : "";
   }
 
   function mainPromptText(frameWidth) {

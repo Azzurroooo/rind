@@ -15,8 +15,8 @@ export function startupText(info = {}, width) {
   return sections.filter(Boolean).join("\n\n");
 }
 
-export function promptText(info = {}, _stats = {}, state = {}, frameWidth) {
-  return inputPromptFrame(promptHeaderLine(info, frameWidth), state, frameWidth);
+export function promptText(info = {}, stats = {}, state = {}, frameWidth) {
+  return inputPromptFrame(promptHeaderLine(info, frameWidth, stats), state, frameWidth);
 }
 
 export function promptActivityLine(state = {}) {
@@ -25,7 +25,8 @@ export function promptActivityLine(state = {}) {
   }
   const elapsed = formatActivityDuration(state.elapsedMs);
   const label = singleLine(state.label) || "Working";
-  return `  ${accent(activityFrame(state.frame))} ${bold(label)} ${dim(`(${elapsed}) ctrl+c interrupt`)}`;
+  const detail = state.detail ? dim(` · ${clipSingleLine(state.detail, 28)}`) : "";
+  return `  ${accent(activityFrame(state.frame))} ${bold(label)}${detail} ${dim(`(${elapsed}) ctrl+c interrupt`)}`;
 }
 
 export function promptPlaceholderText() {
@@ -1280,7 +1281,7 @@ function visibleLength(text) {
   return textWidth(text);
 }
 
-function promptHeaderLine(info, frameWidth) {
+function promptHeaderLine(info, frameWidth, stats = {}) {
   const backgroundCount = Number(info.background_count);
   const delegateCount = Number(info.delegate_count);
   const taskHints = [];
@@ -1298,17 +1299,46 @@ function promptHeaderLine(info, frameWidth) {
   const cwd = middleClip(info.cwd, 56);
   const width = composerWidth(frameWidth);
   const effortSegment = effort ? `${dim(" · ")}${promptModel(effort)}` : "";
+  let header;
   if (model && cwd) {
     const separator = " · ";
     const pathWidth = width - visibleLength(model) - visibleLength(separator) - visibleLength(taskHint) - visibleLength(effortSegment);
-    if (pathWidth > 0) {
-      return `  ${promptModel(clipSingleLine(model, width))}${effortSegment}${dim(separator)}${promptPath(clipSingleLine(cwd, pathWidth))}${taskHint}`;
-    }
+    header = pathWidth > 0
+      ? `  ${promptModel(clipSingleLine(model, width))}${effortSegment}${dim(separator)}${promptPath(clipSingleLine(cwd, pathWidth))}${taskHint}`
+      : model
+        ? `  ${promptModel(clipSingleLine(model, width))}${taskHint}`
+        : "";
+  } else if (model) {
+    header = `  ${promptModel(clipSingleLine(model, width))}${taskHint}`;
+  } else {
+    header = cwd ? `  ${promptPath(clipSingleLine(cwd, width))}${taskHint}` : "";
   }
-  if (model) {
-    return `  ${promptModel(clipSingleLine(model, width))}${taskHint}`;
+  return appendContextMeter(header, stats, width);
+}
+
+// Right-align the context meter when the header leaves room for it; drop it
+// rather than wrap on narrow terminals.
+function appendContextMeter(header, stats, width) {
+  const meter = contextMeterText(stats);
+  if (!meter || !header) {
+    return header;
   }
-  return cwd ? `  ${promptPath(clipSingleLine(cwd, width))}${taskHint}` : "";
+  const gap = width - visibleLength(header) - visibleLength(meter);
+  return gap >= 2 ? `${header}${" ".repeat(gap)}${meter}` : header;
+}
+
+function contextMeterText(stats) {
+  const ratio = Number(stats?.context_usage_percent);
+  if (!Number.isFinite(ratio) || ratio <= 0) {
+    return "";
+  }
+  const segments = [`${usageMeter(ratio)} ${dim(formatPercent(ratio))}`];
+  const windowTokens = Number(stats?.context_window_tokens) || 0;
+  const inputTokens = Number(stats?.input_tokens) || 0;
+  if (windowTokens > 0 && inputTokens > 0) {
+    segments.push(dim(`${formatCount(inputTokens)} / ${formatCount(windowTokens)}`));
+  }
+  return segments.join(" ");
 }
 
 function composerWidth(frameWidth) {

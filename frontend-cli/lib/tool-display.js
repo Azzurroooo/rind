@@ -619,6 +619,12 @@ const GENERIC_RENDERER = {
   },
 };
 
+// Plain-text summary for the composer activity line: "<tool> <key arg>".
+export function toolActivityText(name, args) {
+  const value = singleLineText(firstKeyArg(args, 24));
+  return value ? `${humanToolName(name)} ${value}` : humanToolName(name);
+}
+
 function humanToolName(name) {
   return String(name || "tool").replace(/[_-]+/g, " ").trim() || "tool";
 }
