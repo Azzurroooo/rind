@@ -175,6 +175,7 @@ test("local command catalog stays complete before the runtime starts", async () 
     "compact",
     "config",
     "doctor",
+    "goal",
     "help",
     "init",
     "login",

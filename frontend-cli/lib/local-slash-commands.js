@@ -7,6 +7,7 @@ export const LOCAL_SLASH_COMMANDS = Object.freeze([
   { name: "compact", description: "Compact current session context", usage: "/compact" },
   { name: "config", description: "Show config guidance", usage: "/config" },
   { name: "doctor", description: "Run local setup diagnostics", usage: "/doctor" },
+  { name: "goal", description: "View or control the active goal", usage: "/goal [pause | resume | clear | objective]" },
   { name: "help", description: "Show commands", usage: "/help [command]" },
   { name: "init", description: "Draft RIND.md", usage: "/init [project|user]" },
   { name: "login", description: "Show login setup guidance", usage: "/login" },
