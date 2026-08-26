@@ -132,3 +132,24 @@ test("event controller delivers queued input and clears pending input on termina
   assert.deepEqual(delivered, [{ input: "continue with tests", mode: "follow_up", inputId: "queued-1" }]);
   assert.equal(clears, 1);
 });
+
+test("event controller logs goal continuation and toggles the chasing state", async () => {
+  const logged = [];
+  const chasing = [];
+  const controller = createEventController({
+    output: {
+      log: (text) => logged.push(typeof text === "function" ? text() : text),
+      setGoalChasing: (enabled) => chasing.push(enabled),
+      closeAssistant() {},
+      clearQueuedInputs() {},
+      clearCompactContext() {},
+    },
+  });
+
+  await controller.handle({ kind: "event", event: { type: "goal_continued", round: 2 } });
+  await controller.handle({ kind: "event", event: { type: "turn_completed" } });
+
+  assert.match(logged[0], /Goal continued/);
+  assert.match(logged[0], /round 2/);
+  assert.deepEqual(chasing, [true, false]);
+});

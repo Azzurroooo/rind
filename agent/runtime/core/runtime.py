@@ -365,6 +365,7 @@ class AgentRuntime:
                 yield started_event
 
                 total_duration_ms = 0
+                goal_round = 0
                 pass_transients: list[dict] | None = None
                 while True:
                     runner_kwargs = {
@@ -410,7 +411,8 @@ class AgentRuntime:
                             continue
                         goal = await self._current_goal()
                         if goal and goal.get("status") == "active":
-                            yield GoalContinuedEvent(**event_meta(self._session_store, turn_id))
+                            goal_round += 1
+                            yield GoalContinuedEvent(**event_meta(self._session_store, turn_id), round=goal_round)
                             pass_transients = [
                                 {
                                     "role": "system",

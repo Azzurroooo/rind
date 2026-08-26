@@ -132,6 +132,7 @@ class QueuedInputDeliveredEvent(RuntimeEvent):
 class GoalContinuedEvent(RuntimeEvent):
     """Fired when an active goal triggers another pass after a completed pass."""
     type: Literal["goal_continued"] = "goal_continued"
+    round: int = 0
 
 
 @dataclass(slots=True)

@@ -353,7 +353,7 @@ async def test_async_runtime_continues_active_goal_until_terminal_status():
     )
     assert "finish the release" in runner.calls[1][-1]["content"]
     goal_continued_events = [event for event in events if isinstance(event, GoalContinuedEvent)]
-    assert len(goal_continued_events) == 1
+    assert [event.round for event in goal_continued_events] == [1]
     assert events.index(goal_continued_events[0]) < events.index(events[-1])
     assert isinstance(events[-1], TurnCompletedEvent)
     assert session.goal["status"] == "complete"

@@ -335,6 +335,9 @@ const eventController = createEventController({
     log: logOutput,
     debug: (text) => writeErrorOutput(`${text}\n`),
     updateGoal: updateGoalState,
+    setGoalChasing: (enabled) => {
+      displayState.goalChasing = Boolean(enabled);
+    },
     setStats: (stats) => {
       displayState.stats = stats;
     },

@@ -3,6 +3,7 @@ import {
   cancelledText,
   contextBuiltLine,
   errorLine,
+  goalContinuedLine,
   planUpdatedLine,
   turnCompletedLine,
 } from "./rendering.js";
@@ -112,12 +113,19 @@ export function createEventController({
         await input.answerQuestion?.(event);
         return;
       case "queued_input_delivered":
+        output.setGoalChasing?.(false);
         output.deliverQueuedInput?.(event.input || "", event.mode || "steering", event.input_id || "");
+        return;
+      case "goal_continued":
+        output.closeAssistant?.();
+        output.setGoalChasing?.(true);
+        output.log?.(() => goalContinuedLine(event.round));
         return;
       case "turn_failed":
         output.clearQueuedInputs?.();
         output.clearCompactContext?.();
         output.closeAssistant?.();
+        output.setGoalChasing?.(false);
         output.log?.(() => errorLine(event.error));
         resetTurnState();
         return;
@@ -125,6 +133,7 @@ export function createEventController({
         output.clearQueuedInputs?.();
         output.clearCompactContext?.();
         output.closeAssistant?.();
+        output.setGoalChasing?.(false);
         output.log?.(() => cancelledText());
         resetTurnState();
         return;
@@ -132,6 +141,7 @@ export function createEventController({
         output.clearQueuedInputs?.();
         output.clearCompactContext?.();
         output.closeAssistant?.();
+        output.setGoalChasing?.(false);
         output.log?.(turnCompletedLine(event, toolStats));
         resetTurnState();
         return;

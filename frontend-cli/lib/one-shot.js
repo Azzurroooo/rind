@@ -143,6 +143,9 @@ export async function runOneShot({ args, python, repoRoot, runtimePath, cwd = pr
         if (message?.turn_id) turnId = String(message.turn_id);
         if (type === "assistant_delta") assistant += String(event.text || "");
         if (type === "assistant_message_completed") completed = String(event.content || "");
+        if (type === "goal_continued") {
+          progress.note(`goal check · round ${Number(event.round) || 0}`);
+        }
         const toolCallId = String(event?.tool_call_id || "");
         const trackedId = toolCallId || (type === "tool_requested" ? `anon:${(anonymousToolCounter += 1)}` : "");
         if (trackedId && (type === "tool_requested" || type === "tool_input_started") && !progress.hasTool(trackedId)) {

@@ -521,6 +521,10 @@ export function planUpdatedLine(plan) {
   return lines.join("\n");
 }
 
+export function goalContinuedLine(round) {
+  return `${accent("◌")} ${bold("Goal continued")} ${dim(`· round ${Number(round) || 0}`)}`;
+}
+
 export function toolProgressLine(event) {
   const name = event.tool_name || "tool";
   const message = progressMessage(event.payload);

@@ -41,7 +41,11 @@ export function createCliOutputController({ state, terminalUi, transcript }) {
     const running = state.turn.active || state.display.activeCompact;
     return {
       running,
-      label: state.display.activeCompact ? "Compacting" : "Working",
+      label: state.display.activeCompact
+        ? "Compacting"
+        : state.display.goalChasing
+          ? "Goal-Chasing"
+          : "Working",
       frame: state.display.activityFrame,
       elapsedMs: running ? Date.now() - state.display.activityStartedAt : 0,
       pendingInputs: state.input.pending,
