@@ -34,28 +34,28 @@ test("composer places an inline menu cursor on the custom answer row", () => {
   const frame = prepareComposerFrame({
     prompt: "\n  ▷ ",
     inputText: "",
-    menuText: "  Answers\n  · Fast\n  › Type your own answer: draft\n    ↑↓ select",
-    menuCursor: { line: 2, column: 31 },
+    menuText: "  Answers\n  · Fast\n  › draft\n    ↑↓ select",
+    menuCursor: { line: 2, column: 9 },
   }, 80);
 
-  const customRow = frame.lines.findIndex((line) => stripAnsi(line).includes("Type your own answer: draft"));
+  const customRow = frame.lines.findIndex((line) => stripAnsi(line).includes("› draft"));
   assert.ok(customRow >= 0);
   assert.equal(stripAnsi(frame.lines.join("\n")).match(/draft/g)?.length, 1);
   assert.equal(frame.cursorRow, customRow);
-  assert.equal(frame.cursorColumn, 31);
+  assert.equal(frame.cursorColumn, 9);
 });
 
 test("composer keeps the question visible while the custom answer is edited", () => {
   const frame = prepareComposerFrame({
     prompt: "\n  ▷ ",
     inputText: "Which option should be used?",
-    menuText: "  Answers\n  › Type your own answer: draft\n    ↑↓ select",
-    menuCursor: { line: 1, column: 31 },
+    menuText: "  Answers\n  › draft\n    ↑↓ select",
+    menuCursor: { line: 1, column: 9 },
   }, 80);
 
   assert.ok(frame.lines.some((line) => stripAnsi(line).includes("Which option should be used?")));
   assert.equal(stripAnsi(frame.lines.join("\n")).match(/draft/g)?.length, 1);
-  assert.equal(frame.cursorRow, frame.lines.findIndex((line) => stripAnsi(line).includes("Type your own answer: draft")));
+  assert.equal(frame.cursorRow, frame.lines.findIndex((line) => stripAnsi(line).includes("› draft")));
 });
 
 test("composer wraps long ascii input and tracks cursor position", () => {

@@ -211,22 +211,32 @@ export function questionMenuFrame(
   for (const [index, option] of visible.items.entries()) {
     const active = index === visible.activeIndex;
     const marker = active ? accent("›") : dim("·");
-    const labelLines = wrapQuestionLines(option.label, Math.max(1, width - 4));
-    const labelStyle = active ? bold : dim;
+    const isCustom = option.label === customLabel;
+    const customText = String(customInput || "");
+    const labelLines = isCustom && editing
+      ? wrapQuestionLines(customText || `${customLabel}:`, Math.max(1, width - 4))
+      : wrapQuestionLines(option.label, Math.max(1, width - 4));
+    const labelStyle = isCustom && editing && !customText ? dim : active ? bold : dim;
+    let firstPushedLine = -1;
+    let lastPushedLine = -1;
+    let firstPrefixWidth = 0;
     for (const [lineIndex, labelLine] of labelLines.entries()) {
       const prefix = lineIndex === 0 ? `  ${marker} ` : "    ";
       lines.push(`${prefix}${labelStyle(labelLine)}`);
+      if (firstPushedLine === -1) {
+        firstPushedLine = lines.length - 1;
+        firstPrefixWidth = textWidth(prefix);
+      }
+      lastPushedLine = lines.length - 1;
     }
-    if (active && editing && option.label === customLabel) {
-      const lastLine = lines.length - 1;
-      const input = clipCells(
-        `: ${String(customInput || "")}`,
-        Math.max(1, width - textWidth(lines[lastLine])),
-      );
-      lines[lastLine] += input;
+    if (active && editing && isCustom) {
+      const cursorLine = customText ? Math.max(0, lastPushedLine) : Math.max(0, firstPushedLine);
+      const cursorColumn = customText
+        ? textWidth(lines[cursorLine])
+        : firstPrefixWidth;
       cursor = {
-        line: lastLine,
-        column: textWidth(lines[lastLine]),
+        line: cursorLine,
+        column: Math.max(0, cursorColumn),
       };
     }
     if (option.description) {
@@ -525,11 +535,13 @@ export function errorLine(error) {
 }
 
 export function questionText(event = {}) {
-  return [
-    `${accent("◆")} ${bold("Choice required")}`,
-    "",
-    `  ${clipSingleLine(event.question || "Input required", 76)}`,
-  ].join("\n");
+  return `  Q: ${clipSingleLine(event.question || "Input required", 76)}`;
+}
+
+export function questionAnswerText(event = {}, answer = "") {
+  const question = clipSingleLine(event.question || "Input required", 76);
+  const value = clipSingleLine(String(answer || "").trim() || "(no answer)", 76);
+  return [`  ${dim("Q:")} ${question}`, `  ${green("A:")} ${value}`].join("\n");
 }
 
 function toolDetail(name, args) {

@@ -9,6 +9,7 @@ import { parseTerminalKey } from "./terminal-key.js";
 import {
   answerPromptText,
   answerPlaceholderText,
+  questionAnswerText,
   questionText,
 } from "./rendering.js";
 
@@ -100,7 +101,11 @@ export function createCliInputActions({
   async function answerQuestion(event) {
     pausePrompt();
     output.closeAssistant();
-    output.log(() => questionText(event));
+    if (output.beginQuestion) {
+      output.beginQuestion(event);
+    } else {
+      output.log(() => questionText(event));
+    }
     try {
       const options = Array.isArray(event.options) ? event.options : [];
       const answer = output.terminalUi
@@ -113,6 +118,11 @@ export function createCliInputActions({
         tool_call_id: event.tool_call_id,
         answer,
       });
+      if (output.finishQuestion) {
+        output.finishQuestion(event, answer);
+      } else {
+        output.log(() => questionAnswerText(event, answer));
+      }
     } finally {
       resumePrompt();
     }

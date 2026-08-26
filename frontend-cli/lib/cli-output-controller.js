@@ -8,6 +8,8 @@ import {
   toolResultLine,
   toolStartedLine,
   userInputText,
+  questionAnswerText,
+  questionText,
 } from "./rendering.js";
 import { TextBlock } from "./components/text-block.js";
 import { DynamicBlock } from "./components/dynamic-block.js";
@@ -22,6 +24,7 @@ export function createCliOutputController({ state, terminalUi, transcript }) {
   let blockCount = 0;
   const toolBlocks = new Map();
   const legacyBegunTools = new Set();
+  let questionBlock = null;
 
   function suspendPrompt(action, options = {}) {
     return action();
@@ -200,6 +203,34 @@ export function createCliOutputController({ state, terminalUi, transcript }) {
     state.display.assistantHeaderShown = false;
   }
 
+  function beginQuestion(event) {
+    if (!terminalUi) {
+      log(() => questionText(event));
+      return;
+    }
+    const state = { event, answer: null };
+    const block = new DynamicBlock(() => {
+      const text = state.answer === null
+        ? questionText(state.event)
+        : questionAnswerText(state.event, state.answer);
+      return text.split("\n");
+    });
+    questionBlock = { state, block };
+    appendBlock(block);
+  }
+
+  function finishQuestion(event, answer) {
+    if (!terminalUi || !questionBlock) {
+      log(() => questionAnswerText(event, answer));
+      return;
+    }
+    questionBlock.state.event = event;
+    questionBlock.state.answer = answer;
+    questionBlock.block.invalidate();
+    questionBlock = null;
+    redraw();
+  }
+
   function assistantAppend(text) {
     if (!terminalUi) {
       legacyRenderer.append(text);
@@ -371,6 +402,8 @@ export function createCliOutputController({ state, terminalUi, transcript }) {
     beginTool,
     updateToolProgress,
     finishTool,
+    beginQuestion,
+    finishQuestion,
     setToolsExpanded,
     renderHistory,
     showStartup,

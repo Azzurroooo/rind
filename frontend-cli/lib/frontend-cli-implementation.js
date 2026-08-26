@@ -470,7 +470,7 @@ function composeFrame(width = process.stdout.columns || 80) {
   // While a turn runs, the composer is a steering box: keep the hardware
   // caret hidden so nothing blinks beside the spinner (question editing
   // still needs a visible caret for its custom-answer field).
-  const showCaret = !turnRunning || session.mode === "question";
+  const showCaret = !turnRunning || (session.mode === "question" && session.questionState.isEditing());
   if (session.mode === "model") {
     return {
       showCaret,

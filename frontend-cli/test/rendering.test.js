@@ -30,6 +30,7 @@ import {
   outputBlockText,
   promptText,
   promptPlaceholderText,
+  questionAnswerText,
   questionText,
   questionMenuFrame,
   choiceMenuText,
@@ -1028,13 +1029,18 @@ test("turnCompletedLine renders duration and tool summary", () => {
 test("status helpers render question and errors", () => {
   assert.equal(
     questionText({ question: "Pick one", options: ["A", "B"] }),
-    ["◆ Choice required", "", "  Pick one"].join("\n"),
+    "  Q: Pick one",
   );
   assert.equal(
     questionText({ question: "Explain" }),
-    ["◆ Choice required", "", "  Explain"].join("\n"),
+    "  Q: Explain",
   );
-  assert.match(questionText({ question: "q".repeat(120) }), /\n  q{73}\.\.\.$/);
+  assert.match(questionText({ question: "q".repeat(120) }), /^  Q: q{73}\.\.\.$/);
+  assert.equal(
+    questionAnswerText({ question: "Pick one" }, "Fast (Recommended)"),
+    ["  Q: Pick one", "  A: Fast (Recommended)"].join("\n"),
+  );
+  assert.match(questionAnswerText({ question: "Explain" }, ""), /  A: \(no answer\)$/);
   assert.equal(errorLine("failed"), "⊘ Turn failed\n  ↳ failed");
   assert.equal(errorLine(""), "⊘ Turn failed");
 });
@@ -1069,10 +1075,20 @@ test("questionMenuFrame renders custom input in its option row", () => {
     { label: "Thorough (Recommended)", description: "Use more analysis." },
   ], 1, "my answer", true);
 
-  assert.match(frame.text, /Type your own answer: my answer/);
+  assert.match(frame.text, /› my answer/);
+  assert.doesNotMatch(frame.text, /Type your own answer/);
   assert.doesNotMatch(frame.text, /press Tab to type/);
   assert.equal(frame.cursor.line, 3);
   assert.ok(frame.cursor.column > 0);
+});
+
+test("questionMenuFrame dims the custom placeholder while editing an empty answer", () => {
+  const frame = questionMenuFrame([], 0, "", true);
+  const plain = frame.text.replace(/\x1b\[[0-9;]*m/g, "");
+
+  assert.match(plain, /› Type your own answer:/);
+  assert.equal(frame.cursor.line, 1);
+  assert.equal(frame.cursor.column, 4);
 });
 
 test("questionMenuFrame wraps complete labels and descriptions with distinct formatting", () => {

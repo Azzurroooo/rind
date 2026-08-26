@@ -112,6 +112,24 @@ test("log lines appear as transcript blocks with blank separation", async () => 
   harness.tui.stop();
 });
 
+test("question status changes in place after an answer is accepted", async () => {
+  const harness = createHarness({ columns: 60, rows: 14 });
+  harness.tui.start();
+  const event = { question: "Which option should be used?" };
+
+  harness.output.beginQuestion(event);
+  await settle(harness.virtual);
+  let viewport = harness.virtual.getViewport().join("\n");
+  assert.match(viewport, /Which option should be used/);
+
+  harness.output.finishQuestion(event, "Fast");
+  await settle(harness.virtual);
+  viewport = harness.virtual.getViewport().join("\n");
+  assert.match(viewport, /Q: Which option should be used\?/);
+  assert.match(viewport, /A: Fast/);
+  harness.tui.stop();
+});
+
 test("error writes land in the transcript without corrupting the frame", async () => {
   const harness = createHarness({ columns: 50, rows: 14 });
   harness.tui.start();
