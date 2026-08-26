@@ -60,6 +60,7 @@ def _sanitize_header_segment(value: str) -> str:
 
 DEFAULT_MODEL = "gpt-4o-mini"
 DEFAULT_BASE_URL = "https://api.openai.com/v1"
+REASONING_EFFORTS = ("low", "medium", "high", "xhigh", "max")
 DEFAULT_USER_AGENT = build_default_user_agent()
 DEFAULT_SETTINGS_TEMPLATE = {
     "model": "gpt-5.5",
@@ -105,6 +106,15 @@ def load_settings(workspace_root: str | Path | None = None) -> AppSettings:
     settings_path = default_settings_path()
     data = _read_json_object(settings_path) if settings_path.exists() else {}
     return _build_settings(settings_path, data)
+
+
+def normalize_reasoning_effort(value: Any) -> str:
+    effort = str(value or "").strip().lower()
+    if effort and effort not in REASONING_EFFORTS:
+        raise ValueError(
+            f"Reasoning effort must be one of {', '.join(REASONING_EFFORTS)}."
+        )
+    return effort
 
 
 def _build_settings(settings_path: Path, data: dict[str, Any]) -> AppSettings:

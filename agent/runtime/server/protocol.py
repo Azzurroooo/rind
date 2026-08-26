@@ -48,6 +48,7 @@ class RuntimeMethod:
     SESSION_CANCEL = "session/cancel"
     MODEL_LIST = "model/list"
     MODEL_SET = "model/set"
+    MODEL_EFFORT = "model/effort"
     RIND_SESSION_STEER = "rind/session/steer"
     RIND_SESSION_FOLLOW_UP = "rind/session/follow_up"
     RIND_SESSION_PROMOTE_FOLLOW_UP = "rind/session/promote_follow_up"
@@ -108,6 +109,7 @@ CORE_METHODS = (
     RuntimeMethod.SESSION_CANCEL,
     RuntimeMethod.MODEL_LIST,
     RuntimeMethod.MODEL_SET,
+    RuntimeMethod.MODEL_EFFORT,
     RuntimeMethod.RIND_SESSION_STEER,
     RuntimeMethod.RIND_SESSION_FOLLOW_UP,
     RuntimeMethod.RIND_SESSION_PROMOTE_FOLLOW_UP,

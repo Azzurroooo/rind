@@ -54,6 +54,10 @@ export function createCommandController({
       await input.runModelSelector();
       return;
     }
+    if (isEffortCommand(text)) {
+      await input.runEffortCommand?.(effortArgument(text));
+      return;
+    }
     if (isCompactCommand(text) && input.isTerminal) {
       input.startCompactCommand?.();
       return;
@@ -128,6 +132,14 @@ function singleWord(value) {
 
 function isBareModelCommand(value) {
   return String(value || "").trim().toLowerCase() === "/model";
+}
+
+function isEffortCommand(value) {
+  return String(value || "").trim().toLowerCase().startsWith("/effort");
+}
+
+function effortArgument(value) {
+  return String(value || "").trim().replace(/^\/effort\s*/i, "").trim();
 }
 
 function isBareThemeCommand(value) {

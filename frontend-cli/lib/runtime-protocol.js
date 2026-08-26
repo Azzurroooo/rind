@@ -1,5 +1,7 @@
 export const runtimeProtocolVersion = "2";
 
+export const REASONING_EFFORTS = Object.freeze(["low", "medium", "high", "xhigh", "max"]);
+
 export const runtimeMethods = Object.freeze({
   initialize: "initialize",
   shutdown: "shutdown",
@@ -11,6 +13,7 @@ export const runtimeMethods = Object.freeze({
   sessionCancel: "session/cancel",
   modelList: "model/list",
   modelSet: "model/set",
+  modelEffortSet: "model/effort",
   sessionSteer: "rind/session/steer",
   sessionFollowUp: "rind/session/follow_up",
   sessionPromoteFollowUp: "rind/session/promote_follow_up",
@@ -33,6 +36,7 @@ export const sessionScopedMethods = new Set([
   runtimeMethods.sessionSwitch,
   runtimeMethods.sessionCancel,
   runtimeMethods.modelSet,
+  runtimeMethods.modelEffortSet,
   runtimeMethods.sessionSteer,
   runtimeMethods.sessionFollowUp,
   runtimeMethods.sessionPromoteFollowUp,

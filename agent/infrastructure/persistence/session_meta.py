@@ -73,6 +73,7 @@ def new_session_meta(
     owner_agent_id: str | None = None,
     session_type: str | None = None,
     parent_session_id: str | None = None,
+    reasoning_effort: str = "",
 ) -> dict[str, Any]:
     meta = {
         "schema_version": "2.0",
@@ -87,6 +88,8 @@ def new_session_meta(
         "tool_call_count": 0,
         "auto_compact_window": default_auto_compact_window(),
     }
+    if reasoning_effort:
+        meta["reasoning_effort"] = reasoning_effort
     for key, value in {
         "project_id": project_id,
         "owner_agent_id": owner_agent_id,

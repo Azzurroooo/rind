@@ -120,6 +120,7 @@ class SessionRepository:
             "session_id": str(meta.get("session_id") or session_id),
             "draft": False,
             "model": str(meta.get("model") or self._settings.model),
+            "reasoning_effort": str(meta.get("reasoning_effort") or self._settings.reasoning_effort or ""),
             "workspace_root": str(meta.get("workspace_root") or meta.get("cwd") or ""),
             "project_id": meta.get("project_id"),
             "owner_agent_id": meta.get("owner_agent_id"),

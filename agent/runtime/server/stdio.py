@@ -17,7 +17,7 @@ from agent.domain.events import UserQuestionRequestedEvent
 from agent.infrastructure.paths import validate_session_id
 from agent.version import __version__
 from agent.runtime.server.commands import SlashCommandContext, SlashCommandResult, SlashCommandRouter
-from agent.runtime.server.commands.model_control import set_active_model
+from agent.runtime.server.commands.model_control import set_active_model, set_active_reasoning_effort
 from agent.runtime.server.resume_preview import render_resume_preview
 from agent.runtime.server.protocol import (
     CAPABILITIES,
@@ -193,6 +193,8 @@ class StdioRuntimeServer:
                 await self._list_models(request)
             elif method == RuntimeMethod.MODEL_SET:
                 await self._set_model(request)
+            elif method == RuntimeMethod.MODEL_EFFORT:
+                await self._set_reasoning_effort(request)
             elif method == RuntimeMethod.SESSION_SWITCH:
                 await self._switch_session(request)
             elif method == RuntimeMethod.SESSION_LIST:
@@ -224,6 +226,7 @@ class StdioRuntimeServer:
             "session_id": getattr(self._session, "session_id", None),
             "draft": getattr(self._session, "session_id", None) is None,
             "model": getattr(self._session, "model", None),
+            "reasoning_effort": getattr(self._session, "reasoning_effort", None),
             "version": __version__,
             "protocol_version": PROTOCOL_VERSION,
             "capabilities": self._capabilities(),
@@ -444,6 +447,15 @@ class StdioRuntimeServer:
             await self._respond_error(request, "model/set requires model.", "InvalidRequest")
             return
         result = await set_active_model(self._runtime, self._session, model)
+        await self._respond(request, result)
+
+    async def _set_reasoning_effort(self, request: dict[str, Any]) -> None:
+        params = request.get("params") if isinstance(request.get("params"), dict) else {}
+        effort = str(params.get("reasoning_effort") or "").strip().lower()
+        if not effort:
+            await self._respond_error(request, "model/effort requires reasoning_effort.", "InvalidRequest")
+            return
+        result = await set_active_reasoning_effort(self._runtime, self._session, effort)
         await self._respond(request, result)
 
     async def _switch_session(self, request: dict[str, Any]) -> None:
@@ -1017,6 +1029,9 @@ class WorkerStdioRuntimeServer:
             if method == RuntimeMethod.MODEL_SET:
                 await self._set_model(request)
                 return
+            if method == RuntimeMethod.MODEL_EFFORT:
+                await self._set_reasoning_effort(request)
+                return
             if method in {
                 RuntimeMethod.RIND_GOAL_GET,
                 RuntimeMethod.RIND_GOAL_SET,
@@ -1054,6 +1069,7 @@ class WorkerStdioRuntimeServer:
             "session_id": info["session_id"],
             "draft": False,
             "model": info.get("model"),
+            "reasoning_effort": info.get("reasoning_effort"),
             "base_url": info.get("base_url"),
             "workspace_root": info.get("workspace_root"),
             "version": __version__,
@@ -1340,6 +1356,23 @@ class WorkerStdioRuntimeServer:
             return
         store = await self._worker.repository.open_store(session_id, persist_system_prompt=False)
         await self._respond(request, await set_active_model(None, store, model))
+
+    async def _set_reasoning_effort(self, request: dict[str, Any]) -> None:
+        params = request.get("params") if isinstance(request.get("params"), dict) else {}
+        session_id = await self._required_session_id(request)
+        if session_id is None:
+            return
+        effort = str(params.get("reasoning_effort") or "").strip().lower()
+        if not effort:
+            await self._respond_error(request, "model/effort requires reasoning_effort.", "InvalidRequest")
+            return
+        active = self._worker.execution.active_container(session_id)
+        if active is not None:
+            result = await set_active_reasoning_effort(active.runtime, active.session_store, effort)
+            await self._respond(request, result)
+            return
+        store = await self._worker.repository.open_store(session_id, persist_system_prompt=False)
+        await self._respond(request, await set_active_reasoning_effort(None, store, effort))
 
     async def _goal_request(self, request: dict[str, Any]) -> None:
         session_id = await self._required_session_id(request)

@@ -1255,13 +1255,15 @@ function promptHeaderLine(info, frameWidth) {
     ? dim(` · ${taskHints.join(" ")} (ctrl+b monitor)`)
     : "";
   const model = singleLine(info.model);
+  const effort = singleLine(info.reasoning_effort);
   const cwd = middleClip(info.cwd, 56);
   const width = composerWidth(frameWidth);
+  const effortSegment = effort ? `${dim(" · ")}${promptModel(effort)}` : "";
   if (model && cwd) {
     const separator = " · ";
-    const pathWidth = width - visibleLength(model) - visibleLength(separator) - visibleLength(taskHint);
+    const pathWidth = width - visibleLength(model) - visibleLength(separator) - visibleLength(taskHint) - visibleLength(effortSegment);
     if (pathWidth > 0) {
-      return `  ${promptModel(clipSingleLine(model, width))}${dim(separator)}${promptPath(clipSingleLine(cwd, pathWidth))}${taskHint}`;
+      return `  ${promptModel(clipSingleLine(model, width))}${effortSegment}${dim(separator)}${promptPath(clipSingleLine(cwd, pathWidth))}${taskHint}`;
     }
   }
   if (model) {

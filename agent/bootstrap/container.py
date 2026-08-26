@@ -111,6 +111,7 @@ def build_agent_container(
         owner_agent_id=owner_agent_id,
         session_type=session_type,
         parent_session_id=parent_session_id,
+        reasoning_effort=settings.reasoning_effort,
     )
     skill_repository = SkillRepository(
         project_root=skill_project_root,

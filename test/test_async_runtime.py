@@ -532,6 +532,37 @@ async def test_async_runtime_facade_set_model_updates_runner_and_session():
 
 
 @pytest.mark.asyncio
+async def test_async_runtime_facade_set_reasoning_effort_updates_runner_and_session():
+    class FakeSession:
+        def __init__(self):
+            self.effort = "low"
+
+        async def initialize(self):
+            return None
+
+        async def update_reasoning_effort(self, effort):
+            self.effort = effort
+
+    class FakeRunner:
+        def __init__(self):
+            self.effort = "low"
+
+        def set_reasoning_effort(self, effort):
+            self.effort = effort
+            return True
+
+    session = FakeSession()
+    runner = FakeRunner()
+    facade = AgentRuntime(turn_runner=runner, session_store=session)
+
+    result = await facade.set_reasoning_effort("max")
+
+    assert result == {"runtime": True, "session": True}
+    assert runner.effort == "max"
+    assert session.effort == "max"
+
+
+@pytest.mark.asyncio
 async def test_async_turn_runner_emits_tool_requested_before_tool_execution():
     mock_client = AsyncMock()
 

@@ -58,6 +58,10 @@ class SessionStore(Protocol):
         """Update the model recorded for the active session."""
         ...
 
+    async def update_reasoning_effort(self, effort: str) -> None:
+        """Update the reasoning effort recorded for the active session."""
+        ...
+
     async def get_skill_catalog(self) -> list[dict[str, str]]:
         """Return the persisted effective Skill metadata catalog."""
         ...

@@ -210,6 +210,7 @@ const runtimeController = createCliRuntimeController({
   getTaskMonitor: () => taskMonitorController,
   getCompactContextState: () => compactContextState,
   askModelMenu: (...args) => inputActions.askModelMenu(...args),
+  askEffortMenu: (...args) => inputActions.askEffortMenu(...args),
   askSessionMenu: (...args) => inputActions.askSessionMenu(...args),
   askTeamBlueprint: (...args) => inputActions.askTeamBlueprint(...args),
   restoreLiveTurn,
@@ -247,6 +248,7 @@ commandController = createCommandController({
     isTerminal: Boolean(tui),
     runGoalCommand: runtimeController.runGoalCommand,
     runModelSelector: runtimeController.runModelSelector,
+    runEffortCommand: (value) => runtimeController.runEffortCommand(value),
     runThemeSelector: async () => {
       const selected = await inputActions.askThemeMenu();
       if (selected) {

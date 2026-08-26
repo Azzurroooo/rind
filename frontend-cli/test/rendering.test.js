@@ -168,6 +168,13 @@ test("promptText includes only model and working directory above the input", () 
   );
 });
 
+test("promptText places reasoning effort between model and working directory", () => {
+  assert.equal(
+    promptText({ model: "glm-5.1", reasoning_effort: "xhigh", cwd: "E:\\project" }).split("\n")[1],
+    "  glm-5.1 · xhigh · E:\\project",
+  );
+});
+
 test("promptText colors model and working directory with separate hierarchy", () => {
   const originalIsTty = process.stdout.isTTY;
   const originalNoColor = process.env.NO_COLOR;

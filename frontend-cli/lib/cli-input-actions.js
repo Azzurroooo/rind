@@ -4,7 +4,7 @@ import { createModelMenuState } from "./model-menu-state.js";
 import { createThemeMenuState } from "./theme-menu-state.js";
 import { createQuestionMenuState } from "./question-menu-state.js";
 import { createSlashMenuState } from "./slash-menu-state.js";
-import { runtimeMethods } from "./runtime-protocol.js";
+import { REASONING_EFFORTS, runtimeMethods } from "./runtime-protocol.js";
 import { parseTerminalKey } from "./terminal-key.js";
 import {
   answerPromptText,
@@ -209,6 +209,10 @@ export function createCliInputActions({
       output.setToolsExpanded?.(state.display.toolDetailsExpanded);
       return;
     }
+    if (event.ctrl && !event.alt && !event.shift && event.name === "t") {
+      void cycleReasoningEffort();
+      return;
+    }
     const monitor = getTaskMonitor();
     if (monitor?.isMonitoring()) {
       monitor.handleInput(event);
@@ -376,6 +380,30 @@ export function createCliInputActions({
     });
   }
 
+  function askEffortMenu(currentEffort) {
+    return new Promise((resolve) => {
+      output.clearAssistantLineForInput();
+      const modelState = createModelMenuState(REASONING_EFFORTS.slice(), currentEffort);
+      const session = { mode: "model", inputText: "/effort", modelState, resolve };
+      state.input.session = session;
+      state.input.active = true;
+      cancelActiveInput = () => completeTtyInput(session, "", false);
+      output.redraw(true);
+    });
+  }
+
+  async function cycleReasoningEffort() {
+    const index = REASONING_EFFORTS.indexOf(String(state.session.info.reasoning_effort || "").toLowerCase());
+    const next = REASONING_EFFORTS[(index + 1 + REASONING_EFFORTS.length) % REASONING_EFFORTS.length];
+    try {
+      await request(runtimeMethods.modelEffortSet, { reasoning_effort: next });
+      state.session.info = { ...state.session.info, reasoning_effort: next };
+      output.writeError(`Reasoning effort: ${next}\n`);
+    } catch (error) {
+      output.writeError(`${error instanceof Error ? error.message : String(error)}\n`);
+    }
+  }
+
   function askQuestionMenu(event) {
     return new Promise((resolve) => {
       output.clearAssistantLineForInput();
@@ -511,6 +539,7 @@ export function createCliInputActions({
     handleTerminalInput,
     handleTerminalPaste,
     askModelMenu,
+    askEffortMenu,
     askThemeMenu,
     askSessionMenu,
     askTeamBlueprint,

@@ -1,3 +1,4 @@
+import { REASONING_EFFORTS } from "./runtime-protocol.js";
 import { modelListErrorText, commandResultText, goalCommandText, sessionSwitchedText } from "./rendering.js";
 
 export function createCliRuntimeController({
@@ -12,6 +13,7 @@ export function createCliRuntimeController({
   getTaskMonitor,
   getCompactContextState,
   askModelMenu,
+  askEffortMenu = null,
   askSessionMenu,
   restoreLiveTurn,
   renderHistory = () => {},
@@ -158,6 +160,7 @@ export function createCliRuntimeController({
       cwd: workspaceRoot || state.session.info.cwd,
       workspace_root: workspaceRoot || state.session.info.workspace_root,
       model: replay?.model || update?.model || state.session.info.model,
+      reasoning_effort: replay?.reasoning_effort || update?.reasoning_effort || currentReasoningEffort(),
       resume_preview: "",
       goal: update?.goal || null,
       live_turn: liveTurn,
@@ -264,6 +267,41 @@ export function createCliRuntimeController({
     }
   }
 
+  async function runEffortCommand(value = "") {
+    const requested = String(value || "").trim().toLowerCase();
+    if (!requested) {
+      if (!askEffortMenu) {
+        log("Reasoning effort menu requires a TTY. Use /effort <low|medium|high|xhigh|max>.");
+        return;
+      }
+      const selected = await askEffortMenu(currentReasoningEffort());
+      if (!selected || state.runtime.status === "closing") {
+        return;
+      }
+      await applyReasoningEffort(selected);
+      return;
+    }
+    if (!REASONING_EFFORTS.includes(requested)) {
+      log(`Unknown reasoning effort "${requested}". Available: ${REASONING_EFFORTS.join(", ")}.`);
+      return;
+    }
+    await applyReasoningEffort(requested);
+  }
+
+  function currentReasoningEffort() {
+    return String(state.session.info.reasoning_effort || "").toLowerCase();
+  }
+
+  async function applyReasoningEffort(effort) {
+    try {
+      await request(methods.modelEffortSet, { reasoning_effort: effort });
+      state.session.info = { ...state.session.info, reasoning_effort: effort };
+      log(() => commandResultText("Reasoning effort updated.", `- session effort: ${effort}`));
+    } catch (error) {
+      log(`Command failed: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
   return {
     request,
     ensureRuntime,
@@ -273,6 +311,7 @@ export function createCliRuntimeController({
     runSessionsSelector,
     startCompactCommand,
     runModelSelector,
+    runEffortCommand,
   };
 }
 

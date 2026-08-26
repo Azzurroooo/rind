@@ -61,6 +61,11 @@ class OpenAIChatClient(ChatClient):
         self._reasoning_effort_disabled = False
         self._prompt_cache_key_disabled = False
 
+    def set_reasoning_effort(self, effort: str) -> None:
+        from agent.infrastructure.config.settings_loader import normalize_reasoning_effort
+
+        self._reasoning_effort = normalize_reasoning_effort(effort) or None
+
     def set_retry_callback(self, callback) -> None:
         self.on_retry = callback
 

@@ -89,6 +89,10 @@ class TurnRunner:
         self._chat_client.set_model(model)
         return True
 
+    def set_reasoning_effort(self, effort: str) -> bool:
+        self._chat_client.set_reasoning_effort(effort)
+        return True
+
     async def run_turn(
         self,
         session: SessionStore,

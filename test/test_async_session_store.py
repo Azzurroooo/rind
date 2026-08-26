@@ -1340,6 +1340,39 @@ async def test_update_model_persists_session_meta(temp_session_dir):
 
 
 @pytest.mark.asyncio
+async def test_update_reasoning_effort_persists_and_adopts_meta(temp_session_dir):
+    store = JsonlSessionStore(
+        session_dir=temp_session_dir,
+        session_id="effort-update",
+        model="m",
+        system_prompt="sys",
+        reasoning_effort="low",
+    )
+    await store.initialize()
+
+    await store.update_reasoning_effort("xhigh")
+
+    session_base = Path(temp_session_dir) / store.session_id
+    meta_path = session_base / "meta.json"
+    meta = json.loads(meta_path.read_text(encoding="utf-8"))
+    assert store.reasoning_effort == "xhigh"
+    assert meta["reasoning_effort"] == "xhigh"
+
+    resumed = JsonlSessionStore(
+        session_dir=temp_session_dir,
+        session_id=store.session_id,
+        model="m",
+        system_prompt="sys",
+        reasoning_effort="low",
+    )
+    await resumed.initialize()
+    assert resumed.reasoning_effort == "xhigh"
+
+    with pytest.raises(ValueError):
+        await store.update_reasoning_effort("ultra")
+
+
+@pytest.mark.asyncio
 async def test_resume_repairs_stale_meta_counts(temp_session_dir):
     store = JsonlSessionStore(session_dir=temp_session_dir, system_prompt="sys")
     await store.initialize()

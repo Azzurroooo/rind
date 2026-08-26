@@ -202,6 +202,21 @@ class AgentRuntime:
             ) from exc
         return {"runtime": runtime_updated, "session": True}
 
+    async def set_reasoning_effort(self, effort: str) -> dict[str, bool]:
+        """Switch the active reasoning effort and persist the session metadata when supported."""
+        await self.initialize()
+        runtime_updated = bool(self._turn_runner.set_reasoning_effort(effort))
+        try:
+            await self._session_store.update_reasoning_effort(effort)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            raise PersistenceError(
+                f"Failed to persist reasoning effort update: {exc}",
+                code=type(exc).__name__,
+            ) from exc
+        return {"runtime": runtime_updated, "session": True}
+
     async def get_goal(self) -> dict[str, str] | None:
         await self.initialize()
         if not self._goal_enabled:
