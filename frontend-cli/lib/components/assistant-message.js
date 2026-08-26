@@ -1,9 +1,11 @@
-import { wrapTextWithAnsi } from "../text-width.js";
+import { textWidth, wrapTextWithAnsi } from "../text-width.js";
 import {
+  codeCloseLabel,
   codeOpenLabel,
   dim,
   isPlainLine,
   isTableLine,
+  isTableSeparatorRow,
   parseTableRow,
   renderInline,
   renderMarkdownishLine,
@@ -11,6 +13,7 @@ import {
 } from "../markdown-lines.js";
 
 const CONTENT_PREFIX = "  ";
+const COLUMN_SEPARATOR_CELLS = 3;
 
 export class AssistantMessage {
   constructor(options = {}) {
@@ -52,11 +55,17 @@ export class AssistantMessage {
 
   classifyFinalize(line) {
     if (isTableLine(line, this.inCodeBlock)) {
-      this.finalizeTable(line);
+      const cells = parseTableRow(line);
+      if (cells.length && !isTableSeparatorRow(cells)) {
+        this.pushItem({ kind: "table", raw: line });
+      }
       return;
     }
     if (line.trim().startsWith("```")) {
-      this.finalizeCodeFence(line);
+      const opening = !this.inCodeBlock;
+      this.inCodeBlock = opening;
+      const label = opening ? line.trim().slice(3).trim().slice(0, 32) : "";
+      this.pushItem({ kind: "fence", label });
       return;
     }
     if (this.inCodeBlock) {
@@ -67,45 +76,60 @@ export class AssistantMessage {
       if (line) {
         this.pushItem({ kind: "plain", raw: line });
       } else {
-        this.finalized.push("");
+        this.pushItem("");
       }
       return;
     }
     this.pushItem({ kind: "markdown", raw: line });
   }
 
-  finalizeTable(line) {
-    const cells = parseTableRow(line);
-    if (!cells.length || cells.every((cell) => /^:?-{3,}:?$/.test(cell.trim()))) {
-      return;
-    }
-    this.pushItem({ kind: "table", raw: line });
-  }
-
-  finalizeCodeFence(line) {
-    const opening = !this.inCodeBlock;
-    this.inCodeBlock = opening;
-    const label = opening ? line.trim().slice(3).trim().slice(0, 32) : "";
-    this.pushItem({ kind: "fence", label });
-  }
-
-  // Items keep the raw source; styling happens per render so theme switches
-  // recolor history without rebuilding blocks.
+  // finalized keeps raw sources for width-change restyling; cacheItems keeps
+  // wrapped output so streaming frames only style new lines.
   pushItem(item) {
     this.finalized.push(item);
+    ensureRenderWidth(this);
+    if (item === "") {
+      this.cacheItems.push({ lines: [""] });
+      return;
+    }
+    if (item.kind === "table") {
+      this.cacheItems.push({ tableRun: true, cells: parseTableRow(item.raw), lines: [] });
+      this.repadLastTableRun();
+      return;
+    }
+    this.cacheItems.push({ lines: this.wrapLogical(this.styleItem(item), this.cacheWidth) });
+  }
+
+  // Re-pad the trailing table run so a newly streamed row widens earlier
+  // columns; runs are short, so restyling stays local.
+  repadLastTableRun() {
+    let start = this.cacheItems.length - 1;
+    while (start > 0 && this.cacheItems[start - 1].tableRun) {
+      start -= 1;
+    }
+    this.repadTableRun(start, this.cacheItems.length);
+  }
+
+  repadTableRun(start, end) {
+    const run = this.cacheItems.slice(start, end);
+    const widths = [];
+    for (const row of run) {
+      row.cells.forEach((cell, columnIndex) => {
+        widths[columnIndex] = Math.max(widths[columnIndex] || 0, textWidth(cell));
+      });
+    }
+    const usable = Math.max(8, this.cacheWidth - CONTENT_PREFIX.length);
+    const aligned = widths.reduce((sum, w) => sum + w, 0) + COLUMN_SEPARATOR_CELLS * (widths.length - 1) <= usable;
+    for (const [index, entry] of run.entries()) {
+      const joined = tableRowText(entry.cells, widths, aligned, index === 0, this.color);
+      entry.lines = this.wrapLogical(joined, this.cacheWidth);
+    }
   }
 
   styleItem(item) {
     switch (item.kind) {
-      case "table": {
-        const cells = parseTableRow(item.raw);
-        const rendered = cells.map((cell, index) =>
-          renderInline(cell, this.color, index === 0 ? "tableHeader" : "")
-        );
-        return rendered.join(dim(" | ", this.color));
-      }
       case "fence":
-        return dim(item.label ? codeOpenLabel(item.label) : "└ end", this.color);
+        return dim(item.label ? codeOpenLabel(item.label) : codeCloseLabel(), this.color);
       case "code":
         return styled(item.raw, this.color, "codeBlock");
       case "plain":
@@ -120,23 +144,47 @@ export class AssistantMessage {
       return this.cacheLines;
     }
     if (this.cacheWidth !== width) {
-      this.cacheItems.length = 0;
-      this.cacheWidth = width;
-    }
-    while (this.cacheItems.length < this.finalized.length) {
-      const item = this.finalized[this.cacheItems.length];
-      const logical = typeof item === "string" ? item : this.styleItem(item);
-      this.cacheItems.push(this.wrapLogical(logical, width));
+      this.restyleAll(width);
     }
     const lines = [];
     for (const item of this.cacheItems) {
-      lines.push(...item);
+      lines.push(...item.lines);
     }
     if (this.pending) {
       lines.push(...this.wrapLogical(previewPending(this.pending, this.inCodeBlock, this.color), width));
     }
     this.cacheLines = lines;
     return lines;
+  }
+
+  // Terminal resize: drop caches and restyle history under the new width.
+  restyleAll(width) {
+    this.cacheWidth = width;
+    this.cacheItems = [];
+    for (const item of this.finalized) {
+      if (item === "") {
+        this.cacheItems.push({ lines: [""] });
+      } else if (item.kind === "table") {
+        this.cacheItems.push({ tableRun: true, cells: parseTableRow(item.raw), lines: [] });
+      } else {
+        const logical = this.styleItem(item);
+        this.cacheItems.push({ lines: logical ? this.wrapLogical(logical, width) : [""] });
+      }
+    }
+    let index = 0;
+    while (index < this.cacheItems.length) {
+      if (!this.cacheItems[index].tableRun) {
+        index += 1;
+        continue;
+      }
+      let end = index + 1;
+      while (end < this.cacheItems.length && this.cacheItems[end].tableRun) {
+        end += 1;
+      }
+      this.repadTableRun(index, end);
+      index = end;
+    }
+    this.cacheLines = null;
   }
 
   wrapLogical(logical, width) {
@@ -150,8 +198,22 @@ export class AssistantMessage {
 
   invalidate() {
     this.cacheWidth = -1;
-    this.cacheItems.length = 0;
     this.cacheLines = null;
+  }
+}
+
+function tableRowText(cells, widths, aligned, isHeader, color) {
+  const rendered = cells.map((cell, columnIndex) => {
+    const painted = renderInline(cell, color, isHeader ? "tableHeader" : "");
+    const isLastColumn = columnIndex === cells.length - 1;
+    return aligned && !isLastColumn ? painted + " ".repeat(widths[columnIndex] - textWidth(cell)) : painted;
+  });
+  return rendered.join(dim(" | ", color));
+}
+
+function ensureRenderWidth(message) {
+  if (message.cacheWidth < 0) {
+    message.cacheWidth = Number(process.stdout.columns) || 80;
   }
 }
 

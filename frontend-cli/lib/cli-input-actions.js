@@ -45,13 +45,13 @@ export function createCliInputActions({
     output.redraw();
   }
 
-  function deliverQueuedInput(input, _mode, inputId, ts = "") {
+  function deliverQueuedInput(input, _mode, inputId) {
     const index = state.input.pending.findIndex((entry) => entry.inputId === inputId);
     if (index === -1) {
       return;
     }
     state.input.pending.splice(index, 1);
-    output.suspendPrompt(() => output.writeUserInput(input, ts));
+    output.suspendPrompt(() => output.writeUserInput(input));
   }
 
   async function retrievePendingInput(mode, session) {

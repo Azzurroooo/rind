@@ -35,7 +35,6 @@ export function createEventController({
     }
     switch (eventType) {
       case "turn_started":
-        output.beginTurn?.(event.ts || "");
         tokenStart = null;
         return;
       case "assistant_delta":
@@ -128,7 +127,7 @@ export function createEventController({
         return;
       case "queued_input_delivered":
         output.setGoalChasing?.(false);
-        output.deliverQueuedInput?.(event.input || "", event.mode || "steering", event.input_id || "", event.ts || "");
+        output.deliverQueuedInput?.(event.input || "", event.mode || "steering", event.input_id || "");
         return;
       case "goal_continued":
         output.closeAssistant?.();
@@ -141,7 +140,6 @@ export function createEventController({
         output.closeAssistant?.();
         output.setGoalChasing?.(false);
         output.log?.(() => errorLine(event.error));
-        output.endTurn?.();
         resetTurnState();
         return;
       case "turn_cancelled":
@@ -150,7 +148,6 @@ export function createEventController({
         output.closeAssistant?.();
         output.setGoalChasing?.(false);
         output.log?.(() => cancelledText());
-        output.endTurn?.();
         resetTurnState();
         return;
       case "turn_completed":
@@ -159,7 +156,6 @@ export function createEventController({
         output.closeAssistant?.();
         output.setGoalChasing?.(false);
         output.log?.(turnCompletedLine(event, toolStats, turnSummary()));
-        output.endTurn?.();
         resetTurnState();
         return;
       default:

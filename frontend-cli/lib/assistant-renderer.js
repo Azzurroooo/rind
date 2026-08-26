@@ -1,5 +1,6 @@
 import { graphemes, textWidth } from "./text-width.js";
 import {
+  codeCloseLabel,
   codeOpenLabel,
   dim,
   isPlainLine,
@@ -95,7 +96,7 @@ export class AssistantRenderer {
     const opening = !this.inCodeBlock;
     this.inCodeBlock = opening;
     const label = opening ? line.trim().slice(3).trim().slice(0, 32) : "";
-    this.writeStyled(dim(opening ? codeOpenLabel(label) : "└ end", this.color), newline);
+    this.writeStyled(dim(opening ? codeOpenLabel(label) : codeCloseLabel(), this.color), newline);
   }
 
   writePlain(text, newline) {

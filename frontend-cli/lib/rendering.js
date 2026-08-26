@@ -1,6 +1,5 @@
 import { clipCells, middleClipCells, textWidth, wrapTextCells } from "./text-width.js";
 import { paint, flavorSwatch } from "./theme.js";
-import { formatClock } from "./transcript-time.js";
 import { glyph, spinnerFrame } from "./glyphs.js";
 import { homedir } from "node:os";
 
@@ -33,27 +32,23 @@ export function promptPlaceholderText() {
   return "Ask Rind to do anything";
 }
 
-export function userInputText(text, width, meta = {}) {
+export function userInputText(text, width) {
   const lines = messageLines(text);
   if (!lines.length) {
     return "";
   }
-  const contentWidth = Math.max(1, userInputContentWidth(width) - 2);
-  const clock = meta.clock || "";
-  const header = `  ${accent(messageGlyph())} ${bold("You")}${clock ? dim(` · ${clock}`) : ""}`;
+  const contentWidth = userInputContentWidth(width);
   const physicalLines = lines.flatMap((line) => (
-    wrapTextCells(line, contentWidth, contentWidth).map((chunk) => `  ${dim("│")} ${chunk.text}`)
+    wrapTextCells(line, contentWidth, contentWidth).map((chunk) => `  ${chunk.text}`)
   ));
-  return [header, ...physicalLines].join("\n");
+  return `${accent(glyph("user"))} ${bold("You")}\n${physicalLines.join("\n")}`;
 }
 
-export function assistantHeaderText(clock = "") {
-  const suffix = clock ? dim(` · ${clock}`) : "";
-  return `  ${accent(agentGlyph())} ${bold("Rind")}${suffix}`;
+export function assistantHeaderText() {
+  return `${accent(glyph("agent"))} ${bold("Assistant")}`;
 }
 
-// One dim rule between conversation days so resumed sessions read as a
-// timeline instead of an undifferentiated wall of text.
+// One dim rule marking a special transcript boundary (compaction, day change).
 export function transcriptDayDividerText(label, frameWidth) {
   const text = clipSingleLine(label, 40);
   const width = Math.max(20, Number(frameWidth) || process.stdout.columns || 80);
@@ -1271,14 +1266,6 @@ function pendingInputLines(entries, frameWidth) {
     lines.push(dim(`    ${hints.join(" · ")}`));
   }
   return lines;
-}
-
-function messageGlyph() {
-  return glyph("user");
-}
-
-function agentGlyph() {
-  return glyph("agent");
 }
 
 function activityFrame(frame) {

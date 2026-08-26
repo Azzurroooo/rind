@@ -1,10 +1,18 @@
+import { glyph } from "./glyphs.js";
+import { paintRaw } from "./theme.js";
+
 const INLINE_TOKEN_RE = /(\[[^\]]+\]\([^)]+\)|`[^`]+`|\*\*[^*]+\*\*)/g;
 const PLAIN_TEXT_RE = /[`*#>|\[]/;
 
 export function renderMarkdownishLine(line, color) {
   const heading = line.match(/^(#{1,6})\s+(.+?)\s*$/);
   if (heading) {
-    return renderInline(heading[2], color, "heading");
+    const text = renderInline(heading[2], color, "heading");
+    // Top-level headings get a color bar so document structure survives
+    // scanning; deeper levels keep the plain bold treatment.
+    return heading[1].length <= 2
+      ? `${styled(glyph("headingBar"), color, "heading")} ${text}`
+      : text;
   }
 
   const quote = line.match(/^(\s*)>\s?(.*)$/);
@@ -74,11 +82,17 @@ export function parseTableRow(line) {
   return stripped.split("|").map((cell) => cell.trim());
 }
 
-export function codeOpenLabel(label) {
-  return label ? `┌ code ${label}` : "┌ code";
+export function isTableSeparatorRow(cells) {
+  return cells.length > 0 && cells.every((cell) => /^:?-{3,}:?$/.test(cell.trim()));
 }
 
-import { paintRaw } from "./theme.js";
+export function codeOpenLabel(label) {
+  return `${glyph("cornerOpen")}${glyph("rule")} code${label ? ` ${label}` : ""}`;
+}
+
+export function codeCloseLabel() {
+  return `${glyph("cornerClose")}${glyph("rule").repeat(4)}`;
+}
 
 export function styled(text, color, style) {
   if (!text || !color || !style) {

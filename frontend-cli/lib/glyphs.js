@@ -3,8 +3,8 @@
 // meter shapes, so callers transparently receive ASCII equivalents.
 
 const UNICODE = {
-  user: "●",
-  agent: "●",
+  user: "▷",
+  agent: "◁",
   divider: "◆",
   notice: "◆",
   goal: "◆",
@@ -27,8 +27,8 @@ const UNICODE = {
 };
 
 const ASCII = {
-  user: "*",
-  agent: "*",
+  user: ">",
+  agent: "<",
   divider: "+",
   notice: "+",
   goal: "+",

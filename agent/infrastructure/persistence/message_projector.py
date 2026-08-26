@@ -149,7 +149,6 @@ def _compact_replacement_boundary(compaction: dict[str, Any]) -> list[dict[str, 
             "role": "user",
             "content": user["content"],
             "_rind_meta": {"kind": "compact_boundary"},
-            "ts": compaction.get("created_at", ""),
         },
         {"role": "assistant", "content": content},
     ]
@@ -180,8 +179,6 @@ def _has_reasoning_content(message: dict[str, Any]) -> bool:
 
 
 def _add_identity(projected: dict[str, Any], message: dict[str, Any], include_ids: bool) -> None:
-    if message.get("ts"):
-        projected["ts"] = str(message["ts"])
     if include_ids and message.get("id"):
         projected["id"] = str(message["id"])
 

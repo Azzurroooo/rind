@@ -33,8 +33,6 @@ export function createCliState() {
       activityStartedAt: 0,
       assistantOutputLineOpen: false,
       assistantHeaderShown: false,
-      turnClock: "",
-      lastTranscriptDay: "",
       outputStarted: false,
       toolDetailsExpanded: false,
       processExitTimer: null,

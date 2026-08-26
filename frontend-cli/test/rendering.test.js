@@ -50,9 +50,7 @@ import {
   userInputText,
   compactBoundaryLine,
   thinkingBlockLines,
-  transcriptDayDividerText,
 } from "../lib/rendering.js";
-import { dayKey, formatClock, formatDayLabel } from "../lib/transcript-time.js";
 import { textWidth } from "../lib/text-width.js";
 
 test("startupText includes resume preview when provided", () => {
@@ -73,8 +71,8 @@ test("startupText includes resume preview when provided", () => {
       "",
       "◆ Recent context",
       "  Resumed session s1",
-      "● You · hello",
-      "● Assistant · hi",
+      "▷ You · hello",
+      "◁ Assistant · hi",
     ].join("\n"),
   );
 });
@@ -84,7 +82,7 @@ test("startupText clips long resume preview lines", () => {
     resume_preview: `user: ${"x".repeat(120)}`,
   });
 
-  assert.match(text, /● You · x{69}\.\.\./);
+  assert.match(text, /▷ You · x{69}\.\.\./);
 });
 
 test("startupText clips resume preview without splitting keycap emoji", () => {
@@ -92,7 +90,7 @@ test("startupText clips resume preview without splitting keycap emoji", () => {
     resume_preview: `user: ${"x".repeat(68)}9️⃣ tail`,
   });
 
-  assert.match(text, /● You · x{68}\.\.\./);
+  assert.match(text, /▷ You · x{68}\.\.\./);
   assert.doesNotMatch(text, /9\uFE0F\.\.\./);
   assert.doesNotMatch(text, /9\u20E3/);
 });
@@ -135,32 +133,22 @@ test("prompt and turn status copy match the compact terminal UI", () => {
     ].join("\n"),
   );
   assert.equal(promptPlaceholderText(), "Ask Rind to do anything");
-  assert.equal(answerPromptText(), "\n  ● ");
+  assert.equal(answerPromptText(), "\n  ▷ ");
   assert.equal(answerPlaceholderText(), "Type your answer");
   assert.equal(inputHintText("Ask Rind to do anything"), "Ask Rind to do anything");
   assert.equal(interruptText(), "◆ Interrupt requested\n    ctrl+c again to quit");
   assert.equal(cancelledText(), "◆ Interrupted\n    session preserved; resume with -c");
-  assert.equal(
-    userInputText("hello", undefined, { clock: "14:32" }),
-    "  ● You · 14:32\n  │ hello",
-  );
-  assert.equal(
-    userInputText("first\r\nsecond", undefined, { clock: "14:32" }),
-    "  ● You · 14:32\n  │ first\n  │ second",
-  );
+  assert.equal(userInputText("hello"), "▷ You\n  hello");
+  assert.equal(userInputText("first\r\nsecond"), "▷ You\n  first\n  second");
   const originalColumns = process.stdout.columns;
   process.stdout.columns = 12;
   try {
-    assert.equal(
-      userInputText("abcdefghijklmnop", undefined, { clock: "09:05" }),
-      "  ● You · 09:05\n  │ abcdefgh\n  │ ijklmnop",
-    );
+    assert.equal(userInputText("abcdefghijklmnop"), "▷ You\n  abcdefghij\n  klmnop");
   } finally {
     process.stdout.columns = originalColumns;
   }
   assert.equal(userInputText(""), "");
-  assert.equal(assistantHeaderText(), "  ● Rind");
-  assert.equal(assistantHeaderText("14:32"), "  ● Rind · 14:32");
+  assert.equal(assistantHeaderText(), "◁ Assistant");
   assert.equal(outputBlockText("• Working"), "• Working\n");
   assert.equal(outputBlockText("• Working", true), "\n• Working\n");
   assert.equal(outputBlockText(""), "");
@@ -1216,7 +1204,7 @@ test("AssistantRenderer renders headings and lists without raw markdown prefixes
   renderer.append("## 🔟 标题\n- **重点** 9️⃣ 项\n");
   renderer.finish();
 
-  assert.equal(output, "  🔟 标题\n  – 重点 9️⃣ 项\n");
+  assert.equal(output, "  ▍ 🔟 标题\n  – 重点 9️⃣ 项\n");
 });
 
 test("AssistantRenderer renders code fences as compact labels", () => {
@@ -1228,7 +1216,7 @@ test("AssistantRenderer renders code fences as compact labels", () => {
   renderer.append("```sh\necho hi\n```\n");
   renderer.finish();
 
-  assert.equal(output, "  ┌ code sh\n  echo hi\n  └ end\n");
+  assert.equal(output, "  ╭─ code sh\n  echo hi\n  ╰────\n");
 });
 
 test("AssistantRenderer renders markdown links as readable text", () => {
@@ -1284,30 +1272,6 @@ test("AssistantRenderer keeps markdown structure markers dim", () => {
   assert.doesNotMatch(output, /\x1b\[(1;33|32)m/);
 });
 
-test("transcript time helpers format clocks, day keys and labels", () => {
-  const ts = "2026-08-24T06:32:00Z";
-  assert.equal(formatClock(ts), formatClock(new Date(ts).toISOString()));
-  assert.match(formatClock(ts), /^\d{2}:\d{2}$/);
-  assert.equal(formatClock(""), "");
-  assert.equal(formatClock("not-a-date"), "");
-  assert.equal(dayKey(ts), dayKey(new Date(ts).toISOString()));
-  assert.equal(dayKey(""), "");
-  assert.equal(formatDayLabel(ts, new Date(ts)), "Aug 24");
-  assert.equal(formatDayLabel("", new Date(ts)), "");
-});
-
-test("day divider centers its label within the frame width", () => {
-  const line = transcriptDayDividerText("Aug 24", 40);
-  assert.equal(line.startsWith("  "), true);
-  assert.ok(line.includes("Aug 24"));
-  assert.ok(textWidth(line) <= 40);
-});
-
-test("assistant turn card header carries the clock", () => {
-  assert.equal(assistantHeaderText(), "  ● Rind");
-  assert.equal(assistantHeaderText("07:41"), "  ● Rind · 07:41");
-});
-
 test("compact boundary renders as a dim rule", () => {
   const line = compactBoundaryLine();
   assert.ok(line.includes("context compacted"));
@@ -1324,4 +1288,43 @@ test("thinking blocks collapse to a bounded dim preview", () => {
   const one = thinkingBlockLines("only");
   assert.deepEqual(one, ["  ▸ thinking", "  │ only"]);
   assert.deepEqual(thinkingBlockLines("   "), []);
+});
+
+test("AssistantMessage aligns markdown table columns across streamed rows", () => {
+  const originalColumns = process.stdout.columns;
+  process.stdout.columns = 80;
+  try {
+    const message = new AssistantMessage({ color: false });
+    message.append("| Name | Age |\n");
+    message.append("|---|---|\n");
+    message.append("| Alice | 30 |\n");
+    message.append("| Bob | 5 |\n");
+    message.finish();
+
+    assert.deepEqual(message.render(80), [
+      "  Name  | Age",
+      "  Alice | 30",
+      "  Bob   | 5",
+    ]);
+  } finally {
+    process.stdout.columns = originalColumns;
+  }
+});
+
+test("AssistantMessage re-pads earlier table rows when later rows widen columns", () => {
+  const originalColumns = process.stdout.columns;
+  process.stdout.columns = 80;
+  try {
+    const message = new AssistantMessage({ color: false });
+    message.append("| K | n |\n");
+    message.append("| Alice | 1 |\n");
+    message.finish();
+
+    assert.deepEqual(message.render(80), [
+      "  K     | n",
+      "  Alice | 1",
+    ]);
+  } finally {
+    process.stdout.columns = originalColumns;
+  }
 });

@@ -9,12 +9,10 @@ import {
   toolRequestedLine,
   toolResultLine,
   toolStartedLine,
-  transcriptDayDividerText,
   userInputText,
   questionAnswerText,
   questionText,
 } from "./rendering.js";
-import { dayKey, formatClock, formatDayLabel } from "./transcript-time.js";
 import { TextBlock } from "./components/text-block.js";
 import { DynamicBlock } from "./components/dynamic-block.js";
 import { AssistantMessage } from "./components/assistant-message.js";
@@ -145,31 +143,25 @@ export function createCliOutputController({ state, terminalUi, transcript }) {
     process.stdout.write(output);
   }
 
-  function writeUserInput(text, ts = "") {
+  function writeUserInput(text) {
     const value = String(text ?? "");
     if (!value.trim()) {
       return;
     }
-    const clock = formatClock(ts) || formatClock(new Date().toISOString());
     if (!terminalUi) {
       flushAssistantText(streamBuffer.flush());
-      const line = userInputText(value, undefined, { clock });
+      const line = userInputText(value);
       if (!line) {
         return;
       }
-      const divider = dayDividerFor(ts);
-      process.stdout.write(outputBlockText(divider ? `${divider}\n${line}` : line, state.display.outputStarted));
+      process.stdout.write(outputBlockText(line, state.display.outputStarted));
       state.display.outputStarted = true;
       return;
     }
     const leading = blockCount > 0;
     appendBlock(new DynamicBlock((width) => {
-      const divider = dayDividerFor(ts);
-      const rendered = userInputText(value, width, { clock });
+      const rendered = userInputText(value, width);
       const lines = rendered ? rendered.split("\n") : [];
-      if (divider) {
-        lines.unshift(divider);
-      }
       if (leading && lines.length) {
         lines.unshift("");
       }
@@ -178,21 +170,6 @@ export function createCliOutputController({ state, terminalUi, transcript }) {
       }
       return lines;
     }));
-  }
-
-  // Emit a dated rule the first time a transcript touches a new calendar day,
-  // so resumed sessions read as a timeline.
-  function dayDividerFor(ts) {
-    const key = dayKey(ts);
-    if (!key || key === state.display.lastTranscriptDay) {
-      return "";
-    }
-    const isFirst = !state.display.lastTranscriptDay;
-    state.display.lastTranscriptDay = key;
-    if (isFirst && key === dayKey(new Date().toISOString())) {
-      return "";
-    }
-    return transcriptDayDividerText(formatDayLabel(ts), process.stdout.columns || 80);
   }
 
   function writeError(text) {
@@ -208,14 +185,9 @@ export function createCliOutputController({ state, terminalUi, transcript }) {
 
   function ensureAssistantBlocks() {
     if (!assistantMessage) {
-      // One header per turn: tool calls split the text into several blocks,
-      // but the header must not repeat after every tool interruption.
-      if (!state.display.assistantHeaderShown) {
-        const leading = blockCount > 0;
-        transcript.addChild(lazyLines(() => assistantHeaderText(state.display.turnClock), leading));
-        blockCount += 1;
-        state.display.assistantHeaderShown = true;
-      }
+      const leading = blockCount > 0;
+      transcript.addChild(lazyLines(() => assistantHeaderText(), leading));
+      blockCount += 1;
       assistantMessage = new AssistantMessage({ color: true });
       transcript.addChild(assistantMessage);
       blockCount += 1;
@@ -229,21 +201,12 @@ export function createCliOutputController({ state, terminalUi, transcript }) {
         assistantMessage.finish();
         assistantMessage = null;
       }
+      state.display.assistantHeaderShown = false;
       return;
     }
     legacyRenderer.finish();
     flushAssistantText(streamBuffer.flush());
-  }
-
-  // Turn lifecycle: capture the turn's wall-clock time for the card header
-  // and re-arm the once-per-turn header.
-  function beginTurn(ts = "") {
-    state.display.turnClock = formatClock(ts);
     state.display.assistantHeaderShown = false;
-  }
-
-  function endTurn() {
-    state.display.turnClock = "";
   }
 
   function beginQuestion(event) {
@@ -389,7 +352,6 @@ export function createCliOutputController({ state, terminalUi, transcript }) {
     };
     for (const message of Array.isArray(messages) ? messages : []) {
       const role = String(message?.role || "");
-      const ts = String(message?.ts || "");
       if (message?._rind_meta?.kind === "compact_boundary") {
         flushPendingTools();
         closeAssistant();
@@ -399,20 +361,17 @@ export function createCliOutputController({ state, terminalUi, transcript }) {
       if (role === "user") {
         flushPendingTools();
         closeAssistant();
-        writeUserInput(messageText(message?.content), ts);
+        writeUserInput(messageText(message?.content));
         continue;
       }
       if (role === "assistant") {
         flushPendingTools();
         const reasoning = String(message?.reasoning_content || "");
         if (reasoning.trim()) {
-          beginTurn(ts);
           log(() => thinkingBlockLines(reasoning).join("\n"));
-          closeAssistant();
         }
         const content = messageText(message?.content);
         if (content) {
-          beginTurn(ts);
           assistantAppend(content);
           closeAssistant();
         }
@@ -454,8 +413,6 @@ export function createCliOutputController({ state, terminalUi, transcript }) {
     writeUserInput,
     writeError,
     closeAssistant,
-    beginTurn,
-    endTurn,
     clearAssistantLineForInput,
     assistantAppend,
     beginTool,

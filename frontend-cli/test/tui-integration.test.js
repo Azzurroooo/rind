@@ -79,7 +79,7 @@ test("streaming assistant text renders above the composer and reflows on resize"
   let viewport = harness.virtual.getViewport().filter((line) => line.trim().length > 0);
   const flat = viewport.join("\n");
   assert.ok(flat.includes("You"), "user echo visible");
-  assert.ok(flat.includes("Rind"), "assistant header visible");
+  assert.ok(flat.includes("Assistant"), "assistant header visible");
   assert.ok(flat.includes("streams tokens"), "streamed tail visible");
 
   harness.virtual.resize(80, 14);

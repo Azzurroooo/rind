@@ -136,13 +136,10 @@ test("event controller delivers queued input and clears pending input on termina
 
 test("turn completion summary aggregates file changes and token spend", async () => {
   const logged = [];
-  const statsSeen = [];
   const controller = createEventController({
     state: { get activeTurn() { return true; } },
     output: {
-      beginTurn() {},
-      endTurn() {},
-      setStats: (stats) => statsSeen.push(stats.input_tokens),
+      setStats: () => {},
       closeAssistant() {},
       clearQueuedInputs() {},
       clearCompactContext() {},
