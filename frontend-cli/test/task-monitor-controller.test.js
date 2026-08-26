@@ -3,6 +3,34 @@ import assert from "node:assert/strict";
 
 import { createTaskMonitorController } from "../lib/task-monitor-controller.js";
 
+test("task monitor announces background tasks that finish between refreshes", async () => {
+  const state = {
+    runtimeClosing: false,
+    sessionInfo: {},
+    inputActive: false,
+  };
+  let listed = [{ bg_id: "bg-9", status: "running", command: "server" }];
+  const logged = [];
+  const controller = createTaskMonitorController({
+    request: async () => ({ tasks: listed }),
+    terminalUi: true,
+    state,
+    log: (text) => logged.push(text),
+  });
+
+  await controller.refresh();
+  assert.deepEqual(logged, []);
+
+  listed = [{ bg_id: "bg-9", status: "completed", exit_code: 0 }];
+  await controller.refresh();
+  assert.equal(logged.length, 1);
+  assert.match(logged[0], /background completed · bg bg-9/);
+
+  await controller.refresh();
+  assert.equal(logged.length, 1, "no repeat announcement");
+  controller.stop();
+});
+
 test("task monitor merges background commands and results", () => {
   const state = {
     runtimeClosing: false,

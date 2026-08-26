@@ -1,4 +1,5 @@
 import { backgroundMonitorText, delegateMonitorText, taskMonitorTabs } from "./rendering.js";
+import { glyph } from "./glyphs.js";
 import { runtimeMethods } from "./runtime-protocol.js";
 
 const PAGES = ["background", "delegates"];
@@ -43,7 +44,9 @@ export function createTaskMonitorController({
             continue;
           }
           ids.add(bgId);
-          tasks.set(bgId, { ...(tasks.get(bgId) || {}), ...task, bg_id: bgId });
+          const previous = tasks.get(bgId) || {};
+          tasks.set(bgId, { ...previous, ...task, bg_id: bgId });
+          announceFinished(previous, task, bgId);
         }
         for (const bgId of tasks.keys()) {
           if (!ids.has(bgId) && tasks.get(bgId)?.status === "running") {
@@ -84,6 +87,18 @@ export function createTaskMonitorController({
     } else {
       stopRefresh();
     }
+  }
+
+  // A background command leaving "running" is worth one line in the
+  // transcript; repeated announcements would be noise.
+  function announceFinished(previous, next, bgId) {
+    if (previous.status !== "running" || !next || next.status === "running" || previous.announced) {
+      return;
+    }
+    tasks.get(bgId).announced = true;
+    const exit = Number(next.exit_code);
+    const detail = Number.isInteger(exit) && exit !== 0 ? ` · exit ${exit}` : "";
+    log(`${glyph("done")} background ${next.status} · bg ${bgId}${detail}`);
   }
 
   function startRefresh() {
