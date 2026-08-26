@@ -467,10 +467,18 @@ function composeFrame(width = process.stdout.columns || 80) {
     return null;
   }
   const turnRunning = Boolean(turnStateData.active || displayState.activeCompact);
+  const choiceMenu = ["model", "theme", "sessions", "team-blueprints"].includes(session.mode);
+  if (session.mode === "prompt" && session.menuState) {
+    session.menuState.setInput(session.editor.input());
+  }
+  const slashMenuOpen = session.mode === "prompt"
+    && session.menuState
+    && session.menuState.matches().length > 0;
   // While a turn runs, the composer is a steering box: keep the hardware
   // caret hidden so nothing blinks beside the spinner (question editing
   // still needs a visible caret for its custom-answer field).
-  const showCaret = !turnRunning || (session.mode === "question" && session.questionState.isEditing());
+  const showCaret = (!turnRunning && !choiceMenu && !slashMenuOpen)
+    || (session.mode === "question" && session.questionState.isEditing());
   if (session.mode === "model") {
     return {
       showCaret,
