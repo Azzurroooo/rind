@@ -21,7 +21,9 @@ from agent.domain.events import (
     AssistantDeltaEvent,
     AssistantMessageCompletedEvent,
     ContextBuiltEvent,
+    GoalContinuedEvent,
     PlanUpdatedEvent,
+    QueuedInputDeliveredEvent,
     ToolInputDeltaEvent,
     ToolInputEndedEvent,
     ToolInputStartedEvent,
@@ -346,9 +348,72 @@ async def test_async_runtime_continues_active_goal_until_terminal_status():
     ]
 
     assert len(runner.calls) == 2
-    assert all(messages and "finish the release" in messages[-1]["content"] for messages in runner.calls)
+    assert runner.calls[0] is None or not any(
+        message.get("_context_kind") == "goal" for message in runner.calls[0]
+    )
+    assert "finish the release" in runner.calls[1][-1]["content"]
+    goal_continued_events = [event for event in events if isinstance(event, GoalContinuedEvent)]
+    assert len(goal_continued_events) == 1
+    assert events.index(goal_continued_events[0]) < events.index(events[-1])
     assert isinstance(events[-1], TurnCompletedEvent)
     assert session.goal["status"] == "complete"
+
+
+@pytest.mark.asyncio
+async def test_async_runtime_delivers_follow_up_before_goal_continuation():
+    class GoalSession:
+        session_id = "goal-session"
+
+        def __init__(self):
+            self.goal = {"objective": "finish the release", "status": "active"}
+            self.persisted = []
+
+        async def initialize(self):
+            return None
+
+        async def persist_message(self, role, content, **kwargs):
+            self.persisted.append((role, content, kwargs))
+
+        async def persist_turn_state(self, turn_id, status, ts, recovery_attempt=None):
+            return None
+
+        async def get_goal(self):
+            return dict(self.goal)
+
+        async def set_goal_status(self, status):
+            self.goal["status"] = status
+            return dict(self.goal)
+
+        def now_iso(self):
+            return "2026-05-08T00:00:00Z"
+
+    class GoalRunner:
+        def __init__(self, session):
+            self.session = session
+            self.calls = []
+            self.runtime = None
+
+        async def run_turn(self, session, transient_system_messages=None, **_kwargs):
+            self.calls.append(transient_system_messages)
+            if len(self.calls) == 1:
+                self.runtime.submit_follow_up("user follow-up")
+            if len(self.calls) == 2:
+                await self.session.set_goal_status("complete")
+            yield TurnCompletedEvent(turn_id="goal-turn")
+
+    session = GoalSession()
+    runner = GoalRunner(session)
+    runtime = AgentRuntime(runner, session, goal_enabled=True)
+    runner.runtime = runtime
+    events = [
+        event
+        async for event in runtime.run_turn(query="start")
+    ]
+
+    delivered = [event for event in events if isinstance(event, QueuedInputDeliveredEvent)]
+    assert len(delivered) == 1
+    assert delivered[0].input == "user follow-up"
+    assert not [event for event in events if isinstance(event, GoalContinuedEvent)]
 
 
 @pytest.mark.asyncio

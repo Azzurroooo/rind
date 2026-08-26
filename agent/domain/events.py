@@ -129,6 +129,12 @@ class QueuedInputDeliveredEvent(RuntimeEvent):
 
 
 @dataclass(slots=True)
+class GoalContinuedEvent(RuntimeEvent):
+    """Fired when an active goal triggers another pass after a completed pass."""
+    type: Literal["goal_continued"] = "goal_continued"
+
+
+@dataclass(slots=True)
 class ToolRequestedEvent(RuntimeEvent):
     """Fired when the model requests a tool call."""
     type: Literal["tool_requested"] = "tool_requested"

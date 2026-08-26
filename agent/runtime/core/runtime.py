@@ -16,8 +16,8 @@ from agent.application.skill_selection import SkillTurnCoordinator
 from agent.runtime.core.turn_runner import TurnRunner
 from agent.domain.cancellation import CancellationToken
 from agent.domain.errors import PersistenceError
-from agent.domain.events import QueuedInputDeliveredEvent, RuntimeEvent, TurnStartedEvent, event_meta
-from agent.prompts import build_goal_prompt
+from agent.domain.events import GoalContinuedEvent, QueuedInputDeliveredEvent, RuntimeEvent, TurnStartedEvent, event_meta
+from agent.prompts import build_goal_continuation_prompt
 
 
 MAX_QUEUED_INPUTS = 4
@@ -365,6 +365,7 @@ class AgentRuntime:
                 yield started_event
 
                 total_duration_ms = 0
+                pass_transients: list[dict] | None = None
                 while True:
                     runner_kwargs = {
                         "session": self._session_store,
@@ -373,20 +374,16 @@ class AgentRuntime:
                         "take_steering": self._take_steering,
                     }
                     context_messages = [dict(message) for message in self._runtime_system_messages]
-                    context_messages.extend(dict(message) for message in (transient_system_messages or []))
-                    goal = await self._current_goal()
-                    if goal and goal.get("status") == "active":
-                        context_messages.append(
-                            {
-                                "role": "system",
-                                "content": build_goal_prompt(goal["objective"]),
-                                "_context_kind": "goal",
-                            }
-                        )
+                    if pass_transients is None:
+                        context_messages.extend(dict(message) for message in (transient_system_messages or []))
+                    else:
+                        context_messages.extend(dict(message) for message in pass_transients)
+                        pass_transients = None
                     if context_messages:
                         runner_kwargs["transient_system_messages"] = context_messages
                     if resume:
                         runner_kwargs["resume"] = True
+                        resume = False
 
                     terminal_event = None
                     async for event in self._turn_runner.run_turn(**runner_kwargs):
@@ -411,7 +408,16 @@ class AgentRuntime:
                                 mode="follow_up",
                             )
                             continue
-                        if await self._goal_is_active():
+                        goal = await self._current_goal()
+                        if goal and goal.get("status") == "active":
+                            yield GoalContinuedEvent(**event_meta(self._session_store, turn_id))
+                            pass_transients = [
+                                {
+                                    "role": "system",
+                                    "content": build_goal_continuation_prompt(goal["objective"]),
+                                    "_context_kind": "goal",
+                                }
+                            ]
                             continue
 
                     if terminal_event.type == "turn_failed":
@@ -440,10 +446,6 @@ class AgentRuntime:
             return None
         goal = await getter()
         return dict(goal) if isinstance(goal, dict) else None
-
-    async def _goal_is_active(self) -> bool:
-        goal = await self._current_goal()
-        return bool(goal and goal.get("status") == "active")
 
     async def _stop_active_goal(self, status: str) -> None:
         goal = await self._current_goal()
