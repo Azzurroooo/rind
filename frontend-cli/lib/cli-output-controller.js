@@ -1,9 +1,11 @@
 import { AssistantRenderer } from "./assistant-renderer.js";
 import {
   assistantHeaderText,
+  compactBoundaryLine,
   outputBlockText,
   promptText,
   startupText,
+  thinkingBlockLines,
   toolRequestedLine,
   toolResultLine,
   toolStartedLine,
