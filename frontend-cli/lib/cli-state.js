@@ -27,6 +27,7 @@ export function createCliState() {
       activeCompact: false,
       goalChasing: false,
       stats: {},
+      plan: [],
       lastEventSequence: 0,
       activityFrame: 0,
       activityTimer: null,

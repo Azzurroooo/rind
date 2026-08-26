@@ -1344,3 +1344,26 @@ test("AssistantMessage re-pads earlier table rows when later rows widen columns"
     process.stdout.columns = originalColumns;
   }
 });
+
+test("promptText mirrors the plan above the composer while a turn runs", () => {
+  const frame = promptText({}, {}, {
+    running: true,
+    frame: 0,
+    elapsedMs: 500,
+    plan: [
+      { step: "analyze repo", status: "completed" },
+      { step: "apply edits", status: "in_progress" },
+      { step: "run tests", status: "pending" },
+    ],
+  });
+  const lines = frame.split("\n");
+  assert.match(lines[1], /Plan$/);
+  assert.equal(lines[2].includes("analyze repo"), true);
+  assert.equal(lines[3].includes("apply edits"), true);
+  assert.equal(lines[4].includes("run tests"), true);
+});
+
+test("promptText hides the plan panel when idle or without a plan", () => {
+  assert.doesNotMatch(promptText({}, {}, { running: false, plan: [{ step: "x", status: "pending" }] }), /Plan/);
+  assert.doesNotMatch(promptText({}, {}, { running: true, elapsedMs: 10 }), /Plan/);
+});

@@ -52,7 +52,13 @@ export function createCliOutputController({ state, terminalUi, transcript }) {
       frame: state.display.activityFrame,
       elapsedMs: running ? Date.now() - state.display.activityStartedAt : 0,
       pendingInputs: state.input.pending,
+      plan: state.display.plan,
     };
+  }
+
+  function updatePlan(plan) {
+    state.display.plan = Array.isArray(plan) ? plan : [];
+    redraw();
   }
 
   // Latest still-running tool call names the current action in the activity line.
@@ -432,6 +438,7 @@ export function createCliOutputController({ state, terminalUi, transcript }) {
     beginTool,
     updateToolProgress,
     finishTool,
+    updatePlan,
     beginQuestion,
     finishQuestion,
     setToolsExpanded,

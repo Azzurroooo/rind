@@ -101,6 +101,9 @@ export function createEventController({
         }
         recordFileChange(event);
         return;
+      case "plan_updated":
+        output.updatePlan?.(Array.isArray(event.plan) ? event.plan : []);
+        return;
       case "tool_progress": {
         const message = progressMessage(event.payload);
         if (message) {

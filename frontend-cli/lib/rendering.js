@@ -1217,7 +1217,7 @@ function helpRow(leftKey, leftText, rightKey = "", rightText = "") {
 }
 
 function inputPromptFrame(header = "", state = {}, frameWidth) {
-  const lines = [""];
+  const lines = ["", ...planPanelLines(state)];
   const activity = promptActivityLine(state);
   if (activity) {
     lines.push(activity);
@@ -1265,6 +1265,29 @@ function pendingInputLines(entries, frameWidth) {
   }
   if (hints.length) {
     lines.push(dim(`    ${hints.join(" · ")}`));
+  }
+  return lines;
+}
+
+const PLAN_PANEL_ROWS = 6;
+
+// Live plan mirror above the composer while the agent works; the transcript
+// keeps the full update history via planUpdatedLine.
+function planPanelLines(state) {
+  const plan = Array.isArray(state?.plan) ? state.plan : [];
+  if (!state.running || !plan.length) {
+    return [];
+  }
+  const lines = [dim("  Plan")];
+  for (const item of plan.slice(0, PLAN_PANEL_ROWS)) {
+    const step = clipSingleLine(item?.step, detailTextWidth());
+    if (step) {
+      lines.push(`  ${planStatusIcon(item?.status)} ${step}`);
+    }
+  }
+  const hidden = plan.length - Math.min(plan.length, PLAN_PANEL_ROWS);
+  if (hidden > 0) {
+    lines.push(dim(`    … +${hidden}`));
   }
   return lines;
 }

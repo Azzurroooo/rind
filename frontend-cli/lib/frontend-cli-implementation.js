@@ -328,6 +328,7 @@ const eventController = createEventController({
     beginTool: (...args) => outputController.beginTool(...args),
     updateToolProgress: (...args) => outputController.updateToolProgress(...args),
     finishTool: (...args) => outputController.finishTool(...args),
+    updatePlan: (plan) => outputController.updatePlan(plan),
     handleContextBuilt: (event) => compactContextState.handleContextBuilt(event),
     resetContextUsage,
     closeAssistant,
