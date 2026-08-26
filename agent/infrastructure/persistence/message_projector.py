@@ -38,8 +38,7 @@ def project_messages(
                 "tool_call_id": tool_call_id,
                 "content": _build_tool_content(tool_map.get(str(tool_call_id))),
             }
-            if include_ids and message.get("id"):
-                projected["id"] = str(message["id"])
+            _add_identity(projected, message, include_ids)
             built_messages.append(projected)
             if tool_call_id:
                 emitted_tool_call_ids.add(str(tool_call_id))
@@ -48,8 +47,7 @@ def project_messages(
             tool_calls = _build_assistant_tool_calls(message["meta"]["tool_calls"], tool_map)
             if tool_calls:
                 assistant = {"role": "assistant", "tool_calls": tool_calls}
-                if include_ids and message.get("id"):
-                    assistant["id"] = str(message["id"])
+                _add_identity(assistant, message, include_ids)
                 if message.get("content"):
                     assistant["content"] = message["content"]
                 _add_reasoning_content(assistant, message)
@@ -57,20 +55,20 @@ def project_messages(
                 built_messages.extend(_missing_tool_messages(tool_calls, tool_map, emitted_tool_call_ids, include_ids))
             elif message.get("content") or _has_reasoning_content(message):
                 assistant = {"role": "assistant", "content": message.get("content", "")}
-                if include_ids and message.get("id"):
-                    assistant["id"] = str(message["id"])
+                _add_identity(assistant, message, include_ids)
                 _add_reasoning_content(assistant, message)
                 built_messages.append(assistant)
             continue
         if role in {"system", "user", "assistant"}:
             projected = {"role": role, "content": message.get("content", "")}
-            if include_ids and message.get("id"):
-                projected["id"] = str(message["id"])
-            if role == "assistant":
-                _add_reasoning_content(projected, message)
+            _add_identity(projected, message, include_ids)
             metadata = message.get("meta")
             if isinstance(metadata, dict) and metadata.get("kind") == "skill_snapshot":
                 projected["_rind_meta"] = {"kind": "skill_snapshot"}
+            elif isinstance(message.get("_rind_meta"), dict):
+                projected["_rind_meta"] = message["_rind_meta"]
+            if role == "assistant":
+                _add_reasoning_content(projected, message)
             built_messages.append(projected)
 
     if not built_messages:
@@ -147,7 +145,12 @@ def _compact_replacement_boundary(compaction: dict[str, Any]) -> list[dict[str, 
     if not _valid_message(user, {"user"}):
         user = {"role": "user", "content": COMPACT_CONTINUATION_USER_CONTENT}
     return [
-        {"role": "user", "content": user["content"]},
+        {
+            "role": "user",
+            "content": user["content"],
+            "_rind_meta": {"kind": "compact_boundary"},
+            "ts": compaction.get("created_at", ""),
+        },
         {"role": "assistant", "content": content},
     ]
 
@@ -174,6 +177,13 @@ def _has_tool_calls_meta(message: dict[str, Any]) -> bool:
 
 def _has_reasoning_content(message: dict[str, Any]) -> bool:
     return isinstance(message.get("reasoning_content"), str)
+
+
+def _add_identity(projected: dict[str, Any], message: dict[str, Any], include_ids: bool) -> None:
+    if message.get("ts"):
+        projected["ts"] = str(message["ts"])
+    if include_ids and message.get("id"):
+        projected["id"] = str(message["id"])
 
 
 def _add_reasoning_content(projected: dict[str, Any], message: dict[str, Any]) -> None:

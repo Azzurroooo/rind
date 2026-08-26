@@ -228,9 +228,6 @@ turnController = createTurnController({
   request,
   state: turnState,
   refreshGoalState: runtimeController.refreshGoalState,
-  onTurnStart: () => {
-    displayState.assistantHeaderShown = false;
-  },
   output: {
     queueInput: (...args) => inputActions.addPendingInput(...args),
     restoreInputText: (...args) => inputActions.restoreInputText(...args),
@@ -331,6 +328,8 @@ const eventController = createEventController({
     beginTool: (...args) => outputController.beginTool(...args),
     updateToolProgress: (...args) => outputController.updateToolProgress(...args),
     finishTool: (...args) => outputController.finishTool(...args),
+    beginTurn: (ts) => outputController.beginTurn(ts),
+    endTurn: () => outputController.endTurn(),
     handleContextBuilt: (event) => compactContextState.handleContextBuilt(event),
     resetContextUsage,
     closeAssistant,

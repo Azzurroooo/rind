@@ -79,7 +79,7 @@ test("streaming assistant text renders above the composer and reflows on resize"
   let viewport = harness.virtual.getViewport().filter((line) => line.trim().length > 0);
   const flat = viewport.join("\n");
   assert.ok(flat.includes("You"), "user echo visible");
-  assert.ok(flat.includes("Assistant"), "assistant header visible");
+  assert.ok(flat.includes("Rind"), "assistant header visible");
   assert.ok(flat.includes("streams tokens"), "streamed tail visible");
 
   harness.virtual.resize(80, 14);
@@ -482,7 +482,7 @@ test("streaming fragments without newlines stay on one line", async () => {
   await settle(harness.virtual);
 
   const viewport = harness.virtual.getViewport().filter((line) => line.trim());
-  const assistantRows = viewport.filter((line) => line.includes("你好") || line.includes("我是") || line.includes("Rind"));
+  const assistantRows = viewport.filter((line) => line.includes("你好"));
   assert.equal(assistantRows.length, 1, `fragments joined on one row, got ${JSON.stringify(viewport)}`);
   assert.ok(assistantRows[0].includes("你好！我是Rind"));
   harness.tui.stop();

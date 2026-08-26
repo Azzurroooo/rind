@@ -1,5 +1,7 @@
 import { clipCells, middleClipCells, textWidth, wrapTextCells } from "./text-width.js";
 import { paint, flavorSwatch } from "./theme.js";
+import { formatClock } from "./transcript-time.js";
+import { glyph, spinnerFrame } from "./glyphs.js";
 import { homedir } from "node:os";
 
 const MAX_STARTUP_BANNER_WIDTH = 80;
@@ -10,7 +12,7 @@ export function startupText(info = {}, width) {
   const header = startupBannerText(info, width);
   const goal = goalText(info.goal, true);
   const preview = resumePreviewText(info.resume_preview);
-  const sections = [header, goal, preview ? `${accent("◆")} ${bold("Recent context")}\n${preview}` : ""];
+  const sections = [header, goal, preview ? `${accent(glyph("divider"))} ${bold("Recent context")}\n${preview}` : ""];
   return sections.filter(Boolean).join("\n\n");
 }
 
@@ -31,20 +33,32 @@ export function promptPlaceholderText() {
   return "Ask Rind to do anything";
 }
 
-export function userInputText(text, width) {
+export function userInputText(text, width, meta = {}) {
   const lines = messageLines(text);
   if (!lines.length) {
     return "";
   }
-  const contentWidth = userInputContentWidth(width);
+  const contentWidth = Math.max(1, userInputContentWidth(width) - 2);
+  const clock = meta.clock || "";
+  const header = `  ${accent(messageGlyph())} ${bold("You")}${clock ? dim(` · ${clock}`) : ""}`;
   const physicalLines = lines.flatMap((line) => (
-    wrapTextCells(line, contentWidth, contentWidth).map((chunk) => `  ${chunk.text}`)
+    wrapTextCells(line, contentWidth, contentWidth).map((chunk) => `  ${dim("│")} ${chunk.text}`)
   ));
-  return `${accent("▷")} ${bold("You")}\n${physicalLines.join("\n")}`;
+  return [header, ...physicalLines].join("\n");
 }
 
-export function assistantHeaderText() {
-  return `${accent("◁")} ${bold("Assistant")}`;
+export function assistantHeaderText(clock = "") {
+  const suffix = clock ? dim(` · ${clock}`) : "";
+  return `  ${accent(agentGlyph())} ${bold("Rind")}${suffix}`;
+}
+
+// One dim rule between conversation days so resumed sessions read as a
+// timeline instead of an undifferentiated wall of text.
+export function transcriptDayDividerText(label, frameWidth) {
+  const text = clipSingleLine(label, 40);
+  const width = Math.max(20, Number(frameWidth) || process.stdout.columns || 80);
+  const fill = Math.max(2, Math.floor((width - visibleLength(text) - 8) / 2));
+  return `  ${dim(`${"─".repeat(fill)}  ${text}  ${"─".repeat(fill)}`)}`;
 }
 
 export function outputBlockText(text, leading = false) {
@@ -103,7 +117,7 @@ export function slashResultText(result, commands = []) {
 }
 
 export function answerPromptText() {
-  return `\n  ${accent("▷")} `;
+  return `\n  ${accent(glyph("user"))} `;
 }
 
 export function answerPlaceholderText() {
@@ -365,7 +379,7 @@ export function sessionSwitchedText(info = {}) {
     lines.push("", goal);
   }
   if (preview) {
-    lines.push("", `${accent("◆")} ${bold("Recent context")}`, preview);
+    lines.push("", `${accent(glyph("divider"))} ${bold("Recent context")}`, preview);
   }
   return lines.join("\n");
 }
@@ -376,7 +390,7 @@ export function goalText(goal, includeHint = false) {
   }
   const status = singleLine(goal.status) || "unknown";
   const objective = clipSingleLine(goal.objective, 96);
-  const lines = [`${accent("◆")} ${bold("Goal")} ${dim(`· ${status}`)}`];
+  const lines = [`${accent(glyph("divider"))} ${bold("Goal")} ${dim(`· ${status}`)}`];
   if (objective) {
     lines.push(dim(`    ${objective}`));
   }
@@ -416,8 +430,8 @@ export function turnCompletedLine(event, tools = { completed: 0, failed: 0 }) {
   const duration = formatDuration(event.duration_ms);
   const summary = toolSummary(tools);
   return summary
-    ? `${green("─")} ${bold("Worked for")} ${duration} ${dim(`· ${summary}`)}`
-    : `${green("─")} ${bold("Worked for")} ${duration}`;
+    ? `${green(glyph("rule"))} ${bold("Worked for")} ${duration} ${dim(`· ${summary}`)}`
+    : `${green(glyph("rule"))} ${bold("Worked for")} ${duration}`;
 }
 
 export function interruptText() {
@@ -453,7 +467,7 @@ export function unknownCommandText() {
 }
 
 function notice(label, ...details) {
-  const lines = [`${accent("◆")} ${bold(label)}`];
+  const lines = [`${accent(glyph("divider"))} ${bold(label)}`];
   for (const detail of details.flat()) {
     if (detail) {
       lines.push(dim(`    ${detail}`));
@@ -466,13 +480,13 @@ export function toolRequestedLine(event) {
   const name = event.tool_name || "unknown";
   const detail = toolDetail(name, parseJsonObject(event.args_preview));
   const label = toolLabel(name);
-  const line = `${accent("◌")} ${bold("Tool")} ${dim("·")} ${toolActiveVerb(name)} ${label}`;
+  const line = `${accent(glyph("running"))} ${bold("Tool")} ${dim("·")} ${toolActiveVerb(name)} ${label}`;
   return detail ? `${line}\n${dim(toolDetailLine(name, detail))}` : line;
 }
 
 export function toolStartedLine(event) {
   const name = event.tool_name || "tool";
-  return `${accent("◌")} ${bold("Tool")} ${dim("·")} ${toolActiveVerb(name)} ${toolLabel(name)}`;
+  return `${accent(glyph("running"))} ${bold("Tool")} ${dim("·")} ${toolActiveVerb(name)} ${toolLabel(name)}`;
 }
 
 export function toolResultLine(event, fileChange) {
@@ -482,7 +496,7 @@ export function toolResultLine(event, fileChange) {
   if (event.status === "failed") {
     const suffix = event.error_type ? ` (${event.error_type})` : "";
     const detail = toolErrorDetail(event.result);
-    const line = `${red("⊘")} ${bold("Tool")} ${dim("·")} ${label} failed in ${duration}${suffix}`;
+    const line = `${red(glyph("fail"))} ${bold("Tool")} ${dim("·")} ${label} failed in ${duration}${suffix}`;
     return detail ? `${line}\n${dim(detailLine(detail))}` : line;
   }
   const result = toolResultSummary(event.result);
@@ -490,15 +504,15 @@ export function toolResultLine(event, fileChange) {
     const runningText = name === "bash_output"
       ? "command output read; command still running in background"
       : "command running in background";
-    const line = `${accent("◌")} ${bold("Tool")} ${dim("·")} ${runningText} in ${duration}`;
+    const line = `${accent(glyph("running"))} ${bold("Tool")} ${dim("·")} ${runningText} in ${duration}`;
     const output = result.output;
     return [line, output ? dim(detailLine(output)) : "", fileChangeLine(fileChange)]
       .filter(Boolean)
       .join("\n");
   }
   const line = result.exitCode
-    ? `${red("⊘")} ${bold("Tool")} ${dim("·")} ${label} exited ${result.exitCode} in ${duration}`
-    : `${green("◉")} ${bold("Tool")} ${dim("·")} ${completedToolText(name, label)} in ${duration}`;
+    ? `${red(glyph("fail"))} ${bold("Tool")} ${dim("·")} ${label} exited ${result.exitCode} in ${duration}`
+    : `${green(glyph("done"))} ${bold("Tool")} ${dim("·")} ${completedToolText(name, label)} in ${duration}`;
   const output = result.output;
   return [line, output ? dim(detailLine(output)) : "", fileChangeLine(fileChange)]
     .filter(Boolean)
@@ -508,10 +522,10 @@ export function toolResultLine(event, fileChange) {
 export function planUpdatedLine(plan) {
   const items = Array.isArray(plan) ? plan : [];
   if (!items.length) {
-    return `${green("◉")} ${bold("Plan cleared")}`;
+    return `${green(glyph("done"))} ${bold("Plan cleared")}`;
   }
 
-  const lines = [`${green("◉")} ${bold("Plan updated")}`];
+  const lines = [`${green(glyph("done"))} ${bold("Plan updated")}`];
   for (const item of items) {
     const step = clipSingleLine(item?.step, detailTextWidth());
     if (step) {
@@ -522,20 +536,20 @@ export function planUpdatedLine(plan) {
 }
 
 export function goalContinuedLine(round) {
-  return `${accent("◌")} ${bold("Goal continued")} ${dim(`· round ${Number(round) || 0}`)}`;
+  return `${accent(glyph("running"))} ${bold("Goal continued")} ${dim(`· round ${Number(round) || 0}`)}`;
 }
 
 export function toolProgressLine(event) {
   const name = event.tool_name || "tool";
   const message = progressMessage(event.payload);
-  return message ? `${accent("◌")} ${bold("Tool")} ${dim("·")} ${toolLabel(name)}\n${dim(`  ↳ ${message}`)}` : "";
+  return message ? `${accent(glyph("running"))} ${bold("Tool")} ${dim("·")} ${toolLabel(name)}\n${dim(`  ↳ ${message}`)}` : "";
 }
 
 export function errorLine(error) {
   const detail = clipSingleLine(error, 120);
   return detail
-    ? `${red("⊘")} ${bold("Turn failed")}\n${dim(detailLine(detail))}`
-    : `${red("⊘")} ${bold("Turn failed")}`;
+    ? `${red(glyph("fail"))} ${bold("Turn failed")}\n${dim(detailLine(detail))}`
+    : `${red(glyph("fail"))} ${bold("Turn failed")}`;
 }
 
 export function questionText(event = {}) {
@@ -546,6 +560,25 @@ export function questionAnswerText(event = {}, answer = "") {
   const question = clipSingleLine(event.question || "Input required", 76);
   const value = clipSingleLine(String(answer || "").trim() || "(no answer)", 76);
   return [`  ${dim("Q:")} ${question}`, `  ${green("A:")} ${value}`].join("\n");
+}
+
+export function compactBoundaryLine() {
+  return transcriptDayDividerText("context compacted · earlier turns summarized", process.stdout.columns || 80);
+}
+
+const THINKING_PREVIEW_LINES = 3;
+
+// Stored reasoning renders as a collapsed dim preview: enough to recall why a
+// decision was made without burying the answer it produced.
+export function thinkingBlockLines(reasoning) {
+  const lines = messageLines(reasoning);
+  if (!lines.length) {
+    return [];
+  }
+  const shown = lines.slice(0, THINKING_PREVIEW_LINES).map((line) => dim(`  ${glyph("bar")} ${clipSingleLine(line, detailTextWidth())}`));
+  const hidden = lines.length - shown.length;
+  const header = dim(`  ▸ ${hidden > 0 ? `thinking (${lines.length} lines)` : "thinking"}`);
+  return [header, ...shown];
 }
 
 function toolDetail(name, args) {
@@ -843,7 +876,7 @@ function doctorMarker(status) {
     return green("✓");
   }
   if (status === "fail") {
-    return red("⊘");
+    return red(glyph("fail"));
   }
   return paint.warning("!");
 }
@@ -1019,13 +1052,13 @@ function detailTextWidth() {
 function planStatusIcon(status) {
   switch (status) {
     case "in_progress":
-      return accent("◐");
+      return accent(glyph("planInProgress"));
     case "completed":
-      return green("●");
+      return green(glyph("planDone"));
     case "cancelled":
-      return dim("⊖");
+      return dim(glyph("planCancelled"));
     default:
-      return dim("○");
+      return dim(glyph("planPending"));
   }
 }
 
@@ -1122,7 +1155,7 @@ function resumePreviewLine(line) {
   const message = line.match(/^-?\s*(user|assistant):\s*(.*)$/i);
   if (message) {
     const role = message[1].toLowerCase();
-    const marker = role === "user" ? accent("▷") : dim("◁");
+    const marker = role === "user" ? accent(glyph("user")) : dim(glyph("agent"));
     const label = role === "user" ? "You" : "Assistant";
     return `${marker} ${label} ${dim("·")} ${clipSingleLine(message[2], 72)}`;
   }
@@ -1227,10 +1260,16 @@ function pendingInputLines(entries, frameWidth) {
   return lines;
 }
 
+function messageGlyph() {
+  return glyph("user");
+}
+
+function agentGlyph() {
+  return glyph("agent");
+}
+
 function activityFrame(frame) {
-  const frames = ["◐", "◓", "◑", "◒"];
-  const index = Math.abs(Number(frame) || 0) % frames.length;
-  return frames[index];
+  return spinnerFrame(frame);
 }
 
 function padRight(text, width) {
