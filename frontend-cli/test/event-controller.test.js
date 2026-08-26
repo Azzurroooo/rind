@@ -119,6 +119,7 @@ test("event controller delivers queued input and clears pending input on termina
       closeAssistant() {},
       log() {},
     },
+    state: { get activeTurn() { return true; } },
   });
 
   await controller.handle({ kind: "event", event: {
@@ -131,6 +132,53 @@ test("event controller delivers queued input and clears pending input on termina
 
   assert.deepEqual(delivered, [{ input: "continue with tests", mode: "follow_up", inputId: "queued-1" }]);
   assert.equal(clears, 1);
+});
+
+test("turn completion summary aggregates file changes and token spend", async () => {
+  const logged = [];
+  const statsSeen = [];
+  const controller = createEventController({
+    state: { get activeTurn() { return true; } },
+    output: {
+      beginTurn() {},
+      endTurn() {},
+      setStats: (stats) => statsSeen.push(stats.input_tokens),
+      closeAssistant() {},
+      clearQueuedInputs() {},
+      clearCompactContext() {},
+      log: (text) => logged.push(typeof text === "function" ? text() : text),
+    },
+  });
+
+  await controller.handle({ kind: "event", event: { type: "turn_started" } });
+  await controller.handle({ kind: "event", event: {
+    type: "token_stats_updated",
+    stats: { input_tokens: 1000 },
+  } });
+  await controller.handle({ kind: "event", event: {
+    type: "file_change",
+    tool_call_id: "c1",
+    file_path: "src/a.py",
+    lines: [{ kind: "added" }, { kind: "added" }, { kind: "removed" }],
+  } });
+  await controller.handle({ kind: "event", event: {
+    type: "file_change",
+    tool_call_id: "c2",
+    file_path: "src/b.py",
+    lines: [{ kind: "added" }],
+  } });
+  await controller.handle({ kind: "event", event: {
+    type: "token_stats_updated",
+    stats: { input_tokens: 43000 },
+  } });
+  await controller.handle({ kind: "event", event: {
+    type: "turn_completed",
+    duration_ms: 72000,
+  } });
+
+  assert.match(logged.at(-1), /Worked for 1m 12s/);
+  assert.match(logged.at(-1), /\+3 -1 2 files/);
+  assert.match(logged.at(-1), /~42\.0k tokens/);
 });
 
 test("event controller logs goal continuation and toggles the chasing state", async () => {

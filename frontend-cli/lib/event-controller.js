@@ -16,7 +16,10 @@ export function createEventController({
 }) {
   const pendingFileChanges = new Map();
   const pendingPlanInputs = new Map();
+  const turnFiles = new Map();
   let toolStats = { completed: 0, failed: 0 };
+  let tokenStart = null;
+  let tokenLast = null;
 
   async function handle(message) {
     if (state.runtimeClosing) {
@@ -33,6 +36,7 @@ export function createEventController({
     switch (eventType) {
       case "turn_started":
         output.beginTurn?.(event.ts || "");
+        tokenStart = null;
         return;
       case "assistant_delta":
         output.assistantAppend?.(event.text || "");
@@ -96,6 +100,7 @@ export function createEventController({
         if (event.tool_call_id) {
           pendingFileChanges.set(event.tool_call_id, event);
         }
+        recordFileChange(event);
         return;
       case "tool_progress": {
         const message = progressMessage(event.payload);
@@ -108,6 +113,12 @@ export function createEventController({
       case "token_stats_updated":
         output.closeAssistant?.();
         output.setStats?.(event.stats && typeof event.stats === "object" ? event.stats : {});
+        tokenLast = Number(event.stats?.input_tokens);
+        if (!Number.isFinite(tokenLast)) {
+          tokenLast = null;
+        } else if (tokenStart === null && state.activeTurn) {
+          tokenStart = tokenLast;
+        }
         if (!state.activeTurn) {
           output.redraw?.();
         }
@@ -147,7 +158,7 @@ export function createEventController({
         output.clearCompactContext?.();
         output.closeAssistant?.();
         output.setGoalChasing?.(false);
-        output.log?.(turnCompletedLine(event, toolStats));
+        output.log?.(turnCompletedLine(event, toolStats, turnSummary()));
         output.endTurn?.();
         resetTurnState();
         return;
@@ -175,7 +186,37 @@ export function createEventController({
     toolStats = { completed: 0, failed: 0 };
     pendingFileChanges.clear();
     pendingPlanInputs.clear();
+    turnFiles.clear();
+    tokenStart = null;
+    tokenLast = null;
     monitor.clearDelegates?.();
+  }
+
+  function recordFileChange(event) {
+    const filePath = String(event?.file_path || "");
+    if (!filePath) {
+      return;
+    }
+    const entry = turnFiles.get(filePath) || { added: 0, removed: 0 };
+    for (const line of Array.isArray(event?.lines) ? event.lines : []) {
+      if (line?.kind === "added") {
+        entry.added += 1;
+      } else if (line?.kind === "removed") {
+        entry.removed += 1;
+      }
+    }
+    turnFiles.set(filePath, entry);
+  }
+
+  function turnSummary() {
+    let added = 0;
+    let removed = 0;
+    for (const entry of turnFiles.values()) {
+      added += entry.added;
+      removed += entry.removed;
+    }
+    const tokens = tokenStart !== null && tokenLast !== null ? Math.max(0, tokenLast - tokenStart) : 0;
+    return { files: turnFiles.size, added, removed, tokens };
   }
 
   function recordToolResult(event) {

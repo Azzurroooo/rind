@@ -426,12 +426,25 @@ export function modelListErrorText(error, currentModel = "") {
   );
 }
 
-export function turnCompletedLine(event, tools = { completed: 0, failed: 0 }) {
+export function turnCompletedLine(event, tools = { completed: 0, failed: 0 }, summary = {}) {
   const duration = formatDuration(event.duration_ms);
-  const summary = toolSummary(tools);
-  return summary
-    ? `${green(glyph("rule"))} ${bold("Worked for")} ${duration} ${dim(`· ${summary}`)}`
-    : `${green(glyph("rule"))} ${bold("Worked for")} ${duration}`;
+  const segments = [`${bold("Worked for")} ${duration}`];
+  const toolPart = toolSummary(tools);
+  if (toolPart) {
+    segments.push(dim(toolPart));
+  }
+  if (summary.files > 0) {
+    segments.push(`${green(`+${Number(summary.added) || 0}`)} ${red(`-${Number(summary.removed) || 0}`)} ${dim(fileCountText(summary.files))}`);
+  }
+  if (Number(summary.tokens) > 0) {
+    segments.push(dim(`~${formatCount(summary.tokens)} tokens`));
+  }
+  return `${green(glyph("rule"))} ${segments.join(" · ")}`;
+}
+
+function fileCountText(count) {
+  const value = Math.max(0, Math.floor(Number(count) || 0));
+  return `${value} ${value === 1 ? "file" : "files"}`;
 }
 
 export function interruptText() {
