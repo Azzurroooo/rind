@@ -290,6 +290,7 @@ export function createCliOutputController({ state, terminalUi, transcript }) {
     const block = new ToolBlock({
       event,
       onRequestRender: () => redraw(),
+      expanded: state.display.toolDetailsExpanded,
       leading: blockCount > 0,
     });
     toolBlocks.set(callId, block);
@@ -317,6 +318,7 @@ export function createCliOutputController({ state, terminalUi, transcript }) {
       block = new ToolBlock({
         event,
         onRequestRender: () => redraw(),
+        expanded: state.display.toolDetailsExpanded,
         leading: blockCount > 0,
       });
       toolBlocks.set(callId, block);

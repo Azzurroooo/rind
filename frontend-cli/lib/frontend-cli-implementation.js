@@ -356,6 +356,7 @@ inputActions = createCliInputActions({
   pausePrompt: () => inputController.pause(),
   resumePrompt: () => inputController.resume(),
   handleSigint,
+  persistPreference: saveCliState,
 });
 inputController = createInputController({
   terminalUi: tui,
@@ -386,6 +387,9 @@ try {
   const persistedState = loadCliState();
   if (persistedState.theme) {
     setTheme(persistedState.theme);
+  }
+  if (typeof persistedState.toolsExpanded === "boolean") {
+    displayState.toolDetailsExpanded = persistedState.toolsExpanded;
   }
   sessionState.settings = await loadLocalSettings(undefined, process.cwd());
   sessionState.info = { cwd: process.cwd(), model: sessionState.settings.model };

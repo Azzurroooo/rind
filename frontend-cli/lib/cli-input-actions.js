@@ -23,6 +23,7 @@ export function createCliInputActions({
   pausePrompt,
   resumePrompt,
   handleSigint,
+  persistPreference = () => {},
 }) {
   let cancelActiveInput = null;
   const promptEditor = createLineEditor();
@@ -206,6 +207,7 @@ export function createCliInputActions({
     }
     if (event.ctrl && !event.alt && !event.shift && event.name === "o") {
       state.display.toolDetailsExpanded = !state.display.toolDetailsExpanded;
+      persistPreference({ toolsExpanded: state.display.toolDetailsExpanded });
       output.setToolsExpanded?.(state.display.toolDetailsExpanded);
       return;
     }

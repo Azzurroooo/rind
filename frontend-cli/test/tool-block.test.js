@@ -111,3 +111,11 @@ test("ticker only exists for long-running tools", () => {
   const slow = new ToolBlock({ event: editEvent(), onRequestRender: () => {} });
   slow.finish({ status: "completed", duration_ms: 5, result: "{}" });
 });
+
+test("blocks seed expansion from the persisted preference", () => {
+  const block = new ToolBlock({ event: editEvent(), onRequestRender: () => {}, expanded: true });
+  assert.equal(block.expanded, true);
+
+  const collapsed = new ToolBlock({ event: editEvent(), onRequestRender: () => {} });
+  assert.equal(collapsed.expanded, false);
+});

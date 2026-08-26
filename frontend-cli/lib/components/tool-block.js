@@ -7,7 +7,7 @@ import {
 const TICKER_TOOLS = new Set(["bash", "bash_output", "delegate", "search_web", "fetch_web_page"]);
 
 export class ToolBlock {
-  constructor({ event, onRequestRender, leading = false }) {
+  constructor({ event, onRequestRender, leading = false, expanded = false }) {
     this.name = event?.tool_name || "tool";
     this.args = parseToolArguments(event);
     this.phase = "running";
@@ -15,7 +15,7 @@ export class ToolBlock {
     this.progressMessage = "";
     this.fileChange = null;
     this.resultEvent = null;
-    this.expanded = false;
+    this.expanded = Boolean(expanded);
     this.leading = Boolean(leading);
     this.timer = null;
     this.onRequestRender = onRequestRender;
