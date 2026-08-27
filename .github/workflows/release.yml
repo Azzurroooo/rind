@@ -54,6 +54,10 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "20"
+      - name: Install Inno Setup
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: choco install innosetup --yes --no-progress
       - name: Build CLI installer and runtime
         working-directory: rind-distribution
         run: python scripts/release.py cli --target ${{ matrix.target }} --source ../rind
