@@ -371,7 +371,7 @@ test("finish-only blocks recover arguments from result payloads", async () => {
   harness.tui.stop();
 });
 
-test("hardware caret stays hidden while a turn runs and returns when idle", async () => {
+test("hardware caret stays on the input line while a turn runs", async () => {
   const virtual = createVirtualOutput({ columns: 50, rows: 12 });
   const writes = [];
   const recordingOutput = Object.assign(Object.create(virtual.output), {
@@ -396,9 +396,8 @@ test("hardware caret stays hidden while a turn runs and returns when idle", asyn
     if (!session) {
       return null;
     }
-    const turnRunning = Boolean(state.turn.active);
     return {
-      showCaret: !turnRunning,
+      showCaret: true,
       prompt: output.mainPromptText(width),
       inputText: session.editor.input(),
       cursor: session.editor.cursorPosition(),
@@ -426,23 +425,22 @@ test("hardware caret stays hidden while a turn runs and returns when idle", asyn
   const promptRowBefore = viewportBefore.findIndex((line) => line.includes("▷"));
   assert.equal(promptRowBefore, virtual.getCursorPosition().y, "idle caret parked on the input line");
 
-  // Turn starts: caret must be hidden from then on.
+  // Turn starts: caret remains available for steering input.
   writes.length = 0;
   state.turn.active = true;
   state.display.activityFrame += 1;
   tui.requestRender();
   await settle(virtual);
-  assert.ok(writes.some((w) => w.includes("\x1b[?25l")), "transition to working hides the caret");
-  assert.ok(!writes.some((w) => w.includes("\x1b[?25h")), "working frames never reveal the caret");
+  assert.ok(writes.some((w) => w.includes("\x1b[?25h")), "working state keeps the caret visible");
 
-  // Spinner ticks keep it hidden without redundant writes.
+  // Spinner ticks keep it on the input line.
   writes.length = 0;
   state.display.activityFrame += 1;
   tui.requestRender();
   await settle(virtual);
-  assert.ok(!writes.some((w) => w.includes("\x1b[?25h")), "spinner ticks never reveal the caret");
+  assert.ok(writes.some((w) => w.includes("\x1b[?25h")), "spinner ticks keep the caret visible");
 
-  // Turn completes: caret returns to the input line.
+  // Turn completes: caret remains on the input line.
   writes.length = 0;
   state.turn.active = false;
   tui.requestRender();
