@@ -9,11 +9,6 @@ on:
         description: "Source branch, tag, or commit to package"
         required: true
         default: "main"
-      publish_npm:
-        description: "Publish npm packages (requires NPM_TOKEN)"
-        required: true
-        type: boolean
-        default: false
 
 permissions:
   contents: write
@@ -94,16 +89,15 @@ jobs:
       - name: Assemble npm packages
         working-directory: rind-distribution
         run: python scripts/release.py npm --source ../rind --pack
-      - name: Publish npm packages
-        if: ${{ github.event_name == 'workflow_dispatch' && inputs.publish_npm }}
+      - name: Create npm publish bundle
         working-directory: rind-distribution
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-        run: RIND_ALLOW_NPM_PUBLISH=1 python scripts/release.py npm --source ../rind --publish
+        run: python scripts/release.py npm-bundle --source ../rind
       - uses: actions/upload-artifact@v4
         with:
           name: rind-npm
-          path: rind-distribution/artifacts/npm
+          path: |
+            rind-distribution/artifacts/npm
+            rind-distribution/artifacts/release
 
   release:
     needs: [cli, npm]
@@ -123,6 +117,10 @@ jobs:
           pattern: rind-cli-*
           path: rind-distribution/artifacts
           merge-multiple: true
+      - uses: actions/download-artifact@v4
+        with:
+          name: rind-npm
+          path: rind-distribution/artifacts
       - name: Create CLI checksums
         working-directory: rind-distribution
         run: python scripts/create_checksums.py --source ../rind --cli-only
