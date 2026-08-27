@@ -24,7 +24,7 @@ env:
   RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.source_ref || github.ref_name }}
 
 jobs:
-  desktop:
+  cli:
     strategy:
       fail-fast: false
       matrix:
@@ -53,16 +53,16 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "20"
-      - name: Build desktop and runtime
+      - name: Build CLI installer and runtime
         working-directory: rind-distribution
-        run: python scripts/release.py package --target ${{ matrix.target }} --source ../rind
+        run: python scripts/release.py cli --target ${{ matrix.target }} --source ../rind
       - uses: actions/upload-artifact@v4
         with:
-          name: rind-${{ matrix.target }}
+          name: rind-cli-${{ matrix.target }}
           path: rind-distribution/artifacts
 
   npm:
-    needs: desktop
+    needs: cli
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -82,7 +82,7 @@ jobs:
           registry-url: "https://registry.npmjs.org"
       - uses: actions/download-artifact@v4
         with:
-          pattern: rind-*
+          pattern: rind-cli-*
           path: rind-distribution/artifacts
           merge-multiple: true
       - name: Assemble npm packages
@@ -100,7 +100,7 @@ jobs:
           path: rind-distribution/artifacts/npm
 
   release:
-    needs: [desktop, npm]
+    needs: [cli, npm]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -113,13 +113,16 @@ jobs:
           path: rind-distribution
       - uses: actions/download-artifact@v4
         with:
-          pattern: rind-*
+          pattern: rind-cli-*
           path: rind-distribution/artifacts
           merge-multiple: true
-      - name: Create checksums
+      - name: Create CLI checksums
         working-directory: rind-distribution
-        run: python scripts/release.py checksums --source ../rind
-      - name: Publish GitHub Release
+        run: python scripts/create_checksums.py --source ../rind --cli-only
+      - name: Create CLI release notes
+        working-directory: rind-distribution
+        run: python scripts/create_release_notes.py --source ../rind --cli-only
+      - name: Publish CLI GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ env.RELEASE_TAG }}
