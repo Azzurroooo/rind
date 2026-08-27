@@ -371,6 +371,34 @@ test("finish-only blocks recover arguments from result payloads", async () => {
   harness.tui.stop();
 });
 
+test("session replay preserves bash command arguments", async () => {
+  const harness = createHarness({ columns: 60, rows: 14 });
+  const editor = createLineEditor("");
+  harness.setSession({ mode: "prompt", editor });
+  harness.tui.start();
+
+  harness.output.renderHistory([
+    {
+      role: "assistant",
+      tool_calls: [{
+        id: "bash-replay-1",
+        function: { name: "bash", arguments: JSON.stringify({ command: "npm test" }) },
+      }],
+    },
+    {
+      role: "tool",
+      tool_call_id: "bash-replay-1",
+      content: JSON.stringify({ ok: true, data: { exit_code: 0 } }),
+    },
+  ]);
+  await settle(harness.virtual);
+
+  const text = harness.virtual.getViewport().join("\n");
+  assert.match(text, /\$ npm test/);
+  assert.doesNotMatch(text, /\$ …/);
+  harness.tui.stop();
+});
+
 test("hardware caret stays on the input line while a turn runs", async () => {
   const virtual = createVirtualOutput({ columns: 50, rows: 12 });
   const writes = [];

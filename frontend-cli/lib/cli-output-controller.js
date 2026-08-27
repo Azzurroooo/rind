@@ -337,11 +337,15 @@ export function createCliOutputController({ state, terminalUi, transcript }) {
   function renderHistory(messages) {
     const pendingTools = new Map();
     const flushPendingTools = () => {
-      for (const [toolCallId, toolName] of pendingTools.entries()) {
-        beginTool({ tool_call_id: toolCallId, tool_name: toolName, args_preview: "" });
+      for (const [toolCallId, tool] of pendingTools.entries()) {
+        beginTool({
+          tool_call_id: toolCallId,
+          tool_name: tool.name,
+          args_preview: tool.arguments,
+        });
         finishTool({
           tool_call_id: toolCallId,
-          tool_name: toolName,
+          tool_name: tool.name,
           status: "completed",
           result: "",
         });
@@ -367,19 +371,26 @@ export function createCliOutputController({ state, terminalUi, transcript }) {
           const toolCallId = String(call?.id || "");
           const toolName = String(call?.function?.name || "tool");
           if (toolCallId) {
-            pendingTools.set(toolCallId, toolName);
+            pendingTools.set(toolCallId, {
+              name: toolName,
+              arguments: String(call?.function?.arguments || ""),
+            });
           }
         }
         continue;
       }
       if (role === "tool") {
         const toolCallId = String(message?.tool_call_id || "");
-        const toolName = pendingTools.get(toolCallId) || "tool";
+        const tool = pendingTools.get(toolCallId) || { name: "tool", arguments: "" };
         pendingTools.delete(toolCallId);
-        beginTool({ tool_call_id: toolCallId, tool_name: toolName, args_preview: "" });
+        beginTool({
+          tool_call_id: toolCallId,
+          tool_name: tool.name,
+          args_preview: tool.arguments,
+        });
         finishTool({
           tool_call_id: toolCallId,
-          tool_name: toolName,
+          tool_name: tool.name,
           status: "completed",
           result: messageText(message?.content),
         });
