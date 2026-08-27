@@ -56,13 +56,13 @@ test("startupText includes resume preview when provided", () => {
     startupText({
       model: "m1",
       session_id: "s1",
-      version: "0.4.2",
+      version: "0.6.0",
       cwd: "E:\\project",
       resume_preview: "Resumed session s1\n- user: hello\n- assistant: hi",
     }),
     [
       `┌${"─".repeat(78)}┐`,
-      "│ Rind v0.4.2                                                                  │",
+      "│ Rind v0.6.0                                                                  │",
       "│ model m1 · session s1                                                        │",
       "│ E:\\project                                                                   │",
       `└${"─".repeat(78)}┘`,
@@ -1146,12 +1146,12 @@ test("sessionMenuText renders a selectable session deck", () => {
 test("sessionSwitchedText renders target context and model", () => {
   const text = sessionSwitchedText({
     session_id: "s2",
-    version: "0.4.2",
+    version: "0.6.0",
     model: "model-b",
     cwd: "E:\\project",
     resume_preview: "Resumed session s2\n- user: target task",
   });
-  assert.match(text, /Rind v0\.4\.2/);
+  assert.match(text, /Rind v0\.6\.0/);
   assert.match(text, /model model-b · session s2/);
   assert.match(text, /Session switched/);
   assert.match(text, /s2/);
