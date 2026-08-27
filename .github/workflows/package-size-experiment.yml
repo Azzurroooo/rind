@@ -1,0 +1,136 @@
+name: Rind package size experiment
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  runtime:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-15-intel
+            target: macos-x64
+          - os: macos-14
+            target: macos-arm64
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Build and measure Runtime variants
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m venv .work/size-experiment-venv
+          py=.work/size-experiment-venv/bin/python
+          "$py" -m pip install --disable-pip-version-check -r requirements-runtime.txt pyinstaller
+
+          mkdir -p .work/size-experiment-hooks
+          cat > .work/size-experiment-hooks/hook-babel.py <<'PY'
+          hiddenimports = [
+              "babel.dates",
+              "babel.localedata",
+              "babel.numbers",
+              "babel.plural",
+          ]
+          PY
+
+          cat > .work/size-experiment.spec <<'PY'
+          # -*- mode: python ; coding: utf-8 -*-
+
+          import os
+          from pathlib import Path
+
+          from PyInstaller.utils.hooks import collect_data_files, collect_submodules
+
+          source_root = Path(os.environ["RIND_SOURCE_ROOT"]).resolve()
+          entrypoint = source_root / "main.py"
+          template = source_root / "packaging" / "templates" / "settings.json"
+
+          datas = []
+          if template.is_file():
+              datas.append((str(template), "templates"))
+          datas += collect_data_files("certifi")
+          datas += collect_data_files("tiktoken")
+          datas += collect_data_files("trafilatura")
+          datas += collect_data_files("justext")
+
+          excludes = ["pytest", "dotenv", "tests", "test"]
+          if os.environ.get("RIND_EXCLUDE_SQLITE") == "1":
+              excludes += ["sqlite3", "_sqlite3"]
+
+          a = Analysis(
+              [str(entrypoint)],
+              pathex=[str(source_root)],
+              binaries=[],
+              datas=datas,
+              hiddenimports=collect_submodules("tiktoken") + collect_submodules("curl_cffi"),
+              hookspath=[os.environ["RIND_HOOK_ROOT"]],
+              hooksconfig={},
+              runtime_hooks=[],
+              excludes=excludes,
+              noarchive=False,
+              optimize=2,
+          )
+          pyz = PYZ(a.pure)
+          exe = EXE(
+              pyz,
+              a.scripts,
+              [],
+              exclude_binaries=True,
+              name="rind-runtime",
+              debug=False,
+              bootloader_ignore_signals=False,
+              strip=False,
+              upx=False,
+              console=True,
+              disable_windowed_traceback=False,
+              argv_emulation=False,
+              target_arch=None,
+              codesign_identity=None,
+              entitlements_file=None,
+          )
+          COLLECT(
+              exe,
+              a.binaries,
+              a.datas,
+              strip=False,
+              upx=False,
+              upx_exclude=[],
+              name="rind-runtime",
+          )
+          PY
+
+          mkdir -p ".work/results/${{ matrix.target }}"
+          export RIND_SOURCE_ROOT="$PWD"
+          export RIND_HOOK_ROOT="$PWD/.work/size-experiment-hooks"
+          for variant in full no-sqlite; do
+            if [[ "$variant" == "no-sqlite" ]]; then
+              export RIND_EXCLUDE_SQLITE=1
+            else
+              unset RIND_EXCLUDE_SQLITE
+            fi
+            output=".work/size-experiment/$variant"
+            "$py" -m PyInstaller --clean --noconfirm \
+              --distpath "$output/dist" \
+              --workpath "$output/work" \
+              .work/size-experiment.spec
+            runtime="$output/dist/rind-runtime"
+            "$runtime/rind-runtime" --version
+            "$runtime/rind-runtime" app-server --help > /dev/null
+            tarball=".work/results/${{ matrix.target }}/rind-runtime-${variant}.tar.gz"
+            tar -czf "$tarball" -C "$output/dist" rind-runtime
+            size_kib=$(du -sk "$runtime" | awk '{print $1}')
+            archive_bytes=$(stat -f%z "$tarball")
+            printf '%s\t%s\t%s\t%s\n' "${{ matrix.target }}" "$variant" "$((size_kib * 1024))" "$archive_bytes" \
+              >> ".work/results/${{ matrix.target }}/metrics.tsv"
+          done
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rind-runtime-size-${{ matrix.target }}
+          path: .work/results/${{ matrix.target }}
