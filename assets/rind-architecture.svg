@@ -1,0 +1,102 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 820" role="img" aria-labelledby="title desc">
+  <title id="title">Rind: make the work move</title>
+  <desc id="desc">A coding task moves from a prompt through Rind's local engine to tools, delegated agents, and a finished result.</desc>
+  <style>
+    .eyebrow { font: 700 15px Inter, Segoe UI, sans-serif; letter-spacing: 3px; fill: #f09a68; }
+    .hero { font: 800 62px Inter, Segoe UI, sans-serif; fill: #fffaf4; }
+    .subhero { font: 500 22px Inter, Segoe UI, sans-serif; fill: #b7c9c6; }
+    .micro { font: 700 12px Inter, Segoe UI, sans-serif; letter-spacing: 2px; fill: #6c8581; }
+    .terminal-text { font: 500 17px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; fill: #e9f3ef; }
+    .terminal-dim { font: 500 16px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; fill: #89a4a0; }
+    .terminal-accent { font: 700 17px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; fill: #f5c451; }
+    .terminal-teal { font: 700 17px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; fill: #78d3bd; }
+    .card-title { font: 800 21px Inter, Segoe UI, sans-serif; fill: #172329; }
+    .card-body { font: 500 15px Inter, Segoe UI, sans-serif; fill: #40535a; }
+    .bottom { font: 600 14px Inter, Segoe UI, sans-serif; fill: #9ab0ac; }
+  </style>
+
+  <rect width="1600" height="820" fill="#111a1f"/>
+  <path d="M0 0H1600V16H0Z" fill="#e47f48"/>
+  <path d="M0 780H1600V820H0Z" fill="#0b1216"/>
+
+  <g transform="translate(76 68)">
+    <rect width="38" height="38" rx="10" fill="#142b34" stroke="#5fd7ff" stroke-width="2"/>
+    <path d="M30 0h8v38H0v-8z" fill="#f5c451"/>
+    <path d="M30 0h8v38H0" fill="none" stroke="#5fd7ff" stroke-width="1.5"/>
+    <text x="58" y="26" class="eyebrow">RIND / LOCAL AGENT</text>
+  </g>
+
+  <g transform="translate(76 173)">
+    <text x="0" y="0" class="hero">Make the work</text>
+    <text x="0" y="70" class="hero"><tspan fill="#f5c451">move.</tspan></text>
+    <text x="4" y="122" class="subhero">A coding agent that stays small,</text>
+    <text x="4" y="154" class="subhero">keeps context, and gives you the wheel.</text>
+  </g>
+
+  <g transform="translate(76 408)">
+    <text x="0" y="0" class="micro">ONE CORE / FOUR ENTRANCES</text>
+    <g transform="translate(0 28)">
+      <rect width="235" height="74" rx="12" fill="#f8f5ed"/>
+      <text x="22" y="31" class="card-title">Pair</text>
+      <text x="22" y="56" class="card-body">CLI or Desktop</text>
+    </g>
+    <g transform="translate(255 28)">
+      <rect width="235" height="74" rx="12" fill="#f09a68"/>
+      <text x="22" y="31" class="card-title">Run</text>
+      <text x="22" y="56" class="card-body">One-shot jobs</text>
+    </g>
+    <g transform="translate(0 118)">
+      <rect width="235" height="74" rx="12" fill="#8bd0bf"/>
+      <text x="22" y="31" class="card-title">Delegate</text>
+      <text x="22" y="56" class="card-body">Filesystem-native Team</text>
+    </g>
+    <g transform="translate(255 118)">
+      <rect width="235" height="74" rx="12" fill="#efd17f"/>
+      <text x="22" y="31" class="card-title">Build</text>
+      <text x="22" y="56" class="card-body">Your own surface</text>
+    </g>
+  </g>
+
+  <g transform="translate(720 72)">
+    <rect width="804" height="632" rx="18" fill="#1b2a31" stroke="#385158" stroke-width="2"/>
+    <rect width="804" height="48" rx="18" fill="#22343b"/>
+    <path d="M0 48h804" stroke="#385158" stroke-width="2"/>
+    <circle cx="28" cy="24" r="6" fill="#e47f48"/>
+    <circle cx="49" cy="24" r="6" fill="#efd17f"/>
+    <circle cx="70" cy="24" r="6" fill="#8bd0bf"/>
+    <text x="104" y="30" class="terminal-dim">rind / workspace</text>
+
+    <g transform="translate(44 96)">
+      <text x="0" y="0" class="terminal-dim">$ rind</text>
+      <text x="0" y="45" class="terminal-text"><tspan fill="#f09a68">&gt;</tspan> You</text>
+      <text x="0" y="77" class="terminal-text">  Trace the failing request,</text>
+      <text x="0" y="105" class="terminal-text">  run tests, and fix what breaks.</text>
+      <path d="M0 136H716" stroke="#385158"/>
+      <text x="0" y="177" class="terminal-teal">* read</text>
+      <text x="122" y="177" class="terminal-dim">src/api/client.py</text>
+      <text x="0" y="213" class="terminal-teal">* bash</text>
+      <text x="122" y="213" class="terminal-dim">pytest -q</text>
+      <text x="0" y="249" class="terminal-teal">* edit</text>
+      <text x="122" y="249" class="terminal-dim">src/api/client.py</text>
+      <text x="0" y="285" class="terminal-accent">+ delegate</text>
+      <text x="160" y="285" class="terminal-dim">reviewer</text>
+      <path d="M0 320H716" stroke="#385158"/>
+      <text x="0" y="365" class="terminal-text"><tspan fill="#78d3bd">&lt;</tspan> Assistant</text>
+      <text x="0" y="401" class="terminal-text">  Fixed the retry path.</text>
+      <text x="0" y="429" class="terminal-text">  12 tests passed.</text>
+      <text x="0" y="485" class="terminal-dim">ready for the next move</text>
+    </g>
+
+    <rect x="44" y="564" width="716" height="40" rx="9" fill="#111a1f" stroke="#385158"/>
+    <circle cx="68" cy="584" r="5" fill="#f5c451"/>
+    <text x="84" y="590" class="bottom">same tools  /  same protocol  /  your choice of surface</text>
+  </g>
+
+  <g transform="translate(76 692)">
+    <path d="M0 0H560" stroke="#385158"/>
+    <text x="0" y="34" class="bottom">Small by default. Serious when it matters.</text>
+  </g>
+  <g transform="translate(720 742)">
+    <text x="0" y="0" class="micro">ASK  &gt;  ACT  &gt;  DELEGATE  &gt;  SHIP</text>
+  </g>
+</svg>

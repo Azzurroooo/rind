@@ -1,11 +1,15 @@
 <p align="center">
-  <img src="assets/rind.svg" alt="Rind logo" width="104" />
+  <img src="assets/rind.svg" alt="Rind logo" width="118" />
 </p>
 
 <h1 align="center">Rind</h1>
 
 <p align="center">
-  A compact Python agent runtime for coding workflows, built around clarity, resumability, and small composable tools.
+  <strong>A local coding agent you can use, automate, and rebuild.</strong>
+</p>
+
+<p align="center">
+  Work with it in the terminal. Hand it a job. Split the work. Build your own surface.
 </p>
 
 <p align="center">
@@ -13,49 +17,173 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/Python-3.12+-blue.svg" alt="Python 3.12+" />
-  <img src="https://img.shields.io/badge/Architecture-layered-success.svg" alt="Layered architecture" />
-  <img src="https://img.shields.io/badge/Surfaces-CLI%20%2B%20Desktop-informational.svg" alt="CLI and Desktop surfaces" />
+  <a href="https://github.com/Azzurroooo/rind/releases"><img src="https://img.shields.io/github/v/release/Azzurroooo/rind?label=release&color=DF7A3A" alt="Latest release" /></a>
+  <img src="https://img.shields.io/badge/Python-3.12%2B-3776AB" alt="Python 3.12+" />
+  <img src="https://img.shields.io/badge/Node-18%2B-3C873A" alt="Node 18+" />
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-16A085" alt="MIT license" /></a>
 </p>
 
-## What is Rind?
+<p align="center">
+  <img src="assets/rind-architecture.svg" alt="Rind connects interactive work, automation, delegation, and custom clients to one local engine" width="960" />
+</p>
 
-Rind is a lightweight coding agent with two product surfaces: a Node.js frontend CLI and an Electron desktop app. Both use the same Python Runtime Package, which is also readable enough to serve as a reference implementation for a compact agent runtime.
+## The point
 
-The project takes a restrained position: an agent should not become a large framework before it becomes a reliable instrument. Rind keeps the structure explicit, the tool contracts small, and the runtime state recoverable. From context compaction to tool execution, each part is implemented in the smallest form that preserves a good working experience.
+Rind is a local-first coding agent for work that needs to keep moving. It can pair with you in a terminal or Desktop, answer one task from a script, or split focused work across a filesystem-native Team.
 
-## Design Principles
+Rind is not a chat wrapper with tools glued on. Workspace access and agent execution stay in your process; model traffic goes only to the endpoint you configure. The core has a clear boundary, so every surface uses the same tools, turns, events, and protocol. Use the product as-is, or take the core apart and make it yours.
 
-- **Subtract before adding**: Rind favors fewer concepts, smaller modules, and explicit boundaries. New abstractions are introduced only when they reduce real complexity.
-- **Small tools, clear contracts**: Shell, file, web, plan, and skill tools are exposed through compact interfaces and predictable result shapes.
-- **Context is runtime state**: Context estimation, compaction, and tool-result normalization are treated as first-class runtime responsibilities, not as prompt afterthoughts.
-- **Local-first continuity**: Sessions, messages, tool calls, and compactions are persisted as append-only local records so work can resume after interruption.
-- **Standard Python over framework gravity**: The codebase uses ordinary Python modules, dependency inversion, async orchestration, and focused services instead of a heavy plugin framework.
-- **Good defaults, visible mechanics**: Both surfaces keep model, session, workspace, status, and diagnostics visible when they matter.
+> Keep the center small. Let the work get bigger.
 
-## Capabilities
+## Four ways to use it
 
-- Frontend CLI and Desktop experiences with streaming output, slash commands, session resume, status rendering, and setup diagnostics.
-- OpenAI-compatible async chat client with configurable model, base URL, and reasoning effort.
-- Append-only JSONL session storage for messages, tool calls, compactions, and session metadata.
-- Runtime context management with budget estimation, automatic compaction, context-length rescue, and normalized tool outputs.
-- Lightweight session-local `update_plan` tool for tracking multi-step work across turns.
-- Built-in tools for shell execution, file operations, web retrieval, planning, and skill discovery.
-- One headless JSONL Runtime Server shared by both surfaces; Python has no interactive CLI.
+| **Pair** | **Run** |
+| --- | --- |
+| Keyboard-first CLI or visual Desktop for coding, debugging, and exploration. | One-shot commands for CI, hooks, editor actions, and scheduled jobs. |
+| **Delegate** | **Build** |
+| A Team of focused agents sharing a project and a controlled workspace. | A small JSONL boundary for your editor, service, experiment, or new UI. |
 
-## Quick Start
+### Pair with it
 
-### Requirements
+```bash
+rind
+```
 
-- Python 3.12+
-- An API key for an OpenAI-compatible chat completion endpoint
+Read and edit files, run shell commands, search the web, keep a plan, inspect skills, and watch the work stream as it happens. CLI and Desktop are different experiences on the same engine, so changing the surface does not change the agent.
 
-### Install
+```text
+> You
+  Trace the failing request, run tests, and fix what breaks.
+
+* read   src/api/client.py
+* bash   pytest -q
+* edit   src/api/client.py
+
+< Assistant
+  Fixed the retry path. 12 tests passed.
+```
+
+### Run it headlessly
+
+```bash
+rind run --prompt "Summarize the changes in src/" --dir /workspace/project
+```
+
+One-shot mode is the same agent with the interactive layer removed:
+
+- final assistant output goes to `stdout`;
+- progress and diagnostics stay on `stderr`;
+- `ask_user_question` is disabled by default, so automation cannot hang;
+- `--session <id>` continues a task when a job needs context from an earlier run.
+
+### Delegate the work
+
+Team is filesystem-native and opt-in. Give the project a few focused agent profiles, then let the main agent delegate work without creating a second application or a second execution engine.
+
+```text
+.aiteam/
+├── project.yaml
+├── agents/
+│   ├── reviewer/agent.yaml
+│   └── weather/agent.yaml
+└── shared/
+```
+
+```text
+/team init       discover existing agent directories
+/team list       inspect available agents
+/team blueprint  browse user blueprints
+/team add        create an agent from a blueprint
+```
+
+Each delegated job has an explicit session, workspace policy, tool set, and event stream. The same local engine handles creation, execution, cancellation, and result delivery.
+
+## Why this shape works
+
+### One core, any surface
+
+The user-facing layer owns input and presentation. The local engine owns agent work and durable facts. A new client speaks the same JSONL protocol instead of reimplementing the turn loop.
+
+```text
+CLI / Desktop / your app
+          |
+          |  JSONL requests + session/update events
+          v
+      Rind Worker
+          |
+          +-- turns and cancellation
+          +-- model adapter
+          +-- tools and workspace
+          +-- context and compaction
+          +-- local session records
+```
+
+In the source, that local engine is a long-lived Python Worker. The name matters less than the boundary: sessions identify work, turns scope execution, and every event carries its session and turn identity.
+
+### Small by default
+
+Rind keeps the kernel to a short list of replaceable ports: model client, session store, tool registry, context manager, turn scheduler, and cancellation. Worker-level adapters are reused; turn state is temporary and released when work ends.
+
+There is no required web stack, service mesh, or framework-sized dependency graph between your code and the agent loop.
+
+### Composable tools
+
+Shell, files, web retrieval, plans, skills, background work, and Team delegation are focused `ToolSpec` contracts. Add a capability by implementing a handler and registering its schema; the loop does not need to know its internals.
+
+## For builders
+
+Rind is intentionally easy to reshape:
+
+| You want to add or replace | Start at |
+| --- | --- |
+| Model provider | `ChatClient` and its client factory |
+| Model-facing capability | `ToolSpec` and `ToolRegistry` |
+| Storage backend | `SessionStore` |
+| Context policy | Context and compaction services |
+| Human command | Worker command registry or a Surface command |
+| New UI | JSONL protocol and `session/update` |
+| Background workflow | Worker sessions and turn scheduling |
+
+The public protocol stays compact:
+
+```text
+initialize
+session/new       session/list       session/replay
+session/prompt    session/cancel     session/switch
+model/list        model/set          model/effort
+rind/command/execute
+session/update
+```
+
+`session/update` carries live and durable events with `session_id`, `turn_id`, sequence, and durability. You can render the stream, store it, or project it into another product without importing Python internals.
+
+## Install
+
+### Prebuilt CLI installers
+
+Download the current CLI installer from [GitHub Releases](https://github.com/Azzurroooo/rind/releases):
+
+- Windows x64: `.exe`
+- macOS Intel: `.pkg`
+- macOS Apple Silicon: `.pkg`
+- Linux x64: `.deb`
+
+Each installer includes the Node CLI and the matching native local engine. Desktop is distributed separately.
+
+### npm
+
+```bash
+npm install -g @rind-ai/cli
+rind --help
+```
+
+The CLI package selects the matching platform engine through optional dependencies.
+
+### From source
 
 ```bash
 git clone https://github.com/Azzurroooo/rind.git
 cd rind
-
 python -m venv .venv
 ```
 
@@ -64,6 +192,7 @@ On Windows PowerShell:
 ```powershell
 .\.venv\Scripts\Activate.ps1
 pip install -r requirements-runtime.txt
+node frontend-cli/bin/rind.js
 ```
 
 On macOS or Linux:
@@ -71,13 +200,19 @@ On macOS or Linux:
 ```bash
 source .venv/bin/activate
 pip install -r requirements-runtime.txt
+node frontend-cli/bin/rind.js
 ```
 
-### Configure
+Desktop (from source):
 
-Rind reads API configuration only from `~/.rind/settings.json`. Desktop and CLI share this exact file. `RIND_HOME` may still control runtime data such as sessions, but never API configuration.
+```bash
+npm --prefix desktop install
+npm --prefix desktop run dev
+```
 
-Minimal `settings.json` example:
+## Configure
+
+Rind reads API settings from a complete `.rind/settings.json` in the active workspace. Without one, it falls back to `~/.rind/settings.json`.
 
 ```json
 {
@@ -88,81 +223,30 @@ Minimal `settings.json` example:
 }
 ```
 
-### Run
+Project settings are useful for isolated workspaces and Team agents. Keep API keys out of version control.
 
-Frontend CLI:
+## Documentation
 
-```bash
-node frontend-cli/bin/rind.js
-```
-
-Desktop app:
-
-```bash
-npm --prefix desktop run dev
-```
-
-The Python entrypoint is the headless Runtime Package used by both surfaces:
-
-```bash
-python main.py app-server --stdio --cwd .
-```
-
-The Runtime Package exposes one JSONL protocol to both surfaces. Session switching, model selection, goals, background tasks, slash commands, and turn control are handled through that protocol; Python does not provide a separate interactive UI.
-
-Project-level `RIND.md` and project skills are resolved from the current working directory where Rind is launched.
-
-## Architecture
-
-Rind follows a layered structure with dependency inversion between the runtime core and infrastructure adapters.
-
-```text
-agent/
-├── runtime/
-│   ├── core/          # Agent runtime, turn runner, stream parsing and pumping
-│   └── server/        # JSONL server façade, protocol, and runtime commands
-├── application/
-│   ├── context/       # Context manager, estimation, compaction, token usage
-│   ├── tools/         # Tool execution, processing, guards, result normalization
-│   └── ports/         # Chat client, session store, tool registry abstractions
-├── domain/            # Events, cancellation, planning and tool contracts
-├── infrastructure/
-│   ├── llm/           # OpenAI-compatible async chat client
-│   ├── persistence/   # Append-only session records and repositories
-│   ├── planning/      # Session-local plan storage and compact snapshots
-│   └── tools/builtin/ # ToolSpec implementations and build_builtin_tool_specs catalog
-frontend-cli/          # Node.js terminal Surface
-desktop/               # Electron desktop Surface
-```
-
-Runtime and persistence boundaries are documented in [`docs/architecture.md`](docs/architecture.md).
+- [Architecture](docs/architecture.md)
+- [CLI rendering](docs/cli-rendering.md)
+- [CLI turn flow](docs/cli-turn-flow.md)
+- [Main pipeline](docs/main_pipeline.md)
 
 ## Development
 
-Install development dependencies:
-
 ```bash
 pip install -r requirements.txt
-```
-
-Run the test suite:
-
-```bash
 pytest test/ -q
 ```
 
-The tests cover runtime events, context budgets, compaction, session persistence, resume behavior, tool result normalization, plans, skills, protocol handling, and Surface rendering.
+CLI tests:
 
-## Direction
-
-Rind is an exploration of how far agent systems can go while remaining small enough to understand. Its future work is guided by three questions:
-
-- How can an agent become more capable without accumulating unnecessary mechanism?
-- What new interfaces and presentations can make agent work more inspectable, continuous, and calm?
-- Which general design patterns can help Python agents become easier to build, test, package, and reason about?
-
-The project is intentionally modest in shape, but ambitious in what it tries to clarify: a capable agent can be built from simple parts, visible state, and disciplined boundaries.
+```bash
+cd frontend-cli
+npm install
+npm test
+```
 
 ## License
 
-This project is released under the [MIT License](LICENSE).
+Rind is released under the [MIT License](LICENSE).
