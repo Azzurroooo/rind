@@ -67,7 +67,7 @@ async def _message_count(session) -> str:
     if not callable(get_messages):
         return "unknown"
     try:
-        messages = await get_messages()
+        messages = await get_messages(compacted=False)
         return str(sum(1 for message in messages if not _is_skill_snapshot(message)))
     except Exception:
         return "unknown"

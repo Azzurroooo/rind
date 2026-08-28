@@ -15,6 +15,7 @@ class CompactionHandoffBuilder:
     def render(self, previous_handoff: str, messages: list[dict[str, Any]], tool_lines: list[str]) -> str:
         last_user = self._last_content(messages, "user")
         last_assistant = self._last_content(messages, "assistant")
+        last_reasoning = self._last_reasoning(messages)
         lines = [
             "Context compacted.",
             "This is a deterministic handoff generated from persisted session events.",
@@ -25,6 +26,8 @@ class CompactionHandoffBuilder:
             lines.extend(["", "Latest user message:", self._excerpt(last_user)])
         if last_assistant:
             lines.extend(["", "Latest assistant message:", self._excerpt(last_assistant)])
+        if last_reasoning:
+            lines.extend(["", "Latest assistant reasoning:", self._excerpt(last_reasoning)])
         if tool_lines:
             lines.extend(["", "Tool calls:", *tool_lines])
         if len(lines) == 2:
@@ -113,6 +116,16 @@ class CompactionHandoffBuilder:
             content = message.get("content")
             if isinstance(content, str) and content.strip():
                 return content
+        return ""
+
+    @staticmethod
+    def _last_reasoning(messages: list[dict[str, Any]]) -> str:
+        for message in reversed(messages):
+            if message.get("role") != "assistant":
+                continue
+            reasoning = message.get("reasoning_content")
+            if isinstance(reasoning, str) and reasoning.strip():
+                return reasoning
         return ""
 
     def _excerpt(self, text: str) -> str:

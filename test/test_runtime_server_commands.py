@@ -41,7 +41,7 @@ def restore_config_state():
 class FakeSession:
     session_id = "session_1"
     model = "model_a"
-    async def get_messages_slice(self):
+    async def get_messages_slice(self, compacted=True):
         return [{"role": "system", "content": "sys"}, {"role": "user", "content": "hello"}]
 
     async def get_latest_sampling_usage(self):
@@ -368,7 +368,7 @@ async def test_status_shows_session_model_debug_and_message_count() -> None:
 @pytest.mark.asyncio
 async def test_status_excludes_skill_snapshot_messages_from_count() -> None:
     class SnapshotSession(FakeSession):
-        async def get_messages_slice(self):
+        async def get_messages_slice(self, compacted=True):
             return [
                 {"role": "system", "content": "sys"},
                 {"role": "user", "content": "hello"},
@@ -652,7 +652,7 @@ async def test_compact_calls_runtime_compact_context() -> None:
 @pytest.mark.asyncio
 async def test_compact_returns_friendly_message_for_empty_session() -> None:
     class EmptySession(FakeSession):
-        async def get_messages_slice(self):
+        async def get_messages_slice(self, compacted=True):
             return [{"role": "system", "content": "sys"}]
 
     runtime = FakeRuntime()

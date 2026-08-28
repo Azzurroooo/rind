@@ -36,7 +36,7 @@ class _Store:
     async def initialize(self):
         return None
 
-    async def get_messages_slice(self, start=None, end=None):
+    async def get_messages_slice(self, start=None, end=None, compacted=True):
         return []
 
     async def get_turn_state(self):

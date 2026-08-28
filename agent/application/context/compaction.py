@@ -57,6 +57,7 @@ class CompactionService:
             diagnostics=diagnostics,
             handoff_messages=context_messages,
             strategy="deterministic_fallback",
+            keep_recent_chars=self._keep_recent_chars(context_stats),
         )
         try:
             corpus = self.build_compression_corpus(context_messages)
@@ -71,6 +72,9 @@ class CompactionService:
                 raise ValueError("compact model returned empty handoff")
             record["strategy"] = "llm_inline"
             record["handoff_message"] = {"role": "assistant", "content": content}
+            reasoning = self._assistant_reasoning_content(response).strip()
+            if reasoning:
+                record["handoff_message"]["reasoning_content"] = reasoning
             usage = self._sampling_usage(response, context_stats)
             if usage:
                 record["usage"] = usage
@@ -106,12 +110,18 @@ class CompactionService:
         diagnostics: dict[str, Any] | None = None,
         handoff_messages: list[dict[str, Any]] | None = None,
         strategy: str = "manual_deterministic",
+        keep_recent_chars: int = 0,
     ) -> dict[str, Any]:
         handoff_builder = CompactionHandoffBuilder(self.max_excerpt_chars)
         created = created_at or self._now()
         boundary_index = handoff_builder.latest_boundary_index(messages)
         source_start = boundary_index + 1 if boundary_index >= 0 else 0
-        source_end = len(messages)
+        source_end = self._retention_cut(
+            messages,
+            source_start,
+            tool_records or [],
+            keep_recent_chars,
+        )
         source_messages = [
             dict(message)
             for message in messages[source_start:source_end]
@@ -164,6 +174,105 @@ class CompactionService:
                 continue
             corpus.append(handoff_builder.strip_internal_fields(message))
         return corpus
+
+    def _retention_cut(
+        self,
+        messages: list[dict[str, Any]],
+        source_start: int,
+        tool_records: list[dict[str, Any]],
+        keep_recent_chars: int,
+    ) -> int:
+        units = self._conversation_units(messages, source_start)
+        if not units:
+            return len(messages)
+        tool_sizes = {
+            str(record.get("id")): len(str(record.get("model_content") or ""))
+            for record in tool_records
+            if isinstance(record, dict) and record.get("id")
+        }
+        if keep_recent_chars <= 0:
+            return len(messages)
+
+        retained_start, retained_end = units[-1]
+        retained_size = self._unit_size(messages, retained_start, retained_end, tool_sizes)
+        for unit_start, unit_end in reversed(units[:-1]):
+            unit_size = self._unit_size(messages, unit_start, unit_end, tool_sizes)
+            if retained_size + unit_size > keep_recent_chars:
+                break
+            retained_start = unit_start
+            retained_size += unit_size
+        return retained_start
+
+    def _conversation_units(
+        self,
+        messages: list[dict[str, Any]],
+        source_start: int,
+    ) -> list[tuple[int, int]]:
+        units: list[tuple[int, int]] = []
+        index = source_start
+        while index < len(messages):
+            message = messages[index]
+            if message.get("role") == "system":
+                index += 1
+                continue
+            end = index + 1
+            if message.get("role") == "assistant":
+                call_ids = self._tool_call_ids(message)
+                if call_ids:
+                    pending = set(call_ids)
+                    while end < len(messages) and pending:
+                        candidate = messages[end]
+                        if candidate.get("role") != "tool":
+                            break
+                        pending.discard(str(candidate.get("tool_call_id") or ""))
+                        end += 1
+            units.append((index, end))
+            index = end
+        return units
+
+    def _unit_size(
+        self,
+        messages: list[dict[str, Any]],
+        start: int,
+        end: int,
+        tool_sizes: dict[str, int],
+    ) -> int:
+        return sum(self._message_chars(message, tool_sizes) for message in messages[start:end])
+
+    def _tool_call_ids(self, message: dict[str, Any]) -> list[str]:
+        meta = message.get("meta")
+        calls = meta.get("tool_calls") if isinstance(meta, dict) else message.get("tool_calls")
+        if not isinstance(calls, list):
+            return []
+        return [
+            str(call.get("id"))
+            for call in calls
+            if isinstance(call, dict) and call.get("id")
+        ]
+
+    def _message_chars(self, message: dict[str, Any], tool_chars: dict[str, int]) -> int:
+        role = message.get("role")
+        if role == "tool":
+            return tool_chars.get(str(message.get("tool_call_id") or ""), len(str(message.get("content") or "")))
+        size = len(str(message.get("content") or ""))
+        size += len(str(message.get("reasoning_content") or ""))
+        meta = message.get("meta")
+        if isinstance(meta, dict):
+            for tool_call in meta.get("tool_calls") or []:
+                if isinstance(tool_call, dict):
+                    size += len(str(tool_call.get("raw_args") or ""))
+        return size
+
+    def _keep_recent_chars(self, context_stats: dict[str, Any] | None) -> int:
+        stats = context_stats if isinstance(context_stats, dict) else {}
+        try:
+            limit = int(stats.get("auto_compact_token_limit") or 0)
+        except (TypeError, ValueError):
+            return 0
+        if limit <= 0:
+            return 0
+        # Keep one twelfth of the auto-compact limit; CJK-conservative chars per token.
+        return limit // 12 * 3 // 2
 
     async def _load_raw_messages(self, session, fallback: list[dict[str, Any]]) -> list[dict[str, Any]]:
         try:
@@ -223,6 +332,15 @@ class CompactionService:
             content = self._get(message, "content")
             if isinstance(content, str):
                 return content
+        return ""
+
+    def _assistant_reasoning_content(self, response: Any) -> str:
+        choices = self._get(response, "choices")
+        if isinstance(choices, list) and choices:
+            message = self._get(choices[0], "message")
+            reasoning = self._get(message, "reasoning_content")
+            if isinstance(reasoning, str):
+                return reasoning
         return ""
 
     def _sampling_usage(self, response: Any, context_stats: dict[str, Any] | None) -> dict[str, Any] | None:

@@ -112,6 +112,7 @@ class SessionStore(Protocol):
         end: int | None = None,
         roles: list[str] | None = None,
         include_ids: bool = False,
+        compacted: bool = True,
     ) -> list[dict[str, Any]]:
         """Get a slice of messages asynchronously."""
         ...

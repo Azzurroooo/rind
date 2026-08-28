@@ -332,7 +332,7 @@ def test_initialize_response_includes_resume_preview_when_history_exists(capsys)
         session_id = "s1"
         model = "m1"
 
-        async def get_messages_slice(self):
+        async def get_messages_slice(self, compacted=True):
             return [
                 {"role": "system", "content": "sys"},
                 {"role": "user", "content": "hello"},
@@ -454,7 +454,7 @@ def test_goal_control_requests_update_and_clear_state(capsys):
 
 def test_session_replay_returns_projected_messages_and_turn_state(capsys):
     class Session(_Session):
-        async def get_messages_slice(self, start=None, end=None):
+        async def get_messages_slice(self, start=None, end=None, compacted=True):
             return [{"role": "user", "content": "hello"}][slice(start, end)]
 
         async def get_turn_state(self):
@@ -486,7 +486,7 @@ def test_session_switch_returns_target_metadata_and_preview(capsys):
             }
 
     class Session(_Session):
-        async def get_messages_slice(self):
+        async def get_messages_slice(self, compacted=True):
             return [{"role": "user", "content": "target history"}]
 
     async def run():
@@ -551,7 +551,7 @@ def test_session_new_returns_new_metadata_and_preview(capsys):
             return {"session_id": "new-session", "model": "new-model"}
 
     class Session(_Session):
-        async def get_messages_slice(self):
+        async def get_messages_slice(self, compacted=True):
             return []
 
     async def run():
@@ -1025,7 +1025,7 @@ def test_readonly_session_replay_is_handled_while_run_turn_is_blocked(capsys):
             )()
 
     class Session(_Session):
-        async def get_messages_for_session(self, session_id, start=None, end=None):
+        async def get_messages_for_session(self, session_id, start=None, end=None, compacted=True):
             assert session_id == "archived"
             assert start is None
             assert end is None

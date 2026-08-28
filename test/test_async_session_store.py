@@ -19,7 +19,7 @@ from agent.infrastructure.persistence.jsonl_session_store import JsonlSessionSto
 from agent.infrastructure.persistence.session_files import SessionFiles
 from agent.infrastructure.persistence.session_index_repository import SessionIndexRepository
 import agent.infrastructure.persistence.session_files as session_files
-from agent.domain.compaction import COMPACT_CONTINUATION_USER_CONTENT
+from agent.domain.compaction import COMPACT_CONTINUATION_USER_CONTENT, COMPACT_HANDOFF_REASONING_CONTENT
 from agent.domain.message_boundary import validate_model_message_boundary
 from agent.infrastructure.tools.builtin.planning import update_plan
 
@@ -1121,12 +1121,93 @@ async def test_persist_compaction_projects_minimal_replacement_boundary(temp_ses
     assert messages == [
         {"role": "system", "content": "sys"},
         {"role": "user", "content": COMPACT_CONTINUATION_USER_CONTENT},
-        {"role": "assistant", "content": "Context compacted."},
+        {"role": "assistant", "content": "Context compacted.", "reasoning_content": COMPACT_HANDOFF_REASONING_CONTENT},
     ]
     assert {"role": "user", "content": "old question"} not in messages
     assert {"role": "assistant", "content": "old answer"} not in messages
     assert {"role": "user", "content": "current question"} not in messages
     assert not any(message.get("role") == "tool" for message in messages)
+
+
+@pytest.mark.asyncio
+async def test_compaction_retains_recent_suffix_for_context_and_raw_history_for_display(temp_session_dir):
+    store = JsonlSessionStore(session_dir=temp_session_dir, system_prompt="sys")
+    await store.initialize()
+    await store.persist_message("user", "old question")
+    await store.persist_message("assistant", "old answer")
+    await store.persist_message("user", "recent question")
+    await store.persist_message("assistant", "", meta={"tool_calls": [{"id": "call_1", "name": "bash"}]})
+    await store.persist_tool_call(
+        call_id="call_1",
+        name="bash",
+        parsed_args={"command": "date"},
+        raw_args='{"command":"date"}',
+        ts_start=store.now_iso(),
+        ts_end=store.now_iso(),
+        result_payload=json.dumps({"ok": True, "tool": "bash", "data": "raw"}),
+        model_content="tool result content",
+        model_content_format="tool_result_v2",
+        model_content_policy={"truncated": False},
+    )
+    await store.persist_message("tool", "", tool_call_id="call_1", tool_name="bash")
+
+    await store.persist_compaction(
+        {
+            "id": "compact_retained_suffix",
+            "created_at": store.now_iso(),
+            "policy_version": "compact_boundary_v3",
+            "source": {
+                "message_start_index": 0,
+                "message_end_index_exclusive": 3,
+                "tool_call_ids": [],
+            },
+            "handoff_message": {"role": "assistant", "content": "Compacted prefix."},
+        }
+    )
+    await store.persist_message("user", "after compact")
+
+    context_messages = await store.get_messages_slice()
+    display_messages = await store.get_messages_slice(compacted=False)
+
+    assert [(m["role"], m.get("content")) for m in context_messages if m["role"] == "user"] == [
+        ("user", COMPACT_CONTINUATION_USER_CONTENT),
+        ("user", "recent question"),
+        ("user", "after compact"),
+    ]
+    assert context_messages[2] == {
+        "role": "assistant",
+        "content": "Compacted prefix.",
+        "reasoning_content": COMPACT_HANDOFF_REASONING_CONTENT,
+    }
+    record_with_reasoning = {
+        "id": "compact_with_reasoning",
+        "created_at": store.now_iso(),
+        "policy_version": "compact_boundary_v3",
+        "source": {
+            "message_start_index": 0,
+            "message_end_index_exclusive": 3,
+            "tool_call_ids": [],
+        },
+        "handoff_message": {
+            "role": "assistant",
+            "content": "Real handoff.",
+            "reasoning_content": "How the summary was built.",
+        },
+    }
+    await store.persist_compaction(record_with_reasoning)
+
+    context_messages = await store.get_messages_slice()
+
+    assert context_messages[2] == {
+        "role": "assistant",
+        "content": "Real handoff.",
+        "reasoning_content": "How the summary was built.",
+    }
+    assert {"role": "user", "content": "old question"} not in context_messages
+    assert {"role": "user", "content": "recent question"} in display_messages
+    assert {"role": "user", "content": "old question"} in display_messages
+    assert all(m.get("content") != "Compacted prefix." for m in display_messages)
+    assert all(m.get("tool_call_id") != "call_1" or m.get("content") == "tool result content" for m in display_messages)
 
 
 @pytest.mark.asyncio
@@ -1215,7 +1296,7 @@ async def test_latest_valid_compact_boundary_survives_newer_broken_boundary(temp
             "policy_version": "compact_boundary_v3",
             "source": {
                 "message_start_index": 0,
-                "message_end_index_exclusive": 1,
+                "message_end_index_exclusive": 2,
                 "tool_call_ids": [],
             },
             "handoff_message": {

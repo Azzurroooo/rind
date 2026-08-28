@@ -93,6 +93,90 @@ def test_compaction_service_uses_full_source_for_mid_turn() -> None:
     assert "do task" in record["handoff_message"]["content"]
 
 
+def test_compaction_service_retains_recent_suffix_within_budget() -> None:
+    service = CompactionService()
+    messages = [
+        {"role": "system", "content": "sys"},
+        {"role": "user", "content": "old " * 40},
+        {"role": "assistant", "content": "older work " * 20},
+        {"role": "user", "content": "recent question " * 4},
+        {"role": "assistant", "content": "", "meta": {"tool_calls": [{"id": "call_1", "name": "bash", "raw_args": "{}"}]}},
+        {"role": "tool", "tool_call_id": "call_1", "content": ""},
+        {"role": "assistant", "content": "recent answer"},
+    ]
+    tool_records = [{"id": "call_1", "model_content": "tool result " * 10}]
+
+    record = service.build_compaction(messages, tool_records, keep_recent_chars=220)
+
+    assert record["source"]["message_start_index"] == 0
+    cut = record["source"]["message_end_index_exclusive"]
+    assert cut == 3
+    assert messages[cut]["role"] == "user"
+    assert all(message["role"] != "tool" for message in messages[:cut])
+    assert "old" in record["handoff_message"]["content"]
+
+
+def test_compaction_service_retention_never_splits_tool_calls_from_results() -> None:
+    service = CompactionService()
+    messages = [
+        {"role": "system", "content": "sys"},
+        {"role": "user", "content": "do task"},
+        {"role": "assistant", "content": "tool work " * 30, "meta": {"tool_calls": [{"id": "call_1", "name": "bash", "raw_args": '{"command":"date"}'}]}},
+        {"role": "tool", "tool_call_id": "call_1", "content": ""},
+    ]
+    tool_records = [{"id": "call_1", "model_content": "tool result " * 20}]
+
+    record = service.build_compaction(messages, tool_records, keep_recent_chars=len("tool result ") * 20)
+
+    cut = record["source"]["message_end_index_exclusive"]
+    assert cut == 2
+    assert messages[cut]["role"] == "assistant"
+    assert messages[cut + 1]["role"] == "tool"
+
+
+def test_compaction_service_keep_recent_budget_derives_from_auto_compact_limit() -> None:
+    service = CompactionService()
+
+    assert service._keep_recent_chars({"auto_compact_token_limit": 180000}) == 22500
+    assert service._keep_recent_chars({}) == 0
+    assert service._keep_recent_chars(None) == 0
+
+
+def test_compaction_service_retains_final_unit_even_when_it_exceeds_budget() -> None:
+    service = CompactionService()
+    messages = [
+        {"role": "system", "content": "sys"},
+        {"role": "user", "content": "do task"},
+        {"role": "assistant", "content": "", "meta": {"tool_calls": [{"id": "call_1", "name": "bash", "raw_args": "{}"}]}},
+        {"role": "tool", "tool_call_id": "call_1", "content": ""},
+    ]
+    tool_records = [{"id": "call_1", "model_content": "tool result " * 500}]
+
+    record = service.build_compaction(messages, tool_records, keep_recent_chars=10)
+
+    cut = record["source"]["message_end_index_exclusive"]
+    assert cut == 2
+    assert messages[cut]["role"] == "assistant"
+    assert messages[cut + 1]["role"] == "tool"
+
+
+def test_compaction_service_counts_reasoning_in_final_tool_unit() -> None:
+    service = CompactionService()
+    messages = [
+        {"role": "system", "content": "sys"},
+        {"role": "user", "content": "old"},
+        {"role": "assistant", "content": "", "reasoning_content": "private reasoning", "meta": {"tool_calls": [{"id": "call_1", "name": "bash", "raw_args": "{}"}]}},
+        {"role": "tool", "tool_call_id": "call_1", "content": ""},
+        {"role": "user", "content": "latest"},
+    ]
+    tool_records: list[dict[str, str]] = []
+
+    record = service.build_compaction(messages, tool_records, keep_recent_chars=20)
+
+    assert record["source"]["message_end_index_exclusive"] == 4
+    assert "Latest assistant reasoning" in record["handoff_message"]["content"]
+
+
 @pytest.mark.asyncio
 async def test_compaction_service_falls_back_when_llm_compact_fails() -> None:
     class FailingClient:
@@ -117,7 +201,37 @@ async def test_compaction_service_falls_back_when_llm_compact_fails() -> None:
     assert record["policy_version"] == "compact_boundary_v3"
     assert record["fallback_error"]["type"] == "RuntimeError"
     assert record["handoff_message"]["content"].startswith("Context compacted.")
+    assert "reasoning_content" not in record["handoff_message"]
     assert session.records[-1]["source"]["message_start_index"] == 0
+
+
+@pytest.mark.asyncio
+async def test_compaction_service_preserves_handoff_reasoning_content() -> None:
+    class ReasoningClient:
+        async def create(self, *args, **kwargs):
+            return SimpleNamespace(
+                choices=[
+                    SimpleNamespace(
+                        message=SimpleNamespace(
+                            content="Summarized handoff.",
+                            reasoning_content="How the summary was built.",
+                        )
+                    )
+                ]
+            )
+
+    session = FakeSession()
+    record = await CompactionService().compact_async(
+        session=session,
+        context_messages=await session.load_messages(),
+        chat_client=ReasoningClient(),
+        reason="auto",
+        phase="mid_turn",
+    )
+
+    assert record["strategy"] == "llm_inline"
+    assert record["handoff_message"]["content"] == "Summarized handoff."
+    assert record["handoff_message"]["reasoning_content"] == "How the summary was built."
 
 
 @pytest.mark.asyncio

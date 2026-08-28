@@ -281,7 +281,7 @@ class StdioRuntimeServer:
         get_messages = getattr(self._session, "get_messages_slice", None)
         if not callable(get_messages):
             return ""
-        messages = await get_messages()
+        messages = await get_messages(compacted=False)
         return render_resume_preview(messages, session_id=getattr(self._session, "session_id", None))
 
     async def _turn_state(self) -> dict[str, Any] | None:
@@ -310,7 +310,7 @@ class StdioRuntimeServer:
                 if not callable(get_messages_for_session):
                     await self._respond_error(request, "Read-only session replay is unavailable.", "UnsupportedOperation")
                     return
-                messages = await get_messages_for_session(session_id, start=start, end=end)
+                messages = await get_messages_for_session(session_id, start=start, end=end, compacted=False)
                 await self._respond(
                     request,
                     {
@@ -333,9 +333,9 @@ class StdioRuntimeServer:
             )
             return
         if start is None and end is None:
-            messages = await get_messages()
+            messages = await get_messages(compacted=False)
         else:
-            messages = await get_messages(start=start, end=end)
+            messages = await get_messages(start=start, end=end, compacted=False)
         await self._respond(
             request,
             {

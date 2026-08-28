@@ -139,7 +139,7 @@ class SessionRepository:
             info,
             persist_system_prompt=False,
         )
-        messages = await store.get_messages_slice(start=start, end=end, include_ids=True)
+        messages = await store.get_messages_slice(start=start, end=end, include_ids=True, compacted=False)
         return {
             "messages": messages,
             "turn_state": await store.get_turn_state(),

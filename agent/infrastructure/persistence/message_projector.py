@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from agent.domain.compaction import COMPACT_CONTINUATION_USER_CONTENT
+from agent.domain.compaction import COMPACT_CONTINUATION_USER_CONTENT, COMPACT_HANDOFF_REASONING_CONTENT
 from agent.domain.message_boundary import validate_compact_handoff_boundary
 
 
@@ -14,9 +14,13 @@ def project_messages(
     compactions: list[dict[str, Any]],
     system_prompt: str,
     include_ids: bool = False,
+    compacted: bool = True,
 ) -> list[dict[str, Any]]:
-    compact_applied = latest_compact_pair(messages, compactions) is not None
-    projected_messages = apply_latest_compact_boundary(messages, compactions)
+    compact_applied = compacted and latest_compact_pair(messages, compactions) is not None
+    if compact_applied:
+        projected_messages = apply_latest_compact_boundary(messages, compactions)
+    else:
+        projected_messages = [dict(message) for message in messages]
     tool_map = {
         str(item["id"]): item
         for item in tool_records
@@ -120,19 +124,37 @@ def apply_latest_compact_boundary(
     if matched is None:
         return [dict(message) for message in messages]
     boundary_index, compaction = matched
+    cut = _retained_cut_index(messages, boundary_index, compaction)
 
     projected = [
         dict(message)
-        for message in messages[:boundary_index]
+        for message in messages[:cut]
         if message.get("role") == "system"
     ]
     projected.extend(_compact_replacement_boundary(compaction))
+    projected.extend(
+        dict(message)
+        for message in messages[cut:boundary_index]
+        if message.get("role") != "system"
+    )
     projected.extend(
         dict(message)
         for message in messages[boundary_index + 1 :]
         if not is_compact_boundary_message(message)
     )
     return projected
+
+
+def _retained_cut_index(
+    messages: list[dict[str, Any]],
+    boundary_index: int,
+    compaction: dict[str, Any],
+) -> int:
+    source = compaction.get("source")
+    end = source.get("message_end_index_exclusive") if isinstance(source, dict) else None
+    if isinstance(end, int) and not isinstance(end, bool) and 0 <= end <= boundary_index:
+        return end
+    return boundary_index
 
 
 def is_compact_boundary_message(message: dict[str, Any]) -> bool:
@@ -143,12 +165,15 @@ def is_compact_boundary_message(message: dict[str, Any]) -> bool:
 def _compact_replacement_boundary(compaction: dict[str, Any]) -> list[dict[str, Any]]:
     handoff = compaction["handoff_message"]
     content = handoff["content"]
+    reasoning = handoff.get("reasoning_content")
+    if not isinstance(reasoning, str) or not reasoning:
+        reasoning = COMPACT_HANDOFF_REASONING_CONTENT
     user = compaction.get("continuation_user_message")
     if not _valid_message(user, {"user"}):
         user = {"role": "user", "content": COMPACT_CONTINUATION_USER_CONTENT}
     return [
         {"role": "user", "content": user["content"]},
-        {"role": "assistant", "content": content},
+        {"role": "assistant", "content": content, "reasoning_content": reasoning},
     ]
 
 

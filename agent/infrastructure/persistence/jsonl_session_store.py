@@ -86,8 +86,7 @@ class JsonlSessionStore(SessionStore):
         self._tool_call_count = 0
         self._has_user_message = False
         self._last_preview = ""
-        self._projected_messages_cache_key = None
-        self._projected_messages_cache = None
+        self._projected_caches: dict[tuple[bool, tuple[Any, ...]], list[dict[str, Any]]] = {}
         self._files = SessionFiles()
         self._msg_repo = None
         self._tool_repo = None
@@ -413,8 +412,7 @@ class JsonlSessionStore(SessionStore):
             "message_count": self._message_count,
             "tool_call_count": self._tool_call_count,
             "last_preview": self._last_preview,
-            "cache_key": self._projected_messages_cache_key,
-            "cache": self._projected_messages_cache,
+            "projected_caches": dict(self._projected_caches),
             "model": self._model,
             "reasoning_effort": self._reasoning_effort,
             "msg_repo": self._msg_repo,
@@ -431,8 +429,7 @@ class JsonlSessionStore(SessionStore):
             self._message_count = previous["message_count"]
             self._tool_call_count = previous["tool_call_count"]
             self._last_preview = previous["last_preview"]
-            self._projected_messages_cache_key = previous["cache_key"]
-            self._projected_messages_cache = previous["cache"]
+            self._projected_caches = previous["projected_caches"]
             self._model = previous["model"]
             self._reasoning_effort = previous["reasoning_effort"]
             self._msg_repo = previous["msg_repo"]
@@ -553,8 +550,7 @@ class JsonlSessionStore(SessionStore):
         self._update_index()
 
     def _invalidate_projection_cache(self) -> None:
-        self._projected_messages_cache_key = None
-        self._projected_messages_cache = None
+        self._projected_caches.clear()
 
     def _projection_file_signature(self, path: str | None) -> tuple[int, int]:
         if not path:
@@ -574,10 +570,10 @@ class JsonlSessionStore(SessionStore):
             self._projection_file_signature(paths.get("compactions")),
         )
 
-    def _projected_messages_sync(self, *, include_ids: bool = False) -> list[dict[str, Any]]:
-        key = self._projection_cache_key_sync()
-        if not include_ids and self._projected_messages_cache_key == key and self._projected_messages_cache is not None:
-            return copy.deepcopy(self._projected_messages_cache)
+    def _projected_messages_sync(self, *, include_ids: bool = False, compacted: bool = True) -> list[dict[str, Any]]:
+        key = (include_ids, compacted, self._projection_cache_key_sync())
+        if key in self._projected_caches:
+            return copy.deepcopy(self._projected_caches[key])
 
         messages = self._msg_repo.load_messages() if self._msg_repo else []
         tool_records = self._tool_repo.load_tool_calls() if self._tool_repo else []
@@ -588,10 +584,9 @@ class JsonlSessionStore(SessionStore):
             compactions,
             self._system_prompt,
             include_ids=include_ids,
+            compacted=compacted,
         )
-        if not include_ids:
-            self._projected_messages_cache_key = key
-            self._projected_messages_cache = copy.deepcopy(built_messages)
+        self._projected_caches[key] = copy.deepcopy(built_messages)
         return copy.deepcopy(built_messages)
 
     def _auto_compact_window_sync(self) -> dict[str, Any]:
@@ -879,9 +874,10 @@ class JsonlSessionStore(SessionStore):
         end: int | None = None,
         roles: list[str] | None = None,
         include_ids: bool = False,
+        compacted: bool = True,
     ) -> list[dict[str, Any]]:
         def _get():
-            built_messages = self._projected_messages_sync(include_ids=include_ids)
+            built_messages = self._projected_messages_sync(include_ids=include_ids, compacted=compacted)
             if roles:
                 allowed_roles = set(roles)
                 built_messages = [message for message in built_messages if message.get("role") in allowed_roles]
@@ -895,6 +891,7 @@ class JsonlSessionStore(SessionStore):
         start: int | None = None,
         end: int | None = None,
         roles: list[str] | None = None,
+        compacted: bool = True,
     ) -> list[dict[str, Any]]:
         """Project another persisted session without rebinding this store."""
         def _get():
@@ -917,7 +914,13 @@ class JsonlSessionStore(SessionStore):
             messages = MessageRepository(self._files, paths["messages"]).load_messages()
             tool_records = ToolCallRepository(self._files, paths["tool_calls"], looks_like_tool_payload).load_tool_calls()
             compactions = CompactionRepository(self._files, paths["compactions"]).load_compactions()
-            projected = project_messages(messages, tool_records, compactions, self._system_prompt)
+            projected = project_messages(
+                messages,
+                tool_records,
+                compactions,
+                self._system_prompt,
+                compacted=compacted,
+            )
             if roles:
                 projected = [message for message in projected if message.get("role") in set(roles)]
             return [dict(message) for message in projected[slice(start, end)]]
