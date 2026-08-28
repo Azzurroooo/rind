@@ -90,11 +90,11 @@ def _specs(read, write, edit, find, search) -> tuple[ToolSpec, ...]:
         ToolSpec(
             name="read_file",
             handler=read,
-            description="读取 UTF-8 文本文件的指定行范围，单页最多 2000 行和约 50 KiB，返回行号、截断状态、下一次 offset 和完整文件 SHA-256。",
+            description="读取 UTF-8 文本文件的指定行范围，单页最多 2000 行和约 50 KiB，模型预览最多 25 KiB；返回行号、截断状态、下一次 offset 和完整文件 SHA-256。",
             param_descriptions={
                 "path": "文件绝对或相对路径",
                 "offset": "起始行号（默认 1）",
-                "limit": "最多读取的行数（默认 1000 行，最大 2000 行；单页约 50 KiB，超过会被截断）",
+                "limit": "最多读取的行数（默认 1000 行，最大 2000 行；单页约 50 KiB，模型预览最多 25 KiB）",
             },
         ),
         ToolSpec(

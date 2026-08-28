@@ -51,7 +51,7 @@ async def test_large_output_uses_one_absolute_output_path(tmp_path: Path) -> Non
     )
 
     assert store.calls == [("session-a", "call-1")]
-    assert len(result.model_content.encode("utf-8")) <= 50 * 1024
+    assert len(result.model_content.encode("utf-8")) <= 25 * 1024
     assert result.persisted_content == result.model_content
     payload = json.loads(result.model_content)
     assert payload["meta"]["truncated"] is True
@@ -83,8 +83,65 @@ async def test_preview_respects_utf8_bytes_and_lines(tmp_path: Path) -> None:
         session_id="session-a",
         call_id="call-2",
     )
-    assert len(result.model_content.encode("utf-8")) <= 50 * 1024
+    assert len(result.model_content.encode("utf-8")) <= 25 * 1024
     assert json.loads(result.model_content)["meta"]["total_lines"] == 3000
+
+
+@pytest.mark.asyncio
+async def test_large_read_preview_keeps_source_metadata_without_output_store(tmp_path: Path) -> None:
+    source = json.dumps(
+        {
+            "ok": True,
+            "tool": "read_file",
+            "data": "界" * 30000,
+            "meta": {
+                "path": "C:/workspace/book.txt",
+                "offset": 10,
+                "limit": 1000,
+                "next_offset": 1010,
+                "encoding": "utf-8",
+                "sha256": "abc123",
+                "truncated": True,
+            },
+        },
+        ensure_ascii=False,
+    )
+    store = MemoryOutputStore(tmp_path)
+
+    result = await ToolResultNormalizer().normalize(
+        source,
+        tool_name="read_file",
+        output_store=store,
+        session_id="session-a",
+        call_id="call-read",
+    )
+
+    assert store.calls == []
+    assert len(result.model_content.encode("utf-8")) <= 25 * 1024
+    payload = json.loads(result.model_content)
+    assert payload["meta"]["path"] == "C:/workspace/book.txt"
+    assert payload["meta"]["next_offset"] == 1010
+    assert "output_path" not in payload["meta"]
+    assert "original path and next_offset" in payload["data"]
+
+
+@pytest.mark.asyncio
+async def test_paginated_read_keeps_full_page_without_preview_truncation(tmp_path: Path) -> None:
+    source = json.dumps(
+        {
+            "ok": True,
+            "tool": "read_file",
+            "data": "Showing lines 1 to 2:\n1 | first\n2 | second",
+            "meta": {"path": "book.txt", "offset": 1, "limit": 2, "next_offset": 3, "truncated": True},
+        },
+        ensure_ascii=False,
+    )
+
+    result = await ToolResultNormalizer().normalize(source, tool_name="read_file", output_store=MemoryOutputStore(tmp_path))
+
+    payload = json.loads(result.model_content)
+    assert "1 | first" in payload["data"]
+    assert "Read output is limited to the requested page" in payload["data"]
 
 
 @pytest.mark.asyncio
