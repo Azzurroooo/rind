@@ -1134,97 +1134,6 @@ async def test_async_turn_runner_auto_compacts_before_sampling():
 
 
 @pytest.mark.asyncio
-async def test_async_turn_runner_compacts_when_hard_limit_is_required():
-    class EmptyStream:
-        def __aiter__(self):
-            return self
-
-        async def __anext__(self):
-            raise StopAsyncIteration
-
-    class FakeChatClient:
-        def __init__(self):
-            self.created = 0
-            self.streamed = 0
-
-        async def create(self, messages, tools=None, cancellation_token=None):
-            self.created += 1
-            return SimpleNamespace(
-                choices=[SimpleNamespace(message=SimpleNamespace(content="LLM handoff"))],
-            )
-
-        def stream(self, *args, **kwargs):
-            self.streamed += 1
-            return EmptyStream()
-
-    class FakeSession:
-        session_id = "session_1"
-
-        def __init__(self):
-            self.compactions = []
-
-        def now_iso(self):
-            return "2026-05-08T00:00:00Z"
-
-        async def load_messages(self):
-            return [{"role": "user", "content": "hello"}]
-
-        async def get_tool_records(self, *args, **kwargs):
-            return []
-
-        async def get_latest_compaction(self):
-            return None
-
-        async def persist_compaction(self, record):
-            self.compactions.append(dict(record))
-            return dict(record)
-
-        async def persist_sampling_usage(self, usage):
-            return None
-
-        async def persist_message(self, *args, **kwargs):
-            return None
-
-    first_context = MagicMock(
-        messages=[{"role": "user", "content": "hello"}],
-        stats={"context_window_tokens": 1000},
-        decisions={"compact_required": True, "auto_compact_token_limit_reached": False},
-    )
-    second_context = MagicMock(
-        messages=[
-            {"role": "user", "content": COMPACT_CONTINUATION_USER_CONTENT},
-            {"role": "assistant", "content": "LLM handoff"},
-        ],
-        stats={},
-        decisions={},
-    )
-    mock_context = MagicMock()
-    mock_context.build_messages_async = AsyncMock(side_effect=[first_context, second_context])
-    mock_context.select_active_skills_for_turn = None
-
-    mock_parser = MagicMock()
-    mock_parser.consume_async_stream = AsyncMock(return_value=("", [], None))
-
-    chat_client = FakeChatClient()
-    session = FakeSession()
-    runner = TurnRunner(
-        chat_client=chat_client,
-        tool_processor=MagicMock(),
-        stream_parser=mock_parser,
-        tool_schemas=[],
-        context_manager=mock_context,
-    )
-
-    events = [event async for event in runner.run_turn(session)]
-
-    assert chat_client.created == 1
-    assert chat_client.streamed == 1
-    assert len(session.compactions) == 1
-    assert session.compactions[0]["diagnostics"]["auto_compact_phase_detail"] == "hard_limit"
-    assert sum(isinstance(event, ContextBuiltEvent) for event in events) == 2
-
-
-@pytest.mark.asyncio
 async def test_async_turn_runner_mid_turn_compact_does_not_preserve_raw_tail():
     class FakeChatClient:
         def __init__(self):
@@ -1532,7 +1441,6 @@ def main() -> int:
     asyncio.run(test_async_turn_runner_usage_tolerates_bad_context_stats())
     asyncio.run(test_async_turn_runner_retry_error_emits_visible_failure())
     asyncio.run(test_async_turn_runner_auto_compacts_before_sampling())
-    asyncio.run(test_async_turn_runner_compacts_when_hard_limit_is_required())
     asyncio.run(test_async_turn_runner_mid_turn_compact_does_not_preserve_raw_tail())
     test_compact_continuation_boundary_rejects_system_assistant_only()
     test_compact_continuation_boundary_accepts_user_assistant_handoff()

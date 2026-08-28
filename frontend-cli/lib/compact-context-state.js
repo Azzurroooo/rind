@@ -7,7 +7,7 @@ export function createCompactContextState() {
         awaitingPostCompactContext = false;
         return true;
       }
-      if (decisions.auto_compact_token_limit_reached || decisions.compact_required) {
+      if (decisions.auto_compact_token_limit_reached) {
         awaitingPostCompactContext = true;
       }
       return false;

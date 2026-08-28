@@ -15,17 +15,6 @@ test("compact context state resets after automatic compact handoff context", () 
   assert.equal(state.pending(), false);
 });
 
-test("compact context state tracks hard-limit compaction requests", () => {
-  const state = createCompactContextState();
-
-  assert.equal(state.handleContextBuilt({
-    decisions: { compact_required: true },
-  }), false);
-  assert.equal(state.pending(), true);
-
-  assert.equal(state.handleContextBuilt({}), true);
-});
-
 test("compact context state clears pending reset on turn settlement", () => {
   const state = createCompactContextState();
 

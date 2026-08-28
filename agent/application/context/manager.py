@@ -15,6 +15,15 @@ from .estimator import ContextEstimator
 logger = logging.getLogger(__name__)
 
 
+_ANCHOR_RATIO_MIN = 0.2
+_ANCHOR_RATIO_MAX = 2.0
+
+
+def _anchor_ratio(server_input_tokens: int, local_estimated_input_tokens: int) -> float:
+    ratio = server_input_tokens / local_estimated_input_tokens
+    return max(_ANCHOR_RATIO_MIN, min(_ANCHOR_RATIO_MAX, ratio))
+
+
 @dataclass(slots=True)
 class ContextBuildResult:
     """Result of building messages for a model request."""
@@ -131,7 +140,6 @@ class ContextManager:
             "over_conversation_budget": final_estimate.conversation_tokens >= budget.conversation_budget_tokens,
             "over_tool_budget": final_estimate.tool_tokens >= budget.tool_budget_tokens,
             "over_system_budget": final_estimate.system_tokens >= budget.system_budget_tokens,
-            "compact_required": final_estimate.over_hard_limit,
             "auto_compact_token_limit_reached": auto_compact_status["auto_compact_token_limit_reached"],
             **rind_decisions,
             **skill_decisions,
@@ -151,7 +159,8 @@ class ContextManager:
 
         if anchor["usable"]:
             local_delta = max(0, final_estimate.estimated_input_tokens - anchor["local_estimated_input_tokens"])
-            active_tokens = anchor["server_input_tokens"] + local_delta
+            ratio = _anchor_ratio(anchor["server_input_tokens"], anchor["local_estimated_input_tokens"])
+            active_tokens = anchor["server_input_tokens"] + int(local_delta * ratio)
             token_source = "assistant_usage_plus_local_delta"
         else:
             local_delta = 0

@@ -88,8 +88,6 @@ async def test_context_manager_builds_from_session_queries() -> None:
         raise AssertionError(f"Expected context usage percent, got: {result.stats}")
     if result.decisions.get("source") != "session_queries":
         raise AssertionError(f"Unexpected decisions: {result.decisions}")
-    if result.decisions.get("compact_required") is not False:
-        raise AssertionError(f"Unexpected compact decision: {result.decisions}")
     for key in ("tool_policy_applied", "rolling_summary_applied", "rolling_summary_generated"):
         if key in result.decisions:
             raise AssertionError(f"Did not expect legacy decision key {key}, got: {result.decisions}")
@@ -144,8 +142,6 @@ async def test_context_manager_build_is_stable_and_has_no_summary_side_effects()
             raise AssertionError(f"Did not expect legacy stat key {key}, got: {first.stats}")
     if first.decisions.get("auto_compact_token_limit_reached") is not True:
         raise AssertionError(f"Expected auto compact token limit reached, got: {first.decisions}")
-    if first.decisions.get("compact_required") is not False:
-        raise AssertionError(f"Did not expect hard-limit compact requirement, got: {first.decisions}")
 
 
 @pytest.mark.asyncio
@@ -180,7 +176,7 @@ async def test_context_manager_uses_assistant_usage_anchor_for_auto_compact() ->
     result = await manager.build_messages_async(session=session)
 
     assert result.stats["auto_compact_token_source"] == "assistant_usage_plus_local_delta"
-    assert result.stats["auto_compact_active_tokens"] == 70
+    assert result.stats["auto_compact_active_tokens"] == 55
     assert result.stats["auto_compact_local_delta_tokens"] == 20
     assert result.stats["auto_compact_anchor_usable"] is True
     assert result.decisions["auto_compact_token_limit_reached"] is False
@@ -192,7 +188,7 @@ async def test_context_manager_triggers_when_anchor_plus_delta_reaches_limit() -
         [{"role": "system", "content": "sys"}, {"role": "user", "content": "hello"}],
         assistant_usage={
             "sampling_kind": "assistant",
-            "input_tokens": 90,
+            "input_tokens": 100,
             "anchor": {
                 "local_estimated_input_tokens": 200,
                 "compact_generation": 1,

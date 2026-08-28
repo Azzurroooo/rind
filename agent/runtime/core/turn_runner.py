@@ -144,8 +144,7 @@ class TurnRunner:
                     stats=dict(context_stats),
                     decisions=dict(context_decisions),
                 )
-                compact_required = bool(context_decisions.get("compact_required"))
-                if context_decisions.get("auto_compact_token_limit_reached") or compact_required:
+                if context_decisions.get("auto_compact_token_limit_reached"):
                     context = await self._run_compact(
                         session=session,
                         context_messages=context_messages,
@@ -153,7 +152,7 @@ class TurnRunner:
                         context_decisions=context_decisions,
                         reason="auto",
                         phase="mid_turn",
-                        phase_detail=self._compact_phase_detail(sampling_index, compact_required),
+                        phase_detail=self._compact_phase_detail(sampling_index),
                         transient_system_messages=transient_system_messages,
                         cancellation_token=cancellation_token,
                     )
@@ -608,9 +607,7 @@ class TurnRunner:
         except Exception:
             logger.debug("Best-effort runtime operation failed.", exc_info=True)
 
-    def _compact_phase_detail(self, sampling_index: int, compact_required: bool) -> str | None:
-        if compact_required:
-            return "hard_limit"
+    def _compact_phase_detail(self, sampling_index: int) -> str | None:
         if sampling_index == 0:
             return "before_first_sampling"
         return None
