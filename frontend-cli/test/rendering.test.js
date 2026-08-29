@@ -644,7 +644,7 @@ test("toolRequestedLine shows bash command", () => {
       tool_name: "bash",
       args_preview: '{"command":"date"}',
     }),
-    "◌ Tool · Running command\n  $ date",
+    "  ◌ Tool · Running command\n    $ date",
   );
 });
 
@@ -654,7 +654,7 @@ test("toolRequestedLine shows delegate agent", () => {
       tool_name: "delegate",
       args_preview: '{"agent_id":"weather-agent","task":"check the forecast"}',
     }),
-    "◌ Tool · Calling delegate\n  ↳ agent: weather-agent",
+    "  ◌ Tool · Calling delegate\n    ↳ agent: weather-agent",
   );
 });
 
@@ -664,7 +664,7 @@ test("toolRequestedLine clips long details", () => {
     args_preview: JSON.stringify({ command: `echo ${"x".repeat(140)}` }),
   });
 
-  assert.equal(line.split("\n")[1].length, "  $ ".length + 96);
+  assert.equal(line.split("\n")[1].length, "    $ ".length + 96);
   assert.match(line, /\.\.\.$/);
 });
 
@@ -674,7 +674,7 @@ test("toolRequestedLine shows non-shell details as metadata", () => {
       tool_name: "read_file",
       args_preview: '{"path":"frontend-cli/lib/rendering.js"}',
     }),
-    "◌ Tool · Calling file read\n  ↳ frontend-cli/lib/rendering.js",
+    "  ◌ Tool · Calling file read\n    ↳ frontend-cli/lib/rendering.js",
   );
 });
 
@@ -754,7 +754,7 @@ test("toolRequestedLine keeps large file content out of the status", () => {
     }),
   });
 
-  assert.equal(line, "◌ Tool · Calling write file\n  ↳ notes.txt");
+  assert.equal(line, "  ◌ Tool · Calling write file\n    ↳ notes.txt");
   assert.doesNotMatch(line, /secret content/);
 });
 
@@ -768,7 +768,7 @@ test("toolRequestedLine keeps edit text out of the status", () => {
     }),
   });
 
-  assert.equal(line, "◌ Tool · Calling file edit\n  ↳ notes.txt");
+  assert.equal(line, "  ◌ Tool · Calling file edit\n    ↳ notes.txt");
   assert.doesNotMatch(line, /secret/);
 });
 
@@ -778,7 +778,7 @@ test("toolRequestedLine does not expose generic command arguments", () => {
       tool_name: "custom_tool",
       args_preview: JSON.stringify({ command: "hidden command" }),
     }),
-    "◌ Tool · Calling custom tool",
+    "  ◌ Tool · Calling custom tool",
   );
 });
 
@@ -788,15 +788,15 @@ test("toolRequestedLine keeps the tool name when arguments are incomplete", () =
       tool_name: "write_file",
       args_preview: '{"file_path":"notes.txt","content":"unfinished',
     }),
-    "◌ Tool · Calling write file",
+    "  ◌ Tool · Calling write file",
   );
 });
 
 test("toolStartedLine renders fallback running state", () => {
-  assert.equal(toolStartedLine({ tool_name: "bash" }), "◌ Tool · Running command");
-  assert.equal(toolStartedLine({ tool_name: "bash_output" }), "◌ Tool · Reading command output");
-  assert.equal(toolStartedLine({ tool_name: "web_search" }), "◌ Tool · Calling web search");
-  assert.equal(toolStartedLine({ tool_name: "custom_tool" }), "◌ Tool · Calling custom tool");
+  assert.equal(toolStartedLine({ tool_name: "bash" }), "  ◌ Tool · Running command");
+  assert.equal(toolStartedLine({ tool_name: "bash_output" }), "  ◌ Tool · Reading command output");
+  assert.equal(toolStartedLine({ tool_name: "web_search" }), "  ◌ Tool · Calling web search");
+  assert.equal(toolStartedLine({ tool_name: "custom_tool" }), "  ◌ Tool · Calling custom tool");
 });
 
 test("toolResultLine renders compact success state", () => {
@@ -807,7 +807,7 @@ test("toolResultLine renders compact success state", () => {
       duration_ms: 1250,
       result: JSON.stringify({ ok: true, data: { stdout: "hello\nworld", stderr: "", exit_code: 0 } }),
     }),
-    "◉ Tool · Ran command in 1.25s\n  ↳ hello world",
+    "  ◉ Tool · Ran command in 1.25s\n    ↳ hello world",
   );
   assert.equal(
     toolResultLine({
@@ -815,7 +815,7 @@ test("toolResultLine renders compact success state", () => {
       status: "completed",
       duration_ms: 20,
     }),
-    "◉ Tool · Called view image in 20ms",
+    "  ◉ Tool · Called view image in 20ms",
   );
   assert.equal(
     toolResultLine({
@@ -824,7 +824,7 @@ test("toolResultLine renders compact success state", () => {
       duration_ms: 25,
       result: JSON.stringify({ ok: true, data: { stdout: "", stderr: "warning" } }),
     }),
-    "◉ Tool · Ran command in 25ms\n  ↳ warning",
+    "  ◉ Tool · Ran command in 25ms\n    ↳ warning",
   );
   assert.equal(
     toolResultLine({
@@ -833,7 +833,7 @@ test("toolResultLine renders compact success state", () => {
       duration_ms: 35,
       result: JSON.stringify({ ok: true, data: { message: "Background process started: npm run dev" } }),
     }),
-    "◉ Tool · Ran command in 35ms\n  ↳ Background process started: npm run dev",
+    "  ◉ Tool · Ran command in 35ms\n    ↳ Background process started: npm run dev",
   );
   assert.equal(
     toolResultLine({
@@ -845,7 +845,7 @@ test("toolResultLine renders compact success state", () => {
         data: { status: "running", stdout: "tick-0", exit_code: -1, bg_id: "bg_123" },
       }),
     }),
-    "◌ Tool · command running in background in 1.05s\n  ↳ tick-0",
+    "  ◌ Tool · command running in background in 1.05s\n    ↳ tick-0",
   );
   assert.equal(
     toolResultLine({
@@ -857,7 +857,7 @@ test("toolResultLine renders compact success state", () => {
         data: { status: "running", stdout: "tick-1\ntick-2", exit_code: -1, bg_id: "bg_123" },
       }),
     }),
-    "◌ Tool · command output read; command still running in background in 5.05s\n  ↳ tick-1 tick-2",
+    "  ◌ Tool · command output read; command still running in background in 5.05s\n    ↳ tick-1 tick-2",
   );
   assert.equal(
     toolResultLine({
@@ -866,7 +866,7 @@ test("toolResultLine renders compact success state", () => {
       duration_ms: 25,
       result: JSON.stringify({ ok: true, data: { stdout: "", stderr: "not found", exit_code: 1 } }),
     }),
-    "⊘ Tool · command exited 1 in 25ms\n  ↳ not found",
+    "  ⊘ Tool · command exited 1 in 25ms\n    ↳ not found",
   );
 });
 
@@ -879,23 +879,23 @@ test("planUpdatedLine renders each plan status with its dedicated icon", () => {
       { step: "cancelled step", status: "cancelled" },
     ]),
     [
-      "◉ Plan updated",
-      "  ○ pending step",
-      "  ◐ active step",
-      "  ● done step",
-      "  ⊖ cancelled step",
+      "  ◉ Plan updated",
+      "    ○ pending step",
+      "    ◐ active step",
+      "    ● done step",
+      "    ⊖ cancelled step",
     ].join("\n"),
   );
 });
 
 test("planUpdatedLine renders an empty plan and clips long steps", () => {
-  assert.equal(planUpdatedLine([]), "◉ Plan cleared");
+  assert.equal(planUpdatedLine([]), "  ◉ Plan cleared");
   const originalColumns = process.stdout.columns;
   process.stdout.columns = 30;
   try {
     assert.equal(
       planUpdatedLine([{ step: "x".repeat(80), status: "pending" }]),
-      `◉ Plan updated\n  ○ ${"x".repeat(21)}...`,
+      `  ◉ Plan updated\n    ○ ${"x".repeat(21)}...`,
     );
   } finally {
     process.stdout.columns = originalColumns;
@@ -920,10 +920,10 @@ test("toolResultLine appends inline file change diff for successful file tools",
       ],
     }),
     [
-      "◉ Tool · Called file edit in 35ms",
-      "  ↳ frontend-cli/lib/rendering.js",
-      "    - const oldValue = 1;",
-      "    + const newValue = 2;",
+      "  ◉ Tool · Called file edit in 35ms",
+      "    ↳ frontend-cli/lib/rendering.js",
+      "      - const oldValue = 1;",
+      "      + const newValue = 2;",
     ].join("\n"),
   );
 });
@@ -942,9 +942,9 @@ test("toolResultLine clips long file change lines", () => {
         lines: [{ kind: "added", text: "x".repeat(60) }],
       }),
       [
-        "◉ Tool · Called write file in 10ms",
-        "  ↳ E:\\deep\\...file.md",
-        `    + ${"x".repeat(31)}...`,
+        "  ◉ Tool · Called write file in 10ms",
+        "    ↳ E:\\deep\\...file.md",
+        `      + ${"x".repeat(31)}...`,
       ].join("\n"),
     );
   } finally {
@@ -966,8 +966,8 @@ test("toolResultLine truncates long file change blocks", () => {
     lines,
   });
 
-  assert.match(output, /\n  ↳ demo\.txt\n/);
-  assert.match(output, /\n    \+ line 20\n    … 2 more changed lines$/);
+  assert.match(output, /\n    ↳ demo\.txt\n/);
+  assert.match(output, /\n      \+ line 20\n      … 2 more changed lines$/);
   assert.doesNotMatch(output, /line 21/);
 });
 
@@ -1001,7 +1001,7 @@ test("toolResultLine ignores file change details for failed tools", () => {
         { kind: "added", text: "new" },
       ],
     }),
-    "⊘ Tool · file edit failed in 20ms (OldStrNotFound)\n  ↳ not found",
+    "  ⊘ Tool · file edit failed in 20ms (OldStrNotFound)\n    ↳ not found",
   );
 });
 
@@ -1014,7 +1014,7 @@ test("toolResultLine includes compact failure detail", () => {
       duration_ms: 50,
       result: '{"ok":false,"error":"command timed out\\ntry again"}',
     }),
-    "⊘ Tool · command failed in 50ms (Timeout)\n  ↳ command timed out try again",
+    "  ⊘ Tool · command failed in 50ms (Timeout)\n    ↳ command timed out try again",
   );
 });
 
@@ -1024,7 +1024,7 @@ test("toolProgressLine renders compact progress messages", () => {
       tool_name: "bash",
       payload: { message: "waiting\nfor output" },
     }),
-    "◌ Tool · command\n  ↳ waiting for output",
+    "  ◌ Tool · command\n    ↳ waiting for output",
   );
   assert.equal(toolProgressLine({ tool_name: "bash", payload: { stdout: "ignored" } }), "");
 });

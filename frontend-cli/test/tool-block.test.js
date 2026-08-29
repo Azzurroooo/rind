@@ -25,7 +25,7 @@ test("tool block starts running and mutates in place on finish", () => {
   assert.equal(block.isRunning, true);
 
   const runningLines = block.render(WIDTH).map(stripAnsi);
-  assert.match(runningLines[0], /^◌ edit src\/app\.ts$/);
+  assert.match(runningLines[0], /^  ◌ edit src\/app\.ts$/);
 
   block.finish({
     status: "completed",
@@ -38,7 +38,7 @@ test("tool block starts running and mutates in place on finish", () => {
   assert.ok(renders.length >= 1, "mutations request re-renders");
 
   const doneLines = block.render(WIDTH).map(stripAnsi);
-  assert.match(doneLines[0], /^◉ edit src\/app\.ts \(\+1 -0\)$/);
+  assert.match(doneLines[0], /^  ◉ edit src\/app\.ts \(\+1 -0\)$/);
   assert.match(doneLines[1], /hi/);
 });
 
@@ -86,7 +86,7 @@ test("late-arriving tool_requested arguments enrich a bare running block", () =>
   }, onRequestRender: () => { renders += 1; } });
 
   const bare = block.render(WIDTH).map(stripAnsi);
-  assert.match(bare[0], /^◌ \$ … · 0s$/);
+  assert.match(bare[0], /^  ◌ \$ … · 0s$/);
 
   block.enrichArgs({
     tool_call_id: "call-9",
@@ -96,7 +96,7 @@ test("late-arriving tool_requested arguments enrich a bare running block", () =>
   });
   assert.ok(renders >= 1, "enrichment requests re-render");
   const enriched = block.render(WIDTH).map(stripAnsi);
-  assert.match(enriched[0], /^◌ \$ date/);
+  assert.match(enriched[0], /^  ◌ \$ date/);
 });
 
 test("ticker only exists for long-running tools", () => {

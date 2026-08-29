@@ -30,7 +30,8 @@ test("running block shows accent glyph, command and elapsed time", () => {
     progressMessage: "still running (3s)",
   }, WIDTH);
   assert.equal(lines.length, 2);
-  assert.match(stripAnsi(lines[0]), /^◌ \$ npm test · 3s$/);
+  assert.match(stripAnsi(lines[0]), /^  ◌ \$ npm test · 3s$/);
+  assert.match(stripAnsi(lines[1]), /^  /);
   assert.match(stripAnsi(lines[1]), /↳ still running \(3s\)/);
 });
 
@@ -47,7 +48,7 @@ test("finished bash success shows glyph, duration and output tail", () => {
     },
   }, WIDTH);
   const plain = lines.map(stripAnsi);
-  assert.match(plain[0], /^◉ \$ npm test · 1\.23s$/);
+  assert.match(plain[0], /^  ◉ \$ npm test · 1\.23s$/);
   assert.equal(plain.length, 7); // title + 5 tail lines + footer
   assert.match(plain[1], /l3/);
   assert.match(plain[5], /l7/);
@@ -84,7 +85,7 @@ test("background running bash keeps a pending presentation", () => {
     },
   }, WIDTH);
   const plain = lines.map(stripAnsi);
-  assert.match(plain[0], /^◌ \$ npm run dev$/);
+  assert.match(plain[0], /^  ◌ \$ npm run dev$/);
   assert.match(plain.at(-1), /running in background \(bg bg9\)/);
 });
 
@@ -105,7 +106,7 @@ test("edit_file title carries diff counts and body renders colored diff with foo
     fileChange,
   }, WIDTH);
   const plain = lines.map(stripAnsi);
-  assert.match(plain[0], /^◉ edit src\/app\.ts \(\+25 -25\)$/);
+  assert.match(plain[0], /^  ◉ edit src\/app\.ts \(\+25 -25\)$/);
   assert.equal(plain.length, 22); // title + 20 diff + footer
   assert.match(plain.at(-1), /\(30 more lines · ctrl\+o to expand\)/);
   assert.ok(lines[1].includes("\x1b[2m    - ") && lines[1].includes("\x1b[38;2;243;139;168m"));
@@ -127,7 +128,7 @@ test("write_file falls back to meta diff counts without live file_change", () =>
       }),
     },
   }, WIDTH);
-  assert.match(stripAnsi(lines[0]), /^◉ write docs\/new\.md \(\+4 -0\)$/);
+  assert.match(stripAnsi(lines[0]), /^  ◉ write docs\/new\.md \(\+4 -0\)$/);
 });
 
 test("grep collapsed hides listings behind a hint; expanded lists them", () => {
@@ -145,7 +146,7 @@ test("grep collapsed hides listings behind a hint; expanded lists them", () => {
   };
   const collapsed = renderToolFinished({ ...context, expanded: false }, WIDTH);
   const collapsedPlain = collapsed.map(stripAnsi);
-  assert.match(collapsedPlain[0], /^◉ grep \/TODO\/ in src · 42 matches$/);
+  assert.match(collapsedPlain[0], /^  ◉ grep \/TODO\/ in src · 42 matches$/);
   assert.equal(collapsed.length, 2); // title only + hint
   assert.match(collapsedPlain[1], /\(2 more lines · ctrl\+o to expand\)/);
 
@@ -170,7 +171,7 @@ test("bash_output surfaces bg id and waited time from the result payload", () =>
     },
   }, WIDTH);
   const plain = lines.map(stripAnsi);
-  assert.match(plain[0], /^◉ bg bg_f8e9337e · waited 3\.20s · 489ms$/);
+  assert.match(plain[0], /^  ◉ bg bg_f8e9337e · waited 3\.20s · 489ms$/);
   assert.match(plain[1], /background task done/);
 });
 
@@ -246,7 +247,7 @@ test("delegate shows status, summary head and published paths", () => {
     event: { status: "completed", duration_ms: 4200, result },
   }, WIDTH);
   const plain = collapsed.map(stripAnsi);
-  assert.match(plain[0], /^◉ delegate → reviewer · completed · 4\.20s$/);
+  assert.match(plain[0], /^  ◉ delegate → reviewer · completed · 4\.20s$/);
   assert.equal(plain.length, 3); // title + summary head + footer
   assert.match(plain[1], /All good/);
 
@@ -273,7 +274,7 @@ test("failed tools show error detail line", () => {
     },
   }, WIDTH);
   const plain = lines.map(stripAnsi);
-  assert.match(plain[0], /^⊘/);
+  assert.match(plain[0], /^  ⊘/);
   assert.match(plain[1], /command matches deny list/);
 });
 
@@ -285,7 +286,7 @@ test("generic renderer covers unknown tools", () => {
     expanded: false,
     event: { status: "completed", duration_ms: 12, result: "" },
   }, WIDTH);
-  assert.match(stripAnsi(lines[0]), /^◉ totally new tool custom$/);
+  assert.match(stripAnsi(lines[0]), /^  ◉ totally new tool custom$/);
 });
 
 test("wide characters are clipped without breaking layout", () => {

@@ -467,12 +467,12 @@ export function toolRequestedLine(event) {
   const detail = toolDetail(name, parseJsonObject(event.args_preview));
   const label = toolLabel(name);
   const line = `${accent("◌")} ${bold("Tool")} ${dim("·")} ${toolActiveVerb(name)} ${label}`;
-  return detail ? `${line}\n${dim(toolDetailLine(name, detail))}` : line;
+  return indentToolText(detail ? `${line}\n${dim(toolDetailLine(name, detail))}` : line);
 }
 
 export function toolStartedLine(event) {
   const name = event.tool_name || "tool";
-  return `${accent("◌")} ${bold("Tool")} ${dim("·")} ${toolActiveVerb(name)} ${toolLabel(name)}`;
+  return indentToolText(`${accent("◌")} ${bold("Tool")} ${dim("·")} ${toolActiveVerb(name)} ${toolLabel(name)}`);
 }
 
 export function toolResultLine(event, fileChange) {
@@ -483,7 +483,7 @@ export function toolResultLine(event, fileChange) {
     const suffix = event.error_type ? ` (${event.error_type})` : "";
     const detail = toolErrorDetail(event.result);
     const line = `${red("⊘")} ${bold("Tool")} ${dim("·")} ${label} failed in ${duration}${suffix}`;
-    return detail ? `${line}\n${dim(detailLine(detail))}` : line;
+    return indentToolText(detail ? `${line}\n${dim(detailLine(detail))}` : line);
   }
   const result = toolResultSummary(event.result);
   if (result.status === "running" && (name === "bash" || name === "bash_output")) {
@@ -492,30 +492,37 @@ export function toolResultLine(event, fileChange) {
       : "command running in background";
     const line = `${accent("◌")} ${bold("Tool")} ${dim("·")} ${runningText} in ${duration}`;
     const output = result.output;
-    return [line, output ? dim(detailLine(output)) : "", fileChangeLine(fileChange)]
+    return indentToolText([line, output ? dim(detailLine(output)) : "", fileChangeLine(fileChange)]
       .filter(Boolean)
-      .join("\n");
+      .join("\n"));
   }
   const line = result.exitCode
     ? `${red("⊘")} ${bold("Tool")} ${dim("·")} ${label} exited ${result.exitCode} in ${duration}`
     : `${green("◉")} ${bold("Tool")} ${dim("·")} ${completedToolText(name, label)} in ${duration}`;
   const output = result.output;
-  return [line, output ? dim(detailLine(output)) : "", fileChangeLine(fileChange)]
+  return indentToolText([line, output ? dim(detailLine(output)) : "", fileChangeLine(fileChange)]
     .filter(Boolean)
+    .join("\n"));
+}
+
+function indentToolText(value) {
+  return String(value || "")
+    .split("\n")
+    .map((line) => `  ${line}`)
     .join("\n");
 }
 
 export function planUpdatedLine(plan) {
   const items = Array.isArray(plan) ? plan : [];
   if (!items.length) {
-    return `${green("◉")} ${bold("Plan cleared")}`;
+    return `  ${green("◉")} ${bold("Plan cleared")}`;
   }
 
-  const lines = [`${green("◉")} ${bold("Plan updated")}`];
+  const lines = [`  ${green("◉")} ${bold("Plan updated")}`];
   for (const item of items) {
     const step = clipSingleLine(item?.step, detailTextWidth());
     if (step) {
-      lines.push(`  ${planStatusIcon(item?.status)} ${step}`);
+      lines.push(`    ${planStatusIcon(item?.status)} ${step}`);
     }
   }
   return lines.join("\n");
@@ -528,7 +535,9 @@ export function goalContinuedLine(round) {
 export function toolProgressLine(event) {
   const name = event.tool_name || "tool";
   const message = progressMessage(event.payload);
-  return message ? `${accent("◌")} ${bold("Tool")} ${dim("·")} ${toolLabel(name)}\n${dim(`  ↳ ${message}`)}` : "";
+  return message
+    ? indentToolText(`${accent("◌")} ${bold("Tool")} ${dim("·")} ${toolLabel(name)}\n${dim(`  ↳ ${message}`)}`)
+    : "";
 }
 
 export function errorLine(error) {

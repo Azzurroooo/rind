@@ -143,7 +143,7 @@ export function renderToolRunning(context, width) {
   if (context.progressMessage) {
     lines.push(dim(`    ↳ ${clipText(context.progressMessage, width, 8)}`));
   }
-  return lines;
+  return indentToolLines(lines, width);
 }
 
 export function renderToolFinished(context, width) {
@@ -155,7 +155,7 @@ export function renderToolFinished(context, width) {
     if (detail) {
       lines.push(detail);
     }
-    return lines;
+    return indentToolLines(lines, width);
   }
   const bodyLimit = context.expanded ? EXPANDED_HARD_CAPS[context.name] ?? 200 : COLLAPSED_BODY_CAPS[context.name] ?? 0;
   const produced = renderer.body ? renderer.body(context, width, bodyLimit) : [];
@@ -164,14 +164,19 @@ export function renderToolFinished(context, width) {
     if (normalized.total > 0) {
       lines.push(bodyFooter(normalized.total, context.expanded));
     }
-    return lines;
+    return indentToolLines(lines, width);
   }
   lines.push(...normalized.lines);
   const hidden = Math.max(0, normalized.total - normalized.lines.length);
   if (hidden > 0) {
     lines.push(bodyFooter(hidden, context.expanded));
   }
-  return lines;
+  return indentToolLines(lines, width);
+}
+
+function indentToolLines(lines, width) {
+  const limit = Math.max(1, Number(width) || 1);
+  return lines.map((line) => clipCells(`  ${line}`, limit));
 }
 
 function normalizeBody(produced) {
