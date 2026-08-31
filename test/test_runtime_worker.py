@@ -401,6 +401,52 @@ def test_replay_does_not_create_active_execution():
     assert any(message.get("request_id") == "replay" for message in messages)
 
 
+def test_worker_create_session_uses_workspace_settings_model_and_effort():
+    async def run():
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            workspace = root / "workspace"
+            workspace.mkdir()
+            settings_path = workspace / ".rind"
+            settings_path.mkdir()
+            (settings_path / "settings.json").write_text(
+                json.dumps({
+                    "model": "workspace-model",
+                    "apiKey": "test-key",
+                    "baseUrl": "https://example.com/v1",
+                    "reasoningEffort": "xhigh",
+                }),
+                encoding="utf-8",
+            )
+            settings = AppSettings(
+                settings_path=root / "settings.json",
+                settings_exists=True,
+                model="global-model",
+                api_key="test-key",
+                base_url="https://example.com/v1",
+                reasoning_effort="low",
+            )
+            worker = RuntimeWorker(
+                settings=settings,
+                workspace_root=str(workspace),
+                session_dir=str(root / "sessions"),
+                enable_goal=False,
+            )
+            try:
+                info = await worker.create_session(str(workspace))
+                meta = await worker.repository.metadata(info["session_id"])
+                return info, meta, workspace
+            finally:
+                await worker.close()
+
+    info, meta, workspace = asyncio.run(run())
+    assert info["model"] == "workspace-model"
+    assert Path(info["workspace_root"]).resolve() == workspace.resolve()
+    assert meta["model"] == "workspace-model"
+    assert Path(meta["workspace_root"]).resolve() == workspace.resolve()
+    assert meta["reasoning_effort"] == "xhigh"
+
+
 def test_worker_team_session_binding_matches_execution_context():
     async def run():
         with tempfile.TemporaryDirectory() as directory:

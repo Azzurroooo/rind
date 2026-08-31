@@ -19,9 +19,12 @@ def main(argv: list[str] | None = None) -> int:
     arguments = list(sys.argv[1:] if argv is None else argv)
     if arguments[:1] == ["app-server"]:
         from agent.runtime.server.app_server import main as app_server_main
-        from agent.runtime.server.stdio import WorkerStdioRuntimeServer
+        if "--web" in arguments[1:]:
+            from agent.runtime.server.web import WebRuntimeServer as server_class
+        else:
+            from agent.runtime.server.stdio import WorkerStdioRuntimeServer as server_class
 
-        return app_server_main(arguments[1:], server_class=WorkerStdioRuntimeServer)
+        return app_server_main(arguments[1:], server_class=server_class)
 
     parsed = build_parser().parse_args(arguments)
     if parsed.command is None:

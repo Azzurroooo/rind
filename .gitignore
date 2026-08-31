@@ -46,6 +46,8 @@ prompt.txt
 test_web.py
 test.txt
 src/
+!frontend-web/src/
+!frontend-web/src/**
 .claude/
 .agents/
 AGENTS.md

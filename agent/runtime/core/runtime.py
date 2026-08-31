@@ -86,7 +86,7 @@ class AgentRuntime:
                     code=type(exc).__name__,
                 ) from exc
             await self._sync_skill_catalog()
-            self._sync_turn_runner_model()
+            self._sync_turn_runner_config()
             self._initialized = True
 
     async def _sync_skill_catalog(self) -> None:
@@ -106,11 +106,15 @@ class AgentRuntime:
             logger.debug("Skill catalog persistence failed; retaining the previous catalog.", exc_info=True)
             return
 
-    def _sync_turn_runner_model(self) -> str:
+    def _sync_turn_runner_config(self) -> str:
         model = str(getattr(self._session_store, "model", None) or "").strip()
         set_model = getattr(self._turn_runner, "set_model", None)
         if model and callable(set_model):
             set_model(model)
+        effort = str(getattr(self._session_store, "reasoning_effort", None) or "").strip()
+        set_effort = getattr(self._turn_runner, "set_reasoning_effort", None)
+        if effort and callable(set_effort):
+            set_effort(effort)
         return model
 
     def set_retry_callback(self, callback) -> None:
@@ -284,7 +288,7 @@ class AgentRuntime:
                     code=type(exc).__name__,
                 ) from exc
 
-            target_model = self._sync_turn_runner_model()
+            target_model = self._sync_turn_runner_config()
             self.discard_pending_inputs()
             return dict(result) if isinstance(result, dict) else {
                 "session_id": getattr(self._session_store, "session_id", None),
@@ -314,7 +318,7 @@ class AgentRuntime:
                     code=type(exc).__name__,
                 ) from exc
 
-            target_model = self._sync_turn_runner_model()
+            target_model = self._sync_turn_runner_config()
             self.discard_pending_inputs()
             return dict(result) if isinstance(result, dict) else {
                 "session_id": getattr(self._session_store, "session_id", None),

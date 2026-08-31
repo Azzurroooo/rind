@@ -23,6 +23,9 @@ from agent.infrastructure.tools.builtin.shell.tool import (
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Rind headless runtime server")
     parser.add_argument("--stdio", action="store_true", help="Use the JSONL standard-stream transport")
+    parser.add_argument("--web", action="store_true", help="Use the WebSocket transport")
+    parser.add_argument("--host", type=str, default="127.0.0.1", help="WebSocket bind host")
+    parser.add_argument("--port", type=int, default=8765, help="WebSocket bind port")
     parser.add_argument("--debug", action="store_true")
     parser.add_argument("--cwd", type=str, default=None, help="Workspace directory for this runtime")
     parser.add_argument("--session", type=str, default=None)
@@ -108,6 +111,7 @@ async def async_main(argv: list[str] | None = None, *, server_class: type[Any]) 
                 background_list=background_list,
                 background_output=background_output,
                 goal_enabled=True,
+                **({"host": args.host, "port": args.port} if getattr(server_class, "network_mode", False) else {}),
             )
             server_started = True
             try:
@@ -160,11 +164,13 @@ async def async_main(argv: list[str] | None = None, *, server_class: type[Any]) 
 
 
 def main(argv: list[str] | None = None, *, server_class: type[Any]) -> int:
-    from agent.runtime.server.stdio import (
-        configure_stdio_server_signals,
-        configure_utf8_stdio,
-    )
+    arguments = list(sys.argv[1:] if argv is None else argv)
+    if "--web" not in arguments:
+        from agent.runtime.server.stdio import (
+            configure_stdio_server_signals,
+            configure_utf8_stdio,
+        )
 
-    configure_stdio_server_signals()
-    configure_utf8_stdio()
-    return asyncio.run(async_main(argv, server_class=server_class))
+        configure_stdio_server_signals()
+        configure_utf8_stdio()
+    return asyncio.run(async_main(arguments, server_class=server_class))

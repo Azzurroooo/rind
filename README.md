@@ -157,6 +157,21 @@ session/update
 
 `session/update` carries live and durable events with `session_id`, `turn_id`, sequence, and durability. You can render the stream, store it, or project it into another product without importing Python internals.
 
+## Web Surface
+
+Start a long-lived worker over WebSocket and connect the browser surface independently:
+
+```bash
+python main.py app-server --web --host 127.0.0.1 --port 8765 --cwd <workspace>
+cd frontend-web
+npm install
+npm run dev -- --host 0.0.0.0
+```
+
+Open `http://localhost:5173`. Closing the browser only closes its WebSocket connection; the worker process and session execution continue running.
+
+Omit `--session-dir` to use the same default `~/.rind/sessions` and session index as the CLI. When using a custom `--session-dir` or `RIND_HOME`, use the same value for both surfaces.
+
 ## Install
 
 ### Prebuilt CLI installers

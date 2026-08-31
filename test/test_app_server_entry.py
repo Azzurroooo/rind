@@ -26,6 +26,20 @@ def test_app_server_command_delegates_to_stdio_entry(monkeypatch):
     assert received[0][0] == ["--stdio", "--cwd", "workspace"]
 
 
+def test_app_server_web_command_selects_web_transport(monkeypatch):
+    received = []
+
+    def fake_app_server(argv, *, server_class):
+        received.append((argv, server_class))
+        return 17
+
+    monkeypatch.setattr("agent.runtime.server.app_server.main", fake_app_server)
+
+    assert rind_main.main(["app-server", "--web", "--port", "9000"]) == 17
+    assert received[0][0] == ["--web", "--port", "9000"]
+    assert received[0][1].__name__ == "WebRuntimeServer"
+
+
 @pytest.mark.parametrize("entrypoint", ("app-server", "stdio-module"))
 def test_app_server_stdio_subprocess_smoke(tmp_path, entrypoint):
     workspace = tmp_path / "workspace"

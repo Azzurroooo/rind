@@ -9,3 +9,4 @@ socksio>=1.0.0
 filelock>=3.13.0
 tiktoken>=0.6.0
 tenacity>=8.2.0
+websockets>=14.0,<17.0

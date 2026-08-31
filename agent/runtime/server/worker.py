@@ -19,6 +19,7 @@ from agent.application.context import CompactionService
 from agent.application.tools import ToolResultNormalizer
 from agent.bootstrap import AgentContainer, SharedRuntimeResources, build_agent_container
 from agent.infrastructure.config import AppSettings
+from agent.infrastructure.config.settings_loader import load_settings
 from agent.infrastructure.llm import OpenAIClientFactory
 from agent.infrastructure.persistence import JsonlSessionStore, ToolOutputStore
 from agent.infrastructure.paths import validate_session_id
@@ -68,6 +69,7 @@ class SessionRepository:
         parent_session_id: str | None = None,
     ) -> dict[str, Any]:
         root = _normalize_workspace_root(workspace_root)
+        workspace_settings = load_settings(root)
         agent_context = discover_agent(root)
         if project_id is None and agent_context:
             project_id = agent_context.project_id
@@ -82,13 +84,14 @@ class SessionRepository:
         store = JsonlSessionStore(
             session_dir=self.session_dir,
             session_id=_new_session_id(),
-            model=self._settings.model,
+            model=workspace_settings.model,
             system_prompt=system_prompt,
             workspace_root=root,
             project_id=project_id,
             owner_agent_id=owner_agent_id,
             session_type=session_type,
             parent_session_id=parent_session_id,
+            reasoning_effort=workspace_settings.reasoning_effort,
         )
         await store.initialize()
         return {

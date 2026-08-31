@@ -7,6 +7,7 @@
 ```mermaid
 flowchart LR
     Surface["frontend-cli / desktop"] -->|JSONL over stdio| Server["agent/runtime/server"]
+    Web["frontend-web"] -->|WebSocket| Server
     Main["main.py app-server"] --> Server
     Server --> Bootstrap["agent/bootstrap/container.py"]
     Bootstrap --> Core["agent/runtime/core"]
@@ -20,13 +21,19 @@ flowchart LR
 python main.py app-server --stdio --cwd <workspace>
 ```
 
+For a long-lived remote worker, start the WebSocket transport instead:
+
+```bash
+python main.py app-server --web --host 127.0.0.1 --port 8765 --cwd <workspace>
+```
+
 `agent/runtime/server/app_server.py` 校验工作区、加载共享 settings、调用 `build_agent_container()`，然后把 runtime 和 session store 交给 `StdioRuntimeServer`。Server 和 core 位于同一个 Runtime Package 内，不存在 server 到 runtime 的额外 RPC。
 
 ## 2. Surface 启动
 
 ### frontend-cli
 
-`frontend-cli/bin/rind.js` 创建 `runtime-client`，源代码模式启动 `python main.py app-server --stdio`，安装包模式启动 `rind-runtime`。Node 进程负责输入编辑、菜单、状态和文本渲染；Python 进程只负责协议与 Agent 执行。
+`frontend-cli/bin/rind.js` 创建 `runtime-client`，源代码模式启动 `python main.py app-server --stdio`，安装包模式启动 `rind-runtime`。`frontend-web` 连接 `--web` 暴露的 WebSocket Worker；浏览器断开不会关闭 Worker。Surface 进程负责输入编辑、菜单、状态和文本渲染；Python 进程只负责协议与 Agent 执行。
 
 ### Desktop
 

@@ -876,8 +876,8 @@ class StdioRuntimeServer:
 
 
 class _WorkerWriter:
-    def __init__(self) -> None:
-        self._writer = JsonlWriter()
+    def __init__(self, writer: Any | None = None) -> None:
+        self._writer = writer or JsonlWriter()
         self._lock = asyncio.Lock()
         self._sequence = 0
 
@@ -902,13 +902,14 @@ class WorkerStdioRuntimeServer:
         background_list: Callable[[str], Any] | None = None,
         background_output: Callable[..., Any] | None = None,
         goal_enabled: bool = True,
+        writer: Any | None = None,
     ):
         self._worker = worker
         self._debug = debug
         self._background_list = background_list
         self._background_output = background_output
         self._goal_enabled = goal_enabled
-        self._writer = _WorkerWriter()
+        self._writer = _WorkerWriter(writer)
         self._slash_router = SlashCommandRouter()
         self._requests: asyncio.Queue[dict[str, Any] | None] = asyncio.Queue()
         self._dispatch_tasks: set[asyncio.Task] = set()
@@ -920,6 +921,12 @@ class WorkerStdioRuntimeServer:
     async def run(self) -> int:
         self._start_stdin_pump()
         return await self._serve()
+
+    async def dispatch(self, request: dict[str, Any]) -> None:
+        await self._dispatch(request)
+
+    def schedule(self, request: dict[str, Any]) -> None:
+        self._schedule_dispatch(request)
 
     def _start_stdin_pump(self) -> None:
         loop = asyncio.get_running_loop()
