@@ -314,6 +314,9 @@ class ExecutionCoordinator:
                 "error_type": str(event.get("error_type") or ""),
                 "duration_ms": int(event.get("duration_ms") or 0),
             })
+            question = current.get("question")
+            if isinstance(question, dict) and question.get("tool_call_id") == tool.get("tool_call_id"):
+                current["question"] = None
         elif event_type == "plan_updated":
             current["plan"] = event.get("plan") if isinstance(event.get("plan"), list) else []
         elif event_type == "user_question_requested":
@@ -368,6 +371,8 @@ class ExecutionCoordinator:
                     async for event in execution.container.runtime.run_turn(**run_kwargs):
                         event_data = event.to_dict()
                         self.update_live_event(event_data)
+                        if event_data.get("type") == "user_question_requested":
+                            self._prepare_user_question(clean, str(event_data.get("tool_call_id") or ""))
                         yield event_data
                 finally:
                     if execution.current_cancel is cancel_source:
@@ -435,18 +440,32 @@ class ExecutionCoordinator:
         execution = self._active.get(clean)
         if execution is None:
             raise LookupError("No pending user question.")
-        future = execution.pending_answers.pop(tool_call_id, None)
+        future = execution.pending_answers.get(tool_call_id)
         if future is None:
             raise LookupError("No pending user question.")
         if not future.done():
             future.set_result(answer)
+        snapshot = self._live.get(clean)
+        question = snapshot.get("question") if isinstance(snapshot, dict) else None
+        if isinstance(question, dict) and question.get("tool_call_id") == tool_call_id:
+            snapshot["question"] = None
+
+    def _prepare_user_question(self, session_id: str, tool_call_id: str) -> None:
+        value = str(tool_call_id or "").strip()
+        if not value:
+            return
+        execution = self._active.get(validate_session_id(session_id))
+        if execution is not None and value not in execution.pending_answers:
+            execution.pending_answers[value] = asyncio.get_running_loop().create_future()
 
     async def _answer_user_question(self, session_id: str, event: UserQuestionRequestedEvent) -> str:
         execution = self._active.get(session_id)
         if execution is None:
             return ""
-        future = asyncio.get_running_loop().create_future()
-        execution.pending_answers[event.tool_call_id] = future
+        future = execution.pending_answers.get(event.tool_call_id)
+        if future is None:
+            future = asyncio.get_running_loop().create_future()
+            execution.pending_answers[event.tool_call_id] = future
         try:
             return await future
         finally:

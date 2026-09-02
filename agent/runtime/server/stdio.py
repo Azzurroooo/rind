@@ -840,7 +840,7 @@ class StdioRuntimeServer:
         params = message.get("params") if isinstance(message.get("params"), dict) else {}
         tool_call_id = str(params.get("tool_call_id") or "")
         answer = str(params.get("answer") or "").strip()
-        future = self._pending_answers.pop(tool_call_id, None)
+        future = self._pending_answers.get(tool_call_id)
         if future is None:
             await self._respond_error(message, "No pending user question.", "QuestionNotFound")
             return
@@ -848,9 +848,16 @@ class StdioRuntimeServer:
             future.set_result(answer)
         await self._respond(message, {"ok": True})
 
+    def _prepare_user_question(self, tool_call_id: str) -> None:
+        value = str(tool_call_id or "").strip()
+        if value and value not in self._pending_answers:
+            self._pending_answers[value] = asyncio.get_running_loop().create_future()
+
     async def _answer_user_question(self, event: UserQuestionRequestedEvent) -> str:
-        future = asyncio.get_running_loop().create_future()
-        self._pending_answers[event.tool_call_id] = future
+        future = self._pending_answers.get(event.tool_call_id)
+        if future is None:
+            future = asyncio.get_running_loop().create_future()
+            self._pending_answers[event.tool_call_id] = future
         try:
             return await future
         finally:
@@ -867,6 +874,8 @@ class StdioRuntimeServer:
         event_session_id = str(event.get("session_id") or "")
         if event_session_id != session_id:
             event = {**event, "session_id": session_id}
+        if event.get("type") == "user_question_requested":
+            self._prepare_user_question(str(event.get("tool_call_id") or ""))
         if self._event_observer is not None:
             callback_result = self._event_observer(event)
             if inspect.isawaitable(callback_result):

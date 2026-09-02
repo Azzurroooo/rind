@@ -51,7 +51,10 @@ export function createRuntimeClient({ url = DEFAULT_URL, onEvent = () => {}, onS
           reject(new Error(`Connection to ${url} closed.`));
         }
         if (socket === current) socket = null;
-        for (const entry of pending.values()) entry.reject(new Error("Runtime connection closed."));
+        for (const entry of pending.values()) {
+          clearRequestTimeout(entry);
+          entry.reject(new Error("Runtime connection closed."));
+        }
         pending.clear();
         onStatus({ state: closedByUser ? "closed" : "disconnected", url });
         if (!closedByUser) scheduleReconnect();
@@ -70,15 +73,22 @@ export function createRuntimeClient({ url = DEFAULT_URL, onEvent = () => {}, onS
     }, delay);
   }
 
-  async function request(method, params = {}) {
+  async function request(method, params = {}, timeoutMs = 0) {
     await connect();
     const requestId = nextRequestId++;
     return new Promise((resolve, reject) => {
-      pending.set(requestId, { resolve, reject });
+      const entry = { resolve, reject, timer: null };
+      if (timeoutMs > 0) {
+        entry.timer = window.setTimeout(() => {
+          if (pending.delete(requestId)) reject(new Error(`Runtime request timed out: ${method}`));
+        }, timeoutMs);
+      }
+      pending.set(requestId, entry);
       try {
         socket.send(JSON.stringify({ kind: "request", request_id: requestId, method, params }));
       } catch (error) {
         pending.delete(requestId);
+        clearRequestTimeout(entry);
         reject(error);
       }
     });
@@ -100,6 +110,7 @@ export function createRuntimeClient({ url = DEFAULT_URL, onEvent = () => {}, onS
     const entry = pending.get(requestId);
     if (!entry) return;
     pending.delete(requestId);
+    clearRequestTimeout(entry);
     if (message.error) {
       const error = new Error(message.error.message || "Runtime request failed.");
       error.type = message.error.type;
@@ -129,6 +140,13 @@ export function createRuntimeClient({ url = DEFAULT_URL, onEvent = () => {}, onS
     socket = null;
     connectPromise = null;
     current?.close();
+  }
+
+  function clearRequestTimeout(entry) {
+    if (entry?.timer) {
+      clearTimeout(entry.timer);
+      entry.timer = null;
+    }
   }
 
   return {

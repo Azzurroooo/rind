@@ -9,7 +9,7 @@ from pathlib import Path
 
 from agent.infrastructure.config import AppSettings
 from agent.infrastructure.team import initialize_team_project
-from agent.runtime.server.worker import RuntimeWorker
+from agent.runtime.server.worker import ExecutionCoordinator, RuntimeWorker
 from agent.runtime.server.protocol import RuntimeMethod
 from agent.runtime.server.stdio import WorkerStdioRuntimeServer
 
@@ -569,12 +569,61 @@ def test_worker_replay_includes_active_live_turn_without_creating_execution():
                 "turn_id": "turn-live",
                 "text": "streaming",
             })
+            worker.execution.update_live_event({
+                "type": "user_question_requested",
+                "session_id": session_id,
+                "turn_id": "turn-live",
+                "tool_call_id": "call-question",
+                "question": "Continue?",
+                "options": [{"label": "yes", "description": "Continue"}],
+            })
+            worker.execution.update_live_event({
+                "type": "tool_result",
+                "session_id": session_id,
+                "turn_id": "turn-live",
+                "tool_call_id": "call-question",
+                "tool_name": "ask_user_question",
+                "status": "completed",
+                "result": "{\"ok\":true}",
+            })
             replay = await worker.replay(session_id)
             active = worker.execution.active_session_ids()
+            question = worker.execution.live_turn(session_id)["question"]
             await worker.close()
-            return replay, active
+            return replay, active, question
 
-    replay, active = asyncio.run(run())
+    replay, active, question = asyncio.run(run())
     assert replay["live_turn"]["turn_id"] == "turn-live"
     assert replay["live_turn"]["assistant_text"] == "streaming"
+    assert question is None
     assert active == set()
+
+
+def test_worker_replays_answer_received_before_question_responder_waits():
+    async def run():
+        execution = ExecutionCoordinator(
+            settings=AppSettings(
+                settings_path=Path("settings.json"),
+                settings_exists=True,
+                model="test-model",
+                api_key="test-key",
+                base_url="https://example.com/v1",
+                reasoning_effort="",
+            ),
+            provider_client_factory=_ProviderFactory(),
+            shared_resources=SimpleNamespace(),
+            repository=SimpleNamespace(),
+            debug=False,
+            enable_goal=False,
+            enable_user_question=True,
+            session_dir=None,
+        )
+        container = SimpleNamespace()
+        active = SimpleNamespace(container=container, pending_answers={})
+        execution._active["session-a"] = active
+        execution._prepare_user_question("session-a", "call-early")
+        await execution.answer_user_question("session-a", "call-early", "yes")
+        event = SimpleNamespace(tool_call_id="call-early")
+        return await execution._answer_user_question("session-a", event)
+
+    assert asyncio.run(run()) == "yes"

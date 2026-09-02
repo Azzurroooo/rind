@@ -24,12 +24,16 @@ class _Execution:
         self.started = asyncio.Event()
         self.finished = asyncio.Event()
         self.turn_id = ""
+        self.answers = []
 
     def active_session_ids(self):
         return set()
 
     def active_turn_id(self, _session_id):
         return self.turn_id
+
+    async def answer_user_question(self, session_id, tool_call_id, answer):
+        self.answers.append((session_id, tool_call_id, answer))
 
     async def run_turn(self, _session_id, **_kwargs):
         self.turn_id = "turn-web"
@@ -101,3 +105,30 @@ def test_web_disconnect_does_not_cancel_a_running_turn():
             await asyncio.wait_for(worker.execution.finished.wait(), timeout=1)
 
     asyncio.run(run())
+
+
+def test_web_user_question_response_reaches_worker_execution():
+    async def run():
+        worker = _Worker()
+        runtime = WebRuntimeServer(worker)
+        async with websockets.serve(runtime._handle_connection, "127.0.0.1", 0) as server:
+            port = server.sockets[0].getsockname()[1]
+            async with websockets.connect(f"ws://127.0.0.1:{port}") as websocket:
+                await websocket.send(json.dumps({"kind": "request", "request_id": 1, "method": "initialize"}))
+                await websocket.recv()
+                await websocket.send(json.dumps({
+                    "kind": "request",
+                    "request_id": 2,
+                    "method": "rind/user-question/respond",
+                    "params": {
+                        "session_id": "session-web",
+                        "tool_call_id": "call-question",
+                        "answer": "yes",
+                    },
+                }))
+                response = json.loads(await websocket.recv())
+                return response, worker.execution.answers
+
+    response, answers = asyncio.run(run())
+    assert response["result"] == {"ok": True}
+    assert answers == [("session-web", "call-question", "yes")]

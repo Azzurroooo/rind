@@ -139,6 +139,19 @@ def test_question_response_completes_pending_future():
     assert asyncio.run(run()) == "yes"
 
 
+def test_question_response_before_responder_registration_is_replayed():
+    async def run():
+        server = StdioRuntimeServer(_Runtime(), _Session())
+        server._prepare_user_question("call-early")
+        await server._receive_user_answer(
+            {"request_id": 2, "method": "rind/user-question/respond", "params": {"tool_call_id": "call-early", "answer": "yes"}}
+        )
+        event = type("Event", (), {"tool_call_id": "call-early"})()
+        return await server._answer_user_question(event)
+
+    assert asyncio.run(run()) == "yes"
+
+
 def test_jsonl_writer_uses_compact_json(capsys):
     async def run():
         await JsonlWriter().send({"kind": "event", "event": {"type": "turn_completed"}})

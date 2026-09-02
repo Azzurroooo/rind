@@ -38,6 +38,7 @@ export default function App() {
   const workspaceRef = useRef("");
   const infoRef = useRef({});
   const currentModelRef = useRef("");
+  const resolvedQuestionRef = useRef("");
   const clientRef = useRef(null);
   workspaceRef.current = selectedWorkspace;
   infoRef.current = info;
@@ -110,7 +111,12 @@ export default function App() {
         setStats(event.stats && typeof event.stats === "object" ? event.stats : {});
         return;
       case "user_question_requested":
-        setQuestion({ toolCallId: event.tool_call_id, question: event.question, options: Array.isArray(event.options) ? event.options : [] });
+        {
+          const nextQuestion = normalizeQuestion(event, infoRef.current.session_id);
+          if (nextQuestion && questionKey(nextQuestion) !== resolvedQuestionRef.current) {
+            setQuestion(nextQuestion);
+          }
+        }
         return;
       case "queued_input_delivered":
         appendMessage({ role: "system", content: `Steering input delivered: ${event.input || ""}` });
@@ -137,6 +143,7 @@ export default function App() {
   function finishTurn() {
     setActive(false);
     setTurnId("");
+    setQuestion(null);
     const pendingDraft = draftRef.current;
     draftRef.current = "";
     setDraft("");
@@ -471,18 +478,26 @@ export default function App() {
     setDraft(liveDraft);
     setMessages((current) => mergeLiveTools(current, liveTurn.tools));
     setPlan(Array.isArray(liveTurn.plan) ? liveTurn.plan : []);
-    setQuestion(liveTurn.question || null);
+    const liveQuestion = normalizeQuestion(liveTurn.question, infoRef.current.session_id);
+    setQuestion(liveQuestion && questionKey(liveQuestion) !== resolvedQuestionRef.current ? liveQuestion : null);
     setActive(liveTurn.status === "running");
     setTurnId(String(liveTurn.turn_id || ""));
   }
 
   async function answerQuestion(answer) {
-    if (!question) return;
+    if (!question) return false;
     try {
-      await clientRef.current.request(methods.userQuestionRespond, { session_id: info.session_id, tool_call_id: question.toolCallId, answer });
+      await clientRef.current.request(methods.userQuestionRespond, {
+        session_id: question.sessionId || info.session_id,
+        tool_call_id: question.toolCallId,
+        answer: String(answer || "").trim(),
+      }, 15_000);
+      resolvedQuestionRef.current = questionKey(question);
       setQuestion(null);
+      return true;
     } catch (error) {
       appendMessage({ role: "system", content: `Question response failed: ${error.message}`, tone: "error" });
+      return false;
     }
   }
 
@@ -502,13 +517,60 @@ export default function App() {
       <Inspector info={info} stats={stats} goal={goal} plan={plan} models={info.models || []} effort={info.reasoning_effort || ""} connection={connection} onModel={setModel} onEffort={setEffort} onRefreshModels={() => refreshModels(info.session_id)} onCompact={compact} compacting={compacting} currentModel={currentModel} />
     </div>
     {connection !== "connected" && <div className="connection-banner"><AlertCircle size={16} /><span>{connectionMessage || "Start the Rind worker with --web to connect."}</span><button className="icon-button subtle" title="Retry connection" onClick={reconnect}><RefreshCw size={15} /></button></div>}
-    {question && <QuestionDialog question={question} onAnswer={answerQuestion} onDismiss={() => setQuestion(null)} />}
+    {question && <QuestionDialog key={questionKey(question)} question={question} onAnswer={answerQuestion} />}
   </div>;
 }
 
-function QuestionDialog({ question, onAnswer, onDismiss }) {
+function QuestionDialog({ question, onAnswer }) {
+  const options = Array.isArray(question.options) ? question.options : [];
+  const [selected, setSelected] = useState(null);
   const [custom, setCustom] = useState("");
-  return <div className="modal-backdrop"><div className="question-dialog"><div className="question-heading"><div><span className="eyebrow">WORKER QUESTION</span><h2><MessageCircleQuestion size={18} /> {question.question || "The worker needs an answer"}</h2></div><button className="icon-button subtle" title="Dismiss question" onClick={onDismiss}><X size={17} /></button></div><div className="question-options">{question.options.map((option) => <button key={option.label || option.value} onClick={() => onAnswer(option.value || option.label)}><span>{option.label || option.value}</span><Check size={15} /></button>)}</div><div className="custom-answer"><input value={custom} onChange={(event) => setCustom(event.target.value)} placeholder="Type a custom answer" onKeyDown={(event) => event.key === "Enter" && custom.trim() && onAnswer(custom.trim())} /><button className="send-button" onClick={() => custom.trim() && onAnswer(custom.trim())} disabled={!custom.trim()}><Check size={16} /></button></div></div></div>;
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState("");
+  const customSelected = selected?.type === "custom";
+  const canConfirm = selected && (!customSelected || custom.trim());
+
+  async function submit(answer) {
+    if (submitting) return;
+    setError("");
+    setSubmitting(true);
+    try {
+      if (!await onAnswer(answer)) setError("答案未发送成功，请重试。");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  return <div className="modal-backdrop">
+    <div className="question-dialog">
+      <div className="question-heading">
+        <div>
+          <span className="eyebrow">WORKER QUESTION</span>
+          <h2><MessageCircleQuestion size={18} /> {question.question || "The worker needs an answer"}</h2>
+        </div>
+      </div>
+      <div className="question-options">
+        {options.map((option, index) => {
+          const value = String(option?.value || option?.label || "");
+          const active = selected?.type === "option" && selected.value === value;
+          return <button className={active ? "selected" : ""} key={`${value}-${index}`} onClick={() => setSelected({ type: "option", value })} disabled={submitting}>
+            <span><strong>{option?.label || value}</strong>{option?.description && <small>{option.description}</small>}</span>
+            {active && <Check size={15} />}
+          </button>;
+        })}
+        <button className={customSelected ? "selected custom-option" : "custom-option"} onClick={() => setSelected({ type: "custom" })} disabled={submitting}>
+          <span><strong>自定义答案</strong><small>输入自己的回答</small></span>
+          {customSelected && <Check size={15} />}
+        </button>
+      </div>
+      {customSelected && <div className="custom-answer"><input autoFocus value={custom} onChange={(event) => setCustom(event.target.value)} placeholder="输入自定义答案" disabled={submitting} onKeyDown={(event) => event.key === "Enter" && canConfirm && submit(custom.trim())} /></div>}
+      {error && <div className="question-error">{error}</div>}
+      <div className="question-actions">
+        <button className="question-close" onClick={() => submit("")} disabled={submitting}><X size={15} /> 关闭</button>
+        <button className="question-confirm" onClick={() => submit(customSelected ? custom.trim() : selected.value)} disabled={!canConfirm || submitting}>{submitting ? <LoaderCircle className="spin" size={15} /> : <Check size={15} />} 确认</button>
+      </div>
+    </div>
+  </div>;
 }
 
 function upsertTool(current, patch) {
@@ -587,4 +649,20 @@ function formatTurnFailure(event) {
   const message = String(event?.error || "Runtime error");
   const details = [event?.error_type, event?.error_source].filter(Boolean).join(" · ");
   return details ? `Turn failed: ${message} (${details})` : `Turn failed: ${message}`;
+}
+
+function normalizeQuestion(value, fallbackSessionId = "") {
+  if (!value || typeof value !== "object") return null;
+  const toolCallId = String(value.toolCallId || value.tool_call_id || "").trim();
+  if (!toolCallId) return null;
+  return {
+    sessionId: String(value.sessionId || value.session_id || fallbackSessionId || "").trim(),
+    toolCallId,
+    question: String(value.question || ""),
+    options: Array.isArray(value.options) ? value.options : [],
+  };
+}
+
+function questionKey(question) {
+  return `${question.sessionId}:${question.toolCallId}`;
 }
