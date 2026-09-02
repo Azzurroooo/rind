@@ -362,7 +362,7 @@ def test_initialize_response_includes_resume_preview_when_history_exists(capsys)
     result = message["result"]
     assert message["request_id"] == 7
     assert result["protocol_version"] == "2"
-    assert result["version"] == "0.6.0"
+    assert result["version"] == "0.6.1"
     assert result["capabilities"] == list(CAPABILITIES)
     assert result["methods"] == list(CORE_METHODS)
     assert result["session_id"] == "s1"

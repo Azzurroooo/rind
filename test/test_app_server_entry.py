@@ -103,7 +103,7 @@ def test_app_server_stdio_subprocess_smoke(tmp_path, entrypoint):
     assert initialize["kind"] == "response"
     assert initialize["request_id"] == "initialize-1"
     assert initialize["result"]["protocol_version"] == "2"
-    assert initialize["result"]["version"] == "0.6.0"
+    assert initialize["result"]["version"] == "0.6.1"
     assert shutdown == {
         "kind": "response",
         "request_id": "shutdown-1",
