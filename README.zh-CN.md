@@ -90,6 +90,33 @@ Rind 的 API 配置只读取 `~/.rind/settings.json`，Desktop 与 CLI 使用同
 
 ### 运行
 
+#### 一键部署 Web
+
+安装 Docker Desktop 或 Docker Engine（含 Compose v2）后，在仓库根目录执行：
+
+```bash
+docker compose up -d --build
+```
+
+然后打开 `http://localhost:8080`。该命令会构建生产版 Web 前端，并在同一套 Compose 服务中启动长期运行的 WebSocket worker。当前目录挂载为工作目录，`./.rind` 用于保存配置和会话。停止服务：
+
+```bash
+docker compose down
+```
+
+可以在 `.env` 中覆盖默认路径和端口：
+
+```dotenv
+RIND_WORKSPACE=/absolute/path/to/workspace
+RIND_HOME=/absolute/path/to/rind-data
+RIND_WEB_PORT=8080
+RIND_WEB_BIND=127.0.0.1
+RIND_PYPI_INDEX_URL=https://pypi.org/simple
+RIND_DEBIAN_MIRROR=deb.debian.org
+```
+
+只有在主机已配置认证和 TLS 时，才将 `RIND_WEB_BIND` 改为 `0.0.0.0`。
+
 Node 前端 CLI：
 
 ```bash

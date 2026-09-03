@@ -1,0 +1,43 @@
+services:
+  worker:
+    build:
+      context: .
+      dockerfile: frontend-web/deploy/Dockerfile
+      target: runtime
+      args:
+        DEBIAN_MIRROR: ${RIND_DEBIAN_MIRROR:-deb.debian.org}
+        PYPI_INDEX_URL: ${RIND_PYPI_INDEX_URL:-https://pypi.org/simple}
+    command:
+      - app-server
+      - --web
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8765"
+      - --cwd
+      - /workspace
+    environment:
+      HOME: /root
+      RIND_HOME: /root/.rind
+    volumes:
+      - ${RIND_WORKSPACE:-.}:/workspace
+      - ${RIND_HOME:-./.rind}:/root/.rind
+    restart: unless-stopped
+    stop_grace_period: 30s
+    healthcheck:
+      test: ["CMD", "python", "/app/deploy/healthcheck.py"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+
+  web:
+    build:
+      context: .
+      dockerfile: frontend-web/deploy/Dockerfile
+      target: web
+    depends_on:
+      worker:
+        condition: service_healthy
+    ports:
+      - "${RIND_WEB_BIND:-127.0.0.1}:${RIND_WEB_PORT:-8080}:8080"
+    restart: unless-stopped

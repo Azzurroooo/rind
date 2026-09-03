@@ -1,11 +1,17 @@
 const DEFAULT_URL = "ws://localhost:8765";
 
-export function initialRuntimeUrl() {
-  const queryUrl = new URLSearchParams(window.location.search).get("ws");
-  return queryUrl || localStorage.getItem("rind.wsUrl") || import.meta.env.VITE_RIND_WS_URL || DEFAULT_URL;
+function productionRuntimeUrl() {
+  if (!import.meta.env.PROD || !window.location.host) return DEFAULT_URL;
+  const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+  return `${protocol}//${window.location.host}/ws`;
 }
 
-export function createRuntimeClient({ url = DEFAULT_URL, onEvent = () => {}, onStatus = () => {}, onOpen = () => {} } = {}) {
+export function initialRuntimeUrl() {
+  const queryUrl = new URLSearchParams(window.location.search).get("ws");
+  return queryUrl || localStorage.getItem("rind.wsUrl") || import.meta.env.VITE_RIND_WS_URL || productionRuntimeUrl();
+}
+
+export function createRuntimeClient({ url = productionRuntimeUrl(), onEvent = () => {}, onStatus = () => {}, onOpen = () => {} } = {}) {
   let socket = null;
   let closedByUser = false;
   let reconnectTimer = null;

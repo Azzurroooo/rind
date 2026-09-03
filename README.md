@@ -159,6 +159,29 @@ session/update
 
 ## Web Surface
 
+### One-command deployment
+
+With Docker Desktop or Docker Engine + Compose v2 installed, run from the repository root:
+
+```bash
+docker compose up -d --build
+```
+
+Then open `http://localhost:8080`. This starts the production web surface and the long-lived WebSocket worker together. The current directory is mounted as the workspace and `./.rind` stores settings and sessions. Stop it with `docker compose down`.
+
+Use a `.env` file when the defaults need changing:
+
+```dotenv
+RIND_WORKSPACE=/absolute/path/to/workspace
+RIND_HOME=/absolute/path/to/rind-data
+RIND_WEB_PORT=8080
+RIND_WEB_BIND=127.0.0.1
+RIND_PYPI_INDEX_URL=https://pypi.org/simple
+RIND_DEBIAN_MIRROR=deb.debian.org
+```
+
+Use `RIND_WEB_BIND=0.0.0.0` only when the host is protected by authentication and TLS.
+
 Start a long-lived worker over WebSocket and connect the browser surface independently:
 
 ```bash
