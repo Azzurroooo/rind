@@ -127,10 +127,16 @@ jobs:
       - name: Create CLI release notes
         working-directory: rind-distribution
         run: python scripts/create_release_notes.py --source ../rind --cli-only
+      - name: Read release version
+        id: version
+        working-directory: rind
+        shell: bash
+        run: echo "version=$(python -c 'from agent.version import __version__; print(__version__)')" >> "$GITHUB_OUTPUT"
       - name: Publish CLI GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ env.RELEASE_TAG }}
           name: Rind ${{ env.RELEASE_TAG }}
+          body_path: rind-distribution/artifacts/release/${{ steps.version.outputs.version }}/RELEASE_NOTES.md
           files: |
             rind-distribution/artifacts/release/*/*
