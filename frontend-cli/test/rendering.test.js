@@ -1103,6 +1103,48 @@ test("questionMenuFrame dims the custom placeholder while editing an empty answe
   assert.equal(frame.cursor.column, 4);
 });
 
+test("questionMenuFrame cursor follows the editor cursor in the custom answer row", () => {
+  const legacy = questionMenuFrame([], 0, "my answer", true);
+
+  assert.deepEqual(
+    questionMenuFrame([], 0, "my answer", true, undefined, 76, { line: 0, column: 9 }).cursor,
+    legacy.cursor,
+  );
+  assert.deepEqual(
+    questionMenuFrame([], 0, "my answer", true, undefined, 76, { line: 0, column: 2 }).cursor,
+    { line: 1, column: 6 },
+  );
+  assert.deepEqual(
+    questionMenuFrame([], 0, "my answer", true, undefined, 76, { line: 0, column: 0 }).cursor,
+    { line: 1, column: 4 },
+  );
+  assert.deepEqual(
+    questionMenuFrame([], 0, "你好吗", true, undefined, 76, { line: 0, column: 1 }).cursor,
+    { line: 1, column: 6 },
+  );
+  assert.deepEqual(
+    questionMenuFrame([], 0, "", true, undefined, 76, { line: 0, column: 0 }).cursor,
+    { line: 1, column: 4 },
+  );
+});
+
+test("questionMenuFrame maps multiline custom answers onto the flattened row", () => {
+  const frame = questionMenuFrame([], 0, "first\nsecond", true, undefined, 76, { line: 1, column: 3 });
+  const plain = frame.text.replace(/\x1b\[[0-9;]*m/g, "");
+
+  assert.match(plain, /› first second/);
+  assert.deepEqual(frame.cursor, { line: 1, column: 13 });
+});
+
+test("questionMenuFrame wraps long custom answers onto continuation rows", () => {
+  const frame = questionMenuFrame([], 0, "abcdefghij", true, undefined, 12, { line: 0, column: 9 });
+  const plain = frame.text.replace(/\x1b\[[0-9;]*m/g, "");
+
+  assert.match(plain, /abcdefgh/);
+  assert.match(plain, /ij/);
+  assert.deepEqual(frame.cursor, { line: 2, column: 5 });
+});
+
 test("questionMenuFrame wraps complete labels and descriptions with distinct formatting", () => {
   const label = "A very long option label that must remain complete";
   const description = "A very long description that must remain complete and wrap across terminal lines";

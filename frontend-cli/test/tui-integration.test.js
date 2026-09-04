@@ -459,21 +459,31 @@ test("hardware caret stays on the input line while a turn runs", async () => {
   state.display.activityFrame += 1;
   tui.requestRender();
   await settle(virtual);
-  assert.ok(writes.some((w) => w.includes("\x1b[?25h")), "working state keeps the caret visible");
+  assert.ok(!writes.some((w) => w.includes("\x1b[?25l")), "working state never hides the caret");
+  assert.equal(
+    virtual.getViewport().findIndex((line) => line.includes("▷")),
+    virtual.getCursorPosition().y,
+    "working state keeps the caret on the input line",
+  );
 
   // Spinner ticks keep it on the input line.
   writes.length = 0;
   state.display.activityFrame += 1;
   tui.requestRender();
   await settle(virtual);
-  assert.ok(writes.some((w) => w.includes("\x1b[?25h")), "spinner ticks keep the caret visible");
+  assert.ok(!writes.some((w) => w.includes("\x1b[?25l")), "spinner ticks never hide the caret");
+  assert.equal(
+    virtual.getViewport().findIndex((line) => line.includes("▷")),
+    virtual.getCursorPosition().y,
+    "spinner ticks keep the caret on the input line",
+  );
 
   // Turn completes: caret remains on the input line.
   writes.length = 0;
   state.turn.active = false;
   tui.requestRender();
   await settle(virtual);
-  assert.ok(writes.some((w) => w.includes("\x1b[?25h")), "idle frames reveal the caret");
+  assert.ok(!writes.some((w) => w.includes("\x1b[?25l")), "idle frames never hide the caret");
   const viewport = virtual.getViewport();
   const promptRowIndex = viewport.findIndex((line) => line.includes("▷"));
   assert.equal(promptRowIndex, virtual.getCursorPosition().y, "caret parked on the input line");

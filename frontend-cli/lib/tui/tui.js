@@ -5,6 +5,8 @@ export const CURSOR_MARKER = "\x1b_pi:c\x07";
 
 const SYNC_START = "\x1b[?2026h";
 const SYNC_END = "\x1b[?2026l";
+const SHOW_CURSOR = "\x1b[?25h";
+const HIDE_CURSOR = "\x1b[?25l";
 const LINE_RESET = "\x1b[0m";
 const PASTE_ENABLE = "\x1b[?2004h";
 const PASTE_DISABLE = "\x1b[?2004l";
@@ -40,6 +42,7 @@ export function createTui(options = {}) {
   let previousHeight = 0;
   let cursorRow = 0;
   let hardwareCursorRow = 0;
+  let hardwareCursorCol = 0;
   let maxLinesRendered = 0;
   let previousViewportTop = 0;
 
@@ -260,6 +263,7 @@ export function createTui(options = {}) {
       previousHeight = -1;
       cursorRow = 0;
       hardwareCursorRow = 0;
+      hardwareCursorCol = -1;
       maxLinesRendered = 0;
       previousViewportTop = 0;
     }
@@ -292,14 +296,15 @@ export function createTui(options = {}) {
         }
         buffer += writableLine(newLines[index], width);
       }
-      buffer += SYNC_END;
-      write(buffer);
       cursorRow = Math.max(0, newLines.length - 1);
       hardwareCursorRow = cursorRow;
+      hardwareCursorCol = -1;
+      buffer += hardwareCursorSequence(cursorPos, newLines);
+      buffer += SYNC_END;
+      write(buffer);
       maxLinesRendered = clear ? newLines.length : Math.max(maxLinesRendered, newLines.length);
       const bufferLength = Math.max(height, newLines.length);
       previousViewportTop = Math.max(0, bufferLength - height);
-      positionHardwareCursor(cursorPos, newLines);
       previousLines = newLines;
       previousWidth = width;
       previousHeight = height;
@@ -352,7 +357,7 @@ export function createTui(options = {}) {
     const appendStart = appendedLines && firstChanged === previousLines.length && firstChanged > 0;
 
     if (firstChanged === -1) {
-      positionHardwareCursor(cursorPos, newLines);
+      emitCursorSequence(cursorPos, newLines);
       previousViewportTop = prevViewportTop;
       previousHeight = height;
       return;
@@ -373,6 +378,9 @@ export function createTui(options = {}) {
           return;
         }
         let buffer = SYNC_START;
+        cursorRow = targetRow;
+        hardwareCursorRow = targetRow;
+        hardwareCursorCol = -1;
         const lineDiff = computeLineDiff(targetRow);
         if (lineDiff > 0) {
           buffer += `\x1b[${lineDiff}B`;
@@ -394,12 +402,11 @@ export function createTui(options = {}) {
         if (moveBack > 0) {
           buffer += `\x1b[${moveBack}A`;
         }
+        buffer += hardwareCursorSequence(cursorPos, newLines);
         buffer += SYNC_END;
         write(buffer);
-        cursorRow = targetRow;
-        hardwareCursorRow = targetRow;
       }
-      positionHardwareCursor(cursorPos, newLines);
+      emitCursorSequence(cursorPos, newLines);
       previousLines = newLines;
       previousWidth = width;
       previousHeight = height;
@@ -461,14 +468,15 @@ export function createTui(options = {}) {
       buffer += `\x1b[${extraLines}A`;
     }
 
+    cursorRow = Math.max(0, newLines.length - 1);
+    hardwareCursorRow = finalCursorRow;
+    hardwareCursorCol = -1;
+    maxLinesRendered = Math.max(maxLinesRendered, newLines.length);
+    previousViewportTop = Math.max(prevViewportTop, finalCursorRow - height + 1);
+    buffer += hardwareCursorSequence(cursorPos, newLines);
     buffer += SYNC_END;
     write(buffer);
 
-    cursorRow = Math.max(0, newLines.length - 1);
-    hardwareCursorRow = finalCursorRow;
-    maxLinesRendered = Math.max(maxLinesRendered, newLines.length);
-    previousViewportTop = Math.max(prevViewportTop, finalCursorRow - height + 1);
-    positionHardwareCursor(cursorPos, newLines);
     previousLines = newLines;
     previousWidth = width;
     previousHeight = height;
@@ -510,38 +518,49 @@ export function createTui(options = {}) {
     return null;
   }
 
-  function positionHardwareCursor(cursorPos, lines) {
-    const totalLines = lines.length;
-    if (!cursorPos || totalLines <= 0) {
-      if (cursorVisible) {
-        hideCursor();
+  function hardwareCursorSequence(cursorPos, lines) {
+    if (!cursorPos || lines.length <= 0) {
+      if (!cursorVisible) {
+        return "";
       }
-      return;
+      cursorVisible = false;
+      return HIDE_CURSOR;
     }
-    let targetRow;
-    let targetCol;
-    targetRow = Math.max(0, Math.min(cursorPos.row, totalLines - 1));
-    targetCol = Math.max(0, cursorPos.col);
+    const targetRow = Math.max(0, Math.min(cursorPos.row, lines.length - 1));
+    const targetCol = Math.max(0, cursorPos.col);
+    let sequence = "";
     const rowDelta = targetRow - hardwareCursorRow;
-    let buffer = "";
     if (rowDelta > 0) {
-      buffer += `\x1b[${rowDelta}B`;
+      sequence += `\x1b[${rowDelta}B`;
     } else if (rowDelta < 0) {
-      buffer += `\x1b[${-rowDelta}A`;
+      sequence += `\x1b[${-rowDelta}A`;
     }
-    buffer += `\x1b[${targetCol + 1}G`;
-    write(buffer);
+    if (hardwareCursorCol !== targetCol) {
+      sequence += `\x1b[${targetCol + 1}G`;
+    }
+    if (!cursorVisible) {
+      sequence += SHOW_CURSOR;
+    }
     hardwareCursorRow = targetRow;
-    showCursor();
+    hardwareCursorCol = targetCol;
+    cursorVisible = true;
+    return sequence;
+  }
+
+  function emitCursorSequence(cursorPos, lines) {
+    const sequence = hardwareCursorSequence(cursorPos, lines);
+    if (sequence) {
+      write(`${SYNC_START}${sequence}${SYNC_END}`);
+    }
   }
 
   function hideCursor() {
-    write("\x1b[?25l");
+    write(HIDE_CURSOR);
     cursorVisible = false;
   }
 
   function showCursor() {
-    write("\x1b[?25h");
+    write(SHOW_CURSOR);
     cursorVisible = true;
   }
 

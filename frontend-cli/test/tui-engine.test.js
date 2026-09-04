@@ -200,6 +200,94 @@ test("hardware cursor hides when no component emits a focus marker", async () =>
   tui.stop();
 });
 
+function createRecordingHarness({ columns = 20, rows = 6 } = {}) {
+  const virtual = createVirtualOutput({ columns, rows });
+  const writes = [];
+  const recordingOutput = Object.assign(Object.create(virtual.output), {
+    write(chunk) {
+      writes.push(String(chunk));
+      return virtual.output.write(chunk);
+    },
+  });
+  const input = createVirtualInput();
+  const tui = createTui({
+    input,
+    output: recordingOutput,
+    renderIntervalMs: 0,
+    setTimeout: (fn) => setTimeout(fn, 0),
+    clearTimeout,
+  });
+  return { tui, virtual, writes };
+}
+
+test("cursor repositioning rides inside the frame's synchronized write", async () => {
+  const { tui, virtual, writes } = createRecordingHarness();
+  const line = new StaticText(`first${CURSOR_MARKER}`);
+  tui.addChild(line);
+  tui.start();
+  await settle(virtual);
+
+  writes.length = 0;
+  line.text = `second${CURSOR_MARKER}`;
+  tui.requestRender();
+  await settle(virtual);
+  assert.equal(writes.length, 1, "changed frames emit exactly one write");
+  const write = writes[0];
+  assert.ok(write.startsWith("\x1b[?2026h"), "write opens the synchronized region");
+  assert.ok(write.endsWith("\x1b[?2026l"), "write closes the synchronized region");
+  assert.ok(/\x1b\[\d+G/.test(write), "cursor column sequence is part of the frame write");
+  tui.stop();
+});
+
+test("unchanged frames with a stationary marker emit no output", async () => {
+  const { tui, virtual, writes } = createRecordingHarness();
+  tui.addChild(new StaticText(`hello${CURSOR_MARKER}`));
+  tui.start();
+  await settle(virtual);
+
+  writes.length = 0;
+  tui.requestRender(true);
+  await settle(virtual);
+  assert.equal(writes.length, 0, "idle frames must not re-emit cursor sequences");
+  tui.stop();
+});
+
+test("a moved marker repositions once without re-showing the cursor", async () => {
+  const { tui, virtual, writes } = createRecordingHarness();
+  const line = new StaticText(`hello${CURSOR_MARKER}`);
+  tui.addChild(line);
+  tui.start();
+  await settle(virtual);
+
+  writes.length = 0;
+  line.text = `he${CURSOR_MARKER}llo`;
+  tui.requestRender();
+  await settle(virtual);
+  assert.equal(writes.length, 1, "a moved marker emits one sequence");
+  assert.ok(writes[0].includes("\x1b[3G"), "sequence targets the marker column");
+  assert.ok(!writes[0].includes("\x1b[?25h"), "visible cursor is not re-shown");
+  assert.equal(virtual.getCursorPosition().x, 2);
+  tui.stop();
+});
+
+test("removing the marker hides the cursor in a single sequence", async () => {
+  const { tui, virtual, writes } = createRecordingHarness();
+  const line = new StaticText(`hello${CURSOR_MARKER}`);
+  tui.addChild(line);
+  tui.start();
+  await settle(virtual);
+
+  writes.length = 0;
+  line.text = "hello";
+  tui.requestRender();
+  await settle(virtual);
+  assert.equal(writes.length, 1, "a removed marker emits one sequence");
+  assert.ok(writes[0].includes("\x1b[?2026h"), "hide sequence is synchronized");
+  assert.ok(writes[0].includes("\x1b[?25l"), "sequence hides the cursor");
+  assert.ok(!writes[0].includes("\x1b[?25h"), "sequence does not re-show the cursor");
+  tui.stop();
+});
+
 test("styled lines carry no styles across rows", async () => {
   const { tui, virtual } = createHarness({ columns: 40, rows: 6 });
   class Styled {

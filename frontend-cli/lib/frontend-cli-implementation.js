@@ -500,6 +500,10 @@ function composeFrame(width = process.stdout.columns || 80) {
   }
   if (session.mode === "question") {
     const editing = session.questionState.isEditing();
+    if (editing) {
+      session.editor.setViewportWidth(width);
+    }
+    const editorCursor = editing ? session.editor.cursorPosition() : null;
     const menu = questionMenuFrame(
       session.questionState.options(),
       session.questionState.selectedIndex(),
@@ -507,12 +511,13 @@ function composeFrame(width = process.stdout.columns || 80) {
       editing,
       CUSTOM_ANSWER_LABEL,
       width,
+      editorCursor,
     );
     return {
       showCaret,
       prompt: mainPromptText(width),
       inputText: session.question,
-      cursor: editing ? session.editor.cursorPosition() : { line: 0, column: session.question.length },
+      cursor: editorCursor ?? { line: 0, column: session.question.length },
       menuText: menu.text.trimEnd(),
       menuCursor: editing ? menu.cursor : null,
     };

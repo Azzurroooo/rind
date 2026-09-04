@@ -1,4 +1,4 @@
-import { clipCells, middleClipCells, textWidth, wrapTextCells } from "./text-width.js";
+import { clipCells, graphemes, middleClipCells, textWidth, wrapTextCells } from "./text-width.js";
 import { paint, flavorSwatch } from "./theme.js";
 import { homedir } from "node:os";
 
@@ -197,6 +197,7 @@ export function questionMenuFrame(
   editing = false,
   customLabel = "Type your own answer",
   width = 76,
+  editorCursor = null,
 ) {
   const entries = [
     ...(Array.isArray(options) ? options : []),
@@ -230,14 +231,24 @@ export function questionMenuFrame(
       lastPushedLine = lines.length - 1;
     }
     if (active && editing && isCustom) {
-      const cursorLine = customText ? Math.max(0, lastPushedLine) : Math.max(0, firstPushedLine);
-      const cursorColumn = customText
-        ? textWidth(lines[cursorLine])
-        : firstPrefixWidth;
-      cursor = {
-        line: cursorLine,
-        column: Math.max(0, cursorColumn),
-      };
+      if (editorCursor) {
+        cursor = customAnswerCursor(
+          customText,
+          editorCursor,
+          Math.max(0, firstPushedLine),
+          firstPrefixWidth,
+          Math.max(1, width - 4),
+        );
+      } else {
+        const cursorLine = customText ? Math.max(0, lastPushedLine) : Math.max(0, firstPushedLine);
+        const cursorColumn = customText
+          ? textWidth(lines[cursorLine])
+          : firstPrefixWidth;
+        cursor = {
+          line: cursorLine,
+          column: Math.max(0, cursorColumn),
+        };
+      }
     }
     if (option.description) {
       const descriptionLines = wrapQuestionLines(option.description, Math.max(1, width - 6));
@@ -255,6 +266,23 @@ export function questionMenuFrame(
 function wrapQuestionLines(value, width) {
   const text = String(value || "").replace(/\r?\n/g, " ").trim();
   return wrapTextCells(text, Math.max(1, width), Math.max(1, width)).map((chunk) => chunk.text);
+}
+
+function customAnswerCursor(customText, editorCursor, firstRow, prefixWidth, labelWidth) {
+  const rawLines = String(customText || "").split("\n");
+  const line = Math.min(rawLines.length - 1, Math.max(0, Math.floor(Number(editorCursor.line) || 0)));
+  const column = Math.min(
+    graphemes(rawLines[line]).length,
+    Math.max(0, Math.floor(Number(editorCursor.column) || 0)),
+  );
+  const before = [...rawLines.slice(0, line), graphemes(rawLines[line]).slice(0, column).join("")]
+    .join(" ")
+    .trim();
+  const chunks = wrapTextCells(before, Math.max(1, labelWidth), Math.max(1, labelWidth));
+  return {
+    line: firstRow + chunks.length - 1,
+    column: prefixWidth + textWidth(chunks[chunks.length - 1].text),
+  };
 }
 
 export function backgroundMonitorText(tasks = [], selectedIndex = 0, selectedTask = null, width = 76) {
