@@ -5,7 +5,7 @@ from __future__ import annotations
 import inspect
 from typing import Any
 
-from agent.infrastructure.config import Config
+from agent.infrastructure.config.settings_loader import DEFAULT_MODEL, load_settings
 
 
 def normalize_model_name(value: object) -> str | None:
@@ -22,7 +22,7 @@ async def set_active_model(runtime: Any, session: Any, model: str) -> dict[str, 
     if clean is None:
         raise ValueError("Model name is required.")
 
-    default_model = str(Config.DEFAULT_MODEL or "").strip()
+    default_model = _default_model(session)
     active = await _update_active_model(runtime, session, clean)
     return {
         "model": clean,
@@ -35,6 +35,14 @@ async def set_active_model(runtime: Any, session: Any, model: str) -> dict[str, 
         "session": active["session"],
         "active_updated": active["runtime"] or active["session"],
     }
+
+
+def _default_model(session: Any) -> str:
+    workspace_root = getattr(session, "workspace_root", None)
+    try:
+        return load_settings(workspace_root).model
+    except (OSError, ValueError):
+        return DEFAULT_MODEL
 
 
 async def set_active_reasoning_effort(runtime: Any, session: Any, effort: str) -> dict[str, object]:

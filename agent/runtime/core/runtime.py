@@ -16,8 +16,7 @@ from agent.application.skill_selection import SkillTurnCoordinator
 from agent.runtime.core.turn_runner import TurnRunner
 from agent.domain.cancellation import CancellationToken
 from agent.domain.errors import PersistenceError
-from agent.domain.events import GoalContinuedEvent, QueuedInputDeliveredEvent, RuntimeEvent, TurnStartedEvent, event_meta
-from agent.prompts import build_goal_continuation_prompt
+from agent.domain.events import QueuedInputDeliveredEvent, RuntimeEvent, TurnStartedEvent, event_meta
 
 
 MAX_QUEUED_INPUTS = 4
@@ -194,7 +193,6 @@ class AgentRuntime:
     async def set_model(self, model: str) -> dict[str, bool]:
         """Switch the active chat model and persist the session metadata when supported."""
         await self.initialize()
-        runtime_updated = bool(self._turn_runner.set_model(model))
         try:
             await self._session_store.update_model(model)
         except asyncio.CancelledError:
@@ -203,22 +201,27 @@ class AgentRuntime:
                 raise PersistenceError(
                     f"Failed to persist model update: {exc}",
                     code=type(exc).__name__,
-            ) from exc
+                ) from exc
+        runtime_updated = False
+        if not self.turn_active:
+            runtime_updated = bool(self._turn_runner.set_model(model))
         return {"runtime": runtime_updated, "session": True}
 
     async def set_reasoning_effort(self, effort: str) -> dict[str, bool]:
         """Switch the active reasoning effort and persist the session metadata when supported."""
         await self.initialize()
-        runtime_updated = bool(self._turn_runner.set_reasoning_effort(effort))
         try:
             await self._session_store.update_reasoning_effort(effort)
         except asyncio.CancelledError:
             raise
         except Exception as exc:
             raise PersistenceError(
-                f"Failed to persist reasoning effort update: {exc}",
-                code=type(exc).__name__,
-            ) from exc
+                    f"Failed to persist reasoning effort update: {exc}",
+                    code=type(exc).__name__,
+                ) from exc
+        runtime_updated = False
+        if not self.turn_active:
+            runtime_updated = bool(self._turn_runner.set_reasoning_effort(effort))
         return {"runtime": runtime_updated, "session": True}
 
     async def get_goal(self) -> dict[str, str] | None:
@@ -384,8 +387,6 @@ class AgentRuntime:
                 yield started_event
 
                 total_duration_ms = 0
-                goal_round = 0
-                pass_transients: list[dict] | None = None
                 while True:
                     runner_kwargs = {
                         "session": self._session_store,
@@ -394,11 +395,7 @@ class AgentRuntime:
                         "take_steering": self._take_steering,
                     }
                     context_messages = [dict(message) for message in self._runtime_system_messages]
-                    if pass_transients is None:
-                        context_messages.extend(dict(message) for message in (transient_system_messages or []))
-                    else:
-                        context_messages.extend(dict(message) for message in pass_transients)
-                        pass_transients = None
+                    context_messages.extend(dict(message) for message in (transient_system_messages or []))
                     if context_messages:
                         runner_kwargs["transient_system_messages"] = context_messages
                     if resume:
@@ -428,19 +425,6 @@ class AgentRuntime:
                                 mode="follow_up",
                             )
                             continue
-                        goal = await self._current_goal()
-                        if goal and goal.get("status") == "active":
-                            goal_round += 1
-                            yield GoalContinuedEvent(**event_meta(self._session_store, turn_id), round=goal_round)
-                            pass_transients = [
-                                {
-                                    "role": "system",
-                                    "content": build_goal_continuation_prompt(goal["objective"]),
-                                    "_context_kind": "goal",
-                                }
-                            ]
-                            continue
-
                     if terminal_event.type == "turn_failed":
                         await self._stop_active_goal("blocked")
                     elif terminal_event.type == "turn_cancelled":

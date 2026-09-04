@@ -11,6 +11,7 @@ import subprocess
 import sys
 
 from agent.runtime.server.commands.formatting import tail_clip_text
+from agent.infrastructure.config import AppSettings, load_settings
 
 from .router import SlashCommandContext
 
@@ -32,7 +33,7 @@ class DoctorReport:
 
 @dataclass(frozen=True, slots=True)
 class ConfigStatus:
-    config: object | None
+    settings: AppSettings | None
     error: str = ""
 
 
@@ -69,7 +70,7 @@ def build_doctor_report(context: SlashCommandContext) -> DoctorReport:
 
 
 def _build_checks(context: SlashCommandContext) -> list[DoctorCheck]:
-    config_status = _load_config_status()
+    config_status = _load_config_status(context.workspace_root)
 
     checks = [
         _python_check(),
@@ -84,11 +85,9 @@ def _build_checks(context: SlashCommandContext) -> list[DoctorCheck]:
     return checks
 
 
-def _load_config_status() -> ConfigStatus:
+def _load_config_status(workspace_root: str | None) -> ConfigStatus:
     try:
-        from agent.infrastructure.config import Config
-
-        return ConfigStatus(Config)
+        return ConfigStatus(load_settings(workspace_root))
     except Exception as exc:
         return ConfigStatus(None, str(exc))
 
@@ -122,27 +121,27 @@ def _git_check(workspace_root: str | None) -> DoctorCheck:
 def _settings_check(status: ConfigStatus) -> DoctorCheck:
     if status.error:
         return DoctorCheck("fail", "Settings", f"{_settings_path_guess()} (invalid: {status.error})")
-    config = status.config
-    path = str(getattr(config, "SETTINGS_PATH", "") or "unknown")
-    state = "found" if bool(getattr(config, "SETTINGS_EXISTS", False)) else "missing"
+    settings = status.settings
+    path = str(settings.settings_path if settings else _settings_path_guess())
+    state = "found" if settings and settings.settings_exists else "missing"
     severity = "ok" if state == "found" else "warn"
     return DoctorCheck(severity, "Settings", f"{path} ({state})")
 
 
 def _api_key_check(status: ConfigStatus) -> DoctorCheck:
-    config = status.config
-    if not config:
+    settings = status.settings
+    if not settings:
         return DoctorCheck("warn", "API key", "not checked because settings are invalid")
-    if getattr(config, "OPENAI_API_KEY", ""):
+    if settings.api_key:
         return DoctorCheck("ok", "API key", "set")
     return DoctorCheck("fail", "API key", "unset")
 
 
 def _model_check(status: ConfigStatus) -> DoctorCheck:
-    config = status.config
-    if not config:
+    settings = status.settings
+    if not settings:
         return DoctorCheck("warn", "Model", "not checked because settings are invalid")
-    model = str(getattr(config, "DEFAULT_MODEL", "") or "").strip()
+    model = str(settings.model or "").strip()
     if model:
         return DoctorCheck("ok", "Model", model)
     return DoctorCheck("fail", "Model", "unset")

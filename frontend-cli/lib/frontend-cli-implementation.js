@@ -168,6 +168,7 @@ const runtimeClient = createRuntimeClient({
     displayState.lastEventSequence = 0;
     turnStateData.active = false;
     turnStateData.interruptRequested = false;
+    clearActivityTimer();
     inputActions?.clearPendingInputs();
     if (!wasClosing) {
       runtimeState.failure = error;
@@ -206,7 +207,6 @@ const runtimeController = createCliRuntimeController({
   requireInitialization: requireRuntimeInitialization,
   state: cliState,
   getCommands: () => commandController,
-  getTurnController: () => turnController,
   getTaskMonitor: () => taskMonitorController,
   getCompactContextState: () => compactContextState,
   askModelMenu: (...args) => inputActions.askModelMenu(...args),
@@ -227,7 +227,6 @@ const request = runtimeController.request;
 turnController = createTurnController({
   request,
   state: turnState,
-  refreshGoalState: runtimeController.refreshGoalState,
   onTurnStart: () => {
     displayState.assistantHeaderShown = false;
   },
@@ -322,6 +321,9 @@ const eventController = createEventController({
     get activeTurn() {
       return turnStateData.active;
     },
+    get activeGoal() {
+      return sessionState.info.goal;
+    },
     debug: cliArgs.includes("--debug"),
   },
   input: { answerQuestion: (...args) => inputActions.answerQuestion(...args) },
@@ -337,9 +339,6 @@ const eventController = createEventController({
     log: logOutput,
     debug: (text) => writeErrorOutput(`${text}\n`),
     updateGoal: updateGoalState,
-    setGoalChasing: (enabled) => {
-      displayState.goalChasing = Boolean(enabled);
-    },
     setStats: (stats) => {
       displayState.stats = stats;
     },
@@ -442,25 +441,41 @@ async function renderEvent(message) {
     return;
   }
   if (message?.event?.type === "turn_started") {
-    if (turnStateData.id && String(message.turn_id || "") !== turnStateData.id) {
+    const nextTurnId = String(message.turn_id || "");
+    if (turnStateData.id && nextTurnId !== turnStateData.id) {
       return;
     }
-    turnStateData.id = String(message.turn_id || "");
+    clearActivityTimer();
+    turnStateData.id = nextTurnId;
     turnStateData.active = Boolean(turnStateData.id);
+    turnStateData.interruptRequested = false;
+    displayState.assistantHeaderShown = false;
+    refreshInputState();
   }
   const result = await eventController.handle(message);
   if (["turn_completed", "turn_failed", "turn_cancelled"].includes(message?.event?.type)) {
     turnStateData.id = "";
+    await runtimeController.refreshGoalState();
+    const goalActive = sessionState.info.goal?.status === "active";
+    turnStateData.active = goalActive;
+    turnStateData.interruptRequested = false;
+    if (!goalActive) {
+      clearActivityTimer();
+    }
+    refreshInputState();
   }
   return result;
 }
 
 function restoreLiveTurn(value) {
   if (!value || typeof value !== "object") return;
+  if (String(value.status || "") !== "running") return;
   const turnId = String(value.turn_id || "");
   if (!turnId) return;
+  clearActivityTimer();
   turnStateData.id = turnId;
   turnStateData.active = true;
+  turnStateData.interruptRequested = false;
   displayState.assistantHeaderShown = false;
   const text = String(value.assistant_text || "");
   if (text) outputController.assistantAppend(text);

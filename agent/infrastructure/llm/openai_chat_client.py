@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import inspect
 import json
 import logging
 import os
@@ -68,6 +69,14 @@ class OpenAIChatClient(ChatClient):
 
     def set_retry_callback(self, callback) -> None:
         self.on_retry = callback
+
+    async def close(self) -> None:
+        close = getattr(self._client, "close", None)
+        if not callable(close):
+            return
+        result = close()
+        if inspect.isawaitable(result):
+            await result
 
     def _before_sleep_log(self, retry_state: RetryCallState):
         if self.on_retry and retry_state.outcome and retry_state.outcome.failed:

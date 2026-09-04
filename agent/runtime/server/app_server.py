@@ -81,14 +81,6 @@ async def async_main(argv: list[str] | None = None, *, server_class: type[Any]) 
             _write_startup_error("Session error", exc, args.debug)
             return 1
 
-    try:
-        Config.ensure_user_settings_template()
-        settings = Config.reload(workspace_root)
-        validate_settings(settings)
-    except Exception as exc:
-        _write_startup_error("Configuration error", exc, args.debug)
-        return 1
-
     if getattr(server_class, "worker_mode", False):
         from agent.runtime.server.worker import RuntimeWorker
 
@@ -96,7 +88,6 @@ async def async_main(argv: list[str] | None = None, *, server_class: type[Any]) 
         server_started = False
         try:
             worker = RuntimeWorker(
-                settings=settings,
                 workspace_root=workspace_root,
                 session_id=args.session,
                 resume_latest=args.resume_latest,
@@ -129,6 +120,9 @@ async def async_main(argv: list[str] | None = None, *, server_class: type[Any]) 
     previous_cwd = Path.cwd()
     container = None
     try:
+        Config.ensure_user_settings_template()
+        settings = Config.reload(workspace_root)
+        validate_settings(settings)
         os.chdir(workspace_root)
         container = build_agent_container(
             settings=settings,
@@ -158,6 +152,10 @@ async def async_main(argv: list[str] | None = None, *, server_class: type[Any]) 
         if container is not None:
             try:
                 await container.session_store.discard_if_empty()
+            except Exception as exc:
+                _write_startup_error("Shutdown error", exc, args.debug)
+            try:
+                await container.chat_client.close()
             except Exception as exc:
                 _write_startup_error("Shutdown error", exc, args.debug)
         os.chdir(previous_cwd)

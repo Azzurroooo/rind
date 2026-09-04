@@ -21,7 +21,6 @@ from agent.domain.events import (
     AssistantDeltaEvent,
     AssistantMessageCompletedEvent,
     ContextBuiltEvent,
-    GoalContinuedEvent,
     PlanUpdatedEvent,
     QueuedInputDeliveredEvent,
     ToolInputDeltaEvent,
@@ -302,7 +301,7 @@ async def test_async_runtime_facade_passes_transient_system_messages():
 
 
 @pytest.mark.asyncio
-async def test_async_runtime_continues_active_goal_until_terminal_status():
+async def test_async_runtime_completes_one_turn_with_active_goal_unchanged():
     class GoalSession:
         session_id = "goal-session"
 
@@ -336,8 +335,6 @@ async def test_async_runtime_continues_active_goal_until_terminal_status():
 
         async def run_turn(self, session, transient_system_messages=None, **_kwargs):
             self.calls.append(transient_system_messages)
-            if len(self.calls) == 2:
-                await self.session.set_goal_status("complete")
             yield TurnCompletedEvent(turn_id="goal-turn")
 
     session = GoalSession()
@@ -347,16 +344,12 @@ async def test_async_runtime_continues_active_goal_until_terminal_status():
         async for event in AgentRuntime(runner, session, goal_enabled=True).run_turn(query="start")
     ]
 
-    assert len(runner.calls) == 2
+    assert len(runner.calls) == 1
     assert runner.calls[0] is None or not any(
         message.get("_context_kind") == "goal" for message in runner.calls[0]
     )
-    assert "finish the release" in runner.calls[1][-1]["content"]
-    goal_continued_events = [event for event in events if isinstance(event, GoalContinuedEvent)]
-    assert [event.round for event in goal_continued_events] == [1]
-    assert events.index(goal_continued_events[0]) < events.index(events[-1])
     assert isinstance(events[-1], TurnCompletedEvent)
-    assert session.goal["status"] == "complete"
+    assert session.goal["status"] == "active"
 
 
 @pytest.mark.asyncio
@@ -413,7 +406,6 @@ async def test_async_runtime_delivers_follow_up_before_goal_continuation():
     delivered = [event for event in events if isinstance(event, QueuedInputDeliveredEvent)]
     assert len(delivered) == 1
     assert delivered[0].input == "user follow-up"
-    assert not [event for event in events if isinstance(event, GoalContinuedEvent)]
 
 
 @pytest.mark.asyncio

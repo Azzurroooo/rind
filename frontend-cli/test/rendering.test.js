@@ -24,7 +24,6 @@ import {
   modelListErrorText,
   modelMenuText,
   planUpdatedLine,
-  goalContinuedLine,
   sessionMenuText,
   sessionSwitchedText,
   modelUsageText,
@@ -900,10 +899,6 @@ test("planUpdatedLine renders an empty plan and clips long steps", () => {
   } finally {
     process.stdout.columns = originalColumns;
   }
-});
-
-test("goalContinuedLine renders the chase round with the progress glyph", () => {
-  assert.equal(goalContinuedLine(3), "◌ Goal continued · round 3");
 });
 
 test("toolResultLine appends inline file change diff for successful file tools", () => {

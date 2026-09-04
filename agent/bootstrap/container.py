@@ -27,7 +27,6 @@ from agent.prompts import build_system_prompt
 class SharedRuntimeResources:
     """Worker-scoped resources without session-bound mutable state."""
 
-    provider_async_client: Any
     tool_result_normalizer: ToolResultNormalizer
     stream_parser: MessageStreamParser
     compaction_service: CompactionService
@@ -199,8 +198,6 @@ def build_agent_container(
         async_client=(
             provider_async_client
             if provider_async_client is not None
-            else shared_resources.provider_async_client
-            if shared_resources is not None
             else provider_client_factory.create_async_client()
         ),
         model=model,

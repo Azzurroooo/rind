@@ -117,22 +117,11 @@ class _ModelList:
             raise StopAsyncIteration from exc
 
 
-class _ProviderFactory:
-    def __init__(self):
-        self.create_count = 0
-
-    def create_async_client(self):
-        self.create_count += 1
-        return _ModelClient()
-
-
 class _Worker:
     def __init__(self):
         self.sessions = {session_id: _ExecutionContainer(session_id) for session_id in ("A", "B")}
         self.session_id = "A"
         self.default_model = "default-model"
-        self.provider_client_factory = _ProviderFactory()
-        self.model_client = _ModelClient()
         self.execution = _Execution(self)
 
     async def initialize(self):
@@ -150,7 +139,7 @@ class _Worker:
         return {"session_id": session_id, "model": execution.session.model, "workspace_root": "."}
 
     async def close(self):
-        await self.model_client.close()
+        return None
 
 
 class _Execution:
@@ -241,18 +230,41 @@ def test_worker_routes_concurrent_sessions_without_crossed_events():
     assert worker.execution.active_session_ids() == set()
 
 
-def test_worker_model_list_reuses_injected_client():
+def test_worker_model_list_creates_and_closes_workspace_client(monkeypatch):
+    clients = []
+
+    class Factory:
+        def __init__(self, _settings):
+            pass
+
+        def create_async_client(self):
+            client = _ModelClient()
+            clients.append(client)
+            return client
+
+    async def settings_for(_session_id):
+        return AppSettings(
+            settings_path=Path("settings.json"),
+            settings_exists=True,
+            model="default-model",
+            api_key="test-key",
+            base_url="https://example.com/v1",
+            reasoning_effort="",
+        )
+
     async def run():
         worker, server, messages = _server_with_messages()
+        worker.repository = SimpleNamespace(settings_for=settings_for)
+        monkeypatch.setattr("agent.runtime.server.stdio.OpenAIClientFactory", Factory)
         await server._dispatch({"request_id": "models-1", "method": RuntimeMethod.MODEL_LIST, "params": {}})
         await server._dispatch({"request_id": "models-2", "method": RuntimeMethod.MODEL_LIST, "params": {}})
-        return worker, messages
+        return messages
 
-    worker, messages = asyncio.run(run())
+    messages = asyncio.run(run())
     responses = [message for message in messages if message.get("kind") == "response"]
     assert len(responses) == 2
-    assert worker.provider_client_factory.create_count == 0
-    assert worker.model_client.close_count == 0
+    assert len(clients) == 2
+    assert all(client.close_count == 1 for client in clients)
 
 
 def test_background_monitoring_survives_turn_execution_release():
@@ -354,7 +366,6 @@ def test_worker_shutdown_interrupts_all_active_sessions():
         if message.get("kind") == "response" and message.get("request_id") in {"prompt-A", "prompt-B"}
     }
     assert set(prompt_responses) == {"prompt-A", "prompt-B"}
-    assert worker.model_client.close_count == 1
 
 
 def test_replay_does_not_create_active_execution():
@@ -372,7 +383,6 @@ def test_replay_does_not_create_active_execution():
                 reasoning_effort="",
             )
             worker = RuntimeWorker(
-                settings=settings,
                 workspace_root=str(workspace),
                 session_dir=str(root / "sessions"),
                 enable_goal=False,
@@ -427,7 +437,6 @@ def test_worker_create_session_uses_workspace_settings_model_and_effort():
                 reasoning_effort="low",
             )
             worker = RuntimeWorker(
-                settings=settings,
                 workspace_root=str(workspace),
                 session_dir=str(root / "sessions"),
                 enable_goal=False,
@@ -463,7 +472,6 @@ def test_worker_team_session_binding_matches_execution_context():
             )
             session_dir = root / "sessions"
             worker = RuntimeWorker(
-                settings=settings,
                 workspace_root=str(workspace),
                 session_dir=str(session_dir),
                 enable_goal=False,
@@ -509,7 +517,6 @@ def test_worker_reopens_delegated_session_with_original_binding():
                 reasoning_effort="",
             )
             worker = RuntimeWorker(
-                settings=settings,
                 workspace_root=str(source),
                 session_dir=str(root / "sessions"),
                 enable_goal=False,
@@ -551,7 +558,6 @@ def test_worker_replay_includes_active_live_turn_without_creating_execution():
                 reasoning_effort="",
             )
             worker = RuntimeWorker(
-                settings=settings,
                 workspace_root=str(workspace),
                 session_dir=str(root / "sessions"),
                 enable_goal=False,
@@ -602,15 +608,6 @@ def test_worker_replay_includes_active_live_turn_without_creating_execution():
 def test_worker_replays_answer_received_before_question_responder_waits():
     async def run():
         execution = ExecutionCoordinator(
-            settings=AppSettings(
-                settings_path=Path("settings.json"),
-                settings_exists=True,
-                model="test-model",
-                api_key="test-key",
-                base_url="https://example.com/v1",
-                reasoning_effort="",
-            ),
-            provider_client_factory=_ProviderFactory(),
             shared_resources=SimpleNamespace(),
             repository=SimpleNamespace(),
             debug=False,
@@ -627,3 +624,60 @@ def test_worker_replays_answer_received_before_question_responder_waits():
         return await execution._answer_user_question("session-a", event)
 
     assert asyncio.run(run()) == "yes"
+
+
+def test_worker_goal_continuation_runs_distinct_turns_without_user_messages():
+    async def run():
+        class Repository:
+            def __init__(self):
+                self.goal = {"objective": "finish the release", "status": "active"}
+
+            async def get_goal(self, _session_id):
+                return dict(self.goal)
+
+            async def set_goal_status(self, status):
+                self.goal["status"] = status
+                return dict(self.goal)
+
+        repository = Repository()
+        execution = ExecutionCoordinator(
+            shared_resources=SimpleNamespace(),
+            repository=repository,
+            debug=False,
+            enable_goal=True,
+            enable_user_question=False,
+            session_dir=None,
+        )
+        turns = []
+        events = []
+
+        async def run_turn(_session_id, **kwargs):
+            turn_id = f"turn-{len(turns) + 1}"
+            turns.append(kwargs)
+            events.append({"type": "turn_started", "session_id": "session-a", "turn_id": turn_id})
+            yield events[-1]
+            terminal = {"type": "turn_completed", "session_id": "session-a", "turn_id": turn_id}
+            events.append(terminal)
+            yield terminal
+            if len(turns) == 2:
+                repository.goal["status"] = "complete"
+
+        async def sink(event):
+            events.append(event)
+
+        execution.run_turn = run_turn
+        execution.set_event_sink(sink)
+        started = await execution.start_goal_continuation("session-a")
+        await next(iter(execution._goal_tasks.values()))
+        return started, turns, events, repository.goal
+
+    started, turns, events, goal = asyncio.run(run())
+    assert started is True
+    assert len(turns) == 2
+    assert all(turn["query"] is None for turn in turns)
+    assert all(turn["continuation"] is True for turn in turns)
+    assert [event["type"] for event in events if event["type"] == "turn_started"] == [
+        "turn_started",
+        "turn_started",
+    ]
+    assert goal["status"] == "complete"

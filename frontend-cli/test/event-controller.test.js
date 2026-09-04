@@ -133,13 +133,12 @@ test("event controller delivers queued input and clears pending input on termina
   assert.equal(clears, 1);
 });
 
-test("event controller logs goal continuation and toggles the chasing state", async () => {
+test("event controller ignores legacy goal continuation events", async () => {
   const logged = [];
   const chasing = [];
   const controller = createEventController({
     output: {
       log: (text) => logged.push(typeof text === "function" ? text() : text),
-      setGoalChasing: (enabled) => chasing.push(enabled),
       closeAssistant() {},
       clearQueuedInputs() {},
       clearCompactContext() {},
@@ -149,7 +148,6 @@ test("event controller logs goal continuation and toggles the chasing state", as
   await controller.handle({ kind: "event", event: { type: "goal_continued", round: 2 } });
   await controller.handle({ kind: "event", event: { type: "turn_completed" } });
 
-  assert.match(logged[0], /Goal continued/);
-  assert.match(logged[0], /round 2/);
-  assert.deepEqual(chasing, [true, false]);
+  assert.deepEqual(logged, ["─ Worked for 0ms"]);
+  assert.deepEqual(chasing, []);
 });

@@ -38,7 +38,7 @@ function createHarness({ activeTurn = false } = {}) {
   return { calls, logs, state, controller, resolveRequest: () => resolveRequest?.({}) };
 }
 
-test("turn controller starts a turn and clears active state when it settles", async () => {
+test("turn controller keeps activity until the runtime emits a terminal event", async () => {
   const harness = createHarness();
   harness.controller.submit("hello");
   assert.equal(harness.state.activeTurn, true);
@@ -47,7 +47,7 @@ test("turn controller starts a turn and clears active state when it settles", as
 
   harness.resolveRequest();
   await new Promise((resolve) => setImmediate(resolve));
-  assert.equal(harness.state.activeTurn, false);
+  assert.equal(harness.state.activeTurn, true);
 });
 
 test("active turns steer by default and queue follow-ups explicitly", async () => {

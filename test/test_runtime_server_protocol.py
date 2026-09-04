@@ -306,7 +306,7 @@ def test_turn_start_preserves_original_input_text(capsys):
     assert runtime.received_query == "  preserve surrounding text  "
 
 
-def test_goal_continuation_allows_empty_turn_input(capsys):
+def test_goal_continuation_requires_a_regular_prompt(capsys):
     class Runtime(_Runtime):
         async def get_goal(self):
             return {"objective": "finish the release", "status": "active"}
@@ -337,7 +337,7 @@ def test_goal_continuation_allows_empty_turn_input(capsys):
     asyncio.run(run())
 
     messages = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
-    assert messages[-1]["result"] == {"ok": True, "session_id": "s1", "turn_id": "goal-turn"}
+    assert messages[-1]["error"]["type"] == "InvalidRequest"
 
 
 def test_initialize_response_includes_resume_preview_when_history_exists(capsys):

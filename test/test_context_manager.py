@@ -113,6 +113,17 @@ async def test_context_manager_appends_pending_messages() -> None:
 
 
 @pytest.mark.asyncio
+async def test_context_manager_gives_empty_goal_continuation_a_model_user_boundary() -> None:
+    result = await ContextManager().build_messages_async(
+        session=QueryOnlySession([{"role": "system", "content": "sys"}]),
+        transient_system_messages=[{"role": "system", "content": "goal", "_context_kind": "goal"}],
+    )
+
+    assert result.messages[-1]["role"] == "user"
+    assert result.messages[-1]["content"] == "Continue working toward the active goal using the instructions above."
+
+
+@pytest.mark.asyncio
 async def test_context_manager_build_is_stable_and_has_no_summary_side_effects() -> None:
     session_messages = [{"role": "system", "content": "sys"}]
     for index in range(8):

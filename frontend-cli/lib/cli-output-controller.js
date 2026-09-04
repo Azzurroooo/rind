@@ -43,9 +43,7 @@ export function createCliOutputController({ state, terminalUi, transcript }) {
       running,
       label: state.display.activeCompact
         ? "Compacting"
-        : state.display.goalChasing
-          ? "Goal-Chasing"
-          : "Working",
+        : "Working",
       frame: state.display.activityFrame,
       elapsedMs: running ? Date.now() - state.display.activityStartedAt : 0,
       pendingInputs: state.input.pending,
@@ -80,10 +78,9 @@ export function createCliOutputController({ state, terminalUi, transcript }) {
   }
 
   function clearActivityTimer() {
-    if (!state.display.activityTimer) {
-      return;
+    if (state.display.activityTimer) {
+      clearInterval(state.display.activityTimer);
     }
-    clearInterval(state.display.activityTimer);
     state.display.activityTimer = null;
     state.display.activityFrame = 0;
     state.display.activityStartedAt = 0;

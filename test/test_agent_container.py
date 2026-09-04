@@ -79,7 +79,6 @@ def test_container_reuses_worker_safe_resources() -> None:
     )
     provider_client_factory = FakeProviderClientFactory()
     shared = SharedRuntimeResources(
-        provider_async_client=provider_client_factory.client,
         tool_result_normalizer=ToolResultNormalizer(),
         stream_parser=MessageStreamParser(),
         compaction_service=CompactionService(),
@@ -93,7 +92,7 @@ def test_container_reuses_worker_safe_resources() -> None:
             shared_resources=shared,
         )
 
-    assert container.chat_client._client is shared.provider_async_client
+    assert container.chat_client._client is provider_client_factory.client
     assert container.tool_processor._tool_result_normalizer is shared.tool_result_normalizer
     assert container.turn_runner._stream_parser is shared.stream_parser
     assert container.turn_runner._compaction_service is shared.compaction_service

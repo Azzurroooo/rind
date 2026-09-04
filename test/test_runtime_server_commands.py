@@ -14,7 +14,7 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from agent.runtime.server.commands import SlashCommandContext, SlashCommandInfo, SlashCommandRouter
 from agent.runtime.server.commands.git_status import GitPromptStatus
-from agent.infrastructure.config import Config
+from agent.infrastructure.config import AppSettings, Config
 from agent.infrastructure.persistence.jsonl_session_store import JsonlSessionStore
 from agent.infrastructure.skills.repository import SkillRepository
 from agent.infrastructure.team import initialize_team_project
@@ -544,6 +544,15 @@ async def test_config_does_not_leak_api_key(monkeypatch) -> None:
     monkeypatch.setattr(Config, "MODEL_REASONING_EFFORT", "xhigh")
     monkeypatch.setattr(Config, "SETTINGS_PATH", r"C:\Users\admin\.rind\settings.json")
     monkeypatch.setattr(Config, "SETTINGS_EXISTS", True)
+    settings = AppSettings(
+        settings_path=Path(r"C:\Users\admin\.rind\settings.json"),
+        settings_exists=True,
+        model="test-model",
+        api_key="secret-value",
+        base_url="https://example.com/v1",
+        reasoning_effort="xhigh",
+    )
+    monkeypatch.setattr("agent.runtime.server.commands.features.config.load_settings", lambda _: settings)
 
     result = await SlashCommandRouter().execute("/config", _context())
 
@@ -574,6 +583,15 @@ async def test_doctor_reports_setup_without_leaking_api_key(monkeypatch, tmp_pat
     monkeypatch.setattr(Config, "DEFAULT_MODEL", "test-model")
     monkeypatch.setattr(Config, "SETTINGS_PATH", str(tmp_path / "settings.json"))
     monkeypatch.setattr(Config, "SETTINGS_EXISTS", True)
+    settings = AppSettings(
+        settings_path=tmp_path / "settings.json",
+        settings_exists=True,
+        model="test-model",
+        api_key="secret-value",
+        base_url="https://example.com/v1",
+        reasoning_effort="",
+    )
+    monkeypatch.setattr("agent.runtime.server.commands.diagnostics.load_settings", lambda _: settings)
 
     result = await SlashCommandRouter().execute("/doctor", _context(session=SessionWithRoot()))
 

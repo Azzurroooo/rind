@@ -14,6 +14,8 @@ from typing import Any
 from agent.runtime.core import InputQueueError
 from agent.domain.cancellation import CancellationTokenSource
 from agent.domain.events import UserQuestionRequestedEvent
+from agent.infrastructure.config import validate_settings
+from agent.infrastructure.llm import OpenAIClientFactory
 from agent.infrastructure.paths import validate_session_id
 from agent.version import __version__
 from agent.runtime.server.commands import SlashCommandContext, SlashCommandResult, SlashCommandRouter
@@ -42,6 +44,15 @@ class JsonlWriter:
         async with self._lock:
             sys.stdout.write(line + "\n")
             sys.stdout.flush()
+
+
+async def _close_client(client: Any) -> None:
+    close = getattr(client, "close", None)
+    if not callable(close):
+        return
+    result = close()
+    if inspect.isawaitable(result):
+        await result
 
 
 def configure_utf8_stdio() -> None:
@@ -353,21 +364,12 @@ class StdioRuntimeServer:
                 raw_query = params.get("query")
             query = str(raw_query or "")
             resume = params.get("resume") is True
-            goal_continuation = params.get("goal_continuation") is True
-            if not query.strip() and not goal_continuation and not resume:
+            if not query.strip() and not resume:
                 await self._respond_error(request, "session/prompt requires input.", "InvalidRequest")
                 return
-            if resume and (query.strip() or goal_continuation):
-                await self._respond_error(request, "resume cannot include input or goal continuation.", "InvalidRequest")
+            if resume and query.strip():
+                await self._respond_error(request, "resume cannot include input.", "InvalidRequest")
                 return
-            if goal_continuation:
-                if not self._goal_enabled:
-                    await self._respond_error(request, "Goal support is unavailable.", "UnsupportedOperation")
-                    return
-                goal = await self._runtime.get_goal()
-                if not goal or goal.get("status") != "active":
-                    await self._respond_error(request, "No active goal to continue.", "InvalidRequest")
-                    return
             transient_system_messages = params.get("transient_system_messages")
             if not isinstance(transient_system_messages, list):
                 transient_system_messages = None
@@ -618,12 +620,7 @@ class StdioRuntimeServer:
         return str(getattr(item, "id", "") or "").strip()
 
     async def _close_client(self, client: Any) -> None:
-        close = getattr(client, "close", None)
-        if not callable(close):
-            return
-        result = close()
-        if inspect.isawaitable(result):
-            await result
+        await _close_client(client)
 
     async def _execute_slash(self, request: dict[str, Any]) -> None:
         params = request.get("params") if isinstance(request.get("params"), dict) else {}
@@ -926,6 +923,9 @@ class WorkerStdioRuntimeServer:
         self._stopping = False
         self._shutdown_request: dict[str, Any] | None = None
         self._shutdown_response_sent = False
+        set_event_sink = getattr(self._worker.execution, "set_event_sink", None)
+        if callable(set_event_sink):
+            set_event_sink(self._send_event)
 
     async def run(self) -> int:
         self._start_stdin_pump()
@@ -1131,21 +1131,12 @@ class WorkerStdioRuntimeServer:
             raw_query = params.get("query")
         query = str(raw_query or "")
         resume = params.get("resume") is True
-        goal_continuation = params.get("goal_continuation") is True
-        if not query.strip() and not goal_continuation and not resume:
+        if not query.strip() and not resume:
             await self._respond_error(request, "session/prompt requires input.", "InvalidRequest")
             return
-        if resume and (query.strip() or goal_continuation):
-            await self._respond_error(request, "resume cannot include input or goal continuation.", "InvalidRequest")
+        if resume and query.strip():
+            await self._respond_error(request, "resume cannot include input.", "InvalidRequest")
             return
-        if goal_continuation:
-            if not self._goal_enabled:
-                await self._respond_error(request, "Goal support is unavailable.", "UnsupportedOperation")
-                return
-            goal = await self._worker.repository.get_goal(session_id)
-            if not goal or goal.get("status") != "active":
-                await self._respond_error(request, "No active goal to continue.", "InvalidRequest")
-                return
         transient_system_messages = params.get("transient_system_messages")
         if not isinstance(transient_system_messages, list):
             transient_system_messages = None
@@ -1278,15 +1269,21 @@ class WorkerStdioRuntimeServer:
         else:
             session_id = (await self._worker.initialize())["session_id"]
         info = await self._worker.session(session_id)
-        client = self._worker.model_client
-        models = await self._fetch_model_ids(client)
-        current_model = str(info.get("model") or self._worker.default_model)
+        settings = await self._worker.repository.settings_for(session_id)
+        validate_settings(settings)
+        client = OpenAIClientFactory(settings).create_async_client()
+        try:
+            models = await self._fetch_model_ids(client)
+        finally:
+            await _close_client(client)
+        default_model = settings.model
+        current_model = str(info.get("model") or default_model)
         await self._respond(
             request,
             {
                 "models": self._merge_models(models, current_model),
                 "current_model": current_model,
-                "default_model": self._worker.default_model,
+                "default_model": default_model,
             },
         )
 
@@ -1330,9 +1327,7 @@ class WorkerStdioRuntimeServer:
             return
         raw_input = str(params.get("input") or "").strip()
         command = raw_input.split(maxsplit=1)[0].lstrip("/").lower() if raw_input else ""
-        needs_execution = command in {"compact", "team"} or (
-            command == "model" and raw_input.lower().startswith("/model set ")
-        )
+        needs_execution = command in {"compact", "team"}
         active = self._worker.execution.active_container(session_id)
         owns_execution = active is None and needs_execution
         if needs_execution:
@@ -1406,13 +1401,18 @@ class WorkerStdioRuntimeServer:
                 if not isinstance(objective, str) or not objective.strip():
                     await self._respond_error(request, "rind/goal/set requires objective.", "InvalidRequest")
                     return
-                await self._respond(request, {"goal": await runtime.set_goal(objective)})
+                goal = await runtime.set_goal(objective)
+                await self._respond(request, {"goal": goal})
+                await self._start_goal_continuation(session_id)
             elif method == RuntimeMethod.RIND_GOAL_STATUS:
                 status = params.get("status")
                 if status not in {"active", "paused"}:
                     await self._respond_error(request, "rind/goal/status requires active or paused.", "InvalidRequest")
                     return
-                await self._respond(request, {"goal": await runtime.set_goal_status(status)})
+                goal = await runtime.set_goal_status(status)
+                await self._respond(request, {"goal": goal})
+                if status == "active":
+                    await self._start_goal_continuation(session_id)
                 if status == "paused":
                     self._worker.execution.interrupt(session_id)
             else:
@@ -1430,17 +1430,27 @@ class WorkerStdioRuntimeServer:
             if not isinstance(objective, str) or not objective.strip():
                 await self._respond_error(request, "rind/goal/set requires objective.", "InvalidRequest")
                 return
-            await self._respond(request, {"goal": await self._worker.repository.set_goal(session_id, objective)})
+            goal = await self._worker.repository.set_goal(session_id, objective)
+            await self._respond(request, {"goal": goal})
+            await self._start_goal_continuation(session_id)
             return
         if method == RuntimeMethod.RIND_GOAL_STATUS:
             status = params.get("status")
             if status not in {"active", "paused"}:
                 await self._respond_error(request, "rind/goal/status requires active or paused.", "InvalidRequest")
                 return
-            await self._respond(request, {"goal": await self._worker.repository.set_goal_status(session_id, status)})
+            goal = await self._worker.repository.set_goal_status(session_id, status)
+            await self._respond(request, {"goal": goal})
+            if status == "active":
+                await self._start_goal_continuation(session_id)
             return
         await self._worker.repository.clear_goal(session_id)
         await self._respond(request, {"goal": None})
+
+    async def _start_goal_continuation(self, session_id: str) -> None:
+        start = getattr(self._worker.execution, "start_goal_continuation", None)
+        if callable(start):
+            await start(session_id)
 
     async def _background_request(self, request: dict[str, Any]) -> None:
         session_id = await self._required_session_id(request)

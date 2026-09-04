@@ -130,6 +130,18 @@ test("runtime controller shares initialization and injects session and turn IDs"
   );
 });
 
+test("goal control does not submit a duplicate prompt", async () => {
+  const harness = createHarness();
+  await harness.controller.runGoalCommand({ action: "set", objective: "ship it" });
+
+  assert.equal(harness.requests.some((item) => item.method === "session/prompt"), false);
+  assert.equal(harness.state.turn.active, false);
+  assert.equal(
+    harness.requests.filter((item) => item.method === methods.goalSet).length,
+    1,
+  );
+});
+
 test("session selector requests the full list and updates the active workspace", async () => {
   const harness = createHarness({ selectedSession: { id: "session-b" } });
   harness.state.turn.active = false;

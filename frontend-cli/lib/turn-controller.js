@@ -1,6 +1,11 @@
 import { runtimeMethods } from "./runtime-protocol.js";
 
-export function createTurnController({ request, state, output, refreshGoalState = () => {}, onTurnStart = () => {} }) {
+export function createTurnController({
+  request,
+  state,
+  output,
+  onTurnStart = () => {},
+}) {
   function submit(text, extra = {}) {
     if (state.activeTurn) {
       void submitQueuedInput(runtimeMethods.sessionSteer, text, text, "steering");
@@ -41,14 +46,18 @@ export function createTurnController({ request, state, output, refreshGoalState 
   }
 
   async function run(text, extra = {}) {
+    let requestSucceeded = false;
     try {
       await request(runtimeMethods.sessionPrompt, { input: text, ...extra });
+      requestSucceeded = true;
     } finally {
-      void refreshGoalState();
-      state.activeTurn = false;
-      state.interruptRequested = false;
       output.closeAssistant();
       output.refreshInputState();
+      if (!requestSucceeded) {
+        state.activeTurn = false;
+        state.interruptRequested = false;
+        output.refreshInputState();
+      }
     }
   }
 

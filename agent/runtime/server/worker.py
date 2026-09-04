@@ -10,24 +10,24 @@ import os
 import tempfile
 import uuid
 from datetime import datetime
-from dataclasses import dataclass, field
-from collections.abc import AsyncIterator
+from dataclasses import dataclass, field, replace
+from collections.abc import AsyncIterator, Awaitable, Callable
 from pathlib import Path
 from typing import Any
 
 from agent.application.context import CompactionService
 from agent.application.tools import ToolResultNormalizer
 from agent.bootstrap import AgentContainer, SharedRuntimeResources, build_agent_container
-from agent.infrastructure.config import AppSettings
-from agent.infrastructure.config.settings_loader import load_settings
+from agent.infrastructure.config import AppSettings, validate_settings
+from agent.infrastructure.config.settings_loader import DEFAULT_MODEL, load_settings
 from agent.infrastructure.llm import OpenAIClientFactory
 from agent.infrastructure.persistence import JsonlSessionStore, ToolOutputStore
 from agent.infrastructure.paths import validate_session_id
 from agent.infrastructure.planning import build_plan_snapshot
 from agent.infrastructure.team import discover_agent
-from agent.prompts import build_system_prompt
+from agent.prompts import build_goal_continuation_prompt, build_system_prompt
 from agent.domain.cancellation import CancellationTokenSource
-from agent.domain.events import AssistantMessageCompletedEvent, TurnCancelledEvent, TurnFailedEvent, UserQuestionRequestedEvent
+from agent.domain.events import UserQuestionRequestedEvent
 from agent.runtime.core import MessageStreamParser
 
 
@@ -43,8 +43,7 @@ class _ActiveExecution:
 class SessionRepository:
     """Read and write persisted sessions by explicit session ID."""
 
-    def __init__(self, *, settings: AppSettings, session_dir: str | None):
-        self._settings = settings
+    def __init__(self, *, session_dir: str | None):
         self.session_dir = session_dir
 
     async def metadata(self, session_id: str) -> dict[str, Any]:
@@ -69,7 +68,7 @@ class SessionRepository:
         parent_session_id: str | None = None,
     ) -> dict[str, Any]:
         root = _normalize_workspace_root(workspace_root)
-        workspace_settings = load_settings(root)
+        model, reasoning_effort, _ = _workspace_defaults(root)
         agent_context = discover_agent(root)
         if project_id is None and agent_context:
             project_id = agent_context.project_id
@@ -84,20 +83,21 @@ class SessionRepository:
         store = JsonlSessionStore(
             session_dir=self.session_dir,
             session_id=_new_session_id(),
-            model=workspace_settings.model,
+            model=model,
             system_prompt=system_prompt,
             workspace_root=root,
             project_id=project_id,
             owner_agent_id=owner_agent_id,
             session_type=session_type,
             parent_session_id=parent_session_id,
-            reasoning_effort=workspace_settings.reasoning_effort,
+            reasoning_effort=reasoning_effort,
         )
         await store.initialize()
         return {
             "session_id": store.session_id,
             "draft": False,
             "model": store.model,
+            "reasoning_effort": store.reasoning_effort,
             "workspace_root": root,
             "turn_state": None,
         }
@@ -119,12 +119,14 @@ class SessionRepository:
 
     async def info(self, session_id: str) -> dict[str, Any]:
         meta = await self.metadata(session_id)
+        workspace_root = str(meta.get("workspace_root") or meta.get("cwd") or "")
+        default_model, default_effort, _ = await asyncio.to_thread(_workspace_defaults, workspace_root)
         return {
             "session_id": str(meta.get("session_id") or session_id),
             "draft": False,
-            "model": str(meta.get("model") or self._settings.model),
-            "reasoning_effort": str(meta.get("reasoning_effort") or self._settings.reasoning_effort or ""),
-            "workspace_root": str(meta.get("workspace_root") or meta.get("cwd") or ""),
+            "model": str(meta.get("model") or default_model),
+            "reasoning_effort": str(meta.get("reasoning_effort") or default_effort or ""),
+            "workspace_root": workspace_root,
             "project_id": meta.get("project_id"),
             "owner_agent_id": meta.get("owner_agent_id"),
             "session_type": meta.get("session_type"),
@@ -134,6 +136,10 @@ class SessionRepository:
             "usage": meta.get("latest_sampling_usage") if isinstance(meta.get("latest_sampling_usage"), dict) else None,
             "message_count": int(meta.get("message_count") or 0),
         }
+
+    async def settings_for(self, session_id: str) -> AppSettings:
+        info = await self.info(session_id)
+        return await asyncio.to_thread(load_settings, info["workspace_root"])
 
     async def replay(self, session_id: str, start: int | None = None, end: int | None = None) -> dict[str, Any]:
         info = await self.info(session_id)
@@ -182,6 +188,7 @@ class SessionRepository:
             model=info["model"],
             system_prompt=build_system_prompt(root),
             workspace_root=root,
+            reasoning_effort=info.get("reasoning_effort") or "",
         )
         await store.initialize(persist_system_prompt=persist_system_prompt)
         return store
@@ -209,8 +216,6 @@ class ExecutionCoordinator:
     def __init__(
         self,
         *,
-        settings: AppSettings,
-        provider_client_factory: OpenAIClientFactory,
         shared_resources: SharedRuntimeResources,
         repository: SessionRepository,
         debug: bool,
@@ -218,8 +223,6 @@ class ExecutionCoordinator:
         enable_user_question: bool,
         session_dir: str | None,
     ):
-        self._settings = settings
-        self._provider_client_factory = provider_client_factory
         self._shared_resources = shared_resources
         self._repository = repository
         self._debug = debug
@@ -228,7 +231,66 @@ class ExecutionCoordinator:
         self.session_dir = session_dir
         self._active: dict[str, _ActiveExecution] = {}
         self._live: dict[str, dict[str, Any]] = {}
+        self._goal_tasks: dict[str, asyncio.Task] = {}
+        self._event_sink: Callable[[dict[str, Any]], Awaitable[None] | None] | None = None
+        self._closed = False
         self._lock = asyncio.Lock()
+
+    def set_event_sink(self, sink: Callable[[dict[str, Any]], Awaitable[None] | None] | None) -> None:
+        self._event_sink = sink
+
+    async def start_goal_continuation(self, session_id: str) -> bool:
+        clean = validate_session_id(session_id)
+        goal = await self._repository.get_goal(clean)
+        if not goal or goal.get("status") != "active":
+            return False
+        async with self._lock:
+            if self._closed or clean in self._goal_tasks:
+                return False
+            execution = self._active.get(clean)
+            if execution is not None and (
+                execution.container.runtime.turn_active or execution.queued_turn_starts
+            ):
+                return False
+            task = asyncio.create_task(self._run_goal_continuation(clean), name=f"rind-goal-{clean}")
+            self._goal_tasks[clean] = task
+            task.add_done_callback(
+                lambda completed: self._goal_tasks.pop(clean, None)
+                if self._goal_tasks.get(clean) is completed
+                else None
+            )
+            return True
+
+    async def _run_goal_continuation(self, session_id: str) -> None:
+        try:
+            while True:
+                goal = await self._repository.get_goal(session_id)
+                if not goal or goal.get("status") != "active":
+                    return
+                transient = [{
+                    "role": "system",
+                    "content": build_goal_continuation_prompt(str(goal["objective"])),
+                    "_context_kind": "goal",
+                }]
+                terminal = ""
+                async for event in self.run_turn(
+                    session_id,
+                    query=None,
+                    transient_system_messages=transient,
+                    continuation=True,
+                ):
+                    terminal = str(event.get("type") or terminal)
+                if terminal != "turn_completed":
+                    return
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            try:
+                await self._repository.set_goal_status(session_id, "blocked")
+            except Exception:
+                pass
+        finally:
+            await self.release(session_id)
 
     def active_session_ids(self) -> set[str]:
         return set(self._active)
@@ -344,15 +406,17 @@ class ExecutionCoordinator:
         self,
         session_id: str,
         *,
-        query: str,
+        query: str | None,
         transient_system_messages: list[dict[str, Any]] | None = None,
         cancellation_token=None,
         resume: bool = False,
+        continuation: bool = False,
     ) -> AsyncIterator[dict[str, Any]]:
         clean = validate_session_id(session_id)
         await self.start(clean)
         execution = self._active[clean]
         execution.queued_turn_starts += 1
+        terminal_type = ""
         try:
             async with execution.turn_slot:
                 cancel_source = CancellationTokenSource(parent_token=cancellation_token)
@@ -370,9 +434,15 @@ class ExecutionCoordinator:
                         run_kwargs["resume"] = True
                     async for event in execution.container.runtime.run_turn(**run_kwargs):
                         event_data = event.to_dict()
+                        if event_data.get("type") in {"turn_completed", "turn_failed", "turn_cancelled"}:
+                            terminal_type = str(event_data["type"])
                         self.update_live_event(event_data)
                         if event_data.get("type") == "user_question_requested":
                             self._prepare_user_question(clean, str(event_data.get("tool_call_id") or ""))
+                        if continuation and self._event_sink is not None:
+                            sink_result = self._event_sink(event_data)
+                            if inspect.isawaitable(sink_result):
+                                await sink_result
                         yield event_data
                 finally:
                     if execution.current_cancel is cancel_source:
@@ -380,7 +450,10 @@ class ExecutionCoordinator:
                     cancel_source.dispose()
         finally:
             execution.queued_turn_starts = max(0, execution.queued_turn_starts - 1)
-            await self._release_if_idle(clean, execution)
+            if not continuation:
+                await self._release_if_idle(clean, execution)
+            if not continuation and terminal_type == "turn_completed":
+                await self.start_goal_continuation(clean)
 
     def interrupt(self, session_id: str, reason: str = "User interrupted") -> bool:
         clean = validate_session_id(session_id)
@@ -489,27 +562,42 @@ class ExecutionCoordinator:
                 return existing.container
             info = await self._repository.info(clean)
             root = _normalize_workspace_root(info["workspace_root"])
-            container = build_agent_container(
-                settings=self._settings,
-                provider_client_factory=self._provider_client_factory,
-                debug=self._debug,
-                session_dir=self.session_dir,
-                session_id=clean,
-                enable_goal=self._enable_goal,
-                enable_user_question=(
-                    self._enable_user_question if enable_user_question is None else enable_user_question
-                ),
-                enabled_tools=enabled_tools,
-                lock_workspace=lock_workspace,
-                workspace_root=root,
-                project_id=info.get("project_id"),
-                owner_agent_id=info.get("owner_agent_id"),
-                session_type=info.get("session_type"),
-                parent_session_id=info.get("parent_session_id"),
-                shared_resources=self._shared_resources,
-                session_runner=self._run_delegated_session,
+            settings = await self._repository.settings_for(clean)
+            settings = replace(
+                settings,
+                model=str(info.get("model") or settings.model),
+                reasoning_effort=str(info.get("reasoning_effort") or settings.reasoning_effort),
             )
-            await container.runtime.initialize()
+            validate_settings(settings)
+            provider_client_factory = OpenAIClientFactory(settings)
+            provider_async_client = provider_client_factory.create_async_client()
+            container = None
+            try:
+                container = build_agent_container(
+                    settings=settings,
+                    provider_client_factory=provider_client_factory,
+                    provider_async_client=provider_async_client,
+                    debug=self._debug,
+                    session_dir=self.session_dir,
+                    session_id=clean,
+                    enable_goal=self._enable_goal,
+                    enable_user_question=(
+                        self._enable_user_question if enable_user_question is None else enable_user_question
+                    ),
+                    enabled_tools=enabled_tools,
+                    lock_workspace=lock_workspace,
+                    workspace_root=root,
+                    project_id=info.get("project_id"),
+                    owner_agent_id=info.get("owner_agent_id"),
+                    session_type=info.get("session_type"),
+                    parent_session_id=info.get("parent_session_id"),
+                    shared_resources=self._shared_resources,
+                    session_runner=self._run_delegated_session,
+                )
+                await container.runtime.initialize()
+            except BaseException:
+                await _close_provider_client(provider_async_client)
+                raise
             self._active[clean] = _ActiveExecution(container=container)
             return container
 
@@ -546,26 +634,34 @@ class ExecutionCoordinator:
 
         with tempfile.TemporaryDirectory(prefix="rind-inspect-") as session_dir:
             with preserve_active_session_context():
-                container = build_agent_container(
-                    settings=self._settings,
-                    provider_client_factory=self._provider_client_factory,
-                    session_dir=session_dir,
-                    enable_goal=False,
-                    enable_user_question=False,
-                    enabled_tools=enabled_tools,
-                    lock_workspace=False,
-                    workspace_root=str(target.workspace_root),
-                    project_id=project.project_id,
-                    owner_agent_id=target.agent_id,
-                    session_type="inspect",
-                    shared_resources=self._shared_resources,
-                )
-                response = await self._collect_container_turn(
-                    container,
-                    task,
-                    instruction,
-                    cancellation_token,
-                )
+                settings = await asyncio.to_thread(load_settings, str(target.workspace_root))
+                validate_settings(settings)
+                provider_client_factory = OpenAIClientFactory(settings)
+                provider_async_client = provider_client_factory.create_async_client()
+                try:
+                    container = build_agent_container(
+                        settings=settings,
+                        provider_client_factory=provider_client_factory,
+                        provider_async_client=provider_async_client,
+                        session_dir=session_dir,
+                        enable_goal=False,
+                        enable_user_question=False,
+                        enabled_tools=enabled_tools,
+                        lock_workspace=False,
+                        workspace_root=str(target.workspace_root),
+                        project_id=project.project_id,
+                        owner_agent_id=target.agent_id,
+                        session_type="inspect",
+                        shared_resources=self._shared_resources,
+                    )
+                    response = await self._collect_container_turn(
+                        container,
+                        task,
+                        instruction,
+                        cancellation_token,
+                    )
+                finally:
+                    await _close_provider_client(provider_async_client)
         return response, None
 
     async def _collect_delegated_turn(self, session_id: str, task: str, instruction: str, cancellation_token) -> dict[str, str]:
@@ -609,26 +705,47 @@ class ExecutionCoordinator:
     async def _release_if_idle(self, session_id: str, execution: _ActiveExecution) -> None:
         if execution.current_cancel is not None or execution.queued_turn_starts or execution.container.runtime.turn_active:
             return
+        released = None
         async with self._lock:
             if self._active.get(session_id) is execution:
                 self._active.pop(session_id, None)
                 self._live.pop(session_id, None)
+                released = execution
+        if released is not None:
+            await _close_container(released.container)
 
     async def release(self, session_id: str) -> None:
         clean = validate_session_id(session_id)
+        released = None
         async with self._lock:
             execution = self._active.get(clean)
             if execution is not None:
                 self.interrupt(clean, "Execution released")
                 self._active.pop(clean, None)
                 self._live.pop(clean, None)
+                released = execution
+        if released is not None:
+            await _close_container(released.container)
 
     async def close(self) -> None:
         async with self._lock:
+            self._closed = True
+            goal_tasks = list(self._goal_tasks.values())
+        for task in goal_tasks:
+            task.cancel()
+        if goal_tasks:
+            await asyncio.gather(*goal_tasks, return_exceptions=True)
+        self._goal_tasks.clear()
+        executions = []
+        async with self._lock:
+            executions = list(self._active.values())
             for session_id in list(self._active):
                 self.interrupt(session_id, "Worker shutting down")
             self._active.clear()
             self._live.clear()
+        if executions:
+            await asyncio.gather(*(_close_container(item.container) for item in executions))
+        self._event_sink = None
 
 
 class RuntimeWorker:
@@ -637,7 +754,6 @@ class RuntimeWorker:
     def __init__(
         self,
         *,
-        settings: AppSettings,
         workspace_root: str,
         session_id: str | None = None,
         resume_latest: bool = False,
@@ -649,21 +765,15 @@ class RuntimeWorker:
         self.workspace_root = _normalize_workspace_root(workspace_root)
         self.session_id = session_id
         self._resume_latest = resume_latest
-        self._settings = settings
-        self._provider_client_factory = OpenAIClientFactory(settings)
-        provider_async_client = self._provider_client_factory.create_async_client()
         tool_output_store = ToolOutputStore(session_dir)
         self._shared_resources = SharedRuntimeResources(
-            provider_async_client=provider_async_client,
             tool_result_normalizer=ToolResultNormalizer(),
             stream_parser=MessageStreamParser(),
             compaction_service=CompactionService(plan_snapshot_provider=build_plan_snapshot),
             tool_output_store=tool_output_store,
         )
-        self.repository = SessionRepository(settings=settings, session_dir=session_dir)
+        self.repository = SessionRepository(session_dir=session_dir)
         self.execution = ExecutionCoordinator(
-            settings=settings,
-            provider_client_factory=self._provider_client_factory,
             shared_resources=self._shared_resources,
             repository=self.repository,
             debug=debug,
@@ -671,21 +781,8 @@ class RuntimeWorker:
             enable_user_question=enable_user_question,
             session_dir=session_dir,
         )
-        self._provider_async_client = provider_async_client
         self._initialized = False
         self._tool_output_store = tool_output_store
-
-    @property
-    def default_model(self) -> str:
-        return self._settings.model
-
-    @property
-    def provider_client_factory(self) -> OpenAIClientFactory:
-        return self._provider_client_factory
-
-    @property
-    def model_client(self):
-        return self._provider_async_client
 
     async def initialize(self) -> dict[str, Any]:
         if not self._initialized:
@@ -696,9 +793,9 @@ class RuntimeWorker:
                 self._resume_latest,
             )
             self.session_id = str(info["session_id"])
-            self._initialized = True
+        self._initialized = True
         info = await self.repository.info(self.session_id)
-        info["base_url"] = self._provider_client_factory.settings.base_url
+        info["base_url"] = _workspace_defaults(info["workspace_root"])[2]
         info["live_turn"] = self.execution.live_turn(self.session_id)
         return info
 
@@ -723,11 +820,6 @@ class RuntimeWorker:
 
     async def close(self) -> None:
         await self.execution.close()
-        close = getattr(self._provider_async_client, "close", None)
-        if callable(close):
-            result = close()
-            if inspect.isawaitable(result):
-                await result
 
 
 def _normalize_workspace_root(value: str) -> str:
@@ -735,6 +827,27 @@ def _normalize_workspace_root(value: str) -> str:
     if not root.is_dir():
         raise ValueError(f"Workspace directory does not exist: {root}")
     return os.path.normcase(str(root))
+
+
+def _workspace_defaults(workspace_root: str) -> tuple[str, str, str]:
+    try:
+        settings = load_settings(workspace_root)
+    except (OSError, ValueError):
+        return DEFAULT_MODEL, "", "https://api.openai.com/v1"
+    return settings.model, settings.reasoning_effort, settings.base_url
+
+
+async def _close_provider_client(client: Any) -> None:
+    close = getattr(client, "close", None)
+    if not callable(close):
+        return
+    result = close()
+    if inspect.isawaitable(result):
+        await result
+
+
+async def _close_container(container: AgentContainer) -> None:
+    await container.chat_client.close()
 
 
 def _new_session_id() -> str:

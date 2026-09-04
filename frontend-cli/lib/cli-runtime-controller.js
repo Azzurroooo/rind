@@ -9,7 +9,6 @@ export function createCliRuntimeController({
   requireInitialization,
   state,
   getCommands,
-  getTurnController,
   getTaskMonitor,
   getCompactContextState,
   askModelMenu,
@@ -74,7 +73,6 @@ export function createCliRuntimeController({
   }
 
   async function runGoalCommand(command) {
-    const turnController = getTurnController();
     if (command.action === "set" && state.turn.active) {
       log(() => commandResultText("Goal not started", "pause or finish the active turn first"));
       return;
@@ -84,7 +82,6 @@ export function createCliRuntimeController({
         const result = await request(methods.goalSet, { objective: command.objective });
         updateGoalState(result?.goal);
         log(() => goalCommandText(result?.goal, "set"));
-        turnController.submit(command.objective);
         return;
       }
       if (command.action === "clear") {
@@ -97,9 +94,6 @@ export function createCliRuntimeController({
         const result = await request(methods.goalStatus, { status: command.action === "resume" ? "active" : "paused" });
         updateGoalState(result?.goal);
         log(() => goalCommandText(result?.goal, command.action));
-        if (command.action === "resume" && !state.turn.active) {
-          turnController.submit("", { goal_continuation: true });
-        }
         return;
       }
       const result = await request(methods.goalGet);
@@ -341,7 +335,7 @@ function modelSetResultText(result, model) {
   if (defaultModel) lines.push(`- default model: ${defaultModel} (unchanged)`);
   lines.push(result?.active_updated || result?.runtime || result?.session
     ? "- active session: updated"
-    : "- active session: unchanged; start a new session to use this model");
+    : "- active turn: unchanged; the new model applies to the next turn");
   return commandResultText(lines[0], lines.slice(1).join(" · "));
 }
 
