@@ -537,5 +537,11 @@ export function createLineEditor(initialValue = "") {
 }
 
 function isPrintable(chunk, key) {
-  return Boolean(chunk && !key.ctrl && !key.alt && String(chunk) >= " ");
+  if (!chunk || key.ctrl || key.alt || key.shift) {
+    return false;
+  }
+  return [...String(chunk)].every((character) => {
+    const code = character.codePointAt(0);
+    return code >= 0x20 && code !== 0x7f && !(code >= 0x80 && code <= 0x9f);
+  });
 }

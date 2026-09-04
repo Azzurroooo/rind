@@ -197,3 +197,13 @@ test("line editor supports word deletion, undo, and bracketed paste events", () 
   editor.handleInput({ kind: "paste", text: "\n\t你\x1b好" });
   assert.equal(editor.input(), "hello world\n    你好");
 });
+
+test("line editor rejects control characters passed through the key path", () => {
+  const editor = createLineEditor("ab");
+
+  editor.handleKey("\x01", {});
+  editor.handleKey("\x7f", {});
+  editor.handleKey("\u0085", {});
+
+  assert.equal(editor.input(), "ab");
+});

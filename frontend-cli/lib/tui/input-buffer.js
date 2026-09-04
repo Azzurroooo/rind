@@ -3,6 +3,42 @@ const PASTE_START = "\x1b[200~";
 const PASTE_END = "\x1b[201~";
 const DEFAULT_INPUT_TIMEOUT_MS = 10;
 
+function sequenceStatus(value) {
+  if (!value.startsWith(ESC)) {
+    return "not-escape";
+  }
+  if (value.length === 1) {
+    return "incomplete";
+  }
+
+  const type = value[1];
+  if (type === "[") {
+    if (value.startsWith(`${ESC}[M`)) {
+      return value.length >= 6 ? "complete" : "incomplete";
+    }
+    return csiStatus(value);
+  }
+  if (type === "O") {
+    return value.length >= 3 ? "complete" : "incomplete";
+  }
+  if (type === "]" || type === "P" || type === "_") {
+    return value.includes("\x07") || value.includes(`${ESC}\\`) ? "complete" : "incomplete";
+  }
+  const codepoint = value.codePointAt(1);
+  if (codepoint >= 0xd800 && codepoint <= 0xdbff && value.length < 3) {
+    return "incomplete";
+  }
+  return "complete";
+}
+
+function csiStatus(value) {
+  if (value.length < 3) {
+    return "incomplete";
+  }
+  const final = value.charCodeAt(value.length - 1);
+  return final >= 0x40 && final <= 0x7e ? "complete" : "incomplete";
+}
+
 export function createInputBuffer(options = {}) {
   const onSequence = typeof options.onSequence === "function" ? options.onSequence : () => {};
   const onPaste = typeof options.onPaste === "function" ? options.onPaste : () => {};
@@ -14,6 +50,7 @@ export function createInputBuffer(options = {}) {
   let timer = null;
   let pasteMode = false;
   let pasteBuffer = "";
+  let pendingKittyCodepoint = null;
 
   function feed(data) {
     const value = Buffer.isBuffer(data) ? data.toString("utf8") : String(data || "");
@@ -39,6 +76,7 @@ export function createInputBuffer(options = {}) {
     buffer = "";
     pasteMode = false;
     pasteBuffer = "";
+    pendingKittyCodepoint = null;
   }
 
   function clearTimer() {
@@ -50,9 +88,20 @@ export function createInputBuffer(options = {}) {
   }
 
   function emit(sequence) {
-    if (sequence) {
-      onSequence(sequence);
+    if (!sequence) {
+      return;
     }
+    if (pendingKittyCodepoint !== null) {
+      const codepoint = sequence.codePointAt(0);
+      if (!sequence.startsWith(ESC) && sequence.length === String.fromCodePoint(codepoint).length && codepoint === pendingKittyCodepoint) {
+        pendingKittyCodepoint = null;
+        return;
+      }
+      pendingKittyCodepoint = null;
+    }
+    onSequence(sequence);
+    const kittyPrintable = sequence.match(/^\x1b\[(\d+)u$/);
+    pendingKittyCodepoint = kittyPrintable ? Number(kittyPrintable[1]) : null;
   }
 
   function processBuffer() {
@@ -77,6 +126,7 @@ export function createInputBuffer(options = {}) {
       pasteMode = true;
       pasteBuffer = pasteContent;
       buffer = "";
+      pendingKittyCodepoint = null;
       const endIndex = pasteBuffer.indexOf(PASTE_END);
       if (endIndex !== -1) {
         finishPaste(endIndex);
@@ -92,6 +142,7 @@ export function createInputBuffer(options = {}) {
     const remaining = pasteBuffer.slice(endIndex + PASTE_END.length);
     pasteMode = false;
     pasteBuffer = "";
+    pendingKittyCodepoint = null;
     onPaste(content);
     if (remaining) {
       feed(remaining);
@@ -130,9 +181,17 @@ export function splitSequences(value) {
       continue;
     }
 
-    const end = findEscapeEnd(value, position);
+    let end = findEscapeEnd(value, position);
     if (end === -1) {
       return { sequences, remainder: value.slice(position) };
+    }
+    if (value.slice(position, end) === `${ESC}${ESC}`) {
+      const next = value[end];
+      if (["[", "]", "O", "P", "_"].includes(next)) {
+        sequences.push(ESC);
+        position += 1;
+        continue;
+      }
     }
     sequences.push(value.slice(position, end));
     position = end;
@@ -141,32 +200,14 @@ export function splitSequences(value) {
 }
 
 function findEscapeEnd(value, start) {
-  if (start + 1 >= value.length) {
-    return -1;
-  }
-  const type = value[start + 1];
-  if (type === "[") {
-    for (let index = start + 2; index < value.length; index += 1) {
-      const code = value.charCodeAt(index);
-      if (code >= 0x40 && code <= 0x7e) {
-        return index + 1;
-      }
+  for (let end = start + 1; end <= value.length; end += 1) {
+    const status = sequenceStatus(value.slice(start, end));
+    if (status === "complete") {
+      return end;
     }
-    return -1;
-  }
-  if (type === "O") {
-    return start + 3 <= value.length ? start + 3 : -1;
-  }
-  if (type === "]" || type === "P" || type === "_") {
-    const bell = value.indexOf("\x07", start + 2);
-    const stringTerminator = value.indexOf(`${ESC}\\`, start + 2);
-    if (bell === -1 && stringTerminator === -1) {
-      return -1;
+    if (status === "not-escape") {
+      return start + 1;
     }
-    if (bell !== -1 && (stringTerminator === -1 || bell < stringTerminator)) {
-      return bell + 1;
-    }
-    return stringTerminator + 2;
   }
-  return start + 1 + String.fromCodePoint(value.codePointAt(start + 1)).length;
+  return -1;
 }

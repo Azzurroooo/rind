@@ -26,7 +26,17 @@ export function createQuestionMenuState(options) {
       editing = true;
       return true;
     },
+    leaveEditing() {
+      if (!editing) {
+        return false;
+      }
+      editing = false;
+      return true;
+    },
     handleNavigation(key = {}) {
+      if (editing) {
+        return false;
+      }
       const vimNavigation = !editing && (key.text === "j" || key.text === "k");
       if (key.name !== "up" && key.name !== "down" && !vimNavigation) {
         return false;

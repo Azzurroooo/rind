@@ -50,7 +50,7 @@ test("choice menu stores only string options", () => {
   assert.deepEqual(state.options(), ["a", "b"]);
 });
 
-test("question menu enters custom editing and discards its draft on navigation", () => {
+test("question menu enters and leaves custom editing without moving the selection", () => {
   const state = createQuestionMenuState([
     { label: "fast", description: "Less analysis" },
     { label: "thorough (Recommended)", description: "More analysis" },
@@ -62,9 +62,12 @@ test("question menu enters custom editing and discards its draft on navigation",
   assert.equal(state.selectedIndex(), 2);
   assert.equal(state.enterEditing(), true);
   assert.equal(state.isEditing(), true);
+  assert.equal(state.handleNavigation({ name: "up" }), false);
+  assert.equal(state.selectedIndex(), 2);
+  assert.equal(state.leaveEditing(), true);
+  assert.equal(state.isEditing(), false);
   assert.equal(state.handleNavigation({ name: "up" }), true);
   assert.equal(state.selectedIndex(), 1);
-  assert.equal(state.isEditing(), false);
   assert.equal(state.handleNavigation({ text: "j" }), true);
   assert.equal(state.selectedIndex(), 2);
   assert.equal(state.enterEditing(), true);

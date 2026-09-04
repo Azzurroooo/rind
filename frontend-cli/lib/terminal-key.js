@@ -44,12 +44,40 @@ export function parseTerminalKey(raw = "") {
     return { kind: "text", name: "", text: value };
   }
 
-  const modifiedArrow = value.match(/^\x1b\[1;([2-8])([ABCDHF])$/);
-  if (modifiedArrow) {
-    return key(ARROW_KEYS[modifiedArrow[2]], Number(modifiedArrow[1]));
+  const kitty = value.match(/^\x1b\[(\d+)(?::(\d*))?(?::(\d+))?(?:;(\d+))?(?::(\d+))?u$/);
+  if (kitty) {
+    const codepoint = Number(kitty[1]);
+    const shiftedCodepoint = kitty[2] ? Number(kitty[2]) : codepoint;
+    const modifier = Number(kitty[4] || 1);
+    if (kitty[5] === "3") {
+      return null;
+    }
+    const special = kittySpecialKey(codepoint, modifier);
+    if (special) {
+      return special;
+    }
+    if (codepoint < 32 || codepoint === 127) {
+      return null;
+    }
+    const character = String.fromCodePoint(shiftedCodepoint);
+    if (modifier === 1 || modifier === 2) {
+      return { kind: "text", name: "", text: character };
+    }
+    return key(character.toLowerCase(), modifier);
   }
-  const tilde = value.match(/^\x1b\[([0-9]+)(?:;([2-8]))?~$/);
+
+  const modifiedArrow = value.match(/^\x1b\[1;([0-9]+)(?::([1-3]))?([ABCDHF])$/);
+  if (modifiedArrow) {
+    if (modifiedArrow[2] === "3") {
+      return null;
+    }
+    return key(ARROW_KEYS[modifiedArrow[3]], Number(modifiedArrow[1]));
+  }
+  const tilde = value.match(/^\x1b\[([0-9]+)(?:;([0-9]+))?(?::([1-3]))?~$/);
   if (tilde) {
+    if (tilde[3] === "3") {
+      return null;
+    }
     return Number(tilde[1]) === 3 ? key("delete", Number(tilde[2] || 1)) : null;
   }
   const csiKey = value.match(/^\x1b\[([ABCDHFZ])$/);
@@ -94,4 +122,20 @@ function key(name, modifier = 1) {
     ctrl: Boolean(bits & 4),
     text: "",
   };
+}
+
+function kittySpecialKey(codepoint, modifier) {
+  if (codepoint === 13) {
+    return key("enter", modifier);
+  }
+  if (codepoint === 9) {
+    return key("tab", modifier);
+  }
+  if (codepoint === 127) {
+    return key("backspace", modifier);
+  }
+  if (codepoint === 27) {
+    return key("escape", modifier);
+  }
+  return null;
 }

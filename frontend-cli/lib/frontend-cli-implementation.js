@@ -500,9 +500,7 @@ function composeFrame(width = process.stdout.columns || 80) {
   }
   if (session.mode === "question") {
     const editing = session.questionState.isEditing();
-    if (editing) {
-      session.editor.setViewportWidth(width);
-    }
+    session.editor.setViewportWidth(width);
     const editorCursor = editing ? session.editor.cursorPosition() : null;
     const menu = questionMenuFrame(
       session.questionState.options(),

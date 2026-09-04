@@ -3,6 +3,8 @@ import test from "node:test";
 
 import { prepareComposerFrame } from "../lib/composer-terminal.js";
 import { stripAnsi } from "../lib/text-width.js";
+import { insertCursorMarker } from "../lib/tui/cursor.js";
+import { CURSOR_MARKER } from "../lib/tui/tui.js";
 
 const prompt = [
   "",
@@ -56,6 +58,11 @@ test("composer keeps the question visible while the custom answer is edited", ()
   assert.ok(frame.lines.some((line) => stripAnsi(line).includes("Which option should be used?")));
   assert.equal(stripAnsi(frame.lines.join("\n")).match(/draft/g)?.length, 1);
   assert.equal(frame.cursorRow, frame.lines.findIndex((line) => stripAnsi(line).includes("› draft")));
+});
+
+test("cursor markers never split a grapheme cluster", () => {
+  assert.equal(insertCursorMarker("  › 9️⃣你", 6), `  › 9️⃣${CURSOR_MARKER}你`);
+  assert.equal(insertCursorMarker("  › 9️⃣你", 8), `  › 9️⃣你${CURSOR_MARKER}`);
 });
 
 test("composer wraps long ascii input and tracks cursor position", () => {
@@ -153,6 +160,35 @@ test("composer wraps styled placeholders without counting ANSI sequences", () =>
   assert.match(frame.lines[2], /^ {4}\x1b\[2m/);
   assert.equal(frame.cursorRow, 1);
   assert.equal(frame.cursorColumn, 4);
+});
+
+test("composer keeps the cursor outside styled placeholder sequences", () => {
+  const frame = prepareComposerFrame({
+    prompt: "\n  ▷ ",
+    placeholder: "\x1b[2mAsk Rind to do anything\x1b[0m",
+    inputText: "",
+    cursor: { line: 0, column: 0 },
+  }, 80);
+
+  const line = insertCursorMarker(frame.lines[frame.cursorRow], frame.cursorColumn);
+  assert.equal(line.indexOf("\x1b[2m"), 4);
+  assert.equal(line.indexOf(CURSOR_MARKER), line.indexOf("Ask Rind") - CURSOR_MARKER.length);
+  assert.ok(line.indexOf(CURSOR_MARKER) > line.indexOf("\x1b[2m"));
+  assert.ok(line.indexOf(CURSOR_MARKER) < line.indexOf("Ask Rind"));
+  assert.equal(line.includes("\x1b\x1b_pi:c"), false);
+});
+
+test("composer keeps the custom answer cursor before its styled placeholder", () => {
+  const frame = prepareComposerFrame({
+    prompt: "\n  ▷ ",
+    inputText: "question",
+    menuText: "  Answers\n  › \x1b[2mType your own answer:\x1b[0m",
+    menuCursor: { line: 1, column: 4 },
+  }, 80);
+
+  const line = insertCursorMarker(frame.lines[frame.cursorRow], frame.cursorColumn);
+  assert.equal(line.indexOf(CURSOR_MARKER), line.indexOf("Type your own answer") - CURSOR_MARKER.length);
+  assert.equal(line.includes("\x1b\x1b_pi:c"), false);
 });
 
 test("composer preserves a style that follows an SGR reset", () => {

@@ -60,3 +60,20 @@ test("parses kitty ctrl-minus", () => {
   assert.equal(event.name, "-");
   assert.equal(event.ctrl, true);
 });
+
+test("parses Kitty printable keys, special keys, and ignores releases", () => {
+  assert.deepEqual(parseTerminalKey("\x1b[20320u"), { kind: "text", name: "", text: "你" });
+  assert.deepEqual(parseTerminalKey("\x1b[97;5u"), {
+    kind: "key",
+    name: "a",
+    shift: false,
+    alt: false,
+    ctrl: true,
+    text: "",
+  });
+  assert.equal(parseTerminalKey("\x1b[13;2u").shift, true);
+  assert.equal(parseTerminalKey("\x1b[1;5:1D").ctrl, true);
+  assert.equal(parseTerminalKey("\x1b[1;9:1D").name, "left");
+  assert.equal(parseTerminalKey("\x1b[97;1:3u"), null);
+  assert.equal(parseTerminalKey("\x1b[1;1:3A"), null);
+});

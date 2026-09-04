@@ -10,6 +10,11 @@ const HIDE_CURSOR = "\x1b[?25l";
 const LINE_RESET = "\x1b[0m";
 const PASTE_ENABLE = "\x1b[?2004h";
 const PASTE_DISABLE = "\x1b[?2004l";
+const KITTY_KEYBOARD_ENABLE = "\x1b[>7u\x1b[?u\x1b[c";
+const KITTY_KEYBOARD_DISABLE = "\x1b[<u";
+const MODIFY_OTHER_KEYS_ENABLE = "\x1b[>4;2m";
+const MODIFY_OTHER_KEYS_DISABLE = "\x1b[>4;0m";
+const KEYBOARD_QUERY_TIMEOUT_MS = 150;
 const DEFAULT_COLUMNS = 80;
 const DEFAULT_ROWS = 24;
 const DEFAULT_RENDER_INTERVAL_MS = 16;
@@ -49,8 +54,13 @@ export function createTui(options = {}) {
   let clearOnShrink = false;
   let cursorVisible = false;
   let replayRequested = false;
+  let keyboardQueryActive = false;
+  let kittyKeyboardActive = false;
+  let modifyOtherKeysActive = false;
+  let keyboardQueryTimer = null;
+  let keyboardProtocolPushed = false;
   const inputBuffer = createInputBuffer({
-    onSequence: (sequence) => inputHandler?.(sequence),
+    onSequence: handleInputSequence,
     onPaste: (payload) => pasteHandler?.(payload),
     setTimeout: schedule,
     clearTimeout: cancelSchedule,
@@ -130,6 +140,7 @@ export function createTui(options = {}) {
       output.on("resize", handleResize);
     }
     write(PASTE_ENABLE);
+    enableKeyboardProtocol();
     hideCursor();
     requestRender();
   }
@@ -170,11 +181,70 @@ export function createTui(options = {}) {
       input.setRawMode(rawModeBeforeStart);
     }
     write(PASTE_DISABLE);
+    disableKeyboardProtocol();
     inputBuffer.clear();
   }
 
   function handleInputData(data) {
     inputBuffer.feed(data);
+  }
+
+  function handleInputSequence(sequence) {
+    const kittyFlags = keyboardQueryActive ? kittyKeyboardFlags(sequence) : null;
+    if (kittyFlags !== null) {
+      clearKeyboardQuery();
+      if (kittyFlags > 0) {
+        kittyKeyboardActive = true;
+      } else {
+        enableModifyOtherKeys();
+      }
+      return;
+    }
+    if (keyboardQueryActive && isDeviceAttributesResponse(sequence)) {
+      clearKeyboardQuery();
+      enableModifyOtherKeys();
+      return;
+    }
+    inputHandler?.(sequence);
+  }
+
+  function enableKeyboardProtocol() {
+    keyboardQueryActive = true;
+    keyboardProtocolPushed = true;
+    keyboardQueryTimer = schedule(() => {
+      keyboardQueryTimer = null;
+      keyboardQueryActive = false;
+    }, KEYBOARD_QUERY_TIMEOUT_MS);
+    write(KITTY_KEYBOARD_ENABLE);
+  }
+
+  function clearKeyboardQuery() {
+    keyboardQueryActive = false;
+    if (keyboardQueryTimer !== null) {
+      cancelSchedule(keyboardQueryTimer);
+      keyboardQueryTimer = null;
+    }
+  }
+
+  function disableKeyboardProtocol() {
+    if (keyboardProtocolPushed) {
+      write(KITTY_KEYBOARD_DISABLE);
+    }
+    if (modifyOtherKeysActive) {
+      write(MODIFY_OTHER_KEYS_DISABLE);
+    }
+    clearKeyboardQuery();
+    keyboardProtocolPushed = false;
+    kittyKeyboardActive = false;
+    modifyOtherKeysActive = false;
+  }
+
+  function enableModifyOtherKeys() {
+    if (kittyKeyboardActive || modifyOtherKeysActive) {
+      return;
+    }
+    write(MODIFY_OTHER_KEYS_ENABLE);
+    modifyOtherKeysActive = true;
   }
 
   function handleResize() {
@@ -607,4 +677,13 @@ export function createTui(options = {}) {
 function finitePositive(value, fallback) {
   const number = Number(value);
   return Number.isFinite(number) && number > 0 ? Math.floor(number) : fallback;
+}
+
+function kittyKeyboardFlags(sequence) {
+  const match = String(sequence || "").match(/^\x1b\[\?(\d+)u$/);
+  return match ? Number(match[1]) : null;
+}
+
+function isDeviceAttributesResponse(sequence) {
+  return /^\x1b\[\?[\d;]*c$/.test(sequence);
 }

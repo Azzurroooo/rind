@@ -411,11 +411,13 @@ export function createCliInputActions({
         .map((option) => ({ label: String(option?.label || "").trim(), description: String(option?.description || "").trim() }))
         .filter((option) => option.label);
       const questionState = createQuestionMenuState(options);
+      const editor = createLineEditor();
+      editor.setViewportWidth(process.stdout.columns || 80);
       state.input.session = {
         mode: "question",
         question: String(event.question || "Input required"),
         questionState,
-        editor: null,
+        editor,
         resolve,
       };
       state.input.active = true;
@@ -459,9 +461,14 @@ export function createCliInputActions({
   function handleQuestionInput(session, key) {
     const modified = key.ctrl || key.alt || key.shift;
     if (session.questionState.isEditing()) {
-      if (!modified && key.name === "escape") return completeTtyInput(session, "", false);
-      if (!modified && session.questionState.handleNavigation(key)) {
-        session.editor = null;
+      if (!modified && (key.name === "up" || key.name === "down")) {
+        session.questionState.leaveEditing();
+        session.editor.setInput("");
+        if (session.questionState.handleNavigation(key)) output.redraw();
+        return;
+      }
+      if (!modified && key.name === "escape") {
+        session.questionState.leaveEditing();
         output.redraw();
         return;
       }
@@ -477,8 +484,6 @@ export function createCliInputActions({
     }
     if (!modified && (key.name === "enter" || key.name === "return" || key.name === "tab")) {
       if (session.questionState.enterEditing()) {
-        session.editor = createLineEditor();
-        session.editor.setViewportWidth(process.stdout.columns || 80);
         output.redraw();
         return;
       }
@@ -488,7 +493,6 @@ export function createCliInputActions({
     }
     if (!modified && key.name === "escape") return completeTtyInput(session, "", false);
     if (!modified && session.questionState.handleNavigation(key)) {
-      session.editor = null;
       output.redraw();
     }
   }

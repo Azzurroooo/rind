@@ -200,6 +200,67 @@ test("hardware cursor hides when no component emits a focus marker", async () =>
   tui.stop();
 });
 
+test("terminal consumes Kitty negotiation responses and restores the protocol on stop", async () => {
+  const virtual = createVirtualOutput({ columns: 20, rows: 6 });
+  const writes = [];
+  const recordingOutput = Object.assign(Object.create(virtual.output), {
+    write(chunk) {
+      writes.push(String(chunk));
+      return virtual.output.write(chunk);
+    },
+  });
+  const input = createVirtualInput();
+  const received = [];
+  const tui = createTui({
+    input,
+    output: recordingOutput,
+    renderIntervalMs: 0,
+    setTimeout: (fn, delay) => setTimeout(fn, delay),
+    clearTimeout,
+  });
+  tui.onData((sequence) => received.push(sequence));
+  tui.start();
+  await settle(virtual);
+
+  assert.ok(writes.some((write) => write.includes("\x1b[>7u")), "queries Kitty keyboard support");
+  input.send("\x1b[?1u");
+  input.send("a");
+  await settle(virtual);
+  assert.deepEqual(received, ["a"]);
+
+  writes.length = 0;
+  tui.stop();
+  assert.ok(writes.some((write) => write.includes("\x1b[<u")), "restores the terminal keyboard protocol");
+});
+
+test("terminal falls back to modifyOtherKeys after a non-Kitty response", async () => {
+  const virtual = createVirtualOutput({ columns: 20, rows: 6 });
+  const writes = [];
+  const recordingOutput = Object.assign(Object.create(virtual.output), {
+    write(chunk) {
+      writes.push(String(chunk));
+      return virtual.output.write(chunk);
+    },
+  });
+  const input = createVirtualInput();
+  const tui = createTui({
+    input,
+    output: recordingOutput,
+    renderIntervalMs: 0,
+    setTimeout: (fn, delay) => setTimeout(fn, delay),
+    clearTimeout,
+  });
+  tui.start();
+  await settle(virtual);
+  input.send("\x1b[?1;2c");
+  await settle(virtual);
+
+  assert.ok(writes.some((write) => write.includes("\x1b[>4;2m")), "enables modifyOtherKeys fallback");
+  writes.length = 0;
+  tui.stop();
+  assert.ok(writes.some((write) => write.includes("\x1b[>4;0m")), "disables modifyOtherKeys on stop");
+});
+
 function createRecordingHarness({ columns = 20, rows = 6 } = {}) {
   const virtual = createVirtualOutput({ columns, rows });
   const writes = [];

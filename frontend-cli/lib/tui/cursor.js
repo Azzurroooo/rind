@@ -1,7 +1,7 @@
 import { CURSOR_MARKER } from "./tui.js";
 import { graphemes, textWidth } from "../text-width.js";
 
-const ANSI_SEQUENCE = /\x1b\[[0-?]*[ -/]*[@-~]/g;
+const ANSI_SEQUENCE = /\x1b\[[0-?]*[ -/]*[@-~]/;
 
 export function insertCursorMarker(line, column) {
   const text = String(line || "");
@@ -16,14 +16,21 @@ export function insertCursorMarker(line, column) {
         continue;
       }
     }
-    const codePoint = text.codePointAt(position);
-    const segment = String.fromCodePoint(codePoint);
-    const segmentWidth = textWidth(segment);
-    if (width + segmentWidth > target) {
-      break;
+    const ansiIndex = text.indexOf("\x1b", position);
+    const end = ansiIndex === -1 ? text.length : ansiIndex;
+    const content = text.slice(position, end);
+    if (!content) {
+      position += 1;
+      continue;
     }
-    width += segmentWidth;
-    position += segment.length;
+    for (const segment of graphemes(content)) {
+      const segmentWidth = textWidth(segment);
+      if (width + segmentWidth > target) {
+        return `${text.slice(0, position)}${CURSOR_MARKER}${text.slice(position)}`;
+      }
+      width += segmentWidth;
+      position += segment.length;
+    }
   }
   return `${text.slice(0, position)}${CURSOR_MARKER}${text.slice(position)}`;
 }

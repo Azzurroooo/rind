@@ -95,3 +95,46 @@ test("splitSequences keeps unterminated escapes in the remainder", () => {
   assert.deepEqual(complete.sequences, ["\x1b[H", "\x1bOA", "z", "\x1b]0;t\x07", "q"]);
   assert.equal(complete.remainder, "");
 });
+
+test("buffers OSC, DCS, APC, and old mouse sequences until complete", () => {
+  const handlers = { sequences: [], pastes: [] };
+  const buffer = createBuffer(handlers, createScheduler());
+
+  buffer.feed("\x1b]0;title");
+  buffer.feed("\x07\x1bP1;data");
+  buffer.feed("\x1b\\\x1b_payload");
+  buffer.feed("\x1b\\\x1b[M ab");
+
+  assert.deepEqual(handlers.sequences, [
+    "\x1b]0;title\x07",
+    "\x1bP1;data\x1b\\",
+    "\x1b_payload\x1b\\",
+    "\x1b[M ab",
+  ]);
+});
+
+test("separates Kitty releases and suppresses duplicated raw printable input", () => {
+  const handlers = { sequences: [], pastes: [] };
+  const buffer = createBuffer(handlers, createScheduler());
+
+  buffer.feed("\x1b[97ua\x1b[97;1:3u\x1b[98u");
+
+  assert.deepEqual(handlers.sequences, ["\x1b[97u", "\x1b[97;1:3u", "\x1b[98u"]);
+});
+
+test("splits a raw escape before a following Kitty release sequence", () => {
+  assert.deepEqual(splitSequences("\x1b\x1b[27;1:3u"), {
+    sequences: ["\x1b", "\x1b[27;1:3u"],
+    remainder: "",
+  });
+});
+
+test("suppresses a duplicated raw printable character across chunks", () => {
+  const handlers = { sequences: [], pastes: [] };
+  const buffer = createBuffer(handlers, createScheduler());
+
+  buffer.feed("\x1b[64u");
+  buffer.feed("@");
+
+  assert.deepEqual(handlers.sequences, ["\x1b[64u"]);
+});
