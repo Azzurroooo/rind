@@ -302,10 +302,6 @@ function eventForLive(turnId: string, type: string, event: Record<string, unknow
   return { type, sequence: 0, durability: "incremental", sessionId: "", turnId, event: { ...event, ...extra } }
 }
 
-export function latestPlan(state: ConversationState): PlanEntry | undefined {
-  return state.plan
-}
-
 export function activePlan(state: ConversationState): PlanEntry | undefined {
   const plan = state.plan
   if (!plan) return undefined

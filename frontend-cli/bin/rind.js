@@ -1,5 +1,5 @@
 #!/usr/bin/env node
 
-import { runFrontendCli } from "../lib/frontend-cli.js";
+import { runFrontendCliApp } from "../lib/frontend-cli-implementation.js";
 
-await runFrontendCli(process.argv.slice(2));
+await runFrontendCliApp(process.argv.slice(2));

@@ -1,4 +1,5 @@
 import { clipCells, graphemes, middleClipCells, textWidth, wrapTextCells } from "./text-width.js";
+import { formatDuration } from "./tool-display.js";
 import { paint, flavorSwatch } from "./theme.js";
 import { homedir } from "node:os";
 
@@ -473,10 +474,6 @@ export function commandResultText(text, detail = "") {
   return `${green("✓")} ${bold(clipSingleLine(text, 96))}${extra ? dim(` — ${extra}`) : ""}`;
 }
 
-export function modelUsageText() {
-  return notice("Model command", "/model set <name>");
-}
-
 export function contextBuiltLine(event) {
   const decisions = event.decisions && typeof event.decisions === "object" ? event.decisions : {};
   if (!decisions.rind_docs_truncated) {
@@ -486,10 +483,6 @@ export function contextBuiltLine(event) {
     ? decisions.rind_docs_truncated_scopes.join(", ")
     : "unknown";
   return notice("Context trimmed", `RIND.md: ${clipSingleLine(scopes, 96)}`);
-}
-
-export function unknownCommandText() {
-  return notice("Unknown command", "type / to browse commands or ? for shortcuts");
 }
 
 function notice(label, ...details) {
@@ -566,14 +559,6 @@ export function planUpdatedLine(plan) {
     }
   }
   return lines.join("\n");
-}
-
-export function toolProgressLine(event) {
-  const name = event.tool_name || "tool";
-  const message = progressMessage(event.payload);
-  return message
-    ? indentToolText(`${accent("◌")} ${bold("Tool")} ${dim("·")} ${toolLabel(name)}\n${dim(`  ↳ ${message}`)}`)
-    : "";
 }
 
 export function errorLine(error) {
@@ -1002,19 +987,6 @@ function nonZeroExitCode(value) {
   return Number.isInteger(code) && code !== 0 ? code : 0;
 }
 
-function progressMessage(payload) {
-  if (!payload || typeof payload !== "object") {
-    return "";
-  }
-  for (const key of ["message", "status", "text"]) {
-    const value = clipSingleLine(payload[key], 120);
-    if (value) {
-      return value;
-    }
-  }
-  return "";
-}
-
 function fileChangeLine(fileChange) {
   if (!fileChange || typeof fileChange !== "object") {
     return "";
@@ -1096,23 +1068,6 @@ function messageLines(value) {
 function userInputContentWidth(width) {
   const columns = Number(width ?? process.stdout.columns);
   return Number.isFinite(columns) && columns > 0 ? Math.max(1, Math.floor(columns - 2)) : 78;
-}
-
-function formatDuration(durationMs) {
-  const value = Number(durationMs || 0);
-  if (!Number.isFinite(value) || value <= 0) {
-    return "0ms";
-  }
-  if (value < 1000) {
-    return `${Math.trunc(value)}ms`;
-  }
-  if (value >= 60000) {
-    const totalSeconds = Math.round(value / 1000);
-    const minutes = Math.floor(totalSeconds / 60);
-    const seconds = String(totalSeconds % 60).padStart(2, "0");
-    return `${minutes}m ${seconds}s`;
-  }
-  return `${(value / 1000).toFixed(2)}s`;
 }
 
 function formatActivityDuration(durationMs) {

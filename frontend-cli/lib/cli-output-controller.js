@@ -18,7 +18,6 @@ import { ToolBlock } from "./components/tool-block.js";
 import { argsFromResult } from "./tool-display.js";
 
 export function createCliOutputController({ state, terminalUi, transcript }) {
-  const streamBuffer = createLegacyStreamBuffer();
   const legacyRenderer = new AssistantRenderer((text) => writeOutput(text));
   let assistantMessage = null;
   let blockCount = 0;
@@ -26,10 +25,6 @@ export function createCliOutputController({ state, terminalUi, transcript }) {
   const legacyBegunTools = new Set();
   let questionBlock = null;
   let turnContext = "";
-
-  function suspendPrompt(action, options = {}) {
-    return action();
-  }
 
   function redraw(force = false) {
     if (!terminalUi || state.runtime.status === "closing") {
@@ -124,7 +119,6 @@ export function createCliOutputController({ state, terminalUi, transcript }) {
   function log(text) {
     const build = typeof text === "function" ? text : () => String(text ?? "");
     if (!terminalUi) {
-      flushAssistantText(streamBuffer.flush());
       const value = String(build() ?? "");
       if (!value.trim()) {
         return;
@@ -139,7 +133,7 @@ export function createCliOutputController({ state, terminalUi, transcript }) {
 
   function writeOutput(text) {
     if (!terminalUi) {
-      flushAssistantText(streamBuffer.push(text));
+      flushAssistantText(text);
     }
   }
 
@@ -157,7 +151,6 @@ export function createCliOutputController({ state, terminalUi, transcript }) {
       return;
     }
     if (!terminalUi) {
-      flushAssistantText(streamBuffer.flush());
       const line = userInputText(value);
       if (!line) {
         return;
@@ -189,8 +182,6 @@ export function createCliOutputController({ state, terminalUi, transcript }) {
     appendBlock(new TextBlock(outputBlockText(value), { leading: blockCount > 0 }));
   }
 
-  function closeOpenAssistantOutputLine() {}
-
   function ensureAssistantBlocks() {
     if (!assistantMessage) {
       const leading = blockCount > 0;
@@ -213,7 +204,6 @@ export function createCliOutputController({ state, terminalUi, transcript }) {
       return;
     }
     legacyRenderer.finish();
-    flushAssistantText(streamBuffer.flush());
     state.display.assistantHeaderShown = false;
   }
 
@@ -253,13 +243,6 @@ export function createCliOutputController({ state, terminalUi, transcript }) {
     const message = ensureAssistantBlocks();
     message.append(text);
     redraw();
-  }
-
-  function clearAssistantLineForInput() {
-    if (!terminalUi && state.display.assistantOutputLineOpen) {
-      process.stdout.write("\n");
-      state.display.assistantOutputLineOpen = false;
-    }
   }
 
   function showStartup(info) {
@@ -424,7 +407,6 @@ export function createCliOutputController({ state, terminalUi, transcript }) {
 
   return {
     terminalUi: Boolean(terminalUi),
-    suspendPrompt,
     redraw,
     refreshInputState,
     clearActivityTimer,
@@ -434,7 +416,6 @@ export function createCliOutputController({ state, terminalUi, transcript }) {
     writeUserInput,
     writeError,
     closeAssistant,
-    clearAssistantLineForInput,
     assistantAppend,
     beginTool,
     updateToolProgress,
@@ -449,22 +430,6 @@ export function createCliOutputController({ state, terminalUi, transcript }) {
   };
 }
 
-function createLegacyStreamBuffer() {
-  let pending = "";
-  return {
-    push(text) {
-      pending += String(text || "");
-      const flushed = pending;
-      pending = "";
-      return flushed;
-    },
-    flush() {
-      const flushed = pending;
-      pending = "";
-      return flushed;
-    },
-  };
-}
 
 function messageText(content) {
   if (typeof content === "string") {

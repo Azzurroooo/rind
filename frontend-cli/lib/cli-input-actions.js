@@ -53,7 +53,7 @@ export function createCliInputActions({
       return;
     }
     state.input.pending.splice(index, 1);
-    output.suspendPrompt(() => output.writeUserInput(input));
+    output.writeUserInput(input);
   }
 
   async function retrievePendingInput(mode, session) {
@@ -180,7 +180,6 @@ export function createCliInputActions({
 
   function askTtyInput(prompt, placeholder) {
     return new Promise((resolve) => {
-      output.clearAssistantLineForInput();
       const mode = placeholder && placeholder !== answerPlaceholderText() ? "prompt" : "line";
       const initialInput = state.input.prefill;
       const editor = mode === "prompt" ? promptEditor : createLineEditor(initialInput);
@@ -309,7 +308,6 @@ export function createCliInputActions({
 
   function askThemeMenu() {
     return new Promise((resolve) => {
-      output.clearAssistantLineForInput();
       const themeState = createThemeMenuState();
       if (!themeState.items().length) {
         resolve("");
@@ -379,7 +377,6 @@ export function createCliInputActions({
 
   function askModelMenu(models, currentModel) {
     return new Promise((resolve) => {
-      output.clearAssistantLineForInput();
       const modelState = createModelMenuState(models, currentModel);
       if (!modelState.items().length) {
         resolve("");
@@ -395,7 +392,6 @@ export function createCliInputActions({
 
   function askEffortMenu(currentEffort) {
     return new Promise((resolve) => {
-      output.clearAssistantLineForInput();
       const modelState = createModelMenuState(REASONING_EFFORTS.slice(), currentEffort);
       const session = { mode: "model", inputText: "/effort", modelState, resolve };
       state.input.session = session;
@@ -419,7 +415,6 @@ export function createCliInputActions({
 
   function askQuestionMenu(event) {
     return new Promise((resolve) => {
-      output.clearAssistantLineForInput();
       const options = (Array.isArray(event.options) ? event.options : [])
         .map((option) => ({ label: String(option?.label || "").trim(), description: String(option?.description || "").trim() }))
         .filter((option) => option.label);
@@ -441,7 +436,6 @@ export function createCliInputActions({
 
   function askSessionMenu(options, sessions, currentIndex) {
     return new Promise((resolve) => {
-      output.clearAssistantLineForInput();
       const choiceState = createChoiceMenuState(options, options[currentIndex] || "");
       const session = { mode: "sessions", inputText: "/sessions", choiceState, sessions, resolve };
       state.input.session = session;
@@ -453,7 +447,6 @@ export function createCliInputActions({
 
   function askTeamBlueprint(blueprints) {
     return new Promise((resolve) => {
-      output.clearAssistantLineForInput();
       const items = (Array.isArray(blueprints) ? blueprints : []).map((item) => ({
         id: String(item?.id || ""),
         label: [item?.id, item?.name, item?.description].filter(Boolean).join(" · "),

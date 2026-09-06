@@ -1,8 +1,8 @@
+import { ANSI_SEQUENCE } from "./text-width.js";
 import { graphemes, stripAnsi, textWidth, wrapTextCells } from "./text-width.js";
 
 const DEFAULT_COLUMNS = 80;
 const INPUT_MARKER = "\n  ▷ ";
-const ANSI_SEQUENCE = /\x1b\[[0-?]*[ -/]*[@-~]/g;
 const SGR_SEQUENCE = /^\x1b\[([0-9;]*)m$/;
 
 export function prepareComposerFrame(frame = {}, columns = DEFAULT_COLUMNS) {

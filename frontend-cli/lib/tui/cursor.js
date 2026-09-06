@@ -1,7 +1,9 @@
 import { CURSOR_MARKER } from "./tui.js";
+
+// Non-global: String.match must expose match.index for cursor placement.
+const ANSI_SEQUENCE = /\[[0-?]*[ -/]*[@-~]/;
 import { graphemes, textWidth } from "../text-width.js";
 
-const ANSI_SEQUENCE = /\x1b\[[0-?]*[ -/]*[@-~]/;
 
 export function insertCursorMarker(line, column) {
   const text = String(line || "");

@@ -50,12 +50,11 @@ export function createRuntimeClient({
   cwd = process.cwd(),
   rindHome = process.env.RIND_HOME,
   runtimePath = process.env.RIND_RUNTIME_PATH || "",
-  onEvent = () => {},
   onMessage = null,
   onStderr = () => {},
   onExit = () => {},
 }) {
-  const handleEvent = onMessage || onEvent;
+  const handleEvent = onMessage;
   const launch = resolveRuntimeLaunch({ python, repoRoot, runtimePath, cliArgs });
 
   let nextId = 1;

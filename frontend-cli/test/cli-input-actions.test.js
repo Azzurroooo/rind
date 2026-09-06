@@ -10,7 +10,6 @@ test("question arrows leave custom editing and discard its draft", async () => {
   state.session.commands = [];
   const output = {
     terminalUi: {},
-    clearAssistantLineForInput() {},
     writeUserInput() {},
     closeAssistant() {},
     beginQuestion() {},
@@ -70,7 +69,6 @@ test("prompt input restores persisted history and saves natural prompts only", a
   const saved = [];
   const output = {
     terminalUi: {},
-    clearAssistantLineForInput() {},
     writeUserInput() {},
     redraw() {},
     writeError() {},

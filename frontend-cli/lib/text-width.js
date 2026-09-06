@@ -4,6 +4,8 @@ const segmenter = typeof Intl?.Segmenter === "function"
   ? new Intl.Segmenter(undefined, { granularity: "grapheme" })
   : null;
 
+export const ANSI_SEQUENCE = /\x1b\[[0-?]*[ -/]*[@-~]/g;
+
 export function stripAnsi(value) {
   return String(value || "").replace(ANSI_RE, "");
 }
@@ -82,25 +84,6 @@ export function truncateToWidth(value, maxWidth, ellipsis = "...") {
   return `${takeStartCells(text, maxWidth - suffixWidth)}${ellipsis}`;
 }
 
-export function expandTabs(value, tabWidth = 4) {
-  const text = String(value || "");
-  if (!text.includes("\t")) {
-    return text;
-  }
-  let column = 0;
-  let output = "";
-  for (const segment of graphemes(text)) {
-    if (segment === "\t") {
-      const spaces = tabWidth - (column % tabWidth);
-      output += " ".repeat(spaces);
-      column += spaces;
-      continue;
-    }
-    output += segment;
-    column += segmentWidth(segment);
-  }
-  return output;
-}
 
 export function wrapTextWithAnsi(value, firstWidth, continuationWidth = firstWidth) {
   const source = String(value ?? "");

@@ -1,3 +1,4 @@
+import { ANSI_SEQUENCE } from "./text-width.js";
 import { graphemes, textWidth } from "./text-width.js";
 import {
   codeOpenLabel,
@@ -12,7 +13,6 @@ import {
 } from "./markdown-lines.js";
 
 const CONTENT_PREFIX = "  ";
-const ANSI_SEQUENCE = /\x1b\[[0-?]*[ -/]*[@-~]/g;
 
 export { CONTENT_PREFIX };
 

@@ -233,7 +233,7 @@ function durationPart(name, event) {
   return dim(` · ${formatDuration(event?.duration_ms)}`);
 }
 
-function formatDuration(durationMs) {
+export function formatDuration(durationMs) {
   const value = Number(durationMs || 0);
   if (!Number.isFinite(value) || value <= 0) {
     return "0ms";
@@ -388,12 +388,12 @@ const BASH_RENDERER = {
 
 const BASH_OUTPUT_RENDERER = {
   runningMain(context, width) {
-    return `${bold("bg")} ${bgIdArg(context.args.bg_id, width, 10)}`;
+    return `${bold("bg")} ${commandArg(context.args.bg_id, width, 10)}`;
   },
   finished(context, width, state) {
     const { data } = resultData(context);
     const id = context.args.bg_id || data.bg_id;
-    let main = `${bold("bg")} ${bgIdArg(id, width, 14)}`;
+    let main = `${bold("bg")} ${commandArg(id, width, 14)}`;
     if (state.kind === "cancelled") {
       main += ` ${dim("(cancelled)")}`;
     }
@@ -654,11 +654,6 @@ function quoteArg(value, width) {
 }
 
 function commandArg(value, width, reserve) {
-  const text = singleLineText(value);
-  return text ? clipText(text, width, reserve) : dim("…");
-}
-
-function bgIdArg(value, width, reserve) {
   const text = singleLineText(value);
   return text ? clipText(text, width, reserve) : dim("…");
 }

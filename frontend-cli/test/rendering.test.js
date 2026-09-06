@@ -26,7 +26,6 @@ import {
   planUpdatedLine,
   sessionMenuText,
   sessionSwitchedText,
-  modelUsageText,
   outputBlockText,
   promptText,
   promptPlaceholderText,
@@ -40,12 +39,10 @@ import {
   startupText,
   taskMonitorTabs,
   themeMenuText,
-  toolProgressLine,
   toolRequestedLine,
   toolResultLine,
   toolStartedLine,
   turnCompletedLine,
-  unknownCommandText,
   userInputText,
 } from "../lib/rendering.js";
 import { textWidth } from "../lib/text-width.js";
@@ -408,13 +405,9 @@ test("modelListErrorText renders current model and fallback command", () => {
   );
 });
 
-test("unknownCommandText points to shortcuts help", () => {
-  assert.equal(unknownCommandText(), "◆ Unknown command\n    type / to browse commands or ? for shortcuts");
-});
 
-test("modelUsageText renders concrete model command usage", () => {
-  assert.equal(modelUsageText(), "◆ Model command\n    /model set <name>");
-});
+
+
 
 test("commandResultText renders a compact success line", () => {
   assert.equal(commandResultText("Model updated: glm-5.1"), "✓ Model updated: glm-5.1");
@@ -1017,16 +1010,7 @@ test("toolResultLine includes compact failure detail", () => {
   );
 });
 
-test("toolProgressLine renders compact progress messages", () => {
-  assert.equal(
-    toolProgressLine({
-      tool_name: "bash",
-      payload: { message: "waiting\nfor output" },
-    }),
-    "  ◌ Tool · command\n    ↳ waiting for output",
-  );
-  assert.equal(toolProgressLine({ tool_name: "bash", payload: { stdout: "ignored" } }), "");
-});
+
 
 test("turnCompletedLine renders duration and tool summary", () => {
   assert.equal(
