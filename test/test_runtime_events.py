@@ -49,7 +49,7 @@ class TestRuntimeEvents(unittest.TestCase):
         self.assertIn("tool_progress", json_str)
         self.assertIn("call_123", json_str)
 
-    def test_standard_event_metadata_round_trip(self):
+    def test_standard_event_metadata_serialization(self):
         event = ContextBuiltEvent(
             ts="2026-05-19T00:00:00Z",
             session_id="session_1",
@@ -59,13 +59,12 @@ class TestRuntimeEvents(unittest.TestCase):
             decisions={"mode": "test"},
         )
 
-        restored = RuntimeEvent.from_dict(event.to_dict())
+        event_dict = event.to_dict()
 
-        self.assertTrue(isinstance(restored, ContextBuiltEvent))
-        self.assertEqual(restored.session_id, "session_1")
-        self.assertEqual(restored.turn_id, "turn_1")
-        self.assertEqual(restored.message_count, 3)
-        self.assertEqual(restored.stats["estimated_input_tokens"], 123)
+        self.assertEqual(event_dict["session_id"], "session_1")
+        self.assertEqual(event_dict["turn_id"], "turn_1")
+        self.assertEqual(event_dict["message_count"], 3)
+        self.assertEqual(event_dict["stats"]["estimated_input_tokens"], 123)
 
     def test_new_runtime_events_are_serializable(self):
         events = [
@@ -93,17 +92,16 @@ class TestRuntimeEvents(unittest.TestCase):
         for event in events:
             event_dict = event.to_dict()
             self.assertTrue(event_dict["event_id"])
-            restored = RuntimeEvent.from_dict(event_dict)
-            self.assertEqual(restored.type, event.type)
+            self.assertEqual(event_dict["type"], event.type)
             if isinstance(event, QueuedInputDeliveredEvent):
-                self.assertEqual(restored.input_id, "queued-1")
+                self.assertEqual(event_dict["input_id"], "queued-1")
 
     def test_inheritance(self):
         event = TurnCompletedEvent()
         self.assertTrue(isinstance(event, RuntimeEvent))
         self.assertEqual(event.type, "turn_completed")
 
-    def test_user_question_requested_event_round_trip(self):
+    def test_user_question_requested_event_serialization(self):
         event = UserQuestionRequestedEvent(
             ts="2026-05-19T00:00:00Z",
             session_id="session_1",
@@ -118,12 +116,9 @@ class TestRuntimeEvents(unittest.TestCase):
 
         event_dict = event.to_dict()
         self.assertEqual(event_dict["type"], "user_question_requested")
-        restored = RuntimeEvent.from_dict(event_dict)
-
-        self.assertTrue(isinstance(restored, UserQuestionRequestedEvent))
-        self.assertEqual(restored.tool_call_id, "call_question")
-        self.assertEqual(restored.question, "Which mode should I use?")
-        self.assertEqual(restored.options, [
+        self.assertEqual(event_dict["tool_call_id"], "call_question")
+        self.assertEqual(event_dict["question"], "Which mode should I use?")
+        self.assertEqual(event_dict["options"], [
             {"label": "thorough (Recommended)", "description": "Use more analysis."},
             {"label": "fast", "description": "Use less analysis."},
         ])

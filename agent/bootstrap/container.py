@@ -44,7 +44,6 @@ class AgentContainer:
     tool_result_normalizer: ToolResultNormalizer
     tool_processor: ToolCallProcessor
     stream_parser: MessageStreamParser
-    context_estimator: ContextEstimator
     skill_repository: SkillRepository
     context_manager: ContextManager
     compaction_service: CompactionService
@@ -57,7 +56,6 @@ def build_agent_container(
     settings: AppSettings | None = None,
     provider_client_factory: OpenAIClientFactory | None = None,
     provider_async_client=None,
-    debug: bool = False,
     session_dir: str | None = None,
     session_id: str | None = None,
     resume_latest: bool = False,
@@ -213,9 +211,8 @@ def build_agent_container(
         workspace_root=workspace_root,
     )
     stream_parser = shared_resources.stream_parser if shared_resources else MessageStreamParser()
-    context_estimator = ContextEstimator()
     context_manager = ContextManager(
-        estimator=context_estimator,
+        estimator=ContextEstimator(),
         rind_doc_provider=lambda: build_rind_doc_context(workspace_root),
     )
     compaction_service = shared_resources.compaction_service if shared_resources else CompactionService(
@@ -229,7 +226,6 @@ def build_agent_container(
         context_manager=context_manager,
         compaction_service=compaction_service,
         skill_repository=skill_repository,
-        debug=debug,
     )
     runtime = AgentRuntime(
         turn_runner=turn_runner,
@@ -249,7 +245,6 @@ def build_agent_container(
         tool_result_normalizer=tool_result_normalizer,
         tool_processor=tool_processor,
         stream_parser=stream_parser,
-        context_estimator=context_estimator,
         skill_repository=skill_repository,
         context_manager=context_manager,
         compaction_service=compaction_service,

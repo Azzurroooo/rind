@@ -58,27 +58,6 @@ class RuntimeEvent:
         """Serialize event to a dictionary."""
         return asdict(self)
 
-    @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> RuntimeEvent:
-        """Deserialize a dictionary to a RuntimeEvent instance."""
-        event_type = data.get("type")
-
-        # We need to dispatch to the correct subclass
-        for subclass in cls.__subclasses__():
-            # Get the default value of 'type' field from the subclass
-            if hasattr(subclass, "__dataclass_fields__") and "type" in subclass.__dataclass_fields__:
-                type_field = subclass.__dataclass_fields__["type"]
-                if type_field.default == event_type:
-                    # Filter data to only include valid fields for this subclass
-                    valid_keys = {f.name for f in subclass.__dataclass_fields__.values()}
-                    filtered_data = {k: v for k, v in data.items() if k in valid_keys}
-                    return subclass(**filtered_data)
-
-        # Fallback to base class if no match
-        valid_keys = {f.name for f in cls.__dataclass_fields__.values()}
-        filtered_data = {k: v for k, v in data.items() if k in valid_keys}
-        return cls(**filtered_data)
-
 
 @dataclass(slots=True)
 class AssistantDeltaEvent(RuntimeEvent):

@@ -5,9 +5,6 @@ import sys
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 from types import SimpleNamespace
-import httpx
-import openai
-from tenacity import Future, RetryError
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 os.chdir(PROJECT_ROOT)
@@ -17,6 +14,8 @@ if str(PROJECT_ROOT) not in sys.path:
 from agent.runtime.core.runtime import AgentRuntime
 from agent.runtime.core.turn_runner import TurnRunner
 from agent.domain import ParsedToolCall
+from agent.domain.message_boundary import validate_model_message_boundary
+from agent.domain.errors import ProviderError
 from agent.domain.events import (
     AssistantDeltaEvent,
     AssistantMessageCompletedEvent,
@@ -608,7 +607,7 @@ async def test_async_turn_runner_emits_tool_requested_before_tool_execution():
             await on_tool_input_started_async(call.call_id, call.name)
             await on_tool_input_delta_async(call.call_id, call.name, call.raw_args)
             await on_tool_input_ended_async(call.call_id, call.name)
-        return item["content"], item["calls"]
+        return item["content"], item["calls"], None, None, None
 
     mock_parser = MagicMock()
     mock_parser.consume_async_stream = mock_consume
@@ -687,7 +686,7 @@ async def test_async_turn_runner_emits_plan_snapshot_before_plan_execution():
         on_content_async = args[1]
         item = calls.pop(0)
         await on_content_async(item["content"])
-        return item["content"], item["calls"]
+        return item["content"], item["calls"], None, None, None
 
     mock_parser = MagicMock()
     mock_parser.consume_async_stream = mock_consume
@@ -738,7 +737,7 @@ async def test_async_turn_runner_passes_transient_system_messages_to_context():
     mock_client = AsyncMock()
     mock_client.stream = MagicMock(return_value=EmptyStream())
     mock_parser = MagicMock()
-    mock_parser.consume_async_stream = AsyncMock(return_value=("", [], None))
+    mock_parser.consume_async_stream = AsyncMock(return_value=("", [], None, None, None))
     mock_context = MagicMock()
     mock_context.build_messages_async = AsyncMock(return_value=MagicMock(messages=[], stats={}, decisions={}))
     mock_context.select_active_skills_for_turn = None
@@ -791,7 +790,7 @@ async def test_async_turn_runner_fails_after_tool_persist_failure():
     async def mock_consume(*args, **kwargs):
         on_content_async = args[1]
         await on_content_async("Need tool")
-        return "Need tool", [call]
+        return "Need tool", [call], None, None, None
 
     mock_parser = MagicMock()
     mock_parser.consume_async_stream = mock_consume
@@ -860,7 +859,7 @@ async def test_async_turn_runner_emits_and_persists_sampling_usage():
     )
 
     mock_parser = MagicMock()
-    mock_parser.consume_async_stream = AsyncMock(return_value=("Done", [], usage))
+    mock_parser.consume_async_stream = AsyncMock(return_value=("Done", [], usage, None, None))
 
     mock_context = MagicMock()
     mock_context.build_messages_async = AsyncMock(
@@ -880,6 +879,7 @@ async def test_async_turn_runner_emits_and_persists_sampling_usage():
 
     class FakeSession:
         session_id = "session_1"
+        model = "test-model"
 
         def __init__(self):
             self.usages = []
@@ -924,7 +924,7 @@ async def test_async_turn_runner_usage_persistence_failure_does_not_fail_turn():
 
     usage = SimpleNamespace(prompt_tokens=12, completion_tokens=3, total_tokens=15)
     mock_parser = MagicMock()
-    mock_parser.consume_async_stream = AsyncMock(return_value=("Done", [], usage))
+    mock_parser.consume_async_stream = AsyncMock(return_value=("Done", [], usage, None, None))
 
     mock_context = MagicMock()
     mock_context.build_messages_async = AsyncMock(
@@ -938,6 +938,7 @@ async def test_async_turn_runner_usage_persistence_failure_does_not_fail_turn():
 
     class FakeSession:
         session_id = "session_1"
+        model = "test-model"
 
         def __init__(self):
             self.messages = []
@@ -978,7 +979,7 @@ async def test_async_turn_runner_usage_tolerates_bad_context_stats():
 
     usage = SimpleNamespace(prompt_tokens=12, completion_tokens=3, total_tokens=15)
     mock_parser = MagicMock()
-    mock_parser.consume_async_stream = AsyncMock(return_value=("Done", [], usage))
+    mock_parser.consume_async_stream = AsyncMock(return_value=("Done", [], usage, None, None))
 
     mock_context = MagicMock()
     mock_context.build_messages_async = AsyncMock(
@@ -992,6 +993,7 @@ async def test_async_turn_runner_usage_tolerates_bad_context_stats():
 
     class FakeSession:
         session_id = "session_1"
+        model = "test-model"
 
         def __init__(self):
             self.usages = []
@@ -1024,15 +1026,14 @@ async def test_async_turn_runner_usage_tolerates_bad_context_stats():
 
 
 @pytest.mark.asyncio
-async def test_async_turn_runner_retry_error_emits_visible_failure():
+async def test_async_turn_runner_provider_unavailable_emits_failure():
     mock_client = AsyncMock()
     mock_client.stream = MagicMock()
 
-    failed_attempt = Future(1)
-    failed_attempt.set_exception(RuntimeError("network down"))
-
     mock_parser = MagicMock()
-    mock_parser.consume_async_stream = AsyncMock(side_effect=RetryError(failed_attempt))
+    mock_parser.consume_async_stream = AsyncMock(
+        side_effect=ProviderError("network down", status="unavailable", error_type="ProviderError")
+    )
 
     mock_context = MagicMock()
     mock_context.build_messages_async = AsyncMock(return_value=MagicMock(messages=[], stats={}, decisions={}))
@@ -1051,13 +1052,10 @@ async def test_async_turn_runner_retry_error_emits_visible_failure():
 
     events = [event async for event in runner.run_turn(mock_session)]
 
-    assert any(
-        isinstance(event, AssistantDeltaEvent) and "network down" in event.text
-        for event in events
-    )
     assert isinstance(events[-1], TurnFailedEvent)
-    assert events[-1].error_type == "RetryError"
-    assert "APIUnavailableError" in events[-1].error
+    assert events[-1].error_type == "ProviderError"
+    assert "network down" in events[-1].error
+    assert events[-1].status == "unavailable"
     assert not any(event.error_type == "NameError" for event in events if isinstance(event, TurnFailedEvent))
 
 
@@ -1128,7 +1126,7 @@ async def test_async_turn_runner_auto_compacts_before_sampling():
     mock_context.select_active_skills_for_turn = None
 
     mock_parser = MagicMock()
-    mock_parser.consume_async_stream = AsyncMock(return_value=("", [], None))
+    mock_parser.consume_async_stream = AsyncMock(return_value=("", [], None, None, None))
 
     chat_client = FakeChatClient()
     session = FakeSession()
@@ -1261,12 +1259,12 @@ def test_compact_continuation_boundary_rejects_system_assistant_only():
         context_manager=MagicMock(),
     )
 
-    assert runner._has_valid_continuation_boundary(
+    assert validate_model_message_boundary(
         [
             {"role": "system", "content": "sys"},
             {"role": "assistant", "content": "Context compacted."},
         ]
-    ) is False
+    ).ok is False
 
 
 def test_compact_continuation_boundary_accepts_user_assistant_handoff():
@@ -1278,13 +1276,13 @@ def test_compact_continuation_boundary_accepts_user_assistant_handoff():
         context_manager=MagicMock(),
     )
 
-    assert runner._has_valid_continuation_boundary(
+    assert validate_model_message_boundary(
         [
             {"role": "system", "content": "sys"},
             {"role": "user", "content": COMPACT_CONTINUATION_USER_CONTENT},
             {"role": "assistant", "content": "Context compacted."},
         ]
-    ) is True
+    ).ok is True
 
 
 def test_model_boundary_rejects_naked_tool():
@@ -1296,13 +1294,13 @@ def test_model_boundary_rejects_naked_tool():
         context_manager=MagicMock(),
     )
 
-    assert runner._has_valid_continuation_boundary(
+    assert validate_model_message_boundary(
         [
             {"role": "system", "content": "sys"},
             {"role": "user", "content": "hello"},
             {"role": "tool", "tool_call_id": "call_1", "content": "orphan"},
         ]
-    ) is False
+    ).ok is False
 
 
 def test_model_boundary_rejects_incomplete_tool_call_tail():
@@ -1314,7 +1312,7 @@ def test_model_boundary_rejects_incomplete_tool_call_tail():
         context_manager=MagicMock(),
     )
 
-    assert runner._has_valid_continuation_boundary(
+    assert validate_model_message_boundary(
         [
             {"role": "system", "content": "sys"},
             {"role": "user", "content": "hello"},
@@ -1329,7 +1327,7 @@ def test_model_boundary_rejects_incomplete_tool_call_tail():
                 ],
             },
         ]
-    ) is False
+    ).ok is False
 
 
 def test_model_boundary_accepts_completed_tool_call():
@@ -1341,7 +1339,7 @@ def test_model_boundary_accepts_completed_tool_call():
         context_manager=MagicMock(),
     )
 
-    assert runner._has_valid_continuation_boundary(
+    assert validate_model_message_boundary(
         [
             {"role": "system", "content": "sys"},
             {"role": "user", "content": "hello"},
@@ -1357,7 +1355,7 @@ def test_model_boundary_accepts_completed_tool_call():
             },
             {"role": "tool", "tool_call_id": "call_1", "content": "done"},
         ]
-    ) is True
+    ).ok is True
 
 
 @pytest.mark.asyncio
@@ -1376,11 +1374,11 @@ async def test_context_length_recovery_hard_limit_is_turn_local():
         def stream(self, *args, **kwargs):
             self.stream_calls += 1
             if self.stream_calls <= 2:
-                response = httpx.Response(400, request=httpx.Request("POST", "https://example.test"))
-                raise openai.BadRequestError(
+                raise ProviderError(
                     "context_length_exceeded",
-                    response=response,
-                    body={"error": {"code": "context_length_exceeded"}},
+                    status="rejected",
+                    error_type="BadRequestError",
+                    code="context_length_exceeded",
                 )
             return LocalEmptyStream()
 
@@ -1429,7 +1427,7 @@ async def test_context_length_recovery_hard_limit_is_turn_local():
         )
     )
     parser = MagicMock()
-    parser.consume_async_stream = AsyncMock(return_value=("", [], None))
+    parser.consume_async_stream = AsyncMock(return_value=("", [], None, None, None))
     runner = TurnRunner(
         chat_client=FailingThenSuccessfulChatClient(),
         tool_processor=MagicMock(),

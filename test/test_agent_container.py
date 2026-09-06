@@ -62,7 +62,6 @@ def test_container_explicitly_shares_production_dependencies() -> None:
         assert container.turn_runner._compaction_service is container.compaction_service
         assert container.tool_processor._tool_executor is container.tool_executor
         assert container.tool_processor._tool_result_normalizer is container.tool_result_normalizer
-        assert container.context_manager._estimator is container.context_estimator
         assert not hasattr(container, "cli")
 
 

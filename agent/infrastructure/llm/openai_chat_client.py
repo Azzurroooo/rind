@@ -15,7 +15,6 @@ from tenacity import (
     stop_after_attempt,
     wait_exponential,
     retry_if_exception_type,
-    RetryCallState,
 )
 
 from agent.application.ports.chat_client import ChatClient
@@ -42,7 +41,6 @@ class OpenAIChatClient(ChatClient):
         self._reasoning_effort = (reasoning_effort or "").strip() or None
         self._reasoning_effort_disabled = False
         self._prompt_cache_key_disabled = False
-        self.on_retry = None  # Callback function: def on_retry(attempt: int, exception: Exception)
         self._trace_session_id_provider: Callable[[], str] | None = None
         self._workspace_root = workspace_root
 
@@ -67,9 +65,6 @@ class OpenAIChatClient(ChatClient):
 
         self._reasoning_effort = normalize_reasoning_effort(effort) or None
 
-    def set_retry_callback(self, callback) -> None:
-        self.on_retry = callback
-
     async def close(self) -> None:
         close = getattr(self._client, "close", None)
         if not callable(close):
@@ -77,13 +72,6 @@ class OpenAIChatClient(ChatClient):
         result = close()
         if inspect.isawaitable(result):
             await result
-
-    def _before_sleep_log(self, retry_state: RetryCallState):
-        if self.on_retry and retry_state.outcome and retry_state.outcome.failed:
-            try:
-                self.on_retry(retry_state.attempt_number, retry_state.outcome.exception())
-            except Exception:
-                logger.debug("Best-effort provider retry callback failed.", exc_info=True)
 
     @property
     def _retry_decorator(self):
@@ -96,7 +84,6 @@ class OpenAIChatClient(ChatClient):
             )),
             wait=wait_exponential(multiplier=1, min=2, max=10),
             stop=stop_after_attempt(5),
-            before_sleep=self._before_sleep_log,
             reraise=True,
         )
 
@@ -267,8 +254,6 @@ class OpenAIChatClient(ChatClient):
             else:
                 status = "failed"
         elif isinstance(exc, (openai.APIConnectionError, openai.RateLimitError, openai.InternalServerError)):
-            status = "unavailable"
-        elif type(exc).__name__ == "RetryError":
             status = "unavailable"
         else:
             status = "failed"

@@ -11,8 +11,7 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from agent.domain.cancellation import (
     CancellationToken,
-    CancellationTokenSource,
-    create_child_token
+    CancellationTokenSource
 )
 
 
@@ -70,7 +69,7 @@ class TestCancellationToken(unittest.TestCase):
 
     def test_child_token_propagation(self):
         parent_source = CancellationTokenSource()
-        child_source = create_child_token(parent_source.token)
+        child_source = CancellationTokenSource(parent_token=parent_source.token)
 
         self.assertFalse(parent_source.token.is_cancelled)
         self.assertFalse(child_source.token.is_cancelled)
@@ -83,7 +82,7 @@ class TestCancellationToken(unittest.TestCase):
 
     def test_child_token_isolation(self):
         parent_source = CancellationTokenSource()
-        child_source = create_child_token(parent_source.token)
+        child_source = CancellationTokenSource(parent_token=parent_source.token)
 
         child_source.cancel("child_died")
 

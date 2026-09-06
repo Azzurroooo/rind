@@ -100,11 +100,3 @@ class CancellationTokenSource:
         if self._parent_deregister:
             self._parent_deregister()
             self._parent_deregister = None
-
-
-def create_child_token(parent: CancellationToken) -> CancellationTokenSource:
-    """
-    Create a new cancellation token source linked to a parent token.
-    If the parent token is cancelled, the child token will also be cancelled.
-    """
-    return CancellationTokenSource(parent_token=parent)

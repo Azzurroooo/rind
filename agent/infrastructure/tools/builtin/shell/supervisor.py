@@ -212,7 +212,6 @@ class ProcessSupervisor:
             result_str=tool_ok(
                 "bash_output", payload, meta=output_meta(record, truncated)
             ),
-            exit_code=payload["exit_code"],
         )
 
     async def cancel_background(self, process_id: str, session_id: str) -> ToolExecutionResult:

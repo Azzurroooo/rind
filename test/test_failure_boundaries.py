@@ -6,7 +6,6 @@ from agent.application.tools.executor import ToolExecutor
 from agent.domain.errors import (
     PersistenceError,
     ProviderError,
-    RenderingError,
 )
 from agent.domain.events import ToolResultEvent, TurnFailedEvent
 from agent.infrastructure.llm.openai_chat_client import OpenAIChatClient
@@ -74,4 +73,3 @@ def test_provider_error_classification_and_boundary_sources():
     assert client._provider_error(TimeoutError("deadline")).status == "timed_out"
     assert ProviderError("offline", status="unavailable").source == "provider"
     assert PersistenceError("disk").source == "persistence"
-    assert RenderingError("console").source == "rendering"

@@ -55,7 +55,7 @@ async def test_async_turn_runner_stream():
         on_content_async = args[1]
         await on_content_async("Hello ")
         await on_content_async("World!")
-        return "Hello World!", []
+        return "Hello World!", [], None, None, None
 
     mock_parser.consume_async_stream = mock_consume
     runner, mock_session = make_runner(mock_parser)
@@ -76,7 +76,7 @@ async def test_async_turn_runner_stream():
 @pytest.mark.asyncio
 async def test_async_turn_runner_persists_reasoning_content():
     mock_parser = MagicMock()
-    mock_parser.consume_async_stream = AsyncMock(return_value=("Answer", [], None, "Private reasoning"))
+    mock_parser.consume_async_stream = AsyncMock(return_value=("Answer", [], None, "Private reasoning", None))
     runner, mock_session = make_runner(mock_parser)
 
     events = [event async for event in runner.run_turn(mock_session)]
@@ -99,7 +99,7 @@ async def test_async_turn_runner_yields_delta_before_stream_completes():
         await on_content_async("partial")
         delta_sent.set()
         await finish_stream.wait()
-        return "partial done", []
+        return "partial done", [], None, None, None
 
     mock_parser = MagicMock()
     mock_parser.consume_async_stream = mock_consume
@@ -138,7 +138,7 @@ async def test_async_turn_runner_cancels_stream_consumer_when_closed_early():
         except asyncio.CancelledError:
             consumer_cancelled.set()
             raise
-        return "partial done", []
+        return "partial done", [], None, None, None
 
     mock_parser = MagicMock()
     mock_parser.consume_async_stream = mock_consume
@@ -171,7 +171,7 @@ async def test_async_turn_runner_forwards_tool_input_before_stream_completes():
         input_started.set()
         await finish_stream.wait()
         await on_ended("call_1", "write_file")
-        return "", []
+        return "", [], None, None, None
 
     mock_parser = MagicMock()
     mock_parser.consume_async_stream = mock_consume

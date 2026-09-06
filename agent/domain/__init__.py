@@ -7,8 +7,6 @@ from .errors import (
     FailureStatus,
     PersistenceError,
     ProviderError,
-    RenderingError,
-    ToolBoundaryError,
     ToolEventStatus,
 )
 from .cancellation import CancellationToken, CancellationTokenSource
@@ -81,8 +79,6 @@ __all__ = [
     "FailureStatus",
     "PersistenceError",
     "ProviderError",
-    "RenderingError",
-    "ToolBoundaryError",
     "ToolEventStatus",
     "CancellationToken",
     "CancellationTokenSource",

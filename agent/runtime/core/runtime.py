@@ -116,10 +116,6 @@ class AgentRuntime:
             set_effort(effort)
         return model
 
-    def set_retry_callback(self, callback) -> None:
-        """Set a callback invoked on LLM API retries: (attempt: int, exception: Exception) -> None."""
-        self._turn_runner.set_retry_callback(callback)
-
     @property
     def skill_repository(self):
         """Expose the resolved repository to read-only interface commands."""

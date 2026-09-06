@@ -34,7 +34,6 @@ def completed_result(
             },
             meta=output_meta(record),
         ),
-        exit_code=display_exit_code(record),
     )
 
 
@@ -52,7 +51,6 @@ def cancelled_result(tool: str, record: ProcessRecord) -> ToolExecutionResult:
             },
             meta=output_meta(record),
         ),
-        exit_code=-1,
     )
 
 

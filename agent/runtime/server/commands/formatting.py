@@ -31,10 +31,6 @@ def single_line(value: object) -> str:
     return str(value or "").replace("\n", " ").strip()
 
 
-def escaped_newlines(value: object) -> str:
-    return str(value or "").replace("\n", "\\n")
-
-
 def safe_int(value: object, default: int = 0) -> int:
     try:
         return int(value)

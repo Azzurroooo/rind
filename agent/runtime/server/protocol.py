@@ -8,13 +8,6 @@ PROTOCOL_VERSION = "2"
 RequestId: TypeAlias = str | int | float
 
 
-class RequestEnvelope(TypedDict):
-    kind: Literal["request"]
-    request_id: RequestId
-    method: str
-    params: NotRequired[dict[str, Any]]
-
-
 class ErrorObject(TypedDict):
     type: str
     message: str

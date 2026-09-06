@@ -39,13 +39,5 @@ class ProviderError(BoundaryError):
     source = "provider"
 
 
-class ToolBoundaryError(BoundaryError):
-    source = "tool"
-
-
 class PersistenceError(BoundaryError):
     source = "persistence"
-
-
-class RenderingError(BoundaryError):
-    source = "rendering"

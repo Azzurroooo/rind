@@ -54,14 +54,6 @@ def normalize_skill_catalog(value: Any) -> list[dict[str, str]]:
     return entries
 
 
-def positive_int_or_none(value: Any) -> int | None:
-    try:
-        parsed = int(value)
-    except (TypeError, ValueError):
-        return None
-    return parsed if parsed > 0 else None
-
-
 def new_session_meta(
     *,
     session_id: str,

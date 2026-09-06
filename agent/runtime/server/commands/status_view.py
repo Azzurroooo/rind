@@ -9,11 +9,6 @@ from agent.runtime.server.commands.formatting import display_value, nonnegative_
 from .router import SlashCommandContext
 
 
-async def render_status(context: SlashCommandContext) -> str:
-    display = await build_status_display(context)
-    return render_status_display(display)
-
-
 def render_status_display(display: dict) -> str:
     lines = [
         "```text",

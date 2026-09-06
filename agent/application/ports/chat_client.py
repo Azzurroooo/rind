@@ -36,7 +36,3 @@ class ChatClient(Protocol):
     def set_model(self, model: str) -> None:
         """Set the active provider model."""
         ...
-
-    def set_retry_callback(self, callback) -> None:
-        """Set the provider retry observer."""
-        ...

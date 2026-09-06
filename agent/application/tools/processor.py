@@ -362,10 +362,10 @@ class ToolCallProcessor:
                 "_output_store": self._tool_output_store,
             }
             if self._tool_executor.is_async_tool(call.name):
-                result = await self._tool_executor.execute_async(call.name, execution_args, call.raw_args)
+                result = await self._tool_executor.execute_async(call.name, execution_args)
             else:
                 def _sync_run():
-                    return self._tool_executor.execute_sync(call.name, execution_args, call.raw_args)
+                    return self._tool_executor.execute_sync(call.name, execution_args)
 
                 result = await asyncio.to_thread(_sync_run)
 
@@ -461,16 +461,6 @@ class ToolCallProcessor:
         )
 
     async def _run_user_question(self, event: UserQuestionRequestedEvent) -> _ToolCallOutcome:
-        if not event.question:
-            return _ToolCallOutcome(
-                status="rejected",
-                error_type="InvalidUserQuestion",
-                result=tool_error(
-                    "ask_user_question",
-                    "ask_user_question requires a non-empty question string.",
-                    "InvalidUserQuestion",
-                ),
-            )
         if self._user_question_responder is None:
             return _ToolCallOutcome(
                 status="unavailable",

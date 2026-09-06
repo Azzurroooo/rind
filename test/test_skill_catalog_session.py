@@ -19,9 +19,6 @@ class MinimalRunner:
     def set_model(self, model):
         self.model = model
 
-    def set_retry_callback(self, callback):
-        self.retry_callback = callback
-
     def set_user_question_responder(self, responder):
         self.responder = responder
 

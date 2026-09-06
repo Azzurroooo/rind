@@ -82,20 +82,18 @@ async def pump_model_stream_events(
                     )
                 )
 
-            content, calls, usage, reasoning_content, finish_reason = _normalize_parsed_stream_result(
-                await stream_parser.consume_async_stream(
-                    stream_response,
-                    _on_content_async,
-                    cancellation_token,
-                    _on_tool_input_started_async,
-                    _on_tool_input_delta_async,
-                    _on_tool_input_ended_async,
-                )
+            content, calls, usage, reasoning_content, finish_reason = await stream_parser.consume_async_stream(
+                stream_response,
+                _on_content_async,
+                cancellation_token,
+                _on_tool_input_started_async,
+                _on_tool_input_delta_async,
+                _on_tool_input_ended_async,
             )
-            result.content = content
-            result.tool_calls = list(calls)
-            result.reasoning_content = reasoning_content
-            result.finish_reason = finish_reason
+            result.content = str(content or "")
+            result.tool_calls = list(calls or [])
+            result.reasoning_content = reasoning_content if isinstance(reasoning_content, str) else None
+            result.finish_reason = str(finish_reason) if finish_reason is not None else None
 
             normalized_usage = _normalize_usage(
                 usage,
@@ -137,34 +135,6 @@ async def pump_model_stream_events(
     consume_task.result()
 
 
-def _normalize_parsed_stream_result(
-    parsed: Any,
-) -> tuple[str, list[ParsedToolCall], Any | None, str | None, str | None]:
-    finish_reason = None
-    if isinstance(parsed, tuple) and len(parsed) == 5:
-        content, calls, usage, reasoning_content, finish_reason = parsed
-    elif isinstance(parsed, tuple) and len(parsed) == 4:
-        content, calls, usage, reasoning_content = parsed
-    elif isinstance(parsed, tuple) and len(parsed) == 3:
-        content, calls, usage = parsed
-        reasoning_content = None
-    else:
-        content, calls = parsed
-        usage = None
-        reasoning_content = None
-    return (
-        str(content or ""),
-        list(calls or []),
-        usage,
-        _normalize_reasoning_content(reasoning_content),
-        str(finish_reason) if finish_reason is not None else None,
-    )
-
-
-def _normalize_reasoning_content(value: Any) -> str | None:
-    return value if isinstance(value, str) else None
-
-
 def _normalize_usage(usage: Any, context_stats: dict[str, Any], model: str | None = None) -> dict[str, Any]:
     if usage is None:
         return {}
@@ -197,8 +167,5 @@ def _positive_int_or_default(value: Any, default: int) -> int:
     return parsed if parsed > 0 else default
 
 
-def _session_model(session: SessionStore) -> str | None:
-    try:
-        return session.model
-    except AttributeError:
-        return None
+def _session_model(session: SessionStore) -> str:
+    return session.model

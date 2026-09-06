@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from openai import AsyncOpenAI, OpenAI
+from openai import AsyncOpenAI
 
 from agent.infrastructure.config.settings_loader import AppSettings
 
@@ -12,13 +12,6 @@ from agent.infrastructure.config.settings_loader import AppSettings
 @dataclass(frozen=True, slots=True)
 class OpenAIClientFactory:
     settings: AppSettings
-
-    def create_client(self) -> OpenAI:
-        return OpenAI(
-            api_key=self.settings.api_key,
-            base_url=self.settings.base_url,
-            default_headers=self._default_headers(),
-        )
 
     def create_async_client(self) -> AsyncOpenAI:
         return AsyncOpenAI(

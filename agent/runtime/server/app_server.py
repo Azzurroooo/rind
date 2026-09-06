@@ -126,7 +126,6 @@ async def async_main(argv: list[str] | None = None, *, server_class: type[Any]) 
         os.chdir(workspace_root)
         container = build_agent_container(
             settings=settings,
-            debug=args.debug,
             session_dir=args.session_dir,
             session_id=args.session,
             resume_latest=args.resume_latest,

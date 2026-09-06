@@ -585,7 +585,6 @@ class ExecutionCoordinator:
                     settings=settings,
                     provider_client_factory=provider_client_factory,
                     provider_async_client=provider_async_client,
-                    debug=self._debug,
                     session_dir=self.session_dir,
                     session_id=clean,
                     enable_goal=self._enable_goal,
@@ -637,7 +636,6 @@ class ExecutionCoordinator:
             )
             return await self._collect_delegated_turn(session_id, task, instruction, cancellation_token), session_id
 
-        from agent.bootstrap import build_agent_container
         from agent.infrastructure.planning.store import preserve_active_session_context
 
         with tempfile.TemporaryDirectory(prefix="rind-inspect-") as session_dir:

@@ -8,8 +8,6 @@ import logging
 import time
 from collections.abc import Awaitable, Callable
 from typing import AsyncIterator
-import openai
-from tenacity import RetryError
 
 from agent.application.context.compaction import CompactionService
 from agent.application.context.manager import ContextBuildResult, ContextManager
@@ -63,7 +61,6 @@ class TurnRunner:
         context_manager: ContextManager,
         compaction_service: CompactionService | None = None,
         skill_repository=None,
-        debug: bool = False,
     ):
         self._chat_client = chat_client
         self._tool_processor = tool_processor
@@ -75,11 +72,6 @@ class TurnRunner:
         self._skill_turn_coordinator = (
             SkillTurnCoordinator(skill_repository) if skill_repository is not None else None
         )
-        self._debug = debug
-
-    def set_retry_callback(self, callback) -> None:
-        """Set a callback invoked on LLM API retries: (attempt: int, exception: Exception) -> None."""
-        self._chat_client.set_retry_callback(callback)
 
     def set_user_question_responder(self, responder) -> None:
         """Set the callback used when ask_user_question needs a user answer."""
@@ -261,42 +253,6 @@ class TurnRunner:
                         continue
                     yield self._failed_event(session, turn_id, e)
                     return
-                except openai.BadRequestError as e:
-                    if "context_length_exceeded" in str(e) or "maximum context length" in str(e).lower():
-                        context_length_recovery_count += 1
-                        if context_length_recovery_count == 1:
-                            await self._run_compact(
-                                session=session,
-                                context_messages=context_messages,
-                                context_stats=context_stats,
-                                context_decisions=context_decisions,
-                                reason="context_length_error",
-                                phase="mid_turn",
-                                phase_detail="context_length_recovery",
-                                transient_system_messages=transient_system_messages,
-                                cancellation_token=cancellation_token,
-                            )
-                        else:
-                            self._context_manager.reduce_hard_limit(factor=0.8)
-                            force_rescue_next_build = True
-                        continue
-                    yield self._failed_event(
-                        session,
-                        turn_id,
-                        ProviderError(str(e), status="rejected", error_type=type(e).__name__),
-                    )
-                    return
-                except RetryError as e:
-                    error_msg = f"\n\n[APIUnavailableError: The AI provider is currently unreachable after multiple retries. Error: {e.last_attempt.exception()}]"
-                    yield AssistantDeltaEvent(**event_meta(session, turn_id), text=error_msg)
-                    yield TurnFailedEvent(
-                        **event_meta(session, turn_id),
-                        error=error_msg,
-                        error_type="RetryError",
-                        status="unavailable",
-                        error_source="provider",
-                    )
-                    return
 
                 if parsed_tool_calls:
                     sampling_index += 1
@@ -354,26 +310,6 @@ class TurnRunner:
             yield self._cancelled_event(session, turn_id, cancellation_token, fallback=str(e))
         except BoundaryError as e:
             yield self._failed_event(session, turn_id, e)
-        except (asyncio.TimeoutError, TimeoutError, openai.APITimeoutError) as e:
-            yield self._failed_event(
-                session,
-                turn_id,
-                ProviderError(str(e), status="timed_out", error_type=type(e).__name__),
-            )
-        except (openai.APIConnectionError, openai.RateLimitError, openai.InternalServerError) as e:
-            yield self._failed_event(
-                session,
-                turn_id,
-                ProviderError(str(e), status="unavailable", error_type=type(e).__name__),
-            )
-        except openai.APIStatusError as e:
-            status_code = getattr(e, "status_code", None)
-            status = "rejected" if status_code in {400, 401, 403, 404, 409, 422} else "unavailable"
-            yield self._failed_event(
-                session,
-                turn_id,
-                ProviderError(str(e), status=status, error_type=type(e).__name__),
-            )
         except Exception as e:
             yield TurnFailedEvent(
                 **event_meta(session, turn_id),
@@ -595,9 +531,6 @@ class TurnRunner:
         result = validate_compact_handoff_boundary(messages)
         if not result.ok:
             raise RuntimeError(f"Compact produced an invalid continuation boundary: {result.reason}")
-
-    def _has_valid_continuation_boundary(self, messages: list[dict]) -> bool:
-        return validate_model_message_boundary(messages).ok
 
     async def _best_effort(self, operation, *args) -> None:
         try:

@@ -37,10 +37,6 @@ class ConfigStatus:
     error: str = ""
 
 
-def render_doctor_report(context: SlashCommandContext) -> str:
-    return build_doctor_report(context).text
-
-
 def build_doctor_report(context: SlashCommandContext) -> DoctorReport:
     checks = _build_checks(context)
     failures = sum(1 for check in checks if check.status == "fail")
