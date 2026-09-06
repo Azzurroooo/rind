@@ -20,7 +20,7 @@ from agent.application.tools import ToolResultNormalizer
 from agent.bootstrap import AgentContainer, SharedRuntimeResources, build_agent_container
 from agent.infrastructure.config import AppSettings, validate_settings
 from agent.infrastructure.config.settings_loader import DEFAULT_MODEL, load_settings
-from agent.infrastructure.llm import OpenAIClientFactory
+from agent.infrastructure.llm import OpenAIClientFactory, close_async_client
 from agent.infrastructure.persistence import JsonlSessionStore, ToolOutputStore
 from agent.infrastructure.paths import validate_session_id
 from agent.infrastructure.planning import build_plan_snapshot
@@ -603,7 +603,7 @@ class ExecutionCoordinator:
                 )
                 await container.runtime.initialize()
             except BaseException:
-                await _close_provider_client(provider_async_client)
+                await close_async_client(provider_async_client)
                 raise
             self._active[clean] = _ActiveExecution(container=container)
             return container
@@ -667,7 +667,7 @@ class ExecutionCoordinator:
                         cancellation_token,
                     )
                 finally:
-                    await _close_provider_client(provider_async_client)
+                    await close_async_client(provider_async_client)
         return response, None
 
     async def _collect_delegated_turn(self, session_id: str, task: str, instruction: str, cancellation_token) -> dict[str, str]:
@@ -841,15 +841,6 @@ def _workspace_defaults(workspace_root: str) -> tuple[str, str, str]:
     except (OSError, ValueError):
         return DEFAULT_MODEL, "", "https://api.openai.com/v1"
     return settings.model, settings.reasoning_effort, settings.base_url
-
-
-async def _close_provider_client(client: Any) -> None:
-    close = getattr(client, "close", None)
-    if not callable(close):
-        return
-    result = close()
-    if inspect.isawaitable(result):
-        await result
 
 
 async def _close_container(container: AgentContainer) -> None:

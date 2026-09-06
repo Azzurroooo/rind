@@ -9,16 +9,11 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 import agent.prompts as prompts
-
-
-class FakeShellPool:
-    def __init__(self, backend: str, executable: str | None):
-        self._default_backend = backend
-        self._default_executable = executable
+from agent.domain.shell import ShellDetection
 
 
 def test_system_info_omits_start_time(monkeypatch):
-    monkeypatch.setattr(prompts, "ShellSessionPool", lambda: FakeShellPool("bash", "/bin/bash"))
+    monkeypatch.setattr(prompts, "detect_default_shell", lambda: ShellDetection("/bin/bash", "bash"))
 
     info = prompts.get_system_info()
 
@@ -27,7 +22,7 @@ def test_system_info_omits_start_time(monkeypatch):
 
 
 def test_system_info_includes_current_date_without_time(monkeypatch):
-    monkeypatch.setattr(prompts, "ShellSessionPool", lambda: FakeShellPool("bash", "/bin/bash"))
+    monkeypatch.setattr(prompts, "detect_default_shell", lambda: ShellDetection("/bin/bash", "bash"))
 
     today = date.today().isoformat()
     info = prompts.get_system_info()
@@ -40,7 +35,7 @@ def test_system_info_includes_current_date_without_time(monkeypatch):
 
 def test_system_info_uses_detected_shell_backend(monkeypatch):
     shell_path = r"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe"
-    monkeypatch.setattr(prompts, "ShellSessionPool", lambda: FakeShellPool("powershell", shell_path))
+    monkeypatch.setattr(prompts, "detect_default_shell", lambda: ShellDetection(shell_path, "powershell"))
 
     info = prompts.get_system_info()
 

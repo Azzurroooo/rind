@@ -8,6 +8,8 @@ import math
 import re
 from dataclasses import asdict, dataclass
 
+from .token_usage import positive_int
+
 
 logger = logging.getLogger(__name__)
 
@@ -39,10 +41,10 @@ class ContextBudget:
         return data
 
     def resolved_context_window_tokens(self) -> int:
-        return self._positive_int_or_default(self.context_window_tokens, DEFAULT_CONTEXT_WINDOW_TOKENS)
+        return positive_int(self.context_window_tokens, DEFAULT_CONTEXT_WINDOW_TOKENS)
 
     def resolved_auto_compact_token_limit_percent(self) -> int:
-        percent = self._positive_int_or_default(
+        percent = positive_int(
             self.auto_compact_token_limit_percent,
             DEFAULT_AUTO_COMPACT_TOKEN_LIMIT_PERCENT,
         )
@@ -52,18 +54,10 @@ class ContextBudget:
         return max(1, self.resolved_context_window_tokens() * self.resolved_auto_compact_token_limit_percent() // 100)
 
     def resolved_hard_limit_tokens(self) -> int:
-        if self.hard_limit_tokens is not None:
-            return self._positive_int_or_default(self.hard_limit_tokens, self.resolved_context_window_tokens())
-        return self.resolved_context_window_tokens()
-
-    def _positive_int_or_default(self, value, default: int) -> int:
-        try:
-            parsed = int(value)
-        except (TypeError, ValueError):
-            return max(1, int(default))
-        if parsed <= 0:
-            return max(1, int(default))
-        return parsed
+        return positive_int(
+            self.hard_limit_tokens,
+            self.resolved_context_window_tokens(),
+        )
 
 
 @dataclass(slots=True)

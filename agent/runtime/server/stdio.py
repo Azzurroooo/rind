@@ -15,7 +15,7 @@ from agent.runtime.core import InputQueueError
 from agent.domain.cancellation import CancellationTokenSource
 from agent.domain.events import UserQuestionRequestedEvent
 from agent.infrastructure.config import validate_settings
-from agent.infrastructure.llm import OpenAIClientFactory
+from agent.infrastructure.llm import OpenAIClientFactory, close_async_client
 from agent.infrastructure.paths import validate_session_id
 from agent.version import __version__
 from agent.runtime.server.commands import SlashCommandContext, SlashCommandResult, SlashCommandRouter
@@ -45,14 +45,6 @@ class JsonlWriter:
             sys.stdout.write(line + "\n")
             sys.stdout.flush()
 
-
-async def _close_client(client: Any) -> None:
-    close = getattr(client, "close", None)
-    if not callable(close):
-        return
-    result = close()
-    if inspect.isawaitable(result):
-        await result
 
 
 def configure_utf8_stdio() -> None:
@@ -436,7 +428,7 @@ class StdioRuntimeServer:
             merged = self._merge_models(models, current_model)
         finally:
             if owns_client:
-                await self._close_client(client)
+                await close_async_client(client)
         await self._respond(
             request,
             {
@@ -622,9 +614,6 @@ class StdioRuntimeServer:
         if isinstance(item, dict):
             return str(item.get("id") or "").strip()
         return str(getattr(item, "id", "") or "").strip()
-
-    async def _close_client(self, client: Any) -> None:
-        await _close_client(client)
 
     async def _execute_slash(self, request: dict[str, Any]) -> None:
         params = request.get("params") if isinstance(request.get("params"), dict) else {}
@@ -1279,7 +1268,7 @@ class WorkerStdioRuntimeServer:
         try:
             models = await self._fetch_model_ids(client)
         finally:
-            await _close_client(client)
+            await close_async_client(client)
         default_model = settings.model
         current_model = str(info.get("model") or default_model)
         await self._respond(

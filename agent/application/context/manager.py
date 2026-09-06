@@ -10,6 +10,7 @@ from agent.domain.skills import render_available_skills
 from agent.domain.errors import PersistenceError
 
 from .estimator import ContextEstimator
+from .token_usage import positive_int
 
 
 logger = logging.getLogger(__name__)
@@ -64,7 +65,7 @@ class ContextManager:
         except Exception as exc:
             raise PersistenceError(
                 f"Failed to load session messages: {exc}",
-                error_type=type(exc).__name__,
+                code=type(exc).__name__,
             ) from exc
         pending = [dict(message) for message in (pending_messages or [])]
         budget = self._estimator.budget
@@ -187,7 +188,7 @@ class ContextManager:
 
     async def _get_compact_generation(self, session) -> int:
         try:
-            generation = self._positive_int_or_none(await session.get_compact_generation())
+            generation = positive_int(await session.get_compact_generation())
             if generation is not None:
                 return generation
         except Exception:
@@ -217,7 +218,7 @@ class ContextManager:
         if usage.get("sampling_kind") != "assistant":
             result["fallback_reason"] = "non_assistant_usage"
             return result
-        server_input_tokens = self._positive_int_or_none(usage.get("input_tokens"))
+        server_input_tokens = positive_int(usage.get("input_tokens"))
         if server_input_tokens is None:
             result["fallback_reason"] = "invalid_server_input_tokens"
             return result
@@ -227,8 +228,8 @@ class ContextManager:
             result["server_input_tokens"] = server_input_tokens
             return result
 
-        local_estimate = self._positive_int_or_none(anchor.get("local_estimated_input_tokens"))
-        anchor_generation = self._positive_int_or_none(anchor.get("compact_generation"))
+        local_estimate = positive_int(anchor.get("local_estimated_input_tokens"))
+        anchor_generation = positive_int(anchor.get("compact_generation"))
         anchor_model = self._clean_text(anchor.get("model"))
         current_model = self._clean_text(model)
         result.update(
@@ -265,13 +266,6 @@ class ContextManager:
         except Exception:
             logger.debug("Best-effort sampling usage lookup failed.", exc_info=True)
         return {}
-
-    def _positive_int_or_none(self, value) -> int | None:
-        try:
-            parsed = int(value)
-        except (TypeError, ValueError):
-            return None
-        return parsed if parsed > 0 else None
 
     def _clean_text(self, value) -> str | None:
         if not isinstance(value, str):

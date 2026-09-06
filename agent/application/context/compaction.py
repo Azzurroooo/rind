@@ -17,7 +17,7 @@ from agent.prompts import build_compact_prompt
 
 from .estimator import DEFAULT_CONTEXT_WINDOW_TOKENS
 from .handoff import CompactionHandoffBuilder
-from .token_usage import normalize_sampling_usage
+from .token_usage import normalize_sampling_usage, positive_int
 
 
 logger = logging.getLogger(__name__)
@@ -345,19 +345,12 @@ class CompactionService:
 
     def _sampling_usage(self, response: Any, context_stats: dict[str, Any] | None) -> dict[str, Any] | None:
         stats = context_stats or {}
-        context_window = self._positive_int(stats.get("context_window_tokens"), DEFAULT_CONTEXT_WINDOW_TOKENS)
+        context_window = positive_int(stats.get("context_window_tokens"), DEFAULT_CONTEXT_WINDOW_TOKENS)
         return normalize_sampling_usage(
             response,
             sampling_kind="compact",
             context_window_tokens=context_window,
         )
-
-    def _positive_int(self, value: Any, default: int) -> int:
-        try:
-            parsed = int(value)
-        except (TypeError, ValueError):
-            return default
-        return parsed if parsed > 0 else default
 
     async def _try_persist_sampling_usage(self, session, usage: dict[str, Any]) -> dict[str, str] | None:
         try:

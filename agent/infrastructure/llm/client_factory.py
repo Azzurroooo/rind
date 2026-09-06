@@ -2,11 +2,23 @@
 
 from __future__ import annotations
 
+import inspect
 from dataclasses import dataclass
+from typing import Any
 
 from openai import AsyncOpenAI
 
 from agent.infrastructure.config.settings_loader import AppSettings
+
+
+async def close_async_client(client: Any) -> None:
+    """Close a provider client regardless of sync/async SDK variants."""
+    close = getattr(client, "close", None)
+    if not callable(close):
+        return
+    result = close()
+    if inspect.isawaitable(result):
+        await result
 
 
 @dataclass(frozen=True, slots=True)

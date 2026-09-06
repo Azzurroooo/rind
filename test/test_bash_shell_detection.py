@@ -6,9 +6,10 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
+from agent.domain import shell as shell_detection
+from agent.domain.shell import ShellDetection, detect_default_shell
 from agent.infrastructure.tools.builtin.shell import session_pool as bash_session_pool
 from agent.infrastructure.tools.builtin.shell.supervisor import ProcessSupervisor
-from agent.infrastructure.tools.builtin.shell.session_pool import ShellSessionPool
 
 
 def test_detect_shell_prefers_rind_bash_path(tmp_path, monkeypatch):
@@ -16,10 +17,10 @@ def test_detect_shell_prefers_rind_bash_path(tmp_path, monkeypatch):
     bash_path.write_text("", encoding="utf-8")
     monkeypatch.setenv("RIND_BASH_PATH", str(bash_path))
 
-    pool = ShellSessionPool()
+    detection = detect_default_shell()
 
-    assert pool._default_executable == str(bash_path)
-    assert pool._default_backend == "bash"
+    assert detection.executable == str(bash_path)
+    assert detection.backend == "bash"
 
 
 def test_detect_shell_uses_bundled_portable_git(tmp_path, monkeypatch):
@@ -28,75 +29,84 @@ def test_detect_shell_uses_bundled_portable_git(tmp_path, monkeypatch):
     bash_path.parent.mkdir(parents=True)
     bash_path.write_text("", encoding="utf-8")
     monkeypatch.delenv("RIND_BASH_PATH", raising=False)
-    monkeypatch.setattr(bash_session_pool.platform, "system", lambda: "Windows")
-    monkeypatch.setattr(bash_session_pool.sys, "executable", str(app_dir / "rind.exe"))
-    monkeypatch.setattr(bash_session_pool.shutil, "which", lambda name: None)
+    monkeypatch.setattr(shell_detection.platform, "system", lambda: "Windows")
+    monkeypatch.setattr(shell_detection.sys, "executable", str(app_dir / "rind.exe"))
+    monkeypatch.setattr(shell_detection.shutil, "which", lambda name: None)
 
-    pool = ShellSessionPool()
+    detection = detect_default_shell()
 
-    assert pool._default_executable == str(bash_path)
-    assert pool._default_backend == "bash"
+    assert detection.executable == str(bash_path)
+    assert detection.backend == "bash"
 
 
 def test_detect_shell_uses_bundled_portable_git_usr_bin(tmp_path, monkeypatch):
     app_dir = tmp_path / "app"
-    bash_path = app_dir / "portable-git" / "usr" / "bin" / "bash.exe"
+    bash_path = app_dir / "portable-git" / "usr" / "bin" / "sh.exe"
     bash_path.parent.mkdir(parents=True)
     bash_path.write_text("", encoding="utf-8")
     monkeypatch.delenv("RIND_BASH_PATH", raising=False)
-    monkeypatch.setattr(bash_session_pool.platform, "system", lambda: "Windows")
-    monkeypatch.setattr(bash_session_pool.sys, "executable", str(app_dir / "rind.exe"))
-    monkeypatch.setattr(bash_session_pool.shutil, "which", lambda name: None)
+    monkeypatch.setattr(shell_detection.platform, "system", lambda: "Windows")
+    monkeypatch.setattr(shell_detection.sys, "executable", str(app_dir / "rind.exe"))
+    monkeypatch.setattr(shell_detection.shutil, "which", lambda name: None)
 
-    pool = ShellSessionPool()
+    detection = detect_default_shell()
 
-    assert pool._default_executable == str(bash_path)
-    assert pool._default_backend == "bash"
+    assert detection.executable == str(bash_path)
+    assert detection.backend == "sh"
+
+
+def _windows_with_no_bash(monkeypatch, tmp_path):
+    monkeypatch.delenv("RIND_BASH_PATH", raising=False)
+    monkeypatch.setattr(shell_detection.platform, "system", lambda: "Windows")
+    monkeypatch.setattr(shell_detection.sys, "executable", str(tmp_path / "rind.exe"))
+    monkeypatch.setattr(shell_detection.shutil, "which", lambda name: None)
+    monkeypatch.setattr(
+        shell_detection,
+        "_windows_bash_candidates",
+        lambda: [tmp_path / "missing" / "bash.exe"],
+    )
 
 
 def test_detect_shell_falls_back_to_powershell_on_windows(tmp_path, monkeypatch):
     powershell_path = tmp_path / "powershell.exe"
     powershell_path.write_text("", encoding="utf-8")
-    monkeypatch.delenv("RIND_BASH_PATH", raising=False)
-    monkeypatch.setattr(bash_session_pool.platform, "system", lambda: "Windows")
-    monkeypatch.setattr(bash_session_pool.sys, "executable", str(tmp_path / "rind.exe"))
+    _windows_with_no_bash(monkeypatch, tmp_path)
     monkeypatch.setattr(
-        bash_session_pool.shutil,
+        shell_detection.shutil,
         "which",
         lambda name: str(powershell_path) if name in {"pwsh", "powershell", "powershell.exe"} else None,
     )
-    monkeypatch.setattr(
-        ShellSessionPool,
-        "_windows_bash_candidates",
-        lambda self: [tmp_path / "missing" / "bash.exe"],
-    )
 
-    pool = ShellSessionPool()
-    state = pool.get_state("fallback")
+    detection = detect_default_shell()
 
-    assert state.shell_executable == str(powershell_path)
-    assert state.shell_backend == "powershell"
-    assert state.shell_error is None
+    assert detection.executable == str(powershell_path)
+    assert detection.backend == "powershell"
+    assert detection.error is None
 
 
 def test_detect_shell_reports_missing_backend_on_windows(tmp_path, monkeypatch):
-    monkeypatch.delenv("RIND_BASH_PATH", raising=False)
-    monkeypatch.setattr(bash_session_pool.platform, "system", lambda: "Windows")
-    monkeypatch.setattr(bash_session_pool.sys, "executable", str(tmp_path / "rind.exe"))
-    monkeypatch.setattr(bash_session_pool.shutil, "which", lambda name: None)
+    _windows_with_no_bash(monkeypatch, tmp_path)
+    monkeypatch.setattr(shell_detection, "_detect_powershell", lambda: None)
+
+    detection = detect_default_shell()
+
+    assert detection.executable is None
+    assert detection.backend == "unavailable"
+    assert "No supported shell backend" in (detection.error or "")
+
+
+def test_session_pool_uses_detected_shell(tmp_path, monkeypatch):
     monkeypatch.setattr(
-        ShellSessionPool,
-        "_windows_bash_candidates",
-        lambda self: [tmp_path / "missing" / "bash.exe"],
+        bash_session_pool,
+        "detect_default_shell",
+        lambda: ShellDetection(r"C:\shells\bash.exe", "bash"),
     )
-    monkeypatch.setattr(ShellSessionPool, "_detect_powershell", lambda self: None)
 
-    pool = ShellSessionPool()
-    state = pool.get_state("missing")
+    state = bash_session_pool.ShellSessionPool().get_state("session_1")
 
-    assert state.shell_executable is None
-    assert state.shell_backend == "unavailable"
-    assert "No supported shell backend" in (state.shell_error or "")
+    assert state.shell_executable == r"C:\shells\bash.exe"
+    assert state.shell_backend == "bash"
+    assert state.shell_error is None
 
 
 def test_process_supervisor_builds_powershell_command(tmp_path):

@@ -345,7 +345,7 @@ def discover_agent(cwd: str | Path | None = None) -> ResolvedAgent | None:
     if not (start / AITEAM_DIR / AGENT_MANIFEST).is_file():
         return None
     capsule = load_agent_capsule(start)
-    team_root = _find_team_root(start)
+    team_root = _find_project_root(start)
     if team_root is None:
         return ResolvedAgent(capsule, None)
     project = load_team_project(team_root)
@@ -441,13 +441,6 @@ def _find_descendant_project_root(root: Path) -> Path | None:
         project_root = manifest.parent.parent.resolve()
         if project_root != root:
             return project_root
-    return None
-
-
-def _find_team_root(start: Path) -> Path | None:
-    for path in (start, *start.parents):
-        if (path / AITEAM_DIR / PROJECT_MANIFEST).is_file():
-            return path
     return None
 
 

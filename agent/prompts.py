@@ -3,18 +3,18 @@ import platform
 from datetime import date
 from xml.sax.saxutils import escape
 
-from agent.infrastructure.tools.builtin.shell.session_pool import ShellSessionPool
+from agent.domain.shell import detect_default_shell
 
 
 def _detect_shell_display() -> tuple[str, str]:
-    pool = ShellSessionPool()
+    detection = detect_default_shell()
     shell_type = {
         "bash": "Bash",
         "sh": "POSIX sh",
         "powershell": "PowerShell",
         "unavailable": "Unavailable",
-    }.get(pool._default_backend, pool._default_backend)
-    return shell_type, pool._default_executable or "not found"
+    }.get(detection.backend, detection.backend)
+    return shell_type, detection.executable or "not found"
 
 
 def get_system_info(cwd: str | os.PathLike[str] | None = None):

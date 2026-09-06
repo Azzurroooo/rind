@@ -8,7 +8,7 @@ from dataclasses import dataclass, field
 from typing import Any, AsyncIterator, Awaitable, Callable
 
 from agent.application.context.estimator import DEFAULT_CONTEXT_WINDOW_TOKENS
-from agent.application.context.token_usage import attach_context_anchor, normalize_sampling_usage
+from agent.application.context.token_usage import attach_context_anchor, normalize_sampling_usage, positive_int
 from agent.application.ports.session_store import SessionStore
 from agent.runtime.core.stream_parser import MessageStreamParser
 from agent.domain.cancellation import CancellationToken
@@ -141,7 +141,7 @@ def _normalize_usage(usage: Any, context_stats: dict[str, Any], model: str | Non
     normalized = normalize_sampling_usage(
         usage,
         sampling_kind="assistant",
-        context_window_tokens=_positive_int_or_default(
+        context_window_tokens=positive_int(
             context_stats.get("context_window_tokens"),
             DEFAULT_CONTEXT_WINDOW_TOKENS,
         ),
@@ -152,19 +152,12 @@ def _normalize_usage(usage: Any, context_stats: dict[str, Any], model: str | Non
         normalized,
         context_stats=context_stats,
         model=model,
-        compact_generation=_positive_int_or_default(
+        compact_generation=positive_int(
             context_stats.get("auto_compact_compact_generation"),
             1,
         ),
     )
 
-
-def _positive_int_or_default(value: Any, default: int) -> int:
-    try:
-        parsed = int(value)
-    except (TypeError, ValueError):
-        return default
-    return parsed if parsed > 0 else default
 
 
 def _session_model(session: SessionStore) -> str:
