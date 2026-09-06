@@ -26,6 +26,9 @@ from agent.domain.events import (
 
 
 class RecordingSession:
+    async def get_turn_state(self):
+        return None
+    reasoning_effort = ""
     session_id = "session_1"
     model = "test-model"
 
@@ -53,8 +56,17 @@ class RecordingSession:
 
 
 class CompletingRunner:
+    model = "test-model"
+    reasoning_effort = ""
+
     def __init__(self):
         self.calls = []
+
+    def set_model(self, model):
+        self.model = model
+
+    def set_reasoning_effort(self, effort):
+        self.reasoning_effort = effort
 
     async def run_turn(self, session, cancellation_token=None, turn_id="", take_steering=None):
         self.calls.append(turn_id)
@@ -326,6 +338,15 @@ async def test_runtime_delivers_follow_ups_fifo_with_one_terminal_event_and_turn
 @pytest.mark.asyncio
 async def test_runtime_cancellation_discards_unconsumed_inputs_without_persisting_them():
     class CancelledRunner:
+        model = "test-model"
+        reasoning_effort = ""
+
+        def set_model(self, model):
+            self.model = model
+
+        def set_reasoning_effort(self, effort):
+            self.reasoning_effort = effort
+
         async def run_turn(self, session, cancellation_token=None, turn_id="", take_steering=None):
             assert cancellation_token.is_cancelled
             yield TurnCancelledEvent(turn_id=turn_id, reason=cancellation_token.reason)
@@ -391,10 +412,18 @@ async def test_turn_runner_injects_one_fifo_steering_after_tool_chain_per_sampli
             order.append("tool_finished")
 
     class ContextManager:
+        def snapshot_hard_limit(self):
+            return None
+
+        def restore_hard_limit(self, hard_limit):
+            return None
+
         async def build_messages_async(self, **_kwargs):
             return SimpleNamespace(messages=[], stats={}, decisions={})
 
     class OrderedSession(RecordingSession):
+        async def get_turn_state(self):
+            return None
         async def persist_message(self, role, content, **kwargs):
             order.append(f"persist:{role}:{content}")
             await super().persist_message(role, content, **kwargs)

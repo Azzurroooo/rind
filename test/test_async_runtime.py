@@ -16,6 +16,15 @@ from agent.runtime.core.turn_runner import TurnRunner
 from agent.domain import ParsedToolCall
 from agent.domain.message_boundary import validate_model_message_boundary
 from agent.domain.errors import ProviderError
+
+
+def _async_session_mock():
+    """MagicMock session whose async store methods are awaitable."""
+    session = MagicMock()
+    session.persist_turn_state = AsyncMock()
+    session.get_turn_state = AsyncMock(return_value=None)
+    return session
+
 from agent.domain.events import (
     AssistantDeltaEvent,
     AssistantMessageCompletedEvent,
@@ -60,7 +69,7 @@ async def test_async_turn_runner_cancellation():
     source.cancel("User cancelled")
 
     events = []
-    async for event in runner.run_turn(MagicMock(), cancellation_token=source.token):
+    async for event in runner.run_turn(_async_session_mock(), cancellation_token=source.token):
         events.append(event)
 
     assert len(events) == 1
@@ -88,7 +97,7 @@ async def test_async_turn_runner_stream_cancelled_error_is_cancelled_event():
     mock_context.build_messages_async = AsyncMock(return_value=MagicMock(messages=[], decisions={}))
     mock_context.select_active_skills_for_turn = None
 
-    mock_session = MagicMock()
+    mock_session = _async_session_mock()
     mock_session.now_iso.return_value = "2026-05-08T00:00:00Z"
 
     runner = TurnRunner(
@@ -129,7 +138,7 @@ async def test_async_turn_runner_cancelled_error_prefers_token_reason():
     mock_context.build_messages_async = AsyncMock(return_value=MagicMock(messages=[], stats={}, decisions={}))
     mock_context.select_active_skills_for_turn = None
 
-    mock_session = MagicMock()
+    mock_session = _async_session_mock()
     mock_session.now_iso.return_value = "2026-05-08T00:00:00Z"
 
     runner = TurnRunner(
@@ -150,6 +159,12 @@ async def test_async_turn_runner_cancelled_error_prefers_token_reason():
 @pytest.mark.asyncio
 async def test_async_runtime_facade_emits_turn_started_first():
     class FakeSession:
+        async def get_turn_state(self):
+            return None
+        model = "test-model"
+        reasoning_effort = ""
+        async def persist_turn_state(self, turn_id, status, ts, recovery_attempt=None):
+            return None
         session_id = "session_1"
 
         def __init__(self):
@@ -165,6 +180,8 @@ async def test_async_runtime_facade_emits_turn_started_first():
             return "2026-05-08T00:00:00Z"
 
     class FakeRunner:
+        def set_model(self, model):
+            self.model = model
         async def run_turn(self, session, cancellation_token=None, turn_id="", take_steering=None):
             yield TurnCompletedEvent(turn_id=turn_id)
 
@@ -186,6 +203,12 @@ async def test_async_runtime_holds_the_workspace_lock_for_the_entire_turn():
     events = []
 
     class FakeSession:
+        async def get_turn_state(self):
+            return None
+        model = "test-model"
+        reasoning_effort = ""
+        async def persist_turn_state(self, turn_id, status, ts, recovery_attempt=None):
+            return None
         session_id = "session_1"
 
         async def initialize(self):
@@ -206,6 +229,8 @@ async def test_async_runtime_holds_the_workspace_lock_for_the_entire_turn():
             events.append("released")
 
     class FakeRunner:
+        def set_model(self, model):
+            self.model = model
         async def run_turn(self, session, cancellation_token=None, turn_id="", take_steering=None):
             assert events == ["entered"]
             events.append("running")
@@ -222,6 +247,10 @@ async def test_async_runtime_holds_the_workspace_lock_for_the_entire_turn():
 @pytest.mark.asyncio
 async def test_async_runtime_persists_terminal_turn_state():
     class FakeSession:
+        async def get_turn_state(self):
+            return None
+        model = "test-model"
+        reasoning_effort = ""
         session_id = "session_1"
 
         def __init__(self):
@@ -240,6 +269,8 @@ async def test_async_runtime_persists_terminal_turn_state():
             return "2026-05-08T00:00:00Z"
 
     class FakeRunner:
+        def set_model(self, model):
+            self.model = model
         async def run_turn(self, session, cancellation_token=None, turn_id="", take_steering=None):
             yield TurnCompletedEvent(turn_id=turn_id, ts="2026-05-08T00:00:01Z")
 
@@ -259,6 +290,12 @@ async def test_async_runtime_persists_terminal_turn_state():
 @pytest.mark.asyncio
 async def test_async_runtime_facade_passes_transient_system_messages():
     class FakeSession:
+        async def get_turn_state(self):
+            return None
+        model = "test-model"
+        reasoning_effort = ""
+        async def persist_turn_state(self, turn_id, status, ts, recovery_attempt=None):
+            return None
         session_id = "session_1"
 
         def __init__(self):
@@ -274,6 +311,8 @@ async def test_async_runtime_facade_passes_transient_system_messages():
             return "2026-05-08T00:00:00Z"
 
     class FakeRunner:
+        def set_model(self, model):
+            self.model = model
         def __init__(self):
             self.received = None
 
@@ -302,6 +341,10 @@ async def test_async_runtime_facade_passes_transient_system_messages():
 @pytest.mark.asyncio
 async def test_async_runtime_completes_one_turn_with_active_goal_unchanged():
     class GoalSession:
+        async def get_turn_state(self):
+            return None
+        model = "test-model"
+        reasoning_effort = ""
         session_id = "goal-session"
 
         def __init__(self):
@@ -328,6 +371,8 @@ async def test_async_runtime_completes_one_turn_with_active_goal_unchanged():
             return "2026-05-08T00:00:00Z"
 
     class GoalRunner:
+        def set_model(self, model):
+            self.model = model
         def __init__(self, session):
             self.session = session
             self.calls = []
@@ -354,6 +399,10 @@ async def test_async_runtime_completes_one_turn_with_active_goal_unchanged():
 @pytest.mark.asyncio
 async def test_async_runtime_delivers_follow_up_before_goal_continuation():
     class GoalSession:
+        async def get_turn_state(self):
+            return None
+        model = "test-model"
+        reasoning_effort = ""
         session_id = "goal-session"
 
         def __init__(self):
@@ -380,6 +429,8 @@ async def test_async_runtime_delivers_follow_up_before_goal_continuation():
             return "2026-05-08T00:00:00Z"
 
     class GoalRunner:
+        def set_model(self, model):
+            self.model = model
         def __init__(self, session):
             self.session = session
             self.calls = []
@@ -410,6 +461,12 @@ async def test_async_runtime_delivers_follow_up_before_goal_continuation():
 @pytest.mark.asyncio
 async def test_async_runtime_facade_initializes_session_once_for_concurrent_turns():
     class FakeSession:
+        async def get_turn_state(self):
+            return None
+        model = "test-model"
+        reasoning_effort = ""
+        async def persist_turn_state(self, turn_id, status, ts, recovery_attempt=None):
+            return None
         session_id = "session_1"
 
         def __init__(self):
@@ -427,6 +484,8 @@ async def test_async_runtime_facade_initializes_session_once_for_concurrent_turn
             return "2026-05-08T00:00:00Z"
 
     class FakeRunner:
+        def set_model(self, model):
+            self.model = model
         async def run_turn(self, session, cancellation_token=None, turn_id="", take_steering=None):
             yield TurnCompletedEvent(turn_id=turn_id)
 
@@ -448,6 +507,7 @@ async def test_async_runtime_facade_initializes_session_once_for_concurrent_turn
 async def test_async_runtime_initialization_binds_loaded_session_model():
     class FakeSession:
         model = "meta-model"
+        reasoning_effort = ""
 
         async def initialize(self):
             return None
@@ -470,12 +530,20 @@ async def test_async_runtime_initialization_binds_loaded_session_model():
 @pytest.mark.asyncio
 async def test_async_runtime_facade_manual_compact_uses_runner():
     class FakeSession:
+        model = "test-model"
+        reasoning_effort = ""
+
         async def initialize(self):
             return None
 
     class FakeRunner:
+        model = ""
+
         def __init__(self):
             self.called = None
+
+        def set_model(self, model):
+            self.model = model
 
         async def compact_context(self, session, reason="manual", phase="manual", cancellation_token=None):
             self.called = (session, reason, phase, cancellation_token)
@@ -494,6 +562,8 @@ async def test_async_runtime_facade_manual_compact_uses_runner():
 @pytest.mark.asyncio
 async def test_async_runtime_facade_set_model_updates_runner_and_session():
     class FakeSession:
+        reasoning_effort = ""
+
         def __init__(self):
             self.model = "old-model"
 
@@ -525,6 +595,9 @@ async def test_async_runtime_facade_set_model_updates_runner_and_session():
 @pytest.mark.asyncio
 async def test_async_runtime_facade_set_reasoning_effort_updates_runner_and_session():
     class FakeSession:
+        model = ""
+        reasoning_effort = ""
+
         def __init__(self):
             self.effort = "low"
 
@@ -535,8 +608,13 @@ async def test_async_runtime_facade_set_reasoning_effort_updates_runner_and_sess
             self.effort = effort
 
     class FakeRunner:
+        model = ""
+
         def __init__(self):
             self.effort = "low"
+
+        def set_model(self, model):
+            self.model = model
 
         def set_reasoning_effort(self, effort):
             self.effort = effort
@@ -617,6 +695,12 @@ async def test_async_turn_runner_emits_tool_requested_before_tool_execution():
     mock_context.select_active_skills_for_turn = None
 
     class FakeSession:
+        async def get_turn_state(self):
+            return None
+        model = "test-model"
+        reasoning_effort = ""
+        async def persist_turn_state(self, turn_id, status, ts, recovery_attempt=None):
+            return None
         session_id = "session_1"
 
         def __init__(self):
@@ -695,6 +779,12 @@ async def test_async_turn_runner_emits_plan_snapshot_before_plan_execution():
     mock_context.select_active_skills_for_turn = None
 
     class FakeSession:
+        async def get_turn_state(self):
+            return None
+        model = "test-model"
+        reasoning_effort = ""
+        async def persist_turn_state(self, turn_id, status, ts, recovery_attempt=None):
+            return None
         session_id = "session_1"
 
         def now_iso(self):
@@ -743,7 +833,18 @@ async def test_async_turn_runner_passes_transient_system_messages_to_context():
     mock_context.select_active_skills_for_turn = None
 
     class FakeSession:
+        model = "test-model"
+        reasoning_effort = ""
         session_id = "session_1"
+
+        def __init__(self):
+            self.seen_transient = None
+
+        async def get_turn_state(self):
+            return None
+
+        async def persist_turn_state(self, turn_id, status, ts, recovery_attempt=None):
+            return None
 
         def now_iso(self):
             return "2026-05-08T00:00:00Z"
@@ -800,6 +901,12 @@ async def test_async_turn_runner_fails_after_tool_persist_failure():
     mock_context.select_active_skills_for_turn = None
 
     class FakeSession:
+        async def get_turn_state(self):
+            return None
+        model = "test-model"
+        reasoning_effort = ""
+        async def persist_turn_state(self, turn_id, status, ts, recovery_attempt=None):
+            return None
         session_id = "session_1"
 
         def __init__(self):
@@ -878,6 +985,12 @@ async def test_async_turn_runner_emits_and_persists_sampling_usage():
     mock_context.select_active_skills_for_turn = None
 
     class FakeSession:
+        async def get_turn_state(self):
+            return None
+        model = "test-model"
+        reasoning_effort = ""
+        async def persist_turn_state(self, turn_id, status, ts, recovery_attempt=None):
+            return None
         session_id = "session_1"
         model = "test-model"
 
@@ -937,6 +1050,12 @@ async def test_async_turn_runner_usage_persistence_failure_does_not_fail_turn():
     mock_context.select_active_skills_for_turn = None
 
     class FakeSession:
+        async def get_turn_state(self):
+            return None
+        model = "test-model"
+        reasoning_effort = ""
+        async def persist_turn_state(self, turn_id, status, ts, recovery_attempt=None):
+            return None
         session_id = "session_1"
         model = "test-model"
 
@@ -992,6 +1111,12 @@ async def test_async_turn_runner_usage_tolerates_bad_context_stats():
     mock_context.select_active_skills_for_turn = None
 
     class FakeSession:
+        async def get_turn_state(self):
+            return None
+        model = "test-model"
+        reasoning_effort = ""
+        async def persist_turn_state(self, turn_id, status, ts, recovery_attempt=None):
+            return None
         session_id = "session_1"
         model = "test-model"
 
@@ -1039,7 +1164,7 @@ async def test_async_turn_runner_provider_unavailable_emits_failure():
     mock_context.build_messages_async = AsyncMock(return_value=MagicMock(messages=[], stats={}, decisions={}))
     mock_context.select_active_skills_for_turn = None
 
-    mock_session = MagicMock()
+    mock_session = _async_session_mock()
     mock_session.now_iso.return_value = "2026-05-08T00:00:00Z"
 
     runner = TurnRunner(
@@ -1078,6 +1203,12 @@ async def test_async_turn_runner_auto_compacts_before_sampling():
             return EmptyStream()
 
     class FakeSession:
+        async def get_turn_state(self):
+            return None
+        model = "test-model"
+        reasoning_effort = ""
+        async def persist_turn_state(self, turn_id, status, ts, recovery_attempt=None):
+            return None
         session_id = "session_1"
 
         def __init__(self):
@@ -1165,6 +1296,10 @@ async def test_async_turn_runner_mid_turn_compact_does_not_preserve_raw_tail():
             )
 
     class FakeSession:
+        async def get_turn_state(self):
+            return None
+        model = "test-model"
+        reasoning_effort = ""
         session_id = "session_1"
 
         def __init__(self):
@@ -1386,6 +1521,12 @@ async def test_context_length_recovery_hard_limit_is_turn_local():
             return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content="handoff"))])
 
     class FakeSession:
+        async def get_turn_state(self):
+            return None
+        model = "test-model"
+        reasoning_effort = ""
+        async def persist_turn_state(self, turn_id, status, ts, recovery_attempt=None):
+            return None
         session_id = "session_1"
 
         def __init__(self):

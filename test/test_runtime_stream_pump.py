@@ -36,6 +36,8 @@ def make_runner(mock_parser):
     mock_session = MagicMock()
     mock_session.now_iso.return_value = "2026-05-08T00:00:00Z"
     mock_session.persist_message = AsyncMock()
+    mock_session.persist_turn_state = AsyncMock()
+    mock_session.get_turn_state = AsyncMock(return_value=None)
 
     runner = TurnRunner(
         chat_client=mock_client,

@@ -89,31 +89,16 @@ class AgentRuntime:
             self._initialized = True
 
     async def _sync_skill_catalog(self) -> None:
-        if self._skill_repository is None:
-            return
-        setter = getattr(self._session_store, "set_skill_catalog", None)
-        if not callable(setter):
-            return
-        try:
-            entries = [skill.to_catalog_entry() for skill in self._skill_repository.list_skills()]
-        except Exception:
-            logger.warning("Skill catalog scan failed; retaining the previous catalog.", exc_info=True)
-            return
-        try:
-            await setter(entries)
-        except Exception:
-            logger.debug("Skill catalog persistence failed; retaining the previous catalog.", exc_info=True)
-            return
+        if self._skill_turn_coordinator is not None:
+            await self._skill_turn_coordinator.sync_catalog(self._session_store)
 
     def _sync_turn_runner_config(self) -> str:
-        model = str(getattr(self._session_store, "model", None) or "").strip()
-        set_model = getattr(self._turn_runner, "set_model", None)
-        if model and callable(set_model):
-            set_model(model)
-        effort = str(getattr(self._session_store, "reasoning_effort", None) or "").strip()
-        set_effort = getattr(self._turn_runner, "set_reasoning_effort", None)
-        if effort and callable(set_effort):
-            set_effort(effort)
+        model = str(self._session_store.model or "").strip()
+        if model:
+            self._turn_runner.set_model(model)
+        effort = str(self._session_store.reasoning_effort or "").strip()
+        if effort:
+            self._turn_runner.set_reasoning_effort(effort)
         return model
 
     @property
@@ -187,140 +172,104 @@ class AgentRuntime:
         }
 
     async def set_model(self, model: str) -> dict[str, bool]:
-        """Switch the active chat model and persist the session metadata when supported."""
-        await self.initialize()
-        try:
-            await self._session_store.update_model(model)
-        except asyncio.CancelledError:
-            raise
-        except Exception as exc:
-                raise PersistenceError(
-                    f"Failed to persist model update: {exc}",
-                    code=type(exc).__name__,
-                ) from exc
-        runtime_updated = False
-        if not self.turn_active:
-            runtime_updated = bool(self._turn_runner.set_model(model))
-        return {"runtime": runtime_updated, "session": True}
+        """Switch the active chat model and persist the session metadata."""
+        return await self._update_model_setting(
+            model,
+            persist=self._session_store.update_model,
+            apply=self._turn_runner.set_model,
+            error_label="Failed to persist model update",
+        )
 
     async def set_reasoning_effort(self, effort: str) -> dict[str, bool]:
-        """Switch the active reasoning effort and persist the session metadata when supported."""
+        """Switch the active reasoning effort and persist the session metadata."""
+        return await self._update_model_setting(
+            effort,
+            persist=self._session_store.update_reasoning_effort,
+            apply=self._turn_runner.set_reasoning_effort,
+            error_label="Failed to persist reasoning effort update",
+        )
+
+    async def _update_model_setting(self, value: str, *, persist, apply, error_label: str) -> dict[str, bool]:
         await self.initialize()
         try:
-            await self._session_store.update_reasoning_effort(effort)
+            await persist(value)
         except asyncio.CancelledError:
             raise
         except Exception as exc:
-            raise PersistenceError(
-                    f"Failed to persist reasoning effort update: {exc}",
-                    code=type(exc).__name__,
-                ) from exc
+            raise PersistenceError(f"{error_label}: {exc}", code=type(exc).__name__) from exc
         runtime_updated = False
         if not self.turn_active:
-            runtime_updated = bool(self._turn_runner.set_reasoning_effort(effort))
+            apply(value)
+            runtime_updated = True
         return {"runtime": runtime_updated, "session": True}
 
     async def get_goal(self) -> dict[str, str] | None:
-        await self.initialize()
-        if not self._goal_enabled:
-            raise RuntimeError("Goal support is unavailable.")
-        getter = getattr(self._session_store, "get_goal", None)
-        if not callable(getter):
-            raise RuntimeError("Goal support is unavailable.")
-        goal = await getter()
+        await self._require_goal_enabled()
+        goal = await self._session_store.get_goal()
         return dict(goal) if isinstance(goal, dict) else None
 
     async def set_goal(self, objective: str) -> dict[str, str]:
-        await self.initialize()
-        if not self._goal_enabled:
-            raise RuntimeError("Goal support is unavailable.")
+        await self._require_goal_enabled()
         if self._accepting_inputs or self._active_turn_id:
             raise RuntimeError("Cannot replace a goal while a turn is active.")
         async with self._workspace_lock_guard(), self._turn_lock:
             if self._accepting_inputs or self._active_turn_id:
                 raise RuntimeError("Cannot replace a goal while a turn is active.")
-            setter = getattr(self._session_store, "set_goal", None)
-            if not callable(setter):
-                raise RuntimeError("Goal support is unavailable.")
-            goal = await setter(objective)
+            goal = await self._session_store.set_goal(objective)
             return dict(goal)
 
     async def set_goal_status(self, status: str) -> dict[str, str]:
-        await self.initialize()
-        if not self._goal_enabled:
-            raise RuntimeError("Goal support is unavailable.")
-        setter = getattr(self._session_store, "set_goal_status", None)
-        if not callable(setter):
-            raise RuntimeError("Goal support is unavailable.")
-        goal = await setter(status)
+        await self._require_goal_enabled()
+        goal = await self._session_store.set_goal_status(status)
         return dict(goal)
 
     async def clear_goal(self) -> None:
+        await self._require_goal_enabled()
+        await self._session_store.clear_goal()
+
+    async def _require_goal_enabled(self) -> None:
         await self.initialize()
         if not self._goal_enabled:
             raise RuntimeError("Goal support is unavailable.")
-        clear = getattr(self._session_store, "clear_goal", None)
-        if not callable(clear):
-            raise RuntimeError("Goal support is unavailable.")
-        await clear()
 
     async def switch_session(self, session_id: str) -> dict[str, object]:
         """Rebind the runtime to an existing session while it is idle."""
-        await self.initialize()
-        if self._accepting_inputs or self._active_turn_id:
-            raise RuntimeError("Cannot switch sessions while a turn is active.")
-
-        async with self._turn_lock:
-            if self._accepting_inputs or self._active_turn_id:
-                raise RuntimeError("Cannot switch sessions while a turn is active.")
-            switch = getattr(self._session_store, "switch_session", None)
-            if not callable(switch):
-                raise RuntimeError("Session switching is unsupported by this session store.")
-            self.discard_pending_inputs()
-            try:
-                result = await switch(session_id)
-            except asyncio.CancelledError:
-                raise
-            except Exception as exc:
-                raise PersistenceError(
-                    f"Failed to switch session: {exc}",
-                    code=type(exc).__name__,
-                ) from exc
-
-            target_model = self._sync_turn_runner_config()
-            self.discard_pending_inputs()
-            return dict(result) if isinstance(result, dict) else {
-                "session_id": getattr(self._session_store, "session_id", None),
-                "model": target_model,
-            }
+        return await self._rebind_session(
+            lambda: self._session_store.switch_session(session_id),
+            busy_message="Cannot switch sessions while a turn is active.",
+            persistence_label="Failed to switch session",
+        )
 
     async def create_session(self) -> dict[str, object]:
         """Create and bind a new session while the runtime is idle."""
+        return await self._rebind_session(
+            self._session_store.create_session,
+            busy_message="Cannot create a session while a turn is active.",
+            persistence_label="Failed to create session",
+        )
+
+    async def _rebind_session(self, rebind, *, busy_message: str, persistence_label: str) -> dict[str, object]:
         await self.initialize()
         if self._accepting_inputs or self._active_turn_id:
-            raise RuntimeError("Cannot create a session while a turn is active.")
+            raise RuntimeError(busy_message)
 
         async with self._turn_lock:
             if self._accepting_inputs or self._active_turn_id:
-                raise RuntimeError("Cannot create a session while a turn is active.")
-            create = getattr(self._session_store, "create_session", None)
-            if not callable(create):
-                raise RuntimeError("Session creation is unsupported by this session store.")
+                raise RuntimeError(busy_message)
             self.discard_pending_inputs()
             try:
-                result = await create()
+                result = await rebind()
             except asyncio.CancelledError:
                 raise
             except Exception as exc:
                 raise PersistenceError(
-                    f"Failed to create session: {exc}",
+                    f"{persistence_label}: {exc}",
                     code=type(exc).__name__,
                 ) from exc
 
             target_model = self._sync_turn_runner_config()
-            self.discard_pending_inputs()
             return dict(result) if isinstance(result, dict) else {
-                "session_id": getattr(self._session_store, "session_id", None),
+                "session_id": self._session_store.session_id,
                 "model": target_model,
             }
 
@@ -442,19 +391,14 @@ class AgentRuntime:
     async def _current_goal(self) -> dict[str, str] | None:
         if not self._goal_enabled:
             return None
-        getter = getattr(self._session_store, "get_goal", None)
-        if not callable(getter):
-            return None
-        goal = await getter()
+        goal = await self._session_store.get_goal()
         return dict(goal) if isinstance(goal, dict) else None
 
     async def _stop_active_goal(self, status: str) -> None:
         goal = await self._current_goal()
         if not goal or goal.get("status") != "active":
             return
-        setter = getattr(self._session_store, "set_goal_status", None)
-        if callable(setter):
-            await setter(status)
+        await self._session_store.set_goal_status(status)
 
     def _submit_input(self, mode: str, text: str, queue: deque[QueuedInput]) -> dict[str, object]:
         value = str(text or "").strip()
@@ -566,12 +510,9 @@ class AgentRuntime:
             ) from exc
 
     async def _persist_turn_state(self, event: RuntimeEvent, recovery_attempt: int | None = None) -> None:
-        persist = getattr(self._session_store, "persist_turn_state", None)
-        if not inspect.iscoroutinefunction(persist):
-            return
         try:
             status = "running" if event.type == "turn_started" else event.type.removeprefix("turn_")
-            await persist(event.turn_id, status, event.ts, recovery_attempt=recovery_attempt)
+            await self._session_store.persist_turn_state(event.turn_id, status, event.ts, recovery_attempt=recovery_attempt)
         except asyncio.CancelledError:
             raise
         except Exception as exc:

@@ -3,9 +3,14 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import asyncio
+import logging
 import re
 
 from agent.domain.skills import LoadedSkill, render_skill_content
+
+
+logger = logging.getLogger(__name__)
 
 
 _DOLLAR_MENTION_PATTERN = re.compile(r"\$([A-Za-z0-9_-]+)")
@@ -88,3 +93,19 @@ class SkillTurnCoordinator:
                 },
             )
         return [invocation for invocation, _skill in loaded]
+
+    async def sync_catalog(self, session) -> None:
+        """Refresh the session's Skill catalog; keep the previous one on failure."""
+        try:
+            entries = [skill.to_catalog_entry() for skill in self._repository.list_skills()]
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.warning("Skill catalog scan failed; retaining the previous catalog.", exc_info=True)
+            return
+        try:
+            await session.set_skill_catalog(entries)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.debug("Skill catalog persistence failed; retaining the previous catalog.", exc_info=True)

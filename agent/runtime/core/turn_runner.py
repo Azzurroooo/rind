@@ -6,7 +6,7 @@ import asyncio
 import inspect
 import logging
 import time
-from collections.abc import Awaitable, Callable
+from collections.abc import Callable
 from typing import AsyncIterator
 
 from agent.application.context.compaction import CompactionService
@@ -49,6 +49,15 @@ def _compact_diagnostics(phase_detail: str | None) -> dict | None:
     return {"auto_compact_phase_detail": phase_detail}
 
 
+def _context_built(context: ContextBuildResult, session: SessionStore, turn_id: str) -> ContextBuiltEvent:
+    return ContextBuiltEvent(
+        **event_meta(session, turn_id),
+        message_count=len(context.messages),
+        stats=dict(context.stats),
+        decisions=dict(context.decisions),
+    )
+
+
 class TurnRunner:
     """Manages the execution of a single conversational turn asynchronously."""
 
@@ -68,7 +77,6 @@ class TurnRunner:
         self._tool_schemas = tool_schemas
         self._context_manager = context_manager
         self._compaction_service = compaction_service or CompactionService()
-        self._skill_repository = skill_repository
         self._skill_turn_coordinator = (
             SkillTurnCoordinator(skill_repository) if skill_repository is not None else None
         )
@@ -77,13 +85,11 @@ class TurnRunner:
         """Set the callback used when ask_user_question needs a user answer."""
         self._tool_processor.set_user_question_responder(responder)
 
-    def set_model(self, model: str) -> bool:
+    def set_model(self, model: str) -> None:
         self._chat_client.set_model(model)
-        return True
 
-    def set_reasoning_effort(self, effort: str) -> bool:
+    def set_reasoning_effort(self, effort: str) -> None:
         self._chat_client.set_reasoning_effort(effort)
-        return True
 
     async def run_turn(
         self,
@@ -91,7 +97,7 @@ class TurnRunner:
         cancellation_token: CancellationToken | None = None,
         turn_id: str = "",
         transient_system_messages: list[dict] | None = None,
-        take_steering: Callable[[], str | tuple[str, str] | None | Awaitable[str | tuple[str, str] | None]] | None = None,
+        take_steering: Callable[[], tuple[str, str] | None] | None = None,
         resume: bool = False,
     ) -> AsyncIterator[RuntimeEvent]:
         """Run the main conversation loop for a user turn asynchronously, yielding events."""
@@ -127,38 +133,22 @@ class TurnRunner:
                     allow_rescue=force_rescue_next_build,
                 )
                 force_rescue_next_build = False
-                context_stats = dict(context.stats)
-                context_decisions = dict(context.decisions)
-                context_messages = list(context.messages)
-                yield ContextBuiltEvent(
-                    **event_meta(session, turn_id),
-                    message_count=len(context_messages),
-                    stats=dict(context_stats),
-                    decisions=dict(context_decisions),
-                )
-                if context_decisions.get("auto_compact_token_limit_reached"):
+                yield _context_built(context, session, turn_id)
+                if context.decisions.get("auto_compact_token_limit_reached"):
                     context = await self._run_compact(
                         session=session,
-                        context_messages=context_messages,
-                        context_stats=context_stats,
-                        context_decisions=context_decisions,
+                        context_messages=context.messages,
+                        context_stats=context.stats,
+                        context_decisions=context.decisions,
                         reason="auto",
                         phase="mid_turn",
                         phase_detail=self._compact_phase_detail(sampling_index),
                         transient_system_messages=transient_system_messages,
                         cancellation_token=cancellation_token,
                     )
-                    context_stats = dict(context.stats)
-                    context_decisions = dict(context.decisions)
-                    context_messages = list(context.messages)
-                    yield ContextBuiltEvent(
-                        **event_meta(session, turn_id),
-                        message_count=len(context_messages),
-                        stats=dict(context_stats),
-                        decisions=dict(context_decisions),
-                    )
+                    yield _context_built(context, session, turn_id)
 
-                boundary = validate_model_message_boundary(context_messages) if context_messages else None
+                boundary = validate_model_message_boundary(context.messages) if context.messages else None
                 if boundary is not None and not boundary.ok:
                     raise RuntimeError(f"Invalid model message boundary: {boundary.reason}")
 
@@ -167,7 +157,7 @@ class TurnRunner:
                     initial_recovery_attempt = 0
                     while True:
                         stream_response = self._chat_client.stream(
-                            messages=context_messages,
+                            messages=context.messages,
                             tools=self._tool_schemas,
                             cancellation_token=cancellation_token,
                         )
@@ -179,7 +169,7 @@ class TurnRunner:
                                 session=session,
                                 turn_id=turn_id,
                                 cancellation_token=cancellation_token,
-                                context_stats=context_stats,
+                                context_stats=context.stats,
                                 persist_sampling_usage=self._persist_sampling_usage,
                                 result=stream_result,
                             ):
@@ -238,9 +228,9 @@ class TurnRunner:
                         if context_length_recovery_count == 1:
                             await self._run_compact(
                                 session=session,
-                                context_messages=context_messages,
-                                context_stats=context_stats,
-                                context_decisions=context_decisions,
+                                context_messages=context.messages,
+                                context_stats=context.stats,
+                                context_decisions=context.decisions,
                                 reason="context_length_error",
                                 phase="mid_turn",
                                 phase_detail="context_length_recovery",
@@ -284,7 +274,7 @@ class TurnRunner:
                 if cancellation_token and cancellation_token.is_cancelled:
                     continue
 
-                steering_item = await self._next_steering(take_steering)
+                steering_item = self._next_steering(take_steering)
                 if steering_item is not None:
                     input_id, steering = steering_item
                     if self._skill_turn_coordinator is not None:
@@ -338,10 +328,7 @@ class TurnRunner:
         )
 
     async def _persist_recovery_state(self, session: SessionStore, turn_id: str, attempt: int) -> None:
-        persist = getattr(session, "persist_turn_state", None)
-        if not inspect.iscoroutinefunction(persist):
-            return
-        await persist(
+        await session.persist_turn_state(
             turn_id,
             "running",
             session.now_iso(),
@@ -349,19 +336,12 @@ class TurnRunner:
         )
 
     async def _current_recovery_attempt(self, session: SessionStore) -> int:
-        load = getattr(session, "get_turn_state", None)
-        if not inspect.iscoroutinefunction(load):
-            return 0
-        state = await load()
+        state = await session.get_turn_state()
         value = state.get("recovery_attempt") if isinstance(state, dict) else None
         return value if isinstance(value, int) and not isinstance(value, bool) and value > 0 else 0
 
     async def _pending_tool_calls(self, session: SessionStore) -> list[ParsedToolCall]:
-        load_messages = getattr(session, "load_messages", None)
-        load_records = getattr(session, "get_tool_records", None)
-        if not inspect.iscoroutinefunction(load_messages) or not inspect.iscoroutinefunction(load_records):
-            return []
-        messages = await load_messages()
+        messages = await session.load_messages()
         metadata = None
         for message in reversed(messages if isinstance(messages, list) else []):
             if not isinstance(message, dict):
@@ -385,7 +365,7 @@ class TurnRunner:
         ]
         if not calls:
             return []
-        records = await load_records(call_ids=[call.call_id for call in calls])
+        records = await session.get_tool_records(call_ids=[call.call_id for call in calls])
         completed = {
             (str(record.get("id") or ""), str(record.get("name") or ""), str(record.get("raw_args") or ""))
             for record in records
@@ -504,27 +484,12 @@ class TurnRunner:
         )
 
     async def _persist_sampling_usage(self, session: SessionStore, usage: dict) -> None:
-        try:
-            operation = session.persist_sampling_usage
-        except AttributeError:
-            logger.debug("Session does not expose optional sampling persistence.", exc_info=True)
-            return
-        await self._best_effort(operation, usage)
+        await self._best_effort(session.persist_sampling_usage, usage)
 
-    async def _next_steering(
-        self,
-        take_steering: Callable[[], str | tuple[str, str] | None | Awaitable[str | tuple[str, str] | None]] | None,
-    ) -> tuple[str, str] | None:
+    def _next_steering(self, take_steering: Callable[[], tuple[str, str] | None] | None) -> tuple[str, str] | None:
         if take_steering is None:
             return None
-        result = take_steering()
-        if inspect.isawaitable(result):
-            result = await result
-        if result is None:
-            return None
-        if isinstance(result, tuple) and len(result) == 2:
-            return str(result[0]), str(result[1])
-        return "", str(result)
+        return take_steering()
 
     def _validate_compact_context(self, context) -> None:
         messages = list(context.messages)
@@ -546,18 +511,12 @@ class TurnRunner:
         return None
 
     def _snapshot_context_hard_limit(self):
-        try:
-            return self._context_manager.snapshot_hard_limit()
-        except AttributeError:
-            return None
+        return self._context_manager.snapshot_hard_limit()
 
     def _restore_context_hard_limit(self, hard_limit) -> None:
         if hard_limit is None:
             return
-        try:
-            self._context_manager.restore_hard_limit(hard_limit)
-        except AttributeError:
-            return
+        self._context_manager.restore_hard_limit(hard_limit)
 
     def _cancelled_event(
         self,
@@ -571,18 +530,8 @@ class TurnRunner:
         return TurnCancelledEvent(**event_meta(session, turn_id), reason=reason)
 
     async def _sync_skill_catalog(self, session: SessionStore) -> None:
-        if self._skill_repository is None:
-            return
-        setter = getattr(session, "set_skill_catalog", None)
-        if not callable(setter):
-            return
-        try:
-            entries = [skill.to_catalog_entry() for skill in self._skill_repository.list_skills()]
-            await setter(entries)
-        except asyncio.CancelledError:
-            raise
-        except Exception:
-            logger.debug("Best-effort Skill catalog refresh failed.", exc_info=True)
+        if self._skill_turn_coordinator is not None:
+            await self._skill_turn_coordinator.sync_catalog(session)
 
     async def _persist_message(self, session: SessionStore, role: str, content: str, **kwargs) -> None:
         try:
