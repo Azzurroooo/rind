@@ -27,6 +27,18 @@ export function promptActivityLine(state = {}) {
   return `  ${accent(activityFrame(state.frame))} ${bold(label)} ${dim(`(${elapsed}) ctrl+c interrupt`)}`;
 }
 
+export function promptHintLine(state = {}) {
+  if (state.menuOpen) {
+    return "";
+  }
+  const text = state.inputMode === "question"
+    ? "  ↑↓ choose · enter confirm · esc cancel"
+    : state.running
+      ? "  enter steer · tab queue · ctrl+c stop · ctrl+b tasks"
+      : "  enter send · ↑↓ history · / commands · ? help";
+  return dim(clipCells(text, composerWidth(state.frameWidth)));
+}
+
 export function promptPlaceholderText() {
   return "Ask Rind to do anything";
 }
@@ -1216,6 +1228,10 @@ function inputPromptFrame(header = "", state = {}, frameWidth) {
   lines.push(...pendingInputLines(state.pendingInputs, frameWidth));
   if (header) {
     lines.push(header);
+  }
+  const hint = promptHintLine({ ...state, frameWidth });
+  if (hint) {
+    lines.push(hint);
   }
   lines.push(inputDivider(frameWidth));
   lines.push("  ▷ ");

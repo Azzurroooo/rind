@@ -11,6 +11,7 @@ test("question arrows leave custom editing and discard its draft", async () => {
   const output = {
     terminalUi: {},
     clearAssistantLineForInput() {},
+    writeUserInput() {},
     closeAssistant() {},
     beginQuestion() {},
     finishQuestion() {},
@@ -60,4 +61,47 @@ test("question arrows leave custom editing and discard its draft", async () => {
 
   actions.cancel();
   await pending;
+});
+
+test("prompt input restores persisted history and saves natural prompts only", async () => {
+  const state = createCliState();
+  state.runtime.status = "ready";
+  state.session.commands = [];
+  const saved = [];
+  const output = {
+    terminalUi: {},
+    clearAssistantLineForInput() {},
+    writeUserInput() {},
+    redraw() {},
+    writeError() {},
+  };
+  const actions = createCliInputActions({
+    state,
+    request: async () => ({}),
+    output,
+    promptHistory: ["previous prompt"],
+    onPromptHistory: (history) => saved.push(history),
+    getTurnController: () => ({ submitFollowUp() {} }),
+    getTaskMonitor: () => null,
+    getLineInput: () => null,
+    pausePrompt() {},
+    resumePrompt() {},
+    handleSigint() {},
+  });
+
+  const prompt = actions.ask("", "Ask Rind to do anything");
+  await Promise.resolve();
+  actions.handleTerminalInput("\x1b[A");
+  assert.equal(state.input.session.editor.input(), "previous prompt");
+  state.input.session.editor.setInput("new prompt");
+  actions.handleTerminalInput("\r");
+  assert.equal(await prompt, "new prompt");
+  assert.deepEqual(saved, [["new prompt", "previous prompt"]]);
+
+  const command = actions.ask("", "Ask Rind to do anything");
+  await Promise.resolve();
+  actions.handleTerminalInput("/help");
+  actions.handleTerminalInput("\r");
+  assert.equal(await command, "/help");
+  assert.deepEqual(saved, [["new prompt", "previous prompt"]]);
 });

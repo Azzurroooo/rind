@@ -23,9 +23,11 @@ export function createCliInputActions({
   pausePrompt,
   resumePrompt,
   handleSigint,
+  promptHistory = [],
+  onPromptHistory = () => {},
 }) {
   let cancelActiveInput = null;
-  const promptEditor = createLineEditor();
+  const promptEditor = createLineEditor("", { history: promptHistory });
 
   function restoreInputText(text) {
     state.input.prefill = String(text || "");
@@ -339,16 +341,27 @@ export function createCliInputActions({
     if (session.menuState) syncSlashMenu(session);
     const command = session.menuState?.selectedCommand();
     const value = command ? `/${command.name}` : session.editor.input();
-    if (session.mode === "prompt") session.editor.addToHistory(value);
+    if (session.mode === "prompt") recordPromptHistory(session.editor, value);
     completeTtyInput(session, value, session.mode === "prompt" && !state.turn.active, session.mode === "line" ? "\n" : "");
   }
 
   function queueTtyInput(session) {
     const value = session.editor.input();
     if (!value.trim()) return;
-    session.editor.addToHistory(value);
+    recordPromptHistory(session.editor, value);
     completeTtyInput(session, "", false);
     getTurnController().submitFollowUp(value);
+  }
+
+  function recordPromptHistory(editor, value) {
+    const text = String(value || "").trim();
+    if (!text || text.startsWith("/")) {
+      editor.addToHistory("");
+      return;
+    }
+    if (editor.addToHistory(text)) {
+      onPromptHistory(editor.getHistory());
+    }
   }
 
   function completeTtyInput(session, value, writeUser, lineText = "", displayValue = value) {

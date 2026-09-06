@@ -31,8 +31,14 @@ export function createEventController({
     }
     switch (eventType) {
       case "assistant_delta":
+        output.setActivityLabel?.("Working");
         output.assistantAppend?.(event.text || "");
         return;
+      case "turn_step_retry": {
+        const attempt = Number(event.attempt);
+        output.setActivityLabel?.(attempt > 0 ? `Retrying ${attempt}` : "Retrying");
+        return;
+      }
       case "context_built": {
         if (output.handleContextBuilt?.(event)) {
           output.resetContextUsage?.();

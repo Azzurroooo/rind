@@ -4,11 +4,11 @@ const HISTORY_LIMIT = 100;
 const UNDO_LIMIT = 100;
 const INPUT_PREFIX_WIDTH = 4;
 
-export function createLineEditor(initialValue = "") {
+export function createLineEditor(initialValue = "", options = {}) {
   let lines = splitLines(initialValue);
   let cursorLine = lines.length - 1;
   let cursorColumn = graphemes(lines[cursorLine]).length;
-  const history = [];
+  const history = normalizeHistory(options.history);
   let historyIndex = -1;
   let historyDraft = null;
   const undoStack = [];
@@ -142,13 +142,17 @@ export function createLineEditor(initialValue = "") {
       const text = String(value || "").trim();
       if (!text || history[0] === text) {
         resetHistory();
-        return;
+        return false;
       }
       history.unshift(text);
       if (history.length > HISTORY_LIMIT) {
         history.length = HISTORY_LIMIT;
       }
       resetHistory();
+      return true;
+    },
+    getHistory() {
+      return history.slice();
     },
   };
   return editor;
@@ -544,4 +548,19 @@ function isPrintable(chunk, key) {
     const code = character.codePointAt(0);
     return code >= 0x20 && code !== 0x7f && !(code >= 0x80 && code <= 0x9f);
   });
+}
+
+function normalizeHistory(values) {
+  const history = [];
+  for (const value of Array.isArray(values) ? values : []) {
+    const text = String(value || "").trim();
+    if (!text || history.includes(text)) {
+      continue;
+    }
+    history.push(text);
+    if (history.length >= HISTORY_LIMIT) {
+      break;
+    }
+  }
+  return history;
 }

@@ -25,6 +25,7 @@ export function createCliOutputController({ state, terminalUi, transcript }) {
   const toolBlocks = new Map();
   const legacyBegunTools = new Set();
   let questionBlock = null;
+  let turnContext = "";
 
   function suspendPrompt(action, options = {}) {
     return action();
@@ -39,15 +40,27 @@ export function createCliOutputController({ state, terminalUi, transcript }) {
 
   function inputState() {
     const running = state.turn.active || state.display.activeCompact;
+    const inputSession = state.input.session;
     return {
       running,
-      label: state.display.activeCompact
+      label: state.display.activityLabel || (state.display.activeCompact
         ? "Compacting"
-        : "Working",
+        : "Working"),
       frame: state.display.activityFrame,
       elapsedMs: running ? Date.now() - state.display.activityStartedAt : 0,
       pendingInputs: state.input.pending,
+      inputMode: inputSession?.mode || "prompt",
+      menuOpen: Boolean(inputSession?.menuState?.matches?.()?.length),
     };
+  }
+
+  function setActivityLabel(label = "") {
+    const next = String(label || "");
+    if (state.display.activityLabel === next) {
+      return;
+    }
+    state.display.activityLabel = next;
+    redraw();
   }
 
   function mainPromptText(frameWidth) {
@@ -277,7 +290,8 @@ export function createCliOutputController({ state, terminalUi, transcript }) {
     if (!callId) {
       return;
     }
-    const existing = toolBlocks.get(callId);
+    const key = toolBlockKey(callId);
+    const existing = toolBlocks.get(key);
     if (existing) {
       existing.enrichArgs(event);
       return;
@@ -287,7 +301,7 @@ export function createCliOutputController({ state, terminalUi, transcript }) {
       onRequestRender: () => redraw(),
       leading: blockCount > 0,
     });
-    toolBlocks.set(callId, block);
+    toolBlocks.set(key, block);
     appendBlock(block);
   }
 
@@ -295,7 +309,7 @@ export function createCliOutputController({ state, terminalUi, transcript }) {
     if (!terminalUi) {
       return;
     }
-    toolBlocks.get(String(callId || ""))?.setProgress(message);
+    toolBlocks.get(toolBlockKey(callId))?.setProgress(message);
   }
 
   function finishTool(event, fileChange) {
@@ -304,7 +318,8 @@ export function createCliOutputController({ state, terminalUi, transcript }) {
       return;
     }
     const callId = String(event?.tool_call_id || "");
-    let block = toolBlocks.get(callId);
+    const key = toolBlockKey(callId);
+    let block = toolBlocks.get(key);
     if (!block) {
       if (!callId) {
         return;
@@ -314,7 +329,7 @@ export function createCliOutputController({ state, terminalUi, transcript }) {
         onRequestRender: () => redraw(),
         leading: blockCount > 0,
       });
-      toolBlocks.set(callId, block);
+      toolBlocks.set(key, block);
       appendBlock(block);
     }
     block.enrichArgs({ arguments: argsFromResult(event?.tool_name, event?.result) });
@@ -329,6 +344,15 @@ export function createCliOutputController({ state, terminalUi, transcript }) {
       block.setExpanded(expanded);
     }
     redraw();
+  }
+
+  function setTurnContext(turnId = "") {
+    turnContext = String(turnId || "");
+  }
+
+  function toolBlockKey(callId) {
+    const value = String(callId || "");
+    return value ? `${turnContext}:${value}` : "";
   }
 
   function renderHistory(messages) {
@@ -404,6 +428,7 @@ export function createCliOutputController({ state, terminalUi, transcript }) {
     redraw,
     refreshInputState,
     clearActivityTimer,
+    setActivityLabel,
     mainPromptText,
     log,
     writeUserInput,
@@ -417,6 +442,7 @@ export function createCliOutputController({ state, terminalUi, transcript }) {
     beginQuestion,
     finishQuestion,
     setToolsExpanded,
+    setTurnContext,
     renderHistory,
     showStartup,
     replayAll: () => terminalUi?.replayAll?.(),

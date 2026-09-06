@@ -16,6 +16,7 @@ import {
 } from "./runtime-protocol.js";
 import { executeLocalSlashCommand, loadLocalSettings } from "./local-slash-commands.js";
 import { loadCliState, saveCliState } from "./cli-state-store.js";
+import { loadPromptHistory, savePromptHistory } from "./prompt-history-store.js";
 import { setTheme } from "./theme.js";
 import { createTurnController } from "./turn-controller.js";
 import { createCommandController } from "./command-controller.js";
@@ -102,6 +103,7 @@ const sessionState = cliState.session;
 const turnStateData = cliState.turn;
 const inputStateData = cliState.input;
 const displayState = cliState.display;
+const promptHistory = loadPromptHistory();
 let input = null;
 const compactContextState = createCompactContextState();
 const isTty = Boolean(process.stdin.isTTY && process.stdout.isTTY);
@@ -143,6 +145,7 @@ const {
   writeError: writeErrorOutput,
   closeAssistant,
   renderHistory,
+  setTurnContext,
 } = outputController;
 
 const runtimeClient = createRuntimeClient({
@@ -168,6 +171,9 @@ const runtimeClient = createRuntimeClient({
     displayState.lastEventSequence = 0;
     turnStateData.active = false;
     turnStateData.interruptRequested = false;
+    displayState.activityLabel = "";
+    displayState.lastTurnId = "";
+    setTurnContext("");
     clearActivityTimer();
     inputActions?.clearPendingInputs();
     if (!wasClosing) {
@@ -342,6 +348,7 @@ const eventController = createEventController({
     setStats: (stats) => {
       displayState.stats = stats;
     },
+    setActivityLabel: outputController.setActivityLabel,
     redraw: redrawInput,
     clearCompactContext: () => compactContextState.clear(),
     deliverQueuedInput: (...args) => inputActions.deliverQueuedInput(...args),
@@ -352,6 +359,8 @@ inputActions = createCliInputActions({
   state: cliState,
   request,
   output: outputController,
+  promptHistory,
+  onPromptHistory: (history) => savePromptHistory(history),
   getTurnController: () => turnController,
   getTaskMonitor: () => taskMonitorController,
   getLineInput: () => input,
@@ -442,19 +451,25 @@ async function renderEvent(message) {
   }
   if (message?.event?.type === "turn_started") {
     const nextTurnId = String(message.turn_id || "");
-    if (turnStateData.id && nextTurnId !== turnStateData.id) {
+    if (!nextTurnId || (!turnStateData.id && displayState.lastTurnId === nextTurnId)
+      || (turnStateData.id && nextTurnId !== turnStateData.id)) {
       return;
     }
     clearActivityTimer();
     turnStateData.id = nextTurnId;
+    displayState.lastTurnId = nextTurnId;
+    setTurnContext(nextTurnId);
     turnStateData.active = Boolean(turnStateData.id);
     turnStateData.interruptRequested = false;
+    displayState.activityLabel = "Working";
     displayState.assistantHeaderShown = false;
     refreshInputState();
   }
   const result = await eventController.handle(message);
   if (["turn_completed", "turn_failed", "turn_cancelled"].includes(message?.event?.type)) {
     turnStateData.id = "";
+    setTurnContext("");
+    displayState.activityLabel = "";
     await runtimeController.refreshGoalState();
     const goalActive = sessionState.info.goal?.status === "active";
     turnStateData.active = goalActive;
@@ -468,14 +483,24 @@ async function renderEvent(message) {
 }
 
 function restoreLiveTurn(value) {
-  if (!value || typeof value !== "object") return;
-  if (String(value.status || "") !== "running") return;
+  if (!value || typeof value !== "object" || String(value.status || "") !== "running") {
+    displayState.lastTurnId = "";
+    setTurnContext("");
+    return;
+  }
   const turnId = String(value.turn_id || "");
-  if (!turnId) return;
+  if (!turnId) {
+    displayState.lastTurnId = "";
+    setTurnContext("");
+    return;
+  }
   clearActivityTimer();
   turnStateData.id = turnId;
   turnStateData.active = true;
   turnStateData.interruptRequested = false;
+  displayState.activityLabel = "Working";
+  displayState.lastTurnId = turnId;
+  setTurnContext(turnId);
   displayState.assistantHeaderShown = false;
   const text = String(value.assistant_text || "");
   if (text) outputController.assistantAppend(text);

@@ -125,6 +125,7 @@ test("prompt and turn status copy match the compact terminal UI", () => {
     promptText(),
     [
       "",
+      "  enter send · ↑↓ history · / commands · ? help",
       `  ${"─".repeat(78)}`,
       "  ▷ ",
     ].join("\n"),
@@ -161,6 +162,7 @@ test("promptText includes only model and working directory above the input", () 
     [
       "",
       "  glm-5.1 · E:\\code\\agent\\rind-ts-cli-process-split",
+      "  enter send · ↑↓ history · / commands · ? help",
       `  ${"─".repeat(78)}`,
       "  ▷ ",
     ].join("\n"),
@@ -198,6 +200,7 @@ test("promptText keeps the activity line separate from the input chrome", () => 
     [
       "",
       "  ◓ Working (1s) ctrl+c interrupt",
+      "  enter steer · tab queue · ctrl+c stop · ctrl+b tasks",
       `  ${"─".repeat(78)}`,
       "  ▷ ",
     ].join("\n"),
@@ -222,6 +225,7 @@ test("promptText keeps pending input inside the live composer", () => {
       "  Queue: then summarize",
       "    alt+up recall queue · alt+down recall steer",
       "  m1 · E:\\project",
+      "  enter steer · tab queue · ctrl+c stop · ctrl+b tasks",
       `  ${"─".repeat(78)}`,
       "  ▷ ",
     ].join("\n"),
@@ -252,7 +256,7 @@ test("promptText extends the divider to the terminal's right edge", () => {
   const originalColumns = process.stdout.columns;
   process.stdout.columns = 80;
   try {
-    const divider = promptText().split("\n")[1];
+    const divider = promptText().split("\n").find((line) => line.startsWith("  ─"));
 
     assert.equal(divider.length, 80);
   } finally {
@@ -260,14 +264,14 @@ test("promptText extends the divider to the terminal's right edge", () => {
   }
 });
 
-test("promptText omits footer shortcuts and session metrics", () => {
+test("promptText shows compact shortcuts without session metrics", () => {
   const text = promptText({ model: "m1", cwd: "E:\\project" }, {
     context_usage_percent: 0.03,
     cache_hit_rate: 0.8,
     output_tokens: 3200,
   });
 
-  assert.doesNotMatch(text, /shortcuts|commands|enter send|ctrl\+c quit/);
+  assert.match(text, /enter send · ↑↓ history · \/ commands · \? help/);
   assert.doesNotMatch(text, /Context|cached|output/);
   assert.equal(text.split("\n").at(-1), "  ▷ ");
 });

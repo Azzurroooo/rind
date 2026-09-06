@@ -198,6 +198,17 @@ test("line editor supports word deletion, undo, and bracketed paste events", () 
   assert.equal(editor.input(), "hello world\n    你好");
 });
 
+test("line editor accepts persisted history and exposes a snapshot", () => {
+  const editor = createLineEditor("draft", { history: ["newest", "older"] });
+
+  assert.deepEqual(editor.getHistory(), ["newest", "older"]);
+  editor.handleKey("", { name: "home" });
+  editor.handleKey("", { name: "up" });
+  assert.equal(editor.input(), "newest");
+  assert.equal(editor.addToHistory("latest"), true);
+  assert.deepEqual(editor.getHistory(), ["latest", "newest", "older"]);
+});
+
 test("line editor rejects control characters passed through the key path", () => {
   const editor = createLineEditor("ab");
 

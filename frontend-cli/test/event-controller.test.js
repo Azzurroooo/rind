@@ -151,3 +151,18 @@ test("event controller ignores legacy goal continuation events", async () => {
   assert.deepEqual(logged, ["─ Worked for 0ms"]);
   assert.deepEqual(chasing, []);
 });
+
+test("event controller exposes stream recovery as a working status", async () => {
+  const labels = [];
+  const controller = createEventController({
+    output: {
+      setActivityLabel: (label) => labels.push(label),
+      assistantAppend() {},
+    },
+  });
+
+  await controller.handle({ kind: "event", event: { type: "turn_step_retry", attempt: 2 } });
+  await controller.handle({ kind: "event", event: { type: "assistant_delta", text: "continued" } });
+
+  assert.deepEqual(labels, ["Retrying 2", "Working"]);
+});

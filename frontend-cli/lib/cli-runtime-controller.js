@@ -219,6 +219,7 @@ export function createCliRuntimeController({
       return;
     }
     state.display.activeCompact = true;
+    state.display.activityLabel = "Compacting";
     state.turn.interruptRequested = false;
     refreshInputState();
     void runCompactCommand().catch((error) => {
@@ -234,6 +235,7 @@ export function createCliRuntimeController({
       await getCommands().applyResult(result);
     } finally {
       state.display.activeCompact = false;
+      state.display.activityLabel = "";
       state.turn.interruptRequested = false;
       refreshInputState();
     }
