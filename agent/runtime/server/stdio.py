@@ -58,6 +58,97 @@ def configure_stdio_server_signals() -> None:
     signal.signal(signal.SIGINT, signal.SIG_IGN)
 
 
+def protocol_capabilities(background_enabled: bool, goal_enabled: bool) -> list[str]:
+    capabilities = list(CAPABILITIES)
+    if background_enabled:
+        capabilities.append("rind/backgrounds")
+    if goal_enabled:
+        capabilities.append("rind/goals")
+    return capabilities
+
+
+def protocol_methods(background_enabled: bool, goal_enabled: bool) -> list[str]:
+    methods = list(CORE_METHODS)
+    if background_enabled:
+        methods.extend((RuntimeMethod.RIND_BACKGROUND_LIST, RuntimeMethod.RIND_BACKGROUND_OUTPUT))
+    if goal_enabled:
+        methods.extend(
+            (
+                RuntimeMethod.RIND_GOAL_GET,
+                RuntimeMethod.RIND_GOAL_SET,
+                RuntimeMethod.RIND_GOAL_STATUS,
+                RuntimeMethod.RIND_GOAL_CLEAR,
+            )
+        )
+    return methods
+
+
+def slash_command_infos(router: SlashCommandRouter) -> list[dict[str, Any]]:
+    return [
+        {"name": info.name, "description": info.description, "usage": info.usage, "aliases": list(info.aliases)}
+        for info in router.command_infos()
+    ]
+
+
+def merge_models(models: list[str], current_model: str) -> list[str]:
+    values = sorted({model for model in models if model})
+    if current_model and current_model not in values:
+        values.insert(0, current_model)
+    return values
+
+
+async def fetch_model_ids(client: Any) -> list[str]:
+    def _model_id(item: Any) -> str:
+        return str(item.get("id") if isinstance(item, dict) else getattr(item, "id", "") or "").strip()
+
+    response = client.models.list()
+    if hasattr(response, "__aiter__"):
+        return [_model_id(item) async for item in response]
+    if inspect.isawaitable(response):
+        response = await response
+    data = getattr(response, "data", response)
+    if hasattr(data, "__aiter__"):
+        return [_model_id(item) async for item in data]
+    if not isinstance(data, list | tuple):
+        try:
+            data = list(data)
+        except TypeError:
+            data = []
+    return [_model_id(item) for item in data]
+
+
+def background_enabled(background_list, background_output) -> bool:
+    return background_list is not None and background_output is not None
+
+
+async def background_list_response(background_list, session_id: str) -> dict[str, Any]:
+    tasks = background_list(session_id)
+    if inspect.isawaitable(tasks):
+        tasks = await tasks
+    if not isinstance(tasks, list):
+        raise TypeError("Background list must be a list.")
+    return {"tasks": tasks}
+
+
+async def background_output_response(background_output, session_id: str, params: dict[str, Any]) -> dict[str, Any]:
+    bg_id = params.get("bg_id")
+    if not isinstance(bg_id, str) or not bg_id.strip():
+        raise ValueError("rind/background/output requires bg_id.")
+    max_output_chars = params.get("max_output_chars", 20000)
+    if isinstance(max_output_chars, bool) or not isinstance(max_output_chars, int):
+        raise ValueError("rind/background/output max_output_chars must be an integer.")
+    task = background_output(
+        bg_id.strip(),
+        max_output_chars=max_output_chars,
+        _session_id=session_id,
+    )
+    if inspect.isawaitable(task):
+        task = await task
+    if not isinstance(task, dict):
+        raise TypeError("Background output must be an object.")
+    return {"task": task}
+
+
 class StdioRuntimeServer:
     def __init__(
         self,
@@ -247,38 +338,13 @@ class StdioRuntimeServer:
         )
 
     def _capabilities(self) -> list[str]:
-        capabilities = list(CAPABILITIES)
-        if self._background_list is not None and self._background_output is not None:
-            capabilities.append("rind/backgrounds")
-        if self._goal_enabled:
-            capabilities.append("rind/goals")
-        return capabilities
+        return protocol_capabilities(background_enabled(self._background_list, self._background_output), self._goal_enabled)
 
     def _methods(self) -> list[str]:
-        methods = list(CORE_METHODS)
-        if self._background_list is not None and self._background_output is not None:
-            methods.extend((RuntimeMethod.RIND_BACKGROUND_LIST, RuntimeMethod.RIND_BACKGROUND_OUTPUT))
-        if self._goal_enabled:
-            methods.extend(
-                (
-                    RuntimeMethod.RIND_GOAL_GET,
-                    RuntimeMethod.RIND_GOAL_SET,
-                    RuntimeMethod.RIND_GOAL_STATUS,
-                    RuntimeMethod.RIND_GOAL_CLEAR,
-                )
-            )
-        return methods
+        return protocol_methods(background_enabled(self._background_list, self._background_output), self._goal_enabled)
 
     def _slash_command_infos(self) -> list[dict[str, Any]]:
-        return [
-            {
-                "name": info.name,
-                "description": info.description,
-                "usage": info.usage,
-                "aliases": list(info.aliases),
-            }
-            for info in self._slash_router.command_infos()
-        ]
+        return slash_command_infos(self._slash_router)
 
     async def _resume_preview(self) -> str:
         get_messages = getattr(self._session, "get_messages_slice", None)
@@ -422,10 +488,10 @@ class StdioRuntimeServer:
         if client is None:
             client = self._model_client_factory()
         try:
-            models = await self._fetch_model_ids(client)
+            models = await fetch_model_ids(client)
             current_model = self._current_model()
             default_model = self._default_model
-            merged = self._merge_models(models, current_model)
+            merged = merge_models(models, current_model)
         finally:
             if owns_client:
                 await close_async_client(client)
@@ -576,44 +642,9 @@ class StdioRuntimeServer:
         self._interrupt_current()
         await self._respond(request, {"goal": None})
 
-    async def _fetch_model_ids(self, client: Any) -> list[str]:
-        response = client.models.list()
-        if hasattr(response, "__aiter__"):
-            return [self._model_id(item) async for item in response]
-        if inspect.isawaitable(response):
-            response = await response
-        data = getattr(response, "data", response)
-        if hasattr(data, "__aiter__"):
-            return [self._model_id(item) async for item in data]
-        if not isinstance(data, list | tuple):
-            try:
-                data = list(data)
-            except TypeError:
-                data = []
-        return [self._model_id(item) for item in data]
-
     def _current_model(self) -> str:
         session_model = str(getattr(self._session, "model", "") or "").strip()
         return session_model or self._default_model
-
-    def _merge_models(self, models: list[str], current_model: str) -> list[str]:
-        seen: set[str] = set()
-        merged: list[str] = []
-        current_found = False
-        for model in sorted(model for model in models if model):
-            if model in seen:
-                continue
-            seen.add(model)
-            current_found = current_found or model == current_model
-            merged.append(model)
-        if current_model and not current_found:
-            merged.insert(0, current_model)
-        return merged
-
-    def _model_id(self, item: Any) -> str:
-        if isinstance(item, dict):
-            return str(item.get("id") or "").strip()
-        return str(getattr(item, "id", "") or "").strip()
 
     async def _execute_slash(self, request: dict[str, Any]) -> None:
         params = request.get("params") if isinstance(request.get("params"), dict) else {}
@@ -721,12 +752,7 @@ class StdioRuntimeServer:
             )
             return
         try:
-            tasks = self._background_list(self._session_id())
-            if inspect.isawaitable(tasks):
-                tasks = await tasks
-            if not isinstance(tasks, list):
-                raise TypeError("Background list must be a list.")
-            await self._respond(request, {"tasks": tasks})
+            await self._respond(request, await background_list_response(self._background_list, self._session_id()))
         except Exception as exc:
             await self._respond_error(request, str(exc), type(exc).__name__)
 
@@ -739,33 +765,18 @@ class StdioRuntimeServer:
             )
             return
         params = request.get("params") if isinstance(request.get("params"), dict) else {}
-        bg_id = params.get("bg_id")
-        if not isinstance(bg_id, str) or not bg_id.strip():
-            await self._respond_error(request, "rind/background/output requires bg_id.", "InvalidRequest")
-            return
-        max_output_chars = params.get("max_output_chars", 20000)
-        if isinstance(max_output_chars, bool) or not isinstance(max_output_chars, int):
-            await self._respond_error(
-                request,
-                "rind/background/output max_output_chars must be an integer.",
-                "InvalidRequest",
-            )
-            return
         try:
-            task = self._background_output(
-                bg_id.strip(),
-                max_output_chars=max_output_chars,
-                _session_id=self._session_id(),
-            )
-            if inspect.isawaitable(task):
-                task = await task
-            if not isinstance(task, dict):
-                raise TypeError("Background output must be an object.")
-            await self._respond(request, {"task": task})
+            response = await background_output_response(self._background_output, self._session_id(), params)
+        except ValueError as exc:
+            await self._respond_error(request, str(exc), "InvalidRequest")
+            return
         except LookupError as exc:
             await self._respond_error(request, str(exc), "NotFound")
+            return
         except Exception as exc:
             await self._respond_error(request, str(exc), type(exc).__name__)
+            return
+        await self._respond(request, response)
 
     def _session_id(self) -> str:
         return str(getattr(self._session, "session_id", "default") or "default")
@@ -886,6 +897,26 @@ class _WorkerWriter:
                 self._sequence += 1
                 payload = {**payload, "sequence": self._sequence}
             await self._writer.send(payload)
+
+
+class _RepositoryGoalOps:
+    """Runtime-shaped goal operations backed by the repository for inactive sessions."""
+
+    def __init__(self, repository, session_id: str):
+        self._repository = repository
+        self._session_id = session_id
+
+    async def get_goal(self):
+        return await self._repository.get_goal(self._session_id)
+
+    async def set_goal(self, objective: str):
+        return await self._repository.set_goal(self._session_id, objective)
+
+    async def set_goal_status(self, status: str):
+        return await self._repository.set_goal_status(self._session_id, status)
+
+    async def clear_goal(self):
+        await self._repository.clear_goal(self._session_id)
 
 
 class WorkerStdioRuntimeServer:
@@ -1096,26 +1127,13 @@ class WorkerStdioRuntimeServer:
         self._initialized = True
 
     def _capabilities(self) -> list[str]:
-        capabilities = list(CAPABILITIES)
-        if self._background_list is not None and self._background_output is not None:
-            capabilities.append("rind/backgrounds")
-        if self._goal_enabled:
-            capabilities.append("rind/goals")
-        return capabilities
+        return protocol_capabilities(background_enabled(self._background_list, self._background_output), self._goal_enabled)
 
     def _methods(self) -> list[str]:
-        methods = list(CORE_METHODS)
-        if self._background_list is not None and self._background_output is not None:
-            methods.extend((RuntimeMethod.RIND_BACKGROUND_LIST, RuntimeMethod.RIND_BACKGROUND_OUTPUT))
-        if self._goal_enabled:
-            methods.extend((RuntimeMethod.RIND_GOAL_GET, RuntimeMethod.RIND_GOAL_SET, RuntimeMethod.RIND_GOAL_STATUS, RuntimeMethod.RIND_GOAL_CLEAR))
-        return methods
+        return protocol_methods(background_enabled(self._background_list, self._background_output), self._goal_enabled)
 
     def _slash_command_infos(self) -> list[dict[str, Any]]:
-        return [
-            {"name": info.name, "description": info.description, "usage": info.usage, "aliases": list(info.aliases)}
-            for info in self._slash_router.command_infos()
-        ]
+        return slash_command_infos(self._slash_router)
 
     async def _run_turn(self, session_id: str, request: dict[str, Any]) -> None:
         params = request.get("params") if isinstance(request.get("params"), dict) else {}
@@ -1266,7 +1284,7 @@ class WorkerStdioRuntimeServer:
         validate_settings(settings)
         client = OpenAIClientFactory(settings).create_async_client()
         try:
-            models = await self._fetch_model_ids(client)
+            models = await fetch_model_ids(client)
         finally:
             await close_async_client(client)
         default_model = settings.model
@@ -1274,27 +1292,11 @@ class WorkerStdioRuntimeServer:
         await self._respond(
             request,
             {
-                "models": self._merge_models(models, current_model),
+                "models": merge_models(models, current_model),
                 "current_model": current_model,
                 "default_model": default_model,
             },
         )
-
-    async def _fetch_model_ids(self, client: Any) -> list[str]:
-        response = client.models.list()
-        if hasattr(response, "__aiter__"):
-            values = [item async for item in response]
-        else:
-            response = await response if inspect.isawaitable(response) else response
-            values = getattr(response, "data", response)
-            values = list(values) if not isinstance(values, list | tuple) else values
-        return [str(item.get("id") if isinstance(item, dict) else getattr(item, "id", "") or "").strip() for item in values]
-
-    def _merge_models(self, models: list[str], current_model: str) -> list[str]:
-        values = sorted({model for model in models if model})
-        if current_model and current_model not in values:
-            values.insert(0, current_model)
-        return values
 
     async def _replay(self, request: dict[str, Any]) -> None:
         params = request.get("params") if isinstance(request.get("params"), dict) else {}
@@ -1384,60 +1386,43 @@ class WorkerStdioRuntimeServer:
             return
         active = self._worker.execution.active_container(session_id)
         if active is not None:
-            runtime = active.runtime
-            params = request.get("params") if isinstance(request.get("params"), dict) else {}
-            method = request.get("method")
-            if method == RuntimeMethod.RIND_GOAL_GET:
-                await self._respond(request, {"goal": await runtime.get_goal()})
-            elif method == RuntimeMethod.RIND_GOAL_SET:
-                objective = params.get("objective")
-                if not isinstance(objective, str) or not objective.strip():
-                    await self._respond_error(request, "rind/goal/set requires objective.", "InvalidRequest")
-                    return
-                goal = await runtime.set_goal(objective)
-                await self._respond(request, {"goal": goal})
-                await self._start_goal_continuation(session_id)
-            elif method == RuntimeMethod.RIND_GOAL_STATUS:
-                status = params.get("status")
-                if status not in {"active", "paused"}:
-                    await self._respond_error(request, "rind/goal/status requires active or paused.", "InvalidRequest")
-                    return
-                goal = await runtime.set_goal_status(status)
-                await self._respond(request, {"goal": goal})
-                if status == "active":
-                    await self._start_goal_continuation(session_id)
-                if status == "paused":
-                    self._worker.execution.interrupt(session_id)
-            else:
-                await runtime.clear_goal()
-                self._worker.execution.interrupt(session_id)
-                await self._respond(request, {"goal": None})
-            return
-        params = request.get("params") if isinstance(request.get("params"), dict) else {}
+            store = active.runtime
+            start_continuation = lambda: self._start_goal_continuation(session_id)
+            interrupt = lambda: self._worker.execution.interrupt(session_id)
+        else:
+            repository = self._worker.repository
+            store = _RepositoryGoalOps(repository, session_id)
+            start_continuation = lambda: self._start_goal_continuation(session_id)
+            interrupt = lambda: None
+
         method = request.get("method")
         if method == RuntimeMethod.RIND_GOAL_GET:
-            await self._respond(request, {"goal": await self._worker.repository.get_goal(session_id)})
+            await self._respond(request, {"goal": await store.get_goal()})
             return
+        params = request.get("params") if isinstance(request.get("params"), dict) else {}
         if method == RuntimeMethod.RIND_GOAL_SET:
             objective = params.get("objective")
             if not isinstance(objective, str) or not objective.strip():
                 await self._respond_error(request, "rind/goal/set requires objective.", "InvalidRequest")
                 return
-            goal = await self._worker.repository.set_goal(session_id, objective)
+            goal = await store.set_goal(objective)
             await self._respond(request, {"goal": goal})
-            await self._start_goal_continuation(session_id)
+            await start_continuation()
             return
         if method == RuntimeMethod.RIND_GOAL_STATUS:
             status = params.get("status")
             if status not in {"active", "paused"}:
                 await self._respond_error(request, "rind/goal/status requires active or paused.", "InvalidRequest")
                 return
-            goal = await self._worker.repository.set_goal_status(session_id, status)
+            goal = await store.set_goal_status(status)
             await self._respond(request, {"goal": goal})
             if status == "active":
-                await self._start_goal_continuation(session_id)
+                await start_continuation()
+            if status == "paused":
+                interrupt()
             return
-        await self._worker.repository.clear_goal(session_id)
+        await store.clear_goal()
+        interrupt()
         await self._respond(request, {"goal": None})
 
     async def _start_goal_continuation(self, session_id: str) -> None:
@@ -1460,12 +1445,7 @@ class WorkerStdioRuntimeServer:
             await self._respond_error(request, "Background monitoring is unavailable.", "UnsupportedOperation")
             return
         try:
-            tasks = self._background_list(session_id)
-            if inspect.isawaitable(tasks):
-                tasks = await tasks
-            if not isinstance(tasks, list):
-                raise TypeError("Background list must be a list.")
-            await self._respond(request, {"tasks": tasks})
+            await self._respond(request, await background_list_response(self._background_list, session_id))
         except Exception as exc:
             await self._respond_error(request, str(exc), type(exc).__name__)
 
@@ -1474,29 +1454,18 @@ class WorkerStdioRuntimeServer:
             await self._respond_error(request, "Background monitoring is unavailable.", "UnsupportedOperation")
             return
         params = request.get("params") if isinstance(request.get("params"), dict) else {}
-        bg_id = params.get("bg_id")
-        if not isinstance(bg_id, str) or not bg_id.strip():
-            await self._respond_error(request, "rind/background/output requires bg_id.", "InvalidRequest")
-            return
-        max_output_chars = params.get("max_output_chars", 20000)
-        if isinstance(max_output_chars, bool) or not isinstance(max_output_chars, int):
-            await self._respond_error(request, "rind/background/output max_output_chars must be an integer.", "InvalidRequest")
-            return
         try:
-            task = self._background_output(
-                bg_id.strip(),
-                max_output_chars=max_output_chars,
-                _session_id=session_id,
-            )
-            if inspect.isawaitable(task):
-                task = await task
-            if not isinstance(task, dict):
-                raise TypeError("Background output must be an object.")
-            await self._respond(request, {"task": task})
+            response = await background_output_response(self._background_output, session_id, params)
+        except ValueError as exc:
+            await self._respond_error(request, str(exc), "InvalidRequest")
+            return
         except LookupError as exc:
             await self._respond_error(request, str(exc), "NotFound")
+            return
         except Exception as exc:
             await self._respond_error(request, str(exc), type(exc).__name__)
+            return
+        await self._respond(request, response)
 
     async def _required_session_id(self, request: dict[str, Any]) -> str | None:
         params = request.get("params") if isinstance(request.get("params"), dict) else {}
@@ -1547,13 +1516,3 @@ class WorkerStdioRuntimeServer:
 
     async def _respond_error(self, request: dict[str, Any], message: str, error_type: str) -> None:
         await self._writer.send(error_message(request, message, error_type))
-
-
-def main(argv: list[str] | None = None) -> int:
-    from agent.runtime.server.app_server import main as app_server_main
-
-    return app_server_main(argv, server_class=WorkerStdioRuntimeServer)
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())

@@ -40,8 +40,7 @@ def test_app_server_web_command_selects_web_transport(monkeypatch):
     assert received[0][1].__name__ == "WebRuntimeServer"
 
 
-@pytest.mark.parametrize("entrypoint", ("app-server", "stdio-module"))
-def test_app_server_stdio_subprocess_smoke(tmp_path, entrypoint):
+def test_app_server_stdio_subprocess_smoke(tmp_path):
     workspace = tmp_path / "workspace"
     rind_home = tmp_path / "rind-home"
     workspace.mkdir()
@@ -57,14 +56,7 @@ def test_app_server_stdio_subprocess_smoke(tmp_path, entrypoint):
         encoding="utf-8",
     )
     environment = {**os.environ, "RIND_HOME": str(rind_home)}
-    if entrypoint == "app-server":
-        command = [sys.executable, "main.py", "app-server"]
-    else:
-        command = [
-            sys.executable,
-            "-c",
-            "import runpy; runpy.run_module('agent.runtime.server.stdio', run_name='__main__')",
-        ]
+    command = [sys.executable, "main.py", "app-server"]
     process = subprocess.Popen(
         [
             *command,
