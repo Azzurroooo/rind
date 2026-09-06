@@ -17,7 +17,7 @@ class QueryOnlySession:
         self._messages = [dict(message) for message in messages]
         self._catalog = list(catalog or [])
 
-    async def get_messages_slice(self, start=None, end=None, roles=None):
+    async def get_messages_slice(self, start=None, end=None, roles=None, include_internal=False):
         messages = [dict(message) for message in self._messages]
         if roles:
             messages = [message for message in messages if message.get("role") in set(roles)]

@@ -20,7 +20,7 @@ from agent.infrastructure.rind_docs import build_rind_doc_context
 from agent.infrastructure.skills import SkillRepository
 from agent.infrastructure.tools import DefaultToolRegistry
 from agent.infrastructure.tools.builtin import build_builtin_tool_specs
-from agent.prompts import build_system_prompt
+from agent.prompts import build_goal_policy_prompt, build_system_prompt
 
 
 @dataclass(frozen=True, slots=True)
@@ -118,6 +118,14 @@ def build_agent_container(
         agent_skill_dir=skill_agent_dir,
     )
     runtime_system_messages: list[dict] = []
+    if enable_goal:
+        runtime_system_messages.append(
+            {
+                "role": "system",
+                "content": build_goal_policy_prompt(),
+                "_context_kind": "goal_policy",
+            }
+        )
     delegate_handler = None
     agent_create_project = None
     workspace_lock = None

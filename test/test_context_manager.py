@@ -16,8 +16,14 @@ class QueryOnlySession:
     def __init__(self, messages):
         self._messages = [dict(message) for message in messages]
 
-    async def get_messages_slice(self, start=None, end=None, roles=None):
+    async def get_messages_slice(self, start=None, end=None, roles=None, include_internal=False):
         messages = [dict(message) for message in self._messages]
+        if not include_internal:
+            messages = [
+                message
+                for message in messages
+                if message.get("meta", {}).get("kind") != "goal_checkpoint"
+            ]
         if roles:
             allowed = set(roles)
             messages = [message for message in messages if message.get("role") in allowed]
@@ -113,14 +119,25 @@ async def test_context_manager_appends_pending_messages() -> None:
 
 
 @pytest.mark.asyncio
-async def test_context_manager_gives_empty_goal_continuation_a_model_user_boundary() -> None:
-    result = await ContextManager().build_messages_async(
-        session=QueryOnlySession([{"role": "system", "content": "sys"}]),
-        transient_system_messages=[{"role": "system", "content": "goal", "_context_kind": "goal"}],
-    )
+async def test_context_manager_keeps_goal_checkpoint_for_model_context() -> None:
+    session = QueryOnlySession([
+        {"role": "system", "content": "sys"},
+        {"role": "user", "content": "start"},
+        {"role": "assistant", "content": "progress"},
+        {
+            "role": "user",
+            "content": "Continue the active goal.",
+            "meta": {"kind": "goal_checkpoint"},
+        },
+    ])
 
-    assert result.messages[-1]["role"] == "user"
-    assert result.messages[-1]["content"] == "Continue working toward the active goal using the instructions above."
+    result = await ContextManager().build_messages_async(session=session)
+
+    assert result.messages[-1] == {
+        "role": "user",
+        "content": "Continue the active goal.",
+        "meta": {"kind": "goal_checkpoint"},
+    }
 
 
 @pytest.mark.asyncio

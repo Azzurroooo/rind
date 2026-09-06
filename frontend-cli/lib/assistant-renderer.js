@@ -1,11 +1,12 @@
 import { graphemes, textWidth } from "./text-width.js";
 import {
   codeOpenLabel,
+  consumeTableLine,
+  createTableState,
   dim,
+  finishTableState,
   isPlainLine,
-  isTableLine,
-  parseTableRow,
-  renderInline,
+  renderTableBlock,
   renderMarkdownishLine,
   styled,
 } from "./markdown-lines.js";
@@ -21,6 +22,7 @@ export class AssistantRenderer {
     this.color = options.color ?? (Boolean(process.stdout.isTTY) && !process.env.NO_COLOR);
     this.pending = "";
     this.inCodeBlock = false;
+    this.tableState = createTableState();
     this.lineOpen = false;
     this.atLineStart = true;
     this.visibleColumn = 0;
@@ -46,6 +48,12 @@ export class AssistantRenderer {
       this.renderLine(this.pending, false);
       this.pending = "";
     }
+    const table = finishTableState(this.tableState);
+    if (table?.type === "flush") {
+      this.writeTable(table.rows);
+    } else if (table?.type === "flush_candidate") {
+      table.lines.forEach((line) => this.renderNormalLine(line, true));
+    }
     if (this.lineOpen) {
       this.writeText("\n");
       this.lineOpen = false;
@@ -53,7 +61,7 @@ export class AssistantRenderer {
   }
 
   flushPlainPending() {
-    if (!this.pending || this.inCodeBlock || !isPlainLine(this.pending)) {
+    if (!this.pending || this.inCodeBlock || this.tableState.candidate.length || this.tableState.rows || !isPlainLine(this.pending)) {
       return;
     }
     this.writePlain(this.pending, false);
@@ -61,10 +69,29 @@ export class AssistantRenderer {
   }
 
   renderLine(line, newline) {
-    if (isTableLine(line, this.inCodeBlock)) {
-      this.renderTableLine(line, newline);
+    const result = consumeTableLine(this.tableState, line, this.inCodeBlock);
+    if (result.type === "hold" || result.type === "append") {
       return;
     }
+    if (result.type === "start") {
+      result.lines?.forEach((candidate) => this.renderNormalLine(candidate, true));
+      return;
+    }
+    if (result.type === "flush") {
+      this.writeTable(result.rows);
+      if (result.line === undefined) return;
+      this.renderNormalLine(result.line, newline);
+      return;
+    }
+    if (result.type === "flush_candidate") {
+      result.lines.forEach((candidate) => this.renderNormalLine(candidate, true));
+      if (result.line !== undefined) this.renderNormalLine(result.line, newline);
+      return;
+    }
+    this.renderNormalLine(line, newline);
+  }
+
+  renderNormalLine(line, newline) {
     if (line.trim().startsWith("```")) {
       this.renderCodeFence(line, newline);
       return;
@@ -80,15 +107,15 @@ export class AssistantRenderer {
     this.writeStyled(renderMarkdownishLine(line, this.color), newline);
   }
 
-  renderTableLine(line, newline) {
-    const cells = parseTableRow(line);
-    if (!cells.length || cells.every((cell) => /^:?-{3,}:?$/.test(cell.trim()))) {
-      return;
-    }
-    const rendered = cells.map((cell, index) =>
-      renderInline(cell, this.color, index === 0 ? "tableHeader" : "")
+  writeTable(rows) {
+    const table = renderTableBlock(
+      rows,
+      this.color,
+      Math.max(1, Math.floor(Number(this.columns ?? process.stdout.columns ?? 80) || 80) - CONTENT_PREFIX.length),
     );
-    this.writeStyled(rendered.join(dim(" | ", this.color)), newline);
+    if (table) {
+      this.writeStyled(table, true);
+    }
   }
 
   renderCodeFence(line, newline) {

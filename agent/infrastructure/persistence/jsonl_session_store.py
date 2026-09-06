@@ -17,7 +17,12 @@ from agent.infrastructure.persistence.message_repository import MessageRepositor
 from agent.infrastructure.persistence.tool_call_repository import ToolCallRepository
 from agent.infrastructure.persistence.compaction_repository import CompactionRepository
 from agent.infrastructure.persistence.session_index_repository import SessionIndexRepository
-from agent.infrastructure.persistence.message_projector import latest_compaction, project_messages
+from agent.infrastructure.persistence.message_projector import (
+    INTERNAL_MESSAGE_KINDS,
+    is_internal_message,
+    latest_compaction,
+    project_messages,
+)
 from agent.infrastructure.persistence.session_meta import (
     default_auto_compact_window,
     new_session_meta,
@@ -43,6 +48,14 @@ def _valid_session_id_value(value: object) -> bool:
     except ValueError:
         return False
     return True
+
+
+def _is_non_conversation_message(message: dict[str, Any]) -> bool:
+    metadata = message.get("meta")
+    return is_internal_message(message) or (
+        isinstance(metadata, dict)
+        and metadata.get("kind") in {"skill_snapshot", "skill_catalog"}
+    )
 
 
 class JsonlSessionStore(SessionStore):
@@ -86,7 +99,7 @@ class JsonlSessionStore(SessionStore):
         self._tool_call_count = 0
         self._has_user_message = False
         self._last_preview = ""
-        self._projected_caches: dict[tuple[bool, tuple[Any, ...]], list[dict[str, Any]]] = {}
+        self._projected_caches: dict[tuple[bool, bool, bool, tuple[Any, ...]], list[dict[str, Any]]] = {}
         self._files = SessionFiles()
         self._msg_repo = None
         self._tool_repo = None
@@ -366,11 +379,7 @@ class JsonlSessionStore(SessionStore):
         return sum(
             1
             for message in messages
-            if isinstance(message, dict)
-            and not (
-                isinstance(message.get("meta"), dict)
-                and message["meta"].get("kind") in {"skill_snapshot", "skill_catalog"}
-            )
+            if isinstance(message, dict) and not _is_non_conversation_message(message)
         )
 
     def _has_user_message_sync(self) -> bool:
@@ -378,11 +387,7 @@ class JsonlSessionStore(SessionStore):
         return any(
             message.get("role") == "user" and str(message.get("content") or "").strip()
             for message in messages
-            if isinstance(message, dict)
-            and not (
-                isinstance(message.get("meta"), dict)
-                and message["meta"].get("kind") in {"skill_snapshot", "skill_catalog"}
-            )
+            if isinstance(message, dict) and not _is_non_conversation_message(message)
         )
 
     def _validate_existing_session_sync(self, session_id: str) -> str:
@@ -570,8 +575,14 @@ class JsonlSessionStore(SessionStore):
             self._projection_file_signature(paths.get("compactions")),
         )
 
-    def _projected_messages_sync(self, *, include_ids: bool = False, compacted: bool = True) -> list[dict[str, Any]]:
-        key = (include_ids, compacted, self._projection_cache_key_sync())
+    def _projected_messages_sync(
+        self,
+        *,
+        include_ids: bool = False,
+        compacted: bool = True,
+        include_internal: bool = False,
+    ) -> list[dict[str, Any]]:
+        key = (include_ids, compacted, include_internal, self._projection_cache_key_sync())
         if key in self._projected_caches:
             return copy.deepcopy(self._projected_caches[key])
 
@@ -585,6 +596,7 @@ class JsonlSessionStore(SessionStore):
             self._system_prompt,
             include_ids=include_ids,
             compacted=compacted,
+            include_internal=include_internal,
         )
         self._projected_caches[key] = copy.deepcopy(built_messages)
         return copy.deepcopy(built_messages)
@@ -775,10 +787,9 @@ class JsonlSessionStore(SessionStore):
     ) -> None:
         async with self._write_lock:
             def _persist():
-                is_context_record = isinstance(meta, dict) and meta.get("kind") in {
-                    "skill_snapshot",
-                    "skill_catalog",
-                }
+                is_context_record = isinstance(meta, dict) and meta.get("kind") in (
+                    {"skill_snapshot", "skill_catalog"} | INTERNAL_MESSAGE_KINDS
+                )
                 if self._session_id is None:
                     if role != "user" or not str(content or "").strip() or is_context_record:
                         return
@@ -875,9 +886,14 @@ class JsonlSessionStore(SessionStore):
         roles: list[str] | None = None,
         include_ids: bool = False,
         compacted: bool = True,
+        include_internal: bool = False,
     ) -> list[dict[str, Any]]:
         def _get():
-            built_messages = self._projected_messages_sync(include_ids=include_ids, compacted=compacted)
+            built_messages = self._projected_messages_sync(
+                include_ids=include_ids,
+                compacted=compacted,
+                include_internal=include_internal,
+            )
             if roles:
                 allowed_roles = set(roles)
                 built_messages = [message for message in built_messages if message.get("role") in allowed_roles]
@@ -892,6 +908,7 @@ class JsonlSessionStore(SessionStore):
         end: int | None = None,
         roles: list[str] | None = None,
         compacted: bool = True,
+        include_internal: bool = False,
     ) -> list[dict[str, Any]]:
         """Project another persisted session without rebinding this store."""
         def _get():
@@ -920,6 +937,7 @@ class JsonlSessionStore(SessionStore):
                 compactions,
                 self._system_prompt,
                 compacted=compacted,
+                include_internal=include_internal,
             )
             if roles:
                 projected = [message for message in projected if message.get("role") in set(roles)]

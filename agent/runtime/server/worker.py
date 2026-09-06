@@ -25,7 +25,7 @@ from agent.infrastructure.persistence import JsonlSessionStore, ToolOutputStore
 from agent.infrastructure.paths import validate_session_id
 from agent.infrastructure.planning import build_plan_snapshot
 from agent.infrastructure.team import discover_agent
-from agent.prompts import build_goal_continuation_prompt, build_system_prompt
+from agent.prompts import build_goal_checkpoint_prompt, build_system_prompt
 from agent.domain.cancellation import CancellationTokenSource
 from agent.domain.events import UserQuestionRequestedEvent
 from agent.runtime.core import MessageStreamParser
@@ -148,7 +148,12 @@ class SessionRepository:
             info,
             persist_system_prompt=False,
         )
-        messages = await store.get_messages_slice(start=start, end=end, include_ids=True, compacted=False)
+        messages = await store.get_messages_slice(
+            start=start,
+            end=end,
+            include_ids=True,
+            compacted=False,
+        )
         return {
             "messages": messages,
             "turn_state": await store.get_turn_state(),
@@ -267,16 +272,19 @@ class ExecutionCoordinator:
                 goal = await self._repository.get_goal(session_id)
                 if not goal or goal.get("status") != "active":
                     return
-                transient = [{
-                    "role": "system",
-                    "content": build_goal_continuation_prompt(str(goal["objective"])),
-                    "_context_kind": "goal",
-                }]
+                container = await self.start(session_id)
+                goal = await self._repository.get_goal(session_id)
+                if not goal or goal.get("status") != "active":
+                    return
+                await container.session_store.persist_message(
+                    "user",
+                    build_goal_checkpoint_prompt(str(goal["objective"])),
+                    meta={"kind": "goal_checkpoint"},
+                )
                 terminal = ""
                 async for event in self.run_turn(
                     session_id,
                     query=None,
-                    transient_system_messages=transient,
                     continuation=True,
                 ):
                     terminal = str(event.get("type") or terminal)

@@ -7,6 +7,8 @@ from typing import Any
 from agent.domain.compaction import COMPACT_CONTINUATION_USER_CONTENT, COMPACT_HANDOFF_REASONING_CONTENT
 from agent.domain.message_boundary import validate_compact_handoff_boundary
 
+INTERNAL_MESSAGE_KINDS = frozenset({"goal_checkpoint"})
+
 
 def project_messages(
     messages: list[dict[str, Any]],
@@ -15,6 +17,7 @@ def project_messages(
     system_prompt: str,
     include_ids: bool = False,
     compacted: bool = True,
+    include_internal: bool = False,
 ) -> list[dict[str, Any]]:
     compact_applied = compacted and latest_compact_pair(messages, compactions) is not None
     if compact_applied:
@@ -31,6 +34,8 @@ def project_messages(
     emitted_tool_call_ids: set[str] = set()
     for message in projected_messages:
         if not isinstance(message, dict) or is_compact_boundary_message(message):
+            continue
+        if not include_internal and is_internal_message(message):
             continue
         role = message.get("role")
         if role == "tool":
@@ -84,6 +89,11 @@ def project_messages(
         if not result.ok:
             raise ValueError(f"Invalid compact continuation boundary: {result.reason}")
     return built_messages
+
+
+def is_internal_message(message: dict[str, Any]) -> bool:
+    metadata = message.get("meta")
+    return isinstance(metadata, dict) and metadata.get("kind") in INTERNAL_MESSAGE_KINDS
 
 
 def latest_compaction(

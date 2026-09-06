@@ -626,11 +626,12 @@ def test_worker_replays_answer_received_before_question_responder_waits():
     assert asyncio.run(run()) == "yes"
 
 
-def test_worker_goal_continuation_runs_distinct_turns_without_user_messages():
+def test_worker_goal_continuation_persists_distinct_checkpoints():
     async def run():
         class Repository:
             def __init__(self):
                 self.goal = {"objective": "finish the release", "status": "active"}
+                self.checkpoints = []
 
             async def get_goal(self, _session_id):
                 return dict(self.goal)
@@ -640,7 +641,16 @@ def test_worker_goal_continuation_runs_distinct_turns_without_user_messages():
                 return dict(self.goal)
 
         repository = Repository()
-        execution = ExecutionCoordinator(
+
+        class Store:
+            async def persist_message(self, role, content, meta=None):
+                repository.checkpoints.append({"role": role, "content": content, "meta": meta})
+
+        class Execution(ExecutionCoordinator):
+            async def start(self, _session_id):
+                return SimpleNamespace(session_store=Store())
+
+        execution = Execution(
             shared_resources=SimpleNamespace(),
             repository=repository,
             debug=False,
@@ -669,13 +679,17 @@ def test_worker_goal_continuation_runs_distinct_turns_without_user_messages():
         execution.set_event_sink(sink)
         started = await execution.start_goal_continuation("session-a")
         await next(iter(execution._goal_tasks.values()))
-        return started, turns, events, repository.goal
+        return started, turns, events, repository.goal, repository.checkpoints
 
-    started, turns, events, goal = asyncio.run(run())
+    started, turns, events, goal, checkpoints = asyncio.run(run())
     assert started is True
     assert len(turns) == 2
     assert all(turn["query"] is None for turn in turns)
     assert all(turn["continuation"] is True for turn in turns)
+    assert len(checkpoints) == 2
+    assert all(item["role"] == "user" for item in checkpoints)
+    assert all(item["meta"] == {"kind": "goal_checkpoint"} for item in checkpoints)
+    assert all("finish the release" in item["content"] for item in checkpoints)
     assert [event["type"] for event in events if event["type"] == "turn_started"] == [
         "turn_started",
         "turn_started",

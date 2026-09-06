@@ -57,7 +57,8 @@ class ContextManager:
         include_skill_catalog: bool = True,
     ) -> ContextBuildResult:
         try:
-            persisted_messages = [dict(message) for message in await session.get_messages_slice()]
+            persisted = await session.get_messages_slice(include_internal=True)
+            persisted_messages = [dict(message) for message in persisted]
         except asyncio.CancelledError:
             raise
         except Exception as exc:
@@ -84,18 +85,6 @@ class ContextManager:
         )
         if extra_system_messages:
             full_messages = self._insert_after_first_system(full_messages, extra_system_messages)
-        if (
-            not any(message.get("role") == "user" for message in full_messages)
-            and any(message.get("_context_kind") == "goal" for message in extra_system_messages)
-        ):
-            full_messages.append(
-                {
-                    "role": "user",
-                    "content": "Continue working toward the active goal using the instructions above.",
-                    "_context_kind": "goal_trigger",
-                }
-            )
-
         messages = list(full_messages)
         hot_message_count = min(
             self._hot_message_limit,

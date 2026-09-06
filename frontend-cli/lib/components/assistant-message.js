@@ -1,11 +1,12 @@
 import { wrapTextWithAnsi } from "../text-width.js";
 import {
   codeOpenLabel,
+  consumeTableLine,
+  createTableState,
+  finishTableState,
   dim,
   isPlainLine,
-  isTableLine,
-  parseTableRow,
-  renderInline,
+  renderTableBlock,
   renderMarkdownishLine,
   styled,
 } from "../markdown-lines.js";
@@ -18,6 +19,7 @@ export class AssistantMessage {
     this.finalized = [];
     this.pending = "";
     this.inCodeBlock = false;
+    this.tableState = createTableState();
     this.cacheWidth = -1;
     this.cacheItems = [];
     this.cacheLines = null;
@@ -32,7 +34,9 @@ export class AssistantMessage {
       }
       const line = this.pending.slice(0, newlineIndex);
       this.pending = this.pending.slice(newlineIndex + 1);
-      this.classifyFinalize(line);
+      if (this.classifyFinalize(line)) {
+        this.cacheItems.length = 0;
+      }
     }
     this.cacheLines = null;
   }
@@ -43,18 +47,48 @@ export class AssistantMessage {
       this.pending = "";
       this.classifyFinalize(line);
     }
+    this.flushTableState();
+    this.cacheItems.length = 0;
     this.cacheLines = null;
   }
 
   get isEmpty() {
-    return !this.finalized.length && !this.pending;
+    return !this.finalized.length && !this.pending && !this.tableState.candidate.length && !this.tableState.rows;
   }
 
   classifyFinalize(line) {
-    if (isTableLine(line, this.inCodeBlock)) {
-      this.finalizeTable(line);
-      return;
+    const result = consumeTableLine(this.tableState, line, this.inCodeBlock);
+    if (result.type === "hold") {
+      return false;
     }
+    if (result.type === "start") {
+      for (const line of result.lines || []) {
+        this.classifyNonTable(line);
+      }
+      this.pushItem({ kind: "table", rows: this.tableState.rows });
+      return true;
+    }
+    if (result.type === "append") {
+      return true;
+    }
+    if (result.type === "flush") {
+      this.classifyNonTable(result.line);
+      return true;
+    }
+    if (result.type === "flush_candidate") {
+      for (const candidate of result.lines) {
+        this.classifyNonTable(candidate);
+      }
+      if (result.line !== undefined) {
+        this.classifyNonTable(result.line);
+      }
+      return false;
+    }
+    this.classifyNonTable(line);
+    return false;
+  }
+
+  classifyNonTable(line) {
     if (line.trim().startsWith("```")) {
       this.finalizeCodeFence(line);
       return;
@@ -74,12 +108,16 @@ export class AssistantMessage {
     this.pushItem({ kind: "markdown", raw: line });
   }
 
-  finalizeTable(line) {
-    const cells = parseTableRow(line);
-    if (!cells.length || cells.every((cell) => /^:?-{3,}:?$/.test(cell.trim()))) {
+  flushTableState() {
+    const result = finishTableState(this.tableState);
+    if (!result) {
       return;
     }
-    this.pushItem({ kind: "table", raw: line });
+    if (result.type === "flush_candidate") {
+      for (const line of result.lines) {
+        this.classifyNonTable(line);
+      }
+    }
   }
 
   finalizeCodeFence(line) {
@@ -95,15 +133,10 @@ export class AssistantMessage {
     this.finalized.push(item);
   }
 
-  styleItem(item) {
+  styleItem(item, width) {
     switch (item.kind) {
-      case "table": {
-        const cells = parseTableRow(item.raw);
-        const rendered = cells.map((cell, index) =>
-          renderInline(cell, this.color, index === 0 ? "tableHeader" : "")
-        );
-        return rendered.join(dim(" | ", this.color));
-      }
+      case "table":
+        return renderTableBlock(item.rows, this.color, Math.max(1, width - CONTENT_PREFIX.length));
       case "fence":
         return dim(item.label ? codeOpenLabel(item.label) : "└ end", this.color);
       case "code":
@@ -125,7 +158,7 @@ export class AssistantMessage {
     }
     while (this.cacheItems.length < this.finalized.length) {
       const item = this.finalized[this.cacheItems.length];
-      const logical = typeof item === "string" ? item : this.styleItem(item);
+      const logical = typeof item === "string" ? item : this.styleItem(item, width);
       this.cacheItems.push(this.wrapLogical(logical, width));
     }
     const lines = [];

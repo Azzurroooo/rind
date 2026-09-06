@@ -1254,6 +1254,31 @@ test("AssistantRenderer renders code fences as compact labels", () => {
   assert.equal(output, "  ┌ code sh\n  echo hi\n  └ end\n");
 });
 
+test("AssistantRenderer buffers markdown tables until the block ends", () => {
+  let output = "";
+  const renderer = new AssistantRenderer((text) => {
+    output += text;
+  }, { color: false, columns: 40 });
+
+  renderer.append("| Name | Status |\n| --- | --- |\n| A | ok |\n");
+  assert.equal(output, "");
+
+  renderer.append("after\n");
+
+  assert.equal(
+    output,
+    [
+      "  ┌──────┬────────┐",
+      "  │ Name │ Status │",
+      "  ├──────┼────────┤",
+      "  │ A    │ ok     │",
+      "  └──────┴────────┘",
+      "  after",
+      "",
+    ].join("\n"),
+  );
+});
+
 test("AssistantRenderer renders markdown links as readable text", () => {
   let output = "";
   const renderer = new AssistantRenderer((text) => {

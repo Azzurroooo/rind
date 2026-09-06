@@ -524,6 +524,28 @@ test("streaming fragments without newlines stay on one line", async () => {
   harness.tui.stop();
 });
 
+test("streaming tables reflow in one assistant message block", async () => {
+  const harness = createHarness({ columns: 40, rows: 14 });
+  harness.tui.start();
+  harness.output.assistantAppend("| Name | Status |\n| --- | --- |\n| A | ok |\n");
+  await settle(harness.virtual);
+
+  let viewport = harness.virtual.getViewport().join("\n");
+  assert.match(viewport, /┌──────┬────────┐/);
+  assert.match(viewport, /│ A    │ ok     │/);
+
+  harness.output.assistantAppend("| Longer | ready |\n");
+  await settle(harness.virtual);
+  harness.output.closeAssistant();
+  await settle(harness.virtual);
+
+  viewport = harness.virtual.getViewport().join("\n");
+  assert.match(viewport, /┌────────┬────────┐/);
+  assert.match(viewport, /│ Longer │ ready  │/);
+  assert.equal((viewport.match(/│ A\s+│ ok\s+│/g) || []).length, 1);
+  harness.tui.stop();
+});
+
 test("list items become bullets once their line completes", async () => {
   const harness = createHarness({ columns: 60, rows: 14 });
   harness.tui.start();

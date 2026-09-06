@@ -346,7 +346,11 @@ class StdioRuntimeServer:
         if start is None and end is None:
             messages = await get_messages(compacted=False)
         else:
-            messages = await get_messages(start=start, end=end, compacted=False)
+            messages = await get_messages(
+                start=start,
+                end=end,
+                compacted=False,
+            )
         await self._respond(
             request,
             {

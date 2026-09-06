@@ -77,6 +77,29 @@ async def test_async_session_store_facade(temp_session_dir):
 
 
 @pytest.mark.asyncio
+async def test_goal_checkpoint_is_hidden_from_replay_but_kept_for_context(temp_session_dir):
+    store = JsonlSessionStore(session_dir=temp_session_dir, session_id="goal-checkpoint", system_prompt="sys")
+    await store.initialize()
+    await store.persist_message("user", "start")
+    await store.persist_message(
+        "user",
+        "Continue the active goal.",
+        meta={"kind": "goal_checkpoint"},
+    )
+
+    visible = await store.get_messages_slice()
+    context = await store.get_messages_slice(include_internal=True)
+
+    assert [message["content"] for message in visible if message["role"] == "user"] == ["start"]
+    assert [message["content"] for message in context if message["role"] == "user"] == [
+        "start",
+        "Continue the active goal.",
+    ]
+    assert store._message_count == 2
+    assert store._has_user_message is True
+
+
+@pytest.mark.asyncio
 async def test_empty_session_is_removed_with_index_entry(temp_session_dir):
     store = JsonlSessionStore(session_dir=temp_session_dir)
     await store.initialize()

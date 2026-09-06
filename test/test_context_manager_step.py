@@ -13,7 +13,7 @@ class MockSession:
     def __init__(self):
         self.messages = []
 
-    async def get_messages_slice(self):
+    async def get_messages_slice(self, include_internal=False):
         return [dict(message) for message in self.messages]
 
 
