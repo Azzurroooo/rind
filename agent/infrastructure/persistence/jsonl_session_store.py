@@ -50,6 +50,25 @@ def _valid_session_id_value(value: object) -> bool:
     return True
 
 
+def _validate_session_meta(meta: Any, session_id: str) -> None:
+    if not isinstance(meta, dict):
+        raise ValueError(f"Session data corrupted or missing meta.json for id: {session_id}")
+    if str(meta.get("schema_version") or "") != "2.0":
+        raise ValueError("Unsupported legacy session schema; start a new session.")
+    if str(meta.get("session_id") or session_id) != session_id:
+        raise ValueError(f"Session data corrupted: meta.json id does not match {session_id}")
+
+
+def _is_real_user_message(message: dict[str, Any]) -> bool:
+    return message.get("role") == "user" and bool(str(message.get("content") or "").strip())
+
+
+def _require_session_files(paths: dict, session_id: str) -> None:
+    for key in ("messages", "tool_calls"):
+        if not os.path.isfile(paths[key]):
+            raise ValueError(f"Session data corrupted or missing {key}.jsonl for id: {session_id}")
+
+
 def _is_non_conversation_message(message: dict[str, Any]) -> bool:
     metadata = message.get("meta")
     return is_internal_message(message) or (
@@ -159,17 +178,13 @@ class JsonlSessionStore(SessionStore):
     def load_session_metadata(cls, session_id: str, session_dir: str | None = None) -> dict[str, Any]:
         clean = validate_session_id(session_id)
         root = cls.resolve_session_root(session_dir)
-        paths = cls._metadata_paths(root, clean)
+        base = str(resolve_session_base(root, clean))
+        paths = {"base": base, "meta": os.path.join(base, "meta.json")}
         if not os.path.isdir(paths["base"]):
             raise LookupError(f"Session not found: {clean}")
         files = SessionFiles()
         meta = files.load_json(paths["meta"])
-        if not isinstance(meta, dict):
-            raise ValueError(f"Session data corrupted or missing meta.json for id: {clean}")
-        if str(meta.get("schema_version") or "") != "2.0":
-            raise ValueError("Unsupported legacy session schema; start a new session.")
-        if str(meta.get("session_id") or clean) != clean:
-            raise ValueError(f"Session data corrupted: meta.json id does not match {clean}")
+        _validate_session_meta(meta, clean)
         return meta
 
     @classmethod
@@ -209,14 +224,6 @@ class JsonlSessionStore(SessionStore):
             result.append(copy.deepcopy(entry))
         result.sort(key=lambda item: str(item.get("updated_at") or ""), reverse=True)
         return result[: max(0, int(limit))]
-
-    @classmethod
-    def _metadata_paths(cls, session_root: str, session_id: str) -> dict[str, str]:
-        base = str(resolve_session_base(session_root, session_id))
-        return {
-            "base": base,
-            "meta": os.path.join(base, "meta.json"),
-        }
 
     def _resolve_workspace_root(self) -> str:
         if self._workspace_root:
@@ -319,16 +326,9 @@ class JsonlSessionStore(SessionStore):
         self._session_id = session_id
         self._session_paths = self._get_session_paths(session_id)
         meta = self._files.load_json(self._session_paths["meta"])
-        if not meta:
-            raise ValueError(f"Session data corrupted or missing meta.json for id: {session_id}")
-        if str(meta.get("schema_version") or "") != "2.0":
-            raise ValueError("Unsupported legacy session schema; start a new session.")
-        if str(meta.get("session_id") or session_id) != session_id:
-            raise ValueError(f"Session data corrupted: meta.json id does not match {session_id}")
+        _validate_session_meta(meta, session_id)
         self._validate_session_binding(meta)
-        for key in ("messages", "tool_calls"):
-            if not os.path.isfile(self._session_paths[key]):
-                raise ValueError(f"Session data corrupted or missing {key}.jsonl for id: {session_id}")
+        _require_session_files(self._session_paths, session_id)
 
         self._setup_repos()
         self._invalidate_projection_cache()
@@ -385,7 +385,7 @@ class JsonlSessionStore(SessionStore):
     def _has_user_message_sync(self) -> bool:
         messages = self._msg_repo.load_messages() if self._msg_repo else []
         return any(
-            message.get("role") == "user" and str(message.get("content") or "").strip()
+            _is_real_user_message(message)
             for message in messages
             if isinstance(message, dict) and not _is_non_conversation_message(message)
         )
@@ -396,15 +396,8 @@ class JsonlSessionStore(SessionStore):
         if not os.path.isdir(paths["base"]):
             raise ValueError(f"Session not found: {clean}")
         meta = self._files.load_json(paths["meta"])
-        if not isinstance(meta, dict):
-            raise ValueError(f"Session data corrupted or missing meta.json for id: {clean}")
-        if str(meta.get("schema_version") or "") != "2.0":
-            raise ValueError("Unsupported legacy session schema; start a new session.")
-        if str(meta.get("session_id") or clean) != clean:
-            raise ValueError(f"Session data corrupted: meta.json id does not match {clean}")
-        for key in ("messages", "tool_calls"):
-            if not os.path.isfile(paths[key]):
-                raise ValueError(f"Session data corrupted or missing {key}.jsonl for id: {clean}")
+        _validate_session_meta(meta, clean)
+        _require_session_files(paths, clean)
         return clean
 
     def _switch_session_sync(self, session_id: str) -> None:
@@ -497,9 +490,9 @@ class JsonlSessionStore(SessionStore):
             return False
         messages = self._files.read_jsonl(self._get_session_paths(session_id)["messages"])
         has_user_message = any(
-            message.get("role") == "user" and str(message.get("content") or "").strip()
+            _is_real_user_message(message)
             for message in messages
-            if isinstance(message, dict)
+            if isinstance(message, dict) and not _is_non_conversation_message(message)
         )
         entry["has_user_message"] = has_user_message
         if self._index_repo:
@@ -674,13 +667,9 @@ class JsonlSessionStore(SessionStore):
             return
         messages = self._msg_repo.load_messages() if self._msg_repo else []
         if any(
-            message.get("role") == "user" and str(message.get("content") or "").strip()
+            _is_real_user_message(message)
             for message in messages
-            if isinstance(message, dict)
-            and not (
-                isinstance(message.get("meta"), dict)
-                and message["meta"].get("kind") in {"skill_snapshot", "skill_catalog"}
-            )
+            if isinstance(message, dict) and not _is_non_conversation_message(message)
         ):
             return
         base = self._session_paths.get("base")
@@ -918,16 +907,9 @@ class JsonlSessionStore(SessionStore):
             if not os.path.isdir(paths["base"]):
                 raise ValueError(f"Session not found: {clean}")
             meta = self._files.load_json(paths["meta"])
-            if not isinstance(meta, dict):
-                raise ValueError(f"Session data corrupted or missing meta.json for id: {clean}")
-            if str(meta.get("schema_version") or "") != "2.0":
-                raise ValueError("Unsupported legacy session schema; start a new session.")
-            if str(meta.get("session_id") or clean) != clean:
-                raise ValueError(f"Session data corrupted: meta.json id does not match {clean}")
+            _validate_session_meta(meta, clean)
             self._validate_session_binding(meta)
-            for key in ("messages", "tool_calls"):
-                if not os.path.isfile(paths[key]):
-                    raise ValueError(f"Session data corrupted or missing {key}.jsonl for id: {clean}")
+            _require_session_files(paths, clean)
             messages = MessageRepository(self._files, paths["messages"]).load_messages()
             tool_records = ToolCallRepository(self._files, paths["tool_calls"], looks_like_tool_payload).load_tool_calls()
             compactions = CompactionRepository(self._files, paths["compactions"]).load_compactions()
@@ -991,22 +973,16 @@ class JsonlSessionStore(SessionStore):
             await asyncio.to_thread(_persist)
 
     async def get_latest_sampling_usage(self) -> dict[str, Any] | None:
-        def _get():
-            if not isinstance(self._session_meta, dict):
-                return None
-            usage = self._session_meta.get("latest_sampling_usage")
-            return dict(usage) if isinstance(usage, dict) else None
-
-        return await asyncio.to_thread(_get)
+        return await asyncio.to_thread(self._latest_meta_usage, "latest_sampling_usage")
 
     async def get_latest_assistant_sampling_usage(self) -> dict[str, Any] | None:
-        def _get():
-            if not isinstance(self._session_meta, dict):
-                return None
-            usage = self._session_meta.get("latest_assistant_sampling_usage")
-            return dict(usage) if isinstance(usage, dict) else None
+        return await asyncio.to_thread(self._latest_meta_usage, "latest_assistant_sampling_usage")
 
-        return await asyncio.to_thread(_get)
+    def _latest_meta_usage(self, key: str) -> dict[str, Any] | None:
+        if not isinstance(self._session_meta, dict):
+            return None
+        usage = self._session_meta.get(key)
+        return dict(usage) if isinstance(usage, dict) else None
 
     async def persist_turn_state(
         self,
