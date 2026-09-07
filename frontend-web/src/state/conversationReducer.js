@@ -15,9 +15,19 @@
 //   { kind: "live_turn", liveTurn, sessionId }  live_turn snapshot reconciliation
 //   { kind: "message", role, content, tone }    optimistic local messages
 //   { kind: "system", content, tone }           (alias of message with role "system")
-//   { kind: "answered", key }            question card answered
+//   { kind: "answered", key, answer }    question card answered (stays in stream)
+//   { kind: "question_expired", key }    question card TTL reached (§2.3 expired)
 //   { kind: "set_cursor", cursor }       adopt the server's durable ordinal
 //   { kind: "reset" }                    clear session
+//
+// Question cards (web-ui.md §2.3) live twice in state: the `question` pointer
+// tracks the one card that can still be answered, while every card is ALSO a
+// stream entry (role "question") so the answered/cancelled card remains
+// readable in the transcript instead of vanishing.
+
+// Client-side TTL for the silent countdown; the wire event may override it
+// with ttl_ms once the worker reports one.
+export const QUESTION_TTL_MS = 120_000;
 
 export function emptyConversationState() {
   return {
@@ -26,7 +36,7 @@ export function emptyConversationState() {
     active: false,
     activeTurnId: "",
     plan: [],
-    question: null, // { sessionId, toolCallId, question, options, status: "pending"|"answered" }
+    question: null, // { sessionId, toolCallId, question, options, status, requestedAt, ttlMs }
     resolvedQuestionKey: "",
     cursor: 0, // durable events applied for the current session
     seen: {}, // "session:turn:sequence" -> true (idempotence guard)
@@ -51,7 +61,17 @@ export function reduceConversation(state, action) {
     case "answered": {
       const key = String(action.key || "");
       if (!key) return state;
-      return { ...state, question: null, resolvedQuestionKey: key };
+      // Answered cards freeze in the stream (§2.3) — only the pointer clears.
+      const next = markQuestionEntry(state, key, { status: "answered", selectedAnswer: String(action.answer || "") });
+      const pointerMatches = next.question && questionKey(next.question) === key;
+      return { ...next, question: pointerMatches ? null : next.question, resolvedQuestionKey: key };
+    }
+    case "question_expired": {
+      const key = String(action.key || "");
+      if (!key) return state;
+      const next = markQuestionEntry(state, key, { status: "expired" });
+      const pointerMatches = next.question && questionKey(next.question) === key;
+      return { ...next, question: pointerMatches ? null : next.question };
     }
     case "set_cursor":
       return { ...state, cursor: Math.max(0, Number(action.cursor) || 0) };
@@ -149,7 +169,8 @@ function applyTurnEvent(state, event, context) {
       const key = questionKey(question);
       if (key === state.resolvedQuestionKey) return state;
       const existing = state.question && questionKey(state.question) === key ? state.question : null;
-      return { ...state, question: { ...question, status: existing?.status || "pending" } };
+      const nextQuestion = { ...question, status: existing?.status || "pending" };
+      return withQuestionEntry({ ...state, question: nextQuestion }, nextQuestion);
     }
 
     case "queued_input_delivered":
@@ -178,16 +199,49 @@ function applyTurnEvent(state, event, context) {
 
 function finalizeTurn(state, turnId) {
   const streamingText = state.streaming ? state.streaming.text : "";
-  let next = streamingText
+  const next = streamingText
     ? appendEntry(state, { id: `msg:${state.activeTurnId || turnId}:final`, role: "assistant", content: streamingText })
     : state;
+  const entries = next.entries.some((entry) => entry.role === "question" && entry.status === "pending")
+    ? next.entries.map((entry) => (entry.role === "question" && entry.status === "pending" ? { ...entry, status: "cancelled" } : entry))
+    : next.entries;
   return {
     ...next,
+    entries,
     active: false,
     activeTurnId: "",
     streaming: null,
     question: null, // pending question dies with its turn (§2.3 cancelled)
   };
+}
+
+// Question cards live in the stream so answered/cancelled history stays readable.
+function withQuestionEntry(state, question) {
+  const key = questionKey(question);
+  const index = state.entries.findIndex((entry) => entry.role === "question" && questionKey(entry) === key);
+  const fields = {
+    role: "question",
+    sessionId: question.sessionId,
+    toolCallId: question.toolCallId,
+    question: question.question,
+    options: question.options,
+    requestedAt: question.requestedAt,
+    ttlMs: question.ttlMs,
+  };
+  if (index < 0) {
+    return { ...state, entries: [...state.entries, { id: `question:${key}`, status: question.status || "pending", selectedAnswer: "", ...fields }] };
+  }
+  const entries = [...state.entries];
+  entries[index] = { ...entries[index], ...fields }; // keeps local status/selectedAnswer
+  return { ...state, entries };
+}
+
+function markQuestionEntry(state, key, patch) {
+  const index = state.entries.findIndex((entry) => entry.role === "question" && questionKey(entry) === key);
+  if (index < 0) return state;
+  const entries = [...state.entries];
+  entries[index] = { ...entries[index], ...definedOnly(patch) };
+  return { ...state, entries };
 }
 
 function upsertTool(state, patch) {
@@ -242,7 +296,8 @@ function applyLiveTurn(state, liveTurn, sessionId) {
   }
   const question = normalizeQuestion(liveTurn.question, sessionId);
   const keepAnswered = question && questionKey(question) === state.resolvedQuestionKey;
-  next = { ...next, question: question && !keepAnswered ? { ...question, status: "pending" } : null };
+  const activeQuestion = question && !keepAnswered ? { ...question, status: "pending" } : null;
+  next = activeQuestion ? withQuestionEntry({ ...next, question: activeQuestion }, activeQuestion) : { ...next, question: null };
   return next;
 }
 
@@ -284,11 +339,15 @@ export function normalizeQuestion(value, fallbackSessionId = "") {
   if (!value || typeof value !== "object") return null;
   const toolCallId = String(value.toolCallId || value.tool_call_id || "").trim();
   if (!toolCallId) return null;
+  const requestedAt = Date.parse(value.requestedAt || value.ts || "") || 0;
+  const explicitTtl = Number(value.ttl_ms || value.ttlMs);
   return {
     sessionId: String(value.sessionId || value.session_id || fallbackSessionId || "").trim(),
     toolCallId,
     question: String(value.question || ""),
     options: Array.isArray(value.options) ? value.options : [],
+    requestedAt: Number.isFinite(requestedAt) ? requestedAt : 0,
+    ttlMs: Number.isFinite(explicitTtl) && explicitTtl > 0 ? explicitTtl : QUESTION_TTL_MS,
   };
 }
 

@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
-import { Check, LoaderCircle, MessageCircleQuestion, X } from "lucide-react";
 import { ConnectionBar } from "./components/ConnectionBar.jsx";
 import { Composer } from "./components/Composer.jsx";
 import { Conversation } from "./components/Conversation.jsx";
@@ -8,6 +7,8 @@ import { LoginGate } from "./components/LoginGate.jsx";
 import { SessionRail } from "./components/SessionRail.jsx";
 import { methods, parseSlashCommand, sessionIdOf } from "./methods.js";
 import { createRuntimeClient, initialRuntimeUrl, isAuthError } from "./runtimeClient.js";
+import { currentNotificationPermission, finalAssistantText, requestNotificationPermission, showNotification, truncateFirstLine } from "./lib/notifications.js";
+import { fileToBase64, uploadTargetPath } from "./lib/files.js";
 import { createConnectionController, initialConnectionState, reduceConnection } from "./state/connection.js";
 import { conversationView, emptyConversationState, questionKey, reduceConversation } from "./state/conversationReducer.js";
 import { dropCredentials, fetchTicket, hasStoredCredential, loginErrorMessage, readStoredTicket, readStoredToken, storeTicket, storeToken, unauthorizedMessage } from "./ticket.js";
@@ -33,6 +34,8 @@ export default function App() {
   const [currentModel, setCurrentModel] = useState("");
   const [compacting, setCompacting] = useState(false);
   const [busySession, setBusySession] = useState(false);
+  const [unreadIds, setUnreadIds] = useState(() => new Set());
+  const [notificationPermission, setNotificationPermission] = useState(() => currentNotificationPermission());
   const bootstrappedRef = useRef(false);
   const catchUpRef = useRef(false);
   const initializingRef = useRef(false);
@@ -52,6 +55,33 @@ export default function App() {
     dispatchConversation({ kind: "message", role, content, tone });
   }, []);
 
+  const markUnread = useCallback((sessionId) => {
+    setUnreadIds((current) => {
+      if (current.has(sessionId)) return current;
+      const next = new Set(current);
+      next.add(sessionId);
+      return next;
+    });
+  }, []);
+
+  const clearUnread = useCallback((sessionId) => {
+    setUnreadIds((current) => {
+      if (!current.has(sessionId)) return current;
+      const next = new Set(current);
+      next.delete(sessionId);
+      return next;
+    });
+  }, []);
+
+  const enableNotifications = useCallback(async () => {
+    const result = await requestNotificationPermission();
+    setNotificationPermission(result);
+  }, []);
+
+  const expireQuestion = useCallback((key) => {
+    dispatchConversation({ kind: "question_expired", key: String(key || "") });
+  }, []);
+
   const handleEvent = useCallback((message) => {
     const event = message?.event;
     if (!event || typeof event !== "object") return;
@@ -59,8 +89,25 @@ export default function App() {
       setStats(event.stats && typeof event.stats === "object" ? event.stats : {});
       return;
     }
+    // Events from other sessions never enter this conversation (J7): a durable
+    // event lights the unread dot instead; the catch-up replay rebuilds the
+    // stream when that session is opened.
+    const envelopeSession = String(message.session_id || event.session_id || "");
+    const currentSession = String(infoRef.current.session_id || "");
+    if (envelopeSession && currentSession && envelopeSession !== currentSession) {
+      if (String(message.durability) === "durable") markUnread(envelopeSession);
+      return;
+    }
+    // Browser notifications: only when the tab is hidden AND permission was
+    // granted via the rail footer button (never a load-time prompt).
+    if (event.type === "turn_completed") {
+      showNotification({ title: "Rind 回复完成", body: truncateFirstLine(finalAssistantText(convRef.current)) });
+    }
+    if (event.type === "user_question_requested") {
+      showNotification({ title: "Rind 需要你的输入", body: truncateFirstLine(event.question) });
+    }
     dispatchConversation(message);
-  }, []);
+  }, [markUnread]);
 
   const client = useMemo(() => createRuntimeClient({
     url: endpoint,
@@ -251,6 +298,7 @@ export default function App() {
   async function loadSession(sessionId, switchSession = true) {
     const target = String(sessionId || "").trim();
     if (!target || !clientRef.current) return;
+    clearUnread(target);
     setBusySession(true);
     try {
       const switched = switchSession ? await clientRef.current.request(methods.sessionSwitch, { session_id: target }) : infoRef.current;
@@ -276,6 +324,7 @@ export default function App() {
       dispatchConversation({ kind: "live_turn", liveTurn: replay?.live_turn || null, sessionId: target });
       setGoal(switched?.goal || null);
       setStats(switched?.usage || {});
+      clearUnread(target); // late events during the switch may have re-marked it
     } catch (error) {
       dispatchMessage("system", `Unable to open session: ${error instanceof Error ? error.message : String(error)}`, "error");
     } finally {
@@ -337,8 +386,10 @@ export default function App() {
     dispatchConversation({ kind: "reset" });
   }
 
-  async function submit() {
-    const text = input.trim();
+  // `composed` arrives from the Composer and already carries attachment path
+  // reference lines (web-ui.md §2.4); direct calls fall back to the draft.
+  async function submit(composed) {
+    const text = String(composed ?? input).trim();
     if (!text || !clientRef.current) return;
     setInput("");
     if (text.startsWith("/")) {
@@ -463,16 +514,36 @@ export default function App() {
     }
   }
 
-  async function answerQuestion(answer) {
-    const question = convRef.current.question;
-    if (!question) return false;
+  // Inline delete from the SessionRail (verification J7). Server errors
+  // (InvalidRequest for the current session, TurnActive, SessionNotFound)
+  // bubble to the rail and render inline next to the item.
+  async function deleteSession(sessionId) {
+    await clientRef.current.request(methods.sessionDelete, { session_id: sessionId });
+    setSessions((current) => current.filter((session) => sessionIdOf(session) !== sessionId));
+  }
+
+  // Attachment upload path (web-ui.md §2.4): base64 → file/write into the
+  // uploads/ subtree; resolves with the stored path for the chip.
+  async function uploadAttachment(file) {
+    const content_base64 = await fileToBase64(file);
+    const path = uploadTargetPath(file?.name || "pasted-image", new Date());
+    const result = await clientRef.current?.request(methods.fileWrite, { path, content_base64 });
+    return String(result?.path || path);
+  }
+
+  const listFiles = useCallback((path) => clientRef.current.request(methods.fileList, { path: path || "" }), []);
+  const readFile = useCallback((path) => clientRef.current.request(methods.fileRead, { path }), []);
+
+  async function answerQuestion(question, answer) {
+    if (!question || question.status !== "pending") return false;
+    const text = String(answer || "").trim();
     try {
       await clientRef.current.request(methods.userQuestionRespond, {
         session_id: question.sessionId || info.session_id,
         tool_call_id: question.toolCallId,
-        answer: String(answer || "").trim(),
+        answer: text,
       }, 15_000);
-      dispatchConversation({ kind: "answered", key: questionKey(question) });
+      dispatchConversation({ kind: "answered", key: questionKey(question), answer: text });
       return true;
     } catch (error) {
       dispatchMessage("system", `Question response failed: ${error.message}`, "error");
@@ -490,66 +561,30 @@ export default function App() {
   return <div className="app-shell">
     <ConnectionBar phase={connection.phase} syncRemaining={connection.syncRemaining} syncTotal={connection.syncTotal} url={endpoint} onChangeUrl={setEndpoint} onReconnect={reconnect} onLogout={logout} />
     <div className="workspace-grid">
-      <SessionRail sessions={sessions} activeId={info.session_id} workspace={selectedWorkspace} workspaceDraft={workspaceDraft} workspaceBusy={workspaceBusy} workspaceMessage={workspaceMessage} loading={busySession || workspaceBusy} onWorkspaceDraftChange={setWorkspaceDraft} onWorkspaceApply={selectWorkspace} onNew={createSession} onSelect={(id) => loadSession(id, true)} />
+      <SessionRail
+        sessions={sessions}
+        activeId={info.session_id}
+        workspace={selectedWorkspace}
+        workspaceDraft={workspaceDraft}
+        workspaceBusy={workspaceBusy}
+        workspaceMessage={workspaceMessage}
+        loading={busySession || workspaceBusy}
+        unreadIds={unreadIds}
+        notificationPermission={notificationPermission}
+        fileTree={{ listFiles, readFile }}
+        onWorkspaceDraftChange={setWorkspaceDraft}
+        onWorkspaceApply={selectWorkspace}
+        onNew={createSession}
+        onSelect={(id) => loadSession(id, true)}
+        onDelete={deleteSession}
+        onEnableNotifications={enableNotifications}
+      />
       <main className="main-column">
-        <Conversation messages={view.messages} draft={view.draft} plan={view.plan} active={view.active} onCancel={cancelTurn} />
+        <Conversation messages={view.messages} draft={view.draft} plan={view.plan} active={view.active} onCancel={cancelTurn} onAnswer={answerQuestion} onExpire={expireQuestion} />
         {/* Invariant: composer input is never disabled by connection state. */}
-        <Composer value={input} onChange={setInput} onSubmit={submit} active={view.active} onCancel={cancelTurn} />
+        <Composer value={input} onChange={setInput} onSubmit={submit} active={view.active} onCancel={cancelTurn} onUpload={uploadAttachment} />
       </main>
       <Inspector info={info} stats={stats} goal={goal} plan={view.plan} models={info.models || []} effort={info.reasoning_effort || ""} connection={inspectorConnection} onModel={setModel} onEffort={setEffort} onRefreshModels={() => refreshModels(info.session_id)} onCompact={compact} compacting={compacting} currentModel={currentModel} />
-    </div>
-    {view.question && <QuestionDialog key={questionKey(view.question)} question={view.question} onAnswer={answerQuestion} />}
-  </div>;
-}
-
-function QuestionDialog({ question, onAnswer }) {
-  const options = Array.isArray(question.options) ? question.options : [];
-  const [selected, setSelected] = useState(null);
-  const [custom, setCustom] = useState("");
-  const [submitting, setSubmitting] = useState(false);
-  const [error, setError] = useState("");
-  const customSelected = selected?.type === "custom";
-  const canConfirm = selected && (!customSelected || custom.trim());
-
-  async function submit(answer) {
-    if (submitting) return;
-    setError("");
-    setSubmitting(true);
-    try {
-      if (!await onAnswer(answer)) setError("答案未发送成功，请重试。");
-    } finally {
-      setSubmitting(false);
-    }
-  }
-
-  return <div className="modal-backdrop">
-    <div className="question-dialog">
-      <div className="question-heading">
-        <div>
-          <span className="eyebrow">WORKER QUESTION</span>
-          <h2><MessageCircleQuestion size={18} /> {question.question || "The worker needs an answer"}</h2>
-        </div>
-      </div>
-      <div className="question-options">
-        {options.map((option, index) => {
-          const value = String(option?.value || option?.label || "");
-          const active = selected?.type === "option" && selected.value === value;
-          return <button className={active ? "selected" : ""} key={`${value}-${index}`} onClick={() => setSelected({ type: "option", value })} disabled={submitting}>
-            <span><strong>{option?.label || value}</strong>{option?.description && <small>{option.description}</small>}</span>
-            {active && <Check size={15} />}
-          </button>;
-        })}
-        <button className={customSelected ? "selected custom-option" : "custom-option"} onClick={() => setSelected({ type: "custom" })} disabled={submitting}>
-          <span><strong>自定义答案</strong><small>输入自己的回答</small></span>
-          {customSelected && <Check size={15} />}
-        </button>
-      </div>
-      {customSelected && <div className="custom-answer"><input autoFocus value={custom} onChange={(event) => setCustom(event.target.value)} placeholder="输入自定义答案" disabled={submitting} onKeyDown={(event) => event.key === "Enter" && canConfirm && submit(custom.trim())} /></div>}
-      {error && <div className="question-error">{error}</div>}
-      <div className="question-actions">
-        <button className="question-close" onClick={() => submit("")} disabled={submitting}><X size={15} /> 关闭</button>
-        <button className="question-confirm" onClick={() => submit(customSelected ? custom.trim() : selected.value)} disabled={!canConfirm || submitting}>{submitting ? <LoaderCircle className="spin" size={15} /> : <Check size={15} />} 确认</button>
-      </div>
     </div>
   </div>;
 }

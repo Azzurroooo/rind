@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
-import { conversationView, emptyConversationState, normalizeHistoryMessages, questionKey, reduceConversation } from "./conversationReducer.js";
+import { conversationView, emptyConversationState, normalizeHistoryMessages, QUESTION_TTL_MS, questionKey, reduceConversation } from "./conversationReducer.js";
 
 // Golden fixture lives outside frontend-web: ../test/fixtures/ relative to here.
 const FIXTURE_PATH = resolve(process.cwd(), "../test/fixtures/runtime_protocol.golden.jsonl");
@@ -130,6 +130,7 @@ describe("conversation reducer — tool blocks", () => {
 describe("conversation reducer — question card state (§2.3)", () => {
   const questionEnvelope = event(1, "durable", {
     type: "user_question_requested",
+    ts: "2026-03-01T10:00:00Z",
     tool_call_id: "q1",
     question: "Proceed?",
     options: [{ value: "yes", label: "Yes" }],
@@ -155,6 +156,83 @@ describe("conversation reducer — question card state (§2.3)", () => {
     ]);
     expect(state.question).toBeNull();
     expect(state.entries.at(-1)).toMatchObject({ role: "system", content: "Turn cancelled." });
+  });
+});
+
+describe("conversation reducer — question cards as stream entries (§2.3 answered stays visible)", () => {
+  const questionEnvelope = event(1, "durable", {
+    type: "user_question_requested",
+    ts: "2026-03-01T10:00:00Z",
+    tool_call_id: "q1",
+    question: "Proceed?",
+    options: [{ value: "yes", label: "Yes" }, { value: "no", label: "No" }],
+  });
+
+  it("a requested question is also inserted into the stream as a role=question entry", () => {
+    const state = reduceConversation(emptyConversationState(), questionEnvelope);
+    const entry = state.entries.find((item) => item.role === "question");
+    expect(entry).toMatchObject({
+      id: "question:session-1:q1",
+      sessionId: "session-1",
+      toolCallId: "q1",
+      question: "Proceed?",
+      status: "pending",
+      selectedAnswer: "",
+    });
+    expect(entry.requestedAt).toBe(Date.parse("2026-03-01T10:00:00Z"));
+    expect(entry.ttlMs).toBe(QUESTION_TTL_MS);
+  });
+
+  it("an explicit ttl_ms on the event overrides the default TTL", () => {
+    const state = reduceConversation(emptyConversationState(), event(1, "durable", {
+      type: "user_question_requested",
+      tool_call_id: "q1",
+      question: "Proceed?",
+      ttl_ms: 5000,
+    }));
+    expect(state.question.ttlMs).toBe(5000);
+  });
+
+  it("answered freezes the entry in the stream with the chosen answer", () => {
+    let state = reduceConversation(emptyConversationState(), questionEnvelope);
+    const key = questionKey(state.question);
+    state = reduceConversation(state, { kind: "answered", key, answer: "yes" });
+    expect(state.question).toBeNull();
+    const entry = state.entries.find((item) => item.role === "question");
+    expect(entry).toMatchObject({ status: "answered", selectedAnswer: "yes" });
+
+    // replay of the same request must not resurrect a pending card
+    const after = reduceConversation(state, questionEnvelope);
+    expect(after.entries.find((item) => item.role === "question").status).toBe("answered");
+    expect(after.question).toBeNull();
+  });
+
+  it("question_expired marks the entry expired and clears the pointer", () => {
+    let state = reduceConversation(emptyConversationState(), questionEnvelope);
+    state = reduceConversation(state, { kind: "question_expired", key: "session-1:q1" });
+    expect(state.question).toBeNull();
+    expect(state.entries.find((item) => item.role === "question")).toMatchObject({ status: "expired" });
+  });
+
+  it("a turn terminal event cancels pending question entries instead of deleting them", () => {
+    const state = replay([
+      questionEnvelope,
+      event(2, "durable", { type: "turn_completed", turn_id: "turn-1" }),
+    ]);
+    expect(state.question).toBeNull();
+    expect(state.entries.find((item) => item.role === "question")).toMatchObject({ status: "cancelled" });
+    expect(state.entries).toHaveLength(1); // kept, not removed
+  });
+
+  it("live_turn snapshots materialize the pending question entry too", () => {
+    let state = reduceConversation(emptyConversationState(), { kind: "history", messages: [] });
+    state = reduceConversation(state, {
+      kind: "live_turn",
+      sessionId: "session-1",
+      liveTurn: { turn_id: "t9", status: "running", question: { tool_call_id: "q2", question: "Use db?", options: [] } },
+    });
+    expect(state.question).toMatchObject({ toolCallId: "q2", status: "pending" });
+    expect(state.entries.at(-1)).toMatchObject({ role: "question", toolCallId: "q2", status: "pending" });
   });
 });
 

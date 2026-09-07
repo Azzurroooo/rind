@@ -6,6 +6,7 @@ export const methods = Object.freeze({
   sessionReplay: "session/replay",
   sessionPrompt: "session/prompt",
   sessionCancel: "session/cancel",
+  sessionDelete: "session/delete",
   sessionSteer: "rind/session/steer",
   sessionCompact: "rind/session/compact",
   modelList: "model/list",
@@ -17,6 +18,9 @@ export const methods = Object.freeze({
   goalSet: "rind/goal/set",
   goalStatus: "rind/goal/status",
   goalClear: "rind/goal/clear",
+  fileList: "file/list",
+  fileRead: "file/read",
+  fileWrite: "file/write",
 });
 
 export const slashCommands = [
