@@ -1,0 +1,16 @@
+# Gateway core dependencies: standard library + `websockets` (already pinned by
+# requirements-runtime.txt / requirements.txt). No additional runtime deps.
+#
+# Channel SDKs are optional and only needed when the corresponding channel is
+# enabled (WP4+). They are documented here, commented out until channels land:
+#
+# Telegram (gateway/channels/telegram.py):
+#   aiogram>=3
+#
+# Discord (gateway/channels/discord.py):
+#   discord.py>=2
+#
+# Later channels (P1/P2) per .docs/remote-upgrade-plan.md section 5.6:
+#   slack_bolt        # Slack socket mode
+#   lark-oapi         # Feishu (Lark) websocket events
+#   dingtalk-stream   # DingTalk stream mode

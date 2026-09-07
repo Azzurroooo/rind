@@ -11,12 +11,16 @@ from agent.version import __version__
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Rind Runtime Package")
     parser.add_argument("--version", action="version", version=f"rind {__version__}")
-    parser.add_argument("command", nargs="?", choices=("app-server",), help="Runtime command")
+    parser.add_argument("command", nargs="?", choices=("app-server", "gateway"), help="Runtime command")
     return parser
 
 
 def main(argv: list[str] | None = None) -> int:
     arguments = list(sys.argv[1:] if argv is None else argv)
+    if arguments[:1] == ["gateway"]:
+        from gateway.main import main as gateway_main
+
+        return gateway_main(arguments[1:])
     if arguments[:1] == ["app-server"]:
         from agent.runtime.server.app_server import main as app_server_main
         if "--web" in arguments[1:]:
