@@ -14,12 +14,15 @@ import {
 } from "./composer-region"
 
 import type {
+  DesktopBackgroundTask,
   DesktopFileListing,
   DesktopFilePreview,
+  DesktopGoal,
   DesktopProject,
   DesktopRecentSession,
   DesktopSessionSummary,
   DesktopSettings,
+  DesktopTheme,
   RuntimeEvent,
   RuntimeMethod,
   RuntimeSnapshot,
@@ -63,7 +66,7 @@ import {
   sameProjectPath as samePath,
   workingDirectorySelectionEnabled,
 } from "./project-selection"
-import { projectListStructureKey, recentListStructureKey } from "./sidebar-rendering"
+import { filterSessions, projectListStructureKey, recentListStructureKey } from "./sidebar-rendering"
 import {
   canConfirmQuestion,
   createQuestionSelection,
@@ -72,6 +75,44 @@ import {
   updateQuestionInput,
   type QuestionSelection,
 } from "./question-state"
+import {
+  FILE_LIMIT_BYTES,
+  composeMessageWithAttachments,
+  fileToBase64,
+  formatBytes,
+  isImageMime,
+  uploadTargetPath,
+} from "./attachments"
+import { diffLineCounts, extractDiffText, parseDiffLines } from "./diff-text"
+import { filterCommands, moveActiveIndex, type PaletteCommand } from "./palette"
+import {
+  createTaskMonitorState,
+  mergeTasks,
+  normalizeTask,
+  renderTaskMonitor,
+  runningTaskCount,
+  type TaskMonitorState,
+} from "./task-monitor"
+import { normalizeGoal, renderGoalPanel } from "./goal-panel"
+
+type AttachmentChip = {
+  id: string
+  name: string
+  size: number
+  mime: string
+  previewUrl: string
+  status: "uploading" | "ok" | "failed"
+  path: string
+  error: string
+}
+
+type GoalPanelState = {
+  value?: DesktopGoal
+  busy: boolean
+  setOpen: boolean
+  visible: boolean
+  draft: string
+}
 
 type AppState = {
   runtime: RuntimeSnapshot
@@ -87,7 +128,9 @@ type AppState = {
   chatProjectPath: string
   conversationCache: Record<string, ConversationState>
   sessionModels: Record<string, string>
+  sessionEfforts: Record<string, string>
   model: string
+  effort: string
   models: string[]
   projects: DesktopProject[]
   recentSessions: DesktopRecentSession[]
@@ -120,7 +163,23 @@ type AppState = {
   modelMenuOpen: boolean
   modelMenuLoading: boolean
   modelChanging: boolean
+  effortMenuOpen: boolean
+  effortChanging: boolean
   projectMenuOpen: boolean
+  attachments: Record<string, AttachmentChip[]>
+  sessionDeleteConfirmId: string
+  sessionDeleteBusyId: string
+  sessionSearch: string
+  taskMonitorOpen: boolean
+  taskMonitor: TaskMonitorState
+  goal: GoalPanelState
+  theme: DesktopTheme
+  notificationsEnabled: boolean
+  paletteOpen: boolean
+  paletteQuery: string
+  paletteActiveIndex: number
+  shortcutsOpen: boolean
+  lastPrompts: Record<string, string>
   notice: string
 }
 
@@ -144,7 +203,9 @@ const state: AppState = {
   chatProjectPath: "",
   conversationCache: {},
   sessionModels: {},
+  sessionEfforts: {},
   model: "",
+  effort: "",
   models: [],
   projects: [],
   recentSessions: [],
@@ -176,7 +237,23 @@ const state: AppState = {
   modelMenuOpen: false,
   modelMenuLoading: false,
   modelChanging: false,
+  effortMenuOpen: false,
+  effortChanging: false,
   projectMenuOpen: false,
+  attachments: {},
+  sessionDeleteConfirmId: "",
+  sessionDeleteBusyId: "",
+  sessionSearch: "",
+  taskMonitorOpen: false,
+  taskMonitor: createTaskMonitorState(),
+  goal: { busy: false, setOpen: false, visible: false, draft: "" },
+  theme: "system",
+  notificationsEnabled: true,
+  paletteOpen: false,
+  paletteQuery: "",
+  paletteActiveIndex: 0,
+  shortcutsOpen: false,
+  lastPrompts: {},
   notice: "",
 }
 
@@ -192,8 +269,12 @@ appRoot.innerHTML = `
       </div>
       <div class="topbar-actions">
         <span class="app-version" aria-label="Rind version">v${escapeHtml(appVersion)}</span>
+        <button id="toggle-tasks" type="button" class="ghost-button" title="Background tasks" aria-label="Toggle background task monitor" aria-expanded="false">Tasks</button>
+        <button id="open-palette" type="button" class="ghost-button" title="Command palette (Ctrl+K)" aria-label="Open command palette">Ctrl+K</button>
+        <button id="toggle-theme" type="button" class="ghost-button" title="Switch theme" aria-label="Switch theme">Theme</button>
         <button id="toggle-sidebar" type="button" class="ghost-button" title="Toggle projects sidebar" aria-label="Toggle projects sidebar" aria-expanded="true">${renderIcon(PanelLeft)}</button>
         <button id="toggle-files" type="button" class="ghost-button" title="Browse active project files" aria-label="Browse active project files" aria-expanded="false">${renderIcon(PanelRight)}</button>
+        <button id="open-shortcuts" type="button" class="ghost-button" title="Keyboard shortcuts (?)" aria-label="Keyboard shortcuts">?</button>
         <button id="open-settings" type="button" class="ghost-button" title="Open settings" aria-label="Open settings">${renderIcon(Settings)}</button>
       </div>
     </header>
@@ -209,6 +290,9 @@ appRoot.innerHTML = `
             <div id="recent-list" class="recent-list"></div>
           </section>
           <div class="sidebar-heading"><span>Projects</span><button id="sidebar-add-project" type="button" class="ghost-button" title="Add project">Add</button></div>
+          <div class="session-search-wrap">
+            <input id="session-search" type="search" placeholder="Search loaded sessions…" aria-label="Search loaded sessions" autocomplete="off" />
+          </div>
           <div id="project-list" class="project-list"></div>
         </div>
       </aside>
@@ -238,9 +322,23 @@ appRoot.innerHTML = `
         <label>Base URL<input id="settings-base-url" type="url" placeholder="https://api.openai.com/v1" /></label>
         <label>Model<input id="settings-model" type="text" placeholder="Default model" /></label>
         <label>Reasoning effort<input id="settings-reasoning" type="text" placeholder="high" /></label>
+        <label class="settings-check"><input id="settings-notifications" type="checkbox" /><span>Desktop notifications when the window is not focused</span></label>
         <div class="settings-actions"><button id="cancel-settings" type="button" class="ghost-button">Cancel</button><button id="save-settings" type="submit" class="primary-button">Save</button></div>
       </form>
     </dialog>
+    <dialog id="shortcuts-dialog" class="settings-dialog shortcuts-dialog">
+      <form method="dialog">
+        <div class="settings-heading"><strong>Keyboard shortcuts</strong><button id="close-shortcuts" type="button" class="ghost-button" title="Close shortcuts">Close</button></div>
+        <div class="shortcut-table" id="shortcut-table"></div>
+        <div class="settings-actions"><button type="button" id="dismiss-shortcuts" class="ghost-button">Close</button></div>
+      </form>
+    </dialog>
+    <div id="command-palette" class="command-palette" role="dialog" aria-modal="true" aria-label="Command palette" hidden>
+      <div class="command-palette-box">
+        <input id="palette-input" type="text" placeholder="Type a command…" aria-label="Search commands" autocomplete="off" />
+        <div id="palette-list" class="command-palette-list" role="listbox" aria-label="Commands"></div>
+      </div>
+    </div>
   </div>
 `
 
@@ -257,6 +355,22 @@ const sessionIdLabel = requiredElement("session-id")
 const modelMenuTrigger = requiredElement<HTMLButtonElement>("model-menu-trigger")
 const modelMenuLabel = requiredElement("model-menu-label")
 const modelMenu = requiredElement("model-menu")
+const effortMenuTrigger = requiredElement<HTMLButtonElement>("effort-menu-trigger")
+const effortMenuLabel = requiredElement("effort-menu-label")
+const effortMenu = requiredElement("effort-menu")
+const attachButton = requiredElement<HTMLButtonElement>("attach-button")
+const attachInput = requiredElement<HTMLInputElement>("attach-input")
+const attachmentChips = requiredElement("attachment-chips")
+const taskMonitorShell = requiredElement("task-monitor-shell")
+const taskMonitorDock = requiredElement("task-monitor")
+const goalPanelShell = requiredElement("goal-panel-shell")
+const goalPanel = requiredElement("goal-panel")
+const sessionSearchInput = requiredElement<HTMLInputElement>("session-search")
+const paletteOverlay = requiredElement("command-palette")
+const paletteInput = requiredElement<HTMLInputElement>("palette-input")
+const paletteList = requiredElement("palette-list")
+const shortcutsDialog = requiredElement<HTMLDialogElement>("shortcuts-dialog")
+const shortcutTable = requiredElement("shortcut-table")
 const messageStream = requiredElement("message-stream")
 const jumpLatest = requiredElement<HTMLButtonElement>("jump-latest")
 const planDockShell = requiredElement("plan-dock-shell")
@@ -289,6 +403,7 @@ const settingsBaseUrl = requiredElement<HTMLInputElement>("settings-base-url")
 const settingsModel = requiredElement<HTMLInputElement>("settings-model")
 const settingsReasoning = requiredElement<HTMLInputElement>("settings-reasoning")
 const settingsKeyStatus = requiredElement("settings-key-status")
+const settingsNotifications = requiredElement<HTMLInputElement>("settings-notifications")
 const saveSettingsButton = requiredElement<HTMLButtonElement>("save-settings")
 
 let workingTimer: ReturnType<typeof setInterval> | undefined
@@ -306,6 +421,12 @@ let lastRuntimeSequence = 0
 const replayRequests = new Map<string, Promise<void>>()
 let overviewVersion = 0
 let recentFlushPromise: Promise<void> | undefined
+const uploadPromises = new Map<string, Promise<void>>()
+let attachmentSequence = 0
+let deleteConfirmTimer: ReturnType<typeof setTimeout> | undefined
+let taskMonitorTimer: ReturnType<typeof setInterval> | undefined
+let taskMonitorPollInFlight = false
+let goalLoadSequence = 0
 
 function requiredElement<T extends HTMLElement = HTMLElement>(id: string) {
   const element = document.getElementById(id) as T | null
@@ -347,6 +468,10 @@ function render() {
   renderRecentSessions()
   renderProjects()
   renderModels()
+  renderEffortMenu()
+  renderTaskMonitorDock()
+  renderGoalDock()
+  renderPalette()
   renderPlanDock(
     { shell: planDockShell, dock: planDock },
     state.conversation,
@@ -361,7 +486,7 @@ function render() {
   )
   renderStream()
   renderComposer(
-    { prompt, send, interrupt, menuTrigger: composerMenuTrigger, menu: composerMenu, compactContext, slashCommandMenu, contextMeter },
+    { prompt, send, interrupt, menuTrigger: composerMenuTrigger, menu: composerMenu, compactContext, slashCommandMenu, contextMeter, attachButton },
     {
       ready: chatProject()?.available === true && state.settings.hasApiKey,
       active: runtimeTurnActive(),
@@ -377,10 +502,62 @@ function render() {
     },
   )
   renderSlashCommandMenu()
+  renderAttachments()
   renderFiles()
   renderSettings()
+  renderTheme()
+  renderShortcuts()
   syncWorkingTimer()
 }
+
+function renderTheme() {
+  const resolved = resolveTheme()
+  if (document.documentElement.dataset.theme !== resolved) document.documentElement.dataset.theme = resolved
+  const toggle = document.getElementById("toggle-theme")
+  if (toggle) {
+    const labels: Record<DesktopTheme, string> = { system: "Theme: system", dark: "Theme: dark", light: "Theme: light" }
+    toggle.textContent = labels[state.theme]
+    toggle.title = `Theme: ${state.theme}. Click to switch to ${nextTheme()}.`
+  }
+}
+
+function resolveTheme(): "dark" | "light" {
+  if (state.theme === "system") return window.matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark"
+  return state.theme
+}
+
+function nextTheme(): DesktopTheme {
+  return state.theme === "system" ? "dark" : state.theme === "dark" ? "light" : "system"
+}
+
+function setTheme(theme: DesktopTheme) {
+  state.theme = theme
+  renderTheme()
+  runAction(async () => {
+    await window.api.prefs.update({ theme })
+  })
+}
+
+function renderShortcuts() {
+  if (state.shortcutsOpen && !shortcutsDialog.open) shortcutsDialog.showModal()
+  if (!state.shortcutsOpen && shortcutsDialog.open) shortcutsDialog.close()
+  if (shortcutTable.dataset.rendered) return
+  shortcutTable.dataset.rendered = "1"
+  shortcutTable.innerHTML = shortcutRows.map(([combo, label]) => `
+    <div class="shortcut-row"><span>${escapeHtml(label)}</span><code>${escapeHtml(combo)}</code></div>
+  `).join("")
+}
+
+const shortcutRows: Array<[string, string]> = [
+  ["Ctrl+K", "Command palette"],
+  ["Ctrl+N", "New chat"],
+  ["Ctrl+,", "Open settings"],
+  ["Ctrl+1…9", "Switch to a loaded session"],
+  ["Enter", "Send message"],
+  ["Shift+Enter", "New line"],
+  ["Esc", "Close menus / stop turn / focus composer"],
+  ["?", "This cheat sheet"],
+]
 
 function renderSettings() {
   if (state.settingsOpen && !settingsDialog.open) settingsDialog.showModal()
@@ -388,6 +565,7 @@ function renderSettings() {
   settingsKeyStatus.textContent = state.settings.hasApiKey ? "An API key is available." : "No API key is configured."
   saveSettingsButton.disabled = state.settingsSaving
   saveSettingsButton.textContent = state.settingsSaving ? "Saving..." : "Save"
+  settingsNotifications.checked = state.notificationsEnabled
 }
 
 function activeProject() {
@@ -461,6 +639,9 @@ function renderProjects() {
     sessionTotals: state.sessionTotals,
     expandedProjects: state.expandedProjects,
     projectMenuPath: state.projectMenuPath,
+    sessionSearch: state.sessionSearch,
+    deleteConfirmId: state.sessionDeleteConfirmId,
+    deleteBusyId: state.sessionDeleteBusyId,
   })
   if (structureKey === renderedProjectListStructureKey) {
     syncSidebarSelection()
@@ -478,8 +659,11 @@ function renderProjects() {
   for (const project of state.projects) {
     const expanded = state.expandedProjects.has(project.path)
     const menuOpen = samePath(project.path, state.projectMenuPath)
-    const sessions = projectSessions(project)
+    const loaded = projectSessions(project)
+    const sessions = filterSessions(loaded, state.sessionSearch)
+    const searching = Boolean(state.sessionSearch.trim())
     const total = state.sessionTotals[project.path] ?? project.totalSessions
+    const showSessions = expanded || (searching && sessions.length)
     const projectNode = document.createElement("section")
     projectNode.className = `project-item${expanded ? " expanded" : ""}`
     projectNode.innerHTML = `
@@ -494,7 +678,7 @@ function renderProjects() {
         </div>
       </div>
       ${project.available ? "" : `<p class="project-missing">Folder is unavailable.</p>`}
-      ${expanded ? `<div class="project-sessions">${sessions.map(renderProjectSession).join("")}${sessions.length < total ? `<button type="button" class="show-more ghost-button" data-show-more="${escapeAttribute(project.path)}">View more sessions</button>` : ""}</div>` : ""}
+      ${showSessions ? `<div class="project-sessions">${sessions.map(renderProjectSession).join("") || `<p class="session-search-empty">No loaded sessions match.</p>`}${!searching && loaded.length < total ? `<button type="button" class="show-more ghost-button" data-show-more="${escapeAttribute(project.path)}">View more sessions</button>` : ""}</div>` : ""}
     `
     projectList.append(projectNode)
   }
@@ -502,16 +686,35 @@ function renderProjects() {
   syncSidebarRunningState()
 }
 
-function renderProjectSession(item: DesktopSessionSummary) {
-  const when = item.updatedAt ? relativeTime(item.updatedAt) : ""
+// Shared session row: selectable item + inline delete action (two-press
+// confirm, opencode pattern). The current session cannot be deleted.
+function renderSessionRow(item: DesktopSessionSummary, whenIso: string) {
+  const when = whenIso ? relativeTime(whenIso) : ""
   const running = sessionTurnActive(item.id)
+  const isCurrent = item.id === state.viewedSessionId
+  const confirming = state.sessionDeleteConfirmId === item.id
+  const deleting = state.sessionDeleteBusyId === item.id
+  const deleteState = isCurrent
+    ? `<button type="button" class="session-delete ghost-button" data-session-delete="${escapeAttribute(item.id)}" title="当前会话不可删除" aria-label="当前会话不可删除" disabled>${DELETE_ICON}</button>`
+    : confirming
+      ? `<button type="button" class="session-delete ghost-button confirm" data-session-delete="${escapeAttribute(item.id)}" title="再按一次确认删除" aria-label="再按一次确认删除确认删除会话"${deleting ? " disabled" : ""}>${deleting ? "…" : DELETE_ICON}</button>`
+      : `<button type="button" class="session-delete ghost-button" data-session-delete="${escapeAttribute(item.id)}" title="删除会话" aria-label="删除会话 ${escapeAttribute(item.title || item.id)}"${deleting ? " disabled" : ""}>${DELETE_ICON}</button>`
   return `
-    <button type="button" class="session-item${running ? " running" : ""}" data-session-id="${escapeAttribute(item.id)}" data-session-project="${escapeAttribute(item.workspaceRoot)}">
-      <span class="session-item-title">${running ? `<span class="status-pip pip-running"></span>` : ""}<span class="session-item-title-text">${escapeHtml(item.title || "Untitled")}</span></span>
-      <small>${escapeHtml(clipLine(item.preview || "", 48))}</small>
-      <small class="session-item-meta">${escapeHtml(when)}</small>
-    </button>
+    <div class="session-item-row${confirming ? " confirming" : ""}" data-session-row="${escapeAttribute(item.id)}">
+      <button type="button" class="session-item${running ? " running" : ""}" data-session-id="${escapeAttribute(item.id)}" data-session-project="${escapeAttribute(item.workspaceRoot)}" title="${escapeAttribute(item.title || "Untitled")}">
+        <span class="session-item-title">${running ? `<span class="status-pip pip-running"></span>` : ""}<span class="session-item-title-text">${escapeHtml(item.title || "Untitled")}</span></span>
+        <small>${escapeHtml(clipLine(item.preview || "", 48))}</small>
+        <small class="session-item-meta">${escapeHtml(when)}</small>
+      </button>
+      ${deleteState}
+    </div>
   `
+}
+
+const DELETE_ICON = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="session-delete-icon" aria-hidden="true" focusable="false"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/><line x1="10" x2="10" y1="11" y2="17"/><line x1="14" x2="14" y1="11" y2="17"/></svg>`
+
+function renderProjectSession(item: DesktopSessionSummary) {
+  return renderSessionRow(item, item.updatedAt)
 }
 
 function renderRecentSessions() {
@@ -522,6 +725,9 @@ function renderRecentSessions() {
     sessionTotals: state.sessionTotals,
     expandedProjects: state.expandedProjects,
     projectMenuPath: state.projectMenuPath,
+    sessionSearch: state.sessionSearch,
+    deleteConfirmId: state.sessionDeleteConfirmId,
+    deleteBusyId: state.sessionDeleteBusyId,
   })
   if (structureKey === renderedRecentListStructureKey) {
     syncSidebarSelection()
@@ -529,14 +735,15 @@ function renderRecentSessions() {
     return
   }
   renderedRecentListStructureKey = structureKey
-  if (!state.recentSessions.length) {
-    recentSessions.hidden = true
+  const filtered = filterSessions(state.recentSessions, state.sessionSearch)
+  if (!filtered.length) {
+    recentSessions.hidden = !state.recentSessions.length
     recentList.replaceChildren()
     syncSidebarSelection()
     syncSidebarRunningState()
     return
   }
-  const items = [...state.recentSessions].sort((left, right) => right.lastInteractedAt.localeCompare(left.lastInteractedAt))
+  const items = [...filtered].sort((left, right) => right.lastInteractedAt.localeCompare(left.lastInteractedAt))
   recentSessions.hidden = false
   recentList.innerHTML = items.map(renderRecentSession).join("")
   syncSidebarSelection()
@@ -544,15 +751,7 @@ function renderRecentSessions() {
 }
 
 function renderRecentSession(item: DesktopRecentSession) {
-  const running = sessionTurnActive(item.id)
-  const when = item.lastInteractedAt ? relativeTime(item.lastInteractedAt) : ""
-  return `
-    <button type="button" class="session-item${running ? " running" : ""}" data-session-id="${escapeAttribute(item.id)}" title="${escapeAttribute(item.title || "Untitled")}">
-      <span class="session-item-title">${running ? `<span class="status-pip pip-running"></span>` : ""}<span class="session-item-title-text">${escapeHtml(item.title || "Untitled")}</span></span>
-      <small>${escapeHtml(clipLine(item.preview || "", 48))}</small>
-      <small class="session-item-meta">${escapeHtml(when)}</small>
-    </button>
-  `
+  return renderSessionRow(item, item.lastInteractedAt)
 }
 
 function syncSidebarSelection() {
@@ -669,6 +868,7 @@ function closeModelMenu() {
 
 function closeComposerSelectMenus() {
   closeModelMenu()
+  state.effortMenuOpen = false
   state.projectMenuOpen = false
 }
 
@@ -683,6 +883,7 @@ async function toggleModelMenu() {
   state.modelMenuOpen = true
   state.modelMenuLoading = true
   state.projectMenuOpen = false
+  state.effortMenuOpen = false
   state.composerMenuOpen = false
   closeSlashCommandMenu()
   render()
@@ -742,9 +943,450 @@ function toggleProjectMenu() {
   }
   state.projectMenuOpen = !state.projectMenuOpen
   closeModelMenu()
+  state.effortMenuOpen = false
   state.composerMenuOpen = false
   closeSlashCommandMenu()
   render()
+}
+
+// ---------- reasoning effort switcher (B1) ----------
+
+// Mirrors the kernel's REASONING_EFFORTS (agent/infrastructure/config).
+const reasoningEfforts = ["low", "medium", "high", "xhigh", "max"] as const
+
+function displayedEffort() {
+  if (state.viewedSessionId && state.sessionEfforts[state.viewedSessionId]) return state.sessionEfforts[state.viewedSessionId]
+  return state.effort || state.settings.reasoningEffort || ""
+}
+
+function canOpenEffortMenu() {
+  return Boolean(state.viewedSessionId && currentRuntimeSnapshot().status === "ready" && !state.effortChanging)
+}
+
+function renderEffortMenu() {
+  const activeEffort = displayedEffort()
+  const canOpen = canOpenEffortMenu()
+  if (!canOpen) state.effortMenuOpen = false
+  effortMenuLabel.textContent = activeEffort || "Effort"
+  effortMenuTrigger.title = activeEffort
+    ? `Reasoning effort: ${activeEffort}`
+    : state.viewedSessionId ? "Choose reasoning effort" : "Start a session to change reasoning effort"
+  effortMenuTrigger.disabled = !canOpen
+  effortMenuTrigger.setAttribute("aria-expanded", String(state.effortMenuOpen))
+  effortMenuTrigger.setAttribute("aria-busy", String(state.effortChanging))
+  effortMenu.hidden = !state.effortMenuOpen
+  if (!state.effortMenuOpen) {
+    effortMenu.replaceChildren()
+    return
+  }
+  effortMenu.innerHTML = reasoningEfforts.map((effort) => {
+    const selected = effort === activeEffort
+    return `<button type="button" class="composer-select-option composer-effort-option${selected ? " selected" : ""}" role="option" aria-selected="${String(selected)}" data-effort-choice="${escapeAttribute(effort)}"${state.effortChanging ? " disabled" : ""}><span class="composer-select-option-main">${escapeHtml(effort)}${selected ? " ✓" : ""}</span></button>`
+  }).join("")
+}
+
+async function toggleEffortMenu() {
+  if (!canOpenEffortMenu()) return
+  state.effortMenuOpen = !state.effortMenuOpen
+  if (state.effortMenuOpen) {
+    closeModelMenu()
+    state.projectMenuOpen = false
+    state.composerMenuOpen = false
+    closeSlashCommandMenu()
+  }
+  render()
+}
+
+async function selectEffort(effort: string) {
+  const sessionId = state.viewedSessionId
+  const clean = effort.trim().toLowerCase()
+  if (!sessionId || !reasoningEfforts.includes(clean as (typeof reasoningEfforts)[number]) || clean === displayedEffort() || state.effortChanging) {
+    state.effortMenuOpen = false
+    render()
+    return
+  }
+  state.effortChanging = true
+  render()
+  try {
+    const result = asRecord(await requestForSession(runtimeMethods.modelEffort, sessionId, { reasoning_effort: clean }))
+    const next = asRecordText(result.reasoning_effort) || clean
+    state.sessionEfforts = { ...state.sessionEfforts, [sessionId]: next }
+    if (state.viewedSessionId === sessionId) state.effort = next
+    state.effortMenuOpen = false
+  } finally {
+    state.effortChanging = false
+    render()
+  }
+}
+
+// ---------- attachments (B4) ----------
+
+function attachmentsFor(projectPath: string) {
+  return state.attachments[projectPath] || []
+}
+
+function renderAttachments() {
+  const chips = attachmentsFor(state.chatProjectPath)
+  attachmentChips.hidden = !chips.length
+  const existing = new Map<string, HTMLElement>()
+  for (const node of attachmentChips.querySelectorAll<HTMLElement>("[data-chip-id]")) {
+    if (node.dataset.chipId) existing.set(node.dataset.chipId, node)
+  }
+  for (const [index, chip] of chips.entries()) {
+    let item = existing.get(chip.id)
+    if (!item) {
+      item = document.createElement("div")
+      item.className = "attachment-chip"
+      item.dataset.chipId = chip.id
+      attachmentChips.append(item)
+    }
+    const extension = chip.name.includes(".") ? chip.name.split(".").pop()?.toUpperCase() : chip.name.toUpperCase()
+    item.className = `attachment-chip chip-${chip.status}`
+    item.innerHTML = `
+      ${chip.previewUrl ? `<img class="attachment-thumb" src="${escapeAttribute(chip.previewUrl)}" alt="" aria-hidden="true" />` : `<span class="attachment-thumb attachment-thumb-file" aria-hidden="true">${escapeHtml((extension || "FILE").slice(0, 4))}</span>`}
+      <span class="attachment-meta">
+        <span class="attachment-name" title="${escapeAttribute(chip.name)}">${escapeHtml(chip.name)}</span>
+        <small class="attachment-size">${formatBytes(chip.size)}${chip.status === "uploading" ? " · uploading…" : chip.status === "failed" ? ` · ${escapeHtml(chip.error || "Upload failed")}` : ""}</small>
+      </span>
+      ${chip.status === "failed" ? `<button type="button" class="ghost-button chip-retry" data-chip-retry="${escapeAttribute(chip.id)}" title="Retry upload">Retry</button>` : chip.status === "ok" ? `<span class="status-pip pip-done" title="Uploaded"></span>` : `<span class="send-spinner chip-spinner" aria-hidden="true"></span>`}
+      <button type="button" class="ghost-button chip-delete" data-chip-delete="${escapeAttribute(chip.id)}" title="移除附件" aria-label="移除附件 ${escapeAttribute(chip.name)}">✕</button>
+    `
+    if (attachmentChips.children[index] !== item) attachmentChips.append(item)
+    existing.delete(chip.id)
+  }
+  for (const stale of existing.values()) stale.remove()
+}
+
+function addAttachmentFiles(files: File[]) {
+  const projectPath = state.chatProjectPath
+  if (!projectPath) return
+  for (const file of files) {
+    const chip: AttachmentChip = {
+      id: `chip-${++attachmentSequence}`,
+      name: file.name || "pasted-image",
+      size: file.size,
+      mime: file.type || "application/octet-stream",
+      previewUrl: isImageMime(file.type) && file.size <= FILE_LIMIT_BYTES ? URL.createObjectURL(file) : "",
+      status: "uploading",
+      path: "",
+      error: "",
+    }
+    if (file.size > FILE_LIMIT_BYTES) {
+      chip.status = "failed"
+      chip.error = `Larger than the ${formatBytes(FILE_LIMIT_BYTES)} limit`
+    } else {
+      chipFileBacklog.set(chip.id, file)
+    }
+    state.attachments[projectPath] = [...state.attachments[projectPath] || [], chip]
+    if (chip.status === "uploading") startAttachmentUpload(projectPath, chip.id, file)
+  }
+  renderAttachments()
+}
+
+function startAttachmentUpload(projectPath: string, chipId: string, file: File) {
+  const upload = (async () => {
+    try {
+      const base64 = await fileToBase64(file)
+      const path = uploadTargetPath(file.name || "pasted-image", new Date())
+      const result = asRecord(await window.api.workspaceFiles.write(path, base64))
+      const chip = attachmentsFor(projectPath).find((item) => item.id === chipId)
+      if (!chip) return
+      chip.status = "ok"
+      chip.path = asRecordText(result.path) || path
+    } catch (error) {
+      const chip = attachmentsFor(projectPath).find((item) => item.id === chipId)
+      if (!chip) return
+      chip.status = "failed"
+      chip.error = error instanceof Error ? error.message : String(error)
+    } finally {
+      uploadPromises.delete(chipId)
+      if (projectPath === state.chatProjectPath) renderAttachments()
+    }
+  })()
+  uploadPromises.set(chipId, upload)
+}
+
+function retryAttachment(chipId: string) {
+  const projectPath = state.chatProjectPath
+  const chip = attachmentsFor(projectPath).find((item) => item.id === chipId)
+  if (!chip || chip.status !== "failed") return
+  const entry = chipFileBacklog.get(chipId)
+  if (!entry) {
+    chip.status = "failed"
+    chip.error = "The original file is no longer available. Remove and re-attach it."
+    renderAttachments()
+    return
+  }
+  chip.status = "uploading"
+  chip.error = ""
+  renderAttachments()
+  startAttachmentUpload(projectPath, chipId, entry)
+}
+
+const chipFileBacklog = new Map<string, File>()
+
+function removeAttachment(chipId: string) {
+  const list = state.attachments[state.chatProjectPath] || []
+  state.attachments[state.chatProjectPath] = list.filter((item) => item.id !== chipId)
+  chipFileBacklog.delete(chipId)
+  renderAttachments()
+}
+
+async function waitForAttachments() {
+  while (uploadPromises.size) {
+    await Promise.all([...uploadPromises.values()])
+  }
+}
+
+// ---------- background task monitor (B6) ----------
+
+function renderTaskMonitorDock() {
+  const monitor = state.taskMonitor
+  taskMonitorShell.hidden = !state.taskMonitorOpen
+  const toggle = document.getElementById("toggle-tasks")
+  const running = runningTaskCount(monitor.tasks)
+  if (toggle) {
+    toggle.textContent = running ? `Tasks (${running})` : "Tasks"
+    toggle.setAttribute("aria-expanded", String(state.taskMonitorOpen))
+  }
+  if (!state.taskMonitorOpen) return
+  renderTaskMonitor({ shell: taskMonitorShell, dock: taskMonitorDock }, monitor)
+}
+
+function toggleTaskMonitor(open?: boolean) {
+  const next = open === undefined ? !state.taskMonitorOpen : open
+  state.taskMonitorOpen = next
+  if (!next) {
+    stopTaskMonitorPolling()
+    render()
+    return
+  }
+  render()
+  void pollTaskMonitor().catch(() => {})
+  if (!taskMonitorTimer && state.viewedSessionId && currentRuntimeSnapshot().status === "ready") {
+    taskMonitorTimer = setInterval(() => { void pollTaskMonitor().catch(() => {}) }, 2000)
+  }
+}
+
+function stopTaskMonitorPolling() {
+  if (taskMonitorTimer) {
+    clearInterval(taskMonitorTimer)
+    taskMonitorTimer = undefined
+  }
+}
+
+async function pollTaskMonitor() {
+  if (!state.taskMonitorOpen || !state.viewedSessionId || currentRuntimeSnapshot().status !== "ready") {
+    stopTaskMonitorPolling()
+    return
+  }
+  if (taskMonitorPollInFlight) return
+  taskMonitorPollInFlight = true
+  try {
+    const sessionId = state.viewedSessionId
+    const result = asRecord(await requestForSession(runtimeMethods.backgroundList, sessionId))
+    state.taskMonitor.tasks = mergeTasks(state.taskMonitor.tasks, result.tasks)
+    const expandedId = state.taskMonitor.expandedId
+    if (expandedId && state.taskMonitor.tasks.some((task) => task.bg_id === expandedId)) {
+      const output = asRecord(await requestForSession(runtimeMethods.backgroundOutput, sessionId, { bg_id: expandedId }))
+      if (output.task) state.taskMonitor.outputs[expandedId] = normalizeTask(output.task)
+    }
+  } finally {
+    taskMonitorPollInFlight = false
+    if (state.taskMonitorOpen) renderTaskMonitorDock()
+  }
+}
+
+// ---------- goal panel (B7) ----------
+
+function renderGoalDock() {
+  goalPanelShell.hidden = !state.goal.visible
+  if (!state.goal.visible) return
+  renderGoalPanel({ shell: goalPanelShell, panel: goalPanel }, {
+    goal: state.goal.value,
+    busy: state.goal.busy,
+    setOpen: state.goal.setOpen,
+    draft: state.goal.draft,
+  })
+}
+
+function showGoalPanel(open = true) {
+  state.goal.visible = open
+  state.goal.setOpen = open && !state.goal.value ? true : open && state.goal.setOpen
+  render()
+  if (open) goalPanel.querySelector<HTMLInputElement>("#goal-objective-input")?.focus()
+}
+
+async function loadGoal() {
+  const sessionId = state.viewedSessionId
+  if (!sessionId || currentRuntimeSnapshot().status !== "ready") {
+    state.goal.value = undefined
+    if (state.goal.visible) renderGoalDock()
+    return
+  }
+  const sequence = ++goalLoadSequence
+  try {
+    const result = asRecord(await window.api.goal.get(sessionId))
+    if (sequence !== goalLoadSequence || sessionId !== state.viewedSessionId) return
+    state.goal.value = normalizeGoal(result.goal)
+    if (state.goal.visible) renderGoalDock()
+  } catch {
+    if (sequence === goalLoadSequence) state.goal.value = undefined
+  }
+}
+
+async function submitGoal() {
+  const sessionId = state.viewedSessionId
+  const objective = state.goal.draft.trim()
+  if (!sessionId || !objective || state.goal.busy) return
+  state.goal.busy = true
+  renderGoalDock()
+  try {
+    const result = asRecord(await window.api.goal.set(sessionId, objective))
+    state.goal.value = normalizeGoal(result.goal)
+    state.goal.draft = ""
+    state.goal.setOpen = false
+    state.notice = state.goal.value ? `Goal set: ${clipLine(state.goal.value.objective, 80)}` : state.notice
+  } catch (error) {
+    state.notice = error instanceof Error ? error.message : String(error)
+  } finally {
+    state.goal.busy = false
+    render()
+  }
+}
+
+async function changeGoalStatus(status: "active" | "paused") {
+  const sessionId = state.viewedSessionId
+  if (!sessionId || state.goal.busy) return
+  state.goal.busy = true
+  renderGoalDock()
+  try {
+    const result = asRecord(await window.api.goal.status(sessionId, status))
+    state.goal.value = normalizeGoal(result.goal)
+  } catch (error) {
+    state.notice = error instanceof Error ? error.message : String(error)
+  } finally {
+    state.goal.busy = false
+    render()
+  }
+}
+
+async function clearGoal() {
+  const sessionId = state.viewedSessionId
+  if (!sessionId || state.goal.busy) return
+  state.goal.busy = true
+  renderGoalDock()
+  try {
+    await window.api.goal.clear(sessionId)
+    state.goal.value = undefined
+    state.notice = "Goal cleared."
+  } catch (error) {
+    state.notice = error instanceof Error ? error.message : String(error)
+  } finally {
+    state.goal.busy = false
+    render()
+  }
+}
+
+// ---------- command palette (C10) ----------
+
+function paletteCommands(): PaletteCommand[] {
+  const commands: PaletteCommand[] = [
+    { id: "new-chat", title: "新会话", detail: "Start a new chat", shortcut: "Ctrl+N", run: () => runAction(startNewChat) },
+    { id: "open-settings", title: "打开设置", detail: "Runtime settings", shortcut: "Ctrl+,", run: () => openSettings() },
+    { id: "compact", title: "压缩上下文", detail: "Compact context", run: () => runAction(compactCurrentSession, state.viewedSessionId), disabled: !state.viewedSessionId },
+    { id: "toggle-sidebar", title: "切换侧栏", detail: "Toggle projects sidebar", run: () => runAction(toggleSidebar) },
+    { id: "toggle-files", title: "切换文件面板", detail: "Toggle project files", run: () => runAction(() => setFilesOpen(!state.filesOpen)) },
+    { id: "task-monitor", title: "后台任务", detail: state.taskMonitorOpen ? "Close background task monitor" : "Open background task monitor", run: () => toggleTaskMonitor() },
+    { id: "goal-set", title: "目标：设定", detail: "Set a session goal", run: () => showGoalPanel(true), disabled: !state.viewedSessionId },
+    { id: "goal-pause", title: "目标：暂停", detail: "Pause the active goal", disabled: !state.viewedSessionId || state.goal.value?.status !== "active", run: () => runAction(() => changeGoalStatus("paused"), state.viewedSessionId) },
+    { id: "goal-resume", title: "目标：恢复", detail: "Resume a paused goal", disabled: !state.viewedSessionId || state.goal.value?.status !== "paused", run: () => runAction(() => changeGoalStatus("active"), state.viewedSessionId) },
+    { id: "goal-clear", title: "目标：清除", detail: "Clear the active goal", disabled: !state.viewedSessionId || !state.goal.value, run: () => runAction(clearGoal, state.viewedSessionId) },
+    { id: "theme-dark", title: "主题：深色", detail: "Dark theme", run: () => setTheme("dark") },
+    { id: "theme-light", title: "主题：浅色", detail: "Light theme", run: () => setTheme("light") },
+    { id: "theme-system", title: "主题：跟随系统", detail: "Follow the OS theme", run: () => setTheme("system") },
+    { id: "shortcuts", title: "帮助：快捷键", detail: "Keyboard shortcuts", shortcut: "?", run: () => { state.shortcutsOpen = true; render() } },
+  ]
+  if (state.viewedSessionId && !runtimeTurnActive()) {
+    commands.push({ id: "delete-current", title: `删除会话：${clipLine(sessionTitle.textContent || state.viewedSessionId, 32)}`, detail: state.viewedSessionId, run: () => runAction(() => deleteSessionRequest(state.viewedSessionId)) })
+  }
+  for (const session of knownSessions().filter((item) => item.id !== state.viewedSessionId).slice(0, 20)) {
+    commands.push({
+      id: `session-${session.id}`,
+      title: `切换会话：${clipLine(session.title || "Untitled", 40)}`,
+      detail: clipLine(session.preview || session.id, 60),
+      keywords: `switch session ${session.id}`,
+      run: () => runAction(() => switchSession(session.id), session.id),
+    })
+  }
+  if (canOpenModelMenu()) {
+    for (const model of state.models.slice(0, 15)) {
+      commands.push({
+        id: `model-${model}`,
+        title: `模型：${model}`,
+        keywords: `model ${model}`,
+        run: () => runAction(() => selectModel(model)),
+      })
+    }
+  }
+  if (canOpenEffortMenu()) {
+    for (const effort of reasoningEfforts) {
+      commands.push({
+        id: `effort-${effort}`,
+        title: `力度：${effort}`,
+        keywords: `reasoning effort ${effort}`,
+        run: () => runAction(() => selectEffort(effort), state.viewedSessionId),
+      })
+    }
+  }
+  return commands
+}
+
+function renderPalette() {
+  paletteOverlay.hidden = !state.paletteOpen
+  appRoot.classList.toggle("palette-open", state.paletteOpen)
+  if (!state.paletteOpen) return
+  if (document.activeElement !== paletteInput && paletteInput.value !== state.paletteQuery) paletteInput.value = state.paletteQuery
+  const matches = filterCommands(paletteCommands(), state.paletteQuery)
+  state.paletteActiveIndex = Math.min(state.paletteActiveIndex, Math.max(0, matches.length - 1))
+  paletteList.innerHTML = matches.length ? matches.map((match, index) => `
+    <button type="button" class="palette-option${index === state.paletteActiveIndex ? " selected" : ""}" role="option" aria-selected="${String(index === state.paletteActiveIndex)}" data-palette-index="${index}"${match.command.disabled ? " disabled" : ""}>
+      <span class="palette-option-main">${escapeHtml(match.command.title)}</span>
+      ${match.command.detail ? `<span class="palette-option-detail">${escapeHtml(match.command.detail)}</span>` : ""}
+      ${match.command.shortcut ? `<span class="palette-option-shortcut">${escapeHtml(match.command.shortcut)}</span>` : ""}
+    </button>
+  `).join("") : `<p class="palette-empty">No matching command</p>`
+  paletteList.querySelector<HTMLElement>(".palette-option.selected")?.scrollIntoView({ block: "nearest" })
+}
+
+function openPalette() {
+  state.paletteOpen = true
+  state.paletteQuery = ""
+  state.paletteActiveIndex = 0
+  closeModelMenu()
+  state.effortMenuOpen = false
+  state.projectMenuOpen = false
+  state.composerMenuOpen = false
+  closeSlashCommandMenu()
+  render()
+  paletteInput.focus()
+}
+
+function closePalette(refocus = true) {
+  if (!state.paletteOpen) return
+  state.paletteOpen = false
+  state.paletteQuery = ""
+  state.paletteActiveIndex = 0
+  render()
+  if (refocus) prompt.focus()
+}
+
+function runPaletteCommand(index: number) {
+  const matches = filterCommands(paletteCommands(), state.paletteQuery)
+  const match = matches[index]
+  if (!match || match.command.disabled) return
+  closePalette(false)
+  match.command.run()
 }
 
 function renderStream() {
@@ -837,20 +1479,41 @@ function replaceElementChildren(current: HTMLElement, next: HTMLElement) {
 function renderEntry(entry: Entry): string {
   switch (entry.kind) {
     case "user":
-      return `<article class="turn-user" data-entry-id="${escapeAttribute(entry.id)}"><div class="user-bubble">${renderMarkdown(entry.content)}</div></article>`
-    case "assistant":
-      return `<article class="turn-assistant" data-entry-id="${escapeAttribute(entry.id)}">${renderMarkdown(entry.content)}</article>`
+      return `<article class="turn-user" data-entry-id="${escapeAttribute(entry.id)}"><div class="message-actions"><button type="button" class="ghost-button message-copy" data-copy-message="${escapeAttribute(entry.id)}" title="Copy message">Copy</button></div><div class="user-bubble">${renderMarkdown(entry.content)}</div></article>`
+    case "assistant": {
+      const actions = entry.content ? `<div class="message-actions"><button type="button" class="ghost-button message-copy" data-copy-message="${escapeAttribute(entry.id)}" title="Copy message">Copy</button></div>` : ""
+      return `<article class="turn-assistant" data-entry-id="${escapeAttribute(entry.id)}">${actions}${renderMarkdown(entry.content)}</article>`
+    }
     case "tool":
       return renderTool(entry)
     case "file":
       return `<div class="ledger-row ledger-file" data-entry-id="${escapeAttribute(entry.id)}"><span class="status-pip pip-done"></span><span class="ledger-verb">Edited</span><code class="ledger-arg">${escapeHtml(entry.filePath)}</code></div>`
-    case "error":
-      return `<div class="stream-card card-error" data-entry-id="${escapeAttribute(entry.id)}"><div class="card-label">${escapeHtml(entry.source)}</div><div class="card-body">${escapeHtml(entry.content)}</div></div>`
+    case "error": {
+      const retryable = canRetryLastPrompt() ? `<button type="button" class="ghost-button" data-retry-turn title="Resend the last prompt">重试</button>` : ""
+      return `<div class="stream-card card-error" data-entry-id="${escapeAttribute(entry.id)}"><div class="card-label">${escapeHtml(entry.source)}</div><div class="card-body">${escapeHtml(entry.content)}</div>${retryable ? `<div class="card-actions">${retryable}</div>` : ""}</div>`
+    }
     case "notice":
       return `<div class="stream-card card-notice" data-entry-id="${escapeAttribute(entry.id)}"><div class="card-label">${escapeHtml(entry.label)}</div><div class="card-body">${escapeHtml(entry.content)}</div></div>`
     case "command":
       return `<div data-entry-id="${escapeAttribute(entry.id)}">${renderCommandResult(entry)}</div>`
   }
+}
+
+function canRetryLastPrompt() {
+  const sessionId = state.viewedSessionId
+  return Boolean(sessionId && state.lastPrompts[sessionId]?.trim() && !sessionTurnActive(sessionId))
+}
+
+async function retryLastPrompt() {
+  const sessionId = state.viewedSessionId
+  const input = state.lastPrompts[sessionId]?.trim()
+  if (!sessionId || !input || sessionTurnActive(sessionId)) return
+  await ensureRuntime()
+  setConversationFor(sessionId, addUserMessage(conversationFor(sessionId), input))
+  if (state.viewedSessionId === sessionId) render()
+  await startTurn(sessionId, input)
+  await loadSessions()
+  if (state.viewedSessionId === sessionId) render()
 }
 
 function renderTool(tool: ToolEntry): string {
@@ -860,8 +1523,12 @@ function renderTool(tool: ToolEntry): string {
     ? "pip-running"
     : tool.status === "error" ? "pip-error" : "pip-done"
   const duration = formatDuration(tool.durationMs)
-  const diff = fileMutationPreview(tool.toolName, tool.arguments)
-  const body = renderToolDetails(tool, Boolean(diff))
+  // Prefer the unified diff recorded in the tool RESULT; requests without a
+  // result diff keep the argument-synthesized preview as a fallback.
+  const resultDiffLines = parseDiffLines(extractDiffText(tool.toolName, tool.result))
+  const argDiff = resultDiffLines.length ? undefined : fileMutationPreview(tool.toolName, tool.arguments)
+  const hasDiffPreview = Boolean(resultDiffLines.length || argDiff)
+  const body = renderToolDetails(tool, hasDiffPreview)
   return `
     <div class="ledger-row tool-${tool.status}${open ? " open" : ""}" data-entry-id="${escapeAttribute(tool.id)}" data-tool-id="${escapeAttribute(tool.id)}">
       <button type="button" class="ledger-trigger" data-toggle-tool="${escapeAttribute(tool.id)}" aria-expanded="${body ? String(open) : "false"}" ${body ? "" : "disabled"}>
@@ -872,10 +1539,42 @@ function renderTool(tool: ToolEntry): string {
         ${duration ? `<span class="ledger-duration">${duration}</span>` : ""}
         ${body ? `<span class="ledger-chevron" aria-hidden="true"></span>` : ""}
       </button>
-      ${diff ? renderFileMutationPreview(diff) : ""}
+      ${resultDiffLines.length ? renderResultDiff(tool, resultDiffLines) : argDiff ? renderFileMutationPreview(argDiff) : ""}
       ${body && revealed ? `<div class="tool-detail-shell" aria-hidden="${String(!open)}"><div class="tool-detail-clip">${body}</div></div>` : ""}
     </div>
   `
+}
+
+function renderResultDiff(tool: ToolEntry, lines: ReturnType<typeof parseDiffLines>): string {
+  const { added, removed, capped } = diffLineCounts(lines)
+  const filePath = resultDiffPath(tool)
+  const rows = lines.map((line) => {
+    const sign = line.kind === "added" ? "+" : line.kind === "removed" ? "-" : " "
+    return `<div class="file-diff-line file-diff-${line.kind}"><span>${sign}</span><code>${escapeHtml(line.text || " ")}</code></div>`
+  }).join("")
+  return `
+    <section class="file-diff-preview" aria-label="File change diff">
+      <div class="file-diff-head">
+        <span class="file-diff-label">Diff</span>
+        ${filePath ? `<code class="file-diff-path">${escapeHtml(filePath)}</code>` : ""}
+        <span class="file-diff-stats">${added ? `<span class="file-diff-added-count">+${added}</span>` : ""}${removed ? `<span class="file-diff-removed-count">-${removed}</span>` : ""}${capped ? `<span class="file-diff-capped">Capped</span>` : ""}</span>
+      </div>
+      <div class="file-diff-lines">${rows || `<div class="file-diff-empty">Empty file</div>`}</div>
+    </section>
+  `
+}
+
+function resultDiffPath(tool: ToolEntry): string {
+  const fromArgs = typeof tool.arguments.file_path === "string" ? tool.arguments.file_path : ""
+  if (fromArgs) return fromArgs
+  const metaFiles = tool.result?.meta?.files
+  if (Array.isArray(metaFiles)) {
+    for (const file of metaFiles) {
+      const record = file && typeof file === "object" ? file as Record<string, unknown> : {}
+      if (typeof record.path === "string") return record.path
+    }
+  }
+  return ""
 }
 
 function renderToolDetails(tool: ToolEntry, hasMutationPreview: boolean): string {
@@ -1140,6 +1839,8 @@ async function ensureSession(workspaceRoot: string, requestedSessionId?: string,
   const selectedModel = requestedModel.trim() || state.model.trim() || state.settings.model.trim()
   const createdModel = asRecordText(created.model)
   state.sessionModels[sessionId] = createdModel || selectedModel
+  const selectedEffort = asRecordText(created.reasoning_effort) || state.effort || state.settings.reasoningEffort
+  if (selectedEffort) state.sessionEfforts[sessionId] = selectedEffort
   const bindToView = !state.viewedSessionId && samePath(state.chatProjectPath, workspaceRoot)
   if (bindToView) {
     state.viewedSessionId = sessionId
@@ -1176,6 +1877,8 @@ function applyOverview(overview: Awaited<ReturnType<typeof window.api.projects.g
   state.sidebarWidth = overview.sidebarWidth
   state.filesOpen = overview.filesOpen
   state.filePanelWidth = overview.filePanelWidth
+  state.theme = overview.theme
+  state.notificationsEnabled = overview.notificationsEnabled
   state.sessionPages = nextPages
   state.sessionTotals = nextTotals
 }
@@ -1233,6 +1936,8 @@ async function loadReplayNow(sessionId: string) {
       state.sessionModels[sessionId] = model
       state.model = model
     }
+    const replayEffort = asRecordText(result.reasoning_effort)
+    if (replayEffort) state.sessionEfforts[sessionId] = replayEffort
     resetConversationPresentation(false)
   }
 }
@@ -1262,6 +1967,9 @@ function applyRuntimeInitialization(result: unknown) {
   const initialize = asRecord(result)
   if (!state.viewedSessionId && typeof initialize.model === "string") {
     state.model = initialize.model
+  }
+  if (typeof initialize.reasoning_effort === "string" && initialize.reasoning_effort) {
+    state.effort = initialize.reasoning_effort
   }
   const commands = parseSlashCommands(initialize.commands)
   if (commands.length) state.slashCommands = mergeSlashCommands(fallbackSlashCommands, commands)
@@ -1380,10 +2088,21 @@ function handleRuntimeEvent(envelope: RuntimeEvent) {
   if (envelope.type === "queued_input_delivered") {
     deliverPendingInput(sessionId, asRecordText(envelope.event.input_id))
   }
+  if (envelope.type === "user_question_requested") {
+    void maybeNotify(sessionId, "Rind asks a question", asRecordText(envelope.event.question))
+  }
   setConversationFor(sessionId, reduceEvent(conversationFor(sessionId), envelope))
   if (turnSettled) {
     delete state.activeTurnIds[sessionId]
     delete state.pendingInputs[sessionId]
+    // Cancellations are user-initiated; they never warrant a notification.
+    if (envelope.type !== "turn_cancelled") {
+      void maybeNotify(sessionId, envelope.type === "turn_failed" ? "Turn failed" : "Turn completed", finalAssistantPreview(sessionId))
+    }
+    if (sessionId === state.viewedSessionId) {
+      void loadGoal()
+      if (state.taskMonitorOpen) void pollTaskMonitor().catch(() => {})
+    }
     runAction(async () => {
       await loadSessions()
       if (sessionId === state.viewedSessionId) render()
@@ -1525,45 +2244,153 @@ prompt.addEventListener("keydown", (event) => {
     runAction(sendPrompt, state.viewedSessionId)
   }
 })
+// ---------- keyboard map (C11): one table for every shortcut ----------
+
+type KeyBinding = {
+  id: string
+  matches: (event: KeyboardEvent) => boolean
+  run: (event: KeyboardEvent) => void
+}
+
+function modifierPressed(event: KeyboardEvent) {
+  return event.ctrlKey || event.metaKey
+}
+
+function isTypingTarget(event: KeyboardEvent) {
+  const target = event.target as HTMLElement | null
+  if (!target) return false
+  return target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement || target.isContentEditable
+}
+
+function quickSwitchSessions() {
+  return knownSessions().filter((item) => item.id !== state.viewedSessionId).slice(0, 9)
+}
+
+const keyBindings: KeyBinding[] = [
+  {
+    id: "palette",
+    matches: (event) => modifierPressed(event) && !event.shiftKey && !event.altKey && event.key.toLowerCase() === "k",
+    run: (event) => {
+      event.preventDefault()
+      if (state.paletteOpen) closePalette()
+      else openPalette()
+    },
+  },
+  {
+    id: "new-chat",
+    matches: (event) => modifierPressed(event) && !event.shiftKey && !event.altKey && event.key.toLowerCase() === "n",
+    run: (event) => {
+      event.preventDefault()
+      runAction(startNewChat)
+    },
+  },
+  {
+    id: "settings",
+    matches: (event) => modifierPressed(event) && !event.shiftKey && !event.altKey && event.key === ",",
+    run: (event) => {
+      event.preventDefault()
+      openSettings()
+    },
+  },
+  {
+    id: "quick-session",
+    matches: (event) => modifierPressed(event) && !event.shiftKey && !event.altKey && /^[1-9]$/.test(event.key),
+    run: (event) => {
+      event.preventDefault()
+      const session = quickSwitchSessions()[Number(event.key) - 1]
+      if (session) runAction(() => switchSession(session.id), session.id)
+    },
+  },
+  {
+    id: "cheat-sheet",
+    matches: (event) => event.key === "?" && !modifierPressed(event) && !isTypingTarget(event),
+    run: (event) => {
+      event.preventDefault()
+      state.shortcutsOpen = !state.shortcutsOpen
+      render()
+    },
+  },
+  {
+    id: "escape-chain",
+    matches: (event) => event.key === "Escape",
+    run: (event) => {
+      if (state.paletteOpen) {
+        event.preventDefault()
+        closePalette()
+        return
+      }
+      if (state.shortcutsOpen) {
+        event.preventDefault()
+        state.shortcutsOpen = false
+        render()
+        return
+      }
+      if (state.slashMenuOpen) {
+        event.preventDefault()
+        closeSlashCommandMenu()
+        return
+      }
+      if (state.modelMenuOpen) {
+        event.preventDefault()
+        closeModelMenu()
+        render()
+        modelMenuTrigger.focus()
+        return
+      }
+      if (state.effortMenuOpen) {
+        event.preventDefault()
+        state.effortMenuOpen = false
+        render()
+        effortMenuTrigger.focus()
+        return
+      }
+      if (state.projectMenuOpen) {
+        event.preventDefault()
+        state.projectMenuOpen = false
+        render()
+        projectMenuTrigger.focus()
+        return
+      }
+      if (state.composerMenuOpen) {
+        state.composerMenuOpen = false
+        render()
+        prompt.focus()
+        return
+      }
+      if (state.projectMenuPath) {
+        const menuPath = state.projectMenuPath
+        state.projectMenuPath = ""
+        render()
+        projectList.querySelector<HTMLButtonElement>(`[data-project-menu="${CSS.escape(menuPath)}"]`)?.focus()
+        return
+      }
+      if (state.sessionDeleteConfirmId) {
+        resetDeleteConfirm()
+        render()
+        return
+      }
+      if (state.settingsOpen || state.shortcutsOpen) return
+      // Esc with nothing open: interrupt the active turn, else refocus the
+      // composer ("stop" semantics, matching the web surface).
+      if (runtimeTurnActive() && !state.settingsOpen) {
+        runAction(() => request(runtimeMethods.sessionCancel), state.viewedSessionId)
+        return
+      }
+      prompt.focus()
+    },
+  },
+]
+
 document.addEventListener("keydown", (event) => {
-  if (event.key === "Escape" && state.slashMenuOpen) {
-    event.preventDefault()
-    closeSlashCommandMenu()
-    return
-  }
-  if (event.key === "Escape" && state.modelMenuOpen) {
-    event.preventDefault()
-    closeModelMenu()
-    render()
-    modelMenuTrigger.focus()
-    return
-  }
-  if (event.key === "Escape" && state.projectMenuOpen) {
-    event.preventDefault()
-    state.projectMenuOpen = false
-    render()
-    projectMenuTrigger.focus()
-    return
-  }
-  if (event.key === "Escape" && state.composerMenuOpen) {
-    state.composerMenuOpen = false
-    render()
-    prompt.focus()
-    return
-  }
-  if (event.key === "Escape" && state.projectMenuPath) {
-    const menuPath = state.projectMenuPath
-    state.projectMenuPath = ""
-    render()
-    projectList.querySelector<HTMLButtonElement>(`[data-project-menu="${CSS.escape(menuPath)}"]`)?.focus()
-    return
-  }
-  if (event.key === "Escape" && runtimeTurnActive() && !state.settingsOpen) {
-    runAction(() => request(runtimeMethods.sessionCancel), state.viewedSessionId)
+  for (const binding of keyBindings) {
+    if (binding.matches(event)) {
+      binding.run(event)
+      return
+    }
   }
 })
 document.addEventListener("pointerdown", (event) => {
-  if ((state.modelMenuOpen || state.projectMenuOpen) && !(event.target as HTMLElement).closest(".composer-select-wrap")) {
+  if ((state.modelMenuOpen || state.projectMenuOpen || state.effortMenuOpen) && !(event.target as HTMLElement).closest(".composer-select-wrap")) {
     closeComposerSelectMenus()
     render()
   }
@@ -1576,6 +2403,11 @@ document.addEventListener("pointerdown", (event) => {
     render()
   }
   if (state.slashMenuOpen && !(event.target as HTMLElement).closest(".prompt-wrap")) closeSlashCommandMenu()
+  if (state.paletteOpen && !(event.target as HTMLElement).closest(".command-palette-box")) closePalette(false)
+  if (state.sessionDeleteConfirmId && !(event.target as HTMLElement).closest("[data-session-delete]")) {
+    resetDeleteConfirm()
+    render()
+  }
 })
 
 async function sendPrompt() {
@@ -1584,22 +2416,43 @@ async function sendPrompt() {
     render()
     return
   }
-  const input = prompt.value.trim()
-  if (!input) return
+  const rawInput = prompt.value.trim()
+  if (!rawInput) return
   const project = chatProject()
   if (!project?.available) {
     state.notice = "Choose a project before sending a message."
     render()
     return
   }
-  if (input.startsWith("/")) {
+  if (rawInput.startsWith("/")) {
     prompt.value = ""
     state.drafts[state.chatProjectPath] = ""
     autoGrowPrompt()
     closeSlashCommandMenu()
-    runAction(() => runSlash(input), state.viewedSessionId)
+    runAction(() => runSlash(rawInput), state.viewedSessionId)
     return
   }
+  // Wait for in-flight attachment uploads, then attach the ok chips' paths.
+  if (attachmentsFor(state.chatProjectPath).length) {
+    await waitForAttachments()
+    const chips = attachmentsFor(state.chatProjectPath)
+    const failed = chips.filter((chip) => chip.status === "failed")
+    if (failed.length) {
+      state.notice = `${failed.length} attachment(s) failed to upload. Retry or remove them before sending.`
+      renderAttachments()
+      render()
+      return
+    }
+  }
+  const chips = attachmentsFor(state.chatProjectPath)
+  const input = composeMessageWithAttachments(rawInput, chips.map((chip) => chip.path))
+  const promptValueWithAttachments = input
+  // Clear the composer (and its draft) before the request so the draft is
+  // never left duplicated after a queued prompt.
+  prompt.value = ""
+  state.drafts[project.path] = ""
+  autoGrowPrompt()
+  closeSlashCommandMenu()
   const projectPath = project.path
   const requestedSessionId = state.viewedSessionId
   const requestedModel = state.model || state.settings.model
@@ -1609,23 +2462,28 @@ async function sendPrompt() {
   if (active) {
     const result = asRecord(await requestForSession(runtimeMethods.sessionFollowUp, sessionId, { input }))
     addPendingInput(sessionId, input, result)
-    prompt.value = ""
-    state.drafts[projectPath] = ""
-    autoGrowPrompt()
-    closeSlashCommandMenu()
+    state.lastPrompts[sessionId] = input
+    state.attachments[projectPath] = []
+    renderAttachments()
     syncCurrentPendingInputs()
+    render()
     return
   }
-  prompt.value = ""
-  state.drafts[projectPath] = ""
-  autoGrowPrompt()
-  closeSlashCommandMenu()
-  setConversationFor(sessionId, addUserMessage(conversationFor(sessionId), input))
+  setConversationFor(sessionId, addUserMessage(conversationFor(sessionId), promptValueWithAttachments))
+  state.lastPrompts[sessionId] = promptValueWithAttachments
   if (state.viewedSessionId === sessionId) render()
-  const result = await startTurn(sessionId, input)
-  if (typeof result.session_id === "string" && result.session_id) {
-    await loadSessions()
-    await recordRecentSession(result.session_id)
+  try {
+    const result = await startTurn(sessionId, input)
+    state.attachments[projectPath] = []
+    if (typeof result.session_id === "string" && result.session_id) {
+      await loadSessions()
+      await recordRecentSession(result.session_id)
+    }
+  } catch (error) {
+    // Keep the uploaded chips so the attachments can be re-sent after a retry.
+    state.notice = error instanceof Error ? error.message : String(error)
+  } finally {
+    renderAttachments()
   }
   if (state.viewedSessionId === sessionId) render()
 }
@@ -1800,10 +2658,41 @@ composerMenuTrigger.addEventListener("click", () => {
   state.composerMenuOpen = !state.composerMenuOpen
   render()
 })
+attachButton.addEventListener("click", () => {
+  if (attachButton.disabled) return
+  attachInput.value = ""
+  attachInput.click()
+})
+attachInput.addEventListener("change", () => {
+  const files = Array.from(attachInput.files || [])
+  if (files.length) addAttachmentFiles(files)
+})
+prompt.addEventListener("paste", (event) => {
+  const files = Array.from(event.clipboardData?.files || [])
+  if (!files.length) return
+  event.preventDefault()
+  addAttachmentFiles(files)
+})
 compactContext.addEventListener("click", () => {
   state.composerMenuOpen = false
   render()
     runAction(compactCurrentSession, state.viewedSessionId)
+})
+requiredElement("toggle-goal").addEventListener("click", () => {
+  state.composerMenuOpen = false
+  showGoalPanel(!state.goal.visible)
+})
+const composerForm = requiredElement<HTMLFormElement>("composer")
+composerForm.addEventListener("dragover", (event) => {
+  event.preventDefault()
+  composerForm.classList.add("drag-over")
+})
+composerForm.addEventListener("dragleave", () => composerForm.classList.remove("drag-over"))
+composerForm.addEventListener("drop", (event) => {
+  event.preventDefault()
+  composerForm.classList.remove("drag-over")
+  const files = Array.from(event.dataTransfer?.files || [])
+  if (files.length) addAttachmentFiles(files)
 })
 slashCommandMenu.addEventListener("pointermove", (event) => {
   const commandName = (event.target as HTMLElement).closest<HTMLButtonElement>("[data-slash-command]")?.dataset.slashCommand
@@ -1823,6 +2712,11 @@ modelMenuTrigger.addEventListener("click", () => runAction(toggleModelMenu))
 modelMenu.addEventListener("click", (event) => {
   const model = (event.target as HTMLElement).closest<HTMLButtonElement>("[data-model-choice]")?.dataset.modelChoice
   if (model) runAction(() => selectModel(model))
+})
+effortMenuTrigger.addEventListener("click", () => runAction(toggleEffortMenu))
+effortMenu.addEventListener("click", (event) => {
+  const effort = (event.target as HTMLElement).closest<HTMLButtonElement>("[data-effort-choice]")?.dataset.effortChoice
+  if (effort) runAction(() => selectEffort(effort), state.viewedSessionId)
 })
 settingsForm.addEventListener("submit", (event) => { event.preventDefault(); runAction(saveSettings) })
 requiredElement("close-settings").addEventListener("click", () => { state.settingsOpen = false; render() })
@@ -1870,13 +2764,29 @@ projectList.addEventListener("click", (event) => {
     runAction(() => loadMoreSessions(moreProjectPath))
     return
   }
+  const deleteSessionId = target.closest<HTMLButtonElement>("[data-session-delete]")?.dataset.sessionDelete
+  if (deleteSessionId) {
+    requestSessionDeleteConfirm(deleteSessionId)
+    return
+  }
   const sessionButton = (event.target as HTMLElement).closest<HTMLButtonElement>("[data-session-id]")
   const nextSessionId = sessionButton?.dataset.sessionId
   if (nextSessionId) runAction(() => switchSession(nextSessionId), nextSessionId)
 })
 recentList.addEventListener("click", (event) => {
-  const nextSessionId = (event.target as HTMLElement).closest<HTMLButtonElement>("[data-session-id]")?.dataset.sessionId
+  const target = event.target as HTMLElement
+  const deleteSessionId = target.closest<HTMLButtonElement>("[data-session-delete]")?.dataset.sessionDelete
+  if (deleteSessionId) {
+    requestSessionDeleteConfirm(deleteSessionId)
+    return
+  }
+  const nextSessionId = target.closest<HTMLButtonElement>("[data-session-id]")?.dataset.sessionId
   if (nextSessionId) runAction(() => switchSession(nextSessionId), nextSessionId)
+})
+sessionSearchInput.addEventListener("input", () => {
+  state.sessionSearch = sessionSearchInput.value
+  renderProjects()
+  renderRecentSessions()
 })
 fileTree.addEventListener("click", (event) => {
   const target = event.target as HTMLElement
@@ -1896,6 +2806,122 @@ filePreview.addEventListener("click", (event) => {
 })
 startResize(sidebarResizeHandle, "sidebar")
 startResize(fileResizeHandle, "files")
+
+// ---------- task monitor / goal panel / palette interactions ----------
+
+taskMonitorDock.addEventListener("click", (event) => {
+  const target = event.target as HTMLElement
+  if (target.closest<HTMLButtonElement>("[data-task-close]")) {
+    toggleTaskMonitor(false)
+    return
+  }
+  const bgId = target.closest<HTMLButtonElement>("[data-toggle-task]")?.dataset.toggleTask
+  if (!bgId) return
+  state.taskMonitor.expandedId = state.taskMonitor.expandedId === bgId ? "" : bgId
+  renderTaskMonitorDock()
+  if (state.taskMonitor.expandedId && state.viewedSessionId) {
+    runAction(async () => {
+      const output = asRecord(await requestForSession(runtimeMethods.backgroundOutput, state.viewedSessionId, { bg_id: state.taskMonitor.expandedId }))
+      if (output.task) state.taskMonitor.outputs[state.taskMonitor.expandedId] = normalizeTask(output.task)
+      renderTaskMonitorDock()
+    }, state.viewedSessionId)
+  }
+})
+
+goalPanel.addEventListener("click", (event) => {
+  const target = event.target as HTMLElement
+  if (target.closest<HTMLButtonElement>("[data-goal-pause]")) {
+    runAction(() => changeGoalStatus("paused"), state.viewedSessionId)
+    return
+  }
+  if (target.closest<HTMLButtonElement>("[data-goal-resume]")) {
+    runAction(() => changeGoalStatus("active"), state.viewedSessionId)
+    return
+  }
+  if (target.closest<HTMLButtonElement>("[data-goal-clear]")) {
+    runAction(clearGoal, state.viewedSessionId)
+    return
+  }
+  if (target.closest<HTMLButtonElement>("[data-toggle-goal-set]")) {
+    state.goal.setOpen = true
+    renderGoalDock()
+    goalPanel.querySelector<HTMLInputElement>("#goal-objective-input")?.focus()
+    return
+  }
+  if (target.closest<HTMLButtonElement>("[data-goal-cancel]")) {
+    state.goal.setOpen = false
+    state.goal.draft = ""
+    renderGoalDock()
+    return
+  }
+  if (target.closest<HTMLButtonElement>("[data-goal-close]")) {
+    showGoalPanel(false)
+    return
+  }
+  if (target.closest<HTMLButtonElement>("[data-goal-submit]")) {
+    runAction(submitGoal, state.viewedSessionId)
+  }
+})
+goalPanel.addEventListener("input", (event) => {
+  const input = event.target as HTMLElement
+  if (input.id !== "goal-objective-input" || !(input instanceof HTMLInputElement)) return
+  state.goal.draft = input.value
+  const submit = goalPanel.querySelector<HTMLButtonElement>("[data-goal-submit]")
+  if (submit) submit.disabled = state.goal.busy || !input.value.trim()
+})
+goalPanel.addEventListener("keydown", (event) => {
+  if (event.key !== "Enter" || !(event.target instanceof HTMLInputElement) || event.target.id !== "goal-objective-input") return
+  event.preventDefault()
+  runAction(submitGoal, state.viewedSessionId)
+})
+
+paletteInput.addEventListener("input", () => {
+  state.paletteQuery = paletteInput.value
+  state.paletteActiveIndex = 0
+  renderPalette()
+})
+paletteInput.addEventListener("keydown", (event) => {
+  const matches = filterCommands(paletteCommands(), state.paletteQuery)
+  if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+    event.preventDefault()
+    state.paletteActiveIndex = moveActiveIndex(state.paletteActiveIndex, event.key === "ArrowDown" ? 1 : -1, matches.length)
+    renderPalette()
+    return
+  }
+  if (event.key === "Enter") {
+    event.preventDefault()
+    runPaletteCommand(state.paletteActiveIndex)
+    return
+  }
+  if (event.key === "Escape") {
+    event.preventDefault()
+    closePalette()
+  }
+})
+paletteList.addEventListener("click", (event) => {
+  const index = (event.target as HTMLElement).closest<HTMLElement>("[data-palette-index]")?.dataset.paletteIndex
+  if (index !== undefined) runPaletteCommand(Number(index))
+})
+
+// ---------- topbar actions ----------
+
+document.getElementById("toggle-tasks")?.addEventListener("click", () => toggleTaskMonitor())
+document.getElementById("open-palette")?.addEventListener("click", () => openPalette())
+document.getElementById("toggle-theme")?.addEventListener("click", () => setTheme(nextTheme()))
+document.getElementById("open-shortcuts")?.addEventListener("click", () => {
+  state.shortcutsOpen = true
+  render()
+})
+requiredElement("close-shortcuts").addEventListener("click", () => { state.shortcutsOpen = false; render() })
+requiredElement("dismiss-shortcuts").addEventListener("click", () => { state.shortcutsOpen = false; render() })
+shortcutsDialog.addEventListener("cancel", () => { state.shortcutsOpen = false; render() })
+settingsNotifications.addEventListener("change", () => {
+  const enabled = settingsNotifications.checked
+  state.notificationsEnabled = enabled
+  runAction(async () => {
+    await window.api.prefs.update({ notificationsEnabled: enabled })
+  })
+})
 planDock.addEventListener("click", (event) => {
   if (!(event.target as HTMLElement).closest("[data-toggle-plan]")) return
   state.planDock.collapsed = !state.planDock.collapsed
@@ -1906,6 +2932,17 @@ planDock.addEventListener("click", (event) => {
 })
 messageStream.addEventListener("click", (event) => {
   const target = event.target as HTMLElement
+  const copyMessage = target.closest<HTMLButtonElement>("[data-copy-message]")?.dataset.copyMessage
+  if (copyMessage) {
+    const entry = state.conversation.entries.find((item) => item.id === copyMessage)
+    const content = entry && (entry.kind === "user" || entry.kind === "assistant") ? entry.content : ""
+    if (content) runAction(() => navigator.clipboard.writeText(content))
+    return
+  }
+  if (target.closest<HTMLButtonElement>("[data-retry-turn]")) {
+    runAction(retryLastPrompt, state.viewedSessionId)
+    return
+  }
   const toggle = target.closest<HTMLButtonElement>("[data-toggle-tool]")
   if (toggle?.dataset.toggleTool) {
     const id = toggle.dataset.toggleTool
@@ -2057,11 +3094,15 @@ function resetProjectView() {
   state.viewedSessionId = ""
   state.conversationCache = {}
   state.sessionModels = {}
+  state.sessionEfforts = {}
   state.conversation = createConversation()
   resetConversationPresentation()
   state.expandedDirectories = new Set([""])
   state.fileListings = {}
   state.filePreview = undefined
+  state.goal = { busy: false, setOpen: false, visible: false, draft: "" }
+  state.taskMonitor = createTaskMonitorState()
+  stopTaskMonitorPolling()
   lastRenderedEntries = 0
 }
 
@@ -2166,6 +3207,7 @@ async function startNewChat() {
   state.fileListings = {}
   state.conversation = createConversation()
   resetConversationPresentation()
+  state.goal = { busy: false, setOpen: false, visible: false, draft: "" }
   restoreProjectDraft()
   state.notice = ""
   applyOverview(await window.api.projects.updateLayout({ filesOpen: false }))
@@ -2301,6 +3343,7 @@ async function switchSession(nextSessionId: string) {
   showCachedSession(nextSessionId)
   state.viewedSessionId = nextSessionId
   state.model = state.sessionModels[nextSessionId] || ""
+  state.effort = state.sessionEfforts[nextSessionId] || ""
   state.viewedProjectPath = project.path
   state.chatProjectPath = project.path
   state.expandedDirectories = new Set([""])
@@ -2309,8 +3352,101 @@ async function switchSession(nextSessionId: string) {
   render()
   await loadReplay(nextSessionId)
   if (state.viewedSessionId !== nextSessionId) return
+  void loadGoal()
+  void pollTaskMonitor().catch(() => {})
   if (state.filesOpen && viewedProject()?.available) await loadDirectory("")
   render()
+}
+
+// ---------- OS notifications (B5) ----------
+
+// The main process ignores this when the window is focused or the user
+// disabled notifications, so firing unconditionally here is safe.
+async function maybeNotify(sessionId: string, title: string, body: string) {
+  if (!body && title !== "Rind asks a question") return
+  try {
+    await window.api.notifications.show({
+      title,
+      body: body ? clipLine(body.replace(/\s+/g, " ").trim(), 120) : "This session needs your input.",
+      sessionId,
+    })
+  } catch {
+    // Notifications are best-effort only.
+  }
+}
+
+// Best-effort final assistant text for turn-completed notifications.
+function finalAssistantPreview(sessionId: string): string {
+  const conversation = conversationFor(sessionId)
+  for (let index = conversation.entries.length - 1; index >= 0; index -= 1) {
+    const entry = conversation.entries[index]
+    if (entry.kind === "assistant" && entry.content) return entry.content
+    if (entry.kind === "error" || entry.kind === "notice") return entry.content
+  }
+  return ""
+}
+
+// ---------- session delete (B3) ----------
+
+function resetDeleteConfirm() {
+  state.sessionDeleteConfirmId = ""
+  if (deleteConfirmTimer) {
+    clearTimeout(deleteConfirmTimer)
+    deleteConfirmTimer = undefined
+  }
+}
+
+function requestSessionDeleteConfirm(sessionId: string) {
+  if (state.sessionDeleteBusyId) return
+  if (state.sessionDeleteConfirmId === sessionId) {
+    resetDeleteConfirm()
+    runAction(() => deleteSessionRequest(sessionId), sessionId)
+    return
+  }
+  resetDeleteConfirm()
+  state.sessionDeleteConfirmId = sessionId
+  render()
+  deleteConfirmTimer = setTimeout(() => {
+    if (state.sessionDeleteConfirmId === sessionId) {
+      state.sessionDeleteConfirmId = ""
+      render()
+    }
+  }, 4000)
+}
+
+async function deleteSessionRequest(sessionId: string) {
+  if (!sessionId || state.sessionDeleteBusyId) return
+  if (sessionId === state.viewedSessionId) {
+    state.notice = "The current session cannot be deleted."
+    render()
+    return
+  }
+  state.sessionDeleteBusyId = sessionId
+  render()
+  try {
+    await window.api.sessions.remove(sessionId)
+    // Update the sidebar in place: drop the session from every local list.
+    state.recentSessions = state.recentSessions.filter((item) => item.id !== sessionId)
+    for (const [projectPath, sessions] of Object.entries(state.sessionPages)) {
+      state.sessionPages[projectPath] = sessions.filter((item) => item.id !== sessionId)
+    }
+    for (const project of state.projects) {
+      project.sessions = project.sessions.filter((item) => item.id !== sessionId)
+      if (project.totalSessions > 0) project.totalSessions -= 1
+    }
+    const cache = { ...state.conversationCache }
+    delete cache[sessionId]
+    state.conversationCache = cache
+    delete state.drafts[`${sessionId}:draft`]
+    renderedProjectListStructureKey = ""
+    renderedRecentListStructureKey = ""
+    state.notice = "Session deleted."
+  } finally {
+    state.sessionDeleteBusyId = ""
+    resetDeleteConfirm()
+    render()
+  }
+  await loadSessions()
 }
 
 async function selectChatProject(path: string) {
@@ -2395,6 +3531,7 @@ const unsubscribeStatus = window.api.runtime.subscribe((snapshot) => {
   if (snapshot.status !== "ready") {
     lastRuntimeSequence = 0
     clearRuntimeTurnState()
+    stopTaskMonitorPolling()
   }
   if (snapshot.status === "error") {
     clearSlashCommandPending()
@@ -2408,7 +3545,23 @@ const unsubscribeStatus = window.api.runtime.subscribe((snapshot) => {
   render()
 })
 const unsubscribeEvents = window.api.runtime.subscribeEvents(handleRuntimeEvent)
-window.addEventListener("beforeunload", () => { unsubscribeStatus(); unsubscribeEvents() }, { once: true })
+const unsubscribeNotifyActivate = window.api.notifications.onActivate((sessionId) => {
+  if (sessionId) runAction(() => switchSession(sessionId), sessionId)
+})
+const unsubscribeThemeChanged = window.api.prefs.onThemeChanged(() => {
+  // nativeTheme flips (system mode); re-resolve the CSS dataset.
+  renderTheme()
+})
+const themeMedia = window.matchMedia("(prefers-color-scheme: light)")
+const onThemeMediaChange = () => { if (state.theme === "system") renderTheme() }
+if (typeof themeMedia.addEventListener === "function") themeMedia.addEventListener("change", onThemeMediaChange)
+window.addEventListener("beforeunload", () => {
+  unsubscribeStatus()
+  unsubscribeEvents()
+  unsubscribeNotifyActivate()
+  unsubscribeThemeChanged()
+  if (typeof themeMedia.removeEventListener === "function") themeMedia.removeEventListener("change", onThemeMediaChange)
+}, { once: true })
 runAction(async () => {
   await loadSessions()
   render()

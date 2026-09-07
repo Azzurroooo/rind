@@ -1,13 +1,14 @@
 import { readFile, realpath, stat, unlink } from "node:fs/promises"
 import { basename, dirname, join, resolve } from "node:path"
 
-import type { DesktopProject, DesktopProjectOverview, DesktopRecentSession, DesktopSessionSummary } from "../preload/types"
+import type { DesktopProject, DesktopProjectOverview, DesktopRecentSession, DesktopSessionSummary, DesktopTheme, DesktopPrefsPatch } from "../preload/types"
 import { asObject, readJsonObject, writeJsonObject } from "./json-store.ts"
 
 const recentSessionLimit = 5
 const recentDesktopSessionLimit = 10
 const sessionPageLimit = 20
 const maxSessionPageLimit = 50
+const themes: DesktopTheme[] = ["system", "dark", "light"]
 
 type StoredRecentSession = {
   session_id: string
@@ -22,6 +23,8 @@ type StoredProjectState = {
   sidebarWidth: number
   filesOpen: boolean
   filePanelWidth: number
+  theme: DesktopTheme
+  notificationsEnabled: boolean
 }
 
 export class DesktopProjectStore {
@@ -51,7 +54,18 @@ export class DesktopProjectStore {
       sidebarWidth: state.sidebarWidth,
       filesOpen: state.filesOpen,
       filePanelWidth: state.filePanelWidth,
+      theme: state.theme,
+      notificationsEnabled: state.notificationsEnabled,
     }
+  }
+
+  async updatePrefs(patch: DesktopPrefsPatch): Promise<DesktopProjectOverview> {
+    const state = await this.readState()
+    const next = { ...state }
+    if (patch.theme && themes.includes(patch.theme)) next.theme = patch.theme
+    if (typeof patch.notificationsEnabled === "boolean") next.notificationsEnabled = patch.notificationsEnabled
+    await this.writeState(next)
+    return this.overview()
   }
 
   async add(path: string): Promise<DesktopProjectOverview> {
@@ -172,6 +186,8 @@ export class DesktopProjectStore {
       sidebarWidth: validSidebarWidth(raw.sidebarWidth),
       filesOpen: raw.filesOpen === true,
       filePanelWidth: validFilePanelWidth(storedFilePanelWidth(raw)),
+      theme: themes.includes(raw.theme as DesktopTheme) ? raw.theme as DesktopTheme : "system",
+      notificationsEnabled: raw.notificationsEnabled === undefined ? true : raw.notificationsEnabled === true,
     }
     if (needsMigration(raw, state) || legacyRecentSessions) {
       await this.writeState(state)
@@ -189,6 +205,8 @@ export class DesktopProjectStore {
       sidebarWidth: state.sidebarWidth,
       filesOpen: state.filesOpen,
       filePanelWidth: state.filePanelWidth,
+      theme: state.theme,
+      notificationsEnabled: state.notificationsEnabled,
     })
   }
 
@@ -272,6 +290,8 @@ function needsMigration(raw: Record<string, unknown>, state: StoredProjectState)
     || raw.filePanelWidth !== state.filePanelWidth
     || raw.fileTreeWidth !== undefined
     || raw.filePreviewWidth !== undefined
+    || raw.theme !== state.theme
+    || raw.notificationsEnabled !== state.notificationsEnabled
     || JSON.stringify(raw.projects) !== JSON.stringify(state.projects)
 }
 

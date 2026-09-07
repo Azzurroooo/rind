@@ -149,6 +149,7 @@ export function reduceEvent(state: ConversationState, envelope: RuntimeEvent): C
     case "turn_failed": return finishTurn(appendEntry(closeAssistant(state), { kind: "error", id: "", content: asString(event.error) || "Turn failed", source: asString(event.error_source) || "Runtime error" }), turnId)
     case "turn_cancelled": return finishTurn(appendEntry(closeAssistant(state), { kind: "notice", id: "", content: asString(event.reason) || "Stopped", label: "Interrupted" }), turnId)
     case "turn_completed": return finishTurn(markRunningTools(closeAssistant(state), "completed"), turnId)
+    case "goal_continued": return appendEntry(closeAssistant(state), { kind: "notice", id: "", content: asString(event.objective) || asString(event.message) || "Goal continuation started", label: "Goal" })
     default: return state
   }
 }
@@ -308,6 +309,12 @@ export function activePlan(state: ConversationState): PlanEntry | undefined {
   if (plan.error || plan.status === "error") return plan
   if (!state.activeTurnId) return undefined
   return plan.steps.some((step) => step.status === "pending" || step.status === "in_progress") ? plan : undefined
+}
+
+// The latest plan snapshot regardless of turn or step state — the dock uses
+// activePlan; tests and the palette need the raw latest snapshot.
+export function latestPlan(state: ConversationState): PlanEntry | undefined {
+  return state.plan
 }
 
 function appendAssistantDelta(state: ConversationState, turnId: string, text: string): ConversationState {

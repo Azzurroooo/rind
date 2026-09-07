@@ -453,3 +453,31 @@ test("file syntax highlighting escapes unknown files and colors known files", ()
   assert.equal(plain.language, "text")
   assert.equal(plain.html, "&lt;not markup&gt;")
 })
+
+test("goal_continued events render as system notice rows", () => {
+  let state = createConversation()
+  state = reduceEvent(state, event("turn_started"))
+  state = reduceEvent(state, event("assistant_delta", { text: "Working toward the goal." }))
+  state = reduceEvent(state, event("goal_continued", { objective: "Ship the desktop upgrade" }))
+  const notices = state.entries.filter((entry) => entry.kind === "notice")
+  assert.equal(notices.length, 1)
+  assert.equal(notices[0].label, "Goal")
+  assert.equal(notices[0].content, "Ship the desktop upgrade")
+})
+
+test("goal_continued falls back to a generic message without an objective", () => {
+  let state = createConversation()
+  state = reduceEvent(state, event("goal_continued", {}))
+  const notice = state.entries.find((entry) => entry.kind === "notice")
+  assert.equal(notice.content, "Goal continuation started")
+})
+
+test("latestPlan exposes the newest snapshot regardless of turn state", () => {
+  let state = createConversation()
+  assert.equal(latestPlan(state), undefined)
+  state = reduceEvent(state, event("plan_updated", {
+    tool_call_id: "plan-1",
+    plan: [{ step: "Inspect", status: "in_progress" }],
+  }))
+  assert.equal(latestPlan(state)?.steps[0].step, "Inspect")
+})

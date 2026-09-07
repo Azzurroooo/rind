@@ -1,10 +1,10 @@
-import { app, BrowserWindow, dialog, ipcMain } from "electron"
+import { app, BrowserWindow, dialog, ipcMain, nativeTheme, Notification } from "electron"
 import log from "electron-log/main"
 import windowState from "electron-window-state"
 import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
 
-import { runtimeMethods, type DesktopSettings, type DesktopSettingsPatch, type RuntimeEvent, type RuntimeMethod, type RuntimeSnapshot } from "../preload/types"
+import { runtimeMethods, type DesktopPrefsPatch, type DesktopSettings, type DesktopSettingsPatch, type DesktopTheme, type RuntimeEvent, type RuntimeMethod, type RuntimeSnapshot } from "../preload/types"
 import { asObject, readJsonObject, writeJsonObject } from "./json-store"
 import { listAvailableModels } from "./model-catalog"
 import { listProjectFiles, previewProjectFile } from "./project-files"
@@ -24,6 +24,11 @@ import {
 const appId = "ai.rind.desktop"
 const root = dirname(fileURLToPath(import.meta.url))
 const allowedRuntimeMethods = new Set<RuntimeMethod>(Object.values(runtimeMethods) as RuntimeMethod[])
+const themes: DesktopTheme[] = ["system", "dark", "light"]
+const themeSurfaces = {
+  dark: { background: "#1a1a1f", overlay: { color: "#1a1a1f", symbolColor: "#c9c9cf" } },
+  light: { background: "#f4f4f6", overlay: { color: "#f4f4f6", symbolColor: "#3a3a42" } },
+} as const
 
 function isRuntimeMethod(method: string): method is RuntimeMethod {
   return allowedRuntimeMethods.has(method as RuntimeMethod)
@@ -32,10 +37,40 @@ let mainWindow: BrowserWindow | undefined
 let desktopProjectStore: DesktopProjectStore | undefined
 let quitting = false
 let runtimeShutdownComplete = false
+let windowFocused = false
 const maxSettingLength = 4096
 
 function configPath() {
   return join(app.getPath("userData"), "desktop-settings.json")
+}
+
+function normalizeTheme(value: unknown): DesktopTheme {
+  return themes.includes(value as DesktopTheme) ? value as DesktopTheme : "system"
+}
+
+function resolvedTheme(theme: DesktopTheme) {
+  if (theme !== "system") return theme
+  return nativeTheme.shouldUseDarkColors ? "dark" : "light"
+}
+
+function applyThemeSurface(theme: DesktopTheme) {
+  nativeTheme.themeSource = theme
+  const resolved = resolvedTheme(theme)
+  const surfaces = themeSurfaces[resolved]
+  if (mainWindow) {
+    mainWindow.setBackgroundColor(surfaces.background)
+    if (process.platform === "win32" && mainWindow.setTitleBarOverlay) {
+      try {
+        mainWindow.setTitleBarOverlay({ ...surfaces.overlay, height: 46 })
+      } catch {
+        // Title bar overlays are unavailable on some Linux/Windows configurations.
+      }
+    }
+  }
+}
+
+function notifyThemeChanged(theme: DesktopTheme) {
+  mainWindow?.webContents.send("theme-changed", theme)
 }
 
 function runtimeSettingsPath() {
@@ -186,6 +221,27 @@ function registerIpc() {
   })
   ipcMain.handle("project-files-list", async (_event, projectPath: unknown, path: unknown) => listProjectFiles(await requireProject(projectPath), path))
   ipcMain.handle("project-files-preview", async (_event, projectPath: unknown, path: unknown) => previewProjectFile(await requireProject(projectPath), path))
+  ipcMain.handle("prefs-update", async (_event, patch: unknown) => {
+    const input = asObject(patch)
+    if (!input) throw new Error("Preferences must be an object.")
+    const prefs: DesktopPrefsPatch = {}
+    if (Object.hasOwn(input, "theme")) prefs.theme = normalizeTheme(input.theme)
+    if (Object.hasOwn(input, "notificationsEnabled")) {
+      if (typeof input.notificationsEnabled !== "boolean") throw new Error("notificationsEnabled must be a boolean.")
+      prefs.notificationsEnabled = input.notificationsEnabled
+    }
+    const overview = await projectStore().updatePrefs(prefs)
+    applyThemeSurface(overview.theme)
+    notifyThemeChanged(overview.theme)
+    return overview
+  })
+  ipcMain.handle("notify", async (_event, payload: unknown) => {
+    const record = asObject(payload)
+    if (!record) return false
+    const enabled = (await projectStore().overview()).notificationsEnabled
+    if (!enabled) return false
+    return showDesktopNotification(record)
+  })
   ipcMain.handle("app-quit", () => app.quit())
 }
 
@@ -193,6 +249,8 @@ function createMainWindow() {
   const state = windowState({ defaultWidth: 1320, defaultHeight: 860 })
   const isMac = process.platform === "darwin"
   const isWin = process.platform === "win32"
+  const resolved = resolvedTheme(nativeTheme.themeSource)
+  const surfaces = themeSurfaces[resolved]
   const win = new BrowserWindow({
     x: state.x,
     y: state.y,
@@ -201,7 +259,7 @@ function createMainWindow() {
     show: false,
     title: "Rind",
     autoHideMenuBar: true,
-    backgroundColor: "#1a1a1f",
+    backgroundColor: surfaces.background,
     icon: join(root, "../../resources/icon.png"),
     ...(isMac && {
       titleBarStyle: "hidden",
@@ -209,7 +267,7 @@ function createMainWindow() {
     }),
     ...(isWin && {
       titleBarStyle: "hidden",
-      titleBarOverlay: { color: "#1a1a1f", symbolColor: "#c9c9cf", height: 46 },
+      titleBarOverlay: { ...surfaces.overlay, height: 46 },
     }),
     webPreferences: {
       preload: join(root, "../preload/index.js"),
@@ -227,6 +285,8 @@ function createMainWindow() {
     const snapshot = getRuntimeSnapshot()
     if (snapshot) notifyRuntime(snapshot)
   })
+  win.on("focus", () => { windowFocused = true })
+  win.on("blur", () => { windowFocused = false })
   win.on("closed", () => {
     if (mainWindow === win) mainWindow = undefined
   })
@@ -240,6 +300,27 @@ function notifyRuntime(snapshot: RuntimeSnapshot) {
 
 function notifyRuntimeEvent(event: RuntimeEvent) {
   mainWindow?.webContents.send("runtime-event", event)
+}
+
+function showDesktopNotification(payload: { title?: unknown; body?: unknown; sessionId?: unknown }) {
+  const title = typeof payload.title === "string" && payload.title.trim() ? payload.title.trim() : "Rind"
+  const body = typeof payload.body === "string" ? payload.body : ""
+  const sessionId = typeof payload.sessionId === "string" ? payload.sessionId : ""
+  if (!Notification.isSupported()) return false
+  // Never interrupt a focused window; notifications are for background turns.
+  if (mainWindow && !mainWindow.isDestroyed() && (mainWindow.isFocused() || windowFocused)) return false
+  const notification = new Notification({ title, body: body.slice(0, 200), silent: false })
+  notification.on("click", () => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      if (mainWindow.isMinimized()) mainWindow.restore()
+      mainWindow.show()
+      mainWindow.focus()
+      if (sessionId) mainWindow.webContents.send("notification-activate", sessionId)
+    }
+    notification.close()
+  })
+  notification.show()
+  return true
 }
 
 const hasLock = app.requestSingleInstanceLock()
@@ -260,12 +341,17 @@ if (!hasLock) {
     registerIpc()
     try {
       const overview = await projectStore().overview()
+      nativeTheme.themeSource = overview.theme
       const workspace = overview.activeProjectPath || process.cwd()
       startRuntime(workspace)
       await initializeRuntime()
     } catch (error) {
       log.warn("runtime worker failed to start", error)
     }
+    nativeTheme.on("updated", () => {
+      if (mainWindow && !mainWindow.isDestroyed()) applyThemeSurface(nativeTheme.themeSource)
+      notifyThemeChanged(nativeTheme.themeSource as DesktopTheme)
+    })
     createMainWindow()
   })
 

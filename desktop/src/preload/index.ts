@@ -1,6 +1,6 @@
 import { contextBridge, ipcRenderer } from "electron"
 
-import type { DesktopApi, RuntimeEvent, RuntimeSnapshot } from "./types"
+import { runtimeMethods, type DesktopApi, type DesktopNotificationPayload, type DesktopPrefsPatch, type DesktopTheme, type RuntimeEvent, type RuntimeSnapshot } from "./types"
 
 const api: DesktopApi = {
   runtime: {
@@ -25,6 +25,41 @@ const api: DesktopApi = {
   },
   models: {
     list: (workspace) => ipcRenderer.invoke("models-list", workspace),
+    setEffort: (sessionId, effort) => ipcRenderer.invoke("runtime-request", runtimeMethods.modelEffort, { session_id: sessionId, reasoning_effort: effort }),
+  },
+  sessions: {
+    remove: (sessionId) => ipcRenderer.invoke("runtime-request", runtimeMethods.sessionDelete, { session_id: sessionId }),
+  },
+  workspaceFiles: {
+    list: (path = "") => ipcRenderer.invoke("runtime-request", runtimeMethods.fileList, { path }),
+    read: (path) => ipcRenderer.invoke("runtime-request", runtimeMethods.fileRead, { path }),
+    write: (path, contentBase64) => ipcRenderer.invoke("runtime-request", runtimeMethods.fileWrite, { path, content_base64: contentBase64 }),
+  },
+  background: {
+    list: (sessionId) => ipcRenderer.invoke("runtime-request", runtimeMethods.backgroundList, { session_id: sessionId }),
+    output: (sessionId, bgId, maxOutputChars = 20_000) => ipcRenderer.invoke("runtime-request", runtimeMethods.backgroundOutput, { session_id: sessionId, bg_id: bgId, max_output_chars: maxOutputChars }),
+  },
+  goal: {
+    get: (sessionId) => ipcRenderer.invoke("runtime-request", runtimeMethods.goalGet, { session_id: sessionId }),
+    set: (sessionId, objective) => ipcRenderer.invoke("runtime-request", runtimeMethods.goalSet, { session_id: sessionId, objective }),
+    status: (sessionId, status) => ipcRenderer.invoke("runtime-request", runtimeMethods.goalStatus, { session_id: sessionId, status }),
+    clear: (sessionId) => ipcRenderer.invoke("runtime-request", runtimeMethods.goalClear, { session_id: sessionId }),
+  },
+  notifications: {
+    show: (payload: DesktopNotificationPayload) => ipcRenderer.invoke("notify", payload),
+    onActivate: (listener) => {
+      const handler = (_event: Electron.IpcRendererEvent, sessionId: string) => listener(sessionId)
+      ipcRenderer.on("notification-activate", handler)
+      return () => ipcRenderer.removeListener("notification-activate", handler)
+    },
+  },
+  prefs: {
+    update: (patch: DesktopPrefsPatch) => ipcRenderer.invoke("prefs-update", patch),
+    onThemeChanged: (listener) => {
+      const handler = (_event: Electron.IpcRendererEvent, theme: DesktopTheme) => listener(theme)
+      ipcRenderer.on("theme-changed", handler)
+      return () => ipcRenderer.removeListener("theme-changed", handler)
+    },
   },
   version: () => ipcRenderer.invoke("app-version"),
   projects: {

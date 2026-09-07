@@ -20,6 +20,7 @@ export const runtimeMethods = {
   sessionNew: "session/new",
   sessionReplay: "session/replay",
   sessionPrompt: "session/prompt",
+  sessionDelete: "session/delete",
   sessionSteer: "rind/session/steer",
   sessionFollowUp: "rind/session/follow_up",
   sessionPromoteFollowUp: "rind/session/promote_follow_up",
@@ -29,6 +30,10 @@ export const runtimeMethods = {
   userQuestionRespond: "rind/user-question/respond",
   modelList: "model/list",
   modelSet: "model/set",
+  modelEffort: "model/effort",
+  fileRead: "file/read",
+  fileList: "file/list",
+  fileWrite: "file/write",
   sessionCompact: "rind/session/compact",
   commandExecute: "rind/command/execute",
   backgroundList: "rind/background/list",
@@ -47,7 +52,9 @@ export const sessionScopedMethods = new Set<RuntimeMethod>([
   runtimeMethods.sessionPrompt,
   runtimeMethods.sessionReplay,
   runtimeMethods.sessionCancel,
+  runtimeMethods.sessionDelete,
   runtimeMethods.modelSet,
+  runtimeMethods.modelEffort,
   runtimeMethods.sessionSteer,
   runtimeMethods.sessionFollowUp,
   runtimeMethods.sessionPromoteFollowUp,
@@ -112,6 +119,19 @@ export type DesktopSettingsPatch = {
   reasoningEffort?: string
 }
 
+export type DesktopTheme = "system" | "dark" | "light"
+
+export type DesktopPrefsPatch = {
+  theme?: DesktopTheme
+  notificationsEnabled?: boolean
+}
+
+export type DesktopNotificationPayload = {
+  title: string
+  body?: string
+  sessionId?: string
+}
+
 export type DesktopSessionSummary = {
   id: string
   title: string
@@ -141,6 +161,23 @@ export type DesktopProjectOverview = {
   sidebarWidth: number
   filesOpen: boolean
   filePanelWidth: number
+  theme: DesktopTheme
+  notificationsEnabled: boolean
+}
+
+export type DesktopGoal = {
+  objective: string
+  status: string
+}
+
+export type DesktopBackgroundTask = {
+  bg_id: string
+  status: string
+  exit_code?: number
+  cwd?: string
+  stdout?: string
+  stderr?: string
+  truncated?: boolean
 }
 
 export type DesktopFileNode = {
@@ -182,6 +219,33 @@ export type DesktopApi = {
   }
   models: {
     list: (workspace?: string) => Promise<string[]>
+    setEffort: (sessionId: string, effort: string) => Promise<unknown>
+  }
+  sessions: {
+    remove: (sessionId: string) => Promise<unknown>
+  }
+  workspaceFiles: {
+    list: (path?: string) => Promise<unknown>
+    read: (path: string) => Promise<unknown>
+    write: (path: string, contentBase64: string) => Promise<unknown>
+  }
+  background: {
+    list: (sessionId: string) => Promise<unknown>
+    output: (sessionId: string, bgId: string, maxOutputChars?: number) => Promise<unknown>
+  }
+  goal: {
+    get: (sessionId: string) => Promise<unknown>
+    set: (sessionId: string, objective: string) => Promise<unknown>
+    status: (sessionId: string, status: "active" | "paused") => Promise<unknown>
+    clear: (sessionId: string) => Promise<unknown>
+  }
+  notifications: {
+    show: (payload: DesktopNotificationPayload) => Promise<boolean>
+    onActivate: (listener: (sessionId: string) => void) => () => void
+  }
+  prefs: {
+    update: (patch: DesktopPrefsPatch) => Promise<DesktopProjectOverview>
+    onThemeChanged: (listener: (theme: DesktopTheme) => void) => () => void
   }
   version: () => Promise<string>
   projects: {

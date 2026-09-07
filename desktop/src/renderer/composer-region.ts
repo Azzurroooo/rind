@@ -20,6 +20,7 @@ export type ComposerElements = {
   compactContext: HTMLButtonElement
   slashCommandMenu: HTMLElement
   contextMeter: HTMLElement
+  attachButton?: HTMLButtonElement | null
 }
 
 export type PendingInput = {
@@ -47,10 +48,17 @@ export type ComposerView = {
 export function composerRegionMarkup() {
   return `
     <div class="composer-region">
+      <div id="task-monitor-shell" class="task-monitor-shell" hidden>
+        <section id="task-monitor" class="task-monitor" aria-label="Background tasks"></section>
+      </div>
+      <div id="goal-panel-shell" class="goal-panel-shell" hidden>
+        <section id="goal-panel" class="goal-panel" aria-label="Session goal"></section>
+      </div>
       <div id="plan-dock-shell" class="plan-dock-shell" hidden>
         <section id="plan-dock" class="plan-dock" aria-label="Plan progress"></section>
       </div>
       <div id="pending-input-dock" class="pending-input-dock" aria-label="Queued messages" hidden></div>
+      <div id="attachment-chips" class="attachment-chips" hidden></div>
       <form id="composer" class="composer">
         <div class="prompt-wrap">
           <div id="slash-command-menu" class="slash-command-menu" role="listbox" aria-label="Slash commands" hidden></div>
@@ -59,11 +67,20 @@ export function composerRegionMarkup() {
         <div class="composer-footer">
           <div class="composer-menu-wrap">
             <button id="composer-menu-trigger" type="button" class="composer-menu-trigger" title="More chat actions" aria-label="More chat actions" aria-haspopup="menu" aria-expanded="false">+</button>
-            <div id="composer-menu" class="composer-menu" role="menu" hidden><button id="compact-context" type="button" role="menuitem"><span class="compact-label">Compact context</span></button></div>
+            <div id="composer-menu" class="composer-menu" role="menu" hidden>
+              <button id="compact-context" type="button" role="menuitem"><span class="compact-label">Compact context</span></button>
+              <button id="toggle-goal" type="button" role="menuitem"><span class="goal-label">Set goal</span></button>
+            </div>
           </div>
+          <button id="attach-button" type="button" class="composer-menu-trigger attach-trigger" title="Attach files" aria-label="Attach files">${paperclipIcon()}</button>
+          <input id="attach-input" type="file" multiple hidden />
           <div class="composer-select-wrap model-control">
             <button id="model-menu-trigger" type="button" class="composer-select-trigger" title="Choose model" aria-label="Choose model" aria-haspopup="listbox" aria-controls="model-menu" aria-expanded="false"><span id="model-menu-label" class="composer-select-label">Model</span><span class="composer-select-chevron" aria-hidden="true"></span></button>
             <div id="model-menu" class="composer-select-menu" role="listbox" aria-label="Models" hidden></div>
+          </div>
+          <div class="composer-select-wrap effort-control">
+            <button id="effort-menu-trigger" type="button" class="composer-select-trigger" title="Choose reasoning effort" aria-label="Choose reasoning effort" aria-haspopup="listbox" aria-controls="effort-menu" aria-expanded="false"><span id="effort-menu-label" class="composer-select-label">Effort</span><span class="composer-select-chevron" aria-hidden="true"></span></button>
+            <div id="effort-menu" class="composer-select-menu" role="listbox" aria-label="Reasoning effort" hidden></div>
           </div>
           <div class="composer-select-wrap project-control">
             <button id="project-menu-trigger" type="button" class="composer-select-trigger" title="Choose working directory" aria-label="Choose working directory" aria-haspopup="listbox" aria-controls="project-menu" aria-expanded="false"><span id="project-menu-label" class="composer-select-label">Working directory</span><span class="composer-select-chevron" aria-hidden="true"></span></button>
@@ -77,6 +94,10 @@ export function composerRegionMarkup() {
       </form>
     </div>
   `
+}
+
+function paperclipIcon() {
+  return `<svg class="attach-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" focusable="false" aria-hidden="true"><path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>`
 }
 
 export function renderPlanDock(
@@ -164,6 +185,11 @@ export function renderComposer(elements: ComposerElements, view: ComposerView) {
   elements.compactContext.disabled = !view.ready || !view.runtimeSessionId || view.readOnly || view.active || view.compacting || view.slashCommandPending
   const compactLabel = elements.compactContext.querySelector<HTMLElement>(".compact-label")
   if (compactLabel) compactLabel.textContent = view.compacting ? "Compacting..." : "Compact context"
+  const attach = elements.attachButton
+  if (attach) {
+    attach.disabled = !view.ready || view.compacting || view.slashCommandPending
+    attach.title = view.ready ? "Attach files" : "Attach files after the runtime is ready"
+  }
   elements.contextMeter.hidden = view.contextUsagePercent === null
   elements.contextMeter.textContent = view.contextUsagePercent === null ? "" : `${Math.round(view.contextUsagePercent * 100)}% ctx`
   elements.contextMeter.classList.toggle("context-hot", view.contextUsagePercent !== null && view.contextUsagePercent >= 0.8)
