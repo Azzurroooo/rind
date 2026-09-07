@@ -84,7 +84,28 @@ test("runtime protocol recognizes the shared golden event fixture", () => {
     "turn_completed",
   ]);
   assert.deepEqual(events.map((message) => message.sequence), [1, 2, 3, 4, 5]);
-  assert.deepEqual(responses.map(runtimeRequestId), ["turn-1", "interrupt-2"]);
+  // Request/response sample pairs appended by later protocol methods must stay
+  // parseable by the shared envelope guards; event lines remain the first five.
+  assert.deepEqual(messages.filter((message) => message.kind === "request").map(runtimeRequestId), [
+    "file-list-1",
+    "file-read-1",
+    "file-write-1",
+    "subscribe-1",
+    "unsubscribe-1",
+    "delete-1",
+    "ping-1",
+  ]);
+  assert.deepEqual(responses.map(runtimeRequestId), [
+    "turn-1",
+    "interrupt-2",
+    "file-list-1",
+    "file-read-1",
+    "file-write-1",
+    "subscribe-1",
+    "unsubscribe-1",
+    "delete-1",
+    "ping-1",
+  ]);
 });
 
 test("runtime protocol exposes separate steering and follow-up methods", () => {

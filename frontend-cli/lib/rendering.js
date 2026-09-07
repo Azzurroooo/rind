@@ -1221,6 +1221,7 @@ function pendingInputLines(entries, frameWidth) {
   const hints = [];
   if (entries.some((entry) => entry?.mode === "follow_up")) {
     hints.push("alt+up recall queue");
+    hints.push("alt+right steer now");
   }
   if (entries.some((entry) => entry?.mode === "steering")) {
     hints.push("alt+down recall steer");

@@ -44,6 +44,9 @@ test("parses modified navigation and deletion keys", () => {
   const unsteer = parseTerminalKey("\x1b[1;3B");
   assert.equal(unsteer.name, "down");
   assert.equal(unsteer.alt, true);
+  const promote = parseTerminalKey("\x1b[1;3C");
+  assert.equal(promote.name, "right");
+  assert.equal(promote.alt, true);
 });
 
 test("parses common shifted enter sequences", () => {

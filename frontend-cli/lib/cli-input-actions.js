@@ -92,6 +92,28 @@ export function createCliInputActions({
     }
   }
 
+  async function promotePendingFollowUp(session) {
+    const entry = [...state.input.pending].reverse().find((item) => item.mode === "follow_up");
+    if (!entry || state.input.retrievingModes.has("follow_up")) {
+      return;
+    }
+    state.input.retrievingModes.add("follow_up");
+    try {
+      const result = await request(runtimeMethods.sessionPromoteFollowUp, { input_id: entry.inputId });
+      if (result?.accepted !== true || result?.mode !== "steering" || result?.input_id !== entry.inputId) {
+        throw new Error("Runtime did not confirm the follow-up promotion.");
+      }
+      entry.mode = "steering";
+      output.redraw();
+    } catch (error) {
+      if (state.runtime.status !== "closing") {
+        output.writeError(`${error instanceof Error ? error.message : String(error)}\n`);
+      }
+    } finally {
+      state.input.retrievingModes.delete("follow_up");
+    }
+  }
+
   function clearPendingInputs() {
     if (!state.input.pending.length) {
       return;
@@ -264,6 +286,10 @@ export function createCliInputActions({
     }
     if (session.mode === "prompt" && key.alt && !key.ctrl && !key.shift && key.name === "down" && state.input.pending.some((item) => item.mode === "steering")) {
       void retrievePendingInput("steering", session);
+      return;
+    }
+    if (session.mode === "prompt" && key.alt && !key.ctrl && !key.shift && key.name === "right" && state.input.pending.some((item) => item.mode === "follow_up")) {
+      void promotePendingFollowUp(session);
       return;
     }
     const result = session.editor.handleInput(key);

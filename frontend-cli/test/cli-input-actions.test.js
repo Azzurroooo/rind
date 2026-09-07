@@ -3,6 +3,7 @@ import test from "node:test";
 
 import { createCliInputActions } from "../lib/cli-input-actions.js";
 import { createCliState } from "../lib/cli-state.js";
+import { createLineEditor } from "../lib/line-editor.js";
 
 test("question arrows leave custom editing and discard its draft", async () => {
   const state = createCliState();
@@ -102,4 +103,43 @@ test("prompt input restores persisted history and saves natural prompts only", a
   actions.handleTerminalInput("\r");
   assert.equal(await command, "/help");
   assert.deepEqual(saved, [["new prompt", "previous prompt"]]);
+});
+
+test("alt+right promotes a queued follow-up to steering", async () => {
+  const state = createCliState();
+  state.runtime.status = "ready";
+  const requests = [];
+  const output = {
+    redraw() {},
+    writeError() {},
+  };
+  const actions = createCliInputActions({
+    state,
+    request: async (method, params = {}) => {
+      requests.push({ method, params });
+      return { accepted: true, input_id: params.input_id, mode: "steering", pending: 1 };
+    },
+    output,
+    getTurnController: () => null,
+    getTaskMonitor: () => null,
+    getLineInput: () => null,
+    pausePrompt() {},
+    resumePrompt() {},
+    handleSigint() {},
+  });
+  state.input.pending.push({ inputId: "input-9", input: "follow up text", mode: "follow_up" });
+  state.input.session = {
+    mode: "prompt",
+    editor: createLineEditor(""),
+    menuState: null,
+    resolve: () => {},
+  };
+
+  actions.handleTerminalInput("\x1b[1;3C");
+  await new Promise((resolve) => setTimeout(resolve, 0));
+
+  assert.equal(requests.length, 1);
+  assert.equal(requests[0].method, "rind/session/promote_follow_up");
+  assert.deepEqual(requests[0].params, { input_id: "input-9" });
+  assert.equal(state.input.pending[0].mode, "steering");
 });
