@@ -8,6 +8,12 @@ export const methods = Object.freeze({
   sessionCancel: "session/cancel",
   sessionDelete: "session/delete",
   sessionSteer: "rind/session/steer",
+  sessionFollowUp: "rind/session/follow_up",
+  sessionPromoteFollowUp: "rind/session/promote_follow_up",
+  sessionUnsteer: "rind/session/unsteer",
+  sessionDequeueFollowUp: "rind/session/dequeue_follow_up",
+  sessionSubscribe: "session/subscribe",
+  sessionUnsubscribe: "session/unsubscribe",
   sessionCompact: "rind/session/compact",
   modelList: "model/list",
   modelSet: "model/set",
@@ -22,22 +28,6 @@ export const methods = Object.freeze({
   fileRead: "file/read",
   fileWrite: "file/write",
 });
-
-export const slashCommands = [
-  ["status", "Session status"],
-  ["sessions", "Switch session"],
-  ["model", "Change model"],
-  ["effort", "Reasoning effort"],
-  ["compact", "Compact context"],
-  ["goal", "Manage active goal"],
-  ["help", "Show commands"],
-  ["doctor", "Run diagnostics"],
-  ["init", "Draft RIND.md"],
-  ["skill", "List skills"],
-  ["team", "Manage Team"],
-  ["config", "Show configuration"],
-  ["login", "Login setup"],
-];
 
 export function parseSlashCommand(value) {
   const match = String(value || "").trim().match(/^\/([^\s]+)(?:\s+([\s\S]*))?$/);

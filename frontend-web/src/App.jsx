@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import { Menu, PanelRight } from "lucide-react";
+import { CommandPalette } from "./components/CommandPalette.jsx";
 import { ConnectionBar } from "./components/ConnectionBar.jsx";
 import { Composer } from "./components/Composer.jsx";
 import { Conversation } from "./components/Conversation.jsx";
@@ -8,6 +9,9 @@ import { LoginGate } from "./components/LoginGate.jsx";
 import { SessionRail } from "./components/SessionRail.jsx";
 import { methods, parseSlashCommand, sessionIdOf } from "./methods.js";
 import { createRuntimeClient, initialRuntimeUrl, isAuthError } from "./runtimeClient.js";
+import { buildCommands, findCommandBySlash } from "./lib/commands.js";
+import { createEventCoalescer } from "./lib/streamController.js";
+import { applyTheme, initialTheme, storeTheme, toggleTheme } from "./lib/theme.js";
 import { currentNotificationPermission, finalAssistantText, requestNotificationPermission, showNotification, truncateFirstLine } from "./lib/notifications.js";
 import { fileToBase64, uploadTargetPath } from "./lib/files.js";
 import { createConnectionController, initialConnectionState, reduceConnection } from "./state/connection.js";
@@ -16,6 +20,9 @@ import { dropCredentials, fetchTicket, hasStoredCredential, loginErrorMessage, r
 
 const REASONING_EFFORTS = ["low", "medium", "high", "xhigh", "max"];
 const CATCH_UP_CHUNK = 50;
+const SESSION_PAGE = 30; // session/list page size; the server caps limit at 100
+const SESSION_LIMIT_MAX = 100;
+const INTERRUPT_ARM_MS = 3000; // opencode pattern: second Esc within 3s cancels
 // ≤900px the three desktop columns collapse into one; SessionRail and
 // Inspector become edge slide-out drawers (master plan §6.2 移动端).
 const NARROW_QUERY = "(max-width: 900px)";
@@ -51,10 +58,19 @@ export default function App() {
   const [narrow, setNarrow] = useState(readNarrowViewport);
   const [railOpen, setRailOpen] = useState(false);
   const [inspectorOpen, setInspectorOpen] = useState(false);
+  const [queueMode, setQueueMode] = useState("follow_up"); // "follow_up" | "steering" — queued while a turn runs (audit #1)
+  const [interruptArmed, setInterruptArmed] = useState(false);
+  const [paletteOpen, setPaletteOpen] = useState(false);
+  const [theme, setTheme] = useState(initialTheme);
+  const [sessionLimit, setSessionLimit] = useState(SESSION_PAGE);
+  const [hasMoreSessions, setHasMoreSessions] = useState(false);
+  const [contextInfo, setContextInfo] = useState({ lastTurnDurationMs: 0, messageCount: 0 });
   const railPanelRef = useRef(null);
   const inspectorPanelRef = useRef(null);
   const railToggleRef = useRef(null);
   const inspectorToggleRef = useRef(null);
+  const composerRef = useRef(null);
+  const conversationRef = useRef(null);
   const bootstrappedRef = useRef(false);
   const catchUpRef = useRef(false);
   const initializingRef = useRef(false);
@@ -63,10 +79,24 @@ export default function App() {
   const currentModelRef = useRef("");
   const convRef = useRef(conversation);
   const clientRef = useRef(null);
+  const queueModeRef = useRef(queueMode);
+  const interruptTimerRef = useRef(null);
+  const narrowRef = useRef(narrow);
+  const railOpenRef = useRef(railOpen);
+  const inspectorOpenRef = useRef(inspectorOpen);
+  const paletteOpenRef = useRef(paletteOpen);
+  const sessionsRef = useRef(sessions);
+  const subscribedRef = useRef(new Set()); // session/subscribe bookkeeping (audit #13)
   workspaceRef.current = selectedWorkspace;
   infoRef.current = info;
   currentModelRef.current = currentModel;
   convRef.current = conversation;
+  queueModeRef.current = queueMode;
+  narrowRef.current = narrow;
+  railOpenRef.current = railOpen;
+  inspectorOpenRef.current = inspectorOpen;
+  paletteOpenRef.current = paletteOpen;
+  sessionsRef.current = sessions;
 
   const controller = useMemo(() => createConnectionController({ dispatch: dispatchConnection }), []);
 
@@ -99,6 +129,19 @@ export default function App() {
 
   const expireQuestion = useCallback((key) => {
     dispatchConversation({ kind: "question_expired", key: String(key || "") });
+  }, []);
+
+  // ---- theme (audit #11) ----
+  useEffect(() => {
+    applyTheme(theme);
+  }, [theme]);
+
+  const handleToggleTheme = useCallback(() => {
+    setTheme((current) => {
+      const next = toggleTheme(current);
+      storeTheme(next);
+      return next;
+    });
   }, []);
 
   // ---- mobile drawers (master plan §6.2) ----
@@ -157,10 +200,17 @@ export default function App() {
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [narrow, railOpen, inspectorOpen, closeDrawers]);
 
+  // ---- event intake: deltas coalesce through the stream controller ----
+  const coalescer = useMemo(() => createEventCoalescer({ dispatch: dispatchConversation }), []);
+
   const handleEvent = useCallback((message) => {
     const event = message?.event;
     if (!event || typeof event !== "object") return;
     if (event.type === "context_built" || event.type === "token_stats_updated") {
+      if (event.type === "context_built") {
+        const count = Number(event.message_count || 0);
+        if (count > 0) setContextInfo((current) => ({ ...current, messageCount: count }));
+      }
       setStats(event.stats && typeof event.stats === "object" ? event.stats : {});
       return;
     }
@@ -173,16 +223,15 @@ export default function App() {
       if (String(message.durability) === "durable") markUnread(envelopeSession);
       return;
     }
-    // Browser notifications: only when the tab is hidden AND permission was
-    // granted via the rail footer button (never a load-time prompt).
     if (event.type === "turn_completed") {
+      const duration = Number(event.duration_ms || 0);
+      if (duration > 0) setContextInfo((current) => ({ ...current, lastTurnDurationMs: duration }));
+      // Browser notifications: only when the tab is hidden AND permission was
+      // granted via the rail footer button (never a load-time prompt).
       showNotification({ title: "Rind 回复完成", body: truncateFirstLine(finalAssistantText(convRef.current)) });
     }
-    if (event.type === "user_question_requested") {
-      showNotification({ title: "Rind 需要你的输入", body: truncateFirstLine(event.question) });
-    }
-    dispatchConversation(message);
-  }, [markUnread]);
+    coalescer.push(message);
+  }, [markUnread, coalescer]);
 
   const client = useMemo(() => createRuntimeClient({
     url: endpoint,
@@ -200,6 +249,8 @@ export default function App() {
     });
     return () => client.disconnect();
   }, [client]);
+
+  useEffect(() => () => coalescer.dispose(), [coalescer]);
 
   async function acquireCredential() {
     const token = readStoredToken();
@@ -345,15 +396,44 @@ export default function App() {
     }
   }
 
-  async function refreshSessions(workspace = selectedWorkspace || info.workspace_root) {
+  // session/list (audit #9/#13): the server has no offset — pagination steps
+  // the `limit` (max 100) instead; listed sessions + the current one are
+  // subscribed so unread dots are first-class, not incidental.
+  async function refreshSessions(workspace = selectedWorkspace || info.workspace_root, { limit = sessionLimit } = {}) {
     if (!clientRef.current) return;
     try {
-      const params = { limit: 30 };
+      const params = { limit };
       if (workspace) params.workspace_root = workspace;
       const result = await clientRef.current.request(methods.sessionList, params);
-      setSessions(Array.isArray(result?.sessions) ? result.sessions : []);
+      const list = Array.isArray(result?.sessions) ? result.sessions : [];
+      setSessions(list);
+      setHasMoreSessions(list.length >= limit && limit < SESSION_LIMIT_MAX);
+      void syncSubscriptions(list);
     } catch {
       // Session list refresh is advisory; keep the current list on failure.
+    }
+  }
+
+  async function loadMoreSessions() {
+    const next = Math.min(SESSION_LIMIT_MAX, sessionLimit + SESSION_PAGE);
+    setSessionLimit(next);
+    await refreshSessions(workspaceRef.current || infoRef.current.workspace_root, { limit: next });
+  }
+
+  async function syncSubscriptions(list = sessions) {
+    const client = clientRef.current;
+    if (!client) return;
+    const targets = new Set(list.map((session) => sessionIdOf(session)).filter(Boolean));
+    const currentId = String(infoRef.current.session_id || "");
+    if (currentId) targets.add(currentId);
+    for (const id of targets) {
+      if (subscribedRef.current.has(id)) continue;
+      try {
+        await client.request(methods.sessionSubscribe, { session_id: id });
+        subscribedRef.current.add(id);
+      } catch {
+        // Subscriptions are advisory (unread dots); failures stay silent.
+      }
     }
   }
 
@@ -400,6 +480,7 @@ export default function App() {
       setGoal(switched?.goal || null);
       setStats(switched?.usage || {});
       clearUnread(target); // late events during the switch may have re-marked it
+      void syncSubscriptions([...(sessionsRef.current || []), { id: target }]);
     } catch (error) {
       dispatchMessage("system", `Unable to open session: ${error instanceof Error ? error.message : String(error)}`, "error");
     } finally {
@@ -428,10 +509,12 @@ export default function App() {
     setWorkspaceBusy(true);
     setWorkspaceMessage("");
     try {
-      const result = await clientRef.current.request(methods.sessionList, { limit: 30, workspace_root: workspace });
+      const result = await clientRef.current.request(methods.sessionList, { limit: sessionLimit, workspace_root: workspace });
       const nextSessions = Array.isArray(result?.sessions) ? result.sessions : [];
       setSelectedWorkspace(workspace);
       setSessions(nextSessions);
+      setHasMoreSessions(nextSessions.length >= sessionLimit && sessionLimit < SESSION_LIMIT_MAX);
+      void syncSubscriptions(nextSessions);
       const currentId = sessionIdOf(info);
       const nextSession = nextSessions.find((session) => sessionIdOf(session) === currentId) || nextSessions[0];
       if (nextSession) {
@@ -472,17 +555,82 @@ export default function App() {
       return;
     }
     if (convRef.current.active) {
+      // Queue by default (audit #1): follow_up unless the user flipped the
+      // Composer switch to 立即转向. The returned input_id keeps the chip
+      // addressable for 取回 / 转向.
+      const mode = queueModeRef.current === "steering" ? "steering" : "follow_up";
+      const method = mode === "steering" ? methods.sessionSteer : methods.sessionFollowUp;
       try {
-        await clientRef.current.request(methods.sessionSteer, { session_id: info.session_id, turn_id: convRef.current.activeTurnId, input: text });
-        dispatchMessage("system", `Steering input queued: ${text}`);
+        const result = await clientRef.current.request(method, { session_id: infoRef.current.session_id, input: text });
+        const inputId = String(result?.input_id || "").trim();
+        if (inputId) {
+          dispatchConversation({ kind: "queue_input", inputId, input: text, mode });
+        } else {
+          dispatchMessage("system", `Queued input accepted: ${text}`);
+        }
       } catch (error) {
-        dispatchMessage("system", `Unable to steer turn: ${error.message}`, "error");
+        restoreDraft(text);
+        dispatchMessage("system", `无法排队输入: ${error.message}`, "error");
       }
       return;
     }
     dispatchMessage("user", text);
     try {
-      await clientRef.current.request(methods.sessionPrompt, { session_id: info.session_id, input: text });
+      await clientRef.current.request(methods.sessionPrompt, { session_id: infoRef.current.session_id, input: text });
+    } catch (error) {
+      restoreDraft(text);
+      dispatchMessage("system", `Prompt failed: ${error.message}`, "error");
+    }
+  }
+
+  // A failed submit never eats the user's text: the draft comes back
+  // (prepended to whatever they typed since) instead of vanishing.
+  function restoreDraft(text) {
+    const clean = String(text || "");
+    if (!clean) return;
+    setInput((current) => (current ? `${clean}\n${current}` : clean));
+  }
+
+  // Queued chip actions (audit #1). 取回 pulls the text back into the draft
+  // (unsteer / dequeue_follow_up return the removed item); 转向 promotes a
+  // follow_up into the steering queue.
+  async function retrieveQueued(entry) {
+    const method = entry.mode === "steering" ? methods.sessionUnsteer : methods.sessionDequeueFollowUp;
+    try {
+      const result = await clientRef.current.request(method, { session_id: infoRef.current.session_id, input_id: entry.inputId });
+      dispatchConversation({ kind: "unqueue", inputId: entry.inputId });
+      const text = String(result?.input || entry.input || "");
+      setInput((current) => (current ? `${current}\n${text}` : text));
+      composerRef.current?.focus();
+    } catch (error) {
+      dispatchMessage("system", `取回失败: ${error.message}`, "error");
+    }
+  }
+
+  async function promoteQueued(entry) {
+    try {
+      await clientRef.current.request(methods.sessionPromoteFollowUp, { session_id: infoRef.current.session_id, input_id: entry.inputId });
+      dispatchConversation({ kind: "requeue", inputId: entry.inputId, mode: "steering" });
+    } catch (error) {
+      dispatchMessage("system", `转向失败: ${error.message}`, "error");
+    }
+  }
+
+  // Retry (audit: message actions): resend the last user prompt of that turn.
+  async function retryTurn(message) {
+    const entries = convRef.current.entries;
+    const index = entries.findIndex((entry) => entry.id === message.id);
+    let prompt = "";
+    for (let cursor = (index < 0 ? entries.length : index) - 1; cursor >= 0; cursor -= 1) {
+      if (entries[cursor]?.role === "user" && entries[cursor]?.content) {
+        prompt = entries[cursor].content;
+        break;
+      }
+    }
+    if (!prompt || !clientRef.current) return;
+    dispatchMessage("user", prompt);
+    try {
+      await clientRef.current.request(methods.sessionPrompt, { session_id: infoRef.current.session_id, input: prompt });
     } catch (error) {
       dispatchMessage("system", `Prompt failed: ${error.message}`, "error");
     }
@@ -491,65 +639,30 @@ export default function App() {
   async function runSlashCommand(text) {
     const parsed = parseSlashCommand(text);
     if (!parsed) return;
-    const argument = parsed.argument;
+    let argument = parsed.argument;
+    // CLI-compat quirk: `/model set gpt-x` normalizes to the plain model name.
+    if (parsed.name === "model" && argument.toLowerCase().startsWith("set ")) argument = argument.slice(4).trim();
+    const command = findCommandBySlash(commandList, parsed.name);
+    if (command) {
+      try {
+        await command.run(commandCtxRef.current, argument);
+      } catch (error) {
+        dispatchMessage("system", `Command failed: ${error.message}`, "error");
+      }
+      return;
+    }
     try {
-      if (parsed.name === "compact" && !argument) {
-        await compact();
-        return;
-      }
-      if (parsed.name === "sessions") {
-        await refreshSessions();
-        dispatchMessage("system", "Session list refreshed.");
-        return;
-      }
-      if (parsed.name === "model" && argument.toLowerCase().startsWith("set ")) {
-        await setModel(argument.slice(4).trim());
-        return;
-      }
-      if (parsed.name === "effort" && argument) {
-        await setEffort(argument);
-        return;
-      }
-      if (parsed.name === "goal") {
-        await runGoalCommand(argument);
-        return;
-      }
-      const result = await clientRef.current.request(methods.commandExecute, { session_id: info.session_id, input: text });
+      const result = await clientRef.current.request(methods.commandExecute, { session_id: infoRef.current.session_id, input: text });
       dispatchMessage("system", result?.text || formatResult(result));
     } catch (error) {
       dispatchMessage("system", `Command failed: ${error.message}`, "error");
     }
   }
 
-  async function runGoalCommand(argument) {
-    const action = argument.trim().toLowerCase();
-    if (!action) {
-      const result = await clientRef.current.request(methods.goalGet, { session_id: info.session_id });
-      setGoal(result?.goal || null);
-      dispatchMessage("system", result?.goal?.objective ? `Active goal: ${result.goal.objective}` : "No active goal.");
-      return;
-    }
-    if (action === "clear") {
-      await clientRef.current.request(methods.goalClear, { session_id: info.session_id });
-      setGoal(null);
-      dispatchMessage("system", "Goal cleared.");
-      return;
-    }
-    if (action === "pause" || action === "resume") {
-      const result = await clientRef.current.request(methods.goalStatus, { session_id: info.session_id, status: action === "resume" ? "active" : "paused" });
-      setGoal(result?.goal || null);
-      dispatchMessage("system", `Goal ${action}d.`);
-      return;
-    }
-    const result = await clientRef.current.request(methods.goalSet, { session_id: info.session_id, objective: argument });
-    setGoal(result?.goal || null);
-    dispatchMessage("system", `Goal set: ${argument}`);
-  }
-
   async function setModel(model) {
     const clean = String(model || "").trim();
     if (!clean) return;
-    const result = await clientRef.current.request(methods.modelSet, { session_id: info.session_id, model: clean });
+    const result = await clientRef.current.request(methods.modelSet, { session_id: infoRef.current.session_id, model: clean });
     const next = String(result?.session_model || result?.model || clean).trim();
     setCurrentModel(next);
     setInfo((current) => ({ ...current, model: next }));
@@ -558,8 +671,11 @@ export default function App() {
 
   async function setEffort(effort) {
     const clean = String(effort || "").trim().toLowerCase();
-    if (!REASONING_EFFORTS.includes(clean)) return;
-    const result = await clientRef.current.request(methods.modelEffort, { session_id: info.session_id, reasoning_effort: clean });
+    if (!REASONING_EFFORTS.includes(clean)) {
+      dispatchMessage("system", `Unknown reasoning effort: ${effort}`, "error");
+      return;
+    }
+    const result = await clientRef.current.request(methods.modelEffort, { session_id: infoRef.current.session_id, reasoning_effort: clean });
     const next = String(result?.reasoning_effort || clean).trim();
     setInfo((current) => ({ ...current, reasoning_effort: next }));
     dispatchMessage("system", `Reasoning effort set to ${next}.`);
@@ -572,7 +688,7 @@ export default function App() {
     }
     setCompacting(true);
     try {
-      const result = await clientRef.current.request(methods.sessionCompact, { session_id: info.session_id });
+      const result = await clientRef.current.request(methods.sessionCompact, { session_id: infoRef.current.session_id });
       dispatchMessage("system", `Context compacted${result?.source ? ` · messages ${result.source.message_start_index ?? "?"}-${result.source.message_end_index_exclusive ?? "?"}` : ""}.`);
     } catch (error) {
       dispatchMessage("system", `Compaction failed: ${error.message}`, "error");
@@ -583,10 +699,36 @@ export default function App() {
 
   async function cancelTurn() {
     try {
-      await clientRef.current.request(methods.sessionCancel, { session_id: info.session_id, ...(convRef.current.activeTurnId ? { turn_id: convRef.current.activeTurnId } : {}) });
+      await clientRef.current.request(methods.sessionCancel, { session_id: infoRef.current.session_id, ...(convRef.current.activeTurnId ? { turn_id: convRef.current.activeTurnId } : {}) });
     } catch (error) {
       dispatchMessage("system", error.message, "error");
     }
+  }
+
+  // 目标 command with an argument: set / clear / pause / resume (CLI parity).
+  async function runGoalCommand(argument) {
+    const action = argument.trim().toLowerCase();
+    if (!action) {
+      const result = await clientRef.current.request(methods.goalGet, { session_id: infoRef.current.session_id });
+      setGoal(result?.goal || null);
+      dispatchMessage("system", result?.goal?.objective ? `Active goal: ${result.goal.objective}` : "No active goal.");
+      return;
+    }
+    if (action === "clear") {
+      await clientRef.current.request(methods.goalClear, { session_id: infoRef.current.session_id });
+      setGoal(null);
+      dispatchMessage("system", "Goal cleared.");
+      return;
+    }
+    if (action === "pause" || action === "resume") {
+      const result = await clientRef.current.request(methods.goalStatus, { session_id: infoRef.current.session_id, status: action === "resume" ? "active" : "paused" });
+      setGoal(result?.goal || null);
+      dispatchMessage("system", `Goal ${action}d.`);
+      return;
+    }
+    const result = await clientRef.current.request(methods.goalSet, { session_id: infoRef.current.session_id, objective: argument });
+    setGoal(result?.goal || null);
+    dispatchMessage("system", `Goal set: ${argument}`);
   }
 
   // Selecting a session is the rail drawer's route-relevant action: the
@@ -605,6 +747,12 @@ export default function App() {
   async function deleteSession(sessionId) {
     await clientRef.current.request(methods.sessionDelete, { session_id: sessionId });
     setSessions((current) => current.filter((session) => sessionIdOf(session) !== sessionId));
+    subscribedRef.current.delete(sessionId);
+    try {
+      await clientRef.current.request(methods.sessionUnsubscribe, { session_id: sessionId });
+    } catch {
+      // Unsubscribe is advisory; the deleted id is already dropped locally.
+    }
   }
 
   // Attachment upload path (web-ui.md §2.4): base64 → file/write into the
@@ -624,7 +772,7 @@ export default function App() {
     const text = String(answer || "").trim();
     try {
       await clientRef.current.request(methods.userQuestionRespond, {
-        session_id: question.sessionId || info.session_id,
+        session_id: question.sessionId || infoRef.current.session_id,
         tool_call_id: question.toolCallId,
         answer: text,
       }, 15_000);
@@ -636,7 +784,124 @@ export default function App() {
     }
   }
 
+  // ---- command registry (audit #9/#10) ----
+  const commandList = useMemo(() => buildCommands({}), []); // slash/title metadata for the Composer
+  const commandCtx = {
+    newSession: () => createSession(),
+    focusSessions: () => {
+      if (narrowRef.current) openDrawer("rail");
+      const search = document.getElementById("rail-search-input");
+      if (search) {
+        search.focus();
+        search.select();
+      }
+    },
+    focusModel: () => focusInspectorSelect(0),
+    focusEffort: () => focusInspectorSelect(1),
+    focusGoal: () => document.querySelector(".inspector .goal-section")?.focus(),
+    compact: () => compact(),
+    stopTurn: () => cancelTurn(),
+    scrollToLatest: () => conversationRef.current?.scrollToLatest(),
+    toggleTheme: () => handleToggleTheme(),
+    clearInput: () => setInput(""),
+    focusComposer: () => composerRef.current?.focus(),
+    showHelp: () => showHelp(),
+    setModel: (model) => setModel(model),
+    setEffort: (effort) => setEffort(effort),
+    runGoal: (argument) => runGoalCommand(argument),
+    runServerSlash: (name, argument) => runServerSlash(name, argument),
+  };
+  const commandCtxRef = useRef(commandCtx);
+  commandCtxRef.current = commandCtx;
+
+  async function runServerSlash(name, argument) {
+    const text = argument ? `/${name} ${argument}` : `/${name}`;
+    const result = await clientRef.current.request(methods.commandExecute, { session_id: infoRef.current.session_id, input: text });
+    dispatchMessage("system", result?.text || formatResult(result));
+  }
+
+  function showHelp() {
+    const lines = commandList
+      .map((command) => `/${command.slash || command.id} — ${command.title}${command.keybind ? ` (${command.keybind})` : ""}`)
+      .join("\n");
+    dispatchMessage("system", `可用命令（Ctrl+K 打开命令面板）：\n${lines}`);
+  }
+
+  function focusInspectorSelect(index) {
+    const selects = document.querySelectorAll(".inspector select");
+    const target = selects[index];
+    if (!target) return;
+    target.focus();
+    target.click?.();
+  }
+
+  const closePalette = useCallback(() => {
+    setPaletteOpen(false);
+    // Focus returns to the Composer (audit #10).
+    composerRef.current?.focus();
+  }, []);
+
+  const runCommand = useCallback(async (command) => {
+    setPaletteOpen(false);
+    try {
+      await command.run(commandCtxRef.current, "");
+    } catch (error) {
+      dispatchMessage("system", `Command failed: ${error instanceof Error ? error.message : String(error)}`, "error");
+    } finally {
+      composerRef.current?.focus();
+    }
+  }, [dispatchMessage]);
+
+  // ---- global keys: palette toggle + double-Esc interrupt (audit #1/#10) ----
+  const disarmInterrupt = useCallback(() => {
+    if (interruptTimerRef.current) {
+      window.clearTimeout(interruptTimerRef.current);
+      interruptTimerRef.current = null;
+    }
+    setInterruptArmed(false);
+  }, []);
+
+  useEffect(() => {
+    const onKeyDown = (event) => {
+      if ((event.ctrlKey || event.metaKey) && !event.altKey && !event.shiftKey && String(event.key).toLowerCase() === "k") {
+        event.preventDefault();
+        if (paletteOpenRef.current) closePalette();
+        else setPaletteOpen(true);
+        return;
+      }
+      if (event.key !== "Escape") return;
+      if (paletteOpenRef.current) return; // palette handles its own Esc
+      // Esc still closes the mobile drawers first — that behavior wins.
+      if (narrowRef.current && (railOpenRef.current || inspectorOpenRef.current)) return;
+      if (!convRef.current.active) return;
+      event.preventDefault();
+      if (interruptTimerRef.current) {
+        // second Esc within the window → cancel
+        disarmInterrupt();
+        void cancelTurn();
+      } else {
+        setInterruptArmed(true);
+        interruptTimerRef.current = window.setTimeout(() => {
+          interruptTimerRef.current = null;
+          setInterruptArmed(false); // single Esc after timeout resets silently
+        }, INTERRUPT_ARM_MS);
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [closePalette, disarmInterrupt]);
+
+  // Turn end (or leaving the session) disarms a pending interrupt silently.
   const view = conversationView(conversation);
+  useEffect(() => {
+    if (!view.active) disarmInterrupt();
+  }, [view.active, disarmInterrupt]);
+
+  // Unmount: never leave the arm timer firing into a dead component.
+  useEffect(() => () => {
+    if (interruptTimerRef.current) window.clearTimeout(interruptTimerRef.current);
+  }, []);
+
   const inspectorConnection = connection.phase === "online" || connection.phase === "syncing" ? "connected" : "offline";
   // Off-canvas panels are hidden from AT and untabbable only below the
   // breakpoint; on desktop the columns are plain always-visible panels.
@@ -681,6 +946,8 @@ export default function App() {
         unreadIds={unreadIds}
         notificationPermission={notificationPermission}
         fileTree={{ listFiles, readFile }}
+        hasMore={hasMoreSessions}
+        onLoadMore={loadMoreSessions}
         onWorkspaceDraftChange={setWorkspaceDraft}
         onWorkspaceApply={selectWorkspace}
         onNew={createSession}
@@ -691,12 +958,40 @@ export default function App() {
         panelAttrs={railPanelAttrs}
       />
       <main className="main-column">
-        <Conversation messages={view.messages} draft={view.draft} plan={view.plan} active={view.active} onCancel={cancelTurn} onAnswer={answerQuestion} onExpire={expireQuestion} />
+        <Conversation
+          ref={conversationRef}
+          messages={view.messages}
+          draft={view.draft}
+          plan={view.plan}
+          active={view.active}
+          collapsedCount={view.collapsedCount}
+          turnChanges={view.turnChanges}
+          interruptArmed={interruptArmed}
+          onCancel={cancelTurn}
+          onAnswer={answerQuestion}
+          onExpire={expireQuestion}
+          onRetrieve={retrieveQueued}
+          onPromote={promoteQueued}
+          onRetry={retryTurn}
+        />
         {/* Invariant: composer input is never disabled by connection state. */}
-        <Composer value={input} onChange={setInput} onSubmit={submit} active={view.active} onCancel={cancelTurn} onUpload={uploadAttachment} />
+        <Composer
+          ref={composerRef}
+          value={input}
+          onChange={setInput}
+          onSubmit={submit}
+          active={view.active}
+          onCancel={cancelTurn}
+          onUpload={uploadAttachment}
+          queueMode={queueMode}
+          onQueueModeChange={setQueueMode}
+          interruptArmed={interruptArmed}
+          commands={commandList}
+        />
       </main>
-      <Inspector info={info} stats={stats} goal={goal} plan={view.plan} models={info.models || []} effort={info.reasoning_effort || ""} connection={inspectorConnection} onModel={setModel} onEffort={setEffort} onRefreshModels={() => refreshModels(info.session_id)} onCompact={compact} compacting={compacting} currentModel={currentModel} panelRef={inspectorPanelRef} panelAttrs={inspectorPanelAttrs} />
+      <Inspector info={info} stats={stats} goal={goal} plan={view.plan} models={info.models || []} effort={info.reasoning_effort || ""} connection={inspectorConnection} onModel={setModel} onEffort={setEffort} onRefreshModels={() => refreshModels(info.session_id)} onCompact={compact} compacting={compacting} currentModel={currentModel} contextInfo={contextInfo} panelRef={inspectorPanelRef} panelAttrs={inspectorPanelAttrs} />
     </div>
+    <CommandPalette open={paletteOpen} commands={commandList} onClose={closePalette} onRun={runCommand} />
   </div>;
 }
 

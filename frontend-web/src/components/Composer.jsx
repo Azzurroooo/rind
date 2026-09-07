@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useRef, useState } from "react";
-import { ArrowUp, Command, Paperclip, Square } from "lucide-react";
-import { slashCommands } from "../methods.js";
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from "react";
+import { ArrowUp, Command, CornerUpRight, Layers, Paperclip, Square } from "lucide-react";
+import { buildCommands, matchingSlashCommands } from "../lib/commands.js";
 import { UploadChip } from "./UploadChip.jsx";
 import { composeMessageWithAttachments } from "../lib/files.js";
 
@@ -12,13 +12,40 @@ let nextChipId = 1;
 // NEVER block typing or sending. On send, each uploaded chip appends a path
 // reference line to the message; chips still uploading are left out and a thin
 // one-line notice above the composer says so — no modal.
-export function Composer({ value, onChange, onSubmit, active, onCancel, disabled, onUpload }) {
+//
+// Queue mode (audit #1, opencode pattern): while a turn runs, submissions
+// queue as follow_up by default; the visible 排队追问 / 转向 switch (the web
+// sibling of the CLI's Tab toggle) flips the wire method between
+// rind/session/follow_up and rind/session/steer. The first Esc of a running
+// turn arms the interrupt; the hint renders from App state.
+//
+// "/" suggestions source the SAME command registry as the palette (audit #9).
+const Composer = forwardRef(function Composer({
+  value,
+  onChange,
+  onSubmit,
+  active,
+  onCancel,
+  disabled,
+  onUpload,
+  queueMode = "follow_up", // "follow_up" | "steering" (kernel vocabulary)
+  onQueueModeChange,
+  interruptArmed = false,
+  commands = buildCommands({}),
+}, ref) {
   const [chips, setChips] = useState([]);
   const [notice, setNotice] = useState("");
   const noticeTimer = useRef(null);
   const fileInputRef = useRef(null);
+  const textareaRef = useRef(null);
   const chipsRef = useRef(chips);
   chipsRef.current = chips;
+
+  useImperativeHandle(ref, () => ({
+    focus() {
+      textareaRef.current?.focus();
+    },
+  }), []);
 
   useEffect(() => () => {
     if (noticeTimer.current) window.clearTimeout(noticeTimer.current);
@@ -80,7 +107,9 @@ export function Composer({ value, onChange, onSubmit, active, onCancel, disabled
 
   const commandMode = value.startsWith("/");
   const query = value.slice(1).split(/\s/)[0].toLowerCase();
-  const suggestions = commandMode && !value.includes(" ") ? slashCommands.filter(([name]) => name.startsWith(query)).slice(0, 5) : [];
+  const suggestions = commandMode && !value.includes(" ")
+    ? matchingSlashCommands(commands, query)
+    : [];
 
   return (
     <div className="composer-wrap">
@@ -99,8 +128,10 @@ export function Composer({ value, onChange, onSubmit, active, onCancel, disabled
       >
         {suggestions.length > 0 && (
           <div className="slash-suggestions">
-            {suggestions.map(([name, description]) => (
-              <button key={name} onClick={() => onChange(`/${name} `)}><Command size={14} /><strong>/{name}</strong><span>{description}</span></button>
+            {suggestions.map((command) => (
+              <button key={command.id} onClick={() => onChange(`/${command.slash} `)}>
+                <Command size={14} /><strong>/{command.slash}</strong><span>{command.title}</span>
+              </button>
             ))}
           </div>
         )}
@@ -111,7 +142,9 @@ export function Composer({ value, onChange, onSubmit, active, onCancel, disabled
             ))}
           </div>
         )}
+        {interruptArmed && <div className="interrupt-hint" role="status">再按一次 Esc 停止</div>}
         <textarea
+          ref={textareaRef}
           value={value}
           onChange={(event) => onChange(event.target.value)}
           onKeyDown={(event) => {
@@ -126,7 +159,7 @@ export function Composer({ value, onChange, onSubmit, active, onCancel, disabled
               addFiles(event.clipboardData.files);
             }
           }}
-          placeholder={active ? "Send steering input to the active turn..." : "Ask your worker anything..."}
+          placeholder={active ? (queueMode === "steering" ? "立即转向当前回合（steer）…" : "回合进行中，消息将排队追问…") : "Ask your worker anything..."}
           disabled={disabled}
           rows={1}
         />
@@ -134,17 +167,35 @@ export function Composer({ value, onChange, onSubmit, active, onCancel, disabled
           <div className="composer-tools">
             <input ref={fileInputRef} type="file" multiple className="visually-hidden" aria-hidden="true" tabIndex={-1} onChange={(event) => { addFiles(event.target.files); event.target.value = ""; }} />
             <button className="icon-button subtle" title="添加附件" onClick={() => fileInputRef.current?.click()}><Paperclip size={16} /></button>
+            {active && (
+              <span className="queue-toggle" role="group" aria-label="队列模式">
+                <button
+                  type="button"
+                  className={queueMode === "follow_up" ? "selected" : ""}
+                  aria-pressed={queueMode === "follow_up"}
+                  title="回合结束后排队追问（follow_up）"
+                  onClick={() => onQueueModeChange?.("follow_up")}
+                ><Layers size={13} /> 排队追问</button>
+                <button
+                  type="button"
+                  className={queueMode === "steering" ? "selected" : ""}
+                  aria-pressed={queueMode === "steering"}
+                  title="立即插入当前回合（steer）"
+                  onClick={() => onQueueModeChange?.("steering")}
+                ><CornerUpRight size={13} /> 转向 steer</button>
+              </span>
+            )}
             <span>Enter to send · Shift+Enter for new line</span>
           </div>
           {active
-            ? <button className="send-button stop" title="Stop active turn" onClick={onCancel}><Square size={15} fill="currentColor" /></button>
+            ? <button className="send-button stop" title={interruptArmed ? "再按一次 Esc 停止" : "Stop active turn"} onClick={onCancel}><Square size={15} fill="currentColor" /></button>
             : <button className="send-button" title="Send message" onClick={() => sendMessage()} disabled={(!value.trim() && !chips.some((chip) => chip.status === "ok" && chip.path)) || disabled}><ArrowUp size={18} /></button>}
         </div>
       </div>
       <div className="composer-status"><span><span className="status-led" />{active ? "Turn in progress" : "Ready"}</span><span>Worker remains online when this tab closes</span></div>
     </div>
   );
-}
+});
 
 function previewUrlFor(file) {
   if (typeof URL === "undefined" || typeof URL.createObjectURL !== "function") return "";
@@ -154,3 +205,6 @@ function previewUrlFor(file) {
     return "";
   }
 }
+
+export { Composer };
+export default Composer;

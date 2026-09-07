@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
-import { conversationView, emptyConversationState, normalizeHistoryMessages, QUESTION_TTL_MS, questionKey, reduceConversation } from "./conversationReducer.js";
+import { conversationView, emptyConversationState, normalizeHistoryMessages, QUESTION_TTL_MS, questionKey, reduceConversation, TRANSCRIPT_CAP } from "./conversationReducer.js";
 
 // Golden fixture lives outside frontend-web: ../test/fixtures/ relative to here.
 const FIXTURE_PATH = resolve(process.cwd(), "../test/fixtures/runtime_protocol.golden.jsonl");
@@ -301,6 +301,138 @@ describe("conversation reducer — defenses", () => {
     const envelope = { kind: "event", durability: "incremental", session_id: "s", turn_id: "t", event: { type: "assistant_delta", text: "a" } };
     const state = reduceConversation(emptyConversationState(), envelope);
     expect(state.streaming.text).toBe("a");
+  });
+});
+
+describe("conversation reducer — queued inputs (audit #1)", () => {
+  const queueAction = { kind: "queue_input", inputId: "in-1", input: "follow up please", mode: "follow_up" };
+
+  it("queue_input appends a user-styled queued entry and the queue array", () => {
+    const state = reduceConversation(emptyConversationState(), queueAction);
+    expect(state.queued).toEqual([{ inputId: "in-1", input: "follow up please", mode: "follow_up" }]);
+    expect(state.entries.at(-1)).toMatchObject({ id: "queued:in-1", role: "queued", inputId: "in-1", mode: "follow_up" });
+  });
+
+  it("the queued_input_delivered event converts the chip into a normal user message", () => {
+    let state = reduceConversation(emptyConversationState(), queueAction);
+    state = reduceConversation(state, event(1, "durable", { type: "queued_input_delivered", input_id: "in-1", input: "follow up please", mode: "follow_up" }));
+    expect(state.queued).toEqual([]);
+    expect(state.entries.at(-1)).toMatchObject({ id: "msg:delivered:in-1", role: "user", content: "follow up please" });
+    expect(state.entries.filter((entry) => entry.role === "queued")).toHaveLength(0);
+  });
+
+  it("delivery without an input_id falls back to the oldest queued item (kernel FIFO)", () => {
+    let state = reduceConversation(emptyConversationState(), { kind: "queue_input", inputId: "in-1", input: "first", mode: "follow_up" });
+    state = reduceConversation(state, { kind: "queue_input", inputId: "in-2", input: "second", mode: "steering" });
+    state = reduceConversation(state, event(1, "durable", { type: "queued_input_delivered", input: "first", mode: "follow_up" }));
+    expect(state.queued.map((item) => item.inputId)).toEqual(["in-2"]);
+    // the oldest chip converted in place into a normal user message
+    expect(state.entries.find((entry) => entry.id === "msg:delivered:in-1")).toMatchObject({ role: "user", content: "first" });
+    expect(state.entries.filter((entry) => entry.role === "queued")).toHaveLength(1);
+  });
+
+  it("delivery of an unknown input still renders the message (transcript stays faithful)", () => {
+    const state = reduceConversation(emptyConversationState(), event(1, "durable", { type: "queued_input_delivered", input_id: "ghost", input: "hi", mode: "steering" }));
+    expect(state.entries.at(-1)).toMatchObject({ role: "user", content: "hi" });
+  });
+
+  it("unqueue removes the chip (取回) and requeue flips the mode in place (转向)", () => {
+    let state = reduceConversation(emptyConversationState(), queueAction);
+    state = reduceConversation(state, { kind: "unqueue", inputId: "in-1" });
+    expect(state.queued).toEqual([]);
+    expect(state.entries.some((entry) => entry.role === "queued")).toBe(false);
+
+    state = reduceConversation(emptyConversationState(), queueAction);
+    state = reduceConversation(state, { kind: "requeue", inputId: "in-1", mode: "steering" });
+    expect(state.queued[0]).toMatchObject({ inputId: "in-1", mode: "steering" });
+    expect(state.entries.at(-1)).toMatchObject({ role: "queued", mode: "steering" });
+    expect(state.entries).toHaveLength(1); // in place, not moved
+  });
+
+  it("turn_cancelled clears the queue (kernel discards pending inputs); turn_completed keeps it", () => {
+    let state = reduceConversation(emptyConversationState(), queueAction);
+    state = reduceConversation(state, event(1, "durable", { type: "turn_cancelled", turn_id: "turn-1" }));
+    expect(state.queued).toEqual([]);
+
+    state = reduceConversation(emptyConversationState(), queueAction);
+    state = reduceConversation(state, event(1, "durable", { type: "turn_completed", turn_id: "turn-1" }));
+    expect(state.queued).toHaveLength(1); // follow_up rolls into the next turn
+  });
+
+  it("live_turn restores pending_inputs as chips so a reconnect re-renders the queue", () => {
+    let state = reduceConversation(emptyConversationState(), { kind: "history", messages: [] });
+    state = reduceConversation(state, {
+      kind: "live_turn",
+      sessionId: "s1",
+      liveTurn: {
+        turn_id: "t9",
+        status: "running",
+        pending_inputs: [
+          { input_id: "in-a", input: "queued steer", mode: "steering" },
+          { input_id: "in-b", input: "queued follow", mode: "follow_up" },
+        ],
+      },
+    });
+    expect(state.queued.map((item) => item.inputId)).toEqual(["in-a", "in-b"]);
+    expect(state.entries.filter((entry) => entry.role === "queued")).toHaveLength(2);
+    expect(state.entries.at(-1)).toMatchObject({ role: "queued", inputId: "in-b", mode: "follow_up" });
+  });
+
+  it("live_turn drops chips the snapshot no longer lists and updates existing ones in place", () => {
+    let state = reduceConversation(emptyConversationState(), { kind: "queue_input", inputId: "in-a", input: "kept", mode: "follow_up" });
+    state = reduceConversation(state, { kind: "queue_input", inputId: "in-gone", input: "gone", mode: "follow_up" });
+    state = reduceConversation(state, {
+      kind: "live_turn",
+      sessionId: "s1",
+      liveTurn: { turn_id: "t9", status: "running", pending_inputs: [{ input_id: "in-a", input: "kept", mode: "steering" }] },
+    });
+    expect(state.queued).toEqual([{ inputId: "in-a", input: "kept", mode: "steering" }]);
+    expect(state.entries.filter((entry) => entry.role === "queued")).toHaveLength(1); // no duplicate chip
+  });
+
+  it("conversationView exposes queued/collapsedCount/turnChanges", () => {
+    let state = reduceConversation(emptyConversationState(), queueAction);
+    const view = conversationView(state);
+    expect(view.queued).toHaveLength(1);
+    expect(view.collapsedCount).toBe(0);
+    expect(view.turnChanges).toBeNull();
+  });
+});
+
+describe("conversation reducer — transcript cap (audit #5)", () => {
+  it("drops the OLDEST entries beyond the cap and counts them in collapsedCount", () => {
+    let state = emptyConversationState();
+    for (let index = 0; index < TRANSCRIPT_CAP + 7; index += 1) {
+      state = reduceConversation(state, { kind: "message", role: "user", content: `m${index}` });
+    }
+    expect(state.entries).toHaveLength(TRANSCRIPT_CAP);
+    expect(state.collapsedCount).toBe(7);
+    expect(state.entries[0].content).toBe("m7"); // oldest dropped
+    expect(state.entries.at(-1).content).toBe(`m${TRANSCRIPT_CAP + 6}`);
+  });
+});
+
+describe("conversation reducer — turn-scoped change summary (audit #14)", () => {
+  const editResult = JSON.stringify({ ok: true, meta: { files: [{ path: "src/app.py", added_lines: 3, removed_lines: 1 }] } });
+
+  it("a finished turn with file mutations records 改动 stats and the first diff tool id", () => {
+    const state = replay([
+      event(1, "durable", { type: "turn_started", turn_id: "t1" }),
+      event(2, "durable", { type: "tool_requested", turn_id: "t1", tool_call_id: "c1", tool_name: "edit_file", args_preview: "{}" }),
+      event(3, "durable", { type: "tool_result", turn_id: "t1", tool_call_id: "c1", status: "completed", result: editResult }),
+      event(4, "durable", { type: "turn_completed", turn_id: "t1" }),
+    ]);
+    expect(state.turnChanges).toEqual({ fileCount: 1, added: 3, removed: 1, firstToolCallId: "c1" });
+  });
+
+  it("a turn without mutations records no summary", () => {
+    const state = replay([
+      event(1, "durable", { type: "turn_started", turn_id: "t1" }),
+      event(2, "durable", { type: "tool_requested", turn_id: "t1", tool_call_id: "c1", tool_name: "bash", args_preview: "{}" }),
+      event(3, "durable", { type: "tool_result", turn_id: "t1", tool_call_id: "c1", status: "completed", result: "ok" }),
+      event(4, "durable", { type: "turn_completed", turn_id: "t1" }),
+    ]);
+    expect(state.turnChanges).toBeNull();
   });
 });
 

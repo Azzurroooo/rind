@@ -1,6 +1,7 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Composer } from "./Composer.jsx";
+import { buildCommands } from "../lib/commands.js";
 
 afterEach(cleanup);
 
@@ -113,5 +114,53 @@ describe("Composer — sending with attachments (J6)", () => {
     renderComposer({ value: "hello", onChange: () => {}, onSubmit });
     fireEvent.keyDown(screen.getByRole("textbox"), { key: "Enter" });
     expect(onSubmit).toHaveBeenCalledWith("hello");
+  });
+});
+
+describe("Composer — queue mode toggle (audit #1)", () => {
+  it("the follow_up/steer switch renders only while a turn is active and defaults to 排队追问", () => {
+    const onQueueModeChange = vi.fn();
+    const { rerender } = render(<Composer value="" onChange={() => {}} onSubmit={vi.fn()} active={false} onQueueModeChange={onQueueModeChange} />);
+    expect(screen.queryByRole("group", { name: "队列模式" })).toBeNull();
+
+    rerender(<Composer value="" onChange={() => {}} onSubmit={vi.fn()} active onQueueModeChange={onQueueModeChange} queueMode="follow_up" />);
+    const group = screen.getByRole("group", { name: "队列模式" });
+    expect(group.querySelector("button.selected").textContent).toContain("排队追问");
+    expect(screen.getByRole("textbox").placeholder).toContain("排队追问");
+
+    fireEvent.click(screen.getByTitle("立即插入当前回合（steer）"));
+    expect(onQueueModeChange).toHaveBeenCalledWith("steering");
+  });
+
+  it("steer mode flips the selection and the placeholder", () => {
+    renderComposer({ active: true, queueMode: "steering", onQueueModeChange: vi.fn() });
+    const group = screen.getByRole("group", { name: "队列模式" });
+    expect(group.querySelector("button.selected").textContent).toContain("转向 steer");
+    expect(screen.getByRole("textbox").placeholder).toContain("steer");
+  });
+});
+
+describe("Composer — interrupt arming hint (audit #1)", () => {
+  it("shows 再按一次 Esc 停止 only while armed and mirrors it on the stop button", () => {
+    const { rerender } = render(<Composer value="" onChange={() => {}} onSubmit={vi.fn()} active onCancel={() => {}} interruptArmed />);
+    expect(screen.getByText("再按一次 Esc 停止")).not.toBeNull();
+    expect(screen.getByTitle("再按一次 Esc 停止")).not.toBeNull();
+
+    rerender(<Composer value="" onChange={() => {}} onSubmit={vi.fn()} active onCancel={() => {}} interruptArmed={false} />);
+    expect(screen.queryByText("再按一次 Esc 停止")).toBeNull();
+    expect(screen.getByTitle("Stop active turn")).not.toBeNull();
+  });
+});
+
+describe("Composer — slash suggestions source the command registry (audit #9)", () => {
+  it("typing / lists registry slash commands; clicking fills the slash form", () => {
+    const commands = buildCommands({});
+    const onChange = vi.fn();
+    renderComposer({ value: "/the", onChange, commands });
+    const options = document.querySelectorAll(".slash-suggestions button");
+    expect(options.length).toBe(1);
+    expect(options[0].textContent).toContain("/theme");
+    fireEvent.click(options[0]);
+    expect(onChange).toHaveBeenCalledWith("/theme ");
   });
 });

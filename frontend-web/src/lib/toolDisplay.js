@@ -226,6 +226,67 @@ export function failedMessage(tool) {
   return "";
 }
 
+// Per-tool mutation stats for the turn-scoped change summary: files touched
+// with +/- line counts. Sources, in order: meta.files entries, else the raw
+// unified diff (same +/- counting DiffView renders).
+export function toolChangeStats(name, tool) {
+  if (name !== "edit_file" && name !== "write_file") return [];
+  const { meta } = payloadParts(tool);
+  const files = Array.isArray(meta.files) ? meta.files : [];
+  if (files.length) {
+    return files
+      .map((file) => ({
+        path: String(file?.path || ""),
+        added: Number(file?.added_lines) || 0,
+        removed: Number(file?.removed_lines) || 0,
+      }))
+      .filter((file) => file.path);
+  }
+  const diff = extractDiffText(name, tool);
+  if (!diff) {
+    const path = String(tool?.file || "");
+    return path ? [{ path, added: 0, removed: 0 }] : [];
+  }
+  let added = 0;
+  let removed = 0;
+  for (const line of diff.split("\n")) {
+    if (line.startsWith("+++") || line.startsWith("---")) continue;
+    if (line.startsWith("+")) added += 1;
+    else if (line.startsWith("-")) removed += 1;
+  }
+  const path = String(tool?.file || firstMetaFilePath(meta) || "");
+  return [{ path, added, removed }];
+}
+
+// Aggregates the trailing turn segment (entries after the last user/queued
+// entry) into `{ fileCount, added, removed, firstToolCallId }`, or null when
+// the turn touched no files.
+export function summarizeChanges(entries) {
+  let start = entries.length;
+  while (start > 0) {
+    const role = entries[start - 1]?.role;
+    if (role === "user" || role === "queued") break;
+    start -= 1;
+  }
+  const stats = [];
+  let firstToolCallId = "";
+  for (let index = start; index < entries.length; index += 1) {
+    const entry = entries[index];
+    if (entry?.role !== "tool") continue;
+    const files = toolChangeStats(String(entry.name || ""), entry);
+    if (!files.length) continue;
+    if (!firstToolCallId) firstToolCallId = String(entry.tool_call_id || entry.id || "");
+    stats.push(...files);
+  }
+  if (!stats.length) return null;
+  return {
+    fileCount: stats.length,
+    added: stats.reduce((sum, file) => sum + file.added, 0),
+    removed: stats.reduce((sum, file) => sum + file.removed, 0),
+    firstToolCallId,
+  };
+}
+
 // Level 3 raw payloads: what went in, what came back.
 export function rawPayloads(tool) {
   return {

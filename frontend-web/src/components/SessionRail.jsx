@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { Bell, Check, ChevronRight, CirclePlus, FolderOpen, History, LoaderCircle, MessageSquareText, Trash2 } from "lucide-react";
+import { useMemo, useState } from "react";
+import { Bell, Check, ChevronRight, CirclePlus, FolderOpen, History, LoaderCircle, MessageSquareText, Search, Trash2 } from "lucide-react";
 import { FileTree } from "./FileTree.jsx";
 import { sessionIdOf } from "../methods.js";
 
@@ -8,6 +8,11 @@ import { sessionIdOf } from "../methods.js";
 // one-click delete confirm (no modal; current session's delete is disabled
 // with a tooltip), an unobtrusive notification-permission button in the
 // footer, and the read-only workspace file tree panel.
+//
+// Search + pagination (audit #9): the search box filters by title
+// client-side; "加载更多" asks App for the next page of the session list
+// (server has no offset — App re-requests with a larger limit). Delete keeps
+// its inline confirm.
 export function SessionRail({
   sessions,
   activeId,
@@ -19,6 +24,8 @@ export function SessionRail({
   unreadIds,
   notificationPermission,
   fileTree,
+  hasMore = false,
+  onLoadMore,
   onWorkspaceDraftChange,
   onWorkspaceApply,
   onNew,
@@ -33,6 +40,14 @@ export function SessionRail({
   const { className: panelClassName = "", ...restPanelAttrs } = panelAttrs;
   const [confirmingId, setConfirmingId] = useState("");
   const [deleteError, setDeleteError] = useState({});
+  const [search, setSearch] = useState("");
+
+  // Client-side title filter, always applied to the freshly loaded list.
+  const visibleSessions = useMemo(() => {
+    const needle = search.trim().toLowerCase();
+    if (!needle) return sessions;
+    return sessions.filter((session) => String(session.title || session.preview || sessionIdOf(session)).toLowerCase().includes(needle));
+  }, [sessions, search]);
 
   async function confirmDelete(id) {
     try {
@@ -60,10 +75,21 @@ export function SessionRail({
         {workspaceMessage ? <div className="workspace-message">{workspaceMessage}</div> : <div className="workspace-hint">{workspace || "Choose the worker-visible path"}</div>}
       </div>
       <div className="rail-rule" />
-      <div className="sessions-heading"><span>Sessions</span><span>{sessions.length}</span></div>
-      {loading ? <div className="rail-empty"><LoaderCircle className="spin" size={16} /> Loading sessions</div> : sessions.length ? (
+      <div className="sessions-heading"><span>Sessions</span><span>{visibleSessions.length}</span></div>
+      <div className="session-search">
+        <Search size={13} />
+        <input
+          id="rail-search-input"
+          value={search}
+          onChange={(event) => setSearch(event.target.value)}
+          placeholder="搜索会话标题…"
+          aria-label="搜索会话"
+        />
+        {search && <button type="button" className="session-search-clear" title="清除搜索" onClick={() => setSearch("")}>×</button>}
+      </div>
+      {loading ? <div className="rail-empty"><LoaderCircle className="spin" size={16} /> Loading sessions</div> : visibleSessions.length ? (
         <nav className="session-list" aria-label="Sessions">
-          {sessions.map((session) => {
+          {visibleSessions.map((session) => {
             const id = sessionIdOf(session);
             const current = id === activeId;
             const unread = !current && unreadIds?.has?.(id);
@@ -91,7 +117,10 @@ export function SessionRail({
             );
           })}
         </nav>
-      ) : <div className="rail-empty"><History size={16} /> No sessions yet</div>}
+      ) : <div className="rail-empty"><History size={16} /> {search ? "没有匹配的会话" : "No sessions yet"}</div>}
+      {!loading && hasMore && (
+        <button type="button" className="load-more" onClick={() => onLoadMore?.()}>加载更多</button>
+      )}
       <FileTree workspace={workspace} listFiles={fileTree?.listFiles} readFile={fileTree?.readFile} />
       <div className="rail-footer">
         <span>Long-lived worker · browser-safe disconnect</span>

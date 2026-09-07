@@ -110,3 +110,31 @@ describe("SessionRail — notification permission lives in the footer", () => {
     expect(screen.queryByText("开启桌面通知")).toBeNull();
   });
 });
+
+describe("SessionRail — search filter (audit #9)", () => {
+  it("filters sessions by title client-side and clears with the × button", () => {
+    renderRail();
+    const input = screen.getByLabelText("搜索会话");
+    fireEvent.change(input, { target: { value: "gateway" } });
+    expect(screen.getByText("Fix gateway")).not.toBeNull();
+    expect(screen.queryByText("Refactor auth")).toBeNull();
+    expect(screen.queryByText("没有匹配的会话")).toBeNull();
+
+    fireEvent.change(input, { target: { value: "zzz" } });
+    expect(screen.getByText("没有匹配的会话")).not.toBeNull();
+    fireEvent.click(screen.getByTitle("清除搜索"));
+    expect(screen.getByText("Refactor auth")).not.toBeNull();
+  });
+});
+
+describe("SessionRail — 加载更多 pagination (audit #9)", () => {
+  it("renders the button only when hasMore is set and calls onLoadMore", () => {
+    const onLoadMore = vi.fn();
+    const { rerender } = render(<SessionRail {...{ sessions, activeId: "s-current" }} hasMore onLoadMore={onLoadMore} />);
+    fireEvent.click(screen.getByText("加载更多"));
+    expect(onLoadMore).toHaveBeenCalledTimes(1);
+
+    rerender(<SessionRail sessions={sessions} activeId="s-current" hasMore={false} onLoadMore={onLoadMore} />);
+    expect(screen.queryByText("加载更多")).toBeNull();
+  });
+});

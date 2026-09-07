@@ -10,6 +10,15 @@
 //   - every envelope with durability === "durable" advances the local cursor
 //     (which is what `session/replay { after_cursor }` resumes from).
 //
+// Queued inputs (steer / follow_up) live in the stream as `role: "queued"`
+// entries with a matching `state.queued` array, so a reconnect's live_turn
+// snapshot (pending_inputs) re-renders the queue bit-for-bit. The
+// `queued_input_delivered` event converts the chip into a normal user message.
+//
+// Transcript governance (§ audit #5): `appendEntry` caps the stream at
+// TRANSCRIPT_CAP entries, dropping the OLDEST and counting them in
+// `collapsedCount` so long-running sessions cannot grow without bound.
+//
 // Non-event actions keep the existing flows working:
 //   { kind: "history", messages }        initial session/replay messages load
 //   { kind: "live_turn", liveTurn, sessionId }  live_turn snapshot reconciliation
@@ -17,6 +26,9 @@
 //   { kind: "system", content, tone }           (alias of message with role "system")
 //   { kind: "answered", key, answer }    question card answered (stays in stream)
 //   { kind: "question_expired", key }    question card TTL reached (§2.3 expired)
+//   { kind: "queue_input", inputId, input, mode }  input accepted into the queue
+//   { kind: "unqueue", inputId }         queued input retrieved (取回)
+//   { kind: "queued_delivered", inputId, input?, mode? }  chip → user message
 //   { kind: "set_cursor", cursor }       adopt the server's durable ordinal
 //   { kind: "reset" }                    clear session
 //
@@ -24,6 +36,11 @@
 // tracks the one card that can still be answered, while every card is ALSO a
 // stream entry (role "question") so the answered/cancelled card remains
 // readable in the transcript instead of vanishing.
+import { summarizeChanges } from "../lib/toolDisplay.js";
+
+// Stream length ceiling (audit #5): dropping the oldest keeps month-long
+// sessions bounded; the collapsed divider keeps the truncation honest.
+export const TRANSCRIPT_CAP = 400;
 
 // Client-side TTL for the silent countdown; the wire event may override it
 // with ttl_ms once the worker reports one.
@@ -38,6 +55,9 @@ export function emptyConversationState() {
     plan: [],
     question: null, // { sessionId, toolCallId, question, options, status, requestedAt, ttlMs }
     resolvedQuestionKey: "",
+    queued: [], // [{inputId, input, mode}] — inputs accepted but not yet delivered
+    collapsedCount: 0, // entries dropped by the TRANSCRIPT_CAP (oldest first)
+    turnChanges: null, // { fileCount, added, removed, firstToolCallId } — last finished turn's mutations
     cursor: 0, // durable events applied for the current session
     seen: {}, // "session:turn:sequence" -> true (idempotence guard)
   };
@@ -58,6 +78,42 @@ export function reduceConversation(state, action) {
         content: String(action.content || ""),
         tone: action.tone || "",
       });
+    case "queue_input": {
+      const inputId = String(action.inputId || "").trim();
+      const input = String(action.input || "");
+      if (!inputId || !input) return state;
+      const mode = action.mode === "steering" ? "steering" : "follow_up";
+      const entry = { id: `queued:${inputId}`, role: "queued", inputId, input, mode };
+      return withCap({
+        ...state,
+        queued: [...state.queued, { inputId, input, mode }],
+        entries: [...state.entries, entry],
+      });
+    }
+    case "unqueue": {
+      const inputId = String(action.inputId || "").trim();
+      if (!inputId) return state;
+      if (!state.queued.some((item) => item.inputId === inputId)) return state;
+      return {
+        ...state,
+        queued: state.queued.filter((item) => item.inputId !== inputId),
+        entries: state.entries.filter((entry) => !(entry.role === "queued" && entry.inputId === inputId)),
+      };
+    }
+    case "requeue": {
+      // promote_follow_up moved the item into the steering queue kernel-side;
+      // flip the chip's mode in place instead of moving the row.
+      const inputId = String(action.inputId || "").trim();
+      if (!inputId || action.mode !== "steering") return state;
+      if (!state.queued.some((item) => item.inputId === inputId && item.mode !== "steering")) return state;
+      return {
+        ...state,
+        queued: state.queued.map((item) => (item.inputId === inputId ? { ...item, mode: "steering" } : item)),
+        entries: state.entries.map((entry) => (entry.role === "queued" && entry.inputId === inputId ? { ...entry, mode: "steering" } : entry)),
+      };
+    }
+    case "queued_delivered":
+      return deliverQueued(state, action.inputId, action.input, action.mode);
     case "answered": {
       const key = String(action.key || "");
       if (!key) return state;
@@ -89,6 +145,9 @@ export function conversationView(state) {
     plan: state.plan,
     active: state.active,
     question: state.question,
+    queued: state.queued,
+    collapsedCount: state.collapsedCount,
+    turnChanges: state.turnChanges,
     cursor: state.cursor,
   };
 }
@@ -102,6 +161,17 @@ function applyEnvelope(state, envelope) {
   const key = `${sessionId}:${turnId}:${envelope.sequence ?? event.event_id ?? ""}`;
   if (hasKey && state.seen[key]) return state; // duplicate → idempotent drop
   let next = hasKey ? { ...state, seen: { ...state.seen, [key]: true } } : state;
+  // Delta coalescing (lib/streamController.js): merged envelopes carry the
+  // sequence numbers of the deltas they absorbed so a replayed stream can
+  // never re-apply them.
+  const absorbed = Array.isArray(envelope.absorbed) ? envelope.absorbed : [];
+  if (absorbed.length) {
+    const seen = { ...next.seen };
+    for (const value of absorbed) {
+      if (value != null) seen[`${sessionId}:${turnId}:${value}`] = true;
+    }
+    next = { ...next, seen };
+  }
   next = applyTurnEvent(next, event, { sessionId, turnId, key });
   if (String(envelope.durability) === "durable") next = { ...next, cursor: next.cursor + 1 };
   return next;
@@ -174,22 +244,28 @@ function applyTurnEvent(state, event, context) {
     }
 
     case "queued_input_delivered":
-      return appendEntry(state, { role: "system", content: `Steering input delivered: ${event.input || ""}` });
+      // The queued chip converts into a normal user message in place.
+      return deliverQueued(state, event.input_id, event.input, event.mode);
 
     case "goal_continued":
       return appendEntry(state, { role: "system", content: `Goal continuation · round ${event.round || "?"}` });
 
     case "turn_failed": {
-      const finalized = finalizeTurn(state, turnId);
+      // The kernel discards pending queued inputs on failure — mirror that.
+      const cleared = { ...state, queued: [] };
+      const finalized = finalizeTurn(cleared, turnId);
       return appendEntry(finalized, { role: "system", content: formatTurnFailure(event), tone: "error" });
     }
 
     case "turn_cancelled": {
-      const finalized = finalizeTurn(state, turnId);
+      const cleared = { ...state, queued: [] };
+      const finalized = finalizeTurn(cleared, turnId);
       return appendEntry(finalized, { role: "system", content: "Turn cancelled." });
     }
 
     case "turn_completed":
+      // follow_up inputs roll into the NEXT turn (kernel keeps them queued),
+      // so the queue survives a completed turn until delivery.
       return finalizeTurn(state, turnId);
 
     default:
@@ -212,7 +288,43 @@ function finalizeTurn(state, turnId) {
     activeTurnId: "",
     streaming: null,
     question: null, // pending question dies with its turn (§2.3 cancelled)
+    turnChanges: summarizeChanges(entries),
   };
+}
+
+// Queued chip → normal user message. With an input_id the exact chip is
+// converted; without one (legacy event) the oldest matching mode is delivered
+// first, mirroring the kernel's FIFO consumption.
+function deliverQueued(state, inputId, input, mode) {
+  const cleanId = String(inputId || "").trim();
+  let item = null;
+  if (cleanId) {
+    item = state.queued.find((candidate) => candidate.inputId === cleanId) || null;
+  }
+  if (!item) {
+    const wantedMode = mode === "steering" ? "steering" : mode === "follow_up" ? "follow_up" : "";
+    item = state.queued.find((candidate) => (!wantedMode || candidate.mode === wantedMode)) || null;
+  }
+  if (!item) {
+    // Nothing queued locally (e.g. delivery predates the snapshot): still show
+    // the message so the transcript stays faithful.
+    return appendEntry(state, { role: "user", content: String(input || ""), tone: "" });
+  }
+  const delivered = {
+    id: `msg:delivered:${item.inputId}`,
+    role: "user",
+    content: String(input || item.input),
+    tone: "",
+  };
+  const index = state.entries.findIndex((entry) => entry.role === "queued" && entry.inputId === item.inputId);
+  const entries = [...state.entries];
+  if (index < 0) entries.push(delivered);
+  else entries[index] = delivered;
+  return withCap({
+    ...state,
+    queued: state.queued.filter((candidate) => candidate.inputId !== item.inputId),
+    entries,
+  });
 }
 
 // Question cards live in the stream so answered/cancelled history stays readable.
@@ -276,14 +388,38 @@ function applyHistory(state, messages) {
 // live_turn snapshot reconciliation (used right after a history load).
 function applyLiveTurn(state, liveTurn, sessionId) {
   if (!liveTurn || typeof liveTurn !== "object") {
-    return { ...state, active: false, activeTurnId: "", streaming: null, question: null };
+    return { ...state, active: false, activeTurnId: "", streaming: null, question: null, queued: [] };
   }
   let next = {
     ...state,
     active: liveTurn.status === "running",
     activeTurnId: String(liveTurn.turn_id || ""),
     streaming: { turnId: String(liveTurn.turn_id || ""), text: String(liveTurn.assistant_text || "") },
+    // The snapshot is authoritative for the queue: rebuild it from
+    // pending_inputs so a reconnect re-renders exactly what the kernel holds.
+    queued: [],
   };
+  const staleQueuedIds = new Set(state.queued.map((item) => item.inputId));
+  for (const pending of Array.isArray(liveTurn.pending_inputs) ? liveTurn.pending_inputs : []) {
+    const inputId = String(pending?.input_id || "").trim();
+    const input = String(pending?.input || "");
+    if (!inputId || !input) continue;
+    if (!state.queued.some((item) => item.inputId === inputId)) {
+      const mode = pending.mode === "steering" ? "steering" : "follow_up";
+      next = withCap({
+        ...next,
+        queued: [...next.queued, { inputId, input, mode }],
+        entries: [...next.entries, { id: `queued:${inputId}`, role: "queued", inputId, input, mode }],
+      });
+    } else {
+      next = { ...next, queued: [...next.queued, { inputId, input, mode: pending.mode === "steering" ? "steering" : "follow_up" }] };
+    }
+  }
+  // Chips the snapshot no longer lists are gone kernel-side: drop them.
+  const keepIds = new Set(next.queued.map((item) => item.inputId));
+  if (staleQueuedIds.size) {
+    next = { ...next, entries: next.entries.filter((entry) => entry.role !== "queued" || keepIds.has(entry.inputId)) };
+  }
   if (Array.isArray(liveTurn.plan)) next = { ...next, plan: liveTurn.plan };
   for (const tool of Array.isArray(liveTurn.tools) ? liveTurn.tools : []) {
     next = upsertTool(next, {
@@ -303,7 +439,19 @@ function applyLiveTurn(state, liveTurn, sessionId) {
 
 function appendEntry(state, entry) {
   const id = entry.id || `local-${state.entries.length}`;
-  return { ...state, entries: [...state.entries, { id, ...entry }] };
+  return withCap({ ...state, entries: [...state.entries, { id, ...entry }] });
+}
+
+// Drops the OLDEST entries beyond the cap; the count surfaces as the
+// "更早的消息已折叠" divider so truncation is never silent.
+function withCap(state) {
+  const overflow = state.entries.length - TRANSCRIPT_CAP;
+  if (overflow <= 0) return state;
+  return {
+    ...state,
+    entries: state.entries.slice(overflow),
+    collapsedCount: state.collapsedCount + overflow,
+  };
 }
 
 // ---- shared normalization helpers (ported from the former App.jsx handlers) ----
