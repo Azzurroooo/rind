@@ -42,3 +42,28 @@ services:
     ports:
       - "${RIND_WEB_BIND:-127.0.0.1}:${RIND_WEB_PORT:-8080}:8080"
     restart: unless-stopped
+
+  gateway:
+    build:
+      context: .
+      dockerfile: frontend-web/deploy/Dockerfile
+      target: runtime
+      args:
+        DEBIAN_MIRROR: ${RIND_DEBIAN_MIRROR:-deb.debian.org}
+        PYPI_INDEX_URL: ${RIND_PYPI_INDEX_URL:-https://pypi.org/simple}
+    command:
+      - gateway
+      - --config
+      - /root/.rind/gateway.yaml
+    environment:
+      HOME: /root
+      RIND_HOME: /root/.rind
+      RIND_SERVER_TOKEN: ${RIND_SERVER_TOKEN:?set RIND_SERVER_TOKEN}
+    volumes:
+      - ${RIND_WORKSPACE:-.}:/workspace
+      - ${RIND_HOME:-./.rind}:/root/.rind
+    depends_on:
+      worker:
+        condition: service_healthy
+    profiles: [gateway]
+    restart: unless-stopped

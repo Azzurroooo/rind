@@ -95,10 +95,11 @@ Rind 的 API 配置只读取 `~/.rind/settings.json`，Desktop 与 CLI 使用同
 安装 Docker Desktop 或 Docker Engine（含 Compose v2）后，在仓库根目录执行：
 
 ```bash
+export RIND_SERVER_TOKEN="$(python -c 'import secrets; print(secrets.token_urlsafe(24))')"
 docker compose up -d --build
 ```
 
-然后打开 `http://localhost:8080`。该命令会构建生产版 Web 前端，并在同一套 Compose 服务中启动长期运行的 WebSocket worker。当前目录挂载为工作目录，`./.rind` 用于保存配置和会话。停止服务：
+然后打开 `http://localhost:8080`，使用 `RIND_SERVER_TOKEN` 登录。该命令会构建生产版 Web 前端，并在同一套 Compose 服务中启动长期运行的 WebSocket worker。worker 的 WebSocket 端点通过一次性 ticket（浏览器）或常驻 token（脚本）鉴权——非 loopback 绑定且无 token 时拒绝启动。当前目录挂载为工作目录，`./.rind` 用于保存配置和会话。停止服务：
 
 ```bash
 docker compose down
@@ -111,11 +112,49 @@ RIND_WORKSPACE=/absolute/path/to/workspace
 RIND_HOME=/absolute/path/to/rind-data
 RIND_WEB_PORT=8080
 RIND_WEB_BIND=127.0.0.1
+RIND_SERVER_TOKEN=change-me
 RIND_PYPI_INDEX_URL=https://pypi.org/simple
 RIND_DEBIAN_MIRROR=deb.debian.org
 ```
 
-只有在主机已配置认证和 TLS 时，才将 `RIND_WEB_BIND` 改为 `0.0.0.0`。
+只有在主机已配置认证和 TLS 时，才将 `RIND_WEB_BIND` 改为 `0.0.0.0`——参见下方「远程访问」。
+
+浏览器断开只关闭 WebSocket 连接；worker 进程与会话执行继续运行。重连后 Web 端通过增量回放追平错过的 durable 事件，中途合盖休眠的笔记本重新打开即可接上完整历史。
+
+#### 远程访问
+
+Rind 刻意保持攻击面很小：一个 WebSocket 端点、一个 token、没有第二套 REST API。从其他机器访问 worker：
+
+- **推荐：私有网络。** 在 worker 主机与你的设备上都运行 Tailscale（或 WireGuard），浏览器直接指向 tailnet 地址——不向公网暴露端口。
+- **隧道：** `cloudflared tunnel --url http://localhost:8080` 为 Web 界面加 TLS 前置；务必保持 `RIND_SERVER_TOKEN` 已设置。
+- 不要在没有 TLS 的情况下直接转发 worker 端口（8765）；token 随握手查询串传输。
+
+#### 消息网关（Telegram、Discord 等）
+
+可选的网关进程把 IM 渠道接入同一个 worker——一条连接订阅所有渠道会话，对话上下文跨设备延续：
+
+```bash
+python main.py gateway --config .rind/gateway.yaml
+```
+
+```yaml
+worker: ws://127.0.0.1:8765
+worker_token: ${RIND_SERVER_TOKEN}
+workspace: /workspace
+channels:
+  telegram:
+    token: ${TELEGRAM_BOT_TOKEN}
+    allow_from: ["12345678"]
+  discord:
+    token: ${DISCORD_BOT_TOKEN}
+pairing:
+  enabled: true
+```
+
+- `${VAR}` 从环境变量插值；未知键与未定义变量都是启动错误，绝不静默兜底。
+- 渠道 SDK 是按渠道可选的依赖（`requirements-gateway.txt`），仅在对应渠道启用时才 import。
+- 陌生发送者会收到一次性配对码；在服务端执行 `python main.py gateway approve <CODE>` 完成批准。
+- Docker 部署中网关是 opt-in 服务：`docker compose --profile gateway up -d`，配置放在 `./.rind/gateway.yaml`。它只发起出站连接——没有任何入站端口。
 
 Node 前端 CLI：
 

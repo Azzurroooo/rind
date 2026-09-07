@@ -198,10 +198,6 @@ class SessionRepository:
             "session_id": session_id,
         }
 
-    async def delete_session(self, session_id: str) -> dict[str, Any]:
-        clean = validate_session_id(session_id)
-        return await self.repository.delete(clean)
-
     async def open_store(
         self,
         session_id: str,
@@ -885,6 +881,10 @@ class RuntimeWorker:
 
     async def replay_event_pages(self, session_id: str) -> dict[str, Any]:
         return await self.repository.replay_event_pages(session_id)
+
+    async def delete_session(self, session_id: str) -> dict[str, Any]:
+        clean = validate_session_id(session_id)
+        return await self.repository.delete(clean)
 
     async def close(self) -> None:
         await self.execution.close()

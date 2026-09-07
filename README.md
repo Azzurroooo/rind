@@ -164,10 +164,11 @@ session/update
 With Docker Desktop or Docker Engine + Compose v2 installed, run from the repository root:
 
 ```bash
+export RIND_SERVER_TOKEN="$(python -c 'import secrets; print(secrets.token_urlsafe(24))')"
 docker compose up -d --build
 ```
 
-Then open `http://localhost:8080`. This starts the production web surface and the long-lived WebSocket worker together. The current directory is mounted as the workspace and `./.rind` stores settings and sessions. Stop it with `docker compose down`.
+Then open `http://localhost:8080` and sign in with `RIND_SERVER_TOKEN`. This starts the production web surface and the long-lived WebSocket worker together. The worker's WebSocket endpoint authenticates with a one-time ticket (browser) or a persistent token (scripts) — non-loopback binds refuse to start without a token. The current directory is mounted as the workspace and `./.rind` stores settings and sessions. Stop it with `docker compose down`.
 
 Use a `.env` file when the defaults need changing:
 
@@ -176,11 +177,12 @@ RIND_WORKSPACE=/absolute/path/to/workspace
 RIND_HOME=/absolute/path/to/rind-data
 RIND_WEB_PORT=8080
 RIND_WEB_BIND=127.0.0.1
+RIND_SERVER_TOKEN=change-me
 RIND_PYPI_INDEX_URL=https://pypi.org/simple
 RIND_DEBIAN_MIRROR=deb.debian.org
 ```
 
-Use `RIND_WEB_BIND=0.0.0.0` only when the host is protected by authentication and TLS.
+Use `RIND_WEB_BIND=0.0.0.0` only when the host is protected by authentication and TLS — see [Remote access](#remote-access).
 
 Start a long-lived worker over WebSocket and connect the browser surface independently:
 
@@ -191,9 +193,44 @@ npm install
 npm run dev -- --host 0.0.0.0
 ```
 
-Open `http://localhost:5173`. Closing the browser only closes its WebSocket connection; the worker process and session execution continue running.
+Open `http://localhost:5173`. Closing the browser only closes its WebSocket connection; the worker process and session execution continue running. On reconnect the web surface catches up missed durable events via incremental replay, so a laptop that sleeps mid-task rejoins with full history.
 
 Omit `--session-dir` to use the same default `~/.rind/sessions` and session index as the CLI. When using a custom `--session-dir` or `RIND_HOME`, use the same value for both surfaces.
+
+### Remote access
+
+Rind keeps its attack surface small: one WebSocket endpoint, one token, no second REST API. To reach a worker on another machine:
+
+- **Preferred: a private network.** Run Tailscale (or WireGuard) on the worker host and your devices, then point the browser at the tailnet address — no ports exposed to the public internet.
+- **Tunnel:** `cloudflared tunnel --url http://localhost:8080` fronts the web surface with TLS; keep `RIND_SERVER_TOKEN` set.
+- Never forward the raw worker port (8765) without TLS; the token travels in the handshake query.
+
+### Message gateway (Telegram, Discord, and more)
+
+The optional gateway process connects IM channels to the same worker — one connection subscribes to every channel session, so conversations continue where they left off:
+
+```bash
+python main.py gateway --config .rind/gateway.yaml
+```
+
+```yaml
+worker: ws://127.0.0.1:8765
+worker_token: ${RIND_SERVER_TOKEN}
+workspace: /workspace
+channels:
+  telegram:
+    token: ${TELEGRAM_BOT_TOKEN}
+    allow_from: ["12345678"]
+  discord:
+    token: ${DISCORD_BOT_TOKEN}
+pairing:
+  enabled: true
+```
+
+- `${VAR}` interpolates environment variables; unknown keys and undefined variables are startup errors, never silent defaults.
+- Channel SDKs are optional per-channel dependencies (`requirements-gateway.txt`) and only import when a channel is enabled.
+- Unknown senders get a one-time pairing code; approve it out-of-band with `python main.py gateway approve <CODE>`.
+- In Docker, the gateway ships as an opt-in service: `docker compose --profile gateway up -d` with the config at `./.rind/gateway.yaml`. It only makes outbound connections — no inbound ports.
 
 ## Install
 
