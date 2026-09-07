@@ -96,6 +96,7 @@ class AssistantMessageCompletedEvent(RuntimeEvent):
     type: Literal["assistant_message_completed"] = "assistant_message_completed"
     content: str = ""
     content_chars: int = 0
+    image_fallback: bool = False
 
 
 @dataclass(slots=True)
@@ -210,6 +211,7 @@ class TurnCompletedEvent(RuntimeEvent):
     """Fired when an entire turn (including all tool executions and LLM generation) completes successfully."""
     type: Literal["turn_completed"] = "turn_completed"
     duration_ms: int = 0
+    image_fallback: bool = False
 
 
 @dataclass(slots=True)

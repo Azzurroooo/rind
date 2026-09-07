@@ -36,6 +36,7 @@ from agent.domain.message_boundary import validate_compact_handoff_boundary, val
 from agent.domain import ParsedToolCall
 from agent.domain.tool_payload import parse_tool_args
 
+from .image_promotion import promote_user_images
 from .stream_parser import MessageStreamParser
 
 
@@ -111,6 +112,7 @@ class TurnRunner:
             sampling_index = 0
             force_rescue_next_build = False
             context_length_recovery_count = 0
+            image_fallback_used = False
             initial_recovery_attempt = await self._current_recovery_attempt(session)
             if resume:
                 pending_tool_calls = await self._pending_tool_calls(session)
@@ -152,12 +154,20 @@ class TurnRunner:
                 if boundary is not None and not boundary.ok:
                     raise RuntimeError(f"Invalid model message boundary: {boundary.reason}")
 
+                request_messages = context.messages
+                promoted_any = False
+                if not image_fallback_used:
+                    request_messages, promoted_any = promote_user_images(
+                        context.messages,
+                        getattr(session, "workspace_root", None),
+                    )
+
                 try:
                     recovery_attempt = initial_recovery_attempt
                     initial_recovery_attempt = 0
                     while True:
                         stream_response = self._chat_client.stream(
-                            messages=context.messages,
+                            messages=request_messages,
                             tools=self._tool_schemas,
                             cancellation_token=cancellation_token,
                         )
@@ -177,6 +187,20 @@ class TurnRunner:
                             self._validate_finish_reason(stream_result)
                             break
                         except ProviderError as e:
+                            if (
+                                promoted_any
+                                and not image_fallback_used
+                                and e.code != "context_length_exceeded"
+                                and e.status == "rejected"
+                            ):
+                                image_fallback_used = True
+                                request_messages = context.messages
+                                yield TurnStepRetryEvent(
+                                    **event_meta(session, turn_id),
+                                    attempt=1,
+                                    reason="image_fallback",
+                                )
+                                continue
                             if e.code != "stream_interrupted" or recovery_attempt >= MAX_STEP_RECOVERY_ATTEMPTS:
                                 raise
                             recovery_attempt += 1
@@ -220,6 +244,7 @@ class TurnRunner:
                             **event_meta(session, turn_id),
                             content=content_text,
                             content_chars=len(content_text),
+                            image_fallback=image_fallback_used,
                         )
 
                 except ProviderError as e:
@@ -294,6 +319,7 @@ class TurnRunner:
             yield TurnCompletedEvent(
                 **event_meta(session, turn_id),
                 duration_ms=int((time.perf_counter() - turn_started_at) * 1000),
+                image_fallback=image_fallback_used,
             )
 
         except asyncio.CancelledError as e:
