@@ -1,157 +1,201 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { AlertCircle, Check, LoaderCircle, MessageCircleQuestion, RefreshCw, X } from "lucide-react";
+import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
+import { Check, LoaderCircle, MessageCircleQuestion, X } from "lucide-react";
 import { ConnectionBar } from "./components/ConnectionBar.jsx";
 import { Composer } from "./components/Composer.jsx";
 import { Conversation } from "./components/Conversation.jsx";
 import { Inspector } from "./components/Inspector.jsx";
+import { LoginGate } from "./components/LoginGate.jsx";
 import { SessionRail } from "./components/SessionRail.jsx";
 import { methods, parseSlashCommand, sessionIdOf } from "./methods.js";
-import { createRuntimeClient, initialRuntimeUrl } from "./runtimeClient.js";
+import { createRuntimeClient, initialRuntimeUrl, isAuthError } from "./runtimeClient.js";
+import { createConnectionController, initialConnectionState, reduceConnection } from "./state/connection.js";
+import { conversationView, emptyConversationState, questionKey, reduceConversation } from "./state/conversationReducer.js";
+import { dropCredentials, fetchTicket, hasStoredCredential, loginErrorMessage, readStoredTicket, readStoredToken, storeTicket, storeToken, unauthorizedMessage } from "./ticket.js";
 
 const REASONING_EFFORTS = ["low", "medium", "high", "xhigh", "max"];
+const CATCH_UP_CHUNK = 50;
 
 export default function App() {
   const [endpoint, setEndpoint] = useState(initialRuntimeUrl);
-  const [connection, setConnection] = useState("connecting");
-  const [connectionMessage, setConnectionMessage] = useState("");
+  const [connection, dispatchConnection] = useReducer(reduceConnection, undefined, () => initialConnectionState({ authenticated: hasStoredCredential() }));
+  const [conversation, dispatchConversation] = useReducer(reduceConversation, undefined, emptyConversationState);
+  const [authBusy, setAuthBusy] = useState(false);
+  const [loginToken, setLoginToken] = useState("");
   const [info, setInfo] = useState({});
   const [sessions, setSessions] = useState([]);
   const [selectedWorkspace, setSelectedWorkspace] = useState("");
   const [workspaceDraft, setWorkspaceDraft] = useState("");
   const [workspaceBusy, setWorkspaceBusy] = useState(false);
   const [workspaceMessage, setWorkspaceMessage] = useState("");
-  const [messages, setMessages] = useState([]);
-  const [draft, setDraft] = useState("");
-  const [plan, setPlan] = useState([]);
+  const [input, setInput] = useState("");
   const [stats, setStats] = useState({});
   const [goal, setGoal] = useState(null);
   const [currentModel, setCurrentModel] = useState("");
-  const [input, setInput] = useState("");
-  const [active, setActive] = useState(false);
-  const [turnId, setTurnId] = useState("");
-  const [question, setQuestion] = useState(null);
   const [compacting, setCompacting] = useState(false);
   const [busySession, setBusySession] = useState(false);
+  const bootstrappedRef = useRef(false);
+  const catchUpRef = useRef(false);
   const initializingRef = useRef(false);
-  const draftRef = useRef("");
-  const lastEventAtRef = useRef(0);
   const workspaceRef = useRef("");
   const infoRef = useRef({});
   const currentModelRef = useRef("");
-  const resolvedQuestionRef = useRef("");
+  const convRef = useRef(conversation);
   const clientRef = useRef(null);
   workspaceRef.current = selectedWorkspace;
   infoRef.current = info;
   currentModelRef.current = currentModel;
+  convRef.current = conversation;
 
-  const appendMessage = useCallback((message) => {
-    setMessages((current) => [...current, { id: `${Date.now()}-${Math.random()}`, ...message }]);
+  const controller = useMemo(() => createConnectionController({ dispatch: dispatchConnection }), []);
+
+  const dispatchMessage = useCallback((role, content, tone = "") => {
+    dispatchConversation({ kind: "message", role, content, tone });
   }, []);
 
   const handleEvent = useCallback((message) => {
     const event = message?.event;
     if (!event || typeof event !== "object") return;
-    lastEventAtRef.current = Date.now();
-    switch (event.type) {
-      case "turn_started":
-        setActive(true);
-        setTurnId(String(event.turn_id || ""));
-        draftRef.current = "";
-        setDraft("");
-        return;
-      case "assistant_delta":
-        setActive(true);
-        setDraft((current) => {
-          const next = current + String(event.text || "");
-          draftRef.current = next;
-          return next;
-        });
-        return;
-      case "assistant_message_completed":
-        draftRef.current = "";
-        setDraft("");
-        if (event.content) appendMessage({ role: "assistant", content: String(event.content) });
-        return;
-      case "tool_requested":
-      case "tool_call_started":
-        {
-          const tool = {
-            id: event.tool_call_id,
-            name: event.tool_name,
-            args: event.args_preview || "",
-            status: "running",
-          };
-          setMessages((current) => upsertToolMessage(current, tool));
-        }
-        return;
-      case "tool_result":
-        {
-          const tool = {
-            id: event.tool_call_id,
-            name: event.tool_name,
-            result: String(event.result || event.error_source || ""),
-            status: event.status === "error" ? "failed" : event.status || "completed",
-            duration_ms: event.duration_ms,
-            error_type: event.error_type,
-          };
-          setMessages((current) => upsertToolMessage(current, tool));
-        }
-        return;
-      case "file_change":
-        {
-          const tool = { id: event.tool_call_id, file: event.file_path };
-          setMessages((current) => upsertToolMessage(current, tool));
-        }
-        return;
-      case "plan_updated":
-        setPlan(Array.isArray(event.plan) ? event.plan : []);
-        return;
-      case "context_built":
-      case "token_stats_updated":
-        setStats(event.stats && typeof event.stats === "object" ? event.stats : {});
-        return;
-      case "user_question_requested":
-        {
-          const nextQuestion = normalizeQuestion(event, infoRef.current.session_id);
-          if (nextQuestion && questionKey(nextQuestion) !== resolvedQuestionRef.current) {
-            setQuestion(nextQuestion);
-          }
-        }
-        return;
-      case "queued_input_delivered":
-        appendMessage({ role: "system", content: `Steering input delivered: ${event.input || ""}` });
-        return;
-      case "goal_continued":
-        appendMessage({ role: "system", content: `Goal continuation · round ${event.round || "?"}` });
-        return;
-      case "turn_failed":
-        finishTurn();
-        appendMessage({ role: "system", content: formatTurnFailure(event), tone: "error" });
-        return;
-      case "turn_cancelled":
-        finishTurn();
-        appendMessage({ role: "system", content: "Turn cancelled." });
-        return;
-      case "turn_completed":
-        finishTurn();
-        return;
-      default:
-        return;
+    if (event.type === "context_built" || event.type === "token_stats_updated") {
+      setStats(event.stats && typeof event.stats === "object" ? event.stats : {});
+      return;
     }
-  }, [appendMessage]);
+    dispatchConversation(message);
+  }, []);
 
-  function finishTurn() {
-    setActive(false);
-    setTurnId("");
-    setQuestion(null);
-    const pendingDraft = draftRef.current;
-    draftRef.current = "";
-    setDraft("");
-    if (pendingDraft) appendMessage({ role: "assistant", content: pendingDraft });
-    void refreshSessions(workspaceRef.current || infoRef.current.workspace_root);
+  const client = useMemo(() => createRuntimeClient({
+    url: endpoint,
+    credentialProvider: acquireCredential,
+    onEvent: handleEvent,
+    onStatus: handleStatus,
+    onOpen: handleOpen,
+  }), []);
+  clientRef.current = client;
+
+  useEffect(() => {
+    if (!hasStoredCredential()) return undefined;
+    client.connect().catch(() => {
+      // Statuses carry the outcome; auth failures route back to the login card.
+    });
+    return () => client.disconnect();
+  }, [client]);
+
+  async function acquireCredential() {
+    const token = readStoredToken();
+    if (token) {
+      // Tickets are one-time: mint a fresh one for every (re)connect.
+      const ticket = await fetchTicket(token);
+      storeTicket(ticket);
+      return `ticket=${encodeURIComponent(ticket)}`;
+    }
+    const stored = readStoredTicket();
+    if (stored) return `ticket=${encodeURIComponent(stored)}`;
+    const error = new Error("credentials required");
+    error.code = "auth_required";
+    throw error;
   }
 
-  const initializeRuntime = useCallback(async () => {
+  function handleStatus(status) {
+    if (status?.state === "unauthorized") {
+      dropCredentials();
+      setLoginToken("");
+      clientRef.current?.disconnect();
+      dispatchConnection({ type: "unauthorized", message: unauthorizedMessage() });
+      return;
+    }
+    controller.handleStatus(status);
+  }
+
+  async function handleOpen() {
+    if (!bootstrappedRef.current) {
+      bootstrappedRef.current = true;
+      try {
+        await initializeRuntime();
+      } finally {
+        dispatchConnection({ type: "socket_open" });
+      }
+      return;
+    }
+    await runCatchUp();
+  }
+
+  async function handleLogin(token) {
+    if (authBusy) return;
+    setAuthBusy(true);
+    setLoginToken(token);
+    try {
+      const ticket = await fetchTicket(token);
+      storeToken(token);
+      storeTicket(ticket);
+      bootstrappedRef.current = false;
+      dispatchConnection({ type: "submit_credentials" });
+      await clientRef.current.connect();
+    } catch (error) {
+      if (isAuthError(error)) dropCredentials();
+      dispatchConnection({ type: "unauthorized", message: loginErrorMessage(error) });
+    } finally {
+      setAuthBusy(false);
+    }
+  }
+
+  function logout() {
+    dropCredentials();
+    setLoginToken("");
+    clientRef.current.disconnect();
+    dispatchConnection({ type: "sign_out" });
+  }
+
+  function reconnect() {
+    if (connection.phase === "login") return;
+    dispatchConnection({ type: "retry" });
+    clientRef.current.setUrl(endpoint);
+    clientRef.current.connect().catch(() => {});
+  }
+
+  async function runCatchUp() {
+    if (catchUpRef.current) return;
+    catchUpRef.current = true;
+    try {
+      const sessionId = sessionIdOf(infoRef.current);
+      if (!sessionId) return; // nothing selected yet → nothing to catch up
+      const cursor = Math.max(0, Number(convRef.current.cursor) || 0);
+      const result = await requestCatchUp(sessionId, cursor);
+      const events = Array.isArray(result?.events) ? result.events : [];
+      dispatchConnection({ type: "sync_start", total: events.length });
+      await applyCatchUpEvents(events);
+      const serverCursor = Number(result?.cursor);
+      dispatchConversation({ kind: "set_cursor", cursor: Number.isFinite(serverCursor) && serverCursor >= 0 ? serverCursor : cursor });
+      void refreshSessions(workspaceRef.current || infoRef.current.workspace_root);
+    } catch {
+      // Both catch-up attempts failed; stay quiet — the next reconnect heals the gap.
+    } finally {
+      dispatchConnection({ type: "sync_complete" });
+      catchUpRef.current = false;
+    }
+  }
+
+  async function requestCatchUp(sessionId, cursor, attempts = 2) {
+    let lastError = null;
+    for (let attempt = 0; attempt < attempts; attempt += 1) {
+      try {
+        return await clientRef.current.request(methods.sessionReplay, { session_id: sessionId, after_cursor: cursor });
+      } catch (error) {
+        lastError = error;
+        await new Promise((resolve) => window.setTimeout(resolve, 400));
+      }
+    }
+    throw lastError;
+  }
+
+  async function applyCatchUpEvents(events) {
+    for (let index = 0; index < events.length; index += CATCH_UP_CHUNK) {
+      const batch = events.slice(index, index + CATCH_UP_CHUNK);
+      for (const envelope of batch) dispatchConversation(envelope);
+      dispatchConnection({ type: "sync_progress", applied: batch.length });
+      if (index + CATCH_UP_CHUNK < events.length) await new Promise((resolve) => window.setTimeout(resolve, 0));
+    }
+  }
+
+  async function initializeRuntime() {
     if (initializingRef.current) return;
     initializingRef.current = true;
     try {
@@ -173,46 +217,11 @@ export default function App() {
       await refreshSessions(workspace);
       void refreshModels(currentId);
     } catch (error) {
-      setConnectionMessage(error instanceof Error ? error.message : String(error));
+      dispatchMessage("system", error instanceof Error ? error.message : String(error), "error");
     } finally {
       initializingRef.current = false;
     }
-  }, []);
-
-  const client = useMemo(() => createRuntimeClient({
-    url: endpoint,
-    onEvent: handleEvent,
-    onStatus: (status) => {
-      setConnection(status.state);
-      if (status.message) setConnectionMessage(status.message);
-    },
-    onOpen: initializeRuntime,
-  }), []);
-  clientRef.current = client;
-
-  useEffect(() => {
-    client.connect().catch((error) => setConnectionMessage(error.message));
-    return () => client.disconnect();
-  }, [client]);
-
-  useEffect(() => {
-    if (connection !== "connected" || !active || !info.session_id) return undefined;
-    const timer = window.setInterval(async () => {
-      if (Date.now() - lastEventAtRef.current < 1500) return;
-      try {
-        const replay = await clientRef.current.request(methods.sessionReplay, { session_id: info.session_id });
-        if (replay?.live_turn) {
-          syncLiveTurn(replay.live_turn);
-        } else {
-          setMessages(normalizeMessages(replay?.messages));
-          syncLiveTurn(null);
-        }
-      } catch {
-        // Reconnect logic owns the next attempt.
-      }
-    }, 2000);
-    return () => window.clearInterval(timer);
-  }, [connection, active, info.session_id, turnId]);
+  }
 
   async function refreshSessions(workspace = selectedWorkspace || info.workspace_root) {
     if (!clientRef.current) return;
@@ -221,8 +230,8 @@ export default function App() {
       if (workspace) params.workspace_root = workspace;
       const result = await clientRef.current.request(methods.sessionList, params);
       setSessions(Array.isArray(result?.sessions) ? result.sessions : []);
-    } catch (error) {
-      setConnectionMessage(error instanceof Error ? error.message : String(error));
+    } catch {
+      // Session list refresh is advisory; keep the current list on failure.
     }
   }
 
@@ -244,7 +253,7 @@ export default function App() {
     if (!target || !clientRef.current) return;
     setBusySession(true);
     try {
-      const switched = switchSession ? await clientRef.current.request(methods.sessionSwitch, { session_id: target }) : info;
+      const switched = switchSession ? await clientRef.current.request(methods.sessionSwitch, { session_id: target }) : infoRef.current;
       const replay = await clientRef.current.request(methods.sessionReplay, { session_id: target });
       const workspace = String(switched?.workspace_root || selectedWorkspace || "").trim();
       const sessionModel = String(switched?.model || replay?.model || infoRef.current.model || infoRef.current.default_model || currentModelRef.current || "").trim();
@@ -263,14 +272,12 @@ export default function App() {
         setSelectedWorkspace(workspace);
         setWorkspaceDraft(workspace);
       }
-      setMessages(normalizeMessages(replay?.messages));
-      draftRef.current = "";
-      setDraft("");
-      syncLiveTurn(replay?.live_turn || null);
+      dispatchConversation({ kind: "history", messages: replay?.messages });
+      dispatchConversation({ kind: "live_turn", liveTurn: replay?.live_turn || null, sessionId: target });
       setGoal(switched?.goal || null);
       setStats(switched?.usage || {});
     } catch (error) {
-      appendMessage({ role: "system", content: `Unable to open session: ${error instanceof Error ? error.message : String(error)}`, tone: "error" });
+      dispatchMessage("system", `Unable to open session: ${error instanceof Error ? error.message : String(error)}`, "error");
     } finally {
       setBusySession(false);
     }
@@ -284,7 +291,7 @@ export default function App() {
       await refreshSessions(workspace);
       await loadSession(result?.session_id, true);
     } catch (error) {
-      appendMessage({ role: "system", content: `Unable to create session: ${error.message}`, tone: "error" });
+      dispatchMessage("system", `Unable to create session: ${error.message}`, "error");
     }
   }
 
@@ -307,11 +314,9 @@ export default function App() {
         await loadSession(sessionIdOf(nextSession), true);
       } else {
         clearActiveSession(workspace);
-        setMessages([]);
-        setPlan([]);
         setStats({});
         setGoal(null);
-        appendMessage({ role: "system", content: `No sessions in ${workspace}. Create a new session to begin.` });
+        dispatchMessage("system", `No sessions in ${workspace}. Create a new session to begin.`);
       }
     } catch (error) {
       setWorkspaceMessage(error instanceof Error ? error.message : String(error));
@@ -329,11 +334,7 @@ export default function App() {
       workspace_root: workspace,
       model: current.model,
     }));
-    setActive(false);
-    setTurnId("");
-    draftRef.current = "";
-    setDraft("");
-    setQuestion(null);
+    dispatchConversation({ kind: "reset" });
   }
 
   async function submit() {
@@ -344,22 +345,20 @@ export default function App() {
       await runSlashCommand(text);
       return;
     }
-    if (active) {
+    if (convRef.current.active) {
       try {
-        await clientRef.current.request(methods.sessionSteer, { session_id: info.session_id, turn_id: turnId, input: text });
-        appendMessage({ role: "system", content: `Steering input queued: ${text}` });
+        await clientRef.current.request(methods.sessionSteer, { session_id: info.session_id, turn_id: convRef.current.activeTurnId, input: text });
+        dispatchMessage("system", `Steering input queued: ${text}`);
       } catch (error) {
-        appendMessage({ role: "system", content: `Unable to steer turn: ${error.message}`, tone: "error" });
+        dispatchMessage("system", `Unable to steer turn: ${error.message}`, "error");
       }
       return;
     }
-    appendMessage({ role: "user", content: text });
-    setActive(true);
+    dispatchMessage("user", text);
     try {
       await clientRef.current.request(methods.sessionPrompt, { session_id: info.session_id, input: text });
     } catch (error) {
-      setActive(false);
-      appendMessage({ role: "system", content: `Prompt failed: ${error.message}`, tone: "error" });
+      dispatchMessage("system", `Prompt failed: ${error.message}`, "error");
     }
   }
 
@@ -374,7 +373,7 @@ export default function App() {
       }
       if (parsed.name === "sessions") {
         await refreshSessions();
-        appendMessage({ role: "system", content: "Session list refreshed." });
+        dispatchMessage("system", "Session list refreshed.");
         return;
       }
       if (parsed.name === "model" && argument.toLowerCase().startsWith("set ")) {
@@ -390,9 +389,9 @@ export default function App() {
         return;
       }
       const result = await clientRef.current.request(methods.commandExecute, { session_id: info.session_id, input: text });
-      appendMessage({ role: "system", content: result?.text || formatResult(result) });
+      dispatchMessage("system", result?.text || formatResult(result));
     } catch (error) {
-      appendMessage({ role: "system", content: `Command failed: ${error.message}`, tone: "error" });
+      dispatchMessage("system", `Command failed: ${error.message}`, "error");
     }
   }
 
@@ -401,24 +400,24 @@ export default function App() {
     if (!action) {
       const result = await clientRef.current.request(methods.goalGet, { session_id: info.session_id });
       setGoal(result?.goal || null);
-      appendMessage({ role: "system", content: result?.goal?.objective ? `Active goal: ${result.goal.objective}` : "No active goal." });
+      dispatchMessage("system", result?.goal?.objective ? `Active goal: ${result.goal.objective}` : "No active goal.");
       return;
     }
     if (action === "clear") {
       await clientRef.current.request(methods.goalClear, { session_id: info.session_id });
       setGoal(null);
-      appendMessage({ role: "system", content: "Goal cleared." });
+      dispatchMessage("system", "Goal cleared.");
       return;
     }
     if (action === "pause" || action === "resume") {
       const result = await clientRef.current.request(methods.goalStatus, { session_id: info.session_id, status: action === "resume" ? "active" : "paused" });
       setGoal(result?.goal || null);
-      appendMessage({ role: "system", content: `Goal ${action}d.` });
+      dispatchMessage("system", `Goal ${action}d.`);
       return;
     }
     const result = await clientRef.current.request(methods.goalSet, { session_id: info.session_id, objective: argument });
     setGoal(result?.goal || null);
-    appendMessage({ role: "system", content: `Goal set: ${argument}` });
+    dispatchMessage("system", `Goal set: ${argument}`);
   }
 
   async function setModel(model) {
@@ -428,7 +427,7 @@ export default function App() {
     const next = String(result?.session_model || result?.model || clean).trim();
     setCurrentModel(next);
     setInfo((current) => ({ ...current, model: next }));
-    appendMessage({ role: "system", content: `Model updated to ${next}.` });
+    dispatchMessage("system", `Model updated to ${next}.`);
   }
 
   async function setEffort(effort) {
@@ -437,20 +436,20 @@ export default function App() {
     const result = await clientRef.current.request(methods.modelEffort, { session_id: info.session_id, reasoning_effort: clean });
     const next = String(result?.reasoning_effort || clean).trim();
     setInfo((current) => ({ ...current, reasoning_effort: next }));
-    appendMessage({ role: "system", content: `Reasoning effort set to ${next}.` });
+    dispatchMessage("system", `Reasoning effort set to ${next}.`);
   }
 
   async function compact() {
-    if (compacting || active) {
-      appendMessage({ role: "system", content: active ? "Finish or stop the active turn before compacting." : "Compaction is already running." });
+    if (compacting || convRef.current.active) {
+      dispatchMessage("system", convRef.current.active ? "Finish or stop the active turn before compacting." : "Compaction is already running.");
       return;
     }
     setCompacting(true);
     try {
       const result = await clientRef.current.request(methods.sessionCompact, { session_id: info.session_id });
-      appendMessage({ role: "system", content: `Context compacted${result?.source ? ` · messages ${result.source.message_start_index ?? "?"}-${result.source.message_end_index_exclusive ?? "?"}` : ""}.` });
+      dispatchMessage("system", `Context compacted${result?.source ? ` · messages ${result.source.message_start_index ?? "?"}-${result.source.message_end_index_exclusive ?? "?"}` : ""}.`);
     } catch (error) {
-      appendMessage({ role: "system", content: `Compaction failed: ${error.message}`, tone: "error" });
+      dispatchMessage("system", `Compaction failed: ${error.message}`, "error");
     } finally {
       setCompacting(false);
     }
@@ -458,33 +457,14 @@ export default function App() {
 
   async function cancelTurn() {
     try {
-      await clientRef.current.request(methods.sessionCancel, { session_id: info.session_id, ...(turnId ? { turn_id: turnId } : {}) });
+      await clientRef.current.request(methods.sessionCancel, { session_id: info.session_id, ...(convRef.current.activeTurnId ? { turn_id: convRef.current.activeTurnId } : {}) });
     } catch (error) {
-      setConnectionMessage(error.message);
+      dispatchMessage("system", error.message, "error");
     }
-  }
-
-  function syncLiveTurn(liveTurn) {
-    if (!liveTurn) {
-      setActive(false);
-      setTurnId("");
-      draftRef.current = "";
-      setDraft("");
-      setQuestion(null);
-      return;
-    }
-    const liveDraft = String(liveTurn.assistant_text || "");
-    draftRef.current = liveDraft;
-    setDraft(liveDraft);
-    setMessages((current) => mergeLiveTools(current, liveTurn.tools));
-    setPlan(Array.isArray(liveTurn.plan) ? liveTurn.plan : []);
-    const liveQuestion = normalizeQuestion(liveTurn.question, infoRef.current.session_id);
-    setQuestion(liveQuestion && questionKey(liveQuestion) !== resolvedQuestionRef.current ? liveQuestion : null);
-    setActive(liveTurn.status === "running");
-    setTurnId(String(liveTurn.turn_id || ""));
   }
 
   async function answerQuestion(answer) {
+    const question = convRef.current.question;
     if (!question) return false;
     try {
       await clientRef.current.request(methods.userQuestionRespond, {
@@ -492,32 +472,33 @@ export default function App() {
         tool_call_id: question.toolCallId,
         answer: String(answer || "").trim(),
       }, 15_000);
-      resolvedQuestionRef.current = questionKey(question);
-      setQuestion(null);
+      dispatchConversation({ kind: "answered", key: questionKey(question) });
       return true;
     } catch (error) {
-      appendMessage({ role: "system", content: `Question response failed: ${error.message}`, tone: "error" });
+      dispatchMessage("system", `Question response failed: ${error.message}`, "error");
       return false;
     }
   }
 
-  async function reconnect() {
-    clientRef.current.setUrl(endpoint);
-    await clientRef.current.connect().catch((error) => setConnectionMessage(error.message));
+  const view = conversationView(conversation);
+  const inspectorConnection = connection.phase === "online" || connection.phase === "syncing" ? "connected" : "offline";
+
+  if (connection.phase === "login") {
+    return <LoginGate onSubmit={handleLogin} busy={authBusy} error={connection.message} initialToken={loginToken} />;
   }
 
   return <div className="app-shell">
-    <ConnectionBar state={connection} url={endpoint} onChangeUrl={setEndpoint} onReconnect={reconnect} onDisconnect={() => clientRef.current.disconnect()} />
+    <ConnectionBar phase={connection.phase} syncRemaining={connection.syncRemaining} syncTotal={connection.syncTotal} url={endpoint} onChangeUrl={setEndpoint} onReconnect={reconnect} onLogout={logout} />
     <div className="workspace-grid">
       <SessionRail sessions={sessions} activeId={info.session_id} workspace={selectedWorkspace} workspaceDraft={workspaceDraft} workspaceBusy={workspaceBusy} workspaceMessage={workspaceMessage} loading={busySession || workspaceBusy} onWorkspaceDraftChange={setWorkspaceDraft} onWorkspaceApply={selectWorkspace} onNew={createSession} onSelect={(id) => loadSession(id, true)} />
       <main className="main-column">
-      <Conversation messages={messages} draft={draft} plan={plan} active={active} onCancel={cancelTurn} />
-        <Composer value={input} onChange={setInput} onSubmit={submit} active={active} onCancel={cancelTurn} disabled={connection !== "connected" || busySession} />
+        <Conversation messages={view.messages} draft={view.draft} plan={view.plan} active={view.active} onCancel={cancelTurn} />
+        {/* Invariant: composer input is never disabled by connection state. */}
+        <Composer value={input} onChange={setInput} onSubmit={submit} active={view.active} onCancel={cancelTurn} />
       </main>
-      <Inspector info={info} stats={stats} goal={goal} plan={plan} models={info.models || []} effort={info.reasoning_effort || ""} connection={connection} onModel={setModel} onEffort={setEffort} onRefreshModels={() => refreshModels(info.session_id)} onCompact={compact} compacting={compacting} currentModel={currentModel} />
+      <Inspector info={info} stats={stats} goal={goal} plan={view.plan} models={info.models || []} effort={info.reasoning_effort || ""} connection={inspectorConnection} onModel={setModel} onEffort={setEffort} onRefreshModels={() => refreshModels(info.session_id)} onCompact={compact} compacting={compacting} currentModel={currentModel} />
     </div>
-    {connection !== "connected" && <div className="connection-banner"><AlertCircle size={16} /><span>{connectionMessage || "Start the Rind worker with --web to connect."}</span><button className="icon-button subtle" title="Retry connection" onClick={reconnect}><RefreshCw size={15} /></button></div>}
-    {question && <QuestionDialog key={questionKey(question)} question={question} onAnswer={answerQuestion} />}
+    {view.question && <QuestionDialog key={questionKey(view.question)} question={view.question} onAnswer={answerQuestion} />}
   </div>;
 }
 
@@ -573,96 +554,7 @@ function QuestionDialog({ question, onAnswer }) {
   </div>;
 }
 
-function upsertTool(current, patch) {
-  if (!patch.id) return current;
-  const index = current.findIndex((tool) => tool.id === patch.id);
-  if (index < 0) return [...current, patch];
-  const next = [...current];
-  next[index] = { ...next[index], ...patch };
-  return next;
-}
-
-function upsertToolMessage(current, patch) {
-  if (!patch.id) return current;
-  const index = current.findIndex((message) => message.role === "tool" && message.tool_call_id === patch.id);
-  if (index < 0) return [...current, { role: "tool", id: `tool-${patch.id}`, tool_call_id: patch.id, ...patch }];
-  const next = [...current];
-  next[index] = { ...next[index], ...patch };
-  return next;
-}
-
-function mergeLiveTools(current, values) {
-  return (Array.isArray(values) ? values : []).reduce((messages, tool) => upsertToolMessage(messages, {
-    id: tool.tool_call_id,
-    name: tool.tool_name,
-    args: tool.args_preview || "",
-    result: tool.output || "",
-    status: tool.status === "error" ? "failed" : tool.status === "completed" ? "completed" : "running",
-  }), current);
-}
-
-function normalizeMessages(values) {
-  if (!Array.isArray(values)) return [];
-  return values.filter((message) => ["user", "assistant", "tool"].includes(message?.role)).map((message, index) => {
-    if (message.role === "tool") {
-      const content = contentText(message.content);
-      const payload = parseToolPayload(content);
-      return {
-        id: message.id || `history-tool-${message.tool_call_id || index}`,
-        role: "tool",
-        tool_call_id: message.tool_call_id || `history-${index}`,
-        name: message.name || message.tool_name || payload?.tool || "tool",
-        result: content,
-        status: payload?.ok === false ? "failed" : "completed",
-      };
-    }
-    return {
-      id: message.id || `history-${index}`,
-      role: message.role,
-      content: contentText(message.content),
-      meta: "",
-    };
-  }).filter((message) => message.role === "tool" || message.content);
-}
-
-function parseToolPayload(content) {
-  try {
-    const value = JSON.parse(content);
-    return value && typeof value === "object" ? value : null;
-  } catch {
-    return null;
-  }
-}
-
-function contentText(value) {
-  if (typeof value === "string") return value;
-  if (Array.isArray(value)) return value.map((item) => typeof item === "string" ? item : item?.text || "").join("");
-  return value == null ? "" : JSON.stringify(value, null, 2);
-}
-
 function formatResult(result) {
   if (!result || typeof result !== "object") return String(result || "");
   return JSON.stringify(result, null, 2);
-}
-
-function formatTurnFailure(event) {
-  const message = String(event?.error || "Runtime error");
-  const details = [event?.error_type, event?.error_source].filter(Boolean).join(" · ");
-  return details ? `Turn failed: ${message} (${details})` : `Turn failed: ${message}`;
-}
-
-function normalizeQuestion(value, fallbackSessionId = "") {
-  if (!value || typeof value !== "object") return null;
-  const toolCallId = String(value.toolCallId || value.tool_call_id || "").trim();
-  if (!toolCallId) return null;
-  return {
-    sessionId: String(value.sessionId || value.session_id || fallbackSessionId || "").trim(),
-    toolCallId,
-    question: String(value.question || ""),
-    options: Array.isArray(value.options) ? value.options : [],
-  };
-}
-
-function questionKey(question) {
-  return `${question.sessionId}:${question.toolCallId}`;
 }

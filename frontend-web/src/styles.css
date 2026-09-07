@@ -190,8 +190,34 @@ h1, h2, p { margin: 0; }
 .secondary-action:hover:not(:disabled) { color: var(--amber); border-color: var(--line-strong); }
 .mini-plan { display: flex; flex-direction: column; gap: 11px; }
 
-.connection-banner { position: fixed; right: 22px; bottom: 100px; z-index: 4; display: flex; align-items: center; gap: 9px; max-width: min(500px, calc(100vw - 44px)); padding: 10px 11px 10px 13px; border: 1px solid #5a4c31; border-radius: 5px; background: #1e1b15; color: var(--amber); box-shadow: 0 10px 30px #0007; font: 11px var(--mono); }
-.connection-banner span { color: #d7c59b; }
+.connection-strip { position: fixed; inset: 0 0 auto 0; z-index: 9; pointer-events: none; }
+.connection-strip-track { height: 2px; background: transparent; }
+.connection-strip-bar { height: 100%; width: 100%; background: var(--amber); transition: width 150ms cubic-bezier(0.2, 0, 0, 1), background-color 150ms ease, opacity 800ms ease; }
+.connection-strip.reconnecting .connection-strip-bar { animation: strip-pulse 1.2s ease-in-out infinite; }
+.connection-strip.syncing .connection-strip-bar { background: var(--cyan); }
+.connection-strip.offline .connection-strip-bar { background: var(--red); animation: none; }
+.connection-strip.fading .connection-strip-bar { opacity: 0; }
+.connection-strip-chip { position: absolute; top: 10px; right: 18px; display: flex; align-items: center; gap: 8px; padding: 6px 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface-raised); box-shadow: 0 8px 22px #00000025; color: var(--amber); font: 11px var(--mono); pointer-events: auto; font-variant-numeric: tabular-nums; }
+.connection-strip-chip.is-error { color: var(--red); border-color: #573536; }
+.strip-retry { min-height: 26px; padding: 0 10px; border: 1px solid var(--line-strong); border-radius: 4px; background: transparent; color: var(--text); font: 11px var(--mono); cursor: pointer; transition: color 120ms ease, border-color 120ms ease; }
+.strip-retry:hover { color: var(--amber); border-color: var(--amber); }
+.strip-retry:active { transform: scale(.96); }
+@keyframes strip-pulse { 50% { opacity: .55; } }
+
+.login-screen { height: 100vh; display: grid; place-items: center; padding: 20px; background: var(--bg); }
+.login-card { width: min(400px, 100%); display: flex; flex-direction: column; gap: 14px; padding: 28px 24px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); box-shadow: 0 24px 70px #00000059; }
+.login-card .brand-lockup { margin-bottom: 2px; }
+.login-label { color: var(--muted); font: 10px var(--mono); text-transform: uppercase; letter-spacing: .08em; }
+.login-input-row { display: flex; align-items: center; gap: 9px; height: 42px; padding: 0 6px 0 11px; border: 1px solid var(--line-strong); border-radius: 6px; background: var(--surface-soft); color: var(--dim); }
+.login-input-row:focus-within { border-color: var(--cyan); }
+.login-input-row input { min-width: 0; flex: 1; border: 0; outline: 0; background: transparent; color: var(--text); font: 13px var(--mono); letter-spacing: .02em; }
+.login-input-row input::placeholder { color: var(--dim); }
+.login-submit { width: 32px; height: 32px; flex: 0 0 32px; display: inline-grid; place-items: center; padding: 0; border: 0; border-radius: 5px; background: var(--amber); color: #1a1710; cursor: pointer; transition: background 120ms ease, transform 120ms ease; }
+.login-submit:hover:not(:disabled) { background: #ffd37d; }
+.login-submit:active:not(:disabled) { transform: scale(.96); }
+.login-error { padding: 8px 10px; border-left: 2px solid var(--red); background: #241719; color: #f2b1ab; font-size: 11px; line-height: 1.45; overflow-wrap: anywhere; }
+.login-description { color: var(--muted); font-size: 11px; line-height: 1.6; text-wrap: pretty; }
+
 .modal-backdrop { position: fixed; inset: 0; z-index: 8; display: grid; place-items: center; padding: 20px; background: #05080bc7; }
 .question-dialog { width: min(520px, 100%); padding: 20px; border: 1px solid var(--line-strong); border-radius: 7px; background: var(--surface-raised); box-shadow: 0 24px 70px #000b; }
 .question-heading { display: flex; justify-content: space-between; gap: 15px; }
@@ -250,7 +276,7 @@ h1, h2, p { margin: 0; }
   .composer-wrap { padding: 8px 12px 14px; }
   .composer-status { font-size: 9px; }
   .composer-status > span:last-child { display: none; }
-  .connection-banner { right: 12px; bottom: 88px; max-width: calc(100vw - 24px); }
+  .connection-strip-chip { top: 8px; right: 12px; }
 }
 
 @media (prefers-reduced-motion: reduce) {
