@@ -1,0 +1,19 @@
+{
+  "name": "Rind Console",
+  "short_name": "Rind",
+  "description": "Local-first coding agent console",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "icons": [
+    {
+      "src": "/rind.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ],
+  "theme_color": "#0a0f14",
+  "background_color": "#0a0f14"
+}
