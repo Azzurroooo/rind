@@ -1,9 +1,11 @@
 """TurnPump: the gateway's only business logic (remote-plan/gateway.md §5).
 
-Inbound rows (ordered): message_ref LRU dedup → security verdict → /stop →
+Inbound rows (ordered): message_ref LRU dedup → security verdict → text
+commands (/stop /new /status /compact /help …, control traffic) →
 pending-question digits → follow_up while a turn is active → session/prompt.
-While the worker is offline, inbound buffers in memory (100 cap, §1) and
-flushes in order on reconnect.  Durable events advance the session cursor.
+While the worker is offline, inbound buffers in memory (100 cap, §1; commands
+queue with a one-line notice) and flushes in order on reconnect.  Durable
+events advance the session cursor and drive the reaction controller.
 """
 
 from __future__ import annotations
@@ -19,25 +21,21 @@ from agent.runtime.server.protocol import RuntimeMethod
 
 from . import Channel, InboundMessage, OutboundPayload, SendTarget
 from .chunk import first_line_title
+from .commands import SESSION_CREATE_FAILED_REPLY, STOPPED_REPLY, CommandContext, CommandHub, HubLinks, is_command
+from .errors import user_error_line
 from .outbound import Outbound
+from .reactions import ReactionController
 from .router import SessionRouter, session_key
 from .security import SecurityGate
 from .worker_client import REQUEST_TIMEOUT_SECONDS, WorkerClient, WorkerError
 
 logger = logging.getLogger(__name__)
 
-MESSAGE_REF_LRU_SIZE = 512
-INBOUND_QUEUE_LIMIT = 100  # §1: messages buffered while the worker is offline
-QUESTION_TTL_SECONDS = 300.0
-QUESTION_SCAN_SECONDS = 30.0
+MESSAGE_REF_LRU_SIZE, INBOUND_QUEUE_LIMIT = 512, 100  # §1: offline buffer cap
+QUESTION_TTL_SECONDS, QUESTION_SCAN_SECONDS = 300.0, 30.0
 TURN_STUCK_SECONDS = 30 * 60.0  # a turn active longer than this is force-reset
-STOP_TEXT = "/stop"
 TERMINAL_EVENT_TYPES = ("turn_completed", "turn_failed", "turn_cancelled")
-STOPPED_REPLY = "已停止"
-QUESTION_EXPIRED_REPLY = "问题已超时"
-SESSION_CREATE_FAILED_REPLY = "暂时无法创建会话，稍后再试"
-WORKER_UNRESPONSIVE_REPLY = "worker 暂时无响应，已重试排队"
-TURN_FAILED_TEMPLATE = "任务失败：{summary}（session {short_id}）"
+QUESTION_EXPIRED_REPLY, WORKER_UNRESPONSIVE_REPLY = "问题已超时", "worker 暂时无响应，已重试排队"
 
 
 @dataclass(slots=True)
@@ -70,7 +68,8 @@ class TurnPump:
     def __init__(self, *, worker: WorkerClient, router: SessionRouter, security: SecurityGate,
                  workspace_root: str, clock: Any = time.monotonic, question_ttl: float = QUESTION_TTL_SECONDS,
                  scan_interval: float = QUESTION_SCAN_SECONDS,
-                 request_timeout: float = REQUEST_TIMEOUT_SECONDS) -> None:
+                 request_timeout: float = REQUEST_TIMEOUT_SECONDS,
+                 reactions: ReactionController | None = None) -> None:
         self._worker, self._router, self._security = worker, router, security
         self._workspace_root, self._clock = workspace_root, clock
         self._question_ttl, self._scan_interval = question_ttl, scan_interval
@@ -82,11 +81,20 @@ class TurnPump:
         self._turns: dict[str, _ActiveTurn] = {}
         self._questions: dict[str, _PendingQuestion] = {}
         self._targets: dict[str, tuple[str, SendTarget]] = {}
-        self._typing_tasks: dict[str, asyncio.Task[None]] = {}
+        self._reactions = reactions or ReactionController(react=self._out.react_emoji)
+        links = HubLinks(active_session=self.active_session, finish_turn=self._finish_turn,
+                         queue_depth=lambda: len(self._pending_inbound), bind_target=self._targets.__setitem__)
+        self._commands = CommandHub(worker_getter=lambda: self._worker, router=router, links=links,
+                                    workspace_root=workspace_root, request_timeout=request_timeout)
         worker.on_event(self.handle_event)  # register before worker.start()
 
     def register_channel(self, channel: Channel) -> None:
         self._channels[channel.id] = channel
+
+    def active_session(self, key: str) -> str | None:
+        """Session id of the turn running on ``key`` (command-layer view)."""
+        turn = self._turns.get(key)
+        return turn.session_id if turn is not None else None
 
     async def run(self) -> None:
         """Scan pending questions and stuck turns until cancelled."""
@@ -95,7 +103,7 @@ class TurnPump:
             if self._pending_inbound and bool(getattr(self._worker, "connected", True)):
                 await self._flush_queued()
             await self._expire_questions()
-            self._reset_stuck_turns()
+            await self._reset_stuck_turns()
 
     # --- inbound decision table (ordered rows) ----------------------------------
 
@@ -105,6 +113,9 @@ class TurnPump:
             while len(self._pending_inbound) > INBOUND_QUEUE_LIMIT:
                 dropped = self._pending_inbound.popleft()
                 logger.warning("gateway: worker offline; dropping queued message %s", dropped.message_ref)
+            if is_command(message.text.strip()):  # commands queue too, but say so
+                await self._out.send(message.channel, self._target_of(message),
+                                     OutboundPayload(text="worker 离线，命令暂存"))
             return
         if self._pending_inbound:  # preserve ordering: older messages first
             await self._flush_queued()
@@ -124,14 +135,11 @@ class TurnPump:
             return
         key = session_key(message)
         text = message.text.strip()
-        turn = self._turns.get(key)
-        if text == STOP_TEXT:  # row 4: /stop cancels the active turn
-            if turn is not None:
-                try:
-                    await self._worker.request(RuntimeMethod.SESSION_CANCEL, {"session_id": turn.session_id}, self._request_timeout)
-                except WorkerError as exc:
-                    logger.warning("gateway: session/cancel failed: %s", exc)
-                await self._out.send(message.channel, self._target_of(message), OutboundPayload(text=STOPPED_REPLY))
+        if text.startswith("/"):  # row 4: control commands (also /stop); never prompts
+            ctx = CommandContext(channel_id=message.channel, target=self._target_of(message), message=message, key=key)
+            reply = await self._commands.dispatch(text, ctx)
+            if reply:
+                await self._out.send(message.channel, ctx.target, OutboundPayload(text=reply))
             return
         question = self._questions.get(key)  # row 5: numbered answer (or button text)
         numbered = {str(index) for index in range(1, len(question.options) + 1)} if question else set()
@@ -141,7 +149,8 @@ class TurnPump:
         record = await self._ensure_session(message, key)  # rows 6-7
         if record is None:
             return
-        self._targets[record.session_id] = (message.channel, self._target_of(message))
+        self._targets[record.session_id] = self._target_of(message)
+        turn = self._turns.get(key)
         method = RuntimeMethod.RIND_SESSION_FOLLOW_UP if turn is not None else RuntimeMethod.SESSION_PROMPT
         await self._dispatch_input(key, message, record, text, method, new_turn=turn is None)
 
@@ -174,7 +183,8 @@ class TurnPump:
             return record
         except Exception as exc:  # noqa: BLE001 - every failure path answers the user
             logger.warning("gateway: session resolve failed for %s: %s", key, exc)
-            await self._out.send(message.channel, self._target_of(message), OutboundPayload(text=SESSION_CREATE_FAILED_REPLY))
+            await self._out.send(message.channel, self._target_of(message),
+                                 OutboundPayload(text=SESSION_CREATE_FAILED_REPLY))
             return None
 
     async def _dispatch_input(self, key: str, message: InboundMessage, record, text: str,
@@ -183,12 +193,14 @@ class TurnPump:
             self._turns[key] = _ActiveTurn(session_id=record.session_id, channel_id=message.channel,
                                            target=self._target_of(message), started_at=self._clock(),
                                            title=first_line_title(text))
+            await self._reactions.queued((message.channel, self._target_of(message)))
         try:
             await self._worker.request(method, {"session_id": record.session_id, "input": text}, self._request_timeout)
         except WorkerError as exc:
             logger.warning("gateway: %s failed for %s: %s", method, key, exc)
             if new_turn and (turn := self._turns.get(key)) is not None and not turn.confirmed:
                 self._turns.pop(key, None)  # unconfirmed prompt: no phantom active turn
+                await self._reactions.cancel((message.channel, self._target_of(message)))
             await self._out.send(message.channel, self._target_of(message),
                                  OutboundPayload(text=WORKER_UNRESPONSIVE_REPLY))
 
@@ -204,6 +216,8 @@ class TurnPump:
             return
         if envelope.get("durability") == "durable":  # cursor: durable ordinal, not transport sequence
             self._router.update_cursor(key, self._router.cursor_for(key) + 1)
+        position = self._position(key)
+        await self._reactions.on_event(position, event, replayed=replayed)
         if etype in ("tool_requested", "tool_result"):
             logger.debug("gateway: %s on session %s (never sent to channels)", etype, session_id)
             return
@@ -214,15 +228,12 @@ class TurnPump:
         elif etype == "assistant_message_completed":
             await self._on_assistant(key, event)
         elif etype in TERMINAL_EVENT_TYPES:
-            position = self._position(key)
-            self._finish_turn(key)
-            if etype == "turn_completed":  # ✅ receipt; no-op without the capability
-                await self._out.react(position)
-            elif etype == "turn_failed":
-                summary = " ".join(str(event.get("error") or event.get("error_type") or "未知错误").split())[:120]
-                await self._out.reply(position, TURN_FAILED_TEMPLATE.format(summary=summary, short_id=session_id[:8]))
-            else:
-                await self._out.reply(position, STOPPED_REPLY)
+            await self._finish_turn(key)  # typing stop lands before any terminal reply
+            if etype == "turn_failed":
+                detail = f"{user_error_line(event)}（session {session_id[:8]}）"
+                await self._out.reply(position, detail)
+            elif etype == "turn_cancelled":
+                await self._out.reply(position, STOPPED_REPLY)  # ✅ receipt rides the reaction hook
 
     async def _on_turn_started(self, key: str, session_id: str, turn_id: str) -> None:
         turn = self._turns.get(key)
@@ -230,17 +241,11 @@ class TurnPump:
             position = self._targets.get(session_id)
             if position is None:
                 return
-            turn = _ActiveTurn(session_id=session_id, channel_id=position[0], target=position[1],
-                               started_at=self._clock())
-            self._turns[key] = turn
+            turn = self._turns[key] = _ActiveTurn(session_id=session_id, channel_id=position[0],
+                                                  target=position[1], started_at=self._clock())
         turn.confirmed = True
         turn.turn_id = turn_id
-        previous = self._typing_tasks.pop(key, None)
-        if previous is not None:
-            previous.cancel()
-        task = self._out.start_typing(turn.channel_id, turn.target, asyncio.get_running_loop())
-        if task is not None:
-            self._typing_tasks[key] = task
+        self._out.start_typing(key, turn.channel_id, turn.target, asyncio.get_running_loop())
 
     async def _on_question(self, key: str, session_id: str, event: dict) -> None:
         position = self._position(key, session_id)
@@ -261,39 +266,35 @@ class TurnPump:
         turn = self._turns.get(key)
         await self._out.send_assistant(position, content, turn.title if turn is not None else "")
 
-    def _finish_turn(self, key: str) -> None:
+    async def _finish_turn(self, key: str) -> None:
         self._turns.pop(key, None)
-        task = self._typing_tasks.pop(key, None)
-        if task is not None:
-            task.cancel()
+        await self._out.stop_typing(key)
 
     def _position(self, key: str, session_id: str | None = None) -> tuple[str, SendTarget] | None:
         turn = self._turns.get(key)
         if turn is not None:
             return turn.channel_id, turn.target
-        if session_id is None:
-            record = self._router.lookup(key)
-            session_id = record.session_id if record else None
+        record = self._router.lookup(key) if session_id is None else None
+        session_id = session_id or (record.session_id if record else None)
         return self._targets.get(session_id) if session_id else None
 
     async def _expire_questions(self) -> None:
         now = self._clock()
-        for key, question in list(self._questions.items()):
-            if now < question.deadline:
-                continue
-            self._questions.pop(key, None)
-            timeout_option = next((o for o in question.options if "超时" in o or "timeout" in o.lower()), None)
-            if timeout_option is not None:  # respond the timeout choice, stay quiet
-                await self._answer_question(question, timeout_option)
+        for question in [q for q in self._questions.values() if now >= q.deadline]:
+            self._questions.pop(question.key, None)
+            timeout = next((o for o in question.options if "超时" in o or "timeout" in o.lower()), None)
+            if timeout is not None:  # respond the timeout choice, stay quiet
+                await self._answer_question(question, timeout)
             else:
                 await self._out.reply((question.channel_id, question.target), QUESTION_EXPIRED_REPLY)
 
-    def _reset_stuck_turns(self) -> None:
+    async def _reset_stuck_turns(self) -> None:
         for key, turn in list(self._turns.items()):
             if self._clock() - turn.started_at <= TURN_STUCK_SECONDS:
                 continue
             logger.warning("gateway: turn on %s active for over 30 minutes; forcing idle", key)
-            self._finish_turn(key)
+            await self._reactions.cancel((turn.channel_id, turn.target))
+            await self._finish_turn(key)
 
 
 __all__ = ["TurnPump"]

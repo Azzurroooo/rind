@@ -28,9 +28,25 @@ PENDING_CAP = 3
 COOLDOWN_WINDOW_SECONDS = 60.0
 
 DEFAULT_BOT_HANDLES = ("rind", "bot")
-PAIRING_INSTRUCTIONS = "首次使用请先完成配对：请让服务器管理员执行 python main.py gateway approve {code} 后再发消息。"
-PAIRING_FULL_NOTICE = "配对申请已达上限，请稍后再试。"
 COOLDOWN_NOTICE = "消息有点频繁，已暂停处理，请稍后再发。"
+APPROVE_COMMAND = "python main.py gateway approve {code}"
+PAIRING_FULL_NOTICE = "配对申请已达上限，请稍后再试。"
+
+
+def pairing_notice(channel: str, sender_id: str, code: str, ttl_seconds: float) -> str:
+    """Fixed, honest pairing card: identity, code, server command, TTL.
+
+    The command and code alphabet are the server's (gateway.main approve +
+    ``CODE_ALPHABET``); the TTL mirrors the configured ``pairing_ttl_seconds``.
+    """
+    minutes = max(1, int(ttl_seconds // 60))
+    return (
+        "Rind：尚未授权此账号。\n"
+        f"身份：{channel} · {sender_id}\n"
+        f"配对码：`{code}`\n"
+        f"批准：在服务器执行 `{APPROVE_COMMAND.format(code=code)}`\n"
+        f"有效期：{minutes} 分钟，过期后重新发消息会生成新码。"
+    )
 
 
 class Verdict:
@@ -218,7 +234,8 @@ class SecurityGate:
         code = self._pairing.ensure_pending(message.channel, message.sender_id, self._pairing_ttl)
         if code is None:
             return Verdict(False, pairing=True, notice=PAIRING_FULL_NOTICE)
-        return Verdict(False, pairing=True, notice=PAIRING_INSTRUCTIONS.format(code=code))
+        return Verdict(False, pairing=True,
+                       notice=pairing_notice(message.channel, message.sender_id, code, self._pairing_ttl))
 
 
 __all__ = [
@@ -232,4 +249,5 @@ __all__ = [
     "SecurityGate",
     "Verdict",
     "is_addressed_to_bot",
+    "pairing_notice",
 ]

@@ -370,7 +370,7 @@ def test_stuck_turn_is_reset_after_30_minutes(tmp_path):
         harness = await _harness(tmp_path, clock)
         task, _ = await _start_turn(harness)
         clock.advance(31 * 60)
-        harness.pump._reset_stuck_turns()
+        await harness.pump._reset_stuck_turns()
         assert harness.pump._turns == {}
         second = asyncio.create_task(harness.pump.inbound(_message("m-2", text="再来一件事")))
         await _until(lambda: len(harness.worker.prompts) == 2)  # new prompt, not a follow_up
@@ -605,7 +605,7 @@ def test_turn_failed_sends_one_line_with_short_session_id(tmp_path):
         task, session_id = await _start_turn(harness)
         harness.worker.push_event(session_id, {"type": "turn_failed", "error": "模型\n连接 中断"})
         await _until(lambda: len(harness.channel.sent) == 1)
-        expected = f"任务失败：模型 连接 中断（session {session_id[:8]}）"
+        expected = f"⚠️ 任务失败（模型 连接 中断）。可回复 /status 查看状态或重试。（session {session_id[:8]}）"
         assert _texts(harness.channel)[0] == expected
         assert harness.pump._turns == {}
         await _until(task.done)  # terminal event also unblocks the pending prompt

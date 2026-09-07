@@ -69,6 +69,14 @@ class SessionRouter:
         record = self._records.get(key)
         if record is not None:
             return record
+        return await self.create_session(key, worker, workspace_root)
+
+    async def create_session(self, key: str, worker: Any, workspace_root: str) -> SessionRecord:
+        """Always create a fresh session and re-bind key → new id (/new).
+
+        The previous session keeps its key mapping in ``_keys_by_session`` so
+        events of a still-running old turn keep routing to the chat.
+        """
         last_error: Exception | None = None
         for _attempt in range(2):
             try:

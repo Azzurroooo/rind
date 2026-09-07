@@ -88,7 +88,7 @@ MODULES_BY_ID = {
 
 CAPS_BY_CHANNEL = {
     "telegram": {"max_text_length": 4000, "len_unit": "utf16", "supports_typing": True,
-                 "supports_buttons": True, "supports_reaction": False, "markdown": "none"},
+                 "supports_buttons": True, "supports_reaction": True, "markdown": "none"},
     "discord": {"max_text_length": 2000, "len_unit": "chars", "supports_typing": False,
                 "supports_buttons": False, "supports_reaction": False, "markdown": "subset"},
     "wecom": {"max_text_length": 2048, "len_unit": "chars", "supports_typing": False,

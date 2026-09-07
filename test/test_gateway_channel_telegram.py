@@ -66,6 +66,8 @@ class FakeBot:
         self.media = []
         self.chat_actions = []
         self.downloads = []
+        self.reactions: list[dict] = []
+        self.fail_reactions = False
 
     async def delete_webhook(self, drop_pending_updates=False):
         self.webhooks_dropped += 1
@@ -89,6 +91,12 @@ class FakeBot:
 
     async def send_chat_action(self, chat_id, action, **kwargs):
         self.chat_actions.append((chat_id, action))
+
+    async def set_message_reaction(self, chat_id, message_id, reaction=None, is_big=False, **kwargs):
+        if self.fail_reactions:
+            raise RuntimeError("reaction not allowed in this chat")
+        self.reactions.append({"chat_id": chat_id, "message_id": message_id,
+                               "reaction": reaction, "is_big": is_big})
 
     async def download(self, file, destination=None):
         self.downloads.append(file)
@@ -314,6 +322,42 @@ def test_typing_sends_chat_action(tmp_path, fake_aiogram):
         await channel.typing(SendTarget(chat_id="42"))
         await channel.typing(SendTarget(chat_id="42", thread_id="7"))
         assert bot.chat_actions == [("42", "typing"), ("42", "typing")]
+        await channel.stop()
+
+    asyncio.run(scenario())
+
+
+# --- react ------------------------------------------------------------------------
+
+
+def test_react_pins_seen_emoji_on_last_posted_message(tmp_path, fake_aiogram):
+    async def scenario():
+        channel, bot, sink = await _start(tmp_path)
+        await channel.react(SendTarget(chat_id="42"), "✅")  # nothing posted yet → quiet no-op
+        assert bot.reactions == []
+        await channel.send(SendTarget(chat_id="42"), OutboundPayload(text="开工"))  # message_id 101
+        await channel.react(SendTarget(chat_id="42"), "🧠")  # Outbound passes the raw glyph
+        (reaction,) = bot.reactions
+        assert reaction["chat_id"] == "42" and reaction["message_id"] == 101
+        assert reaction["reaction"] == [{"type": "emoji", "emoji": "👀"}]  # pinned DM-safe emoji
+        assert reaction["is_big"] is False
+        await channel.stop()
+
+    asyncio.run(scenario())
+
+
+def test_react_uses_sdk_reaction_type_and_tolerates_failures(tmp_path, fake_aiogram):
+    async def scenario():
+        fake_aiogram.ReactionTypeEmoji = lambda emoji: SimpleNamespace(type="emoji", emoji=emoji)
+        channel, bot, sink = await _start(tmp_path)
+        await channel.send(SendTarget(chat_id="42"), OutboundPayload(text="开工"))
+        await channel.react(SendTarget(chat_id="42"), "❌")
+        reaction = bot.reactions.pop()
+        assert reaction["reaction"] == [SimpleNamespace(type="emoji", emoji="👀")]
+        del fake_aiogram.ReactionTypeEmoji
+
+        bot.fail_reactions = True  # API refuses (e.g. DM reaction not allowed)
+        await channel.react(SendTarget(chat_id="42"), "✅")  # swallowed, never raised
         await channel.stop()
 
     asyncio.run(scenario())

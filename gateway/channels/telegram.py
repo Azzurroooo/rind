@@ -39,7 +39,7 @@ CAPABILITIES = ChannelCapabilities(
     len_unit="utf16",
     supports_typing=True,
     supports_buttons=True,  # inline keyboard: callback_data "ans:<index>" loops back as digit text
-    supports_reaction=False,
+    supports_reaction=True,  # setMessageReaction with the pinned 👀 emoji (see react)
     markdown="none",  # pump/chunker degrade to plain text; we send with parse_mode=None
 )
 
@@ -49,6 +49,10 @@ BUTTON_CALLBACK_PREFIX = "ans:"
 LONG_POLL_SECONDS = 25
 POLL_ERROR_PAUSE_SECONDS = 3.0
 TYPING_ACTION = "typing"
+# Telegram's default reaction catalogue is narrow — private chats allow only
+# 👀/🔥/😍 unless the chat defines a custom list — so every status maps to the
+# pinned 👀 ("seen/working"); setMessageReaction failures degrade to a log.
+REACTION_EMOJI = "👀"
 
 _EXTENSION_FOR_KIND = {"image": ".jpg", "audio": ".ogg", "video": ".mp4", "document": ".bin"}
 
@@ -110,6 +114,7 @@ class TelegramChannel:
         self._bot: Any = None
         self._aiogram: Any = None
         self._poll_task: asyncio.Task[None] | None = None
+        self._last_message_id: dict[str, int] = {}  # chat_id → last posted message (reaction anchor)
 
     # --- lifecycle -----------------------------------------------------------
 
@@ -301,13 +306,16 @@ class TelegramChannel:
         try:
             reply_markup = self._choice_keyboard(payload.choices) if payload.choices else None
             if payload.text or reply_markup is not None:
-                await bot.send_message(
+                sent = await bot.send_message(
                     target.chat_id,
                     payload.text,
                     parse_mode=None,
                     reply_markup=reply_markup,
                     message_thread_id=thread_id,
                 )
+                message_id = getattr(sent, "message_id", None)
+                if message_id:  # transport state: anchor for the status reaction
+                    self._last_message_id[target.chat_id] = message_id
             for attachment in payload.attachments:
                 await self._send_attachment(bot, target.chat_id, attachment, thread_id)
         except Exception as exc:
@@ -338,6 +346,26 @@ class TelegramChannel:
         except Exception as exc:
             logger.debug("gateway telegram: chat action failed: %s", exc)
 
+    async def react(self, target: SendTarget, emoji: str) -> None:
+        """Status reaction: setMessageReaction with the pinned 👀 emoji on our
+        last posted message; failures are best-effort (never raised)."""
+        bot = self._bot
+        message_id = self._last_message_id.get(target.chat_id)
+        setter = getattr(bot, "set_message_reaction", None) if bot is not None else None
+        if not message_id or not callable(setter):
+            return
+        try:
+            await setter(target.chat_id, message_id, reaction=self._reaction_payload(), is_big=False)
+        except Exception as exc:
+            logger.debug("gateway telegram: reaction failed: %s", exc)
+
+    def _reaction_payload(self) -> list[Any]:
+        """ReactionTypeEmoji when the SDK provides it; plain dict otherwise."""
+        factory = getattr(self._aiogram, "ReactionTypeEmoji", None)
+        if factory is not None:
+            return [factory(emoji=REACTION_EMOJI)]
+        return [{"type": "emoji", "emoji": REACTION_EMOJI}]
+
 
 def build_channel(config: ChannelConfig, uploads_root: Path) -> TelegramChannel:
     """Registry entry point: validates config, fails fast when SDK missing."""
@@ -347,4 +375,4 @@ def build_channel(config: ChannelConfig, uploads_root: Path) -> TelegramChannel:
     return TelegramChannel(token=config.token.strip(), uploads_root=Path(uploads_root))
 
 
-__all__ = ["CAPABILITIES", "CONFIG_KEYS", "CHANNEL_ID", "TelegramChannel", "build_channel"]
+__all__ = ["CAPABILITIES", "CONFIG_KEYS", "CHANNEL_ID", "REACTION_EMOJI", "TelegramChannel", "build_channel"]

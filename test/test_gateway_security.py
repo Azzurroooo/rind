@@ -79,6 +79,35 @@ def test_dm_stranger_gets_pairing_instructions_with_code(tmp_path):
     assert gate._pairing.pending[code]["sender_id"] == "stranger"
 
 
+def test_dm_stranger_gets_fixed_pairing_card(tmp_path):
+    """The deny_pairing reply is a fixed, honest card (openclaw pairing card):
+    identity line, backticked code, the exact server command, and the TTL."""
+    clock = _FakeClock()
+    gate = _gate(tmp_path, clock)
+    verdict = gate.admit(_message(channel="telegram", sender_id="stranger"))
+    lines = verdict.notice.splitlines()
+    code = next(iter(gate._pairing.pending))
+    assert lines[0] == "Rind：尚未授权此账号。"
+    assert lines[1] == "身份：telegram · stranger"
+    assert f"配对码：`{code}`" in lines
+    assert f"python main.py gateway approve {code}" in verdict.notice  # server command verbatim
+    assert any(line.startswith("有效期：60 分钟") for line in lines)  # 3600s TTL → 60 分钟
+    for char in code:  # code alphabet matches security.py (no I/1/O/0)
+        assert char in CODE_ALPHABET
+
+
+def test_dm_pairing_card_ttl_reflects_gate_config(tmp_path):
+    clock = _FakeClock()
+    gate = SecurityGate(
+        pairing=PairingStore(tmp_path / "pairing.json", now=clock),
+        cooldown=CooldownGate(1000),
+        allow_from={"telegram": ()},
+        pairing_ttl_seconds=90.0,  # sub-minute floors at 1 minute
+    )
+    verdict = gate.admit(_message(sender_id="stranger"))
+    assert "有效期：1 分钟" in verdict.notice
+
+
 def test_dm_pairing_approved_sender_allows(tmp_path):
     clock = _FakeClock()
     gate = _gate(tmp_path, clock)

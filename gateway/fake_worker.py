@@ -69,6 +69,7 @@ class FakeWorker:
         self.follow_ups: list[tuple[str | None, str]] = []
         self.answers: list[tuple[str | None, str, str]] = []
         self.cancels: list[str | None] = []
+        self.compacts: list[str | None] = []
         self.sessions: dict[str, FakeSession] = {}
         self._connections: list[FakeConnection] = []
         self._counter = 0
@@ -146,6 +147,9 @@ class FakeWorker:
         if method == "rind/user-question/respond":
             answer = (params.get("session_id"), str(params.get("tool_call_id") or ""), str(params.get("answer") or ""))
             self.answers.append(answer)
+            return {"ok": True}
+        if method == "rind/session/compact":
+            self.compacts.append(params.get("session_id"))
             return {"ok": True}
         if method == "session/replay":
             session = self.sessions[str(params.get("session_id") or "")]
