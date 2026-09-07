@@ -26,6 +26,20 @@ _KNOWN_TOP_LEVEL = frozenset(
 )
 _KNOWN_PAIRING = frozenset({"enabled", "ttl_minutes"})
 _KNOWN_CHANNEL = frozenset({"token", "allow_from", "group_allow"})
+# Per-channel extensions beyond the common keys (WP11: wecom / whatsapp / email).
+# Every channel also accepts _KNOWN_CHANNEL; unknown keys still error (§2).
+_CHANNEL_KEYS: dict[str, frozenset[str]] = {
+    "wecom": frozenset({"corp_id", "agent_id", "secret", "encoding_aes_key", "callback_host", "callback_port"}),
+    "whatsapp": frozenset({"phone_number_id", "access_token", "verify_token", "webhook_host", "webhook_port"}),
+    "email": frozenset(
+        {"imap_host", "imap_port", "imap_ssl", "smtp_host", "smtp_port", "smtp_starttls",
+         "username", "password", "mailbox", "poll_interval"}
+    ),
+}
+_CHANNEL_PORT_KEYS = frozenset({"callback_port", "webhook_port", "imap_port", "smtp_port"})
+_CHANNEL_BOOL_KEYS = frozenset({"imap_ssl", "smtp_starttls"})
+_CHANNEL_INT_KEYS = frozenset({"poll_interval"})
+_CHANNEL_SCALAR_KEYS = frozenset({"agent_id", "phone_number_id"})  # numeric ok, normalized to str
 
 
 class ConfigError(Exception):
@@ -44,6 +58,7 @@ class ChannelConfig:
     token: str = ""
     allow_from: tuple[str, ...] = ()
     group_allow: tuple[str, ...] = ()
+    extra: dict[str, Any] = field(default_factory=dict)  # per-channel keys (e.g. channels.wecom.corp_id)
 
 
 @dataclass(frozen=True, slots=True)
@@ -263,14 +278,44 @@ def _build_channels(raw: Mapping[str, Any]) -> dict[str, ChannelConfig]:
     for channel_id, block in raw.items():
         if not isinstance(block, Mapping):
             raise ConfigError(f"gateway config: channels.{channel_id} must be a mapping")
-        _check_keys(block, _KNOWN_CHANNEL, f"channels.{channel_id}")
-        allow_from = _string_list(block.get("allow_from") or (), f"channels.{channel_id}.allow_from")
-        group_allow = _string_list(block.get("group_allow") or (), f"channels.{channel_id}.group_allow")
+        cid = str(channel_id)
+        _check_keys(block, _KNOWN_CHANNEL | _CHANNEL_KEYS.get(cid, frozenset()), f"channels.{cid}")
+        allow_from = _string_list(block.get("allow_from") or (), f"channels.{cid}.allow_from")
+        group_allow = _string_list(block.get("group_allow") or (), f"channels.{cid}.group_allow")
         token = block.get("token") or ""
         if not isinstance(token, str):
-            raise ConfigError(f"gateway config: channels.{channel_id}.token must be a string")
-        channels[str(channel_id)] = ChannelConfig(id=str(channel_id), token=token, allow_from=allow_from, group_allow=group_allow)
+            raise ConfigError(f"gateway config: channels.{cid}.token must be a string")
+        extra = {key: _channel_value(cid, key, value) for key, value in block.items() if key not in _KNOWN_CHANNEL}
+        channels[cid] = ChannelConfig(
+            id=cid, token=token, allow_from=allow_from, group_allow=group_allow, extra=extra
+        )
     return channels
+
+
+def _channel_value(channel_id: str, key: str, raw: Any) -> Any:
+    """Validate one per-channel key (types only; semantics live in the adapter)."""
+    label = f"gateway config: channels.{channel_id}.{key}"
+    if key in _CHANNEL_BOOL_KEYS:
+        if not isinstance(raw, bool):
+            raise ConfigError(f"{label} must be true or false")
+        return raw
+    if key in _CHANNEL_PORT_KEYS:
+        if isinstance(raw, bool) or not isinstance(raw, int) or not 1 <= raw <= 65535:
+            raise ConfigError(f"{label} must be an integer port in [1, 65535]")
+        return raw
+    if key in _CHANNEL_INT_KEYS:
+        if isinstance(raw, bool) or not isinstance(raw, int) or not 5 <= raw <= 3600:
+            raise ConfigError(f"{label} must be an integer seconds value in [5, 3600]")
+        return raw
+    if key in _CHANNEL_SCALAR_KEYS:
+        if isinstance(raw, int) and not isinstance(raw, bool):
+            return str(raw)
+        if isinstance(raw, str) and raw.strip():
+            return raw.strip()
+        raise ConfigError(f"{label} must be a non-empty string or integer")
+    if not isinstance(raw, str) or not raw.strip():
+        raise ConfigError(f"{label} must be a non-empty string")
+    return raw.strip()
 
 
 def _string_list(raw: Any, label: str) -> tuple[str, ...]:

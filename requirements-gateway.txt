@@ -16,3 +16,15 @@ discord.py>=2.3
 #   slack_bolt        # Slack socket mode
 #   lark-oapi         # Feishu (Lark) websocket events
 #   dingtalk-stream   # DingTalk stream mode
+#
+# WeCom / 企业微信 (gateway/channels/wecom.py) — callback server + API client
+# and AES-256-CBC for the callback verify/decrypt flow (WP11):
+aiohttp>=3.9
+cryptography>=42.0.0
+#
+# WhatsApp Cloud API (gateway/channels/whatsapp_cloud.py) — webhook server +
+# Graph REST client (WP11); shares the aiohttp pin above.
+#
+# Email (gateway/channels/email_channel.py) — IMAP inbound + SMTP replies (WP11):
+imapclient>=2.3
+aiosmtplib>=3.0

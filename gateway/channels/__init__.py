@@ -22,6 +22,9 @@ logger = logging.getLogger(__name__)
 LOADERS: dict[str, str] = {
     "telegram": "gateway.channels.telegram:build_channel",
     "discord": "gateway.channels.discord:build_channel",
+    "wecom": "gateway.channels.wecom:build_channel",
+    "whatsapp": "gateway.channels.whatsapp_cloud:build_channel",
+    "email": "gateway.channels.email_channel:build_channel",
 }
 
 

@@ -91,6 +91,58 @@ def test_unknown_channel_key_is_an_error():
         )
 
 
+# --- per-channel key schemas (WP11: wecom / whatsapp / email) -----------------------
+
+
+def test_wecom_whatsapp_email_keys_parse_with_types():
+    config = build_config({"worker": "stdio", "workspace": ABS_WORKSPACE, "channels": {
+        "wecom": {"token": "cb-token", "corp_id": "corp-1", "agent_id": 1000002, "secret": "s",
+                  "encoding_aes_key": "x" * 43, "callback_host": "127.0.0.1", "callback_port": 8081},
+        "whatsapp": {"phone_number_id": 106540352242922, "access_token": "a", "verify_token": "v",
+                     "webhook_port": 9090},
+        "email": {"imap_host": "i", "smtp_host": "s", "username": "u", "password": "p",
+                  "imap_ssl": False, "smtp_starttls": True, "mailbox": "Archive", "poll_interval": 60},
+    }})
+    wecom = config.channels["wecom"]
+    assert wecom.token == "cb-token" and wecom.extra["agent_id"] == "1000002"  # numeric scalar → str
+    assert wecom.extra["callback_port"] == 8081 and wecom.extra["encoding_aes_key"] == "x" * 43
+    whatsapp = config.channels["whatsapp"]
+    assert whatsapp.extra["phone_number_id"] == "106540352242922" and whatsapp.extra["webhook_port"] == 9090
+    email = config.channels["email"]
+    assert email.extra["imap_ssl"] is False and email.extra["smtp_starttls"] is True
+    assert email.extra["mailbox"] == "Archive" and email.extra["poll_interval"] == 60
+
+
+def test_unknown_per_channel_key_is_an_error():
+    data = {"worker": "stdio", "workspace": ABS_WORKSPACE,
+            "channels": {"wecom": {"corp_id": "c", "oops": 1}}}
+    with pytest.raises(ConfigError, match="channels.wecom.oops"):
+        build_config(data)
+    # keys of one channel are not valid for another; unknown ids get no extra keys
+    data["channels"] = {"email": {"corp_id": "c"}}
+    with pytest.raises(ConfigError, match="channels.email.corp_id"):
+        build_config(data)
+    data["channels"] = {"slack": {"corp_id": "c"}}
+    with pytest.raises(ConfigError, match="channels.slack.corp_id"):
+        build_config(data)
+
+
+def test_per_channel_value_types_are_validated():
+    base = {"worker": "stdio", "workspace": ABS_WORKSPACE}
+    with pytest.raises(ConfigError, match="channels.whatsapp.webhook_port"):
+        build_config({**base, "channels": {"whatsapp": {"webhook_port": "8080"}}})
+    with pytest.raises(ConfigError, match="channels.whatsapp.webhook_port"):
+        build_config({**base, "channels": {"whatsapp": {"webhook_port": 70000}}})
+    with pytest.raises(ConfigError, match="channels.email.imap_ssl"):
+        build_config({**base, "channels": {"email": {"imap_ssl": "true"}}})
+    with pytest.raises(ConfigError, match="channels.email.poll_interval"):
+        build_config({**base, "channels": {"email": {"poll_interval": 4}}})
+    with pytest.raises(ConfigError, match="channels.email.username"):
+        build_config({**base, "channels": {"email": {"username": ""}}})
+    with pytest.raises(ConfigError, match="channels.wecom.agent_id"):
+        build_config({**base, "channels": {"wecom": {"agent_id": True}}})
+
+
 def test_undefined_env_variable_is_an_error(tmp_path):
     with pytest.raises(ConfigError, match="UNDEFINED_VAR"):
         load_config(_write(tmp_path, "worker: stdio\nworkspace: ${UNDEFINED_VAR}\n"), env={})
