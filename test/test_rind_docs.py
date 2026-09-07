@@ -123,3 +123,18 @@ def test_rind_project_doc_uses_cwd_not_parent_git_root(tmp_path, monkeypatch) ->
     assert "cwd doc" in messages[0]["content"]
     assert "parent git root doc" not in messages[0]["content"]
     assert decisions["rind_docs_project_path"] == str(nested.resolve() / "RIND.md")
+
+
+def test_rind_docs_accept_str_cwd(tmp_path, monkeypatch) -> None:
+    user_home = tmp_path / "home"
+    project = _project_root(tmp_path)
+    user_home.mkdir()
+    monkeypatch.setenv("RIND_HOME", str(user_home))
+    (project / "RIND.md").write_text("str cwd guidance", encoding="utf-8")
+
+    messages, stats, decisions = build_rind_doc_context(str(project))
+
+    assert decisions["rind_docs_injected"] is True
+    assert decisions["rind_docs_project_path"] == str(project.resolve() / "RIND.md")
+    assert "str cwd guidance" in messages[0]["content"]
+    assert stats["rind_docs_project_injected_bytes"] > 0

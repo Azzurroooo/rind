@@ -15,11 +15,11 @@ def resolve_user_doc_path() -> Path:
     return resolve_rind_home() / RIND_DOC_NAME
 
 
-def resolve_project_doc_path(cwd: Path | None = None) -> Path:
+def resolve_project_doc_path(cwd: str | Path | None = None) -> Path:
     return resolve_project_root(cwd) / RIND_DOC_NAME
 
 
-def build_rind_doc_context(cwd: Path | None = None) -> tuple[list[dict], dict, dict]:
+def build_rind_doc_context(cwd: str | Path | None = None) -> tuple[list[dict], dict, dict]:
     docs = [
         _read_doc("user", resolve_user_doc_path()),
         _read_doc("project", resolve_project_doc_path(cwd)),

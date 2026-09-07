@@ -341,3 +341,32 @@ def test_container_rejects_invalid_team_agent_capsule(tmp_path, monkeypatch) -> 
             provider_client_factory=FakeProviderClientFactory(),
             session_dir=str(tmp_path / "sessions"),
         )
+
+
+def test_container_rind_doc_provider_injects_workspace_doc(tmp_path, monkeypatch) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    (workspace / "RIND.md").write_text("workspace guidance", encoding="utf-8")
+    monkeypatch.setenv("RIND_HOME", str(tmp_path / "rind_home"))
+    settings = AppSettings(
+        settings_path=tmp_path / "settings.json",
+        settings_exists=True,
+        model="test-model",
+        api_key="test-key",
+        base_url="https://example.com/v1",
+        reasoning_effort="high",
+        user_agent="test-agent",
+    )
+
+    with tempfile.TemporaryDirectory(dir=tmp_path) as session_dir:
+        container = build_agent_container(
+            settings=settings,
+            provider_client_factory=FakeProviderClientFactory(),
+            session_dir=session_dir,
+            workspace_root=str(workspace),
+        )
+
+        messages, _, decisions = container.context_manager._rind_doc_provider()
+
+        assert decisions["rind_docs_injected"] is True
+        assert "workspace guidance" in messages[0]["content"]

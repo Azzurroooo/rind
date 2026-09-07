@@ -16,8 +16,8 @@ def resolve_rind_home() -> Path:
     return (Path.home() / ".rind").resolve()
 
 
-def resolve_project_root(cwd: Path | None = None) -> Path:
-    return (cwd or Path.cwd()).resolve()
+def resolve_project_root(cwd: str | Path | None = None) -> Path:
+    return Path(cwd or Path.cwd()).resolve()
 
 
 def validate_session_id(session_id: str) -> str:
