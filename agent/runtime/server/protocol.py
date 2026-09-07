@@ -41,6 +41,8 @@ class RuntimeMethod:
     SESSION_CANCEL = "session/cancel"
     SESSION_SUBSCRIBE = "session/subscribe"
     SESSION_UNSUBSCRIBE = "session/unsubscribe"
+    SESSION_DELETE = "session/delete"
+    PING = "ping"
     FILE_LIST = "file/list"
     FILE_READ = "file/read"
     FILE_WRITE = "file/write"
@@ -72,6 +74,7 @@ SESSION_SCOPED_METHODS = frozenset(
         RuntimeMethod.SESSION_CANCEL,
         RuntimeMethod.SESSION_SUBSCRIBE,
         RuntimeMethod.SESSION_UNSUBSCRIBE,
+        RuntimeMethod.SESSION_DELETE,
         RuntimeMethod.MODEL_SET,
         RuntimeMethod.RIND_SESSION_STEER,
         RuntimeMethod.RIND_SESSION_FOLLOW_UP,
@@ -109,6 +112,8 @@ CORE_METHODS = (
     RuntimeMethod.SESSION_CANCEL,
     RuntimeMethod.SESSION_SUBSCRIBE,
     RuntimeMethod.SESSION_UNSUBSCRIBE,
+    RuntimeMethod.SESSION_DELETE,
+    RuntimeMethod.PING,
     RuntimeMethod.FILE_LIST,
     RuntimeMethod.FILE_READ,
     RuntimeMethod.FILE_WRITE,

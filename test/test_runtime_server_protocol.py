@@ -231,6 +231,8 @@ def test_golden_event_fixture_matches_python_envelope():
         "file/write",
         "session/subscribe",
         "session/unsubscribe",
+        "session/delete",
+        "ping",
     ]
     assert responses == [
         {
@@ -267,6 +269,16 @@ def test_golden_event_fixture_matches_python_envelope():
             "kind": "response",
             "request_id": "unsubscribe-1",
             "result": {"ok": True, "subscribed": []},
+        },
+        {
+            "kind": "response",
+            "request_id": "delete-1",
+            "result": {"ok": True, "deleted": "session-9"},
+        },
+        {
+            "kind": "response",
+            "request_id": "ping-1",
+            "result": {"ok": True},
         },
     ]
 

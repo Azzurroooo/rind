@@ -15,3 +15,7 @@
 {"kind":"response","request_id":"subscribe-1","result":{"ok":true,"subscribed":["session-1"]}}
 {"kind":"request","request_id":"unsubscribe-1","method":"session/unsubscribe","params":{"session_id":"session-1"}}
 {"kind":"response","request_id":"unsubscribe-1","result":{"ok":true,"subscribed":[]}}
+{"kind":"request","request_id":"delete-1","method":"session/delete","params":{"session_id":"session-9"}}
+{"kind":"response","request_id":"delete-1","result":{"ok":true,"deleted":"session-9"}}
+{"kind":"request","request_id":"ping-1","method":"ping","params":{}}
+{"kind":"response","request_id":"ping-1","result":{"ok":true}}

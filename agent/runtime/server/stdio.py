@@ -1066,6 +1066,9 @@ class WorkerStdioRuntimeServer:
             if method == RuntimeMethod.INITIALIZE:
                 await self._initialize(request)
                 return
+            if method == RuntimeMethod.PING:
+                await self._respond(request, {"ok": True})
+                return
             if not self._initialized:
                 await self._respond_error(request, "Runtime worker is not initialized.", "ServerNotReady")
                 return
@@ -1077,6 +1080,9 @@ class WorkerStdioRuntimeServer:
                 return
             if method == RuntimeMethod.SESSION_SWITCH:
                 await self._switch_session(request)
+                return
+            if method == RuntimeMethod.SESSION_DELETE:
+                await self._delete_session(request)
                 return
             if method in {RuntimeMethod.SESSION_SUBSCRIBE, RuntimeMethod.SESSION_UNSUBSCRIBE}:
                 await self._subscription_request(request)
@@ -1305,6 +1311,20 @@ class WorkerStdioRuntimeServer:
         info = await self._worker.session(session_id)
         self._subscribed.add(session_id)
         await self._respond(request, info)
+
+    async def _delete_session(self, request: dict[str, Any]) -> None:
+        session_id = await self._required_session_id(request)
+        if session_id is None:
+            return
+        if session_id == self._worker.session_id:
+            await self._respond_error(request, "Cannot delete the current session. Switch to another session first.", "InvalidRequest")
+            return
+        if session_id in self._worker.execution.active_session_ids():
+            await self._respond_error(request, "Cannot delete a session with an active turn.", "TurnActive")
+            return
+        await self._worker.delete_session(session_id)
+        self._subscribed.discard(session_id)
+        await self._respond(request, {"ok": True, "deleted": session_id})
 
     async def _subscription_request(self, request: dict[str, Any]) -> None:
         method = str(request.get("method") or "")

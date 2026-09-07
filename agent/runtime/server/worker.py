@@ -7,6 +7,7 @@ import copy
 import inspect
 import json
 import os
+import shutil
 import tempfile
 import uuid
 from datetime import datetime
@@ -22,7 +23,9 @@ from agent.infrastructure.config import AppSettings, validate_settings
 from agent.infrastructure.config.settings_loader import DEFAULT_MODEL, load_settings
 from agent.infrastructure.llm import OpenAIClientFactory, close_async_client
 from agent.infrastructure.persistence import JsonlSessionStore, ToolOutputStore
-from agent.infrastructure.paths import validate_session_id
+from agent.infrastructure.persistence.session_files import SessionFiles
+from agent.infrastructure.persistence.session_index_repository import SessionIndexRepository
+from agent.infrastructure.paths import resolve_session_base, validate_session_id
 from agent.infrastructure.planning import build_plan_snapshot
 from agent.infrastructure.team import discover_agent
 from agent.prompts import build_goal_checkpoint_prompt, build_system_prompt
@@ -57,6 +60,25 @@ class SessionRepository:
             limit,
             workspace_root,
         )
+
+    async def delete(self, session_id: str) -> dict[str, Any]:
+        clean = validate_session_id(session_id)
+        meta = await asyncio.to_thread(JsonlSessionStore.load_session_metadata, clean, self.session_dir)
+
+        def _remove() -> None:
+            root = JsonlSessionStore.resolve_session_root(self.session_dir)
+            base = resolve_session_base(root, clean)
+            if base.exists():
+                shutil.rmtree(base)
+            index_path = (
+                os.path.join(root, "index.json")
+                if self.session_dir
+                else os.path.join(JsonlSessionStore.default_rind_home(), "session_index.json")
+            )
+            SessionIndexRepository(SessionFiles(), index_path).remove_session(clean)
+
+        await asyncio.to_thread(_remove)
+        return {"session_id": clean, "workspace_root": str(meta.get("workspace_root") or "")}
 
     async def create(
         self,
@@ -175,6 +197,10 @@ class SessionRepository:
             "turn_state": await store.get_turn_state(),
             "session_id": session_id,
         }
+
+    async def delete_session(self, session_id: str) -> dict[str, Any]:
+        clean = validate_session_id(session_id)
+        return await self.repository.delete(clean)
 
     async def open_store(
         self,
