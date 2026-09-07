@@ -161,6 +161,21 @@ class SessionRepository:
             "model": store.model,
         }
 
+    async def replay_event_pages(self, session_id: str) -> dict[str, Any]:
+        """Load the raw materials for durable event projection with one store open."""
+        info = await self.info(session_id)
+        store = await self._open_store_from_info(
+            session_id,
+            info,
+            persist_system_prompt=False,
+        )
+        return {
+            "messages": await store.get_messages_slice(include_ids=True, compacted=False),
+            "tool_records": await store.get_tool_records(),
+            "turn_state": await store.get_turn_state(),
+            "session_id": session_id,
+        }
+
     async def open_store(
         self,
         session_id: str,
@@ -237,12 +252,32 @@ class ExecutionCoordinator:
         self._active: dict[str, _ActiveExecution] = {}
         self._live: dict[str, dict[str, Any]] = {}
         self._goal_tasks: dict[str, asyncio.Task] = {}
-        self._event_sink: Callable[[dict[str, Any]], Awaitable[None] | None] | None = None
+        self._event_sinks: list[Callable[[dict[str, Any]], Awaitable[None] | None]] = []
         self._closed = False
         self._lock = asyncio.Lock()
 
+    def add_event_sink(self, sink: Callable[[dict[str, Any]], Awaitable[None] | None]) -> Callable[[], None]:
+        """Register an event sink and return a callable that unregisters it."""
+        self._event_sinks.append(sink)
+
+        def remove() -> None:
+            try:
+                self._event_sinks.remove(sink)
+            except ValueError:
+                pass
+
+        return remove
+
     def set_event_sink(self, sink: Callable[[dict[str, Any]], Awaitable[None] | None] | None) -> None:
-        self._event_sink = sink
+        self._event_sinks.clear()
+        if sink is not None:
+            self._event_sinks.append(sink)
+
+    async def _emit_to_event_sinks(self, event: dict[str, Any]) -> None:
+        for sink in list(self._event_sinks):
+            sink_result = sink(event)
+            if inspect.isawaitable(sink_result):
+                await sink_result
 
     async def start_goal_continuation(self, session_id: str) -> bool:
         clean = validate_session_id(session_id)
@@ -447,10 +482,8 @@ class ExecutionCoordinator:
                         self.update_live_event(event_data)
                         if event_data.get("type") == "user_question_requested":
                             self._prepare_user_question(clean, str(event_data.get("tool_call_id") or ""))
-                        if continuation and self._event_sink is not None:
-                            sink_result = self._event_sink(event_data)
-                            if inspect.isawaitable(sink_result):
-                                await sink_result
+                        if continuation:
+                            await self._emit_to_event_sinks(event_data)
                         yield event_data
                 finally:
                     if execution.current_cancel is cancel_source:
@@ -751,7 +784,7 @@ class ExecutionCoordinator:
             self._live.clear()
         if executions:
             await asyncio.gather(*(_close_container(item.container) for item in executions))
-        self._event_sink = None
+        self._event_sinks.clear()
 
 
 class RuntimeWorker:
@@ -823,6 +856,9 @@ class RuntimeWorker:
         result = await self.repository.replay(session_id, start=start, end=end)
         result["live_turn"] = self.execution.live_turn(session_id)
         return result
+
+    async def replay_event_pages(self, session_id: str) -> dict[str, Any]:
+        return await self.repository.replay_event_pages(session_id)
 
     async def close(self) -> None:
         await self.execution.close()

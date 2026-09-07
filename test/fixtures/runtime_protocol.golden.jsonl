@@ -11,3 +11,7 @@
 {"kind":"response","request_id":"file-read-1","result":{"content_base64":"SGVsbG8=","mime":"text/plain","size":5}}
 {"kind":"request","request_id":"file-write-1","method":"file/write","params":{"path":"uploads/note.txt","content_base64":"SGVsbG8="}}
 {"kind":"response","request_id":"file-write-1","result":{"path":"uploads/note.txt","size":5}}
+{"kind":"request","request_id":"subscribe-1","method":"session/subscribe","params":{"session_id":"session-1"}}
+{"kind":"response","request_id":"subscribe-1","result":{"ok":true,"subscribed":["session-1"]}}
+{"kind":"request","request_id":"unsubscribe-1","method":"session/unsubscribe","params":{"session_id":"session-1"}}
+{"kind":"response","request_id":"unsubscribe-1","result":{"ok":true,"subscribed":[]}}

@@ -21,11 +21,20 @@ from agent.runtime.core import InputQueueError
 from agent.runtime.server.stdio import (
     JsonlWriter,
     StdioRuntimeServer,
+    WorkerStdioRuntimeServer,
     configure_stdio_server_signals,
     configure_utf8_stdio,
 )
 from agent.runtime.server.commands import SlashCommandInfo, SlashCommandRouter
-from agent.runtime.server.protocol import CAPABILITIES, CORE_METHODS, RuntimeMethod, event_envelope, validate_request
+from agent.runtime.server.protocol import (
+    CAPABILITIES,
+    CORE_METHODS,
+    DURABLE_EVENT_TYPES,
+    RuntimeMethod,
+    event_envelope,
+    validate_request,
+)
+from agent.runtime.server.replay_events import project_durable_events
 from agent.infrastructure.config import Config
 
 
@@ -220,6 +229,8 @@ def test_golden_event_fixture_matches_python_envelope():
         "file/list",
         "file/read",
         "file/write",
+        "session/subscribe",
+        "session/unsubscribe",
     ]
     assert responses == [
         {
@@ -246,6 +257,16 @@ def test_golden_event_fixture_matches_python_envelope():
             "kind": "response",
             "request_id": "file-write-1",
             "result": {"path": "uploads/note.txt", "size": 5},
+        },
+        {
+            "kind": "response",
+            "request_id": "subscribe-1",
+            "result": {"ok": True, "subscribed": ["session-1"]},
+        },
+        {
+            "kind": "response",
+            "request_id": "unsubscribe-1",
+            "result": {"ok": True, "subscribed": []},
         },
     ]
 
@@ -1414,6 +1435,277 @@ def test_configure_stdio_server_signals_ignores_console_sigint(monkeypatch):
     configure_stdio_server_signals()
 
     assert calls == [(signal.SIGINT, signal.SIG_IGN)]
+
+
+# --- incremental replay cursor (W2) -------------------------------------------
+
+
+class _ReplayExecution:
+    def __init__(self):
+        self.sinks = []
+
+    def add_event_sink(self, sink):
+        self.sinks.append(sink)
+        return lambda: self.sinks.remove(sink)
+
+    def set_event_sink(self, sink):
+        self.sinks.clear()
+        if sink is not None:
+            self.sinks.append(sink)
+
+
+class _ReplayWorker:
+    """Worker fake whose store exposes messages, tool records, and turn state."""
+
+    def __init__(self):
+        self.execution = _ReplayExecution()
+        self.messages: list[dict] = []
+        self.tool_records: list[dict] = []
+        self.turn_state: dict | None = None
+
+    async def replay_event_pages(self, session_id):
+        return {
+            "messages": list(self.messages),
+            "tool_records": list(self.tool_records),
+            "turn_state": self.turn_state,
+            "session_id": session_id,
+        }
+
+
+def _replay_server(worker: _ReplayWorker):
+    payloads: list[dict] = []
+
+    async def send(payload: dict) -> None:
+        payloads.append(payload)
+
+    server = WorkerStdioRuntimeServer(worker)
+    server._writer.send = send
+    server._initialized = True
+    return server, payloads
+
+
+def _append_completed_turn(worker: _ReplayWorker, turn_id: str, text: str) -> None:
+    worker.messages.extend(
+        [
+            {"id": f"user-{turn_id}", "role": "user", "content": f"query {turn_id}"},
+            {
+                "id": f"assistant-{turn_id}",
+                "role": "assistant",
+                "content": text,
+                "tool_calls": [
+                    {
+                        "id": f"call-{turn_id}",
+                        "type": "function",
+                        "function": {"name": "read_file", "arguments": '{"path": "note.txt"}'},
+                    }
+                ],
+            },
+            {"role": "tool", "tool_call_id": f"call-{turn_id}", "content": "record body"},
+        ]
+    )
+    worker.tool_records.append(
+        {
+            "id": f"call-{turn_id}",
+            "name": "read_file",
+            "raw_args": '{"path": "note.txt"}',
+            "model_content": "record body",
+            "ok": True,
+            "ts_start": "2026-01-01T00:00:00+00:00",
+            "ts_end": "2026-01-01T00:00:01.500000+00:00",
+        }
+    )
+    worker.turn_state = {"turn_id": turn_id, "status": "completed", "ts": "2026-01-01T00:00:02+00:00"}
+
+
+def test_replay_after_cursor_zero_returns_full_durable_stream():
+    worker = _ReplayWorker()
+    for index in range(3):
+        _append_completed_turn(worker, f"t{index}", f"reply {index}")
+    server, payloads = _replay_server(worker)
+
+    asyncio.run(
+        server._dispatch(
+            {
+                "kind": "request",
+                "request_id": "replay-0",
+                "method": RuntimeMethod.SESSION_REPLAY,
+                "params": {"session_id": "s1", "after_cursor": 0},
+            }
+        )
+    )
+
+    result = payloads[-1]["result"]
+    assert result["cursor"] == 13
+    events = result["events"]
+    assert [envelope["sequence"] for envelope in events] == list(range(1, 14))
+    assert [envelope["event"]["type"] for envelope in events] == [
+        "turn_started",
+        "tool_requested",
+        "assistant_message_completed",
+        "tool_result",
+    ] * 3 + ["turn_completed"]
+    assert all(envelope["durability"] == "durable" for envelope in events)
+    assert all(envelope["session_id"] == "s1" for envelope in events)
+    assert events[1]["event"]["tool_call_id"] == "call-t0"
+    assert events[1]["event"]["arguments"] == {"path": "note.txt"}
+    assert events[1]["event"]["tool_name"] == "read_file"
+    assert events[3]["event"]["result"] == "record body"
+    assert events[3]["event"]["status"] == "completed"
+    assert events[3]["event"]["duration_ms"] == 1500
+
+
+def test_replay_after_cursor_returns_only_new_events():
+    worker = _ReplayWorker()
+    _append_completed_turn(worker, "t0", "first reply")
+    server, payloads = _replay_server(worker)
+    asyncio.run(
+        server._dispatch(
+            {
+                "kind": "request",
+                "request_id": "replay-old",
+                "method": RuntimeMethod.SESSION_REPLAY,
+                "params": {"session_id": "s1", "after_cursor": 0},
+            }
+        )
+    )
+    assert payloads[-1]["result"]["cursor"] == 5
+
+    _append_completed_turn(worker, "t1", "second reply")
+    asyncio.run(
+        server._dispatch(
+            {
+                "kind": "request",
+                "request_id": "replay-new",
+                "method": RuntimeMethod.SESSION_REPLAY,
+                "params": {"session_id": "s1", "after_cursor": 5},
+            }
+        )
+    )
+
+    result = payloads[-1]["result"]
+    assert result["cursor"] == 9
+    # Envelope sequences are the events' durable ordinals: stable across calls,
+    # independent of any connection's send counter.
+    assert [envelope["sequence"] for envelope in result["events"]] == [6, 7, 8, 9]
+    tool_call_ids = [envelope["event"].get("tool_call_id") for envelope in result["events"]]
+    assert "call-t1" in tool_call_ids
+    assert "call-t0" not in tool_call_ids
+    texts = [envelope["event"].get("text") for envelope in result["events"]]
+    assert "second reply" in texts
+    assert "first reply" not in texts
+
+
+def test_replay_after_cursor_beyond_total_returns_empty_events():
+    worker = _ReplayWorker()
+    _append_completed_turn(worker, "t0", "only reply")
+    server, payloads = _replay_server(worker)
+
+    asyncio.run(
+        server._dispatch(
+            {
+                "kind": "request",
+                "request_id": "replay-far",
+                "method": RuntimeMethod.SESSION_REPLAY,
+                "params": {"session_id": "s1", "after_cursor": 99},
+            }
+        )
+    )
+
+    assert payloads[-1]["result"] == {"events": [], "cursor": 5}
+
+
+@pytest.mark.parametrize(("cursor_value",), [(-1,), (True,), ("3",)])
+def test_replay_after_cursor_rejects_invalid_values(cursor_value):
+    worker = _ReplayWorker()
+    _append_completed_turn(worker, "t0", "only reply")
+    server, payloads = _replay_server(worker)
+
+    asyncio.run(
+        server._dispatch(
+            {
+                "kind": "request",
+                "request_id": "replay-bad",
+                "method": RuntimeMethod.SESSION_REPLAY,
+                "params": {"session_id": "s1", "after_cursor": cursor_value},
+            }
+        )
+    )
+
+    assert payloads[-1]["error"]["type"] == "InvalidRequest"
+
+
+def test_replay_projection_emits_only_durable_event_types():
+    worker = _ReplayWorker()
+    worker.messages = [
+        {"role": "user", "content": "checkpoint", "meta": {"kind": "goal_checkpoint"}},
+        {"role": "user", "content": "boundary", "meta": {"kind": "compact_boundary"}},
+        {"id": "u1", "role": "user", "content": "hello"},
+        {"id": "a1", "role": "assistant", "content": "hi there"},
+    ]
+    worker.turn_state = {"turn_id": "t1", "status": "completed"}
+    server, payloads = _replay_server(worker)
+
+    asyncio.run(
+        server._dispatch(
+            {
+                "kind": "request",
+                "request_id": "replay-durable",
+                "method": RuntimeMethod.SESSION_REPLAY,
+                "params": {"session_id": "s1", "after_cursor": 0},
+            }
+        )
+    )
+
+    events = payloads[-1]["result"]["events"]
+    assert [envelope["event"]["type"] for envelope in events] == [
+        "turn_started",
+        "assistant_message_completed",
+        "turn_completed",
+    ]
+    assert all(envelope["durability"] == "durable" for envelope in events)
+    assert all(envelope["event"]["type"] in DURABLE_EVENT_TYPES for envelope in events)
+
+
+def test_project_durable_events_maps_raw_meta_shapes_and_failures():
+    events = project_durable_events(
+        [
+            {"role": "user", "content": "go", "meta": {"turn_id": "turn-9"}},
+            {
+                "role": "assistant",
+                "content": "calling",
+                "meta": {"turn_id": "turn-9", "tool_calls": [{"id": "call-1", "name": "bash", "raw_args": "not-json"}]},
+            },
+            {"role": "tool", "tool_call_id": "call-1", "content": ""},
+        ],
+        [{"id": "call-1", "name": "bash", "ok": False, "error_type": "BashError", "model_content": "boom"}],
+        {"turn_id": "turn-9", "status": "failed", "error": "model exploded"},
+        "s1",
+    )
+
+    assert events[0] == {"type": "turn_started", "session_id": "s1", "turn_id": "turn-9", "user_message_chars": 2}
+    assert events[1] == {
+        "type": "tool_requested",
+        "session_id": "s1",
+        "turn_id": "turn-9",
+        "tool_call_id": "call-1",
+        "tool_name": "bash",
+        "arguments": {},
+    }
+    assert events[2] == {
+        "type": "assistant_message_completed",
+        "session_id": "s1",
+        "turn_id": "turn-9",
+        "text": "calling",
+    }
+    assert events[3]["status"] == "error"
+    assert events[3]["result"] == "boom"
+    assert "duration_ms" not in events[3]
+    assert events[4] == {
+        "type": "turn_failed",
+        "session_id": "s1",
+        "turn_id": "turn-9",
+        "reason": "model exploded",
+    }
 
 
 def test_app_server_process_serves_git_backed_commands_and_exits_after_shutdown(tmp_path):

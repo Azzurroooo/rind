@@ -22,6 +22,7 @@ from agent.runtime.server.commands import SlashCommandContext, SlashCommandResul
 from agent.runtime.server.commands.model_control import set_active_model, set_active_reasoning_effort
 from agent.runtime.server.resume_preview import render_resume_preview
 from agent.runtime.server.files import FileMethodError, file_list, file_read, file_write
+from agent.runtime.server.replay_events import project_durable_events
 from agent.runtime.server.protocol import (
     CAPABILITIES,
     CORE_METHODS,
@@ -899,6 +900,11 @@ class _WorkerWriter:
                 payload = {**payload, "sequence": self._sequence}
             await self._writer.send(payload)
 
+    def close(self) -> None:
+        close = getattr(self._writer, "close", None)
+        if callable(close):
+            close()
+
 
 class _RepositoryGoalOps:
     """Runtime-shaped goal operations backed by the repository for inactive sessions."""
@@ -948,9 +954,23 @@ class WorkerStdioRuntimeServer:
         self._stopping = False
         self._shutdown_request: dict[str, Any] | None = None
         self._shutdown_response_sent = False
-        set_event_sink = getattr(self._worker.execution, "set_event_sink", None)
-        if callable(set_event_sink):
-            set_event_sink(self._send_event)
+        self._subscribed: set[str] = set()
+        self._remove_event_sink: Callable[[], None] | None = None
+        add_event_sink = getattr(self._worker.execution, "add_event_sink", None)
+        if callable(add_event_sink):
+            self._remove_event_sink = add_event_sink(self._send_event)
+        else:
+            set_event_sink = getattr(self._worker.execution, "set_event_sink", None)
+            if callable(set_event_sink):
+                set_event_sink(self._send_event)
+
+    def close(self) -> None:
+        """Unregister this connection's sink and close the writer."""
+        remover = self._remove_event_sink
+        self._remove_event_sink = None
+        if remover is not None:
+            remover()
+        self._writer.close()
 
     async def run(self) -> int:
         self._start_stdin_pump()
@@ -1058,6 +1078,9 @@ class WorkerStdioRuntimeServer:
             if method == RuntimeMethod.SESSION_SWITCH:
                 await self._switch_session(request)
                 return
+            if method in {RuntimeMethod.SESSION_SUBSCRIBE, RuntimeMethod.SESSION_UNSUBSCRIBE}:
+                await self._subscription_request(request)
+                return
             if method == RuntimeMethod.MODEL_LIST:
                 await self._list_models(request)
                 return
@@ -1109,6 +1132,9 @@ class WorkerStdioRuntimeServer:
 
     async def _initialize(self, request: dict[str, Any]) -> None:
         info = await self._worker.initialize()
+        session_id = str(info.get("session_id") or "")
+        if session_id:
+            self._subscribed.add(session_id)
         result = {
             "session_id": info["session_id"],
             "draft": False,
@@ -1155,6 +1181,8 @@ class WorkerStdioRuntimeServer:
         transient_system_messages = params.get("transient_system_messages")
         if not isinstance(transient_system_messages, list):
             transient_system_messages = None
+        # Subscribe before the turn runs so its events are never dropped.
+        self._subscribed.add(session_id)
         turn_session_id = ""
         turn_id = ""
         async for event in self._worker.execution.run_turn(
@@ -1265,6 +1293,9 @@ class WorkerStdioRuntimeServer:
             await self._respond_error(request, "workspace_root must be a non-empty string.", "InvalidRequest")
             return
         info = await self._worker.create_session(workspace_root)
+        created_session_id = str(info.get("session_id") or "")
+        if created_session_id:
+            self._subscribed.add(created_session_id)
         await self._respond(request, info)
 
     async def _switch_session(self, request: dict[str, Any]) -> None:
@@ -1272,7 +1303,28 @@ class WorkerStdioRuntimeServer:
         if session_id is None:
             return
         info = await self._worker.session(session_id)
+        self._subscribed.add(session_id)
         await self._respond(request, info)
+
+    async def _subscription_request(self, request: dict[str, Any]) -> None:
+        method = str(request.get("method") or "")
+        params = request.get("params") if isinstance(request.get("params"), dict) else {}
+        raw_session_id = params.get("session_id")
+        if not isinstance(raw_session_id, str) or not raw_session_id.strip():
+            await self._respond_error(request, f"{method} requires session_id.", "InvalidRequest")
+            return
+        try:
+            session_id = validate_session_id(raw_session_id)
+        except ValueError as exc:
+            await self._respond_error(request, str(exc), "InvalidRequest")
+            return
+        # Mirror session/switch: unknown sessions surface as SessionNotFound.
+        await self._worker.session(session_id)
+        if method == RuntimeMethod.SESSION_SUBSCRIBE:
+            self._subscribed.add(session_id)
+        else:
+            self._subscribed.discard(session_id)
+        await self._respond(request, {"ok": True, "subscribed": sorted(self._subscribed)})
 
     async def _list_models(self, request: dict[str, Any]) -> None:
         params = request.get("params") if isinstance(request.get("params"), dict) else {}
@@ -1304,6 +1356,17 @@ class WorkerStdioRuntimeServer:
 
     async def _replay(self, request: dict[str, Any]) -> None:
         params = request.get("params") if isinstance(request.get("params"), dict) else {}
+        after_cursor = params.get("after_cursor")
+        if "after_cursor" in params:
+            if isinstance(after_cursor, bool) or not isinstance(after_cursor, int) or after_cursor < 0:
+                await self._respond_error(
+                    request,
+                    "session/replay after_cursor must be a non-negative integer.",
+                    "InvalidRequest",
+                )
+                return
+            await self._replay_event_pages(request, after_cursor)
+            return
         session_id = await self._required_session_id(request)
         if session_id is None:
             return
@@ -1315,6 +1378,21 @@ class WorkerStdioRuntimeServer:
         else:
             result = await self._worker.repository.replay(session_id, start=start, end=end)
         await self._respond(request, result)
+
+    async def _replay_event_pages(self, request: dict[str, Any], after_cursor: int) -> None:
+        session_id = await self._required_session_id(request)
+        if session_id is None:
+            return
+        loader = getattr(self._worker, "replay_event_pages", None)
+        if not callable(loader):
+            await self._respond_error(request, "Incremental replay is unavailable.", "UnsupportedOperation")
+            return
+        materials = await loader(session_id)
+        messages = materials.get("messages") if isinstance(materials.get("messages"), list) else []
+        tool_records = materials.get("tool_records") if isinstance(materials.get("tool_records"), list) else []
+        events = project_durable_events(messages, tool_records, materials.get("turn_state"), session_id)
+        envelopes = [event_envelope(event, index + 1) for index, event in enumerate(events)]
+        await self._respond(request, {"events": envelopes[after_cursor:], "cursor": len(events)})
 
     async def _file_request(self, request: dict[str, Any]) -> None:
         params = request.get("params") if isinstance(request.get("params"), dict) else {}
@@ -1514,6 +1592,9 @@ class WorkerStdioRuntimeServer:
         return True
 
     async def _send_event(self, event: dict[str, Any]) -> None:
+        event_session_id = str(event.get("session_id") or "")
+        if event_session_id and event_session_id not in self._subscribed:
+            return
         await self._writer.send(event_envelope(event, 0))
 
     async def _ingest_line(self, line: str) -> None:
