@@ -26,7 +26,12 @@
   --mono: "DM Mono", Consolas, monospace;
   --t-fast: 120ms;
   --t-base: 150ms;
+  --t-slow: 280ms; /* drawer slide, ≤300ms (master plan §6.5) */
   --ease: cubic-bezier(0.2, 0, 0, 1);
+  /* Mobile drawer tokens (§6.2). The surface ships dark-only, so these are
+     the dark-theme values; a future light theme only re-tunes them here. */
+  --scrim: #00000080;
+  --drawer-width: 320px;
 }
 
 * { box-sizing: border-box; }
@@ -36,7 +41,9 @@ button, input, textarea, select { font: inherit; }
 button { color: inherit; }
 button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-visible { outline: 2px solid var(--cyan); outline-offset: 2px; }
 
-.app-shell { height: 100vh; display: flex; flex-direction: column; overflow: hidden; background: var(--bg); }
+/* 100dvh keeps the shell glued to the visual viewport so the composer rides
+   above the mobile keyboard (with interactive-widget=resizes-content). */
+.app-shell { height: 100vh; height: 100dvh; display: flex; flex-direction: column; overflow: hidden; background: var(--bg); }
 .topbar { min-height: 72px; display: flex; align-items: center; gap: 24px; padding: 0 28px; border-bottom: 1px solid var(--line); background: #0b1219; }
 .brand-lockup { display: flex; align-items: center; gap: 11px; min-width: 195px; }
 .brand-mark { width: 34px; height: 34px; }
@@ -50,6 +57,11 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .connection-dot.pending { background: var(--amber); animation: pulse 1.2s ease-in-out infinite; }
 .service-state { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 12px; white-space: nowrap; }
 .service-state svg { color: var(--cyan); }
+
+/* Compact nav row for narrow screens: hamburger | title | inspector toggle.
+   Desktop never renders it visually; the ≤900px media query shows it. */
+.mobile-header { display: none; align-items: center; justify-content: space-between; gap: 10px; min-height: 52px; padding: 0 12px; border-bottom: 1px solid var(--line); background: var(--surface); }
+.mobile-header-title { font-weight: 800; letter-spacing: -.02em; }
 
 .workspace-grid { flex: 1; min-height: 0; display: grid; grid-template-columns: 236px minmax(0, 1fr) 290px; }
 .session-rail, .inspector { min-height: 0; background: #0c141c; }
@@ -240,7 +252,7 @@ h1, h2, p { margin: 0; }
 .strip-retry:active { transform: scale(.96); }
 @keyframes strip-pulse { 50% { opacity: .55; } }
 
-.login-screen { height: 100vh; display: grid; place-items: center; padding: 20px; background: var(--bg); }
+.login-screen { height: 100vh; height: 100dvh; display: grid; place-items: center; padding: 20px; background: var(--bg); }
 .login-card { width: min(400px, 100%); display: flex; flex-direction: column; gap: 14px; padding: 28px 24px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); box-shadow: 0 24px 70px #00000059; }
 .login-card .brand-lockup { margin-bottom: 2px; }
 .login-label { color: var(--muted); font: 10px var(--mono); text-transform: uppercase; letter-spacing: .08em; }
@@ -302,19 +314,45 @@ h1, h2, p { margin: 0; }
   .inspector { display: none; }
 }
 
-@media (max-width: 760px) {
-  .topbar { min-height: 64px; gap: 12px; padding: 0 14px; }
-  .brand-lockup { min-width: auto; }
-  .brand-subtitle, .service-state, .connection-label { display: none; }
-  .brand-mark { width: 31px; height: 31px; }
-  .connection-control { min-width: 0; height: 34px; }
+/* ---- ≤900px: single column, drawers (master plan §6.2 移动端) ----
+   SessionRail slides in from the left edge, Inspector from the right; the
+   composer stays pinned to the bottom of the flow. Panels are transform-only
+   (no layout shift, scroll untouched), backdrop tap closes, and the slide
+   dies under prefers-reduced-motion via the global override. */
+@media (max-width: 900px) {
+  .mobile-header { display: flex; }
+  .topbar { min-height: 52px; }
+  .topbar .brand-lockup { display: none; }
   .workspace-grid { display: flex; flex-direction: column; }
-  .session-rail { max-height: 245px; padding: 13px 12px 12px; border-right: 0; border-bottom: 1px solid var(--line); }
-  .rail-heading h2 { margin-top: 5px; font-size: 15px; }
-  .rail-rule { margin: 11px 0 7px; }
-  .session-list { max-height: 96px; }
-  .session-item { padding: 7px 8px; }
-  .rail-footer { display: none; }
+  .main-column { flex: 1; }
+  .session-rail, .inspector {
+    position: fixed;
+    top: 0;
+    bottom: 0;
+    z-index: 30;
+    width: var(--drawer-width);
+    max-width: 86vw;
+    padding-top: max(25px, env(safe-area-inset-top));
+    overflow-y: auto;
+    transition: transform var(--t-slow) var(--ease);
+  }
+  .session-rail { left: 0; transform: translateX(-102%); border-right: 1px solid var(--line); }
+  .inspector { right: 0; display: block; transform: translateX(102%); border-left: 1px solid var(--line); }
+  .session-rail.drawer-open, .inspector.drawer-open { transform: translateX(0); }
+  .drawer-backdrop { position: fixed; inset: 0; z-index: 25; background: var(--scrim); }
+  /* iOS zooms focused inputs set below 16px — keep every field at 16px. */
+  .composer-shell textarea, .question-custom input, .login-input-row input, .workspace-input-row input { font-size: 16px; }
+  /* The desktop reading measure gives way; content goes full-bleed. */
+  .message, .tool-stack, .plan-block, .thinking-line { max-width: 100%; }
+  .composer-shell, .composer-status, .empty-conversation { max-width: 100%; }
+  /* Long tables scroll inside their container instead of the page. */
+  .markdown-content table { display: block; max-width: 100%; overflow-x: auto; }
+}
+
+@media (max-width: 760px) {
+  .topbar { min-height: 48px; gap: 12px; padding: 0 14px; }
+  .service-state, .connection-label { display: none; }
+  .connection-control { min-width: 0; height: 34px; }
   .conversation-header { align-items: center; padding: 19px 16px 15px; }
   .conversation-header h1 { font-size: 18px; }
   .transcript { padding: 21px 16px 10px; }
@@ -327,6 +365,25 @@ h1, h2, p { margin: 0; }
   .composer-status { font-size: 9px; }
   .composer-status > span:last-child { display: none; }
   .connection-strip-chip { top: 8px; right: 12px; }
+}
+
+/* ---- coarse pointers: touch targets ≥44px (§6.5) ---- */
+@media (pointer: coarse) {
+  .icon-button, .icon-button.subtle { width: 44px; height: 44px; }
+  .session-delete { flex-basis: 44px; }
+  .send-button { width: 44px; height: 44px; }
+  .stop-button, .secondary-action { min-height: 44px; }
+  .tool-title, .tool-expand-all { min-height: 44px; }
+  .slash-suggestions button { min-height: 44px; }
+  .session-confirm button { min-width: 44px; min-height: 44px; }
+  .session-main { padding: 15px 6px 15px 9px; }
+  .strip-retry, .notif-button { min-height: 44px; }
+  .inspector-section select { height: 44px; }
+  .workspace-input-row { min-height: 44px; }
+  .file-tree-header, .tree-row, .tree-retry { min-height: 44px; }
+  .tree-preview-close, .chip-retry, .chip-delete { width: 44px; height: 44px; }
+  .login-input-row { height: 50px; }
+  .login-submit { width: 44px; height: 44px; flex-basis: 44px; }
 }
 
 @media (prefers-reduced-motion: reduce) {

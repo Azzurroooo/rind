@@ -25,7 +25,12 @@ export function SessionRail({
   onSelect,
   onDelete,
   onEnableNotifications,
+  // Mobile drawer wiring (master plan §6.2): App passes the panel id,
+  // drawer-open/closed class and aria-hidden/inert state; empty on desktop.
+  panelAttrs = {},
+  panelRef,
 }) {
+  const { className: panelClassName = "", ...restPanelAttrs } = panelAttrs;
   const [confirmingId, setConfirmingId] = useState("");
   const [deleteError, setDeleteError] = useState({});
 
@@ -41,7 +46,7 @@ export function SessionRail({
   }
 
   return (
-    <aside className="session-rail">
+    <aside ref={panelRef} className={`session-rail ${panelClassName}`.trim()} tabIndex={-1} {...restPanelAttrs}>
       <div className="rail-heading">
         <div>
           <span className="eyebrow">WORKSPACE</span>

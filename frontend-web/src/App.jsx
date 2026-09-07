@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
+import { Menu, PanelRight } from "lucide-react";
 import { ConnectionBar } from "./components/ConnectionBar.jsx";
 import { Composer } from "./components/Composer.jsx";
 import { Conversation } from "./components/Conversation.jsx";
@@ -15,6 +16,17 @@ import { dropCredentials, fetchTicket, hasStoredCredential, loginErrorMessage, r
 
 const REASONING_EFFORTS = ["low", "medium", "high", "xhigh", "max"];
 const CATCH_UP_CHUNK = 50;
+// ≤900px the three desktop columns collapse into one; SessionRail and
+// Inspector become edge slide-out drawers (master plan §6.2 移动端).
+const NARROW_QUERY = "(max-width: 900px)";
+
+function readNarrowViewport() {
+  try {
+    return Boolean(window.matchMedia?.(NARROW_QUERY)?.matches);
+  } catch {
+    return false;
+  }
+}
 
 export default function App() {
   const [endpoint, setEndpoint] = useState(initialRuntimeUrl);
@@ -36,6 +48,13 @@ export default function App() {
   const [busySession, setBusySession] = useState(false);
   const [unreadIds, setUnreadIds] = useState(() => new Set());
   const [notificationPermission, setNotificationPermission] = useState(() => currentNotificationPermission());
+  const [narrow, setNarrow] = useState(readNarrowViewport);
+  const [railOpen, setRailOpen] = useState(false);
+  const [inspectorOpen, setInspectorOpen] = useState(false);
+  const railPanelRef = useRef(null);
+  const inspectorPanelRef = useRef(null);
+  const railToggleRef = useRef(null);
+  const inspectorToggleRef = useRef(null);
   const bootstrappedRef = useRef(false);
   const catchUpRef = useRef(false);
   const initializingRef = useRef(false);
@@ -81,6 +100,62 @@ export default function App() {
   const expireQuestion = useCallback((key) => {
     dispatchConversation({ kind: "question_expired", key: String(key || "") });
   }, []);
+
+  // ---- mobile drawers (master plan §6.2) ----
+  // The two drawers are exclusive; toggles exist only in the narrow header
+  // row (CSS), and on desktop an open flag would be meaningless — so opening
+  // is a no-op above the breakpoint, and leaving the breakpoint clears it.
+  const openDrawer = useCallback((name) => {
+    if (!narrow) return;
+    setRailOpen(name === "rail");
+    setInspectorOpen(name === "inspector");
+  }, [narrow]);
+
+  const closeDrawers = useCallback(() => {
+    setRailOpen(false);
+    setInspectorOpen(false);
+    const opener = railOpen ? railToggleRef.current : inspectorOpen ? inspectorToggleRef.current : null;
+    opener?.focus(); // Esc / backdrop always hand focus back to the toggle
+  }, [railOpen, inspectorOpen]);
+
+  useEffect(() => {
+    if (typeof window.matchMedia !== "function") return undefined;
+    const media = window.matchMedia(NARROW_QUERY);
+    if (!media) return undefined;
+    const apply = (event) => {
+      const nextNarrow = Boolean(event?.matches);
+      setNarrow(nextNarrow);
+      if (!nextNarrow) {
+        setRailOpen(false);
+        setInspectorOpen(false);
+      }
+    };
+    if (typeof media.addEventListener === "function") {
+      media.addEventListener("change", apply);
+      return () => media.removeEventListener("change", apply);
+    }
+    media.addListener(apply);
+    return () => media.removeListener(apply);
+  }, []);
+
+  // Focus moves into the drawer when it opens; the panel itself is not a
+  // dialog (nothing modal here), it just receives the reading focus.
+  useEffect(() => {
+    if (!narrow) return;
+    if (railOpen) railPanelRef.current?.focus();
+    else if (inspectorOpen) inspectorPanelRef.current?.focus();
+  }, [narrow, railOpen, inspectorOpen]);
+
+  useEffect(() => {
+    if (!narrow || (!railOpen && !inspectorOpen)) return undefined;
+    const onKeyDown = (event) => {
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      closeDrawers();
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [narrow, railOpen, inspectorOpen, closeDrawers]);
 
   const handleEvent = useCallback((message) => {
     const event = message?.event;
@@ -514,6 +589,16 @@ export default function App() {
     }
   }
 
+  // Selecting a session is the rail drawer's route-relevant action: the
+  // drawer slides away while the session loads — no modal, no draft reset.
+  async function handleSelectSession(sessionId) {
+    if (narrow) {
+      setRailOpen(false);
+      setInspectorOpen(false);
+    }
+    await loadSession(sessionId, true);
+  }
+
   // Inline delete from the SessionRail (verification J7). Server errors
   // (InvalidRequest for the current session, TurnActive, SessionNotFound)
   // bubble to the rail and render inline next to the item.
@@ -553,6 +638,22 @@ export default function App() {
 
   const view = conversationView(conversation);
   const inspectorConnection = connection.phase === "online" || connection.phase === "syncing" ? "connected" : "offline";
+  // Off-canvas panels are hidden from AT and untabbable only below the
+  // breakpoint; on desktop the columns are plain always-visible panels.
+  const railHidden = narrow && !railOpen;
+  const inspectorHidden = narrow && !inspectorOpen;
+  const railPanelAttrs = {
+    id: "session-rail-panel",
+    className: narrow ? (railOpen ? "drawer-open" : "drawer-closed") : "",
+    "aria-hidden": railHidden || undefined,
+    inert: railHidden ? "" : undefined,
+  };
+  const inspectorPanelAttrs = {
+    id: "inspector-panel",
+    className: narrow ? (inspectorOpen ? "drawer-open" : "drawer-closed") : "",
+    "aria-hidden": inspectorHidden || undefined,
+    inert: inspectorHidden ? "" : undefined,
+  };
 
   if (connection.phase === "login") {
     return <LoginGate onSubmit={handleLogin} busy={authBusy} error={connection.message} initialToken={loginToken} />;
@@ -560,6 +661,14 @@ export default function App() {
 
   return <div className="app-shell">
     <ConnectionBar phase={connection.phase} syncRemaining={connection.syncRemaining} syncTotal={connection.syncTotal} url={endpoint} onChangeUrl={setEndpoint} onReconnect={reconnect} onLogout={logout} />
+    {/* Compact nav row — display:none on desktop (styles.css), the only
+        place the two drawer toggles exist. */}
+    <div className="mobile-header">
+      <button ref={railToggleRef} type="button" className="icon-button" aria-label="会话列表" aria-expanded={railOpen} aria-controls="session-rail-panel" onClick={() => openDrawer("rail")}><Menu size={19} /></button>
+      <span className="mobile-header-title">Rind</span>
+      <button ref={inspectorToggleRef} type="button" className="icon-button" aria-label="会话状态" aria-expanded={inspectorOpen} aria-controls="inspector-panel" onClick={() => openDrawer("inspector")}><PanelRight size={19} /></button>
+    </div>
+    {narrow && (railOpen || inspectorOpen) && <div className="drawer-backdrop" onClick={closeDrawers} aria-hidden="true" />}
     <div className="workspace-grid">
       <SessionRail
         sessions={sessions}
@@ -575,16 +684,18 @@ export default function App() {
         onWorkspaceDraftChange={setWorkspaceDraft}
         onWorkspaceApply={selectWorkspace}
         onNew={createSession}
-        onSelect={(id) => loadSession(id, true)}
+        onSelect={handleSelectSession}
         onDelete={deleteSession}
         onEnableNotifications={enableNotifications}
+        panelRef={railPanelRef}
+        panelAttrs={railPanelAttrs}
       />
       <main className="main-column">
         <Conversation messages={view.messages} draft={view.draft} plan={view.plan} active={view.active} onCancel={cancelTurn} onAnswer={answerQuestion} onExpire={expireQuestion} />
         {/* Invariant: composer input is never disabled by connection state. */}
         <Composer value={input} onChange={setInput} onSubmit={submit} active={view.active} onCancel={cancelTurn} onUpload={uploadAttachment} />
       </main>
-      <Inspector info={info} stats={stats} goal={goal} plan={view.plan} models={info.models || []} effort={info.reasoning_effort || ""} connection={inspectorConnection} onModel={setModel} onEffort={setEffort} onRefreshModels={() => refreshModels(info.session_id)} onCompact={compact} compacting={compacting} currentModel={currentModel} />
+      <Inspector info={info} stats={stats} goal={goal} plan={view.plan} models={info.models || []} effort={info.reasoning_effort || ""} connection={inspectorConnection} onModel={setModel} onEffort={setEffort} onRefreshModels={() => refreshModels(info.session_id)} onCompact={compact} compacting={compacting} currentModel={currentModel} panelRef={inspectorPanelRef} panelAttrs={inspectorPanelAttrs} />
     </div>
   </div>;
 }

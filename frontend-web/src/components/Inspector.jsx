@@ -1,10 +1,13 @@
 import { Activity, BrainCircuit, CircleGauge, Cloud, GitBranch, Goal, Server, Sparkles } from "lucide-react";
 
-export function Inspector({ info, stats, goal, plan, models, effort, connection, onModel, onEffort, onRefreshModels, onCompact, compacting, currentModel }) {
+export function Inspector({ info, stats, goal, plan, models, effort, connection, onModel, onEffort, onRefreshModels, onCompact, compacting, currentModel, panelAttrs = {}, panelRef }) {
+  // Mobile drawer wiring (master plan §6.2): panelAttrs carries the drawer
+  // class and aria/inert state below the breakpoint; empty on desktop.
+  const { className: panelClassName = "", ...restPanelAttrs } = panelAttrs;
   const usage = Number(stats?.context_usage_percent || 0);
   const modelValue = currentModel || info?.model || info?.default_model || "";
   const modelOptions = Array.from(new Set([modelValue, ...models].filter(Boolean)));
-  return <aside className="inspector">
+  return <aside ref={panelRef} className={`inspector ${panelClassName}`.trim()} tabIndex={-1} {...restPanelAttrs}>
     <div className="inspector-heading"><div><span className="eyebrow">RUNTIME</span><h2>Session state</h2></div><span className="live-pulse" /></div>
     <div className="state-list">
       <StateRow icon={<Server size={15} />} label="Worker" value={connection === "connected" ? "online" : "offline"} tone={connection === "connected" ? "success" : ""} />
