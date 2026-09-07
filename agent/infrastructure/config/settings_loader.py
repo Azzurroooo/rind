@@ -67,6 +67,7 @@ DEFAULT_SETTINGS_TEMPLATE = {
     "apiKey": "",
     "baseUrl": "",
     "reasoningEffort": "xhigh",
+    "serverToken": "",
 }
 
 
@@ -79,6 +80,7 @@ class AppSettings:
     base_url: str
     reasoning_effort: str
     user_agent: str = DEFAULT_USER_AGENT
+    server_token: str = ""
 
 
 def validate_settings(settings: AppSettings) -> None:
@@ -126,6 +128,7 @@ def _build_settings(settings_path: Path, data: dict[str, Any]) -> AppSettings:
         base_url=_string(data, "baseUrl") or DEFAULT_BASE_URL,
         reasoning_effort=_string(data, "reasoningEffort"),
         user_agent=DEFAULT_USER_AGENT,
+        server_token=_string(data, "serverToken"),
     )
 
 

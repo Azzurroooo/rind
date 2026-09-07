@@ -65,6 +65,14 @@ def _write_startup_error(label: str, exc: Exception, debug: bool) -> None:
         traceback.print_exception(exc, file=sys.stderr)
 
 
+def _worker_server_token(workspace_root: str) -> str:
+    """Resolve serverToken without strict settings validation; worker mode must still start."""
+    try:
+        return Config.reload(workspace_root).server_token.strip()
+    except Exception:
+        return ""
+
+
 async def async_main(argv: list[str] | None = None, *, server_class: type[Any]) -> int:
     args = build_parser().parse_args(argv)
     if args.trace_llm:
@@ -96,13 +104,19 @@ async def async_main(argv: list[str] | None = None, *, server_class: type[Any]) 
                 enable_goal=True,
                 enable_user_question=not args.no_user_question,
             )
+            network_kwargs: dict[str, Any] = {}
+            if getattr(server_class, "network_mode", False):
+                network_kwargs.update({"host": args.host, "port": args.port})
+                token = os.environ.get("RIND_SERVER_TOKEN") or _worker_server_token(workspace_root)
+                if token.strip():
+                    network_kwargs["server_token"] = token.strip()
             server = server_class(
                 worker,
                 debug=args.debug,
                 background_list=background_list,
                 background_output=background_output,
                 goal_enabled=True,
-                **({"host": args.host, "port": args.port} if getattr(server_class, "network_mode", False) else {}),
+                **network_kwargs,
             )
             server_started = True
             try:

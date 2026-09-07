@@ -48,6 +48,32 @@ def test_load_settings_reads_user_json(tmp_path, monkeypatch):
     assert settings.reasoning_effort == "xhigh"
 
 
+def test_load_settings_reads_server_token(tmp_path, monkeypatch):
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    write_settings(
+        tmp_path,
+        {
+            "model": "gpt-5.5",
+            "apiKey": "secret-key",
+            "baseUrl": "https://openai945.cn/",
+            "serverToken": " relay-secret ",
+        },
+    )
+
+    settings = load_settings()
+
+    assert settings.server_token == "relay-secret"
+
+
+def test_load_settings_defaults_server_token_to_empty(tmp_path, monkeypatch):
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    write_settings(tmp_path, {"model": "gpt-5.5", "apiKey": "secret-key"})
+
+    settings = load_settings()
+
+    assert settings.server_token == ""
+
+
 def test_load_settings_prefers_complete_project_json(tmp_path, monkeypatch):
     monkeypatch.setattr(Path, "home", lambda: tmp_path / "home")
     user_home = tmp_path / "home"

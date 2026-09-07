@@ -19,6 +19,7 @@ services:
     environment:
       HOME: /root
       RIND_HOME: /root/.rind
+      RIND_SERVER_TOKEN: ${RIND_SERVER_TOKEN:?set RIND_SERVER_TOKEN}
     volumes:
       - ${RIND_WORKSPACE:-.}:/workspace
       - ${RIND_HOME:-./.rind}:/root/.rind
