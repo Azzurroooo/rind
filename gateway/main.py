@@ -13,6 +13,7 @@ import logging
 import sys
 from pathlib import Path
 
+from .channels import build_channel
 from .config import ConfigError, GatewayConfig, load_config, resolve_config_path
 from .pump import TurnPump
 from .router import SessionRouter
@@ -55,8 +56,18 @@ async def _run(config: GatewayConfig, runtime_dir: Path, pairing: PairingStore) 
             await worker.subscribe(record.session_id)
         except WorkerError as exc:
             logger.warning("gateway: resubscribe of %s failed: %s", key, exc)
-    for channel_id in config.channels:  # WP4 registers real adapters here
-        logger.warning("gateway: no adapter installed for channel %s; channel disabled", channel_id)
+    uploads_root = Path(config.workspace) / config.uploads_dir
+    for channel_id, channel_config in config.channels.items():
+        channel = build_channel(channel_id, channel_config, uploads_root)
+        if channel is None:  # registry already logged why (unknown id / SDK / config)
+            continue
+        pump.register_channel(channel)
+        try:
+            # The pump is the adapters' sink: they normalize SDK events into
+            # InboundMessage and call back through pump.inbound (§8).
+            await channel.start(pump)
+        except Exception as exc:  # §1: one failing channel never stops the process
+            logger.warning("gateway: channel %s failed to start; disabled: %s", channel_id, exc)
     scan = asyncio.create_task(pump.run(), name="gateway-scan")
     try:
         await scan
