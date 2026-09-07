@@ -5,3 +5,9 @@
 {"kind":"event","method":"session/update","sequence":5,"durability":"durable","session_id":"session-1","turn_id":"turn-1","event":{"type":"turn_completed","ts":"2026-01-01T00:00:04Z","event_id":"event-5","session_id":"session-1","turn_id":"turn-1"}}
 {"kind":"response","request_id":"turn-1","result":{"ok":true,"session_id":"session-1","turn_id":"turn-1"}}
 {"kind":"response","request_id":"interrupt-2","error":{"type":"TurnNotActive","message":"No active turn to interrupt."}}
+{"kind":"request","request_id":"file-list-1","method":"file/list","params":{"path":"uploads"}}
+{"kind":"response","request_id":"file-list-1","result":{"entries":[{"name":"note.txt","size":5,"type":"file"}]}}
+{"kind":"request","request_id":"file-read-1","method":"file/read","params":{"path":"uploads/note.txt"}}
+{"kind":"response","request_id":"file-read-1","result":{"content_base64":"SGVsbG8=","mime":"text/plain","size":5}}
+{"kind":"request","request_id":"file-write-1","method":"file/write","params":{"path":"uploads/note.txt","content_base64":"SGVsbG8="}}
+{"kind":"response","request_id":"file-write-1","result":{"path":"uploads/note.txt","size":5}}

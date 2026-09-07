@@ -10,6 +10,8 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
+from agent.version import __version__
+
 import main as rind_main
 
 
@@ -95,7 +97,7 @@ def test_app_server_stdio_subprocess_smoke(tmp_path):
     assert initialize["kind"] == "response"
     assert initialize["request_id"] == "initialize-1"
     assert initialize["result"]["protocol_version"] == "2"
-    assert initialize["result"]["version"] == "0.6.2"
+    assert initialize["result"]["version"] == __version__
     assert shutdown == {
         "kind": "response",
         "request_id": "shutdown-1",

@@ -14,6 +14,8 @@ os.chdir(PROJECT_ROOT)
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
+from agent.version import __version__
+
 from agent.domain.cancellation import CancellationTokenSource
 from agent.runtime.core import InputQueueError
 from agent.runtime.server.stdio import (
@@ -209,9 +211,16 @@ def test_golden_event_fixture_matches_python_envelope():
     messages = [json.loads(line) for line in fixture.read_text(encoding="utf-8").splitlines()]
     events = [message for message in messages if message["kind"] == "event"]
     responses = [message for message in messages if message["kind"] == "response"]
+    requests = [message for message in messages if message["kind"] == "request"]
 
     assert [event_envelope(message["event"], message["sequence"]) for message in events] == events
     assert [message["sequence"] for message in events] == [1, 2, 3, 4, 5]
+    assert [validate_request(request) for request in requests] == [None] * len(requests)
+    assert [request["method"] for request in requests] == [
+        "file/list",
+        "file/read",
+        "file/write",
+    ]
     assert responses == [
         {
             "kind": "response",
@@ -222,6 +231,21 @@ def test_golden_event_fixture_matches_python_envelope():
             "kind": "response",
             "request_id": "interrupt-2",
             "error": {"type": "TurnNotActive", "message": "No active turn to interrupt."},
+        },
+        {
+            "kind": "response",
+            "request_id": "file-list-1",
+            "result": {"entries": [{"name": "note.txt", "size": 5, "type": "file"}]},
+        },
+        {
+            "kind": "response",
+            "request_id": "file-read-1",
+            "result": {"content_base64": "SGVsbG8=", "mime": "text/plain", "size": 5},
+        },
+        {
+            "kind": "response",
+            "request_id": "file-write-1",
+            "result": {"path": "uploads/note.txt", "size": 5},
         },
     ]
 
@@ -362,7 +386,7 @@ def test_initialize_response_includes_resume_preview_when_history_exists(capsys)
     result = message["result"]
     assert message["request_id"] == 7
     assert result["protocol_version"] == "2"
-    assert result["version"] == "0.6.2"
+    assert result["version"] == __version__
     assert result["capabilities"] == list(CAPABILITIES)
     assert result["methods"] == list(CORE_METHODS)
     assert result["session_id"] == "s1"

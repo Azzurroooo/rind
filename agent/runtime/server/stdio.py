@@ -21,6 +21,7 @@ from agent.version import __version__
 from agent.runtime.server.commands import SlashCommandContext, SlashCommandResult, SlashCommandRouter
 from agent.runtime.server.commands.model_control import set_active_model, set_active_reasoning_effort
 from agent.runtime.server.resume_preview import render_resume_preview
+from agent.runtime.server.files import FileMethodError, file_list, file_read, file_write
 from agent.runtime.server.protocol import (
     CAPABILITIES,
     CORE_METHODS,
@@ -1083,6 +1084,9 @@ class WorkerStdioRuntimeServer:
             if method in {RuntimeMethod.RIND_BACKGROUND_LIST, RuntimeMethod.RIND_BACKGROUND_OUTPUT}:
                 await self._background_request(request)
                 return
+            if method in {RuntimeMethod.FILE_LIST, RuntimeMethod.FILE_READ, RuntimeMethod.FILE_WRITE}:
+                await self._file_request(request)
+                return
             if method in SESSION_SCOPED_METHODS:
                 session_id = await self._required_session_id(request)
                 if session_id is None:
@@ -1310,6 +1314,25 @@ class WorkerStdioRuntimeServer:
             result = await replay(session_id, start=start, end=end)
         else:
             result = await self._worker.repository.replay(session_id, start=start, end=end)
+        await self._respond(request, result)
+
+    async def _file_request(self, request: dict[str, Any]) -> None:
+        params = request.get("params") if isinstance(request.get("params"), dict) else {}
+        method = str(request.get("method") or "")
+        try:
+            if method == RuntimeMethod.FILE_LIST:
+                result = file_list(self._worker.workspace_root, str(params.get("path") or ""))
+            elif method == RuntimeMethod.FILE_READ:
+                result = file_read(self._worker.workspace_root, str(params.get("path") or ""))
+            else:
+                result = file_write(
+                    self._worker.workspace_root,
+                    str(params.get("path") or ""),
+                    params.get("content_base64"),
+                )
+        except FileMethodError as exc:
+            await self._respond_error(request, exc.message, exc.error_type)
+            return
         await self._respond(request, result)
 
     async def _execute_command(self, request: dict[str, Any]) -> None:

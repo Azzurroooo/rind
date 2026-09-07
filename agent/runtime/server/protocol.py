@@ -39,6 +39,11 @@ class RuntimeMethod:
     SESSION_REPLAY = "session/replay"
     SESSION_PROMPT = "session/prompt"
     SESSION_CANCEL = "session/cancel"
+    SESSION_SUBSCRIBE = "session/subscribe"
+    SESSION_UNSUBSCRIBE = "session/unsubscribe"
+    FILE_LIST = "file/list"
+    FILE_READ = "file/read"
+    FILE_WRITE = "file/write"
     MODEL_LIST = "model/list"
     MODEL_SET = "model/set"
     MODEL_EFFORT = "model/effort"
@@ -65,6 +70,8 @@ SESSION_SCOPED_METHODS = frozenset(
         RuntimeMethod.SESSION_REPLAY,
         RuntimeMethod.SESSION_SWITCH,
         RuntimeMethod.SESSION_CANCEL,
+        RuntimeMethod.SESSION_SUBSCRIBE,
+        RuntimeMethod.SESSION_UNSUBSCRIBE,
         RuntimeMethod.MODEL_SET,
         RuntimeMethod.RIND_SESSION_STEER,
         RuntimeMethod.RIND_SESSION_FOLLOW_UP,
@@ -100,6 +107,11 @@ CORE_METHODS = (
     RuntimeMethod.SESSION_REPLAY,
     RuntimeMethod.SESSION_PROMPT,
     RuntimeMethod.SESSION_CANCEL,
+    RuntimeMethod.SESSION_SUBSCRIBE,
+    RuntimeMethod.SESSION_UNSUBSCRIBE,
+    RuntimeMethod.FILE_LIST,
+    RuntimeMethod.FILE_READ,
+    RuntimeMethod.FILE_WRITE,
     RuntimeMethod.MODEL_LIST,
     RuntimeMethod.MODEL_SET,
     RuntimeMethod.MODEL_EFFORT,
@@ -122,6 +134,8 @@ CAPABILITIES = (
     "rind/steering",
     "rind/follow-up",
     "rind/input-retrieval",
+    "rind/session-subscriptions",
+    "rind/files",
 )
 
 DURABLE_EVENT_TYPES = frozenset(
