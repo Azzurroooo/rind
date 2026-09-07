@@ -143,6 +143,42 @@ def test_per_channel_value_types_are_validated():
         build_config({**base, "channels": {"wecom": {"agent_id": True}}})
 
 
+# --- per-channel key schemas (WP7: slack / qq / feishu / dingtalk) -------------------
+
+
+def test_slack_qq_feishu_dingtalk_keys_parse_with_types():
+    config = build_config({"worker": "stdio", "workspace": ABS_WORKSPACE, "channels": {
+        "slack": {"app_token": "xapp-1", "bot_token": "xoxb-2", "allow_from": ["U1"]},
+        "qq": {"ws_path": "/ob", "ws_port": 9099, "access_token": "t0k", "group_allow": ["20002"]},
+        "feishu": {"app_id": "cli", "app_secret": "s"},
+        "dingtalk": {"client_id": "c", "client_secret": "s"},
+    }})
+    assert config.channels["slack"].extra == {"app_token": "xapp-1", "bot_token": "xoxb-2"}
+    assert config.channels["slack"].allow_from == ("U1",)
+    qq = config.channels["qq"]
+    assert qq.extra == {"ws_path": "/ob", "ws_port": 9099, "access_token": "t0k"}
+    assert qq.group_allow == ("20002",)
+    assert config.channels["feishu"].extra == {"app_id": "cli", "app_secret": "s"}
+    assert config.channels["dingtalk"].extra == {"client_id": "c", "client_secret": "s"}
+
+
+def test_qq_ws_port_and_unknown_keys_are_validated():
+    base = {"worker": "stdio", "workspace": ABS_WORKSPACE}
+    with pytest.raises(ConfigError, match="channels.qq.ws_port"):
+        build_config({**base, "channels": {"qq": {"ws_port": "8082"}}})
+    with pytest.raises(ConfigError, match="channels.qq.ws_port"):
+        build_config({**base, "channels": {"qq": {"ws_port": 0}}})
+    with pytest.raises(ConfigError, match="channels.slack.grant_type"):
+        build_config({**base, "channels": {"slack": {"grant_type": "x"}}})
+    with pytest.raises(ConfigError, match="channels.feishu.isv_key"):
+        build_config({**base, "channels": {"feishu": {"isv_key": "x"}}})
+    with pytest.raises(ConfigError, match="channels.dingtalk.robot_code"):
+        build_config({**base, "channels": {"dingtalk": {"robot_code": "x"}}})
+
+
+# --- env interpolation / required keys ----------------------------------------------
+
+
 def test_undefined_env_variable_is_an_error(tmp_path):
     with pytest.raises(ConfigError, match="UNDEFINED_VAR"):
         load_config(_write(tmp_path, "worker: stdio\nworkspace: ${UNDEFINED_VAR}\n"), env={})

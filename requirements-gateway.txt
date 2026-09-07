@@ -12,10 +12,17 @@ aiogram>=3.4
 # Discord (gateway/channels/discord.py):
 discord.py>=2.3
 #
-# Later channels (P1/P2) per .docs/remote-upgrade-plan.md section 5.6:
-#   slack_bolt        # Slack socket mode
-#   lark-oapi         # Feishu (Lark) websocket events
-#   dingtalk-stream   # DingTalk stream mode
+# Slack (gateway/channels/slack.py) — Socket Mode WS, zero inbound ports (WP7):
+slack_bolt>=1.18
+#
+# QQ / OneBot v11 (gateway/channels/qq.py) — reverse WS endpoint served with the
+# repo's existing `websockets` dependency (WP7); no extra package needed here.
+#
+# Feishu / 飞书 (gateway/channels/feishu.py) — lark-oapi WS long connection (WP7):
+lark-oapi>=1.4
+#
+# DingTalk / 钉钉 (gateway/channels/dingtalk.py) — dingtalk-stream Stream Mode WS (WP7):
+dingtalk-stream>=0.24
 #
 # WeCom / 企业微信 (gateway/channels/wecom.py) — callback server + API client
 # and AES-256-CBC for the callback verify/decrypt flow (WP11):

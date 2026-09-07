@@ -25,6 +25,10 @@ LOADERS: dict[str, str] = {
     "wecom": "gateway.channels.wecom:build_channel",
     "whatsapp": "gateway.channels.whatsapp_cloud:build_channel",
     "email": "gateway.channels.email_channel:build_channel",
+    "slack": "gateway.channels.slack:build_channel",
+    "qq": "gateway.channels.qq:build_channel",
+    "feishu": "gateway.channels.feishu:build_channel",
+    "dingtalk": "gateway.channels.dingtalk:build_channel",
 }
 
 

@@ -26,7 +26,8 @@ _KNOWN_TOP_LEVEL = frozenset(
 )
 _KNOWN_PAIRING = frozenset({"enabled", "ttl_minutes"})
 _KNOWN_CHANNEL = frozenset({"token", "allow_from", "group_allow"})
-# Per-channel extensions beyond the common keys (WP11: wecom / whatsapp / email).
+# Per-channel extensions beyond the common keys (WP11: wecom / whatsapp / email,
+# WP7: slack / qq / feishu / dingtalk).
 # Every channel also accepts _KNOWN_CHANNEL; unknown keys still error (§2).
 _CHANNEL_KEYS: dict[str, frozenset[str]] = {
     "wecom": frozenset({"corp_id", "agent_id", "secret", "encoding_aes_key", "callback_host", "callback_port"}),
@@ -35,8 +36,12 @@ _CHANNEL_KEYS: dict[str, frozenset[str]] = {
         {"imap_host", "imap_port", "imap_ssl", "smtp_host", "smtp_port", "smtp_starttls",
          "username", "password", "mailbox", "poll_interval"}
     ),
+    "slack": frozenset({"app_token", "bot_token"}),
+    "qq": frozenset({"ws_path", "ws_port", "access_token"}),
+    "feishu": frozenset({"app_id", "app_secret"}),
+    "dingtalk": frozenset({"client_id", "client_secret"}),
 }
-_CHANNEL_PORT_KEYS = frozenset({"callback_port", "webhook_port", "imap_port", "smtp_port"})
+_CHANNEL_PORT_KEYS = frozenset({"callback_port", "webhook_port", "ws_port", "imap_port", "smtp_port"})
 _CHANNEL_BOOL_KEYS = frozenset({"imap_ssl", "smtp_starttls"})
 _CHANNEL_INT_KEYS = frozenset({"poll_interval"})
 _CHANNEL_SCALAR_KEYS = frozenset({"agent_id", "phone_number_id"})  # numeric ok, normalized to str
