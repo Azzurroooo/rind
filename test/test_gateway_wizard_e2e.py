@@ -43,6 +43,7 @@ def test_full_interactive_wizard_writes_working_config(tmp_path):
         str(workspace),   # 工作目录
         "",               # worker token（留空）
         "123456:AAE",     # telegram token
+        "",               # telegram proxy（直连）
         "",               # telegram allow_from
         "",               # telegram group_allow
         "n",              # 跳过凭证探活
@@ -91,6 +92,7 @@ def test_wizard_defaults_skip_optional_fields(tmp_path):
         str(workspace),   # workspace
         "",               # token
         "tok",            # telegram token
+        "",               # telegram proxy（直连）
         "", "",           # telegram allow/group
         "n", "n",         # telegram probe/discovery
         "", "",           # email imap_host/port
