@@ -15,8 +15,8 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from .config import build_config, parse_yaml, render_yaml
-from .prompt import WizardCancelled, ask as _ask, ask_list as _ask_list, confirm as _confirm, pick_channels as _pick_channels
+from .config import build_config, parse_yaml, render_yaml, ConfigError
+from .prompt import WizardCancelled, ask as _ask, ask_list as _ask_list, confirm as _confirm, input_line as _input, pick_channels as _pick_channels
 from .onboarding import ChannelGuide, all_guides, guide_for
 from .probes import worker_alive
 
@@ -26,22 +26,44 @@ DEFAULT_WORKER = "ws://127.0.0.1:8765"
 # --- pure builders -------------------------------------------------------------
 
 
-async def resolve_worker(explicit: str, env: dict[str, str], probe=worker_alive) -> tuple[str, str, bool]:
+async def resolve_worker(
+    explicit: str, env: dict[str, str], probe=worker_alive, stored_worker: str = "", stored_token: str = ""
+) -> tuple[str, str, bool]:
     """worker 与 token 的静默决策——新手一个问题都不用答。
 
-    显式 --worker-url / RIND_GW_WORKER 直接采用（未验证）；否则探活本机默认
-    端点：在线 → 用它（worker 已在跑，握手同时证明了 token 可用性）；
-    不通 → stdio（网关自起 worker 子进程，无需第二个终端）。token 只来自
-    RIND_SERVER_TOKEN，stdio 不需要。返回 (worker, token, 是否已探活验证)。
+    优先级：显式 --worker-url > RIND_GW_WORKER / RIND_SERVER_TOKEN > 已有配置
+    > 探活本机默认端点（在线 → 用它；不通 → stdio 自起 worker 子进程）。
+    stdio 无需验证；其余 URL 未经验证，调用方可据第三位决定是否追问 token。
     """
-    token = env.get("RIND_SERVER_TOKEN", "")
-    worker = explicit or env.get("RIND_GW_WORKER", "")
+    token = env.get("RIND_SERVER_TOKEN", "") or stored_token
+    worker = explicit or env.get("RIND_GW_WORKER", "") or stored_worker
     if worker:
-        return worker, token, False
+        return worker, token, worker == "stdio"
     alive, _ = await probe(DEFAULT_WORKER, token, timeout=2.0)
     if alive:
         return DEFAULT_WORKER, token, True
     return "stdio", "", True
+
+
+def load_existing_answers(config_path: Path) -> dict[str, dict[str, Any]]:
+    """Best-effort read of the current gateway.yaml as wizard defaults.
+
+    Returns ``{channel_id: {field: value, allow_from: [...], group_allow: [...]}}``
+    plus top-level ``worker``/``worker_token`` keys.  Unreadable or invalid
+    configs yield ``{}`` — prefilling must never block init.
+    """
+    try:
+        data = parse_yaml(config_path.read_text(encoding="utf-8"), env=os.environ)
+        config = build_config(data)
+    except (OSError, ConfigError):
+        return {}
+    existing: dict[str, Any] = {"worker": config.worker, "worker_token": config.worker_token or ""}
+    for channel_id, channel in config.channels.items():
+        entry: dict[str, Any] = {"allow_from": list(channel.allow_from), "group_allow": list(channel.group_allow), **channel.extra}
+        if channel.token:
+            entry["token"] = channel.token
+        existing[channel_id] = entry
+    return existing
 
 
 def env_answer(channel_id: str, field_name: str, env: dict[str, str]) -> str:
@@ -113,14 +135,13 @@ def config_path_for(workspace: str) -> Path:
     return Path(workspace).expanduser() / ".rind" / "gateway.yaml"
 
 
-def _guide_walk(guide: ChannelGuide, env: dict[str, str]) -> tuple[dict[str, str], dict[str, list[str]]]:
-    print(f"\n=== {guide.emoji} {guide.label} ===")
-    for step in guide.setup_steps:
-        print(f"  · {step}")
-    if guide.scopes:
-        print("  精确权限/事件代码（在平台对应搜索框里逐个粘贴，唯一确定）：")
-        for code in guide.scopes:
-            print(f"      {code}")
+def _ask_fields(guide: ChannelGuide, env: dict[str, str], existing: dict[str, Any]) -> dict[str, str] | None:
+    """Ask (or adopt) every field; ``None`` = a required field stayed empty.
+
+    Priority per field: env var > stored value (回车保留) > built-in default.
+    A required field is re-asked once; empty twice drops the channel rather
+    than writing a config that cannot work.
+    """
     answers: dict[str, str] = {}
     env_prefix = f"RIND_GW_{guide.id.upper()}_"
     for spec in guide.fields:
@@ -129,38 +150,66 @@ def _guide_walk(guide: ChannelGuide, env: dict[str, str]) -> tuple[dict[str, str
             print(f"  · {spec.label}：已从 {env_prefix + spec.name.upper()} 读取")
             answers[spec.name] = env_value
             continue
-        label = f"{spec.label}" + (f"（{spec.help}）" if spec.help else "")
-        answers[spec.name] = _ask(label, spec.default, secret=spec.secret)
+        stored = str(existing.get(spec.name, ""))
+        default = stored or spec.default
+        hint = "已配置，回车保留" if stored and spec.secret else ""
+        label = spec.label + (f"（{spec.help}）" if spec.help else "")
+        value = _ask(label, default, secret=spec.secret, hint=hint)
+        if not value and spec.required:
+            value = _ask(f"{spec.label}（必填，不能为空）", default, secret=spec.secret, hint=hint)
+        if not value and spec.required:
+            return None
+        answers[spec.name] = value
+    return answers
+
+
+def _guide_walk(guide: ChannelGuide, env: dict[str, str], existing: dict[str, Any]) -> tuple[dict[str, str], dict[str, list[str]]] | None:
+    print(f"\n=== {guide.emoji} {guide.label} ===")
+    for step in guide.setup_steps:
+        print(f"  · {step}")
+    if guide.scopes:
+        print("  精确权限/事件代码（在平台对应搜索框里逐个粘贴，唯一确定）：")
+        for code in guide.scopes:
+            print(f"      {code}")
+    answers = _ask_fields(guide, env, existing)
+    if answers is None:
+        print(f"  ✘ 必填凭证未填写——本次不写入 {guide.label} 渠道（其余渠道不受影响，可稍后重新运行 init 添加）。")
+        return None
     print("  allow_from / group_allow 现在可以留空——陌生账号首次发消息会收到配对码，")
     print("  在服务器执行 `gateway approve <码>` 后即自动进入白名单。")
-    allow = _ask_list("allow_from 白名单")
-    group = _ask_list("group_allow 群白名单")
+    allow = _ask_list("allow_from 白名单", list(existing.get("allow_from", [])))
+    group = _ask_list("group_allow 群白名单", list(existing.get("group_allow", [])))
+    required = [spec.name for spec in guide.fields if spec.required]
+    credentials = {key: value for key, value in answers.items() if value}
+    ready = all(credentials.get(name) for name in required)
     probe_detail = ""
-    if guide.probe and answers:
-        if _confirm("立即验证凭证（会访问平台 API）？"):
-            result = guide.probe({key: value for key, value in answers.items() if value})
+    if guide.probe and not ready:
+        print("  · 必填凭证不完整，跳过在线验证（补齐后可用 gateway doctor --probe 补测）。")
+    elif guide.probe and _confirm("立即验证凭证（会访问平台 API）？"):
+        result = guide.probe(credentials)
+        probe_detail = result.detail
+        mark = "✔" if result.ok else "✘"
+        print(f"  {mark} {probe_detail}")
+        # 探活失败：给最多两次"重新填写凭证再验证"的机会（错 token、代理失效都在这一步修）。
+        retries = 0
+        while not result.ok and retries < 2 and _confirm("重新填写凭证并再次验证？", default_yes=False):
+            answers = _ask_fields(guide, {}, answers) or answers
+            credentials = {key: value for key, value in answers.items() if value}
+            result = guide.probe(credentials)
             probe_detail = result.detail
             mark = "✔" if result.ok else "✘"
             print(f"  {mark} {probe_detail}")
-            # 探活失败（常见于直连被墙的超时）：给一次改代理重试的机会。
-            retries = 0
-            while not result.ok and retries < 2 and _confirm("重新填写『代理地址』并再次验证？", default_yes=False):
-                answers["proxy"] = _ask("代理地址（如 http://127.0.0.1:7890）")
-                result = guide.probe({key: value for key, value in answers.items() if value})
-                probe_detail = result.detail
-                mark = "✔" if result.ok else "✘"
-                print(f"  {mark} {probe_detail}")
-                retries += 1
-            if not result.ok:
-                print("     可稍后运行 `python main.py gateway doctor --probe` 重新体检。")
-    if guide.discover_senders:
+            retries += 1
+        if not result.ok:
+            print("     可稍后运行 `python main.py gateway doctor --probe` 重新体检。")
+    if guide.discover_senders and ready:
         import re
 
         bot_match = re.search(r"@[\w]+", probe_detail)
         where = f"在 Telegram 里给你的 bot {bot_match.group(0)} 发一条消息" if bot_match else "在 Telegram 里找到你的 bot（BotFather 给的 username）并发一条消息"
         if _confirm(f"现在抓取你的账号 ID？（60 秒内{where}）", default_yes=False):
             print(f"  等待消息中——请在 Telegram 里给 {bot_match.group(0) if bot_match else '你的 bot'} 发送任意消息…")
-            senders = guide.discover_senders({key: value for key, value in answers.items() if value}, 60.0)
+            senders = guide.discover_senders(credentials, 60.0)
             if senders:
                 print("  发现以下发送者：")
                 for index, sender in enumerate(senders, start=1):
@@ -243,14 +292,18 @@ def run_init(args) -> int:
                 return 2
         else:
             selected = _pick_channels()
-        worker, worker_token, verified = asyncio.run(resolve_worker(args.worker_url, env))
+        workspace = _resolve_workspace(_ask("工作目录（网关会话的根目录，绝对路径）", args.workspace or _default_workspace()))
+        existing = load_existing_answers(config_path_for(workspace))
+        stored = existing.get("worker", ""), str(existing.get("worker_token", ""))
+        worker, worker_token, verified = asyncio.run(resolve_worker(args.worker_url, env, stored_worker=stored[0], stored_token=stored[1]))
         if worker == "stdio":
             print("  worker：本机自起（stdio）——网关进程自带 worker，无需单独启动。")
+        elif worker == stored[0]:
+            print(f"  worker：{worker}（沿用现有配置）")
         else:
             print(f"  worker：{worker}" + ("（已探测在线）" if verified else ""))
             if not verified and not worker_token:
                 worker_token = _ask("Worker Token（worker 侧 RIND_SERVER_TOKEN 的值，可留空）", secret=True)
-        workspace = _resolve_workspace(_ask("工作目录（网关会话的根目录，绝对路径）", args.workspace or _default_workspace()))
 
         guides = [guide_for(channel_id) for channel_id in selected]
         from .doctor import ensure_channel_sdks
@@ -262,11 +315,22 @@ def run_init(args) -> int:
         answers = {}
         lists = {}
         for guide in guides:
-            answers[guide.id], lists[guide.id] = _guide_walk(guide, env)
+            outcome = _guide_walk(guide, env, existing.get(guide.id, {}))
+            if outcome is None:
+                selected = [channel_id for channel_id in selected if channel_id != guide.id]
+                continue
+            answers[guide.id], lists[guide.id] = outcome
+        if not selected:
+            print("没有可启动的渠道。", file=sys.stderr)
+            return 2
     except WizardCancelled:
         print("\n已取消（配置未写入）。")
         return 1
-    return _finish(args, selected, answers, lists, worker, worker_token, workspace, confirm=True, auto_install_sdk=auto_install)
+    try:
+        return _finish(args, selected, answers, lists, worker, worker_token, workspace, confirm=True, auto_install_sdk=auto_install)
+    except WizardCancelled:  # EOF at the write/start confirm: cancel, never a traceback
+        print("\n已取消（配置未写入）。")
+        return 1
 
 
 def _finish(args, selected, answers, lists, worker, worker_token, workspace, *, confirm: bool, auto_install_sdk: bool = False) -> int:
@@ -279,7 +343,8 @@ def _finish(args, selected, answers, lists, worker, worker_token, workspace, *, 
     print("\n—— 生成的 gateway.yaml ——")
     print(text)
     target = config_path_for(str(workspace))
-    if confirm and not _confirm(f"写入 {target}？"):
+    overwrite = "（将覆盖现有配置）" if target.is_file() else ""
+    if confirm and not _confirm(f"写入 {target}{overwrite}？"):
         print("已取消（配置未写入）。")
         return 1
     target.parent.mkdir(parents=True, exist_ok=True)

@@ -38,7 +38,7 @@ def test_full_interactive_wizard_writes_working_config(tmp_path):
     workspace = tmp_path / "ws"
     workspace.mkdir()
     lines = [
-        "7,3",            # 选渠道：telegram + email
+        "1,2",            # 选渠道：telegram + email（推荐位在前）
         str(workspace),   # 工作目录
         "123456:AAE",     # telegram token
         "",               # telegram proxy（直连）
@@ -81,28 +81,104 @@ def test_full_interactive_wizard_writes_working_config(tmp_path):
 
 
 def test_wizard_defaults_skip_optional_fields(tmp_path):
-    # 回车到底 = telegram + email 两个零门槛渠道；email 必填字段需要值。
+    # 回车到底 = 仅 Telegram（零门槛首选）；token 必填。
     workspace = tmp_path / "ws"
     workspace.mkdir()
     lines = [
-        "",               # 渠道（默认 telegram + email）
+        "",               # 渠道（默认 telegram）
         str(workspace),   # workspace
         "tok",            # telegram token
         "",               # telegram proxy（直连）
         "", "",           # telegram allow/group
         "n", "n",         # telegram probe/discovery
-        "", "",           # email imap_host/port
-        "", "",           # email smtp_host/port
-        "me@qq.com",      # username
-        "pw",             # password
-        "", "",           # mailbox/poll
-        "", "",           # email allow/group
-        "n",              # email probe
         "Y",              # 写入
     ]
     result = _run_gateway(["init"], stdin="\n".join(lines) + "\n")
     _assert_no_traceback(result)
     assert (workspace / ".rind" / "gateway.yaml").exists()
+    text = (workspace / ".rind" / "gateway.yaml").read_text(encoding="utf-8")
+    assert "telegram" in text and "email" not in text
+
+
+def test_wizard_garbage_channel_input_reasks_instead_of_silently_defaulting(tmp_path):
+    workspace = tmp_path / "ws"
+    workspace.mkdir()
+    lines = [
+        "abc,99",         # 乱输入 → 必须重问，而不是悄悄落到默认渠道
+        "1",              # telegram
+        str(workspace),
+        "tok",
+        "", "", "",
+        "n", "n",
+        "Y",
+    ]
+    result = _run_gateway(["init"], stdin="\n".join(lines) + "\n")
+    _assert_no_traceback(result)
+    assert "看不懂这些输入" in result.stdout
+    assert (workspace / ".rind" / "gateway.yaml").exists()
+
+
+def test_wizard_eof_at_write_confirm_cancels_cleanly(tmp_path):
+    # 回归：EOF 落在"写入 gateway.yaml？"时曾以 WizardCancelled 堆栈崩溃。
+    workspace = tmp_path / "ws"
+    workspace.mkdir()
+    lines = [
+        "1",              # telegram
+        str(workspace),
+        "123456:AAE",
+        "",               # proxy
+        "", "",           # allow/group
+        "n", "n",         # probe/discovery
+    ]                     # ← 下一个提示就是写入确认，stdin 到此耗尽
+    result = _run_gateway(["init"], stdin="\n".join(lines) + "\n")
+    _assert_no_traceback(result)
+    assert result.returncode == 1
+    assert "已取消" in result.stdout
+    assert not (workspace / ".rind" / "gateway.yaml").exists()
+
+
+def test_wizard_required_field_empty_twice_drops_the_channel(tmp_path):
+    # 必填凭证留空两次 → 不写出注定失败的渠道配置。
+    workspace = tmp_path / "ws"
+    workspace.mkdir()
+    lines = [
+        "1",              # telegram
+        str(workspace),
+        "",               # token（第一次空）
+        "",               # token（必填重问，仍为空）→ 渠道被剔除
+    ]
+    result = _run_gateway(["init"], stdin="\n".join(lines) + "\n")
+    _assert_no_traceback(result)
+    assert result.returncode == 2
+    assert "本次不写入" in result.stdout
+
+
+def test_wizard_rerun_keeps_stored_secrets_without_reprinting_them(tmp_path):
+    # 老用户重跑向导：回车保留已配置的 token，且不把密钥回显在屏幕上。
+    workspace = tmp_path / "ws"
+    workspace.mkdir()
+    first = [
+        "1", str(workspace), "123456:AAE", "", "", "", "n", "n", "Y",
+    ]
+    result = _run_gateway(["init"], stdin="\n".join(first) + "\n")
+    _assert_no_traceback(result)
+    assert (workspace / ".rind" / "gateway.yaml").exists()
+
+    second = [
+        "1",              # telegram
+        str(workspace),   # 工作目录（回车保留也可以，这里显式给）
+        "",               # token：回车 = 保留已配置
+        "",               # proxy
+        "", "",           # allow/group
+        "n", "n",         # probe/discovery
+        "Y",              # 覆盖写入
+    ]
+    again = _run_gateway(["init"], stdin="\n".join(second) + "\n")
+    _assert_no_traceback(again)
+    assert "已配置，回车保留" in again.stdout, "密钥应以『回车保留』提示，而非回显明文"
+    assert "Bot Token [123456:AAE]" not in again.stdout, "提问行不得以 [默认值] 形式回显密钥"
+    text = (workspace / ".rind" / "gateway.yaml").read_text(encoding="utf-8")
+    assert "token: '123456:AAE'" in text
 
 
 # --- 用户的原始崩溃场景：无配置 → 引导向导 → 中途 EOF -----------------------------

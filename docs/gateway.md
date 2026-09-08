@@ -50,7 +50,7 @@ RIND_GW_TELEGRAM_TOKEN=123456:AAE python main.py gateway init --yes --channel te
 | `python main.py gateway status` | 不启动，只看当前状态（会话、配对、渠道、worker） |
 | `python main.py gateway doctor` | 排查。逐项体检：配置 → worker → 渠道 SDK → 状态文件 |
 | `python main.py gateway doctor --probe` | 体检 + 真实验证各渠道凭证 |
-| `python main.py gateway init` | 加渠道 / 换渠道（重新跑向导，只填新渠道即可） |
+| `python main.py gateway init` | 加渠道 / 换渠道。已配置的凭证会预填——回车即保留，只填新渠道即可 |
 
 ## 出问题了？
 

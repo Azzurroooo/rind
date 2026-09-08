@@ -296,8 +296,14 @@ def guide_for(channel_id: str) -> ChannelGuide | None:
     return GUIDES.get(channel_id)
 
 
+#: 渠道选择菜单的推荐位：零门槛渠道排最前，其余按字母序跟随。
+RECOMMENDED_ORDER = ("telegram", "email")
+
+
 def all_guides() -> list[ChannelGuide]:
-    return [GUIDES[key] for key in sorted(GUIDES)]
+    ordered = [guides_id for guides_id in RECOMMENDED_ORDER if guides_id in GUIDES]
+    ordered.extend(sorted(set(GUIDES) - set(RECOMMENDED_ORDER)))
+    return [GUIDES[key] for key in ordered]
 
 
-__all__ = ["GUIDES", "ChannelGuide", "FieldSpec", "ProbeResult", "all_guides", "guide_for"]
+__all__ = ["GUIDES", "RECOMMENDED_ORDER", "ChannelGuide", "FieldSpec", "ProbeResult", "all_guides", "guide_for"]

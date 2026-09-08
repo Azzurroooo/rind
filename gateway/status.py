@@ -50,9 +50,12 @@ def startup_panel(worker: str, channels: list[tuple[str, bool]], pairing_enabled
     instead of hiding in log lines.
     """
     worker_line = "已连接（stdio 自起子进程）" if worker == "stdio" else f"已连接（{worker}）"
-    channel_line = "   ".join(
-        f"{channel_label(channel_id)} {'✔' if started else '✘'}" for channel_id, started in channels
-    )
+    if channels:
+        channel_line = "   ".join(
+            f"{channel_label(channel_id)} {'✔' if started else '✘'}" for channel_id, started in channels
+        )
+    else:
+        channel_line = "（未配置任何渠道——运行 python main.py gateway init 添加）"
     pairing_line = (
         "已开启——陌生账号发消息会收到 6 位配对码"
         if pairing_enabled

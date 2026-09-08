@@ -145,6 +145,40 @@ def test_resolve_worker_honors_explicit_url_without_probing():
     assert (env_worker, env_token) == ("ws://10.0.0.9:1", "")
 
 
+# --- 老配置预填充：重跑向导 = 回车保留，而不是从零重填 ---------------------------
+
+
+def test_load_existing_answers_round_trips_channels(tmp_path):
+    import gateway.wizard as wizard
+
+    config = tmp_path / "gateway.yaml"
+    config.write_text(
+        "worker: stdio\n"
+        f"workspace: '{tmp_path}'\n"
+        "channels:\n"
+        "  telegram:\n"
+        "    token: '123456:AAE'\n"
+        "    proxy: 'http://127.0.0.1:7890'\n"
+        "    allow_from: ['111', '222']\n",
+        encoding="utf-8",
+    )
+    existing = wizard.load_existing_answers(config)
+    assert existing["worker"] == "stdio"
+    telegram = existing["telegram"]
+    assert telegram["token"] == "123456:AAE"
+    assert telegram["proxy"] == "http://127.0.0.1:7890"
+    assert telegram["allow_from"] == ["111", "222"]
+
+
+def test_load_existing_answers_ignores_broken_config(tmp_path):
+    import gateway.wizard as wizard
+
+    config = tmp_path / "gateway.yaml"
+    config.write_text("worker: [unclosed\n", encoding="utf-8")
+    assert wizard.load_existing_answers(config) == {}
+    assert wizard.load_existing_answers(tmp_path / "missing.yaml") == {}
+
+
 # --- 探活：注入假 HTTP，验证 ✔/✘ 语义与原因 -------------------------------------
 
 
@@ -296,6 +330,13 @@ def test_startup_panel_reflects_closed_pairing():
 
     panel = startup_panel("ws://127.0.0.1:8765", [("email", True)], pairing_enabled=False)
     assert "已关闭" in panel and "allow_from" in panel
+
+
+def test_startup_panel_speaks_up_when_no_channels_configured():
+    from gateway.status import startup_panel
+
+    panel = startup_panel("stdio", [], pairing_enabled=True)
+    assert "未配置任何渠道" in panel and "gateway init" in panel
 
 
 # --- SDK 自动安装与工作区防护（用户体验包装的机器可测部分）-----------------------

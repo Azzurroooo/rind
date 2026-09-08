@@ -26,25 +26,28 @@ STARTING_NOTICE = "Rind 网关启动中……（worker 就绪与渠道连接可�
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="gateway", description="Rind unified message gateway")
-    parser.add_argument("--config", default=None, help="gateway.yaml path (default <workspace>/.rind/gateway.yaml)")
-    parser.add_argument("--workspace", default=".", help="Workspace root used for config/state lookup")
+    parser = argparse.ArgumentParser(
+        prog="gateway",
+        description="Rind 消息网关——把聊天软件接到你的 worker。首次使用：gateway init",
+    )
+    parser.add_argument("--config", default=None, help="gateway.yaml 路径（默认 <工作目录>/.rind/gateway.yaml）")
+    parser.add_argument("--workspace", default=".", help="工作目录（配置与状态查找的根，默认当前目录）")
     subparsers = parser.add_subparsers(dest="command")
     approve = subparsers.add_parser("approve", help="批准配对码；不带码则列出全部待批请求")
     approve.add_argument("code", nargs="?", default="", help="6 位配对码（陌生发送者收到的卡片上）")
     init = subparsers.add_parser("init", help="交互式创建 gateway.yaml（分渠道引导 + 实时凭证验证 + 自动抓取账号 ID）")
     init.add_argument("--channel", default="", help="逗号分隔的渠道 id（如 telegram,email；跳过选择菜单）")
     init.add_argument("--yes", action="store_true", help="非交互一键模式：字段全部来自 RIND_GW_<渠道>_<字段> 环境变量")
-    init.add_argument("--worker-url", default="", help="Worker 地址（默认 ws://127.0.0.1:8765）")
+    init.add_argument("--worker-url", default="", help="Worker 地址（不填则自动决定：探测本机 worker，没有就 stdio 自起）")
     init.add_argument("--workspace", default=None, help="工作目录（默认当前目录）")
     doctor = subparsers.add_parser("doctor", help="逐项体检：配置/worker/SDK/凭证/状态文件（--probe 实测凭证，--fix 自动修复）")
     doctor.add_argument("--probe", action="store_true", help="实时验证渠道凭证（会访问平台 API）")
     doctor.add_argument("--fix", action="store_true", help="自动修复可修复项（损坏的状态文件备份为 .corrupt）")
-    doctor.add_argument("--config", default=None, help="gateway.yaml path")
-    doctor.add_argument("--workspace", default=".", help="Workspace root")
+    doctor.add_argument("--config", default=None, help="gateway.yaml 路径")
+    doctor.add_argument("--workspace", default=".", help="工作目录")
     status = subparsers.add_parser("status", help="一屏状态：会话映射/配对/渠道/worker 在线")
-    status.add_argument("--config", default=None, help="gateway.yaml path")
-    status.add_argument("--workspace", default=".", help="Workspace root")
+    status.add_argument("--config", default=None, help="gateway.yaml 路径")
+    status.add_argument("--workspace", default=".", help="工作目录")
     subparsers.add_parser("start", help="启动网关（等价于不带子命令运行）")
     return parser
 
@@ -189,6 +192,7 @@ def main(argv: list[str] | None = None) -> int:
     try:
         return asyncio.run(_run(config, runtime_dir, pairing))
     except KeyboardInterrupt:
+        print("\n网关已停止。")
         return 0
     except RuntimeError as exc:  # capability gate: worker needs upgrading first
         print(f"gateway: {exc}", file=sys.stderr)

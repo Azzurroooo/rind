@@ -60,6 +60,7 @@ class WorkerClient:
         transport: Any | None = None,
         cursor_provider: CursorProvider | None = None,
     ) -> None:
+        self._url = url
         self._transport = transport if transport is not None else build_transport(url, token)
         self._cursor_provider = cursor_provider
         self._callback: EventCallback | None = None
@@ -138,7 +139,10 @@ class WorkerClient:
             except Exception:
                 if self._stopping:
                     raise WorkerConnectionError("worker connection failed") from None
-                logger.warning("gateway: worker connection failed; retrying in %.2fs", delay)
+                logger.warning(
+                    "gateway: worker 连接失败（%s）；%.2fs 后重试——请确认 worker 已启动、地址正确且 token 一致",
+                    self._url, delay,
+                )
                 await asyncio.sleep(delay)
                 delay = min(delay * 2, RECONNECT_MAX_SECONDS)
         # The transport is live from here on: bring-up requests need the
