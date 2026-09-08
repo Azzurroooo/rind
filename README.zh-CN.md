@@ -131,30 +131,18 @@ Rind 刻意保持攻击面很小：一个 WebSocket 端点、一个 token、没�
 
 #### 消息网关（Telegram、Discord 等）
 
-可选的网关进程把 IM 渠道接入同一个 worker——一条连接订阅所有渠道会话，对话上下文跨设备延续：
+可选的网关进程把 IM 渠道接入同一个 worker——一条连接订阅所有渠道会话，对话上下文跨设备延续。
+
+配置交给引导向导：每个渠道先打印"凭证去哪拿"的分步说明，粘贴后当场调平台 API 验证，按需自动安装渠道 SDK；worker 连接由向导自行决定（探测本机已有的 worker，没有就自起一个——这项不需要你配置）：
 
 ```bash
-python main.py gateway --config .rind/gateway.yaml
+python main.py gateway init    # 约 2 分钟，最后可直接启动
+python main.py gateway         # 启动；就绪后打印一屏状态
 ```
 
-```yaml
-worker: ws://127.0.0.1:8765
-worker_token: ${RIND_SERVER_TOKEN}
-workspace: /workspace
-channels:
-  telegram:
-    token: ${TELEGRAM_BOT_TOKEN}
-    allow_from: ["12345678"]
-  discord:
-    token: ${DISCORD_BOT_TOKEN}
-pairing:
-  enabled: true
-```
+陌生发送者在聊天里收到一次性配对码；在跑网关的机器上批准（`python main.py gateway approve <配对码>`，不带码运行则列出全部待批请求）。每个命令都有兜底：`gateway status` 一屏看清会话/配对/渠道/worker；`gateway doctor` 逐项体检配置 → worker → 渠道 SDK → 状态文件，`--probe` 可实测凭证。完整上手流程见 [docs/gateway.md](docs/gateway.md)。
 
-- `${VAR}` 从环境变量插值；未知键与未定义变量都是启动错误，绝不静默兜底。
-- 渠道 SDK 是按渠道可选的依赖（`requirements-gateway.txt`），仅在对应渠道启用时才 import。
-- 陌生发送者会收到一次性配对码；在服务端执行 `python main.py gateway approve <CODE>` 完成批准。
-- Docker 部署中网关是 opt-in 服务：`docker compose --profile gateway up -d`，配置放在 `./.rind/gateway.yaml`。它只发起出站连接——没有任何入站端口。
+脚本化部署：向导支持零交互模式（`gateway init --yes --channel telegram`，字段由 `RIND_GW_<渠道>_<字段>` 环境变量驱动）；也支持手写 `gateway.yaml`——`${VAR}` 从环境变量插值，未知键与未定义变量都是启动错误，绝不静默兜底。渠道 SDK 是按渠道可选的依赖（`requirements-gateway.txt`），仅在对应渠道启用时才 import。Docker 部署中网关是 opt-in 服务：`docker compose --profile gateway up -d`，配置放在 `./.rind/gateway.yaml`。它只发起出站连接——没有任何入站端口。
 
 Node 前端 CLI：
 

@@ -207,30 +207,18 @@ Rind keeps its attack surface small: one WebSocket endpoint, one token, no secon
 
 ### Message gateway (Telegram, Discord, and more)
 
-The optional gateway process connects IM channels to the same worker — one connection subscribes to every channel session, so conversations continue where they left off:
+The optional gateway process connects IM channels to the same worker — one connection subscribes to every channel session, so conversations continue where they left off.
+
+A guided wizard does the whole setup — it prints step-by-step instructions for each channel's credentials, verifies them against the platform API before writing anything, installs channel SDKs on request, and resolves the worker connection on its own (probes for a running worker, falls back to self-hosting one — you never configure that by hand):
 
 ```bash
-python main.py gateway --config .rind/gateway.yaml
+python main.py gateway init    # ~2 minutes, then start right from the wizard
+python main.py gateway         # start; prints a one-screen ready panel
 ```
 
-```yaml
-worker: ws://127.0.0.1:8765
-worker_token: ${RIND_SERVER_TOKEN}
-workspace: /workspace
-channels:
-  telegram:
-    token: ${TELEGRAM_BOT_TOKEN}
-    allow_from: ["12345678"]
-  discord:
-    token: ${DISCORD_BOT_TOKEN}
-pairing:
-  enabled: true
-```
+Unknown senders get a one-time pairing code in the chat; approve it on the machine running the gateway (`python main.py gateway approve <CODE>`, or run `approve` with no code to list pending requests). Every command has a safety net: `gateway status` shows sessions/pairing/channels/worker at a glance, and `gateway doctor` checks config → worker → channel SDKs → state files, with `--probe` to live-verify credentials. See [docs/gateway.md](docs/gateway.md) for the full walkthrough.
 
-- `${VAR}` interpolates environment variables; unknown keys and undefined variables are startup errors, never silent defaults.
-- Channel SDKs are optional per-channel dependencies (`requirements-gateway.txt`) and only import when a channel is enabled.
-- Unknown senders get a one-time pairing code; approve it out-of-band with `python main.py gateway approve <CODE>`.
-- In Docker, the gateway ships as an opt-in service: `docker compose --profile gateway up -d` with the config at `./.rind/gateway.yaml`. It only makes outbound connections — no inbound ports.
+For scripted deploys, the wizard has a zero-interaction mode (`gateway init --yes --channel telegram` driven by `RIND_GW_<CHANNEL>_<FIELD>` variables) and hand-written `gateway.yaml` works too — `${VAR}` interpolates environment variables; unknown keys and undefined variables are startup errors, never silent defaults. Channel SDKs are optional per-channel dependencies (`requirements-gateway.txt`) and only import when a channel is enabled. In Docker, the gateway ships as an opt-in service: `docker compose --profile gateway up -d` with the config at `./.rind/gateway.yaml`. It only makes outbound connections — no inbound ports.
 
 ## Install
 
