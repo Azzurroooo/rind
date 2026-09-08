@@ -92,26 +92,40 @@ def config_path_for(workspace: str) -> Path:
 # --- interactive loop ------------------------------------------------------------
 
 
+class WizardCancelled(Exception):
+    """stdin reached EOF (Ctrl+Z / Ctrl+D / closed pipe) — cancel cleanly."""
+
+
+def _input(prompt: str = "") -> str:
+    try:
+        return input(prompt)
+    except EOFError:
+        raise WizardCancelled() from None
+
+
 def _ask(label: str, default: str = "", secret: bool = False) -> str:
     suffix = f" [{default}]" if default else ""
-    try:
-        if secret:
+    # getpass only makes sense on a real terminal: on a piped stdin its Windows
+    # fallback reads console keystrokes and hangs forever. Automations pipe the
+    # answer in visibly; real terminals keep hidden input.
+    if secret and sys.stdin.isatty():
+        try:
             value = getpass.getpass(f"{label}{suffix}: ")
-        else:
-            value = input(f"{label}{suffix}: ")
-    except EOFError:
-        value = ""
+        except EOFError:
+            raise WizardCancelled() from None
+    else:
+        value = _input(f"{label}{suffix}: ")
     return value.strip() or default
 
 
 def _ask_list(label: str) -> list[str]:
-    raw = input(f"{label}（逗号分隔，可留空）: ").strip()
+    raw = _input(f"{label}（逗号分隔，可留空）: ").strip()
     return [item for item in raw.replace("，", ",").split(",") if item]
 
 
 def _confirm(label: str, default_yes: bool = True) -> bool:
     hint = "Y/n" if default_yes else "y/N"
-    raw = input(f"{label} [{hint}]: ").strip().lower()
+    raw = _input(f"{label} [{hint}]: ").strip().lower()
     if not raw:
         return default_yes
     return raw in ("y", "yes")
@@ -122,7 +136,7 @@ def _pick_channels() -> list[str]:
     print("\n可用渠道（回车 = Telegram + Email 两个零门槛渠道）：")
     for index, guide in enumerate(guides, start=1):
         print(f"  {index}. {guide.emoji} {guide.label} — {guide.summary}")
-    raw = input("选择渠道编号（逗号分隔，如 1,4）: ").strip()
+    raw = _input("选择渠道编号（逗号分隔，如 1,4）: ").strip()
     if not raw:
         return ["telegram", "email"]
     picked: list[str] = []
@@ -160,7 +174,7 @@ def _guide_walk(guide: ChannelGuide, env: dict[str, str]) -> tuple[dict[str, str
             print("  发现以下发送者：")
             for index, sender in enumerate(senders, start=1):
                 print(f"    {index}. {sender}")
-            picked = input("把哪些加入 allow_from（编号，回车=全部，0=不加）: ").strip()
+            picked = _input("把哪些加入 allow_from（编号，回车=全部，0=不加）: ").strip()
             if picked != "0":
                 ids = [senders[int(token) - 1].split(" ")[0] for token in picked.replace("，", ",").split(",") if token.strip().isdigit() and 0 < int(token) <= len(senders)] if picked else [sender.split(" ")[0] for sender in senders]
                 allow = allow or ids
@@ -194,27 +208,31 @@ def run_init(args) -> int:
         return _finish(args, selected, answers, lists, worker, worker_token, workspace, confirm=False)
 
     print("Rind 网关配置向导 —— 一步步把 IM 渠道接到你的 worker（全程约 2 分钟）")
-    if args.channel:
-        selected = [token.strip() for token in args.channel.split(",") if guide_for(token.strip())]
-        unknown = [token.strip() for token in args.channel.split(",") if not guide_for(token.strip())]
-        if unknown:
-            print(f"未知渠道已忽略: {', '.join(unknown)}", file=sys.stderr)
-        if not selected:
-            print("没有可用的渠道。", file=sys.stderr)
-            return 2
-    else:
-        selected = _pick_channels()
-    worker_token = os.environ.get("RIND_SERVER_TOKEN", "")
-    worker = _ask("Worker 地址", args.worker_url or DEFAULT_WORKER)
-    workspace = Path(_ask("工作目录（网关会话的根目录，绝对路径）", args.workspace or os.getcwd())).expanduser().resolve()
-    if not worker_token:
-        worker_token = _ask("Worker Token（RIND_SERVER_TOKEN 的值，可留空）", secret=True)
+    try:
+        if args.channel:
+            selected = [token.strip() for token in args.channel.split(",") if guide_for(token.strip())]
+            unknown = [token.strip() for token in args.channel.split(",") if not guide_for(token.strip())]
+            if unknown:
+                print(f"未知渠道已忽略: {', '.join(unknown)}", file=sys.stderr)
+            if not selected:
+                print("没有可用的渠道。", file=sys.stderr)
+                return 2
+        else:
+            selected = _pick_channels()
+        worker_token = os.environ.get("RIND_SERVER_TOKEN", "")
+        worker = _ask("Worker 地址", args.worker_url or DEFAULT_WORKER)
+        workspace = Path(_ask("工作目录（网关会话的根目录，绝对路径）", args.workspace or os.getcwd())).expanduser().resolve()
+        if not worker_token:
+            worker_token = _ask("Worker Token（RIND_SERVER_TOKEN 的值，可留空）", secret=True)
 
-    guides = [guide_for(channel_id) for channel_id in selected]
-    answers = {}
-    lists = {}
-    for guide in guides:
-        answers[guide.id], lists[guide.id] = _guide_walk(guide, env)
+        guides = [guide_for(channel_id) for channel_id in selected]
+        answers = {}
+        lists = {}
+        for guide in guides:
+            answers[guide.id], lists[guide.id] = _guide_walk(guide, env)
+    except WizardCancelled:
+        print("\n已取消（配置未写入）。")
+        return 1
     return _finish(args, selected, answers, lists, worker, worker_token, workspace, confirm=True)
 
 

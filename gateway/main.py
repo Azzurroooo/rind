@@ -92,7 +92,9 @@ async def _run(config: GatewayConfig, runtime_dir: Path, pairing: PairingStore) 
 def main(argv: list[str] | None = None) -> int:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
     args = build_parser().parse_args(list(sys.argv[1:] if argv is None else argv))
-    workspace = Path(args.workspace).expanduser().resolve()
+    # init owns its workspace prompting (default None on the subparser); every
+    # other path resolves against the current directory.
+    workspace = Path(args.workspace or ".").expanduser().resolve()
 
     if args.command == "init":
         from .wizard import run_init
@@ -107,29 +109,44 @@ def main(argv: list[str] | None = None) -> int:
 
         return run_status(args)
 
-    try:
-        config = load_config(resolve_config_path(args.config, workspace))
-    except ConfigError as exc:
-        if args.command in (None, "run") and sys.stdin.isatty():
-            print(f"gateway: {exc}")
-            try:
-                offer = input("现在运行配置向导（gateway init）？[Y/n]: ").strip().lower()
-            except EOFError:
-                offer = "n"
-            if offer in ("", "y", "yes"):
-                from .wizard import run_init
-
-                return run_init(args)
-        print(f"gateway: {exc}", file=sys.stderr)
-        return 2
-    runtime_dir = Path(config.workspace) / ".rind"
-    pairing = PairingStore(runtime_dir / "pairing.json")
+    # Approving a pairing code only needs pairing.json — never require (or
+    # even read) gateway.yaml, so approval works on a machine without config.
     if args.command == "approve":
+        pairing = PairingStore(workspace / ".rind" / "pairing.json")
         if pairing.approve(args.code):
             print(f"已批准配对：{args.code.strip().upper()}")
             return 0
         print(f"配对码无效或已过期：{args.code}", file=sys.stderr)
         return 1
+
+    try:
+        config = load_config(resolve_config_path(args.config, workspace))
+    except ConfigError as exc:
+        # 引导向导不再限定 tty：管道输入 "Y\n" 同样可用（便于自动化与测试），
+        # 输入结束（EOF）则安静取消。
+        print(f"gateway: {exc}")
+        try:
+            offer = input("现在运行配置向导（gateway init）？[Y/n]: ").strip().lower()
+        except EOFError:
+            offer = "n"
+        if offer in ("", "y", "yes"):
+            from types import SimpleNamespace
+
+            from .wizard import run_init
+
+            # The base parser has no init-only flags; give the wizard the
+            # namespace shape it expects (interactive mode, wizard's own
+            # prompts for worker/workspace).
+            return run_init(
+                SimpleNamespace(
+                    command="init", config=None, channel="", yes=False,
+                    worker_url="", workspace=str(workspace),
+                )
+            )
+        print("运行 `python main.py gateway init` 交互式创建配置。", file=sys.stderr)
+        return 2
+    runtime_dir = Path(config.workspace) / ".rind"
+    pairing = PairingStore(runtime_dir / "pairing.json")
     try:
         return asyncio.run(_run(config, runtime_dir, pairing))
     except KeyboardInterrupt:
