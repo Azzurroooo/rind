@@ -113,6 +113,25 @@ describe("Conversation — queued input chips (audit #1)", () => {
   });
 });
 
+describe("Conversation — low-stake tool run grouping", () => {
+  const read = (id) => ({ id: `tool-${id}`, role: "tool", tool_call_id: id, name: "read_file", status: "completed" });
+
+  it("collapses a long read run into one expandable row and expands to the individual blocks", () => {
+    const { container } = render(<Conversation {...makeProps({ messages: [read("a"), read("b"), read("c")] })} />);
+    expect(container.querySelectorAll(".tool-run")).toHaveLength(1);
+    expect(screen.getByText(/3 次调用/)).not.toBeNull();
+    expect(container.querySelectorAll(".tool-run-body")).toHaveLength(0);
+    fireEvent.click(screen.getByRole("button", { name: /Reads & searches/ }));
+    expect(container.querySelectorAll(".tool-run-body .tool-block")).toHaveLength(3);
+  });
+
+  it("individual read rows still render on their own below the run threshold", () => {
+    const { container } = render(<Conversation {...makeProps({ messages: [read("a"), read("b")] })} />);
+    expect(container.querySelectorAll(".tool-run")).toHaveLength(0);
+    expect(container.querySelectorAll("[data-tool-id]")).toHaveLength(2);
+  });
+});
+
 describe("Conversation — message copy & retry (audit #10)", () => {
   it("hover actions copy a user message and reflect the copied state", async () => {
     Object.defineProperty(window.navigator, "clipboard", { configurable: true, value: { writeText: vi.fn(async () => {}) } });

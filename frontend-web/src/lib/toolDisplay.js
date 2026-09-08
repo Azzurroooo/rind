@@ -7,6 +7,40 @@ import { formatBytes } from "./files.js";
 
 export const TOOL_OUTPUT_PREVIEW_LINES = 60;
 
+// Read-only investigation tools whose individual rows carry little signal;
+// long runs of them collapse into one group row (claude-code collapse pattern).
+const LOW_STAKE_TOOLS = new Set(["read_file", "glob", "grep"]);
+const TOOL_RUN_MIN = 3;
+
+// Presentation-only grouping over the faithful entry stream: consecutive
+// completed read/search calls merge into `{ kind: "tool-run", tools }`;
+// anything else (running, failed, mutating, non-tool) breaks the run.
+export function groupToolRuns(messages) {
+  const output = [];
+  let run = [];
+  const flush = () => {
+    if (run.length >= TOOL_RUN_MIN) output.push({ kind: "tool-run", tools: run });
+    else output.push(...run);
+    run = [];
+  };
+  for (const message of messages) {
+    if (isGroupableTool(message)) run.push(message);
+    else {
+      flush();
+      output.push(message);
+    }
+  }
+  flush();
+  return output;
+}
+
+function isGroupableTool(entry) {
+  return entry?.role === "tool"
+    && entry.status === "completed"
+    && LOW_STAKE_TOOLS.has(String(entry.name || ""))
+    && !failedMessage(entry);
+}
+
 const TOOL_LABELS = {
   bash: "Shell command",
   bash_output: "Background output",

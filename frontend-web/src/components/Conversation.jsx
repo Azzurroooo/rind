@@ -1,7 +1,7 @@
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from "react";
-import { ArrowDown, Check, CircleStop, ClipboardCopy, FileDiff, LoaderCircle, RefreshCw, Wrench, X } from "lucide-react";
+import { ArrowDown, Check, ChevronDown, CircleStop, ClipboardCopy, FileDiff, LoaderCircle, RefreshCw, Wrench, X } from "lucide-react";
 import { copyText } from "../lib/clipboard.js";
-import { toolLabel, toolSummary } from "../lib/toolDisplay.js";
+import { formatDuration, groupToolRuns, toolLabel, toolSummary } from "../lib/toolDisplay.js";
 import { MarkdownContent } from "./MarkdownContent.jsx";
 import { QuestionCard } from "./QuestionCard.jsx";
 import { ToolBlock } from "./ToolBlock.jsx";
@@ -83,16 +83,18 @@ const Conversation = forwardRef(function Conversation({
             <div className="collapsed-divider" role="note">更早的消息已折叠（{collapsedCount} 条）</div>
           )}
           {!messages.length && !draft && <EmptyConversation />}
-          {messages.map((message, index) => (
-            <Message
-              key={`${message.id || message.role}-${index}`}
-              message={message}
-              onAnswer={onAnswer}
-              onExpire={onExpire}
-              onRetrieve={onRetrieve}
-              onPromote={onPromote}
-              onRetry={active ? undefined : onRetry}
-            />
+          {groupToolRuns(messages).map((entry, index) => (
+            entry.kind === "tool-run"
+              ? <ToolRunGroup key={`tool-run-${index}`} tools={entry.tools} />
+              : <Message
+                  key={`${entry.id || entry.role}-${index}`}
+                  message={entry}
+                  onAnswer={onAnswer}
+                  onExpire={onExpire}
+                  onRetrieve={onRetrieve}
+                  onPromote={onPromote}
+                  onRetry={active ? undefined : onRetry}
+                />
           ))}
           {draft && <article className="message assistant streaming"><div className="message-avatar">R</div><div className="message-body"><div className="message-meta">Rind <span>streaming</span></div><MarkdownContent value={draft} className="streaming-content" /><span className="cursor-block" /></div></article>}
           {plan?.length > 0 && <PlanBlock plan={plan} />}
@@ -189,6 +191,26 @@ function Message({ message, onAnswer, onExpire, onRetrieve, onPromote, onRetry }
       {actionable && <MessageActions message={message} onRetry={assistant ? onRetry : undefined} />}
     </article>
   );
+}
+
+// Collapsed run of consecutive read/search blocks (claude-code collapse): one
+// quiet row with the run size and total duration; expanding reveals the
+// familiar per-tool blocks. Never auto-expands — the row IS the summary.
+function ToolRunGroup({ tools }) {
+  const [expanded, setExpanded] = useState(false);
+  const totalMs = tools.reduce((sum, tool) => sum + (Number(tool.duration_ms) || 0), 0);
+  return <div className="tool-stack">
+    <article className={`tool-block tool-run ${expanded ? "expanded" : ""}`}>
+      <button type="button" className="tool-title" aria-expanded={expanded} onClick={() => setExpanded((value) => !value)}>
+        <span className="tool-icon is-ok"><Check size={14} /></span>
+        <strong>Reads &amp; searches</strong>
+        <span className="tool-summary-line">{tools.length} 次调用</span>
+        <span className="tool-status">{totalMs ? formatDuration(totalMs) : "complete"}</span>
+        <ChevronDown size={14} className={`tool-chevron ${expanded ? "open" : ""}`} />
+      </button>
+      {expanded && <div className="tool-run-body">{tools.map((tool) => <ToolBlock key={tool.tool_call_id || tool.id} tool={tool} />)}</div>}
+    </article>
+  </div>;
 }
 
 // Hover-only affordances (audit: subtle, keyboard-invisible, no focus trap):

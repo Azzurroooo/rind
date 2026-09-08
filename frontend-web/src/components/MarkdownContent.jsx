@@ -1,3 +1,7 @@
+import { useState } from "react";
+import { Check, ClipboardCopy } from "lucide-react";
+import { copyText } from "../lib/clipboard.js";
+
 export function MarkdownContent({ value, className = "" }) {
   const blocks = parseBlocks(value);
   return <div className={`message-content markdown-content ${className}`.trim()}>{blocks.map((block, index) => renderBlock(block, index))}</div>;
@@ -99,7 +103,15 @@ function splitTableRow(value) {
 }
 
 function renderBlock(block, key) {
-  if (block.type === "code") return <pre className="markdown-code" key={key}><code data-language={block.language || undefined}>{block.value}</code></pre>;
+  if (block.type === "code") return (
+    <div className="code-card" key={key}>
+      <div className="code-card-bar">
+        <span>{block.language || "code"}</span>
+        <CodeCopyButton value={block.value} />
+      </div>
+      <pre className="markdown-code"><code data-language={block.language || undefined}>{block.value}</code></pre>
+    </div>
+  );
   if (block.type === "heading") {
     const Tag = `h${Math.min(6, block.level)}`;
     return <Tag key={key}>{renderInline(block.value)}</Tag>;
@@ -142,4 +154,27 @@ function safeHref(value) {
     return "#";
   }
   return "#";
+}
+
+// Hover-revealed copy on fenced code blocks; the check lingers 1.6s.
+function CodeCopyButton({ value }) {
+  const [state, setState] = useState("idle"); // idle | copied | failed
+  async function handleCopy() {
+    const ok = await copyText(value);
+    setState(ok ? "copied" : "failed");
+    window.setTimeout(() => setState("idle"), 1600);
+  }
+  return (
+    <button
+      type="button"
+      className="code-copy"
+      tabIndex={-1}
+      data-state={state}
+      title={state === "copied" ? "已复制" : state === "failed" ? "复制失败" : "复制代码"}
+      aria-label={state === "copied" ? "已复制" : state === "failed" ? "复制失败" : "复制代码"}
+      onClick={handleCopy}
+    >
+      {state === "copied" ? <Check size={12} /> : <ClipboardCopy size={12} />}
+    </button>
+  );
 }

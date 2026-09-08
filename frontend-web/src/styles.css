@@ -247,6 +247,16 @@ h1, h2, p { margin: 0; }
 .markdown-content code { padding: 2px 5px; border: 1px solid var(--line); border-radius: 3px; background: var(--code-bg); color: var(--amber); font: .88em var(--mono); }
 .markdown-code { margin: 13px 0; padding: 12px 14px; border: 1px solid var(--line); border-radius: 5px; overflow: auto; background: var(--code-bg); color: var(--code-text); font: 12px/1.6 var(--mono); white-space: pre; }
 .markdown-code code { padding: 0; border: 0; background: transparent; color: inherit; }
+/* Fenced code card: language label + hover copy (goose/cline pattern). */
+.code-card { margin: 13px 0; border: 1px solid var(--line); border-radius: 5px; background: var(--code-bg); }
+.code-card .markdown-code { margin: 0; border: 0; border-radius: 0 0 5px 5px; }
+.code-card-bar { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 5px 7px 5px 12px; border-bottom: 1px solid var(--line); }
+.code-card-bar > span { color: var(--dim); font: 10px var(--mono); text-transform: uppercase; letter-spacing: .06em; }
+.code-copy { width: 24px; height: 24px; display: grid; place-items: center; padding: 0; border: 1px solid transparent; border-radius: 4px; background: transparent; color: var(--dim); cursor: pointer; transition: color var(--t-fast) ease, border-color var(--t-fast) ease; }
+.code-card:hover .code-copy, .code-copy[data-state="copied"], .code-copy[data-state="failed"] { color: var(--muted); border-color: var(--line); }
+.code-copy:hover { color: var(--amber); }
+.code-copy[data-state="copied"] { color: var(--green); }
+.code-copy[data-state="failed"] { color: var(--red); }
 .markdown-content a { color: var(--cyan); text-decoration: none; }.markdown-content a:hover { text-decoration: underline; }
 .markdown-content table { width: 100%; margin: 13px 0; border-collapse: collapse; font-size: 12px; }.markdown-content th, .markdown-content td { padding: 7px 9px; border: 1px solid var(--line); text-align: left; vertical-align: top; }.markdown-content th { color: var(--text); background: var(--th-bg); font-weight: 700; }.markdown-content td { color: var(--muted); }
 .message.user .message-content { color: var(--content-strong); }
@@ -287,6 +297,10 @@ h1, h2, p { margin: 0; }
 .tool-block { margin: 7px 0; border: 1px solid var(--line); border-radius: 5px; background: var(--tool-bg); overflow: hidden; }
 .tool-block.running { border-color: var(--warn-line); }
 .tool-block.failed { border-color: var(--failed-line); }
+/* Collapsed run of consecutive read/search tools (claude-code collapse). */
+.tool-run .tool-summary-line { color: var(--dim); }
+.tool-run-body { padding: 5px 7px; border-top: 1px solid var(--line); }
+.tool-run-body .tool-stack { padding-left: 0; border-left: 0; margin: 0; }
 .tool-title { width: 100%; min-height: 34px; display: flex; align-items: center; gap: 8px; padding: 0 11px; border: 0; background: transparent; color: var(--muted); font-size: 11px; text-align: left; cursor: pointer; }
 .tool-title strong { flex: 0 0 auto; color: var(--text); font: 11px var(--mono); }
 .tool-summary-line { min-width: 0; flex: 1; overflow: hidden; color: var(--muted); font: 11px var(--mono); text-overflow: ellipsis; white-space: nowrap; }

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   extractDiffText,
   failedMessage,
+  groupToolRuns,
   formatDuration,
   parseToolArguments,
   parseToolResult,
@@ -151,5 +152,40 @@ describe("toolDisplay — duration formatting", () => {
     expect(formatDuration(1500)).toBe("1.50s");
     expect(formatDuration(61000)).toBe("1m 01s");
     expect(formatDuration(0)).toBe("");
+  });
+});
+
+describe("toolDisplay — low-stake run grouping (claude-code collapse)", () => {
+  const read = (id) => ({ id: `t-${id}`, role: "tool", tool_call_id: id, name: "read_file", status: "completed" });
+  const bash = (id) => ({ id: `t-${id}`, role: "tool", tool_call_id: id, name: "bash", status: "completed" });
+
+  it("merges runs of three or more consecutive completed read/search calls", () => {
+    const grouped = groupToolRuns([read("a"), read("b"), read("c")]);
+    expect(grouped).toHaveLength(1);
+    expect(grouped[0].kind).toBe("tool-run");
+    expect(grouped[0].tools).toHaveLength(3);
+  });
+
+  it("short runs stay inline; a mutating tool breaks the run", () => {
+    const grouped = groupToolRuns([read("a"), read("b"), bash("c"), read("d"), read("e"), read("f")]);
+    expect(grouped[0]).toEqual(read("a"));
+    expect(grouped[1]).toEqual(read("b"));
+    expect(grouped[2]).toEqual(bash("c"));
+    expect(grouped[3].kind).toBe("tool-run");
+    expect(grouped[3].tools.map((tool) => tool.tool_call_id)).toEqual(["d", "e", "f"]);
+  });
+
+  it("never groups failed or running tools", () => {
+    const failed = { ...read("a"), status: "failed" };
+    const running = { ...read("b"), status: "running" };
+    expect(groupToolRuns([failed, running, read("c")])).toHaveLength(3);
+  });
+
+  it("a completed read whose payload reports failure stays standalone", () => {
+    const broken = { ...read("a"), result: JSON.stringify({ ok: false, error: "boom" }) };
+    const grouped = groupToolRuns([broken, read("b"), read("c"), read("d")]);
+    expect(grouped[0]).toEqual(broken);
+    expect(grouped[1].kind).toBe("tool-run");
+    expect(grouped[1].tools.map((tool) => tool.tool_call_id)).toEqual(["b", "c", "d"]);
   });
 });
