@@ -472,6 +472,30 @@ describe("conversation reducer — alive-turn state (working status, heartbeats,
     expect(state.stepRetry).toBeNull();
   });
 
+  it("records how the previous turn ended so queue receipts can race-check", () => {
+    let state = replay([event(1, "durable", { type: "turn_started", turn_id: "t1" })]);
+    expect(state.lastTerminal).toBe("");
+    state = replay([event(2, "durable", { type: "turn_completed", turn_id: "t1" })], state);
+    expect(state.lastTerminal).toBe("completed");
+    state = replay([event(3, "durable", { type: "turn_started", turn_id: "t2" })], state);
+    expect(state.lastTerminal).toBe("");
+    state = replay([event(4, "durable", { type: "turn_cancelled", turn_id: "t2" })], state);
+    expect(state.lastTerminal).toBe("cancelled");
+  });
+
+  it("cancel/fail removes queued chips from BOTH the array and the transcript", () => {
+    const state = replay([
+      event(1, "durable", { type: "turn_started", turn_id: "t1" }),
+      event(2, "durable", { type: "turn_cancelled", turn_id: "t1" }),
+    ]);
+    // queue_input actions applied between those events (receipt race):
+    let queued = reduceConversation(state, { kind: "queue_input", inputId: "in-1", input: "x", mode: "follow_up" });
+    expect(queued.entries.some((entry) => entry.role === "queued")).toBe(true);
+    const cancelled = replay([event(3, "durable", { type: "turn_cancelled", turn_id: "t1" })], queued);
+    expect(cancelled.queued).toEqual([]);
+    expect(cancelled.entries.some((entry) => entry.role === "queued")).toBe(false);
+  });
+
   it("a turn terminal event clears the retry strip", () => {
     const state = replay([
       event(1, "durable", { type: "turn_started", turn_id: "t1" }),

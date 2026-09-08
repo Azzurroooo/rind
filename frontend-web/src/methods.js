@@ -29,6 +29,9 @@ export const methods = Object.freeze({
   fileWrite: "file/write",
 });
 
+// Kernel model/effort vocabulary (model/effort accepts exactly these).
+export const REASONING_EFFORTS = Object.freeze(["low", "medium", "high", "xhigh", "max"]);
+
 export function parseSlashCommand(value) {
   const match = String(value || "").trim().match(/^\/([^\s]+)(?:\s+([\s\S]*))?$/);
   return match ? { name: match[1].toLowerCase(), argument: String(match[2] || "").trim() } : null;

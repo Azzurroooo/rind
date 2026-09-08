@@ -60,6 +60,7 @@ export function emptyConversationState() {
     turnChanges: null, // { fileCount, added, removed, firstToolCallId } — last finished turn's mutations
     activeSince: 0, // epoch ms of turn_started (event `ts`); 0 when unknown
     stepRetry: null, // { attempt, reason } — latest turn_step_retry; cleared once text flows again
+    lastTerminal: "", // "completed" | "failed" | "cancelled" — how the previous turn ended
     cursor: 0, // durable events applied for the current session
     seen: {}, // "session:turn:sequence" -> true (idempotence guard)
   };
@@ -185,7 +186,7 @@ function applyTurnEvent(state, event, context) {
   const turnId = context.turnId;
   switch (event.type) {
     case "turn_started":
-      return { ...state, active: true, activeTurnId: turnId, activeSince: epochMs(event.ts), streaming: { turnId, text: "" }, stepRetry: null };
+      return { ...state, active: true, activeTurnId: turnId, activeSince: epochMs(event.ts), streaming: { turnId, text: "" }, stepRetry: null, lastTerminal: "" };
 
     case "assistant_delta": {
       const streaming = state.streaming && state.streaming.turnId === turnId
@@ -268,14 +269,25 @@ function applyTurnEvent(state, event, context) {
       return appendEntry(state, { role: "system", content: `Goal continuation · round ${event.round || "?"}` });
 
     case "turn_failed": {
-      // The kernel discards pending queued inputs on failure — mirror that.
-      const cleared = { ...state, queued: [] };
+      // The kernel discards pending queued inputs on failure — mirror that in
+      // BOTH places the queue lives: the array and the transcript entries.
+      const cleared = {
+        ...state,
+        queued: [],
+        entries: state.entries.filter((entry) => entry.role !== "queued"),
+        lastTerminal: "failed",
+      };
       const finalized = finalizeTurn(cleared, turnId);
       return appendEntry(finalized, { role: "system", content: formatTurnFailure(event), tone: "error" });
     }
 
     case "turn_cancelled": {
-      const cleared = { ...state, queued: [] };
+      const cleared = {
+        ...state,
+        queued: [],
+        entries: state.entries.filter((entry) => entry.role !== "queued"),
+        lastTerminal: "cancelled",
+      };
       const finalized = finalizeTurn(cleared, turnId);
       return appendEntry(finalized, { role: "system", content: "Turn cancelled." });
     }
@@ -283,7 +295,7 @@ function applyTurnEvent(state, event, context) {
     case "turn_completed":
       // follow_up inputs roll into the NEXT turn (kernel keeps them queued),
       // so the queue survives a completed turn until delivery.
-      return finalizeTurn(state, turnId);
+      return finalizeTurn({ ...state, lastTerminal: "completed" }, turnId);
 
     default:
       return state;

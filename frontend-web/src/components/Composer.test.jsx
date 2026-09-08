@@ -166,6 +166,17 @@ describe("Composer — slash suggestions source the command registry (audit #9)"
   });
 });
 
+describe("Composer — oversized files are never silently dropped", () => {
+  it("files above 8MB show a notice and add no chip", () => {
+    renderComposer();
+    const big = new File(["x".repeat(100)], "huge.png", { type: "image/png" });
+    Object.defineProperty(big, "size", { value: 9 * 1024 * 1024 });
+    fireEvent.paste(screen.getByRole("textbox"), { clipboardData: { files: [big] } });
+    expect(screen.getByText("1 个文件超过 8MB，未添加")).not.toBeNull();
+    expect(document.querySelector(".upload-chip")).toBeNull();
+  });
+});
+
 describe("Composer — draft history (↑ recall)", () => {
   function HistoryHarness(props = {}) {
     const [value, setValue] = useState("");

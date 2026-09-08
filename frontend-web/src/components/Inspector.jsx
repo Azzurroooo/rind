@@ -1,4 +1,5 @@
 import { Activity, BrainCircuit, CircleGauge, Cloud, GitBranch, Goal, Server, Sparkles } from "lucide-react";
+import { REASONING_EFFORTS } from "../methods.js";
 import { formatDuration } from "../lib/toolDisplay.js";
 
 const RING_RADIUS = 18;
@@ -22,7 +23,7 @@ export function Inspector({ info, stats, goal, plan, models, effort, connection,
       <StateRow icon={<Cloud size={15} />} label="Session" value={info?.session_id || "none"} />
       <StateRow icon={<GitBranch size={15} />} label="Workspace" value={shortPath(info?.workspace_root)} />
     </div>
-    <div className="inspector-section"><div className="section-title"><BrainCircuit size={15} /> Model</div><select value={modelValue} onFocus={onRefreshModels} onChange={(event) => onModel(event.target.value)}>{modelOptions.length ? modelOptions.map((model) => <option key={model} value={model}>{model}</option>) : <option value="">Select model</option>}</select><select value={effort || ""} onChange={(event) => onEffort(event.target.value)}><option value="">Reasoning effort</option>{["low", "medium", "high", "xhigh", "max"].map((item) => <option key={item} value={item}>{item}</option>)}</select></div>
+    <div className="inspector-section"><div className="section-title"><BrainCircuit size={15} /> Model</div><select value={modelValue} onFocus={onRefreshModels} onChange={(event) => onModel(event.target.value)}>{modelOptions.length ? modelOptions.map((model) => <option key={model} value={model}>{model}</option>) : <option value="">Select model</option>}</select><select value={effort || ""} onChange={(event) => onEffort(event.target.value)}><option value="">Reasoning effort</option>{REASONING_EFFORTS.map((item) => <option key={item} value={item}>{item}</option>)}</select></div>
     {/* Context gauge (audit #15): ring + "tokens · % used" badge; the expandable
         detail carries window/cached plus last-turn duration & message count
         when the runtime reported them. No cost display — the kernel doesn't track $. */}

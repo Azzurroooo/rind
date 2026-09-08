@@ -6,6 +6,7 @@ import { composeMessageWithAttachments } from "../lib/files.js";
 
 const NOTICE_MS = 4000;
 const DRAFT_HISTORY_MAX = 50;
+const MAX_FILE_BYTES = 8 * 1024 * 1024;
 let nextChipId = 1;
 
 // Composer (web-ui.md §2.4): paste / drag-drop / paperclip → attachment chips
@@ -72,7 +73,14 @@ const Composer = forwardRef(function Composer({
   }, [onUpload, patchChip]);
 
   const addFiles = useCallback((fileList) => {
-    const files = Array.from(fileList || []).filter((file) => file && (file.size == null || file.size <= 8 * 1024 * 1024));
+    const all = Array.from(fileList || []).filter(Boolean);
+    const files = all.filter((file) => file.size == null || file.size <= MAX_FILE_BYTES);
+    const rejected = all.length - files.length;
+    if (rejected) {
+      setNotice(rejected === 1 ? "1 个文件超过 8MB，未添加" : `${rejected} 个文件超过 8MB，未添加`);
+      if (noticeTimer.current) window.clearTimeout(noticeTimer.current);
+      noticeTimer.current = window.setTimeout(() => setNotice(""), NOTICE_MS);
+    }
     if (!files.length) return;
     const created = files.map((file) => ({
       id: `chip-${nextChipId++}`,

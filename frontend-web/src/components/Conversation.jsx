@@ -250,7 +250,7 @@ function Message({ message, onAnswer, onExpire, onRetrieve, onPromote, onRetry }
     <article className={`message ${assistant ? "assistant" : system ? "system" : "user"}`} data-message-id={message.id || ""}>
       <div className={`message-avatar ${assistant ? "rind" : "human"}`}>{assistant ? "R" : "You"}</div>
       <div className="message-body">
-        <div className="message-meta">{assistant ? "Rind" : "You"}<span>{message.time || ""}</span></div>
+        <div className="message-meta">{assistant ? "Rind" : "You"}</div>
         <MarkdownContent value={message.content} />{message.meta && <div className="message-note">{message.meta}</div>}
       </div>
       {actionable && <MessageActions message={message} onRetry={assistant ? onRetry : undefined} />}

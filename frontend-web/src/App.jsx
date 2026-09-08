@@ -7,7 +7,7 @@ import { Conversation } from "./components/Conversation.jsx";
 import { Inspector } from "./components/Inspector.jsx";
 import { LoginGate } from "./components/LoginGate.jsx";
 import { SessionRail } from "./components/SessionRail.jsx";
-import { methods, parseSlashCommand, sessionIdOf } from "./methods.js";
+import { methods, parseSlashCommand, REASONING_EFFORTS, sessionIdOf } from "./methods.js";
 import { createRuntimeClient, initialRuntimeUrl, isAuthError } from "./runtimeClient.js";
 import { buildCommands, findCommandBySlash } from "./lib/commands.js";
 import { createEventCoalescer } from "./lib/streamController.js";
@@ -18,7 +18,6 @@ import { createConnectionController, initialConnectionState, reduceConnection } 
 import { conversationView, emptyConversationState, questionKey, reduceConversation } from "./state/conversationReducer.js";
 import { dropCredentials, fetchTicket, loginErrorMessage, readStoredTicket, readStoredToken, storeTicket, storeToken, unauthorizedMessage } from "./ticket.js";
 
-const REASONING_EFFORTS = ["low", "medium", "high", "xhigh", "max"];
 const CATCH_UP_CHUNK = 50;
 const SESSION_PAGE = 30; // session/list page size; the server caps limit at 100
 const SESSION_LIMIT_MAX = 100;
@@ -318,8 +317,15 @@ export default function App() {
       dispatchConnection({ type: "submit_credentials" });
       await clientRef.current.connect();
     } catch (error) {
-      if (isAuthError(error)) dropCredentials();
-      dispatchConnection({ type: "unauthorized", message: loginErrorMessage(error) });
+      if (Number(error?.status) === 404) {
+        // No /ticket endpoint → the worker runs tokenless; the typed value is
+        // not stored and a bare connect takes over.
+        dispatchConnection({ type: "submit_credentials" });
+        await clientRef.current.connect().catch(() => {});
+      } else {
+        if (isAuthError(error)) dropCredentials();
+        dispatchConnection({ type: "unauthorized", message: loginErrorMessage(error) });
+      }
     } finally {
       setAuthBusy(false);
     }
@@ -626,11 +632,19 @@ export default function App() {
           input: text,
           ...(mode === "steering" && convRef.current.activeTurnId ? { turn_id: convRef.current.activeTurnId } : {}),
         });
-        const inputId = String(result?.input_id || "").trim();
-        if (inputId) {
-          dispatchConversation({ kind: "queue_input", inputId, input: text, mode });
+        // The receipt can race the turn's end: cancel/fail discards queued
+        // inputs kernel-side, so a chip would ghost forever — the user's words
+        // go back to the draft instead. Completion keeps them queued.
+        const terminal = convRef.current.lastTerminal;
+        if (terminal === "cancelled" || terminal === "failed") {
+          restoreDraft(text);
         } else {
-          dispatchMessage("system", `Queued input accepted: ${text}`);
+          const inputId = String(result?.input_id || "").trim();
+          if (inputId) {
+            dispatchConversation({ kind: "queue_input", inputId, input: text, mode });
+          } else {
+            dispatchMessage("system", `Queued input accepted: ${text}`);
+          }
         }
       } catch (error) {
         restoreDraft(text);
