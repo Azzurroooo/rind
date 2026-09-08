@@ -481,3 +481,23 @@ test("latestPlan exposes the newest snapshot regardless of turn state", () => {
   }))
   assert.equal(latestPlan(state)?.steps[0].step, "Inspect")
 })
+
+test("turn_completed records a turn summary with the latest token stats", async (t) => {
+  const { createConversation, reduceEvent } = await import("../src/renderer/timeline-model.ts")
+  let state = createConversation()
+  state = reduceEvent(state, event("turn_started", {}))
+  state = reduceEvent(state, event("token_stats_updated", { stats: { input_tokens: 5300, output_tokens: 852, total_tokens: 6152, context_usage_percent: 0.03 } }))
+  state = reduceEvent(state, event("turn_completed", { duration_ms: 25400 }))
+  assert.deepEqual(state.lastTurnSummary, { durationMs: 25400, inputTokens: 5300, outputTokens: 852 })
+  assert.equal(state.contextUsagePercent, 0.03)
+  assert.equal(state.activeTurnId, "")
+})
+
+test("turn summary survives when the turn carries no duration", async (t) => {
+  const { createConversation, reduceEvent } = await import("../src/renderer/timeline-model.ts")
+  let state = createConversation()
+  state = reduceEvent(state, event("turn_started", {}))
+  state = reduceEvent(state, event("token_stats_updated", { stats: { input_tokens: 900, output_tokens: 100, total_tokens: 1000 } }))
+  state = reduceEvent(state, event("turn_completed", {}))
+  assert.deepEqual(state.lastTurnSummary, { durationMs: 0, inputTokens: 900, outputTokens: 100 })
+})

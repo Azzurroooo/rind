@@ -1216,10 +1216,17 @@ async function pollTaskMonitor() {
     stopTaskMonitorPolling()
     return
   }
+  await refreshTasks(state.viewedSessionId).catch(() => {})
+}
+
+// One background/list round-trip. Runs on the polling interval while the dock
+// is open, and once after a turn settles or a session switches so the topbar
+// badge stays honest without a permanent timer.
+async function refreshTasks(sessionId: string) {
+  if (!sessionId || currentRuntimeSnapshot().status !== "ready") return
   if (taskMonitorPollInFlight) return
   taskMonitorPollInFlight = true
   try {
-    const sessionId = state.viewedSessionId
     const result = asRecord(await requestForSession(runtimeMethods.backgroundList, sessionId))
     state.taskMonitor.tasks = mergeTasks(state.taskMonitor.tasks, result.tasks)
     const expandedId = state.taskMonitor.expandedId
@@ -1229,7 +1236,7 @@ async function pollTaskMonitor() {
     }
   } finally {
     taskMonitorPollInFlight = false
-    if (state.taskMonitorOpen) renderTaskMonitorDock()
+    renderTaskMonitorDock()
   }
 }
 
@@ -1482,6 +1489,7 @@ function renderStream() {
       hasProject: Boolean(chatProject()?.available),
       ready,
       hasApiKey: state.settings.hasApiKey,
+      runtimeStatus: state.runtime.status,
     }, brandMarkUrl)
     messageStream.append(empty)
   } else {
@@ -2220,7 +2228,7 @@ function handleRuntimeEvent(envelope: RuntimeEvent) {
     }
     if (sessionId === state.viewedSessionId) {
       void loadGoal()
-      if (state.taskMonitorOpen) void pollTaskMonitor().catch(() => {})
+      void refreshTasks(sessionId).catch(() => {})
     }
     runAction(async () => {
       await loadSessions()
@@ -2331,7 +2339,10 @@ function selectSlashCommand(command: SlashCommand) {
 
 // ---------- @-file mentions ----------
 
-const fileIndexPromises = new Map<string, Promise<string[]>>()
+// Indexes are rebuilt when older than the TTL so files created mid-session
+// (including files Rind itself just wrote) become mentionable.
+const fileIndexCache = new Map<string, { files: Promise<string[]>; at: number }>()
+const fileIndexTtlMs = 60_000
 
 function updateMentionMenu() {
   if (prompt.disabled) {
@@ -2360,12 +2371,15 @@ function updateMentionMenu() {
 
 function loadFileIndex(apply: (files: string[]) => void) {
   const projectPath = viewedProject()?.path || ""
-  let promise = fileIndexPromises.get(projectPath)
-  if (!promise) {
-    promise = window.api.files.index(projectPath).then((index) => index.files).catch(() => [])
-    fileIndexPromises.set(projectPath, promise)
+  let entry = fileIndexCache.get(projectPath)
+  if (!entry || Date.now() - entry.at > fileIndexTtlMs) {
+    entry = {
+      files: window.api.files.index(projectPath).then((index) => index.files).catch(() => []),
+      at: Date.now(),
+    }
+    fileIndexCache.set(projectPath, entry)
   }
-  return promise.then(apply)
+  return entry.files.then(apply)
 }
 
 function renderMentionMenu() {
@@ -2430,6 +2444,9 @@ document.addEventListener("selectionchange", () => {
   if (document.activeElement === prompt) updateMentionMenu()
 })
 prompt.addEventListener("keydown", (event) => {
+  // IME composition (Chinese input etc.) owns Enter, Tab, and the arrows
+  // until the composition commits; never interpret those keys ourselves.
+  if (event.isComposing) return
   if (state.mention) {
     if (event.key === "ArrowDown" || event.key === "ArrowUp") {
       event.preventDefault()
@@ -2933,13 +2950,19 @@ function asRecordText(value: unknown): string {
 }
 
 interrupt.addEventListener("click", () => cancelActiveTurn(state.viewedSessionId))
-retry.addEventListener("click", () => runAction(async () => {
-  const project = chatProject()
-  if (!project?.available) return
-  await restartRuntime(project.path)
-  state.notice = ""
-  render()
-}))
+retry.addEventListener("click", () => retryRuntime())
+
+// Restart the runtime in the chat project's workspace; shared by the notice
+// bar's Retry and the empty-state actions.
+function retryRuntime() {
+  runAction(async () => {
+    const project = chatProject()
+    if (!project?.available) return
+    await restartRuntime(project.path)
+    state.notice = ""
+    render()
+  })
+}
 jumpLatest.addEventListener("click", () => {
   messageStream.scrollTop = messageStream.scrollHeight
   jumpLatest.hidden = true
@@ -3321,6 +3344,10 @@ messageStream.addEventListener("click", (event) => {
     runAction(addProject)
     return
   }
+  if (emptyAction === "retry") {
+    retryRuntime()
+    return
+  }
   const emptyPrompt = target.closest<HTMLButtonElement>("[data-empty-prompt]")?.dataset.emptyPrompt
   if (emptyPrompt) {
     setPrompt(emptyPrompt, true)
@@ -3485,7 +3512,14 @@ function openSettings() {
       ...reasoningEfforts.map((effort) => new Option(effort, effort)),
     )
   }
-  settingsReasoning.value = state.settings.reasoningEffort
+  const saved = state.settings.reasoningEffort
+  // Keep an effort this build doesn't know selectable, so saving never
+  // silently rewrites hand-configured settings to "Default".
+  if (saved && !reasoningEfforts.includes(saved as (typeof reasoningEfforts)[number])
+    && ![...settingsReasoning.options].some((option) => option.value === saved)) {
+    settingsReasoning.append(new Option(saved, saved))
+  }
+  settingsReasoning.value = saved
   render()
 }
 
@@ -3755,7 +3789,7 @@ async function switchSession(nextSessionId: string) {
   await loadReplay(nextSessionId)
   if (state.viewedSessionId !== nextSessionId) return
   void loadGoal()
-  void pollTaskMonitor().catch(() => {})
+  void refreshTasks(nextSessionId).catch(() => {})
   if (state.filesOpen && viewedProject()?.available) await loadDirectory("")
   render()
 }

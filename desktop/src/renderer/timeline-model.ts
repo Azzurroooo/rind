@@ -492,12 +492,14 @@ function readTokenStats(stats: Record<string, unknown>): TokenStats | undefined 
   if (!inputTokens && !outputTokens && !totalTokens) return undefined
   return { inputTokens, outputTokens, totalTokens }
 }
-function turnSummary(state: ConversationState, durationMs: number): TurnSummary | undefined {
-  if (!durationMs && !state.tokenStats) return undefined
+function turnSummary(state: ConversationState, durationMs: number): Pick<ConversationState, "lastTurnSummary"> {
+  if (!durationMs && !state.tokenStats) return {}
   return {
-    durationMs,
-    inputTokens: state.tokenStats?.inputTokens ?? 0,
-    outputTokens: state.tokenStats?.outputTokens ?? 0,
+    lastTurnSummary: {
+      durationMs,
+      inputTokens: state.tokenStats?.inputTokens ?? 0,
+      outputTokens: state.tokenStats?.outputTokens ?? 0,
+    },
   }
 }
 function summarizeProgress(payload: unknown) {
