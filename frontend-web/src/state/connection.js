@@ -1,7 +1,7 @@
 // Connection state machine (web-ui.md §2.1) — pure reducer, no IO.
 //
 // Phases and their visuals (ConnectionBar renders the strip):
-//   login        → LoginGate card, app hidden
+//   login        → LoginGate card, shown only after the worker demanded auth
 //   connecting   → renders NOTHING (transitional, e.g. handshake in flight)
 //   online       → renders NOTHING (contract: online shows no element)
 //   reconnecting → 2px top strip + "重连中"
@@ -18,9 +18,9 @@ export const CONNECTION_PHASES = ["login", "connecting", "online", "reconnecting
 
 const OFFLINE_AFTER_FAILED_ATTEMPTS = 3;
 
-export function initialConnectionState({ authenticated = false } = {}) {
+export function initialConnectionState({ gated = false } = {}) {
   return {
-    phase: authenticated ? "connecting" : "login",
+    phase: gated ? "login" : "connecting",
     failedAttempts: 0,
     needsSync: false, // a live connection was lost → next open must replay-catch-up
     syncTotal: 0,
@@ -72,10 +72,10 @@ export function reduceConnection(state, action) {
       return { ...state, phase: "online", needsSync: false, syncTotal: 0, syncRemaining: 0 };
 
     case "unauthorized": // 4401 / rejected credential → back to the login card
-      return { ...initialConnectionState({ authenticated: false }), phase: "login", message: String(action.message || "") };
+      return { ...initialConnectionState({ gated: true }), phase: "login", message: String(action.message || "") };
 
     case "sign_out": // user-initiated disconnect, no error text
-      return { ...initialConnectionState({ authenticated: false }) };
+      return { ...initialConnectionState() };
 
     default:
       return state;

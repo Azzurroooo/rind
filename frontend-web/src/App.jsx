@@ -16,7 +16,7 @@ import { currentNotificationPermission, finalAssistantText, requestNotificationP
 import { fileToBase64, uploadTargetPath } from "./lib/files.js";
 import { createConnectionController, initialConnectionState, reduceConnection } from "./state/connection.js";
 import { conversationView, emptyConversationState, questionKey, reduceConversation } from "./state/conversationReducer.js";
-import { dropCredentials, fetchTicket, hasStoredCredential, loginErrorMessage, readStoredTicket, readStoredToken, storeTicket, storeToken, unauthorizedMessage } from "./ticket.js";
+import { dropCredentials, fetchTicket, loginErrorMessage, readStoredTicket, readStoredToken, storeTicket, storeToken, unauthorizedMessage } from "./ticket.js";
 
 const REASONING_EFFORTS = ["low", "medium", "high", "xhigh", "max"];
 const CATCH_UP_CHUNK = 50;
@@ -37,7 +37,7 @@ function readNarrowViewport() {
 
 export default function App() {
   const [endpoint, setEndpoint] = useState(initialRuntimeUrl);
-  const [connection, dispatchConnection] = useReducer(reduceConnection, undefined, () => initialConnectionState({ authenticated: hasStoredCredential() }));
+  const [connection, dispatchConnection] = useReducer(reduceConnection, undefined, () => initialConnectionState());
   const [conversation, dispatchConversation] = useReducer(reduceConversation, undefined, emptyConversationState);
   const [authBusy, setAuthBusy] = useState(false);
   const [loginToken, setLoginToken] = useState("");
@@ -245,9 +245,15 @@ export default function App() {
   clientRef.current = client;
 
   useEffect(() => {
-    if (!hasStoredCredential()) return undefined;
-    client.connect().catch(() => {
-      // Statuses carry the outcome; auth failures route back to the login card.
+    // Direct-connect first: a tokenless loopback worker needs zero friction.
+    // Only a 4401 from the worker routes to the login card.
+    client.connect().catch((error) => {
+      if (isAuthError(error)) {
+        dropCredentials();
+        dispatchConnection({ type: "unauthorized", message: loginErrorMessage(error) });
+        return;
+      }
+      dispatchConnection({ type: "connect_failed" });
     });
     return () => client.disconnect();
   }, [client]);
@@ -258,15 +264,19 @@ export default function App() {
     const token = readStoredToken();
     if (token) {
       // Tickets are one-time: mint a fresh one for every (re)connect.
-      const ticket = await fetchTicket(token);
-      storeTicket(ticket);
-      return `ticket=${encodeURIComponent(ticket)}`;
+      try {
+        const ticket = await fetchTicket(token);
+        storeTicket(ticket);
+        return `ticket=${encodeURIComponent(ticket)}`;
+      } catch (error) {
+        dropCredentials();
+        // 404 means the worker runs tokenless — fall through and connect bare.
+        if (Number(error?.status) !== 404) throw error;
+      }
     }
     const stored = readStoredTicket();
     if (stored) return `ticket=${encodeURIComponent(stored)}`;
-    const error = new Error("credentials required");
-    error.code = "auth_required";
-    throw error;
+    return ""; // no credential → tokenless direct connect; the worker decides
   }
 
   function handleStatus(status) {
@@ -319,6 +329,9 @@ export default function App() {
     setLoginToken("");
     clientRef.current.disconnect();
     dispatchConnection({ type: "sign_out" });
+    // Credentials are gone: a tokenless worker lets us straight back in; a
+    // tokened one answers 4401 and the login card reappears.
+    clientRef.current.connect().catch(() => {});
   }
 
   function reconnect() {
