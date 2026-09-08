@@ -161,23 +161,34 @@ def _guide_walk(guide: ChannelGuide, env: dict[str, str]) -> tuple[dict[str, str
     print("  在服务器执行 `gateway approve <码>` 后即自动进入白名单。")
     allow = _ask_list("allow_from 白名单")
     group = _ask_list("group_allow 群白名单")
+    probe_detail = ""
     if guide.probe and answers:
         if _confirm("立即验证凭证（会访问平台 API）？"):
             result = guide.probe({key: value for key, value in answers.items() if value})
+            probe_detail = result.detail
             mark = "✔" if result.ok else "✘"
-            print(f"  {mark} {result.detail}")
+            print(f"  {mark} {probe_detail}")
             if not result.ok:
                 print("     可稍后运行 `python main.py gateway doctor --probe` 重新体检。")
-    if guide.discover_senders and _confirm("现在抓取你的账号 ID？（60 秒内给 bot 发一条消息）", default_yes=False):
-        senders = guide.discover_senders({key: value for key, value in answers.items() if value}, 60.0)
-        if senders:
-            print("  发现以下发送者：")
-            for index, sender in enumerate(senders, start=1):
-                print(f"    {index}. {sender}")
-            picked = _input("把哪些加入 allow_from（编号，回车=全部，0=不加）: ").strip()
-            if picked != "0":
-                ids = [senders[int(token) - 1].split(" ")[0] for token in picked.replace("，", ",").split(",") if token.strip().isdigit() and 0 < int(token) <= len(senders)] if picked else [sender.split(" ")[0] for sender in senders]
-                allow = allow or ids
+    if guide.discover_senders:
+        import re
+
+        bot_match = re.search(r"@[\w]+", probe_detail)
+        where = f"在 Telegram 里给你的 bot {bot_match.group(0)} 发一条消息" if bot_match else "在 Telegram 里找到你的 bot（BotFather 给的 username）并发一条消息"
+        if _confirm(f"现在抓取你的账号 ID？（60 秒内{where}）", default_yes=False):
+            print(f"  等待消息中——请在 Telegram 里给 {bot_match.group(0) if bot_match else '你的 bot'} 发送任意消息…")
+            senders = guide.discover_senders({key: value for key, value in answers.items() if value}, 60.0)
+            if senders:
+                print("  发现以下发送者：")
+                for index, sender in enumerate(senders, start=1):
+                    print(f"    {index}. {sender}")
+                picked = _input("把哪些加入 allow_from（编号，回车=全部，0=不加）: ").strip()
+                if picked != "0":
+                    ids = [senders[int(token) - 1].split(" ")[0] for token in picked.replace("，", ",").split(",") if token.strip().isdigit() and 0 < int(token) <= len(senders)] if picked else [sender.split(" ")[0] for sender in senders]
+                    allow = allow or ids
+            else:
+                print("  60 秒内没有收到消息。稍后直接给 bot 发消息会收到配对码卡（含你的 ID），")
+                print("  用 `gateway approve <码>` 批准即可，无需重跑向导。")
     return answers, {"allow_from": allow, "group_allow": group}
 
 
