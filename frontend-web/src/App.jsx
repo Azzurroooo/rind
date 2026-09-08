@@ -1039,6 +1039,7 @@ export default function App() {
           collapsedCount={view.collapsedCount}
           turnChanges={view.turnChanges}
           workspace={selectedWorkspace}
+          connection={connection.phase}
           interruptArmed={interruptArmed}
           onCancel={cancelTurn}
           onAnswer={answerQuestion}

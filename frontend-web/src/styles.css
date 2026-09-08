@@ -231,6 +231,19 @@ h1, h2, p { margin: 0; }
 .starter-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 7px; margin-top: 27px; }
 .starter-chip { padding: 10px 8px; border: 1px solid var(--line); border-radius: 4px; background: transparent; color: var(--muted); font: 10px/1.4 var(--mono); cursor: pointer; transition: color var(--t-fast) ease, border-color var(--t-fast) ease; }
 .starter-chip:hover { color: var(--amber); border-color: var(--line-strong); }
+
+/* Offline setup guide (deployment UX): the console teaches how to start its
+   worker with the exact commands — copy-ready, no docs detour. */
+.setup-guide { margin-top: 27px; padding: 14px 16px; border: 1px solid var(--danger-line); border-radius: 6px; background: var(--surface); text-align: left; }
+.setup-guide > strong { display: block; color: var(--red); font-size: 12px; }
+.setup-guide > span { display: block; margin: 6px 0 11px; color: var(--muted); font-size: 11px; line-height: 1.5; }
+.setup-command + .setup-command { margin-top: 9px; }
+.setup-command > span { display: block; margin-bottom: 4px; color: var(--dim); font: 10px var(--mono); }
+.setup-command-row { display: flex; align-items: stretch; gap: 7px; }
+.setup-command-row code { min-width: 0; flex: 1; display: block; padding: 7px 10px; overflow-x: auto; border: 1px solid var(--line); border-radius: 4px; background: var(--code-bg); color: var(--code-text); font: 10px/1.5 var(--mono); white-space: nowrap; }
+.setup-copy { flex: 0 0 auto; padding: 0 11px; border: 1px solid var(--line-strong); border-radius: 4px; background: transparent; color: var(--muted); font: 10px var(--mono); cursor: pointer; transition: color var(--t-fast) ease, border-color var(--t-fast) ease; }
+.setup-copy:hover:not(:disabled) { color: var(--amber); border-color: var(--amber); }
+.setup-copy:disabled { color: var(--green); border-color: var(--green); opacity: 1; cursor: default; }
 .message { display: flex; gap: 13px; max-width: 880px; margin: 0 auto 27px; }
 .message-avatar { width: 28px; height: 28px; flex: 0 0 28px; display: grid; place-items: center; border-radius: 6px; color: var(--bg); font: 10px var(--mono); font-weight: 600; }
 .message-avatar.rind { background: var(--amber); color: var(--accent-contrast); }

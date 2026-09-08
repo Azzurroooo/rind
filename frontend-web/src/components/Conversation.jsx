@@ -24,6 +24,7 @@ const Conversation = forwardRef(function Conversation({
   collapsedCount = 0,
   turnChanges = null,
   workspace = "",
+  connection = "",
   interruptArmed = false,
   onCancel,
   onAnswer,
@@ -84,7 +85,7 @@ const Conversation = forwardRef(function Conversation({
           {collapsedCount > 0 && (
             <div className="collapsed-divider" role="note">更早的消息已折叠（{collapsedCount} 条）</div>
           )}
-          {!messages.length && !draft && <EmptyConversation workspace={workspace} onStarter={onStarter} />}
+          {!messages.length && !draft && <EmptyConversation workspace={workspace} onStarter={onStarter} offline={connection === "offline"} />}
           {groupToolRuns(messages).map((entry, index) => (
             entry.kind === "tool-run"
               ? <ToolRunGroup key={`tool-run-${index}`} tools={entry.tools} />
@@ -127,7 +128,9 @@ const STARTERS = [
 
 // opencode session-new-view pattern: the workspace path leads (directory muted,
 // project name emphasized) and the starters are one-click fills, not decoration.
-function EmptyConversation({ workspace, onStarter }) {
+// When the worker is unreachable, the console teaches how to start one — the
+// exact commands, copy-ready, instead of a dead "已断开" chip alone.
+function EmptyConversation({ workspace, onStarter, offline = false }) {
   const { dir, name } = splitWorkspace(workspace);
   return <div className="empty-conversation">
     <div className="empty-orbit">R</div>
@@ -139,7 +142,41 @@ function EmptyConversation({ workspace, onStarter }) {
         <button key={starter} type="button" className="starter-chip" onClick={() => onStarter?.(starter)}>{starter}</button>
       ))}
     </div>
+    {offline && <SetupGuide />}
   </div>;
+}
+
+const SETUP_COMMANDS = [
+  { label: "本地启动 worker", command: "python main.py app-server --web --host 127.0.0.1 --port 8765 --cwd <workspace>" },
+  { label: "或一键容器化部署（web + worker）", command: "docker compose up -d --build" },
+];
+
+function SetupGuide() {
+  return <div className="setup-guide" role="note">
+    <strong>连接不上 worker？</strong>
+    <span>在仓库根目录用以下任一方式启动，然后用顶部地址栏连接：</span>
+    {SETUP_COMMANDS.map(({ label, command }) => (
+      <div className="setup-command" key={command}>
+        <span>{label}</span>
+        <div className="setup-command-row">
+          <code>{command}</code>
+          <CopyOnce text={command} label="复制" />
+        </div>
+      </div>
+    ))}
+  </div>;
+}
+
+// One-shot copy chip: 复制 → 已复制 (1.6s). Enough for the two command rows.
+function CopyOnce({ text, label }) {
+  const [copied, setCopied] = useState(false);
+  async function handleCopy() {
+    const ok = await copyText(text);
+    if (!ok) return;
+    setCopied(true);
+    window.setTimeout(() => setCopied(false), 1600);
+  }
+  return <button type="button" className="setup-copy" onClick={handleCopy} disabled={copied}>{copied ? "已复制" : label}</button>;
 }
 
 function splitWorkspace(value) {

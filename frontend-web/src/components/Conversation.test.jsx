@@ -249,3 +249,20 @@ describe("Conversation — working status line", () => {
     expect(screen.queryByText("Working")).toBeNull();
   });
 });
+
+describe("Conversation — offline setup guide (deployment UX)", () => {
+  it("shows copy-ready worker startup commands only when offline and empty", () => {
+    const { container, rerender } = render(<Conversation {...makeProps()} connection="offline" />);
+    expect(container.querySelector(".setup-guide")).not.toBeNull();
+    expect(container.querySelector(".setup-guide code").textContent).toContain("python main.py app-server --web");
+    expect(container.querySelectorAll(".setup-command")).toHaveLength(2);
+
+    rerender(<Conversation {...makeProps()} connection="online" />);
+    expect(container.querySelector(".setup-guide")).toBeNull();
+  });
+
+  it("no guide when a conversation already has content", () => {
+    const { container } = render(<Conversation {...makeProps({ messages: [{ id: "u1", role: "user", content: "hi" }] })} connection="offline" />);
+    expect(container.querySelector(".setup-guide")).toBeNull();
+  });
+});
