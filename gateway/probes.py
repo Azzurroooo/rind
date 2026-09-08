@@ -7,6 +7,7 @@ Tests inject fake HTTP by monkeypatching ``_get_json`` / ``_post_json``.
 
 from __future__ import annotations
 
+import asyncio
 import imaplib
 import json
 import urllib.parse
@@ -161,8 +162,37 @@ def _probe_qq(a: dict[str, str]) -> ProbeResult:
     return _ok("被动通道：启动网关后，NapCat 反向连接即在线")
 
 
+async def worker_alive(worker: str, token: str | None, timeout: float = 5.0) -> tuple[bool, str]:
+    """Real WS handshake probe for ws:// workers ("worker 开着吗" 不靠猜).
 
-def _probe_qq(a: dict[str, str]) -> ProbeResult:
-    return _ok("被动通道：启动网关后，NapCat 反向连接即在线")
+    ``stdio`` workers are owned by the gateway process itself, so callers
+    branch on that before probing. websockets imports lazily to keep this
+    module importable without the gateway dependency set.
+    """
+    try:
+        import websockets
+    except Exception as exc:  # noqa: BLE001
+        return False, f"websockets 不可用：{exc}"
+    url = worker
+    if token:
+        separator = "&" if "?" in url else "?"
+        url = f"{url}{separator}token={token}"
+
+    async def probe() -> tuple[bool, str]:
+        async with websockets.connect(url, open_timeout=timeout) as ws:
+            await ws.send(json.dumps({"kind": "request", "request_id": "probe-1", "method": "initialize", "params": {}}))
+            deadline = asyncio.get_running_loop().time() + timeout
+            while True:
+                remaining = deadline - asyncio.get_running_loop().time()
+                if remaining <= 0:
+                    return False, "initialize 超时"
+                envelope = json.loads(await asyncio.wait_for(ws.recv(), timeout=remaining))
+                if envelope.get("kind") == "response":
+                    return True, "worker 在线，initialize 通过"
+
+    try:
+        return await asyncio.wait_for(probe(), timeout=timeout + 2)
+    except Exception as exc:  # noqa: BLE001
+        return False, f"无法连接：{exc}"
 
 

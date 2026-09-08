@@ -13,6 +13,7 @@ from pathlib import Path
 
 from .config import ConfigError, load_config
 from .onboarding import GUIDES
+from .probes import worker_alive
 
 
 def _load_json(path: Path) -> Any:
@@ -20,34 +21,6 @@ def _load_json(path: Path) -> Any:
         return json.loads(path.read_text(encoding="utf-8"))
     except Exception:  # noqa: BLE001 - status never crashes on a bad file
         return None
-
-
-async def _worker_alive(worker: str, token: str | None, timeout: float = 5.0) -> tuple[bool, str]:
-    try:
-        import websockets
-    except Exception as exc:  # noqa: BLE001
-        return False, f"websockets 不可用：{exc}"
-    url = worker
-    if token:
-        separator = "&" if "?" in url else "?"
-        url = f"{url}{separator}token={token}"
-
-    async def probe() -> tuple[bool, str]:
-        async with websockets.connect(url, open_timeout=timeout) as ws:
-            await ws.send(json.dumps({"kind": "request", "request_id": "status-1", "method": "initialize", "params": {}}))
-            deadline = asyncio.get_running_loop().time() + timeout
-            while True:
-                remaining = deadline - asyncio.get_running_loop().time()
-                if remaining <= 0:
-                    return False, "initialize 超时"
-                envelope = json.loads(await asyncio.wait_for(ws.recv(), timeout=remaining))
-                if envelope.get("kind") == "response":
-                    return True, "worker 在线，initialize 通过"
-
-    try:
-        return await asyncio.wait_for(probe(), timeout=timeout + 2)
-    except Exception as exc:  # noqa: BLE001
-        return False, f"无法连接：{exc}"
 
 
 def run_status(args) -> int:
@@ -90,10 +63,15 @@ def run_status(args) -> int:
         groups = len(channel.group_allow)
         print(f"  渠道 {label}：allow_from {allow} 条 · group_allow {groups} 条")
 
-    alive, detail = asyncio.run(_worker_alive(config.worker, config.worker_token))
-    mark = "✔" if alive else "✘"
-    print(f"  worker：{mark} {detail}（{config.worker}）")
-    return 0 if alive else 1
+    if config.worker == "stdio":
+        print("  worker：stdio 模式——worker 由网关进程自起，随网关同生共死")
+    else:
+        alive, detail = asyncio.run(worker_alive(config.worker, config.worker_token))
+        mark = "✔" if alive else "✘"
+        print(f"  worker：{mark} {detail}（{config.worker}）")
+        if not alive:
+            return 1
+    return 0
 
 
 __all__ = ["run_status"]

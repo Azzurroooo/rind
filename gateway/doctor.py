@@ -18,7 +18,7 @@ from pathlib import Path
 
 from .config import ConfigError, load_config
 from .onboarding import GUIDES
-from .status import _worker_alive
+from .probes import worker_alive
 
 
 @dataclass
@@ -153,7 +153,7 @@ def run_checks(config_path: Path | None, workspace: Path, *, probe: bool = False
     if worker == "stdio":
         add("worker 连接", True, "stdio 模式：网关将自起 worker 子进程")
     else:
-        alive, detail = asyncio.run(_worker_alive(worker, config.worker_token, timeout=5.0))
+        alive, detail = asyncio.run(worker_alive(worker, config.worker_token, timeout=5.0))
         add(
             "worker 连接",
             True if alive else False,

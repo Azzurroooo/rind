@@ -227,9 +227,9 @@ def test_status_counts_sessions_and_pairing(tmp_path, monkeypatch):
     async def dead_worker(worker, token, timeout=0.1):
         return False, "无法连接"
 
-    from gateway import status as status_module
+    from gateway import probes as probes_module
 
-    monkeypatch.setattr(status_module, "_worker_alive", dead_worker)
+    monkeypatch.setattr(probes_module, "worker_alive", dead_worker)
     from gateway.status import run_status
 
     args = type("Args", (), {"config": None, "workspace": str(tmp_path)})()
