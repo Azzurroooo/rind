@@ -8,14 +8,17 @@ can be repaired automatically (corrupt state files get a .corrupt backup).
 
 from __future__ import annotations
 
+import asyncio
 import importlib
 import json
+import subprocess
 import sys
 from dataclasses import dataclass
 from pathlib import Path
 
 from .config import ConfigError, load_config
 from .onboarding import GUIDES
+from .status import _worker_alive
 
 
 @dataclass
@@ -44,6 +47,76 @@ def _fix_corrupt(path: Path) -> str:
         return f"重命名失败：{exc}"
 
 
+def sdk_missing(sdk_module: str) -> bool:
+    try:
+        importlib.import_module(sdk_module)
+        return False
+    except ImportError:
+        return True
+
+
+def ensure_sdk_installed(sdk_module: str, *, runner=None) -> tuple[bool, str]:
+    """pip install a channel SDK on the user's behalf; (ok, detail).
+
+    `runner` is injectable for tests. After installing, the import cache is
+    invalidated so the lazy adapter loader picks the SDK up immediately.
+    """
+    try:
+        importlib.import_module(sdk_module)
+        return True, "已安装"
+    except ImportError:
+        pass
+    run = runner or (lambda cmd: subprocess.run(cmd, capture_output=True, text=True))
+    result = run([sys.executable, "-m", "pip", "install", sdk_module])
+    if getattr(result, "returncode", 1) != 0:
+        tail = (getattr(result, "stderr", "") or "").strip().splitlines()[-1:] or ["pip 失败"]
+        return False, f"pip install {sdk_module} 失败：{tail[0]}"
+    importlib.invalidate_caches()
+    try:
+        importlib.import_module(sdk_module)
+        return True, f"已自动安装 {sdk_module}"
+    except ImportError as exc:
+        return False, f"安装后仍无法导入 {sdk_module}：{exc}"
+
+
+def _looks_like_source_dir(path: Path) -> bool:
+    """运行数据绝不该落进 Rind 的工程目录（含 main.py 与 gateway/ 的树）。"""
+    return (path / "main.py").is_file() and (path / "gateway").is_dir()
+
+
+def ensure_channel_sdks(guides, *, interactive: bool, confirm=None, echo=print):
+    """缺渠道 SDK 的自动 pip 安装；返回（保留的渠道，是否启用启动自愈）。
+
+    一键模式直接装；交互模式先征求同意（confirm 注入，向导传自己的提问
+    函数；缺省用 prompt.confirm）。失败或用户拒绝 → 渠道从本次配置剔除。
+    环境变量 RIND_GATEWAY_NO_AUTO_INSTALL=1 整体关闭（测试/CI）。
+    """
+    import os
+
+    if confirm is None:
+        from .prompt import confirm as _confirm_impl
+
+        confirm = _confirm_impl
+
+    if os.environ.get("RIND_GATEWAY_NO_AUTO_INSTALL"):
+        return guides, False
+    kept = []
+    for guide in guides:
+        if guide.sdk_module and sdk_missing(guide.sdk_module):
+            if interactive:
+                if not confirm(f"渠道 {guide.label} 需要 {guide.sdk_module}（当前未安装）。自动安装？"):
+                    echo(f"  已跳过 {guide.label}：缺 {guide.sdk_module} 的渠道不会写入配置。")
+                    continue
+            echo(f"  正在安装 {guide.sdk_module} …")
+            ok, detail = ensure_sdk_installed(guide.sdk_module)
+            echo(f"  {'✔' if ok else '✘'} {detail}")
+            if not ok:
+                echo(f"  已跳过 {guide.label}。手动安装：pip install {guide.sdk_module}")
+                continue
+        kept.append(guide)
+    return kept, bool(kept)
+
+
 def run_checks(config_path: Path | None, workspace: Path, *, probe: bool = False, fix: bool = False) -> list[CheckResult]:
     results: list[CheckResult] = []
 
@@ -67,18 +140,29 @@ def run_checks(config_path: Path | None, workspace: Path, *, probe: bool = False
         add("配置文件", False, str(exc), "按提示修正后重跑；或运行 `gateway init` 重新生成")
         return results
 
-    # worker reachability (cheap: TCP/WS open is checked live only with --probe)
+    # worker reachability: real WS handshake by default — "开没开" 不该靠猜
     worker = config.worker
     if worker == "stdio":
         add("worker 连接", True, "stdio 模式：网关将自起 worker 子进程")
     else:
-        if config.worker_token:
-            add("worker 连接", None, f"{worker}（未实测；加 --probe 做 WS 握手验证）")
-        else:
-            add("worker 连接", None, f"{worker}（无 worker_token：确认 worker 允许无鉴权连接）")
+        alive, detail = asyncio.run(_worker_alive(worker, config.worker_token, timeout=5.0))
+        add(
+            "worker 连接",
+            True if alive else False,
+            f"{worker} — {detail}",
+            fix="" if alive else "确认 worker 已启动（python main.py app-server --web ...）且 worker_token 一致",
+        )
 
-    if not Path(config.workspace).is_dir():
+    ws_dir = Path(config.workspace)
+    if not ws_dir.is_dir():
         add("workspace 目录", False, f"目录不存在：{config.workspace}", "修正 gateway.yaml 的 workspace 为绝对路径")
+    elif _looks_like_source_dir(ws_dir):
+        add(
+            "workspace 目录",
+            None,
+            f"{config.workspace} 看起来是 Rind 的工程目录——运行数据（state/pairing/uploads）会混入源码树",
+            "建议为网关会话换一个独立目录（如 ~/rind-workspace）",
+        )
     else:
         add("workspace 目录", True, config.workspace)
 

@@ -22,7 +22,8 @@ _VAR_PATTERN = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}")
 _INT_PATTERN = re.compile(r"^-?\d+$")
 
 _KNOWN_TOP_LEVEL = frozenset(
-    {"worker", "workspace", "worker_token", "channels", "pairing", "cooldown_per_minute", "uploads_dir"}
+    {"worker", "workspace", "worker_token", "channels", "pairing", "cooldown_per_minute", "uploads_dir",
+     "auto_install_sdk"}
 )
 _KNOWN_PAIRING = frozenset({"enabled", "ttl_minutes"})
 _KNOWN_CHANNEL = frozenset({"token", "allow_from", "group_allow"})
@@ -76,6 +77,7 @@ class GatewayConfig:
     pairing: PairingConfig = field(default_factory=PairingConfig)
     cooldown_per_minute: int = 10
     uploads_dir: str = "uploads"
+    auto_install_sdk: bool = False  # 启动时缺渠道 SDK 自动 pip install（向导同意后写入）
 
 
 def resolve_config_path(explicit: str | None, workspace: Path) -> Path:
@@ -309,6 +311,9 @@ def build_config(data: Mapping[str, Any]) -> GatewayConfig:
     uploads_dir = data.get("uploads_dir", "uploads")
     if not isinstance(uploads_dir, str) or not uploads_dir or os.path.isabs(uploads_dir):
         raise ConfigError('gateway config: uploads_dir must be a workspace-relative path')
+    auto_install_sdk = data.get("auto_install_sdk", False)
+    if not isinstance(auto_install_sdk, bool):
+        raise ConfigError("gateway config: auto_install_sdk must be a boolean")
     return GatewayConfig(
         worker=worker,
         workspace=workspace,
@@ -317,6 +322,7 @@ def build_config(data: Mapping[str, Any]) -> GatewayConfig:
         pairing=pairing,
         cooldown_per_minute=cooldown,
         uploads_dir=uploads_dir,
+        auto_install_sdk=auto_install_sdk,
     )
 
 

@@ -234,3 +234,79 @@ def test_status_counts_sessions_and_pairing(tmp_path, monkeypatch):
 
     args = type("Args", (), {"config": None, "workspace": str(tmp_path)})()
     assert run_status(args) == 1  # worker 不在线 → 退出码 1，但文件统计仍然输出
+
+
+# --- SDK 自动安装与工作区防护（用户体验包装的机器可测部分）-----------------------
+
+
+def test_ensure_sdk_skips_when_already_importable():
+    import gateway.doctor as doctor
+
+    ran = []
+
+    def runner(cmd):
+        ran.append(cmd)
+        raise AssertionError("已可导入时不应调用 pip")
+
+    ok, detail = doctor.ensure_sdk_installed("json", runner=runner)
+    assert ok and "已安装" in detail
+    assert not ran
+
+
+def test_ensure_sdk_runs_pip_and_reimports(monkeypatch):
+    import types
+
+    import gateway.doctor as doctor
+
+    ran = []
+
+    class FakeResult:
+        returncode = 0
+        stderr = ""
+
+    state = {"installed": False}
+    real_import = doctor.importlib.import_module
+
+    def runner(cmd):
+        ran.append(cmd)
+        state["installed"] = True
+        return FakeResult()
+
+    def fake_import(name, *args, **kwargs):
+        if name == "some_sdk" and state["installed"]:
+            return types.ModuleType("some_sdk")
+        return real_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(doctor.importlib, "import_module", fake_import)
+
+    ok, detail = doctor.ensure_sdk_installed("some_sdk", runner=runner)
+    assert ok and "some_sdk" in detail
+    assert ran and ran[0][-1] == "some_sdk"
+
+
+def test_ensure_sdk_reports_pip_failure(monkeypatch):
+    import gateway.doctor as doctor
+
+    class FakeResult:
+        returncode = 1
+        stderr = "no matching distribution"
+
+    monkeypatch.setattr(doctor.importlib, "import_module", lambda name, *a, **k: (_ for _ in ()).throw(ImportError(name)))
+    monkeypatch.setattr(doctor.importlib, "invalidate_caches", lambda: None)
+    ok, detail = doctor.ensure_sdk_installed("some_sdk", runner=lambda cmd: FakeResult())
+    assert not ok and "pip install some_sdk" in detail
+
+
+def test_feishu_setup_steps_match_official_flow():
+    steps = "\n".join(onboarding.GUIDES["feishu"].setup_steps)
+    for keyword in ("企业自建应用", "机器人", "App ID", "权限", "长连接", "im.message.receive_v1", "发布"):
+        assert keyword in steps, f"飞书引导缺少关键步骤：{keyword}"
+
+
+def test_auto_install_sdk_round_trips_through_yaml():
+    from gateway.config import parse_yaml, render_yaml
+
+    text = render_yaml({"worker": "ws://x", "workspace": "E:/ws", "auto_install_sdk": True})
+    config = build_config(parse_yaml(text, env={}))
+    assert config.auto_install_sdk is True
+    assert render_yaml({"worker": "ws://x", "workspace": "E:/ws"}) == text.replace("auto_install_sdk: true\n", "")

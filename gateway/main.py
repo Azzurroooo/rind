@@ -43,6 +43,7 @@ def build_parser() -> argparse.ArgumentParser:
     status = subparsers.add_parser("status", help="一屏状态：会话映射/配对/渠道/worker 在线")
     status.add_argument("--config", default=None, help="gateway.yaml path")
     status.add_argument("--workspace", default=".", help="Workspace root")
+    subparsers.add_parser("start", help="启动网关（等价于不带子命令运行）")
     return parser
 
 
@@ -72,6 +73,18 @@ async def _run(config: GatewayConfig, runtime_dir: Path, pairing: PairingStore) 
     uploads_root = Path(config.workspace) / config.uploads_dir
     for channel_id, channel_config in config.channels.items():
         channel = build_channel(channel_id, channel_config, uploads_root)
+        if channel is None and config.auto_install_sdk:
+            # SDK 缺失时自愈：装好再建一次（向导同意过 auto_install_sdk 的用户
+            # 不该被 "pip install xxx" 挡在门外）。
+            from .doctor import ensure_sdk_installed
+            from .onboarding import guide_for
+
+            guide = guide_for(channel_id)
+            if guide is not None and guide.sdk_module:
+                ok, detail = ensure_sdk_installed(guide.sdk_module)
+                logger.info("gateway: auto-install %s for channel %s: %s", guide.sdk_module, channel_id, detail)
+                if ok:
+                    channel = build_channel(channel_id, channel_config, uploads_root)
         if channel is None:  # registry already logged why (unknown id / SDK / config)
             continue
         pump.register_channel(channel)
@@ -108,6 +121,8 @@ def main(argv: list[str] | None = None) -> int:
         from .status import run_status
 
         return run_status(args)
+    if args.command == "start":
+        args.command = "run"  # start 与裸运行等价；提供给向导与文档作为显式动词
 
     # Approving a pairing code only needs pairing.json — never require (or
     # even read) gateway.yaml, so approval works on a machine without config.

@@ -8,13 +8,15 @@ unit-testable without a terminal.
 
 from __future__ import annotations
 
+import asyncio
 import getpass
 import os
 import sys
 from pathlib import Path
 from typing import Any
 
-from .config import render_yaml
+from .config import build_config, parse_yaml, render_yaml
+from .prompt import WizardCancelled, ask as _ask, ask_list as _ask_list, confirm as _confirm, pick_channels as _pick_channels
 from .onboarding import ChannelGuide, all_guides, guide_for
 
 DEFAULT_WORKER = "ws://127.0.0.1:8765"
@@ -54,6 +56,7 @@ def build_config_data(
     worker_token: str,
     workspace: str,
     pairing_enabled: bool = True,
+    auto_install_sdk: bool = False,
 ) -> dict[str, Any]:
     channels: dict[str, Any] = {}
     for channel_id in selected:
@@ -82,69 +85,13 @@ def build_config_data(
         data["worker_token"] = worker_token
     if pairing_enabled:
         data["pairing"] = {"enabled": True}
+    if auto_install_sdk:
+        data["auto_install_sdk"] = True
     return data
 
 
 def config_path_for(workspace: str) -> Path:
     return Path(workspace).expanduser() / ".rind" / "gateway.yaml"
-
-
-# --- interactive loop ------------------------------------------------------------
-
-
-class WizardCancelled(Exception):
-    """stdin reached EOF (Ctrl+Z / Ctrl+D / closed pipe) — cancel cleanly."""
-
-
-def _input(prompt: str = "") -> str:
-    try:
-        return input(prompt)
-    except EOFError:
-        raise WizardCancelled() from None
-
-
-def _ask(label: str, default: str = "", secret: bool = False) -> str:
-    suffix = f" [{default}]" if default else ""
-    # getpass only makes sense on a real terminal: on a piped stdin its Windows
-    # fallback reads console keystrokes and hangs forever. Automations pipe the
-    # answer in visibly; real terminals keep hidden input.
-    if secret and sys.stdin.isatty():
-        try:
-            value = getpass.getpass(f"{label}{suffix}: ")
-        except EOFError:
-            raise WizardCancelled() from None
-    else:
-        value = _input(f"{label}{suffix}: ")
-    return value.strip() or default
-
-
-def _ask_list(label: str) -> list[str]:
-    raw = _input(f"{label}（逗号分隔，可留空）: ").strip()
-    return [item for item in raw.replace("，", ",").split(",") if item]
-
-
-def _confirm(label: str, default_yes: bool = True) -> bool:
-    hint = "Y/n" if default_yes else "y/N"
-    raw = _input(f"{label} [{hint}]: ").strip().lower()
-    if not raw:
-        return default_yes
-    return raw in ("y", "yes")
-
-
-def _pick_channels() -> list[str]:
-    guides = all_guides()
-    print("\n可用渠道（回车 = Telegram + Email 两个零门槛渠道）：")
-    for index, guide in enumerate(guides, start=1):
-        print(f"  {index}. {guide.emoji} {guide.label} — {guide.summary}")
-    raw = _input("选择渠道编号（逗号分隔，如 1,4）: ").strip()
-    if not raw:
-        return ["telegram", "email"]
-    picked: list[str] = []
-    for token in raw.replace("，", ",").split(","):
-        token = token.strip()
-        if token.isdigit() and 1 <= int(token) <= len(guides):
-            picked.append(guides[int(token) - 1].id)
-    return picked or ["telegram", "email"]
 
 
 def _guide_walk(guide: ChannelGuide, env: dict[str, str]) -> tuple[dict[str, str], dict[str, list[str]]]:
@@ -192,6 +139,32 @@ def _guide_walk(guide: ChannelGuide, env: dict[str, str]) -> tuple[dict[str, str
     return answers, {"allow_from": allow, "group_allow": group}
 
 
+def _default_workspace() -> str:
+    """运行数据绝不默认写进 Rind 工程目录——回退到用户主目录下的独立工作区。"""
+    cwd = Path(os.getcwd())
+    from .doctor import _looks_like_source_dir
+
+    if _looks_like_source_dir(cwd):
+        return str(Path.home() / "rind-workspace")
+    return str(cwd)
+
+
+def _resolve_workspace(raw: str | None) -> str:
+    from .doctor import _looks_like_source_dir
+
+    candidate = Path(raw or _default_workspace()).expanduser()
+    if _looks_like_source_dir(candidate):
+        print("  ✘ 这是 Rind 的工程目录——运行数据（state/pairing/uploads）不能放进源码树。")
+        fallback = Path.home() / "rind-workspace"
+        value = Path(_input(f"请换一个工作目录（回车 = {fallback}）: ").strip() or str(fallback)).expanduser()
+        if _looks_like_source_dir(value):
+            print("  ✘ 仍是工程目录。已取消。")
+            raise WizardCancelled()
+        candidate = value
+    candidate.mkdir(parents=True, exist_ok=True)
+    return str(candidate.resolve())
+
+
 def run_init(args) -> int:
     env = dict(os.environ)
     if args.yes:
@@ -205,7 +178,7 @@ def run_init(args) -> int:
             return 2
         worker = args.worker_url or env.get("RIND_GW_WORKER") or DEFAULT_WORKER
         worker_token = env.get("RIND_SERVER_TOKEN", "")
-        workspace = Path(args.workspace or os.getcwd()).expanduser().resolve()
+        workspace = _resolve_workspace(args.workspace)
         guides = [guide_for(channel_id) for channel_id in selected]
         answers: dict[str, dict[str, str]] = {}
         lists: dict[str, dict[str, list[str]]] = {}
@@ -216,7 +189,12 @@ def run_init(args) -> int:
             if missing:
                 print(f"✘ {guide.label} 缺少必需字段（环境变量）: {', '.join(missing)}", file=sys.stderr)
                 return 2
-        return _finish(args, selected, answers, lists, worker, worker_token, workspace, confirm=False)
+        from .doctor import ensure_channel_sdks
+        guides, auto_install = ensure_channel_sdks(guides, interactive=False)
+        if not guides:
+            print("没有可启动的渠道。", file=sys.stderr)
+            return 2
+        return _finish(args, selected, answers, lists, worker, worker_token, workspace, confirm=False, auto_install_sdk=auto_install)
 
     print("Rind 网关配置向导 —— 一步步把 IM 渠道接到你的 worker（全程约 2 分钟）")
     try:
@@ -232,11 +210,17 @@ def run_init(args) -> int:
             selected = _pick_channels()
         worker_token = os.environ.get("RIND_SERVER_TOKEN", "")
         worker = _ask("Worker 地址", args.worker_url or DEFAULT_WORKER)
-        workspace = Path(_ask("工作目录（网关会话的根目录，绝对路径）", args.workspace or os.getcwd())).expanduser().resolve()
+        workspace = _resolve_workspace(_ask("工作目录（网关会话的根目录，绝对路径）", args.workspace or _default_workspace()))
         if not worker_token:
             worker_token = _ask("Worker Token（RIND_SERVER_TOKEN 的值，可留空）", secret=True)
 
         guides = [guide_for(channel_id) for channel_id in selected]
+        from .doctor import ensure_channel_sdks
+
+        guides, auto_install = ensure_channel_sdks(guides, interactive=True)
+        if not guides:
+            print("没有可启动的渠道。", file=sys.stderr)
+            return 2
         answers = {}
         lists = {}
         for guide in guides:
@@ -244,13 +228,14 @@ def run_init(args) -> int:
     except WizardCancelled:
         print("\n已取消（配置未写入）。")
         return 1
-    return _finish(args, selected, answers, lists, worker, worker_token, workspace, confirm=True)
+    return _finish(args, selected, answers, lists, worker, worker_token, workspace, confirm=True, auto_install_sdk=auto_install)
 
 
-def _finish(args, selected, answers, lists, worker, worker_token, workspace, *, confirm: bool) -> int:
+def _finish(args, selected, answers, lists, worker, worker_token, workspace, *, confirm: bool, auto_install_sdk: bool = False) -> int:
     data = build_config_data(
         selected, answers, lists,
         worker=worker, worker_token=worker_token, workspace=str(workspace),
+        auto_install_sdk=auto_install_sdk,
     )
     text = render_yaml(data)
     print("\n—— 生成的 gateway.yaml ——")
@@ -262,10 +247,37 @@ def _finish(args, selected, answers, lists, worker, worker_token, workspace, *, 
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text(text, encoding="utf-8")
     print(f"\n✔ 已写入 {target}")
-    print("下一步：")
-    print(f"  1) python main.py gateway doctor --config \"{target}\" --probe   # 逐项体检")
-    print(f"  2) python main.py gateway --config \"{target}\"                  # 启动网关")
-    return 0
+
+    # 收尾包装：体检和启动由向导接管——用户不需要抄任何命令。
+    from .doctor import run_checks
+
+    print("\n—— 自动体检 ——")
+    for check in run_checks(target, Path(workspace)):
+        mark = "✔" if check.ok is True else ("⚠" if check.ok is None else "✘")
+        print(f"  {mark} {check.name}：{check.detail}")
+
+    print("\n下一步：启动网关开始对话。")
+    print(f"  python main.py gateway --config \"{target}\"")
+    print("  （加渠道/换渠道：重新运行 python main.py gateway init）")
+
+    # 启动由向导接管：交互式终端默认直接启动（EOF/管道安静跳过——自动化友好）。
+    try:
+        start_now = _confirm("立即启动网关？（Ctrl+C 停止）", default_yes=True)
+    except WizardCancelled:
+        start_now = False
+    if not start_now:
+        return 0
+
+    from .main import _run
+    from .security import PairingStore
+
+    runtime_dir = Path(workspace) / ".rind"
+    config = build_config(parse_yaml(text, env=os.environ))
+    try:
+        return asyncio.run(_run(config, runtime_dir, PairingStore(runtime_dir / "pairing.json")))
+    except KeyboardInterrupt:
+        print("\n网关已停止。")
+        return 0
 
 
 __all__ = ["build_config_data", "collect_answers_env", "config_path_for", "run_init"]
