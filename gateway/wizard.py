@@ -98,6 +98,10 @@ def _guide_walk(guide: ChannelGuide, env: dict[str, str]) -> tuple[dict[str, str
     print(f"\n=== {guide.emoji} {guide.label} ===")
     for step in guide.setup_steps:
         print(f"  · {step}")
+    if guide.scopes:
+        print("  精确权限/事件代码（在平台对应搜索框里逐个粘贴，唯一确定）：")
+        for code in guide.scopes:
+            print(f"      {code}")
     answers: dict[str, str] = {}
     env_prefix = f"RIND_GW_{guide.id.upper()}_"
     for spec in guide.fields:

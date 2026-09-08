@@ -40,6 +40,7 @@ class ChannelGuide:
     """Optional sender-id discovery (telegram getUpdates)."""
     sdk_module: str = ""  # importable name used by `gateway doctor` SDK checks
     runtime_deps: tuple[str, ...] = ()  # 额外 pip 依赖（如代理场景的 aiohttp_socks），随 sdk_module 一起自动安装
+    scopes: tuple[str, ...] = ()  # 平台权限/事件的唯一标识代码，用户可在平台搜索框直接粘贴
 
 
 def _get_json(url: str, headers: dict[str, str] | None = None) -> tuple[int, Any]:
@@ -108,6 +109,7 @@ GUIDES: dict[str, ChannelGuide] = {
             "2) 复制它回复的 token（形如 123456:AAE...，泄露即等于交出 bot）",
             "3) 想知道自己的数字 ID：给 @userinfobot 发任意消息",
             "4) 国内网络：代理必须填在下方 proxy 字段（系统代理对网关不自动生效）",
+            "5) 群聊使用保持默认隐私模式即可（bot 只收 @机器人/回复消息，与网关门控一致）",
         ),
         fields=(
             FieldSpec("token", "Bot Token", secret=True),
@@ -131,6 +133,10 @@ GUIDES: dict[str, ChannelGuide] = {
         fields=(FieldSpec("token", "Bot Token", secret=True),),
         probe=_probe_discord,
         sdk_module="discord",
+        scopes=(
+            "MESSAGE CONTENT INTENT（Bot 页 Privileged Gateway Intents 开关）",
+            "服务器权限：View Channels / Send Messages / Attach Files / Add Reactions / Read Message History",
+        ),
     ),
     "slack": ChannelGuide(
         id="slack",
@@ -148,6 +154,16 @@ GUIDES: dict[str, ChannelGuide] = {
         ),
         probe=_probe_slack,
         sdk_module="slack_bolt",
+        scopes=(
+            "chat:write",
+            "channels:history",
+            "groups:history",
+            "im:history",
+            "files:read",
+            "files:write",
+            "reactions:write",
+            "connections:write（app_token/xapp- 专用）",
+        ),
     ),
     "qq": _passive(
         "qq",
@@ -185,6 +201,12 @@ GUIDES: dict[str, ChannelGuide] = {
         ),
         probe=_probe_feishu,
         sdk_module="lark_oapi",
+        scopes=(
+            "im:message.p2p.msg:readonly（读取用户发给机器人的单聊消息）",
+            "im:message.group_at_msg:readonly（接收群聊中@机器人消息）",
+            "im:message:send_as_bot（以机器人身份发消息）",
+            "im:resource（获取与上传图片或文件资源）",
+        ),
     ),
     "dingtalk": ChannelGuide(
         id="dingtalk",

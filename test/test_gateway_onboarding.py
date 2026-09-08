@@ -303,6 +303,20 @@ def test_feishu_setup_steps_match_official_flow():
         assert keyword in steps, f"飞书引导缺少关键步骤：{keyword}"
 
 
+def test_permission_scopes_are_exact_copyable_codes():
+    # 用户在平台搜索框里粘贴的就是这些代码——必须是平台可唯一检索的标识，
+    # 而不是中文描述名。
+    scopes = onboarding.GUIDES["feishu"].scopes
+    for code in (
+        "im:message.p2p.msg:readonly",
+        "im:message.group_at_msg:readonly",
+        "im:message:send_as_bot",
+        "im:resource",
+    ):
+        assert any(code in item for item in scopes), f"缺少精确权限代码：{code}"
+    assert any("connections:write" in scope for scope in onboarding.GUIDES["slack"].scopes)
+
+
 def test_auto_install_sdk_round_trips_through_yaml():
     from gateway.config import parse_yaml, render_yaml
 
