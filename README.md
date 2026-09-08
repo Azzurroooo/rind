@@ -63,6 +63,15 @@ Read and edit files, run shell commands, search the web, keep a plan, inspect sk
   Fixed the retry path. 12 tests passed.
 ```
 
+
+The session keeps its own observability. A context meter sits in the composer header and turns it into detail on demand:
+
+```text
+/usage     token usage: context load, cache hits, per-turn delta, session totals
+/context   what fills the window: system, tools, conversation, free space, compact threshold
+/fork      branch the session with its full history; the original stays put
+```
+
 ### Run it headlessly
 
 ```bash
