@@ -67,7 +67,11 @@ def _probe_telegram(a: dict[str, str]) -> ProbeResult:
             return _ok(f"bot @{body['result'].get('username', '?')}")
         return _fail(f"Telegram 返回 {status}：{str(body)[:120]}")
     except Exception as exc:  # noqa: BLE001 - probe reports, never raises
-        return _fail(f"连接失败：{exc}")
+        detail = str(exc)
+        if "timed out" in detail or "timeout" in detail.lower():
+            hint = "" if proxy else "请在『代理地址』填入你的代理（如 http://127.0.0.1:7890）后重试。"
+            return _fail(f"连接超时——api.telegram.org 无法直连。{hint}")
+        return _fail(f"连接失败：{detail}")
 
 
 def _probe_discord(a: dict[str, str]) -> ProbeResult:

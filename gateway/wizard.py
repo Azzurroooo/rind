@@ -115,6 +115,15 @@ def _guide_walk(guide: ChannelGuide, env: dict[str, str]) -> tuple[dict[str, str
             probe_detail = result.detail
             mark = "✔" if result.ok else "✘"
             print(f"  {mark} {probe_detail}")
+            # 探活失败（常见于直连被墙的超时）：给一次改代理重试的机会。
+            retries = 0
+            while not result.ok and retries < 2 and _confirm("重新填写『代理地址』并再次验证？", default_yes=False):
+                answers["proxy"] = _ask("代理地址（如 http://127.0.0.1:7890）")
+                result = guide.probe({key: value for key, value in answers.items() if value})
+                probe_detail = result.detail
+                mark = "✔" if result.ok else "✘"
+                print(f"  {mark} {probe_detail}")
+                retries += 1
             if not result.ok:
                 print("     可稍后运行 `python main.py gateway doctor --probe` 重新体检。")
     if guide.discover_senders:

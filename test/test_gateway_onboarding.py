@@ -310,3 +310,26 @@ def test_auto_install_sdk_round_trips_through_yaml():
     config = build_config(parse_yaml(text, env={}))
     assert config.auto_install_sdk is True
     assert render_yaml({"worker": "ws://x", "workspace": "E:/ws"}) == text.replace("auto_install_sdk: true\n", "")
+
+
+def test_telegram_probe_timeout_suggests_proxy(monkeypatch):
+    import urllib.error
+
+    import gateway.probes as probes
+
+    def timeout_get(url, headers=None, proxy=""):
+        assert proxy == "", "未配置代理时必须直连（与网关出口一致）"
+        raise urllib.error.URLError("timed out")
+
+    monkeypatch.setattr(probes, "_get_json", timeout_get)
+    result = onboarding.GUIDES["telegram"].probe({"token": "t"})
+    assert not result.ok
+    assert "连接超时" in result.detail and "代理" in result.detail
+
+    def proxy_get(url, headers=None, proxy="http://127.0.0.1:7890"):
+        assert proxy == "http://127.0.0.1:7890"
+        return 200, {"ok": True, "result": {"username": "bot"}}
+
+    monkeypatch.setattr(probes, "_get_json", proxy_get)
+    result = onboarding.GUIDES["telegram"].probe({"token": "t", "proxy": "http://127.0.0.1:7890"})
+    assert result.ok
