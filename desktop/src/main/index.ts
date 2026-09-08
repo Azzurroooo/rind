@@ -4,7 +4,7 @@ import windowState from "electron-window-state"
 import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
 
-import { runtimeMethods, type DesktopPrefsPatch, type DesktopSettings, type DesktopSettingsPatch, type DesktopTheme, type RuntimeEvent, type RuntimeMethod, type RuntimeSnapshot } from "../preload/types"
+import { runtimeMethods, type DesktopPrefsPatch, type DesktopSettings, type DesktopSettingsPatch, type DesktopTheme, type DesktopViewZoom, type RuntimeEvent, type RuntimeMethod, type RuntimeSnapshot } from "../preload/types"
 import { asObject, readJsonObject, writeJsonObject } from "./json-store"
 import { listAvailableModels } from "./model-catalog"
 import { listProjectFiles, previewProjectFile } from "./project-files"
@@ -26,6 +26,7 @@ const appId = "ai.rind.desktop"
 const root = dirname(fileURLToPath(import.meta.url))
 const allowedRuntimeMethods = new Set<RuntimeMethod>(Object.values(runtimeMethods) as RuntimeMethod[])
 const themes: DesktopTheme[] = ["system", "dark", "light"]
+const viewZooms: DesktopViewZoom[] = ["in", "out", "reset"]
 const themeSurfaces = {
   dark: { background: "#1a1a1f", overlay: { color: "#1a1a1f", symbolColor: "#c9c9cf" } },
   light: { background: "#f4f4f6", overlay: { color: "#f4f4f6", symbolColor: "#3a3a42" } },
@@ -244,6 +245,27 @@ function registerIpc() {
     notifyThemeChanged(overview.theme)
     return overview
   })
+  ipcMain.handle("view-zoom", async (_event, mode: unknown) => {
+    if (typeof mode !== "string" || !viewZooms.includes(mode as DesktopViewZoom)) {
+      throw new Error("Zoom mode must be in, out, or reset.")
+    }
+    const current = (await projectStore().overview()).zoomLevel
+    const next = mode === "reset" ? 0 : Math.max(-2, Math.min(2, current + (mode === "in" ? 1 : -1)))
+    await projectStore().updatePrefs({ zoomLevel: next })
+    mainWindow?.webContents.setZoomLevel(next)
+  })
+  ipcMain.handle("view-find", (_event, query: unknown, options: unknown) => {
+    if (!mainWindow) return
+    if (typeof query !== "string" || !query) return
+    const input = asObject(options)
+    mainWindow.webContents.findInPage(query, {
+      forward: input?.forward !== false,
+      findNext: input?.findNext === true,
+    })
+  })
+  ipcMain.handle("view-find-stop", () => {
+    mainWindow?.webContents.stopFindInPage("clearSelection")
+  })
   ipcMain.handle("notify", async (_event, payload: unknown) => {
     const record = asObject(payload)
     if (!record) return false
@@ -286,6 +308,13 @@ function createMainWindow() {
     },
   })
   state.manage(win)
+  win.webContents.on("found-in-page", (_event, result) => {
+    if (win.isDestroyed()) return
+    win.webContents.send("view-find-result", { active: result.activeMatchOrdinal, matches: result.matches })
+  })
+  projectStore().overview().then((overview) => {
+    if (!win.isDestroyed() && overview.zoomLevel) win.webContents.setZoomLevel(overview.zoomLevel)
+  }).catch(() => {})
   const rendererUrl = process.env.ELECTRON_RENDERER_URL
   if (rendererUrl) void win.loadURL(new URL("index.html", rendererUrl).toString())
   else void win.loadFile(join(root, "../renderer/index.html"))

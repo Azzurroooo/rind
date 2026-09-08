@@ -44,12 +44,24 @@ export type Entry =
   | { kind: "command"; id: string; command: string; content: string; display?: Record<string, unknown> }
 export type QuestionOption = { label: string; description: string }
 export type Question = { toolCallId: string; turnId: string; question: string; options: QuestionOption[] }
+export type TokenStats = {
+  inputTokens: number
+  outputTokens: number
+  totalTokens: number
+}
+export type TurnSummary = {
+  durationMs: number
+  inputTokens: number
+  outputTokens: number
+}
 export type ConversationState = {
   entries: Entry[]
   activeTurnId: string
   turnStartedAt: number
   question?: Question
   contextUsagePercent: number | null
+  tokenStats?: TokenStats
+  lastTurnSummary?: TurnSummary
   plan?: PlanEntry
   openAssistantId: string
   nextEntryId: number
@@ -144,11 +156,19 @@ export function reduceEvent(state: ConversationState, envelope: RuntimeEvent): C
     case "token_stats_updated": {
       const stats = asRecord(event.stats)
       const percent = typeof stats.context_usage_percent === "number" ? stats.context_usage_percent : null
-      return percent === null ? state : { ...state, contextUsagePercent: percent }
+      const tokenStats = readTokenStats(stats)
+      return percent === null && !tokenStats ? state : {
+        ...state,
+        ...(percent !== null ? { contextUsagePercent: percent } : {}),
+        ...(tokenStats ? { tokenStats } : {}),
+      }
     }
     case "turn_failed": return finishTurn(appendEntry(closeAssistant(state), { kind: "error", id: "", content: asString(event.error) || "Turn failed", source: asString(event.error_source) || "Runtime error" }), turnId)
     case "turn_cancelled": return finishTurn(appendEntry(closeAssistant(state), { kind: "notice", id: "", content: asString(event.reason) || "Stopped", label: "Interrupted" }), turnId)
-    case "turn_completed": return finishTurn(markRunningTools(closeAssistant(state), "completed"), turnId)
+    case "turn_completed": return finishTurn({
+      ...markRunningTools(closeAssistant(state), "completed"),
+      ...turnSummary(state, asInt(event.duration_ms)),
+    }, turnId)
     case "goal_continued": return appendEntry(closeAssistant(state), { kind: "notice", id: "", content: asString(event.objective) || asString(event.message) || "Goal continuation started", label: "Goal" })
     default: return state
   }
@@ -465,6 +485,21 @@ function markRunningTools(state: ConversationState, status: ToolStatus): Convers
 }
 
 function trimEntries(entries: Entry[]) { return entries.length > maxEntries ? entries.slice(entries.length - maxEntries) : entries }
+function readTokenStats(stats: Record<string, unknown>): TokenStats | undefined {
+  const inputTokens = asInt(stats.input_tokens)
+  const outputTokens = asInt(stats.output_tokens)
+  const totalTokens = asInt(stats.total_tokens)
+  if (!inputTokens && !outputTokens && !totalTokens) return undefined
+  return { inputTokens, outputTokens, totalTokens }
+}
+function turnSummary(state: ConversationState, durationMs: number): TurnSummary | undefined {
+  if (!durationMs && !state.tokenStats) return undefined
+  return {
+    durationMs,
+    inputTokens: state.tokenStats?.inputTokens ?? 0,
+    outputTokens: state.tokenStats?.outputTokens ?? 0,
+  }
+}
 function summarizeProgress(payload: unknown) {
   const record = asRecord(payload)
   const text = ["output", "text", "message", "chunk"].map((key) => record[key]).find((value): value is string => typeof value === "string" && value.length > 0)
@@ -542,6 +577,12 @@ function previewDiffLines(value: string): string[] {
 }
 
 export function clipLine(value: string, limit: number) { const line = value.replace(/\s+/g, " ").trim(); return line.length > limit ? `${line.slice(0, limit - 1)}…` : line }
+export function formatTokens(tokens: number) {
+  if (!Number.isFinite(tokens) || tokens <= 0) return ""
+  if (tokens < 1000) return String(Math.round(tokens))
+  if (tokens < 100_000) return `${(tokens / 1000).toFixed(1)}k`
+  return `${Math.round(tokens / 1000)}k`
+}
 export function formatDuration(ms: number) {
   if (ms <= 0) return ""
   if (ms < 1000) return `${ms}ms`

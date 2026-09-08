@@ -126,6 +126,14 @@ export type DesktopTheme = "system" | "dark" | "light"
 export type DesktopPrefsPatch = {
   theme?: DesktopTheme
   notificationsEnabled?: boolean
+  zoomLevel?: number
+}
+
+export type DesktopViewZoom = "in" | "out" | "reset"
+
+export type DesktopFindResult = {
+  active: number
+  matches: number
 }
 
 export type DesktopNotificationPayload = {
@@ -165,6 +173,7 @@ export type DesktopProjectOverview = {
   filePanelWidth: number
   theme: DesktopTheme
   notificationsEnabled: boolean
+  zoomLevel: number
 }
 
 export type DesktopGoal = {
@@ -248,6 +257,12 @@ export type DesktopApi = {
   prefs: {
     update: (patch: DesktopPrefsPatch) => Promise<DesktopProjectOverview>
     onThemeChanged: (listener: (theme: DesktopTheme) => void) => () => void
+  }
+  view: {
+    zoom: (mode: DesktopViewZoom) => Promise<void>
+    find: (query: string, options: { forward: boolean; findNext: boolean }) => Promise<void>
+    findStop: () => Promise<void>
+    onFindResult: (listener: (result: DesktopFindResult) => void) => () => void
   }
   version: () => Promise<string>
   projects: {

@@ -86,7 +86,7 @@ export function composerRegionMarkup() {
             <button id="project-menu-trigger" type="button" class="composer-select-trigger" title="Choose working directory" aria-label="Choose working directory" aria-haspopup="listbox" aria-controls="project-menu" aria-expanded="false"><span id="project-menu-label" class="composer-select-label">Working directory</span><span class="composer-select-chevron" aria-hidden="true"></span></button>
             <div id="project-menu" class="composer-select-menu" role="listbox" aria-label="Working directories" hidden></div>
           </div>
-          <span id="context-meter" class="context-meter" hidden></span>
+          <span id="context-meter" class="context-meter" title="Context window used. Run /compact to free space." hidden></span>
           <span class="composer-spacer"></span>
           <button id="interrupt" type="button" class="ghost-button danger" title="Stop the running turn (Esc)">Stop</button>
           <button id="send" type="submit" class="primary-button"><span class="send-label">Send</span><span class="send-spinner" aria-hidden="true"></span></button>

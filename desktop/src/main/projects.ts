@@ -25,6 +25,7 @@ type StoredProjectState = {
   filePanelWidth: number
   theme: DesktopTheme
   notificationsEnabled: boolean
+  zoomLevel: number
 }
 
 export class DesktopProjectStore {
@@ -56,6 +57,7 @@ export class DesktopProjectStore {
       filePanelWidth: state.filePanelWidth,
       theme: state.theme,
       notificationsEnabled: state.notificationsEnabled,
+      zoomLevel: state.zoomLevel,
     }
   }
 
@@ -64,6 +66,7 @@ export class DesktopProjectStore {
     const next = { ...state }
     if (patch.theme && themes.includes(patch.theme)) next.theme = patch.theme
     if (typeof patch.notificationsEnabled === "boolean") next.notificationsEnabled = patch.notificationsEnabled
+    if (typeof patch.zoomLevel === "number") next.zoomLevel = validZoomLevel(patch.zoomLevel)
     await this.writeState(next)
     return this.overview()
   }
@@ -188,6 +191,7 @@ export class DesktopProjectStore {
       filePanelWidth: validFilePanelWidth(storedFilePanelWidth(raw)),
       theme: themes.includes(raw.theme as DesktopTheme) ? raw.theme as DesktopTheme : "system",
       notificationsEnabled: raw.notificationsEnabled === undefined ? true : raw.notificationsEnabled === true,
+      zoomLevel: validZoomLevel(raw.zoomLevel),
     }
     if (needsMigration(raw, state) || legacyRecentSessions) {
       await this.writeState(state)
@@ -207,6 +211,7 @@ export class DesktopProjectStore {
       filePanelWidth: state.filePanelWidth,
       theme: state.theme,
       notificationsEnabled: state.notificationsEnabled,
+      zoomLevel: state.zoomLevel,
     })
   }
 
@@ -318,6 +323,7 @@ function mergeRecentRecords(records: StoredRecentSession[]) {
 
 function validSidebarWidth(value: unknown) { return typeof value === "number" && Number.isFinite(value) ? Math.max(180, Math.min(420, Math.round(value))) : 248 }
 function validFilePanelWidth(value: unknown) { return typeof value === "number" && Number.isFinite(value) ? Math.max(280, Math.min(900, Math.round(value))) : 480 }
+function validZoomLevel(value: unknown) { return typeof value === "number" && Number.isFinite(value) ? Math.max(-2, Math.min(2, value)) : 0 }
 
 function storedFilePanelWidth(raw: Record<string, unknown>) {
   if (typeof raw.filePanelWidth === "number") return raw.filePanelWidth

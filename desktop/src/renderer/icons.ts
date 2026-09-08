@@ -8,4 +8,5 @@ export function renderIcon(icon: IconNode) {
   }).outerHTML
 }
 
-export { PanelLeft, PanelRight, Settings } from "lucide"
+export type { IconNode }
+export { Keyboard, ListTodo, Monitor, Moon, PanelLeft, PanelRight, Search, Settings, Sun } from "lucide"

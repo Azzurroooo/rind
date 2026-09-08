@@ -1,7 +1,7 @@
 import { contextBridge, ipcRenderer } from "electron"
 
 import { unwrapRuntimeIpcResult } from "../shared/ipc-error"
-import { runtimeMethods, type DesktopApi, type DesktopNotificationPayload, type DesktopPrefsPatch, type DesktopTheme, type RuntimeEvent, type RuntimeSnapshot } from "./types"
+import { runtimeMethods, type DesktopApi, type DesktopFindResult, type DesktopNotificationPayload, type DesktopPrefsPatch, type DesktopTheme, type RuntimeEvent, type RuntimeSnapshot } from "./types"
 
 // The main process returns worker errors as a wrapped envelope (never as a
 // rejected ipcMain.handle) — unwrap here so renderer call sites keep their
@@ -67,6 +67,16 @@ const api: DesktopApi = {
       const handler = (_event: Electron.IpcRendererEvent, theme: DesktopTheme) => listener(theme)
       ipcRenderer.on("theme-changed", handler)
       return () => ipcRenderer.removeListener("theme-changed", handler)
+    },
+  },
+  view: {
+    zoom: (mode) => ipcRenderer.invoke("view-zoom", mode),
+    find: (query, options) => ipcRenderer.invoke("view-find", query, options),
+    findStop: () => ipcRenderer.invoke("view-find-stop"),
+    onFindResult: (listener) => {
+      const handler = (_event: Electron.IpcRendererEvent, result: DesktopFindResult) => listener(result)
+      ipcRenderer.on("view-find-result", handler)
+      return () => ipcRenderer.removeListener("view-find-result", handler)
     },
   },
   version: () => ipcRenderer.invoke("app-version"),

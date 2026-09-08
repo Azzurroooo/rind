@@ -1,7 +1,7 @@
 import "./style.css"
 import brandMarkUrl from "./assets/brand-mark.svg"
 import workingMarkUrl from "./assets/working-mark.svg"
-import { PanelLeft, PanelRight, Settings, renderIcon } from "./icons"
+import { Keyboard, ListTodo, Monitor, Moon, PanelLeft, PanelRight, Search, Settings, Sun, renderIcon, type IconNode } from "./icons"
 import { decideTurnEvent, isTurnNotActive } from "./turn-state"
 
 import {
@@ -40,6 +40,7 @@ import {
   formatDuration,
   mergeLiveConversation,
   mergeReplayConversation,
+  formatTokens,
   reduceEvent,
   relativeTime,
   type ConversationState,
@@ -51,6 +52,7 @@ import { highlightFile } from "./syntax-highlight"
 import { renderCommandResult } from "./command-results"
 import { executeLocalSlashCommand } from "./local-slash-commands"
 import { modelChoices, modelSelectionTarget } from "./composer-select"
+import { renderEmptyState } from "./empty-state"
 import {
   commandPrefill,
   desktopSlashCommandNotice,
@@ -95,6 +97,7 @@ import {
   type TaskMonitorState,
 } from "./task-monitor"
 import { normalizeGoal, renderGoalPanel } from "./goal-panel"
+import { createInputHistory } from "./input-history"
 
 type AttachmentChip = {
   id: string
@@ -179,6 +182,7 @@ type AppState = {
   paletteOpen: boolean
   paletteQuery: string
   paletteActiveIndex: number
+  findOpen: boolean
   shortcutsOpen: boolean
   lastPrompts: Record<string, string>
   notice: string
@@ -253,6 +257,7 @@ const state: AppState = {
   paletteOpen: false,
   paletteQuery: "",
   paletteActiveIndex: 0,
+  findOpen: false,
   shortcutsOpen: false,
   lastPrompts: {},
   notice: "",
@@ -270,13 +275,13 @@ appRoot.innerHTML = `
       </div>
       <div class="topbar-actions">
         <span class="app-version" aria-label="Rind version">v${escapeHtml(appVersion)}</span>
-        <button id="toggle-tasks" type="button" class="ghost-button" title="Background tasks" aria-label="Toggle background task monitor" aria-expanded="false">Tasks</button>
-        <button id="open-palette" type="button" class="ghost-button" title="Command palette (Ctrl+K)" aria-label="Open command palette">Ctrl+K</button>
-        <button id="toggle-theme" type="button" class="ghost-button" title="Switch theme" aria-label="Switch theme">Theme</button>
-        <button id="toggle-sidebar" type="button" class="ghost-button" title="Toggle projects sidebar" aria-label="Toggle projects sidebar" aria-expanded="true">${renderIcon(PanelLeft)}</button>
-        <button id="toggle-files" type="button" class="ghost-button" title="Browse active project files" aria-label="Browse active project files" aria-expanded="false">${renderIcon(PanelRight)}</button>
-        <button id="open-shortcuts" type="button" class="ghost-button" title="Keyboard shortcuts (?)" aria-label="Keyboard shortcuts">?</button>
-        <button id="open-settings" type="button" class="ghost-button" title="Open settings" aria-label="Open settings">${renderIcon(Settings)}</button>
+        <button id="toggle-tasks" type="button" class="ghost-button icon-button" title="Background tasks" aria-label="Toggle background task monitor" aria-expanded="false">${renderIcon(ListTodo)}<span id="task-count" class="task-count" hidden></span></button>
+        <button id="open-palette" type="button" class="ghost-button icon-button" title="Command palette (Ctrl+K)" aria-label="Open command palette">${renderIcon(Search)}</button>
+        <button id="toggle-theme" type="button" class="ghost-button icon-button" title="Switch theme" aria-label="Switch theme"></button>
+        <button id="toggle-sidebar" type="button" class="ghost-button icon-button" title="Toggle projects sidebar" aria-label="Toggle projects sidebar" aria-expanded="true">${renderIcon(PanelLeft)}</button>
+        <button id="toggle-files" type="button" class="ghost-button icon-button" title="Browse active project files" aria-label="Browse active project files" aria-expanded="false">${renderIcon(PanelRight)}</button>
+        <button id="open-shortcuts" type="button" class="ghost-button icon-button" title="Keyboard shortcuts (?)" aria-label="Keyboard shortcuts">${renderIcon(Keyboard)}</button>
+        <button id="open-settings" type="button" class="ghost-button icon-button" title="Open settings" aria-label="Open settings">${renderIcon(Settings)}</button>
       </div>
     </header>
     <main class="layout">
@@ -298,7 +303,14 @@ appRoot.innerHTML = `
         </div>
       </aside>
       <section class="conversation">
-        <div class="conversation-head"><div class="conversation-title"><strong id="session-title">New session</strong><span id="session-id" class="subtle"></span></div></div>
+        <div class="conversation-head"><div class="conversation-title"><strong id="session-title">New session</strong></div><span id="session-meta" class="session-meta" hidden></span></div>
+        <div id="find-bar" class="find-bar" hidden>
+          <input id="find-input" type="text" placeholder="Find in conversation" aria-label="Find in conversation" autocomplete="off" />
+          <span id="find-count" class="find-count"></span>
+          <button id="find-prev" type="button" class="ghost-button" title="Previous match (Shift+Enter)">↑</button>
+          <button id="find-next" type="button" class="ghost-button" title="Next match (Enter)">↓</button>
+          <button id="find-close" type="button" class="ghost-button" title="Close (Esc)">✕</button>
+        </div>
         <div id="notice" class="notice" role="status" hidden><span id="notice-text"></span><button id="retry" type="button" class="ghost-button" hidden>Retry</button></div>
         <div class="stream-wrap">
           <div id="message-stream" class="message-stream" aria-live="polite"></div>
@@ -322,7 +334,7 @@ appRoot.innerHTML = `
         <p id="settings-key-status" class="subtle"></p>
         <label>Base URL<input id="settings-base-url" type="url" placeholder="https://api.openai.com/v1" /></label>
         <label>Model<input id="settings-model" type="text" placeholder="Default model" /></label>
-        <label>Reasoning effort<input id="settings-reasoning" type="text" placeholder="high" /></label>
+        <label>Reasoning effort<select id="settings-reasoning"></select></label>
         <label class="settings-check"><input id="settings-notifications" type="checkbox" /><span>Desktop notifications when the window is not focused</span></label>
         <div class="settings-actions"><button id="cancel-settings" type="button" class="ghost-button">Cancel</button><button id="save-settings" type="submit" class="primary-button">Save</button></div>
       </form>
@@ -334,6 +346,7 @@ appRoot.innerHTML = `
         <div class="settings-actions"><button type="button" id="dismiss-shortcuts" class="ghost-button">Close</button></div>
       </form>
     </dialog>
+    <div id="drop-overlay" class="drop-overlay" hidden><span>Drop files to attach</span></div>
     <div id="command-palette" class="command-palette" role="dialog" aria-modal="true" aria-label="Command palette" hidden>
       <div class="command-palette-box">
         <input id="palette-input" type="text" placeholder="Type a command…" aria-label="Search commands" autocomplete="off" />
@@ -352,7 +365,8 @@ const projectList = requiredElement("project-list")
 const recentSessions = requiredElement("recent-sessions")
 const recentList = requiredElement("recent-list")
 const sessionTitle = requiredElement("session-title")
-const sessionIdLabel = requiredElement("session-id")
+const sessionMeta = requiredElement("session-meta")
+const conversationHead = requiredElement("conversation-head")
 const modelMenuTrigger = requiredElement<HTMLButtonElement>("model-menu-trigger")
 const modelMenuLabel = requiredElement("model-menu-label")
 const modelMenu = requiredElement("model-menu")
@@ -370,6 +384,9 @@ const sessionSearchInput = requiredElement<HTMLInputElement>("session-search")
 const paletteOverlay = requiredElement("command-palette")
 const paletteInput = requiredElement<HTMLInputElement>("palette-input")
 const paletteList = requiredElement("palette-list")
+const findBar = requiredElement("find-bar")
+const findInput = requiredElement<HTMLInputElement>("find-input")
+const findCount = requiredElement("find-count")
 const shortcutsDialog = requiredElement<HTMLDialogElement>("shortcuts-dialog")
 const shortcutTable = requiredElement("shortcut-table")
 const messageStream = requiredElement("message-stream")
@@ -402,7 +419,7 @@ const settingsForm = requiredElement<HTMLFormElement>("settings-form")
 const settingsApiKey = requiredElement<HTMLInputElement>("settings-api-key")
 const settingsBaseUrl = requiredElement<HTMLInputElement>("settings-base-url")
 const settingsModel = requiredElement<HTMLInputElement>("settings-model")
-const settingsReasoning = requiredElement<HTMLInputElement>("settings-reasoning")
+const settingsReasoning = requiredElement<HTMLSelectElement>("settings-reasoning")
 const settingsKeyStatus = requiredElement("settings-key-status")
 const settingsNotifications = requiredElement<HTMLInputElement>("settings-notifications")
 const saveSettingsButton = requiredElement<HTMLButtonElement>("save-settings")
@@ -429,6 +446,8 @@ let deleteConfirmTimer: ReturnType<typeof setTimeout> | undefined
 let taskMonitorTimer: ReturnType<typeof setInterval> | undefined
 let taskMonitorPollInFlight = false
 let goalLoadSequence = 0
+const inputHistory = createInputHistory()
+let dragDepth = 0
 
 function requiredElement<T extends HTMLElement = HTMLElement>(id: string) {
   const element = document.getElementById(id) as T | null
@@ -462,7 +481,11 @@ function render() {
   sidebarToggle.setAttribute("aria-expanded", String(state.sidebarOpen))
   const current = knownSessions().find((item) => item.id === state.viewedSessionId)
   sessionTitle.textContent = current?.title || (state.viewedSessionId ? "Session" : "New session")
-  sessionIdLabel.textContent = state.viewedSessionId || ""
+  conversationHead.title = state.viewedSessionId
+  document.title = current?.title
+    ? `${current.title} — Rind`
+    : chatProject()?.name ? `${chatProject()?.name} — Rind` : "Rind"
+  renderSessionMeta()
   noticeText.textContent = state.notice || runtime.message || ""
   retry.hidden = runtime.status !== "error"
   notice.hidden = !noticeText.textContent && retry.hidden
@@ -474,6 +497,7 @@ function render() {
   renderTaskMonitorDock()
   renderGoalDock()
   renderPalette()
+  renderFindBar()
   renderPlanDock(
     { shell: planDockShell, dock: planDock },
     state.conversation,
@@ -517,8 +541,8 @@ function renderTheme() {
   if (document.documentElement.dataset.theme !== resolved) document.documentElement.dataset.theme = resolved
   const toggle = document.getElementById("toggle-theme")
   if (toggle) {
-    const labels: Record<DesktopTheme, string> = { system: "Theme: system", dark: "Theme: dark", light: "Theme: light" }
-    toggle.textContent = labels[state.theme]
+    const icons: Record<DesktopTheme, IconNode> = { system: Monitor, dark: Moon, light: Sun }
+    toggle.innerHTML = renderIcon(icons[state.theme])
     toggle.title = `Theme: ${state.theme}. Click to switch to ${nextTheme()}.`
   }
 }
@@ -553,8 +577,11 @@ function renderShortcuts() {
 const shortcutRows: Array<[string, string]> = [
   ["Ctrl+K", "Command palette"],
   ["Ctrl+N", "New chat"],
+  ["Ctrl+F", "Find in conversation"],
   ["Ctrl+,", "Open settings"],
   ["Ctrl+1…9", "Switch to a loaded session"],
+  ["Ctrl+= / Ctrl+-", "Zoom in / out (Ctrl+0 resets)"],
+  ["Alt+↑ / Alt+↓", "Browse sent prompts"],
   ["Enter", "Send message"],
   ["Shift+Enter", "New line"],
   ["Esc", "Close menus / stop turn / focus composer"],
@@ -697,10 +724,10 @@ function renderSessionRow(item: DesktopSessionSummary, whenIso: string) {
   const confirming = state.sessionDeleteConfirmId === item.id
   const deleting = state.sessionDeleteBusyId === item.id
   const deleteState = isCurrent
-    ? `<button type="button" class="session-delete ghost-button" data-session-delete="${escapeAttribute(item.id)}" title="当前会话不可删除" aria-label="当前会话不可删除" disabled>${DELETE_ICON}</button>`
+    ? `<button type="button" class="session-delete ghost-button" data-session-delete="${escapeAttribute(item.id)}" title="The current session cannot be deleted" aria-label="The current session cannot be deleted" disabled>${DELETE_ICON}</button>`
     : confirming
-      ? `<button type="button" class="session-delete ghost-button confirm" data-session-delete="${escapeAttribute(item.id)}" title="再按一次确认删除" aria-label="再按一次确认删除确认删除会话"${deleting ? " disabled" : ""}>${deleting ? "…" : DELETE_ICON}</button>`
-      : `<button type="button" class="session-delete ghost-button" data-session-delete="${escapeAttribute(item.id)}" title="删除会话" aria-label="删除会话 ${escapeAttribute(item.title || item.id)}"${deleting ? " disabled" : ""}>${DELETE_ICON}</button>`
+      ? `<button type="button" class="session-delete ghost-button confirm" data-session-delete="${escapeAttribute(item.id)}" title="Click again to confirm" aria-label="Click again to confirm deleting this session"${deleting ? " disabled" : ""}>${deleting ? "…" : DELETE_ICON}</button>`
+      : `<button type="button" class="session-delete ghost-button" data-session-delete="${escapeAttribute(item.id)}" title="Delete session" aria-label="Delete session ${escapeAttribute(item.title || item.id)}"${deleting ? " disabled" : ""}>${DELETE_ICON}</button>`
   return `
     <div class="session-item-row${confirming ? " confirming" : ""}" data-session-row="${escapeAttribute(item.id)}">
       <button type="button" class="session-item${running ? " running" : ""}" data-session-id="${escapeAttribute(item.id)}" data-session-project="${escapeAttribute(item.workspaceRoot)}" title="${escapeAttribute(item.title || "Untitled")}">
@@ -1051,7 +1078,7 @@ function renderAttachments() {
         <small class="attachment-size">${formatBytes(chip.size)}${chip.status === "uploading" ? " · uploading…" : chip.status === "failed" ? ` · ${escapeHtml(chip.error || "Upload failed")}` : ""}</small>
       </span>
       ${chip.status === "failed" ? `<button type="button" class="ghost-button chip-retry" data-chip-retry="${escapeAttribute(chip.id)}" title="Retry upload">Retry</button>` : chip.status === "ok" ? `<span class="status-pip pip-done" title="Uploaded"></span>` : `<span class="send-spinner chip-spinner" aria-hidden="true"></span>`}
-      <button type="button" class="ghost-button chip-delete" data-chip-delete="${escapeAttribute(chip.id)}" title="移除附件" aria-label="移除附件 ${escapeAttribute(chip.name)}">✕</button>
+      <button type="button" class="ghost-button chip-delete" data-chip-delete="${escapeAttribute(chip.id)}" title="Remove attachment" aria-label="Remove attachment ${escapeAttribute(chip.name)}">✕</button>
     `
     if (attachmentChips.children[index] !== item) attachmentChips.append(item)
     existing.delete(chip.id)
@@ -1147,10 +1174,12 @@ function renderTaskMonitorDock() {
   taskMonitorShell.hidden = !state.taskMonitorOpen
   const toggle = document.getElementById("toggle-tasks")
   const running = runningTaskCount(monitor.tasks)
-  if (toggle) {
-    toggle.textContent = running ? `Tasks (${running})` : "Tasks"
-    toggle.setAttribute("aria-expanded", String(state.taskMonitorOpen))
+  const badge = document.getElementById("task-count")
+  if (badge) {
+    badge.textContent = running ? String(running) : ""
+    badge.hidden = !running
   }
+  if (toggle) toggle.setAttribute("aria-expanded", String(state.taskMonitorOpen))
   if (!state.taskMonitorOpen) return
   renderTaskMonitor({ shell: taskMonitorShell, dock: taskMonitorDock }, monitor)
 }
@@ -1294,28 +1323,29 @@ async function clearGoal() {
 
 function paletteCommands(): PaletteCommand[] {
   const commands: PaletteCommand[] = [
-    { id: "new-chat", title: "新会话", detail: "Start a new chat", shortcut: "Ctrl+N", run: () => runAction(startNewChat) },
-    { id: "open-settings", title: "打开设置", detail: "Runtime settings", shortcut: "Ctrl+,", run: () => openSettings() },
-    { id: "compact", title: "压缩上下文", detail: "Compact context", run: () => runAction(compactCurrentSession, state.viewedSessionId), disabled: !state.viewedSessionId },
-    { id: "toggle-sidebar", title: "切换侧栏", detail: "Toggle projects sidebar", run: () => runAction(toggleSidebar) },
-    { id: "toggle-files", title: "切换文件面板", detail: "Toggle project files", run: () => runAction(() => setFilesOpen(!state.filesOpen)) },
-    { id: "task-monitor", title: "后台任务", detail: state.taskMonitorOpen ? "Close background task monitor" : "Open background task monitor", run: () => toggleTaskMonitor() },
-    { id: "goal-set", title: "目标：设定", detail: "Set a session goal", run: () => showGoalPanel(true), disabled: !state.viewedSessionId },
-    { id: "goal-pause", title: "目标：暂停", detail: "Pause the active goal", disabled: !state.viewedSessionId || state.goal.value?.status !== "active", run: () => runAction(() => changeGoalStatus("paused"), state.viewedSessionId) },
-    { id: "goal-resume", title: "目标：恢复", detail: "Resume a paused goal", disabled: !state.viewedSessionId || state.goal.value?.status !== "paused", run: () => runAction(() => changeGoalStatus("active"), state.viewedSessionId) },
-    { id: "goal-clear", title: "目标：清除", detail: "Clear the active goal", disabled: !state.viewedSessionId || !state.goal.value, run: () => runAction(clearGoal, state.viewedSessionId) },
-    { id: "theme-dark", title: "主题：深色", detail: "Dark theme", run: () => setTheme("dark") },
-    { id: "theme-light", title: "主题：浅色", detail: "Light theme", run: () => setTheme("light") },
-    { id: "theme-system", title: "主题：跟随系统", detail: "Follow the OS theme", run: () => setTheme("system") },
-    { id: "shortcuts", title: "帮助：快捷键", detail: "Keyboard shortcuts", shortcut: "?", run: () => { state.shortcutsOpen = true; render() } },
+    { id: "new-chat", title: "New session", detail: "Start a new chat", shortcut: "Ctrl+N", run: () => runAction(startNewChat) },
+    { id: "open-settings", title: "Open settings", detail: "Runtime settings", shortcut: "Ctrl+,", run: () => openSettings() },
+    { id: "find", title: "Find in conversation", detail: "Search the current session", shortcut: "Ctrl+F", run: openFind },
+    { id: "compact", title: "Compact context", detail: "Compact context", run: () => runAction(compactCurrentSession, state.viewedSessionId), disabled: !state.viewedSessionId },
+    { id: "toggle-sidebar", title: "Toggle sidebar", detail: "Toggle projects sidebar", run: () => runAction(toggleSidebar) },
+    { id: "toggle-files", title: "Toggle file panel", detail: "Toggle project files", run: () => runAction(() => setFilesOpen(!state.filesOpen)) },
+    { id: "task-monitor", title: "Background tasks", detail: state.taskMonitorOpen ? "Close background task monitor" : "Open background task monitor", run: () => toggleTaskMonitor() },
+    { id: "goal-set", title: "Goal: set", detail: "Set a session goal", run: () => showGoalPanel(true), disabled: !state.viewedSessionId },
+    { id: "goal-pause", title: "Goal: pause", detail: "Pause the active goal", disabled: !state.viewedSessionId || state.goal.value?.status !== "active", run: () => runAction(() => changeGoalStatus("paused"), state.viewedSessionId) },
+    { id: "goal-resume", title: "Goal: resume", detail: "Resume a paused goal", disabled: !state.viewedSessionId || state.goal.value?.status !== "paused", run: () => runAction(() => changeGoalStatus("active"), state.viewedSessionId) },
+    { id: "goal-clear", title: "Goal: clear", detail: "Clear the active goal", disabled: !state.viewedSessionId || !state.goal.value, run: () => runAction(clearGoal, state.viewedSessionId) },
+    { id: "theme-dark", title: "Theme: dark", detail: "Dark theme", run: () => setTheme("dark") },
+    { id: "theme-light", title: "Theme: light", detail: "Light theme", run: () => setTheme("light") },
+    { id: "theme-system", title: "Theme: system", detail: "Follow the OS theme", run: () => setTheme("system") },
+    { id: "shortcuts", title: "Help: shortcuts", detail: "Keyboard shortcuts", shortcut: "?", run: () => { state.shortcutsOpen = true; render() } },
   ]
   if (state.viewedSessionId && !runtimeTurnActive()) {
-    commands.push({ id: "delete-current", title: `删除会话：${clipLine(sessionTitle.textContent || state.viewedSessionId, 32)}`, detail: state.viewedSessionId, run: () => runAction(() => deleteSessionRequest(state.viewedSessionId)) })
+    commands.push({ id: "delete-current", title: `Delete session: ${clipLine(sessionTitle.textContent || state.viewedSessionId, 32)}`, detail: state.viewedSessionId, run: () => runAction(() => deleteSessionRequest(state.viewedSessionId)) })
   }
   for (const session of knownSessions().filter((item) => item.id !== state.viewedSessionId).slice(0, 20)) {
     commands.push({
       id: `session-${session.id}`,
-      title: `切换会话：${clipLine(session.title || "Untitled", 40)}`,
+      title: `Switch session: ${clipLine(session.title || "Untitled", 40)}`,
       detail: clipLine(session.preview || session.id, 60),
       keywords: `switch session ${session.id}`,
       run: () => runAction(() => switchSession(session.id), session.id),
@@ -1325,7 +1355,7 @@ function paletteCommands(): PaletteCommand[] {
     for (const model of state.models.slice(0, 15)) {
       commands.push({
         id: `model-${model}`,
-        title: `模型：${model}`,
+        title: `Model: ${model}`,
         keywords: `model ${model}`,
         run: () => runAction(() => selectModel(model)),
       })
@@ -1335,7 +1365,7 @@ function paletteCommands(): PaletteCommand[] {
     for (const effort of reasoningEfforts) {
       commands.push({
         id: `effort-${effort}`,
-        title: `力度：${effort}`,
+        title: `Effort: ${effort}`,
         keywords: `reasoning effort ${effort}`,
         run: () => runAction(() => selectEffort(effort), state.viewedSessionId),
       })
@@ -1441,12 +1471,14 @@ function renderStream() {
   }
   if (!entries.length && !conversation.question) {
     const ready = state.runtime.status === "ready"
-    if (!messageStream.querySelector(".stream-empty")) {
-      const empty = document.createElement("div")
-      empty.className = "stream-empty"
-      empty.innerHTML = `<img class="stream-empty-mark" src="${brandMarkUrl}" alt="" aria-hidden="true" /><p>No messages yet</p><p class="subtle">${ready ? "Ask Rind to inspect, change, or explain something in this workspace." : "Pick a project and start a runtime to begin."}</p>`
-      messageStream.append(empty)
-    }
+    const empty = document.createElement("div")
+    empty.className = "stream-empty"
+    empty.innerHTML = renderEmptyState({
+      hasProject: Boolean(chatProject()?.available),
+      ready,
+      hasApiKey: state.settings.hasApiKey,
+    }, brandMarkUrl)
+    messageStream.append(empty)
   } else {
     messageStream.querySelector(".stream-empty")?.remove()
   }
@@ -1491,7 +1523,7 @@ function renderEntry(entry: Entry): string {
     case "file":
       return `<div class="ledger-row ledger-file" data-entry-id="${escapeAttribute(entry.id)}"><span class="status-pip pip-done"></span><span class="ledger-verb">Edited</span><code class="ledger-arg">${escapeHtml(entry.filePath)}</code></div>`
     case "error": {
-      const retryable = canRetryLastPrompt() ? `<button type="button" class="ghost-button" data-retry-turn title="Resend the last prompt">重试</button>` : ""
+      const retryable = canRetryLastPrompt() ? `<button type="button" class="ghost-button" data-retry-turn title="Resend the last prompt">Retry</button>` : ""
       return `<div class="stream-card card-error" data-entry-id="${escapeAttribute(entry.id)}"><div class="card-label">${escapeHtml(entry.source)}</div><div class="card-body">${escapeHtml(entry.content)}</div>${retryable ? `<div class="card-actions">${retryable}</div>` : ""}</div>`
     }
     case "notice":
@@ -1665,7 +1697,31 @@ function renderWorking(): string {
   const turnId = activeTurnIdFor(state.viewedSessionId)
   if (!turnId) return ""
   const elapsed = conversation.turnStartedAt ? Math.max(0, Math.round((Date.now() - conversation.turnStartedAt) / 1000)) : 0
-  return `<div class="working" data-stream-role="working"><img class="working-mark" src="${workingMarkUrl}" alt="" aria-hidden="true" /><span id="working-label">Working… ${elapsed}s</span></div>`
+  const activity = activeToolName(conversation)
+  return `<div class="working" data-stream-role="working"><img class="working-mark" src="${workingMarkUrl}" alt="" aria-hidden="true" /><span id="working-label">${escapeHtml(activity ? `${activity} · ${elapsed}s` : `Working · ${elapsed}s`)}</span></div>`
+}
+
+function activeToolName(conversation: ConversationState) {
+  for (let index = conversation.entries.length - 1; index >= 0; index -= 1) {
+    const entry = conversation.entries[index]
+    if (entry.kind !== "tool") continue
+    if (entry.status === "running" || entry.status === "pending") return entry.toolName
+  }
+  return ""
+}
+
+function renderSessionMeta() {
+  const conversation = runtimeConversation()
+  const parts: string[] = []
+  const input = formatTokens(conversation.tokenStats?.inputTokens ?? 0)
+  const output = formatTokens(conversation.tokenStats?.outputTokens ?? 0)
+  if (input) parts.push(`${input} in`)
+  if (output) parts.push(`${output} out`)
+  if (conversation.contextUsagePercent !== null) parts.push(`${Math.round(conversation.contextUsagePercent * 100)}% ctx`)
+  const duration = formatDuration(conversation.lastTurnSummary?.durationMs ?? 0)
+  if (duration) parts.push(`last turn ${duration}`)
+  sessionMeta.textContent = parts.join(" · ")
+  sessionMeta.hidden = !parts.length
 }
 
 function syncWorkingTimer() {
@@ -1674,7 +1730,11 @@ function syncWorkingTimer() {
     workingTimer = setInterval(() => {
       const label = document.getElementById("working-label")
       const started = state.conversation.turnStartedAt
-      if (label && started) label.textContent = `Working… ${Math.max(0, Math.round((Date.now() - started) / 1000))}s`
+      if (label && started) {
+        const activity = activeToolName(state.conversation)
+        const elapsed = Math.max(0, Math.round((Date.now() - started) / 1000))
+        label.textContent = activity ? `${activity} · ${elapsed}s` : `Working · ${elapsed}s`
+      }
     }, 1000)
   }
   if (!active && workingTimer) {
@@ -2054,7 +2114,7 @@ async function promoteFollowUp(inputId: string) {
       // inputs on settle. Invalidate the dock instead of surfacing the race.
       delete state.pendingInputs[sessionId]
       syncCurrentPendingInputs()
-      state.notice = "回合已结束，排队输入已被丢弃。"
+      state.notice = "The turn already ended; queued input was dropped."
       render()
       return
     }
@@ -2094,7 +2154,7 @@ async function recallPendingInput(inputId: string) {
       if (index >= 0) pending.splice(index, 1)
       if (pending.length === 0) delete state.pendingInputs[sessionId]
       setPrompt([asRecordText(item.input), prompt.value].filter((value) => value.trim()).join("\n\n"), true)
-      state.notice = "回合已结束：排队输入已退回输入框。"
+      state.notice = "The turn already ended; queued input returned to the composer."
       render()
       return
     }
@@ -2272,6 +2332,14 @@ prompt.addEventListener("input", () => {
   renderSlashCommandMenu()
 })
 prompt.addEventListener("keydown", (event) => {
+  if (event.altKey && !event.ctrlKey && !event.metaKey && (event.key === "ArrowUp" || event.key === "ArrowDown")) {
+    const next = event.key === "ArrowUp" ? inputHistory.older(prompt.value) : inputHistory.newer()
+    if (next !== undefined) {
+      event.preventDefault()
+      setPrompt(next)
+    }
+    return
+  }
   const menu = buildSlashCommandMenu(state.slashCommands, prompt.value)
   if (state.slashMenuOpen && menu && menu.commands.length) {
     if (event.key === "ArrowDown" || event.key === "ArrowUp") {
@@ -2344,6 +2412,38 @@ const keyBindings: KeyBinding[] = [
     run: (event) => {
       event.preventDefault()
       openSettings()
+    },
+  },
+  {
+    id: "find",
+    matches: (event) => modifierPressed(event) && !event.shiftKey && !event.altKey && event.key.toLowerCase() === "f",
+    run: (event) => {
+      event.preventDefault()
+      openFind()
+    },
+  },
+  {
+    id: "zoom-in",
+    matches: (event) => modifierPressed(event) && !event.shiftKey && !event.altKey && (event.key === "=" || event.key === "+"),
+    run: (event) => {
+      event.preventDefault()
+      runAction(() => window.api.view.zoom("in"))
+    },
+  },
+  {
+    id: "zoom-out",
+    matches: (event) => modifierPressed(event) && !event.shiftKey && !event.altKey && event.key === "-",
+    run: (event) => {
+      event.preventDefault()
+      runAction(() => window.api.view.zoom("out"))
+    },
+  },
+  {
+    id: "zoom-reset",
+    matches: (event) => modifierPressed(event) && !event.shiftKey && !event.altKey && event.key === "0",
+    run: (event) => {
+      event.preventDefault()
+      runAction(() => window.api.view.zoom("reset"))
     },
   },
   {
@@ -2423,6 +2523,11 @@ const keyBindings: KeyBinding[] = [
         render()
         return
       }
+      if (state.findOpen) {
+        event.preventDefault()
+        closeFind()
+        return
+      }
       if (state.settingsOpen || state.shortcutsOpen) return
       // Esc with nothing open: interrupt the active turn, else refocus the
       // composer ("stop" semantics, matching the web surface).
@@ -2472,6 +2577,7 @@ async function sendPrompt() {
   }
   const rawInput = prompt.value.trim()
   if (!rawInput) return
+  inputHistory.record(rawInput)
   const project = chatProject()
   if (!project?.available) {
     state.notice = "Choose a project before sending a message."
@@ -2751,15 +2857,29 @@ requiredElement("toggle-goal").addEventListener("click", () => {
   state.composerMenuOpen = false
   showGoalPanel(!state.goal.visible)
 })
-const composerForm = requiredElement<HTMLFormElement>("composer")
-composerForm.addEventListener("dragover", (event) => {
+const dropOverlay = requiredElement("drop-overlay")
+function dragCarriesFiles(event: DragEvent) {
+  return Boolean(state.chatProjectPath) && Array.from(event.dataTransfer?.types || []).includes("Files")
+}
+document.addEventListener("dragenter", (event) => {
+  if (!dragCarriesFiles(event)) return
   event.preventDefault()
-  composerForm.classList.add("drag-over")
+  dragDepth += 1
+  dropOverlay.hidden = false
 })
-composerForm.addEventListener("dragleave", () => composerForm.classList.remove("drag-over"))
-composerForm.addEventListener("drop", (event) => {
+document.addEventListener("dragleave", () => {
+  if (dropOverlay.hidden) return
+  dragDepth = Math.max(0, dragDepth - 1)
+  if (!dragDepth) dropOverlay.hidden = true
+})
+document.addEventListener("dragover", (event) => {
+  if (dragCarriesFiles(event)) event.preventDefault()
+})
+document.addEventListener("drop", (event) => {
+  dragDepth = 0
+  dropOverlay.hidden = true
+  if (!dragCarriesFiles(event)) return
   event.preventDefault()
-  composerForm.classList.remove("drag-over")
   const files = Array.from(event.dataTransfer?.files || [])
   if (files.length) addAttachmentFiles(files)
 })
@@ -2875,6 +2995,53 @@ filePreview.addEventListener("click", (event) => {
 })
 startResize(sidebarResizeHandle, "sidebar")
 startResize(fileResizeHandle, "files")
+
+// ---------- find in conversation (Ctrl+F) ----------
+
+function renderFindBar() {
+  findBar.hidden = !state.findOpen
+}
+
+function openFind() {
+  state.findOpen = true
+  findInput.dataset.searched = ""
+  render()
+  findInput.focus()
+  findInput.select()
+}
+
+function closeFind() {
+  if (!state.findOpen) return
+  state.findOpen = false
+  findCount.textContent = ""
+  render()
+  void window.api.view.findStop()
+  prompt.focus()
+}
+
+function runFind(forward: boolean, findNext: boolean) {
+  const query = findInput.value.trim()
+  if (!query) return
+  void window.api.view.find(query, { forward, findNext }).catch(() => {})
+}
+
+findInput.addEventListener("input", () => {
+  findCount.textContent = ""
+  runFind(true, false)
+  findInput.dataset.searched = "true"
+})
+findInput.addEventListener("keydown", (event) => {
+  if (event.key !== "Enter") return
+  event.preventDefault()
+  runFind(!event.shiftKey, Boolean(findInput.dataset.searched))
+  findInput.dataset.searched = "true"
+})
+requiredElement("find-prev").addEventListener("click", () => runFind(false, true))
+requiredElement("find-next").addEventListener("click", () => runFind(true, true))
+requiredElement("find-close").addEventListener("click", () => closeFind())
+window.api.view.onFindResult((result) => {
+  findCount.textContent = result.matches ? `${result.active}/${result.matches}` : "No matches"
+})
 
 // ---------- task monitor / goal panel / palette interactions ----------
 
@@ -3001,6 +3168,20 @@ planDock.addEventListener("click", (event) => {
 })
 messageStream.addEventListener("click", (event) => {
   const target = event.target as HTMLElement
+  const emptyAction = target.closest<HTMLButtonElement>("[data-empty-action]")?.dataset.emptyAction
+  if (emptyAction === "settings") {
+    openSettings()
+    return
+  }
+  if (emptyAction === "add-project") {
+    runAction(addProject)
+    return
+  }
+  const emptyPrompt = target.closest<HTMLButtonElement>("[data-empty-prompt]")?.dataset.emptyPrompt
+  if (emptyPrompt) {
+    setPrompt(emptyPrompt, true)
+    return
+  }
   const copyMessage = target.closest<HTMLButtonElement>("[data-copy-message]")?.dataset.copyMessage
   if (copyMessage) {
     const entry = state.conversation.entries.find((item) => item.id === copyMessage)
@@ -3154,6 +3335,12 @@ function openSettings() {
   settingsApiKey.value = ""
   settingsBaseUrl.value = state.settings.baseUrl
   settingsModel.value = state.settings.model
+  if (!settingsReasoning.options.length) {
+    settingsReasoning.append(
+      new Option("Default", ""),
+      ...reasoningEfforts.map((effort) => new Option(effort, effort)),
+    )
+  }
   settingsReasoning.value = state.settings.reasoningEffort
   render()
 }
