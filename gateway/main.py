@@ -30,6 +30,19 @@ def build_parser() -> argparse.ArgumentParser:
     subparsers = parser.add_subparsers(dest="command")
     approve = subparsers.add_parser("approve", help="Approve a pending pairing code")
     approve.add_argument("code", help="The 6-character pairing code shown to the sender")
+    init = subparsers.add_parser("init", help="交互式创建 gateway.yaml（分渠道引导 + 实时凭证验证 + 自动抓取账号 ID）")
+    init.add_argument("--channel", default="", help="逗号分隔的渠道 id（如 telegram,email；跳过选择菜单）")
+    init.add_argument("--yes", action="store_true", help="非交互一键模式：字段全部来自 RIND_GW_<渠道>_<字段> 环境变量")
+    init.add_argument("--worker-url", default="", help="Worker 地址（默认 ws://127.0.0.1:8765）")
+    init.add_argument("--workspace", default=None, help="工作目录（默认当前目录）")
+    doctor = subparsers.add_parser("doctor", help="逐项体检：配置/worker/SDK/凭证/状态文件（--probe 实测凭证，--fix 自动修复）")
+    doctor.add_argument("--probe", action="store_true", help="实时验证渠道凭证（会访问平台 API）")
+    doctor.add_argument("--fix", action="store_true", help="自动修复可修复项（损坏的状态文件备份为 .corrupt）")
+    doctor.add_argument("--config", default=None, help="gateway.yaml path")
+    doctor.add_argument("--workspace", default=".", help="Workspace root")
+    status = subparsers.add_parser("status", help="一屏状态：会话映射/配对/渠道/worker 在线")
+    status.add_argument("--config", default=None, help="gateway.yaml path")
+    status.add_argument("--workspace", default=".", help="Workspace root")
     return parser
 
 
@@ -80,9 +93,33 @@ def main(argv: list[str] | None = None) -> int:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
     args = build_parser().parse_args(list(sys.argv[1:] if argv is None else argv))
     workspace = Path(args.workspace).expanduser().resolve()
+
+    if args.command == "init":
+        from .wizard import run_init
+
+        return run_init(args)
+    if args.command == "doctor":
+        from .doctor import run_doctor
+
+        return run_doctor(args)
+    if args.command == "status":
+        from .status import run_status
+
+        return run_status(args)
+
     try:
         config = load_config(resolve_config_path(args.config, workspace))
     except ConfigError as exc:
+        if args.command in (None, "run") and sys.stdin.isatty():
+            print(f"gateway: {exc}")
+            try:
+                offer = input("现在运行配置向导（gateway init）？[Y/n]: ").strip().lower()
+            except EOFError:
+                offer = "n"
+            if offer in ("", "y", "yes"):
+                from .wizard import run_init
+
+                return run_init(args)
         print(f"gateway: {exc}", file=sys.stderr)
         return 2
     runtime_dir = Path(config.workspace) / ".rind"

@@ -1,0 +1,242 @@
+"""`gateway init`: guided, per-channel configuration instead of a YAML wall.
+
+The interactive loop (input/print) is thin; the actual work lives in pure
+functions — `collect_answers_env` (one-click env-driven mode) and
+`build_config_data` (answers → gateway.yaml dict) — so the whole flow is
+unit-testable without a terminal.
+"""
+
+from __future__ import annotations
+
+import getpass
+import os
+import sys
+from pathlib import Path
+from typing import Any
+
+from .config import render_yaml
+from .onboarding import ChannelGuide, all_guides, guide_for
+
+DEFAULT_WORKER = "ws://127.0.0.1:8765"
+
+
+# --- pure builders -------------------------------------------------------------
+
+
+def env_answer(channel_id: str, field_name: str, env: dict[str, str]) -> str:
+    return env.get(f"RIND_GW_{channel_id.upper()}_{field_name.upper()}", "")
+
+
+def collect_answers_env(guide: ChannelGuide, env: dict[str, str]) -> tuple[dict[str, str], list[str]]:
+    """Non-interactive mode: read every field from RIND_GW_<CH>_<FIELD>."""
+    answers: dict[str, str] = {}
+    missing_required: list[str] = []
+    for spec in guide.fields:
+        value = env_answer(guide.id, spec.name, env) or (spec.default if spec.default else "")
+        answers[spec.name] = value
+        if spec.required and not value:
+            missing_required.append(f"RIND_GW_{guide.id.upper()}_{spec.name.upper()}")
+    allow = env_answer(guide.id, "allow_from", env)
+    group = env_answer(guide.id, "group_allow", env)
+    lists = {
+        "allow_from": [item.strip() for item in allow.split(",") if item.strip()],
+        "group_allow": [item.strip() for item in group.split(",") if item.strip()],
+    }
+    return {"answers": answers, **lists}, missing_required
+
+
+def build_config_data(
+    selected: list[str],
+    answers: dict[str, dict[str, str]],
+    lists: dict[str, dict[str, list[str]]],
+    *,
+    worker: str,
+    worker_token: str,
+    workspace: str,
+    pairing_enabled: bool = True,
+) -> dict[str, Any]:
+    channels: dict[str, Any] = {}
+    for channel_id in selected:
+        guide = guide_for(channel_id)
+        if guide is None:
+            continue
+        block: dict[str, Any] = {}
+        for spec in guide.fields:
+            value = answers.get(channel_id, {}).get(spec.name, "")
+            if value:
+                block[spec.name] = int(value) if value.isdigit() and spec.name in {"imap_port", "smtp_port", "poll_interval", "callback_port", "webhook_port", "ws_port"} else value
+        allow = [item for item in lists.get(channel_id, {}).get("allow_from", []) if item]
+        group = [item for item in lists.get(channel_id, {}).get("group_allow", []) if item]
+        if allow:
+            block["allow_from"] = allow
+        if group:
+            block["group_allow"] = group
+        if block:
+            channels[channel_id] = block
+    data: dict[str, Any] = {
+        "worker": worker,
+        "workspace": workspace,
+        "channels": channels,
+    }
+    if worker_token:
+        data["worker_token"] = worker_token
+    if pairing_enabled:
+        data["pairing"] = {"enabled": True}
+    return data
+
+
+def config_path_for(workspace: str) -> Path:
+    return Path(workspace).expanduser() / ".rind" / "gateway.yaml"
+
+
+# --- interactive loop ------------------------------------------------------------
+
+
+def _ask(label: str, default: str = "", secret: bool = False) -> str:
+    suffix = f" [{default}]" if default else ""
+    try:
+        if secret:
+            value = getpass.getpass(f"{label}{suffix}: ")
+        else:
+            value = input(f"{label}{suffix}: ")
+    except EOFError:
+        value = ""
+    return value.strip() or default
+
+
+def _ask_list(label: str) -> list[str]:
+    raw = input(f"{label}（逗号分隔，可留空）: ").strip()
+    return [item for item in raw.replace("，", ",").split(",") if item]
+
+
+def _confirm(label: str, default_yes: bool = True) -> bool:
+    hint = "Y/n" if default_yes else "y/N"
+    raw = input(f"{label} [{hint}]: ").strip().lower()
+    if not raw:
+        return default_yes
+    return raw in ("y", "yes")
+
+
+def _pick_channels() -> list[str]:
+    guides = all_guides()
+    print("\n可用渠道（回车 = Telegram + Email 两个零门槛渠道）：")
+    for index, guide in enumerate(guides, start=1):
+        print(f"  {index}. {guide.emoji} {guide.label} — {guide.summary}")
+    raw = input("选择渠道编号（逗号分隔，如 1,4）: ").strip()
+    if not raw:
+        return ["telegram", "email"]
+    picked: list[str] = []
+    for token in raw.replace("，", ",").split(","):
+        token = token.strip()
+        if token.isdigit() and 1 <= int(token) <= len(guides):
+            picked.append(guides[int(token) - 1].id)
+    return picked or ["telegram", "email"]
+
+
+def _guide_walk(guide: ChannelGuide, env: dict[str, str]) -> tuple[dict[str, str], dict[str, list[str]]]:
+    print(f"\n=== {guide.emoji} {guide.label} ===")
+    for step in guide.setup_steps:
+        print(f"  · {step}")
+    answers: dict[str, str] = {}
+    env_prefix = f"RIND_GW_{guide.id.upper()}_"
+    for spec in guide.fields:
+        env_value = env.get(env_prefix + spec.name.upper(), "")
+        label = f"{spec.label}" + (f"（{spec.help}）" if spec.help else "")
+        answers[spec.name] = _ask(label, spec.default, secret=spec.secret) or env_value
+    print("  allow_from / group_allow 现在可以留空——陌生账号首次发消息会收到配对码，")
+    print("  在服务器执行 `gateway approve <码>` 后即自动进入白名单。")
+    allow = _ask_list("allow_from 白名单")
+    group = _ask_list("group_allow 群白名单")
+    if guide.probe and answers:
+        if _confirm("立即验证凭证（会访问平台 API）？"):
+            result = guide.probe({key: value for key, value in answers.items() if value})
+            mark = "✔" if result.ok else "✘"
+            print(f"  {mark} {result.detail}")
+            if not result.ok:
+                print("     可稍后运行 `python main.py gateway doctor --probe` 重新体检。")
+    if guide.discover_senders and _confirm("现在抓取你的账号 ID？（60 秒内给 bot 发一条消息）", default_yes=False):
+        senders = guide.discover_senders({key: value for key, value in answers.items() if value}, 60.0)
+        if senders:
+            print("  发现以下发送者：")
+            for index, sender in enumerate(senders, start=1):
+                print(f"    {index}. {sender}")
+            picked = input("把哪些加入 allow_from（编号，回车=全部，0=不加）: ").strip()
+            if picked != "0":
+                ids = [senders[int(token) - 1].split(" ")[0] for token in picked.replace("，", ",").split(",") if token.strip().isdigit() and 0 < int(token) <= len(senders)] if picked else [sender.split(" ")[0] for sender in senders]
+                allow = allow or ids
+    return answers, {"allow_from": allow, "group_allow": group}
+
+
+def run_init(args) -> int:
+    env = dict(os.environ)
+    if args.yes:
+        # 一键模式：全程零交互——渠道列表、字段、连接信息全部来自参数与环境变量。
+        selected = [token.strip() for token in args.channel.split(",") if guide_for(token.strip())]
+        unknown = [token.strip() for token in args.channel.split(",") if not guide_for(token.strip())]
+        if unknown:
+            print(f"未知渠道已忽略: {', '.join(unknown)}", file=sys.stderr)
+        if not selected:
+            print("--channel 缺少有效渠道。", file=sys.stderr)
+            return 2
+        worker = args.worker_url or env.get("RIND_GW_WORKER") or DEFAULT_WORKER
+        worker_token = env.get("RIND_SERVER_TOKEN", "")
+        workspace = Path(args.workspace or os.getcwd()).expanduser().resolve()
+        guides = [guide_for(channel_id) for channel_id in selected]
+        answers: dict[str, dict[str, str]] = {}
+        lists: dict[str, dict[str, list[str]]] = {}
+        for guide in guides:
+            collected, missing = collect_answers_env(guide, env)
+            answers[guide.id] = collected["answers"]
+            lists[guide.id] = {key: collected[key] for key in ("allow_from", "group_allow")}
+            if missing:
+                print(f"✘ {guide.label} 缺少必需字段（环境变量）: {', '.join(missing)}", file=sys.stderr)
+                return 2
+        return _finish(args, selected, answers, lists, worker, worker_token, workspace, confirm=False)
+
+    print("Rind 网关配置向导 —— 一步步把 IM 渠道接到你的 worker（全程约 2 分钟）")
+    if args.channel:
+        selected = [token.strip() for token in args.channel.split(",") if guide_for(token.strip())]
+        unknown = [token.strip() for token in args.channel.split(",") if not guide_for(token.strip())]
+        if unknown:
+            print(f"未知渠道已忽略: {', '.join(unknown)}", file=sys.stderr)
+        if not selected:
+            print("没有可用的渠道。", file=sys.stderr)
+            return 2
+    else:
+        selected = _pick_channels()
+    worker_token = os.environ.get("RIND_SERVER_TOKEN", "")
+    worker = _ask("Worker 地址", args.worker_url or DEFAULT_WORKER)
+    workspace = Path(_ask("工作目录（网关会话的根目录，绝对路径）", args.workspace or os.getcwd())).expanduser().resolve()
+    if not worker_token:
+        worker_token = _ask("Worker Token（RIND_SERVER_TOKEN 的值，可留空）", secret=True)
+
+    guides = [guide_for(channel_id) for channel_id in selected]
+    answers = {}
+    lists = {}
+    for guide in guides:
+        answers[guide.id], lists[guide.id] = _guide_walk(guide, env)
+    return _finish(args, selected, answers, lists, worker, worker_token, workspace, confirm=True)
+
+
+def _finish(args, selected, answers, lists, worker, worker_token, workspace, *, confirm: bool) -> int:
+    data = build_config_data(
+        selected, answers, lists,
+        worker=worker, worker_token=worker_token, workspace=str(workspace),
+    )
+    text = render_yaml(data)
+    print("\n—— 生成的 gateway.yaml ——")
+    print(text)
+    target = config_path_for(str(workspace))
+    if confirm and not _confirm(f"写入 {target}？"):
+        print("已取消（配置未写入）。")
+        return 1
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(text, encoding="utf-8")
+    print(f"\n✔ 已写入 {target}")
+    print("下一步：")
+    print(f"  1) python main.py gateway doctor --config \"{target}\" --probe   # 逐项体检")
+    print(f"  2) python main.py gateway --config \"{target}\"                  # 启动网关")
+    return 0
+
+
+__all__ = ["build_config_data", "collect_answers_env", "config_path_for", "run_init"]

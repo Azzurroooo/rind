@@ -229,6 +229,66 @@ def _parse_scalar(raw: str, env: Mapping[str, str]) -> str | bool | int:
     return _interpolate(raw, env)
 
 
+
+
+# --- YAML rendering (wizard/doctor write path) --------------------------------
+
+
+def _render_scalar(value: Any) -> str:
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, int):
+        return str(value)
+    text = str(value)
+    if "'" in text:
+        escaped = text.replace("'", "''")
+        return f"'{escaped}'"
+    # Quote anything the parser would otherwise read back as a non-string
+    # (numeric sender IDs like Telegram user ids, true/false, ${VAR} literals).
+    if (
+        text == ""
+        or _INT_PATTERN.match(text)
+        or text in ("true", "false")
+        or any(ch in text for ch in ":#{}[]&*!|>%@`")
+        or text != text.strip()
+        or text.startswith("$")
+    ):
+        return f"'{text}'"
+    return text
+
+
+def _render_mapping(data: Mapping[str, Any], indent: int) -> str:
+    pad = "  " * indent
+    lines: list[str] = []
+    for key, value in data.items():
+        if isinstance(value, dict):
+            if not value:
+                continue
+            lines.append(f"{pad}{key}:")
+            lines.append(_render_mapping(value, indent + 1))
+        elif isinstance(value, (list, tuple)):
+            if not value:
+                continue
+            items = ", ".join(_render_scalar(item) for item in value)
+            lines.append(f"{pad}{key}: [{items}]")
+        elif value is None:
+            continue
+        else:
+            lines.append(f"{pad}{key}: {_render_scalar(value)}")
+    return "\n".join(lines)
+
+
+def render_yaml(data: Mapping[str, Any]) -> str:
+    """Render a bounded gateway config dict back to gateway.yaml text.
+
+    Inverse of parse_yaml for the shapes the wizard produces; validated by
+    round-trip tests (render → parse → build_config).
+    """
+    if not data:
+        return ""
+    return _render_mapping(data, 0) + "\n"
+
+
 # --- schema validation -------------------------------------------------------
 
 
