@@ -180,3 +180,36 @@ describe("Conversation — interrupt arming surface (audit #1)", () => {
     expect(screen.getByRole("button", { name: /再按一次 Esc 停止/ })).not.toBeNull();
   });
 });
+
+describe("Conversation — working status line", () => {
+  it("shows the current running tool and the Esc hint while a turn works", () => {
+    const { container } = render(<Conversation {...makeProps({ active: true, messages: [
+      { id: "u1", role: "user", content: "run tests" },
+      { id: "tool-1", role: "tool", tool_call_id: "c1", name: "bash", status: "running" },
+    ] })} />);
+    const status = container.querySelector(".working-status");
+    expect(status.textContent).toContain("Working");
+    expect(status.textContent).toContain("Shell command");
+    expect(status.querySelector("kbd").textContent).toBe("Esc");
+    expect(status.textContent).toContain("中断");
+  });
+
+  it("an empty stream reads thinking; a streaming draft reads responding", () => {
+    const { container, rerender } = render(<Conversation {...makeProps({ active: true })} />);
+    expect(container.querySelector(".working-activity").textContent).toBe("thinking");
+    rerender(<Conversation {...makeProps({ active: true, draft: "partial" })} />);
+    expect(container.querySelector(".working-activity").textContent).toBe("responding");
+  });
+
+  it("elapsed renders from activeSince and turns a step retry into a strip", () => {
+    const activeSince = Date.now() - 65_000;
+    const { container } = render(<Conversation {...makeProps({ active: true, stepRetry: { attempt: 2, reason: "rate limit" } })} activeSince={activeSince} />);
+    expect(container.querySelector(".working-elapsed").textContent).toBe("1m 05s");
+    expect(container.querySelector(".retry-strip").textContent).toContain("第 2 次重试 · rate limit");
+  });
+
+  it("no status row when the turn is idle", () => {
+    render(<Conversation {...makeProps()} />);
+    expect(screen.queryByText("Working")).toBeNull();
+  });
+});

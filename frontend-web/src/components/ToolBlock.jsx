@@ -50,7 +50,7 @@ export function ToolBlock({ tool }) {
         <StatusIcon running={running} failed={Boolean(failed)} />
         <strong>{label}</strong>
         {summary && <span className="tool-summary-line">{summary}</span>}
-        <span className="tool-status">{running ? "running" : failed ? "failed" : "complete"}</span>
+        <span className={`tool-status ${running && tool?.progress ? "live" : ""}`}>{running ? (tool?.progress || "running") : failed ? "failed" : "complete"}</span>
         <ChevronDown size={14} className={`tool-chevron ${expanded ? "open" : ""}`} />
       </button>
       {expanded && hasBody && (

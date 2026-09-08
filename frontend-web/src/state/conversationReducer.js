@@ -58,6 +58,8 @@ export function emptyConversationState() {
     queued: [], // [{inputId, input, mode}] — inputs accepted but not yet delivered
     collapsedCount: 0, // entries dropped by the TRANSCRIPT_CAP (oldest first)
     turnChanges: null, // { fileCount, added, removed, firstToolCallId } — last finished turn's mutations
+    activeSince: 0, // epoch ms of turn_started (event `ts`); 0 when unknown
+    stepRetry: null, // { attempt, reason } — latest turn_step_retry; cleared once text flows again
     cursor: 0, // durable events applied for the current session
     seen: {}, // "session:turn:sequence" -> true (idempotence guard)
   };
@@ -144,6 +146,8 @@ export function conversationView(state) {
     draft: state.streaming ? state.streaming.text : "",
     plan: state.plan,
     active: state.active,
+    activeSince: state.activeSince,
+    stepRetry: state.stepRetry,
     question: state.question,
     queued: state.queued,
     collapsedCount: state.collapsedCount,
@@ -181,7 +185,7 @@ function applyTurnEvent(state, event, context) {
   const turnId = context.turnId;
   switch (event.type) {
     case "turn_started":
-      return { ...state, active: true, activeTurnId: turnId, streaming: { turnId, text: "" } };
+      return { ...state, active: true, activeTurnId: turnId, activeSince: epochMs(event.ts), streaming: { turnId, text: "" }, stepRetry: null };
 
     case "assistant_delta": {
       const streaming = state.streaming && state.streaming.turnId === turnId
@@ -191,6 +195,7 @@ function applyTurnEvent(state, event, context) {
         ...state,
         active: true,
         streaming: { turnId, text: streaming.text + String(event.text || "") },
+        stepRetry: null, // the model is producing again — the retry note served its purpose
       };
     }
 
@@ -221,11 +226,23 @@ function applyTurnEvent(state, event, context) {
         status,
         duration_ms: event.duration_ms,
         error_type: event.error_type,
+        progress: "", // the heartbeat chip dies with the result
       };
       const name = String(event.tool_name || event.name || "");
       if (name) patch.name = name;
       return upsertTool(state, definedOnly(patch));
     }
+
+    case "tool_progress":
+      // Heartbeat for long-running tools (e.g. bash): `still running (42s)`.
+      // Latest wins — it is a state, not a stream.
+      return upsertTool(state, {
+        id: String(event.tool_call_id || ""),
+        progress: progressText(event.payload),
+      });
+
+    case "turn_step_retry":
+      return { ...state, stepRetry: { attempt: Number(event.attempt) || 0, reason: String(event.reason || "") } };
 
     case "file_change":
       return upsertTool(state, { id: String(event.tool_call_id || ""), file: event.file_path });
@@ -286,7 +303,9 @@ function finalizeTurn(state, turnId) {
     entries,
     active: false,
     activeTurnId: "",
+    activeSince: 0,
     streaming: null,
+    stepRetry: null,
     question: null, // pending question dies with its turn (§2.3 cancelled)
     turnChanges: summarizeChanges(entries),
   };
@@ -388,12 +407,14 @@ function applyHistory(state, messages) {
 // live_turn snapshot reconciliation (used right after a history load).
 function applyLiveTurn(state, liveTurn, sessionId) {
   if (!liveTurn || typeof liveTurn !== "object") {
-    return { ...state, active: false, activeTurnId: "", streaming: null, question: null, queued: [] };
+    return { ...state, active: false, activeTurnId: "", activeSince: 0, streaming: null, stepRetry: null, question: null, queued: [] };
   }
   let next = {
     ...state,
     active: liveTurn.status === "running",
     activeTurnId: String(liveTurn.turn_id || ""),
+    activeSince: 0, // the snapshot carries no start time; elapsed restarts after a reload
+    stepRetry: null,
     streaming: { turnId: String(liveTurn.turn_id || ""), text: String(liveTurn.assistant_text || "") },
     // The snapshot is authoritative for the queue: rebuild it from
     // pending_inputs so a reconnect re-renders exactly what the kernel holds.
@@ -529,4 +550,18 @@ function firstDefined(...values) {
     if (value !== undefined && value !== null && value !== "") return value;
   }
   return undefined;
+}
+
+// Runtime events stamp `ts` as epoch seconds (agent/domain/events.py).
+function epochMs(ts) {
+  const seconds = Number(ts);
+  return Number.isFinite(seconds) && seconds > 0 ? Math.trunc(seconds * 1000) : 0;
+}
+
+// tool_progress payloads arrive as plain strings or objects ({message}).
+function progressText(payload) {
+  if (payload == null) return "";
+  if (typeof payload === "string") return payload;
+  if (typeof payload === "object") return String(payload.message || "");
+  return String(payload);
 }

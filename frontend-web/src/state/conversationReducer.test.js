@@ -15,8 +15,8 @@ function loadGoldenEnvelopes() {
     .filter((message) => message.kind === "event");
 }
 
-function replay(envelopes) {
-  return envelopes.reduce((state, envelope) => reduceConversation(state, envelope), emptyConversationState());
+function replay(envelopes, initial = emptyConversationState()) {
+  return envelopes.reduce((state, envelope) => reduceConversation(state, envelope), initial);
 }
 
 describe("conversation reducer — golden replay (web-ui.md §3)", () => {
@@ -433,6 +433,47 @@ describe("conversation reducer — turn-scoped change summary (audit #14)", () =
       event(4, "durable", { type: "turn_completed", turn_id: "t1" }),
     ]);
     expect(state.turnChanges).toBeNull();
+  });
+});
+
+describe("conversation reducer — alive-turn state (working status, heartbeats, retries)", () => {
+  it("turn_started records the event timestamp as activeSince; the terminal event clears it", () => {
+    const started = replay([event(1, "durable", { type: "turn_started", turn_id: "t1", ts: "1700000000.5" })]);
+    expect(started.activeSince).toBe(1700000000500);
+    const finished = replay([event(2, "durable", { type: "turn_completed", turn_id: "t1" })], started);
+    expect(finished.activeSince).toBe(0);
+  });
+
+  it("tool_progress heartbeats update the running tool's progress; the result clears it", () => {
+    let state = replay([
+      event(1, "durable", { type: "turn_started", turn_id: "t1" }),
+      event(2, "durable", { type: "tool_requested", turn_id: "t1", tool_call_id: "c1", tool_name: "bash", args_preview: "{}" }),
+      event(3, "incremental", { type: "tool_progress", turn_id: "t1", tool_call_id: "c1", payload: { message: "still running (42s)" } }),
+    ]);
+    expect(state.entries.at(-1).progress).toBe("still running (42s)");
+    state = replay([event(4, "incremental", { type: "tool_progress", turn_id: "t1", tool_call_id: "c1", payload: "raw text" })], state);
+    expect(state.entries.at(-1).progress).toBe("raw text");
+    state = replay([event(5, "durable", { type: "tool_result", turn_id: "t1", tool_call_id: "c1", status: "completed", result: "done" })], state);
+    expect(state.entries.at(-1).progress).toBe("");
+  });
+
+  it("turn_step_retry arms the retry strip and the next assistant delta disarms it", () => {
+    let state = replay([
+      event(1, "durable", { type: "turn_started", turn_id: "t1" }),
+      event(2, "incremental", { type: "turn_step_retry", turn_id: "t1", attempt: 2, reason: "rate limit" }),
+    ]);
+    expect(state.stepRetry).toEqual({ attempt: 2, reason: "rate limit" });
+    state = replay([event(3, "incremental", { type: "assistant_delta", turn_id: "t1", text: "back" })], state);
+    expect(state.stepRetry).toBeNull();
+  });
+
+  it("a turn terminal event clears the retry strip", () => {
+    const state = replay([
+      event(1, "durable", { type: "turn_started", turn_id: "t1" }),
+      event(2, "incremental", { type: "turn_step_retry", turn_id: "t1", attempt: 1, reason: "boom" }),
+      event(3, "durable", { type: "turn_failed", turn_id: "t1", error: "x" }),
+    ]);
+    expect(state.stepRetry).toBeNull();
   });
 });
 

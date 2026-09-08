@@ -1,6 +1,7 @@
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from "react";
 import { ArrowDown, Check, CircleStop, ClipboardCopy, FileDiff, LoaderCircle, RefreshCw, Wrench, X } from "lucide-react";
 import { copyText } from "../lib/clipboard.js";
+import { toolLabel, toolSummary } from "../lib/toolDisplay.js";
 import { MarkdownContent } from "./MarkdownContent.jsx";
 import { QuestionCard } from "./QuestionCard.jsx";
 import { ToolBlock } from "./ToolBlock.jsx";
@@ -18,6 +19,8 @@ const Conversation = forwardRef(function Conversation({
   draft,
   plan,
   active,
+  activeSince = 0,
+  stepRetry = null,
   collapsedCount = 0,
   turnChanges = null,
   interruptArmed = false,
@@ -100,7 +103,7 @@ const Conversation = forwardRef(function Conversation({
               <span className="change-delta">+{turnChanges.added} −{turnChanges.removed}</span>
             </button>
           )}
-          {active && !draft && !messages.some((message) => message.role === "tool" && message.status === "running") && <div className="thinking-line"><LoaderCircle className="spin" size={15} /> <span>Rind is thinking</span></div>}
+          {active && <WorkingStatus messages={messages} hasDraft={Boolean(draft)} activeSince={activeSince} stepRetry={stepRetry} />}
         </div>
         {detached && (
           <button type="button" className="jump-latest" onClick={scrollToLatest}>
@@ -114,6 +117,59 @@ const Conversation = forwardRef(function Conversation({
 
 function EmptyConversation() {
   return <div className="empty-conversation"><div className="empty-orbit">R</div><h2>Start a conversation with your worker</h2><p>Your worker stays alive independently. Close this tab and reconnect later without losing the session.</p><div className="starter-grid"><span>Inspect the current workspace</span><span>Review recent changes</span><span>Plan the next task</span></div></div>;
+}
+
+// Single-row turn status (codex status widget / claude spinner pattern):
+// `Working 42s · Shell command $ pytest -q · Esc 停止`. The elapsed clock and
+// the current activity come from state the reducer already tracks; the clock
+// hides when unknown (turn resumed from a snapshot). A step-retry strip rides
+// below while the model is between attempts.
+function WorkingStatus({ messages, hasDraft, activeSince, stepRetry }) {
+  const [, tick] = useState(0);
+  useEffect(() => {
+    if (!activeSince) return undefined;
+    const timer = window.setInterval(() => tick((value) => value + 1), 1000);
+    return () => window.clearInterval(timer);
+  }, [activeSince]);
+
+  const runningTool = latestRunningTool(messages);
+  const elapsed = activeSince ? formatElapsed(Date.now() - activeSince) : "";
+  return <div className="working-status">
+    <div className="working-line">
+      <LoaderCircle className="spin" size={14} />
+      <strong>Working</strong>
+      {elapsed && <span className="working-elapsed">{elapsed}</span>}
+      <span className="working-activity">{runningTool ? workingToolText(runningTool) : hasDraft ? "responding" : "thinking"}</span>
+      <span className="working-hint"><kbd>Esc</kbd> 中断</span>
+    </div>
+    {stepRetry && (
+      <div className="retry-strip" role="status">
+        模型响应中断 · 第 {stepRetry.attempt || "?"} 次重试{stepRetry.reason ? ` · ${stepRetry.reason}` : ""}
+      </div>
+    )}
+  </div>;
+}
+
+function latestRunningTool(messages) {
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const entry = messages[index];
+    if (entry.role !== "tool" && entry.role !== "question" && entry.role !== "queued") return null; // newer non-tool activity
+    if (entry.role === "tool" && entry.status === "running") return entry;
+  }
+  return null;
+}
+
+function workingToolText(tool) {
+  const label = toolLabel(String(tool.name || ""));
+  const summary = toolSummary(String(tool.name || ""), tool);
+  return summary ? `${label} · ${summary}` : label;
+}
+
+function formatElapsed(ms) {
+  const totalSeconds = Math.max(0, Math.floor(ms / 1000));
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return minutes ? `${minutes}m ${String(seconds).padStart(2, "0")}s` : `${seconds}s`;
 }
 
 function Message({ message, onAnswer, onExpire, onRetrieve, onPromote, onRetry }) {

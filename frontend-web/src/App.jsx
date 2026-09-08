@@ -1028,6 +1028,8 @@ export default function App() {
           draft={view.draft}
           plan={view.plan}
           active={view.active}
+          activeSince={view.activeSince}
+          stepRetry={view.stepRetry}
           collapsedCount={view.collapsedCount}
           turnChanges={view.turnChanges}
           interruptArmed={interruptArmed}

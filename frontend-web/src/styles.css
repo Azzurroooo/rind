@@ -292,6 +292,7 @@ h1, h2, p { margin: 0; }
 .tool-summary-line { min-width: 0; flex: 1; overflow: hidden; color: var(--muted); font: 11px var(--mono); text-overflow: ellipsis; white-space: nowrap; }
 .tool-title:hover .tool-summary-line { color: var(--code-text); }
 .tool-status { flex: 0 0 auto; color: var(--dim); font: 10px var(--mono); }
+.tool-status.live { color: var(--amber); animation: pulse 1.2s ease-in-out infinite; }
 .tool-icon { position: relative; width: 14px; height: 14px; display: inline-grid; place-items: center; color: var(--green); }
 .tool-icon-state, .tool-icon-running { grid-area: 1 / 1; display: inline-grid; place-items: center; transition: opacity var(--t-base) var(--ease), transform var(--t-base) var(--ease); }
 .tool-icon-running { opacity: 0; transform: scale(.5); color: var(--amber); }
@@ -328,6 +329,19 @@ h1, h2, p { margin: 0; }
 .plan-check { width: 17px; height: 17px; flex: 0 0 17px; display: grid; place-items: center; border: 1px solid var(--line-strong); border-radius: 50%; color: var(--dim); font: 9px var(--mono); }
 .plan-row.completed .plan-check { border-color: var(--green); color: var(--green); }
 .thinking-line { display: flex; align-items: center; gap: 8px; max-width: 880px; margin: 0 auto; color: var(--dim); font: 11px var(--mono); }
+
+/* Single-row turn status (codex pattern): Working · elapsed · current activity
+   · Esc hint. The hint sits in a fixed slot so the eye learns where "how do I
+   stop this" lives. */
+.working-status { max-width: 880px; margin: 0 auto; }
+.working-line { display: flex; align-items: center; gap: 9px; min-height: 22px; color: var(--dim); font: 11px var(--mono); }
+.working-line > svg { flex: 0 0 auto; color: var(--amber); }
+.working-line strong { flex: 0 0 auto; color: var(--muted); font-weight: 600; }
+.working-elapsed { flex: 0 0 auto; color: var(--dim); font-variant-numeric: tabular-nums; }
+.working-activity { min-width: 0; flex: 1; overflow: hidden; color: var(--dim); text-overflow: ellipsis; white-space: nowrap; }
+.working-hint { flex: 0 0 auto; display: inline-flex; align-items: center; gap: 5px; color: var(--dim); }
+.working-hint kbd { padding: 1px 5px; border: 1px solid var(--line-strong); border-radius: 3px; font: 10px var(--mono); }
+.retry-strip { margin-top: 7px; padding: 5px 9px; border-left: 2px solid var(--amber); background: var(--amber-soft); color: var(--amber); font: 11px/1.5 var(--mono); overflow-wrap: anywhere; }
 
 .composer-wrap { padding: 9px 36px 20px; border-top: 1px solid var(--line); background: var(--bg-elevated); }
 .composer-shell { position: relative; max-width: 880px; margin: 0 auto; border: 1px solid var(--line-strong); border-radius: 7px; background: var(--surface-raised); box-shadow: 0 8px 22px var(--shadow); }
@@ -512,7 +526,7 @@ h1, h2, p { margin: 0; }
   /* iOS zooms focused inputs set below 16px — keep every field at 16px. */
   .composer-shell textarea, .question-custom input, .login-input-row input, .workspace-input-row input { font-size: 16px; }
   /* The desktop reading measure gives way; content goes full-bleed. */
-  .message, .tool-stack, .plan-block, .thinking-line, .change-summary { max-width: 100%; }
+  .message, .tool-stack, .plan-block, .working-status, .change-summary { max-width: 100%; }
   .composer-shell, .composer-status, .empty-conversation { max-width: 100%; }
   /* Long tables scroll inside their container instead of the page. */
   .markdown-content table { display: block; max-width: 100%; overflow-x: auto; }

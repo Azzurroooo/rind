@@ -130,3 +130,18 @@ describe("ToolBlock — failed auto-expands exactly once (§2.2)", () => {
     expect(document.querySelector(".tool-body")).toBeNull();
   });
 });
+
+describe("ToolBlock — heartbeat progress", () => {
+  it("a running tool with a heartbeat shows the progress text in its live status chip", () => {
+    render(<ToolBlock tool={{ ...runningTool, progress: "still running (42s)" }} />);
+    const chip = document.querySelector(".tool-status.live");
+    expect(chip).not.toBeNull();
+    expect(chip.textContent).toBe("still running (42s)");
+  });
+
+  it("the heartbeat chip clears once the result lands", () => {
+    const { rerender } = render(<ToolBlock tool={{ ...runningTool, progress: "still running (42s)" }} />);
+    rerender(<ToolBlock tool={{ ...runningTool, status: "completed", result: "{}" }} />);
+    expect(document.querySelector(".tool-status.live")).toBeNull();
+  });
+});
