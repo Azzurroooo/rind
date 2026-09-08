@@ -482,39 +482,6 @@ export function turnCompletedLine(event, tools = { completed: 0, failed: 0 }) {
   return `${green("─")} ${bold("Worked for")} ${duration}${usageSegment}${summary ? dim(` · ${summary}`) : ""}`;
 }
 
-export function usageText({ stats = {}, totals = null, lastTurn = null } = {}) {
-  const hasTotals = Boolean(totals) && Number(totals.samplings) > 0;
-  const hasSample = hasSampledStats(stats);
-  if (!hasTotals && !hasSample) {
-    return notice("Usage", "no token usage yet — run a turn first");
-  }
-  const lines = [sectionRule("Usage", hasTotals && totals.samplings > 1 ? `${totals.samplings} samplings` : "")];
-  const windowTokens = Number(stats.context_window_tokens) || 0;
-  const percent = Number(stats.context_usage_percent);
-  if (windowTokens > 0 && Number.isFinite(percent)) {
-    const ratio = Math.max(0, Math.min(1, percent));
-    lines.push(kvRow(
-      "context",
-      `${loadMeter(ratio)} ${dim(`${Math.round(ratio * 100)}% · ${formatCount(stats.input_tokens)} / ${formatCount(windowTokens)}`)}`,
-    ));
-  } else if (Number(stats.input_tokens) > 0) {
-    lines.push(kvRow("context", formatCount(stats.input_tokens)));
-  }
-  if (Number(stats.cached_input_tokens) > 0) {
-    lines.push(kvRow("cache", `${formatCount(stats.cached_input_tokens)} ${dim(`· ${formatPercent(stats.cache_hit_rate)} hit`)}`));
-  }
-  if (lastTurn && (Number(lastTurn.input_tokens) > 0 || Number(lastTurn.output_tokens) > 0)) {
-    lines.push(kvRow("last turn", `${dim("↑")}${formatCount(lastTurn.input_tokens)} ${dim("↓")}${formatCount(lastTurn.output_tokens)}`));
-  }
-  if (hasTotals) {
-    const cached = Number(totals.cached_input_tokens) > 0 ? dim(` · cached ${formatCount(totals.cached_input_tokens)}`) : "";
-    const reasoning = Number(totals.reasoning_output_tokens) > 0 ? dim(` · reasoning ${formatCount(totals.reasoning_output_tokens)}`) : "";
-    lines.push(kvRow("input", `${formatCount(totals.input_tokens)}${cached}`));
-    lines.push(kvRow("output", `${formatCount(totals.output_tokens)}${reasoning}`));
-  }
-  return lines.join("\n");
-}
-
 export function contextBreakdownText(stats = null) {
   if (!stats || typeof stats !== "object" || !(Number(stats.estimated_input_tokens) > 0)) {
     return notice("Context", "no measurements yet — run a turn, then check again");
@@ -525,18 +492,9 @@ export function contextBreakdownText(stats = null) {
   const compactLimit = Number(stats.auto_compact_token_limit) || 0;
   const lines = [sectionRule("Context", windowTokens > 0 ? `${formatCount(estimated)} / ${formatCount(windowTokens)}` : formatCount(estimated))];
   lines.push(`  ${loadMeter(ratio)} ${dim(`${Math.round(ratio * 100)}%${compactLimit ? ` · compact at ${formatCount(compactLimit)}` : ""}`)}`);
-  const parts = [
-    { label: "conversation", tokens: Number(stats.conversation_tokens) || 0 },
-    { label: "tools", tokens: Number(stats.tool_tokens) || 0 },
-    { label: "system", tokens: Number(stats.system_tokens) || 0 },
-  ].filter((part) => part.tokens > 0).sort((left, right) => right.tokens - left.tokens);
-  for (const part of parts) {
-    const share = estimated > 0 ? part.tokens / estimated : 0;
-    lines.push(`  ${dim(padRight(part.label, 14))}${padRight(formatCount(part.tokens), 8)}${loadMeter(share, 10)} ${dim(`${Math.round(share * 100)}%`)}`);
-  }
-  const free = windowTokens - estimated;
-  if (windowTokens > 0 && free > 0) {
-    lines.push(dim(`  ${padRight("free", 14)}${padRight(formatCount(free), 8)}${Math.round((free / windowTokens) * 100)}%`));
+  const windowShare = (tokens) => (windowTokens > 0 ? dim(`${Math.round((tokens / windowTokens) * 100)}%`) : "");
+  for (const row of contextRows(stats)) {
+    lines.push(`  ${dim(padRight(row.label, 16))}${padRight(formatCount(row.tokens), 8)}${windowShare(row.tokens)}`);
   }
   const messages = Number(stats.message_count);
   if (Number.isFinite(messages) && messages > 0) {
@@ -545,11 +503,35 @@ export function contextBreakdownText(stats = null) {
   return lines.join("\n");
 }
 
-function hasSampledStats(stats) {
-  if (!stats || typeof stats !== "object") {
-    return false;
+function contextRows(stats) {
+  const windowTokens = Number(stats.context_window_tokens) || 0;
+  const systemTokens = Number(stats.system_tokens) || 0;
+  const docsTokens = Number(stats.rind_docs_tokens) || 0;
+  const skillsTokens = Number(stats.skill_catalog_tokens) || 0;
+  const splitSystem = "rind_docs_tokens" in stats || "skill_catalog_tokens" in stats;
+  const rows = [];
+  if (splitSystem) {
+    rows.push({ label: "system prompt", tokens: Math.max(0, systemTokens - docsTokens - skillsTokens) });
+    if (docsTokens > 0) {
+      rows.push({ label: "rind docs", tokens: docsTokens });
+    }
+    if (skillsTokens > 0) {
+      rows.push({ label: "skills", tokens: skillsTokens });
+    }
+  } else if (systemTokens > 0) {
+    rows.push({ label: "system", tokens: systemTokens });
   }
-  return Number(stats.input_tokens) > 0 || Number.isFinite(Number(stats.context_usage_percent));
+  if (Number(stats.conversation_tokens) > 0) {
+    rows.push({ label: "conversation", tokens: Number(stats.conversation_tokens) });
+  }
+  if (Number(stats.tool_tokens) > 0) {
+    rows.push({ label: "tools", tokens: Number(stats.tool_tokens) });
+  }
+  const free = windowTokens - (Number(stats.estimated_input_tokens) || 0);
+  if (windowTokens > 0 && free > 0) {
+    rows.push({ label: "free", tokens: free });
+  }
+  return rows.filter((row) => row.tokens > 0);
 }
 
 export function interruptText() {

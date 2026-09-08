@@ -36,7 +36,7 @@ Rind 是一个轻量编码 Agent，提供 Node.js 前端 CLI 和 Electron Deskto
 ## 能力概览
 
 - 前端 CLI 和 Desktop 界面，支持流式输出、斜杠命令、会话恢复、状态渲染和本地诊断。
-- 会话可观测性：`/usage` 查看 token 用量与累计，`/context` 查看上下文构成占比，`/fork` 携带完整历史分支会话。
+- 会话可观测性：`/context` 按拼装顺序展示窗口构成与占比，`/status` 查看采样与缓存，`/fork` 携带完整历史分支会话。
 - OpenAI 兼容的异步 Chat Client，支持配置模型、base URL 和 reasoning effort。
 - 基于 JSONL 的 append-only 会话存储，记录消息、工具调用、压缩结果和会话元数据。
 - 运行时上下文管理，包含预算估算、自动压缩、上下文长度救援和工具结果归一化。

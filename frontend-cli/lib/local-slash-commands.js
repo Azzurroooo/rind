@@ -20,7 +20,6 @@ export const LOCAL_SLASH_COMMANDS = Object.freeze([
   { name: "status", description: "Show surface status", usage: "/status" },
   { name: "team", description: "Manage the current Team", usage: "/team create [project-id] | /team init | /team list | /team blueprint [id] | /team add <description>" },
   { name: "theme", description: "Switch the CLI color theme", usage: "/theme [latte | frappe | macchiato | mocha]" },
-  { name: "usage", description: "Show token usage and session totals", usage: "/usage" },
 ]);
 
 export async function loadLocalSettings(

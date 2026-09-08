@@ -52,12 +52,11 @@ Rind 终端界面的统一视觉与信息规范。所有 CLI 改动应遵循本�
 | --- | --- | --- |
 | 模型 / effort / 上下文负载 / 工作目录 | composer 头部行（常驻） | `model · effort · ▮▮▯ 31% · path` |
 | 后台任务 | 头部行尾 | `[bg:n] [delegate:n]` |
-| token 用量明细 | `/usage` 面板 | sectionRule + kvRow |
-| 上下文构成 | `/context` 面板 | 窗口计量条 + 各部分份额行 |
+| 上下文构成 | `/context` 面板 | 唯一窗口计量条 + 按拼装顺序的构成行（token + 占窗口百分比） |
 | 回合成本 | turn summary 行 | `─ Worked for 4.20s · ↑12.3k ↓1.8k · 1 completed` |
 | 会话操作结果 | notice / `✓` 回执 | `✓ Session forked — branch … · from …` |
 
-数据流：`token_stats_updated` 事件喂头部计量条与累计；`context_built` 事件喂 `/context`；`turn_completed.usage` 喂回合小结与 `/usage` 的 last turn；切换/分支会话时从 worker 持久化的 `token_totals` / `latest_context_stats` 重新播种。
+数据流：`token_stats_updated` 事件喂头部计量条；`context_built` 事件喂 `/context`；`turn_completed.usage` 喂回合小结；切换/分支会话时从 worker 持久化的 `latest_context_stats` 重新播种。
 
 ## 键盘交互
 

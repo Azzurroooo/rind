@@ -143,7 +143,6 @@ export function createEventController({
         output.clearQueuedInputs?.();
         output.clearCompactContext?.();
         output.closeAssistant?.();
-        output.setLastTurnUsage?.(event.usage && typeof event.usage === "object" ? event.usage : null);
         if (state.activeGoal?.status !== "active") {
           output.log?.(turnCompletedLine(event, toolStats));
         }

@@ -67,8 +67,8 @@ Read and edit files, run shell commands, search the web, keep a plan, inspect sk
 The session keeps its own observability. A context meter sits in the composer header and turns it into detail on demand:
 
 ```text
-/usage     token usage: context load, cache hits, per-turn delta, session totals
-/context   what fills the window: system, tools, conversation, free space, compact threshold
+/context   what fills the window, in assembly order, as a share of the whole window
+/status    model, latest sampling, cache hits, context load
 /fork      branch the session with its full history; the original stays put
 ```
 

@@ -12,19 +12,20 @@ import { createEventController } from "../lib/event-controller.js";
 import { createCommandController } from "../lib/command-controller.js";
 import { createCliRuntimeController } from "../lib/cli-runtime-controller.js";
 import { createLineEditor } from "../lib/line-editor.js";
-import { promptPlaceholderText } from "../lib/rendering.js";
+import { contextBreakdownText, promptPlaceholderText } from "../lib/rendering.js";
 import {
   requireRuntimeInitialization,
   runtimeMethods,
   sessionScopedMethods,
   turnScopedMethods,
 } from "../lib/runtime-protocol.js";
-import { accumulateUsage, usageTotals } from "../lib/usage.js";
 
 const CONTEXT_STATS = {
   message_count: 12,
   estimated_input_tokens: 62400,
-  system_tokens: 4200,
+  system_tokens: 6300,
+  rind_docs_tokens: 1200,
+  skill_catalog_tokens: 900,
   conversation_tokens: 38100,
   tool_tokens: 12600,
   context_window_tokens: 200000,
@@ -177,7 +178,6 @@ function createHarness({ columns = 80, rows = 24 } = {}) {
       resetContextUsage: () => resetContextUsage(),
       setStats: (stats) => {
         state.display.stats = stats;
-        state.display.totals = accumulateUsage(state.display.totals ?? usageTotals(), stats);
       },
       setContextStats: (stats) => {
         state.display.contextStats = stats;
@@ -237,12 +237,7 @@ function createHarness({ columns = 80, rows = 24 } = {}) {
     input: {
       isTerminal: true,
       runGoalCommand: (...args) => runtimeController.runGoalCommand(...args),
-      runUsageCommand: () => output.log(() => usageTextRender({
-        stats: state.display.stats,
-        totals: state.display.totals,
-        lastTurn: state.display.lastTurnUsage,
-      })),
-      runContextCommand: () => output.log(() => contextTextRender(state.display.contextStats)),
+      runContextCommand: () => output.log(() => contextBreakdownText(state.display.contextStats)),
       runForkCommand: () => runtimeController.runForkCommand(),
     },
     state: {
@@ -274,14 +269,12 @@ function createHarness({ columns = 80, rows = 24 } = {}) {
   };
 }
 
-import { usageText as usageTextRender, contextBreakdownText as contextTextRender } from "../lib/rendering.js";
-
 async function settle(virtual) {
   await new Promise((resolve) => setTimeout(resolve, 25));
   await virtual.flush();
 }
 
-test("user flow: a full turn feeds the header meter, usage and context panels, then fork", async () => {
+test("user flow: a full turn feeds the header meter, the context panel, then fork", async () => {
   const app = createHarness();
   const editor = createLineEditor("");
   app.setSession({ mode: "prompt", editor });
@@ -334,23 +327,16 @@ test("user flow: a full turn feeds the header meter, usage and context panels, t
   const header = app.output.mainPromptText(80);
   assert.match(header, /test-model · ▮▮▮▯▯▯▯▯▯▯ 31%/, "composer header shows the live context meter");
 
-  await app.commands.handle("/usage");
-  await settle(app.virtual);
-  joined = app.virtual.getViewport().join("\n");
-  assert.match(joined, /── Usage · 2 samplings/);
-  assert.match(joined, /last turn\s+↑12\.3k ↓1\.8k/);
-  assert.match(joined, /context\s+▮▮▮▯▯▯▯▯▯▯ 31% · 62\.3k \/ 200k/);
-  assert.match(joined, /input\s+124k · cached 116k/);
-  assert.match(joined, /output\s+2k · reasoning 500/);
-
   await app.commands.handle("/context");
   await settle(app.virtual);
   joined = app.virtual.getViewport().join("\n");
   assert.match(joined, /── Context · 62\.4k \/ 200k/);
-  assert.match(joined, /conversation\s+38\.1k/);
-  assert.match(joined, /tools\s+12\.6k/);
-  assert.match(joined, /system\s+4\.2k/);
-  assert.match(joined, /free\s+138k/);
+  assert.match(joined, /system prompt\s+4\.2k\s+2%/);
+  assert.match(joined, /rind docs\s+1\.2k\s+1%/);
+  assert.match(joined, /skills\s+900\s+0%/);
+  assert.match(joined, /conversation\s+38\.1k\s+19%/);
+  assert.match(joined, /tools\s+12\.6k\s+6%/);
+  assert.match(joined, /free\s+138k\s+69%/);
 
   await app.commands.handle("/fork");
   await settle(app.virtual);
@@ -358,7 +344,6 @@ test("user flow: a full turn feeds the header meter, usage and context panels, t
   assert.match(joined, /Session forked \S?\s*— branch session-forked · from session-a/);
   assert.ok(joined.includes("earlier answer"), "forked history replays into the transcript");
   assert.equal(app.state.session.info.session_id, "session-forked");
-  assert.equal(app.state.display.totals.input_tokens, 500, "usage totals reseed from the forked session");
   assert.equal(app.state.display.contextStats, null, "context stats reset onto the fork");
 
   const forkHeader = app.output.mainPromptText(80);

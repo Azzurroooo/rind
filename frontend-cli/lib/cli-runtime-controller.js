@@ -1,6 +1,5 @@
 import { REASONING_EFFORTS } from "./runtime-protocol.js";
 import { modelListErrorText, commandResultText, goalCommandText, relativeTime, sessionSwitchedText } from "./rendering.js";
-import { usageTotals } from "./usage.js";
 
 export function createCliRuntimeController({
   client,
@@ -171,9 +170,7 @@ export function createCliRuntimeController({
     renderHistory(replay?.messages);
     restoreLiveTurn(liveTurn);
     state.display.stats = usage;
-    state.display.totals = usageTotals(update?.token_totals);
     state.display.contextStats = update?.context && typeof update.context === "object" ? update.context : null;
-    state.display.lastTurnUsage = null;
     getCompactContextState().clear();
     refreshInputState();
     redraw();

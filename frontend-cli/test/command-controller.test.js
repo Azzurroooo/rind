@@ -163,7 +163,7 @@ test("local slash results do not call Runtime", async () => {
   assert.deepEqual(calls, ["local status"]);
 });
 
-test("usage, context, and fork commands run locally without the runtime", async () => {
+test("context and fork commands run locally without the runtime", async () => {
   const calls = [];
   const controller = createCommandController({
     request: async (method, params) => {
@@ -173,7 +173,6 @@ test("usage, context, and fork commands run locally without the runtime", async 
     turn: { submit() {} },
     input: {
       isTerminal: false,
-      runUsageCommand: () => calls.push("usage"),
       runContextCommand: () => calls.push("context"),
       runForkCommand: () => calls.push("fork"),
     },
@@ -181,10 +180,9 @@ test("usage, context, and fork commands run locally without the runtime", async 
     output: { log: () => {} },
   });
 
-  assert.equal(await controller.handle("/usage"), true);
   assert.equal(await controller.handle("/context"), true);
   assert.equal(await controller.handle("/fork"), true);
-  assert.deepEqual(calls, ["usage", "context", "fork"]);
+  assert.deepEqual(calls, ["context", "fork"]);
 });
 
 test("local command catalog stays complete before the runtime starts", async () => {
@@ -212,7 +210,6 @@ test("local command catalog stays complete before the runtime starts", async () 
     "status",
     "team",
     "theme",
-    "usage",
   ]);
   for (const name of ["compact", "init", "sessions", "skill", "team"]) {
     const result = await executeLocalSlashCommand(`/${name}`, {

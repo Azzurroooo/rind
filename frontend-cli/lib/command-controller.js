@@ -66,10 +66,6 @@ export function createCommandController({
       await input.runSessionsSelector?.();
       return;
     }
-    if (isExactCommand(text, "usage")) {
-      await input.runUsageCommand?.();
-      return;
-    }
     if (isExactCommand(text, "context")) {
       await input.runContextCommand?.();
       return;

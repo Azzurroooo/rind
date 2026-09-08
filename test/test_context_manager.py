@@ -443,3 +443,26 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
+
+
+@pytest.mark.asyncio
+async def test_context_stats_split_doc_and_skill_tokens() -> None:
+    session_messages = [
+        {"role": "system", "content": "sys"},
+        {"role": "user", "content": "hello"},
+    ]
+    manager = ContextManager(
+        estimator=ContextEstimator(ContextBudget(hard_limit_tokens=9000)),
+        rind_doc_provider=lambda: (
+            [
+                {"role": "system", "content": "RIND.md memory notes", "_context_kind": "rind_docs"},
+            ],
+            {"rind_docs_injected_chars": 20},
+            {"rind_docs_injected": True},
+        ),
+    )
+    result = await manager.build_messages_async(QueryOnlySession(session_messages))
+
+    assert result.stats["rind_docs_tokens"] > 0
+    assert result.stats["skill_catalog_tokens"] == 0
+    assert result.stats["rind_docs_tokens"] <= result.stats["system_tokens"]

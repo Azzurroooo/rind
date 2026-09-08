@@ -39,6 +39,8 @@ CONTEXT_SUMMARY_KEYS = (
     "message_count",
     "estimated_input_tokens",
     "system_tokens",
+    "rind_docs_tokens",
+    "skill_catalog_tokens",
     "conversation_tokens",
     "tool_tokens",
     "context_window_tokens",
@@ -143,6 +145,8 @@ class ContextManager:
             "estimated_input_tokens": final_estimate.estimated_input_tokens,
             "estimated_chars": final_estimate.estimated_chars,
             "system_tokens": final_estimate.system_tokens,
+            "rind_docs_tokens": self._estimate_group_tokens(rind_messages),
+            "skill_catalog_tokens": self._estimate_group_tokens(skill_messages),
             "conversation_tokens": final_estimate.conversation_tokens,
             "tool_tokens": final_estimate.tool_tokens,
             "context_window_tokens": context_window_tokens,
@@ -402,6 +406,13 @@ class ContextManager:
             }
         )
         return messages, stats, decisions
+
+    def _estimate_group_tokens(self, messages: list[dict]) -> int:
+        if not messages:
+            return 0
+        return self._estimator.estimate_messages(
+            [self._strip_internal_fields(message) for message in messages]
+        ).estimated_input_tokens
 
     def _valid_system_messages(self, messages: list[dict] | None) -> list[dict]:
         valid = []

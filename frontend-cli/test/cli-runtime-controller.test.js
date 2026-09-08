@@ -230,8 +230,6 @@ test("fork requests a branch from the current session and switches onto it", asy
     "session-forked",
   );
   assert.equal(harness.state.session.info.session_id, "session-forked");
-  assert.equal(harness.state.display.totals.input_tokens, 500);
-  assert.equal(harness.state.display.totals.samplings, 4);
 });
 
 test("fork is refused while a turn is active", async () => {
