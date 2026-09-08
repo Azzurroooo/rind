@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import { Bell, Check, ChevronRight, CirclePlus, FolderOpen, History, LoaderCircle, MessageSquareText, Search, Trash2 } from "lucide-react";
 import { FileTree } from "./FileTree.jsx";
 import { sessionIdOf } from "../methods.js";
+import { relativeTime } from "../lib/time.js";
 
 // Session rail (web-ui.md §1/§5): session list with 6px unread dots on
 // non-current sessions receiving durable events (cleared on switch), inline
@@ -96,9 +97,9 @@ export function SessionRail({
             return (
               <div key={id} className={`session-item ${current ? "selected" : ""}`} data-session-id={id}>
                 {unread && <span className="session-unread" title="有新动态" aria-label="未读" />}
-                <button className="session-main" onClick={() => onSelect(id)}>
+                <button className="session-main" onClick={() => onSelect(id)} title={session.preview || ""}>
                   <MessageSquareText size={16} />
-                  <span className="session-copy"><strong>{session.title || session.preview || "Untitled session"}</strong><small>{session.updated_at || id}</small></span>
+                  <span className="session-copy"><strong>{session.title || session.preview || "Untitled session"}</strong><small>{relativeTime(session.updated_at)}{session.preview ? ` · ${session.preview}` : ""}</small></span>
                   {current && <ChevronRight size={15} className="selected-arrow" />}
                 </button>
                 {current ? (

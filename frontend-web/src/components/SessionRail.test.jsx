@@ -138,3 +138,20 @@ describe("SessionRail — 加载更多 pagination (audit #9)", () => {
     expect(screen.queryByText("加载更多")).toBeNull();
   });
 });
+
+describe("SessionRail — preview + relative time hierarchy", () => {
+  it("renders the preview under the title with a relative timestamp instead of raw ISO", () => {
+    const recent = new Date(Date.now() - 5 * 60 * 1000).toISOString();
+    render(<SessionRail sessions={[{ id: "s-1", title: "Refactor auth", preview: "已修复重试路径", updated_at: recent }]} activeId="" />);
+    const item = document.querySelector(".session-copy");
+    expect(item.querySelector("strong").textContent).toBe("Refactor auth");
+    expect(item.querySelector("small").textContent).toContain("已修复重试路径");
+    expect(item.querySelector("small").textContent).toMatch(/分钟前/);
+    expect(item.querySelector("small").textContent).not.toContain("T0");
+  });
+
+  it("untitled sessions fall back to the preview, then the id", () => {
+    render(<SessionRail sessions={[{ id: "s-9" }]} activeId="" />);
+    expect(document.querySelector(".session-copy strong").textContent).toBe("Untitled session");
+  });
+});

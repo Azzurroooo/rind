@@ -421,10 +421,14 @@ h1, h2, p { margin: 0; }
 .context-ring { width: 56px; height: 56px; flex: 0 0 56px; }
 .context-ring-track { stroke: var(--surface-soft); }
 .context-ring-value { stroke: var(--cyan); transition: stroke-dashoffset 180ms ease; }
-.context-ring-value.near-full { stroke: var(--amber); }
+.context-ring-value.high { stroke: var(--amber); }
+.context-ring-value.near-full { stroke: var(--red); }
 .context-badge { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
 .context-badge strong { color: var(--text); font: 19px var(--mono); font-variant-numeric: tabular-nums; }
 .context-badge span { color: var(--muted); font: 10px var(--mono); }
+.context-badge span.high { color: var(--amber); }
+.context-badge span.near-full { color: var(--red); }
+.context-badge em { color: var(--dim); font: 9px/1.4 var(--mono); font-style: normal; }
 .context-detail summary { color: var(--dim); cursor: pointer; font: 10px var(--mono); list-style: none; }
 .context-detail summary::-webkit-details-marker { display: none; }
 .context-detail summary:hover { color: var(--text); }

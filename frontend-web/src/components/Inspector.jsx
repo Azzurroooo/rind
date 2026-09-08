@@ -9,6 +9,10 @@ export function Inspector({ info, stats, goal, plan, models, effort, connection,
   // class and aria/inert state below the breakpoint; empty on desktop.
   const { className: panelClassName = "", ...restPanelAttrs } = panelAttrs;
   const usage = Math.min(1, Math.max(0, Number(stats?.context_usage_percent || 0)));
+  // crush-style tiers: the meter only speaks when it matters — past 75% the
+  // badge turns amber ("收窄回答/可压缩"), past 90% red ("接近上限，建议压缩").
+  const usageTone = usage > 0.9 ? "near-full" : usage > 0.75 ? "high" : "";
+  const usageHint = usage > 0.9 ? "接近上限 · 建议 Compact" : usage > 0.75 ? "偏高 · 可 Compact 腾出空间" : "";
   const modelValue = currentModel || info?.model || info?.default_model || "";
   const modelOptions = Array.from(new Set([modelValue, ...models].filter(Boolean)));
   return <aside ref={panelRef} className={`inspector ${panelClassName}`.trim()} tabIndex={-1} {...restPanelAttrs}>
@@ -27,7 +31,7 @@ export function Inspector({ info, stats, goal, plan, models, effort, connection,
         <svg className="context-ring" viewBox="0 0 44 44" role="img" aria-label={`上下文已使用 ${Math.round(usage * 100)}%`}>
           <circle className="context-ring-track" cx="22" cy="22" r={RING_RADIUS} fill="none" strokeWidth="4" />
           <circle
-            className={`context-ring-value ${usage > 0.9 ? "near-full" : ""}`}
+            className={`context-ring-value ${usageTone}`}
             cx="22" cy="22" r={RING_RADIUS} fill="none" strokeWidth="4" strokeLinecap="round"
             strokeDasharray={RING_CIRCUMFERENCE}
             strokeDashoffset={RING_CIRCUMFERENCE * (1 - usage)}
@@ -36,7 +40,8 @@ export function Inspector({ info, stats, goal, plan, models, effort, connection,
         </svg>
         <div className="context-badge">
           <strong>{formatTokens(stats?.input_tokens)}</strong>
-          <span>{Math.round(usage * 100)}% used</span>
+          <span className={usageTone}>{Math.round(usage * 100)}% used</span>
+          {usageHint && <em>{usageHint}</em>}
         </div>
       </div>
       <details className="context-detail">
