@@ -44,7 +44,7 @@ def pairing_notice(channel: str, sender_id: str, code: str, ttl_seconds: float) 
         "Rind：尚未授权此账号。\n"
         f"身份：{channel} · {sender_id}\n"
         f"配对码：`{code}`\n"
-        f"批准：在服务器执行 `{APPROVE_COMMAND.format(code=code)}`\n"
+        f"批准：请在运行网关的电脑上执行 `{APPROVE_COMMAND.format(code=code)}`\n"
         f"有效期：{minutes} 分钟，过期后重新发消息会生成新码。"
     )
 

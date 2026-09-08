@@ -176,7 +176,7 @@ def _guide_walk(guide: ChannelGuide, env: dict[str, str], existing: dict[str, An
         print(f"  ✘ 必填凭证未填写——本次不写入 {guide.label} 渠道（其余渠道不受影响，可稍后重新运行 init 添加）。")
         return None
     print("  allow_from / group_allow 现在可以留空——陌生账号首次发消息会收到配对码，")
-    print("  在服务器执行 `gateway approve <码>` 后即自动进入白名单。")
+    print("  在运行网关的电脑上执行 `gateway approve <码>` 后即自动进入白名单。")
     allow = _ask_list("allow_from 白名单", list(existing.get("allow_from", [])))
     group = _ask_list("group_allow 群白名单", list(existing.get("group_allow", [])))
     required = [spec.name for spec in guide.fields if spec.required]
