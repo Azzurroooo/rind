@@ -31,7 +31,7 @@ def _assert_no_traceback(result: subprocess.CompletedProcess):
     assert "Traceback" not in combined, f"用户不应看到堆栈：\n{combined[-800:]}"
 
 
-# --- 完整交互式向导：真人在终端里的 22 次按键 -------------------------------------
+# --- 完整交互式向导：真人在终端里的按键（worker/token 已静默决策，不再提问）-------
 
 
 def test_full_interactive_wizard_writes_working_config(tmp_path):
@@ -39,9 +39,7 @@ def test_full_interactive_wizard_writes_working_config(tmp_path):
     workspace.mkdir()
     lines = [
         "7,3",            # 选渠道：telegram + email
-        "",               # worker 地址（默认）
         str(workspace),   # 工作目录
-        "",               # worker token（留空）
         "123456:AAE",     # telegram token
         "",               # telegram proxy（直连）
         "",               # telegram allow_from
@@ -88,9 +86,7 @@ def test_wizard_defaults_skip_optional_fields(tmp_path):
     workspace.mkdir()
     lines = [
         "",               # 渠道（默认 telegram + email）
-        "",               # worker
         str(workspace),   # workspace
-        "",               # token
         "tok",            # telegram token
         "",               # telegram proxy（直连）
         "", "",           # telegram allow/group

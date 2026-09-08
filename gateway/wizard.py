@@ -18,11 +18,30 @@ from typing import Any
 from .config import build_config, parse_yaml, render_yaml
 from .prompt import WizardCancelled, ask as _ask, ask_list as _ask_list, confirm as _confirm, pick_channels as _pick_channels
 from .onboarding import ChannelGuide, all_guides, guide_for
+from .probes import worker_alive
 
 DEFAULT_WORKER = "ws://127.0.0.1:8765"
 
 
 # --- pure builders -------------------------------------------------------------
+
+
+async def resolve_worker(explicit: str, env: dict[str, str], probe=worker_alive) -> tuple[str, str, bool]:
+    """worker 与 token 的静默决策——新手一个问题都不用答。
+
+    显式 --worker-url / RIND_GW_WORKER 直接采用（未验证）；否则探活本机默认
+    端点：在线 → 用它（worker 已在跑，握手同时证明了 token 可用性）；
+    不通 → stdio（网关自起 worker 子进程，无需第二个终端）。token 只来自
+    RIND_SERVER_TOKEN，stdio 不需要。返回 (worker, token, 是否已探活验证)。
+    """
+    token = env.get("RIND_SERVER_TOKEN", "")
+    worker = explicit or env.get("RIND_GW_WORKER", "")
+    if worker:
+        return worker, token, False
+    alive, _ = await probe(DEFAULT_WORKER, token, timeout=2.0)
+    if alive:
+        return DEFAULT_WORKER, token, True
+    return "stdio", "", True
 
 
 def env_answer(channel_id: str, field_name: str, env: dict[str, str]) -> str:
@@ -106,8 +125,12 @@ def _guide_walk(guide: ChannelGuide, env: dict[str, str]) -> tuple[dict[str, str
     env_prefix = f"RIND_GW_{guide.id.upper()}_"
     for spec in guide.fields:
         env_value = env.get(env_prefix + spec.name.upper(), "")
+        if env_value:
+            print(f"  · {spec.label}：已从 {env_prefix + spec.name.upper()} 读取")
+            answers[spec.name] = env_value
+            continue
         label = f"{spec.label}" + (f"（{spec.help}）" if spec.help else "")
-        answers[spec.name] = _ask(label, spec.default, secret=spec.secret) or env_value
+        answers[spec.name] = _ask(label, spec.default, secret=spec.secret)
     print("  allow_from / group_allow 现在可以留空——陌生账号首次发消息会收到配对码，")
     print("  在服务器执行 `gateway approve <码>` 后即自动进入白名单。")
     allow = _ask_list("allow_from 白名单")
@@ -189,8 +212,7 @@ def run_init(args) -> int:
         if not selected:
             print("--channel 缺少有效渠道。", file=sys.stderr)
             return 2
-        worker = args.worker_url or env.get("RIND_GW_WORKER") or DEFAULT_WORKER
-        worker_token = env.get("RIND_SERVER_TOKEN", "")
+        worker, worker_token, _ = asyncio.run(resolve_worker(args.worker_url, env))
         workspace = _resolve_workspace(args.workspace)
         guides = [guide_for(channel_id) for channel_id in selected]
         answers: dict[str, dict[str, str]] = {}
@@ -221,11 +243,14 @@ def run_init(args) -> int:
                 return 2
         else:
             selected = _pick_channels()
-        worker_token = os.environ.get("RIND_SERVER_TOKEN", "")
-        worker = _ask("Worker 地址", args.worker_url or DEFAULT_WORKER)
+        worker, worker_token, verified = asyncio.run(resolve_worker(args.worker_url, env))
+        if worker == "stdio":
+            print("  worker：本机自起（stdio）——网关进程自带 worker，无需单独启动。")
+        else:
+            print(f"  worker：{worker}" + ("（已探测在线）" if verified else ""))
+            if not verified and not worker_token:
+                worker_token = _ask("Worker Token（worker 侧 RIND_SERVER_TOKEN 的值，可留空）", secret=True)
         workspace = _resolve_workspace(_ask("工作目录（网关会话的根目录，绝对路径）", args.workspace or _default_workspace()))
-        if not worker_token:
-            worker_token = _ask("Worker Token（RIND_SERVER_TOKEN 的值，可留空）", secret=True)
 
         guides = [guide_for(channel_id) for channel_id in selected]
         from .doctor import ensure_channel_sdks
@@ -293,4 +318,4 @@ def _finish(args, selected, answers, lists, worker, worker_token, workspace, *, 
         return 0
 
 
-__all__ = ["build_config_data", "collect_answers_env", "config_path_for", "run_init"]
+__all__ = ["build_config_data", "collect_answers_env", "config_path_for", "resolve_worker", "run_init"]

@@ -104,6 +104,47 @@ def test_collect_answers_env_reads_prefixed_variables_and_reports_missing():
     assert "RIND_GW_FEISHU_APP_ID" in missing and "RIND_GW_FEISHU_APP_SECRET" in missing
 
 
+# --- worker 静默决策：探活在线用 ws，不通自起 stdio，零提问 ---------------------
+
+
+def test_resolve_worker_defaults_to_stdio_when_nothing_listens():
+    import asyncio
+
+    import gateway.wizard as wizard
+
+    async def refused(url, token, timeout=0.1):
+        return False, "无法连接"
+
+    worker, token, verified = asyncio.run(wizard.resolve_worker("", {}, probe=refused))
+    assert (worker, token, verified) == ("stdio", "", True)
+
+
+def test_resolve_worker_uses_listening_default_and_env_token():
+    import asyncio
+
+    import gateway.wizard as wizard
+
+    async def online(url, token, timeout=0.1):
+        return True, "worker 在线"
+
+    worker, token, verified = asyncio.run(wizard.resolve_worker("", {"RIND_SERVER_TOKEN": "s3cret"}, probe=online))
+    assert (worker, token, verified) == (wizard.DEFAULT_WORKER, "s3cret", True)
+
+
+def test_resolve_worker_honors_explicit_url_without_probing():
+    import asyncio
+
+    import gateway.wizard as wizard
+
+    async def must_not_probe(url, token, timeout=0.1):
+        raise AssertionError("显式 URL 不应触发探活")
+
+    worker, token, verified = asyncio.run(wizard.resolve_worker("ws://10.0.0.8:9000", {}, probe=must_not_probe))
+    assert (worker, token, verified) == ("ws://10.0.0.8:9000", "", False)
+    env_worker, env_token, _ = asyncio.run(wizard.resolve_worker("", {"RIND_GW_WORKER": "ws://10.0.0.9:1"}, probe=must_not_probe))
+    assert (env_worker, env_token) == ("ws://10.0.0.9:1", "")
+
+
 # --- 探活：注入假 HTTP，验证 ✔/✘ 语义与原因 -------------------------------------
 
 
