@@ -913,6 +913,7 @@ pre code {
 .slash-command-main span { overflow: hidden; color: var(--text-weak); font-size: 11.5px; text-overflow: ellipsis; white-space: nowrap; }
 .slash-command-usage { justify-self: end; overflow: hidden; color: var(--text-faint); font-family: var(--font-mono); font-size: 10.5px; text-align: right; text-overflow: ellipsis; white-space: nowrap; }
 .slash-command-empty { margin: 0; padding: 9px; color: var(--text-faint); font-size: 12px; }
+.mention-menu.slash-command-option, .mention-menu .slash-command-option { grid-template-columns: minmax(0, 1fr); min-height: 36px; }
 
 .composer-select-wrap { position: relative; flex: 0 1 auto; min-width: 0; }
 .model-control { max-width: min(190px, 28vw); }

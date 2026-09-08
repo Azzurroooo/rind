@@ -53,6 +53,7 @@ import { renderCommandResult } from "./command-results"
 import { executeLocalSlashCommand } from "./local-slash-commands"
 import { modelChoices, modelSelectionTarget } from "./composer-select"
 import { renderEmptyState } from "./empty-state"
+import { applyMention, filterFiles, mentionQueryAt, type FileMention } from "./file-mentions"
 import {
   commandPrefill,
   desktopSlashCommandNotice,
@@ -164,6 +165,7 @@ type AppState = {
   slashCommands: SlashCommand[]
   slashMenuOpen: boolean
   slashMenuActiveIndex: number
+  mention?: { start: number; items: FileMention[]; activeIndex: number; loading: boolean }
   modelMenuOpen: boolean
   modelMenuLoading: boolean
   modelChanging: boolean
@@ -239,6 +241,7 @@ const state: AppState = {
   slashCommands: fallbackSlashCommands,
   slashMenuOpen: false,
   slashMenuActiveIndex: 0,
+  mention: undefined,
   modelMenuOpen: false,
   modelMenuLoading: false,
   modelChanging: false,
@@ -303,7 +306,7 @@ appRoot.innerHTML = `
         </div>
       </aside>
       <section class="conversation">
-        <div class="conversation-head"><div class="conversation-title"><strong id="session-title">New session</strong></div><span id="session-meta" class="session-meta" hidden></span></div>
+        <div id="conversation-head" class="conversation-head"><div class="conversation-title"><strong id="session-title">New session</strong></div><span id="session-meta" class="session-meta" hidden></span></div>
         <div id="find-bar" class="find-bar" hidden>
           <input id="find-input" type="text" placeholder="Find in conversation" aria-label="Find in conversation" autocomplete="off" />
           <span id="find-count" class="find-count"></span>
@@ -405,6 +408,7 @@ const composerMenuTrigger = requiredElement<HTMLButtonElement>("composer-menu-tr
 const composerMenu = requiredElement("composer-menu")
 const compactContext = requiredElement<HTMLButtonElement>("compact-context")
 const slashCommandMenu = requiredElement("slash-command-menu")
+const mentionMenu = requiredElement("mention-menu")
 const sidebar = requiredElement("sidebar")
 const sidebarResizeHandle = requiredElement("sidebar-resize-handle")
 const filePanel = requiredElement("file-panel")
@@ -528,6 +532,7 @@ function render() {
     },
   )
   renderSlashCommandMenu()
+  renderMentionMenu()
   renderAttachments()
   renderFiles()
   renderSettings()
@@ -2324,14 +2329,125 @@ function selectSlashCommand(command: SlashCommand) {
   closeSlashCommandMenu()
 }
 
+// ---------- @-file mentions ----------
+
+const fileIndexPromises = new Map<string, Promise<string[]>>()
+
+function updateMentionMenu() {
+  if (prompt.disabled) {
+    closeMention()
+    return
+  }
+  const caret = prompt.selectionStart ?? prompt.value.length
+  const query = mentionQueryAt(prompt.value, caret)
+  if (!query || !viewedProject()?.available) {
+    closeMention()
+    return
+  }
+  const mention = state.mention && state.mention.start === query.start
+    ? state.mention
+    : { start: query.start, items: [], activeIndex: 0, loading: true }
+  state.mention = mention
+  renderMentionMenu()
+  void loadFileIndex((files) => {
+    if (state.mention !== mention) return
+    mention.items = filterFiles(files, query.query)
+    mention.loading = false
+    mention.activeIndex = 0
+    renderMentionMenu()
+  })
+}
+
+function loadFileIndex(apply: (files: string[]) => void) {
+  const projectPath = viewedProject()?.path || ""
+  let promise = fileIndexPromises.get(projectPath)
+  if (!promise) {
+    promise = window.api.files.index(projectPath).then((index) => index.files).catch(() => [])
+    fileIndexPromises.set(projectPath, promise)
+  }
+  return promise.then(apply)
+}
+
+function renderMentionMenu() {
+  const mention = state.mention
+  mentionMenu.hidden = !mention
+  if (!mention) {
+    mentionMenu.replaceChildren()
+    return
+  }
+  if (mention.loading) {
+    mentionMenu.innerHTML = `<p class="slash-command-empty">Loading files…</p>`
+    return
+  }
+  if (!mention.items.length) {
+    mentionMenu.innerHTML = `<p class="slash-command-empty">No matching files</p>`
+    return
+  }
+  mentionMenu.innerHTML = mention.items.map((item, index) => {
+    const nameStart = item.path.lastIndexOf("/") + 1
+    return `
+      <button type="button" class="slash-command-option mention-option${index === mention.activeIndex ? " selected" : ""}" role="option" aria-selected="${String(index === mention.activeIndex)}" data-mention-path="${escapeAttribute(item.path)}">
+        <span class="slash-command-main"><code>${escapeHtml(item.path.slice(nameStart))}</code><span>${escapeHtml(item.path.slice(0, nameStart) || "project root")}</span></span>
+      </button>
+    `
+  }).join("")
+  mentionMenu.querySelector<HTMLElement>(".mention-option.selected")?.scrollIntoView({ block: "nearest" })
+}
+
+function moveMentionSelection(offset: number) {
+  const mention = state.mention
+  if (!mention || !mention.items.length) return
+  mention.activeIndex = (mention.activeIndex + offset + mention.items.length) % mention.items.length
+  renderMentionMenu()
+}
+
+function insertMention() {
+  const mention = state.mention
+  const path = mention?.items[mention.activeIndex]?.path
+  if (!mention || !path) return
+  const caret = prompt.selectionStart ?? prompt.value.length
+  const result = applyMention(prompt.value, caret, mention.start, path)
+  setPrompt(result.value, true)
+  closeMention()
+  prompt.setSelectionRange(result.caret, result.caret)
+}
+
+function closeMention() {
+  if (!state.mention) return
+  state.mention = undefined
+  renderMentionMenu()
+}
+
   requiredElement<HTMLFormElement>("composer").addEventListener("submit", (event) => { event.preventDefault(); runAction(sendPrompt, state.viewedSessionId) })
 
 prompt.addEventListener("input", () => {
   if (state.chatProjectPath) state.drafts[state.chatProjectPath] = prompt.value
   autoGrowPrompt()
   renderSlashCommandMenu()
+  updateMentionMenu()
+})
+document.addEventListener("selectionchange", () => {
+  if (document.activeElement === prompt) updateMentionMenu()
 })
 prompt.addEventListener("keydown", (event) => {
+  if (state.mention) {
+    if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+      event.preventDefault()
+      moveMentionSelection(event.key === "ArrowDown" ? 1 : -1)
+      return
+    }
+    if (event.key === "Tab" || (event.key === "Enter" && !event.shiftKey)) {
+      event.preventDefault()
+      insertMention()
+      return
+    }
+    if (event.key === "Escape") {
+      event.preventDefault()
+      event.stopPropagation()
+      closeMention()
+      return
+    }
+  }
   if (event.altKey && !event.ctrlKey && !event.metaKey && (event.key === "ArrowUp" || event.key === "ArrowDown")) {
     const next = event.key === "ArrowUp" ? inputHistory.older(prompt.value) : inputHistory.newer()
     if (next !== undefined) {
@@ -2357,7 +2473,10 @@ prompt.addEventListener("keydown", (event) => {
     }
   }
   if (event.key === "Escape" && state.slashMenuOpen) {
+    // Stop the chain here: Escape closes the menu, it must not also stop the
+    // running turn (the document-level fallback).
     event.preventDefault()
+    event.stopPropagation()
     closeSlashCommandMenu()
     return
   }
@@ -2484,6 +2603,11 @@ const keyBindings: KeyBinding[] = [
         closeSlashCommandMenu()
         return
       }
+      if (state.mention) {
+        event.preventDefault()
+        closeMention()
+        return
+      }
       if (state.modelMenuOpen) {
         event.preventDefault()
         closeModelMenu()
@@ -2562,6 +2686,7 @@ document.addEventListener("pointerdown", (event) => {
     render()
   }
   if (state.slashMenuOpen && !(event.target as HTMLElement).closest(".prompt-wrap")) closeSlashCommandMenu()
+  if (state.mention && !(event.target as HTMLElement).closest(".prompt-wrap")) closeMention()
   if (state.paletteOpen && !(event.target as HTMLElement).closest(".command-palette-box")) closePalette(false)
   if (state.sessionDeleteConfirmId && !(event.target as HTMLElement).closest("[data-session-delete]")) {
     resetDeleteConfirm()
@@ -2613,6 +2738,7 @@ async function sendPrompt() {
   state.drafts[project.path] = ""
   autoGrowPrompt()
   closeSlashCommandMenu()
+  closeMention()
   const projectPath = project.path
   const requestedSessionId = state.viewedSessionId
   const requestedModel = state.model || state.settings.model
@@ -2896,6 +3022,24 @@ slashCommandMenu.addEventListener("click", (event) => {
   const commandName = (event.target as HTMLElement).closest<HTMLButtonElement>("[data-slash-command]")?.dataset.slashCommand
   const command = state.slashCommands.find((item) => item.name === commandName)
   if (command) selectSlashCommand(command)
+})
+mentionMenu.addEventListener("pointermove", (event) => {
+  const mention = state.mention
+  if (!mention) return
+  const path = (event.target as HTMLElement).closest<HTMLButtonElement>("[data-mention-path]")?.dataset.mentionPath
+  const index = mention.items.findIndex((item) => item.path === path)
+  if (index < 0 || index === mention.activeIndex) return
+  mention.activeIndex = index
+  renderMentionMenu()
+})
+mentionMenu.addEventListener("click", (event) => {
+  const mention = state.mention
+  if (!mention) return
+  const path = (event.target as HTMLElement).closest<HTMLButtonElement>("[data-mention-path]")?.dataset.mentionPath
+  const index = mention.items.findIndex((item) => item.path === path)
+  if (index < 0) return
+  mention.activeIndex = index
+  insertMention()
 })
 modelMenuTrigger.addEventListener("click", () => runAction(toggleModelMenu))
 modelMenu.addEventListener("click", (event) => {
@@ -3347,6 +3491,7 @@ function openSettings() {
 
 function resetProjectView() {
   closeComposerSelectMenus()
+  closeMention()
   state.viewedSessionId = ""
   state.conversationCache = {}
   state.sessionModels = {}
@@ -3596,6 +3741,7 @@ async function switchSession(nextSessionId: string) {
   const project = projectForPath(session.workspaceRoot)
   if (!project) return
   closeComposerSelectMenus()
+  closeMention()
   showCachedSession(nextSessionId)
   state.viewedSessionId = nextSessionId
   state.model = state.sessionModels[nextSessionId] || ""

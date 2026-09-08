@@ -1,11 +1,18 @@
 import { open, readdir, realpath, stat } from "node:fs/promises"
-import { basename, extname, isAbsolute, relative, resolve, sep } from "node:path"
+import { basename, extname, isAbsolute, join, relative, resolve, sep } from "node:path"
 
-import type { DesktopFileListing, DesktopFilePreview } from "../preload/types"
+import type { DesktopFileIndex, DesktopFileListing, DesktopFilePreview } from "../preload/types"
 
 const maxDirectoryEntries = 500
 const maxTextBytes = 1_000_000
 const maxImageBytes = 5_000_000
+const indexEntryLimit = 4000
+const indexDepthLimit = 10
+const indexSkippedDirectories = new Set([
+  ".git", ".rind", ".venv", ".next", ".cache", ".idea", ".vscode",
+  "node_modules", "dist", "build", "out", "target", "coverage", "uploads",
+  "__pycache__", ".pytest_cache", ".mypy_cache", "venv",
+])
 const imageMimeTypes: Record<string, string> = {
   ".avif": "image/avif",
   ".gif": "image/gif",
@@ -32,8 +39,48 @@ export async function listProjectFiles(root: string, requestedPath: unknown): Pr
   }
 }
 
-export async function previewProjectFile(root: string, requestedPath: unknown): Promise<DesktopFilePreview> {
-  const { path, absolutePath } = await resolveProjectPath(root, requestedPath, false)
+// Bounded breadth-first walk for @-mention search: relative paths, shallow
+// files first. Dot-directories and build/vendor directories are skipped so a
+// workspace index stays small and fast.
+export async function indexProjectFiles(root: string): Promise<DesktopFileIndex> {
+  const canonicalRoot = await realpath(root)
+  const files: string[] = []
+  let truncated = false
+  let frontier: Array<{ absolutePath: string; path: string; depth: number }> = [
+    { absolutePath: canonicalRoot, path: "", depth: 0 },
+  ]
+  while (frontier.length && files.length < indexEntryLimit) {
+    const next: typeof frontier = []
+    for (const { absolutePath, path, depth } of frontier) {
+      if (files.length >= indexEntryLimit) break
+      let entries
+      try {
+        entries = await readdir(absolutePath, { withFileTypes: true })
+      } catch {
+        continue
+      }
+      entries.sort((left, right) => Number(right.isDirectory()) - Number(left.isDirectory()) || left.name.localeCompare(right.name))
+      for (const entry of entries) {
+        const entryPath = path ? `${path}/${entry.name}` : entry.name
+        if (entry.isDirectory()) {
+          if (depth >= indexDepthLimit || indexSkippedDirectories.has(entry.name) || entry.name.startsWith(".")) continue
+          next.push({ absolutePath: join(absolutePath, entry.name), path: entryPath, depth: depth + 1 })
+          continue
+        }
+        if (!entry.isFile() || entry.name.startsWith(".")) continue
+        if (files.length >= indexEntryLimit) {
+          truncated = true
+          break
+        }
+        files.push(entryPath)
+      }
+    }
+    frontier = next
+  }
+  return { files, truncated }
+}
+
+export async function previewProjectFile(root: string, requestedPath: unknown): Promise<DesktopFilePreview> {  const { path, absolutePath } = await resolveProjectPath(root, requestedPath, false)
   const fileStat = await stat(absolutePath)
   if (!fileStat.isFile()) throw new Error("Only files can be previewed.")
   const mimeType = imageMimeTypes[extname(absolutePath).toLocaleLowerCase()]

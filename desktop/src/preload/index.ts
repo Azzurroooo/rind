@@ -17,8 +17,13 @@ const api: DesktopApi = {
     request: (method, params = {}) => runtimeRequest(method, params),
     shutdown: () => ipcRenderer.invoke("runtime-shutdown"),
     subscribe: (listener) => {
+      // Pull the current snapshot first (covers reloads and late subscribers),
+      // then apply live pushes on top; both paths are idempotent.
       const handler = (_event: Electron.IpcRendererEvent, snapshot: RuntimeSnapshot) => listener(snapshot)
       ipcRenderer.on("runtime-status", handler)
+      void ipcRenderer.invoke("runtime-snapshot").then((snapshot) => {
+        if (snapshot) listener(snapshot as RuntimeSnapshot)
+      })
       return () => ipcRenderer.removeListener("runtime-status", handler)
     },
     subscribeEvents: (listener) => {
@@ -92,6 +97,7 @@ const api: DesktopApi = {
   files: {
     list: (projectPath, path = "") => ipcRenderer.invoke("project-files-list", projectPath, path),
     preview: (projectPath, path) => ipcRenderer.invoke("project-files-preview", projectPath, path),
+    index: (projectPath) => ipcRenderer.invoke("project-files-index", projectPath),
   },
   quit: () => ipcRenderer.invoke("app-quit"),
   platform: process.platform,

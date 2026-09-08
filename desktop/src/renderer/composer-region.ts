@@ -62,6 +62,7 @@ export function composerRegionMarkup() {
       <form id="composer" class="composer">
         <div class="prompt-wrap">
           <div id="slash-command-menu" class="slash-command-menu" role="listbox" aria-label="Slash commands" hidden></div>
+          <div id="mention-menu" class="slash-command-menu mention-menu" role="listbox" aria-label="File mentions" hidden></div>
           <textarea id="prompt" rows="2" placeholder="Message Rind — Enter to send, Shift+Enter for a new line" aria-label="Message Rind" aria-controls="slash-command-menu" aria-expanded="false" autocomplete="off"></textarea>
         </div>
         <div class="composer-footer">

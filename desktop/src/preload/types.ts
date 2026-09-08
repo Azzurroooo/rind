@@ -203,6 +203,11 @@ export type DesktopFileListing = {
   truncated: boolean
 }
 
+export type DesktopFileIndex = {
+  files: string[]
+  truncated: boolean
+}
+
 export type DesktopFilePreview = {
   path: string
   name: string
@@ -277,6 +282,7 @@ export type DesktopApi = {
   files: {
     list: (projectPath: string, path?: string) => Promise<DesktopFileListing>
     preview: (projectPath: string, path: string) => Promise<DesktopFilePreview>
+    index: (projectPath: string) => Promise<DesktopFileIndex>
   }
   quit: () => Promise<void>
   platform: string
