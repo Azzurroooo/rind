@@ -2,6 +2,15 @@
 
 The web surface connects to a long-lived Rind worker over WebSocket. Closing or refreshing the browser only closes that client connection; the worker process keeps its sessions and active turns alive.
 
+## What the console does
+
+- **Zero-friction local connect**: the console connects directly to a tokenless loopback worker; a login card appears only when the worker demands a token. If the worker is unreachable, the empty state shows the exact startup commands, copy-ready.
+- **Live turn feel**: a single status row carries the elapsed clock, the current tool activity, and the `Esc` interrupt hint; long-running tools surface heartbeats; model step retries appear as a self-clearing strip.
+- **Readable long sessions**: runs of consecutive read/search calls fold into one expandable row, code blocks carry language labels and hover copy, and a turn-change chip summarizes file mutations with a jump-to-diff link.
+- **Queue and steer**: submissions during a running turn queue as follow-ups (or steer, per the visible toggle); queued rows offer 取回 (back to draft) and 转向 (promote to steering).
+- **Shell input habits**: ↑/↓ recall sent prompts; starters fill the composer; attachments paste, drop, and upload in the background.
+- **Honest session history**: the rail shows relative times and reply previews; switching sessions replays history and re-attaches live turns, and reconnects never move the user's place.
+
 ## One-command deployment
 
 Install Docker Desktop or Docker Engine with Compose v2, then run from the repository root:
