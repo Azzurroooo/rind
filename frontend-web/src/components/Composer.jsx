@@ -5,6 +5,7 @@ import { UploadChip } from "./UploadChip.jsx";
 import { composeMessageWithAttachments } from "../lib/files.js";
 
 const NOTICE_MS = 4000;
+const DRAFT_HISTORY_MAX = 50;
 let nextChipId = 1;
 
 // Composer (web-ui.md §2.4): paste / drag-drop / paperclip → attachment chips
@@ -35,6 +36,8 @@ const Composer = forwardRef(function Composer({
 }, ref) {
   const [chips, setChips] = useState([]);
   const [notice, setNotice] = useState("");
+  const [draftHistory, setDraftHistory] = useState([]); // sent prompts, oldest first (shell ↑-recall)
+  const [historyIndex, setHistoryIndex] = useState(-1); // -1 = live input
   const noticeTimer = useRef(null);
   const fileInputRef = useRef(null);
   const textareaRef = useRef(null);
@@ -95,6 +98,10 @@ const Composer = forwardRef(function Composer({
     const sentPaths = current.filter((chip) => chip.status === "ok" && chip.path).map((chip) => chip.path);
     const composed = composeMessageWithAttachments(value, sentPaths);
     onSubmit?.(composed);
+    if (value.trim()) {
+      setDraftHistory((history) => [...history.slice(-(DRAFT_HISTORY_MAX - 1)), value]);
+      setHistoryIndex(-1);
+    }
     // Delivered chips leave the row; still-uploading chips stay for the next message.
     const delivered = new Set(current.filter((chip) => chip.status === "ok" && chip.path).map((chip) => chip.id));
     setChips((next) => next.filter((chip) => !delivered.has(chip.id)));
@@ -103,6 +110,28 @@ const Composer = forwardRef(function Composer({
       if (noticeTimer.current) window.clearTimeout(noticeTimer.current);
       noticeTimer.current = window.setTimeout(() => setNotice(""), NOTICE_MS);
     }
+  }
+
+  // Shell-style ↑/↓ recall of sent prompts: only an empty input starts a
+  // navigation (caret-safe); ↓ past the newest entry returns to the live draft.
+  function navigateHistory(direction) {
+    if (!draftHistory.length) return;
+    if (historyIndex === -1) {
+      if (direction !== "up") return;
+      const last = draftHistory.length - 1;
+      setHistoryIndex(last);
+      onChange(draftHistory[last]);
+      return;
+    }
+    const next = direction === "up" ? historyIndex - 1 : historyIndex + 1;
+    if (next < 0) return; // already at the oldest
+    if (next >= draftHistory.length) {
+      setHistoryIndex(-1);
+      onChange("");
+      return;
+    }
+    setHistoryIndex(next);
+    onChange(draftHistory[next]);
   }
 
   const commandMode = value.startsWith("/");
@@ -151,6 +180,16 @@ const Composer = forwardRef(function Composer({
             if (event.key === "Enter" && !event.shiftKey) {
               event.preventDefault();
               sendMessage();
+              return;
+            }
+            if (event.key === "ArrowUp" && (value === "" || historyIndex !== -1)) {
+              event.preventDefault();
+              navigateHistory("up");
+              return;
+            }
+            if (event.key === "ArrowDown" && historyIndex !== -1) {
+              event.preventDefault();
+              navigateHistory("down");
             }
           }}
           onPaste={(event) => {
@@ -185,7 +224,7 @@ const Composer = forwardRef(function Composer({
                 ><CornerUpRight size={13} /> 转向 steer</button>
               </span>
             )}
-            <span>Enter to send · Shift+Enter for new line</span>
+            <span>Enter 发送 · Shift+Enter 换行 · ↑ 召回最近消息</span>
           </div>
           {active
             ? <button className="send-button stop" title={interruptArmed ? "再按一次 Esc 停止" : "Stop active turn"} onClick={onCancel}><Square size={15} fill="currentColor" /></button>

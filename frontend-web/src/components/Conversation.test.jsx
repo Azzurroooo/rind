@@ -132,6 +132,23 @@ describe("Conversation — low-stake tool run grouping", () => {
   });
 });
 
+describe("Conversation — empty state starters", () => {
+  it("emphasizes the project name over the directory and fills the composer from a starter click", () => {
+    const onStarter = vi.fn();
+    const { container } = render(<Conversation {...makeProps()} workspace={"E:/code/my-project"} onStarter={onStarter} />);
+    const workspaceRow = container.querySelector(".empty-workspace");
+    expect(workspaceRow.textContent).toContain("E:/code/");
+    expect(workspaceRow.querySelector("strong").textContent).toBe("my-project");
+    fireEvent.click(container.querySelector(".starter-chip"));
+    expect(onStarter).toHaveBeenCalledWith(expect.any(String));
+  });
+
+  it("no workspace row before a workspace is selected", () => {
+    const { container } = render(<Conversation {...makeProps()} />);
+    expect(container.querySelector(".empty-workspace")).toBeNull();
+  });
+});
+
 describe("Conversation — message copy & retry (audit #10)", () => {
   it("hover actions copy a user message and reflect the copied state", async () => {
     Object.defineProperty(window.navigator, "clipboard", { configurable: true, value: { writeText: vi.fn(async () => {}) } });

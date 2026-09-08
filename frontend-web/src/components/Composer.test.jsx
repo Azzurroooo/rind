@@ -1,4 +1,5 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { useState } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Composer } from "./Composer.jsx";
 import { buildCommands } from "../lib/commands.js";
@@ -162,5 +163,52 @@ describe("Composer — slash suggestions source the command registry (audit #9)"
     expect(options[0].textContent).toContain("/theme");
     fireEvent.click(options[0]);
     expect(onChange).toHaveBeenCalledWith("/theme ");
+  });
+});
+
+describe("Composer — draft history (↑ recall)", () => {
+  function HistoryHarness(props = {}) {
+    const [value, setValue] = useState("");
+    const sent = [];
+    return <Composer
+      {...props}
+      value={value}
+      onChange={setValue}
+      onSubmit={(text) => { sent.push(text); setValue(""); }}
+    />;
+  }
+
+  function send(text) {
+    fireEvent.change(screen.getByRole("textbox"), { target: { value: text } });
+    fireEvent.keyDown(screen.getByRole("textbox"), { key: "Enter" });
+  }
+
+  it("ArrowUp recalls sent prompts newest-first; ArrowDown returns and restores the live draft", () => {
+    render(<HistoryHarness />);
+    const textarea = screen.getByRole("textbox");
+    send("first message");
+    send("second message");
+
+    fireEvent.keyDown(textarea, { key: "ArrowUp" });
+    expect(textarea.value).toBe("second message");
+    fireEvent.keyDown(textarea, { key: "ArrowUp" });
+    expect(textarea.value).toBe("first message");
+    fireEvent.keyDown(textarea, { key: "ArrowUp" });
+    expect(textarea.value).toBe("first message"); // oldest stops
+
+    fireEvent.keyDown(textarea, { key: "ArrowDown" });
+    expect(textarea.value).toBe("second message");
+    fireEvent.keyDown(textarea, { key: "ArrowDown" });
+    expect(textarea.value).toBe(""); // past newest → live draft
+  });
+
+  it("recall only starts from an empty input; a draft is left untouched", () => {
+    render(<HistoryHarness />);
+    const textarea = screen.getByRole("textbox");
+    send("sent one");
+
+    fireEvent.change(textarea, { target: { value: "draft in progress" } });
+    fireEvent.keyDown(textarea, { key: "ArrowUp" });
+    expect(textarea.value).toBe("draft in progress"); // caret-safe: no hijack
   });
 });

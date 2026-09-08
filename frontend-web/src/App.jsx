@@ -905,6 +905,12 @@ export default function App() {
     composerRef.current?.focus();
   }, []);
 
+  // Starter chips fill the draft instead of sending — the user keeps control.
+  const fillComposer = useCallback((text) => {
+    setInput(text);
+    composerRef.current?.focus();
+  }, []);
+
   const runCommand = useCallback(async (command) => {
     setPaletteOpen(false);
     try {
@@ -1032,6 +1038,7 @@ export default function App() {
           stepRetry={view.stepRetry}
           collapsedCount={view.collapsedCount}
           turnChanges={view.turnChanges}
+          workspace={selectedWorkspace}
           interruptArmed={interruptArmed}
           onCancel={cancelTurn}
           onAnswer={answerQuestion}
@@ -1039,6 +1046,7 @@ export default function App() {
           onRetrieve={retrieveQueued}
           onPromote={promoteQueued}
           onRetry={retryTurn}
+          onStarter={fillComposer}
         />
         {/* Invariant: composer input is never disabled by connection state. */}
         <Composer

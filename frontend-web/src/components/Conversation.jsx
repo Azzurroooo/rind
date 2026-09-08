@@ -23,6 +23,7 @@ const Conversation = forwardRef(function Conversation({
   stepRetry = null,
   collapsedCount = 0,
   turnChanges = null,
+  workspace = "",
   interruptArmed = false,
   onCancel,
   onAnswer,
@@ -30,6 +31,7 @@ const Conversation = forwardRef(function Conversation({
   onRetrieve,
   onPromote,
   onRetry,
+  onStarter,
 }, ref) {
   const transcriptRef = useRef(null);
   const [detached, setDetached] = useState(false);
@@ -82,7 +84,7 @@ const Conversation = forwardRef(function Conversation({
           {collapsedCount > 0 && (
             <div className="collapsed-divider" role="note">更早的消息已折叠（{collapsedCount} 条）</div>
           )}
-          {!messages.length && !draft && <EmptyConversation />}
+          {!messages.length && !draft && <EmptyConversation workspace={workspace} onStarter={onStarter} />}
           {groupToolRuns(messages).map((entry, index) => (
             entry.kind === "tool-run"
               ? <ToolRunGroup key={`tool-run-${index}`} tools={entry.tools} />
@@ -117,8 +119,34 @@ const Conversation = forwardRef(function Conversation({
   );
 });
 
-function EmptyConversation() {
-  return <div className="empty-conversation"><div className="empty-orbit">R</div><h2>Start a conversation with your worker</h2><p>Your worker stays alive independently. Close this tab and reconnect later without losing the session.</p><div className="starter-grid"><span>Inspect the current workspace</span><span>Review recent changes</span><span>Plan the next task</span></div></div>;
+const STARTERS = [
+  "检查当前工作区的结构，总结这个项目是做什么的",
+  "审查最近的改动，指出潜在问题",
+  "帮我梳理当前项目待办，列一个计划",
+];
+
+// opencode session-new-view pattern: the workspace path leads (directory muted,
+// project name emphasized) and the starters are one-click fills, not decoration.
+function EmptyConversation({ workspace, onStarter }) {
+  const { dir, name } = splitWorkspace(workspace);
+  return <div className="empty-conversation">
+    <div className="empty-orbit">R</div>
+    <h2>Start a conversation with your worker</h2>
+    {name && <div className="empty-workspace"><span>{dir}</span><strong>{name}</strong></div>}
+    <p>Your worker stays alive independently. Close this tab and reconnect later without losing the session.</p>
+    <div className="starter-grid">
+      {STARTERS.map((starter) => (
+        <button key={starter} type="button" className="starter-chip" onClick={() => onStarter?.(starter)}>{starter}</button>
+      ))}
+    </div>
+  </div>;
+}
+
+function splitWorkspace(value) {
+  const clean = String(value || "").replace(/[\\/]+$/, "");
+  if (!clean) return { dir: "", name: "" };
+  const cut = Math.max(clean.lastIndexOf("/"), clean.lastIndexOf("\\"));
+  return cut < 0 ? { dir: "", name: clean } : { dir: clean.slice(0, cut + 1), name: clean.slice(cut + 1) };
 }
 
 // Single-row turn status (codex status widget / claude spinner pattern):
