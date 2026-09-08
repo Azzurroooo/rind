@@ -66,6 +66,18 @@ export function createCommandController({
       await input.runSessionsSelector?.();
       return;
     }
+    if (isExactCommand(text, "usage")) {
+      await input.runUsageCommand?.();
+      return;
+    }
+    if (isExactCommand(text, "context")) {
+      await input.runContextCommand?.();
+      return;
+    }
+    if (isExactCommand(text, "fork")) {
+      await input.runForkCommand?.();
+      return;
+    }
     const result = await request(runtimeMethods.commandExecute, { input: text });
     await applyResult(result);
   }
@@ -147,6 +159,10 @@ function isBareThemeCommand(value) {
 }
 
 function isLocalCommand(value, name) {
+  return String(value || "").trim().toLowerCase() === `/${name}`;
+}
+
+function isExactCommand(value, name) {
   return String(value || "").trim().toLowerCase() === `/${name}`;
 }
 

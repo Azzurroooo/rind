@@ -1,5 +1,6 @@
 import { REASONING_EFFORTS } from "./runtime-protocol.js";
 import { modelListErrorText, commandResultText, goalCommandText, sessionSwitchedText } from "./rendering.js";
+import { usageTotals } from "./usage.js";
 
 export function createCliRuntimeController({
   client,
@@ -170,6 +171,9 @@ export function createCliRuntimeController({
     renderHistory(replay?.messages);
     restoreLiveTurn(liveTurn);
     state.display.stats = usage;
+    state.display.totals = usageTotals(update?.token_totals);
+    state.display.contextStats = update?.context && typeof update.context === "object" ? update.context : null;
+    state.display.lastTurnUsage = null;
     getCompactContextState().clear();
     refreshInputState();
     redraw();
@@ -227,6 +231,36 @@ export function createCliRuntimeController({
         writeError(`${error instanceof Error ? error.message : String(error)}\n`);
       }
     });
+  }
+
+  async function runForkCommand() {
+    if (state.turn.active || state.display.activeCompact) {
+      log("Cannot fork while a turn is running.");
+      return;
+    }
+    let result;
+    try {
+      result = await request(methods.sessionFork);
+    } catch (error) {
+      log(`Fork failed: ${error instanceof Error ? error.message : String(error)}`);
+      return;
+    }
+    const forkedId = String(result?.session_id || "");
+    if (!forkedId) {
+      log("Fork failed: runtime returned no session.");
+      return;
+    }
+    try {
+      await restoreSession(forkedId, {
+        switchSession: true,
+        announce: () => log(() => commandResultText(
+          "Session forked",
+          `branch ${forkedId} · from ${String(result.parent_session_id || "unknown")} · history preserved`,
+        )),
+      });
+    } catch (error) {
+      log(`Fork failed: ${error instanceof Error ? error.message : String(error)}`);
+    }
   }
 
   async function runCompactCommand() {
@@ -306,6 +340,7 @@ export function createCliRuntimeController({
     refreshGoalState,
     runSessionsSelector,
     startCompactCommand,
+    runForkCommand,
     runModelSelector,
     runEffortCommand,
   };

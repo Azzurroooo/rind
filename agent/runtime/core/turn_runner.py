@@ -523,7 +523,7 @@ class TurnRunner:
         await self._best_effort(session.persist_sampling_usage, usage)
 
     async def _persist_context_stats(self, session: SessionStore, stats: dict) -> None:
-        await self._best_effort(session.persist_context_stats, context_stats_summary(stats))
+        await self._best_effort(lambda: session.persist_context_stats(context_stats_summary(stats)))
 
     def _next_steering(self, take_steering: Callable[[], tuple[str, str] | None] | None) -> tuple[str, str] | None:
         if take_steering is None:

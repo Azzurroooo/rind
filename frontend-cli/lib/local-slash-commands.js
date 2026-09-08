@@ -6,8 +6,10 @@ import { currentTheme, setTheme, themeNames, themeOptions } from "./theme.js";
 export const LOCAL_SLASH_COMMANDS = Object.freeze([
   { name: "compact", description: "Compact current session context", usage: "/compact" },
   { name: "config", description: "Show config guidance", usage: "/config" },
+  { name: "context", description: "Show context window breakdown", usage: "/context" },
   { name: "doctor", description: "Run local setup diagnostics", usage: "/doctor" },
   { name: "effort", description: "Show or change reasoning effort", usage: "/effort [low | medium | high | xhigh | max]" },
+  { name: "fork", description: "Fork this session into a new branch", usage: "/fork" },
   { name: "goal", description: "View or control the active goal", usage: "/goal [pause | resume | clear | objective]" },
   { name: "help", description: "Show commands", usage: "/help [command]" },
   { name: "init", description: "Draft RIND.md", usage: "/init [project|user]" },
@@ -18,6 +20,7 @@ export const LOCAL_SLASH_COMMANDS = Object.freeze([
   { name: "status", description: "Show surface status", usage: "/status" },
   { name: "team", description: "Manage the current Team", usage: "/team create [project-id] | /team init | /team list | /team blueprint [id] | /team add <description>" },
   { name: "theme", description: "Switch the CLI color theme", usage: "/theme [latte | frappe | macchiato | mocha]" },
+  { name: "usage", description: "Show token usage and session totals", usage: "/usage" },
 ]);
 
 export async function loadLocalSettings(

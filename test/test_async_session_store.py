@@ -1611,3 +1611,117 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
+
+
+@pytest.mark.asyncio
+async def test_sampling_usage_accumulates_session_token_totals(temp_session_dir):
+    store = JsonlSessionStore(session_dir=temp_session_dir, session_id="token-totals", system_prompt="sys")
+    await store.initialize()
+
+    await store.persist_sampling_usage({
+        "sampling_kind": "assistant",
+        "input_tokens": 100,
+        "cached_input_tokens": 40,
+        "output_tokens": 25,
+        "reasoning_output_tokens": 5,
+        "total_tokens": 125,
+    })
+    await store.persist_sampling_usage({
+        "sampling_kind": "compact",
+        "input_tokens": 80,
+        "cached_input_tokens": 30,
+        "output_tokens": 15,
+        "reasoning_output_tokens": 0,
+        "total_tokens": 95,
+    })
+
+    meta = json.loads((Path(store.session_base_path) / "meta.json").read_text(encoding="utf-8"))
+    assert meta["token_totals"] == {
+        "input_tokens": 180,
+        "cached_input_tokens": 70,
+        "output_tokens": 40,
+        "reasoning_output_tokens": 5,
+        "total_tokens": 220,
+        "samplings": 2,
+    }
+
+    await store.persist_message("user", "after totals")
+
+
+@pytest.mark.asyncio
+async def test_context_stats_summary_persists_and_survives_reload(temp_session_dir):
+    store = JsonlSessionStore(session_dir=temp_session_dir, session_id="context-stats", system_prompt="sys")
+    await store.initialize()
+    await store.persist_message("user", "measure me")
+
+    await store.persist_context_stats({
+        "message_count": 3,
+        "estimated_input_tokens": 62400,
+        "system_tokens": 4200,
+        "conversation_tokens": 38100,
+        "tool_tokens": 12600,
+        "context_window_tokens": 200000,
+        "context_usage_percent": 0.312,
+        "auto_compact_token_limit": 180000,
+    })
+
+    stats = await store.get_latest_context_stats()
+    assert stats["estimated_input_tokens"] == 62400
+
+    reloaded = JsonlSessionStore(session_dir=temp_session_dir, session_id="context-stats", system_prompt="sys")
+    await reloaded.initialize(persist_system_prompt=False)
+    assert (await reloaded.get_latest_context_stats())["context_usage_percent"] == 0.312
+
+
+@pytest.mark.asyncio
+async def test_fork_copies_conversation_with_parent_lineage(temp_session_dir):
+    store = JsonlSessionStore(session_dir=temp_session_dir, session_id="fork-source", system_prompt="sys")
+    await store.initialize()
+    await store.persist_message("user", "hello world")
+    await store.persist_message("assistant", "hi there")
+    await store.persist_sampling_usage({
+        "sampling_kind": "assistant",
+        "input_tokens": 100,
+        "output_tokens": 25,
+        "total_tokens": 125,
+    })
+    await store.persist_turn_state("turn-1", "running", store.now_iso())
+
+    result = await store.fork()
+
+    assert result["parent_session_id"] == "fork-source"
+    fork_id = result["session_id"]
+    forked = JsonlSessionStore(session_dir=temp_session_dir, session_id=fork_id, system_prompt="sys")
+    await forked.initialize(persist_system_prompt=False)
+
+    messages = await forked.load_messages()
+    assert [(message["role"], message["content"]) for message in messages] == [
+        ("system", "sys"),
+        ("user", "hello world"),
+        ("assistant", "hi there"),
+    ]
+    meta = json.loads((Path(forked.session_base_path) / "meta.json").read_text(encoding="utf-8"))
+    assert meta["parent_session_id"] == "fork-source"
+    assert meta["title"].endswith("(fork)")
+    assert meta["message_count"] == 3
+    assert "token_totals" not in meta
+    assert "turn_state" not in meta
+    assert meta["latest_sampling_usage"]["input_tokens"] == 100
+
+    sessions = JsonlSessionStore.list_session_metadata(session_dir=temp_session_dir, limit=10)
+    entry = next(item for item in sessions if item["id"] == fork_id)
+    assert entry["parent_session_id"] == "fork-source"
+
+    original_meta = json.loads(
+        (Path(store.session_base_path) / "meta.json").read_text(encoding="utf-8")
+    )
+    assert original_meta["session_id"] == "fork-source"
+    assert original_meta["token_totals"]["input_tokens"] == 100
+
+
+@pytest.mark.asyncio
+async def test_fork_requires_a_materialized_session(temp_session_dir):
+    store = JsonlSessionStore(session_dir=temp_session_dir)
+
+    with pytest.raises(RuntimeError):
+        await store.fork()

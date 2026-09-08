@@ -43,6 +43,7 @@ export function createEventController({
         if (output.handleContextBuilt?.(event)) {
           output.resetContextUsage?.();
         }
+        output.setContextStats?.(event.stats && typeof event.stats === "object" ? event.stats : null);
         const line = contextBuiltLine(event);
         if (line) {
           output.closeAssistant?.();
@@ -138,6 +139,7 @@ export function createEventController({
         output.clearQueuedInputs?.();
         output.clearCompactContext?.();
         output.closeAssistant?.();
+        output.setLastTurnUsage?.(event.usage && typeof event.usage === "object" ? event.usage : null);
         if (state.activeGoal?.status !== "active") {
           output.log?.(turnCompletedLine(event, toolStats));
         }

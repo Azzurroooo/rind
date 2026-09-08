@@ -486,7 +486,7 @@ test("slashDisplayText renders status payloads", () => {
       "",
       `  ── Last sampling ${"─".repeat(77)}`,
       "  context     ▮▮▮▮▮▯▯▯▯▯ 46.9%",
-      "  input       121.3k / 258.4k tokens",
+      "  input       121k / 258k tokens",
       "  cached      98.7k · 81.4% hit",
       "  output      2.1k",
     ].join("\n"),

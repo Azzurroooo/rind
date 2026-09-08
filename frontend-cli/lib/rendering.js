@@ -15,8 +15,8 @@ export function startupText(info = {}, width) {
   return sections.filter(Boolean).join("\n\n");
 }
 
-export function promptText(info = {}, _stats = {}, state = {}, frameWidth) {
-  return inputPromptFrame(promptHeaderLine(info, frameWidth), state, frameWidth);
+export function promptText(info = {}, stats = {}, state = {}, frameWidth) {
+  return inputPromptFrame(promptHeaderLine(info, stats, frameWidth), state, frameWidth);
 }
 
 export function promptActivityLine(state = {}) {
@@ -455,10 +455,82 @@ export function modelListErrorText(error, currentModel = "") {
 
 export function turnCompletedLine(event, tools = { completed: 0, failed: 0 }) {
   const duration = formatDuration(event.duration_ms);
+  const usage = event?.usage && typeof event.usage === "object" ? event.usage : null;
+  const usageSegment = usage && Number(usage.input_tokens) > 0
+    ? `${dim(" · ↑")}${formatCount(usage.input_tokens)}${dim(" ↓")}${formatCount(usage.output_tokens)}`
+    : "";
   const summary = toolSummary(tools);
-  return summary
-    ? `${green("─")} ${bold("Worked for")} ${duration} ${dim(`· ${summary}`)}`
-    : `${green("─")} ${bold("Worked for")} ${duration}`;
+  return `${green("─")} ${bold("Worked for")} ${duration}${usageSegment}${summary ? dim(` · ${summary}`) : ""}`;
+}
+
+export function usageText({ stats = {}, totals = null, lastTurn = null } = {}) {
+  const hasTotals = Boolean(totals) && Number(totals.samplings) > 0;
+  const hasSample = hasSampledStats(stats);
+  if (!hasTotals && !hasSample) {
+    return notice("Usage", "no token usage yet — run a turn first");
+  }
+  const lines = [sectionRule("Usage", hasTotals && totals.samplings > 1 ? `${totals.samplings} samplings` : "")];
+  const windowTokens = Number(stats.context_window_tokens) || 0;
+  const percent = Number(stats.context_usage_percent);
+  if (windowTokens > 0 && Number.isFinite(percent)) {
+    const ratio = Math.max(0, Math.min(1, percent));
+    lines.push(kvRow(
+      "context",
+      `${loadMeter(ratio)} ${dim(`${Math.round(ratio * 100)}% · ${formatCount(stats.input_tokens)} / ${formatCount(windowTokens)}`)}`,
+    ));
+  } else if (Number(stats.input_tokens) > 0) {
+    lines.push(kvRow("context", formatCount(stats.input_tokens)));
+  }
+  if (Number(stats.cached_input_tokens) > 0) {
+    lines.push(kvRow("cache", `${formatCount(stats.cached_input_tokens)} ${dim(`· ${formatPercent(stats.cache_hit_rate)} hit`)}`));
+  }
+  if (lastTurn && (Number(lastTurn.input_tokens) > 0 || Number(lastTurn.output_tokens) > 0)) {
+    lines.push(kvRow("last turn", `${dim("↑")}${formatCount(lastTurn.input_tokens)} ${dim("↓")}${formatCount(lastTurn.output_tokens)}`));
+  }
+  if (hasTotals) {
+    const cached = Number(totals.cached_input_tokens) > 0 ? dim(` · cached ${formatCount(totals.cached_input_tokens)}`) : "";
+    const reasoning = Number(totals.reasoning_output_tokens) > 0 ? dim(` · reasoning ${formatCount(totals.reasoning_output_tokens)}`) : "";
+    lines.push(kvRow("input", `${formatCount(totals.input_tokens)}${cached}`));
+    lines.push(kvRow("output", `${formatCount(totals.output_tokens)}${reasoning}`));
+  }
+  return lines.join("\n");
+}
+
+export function contextBreakdownText(stats = null) {
+  if (!stats || typeof stats !== "object" || !(Number(stats.estimated_input_tokens) > 0)) {
+    return notice("Context", "no measurements yet — run a turn, then check again");
+  }
+  const estimated = Number(stats.estimated_input_tokens) || 0;
+  const windowTokens = Number(stats.context_window_tokens) || 0;
+  const ratio = windowTokens > 0 ? Math.min(1, estimated / windowTokens) : 0;
+  const compactLimit = Number(stats.auto_compact_token_limit) || 0;
+  const lines = [sectionRule("Context", windowTokens > 0 ? `${formatCount(estimated)} / ${formatCount(windowTokens)}` : formatCount(estimated))];
+  lines.push(`  ${loadMeter(ratio)} ${dim(`${Math.round(ratio * 100)}%${compactLimit ? ` · compact at ${formatCount(compactLimit)}` : ""}`)}`);
+  const parts = [
+    { label: "conversation", tokens: Number(stats.conversation_tokens) || 0 },
+    { label: "tools", tokens: Number(stats.tool_tokens) || 0 },
+    { label: "system", tokens: Number(stats.system_tokens) || 0 },
+  ].filter((part) => part.tokens > 0).sort((left, right) => right.tokens - left.tokens);
+  for (const part of parts) {
+    const share = estimated > 0 ? part.tokens / estimated : 0;
+    lines.push(`  ${dim(padRight(part.label, 14))}${padRight(formatCount(part.tokens), 8)}${loadMeter(share, 10)} ${dim(`${Math.round(share * 100)}%`)}`);
+  }
+  const free = windowTokens - estimated;
+  if (windowTokens > 0 && free > 0) {
+    lines.push(dim(`  ${padRight("free", 14)}${padRight(formatCount(free), 8)}${Math.round((free / windowTokens) * 100)}%`));
+  }
+  const messages = Number(stats.message_count);
+  if (Number.isFinite(messages) && messages > 0) {
+    lines.push(dim(`  ${messages} messages in context`));
+  }
+  return lines.join("\n");
+}
+
+function hasSampledStats(stats) {
+  if (!stats || typeof stats !== "object") {
+    return false;
+  }
+  return Number(stats.input_tokens) > 0 || Number.isFinite(Number(stats.context_usage_percent));
 }
 
 export function interruptText() {
@@ -656,7 +728,7 @@ function slashStatusText(display) {
     lines.push("", sectionRule(sectionLabel(usage.label) || "Sampling"));
     const windowTokens = Number(usage.context_window_tokens) || 0;
     if (windowTokens > 0) {
-      lines.push(kvRow("context", `${usageMeter(usage.context_usage_percent)} ${dim(formatPercent(usage.context_usage_percent))}`));
+      lines.push(kvRow("context", `${loadMeter(usage.context_usage_percent)} ${dim(formatPercent(usage.context_usage_percent))}`));
       lines.push(kvRow("input", `${formatCount(usage.input_tokens)} ${dim(`/ ${formatCount(windowTokens)} tokens`)}`));
     } else {
       lines.push(kvRow("input", formatCount(usage.input_tokens)));
@@ -844,11 +916,10 @@ function kvRow(label, value, labelWidth = 12) {
   return `  ${dim(padRight(label, labelWidth))}${value}`;
 }
 
-function usageMeter(ratio) {
-  const cells = 10;
+export function loadMeter(ratio, cells = 10) {
   const clamped = Math.max(0, Math.min(1, Number(ratio) || 0));
   const filled = Math.min(cells, Math.round(clamped * cells));
-  const tone = clamped >= 0.85 ? red : clamped >= 0.6 ? accent : (text) => text;
+  const tone = clamped >= 0.85 ? red : clamped >= 0.6 ? paint.warning : accent;
   return `${tone("▮".repeat(filled))}${dim("▯".repeat(cells - filled))}`;
 }
 
@@ -1099,10 +1170,19 @@ function formatCount(value) {
   if (!Number.isFinite(number) || number <= 0) {
     return "0";
   }
-  if (Math.abs(number) >= 1000) {
-    return `${(number / 1000).toFixed(1)}k`;
+  if (number >= 1_000_000) {
+    return `${compactNumber(number / 1_000_000)}M`;
+  }
+  if (number >= 1000) {
+    return `${compactNumber(number / 1000)}k`;
   }
   return String(Math.trunc(number));
+}
+
+function compactNumber(value) {
+  const digits = value >= 100 ? 0 : 1;
+  const text = value.toFixed(digits);
+  return text.endsWith(".0") ? text.slice(0, -2) : text;
 }
 
 function formatPercent(value) {
@@ -1246,7 +1326,7 @@ function visibleLength(text) {
   return textWidth(text);
 }
 
-function promptHeaderLine(info, frameWidth) {
+function promptHeaderLine(info, stats, frameWidth) {
   const backgroundCount = Number(info.background_count);
   const delegateCount = Number(info.delegate_count);
   const taskHints = [];
@@ -1262,19 +1342,41 @@ function promptHeaderLine(info, frameWidth) {
   const model = singleLine(info.model);
   const effort = singleLine(info.reasoning_effort);
   const cwd = middleClip(info.cwd, 56);
+  const meter = contextMeterSegment(stats);
   const width = composerWidth(frameWidth);
-  const effortSegment = effort ? `${dim(" · ")}${promptModel(effort)}` : "";
-  if (model && cwd) {
-    const separator = " · ";
-    const pathWidth = width - visibleLength(model) - visibleLength(separator) - visibleLength(taskHint) - visibleLength(effortSegment);
+  const segments = [];
+  if (model) {
+    segments.push(promptModel(clipSingleLine(model, width)));
+  }
+  if (effort) {
+    segments.push(dim(effort));
+  }
+  if (meter) {
+    segments.push(meter);
+  }
+  let line = segments.join(dim(" · "));
+  if (cwd) {
+    const used = visibleLength(line) + visibleLength(taskHint) + (line ? 3 : 0);
+    const pathWidth = width - used;
     if (pathWidth > 0) {
-      return `  ${promptModel(clipSingleLine(model, width))}${effortSegment}${dim(separator)}${promptPath(clipSingleLine(cwd, pathWidth))}${taskHint}`;
+      line += `${line ? dim(" · ") : ""}${promptPath(clipSingleLine(cwd, pathWidth))}`;
     }
   }
-  if (model) {
-    return `  ${promptModel(clipSingleLine(model, width))}${taskHint}`;
+  return line ? `  ${line}${taskHint}` : "";
+}
+
+function contextMeterSegment(stats) {
+  if (!stats || typeof stats !== "object") {
+    return "";
   }
-  return cwd ? `  ${promptPath(clipSingleLine(cwd, width))}${taskHint}` : "";
+  const windowTokens = Number(stats.context_window_tokens) || 0;
+  const percent = Number(stats.context_usage_percent);
+  if (windowTokens > 0 && Number.isFinite(percent)) {
+    const ratio = Math.max(0, Math.min(1, percent));
+    return `${loadMeter(ratio)} ${Math.round(ratio * 100)}%`;
+  }
+  const inputTokens = Number(stats.input_tokens) || 0;
+  return inputTokens > 0 ? `${formatCount(inputTokens)} ctx` : "";
 }
 
 function composerWidth(frameWidth) {

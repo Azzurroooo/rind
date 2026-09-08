@@ -14,10 +14,11 @@ const methods = {
   commandExecute: "rind/command/execute",
   sessionSwitch: "session/switch",
   sessionReplay: "session/replay",
+  sessionFork: "rind/session/fork",
   modelSet: "model/set",
 };
 
-function createHarness({ selectedSession = null, replayError = null, switchGate = null } = {}) {
+function createHarness({ selectedSession = null, replayError = null, switchGate = null, forkError = null } = {}) {
   const state = createCliState();
   state.session.info = { session_id: "session-a", model: "model-a" };
   state.turn.id = "turn-a";
@@ -58,9 +59,16 @@ function createHarness({ selectedSession = null, replayError = null, switchGate 
           model: "model-b",
           goal: null,
           usage: null,
+          token_totals: { input_tokens: 500, samplings: 4 },
           live_turn: null,
           resume_preview: "",
         });
+      }
+      if (method === methods.sessionFork) {
+        if (forkError) {
+          return Promise.reject(forkError);
+        }
+        return Promise.resolve({ session_id: "session-forked", parent_session_id: "session-a" });
       }
       if (method === methods.sessionReplay) {
         if (replayError) {
@@ -87,7 +95,7 @@ function createHarness({ selectedSession = null, replayError = null, switchGate 
   const controller = createCliRuntimeController({
     client,
     methods,
-    sessionScopedMethods: new Set(["rind/session/steer"]),
+    sessionScopedMethods: new Set(["rind/session/steer", methods.sessionFork]),
     turnScopedMethods: new Set(["rind/session/steer"]),
     requireInitialization: (value) => value,
     state,
@@ -209,6 +217,38 @@ test("session selector ignores an older concurrent switch response", async () =>
 
   assert.equal(harness.history.length, 1);
   assert.equal(harness.state.session.info.session_id, "session-b");
+});
+
+test("fork requests a branch from the current session and switches onto it", async () => {
+  const harness = createHarness();
+  await harness.controller.runForkCommand();
+
+  const fork = harness.requests.find((item) => item.method === methods.sessionFork);
+  assert.equal(fork.params.session_id, "session-a");
+  assert.equal(
+    harness.requests.filter((item) => item.method === methods.sessionReplay)[0].params.session_id,
+    "session-forked",
+  );
+  assert.equal(harness.state.session.info.session_id, "session-forked");
+  assert.equal(harness.state.display.totals.input_tokens, 500);
+  assert.equal(harness.state.display.totals.samplings, 4);
+});
+
+test("fork is refused while a turn is active", async () => {
+  const harness = createHarness();
+  harness.state.turn.active = true;
+  await harness.controller.runForkCommand();
+
+  assert.equal(harness.requests.some((item) => item.method === methods.sessionFork), false);
+  assert.equal(harness.state.session.info.session_id, "session-a");
+});
+
+test("fork failures keep the current session", async () => {
+  const harness = createHarness({ forkError: new Error("runtime refused") });
+  await harness.controller.runForkCommand();
+
+  assert.equal(harness.requests.some((item) => item.method === methods.sessionSwitch), false);
+  assert.equal(harness.state.session.info.session_id, "session-a");
 });
 
 function deferred() {

@@ -31,6 +31,7 @@ import { createCliRuntimeController } from "./cli-runtime-controller.js";
 import { createCliOutputController } from "./cli-output-controller.js";
 import { createCliInputActions } from "./cli-input-actions.js";
 import { cliHelp, oneShotHelp, runOneShot } from "./one-shot.js";
+import { accumulateUsage, usageTotals } from "./usage.js";
 import { createTui } from "./tui/tui.js";
 import { Container } from "./tui/component.js";
 import { ComposerArea } from "./components/composer-area.js";
@@ -45,6 +46,8 @@ import {
   promptPlaceholderText,
   slashMenuText,
   startupText,
+  usageText,
+  contextBreakdownText,
 } from "./rendering.js";
 
 export async function runFrontendCliApp(cliArgs = process.argv.slice(2)) {
@@ -254,6 +257,13 @@ commandController = createCommandController({
     runGoalCommand: runtimeController.runGoalCommand,
     runModelSelector: runtimeController.runModelSelector,
     runEffortCommand: (value) => runtimeController.runEffortCommand(value),
+    runUsageCommand: () => logOutput(() => usageText({
+      stats: displayState.stats,
+      totals: displayState.totals,
+      lastTurn: displayState.lastTurnUsage,
+    })),
+    runContextCommand: () => logOutput(() => contextBreakdownText(displayState.contextStats)),
+    runForkCommand: () => runtimeController.runForkCommand(),
     runThemeSelector: async () => {
       const selected = await inputActions.askThemeMenu();
       if (selected) {
@@ -347,6 +357,13 @@ const eventController = createEventController({
     updateGoal: updateGoalState,
     setStats: (stats) => {
       displayState.stats = stats;
+      displayState.totals = accumulateUsage(displayState.totals ?? usageTotals(), stats);
+    },
+    setContextStats: (stats) => {
+      displayState.contextStats = stats;
+    },
+    setLastTurnUsage: (usage) => {
+      displayState.lastTurnUsage = usage;
     },
     setActivityLabel: outputController.setActivityLabel,
     redraw: redrawInput,
@@ -436,7 +453,7 @@ function updateGoalState(goal) {
   redrawInput();
 }
 function resetContextUsage() {
-  displayState.stats = { context_usage_percent: 0 };
+  displayState.stats = {};
   redrawInput();
 }
 
