@@ -16,7 +16,7 @@ PYTHON = sys.executable
 
 def _run_gateway(args: list[str], stdin: str = "", workspace: str | None = None, env_extra: dict[str, str] | None = None, timeout: float = 60.0) -> subprocess.CompletedProcess:
     env = dict(os.environ)
-    env.update({"PYTHONUTF8": "1", "PYTHONIOENCODING": "utf-8"})
+    env.update({"PYTHONUTF8": "1", "PYTHONIOENCODING": "utf-8", "RIND_GATEWAY_NO_AUTO_INSTALL": "1"})
     if env_extra:
         env.update(env_extra)
     return subprocess.run(
