@@ -340,6 +340,9 @@ const eventController = createEventController({
     get activeGoal() {
       return sessionState.info.goal;
     },
+    activityElapsedMs: () => (displayState.activityStartedAt
+      ? Date.now() - displayState.activityStartedAt
+      : 0),
     debug: cliArgs.includes("--debug"),
   },
   input: { answerQuestion: (...args) => inputActions.answerQuestion(...args) },
@@ -616,12 +619,40 @@ function handleSigint() {
     activeTurn: turnStateData.active || displayState.activeCompact,
     interruptRequested: turnStateData.interruptRequested,
     runtimeClosing: runtimeState.status === "closing",
+    exitArmed: displayState.exitArmed,
   });
   if (action === "interrupt") {
     interruptTurn();
-  } else {
-    exitFromSignal();
+    return;
   }
+  if (action === "arm-exit") {
+    armExit();
+    return;
+  }
+  clearExitArm();
+  exitFromSignal();
+}
+
+function armExit() {
+  if (displayState.exitArmTimer) {
+    return;
+  }
+  displayState.exitArmed = true;
+  refreshInputState();
+  displayState.exitArmTimer = setTimeout(() => {
+    displayState.exitArmTimer = null;
+    displayState.exitArmed = false;
+    refreshInputState();
+  }, 1000);
+  displayState.exitArmTimer.unref?.();
+}
+
+function clearExitArm() {
+  if (displayState.exitArmTimer) {
+    clearInterval(displayState.exitArmTimer);
+  }
+  displayState.exitArmTimer = null;
+  displayState.exitArmed = false;
 }
 
 function interruptTurn() {

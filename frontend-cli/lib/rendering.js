@@ -1,5 +1,5 @@
 import { clipCells, graphemes, middleClipCells, textWidth, wrapTextCells } from "./text-width.js";
-import { formatDuration } from "./tool-display.js";
+import { formatDuration, humanToolName } from "./tool-display.js";
 import { paint, flavorSwatch } from "./theme.js";
 import { homedir } from "node:os";
 
@@ -32,12 +32,31 @@ export function promptHintLine(state = {}) {
   if (state.menuOpen) {
     return "";
   }
-  const text = state.inputMode === "question"
-    ? "  ↑↓ choose · enter confirm · esc cancel"
-    : state.running
-      ? "  enter steer · tab queue · ctrl+c stop · ctrl+b tasks"
-      : "  enter send · ↑↓ history · / commands · ? help";
+  const text = state.exitArmed
+    ? "  press ctrl+c again to exit"
+    : state.inputMode === "question"
+      ? "  ↑↓ choose · enter confirm · esc cancel"
+      : state.running
+        ? "  enter steer · tab queue · ctrl+c stop · ctrl+b tasks"
+        : "  enter send · ↑↓ history · / commands · ? help";
   return dim(clipCells(text, composerWidth(state.frameWidth)));
+}
+
+export function relativeTime(value, now = Date.now()) {
+  const time = Date.parse(String(value || ""));
+  if (!Number.isFinite(time)) {
+    return "";
+  }
+  const minutes = Math.max(0, now - time) / 60000;
+  if (minutes < 1) return "now";
+  if (minutes < 60) return `${Math.floor(minutes)}m`;
+  const hours = minutes / 60;
+  if (hours < 24) return `${Math.floor(hours)}h`;
+  const days = hours / 24;
+  if (days < 7) return `${Math.floor(days)}d`;
+  if (days < 30) return `${Math.floor(days / 7)}w`;
+  if (days < 365) return `${Math.floor(days / 30)}mo`;
+  return `${Math.floor(days / 365)}y`;
 }
 
 export function promptPlaceholderText() {
@@ -537,8 +556,9 @@ export function interruptText() {
   return notice("Interrupt requested", "ctrl+c again to quit");
 }
 
-export function cancelledText() {
-  return notice("Interrupted", "session preserved; resume with -c");
+export function cancelledText(workedMs = 0) {
+  const worked = workedMs > 0 ? `worked for ${formatActivityDuration(workedMs)} · ` : "";
+  return notice("Interrupted", `${worked}session preserved; resume with -c`);
 }
 
 export function commandResultText(text, detail = "") {
@@ -780,7 +800,7 @@ function slashSessionsText(display) {
     const marker = session.current ? accent("›") : dim("·");
     const current = session.current ? dim(" · current") : "";
     const id = middleClip(session.id, 32);
-    const updated = clipSingleLine(session.updated_at, 28);
+    const updated = relativeTime(session.updated_at) || clipSingleLine(session.updated_at, 24);
     lines.push(`  ${marker} ${id}${current}${updated ? dim(` · ${updated}`) : ""}`);
     const title = clipSingleLine(session.title, slashContentWidth());
     const size = sessionSizeText(session);
@@ -1023,10 +1043,6 @@ function completedToolText(name, label) {
     return `Read ${label}`;
   }
   return `Called ${label}`;
-}
-
-function humanToolName(name) {
-  return singleLine(name).replace(/[_-]+/g, " ") || "tool";
 }
 
 function parseJsonObject(value) {

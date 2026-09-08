@@ -624,7 +624,7 @@ const GENERIC_RENDERER = {
   },
 };
 
-function humanToolName(name) {
+export function humanToolName(name) {
   return String(name || "tool").replace(/[_-]+/g, " ").trim() || "tool";
 }
 

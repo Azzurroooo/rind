@@ -1,4 +1,5 @@
 import { runtimeEventType } from "./runtime-protocol.js";
+import { humanToolName } from "./tool-display.js";
 import {
   cancelledText,
   contextBuiltLine,
@@ -63,6 +64,7 @@ export function createEventController({
         return;
       case "tool_requested":
         output.closeAssistant?.();
+        output.setActivityLabel?.(humanToolName(event.tool_name));
         rememberPlanInputPreview(event);
         monitor.recordCommand?.(event);
         monitor.recordDelegateRequest?.(event);
@@ -128,13 +130,15 @@ export function createEventController({
         output.log?.(() => errorLine(event.error));
         resetTurnState();
         return;
-      case "turn_cancelled":
+      case "turn_cancelled": {
         output.clearQueuedInputs?.();
         output.clearCompactContext?.();
         output.closeAssistant?.();
-        output.log?.(() => cancelledText());
+        const workedMs = state.activityElapsedMs?.() ?? 0;
+        output.log?.(() => cancelledText(workedMs));
         resetTurnState();
         return;
+      }
       case "turn_completed":
         output.clearQueuedInputs?.();
         output.clearCompactContext?.();

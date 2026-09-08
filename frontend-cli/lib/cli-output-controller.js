@@ -46,6 +46,7 @@ export function createCliOutputController({ state, terminalUi, transcript }) {
       pendingInputs: state.input.pending,
       inputMode: inputSession?.mode || "prompt",
       menuOpen: Boolean(inputSession?.menuState?.matches?.()?.length),
+      exitArmed: state.display.exitArmed,
     };
   }
 

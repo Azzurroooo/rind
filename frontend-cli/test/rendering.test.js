@@ -535,7 +535,7 @@ test("slashDisplayText renders sessions, skills, and config payloads", () => {
     }),
     [
       `  ── Sessions · 1 recent ${"─".repeat(71)}`,
-      "  › session_2 · current · 2026-06-02T01:02:03+00:00",
+      "  › session_2 · current · 3mo",
       "      Current task · 4 msg, 1 tool",
       "      latest answer",
       "",

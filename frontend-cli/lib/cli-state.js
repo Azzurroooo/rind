@@ -30,6 +30,8 @@ export function createCliState() {
       totals: null,
       contextStats: null,
       lastTurnUsage: null,
+      exitArmed: false,
+      exitArmTimer: null,
       lastEventSequence: 0,
       lastTurnId: "",
       activityFrame: 0,

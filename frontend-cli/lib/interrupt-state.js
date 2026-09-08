@@ -1,9 +1,9 @@
-export function sigintAction({ activeTurn, interruptRequested, runtimeClosing = false }) {
+export function sigintAction({ activeTurn, interruptRequested, runtimeClosing = false, exitArmed = false }) {
   if (runtimeClosing) {
     return "force-shutdown";
   }
   if (!activeTurn) {
-    return "shutdown";
+    return exitArmed ? "shutdown" : "arm-exit";
   }
   return interruptRequested ? "force-shutdown" : "interrupt";
 }

@@ -59,6 +59,13 @@ Rind 终端界面的统一视觉与信息规范。所有 CLI 改动应遵循本�
 
 数据流：`token_stats_updated` 事件喂头部计量条与累计；`context_built` 事件喂 `/context`；`turn_completed.usage` 喂回合小结与 `/usage` 的 last turn；切换/分支会话时从 worker 持久化的 `token_totals` / `latest_context_stats` 重新播种。
 
+## 键盘交互
+
+- **退出需确认**（claude code 800ms / codex 1s 双击模式）：空闲时第一次 ctrl+c 只武装退出并在提示行显示 `press ctrl+c again to exit`，1 秒内再按才退出；运行回合中的 ctrl+c 语义不变（先中断、再强制退出）。
+- **活动行说真话**：spinner 行实时反映当前工作——生成文本时 `Working`，工具运行时显示工具名（`◐ bash (1m 12s) ctrl+c interrupt`），流式输出恢复后回到 `Working`。
+- **相对时间**（pi 阈值）：会话列表用 `now / Nm / Nh / Nd / Nw / Nmo / Ny`，不显示 ISO 原文。
+- **中断小结带时长**（goose `⏱` 模式）：`◆ Interrupted · worked for 1m 12s · session preserved; resume with -c`。
+
 ## Fork 语义
 
 - fork = 携带完整历史的分支：复制消息、工具记录、压缩记录；`parent_session_id` 记录血缘；标题追加 `(fork)`。

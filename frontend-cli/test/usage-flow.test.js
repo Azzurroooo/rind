@@ -161,6 +161,9 @@ function createHarness({ columns = 80, rows = 24 } = {}) {
       get activeGoal() {
         return state.session.info.goal;
       },
+      activityElapsedMs: () => (state.display.activityStartedAt
+        ? Date.now() - state.display.activityStartedAt
+        : 0),
       debug: false,
     },
     input: {},
@@ -205,11 +208,7 @@ function createHarness({ columns = 80, rows = 24 } = {}) {
       state.turn.id = turnId;
       state.turn.active = true;
       state.display.activityLabel = "Working";
-    }
-    if (["turn_completed", "turn_failed", "turn_cancelled"].includes(event.type)) {
-      state.turn.id = "";
-      state.turn.active = false;
-      state.display.activityLabel = "";
+      state.display.activityStartedAt = Date.now() - 72_000;
     }
     sequence += 1;
     await eventController.handle({
@@ -221,6 +220,12 @@ function createHarness({ columns = 80, rows = 24 } = {}) {
       turn_id: turnId,
       event,
     });
+    if (["turn_completed", "turn_failed", "turn_cancelled"].includes(event.type)) {
+      state.turn.id = "";
+      state.turn.active = false;
+      state.display.activityLabel = "";
+      state.display.activityStartedAt = 0;
+    }
   }
 
   const commands = createCommandController({
@@ -358,6 +363,40 @@ test("user flow: a full turn feeds the header meter, usage and context panels, t
 
   const forkHeader = app.output.mainPromptText(80);
   assert.doesNotMatch(forkHeader, /31%/, "meter hides until the fork samples tokens");
+
+  app.tui.stop();
+});
+
+test("user flow: interrupting a long turn names the tool and reports the elapsed work", async () => {
+  const app = createHarness();
+  const editor = createLineEditor("");
+  app.setSession({ mode: "prompt", editor });
+  app.tui.start();
+  await app.runtimeController.ensureRuntime();
+
+  app.output.writeUserInput("run the whole suite and fix what breaks");
+  await app.deliver({ type: "turn_started", user_message_chars: 40 });
+  await app.deliver({ type: "assistant_delta", text: "Starting the suite now." });
+  await app.deliver({
+    type: "tool_requested",
+    tool_call_id: "call-9",
+    tool_name: "bash",
+    args_preview: '{"command":"npm test"}',
+  });
+
+  assert.equal(app.state.display.activityLabel, "bash", "spinner names the running tool");
+  assert.match(
+    app.output.mainPromptText(80),
+    /◐ bash \(1m 12s\) ctrl\+c interrupt/,
+    "activity line shows the tool and elapsed time",
+  );
+
+  await app.deliver({ type: "turn_cancelled", reason: "User interrupted" });
+  await settle(app.virtual);
+  const joined = app.virtual.getViewport().join("\n");
+  assert.match(joined, /Interrupted/);
+  assert.match(joined, /worked for 1m 12s/);
+  assert.match(joined, /session preserved/);
 
   app.tui.stop();
 });

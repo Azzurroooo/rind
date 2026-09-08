@@ -1,5 +1,5 @@
 import { REASONING_EFFORTS } from "./runtime-protocol.js";
-import { modelListErrorText, commandResultText, goalCommandText, sessionSwitchedText } from "./rendering.js";
+import { modelListErrorText, commandResultText, goalCommandText, relativeTime, sessionSwitchedText } from "./rendering.js";
 import { usageTotals } from "./usage.js";
 
 export function createCliRuntimeController({
@@ -359,7 +359,7 @@ function mergeSlashCommands(...groups) {
 }
 
 function sessionMenuOption(session) {
-  const values = [singleLineText(session?.id), singleLineText(session?.title), singleLineText(session?.updated_at)];
+  const values = [singleLineText(session?.id), singleLineText(session?.title), relativeTime(session?.updated_at)];
   if (session?.current) values.push("current");
   return values.filter(Boolean).join(" · ");
 }
