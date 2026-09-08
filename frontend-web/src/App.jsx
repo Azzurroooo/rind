@@ -291,6 +291,9 @@ export default function App() {
   }
 
   async function handleOpen() {
+    // The worker's subscription table is per-connection: a reconnect is a NEW
+    // connection, so every session must be subscribed again from scratch.
+    subscribedRef.current.clear();
     try {
       // EVERY connection owns a fresh per-connection dispatcher on the worker:
       // without `initialize` it rejects every request with ServerNotReady
@@ -304,9 +307,7 @@ export default function App() {
     // a page reload (tab closed while tasks ran) heals exactly like a network
     // blip instead of leaving the strip stuck or history stale.
     await runCatchUp();
-  }
-
-  async function handleLogin(token) {
+  }  async function handleLogin(token) {
     if (authBusy) return;
     setAuthBusy(true);
     setLoginToken(token);
@@ -426,7 +427,10 @@ export default function App() {
       const workspace = String(result?.workspace_root || "").trim();
       setSelectedWorkspace(workspace);
       setWorkspaceDraft(workspace);
-      if (currentId) await loadSession(currentId, false);
+      // Only the FIRST connect adopts the worker's default session. A reconnect
+      // must keep whatever session the user is reading — yanking the view back
+      // to the worker's default on every network blip loses their place.
+      if (!sessionIdOf(infoRef.current) && currentId) await loadSession(currentId, false);
       await refreshSessions(workspace);
       void refreshModels(currentId);
     } catch (error) {

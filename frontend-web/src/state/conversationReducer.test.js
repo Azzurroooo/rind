@@ -444,6 +444,11 @@ describe("conversation reducer — alive-turn state (working status, heartbeats,
     expect(finished.activeSince).toBe(0);
   });
 
+  it("accepts ISO stamps too — the worker path re-stamps ts with now_iso()", () => {
+    const started = replay([event(1, "durable", { type: "turn_started", turn_id: "t1", ts: "2026-09-08T17:35:58.398361+00:00" })]);
+    expect(started.activeSince).toBe(Date.parse("2026-09-08T17:35:58.398361+00:00"));
+  });
+
   it("tool_progress heartbeats update the running tool's progress; the result clears it", () => {
     let state = replay([
       event(1, "durable", { type: "turn_started", turn_id: "t1" }),

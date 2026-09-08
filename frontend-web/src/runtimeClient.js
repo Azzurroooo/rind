@@ -2,6 +2,7 @@ const DEFAULT_URL = "ws://localhost:8765";
 const HEARTBEAT_INTERVAL_MS = 10000; // send ping every 10s
 const HEARTBEAT_TIMEOUT_MS = 15000; // no traffic for 15s → connection presumed dead
 const MAX_RECONNECT_DELAY_MS = 8000;
+const MAX_RECONNECT_ATTEMPTS = 3; // then rest at offline until the user retries
 const WS_UNAUTHORIZED = 4401;
 
 function productionRuntimeUrl() {
@@ -154,6 +155,13 @@ export function createRuntimeClient({ url = productionRuntimeUrl(), credentialPr
 
   function scheduleReconnect() {
     if (reconnectTimer || closedByUser) return;
+    // Unbounded retries would flap the UI's offline/reconnecting phases forever
+    // on a dead worker; after MAX_RECONNECT_ATTEMPTS the strip rests at
+    // 已断开 + 重试 and a successful connect resets the counter.
+    if (reconnectAttempt >= MAX_RECONNECT_ATTEMPTS) {
+      onStatus({ state: "disconnected", url });
+      return;
+    }
     reconnectAttempt += 1;
     onStatus({ state: "reconnecting", url, attempt: reconnectAttempt });
     const delay = Math.min(MAX_RECONNECT_DELAY_MS, 500 * 2 ** Math.min(reconnectAttempt - 1, 4));

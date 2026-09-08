@@ -552,10 +552,15 @@ function firstDefined(...values) {
   return undefined;
 }
 
-// Runtime events stamp `ts` as epoch seconds (agent/domain/events.py).
+// Runtime events stamp `ts` either as epoch seconds (domain default) or as an
+// ISO instant (the worker path re-stamps with session.now_iso()).
 function epochMs(ts) {
-  const seconds = Number(ts);
-  return Number.isFinite(seconds) && seconds > 0 ? Math.trunc(seconds * 1000) : 0;
+  const raw = String(ts || "").trim();
+  if (!raw) return 0;
+  const seconds = Number(raw);
+  if (Number.isFinite(seconds) && seconds > 0) return Math.trunc(seconds * 1000);
+  const parsed = Date.parse(raw);
+  return Number.isFinite(parsed) ? parsed : 0;
 }
 
 // tool_progress payloads arrive as plain strings or objects ({message}).
