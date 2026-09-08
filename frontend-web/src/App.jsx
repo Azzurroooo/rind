@@ -71,7 +71,6 @@ export default function App() {
   const inspectorToggleRef = useRef(null);
   const composerRef = useRef(null);
   const conversationRef = useRef(null);
-  const bootstrappedRef = useRef(false);
   const catchUpRef = useRef(false);
   const initializingRef = useRef(false);
   const workspaceRef = useRef("");
@@ -282,13 +281,14 @@ export default function App() {
   }
 
   async function handleOpen() {
-    if (!bootstrappedRef.current) {
-      bootstrappedRef.current = true;
-      try {
-        await initializeRuntime();
-      } finally {
-        dispatchConnection({ type: "socket_open" });
-      }
+    try {
+      // EVERY connection owns a fresh per-connection dispatcher on the worker:
+      // without `initialize` it rejects every request with ServerNotReady
+      // ("Runtime worker is not initialized."). A reconnect is a NEW connection,
+      // so it must re-initialize exactly like the first open.
+      await initializeRuntime();
+    } finally {
+      dispatchConnection({ type: "socket_open" });
     }
     // Every open — first or reconnect — ends in the catch-up state machine, so
     // a page reload (tab closed while tasks ran) heals exactly like a network
@@ -304,7 +304,6 @@ export default function App() {
       const ticket = await fetchTicket(token);
       storeToken(token);
       storeTicket(ticket);
-      bootstrappedRef.current = false;
       dispatchConnection({ type: "submit_credentials" });
       await clientRef.current.connect();
     } catch (error) {
@@ -343,8 +342,26 @@ export default function App() {
       const serverCursor = Number(result?.cursor);
       dispatchConversation({ kind: "set_cursor", cursor: Number.isFinite(serverCursor) && serverCursor >= 0 ? serverCursor : cursor });
       void refreshSessions(workspaceRef.current || infoRef.current.workspace_root);
-    } catch {
-      // Both catch-up attempts failed; stay quiet — the next reconnect heals the gap.
+    } catch (error) {
+      if (String(error?.message || "").includes("not initialized")) {
+        // A flapping socket can deliver onOpen while the previous initialize is
+        // still in flight (initializingRef skipped it). Re-initialize once and
+        // retry instead of leaving the gap for the next reconnect.
+        await initializeRuntime();
+        try {
+          const retry = await requestCatchUp(sessionId, Math.max(0, Number(convRef.current.cursor) || 0));
+          const retryEvents = Array.isArray(retry?.events) ? retry.events : [];
+          dispatchConnection({ type: "sync_start", total: retryEvents.length });
+          await applyCatchUpEvents(retryEvents);
+          const retryCursor = Number(retry?.cursor);
+          if (Number.isFinite(retryCursor) && retryCursor >= 0) {
+            dispatchConversation({ kind: "set_cursor", cursor: retryCursor });
+          }
+        } catch {
+          // Still failing → stay quiet; the next reconnect heals the gap.
+        }
+      }
+      // Other failures stay quiet — the next reconnect heals the gap.
     } finally {
       dispatchConnection({ type: "sync_complete" });
       catchUpRef.current = false;
