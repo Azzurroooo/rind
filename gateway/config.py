@@ -30,6 +30,7 @@ _KNOWN_CHANNEL = frozenset({"token", "allow_from", "group_allow"})
 # WP7: slack / qq / feishu / dingtalk).
 # Every channel also accepts _KNOWN_CHANNEL; unknown keys still error (§2).
 _CHANNEL_KEYS: dict[str, frozenset[str]] = {
+    "telegram": frozenset({"proxy"}),
     "wecom": frozenset({"corp_id", "agent_id", "secret", "encoding_aes_key", "callback_host", "callback_port"}),
     "whatsapp": frozenset({"phone_number_id", "access_token", "verify_token", "webhook_host", "webhook_port"}),
     "email": frozenset(

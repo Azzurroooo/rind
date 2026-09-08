@@ -32,7 +32,7 @@ from ..config import ChannelConfig
 logger = logging.getLogger(__name__)
 
 CHANNEL_ID = "telegram"
-CONFIG_KEYS = frozenset({"token", "allow_from", "group_allow"})
+CONFIG_KEYS = frozenset({"token", "allow_from", "group_allow", "proxy"})
 
 CAPABILITIES = ChannelCapabilities(
     max_text_length=4000,
@@ -107,8 +107,12 @@ class TelegramChannel:
     id = CHANNEL_ID
     capabilities = CAPABILITIES
 
-    def __init__(self, token: str, uploads_root: Path) -> None:
+    def __init__(self, token: str, uploads_root: Path, proxy: str = "") -> None:
         self._token = token
+        # aiogram/aiohttp ignore system proxies by default; users behind a
+        # local proxy (Clash etc.) must name it explicitly or direct connects
+        # to api.telegram.org time out.
+        self._proxy = proxy.strip()
         self._uploads_root = Path(uploads_root)
         self._sink: Any = None
         self._bot: Any = None
@@ -122,7 +126,11 @@ class TelegramChannel:
         self._sink = sink
         aiogram = self._aiogram or _load_sdk()
         self._aiogram = aiogram
-        self._bot = aiogram.Bot(token=self._token)
+        if self._proxy:
+            session = aiogram.client.session.aiohttp.AiohttpSession(proxy=self._proxy)
+            self._bot = aiogram.Bot(token=self._token, session=session)
+        else:
+            self._bot = aiogram.Bot(token=self._token)
         await self._bot.delete_webhook(drop_pending_updates=True)
         self._poll_task = asyncio.get_running_loop().create_task(self._poll_loop(), name="telegram-poll")
 
@@ -372,7 +380,8 @@ def build_channel(config: ChannelConfig, uploads_root: Path) -> TelegramChannel:
     if not str(config.token or "").strip():
         raise ValueError("channel 'telegram' requires a non-empty token (channels.telegram.token)")
     _load_sdk()  # §1: ImportError here disables just this channel, one log line
-    return TelegramChannel(token=config.token.strip(), uploads_root=Path(uploads_root))
+    proxy = str(config.extra.get("proxy") or "").strip()
+    return TelegramChannel(token=config.token.strip(), uploads_root=Path(uploads_root), proxy=proxy)
 
 
 __all__ = ["CAPABILITIES", "CONFIG_KEYS", "CHANNEL_ID", "REACTION_EMOJI", "TelegramChannel", "build_channel"]

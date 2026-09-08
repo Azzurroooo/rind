@@ -108,7 +108,7 @@ CAPS_BY_CHANNEL = {
 }
 
 CONFIG_KEYS_BY_CHANNEL = {
-    "telegram": frozenset({"token", "allow_from", "group_allow"}),
+    "telegram": frozenset({"proxy", "token", "allow_from", "group_allow"}),
     "discord": frozenset({"token", "allow_from", "group_allow"}),
     "wecom": frozenset({"token", "allow_from", "group_allow", "corp_id", "agent_id", "secret",
                         "encoding_aes_key", "callback_host", "callback_port"}),

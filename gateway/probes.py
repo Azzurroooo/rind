@@ -23,17 +23,28 @@ class ProbeResult:
     detail: str
 
 
-def _get_json(url: str, headers: dict[str, str] | None = None) -> tuple[int, Any]:
+def _opener(proxy: str = "") -> urllib.request.OpenerDirector:
+    """Egress policy: use the configured proxy, otherwise connect DIRECT.
+
+    System proxies are deliberately bypassed — the gateway's HTTP clients do
+    not honor them either, so a probe that quietly used the OS proxy would
+    report a false pass while the real channel times out.
+    """
+    handler = urllib.request.ProxyHandler({"http": proxy, "https": proxy} if proxy else {})
+    return urllib.request.build_opener(handler)
+
+
+def _get_json(url: str, headers: dict[str, str] | None = None, proxy: str = "") -> tuple[int, Any]:
     request = urllib.request.Request(url, headers=headers or {})
-    with urllib.request.urlopen(request, timeout=PROBE_TIMEOUT) as response:
+    with _opener(proxy).open(request, timeout=PROBE_TIMEOUT) as response:
         return response.status, json.loads(response.read().decode("utf-8"))
 
 
-def _post_json(url: str, payload: dict[str, Any], headers: dict[str, str] | None = None) -> tuple[int, Any]:
+def _post_json(url: str, payload: dict[str, Any], headers: dict[str, str] | None = None, proxy: str = "") -> tuple[int, Any]:
     body = json.dumps(payload).encode("utf-8")
     merged = {"Content-Type": "application/json", **(headers or {})}
     request = urllib.request.Request(url, data=body, headers=merged)
-    with urllib.request.urlopen(request, timeout=PROBE_TIMEOUT) as response:
+    with _opener(proxy).open(request, timeout=PROBE_TIMEOUT) as response:
         return response.status, json.loads(response.read().decode("utf-8"))
 
 
@@ -49,8 +60,9 @@ def _fail(detail: str) -> ProbeResult:
 
 
 def _probe_telegram(a: dict[str, str]) -> ProbeResult:
+    proxy = a.get("proxy", "")
     try:
-        status, body = _get_json(f"https://api.telegram.org/bot{a['token']}/getMe")
+        status, body = _get_json(f"https://api.telegram.org/bot{a['token']}/getMe", proxy=proxy)
         if status == 200 and body.get("ok"):
             return _ok(f"bot @{body['result'].get('username', '?')}")
         return _fail(f"Telegram 返回 {status}：{str(body)[:120]}")

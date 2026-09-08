@@ -106,8 +106,12 @@ GUIDES: dict[str, ChannelGuide] = {
             "1) Telegram 里搜索 @BotFather → 发送 /newbot → 按提示起名（username 以 bot 结尾）",
             "2) 复制它回复的 token（形如 123456:AAE...，泄露即等于交出 bot）",
             "3) 想知道自己的数字 ID：给 @userinfobot 发任意消息",
+            "4) 国内网络：代理必须填在下方 proxy 字段（系统代理对网关不自动生效）",
         ),
-        fields=(FieldSpec("token", "Bot Token", secret=True),),
+        fields=(
+            FieldSpec("token", "Bot Token", secret=True),
+            FieldSpec("proxy", "代理地址（可选，如 http://127.0.0.1:7890）", required=False),
+        ),
         probe=_probe_telegram,
         sdk_module="aiogram",
         discover_senders=_discover_telegram,

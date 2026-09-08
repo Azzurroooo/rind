@@ -110,20 +110,22 @@ def test_collect_answers_env_reads_prefixed_variables_and_reports_missing():
 def test_telegram_probe_reports_bot_and_failure(monkeypatch):
     import gateway.probes as probes
 
-    def fake_get(url, headers=None):
-        assert "bottoken" in url
-        return 200, {"ok": True, "result": {"username": "my_rind_bot"}}
+    captured: dict = {}
 
-    monkeypatch.setattr(probes, "_get_json", fake_get)
-    result = onboarding.GUIDES["telegram"].probe({"token": "bottoken"})
-    assert result.ok and "my_rind_bot" in result.detail
-
-    def bad_get(url, headers=None):
+    def fake_get(url, headers=None, proxy=""):
+        captured["proxy"] = proxy
+        if "bottoken" in url:
+            return 200, {"ok": True, "result": {"username": "my_rind_bot"}}
         return 401, {"ok": False}
 
-    monkeypatch.setattr(probes, "_get_json", bad_get)
+    monkeypatch.setattr(probes, "_get_json", fake_get)
+    result = onboarding.GUIDES["telegram"].probe({"token": "bottoken", "proxy": "http://127.0.0.1:7890"})
+    assert result.ok and "my_rind_bot" in result.detail
+    assert captured["proxy"] == "http://127.0.0.1:7890", "探活必须与网关走同一出口"
+
     result = onboarding.GUIDES["telegram"].probe({"token": "bad"})
     assert not result.ok and "401" in result.detail
+    assert captured["proxy"] == "", "未配置代理时探活必须直连（与网关一致）"
 
 
 def test_feishu_probe_maps_platform_error_code(monkeypatch):
