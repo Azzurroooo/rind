@@ -333,3 +333,23 @@ def test_telegram_probe_timeout_suggests_proxy(monkeypatch):
     monkeypatch.setattr(probes, "_get_json", proxy_get)
     result = onboarding.GUIDES["telegram"].probe({"token": "t", "proxy": "http://127.0.0.1:7890"})
     assert result.ok
+
+
+def test_runtime_deps_installed_alongside_sdk(monkeypatch):
+    """telegram 声明的 aiohttp_socks 属于运行时依赖：缺失时会随 aiogram 一起自动装。"""
+    import gateway.doctor as doctor
+
+    calls: list[str] = []
+    monkeypatch.setattr(doctor, "sdk_missing", lambda module: module in {"aiogram", "aiohttp_socks"})
+    monkeypatch.setattr(
+        doctor, "ensure_sdk_installed",
+        lambda module, **kwargs: (calls.append(module), (True, f"ok {module}"))[1],
+    )
+
+    guides, _ = doctor.ensure_channel_sdks(
+        [onboarding.GUIDES["telegram"]], interactive=False,
+    )
+    assert guides, "依赖装好后渠道应保留"
+    assert sorted(set(calls)) == ["aiogram", "aiohttp_socks"]
+
+

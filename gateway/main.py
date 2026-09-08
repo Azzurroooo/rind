@@ -80,11 +80,12 @@ async def _run(config: GatewayConfig, runtime_dir: Path, pairing: PairingStore) 
             from .onboarding import guide_for
 
             guide = guide_for(channel_id)
-            if guide is not None and guide.sdk_module:
-                ok, detail = ensure_sdk_installed(guide.sdk_module)
-                logger.info("gateway: auto-install %s for channel %s: %s", guide.sdk_module, channel_id, detail)
-                if ok:
-                    channel = build_channel(channel_id, channel_config, uploads_root)
+            if guide is not None:
+                for module in [guide.sdk_module, *guide.runtime_deps]:
+                    if module:
+                        ok, detail = ensure_sdk_installed(module)
+                        logger.info("gateway: auto-install %s for channel %s: %s", module, channel_id, detail)
+                channel = build_channel(channel_id, channel_config, uploads_root)
         if channel is None:  # registry already logged why (unknown id / SDK / config)
             continue
         pump.register_channel(channel)

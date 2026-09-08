@@ -39,6 +39,7 @@ class ChannelGuide:
     discover_senders: Callable[[dict[str, str], float], list[str]] | None = None
     """Optional sender-id discovery (telegram getUpdates)."""
     sdk_module: str = ""  # importable name used by `gateway doctor` SDK checks
+    runtime_deps: tuple[str, ...] = ()  # 额外 pip 依赖（如代理场景的 aiohttp_socks），随 sdk_module 一起自动安装
 
 
 def _get_json(url: str, headers: dict[str, str] | None = None) -> tuple[int, Any]:
@@ -114,6 +115,7 @@ GUIDES: dict[str, ChannelGuide] = {
         ),
         probe=_probe_telegram,
         sdk_module="aiogram",
+        runtime_deps=("aiohttp_socks",),
         discover_senders=_discover_telegram,
     ),
     "discord": ChannelGuide(

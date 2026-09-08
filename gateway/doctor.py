@@ -102,18 +102,26 @@ def ensure_channel_sdks(guides, *, interactive: bool, confirm=None, echo=print):
         return guides, False
     kept = []
     for guide in guides:
-        if guide.sdk_module and sdk_missing(guide.sdk_module):
-            if interactive:
-                if not confirm(f"渠道 {guide.label} 需要 {guide.sdk_module}（当前未安装）。自动安装？"):
-                    echo(f"  已跳过 {guide.label}：缺 {guide.sdk_module} 的渠道不会写入配置。")
-                    continue
-            echo(f"  正在安装 {guide.sdk_module} …")
-            ok, detail = ensure_sdk_installed(guide.sdk_module)
+        needed = ([guide.sdk_module] if guide.sdk_module else []) + list(guide.runtime_deps)
+        missing = [module for module in needed if sdk_missing(module)]
+        if not missing:
+            kept.append(guide)
+            continue
+        if interactive:
+            names = ", ".join(missing)
+            if not confirm(f"渠道 {guide.label} 需要 {names}（当前未安装）。自动安装？"):
+                echo(f"  已跳过 {guide.label}：缺依赖的渠道不会写入配置。")
+                continue
+        installed_ok = True
+        for module in missing:
+            echo(f"  正在安装 {module} …")
+            ok, detail = ensure_sdk_installed(module)
             echo(f"  {'✔' if ok else '✘'} {detail}")
             if not ok:
-                echo(f"  已跳过 {guide.label}。手动安装：pip install {guide.sdk_module}")
-                continue
-        kept.append(guide)
+                echo(f"  已跳过 {guide.label}。手动安装：pip install {module}")
+                installed_ok = False
+        if installed_ok:
+            kept.append(guide)
     return kept, bool(kept)
 
 
