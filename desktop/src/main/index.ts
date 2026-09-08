@@ -11,6 +11,7 @@ import { listProjectFiles, previewProjectFile } from "./project-files"
 import { DesktopProjectStore, samePath } from "./projects"
 import { loadSettingsForWorkspace } from "./runtime-settings"
 import { readRindVersion } from "./version"
+import { wrapRuntimeIpcError } from "../shared/ipc-error"
 import {
   getRuntimeSnapshot,
   initializeRuntime,
@@ -172,12 +173,20 @@ function registerIpc() {
   })
   ipcMain.handle("runtime-initialize", () => initializeRuntime())
   ipcMain.handle("runtime-shutdown", () => shutdownRuntime())
-  ipcMain.handle("runtime-request", (_event, method: unknown, params: unknown) => {
+  ipcMain.handle("runtime-request", async (_event, method: unknown, params: unknown) => {
     if (typeof method !== "string" || !isRuntimeMethod(method)) {
       throw new Error("Runtime method is not available to the desktop client.")
     }
     const safeParams = params && typeof params === "object" ? params as Record<string, unknown> : {}
-    return requestRuntime(method, safeParams)
+    // Return worker errors as a wrapped envelope instead of rejecting: Electron
+    // prints a full stack for every rejected ipcMain.handle, which turned
+    // expected races (e.g. TurnNotActive after a turn finished) into alarming
+    // console noise. The preload bridge unwraps and re-throws for the renderer.
+    try {
+      return await requestRuntime(method, safeParams)
+    } catch (error) {
+      return wrapRuntimeIpcError(error)
+    }
   })
   ipcMain.handle("settings-get", (_event, workspace: unknown) => loadRuntimeSettings(typeof workspace === "string" ? workspace : ""))
   ipcMain.handle("app-version", () => appVersion())

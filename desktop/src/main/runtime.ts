@@ -82,6 +82,7 @@ function handleLine(source: ChildProcessWithoutNullStreams, line: string) {
       sessionId: message.session_id,
       turnId: message.turn_id,
       event: message.event,
+      generation: runtimeGeneration,
     })
     return
   }
@@ -115,11 +116,21 @@ function runtimeLaunch() {
   return { command: python, args: [join(repoRoot, "main.py")] }
 }
 
+let runtimeGeneration = 0
+
+/** Monotonic id of the current worker process generation: sequence numbers
+ *  reset to 1 on every (re)spawn, so clients must reset their watermark when
+ *  this changes. */
+export function runtimeGenerationId(): number {
+  return runtimeGeneration
+}
+
 export function startRuntime(workspace: string) {
   if (worker.snapshot.status === "stopping") throw new Error("Runtime is shutting down.")
   if (worker.child && !worker.child.killed && worker.child.exitCode === null) return worker.snapshot
   if (!workspace) throw new Error("Workspace is required to start the runtime worker.")
   setSnapshot({ status: "starting" })
+  runtimeGeneration += 1
   const launch = runtimeLaunch()
   const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "../../..")
   const python = process.env.RIND_PYTHON || (process.platform === "win32" ? "python" : "python3")

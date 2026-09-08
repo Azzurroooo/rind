@@ -2,6 +2,7 @@ import "./style.css"
 import brandMarkUrl from "./assets/brand-mark.svg"
 import workingMarkUrl from "./assets/working-mark.svg"
 import { PanelLeft, PanelRight, Settings, renderIcon } from "./icons"
+import { decideTurnEvent, isTurnNotActive } from "./turn-state"
 
 import {
   composerRegionMarkup,
@@ -418,6 +419,7 @@ let renderedProjectListStructureKey = ""
 let renderedRecentListStructureKey = ""
 let modelMenuRequestId = 0
 let lastRuntimeSequence = 0
+let runtimeEventGeneration = 0
 const replayRequests = new Map<string, Promise<void>>()
 let overviewVersion = 0
 let recentFlushPromise: Promise<void> | undefined
@@ -1822,6 +1824,29 @@ function runAction(action: () => Promise<unknown>, sessionId = "") {
   })
 }
 
+function cancelActiveTurn(sessionId: string) {
+  void (async () => {
+    try {
+      await request(runtimeMethods.sessionCancel, sessionId ? { session_id: sessionId } : {})
+    } catch (error) {
+      if (isTurnNotActive(error)) {
+        // The turn already ended worker-side: reconcile instead of surfacing a
+        // race as an error (matches the web surface's quiet stop).
+        delete state.activeTurnIds[sessionId]
+        delete state.pendingInputs[sessionId]
+        syncCurrentPendingInputs()
+        if (sessionId === state.viewedSessionId) render()
+        return
+      }
+      throw error
+    }
+  })().catch((error) => {
+    if (sessionId && state.viewedSessionId !== sessionId) return
+    state.notice = error instanceof Error ? error.message : String(error)
+    render()
+  })
+}
+
 async function loadSessions() {
   const version = ++overviewVersion
   const overview = await window.api.projects.get()
@@ -2023,6 +2048,17 @@ async function promoteFollowUp(inputId: string) {
       pending.splice(pending.indexOf(item), 1)
       pending.push(item)
     }
+  } catch (error) {
+    if (isTurnNotActive(error)) {
+      // The turn (and its queues) are gone — the worker discarded pending
+      // inputs on settle. Invalidate the dock instead of surfacing the race.
+      delete state.pendingInputs[sessionId]
+      syncCurrentPendingInputs()
+      state.notice = "回合已结束，排队输入已被丢弃。"
+      render()
+      return
+    }
+    throw error
   } finally {
     item.promoting = false
     syncCurrentPendingInputs()
@@ -2050,6 +2086,19 @@ async function recallPendingInput(inputId: string) {
     pending.splice(index, 1)
     if (!pending.length) delete state.pendingInputs[sessionId]
     setPrompt([input, prompt.value].filter((value) => value.trim()).join("\n\n"), true)
+  } catch (error) {
+    if (isTurnNotActive(error)) {
+      // The turn settled and the worker discarded its queues: the text lives
+      // only in our chip now — hand it back to the composer instead of erroring.
+      const index = pending.findIndex((candidate) => candidate.inputId === item.inputId)
+      if (index >= 0) pending.splice(index, 1)
+      if (pending.length === 0) delete state.pendingInputs[sessionId]
+      setPrompt([asRecordText(item.input), prompt.value].filter((value) => value.trim()).join("\n\n"), true)
+      state.notice = "回合已结束：排队输入已退回输入框。"
+      render()
+      return
+    }
+    throw error
   } finally {
     item.recalling = false
     syncCurrentPendingInputs()
@@ -2065,20 +2114,25 @@ function mergeSlashCommands(...groups: SlashCommand[][]) {
 }
 
 function handleRuntimeEvent(envelope: RuntimeEvent) {
+  // Sequence numbers restart at 1 with every worker process generation; adopt
+  // the new generation instead of dropping the whole generation as "already
+  // seen" (which poisoned turn state after a runtime restart).
+  if (envelope.generation !== undefined && envelope.generation !== runtimeEventGeneration) {
+    runtimeEventGeneration = envelope.generation
+    lastRuntimeSequence = 0
+  }
   if (envelope.sequence <= lastRuntimeSequence) return
   lastRuntimeSequence = envelope.sequence
   const sessionId = envelope.sessionId
   const eventSessionId = asRecordText(envelope.event.session_id)
   if (!sessionId || (eventSessionId && eventSessionId !== sessionId)) return
-  const activeTurnId = activeTurnIdFor(sessionId)
-  if (envelope.type === "turn_started") {
-    if (activeTurnId && envelope.turnId !== activeTurnId) return
-    state.activeTurnIds[sessionId] = envelope.turnId
-  } else if (!activeTurnId || envelope.turnId !== activeTurnId) {
-    return
-  }
+  // The worker is authoritative about turn generations: never drop terminals
+  // (they reconcile local state) and let a new turn_started supersede the
+  // remembered generation (goal continuation / post-restart turns).
+  const decision = decideTurnEvent(envelope.type, envelope.turnId, activeTurnIdFor(sessionId))
+  if (decision.adopt) state.activeTurnIds[sessionId] = envelope.turnId
   const turnStarted = envelope.type === "turn_started"
-  const turnSettled = envelope.type === "turn_completed" || envelope.type === "turn_failed" || envelope.type === "turn_cancelled"
+  const turnSettled = decision.settle
   if (turnStarted || turnSettled) {
     state.runtimeTurnPending[sessionId] = turnStarted
   }
@@ -2373,7 +2427,7 @@ const keyBindings: KeyBinding[] = [
       // Esc with nothing open: interrupt the active turn, else refocus the
       // composer ("stop" semantics, matching the web surface).
       if (runtimeTurnActive() && !state.settingsOpen) {
-        runAction(() => request(runtimeMethods.sessionCancel), state.viewedSessionId)
+        cancelActiveTurn(state.viewedSessionId)
         return
       }
       prompt.focus()
@@ -2460,14 +2514,29 @@ async function sendPrompt() {
   const sessionId = await ensureSession(projectPath, requestedSessionId, requestedModel)
   const active = sessionTurnActive(sessionId)
   if (active) {
-    const result = asRecord(await requestForSession(runtimeMethods.sessionFollowUp, sessionId, { input }))
-    addPendingInput(sessionId, input, result)
-    state.lastPrompts[sessionId] = input
-    state.attachments[projectPath] = []
-    renderAttachments()
-    syncCurrentPendingInputs()
-    render()
-    return
+    try {
+      const result = asRecord(await requestForSession(runtimeMethods.sessionFollowUp, sessionId, { input }))
+      addPendingInput(sessionId, input, result)
+      state.lastPrompts[sessionId] = input
+      state.attachments[projectPath] = []
+      renderAttachments()
+      syncCurrentPendingInputs()
+      render()
+      return
+    } catch (error) {
+      if (!isTurnNotActive(error)) {
+        state.notice = error instanceof Error ? error.message : String(error)
+        render()
+        return
+      }
+      // The turn ended worker-side while the user was typing (our terminal
+      // event was late/stale). Fall through to a fresh prompt — the message
+      // must never be lost to an outdated queue decision.
+      delete state.activeTurnIds[sessionId]
+      delete state.pendingInputs[sessionId]
+      syncCurrentPendingInputs()
+      if (state.viewedSessionId === sessionId) render()
+    }
   }
   setConversationFor(sessionId, addUserMessage(conversationFor(sessionId), promptValueWithAttachments))
   state.lastPrompts[sessionId] = promptValueWithAttachments
@@ -2631,7 +2700,7 @@ function asRecordText(value: unknown): string {
   return typeof value === "string" ? value.trim() : ""
 }
 
-interrupt.addEventListener("click", () => runAction(() => request(runtimeMethods.sessionCancel), state.viewedSessionId))
+interrupt.addEventListener("click", () => cancelActiveTurn(state.viewedSessionId))
 retry.addEventListener("click", () => runAction(async () => {
   const project = chatProject()
   if (!project?.available) return

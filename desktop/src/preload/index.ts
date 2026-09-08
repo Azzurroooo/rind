@@ -1,12 +1,20 @@
 import { contextBridge, ipcRenderer } from "electron"
 
+import { unwrapRuntimeIpcResult } from "../shared/ipc-error"
 import { runtimeMethods, type DesktopApi, type DesktopNotificationPayload, type DesktopPrefsPatch, type DesktopTheme, type RuntimeEvent, type RuntimeSnapshot } from "./types"
+
+// The main process returns worker errors as a wrapped envelope (never as a
+// rejected ipcMain.handle) — unwrap here so renderer call sites keep their
+// try/catch semantics with Error.name carrying the worker error type.
+function runtimeRequest(method: string, params: Record<string, unknown> = {}) {
+  return unwrapRuntimeIpcResult(ipcRenderer.invoke("runtime-request", method, params))
+}
 
 const api: DesktopApi = {
   runtime: {
     start: (workspace) => ipcRenderer.invoke("runtime-start", workspace),
     initialize: () => ipcRenderer.invoke("runtime-initialize"),
-    request: (method, params = {}) => ipcRenderer.invoke("runtime-request", method, params),
+    request: (method, params = {}) => runtimeRequest(method, params),
     shutdown: () => ipcRenderer.invoke("runtime-shutdown"),
     subscribe: (listener) => {
       const handler = (_event: Electron.IpcRendererEvent, snapshot: RuntimeSnapshot) => listener(snapshot)
@@ -25,25 +33,25 @@ const api: DesktopApi = {
   },
   models: {
     list: (workspace) => ipcRenderer.invoke("models-list", workspace),
-    setEffort: (sessionId, effort) => ipcRenderer.invoke("runtime-request", runtimeMethods.modelEffort, { session_id: sessionId, reasoning_effort: effort }),
+    setEffort: (sessionId, effort) => runtimeRequest(runtimeMethods.modelEffort, { session_id: sessionId, reasoning_effort: effort }),
   },
   sessions: {
-    remove: (sessionId) => ipcRenderer.invoke("runtime-request", runtimeMethods.sessionDelete, { session_id: sessionId }),
+    remove: (sessionId) => runtimeRequest(runtimeMethods.sessionDelete, { session_id: sessionId }),
   },
   workspaceFiles: {
-    list: (path = "") => ipcRenderer.invoke("runtime-request", runtimeMethods.fileList, { path }),
-    read: (path) => ipcRenderer.invoke("runtime-request", runtimeMethods.fileRead, { path }),
-    write: (path, contentBase64) => ipcRenderer.invoke("runtime-request", runtimeMethods.fileWrite, { path, content_base64: contentBase64 }),
+    list: (path = "") => runtimeRequest(runtimeMethods.fileList, { path }),
+    read: (path) => runtimeRequest(runtimeMethods.fileRead, { path }),
+    write: (path, contentBase64) => runtimeRequest(runtimeMethods.fileWrite, { path, content_base64: contentBase64 }),
   },
   background: {
-    list: (sessionId) => ipcRenderer.invoke("runtime-request", runtimeMethods.backgroundList, { session_id: sessionId }),
-    output: (sessionId, bgId, maxOutputChars = 20_000) => ipcRenderer.invoke("runtime-request", runtimeMethods.backgroundOutput, { session_id: sessionId, bg_id: bgId, max_output_chars: maxOutputChars }),
+    list: (sessionId) => runtimeRequest(runtimeMethods.backgroundList, { session_id: sessionId }),
+    output: (sessionId, bgId, maxOutputChars = 20_000) => runtimeRequest(runtimeMethods.backgroundOutput, { session_id: sessionId, bg_id: bgId, max_output_chars: maxOutputChars }),
   },
   goal: {
-    get: (sessionId) => ipcRenderer.invoke("runtime-request", runtimeMethods.goalGet, { session_id: sessionId }),
-    set: (sessionId, objective) => ipcRenderer.invoke("runtime-request", runtimeMethods.goalSet, { session_id: sessionId, objective }),
-    status: (sessionId, status) => ipcRenderer.invoke("runtime-request", runtimeMethods.goalStatus, { session_id: sessionId, status }),
-    clear: (sessionId) => ipcRenderer.invoke("runtime-request", runtimeMethods.goalClear, { session_id: sessionId }),
+    get: (sessionId) => runtimeRequest(runtimeMethods.goalGet, { session_id: sessionId }),
+    set: (sessionId, objective) => runtimeRequest(runtimeMethods.goalSet, { session_id: sessionId, objective }),
+    status: (sessionId, status) => runtimeRequest(runtimeMethods.goalStatus, { session_id: sessionId, status }),
+    clear: (sessionId) => runtimeRequest(runtimeMethods.goalClear, { session_id: sessionId }),
   },
   notifications: {
     show: (payload: DesktopNotificationPayload) => ipcRenderer.invoke("notify", payload),

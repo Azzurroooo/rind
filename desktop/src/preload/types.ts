@@ -12,6 +12,8 @@ export type RuntimeEvent = {
   sessionId: string
   turnId: string
   event: Record<string, unknown>
+  /** Id of the worker process generation: sequence numbers reset per spawn. */
+  generation?: number
 }
 
 export const runtimeProtocolVersion = "2"
