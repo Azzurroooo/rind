@@ -1707,6 +1707,8 @@ def test_project_durable_events_maps_raw_meta_shapes_and_failures():
         "type": "assistant_message_completed",
         "session_id": "s1",
         "turn_id": "turn-9",
+        "content": "calling",
+        "content_chars": len("calling"),
         "text": "calling",
     }
     assert events[3]["status"] == "error"

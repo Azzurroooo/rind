@@ -73,11 +73,16 @@ def _project_message(message: dict[str, Any], meta: dict[str, Any], record: dict
             if isinstance(call, dict) and call.get("id")
         ]
         if message.get("content"):
+            content = str(message.get("content") or "")
+            # Live events carry `content` (see AssistantMessageCompletedEvent);
+            # `text` stays as an alias so blueprint-era consumers keep working.
             events.append({
                 "type": "assistant_message_completed",
                 "session_id": session_id,
                 "turn_id": turn_id,
-                "text": str(message.get("content") or ""),
+                "content": content,
+                "content_chars": len(content),
+                "text": content,
             })
         return events
     if role == "tool":

@@ -229,6 +229,9 @@ export default function App() {
       // Browser notifications: only when the tab is hidden AND permission was
       // granted via the rail footer button (never a load-time prompt).
       showNotification({ title: "Rind 回复完成", body: truncateFirstLine(finalAssistantText(convRef.current)) });
+      // First turn of a brand-new session lands it in the session index —
+      // refresh the rail so the user actually sees their session.
+      void refreshSessions(workspaceRef.current || infoRef.current.workspace_root);
     }
     coalescer.push(message);
   }, [markUnread, coalescer]);
@@ -286,8 +289,10 @@ export default function App() {
       } finally {
         dispatchConnection({ type: "socket_open" });
       }
-      return;
     }
+    // Every open — first or reconnect — ends in the catch-up state machine, so
+    // a page reload (tab closed while tasks ran) heals exactly like a network
+    // blip instead of leaving the strip stuck or history stale.
     await runCatchUp();
   }
 
@@ -350,7 +355,12 @@ export default function App() {
     let lastError = null;
     for (let attempt = 0; attempt < attempts; attempt += 1) {
       try {
-        return await clientRef.current.request(methods.sessionReplay, { session_id: sessionId, after_cursor: cursor });
+        // Hard per-attempt bound: a replay request lost on a dying socket must
+        // never leave the connection strip stuck in "同步中…" forever.
+        return await Promise.race([
+          clientRef.current.request(methods.sessionReplay, { session_id: sessionId, after_cursor: cursor }),
+          new Promise((_, reject) => window.setTimeout(() => reject(new Error("catch-up timeout")), 10000)),
+        ]);
       } catch (error) {
         lastError = error;
         await new Promise((resolve) => window.setTimeout(resolve, 400));
@@ -477,6 +487,21 @@ export default function App() {
       }
       dispatchConversation({ kind: "history", messages: replay?.messages });
       dispatchConversation({ kind: "live_turn", liveTurn: replay?.live_turn || null, sessionId: target });
+      // Adopt the session's durable ordinal (an over-bound after_cursor returns
+      // {events: [], cursor: total}) so a post-reload catch-up resumes from the
+      // history instead of replaying it on top.
+      try {
+        const marked = await clientRef.current.request(
+          methods.sessionReplay,
+          { session_id: target, after_cursor: 1073741824 },
+        );
+        const adopted = Number(marked?.cursor);
+        if (Number.isFinite(adopted) && adopted >= 0) {
+          dispatchConversation({ kind: "set_cursor", cursor: adopted });
+        }
+      } catch {
+        // Cursor adoption is advisory; the next catch-up heals any gap.
+      }
       setGoal(switched?.goal || null);
       setStats(switched?.usage || {});
       clearUnread(target); // late events during the switch may have re-marked it
@@ -561,7 +586,12 @@ export default function App() {
       const mode = queueModeRef.current === "steering" ? "steering" : "follow_up";
       const method = mode === "steering" ? methods.sessionSteer : methods.sessionFollowUp;
       try {
-        const result = await clientRef.current.request(method, { session_id: infoRef.current.session_id, input: text });
+        // Steer is turn-scoped: the kernel rejects it without the active turn_id.
+        const result = await clientRef.current.request(method, {
+          session_id: infoRef.current.session_id,
+          input: text,
+          ...(mode === "steering" && convRef.current.activeTurnId ? { turn_id: convRef.current.activeTurnId } : {}),
+        });
         const inputId = String(result?.input_id || "").trim();
         if (inputId) {
           dispatchConversation({ kind: "queue_input", inputId, input: text, mode });
@@ -574,9 +604,26 @@ export default function App() {
       }
       return;
     }
+    // First-message auto-session: a brand-new workspace has no session yet —
+    // create one instead of failing the user's very first message.
+    let sessionId = sessionIdOf(infoRef.current);
+    if (!sessionId) {
+      const workspace = workspaceDraft.trim() || selectedWorkspace || info.workspace_root;
+      try {
+        const result = await clientRef.current.request(methods.sessionNew, { workspace_root: workspace });
+        sessionId = String(result?.session_id || "");
+        setSelectedWorkspace(workspace);
+        await refreshSessions(workspace);
+        await loadSession(sessionId, true);
+      } catch (error) {
+        restoreDraft(text);
+        dispatchMessage("system", `无法创建会话: ${error instanceof Error ? error.message : String(error)}`, "error");
+        return;
+      }
+    }
     dispatchMessage("user", text);
     try {
-      await clientRef.current.request(methods.sessionPrompt, { session_id: infoRef.current.session_id, input: text });
+      await clientRef.current.request(methods.sessionPrompt, { session_id: sessionId, input: text });
     } catch (error) {
       restoreDraft(text);
       dispatchMessage("system", `Prompt failed: ${error.message}`, "error");
