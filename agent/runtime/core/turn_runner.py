@@ -10,7 +10,8 @@ from collections.abc import Callable
 from typing import AsyncIterator
 
 from agent.application.context.compaction import CompactionService
-from agent.application.context.manager import ContextBuildResult, ContextManager
+from agent.application.context.manager import ContextBuildResult, ContextManager, context_stats_summary
+from agent.application.context.token_usage import accumulate_token_totals
 from agent.application.ports.chat_client import ChatClient
 from agent.application.ports.session_store import SessionStore
 from agent.runtime.core.stream_pump import ModelStreamResult, pump_model_stream_events
@@ -105,6 +106,12 @@ class TurnRunner:
 
         turn_started_at = time.perf_counter()
         original_hard_limit = self._snapshot_context_hard_limit()
+        turn_usage_totals: dict[str, int] = {}
+
+        async def record_sampling_usage(sampling_session: SessionStore, usage: dict) -> None:
+            accumulate_token_totals(turn_usage_totals, usage)
+            await self._persist_sampling_usage(sampling_session, usage)
+
         trace_setter = getattr(self._chat_client, "set_trace_session_id_provider", None)
         if callable(trace_setter) and not inspect.iscoroutinefunction(trace_setter):
             trace_setter(lambda: str(getattr(session, "session_id", "") or ""))
@@ -135,6 +142,7 @@ class TurnRunner:
                     allow_rescue=force_rescue_next_build,
                 )
                 force_rescue_next_build = False
+                await self._persist_context_stats(session, context.stats)
                 yield _context_built(context, session, turn_id)
                 if context.decisions.get("auto_compact_token_limit_reached"):
                     context = await self._run_compact(
@@ -148,6 +156,7 @@ class TurnRunner:
                         transient_system_messages=transient_system_messages,
                         cancellation_token=cancellation_token,
                     )
+                    await self._persist_context_stats(session, context.stats)
                     yield _context_built(context, session, turn_id)
 
                 boundary = validate_model_message_boundary(context.messages) if context.messages else None
@@ -180,7 +189,7 @@ class TurnRunner:
                                 turn_id=turn_id,
                                 cancellation_token=cancellation_token,
                                 context_stats=context.stats,
-                                persist_sampling_usage=self._persist_sampling_usage,
+                                persist_sampling_usage=record_sampling_usage,
                                 result=stream_result,
                             ):
                                 yield event
@@ -320,6 +329,7 @@ class TurnRunner:
                 **event_meta(session, turn_id),
                 duration_ms=int((time.perf_counter() - turn_started_at) * 1000),
                 image_fallback=image_fallback_used,
+                usage=dict(turn_usage_totals),
             )
 
         except asyncio.CancelledError as e:
@@ -511,6 +521,9 @@ class TurnRunner:
 
     async def _persist_sampling_usage(self, session: SessionStore, usage: dict) -> None:
         await self._best_effort(session.persist_sampling_usage, usage)
+
+    async def _persist_context_stats(self, session: SessionStore, stats: dict) -> None:
+        await self._best_effort(session.persist_context_stats, context_stats_summary(stats))
 
     def _next_steering(self, take_steering: Callable[[], tuple[str, str] | None] | None) -> tuple[str, str] | None:
         if take_steering is None:

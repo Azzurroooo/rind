@@ -73,6 +73,17 @@ class SessionFiles:
         except Timeout as e:
             raise RuntimeError(f"Session is currently in use by another process. Failed to acquire lock for: {path}") from e
 
+    def write_jsonl(self, path: str, items: list[dict]) -> None:
+        payload = "".join(json.dumps(item, ensure_ascii=False) + "\n" for item in items)
+        try:
+            with self._get_lock_for_path(path):
+                with open(path, "w", encoding="utf-8") as f:
+                    f.write(payload)
+                    f.flush()
+                    os.fsync(f.fileno())
+        except Timeout as e:
+            raise RuntimeError(f"Session is currently in use by another process. Failed to acquire lock for: {path}") from e
+
     def read_jsonl(self, path: str) -> list[dict]:
         if not os.path.exists(path):
             return []

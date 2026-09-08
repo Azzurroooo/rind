@@ -54,6 +54,23 @@ def normalize_sampling_usage(
     }
 
 
+TOKEN_TOTAL_KEYS = (
+    "input_tokens",
+    "cached_input_tokens",
+    "output_tokens",
+    "reasoning_output_tokens",
+    "total_tokens",
+)
+
+
+def accumulate_token_totals(totals: Any, usage: dict[str, Any]) -> dict[str, int]:
+    """Return session-lifetime totals with one sampling's usage merged in."""
+    prior = totals if isinstance(totals, dict) else {}
+    merged = {key: _non_negative_int(prior.get(key)) + _non_negative_int(usage.get(key)) for key in TOKEN_TOTAL_KEYS}
+    merged["samplings"] = _non_negative_int(prior.get("samplings")) + 1
+    return merged
+
+
 def positive_int(value: Any, default: int | None = None) -> int | None:
     """Parse a positive integer, returning `default` for invalid or non-positive values."""
     try:

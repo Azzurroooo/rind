@@ -12,6 +12,7 @@ from typing import Any
 from datetime import datetime, timezone
 
 from agent.application.ports.session_store import SessionStore
+from agent.application.context.token_usage import accumulate_token_totals
 from agent.infrastructure.persistence.session_files import SessionFiles
 from agent.infrastructure.persistence.message_repository import MessageRepository
 from agent.infrastructure.persistence.tool_call_repository import ToolCallRepository
@@ -445,6 +446,8 @@ class JsonlSessionStore(SessionStore):
             "model": self._model,
             "usage": copy.deepcopy(latest) if isinstance(latest, dict) else None,
             "assistant_usage": copy.deepcopy(assistant) if isinstance(assistant, dict) else None,
+            "token_totals": copy.deepcopy(meta.get("token_totals")) if isinstance(meta.get("token_totals"), dict) else None,
+            "context": copy.deepcopy(meta.get("latest_context_stats")) if isinstance(meta.get("latest_context_stats"), dict) else None,
             "goal": copy.deepcopy(meta.get("goal")) if isinstance(meta.get("goal"), dict) else None,
             "project_id": meta.get("project_id"),
             "owner_agent_id": meta.get("owner_agent_id"),
@@ -968,9 +971,30 @@ class JsonlSessionStore(SessionStore):
                 self._session_meta["latest_sampling_usage"] = latest
                 if latest.get("sampling_kind") == "assistant":
                     self._session_meta["latest_assistant_sampling_usage"] = dict(latest)
+                self._session_meta["token_totals"] = accumulate_token_totals(
+                    self._session_meta.get("token_totals"),
+                    latest,
+                )
                 self._persist_meta_sync(latest["updated_at"])
 
             await asyncio.to_thread(_persist)
+
+    async def persist_context_stats(self, stats: dict[str, Any]) -> None:
+        async with self._write_lock:
+            def _persist():
+                if not self._session_meta:
+                    return
+                self._session_meta["latest_context_stats"] = dict(stats or {})
+                self._persist_meta_sync()
+
+            await asyncio.to_thread(_persist)
+
+    async def get_latest_context_stats(self) -> dict[str, Any] | None:
+        def _get():
+            stats = self._session_meta.get("latest_context_stats") if isinstance(self._session_meta, dict) else None
+            return dict(stats) if isinstance(stats, dict) else None
+
+        return await asyncio.to_thread(_get)
 
     async def get_latest_sampling_usage(self) -> dict[str, Any] | None:
         return await asyncio.to_thread(self._latest_meta_usage, "latest_sampling_usage")
@@ -1109,3 +1133,65 @@ class JsonlSessionStore(SessionStore):
 
     async def get_latest_compaction(self) -> dict[str, Any] | None:
         return await asyncio.to_thread(self._latest_compaction_sync)
+
+    async def fork(self) -> dict[str, Any]:
+        """Copy this session's conversation into a new branched session."""
+        async with self._write_lock:
+            return await asyncio.to_thread(self._fork_sync)
+
+    def _fork_sync(self) -> dict[str, Any]:
+        if not self._session_meta or not self._session_paths or not self._msg_repo or not self._tool_repo or not self._compaction_repo:
+            raise RuntimeError("Send a message before forking this session.")
+        source_id = str(self._session_id)
+        source_meta = copy.deepcopy(self._session_meta)
+        now = self.now_iso()
+        fork_id = f"{datetime.now().strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:8]}"
+        paths = self._get_session_paths(fork_id)
+
+        messages = self._msg_repo.load_messages()
+        tool_calls = self._tool_repo.load_tool_calls()
+        compactions = self._compaction_repo.load_compactions()
+
+        os.makedirs(paths["base"], exist_ok=True)
+        self._files.write_jsonl(paths["messages"], messages)
+        self._files.write_jsonl(paths["tool_calls"], tool_calls)
+        self._files.write_jsonl(paths["compactions"], compactions)
+
+        fork_meta = {
+            key: value
+            for key, value in source_meta.items()
+            if key not in {"session_id", "parent_session_id", "created_at", "updated_at", "title", "message_count", "tool_call_count", "turn_state", "token_totals"}
+        }
+        fork_meta.update({
+            "session_id": fork_id,
+            "parent_session_id": source_id,
+            "created_at": now,
+            "updated_at": now,
+            "title": f"{source_meta.get('title', 'Untitled')} (fork)",
+            "message_count": len(messages),
+            "tool_call_count": len(tool_calls),
+        })
+        self._files.write_json(paths["meta"], fork_meta)
+
+        if self._has_user_message and self._index_repo:
+            self._index_repo.update_index({
+                "id": fork_id,
+                "title": fork_meta["title"],
+                "updated_at": now,
+                "size": {"messages": len(messages), "tool_calls": len(tool_calls)},
+                "preview": self._last_preview,
+                "workspace_root": fork_meta.get("workspace_root"),
+                "project_id": fork_meta.get("project_id"),
+                "owner_agent_id": fork_meta.get("owner_agent_id"),
+                "session_type": fork_meta.get("session_type"),
+                "parent_session_id": source_id,
+                "has_user_message": True,
+            })
+        return {
+            "session_id": fork_id,
+            "parent_session_id": source_id,
+            "model": fork_meta.get("model"),
+            "workspace_root": fork_meta.get("workspace_root"),
+            "message_count": len(messages),
+            "tool_call_count": len(tool_calls),
+        }

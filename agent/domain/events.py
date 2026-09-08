@@ -212,6 +212,7 @@ class TurnCompletedEvent(RuntimeEvent):
     type: Literal["turn_completed"] = "turn_completed"
     duration_ms: int = 0
     image_fallback: bool = False
+    usage: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(slots=True)

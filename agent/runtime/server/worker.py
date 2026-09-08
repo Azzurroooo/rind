@@ -156,6 +156,8 @@ class SessionRepository:
             "turn_state": meta.get("turn_state") if isinstance(meta.get("turn_state"), dict) else None,
             "goal": meta.get("goal") if isinstance(meta.get("goal"), dict) else None,
             "usage": meta.get("latest_sampling_usage") if isinstance(meta.get("latest_sampling_usage"), dict) else None,
+            "token_totals": meta.get("token_totals") if isinstance(meta.get("token_totals"), dict) else None,
+            "context": meta.get("latest_context_stats") if isinstance(meta.get("latest_context_stats"), dict) else None,
             "message_count": int(meta.get("message_count") or 0),
         }
 
@@ -234,6 +236,10 @@ class SessionRepository:
         )
         await store.initialize(persist_system_prompt=persist_system_prompt)
         return store
+
+    async def fork(self, session_id: str) -> dict[str, Any]:
+        store = await self.open_store(session_id, persist_system_prompt=False)
+        return await store.fork()
 
     async def get_goal(self, session_id: str) -> dict[str, str] | None:
         store = await self.open_store(session_id, persist_system_prompt=False)
@@ -885,6 +891,10 @@ class RuntimeWorker:
     async def delete_session(self, session_id: str) -> dict[str, Any]:
         clean = validate_session_id(session_id)
         return await self.repository.delete(clean)
+
+    async def fork_session(self, session_id: str) -> dict[str, Any]:
+        clean = validate_session_id(session_id)
+        return await self.repository.fork(clean)
 
     async def close(self) -> None:
         await self.execution.close()

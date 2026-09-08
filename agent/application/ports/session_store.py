@@ -143,6 +143,14 @@ class SessionStore(Protocol):
         """Get the latest ordinary assistant sampling usage sample."""
         ...
 
+    async def persist_context_stats(self, stats: dict[str, Any]) -> None:
+        """Persist a summary of the latest model-facing context assembly."""
+        ...
+
+    async def get_latest_context_stats(self) -> dict[str, Any] | None:
+        """Get the latest persisted context assembly summary."""
+        ...
+
     async def persist_turn_state(
         self,
         turn_id: str,

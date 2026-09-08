@@ -1116,6 +1116,9 @@ class WorkerStdioRuntimeServer:
             if method in {RuntimeMethod.FILE_LIST, RuntimeMethod.FILE_READ, RuntimeMethod.FILE_WRITE}:
                 await self._file_request(request)
                 return
+            if method == RuntimeMethod.RIND_SESSION_FORK:
+                await self._fork_session(request)
+                return
             if method in SESSION_SCOPED_METHODS:
                 session_id = await self._required_session_id(request)
                 if session_id is None:
@@ -1155,6 +1158,9 @@ class WorkerStdioRuntimeServer:
             "resume_preview": "" if info.get("message_count", 0) <= 1 else await self._resume_preview(info["session_id"]),
             "turn_state": info.get("turn_state"),
             "live_turn": info.get("live_turn"),
+            "usage": info.get("usage"),
+            "token_totals": info.get("token_totals"),
+            "context": info.get("context"),
             "commands": self._slash_command_infos(),
         }
         if self._goal_enabled:
@@ -1222,6 +1228,20 @@ class WorkerStdioRuntimeServer:
         finally:
             if owns_execution:
                 await self._worker.release_execution(session_id)
+
+    async def _fork_session(self, request: dict[str, Any]) -> None:
+        session_id = await self._required_session_id(request)
+        if session_id is None:
+            return
+        container = self._worker.execution.active_container(session_id)
+        if container is not None and container.runtime.turn_active:
+            await self._respond_error(request, "Cannot fork while a turn is active.", "TurnActive")
+            return
+        result = await self._worker.fork_session(session_id)
+        forked_id = str(result.get("session_id") or "")
+        if forked_id:
+            self._subscribed.add(forked_id)
+        await self._respond(request, result)
 
     async def _handle_active_control(self, session_id: str, request: dict[str, Any]) -> None:
         method = request.get("method")

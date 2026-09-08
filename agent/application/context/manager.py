@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from dataclasses import dataclass, field
+from typing import Any
 
 from agent.domain.skills import render_available_skills
 from agent.domain.errors import PersistenceError
@@ -32,6 +33,25 @@ class ContextBuildResult:
     messages: list[dict]
     stats: dict = field(default_factory=dict)
     decisions: dict = field(default_factory=dict)
+
+
+CONTEXT_SUMMARY_KEYS = (
+    "message_count",
+    "estimated_input_tokens",
+    "system_tokens",
+    "conversation_tokens",
+    "tool_tokens",
+    "context_window_tokens",
+    "context_usage_percent",
+    "auto_compact_token_limit",
+    "auto_compact_active_tokens",
+    "auto_compact_token_source",
+)
+
+
+def context_stats_summary(stats: dict[str, Any]) -> dict[str, Any]:
+    """Project the display-facing context stats that survive restarts."""
+    return {key: stats[key] for key in CONTEXT_SUMMARY_KEYS if key in stats}
 
 
 class ContextManager:

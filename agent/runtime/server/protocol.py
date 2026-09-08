@@ -55,6 +55,7 @@ class RuntimeMethod:
     RIND_SESSION_UNSTEER = "rind/session/unsteer"
     RIND_SESSION_DEQUEUE_FOLLOW_UP = "rind/session/dequeue_follow_up"
     RIND_SESSION_COMPACT = "rind/session/compact"
+    RIND_SESSION_FORK = "rind/session/fork"
     RIND_COMMAND_EXECUTE = "rind/command/execute"
     RIND_USER_QUESTION_RESPOND = "rind/user-question/respond"
     RIND_BACKGROUND_LIST = "rind/background/list"
@@ -82,6 +83,7 @@ SESSION_SCOPED_METHODS = frozenset(
         RuntimeMethod.RIND_SESSION_UNSTEER,
         RuntimeMethod.RIND_SESSION_DEQUEUE_FOLLOW_UP,
         RuntimeMethod.RIND_SESSION_COMPACT,
+        RuntimeMethod.RIND_SESSION_FORK,
         RuntimeMethod.RIND_COMMAND_EXECUTE,
         RuntimeMethod.RIND_USER_QUESTION_RESPOND,
         RuntimeMethod.RIND_BACKGROUND_LIST,
@@ -126,6 +128,7 @@ CORE_METHODS = (
     RuntimeMethod.RIND_SESSION_UNSTEER,
     RuntimeMethod.RIND_SESSION_DEQUEUE_FOLLOW_UP,
     RuntimeMethod.RIND_SESSION_COMPACT,
+    RuntimeMethod.RIND_SESSION_FORK,
     RuntimeMethod.RIND_COMMAND_EXECUTE,
     RuntimeMethod.RIND_USER_QUESTION_RESPOND,
 )
