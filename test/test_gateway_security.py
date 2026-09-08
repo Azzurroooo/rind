@@ -112,7 +112,7 @@ def test_dm_pairing_approved_sender_allows(tmp_path):
     clock = _FakeClock()
     gate = _gate(tmp_path, clock)
     code = gate._pairing.ensure_pending("telegram", "stranger", 3600.0)
-    assert gate._pairing.approve(code) is True
+    assert gate._pairing.approve(code) is not None
     assert gate.admit(_message(sender_id="stranger")).allow is True
 
 
@@ -173,7 +173,7 @@ def test_pending_cap_is_three(tmp_path):
     assert all(codes)
     assert store.ensure_pending("telegram", "one-more", 3600.0) is None
     # approving frees a slot
-    assert store.approve(codes[0]) is True
+    assert store.approve(codes[0]) is not None
     assert store.ensure_pending("telegram", "one-more", 3600.0) is not None
 
 
@@ -182,7 +182,7 @@ def test_pending_ttl_expires_and_is_purged(tmp_path):
     store = PairingStore(tmp_path / "pairing.json", now=clock)
     first = store.ensure_pending("telegram", "s", 60.0)
     clock.advance(61)
-    assert store.approve(first) is False  # expired entries are dropped
+    assert store.approve(first) is None  # expired entries are dropped
     second = store.ensure_pending("telegram", "s", 60.0)
     assert second != first
 
@@ -191,7 +191,7 @@ def test_pairing_store_persists_across_instances(tmp_path):
     store = PairingStore(tmp_path / "pairing.json")
     code = store.ensure_pending("telegram", "s", 3600.0)
     reloaded = PairingStore(tmp_path / "pairing.json")
-    assert reloaded.approve(code) is True
+    assert reloaded.approve(code) is not None
     assert reloaded.is_approved("telegram", "s") is True
     assert PairingStore(tmp_path / "pairing.json").is_approved("telegram", "s") is True
 

@@ -346,6 +346,8 @@ def _build_cooldown(raw: Any) -> int:
 
 
 def _build_channels(raw: Mapping[str, Any]) -> dict[str, ChannelConfig]:
+    if not isinstance(raw, Mapping):
+        raise ConfigError("gateway config: channels must be a mapping (omit the key entirely when empty)")
     channels: dict[str, ChannelConfig] = {}
     for channel_id, block in raw.items():
         if not isinstance(block, Mapping):

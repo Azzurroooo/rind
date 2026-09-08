@@ -14,6 +14,7 @@ from pathlib import Path
 from .config import ConfigError, load_config
 from .onboarding import GUIDES
 from .probes import worker_alive
+from .security import APPROVE_COMMAND
 
 
 def _load_json(path: Path) -> Any:
@@ -21,6 +22,54 @@ def _load_json(path: Path) -> Any:
         return json.loads(path.read_text(encoding="utf-8"))
     except Exception:  # noqa: BLE001 - status never crashes on a bad file
         return None
+
+
+def channel_label(channel_id: str) -> str:
+    guide = GUIDES.get(channel_id)
+    return f"{guide.emoji} {guide.label}" if guide else channel_id
+
+
+def pending_lines(entries: Any) -> list[str]:
+    """One line per pending pairing request: code, identity, minutes to expiry."""
+    import time
+
+    now = time.time()
+    lines: list[str] = []
+    for code, entry in (entries or {}).items():
+        if not isinstance(entry, dict):
+            continue
+        minutes = max(0, int((float(entry.get("expires", 0.0)) - now) // 60))
+        lines.append(f"  {code}  {entry.get('channel', '?')} · {entry.get('sender_id', '?')}（{minutes} 分钟后过期）")
+    return lines
+
+
+def startup_panel(worker: str, channels: list[tuple[str, bool]], pairing_enabled: bool) -> str:
+    """The one screen a running gateway prints once ready ("我起来了吗？"不用猜).
+
+    Failed channels stay visible with the single repair path (`gateway doctor`)
+    instead of hiding in log lines.
+    """
+    worker_line = "已连接（stdio 自起子进程）" if worker == "stdio" else f"已连接（{worker}）"
+    channel_line = "   ".join(
+        f"{channel_label(channel_id)} {'✔' if started else '✘'}" for channel_id, started in channels
+    )
+    pairing_line = (
+        "已开启——陌生账号发消息会收到 6 位配对码"
+        if pairing_enabled
+        else "已关闭——仅 allow_from / group_allow 名单内的账号可用"
+    )
+    lines = [
+        "━━━ Rind 网关已就绪 ━━━",
+        f"  worker   {worker_line}",
+        f"  渠道     {channel_line}",
+        f"  配对     {pairing_line}",
+        f"  批准     {APPROVE_COMMAND.format(code='<配对码>')}（不带码 = 查看待批列表）",
+    ]
+    failed = [channel_id for channel_id, started in channels if not started]
+    if failed:
+        lines.append(f"  修复     python main.py gateway doctor（{'、'.join(channel_label(c) for c in failed)} 未就绪）")
+    lines.append("按 Ctrl+C 停止网关。")
+    return "\n".join(lines)
 
 
 def run_status(args) -> int:
@@ -50,18 +99,15 @@ def run_status(args) -> int:
     pending = pairing.get("pending") or {}
     approved = pairing.get("approved") or []
     print(f"  配对：{len(pending)} 个待批准，{len(approved)} 个已批准")
-    for code, entry in list(pending.items())[:5]:
-        if isinstance(entry, dict):
-            print(f"    · {code}（{entry.get('channel', '?')} · {entry.get('sender_id', '?')}）")
+    for line in pending_lines(pending):
+        print(line)
     if pending:
-        print("    批准：python main.py gateway approve <配对码>")
+        print(f"    批准：{APPROVE_COMMAND.format(code='<配对码>')}（不带码 = 查看待批列表）")
 
     for channel_id, channel in config.channels.items():
-        guide = GUIDES.get(channel_id)
-        label = guide.label if guide else channel_id
         allow = len(channel.allow_from)
         groups = len(channel.group_allow)
-        print(f"  渠道 {label}：allow_from {allow} 条 · group_allow {groups} 条")
+        print(f"  渠道 {channel_label(channel_id)}：allow_from {allow} 条 · group_allow {groups} 条")
 
     if config.worker == "stdio":
         print("  worker：stdio 模式——worker 由网关进程自起，随网关同生共死")

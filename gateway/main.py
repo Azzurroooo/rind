@@ -28,8 +28,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--config", default=None, help="gateway.yaml path (default <workspace>/.rind/gateway.yaml)")
     parser.add_argument("--workspace", default=".", help="Workspace root used for config/state lookup")
     subparsers = parser.add_subparsers(dest="command")
-    approve = subparsers.add_parser("approve", help="Approve a pending pairing code")
-    approve.add_argument("code", help="The 6-character pairing code shown to the sender")
+    approve = subparsers.add_parser("approve", help="批准配对码；不带码则列出全部待批请求")
+    approve.add_argument("code", nargs="?", default="", help="6 位配对码（陌生发送者收到的卡片上）")
     init = subparsers.add_parser("init", help="交互式创建 gateway.yaml（分渠道引导 + 实时凭证验证 + 自动抓取账号 ID）")
     init.add_argument("--channel", default="", help="逗号分隔的渠道 id（如 telegram,email；跳过选择菜单）")
     init.add_argument("--yes", action="store_true", help="非交互一键模式：字段全部来自 RIND_GW_<渠道>_<字段> 环境变量")
@@ -71,6 +71,7 @@ async def _run(config: GatewayConfig, runtime_dir: Path, pairing: PairingStore) 
         except WorkerError as exc:
             logger.warning("gateway: resubscribe of %s failed: %s", key, exc)
     uploads_root = Path(config.workspace) / config.uploads_dir
+    outcomes: list[tuple[str, bool]] = []
     for channel_id, channel_config in config.channels.items():
         channel = build_channel(channel_id, channel_config, uploads_root)
         if channel is None and config.auto_install_sdk:
@@ -87,6 +88,7 @@ async def _run(config: GatewayConfig, runtime_dir: Path, pairing: PairingStore) 
                         logger.info("gateway: auto-install %s for channel %s: %s", module, channel_id, detail)
                 channel = build_channel(channel_id, channel_config, uploads_root)
         if channel is None:  # registry already logged why (unknown id / SDK / config)
+            outcomes.append((channel_id, False))
             continue
         pump.register_channel(channel)
         try:
@@ -95,7 +97,13 @@ async def _run(config: GatewayConfig, runtime_dir: Path, pairing: PairingStore) 
             await channel.start(pump)
         except Exception as exc:  # §1: one failing channel never stops the process
             logger.warning("gateway: channel %s failed to start; disabled: %s", channel_id, exc)
+            outcomes.append((channel_id, False))
+            continue
+        outcomes.append((channel_id, True))
     scan = asyncio.create_task(pump.run(), name="gateway-scan")
+    from .status import startup_panel
+
+    print(startup_panel(config.worker, outcomes, config.pairing.enabled), flush=True)
     try:
         await scan
     finally:
@@ -128,12 +136,24 @@ def main(argv: list[str] | None = None) -> int:
     # Approving a pairing code only needs pairing.json — never require (or
     # even read) gateway.yaml, so approval works on a machine without config.
     if args.command == "approve":
+        from .status import channel_label, pending_lines
+
         pairing = PairingStore(workspace / ".rind" / "pairing.json")
-        if pairing.approve(args.code):
-            print(f"已批准配对：{args.code.strip().upper()}")
+        code = args.code.strip()
+        entry = pairing.approve(code) if code else None
+        if entry is not None:
+            channel = str(entry.get("channel") or "")
+            print(f"已批准 {channel_label(channel)} · {entry.get('sender_id', '?')}——现在可以直接给 bot 发消息了。")
             return 0
-        print(f"配对码无效或已过期：{args.code}", file=sys.stderr)
-        return 1
+        pending = pending_lines(pairing.pending)
+        if pending:
+            print("待批准的配对请求：")
+            for line in pending:
+                print(line)
+            print("批准：python main.py gateway approve <上面的配对码>")
+        else:
+            print("没有待批准的配对请求。等有人给 bot 发消息后，这里会出现配对码。")
+        return 0 if not code else 1
 
     try:
         config = load_config(resolve_config_path(args.config, workspace))

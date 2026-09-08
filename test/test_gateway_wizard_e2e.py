@@ -71,7 +71,7 @@ def test_full_interactive_wizard_writes_working_config(tmp_path):
         ["status", "--config", str(config_path), "--workspace", str(workspace)],
     )
     _assert_no_traceback(status)
-    assert "会话映射" in status.stdout and "渠道 Email" in status.stdout and "渠道 Telegram" in status.stdout
+    assert "会话映射" in status.stdout and "渠道 📧 Email" in status.stdout and "渠道 ✈️ Telegram" in status.stdout
 
     doctor = _run_gateway(
         ["doctor", "--config", str(config_path), "--workspace", str(workspace)],
@@ -180,8 +180,42 @@ def test_approve_subcommand_end_to_end(tmp_path):
     )
     _assert_no_traceback(result)
     assert result.returncode == 0, f"stderr: {result.stderr[-400:]}"
+    assert "已批准" in result.stdout and "Telegram · 987654" in result.stdout
     pairing = json.loads((runtime_dir / "pairing.json").read_text(encoding="utf-8"))
     assert ["telegram", "987654"] in pairing.get("approved", [])
 
     again = _run_gateway(["--workspace", str(tmp_path), "approve", code])
     assert again.returncode == 1, "同一配对码不应能批准两次"
+
+
+def test_approve_without_code_lists_pending_requests(tmp_path):
+    from gateway.security import PairingStore
+
+    runtime_dir = tmp_path / ".rind"
+    runtime_dir.mkdir(parents=True)
+    store = PairingStore(runtime_dir / "pairing.json")
+    code = store.ensure_pending("telegram", "987654", 3600.0)
+
+    listed = _run_gateway(["--workspace", str(tmp_path), "approve"])
+    _assert_no_traceback(listed)
+    assert listed.returncode == 0
+    assert code in listed.stdout and "987654" in listed.stdout
+    assert "gateway approve" in listed.stdout  # 列表自带批准命令
+
+    empty = _run_gateway(["--workspace", str(tmp_path / "fresh"), "approve"])
+    assert "没有待批准" in empty.stdout and empty.returncode == 0
+
+
+def test_status_reports_stdio_worker_as_healthy(tmp_path):
+    workspace = tmp_path / "ws"
+    workspace.mkdir()
+    (workspace / ".rind").mkdir()
+    (workspace / ".rind" / "gateway.yaml").write_text(
+        "worker: stdio\n"
+        f"workspace: '{str(workspace)}'\n",
+        encoding="utf-8",
+    )
+    result = _run_gateway(["status", "--workspace", str(workspace)])
+    _assert_no_traceback(result)
+    assert result.returncode == 0, f"stdio 不应误报 worker 离线：{result.stdout[-400:]}"
+    assert "stdio" in result.stdout

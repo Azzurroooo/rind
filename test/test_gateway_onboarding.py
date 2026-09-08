@@ -277,6 +277,27 @@ def test_status_counts_sessions_and_pairing(tmp_path, monkeypatch):
     assert run_status(args) == 1  # worker 不在线 → 退出码 1，但文件统计仍然输出
 
 
+# --- 启动就绪面板：网关起来后用户看到的那一屏 -------------------------------------
+
+
+def test_startup_panel_shows_channels_pairing_and_approve_path():
+    from gateway.status import startup_panel
+
+    panel = startup_panel("stdio", [("telegram", True), ("discord", False)], pairing_enabled=True)
+    assert "stdio 自起子进程" in panel
+    assert "✈️ Telegram ✔" in panel and "🎮 Discord ✘" in panel
+    assert "gateway doctor" in panel  # 失败渠道给出唯一修复入口
+    assert "gateway approve <配对码>" in panel
+    assert "按 Ctrl+C 停止网关" in panel
+
+
+def test_startup_panel_reflects_closed_pairing():
+    from gateway.status import startup_panel
+
+    panel = startup_panel("ws://127.0.0.1:8765", [("email", True)], pairing_enabled=False)
+    assert "已关闭" in panel and "allow_from" in panel
+
+
 # --- SDK 自动安装与工作区防护（用户体验包装的机器可测部分）-----------------------
 
 

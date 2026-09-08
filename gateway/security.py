@@ -95,7 +95,7 @@ class PairingStore:
     def is_approved(self, channel: str, sender_id: str) -> bool:
         return [channel, sender_id] in self.approved
 
-    def _purge_expired(self) -> None:
+    def purge_expired(self) -> None:
         now = self._now()
         self.pending = {
             code: entry
@@ -109,7 +109,7 @@ class PairingStore:
         Purges expired entries first; when the pending cap is reached for a
         brand-new sender, returns ``None``.
         """
-        self._purge_expired()
+        self.purge_expired()
         for code, entry in self.pending.items():
             if entry.get("channel") == channel and entry.get("sender_id") == sender_id:
                 return str(code)
@@ -120,16 +120,17 @@ class PairingStore:
         self.save()
         return code
 
-    def approve(self, code: str) -> bool:
-        self._purge_expired()  # expired codes are dropped, never approvable
+    def approve(self, code: str) -> dict[str, object] | None:
+        """Approve one pending code; returns its {channel, sender_id} entry."""
+        self.purge_expired()  # expired codes are dropped, never approvable
         entry = self.pending.pop(code.strip().upper(), None)
         if entry is None:
-            return False
+            return None
         pair = [str(entry.get("channel") or ""), str(entry.get("sender_id") or "")]
         if pair not in self.approved:
             self.approved.append(pair)
         self.save()
-        return True
+        return entry
 
     def _generate_code(self) -> str:
         return "".join(secrets.choice(CODE_ALPHABET) for _ in range(CODE_LENGTH))
