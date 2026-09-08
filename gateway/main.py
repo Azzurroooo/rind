@@ -22,6 +22,8 @@ from .worker_client import WorkerClient, WorkerError
 
 logger = logging.getLogger(__name__)
 
+STARTING_NOTICE = "Rind 网关启动中……（worker 就绪与渠道连接可能需要几十秒）"
+
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="gateway", description="Rind unified message gateway")
@@ -183,6 +185,7 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     runtime_dir = Path(config.workspace) / ".rind"
     pairing = PairingStore(runtime_dir / "pairing.json")
+    print(STARTING_NOTICE, flush=True)
     try:
         return asyncio.run(_run(config, runtime_dir, pairing))
     except KeyboardInterrupt:
