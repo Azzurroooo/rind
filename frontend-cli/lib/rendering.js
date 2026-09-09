@@ -1,4 +1,4 @@
-import { clipCells, graphemes, middleClipCells, textWidth, wrapTextCells } from "./text-width.js";
+import { clipCells, graphemes, middleClipCells, stripAnsi, textWidth, wrapTextCells } from "./text-width.js";
 import { formatDuration } from "./tool-display.js";
 import { paint, flavorSwatch } from "./theme.js";
 import { homedir } from "node:os";
@@ -6,6 +6,358 @@ import { homedir } from "node:os";
 const MAX_STARTUP_BANNER_WIDTH = 80;
 const MAX_COMPOSER_WIDTH = 78;
 const MAX_FILE_CHANGE_LINES = 20;
+const BOARD_MIN_WIDTH = 60;
+const BOARD_MAX_WIDTH = 100;
+const BOARD_PALETTE_ROLES = ["accent", "success", "warning", "danger", "notice", "path", "code", "fence"];
+const BOARD_SECTION_SHORT_LABELS = {
+  chat_user: "user",
+  chat_assistant: "chat",
+  reasoning: "reasoning",
+  system_prompt: "system",
+  skill_catalog: "skills",
+  rind_docs: "RIND",
+  rind_docs_user: "RIND",
+  rind_docs_project: "RIND",
+  compaction_handoff: "compact",
+  goal_policy: "goal",
+  delegate: "delegate",
+  team_agent_catalog: "team",
+  "tool:other": "other",
+};
+
+export function boardWidth(width) {
+  const columns = Number(width ?? process.stdout.columns);
+  if (!Number.isFinite(columns) || columns <= 0) {
+    return BOARD_MAX_WIDTH;
+  }
+  return Math.max(BOARD_MIN_WIDTH, Math.min(BOARD_MAX_WIDTH, Math.floor(columns)));
+}
+
+export function occupancyTone(percent) {
+  const value = Number(percent);
+  if (!Number.isFinite(value)) {
+    return "neutral";
+  }
+  if (value > 0.85) {
+    return "err";
+  }
+  if (value >= 0.6) {
+    return "warn";
+  }
+  return "neutral";
+}
+
+const BOARD_FOOTER = "Tab switch page · Esc exit";
+
+export function contextBoardText(page = {}, width) {
+  const frameWidth = boardWidth(width);
+  const breakdown = isBoardRecord(page.breakdown) ? page.breakdown : null;
+  const usage = isBoardRecord(page.latest_usage) ? page.latest_usage : null;
+  const plain = page.plain === true;
+  const title = "Context · last sampling";
+  if (!breakdown || !Array.isArray(breakdown.sections) || !breakdown.sections.length) {
+    return boardPanel({
+      title,
+      lines: boardEmptyLines(frameWidth, "No context sampled yet"),
+      footer: BOARD_FOOTER,
+      page,
+      frameWidth,
+      plain,
+    });
+  }
+  const windowTokens = boardNumber(breakdown.context_window_tokens);
+  const estimated = boardNumber(breakdown.estimated_total);
+  const measured = Math.max(0, boardNumber(usage?.input_tokens));
+  const usedPercent = windowTokens > 0 ? estimated / windowTokens : 0;
+  const lines = contextMetaLines(windowTokens, usedPercent, measured, estimated, frameWidth - 4);
+  const innerWidth = frameWidth - 4;
+  if (windowTokens > 0) {
+    lines.push(stackedShareBar(breakdown.sections, windowTokens, innerWidth));
+    lines.push(barUnderline(breakdown.sections, windowTokens, innerWidth));
+  }
+  lines.push(...contextSectionRows(breakdown.sections, estimated, innerWidth));
+  return boardPanel({
+    title: contextTitle(breakdown, title),
+    lines,
+    footer: BOARD_FOOTER,
+    page,
+    frameWidth,
+    plain,
+  });
+}
+
+export function usageBoardText(page = {}, width) {
+  const frameWidth = boardWidth(width);
+  const summary = isBoardRecord(page.summary) ? page.summary : {};
+  const totals = isBoardRecord(summary.totals) ? summary.totals : {};
+  const plain = page.plain === true;
+  const days = boardNumber(summary.days) || 7;
+  const title = `Token usage · last ${days} day${days === 1 ? "" : "s"}`;
+  if (!boardNumber(totals.samples)) {
+    return boardPanel({
+      title,
+      lines: boardEmptyLines(frameWidth, "No usage recorded yet"),
+      footer: BOARD_FOOTER,
+      page,
+      frameWidth,
+      plain,
+    });
+  }
+  const lines = usageHeroLines(totals, frameWidth - 4);
+  lines.push(dim(`${boardNumber(totals.samples)} samples`));
+  const byDay = Array.isArray(summary.by_day) ? summary.by_day : [];
+  if (byDay.length) {
+    lines.push("", bold("By day"), ...byDayRows(byDay, frameWidth - 4));
+  }
+  const byModel = Array.isArray(summary.by_model) ? summary.by_model : [];
+  if (byModel.length) {
+    lines.push("", bold("By model"), ...rightRows(byModel.map((row) => [boardText(row?.model), boardCompact(row?.tokens)]), frameWidth - 4));
+  }
+  const sessions = Array.isArray(summary.recent_sessions) ? summary.recent_sessions : [];
+  if (sessions.length) {
+    lines.push(
+      "",
+      bold(`By session (latest ${sessions.length})`),
+      ...rightRows(sessions.map((row) => [sessionRowLabel(row), boardCompact(row?.tokens)]), frameWidth - 4),
+    );
+  }
+  const compactions = boardNumber(totals.compactions);
+  const footer = compactions > 0
+    ? `${formatBoardNumber(compactions)} compaction call${compactions === 1 ? "" : "s"} · ${BOARD_FOOTER}`
+    : BOARD_FOOTER;
+  return boardPanel({ title, lines, footer, page, frameWidth, plain });
+}
+
+function contextTitle(breakdown, fallback) {
+  const turn = boardText(breakdown.turn_id);
+  const time = boardText(breakdown.captured_at).slice(11, 19);
+  const parts = [fallback];
+  if (turn) {
+    parts.push(`turn ${turn.slice(0, 4)}`);
+  }
+  if (/^\d{2}:\d{2}:\d{2}$/.test(time)) {
+    parts.push(time);
+  }
+  return parts.join(" · ");
+}
+
+function contextMetaLines(windowTokens, usedPercent, measured, estimated, inner) {
+  const tone = occupancyTone(usedPercent);
+  const paintTone = tone === "err" ? red : tone === "warn" ? paint.warning : (text) => text;
+  const windowPart = `Window ${formatBoardNumber(windowTokens)} · ${paintTone(`used ${Math.round(usedPercent * 100)}%`)}`;
+  const measuredPart = measured > 0
+    ? `measured ${formatBoardNumber(measured)} · estimated ${formatBoardNumber(estimated)} ${estimatedDeviation(measured, estimated)}`
+    : "";
+  if (measuredPart && textWidth(`${windowPart}   ${measuredPart}`) > inner) {
+    return [windowPart, measuredPart];
+  }
+  return [measuredPart ? `${windowPart}   ${measuredPart}` : windowPart];
+}
+
+function estimatedDeviation(measured, estimated) {
+  if (estimated <= 0) {
+    return "";
+  }
+  const percent = Math.round(((measured - estimated) / estimated) * 100);
+  return `(${percent >= 0 ? "+" : ""}${percent}%)`;
+}
+
+function stackedShareBar(sections, windowTokens, cells) {
+  const spans = boardSpans(sections, windowTokens, cells);
+  const remaining = Math.max(0, cells - spans.reduce((sum, span) => sum + span.cells, 0));
+  const bar = spans.map((span, index) => (
+    boardPalette(index)(BOARD_BAR_CELL.repeat(span.cells))
+  )).join("");
+  return `${bar}${dim(BOARD_REMAINDER_CELL.repeat(remaining))}`;
+}
+
+function barUnderline(sections, windowTokens, cells) {
+  const spans = boardSpans(sections, windowTokens, cells);
+  const pieces = [];
+  for (const [index, span] of spans.entries()) {
+    const label = boardShortLabel(span);
+    const labelWidth = textWidth(label);
+    if (label && span.cells >= labelWidth + 1) {
+      pieces.push(boardPalette(index)(label));
+      pieces.push(dim(BOARD_UNDERLINE_CELL.repeat(span.cells - labelWidth)));
+    } else {
+      pieces.push(dim(BOARD_UNDERLINE_CELL.repeat(span.cells)));
+    }
+  }
+  pieces.push(dim(BOARD_UNDERLINE_CELL.repeat(Math.max(0, cells - spans.reduce((sum, span) => sum + span.cells, 0)))));
+  return pieces.join("");
+}
+
+function boardSpans(sections, windowTokens, cells) {
+  return sections.map((section, index) => ({
+    ...section,
+    paletteIndex: index,
+    cells: Math.max(0, Math.round((boardNumber(section.tokens) / windowTokens) * cells)),
+  }));
+}
+
+function contextSectionRows(sections, total, innerWidth) {
+  const nameWidth = Math.min(
+    Math.max(12, ...sections.map((section) => textWidth(boardText(section.label)))),
+    Math.max(12, innerWidth - 24),
+  );
+  const tokenTexts = sections.map((section) => formatBoardNumber(section.tokens));
+  const tokenWidth = Math.max(6, ...tokenTexts.map(textWidth));
+  const messageTexts = sections.map((section) => boardMessagesLabel(section.messages));
+  const messageWidth = Math.max(6, ...messageTexts.map(textWidth));
+  return sections.map((section, index) => {
+    const percent = total > 0 ? Math.round((boardNumber(section.tokens) / total) * 100) : 0;
+    return [
+      `  ${padRight(clipSingleLine(section.label, nameWidth), nameWidth)}`,
+      padLeft(tokenTexts[index], tokenWidth),
+      padLeft(`${percent}%`, 4),
+      padLeft(messageTexts[index], messageWidth),
+    ].join("  ");
+  });
+}
+
+function boardMessagesLabel(count) {
+  const value = Math.max(0, boardNumber(count));
+  return `${formatBoardNumber(value)} ${value === 1 ? "msg" : "msgs"}`;
+}
+
+function usageHeroLine(totals) {
+  const input = Math.max(0, boardNumber(totals.input));
+  const cached = Math.max(0, boardNumber(totals.cached));
+  const hit = input > 0 ? Math.round((cached / input) * 100) : 0;
+  return [
+    `Input ${boardCompact(totals.input)}`,
+    `Cache hit ${boardCompact(cached)}·${hit}%`,
+    `Output ${boardCompact(totals.output)}`,
+    `Reasoning ${boardCompact(totals.reasoning)}`,
+  ].join("   ");
+}
+
+function usageHeroLines(totals, inner) {
+  const line = usageHeroLine(totals);
+  if (textWidth(stripAnsi(line)) <= inner) {
+    return [line];
+  }
+  return [
+    `Input ${boardCompact(totals.input)}   Cache hit ${boardCompact(totals.cached)}`,
+    `Output ${boardCompact(totals.output)}   Reasoning ${boardCompact(totals.reasoning)}`,
+  ];
+}
+
+function byDayRows(byDay, innerWidth) {
+  const values = byDay.map((row) => boardCompact(row?.tokens));
+  const valueWidth = Math.max(5, ...values.map(textWidth));
+  const peak = Math.max(1, ...byDay.map((row) => Math.max(0, boardNumber(row?.tokens))));
+  const barCells = Math.max(3, innerWidth - 11 - valueWidth);
+  return byDay.map((row, index) => {
+    const filled = Math.max(row && boardNumber(row.tokens) > 0 ? 1 : 0, Math.round((Math.max(0, boardNumber(row?.tokens)) / peak) * barCells));
+    const bar = accent(BOARD_BAR_CELL.repeat(Math.min(barCells, filled)));
+    const region = bar + " ".repeat(Math.max(0, barCells - Math.min(barCells, filled)));
+    return `  ${boardDayLabel(row?.day)}  ${region}  ${padLeft(values[index], valueWidth)}`;
+  });
+}
+
+function boardDayLabel(day) {
+  const text = boardText(day);
+  return /^\d{2}-\d{2}$/.test(text) ? text : " ".repeat(5);
+}
+
+function rightRows(rows, innerWidth) {
+  const valueWidth = Math.max(5, ...rows.map((row) => textWidth(row[1])));
+  const labelWidth = Math.max(1, innerWidth - 2 - valueWidth - 2);
+  const clipped = rows.map((row) => clipSingleLine(row[0], labelWidth));
+  const columnWidth = Math.max(1, ...clipped.map(textWidth));
+  return rows.map((row, index) => `  ${padRight(clipped[index], columnWidth)}  ${padLeft(row[1], valueWidth)}`);
+}
+
+function sessionRowLabel(row) {
+  const updated = boardText(row?.updated_at);
+  const day = /^\d{4}-\d{2}-\d{2}/.test(updated) ? updated.slice(5, 10) : "";
+  return [day, boardText(row?.session_id)].filter(Boolean).join(" ");
+}
+
+function boardShortLabel(section) {
+  if (BOARD_SECTION_SHORT_LABELS[section.key]) {
+    return BOARD_SECTION_SHORT_LABELS[section.key];
+  }
+  if (String(section.key || "").startsWith("tool:")) {
+    return String(section.key).slice(5);
+  }
+  const label = boardText(section.label);
+  return label.split("·")[0].trim().slice(0, 12);
+}
+
+function boardPalette(index) {
+  const painter = paint[BOARD_PALETTE_ROLES[index % BOARD_PALETTE_ROLES.length]];
+  return typeof painter === "function" ? painter : (text) => text;
+}
+
+function boardPanel({ title, lines, footer, page, frameWidth, plain }) {
+  const index = Math.max(1, boardNumber(page?.index) || 1);
+  const count = Math.max(index, boardNumber(page?.count) || 1);
+  if (plain) {
+    // Interaction hints are meaningless in frame-less pipe output.
+    return [bold(clipSingleLine(title, frameWidth)), ...lines].join("\n");
+  }
+  const inner = frameWidth - 4;
+  const pageLabel = count > 1 ? `${index}/${count}` : "";
+  const titlePart = ` ${clipSingleLine(title, inner - pageLabel.length - 4)} `;
+  const dashes = Math.max(1, frameWidth - 2 - textWidth(titlePart) - (pageLabel ? pageLabel.length + 2 : 0));
+  const top = `┌${accent(titlePart)}${dim("─".repeat(dashes))}${pageLabel ? ` ${dim(pageLabel)} ` : ""}┐`;
+  const footerLines = footer ? [dim(footer)] : [];
+  const bodyRows = [...lines, ...footerLines].map((line) => `${dim("│")} ${padRight(line, inner)} ${dim("│")}`);
+  const bottom = `${dim("└")}${dim("─".repeat(frameWidth - 2))}${dim("┘")}`;
+  return [top, ...bodyRows, bottom].join("\n");
+}
+
+function boardEmptyLines(frameWidth, label) {
+  const inner = frameWidth - 4;
+  return [
+    boardCentered(bold(label || "Nothing sampled yet"), inner),
+    boardCentered(dim("Send a message first, then try again."), inner),
+  ];
+}
+
+function boardCentered(text, inner) {
+  return `${" ".repeat(Math.max(0, Math.floor((inner - textWidth(text)) / 2)))}${text}`;
+}
+
+function isBoardRecord(value) {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function boardText(value) {
+  return String(value ?? "").replace(/\s+/g, " ").trim();
+}
+
+function boardNumber(value) {
+  const number = Number(value);
+  return Number.isFinite(number) ? number : 0;
+}
+
+function formatBoardNumber(value) {
+  const number = Math.max(0, Math.round(boardNumber(value)));
+  return String(number).replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+}
+
+function boardCompact(value) {
+  const number = Math.max(0, boardNumber(value));
+  if (number >= 1e6) {
+    return `${(number / 1e6).toFixed(2)}M`;
+  }
+  if (number >= 1e5) {
+    return `${Math.round(number / 1e3)}K`;
+  }
+  if (number >= 1e3) {
+    return `${(number / 1e3).toFixed(1)}K`.replace(/\.0K$/, "K");
+  }
+  return String(Math.round(number));
+}
+
+const BOARD_BAR_CELL = "█";
+const BOARD_REMAINDER_CELL = "░";
+const BOARD_UNDERLINE_CELL = "▔";
+
 
 export function startupText(info = {}, width) {
   const header = startupBannerText(info, width);
@@ -1240,6 +1592,10 @@ function activityFrame(frame) {
 
 function padRight(text, width) {
   return `${text}${" ".repeat(Math.max(0, width - visibleLength(text)))}`;
+}
+
+function padLeft(text, width) {
+  return `${" ".repeat(Math.max(0, width - visibleLength(text)))}${text}`;
 }
 
 function visibleLength(text) {

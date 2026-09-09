@@ -6,6 +6,7 @@ import { currentTheme, setTheme, themeNames, themeOptions } from "./theme.js";
 export const LOCAL_SLASH_COMMANDS = Object.freeze([
   { name: "compact", description: "Compact current session context", usage: "/compact" },
   { name: "config", description: "Show config guidance", usage: "/config" },
+  { name: "context", description: "Show context composition and token usage", usage: "/context" },
   { name: "doctor", description: "Run local setup diagnostics", usage: "/doctor" },
   { name: "effort", description: "Show or change reasoning effort", usage: "/effort [low | medium | high | xhigh | max]" },
   { name: "fork", description: "Fork the current session", usage: "/fork" },

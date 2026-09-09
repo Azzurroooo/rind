@@ -1,5 +1,5 @@
 import { REASONING_EFFORTS } from "./runtime-protocol.js";
-import { modelListErrorText, commandResultText, goalCommandText, sessionSwitchedText } from "./rendering.js";
+import { commandResultText, contextBoardText, goalCommandText, modelListErrorText, sessionSwitchedText, usageBoardText } from "./rendering.js";
 
 export function createCliRuntimeController({
   client,
@@ -15,6 +15,7 @@ export function createCliRuntimeController({
   askEffortMenu = null,
   askSessionMenu,
   askForkPointMenu,
+  askContextBoard = null,
   restoreLiveTurn,
   renderHistory = () => {},
   clearPendingInputs,
@@ -281,6 +282,63 @@ export function createCliRuntimeController({
     }
   }
 
+  async function runContextBoard() {
+    if (state.turn.active || state.display.activeCompact) {
+      log("Cannot open the context board while a turn is running. Wait for it to finish or stop it first.");
+      return;
+    }
+    let data;
+    try {
+      data = await fetchContextBoardData();
+    } catch (error) {
+      log(`Context board failed: ${error instanceof Error ? error.message : String(error)}`);
+      return;
+    }
+    if (!askContextBoard) {
+      printContextPages(data);
+      return;
+    }
+    await askContextBoard({
+      render: (pageIndex, width) => contextPageText(data, pageIndex, width),
+    });
+  }
+
+  async function printContextReport() {
+    let data;
+    try {
+      data = await fetchContextBoardData();
+    } catch (error) {
+      log(`Context report failed: ${error instanceof Error ? error.message : String(error)}`);
+      return;
+    }
+    printContextPages(data);
+  }
+
+  async function fetchContextBoardData() {
+    const breakdownResult = await request(methods.contextInspect);
+    const summaryResult = await request(methods.usageSummary, { days: CONTEXT_BOARD_DAYS });
+    return {
+      breakdown: breakdownResult?.breakdown && typeof breakdownResult.breakdown === "object" ? breakdownResult.breakdown : null,
+      latestUsage: breakdownResult?.latest_usage && typeof breakdownResult.latest_usage === "object" ? breakdownResult.latest_usage : null,
+      summary: summaryResult && typeof summaryResult === "object" ? summaryResult : null,
+    };
+  }
+
+  function contextPageText(data, pageIndex, width, { plain = false } = {}) {
+    return pageIndex === 0
+      ? contextBoardText({ breakdown: data.breakdown, latest_usage: data.latestUsage, index: 1, count: 2, plain }, width)
+      : usageBoardText({ summary: data.summary, index: 2, count: 2, plain }, width);
+  }
+
+  function printContextPages(data) {
+    for (const pageIndex of [0, 1]) {
+      const text = contextPageText(data, pageIndex, process.stdout.columns || 0, { plain: true });
+      if (text.trim()) {
+        log(text);
+      }
+    }
+  }
+
   function startCompactCommand() {
     if (state.display.activeCompact) {
       log("Compact is already running.");
@@ -374,11 +432,15 @@ export function createCliRuntimeController({
     refreshGoalState,
     runSessionsSelector,
     runForkSelector,
+    runContextBoard,
+    printContextReport,
     startCompactCommand,
     runModelSelector,
     runEffortCommand,
   };
 }
+
+const CONTEXT_BOARD_DAYS = 7;
 
 function mergeSlashCommands(...groups) {
   const byName = new Map();

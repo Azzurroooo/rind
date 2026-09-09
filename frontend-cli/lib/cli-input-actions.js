@@ -273,6 +273,10 @@ export function createCliInputActions({
       handleForkInput(session, event);
       return;
     }
+    if (session.mode === "context-board") {
+      handleContextBoardInput(session, event);
+      return;
+    }
     const key = event;
     const matches = session.menuState ? syncSlashMenu(session) : [];
     const menuKey = !key.ctrl && !key.alt && !key.shift && ["escape", "up", "down"].includes(key.name);
@@ -312,7 +316,7 @@ export function createCliInputActions({
       return;
     }
     const session = state.input.session;
-    if (!session || session.mode === "model" || session.mode === "theme" || session.mode === "sessions" || session.mode === "fork") {
+    if (!session || session.mode === "model" || session.mode === "theme" || session.mode === "sessions" || session.mode === "fork" || session.mode === "context-board") {
       return;
     }
     if (session.mode === "question" && !session.questionState.isEditing()) {
@@ -563,6 +567,28 @@ export function createCliInputActions({
     if (!modified && session.choiceState.handleKey(key)) output.redraw();
   }
 
+  function askContextBoard(board) {
+    return new Promise((resolve) => {
+      const session = { mode: "context-board", inputText: "/context", board, pageIndex: 0, resolve };
+      state.input.session = session;
+      state.input.active = true;
+      cancelActiveInput = () => completeTtyInput(session, "", false);
+      output.redraw(true);
+    });
+  }
+
+  function handleContextBoardInput(session, key) {
+    const modified = key.ctrl || key.alt || key.shift;
+    if (!modified && key.name === "escape") {
+      completeTtyInput(session, "", false);
+      return;
+    }
+    if (!modified && (key.name === "tab" || key.name === "left" || key.name === "right")) {
+      session.pageIndex = (session.pageIndex + 1) % 2;
+      output.redraw();
+    }
+  }
+
   function askForkPointMenu(items) {
     return new Promise((resolve) => {
       const choiceState = createChoiceMenuState(items.map((item) => item.label), items[0].label);
@@ -605,6 +631,7 @@ export function createCliInputActions({
     askSessionMenu,
     askTeamBlueprint,
     askForkPointMenu,
+    askContextBoard,
     cancel: () => cancelActiveInput?.(),
   };
 }
