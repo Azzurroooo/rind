@@ -6,8 +6,14 @@ import { createCliInputActions } from "../lib/cli-input-actions.js";
 import { createCliRuntimeController } from "../lib/cli-runtime-controller.js";
 import { createCommandController } from "../lib/command-controller.js";
 import { createCliState } from "../lib/cli-state.js";
+import { createCliOutputController } from "../lib/cli-output-controller.js";
+import { createVirtualOutput, createVirtualInput } from "./helpers/virtual-terminal.js";
+import { createTui } from "../lib/tui/tui.js";
+import { Container } from "../lib/tui/component.js";
+import { ComposerArea } from "../lib/components/composer-area.js";
+import { MonitorStack } from "../lib/components/monitor-stack.js";
 import { contextBoardText, occupancyTone, usageBoardText } from "../lib/rendering.js";
-import { resetTheme, setTheme } from "../lib/theme.js";
+import { resetTheme, setTheme, flavorSwatch } from "../lib/theme.js";
 import { stripAnsi, textWidth } from "../lib/text-width.js";
 
 const BREAKDOWN = {
@@ -309,4 +315,134 @@ test("/context routes to the board on a TTY and to the report otherwise", async 
   await makeController({ isTerminal: false }).handle("/context");
 
   assert.deepEqual(calls, [["board"], ["report"], ["log", "/context requires a connected runtime."]]);
+});
+
+test("every theme paints the board only with its own palette", () => {
+  const originalIsTty = process.stdout.isTTY;
+  try {
+    process.stdout.isTTY = true;
+    for (const theme of ["latte", "frappe", "macchiato", "mocha"]) {
+      resetTheme();
+      assert.equal(setTheme(theme)?.name, theme);
+      // The theme deck swatch enumerates this flavor's eight role colors.
+      const allowed = new Set(flavorSwatch(theme).match(/\x1b\[38;2;\d+;\d+;\d+m/g) || []);
+      assert.equal(allowed.size, 8);
+      for (const text of [
+        contextBoardText({ breakdown: BREAKDOWN, latest_usage: LATEST_USAGE, index: 1, count: 2 }, 100),
+        usageBoardText({ summary: SUMMARY, index: 2, count: 2 }, 100),
+      ]) {
+        const used = text.match(/\x1b\[38;2;\d+;\d+;\d+m/g) || [];
+        assert.ok(used.length > 0, `${theme}: board paints with truecolor`);
+        for (const code of used) {
+          assert.ok(allowed.has(code), `${theme}: unexpected color ${code}`);
+        }
+      }
+    }
+  } finally {
+    if (originalIsTty === undefined) {
+      delete process.stdout.isTTY;
+    } else {
+      process.stdout.isTTY = originalIsTty;
+    }
+    resetTheme();
+  }
+});
+
+test("board renders full screen on a real TUI, Tab flips pages, Esc returns to the composer", async () => {
+  const virtual = createVirtualOutput({ columns: 100, rows: 30 });
+  const input = createVirtualInput();
+  const tui = createTui({
+    input,
+    output: virtual.output,
+    renderIntervalMs: 0,
+    setTimeout: (fn) => setTimeout(fn, 0),
+    clearTimeout,
+  });
+  const state = createCliState();
+  state.runtime.status = "ready";
+  const transcriptContainer = new Container();
+  const composerArea = new ComposerArea((width) => composeFrame(width));
+  const monitorStack = new MonitorStack({
+    composer: composerArea,
+    monitor: { isMonitoring: () => false, frame: () => null },
+    rows: () => tui.rows,
+  });
+  tui.addChild(transcriptContainer);
+  tui.addChild(monitorStack);
+  const output = createCliOutputController({ state, terminalUi: tui, transcript: transcriptContainer });
+  // Mirrors the composeFrame board branch in frontend-cli-implementation.js.
+  function composeFrame(width) {
+    const session = state.input.session;
+    if (!session) {
+      return null;
+    }
+    if (session.mode === "context-board") {
+      return {
+        showCaret: false,
+        prompt: "",
+        inputText: "",
+        cursor: { line: 0, column: 0 },
+        menuText: session.board.render(session.pageIndex, width),
+      };
+    }
+    return { prompt: output.mainPromptText(width), inputText: "", cursor: { line: 0, column: 0 }, placeholder: "" };
+  }
+  const actions = createCliInputActions({
+    state,
+    request: async () => ({}),
+    output,
+    getTurnController: () => null,
+    getTaskMonitor: () => null,
+    getLineInput: () => null,
+    pausePrompt() {},
+    resumePrompt() {},
+    handleSigint() {},
+  });
+
+  const data = { breakdown: BREAKDOWN, latestUsage: LATEST_USAGE, summary: SUMMARY };
+  const renderPage = (pageIndex, width) => (pageIndex === 0
+    ? contextBoardText({ breakdown: data.breakdown, latest_usage: data.latestUsage, index: 1, count: 2 }, width)
+    : usageBoardText({ summary: data.summary, index: 2, count: 2 }, width));
+  tui.onData((sequence) => actions.handleTerminalInput(sequence));
+  tui.start();
+
+  const pending = actions.askContextBoard({ render: renderPage });
+  await new Promise((resolve) => setTimeout(resolve, 25));
+  await virtual.flush();
+
+  let viewport = virtual.getViewport().map((line) => stripAnsi(line)).filter((line) => line.trim());
+  let flat = viewport.join("\n");
+  assert.match(flat, /Context · last sampling · turn 8f3a/);
+  assert.match(flat, /1\/2/);
+  assert.match(flat, /Tool results · bash/);
+  assert.equal(flat.includes("Token usage · last 7 days"), false, "page 2 stays hidden on page 1");
+
+  input.send("\t");
+  await new Promise((resolve) => setTimeout(resolve, 25));
+  await virtual.flush();
+  viewport = virtual.getViewport().map((line) => stripAnsi(line)).filter((line) => line.trim());
+  flat = viewport.join("\n");
+  assert.match(flat, /Token usage · last 7 days/);
+  assert.match(flat, /2\/2/);
+  assert.match(flat, /6 compaction calls/);
+  assert.equal(flat.includes("Tool results · bash"), false, "page 1 stays hidden on page 2");
+
+  input.send("\x1b[C");
+  await new Promise((resolve) => setTimeout(resolve, 25));
+  await virtual.flush();
+  viewport = virtual.getViewport().map((line) => stripAnsi(line)).filter((line) => line.trim());
+  assert.match(viewport.join("\n"), /Context · last sampling/, "arrow right returns to page 1");
+
+  input.send("\x1b");
+  assert.equal(await pending, "");
+  assert.equal(state.input.session, null);
+  assert.equal(state.input.active, false);
+
+  state.input.session = { mode: "prompt" };
+  tui.requestRender(true);
+  await new Promise((resolve) => setTimeout(resolve, 25));
+  await virtual.flush();
+  viewport = virtual.getViewport().map((line) => stripAnsi(line)).filter((line) => line.trim());
+  assert.equal(viewport.join("\n").includes("Context · last sampling"), false, "the board leaves no residue");
+  tui.stop();
 });

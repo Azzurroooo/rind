@@ -47,7 +47,7 @@ def build_context_snapshot(
     if estimated_total is None:
         estimated_total = sum(section["tokens"] for section in sections)
     return {
-        "captured_at": captured_at or datetime.now(timezone.utc).isoformat(),
+        "captured_at": captured_at or datetime.now().astimezone().isoformat(),
         "turn_id": str(turn_id or ""),
         "estimated_total": estimated_total,
         "context_window_tokens": positive_int(

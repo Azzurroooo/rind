@@ -74,10 +74,13 @@ def build_usage_record(
     model: str = "",
     ts: str | None = None,
 ) -> dict[str, Any]:
-    """Shape one normalized sampling into a ledger row: verbatim counting fields plus identity."""
+    """Shape one normalized sampling into a ledger row: verbatim counting fields plus identity.
+
+    The timestamp carries the local UTC offset so day bucketing follows the
+    user's own calendar, not the server's."""
     source = usage if isinstance(usage, dict) else {}
     record: dict[str, Any] = {field: source[field] for field in USAGE_RECORD_FIELDS if field in source}
-    record["ts"] = ts or datetime.now(timezone.utc).isoformat()
+    record["ts"] = ts or datetime.now().astimezone().isoformat()
     record["session_id"] = str(session_id or "")
     record["model"] = str(model or "")
     return record
