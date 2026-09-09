@@ -1356,13 +1356,15 @@ class WorkerStdioRuntimeServer:
         await self._respond(request, result)
 
     async def _context_inspect(self, request: dict[str, Any]) -> None:
-        """Read the session's latest context breakdown and sampling usage from meta."""
+        """Read the session's latest context breakdown and assistant sampling usage from meta."""
         session_id = await self._required_session_id(request)
         if session_id is None:
             return
         meta = await self._worker.repository.metadata(session_id)
         breakdown = meta.get("latest_context_breakdown")
-        usage = meta.get("latest_sampling_usage")
+        # Assistant samplings describe the context the board shows; a compact
+        # sampling would read the pre-compaction context, so it never anchors.
+        usage = meta.get("latest_assistant_sampling_usage")
         await self._respond(
             request,
             {
