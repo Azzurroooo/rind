@@ -64,6 +64,8 @@ class RuntimeMethod:
     RIND_GOAL_SET = "rind/goal/set"
     RIND_GOAL_STATUS = "rind/goal/status"
     RIND_GOAL_CLEAR = "rind/goal/clear"
+    RIND_CONTEXT_INSPECT = "rind/context/inspect"
+    RIND_USAGE_SUMMARY = "rind/usage/summary"
     SESSION_UPDATE = "session/update"
 
 
@@ -92,6 +94,7 @@ SESSION_SCOPED_METHODS = frozenset(
         RuntimeMethod.RIND_GOAL_SET,
         RuntimeMethod.RIND_GOAL_STATUS,
         RuntimeMethod.RIND_GOAL_CLEAR,
+        RuntimeMethod.RIND_CONTEXT_INSPECT,
     }
 )
 
@@ -131,6 +134,8 @@ CORE_METHODS = (
     RuntimeMethod.RIND_SESSION_COMPACT,
     RuntimeMethod.RIND_COMMAND_EXECUTE,
     RuntimeMethod.RIND_USER_QUESTION_RESPOND,
+    RuntimeMethod.RIND_CONTEXT_INSPECT,
+    RuntimeMethod.RIND_USAGE_SUMMARY,
 )
 
 CAPABILITIES = (
@@ -138,6 +143,7 @@ CAPABILITIES = (
     "models",
     "rind/commands",
     "rind/compaction",
+    "rind/context",
     "rind/user-questions",
     "rind/steering",
     "rind/follow-up",

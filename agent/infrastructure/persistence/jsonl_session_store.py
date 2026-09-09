@@ -969,6 +969,17 @@ class JsonlSessionStore(SessionStore):
     async def get_latest_sampling_usage(self) -> dict[str, Any] | None:
         return await asyncio.to_thread(self._latest_meta_usage, "latest_sampling_usage")
 
+    async def persist_context_breakdown(self, snapshot: dict[str, Any]) -> None:
+        """Store the latest context composition snapshot; overwrite = latest, travels with fork."""
+        async with self._write_lock:
+            def _persist():
+                if not self._session_meta or not self._session_paths:
+                    return
+                self._session_meta["latest_context_breakdown"] = dict(snapshot or {})
+                self._persist_meta_sync()
+
+            await asyncio.to_thread(_persist)
+
     async def get_latest_assistant_sampling_usage(self) -> dict[str, Any] | None:
         return await asyncio.to_thread(self._latest_meta_usage, "latest_assistant_sampling_usage")
 

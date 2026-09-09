@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Awaitable, Callable, Collection
 from dataclasses import dataclass, field
+from functools import partial
 from pathlib import Path
 from typing import Any
 
@@ -15,6 +16,7 @@ from agent.infrastructure.config import AppSettings, load_settings
 from agent.infrastructure.llm import OpenAIChatClient, OpenAIClientFactory
 from agent.infrastructure.persistence import JsonlSessionStore
 from agent.infrastructure.persistence import ToolOutputStore
+from agent.infrastructure.persistence.usage_ledger import append_usage_record, default_usage_ledger_path
 from agent.infrastructure.planning import build_plan_snapshot
 from agent.infrastructure.rind_docs import build_rind_doc_context
 from agent.infrastructure.skills import SkillRepository
@@ -215,8 +217,10 @@ def build_agent_container(
         estimator=ContextEstimator(),
         rind_doc_provider=lambda: build_rind_doc_context(workspace_root),
     )
+    usage_recorder = partial(append_usage_record, default_usage_ledger_path())
     compaction_service = shared_resources.compaction_service if shared_resources else CompactionService(
         plan_snapshot_provider=build_plan_snapshot,
+        usage_recorder=usage_recorder,
     )
     turn_runner = TurnRunner(
         chat_client=chat_client,
@@ -226,6 +230,7 @@ def build_agent_container(
         context_manager=context_manager,
         compaction_service=compaction_service,
         skill_repository=skill_repository,
+        usage_recorder=usage_recorder,
     )
     runtime = AgentRuntime(
         turn_runner=turn_runner,

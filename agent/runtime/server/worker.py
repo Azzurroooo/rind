@@ -12,11 +12,14 @@ import tempfile
 import uuid
 from datetime import datetime
 from dataclasses import dataclass, field, replace
+from functools import partial
 from collections.abc import AsyncIterator, Awaitable, Callable
 from pathlib import Path
 from typing import Any
 
 from agent.application.context import CompactionService
+from agent.application.context.token_usage import positive_int
+from agent.application.context.usage_summary import summarize_usage
 from agent.application.tools import ToolResultNormalizer
 from agent.bootstrap import AgentContainer, SharedRuntimeResources, build_agent_container
 from agent.infrastructure.config import AppSettings, validate_settings
@@ -25,6 +28,11 @@ from agent.infrastructure.llm import OpenAIClientFactory, close_async_client
 from agent.infrastructure.persistence import JsonlSessionStore, ToolOutputStore, fork_session
 from agent.infrastructure.persistence.session_files import SessionFiles
 from agent.infrastructure.persistence.session_index_repository import SessionIndexRepository
+from agent.infrastructure.persistence.usage_ledger import (
+    append_usage_record,
+    default_usage_ledger_path,
+    load_usage_records,
+)
 from agent.infrastructure.paths import resolve_session_base, validate_session_id
 from agent.infrastructure.planning import build_plan_snapshot
 from agent.infrastructure.team import discover_agent
@@ -832,10 +840,14 @@ class RuntimeWorker:
         self.session_id = session_id
         self._resume_latest = resume_latest
         tool_output_store = ToolOutputStore(session_dir)
+        usage_recorder = partial(append_usage_record, default_usage_ledger_path())
         self._shared_resources = SharedRuntimeResources(
             tool_result_normalizer=ToolResultNormalizer(),
             stream_parser=MessageStreamParser(),
-            compaction_service=CompactionService(plan_snapshot_provider=build_plan_snapshot),
+            compaction_service=CompactionService(
+                plan_snapshot_provider=build_plan_snapshot,
+                usage_recorder=usage_recorder,
+            ),
             tool_output_store=tool_output_store,
         )
         self.repository = SessionRepository(session_dir=session_dir)
@@ -894,6 +906,12 @@ class RuntimeWorker:
     async def fork_session(self, session_id: str, before_message_id: str | None = None) -> dict[str, Any]:
         clean = validate_session_id(session_id)
         return await self.repository.fork(clean, before_message_id)
+
+    async def usage_summary(self, days: int = 7) -> dict[str, Any]:
+        """Summarize the user-level usage ledger; every number traces to a raw row."""
+        window = max(1, min(positive_int(days, 7), 365))
+        records = await asyncio.to_thread(load_usage_records, default_usage_ledger_path())
+        return summarize_usage(records, window)
 
     async def close(self) -> None:
         await self.execution.close()

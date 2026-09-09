@@ -135,6 +135,10 @@ class SessionStore(Protocol):
         """Persist latest provider token usage for observability."""
         ...
 
+    async def persist_context_breakdown(self, snapshot: dict[str, Any]) -> None:
+        """Persist the latest context composition snapshot for observability."""
+        ...
+
     async def get_latest_sampling_usage(self) -> dict[str, Any] | None:
         """Get the latest provider token usage sample."""
         ...

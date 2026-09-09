@@ -7,10 +7,12 @@ import inspect
 import logging
 import time
 from collections.abc import Callable
-from typing import AsyncIterator
+from typing import Any, AsyncIterator
 
 from agent.application.context.compaction import CompactionService
 from agent.application.context.manager import ContextBuildResult, ContextManager
+from agent.application.context.snapshot import build_context_snapshot
+from agent.application.context.token_usage import build_usage_record
 from agent.application.ports.chat_client import ChatClient
 from agent.application.ports.session_store import SessionStore
 from agent.runtime.core.stream_pump import ModelStreamResult, pump_model_stream_events
@@ -71,6 +73,7 @@ class TurnRunner:
         context_manager: ContextManager,
         compaction_service: CompactionService | None = None,
         skill_repository=None,
+        usage_recorder: Callable[[dict], Any] | None = None,
     ):
         self._chat_client = chat_client
         self._tool_processor = tool_processor
@@ -78,6 +81,7 @@ class TurnRunner:
         self._tool_schemas = tool_schemas
         self._context_manager = context_manager
         self._compaction_service = compaction_service or CompactionService()
+        self._usage_recorder = usage_recorder
         self._skill_turn_coordinator = (
             SkillTurnCoordinator(skill_repository) if skill_repository is not None else None
         )
@@ -133,6 +137,7 @@ class TurnRunner:
                     session,
                     transient_system_messages=transient_system_messages,
                     allow_rescue=force_rescue_next_build,
+                    turn_id=turn_id,
                 )
                 force_rescue_next_build = False
                 yield _context_built(context, session, turn_id)
@@ -147,6 +152,7 @@ class TurnRunner:
                         phase_detail=self._compact_phase_detail(sampling_index),
                         transient_system_messages=transient_system_messages,
                         cancellation_token=cancellation_token,
+                        turn_id=turn_id,
                     )
                     yield _context_built(context, session, turn_id)
 
@@ -261,6 +267,7 @@ class TurnRunner:
                                 phase_detail="context_length_recovery",
                                 transient_system_messages=transient_system_messages,
                                 cancellation_token=cancellation_token,
+                                turn_id=turn_id,
                             )
                         else:
                             self._context_manager.reduce_hard_limit(factor=0.8)
@@ -419,6 +426,7 @@ class TurnRunner:
         reason: str = "manual",
         phase: str = "manual",
         cancellation_token: CancellationToken | None = None,
+        turn_id: str = "",
     ) -> dict:
         context = await self._build_context(session)
         compaction_context = await self._compaction_context(session, context)
@@ -434,7 +442,7 @@ class TurnRunner:
             cancellation_token=cancellation_token,
         )
         await self._sync_skill_catalog(session)
-        context = await self._build_context(session)
+        context = await self._build_context(session, turn_id=turn_id)
         self._validate_compact_context(context)
         return record
 
@@ -450,6 +458,7 @@ class TurnRunner:
         phase_detail: str | None = None,
         transient_system_messages: list[dict] | None = None,
         cancellation_token: CancellationToken | None = None,
+        turn_id: str = "",
     ):
         current_context = ContextBuildResult(
             messages=context_messages,
@@ -475,6 +484,7 @@ class TurnRunner:
         context = await self._build_context(
             session,
             transient_system_messages=transient_system_messages,
+            turn_id=turn_id,
         )
         self._validate_compact_context(context)
         return context
@@ -501,16 +511,58 @@ class TurnRunner:
         transient_system_messages: list[dict] | None = None,
         allow_rescue: bool = False,
         include_skill_catalog: bool = True,
+        turn_id: str = "",
     ):
-        return await self._context_manager.build_messages_async(
+        context = await self._context_manager.build_messages_async(
             session=session,
             transient_system_messages=transient_system_messages,
             allow_rescue=allow_rescue,
             include_skill_catalog=include_skill_catalog,
         )
+        if include_skill_catalog:
+            # Only assemblies that feed a model call update the board; the
+            # skill-catalog-free rebuild is the compaction corpus, not a sampling.
+            await self._capture_context_breakdown(session, context, turn_id)
+        return context
+
+    async def _capture_context_breakdown(self, session: SessionStore, context: ContextBuildResult, turn_id: str) -> None:
+        try:
+            messages = context.internal_messages or context.messages
+            snapshot = build_context_snapshot(messages, context.stats, turn_id)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.debug("Context breakdown capture failed.", exc_info=True)
+            return
+        persist = getattr(session, "persist_context_breakdown", None)
+        if callable(persist):
+            await self._best_effort(persist, snapshot)
 
     async def _persist_sampling_usage(self, session: SessionStore, usage: dict) -> None:
         await self._best_effort(session.persist_sampling_usage, usage)
+        await self._record_usage(session, usage)
+
+    async def _record_usage(self, session: SessionStore, usage: dict) -> None:
+        recorder = self._usage_recorder
+        if recorder is None or not isinstance(usage, dict):
+            return
+        try:
+            record = build_usage_record(
+                usage,
+                session_id=str(getattr(session, "session_id", "") or ""),
+                model=str(getattr(session, "model", "") or ""),
+            )
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.debug("Usage record assembly failed.", exc_info=True)
+            return
+        try:
+            await asyncio.to_thread(recorder, record)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.debug("Usage ledger append failed.", exc_info=True)
 
     def _next_steering(self, take_steering: Callable[[], tuple[str, str] | None] | None) -> tuple[str, str] | None:
         if take_steering is None:
