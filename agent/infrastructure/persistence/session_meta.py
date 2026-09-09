@@ -2,9 +2,38 @@
 
 from __future__ import annotations
 
+import uuid
+from datetime import datetime
 from typing import Any
 
 from agent.domain.skills import SKILL_NAME_PATTERN
+
+
+def new_session_id() -> str:
+    return f"{datetime.now().strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:8]}"
+
+
+def session_index_entry(
+    session_id: str,
+    meta: dict[str, Any],
+    *,
+    message_count: int,
+    tool_call_count: int,
+    preview: str,
+) -> dict[str, Any]:
+    return {
+        "id": session_id,
+        "title": meta.get("title", "Untitled"),
+        "updated_at": meta.get("updated_at", ""),
+        "size": {"messages": message_count, "tool_calls": tool_call_count},
+        "preview": preview,
+        "workspace_root": meta.get("workspace_root"),
+        "project_id": meta.get("project_id"),
+        "owner_agent_id": meta.get("owner_agent_id"),
+        "session_type": meta.get("session_type"),
+        "parent_session_id": meta.get("parent_session_id"),
+        "has_user_message": True,
+    }
 
 
 def default_auto_compact_window() -> dict[str, Any]:

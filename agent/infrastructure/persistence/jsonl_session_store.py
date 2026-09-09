@@ -25,9 +25,11 @@ from agent.infrastructure.persistence.message_projector import (
 )
 from agent.infrastructure.persistence.session_meta import (
     default_auto_compact_window,
+    new_session_id,
     new_session_meta,
     normalize_auto_compact_window,
     normalize_skill_catalog,
+    session_index_entry,
     sync_session_counts,
 )
 from agent.infrastructure.paths import (
@@ -175,6 +177,12 @@ class JsonlSessionStore(SessionStore):
         return os.path.join(cls.default_rind_home(), "sessions")
 
     @classmethod
+    def index_path_for(cls, session_dir: str | None = None) -> str:
+        if session_dir:
+            return os.path.join(cls.resolve_session_root(session_dir), "index.json")
+        return os.path.join(cls.default_rind_home(), "session_index.json")
+
+    @classmethod
     def load_session_metadata(cls, session_id: str, session_dir: str | None = None) -> dict[str, Any]:
         clean = validate_session_id(session_id)
         root = cls.resolve_session_root(session_dir)
@@ -195,11 +203,7 @@ class JsonlSessionStore(SessionStore):
         workspace_root: str | None = None,
     ) -> list[dict[str, Any]]:
         root = cls.resolve_session_root(session_dir)
-        index_path = (
-            os.path.join(root, "index.json")
-            if session_dir
-            else os.path.join(cls.default_rind_home(), "session_index.json")
-        )
+        index_path = cls.index_path_for(session_dir)
         files = SessionFiles()
         index = files.load_json(index_path) or {}
         entries = index.get("sessions") if isinstance(index, dict) else []
@@ -248,10 +252,7 @@ class JsonlSessionStore(SessionStore):
 
     def _setup_paths(self, create_directories: bool = False) -> None:
         self._session_root = self.resolve_session_root(self._session_dir)
-        if self._session_dir:
-            self._index_path = os.path.join(self._session_root, "index.json")
-        else:
-            self._index_path = os.path.join(self.default_rind_home(), "session_index.json")
+        self._index_path = self.index_path_for(self._session_dir)
 
         if create_directories:
             os.makedirs(self._session_root, exist_ok=True)
@@ -277,8 +278,7 @@ class JsonlSessionStore(SessionStore):
 
     def _create_session(self, session_id: str | None = None) -> None:
         if not session_id:
-            ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-            session_id = f"{ts}_{uuid.uuid4().hex[:8]}"
+            session_id = new_session_id()
 
         self._session_id = session_id
         self._session_paths = self._get_session_paths(session_id)
@@ -524,19 +524,13 @@ class JsonlSessionStore(SessionStore):
                 self._index_repo.remove_session(self._session_id)
             return
 
-        entry = {
-            "id": self._session_id,
-            "title": self._session_meta.get("title", "Untitled"),
-            "updated_at": self._session_meta.get("updated_at", self.now_iso()),
-            "size": {"messages": self._message_count, "tool_calls": self._tool_call_count},
-            "preview": self._last_preview,
-            "workspace_root": self._session_meta.get("workspace_root"),
-            "project_id": self._session_meta.get("project_id"),
-            "owner_agent_id": self._session_meta.get("owner_agent_id"),
-            "session_type": self._session_meta.get("session_type"),
-            "parent_session_id": self._session_meta.get("parent_session_id"),
-            "has_user_message": True,
-        }
+        entry = session_index_entry(
+            self._session_id,
+            self._session_meta,
+            message_count=self._message_count,
+            tool_call_count=self._tool_call_count,
+            preview=self._last_preview,
+        )
         self._index_repo.update_index(entry)
 
     def _persist_meta_sync(self, updated_at: str | None = None) -> None:

@@ -14,6 +14,7 @@ export function createCliRuntimeController({
   askModelMenu,
   askEffortMenu = null,
   askSessionMenu,
+  askForkPointMenu,
   restoreLiveTurn,
   renderHistory = () => {},
   clearPendingInputs,
@@ -213,6 +214,73 @@ export function createCliRuntimeController({
     }
   }
 
+  async function runForkSelector() {
+    if (state.turn.active || state.display.activeCompact) {
+      log("Cannot fork while a turn is running. Wait for it to finish or stop it first.");
+      return;
+    }
+    if (String(state.session.info.session_type || "") === "delegated_task") {
+      log("Delegated task sessions cannot be forked.");
+      return;
+    }
+    let replay;
+    try {
+      replay = await request(methods.sessionReplay);
+    } catch (error) {
+      log(`Command failed: ${error instanceof Error ? error.message : String(error)}`);
+      return;
+    }
+    const messages = Array.isArray(replay?.messages) ? replay.messages : [];
+    const userMessages = messages.filter(isForkableUserMessage).slice(-FORK_MENU_MESSAGE_LIMIT);
+    if (!userMessages.length) {
+      log("Nothing to fork: this session has no messages yet.");
+      return;
+    }
+    const items = [
+      { id: "", label: FORK_END_LABEL },
+      ...userMessages.slice().reverse().map((message) => ({
+        id: String(message.id || ""),
+        label: forkPointLabel(message),
+        text: String(message.content || ""),
+      })),
+    ];
+    const selected = await askForkPointMenu(items);
+    if (!selected || state.runtime.status === "closing") {
+      return;
+    }
+    let fork;
+    try {
+      fork = await request(methods.sessionFork, selected.id ? { before_message_id: selected.id } : {});
+    } catch (error) {
+      log(`Fork failed: ${error instanceof Error ? error.message : String(error)}`);
+      return;
+    }
+    const newId = String(fork?.session_id || "");
+    if (!newId) {
+      log("Fork failed: the runtime returned no session id.");
+      return;
+    }
+    try {
+      const switched = await restoreSession(newId, {
+        switchSession: true,
+        announce: (info) => log(() => sessionSwitchedText(info)),
+      });
+      if (!switched) {
+        return;
+      }
+    } catch (error) {
+      log(`Forked to ${newId}, but switching failed: ${error instanceof Error ? error.message : String(error)}`);
+      return;
+    }
+    const kept = selected.id
+      ? Math.max(0, messages.findIndex((message) => String(message.id || "") === selected.id))
+      : messages.length;
+    log(`Forked ${newId} ← ${fork.forked_from} (${kept === messages.length ? `kept all ${kept}` : `kept the first ${kept} of ${messages.length}`} messages).`);
+    if (selected.text) {
+      state.input.prefill = selected.text;
+    }
+  }
+
   function startCompactCommand() {
     if (state.display.activeCompact) {
       log("Compact is already running.");
@@ -305,6 +373,7 @@ export function createCliRuntimeController({
     runGoalCommand,
     refreshGoalState,
     runSessionsSelector,
+    runForkSelector,
     startCompactCommand,
     runModelSelector,
     runEffortCommand,
@@ -321,6 +390,24 @@ function mergeSlashCommands(...groups) {
     }
   }
   return [...byName.values()].sort((left, right) => left.name.localeCompare(right.name));
+}
+
+const FORK_MENU_MESSAGE_LIMIT = 50;
+const FORK_END_LABEL = "Fork at current end (keep full history)";
+const FORK_CONTEXT_KINDS = new Set(["skill_snapshot", "skill_catalog", "goal_checkpoint"]);
+
+function isForkableUserMessage(message) {
+  if (message?.role !== "user" || !String(message?.content || "").trim()) {
+    return false;
+  }
+  const kind = message?.meta?.kind;
+  return !kind || !FORK_CONTEXT_KINDS.has(kind);
+}
+
+function forkPointLabel(message) {
+  const rawTime = String(message.ts || "").slice(11, 16);
+  const time = /^\d{2}:\d{2}$/.test(rawTime) ? rawTime : "";
+  return [time, singleLineText(message.content).slice(0, 60)].filter(Boolean).join(" · ");
 }
 
 function sessionMenuOption(session) {

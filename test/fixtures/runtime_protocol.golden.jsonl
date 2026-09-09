@@ -17,5 +17,7 @@
 {"kind":"response","request_id":"unsubscribe-1","result":{"ok":true,"subscribed":[]}}
 {"kind":"request","request_id":"delete-1","method":"session/delete","params":{"session_id":"session-9"}}
 {"kind":"response","request_id":"delete-1","result":{"ok":true,"deleted":"session-9"}}
+{"kind":"request","request_id":"fork-1","method":"session/fork","params":{"session_id":"session-1","before_message_id":"msg-3"}}
+{"kind":"response","request_id":"fork-1","result":{"session_id":"session-1-fork","forked_from":"session-1"}}
 {"kind":"request","request_id":"ping-1","method":"ping","params":{}}
 {"kind":"response","request_id":"ping-1","result":{"ok":true}}

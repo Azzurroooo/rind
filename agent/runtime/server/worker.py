@@ -22,7 +22,7 @@ from agent.bootstrap import AgentContainer, SharedRuntimeResources, build_agent_
 from agent.infrastructure.config import AppSettings, validate_settings
 from agent.infrastructure.config.settings_loader import DEFAULT_MODEL, load_settings
 from agent.infrastructure.llm import OpenAIClientFactory, close_async_client
-from agent.infrastructure.persistence import JsonlSessionStore, ToolOutputStore
+from agent.infrastructure.persistence import JsonlSessionStore, ToolOutputStore, fork_session
 from agent.infrastructure.persistence.session_files import SessionFiles
 from agent.infrastructure.persistence.session_index_repository import SessionIndexRepository
 from agent.infrastructure.paths import resolve_session_base, validate_session_id
@@ -70,12 +70,17 @@ class SessionRepository:
             base = resolve_session_base(root, clean)
             if base.exists():
                 shutil.rmtree(base)
-            index_path = (
-                os.path.join(root, "index.json")
-                if self.session_dir
-                else os.path.join(JsonlSessionStore.default_rind_home(), "session_index.json")
-            )
-            SessionIndexRepository(SessionFiles(), index_path).remove_session(clean)
+            SessionIndexRepository(
+                SessionFiles(), JsonlSessionStore.index_path_for(self.session_dir)
+            ).remove_session(clean)
+
+    async def fork(self, session_id: str, before_message_id: str | None = None) -> dict[str, Any]:
+        clean = validate_session_id(session_id)
+        meta = await asyncio.to_thread(JsonlSessionStore.load_session_metadata, clean, self.session_dir)
+        if meta.get("session_type") == "delegated_task":
+            raise ValueError("Delegated task sessions cannot be forked.")
+        new_id = await asyncio.to_thread(fork_session, self.session_dir, clean, before_message_id=before_message_id)
+        return {"session_id": new_id, "forked_from": clean}
 
         await asyncio.to_thread(_remove)
         return {"session_id": clean, "workspace_root": str(meta.get("workspace_root") or "")}
@@ -885,6 +890,10 @@ class RuntimeWorker:
     async def delete_session(self, session_id: str) -> dict[str, Any]:
         clean = validate_session_id(session_id)
         return await self.repository.delete(clean)
+
+    async def fork_session(self, session_id: str, before_message_id: str | None = None) -> dict[str, Any]:
+        clean = validate_session_id(session_id)
+        return await self.repository.fork(clean, before_message_id)
 
     async def close(self) -> None:
         await self.execution.close()

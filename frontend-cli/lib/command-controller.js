@@ -66,6 +66,14 @@ export function createCommandController({
       await input.runSessionsSelector?.();
       return;
     }
+    if (isBareForkCommand(text)) {
+      if (input.isTerminal && input.runForkSelector) {
+        await input.runForkSelector();
+      } else {
+        output.log?.("/fork requires an interactive terminal.");
+      }
+      return;
+    }
     const result = await request(runtimeMethods.commandExecute, { input: text });
     await applyResult(result);
   }
@@ -152,6 +160,10 @@ function isLocalCommand(value, name) {
 
 function isBareSessionsCommand(value) {
   return String(value || "").trim().toLowerCase() === "/sessions";
+}
+
+function isBareForkCommand(value) {
+  return String(value || "").trim().toLowerCase() === "/fork";
 }
 
 function isCompactCommand(value) {

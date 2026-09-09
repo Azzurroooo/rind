@@ -218,6 +218,7 @@ const runtimeController = createCliRuntimeController({
   askModelMenu: (...args) => inputActions.askModelMenu(...args),
   askEffortMenu: (...args) => inputActions.askEffortMenu(...args),
   askSessionMenu: (...args) => inputActions.askSessionMenu(...args),
+  askForkPointMenu: (...args) => inputActions.askForkPointMenu(...args),
   askTeamBlueprint: (...args) => inputActions.askTeamBlueprint(...args),
   restoreLiveTurn,
   renderHistory,
@@ -262,6 +263,7 @@ commandController = createCommandController({
     },
     startCompactCommand: runtimeController.startCompactCommand,
     runSessionsSelector: runtimeController.runSessionsSelector,
+    runForkSelector: runtimeController.runForkSelector,
     runLocalCommand: async (text) => {
       if (!Object.keys(sessionState.settings).length) {
         sessionState.settings = await loadLocalSettings(undefined, sessionState.info.workspace_root || sessionState.info.cwd || process.cwd());
@@ -511,7 +513,7 @@ function composeFrame(width = process.stdout.columns || 80) {
   if (!session) {
     return null;
   }
-  const choiceMenu = ["model", "theme", "sessions", "team-blueprints"].includes(session.mode);
+  const choiceMenu = ["model", "theme", "sessions", "team-blueprints", "fork"].includes(session.mode);
   if (session.mode === "prompt" && session.menuState) {
     session.menuState.setInput(session.editor.input());
   }
@@ -560,16 +562,7 @@ function composeFrame(width = process.stdout.columns || 80) {
       menuCursor: editing ? menu.cursor : null,
     };
   }
-  if (session.mode === "sessions") {
-    return {
-      showCaret,
-      prompt: mainPromptText(width),
-      inputText: session.inputText,
-      cursor: { line: 0, column: session.inputText.length },
-      menuText: sessionMenuText(session.choiceState.options(), session.choiceState.selectedIndex()).trimEnd(),
-    };
-  }
-  if (session.mode === "team-blueprints") {
+  if (session.mode === "sessions" || session.mode === "team-blueprints" || session.mode === "fork") {
     return {
       showCaret,
       prompt: mainPromptText(width),

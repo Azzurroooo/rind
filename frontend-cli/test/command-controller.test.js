@@ -146,6 +146,41 @@ test("exit remains a Surface-local command", async () => {
   assert.deepEqual(calls, ["Goodbye.", "shutdown", "exit"]);
 });
 
+test("bare /fork routes to the fork selector on a terminal", async () => {
+  const calls = [];
+  const controller = createCommandController({
+    request: async () => ({}),
+    turn: { submit() {} },
+    input: {
+      isTerminal: true,
+      runForkSelector: async () => calls.push("fork-selector"),
+    },
+    output: { log() {} },
+  });
+
+  assert.equal(await controller.handle("/fork"), true);
+  assert.equal(await controller.handle("/FORK"), true);
+  assert.deepEqual(calls, ["fork-selector", "fork-selector"]);
+});
+
+test("bare /fork without a terminal explains the requirement", async () => {
+  const logs = [];
+  const calls = [];
+  const controller = createCommandController({
+    request: async (method, params) => {
+      calls.push({ method, params });
+      return {};
+    },
+    turn: { submit() {} },
+    input: { isTerminal: false },
+    output: { log: (text) => logs.push(text) },
+  });
+
+  assert.equal(await controller.handle("/fork"), true);
+  assert.deepEqual(logs, ["/fork requires an interactive terminal."]);
+  assert.deepEqual(calls, []);
+});
+
 test("local slash results do not call Runtime", async () => {
   const calls = [];
   const controller = createCommandController({
@@ -176,6 +211,7 @@ test("local command catalog stays complete before the runtime starts", async () 
     "config",
     "doctor",
     "effort",
+    "fork",
     "goal",
     "help",
     "init",
@@ -187,7 +223,7 @@ test("local command catalog stays complete before the runtime starts", async () 
     "team",
     "theme",
   ]);
-  for (const name of ["compact", "init", "sessions", "skill", "team"]) {
+  for (const name of ["compact", "fork", "init", "sessions", "skill", "team"]) {
     const result = await executeLocalSlashCommand(`/${name}`, {
       settings: { model: "m" },
       sessionInfo: {},

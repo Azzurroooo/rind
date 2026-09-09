@@ -89,6 +89,17 @@ class SessionFiles:
                         continue
         return items
 
+    def write_jsonl(self, path: str, records: list[dict]) -> None:
+        payload = "".join(json.dumps(record, ensure_ascii=False) + "\n" for record in records)
+        try:
+            with self._get_lock_for_path(path):
+                with open(path, "w", encoding="utf-8") as f:
+                    f.write(payload)
+                    f.flush()
+                    os.fsync(f.fileno())
+        except Timeout as e:
+            raise RuntimeError(f"Session is currently in use by another process. Failed to acquire lock for: {path}") from e
+
     def _remove_tmp(self, path: str) -> None:
         try:
             if os.path.exists(path):

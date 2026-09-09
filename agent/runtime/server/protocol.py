@@ -36,6 +36,7 @@ class RuntimeMethod:
     SESSION_NEW = "session/new"
     SESSION_LIST = "session/list"
     SESSION_SWITCH = "session/switch"
+    SESSION_FORK = "session/fork"
     SESSION_REPLAY = "session/replay"
     SESSION_PROMPT = "session/prompt"
     SESSION_CANCEL = "session/cancel"
@@ -71,6 +72,7 @@ SESSION_SCOPED_METHODS = frozenset(
         RuntimeMethod.SESSION_PROMPT,
         RuntimeMethod.SESSION_REPLAY,
         RuntimeMethod.SESSION_SWITCH,
+        RuntimeMethod.SESSION_FORK,
         RuntimeMethod.SESSION_CANCEL,
         RuntimeMethod.SESSION_SUBSCRIBE,
         RuntimeMethod.SESSION_UNSUBSCRIBE,
@@ -107,6 +109,7 @@ CORE_METHODS = (
     RuntimeMethod.SESSION_NEW,
     RuntimeMethod.SESSION_LIST,
     RuntimeMethod.SESSION_SWITCH,
+    RuntimeMethod.SESSION_FORK,
     RuntimeMethod.SESSION_REPLAY,
     RuntimeMethod.SESSION_PROMPT,
     RuntimeMethod.SESSION_CANCEL,

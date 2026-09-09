@@ -1084,6 +1084,9 @@ class WorkerStdioRuntimeServer:
             if method == RuntimeMethod.SESSION_DELETE:
                 await self._delete_session(request)
                 return
+            if method == RuntimeMethod.SESSION_FORK:
+                await self._fork_session(request)
+                return
             if method in {RuntimeMethod.SESSION_SUBSCRIBE, RuntimeMethod.SESSION_UNSUBSCRIBE}:
                 await self._subscription_request(request)
                 return
@@ -1325,6 +1328,25 @@ class WorkerStdioRuntimeServer:
         await self._worker.delete_session(session_id)
         self._subscribed.discard(session_id)
         await self._respond(request, {"ok": True, "deleted": session_id})
+
+    async def _fork_session(self, request: dict[str, Any]) -> None:
+        session_id = await self._required_session_id(request)
+        if session_id is None:
+            return
+        if session_id in self._worker.execution.active_session_ids():
+            await self._respond_error(request, "Cannot fork a session with an active turn.", "TurnActive")
+            return
+        params = request.get("params") if isinstance(request.get("params"), dict) else {}
+        before_message_id = params.get("before_message_id")
+        if before_message_id is not None and not isinstance(before_message_id, str):
+            await self._respond_error(request, "before_message_id must be a string.", "InvalidRequest")
+            return
+        try:
+            result = await self._worker.fork_session(session_id, before_message_id)
+        except ValueError as exc:
+            await self._respond_error(request, str(exc), "InvalidRequest")
+            return
+        await self._respond(request, result)
 
     async def _subscription_request(self, request: dict[str, Any]) -> None:
         method = str(request.get("method") or "")

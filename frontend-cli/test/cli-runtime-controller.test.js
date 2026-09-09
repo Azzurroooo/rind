@@ -13,16 +13,33 @@ const methods = {
   goalClear: "rind/goal/clear",
   commandExecute: "rind/command/execute",
   sessionSwitch: "session/switch",
+  sessionFork: "session/fork",
   sessionReplay: "session/replay",
   modelSet: "model/set",
 };
 
-function createHarness({ selectedSession = null, replayError = null, switchGate = null } = {}) {
+const forkMenuMessages = [
+  { id: "sys", role: "system", content: "sys" },
+  { id: "u1", role: "user", ts: "2026-09-09T03:30:00+00:00", content: "first question" },
+  { id: "a1", role: "assistant", content: "first answer" },
+  { id: "u2", role: "user", ts: "2026-09-09T03:35:00+00:00", content: "second question" },
+  { id: "a2", role: "assistant", content: "second answer" },
+];
+
+function createHarness({
+  selectedSession = null,
+  selectedFork = null,
+  replayError = null,
+  forkError = null,
+  switchMismatch = false,
+  switchGate = null,
+} = {}) {
   const state = createCliState();
   state.session.info = { session_id: "session-a", model: "model-a" };
   state.turn.id = "turn-a";
   const requests = [];
   const history = [];
+  const logs = [];
   const client = {
     startCount: 0,
     child: null,
@@ -53,7 +70,7 @@ function createHarness({ selectedSession = null, replayError = null, switchGate 
           return switchGate.promise;
         }
         return Promise.resolve({
-          session_id: params.session_id,
+          session_id: switchMismatch ? "session-other" : params.session_id,
           workspace_root: "E:/workspace-b",
           model: "model-b",
           goal: null,
@@ -62,17 +79,29 @@ function createHarness({ selectedSession = null, replayError = null, switchGate 
           resume_preview: "",
         });
       }
+      if (method === methods.sessionFork) {
+        if (forkError) {
+          return Promise.reject(forkError);
+        }
+        return Promise.resolve({
+          session_id: "session-fork-1",
+          forked_from: params.session_id,
+        });
+      }
       if (method === methods.sessionReplay) {
         if (replayError) {
           return Promise.reject(replayError);
         }
+        const messages = params.session_id === "session-a"
+          ? forkMenuMessages
+          : [
+            { role: "user", content: "previous prompt" },
+            { role: "assistant", content: "previous answer" },
+          ];
         return Promise.resolve({
           session_id: params.session_id,
           model: "model-b-replayed",
-          messages: [
-            { role: "user", content: "previous prompt" },
-            { role: "assistant", content: "previous answer" },
-          ],
+          messages,
           live_turn: null,
         });
       }
@@ -87,7 +116,7 @@ function createHarness({ selectedSession = null, replayError = null, switchGate 
   const controller = createCliRuntimeController({
     client,
     methods,
-    sessionScopedMethods: new Set(["rind/session/steer"]),
+    sessionScopedMethods: new Set(["rind/session/steer", methods.sessionFork, methods.sessionReplay]),
     turnScopedMethods: new Set(["rind/session/steer"]),
     requireInitialization: (value) => value,
     state,
@@ -97,17 +126,18 @@ function createHarness({ selectedSession = null, replayError = null, switchGate 
     getCompactContextState: () => ({ clear() {} }),
     askModelMenu: async () => "",
     askSessionMenu: async () => selectedSession,
+    askForkPointMenu: async () => selectedFork,
     restoreLiveTurn() {},
     renderHistory: (messages) => history.push(messages),
     clearPendingInputs() {},
     closeAssistant() {},
     refreshInputState() {},
     updateGoalState() {},
-    log() {},
+    log: (value) => logs.push(typeof value === "function" ? value() : value),
     writeError() {},
     redraw() {},
   });
-  return { state, client, requests, history, controller };
+  return { state, client, requests, history, logs, controller };
 }
 
 test("runtime controller shares initialization and injects session and turn IDs", async () => {
@@ -209,6 +239,81 @@ test("session selector ignores an older concurrent switch response", async () =>
 
   assert.equal(harness.history.length, 1);
   assert.equal(harness.state.session.info.session_id, "session-b");
+});
+
+test("fork selector forks at the current end and switches without prefill", async () => {
+  const harness = createHarness({ selectedFork: { id: "", label: "Fork at current end (keep full history)" } });
+  await harness.controller.runForkSelector();
+
+  const forkRequest = harness.requests.find((item) => item.method === methods.sessionFork);
+  assert.deepEqual(forkRequest.params, { session_id: "session-a" });
+  assert.equal(harness.state.session.info.session_id, "session-fork-1");
+  assert.equal(harness.state.input.prefill, "");
+  assert.ok(harness.logs.some((line) => line.includes("Forked session-fork-1 ← session-a (kept all 5 messages)")));
+  assert.equal(harness.history.length, 1);
+});
+
+test("fork selector truncates before the chosen message and prefills its text", async () => {
+  const harness = createHarness({ selectedFork: { id: "u2", label: "03:35 · second question", text: "second question" } });
+  await harness.controller.runForkSelector();
+
+  const forkRequest = harness.requests.find((item) => item.method === methods.sessionFork);
+  assert.equal(forkRequest.params.before_message_id, "u2");
+  assert.equal(forkRequest.params.session_id, "session-a");
+  assert.equal(harness.state.session.info.session_id, "session-fork-1");
+  assert.equal(harness.state.input.prefill, "second question");
+  assert.ok(harness.logs.some((line) => line.includes("kept the first 3 of 5 messages")));
+});
+
+test("fork selector refuses during an active turn", async () => {
+  const harness = createHarness({ selectedFork: { id: "" } });
+  harness.state.turn.active = true;
+  await harness.controller.runForkSelector();
+
+  assert.equal(harness.requests.length, 0);
+  assert.equal(harness.state.session.info.session_id, "session-a");
+  assert.deepEqual(harness.logs, ["Cannot fork while a turn is running. Wait for it to finish or stop it first."]);
+});
+
+test("fork selector refuses delegated and empty sessions", async () => {
+  const delegated = createHarness();
+  delegated.state.session.info.session_type = "delegated_task";
+  await delegated.controller.runForkSelector();
+  assert.deepEqual(delegated.logs, ["Delegated task sessions cannot be forked."]);
+
+  const empty = createHarness();
+  empty.client.request = (method, params) => {
+    if (method === methods.sessionReplay) {
+      return Promise.resolve({ session_id: params.session_id, messages: [{ role: "system", content: "sys" }] });
+    }
+    return Promise.resolve({});
+  };
+  await empty.controller.runForkSelector();
+  assert.deepEqual(empty.logs, ["Nothing to fork: this session has no messages yet."]);
+});
+
+test("fork selector cancel leaves state untouched", async () => {
+  const harness = createHarness({ selectedFork: null });
+  await harness.controller.runForkSelector();
+
+  assert.equal(harness.requests.some((item) => item.method === methods.sessionFork), false);
+  assert.equal(harness.state.session.info.session_id, "session-a");
+});
+
+test("fork selector reports fork failures without switching", async () => {
+  const harness = createHarness({ selectedFork: { id: "" }, forkError: new Error("Nothing to fork") });
+  await harness.controller.runForkSelector();
+
+  assert.equal(harness.state.session.info.session_id, "session-a");
+  assert.ok(harness.logs.some((line) => line.includes("Fork failed: Nothing to fork")));
+});
+
+test("fork selector keeps the fork reachable when switching fails", async () => {
+  const harness = createHarness({ selectedFork: { id: "" }, switchMismatch: true });
+  await harness.controller.runForkSelector();
+
+  assert.equal(harness.state.session.info.session_id, "session-a");
+  assert.ok(harness.logs.some((line) => line.includes("Forked to session-fork-1, but switching failed")));
 });
 
 function deferred() {

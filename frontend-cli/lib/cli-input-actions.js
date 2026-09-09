@@ -269,6 +269,10 @@ export function createCliInputActions({
       handleTeamBlueprintInput(session, event);
       return;
     }
+    if (session.mode === "fork") {
+      handleForkInput(session, event);
+      return;
+    }
     const key = event;
     const matches = session.menuState ? syncSlashMenu(session) : [];
     const menuKey = !key.ctrl && !key.alt && !key.shift && ["escape", "up", "down"].includes(key.name);
@@ -308,7 +312,7 @@ export function createCliInputActions({
       return;
     }
     const session = state.input.session;
-    if (!session || session.mode === "model" || session.mode === "theme" || session.mode === "sessions") {
+    if (!session || session.mode === "model" || session.mode === "theme" || session.mode === "sessions" || session.mode === "fork") {
       return;
     }
     if (session.mode === "question" && !session.questionState.isEditing()) {
@@ -549,6 +553,27 @@ export function createCliInputActions({
     if (!modified && session.choiceState.handleKey(key)) output.redraw();
   }
 
+  function handleForkInput(session, key) {
+    const modified = key.ctrl || key.alt || key.shift;
+    if (!modified && (key.name === "enter" || key.name === "return")) {
+      completeTtyInput(session, session.items[session.choiceState.selectedIndex()] || null, false);
+      return;
+    }
+    if (!modified && key.name === "escape") return completeTtyInput(session, null, false);
+    if (!modified && session.choiceState.handleKey(key)) output.redraw();
+  }
+
+  function askForkPointMenu(items) {
+    return new Promise((resolve) => {
+      const choiceState = createChoiceMenuState(items.map((item) => item.label), items[0].label);
+      const session = { mode: "fork", inputText: "/fork", choiceState, items, resolve };
+      state.input.session = session;
+      state.input.active = true;
+      cancelActiveInput = () => completeTtyInput(session, null, false);
+      output.redraw(true);
+    });
+  }
+
   function syncSlashMenu(session) {
     session.menuState.setInput(session.editor.input());
     return session.menuState.matches();
@@ -579,6 +604,7 @@ export function createCliInputActions({
     askThemeMenu,
     askSessionMenu,
     askTeamBlueprint,
+    askForkPointMenu,
     cancel: () => cancelActiveInput?.(),
   };
 }

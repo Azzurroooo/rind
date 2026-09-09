@@ -9,6 +9,7 @@ import {
   requireRuntimeInitialization,
   runtimeMethods,
   runtimeProtocolVersion,
+  sessionScopedMethods,
   runtimeEventType,
   runtimeRequestId,
   isRuntimeEventForTurn,
@@ -93,6 +94,7 @@ test("runtime protocol recognizes the shared golden event fixture", () => {
     "subscribe-1",
     "unsubscribe-1",
     "delete-1",
+    "fork-1",
     "ping-1",
   ]);
   assert.deepEqual(responses.map(runtimeRequestId), [
@@ -104,8 +106,14 @@ test("runtime protocol recognizes the shared golden event fixture", () => {
     "subscribe-1",
     "unsubscribe-1",
     "delete-1",
+    "fork-1",
     "ping-1",
   ]);
+});
+
+test("runtime protocol exposes session fork as a session-scoped method", () => {
+  assert.equal(runtimeMethods.sessionFork, "session/fork");
+  assert.equal(sessionScopedMethods.has(runtimeMethods.sessionFork), true);
 });
 
 test("runtime protocol exposes separate steering and follow-up methods", () => {
