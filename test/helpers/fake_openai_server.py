@@ -41,7 +41,6 @@ class FakeOpenAIServer:
     def script_error(self, status: int = 500) -> None:
         with self._lock:
             self._script.append({"kind": "error", "status": status})
-
     # -- lifecycle -----------------------------------------------------------
 
     def start(self, port: int = 0) -> None:
@@ -73,6 +72,29 @@ class FakeOpenAIServer:
                 if script["kind"] == "error":
                     self._reply(script["status"], {"error": {"message": "scripted failure"}})
                     return
+                if not body.get("stream"):
+                    # Non-streaming callers (compaction) expect one JSON completion.
+                    prompt_chars = sum(len(str(m.get("content") or "")) for m in body.get("messages", []))
+                    content = "".join(script.get("chunks", [])) if script["kind"] == "text" else ""
+                    self._reply(200, {
+                        "id": "chatcmpl-test",
+                        "object": "chat.completion",
+                        "created": int(time.time()),
+                        "model": str(body.get("model") or "fake-model"),
+                        "choices": [{
+                            "index": 0,
+                            "message": {"role": "assistant", "content": content or "(no script)"},
+                            "finish_reason": "stop",
+                        }],
+                        "usage": {
+                            "prompt_tokens": int(prompt_chars / 3.5) + 2,
+                            "completion_tokens": 21,
+                            "total_tokens": int(prompt_chars / 3.5) + 23,
+                            "prompt_tokens_details": {"cached_tokens": 0},
+                            "completion_tokens_details": {"reasoning_tokens": 0},
+                        },
+                    })
+                    return
                 self.send_response(200)
                 self.send_header("Content-Type", "text/event-stream")
                 self.send_header("Cache-Control", "no-cache")
@@ -97,6 +119,22 @@ class FakeOpenAIServer:
                          "function": {"name": script["name"], "arguments": arguments}},
                     ]}))
                     emit(self._chunk(request_id, created, model, {}, finish="tool_calls"))
+                    if body.get("stream_options", {}).get("include_usage"):
+                        prompt_chars = sum(len(str(m.get("content") or "")) for m in body.get("messages", []))
+                        emit({
+                            "id": request_id,
+                            "object": "chat.completion.chunk",
+                            "created": created,
+                            "model": model,
+                            "choices": [],
+                            "usage": {
+                                "prompt_tokens": int(prompt_chars / 3.5) + 2,
+                                "completion_tokens": 21,
+                                "total_tokens": int(prompt_chars / 3.5) + 23,
+                                "prompt_tokens_details": {"cached_tokens": 0},
+                                "completion_tokens_details": {"reasoning_tokens": 0},
+                            },
+                        })
                     self.wfile.write(b"data: [DONE]\n\n")
                     self.wfile.flush()
                     return
@@ -108,6 +146,23 @@ class FakeOpenAIServer:
                     if script["delay_ms"]:
                         time.sleep(script["delay_ms"] / 1000.0)
                 emit(self._chunk(request_id, created, model, {}, finish=script.get("finish", "stop")))
+                if body.get("stream_options", {}).get("include_usage"):
+                    # Providers echo measured usage on a choices-free final chunk.
+                    prompt_chars = sum(len(str(m.get("content") or "")) for m in body.get("messages", []))
+                    emit({
+                        "id": request_id,
+                        "object": "chat.completion.chunk",
+                        "created": created,
+                        "model": model,
+                        "choices": [],
+                        "usage": {
+                            "prompt_tokens": int(prompt_chars / 3.5) + 2,
+                            "completion_tokens": 21,
+                            "total_tokens": int(prompt_chars / 3.5) + 23,
+                            "prompt_tokens_details": {"cached_tokens": 0},
+                            "completion_tokens_details": {"reasoning_tokens": 0},
+                        },
+                    })
                 self.wfile.write(b"data: [DONE]\n\n")
                 self.wfile.flush()
 

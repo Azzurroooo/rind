@@ -126,6 +126,17 @@ def test_totals_reconcile_with_raw_rows():
     assert totals["total"] == 180
 
 
+def test_day_buckets_follow_the_record_own_offset():
+    # 01:00 on 09-10 in UTC+8 is 17:00 on 09-09 in UTC: a user's local calendar
+    # must win, so the row lands on their day, not the server's.
+    record = _record("2026-09-10T01:00:00+08:00", total=77)
+
+    summary = summarize_usage([record], 7, now=NOW)
+
+    assert [row["day"] for row in summary["by_day"]] == ["09-10"]
+    assert summary["by_day"][0]["tokens"] == 77
+
+
 def test_empty_ledger_yields_an_all_zero_structure():
     summary = summarize_usage([], 7, now=NOW)
 

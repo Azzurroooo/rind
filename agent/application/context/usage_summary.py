@@ -54,7 +54,7 @@ def summarize_usage(
         totals["samples"] += 1
         if record.get("sampling_kind") == "compact":
             totals["compactions"] += 1
-        day = ts.astimezone(timezone.utc).strftime("%m-%d")
+        day = ts.strftime("%m-%d")
         by_day[day] = by_day.get(day, 0) + volume
         model = str(record.get("model") or "unknown")
         model_bucket = by_model.setdefault(model, {"tokens": 0, "samples": 0})
@@ -66,13 +66,19 @@ def summarize_usage(
             if session is None:
                 session = sessions[session_id] = {
                     "session_id": session_id,
+                    "_last": ts,
                     "updated_at": ts.isoformat(),
                     "tokens": 0,
                     "samples": 0,
                 }
-            session["updated_at"] = max(session["updated_at"], ts.isoformat())
+            if ts > session["_last"]:
+                session["_last"] = ts
+                session["updated_at"] = ts.isoformat()
             session["tokens"] += volume
             session["samples"] += 1
+
+    for session in sessions.values():
+        session.pop("_last", None)
 
     return {
         "days": window_days,
