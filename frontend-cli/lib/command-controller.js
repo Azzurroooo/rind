@@ -74,6 +74,16 @@ export function createCommandController({
       }
       return;
     }
+    if (isBareContextCommand(text)) {
+      if (input.isTerminal && input.runContextBoard) {
+        await input.runContextBoard();
+      } else if (input.printContextReport) {
+        await input.printContextReport();
+      } else {
+        output.log?.("/context requires a connected runtime.");
+      }
+      return;
+    }
     const result = await request(runtimeMethods.commandExecute, { input: text });
     await applyResult(result);
   }
@@ -164,6 +174,10 @@ function isBareSessionsCommand(value) {
 
 function isBareForkCommand(value) {
   return String(value || "").trim().toLowerCase() === "/fork";
+}
+
+function isBareContextCommand(value) {
+  return String(value || "").trim().toLowerCase() === "/context";
 }
 
 function isCompactCommand(value) {

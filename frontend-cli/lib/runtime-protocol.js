@@ -29,6 +29,8 @@ export const runtimeMethods = Object.freeze({
   goalSet: "rind/goal/set",
   goalStatus: "rind/goal/status",
   goalClear: "rind/goal/clear",
+  contextInspect: "rind/context/inspect",
+  usageSummary: "rind/usage/summary",
 });
 
 export const sessionScopedMethods = new Set([
@@ -53,6 +55,7 @@ export const sessionScopedMethods = new Set([
   runtimeMethods.goalSet,
   runtimeMethods.goalStatus,
   runtimeMethods.goalClear,
+  runtimeMethods.contextInspect,
 ]);
 
 export const turnScopedMethods = new Set([

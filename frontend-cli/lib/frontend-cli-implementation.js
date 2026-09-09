@@ -220,6 +220,7 @@ const runtimeController = createCliRuntimeController({
   askSessionMenu: (...args) => inputActions.askSessionMenu(...args),
   askForkPointMenu: (...args) => inputActions.askForkPointMenu(...args),
   askTeamBlueprint: (...args) => inputActions.askTeamBlueprint(...args),
+  askContextBoard: (...args) => inputActions.askContextBoard(...args),
   restoreLiveTurn,
   renderHistory,
   clearPendingInputs: (...args) => inputActions.clearPendingInputs(...args),
@@ -264,6 +265,8 @@ commandController = createCommandController({
     startCompactCommand: runtimeController.startCompactCommand,
     runSessionsSelector: runtimeController.runSessionsSelector,
     runForkSelector: runtimeController.runForkSelector,
+    runContextBoard: runtimeController.runContextBoard,
+    printContextReport: runtimeController.printContextReport,
     runLocalCommand: async (text) => {
       if (!Object.keys(sessionState.settings).length) {
         sessionState.settings = await loadLocalSettings(undefined, sessionState.info.workspace_root || sessionState.info.cwd || process.cwd());
@@ -569,6 +572,17 @@ function composeFrame(width = process.stdout.columns || 80) {
       inputText: session.inputText,
       cursor: { line: 0, column: session.inputText.length },
       menuText: sessionMenuText(session.choiceState.options(), session.choiceState.selectedIndex()).trimEnd(),
+    };
+  }
+  if (session.mode === "context-board") {
+    return {
+      showCaret: false,
+      prompt: "",
+      inputText: "",
+      cursor: { line: 0, column: 0 },
+      menuText: typeof session.board?.render === "function"
+        ? session.board.render(session.pageIndex, width)
+        : "",
     };
   }
   const matches = session.menuState

@@ -129,7 +129,11 @@ def _assign_context_kind(
         assign("rind_docs", "RIND.md", total)
         return
     # Unknown tags form their own bucket, displayed under their original name.
-    assign(f"kind:{kind}", _CONTEXT_KIND_LABELS.get(kind, kind), total)
+    label = _CONTEXT_KIND_LABELS.get(kind, kind)
+    if label is kind:
+        assign(f"kind:{kind}", kind, total)
+        return
+    assign(kind, label, total)
 
 
 def _assign_assistant(
