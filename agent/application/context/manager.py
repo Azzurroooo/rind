@@ -32,6 +32,9 @@ class ContextBuildResult:
     messages: list[dict]
     stats: dict = field(default_factory=dict)
     decisions: dict = field(default_factory=dict)
+    # Pre-strip copy of `messages` that keeps `_context_kind` tags so the
+    # composition snapshot buckets injections the way the pipeline built them.
+    internal_messages: list[dict] = field(default_factory=list)
 
 
 class ContextManager:
@@ -99,12 +102,15 @@ class ContextManager:
         )
 
         final_messages = [self._strip_internal_fields(message) for message in messages]
-        final_estimate = self._estimator.estimate_messages(final_messages)
+        # Score the tagged list, not the stripped projection: the composition
+        # snapshot re-estimates these exact payloads, keeping section sums
+        # equal to stats["estimated_input_tokens"] with zero drift.
+        final_estimate = self._estimator.estimate_messages(messages)
 
         dropped_count = 0
         while allow_rescue and final_estimate.over_hard_limit and len(final_messages) > 2:
             messages, final_messages = self.rescue_context(messages, final_messages)
-            final_estimate = self._estimator.estimate_messages(final_messages)
+            final_estimate = self._estimator.estimate_messages(messages)
             dropped_count += 1
             if dropped_count > 50:
                 break
@@ -145,7 +151,12 @@ class ContextManager:
             **rind_decisions,
             **skill_decisions,
         }
-        return ContextBuildResult(messages=final_messages, stats=stats, decisions=decisions)
+        return ContextBuildResult(
+            messages=final_messages,
+            stats=stats,
+            decisions=decisions,
+            internal_messages=[dict(message) for message in messages],
+        )
 
     async def _build_token_pressure_status(self, session, final_estimate) -> dict:
         budget = self._estimator.budget

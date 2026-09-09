@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import copy
 import inspect
 import json
 import signal
@@ -1087,6 +1088,12 @@ class WorkerStdioRuntimeServer:
             if method == RuntimeMethod.SESSION_FORK:
                 await self._fork_session(request)
                 return
+            if method == RuntimeMethod.RIND_CONTEXT_INSPECT:
+                await self._context_inspect(request)
+                return
+            if method == RuntimeMethod.RIND_USAGE_SUMMARY:
+                await self._usage_summary(request)
+                return
             if method in {RuntimeMethod.SESSION_SUBSCRIBE, RuntimeMethod.SESSION_UNSUBSCRIBE}:
                 await self._subscription_request(request)
                 return
@@ -1347,6 +1354,31 @@ class WorkerStdioRuntimeServer:
             await self._respond_error(request, str(exc), "InvalidRequest")
             return
         await self._respond(request, result)
+
+    async def _context_inspect(self, request: dict[str, Any]) -> None:
+        """Read the session's latest context breakdown and sampling usage from meta."""
+        session_id = await self._required_session_id(request)
+        if session_id is None:
+            return
+        meta = await self._worker.repository.metadata(session_id)
+        breakdown = meta.get("latest_context_breakdown")
+        usage = meta.get("latest_sampling_usage")
+        await self._respond(
+            request,
+            {
+                "session_id": session_id,
+                "breakdown": copy.deepcopy(breakdown) if isinstance(breakdown, dict) else None,
+                "latest_usage": copy.deepcopy(usage) if isinstance(usage, dict) else None,
+            },
+        )
+
+    async def _usage_summary(self, request: dict[str, Any]) -> None:
+        params = request.get("params") if isinstance(request.get("params"), dict) else {}
+        days = params.get("days", 7)
+        if isinstance(days, bool) or not isinstance(days, int) or not 1 <= days <= 365:
+            await self._respond_error(request, "rind/usage/summary days must be an integer from 1 to 365.", "InvalidRequest")
+            return
+        await self._respond(request, await self._worker.usage_summary(days))
 
     async def _subscription_request(self, request: dict[str, Any]) -> None:
         method = str(request.get("method") or "")

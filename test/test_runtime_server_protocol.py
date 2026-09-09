@@ -234,6 +234,8 @@ def test_golden_event_fixture_matches_python_envelope():
         "session/delete",
         "session/fork",
         "ping",
+        "rind/context/inspect",
+        "rind/usage/summary",
     ]
     assert responses == [
         {
@@ -285,6 +287,54 @@ def test_golden_event_fixture_matches_python_envelope():
             "kind": "response",
             "request_id": "ping-1",
             "result": {"ok": True},
+        },
+        {
+            "kind": "response",
+            "request_id": "context-inspect-1",
+            "result": {
+                "session_id": "session-1",
+                "breakdown": {
+                    "captured_at": "2026-01-01T00:00:04Z",
+                    "turn_id": "turn-1",
+                    "estimated_total": 120,
+                    "context_window_tokens": 1000,
+                    "sections": [
+                        {"key": "chat_user", "label": "Chat · user inputs", "tokens": 120, "messages": 1},
+                    ],
+                },
+                "latest_usage": {
+                    "sampling_kind": "assistant",
+                    "input_tokens": 118,
+                    "cached_input_tokens": 0,
+                    "cache_hit_rate": 0.0,
+                    "output_tokens": 21,
+                    "reasoning_output_tokens": 0,
+                    "total_tokens": 139,
+                    "context_window_tokens": 1000,
+                    "context_usage_percent": 0.118,
+                },
+            },
+        },
+        {
+            "kind": "response",
+            "request_id": "usage-summary-1",
+            "result": {
+                "days": 7,
+                "totals": {
+                    "input": 118,
+                    "cached": 0,
+                    "output": 21,
+                    "reasoning": 0,
+                    "total": 139,
+                    "samples": 1,
+                    "compactions": 0,
+                },
+                "by_day": [{"day": "01-01", "tokens": 139}],
+                "by_model": [{"model": "test-model", "tokens": 139, "samples": 1}],
+                "recent_sessions": [
+                    {"session_id": "session-1", "updated_at": "2026-01-01T00:00:04Z", "tokens": 139, "samples": 1},
+                ],
+            },
         },
     ]
 

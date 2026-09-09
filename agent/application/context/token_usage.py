@@ -54,6 +54,35 @@ def normalize_sampling_usage(
     }
 
 
+USAGE_RECORD_FIELDS = (
+    "sampling_kind",
+    "input_tokens",
+    "cached_input_tokens",
+    "cache_hit_rate",
+    "output_tokens",
+    "reasoning_output_tokens",
+    "total_tokens",
+    "context_window_tokens",
+    "context_usage_percent",
+)
+
+
+def build_usage_record(
+    usage: dict[str, Any],
+    *,
+    session_id: str = "",
+    model: str = "",
+    ts: str | None = None,
+) -> dict[str, Any]:
+    """Shape one normalized sampling into a ledger row: verbatim counting fields plus identity."""
+    source = usage if isinstance(usage, dict) else {}
+    record: dict[str, Any] = {field: source[field] for field in USAGE_RECORD_FIELDS if field in source}
+    record["ts"] = ts or datetime.now(timezone.utc).isoformat()
+    record["session_id"] = str(session_id or "")
+    record["model"] = str(model or "")
+    return record
+
+
 def positive_int(value: Any, default: int | None = None) -> int | None:
     """Parse a positive integer, returning `default` for invalid or non-positive values."""
     try:

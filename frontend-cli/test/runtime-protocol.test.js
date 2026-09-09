@@ -96,6 +96,8 @@ test("runtime protocol recognizes the shared golden event fixture", () => {
     "delete-1",
     "fork-1",
     "ping-1",
+    "context-inspect-1",
+    "usage-summary-1",
   ]);
   assert.deepEqual(responses.map(runtimeRequestId), [
     "turn-1",
@@ -108,6 +110,8 @@ test("runtime protocol recognizes the shared golden event fixture", () => {
     "delete-1",
     "fork-1",
     "ping-1",
+    "context-inspect-1",
+    "usage-summary-1",
   ]);
 });
 

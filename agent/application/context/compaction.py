@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import uuid
@@ -17,7 +18,7 @@ from agent.prompts import build_compact_prompt
 
 from .estimator import DEFAULT_CONTEXT_WINDOW_TOKENS
 from .handoff import CompactionHandoffBuilder
-from .token_usage import normalize_sampling_usage, positive_int
+from .token_usage import build_usage_record, normalize_sampling_usage, positive_int
 
 
 logger = logging.getLogger(__name__)
@@ -31,6 +32,7 @@ class CompactionService:
     max_excerpt_chars: int = 2000
     max_compact_prompt_chars: int = 100000
     plan_snapshot_provider: Callable[[], str] | None = None
+    usage_recorder: Callable[[dict[str, Any]], Any] | None = None
 
     async def compact_async(
         self,
@@ -81,6 +83,7 @@ class CompactionService:
                 usage_error = await self._try_persist_sampling_usage(session, usage)
                 if usage_error:
                     record["usage_persist_error"] = usage_error
+                await self._record_usage(session, usage)
         except Exception as exc:
             record["strategy"] = "deterministic_fallback"
             record["fallback_error"] = {
@@ -358,6 +361,23 @@ class CompactionService:
         except Exception as exc:
             return {"type": type(exc).__name__, "message": str(exc)}
         return None
+
+    async def _record_usage(self, session, usage: dict[str, Any]) -> None:
+        """Best-effort append to the user-level ledger; compaction samples stay counted."""
+        recorder = self.usage_recorder
+        if recorder is None or not isinstance(usage, dict):
+            return
+        record = build_usage_record(
+            usage,
+            session_id=str(getattr(session, "session_id", "") or ""),
+            model=str(getattr(session, "model", "") or ""),
+        )
+        try:
+            await asyncio.to_thread(recorder, record)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.debug("Usage ledger append failed.", exc_info=True)
 
     def _limit_prompt_payload(self, payload: str) -> str:
         if len(payload) <= self.max_compact_prompt_chars:
