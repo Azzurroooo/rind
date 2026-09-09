@@ -74,7 +74,11 @@ export function createCommandController({
       }
       return;
     }
-    if (isBareContextCommand(text)) {
+    if (isContextCommand(text)) {
+      const argument = contextArgument(text);
+      if (argument) {
+        output.log?.("Custom ranges are not supported yet; showing the last 7 days.");
+      }
       if (input.isTerminal && input.runContextBoard) {
         await input.runContextBoard();
       } else if (input.printContextReport) {
@@ -176,8 +180,12 @@ function isBareForkCommand(value) {
   return String(value || "").trim().toLowerCase() === "/fork";
 }
 
-function isBareContextCommand(value) {
-  return String(value || "").trim().toLowerCase() === "/context";
+function isContextCommand(value) {
+  return /^\/context\b/i.test(String(value || "").trim());
+}
+
+function contextArgument(value) {
+  return String(value || "").trim().replace(/^\/context\b/i, "").trim();
 }
 
 function isCompactCommand(value) {

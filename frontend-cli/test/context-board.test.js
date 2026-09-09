@@ -317,6 +317,27 @@ test("/context routes to the board on a TTY and to the report otherwise", async 
   assert.deepEqual(calls, [["board"], ["report"], ["log", "/context requires a connected runtime."]]);
 });
 
+test("/context with a custom range explains the fallback and still opens the board", async () => {
+  const calls = [];
+  const controller = createCommandController({
+    request: async () => ({}),
+    turn: { submit() {} },
+    input: {
+      isTerminal: true,
+      runContextBoard: () => calls.push(["board"]),
+      printContextReport: () => calls.push(["report"]),
+    },
+    output: { log: (text) => calls.push(["log", typeof text === "function" ? text() : text]) },
+  });
+
+  await controller.handle("/context 30");
+
+  assert.deepEqual(calls, [
+    ["log", "Custom ranges are not supported yet; showing the last 7 days."],
+    ["board"],
+  ]);
+});
+
 test("every theme paints the board only with its own palette", () => {
   const originalIsTty = process.stdout.isTTY;
   try {
