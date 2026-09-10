@@ -149,7 +149,7 @@ test("prompt and turn status copy match the compact terminal UI", () => {
   assert.equal(outputBlockText(""), "");
 });
 
-test("promptText includes only model and working directory above the input", () => {
+test("promptText shows model, working directory, and ctx usage above the input", () => {
   assert.equal(
     promptText({ model: "glm-5.1", cwd: "E:\\code\\agent\\rind-ts-cli-process-split" }, {
       context_usage_percent: 0.125,
@@ -158,7 +158,7 @@ test("promptText includes only model and working directory above the input", () 
     }),
     [
       "",
-      "  glm-5.1 · E:\\code\\agent\\rind-ts-cli-process-split",
+      "  glm-5.1 · E:\\code\\agent\\rind-ts-cli-process-split · ctx 13%",
       "  enter send · ↑↓ history · / commands · ? help",
       `  ${"─".repeat(78)}`,
       "  ▷ ",
@@ -246,7 +246,8 @@ test("promptText clips long session status", () => {
   const statusLine = text.split("\n")[1];
 
   assert.ok(statusLine.length <= 80);
-  assert.match(statusLine, /\.\.\.$/);
+  assert.match(statusLine, /\.\.\./);
+  assert.match(statusLine, /ctx 25%$/);
 });
 
 test("promptText extends the divider to the terminal's right edge", () => {
