@@ -12,7 +12,7 @@ import { createTui } from "../lib/tui/tui.js";
 import { Container } from "../lib/tui/component.js";
 import { ComposerArea } from "../lib/components/composer-area.js";
 import { MonitorStack } from "../lib/components/monitor-stack.js";
-import { contextBoardText, occupancyTone, usageBoardText } from "../lib/rendering.js";
+import { contextBoardText, occupancyTone, promptText, usageBoardText } from "../lib/rendering.js";
 import { resetTheme, setTheme, flavorSwatch } from "../lib/theme.js";
 import { stripAnsi, textWidth } from "../lib/text-width.js";
 
@@ -22,14 +22,14 @@ const BREAKDOWN = {
   estimated_total: 41320,
   context_window_tokens: 131072,
   sections: [
-    { key: "tool:bash", label: "Tool results · bash", tokens: 14200, messages: 3 },
     { key: "system_prompt", label: "System prompt (incl. capsule)", tokens: 12400, messages: 1 },
-    { key: "chat_assistant", label: "Chat · assistant replies", tokens: 7300, messages: 6 },
     { key: "rind_docs_project", label: "RIND.md · project", tokens: 2100, messages: 1 },
-    { key: "chat_user", label: "Chat · user inputs", tokens: 1900, messages: 4 },
-    { key: "tool:other", label: "Tool results · other", tokens: 1780, messages: 2 },
-    { key: "reasoning", label: "Reasoning content", tokens: 1200, messages: 6 },
     { key: "skill_catalog", label: "Skill catalog", tokens: 480, messages: 1 },
+    { key: "chat_user", label: "Chat · user inputs", tokens: 1900, messages: 4 },
+    { key: "chat_assistant", label: "Chat · assistant replies", tokens: 7300, messages: 6 },
+    { key: "reasoning", label: "Reasoning content", tokens: 1200, messages: 6 },
+    { key: "tool:bash", label: "Tool results · bash", tokens: 14200, messages: 3 },
+    { key: "tool:other", label: "Tool results · other", tokens: 1780, messages: 2 },
   ],
 };
 
@@ -56,20 +56,91 @@ const SUMMARY = {
 const page1 = () => contextBoardText({ breakdown: BREAKDOWN, latest_usage: LATEST_USAGE, index: 1, count: 2 }, 100);
 const page2 = () => usageBoardText({ summary: SUMMARY, index: 2, count: 2 }, 100);
 
-test("context board page 1 renders the locked layout", () => {
+test("context board page 1 renders the locked layout in assembly order", () => {
   resetTheme();
   const text = page1();
   const lines = text.split("\n").map(stripAnsi);
 
   assert.match(lines[0], /^┌ Context · last sampling · turn 8f3a · 03:33:12 ─+ 1\/2 ┐$/);
-  assert.equal(lines[1], "│ Window 131,072 · used 32%   measured 43,850 · estimated 41,320 (+6%)                             │");
+  assert.equal(lines[1], "│ Window 131,072 · used 32%   measured 43,850 · estimated ~41,320 (+6%)                            │");
   assert.match(lines[2], /^│ █+░+ │$/);
-  assert.equal(lines[4], "│   Tool results · bash            14,200   34%  3 msgs                                            │");
-  assert.equal(lines[5], "│   System prompt (incl. capsule)  12,400   30%   1 msg                                            │");
+  assert.deepEqual(
+    lines.slice(4, 12).map((line) => line.replace(/^│\s+/, "").split(/\s{2,}/)[0]),
+    [
+      "System prompt (incl. capsule)",
+      "RIND.md · project",
+      "Skill catalog",
+      "Chat · user inputs",
+      "Chat · assistant replies",
+      "Reasoning content",
+      "Tool results · bash",
+      "Tool results · other",
+    ],
+  );
+  assert.equal(lines[4], "│   System prompt (incl. capsule)  12,400   30%   1 msg                                            │");
+  assert.equal(lines[10], "│   Tool results · bash            14,200   34%  3 msgs                                            │");
   assert.equal(lines.at(-2), "│ Tab switch page · Esc exit                                                                       │");
   assert.equal(lines.at(-1), `└${"─".repeat(98)}┘`);
   // Byte-deterministic: the same input renders the same bytes.
   assert.equal(page1(), page1());
+});
+
+test("bar segments and underline labels follow the assembly order", () => {
+  resetTheme();
+  setTheme("mocha");
+  const originalIsTty = process.stdout.isTTY;
+  try {
+    process.stdout.isTTY = true;
+    const rawLines = page1().split("\n");
+
+    const underline = stripAnsi(rawLines[3]);
+    assert.ok(underline.indexOf("system") < underline.indexOf("chat"), "system label precedes chat");
+    assert.ok(underline.indexOf("chat") < underline.indexOf("bash"), "chat label precedes bash");
+
+    // The first two bar segments (system prompt, RIND.md) lead with the
+    // palette's first two roles — the bar fills in declaration order.
+    const codes = rawLines[2].match(/\x1b\[38;2;\d+;\d+;\d+m/g) || [];
+    assert.equal(codes[0], "\x1b[38;2;137;180;250m", "accent leads the stacked bar");
+    assert.equal(codes[1], "\x1b[38;2;166;227;161m", "success follows for the next section");
+  } finally {
+    if (originalIsTty === undefined) {
+      delete process.stdout.isTTY;
+    } else {
+      process.stdout.isTTY = originalIsTty;
+    }
+    resetTheme();
+  }
+});
+
+test("composer header carries a threshold-colored ctx segment from measured stats", () => {
+  resetTheme();
+  setTheme("mocha");
+  const originalIsTty = process.stdout.isTTY;
+  try {
+    process.stdout.isTTY = true;
+    const header = (stats) => stripAnsi(promptText({ model: "m1", cwd: "/p" }, stats, {}, 100).split("\n")[1]);
+    const raw = (stats) => promptText({ model: "m1", cwd: "/p" }, stats, {}, 100).split("\n")[1];
+
+    // Absent or zero stats keep the header clean.
+    assert.doesNotMatch(header({}), /ctx /);
+    assert.doesNotMatch(header({ context_usage_percent: 0 }), /ctx /);
+    assert.match(header({ context_usage_percent: 0.33 }), / · ctx 33%$/);
+
+    // The percent rides the same occupancy ladder as the board meta line.
+    const dangerCode = "\x1b[38;2;243;139;168m";
+    const warningCode = "\x1b[38;2;249;226;175m";
+    assert.ok(raw({ context_usage_percent: 0.7 }).includes(warningCode), "70% paints warn");
+    assert.ok(raw({ context_usage_percent: 0.9 }).includes(dangerCode), "90% paints err");
+    const neutral = raw({ context_usage_percent: 0.33 });
+    assert.ok(!neutral.includes(warningCode) && !neutral.includes(dangerCode), "33% stays neutral");
+  } finally {
+    if (originalIsTty === undefined) {
+      delete process.stdout.isTTY;
+    } else {
+      process.stdout.isTTY = originalIsTty;
+    }
+    resetTheme();
+  }
 });
 
 test("usage board page 2 renders the locked layout", () => {
