@@ -188,14 +188,64 @@ def test_missing_stats_fall_back_to_the_section_sum():
     assert snapshot["context_window_tokens"] > 0
 
 
-def test_sections_are_ranked_by_tokens_descending():
+def test_sections_follow_assembly_order():
+    # Token mass is inverted on purpose: the biggest payloads sit last, so only
+    # first-appearance order — not size — can produce this sequence.
     messages = [
-        {"role": "user", "content": "short"},
-        {"role": "assistant", "content": "a much longer assistant reply " * 20},
+        {"role": "system", "content": "sys"},
+        {"role": "system", "content": "--- user-doc ---\n\nu\n\n--- project-doc ---\n\np", "_context_kind": "rind_docs"},
+        {"role": "system", "content": "goal", "_context_kind": "goal_policy"},
+        {"role": "system", "content": "skills", "_context_kind": "skill_catalog"},
+        {"role": "user", "content": "hi " * 100},
+        {"role": "assistant", "content": "hello " * 60, "reasoning_content": "think " * 60},
+        {"role": "assistant", "content": "", "tool_calls": [
+            {"id": "c1", "type": "function", "function": {"name": "zzz_tool", "arguments": "{}"}},
+        ]},
+        {"role": "tool", "tool_call_id": "c1", "content": "out " * 80},
+        {"role": "assistant", "content": "", "tool_calls": [
+            {"id": "c2", "type": "function", "function": {"name": "aaa_tool", "arguments": "{}"}},
+        ]},
+        {"role": "tool", "tool_call_id": "c2", "content": "o " * 400},
     ]
-    stats = {"estimated_input_tokens": 0, "context_window_tokens": 8192}
+    stats = pipeline_stats(messages)
 
     snapshot = build_context_snapshot(messages, stats, "", estimator=ESTIMATOR)
+    keys = [section["key"] for section in snapshot["sections"]]
 
-    tokens = [section["tokens"] for section in snapshot["sections"]]
-    assert tokens == sorted(tokens, reverse=True)
+    assert keys == [
+        "system_prompt",
+        "rind_docs_user",
+        "rind_docs_project",
+        "goal_policy",
+        "skill_catalog",
+        "chat_user",
+        "chat_assistant",
+        "reasoning",
+        "tool:zzz_tool",
+        "tool:aaa_tool",
+    ]
+    # The heaviest section sits last: ordering follows assembly, not mass.
+    assert snapshot["sections"][-1]["tokens"] == max(
+        section["tokens"] for section in snapshot["sections"]
+    )
+
+
+def test_compaction_handoff_precedes_chat_rows():
+    messages = [
+        {"role": "system", "content": "sys"},
+        {"role": "user", "content": COMPACT_CONTINUATION_USER_CONTENT},
+        {"role": "assistant", "content": "summary", "reasoning_content": COMPACT_HANDOFF_REASONING_CONTENT},
+        {"role": "user", "content": "fresh question"},
+        {"role": "assistant", "content": "answer"},
+    ]
+
+    keys = [section["key"] for section in build_context_snapshot(messages, {}, "", estimator=ESTIMATOR)["sections"]]
+
+    assert keys[0] == "system_prompt"
+    assert keys.index("compaction_handoff") < keys.index("chat_user")
+
+
+def test_sections_carry_no_internal_order_field():
+    snapshot = build_context_snapshot([{"role": "user", "content": "hi"}], {}, "")
+
+    assert all(set(section) == {"key", "label", "tokens", "messages"} for section in snapshot["sections"])

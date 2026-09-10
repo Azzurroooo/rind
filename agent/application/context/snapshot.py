@@ -35,11 +35,13 @@ def build_context_snapshot(
     captured_at: str | None = None,
     estimator: ContextEstimator | None = None,
 ) -> dict[str, Any]:
-    """Bucket the assembled message list into sections with estimated tokens.
+    """Bucket the assembled message list into sections with per-message estimates.
 
     Pure function: fixed input produces the same sections. The total is taken
     from the pipeline's own stats (never re-summed), so per-section estimates
     share the exact per-message payloads the estimator scored at build time.
+    Sections are ordered by first appearance in the assembly; the array
+    position is the only order carrier (no extra field is emitted).
     """
     stats = stats if isinstance(stats, dict) else {}
     sections = _build_sections(messages, estimator or ContextEstimator())
@@ -54,59 +56,60 @@ def build_context_snapshot(
             stats.get("context_window_tokens"),
             DEFAULT_CONTEXT_WINDOW_TOKENS,
         ),
-        "sections": sorted(sections, key=lambda section: (-section["tokens"], section["key"])),
+        "sections": sorted(sections, key=lambda section: section.pop("_order")),
     }
 
 
 def _build_sections(messages: list[dict], estimator: ContextEstimator) -> list[dict[str, Any]]:
     buckets: dict[str, dict[str, Any]] = {}
 
-    def assign(key: str, label: str, tokens: int) -> None:
+    def assign(key: str, label: str, tokens: int, order: int) -> None:
         bucket = buckets.get(key)
         if bucket is None:
-            bucket = {"key": key, "label": label, "tokens": 0, "messages": 0}
+            bucket = {"key": key, "label": label, "tokens": 0, "messages": 0, "_order": order}
             buckets[key] = bucket
         bucket["tokens"] += max(0, int(tokens))
         bucket["messages"] += 1
 
     tool_names = _tool_names_by_call_id(messages)
     top_tools = _top_tool_names(messages, tool_names)
-    for message in messages if isinstance(messages, list) else []:
+    for index, message in enumerate(messages if isinstance(messages, list) else []):
         if not isinstance(message, dict):
             continue
         kind = message.get("_context_kind")
         if isinstance(kind, str) and kind.strip():
-            _assign_context_kind(assign, message, kind.strip(), estimator)
+            _assign_context_kind(assign, message, kind.strip(), estimator, index)
             continue
         role = message.get("role")
         if role == "tool":
             name = tool_names.get(str(message.get("tool_call_id") or "")) or "unknown"
             if name in top_tools:
-                assign(f"tool:{name}", f"Tool results · {name}", _estimate(estimator, message))
+                assign(f"tool:{name}", f"Tool results · {name}", _estimate(estimator, message), index)
             else:
-                assign("tool:other", "Tool results · other", _estimate(estimator, message))
+                assign("tool:other", "Tool results · other", _estimate(estimator, message), index)
             continue
         if _is_compaction_handoff(message):
-            assign("compaction_handoff", "Compaction handoff", _estimate(estimator, message))
+            assign("compaction_handoff", "Compaction handoff", _estimate(estimator, message), index)
             continue
         if role == "system":
-            assign("system_prompt", "System prompt (incl. capsule)", _estimate(estimator, message))
+            assign("system_prompt", "System prompt (incl. capsule)", _estimate(estimator, message), index)
         elif role == "user":
-            assign("chat_user", "Chat · user inputs", _estimate(estimator, message))
+            assign("chat_user", "Chat · user inputs", _estimate(estimator, message), index)
         elif role == "assistant":
-            _assign_assistant(assign, message, estimator)
+            _assign_assistant(assign, message, estimator, index)
         else:
             # Unknown roles form their own bucket under their original name.
             label = str(role or "unknown")
-            assign(f"role:{label}", label, _estimate(estimator, message))
+            assign(f"role:{label}", label, _estimate(estimator, message), index)
     return list(buckets.values())
 
 
 def _assign_context_kind(
-    assign: Callable[[str, str, int], None],
+    assign: Callable[[str, str, int, int], None],
     message: dict,
     kind: str,
     estimator: ContextEstimator,
+    order: int,
 ) -> None:
     total = _estimate(estimator, message)
     if kind == "rind_docs":
@@ -117,29 +120,30 @@ def _assign_context_kind(
         if has_user and has_project:
             user_segment = content.split(RIND_DOC_USER_MARKER, 1)[1].split(RIND_DOC_PROJECT_MARKER, 1)[0]
             user_tokens = min(total, _estimate(estimator, {"role": "system", "content": user_segment}))
-            assign("rind_docs_user", "RIND.md · user", user_tokens)
-            assign("rind_docs_project", "RIND.md · project", total - user_tokens)
+            assign("rind_docs_user", "RIND.md · user", user_tokens, order)
+            assign("rind_docs_project", "RIND.md · project", total - user_tokens, order)
             return
         if has_user:
-            assign("rind_docs_user", "RIND.md · user", total)
+            assign("rind_docs_user", "RIND.md · user", total, order)
             return
         if has_project:
-            assign("rind_docs_project", "RIND.md · project", total)
+            assign("rind_docs_project", "RIND.md · project", total, order)
             return
-        assign("rind_docs", "RIND.md", total)
+        assign("rind_docs", "RIND.md", total, order)
         return
     # Unknown tags form their own bucket, displayed under their original name.
     label = _CONTEXT_KIND_LABELS.get(kind, kind)
     if label is kind:
-        assign(f"kind:{kind}", kind, total)
+        assign(f"kind:{kind}", kind, total, order)
         return
-    assign(kind, label, total)
+    assign(kind, label, total, order)
 
 
 def _assign_assistant(
-    assign: Callable[[str, str, int], None],
+    assign: Callable[[str, str, int, int], None],
     message: dict,
     estimator: ContextEstimator,
+    order: int,
 ) -> None:
     total = _estimate(estimator, message)
     reasoning = message.get("reasoning_content")
@@ -148,10 +152,10 @@ def _assign_assistant(
             total,
             _estimate(estimator, {"role": "assistant", "reasoning_content": reasoning}),
         )
-        assign("chat_assistant", "Chat · assistant replies", total - reasoning_tokens)
-        assign("reasoning", "Reasoning content", reasoning_tokens)
+        assign("chat_assistant", "Chat · assistant replies", total - reasoning_tokens, order)
+        assign("reasoning", "Reasoning content", reasoning_tokens, order)
         return
-    assign("chat_assistant", "Chat · assistant replies", total)
+    assign("chat_assistant", "Chat · assistant replies", total, order)
 
 
 def _is_compaction_handoff(message: dict) -> bool:

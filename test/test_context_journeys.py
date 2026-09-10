@@ -157,6 +157,8 @@ def test_jc1_fresh_exchange_shows_board_rows_with_small_deviation(context_worker
     assert "chat_user" in sections
     assert "system_prompt" in sections
     assert "goal_policy" in sections
+    # Assembly order: the system prompt row always leads the board.
+    assert breakdown["sections"][0]["key"] == "system_prompt"
     # Every number on page 1 traces to the snapshot: rows sum to the total.
     assert sum(section["tokens"] for section in breakdown["sections"]) == breakdown["estimated_total"]
     assert breakdown["context_window_tokens"] > 0
@@ -195,6 +197,7 @@ def test_jc2_bash_calls_widen_the_tool_segment(context_worker, model_server):
 
     assert "tool:bash" in sections, f"tool rows missing: {sorted(sections)}"
     assert sections["tool:bash"]["messages"] >= 1
+    assert board["breakdown"]["sections"][0]["key"] == "system_prompt"
     assert sum(section["tokens"] for section in board["breakdown"]["sections"]) == board["breakdown"]["estimated_total"]
 
 
@@ -212,6 +215,10 @@ def test_jc3_compact_replaces_history_and_counts_compactions(context_worker, mod
     sections = _summarize_breakdown(board)
     assert "compaction_handoff" in sections, f"handoff row missing: {sorted(sections)}"
     assert "chat_user" not in sections or sections["compaction_handoff"]["tokens"] > 0
+    keys = [section["key"] for section in board["breakdown"]["sections"]]
+    assert keys[0] == "system_prompt"
+    if "chat_user" in keys:
+        assert keys.index("compaction_handoff") < keys.index("chat_user")
 
     summary = client.request("rind/usage/summary", {"days": 7})
     assert summary["totals"]["compactions"] >= 1
