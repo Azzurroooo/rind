@@ -1,11 +1,11 @@
 <p align="center">
-  <img src="assets/rind.svg" alt="Rind logo" width="104" />
+  <img src="assets/rind.svg" alt="Rind logo" width="118" />
 </p>
 
 <h1 align="center">Rind</h1>
 
 <p align="center">
-  一个精巧、标准、可恢复的 Python Agent 运行时，面向真实的本地编码工作流。
+  <strong>一个天生轻量的本地编码 Agent——可无人值守、可委派小队、可深度扩展、随处可达。</strong>
 </p>
 
 <p align="center">
@@ -13,71 +13,70 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/Python-3.12+-blue.svg" alt="Python 3.12+" />
-  <img src="https://img.shields.io/badge/Architecture-layered-success.svg" alt="Layered architecture" />
-  <img src="https://img.shields.io/badge/Surfaces-CLI%20%2B%20Desktop-informational.svg" alt="CLI 与 Desktop 界面" />
+  <a href="https://github.com/Azzurroooo/rind/releases"><img src="https://img.shields.io/github/v/release/Azzurroooo/rind?label=release&color=DF7A3A" alt="Latest release" /></a>
+  <img src="https://img.shields.io/badge/Python-3.12%2B-3776AB" alt="Python 3.12+" />
+  <img src="https://img.shields.io/badge/Node-18%2B-3C873A" alt="Node 18+" />
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-16A085" alt="MIT license" /></a>
 </p>
 
-## Rind 是什么？
+<p align="center">
+  <img src="assets/rind-architecture.svg" alt="Rind 将交互、自动化、任务分派与自定义客户端接入同一个本地引擎" width="960" />
+</p>
 
-Rind 是一个轻量编码 Agent，提供 Node.js 前端 CLI 和 Electron Desktop 两个产品界面。二者共享同一套 Python Runtime Package；该实现也可作为理解紧凑 Agent 运行时的参考样本。
+## Rind 的不同之处
 
-这个项目的基本判断是：Agent 不必先成为庞大的框架，才能成为可靠的工具。Rind 尽量保持结构清楚、工具契约克制、运行状态可追踪。从上下文压缩到工具执行，每个部件都以尽可能小的形式实现，同时不牺牲交互体验和工程可维护性。
+四个决定，划定了 Rind 能为你做什么：
 
-## 设计理念
+### 把任务交出去，然后走人
 
-- **先做减法，再做加法**：优先减少概念、模块和隐式状态。只有当抽象确实降低复杂度时，才引入新的抽象。
-- **小工具，清晰契约**：Shell、文件、网页、计划和技能等工具都通过紧凑接口暴露，返回结构尽量稳定可预测。
-- **把上下文当作运行时状态**：上下文估算、自动压缩和工具结果归一化不是提示词附属品，而是运行时的核心职责。
-- **本地优先，可持续恢复**：会话、消息、工具调用、压缩记录和元数据都以 append-only 的本地记录保存，便于中断后继续工作。
-- **标准 Python，而非框架惯性**：项目使用普通 Python 模块、依赖倒置、异步编排和聚焦的服务层，避免把简单问题包裹进过重的框架。
-- **默认好用，机制可见**：两个界面都在需要时展示模型、会话、工作目录、状态和诊断信息。
+```bash
+rind run --prompt "总结 src/ 里的改动" --dir /workspace/project
+```
 
-## 能力概览
+One-shot 模式是同一个 Agent 的无头形态：最终回答走 `stdout`，过程走 `stderr`，完整运行日志落到 `logs/` 下的 markdown，`--session <id>` 续接早前任务。提问默认关闭，自动化不会被卡死；长命令转后台、会话继续干活，**Ctrl+B** 随时查看后台任务与子代理的实时监视器。
 
-- 前端 CLI 和 Desktop 界面，支持流式输出、斜杠命令、会话恢复、状态渲染和本地诊断。
-- OpenAI 兼容的异步 Chat Client，支持配置模型、base URL 和 reasoning effort。
-- 基于 JSONL 的 append-only 会话存储，记录消息、工具调用、压缩结果和会话元数据。
-- 运行时上下文管理，包含预算估算、自动压缩、上下文长度救援和工具结果归一化。
-- 轻量的 session-local `update_plan` 工具，用于跨轮次追踪多步骤任务。
-- 内置 Shell、文件、网页、计划和技能发现等工具。
-- 唯一的无头 JSONL Runtime Server 为两个界面服务；Python 不再提供交互式 CLI。
+> 钩子、定时任务、流水线拿到的是一个契约干净的 Agent。
+
+### 一支"带状态"的专家小队
+
+传统子代理即用即丢：提示词进去、摘要出来、记忆清零。Rind 的 Team 是文件系统原生且持久的——每个被委派的代理都是一等公民会话，**拥有自己的 workspace 目录、独立的工具集与工作区策略、持续累积的会话历史**（`.aiteam/agents/<name>/`）。专家创建一次（`/team init`、`/team blueprint`、`/team add`），之后的每个任务都从它已知、已写过的东西开始，成果以真实文件发布回来。
+
+> 专家在积累经验，而不是每个任务都从零开始。
+
+### 无状态的轻量内核
+
+worker 不驻留重型状态：agent 容器只在 turn 运行期间存在，结束即释放。所有持久内容——消息、工具调用、压缩记录、用量——都以 append-only JSONL 落在磁盘上。磁盘即真相，内存只做协调：崩溃不丢任何东西，常驻进程永远和新启动时一样轻。
+
+> 小 footprint、即时恢复、没有藏在内存里的状态。
+
+### 一个引擎，四扇门
+
+**CLI** 键盘流终端工作 · **Desktop** 可视化多项目总览 · **Web** 单一 WebSocket（浏览器中途合盖，重连即增量追平）· **IM 网关** 接入 Telegram / Discord。同一批会话、同一套协议、同一个引擎——门换了，工作不换。
+
+> 会话跟着你跨界面，而不是被锁死在一扇门里。
+
+**再补一个 `rind send`**：从任意终端或脚本把提示词投进正在运行的会话——`rind send --session <id> "…"`，空闲会话立即开 turn，忙碌会话自动转为转向；session id 就是地址。
+
+### 常规能力也做扎实了
+
+turn 运行中转向与排队后续 · 任意历史消息处分叉会话（`/fork`）· 实时上下文计量（`/context`，全部实测、估算带 `~` 标记）· append-only JSONL 会话（崩溃安全、可回放、`RIND_HOME` 隔离）· 运行中 turn 崩溃恢复 · 项目文档（`RIND.md`）自动注入上下文 · 技能与计划 · 四套 TTY 主题，流式 Markdown/表格渲染、CJK 宽度正确 · `/doctor` 直接告诉你哪里坏了。
 
 ## 快速开始
 
-### 环境要求
-
-- Python 3.12+
-- 一个 OpenAI 兼容 Chat Completion 端点的 API Key
-
-### 安装
+**安装**（三选一）：
 
 ```bash
-git clone https://github.com/Azzurroooo/rind.git
-cd rind
-
-python -m venv .venv
-```
-
-Windows PowerShell:
-
-```powershell
-.\.venv\Scripts\Activate.ps1
+# 1. GitHub Releases 下载预构建安装器（Windows/macOS/Linux）
+# 2. npm：
+npm install -g @rind-ai/cli
+# 3. 源码：
+git clone https://github.com/Azzurroooo/rind.git && cd rind
+python -m venv .venv && . .venv/bin/activate   # Windows: .\.venv\Scripts\Activate.ps1
 pip install -r requirements-runtime.txt
+node frontend-cli/bin/rind.js
 ```
 
-macOS 或 Linux:
-
-```bash
-source .venv/bin/activate
-pip install -r requirements-runtime.txt
-```
-
-### 配置
-
-Rind 的 API 配置只读取 `~/.rind/settings.json`，Desktop 与 CLI 使用同一个文件。`RIND_HOME` 仍可控制 session 等运行数据，但不会影响 API 配置。
-
-最小 `settings.json` 示例：
+**配置**——工作区里完整的 `.rind/settings.json`，缺省回退 `~/.rind/settings.json`：
 
 ```json
 {
@@ -88,24 +87,23 @@ Rind 的 API 配置只读取 `~/.rind/settings.json`，Desktop 与 CLI 使用同
 }
 ```
 
-### 运行
-
-#### 一键部署 Web
-
-安装 Docker Desktop 或 Docker Engine（含 Compose v2）后，在仓库根目录执行：
+任意 OpenAI 兼容端点都可用。然后：
 
 ```bash
-export RIND_SERVER_TOKEN="$(python -c 'import secrets; print(secrets.token_urlsafe(24))')"
-docker compose up -d --build
+rind                          # 交互式 CLI
+rind --session <id>           # 打开指定会话
 ```
 
-然后打开 `http://localhost:8080`，使用 `RIND_SERVER_TOKEN` 登录。该命令会构建生产版 Web 前端，并在同一套 Compose 服务中启动长期运行的 WebSocket worker。worker 的 WebSocket 端点通过一次性 ticket（浏览器）或常驻 token（脚本）鉴权——非 loopback 绑定且无 token 时拒绝启动。当前目录挂载为工作目录，`./.rind` 用于保存配置和会话。停止服务：
+## 四张面孔，一个引擎
 
-```bash
-docker compose down
-```
+| 界面 | 适用场景 | 启动方式 |
+| --- | --- | --- |
+| **CLI** | 键盘流结对、终端工作流 | `rind` |
+| **Desktop** | 可视化多项目总览 | `npm --prefix desktop run dev`（源码） |
+| **Web** | 浏览器访问、远程机器、共享主机 | `docker compose up -d --build` → `http://localhost:8080` |
+| **IM 网关** | 用 Telegram / Discord 当前端 | `python main.py gateway --config .rind/gateway.yaml` |
 
-可以在 `.env` 中覆盖默认路径和端口：
+Web 界面背后是常驻 WebSocket worker：浏览器中途断开，重连后通过增量回放追平错过的 durable 事件——合盖走人，回来接着看。一个端点、一个 token、没有第二套 REST API。远程访问优先走私网（Tailscale/WireGuard）或 TLS 隧道（`cloudflared tunnel --url http://localhost:8080`）；切勿在无 TLS 时直接暴露 worker 端口。通过 `.env` 调整：
 
 ```dotenv
 RIND_WORKSPACE=/absolute/path/to/workspace
@@ -113,122 +111,74 @@ RIND_HOME=/absolute/path/to/rind-data
 RIND_WEB_PORT=8080
 RIND_WEB_BIND=127.0.0.1
 RIND_SERVER_TOKEN=change-me
-RIND_PYPI_INDEX_URL=https://pypi.org/simple
-RIND_DEBIAN_MIRROR=deb.debian.org
 ```
 
-只有在主机已配置认证和 TLS 时，才将 `RIND_WEB_BIND` 改为 `0.0.0.0`——参见下方「远程访问」。
+网关只发出站连接；`${VAR}` 从环境变量插值，未知键一律启动报错、绝不静默兜底；陌生发送者走一次性配对码（`python main.py gateway approve <CODE>`）。Docker 下按需启用：`docker compose --profile gateway up -d`。
 
-浏览器断开只关闭 WebSocket 连接；worker 进程与会话执行继续运行。重连后 Web 端通过增量回放追平错过的 durable 事件，中途合盖休眠的笔记本重新打开即可接上完整历史。
-
-#### 远程访问
-
-Rind 刻意保持攻击面很小：一个 WebSocket 端点、一个 token、没有第二套 REST API。从其他机器访问 worker：
-
-- **推荐：私有网络。** 在 worker 主机与你的设备上都运行 Tailscale（或 WireGuard），浏览器直接指向 tailnet 地址——不向公网暴露端口。
-- **隧道：** `cloudflared tunnel --url http://localhost:8080` 为 Web 界面加 TLS 前置；务必保持 `RIND_SERVER_TOKEN` 已设置。
-- 不要在没有 TLS 的情况下直接转发 worker 端口（8765）；token 随握手查询串传输。
-
-#### 消息网关（Telegram、Discord 等）
-
-可选的网关进程把 IM 渠道接入同一个 worker——一条连接订阅所有渠道会话，对话上下文跨设备延续：
-
-```bash
-python main.py gateway --config .rind/gateway.yaml
-```
-
-```yaml
-worker: ws://127.0.0.1:8765
-worker_token: ${RIND_SERVER_TOKEN}
-workspace: /workspace
-channels:
-  telegram:
-    token: ${TELEGRAM_BOT_TOKEN}
-    allow_from: ["12345678"]
-  discord:
-    token: ${DISCORD_BOT_TOKEN}
-pairing:
-  enabled: true
-```
-
-- `${VAR}` 从环境变量插值；未知键与未定义变量都是启动错误，绝不静默兜底。
-- 渠道 SDK 是按渠道可选的依赖（`requirements-gateway.txt`），仅在对应渠道启用时才 import。
-- 陌生发送者会收到一次性配对码；在服务端执行 `python main.py gateway approve <CODE>` 完成批准。
-- Docker 部署中网关是 opt-in 服务：`docker compose --profile gateway up -d`，配置放在 `./.rind/gateway.yaml`。它只发起出站连接——没有任何入站端口。
-
-Node 前端 CLI：
-
-```bash
-node frontend-cli/bin/rind.js
-```
-
-Desktop 应用：
-
-```bash
-npm --prefix desktop run dev
-```
-
-Python 入口是两个界面共用的无头 Runtime Package：
-
-```bash
-python main.py app-server --stdio --cwd .
-```
-
-Runtime Package 通过统一 JSONL 协议服务两个界面，会话、模型、goal、后台任务、slash command 和 turn 控制都由该协议处理，Python 不再提供独立交互 UI。
-
-项目级 `RIND.md` 和项目级 skills 以启动 Rind 时的当前工作目录为根目录。
-
-## 架构
-
-Rind 使用分层结构，并在运行时核心与基础设施适配器之间遵循依赖倒置。
+## 引擎之内
 
 ```text
-agent/
-├── runtime/
-│   ├── core/          # Agent runtime、turn runner、流解析与泵送
-│   └── server/        # JSONL server facade、协议与 runtime commands
-├── application/
-│   ├── context/       # 上下文管理、估算、压缩和 token 使用
-│   ├── tools/         # 工具执行、处理、保护策略和结果归一化
-│   └── ports/         # Chat client、会话存储、工具注册表抽象
-├── domain/            # 事件、取消、规划和工具契约
-├── infrastructure/
-│   ├── llm/           # OpenAI 兼容异步 Chat Client
-│   ├── persistence/   # append-only 会话记录与仓储
-│   ├── planning/      # session-local 计划存储和 compact 快照
-│   └── tools/builtin/ # ToolSpec 实现与 build_builtin_tool_specs catalog
-frontend-cli/          # Node.js 终端 Surface
-desktop/               # Electron Desktop Surface
+CLI / Desktop / Web / IM / 你的应用
+          |
+          |  JSONL 请求 + session/update 事件
+          v
+      Rind Worker
+          |
+          +-- turn、转向与取消
+          +-- 模型适配（OpenAI 兼容）
+          +-- 工具与工作区
+          +-- 上下文管理与压缩
+          +-- append-only 会话记录（JSONL）
 ```
 
-运行时与持久化边界见 [`docs/architecture.md`](docs/architecture.md)。
+三个决定撑起这个形态：
 
-## 开发
+- **一个 worker，任意客户端。** 会话标识工作，turn 圈定执行，每个事件都带会话/turn 身份和持久级别。新界面只需说同一套协议，而不是重写 turn 循环。
+- **磁盘即真相。** 会话是 `~/.rind`（或 `RIND_HOME`）下纯 append-only 的 JSONL。进程崩溃不丢任何东西；运行中的 turn 有快照可续；历史回放精确。
+- **小内核。** 模型客户端、会话存储、工具注册表、上下文管理、turn 调度、取消——一短串可替换的端口，你的代码与 Agent 循环之间没有框架图谱。
 
-安装开发依赖：
+**给造轮子的人**，扩展点直接对应源码：
+
+| 想替换/新增 | 起点 |
+| --- | --- |
+| 模型供应商 | `ChatClient` 及其工厂 |
+| 模型可用的能力 | `ToolSpec` 与 `ToolRegistry` |
+| 存储后端 | `SessionStore` |
+| 上下文策略 | Context 与压缩服务 |
+| 人用命令 | Worker 命令注册表或 Surface 命令 |
+| 新界面 | JSONL 协议与 `session/update` |
+
+## CLI 速查
+
+| 按键 | 含义 |
+| --- | --- |
+| **Enter** | 发送——turn 运行中即为转向 |
+| **Tab** | 排队后续 · **Alt+↑/↓** 召回排队/转向文本 · **Alt+→** 把后续提升为转向 |
+| **Ctrl+B** | 后台任务监视器 · **Ctrl+O** 展开工具输出 · **?** 快捷键表 |
+| **Ctrl+C** | 中断 turn / 退出 |
+
+| 命令 | 含义 |
+| --- | --- |
+| `/context` | 上下文构成 + 用量面板（真实 token） |
+| `/fork` `/sessions` `/compact` | 分叉、切换、释放上下文 |
+| `/model` `/effort` `/theme` | 选模型、推理力度、配色主题 |
+| `/goal` `/skill` `/team` `/doctor` `/help` | 自主目标、技能、小队、诊断、命令表 |
+
+| 入口 | 含义 |
+| --- | --- |
+| `rind` / `rind --session <id>` | 交互式 |
+| `rind run --prompt "…" [--session <id>]` | 无头执行，可接管道 |
+| `rind send --session <id> "…"` | 投递到正在运行的会话 |
+
+## 文档与开发
+
+[架构](docs/architecture.md) · [CLI 渲染](docs/cli-rendering.md) · [CLI turn 流程](docs/cli-turn-flow.md) · [主流水线](docs/main_pipeline.md)（英文）
 
 ```bash
-pip install -r requirements.txt
+pip install -r requirements.txt && pytest test/ -q   # 运行时
+cd frontend-cli && npm install && npm test           # CLI
 ```
-
-运行测试：
-
-```bash
-pytest test/ -q
-```
-
-测试覆盖运行时事件、上下文预算、压缩、会话持久化、恢复行为、工具结果归一化、计划、技能、协议处理和 Surface 渲染。
-
-## 展望
-
-Rind 关注的是：在保持足够简单、可读、可测试的前提下，Agent 系统还能走多远。后续探索会围绕三个方向展开：
-
-- 如何让 Agent 的能力增长不必伴随过多机制膨胀。
-- 如何探索 Agent 的全新呈现方式，让工作过程更可观察、更连续、更平静。
-- 如何为 Python Agent 的通用设计提供更清楚的结构、边界和实现路径。
-
-这个项目在形态上保持克制，但目标并不保守：它希望证明，一个有能力的 Agent 可以由简单部件、可见状态和清晰边界组成。
 
 ## 许可证
 
-本项目基于 [MIT License](LICENSE) 发布。
+[MIT](LICENSE)
