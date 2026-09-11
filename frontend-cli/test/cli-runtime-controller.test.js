@@ -40,6 +40,7 @@ function createHarness({
   const requests = [];
   const history = [];
   const logs = [];
+  const restored = [];
   const client = {
     startCount: 0,
     child: null,
@@ -129,6 +130,7 @@ function createHarness({
     askForkPointMenu: async () => selectedFork,
     restoreLiveTurn() {},
     renderHistory: (messages) => history.push(messages),
+    onSessionRestored: () => restored.push(state.session.info.session_id),
     clearPendingInputs() {},
     closeAssistant() {},
     refreshInputState() {},
@@ -137,7 +139,7 @@ function createHarness({
     writeError() {},
     redraw() {},
   });
-  return { state, client, requests, history, logs, controller };
+  return { state, client, requests, history, logs, restored, controller };
 }
 
 test("runtime controller shares initialization and injects session and turn IDs", async () => {
@@ -314,6 +316,14 @@ test("fork selector keeps the fork reachable when switching fails", async () => 
 
   assert.equal(harness.state.session.info.session_id, "session-a");
   assert.ok(harness.logs.some((line) => line.includes("Forked to session-fork-1, but switching failed")));
+});
+
+test("session restore notifies once with the restored session id", async () => {
+  const harness = createHarness({ selectedSession: { id: "session-b" } });
+  harness.state.turn.active = false;
+  await harness.controller.runSessionsSelector();
+
+  assert.deepEqual(harness.restored, ["session-b"]);
 });
 
 function deferred() {

@@ -18,6 +18,7 @@ export function createCliRuntimeController({
   askContextBoard = null,
   restoreLiveTurn,
   renderHistory = () => {},
+  onSessionRestored = () => {},
   clearPendingInputs,
   closeAssistant,
   refreshInputState,
@@ -175,6 +176,7 @@ export function createCliRuntimeController({
     getCompactContextState().clear();
     refreshInputState();
     redraw();
+    await onSessionRestored();
     void getTaskMonitor()?.refresh().catch(() => {});
     return true;
   }

@@ -396,7 +396,7 @@ export function promptPlaceholderText() {
   return "Ask Rind to do anything";
 }
 
-export function userInputText(text, width) {
+export function userInputText(text, width, source = "") {
   const lines = messageLines(text);
   if (!lines.length) {
     return "";
@@ -405,7 +405,8 @@ export function userInputText(text, width) {
   const physicalLines = lines.flatMap((line) => (
     wrapTextCells(line, contentWidth, contentWidth).map((chunk) => `  ${chunk.text}`)
   ));
-  return `${accent("▷")} ${bold("You")}\n${physicalLines.join("\n")}`;
+  const origin = source ? dim(` · via ${source}`) : "";
+  return `${accent("▷")} ${bold("You")}${origin}\n${physicalLines.join("\n")}`;
 }
 
 export function assistantHeaderText() {

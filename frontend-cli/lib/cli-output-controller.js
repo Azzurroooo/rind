@@ -145,13 +145,13 @@ export function createCliOutputController({ state, terminalUi, transcript }) {
     process.stdout.write(output);
   }
 
-  function writeUserInput(text) {
+  function writeUserInput(text, source = "") {
     const value = String(text ?? "");
     if (!value.trim()) {
       return;
     }
     if (!terminalUi) {
-      const line = userInputText(value);
+      const line = userInputText(value, undefined, source);
       if (!line) {
         return;
       }
@@ -161,7 +161,7 @@ export function createCliOutputController({ state, terminalUi, transcript }) {
     }
     const leading = blockCount > 0;
     appendBlock(new DynamicBlock((width) => {
-      const rendered = userInputText(value, width);
+      const rendered = userInputText(value, width, source);
       const lines = rendered ? rendered.split("\n") : [];
       if (leading && lines.length) {
         lines.unshift("");

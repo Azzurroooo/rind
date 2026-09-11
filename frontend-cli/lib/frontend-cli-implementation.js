@@ -31,6 +31,8 @@ import { createCliRuntimeController } from "./cli-runtime-controller.js";
 import { createCliOutputController } from "./cli-output-controller.js";
 import { createCliInputActions } from "./cli-input-actions.js";
 import { cliHelp, oneShotHelp, runOneShot } from "./one-shot.js";
+import { runSend, sendHelp } from "./send.js";
+import { listenIpc } from "./ipc.js";
 import { createTui } from "./tui/tui.js";
 import { Container } from "./tui/component.js";
 import { ComposerArea } from "./components/composer-area.js";
@@ -73,6 +75,19 @@ if (cliArgs[0] === "run" && cliArgs.some((arg) => arg === "--help" || arg === "-
   process.stdout.write(`${oneShotHelp}\n`);
   return;
 }
+if (cliArgs[0] === "send" && cliArgs.some((arg) => arg === "--help" || arg === "-h")) {
+  process.stdout.write(`${sendHelp}\n`);
+  return;
+}
+if (cliArgs[0] === "send") {
+  try {
+    process.exitCode = await runSend({ args: cliArgs });
+  } catch (error) {
+    process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
+    process.exitCode = 2;
+  }
+  return;
+}
 if (cliArgs.some((arg) => arg === "--version" || arg === "--help" || arg === "-h")) {
   if (cliArgs.includes("--help") || cliArgs.includes("-h")) {
     process.stdout.write(`${cliHelp}\n\n`);
@@ -105,6 +120,7 @@ const inputStateData = cliState.input;
 const displayState = cliState.display;
 const promptHistory = loadPromptHistory();
 let input = null;
+let ipcServer = null;
 const compactContextState = createCompactContextState();
 const isTty = Boolean(process.stdin.isTTY && process.stdout.isTTY);
 const tui = isTty
@@ -223,6 +239,7 @@ const runtimeController = createCliRuntimeController({
   askContextBoard: (...args) => inputActions.askContextBoard(...args),
   restoreLiveTurn,
   renderHistory,
+  onSessionRestored: rebindSendEndpoint,
   clearPendingInputs: (...args) => inputActions.clearPendingInputs(...args),
   closeAssistant,
   refreshInputState,
@@ -367,6 +384,7 @@ inputActions = createCliInputActions({
   promptHistory,
   onPromptHistory: (history) => savePromptHistory(history),
   getTurnController: () => turnController,
+  getCommandController: () => commandController,
   getTaskMonitor: () => taskMonitorController,
   getLineInput: () => input,
   pausePrompt: () => inputController.pause(),
@@ -439,6 +457,26 @@ try {
 function updateGoalState(goal) {
   sessionState.info = { ...sessionState.info, goal: goal && typeof goal === "object" ? goal : null };
   redrawInput();
+}
+
+async function rebindSendEndpoint() {
+  try {
+    await ipcServer?.close();
+    ipcServer = null;
+    const sessionId = String(sessionState.info.session_id || "");
+    if (!sessionId) {
+      return;
+    }
+    ipcServer = await listenIpc({
+      sessionId,
+      getSessionId: () => sessionState.info.session_id,
+      dispatch: (text) => inputActions.dispatchExternal(text),
+      onUnavailable: () => logOutput(`Send endpoint unavailable: another rind process owns session ${sessionId}.`),
+    });
+  } catch (error) {
+    ipcServer = null;
+    writeErrorOutput(`${error instanceof Error ? error.message : String(error)}\n`);
+  }
 }
 function resetContextUsage() {
   displayState.stats = { context_usage_percent: 0 };
@@ -640,6 +678,7 @@ function closeRuntime() {
   runtimeState.status = "closing";
   clearActivityTimer();
   taskMonitorController.stop();
+  void ipcServer?.close();
   void runtimeClient.shutdown();
   closeInput();
 }
@@ -648,6 +687,7 @@ function forceCloseRuntime() {
   runtimeState.status = "closing";
   clearActivityTimer();
   taskMonitorController.stop();
+  void ipcServer?.close();
   closeInput();
   runtimeClient.forceShutdown();
 }

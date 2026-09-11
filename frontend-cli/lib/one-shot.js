@@ -4,6 +4,7 @@ import path from "node:path";
 import { createRuntimeClient } from "./runtime-client.js";
 import { requireRuntimeInitialization, runtimeMethods } from "./runtime-protocol.js";
 import { createOneShotProgress } from "./one-shot-progress.js";
+import { sendHelp } from "./send.js";
 
 export const oneShotHelp = [
   "Usage: rind run --prompt <text> [--dir <absolute-path>] [--session <id>]",
@@ -20,6 +21,8 @@ export const cliHelp = [
   "Start the interactive CLI.",
   "",
   oneShotHelp,
+  "",
+  sendHelp,
 ].join("\n");
 
 export function parseOneShotArgs(args) {

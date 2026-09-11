@@ -18,6 +18,7 @@ export function createCliInputActions({
   request,
   output,
   getTurnController,
+  getCommandController,
   getTaskMonitor,
   getLineInput,
   pausePrompt,
@@ -616,6 +617,29 @@ export function createCliInputActions({
     return typeof prompt === "function" ? prompt() : prompt;
   }
 
+  // External input (rind send) enters the same path as a typed submit: echo
+  // only when a typed enter would echo, then command-first dispatch.
+  function dispatchExternal(text) {
+    const value = String(text || "");
+    if (!value.trim()) {
+      return;
+    }
+    if (!state.turn.active && !value.startsWith("/")) {
+      output.writeUserInput(value, "send");
+    }
+    void getCommandController().handle(value)
+      .then((handled) => {
+        if (!handled) {
+          getTurnController().submit(value);
+        }
+      })
+      .catch((error) => {
+        if (state.runtime.status !== "closing") {
+          output.writeError(`${error instanceof Error ? error.message : String(error)}\n`);
+        }
+      });
+  }
+
   return {
     ask,
     answerQuestion,
@@ -625,6 +649,7 @@ export function createCliInputActions({
     clearPendingInputs,
     handleTerminalInput,
     handleTerminalPaste,
+    dispatchExternal,
     askModelMenu,
     askEffortMenu,
     askThemeMenu,
