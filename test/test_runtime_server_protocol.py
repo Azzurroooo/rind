@@ -22,6 +22,7 @@ from agent.runtime.server.stdio import (
     JsonlWriter,
     StdioRuntimeServer,
     WorkerStdioRuntimeServer,
+    _schedule_ingest,
     configure_stdio_server_signals,
     configure_utf8_stdio,
 )
@@ -1875,3 +1876,33 @@ def test_app_server_process_serves_git_backed_commands_and_exits_after_shutdown(
         assert process.returncode == 0
     finally:
         process.kill()
+
+
+def test_schedule_ingest_delivers_on_live_loop():
+    loop = asyncio.new_event_loop()
+    try:
+        received = []
+
+        async def ingest(value):
+            received.append(value)
+
+        future = _schedule_ingest(loop, ingest, "line")
+        assert future is not None
+
+        async def await_delivery():
+            await asyncio.wrap_future(future)
+
+        loop.run_until_complete(await_delivery())
+        assert received == ["line"]
+    finally:
+        loop.close()
+
+
+def test_schedule_ingest_drops_delivery_after_loop_close():
+    loop = asyncio.new_event_loop()
+    loop.close()
+
+    async def ingest():
+        raise AssertionError("dropped delivery must never run")
+
+    assert _schedule_ingest(loop, ingest) is None

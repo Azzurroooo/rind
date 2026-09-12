@@ -38,6 +38,19 @@ from agent.runtime.server.protocol import (
 )
 
 
+def _schedule_ingest(loop: asyncio.AbstractEventLoop, ingest: Callable, *args: Any):
+    """The stdin pump is a daemon thread: once the loop has closed the process
+    is already exiting, so drop the delivery instead of raising."""
+    if loop.is_closed():
+        return None
+    coro = ingest(*args)
+    try:
+        return asyncio.run_coroutine_threadsafe(coro, loop)
+    except RuntimeError:
+        coro.close()
+        return None
+
+
 class JsonlWriter:
     def __init__(self):
         self._lock = asyncio.Lock()
@@ -210,8 +223,9 @@ class StdioRuntimeServer:
                 line = sys.stdin.readline()
                 if line == "":
                     break
-                asyncio.run_coroutine_threadsafe(self._ingest_line(line), loop)
-            asyncio.run_coroutine_threadsafe(self._ingest_eof(), loop)
+                if _schedule_ingest(loop, self._ingest_line, line) is None:
+                    return
+            _schedule_ingest(loop, self._ingest_eof)
 
         threading.Thread(target=_pump, name="rind-stdin-pump", daemon=True).start()
 
@@ -991,8 +1005,11 @@ class WorkerStdioRuntimeServer:
                 line = sys.stdin.readline()
                 if line == "":
                     break
-                asyncio.run_coroutine_threadsafe(self._ingest_line(line), loop).result()
-            asyncio.run_coroutine_threadsafe(self._ingest_eof(), loop).result()
+                future = _schedule_ingest(loop, self._ingest_line, line)
+                if future is None:
+                    return
+                future.result()
+            _schedule_ingest(loop, self._ingest_eof)
 
         threading.Thread(target=_pump, name="rind-stdin-pump", daemon=True).start()
 
