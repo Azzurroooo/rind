@@ -436,14 +436,10 @@ export function slashDisplayText(display, commands = []) {
       return slashHelpText(display, commands);
     case "status":
       return slashStatusText(display);
-    case "doctor":
-      return slashDoctorText(display);
     case "sessions":
       return slashSessionsText(display);
     case "skills":
       return slashSkillsText(display);
-    case "config":
-      return slashConfigText(display);
     case "theme":
       return slashThemeText(display);
     default:
@@ -986,55 +982,22 @@ function slashHelpText(display, commands) {
 }
 
 function slashStatusText(display) {
-  const lines = [sectionRule("Status")];
-  lines.push(kvRow("session", clipSingleLine(display.session, 48)));
-  lines.push(kvRow("model", clipSingleLine(display.model, 52)));
-  lines.push(kvRow("messages", `${singleLine(display.messages) || "unknown"} · debug ${display.debug ? "on" : "off"}`));
-  const git = display.git && typeof display.git === "object" ? display.git : null;
-  if (git) {
-    const state = git.dirty ? "dirty" : "clean";
-    lines.push(kvRow("git", `${clipSingleLine(git.branch, 48)} · ${state}`));
+  const lines = [slashConfigText({ entries: display.entries })];
+  lines.push("", sectionRule("Assistant sampling"));
+  const usage = Array.isArray(display.usage) ? display.usage[0] : null;
+  if (!usage) {
+    lines.push(dim("  no completed sampling yet"));
+    return lines.join("\n");
   }
-  for (const usage of Array.isArray(display.usage) ? display.usage : []) {
-    lines.push("", sectionRule(sectionLabel(usage.label) || "Sampling"));
-    const windowTokens = Number(usage.context_window_tokens) || 0;
-    if (windowTokens > 0) {
-      lines.push(kvRow("context", `${usageMeter(usage.context_usage_percent)} ${dim(formatPercent(usage.context_usage_percent))}`));
-      lines.push(kvRow("input", `${formatCount(usage.input_tokens)} ${dim(`/ ${formatCount(windowTokens)} tokens`)}`));
-    } else {
-      lines.push(kvRow("input", formatCount(usage.input_tokens)));
-    }
-    lines.push(kvRow("cached", `${formatCount(usage.cached_input_tokens)} ${dim(`· ${formatPercent(usage.cache_hit_rate)} hit`)}`));
-    lines.push(kvRow("output", formatCount(usage.output_tokens)));
+  const windowTokens = Number(usage.context_window_tokens) || 0;
+  if (windowTokens > 0) {
+    lines.push(kvRow("context", `${usageMeter(usage.context_usage_percent)} ${dim(formatPercent(usage.context_usage_percent))}`));
+    lines.push(kvRow("input", `${formatCount(usage.input_tokens)} ${dim(`/ ${formatCount(windowTokens)} tokens`)}`));
+  } else {
+    lines.push(kvRow("input", formatCount(usage.input_tokens)));
   }
-  return lines.join("\n");
-}
-
-function slashDoctorText(display) {
-  const failures = Number(display.failures || 0);
-  const warnings = Number(display.warnings || 0);
-  const summary = failures || warnings
-    ? `${failures} fail · ${warnings} warn`
-    : "all checks passed";
-  const checks = (Array.isArray(display.checks) ? display.checks : [])
-    .filter((check) => check && typeof check === "object");
-  const widths = checks.map((check) => visibleLength(clipSingleLine(check.name, 28)));
-  const nameWidth = Math.min(24, Math.max(10, ...(widths.length ? widths : [10])));
-  const lines = [sectionRule("Doctor", summary)];
-  for (const check of checks) {
-    const status = singleLine(check.status).toLowerCase();
-    const marker = doctorMarker(status);
-    const name = padRight(clipSingleLine(check.name, 28), nameWidth);
-    const detail = clipSingleLine(check.detail, Math.max(12, slashContentWidth() - nameWidth - 8));
-    lines.push(`  ${marker} ${name}  ${dim(detail)}`.trimEnd());
-  }
-  const nextSteps = Array.isArray(display.next_steps) ? display.next_steps : [];
-  if (nextSteps.length) {
-    lines.push("", sectionRule("Next steps"));
-    for (const step of nextSteps) {
-      lines.push(`  ${dim(clipSingleLine(step, slashContentWidth()))}`);
-    }
-  }
+  lines.push(kvRow("cached", `${formatCount(usage.cached_input_tokens)} ${dim(`· ${formatPercent(usage.cache_hit_rate)} hit`)}`));
+  lines.push(kvRow("output", formatCount(usage.output_tokens)));
   return lines.join("\n");
 }
 
@@ -1133,7 +1096,7 @@ function optionalNonnegativeNumber(value) {
 function slashConfigText(display) {
   const entries = (Array.isArray(display.entries) ? display.entries : [])
     .filter((entry) => entry && typeof entry === "object");
-  const lines = [sectionRule("Config", entries.length ? `${entries.length} ${entries.length === 1 ? "key" : "keys"}` : "")];
+  const lines = [sectionRule("Config")];
   for (const entry of entries) {
     const label = clipSingleLine(entry.label, 22);
     const rawValue = entry.label === "settings"
@@ -1195,10 +1158,6 @@ function usageMeter(ratio) {
   return `${tone("▮".repeat(filled))}${dim("▯".repeat(cells - filled))}`;
 }
 
-function sectionLabel(value) {
-  return singleLine(value).replace(/:\s*$/, "");
-}
-
 function slashAliases(value) {
   return Array.isArray(value) ? value.map((alias) => `/${clipSingleLine(alias, 18)}`).join(", ") : "";
 }
@@ -1209,16 +1168,6 @@ function slashContentWidth() {
     return 96;
   }
   return Math.max(28, Math.min(96, columns - 6));
-}
-
-function doctorMarker(status) {
-  if (status === "ok") {
-    return green("✓");
-  }
-  if (status === "fail") {
-    return red("⊘");
-  }
-  return paint.warning("!");
 }
 
 function menuWindow(items, selectedIndex) {

@@ -4,7 +4,7 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
-import { loadLocalSettings } from "../lib/local-slash-commands.js";
+import { executeLocalSlashCommand, loadLocalSettings } from "../lib/local-slash-commands.js";
 
 test("local settings prefer a complete project configuration", async () => {
   const root = await mkdtemp(path.join(tmpdir(), "rind-cli-settings-"));
@@ -49,4 +49,37 @@ test("local settings fall back to the user configuration when project settings a
   } finally {
     await rm(root, { recursive: true, force: true });
   }
+});
+
+test("local status combines session config and empty sampling state", async () => {
+  const result = await executeLocalSlashCommand("/status", {
+    settings: {
+      path: "E:\\project\\.rind\\settings.json",
+      exists: true,
+      model: "project-model",
+      baseUrl: "https://project.example/v1",
+      reasoningEffort: "medium",
+      hasApiKey: true,
+    },
+    sessionInfo: { session_id: "session_1", model: "session-model", reasoning_effort: "high" },
+    runtimeInitialized: false,
+    runtimeStarted: false,
+  });
+
+  assert.deepEqual(result.display, {
+    type: "status",
+    entries: [
+      { label: "session", value: "session_1" },
+      { label: "settings", value: "E:\\project\\.rind\\settings.json", state: "found" },
+      { label: "apiKey", value: "set" },
+      { label: "baseUrl", value: "https://project.example/v1" },
+      { label: "model", value: "session-model" },
+      { label: "reasoningEffort", value: "high" },
+    ],
+    usage: [],
+  });
+});
+
+test("config is no longer a local slash command", async () => {
+  assert.equal(await executeLocalSlashCommand("/config", {}), null);
 });

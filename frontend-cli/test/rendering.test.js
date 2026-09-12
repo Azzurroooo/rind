@@ -427,13 +427,11 @@ test("slashDisplayText renders command help payloads", () => {
       type: "help",
       commands: [
         { name: "status", description: "Show session status", usage: "/status" },
-        { name: "doctor", description: "Run diagnostics", usage: "/doctor" },
       ],
     }),
     [
-      `  ── Commands · 2 available ${"─".repeat(68)}`,
+      `  ── Commands · 1 available ${"─".repeat(68)}`,
       "  /status         Show session status",
-      "  /doctor         Run diagnostics",
       "",
       "  use /help <command> for usage",
     ].join("\n"),
@@ -458,17 +456,15 @@ test("slashDisplayText renders command help payloads", () => {
   );
 });
 
-test("slashDisplayText renders status payloads", () => {
+test("slashDisplayText renders the two status sections", () => {
   assert.equal(
     slashDisplayText({
       type: "status",
-      session: "session_1",
-      model: "model_a",
-      debug: true,
-      messages: "2",
-      git: { branch: "main", dirty: true },
+      entries: [
+        { label: "session", value: "session_1" },
+        { label: "model", value: "model_a" },
+      ],
       usage: [{
-        label: "Last sampling:",
         input_tokens: 121300,
         context_window_tokens: 258400,
         context_usage_percent: 121300 / 258400,
@@ -478,13 +474,11 @@ test("slashDisplayText renders status payloads", () => {
       }],
     }),
     [
-      `  ── Status ${"─".repeat(84)}`,
-      "  session     session_1",
-      "  model       model_a",
-      "  messages    2 · debug on",
-      "  git         main · dirty",
+      `  ── Config ${"─".repeat(84)}`,
+      "  session           session_1",
+      "  model             model_a",
       "",
-      `  ── Last sampling ${"─".repeat(77)}`,
+      `  ── Assistant sampling ${"─".repeat(72)}`,
       "  context     ▮▮▮▮▮▯▯▯▯▯ 46.9%",
       "  input       121.3k / 258.4k tokens",
       "  cached      98.7k · 81.4% hit",
@@ -493,32 +487,7 @@ test("slashDisplayText renders status payloads", () => {
   );
 });
 
-test("slashDisplayText renders doctor payloads with textual state", () => {
-  assert.equal(
-    slashDisplayText({
-      type: "doctor",
-      failures: 1,
-      warnings: 1,
-      checks: [
-        { status: "ok", name: "Python", detail: "3.12.0" },
-        { status: "warn", name: "Git", detail: "not found on PATH" },
-        { status: "fail", name: "API key", detail: "unset" },
-      ],
-      next_steps: ["Set apiKey in settings.json."],
-    }),
-    [
-      `  ── Doctor · 1 fail · 1 warn ${"─".repeat(66)}`,
-      "  ✓ Python      3.12.0",
-      "  ! Git         not found on PATH",
-      "  ⊘ API key     unset",
-      "",
-      `  ── Next steps ${"─".repeat(80)}`,
-      "  Set apiKey in settings.json.",
-    ].join("\n"),
-  );
-});
-
-test("slashDisplayText renders sessions, skills, and config payloads", () => {
+test("slashDisplayText renders sessions and skills payloads", () => {
   assert.equal(
     slashDisplayText({
       type: "sessions",
@@ -558,20 +527,6 @@ test("slashDisplayText renders sessions, skills, and config payloads", () => {
       "      E:\\project\\.rind\\skills\\demo",
     ].join("\n"),
   );
-  assert.equal(
-    slashDisplayText({
-      type: "config",
-      entries: [
-        { label: "settings", value: "E:\\project\\settings.json", state: "found" },
-        { label: "apiKey", value: "set" },
-      ],
-    }),
-    [
-      `  ── Config · 2 keys ${"─".repeat(75)}`,
-      "  settings          E:\\project\\settings.json  (found)",
-      "  apiKey            set",
-    ].join("\n"),
-  );
 });
 
 test("slashDisplayText clips long slash command fields", () => {
@@ -603,10 +558,16 @@ test("skill locations collapse the home directory and drop SKILL.md", () => {
 test("slashResultText prefers structured display and falls back to raw text", () => {
   assert.equal(
     slashResultText({
-      text: "Raw markdown",
-      display: { type: "config", entries: [{ label: "apiKey", value: "unset" }] },
+      text: "Raw status",
+      display: { type: "status", entries: [{ label: "apiKey", value: "unset" }], usage: [] },
     }),
-    `  ── Config · 1 key ${"─".repeat(76)}\n  apiKey            unset`,
+    [
+      `  ── Config ${"─".repeat(84)}`,
+      "  apiKey            unset",
+      "",
+      `  ── Assistant sampling ${"─".repeat(72)}`,
+      "  no completed sampling yet",
+    ].join("\n"),
   );
   assert.equal(slashResultText({ text: "Raw text", display: { type: "unknown" } }), "Raw text");
   assert.equal(slashResultText(null), "");

@@ -13,7 +13,7 @@ async def handle_status(context: SlashCommandContext, args: list[str]) -> str | 
 
 COMMAND = SlashCommandInfo(
     name="status",
-    description="Show session status",
+    description="Show config and assistant sampling",
     usage="/status",
     handler=handle_status,
 )

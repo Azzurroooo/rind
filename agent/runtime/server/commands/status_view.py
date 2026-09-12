@@ -2,106 +2,54 @@
 
 from __future__ import annotations
 
-import asyncio
-
+from agent.infrastructure.config import load_settings
 from agent.runtime.server.commands.formatting import display_value, nonnegative_int
 
 from .router import SlashCommandContext
 
 
 def render_status_display(display: dict) -> str:
-    lines = [
-        "```text",
-        "Status:",
-        f"Session: {display['session']}",
-        f"Model: {display['model']}",
-        f"Debug: {str(bool(display['debug'])).lower()}",
-        f"Messages: {display['messages']}",
-    ]
-    git_status = display.get("git")
-    if isinstance(git_status, dict):
-        marker = "*" if git_status.get("dirty") else ""
-        lines.append(f"Git: {display_value(git_status.get('branch'))}{marker}")
-    for usage in display.get("usage") or []:
-        if isinstance(usage, dict):
-            lines.extend(_usage_lines(str(usage.get("label") or "Last sampling:"), usage))
+    lines = ["```text", "Config:"]
+    lines.extend(_config_lines(display.get("entries")))
+    lines.extend(["", "Assistant sampling:"])
+    usage_items = display.get("usage")
+    usage = usage_items[0] if isinstance(usage_items, list) and usage_items else None
+    if isinstance(usage, dict):
+        lines.extend(_usage_lines(usage))
+    else:
+        lines.append("no completed sampling yet")
     lines.append("```")
     return "\n".join(lines)
 
 
 async def build_status_display(context: SlashCommandContext) -> dict:
     session = context.session
-    message_count = await _message_count(session)
-    display = {
-        "type": "status",
-        "session": display_value(getattr(session, "session_id", None)),
-        "model": display_value(getattr(session, "model", None)),
-        "debug": bool(context.debug),
-        "messages": message_count,
-    }
-    git_status = await _git_status_display(context.workspace_root)
-    if git_status:
-        display["git"] = git_status
-    assistant_usage = await _latest_assistant_sampling_usage(session)
-    latest_usage = await _latest_sampling_usage(session)
-    usage_items = []
-    if assistant_usage:
-        usage_items.append(_usage_display("Assistant sampling:", assistant_usage))
-        if latest_usage and latest_usage.get("sampling_kind") != "assistant":
-            label = f"Latest request ({latest_usage.get('sampling_kind') or 'unknown'}):"
-            usage_items.append(_usage_display(label, latest_usage))
-    elif latest_usage:
-        usage_items.append(_usage_display("Last sampling:", latest_usage))
-    if usage_items:
-        display["usage"] = usage_items
-    return display
-
-
-async def _message_count(session) -> str:
-    get_messages = getattr(session, "get_messages_slice", None)
-    if not callable(get_messages):
-        return "unknown"
+    entries = [{"label": "session", "value": display_value(getattr(session, "session_id", None))}]
     try:
-        messages = await get_messages(compacted=False)
-        return str(sum(1 for message in messages if not _is_skill_snapshot(message)))
-    except Exception:
-        return "unknown"
-
-
-def _is_skill_snapshot(message: object) -> bool:
-    if not isinstance(message, dict):
-        return False
-    for metadata_key in ("_rind_meta", "meta"):
-        metadata = message.get(metadata_key)
-        if isinstance(metadata, dict) and metadata.get("kind") == "skill_snapshot":
-            return True
-    return False
-
-
-async def _git_status_display(workspace_root: str | None) -> dict | None:
-    def _current():
-        from agent.runtime.server.commands.git_status import GitPromptStatusProvider
-
-        return GitPromptStatusProvider(cwd=workspace_root, ttl_seconds=0).current()
-
-    try:
-        status = await asyncio.to_thread(_current)
-    except Exception:
-        return None
-    if status is None:
-        return None
-    return {"branch": display_value(status.branch), "dirty": bool(status.dirty)}
-
-
-async def _latest_sampling_usage(session) -> dict | None:
-    get_usage = getattr(session, "get_latest_sampling_usage", None)
-    if not callable(get_usage):
-        return None
-    try:
-        usage = await get_usage()
-        return dict(usage) if isinstance(usage, dict) else None
-    except Exception:
-        return None
+        settings = load_settings(context.workspace_root)
+        entries.extend([
+            {
+                "label": "settings",
+                "value": str(settings.settings_path),
+                "state": "found" if settings.settings_exists else "missing",
+            },
+            {"label": "apiKey", "value": "set" if settings.api_key else "unset"},
+            {"label": "baseUrl", "value": str(settings.base_url)},
+            {
+                "label": "model",
+                "value": display_value(getattr(session, "model", None) or settings.model),
+            },
+            {
+                "label": "reasoningEffort",
+                "value": display_value(
+                    getattr(session, "reasoning_effort", None) or settings.reasoning_effort or "unset"
+                ),
+            },
+        ])
+    except (OSError, ValueError) as exc:
+        entries.append({"label": "settings", "value": f"unavailable: {exc}"})
+    usage = await _latest_assistant_sampling_usage(session)
+    return {"type": "status", "entries": entries, "usage": [_usage_display(usage)] if usage else []}
 
 
 async def _latest_assistant_sampling_usage(session) -> dict | None:
@@ -115,25 +63,41 @@ async def _latest_assistant_sampling_usage(session) -> dict | None:
         return None
 
 
-def _usage_lines(label: str, usage: dict) -> list[str]:
+def _config_lines(entries: object) -> list[str]:
+    if not isinstance(entries, list):
+        return ["settings           unavailable"]
+    lines: list[str] = []
+    for entry in entries:
+        if not isinstance(entry, dict):
+            continue
+        label = str(entry.get("label") or "")
+        value = str(entry.get("value") or "")
+        state = f" ({entry['state']})" if entry.get("state") else ""
+        lines.append(f"{label}: {value}{state}")
+    return lines or ["settings           unavailable"]
+
+
+def _usage_lines(usage: dict) -> list[str]:
+    context_percent = _numeric_percent(usage.get("context_usage_percent"))
     context_window = nonnegative_int(usage.get("context_window_tokens"))
     input_tokens = nonnegative_int(usage.get("input_tokens"))
     cached_tokens = nonnegative_int(usage.get("cached_input_tokens"))
     output_tokens = nonnegative_int(usage.get("output_tokens"))
-    limit = f" / {_format_count(context_window)}" if context_window > 0 else ""
-    return [
-        "",
-        label,
-        f"input: {_format_count(input_tokens)}{limit} ({_format_percent(usage.get('context_usage_percent'))})",
-        f"cached: {_format_count(cached_tokens)} ({_format_percent(usage.get('cache_hit_rate'))})",
+    limit = f" / {_format_count(context_window)} tokens" if context_window > 0 else ""
+    lines = []
+    if context_window > 0:
+        filled = min(10, max(0, round(context_percent * 10)))
+        lines.append(f"context: {'▮' * filled}{'▯' * (10 - filled)} {_format_percent(context_percent)}")
+    lines.extend([
+        f"input: {_format_count(input_tokens)}{limit}",
+        f"cached: {_format_count(cached_tokens)} · {_format_percent(usage.get('cache_hit_rate'))} hit",
         f"output: {_format_count(output_tokens)}",
-    ]
+    ])
+    return lines
 
 
-def _usage_display(label: str, usage: dict) -> dict:
+def _usage_display(usage: dict) -> dict:
     return {
-        "label": label,
-        "sampling_kind": str(usage.get("sampling_kind") or ""),
         "input_tokens": nonnegative_int(usage.get("input_tokens")),
         "context_window_tokens": nonnegative_int(usage.get("context_window_tokens")),
         "context_usage_percent": _numeric_percent(usage.get("context_usage_percent")),

@@ -8,7 +8,7 @@ from .router import SlashCommandInfo
 HELP_GROUPS = (
     ("Operate", ("status", "plan", "draft", "compact")),
     ("Explore", ("sessions", "skill", "help")),
-    ("Configure", ("model", "config", "doctor", "login")),
+    ("Configure", ("model", "login")),
 )
 
 

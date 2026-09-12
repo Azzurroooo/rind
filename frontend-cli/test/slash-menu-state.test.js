@@ -13,7 +13,6 @@ const fullCommandDeck = [
   "clear",
   "compact",
   "config",
-  "doctor",
   "draft",
   "exit",
   "help",
@@ -100,7 +99,6 @@ test("slash menu keeps all matching commands for renderer windowing", () => {
     "clear",
     "compact",
     "config",
-    "doctor",
     "draft",
     "exit",
     "help",
@@ -120,11 +118,11 @@ test("slash menu can select commands beyond the first visible window", () => {
   }
 
   assert.equal(state.selectedIndex(), 8);
-  assert.equal(state.selectedCommand().name, "model");
+  assert.equal(state.selectedCommand().name, "skill");
 
   assert.equal(state.handleKey("", { name: "down" }), true);
   assert.equal(state.selectedIndex(), 9);
-  assert.equal(state.selectedCommand().name, "skill");
+  assert.equal(state.selectedCommand().name, "status");
 });
 
 test("slash menu returns later selected commands for submission", () => {
@@ -138,5 +136,5 @@ test("slash menu returns later selected commands for submission", () => {
   const command = state.selectedCommand();
   const submitted = command ? `/${command.name}` : state.input();
 
-  assert.equal(submitted, "/skill");
+  assert.equal(submitted, "/status");
 });

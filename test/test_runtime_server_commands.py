@@ -1,7 +1,6 @@
 import asyncio
 import json
 import os
-import subprocess
 import sys
 from pathlib import Path
 
@@ -13,7 +12,6 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from agent.runtime.server.commands import SlashCommandContext, SlashCommandInfo, SlashCommandRouter
-from agent.runtime.server.commands.git_status import GitPromptStatus
 from agent.infrastructure.config import AppSettings, Config
 from agent.infrastructure.persistence.jsonl_session_store import JsonlSessionStore
 from agent.infrastructure.skills.repository import SkillRepository
@@ -104,8 +102,7 @@ async def test_help_returns_command_list() -> None:
     assert "Commands" in result.text
     assert "Operate" in result.text
     assert "/status" in result.text
-    assert "Show session status" in result.text
-    assert "/doctor" in result.text
+    assert "Show config and assistant sampling" in result.text
     assert "/skill" in result.text
     assert "Use `/help <command>` for usage." in result.text
     assert result.display is not None
@@ -135,6 +132,13 @@ async def test_help_reports_unknown_command() -> None:
 
 
 @pytest.mark.asyncio
+async def test_config_command_is_removed() -> None:
+    result = await SlashCommandRouter().execute("/config", _context())
+
+    assert result.text == "Unknown command: /config\nRun /help to see available commands."
+
+
+@pytest.mark.asyncio
 async def test_help_rejects_too_many_args() -> None:
     result = await SlashCommandRouter().execute("/help model now", _context())
 
@@ -149,6 +153,7 @@ def test_router_exposes_sorted_command_names() -> None:
     assert "status" in names
     assert "sessions" in names
     assert "team" in names
+    assert "config" not in names
 
 
 def test_router_exposes_command_descriptions() -> None:
@@ -157,7 +162,7 @@ def test_router_exposes_command_descriptions() -> None:
     usages = {info.name: info.usage for info in infos}
 
     assert [info.name for info in infos] == sorted(descriptions)
-    assert descriptions["status"] == "Show session status"
+    assert descriptions["status"] == "Show config and assistant sampling"
     assert descriptions["model"] == "Show or change the active model"
     assert "clear" not in descriptions
     assert "exit" not in descriptions
@@ -352,37 +357,19 @@ async def test_team_add_returns_main_agent_creation_prompt(tmp_path) -> None:
 
 
 @pytest.mark.asyncio
-async def test_status_shows_session_model_debug_and_message_count() -> None:
+async def test_status_shows_config_and_empty_assistant_sampling() -> None:
     result = await SlashCommandRouter().execute("/status", _context())
 
-    assert "Session: session_1" in result.text
-    assert "Model: model_a" in result.text
-    assert "Debug: true" in result.text
-    assert "Messages: 2" in result.text
+    assert "Config:" in result.text
+    assert "session: session_1" in result.text
+    assert "model: model_a" in result.text
+    assert "Assistant sampling:" in result.text
+    assert "no completed sampling yet" in result.text
     assert result.display is not None
     assert result.display["type"] == "status"
-    assert result.display["session"] == "session_1"
-    assert result.display["debug"] is True
-
-
-@pytest.mark.asyncio
-async def test_status_excludes_skill_snapshot_messages_from_count() -> None:
-    class SnapshotSession(FakeSession):
-        async def get_messages_slice(self, compacted=True):
-            return [
-                {"role": "system", "content": "sys"},
-                {"role": "user", "content": "hello"},
-                {
-                    "role": "user",
-                    "content": "<skill_content>private body</skill_content>",
-                    "_rind_meta": {"kind": "skill_snapshot"},
-                },
-            ]
-
-    result = await SlashCommandRouter().execute("/status", _context(SnapshotSession()))
-
-    assert result.display["messages"] == "2"
-    assert "Messages: 2" in result.text
+    assert [entry["label"] for entry in result.display["entries"]] == [
+        "session", "settings", "apiKey", "baseUrl", "model", "reasoningEffort",
+    ]
 
 
 @pytest.mark.asyncio
@@ -393,43 +380,9 @@ async def test_status_rejects_extra_args() -> None:
 
 
 @pytest.mark.asyncio
-async def test_status_shows_git_branch(monkeypatch) -> None:
-    class FakeGitProvider:
-        def __init__(self, *args, **kwargs):
-            pass
-
-        def current(self):
-            return GitPromptStatus(branch="main", dirty=True)
-
-    monkeypatch.setattr("agent.runtime.server.commands.git_status.GitPromptStatusProvider", FakeGitProvider)
-
-    result = await SlashCommandRouter().execute("/status", _context())
-
-    assert "Git: main*" in result.text
-
-
-def test_git_commands_do_not_inherit_runtime_stdin(monkeypatch, tmp_path) -> None:
-    from agent.runtime.server.commands import diagnostics, git_status
-
-    calls = []
-
-    def fake_run(*args, **kwargs):
-        calls.append(kwargs)
-        return type("Completed", (), {"returncode": 0, "stdout": "main\n"})()
-
-    monkeypatch.setattr(git_status.subprocess, "run", fake_run)
-
-    assert git_status._run_git(["rev-parse", "--abbrev-ref", "HEAD"], str(tmp_path)) == "main"
-    assert diagnostics._run_git(["rev-parse", "--abbrev-ref", "HEAD"]) == "main"
-    assert len(calls) == 2
-    assert calls[0]["stdin"] is subprocess.DEVNULL
-    assert calls[1]["stdin"] is subprocess.DEVNULL
-
-
-@pytest.mark.asyncio
 async def test_status_shows_latest_sampling_usage() -> None:
     class UsageSession(FakeSession):
-        async def get_latest_sampling_usage(self):
+        async def get_latest_assistant_sampling_usage(self):
             return {
                 "input_tokens": 121300,
                 "context_window_tokens": 258400,
@@ -441,16 +394,16 @@ async def test_status_shows_latest_sampling_usage() -> None:
 
     result = await SlashCommandRouter().execute("/status", _context(session=UsageSession()))
 
-    assert "Last sampling:" in result.text
-    assert "input: 121.3k / 258.4k" in result.text
-    assert "cached: 98.7k (81.4%)" in result.text
+    assert "Assistant sampling:" in result.text
+    assert "context: ▮▮▮▮▮▯▯▯▯▯ 46.9%" in result.text
+    assert "input: 121.3k / 258.4k tokens" in result.text
+    assert "cached: 98.7k · 81.4% hit" in result.text
     assert result.display is not None
-    assert result.display["usage"][0]["label"] == "Last sampling:"
     assert result.display["usage"][0]["input_tokens"] == 121300
 
 
 @pytest.mark.asyncio
-async def test_status_labels_assistant_and_compact_usage_separately() -> None:
+async def test_status_ignores_compact_sampling_usage() -> None:
     class UsageSession(FakeSession):
         async def get_latest_assistant_sampling_usage(self):
             return {
@@ -477,15 +430,15 @@ async def test_status_labels_assistant_and_compact_usage_separately() -> None:
     result = await SlashCommandRouter().execute("/status", _context(session=UsageSession()))
 
     assert "Assistant sampling:" in result.text
-    assert "Latest request (compact):" in result.text
+    assert "Latest request" not in result.text
     assert "input: 121.3k / 258.4k" in result.text
-    assert "input: 37.0k / 258.4k" in result.text
+    assert len(result.display["usage"]) == 1
 
 
 @pytest.mark.asyncio
 async def test_status_tolerates_invalid_sampling_usage() -> None:
     class UsageSession(FakeSession):
-        async def get_latest_sampling_usage(self):
+        async def get_latest_assistant_sampling_usage(self):
             return {
                 "input_tokens": "bad",
                 "context_window_tokens": object(),
@@ -497,9 +450,9 @@ async def test_status_tolerates_invalid_sampling_usage() -> None:
 
     result = await SlashCommandRouter().execute("/status", _context(session=UsageSession()))
 
-    assert "Last sampling:" in result.text
-    assert "input: 0 (0.0%)" in result.text
-    assert "cached: 0 (0.0%)" in result.text
+    assert "Assistant sampling:" in result.text
+    assert "input: 0" in result.text
+    assert "cached: 0 · 0.0% hit" in result.text
     assert "output: 0" in result.text
 
 
@@ -531,13 +484,13 @@ async def test_status_does_not_show_recent_tools() -> None:
     result = await SlashCommandRouter().execute("/status", _context(session=session))
 
     assert session.tool_records_called is False
-    assert "Status:" in result.text
+    assert "Assistant sampling:" in result.text
     assert "Recent tools:" not in result.text
     assert "bash ok" not in result.text
 
 
 @pytest.mark.asyncio
-async def test_config_does_not_leak_api_key(monkeypatch) -> None:
+async def test_status_does_not_leak_api_key(monkeypatch) -> None:
     monkeypatch.setattr(Config, "OPENAI_API_KEY", "secret-value")
     monkeypatch.setattr(Config, "OPENAI_API_BASE", "https://example.com/v1")
     monkeypatch.setattr(Config, "DEFAULT_MODEL", "test-model")
@@ -552,16 +505,16 @@ async def test_config_does_not_leak_api_key(monkeypatch) -> None:
         base_url="https://example.com/v1",
         reasoning_effort="xhigh",
     )
-    monkeypatch.setattr("agent.runtime.server.commands.features.config.load_settings", lambda _: settings)
+    monkeypatch.setattr("agent.runtime.server.commands.status_view.load_settings", lambda _: settings)
 
-    result = await SlashCommandRouter().execute("/config", _context())
+    result = await SlashCommandRouter().execute("/status", _context())
 
     assert "apiKey: set" in result.text
     assert "baseUrl: https://example.com/v1" in result.text
-    assert "model: test-model" in result.text
+    assert "model: model_a" in result.text
     assert "secret-value" not in result.text
     assert result.display is not None
-    assert result.display["type"] == "config"
+    assert result.display["type"] == "status"
     assert {"label": "apiKey", "value": "set"} in result.display["entries"]
 
 
@@ -571,46 +524,6 @@ async def test_login_mentions_shared_settings_path() -> None:
 
     assert "~/.rind" in result.text
     assert "settings.json" in result.text
-
-
-@pytest.mark.asyncio
-async def test_doctor_reports_setup_without_leaking_api_key(monkeypatch, tmp_path) -> None:
-    class SessionWithRoot(FakeSession):
-        session_root = tmp_path / "sessions"
-
-    monkeypatch.setattr(Config, "OPENAI_API_KEY", "secret-value")
-    monkeypatch.setattr(Config, "OPENAI_API_BASE", "https://example.com/v1")
-    monkeypatch.setattr(Config, "DEFAULT_MODEL", "test-model")
-    monkeypatch.setattr(Config, "SETTINGS_PATH", str(tmp_path / "settings.json"))
-    monkeypatch.setattr(Config, "SETTINGS_EXISTS", True)
-    settings = AppSettings(
-        settings_path=tmp_path / "settings.json",
-        settings_exists=True,
-        model="test-model",
-        api_key="secret-value",
-        base_url="https://example.com/v1",
-        reasoning_effort="",
-    )
-    monkeypatch.setattr("agent.runtime.server.commands.diagnostics.load_settings", lambda _: settings)
-
-    result = await SlashCommandRouter().execute("/doctor", _context(session=SessionWithRoot()))
-
-    assert "Doctor:" in result.text
-    assert "API key: set" in result.text
-    assert "Model: test-model" in result.text
-    assert "Session store:" in result.text
-    assert "Context window" not in result.text
-    assert "secret-value" not in result.text
-    assert result.display is not None
-    assert result.display["type"] == "doctor"
-    assert any(check["name"] == "API key" for check in result.display["checks"])
-
-
-@pytest.mark.asyncio
-async def test_doctor_rejects_extra_args() -> None:
-    result = await SlashCommandRouter().execute("/doctor now", _context())
-
-    assert result.text == "Usage: /doctor"
 
 
 @pytest.mark.asyncio
@@ -875,11 +788,12 @@ def main() -> int:
     asyncio.run(test_help_returns_command_list())
     asyncio.run(test_help_returns_command_specific_usage())
     asyncio.run(test_help_reports_unknown_command())
+    asyncio.run(test_config_command_is_removed())
     asyncio.run(test_help_rejects_too_many_args())
     asyncio.run(test_unknown_command_returns_friendly_error())
-    asyncio.run(test_status_shows_session_model_debug_and_message_count())
+    asyncio.run(test_status_shows_config_and_empty_assistant_sampling())
     asyncio.run(test_status_shows_latest_sampling_usage())
-    asyncio.run(test_status_labels_assistant_and_compact_usage_separately())
+    asyncio.run(test_status_ignores_compact_sampling_usage())
     asyncio.run(test_status_does_not_show_recent_tools())
     asyncio.run(test_model_rejects_invalid_set_args())
     asyncio.run(test_compact_calls_runtime_compact_context())

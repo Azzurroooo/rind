@@ -59,7 +59,7 @@ The worker keeps no heavy resident state: agent containers exist only while a tu
 
 ### And the standard kit, done properly
 
-Mid-turn steering and queued follow-ups · session fork at any past message · live context telemetry (`/context` — every number measured, estimates marked `~`) · append-only JSONL sessions (crash-safe, replayable, isolated by `RIND_HOME`) · live-turn crash recovery · project docs (`RIND.md`) auto-injected into context · skills · plans · four TTY themes with streaming markdown, tables, and CJK-aware rendering · `/doctor` that tells you what's wrong.
+Mid-turn steering and queued follow-ups · session fork at any past message · live context telemetry (`/context` — every number measured, estimates marked `~`) · append-only JSONL sessions (crash-safe, replayable, isolated by `RIND_HOME`) · live-turn crash recovery · project docs (`RIND.md`) auto-injected into context · skills · plans · four TTY themes with streaming markdown, tables, and CJK-aware rendering.
 
 ## Quick start
 
@@ -162,7 +162,7 @@ Three decisions make this shape work:
 | `/context` | context breakdown + usage board (real tokens) |
 | `/fork` `/sessions` `/compact` | branch, switch, or free context |
 | `/model` `/effort` `/theme` | pick model, reasoning effort, color theme |
-| `/goal` `/skill` `/team` `/doctor` `/help` | autonomous goal, skills, team, diagnostics, commands |
+| `/goal` `/skill` `/team` `/help` | autonomous goal, skills, team, commands |
 
 | Entry points | Meaning |
 | --- | --- |

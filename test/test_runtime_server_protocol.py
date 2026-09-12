@@ -725,7 +725,6 @@ def test_slash_execute_non_compact_does_not_reset_context_usage(capsys):
     ("slash_input", "display_type"),
     [
         ("/status", "status"),
-        ("/doctor", "doctor"),
         ("/help", "help"),
     ],
 )
@@ -760,7 +759,7 @@ def test_serve_answers_slash_commands_while_a_turn_occupies_the_runtime(slash_in
     assert prompt["result"] == {"ok": True, "session_id": "s1", "turn_id": "t1"}
 
 
-@pytest.mark.parametrize("slash_input", ["/status", "/doctor", "/help"])
+@pytest.mark.parametrize("slash_input", ["/status", "/help"])
 def test_ingested_slash_commands_use_the_control_lane_after_initialize(slash_input, capsys):
     async def run():
         server = StdioRuntimeServer(_Runtime(), _Session())
@@ -784,7 +783,7 @@ def test_ingested_slash_commands_use_the_control_lane_after_initialize(slash_inp
 
     message = json.loads(capsys.readouterr().out)
     assert message["request_id"] == 42
-    assert message["result"]["display"]["type"] in {"status", "doctor", "help"}
+    assert message["result"]["display"]["type"] in {"status", "help"}
 
 
 def test_ingested_slash_command_bypasses_a_running_turn(capsys):
@@ -903,7 +902,7 @@ def test_slash_execution_does_not_replace_the_active_turn_cancel_source(capsys):
     messages = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
 
     assert cancel_still_registered is True
-    assert messages[0]["result"]["text"].startswith("```text\nStatus:")
+    assert messages[0]["result"]["text"].startswith("```text\nConfig:")
     assert messages[-1]["result"] == {"ok": True, "session_id": "s1", "turn_id": "t1"}
 
 
@@ -1268,14 +1267,14 @@ def test_slash_usage_errors_return_as_command_results(capsys):
             {"kind": "request", "request_id": 19, "method": "rind/command/execute", "params": {"input": "/status bad"}}
         )
         await server._execute_slash(
-            {"kind": "request", "request_id": 20, "method": "rind/command/execute", "params": {"input": "/doctor extra"}}
+            {"kind": "request", "request_id": 20, "method": "rind/command/execute", "params": {"input": "/help model now"}}
         )
 
     asyncio.run(run())
 
     messages = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
     assert messages[0]["result"]["text"] == "Usage: /status"
-    assert messages[1]["result"]["text"] == "Usage: /doctor"
+    assert messages[1]["result"]["text"] == "Usage: /help [command]"
 
 
 def test_compact_slash_is_rejected_while_a_turn_is_active(capsys):
@@ -1835,22 +1834,6 @@ def test_app_server_process_serves_git_backed_commands_and_exits_after_shutdown(
         status = read_response()
         assert status.get("request_id") == "status", status
         assert status.get("result", {}).get("display", {}).get("type") == "status", status
-
-        process.stdin.write(
-            json.dumps(
-                {
-                    "kind": "request",
-                    "request_id": "doctor",
-                    "method": "rind/command/execute",
-                    "params": {"session_id": session_id, "input": "/doctor"},
-                }
-            )
-            + "\n"
-        )
-        process.stdin.flush()
-        doctor = read_response()
-        assert doctor.get("request_id") == "doctor", doctor
-        assert doctor.get("result", {}).get("display", {}).get("type") == "doctor", doctor
 
         process.stdin.write(
             json.dumps(

@@ -59,7 +59,7 @@ worker 不驻留重型状态：agent 容器只在 turn 运行期间存在，结�
 
 ### 常规能力也做扎实了
 
-turn 运行中转向与排队后续 · 任意历史消息处分叉会话（`/fork`）· 实时上下文计量（`/context`，全部实测、估算带 `~` 标记）· append-only JSONL 会话（崩溃安全、可回放、`RIND_HOME` 隔离）· 运行中 turn 崩溃恢复 · 项目文档（`RIND.md`）自动注入上下文 · 技能与计划 · 四套 TTY 主题，流式 Markdown/表格渲染、CJK 宽度正确 · `/doctor` 直接告诉你哪里坏了。
+turn 运行中转向与排队后续 · 任意历史消息处分叉会话（`/fork`）· 实时上下文计量（`/context`，全部实测、估算带 `~` 标记）· append-only JSONL 会话（崩溃安全、可回放、`RIND_HOME` 隔离）· 运行中 turn 崩溃恢复 · 项目文档（`RIND.md`）自动注入上下文 · 技能与计划 · 四套 TTY 主题，流式 Markdown/表格渲染、CJK 宽度正确。
 
 ## 快速开始
 
@@ -162,7 +162,7 @@ CLI / Desktop / Web / IM / 你的应用
 | `/context` | 上下文构成 + 用量面板（真实 token） |
 | `/fork` `/sessions` `/compact` | 分叉、切换、释放上下文 |
 | `/model` `/effort` `/theme` | 选模型、推理力度、配色主题 |
-| `/goal` `/skill` `/team` `/doctor` `/help` | 自主目标、技能、小队、诊断、命令表 |
+| `/goal` `/skill` `/team` `/help` | 自主目标、技能、小队、命令表 |
 
 | 入口 | 含义 |
 | --- | --- |
