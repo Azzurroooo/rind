@@ -69,7 +69,7 @@ export function contextBoardText(page = {}, width) {
   const estimated = boardNumber(breakdown.estimated_total);
   const measured = Math.max(0, boardNumber(usage?.input_tokens));
   const usedPercent = windowTokens > 0 ? estimated / windowTokens : 0;
-  const lines = contextMetaLines(windowTokens, usedPercent, measured, estimated, frameWidth - 4);
+  const lines = contextMetaLines(windowTokens, usedPercent, measured, frameWidth - 4);
   const innerWidth = frameWidth - 4;
   if (windowTokens > 0) {
     lines.push(stackedShareBar(breakdown.sections, windowTokens, innerWidth));
@@ -141,25 +141,15 @@ function contextTitle(breakdown, fallback) {
   return parts.join(" · ");
 }
 
-function contextMetaLines(windowTokens, usedPercent, measured, estimated, inner) {
+function contextMetaLines(windowTokens, usedPercent, measured, inner) {
   const tone = occupancyTone(usedPercent);
   const paintTone = tone === "err" ? red : tone === "warn" ? paint.warning : (text) => text;
   const windowPart = `Window ${formatBoardNumber(windowTokens)} · ${paintTone(`used ${Math.round(usedPercent * 100)}%`)}`;
-  const measuredPart = measured > 0
-    ? `measured ${formatBoardNumber(measured)} · estimated ~${formatBoardNumber(estimated)} ${estimatedDeviation(measured, estimated)}`
-    : "";
+  const measuredPart = measured > 0 ? `measured ${formatBoardNumber(measured)}` : "";
   if (measuredPart && textWidth(`${windowPart}   ${measuredPart}`) > inner) {
     return [windowPart, measuredPart];
   }
   return [measuredPart ? `${windowPart}   ${measuredPart}` : windowPart];
-}
-
-function estimatedDeviation(measured, estimated) {
-  if (estimated <= 0) {
-    return "";
-  }
-  const percent = Math.round(((measured - estimated) / estimated) * 100);
-  return `(${percent >= 0 ? "+" : ""}${percent}%)`;
 }
 
 function stackedShareBar(sections, windowTokens, cells) {
@@ -367,8 +357,8 @@ export function startupText(info = {}, width) {
   return sections.filter(Boolean).join("\n\n");
 }
 
-export function promptText(info = {}, stats = {}, state = {}, frameWidth) {
-  return inputPromptFrame(promptHeaderLine(info, stats, frameWidth), state, frameWidth);
+export function promptText(info = {}, _stats = {}, state = {}, frameWidth) {
+  return inputPromptFrame(promptHeaderLine(info, frameWidth), state, frameWidth);
 }
 
 export function promptActivityLine(state = {}) {
@@ -1603,7 +1593,7 @@ function visibleLength(text) {
   return textWidth(text);
 }
 
-function promptHeaderLine(info, stats = {}, frameWidth) {
+function promptHeaderLine(info, frameWidth) {
   const backgroundCount = Number(info.background_count);
   const delegateCount = Number(info.delegate_count);
   const taskHints = [];
@@ -1616,7 +1606,6 @@ function promptHeaderLine(info, stats = {}, frameWidth) {
   const taskHint = taskHints.length
     ? dim(` · ${taskHints.join(" ")} (ctrl+b monitor)`)
     : "";
-  const ctxSegment = contextUsageSegment(stats);
   const model = singleLine(info.model);
   const effort = singleLine(info.reasoning_effort);
   const cwd = middleClip(info.cwd, 56);
@@ -1624,25 +1613,15 @@ function promptHeaderLine(info, stats = {}, frameWidth) {
   const effortSegment = effort ? `${dim(" · ")}${promptModel(effort)}` : "";
   if (model && cwd) {
     const separator = " · ";
-    const pathWidth = width - visibleLength(model) - visibleLength(separator) - visibleLength(taskHint) - visibleLength(effortSegment) - visibleLength(ctxSegment);
+    const pathWidth = width - visibleLength(model) - visibleLength(separator) - visibleLength(taskHint) - visibleLength(effortSegment);
     if (pathWidth > 0) {
-      return `  ${promptModel(clipSingleLine(model, width))}${effortSegment}${dim(separator)}${promptPath(clipSingleLine(cwd, pathWidth))}${taskHint}${ctxSegment}`;
+      return `  ${promptModel(clipSingleLine(model, width))}${effortSegment}${dim(separator)}${promptPath(clipSingleLine(cwd, pathWidth))}${taskHint}`;
     }
   }
   if (model) {
-    return `  ${promptModel(clipSingleLine(model, width))}${taskHint}${ctxSegment}`;
+    return `  ${promptModel(clipSingleLine(model, width))}${taskHint}`;
   }
-  return cwd ? `  ${promptPath(clipSingleLine(cwd, width))}${taskHint}${ctxSegment}` : "";
-}
-
-function contextUsageSegment(stats) {
-  const ratio = Number(stats.context_usage_percent);
-  if (!Number.isFinite(ratio) || ratio <= 0) {
-    return "";
-  }
-  const percent = `ctx ${Math.round(ratio * 100)}%`;
-  const tone = occupancyTone(ratio);
-  return `${dim(" · ")}${tone === "err" ? red(percent) : tone === "warn" ? paint.warning(percent) : percent}`;
+  return cwd ? `  ${promptPath(clipSingleLine(cwd, width))}${taskHint}` : "";
 }
 
 function composerWidth(frameWidth) {
