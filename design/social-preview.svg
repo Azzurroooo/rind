@@ -1,0 +1,44 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="640" viewBox="0 0 1280 640" role="img" aria-labelledby="title desc">
+  <title id="title">Rind</title>
+  <desc id="desc">Rind, a lightweight AI coding agent.</desc>
+  <defs>
+    <filter id="coreBlur" x="-40%" y="-40%" width="180%" height="180%">
+      <feGaussianBlur stdDeviation="6" />
+    </filter>
+    <clipPath id="tile">
+      <rect x="10" y="10" width="100" height="100" rx="22" />
+    </clipPath>
+  </defs>
+
+  <rect width="1280" height="640" fill="#0b1115" />
+  <path d="M72 74H1208" stroke="#1f3d4a" />
+  <path d="M72 566H1208" stroke="#1f3d4a" />
+  <path d="M504 142V498" stroke="#1f3d4a" />
+  <path d="M504 142V218" stroke="#5fd7ff" stroke-width="2" />
+  <path d="M504 422V498" stroke="#f5c451" stroke-width="2" />
+
+  <g transform="translate(108 158) scale(2.7)">
+    <rect x="10" y="10" width="100" height="100" rx="22" fill="#0b1115" stroke="#5fd7ff" stroke-width="2.5" />
+    <g clip-path="url(#tile)">
+      <rect x="10" y="10" width="100" height="100" fill="#13242b" />
+      <polygon points="75,10 110,10 110,110 10,110 10,75" fill="#f5c451" />
+      <polygon points="75,10 110,10 110,110 10,110 10,75" fill="#f5c451" filter="url(#coreBlur)" opacity="0.5" />
+      <line x1="75" y1="10" x2="10" y2="75" stroke="#5fd7ff" stroke-width="3.5" stroke-linecap="round" />
+    </g>
+  </g>
+
+  <text x="578" y="190" fill="#5fd7ff" font-family="Consolas, monospace" font-size="20" font-weight="700">OPEN-SOURCE · LOCAL-FIRST</text>
+  <text x="568" y="354" fill="#e6f0f2" font-family="Segoe UI, Arial, sans-serif" font-size="154" font-weight="700">Rind</text>
+  <text x="578" y="413" fill="#8ca1aa" font-family="Segoe UI, Arial, sans-serif" font-size="32" font-weight="400">A lightweight AI coding agent</text>
+
+  <g font-family="Consolas, monospace" font-size="18" font-weight="700">
+    <text x="578" y="480" fill="#f5c451">AUTOMATE</text>
+    <circle cx="695" cy="474" r="3" fill="#1f3d4a" />
+    <text x="720" y="480" fill="#e6f0f2">DELEGATE</text>
+    <circle cx="838" cy="474" r="3" fill="#1f3d4a" />
+    <text x="863" y="480" fill="#5fd7ff">EXTEND</text>
+  </g>
+
+  <text x="72" y="112" fill="#607984" font-family="Consolas, monospace" font-size="15">RIND / AGENT SYSTEM</text>
+  <text x="1208" y="112" fill="#607984" font-family="Consolas, monospace" font-size="15" text-anchor="end">TERMINAL · ONE-SHOT · TEAMS · KERNEL</text>
+</svg>
