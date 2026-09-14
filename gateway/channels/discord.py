@@ -45,7 +45,7 @@ CAPABILITIES = ChannelCapabilities(
 )
 
 MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024
-OVERSIZE_NOTICE = "附件过大（单个上限 20MB），已忽略该附件。"
+OVERSIZE_NOTICE = "Attachment too large (per-file limit 20MB); skipped."
 
 
 def _load_sdk() -> Any:

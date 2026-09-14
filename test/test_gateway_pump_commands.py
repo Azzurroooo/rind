@@ -97,7 +97,7 @@ async def _until(predicate, timeout=2.0, message="condition not met"):
         await asyncio.sleep(0.005)
 
 
-def _message(ref, text="做件事", **overrides):
+def _message(ref, text="do a thing", **overrides):
     base = dict(channel="test", chat_id="chat", chat_type="dm", sender_id="u1", sender_name="n",
                 thread_id=None, text=text, attachments=(), message_ref=ref)
     base.update(overrides)
@@ -136,7 +136,7 @@ async def _teardown(harness, *tasks):
     await asyncio.gather(*(t for t in tasks if t is not None), return_exceptions=True)
 
 
-async def _start_turn(harness, ref="m-1", text="帮我做一件事"):
+async def _start_turn(harness, ref="m-1", text="do something for me"):
     task = asyncio.create_task(harness.pump.inbound(_message(ref, text)))
     await _until(lambda: harness.worker.prompts, message="prompt never reached worker")
     return task, harness.worker.prompts[0][0]
@@ -146,8 +146,8 @@ def _texts(channel):
     return [payload.text for payload in channel.sent]
 
 
-def _question_event(options=("甲", "乙")):
-    return {"type": "user_question_requested", "question": "选一个：", "tool_call_id": "q-1",
+def _question_event(options=("A", "B")):
+    return {"type": "user_question_requested", "question": "Pick one:", "tool_call_id": "q-1",
             "options": [{"label": label} for label in options]}
 
 
@@ -159,7 +159,7 @@ def test_help_replies_tiered_list_without_touching_worker(tmp_path):
         harness = await _harness(tmp_path, _Clock())
         await harness.pump.inbound(_message("m-1", text="/help"))
         text = _texts(harness.channel)[0]
-        assert text.startswith("常用：") and "全部：" in text
+        assert text.startswith("Essentials:") and "All:" in text
         for name in ("/new", "/status", "/stop", "/compact", "/help"):
             assert name in text
         assert harness.worker.prompts == [] and harness.worker.created == []  # no session, no prompt
@@ -173,11 +173,11 @@ def test_status_composes_idle_then_running_state(tmp_path):
         harness = await _harness(tmp_path, _Clock())
         await harness.pump.inbound(_message("m-1", text="/status"))
         idle = _texts(harness.channel)[0]
-        assert "任务：空闲" in idle and "worker：已连接" in idle and "会话：0 个" in idle
+        assert "task: idle" in idle and "worker: connected" in idle and "sessions: 0" in idle
         task, session_id = await _start_turn(harness, ref="m-2")
         await harness.pump.inbound(_message("m-3", text="/status"))
         running = _texts(harness.channel)[-1]
-        assert "任务：运行中" in running and "会话：1 个" in running and session_id[:8] not in running
+        assert "task: running" in running and "sessions: 1" in running and session_id[:8] not in running
         harness.worker.push_event(session_id, {"type": "turn_completed"})
         await _until(task.done)
         await _teardown(harness, task)
@@ -190,11 +190,11 @@ def test_new_creates_session_and_rebinds_follow_up_prompts(tmp_path):
         harness = await _harness(tmp_path, _Clock())
         await harness.pump.inbound(_message("m-1", text="/new"))
         first = _texts(harness.channel)[0]
-        assert first.startswith("已开启新会话（session ")
+        assert first.startswith("New session started (session ")
         session_a = harness.router.lookup("test:dm:chat").session_id
         assert harness.worker.created and harness.worker.prompts == []  # no prompt for commands
 
-        task, _prompted = await _start_turn(harness, ref="m-2", text="在会话里干活")
+        task, _prompted = await _start_turn(harness, ref="m-2", text="work in the session")
         assert _prompted == session_a  # subsequent prompts land in the /new session
         harness.worker.push_event(session_a, {"type": "turn_completed"})
         await _until(task.done)
@@ -210,10 +210,10 @@ def test_new_cancels_running_turn_then_opens_fresh_session(tmp_path):
         await harness.pump.inbound(_message("m-2", text="/new"))
         assert harness.worker.cancels == [session_id]  # old turn stopped first
         await _until(lambda: any(t == STOPPED_REPLY for t in _texts(harness.channel)))  # cancel receipt
-        await _until(lambda: any(t.startswith("已开启新会话") for t in _texts(harness.channel)))
+        await _until(lambda: any(t.startswith("New session started") for t in _texts(harness.channel)))
         fresh = harness.router.lookup("test:dm:chat").session_id
         assert fresh != session_id
-        second = asyncio.create_task(harness.pump.inbound(_message("m-3", text="新会话任务")))
+        second = asyncio.create_task(harness.pump.inbound(_message("m-3", text="fresh session task")))
         await _until(lambda: len(harness.worker.prompts) == 2)
         assert harness.worker.prompts[1][0] == fresh  # next prompt targets the fresh session
         assert harness.worker.follow_ups == []  # the cancelled turn never swallowed the prompt
@@ -259,10 +259,10 @@ def test_commands_do_not_swallow_question_digits(tmp_path):
         harness.worker.push_event(session_id, _question_event())
         await _until(lambda: harness.pump._questions != {})
         await harness.pump.inbound(_message("m-2", text="/help"))  # command row runs, question kept
-        assert harness.worker.answers == [] and any("常用：" in t for t in _texts(harness.channel))
+        assert harness.worker.answers == [] and any("Essentials:" in t for t in _texts(harness.channel))
         assert harness.pump._questions != {}  # the question survived the command
         await harness.pump.inbound(_message("m-3", text="2"))  # digits still answer first
-        assert harness.worker.answers == [(session_id, "q-1", "乙")]
+        assert harness.worker.answers == [(session_id, "q-1", "B")]
         harness.worker.push_event(session_id, {"type": "turn_completed"})
         await _until(task.done)
         await _teardown(harness, task)
@@ -317,8 +317,8 @@ def test_offline_command_queues_with_notice_then_flushes_as_command(tmp_path):
 
         stub.connected = True
         await pump.inbound(_message("m-2", text="/status"))  # flush runs first, as its command
-        assert any(t.startswith("已开启新会话") for t in _texts(harness.channel))
-        assert any("任务：" in t for t in _texts(harness.channel))  # the queued /new executed
+        assert any(t.startswith("New session started") for t in _texts(harness.channel))
+        assert any("task:" in t for t in _texts(harness.channel))  # the queued /new executed
         methods = [method for method, _params in stub.requests]
         assert methods.count("session/new") == 1  # command replay, not a prompt
         await _teardown(harness)

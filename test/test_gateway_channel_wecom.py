@@ -1,4 +1,4 @@
-"""WeCom adapter smoke tests against a fake aiohttp (渠道冒烟, gateway.md §9).
+"""WeCom adapter smoke tests against a fake aiohttp (channel smoke tests, gateway.md §9).
 
 A fake ``aiohttp`` module is injected into ``sys.modules``; the real adapter
 code (lazy import, callback server wiring, signature/AES verification,
@@ -257,7 +257,7 @@ def test_text_message_normalizes_to_inbound_message(tmp_path, fake_aiohttp):
         aes_key = _make_aes_key()
         channel, sink, routes = await _start(tmp_path, aes_key)
         fields = {"FromUserName": "zhangsan", "CreateTime": "1700000001", "MsgType": "text",
-                  "Content": "帮我看看 build 报错", "MsgId": "1234567890", "AgentID": str(AGENT_ID)}
+                  "Content": "help me look at this build error", "MsgId": "1234567890", "AgentID": str(AGENT_ID)}
         query, body = _message_query(aes_key, fields)
         response = await routes[("POST", "/wecom/callback")](FakeRequest(query=query, text=body))
         assert response.status == 200 and response.text == "success"
@@ -265,7 +265,7 @@ def test_text_message_normalizes_to_inbound_message(tmp_path, fake_aiohttp):
         assert msg.channel == "wecom"
         assert msg.chat_id == "zhangsan" and msg.chat_type == "dm"  # self-built apps are 1:1
         assert msg.sender_id == "zhangsan" and msg.sender_name == "zhangsan"
-        assert msg.thread_id is None and msg.text == "帮我看看 build 报错"
+        assert msg.thread_id is None and msg.text == "help me look at this build error"
         assert msg.attachments == () and msg.message_ref == "1234567890"
         await channel.stop()
 
@@ -344,13 +344,13 @@ def test_send_text_uses_message_send_and_caches_access_token(tmp_path, fake_aioh
         channel._session.get_responses.append(_token_response())
         channel._session.post_responses.extend([FakeApiResponse(json_data={"errcode": 0}),
                                                 FakeApiResponse(json_data={"errcode": 0})])
-        await channel.send(SendTarget(chat_id="zhangsan"), OutboundPayload(text="部署完成"))
-        await channel.send(SendTarget(chat_id="zhangsan"), OutboundPayload(text="第二次"))
+        await channel.send(SendTarget(chat_id="zhangsan"), OutboundPayload(text="deploy finished"))
+        await channel.send(SendTarget(chat_id="zhangsan"), OutboundPayload(text="second one"))
         first = channel._session.posts[0]
         assert first["url"] == "https://qyapi.weixin.qq.com/cgi-bin/message/send"
         assert first["params"] == {"access_token": "at-1"}
         assert first["json"] == {"touser": "zhangsan", "msgtype": "text", "agentid": AGENT_ID,
-                                 "text": {"content": "部署完成"}}
+                                 "text": {"content": "deploy finished"}}
         assert len(channel._session.gets) == 1  # token cached across sends (transport auth)
         await channel.typing(SendTarget(chat_id="zhangsan"))  # capability off: quiet no-op
         session = channel._session
@@ -372,7 +372,7 @@ def test_send_attachment_uploads_media_then_sends_file(tmp_path, fake_aiohttp):
                                                 FakeApiResponse(json_data={"media_id": "M-1"}),
                                                 FakeApiResponse(json_data={"errcode": 0})])
         await channel.send(SendTarget(chat_id="zhangsan"),
-                           OutboundPayload(text="看附件",
+                           OutboundPayload(text="see attachment",
                                            attachments=(Attachment(path=media, content_type="image/png",
                                                                    kind="image"),)))
         text, upload, message = channel._session.posts[0], channel._session.posts[1], channel._session.posts[2]

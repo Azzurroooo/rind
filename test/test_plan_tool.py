@@ -46,7 +46,7 @@ def test_registry_exposes_one_plan_tool_with_nested_schema() -> None:
     assert item["additionalProperties"] is False
     assert item["properties"]["step"] == {"type": "string", "minLength": 1}
     assert item["properties"]["status"]["enum"] == ["pending", "in_progress", "completed", "cancelled"]
-    assert "完整列表" in function["description"]
+    assert "complete list" in function["description"]
 
 
 def test_update_plan_writes_v2_and_replaces_previous_list() -> None:

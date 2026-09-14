@@ -65,13 +65,13 @@ def _probe_telegram(a: dict[str, str]) -> ProbeResult:
         status, body = _get_json(f"https://api.telegram.org/bot{a['token']}/getMe", proxy=proxy)
         if status == 200 and body.get("ok"):
             return _ok(f"bot @{body['result'].get('username', '?')}")
-        return _fail(f"Telegram 返回 {status}：{str(body)[:120]}")
+        return _fail(f"Telegram returned {status}: {str(body)[:120]}")
     except Exception as exc:  # noqa: BLE001 - probe reports, never raises
         detail = str(exc)
         if "timed out" in detail or "timeout" in detail.lower():
-            hint = "" if proxy else "请在『代理地址』填入你的代理（如 http://127.0.0.1:7890）后重试。"
-            return _fail(f"连接超时——api.telegram.org 无法直连。{hint}")
-        return _fail(f"连接失败：{detail}")
+            hint = "" if proxy else "Enter your proxy in the proxy field (e.g. http://127.0.0.1:7890) and retry."
+            return _fail(f"Connection timed out — api.telegram.org is not directly reachable. {hint}")
+        return _fail(f"Connection failed: {detail}")
 
 
 def _probe_discord(a: dict[str, str]) -> ProbeResult:
@@ -81,9 +81,9 @@ def _probe_discord(a: dict[str, str]) -> ProbeResult:
         )
         if status == 200:
             return _ok(f"bot {body.get('username', '?')}")
-        return _fail(f"Discord 返回 {status}（401 = token 无效；注意开启 MESSAGE CONTENT INTENT）")
+        return _fail(f"Discord returned {status} (401 = invalid token; make sure MESSAGE CONTENT INTENT is on)")
     except Exception as exc:  # noqa: BLE001
-        return _fail(f"连接失败：{exc}")
+        return _fail(f"Connection failed: {exc}")
 
 
 def _probe_slack(a: dict[str, str]) -> ProbeResult:
@@ -93,9 +93,9 @@ def _probe_slack(a: dict[str, str]) -> ProbeResult:
         )
         if body.get("ok"):
             return _ok(f"team {body.get('team', '?')} / bot {body.get('user', '?')}")
-        return _fail(f"Slack auth.test 失败：{body.get('error', status)}")
+        return _fail(f"Slack auth.test failed: {body.get('error', status)}")
     except Exception as exc:  # noqa: BLE001
-        return _fail(f"连接失败：{exc}")
+        return _fail(f"Connection failed: {exc}")
 
 
 def _probe_feishu(a: dict[str, str]) -> ProbeResult:
@@ -105,10 +105,10 @@ def _probe_feishu(a: dict[str, str]) -> ProbeResult:
             {"app_id": a["app_id"], "app_secret": a["app_secret"]},
         )
         if body.get("code") == 0:
-            return _ok("tenant_access_token 获取成功（应用凭证有效）")
-        return _fail(f"飞书返回 code={body.get('code')}：{body.get('msg', '')}")
+            return _ok("tenant_access_token acquired (app credentials valid)")
+        return _fail(f"Feishu returned code={body.get('code')}: {body.get('msg', '')}")
     except Exception as exc:  # noqa: BLE001
-        return _fail(f"连接失败：{exc}")
+        return _fail(f"Connection failed: {exc}")
 
 
 def _probe_dingtalk(a: dict[str, str]) -> ProbeResult:
@@ -116,10 +116,10 @@ def _probe_dingtalk(a: dict[str, str]) -> ProbeResult:
         query = urllib.parse.urlencode({"appkey": a["client_id"], "appsecret": a["client_secret"]})
         _status, body = _get_json(f"https://oapi.dingtalk.com/gettoken?{query}")
         if body.get("errcode") == 0:
-            return _ok("access_token 获取成功（应用凭证有效）")
-        return _fail(f"钉钉返回 errcode={body.get('errcode')}：{body.get('errmsg', '')}")
+            return _ok("access_token acquired (app credentials valid)")
+        return _fail(f"DingTalk returned errcode={body.get('errcode')}: {body.get('errmsg', '')}")
     except Exception as exc:  # noqa: BLE001
-        return _fail(f"连接失败：{exc}")
+        return _fail(f"Connection failed: {exc}")
 
 
 def _probe_wecom(a: dict[str, str]) -> ProbeResult:
@@ -127,10 +127,10 @@ def _probe_wecom(a: dict[str, str]) -> ProbeResult:
         query = urllib.parse.urlencode({"corpid": a["corp_id"], "corpsecret": a["secret"]})
         _status, body = _get_json(f"https://qyapi.weixin.qq.com/cgi-bin/gettoken?{query}")
         if body.get("errcode") == 0:
-            return _ok("access_token 获取成功（应用凭证有效）")
-        return _fail(f"企业微信返回 errcode={body.get('errcode')}：{body.get('errmsg', '')}")
+            return _ok("access_token acquired (app credentials valid)")
+        return _fail(f"WeCom returned errcode={body.get('errcode')}: {body.get('errmsg', '')}")
     except Exception as exc:  # noqa: BLE001
-        return _fail(f"连接失败：{exc}")
+        return _fail(f"Connection failed: {exc}")
 
 
 def _probe_whatsapp(a: dict[str, str]) -> ProbeResult:
@@ -138,10 +138,10 @@ def _probe_whatsapp(a: dict[str, str]) -> ProbeResult:
         url = f"https://graph.facebook.com/v20.0/{a['phone_number_id']}?access_token={a['access_token']}"
         status, body = _get_json(url)
         if status == 200 and body.get("id"):
-            return _ok(f"号码 {body.get('display_phone_number', body.get('id'))} 验证通过")
-        return _fail(f"Graph API 返回 {status}：{str(body)[:120]}")
+            return _ok(f"phone number {body.get('display_phone_number', body.get('id'))} verified")
+        return _fail(f"Graph API returned {status}: {str(body)[:120]}")
     except Exception as exc:  # noqa: BLE001
-        return _fail(f"连接失败：{exc}")
+        return _fail(f"Connection failed: {exc}")
 
 
 def _probe_email(a: dict[str, str]) -> ProbeResult:
@@ -150,19 +150,19 @@ def _probe_email(a: dict[str, str]) -> ProbeResult:
         client = imaplib.IMAP4_SSL(a["imap_host"], port)
         try:
             client.login(a["username"], a["password"])
-            return _ok(f"IMAP 登录成功：{a['username']}")
+            return _ok(f"IMAP login succeeded: {a['username']}")
         finally:
             client.logout()
     except Exception as exc:  # noqa: BLE001
-        return _fail(f"IMAP 登录失败：{exc}（检查授权码/IMAP 服务是否开启）")
+        return _fail(f"IMAP login failed: {exc} (check the authorization code and that IMAP service is enabled)")
 
 
 def _probe_qq(a: dict[str, str]) -> ProbeResult:
-    return _ok("被动通道：启动网关后，NapCat 反向连接即在线")
+    return _ok("Passive channel: once the gateway starts, NapCat's reverse connection is online")
 
 
 
 def _probe_qq(a: dict[str, str]) -> ProbeResult:
-    return _ok("被动通道：启动网关后，NapCat 反向连接即在线")
+    return _ok("Passive channel: once the gateway starts, NapCat's reverse connection is online")
 
 

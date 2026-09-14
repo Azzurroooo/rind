@@ -22,15 +22,15 @@ from . import InboundMessage
 
 logger = logging.getLogger(__name__)
 
-CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"  # 无歧义：去除 I/1/O/0
+CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"  # unambiguous: I/1/O/0 removed
 CODE_LENGTH = 6
 PENDING_CAP = 3
 COOLDOWN_WINDOW_SECONDS = 60.0
 
 DEFAULT_BOT_HANDLES = ("rind", "bot")
-COOLDOWN_NOTICE = "消息有点频繁，已暂停处理，请稍后再发。"
+COOLDOWN_NOTICE = "You're sending too fast; processing is paused — try again shortly."
 APPROVE_COMMAND = "python main.py gateway approve {code}"
-PAIRING_FULL_NOTICE = "配对申请已达上限，请稍后再试。"
+PAIRING_FULL_NOTICE = "Too many pending pairing requests; try again later."
 
 
 def pairing_notice(channel: str, sender_id: str, code: str, ttl_seconds: float) -> str:
@@ -41,11 +41,11 @@ def pairing_notice(channel: str, sender_id: str, code: str, ttl_seconds: float) 
     """
     minutes = max(1, int(ttl_seconds // 60))
     return (
-        "Rind：尚未授权此账号。\n"
-        f"身份：{channel} · {sender_id}\n"
-        f"配对码：`{code}`\n"
-        f"批准：在服务器执行 `{APPROVE_COMMAND.format(code=code)}`\n"
-        f"有效期：{minutes} 分钟，过期后重新发消息会生成新码。"
+        "Rind: this account is not authorized yet.\n"
+        f"identity: {channel} · {sender_id}\n"
+        f"pairing code: `{code}`\n"
+        f"approve: run `{APPROVE_COMMAND.format(code=code)}` on the server\n"
+        f"valid for {minutes} minutes; once it expires, messaging again issues a new code."
     )
 
 
@@ -173,12 +173,12 @@ def is_addressed_to_bot(message: InboundMessage, handles: Iterable[str] = DEFAUL
     """Group gating: the normalized text must @mention the bot.
 
     The §5.2 InboundMessage contract carries no native mention/reply flag, so
-    adapters keep the mention text (e.g. "@rind 帮我看看") and gating matches
+    adapters keep the mention text (e.g. "@rind take a look") and gating matches
     ``@<handle>`` tokens case-insensitively; reply-to-bot adapters express the
     same way (WP4).
     """
     normalized = {handle.lower() for handle in handles}
-    punctuation = "，。！？,.!?：:\"'（）()[]【】「」『』、;；"
+    punctuation = "，。！？,.!?：:\"'（）()[]【】「」『』、;；"  # CJK + ASCII punctuation stripped around @handles
     for token in message.text.split():
         candidate = token.strip(punctuation).lower()
         if candidate.startswith("@") and candidate[1:] in normalized:

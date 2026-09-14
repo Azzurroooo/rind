@@ -81,35 +81,35 @@ afterEach(() => {
 describe("App — queue mode (audit #1)", () => {
   it("submitting while a turn runs queues as follow_up by default and renders the chip", async () => {
     await renderShell(runningTurn());
-    typeAndSend("排队追问一句话");
+    typeAndSend("Queue a follow-up");
     await waitFor(() => expect(called("rind/session/follow_up")).toBe(true));
     const call = requests().find((entry) => entry.method === "rind/session/follow_up");
-    expect(call.params).toMatchObject({ session_id: "s-1", input: "排队追问一句话" });
+    expect(call.params).toMatchObject({ session_id: "s-1", input: "Queue a follow-up" });
     // the returned input_id is kept and the queued chip renders
     await waitFor(() => expect(document.querySelector(".queued-row[data-input-id='in-1']")).not.toBeNull());
-    expect(screen.getByText(/QUEUED 队列中/)).not.toBeNull();
+    expect(screen.getByText(/QUEUED/)).not.toBeNull();
     // the draft was consumed by the send
     expect(composerTextarea().value).toBe("");
   });
 
   it("the composer switch flips the wire method to steer", async () => {
     await renderShell(runningTurn());
-    fireEvent.click(screen.getByTitle("立即插入当前回合（steer）"));
-    typeAndSend("立即转向");
+    fireEvent.click(screen.getByTitle("Redirect the current turn immediately (steer)"));
+    typeAndSend("Redirect now");
     await waitFor(() => expect(called("rind/session/steer")).toBe(true));
     expect(called("rind/session/follow_up")).toBe(false);
   });
 
-  it("取回 dequeues by input_id and restores the draft; 转向 promotes to steering", async () => {
+  it("Retrieve dequeues by input_id and restores the draft; Steer promotes to steering", async () => {
     await renderShell(runningTurn([{ input_id: "in-9", input: "queued text", mode: "follow_up" }]));
     expect(document.querySelector(".queued-row[data-input-id='in-9']")).not.toBeNull();
 
-    fireEvent.click(screen.getByRole("button", { name: "转向" }));
+    fireEvent.click(screen.getByRole("button", { name: "Steer" }));
     await waitFor(() => expect(called("rind/session/promote_follow_up")).toBe(true));
     expect(requests().find((entry) => entry.method === "rind/session/promote_follow_up").params).toMatchObject({ session_id: "s-1", input_id: "in-9" });
-    await waitFor(() => expect(screen.getByText("QUEUED 队列中 · steer")).not.toBeNull());
+    await waitFor(() => expect(screen.getByText("QUEUED · steer")).not.toBeNull());
 
-    fireEvent.click(screen.getByRole("button", { name: "取回" }));
+    fireEvent.click(screen.getByRole("button", { name: "Retrieve" }));
     await waitFor(() => expect(called("rind/session/unsteer")).toBe(true));
     expect(requests().find((entry) => entry.method === "rind/session/unsteer").params).toMatchObject({ session_id: "s-1", input_id: "in-9" });
     await waitFor(() => expect(document.querySelector(".queued-row")).toBeNull());
@@ -139,16 +139,16 @@ describe("App — queue mode (audit #1)", () => {
   it("loading a session restores the queue from live_turn pending_inputs (reconnect path)", async () => {
     await renderShell(runningTurn([{ input_id: "in-a", input: "restored", mode: "steering" }]));
     expect(document.querySelector(".queued-row[data-input-id='in-a']")).not.toBeNull();
-    expect(screen.getByText("QUEUED 队列中 · steer")).not.toBeNull();
-    // steering items expose 取回 only
-    expect(screen.queryByRole("button", { name: "转向" })).toBeNull();
+    expect(screen.getByText("QUEUED · steer")).not.toBeNull();
+    // steering items expose Retrieve only
+    expect(screen.queryByRole("button", { name: "Steer" })).toBeNull();
   });
 });
 
 describe("App — double-Esc interrupt (audit #1)", () => {
-  it("first Esc arms with the 再按一次 hint; second Esc cancels the turn", async () => {
+  it("first Esc arms with the press-again hint; second Esc cancels the turn", async () => {
     await renderShell(runningTurn());
-    expect(screen.queryByText("再按一次 Esc 停止")).toBeNull();
+    expect(screen.queryByText("Press Esc again to stop")).toBeNull();
 
     fireEvent.keyDown(window, { key: "Escape" });
     expect(document.querySelector(".interrupt-hint")).not.toBeNull();
@@ -181,33 +181,33 @@ describe("App — double-Esc interrupt (audit #1)", () => {
 describe("App — Ctrl/Cmd+K palette (audit #10)", () => {
   it("opens with Ctrl+K, closes on Esc and hands focus back to the composer", async () => {
     await renderShell(null);
-    expect(screen.queryByRole("dialog", { name: "命令面板" })).toBeNull();
+    expect(screen.queryByRole("dialog", { name: "Command palette" })).toBeNull();
 
     fireEvent.keyDown(window, { key: "k", ctrlKey: true });
-    expect(screen.getByRole("dialog", { name: "命令面板" })).not.toBeNull();
+    expect(screen.getByRole("dialog", { name: "Command palette" })).not.toBeNull();
 
-    fireEvent.keyDown(screen.getByLabelText("搜索命令"), { key: "Escape" });
-    await waitFor(() => expect(screen.queryByRole("dialog", { name: "命令面板" })).toBeNull());
+    fireEvent.keyDown(screen.getByLabelText("Search commands"), { key: "Escape" });
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Command palette" })).toBeNull());
     expect(document.activeElement).toBe(composerTextarea());
   });
 
-  it("executing 停止 from the palette cancels the active turn", async () => {
+  it("executing Stop from the palette cancels the active turn", async () => {
     await renderShell(runningTurn());
     fireEvent.keyDown(window, { key: "k", metaKey: true });
-    fireEvent.click(screen.getByText("停止"));
+    fireEvent.click(screen.getByText("Stop"));
     await waitFor(() => expect(called("session/cancel")).toBe(true));
   });
 
-  it("executing 主题 flips data-theme and persists the choice (audit #11)", async () => {
+  it("executing Theme flips data-theme and persists the choice (audit #11)", async () => {
     await renderShell(null);
     applyTheme("dark");
     fireEvent.keyDown(window, { key: "k", ctrlKey: true });
-    fireEvent.click(screen.getByText("主题"));
+    fireEvent.click(screen.getByText("Theme"));
     await waitFor(() => expect(document.documentElement.dataset.theme).toBe("light"));
     expect(localStorage.getItem("rind.theme")).toBe("light");
 
     fireEvent.keyDown(window, { key: "k", ctrlKey: true });
-    fireEvent.click(screen.getByText("主题"));
+    fireEvent.click(screen.getByText("Theme"));
     await waitFor(() => expect(document.documentElement.dataset.theme).toBe("dark"));
     expect(localStorage.getItem("rind.theme")).toBe("dark");
   });
@@ -236,13 +236,13 @@ describe("App — session subscriptions (audit #13)", () => {
 describe("App — rail search + pagination (audit #9)", () => {
   it("load more requests a larger limit; search filters the rail client-side", async () => {
     await renderShell(null);
-    fireEvent.click(screen.getByText("加载更多"));
+    fireEvent.click(screen.getByText("Load more"));
     await waitFor(() => {
       const listCalls = requests().filter((entry) => entry.method === "session/list");
       expect(listCalls.at(-1).params.limit).toBe(60);
     });
 
-    const search = screen.getByLabelText("搜索会话");
+    const search = screen.getByLabelText("Search sessions");
     fireEvent.change(search, { target: { value: "Session 5" } });
     expect(screen.queryByText("Session 1")).toBeNull();
     expect(screen.getByText("Session 5")).not.toBeNull();

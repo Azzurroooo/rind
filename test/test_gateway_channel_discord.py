@@ -1,4 +1,4 @@
-"""Discord adapter smoke tests against a mocked discord.py (渠道冒烟, §9).
+"""Discord adapter smoke tests against a mocked discord.py (channel smoke tests, §9).
 
 A fake ``discord`` module is injected into ``sys.modules``; the real adapter
 code (lazy import, intent setup, on_message event, normalization, send) runs
@@ -160,13 +160,13 @@ def test_on_message_normalizes_guild_message_and_ignores_bot_authors(tmp_path, f
         channel, client, sink = await _start(tmp_path)
         guild_channel = _TextChannel(555, _guild())
         await client.handlers["on_message"](
-            _message(mid=99, author=_user(2002, "grace", "Grace H"), channel=guild_channel, content="@rind 帮我看看"))
+            _message(mid=99, author=_user(2002, "grace", "Grace H"), channel=guild_channel, content="@rind help me check"))
         await _until(lambda: len(sink.messages) == 1)
         msg = sink.messages[0]
         assert msg.channel == "discord"
         assert msg.chat_id == "555" and msg.chat_type == "group"  # guild text channel = group
         assert msg.sender_id == "2002" and msg.sender_name == "Grace H"
-        assert msg.thread_id is None and msg.text == "@rind 帮我看看"
+        assert msg.thread_id is None and msg.text == "@rind help me check"
         assert msg.attachments == () and msg.message_ref == "99"
 
         # loop prevention: every bot author (self included) is dropped pre-normalization
@@ -240,8 +240,8 @@ def test_send_calls_channel_send_with_text_as_is(tmp_path, fake_discord):
         channel, client, sink = await _start(tmp_path)
         target_channel = _TextChannel(555)
         client.channels[555] = target_channel
-        await channel.send(SendTarget(chat_id="555"), OutboundPayload(text="**完成** `ok`"))
-        assert target_channel.sent == [("**完成** `ok`", {})]  # markdown "subset": chunker output sent unchanged
+        await channel.send(SendTarget(chat_id="555"), OutboundPayload(text="**Done** `ok`"))
+        assert target_channel.sent == [("**Done** `ok`", {})]  # markdown "subset": chunker output sent unchanged
         await channel.stop()
 
     asyncio.run(scenario())
@@ -255,11 +255,11 @@ def test_send_resolves_thread_target_and_attachments(tmp_path, fake_discord):
         media = tmp_path / "out.png"
         media.write_bytes(b"png")
         from gateway import Attachment
-        payload = OutboundPayload(text="看附件",
+        payload = OutboundPayload(text="see attachment",
                                   attachments=(Attachment(path=media, content_type="image/png", kind="image"),))
         await channel.send(SendTarget(chat_id="555", thread_id="777"), payload)
         content, kwargs = thread_channel.sent[0]
-        assert content == "看附件"
+        assert content == "see attachment"
         assert thread_channel.sent[1][1]["file"].fp == str(media)  # discord.File over the saved path
         await channel.stop()
 

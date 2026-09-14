@@ -1,8 +1,9 @@
-"""`gateway doctor`: one checklist for "为什么我的渠道没反应".
+"""`gateway doctor`: one checklist for "why is my channel silent".
 
 Each check answers a question a user would actually ask, in order:
-配置在吗 → 能读吗 → worker 通吗 → 每个渠道的 SDK 装了吗、凭证有效吗 →
-状态文件没坏吧。`--probe` adds live credential checks; `--fix` repairs what
+does the config exist → does it parse → is the worker reachable → per-channel
+SDK installed and credentials valid → are the state files intact.
+`--probe` adds live credential checks; `--fix` repairs what
 can be repaired automatically (corrupt state files get a .corrupt backup).
 """
 
@@ -42,9 +43,9 @@ def _fix_corrupt(path: Path) -> str:
     backup = path.with_name(path.name + ".corrupt")
     try:
         path.rename(backup)
-        return f"已备份为 {backup.name}"
+        return f"backed up as {backup.name}"
     except OSError as exc:
-        return f"重命名失败：{exc}"
+        return f"rename failed: {exc}"
 
 
 def sdk_missing(sdk_module: str) -> bool:
@@ -63,33 +64,35 @@ def ensure_sdk_installed(sdk_module: str, *, runner=None) -> tuple[bool, str]:
     """
     try:
         importlib.import_module(sdk_module)
-        return True, "已安装"
+        return True, "already installed"
     except ImportError:
         pass
     run = runner or (lambda cmd: subprocess.run(cmd, capture_output=True, text=True))
     result = run([sys.executable, "-m", "pip", "install", sdk_module])
     if getattr(result, "returncode", 1) != 0:
-        tail = (getattr(result, "stderr", "") or "").strip().splitlines()[-1:] or ["pip 失败"]
-        return False, f"pip install {sdk_module} 失败：{tail[0]}"
+        tail = (getattr(result, "stderr", "") or "").strip().splitlines()[-1:] or ["pip failed"]
+        return False, f"pip install {sdk_module} failed: {tail[0]}"
     importlib.invalidate_caches()
     try:
         importlib.import_module(sdk_module)
-        return True, f"已自动安装 {sdk_module}"
+        return True, f"auto-installed {sdk_module}"
     except ImportError as exc:
-        return False, f"安装后仍无法导入 {sdk_module}：{exc}"
+        return False, f"{sdk_module} still not importable after install: {exc}"
 
 
 def _looks_like_source_dir(path: Path) -> bool:
-    """运行数据绝不该落进 Rind 的工程目录（含 main.py 与 gateway/ 的树）。"""
+    """Runtime data must never land in the Rind source tree (main.py + gateway/)."""
     return (path / "main.py").is_file() and (path / "gateway").is_dir()
 
 
 def ensure_channel_sdks(guides, *, interactive: bool, confirm=None, echo=print):
-    """缺渠道 SDK 的自动 pip 安装；返回（保留的渠道，是否启用启动自愈）。
+    """Auto pip-install missing channel SDKs; returns (kept guides, self-heal enabled).
 
-    一键模式直接装；交互模式先征求同意（confirm 注入，向导传自己的提问
-    函数；缺省用 prompt.confirm）。失败或用户拒绝 → 渠道从本次配置剔除。
-    环境变量 RIND_GATEWAY_NO_AUTO_INSTALL=1 整体关闭（测试/CI）。
+    One-shot mode installs directly; interactive mode asks first (confirm is
+    injectable — the wizard passes its own prompt function; defaults to
+    prompt.confirm). Failure or user refusal → the channel is dropped from
+    this configuration. RIND_GATEWAY_NO_AUTO_INSTALL=1 disables it entirely
+    (tests/CI).
     """
     import os
 
@@ -109,16 +112,16 @@ def ensure_channel_sdks(guides, *, interactive: bool, confirm=None, echo=print):
             continue
         if interactive:
             names = ", ".join(missing)
-            if not confirm(f"渠道 {guide.label} 需要 {names}（当前未安装）。自动安装？"):
-                echo(f"  已跳过 {guide.label}：缺依赖的渠道不会写入配置。")
+            if not confirm(f"Channel {guide.label} needs {names} (not installed). Install automatically?"):
+                echo(f"  Skipped {guide.label}: channels with missing dependencies are not written to the config.")
                 continue
         installed_ok = True
         for module in missing:
-            echo(f"  正在安装 {module} …")
+            echo(f"  Installing {module} …")
             ok, detail = ensure_sdk_installed(module)
             echo(f"  {'✔' if ok else '✘'} {detail}")
             if not ok:
-                echo(f"  已跳过 {guide.label}。手动安装：pip install {module}")
+                echo(f"  Skipped {guide.label}. Install manually: pip install {module}")
                 installed_ok = False
         if installed_ok:
             kept.append(guide)
@@ -134,56 +137,56 @@ def run_checks(config_path: Path | None, workspace: Path, *, probe: bool = False
     path = config_path or (workspace / ".rind" / "gateway.yaml")
     if not path.is_file():
         add(
-            "配置文件",
+            "config file",
             False,
-            f"未找到 {path}",
-            "运行 `python main.py gateway init` 创建（约 2 分钟）",
+            f"not found: {path}",
+            "run `python main.py gateway init` to create one (about 2 minutes)",
         )
         return results
 
     try:
         config = load_config(path)
-        add("配置文件", True, f"{path} 解析成功")
+        add("config file", True, f"{path} parses cleanly")
     except ConfigError as exc:
-        add("配置文件", False, str(exc), "按提示修正后重跑；或运行 `gateway init` 重新生成")
+        add("config file", False, str(exc), "fix per the message and rerun, or regenerate with `gateway init`")
         return results
 
-    # worker reachability: real WS handshake by default — "开没开" 不该靠猜
+    # worker reachability: real WS handshake by default — never guess "is it up"
     worker = config.worker
     if worker == "stdio":
-        add("worker 连接", True, "stdio 模式：网关将自起 worker 子进程")
+        add("worker connection", True, "stdio mode: the gateway spawns the worker subprocess itself")
     else:
         alive, detail = asyncio.run(_worker_alive(worker, config.worker_token, timeout=5.0))
         add(
-            "worker 连接",
+            "worker connection",
             True if alive else False,
             f"{worker} — {detail}",
-            fix="" if alive else "确认 worker 已启动（python main.py app-server --web ...）且 worker_token 一致",
+            fix="" if alive else "confirm the worker is running (python main.py app-server --web ...) and the worker_token matches",
         )
 
     ws_dir = Path(config.workspace)
     if not ws_dir.is_dir():
-        add("workspace 目录", False, f"目录不存在：{config.workspace}", "修正 gateway.yaml 的 workspace 为绝对路径")
+        add("workspace directory", False, f"directory missing: {config.workspace}", "set workspace in gateway.yaml to an absolute path")
     elif _looks_like_source_dir(ws_dir):
         add(
-            "workspace 目录",
+            "workspace directory",
             None,
-            f"{config.workspace} 看起来是 Rind 的工程目录——运行数据（state/pairing/uploads）会混入源码树",
-            "建议为网关会话换一个独立目录（如 ~/rind-workspace）",
+            f"{config.workspace} looks like the Rind source tree — runtime data (state/pairing/uploads) would mix into it",
+            "use a dedicated directory for gateway sessions (e.g. ~/rind-workspace)",
         )
     else:
-        add("workspace 目录", True, config.workspace)
+        add("workspace directory", True, config.workspace)
 
     runtime_dir = Path(config.workspace) / ".rind"
     for name in ("state.json", "pairing.json"):
         target = runtime_dir / name
         readable, data = _read_json(target)
         if readable:
-            add(name, True, "可读" if data else "尚未生成（首次运行后出现）")
+            add(name, True, "readable" if data else "not created yet (appears after first run)")
         elif fix:
-            add(name, True, f"文件损坏，{_fix_corrupt(target)}（已重置）")
+            add(name, True, f"corrupt, {_fix_corrupt(target)} (reset)")
         else:
-            add(name, False, "文件损坏", "加 --fix 自动备份并重置")
+            add(name, False, "corrupt", "add --fix to back up and reset automatically")
 
     for channel_id, channel in config.channels.items():
         guide = GUIDES.get(channel_id)
@@ -193,9 +196,9 @@ def run_checks(config_path: Path | None, workspace: Path, *, probe: bool = False
         if sdk_module:
             try:
                 importlib.import_module(sdk_module)
-            except Exception:  # noqa: BLE001 - SDK 可选，缺失只影响该渠道
+            except Exception:  # noqa: BLE001 - SDKs are optional; a missing one only affects this channel
                 sdk_ok = False
-                add(f"渠道 {label}", False, f"SDK 未安装：pip install {sdk_module}")
+                add(f"channel {label}", False, f"SDK not installed: pip install {sdk_module}")
         if not sdk_ok:
             continue
         if guide is not None and guide.probe and probe:
@@ -203,15 +206,15 @@ def run_checks(config_path: Path | None, workspace: Path, *, probe: bool = False
             required = [spec.name for spec in guide.fields if spec.required]
             missing = [name for name in required if not answers.get(name)]
             if missing:
-                add(f"渠道 {label}", False, f"缺少必填字段：{', '.join(missing)}")
+                add(f"channel {label}", False, f"missing required fields: {', '.join(missing)}")
                 continue
             result = guide.probe({key: value for key, value in answers.items() if value})
-            add(f"渠道 {label} 凭证", result.ok, result.detail)
+            add(f"channel {label} credentials", result.ok, result.detail)
         else:
-            add(f"渠道 {label}", True, "已配置（加 --probe 验证凭证有效性）")
+            add(f"channel {label}", True, "configured (add --probe to verify credentials)")
 
     if not config.channels:
-        add("渠道", None, "尚未配置任何渠道", "运行 `python main.py gateway init` 添加")
+        add("channels", None, "no channels configured yet", "run `python main.py gateway init` to add one")
     return results
 
 
@@ -219,7 +222,7 @@ def run_doctor(args) -> int:
     workspace = Path(args.workspace).expanduser().resolve()
     config_path = Path(args.config) if args.config else None
     results = run_checks(config_path, workspace, probe=bool(args.probe), fix=bool(args.fix))
-    print("Rind 网关体检")
+    print("Rind gateway health check")
     failed = 0
     for check in results:
         if check.ok is True:
@@ -229,13 +232,13 @@ def run_doctor(args) -> int:
         else:
             mark = "✘"
             failed += 1
-        print(f"  {mark} {check.name}：{check.detail}")
+        print(f"  {mark} {check.name}: {check.detail}")
         if check.fix and not check.ok:
             print(f"      ↳ {check.fix}")
     if failed == 0:
-        print("全部通过。启动：python main.py gateway --config <配置路径>")
+        print("All checks passed. Start: python main.py gateway --config <config path>")
         return 0
-    print(f"{failed} 项未通过。", file=sys.stderr)
+    print(f"{failed} check(s) failed.", file=sys.stderr)
     return 1
 
 

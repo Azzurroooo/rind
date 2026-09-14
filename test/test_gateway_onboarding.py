@@ -1,8 +1,10 @@
-"""`gateway init` / `doctor` / `status` 的用户通道测试。
+"""User-channel tests for `gateway init` / `doctor` / `status`.
 
-这些测试守护的不是解析器，而是"新用户 2 分钟接入"的承诺：每个渠道都有
-引导与字段表单、字段键名合法（不会生成被配置校验拒绝的 yaml）、向导产物
-能被现有解析器原样读回、doctor 能在干净/损坏两种状态下给出正确结论。
+These tests guard not the parser but the "new user onboarded in 2 minutes"
+promise: every channel has a guide and a field form, field keys are legal
+(no yaml the config validation would reject), wizard output round-trips
+through the existing parser, and doctor draws the right conclusion on both
+clean and corrupted workspaces.
 """
 
 import json
@@ -24,32 +26,32 @@ from gateway.doctor import run_checks
 from gateway.wizard import build_config_data, collect_answers_env, config_path_for
 
 
-# --- 引导完备性：注册表里的渠道必须有向导，字段键名必须合法 -------------------
+# --- guide completeness: every registered channel needs a wizard; field keys must be legal -------------------
 
 
 def test_every_registered_channel_has_a_guide():
     missing = sorted(set(LOADERS) - set(onboarding.GUIDES))
     orphan = sorted(set(onboarding.GUIDES) - set(LOADERS))
-    assert not missing, f"渠道缺少 init 引导: {missing}"
-    assert not orphan, f"向导里的渠道不在注册表: {orphan}"
+    assert not missing, f"channels missing an init guide: {missing}"
+    assert not orphan, f"guides contain channels not in the registry: {orphan}"
 
 
 def test_guides_carry_user_facing_content():
     for guide in onboarding.all_guides():
         assert guide.label and guide.emoji and guide.summary, guide.id
-        assert guide.setup_steps, f"{guide.id} 缺少凭证获取引导"
-        assert guide.probe is not None, f"{guide.id} 缺少凭证探活"
+        assert guide.setup_steps, f"{guide.id} missing credential setup steps"
+        assert guide.probe is not None, f"{guide.id} missing a credential probe"
 
 
 def test_guide_field_names_are_acceptable_config_keys():
-    # 生成 yaml 前就拦住拼写错误：字段名必须是该渠道 schema 或通用 token。
+    # Catch typos before any yaml is generated: field names must come from the channel schema or shared tokens.
     for guide in onboarding.all_guides():
         allowed = _CHANNEL_KEYS.get(guide.id, frozenset()) | {"token"}
         for spec in guide.fields:
-            assert spec.name in allowed, f"{guide.id}.{spec.name} 不在该渠道配置 schema 中"
+            assert spec.name in allowed, f"{guide.id}.{spec.name} is not in the channel's config schema"
 
 
-# --- 向导构建：answers -> config dict -> yaml -> 原样读回 ----------------------
+# --- wizard construction: answers -> config dict -> yaml -> read back verbatim ----------------------
 
 
 def test_build_config_data_produces_parseable_yaml(tmp_path):
@@ -88,7 +90,7 @@ def test_numeric_sender_ids_survive_the_yaml_round_trip():
         worker="ws://x", worker_token="", workspace="E:/ws",
     )
     text = render_yaml(data)
-    assert '"123456789"' in text or "'123456789'" in text, "纯数字 ID 必须加引号，否则回读成 int"
+    assert '"123456789"' in text or "'123456789'" in text, "numeric IDs must be quoted or they read back as int"
     config = build_config(parse_yaml(text, env={}))
     assert config.channels["telegram"].allow_from == ("123456789",)
 
@@ -104,7 +106,7 @@ def test_collect_answers_env_reads_prefixed_variables_and_reports_missing():
     assert "RIND_GW_FEISHU_APP_ID" in missing and "RIND_GW_FEISHU_APP_SECRET" in missing
 
 
-# --- 探活：注入假 HTTP，验证 ✔/✘ 语义与原因 -------------------------------------
+# --- probes: fake HTTP injected; verify ✔/✘ semantics and reasons -------------------------------------
 
 
 def test_telegram_probe_reports_bot_and_failure(monkeypatch):
@@ -121,11 +123,11 @@ def test_telegram_probe_reports_bot_and_failure(monkeypatch):
     monkeypatch.setattr(probes, "_get_json", fake_get)
     result = onboarding.GUIDES["telegram"].probe({"token": "bottoken", "proxy": "http://127.0.0.1:7890"})
     assert result.ok and "my_rind_bot" in result.detail
-    assert captured["proxy"] == "http://127.0.0.1:7890", "探活必须与网关走同一出口"
+    assert captured["proxy"] == "http://127.0.0.1:7890", "the probe must use the same egress as the gateway"
 
     result = onboarding.GUIDES["telegram"].probe({"token": "bad"})
     assert not result.ok and "401" in result.detail
-    assert captured["proxy"] == "", "未配置代理时探活必须直连（与网关一致）"
+    assert captured["proxy"] == "", "without a configured proxy the probe must connect directly (like the gateway)"
 
 
 def test_feishu_probe_maps_platform_error_code(monkeypatch):
@@ -158,7 +160,7 @@ def test_telegram_discovery_collects_sender_ids(monkeypatch):
     assert senders == ["111 (@alice)", "222"]
 
 
-# --- doctor：干净/缺失/损坏三种工作区状态 ----------------------------------------
+# --- doctor: clean / missing / corrupted workspace states ----------------------------------------
 
 
 def _write_config(workspace: Path) -> None:
@@ -185,7 +187,7 @@ def test_doctor_passes_on_valid_config_and_flags_corrupt_state(tmp_path):
 
     results = run_checks(None, tmp_path)
     by_name = {check.name: check for check in results}
-    assert by_name["配置文件"].ok is True
+    assert by_name["config file"].ok is True
     assert by_name["state.json"].ok is False
     assert "--fix" in by_name["state.json"].fix
 
@@ -208,7 +210,7 @@ def test_doctor_reports_missing_channel_sdk(tmp_path, monkeypatch):
 
     monkeypatch.setattr(importlib, "import_module", fake_import)
     results = run_checks(None, tmp_path)
-    telegram = [check for check in results if check.name == "渠道 Telegram"]
+    telegram = [check for check in results if check.name == "channel Telegram"]
     assert telegram and telegram[0].ok is False and "aiogram" in telegram[0].detail
 
 
@@ -225,7 +227,7 @@ def test_status_counts_sessions_and_pairing(tmp_path, monkeypatch):
     )
 
     async def dead_worker(worker, token, timeout=0.1):
-        return False, "无法连接"
+        return False, "cannot connect"
 
     from gateway import status as status_module
 
@@ -233,10 +235,10 @@ def test_status_counts_sessions_and_pairing(tmp_path, monkeypatch):
     from gateway.status import run_status
 
     args = type("Args", (), {"config": None, "workspace": str(tmp_path)})()
-    assert run_status(args) == 1  # worker 不在线 → 退出码 1，但文件统计仍然输出
+    assert run_status(args) == 1  # worker offline → exit code 1, but file stats still print
 
 
-# --- SDK 自动安装与工作区防护（用户体验包装的机器可测部分）-----------------------
+# --- SDK auto-install and workspace protection (the machine-testable part of the UX wrapper) -----------------------
 
 
 def test_ensure_sdk_skips_when_already_importable():
@@ -246,10 +248,10 @@ def test_ensure_sdk_skips_when_already_importable():
 
     def runner(cmd):
         ran.append(cmd)
-        raise AssertionError("已可导入时不应调用 pip")
+        raise AssertionError("pip must not run when the module is already importable")
 
     ok, detail = doctor.ensure_sdk_installed("json", runner=runner)
-    assert ok and "已安装" in detail
+    assert ok and "already installed" in detail
     assert not ran
 
 
@@ -299,13 +301,13 @@ def test_ensure_sdk_reports_pip_failure(monkeypatch):
 
 def test_feishu_setup_steps_match_official_flow():
     steps = "\n".join(onboarding.GUIDES["feishu"].setup_steps)
-    for keyword in ("企业自建应用", "机器人", "App ID", "权限", "长连接", "im.message.receive_v1", "发布"):
-        assert keyword in steps, f"飞书引导缺少关键步骤：{keyword}"
+    for keyword in ("Custom App", "Bot", "App ID", "Permissions & Scopes", "long connection", "im.message.receive_v1", "publish"):
+        assert keyword in steps, f"feishu guide missing a key step: {keyword}"
 
 
 def test_permission_scopes_are_exact_copyable_codes():
-    # 用户在平台搜索框里粘贴的就是这些代码——必须是平台可唯一检索的标识，
-    # 而不是中文描述名。
+    # These are the codes users paste into the platform's search box — they
+    # must be platform-unique identifiers, not localized descriptive names.
     scopes = onboarding.GUIDES["feishu"].scopes
     for code in (
         "im:message.p2p.msg:readonly",
@@ -313,7 +315,7 @@ def test_permission_scopes_are_exact_copyable_codes():
         "im:message:send_as_bot",
         "im:resource",
     ):
-        assert any(code in item for item in scopes), f"缺少精确权限代码：{code}"
+        assert any(code in item for item in scopes), f"missing the exact permission code: {code}"
     assert any("connections:write" in scope for scope in onboarding.GUIDES["slack"].scopes)
 
 
@@ -332,13 +334,13 @@ def test_telegram_probe_timeout_suggests_proxy(monkeypatch):
     import gateway.probes as probes
 
     def timeout_get(url, headers=None, proxy=""):
-        assert proxy == "", "未配置代理时必须直连（与网关出口一致）"
+        assert proxy == "", "without a configured proxy it must connect directly (matching the gateway egress)"
         raise urllib.error.URLError("timed out")
 
     monkeypatch.setattr(probes, "_get_json", timeout_get)
     result = onboarding.GUIDES["telegram"].probe({"token": "t"})
     assert not result.ok
-    assert "连接超时" in result.detail and "代理" in result.detail
+    assert "Connection timed out" in result.detail and "proxy" in result.detail
 
     def proxy_get(url, headers=None, proxy="http://127.0.0.1:7890"):
         assert proxy == "http://127.0.0.1:7890"
@@ -350,7 +352,7 @@ def test_telegram_probe_timeout_suggests_proxy(monkeypatch):
 
 
 def test_runtime_deps_installed_alongside_sdk(monkeypatch):
-    """telegram 声明的 aiohttp_socks 属于运行时依赖：缺失时会随 aiogram 一起自动装。"""
+    """aiohttp_socks declared by telegram is a runtime dependency: when missing it auto-installs alongside aiogram."""
     import gateway.doctor as doctor
 
     calls: list[str] = []
@@ -363,7 +365,7 @@ def test_runtime_deps_installed_alongside_sdk(monkeypatch):
     guides, _ = doctor.ensure_channel_sdks(
         [onboarding.GUIDES["telegram"]], interactive=False,
     )
-    assert guides, "依赖装好后渠道应保留"
+    assert guides, "channels should survive once dependencies are installed"
     assert sorted(set(calls)) == ["aiogram", "aiohttp_socks"]
 
 

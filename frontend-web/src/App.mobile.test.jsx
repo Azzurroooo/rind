@@ -52,8 +52,8 @@ function stubMatchMedia(matches) {
 
 const railPanel = () => document.getElementById("session-rail-panel");
 const inspectorPanel = () => document.getElementById("inspector-panel");
-const railToggle = () => screen.getByRole("button", { name: "会话列表" });
-const inspectorToggle = () => screen.getByRole("button", { name: "会话状态" });
+const railToggle = () => screen.getByRole("button", { name: "Sessions" });
+const inspectorToggle = () => screen.getByRole("button", { name: "Session state" });
 
 function expectClosed(panel) {
   expect(panel.className).toContain("drawer-closed");

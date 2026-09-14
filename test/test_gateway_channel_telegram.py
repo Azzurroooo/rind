@@ -1,4 +1,4 @@
-"""Telegram adapter smoke tests against a mocked aiogram (渠道冒烟, §9).
+"""Telegram adapter smoke tests against a mocked aiogram (channel smoke tests, §9).
 
 A fake ``aiogram`` module is injected into ``sys.modules``; the real adapter
 code (lazy import, polling loop, normalization, send) runs end to end over
@@ -193,7 +193,7 @@ def test_private_text_update_flows_to_inbound_message(tmp_path, fake_aiogram):
     async def scenario():
         channel, bot, sink = await _start(tmp_path)
         bot.updates.append(_update(_message(message_id=7, chat=_chat(42, "private"), user=_user(1001, "Ada"),
-                                            text="帮我看看 build 报错"), update_id=1))
+                                            text="help me look at this build error"), update_id=1))
         await _until(lambda: len(sink.messages) == 1, message="polling loop never delivered the update")
         msg = sink.messages[0]
         assert msg.channel == "telegram"
@@ -202,7 +202,7 @@ def test_private_text_update_flows_to_inbound_message(tmp_path, fake_aiogram):
         assert msg.sender_id == "1001"
         assert msg.sender_name == "Ada"
         assert msg.thread_id is None
-        assert msg.text == "帮我看看 build 报错"
+        assert msg.text == "help me look at this build error"
         assert msg.attachments == ()
         assert msg.message_ref == "42:7"
         await channel.stop()
@@ -216,12 +216,12 @@ def test_group_message_with_caption_and_forum_thread(tmp_path, fake_aiogram):
         photo = [SimpleNamespace(file_id="p1", width=90, height=90, file_size=1200),
                  SimpleNamespace(file_id="p2", width=800, height=600, file_size=90000)]
         bot.updates.append(_update(_message(message_id=8, chat=_chat(-100, "supergroup"), user=_user(1002, "Bob"),
-                                            text=None, caption="看这张图", photo=photo, thread_id=55), update_id=1))
+                                            text=None, caption="look at this image", photo=photo, thread_id=55), update_id=1))
         await _until(lambda: len(sink.messages) == 1)
         msg = sink.messages[0]
         assert msg.chat_type == "group"
         assert msg.thread_id == "55"
-        assert msg.text == "看这张图"  # caption stands in for text on media messages
+        assert msg.text == "look at this image"  # caption stands in for text on media messages
         assert len(msg.attachments) == 1 and msg.attachments[0].kind == "image"
         assert bot.downloads == [photo[1]]  # largest photo size wins
         await channel.stop()
@@ -289,13 +289,13 @@ def test_send_with_choices_builds_inline_keyboard_ans_digits(tmp_path, fake_aiog
     async def scenario():
         channel, bot, sink = await _start(tmp_path)
         await channel.send(SendTarget(chat_id="42"),
-                           OutboundPayload(text="部署到生产环境？", choices=("立即部署", "再等等")))
+                           OutboundPayload(text="Deploy to production?", choices=("Deploy now", "Wait a bit")))
         entry = bot.sent[-1]
-        assert entry.text == "部署到生产环境？"
+        assert entry.text == "Deploy to production?"
         assert entry.parse_mode is None  # markdown "none": plain text
         rows = [row[0] for row in entry.reply_markup.inline_keyboard]
         assert [button.callback_data for button in rows] == ["ans:0", "ans:1"]
-        assert [button.text for button in rows] == ["立即部署", "再等等"]
+        assert [button.text for button in rows] == ["Deploy now", "Wait a bit"]
         await channel.stop()
 
     asyncio.run(scenario())
@@ -306,10 +306,10 @@ def test_send_text_and_attachment_use_native_apis(tmp_path, fake_aiogram):
         channel, bot, sink = await _start(tmp_path)
         media = tmp_path / "out.png"
         media.write_bytes(b"png")
-        payload = OutboundPayload(text="完成",
+        payload = OutboundPayload(text="Done",
                                   attachments=(Attachment(path=media, content_type="image/png", kind="image"),))
         await channel.send(SendTarget(chat_id="42", thread_id="55"), payload)
-        assert bot.sent[-1].text == "完成" and bot.sent[-1].message_thread_id == "55"
+        assert bot.sent[-1].text == "Done" and bot.sent[-1].message_thread_id == "55"
         assert bot.media[0][0] == "photo" and bot.media[0][1] == "42" and bot.media[0][2].path == str(media)
         await channel.stop()
 
@@ -335,7 +335,7 @@ def test_react_pins_seen_emoji_on_last_posted_message(tmp_path, fake_aiogram):
         channel, bot, sink = await _start(tmp_path)
         await channel.react(SendTarget(chat_id="42"), "✅")  # nothing posted yet → quiet no-op
         assert bot.reactions == []
-        await channel.send(SendTarget(chat_id="42"), OutboundPayload(text="开工"))  # message_id 101
+        await channel.send(SendTarget(chat_id="42"), OutboundPayload(text="starting work"))  # message_id 101
         await channel.react(SendTarget(chat_id="42"), "🧠")  # Outbound passes the raw glyph
         (reaction,) = bot.reactions
         assert reaction["chat_id"] == "42" and reaction["message_id"] == 101
@@ -350,7 +350,7 @@ def test_react_uses_sdk_reaction_type_and_tolerates_failures(tmp_path, fake_aiog
     async def scenario():
         fake_aiogram.ReactionTypeEmoji = lambda emoji: SimpleNamespace(type="emoji", emoji=emoji)
         channel, bot, sink = await _start(tmp_path)
-        await channel.send(SendTarget(chat_id="42"), OutboundPayload(text="开工"))
+        await channel.send(SendTarget(chat_id="42"), OutboundPayload(text="starting work"))
         await channel.react(SendTarget(chat_id="42"), "❌")
         reaction = bot.reactions.pop()
         assert reaction["reaction"] == [SimpleNamespace(type="emoji", emoji="👀")]

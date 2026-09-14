@@ -81,9 +81,9 @@ describe("ToolBlock — level 2 expanded detail", () => {
     fireEvent.click(screen.getByRole("button", { name: /Shell command/ }));
     const outputPre = document.querySelector(".tool-output pre");
     expect(outputPre.textContent).not.toContain("line-89"); // preview capped before the last lines
-    expect(screen.getByText(/展开全部（共 90 行）/)).not.toBeNull();
+    expect(screen.getByText(/Show all \(90 lines\)/)).not.toBeNull();
 
-    fireEvent.click(screen.getByText(/展开全部（共 90 行）/));
+    fireEvent.click(screen.getByText(/Show all \(90 lines\)/));
     expect(document.querySelector(".tool-output pre").textContent).toContain("line-89");
   });
 });

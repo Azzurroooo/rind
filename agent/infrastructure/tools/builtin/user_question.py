@@ -22,16 +22,16 @@ TOOL_SPECS = (
     ToolSpec(
         name="ask_user_question",
         handler=ask_user_question,
-        description="向用户提出一个必须由用户确认的问题。仅当偏好、范围、阻塞决策或无法从环境发现的信息确实需要用户回答时使用；不要询问可通过工具探索得到的问题。",
+        description="Ask the user a question that must be confirmed by them. Use only when a preference, scope decision, blocking choice, or information genuinely absent from the environment needs a human answer; do not ask about things tools can discover.",
         param_descriptions={
-            "question": "要向用户提出的单个明确问题",
+            "question": "The single, clearly stated question to ask the user",
             "options": {
-                "description": "可选结构化答案列表；首项的 label 必须以 \" (Recommended)\" 结尾，其他选项不得使用该后缀。用户也可输入自由文本。",
+                "description": "Optional structured answer list; the first item's label must end with \" (Recommended)\" and no other item may use that suffix. The user can also type free text.",
                 "items": {
                     "type": "object",
                     "properties": {
-                        "label": {"type": "string", "description": "简短的答案标签"},
-                        "description": {"type": "string", "description": "解释该答案的简短说明"},
+                        "label": {"type": "string", "description": "Short answer label"},
+                        "description": {"type": "string", "description": "Brief explanation of the answer"},
                     },
                     "required": ["label", "description"],
                     "additionalProperties": False,

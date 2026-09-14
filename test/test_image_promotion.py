@@ -131,7 +131,7 @@ def test_promotion_success_builds_image_url_data_url_part(tmp_path):
     chat_client = _RecordingChatClient()
     runner = _runner(
         chat_client,
-        [{"role": "user", "content": "看这张图 uploads/photo.png"}],
+        [{"role": "user", "content": "look at this image uploads/photo.png"}],
     )
 
     events = _run_turn(runner, _FakeSession(workspace))
@@ -139,7 +139,7 @@ def test_promotion_success_builds_image_url_data_url_part(tmp_path):
     request = chat_client.requests[0]
     content = request[0]["content"]
     assert isinstance(content, list)
-    assert content[0] == {"type": "text", "text": "看这张图 uploads/photo.png"}
+    assert content[0] == {"type": "text", "text": "look at this image uploads/photo.png"}
     image_part = content[1]
     assert image_part["type"] == "image_url"
     url = image_part["image_url"]["url"]
@@ -167,7 +167,7 @@ def test_promoted_user_message_keeps_text_and_deduplicates(tmp_path):
     workspace = _make_workspace(tmp_path)
     chat_client = _RecordingChatClient()
     session = _FakeSession(workspace)
-    text = "两张都要 uploads/photo.png 和 uploads/photo.png"
+    text = "I want both uploads/photo.png and uploads/photo.png"
     runner = _runner(chat_client, [{"role": "user", "content": text}])
 
     _run_turn(runner, session)
@@ -182,12 +182,12 @@ def test_missing_file_degrades_to_text_only(tmp_path):
     chat_client = _RecordingChatClient()
     runner = _runner(
         chat_client,
-        [{"role": "user", "content": "看这张图 uploads/missing.png"}],
+        [{"role": "user", "content": "look at this image uploads/missing.png"}],
     )
 
     events = _run_turn(runner, _FakeSession(tmp_path))
 
-    assert chat_client.requests[0][0]["content"] == "看这张图 uploads/missing.png"
+    assert chat_client.requests[0][0]["content"] == "look at this image uploads/missing.png"
     assert isinstance(events[-1], TurnCompletedEvent)
     assert events[-1].image_fallback is False
 
@@ -197,12 +197,12 @@ def test_oversize_file_degrades_to_text_only(tmp_path):
     chat_client = _RecordingChatClient()
     runner = _runner(
         chat_client,
-        [{"role": "user", "content": "看这张图 uploads/photo.png"}],
+        [{"role": "user", "content": "look at this image uploads/photo.png"}],
     )
 
     events = _run_turn(runner, _FakeSession(workspace))
 
-    assert chat_client.requests[0][0]["content"] == "看这张图 uploads/photo.png"
+    assert chat_client.requests[0][0]["content"] == "look at this image uploads/photo.png"
     assert isinstance(events[-1], TurnCompletedEvent)
 
 
@@ -222,10 +222,10 @@ def test_file_exactly_at_4mb_limit_is_promoted(tmp_path):
 def test_unsafe_paths_degrade_to_text_only(tmp_path):
     workspace = _make_workspace(tmp_path, filename="secret.png")
     unsafe_texts = [
-        "外面这张 ../uploads/secret.png 看看",
-        "这张 uploads/../../uploads/secret.png 看看",
-        "这张 uploads/secret.png/../../secret.png 看看",
-        f"绝对路径 {tmp_path / 'uploads' / 'secret.png'} 看看",
+        "outside this one ../uploads/secret.png take a look",
+        "this one uploads/../../uploads/secret.png take a look",
+        "this one uploads/secret.png/../../secret.png take a look",
+        f"absolute path {tmp_path / 'uploads' / 'secret.png'} take a look",
     ]
     for text in unsafe_texts:
         chat_client = _RecordingChatClient()
@@ -264,7 +264,7 @@ def test_non_image_references_and_non_user_messages_are_untouched(tmp_path):
     (workspace / "uploads" / "notes.txt").write_text("hello")
     messages = [
         {"role": "system", "content": "sys"},
-        {"role": "user", "content": "读取 uploads/notes.txt"},
+        {"role": "user", "content": "read uploads/notes.txt"},
         {"role": "assistant", "content": "ok"},
     ]
 
@@ -286,7 +286,7 @@ def test_promotion_without_workspace_root_is_noop():
 def test_provider_rejection_retries_once_text_only_and_sets_image_fallback(tmp_path):
     workspace = _make_workspace(tmp_path)
     chat_client = _RecordingChatClient()
-    text = "看这张图 uploads/photo.png"
+    text = "look at this image uploads/photo.png"
     runner = _runner(
         chat_client,
         [{"role": "user", "content": text}],
@@ -318,7 +318,7 @@ def test_provider_rejection_without_promoted_images_does_not_retry(tmp_path):
     chat_client = _RecordingChatClient()
     runner = _runner(
         chat_client,
-        [{"role": "user", "content": "普通提问，无图"}],
+        [{"role": "user", "content": "plain question, no image"}],
         consume_side_effect=[
             ProviderError("Bad request", status="rejected", error_type="BadRequestError"),
         ],
@@ -335,7 +335,7 @@ def test_provider_rejection_without_promoted_images_does_not_retry(tmp_path):
 def test_context_length_error_keeps_existing_recovery_path(tmp_path):
     workspace = _make_workspace(tmp_path)
     chat_client = _RecordingChatClient()
-    text = "看这张图 uploads/photo.png"
+    text = "look at this image uploads/photo.png"
     context_with_image = SimpleNamespace(
         messages=[{"role": "user", "content": text}],
         stats={},
@@ -387,7 +387,7 @@ def test_context_length_error_keeps_existing_recovery_path(tmp_path):
 def test_prompts_without_image_references_produce_identical_requests(tmp_path):
     messages = [
         {"role": "system", "content": "system prompt"},
-        {"role": "user", "content": "普通中文提问，没有图片"},
+        {"role": "user", "content": "plain question without images"},
     ]
     chat_client = _RecordingChatClient()
     runner = _runner(chat_client, messages)

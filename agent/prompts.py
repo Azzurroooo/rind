@@ -18,7 +18,7 @@ def _detect_shell_display() -> tuple[str, str]:
 
 
 def get_system_info(cwd: str | os.PathLike[str] | None = None):
-    """动态获取系统信息"""
+    """Collect dynamic system information."""
     system = platform.system()
     cwd = os.path.abspath(os.fspath(cwd)) if cwd is not None else os.getcwd()
     current_date = date.today().isoformat()

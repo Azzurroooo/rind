@@ -1,4 +1,4 @@
-"""Email adapter smoke tests against fake imapclient/aiosmtplib (渠道冒烟, §9).
+"""Email adapter smoke tests against fake imapclient/aiosmtplib (channel smoke tests, §9).
 
 Fake ``imapclient`` and ``aiosmtplib`` modules are injected into
 ``sys.modules``; the real adapter code (lazy import, IMAP fetch in worker
@@ -161,7 +161,7 @@ def test_unseen_message_flows_to_inbound_message(tmp_path, fake_sdk):
     async def scenario():
         channel, sink, client = await _start(tmp_path)
         client.messages[1] = _raw_email(subject="Re: Build failed", sender="Ada Lovelace <ada@example.com>",
-                                        message_id="<a1@example.com>", body="帮我看看这个报错",
+                                        message_id="<a1@example.com>", body="help me look at this error",
                                         attachments=[("crash log.txt", "text/plain", b"payload")])
         client.uids = [1]
         await _until(lambda: len(sink.messages) == 1, message="poll loop never delivered the mail")
@@ -172,7 +172,7 @@ def test_unseen_message_flows_to_inbound_message(tmp_path, fake_sdk):
         assert msg.chat_id == "ada@example.com" and msg.chat_type == "dm"
         assert msg.sender_id == "ada@example.com" and msg.sender_name == "Ada Lovelace"
         assert msg.thread_id == "build failed"  # Re: prefix stripped, lowercased
-        assert msg.text == "帮我看看这个报错\n"
+        assert msg.text == "help me look at this error\n"
         assert msg.message_ref == "<a1@example.com>"
         (attachment,) = msg.attachments
         assert attachment.path.is_file() and attachment.path.read_bytes() == b"payload"
@@ -220,16 +220,16 @@ def test_reply_sets_in_reply_to_and_reuses_subject(tmp_path, fake_sdk):
     async def scenario():
         channel, sink, client = await _start(tmp_path)
         client.messages[1] = _raw_email(subject="Build failed", sender="Ada <ada@example.com>",
-                                        message_id="<a1@example.com>", body="看下")
+                                        message_id="<a1@example.com>", body="take a look")
         client.uids = [1]
         await _until(lambda: len(sink.messages) == 1)
         await channel.send(SendTarget(chat_id="ada@example.com", thread_id="build failed"),
-                           OutboundPayload(text="已修复，见附件说明"))
+                           OutboundPayload(text="Fixed; see the attachment notes"))
         message, kwargs = SMTP_SENT[0]
         assert message["To"] == "ada@example.com" and message["From"] == "rind@example.com"
         assert message["Subject"] == "Re: Build failed"
         assert message["In-Reply-To"] == "<a1@example.com>"  # thread continuity via stored Message-ID
-        assert _text_body(message) == "已修复，见附件说明"
+        assert _text_body(message) == "Fixed; see the attachment notes"
         assert kwargs["hostname"] == "smtp.example.com" and kwargs["username"] == "rind@example.com"
         assert kwargs["start_tls"] is False
         await channel.stop()
@@ -241,9 +241,9 @@ def test_reply_without_known_thread_uses_fallback_subject(tmp_path, fake_sdk):
     async def scenario():
         channel = email_channel.build_channel(_config(smtp_starttls=True, smtp_port=587), tmp_path / "uploads")
         await channel.start(_Sink())
-        await channel.send(SendTarget(chat_id="new@example.com"), OutboundPayload(text="主动通知"))
+        await channel.send(SendTarget(chat_id="new@example.com"), OutboundPayload(text="proactive notice"))
         message, kwargs = SMTP_SENT[0]
-        assert message["Subject"] == "来自 rind 的消息"
+        assert message["Subject"] == "Message from rind"
         assert message["In-Reply-To"] is None
         assert kwargs["start_tls"] is True and kwargs["port"] == 587
         await channel.stop()
@@ -255,7 +255,7 @@ def test_oversize_attachment_is_ignored_with_notice_mail(tmp_path, fake_sdk):
     async def scenario():
         channel, sink, client = await _start(tmp_path)
         client.messages[1] = _raw_email(subject="logs", sender="ada@example.com", message_id="<big@x>",
-                                        body="附件太大", attachments=[("huge.zip", "application/zip",
+                                        body="attachment too big", attachments=[("huge.zip", "application/zip",
                                                                       b"x" * (21 * 1024 * 1024))])
         client.uids = [1]
         await _until(lambda: len(SMTP_SENT) == 1)  # the one-line notice reply
@@ -277,13 +277,13 @@ def test_send_with_attachment_builds_multipart(tmp_path, fake_sdk):
         media = tmp_path / "out.png"
         media.write_bytes(b"png")
         await channel.send(SendTarget(chat_id="ada@example.com", thread_id="hi"),
-                           OutboundPayload(text="看附件",
+                           OutboundPayload(text="see attachment",
                                            attachments=(Attachment(path=media, content_type="image/png",
                                                                    kind="image"),)))
         message, _ = SMTP_SENT[0]
         texts = [part for part in message.walk() if part.get_content_type() == "text/plain"]
         images = [part for part in message.walk() if part.get_content_type() == "image/png"]
-        assert texts and _text_body(message) == "看附件"
+        assert texts and _text_body(message) == "see attachment"
         assert images and images[0].get_filename() == "out.png"
         await channel.stop()
 
@@ -296,7 +296,7 @@ def test_send_with_attachment_builds_multipart(tmp_path, fake_sdk):
 def test_normalize_subject_strips_reply_prefixes_and_case():
     assert email_channel.normalize_subject("Re: Build failed") == "build failed"
     assert email_channel.normalize_subject("Re: Re[2]: FWD:   Build   failed ") == "build failed"
-    assert email_channel.normalize_subject("新任务") == "新任务"
+    assert email_channel.normalize_subject("new task") == "new task"
     assert email_channel.normalize_subject("") == ""
 
 

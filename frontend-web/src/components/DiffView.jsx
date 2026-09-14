@@ -26,7 +26,7 @@ export function DiffView({ diff, caption }) {
   return (
     <div className="diff-view">
       {caption && <div className="diff-caption">{caption}</div>}
-      <div className="diff-body" role="figure" aria-label="代码差异">
+      <div className="diff-body" role="figure" aria-label="Code diff">
         {lines.map((line, index) => (
           <div key={index} className={`diff-line ${line.kind}`}>
             <span className="diff-marker">{line.kind === "added" ? "+" : line.kind === "removed" ? "-" : " "}</span>

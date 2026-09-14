@@ -20,19 +20,19 @@ export function UploadChip({ chip, onDelete, onRetry }) {
         <strong>{chip?.name || "attachment"}</strong>
         <small>
           {formatBytes(chip?.size)}
-          {status === "uploading" && " · 上传中"}
+          {status === "uploading" && " · uploading"}
           {status === "ok" && chip?.path && ` · ${chip.path}`}
-          {failed && chip?.error ? ` · ${chip.error}` : failed ? " · 上传失败" : ""}
+          {failed && chip?.error ? ` · ${chip.error}` : failed ? " · upload failed" : ""}
         </small>
       </span>
       <span className="chip-actions">
         {failed && onRetry && (
-          <button type="button" className="chip-retry" title="重试上传" aria-label={`重试上传 ${chip?.name || ""}`} onClick={() => onRetry(chip)}>
+          <button type="button" className="chip-retry" title="Retry upload" aria-label={`Retry upload ${chip?.name || ""}`} onClick={() => onRetry(chip)}>
             <RotateCw size={13} />
           </button>
         )}
         {onDelete && (
-          <button type="button" className="chip-delete" title="移除附件" aria-label={`移除附件 ${chip?.name || ""}`} onClick={() => onDelete(chip)}>
+          <button type="button" className="chip-delete" title="Remove attachment" aria-label={`Remove attachment ${chip?.name || ""}`} onClick={() => onDelete(chip)}>
             <X size={13} />
           </button>
         )}

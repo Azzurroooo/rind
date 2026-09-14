@@ -2,9 +2,9 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Check, MessageCircleQuestion, Send } from "lucide-react";
 
 // Question card in the stream (web-ui.md §2.3):
-//   pending →（选择）→ answered ｜（TTL 到）→ expired ｜（turn 终止）→ cancelled
+//   pending → (choose) → answered | (TTL reached) → expired | (turn ended) → cancelled
 // Answered buttons freeze as selected and the card STAYS in the stream;
-// expired shows the 已超时 tag; cancelled reads 已随回合结束.
+// expired shows the Expired tag; cancelled reads "Ended with the turn".
 // Countdown is silent: one thin depleting bar, no ticking numbers.
 export function QuestionCard({ entry, onAnswer, onExpire }) {
   const options = Array.isArray(entry?.options) ? entry.options : [];
@@ -43,7 +43,7 @@ export function QuestionCard({ entry, onAnswer, onExpire }) {
       if (await onAnswer?.(entry, text)) {
         setSelected(text);
       } else {
-        setError("答案未发送成功，请重试。");
+        setError("The answer failed to send. Try again.");
       }
     } finally {
       submittingRef.current = false;
@@ -56,9 +56,9 @@ export function QuestionCard({ entry, onAnswer, onExpire }) {
       <header className="question-card-heading">
         <MessageCircleQuestion size={15} />
         <strong>{entry?.question || "The worker needs an answer"}</strong>
-        {status === "expired" && <span className="question-tag expired">已超时</span>}
-        {status === "cancelled" && <span className="question-tag cancelled">已随回合结束</span>}
-        {answered && <span className="question-tag answered">已回答</span>}
+        {status === "expired" && <span className="question-tag expired">Expired</span>}
+        {status === "cancelled" && <span className="question-tag cancelled">Ended with the turn</span>}
+        {answered && <span className="question-tag answered">Answered</span>}
       </header>
       {status === "pending" && ttl > 0 && (
         <div className="question-timer" aria-hidden="true">
@@ -92,21 +92,21 @@ export function QuestionCard({ entry, onAnswer, onExpire }) {
               onChange={(event) => setCustom(event.target.value)}
               onFocus={() => setCustomOpen(true)}
               onKeyDown={(event) => event.key === "Enter" && answer(custom)}
-              placeholder="输入自定义答案后回车"
-              aria-label="自定义答案"
+              placeholder="Type a custom answer and press Enter"
+              aria-label="Custom answer"
               disabled={submitting}
             />
             {customOpen && (
               <button type="button" className="question-send" onClick={() => answer(custom)} disabled={!custom.trim() || submitting}>
-                <Send size={14} /> 发送
+                <Send size={14} /> Send
               </button>
             )}
           </div>
         )}
       </div>
-      {answered && <div className="question-answer-note">已选择：{selected}</div>}
+      {answered && <div className="question-answer-note">Selected: {selected}</div>}
       {error && <div className="question-card-error" role="alert">{error}</div>}
-      {closed && status !== "answered" && <div className="question-closed-note">问题已关闭，回答未提交。</div>}
+      {closed && status !== "answered" && <div className="question-closed-note">Question closed; answer not submitted.</div>}
     </article>
   );
 }

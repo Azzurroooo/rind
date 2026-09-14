@@ -39,7 +39,7 @@ CAPABILITIES = ChannelCapabilities(max_text_length=4500, len_unit="chars", suppo
                                    supports_buttons=False, supports_reaction=False, markdown="none")
 
 DEFAULT_WS_PATH, DEFAULT_WS_PORT, BIND_HOST = "/onebot/v11", 8082, "0.0.0.0"
-MAX_ATTACHMENT_BYTES, OVERSIZE_NOTICE = 20 * 1024 * 1024, "附件过大（单个上限 20MB），已忽略该附件。"
+MAX_ATTACHMENT_BYTES, OVERSIZE_NOTICE = 20 * 1024 * 1024, "Attachment too large (per-file limit 20MB); skipped."
 ECHO_TIMEOUT_SECONDS = 120.0  # mirrors the worker client request timeout (§3)
 
 _CQ_PATTERN = re.compile(r"\[CQ:([a-zA-Z0-9_.\-]+)((?:,[^\[\]]*)*)\]")

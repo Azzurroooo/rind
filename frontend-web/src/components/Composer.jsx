@@ -14,8 +14,8 @@ let nextChipId = 1;
 // one-line notice above the composer says so — no modal.
 //
 // Queue mode (audit #1, opencode pattern): while a turn runs, submissions
-// queue as follow_up by default; the visible 排队追问 / 转向 switch (the web
-// sibling of the CLI's Tab toggle) flips the wire method between
+// queue as follow_up by default; the visible "Queue follow-up / Redirect steer"
+// switch (the web sibling of the CLI's Tab toggle) flips the wire method between
 // rind/session/follow_up and rind/session/steer. The first Esc of a running
 // turn arms the interrupt; the hint renders from App state.
 //
@@ -65,7 +65,7 @@ const Composer = forwardRef(function Composer({
     patchChip(chip.id, { status: "uploading", error: "" });
     onUpload(chip.file)
       .then((path) => patchChip(chip.id, { status: "ok", path: String(path || ""), error: "" }))
-      .catch((error) => patchChip(chip.id, { status: "failed", error: error instanceof Error ? error.message : String(error || "上传失败") }));
+      .catch((error) => patchChip(chip.id, { status: "failed", error: error instanceof Error ? error.message : String(error || "Upload failed") }));
   }, [onUpload, patchChip]);
 
   const addFiles = useCallback((fileList) => {
@@ -80,7 +80,7 @@ const Composer = forwardRef(function Composer({
       previewUrl: previewUrlFor(file),
       status: onUpload ? "uploading" : "failed",
       path: "",
-      error: onUpload ? "" : "上传不可用",
+      error: onUpload ? "" : "Upload unavailable",
     }));
     setChips((current) => [...current, ...created]);
     for (const chip of created) {
@@ -99,7 +99,7 @@ const Composer = forwardRef(function Composer({
     const delivered = new Set(current.filter((chip) => chip.status === "ok" && chip.path).map((chip) => chip.id));
     setChips((next) => next.filter((chip) => !delivered.has(chip.id)));
     if (uploading.length) {
-      setNotice(uploading.length === 1 ? "1 个附件仍在上传，未随消息发送" : `${uploading.length} 个附件仍在上传，未随消息发送`);
+      setNotice(uploading.length === 1 ? "1 attachment still uploading; not sent with this message" : `${uploading.length} attachments still uploading; not sent with this message`);
       if (noticeTimer.current) window.clearTimeout(noticeTimer.current);
       noticeTimer.current = window.setTimeout(() => setNotice(""), NOTICE_MS);
     }
@@ -136,13 +136,13 @@ const Composer = forwardRef(function Composer({
           </div>
         )}
         {chips.length > 0 && (
-          <div className="chip-row" aria-label="附件">
+          <div className="chip-row" aria-label="Attachments">
             {chips.map((chip) => (
               <UploadChip key={chip.id} chip={chip} onDelete={removeChip} onRetry={startUpload} />
             ))}
           </div>
         )}
-        {interruptArmed && <div className="interrupt-hint" role="status">再按一次 Esc 停止</div>}
+        {interruptArmed && <div className="interrupt-hint" role="status">Press Esc again to stop</div>}
         <textarea
           ref={textareaRef}
           value={value}
@@ -159,36 +159,36 @@ const Composer = forwardRef(function Composer({
               addFiles(event.clipboardData.files);
             }
           }}
-          placeholder={active ? (queueMode === "steering" ? "立即转向当前回合（steer）…" : "回合进行中，消息将排队追问…") : "Ask your worker anything..."}
+          placeholder={active ? (queueMode === "steering" ? "Redirect current turn immediately (steer)…" : "Turn in progress, messages will queue as follow-ups…") : "Ask your worker anything..."}
           disabled={disabled}
           rows={1}
         />
         <div className="composer-footer">
           <div className="composer-tools">
             <input ref={fileInputRef} type="file" multiple className="visually-hidden" aria-hidden="true" tabIndex={-1} onChange={(event) => { addFiles(event.target.files); event.target.value = ""; }} />
-            <button className="icon-button subtle" title="添加附件" onClick={() => fileInputRef.current?.click()}><Paperclip size={16} /></button>
+            <button className="icon-button subtle" title="Add attachment" onClick={() => fileInputRef.current?.click()}><Paperclip size={16} /></button>
             {active && (
-              <span className="queue-toggle" role="group" aria-label="队列模式">
+              <span className="queue-toggle" role="group" aria-label="Queue mode">
                 <button
                   type="button"
                   className={queueMode === "follow_up" ? "selected" : ""}
                   aria-pressed={queueMode === "follow_up"}
-                  title="回合结束后排队追问（follow_up）"
+                  title="Queue as a follow-up after the turn ends (follow_up)"
                   onClick={() => onQueueModeChange?.("follow_up")}
-                ><Layers size={13} /> 排队追问</button>
+                ><Layers size={13} /> Queue follow-up</button>
                 <button
                   type="button"
                   className={queueMode === "steering" ? "selected" : ""}
                   aria-pressed={queueMode === "steering"}
-                  title="立即插入当前回合（steer）"
+                  title="Redirect the current turn immediately (steer)"
                   onClick={() => onQueueModeChange?.("steering")}
-                ><CornerUpRight size={13} /> 转向 steer</button>
+                ><CornerUpRight size={13} /> Redirect steer</button>
               </span>
             )}
             <span>Enter to send · Shift+Enter for new line</span>
           </div>
           {active
-            ? <button className="send-button stop" title={interruptArmed ? "再按一次 Esc 停止" : "Stop active turn"} onClick={onCancel}><Square size={15} fill="currentColor" /></button>
+            ? <button className="send-button stop" title={interruptArmed ? "Press Esc again to stop" : "Stop active turn"} onClick={onCancel}><Square size={15} fill="currentColor" /></button>
             : <button className="send-button" title="Send message" onClick={() => sendMessage()} disabled={(!value.trim() && !chips.some((chip) => chip.status === "ok" && chip.path)) || disabled}><ArrowUp size={18} /></button>}
         </div>
       </div>

@@ -26,9 +26,9 @@ def create_agent_create_tool_spec(project: TeamProject) -> ToolSpec:
     return ToolSpec(
         name="agent_create",
         handler=agent_create,
-        description="根据 Agent ID 和职责描述创建标准 Team Agent Capsule。目录本身即为注册结果，不创建 Session 或组织状态。",
+        description="Create a standard Team Agent Capsule from an Agent ID and a responsibility description. The directory itself is the registration result; no Session or organization state is created.",
         param_descriptions={
-            "agent_id": "新 Agent 的目录 id。",
-            "description": "新 Agent 的职责和工作范围。",
+            "agent_id": "Directory id of the new Agent.",
+            "description": "Responsibilities and scope of work for the new Agent.",
         },
     )

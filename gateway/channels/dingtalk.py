@@ -1,7 +1,7 @@
 """DingTalk channel adapter via Stream Mode (gateway.md §8, plan §5.6 P1).
 
 Transport: the official ``dingtalk-stream`` SDK keeps a WebSocket to DingTalk
-open (零公网回调); bot messages arrive as CALLBACK_TAG callbacks and replies
+open (zero public callbacks); bot messages arrive as CALLBACK_TAG callbacks and replies
 go out through the robot oapi send APIs (groupMessages / oToMessages) over the
 SDK's authenticated client.  Optional dep lazy-imported in
 :func:`build_channel`/:meth:`DingTalkChannel.start`; a missing SDK disables
@@ -51,7 +51,7 @@ CAPABILITIES = ChannelCapabilities(
 )
 
 MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024
-OVERSIZE_NOTICE = "附件过大（单个上限 20MB），已忽略该附件。"
+OVERSIZE_NOTICE = "Attachment too large (per-file limit 20MB); skipped."
 GROUP_SEND_API = "/v1.0/robot/groupMessages/send"
 DIRECT_SEND_API = "/v1.0/robot/oToMessages/send"  # 1:1 (conversationType "1")
 MSG_KEY = "sampleMarkdown"  # markdown subset natively rendered by the robot

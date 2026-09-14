@@ -12,9 +12,9 @@ describe("UploadChip — four states of §2.4", () => {
     render(<UploadChip chip={{ ...base, status: "uploading" }} onDelete={onDelete} />);
     expect(document.querySelector(".upload-chip.uploading")).not.toBeNull();
     expect(screen.getByText(/2.0 KiB/)).not.toBeNull();
-    expect(screen.getByText(/上传中/)).not.toBeNull();
-    expect(screen.queryByTitle("重试上传")).toBeNull();
-    fireEvent.click(screen.getByTitle("移除附件"));
+    expect(screen.getByText(/uploading/)).not.toBeNull();
+    expect(screen.queryByTitle("Retry upload")).toBeNull();
+    fireEvent.click(screen.getByTitle("Remove attachment"));
     expect(onDelete).toHaveBeenCalledTimes(1);
   });
 
@@ -22,7 +22,7 @@ describe("UploadChip — four states of §2.4", () => {
     render(<UploadChip chip={{ ...base, status: "ok", path: "uploads/web/x.png" }} onDelete={() => {}} />);
     expect(document.querySelector(".upload-chip.ok")).not.toBeNull();
     expect(screen.getByText(/uploads\/web\/x.png/)).not.toBeNull();
-    expect(screen.queryByTitle("重试上传")).toBeNull();
+    expect(screen.queryByTitle("Retry upload")).toBeNull();
   });
 
   it("failed: red styling, error text and a working retry button", () => {
@@ -30,7 +30,7 @@ describe("UploadChip — four states of §2.4", () => {
     const { container } = render(<UploadChip chip={{ ...base, status: "failed", error: "runtime offline" }} onRetry={onRetry} onDelete={() => {}} />);
     expect(document.querySelector(".upload-chip.failed")).not.toBeNull();
     expect(screen.getByText(/runtime offline/)).not.toBeNull();
-    fireEvent.click(screen.getByTitle("重试上传"));
+    fireEvent.click(screen.getByTitle("Retry upload"));
     expect(onRetry).toHaveBeenCalledWith(expect.objectContaining({ id: "chip-1", status: "failed" }));
     expect(container.querySelector(".chip-retry")).not.toBeNull();
   });
@@ -38,9 +38,9 @@ describe("UploadChip — four states of §2.4", () => {
   it("delete stays available in every state", () => {
     const onDelete = vi.fn();
     const { rerender } = render(<UploadChip chip={{ ...base, status: "uploading" }} onDelete={onDelete} />);
-    fireEvent.click(screen.getByTitle("移除附件"));
+    fireEvent.click(screen.getByTitle("Remove attachment"));
     rerender(<UploadChip chip={{ ...base, status: "failed" }} onDelete={onDelete} />);
-    fireEvent.click(screen.getByTitle("移除附件"));
+    fireEvent.click(screen.getByTitle("Remove attachment"));
     expect(onDelete).toHaveBeenCalledTimes(2);
   });
 

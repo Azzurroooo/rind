@@ -39,7 +39,7 @@ def ask(label: str, default: str = "", secret: bool = False) -> str:
 
 
 def ask_list(label: str) -> list[str]:
-    raw = input_line(f"{label}（逗号分隔，可留空）: ").strip()
+    raw = input_line(f"{label} (comma-separated, may be empty): ").strip()
     return [item for item in raw.replace("，", ",").split(",") if item]
 
 
@@ -53,10 +53,10 @@ def confirm(label: str, default_yes: bool = True) -> bool:
 
 def pick_channels() -> list[str]:
     guides = all_guides()
-    print("\n可用渠道（回车 = Telegram + Email 两个零门槛渠道）：")
+    print("\nAvailable channels (Enter = Telegram + Email, the two zero-setup channels):")
     for index, guide in enumerate(guides, start=1):
         print(f"  {index}. {guide.emoji} {guide.label} — {guide.summary}")
-    raw = input_line("选择渠道编号（逗号分隔，如 1,4）: ").strip()
+    raw = input_line("Channel numbers (comma-separated, e.g. 1,4): ").strip()
     if not raw:
         return ["telegram", "email"]
     picked: list[str] = []

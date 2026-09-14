@@ -82,9 +82,9 @@ describe("formatBytes", () => {
 });
 
 describe("composeMessageWithAttachments (J6 path reference lines)", () => {
-  it("appends one 附件 line per uploaded path", () => {
-    expect(composeMessageWithAttachments("请看截图", ["uploads/web/a.png", "uploads/web/b.pdf"]))
-      .toBe("请看截图\n附件：uploads/web/a.png\n附件：uploads/web/b.pdf");
+  it("appends one Attachment line per uploaded path", () => {
+    expect(composeMessageWithAttachments("See the screenshot", ["uploads/web/a.png", "uploads/web/b.pdf"]))
+      .toBe("See the screenshot\nAttachment: uploads/web/a.png\nAttachment: uploads/web/b.pdf");
   });
 
   it("returns the bare text when there are no paths", () => {
@@ -93,10 +93,10 @@ describe("composeMessageWithAttachments (J6 path reference lines)", () => {
   });
 
   it("can compose an attachment-only message", () => {
-    expect(composeMessageWithAttachments("", ["uploads/web/a.png"])).toBe("附件：uploads/web/a.png");
+    expect(composeMessageWithAttachments("", ["uploads/web/a.png"])).toBe("Attachment: uploads/web/a.png");
   });
 
   it("trims trailing whitespace so the reference lines sit tight", () => {
-    expect(composeMessageWithAttachments("text\n\n", ["p"])).toBe("text\n附件：p");
+    expect(composeMessageWithAttachments("text\n\n", ["p"])).toBe("text\nAttachment: p");
   });
 });

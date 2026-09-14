@@ -145,21 +145,21 @@ def _build_skill_tool_specs(repository: SkillRepository | None) -> tuple[ToolSpe
             name="skill",
             handler=load_skill,
             description="Load a specialized Skill from the available Skill catalog when its workflow matches the current task.",
-            param_descriptions={"name": "Skill 名称，必须匹配当前可用 Skill 清单中的名称。"},
+            param_descriptions={"name": "Skill name; must match an entry in the currently available Skill catalog."},
         ),
         ToolSpec(
             name="skill_create",
             handler=create_skill,
-            description="创建格式正确的 Rind Skill。Skill 正文只会在显式加载时进入上下文。",
+            description="Create a well-formed Rind Skill. The Skill body only enters context when explicitly loaded.",
             param_descriptions={
-                "name": "Skill 名称。只能包含字母、数字、下划线和连字符。",
-                "description": "Skill 的单行摘要，用于 session Skill catalog。",
-                "body": "SKILL.md 正文指令内容。",
+                "name": "Skill name. May only contain letters, digits, underscores, and hyphens.",
+                "description": "One-line summary of the Skill, used in the session Skill catalog.",
+                "body": "Instruction content of the SKILL.md body.",
                 "scope": {
-                    "description": "写入范围。agent 仅在当前 Agent workspace 中可用。默认 project。",
+                    "description": "Write scope. agent is available only inside the current Agent workspace. Default project.",
                     "enum": ["project", "user", "agent"],
                 },
-                "overwrite": "是否覆盖已存在的 SKILL.md。默认 False。",
+                "overwrite": "Whether to overwrite an existing SKILL.md. Default False.",
             },
         ),
     )

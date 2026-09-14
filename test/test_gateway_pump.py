@@ -96,7 +96,7 @@ async def _until(predicate, timeout=2.0, message="condition not met"):
         await asyncio.sleep(0.005)
 
 
-def _message(ref, text="做件事", **overrides):
+def _message(ref, text="do a thing", **overrides):
     base = dict(channel="test", chat_id="chat", chat_type="dm", sender_id="u1", sender_name="n",
                 thread_id=None, text=text, attachments=(), message_ref=ref)
     base.update(overrides)
@@ -135,7 +135,7 @@ async def _teardown(harness, *tasks):
     await asyncio.gather(*(t for t in tasks if t is not None), return_exceptions=True)
 
 
-async def _start_turn(harness, ref="m-1", text="帮我做一件事"):
+async def _start_turn(harness, ref="m-1", text="do something for me"):
     """Deliver an inbound message; returns (prompt_task, session_id)."""
     task = asyncio.create_task(harness.pump.inbound(_message(ref, text)))
     await _until(lambda: harness.worker.prompts, message="prompt never reached worker")
@@ -185,7 +185,7 @@ def test_row2_unpaired_dm_gets_pairing_code_and_no_session(tmp_path):
 def test_row3_group_not_allowlisted_is_silently_dropped(tmp_path):
     async def scenario(tmp_path):
         harness = await _harness(tmp_path, _Clock())
-        await harness.pump.inbound(_message("m-1", chat_type="group", chat_id="evil", text="@rind 你好"))
+        await harness.pump.inbound(_message("m-1", chat_type="group", chat_id="evil", text="@rind hello"))
         assert harness.channel.sent == [] and harness.worker.created == []
         await _teardown(harness)
 
@@ -195,10 +195,10 @@ def test_row3_group_not_allowlisted_is_silently_dropped(tmp_path):
 def test_row3_group_allowlisted_needs_mention(tmp_path):
     async def scenario(tmp_path):
         harness = await _harness(tmp_path, _Clock())
-        await harness.pump.inbound(_message("m-1", chat_type="group", chat_id="good-group", text="闲聊"))
+        await harness.pump.inbound(_message("m-1", chat_type="group", chat_id="good-group", text="just chatting"))
         assert harness.channel.sent == [] and harness.worker.created == []
         task = asyncio.create_task(harness.pump.inbound(
-            _message("m-2", chat_type="group", chat_id="good-group", text="@rind 帮忙")))
+            _message("m-2", chat_type="group", chat_id="good-group", text="@rind help")))
         await _until(lambda: len(harness.worker.prompts) == 1)
         harness.worker.push_event(harness.worker.prompts[0][0], {"type": "turn_completed"})
         await _until(task.done)
@@ -214,9 +214,9 @@ def test_row3_cooldown_first_trip_notices_then_silent(tmp_path):
         task = asyncio.create_task(harness.pump.inbound(_message("m-1")))
         await _until(lambda: len(harness.worker.prompts) == 1)
         await harness.pump.inbound(_message("m-2"))  # trips the 1-per-window cooldown
-        assert any("频繁" in text for text in _texts(harness.channel))
+        assert any("too fast" in text for text in _texts(harness.channel))
         await harness.pump.inbound(_message("m-3"))  # still denied, but silent now
-        frequent = [text for text in _texts(harness.channel) if "频繁" in text]
+        frequent = [text for text in _texts(harness.channel) if "too fast" in text]
         assert len(frequent) == 1
         assert len(harness.worker.prompts) == 1  # denied messages never reach the worker
         harness.worker.push_event(harness.worker.prompts[0][0], {"type": "turn_completed"})
@@ -234,7 +234,7 @@ def test_row4_stop_cancels_active_turn(tmp_path):
         task, session_id = await _start_turn(harness)
         await harness.pump.inbound(_message("m-2", text="/stop"))
         assert harness.worker.cancels == [session_id]
-        await _until(lambda: any("已停止" in text for text in _texts(harness.channel)))
+        await _until(lambda: any("Stopped" in text for text in _texts(harness.channel)))
         await _until(task.done)
         assert harness.pump._turns == {}
         await _teardown(harness, task)
@@ -254,8 +254,8 @@ def test_row4_stop_without_active_turn_is_ignored(tmp_path):
 
 # --- inbound row 5: pending question digits ------------------------------------
 
-def _question_event(options=("甲", "乙")):
-    return {"type": "user_question_requested", "question": "选一个：", "tool_call_id": "q-1",
+def _question_event(options=("A", "B")):
+    return {"type": "user_question_requested", "question": "Pick one:", "tool_call_id": "q-1",
             "options": [{"label": label} for label in options]}
 
 
@@ -264,9 +264,9 @@ def test_row5_digit_answers_pending_question(tmp_path):
         harness = await _harness(tmp_path, _Clock())
         task, session_id = await _start_turn(harness)
         harness.worker.push_event(session_id, _question_event())
-        await _until(lambda: any("1. 甲" in text for text in _texts(harness.channel)))
+        await _until(lambda: any("1. A" in text for text in _texts(harness.channel)))
         await harness.pump.inbound(_message("m-2", text="2"))
-        assert harness.worker.answers == [(session_id, "q-1", "乙")]
+        assert harness.worker.answers == [(session_id, "q-1", "B")]
         assert harness.pump._questions == {}  # question is terminal once answered
         harness.worker.push_event(session_id, {"type": "turn_completed"})
         await _until(task.done)
@@ -300,8 +300,8 @@ def test_row6_active_turn_text_becomes_follow_up(tmp_path):
         harness = await _harness(tmp_path, _Clock())
         task, session_id = await _start_turn(harness)
         harness.worker.push_event(session_id, {"type": "turn_started"})
-        await harness.pump.inbound(_message("m-2", text="追加要求"))
-        assert harness.worker.follow_ups == [(session_id, "追加要求")]
+        await harness.pump.inbound(_message("m-2", text="one more requirement"))
+        assert harness.worker.follow_ups == [(session_id, "one more requirement")]
         assert len(harness.worker.prompts) == 1  # no second prompt
         harness.worker.push_event(session_id, {"type": "turn_completed"})
         await _until(task.done)
@@ -313,10 +313,10 @@ def test_row6_active_turn_text_becomes_follow_up(tmp_path):
 def test_row7_new_conversation_creates_session_and_prompt(tmp_path):
     async def scenario(tmp_path):
         harness = await _harness(tmp_path, _Clock())
-        task, session_id = await _start_turn(harness, text="第一件事")
+        task, session_id = await _start_turn(harness, text="first thing")
         assert harness.worker.created and harness.worker.created[0]["workspace_root"] == "/ws"
         assert harness.router.lookup("test:dm:chat").session_id == session_id
-        assert harness.worker.prompts == [(session_id, "第一件事")]
+        assert harness.worker.prompts == [(session_id, "first thing")]
         harness.worker.push_event(session_id, {"type": "turn_completed"})
         await _until(task.done)
         assert harness.pump._turns == {}  # terminal event resets the turn
@@ -343,7 +343,7 @@ def test_session_create_failure_replies_one_line(tmp_path):
         await harness.client.stop()
         harness.pump._worker = _DownWorker()
         await harness.pump.inbound(_message("m-1"))
-        assert _texts(harness.channel) == ["暂时无法创建会话，稍后再试"]
+        assert _texts(harness.channel) == ["Cannot create a session right now; try again shortly"]
         await _teardown(harness)
 
     asyncio.run(scenario(tmp_path))
@@ -356,7 +356,7 @@ def test_worker_timeout_replies_without_crashing(tmp_path):
         harness = await _harness(tmp_path, _Clock(), stall=("session/prompt",))
         harness.pump._request_timeout = 0.05
         task = asyncio.create_task(harness.pump.inbound(_message("m-1")))
-        await _until(lambda: _texts(harness.channel) == ["worker 暂时无响应，已重试排队"])
+        await _until(lambda: _texts(harness.channel) == ["Worker temporarily unresponsive; queued for retry"])
         await asyncio.wait_for(task, 2)
         assert harness.pump._turns == {}  # unconfirmed turn is rolled back
         await _teardown(harness, task)
@@ -372,7 +372,7 @@ def test_stuck_turn_is_reset_after_30_minutes(tmp_path):
         clock.advance(31 * 60)
         await harness.pump._reset_stuck_turns()
         assert harness.pump._turns == {}
-        second = asyncio.create_task(harness.pump.inbound(_message("m-2", text="再来一件事")))
+        second = asyncio.create_task(harness.pump.inbound(_message("m-2", text="one more thing")))
         await _until(lambda: len(harness.worker.prompts) == 2)  # new prompt, not a follow_up
         harness.worker.push_event(harness.worker.prompts[1][0], {"type": "turn_completed"})
         await _until(second.done)
@@ -441,7 +441,7 @@ def test_question_expiry_without_timeout_option_notifies_user(tmp_path):
         clock.advance(301)
         await harness.pump._expire_questions()
         assert harness.worker.answers == []
-        assert _texts(harness.channel)[-1] == "问题已超时"
+        assert _texts(harness.channel)[-1] == "Question expired"
         assert harness.pump._questions == {}
         harness.worker.push_event(session_id, {"type": "turn_completed"})
         await _until(task.done)
@@ -455,13 +455,13 @@ def test_question_expiry_answers_the_timeout_option(tmp_path):
         clock = _Clock()
         harness = await _harness(tmp_path, clock)
         task, session_id = await _start_turn(harness)
-        event = _question_event(options=("继续等", "超时退出"))
+        event = _question_event(options=("keep waiting", "exit on timeout"))
         harness.worker.push_event(session_id, event)
         await _until(lambda: harness.pump._questions != {})
         clock.advance(301)
         await harness.pump._expire_questions()
-        assert harness.worker.answers == [(session_id, "q-1", "超时退出")]
-        assert not any("问题已超时" in text for text in _texts(harness.channel))
+        assert harness.worker.answers == [(session_id, "q-1", "exit on timeout")]
+        assert not any("Question expired" in text for text in _texts(harness.channel))
         harness.worker.push_event(session_id, {"type": "turn_completed"})
         await _until(task.done)
         await _teardown(harness, task)
@@ -509,10 +509,10 @@ def test_user_question_renders_numbered_list_without_buttons(tmp_path):
     async def scenario(tmp_path):
         harness = await _harness(tmp_path, _Clock())
         task, session_id = await _start_turn(harness)
-        harness.worker.push_event(session_id, _question_event(("甲", "乙", "丙")))
+        harness.worker.push_event(session_id, _question_event(("A", "B", "C")))
         await _until(lambda: len(_texts(harness.channel)) == 1)
         lines = _texts(harness.channel)[0].splitlines()
-        assert lines[0] == "选一个：" and "1. 甲" in lines and "回复数字即可" in lines
+        assert lines[0] == "Pick one:" and "1. A" in lines and "Reply with a number" in lines
         question = next(iter(harness.pump._questions.values()))
         assert question.deadline == pytest.approx(1000.0 + 300.0)  # injectable clock + 300s TTL
         harness.worker.push_event(session_id, {"type": "turn_completed"})
@@ -527,10 +527,10 @@ def test_user_question_uses_native_buttons_when_supported(tmp_path):
         capabilities = ChannelCapabilities(supports_buttons=True)
         harness = await _harness(tmp_path, _Clock(), capabilities=capabilities)
         task, session_id = await _start_turn(harness)
-        harness.worker.push_event(session_id, _question_event(("甲", "乙")))
+        harness.worker.push_event(session_id, _question_event(("A", "B")))
         await _until(lambda: len(harness.channel.sent) == 1)
         payload = harness.channel.sent[0]
-        assert payload.choices == ("甲", "乙") and payload.text == "选一个："
+        assert payload.choices == ("A", "B") and payload.text == "Pick one:"
         harness.worker.push_event(session_id, {"type": "turn_completed"})
         await _until(task.done)
         await _teardown(harness, task)
@@ -542,15 +542,15 @@ def test_assistant_message_chunked_with_title_prefix(tmp_path):
     async def scenario(tmp_path):
         capabilities = ChannelCapabilities(max_text_length=300)  # cap 100 after reserve
         harness = await _harness(tmp_path, _Clock(), capabilities=capabilities)
-        task, session_id = await _start_turn(harness, text="修复任务\n请执行")
-        body = "啊" * 250
+        task, session_id = await _start_turn(harness, text="fix the task\nplease run")
+        body = "a" * 250
         harness.worker.push_event(session_id, {"type": "assistant_message_completed", "content": body})
         harness.worker.push_event(session_id, {"type": "turn_completed"})  # settles all sends
         await _until(task.done)
         pieces = [payload.text for payload in harness.channel.sent]
         assert len(pieces) == 3  # 250 codepoints → 100 + 100 + 50 under cap 100
-        assert pieces[0] == "修复任务\n" + "啊" * 100  # first piece carries the task title
-        assert "".join(pieces) == "修复任务\n" + body
+        assert pieces[0] == "fix the task\n" + "a" * 100  # first piece carries the task title
+        assert "".join(pieces) == "fix the task\n" + body
         await _teardown(harness, task)
 
     asyncio.run(scenario(tmp_path))
@@ -561,11 +561,11 @@ def test_assistant_message_degrades_markdown_for_plain_channels(tmp_path):
         harness = await _harness(tmp_path, _Clock())  # default capabilities: markdown "none"
         task, session_id = await _start_turn(harness)
         harness.worker.push_event(
-            session_id, {"type": "assistant_message_completed", "content": "**重点** 和 [链接](https://x.y)"})
+            session_id, {"type": "assistant_message_completed", "content": "**bold** and [link](https://x.y)"})
         harness.worker.push_event(session_id, {"type": "turn_completed"})
         await _until(task.done)
         text = _texts(harness.channel)[0]
-        assert "重点" in text and "**" not in text and "](https" not in text
+        assert "bold" in text and "**" not in text and "](https" not in text
         await _teardown(harness, task)
 
     asyncio.run(scenario(tmp_path))
@@ -603,9 +603,9 @@ def test_turn_failed_sends_one_line_with_short_session_id(tmp_path):
     async def scenario(tmp_path):
         harness = await _harness(tmp_path, _Clock())
         task, session_id = await _start_turn(harness)
-        harness.worker.push_event(session_id, {"type": "turn_failed", "error": "模型\n连接 中断"})
+        harness.worker.push_event(session_id, {"type": "turn_failed", "error": "model\nconnection dropped"})
         await _until(lambda: len(harness.channel.sent) == 1)
-        expected = f"⚠️ 任务失败（模型 连接 中断）。可回复 /status 查看状态或重试。（session {session_id[:8]}）"
+        expected = f"⚠️ Task failed (model connection dropped). Reply /status to check state, or retry. (session {session_id[:8]})"
         assert _texts(harness.channel)[0] == expected
         assert harness.pump._turns == {}
         await _until(task.done)  # terminal event also unblocks the pending prompt
@@ -619,7 +619,7 @@ def test_turn_cancelled_replies_stopped(tmp_path):
         harness = await _harness(tmp_path, _Clock())
         task, session_id = await _start_turn(harness)
         harness.worker.push_event(session_id, {"type": "turn_cancelled", "reason": "user"})
-        await _until(lambda: "已停止" in _texts(harness.channel))
+        await _until(lambda: "Stopped" in _texts(harness.channel))
         await _until(task.done)
         await _teardown(harness, task)
 
@@ -633,7 +633,7 @@ def test_every_durable_event_advances_the_session_cursor(tmp_path):
         harness = await _harness(tmp_path, _Clock())
         task, session_id = await _start_turn(harness)
         for event in ({"type": "turn_started"},
-                      {"type": "assistant_message_completed", "content": "进度"},
+                      {"type": "assistant_message_completed", "content": "progress"},
                       {"type": "tool_requested", "tool": "read"},
                       {"type": "tool_result", "tool": "read"}):
             harness.worker.push_event(session_id, event)
@@ -641,7 +641,7 @@ def test_every_durable_event_advances_the_session_cursor(tmp_path):
         await _until(task.done)
         key = "test:dm:chat"
         assert harness.router.cursor_for(key) == 5  # all durable events, tool ones included
-        second = asyncio.create_task(harness.pump.inbound(_message("m-2", text="第二轮")))
+        second = asyncio.create_task(harness.pump.inbound(_message("m-2", text="second round")))
         await _until(lambda: len(harness.worker.prompts) == 2)
         harness.worker.push_event(session_id, {"type": "turn_completed"})
         await _until(lambda: harness.router.cursor_for(key) == 6)

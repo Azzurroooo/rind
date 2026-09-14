@@ -1,8 +1,8 @@
-# Rind 主流程与运行时数据流
+# Rind Main Flow and Runtime Data Flow
 
-本文描述当前两个产品入口如何共享 Runtime Package。`frontend-cli` 和 Desktop 都是 Surface；Python 入口只负责启动无头 Runtime Server。
+This document describes how the two current product entry points share the Runtime Package. `frontend-cli` and Desktop are both surfaces; the Python entry point only starts the headless Runtime Server.
 
-## 1. 入口与组合根
+## 1. Entry points and composition root
 
 ```mermaid
 flowchart LR
@@ -15,7 +15,7 @@ flowchart LR
     Core --> Infrastructure["agent/infrastructure"]
 ```
 
-`main.py --version` 和 `main.py --help` 只提供 Runtime Package 的元信息；实际运行命令是：
+`main.py --version` and `main.py --help` only report Runtime Package metadata; the actual run command is:
 
 ```bash
 python main.py app-server --stdio --cwd <workspace>
@@ -27,41 +27,41 @@ For a long-lived remote worker, start the WebSocket transport instead:
 python main.py app-server --web --host 127.0.0.1 --port 8765 --cwd <workspace>
 ```
 
-`agent/runtime/server/app_server.py` 校验工作区、加载共享 settings、调用 `build_agent_container()`，然后把 runtime 和 session store 交给 `StdioRuntimeServer`。Server 和 core 位于同一个 Runtime Package 内，不存在 server 到 runtime 的额外 RPC。
+`agent/runtime/server/app_server.py` validates the workspace, loads shared settings, calls `build_agent_container()`, and hands the runtime and session store to `StdioRuntimeServer`. Server and core live in the same Runtime Package; there is no extra RPC from server to runtime.
 
-## 2. Surface 启动
+## 2. Surface startup
 
 ### frontend-cli
 
-`frontend-cli/bin/rind.js` 创建 `runtime-client`，源代码模式启动 `python main.py app-server --stdio`，安装包模式启动 `rind-runtime`。`frontend-web` 连接 `--web` 暴露的 WebSocket Worker；浏览器断开不会关闭 Worker。Surface 进程负责输入编辑、菜单、状态和文本渲染；Python 进程只负责协议与 Agent 执行。
+`frontend-cli/bin/rind.js` creates the `runtime-client`; source mode spawns `python main.py app-server --stdio`, installed-package mode spawns `rind-runtime`. `frontend-web` connects to the WebSocket worker exposed by `--web`; a browser disconnecting does not shut the worker down. The surface process owns input editing, menus, state, and text rendering; the Python process owns only the protocol and agent execution.
 
 ### Desktop
 
-Electron 主进程的 `desktop/src/main/runtime.ts` 为每个工作区维护一个 Runtime worker，IPC 只允许 `desktop/src/preload/types.ts` 中声明的方法。Renderer 通过 preload 调用统一请求接口，不直接访问 Python 或 session 文件。
+The Electron main process's `desktop/src/main/runtime.ts` keeps one Runtime worker per workspace, and IPC allows only the methods declared in `desktop/src/preload/types.ts`. The renderer calls the unified request interface through the preload and never touches the Python process or session files directly.
 
-## 3. JSONL 协议
+## 3. JSONL protocol
 
-请求和响应使用 `request_id` 匹配；事件是独立消息，不占用响应通道。所有请求携带 `kind: "request"`：
+Requests and responses are matched by `request_id`; events are standalone messages that do not occupy the response channel. All requests carry `kind: "request"`:
 
 ```json
 {"kind":"request","request_id":1,"method":"session/prompt","params":{"input":"inspect the project"}}
 ```
 
-初始化返回 `protocol_version`、`capabilities`、`methods`、当前 session 和可用 `commands`。核心方法包括：
+Initialization returns `protocol_version`, `capabilities`, `methods`, the current session, and available `commands`. Core methods:
 
-| 方法 | 作用 |
+| Method | Purpose |
 | --- | --- |
-| `initialize`, `shutdown` | 生命周期 |
-| `session/new`, `session/list`, `session/switch`, `session/replay` | session 管理 |
-| `session/prompt`, `session/cancel` | turn 输入与取消 |
-| `model/list`, `model/set` | 模型能力 |
-| `session/update` | 统一事件通知 |
+| `initialize`, `shutdown` | Lifecycle |
+| `session/new`, `session/list`, `session/switch`, `session/replay` | Session management |
+| `session/prompt`, `session/cancel` | Turn input and cancellation |
+| `model/list`, `model/set` | Model capabilities |
+| `session/update` | Unified event notification |
 
-Rind 扩展使用明确的 `rind/` 命名空间，例如 `rind/session/steer`、`rind/session/follow_up`、`rind/session/compact`、`rind/command/execute`、`rind/goal/*` 和 `rind/background/*`。只有在初始化能力声明中出现的扩展才可调用。
+Rind extensions use an explicit `rind/` namespace, for example `rind/session/steer`, `rind/session/follow_up`, `rind/session/compact`, `rind/command/execute`, `rind/goal/*`, and `rind/background/*`. Only extensions present in the initialization capability declaration may be called.
 
-事件 envelope 的公共字段是 `kind`、`method: "session/update"`、单调递增 `sequence`、`durability`、`session_id`、`turn_id` 和嵌套的 domain event。事件类型位于 `event.type`，不再重复放在外层。
+The public fields of an event envelope are `kind`, `method: "session/update"`, a monotonically increasing `sequence`, `durability`, `session_id`, `turn_id`, and the nested domain event. The event type lives at `event.type` and is no longer duplicated at the outer level.
 
-## 4. 一次 prompt
+## 4. One prompt
 
 ```mermaid
 sequenceDiagram
@@ -82,9 +82,9 @@ sequenceDiagram
     Server-->>Surface: response(session_id, turn_id)
 ```
 
-`session/cancel` 取消当前 token；`rind/session/steer` 和 `rind/session/follow_up` 分别进入当前 turn 的控制队列和后续 turn 队列。两类队列按 FIFO 投递；`rind/session/unsteer` 与 `rind/session/dequeue_follow_up` 不带 `input_id` 时分别以 LIFO 取回最新输入，带 `input_id` 时按 ID 取回指定输入。`rind/session/compact`、模型、session、goal 和 background 请求不绕过 Server 直接触碰 core。
+`session/cancel` cancels the current token; `rind/session/steer` and `rind/session/follow_up` enter the current turn's steering queue and the next-turn queue respectively. Both queues deliver FIFO; without an `input_id`, `rind/session/unsteer` and `rind/session/dequeue_follow_up` each retrieve the newest input LIFO, and with an `input_id` they retrieve the specified input by ID. `rind/session/compact`, model, session, goal, and background requests never bypass the Server to touch core directly.
 
-## 5. 代码阅读顺序
+## 5. Code reading order
 
 ```text
 main.py

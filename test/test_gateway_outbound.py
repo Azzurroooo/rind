@@ -246,10 +246,10 @@ def test_send_delivers_payload_through_the_registry():
                 recorded.append((target.chat_id, payload.text))
 
         out = Outbound({"test": _SendChannel()})
-        await out.send("test", SendTarget(chat_id="c1"), OutboundPayload(text="你好"))
-        await out.reply(POSITION, "一条回复")
-        await out.reply(None, "无位置")  # dropped quietly
-        await out.send("missing", SendTarget(chat_id="c1"), OutboundPayload(text="丢弃"))
-        assert recorded == [("c1", "你好"), ("c1", "一条回复")]
+        await out.send("test", SendTarget(chat_id="c1"), OutboundPayload(text="hello"))
+        await out.reply(POSITION, "a reply")
+        await out.reply(None, "no position")  # dropped quietly
+        await out.send("missing", SendTarget(chat_id="c1"), OutboundPayload(text="dropped"))
+        assert recorded == [("c1", "hello"), ("c1", "a reply")]
 
     asyncio.run(scenario())

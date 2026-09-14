@@ -336,7 +336,7 @@ describe("conversation reducer — queued inputs (audit #1)", () => {
     expect(state.entries.at(-1)).toMatchObject({ role: "user", content: "hi" });
   });
 
-  it("unqueue removes the chip (取回) and requeue flips the mode in place (转向)", () => {
+  it("unqueue removes the chip (retrieve) and requeue flips the mode in place (steer)", () => {
     let state = reduceConversation(emptyConversationState(), queueAction);
     state = reduceConversation(state, { kind: "unqueue", inputId: "in-1" });
     expect(state.queued).toEqual([]);
@@ -415,7 +415,7 @@ describe("conversation reducer — transcript cap (audit #5)", () => {
 describe("conversation reducer — turn-scoped change summary (audit #14)", () => {
   const editResult = JSON.stringify({ ok: true, meta: { files: [{ path: "src/app.py", added_lines: 3, removed_lines: 1 }] } });
 
-  it("a finished turn with file mutations records 改动 stats and the first diff tool id", () => {
+  it("a finished turn with file mutations records change stats and the first diff tool id", () => {
     const state = replay([
       event(1, "durable", { type: "turn_started", turn_id: "t1" }),
       event(2, "durable", { type: "tool_requested", turn_id: "t1", tool_call_id: "c1", tool_name: "edit_file", args_preview: "{}" }),

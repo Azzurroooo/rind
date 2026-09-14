@@ -59,5 +59,5 @@ export function composeMessageWithAttachments(text: string, paths: string[]) {
   const base = String(text || "").replace(/\s+$/, "")
   const clean = (Array.isArray(paths) ? paths : []).map((path) => String(path || "").trim()).filter(Boolean)
   if (!clean.length) return base
-  return `${base ? `${base}\n` : ""}${clean.map((path) => `附件：${path}`).join("\n")}`
+  return `${base ? `${base}\n` : ""}${clean.map((path) => `Attachment: ${path}`).join("\n")}`
 }

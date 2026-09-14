@@ -40,22 +40,22 @@ def _specs(bash_handler, bash_output_handler) -> tuple[ToolSpec, ...]:
         ToolSpec(
             name="bash",
             handler=bash_handler,
-            description="执行 Shell 命令。每次调用从当前项目工作目录启动；cd 只在本次命令内生效，如需切换目录后继续执行请使用 cd <dir> && <command>。返回 running、completed、failed、cancelled 或 timed_out 状态。run_in_background=false 时前台运行直到完成或超时；run_in_background=true 时先等待 wait_ms，短任务直接返回结果，仍在运行才返回 bg_id 供 bash_output 后续等待。",
+            description="Run a shell command. Each call starts in the current project working directory; cd only applies within that command — use `cd <dir> && <command>` to run in another directory. Returns running, completed, failed, cancelled, or timed_out. With run_in_background=false the command runs in the foreground until completion or timeout; with run_in_background=true it first waits wait_ms, returns the result directly for short tasks, and only returns a bg_id for later bash_output polling while still running.",
             param_descriptions={
-                "command": "要执行的命令",
-                "run_in_background": "允许命令在等待窗口后挂起为后台任务。默认 False。",
-                "wait_ms": "仅在 run_in_background=true 时生效：后台启动后先等待新输出或完成的毫秒数，默认 10000，范围 1000-60000。前台执行会忽略此参数。",
+                "command": "The command to execute",
+                "run_in_background": "Allow the command to remain a background task after the wait window. Default False.",
+                "wait_ms": "Only effective with run_in_background=true: milliseconds to wait for new output or completion after background start, default 10000, range 1000-60000. Ignored by foreground execution.",
             },
         ),
         ToolSpec(
             name="bash_output",
             handler=bash_output_handler,
-            description="阻塞等待并读取后台进程的增量输出，或终止整个进程树。后台进程运行时始终等待到进程完成或 wait_ms 到期，再一次性返回等待期间累积的输出；no_new_output=true 表示本次没有可返回的新信息，应按 suggested_next_wait_ms 再查。若返回 RepeatedEmptyPoll，应停止继续轮询并把 bg_id 告诉用户，提示稍后可继续查看。",
+            description="Block on and read incremental output of a background process, or kill the whole process tree. While the process runs, always wait until it completes or wait_ms expires, then return the output accumulated during the wait; no_new_output=true means there is nothing new to return and you should poll again after suggested_next_wait_ms. If it returns RepeatedEmptyPoll, stop polling and tell the user the bg_id so they can check again later.",
             param_descriptions={
-                "bg_id": "后台进程 ID（bash 返回的 bg_id）。",
-                "kill": "设为 true 可终止该进程。默认 False（仅读取输出）。",
-                "wait_ms": "阻塞等待新输出或完成的最长毫秒数，默认 15000，范围 5000-300000。连续无输出时建议等待 120000 或 300000。",
-                "max_output_chars": "单次返回 stdout/stderr 增量的最大字符数，默认 20000，最大 40000。",
+                "bg_id": "Background process ID (the bg_id returned by bash).",
+                "kill": "Set to true to terminate the process. Default False (read output only).",
+                "wait_ms": "Maximum milliseconds to block waiting for new output or completion, default 15000, range 5000-300000. When output is silent, waiting 120000 or 300000 is recommended.",
+                "max_output_chars": "Maximum characters of stdout/stderr delta returned per call, default 20000, maximum 40000.",
             },
         ),
     )

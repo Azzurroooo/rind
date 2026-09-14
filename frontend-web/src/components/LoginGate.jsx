@@ -4,7 +4,7 @@ import { ArrowRight, KeyRound, LoaderCircle } from "lucide-react";
 // Full-screen single login card (web-ui.md §1, J1).
 // Errors render inline in red; the token input is preserved; no redirects, no
 // modals, and the token never leaves this tab (sessionStorage only).
-export function LoginGate({ onSubmit, busy = false, error = "", initialToken = "", description = "粘贴 rind worker 的访问令牌以建立连接。令牌只保存在本标签页会话中，关闭页面即清除。" }) {
+export function LoginGate({ onSubmit, busy = false, error = "", initialToken = "", description = "Paste the rind worker access token to connect. The token is stored only in this tab's session and cleared when the page closes." }) {
   const [token, setToken] = useState(initialToken);
 
   async function handleSubmit(event) {
@@ -24,7 +24,7 @@ export function LoginGate({ onSubmit, busy = false, error = "", initialToken = "
             <div className="brand-subtitle">remote console</div>
           </div>
         </div>
-        <label className="login-label" htmlFor="rind-login-token">访问令牌</label>
+        <label className="login-label" htmlFor="rind-login-token">Access token</label>
         <div className="login-input-row">
           <KeyRound size={15} />
           <input
@@ -37,7 +37,7 @@ export function LoginGate({ onSubmit, busy = false, error = "", initialToken = "
             disabled={busy}
             onChange={(event) => setToken(event.target.value)}
           />
-          <button type="submit" className="login-submit" title="连接 worker" disabled={busy || !token.trim()}>
+          <button type="submit" className="login-submit" title="Connect to worker" disabled={busy || !token.trim()}>
             {busy ? <LoaderCircle className="spin" size={15} /> : <ArrowRight size={15} />}
           </button>
         </div>

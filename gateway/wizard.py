@@ -99,61 +99,61 @@ def _guide_walk(guide: ChannelGuide, env: dict[str, str]) -> tuple[dict[str, str
     for step in guide.setup_steps:
         print(f"  · {step}")
     if guide.scopes:
-        print("  精确权限/事件代码（在平台对应搜索框里逐个粘贴，唯一确定）：")
+        print("  Exact permission/event codes (paste each into the platform's search box to pin them down):")
         for code in guide.scopes:
             print(f"      {code}")
     answers: dict[str, str] = {}
     env_prefix = f"RIND_GW_{guide.id.upper()}_"
     for spec in guide.fields:
         env_value = env.get(env_prefix + spec.name.upper(), "")
-        label = f"{spec.label}" + (f"（{spec.help}）" if spec.help else "")
+        label = f"{spec.label}" + (f" ({spec.help})" if spec.help else "")
         answers[spec.name] = _ask(label, spec.default, secret=spec.secret) or env_value
-    print("  allow_from / group_allow 现在可以留空——陌生账号首次发消息会收到配对码，")
-    print("  在服务器执行 `gateway approve <码>` 后即自动进入白名单。")
-    allow = _ask_list("allow_from 白名单")
-    group = _ask_list("group_allow 群白名单")
+    print("  allow_from / group_allow can stay empty — unknown accounts get a pairing code on their first message,")
+    print("  and `gateway approve <code>` on the server adds them to the allowlist automatically.")
+    allow = _ask_list("allow_from allowlist")
+    group = _ask_list("group_allow group allowlist")
     probe_detail = ""
     if guide.probe and answers:
-        if _confirm("立即验证凭证（会访问平台 API）？"):
+        if _confirm("Verify credentials now (calls the platform API)?"):
             result = guide.probe({key: value for key, value in answers.items() if value})
             probe_detail = result.detail
             mark = "✔" if result.ok else "✘"
             print(f"  {mark} {probe_detail}")
-            # 探活失败（常见于直连被墙的超时）：给一次改代理重试的机会。
+            # Probe failure (often a direct-connection timeout on blocked networks): offer a proxy retry.
             retries = 0
-            while not result.ok and retries < 2 and _confirm("重新填写『代理地址』并再次验证？", default_yes=False):
-                answers["proxy"] = _ask("代理地址（如 http://127.0.0.1:7890）")
+            while not result.ok and retries < 2 and _confirm("Re-enter the proxy URL and verify again?", default_yes=False):
+                answers["proxy"] = _ask("Proxy URL (e.g. http://127.0.0.1:7890)")
                 result = guide.probe({key: value for key, value in answers.items() if value})
                 probe_detail = result.detail
                 mark = "✔" if result.ok else "✘"
                 print(f"  {mark} {probe_detail}")
                 retries += 1
             if not result.ok:
-                print("     可稍后运行 `python main.py gateway doctor --probe` 重新体检。")
+                print("     You can re-run the health check later with `python main.py gateway doctor --probe`.")
     if guide.discover_senders:
         import re
 
         bot_match = re.search(r"@[\w]+", probe_detail)
-        where = f"在 Telegram 里给你的 bot {bot_match.group(0)} 发一条消息" if bot_match else "在 Telegram 里找到你的 bot（BotFather 给的 username）并发一条消息"
-        if _confirm(f"现在抓取你的账号 ID？（60 秒内{where}）", default_yes=False):
-            print(f"  等待消息中——请在 Telegram 里给 {bot_match.group(0) if bot_match else '你的 bot'} 发送任意消息…")
+        where = f"send your bot {bot_match.group(0)} a message on Telegram" if bot_match else "find your bot on Telegram (the username BotFather gave you) and send it a message"
+        if _confirm(f"Capture your account ID now? (within 60 seconds, {where})", default_yes=False):
+            print(f"  Waiting for a message — send anything to {bot_match.group(0) if bot_match else 'your bot'} on Telegram…")
             senders = guide.discover_senders({key: value for key, value in answers.items() if value}, 60.0)
             if senders:
-                print("  发现以下发送者：")
+                print("  Discovered senders:")
                 for index, sender in enumerate(senders, start=1):
                     print(f"    {index}. {sender}")
-                picked = _input("把哪些加入 allow_from（编号，回车=全部，0=不加）: ").strip()
+                picked = _input("Add which to allow_from (numbers, Enter = all, 0 = none): ").strip()
                 if picked != "0":
                     ids = [senders[int(token) - 1].split(" ")[0] for token in picked.replace("，", ",").split(",") if token.strip().isdigit() and 0 < int(token) <= len(senders)] if picked else [sender.split(" ")[0] for sender in senders]
                     allow = allow or ids
             else:
-                print("  60 秒内没有收到消息。稍后直接给 bot 发消息会收到配对码卡（含你的 ID），")
-                print("  用 `gateway approve <码>` 批准即可，无需重跑向导。")
+                print("  No message within 60 seconds. Messaging the bot later returns a pairing card (with your ID);")
+                print("  approve it with `gateway approve <code>` — no need to rerun the wizard.")
     return answers, {"allow_from": allow, "group_allow": group}
 
 
 def _default_workspace() -> str:
-    """运行数据绝不默认写进 Rind 工程目录——回退到用户主目录下的独立工作区。"""
+    """Runtime data never defaults into the Rind source tree — fall back to a dedicated workspace under the user's home."""
     cwd = Path(os.getcwd())
     from .doctor import _looks_like_source_dir
 
@@ -167,11 +167,11 @@ def _resolve_workspace(raw: str | None) -> str:
 
     candidate = Path(raw or _default_workspace()).expanduser()
     if _looks_like_source_dir(candidate):
-        print("  ✘ 这是 Rind 的工程目录——运行数据（state/pairing/uploads）不能放进源码树。")
+        print("  ✘ This is the Rind source tree — runtime data (state/pairing/uploads) must not live here.")
         fallback = Path.home() / "rind-workspace"
-        value = Path(_input(f"请换一个工作目录（回车 = {fallback}）: ").strip() or str(fallback)).expanduser()
+        value = Path(_input(f"Pick another workspace directory (Enter = {fallback}): ").strip() or str(fallback)).expanduser()
         if _looks_like_source_dir(value):
-            print("  ✘ 仍是工程目录。已取消。")
+            print("  ✘ Still the source tree. Cancelled.")
             raise WizardCancelled()
         candidate = value
     candidate.mkdir(parents=True, exist_ok=True)
@@ -181,13 +181,13 @@ def _resolve_workspace(raw: str | None) -> str:
 def run_init(args) -> int:
     env = dict(os.environ)
     if args.yes:
-        # 一键模式：全程零交互——渠道列表、字段、连接信息全部来自参数与环境变量。
+        # One-shot mode: fully non-interactive — channels, fields, and connection info all come from args and env.
         selected = [token.strip() for token in args.channel.split(",") if guide_for(token.strip())]
         unknown = [token.strip() for token in args.channel.split(",") if not guide_for(token.strip())]
         if unknown:
-            print(f"未知渠道已忽略: {', '.join(unknown)}", file=sys.stderr)
+            print(f"Unknown channels ignored: {', '.join(unknown)}", file=sys.stderr)
         if not selected:
-            print("--channel 缺少有效渠道。", file=sys.stderr)
+            print("--channel has no valid channels.", file=sys.stderr)
             return 2
         worker = args.worker_url or env.get("RIND_GW_WORKER") or DEFAULT_WORKER
         worker_token = env.get("RIND_SERVER_TOKEN", "")
@@ -200,46 +200,46 @@ def run_init(args) -> int:
             answers[guide.id] = collected["answers"]
             lists[guide.id] = {key: collected[key] for key in ("allow_from", "group_allow")}
             if missing:
-                print(f"✘ {guide.label} 缺少必需字段（环境变量）: {', '.join(missing)}", file=sys.stderr)
+                print(f"✘ {guide.label} is missing required fields (environment variables): {', '.join(missing)}", file=sys.stderr)
                 return 2
         from .doctor import ensure_channel_sdks
         guides, auto_install = ensure_channel_sdks(guides, interactive=False)
         if not guides:
-            print("没有可启动的渠道。", file=sys.stderr)
+            print("No channels available to start.", file=sys.stderr)
             return 2
         return _finish(args, selected, answers, lists, worker, worker_token, workspace, confirm=False, auto_install_sdk=auto_install)
 
-    print("Rind 网关配置向导 —— 一步步把 IM 渠道接到你的 worker（全程约 2 分钟）")
+    print("Rind gateway configuration wizard — connect IM channels to your worker step by step (about 2 minutes)")
     try:
         if args.channel:
             selected = [token.strip() for token in args.channel.split(",") if guide_for(token.strip())]
             unknown = [token.strip() for token in args.channel.split(",") if not guide_for(token.strip())]
             if unknown:
-                print(f"未知渠道已忽略: {', '.join(unknown)}", file=sys.stderr)
+                print(f"Unknown channels ignored: {', '.join(unknown)}", file=sys.stderr)
             if not selected:
-                print("没有可用的渠道。", file=sys.stderr)
+                print("No usable channels.", file=sys.stderr)
                 return 2
         else:
             selected = _pick_channels()
         worker_token = os.environ.get("RIND_SERVER_TOKEN", "")
-        worker = _ask("Worker 地址", args.worker_url or DEFAULT_WORKER)
-        workspace = _resolve_workspace(_ask("工作目录（网关会话的根目录，绝对路径）", args.workspace or _default_workspace()))
+        worker = _ask("Worker URL", args.worker_url or DEFAULT_WORKER)
+        workspace = _resolve_workspace(_ask("Workspace directory (root for gateway sessions, absolute path)", args.workspace or _default_workspace()))
         if not worker_token:
-            worker_token = _ask("Worker Token（RIND_SERVER_TOKEN 的值，可留空）", secret=True)
+            worker_token = _ask("Worker Token (value of RIND_SERVER_TOKEN, optional)", secret=True)
 
         guides = [guide_for(channel_id) for channel_id in selected]
         from .doctor import ensure_channel_sdks
 
         guides, auto_install = ensure_channel_sdks(guides, interactive=True)
         if not guides:
-            print("没有可启动的渠道。", file=sys.stderr)
+            print("No channels available to start.", file=sys.stderr)
             return 2
         answers = {}
         lists = {}
         for guide in guides:
             answers[guide.id], lists[guide.id] = _guide_walk(guide, env)
     except WizardCancelled:
-        print("\n已取消（配置未写入）。")
+        print("\nCancelled (nothing written).")
         return 1
     return _finish(args, selected, answers, lists, worker, worker_token, workspace, confirm=True, auto_install_sdk=auto_install)
 
@@ -251,31 +251,31 @@ def _finish(args, selected, answers, lists, worker, worker_token, workspace, *, 
         auto_install_sdk=auto_install_sdk,
     )
     text = render_yaml(data)
-    print("\n—— 生成的 gateway.yaml ——")
+    print("\n—— Generated gateway.yaml ——")
     print(text)
     target = config_path_for(str(workspace))
-    if confirm and not _confirm(f"写入 {target}？"):
-        print("已取消（配置未写入）。")
+    if confirm and not _confirm(f"Write to {target}?"):
+        print("Cancelled (nothing written).")
         return 1
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text(text, encoding="utf-8")
-    print(f"\n✔ 已写入 {target}")
+    print(f"\n✔ Written to {target}")
 
-    # 收尾包装：体检和启动由向导接管——用户不需要抄任何命令。
+    # Wrap-up: the wizard owns the health check and startup — the user never copies commands.
     from .doctor import run_checks
 
-    print("\n—— 自动体检 ——")
+    print("\n—— Health check ——")
     for check in run_checks(target, Path(workspace)):
         mark = "✔" if check.ok is True else ("⚠" if check.ok is None else "✘")
-        print(f"  {mark} {check.name}：{check.detail}")
+        print(f"  {mark} {check.name}: {check.detail}")
 
-    print("\n下一步：启动网关开始对话。")
+    print("\nNext: start the gateway to begin chatting.")
     print(f"  python main.py gateway --config \"{target}\"")
-    print("  （加渠道/换渠道：重新运行 python main.py gateway init）")
+    print("  (add/change channels: rerun python main.py gateway init)")
 
-    # 启动由向导接管：交互式终端默认直接启动（EOF/管道安静跳过——自动化友好）。
+    # Startup owned by the wizard: interactive terminals launch by default (EOF/pipe skips quietly — automation-friendly).
     try:
-        start_now = _confirm("立即启动网关？（Ctrl+C 停止）", default_yes=True)
+        start_now = _confirm("Start the gateway now? (Ctrl+C to stop)", default_yes=True)
     except WizardCancelled:
         start_now = False
     if not start_now:
@@ -289,7 +289,7 @@ def _finish(args, selected, answers, lists, worker, worker_token, workspace, *, 
     try:
         return asyncio.run(_run(config, runtime_dir, PairingStore(runtime_dir / "pairing.json")))
     except KeyboardInterrupt:
-        print("\n网关已停止。")
+        print("\nGateway stopped.")
         return 0
 
 

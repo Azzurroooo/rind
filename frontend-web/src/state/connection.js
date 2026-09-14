@@ -4,9 +4,9 @@
 //   login        → LoginGate card, app hidden
 //   connecting   → renders NOTHING (transitional, e.g. handshake in flight)
 //   online       → renders NOTHING (contract: online shows no element)
-//   reconnecting → 2px top strip + "重连中"
-//   syncing      → strip + "同步中…（N 条）", N counts down; fades out 800ms after done
-//   offline      → strip + "已断开" + retry button (after >= 3 failed reconnect attempts)
+//   reconnecting → 2px top strip + "Reconnecting"
+//   syncing      → strip + "Syncing… (N items)", N counts down; fades out 800ms after done
+//   offline      → strip + "Disconnected" + retry button (after >= 3 failed reconnect attempts)
 //
 // Invariants that must hold in every phase (enforced by construction):
 //   - no modal is ever opened;

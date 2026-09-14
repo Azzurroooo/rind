@@ -60,9 +60,9 @@ describe("notification gating (web-ui.md §5: only hidden tab + granted permissi
   it("shows a notification when hidden + granted, and focusing the click closes it", () => {
     const Fake = installFakeNotification("granted");
     const focusSpy = vi.spyOn(window, "focus").mockImplementation(() => {});
-    expect(showNotification({ title: "Rind 回复完成", body: "first line" })).toBe(true);
+    expect(showNotification({ title: "Rind reply ready", body: "first line" })).toBe(true);
     expect(Fake.created).toHaveLength(1);
-    expect(Fake.created[0].title).toBe("Rind 回复完成");
+    expect(Fake.created[0].title).toBe("Rind reply ready");
 
     Fake.created[0].onclick();
     expect(focusSpy).toHaveBeenCalledTimes(1);

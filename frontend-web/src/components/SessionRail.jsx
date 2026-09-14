@@ -10,7 +10,7 @@ import { sessionIdOf } from "../methods.js";
 // footer, and the read-only workspace file tree panel.
 //
 // Search + pagination (audit #9): the search box filters by title
-// client-side; "加载更多" asks App for the next page of the session list
+// client-side; "Load more" asks App for the next page of the session list
 // (server has no offset — App re-requests with a larger limit). Delete keeps
 // its inline confirm.
 export function SessionRail({
@@ -54,7 +54,7 @@ export function SessionRail({
       await onDelete?.(id);
       setDeleteError((current) => ({ ...current, [id]: "" }));
     } catch (error) {
-      setDeleteError((current) => ({ ...current, [id]: error instanceof Error ? error.message : String(error || "删除失败") }));
+      setDeleteError((current) => ({ ...current, [id]: error instanceof Error ? error.message : String(error || "Delete failed") }));
     } finally {
       setConfirmingId((current) => (current === id ? "" : current));
     }
@@ -82,10 +82,10 @@ export function SessionRail({
           id="rail-search-input"
           value={search}
           onChange={(event) => setSearch(event.target.value)}
-          placeholder="搜索会话标题…"
-          aria-label="搜索会话"
+          placeholder="Search session titles…"
+          aria-label="Search sessions"
         />
-        {search && <button type="button" className="session-search-clear" title="清除搜索" onClick={() => setSearch("")}>×</button>}
+        {search && <button type="button" className="session-search-clear" title="Clear search" onClick={() => setSearch("")}>×</button>}
       </div>
       {loading ? <div className="rail-empty"><LoaderCircle className="spin" size={16} /> Loading sessions</div> : visibleSessions.length ? (
         <nav className="session-list" aria-label="Sessions">
@@ -95,37 +95,37 @@ export function SessionRail({
             const unread = !current && unreadIds?.has?.(id);
             return (
               <div key={id} className={`session-item ${current ? "selected" : ""}`} data-session-id={id}>
-                {unread && <span className="session-unread" title="有新动态" aria-label="未读" />}
+                {unread && <span className="session-unread" title="New activity" aria-label="Unread" />}
                 <button className="session-main" onClick={() => onSelect(id)}>
                   <MessageSquareText size={16} />
                   <span className="session-copy"><strong>{session.title || session.preview || "Untitled session"}</strong><small>{session.updated_at || id}</small></span>
                   {current && <ChevronRight size={15} className="selected-arrow" />}
                 </button>
                 {current ? (
-                  <button className="icon-button subtle session-delete" title="当前会话不可删除" disabled><Trash2 size={14} /></button>
+                  <button className="icon-button subtle session-delete" title="Current session cannot be deleted" disabled><Trash2 size={14} /></button>
                 ) : confirmingId === id ? (
-                  <span className="session-confirm" role="alertdialog" aria-label={`确认删除会话 ${id}`}>
-                    删除？
-                    <button className="confirm-yes" onClick={() => confirmDelete(id)}>是</button>
-                    <button className="confirm-no" onClick={() => setConfirmingId("")}>否</button>
+                  <span className="session-confirm" role="alertdialog" aria-label={`Confirm delete session ${id}`}>
+                    Delete?
+                    <button className="confirm-yes" onClick={() => confirmDelete(id)}>Yes</button>
+                    <button className="confirm-no" onClick={() => setConfirmingId("")}>No</button>
                   </span>
                 ) : (
-                  <button className="icon-button subtle session-delete" title="删除会话" onClick={() => { setDeleteError((current) => ({ ...current, [id]: "" })); setConfirmingId(id); }}><Trash2 size={14} /></button>
+                  <button className="icon-button subtle session-delete" title="Delete session" onClick={() => { setDeleteError((current) => ({ ...current, [id]: "" })); setConfirmingId(id); }}><Trash2 size={14} /></button>
                 )}
                 {deleteError[id] && <div className="session-delete-error" role="alert">{deleteError[id]}</div>}
               </div>
             );
           })}
         </nav>
-      ) : <div className="rail-empty"><History size={16} /> {search ? "没有匹配的会话" : "No sessions yet"}</div>}
+      ) : <div className="rail-empty"><History size={16} /> {search ? "No matching sessions" : "No sessions yet"}</div>}
       {!loading && hasMore && (
-        <button type="button" className="load-more" onClick={() => onLoadMore?.()}>加载更多</button>
+        <button type="button" className="load-more" onClick={() => onLoadMore?.()}>Load more</button>
       )}
       <FileTree workspace={workspace} listFiles={fileTree?.listFiles} readFile={fileTree?.readFile} />
       <div className="rail-footer">
         <span>Long-lived worker · browser-safe disconnect</span>
         {notificationPermission === "default" && onEnableNotifications && (
-          <button className="notif-button" title="仅页面隐藏时才会收到系统通知" onClick={onEnableNotifications}><Bell size={12} /> 开启桌面通知</button>
+          <button className="notif-button" title="System notifications arrive only while the page is hidden" onClick={onEnableNotifications}><Bell size={12} /> Enable desktop notifications</button>
         )}
       </div>
     </aside>

@@ -78,8 +78,8 @@ def test_markdown_degrade_strips_markup_keeps_code_indent():
 
 def test_render_choices_truncates_after_five():
     rendered = render_choices(("a", "b", "c", "d", "e", "f", "g"))
-    assert rendered.splitlines() == ["1. a", "2. b", "3. c", "4. d", "5. e", "（其余 2 项略）", "", "回复数字即可"]
-    assert render_choices(("a", "b")).splitlines() == ["1. a", "2. b", "", "回复数字即可"]
+    assert rendered.splitlines() == ["1. a", "2. b", "3. c", "4. d", "5. e", "(2 more omitted)", "", "Reply with a number"]
+    assert render_choices(("a", "b")).splitlines() == ["1. a", "2. b", "", "Reply with a number"]
 
 
 def test_cap_leaves_title_reserve():

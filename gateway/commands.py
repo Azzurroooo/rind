@@ -26,12 +26,12 @@ COMMAND_PREFIX = "/"
 SESSION_CANCEL_METHOD = "session/cancel"
 SESSION_COMPACT_METHOD = "rind/session/compact"
 
-STOPPED_REPLY = "已停止"
-COMPACT_ACK = "已请求压缩上下文"
-UNKNOWN_REPLY = "未知命令，回复 /help 查看。"
-OFFLINE_NOTICE = "worker 离线，命令暂存"
-SESSION_CREATE_FAILED_REPLY = "暂时无法创建会话，稍后再试"
-NO_SESSION_REPLY = "当前没有会话，发送消息后即可压缩"
+STOPPED_REPLY = "Stopped"
+COMPACT_ACK = "Context compaction requested"
+UNKNOWN_REPLY = "Unknown command; reply /help for the list."
+OFFLINE_NOTICE = "Worker offline; command queued"
+SESSION_CREATE_FAILED_REPLY = "Cannot create a session right now; try again shortly"
+NO_SESSION_REPLY = "No session yet — send a message first, then compact"
 
 
 @dataclass(frozen=True, slots=True)
@@ -79,7 +79,7 @@ class CommandHub:
 
     def __init__(self, *, worker_getter: Callable[[], Any], router: Any, links: HubLinks,
                  workspace_root: str = "", request_timeout: float = 120.0,
-                 model: str = "默认（worker 内置）") -> None:
+                 model: str = "default (worker built-in)") -> None:
         self._worker_getter = worker_getter
         self._router = router
         self._links = links
@@ -130,17 +130,17 @@ class CommandHub:
             logger.warning("gateway: /new session create failed for %s: %s", ctx.key, exc)
             return SESSION_CREATE_FAILED_REPLY
         self._links.bind_target(record.session_id, (ctx.channel_id, ctx.target))
-        return f"已开启新会话（session {record.session_id[:8]}）"
+        return f"New session started (session {record.session_id[:8]})"
 
     async def cmd_status(self, ctx: CommandContext) -> str | None:
         active = self._links.active_session(ctx.key)
         queued = self._links.queue_depth()
         connected = bool(getattr(self._worker, "connected", True))
-        parts = [f"模型：{self._model}",
-                 "任务：" + ("运行中" if active else "空闲") + (f"（排队 {queued}）" if queued > 0 else ""),
-                 f"会话：{len(self._router.all_sessions())} 个",
-                 "worker：" + ("已连接" if connected else "离线")]
-        return "｜".join(parts)
+        parts = [f"model: {self._model}",
+                 "task: " + ("running" if active else "idle") + (f" ({queued} queued)" if queued > 0 else ""),
+                 f"sessions: {len(self._router.all_sessions())}",
+                 "worker: " + ("connected" if connected else "offline")]
+        return " | ".join(parts)
 
     async def cmd_compact(self, ctx: CommandContext) -> str | None:
         session = self._links.active_session(ctx.key)
@@ -155,7 +155,7 @@ class CommandHub:
     async def cmd_help(self, ctx: CommandContext) -> str | None:
         essential = [spec for spec in COMMANDS.values() if spec.tier == "essential"]
         standard = [spec for spec in COMMANDS.values() if spec.tier != "essential"]
-        lines = ["常用：", *[_line(spec) for spec in essential], "全部：", *[_line(spec) for spec in standard]]
+        lines = ["Essentials:", *[_line(spec) for spec in essential], "All:", *[_line(spec) for spec in standard]]
         return "\n".join(lines)
 
 
@@ -166,11 +166,11 @@ def _line(spec: CommandSpec) -> str:
 # Single source for /help rendering and dispatch. Handlers are unbound methods;
 # dict order defines the help listing.
 COMMANDS: dict[str, CommandSpec] = {
-    "stop": CommandSpec("stop", "essential", "停止当前任务", CommandHub.cmd_stop),
-    "new": CommandSpec("new", "essential", "开启新会话", CommandHub.cmd_new),
-    "status": CommandSpec("status", "essential", "查看状态", CommandHub.cmd_status),
-    "compact": CommandSpec("compact", "essential", "压缩上下文", CommandHub.cmd_compact),
-    "help": CommandSpec("help", "standard", "显示本帮助", CommandHub.cmd_help),
+    "stop": CommandSpec("stop", "essential", "stop the current task", CommandHub.cmd_stop),
+    "new": CommandSpec("new", "essential", "start a new session", CommandHub.cmd_new),
+    "status": CommandSpec("status", "essential", "show status", CommandHub.cmd_status),
+    "compact": CommandSpec("compact", "essential", "compact the context", CommandHub.cmd_compact),
+    "help": CommandSpec("help", "standard", "show this help", CommandHub.cmd_help),
 }
 
 

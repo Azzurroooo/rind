@@ -24,7 +24,7 @@ const SESSION_PAGE = 30; // session/list page size; the server caps limit at 100
 const SESSION_LIMIT_MAX = 100;
 const INTERRUPT_ARM_MS = 3000; // opencode pattern: second Esc within 3s cancels
 // ≤900px the three desktop columns collapse into one; SessionRail and
-// Inspector become edge slide-out drawers (master plan §6.2 移动端).
+// Inspector become edge slide-out drawers (master plan §6.2, mobile).
 const NARROW_QUERY = "(max-width: 900px)";
 
 function readNarrowViewport() {
@@ -227,7 +227,7 @@ export default function App() {
       if (duration > 0) setContextInfo((current) => ({ ...current, lastTurnDurationMs: duration }));
       // Browser notifications: only when the tab is hidden AND permission was
       // granted via the rail footer button (never a load-time prompt).
-      showNotification({ title: "Rind 回复完成", body: truncateFirstLine(finalAssistantText(convRef.current)) });
+      showNotification({ title: "Rind reply ready", body: truncateFirstLine(finalAssistantText(convRef.current)) });
       // First turn of a brand-new session lands it in the session index —
       // refresh the rail so the user actually sees their session.
       void refreshSessions(workspaceRef.current || infoRef.current.workspace_root);
@@ -373,7 +373,7 @@ export default function App() {
     for (let attempt = 0; attempt < attempts; attempt += 1) {
       try {
         // Hard per-attempt bound: a replay request lost on a dying socket must
-        // never leave the connection strip stuck in "同步中…" forever.
+        // never leave the connection strip stuck in "Syncing…" forever.
         return await Promise.race([
           clientRef.current.request(methods.sessionReplay, { session_id: sessionId, after_cursor: cursor }),
           new Promise((_, reject) => window.setTimeout(() => reject(new Error("catch-up timeout")), 10000)),
@@ -598,8 +598,8 @@ export default function App() {
     }
     if (convRef.current.active) {
       // Queue by default (audit #1): follow_up unless the user flipped the
-      // Composer switch to 立即转向. The returned input_id keeps the chip
-      // addressable for 取回 / 转向.
+      // Composer switch to steering. The returned input_id keeps the chip
+      // addressable for retrieve / steer.
       const mode = queueModeRef.current === "steering" ? "steering" : "follow_up";
       const method = mode === "steering" ? methods.sessionSteer : methods.sessionFollowUp;
       try {
@@ -617,7 +617,7 @@ export default function App() {
         }
       } catch (error) {
         restoreDraft(text);
-        dispatchMessage("system", `无法排队输入: ${error.message}`, "error");
+        dispatchMessage("system", `Unable to queue input: ${error.message}`, "error");
       }
       return;
     }
@@ -634,7 +634,7 @@ export default function App() {
         await loadSession(sessionId, true);
       } catch (error) {
         restoreDraft(text);
-        dispatchMessage("system", `无法创建会话: ${error instanceof Error ? error.message : String(error)}`, "error");
+        dispatchMessage("system", `Unable to create session: ${error instanceof Error ? error.message : String(error)}`, "error");
         return;
       }
     }
@@ -655,9 +655,9 @@ export default function App() {
     setInput((current) => (current ? `${clean}\n${current}` : clean));
   }
 
-  // Queued chip actions (audit #1). 取回 pulls the text back into the draft
-  // (unsteer / dequeue_follow_up return the removed item); 转向 promotes a
-  // follow_up into the steering queue.
+  // Queued chip actions (audit #1). Retrieve pulls the text back into the
+  // draft (unsteer / dequeue_follow_up return the removed item); steer promotes
+  // a follow_up into the steering queue.
   async function retrieveQueued(entry) {
     const method = entry.mode === "steering" ? methods.sessionUnsteer : methods.sessionDequeueFollowUp;
     try {
@@ -667,7 +667,7 @@ export default function App() {
       setInput((current) => (current ? `${current}\n${text}` : text));
       composerRef.current?.focus();
     } catch (error) {
-      dispatchMessage("system", `取回失败: ${error.message}`, "error");
+      dispatchMessage("system", `Failed to retrieve: ${error.message}`, "error");
     }
   }
 
@@ -676,7 +676,7 @@ export default function App() {
       await clientRef.current.request(methods.sessionPromoteFollowUp, { session_id: infoRef.current.session_id, input_id: entry.inputId });
       dispatchConversation({ kind: "requeue", inputId: entry.inputId, mode: "steering" });
     } catch (error) {
-      dispatchMessage("system", `转向失败: ${error.message}`, "error");
+      dispatchMessage("system", `Failed to redirect: ${error.message}`, "error");
     }
   }
 
@@ -769,7 +769,7 @@ export default function App() {
     }
   }
 
-  // 目标 command with an argument: set / clear / pause / resume (CLI parity).
+  // Goal command with an argument: set / clear / pause / resume (CLI parity).
   async function runGoalCommand(argument) {
     const action = argument.trim().toLowerCase();
     if (!action) {
@@ -888,7 +888,7 @@ export default function App() {
     const lines = commandList
       .map((command) => `/${command.slash || command.id} — ${command.title}${command.keybind ? ` (${command.keybind})` : ""}`)
       .join("\n");
-    dispatchMessage("system", `可用命令（Ctrl+K 打开命令面板）：\n${lines}`);
+    dispatchMessage("system", `Available commands (Ctrl+K opens the command palette):\n${lines}`);
   }
 
   function focusInspectorSelect(index) {
@@ -993,9 +993,9 @@ export default function App() {
     {/* Compact nav row — display:none on desktop (styles.css), the only
         place the two drawer toggles exist. */}
     <div className="mobile-header">
-      <button ref={railToggleRef} type="button" className="icon-button" aria-label="会话列表" aria-expanded={railOpen} aria-controls="session-rail-panel" onClick={() => openDrawer("rail")}><Menu size={19} /></button>
+      <button ref={railToggleRef} type="button" className="icon-button" aria-label="Sessions" aria-expanded={railOpen} aria-controls="session-rail-panel" onClick={() => openDrawer("rail")}><Menu size={19} /></button>
       <span className="mobile-header-title">Rind</span>
-      <button ref={inspectorToggleRef} type="button" className="icon-button" aria-label="会话状态" aria-expanded={inspectorOpen} aria-controls="inspector-panel" onClick={() => openDrawer("inspector")}><PanelRight size={19} /></button>
+      <button ref={inspectorToggleRef} type="button" className="icon-button" aria-label="Session state" aria-expanded={inspectorOpen} aria-controls="inspector-panel" onClick={() => openDrawer("inspector")}><PanelRight size={19} /></button>
     </div>
     {narrow && (railOpen || inspectorOpen) && <div className="drawer-backdrop" onClick={closeDrawers} aria-hidden="true" />}
     <div className="workspace-grid">

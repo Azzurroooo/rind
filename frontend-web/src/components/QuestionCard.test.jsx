@@ -34,7 +34,7 @@ describe("QuestionCard — pending state (§2.3)", () => {
     expect(document.querySelector(".question-option")).not.toBeNull();
     expect(container.querySelector(".question-timer-bar")).not.toBeNull();
     expect(container.querySelector(".question-timer-bar").style.animationDuration).toBe("120000ms");
-    expect(screen.queryByText("已超时")).toBeNull();
+    expect(screen.queryByText("Expired")).toBeNull();
   });
 
   it("no ticking countdown numbers anywhere", () => {
@@ -56,12 +56,12 @@ describe("QuestionCard — pending state (§2.3)", () => {
 describe("QuestionCard — answered freezes in the stream (§2.3)", () => {
   it("buttons freeze with the chosen option marked and stay rendered", () => {
     render(<QuestionCard entry={answeredEntry()} onAnswer={() => {}} onExpire={() => {}} />);
-    expect(screen.getByText("已回答")).not.toBeNull();
+    expect(screen.getByText("Answered")).not.toBeNull();
     const selected = screen.getByText("Yes, deploy").closest("button");
     expect(selected.className).toContain("selected");
     expect(selected.disabled).toBe(true);
     expect(screen.getByText("No, wait").closest("button").disabled).toBe(true);
-    expect(screen.getByText("已选择：yes")).not.toBeNull();
+    expect(screen.getByText("Selected: yes")).not.toBeNull();
     expect(document.querySelector(".question-timer")).toBeNull();
   });
 
@@ -70,14 +70,14 @@ describe("QuestionCard — answered freezes in the stream (§2.3)", () => {
     render(<QuestionCard entry={pendingEntry} onAnswer={onAnswer} />);
     fireEvent.click(screen.getByText("Yes, deploy"));
     await act(async () => {});
-    expect(screen.getByRole("alert").textContent).toContain("未发送成功");
+    expect(screen.getByRole("alert").textContent).toContain("failed to send");
     expect(screen.getByText("Yes, deploy").closest("button").disabled).toBe(false);
   });
 
   it("supports the custom answer input", async () => {
     const onAnswer = vi.fn(async () => true);
     render(<QuestionCard entry={pendingEntry} onAnswer={onAnswer} />);
-    const input = screen.getByLabelText("自定义答案");
+    const input = screen.getByLabelText("Custom answer");
     fireEvent.change(input, { target: { value: "ship on friday" } });
     fireEvent.keyDown(input, { key: "Enter" });
     await act(async () => {});
@@ -86,15 +86,15 @@ describe("QuestionCard — answered freezes in the stream (§2.3)", () => {
 });
 
 describe("QuestionCard — expired and cancelled (§2.3)", () => {
-  it("expired shows the 已超时 tag and closes the options", () => {
+  it("expired shows the Expired tag and closes the options", () => {
     render(<QuestionCard entry={{ ...pendingEntry, status: "expired" }} onAnswer={() => {}} />);
-    expect(screen.getByText("已超时")).not.toBeNull();
+    expect(screen.getByText("Expired")).not.toBeNull();
     expect(screen.getByText("Yes, deploy").closest("button").disabled).toBe(true);
   });
 
   it("cancelled (turn terminal) shows the closed tag", () => {
     render(<QuestionCard entry={{ ...pendingEntry, status: "cancelled" }} onAnswer={() => {}} />);
-    expect(screen.getByText("已随回合结束")).not.toBeNull();
+    expect(screen.getByText("Ended with the turn")).not.toBeNull();
     expect(screen.getByText("Yes, deploy").closest("button").disabled).toBe(true);
   });
 

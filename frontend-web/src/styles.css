@@ -214,7 +214,7 @@ h1, h2, p { margin: 0; }
 .stop-button.armed { border-color: var(--red); color: var(--red); font-weight: 700; }
 .transcript-frame { position: relative; min-height: 0; flex: 1; display: flex; flex-direction: column; }
 .transcript { min-height: 0; flex: 1; overflow-y: auto; padding: 28px 36px 14px; }
-/* Floating "回到最新" chip (audit #5) — appears only when the user scrolled
+/* Floating "Jump to latest" chip (audit #5) — appears only when the user scrolled
    away from the live tail; click re-attaches without disturbing history. */
 .jump-latest { position: absolute; bottom: 14px; left: 50%; z-index: 3; display: inline-flex; align-items: center; gap: 6px; padding: 7px 13px; border: 1px solid var(--line-strong); border-radius: 999px; background: var(--surface-raised); box-shadow: 0 8px 22px var(--shadow); color: var(--cyan); font: 11px var(--mono); cursor: pointer; transform: translateX(-50%); }
 .jump-latest:hover { color: var(--text); border-color: var(--cyan); }
@@ -268,7 +268,7 @@ h1, h2, p { margin: 0; }
 .message-actions[data-state="failed"] .message-action { color: var(--red); border-color: var(--red); }
 
 /* Queued input rows (audit #1): user-styled rows carrying the QUEUED tag and
-   the 取回 / 转向 actions until queued_input_delivered converts them. */
+   the retrieve / steer actions until queued_input_delivered converts them. */
 .queued-row { border: 1px dashed var(--line-strong); border-radius: 6px; padding: 8px 10px 8px 0; background: transparent; }
 .queued-chip { display: inline-flex; align-items: center; padding: 2px 7px; border: 1px solid var(--amber); border-radius: 999px; background: var(--amber-soft); color: var(--amber); font: 10px var(--mono); font-weight: 400; letter-spacing: .05em; }
 .queued-actions { display: flex; gap: 6px; margin-top: 8px; }
@@ -483,7 +483,7 @@ h1, h2, p { margin: 0; }
   .inspector { display: none; }
 }
 
-/* ---- ≤900px: single column, drawers (master plan §6.2 移动端) ----
+/* ---- ≤900px: single column, drawers (master plan §6.2, mobile) ----
    SessionRail slides in from the left edge, Inspector from the right; the
    composer stays pinned to the bottom of the flow. Panels are transform-only
    (no layout shift, scroll untouched), backdrop tap closes, and the slide

@@ -44,7 +44,7 @@ CAPABILITIES = ChannelCapabilities(
 )
 
 MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024
-OVERSIZE_NOTICE = "附件过大（单个上限 20MB），已忽略该附件。"
+OVERSIZE_NOTICE = "Attachment too large (per-file limit 20MB); skipped."
 BUTTON_CALLBACK_PREFIX = "ans:"
 LONG_POLL_SECONDS = 25
 POLL_ERROR_PAUSE_SECONDS = 3.0

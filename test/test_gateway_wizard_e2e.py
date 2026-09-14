@@ -1,5 +1,6 @@
-"""终端级用户通道测试：用子进程 + 脚本化 stdin 模拟真人在 PowerShell 里
-逐行操作，覆盖 gateway 一键化的完整成果。任何一步出现 Traceback 即失败。
+"""Terminal-level user-channel tests: subprocesses with scripted stdin
+simulate a real person typing line by line in PowerShell, covering the full
+one-command gateway story. Any Traceback at any step fails the test.
 """
 
 import json
@@ -28,71 +29,71 @@ def _run_gateway(args: list[str], stdin: str = "", workspace: str | None = None,
 
 def _assert_no_traceback(result: subprocess.CompletedProcess):
     combined = result.stdout + result.stderr
-    assert "Traceback" not in combined, f"用户不应看到堆栈：\n{combined[-800:]}"
+    assert "Traceback" not in combined, f"users must never see a stack trace:\n{combined[-800:]}"
 
 
-# --- 完整交互式向导：真人在终端里的 22 次按键 -------------------------------------
+# --- the full interactive wizard: a human's 22 keystrokes in the terminal -------------------------------------
 
 
 def test_full_interactive_wizard_writes_working_config(tmp_path):
     workspace = tmp_path / "ws"
     workspace.mkdir()
     lines = [
-        "7,3",            # 选渠道：telegram + email
-        "",               # worker 地址（默认）
-        str(workspace),   # 工作目录
-        "",               # worker token（留空）
+        "7,3",            # channel selection: telegram + email
+        "",               # worker URL (default)
+        str(workspace),   # working directory
+        "",               # worker token (left empty)
         "123456:AAE",     # telegram token
-        "",               # telegram proxy（直连）
+        "",               # telegram proxy (direct)
         "",               # telegram allow_from
         "",               # telegram group_allow
-        "n",              # 跳过凭证探活
-        "n",              # 跳过 ID 抓取
-        "",               # email imap_host（默认）
-        "",               # email imap_port（默认）
-        "",               # email smtp_host（默认）
-        "",               # email smtp_port（默认）
+        "n",              # skip the credential probe
+        "n",              # skip ID discovery
+        "",               # email imap_host (default)
+        "",               # email imap_port (default)
+        "",               # email smtp_host (default)
+        "",               # email smtp_port (default)
         "me@qq.com",      # email username
         "auth-code",      # email password
-        "",               # mailbox（默认）
-        "",               # poll_interval（默认）
+        "",               # mailbox (default)
+        "",               # poll_interval (default)
         "",               # email allow_from
         "",               # email group_allow
-        "n",              # 跳过凭证探活
-        "Y",              # 确认写入
+        "n",              # skip the credential probe
+        "Y",              # confirm the write
     ]
     result = _run_gateway(["init"], stdin="\n".join(lines) + "\n", workspace=None)
     _assert_no_traceback(result)
     assert result.returncode == 0, f"stderr: {result.stderr[-600:]}"
 
     config_path = workspace / ".rind" / "gateway.yaml"
-    assert config_path.exists(), f"配置未写入；stdout: {result.stdout[-600:]}"
+    assert config_path.exists(), f"config not written; stdout: {result.stdout[-600:]}"
 
-    # 产物必须能被真实启动链路读回
+    # the artifact must be readable by the real startup chain
     status = _run_gateway(
         ["status", "--config", str(config_path), "--workspace", str(workspace)],
     )
     _assert_no_traceback(status)
-    assert "会话映射" in status.stdout and "渠道 Email" in status.stdout and "渠道 Telegram" in status.stdout
+    assert "session mappings" in status.stdout and "channel Email" in status.stdout and "channel Telegram" in status.stdout
 
     doctor = _run_gateway(
         ["doctor", "--config", str(config_path), "--workspace", str(workspace)],
     )
     _assert_no_traceback(doctor)
-    assert "配置文件" in doctor.stdout and "✔" in doctor.stdout
+    assert "config file" in doctor.stdout and "✔" in doctor.stdout
 
 
 def test_wizard_defaults_skip_optional_fields(tmp_path):
-    # 回车到底 = telegram + email 两个零门槛渠道；email 必填字段需要值。
+    # Enter-all-the-way = telegram + email, the two zero-friction channels; email's required fields still need values.
     workspace = tmp_path / "ws"
     workspace.mkdir()
     lines = [
-        "",               # 渠道（默认 telegram + email）
+        "",               # channels (default telegram + email)
         "",               # worker
         str(workspace),   # workspace
         "",               # token
         "tok",            # telegram token
-        "",               # telegram proxy（直连）
+        "",               # telegram proxy (direct)
         "", "",           # telegram allow/group
         "n", "n",         # telegram probe/discovery
         "", "",           # email imap_host/port
@@ -102,21 +103,21 @@ def test_wizard_defaults_skip_optional_fields(tmp_path):
         "", "",           # mailbox/poll
         "", "",           # email allow/group
         "n",              # email probe
-        "Y",              # 写入
+        "Y",              # write
     ]
     result = _run_gateway(["init"], stdin="\n".join(lines) + "\n")
     _assert_no_traceback(result)
     assert (workspace / ".rind" / "gateway.yaml").exists()
 
 
-# --- 用户的原始崩溃场景：无配置 → 引导向导 → 中途 EOF -----------------------------
+# --- the original user crash: no config → wizard offered → EOF mid-way -----------------------------
 
 
 def test_gateway_without_config_offers_wizard_and_cancels_cleanly(tmp_path):
     result = _run_gateway(["--workspace", str(tmp_path)], stdin="Y\n")
     _assert_no_traceback(result)
-    assert "配置向导" in result.stdout
-    assert "已取消（配置未写入）" in result.stdout
+    assert "configuration wizard" in result.stdout
+    assert "Cancelled (nothing written)" in result.stdout
     assert result.returncode == 1
 
 
@@ -124,7 +125,7 @@ def test_wizard_immediate_eof_cancels_cleanly(tmp_path):
     result = _run_gateway(["init", "--workspace", str(tmp_path)], stdin="")
     _assert_no_traceback(result)
     assert result.returncode == 1
-    assert "已取消" in result.stdout or "Traceback" not in result.stderr
+    assert "Cancelled" in result.stdout or "Traceback" not in result.stderr
 
 
 def test_gateway_without_config_non_tty_reports_instead_of_crash(tmp_path):
@@ -133,7 +134,7 @@ def test_gateway_without_config_non_tty_reports_instead_of_crash(tmp_path):
     assert "gateway init" in result.stdout + result.stderr
 
 
-# --- 一键模式：env 驱动，缺字段精确到环境变量名 -------------------------------------
+# --- one-click mode: env-driven; a missing field names the exact variable -------------------------------------
 
 
 def test_one_click_init_writes_config_from_env(tmp_path):
@@ -168,7 +169,7 @@ def test_one_click_init_ignores_unknown_channels(tmp_path):
     assert "myspace" in result.stderr
 
 
-# --- 配对批准子命令的端到端 ---------------------------------------------------------
+# --- pairing approval subcommand, end to end ---------------------------------------------------------
 
 
 def test_approve_subcommand_end_to_end(tmp_path):
@@ -188,4 +189,4 @@ def test_approve_subcommand_end_to_end(tmp_path):
     assert ["telegram", "987654"] in pairing.get("approved", [])
 
     again = _run_gateway(["--workspace", str(tmp_path), "approve", code])
-    assert again.returncode == 1, "同一配对码不应能批准两次"
+    assert again.returncode == 1, "the same pairing code must not be approvable twice"

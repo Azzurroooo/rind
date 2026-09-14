@@ -1,4 +1,4 @@
-"""企业微信 self-built app channel (gateway.md §8, plan §5.6 P2).
+"""WeCom self-built app channel (gateway.md §8, plan §5.6 P2).
 
 Transport: HTTP callback + API (§5.6).  WeCom pushes events to a public HTTPS
 callback URL, so deployment needs a public address or an intranet tunnel
@@ -42,7 +42,7 @@ API_BASE = "https://qyapi.weixin.qq.com/cgi-bin"
 CALLBACK_PATH = "/wecom/callback"
 DEFAULT_CALLBACK_HOST, DEFAULT_CALLBACK_PORT = "0.0.0.0", 8081
 MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024
-OVERSIZE_NOTICE = "附件过大（单个上限 20MB），已忽略该附件。"
+OVERSIZE_NOTICE = "Attachment too large (per-file limit 20MB); skipped."
 
 _KIND_EXT = {"image": ".jpg", "audio": ".ogg", "video": ".mp4", "document": ".bin"}
 _KIND_CONTENT_TYPE = {"image": "image/jpeg", "audio": "audio/amr", "video": "video/mp4"}
@@ -75,7 +75,7 @@ def _signature(token: str, *parts: str) -> str:
 
 def _decrypt(encoding_aes_key: str, ciphertext_b64: str, receive_id: str) -> bytes:
     """WeCom callback crypto: AES-256-CBC (IV = key[:16]), PKCS7(32); payload is
-    random(16) + len(4, big-endian) + message + receive_id tail (加解密协议)."""
+    random(16) + len(4, big-endian) + message + receive_id tail (encrypt/decrypt protocol)."""
     from cryptography.hazmat.primitives import padding
     from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 

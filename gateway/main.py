@@ -30,20 +30,20 @@ def build_parser() -> argparse.ArgumentParser:
     subparsers = parser.add_subparsers(dest="command")
     approve = subparsers.add_parser("approve", help="Approve a pending pairing code")
     approve.add_argument("code", help="The 6-character pairing code shown to the sender")
-    init = subparsers.add_parser("init", help="交互式创建 gateway.yaml（分渠道引导 + 实时凭证验证 + 自动抓取账号 ID）")
-    init.add_argument("--channel", default="", help="逗号分隔的渠道 id（如 telegram,email；跳过选择菜单）")
-    init.add_argument("--yes", action="store_true", help="非交互一键模式：字段全部来自 RIND_GW_<渠道>_<字段> 环境变量")
-    init.add_argument("--worker-url", default="", help="Worker 地址（默认 ws://127.0.0.1:8765）")
-    init.add_argument("--workspace", default=None, help="工作目录（默认当前目录）")
-    doctor = subparsers.add_parser("doctor", help="逐项体检：配置/worker/SDK/凭证/状态文件（--probe 实测凭证，--fix 自动修复）")
-    doctor.add_argument("--probe", action="store_true", help="实时验证渠道凭证（会访问平台 API）")
-    doctor.add_argument("--fix", action="store_true", help="自动修复可修复项（损坏的状态文件备份为 .corrupt）")
+    init = subparsers.add_parser("init", help="Create gateway.yaml interactively (per-channel guidance + live credential checks + automatic account-ID capture)")
+    init.add_argument("--channel", default="", help="Comma-separated channel ids (e.g. telegram,email; skips the selection menu)")
+    init.add_argument("--yes", action="store_true", help="Non-interactive one-shot mode: all fields come from RIND_GW_<CHANNEL>_<FIELD> environment variables")
+    init.add_argument("--worker-url", default="", help="Worker URL (default ws://127.0.0.1:8765)")
+    init.add_argument("--workspace", default=None, help="Workspace directory (default: current directory)")
+    doctor = subparsers.add_parser("doctor", help="Item-by-item health check: config/worker/SDK/credentials/state files (--probe tests credentials live, --fix auto-repairs)")
+    doctor.add_argument("--probe", action="store_true", help="Verify channel credentials live (calls platform APIs)")
+    doctor.add_argument("--fix", action="store_true", help="Auto-repair what can be repaired (corrupt state files are backed up as .corrupt)")
     doctor.add_argument("--config", default=None, help="gateway.yaml path")
     doctor.add_argument("--workspace", default=".", help="Workspace root")
-    status = subparsers.add_parser("status", help="一屏状态：会话映射/配对/渠道/worker 在线")
+    status = subparsers.add_parser("status", help="One-screen status: session mappings/pairing/channels/worker liveness")
     status.add_argument("--config", default=None, help="gateway.yaml path")
     status.add_argument("--workspace", default=".", help="Workspace root")
-    subparsers.add_parser("start", help="启动网关（等价于不带子命令运行）")
+    subparsers.add_parser("start", help="Start the gateway (same as running without a subcommand)")
     return parser
 
 
@@ -74,8 +74,8 @@ async def _run(config: GatewayConfig, runtime_dir: Path, pairing: PairingStore) 
     for channel_id, channel_config in config.channels.items():
         channel = build_channel(channel_id, channel_config, uploads_root)
         if channel is None and config.auto_install_sdk:
-            # SDK 缺失时自愈：装好再建一次（向导同意过 auto_install_sdk 的用户
-            # 不该被 "pip install xxx" 挡在门外）。
+            # Self-heal on missing SDK: install and rebuild once (users who accepted
+            # auto_install_sdk in the wizard shouldn't be blocked by "pip install xxx").
             from .doctor import ensure_sdk_installed
             from .onboarding import guide_for
 
@@ -123,26 +123,26 @@ def main(argv: list[str] | None = None) -> int:
 
         return run_status(args)
     if args.command == "start":
-        args.command = "run"  # start 与裸运行等价；提供给向导与文档作为显式动词
+        args.command = "run"  # start equals bare invocation; an explicit verb for the wizard and docs
 
     # Approving a pairing code only needs pairing.json — never require (or
     # even read) gateway.yaml, so approval works on a machine without config.
     if args.command == "approve":
         pairing = PairingStore(workspace / ".rind" / "pairing.json")
         if pairing.approve(args.code):
-            print(f"已批准配对：{args.code.strip().upper()}")
+            print(f"Pairing approved: {args.code.strip().upper()}")
             return 0
-        print(f"配对码无效或已过期：{args.code}", file=sys.stderr)
+        print(f"Pairing code invalid or expired: {args.code}", file=sys.stderr)
         return 1
 
     try:
         config = load_config(resolve_config_path(args.config, workspace))
     except ConfigError as exc:
-        # 引导向导不再限定 tty：管道输入 "Y\n" 同样可用（便于自动化与测试），
-        # 输入结束（EOF）则安静取消。
+        # The wizard is not tty-gated: piped "Y\n" works too (automation and
+        # tests); end of input (EOF) cancels quietly.
         print(f"gateway: {exc}")
         try:
-            offer = input("现在运行配置向导（gateway init）？[Y/n]: ").strip().lower()
+            offer = input("Run the configuration wizard (gateway init) now? [Y/n]: ").strip().lower()
         except EOFError:
             offer = "n"
         if offer in ("", "y", "yes"):
@@ -159,7 +159,7 @@ def main(argv: list[str] | None = None) -> int:
                     worker_url="", workspace=str(workspace),
                 )
             )
-        print("运行 `python main.py gateway init` 交互式创建配置。", file=sys.stderr)
+        print("Run `python main.py gateway init` to create the config interactively.", file=sys.stderr)
         return 2
     runtime_dir = Path(config.workspace) / ".rind"
     pairing = PairingStore(runtime_dir / "pairing.json")

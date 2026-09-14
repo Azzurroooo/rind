@@ -107,11 +107,11 @@ export async function fetchTicket(serverToken, { endpoint = "/ticket", fetchImpl
 
 export function loginErrorMessage(error) {
   const status = Number(error?.status);
-  if (status === 401 || status === 403) return "令牌无效或已被拒绝，请检查后重试。";
-  if (status === 0) return "无法连接服务器，请确认 worker 地址后重试。";
-  return error?.message ? `连接失败：${error.message}` : "连接失败，请稍后重试。";
+  if (status === 401 || status === 403) return "Token invalid or rejected. Check it and try again.";
+  if (status === 0) return "Cannot reach the server. Verify the worker address and try again.";
+  return error?.message ? `Connection failed: ${error.message}` : "Connection failed. Try again later.";
 }
 
 export function unauthorizedMessage() {
-  return "登录已失效，请重新输入令牌。";
+  return "Session expired. Re-enter the token.";
 }

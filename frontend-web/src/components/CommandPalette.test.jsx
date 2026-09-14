@@ -22,13 +22,13 @@ function renderPalette(overrides = {}) {
 describe("CommandPalette — open/filter/execute (audit #10)", () => {
   it("does not render when closed", () => {
     renderPalette({ open: false });
-    expect(screen.queryByRole("dialog", { name: "命令面板" })).toBeNull();
+    expect(screen.queryByRole("dialog", { name: "Command palette" })).toBeNull();
   });
 
   it("renders the registry grouped with categories and keybind hints resolved from it", () => {
     renderPalette();
-    expect(screen.getByRole("dialog", { name: "命令面板" })).not.toBeNull();
-    expect(screen.getByText("新会话")).not.toBeNull();
+    expect(screen.getByRole("dialog", { name: "Command palette" })).not.toBeNull();
+    expect(screen.getByText("New session")).not.toBeNull();
     expect(screen.getByText(COMMAND_CATEGORIES.session)).not.toBeNull();
     // keybind hint comes from the registry, never hardcoded
     expect(screen.getByText("Esc ×2")).not.toBeNull();
@@ -36,19 +36,19 @@ describe("CommandPalette — open/filter/execute (audit #10)", () => {
 
   it("filters as you type and shows an empty state without matches", () => {
     renderPalette();
-    const input = screen.getByLabelText("搜索命令");
-    fireEvent.change(input, { target: { value: "主题" } });
-    expect(screen.getByText("主题")).not.toBeNull();
-    expect(screen.queryByText("压缩上下文")).toBeNull();
+    const input = screen.getByLabelText("Search commands");
+    fireEvent.change(input, { target: { value: "theme" } });
+    expect(screen.getByText("Theme")).not.toBeNull();
+    expect(screen.queryByText("Compact context")).toBeNull();
     fireEvent.change(input, { target: { value: "zzzz" } });
-    expect(screen.getByText("没有匹配的命令")).not.toBeNull();
+    expect(screen.getByText("No matching commands")).not.toBeNull();
   });
 
   it("Enter executes the highlighted command; arrows move the highlight", () => {
     const onRun = vi.fn();
     renderPalette({ onRun });
-    const input = screen.getByLabelText("搜索命令");
-    fireEvent.change(input, { target: { value: "停止" } });
+    const input = screen.getByLabelText("Search commands");
+    fireEvent.change(input, { target: { value: "stop" } });
     const options = screen.getAllByRole("option");
     expect(options[0].getAttribute("aria-selected")).toBe("true");
     fireEvent.keyDown(input, { key: "Enter" });
@@ -59,7 +59,7 @@ describe("CommandPalette — open/filter/execute (audit #10)", () => {
   it("arrow down/up cycles the selection and click executes", () => {
     const onRun = vi.fn();
     renderPalette({ onRun });
-    const input = screen.getByLabelText("搜索命令");
+    const input = screen.getByLabelText("Search commands");
     fireEvent.keyDown(input, { key: "ArrowDown" });
     fireEvent.keyDown(input, { key: "ArrowUp" });
     fireEvent.keyDown(input, { key: "ArrowUp" });
@@ -73,7 +73,7 @@ describe("CommandPalette — open/filter/execute (audit #10)", () => {
   it("Esc closes and the scrim click closes", () => {
     const onClose = vi.fn();
     renderPalette({ onClose });
-    fireEvent.keyDown(screen.getByLabelText("搜索命令"), { key: "Escape" });
+    fireEvent.keyDown(screen.getByLabelText("Search commands"), { key: "Escape" });
     expect(onClose).toHaveBeenCalledTimes(1);
     fireEvent.click(screen.getByTestId("palette-scrim"));
     expect(onClose).toHaveBeenCalledTimes(2);
@@ -81,6 +81,6 @@ describe("CommandPalette — open/filter/execute (audit #10)", () => {
 
   it("the filter input receives focus on open", () => {
     renderPalette();
-    expect(document.activeElement).toBe(screen.getByLabelText("搜索命令"));
+    expect(document.activeElement).toBe(screen.getByLabelText("Search commands"));
   });
 });

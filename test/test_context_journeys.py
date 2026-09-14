@@ -144,8 +144,8 @@ def test_jc1_fresh_exchange_shows_board_rows_with_small_deviation(context_worker
     client = context_worker.client
     info = client.request("initialize", {})
     session_id = info["session_id"]
-    model_server.script_text(["你好", "，很高兴见到你。"], delay_ms=1)
-    client.run_prompt(session_id, "打个招呼")
+    model_server.script_text(["Hello", ", nice to meet you."], delay_ms=1)
+    client.run_prompt(session_id, "say hello")
 
     board = client.request("rind/context/inspect", {"session_id": session_id})
     sections = _summarize_breakdown(board)
@@ -172,8 +172,8 @@ def test_jc1_fresh_exchange_shows_board_rows_with_small_deviation(context_worker
 
     # A second exchange samples WITH the first reply in context: the assistant
     # row appears and the tool-spec row remains part of the request context.
-    model_server.script_text(["第二次回答"], delay_ms=1)
-    client.run_prompt(session_id, "再问一句")
+    model_server.script_text(["second answer"], delay_ms=1)
+    client.run_prompt(session_id, "ask another question")
     board = client.request("rind/context/inspect", {"session_id": session_id})
     sections = _summarize_breakdown(board)
     assert "chat_assistant" in sections

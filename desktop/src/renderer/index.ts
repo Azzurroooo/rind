@@ -697,10 +697,10 @@ function renderSessionRow(item: DesktopSessionSummary, whenIso: string) {
   const confirming = state.sessionDeleteConfirmId === item.id
   const deleting = state.sessionDeleteBusyId === item.id
   const deleteState = isCurrent
-    ? `<button type="button" class="session-delete ghost-button" data-session-delete="${escapeAttribute(item.id)}" title="当前会话不可删除" aria-label="当前会话不可删除" disabled>${DELETE_ICON}</button>`
+    ? `<button type="button" class="session-delete ghost-button" data-session-delete="${escapeAttribute(item.id)}" title="Current session cannot be deleted" aria-label="Current session cannot be deleted" disabled>${DELETE_ICON}</button>`
     : confirming
-      ? `<button type="button" class="session-delete ghost-button confirm" data-session-delete="${escapeAttribute(item.id)}" title="再按一次确认删除" aria-label="再按一次确认删除确认删除会话"${deleting ? " disabled" : ""}>${deleting ? "…" : DELETE_ICON}</button>`
-      : `<button type="button" class="session-delete ghost-button" data-session-delete="${escapeAttribute(item.id)}" title="删除会话" aria-label="删除会话 ${escapeAttribute(item.title || item.id)}"${deleting ? " disabled" : ""}>${DELETE_ICON}</button>`
+      ? `<button type="button" class="session-delete ghost-button confirm" data-session-delete="${escapeAttribute(item.id)}" title="Press again to confirm delete" aria-label="Press again to confirm deleting this session"${deleting ? " disabled" : ""}>${deleting ? "…" : DELETE_ICON}</button>`
+      : `<button type="button" class="session-delete ghost-button" data-session-delete="${escapeAttribute(item.id)}" title="Delete session" aria-label="Delete session ${escapeAttribute(item.title || item.id)}"${deleting ? " disabled" : ""}>${DELETE_ICON}</button>`
   return `
     <div class="session-item-row${confirming ? " confirming" : ""}" data-session-row="${escapeAttribute(item.id)}">
       <button type="button" class="session-item${running ? " running" : ""}" data-session-id="${escapeAttribute(item.id)}" data-session-project="${escapeAttribute(item.workspaceRoot)}" title="${escapeAttribute(item.title || "Untitled")}">
@@ -1051,7 +1051,7 @@ function renderAttachments() {
         <small class="attachment-size">${formatBytes(chip.size)}${chip.status === "uploading" ? " · uploading…" : chip.status === "failed" ? ` · ${escapeHtml(chip.error || "Upload failed")}` : ""}</small>
       </span>
       ${chip.status === "failed" ? `<button type="button" class="ghost-button chip-retry" data-chip-retry="${escapeAttribute(chip.id)}" title="Retry upload">Retry</button>` : chip.status === "ok" ? `<span class="status-pip pip-done" title="Uploaded"></span>` : `<span class="send-spinner chip-spinner" aria-hidden="true"></span>`}
-      <button type="button" class="ghost-button chip-delete" data-chip-delete="${escapeAttribute(chip.id)}" title="移除附件" aria-label="移除附件 ${escapeAttribute(chip.name)}">✕</button>
+      <button type="button" class="ghost-button chip-delete" data-chip-delete="${escapeAttribute(chip.id)}" title="Remove attachment" aria-label="Remove attachment ${escapeAttribute(chip.name)}">✕</button>
     `
     if (attachmentChips.children[index] !== item) attachmentChips.append(item)
     existing.delete(chip.id)
@@ -1294,28 +1294,28 @@ async function clearGoal() {
 
 function paletteCommands(): PaletteCommand[] {
   const commands: PaletteCommand[] = [
-    { id: "new-chat", title: "新会话", detail: "Start a new chat", shortcut: "Ctrl+N", run: () => runAction(startNewChat) },
-    { id: "open-settings", title: "打开设置", detail: "Runtime settings", shortcut: "Ctrl+,", run: () => openSettings() },
-    { id: "compact", title: "压缩上下文", detail: "Compact context", run: () => runAction(compactCurrentSession, state.viewedSessionId), disabled: !state.viewedSessionId },
-    { id: "toggle-sidebar", title: "切换侧栏", detail: "Toggle projects sidebar", run: () => runAction(toggleSidebar) },
-    { id: "toggle-files", title: "切换文件面板", detail: "Toggle project files", run: () => runAction(() => setFilesOpen(!state.filesOpen)) },
-    { id: "task-monitor", title: "后台任务", detail: state.taskMonitorOpen ? "Close background task monitor" : "Open background task monitor", run: () => toggleTaskMonitor() },
-    { id: "goal-set", title: "目标：设定", detail: "Set a session goal", run: () => showGoalPanel(true), disabled: !state.viewedSessionId },
-    { id: "goal-pause", title: "目标：暂停", detail: "Pause the active goal", disabled: !state.viewedSessionId || state.goal.value?.status !== "active", run: () => runAction(() => changeGoalStatus("paused"), state.viewedSessionId) },
-    { id: "goal-resume", title: "目标：恢复", detail: "Resume a paused goal", disabled: !state.viewedSessionId || state.goal.value?.status !== "paused", run: () => runAction(() => changeGoalStatus("active"), state.viewedSessionId) },
-    { id: "goal-clear", title: "目标：清除", detail: "Clear the active goal", disabled: !state.viewedSessionId || !state.goal.value, run: () => runAction(clearGoal, state.viewedSessionId) },
-    { id: "theme-dark", title: "主题：深色", detail: "Dark theme", run: () => setTheme("dark") },
-    { id: "theme-light", title: "主题：浅色", detail: "Light theme", run: () => setTheme("light") },
-    { id: "theme-system", title: "主题：跟随系统", detail: "Follow the OS theme", run: () => setTheme("system") },
-    { id: "shortcuts", title: "帮助：快捷键", detail: "Keyboard shortcuts", shortcut: "?", run: () => { state.shortcutsOpen = true; render() } },
+    { id: "new-chat", title: "New chat", detail: "Start a new chat", shortcut: "Ctrl+N", run: () => runAction(startNewChat) },
+    { id: "open-settings", title: "Open settings", detail: "Runtime settings", shortcut: "Ctrl+,", run: () => openSettings() },
+    { id: "compact", title: "Compact context", detail: "Compact context", run: () => runAction(compactCurrentSession, state.viewedSessionId), disabled: !state.viewedSessionId },
+    { id: "toggle-sidebar", title: "Toggle sidebar", detail: "Toggle projects sidebar", run: () => runAction(toggleSidebar) },
+    { id: "toggle-files", title: "Toggle files panel", detail: "Toggle project files", run: () => runAction(() => setFilesOpen(!state.filesOpen)) },
+    { id: "task-monitor", title: "Background tasks", detail: state.taskMonitorOpen ? "Close background task monitor" : "Open background task monitor", run: () => toggleTaskMonitor() },
+    { id: "goal-set", title: "Goal: set", detail: "Set a session goal", run: () => showGoalPanel(true), disabled: !state.viewedSessionId },
+    { id: "goal-pause", title: "Goal: pause", detail: "Pause the active goal", disabled: !state.viewedSessionId || state.goal.value?.status !== "active", run: () => runAction(() => changeGoalStatus("paused"), state.viewedSessionId) },
+    { id: "goal-resume", title: "Goal: resume", detail: "Resume a paused goal", disabled: !state.viewedSessionId || state.goal.value?.status !== "paused", run: () => runAction(() => changeGoalStatus("active"), state.viewedSessionId) },
+    { id: "goal-clear", title: "Goal: clear", detail: "Clear the active goal", disabled: !state.viewedSessionId || !state.goal.value, run: () => runAction(clearGoal, state.viewedSessionId) },
+    { id: "theme-dark", title: "Theme: dark", detail: "Dark theme", run: () => setTheme("dark") },
+    { id: "theme-light", title: "Theme: light", detail: "Light theme", run: () => setTheme("light") },
+    { id: "theme-system", title: "Theme: system", detail: "Follow the OS theme", run: () => setTheme("system") },
+    { id: "shortcuts", title: "Help: keyboard shortcuts", detail: "Keyboard shortcuts", shortcut: "?", run: () => { state.shortcutsOpen = true; render() } },
   ]
   if (state.viewedSessionId && !runtimeTurnActive()) {
-    commands.push({ id: "delete-current", title: `删除会话：${clipLine(sessionTitle.textContent || state.viewedSessionId, 32)}`, detail: state.viewedSessionId, run: () => runAction(() => deleteSessionRequest(state.viewedSessionId)) })
+    commands.push({ id: "delete-current", title: `Delete session: ${clipLine(sessionTitle.textContent || state.viewedSessionId, 32)}`, detail: state.viewedSessionId, run: () => runAction(() => deleteSessionRequest(state.viewedSessionId)) })
   }
   for (const session of knownSessions().filter((item) => item.id !== state.viewedSessionId).slice(0, 20)) {
     commands.push({
       id: `session-${session.id}`,
-      title: `切换会话：${clipLine(session.title || "Untitled", 40)}`,
+      title: `Switch session: ${clipLine(session.title || "Untitled", 40)}`,
       detail: clipLine(session.preview || session.id, 60),
       keywords: `switch session ${session.id}`,
       run: () => runAction(() => switchSession(session.id), session.id),
@@ -1325,7 +1325,7 @@ function paletteCommands(): PaletteCommand[] {
     for (const model of state.models.slice(0, 15)) {
       commands.push({
         id: `model-${model}`,
-        title: `模型：${model}`,
+        title: `Model: ${model}`,
         keywords: `model ${model}`,
         run: () => runAction(() => selectModel(model)),
       })
@@ -1335,7 +1335,7 @@ function paletteCommands(): PaletteCommand[] {
     for (const effort of reasoningEfforts) {
       commands.push({
         id: `effort-${effort}`,
-        title: `力度：${effort}`,
+        title: `Effort: ${effort}`,
         keywords: `reasoning effort ${effort}`,
         run: () => runAction(() => selectEffort(effort), state.viewedSessionId),
       })
@@ -1491,7 +1491,7 @@ function renderEntry(entry: Entry): string {
     case "file":
       return `<div class="ledger-row ledger-file" data-entry-id="${escapeAttribute(entry.id)}"><span class="status-pip pip-done"></span><span class="ledger-verb">Edited</span><code class="ledger-arg">${escapeHtml(entry.filePath)}</code></div>`
     case "error": {
-      const retryable = canRetryLastPrompt() ? `<button type="button" class="ghost-button" data-retry-turn title="Resend the last prompt">重试</button>` : ""
+      const retryable = canRetryLastPrompt() ? `<button type="button" class="ghost-button" data-retry-turn title="Resend the last prompt">Retry</button>` : ""
       return `<div class="stream-card card-error" data-entry-id="${escapeAttribute(entry.id)}"><div class="card-label">${escapeHtml(entry.source)}</div><div class="card-body">${escapeHtml(entry.content)}</div>${retryable ? `<div class="card-actions">${retryable}</div>` : ""}</div>`
     }
     case "notice":
@@ -2054,7 +2054,7 @@ async function promoteFollowUp(inputId: string) {
       // inputs on settle. Invalidate the dock instead of surfacing the race.
       delete state.pendingInputs[sessionId]
       syncCurrentPendingInputs()
-      state.notice = "回合已结束，排队输入已被丢弃。"
+      state.notice = "The turn has ended; queued input was discarded."
       render()
       return
     }
@@ -2094,7 +2094,7 @@ async function recallPendingInput(inputId: string) {
       if (index >= 0) pending.splice(index, 1)
       if (pending.length === 0) delete state.pendingInputs[sessionId]
       setPrompt([asRecordText(item.input), prompt.value].filter((value) => value.trim()).join("\n\n"), true)
-      state.notice = "回合已结束：排队输入已退回输入框。"
+      state.notice = "The turn has ended; queued input was returned to the composer."
       render()
       return
     }

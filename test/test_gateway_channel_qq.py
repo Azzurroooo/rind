@@ -1,4 +1,4 @@
-"""QQ adapter smoke tests over a REAL loopback reverse-WS (渠道冒烟, gateway.md §9).
+"""QQ adapter smoke tests over a REAL loopback reverse-WS (channel smoke tests, gateway.md §9).
 
 QQ's "SDK" is the repo's own ``websockets`` library, so these tests run the
 real stack: the adapter serves its OneBot v11 endpoint on an ephemeral port
@@ -176,7 +176,7 @@ def test_oversize_attachment_is_dropped_with_one_line_notice(tmp_path, monkeypat
                 "sender": {"nickname": "Zhang"}}))
             notice = await _recv(ws)  # §8: one-line notice instead of the attachment
             assert notice["action"] == "send_private_msg"
-            assert notice["params"]["message"][0]["data"]["text"].startswith("附件过大")
+            assert notice["params"]["message"][0]["data"]["text"].startswith("Attachment too large")
             await ws.send(json.dumps({"status": "ok", "retcode": 0, "echo": notice["echo"], "data": {}}))
             await _until(lambda: len(sink.messages) == 1)
         (msg,) = sink.messages
@@ -198,11 +198,11 @@ def test_send_after_private_inbound_dispatches_send_private_msg_with_echo(tmp_pa
                                       "sender": {"nickname": "Zhang"}}))
             await _until(lambda: len(sink.messages) == 1)
             send_task = asyncio.create_task(
-                channel.send(SendTarget(chat_id="10001"), OutboundPayload(text="部署完成")))
+                channel.send(SendTarget(chat_id="10001"), OutboundPayload(text="deploy finished")))
             frame = await _recv(ws)
             assert frame["action"] == "send_private_msg"
             assert frame["params"] == {"user_id": 10001,
-                                       "message": [{"type": "text", "data": {"text": "部署完成"}}]}
+                                       "message": [{"type": "text", "data": {"text": "deploy finished"}}]}
             assert frame["echo"].startswith("rind-")
             await ws.send(json.dumps({"status": "ok", "retcode": 0, "echo": frame["echo"],
                                       "data": {"message_id": 900}}))
@@ -220,12 +220,12 @@ def test_send_group_text_and_image_segment(tmp_path):
         async with ws_connect(url) as ws:
             send_task = asyncio.create_task(channel.send(  # unknown chat → group action by default
                 SendTarget(chat_id="20002"),
-                OutboundPayload(text="看附件", attachments=(
+                OutboundPayload(text="see attachment", attachments=(
                     Attachment(path=media, content_type="image/png", kind="image"),))))
             frame = await _recv(ws)
             assert frame["action"] == "send_group_msg"
             assert frame["params"]["group_id"] == 20002
-            assert frame["params"]["message"] == [{"type": "text", "data": {"text": "看附件"}},
+            assert frame["params"]["message"] == [{"type": "text", "data": {"text": "see attachment"}},
                                                   {"type": "image", "data": {"file": media.as_uri()}}]
             await ws.send(json.dumps({"status": "ok", "retcode": 0, "echo": frame["echo"], "data": {}}))
             await asyncio.wait_for(send_task, 2.0)

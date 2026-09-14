@@ -1,4 +1,4 @@
-"""Slack adapter smoke tests against a fake slack_bolt (渠道冒烟, gateway.md §9).
+"""Slack adapter smoke tests against a fake slack_bolt (channel smoke tests, gateway.md §9).
 
 A fake ``slack_bolt`` module tree is injected into ``sys.modules``; the real
 adapter code (lazy import, socket-mode wiring, event normalization, send,
@@ -102,7 +102,7 @@ def fake_slack_bolt(monkeypatch):
 
 def _message_event(**overrides):
     event = {"type": "message", "channel": "C123", "channel_type": "channel", "user": "U42",
-             "text": "帮我看看 build 报错", "ts": "1700000001.000100"}
+             "text": "help me look at this build error", "ts": "1700000001.000100"}
     event.update(overrides)
     return event
 
@@ -149,12 +149,12 @@ def test_dm_message_event_normalizes_to_inbound_message(tmp_path, fake_slack_bol
     async def scenario():
         channel, sink = await _start(tmp_path)
         await channel._on_message(_message_event(channel="D555", channel_type="im",
-                                                 user="U42", text="你好 rind"))
+                                                 user="U42", text="hello rind"))
         (msg,) = sink.messages
         assert msg.channel == "slack"
         assert msg.chat_id == "D555" and msg.chat_type == "dm"
         assert msg.sender_id == "U42" and msg.sender_name == "U42"
-        assert msg.thread_id is None and msg.text == "你好 rind"
+        assert msg.thread_id is None and msg.text == "hello rind"
         assert msg.attachments == () and msg.message_ref == "1700000001.000100"
         await channel.stop()
 
@@ -185,8 +185,8 @@ def test_group_message_maps_thread_ts_and_downloads_file(tmp_path, fake_slack_bo
 
         channel._fetch_bytes = fake_fetch
         event = _message_event(channel_type="group", thread_ts="1700000000.000500",
-                               text="看这张图",
-                               files=[{"name": "截图 build.png", "size": 1024, "mimetype": "image/png",
+                               text="look at this image",
+                               files=[{"name": "screenshot build.png", "size": 1024, "mimetype": "image/png",
                                        "url_private_download": "https://files.slack.com/x.png",
                                        "url_private": "https://files.slack.com/x.png"}])
         await channel._on_message(event)
@@ -197,7 +197,7 @@ def test_group_message_maps_thread_ts_and_downloads_file(tmp_path, fake_slack_bo
         assert attachment.path.is_file() and attachment.path.read_bytes() == b"png-bytes"
         assert attachment.path.parent.parent.parent == tmp_path / "uploads"  # <uploads>/slack/<date>/
         assert attachment.path.parent.parent.name == "slack"
-        assert attachment.path.name == "截图_build.png"  # sanitized, no spaces
+        assert attachment.path.name == "screenshot_build.png"  # sanitized, no spaces
         assert attachment.content_type == "image/png" and attachment.kind == "image"
         assert fetched == ["https://files.slack.com/x.png"]
         await channel.stop()
@@ -236,10 +236,10 @@ def test_send_posts_text_with_thread_ts_and_records_it(tmp_path, fake_slack_bolt
     async def scenario():
         channel, sink = await _start(tmp_path)
         await channel.send(SendTarget(chat_id="C123", thread_id="1700000000.000500"),
-                           OutboundPayload(text="部署到生产环境？ 1. 立即部署 2. 再等等"))
+                           OutboundPayload(text="Deploy to production? 1. Deploy now 2. Wait a bit"))
         method, kwargs = channel._client.calls[-1]
         assert method == "chat_postMessage"
-        assert kwargs == {"channel": "C123", "text": "部署到生产环境？ 1. 立即部署 2. 再等等",
+        assert kwargs == {"channel": "C123", "text": "Deploy to production? 1. Deploy now 2. Wait a bit",
                           "thread_ts": "1700000000.000500"}
         assert channel._last_ts["C123"] == "1700000000.000001"  # transport state for the react hook
         await channel.stop()
@@ -269,7 +269,7 @@ def test_react_hook_adds_white_check_mark_on_last_posted_message(tmp_path, fake_
         channel, sink = await _start(tmp_path)
         await channel.react(SendTarget(chat_id="C123"), "✅")  # nothing posted yet → quiet no-op
         assert all(method != "reactions_add" for method, _ in channel._client.calls)
-        await channel.send(SendTarget(chat_id="C123"), OutboundPayload(text="完成"))
+        await channel.send(SendTarget(chat_id="C123"), OutboundPayload(text="Done"))
         await channel.react(SendTarget(chat_id="C123"), "✅")  # Outbound.react passes the glyph
         method, kwargs = channel._client.calls[-1]
         assert method == "reactions_add"

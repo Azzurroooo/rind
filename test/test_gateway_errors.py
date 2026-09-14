@@ -62,11 +62,11 @@ def test_cancelled_detection():
 
 
 def test_unknown_path_uses_sanitized_short_reason():
-    event = {"type": "turn_failed", "error": "模型\n连接 中断"}
-    assert user_error_line(event) == "⚠️ 任务失败（模型 连接 中断）。可回复 /status 查看状态或重试。"
+    event = {"type": "turn_failed", "error": "model\nconnection dropped"}
+    assert user_error_line(event) == "⚠️ Task failed (model connection dropped). Reply /status to check state, or retry."
     assert user_error_line(RuntimeError("weird upstream state")) == (
-        "⚠️ 任务失败（weird upstream state）。可回复 /status 查看状态或重试。")
-    assert user_error_line({"error": ""}) == UNKNOWN_TEMPLATE.format(detail="未知错误")
+        "⚠️ Task failed (weird upstream state). Reply /status to check state, or retry.")
+    assert user_error_line({"error": ""}) == UNKNOWN_TEMPLATE.format(detail="unknown error")
 
 
 def test_detail_is_capped_and_never_multiline():
@@ -86,7 +86,7 @@ def test_no_stack_or_provider_body_leakage():
         line = user_error_line(exc)
     assert "secret-internal-detail" in line  # the message is the short reason
     assert "Traceback" not in line and "File \"" not in line
-    assert line.startswith("⚠️") and line.endswith("。")
+    assert line.startswith("⚠️") and line.endswith(".")
 
 
 def test_worker_request_error_maps_by_provider_error_body():

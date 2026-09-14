@@ -30,7 +30,7 @@ if str(PROJECT_ROOT / "test") not in sys.path:
 from helpers.fake_openai_server import FakeOpenAIServer
 
 TOKEN = "journey-suite-token"
-REPLY = "你好！这是来自假模型的完整回复。"
+REPLY = "Hello! This is a complete reply from the fake model."
 
 
 def _free_port() -> int:
@@ -149,7 +149,7 @@ async def _run_prompt_turn(client: JourneyClient, session_id: str, text: str, ti
             break
         await client.next_event(timeout=max(1.0, deadline - time.monotonic()))
     else:
-        raise AssertionError("turn 未在时限内结束")
+        raise AssertionError("turn did not finish within the timeout")
     return client.events[start:], response
 
 
@@ -237,7 +237,7 @@ async def _fresh_session(worker, client: JourneyClient) -> str:
     return session_id
 
 
-# --- J1: 浏览器登录通道 --------------------------------------------------------
+# --- J1: browser login channel --------------------------------------------------------
 
 
 def test_j1_browser_login_channel(worker_journey):
@@ -284,11 +284,11 @@ def test_j1_browser_login_channel(worker_journey):
     asyncio.run(run())
 
 
-# --- J2: 完整对话回合 -----------------------------------------------------------
+# --- J2: full conversation turn -----------------------------------------------------------
 
 
 def test_j2_full_conversation_turn(worker_journey, model_server):
-    worker_journey.server.script_text(["你好！", "这是来自", "假模型的", "完整回复。"], delay_ms=15)
+    worker_journey.server.script_text(["Hello!", " This is a", " complete reply", " from the fake model."], delay_ms=15)
 
     async def run():
         client = JourneyClient(f"{worker_journey.ws_url}?token={TOKEN}")
@@ -296,7 +296,7 @@ def test_j2_full_conversation_turn(worker_journey, model_server):
         session_id = await _fresh_session(worker_journey, client)
         client.reset_cursor()
 
-        events, response = await _run_prompt_turn(client, session_id, "打个招呼")
+        events, response = await _run_prompt_turn(client, session_id, "say hello")
 
         assert response.get("ok") is True and response.get("session_id") == session_id
         types = _event_types(events)
@@ -305,22 +305,22 @@ def test_j2_full_conversation_turn(worker_journey, model_server):
         assert "assistant_message_completed" in types
         assert types[-1] == "turn_completed"
         completed = [e for e in events if e["event"]["type"] == "assistant_message_completed"]
-        assert completed and completed[-1]["event"].get("content", "").endswith("完整回复。")
+        assert completed and completed[-1]["event"].get("content", "").endswith("fake model.")
         deltas = "".join(e["event"].get("text", "") for e in events if e["event"]["type"] == "assistant_delta")
-        assert deltas == "你好！这是来自假模型的完整回复。"
+        assert deltas == "Hello! This is a complete reply from the fake model."
         for envelope in events:
-            assert envelope["session_id"] == session_id, "订阅过滤失效：收到了别的会话的事件"
+            assert envelope["session_id"] == session_id, "subscription filter broken: received events from another session"
         await client.close()
 
     asyncio.run(run())
 
 
-# --- J3: 断线追平 ----------------------------------------------------------------
+# --- J3: disconnect and catch-up ----------------------------------------------------------------
 
 
 def test_j3_disconnect_and_catch_up(worker_journey, model_server):
     server = worker_journey.server
-    server.script_text([f"片段{i}。" for i in range(40)], delay_ms=40)
+    server.script_text([f"segment {i}." for i in range(40)], delay_ms=40)
 
     async def run():
         client = JourneyClient(f"{worker_journey.ws_url}?token={TOKEN}")
@@ -328,14 +328,14 @@ def test_j3_disconnect_and_catch_up(worker_journey, model_server):
         session_id = await _fresh_session(worker_journey, client)
         client.reset_cursor()
         prompt_task = asyncio.create_task(
-            client.request("session/prompt", {"session_id": session_id, "input": "跑个长任务"}, timeout=60)
+            client.request("session/prompt", {"session_id": session_id, "input": "run a long task"}, timeout=60)
         )
         await client.next_event(timeout=30)
         await client.next_event(timeout=30)
         seen_before = [
             e for e in client.events if e["event"].get("durability") == "durable"
         ]
-        await client.close()  # 用户断网；worker 继续跑
+        await client.close()  # the user goes offline; the worker keeps running
 
         deadline = time.monotonic() + 30
         while time.monotonic() < deadline:
@@ -349,7 +349,7 @@ def test_j3_disconnect_and_catch_up(worker_journey, model_server):
                 break
             await asyncio.sleep(0.3)
         else:
-            raise AssertionError("断线后 turn 未完成")
+            raise AssertionError("turn did not complete after the disconnect")
 
         reconnected = JourneyClient(f"{worker_journey.ws_url}?token={TOKEN}")
         await reconnected.connect()
@@ -360,9 +360,9 @@ def test_j3_disconnect_and_catch_up(worker_journey, model_server):
         assert types[0] == "turn_started"
         assert types[-1] == "turn_completed"
         completed = [e for e in events if e["event"]["type"] == "assistant_message_completed"]
-        assert completed and completed[-1]["event"]["content"].endswith("片段39。")
+        assert completed and completed[-1]["event"]["content"].endswith("segment 39.")
         durable_before_types = _event_types(seen_before)
-        assert types[: len(durable_before_types)] == durable_before_types, "追平事件与断线前所见不一致"
+        assert types[: len(durable_before_types)] == durable_before_types, "replayed events do not match what was seen before the disconnect"
         empty = await reconnected.request("session/replay", {"session_id": session_id, "after_cursor": cursor})
         assert empty["events"] == [] and empty["cursor"] == cursor
         with contextlib.suppress(ConnectionError):
@@ -372,11 +372,11 @@ def test_j3_disconnect_and_catch_up(worker_journey, model_server):
     asyncio.run(run())
 
 
-# --- J4: 队列与打断 ----------------------------------------------------------------
+# --- J4: queueing and interruption ----------------------------------------------------------------
 
 
 def test_j4_queue_and_cancel(worker_journey, model_server):
-    worker_journey.server.script_text([f"长任务进度{i}。" for i in range(50)], delay_ms=120)
+    worker_journey.server.script_text([f"long task progress {i}." for i in range(50)], delay_ms=120)
 
     async def run():
         client = JourneyClient(f"{worker_journey.ws_url}?token={TOKEN}")
@@ -384,16 +384,18 @@ def test_j4_queue_and_cancel(worker_journey, model_server):
         session_id = await _fresh_session(worker_journey, client)
         client.reset_cursor()
         prompt_task = asyncio.create_task(
-            client.request("session/prompt", {"session_id": session_id, "input": "跑个长任务"}, timeout=60)
+            client.request("session/prompt", {"session_id": session_id, "input": "run a long task"}, timeout=60)
         )
         started = await client.next_event(timeout=30)
         assert started["event"]["type"] == "turn_started"
 
-        queued = await client.request("rind/session/follow_up", {"session_id": session_id, "input": "追加一个问题"})
+        queued = await client.request("rind/session/follow_up", {"session_id": session_id, "input": "one more question"})
         assert queued.get("input_id")
-        # NOTE: steer 中止当前流并在下一采样步重新调用模型，会额外消耗一个脚本
-        # 条目且与 cancel 存在竞态——steer 的接线已由 web(带 turn_id) 与输入队列
-        # 单元测试覆盖，这里聚焦用户可感知的"排队 + 打断 + 恢复"。
+        # NOTE: steer aborts the current stream and re-calls the model at the
+        # next sampling step, burning an extra script entry and racing with
+        # cancel — steer wiring is covered by the web (with turn_id) and
+        # input-queue unit tests; here we focus on the user-visible
+        # queue + interrupt + resume.
 
         cancelled = await client.request("session/cancel", {"session_id": session_id})
         assert cancelled.get("ok") is True
@@ -403,11 +405,11 @@ def test_j4_queue_and_cancel(worker_journey, model_server):
                 break
             await client.next_event(timeout=max(1.0, deadline - time.monotonic()))
         else:
-            raise AssertionError("取消后未收到 turn_cancelled")
+            raise AssertionError("turn_cancelled not received after the cancel")
         await prompt_task
 
-        worker_journey.server.script_text(["取消后一切正常。"])
-        events, response = await _run_prompt_turn(client, session_id, "还在吗")
+        worker_journey.server.script_text(["All good after the cancel."])
+        events, response = await _run_prompt_turn(client, session_id, "are you still there")
         delta_texts = "".join(e["event"].get("text", "") for e in events if e["event"].get("type") == "assistant_delta")
         print("J4-PROMPT2 deltas:", delta_texts[:80], flush=True)
         print("J4-SERVER-LAST:", json.dumps(worker_journey.server.last_request().get("messages", [])[-2:], ensure_ascii=False)[:300], flush=True)
@@ -418,18 +420,18 @@ def test_j4_queue_and_cancel(worker_journey, model_server):
     asyncio.run(run())
 
 
-# --- J5: 提问旅程 ------------------------------------------------------------------
+# --- J5: question journey ------------------------------------------------------------------
 
 
 def test_j5_user_question_round_trip(worker_journey, model_server):
     server = worker_journey.server
     server.script_tool_call(
         "ask_user_question",
-        {"question": "选哪个方案？", "options": [
-            {"label": "方案A (Recommended)", "description": "更稳妥"},
-            {"label": "方案B", "description": "更快"},
+        {"question": "Which option should we pick?", "options": [
+            {"label": "Option A (Recommended)", "description": "safer"},
+            {"label": "Option B", "description": "faster"},
         ]},
-        then_text=["好的，按方案A执行完毕。"],
+        then_text=["OK, done executing Option A."],
     )
 
     async def run():
@@ -438,7 +440,7 @@ def test_j5_user_question_round_trip(worker_journey, model_server):
         session_id = await _fresh_session(worker_journey, client)
         client.reset_cursor()
         prompt_task = asyncio.create_task(
-            client.request("session/prompt", {"session_id": session_id, "input": "做决策"}, timeout=90)
+            client.request("session/prompt", {"session_id": session_id, "input": "make the decision"}, timeout=90)
         )
         question = None
         deadline = time.monotonic() + 30
@@ -446,35 +448,35 @@ def test_j5_user_question_round_trip(worker_journey, model_server):
             envelope = await client.next_event(timeout=max(1.0, deadline - time.monotonic()))
             if envelope["event"].get("type") == "user_question_requested":
                 question = envelope["event"]
-        assert question, f"未收到提问事件；已见事件: {_event_types(client.events)}"
-        assert question.get("question") == "选哪个方案？"
-        assert question.get("options"), "提问事件未携带选项"
+        assert question, f"no question event received; events seen: {_event_types(client.events)}"
+        assert question.get("question") == "Which option should we pick?"
+        assert question.get("options"), "question event carried no options"
 
         await client.request(
             "rind/user-question/respond",
-            {"session_id": session_id, "tool_call_id": question["tool_call_id"], "answer": "方案A"},
+            {"session_id": session_id, "tool_call_id": question["tool_call_id"], "answer": "Option A"},
         )
         deadline = time.monotonic() + 60
         while time.monotonic() < deadline:
             completed = [e for e in client.events if e["event"].get("type") == "assistant_message_completed"]
             if completed:
-                assert "方案A" in completed[-1]["event"]["content"]
+                assert "Option A" in completed[-1]["event"]["content"]
                 break
             await client.next_event(timeout=max(1.0, deadline - time.monotonic()))
         else:
-            raise AssertionError("回答后未收到最终回复")
+            raise AssertionError("no final reply received after answering")
         await prompt_task
-        assert server.request_count() >= 2, "回答后模型没有带着答案继续"
+        assert server.request_count() >= 2, "model did not continue with the answer after responding"
         await client.close()
 
     asyncio.run(run())
 
 
-# --- J6: 附件与多模态提升 -----------------------------------------------------------
+# --- J6: attachments and multimodal promotion -----------------------------------------------------------
 
 
 def test_j6_attachment_upload_and_image_promotion(worker_journey, model_server):
-    worker_journey.server.script_text(["我看到这张图了。"])
+    worker_journey.server.script_text(["I can see this image."])
     png = base64.b64encode(b"\x89PNG\r\n\x1a\n" + b"0" * 64).decode()
 
     async def run():
@@ -489,29 +491,29 @@ def test_j6_attachment_upload_and_image_promotion(worker_journey, model_server):
         assert written["size"] == len(b"\x89PNG\r\n\x1a\n" + b"0" * 64)
 
         client.reset_cursor()
-        events, response = await _run_prompt_turn(client, session_id, "看看 uploads/web/journey.png")
+        events, response = await _run_prompt_turn(client, session_id, "look at uploads/web/journey.png")
         assert response.get("ok") is True
 
         request = worker_journey.server.last_request()
         user_messages = [m for m in request.get("messages", []) if m.get("role") == "user"]
-        assert user_messages, "模型请求缺少 user 消息"
+        assert user_messages, "model request is missing the user message"
         content = user_messages[-1]["content"]
-        assert isinstance(content, list), f"图片引用未被提升为多模态 part: {content!r}"
+        assert isinstance(content, list), f"image reference was not promoted to a multimodal part: {content!r}"
         assert any(
             part.get("type") == "image_url" and part["image_url"]["url"].startswith("data:image/png;base64,")
             for part in content
-        ), f"未找到 image_url part: {content!r}"
+        ), f"no image_url part found: {content!r}"
         await client.close()
 
     asyncio.run(run())
 
 
-# --- J7: 错误恢复 -------------------------------------------------------------------
+# --- J7: error recovery -------------------------------------------------------------------
 
 
 def test_j7_model_failure_recovers(worker_journey, model_server):
     worker_journey.server.script_error(500)
-    worker_journey.server.script_text(["恢复了。"])
+    worker_journey.server.script_text(["Recovered."])
 
     async def run():
         client = JourneyClient(f"{worker_journey.ws_url}?token={TOKEN}")
@@ -519,43 +521,44 @@ def test_j7_model_failure_recovers(worker_journey, model_server):
         session_id = await _fresh_session(worker_journey, client)
         client.reset_cursor()
 
-        events, response = await _run_prompt_turn(client, session_id, "这次会失败吗", timeout=90)
+        events, response = await _run_prompt_turn(client, session_id, "will this fail", timeout=90)
         failed = [e for e in events if e["event"].get("type") == "turn_failed"]
         recovered = [e for e in events if e["event"].get("type") == "turn_completed"]
-        assert failed or recovered, f"模型故障后既没有失败也没有恢复事件；已见: {_event_types(events)}；响应: {response}"
+        assert failed or recovered, f"neither a failure nor a recovery event after the model outage; seen: {_event_types(events)}; response: {response}"
         if recovered:
             finals = [e for e in events if e["event"].get("type") == "assistant_message_completed" and str(e["event"].get("content", "")).strip()]
-            assert finals, f"重试成功后没有任何非空的最终回复；事件: {[(e['event'].get('type'), str(e['event'].get('content', ''))[:15]) for e in events]}；模型请求数: {model_server.request_count()}"
-            assert "恢复了" in finals[-1]["event"]["content"]
+            assert finals, f"no non-empty final reply after the successful retry; events: {[(e['event'].get('type'), str(e['event'].get('content', ''))[:15]) for e in events]}; model requests: {model_server.request_count()}"
+            assert "Recovered" in finals[-1]["event"]["content"]
         else:
             assert "__error__" in response or response.get("ok") is not True
 
         ping = await client.request("ping", {})
-        assert ping == {"ok": True}, "故障后 worker 不可用"
+        assert ping == {"ok": True}, "worker unavailable after the failure"
 
-        worker_journey.server.script_text(["第二次成功。"])
-        events, response = await _run_prompt_turn(client, session_id, "再试一次")
+        worker_journey.server.script_text(["Second attempt succeeded."])
+        events, response = await _run_prompt_turn(client, session_id, "try again")
         assert response.get("ok") is True
         completed = [e for e in events if e["event"].get("type") == "assistant_message_completed"]
-        assert completed and "第二次成功" in completed[-1]["event"]["content"]
+        assert completed and "Second attempt succeeded" in completed[-1]["event"]["content"]
         await client.close()
 
     asyncio.run(run())
 
 
-# --- J8: 网关席位（gateway + 真实 worker 共享 WS）---------------------------------
+# --- J8: gateway seat (gateway + real worker sharing WS) ---------------------------------
 
 
 def test_j8_gateway_channel_full_conversation(worker_journey, model_server, tmp_path):
-    """一个 Telegram 风格的渠道用户：发消息 → 收到流式回复的最终稿；
-    追问被并入；/help 与 /stop 立即生效。"""
+    """A Telegram-style channel user: send a message → receive the final
+    draft of the streamed reply; follow-ups get merged in; /help and /stop
+    take effect immediately."""
     from gateway import ChannelCapabilities, InboundMessage, SendTarget
     from gateway.pump import TurnPump
     from gateway.router import SessionRouter
     from gateway.security import CooldownGate, PairingStore, SecurityGate
     from gateway.worker_client import WorkerClient
 
-    model_server.script_text(["网关收到任务并完成。"], delay_ms=5)
+    model_server.script_text(["Gateway got the task and finished it."], delay_ms=5)
     received: list = []
     typings = {"count": 0}
 
@@ -600,30 +603,30 @@ def test_j8_gateway_channel_full_conversation(worker_journey, model_server, tmp_
 
         async def inbound(ref, text):
             await pump.inbound(InboundMessage(channel="test", chat_id="chat", chat_type="dm",
-                                              sender_id="u1", sender_name="用户", thread_id=None,
+                                              sender_id="u1", sender_name="user", thread_id=None,
                                               text=text, attachments=(), message_ref=ref))
 
         def until(predicate, timeout=60.0, message="condition not met"):
             deadline = time.monotonic() + timeout
             while not predicate():
                 if time.monotonic() > deadline:
-                    raise AssertionError(f"{message}; 已收: {received}")
+                    raise AssertionError(f"{message}; received: {received}")
                 time.sleep(0.05)
 
-        # 1) 首条消息 → 完整回复（分片合并后）
-        await inbound("m-1", "帮我跑个任务")
-        until(lambda: any("网关收到任务" in text for text in received), message="首个回复未到达")
+        # 1) first message → full reply (after chunk merge)
+        await inbound("m-1", "run a task for me")
+        until(lambda: any("Gateway got the task" in text for text in received), message="first reply never arrived")
 
-        # 2) /help 立即生效（控制命令不走模型）
+        # 2) /help takes effect immediately (control commands bypass the model)
         before = len(received)
         await inbound("m-2", "/help")
-        until(lambda: len(received) > before and "常用" in received[-1] or any("命令" in text for text in received[before:]),
-              message="/help 未回复")
+        until(lambda: len(received) > before and "Essentials:" in received[-1] or any("Essentials:" in text for text in received[before:]),
+              message="/help did not reply")
 
         # 3) /status
         before = len(received)
         await inbound("m-3", "/status")
-        until(lambda: len(received) > before, message="/status 未回复")
+        until(lambda: len(received) > before, message="/status did not reply")
 
         pump_task.cancel()
         await asyncio.gather(pump_task, return_exceptions=True)
@@ -632,19 +635,19 @@ def test_j8_gateway_channel_full_conversation(worker_journey, model_server, tmp_
     asyncio.run(run())
 
 
-# --- J9: CLI 席位（one-shot 子进程）-------------------------------------------------
+# --- J9: CLI seat (one-shot subprocess) -------------------------------------------------
 
 
 def test_j9_cli_one_shot_channel(worker_journey, model_server):
-    model_server.script_text(["一次性任务完成，退出码应为 0。"], delay_ms=5)
+    model_server.script_text(["One-shot task done, exit code should be 0."], delay_ms=5)
     env = dict(os.environ)
     env.update({"RIND_HOME": str(worker_journey.home), "PYTHONUTF8": "1"})
     result = subprocess.run(
         ["node", str(PROJECT_ROOT / "frontend-cli" / "bin" / "rind.js"),
-         "run", "--prompt", "跑一个一次性任务", "--dir", str(worker_journey.workspace)],
+         "run", "--prompt", "run a one-shot task", "--dir", str(worker_journey.workspace)],
         cwd=worker_journey.root, env=env, capture_output=True, text=True, timeout=120,
         encoding="utf-8", errors="replace",
     )
-    assert result.returncode == 0, f"one-shot 退出码 {result.returncode}; stderr: {result.stderr[-500:]}"
-    assert "一次性任务完成" in result.stdout, f"stdout 缺少最终回复: {result.stdout[-300:]}"
-    assert model_server.request_count() >= 1, "CLI 未向模型发起请求"
+    assert result.returncode == 0, f"one-shot exit code {result.returncode}; stderr: {result.stderr[-500:]}"
+    assert "One-shot task done" in result.stdout, f"stdout missing the final reply: {result.stdout[-300:]}"
+    assert model_server.request_count() >= 1, "CLI made no model request"

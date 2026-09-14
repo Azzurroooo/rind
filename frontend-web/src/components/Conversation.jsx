@@ -10,9 +10,9 @@ import { ToolBlock } from "./ToolBlock.jsx";
 const DETACH_THRESHOLD_PX = 48;
 
 // Transcript governance (audit #5): stick to the bottom while streaming unless
-// the user scrolled up; a floating "↓ 回到最新" chip offers the way back.
+// the user scrolled up; a floating "↓ Jump to latest" chip offers the way back.
 // The oldest entries beyond the cap are dropped reducer-side; this component
-// renders the honest "更早的消息已折叠" divider for them.
+// renders the honest "Earlier messages have been collapsed" divider for them.
 const Conversation = forwardRef(function Conversation({
   messages,
   draft,
@@ -72,12 +72,12 @@ const Conversation = forwardRef(function Conversation({
     <section className="conversation-panel">
       <div className="conversation-header">
         <div><span className="eyebrow">LIVE TRANSCRIPT</span><h1>{active ? "Working through the request" : "Ready for your next request"}</h1></div>
-        {active && <button className={`stop-button ${interruptArmed ? "armed" : ""}`} onClick={onCancel}><CircleStop size={16} /> {interruptArmed ? "再按一次 Esc 停止" : "Stop turn"}</button>}
+        {active && <button className={`stop-button ${interruptArmed ? "armed" : ""}`} onClick={onCancel}><CircleStop size={16} /> {interruptArmed ? "Press Esc again to stop" : "Stop turn"}</button>}
       </div>
       <div className="transcript-frame">
         <div className="transcript" ref={transcriptRef} onScroll={handleScroll} aria-live="polite">
           {collapsedCount > 0 && (
-            <div className="collapsed-divider" role="note">更早的消息已折叠（{collapsedCount} 条）</div>
+            <div className="collapsed-divider" role="note">Earlier messages have been collapsed ({collapsedCount})</div>
           )}
           {!messages.length && !draft && <EmptyConversation />}
           {messages.map((message, index) => (
@@ -96,7 +96,7 @@ const Conversation = forwardRef(function Conversation({
           {!active && turnChanges && (
             <button type="button" className="change-summary" onClick={() => jumpToDiff(turnChanges.firstToolCallId)}>
               <FileDiff size={14} />
-              <span>改动 {turnChanges.fileCount} 个文件</span>
+              <span>Changed {turnChanges.fileCount} {turnChanges.fileCount === 1 ? "file" : "files"}</span>
               <span className="change-delta">+{turnChanges.added} −{turnChanges.removed}</span>
             </button>
           )}
@@ -104,7 +104,7 @@ const Conversation = forwardRef(function Conversation({
         </div>
         {detached && (
           <button type="button" className="jump-latest" onClick={scrollToLatest}>
-            <ArrowDown size={14} /> 回到最新
+            <ArrowDown size={14} /> Jump to latest
           </button>
         )}
       </div>
@@ -158,8 +158,8 @@ function MessageActions({ message, onRetry }) {
         type="button"
         className="message-action"
         tabIndex={-1}
-        title={state === "copied" ? "已复制" : state === "failed" ? "复制失败" : "复制消息"}
-        aria-label={state === "copied" ? "已复制" : state === "failed" ? "复制失败" : "复制消息"}
+        title={state === "copied" ? "Copied" : state === "failed" ? "Copy failed" : "Copy message"}
+        aria-label={state === "copied" ? "Copied" : state === "failed" ? "Copy failed" : "Copy message"}
         onClick={handleCopy}
       >
         {state === "copied" ? <Check size={13} /> : state === "failed" ? <X size={13} /> : <ClipboardCopy size={13} />}
@@ -169,8 +169,8 @@ function MessageActions({ message, onRetry }) {
           type="button"
           className="message-action"
           tabIndex={-1}
-          title="重试（重新发送该回合的用户输入）"
-          aria-label="重试"
+          title="Retry (resend this turn's user input)"
+          aria-label="Retry"
           onClick={() => onRetry(message)}
         >
           <RefreshCw size={13} />
@@ -181,8 +181,8 @@ function MessageActions({ message, onRetry }) {
 }
 
 // Queued input chip (audit #1): renders like a user row plus the QUEUED tag
-// and per-item actions — 取回 retrieves the input back to the draft
-// (unsteer / dequeue_follow_up), 转向 promotes a follow_up to steering.
+// and per-item actions — retrieve pulls the input back to the draft
+// (unsteer / dequeue_follow_up), steer promotes a follow_up to steering.
 function QueuedRow({ message, onRetrieve, onPromote }) {
   const [busy, setBusy] = useState(false);
   async function run(action) {
@@ -198,12 +198,12 @@ function QueuedRow({ message, onRetrieve, onPromote }) {
     <article className="message user queued-row" data-input-id={message.inputId || ""}>
       <div className="message-avatar human">You</div>
       <div className="message-body">
-        <div className="message-meta">You<span className="queued-chip">QUEUED 队列中{message.mode === "follow_up" ? " · follow_up" : " · steer"}</span></div>
+        <div className="message-meta">You<span className="queued-chip">QUEUED{message.mode === "follow_up" ? " · follow_up" : " · steer"}</span></div>
         <div className="message-content">{message.input}</div>
         <div className="queued-actions">
-          <button type="button" className="queued-action" tabIndex={-1} disabled={busy} title="取回该输入（回到输入框草稿）" onClick={() => run(onRetrieve)}>取回</button>
+          <button type="button" className="queued-action" tabIndex={-1} disabled={busy} title="Retrieve this input (back to the composer draft)" onClick={() => run(onRetrieve)}>Retrieve</button>
           {message.mode === "follow_up" && (
-            <button type="button" className="queued-action" tabIndex={-1} disabled={busy} title="转为立即转向（steer）插入当前回合" onClick={() => run(onPromote)}>转向</button>
+            <button type="button" className="queued-action" tabIndex={-1} disabled={busy} title="Redirect the current turn immediately (steer)" onClick={() => run(onPromote)}>Steer</button>
           )}
         </div>
       </div>

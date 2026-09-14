@@ -1,4 +1,4 @@
-"""DingTalk adapter smoke tests against a fake dingtalk-stream (渠道冒烟, §9).
+"""DingTalk adapter smoke tests against a fake dingtalk-stream (channel smoke tests, §9).
 
 A fake ``dingtalk_stream`` module is injected into ``sys.modules``; the real
 adapter code (lazy import, stream-client wiring, callback normalization with
@@ -109,7 +109,7 @@ async def _callback(channel, data):
 
 def _dm_data(**overrides):
     data = {"conversationId": "cid$dm1", "conversationType": "1", "senderStaffId": "staff42",
-            "senderNick": "张三", "msgId": "msg_1", "text": {"content": "帮我跑个构建"}}
+            "senderNick": "zhangsan", "msgId": "msg_1", "text": {"content": "run a build for me"}}
     data.update(overrides)
     return data
 
@@ -137,8 +137,8 @@ def test_dm_callback_normalizes_to_inbound_message(tmp_path, fake_dingtalk):
         (msg,) = sink.messages
         assert msg.channel == "dingtalk"
         assert msg.chat_id == "cid$dm1" and msg.chat_type == "dm"  # conversationType "1" → dm
-        assert msg.sender_id == "staff42" and msg.sender_name == "张三"
-        assert msg.thread_id is None and msg.text == "帮我跑个构建"
+        assert msg.sender_id == "staff42" and msg.sender_name == "zhangsan"
+        assert msg.thread_id is None and msg.text == "run a build for me"
         assert msg.attachments == () and msg.message_ref == "msg_1"
         await channel.stop()
 
@@ -157,12 +157,12 @@ def test_group_callback_and_picture_download_url(tmp_path, fake_dingtalk, monkey
         channel._fetch_bytes = fake_fetch
         await _callback(channel, {
             "conversationId": "cid$group9", "conversationType": "2", "senderStaffId": "staff42",
-            "senderNick": "李四", "msgId": "msg_2",
-            "text": {"content": "看这张图"},
+            "senderNick": "lisi", "msgId": "msg_2",
+            "text": {"content": "look at this image"},
             "content": {"downloadUrl": "https://static.dingtalk.com/pic.JPG", "mediaType": "picture"}})
         (msg,) = sink.messages
         assert msg.chat_id == "cid$group9" and msg.chat_type == "group"
-        assert msg.text == "看这张图"
+        assert msg.text == "look at this image"
         (attachment,) = msg.attachments
         assert attachment.path.is_file() and attachment.path.read_bytes() == b"png-bytes"
         assert attachment.path.parent.parent.parent == tmp_path / "uploads"  # <uploads>/dingtalk/<date>/
@@ -189,7 +189,7 @@ def test_oversize_media_is_dropped_with_one_line_notice(tmp_path, fake_dingtalk,
         assert msg.attachments == ()
         path, payload = channel._chatbot.posts[-1]
         assert path == dingtalk.DIRECT_SEND_API  # notice goes to the dm sender
-        assert json.loads(payload["msgParam"])["content"].startswith("附件过大")
+        assert json.loads(payload["msgParam"])["content"].startswith("Attachment too large")
         await channel.stop()
 
     asyncio.run(scenario())
@@ -211,15 +211,15 @@ def test_callbacks_without_identity_are_dropped(tmp_path, fake_dingtalk):
 def test_group_send_uses_group_messages_api_with_sample_markdown(tmp_path, fake_dingtalk):
     async def scenario():
         channel, sink = await _start(tmp_path)
-        await channel.send(SendTarget(chat_id="cid$group9"), OutboundPayload(text="部署到生产环境？\n1. 立即部署"))
+        await channel.send(SendTarget(chat_id="cid$group9"), OutboundPayload(text="Deploy to production?\n1. Deploy now"))
         (path, payload) = channel._chatbot.posts[-1]
         assert path == dingtalk.GROUP_SEND_API
         assert payload["robotCode"] == CLIENT_ID
         assert payload["openConversationId"] == "cid$group9"
         assert payload["msgKey"] == "sampleMarkdown"  # native markdown subset
         msg_param = json.loads(payload["msgParam"])
-        assert msg_param["content"] == "部署到生产环境？\n1. 立即部署"
-        assert msg_param["title"] == "部署到生产环境？"  # first line becomes the card title
+        assert msg_param["content"] == "Deploy to production?\n1. Deploy now"
+        assert msg_param["title"] == "Deploy to production?"  # first line becomes the card title
         await channel.stop()
 
     asyncio.run(scenario())
@@ -229,7 +229,7 @@ def test_send_after_dm_inbound_targets_the_staff_via_o_to_messages(tmp_path, fak
     async def scenario():
         channel, sink = await _start(tmp_path)
         await _callback(channel, _dm_data())  # teaches the adapter the dm sender
-        await channel.send(SendTarget(chat_id="cid$dm1"), OutboundPayload(text="构建完成"))
+        await channel.send(SendTarget(chat_id="cid$dm1"), OutboundPayload(text="build finished"))
         (path, payload) = channel._chatbot.posts[-1]
         assert path == dingtalk.DIRECT_SEND_API
         assert payload["userIds"] == ["staff42"]  # dm targets the staff, not the conversation

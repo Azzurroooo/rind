@@ -4,8 +4,8 @@ import { CheckCircle2, CircleOff, LoaderCircle, PlugZap, RefreshCw } from "lucid
 const FADE_MS = 800; // strip fades out 800ms after syncing completes (web-ui.md §2.1)
 
 // Connection state machine rendering (web-ui.md §2.1):
-//   online → nothing at all; reconnecting → 2px strip + "重连中";
-//   syncing → strip + "同步中…（N 条）" with a countdown; offline → strip + "已断开" + retry.
+//   online → nothing at all; reconnecting → 2px strip + "Reconnecting";
+//   syncing → strip + "Syncing… (N items)" with a countdown; offline → strip + "Disconnected" + retry.
 // The strip is position:fixed, so no transition ever shifts layout or scroll.
 export function ConnectionBar({ phase = "online", syncRemaining = 0, syncTotal = 0, url, onChangeUrl, onReconnect, onLogout }) {
   const [fading, setFading] = useState(false);
@@ -41,9 +41,9 @@ export function ConnectionBar({ phase = "online", syncRemaining = 0, syncTotal =
             <div className="connection-strip-bar" style={progressPercent != null ? { width: `${progressPercent}%` } : undefined} />
           </div>
           <div className={`connection-strip-chip ${stripPhase === "offline" ? "is-error" : "is-warning"}`}>
-            {stripPhase === "reconnecting" && <><LoaderCircle className="spin" size={13} /><span>重连中</span></>}
-            {(stripPhase === "syncing" || stripPhase === "fading") && <><LoaderCircle className="spin" size={13} /><span>同步中…（{Math.max(0, remaining)} 条）</span></>}
-            {stripPhase === "offline" && <><span>已断开</span><button className="strip-retry" onClick={onReconnect}>重试</button></>}
+            {stripPhase === "reconnecting" && <><LoaderCircle className="spin" size={13} /><span>Reconnecting</span></>}
+            {(stripPhase === "syncing" || stripPhase === "fading") && <><LoaderCircle className="spin" size={13} /><span>Syncing… ({Math.max(0, remaining)} items)</span></>}
+            {stripPhase === "offline" && <><span>Disconnected</span><button className="strip-retry" onClick={onReconnect}>Retry</button></>}
           </div>
         </div>
       )}
@@ -60,7 +60,7 @@ export function ConnectionBar({ phase = "online", syncRemaining = 0, syncTotal =
           <input aria-label="Worker WebSocket URL" value={url} onChange={(event) => onChangeUrl(event.target.value)} onKeyDown={(event) => event.key === "Enter" && onReconnect()} />
           <span className="connection-label">{phase === "online" ? "connected" : phase === "syncing" ? "syncing" : phase === "offline" || phase === "login" ? "offline" : "connecting"}</span>
           {connected
-            ? <button className="icon-button subtle" title="断开并清除本页凭证" onClick={onLogout}><CircleOff size={16} /></button>
+            ? <button className="icon-button subtle" title="Disconnect and clear this page's credentials" onClick={onLogout}><CircleOff size={16} /></button>
             : <button className="icon-button subtle" title="Reconnect to worker" onClick={onReconnect}>{phase === "reconnecting" || phase === "connecting" ? <LoaderCircle className="spin" size={16} /> : <RefreshCw size={16} />}</button>}
         </div>
         <div className="service-state">

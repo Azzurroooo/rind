@@ -35,7 +35,7 @@ MESSAGE_REF_LRU_SIZE, INBOUND_QUEUE_LIMIT = 512, 100  # §1: offline buffer cap
 QUESTION_TTL_SECONDS, QUESTION_SCAN_SECONDS = 300.0, 30.0
 TURN_STUCK_SECONDS = 30 * 60.0  # a turn active longer than this is force-reset
 TERMINAL_EVENT_TYPES = ("turn_completed", "turn_failed", "turn_cancelled")
-QUESTION_EXPIRED_REPLY, WORKER_UNRESPONSIVE_REPLY = "问题已超时", "worker 暂时无响应，已重试排队"
+QUESTION_EXPIRED_REPLY, WORKER_UNRESPONSIVE_REPLY = "Question expired", "Worker temporarily unresponsive; queued for retry"
 
 
 @dataclass(slots=True)
@@ -115,7 +115,7 @@ class TurnPump:
                 logger.warning("gateway: worker offline; dropping queued message %s", dropped.message_ref)
             if is_command(message.text.strip()):  # commands queue too, but say so
                 await self._out.send(message.channel, self._target_of(message),
-                                     OutboundPayload(text="worker 离线，命令暂存"))
+                                     OutboundPayload(text="Worker offline; command queued"))
             return
         if self._pending_inbound:  # preserve ordering: older messages first
             await self._flush_queued()
@@ -230,7 +230,7 @@ class TurnPump:
         elif etype in TERMINAL_EVENT_TYPES:
             await self._finish_turn(key)  # typing stop lands before any terminal reply
             if etype == "turn_failed":
-                detail = f"{user_error_line(event)}（session {session_id[:8]}）"
+                detail = f"{user_error_line(event)} (session {session_id[:8]})"
                 await self._out.reply(position, detail)
             elif etype == "turn_cancelled":
                 await self._out.reply(position, STOPPED_REPLY)  # ✅ receipt rides the reaction hook
@@ -253,7 +253,7 @@ class TurnPump:
             return
         options = tuple(str(option.get("label") if isinstance(option, dict) else option)
                         for option in event.get("options") or [])
-        await self._out.send_question(position, str(event.get("question") or "请选择："), options)
+        await self._out.send_question(position, str(event.get("question") or "Choose:"), options)
         pending = _PendingQuestion(key, session_id, position[0], position[1], str(event.get("tool_call_id") or ""),
                                    options, self._clock() + self._question_ttl)
         self._questions[key] = pending

@@ -35,7 +35,7 @@ export function ToolBlock({ tool }) {
 
   const name = String(tool?.name || "tool");
   const label = toolLabel(name);
-  const summary = toolSummary(name, tool) || (running ? "运行中…" : "");
+  const summary = toolSummary(name, tool) || (running ? "Running…" : "");
   const diffText = extractDiffText(name, tool);
   const output = toolOutput(name, tool);
   const details = toolDetails(name, tool);
@@ -89,7 +89,7 @@ export function ToolBlock({ tool }) {
             <div className="file-change"><FileCode2 size={14} /> {tool.file}</div>
           )}
           <details className="tool-raw">
-            <summary><TerminalSquare size={13} /> 原始 JSON</summary>
+            <summary><TerminalSquare size={13} /> Raw JSON</summary>
             {raw.args && <pre data-raw="args">{raw.args}</pre>}
             {raw.result && <pre data-raw="result">{raw.result}</pre>}
             {!raw.args && !raw.result && <pre data-raw="empty">{"{}"}</pre>}
@@ -123,7 +123,7 @@ function OutputArea({ output }) {
       <pre>{text}</pre>
       {capped && (
         <button type="button" className="tool-expand-all" onClick={() => setShowAll(true)}>
-          展开全部（共 {lines.length} 行）
+          Show all ({lines.length} lines)
         </button>
       )}
     </div>

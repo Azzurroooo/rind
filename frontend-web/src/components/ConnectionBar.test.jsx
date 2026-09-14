@@ -16,29 +16,29 @@ describe("ConnectionBar — four connection states (web-ui.md §2.1)", () => {
   it("online renders no connection strip at all", () => {
     render(<ConnectionBar {...baseProps} phase="online" />);
     expect(document.querySelector(".connection-strip")).toBeNull();
-    expect(screen.queryByText("重连中")).toBeNull();
-    expect(screen.queryByText("已断开")).toBeNull();
+    expect(screen.queryByText("Reconnecting")).toBeNull();
+    expect(screen.queryByText("Disconnected")).toBeNull();
   });
 
-  it("reconnecting shows the strip with 重连中", () => {
+  it("reconnecting shows the strip with Reconnecting", () => {
     render(<ConnectionBar {...baseProps} phase="reconnecting" />);
     expect(document.querySelector(".connection-strip.reconnecting")).not.toBeNull();
-    expect(screen.getByText("重连中")).not.toBeNull();
-    expect(screen.queryByText("重试")).toBeNull(); // no retry button while auto-retrying
+    expect(screen.getByText("Reconnecting")).not.toBeNull();
+    expect(screen.queryByText("Retry")).toBeNull(); // no retry button while auto-retrying
   });
 
-  it("syncing shows 同步中…（N 条） with the remaining count", () => {
+  it("syncing shows Syncing… (N items) with the remaining count", () => {
     render(<ConnectionBar {...baseProps} phase="syncing" syncTotal={6} syncRemaining={2} />);
     expect(document.querySelector(".connection-strip.syncing")).not.toBeNull();
-    expect(screen.getByText("同步中…（2 条）")).not.toBeNull();
+    expect(screen.getByText("Syncing… (2 items)")).not.toBeNull();
   });
 
-  it("offline shows 已断开 and its retry button triggers onReconnect", () => {
+  it("offline shows Disconnected and its retry button triggers onReconnect", () => {
     const onReconnect = vi.fn();
     render(<ConnectionBar {...baseProps} phase="offline" onReconnect={onReconnect} />);
     expect(document.querySelector(".connection-strip.offline")).not.toBeNull();
-    expect(screen.getByText("已断开")).not.toBeNull();
-    fireEvent.click(screen.getByText("重试"));
+    expect(screen.getByText("Disconnected")).not.toBeNull();
+    fireEvent.click(screen.getByText("Retry"));
     expect(onReconnect).toHaveBeenCalledTimes(1);
   });
 
@@ -53,11 +53,11 @@ describe("ConnectionBar — syncing completion fade (800ms)", () => {
     vi.useFakeTimers();
     try {
       const { rerender } = render(<ConnectionBar {...baseProps} phase="syncing" syncTotal={3} syncRemaining={0} />);
-      expect(screen.getByText("同步中…（0 条）")).not.toBeNull();
+      expect(screen.getByText("Syncing… (0 items)")).not.toBeNull();
 
       rerender(<ConnectionBar {...baseProps} phase="online" syncTotal={3} syncRemaining={0} />);
       expect(document.querySelector(".connection-strip.fading")).not.toBeNull();
-      expect(screen.getByText("同步中…（0 条）")).not.toBeNull(); // last count retained
+      expect(screen.getByText("Syncing… (0 items)")).not.toBeNull(); // last count retained
 
       act(() => {
         vi.advanceTimersByTime(800);
@@ -76,7 +76,7 @@ describe("ConnectionBar — topbar chrome", () => {
     expect(container.querySelector(".connection-dot.online")).not.toBeNull();
     expect(screen.getByText("connected")).not.toBeNull();
 
-    fireEvent.click(screen.getByTitle("断开并清除本页凭证"));
+    fireEvent.click(screen.getByTitle("Disconnect and clear this page's credentials"));
     expect(onLogout).toHaveBeenCalledTimes(1);
 
     rerender(<ConnectionBar {...baseProps} phase="offline" onLogout={onLogout} />);

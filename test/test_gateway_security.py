@@ -87,11 +87,11 @@ def test_dm_stranger_gets_fixed_pairing_card(tmp_path):
     verdict = gate.admit(_message(channel="telegram", sender_id="stranger"))
     lines = verdict.notice.splitlines()
     code = next(iter(gate._pairing.pending))
-    assert lines[0] == "Rind：尚未授权此账号。"
-    assert lines[1] == "身份：telegram · stranger"
-    assert f"配对码：`{code}`" in lines
+    assert lines[0] == "Rind: this account is not authorized yet."
+    assert lines[1] == "identity: telegram · stranger"
+    assert f"pairing code: `{code}`" in lines
     assert f"python main.py gateway approve {code}" in verdict.notice  # server command verbatim
-    assert any(line.startswith("有效期：60 分钟") for line in lines)  # 3600s TTL → 60 分钟
+    assert any(line.startswith("valid for 60 minutes") for line in lines)  # 3600s TTL → 60 minutes
     for char in code:  # code alphabet matches security.py (no I/1/O/0)
         assert char in CODE_ALPHABET
 
@@ -105,7 +105,7 @@ def test_dm_pairing_card_ttl_reflects_gate_config(tmp_path):
         pairing_ttl_seconds=90.0,  # sub-minute floors at 1 minute
     )
     verdict = gate.admit(_message(sender_id="stranger"))
-    assert "有效期：1 分钟" in verdict.notice
+    assert "valid for 1 minutes" in verdict.notice
 
 
 def test_dm_pairing_approved_sender_allows(tmp_path):
@@ -129,14 +129,14 @@ def test_dm_pairing_disabled_denies_silently(tmp_path):
 def test_group_allowed_with_mention(tmp_path):
     clock = _FakeClock()
     gate = _gate(tmp_path, clock)
-    verdict = gate.admit(_message(chat_type="group", chat_id="good-group", text="@Rind 帮我看下"))
+    verdict = gate.admit(_message(chat_type="group", chat_id="good-group", text="@Rind take a look"))
     assert verdict.allow is True
 
 
 def test_group_allowed_chat_without_mention_denied(tmp_path):
     clock = _FakeClock()
     gate = _gate(tmp_path, clock)
-    verdict = gate.admit(_message(chat_type="group", chat_id="good-group", text="普通聊天"))
+    verdict = gate.admit(_message(chat_type="group", chat_id="good-group", text="just chatting"))
     assert (verdict.allow, verdict.notice) == (False, "")
 
 
@@ -211,7 +211,7 @@ def test_cooldown_allows_then_notices_once_per_window():
     gate = CooldownGate(2)
     verdicts = [gate.admit("telegram", "s", now=1000.0 + offset) for offset in range(4)]
     assert [verdict.allow for verdict in verdicts[:2]] == [True, True]
-    assert verdicts[2].allow is False and "频繁" in verdicts[2].notice
+    assert verdicts[2].allow is False and "too fast" in verdicts[2].notice
     assert verdicts[3].allow is False and verdicts[3].notice == ""  # silent after first notice
 
 

@@ -21,7 +21,7 @@ describe("FileTree — panel and directory browsing (file/list)", () => {
     expect(listFiles).not.toHaveBeenCalled();
     expect(document.querySelector(".file-tree-body")).toBeNull();
 
-    fireEvent.click(screen.getByText("工作区文件"));
+    fireEvent.click(screen.getByText("Workspace files"));
     expect(listFiles).toHaveBeenCalledWith("");
     await waitFor(() => expect(screen.getByText("README.md")).not.toBeNull());
     expect(screen.getByText("src")).not.toBeNull();
@@ -35,7 +35,7 @@ describe("FileTree — panel and directory browsing (file/list)", () => {
       path === "" ? { entries: rootEntries } : { entries: [{ name: "app.py", type: "file", size: 10 }] }
     ));
     render(<FileTree workspace="E:/w" listFiles={listFiles} readFile={vi.fn()} />);
-    fireEvent.click(screen.getByText("工作区文件"));
+    fireEvent.click(screen.getByText("Workspace files"));
     await waitFor(() => expect(screen.getByText("src")).not.toBeNull());
     expect(listFiles).toHaveBeenCalledTimes(1);
 
@@ -52,19 +52,19 @@ describe("FileTree — panel and directory browsing (file/list)", () => {
       return { entries: [] };
     });
     render(<FileTree workspace="E:/w" listFiles={listFiles} readFile={vi.fn()} />);
-    fireEvent.click(screen.getByText("工作区文件"));
+    fireEvent.click(screen.getByText("Workspace files"));
     await waitFor(() => expect(screen.getByRole("alert").textContent).toContain("workspace gone"));
 
     failing = false; // the click invokes listFiles synchronously
-    fireEvent.click(screen.getByText("重试"));
-    await waitFor(() => expect(screen.getByText("空目录")).not.toBeNull());
+    fireEvent.click(screen.getByText("Retry"));
+    await waitFor(() => expect(screen.getByText("Empty directory")).not.toBeNull());
   });
 
   it("without a workspace it shows the idle hint and never calls the protocol", () => {
     const listFiles = vi.fn();
     render(<FileTree workspace="" listFiles={listFiles} readFile={vi.fn()} />);
-    fireEvent.click(screen.getByText("工作区文件"));
-    expect(screen.getByText("未选择工作区")).not.toBeNull();
+    fireEvent.click(screen.getByText("Workspace files"));
+    expect(screen.getByText("No workspace selected")).not.toBeNull();
     expect(listFiles).not.toHaveBeenCalled();
   });
 });
@@ -73,7 +73,7 @@ describe("FileTree — file preview (file/read)", () => {
   it("decodes text files from base64", async () => {
     const readFile = vi.fn(async () => ({ content_base64: b64("# hello"), mime: "text/markdown", size: 7 }));
     render(<FileTree workspace="E:/w" listFiles={vi.fn(async () => ({ entries: rootEntries }))} readFile={readFile} />);
-    fireEvent.click(screen.getByText("工作区文件"));
+    fireEvent.click(screen.getByText("Workspace files"));
     fireEvent.click(await screen.findByText("README.md"));
     await waitFor(() => expect(screen.getByText(/# hello/)).not.toBeNull());
     expect(readFile).toHaveBeenCalledWith("README.md");
@@ -82,7 +82,7 @@ describe("FileTree — file preview (file/read)", () => {
   it("shows images via a data URL", async () => {
     const readFile = vi.fn(async () => ({ content_base64: b64("pngdata"), mime: "image/png", size: 8 }));
     render(<FileTree workspace="E:/w" listFiles={vi.fn(async () => ({ entries: rootEntries }))} readFile={readFile} />);
-    fireEvent.click(screen.getByText("工作区文件"));
+    fireEvent.click(screen.getByText("Workspace files"));
     fireEvent.click(await screen.findByText("logo.png"));
     await waitFor(() => expect(document.querySelector(".tree-preview-image")).not.toBeNull());
     expect(document.querySelector(".tree-preview-image").src).toContain("data:image/png;base64,");
@@ -91,25 +91,25 @@ describe("FileTree — file preview (file/read)", () => {
   it("binary files get a size + hint instead of garbage", async () => {
     const readFile = vi.fn(async () => ({ content_base64: b64("PK"), mime: "application/zip", size: 9000 }));
     render(<FileTree workspace="E:/w" listFiles={vi.fn(async () => ({ entries: [{ name: "bundle.zip", type: "file", size: 9000 }] }))} readFile={readFile} />);
-    fireEvent.click(screen.getByText("工作区文件"));
+    fireEvent.click(screen.getByText("Workspace files"));
     fireEvent.click(await screen.findByText("bundle.zip"));
-    await waitFor(() => expect(screen.getByText(/二进制文件/)).not.toBeNull());
+    await waitFor(() => expect(screen.getByText(/Binary file/)).not.toBeNull());
     expect(document.querySelector(".tree-preview").textContent).toContain("8.8 KiB");
   });
 
   it("files above the 8 MiB limit are rejected before reading", async () => {
     const readFile = vi.fn();
     render(<FileTree workspace="E:/w" listFiles={vi.fn(async () => ({ entries: [{ name: "huge.bin", type: "file", size: 9 * 1024 * 1024 }] }))} readFile={readFile} />);
-    fireEvent.click(screen.getByText("工作区文件"));
+    fireEvent.click(screen.getByText("Workspace files"));
     fireEvent.click(await screen.findByText("huge.bin"));
-    await waitFor(() => expect(screen.getByText(/文件过大/)).not.toBeNull());
+    await waitFor(() => expect(screen.getByText(/File too large/)).not.toBeNull());
     expect(readFile).not.toHaveBeenCalled();
   });
 
   it("read errors surface inline", async () => {
     const readFile = vi.fn(async () => { throw new Error("NotFound"); });
     render(<FileTree workspace="E:/w" listFiles={vi.fn(async () => ({ entries: rootEntries }))} readFile={readFile} />);
-    fireEvent.click(screen.getByText("工作区文件"));
+    fireEvent.click(screen.getByText("Workspace files"));
     fireEvent.click(await screen.findByText("README.md"));
     await waitFor(() => expect(screen.getAllByRole("alert")[0].textContent).toContain("NotFound"));
   });
@@ -117,10 +117,10 @@ describe("FileTree — file preview (file/read)", () => {
   it("preview can be closed", async () => {
     const readFile = vi.fn(async () => ({ content_base64: b64("hey"), mime: "text/plain", size: 3 }));
     render(<FileTree workspace="E:/w" listFiles={vi.fn(async () => ({ entries: rootEntries }))} readFile={readFile} />);
-    fireEvent.click(screen.getByText("工作区文件"));
+    fireEvent.click(screen.getByText("Workspace files"));
     fireEvent.click(await screen.findByText("README.md"));
     await waitFor(() => expect(screen.getByText(/hey/)).not.toBeNull());
-    fireEvent.click(screen.getByLabelText("关闭预览"));
+    fireEvent.click(screen.getByLabelText("Close preview"));
     expect(document.querySelector(".tree-preview")).toBeNull();
   });
 });

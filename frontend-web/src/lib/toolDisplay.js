@@ -1,4 +1,4 @@
-// Tool display mapping (web-ui.md §2.2 / §6.6 工具块渲染).
+// Tool display mapping (web-ui.md §2.2 / §6.6 tool block rendering).
 //
 // Ported from frontend-cli/lib/tool-display.js — the label/summary/detail/diff
 // mapping LOGIC only, no TUI rendering. Pure functions: tool block entry in,
@@ -121,7 +121,7 @@ export function toolDetails(name, tool) {
       if (meta.offset !== undefined) {
         push("lines", `${meta.offset}-${meta.next_offset != null ? meta.next_offset - 1 : "end"}`);
       }
-      if (meta.truncated) push("note", "输出已截断，可按下一偏移继续读取");
+      if (meta.truncated) push("note", "Output truncated; read again from the next offset to continue");
       break;
     }
     case "glob":
@@ -134,7 +134,7 @@ export function toolDetails(name, tool) {
     case "edit_file": {
       push("file", args.file_path || firstMetaFilePath(meta));
       const counts = diffCounts(meta, tool);
-      if (counts.added || counts.removed) push("changes", `+${counts.added} / -${counts.removed} 行`);
+      if (counts.added || counts.removed) push("changes", `+${counts.added} / -${counts.removed} lines`);
       break;
     }
     case "search_web":
@@ -144,7 +144,7 @@ export function toolDetails(name, tool) {
       break;
     case "fetch_web_page":
       push("url", args.url || meta.url);
-      if (meta.truncated) push("note", "内容已截断");
+      if (meta.truncated) push("note", "Content truncated");
       break;
     default:
       break;
@@ -174,7 +174,7 @@ export function toolItems(name, tool) {
         const path = args.file_path || args.path;
         return path ? [{ title: String(path), detail: "" }] : [];
       }
-      return files.slice(0, 8).map((item) => ({ title: item?.path, detail: `+${Number(item?.added_lines) || 0} / -${Number(item?.removed_lines) || 0} 行` }));
+      return files.slice(0, 8).map((item) => ({ title: item?.path, detail: `+${Number(item?.added_lines) || 0} / -${Number(item?.removed_lines) || 0} lines` }));
     }
     default:
       return [];
@@ -187,7 +187,7 @@ export function toolOutput(name, tool) {
   switch (name) {
     case "bash":
     case "bash_output": {
-      if (String(data.status) === "running") return "命令在后台运行中";
+      if (String(data.status) === "running") return "Command running in background";
       return joinNonEmpty([data.stdout, data.stderr]);
     }
     case "read_file":
@@ -221,7 +221,7 @@ export function extractDiffText(name, tool) {
 export function failedMessage(tool) {
   const { payload } = payloadParts(tool);
   if (payload.ok === false || tool?.status === "failed") {
-    return String(payload.error || tool?.error_type || "工具执行失败");
+    return String(payload.error || tool?.error_type || "Tool execution failed");
   }
   return "";
 }
@@ -392,7 +392,7 @@ function diffCounts(meta, tool) {
 
 function summarizeValue(value) {
   if (typeof value === "string") return value;
-  if (Array.isArray(value)) return `${value.length} 项`;
+  if (Array.isArray(value)) return `${value.length} items`;
   if (value && typeof value === "object") return Object.keys(value).slice(0, 4).join(", ");
   return String(value ?? "");
 }

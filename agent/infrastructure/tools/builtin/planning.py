@@ -26,13 +26,14 @@ TOOL_SPECS = (
         name="update_plan",
         handler=update_plan,
         description=(
-            "维护多步骤任务的轻量计划。每次调用必须提交完整列表，数组顺序就是展示和执行优先顺序；"
-            "只保存控制状态，不记录事实总结。状态只能是 pending、in_progress、completed 或 cancelled，"
-            "最多一个 in_progress；完成工作并验证后再标记 completed。"
+            "Maintain a lightweight plan for a multi-step task. Every call must submit the complete list; "
+            "array order is both the display and the execution priority. Stores control state only, not "
+            "factual summaries. Status must be pending, in_progress, completed, or cancelled, with at most "
+            "one in_progress; mark a step completed only after the work is done and verified."
         ),
         param_descriptions={
             "plan": {
-                "description": "完整计划列表；传入空数组可清空当前计划。",
+                "description": "The complete plan; pass an empty array to clear the current plan.",
                 "type": "array",
                 "items": {
                     "type": "object",

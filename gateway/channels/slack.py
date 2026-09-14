@@ -43,7 +43,7 @@ CAPABILITIES = ChannelCapabilities(
 )
 
 MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024
-OVERSIZE_NOTICE = "附件过大（单个上限 20MB），已忽略该附件。"
+OVERSIZE_NOTICE = "Attachment too large (per-file limit 20MB); skipped."
 # message subtypes that carry no user turn: edits, deletes, bot echoes
 _SKIPPED_SUBTYPES = frozenset({"message_changed", "message_deleted", "message_replied", "bot_message"})
 # Outbound.react passes the raw ✅ glyph; Slack's API wants the emoji name.

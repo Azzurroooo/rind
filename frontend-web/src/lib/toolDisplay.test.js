@@ -107,10 +107,10 @@ describe("toolDisplay — level 2 details/items/output", () => {
 
   it("summarizes mutation files with +/- line counts", () => {
     const tool = { result: '{"meta":{"files":[{"path":"a.py","added_lines":4,"removed_lines":1}]}}' };
-    expect(toolItems("edit_file", tool)).toEqual([{ title: "a.py", detail: "+4 / -1 行" }]);
+    expect(toolItems("edit_file", tool)).toEqual([{ title: "a.py", detail: "+4 / -1 lines" }]);
     expect(toolDetails("edit_file", tool)).toEqual([
       { label: "file", value: "a.py" },
-      { label: "changes", value: "+4 / -1 行" },
+      { label: "changes", value: "+4 / -1 lines" },
     ]);
   });
 });

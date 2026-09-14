@@ -49,7 +49,7 @@ WEBHOOK_PATH = "/webhook"
 DEFAULT_WEBHOOK_HOST = "0.0.0.0"
 DEFAULT_WEBHOOK_PORT = 8080
 MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024
-OVERSIZE_NOTICE = "附件过大（单个上限 20MB），已忽略该附件。"
+OVERSIZE_NOTICE = "Attachment too large (per-file limit 20MB); skipped."
 
 _KIND_EXT = {"image": ".jpg", "audio": ".ogg", "video": ".mp4", "document": ".bin"}
 _INBOUND_MEDIA_KINDS = ("image", "document", "audio", "video")  # msg["type"] values carrying media ids

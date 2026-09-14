@@ -140,9 +140,9 @@ describe("connection reducer — transition table (web-ui.md §2.1)", () => {
   it("any phase → unauthorized → login with inline message", () => {
     for (const phase of ["connecting", "online", "reconnecting", "syncing", "offline"]) {
       const state = { ...authenticated(), phase, needsSync: true, syncRemaining: 3 };
-      const next = reduceConnection(state, { type: "unauthorized", message: "登录已失效" });
+      const next = reduceConnection(state, { type: "unauthorized", message: "Session expired" });
       expect(next.phase).toBe("login");
-      expect(next.message).toBe("登录已失效");
+      expect(next.message).toBe("Session expired");
       expect(next.needsSync).toBe(false);
       expect(next.syncRemaining).toBe(0);
     }

@@ -4,7 +4,7 @@ One state machine over two transports (see ``transports.py``).  Requests
 correlate by auto-incrementing int ids and time out after 120s with
 :class:`WorkerTimeout`.  Events dedup on ``(session_id, sequence)`` within a
 connection epoch.  Reconnect runs a fixed order: reconnect + initialize →
-resubscribe every known session → ``session/replay(after_cursor=本地 cursor)``
+resubscribe every known session → ``session/replay(after_cursor=local cursor)``
 fed to the callback with ``replayed=True`` → resume the live stream.
 """
 
@@ -154,7 +154,7 @@ class WorkerClient:
         capabilities = result.get("capabilities")
         if not isinstance(capabilities, list) or WORKER_CAPABILITY not in capabilities:
             await self._teardown()
-            raise RuntimeError(f"worker 缺少 {WORKER_CAPABILITY} 能力：请先升级 worker（app-server）再启动网关。")
+            raise RuntimeError(f"worker lacks the {WORKER_CAPABILITY} capability: upgrade the worker (app-server) before starting the gateway.")
 
     async def _teardown(self) -> None:
         """Close one connection without ending the client's lifecycle."""

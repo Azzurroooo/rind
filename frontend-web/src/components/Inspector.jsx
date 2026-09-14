@@ -24,7 +24,7 @@ export function Inspector({ info, stats, goal, plan, models, effort, connection,
         when the runtime reported them. No cost display — the kernel doesn't track $. */}
     <div className="inspector-section context-section"><div className="section-title"><CircleGauge size={15} /> Context</div>
       <div className="context-ring-row">
-        <svg className="context-ring" viewBox="0 0 44 44" role="img" aria-label={`上下文已使用 ${Math.round(usage * 100)}%`}>
+        <svg className="context-ring" viewBox="0 0 44 44" role="img" aria-label={`Context ${Math.round(usage * 100)}% used`}>
           <circle className="context-ring-track" cx="22" cy="22" r={RING_RADIUS} fill="none" strokeWidth="4" />
           <circle
             className={`context-ring-value ${usage > 0.9 ? "near-full" : ""}`}
@@ -40,12 +40,12 @@ export function Inspector({ info, stats, goal, plan, models, effort, connection,
         </div>
       </div>
       <details className="context-detail">
-        <summary>详情</summary>
+        <summary>Details</summary>
         <div className="context-detail-rows">
           <div className="tool-detail"><span>window</span><strong>{formatTokens(stats?.context_window_tokens)}</strong></div>
           <div className="tool-detail"><span>cached</span><strong>{formatTokens(stats?.cached_input_tokens)}</strong></div>
-          {Number(contextInfo?.lastTurnDurationMs) > 0 && <div className="tool-detail"><span>上一回合</span><strong>{formatDuration(contextInfo.lastTurnDurationMs)}</strong></div>}
-          {Number(contextInfo?.messageCount) > 0 && <div className="tool-detail"><span>上下文消息</span><strong>{contextInfo.messageCount} 条</strong></div>}
+          {Number(contextInfo?.lastTurnDurationMs) > 0 && <div className="tool-detail"><span>last turn</span><strong>{formatDuration(contextInfo.lastTurnDurationMs)}</strong></div>}
+          {Number(contextInfo?.messageCount) > 0 && <div className="tool-detail"><span>context messages</span><strong>{contextInfo.messageCount}</strong></div>}
         </div>
       </details>
     </div>

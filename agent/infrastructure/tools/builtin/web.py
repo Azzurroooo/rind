@@ -360,13 +360,13 @@ TOOL_SPECS = (
     ToolSpec(
         name="search_web",
         handler=search_web,
-        description="搜索互联网信息。支持多搜索引擎自动切换（Bing/Baidu/DDG），适用于中英文内容查询，中国大陆可用。",
-        param_descriptions={"query": "搜索关键词（支持中英文）", "max_results": "最大结果数 (默认 5)"},
+        description="Search the internet. Automatically switches between search engines (Bing/Baidu/DDG); works for both English and Chinese queries and is reachable from mainland China.",
+        param_descriptions={"query": "Search keywords (English or Chinese)", "max_results": "Maximum number of results (default 5)"},
     ),
     ToolSpec(
         name="fetch_web_page",
         handler=fetch_web_page,
-        description="抓取并提取网页主要内容（自动去除导航、广告等干扰，输出Markdown）。通常在 search_web 返回 URL 后使用。",
-        param_descriptions={"url": "网页 URL"},
+        description="Fetch a web page and extract its main content (navigation, ads, and other clutter removed; outputs Markdown). Typically used after search_web returns URLs.",
+        param_descriptions={"url": "Web page URL"},
     ),
 )

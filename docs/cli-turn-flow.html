@@ -27,29 +27,29 @@
     <body for="html-export">
       <div class="crossnote markdown-preview  ">
       
-<h1 id="cli-一次-turn-的运行流程">CLI 一次 Turn 的运行流程 </h1>
-<p>本文描述当前 Rind CLI 与 Runtime Worker 的实际结构。CLI 进程启动一个长期运行的 Runtime 子进程；Worker 按 <code>session_id</code> 路由请求。历史 session 不会被 Worker 长期缓存成运行对象，只有真正执行 turn 时才创建 active execution。</p>
-<p>当前生命周期边界：</p>
-<pre data-role="codeBlock" data-info="text" class="language-text text"><code>Worker 进程长期运行
-├── WorkerStdioRuntimeServer：JSONL ACP 传输、路由、事件封装
-├── RuntimeWorker：Worker 级资源和服务所有者
-│   ├── SessionRepository：按 session_id 读写持久化历史
-│   ├── ExecutionCoordinator：只保存 active execution
-│   └── SharedRuntimeResources：provider client、parser、normalizer、compaction service
+<h1 id="cli-一次-turn-的运行流程">How One CLI Turn Runs </h1>
+<p>This document describes the actual structure of the current Rind CLI and Runtime Worker. The CLI process spawns a long-lived Runtime subprocess; the worker routes requests by <code>session_id</code>. Historical sessions are never cached as long-lived runtime objects — an active execution is created only when a turn actually runs.</p>
+<p>Current lifecycle boundaries:</p>
+<pre data-role="codeBlock" data-info="text" class="language-text text"><code>Worker process is long-lived
+├── WorkerStdioRuntimeServer: JSONL ACP transport, routing, event wrapping
+├── RuntimeWorker: owner of worker-level resources and services
+│   ├── SessionRepository: reads/writes persisted history by session_id
+│   ├── ExecutionCoordinator: holds only active executions
+│   └── SharedRuntimeResources: provider client, parser, normalizer, compaction service
 └── active execution
     └── AgentContainer(session store + AgentRuntime + TurnRunner + tools)
-</code></pre><p><code>SessionRepository</code> 只负责持久化访问，不会为浏览历史创建 <code>AgentRuntime</code>。<code>ExecutionCoordinator</code> 只在 turn 运行期间保存对应的 <code>AgentContainer</code>，turn 终态后释放。</p>
-<h2 id="组件结构">组件结构 </h2>
+</code></pre><p><code>SessionRepository</code> only handles persisted access; it never creates an <code>AgentRuntime</code> just to browse history. <code>ExecutionCoordinator</code> holds the matching <code>AgentContainer</code> only while a turn runs and releases it at the turn's terminal state.</p>
+<h2 id="组件结构">Component structure </h2>
 <div class="mermaid">flowchart TD
     CLI[CLI Surface\nrunFrontendCliApp]
     INPUT[Input Controller\nline editor / TTY UI]
     CONTROL[Turn Controller\nCommand Controller]
     CLIENT[Runtime Client\nrequest_id / pending requests]
 
-    subgraph PROCESS[Runtime 子进程]
+    subgraph PROCESS[Runtime subprocess]
         SERVER[WorkerStdioRuntimeServer\nJSONL stdin/stdout\nACP dispatch / event writer]
-        WORKER[RuntimeWorker\n应用级生命周期]
-        REPO[SessionRepository\n按 session_id 读写历史]
+        WORKER[RuntimeWorker\napplication-level lifecycle]
+        REPO[SessionRepository\nread/write history by session_id]
         EXEC[ExecutionCoordinator\nactive session -&gt; AgentContainer]
         SHARED[SharedRuntimeResources\nprovider / parser / normalizer / compaction]
         SERVER --&gt; WORKER
@@ -67,27 +67,27 @@
     classDef runtime fill:#eef8ee,stroke:#4f8a4f,color:#111;
     class CLI,INPUT,CONTROL,CLIENT boundary;
     class SERVER,WORKER,REPO,EXEC,SHARED runtime;
-</div><p>CLI 和 Runtime 是两个进程；<code>WorkerStdioRuntimeServer</code>、<code>RuntimeWorker</code>、<code>SessionRepository</code> 和 <code>ExecutionCoordinator</code> 都在同一个 Runtime 子进程内。Desktop 复用同一 Worker ACP 边界，但可以同时观察多个 session；CLI 通常只展示当前 session。</p>
-<h2 id="worker-内部构造">Worker 内部构造 </h2>
-<p>下面的图展示 Worker 启动后的长期对象、只读路径和 active turn 路径。<code>AgentContainer</code> 只位于 active execution 中，不属于 session 的长期缓存。</p>
+</div><p>CLI and Runtime are two processes; <code>WorkerStdioRuntimeServer</code>, <code>RuntimeWorker</code>, <code>SessionRepository</code>, and <code>ExecutionCoordinator</code> all live inside the same Runtime subprocess. Desktop reuses the same worker ACP boundary but can observe multiple sessions at once; the CLI usually shows only the current session.</p>
+<h2 id="worker-内部构造">Worker internals </h2>
+<p>The diagram below shows the worker's long-lived objects after startup, the read-only path, and the active-turn path. <code>AgentContainer</code> exists only inside an active execution and is not part of a session's long-lived state.</p>
 <div class="mermaid">flowchart TB
     APP[app-server --stdio]
     WS[WorkerStdioRuntimeServer\nJSONL request / response / event]
-    RW[RuntimeWorker\nWorker 生命周期]
-    SR[SessionRepository\n按 session_id 访问持久化数据]
+    RW[RuntimeWorker\nworker lifecycle]
+    SR[SessionRepository\naccess persisted data by session_id]
     EC[ExecutionCoordinator\nactive session -&gt; AgentContainer]
     RES[SharedRuntimeResources]
-    PC[共享 provider async client]
+    PC[shared provider async client]
     PARSER[MessageStreamParser]
     NORMALIZER[ToolResultNormalizer]
     COMPACT[CompactionService]
     ACTIVE{active execution map}
-    CONTAINER[AgentContainer\n仅 turn 期间存在]
-    STORE[JsonlSessionStore\n指定 session_id]
+    CONTAINER[AgentContainer\nexists only during a turn]
+    STORE[JsonlSessionStore\nfor a given session_id]
     AR[AgentRuntime\nturn lock / queues / turn state]
     TR[TurnRunner\nsampling loop / tool steps]
     TOOLS[Tool Registry / Tool Executor]
-    MODEL[OpenAIChatClient\n共享底层 client]
+    MODEL[OpenAIChatClient\nshared underlying client]
     FILES[JSONL messages / meta / tool records]
 
     APP --&gt; WS --&gt; RW
@@ -119,44 +119,44 @@
     class RW,SR,EC,RES,PC,PARSER,NORMALIZER,COMPACT worker;
     class ACTIVE,CONTAINER,AR,TR,TOOLS,MODEL active;
     class STORE,FILES storage;
-</div><h3 id="worker-内部职责">Worker 内部职责 </h3>
+</div><h3 id="worker-内部职责">Worker responsibilities </h3>
 <ul>
-<li><code>WorkerStdioRuntimeServer</code>：校验 ACP 请求、按 <code>session_id</code> 路由、管理 active server wrapper、发送 response 和 <code>session/update</code> event。</li>
-<li><code>RuntimeWorker</code>：创建共享 provider client、repository 和 execution coordinator；负责 Worker 初始化与关闭。</li>
-<li><code>SessionRepository</code>：读取 metadata、session list、replay、goal 和 model 等持久化状态；只读 replay 不创建执行对象。</li>
-<li><code>ExecutionCoordinator</code>：在 prompt/compact 等需要执行的请求到达后创建 <code>AgentContainer</code>；turn 终态后释放。</li>
-<li><code>SharedRuntimeResources</code>：保存无 session 可变状态的 provider client、stream parser、result normalizer 和 compaction service。</li>
-<li><code>AgentRuntime</code>：active turn owner，负责 turn lock、turn_id、steering/follow-up、问题等待、持久化 turn 状态和终态。</li>
-<li><code>TurnRunner</code>：执行 turn 内模型 sampling、流式解析、工具调用和步骤恢复；一次 turn 可以包含多次 sampling。</li>
-<li><code>Tool Executor</code>：执行工具并按 <code>tool_call_id</code> 产生结果；不是独立进程。</li>
+<li><code>WorkerStdioRuntimeServer</code>: validates ACP requests, routes by <code>session_id</code>, manages active server wrappers, and sends responses and <code>session/update</code> events.</li>
+<li><code>RuntimeWorker</code>: creates the shared provider client, repository, and execution coordinator; owns worker initialization and shutdown.</li>
+<li><code>SessionRepository</code>: reads persisted state such as metadata, session lists, replay, goals, and models; read-only replay creates no execution objects.</li>
+<li><code>ExecutionCoordinator</code>: creates an <code>AgentContainer</code> once a request that needs execution (prompt/compact and the like) arrives; releases it at the turn's terminal state.</li>
+<li><code>SharedRuntimeResources</code>: holds the provider client, stream parser, result normalizer, and compaction service, none of which carry per-session mutable state.</li>
+<li><code>AgentRuntime</code>: the active turn owner; owns the turn lock, turn_id, steering/follow-up, question waiting, persisted turn state, and the terminal state.</li>
+<li><code>TurnRunner</code>: runs the turn's model sampling, stream parsing, tool calls, and step resumption; one turn can contain multiple samplings.</li>
+<li><code>Tool Executor</code>: executes tools and produces results keyed by <code>tool_call_id</code>; not a separate process.</li>
 </ul>
-<h2 id="启动时序">启动时序 </h2>
+<h2 id="启动时序">Startup sequence </h2>
 <div class="mermaid">sequenceDiagram
     participant C as CLI
-    participant P as Runtime 子进程
+    participant P as Runtime subprocess
     participant S as WorkerStdioRuntimeServer
     participant W as RuntimeWorker
     participant R as SessionRepository
     participant E as ExecutionCoordinator
 
-    C-&gt;&gt;C: 读取本地 settings / CLI 参数
+    C-&gt;&gt;C: read local settings / CLI args
     C-&gt;&gt;P: spawn app-server --stdio
-    P-&gt;&gt;S: 创建 WorkerStdioRuntimeServer
-    S-&gt;&gt;W: 创建 RuntimeWorker
-    W-&gt;&gt;W: 创建共享 provider client 和 SharedRuntimeResources
-    W-&gt;&gt;R: 创建 SessionRepository
-    W-&gt;&gt;E: 创建空的 ExecutionCoordinator
+    P-&gt;&gt;S: create WorkerStdioRuntimeServer
+    S-&gt;&gt;W: create RuntimeWorker
+    W-&gt;&gt;W: create shared provider client and SharedRuntimeResources
+    W-&gt;&gt;R: create SessionRepository
+    W-&gt;&gt;E: create empty ExecutionCoordinator
     C-&gt;&gt;S: initialize(request_id)
     S-&gt;&gt;W: initialize()
     W-&gt;&gt;R: initial(workspace, session_id, resume_latest)
     R--&gt;&gt;W: session metadata
     S--&gt;&gt;C: initialize response(session_id, model, methods, commands)
-    Note over C,E: Worker 常驻；此时没有任何 active AgentContainer
-</div><p>初始化只读取或创建 session metadata。打开历史 session、执行 <code>session/replay</code> 或切换 CLI 当前 session 都不会创建 <code>AgentContainer</code>。</p>
-<h2 id="一个普通-turn">一个普通 Turn </h2>
-<p>假设用户输入“检查测试失败原因”。</p>
+    Note over C,E: Worker is resident; no active AgentContainer exists yet
+</div><p>Initialization only reads or creates session metadata. Opening a historical session, running <code>session/replay</code>, or switching the CLI's current session never creates an <code>AgentContainer</code>.</p>
+<h2 id="一个普通-turn">An ordinary turn </h2>
+<p>Suppose the user enters "investigate why the tests failed".</p>
 <div class="mermaid">sequenceDiagram
-    participant U as 用户
+    participant U as User
     participant I as Input Controller
     participant T as Turn Controller
     participant C as Runtime Client
@@ -169,84 +169,84 @@
     participant X as Tool Executor
     participant H as SessionRepository / JsonlSessionStore
 
-    U-&gt;&gt;I: 输入并按 Enter
+    U-&gt;&gt;I: type input and press Enter
     I-&gt;&gt;T: submit(prompt)
     T-&gt;&gt;C: session/prompt\n{session_id, input}
     C-&gt;&gt;S: JSONL request + request_id
     S-&gt;&gt;W: route(session_id)
     W-&gt;&gt;E: start(session_id)
-    E-&gt;&gt;H: 读取 session metadata / workspace / model
-    E-&gt;&gt;E: 创建 active AgentContainer
+    E-&gt;&gt;H: read session metadata / workspace / model
+    E-&gt;&gt;E: create active AgentContainer
     E-&gt;&gt;A: initialize()
     S-&gt;&gt;A: _run_turn()
-    A-&gt;&gt;A: 获取 turn lock，生成 turn_id
-    A-&gt;&gt;H: 持久化 user message + running turn state
+    A-&gt;&gt;A: acquire turn lock, generate turn_id
+    A-&gt;&gt;H: persist user message + running turn state
     A--&gt;&gt;S: turn_started(session_id, turn_id)
     S--&gt;&gt;C: session/update
-    C--&gt;&gt;T: 显示 Working
+    C--&gt;&gt;T: show Working
 
     loop TurnRunner sampling loop
         A-&gt;&gt;R: run_turn(session, turn_id)
-        R-&gt;&gt;H: 读取历史并构建上下文
-        R-&gt;&gt;M: 发起一次模型流式请求
+        R-&gt;&gt;H: read history and build context
+        R-&gt;&gt;M: issue one streaming model request
         M--&gt;&gt;R: assistant delta / tool request
         R--&gt;&gt;S: session/update(incremental)
         S--&gt;&gt;C: JSONL event
-        C--&gt;&gt;T: 更新 assistant/tool UI
+        C--&gt;&gt;T: update assistant/tool UI
 
-        opt 模型请求工具
-            R-&gt;&gt;X: 执行 tool_call_id
+        opt model requests a tool
+            R-&gt;&gt;X: execute tool_call_id
             X--&gt;&gt;R: tool progress / tool result
-            R-&gt;&gt;H: 持久化 tool call 和 result
+            R-&gt;&gt;H: persist tool call and result
             R--&gt;&gt;S: tool_result event
         end
 
-        opt 有工具调用或 steering
-            R-&gt;&gt;R: 继续下一次 sampling
+        opt has tool calls or steering
+            R-&gt;&gt;R: continue to next sampling
         end
     end
 
-    A-&gt;&gt;H: 持久化最终 turn state
+    A-&gt;&gt;H: persist final turn state
     A--&gt;&gt;S: turn_completed / failed / cancelled
     S--&gt;&gt;C: session/update(terminal)
     S--&gt;&gt;C: session/prompt response
     S-&gt;&gt;E: release(session_id)
-    C--&gt;&gt;T: 清理 Working，恢复输入
-</div><p><code>session/prompt</code> response 和 <code>turn_completed</code> event 是两条不同的输出：event 用于实时渲染，response 用于结束本次请求。CLI 不应把二者都当作新的 assistant 内容打印。</p>
-<h2 id="turn-内部循环">Turn 内部循环 </h2>
+    C--&gt;&gt;T: clear Working, restore input
+</div><p>The <code>session/prompt</code> response and the <code>turn_completed</code> event are two distinct outputs: the event drives live rendering, and the response closes the request. The CLI must not print both as new assistant content.</p>
+<h2 id="turn-内部循环">Turn inner loop </h2>
 <div class="mermaid">flowchart TD
     START[AgentRuntime.run_turn]
-    LOCK[获取 turn lock\n生成 turn_id / running state]
-    STEP[调用 TurnRunner.run_turn]
-    CONTEXT[构建模型上下文]
-    SAMPLE[一次模型 sampling]
-    STREAM[assistant/tool/token 流式事件]
-    TOOL{有 tool call?}
+    LOCK[acquire turn lock\ngenerate turn_id / running state]
+    STEP[call TurnRunner.run_turn]
+    CONTEXT[build model context]
+    SAMPLE[one model sampling]
+    STREAM[assistant/tool/token stream events]
+    TOOL{has tool call?}
     EXEC[Tool Executor]
-    RESULT[持久化 tool result]
-    STEER{消费 steering?}
-    NEXT[下一次 sampling]
-    STEP_DONE[TurnRunner 产生 terminal event]
-    FOLLOW{有 follow-up 或 active goal?}
-    TURN_DONE[AgentRuntime 持久化终态并释放 execution]
+    RESULT[persist tool result]
+    STEER{consume steering?}
+    NEXT[next sampling]
+    STEP_DONE[TurnRunner emits terminal event]
+    FOLLOW{has follow-up or active goal?}
+    TURN_DONE[AgentRuntime persists terminal state and releases execution]
 
     START --&gt; LOCK --&gt; STEP --&gt; CONTEXT --&gt; SAMPLE --&gt; STREAM --&gt; TOOL
-    TOOL -- 是 --&gt; EXEC --&gt; RESULT --&gt; STEER
-    TOOL -- 否 --&gt; STEER
-    STEER -- 是 --&gt; NEXT --&gt; CONTEXT
-    STEER -- 否 --&gt; STEP_DONE
+    TOOL -- yes --&gt; EXEC --&gt; RESULT --&gt; STEER
+    TOOL -- no --&gt; STEER
+    STEER -- yes --&gt; NEXT --&gt; CONTEXT
+    STEER -- no --&gt; STEP_DONE
     STEP_DONE --&gt; FOLLOW
-    FOLLOW -- 是 --&gt; STEP
-    FOLLOW -- 否 --&gt; TURN_DONE
-</div><p>工具结果不会直接结束 turn；结果进入历史和下一次模型上下文。一个 turn 可以进行多次 sampling，但只使用一个 <code>turn_id</code>。只有 AgentRuntime 确认没有 follow-up、active goal continuation 或未完成控制状态后，才发送终态并释放 active execution。</p>
-<h2 id="历史-replay-与活动-turn">历史 replay 与活动 turn </h2>
-<p><code>session/replay</code> 是只读 ACP 请求：</p>
+    FOLLOW -- yes --&gt; STEP
+    FOLLOW -- no --&gt; TURN_DONE
+</div><p>A tool result does not end the turn by itself; it goes into history and the next model context. One turn can run multiple samplings but uses a single <code>turn_id</code>. Only after AgentRuntime confirms there is no follow-up, active goal continuation, or unfinished control state does it emit the terminal state and release the active execution.</p>
+<h2 id="历史-replay-与活动-turn">History replay and the active turn </h2>
+<p><code>session/replay</code> is a read-only ACP request:</p>
 <pre data-role="codeBlock" data-info="text" class="language-text text"><code>WorkerStdioRuntimeServer
   -&gt; RuntimeWorker.replay(session_id)
   -&gt; SessionRepository.replay(session_id)
   -&gt; messages + turn_state
-  -&gt; 若该 session 有 active execution，再附加 live_turn
-</code></pre><p><code>live_turn</code> 是 Worker 内存中的有界快照，只用于 surface 在切换 session 时恢复未落盘的 assistant 尾部、tool 状态、question、plan 和 pending input。它不写入历史，不启动新的 execution。</p>
+  -&gt; if the session has an active execution, also attach live_turn
+</code></pre><p><code>live_turn</code> is a bounded snapshot in worker memory used only so a surface switching back to a session can restore the not-yet-persisted assistant tail, tool state, question, plan, and pending input. It never writes to history or starts a new execution.</p>
 <div class="mermaid">sequenceDiagram
     participant C as CLI/Desktop
     participant S as Worker Server
@@ -256,29 +256,29 @@
 
     C-&gt;&gt;S: session/replay(session_id)
     S-&gt;&gt;W: replay(session_id)
-    W-&gt;&gt;R: 读取持久化 messages / turn_state
-    W-&gt;&gt;E: 读取 live_turn（若 active）
+    W-&gt;&gt;R: read persisted messages / turn_state
+    W-&gt;&gt;E: read live_turn (if active)
     R--&gt;&gt;W: HistorySnapshot
     E--&gt;&gt;W: LiveTurnOverlay
     W--&gt;&gt;S: snapshot + live_turn
     S--&gt;&gt;C: response
-</div><p>surface 切换 session 不发送新的 prompt，不自动发送 <code>resume=true</code>，也不重复执行工具。Worker 仍存活时，切回页面可以继续接收同一 <code>session_id</code>、<code>turn_id</code> 的事件；Worker 已退出时只能恢复已持久化历史。</p>
-<h2 id="steering-queue-与事件回传">Steering、Queue 与事件回传 </h2>
-<p>普通输入：</p>
-<pre data-role="codeBlock" data-info="text" class="language-text text"><code>空闲 session -&gt; session/prompt
-active turn -&gt; rind/session/steer 或 rind/session/follow_up
-</code></pre><p>输入接纳和真正交付是两个阶段：</p>
+</div><p>Switching sessions on a surface sends no new prompt, does not automatically send <code>resume=true</code>, and does not re-execute tools. While the worker is still alive, returning to the view keeps receiving events for the same <code>session_id</code> and <code>turn_id</code>; once the worker has exited, only the persisted history can be restored.</p>
+<h2 id="steering-queue-与事件回传">Steering, queues, and event delivery </h2>
+<p>Ordinary input:</p>
+<pre data-role="codeBlock" data-info="text" class="language-text text"><code>idle session -&gt; session/prompt
+active turn -&gt; rind/session/steer or rind/session/follow_up
+</code></pre><p>Input acceptance and actual delivery are two stages:</p>
 <pre data-role="codeBlock" data-info="text" class="language-text text"><code>rind/session/steer / rind/session/follow_up
   -&gt; response(input_id, pending)
-  -&gt; turn loop 在步骤边界消费
+  -&gt; turn loop consumes it at step boundaries
   -&gt; session/update(event.type = queued_input_delivered)
-</code></pre><p><code>input_id</code> 是队列实体身份；<code>queued_input_delivered</code> 才表示输入真正进入 turn。CLI 和 Desktop 都不应在收到“accepted/pending” response 时把它当作已交付消息。</p>
-<h2 id="多轮与多-session">多轮与多 Session </h2>
+</code></pre><p><code>input_id</code> is the queued entity's identity; only <code>queued_input_delivered</code> means the input actually entered the turn. Neither the CLI nor Desktop should treat an "accepted/pending" response as a delivered message.</p>
+<h2 id="多轮与多-session">Multiple turns and multiple sessions </h2>
 <div class="mermaid">flowchart LR
-    W[一个长期 RuntimeWorker]
-    R[SessionRepository\n所有 session 持久化访问]
-    E1[Active execution A\n仅 A turn 期间存在]
-    E2[Active execution B\n仅 B turn 期间存在]
+    W[one long-lived RuntimeWorker]
+    R[SessionRepository\npersisted access for all sessions]
+    E1[Active execution A\nexists only during A's turn]
+    E2[Active execution B\nexists only during B's turn]
     H1[Session history A]
     H2[Session history B]
     W --&gt; R
@@ -289,13 +289,13 @@ active turn -&gt; rind/session/steer 或 rind/session/follow_up
     E1 -. session_id=A .-&gt; H1
     E2 -. session_id=B .-&gt; H2
 </div><ul>
-<li>多轮对话：同一 session 的历史被 repository 持久化；每个新 turn 创建新的 <code>AgentContainer</code> 和新的 <code>turn_id</code>，不依赖上一个 turn 的常驻运行对象。</li>
-<li>多 session：同一个 Worker 可以同时拥有 A、B 两个 active execution；它们共享 Worker 级 provider/parser 等无状态资源，但各自拥有 session store、turn lock、queue 和 AgentRuntime 状态。</li>
-<li>CLI session 切换：<code>/sessions</code> 通过 <code>rind/command/execute</code> 获取列表，再调用 <code>session/switch</code> 获取目标 metadata；切换不会重启 Worker，也不会创建 execution。</li>
-<li>Desktop session 切换：使用本地侧栏索引和 <code>session/replay</code>；不调用 <code>session/switch</code>。</li>
-<li>取消 A：只调用带 A 的 <code>session/cancel</code>，不影响 B。</li>
+<li>Multi-turn conversations: a session's history is persisted by the repository; each new turn creates a new <code>AgentContainer</code> and a new <code>turn_id</code>, with no reliance on the previous turn's resident runtime objects.</li>
+<li>Multiple sessions: one worker can hold active executions A and B at the same time; they share worker-level stateless resources such as provider/parser, but each owns its session store, turn lock, queues, and AgentRuntime state.</li>
+<li>CLI session switching: <code>/sessions</code> fetches the list via <code>rind/command/execute</code>, then <code>session/switch</code> fetches the target's metadata; switching neither restarts the worker nor creates an execution.</li>
+<li>Desktop session switching: uses the local sidebar index and <code>session/replay</code>; it does not call <code>session/switch</code>.</li>
+<li>Cancelling A: calls <code>session/cancel</code> for A only and does not affect B.</li>
 </ul>
-<h2 id="退出流程">退出流程 </h2>
+<h2 id="退出流程">Shutdown sequence </h2>
 <div class="mermaid">sequenceDiagram
     participant C as CLI/Desktop
     participant S as WorkerStdioRuntimeServer
@@ -312,7 +312,7 @@ active turn -&gt; rind/session/steer 或 rind/session/follow_up
     W-&gt;&gt;P: close shared provider client
     S--&gt;&gt;C: shutdown response
     S--&gt;&gt;C: process exits
-</div><p>历史文件不会因为 execution release 或正常 shutdown 被删除；只有已有的空 session 清理规则才会处理空记录。</p>
+</div><p>History files are not deleted by execution release or a normal shutdown; only the existing empty-session cleanup rules handle empty records.</p>
 
       </div>
       

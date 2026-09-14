@@ -77,7 +77,7 @@ class GatewayConfig:
     pairing: PairingConfig = field(default_factory=PairingConfig)
     cooldown_per_minute: int = 10
     uploads_dir: str = "uploads"
-    auto_install_sdk: bool = False  # 启动时缺渠道 SDK 自动 pip install（向导同意后写入）
+    auto_install_sdk: bool = False  # auto pip-install missing channel SDKs at startup (written after wizard consent)
 
 
 def resolve_config_path(explicit: str | None, workspace: Path) -> Path:

@@ -1,4 +1,4 @@
-"""WhatsApp Cloud adapter smoke tests against a fake aiohttp (渠道冒烟, §9).
+"""WhatsApp Cloud adapter smoke tests against a fake aiohttp (channel smoke tests, §9).
 
 A fake ``aiohttp`` module is injected into ``sys.modules``; the real adapter
 code (lazy import, webhook wiring, Meta handshake, payload normalization,
@@ -212,14 +212,14 @@ def test_text_message_normalizes_to_inbound_message(tmp_path, fake_aiohttp):
         channel, sink, routes = await _start(tmp_path)
         post = routes[("POST", "/webhook")]
         message = {"from": "15551234567", "id": "wamid.ABC1", "type": "text",
-                   "text": {"body": "帮我看看 build 报错"}}
+                   "text": {"body": "help me look at this build error"}}
         response = await post(FakeRequest(json_body=_payload(message)))
         assert response.status == 200 and response.text == "EVENT_RECEIVED"
         msg = sink.messages[0]
         assert msg.channel == "whatsapp"
         assert msg.chat_id == "15551234567" and msg.chat_type == "dm"
         assert msg.sender_id == "15551234567" and msg.sender_name == "15551234567"
-        assert msg.thread_id is None and msg.text == "帮我看看 build 报错"
+        assert msg.thread_id is None and msg.text == "help me look at this build error"
         assert msg.attachments == () and msg.message_ref == "wamid.ABC1"
 
         # delivery receipts (statuses only) are ignored; uninteresting types too
@@ -244,10 +244,10 @@ def test_media_message_downloads_via_graph_into_uploads_dir(tmp_path, fake_aioht
             FakeApiResponse(body=b"jpeg-bytes"),
         ])
         message = {"from": "15551234567", "id": "wamid.M1", "type": "image",
-                   "image": {"id": "MEDIA-1", "mime_type": "image/jpeg", "caption": "看这张图"}}
+                   "image": {"id": "MEDIA-1", "mime_type": "image/jpeg", "caption": "look at this image"}}
         await routes[("POST", "/webhook")](FakeRequest(json_body=_payload(message)))
         msg = sink.messages[0]
-        assert msg.text == "看这张图"  # caption stands in for text on media messages
+        assert msg.text == "look at this image"  # caption stands in for text on media messages
         (attachment,) = msg.attachments
         assert attachment.path.is_file() and attachment.path.read_bytes() == b"jpeg-bytes"
         assert attachment.path.parent.parent.parent == tmp_path / "uploads"  # <uploads>/whatsapp/<date>/
@@ -288,13 +288,13 @@ def test_send_text_posts_cloud_api_envelope(tmp_path, fake_aiohttp):
     async def scenario():
         channel, sink, routes = await _start(tmp_path)
         channel._session.post_responses.append(FakeApiResponse(json_data={"messages": [{"id": "wamid.OUT1"}]}))
-        await channel.send(SendTarget(chat_id="15551234567"), OutboundPayload(text="部署完成"))
+        await channel.send(SendTarget(chat_id="15551234567"), OutboundPayload(text="deploy finished"))
         (post,) = channel._session.posts
         assert post["url"] == f"https://graph.facebook.com/v20.0/{PHONE_ID}/messages"
         assert post["headers"] == {"Authorization": f"Bearer {ACCESS_TOKEN}"}
         assert post["json"] == {"messaging_product": "whatsapp", "recipient_type": "individual",
                                 "to": "15551234567", "type": "text",
-                                "text": {"body": "部署完成", "preview_url": False}}
+                                "text": {"body": "deploy finished", "preview_url": False}}
         await channel.typing(SendTarget(chat_id="15551234567"))  # capability off: quiet no-op
         session = channel._session
         await channel.stop()
@@ -313,7 +313,7 @@ def test_send_attachment_uploads_media_then_sends(tmp_path, fake_aiohttp):
                                                 FakeApiResponse(json_data={"id": "MEDIA-OUT"}),
                                                 FakeApiResponse(json_data={"messages": [{"id": "wamid.O2"}]})])
         await channel.send(SendTarget(chat_id="15551234567"),
-                           OutboundPayload(text="看附件",
+                           OutboundPayload(text="see attachment",
                                            attachments=(Attachment(path=media, content_type="image/png",
                                                                    kind="image"),)))
         text, upload, message = channel._session.posts

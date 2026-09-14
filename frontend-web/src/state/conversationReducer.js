@@ -27,7 +27,7 @@
 //   { kind: "answered", key, answer }    question card answered (stays in stream)
 //   { kind: "question_expired", key }    question card TTL reached (§2.3 expired)
 //   { kind: "queue_input", inputId, input, mode }  input accepted into the queue
-//   { kind: "unqueue", inputId }         queued input retrieved (取回)
+//   { kind: "unqueue", inputId }         queued input retrieved
 //   { kind: "queued_delivered", inputId, input?, mode? }  chip → user message
 //   { kind: "set_cursor", cursor }       adopt the server's durable ordinal
 //   { kind: "reset" }                    clear session
@@ -443,7 +443,7 @@ function appendEntry(state, entry) {
 }
 
 // Drops the OLDEST entries beyond the cap; the count surfaces as the
-// "更早的消息已折叠" divider so truncation is never silent.
+// "Earlier messages have been collapsed" divider so truncation is never silent.
 function withCap(state) {
   const overflow = state.entries.length - TRANSCRIPT_CAP;
   if (overflow <= 0) return state;

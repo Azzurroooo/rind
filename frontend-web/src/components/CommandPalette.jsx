@@ -81,7 +81,7 @@ export function CommandPalette({ open, commands, onClose, onRun }) {
       <div
         className="palette"
         role="dialog"
-        aria-label="命令面板"
+        aria-label="Command palette"
         onClick={(event) => event.stopPropagation()}
       >
         <input
@@ -90,13 +90,13 @@ export function CommandPalette({ open, commands, onClose, onRun }) {
           value={query}
           onChange={(event) => setQuery(event.target.value)}
           onKeyDown={onKeyDown}
-          placeholder="搜索命令…"
-          aria-label="搜索命令"
+          placeholder="Search commands…"
+          aria-label="Search commands"
           autoComplete="off"
           spellCheck={false}
         />
-        <div className="palette-list" ref={listRef} role="listbox" aria-label="命令列表">
-          {filtered.length === 0 && <div className="palette-empty">没有匹配的命令</div>}
+        <div className="palette-list" ref={listRef} role="listbox" aria-label="Command list">
+          {filtered.length === 0 && <div className="palette-empty">No matching commands</div>}
           {groups.map((group, groupIndex) => (
             <div className="palette-group" key={`group-${groupIndex}`}>
               <div className="palette-category">{group.category}</div>
@@ -126,9 +126,9 @@ export function CommandPalette({ open, commands, onClose, onRun }) {
           ))}
         </div>
         <div className="palette-foot">
-          <span>↑↓ 选择</span>
-          <span>Enter 执行</span>
-          <span>Esc 关闭</span>
+          <span>↑↓ Navigate</span>
+          <span>Enter Run</span>
+          <span>Esc Close</span>
         </div>
       </div>
     </div>

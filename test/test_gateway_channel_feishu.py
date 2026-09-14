@@ -1,4 +1,4 @@
-"""Feishu adapter smoke tests against a fake lark-oapi (渠道冒烟, gateway.md §9).
+"""Feishu adapter smoke tests against a fake lark-oapi (channel smoke tests, gateway.md §9).
 
 A fake ``lark_oapi`` module tree (top module + ``lark_oapi.ws`` +
 ``lark_oapi.api.im.v1`` request builders) is injected into ``sys.modules``;
@@ -172,7 +172,7 @@ def fake_lark(monkeypatch):
 
 
 def _receive_event(*, chat_id="oc_chat1", chat_type="p2p", message_type="text",
-                   message_id="om_in1", content=json.dumps({"text": "帮我看看 build 报错"}),
+                   message_id="om_in1", content=json.dumps({"text": "help me look at this build error"}),
                    open_id="ou_user1"):
     message = SimpleNamespace(chat_id=chat_id, chat_type=chat_type, message_type=message_type,
                               message_id=message_id, content=content)
@@ -226,7 +226,7 @@ def test_p2p_text_event_normalizes_to_inbound_message(tmp_path, fake_lark):
         assert msg.channel == "feishu"
         assert msg.chat_id == "oc_chat1" and msg.chat_type == "dm"  # p2p → dm
         assert msg.sender_id == "ou_user1" and msg.sender_name == "ou_user1"
-        assert msg.thread_id is None and msg.text == "帮我看看 build 报错"
+        assert msg.thread_id is None and msg.text == "help me look at this build error"
         assert msg.attachments == () and msg.message_ref == "om_in1"
         await channel.stop()
 
@@ -236,15 +236,15 @@ def test_p2p_text_event_normalizes_to_inbound_message(tmp_path, fake_lark):
 def test_group_event_and_post_rich_text_extraction(tmp_path, fake_lark):
     async def scenario():
         channel, sink = await _start(tmp_path)
-        post = json.dumps({"title": "日报", "content": [
-            [{"tag": "text", "text": "第一行 "}, {"tag": "a", "text": "链接", "href": "https://x"}],
-            [{"tag": "text", "text": "第二行"}, {"tag": "at", "user_id": "ou_user1"}]]})
+        post = json.dumps({"title": "daily report", "content": [
+            [{"tag": "text", "text": "line one "}, {"tag": "a", "text": "link", "href": "https://x"}],
+            [{"tag": "text", "text": "line two"}, {"tag": "at", "user_id": "ou_user1"}]]})
         await _deliver(channel, sink, _receive_event(chat_id="oc_grp", chat_type="group",
                                                      message_type="post", message_id="om_in2",
                                                      content=post))
         (msg,) = sink.messages
         assert msg.chat_type == "group" and msg.chat_id == "oc_grp"
-        assert msg.text == "第一行 链接\n第二行"  # text + link labels, line breaks kept, at dropped
+        assert msg.text == "line one link\nline two"  # text + link labels, line breaks kept, at dropped
         await channel.stop()
 
     asyncio.run(scenario())
@@ -280,7 +280,7 @@ def test_oversize_media_is_dropped_with_one_line_notice(tmp_path, fake_lark):
         (notice,) = channel._client.messages  # the one-line notice went out as a text message
         body = notice.values["request_body"]
         assert body.values["msg_type"] == "text"
-        assert json.loads(body.values["content"])["text"].startswith("附件过大")
+        assert json.loads(body.values["content"])["text"].startswith("Attachment too large")
         await channel.stop()
 
     asyncio.run(scenario())
@@ -304,12 +304,12 @@ def test_malformed_events_are_dropped(tmp_path, fake_lark):
 def test_send_text_payload_and_reaction_hook(tmp_path, fake_lark):
     async def scenario():
         channel, sink = await _start(tmp_path)
-        await channel.send(SendTarget(chat_id="oc_chat1"), OutboundPayload(text="部署完成"))
+        await channel.send(SendTarget(chat_id="oc_chat1"), OutboundPayload(text="deploy finished"))
         (message,) = channel._client.messages
         assert message.values["receive_id_type"] == "chat_id"
         body = message.values["request_body"]
         assert body.values["receive_id"] == "oc_chat1" and body.values["msg_type"] == "text"
-        assert json.loads(body.values["content"]) == {"text": "部署完成"}
+        assert json.loads(body.values["content"]) == {"text": "deploy finished"}
         await channel.react(SendTarget(chat_id="oc_chat1"), "✅")  # Outbound.react passes the glyph
         (reaction,) = channel._client.reactions
         assert reaction.values["message_id"] == "om_1"  # last posted message anchors the ✅

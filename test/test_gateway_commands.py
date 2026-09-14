@@ -95,8 +95,8 @@ def test_registry_is_tiered_and_single_source():
 
 
 def test_is_command_and_name_parsing():
-    assert is_command("/status") and is_command("/help 现在")
-    assert not is_command("1") and not is_command("你好 /status") and not is_command("")
+    assert is_command("/status") and is_command("/help now")
+    assert not is_command("1") and not is_command("hello /status") and not is_command("")
     assert command_name("/status") == "status"
     assert command_name("/Help") == "help"
     assert command_name("/compact now") == "compact"
@@ -104,7 +104,7 @@ def test_is_command_and_name_parsing():
 
 
 def test_offline_notice_constant_is_shared():
-    assert OFFLINE_NOTICE == "worker 离线，命令暂存"
+    assert OFFLINE_NOTICE == "Worker offline; command queued"
 
 
 # --- /help ------------------------------------------------------------------------------
@@ -114,12 +114,12 @@ def test_help_renders_tiered_list(tmp_path):
     async def scenario():
         hub, *_ = _hub(tmp_path)
         text = await hub.dispatch("/help", _ctx())
-        assert text.startswith("常用：")
-        essential_block, full_block = text.split("全部：")
+        assert text.startswith("Essentials:")
+        essential_block, full_block = text.split("All:")
         for name in ("stop", "new", "status", "compact"):
             assert f"/{name}" in essential_block
         assert "/help" in full_block
-        assert "/stop 停止当前任务" in text
+        assert "/stop stop the current task" in text
 
     run(scenario())
 
@@ -134,10 +134,10 @@ def test_status_composes_local_state_only(tmp_path):
         router._register("other:dm:x", "sess-2")
         worker.connected = True
         text = await hub.dispatch("/status", _ctx())
-        assert "模型：" in text
-        assert "任务：运行中（排队 2）" in text
-        assert "会话：2 个" in text
-        assert "worker：已连接" in text
+        assert "model:" in text
+        assert "task: running (2 queued)" in text
+        assert "sessions: 2" in text
+        assert "worker: connected" in text
         assert worker.requests == []  # no protocol call: composed from local state
 
     run(scenario())
@@ -148,7 +148,7 @@ def test_status_idle_and_disconnected(tmp_path):
         hub, worker, _router, _ = _hub(tmp_path)
         worker.connected = False
         text = await hub.dispatch("/status", _ctx())
-        assert "任务：空闲" in text and "worker：离线" in text and "会话：0 个" in text
+        assert "task: idle" in text and "worker: offline" in text and "sessions: 0" in text
 
     run(scenario())
 
@@ -160,7 +160,7 @@ def test_new_creates_fresh_session_binds_target_and_subscribes(tmp_path):
     async def scenario():
         hub, worker, router, binds = _hub(tmp_path)
         reply = await hub.dispatch("/new", _ctx())
-        assert reply and reply.startswith("已开启新会话（session fresh-")
+        assert reply and reply.startswith("New session started (session fresh-")
         created = [params for method, params in worker.requests if method == "session/new"]
         assert created and created[0]["workspace_root"] == WORKSPACE
         assert worker.subscriptions == [router.lookup("test:dm:chat").session_id]
@@ -181,7 +181,7 @@ def test_new_cancels_active_turn_first(tmp_path):
         cancels = [params for method, params in worker.requests if method == "session/cancel"]
         assert cancels == [{"session_id": "old-session"}]
         assert finished == ["test:dm:chat"]
-        assert reply and "已开启新会话" in reply
+        assert reply and "New session started" in reply
 
     run(scenario())
 
@@ -194,7 +194,7 @@ def test_new_failure_replies_one_line(tmp_path):
 
         hub, *_ = _hub(tmp_path, _DownWorker())
         reply = await hub.dispatch("/new", _ctx())
-        assert reply == "暂时无法创建会话，稍后再试"
+        assert reply == "Cannot create a session right now; try again shortly"
 
     run(scenario())
 

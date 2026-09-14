@@ -156,14 +156,14 @@ def _degrade_inline(text: str) -> str:
 
 
 def render_choices(choices: tuple[str, ...] | list[str]) -> str:
-    """``1. 选项`` lines + blank line + 回复数字即可; >5 truncates with a note."""
+    """``1. option`` lines + blank line + a reply hint; >5 truncates with a note."""
     labels = list(choices[:CHOICE_LIMIT])
     hidden = len(choices) - len(labels)
     lines = [f"{index}. {label}" for index, label in enumerate(labels, 1)]
     if hidden > 0:
-        lines.append(f"（其余 {hidden} 项略）")
+        lines.append(f"({hidden} more omitted)")
     lines.append("")
-    lines.append("回复数字即可")
+    lines.append("Reply with a number")
     return "\n".join(lines)
 
 

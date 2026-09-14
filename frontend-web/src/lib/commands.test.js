@@ -99,7 +99,7 @@ describe("commands — palette fuzzy filter", () => {
   });
 
   it("matches titles, keywords and slash names; prefix beats subsequence", () => {
-    const theme = filterCommands(commands, "主题");
+    const theme = filterCommands(commands, "theme");
     expect(theme[0].id).toBe("view.theme");
     expect(filterCommands(commands, "stop")[0].id).toBe("turn.stop");
     expect(filterCommands(commands, "new")[0].id).toBe("session.new");

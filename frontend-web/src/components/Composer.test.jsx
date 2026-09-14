@@ -62,7 +62,7 @@ describe("Composer — attachments enter as chips (J6)", () => {
     expect(screen.getByRole("textbox").disabled).toBe(false);
 
     fail = false; // the click invokes onUpload synchronously — flip first
-    fireEvent.click(screen.getByTitle("重试上传"));
+    fireEvent.click(screen.getByTitle("Retry upload"));
     await waitFor(() => expect(document.querySelector(".upload-chip.ok")).not.toBeNull());
     expect(onUpload).toHaveBeenCalledTimes(2);
   });
@@ -72,7 +72,7 @@ describe("Composer — attachments enter as chips (J6)", () => {
     renderComposer({ onUpload });
     fireEvent.drop(document.querySelector(".composer-shell"), { dataTransfer: { files: [makeFile()] } });
     await waitFor(() => expect(document.querySelector(".upload-chip")).not.toBeNull());
-    fireEvent.click(screen.getByTitle("移除附件"));
+    fireEvent.click(screen.getByTitle("Remove attachment"));
     expect(document.querySelector(".upload-chip")).toBeNull();
   });
 });
@@ -80,12 +80,12 @@ describe("Composer — attachments enter as chips (J6)", () => {
 describe("Composer — sending with attachments (J6)", () => {
   it("appends one path reference line per uploaded chip", async () => {
     const onSubmit = vi.fn();
-    renderComposer({ value: "请看截图", onChange: () => {}, onSubmit });
+    renderComposer({ value: "See the screenshot", onChange: () => {}, onSubmit });
     fireEvent.drop(document.querySelector(".composer-shell"), { dataTransfer: { files: [makeFile()] } });
     await waitFor(() => expect(document.querySelector(".upload-chip.ok")).not.toBeNull());
 
     fireEvent.click(screen.getByTitle("Send message"));
-    expect(onSubmit).toHaveBeenCalledWith("请看截图\n附件：uploads/web/mock-shot.png");
+    expect(onSubmit).toHaveBeenCalledWith("See the screenshot\nAttachment: uploads/web/mock-shot.png");
     // delivered chip leaves the row
     expect(document.querySelector(".upload-chip")).toBeNull();
   });
@@ -94,7 +94,7 @@ describe("Composer — sending with attachments (J6)", () => {
     const onSubmit = vi.fn();
     const onChange = vi.fn();
     const onUpload = vi.fn(() => new Promise(() => {})); // stuck uploading
-    renderComposer({ value: "先发文本", onChange, onSubmit, onUpload });
+    renderComposer({ value: "Send text first", onChange, onSubmit, onUpload });
     fireEvent.drop(document.querySelector(".composer-shell"), { dataTransfer: { files: [makeFile()] } });
     await waitFor(() => expect(document.querySelector(".upload-chip.uploading")).not.toBeNull());
 
@@ -102,8 +102,8 @@ describe("Composer — sending with attachments (J6)", () => {
     expect(send.disabled).toBe(false); // sending is never blocked
     fireEvent.click(send);
     expect(onSubmit).toHaveBeenCalledTimes(1);
-    expect(onSubmit.mock.calls[0][0]).toBe("先发文本"); // no attachment line
-    expect(screen.getByRole("status").textContent).toBe("1 个附件仍在上传，未随消息发送");
+    expect(onSubmit.mock.calls[0][0]).toBe("Send text first"); // no attachment line
+    expect(screen.getByRole("status").textContent).toBe("1 attachment still uploading; not sent with this message");
     expect(screen.getByRole("textbox").disabled).toBe(false);
     // the uploading chip stays in the row for the next message
     expect(document.querySelector(".upload-chip.uploading")).not.toBeNull();
@@ -118,36 +118,36 @@ describe("Composer — sending with attachments (J6)", () => {
 });
 
 describe("Composer — queue mode toggle (audit #1)", () => {
-  it("the follow_up/steer switch renders only while a turn is active and defaults to 排队追问", () => {
+  it("the follow_up/steer switch renders only while a turn is active and defaults to Queue follow-up", () => {
     const onQueueModeChange = vi.fn();
     const { rerender } = render(<Composer value="" onChange={() => {}} onSubmit={vi.fn()} active={false} onQueueModeChange={onQueueModeChange} />);
-    expect(screen.queryByRole("group", { name: "队列模式" })).toBeNull();
+    expect(screen.queryByRole("group", { name: "Queue mode" })).toBeNull();
 
     rerender(<Composer value="" onChange={() => {}} onSubmit={vi.fn()} active onQueueModeChange={onQueueModeChange} queueMode="follow_up" />);
-    const group = screen.getByRole("group", { name: "队列模式" });
-    expect(group.querySelector("button.selected").textContent).toContain("排队追问");
-    expect(screen.getByRole("textbox").placeholder).toContain("排队追问");
+    const group = screen.getByRole("group", { name: "Queue mode" });
+    expect(group.querySelector("button.selected").textContent).toContain("Queue follow-up");
+    expect(screen.getByRole("textbox").placeholder).toContain("queue as follow-ups");
 
-    fireEvent.click(screen.getByTitle("立即插入当前回合（steer）"));
+    fireEvent.click(screen.getByTitle("Redirect the current turn immediately (steer)"));
     expect(onQueueModeChange).toHaveBeenCalledWith("steering");
   });
 
   it("steer mode flips the selection and the placeholder", () => {
     renderComposer({ active: true, queueMode: "steering", onQueueModeChange: vi.fn() });
-    const group = screen.getByRole("group", { name: "队列模式" });
-    expect(group.querySelector("button.selected").textContent).toContain("转向 steer");
+    const group = screen.getByRole("group", { name: "Queue mode" });
+    expect(group.querySelector("button.selected").textContent).toContain("Redirect steer");
     expect(screen.getByRole("textbox").placeholder).toContain("steer");
   });
 });
 
 describe("Composer — interrupt arming hint (audit #1)", () => {
-  it("shows 再按一次 Esc 停止 only while armed and mirrors it on the stop button", () => {
+  it("shows Press Esc again to stop only while armed and mirrors it on the stop button", () => {
     const { rerender } = render(<Composer value="" onChange={() => {}} onSubmit={vi.fn()} active onCancel={() => {}} interruptArmed />);
-    expect(screen.getByText("再按一次 Esc 停止")).not.toBeNull();
-    expect(screen.getByTitle("再按一次 Esc 停止")).not.toBeNull();
+    expect(screen.getByText("Press Esc again to stop")).not.toBeNull();
+    expect(screen.getByTitle("Press Esc again to stop")).not.toBeNull();
 
     rerender(<Composer value="" onChange={() => {}} onSubmit={vi.fn()} active onCancel={() => {}} interruptArmed={false} />);
-    expect(screen.queryByText("再按一次 Esc 停止")).toBeNull();
+    expect(screen.queryByText("Press Esc again to stop")).toBeNull();
     expect(screen.getByTitle("Stop active turn")).not.toBeNull();
   });
 });

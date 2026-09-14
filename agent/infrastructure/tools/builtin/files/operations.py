@@ -1,4 +1,4 @@
-"""文件导航工具定义。"""
+"""File navigation tool implementations."""
 
 import hashlib
 import json
@@ -31,11 +31,11 @@ def _existing_path(tool_name: str, raw_path: str) -> tuple[Path, str | None]:
         path = Path(raw_path).expanduser().resolve()
         path.stat()
     except FileNotFoundError:
-        return Path(raw_path), tool_error(tool_name, f"路径不存在: {raw_path}", "NotFound")
+        return Path(raw_path), tool_error(tool_name, f"Path does not exist: {raw_path}", "NotFound")
     except PermissionError:
-        return Path(raw_path), tool_error(tool_name, f"无权访问路径: {raw_path}", "PermissionDenied")
+        return Path(raw_path), tool_error(tool_name, f"Permission denied for path: {raw_path}", "PermissionDenied")
     except OSError as exc:
-        return Path(raw_path), tool_error(tool_name, f"无法访问路径: {raw_path}: {exc}", "PathAccessError")
+        return Path(raw_path), tool_error(tool_name, f"Cannot access path: {raw_path}: {exc}", "PathAccessError")
     return path, None
 
 
@@ -77,20 +77,20 @@ def read_file(
     if error:
         return error
     if not file_path.is_file():
-        return tool_error("read_file", f"路径不是文件: {path}", "NotAFile")
+        return tool_error("read_file", f"Path is not a file: {path}", "NotAFile")
 
     try:
         offset = int(offset)
     except (TypeError, ValueError, OverflowError):
-        return tool_error("read_file", "offset 必须是整数。", "InvalidOffset")
+        return tool_error("read_file", "offset must be an integer.", "InvalidOffset")
     try:
         requested_limit = int(limit)
     except (TypeError, ValueError, OverflowError):
-        return tool_error("read_file", "limit 必须是整数。", "InvalidLimit")
+        return tool_error("read_file", "limit must be an integer.", "InvalidLimit")
     if offset < 1:
-        return tool_error("read_file", "offset 必须 >= 1。", "InvalidOffset")
+        return tool_error("read_file", "offset must be >= 1.", "InvalidOffset")
     if requested_limit < 1:
-        return tool_error("read_file", "limit 必须 >= 1。", "InvalidLimit")
+        return tool_error("read_file", "limit must be >= 1.", "InvalidLimit")
 
     try:
         with file_path.open("rb") as raw_file:
@@ -100,7 +100,7 @@ def read_file(
             for chunk in iter(lambda: raw_file.read(1024 * 1024), b""):
                 digest.update(chunk)
         if _looks_binary(sample):
-            return tool_error("read_file", f"二进制文件不可按文本读取: {path}", "BinaryFile")
+            return tool_error("read_file", f"Binary file cannot be read as text: {path}", "BinaryFile")
 
         effective_limit = min(requested_limit, _READ_MAX_LIMIT)
         end_line = offset + effective_limit - 1
@@ -135,7 +135,7 @@ def read_file(
         if offset > last_line and not (offset == 1 and last_line == 0):
             return tool_error(
                 "read_file",
-                f"起始行 {offset} 超出文件总行数 ({last_line} 行)。",
+                f"Offset {offset} is beyond the end of the file ({last_line} lines).",
                 "OffsetOutOfRange",
                 meta={"path": str(file_path), "offset": offset},
             )
@@ -158,11 +158,11 @@ def read_file(
             },
         )
     except PermissionError:
-        return tool_error("read_file", f"无权读取文件: {path}", "PermissionDenied")
+        return tool_error("read_file", f"Permission denied reading file: {path}", "PermissionDenied")
     except UnicodeDecodeError:
-        return tool_error("read_file", f"文件不是有效的 UTF-8 文本: {path}", "InvalidEncoding")
+        return tool_error("read_file", f"File is not valid UTF-8 text: {path}", "InvalidEncoding")
     except OSError as exc:
-        return tool_error("read_file", f"读取文件失败: {exc}", "ReadError")
+        return tool_error("read_file", f"Failed to read file: {exc}", "ReadError")
 
 def glob(
     pattern: str,
@@ -176,15 +176,15 @@ def glob(
     if error:
         return error
     if not search_path.is_dir():
-        return tool_error("glob", f"路径不是目录: {path}", "NotADirectory")
+        return tool_error("glob", f"Path is not a directory: {path}", "NotADirectory")
     if not isinstance(pattern, str) or not pattern:
-        return tool_error("glob", "pattern 不能为空。", "InvalidPattern")
+        return tool_error("glob", "pattern must not be empty.", "InvalidPattern")
     try:
         max_results = int(max_results)
     except (TypeError, ValueError, OverflowError):
-        return tool_error("glob", "max_results 必须是整数。", "InvalidMaxResults")
+        return tool_error("glob", "max_results must be an integer.", "InvalidMaxResults")
     if max_results < 1:
-        return tool_error("glob", "max_results 必须 >= 1。", "InvalidMaxResults")
+        return tool_error("glob", "max_results must be >= 1.", "InvalidMaxResults")
 
     try:
         results: list[dict[str, object]] = []
@@ -200,7 +200,7 @@ def glob(
             try:
                 size_bytes = file_path.stat().st_size
             except PermissionError:
-                return tool_error("glob", f"无权访问文件: {file_path}", "PermissionDenied")
+                return tool_error("glob", f"Permission denied accessing file: {file_path}", "PermissionDenied")
             results.append({"path": _relative_path(file_path, search_path), "size_bytes": int(size_bytes)})
 
         return tool_ok(
@@ -215,11 +215,11 @@ def glob(
             },
         )
     except ValueError as exc:
-        return tool_error("glob", f"无效的 glob 模式: {exc}", "InvalidPattern")
+        return tool_error("glob", f"Invalid glob pattern: {exc}", "InvalidPattern")
     except PermissionError:
-        return tool_error("glob", f"无权读取目录: {path}", "PermissionDenied")
+        return tool_error("glob", f"Permission denied reading directory: {path}", "PermissionDenied")
     except OSError as exc:
-        return tool_error("glob", f"查找文件失败: {exc}", "GlobError")
+        return tool_error("glob", f"File lookup failed: {exc}", "GlobError")
 
 
 def _rg_command(rg: str, pattern: str, search_path: Path, file_glob: str) -> list[str]:
@@ -260,19 +260,19 @@ def grep(
     if error:
         return error
     if not isinstance(pattern, str) or not pattern:
-        return tool_error("grep", "pattern 不能为空。", "InvalidPattern")
+        return tool_error("grep", "pattern must not be empty.", "InvalidPattern")
     if not isinstance(glob, str) or not glob:
-        return tool_error("grep", "glob 不能为空。", "InvalidPattern")
+        return tool_error("grep", "glob must not be empty.", "InvalidPattern")
     try:
         max_results = int(max_results)
     except (TypeError, ValueError, OverflowError):
-        return tool_error("grep", "max_results 必须是整数。", "InvalidMaxResults")
+        return tool_error("grep", "max_results must be an integer.", "InvalidMaxResults")
     if max_results < 1:
-        return tool_error("grep", "max_results 必须 >= 1。", "InvalidMaxResults")
+        return tool_error("grep", "max_results must be >= 1.", "InvalidMaxResults")
 
     rg = shutil.which("rg")
     if not rg:
-        return tool_error("grep", "未找到 rg 可执行文件。", "RgUnavailable")
+        return tool_error("grep", "rg executable not found.", "RgUnavailable")
 
     process: subprocess.Popen[str] | None = None
     results: list[dict[str, object]] = []
@@ -317,7 +317,7 @@ def grep(
         stderr = process.stderr.read() if process.stderr is not None else ""
         return_code = process.wait()
         if return_code not in (0, 1) and not truncated:
-            return tool_error("grep", stderr.strip() or "rg 搜索失败。", _rg_error(stderr))
+            return tool_error("grep", stderr.strip() or "rg search failed.", _rg_error(stderr))
         return tool_ok(
             "grep",
             results,
@@ -331,9 +331,9 @@ def grep(
             },
         )
     except FileNotFoundError:
-        return tool_error("grep", "未找到 rg 可执行文件。", "RgUnavailable")
+        return tool_error("grep", "rg executable not found.", "RgUnavailable")
     except OSError as exc:
-        return tool_error("grep", f"无法启动 rg: {exc}", "GrepError")
+        return tool_error("grep", f"Failed to start rg: {exc}", "GrepError")
     finally:
         if process is not None and process.poll() is None:
             process.kill()

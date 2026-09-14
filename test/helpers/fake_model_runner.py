@@ -19,7 +19,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="persistent fake OpenAI-compatible model server")
     parser.add_argument("--port", type=int, default=9100)
     parser.add_argument("--replies", type=int, default=50)
-    parser.add_argument("--text", default="收到！这是浏览器旅程的流式回复，一切正常。")
+    parser.add_argument("--text", default="Got it! This is a streamed reply from the browser journey; all is well.")
     args = parser.parse_args()
 
     server = FakeOpenAIServer()

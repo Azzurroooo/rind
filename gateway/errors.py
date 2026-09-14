@@ -2,7 +2,7 @@
 failure-reply pattern).
 
 ``user_error_line`` maps an exception or a ``turn_failed`` event onto a single
-Chinese line with a recovery hint.  Rules: never raw stacks or provider bodies
+user-facing line with a recovery hint.  Rules: never raw stacks or provider bodies
 (only the message text, whitespace-collapsed), detail capped at
 :data:`DETAIL_LIMIT` chars, and unknown failures degrade to a short sanitized
 reason instead of leaking internals.
@@ -12,16 +12,17 @@ from __future__ import annotations
 
 DETAIL_LIMIT = 120
 
-TIMEOUT_LINE = "⏱️ worker 响应超时，任务未完成。稍后重发即可；如反复出现请检查网络。"
-RATE_LIMIT_LINE = "🚦 模型限流，请稍等片刻再试，或降低并发。"
-AUTH_LINE = "🔑 API 鉴权/额度失败：请检查 .rind/settings.json 的 apiKey 或服务商控制台。"
-OVERFLOW_LINE = "📚 上下文超限：回复 /compact 压缩后重试，或发 /new 开新会话。"
-CANCELLED_LINE = "已停止。"
-UNKNOWN_TEMPLATE = "⚠️ 任务失败（{detail}）。可回复 /status 查看状态或重试。"
+TIMEOUT_LINE = "⏱️ Worker response timed out; the task did not finish. Resend it later; if it recurs, check the network."
+RATE_LIMIT_LINE = "🚦 Model rate-limited. Wait a moment and retry, or lower concurrency."
+AUTH_LINE = "🔑 API auth/quota failed: check the apiKey in .rind/settings.json or the provider console."
+OVERFLOW_LINE = "📚 Context limit exceeded: reply /compact to shrink it and retry, or send /new for a fresh session."
+CANCELLED_LINE = "Stopped."
+UNKNOWN_TEMPLATE = "⚠️ Task failed ({detail}). Reply /status to check state, or retry."
 
 # Detection order matters: cancelled before timeout ("request cancelled by
 # timeout"), rate limit before auth ("429" vs "401" never collide, but quota
-# phrasing overlaps billing).
+# phrasing overlaps billing). Chinese needles stay: they classify
+# Chinese-language provider errors, not user copy.
 _SIGNATURES: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("cancelled", ("cancelled", "canceled", "aborted", "已取消", "任务取消")),
     ("timeout", ("timeout", "timed out", "超时")),
@@ -47,7 +48,7 @@ def _detail(text: str) -> str:
     collapsed = " ".join(str(text or "").split())
     if len(collapsed) > DETAIL_LIMIT:
         collapsed = collapsed[:DETAIL_LIMIT]
-    return collapsed or "未知错误"
+    return collapsed or "unknown error"
 
 
 def user_error_line(source: object) -> str:

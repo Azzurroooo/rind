@@ -1,29 +1,29 @@
-# Rind 当前代码架构
+# Rind Current Code Architecture
 
-Rind 由两个产品 Surface 共享一个 Runtime Package：`frontend-cli` 提供终端体验，`desktop` 提供 Electron 界面。Python 入口不再承载交互 UI，只启动 Runtime Server。
+Rind has two product surfaces sharing one Runtime Package: `frontend-cli` provides the terminal experience and `desktop` provides the Electron UI. The Python entry point no longer hosts interactive UI; it only starts the Runtime Server.
 
-## 分层
+## Layering
 
 ```mermaid
 flowchart TB
-    Surface["frontend-cli / desktop"] --> Server["agent/runtime/server\n协议、JSONL、commands"]
-    Server --> Core["agent/runtime/core\nAgentRuntime、TurnRunner、stream"]
-    Core --> Application["agent/application\ncontext、tools、ports"]
-    Core --> Domain["agent/domain\n事件、错误、取消、goal"]
+    Surface["frontend-cli / desktop"] --> Server["agent/runtime/server\nprotocol, JSONL, commands"]
+    Server --> Core["agent/runtime/core\nAgentRuntime, TurnRunner, stream"]
+    Core --> Application["agent/application\ncontext, tools, ports"]
+    Core --> Domain["agent/domain\nevents, errors, cancellation, goal"]
     Application --> Domain
     Bootstrap["agent/bootstrap/container.py"] --> Core
-    Bootstrap --> Infrastructure["agent/infrastructure\nLLM、持久化、工具、配置"]
+    Bootstrap --> Infrastructure["agent/infrastructure\nLLM, persistence, tools, config"]
     Infrastructure -. implements .-> Application
 ```
 
-- `domain` 只包含领域模型和标准库逻辑。
-- `application` 编排 context、tool、skill 和 ports，不依赖具体 provider 或 Surface。
-- `runtime/core` 是执行核心，拥有 turn 生命周期、输入队列和事件流。
-- `runtime/server` 是统一 Server facade，负责协议分发、能力声明、session/model/goal/background 控制和可复用 command catalog。
-- `infrastructure` 实现 LLM、JSONL session store、工具注册、配置和 workspace 集成。
-- `bootstrap` 是唯一生产组合根；Server 通过 `build_agent_container()` 获取依赖。
+- `domain` holds only domain models and standard-library logic.
+- `application` orchestrates context, tools, skills, and ports; it depends on no concrete provider or surface.
+- `runtime/core` is the execution core: it owns turn lifecycles, input queues, and the event stream.
+- `runtime/server` is the unified Server facade: protocol dispatch, capability declaration, session/model/goal/background control, and the reusable command catalog.
+- `infrastructure` implements the LLM, the JSONL session store, tool registration, config, and workspace integration.
+- `bootstrap` is the only production composition root; the Server obtains its dependencies through `build_agent_container()`.
 
-`runtime/core` 不导入 `runtime/server`、`bootstrap` 或具体 infrastructure。Server 与 core 在同一个进程内直接调用，没有内部 RPC 或重复的 runtime dependency object。
+`runtime/core` imports neither `runtime/server`, `bootstrap`, nor concrete infrastructure. Server and core call each other directly in the same process — no internal RPC and no duplicated runtime dependency objects.
 
 ## Runtime Package
 
@@ -31,29 +31,29 @@ flowchart TB
 agent/runtime/
 ├── __init__.py
 ├── core/
-│   ├── runtime.py          # AgentRuntime facade、turn lock、输入队列、session control
-│   ├── turn_runner.py      # context -> model -> tool 主循环
-│   ├── stream_parser.py    # provider stream 解析
+│   ├── runtime.py          # AgentRuntime facade, turn lock, input queues, session control
+│   ├── turn_runner.py      # context -> model -> tool main loop
+│   ├── stream_parser.py    # provider stream parsing
 │   └── stream_pump.py      # stream -> RuntimeEvent
 └── server/
-    ├── app_server.py       # workspace/config/container 启动
-    ├── protocol.py         # v2 方法、capabilities、envelope、errors
-    ├── stdio.py            # JSONL transport 与 request dispatcher
-    ├── resume_preview.py   # session 恢复摘要
-    └── commands/            # command catalog 与 runtime-safe handlers
+    ├── app_server.py       # workspace/config/container startup
+    ├── protocol.py         # v2 methods, capabilities, envelope, errors
+    ├── stdio.py            # JSONL transport and request dispatcher
+    ├── resume_preview.py   # session resume summary
+    └── commands/            # command catalog and runtime-safe handlers
 ```
 
-## Surface 协议
+## Surface protocol
 
-协议由 `agent/runtime/server/protocol.py` 定义，前端镜像在 `frontend-cli/lib/runtime-protocol.js`，Desktop 的允许方法由 `desktop/src/preload/types.ts` 派生。公共方法使用标准语义：
+The protocol is defined in `agent/runtime/server/protocol.py`, mirrored for the frontend in `frontend-cli/lib/runtime-protocol.js`, and the Desktop allowlist of methods derives from `desktop/src/preload/types.ts`. Common methods use standard semantics:
 
-`initialize`、`shutdown`、`session/new`、`session/list`、`session/switch`、`session/replay`、`session/prompt`、`session/cancel`、`model/list`、`model/set`。
+`initialize`, `shutdown`, `session/new`, `session/list`, `session/switch`, `session/replay`, `session/prompt`, `session/cancel`, `model/list`, `model/set`.
 
-产品扩展使用 `rind/` 命名空间，并由能力声明门控：`rind/session/steer`、`rind/session/follow_up`、`rind/session/unsteer`、`rind/session/dequeue_follow_up`、`rind/session/compact`、`rind/command/execute`、`rind/user-question/respond`、`rind/goal/*`、`rind/background/*`。两类待输入分别 FIFO 投递；取回方法不带 `input_id` 时各自以 LIFO 取回最新项，带 `input_id` 时可精确移除对应类别中的任意尚未投递项。
+Product extensions use the `rind/` namespace and are gated by capability declaration: `rind/session/steer`, `rind/session/follow_up`, `rind/session/unsteer`, `rind/session/dequeue_follow_up`, `rind/session/compact`, `rind/command/execute`, `rind/user-question/respond`, `rind/goal/*`, `rind/background/*`. The two kinds of queued input each deliver FIFO; without an `input_id` the retrieval methods each fetch the newest item (LIFO), and with an `input_id` they can remove any specific not-yet-delivered item from the corresponding kind.
 
-事件统一为 `method: "session/update"` 的 envelope，包含 `sequence`、`durability`、session/turn ids 和 `event.type`。增量事件可实时消费，durable 事件用于恢复和状态同步。公共 fixture 位于 `test/fixtures/runtime_protocol.golden.jsonl`。
+Events are uniformly envelopes with `method: "session/update"` carrying `sequence`, `durability`, session/turn ids, and `event.type`. Incremental events can be consumed live; durable events serve recovery and state synchronization. The public fixture lives at `test/fixtures/runtime_protocol.golden.jsonl`.
 
-## 主要数据流
+## Main data flow
 
 ```mermaid
 sequenceDiagram
@@ -72,9 +72,9 @@ sequenceDiagram
     Server-->>Surface: response(session_id, turn_id)
 ```
 
-控制请求不会复制业务逻辑：Server 调用 Runtime 的 `set_model`、`switch_session`、`compact_context`、goal API 和输入队列；命令 handler 通过 `SlashCommandContext` 使用同一个 runtime/session 实例。
+Control requests duplicate no business logic: the Server calls the Runtime's `set_model`, `switch_session`, `compact_context`, goal APIs, and input queues; command handlers use the same runtime/session instances through `SlashCommandContext`.
 
-## 入口
+## Entry points
 
 ```text
 frontend-cli/bin/rind.js
@@ -88,11 +88,11 @@ desktop/src/main/index.ts
      -> python main.py app-server --stdio
 ```
 
-`desktop` 主进程隔离 worker、IPC 和项目状态；renderer 只通过 preload API 访问 runtime。`frontend-cli` 负责 TTY/non-TTY 输入、菜单、文本和 Markdown 渲染。两者都消费同一套方法、事件和能力。CLI 的 TTY 渲染采用单组件树 + 全缓冲 diff 架构，详见 [`docs/cli-rendering.md`](cli-rendering.md)。
+The `desktop` main process isolates the worker, IPC, and project state; the renderer reaches the runtime only through the preload API. `frontend-cli` owns TTY/non-TTY input, menus, and text/Markdown rendering. Both consume the same methods, events, and capabilities. The CLI's TTY rendering uses a single component tree plus full-buffer diff architecture — see [`docs/cli-rendering.md`](cli-rendering.md).
 
-## 测试边界
+## Test boundaries
 
-- Python 测试覆盖 `runtime/core`、`runtime/server`、application/infrastructure 和协议 fixture。
-- `frontend-cli/test` 覆盖协议、controller、输入状态和渲染。
-- `desktop/scripts` 覆盖 fake runtime 生命周期、项目/session adapter 和 app-server smoke；需要 Node 22+ 才能直接运行 TypeScript 源测试。
-- Python 交互 CLI、prompt renderer 和对应测试已删除；Python CLI 不再是产品入口。
+- Python tests cover `runtime/core`, `runtime/server`, application/infrastructure, and the protocol fixtures.
+- `frontend-cli/test` covers the protocol, controllers, input state, and rendering.
+- `desktop/scripts` covers the fake runtime lifecycle, project/session adapters, and an app-server smoke test; Node 22+ is required to run the TypeScript source tests directly.
+- The interactive Python CLI, its prompt renderer, and their tests have been deleted; the Python CLI is no longer a product entry point.

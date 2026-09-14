@@ -1,6 +1,6 @@
 """Feishu (Lark) channel adapter (gateway.md §8, plan §5.6 P1).
 
-Transport: ``lark-oapi`` WebSocket long connection (事件订阅) — Feishu dials
+Transport: ``lark-oapi`` WebSocket long connection (event subscription) — Feishu dials
 out, zero inbound ports.  The SDK is synchronous on its own thread: events
 hand off to the gateway loop via ``run_coroutine_threadsafe`` and API calls
 run in worker threads (the imapclient precedent).  Lazy-imported in
@@ -38,7 +38,7 @@ CAPABILITIES = ChannelCapabilities(max_text_length=15000, len_unit="chars", supp
                                   supports_buttons=False, supports_reaction=True, markdown="none")
 
 MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024
-OVERSIZE_NOTICE = "附件过大（单个上限 20MB），已忽略该附件。"
+OVERSIZE_NOTICE = "Attachment too large (per-file limit 20MB); skipped."
 _MEDIA_TYPES = {"image": "image", "audio": "audio", "video": "video", "media": "video", "file": "document"}
 _KIND_META = {"image": ("image/jpeg", ".jpg"), "audio": ("audio/opus", ".opus"), "video": ("video/mp4", ".mp4")}
 _FILE_TYPE_BY_KIND = {"audio": "opus", "video": "mp4", "document": "stream"}

@@ -52,10 +52,10 @@ CAPABILITIES = ChannelCapabilities(
 )
 
 MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024
-OVERSIZE_NOTICE = "附件过大（单个上限 20MB），已忽略该附件。"
+OVERSIZE_NOTICE = "Attachment too large (per-file limit 20MB); skipped."
 DEFAULT_MAILBOX = "INBOX"
 DEFAULT_POLL_INTERVAL = 30
-FALLBACK_SUBJECT = "来自 rind 的消息"
+FALLBACK_SUBJECT = "Message from rind"
 _SUBJECT_PREFIX = re.compile(r"^(?:(?:re|fw|fwd)(?:\[\d+\])?\s*:\s*)+", re.IGNORECASE)
 
 
