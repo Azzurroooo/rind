@@ -32,22 +32,41 @@ def build_context_snapshot(
     stats: dict,
     turn_id: str = "",
     *,
+    tool_schemas: list[dict] | None = None,
     captured_at: str | None = None,
     estimator: ContextEstimator | None = None,
 ) -> dict[str, Any]:
     """Bucket the assembled message list into sections with per-message estimates.
 
-    Pure function: fixed input produces the same sections. The total is taken
-    from the pipeline's own stats (never re-summed), so per-section estimates
-    share the exact per-message payloads the estimator scored at build time.
+    Pure function: fixed input produces the same sections. The message total is
+    taken from the pipeline's own stats; request tool schemas are added because
+    they are not part of the assembled message list.
     Sections are ordered by first appearance in the assembly; the array
     position is the only order carrier (no extra field is emitted).
     """
     stats = stats if isinstance(stats, dict) else {}
-    sections = _build_sections(messages, estimator or ContextEstimator())
+    estimator = estimator or ContextEstimator()
+    sections = _build_sections(messages, estimator)
+    tool_schema_tokens = estimator.estimate_tool_schemas(tool_schemas) if tool_schemas else 0
+    if tool_schemas:
+        system_order = next(
+            (section["_order"] for section in sections if section["key"] == "system_prompt"),
+            -1,
+        )
+        sections.append(
+            {
+                "key": "tool_specs",
+                "label": "Tool specifications",
+                "tokens": tool_schema_tokens,
+                "messages": len(tool_schemas),
+                "_order": system_order + 0.5,
+            }
+        )
     estimated_total = positive_int(stats.get("estimated_input_tokens"))
     if estimated_total is None:
         estimated_total = sum(section["tokens"] for section in sections)
+    else:
+        estimated_total += tool_schema_tokens
     return {
         "captured_at": captured_at or datetime.now().astimezone().isoformat(),
         "turn_id": str(turn_id or ""),

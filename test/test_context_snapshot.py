@@ -72,6 +72,45 @@ def test_mixed_messages_produce_the_full_bucket_set():
     assert sections["kind:mystery_tag"]["label"] == "mystery_tag"
 
 
+def test_tool_schemas_have_a_separate_context_bucket():
+    messages = [{"role": "system", "content": "system"}, {"role": "user", "content": "hello"}]
+    schemas = [
+        {
+            "type": "function",
+            "function": {
+                "name": "bash",
+                "description": "Run a shell command",
+                "parameters": {"type": "object", "properties": {"command": {"type": "string"}}},
+            },
+        },
+    ]
+    message_tokens = ESTIMATOR.estimate_messages(messages).estimated_input_tokens
+    tool_tokens = ESTIMATOR.estimate_tool_schemas(schemas)
+
+    snapshot = build_context_snapshot(
+        messages,
+        {"estimated_input_tokens": message_tokens, "context_window_tokens": 4096},
+        "turn-1",
+        tool_schemas=schemas,
+        estimator=ESTIMATOR,
+    )
+    sections = _sections(snapshot)
+
+    assert sections["tool_specs"] == {
+        "key": "tool_specs",
+        "label": "Tool specifications",
+        "tokens": tool_tokens,
+        "messages": 1,
+    }
+    assert snapshot["estimated_total"] == message_tokens + tool_tokens
+    assert sum(section["tokens"] for section in snapshot["sections"]) == snapshot["estimated_total"]
+    assert [section["key"] for section in snapshot["sections"]] == [
+        "system_prompt",
+        "tool_specs",
+        "chat_user",
+    ]
+
+
 def pipeline_stats(messages):
     estimate = ESTIMATOR.estimate_messages(messages)
     return {

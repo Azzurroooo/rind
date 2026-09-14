@@ -13,6 +13,16 @@ import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 
+def _prompt_chars(body: dict) -> int:
+    message_chars = sum(
+        len(str(message.get("content") or ""))
+        for message in body.get("messages", [])
+    )
+    tools = body.get("tools")
+    tool_chars = len(json.dumps({"tools": tools}, ensure_ascii=False)) if tools else 0
+    return message_chars + tool_chars
+
+
 class FakeOpenAIServer:
     """Queue of scripted responses; records every request body it receives."""
 
@@ -74,7 +84,7 @@ class FakeOpenAIServer:
                     return
                 if not body.get("stream"):
                     # Non-streaming callers (compaction) expect one JSON completion.
-                    prompt_chars = sum(len(str(m.get("content") or "")) for m in body.get("messages", []))
+                    prompt_chars = _prompt_chars(body)
                     content = "".join(script.get("chunks", [])) if script["kind"] == "text" else ""
                     self._reply(200, {
                         "id": "chatcmpl-test",
@@ -120,7 +130,7 @@ class FakeOpenAIServer:
                     ]}))
                     emit(self._chunk(request_id, created, model, {}, finish="tool_calls"))
                     if body.get("stream_options", {}).get("include_usage"):
-                        prompt_chars = sum(len(str(m.get("content") or "")) for m in body.get("messages", []))
+                        prompt_chars = _prompt_chars(body)
                         emit({
                             "id": request_id,
                             "object": "chat.completion.chunk",
@@ -148,7 +158,7 @@ class FakeOpenAIServer:
                 emit(self._chunk(request_id, created, model, {}, finish=script.get("finish", "stop")))
                 if body.get("stream_options", {}).get("include_usage"):
                     # Providers echo measured usage on a choices-free final chunk.
-                    prompt_chars = sum(len(str(m.get("content") or "")) for m in body.get("messages", []))
+                    prompt_chars = _prompt_chars(body)
                     emit({
                         "id": request_id,
                         "object": "chat.completion.chunk",

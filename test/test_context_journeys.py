@@ -152,11 +152,12 @@ def test_jc1_fresh_exchange_shows_board_rows_with_small_deviation(context_worker
     breakdown = board["breakdown"]
 
     # Page 1 shows the composition of the LAST SAMPLING: after one exchange the
-    # reply was persisted after that sampling, so the fresh board shows three
-    # rows — system prompt, goal policy, and the user's message.
+    # reply was persisted after that sampling, so the fresh board includes the
+    # assembled messages plus the request's tool specifications.
     assert "chat_user" in sections
     assert "system_prompt" in sections
     assert "goal_policy" in sections
+    assert "tool_specs" in sections
     # Assembly order: the system prompt row always leads the board.
     assert breakdown["sections"][0]["key"] == "system_prompt"
     # Every number on page 1 traces to the snapshot: rows sum to the total.
@@ -170,13 +171,14 @@ def test_jc1_fresh_exchange_shows_board_rows_with_small_deviation(context_worker
     assert deviation < 0.15, f"estimated {breakdown['estimated_total']} vs measured {usage['input_tokens']}"
 
     # A second exchange samples WITH the first reply in context: the assistant
-    # row appears and the tools segment is still absent.
+    # row appears and the tool-spec row remains part of the request context.
     model_server.script_text(["第二次回答"], delay_ms=1)
     client.run_prompt(session_id, "再问一句")
     board = client.request("rind/context/inspect", {"session_id": session_id})
     sections = _summarize_breakdown(board)
     assert "chat_assistant" in sections
     assert sections["chat_assistant"]["messages"] >= 1
+    assert "tool_specs" in sections
 
     summary = client.request("rind/usage/summary", {"days": 7})
     assert summary["totals"]["samples"] >= 2
@@ -196,6 +198,7 @@ def test_jc2_bash_calls_widen_the_tool_segment(context_worker, model_server):
     sections = _summarize_breakdown(board)
 
     assert "tool:bash" in sections, f"tool rows missing: {sorted(sections)}"
+    assert "tool_specs" in sections, f"tool-spec row missing: {sorted(sections)}"
     assert sections["tool:bash"]["messages"] >= 1
     assert board["breakdown"]["sections"][0]["key"] == "system_prompt"
     assert sum(section["tokens"] for section in board["breakdown"]["sections"]) == board["breakdown"]["estimated_total"]

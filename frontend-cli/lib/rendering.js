@@ -15,14 +15,15 @@ const BOARD_SECTION_SHORT_LABELS = {
   reasoning: "reasoning",
   system_prompt: "system",
   skill_catalog: "skills",
+  tool_specs: "tools",
   rind_docs: "RIND",
-  rind_docs_user: "RIND",
-  rind_docs_project: "RIND",
+  rind_docs_user: "RIND user",
+  rind_docs_project: "RIND project",
   compaction_handoff: "compact",
   goal_policy: "goal",
   delegate: "delegate",
   team_agent_catalog: "team",
-  "tool:other": "other",
+  tool_results: "results",
 };
 
 export function boardWidth(width) {
@@ -69,13 +70,15 @@ export function contextBoardText(page = {}, width) {
   const estimated = boardNumber(breakdown.estimated_total);
   const measured = Math.max(0, boardNumber(usage?.input_tokens));
   const usedPercent = windowTokens > 0 ? estimated / windowTokens : 0;
+  const groups = contextDisplayGroups(breakdown.sections);
+  const sections = groups.flatMap((group) => group.sections);
   const lines = contextMetaLines(windowTokens, usedPercent, measured, frameWidth - 4);
   const innerWidth = frameWidth - 4;
   if (windowTokens > 0) {
-    lines.push(stackedShareBar(breakdown.sections, windowTokens, innerWidth));
-    lines.push(barUnderline(breakdown.sections, windowTokens, innerWidth));
+    lines.push(stackedShareBar(sections, windowTokens, innerWidth));
+    lines.push(...contextLegendRows(sections, estimated, innerWidth));
   }
-  lines.push(...contextSectionRows(breakdown.sections, estimated, innerWidth));
+  lines.push(...contextSectionRows(groups, estimated, innerWidth));
   return boardPanel({
     title: contextTitle(breakdown, title),
     lines,
@@ -161,23 +164,6 @@ function stackedShareBar(sections, windowTokens, cells) {
   return `${bar}${dim(BOARD_REMAINDER_CELL.repeat(remaining))}`;
 }
 
-function barUnderline(sections, windowTokens, cells) {
-  const spans = boardSpans(sections, windowTokens, cells);
-  const pieces = [];
-  for (const [index, span] of spans.entries()) {
-    const label = boardShortLabel(span);
-    const labelWidth = textWidth(label);
-    if (label && span.cells >= labelWidth + 1) {
-      pieces.push(boardPalette(index)(label));
-      pieces.push(dim(BOARD_UNDERLINE_CELL.repeat(span.cells - labelWidth)));
-    } else {
-      pieces.push(dim(BOARD_UNDERLINE_CELL.repeat(span.cells)));
-    }
-  }
-  pieces.push(dim(BOARD_UNDERLINE_CELL.repeat(Math.max(0, cells - spans.reduce((sum, span) => sum + span.cells, 0)))));
-  return pieces.join("");
-}
-
 function boardSpans(sections, windowTokens, cells) {
   return sections.map((section, index) => ({
     ...section,
@@ -186,29 +172,108 @@ function boardSpans(sections, windowTokens, cells) {
   }));
 }
 
-function contextSectionRows(sections, total, innerWidth) {
-  const nameWidth = Math.min(
-    Math.max(12, ...sections.map((section) => textWidth(boardText(section.label)))),
-    Math.max(12, innerWidth - 24),
-  );
-  const tokenTexts = sections.map((section) => formatBoardNumber(section.tokens));
-  const tokenWidth = Math.max(6, ...tokenTexts.map(textWidth));
-  const messageTexts = sections.map((section) => boardMessagesLabel(section.messages));
-  const messageWidth = Math.max(6, ...messageTexts.map(textWidth));
-  return sections.map((section, index) => {
+function contextDisplayGroups(sections) {
+  const groups = [
+    { label: "Core context", sections: [] },
+    { label: "Conversation & Tools", sections: [] },
+  ];
+  let toolResults;
+  for (const section of sections) {
+    if (isToolResultSection(section)) {
+      if (!toolResults) {
+        toolResults = {
+          key: "tool_results",
+          label: "Tool results",
+          tokens: 0,
+          messages: 0,
+        };
+        groups[1].sections.push(toolResults);
+      }
+      toolResults.tokens += Math.max(0, boardNumber(section.tokens));
+      toolResults.messages += Math.max(0, boardNumber(section.messages));
+      continue;
+    }
+    (isCoreContextSection(section) ? groups[0] : groups[1]).sections.push(section);
+  }
+  return groups.filter((group) => group.sections.length);
+}
+
+function isToolResultSection(section) {
+  return String(section?.key || "").startsWith("tool:");
+}
+
+function isCoreContextSection(section) {
+  const key = String(section?.key || "");
+  return key === "system_prompt"
+    || key === "tool_specs"
+    || key === "skill_catalog"
+    || key === "goal_policy"
+    || key === "delegate"
+    || key === "team_agent_catalog"
+    || key === "rind_init"
+    || key.startsWith("rind_docs")
+    || key.startsWith("kind:");
+}
+
+function contextLegendRows(sections, total, innerWidth) {
+  const items = sections.map((section, index) => {
+    const tokens = formatBoardNumber(section.tokens);
     const percent = total > 0 ? Math.round((boardNumber(section.tokens) / total) * 100) : 0;
-    return [
-      `  ${padRight(clipSingleLine(section.label, nameWidth), nameWidth)}`,
-      padLeft(tokenTexts[index], tokenWidth),
-      padLeft(`${percent}%`, 4),
-      padLeft(messageTexts[index], messageWidth),
-    ].join("  ");
+    const label = clipSingleLine(boardShortLabel(section), 14);
+    return `${boardPalette(index)("●")} ${label} ${tokens} ${percent}%`;
+  });
+  const rows = [];
+  let row = "";
+  for (const item of items) {
+    const candidate = row ? `${row}   ${item}` : item;
+    if (row && textWidth(candidate) > innerWidth) {
+      rows.push(row);
+      row = item;
+    } else {
+      row = candidate;
+    }
+  }
+  if (row) {
+    rows.push(row);
+  }
+  return rows;
+}
+
+function contextSectionRows(groups, total, innerWidth) {
+  const flatSections = groups.flatMap((group) => group.sections);
+  const nameWidth = Math.min(
+    Math.max(12, ...flatSections.map((section) => textWidth(boardText(section.label)))),
+    Math.max(12, innerWidth - 26),
+  );
+  const tokenTexts = flatSections.map((section) => formatBoardNumber(section.tokens));
+  const tokenWidth = Math.max(6, ...tokenTexts.map(textWidth));
+  const messageTexts = flatSections.map((section) => boardMessagesLabel(
+    section.messages,
+    section.key === "tool_specs" ? "tool" : section.key === "tool_results" ? "result" : "msg",
+  ));
+  const messageWidth = Math.max(6, ...messageTexts.map(textWidth));
+  let sectionIndex = 0;
+  return groups.flatMap((group) => {
+    const rows = ["", bold(group.label)];
+    for (const section of group.sections) {
+      const index = sectionIndex;
+      const percent = total > 0 ? Math.round((boardNumber(section.tokens) / total) * 100) : 0;
+      const marker = `${boardPalette(index)("●")} `;
+      rows.push([
+        `${marker}${padRight(clipSingleLine(section.label, nameWidth), nameWidth)}`,
+        padLeft(tokenTexts[index], tokenWidth),
+        padLeft(`${percent}%`, 4),
+        padLeft(messageTexts[index], messageWidth),
+      ].join("  "));
+      sectionIndex += 1;
+    }
+    return rows;
   });
 }
 
-function boardMessagesLabel(count) {
+function boardMessagesLabel(count, unit = "msg") {
   const value = Math.max(0, boardNumber(count));
-  return `${formatBoardNumber(value)} ${value === 1 ? "msg" : "msgs"}`;
+  return `${formatBoardNumber(value)} ${value === 1 ? unit : `${unit}s`}`;
 }
 
 function usageHeroLine(totals) {
@@ -269,9 +334,6 @@ function sessionRowLabel(row) {
 function boardShortLabel(section) {
   if (BOARD_SECTION_SHORT_LABELS[section.key]) {
     return BOARD_SECTION_SHORT_LABELS[section.key];
-  }
-  if (String(section.key || "").startsWith("tool:")) {
-    return String(section.key).slice(5);
   }
   const label = boardText(section.label);
   return label.split("·")[0].trim().slice(0, 12);
@@ -346,8 +408,6 @@ function boardCompact(value) {
 
 const BOARD_BAR_CELL = "█";
 const BOARD_REMAINDER_CELL = "░";
-const BOARD_UNDERLINE_CELL = "▔";
-
 
 export function startupText(info = {}, width) {
   const header = startupBannerText(info, width);

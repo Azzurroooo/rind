@@ -56,7 +56,7 @@ const SUMMARY = {
 const page1 = () => contextBoardText({ breakdown: BREAKDOWN, latest_usage: LATEST_USAGE, index: 1, count: 2 }, 100);
 const page2 = () => usageBoardText({ summary: SUMMARY, index: 2, count: 2 }, 100);
 
-test("context board page 1 renders the locked layout in assembly order", () => {
+test("context board page 1 renders the legend and detail rows in assembly order", () => {
   resetTheme();
   const text = page1();
   const lines = text.split("\n").map(stripAnsi);
@@ -64,28 +64,53 @@ test("context board page 1 renders the locked layout in assembly order", () => {
   assert.match(lines[0], /^┌ Context · last sampling · turn 8f3a · 03:33:12 ─+ 1\/2 ┐$/);
   assert.equal(lines[1], `│ Window 131,072 · used 32%   measured 43,850${" ".repeat(54)}│`);
   assert.match(lines[2], /^│ █+░+ │$/);
+  assert.equal(lines.some((line) => line.includes("Core context")), true);
+  assert.equal(lines.some((line) => line.includes("Conversation & Tools")), true);
+  const detailRows = lines.filter((line) => (
+    line.startsWith("│ ● ") && /(?:msg|result)s?\s+│$/.test(line)
+  ));
   assert.deepEqual(
-    lines.slice(4, 12).map((line) => line.replace(/^│\s+/, "").split(/\s{2,}/)[0]),
+    detailRows.map((line) => line.replace(/^│\s+/, "").split(/\s{2,}/)[0]),
     [
-      "System prompt (incl. capsule)",
-      "RIND.md · project",
-      "Skill catalog",
-      "Chat · user inputs",
-      "Chat · assistant replies",
-      "Reasoning content",
-      "Tool results · bash",
-      "Tool results · other",
+      "● System prompt (incl. capsule)",
+      "● RIND.md · project",
+      "● Skill catalog",
+      "● Chat · user inputs",
+      "● Chat · assistant replies",
+      "● Reasoning content",
+      "● Tool results",
     ],
   );
-  assert.equal(lines[4], "│   System prompt (incl. capsule)  12,400   30%   1 msg                                            │");
-  assert.equal(lines[10], "│   Tool results · bash            14,200   34%  3 msgs                                            │");
+  assert.match(lines[3], /● system 12,400 30%/);
+  assert.match(lines[4], /● chat 7,300 18%/);
+  assert.equal(detailRows[0], "│ ● System prompt (incl. capsule)  12,400   30%      1 msg                                         │");
+  assert.equal(detailRows.at(-1), "│ ● Tool results                   15,980   39%  5 results                                         │");
   assert.equal(lines.at(-2), "│ Tab switch page · Esc exit                                                                       │");
   assert.equal(lines.at(-1), `└${"─".repeat(98)}┘`);
   // Byte-deterministic: the same input renders the same bytes.
   assert.equal(page1(), page1());
 });
 
-test("bar segments and underline labels follow the assembly order", () => {
+test("context board exposes tool specifications in both legend and detail rows", () => {
+  resetTheme();
+  const breakdown = {
+    ...BREAKDOWN,
+    estimated_total: BREAKDOWN.estimated_total + 3200,
+    sections: [...BREAKDOWN.sections, {
+      key: "tool_specs",
+      label: "Tool specifications",
+      tokens: 3200,
+      messages: 6,
+    }],
+  };
+  const lines = contextBoardText({ breakdown, index: 1, count: 1 }, 80).split("\n").map(stripAnsi);
+
+  assert.ok(lines.some((line) => /● tools 3,200 \d+%/.test(line)));
+  assert.ok(lines.some((line) => /● Tool specifications\s+3,200\s+\d+%\s+6 tools/.test(line)));
+  assert.equal(lines.some((line) => line.includes("▔")), false);
+});
+
+test("bar segments and legend markers follow the assembly order", () => {
   resetTheme();
   setTheme("mocha");
   const originalIsTty = process.stdout.isTTY;
@@ -93,9 +118,11 @@ test("bar segments and underline labels follow the assembly order", () => {
     process.stdout.isTTY = true;
     const rawLines = page1().split("\n");
 
-    const underline = stripAnsi(rawLines[3]);
-    assert.ok(underline.indexOf("system") < underline.indexOf("chat"), "system label precedes chat");
-    assert.ok(underline.indexOf("chat") < underline.indexOf("bash"), "chat label precedes bash");
+    const legend = stripAnsi(rawLines.slice(3, 5).join(" "));
+    assert.ok(legend.indexOf("system") < legend.indexOf("chat"), "system legend precedes chat");
+    assert.ok(legend.indexOf("chat") < legend.indexOf("results"), "chat legend precedes results");
+    assert.equal(legend.includes("bash"), false, "individual tool names stay collapsed");
+    assert.equal(legend.includes("▔"), false, "the bar has no hidden underline labels");
 
     // The first two bar segments (system prompt, RIND.md) lead with the
     // palette's first two roles — the bar fills in declaration order.
@@ -155,7 +182,9 @@ test("CJK and emoji section labels stay aligned with plain ones", () => {
     ],
   };
   const text = contextBoardText({ breakdown, index: 1, count: 2 }, 90);
-  const rows = text.split("\n").map(stripAnsi).filter((line) => line.includes(" msgs"));
+  const rows = text.split("\n").map(stripAnsi).filter((line) => (
+    line.startsWith("│ ● ") && /(?:msgs|results)\s+│$/.test(line)
+  ));
   const tokens = ["9,000", "7,000", "1,000"];
   const columns = rows.map((row, index) => textWidth(row.slice(0, row.indexOf(tokens[index]))));
   assert.equal(rows.length, 3);
@@ -475,7 +504,7 @@ test("board renders full screen on a real TUI, Tab flips pages, Esc returns to t
   let flat = viewport.join("\n");
   assert.match(flat, /Context · last sampling · turn 8f3a/);
   assert.match(flat, /1\/2/);
-  assert.match(flat, /Tool results · bash/);
+  assert.match(flat, /Tool results\s+15,980/);
   assert.equal(flat.includes("Token usage · last 7 days"), false, "page 2 stays hidden on page 1");
 
   input.send("\t");
@@ -486,7 +515,7 @@ test("board renders full screen on a real TUI, Tab flips pages, Esc returns to t
   assert.match(flat, /Token usage · last 7 days/);
   assert.match(flat, /2\/2/);
   assert.match(flat, /6 compaction calls/);
-  assert.equal(flat.includes("Tool results · bash"), false, "page 1 stays hidden on page 2");
+  assert.equal(flat.includes("Tool results"), false, "page 1 stays hidden on page 2");
 
   input.send("\x1b[C");
   await new Promise((resolve) => setTimeout(resolve, 25));

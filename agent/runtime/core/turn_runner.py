@@ -528,7 +528,12 @@ class TurnRunner:
     async def _capture_context_breakdown(self, session: SessionStore, context: ContextBuildResult, turn_id: str) -> None:
         try:
             messages = context.internal_messages or context.messages
-            snapshot = build_context_snapshot(messages, context.stats, turn_id)
+            snapshot = build_context_snapshot(
+                messages,
+                context.stats,
+                turn_id,
+                tool_schemas=self._tool_schemas,
+            )
         except asyncio.CancelledError:
             raise
         except Exception:

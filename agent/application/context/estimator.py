@@ -127,6 +127,13 @@ class ContextEstimator:
             over_hard_limit=estimated_tokens >= self._budget.resolved_hard_limit_tokens(),
         )
 
+    def estimate_tool_schemas(self, tool_schemas: list[dict] | None) -> int:
+        """Estimate the tokens occupied by the schemas sent with a request."""
+        if not tool_schemas:
+            return 0
+        tokens, _ = self._estimate_message_tokens({"tools": tool_schemas})
+        return max(0, tokens)
+
     def _estimate_message_tokens(self, message: dict) -> tuple[int, int]:
         try:
             payload = json.dumps(message, ensure_ascii=False)
