@@ -737,6 +737,8 @@ export function authSecretFrame({
   };
 }
 
+const AUTH_CHOICE_WINDOW = 9;
+
 export function authChoiceFrame({ title = "", options = [], selectedIndex = 0, width = 76 } = {}) {
   const box = startupBannerWidth(width);
   const inner = box - 4;
@@ -744,16 +746,26 @@ export function authChoiceFrame({ title = "", options = [], selectedIndex = 0, w
   if (!values.length) {
     return "";
   }
+  const start = values.length <= AUTH_CHOICE_WINDOW
+    ? 0
+    : Math.min(Math.max(0, selectedIndex - (AUTH_CHOICE_WINDOW - 2)), values.length - AUTH_CHOICE_WINDOW);
+  const end = Math.min(values.length, start + AUTH_CHOICE_WINDOW);
   const lines = [authFrameTitle(`Login · ${title}`.trim(), box)];
-  values.forEach((option, index) => {
+  if (start > 0) {
+    lines.push(startupBannerLine(dim("…"), box));
+  }
+  for (let index = start; index < end; index += 1) {
     const active = index === selectedIndex;
     const marker = active ? accent("›") : dim("·");
-    const parts = option.split(" · ");
+    const parts = values[index].split(" · ");
     const id = clipCells(parts[0] || "", Math.max(8, inner - 8));
     const rest = parts.length > 1 ? clipCells(`· ${parts.slice(1).join(" · ")}`, Math.max(0, inner - 6 - textWidth(id))) : "";
     const content = `${marker} ${active ? bold(id) : id}${rest ? ` ${dim(rest)}` : ""}`;
     lines.push(startupBannerLine(content, box));
-  });
+  }
+  if (end < values.length) {
+    lines.push(startupBannerLine(dim("…"), box));
+  }
   lines.push(startupBannerLine("", box));
   lines.push(startupBannerLine(dim("↑↓ select · enter choose · esc cancel"), box));
   lines.push(startupBannerBorder("└", "┘", box));

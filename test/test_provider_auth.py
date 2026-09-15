@@ -408,14 +408,29 @@ def test_registry_covers_mainstream_providers() -> None:
     for provider_id, environment_key in (
         ("groq", "GROQ_API_KEY"),
         ("mistral", "MISTRAL_API_KEY"),
-        ("moonshot", "MOONSHOT_API_KEY"),
-        ("qwen", "DASHSCOPE_API_KEY"),
         ("zai", "ZAI_API_KEY"),
+        ("zai-coding", "ZAI_CODING_API_KEY"),
+        ("zhipu", "ZHIPU_API_KEY"),
+        ("zhipu-coding", "ZHIPU_CODING_API_KEY"),
+        ("moonshot", "MOONSHOT_API_KEY"),
+        ("moonshot-cn", "MOONSHOT_CN_API_KEY"),
+        ("qwen", "DASHSCOPE_API_KEY"),
+        ("qwen-coding", "QWEN_CODING_API_KEY"),
     ):
         assert PROVIDERS[provider_id].api == "openai-chat"
         assert PROVIDERS[provider_id].environment_key == environment_key
         assert PROVIDERS[provider_id].default_base_url.startswith("https://")
         assert len(PROVIDERS[provider_id].fallback_models) == 2
+    # Pay-as-you-go and coding-plan subscriptions are separate products
+    # with separate keys and endpoints.
+    assert PROVIDERS["zai"].default_base_url == "https://api.z.ai/api/paas/v4"
+    assert PROVIDERS["zai-coding"].default_base_url == "https://api.z.ai/api/coding/paas/v4"
+    assert PROVIDERS["zhipu"].default_base_url == "https://open.bigmodel.cn/api/paas/v4"
+    assert PROVIDERS["zhipu-coding"].default_base_url == "https://open.bigmodel.cn/api/coding/paas/v4"
+    assert PROVIDERS["moonshot-cn"].default_base_url == "https://api.moonshot.cn/v1"
+    assert PROVIDERS["kimi-coding"].api == "anthropic-messages"
+    assert PROVIDERS["kimi-coding"].environment_key == "KIMI_API_KEY"
+    assert [model.id for model in PROVIDERS["kimi-coding"].fallback_models] == ["kimi-for-coding", "k3"]
     assert refreshable_models_api("openai-chat") and refreshable_models_api("openai-responses")
     assert not refreshable_models_api("google-generative-ai") and not refreshable_models_api("anthropic-messages")
     assert default_reasoning_efforts("google-generative-ai") == ()

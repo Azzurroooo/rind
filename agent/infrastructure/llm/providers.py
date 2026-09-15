@@ -47,21 +47,45 @@ PROVIDERS: dict[str, ProviderDefinition] = {
         "mistral", "Mistral", "openai-chat", "https://api.mistral.ai/v1", environment_key="MISTRAL_API_KEY",
         fallback_models=_models("mistral", "openai-chat", (("mistral-large-latest", "Mistral Large"), ("devstral-medium-latest", "Devstral Medium"))),
     ),
+    "zai": ProviderDefinition(
+        "zai", "Z.AI", "openai-chat", "https://api.z.ai/api/paas/v4", environment_key="ZAI_API_KEY",
+        fallback_models=_models("zai", "openai-chat", (("glm-5.3", "GLM-5.3"), ("glm-5.2", "GLM-5.2"))),
+    ),
+    "zai-coding": ProviderDefinition(
+        "zai-coding", "Z.AI Coding", "openai-chat", "https://api.z.ai/api/coding/paas/v4", environment_key="ZAI_CODING_API_KEY",
+        fallback_models=_models("zai-coding", "openai-chat", (("glm-5.3", "GLM-5.3"), ("glm-5.3-flash", "GLM-5.3 Flash"))),
+    ),
+    "zhipu": ProviderDefinition(
+        "zhipu", "Zhipu", "openai-chat", "https://open.bigmodel.cn/api/paas/v4", environment_key="ZHIPU_API_KEY",
+        fallback_models=_models("zhipu", "openai-chat", (("glm-5.3", "GLM-5.3"), ("glm-5.2", "GLM-5.2"))),
+    ),
+    "zhipu-coding": ProviderDefinition(
+        "zhipu-coding", "Zhipu Coding", "openai-chat", "https://open.bigmodel.cn/api/coding/paas/v4", environment_key="ZHIPU_CODING_API_KEY",
+        fallback_models=_models("zhipu-coding", "openai-chat", (("glm-5.3", "GLM-5.3"), ("glm-5.3-flash", "GLM-5.3 Flash"))),
+    ),
+    "kimi-coding": ProviderDefinition(
+        "kimi-coding", "Kimi For Coding", "anthropic-messages", "https://api.kimi.com/coding", environment_key="KIMI_API_KEY",
+        fallback_models=_models("kimi-coding", "anthropic-messages", (("kimi-for-coding", "Kimi For Coding"), ("k3", "Kimi K3"))),
+    ),
     "moonshot": ProviderDefinition(
         "moonshot", "Moonshot AI", "openai-chat", "https://api.moonshot.ai/v1", environment_key="MOONSHOT_API_KEY",
         fallback_models=_models("moonshot", "openai-chat", (("kimi-k3", "Kimi K3"), ("kimi-k2.6", "Kimi K2.6"))),
+    ),
+    "moonshot-cn": ProviderDefinition(
+        "moonshot-cn", "Moonshot AI CN", "openai-chat", "https://api.moonshot.cn/v1", environment_key="MOONSHOT_CN_API_KEY",
+        fallback_models=_models("moonshot-cn", "openai-chat", (("kimi-k3", "Kimi K3"), ("kimi-k2.6", "Kimi K2.6"))),
     ),
     "qwen": ProviderDefinition(
         "qwen", "Qwen", "openai-chat", "https://dashscope.aliyuncs.com/compatible-mode/v1", environment_key="DASHSCOPE_API_KEY",
         fallback_models=_models("qwen", "openai-chat", (("qwen3-coder-plus", "Qwen3 Coder Plus"), ("qwen-max", "Qwen Max"))),
     ),
+    "qwen-coding": ProviderDefinition(
+        "qwen-coding", "Qwen Coding", "openai-chat", "https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1", environment_key="QWEN_CODING_API_KEY",
+        fallback_models=_models("qwen-coding", "openai-chat", (("qwen3-coder-plus", "Qwen3 Coder Plus"), ("qwen3-coder-flash", "Qwen3 Coder Flash"))),
+    ),
     "xai": ProviderDefinition(
         "xai", "xAI", "openai-responses", "https://api.x.ai/v1", environment_key="XAI_API_KEY",
         fallback_models=_models("xai", "openai-responses", (("grok-4.5", "Grok 4.5"), ("grok-4.3", "Grok 4.3"))),
-    ),
-    "zai": ProviderDefinition(
-        "zai", "Z.AI", "openai-chat", "https://api.z.ai/api/coding/paas/v4", environment_key="ZAI_API_KEY",
-        fallback_models=_models("zai", "openai-chat", (("glm-5.3", "GLM-5.3"), ("glm-5.2", "GLM-5.2"))),
     ),
     "openrouter": ProviderDefinition(
         "openrouter", "OpenRouter", "openai-chat", "https://openrouter.ai/api/v1", environment_key="OPENROUTER_API_KEY",

@@ -374,6 +374,23 @@ test("authChoiceFrame renders a full provider box with selection", () => {
   assert.equal(new Set(lines.filter(Boolean).map((line) => textWidth(line))).size, 1, "all box rows share one width");
 });
 
+test("authChoiceFrame windows long provider lists to keep the selection visible", () => {
+  const options = Array.from({ length: 18 }, (_value, index) => `provider-${index} · Name ${index} · not configured`);
+
+  const top = authChoiceFrame({ title: "Provider", options, selectedIndex: 0, width: 76 }).split("\n");
+  assert.equal(top.filter(Boolean).length, 14); // title + 9 options + ellipsis + blank + hint + border
+  assert.ok(top[1].includes("provider-0"));
+  assert.ok(!top.some((line) => line.includes("provider-9")));
+  assert.ok(top.at(-5).includes("…"));
+  assert.ok(top.some((line) => line.includes("›")));
+
+  const bottom = authChoiceFrame({ title: "Provider", options, selectedIndex: 17, width: 76 }).split("\n");
+  assert.ok(bottom[1].includes("…"));
+  assert.ok(bottom.some((line) => line.includes("provider-17")));
+  assert.ok(!bottom.some((line) => line.includes("provider-7")));
+  assert.ok(bottom.some((line) => line.includes("›")));
+});
+
 test("authSecretFrame masks secrets and places the caret", () => {
   const frame = authSecretFrame({
     title: "DeepSeek",
