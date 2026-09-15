@@ -385,8 +385,9 @@ export function createCliInputActions({
   function handleModelInput(session, key) {
     const modified = key.ctrl || key.alt || key.shift;
     if (!modified && (key.name === "enter" || key.name === "return")) {
-      const model = session.modelState.selectedModel()?.name || "";
-      completeTtyInput(session, model, Boolean(model), "", model ? `/model set ${model}` : "");
+      const item = session.modelState.selectedModel();
+      const model = item?.modelId || item?.name || "";
+      completeTtyInput(session, item || "", Boolean(model), "", model ? `/model set ${model}` : "");
       return;
     }
     if (!modified && key.name === "escape") {

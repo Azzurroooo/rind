@@ -12,7 +12,6 @@ export const LOCAL_SLASH_COMMANDS = Object.freeze([
   { name: "help", description: "Show commands", usage: "/help [command]" },
   { name: "init", description: "Draft RIND.md", usage: "/init [project|user]" },
   { name: "login", description: "Configure a provider", usage: "/login [provider]" },
-  { name: "logout", description: "Remove stored provider credentials", usage: "/logout [provider]" },
   { name: "model", description: "Show or change the active model", usage: "/model | /model set <model>" },
   { name: "sessions", description: "List recent sessions", usage: "/sessions [limit]" },
   { name: "skill", description: "List skills", usage: "/skill [list]" },

@@ -486,7 +486,7 @@ function modelSetResultText(result, model) {
   const lines = ["Session model updated."];
   if (sessionModel) lines.push(`- session model: ${sessionModel}`);
   if (defaultModel) lines.push(`- default model: ${defaultModel} (unchanged)`);
-  lines.push(result?.active_updated || result?.runtime || result?.session
+  lines.push(result?.active_updated || result?.runtime
     ? "- active session: updated"
     : "- active turn: unchanged; the new model applies to the next turn");
   return commandResultText(lines[0], lines.slice(1).join(" · "));

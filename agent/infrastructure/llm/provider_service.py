@@ -98,7 +98,7 @@ class ProviderServiceImpl:
     async def create_chat_client(self, workspace_root: str | None, selection: ModelSelection):
         settings = load_settings(workspace_root)
         definition = self.resolve_selection(workspace_root, selection)
-        credential = self._resolve_credential(settings, definition.id)
+        credential = self._resolve_credential(settings, definition.provider_id)
         if credential is None:
             raise ProviderError(
                 f"{self._provider(definition.provider_id).name} is not configured. Run /login or set {self._provider(definition.provider_id).environment_key}.",

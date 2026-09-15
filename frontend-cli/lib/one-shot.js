@@ -125,6 +125,7 @@ export async function runOneShot({ args, python, repoRoot, runtimePath, cwd = pr
 
   let assistant = "";
   let completed = "";
+  let turnFailure = "";
   let turnId = "";
   let status = "failed";
   const startedAt = new Date();
@@ -146,6 +147,7 @@ export async function runOneShot({ args, python, repoRoot, runtimePath, cwd = pr
         if (message?.turn_id) turnId = String(message.turn_id);
         if (type === "assistant_delta") assistant += String(event.text || "");
         if (type === "assistant_message_completed") completed = String(event.content || "");
+        if (type === "turn_failed") turnFailure = String(event.error || "Provider request failed.");
         const toolCallId = String(event?.tool_call_id || "");
         const trackedId = toolCallId || (type === "tool_requested" ? `anon:${(anonymousToolCounter += 1)}` : "");
         if (trackedId && (type === "tool_requested" || type === "tool_input_started") && !progress.hasTool(trackedId)) {
@@ -173,6 +175,7 @@ export async function runOneShot({ args, python, repoRoot, runtimePath, cwd = pr
       session_id: sessionId,
       input: options.prompt,
     });
+    if (turnFailure) throw new Error(turnFailure);
     status = "completed";
     const responseTurnId = String(result?.turn_id || turnId || "");
     turnId = responseTurnId;

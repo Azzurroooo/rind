@@ -21,6 +21,8 @@ class Config:
     OPENAI_USER_AGENT = _SETTINGS.user_agent
     DEFAULT_MODEL = _SETTINGS.model
     MODEL_REASONING_EFFORT = _SETTINGS.reasoning_effort
+    PROVIDER = _SETTINGS.provider
+    API = _SETTINGS.api
     TEMPERATURE = 0.7
     MAX_TOKENS = 2000
 
@@ -44,6 +46,8 @@ class Config:
         cls.OPENAI_USER_AGENT = settings.user_agent
         cls.DEFAULT_MODEL = settings.model
         cls.MODEL_REASONING_EFFORT = settings.reasoning_effort
+        cls.PROVIDER = settings.provider
+        cls.API = settings.api
         return settings
 
     @classmethod

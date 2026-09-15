@@ -1222,7 +1222,8 @@ class WorkerStdioRuntimeServer:
             await self._respond_error(request, "provider_id is required.", "InvalidRequest")
             return
         await self._worker.login(provider_id, method, _StdioAuthInteraction(self))
-        await self._respond(request, {"ok": True, "provider_id": provider_id})
+        models = await self._worker.list_models(refresh=True)
+        await self._respond(request, {"ok": True, "provider_id": provider_id, "models_count": len(models)})
 
     async def _auth_logout(self, request: dict[str, Any]) -> None:
         params = request.get("params") if isinstance(request.get("params"), dict) else {}

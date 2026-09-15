@@ -21,8 +21,9 @@ class OpenAIChatCompletionsClient(ChatClient):
         return _completion(await self._client.create(messages, tools, cancellation_token))
 
     async def stream(self, messages, tools=None, cancellation_token: CancellationToken | None = None) -> AsyncIterator[ModelStreamEvent]:
+        call_ids: dict[int, str] = {}
         async for chunk in self._client.stream(messages, tools, cancellation_token):
-            for event in _events(chunk):
+            for event in _events(chunk, call_ids):
                 yield event
 
     async def close(self) -> None:
@@ -32,7 +33,7 @@ class OpenAIChatCompletionsClient(ChatClient):
         self._client.set_trace_session_id_provider(provider)
 
 
-def _events(chunk: Any) -> list[ModelStreamEvent]:
+def _events(chunk: Any, call_ids: dict[int, str] | None = None) -> list[ModelStreamEvent]:
     usage = _usage(_get(chunk, "usage"))
     events: list[ModelStreamEvent] = []
     choices = _get(chunk, "choices") or []
@@ -51,7 +52,12 @@ def _events(chunk: Any) -> list[ModelStreamEvent]:
             events.append(ModelStreamEvent("reasoning_delta", reasoning=str(reasoning)))
         for call in _get(delta, "tool_calls") or []:
             function = _get(call, "function")
+            index = int(_get(call, "index") or 0)
             call_id = str(_get(call, "id") or "")
+            if call_id and call_ids is not None:
+                call_ids[index] = call_id
+            elif call_ids is not None:
+                call_id = call_ids.get(index, "")
             name = str(_get(function, "name") or "")
             if call_id and name:
                 events.append(ModelStreamEvent("tool_start", tool_call_id=call_id, tool_name=name))

@@ -57,6 +57,7 @@ class SessionRepository:
 
     def __init__(self, *, session_dir: str | None):
         self.session_dir = session_dir
+        self.provider_service: ProviderServiceImpl | None = None
 
     async def metadata(self, session_id: str) -> dict[str, Any]:
         clean = validate_session_id(session_id)
@@ -102,9 +103,15 @@ class SessionRepository:
         owner_agent_id: str | None = None,
         session_type: str | None = None,
         parent_session_id: str | None = None,
+        selection: ModelSelection | None = None,
     ) -> dict[str, Any]:
         root = _normalize_workspace_root(workspace_root)
-        model, reasoning_effort, _, provider = _workspace_defaults(root)
+        if selection is None and self.provider_service is not None:
+            selection = self.provider_service.default_selection(root)
+        if selection is None:
+            model, reasoning_effort, _, provider = _workspace_defaults(root)
+            selection = ModelSelection(provider, model, reasoning_effort)
+        model, reasoning_effort, provider = selection.model_id, selection.reasoning_effort, selection.provider_id
         agent_context = discover_agent(root)
         if project_id is None and agent_context:
             project_id = agent_context.project_id
@@ -145,6 +152,7 @@ class SessionRepository:
         workspace_root: str,
         session_id: str | None = None,
         resume_latest: bool = False,
+        selection: ModelSelection | None = None,
     ) -> dict[str, Any]:
         if session_id:
             return await self.info(session_id)
@@ -153,7 +161,7 @@ class SessionRepository:
             if not sessions:
                 raise ValueError("No existing session found to resume.")
             return await self.info(str(sessions[0]["id"]))
-        return await self.create(workspace_root)
+        return await self.create(workspace_root, selection=selection)
 
     async def info(self, session_id: str) -> dict[str, Any]:
         meta = await self.metadata(session_id)
@@ -898,6 +906,7 @@ class RuntimeWorker:
         )
         self.repository = SessionRepository(session_dir=session_dir)
         self.provider_service = ProviderServiceImpl()
+        self.repository.provider_service = self.provider_service
         self.execution = ExecutionCoordinator(
             shared_resources=self._shared_resources,
             repository=self.repository,
@@ -917,6 +926,7 @@ class RuntimeWorker:
                 self.workspace_root,
                 self.session_id,
                 self._resume_latest,
+                self.provider_service.default_selection(self.workspace_root),
             )
             self.session_id = str(info["session_id"])
         self._initialized = True
