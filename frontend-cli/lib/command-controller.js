@@ -82,7 +82,7 @@ export function createCommandController({
     if (isContextCommand(text)) {
       const argument = contextArgument(text);
       if (argument) {
-        output.log?.("Custom ranges are not supported yet; showing the last 7 days.");
+        output.log?.("Custom ranges are not supported yet; showing the last 90 days.");
       }
       if (input.isTerminal && input.runContextBoard) {
         await input.runContextBoard();

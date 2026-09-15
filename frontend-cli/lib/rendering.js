@@ -110,7 +110,7 @@ export function usageBoardText(page = {}, width) {
   lines.push(dim(`${boardNumber(totals.samples)} samples`));
   const byDay = Array.isArray(summary.by_day) ? summary.by_day : [];
   if (byDay.length) {
-    lines.push("", bold("By day"), ...byDayRows(byDay, frameWidth - 4));
+    lines.push("", bold("By day"), ...heatmapRows(byDay));
   }
   const byModel = Array.isArray(summary.by_model) ? summary.by_model : [];
   if (byModel.length) {
@@ -299,22 +299,66 @@ function usageHeroLines(totals, inner) {
   ];
 }
 
-function byDayRows(byDay, innerWidth) {
-  const values = byDay.map((row) => boardCompact(row?.tokens));
-  const valueWidth = Math.max(5, ...values.map(textWidth));
-  const peak = Math.max(1, ...byDay.map((row) => Math.max(0, boardNumber(row?.tokens))));
-  const barCells = Math.max(3, innerWidth - 11 - valueWidth);
-  return byDay.map((row, index) => {
-    const filled = Math.max(row && boardNumber(row.tokens) > 0 ? 1 : 0, Math.round((Math.max(0, boardNumber(row?.tokens)) / peak) * barCells));
-    const bar = accent(BOARD_BAR_CELL.repeat(Math.min(barCells, filled)));
-    const region = bar + " ".repeat(Math.max(0, barCells - Math.min(barCells, filled)));
-    return `  ${boardDayLabel(row?.day)}  ${region}  ${padLeft(values[index], valueWidth)}`;
+const HEATMAP_WINDOW_DAYS = 90;
+const HEATMAP_LEVEL_CELLS = ["·", "░", "▒", "▓", "█"];
+const HEATMAP_MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+const HEATMAP_ROW_LABELS = ["   ", "Mon", "   ", "Wed", "   ", "Fri", "   "];
+
+function heatmapRows(byDay, now = new Date()) {
+  const tokens = new Map(byDay.map((row) => [boardText(row?.day), Math.max(0, boardNumber(row?.tokens))]));
+  const end = startOfDay(now);
+  const first = addDays(end, 1 - HEATMAP_WINDOW_DAYS);
+  const weeks = [];
+  for (let cursor = addDays(first, -first.getDay()); cursor <= end; cursor = addDays(cursor, 7)) {
+    weeks.push(Array.from({ length: 7 }, (_value, offset) => {
+      const day = addDays(cursor, offset);
+      return day < first || day > end ? null : day;
+    }));
+  }
+  const peak = Math.max(1, ...tokens.values());
+  const monthCells = Array.from({ length: weeks.length * 2 }, () => " ");
+  let previousMonth = -1;
+  weeks.forEach((week, index) => {
+    const anchor = week.find(Boolean);
+    if (anchor && anchor.getMonth() !== previousMonth) {
+      monthCells.splice(index * 2, 3, HEATMAP_MONTHS[anchor.getMonth()]);
+      previousMonth = anchor.getMonth();
+    }
   });
+  const rows = Array.from({ length: 7 }, () => "");
+  for (const week of weeks) {
+    week.forEach((day, rowIndex) => {
+      const cell = day === null ? " " : heatCell((tokens.get(dayKey(day)) || 0) / peak);
+      rows[rowIndex] += `${cell} `;
+    });
+  }
+  return [
+    `    ${monthCells.join("")}`,
+    ...rows.map((row, index) => `${HEATMAP_ROW_LABELS[index]} ${row}`),
+    dim(`Less ${HEATMAP_LEVEL_CELLS.join(" ")} More`),
+  ];
 }
 
-function boardDayLabel(day) {
-  const text = boardText(day);
-  return /^\d{2}-\d{2}$/.test(text) ? text : " ".repeat(5);
+function heatCell(share) {
+  const level = share <= 0 ? 0 : Math.min(4, 1 + Math.floor(share * 4));
+  const cell = HEATMAP_LEVEL_CELLS[level];
+  return level === 0 ? dim(cell) : paint.success(cell);
+}
+
+function dayKey(date) {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+}
+
+function startOfDay(date) {
+  const value = new Date(date);
+  value.setHours(0, 0, 0, 0);
+  return value;
+}
+
+function addDays(date, count) {
+  const value = new Date(date);
+  value.setDate(value.getDate() + count);
+  return value;
 }
 
 function rightRows(rows, innerWidth) {
