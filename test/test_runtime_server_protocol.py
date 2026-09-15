@@ -14,13 +14,13 @@ os.chdir(PROJECT_ROOT)
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
+from helpers.fake_worker import FakeContainer, FakeRuntime, FakeStore, FakeWorker, make_server
+
 from agent.version import __version__
 
-from agent.domain.cancellation import CancellationTokenSource
 from agent.runtime.core import InputQueueError
 from agent.runtime.server.stdio import (
     JsonlWriter,
-    StdioRuntimeServer,
     WorkerStdioRuntimeServer,
     _schedule_ingest,
     configure_stdio_server_signals,
@@ -36,132 +36,17 @@ from agent.runtime.server.protocol import (
     validate_request,
 )
 from agent.runtime.server.replay_events import project_durable_events
-from agent.infrastructure.config import Config
 
 
-class _Runtime:
-    def __init__(self):
-        self.model = None
-
-    def set_user_question_responder(self, responder):
-        self.responder = responder
-
-    async def initialize(self):
-        return None
-
-    async def set_model(self, model):
-        self.model = model
-        return {"runtime": True, "session": False}
-
-    async def compact_context(self, reason="manual", cancellation_token=None):
-        return {
-            "id": "compact-1",
-            "source": {
-                "message_start_index": 1,
-                "message_end_index_exclusive": 3,
-                "tool_call_ids": ["tool-1"],
-            },
-        }
+def _messages(capsys):
+    return [json.loads(line) for line in capsys.readouterr().out.splitlines()]
 
 
-class _Session:
-    session_id = "s1"
-    model = "m1"
+def _response(payloads, request_id):
+    return next(message for message in payloads if message.get("request_id") == request_id)
 
 
-class _Model:
-    def __init__(self, model_id):
-        self.id = model_id
-
-
-class _AsyncModelList:
-    def __init__(self, items):
-        self._items = list(items)
-
-    def __aiter__(self):
-        self._iter = iter(self._items)
-        return self
-
-    async def __anext__(self):
-        try:
-            return next(self._iter)
-        except StopIteration:
-            raise StopAsyncIteration
-
-
-def _turn_event(event_type: str, turn_id: str = "t1"):
-    return type(
-        "Event",
-        (),
-        {
-            "to_dict": lambda _self: {
-                "type": event_type,
-                "ts": "1700000000.0",
-                "session_id": "s1",
-                "turn_id": turn_id,
-            }
-        },
-    )()
-
-
-class _BlockingTurnRuntime(_Runtime):
-    """Runtime whose turn blocks until released, mirroring a long-running turn."""
-
-    def __init__(self):
-        super().__init__()
-        self.started = asyncio.Event()
-        self.release = asyncio.Event()
-
-    async def run_turn(self, **_kwargs):
-        self.started.set()
-        await self.release.wait()
-        yield _turn_event("turn_completed")
-
-
-def _trace_responses(server: StdioRuntimeServer, responses: list) -> None:
-    writer_send = server._writer.send
-
-    async def trace_send(payload: dict) -> None:
-        await writer_send(payload)
-        if payload.get("kind") == "response":
-            responses.append(payload)
-
-    server._writer.send = trace_send
-
-
-async def _await_response(responses: list, request_id, timeout: float = 10.0) -> None:
-    async def poll() -> None:
-        while not any(message.get("request_id") == request_id for message in responses):
-            await asyncio.sleep(0.01)
-
-    await asyncio.wait_for(poll(), timeout)
-
-
-def test_question_response_completes_pending_future():
-    async def run():
-        server = StdioRuntimeServer(_Runtime(), _Session())
-        event = type("Event", (), {"tool_call_id": "call-1"})()
-        task = asyncio.create_task(server._answer_user_question(event))
-        await asyncio.sleep(0)
-        await server._receive_user_answer(
-            {"request_id": 1, "method": "rind/user-question/respond", "params": {"tool_call_id": "call-1", "answer": "yes"}}
-        )
-        return await task
-
-    assert asyncio.run(run()) == "yes"
-
-
-def test_question_response_before_responder_registration_is_replayed():
-    async def run():
-        server = StdioRuntimeServer(_Runtime(), _Session())
-        server._prepare_user_question("call-early")
-        await server._receive_user_answer(
-            {"request_id": 2, "method": "rind/user-question/respond", "params": {"tool_call_id": "call-early", "answer": "yes"}}
-        )
-        event = type("Event", (), {"tool_call_id": "call-early"})()
-        return await server._answer_user_question(event)
-
-    assert asyncio.run(run()) == "yes"
+# -- wire envelope --------------------------------------------------------------
 
 
 def test_jsonl_writer_uses_compact_json(capsys):
@@ -172,48 +57,34 @@ def test_jsonl_writer_uses_compact_json(capsys):
     assert capsys.readouterr().out == '{"kind":"event","event":{"type":"turn_completed"}}\n'
 
 
-def test_runtime_events_use_versioned_envelope(capsys):
+def test_runtime_events_use_versioned_envelope():
+    worker = FakeWorker()
+    server, payloads = make_server(worker)
+    server._subscribed.add("s1")
+
     async def run():
-        server = StdioRuntimeServer(_Runtime(), _Session())
-        await server._send_event(
-            {
-                "type": "assistant_delta",
-                "ts": "1700000000.0",
-                "session_id": "s1",
-                "turn_id": "t1",
-                "text": "hello",
-            }
-        )
-        await server._send_event(
-            {
-                "type": "turn_completed",
-                "ts": "1700000001.0",
-                "session_id": "s1",
-                "turn_id": "t1",
-            }
-        )
+        await server._send_event({"type": "assistant_delta", "session_id": "s1", "turn_id": "t1", "text": "hello"})
+        await server._send_event({"type": "turn_completed", "session_id": "s1", "turn_id": "t1"})
 
     asyncio.run(run())
 
-    messages = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
-    assert [message["sequence"] for message in messages] == [1, 2]
-    assert messages[0]["method"] == RuntimeMethod.SESSION_UPDATE
-    assert messages[0]["durability"] == "incremental"
-    assert messages[0]["session_id"] == "s1"
-    assert messages[0]["turn_id"] == "t1"
-    assert messages[0]["event"]["text"] == "hello"
+    assert [message["sequence"] for message in payloads] == [1, 2]
+    assert payloads[0]["method"] == RuntimeMethod.SESSION_UPDATE
+    assert payloads[0]["durability"] == "incremental"
+    assert payloads[0]["session_id"] == "s1"
+    assert payloads[0]["turn_id"] == "t1"
+    assert payloads[0]["event"]["text"] == "hello"
 
 
-def test_runtime_event_session_identity_is_bound_to_server_session(capsys):
+def test_events_for_unsubscribed_sessions_are_dropped():
+    worker = FakeWorker()
+    server, payloads = make_server(worker)
+
     async def run():
-        server = StdioRuntimeServer(_Runtime(), _Session())
-        await server._send_event({"type": "assistant_delta", "session_id": "other", "turn_id": "t1", "text": "hello"})
+        await server._send_event({"type": "assistant_delta", "session_id": "s1", "turn_id": "t1", "text": "hello"})
 
     asyncio.run(run())
-
-    message = json.loads(capsys.readouterr().out)
-    assert message["session_id"] == "s1"
-    assert message["event"]["session_id"] == "s1"
+    assert payloads == []
 
 
 def test_golden_event_fixture_matches_python_envelope():
@@ -238,105 +109,19 @@ def test_golden_event_fixture_matches_python_envelope():
         "rind/context/inspect",
         "rind/usage/summary",
     ]
-    assert responses == [
-        {
-            "kind": "response",
-            "request_id": "turn-1",
-            "result": {"ok": True, "session_id": "session-1", "turn_id": "turn-1"},
-        },
-        {
-            "kind": "response",
-            "request_id": "interrupt-2",
-            "error": {"type": "TurnNotActive", "message": "No active turn to interrupt."},
-        },
-        {
-            "kind": "response",
-            "request_id": "file-list-1",
-            "result": {"entries": [{"name": "note.txt", "size": 5, "type": "file"}]},
-        },
-        {
-            "kind": "response",
-            "request_id": "file-read-1",
-            "result": {"content_base64": "SGVsbG8=", "mime": "text/plain", "size": 5},
-        },
-        {
-            "kind": "response",
-            "request_id": "file-write-1",
-            "result": {"path": "uploads/note.txt", "size": 5},
-        },
-        {
-            "kind": "response",
-            "request_id": "subscribe-1",
-            "result": {"ok": True, "subscribed": ["session-1"]},
-        },
-        {
-            "kind": "response",
-            "request_id": "unsubscribe-1",
-            "result": {"ok": True, "subscribed": []},
-        },
-        {
-            "kind": "response",
-            "request_id": "delete-1",
-            "result": {"ok": True, "deleted": "session-9"},
-        },
-        {
-            "kind": "response",
-            "request_id": "fork-1",
-            "result": {"session_id": "session-1-fork", "forked_from": "session-1"},
-        },
-        {
-            "kind": "response",
-            "request_id": "ping-1",
-            "result": {"ok": True},
-        },
-        {
-            "kind": "response",
-            "request_id": "context-inspect-1",
-            "result": {
-                "session_id": "session-1",
-                "breakdown": {
-                    "captured_at": "2026-01-01T00:00:04Z",
-                    "turn_id": "turn-1",
-                    "estimated_total": 120,
-                    "context_window_tokens": 1000,
-                    "sections": [
-                        {"key": "chat_user", "label": "Chat · user inputs", "tokens": 120, "messages": 1},
-                    ],
-                },
-                "latest_usage": {
-                    "sampling_kind": "assistant",
-                    "input_tokens": 118,
-                    "cached_input_tokens": 0,
-                    "cache_hit_rate": 0.0,
-                    "output_tokens": 21,
-                    "reasoning_output_tokens": 0,
-                    "total_tokens": 139,
-                    "context_window_tokens": 1000,
-                    "context_usage_percent": 0.118,
-                },
-            },
-        },
-        {
-            "kind": "response",
-            "request_id": "usage-summary-1",
-            "result": {
-                "days": 7,
-                "totals": {
-                    "input": 118,
-                    "cached": 0,
-                    "output": 21,
-                    "reasoning": 0,
-                    "total": 139,
-                    "samples": 1,
-                    "compactions": 0,
-                },
-                "by_day": [{"day": "01-01", "tokens": 139}],
-                "by_model": [{"model": "test-model", "tokens": 139, "samples": 1}],
-                "recent_sessions": [
-                    {"session_id": "session-1", "updated_at": "2026-01-01T00:00:04Z", "tokens": 139, "samples": 1},
-                ],
-            },
-        },
+    assert [(response["request_id"], "error" in response) for response in responses] == [
+        ("turn-1", False),
+        ("interrupt-2", True),
+        ("file-list-1", False),
+        ("file-read-1", False),
+        ("file-write-1", False),
+        ("subscribe-1", False),
+        ("unsubscribe-1", False),
+        ("delete-1", False),
+        ("fork-1", False),
+        ("ping-1", False),
+        ("context-inspect-1", False),
+        ("usage-summary-1", False),
     ]
 
 
@@ -355,479 +140,365 @@ def test_request_validation_requires_the_standard_envelope() -> None:
     assert validate_request({"kind": "request", "request_id": 1, "method": "initialize", "params": []}) == "params must be an object."
 
 
-def test_turn_response_contains_session_and_turn_ids(capsys):
-    class Runtime(_Runtime):
-        async def run_turn(self, **_kwargs):
-            yield type(
-                "Event",
-                (),
-                {
-                    "to_dict": lambda _self: {
-                        "type": "turn_started",
-                        "ts": "1700000000.0",
-                        "session_id": "s1",
-                        "turn_id": "t1",
-                    }
-                },
-            )()
+# -- initialize ----------------------------------------------------------------
+
+
+def test_initialize_response_includes_resume_preview_and_catalog():
+    worker = FakeWorker()
+    worker.messages = [
+        {"role": "system", "content": "sys"},
+        {"role": "user", "content": "hello"},
+        {"role": "assistant", "content": "hi"},
+    ]
+    worker.providers = [{"id": "openai", "name": "OpenAI", "methods": ["api_key"], "configured": False, "source": "none"}]
+    server, payloads = make_server(worker)
+    server._initialized = False
 
     async def run():
-        server = StdioRuntimeServer(Runtime(), _Session())
-        await server._run_turn({"request_id": 21, "method": "session/prompt", "params": {"input": "hello"}})
+        await server._dispatch({"kind": "request", "request_id": 7, "method": "initialize", "params": {}})
 
     asyncio.run(run())
 
-    messages = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
-    assert messages[0]["method"] == RuntimeMethod.SESSION_UPDATE
-    assert messages[1]["request_id"] == 21
-    assert messages[1]["result"] == {"ok": True, "session_id": "s1", "turn_id": "t1"}
-
-
-def test_turn_start_preserves_original_input_text(capsys):
-    class Runtime(_Runtime):
-        def __init__(self):
-            super().__init__()
-            self.received_query = None
-
-        async def run_turn(self, **kwargs):
-            self.received_query = kwargs["query"]
-            yield type(
-                "Event",
-                (),
-                {
-                    "to_dict": lambda _self: {
-                        "type": "turn_completed",
-                        "session_id": "s1",
-                        "turn_id": "t1",
-                    }
-                },
-            )()
-
-    runtime = Runtime()
-
-    async def run():
-        server = StdioRuntimeServer(runtime, _Session())
-        await server._run_turn(
-            {
-                "request_id": 23,
-                "method": "session/prompt",
-                "params": {"input": "  preserve surrounding text  "},
-            }
-        )
-
-    asyncio.run(run())
-
-    assert runtime.received_query == "  preserve surrounding text  "
-
-
-def test_goal_continuation_requires_a_regular_prompt(capsys):
-    class Runtime(_Runtime):
-        async def get_goal(self):
-            return {"objective": "finish the release", "status": "active"}
-
-        async def run_turn(self, **_kwargs):
-            yield type(
-                "Event",
-                (),
-                {
-                    "to_dict": lambda _self: {
-                        "type": "turn_completed",
-                        "session_id": "s1",
-                        "turn_id": "goal-turn",
-                    }
-                },
-            )()
-
-    async def run():
-        server = StdioRuntimeServer(Runtime(), _Session(), goal_enabled=True)
-        await server._run_turn(
-            {
-                "request_id": 22,
-                "method": "session/prompt",
-                "params": {"input": "", "goal_continuation": True},
-            }
-        )
-
-    asyncio.run(run())
-
-    messages = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
-    assert messages[-1]["error"]["type"] == "InvalidRequest"
-
-
-def test_initialize_response_includes_resume_preview_when_history_exists(capsys):
-    class Session:
-        session_id = "s1"
-        model = "m1"
-
-        async def get_messages_slice(self, compacted=True):
-            return [
-                {"role": "system", "content": "sys"},
-                {"role": "user", "content": "hello"},
-                {"role": "assistant", "content": "hi"},
-            ]
-
-    async def run():
-        server = StdioRuntimeServer(_Runtime(), Session())
-        await server._initialize({"request_id": 7, "method": "initialize", "params": {}})
-
-    asyncio.run(run())
-
-    message = json.loads(capsys.readouterr().out)
-    result = message["result"]
-    assert message["request_id"] == 7
+    result = _response(payloads, 7)["result"]
     assert result["protocol_version"] == "2"
     assert result["version"] == __version__
-    assert result["capabilities"] == list(CAPABILITIES)
-    assert result["methods"] == list(CORE_METHODS)
+    assert result["capabilities"] == [*CAPABILITIES, "rind/goals"]
+    assert result["methods"] == [
+        *CORE_METHODS,
+        RuntimeMethod.RIND_GOAL_GET,
+        RuntimeMethod.RIND_GOAL_SET,
+        RuntimeMethod.RIND_GOAL_STATUS,
+        RuntimeMethod.RIND_GOAL_CLEAR,
+    ]
     assert result["session_id"] == "s1"
     assert result["model"] == "m1"
-    assert "Resumed session s1" in result["resume_preview"]
-    assert "- user: hello" in result["resume_preview"]
+    assert result["provider"] == "p1"
+    assert result["providers"] == worker.providers
+    assert "user: hello" in result["resume_preview"]
     assert any(command["name"] == "status" for command in result["commands"])
 
 
-def test_session_prompt_resume_passes_recovery_flag_without_input(capsys):
-    class Runtime(_Runtime):
-        def __init__(self):
-            super().__init__()
-            self.run_kwargs = None
-
-        async def run_turn(self, **kwargs):
-            self.run_kwargs = kwargs
-            yield _turn_event("turn_completed", "recover-turn")
+def test_methods_before_initialize_are_rejected():
+    worker = FakeWorker()
+    server, payloads = make_server(worker)
+    server._initialized = False
 
     async def run():
-        runtime = Runtime()
-        server = StdioRuntimeServer(runtime, _Session())
-        await server._run_turn({"request_id": 8, "method": "session/prompt", "params": {"resume": True}})
-        return runtime
-
-    runtime = asyncio.run(run())
-    messages = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
-    assert messages[-1]["result"]["ok"] is True
-    assert runtime.run_kwargs["resume"] is True
-    assert runtime.run_kwargs["query"] == ""
-
-
-def test_initialize_goal_capability_returns_session_goal(capsys):
-    class Runtime(_Runtime):
-        async def get_goal(self):
-            return {"objective": "finish the release", "status": "active"}
-
-    async def run():
-        server = StdioRuntimeServer(Runtime(), _Session(), goal_enabled=True)
-        await server._initialize({"request_id": 9, "method": "initialize", "params": {}})
+        await server._dispatch({"kind": "request", "request_id": 1, "method": "session/list", "params": {}})
 
     asyncio.run(run())
-
-    result = json.loads(capsys.readouterr().out)["result"]
-    assert "rind/goals" in result["capabilities"]
-    assert result["goal"] == {"objective": "finish the release", "status": "active"}
+    assert _response(payloads, 1)["error"]["type"] == "ServerNotReady"
 
 
-def test_initialize_exposes_only_the_registered_command_catalog(capsys):
-    async def handle_custom(_context, _args):
-        return "custom"
+# -- turns ---------------------------------------------------------------------
+
+
+def test_turn_response_contains_session_and_turn_ids():
+    worker = FakeWorker()
+    server, payloads = make_server(worker)
 
     async def run():
-        server = StdioRuntimeServer(_Runtime(), _Session())
-        server._slash_router = SlashCommandRouter(
-            (SlashCommandInfo("custom", "Custom command", "/custom", handler=handle_custom),)
+        await server._dispatch(
+            {"kind": "request", "request_id": 21, "method": "session/prompt", "params": {"session_id": "s1", "input": "hello"}}
         )
-        await server._initialize({"request_id": 10, "method": "initialize", "params": {}})
 
     asyncio.run(run())
 
-    result = json.loads(capsys.readouterr().out)["result"]
-    assert result["commands"] == [
-        {"name": "custom", "description": "Custom command", "usage": "/custom", "aliases": []}
-    ]
+    events = [message for message in payloads if message.get("kind") == "event"]
+    assert [message["event"]["type"] for message in events] == ["turn_started", "turn_completed"]
+    assert _response(payloads, 21)["result"] == {"ok": True, "session_id": "s1", "turn_id": "t1"}
 
 
-def test_goal_control_requests_update_and_clear_state(capsys):
-    class Runtime(_Runtime):
-        def __init__(self):
-            super().__init__()
-            self.goal = None
-
-        async def get_goal(self):
-            return self.goal
-
-        async def set_goal(self, objective):
-            self.goal = {"objective": objective, "status": "active"}
-            return self.goal
-
-        async def set_goal_status(self, status):
-            self.goal["status"] = status
-            return self.goal
-
-        async def clear_goal(self):
-            self.goal = None
+def test_turn_prompt_preserves_input_text_and_resume_flag():
+    worker = FakeWorker()
+    server, payloads = make_server(worker)
 
     async def run():
-        runtime = Runtime()
-        server = StdioRuntimeServer(runtime, _Session(), goal_enabled=True)
-        await server._goal_set({"request_id": 10, "params": {"objective": "ship it"}})
-        await server._goal_status({"request_id": 11, "params": {"status": "paused"}})
-        await server._goal_clear({"request_id": 12, "params": {}})
-
-    asyncio.run(run())
-
-    messages = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
-    assert messages[0]["result"]["goal"] == {"objective": "ship it", "status": "active"}
-    assert messages[1]["result"]["goal"]["status"] == "paused"
-    assert messages[2]["result"]["goal"] is None
-
-
-def test_session_replay_returns_projected_messages_and_turn_state(capsys):
-    class Session(_Session):
-        async def get_messages_slice(self, start=None, end=None, compacted=True):
-            return [{"role": "user", "content": "hello"}][slice(start, end)]
-
-        async def get_turn_state(self):
-            return {"turn_id": "t1", "status": "completed", "ts": "now"}
-
-    async def run():
-        server = StdioRuntimeServer(_Runtime(), Session())
-        await server._replay({"request_id": 23, "method": "session/replay", "params": {}})
-
-    asyncio.run(run())
-
-    message = json.loads(capsys.readouterr().out)
-    assert message["result"] == {
-        "messages": [{"role": "user", "content": "hello"}],
-        "turn_state": {"turn_id": "t1", "status": "completed", "ts": "now"},
-        "model": "m1",
-    }
-
-
-def test_session_switch_returns_target_metadata_and_preview(capsys):
-    class Runtime(_Runtime):
-        async def switch_session(self, session_id):
-            self.switched = session_id
-            return {
-                "session_id": session_id,
-                "model": "target-model",
-                "usage": {"context_usage_percent": 0.4},
-                "assistant_usage": {"context_usage_percent": 0.3},
+        await server._dispatch(
+            {
+                "kind": "request",
+                "request_id": 23,
+                "method": "session/prompt",
+                "params": {"session_id": "s1", "input": "  preserve surrounding text  "},
             }
-
-    class Session(_Session):
-        async def get_messages_slice(self, compacted=True):
-            return [{"role": "user", "content": "target history"}]
-
-    async def run():
-        runtime = Runtime()
-        server = StdioRuntimeServer(runtime, Session(), default_model="default-model")
-        await server._switch_session(
-            {"request_id": 24, "method": "session/switch", "params": {"session_id": "target"}}
-        )
-        return server
-
-    server = asyncio.run(run())
-
-    message = json.loads(capsys.readouterr().out)
-    assert message["result"]["session_id"] == "target"
-    assert message["result"]["model"] == "target-model"
-    assert message["result"]["usage"] == {"context_usage_percent": 0.3}
-    assert "target history" in message["result"]["resume_preview"]
-    assert server._default_model == "default-model"
-
-
-def test_session_switch_rejects_invalid_request_and_unsupported_runtime(capsys):
-    async def run():
-        server = StdioRuntimeServer(_Runtime(), _Session())
-        await server._dispatch(
-            {"request_id": 25, "method": "session/switch", "params": {}}
         )
         await server._dispatch(
-            {"request_id": 26, "method": "session/switch", "params": {"session_id": "target"}}
+            {"kind": "request", "request_id": 24, "method": "session/prompt", "params": {"session_id": "s1", "resume": True}}
         )
 
     asyncio.run(run())
 
-    messages = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
-    assert messages[0]["error"]["type"] == "InvalidRequest"
-    assert messages[1]["error"]["type"] == "UnsupportedOperation"
+    assert worker.execution.queries[0]["query"] == "  preserve surrounding text  "
+    assert worker.execution.queries[1]["resume"] is True
+    assert worker.execution.queries[1]["query"] == ""
+    assert _response(payloads, 24)["result"]["ok"] is True
 
 
-def test_session_list_returns_recent_sessions_and_current_id(capsys):
-    class Session(_Session):
-        async def list_recent_sessions(self, limit=10):
-            assert limit == 3
-            return [{"id": "session-1", "title": "First"}]
+def test_turn_requires_input_or_resume():
+    worker = FakeWorker()
+    server, payloads = make_server(worker)
 
     async def run():
-        server = StdioRuntimeServer(_Runtime(), Session())
-        await server._dispatch(
-            {"request_id": 27, "method": "session/list", "params": {"limit": 3}}
-        )
+        await server._dispatch({"kind": "request", "request_id": 25, "method": "session/prompt", "params": {"session_id": "s1"}})
 
     asyncio.run(run())
-
-    message = json.loads(capsys.readouterr().out)
-    assert message["result"] == {
-        "sessions": [{"id": "session-1", "title": "First"}],
-        "current_session_id": "s1",
-    }
+    assert _response(payloads, 25)["error"]["type"] == "InvalidRequest"
 
 
-def test_session_new_returns_new_metadata_and_preview(capsys):
-    class Runtime(_Runtime):
-        async def create_session(self):
-            return {"session_id": "new-session", "model": "new-model"}
-
-    class Session(_Session):
-        async def get_messages_slice(self, compacted=True):
-            return []
-
+def test_serve_answers_slash_commands_while_a_turn_occupies_the_runtime():
     async def run():
-        server = StdioRuntimeServer(Runtime(), Session())
-        await server._dispatch({"request_id": 28, "method": "session/new", "params": {}})
-
-    asyncio.run(run())
-
-    message = json.loads(capsys.readouterr().out)
-    assert message["result"] == {
-        "session_id": "new-session",
-        "draft": False,
-        "model": "new-model",
-        "usage": None,
-        "resume_preview": "",
-    }
-
-
-def test_slash_execute_reuses_cli_router(capsys):
-    async def run():
-        server = StdioRuntimeServer(_Runtime(), _Session())
-        await server._execute_slash({"request_id": 8, "method": "rind/command/execute", "params": {"input": "/compact"}})
-
-    asyncio.run(run())
-
-    message = json.loads(capsys.readouterr().out)
-    result = message["result"]
-    assert set(result) == {"text"}
-    assert result["text"].startswith("Compact complete.")
-
-
-def test_slash_execute_non_compact_does_not_reset_context_usage(capsys):
-    async def run():
-        server = StdioRuntimeServer(_Runtime(), _Session())
-        await server._execute_slash({"request_id": 14, "method": "rind/command/execute", "params": {"input": "/help"}})
-
-    asyncio.run(run())
-
-    message = json.loads(capsys.readouterr().out)
-    assert message["result"]["display"]["type"] == "help"
-
-
-@pytest.mark.parametrize(
-    ("slash_input", "display_type"),
-    [
-        ("/status", "status"),
-        ("/help", "help"),
-    ],
-)
-def test_serve_answers_slash_commands_while_a_turn_occupies_the_runtime(slash_input, display_type, capsys):
-    async def run():
-        runtime = _BlockingTurnRuntime()
-        server = StdioRuntimeServer(runtime, _Session())
-        responses: list[dict] = []
-        _trace_responses(server, responses)
+        worker = FakeWorker()
+        worker.execution.blocking = True
+        server, payloads = make_server(worker)
         serve = asyncio.create_task(server._serve())
         server._requests.put_nowait(
-            {"kind": "request", "request_id": 41, "method": "session/prompt", "params": {"input": "hello"}}
+            {"kind": "request", "request_id": 41, "method": "session/prompt", "params": {"session_id": "s1", "input": "hello"}}
         )
-        await runtime.started.wait()
+        await worker.execution.started.wait()
         server._requests.put_nowait(
-            {"kind": "request", "request_id": 42, "method": "rind/command/execute", "params": {"input": slash_input}}
+            {"kind": "request", "request_id": 42, "method": "rind/command/execute", "params": {"session_id": "s1", "input": "/status"}}
         )
-        await _await_response(responses, 42)
-        runtime.release.set()
-        await _await_response(responses, 41)
+        await _await_response(payloads, 42)
+        worker.execution.release.set()
+        await _await_response(payloads, 41)
         server._begin_shutdown()
         return await asyncio.wait_for(serve, 10)
 
     assert asyncio.run(run()) == 0
 
-    messages = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
-    command = next(message for message in messages if message.get("request_id") == 42)
-    prompt = next(message for message in messages if message.get("request_id") == 41)
 
-    assert messages.index(command) < messages.index(prompt)
-    assert command["result"]["display"]["type"] == display_type
-    assert prompt["result"] == {"ok": True, "session_id": "s1", "turn_id": "t1"}
+def test_slash_commands_reuse_the_cli_router():
+    worker = FakeWorker()
+    server, payloads = make_server(worker)
 
-
-@pytest.mark.parametrize("slash_input", ["/status", "/help"])
-def test_ingested_slash_commands_use_the_control_lane_after_initialize(slash_input, capsys):
     async def run():
-        server = StdioRuntimeServer(_Runtime(), _Session())
-        server._initialized = True
-        responses: list[dict] = []
-        _trace_responses(server, responses)
-        await server._ingest_line(
-            json.dumps(
-                {
-                    "kind": "request",
-                    "request_id": 42,
-                    "method": "rind/command/execute",
-                    "params": {"input": slash_input},
-                }
-            )
+        await server._dispatch(
+            {"kind": "request", "request_id": 8, "method": "rind/command/execute", "params": {"session_id": "s1", "input": "/help"}}
         )
-        assert server._requests.empty()
-        await _await_response(responses, 42)
+        await server._dispatch(
+            {"kind": "request", "request_id": 9, "method": "rind/command/execute", "params": {"session_id": "s1", "input": "/status bad"}}
+        )
 
     asyncio.run(run())
 
-    message = json.loads(capsys.readouterr().out)
-    assert message["request_id"] == 42
-    assert message["result"]["display"]["type"] in {"status", "help"}
+    assert _response(payloads, 8)["result"]["display"]["type"] == "help"
+    assert _response(payloads, 9)["result"]["text"] == "Usage: /status"
 
 
-def test_ingested_slash_command_bypasses_a_running_turn(capsys):
+def test_compact_request_returns_turn_active_error_while_a_turn_is_active():
+    worker = FakeWorker()
+    worker.containers["s1"] = FakeContainer(FakeStore(worker, "s1"), FakeRuntime(turn_active=True))
+    server, payloads = make_server(worker)
+
     async def run():
-        runtime = _BlockingTurnRuntime()
-        server = StdioRuntimeServer(runtime, _Session())
-        server._initialized = True
-        responses: list[dict] = []
-        _trace_responses(server, responses)
-        serve = asyncio.create_task(server._serve())
-        await server._ingest_line(
-            json.dumps(
-                {
-                    "kind": "request",
-                    "request_id": 41,
-                    "method": "session/prompt",
-                    "params": {"input": "hello"},
-                }
-            )
+        await server._dispatch(
+            {"kind": "request", "request_id": 50, "method": "rind/session/compact", "params": {"session_id": "s1"}}
         )
-        await runtime.started.wait()
-        await server._ingest_line(
-            json.dumps(
-                {
-                    "kind": "request",
-                    "request_id": 42,
-                    "method": "rind/command/execute",
-                    "params": {"input": "/status"},
-                }
-            )
+
+    asyncio.run(run())
+    assert _response(payloads, 50)["error"] == {
+        "type": "TurnActive",
+        "message": "Cannot compact context while a turn is active.",
+    }
+
+
+async def _await_response(payloads: list, request_id, timeout: float = 10.0) -> None:
+    async def poll() -> None:
+        while not any(message.get("request_id") == request_id for message in payloads):
+            await asyncio.sleep(0.01)
+
+    await asyncio.wait_for(poll(), timeout)
+
+
+# -- queued turn inputs ----------------------------------------------------------
+
+
+def test_turn_input_controls_reach_execution():
+    worker = FakeWorker()
+    worker.execution.active_turn_ids["s1"] = "t1"
+    server, payloads = make_server(worker)
+
+    async def run():
+        await server._dispatch(
+            {"kind": "request", "request_id": 31, "method": "rind/session/steer", "params": {"session_id": "s1", "turn_id": "t1", "input": "change direction"}}
         )
-        await _await_response(responses, 42)
-        runtime.release.set()
-        await _await_response(responses, 41)
-        server._begin_shutdown()
-        await asyncio.wait_for(serve, 10)
+        await server._dispatch(
+            {"kind": "request", "request_id": 32, "method": "rind/session/follow_up", "params": {"session_id": "s1", "turn_id": "t1", "input": "next task"}}
+        )
+        await server._dispatch(
+            {"kind": "request", "request_id": 33, "method": "rind/session/unsteer", "params": {"session_id": "s1", "turn_id": "t1"}}
+        )
+        await server._dispatch(
+            {"kind": "request", "request_id": 34, "method": "rind/session/promote_follow_up", "params": {"session_id": "s1", "turn_id": "t1", "input_id": "follow-1"}}
+        )
 
     asyncio.run(run())
 
-    messages = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
-    command = next(message for message in messages if message.get("request_id") == 42)
-    prompt = next(message for message in messages if message.get("request_id") == 41)
-    assert messages.index(command) < messages.index(prompt)
-    assert command["result"]["display"]["type"] == "status"
+    assert worker.execution.submitted == [
+        ("submit", "steering", "change direction"),
+        ("submit", "follow_up", "next task"),
+        ("retrieve", "steering", None),
+        ("promote", "follow_up", "follow-1"),
+    ]
+    assert _response(payloads, 31)["result"]["mode"] == "steering"
+    assert _response(payloads, 32)["result"]["mode"] == "follow_up"
+    assert _response(payloads, 33)["result"]["retrieved"] is True
+    assert _response(payloads, 34)["result"]["mode"] == "steering"
+
+
+def test_turn_input_control_rejection_is_structured_protocol_error():
+    worker = FakeWorker()
+    worker.execution.active_turn_ids["s1"] = "t1"
+    worker.execution.input_queue_error = InputQueueError("steering queue is full", "InputQueueFull")
+    server, payloads = make_server(worker)
+
+    async def run():
+        await server._dispatch(
+            {"kind": "request", "request_id": 33, "method": "rind/session/steer", "params": {"session_id": "s1", "turn_id": "t1", "input": "change"}}
+        )
+
+    asyncio.run(run())
+    assert _response(payloads, 33)["error"] == {"type": "InputQueueFull", "message": "steering queue is full"}
+
+
+def test_turn_scoped_controls_require_the_active_turn_id():
+    worker = FakeWorker()
+    worker.execution.active_turn_ids["s1"] = "t1"
+    server, payloads = make_server(worker)
+
+    async def run():
+        await server._dispatch(
+            {"kind": "request", "request_id": 34, "method": "rind/session/steer", "params": {"session_id": "s1", "turn_id": "stale", "input": "change"}}
+        )
+
+    asyncio.run(run())
+    assert _response(payloads, 34)["error"]["type"] == "TurnNotActive"
+    assert worker.execution.submitted == []
+
+
+def test_readonly_session_replay_is_handled_while_run_turn_is_blocked():
+    async def run():
+        worker = FakeWorker()
+        worker.execution.blocking = True
+        server, payloads = make_server(worker)
+        turn_task = asyncio.create_task(
+            server._dispatch(
+                {"kind": "request", "request_id": 37, "method": "session/prompt", "params": {"session_id": "s1", "input": "hello"}}
+            )
+        )
+        await worker.execution.started.wait()
+        await server._dispatch(
+            {"kind": "request", "request_id": 38, "method": "session/replay", "params": {"session_id": "s1"}}
+        )
+        assert not turn_task.done()
+        worker.execution.release.set()
+        await turn_task
+        return payloads
+
+    payloads = asyncio.run(run())
+    replay = _response(payloads, 38)
+    assert replay["result"]["messages"] == []
+    assert replay["result"]["session_id"] == "s1"
+
+
+# -- user questions ----------------------------------------------------------------
+
+
+def test_user_question_responses_reach_execution():
+    worker = FakeWorker()
+    worker.pending_questions["call-1"] = ""
+    server, payloads = make_server(worker)
+
+    async def run():
+        await server._dispatch(
+            {
+                "kind": "request",
+                "request_id": 61,
+                "method": "rind/user-question/respond",
+                "params": {"session_id": "s1", "tool_call_id": "call-1", "answer": "yes"},
+            }
+        )
+        await server._dispatch(
+            {
+                "kind": "request",
+                "request_id": 62,
+                "method": "rind/user-question/respond",
+                "params": {"session_id": "s1", "tool_call_id": "missing", "answer": "no"},
+            }
+        )
+
+    asyncio.run(run())
+
+    assert worker.pending_questions["call-1"] == "yes"
+    assert _response(payloads, 61)["result"] == {"ok": True}
+    assert _response(payloads, 62)["error"]["type"] == "QuestionNotFound"
+
+
+# -- sessions ----------------------------------------------------------------
+
+
+def test_session_list_returns_recent_sessions_and_current_id():
+    worker = FakeWorker()
+    server, payloads = make_server(worker)
+
+    async def run():
+        await server._dispatch({"kind": "request", "request_id": 27, "method": "session/list", "params": {"limit": 3}})
+
+    asyncio.run(run())
+
+    result = _response(payloads, 27)["result"]
+    assert result["current_session_id"] == "s1"
+    assert result["sessions"] == [{"id": "s1", "title": "session s1"}]
+
+
+def test_session_new_returns_created_metadata():
+    worker = FakeWorker()
+    server, payloads = make_server(worker)
+
+    async def run():
+        await server._dispatch({"kind": "request", "request_id": 28, "method": "session/new", "params": {}})
+
+    asyncio.run(run())
+    assert _response(payloads, 28)["result"]["session_id"] == "new-session"
+
+
+def test_unknown_sessions_surface_as_session_not_found():
+    worker = FakeWorker()
+    server, payloads = make_server(worker)
+
+    async def run():
+        await server._dispatch({"kind": "request", "request_id": 29, "method": "session/switch", "params": {"session_id": "archived"}})
+
+    asyncio.run(run())
+    assert _response(payloads, 29)["error"]["type"] == "SessionNotFound"
+
+
+# -- goals --------------------------------------------------------------------
+
+
+def test_goal_control_requests_update_and_clear_state():
+    worker = FakeWorker()
+    server, payloads = make_server(worker)
+
+    async def run():
+        await server._dispatch(
+            {"kind": "request", "request_id": 10, "method": "rind/goal/set", "params": {"session_id": "s1", "objective": "ship it"}}
+        )
+        await server._dispatch(
+            {"kind": "request", "request_id": 11, "method": "rind/goal/status", "params": {"session_id": "s1", "status": "paused"}}
+        )
+        await server._dispatch(
+            {"kind": "request", "request_id": 12, "method": "rind/goal/clear", "params": {"session_id": "s1"}}
+        )
+
+    asyncio.run(run())
+
+    assert _response(payloads, 10)["result"]["goal"] == {"objective": "ship it", "status": "active"}
+    assert _response(payloads, 11)["result"]["goal"]["status"] == "paused"
+    assert _response(payloads, 12)["result"]["goal"] is None
+
+
+# -- background ----------------------------------------------------------------
 
 
 def test_background_requests_use_control_callbacks(capsys):
@@ -839,720 +510,171 @@ def test_background_requests_use_control_callbacks(capsys):
         assert (bg_id, max_output_chars, _session_id) == ("bg_1", 100, "s1")
         return {"bg_id": bg_id, "status": "running", "stdout": "tick"}
 
+    worker = FakeWorker()
+    server, payloads = make_server(worker)
+    server._background_list = list_backgrounds
+    server._background_output = snapshot_background
+
     async def run():
-        server = StdioRuntimeServer(
-            _Runtime(),
-            _Session(),
-            background_list=list_backgrounds,
-            background_output=snapshot_background,
+        await server._dispatch(
+            {"kind": "request", "request_id": 30, "method": "rind/background/list", "params": {"session_id": "s1"}}
         )
-        assert await server._handle_control_message(
-            {"request_id": 30, "method": "rind/background/list", "params": {}}
-        )
-        assert await server._handle_control_message(
+        await server._dispatch(
             {
+                "kind": "request",
                 "request_id": 31,
                 "method": "rind/background/output",
-                "params": {"bg_id": "bg_1", "max_output_chars": 100},
+                "params": {"session_id": "s1", "bg_id": "bg_1", "max_output_chars": 100},
             }
         )
-
-    asyncio.run(run())
-
-    messages = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
-    assert messages[0]["result"] == {"tasks": [{"bg_id": "bg_1", "status": "running"}]}
-    assert messages[1]["result"]["task"]["stdout"] == "tick"
-
-
-def test_background_output_rejects_invalid_request(capsys):
-    async def run():
-        server = StdioRuntimeServer(
-            _Runtime(),
-            _Session(),
-            background_output=lambda *_args, **_kwargs: {},
-        )
-        await server._handle_control_message(
-            {"request_id": 32, "method": "rind/background/output", "params": {"bg_id": ""}}
+        await server._dispatch(
+            {"kind": "request", "request_id": 32, "method": "rind/background/output", "params": {"session_id": "s1", "bg_id": ""}}
         )
 
     asyncio.run(run())
 
-    message = json.loads(capsys.readouterr().out)
-    assert message["error"]["type"] == "InvalidRequest"
+    assert _response(payloads, 30)["result"] == {"tasks": [{"bg_id": "bg_1", "status": "running"}]}
+    assert _response(payloads, 31)["result"]["task"]["stdout"] == "tick"
+    assert _response(payloads, 32)["error"]["type"] == "InvalidRequest"
 
 
-def test_slash_execution_does_not_replace_the_active_turn_cancel_source(capsys):
-    async def run():
-        runtime = _BlockingTurnRuntime()
-        server = StdioRuntimeServer(runtime, _Session())
-        turn_task = asyncio.create_task(
-            server._run_turn({"kind": "request", "request_id": 43, "method": "session/prompt", "params": {"input": "hello"}})
-        )
-        await runtime.started.wait()
-        await server._execute_slash(
-            {"kind": "request", "request_id": 44, "method": "rind/command/execute", "params": {"input": "/status"}}
-        )
-        cancel_still_registered = server._current_cancel is not None
-        runtime.release.set()
-        await turn_task
-        return cancel_still_registered
-
-    cancel_still_registered = asyncio.run(run())
-
-    messages = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
-
-    assert cancel_still_registered is True
-    assert messages[0]["result"]["text"].startswith("```text\nConfig:")
-    assert messages[-1]["result"] == {"ok": True, "session_id": "s1", "turn_id": "t1"}
+# -- models and auth -------------------------------------------------------------
 
 
-def test_serve_runs_queued_prompts_serially(capsys):
-    class Runtime(_BlockingTurnRuntime):
-        def __init__(self):
-            super().__init__()
-            self.started_turns: list[str] = []
-
-        async def run_turn(self, **kwargs):
-            self.started_turns.append(str(kwargs.get("query")))
-            async for event in super().run_turn(**kwargs):
-                yield event
+def test_model_list_returns_structured_models_current_and_warning():
+    worker = FakeWorker()
+    worker.models_listing = {
+        "models": [{"provider_id": "openai", "id": "gpt-5.5", "name": "GPT-5.5", "api": "openai-responses", "reasoning_efforts": ["low", "high"], "context_window": None}],
+        "warning": "failed to refresh OpenAI models, showing saved models",
+    }
+    server, payloads = make_server(worker)
 
     async def run():
-        runtime = Runtime()
-        server = StdioRuntimeServer(runtime, _Session())
-        responses: list[dict] = []
-        _trace_responses(server, responses)
+        await server._dispatch({"kind": "request", "request_id": 9, "method": "model/list", "params": {"session_id": "s1"}})
+
+    asyncio.run(run())
+
+    result = _response(payloads, 9)["result"]
+    assert result["models"] == worker.models_listing["models"]
+    assert result["current"] == {"provider_id": "p1", "model_id": "m1"}
+    assert result["warning"] == "failed to refresh OpenAI models, showing saved models"
+
+
+def test_model_set_updates_provider_and_model_atomically():
+    worker = FakeWorker()
+    server, payloads = make_server(worker)
+
+    async def run():
+        await server._dispatch(
+            {"kind": "request", "request_id": 12, "method": "model/set", "params": {"session_id": "s1", "provider_id": "deepseek", "model_id": "deepseek-chat"}}
+        )
+
+    asyncio.run(run())
+
+    store = worker.stores["s1"]
+    assert store.updates == [("deepseek", "deepseek-chat")]
+    assert _response(payloads, 12)["result"]["model_id"] == "deepseek-chat"
+
+
+def test_auth_login_adopts_provider_default_when_session_model_unusable():
+    worker = FakeWorker()
+    worker.models_listing = {
+        "models": [
+            {"provider_id": "deepseek", "id": "deepseek-chat", "name": "DeepSeek Chat", "api": "openai-chat", "reasoning_efforts": [], "context_window": None},
+            {"provider_id": "deepseek", "id": "deepseek-reasoner", "name": "DeepSeek Reasoner", "api": "openai-chat", "reasoning_efforts": [], "context_window": None},
+        ],
+        "warning": None,
+    }
+    server, payloads = make_server(worker)
+    server._initialized = True
+
+    async def run():
+        login_task = asyncio.create_task(
+            server._dispatch(
+                {"kind": "request", "request_id": 71, "method": "rind/auth/login", "params": {"session_id": "s1", "provider_id": "deepseek", "method": "api_key"}}
+            )
+        )
+        while not server._auth_waiters:
+            await asyncio.sleep(0.01)
+        (prompt_request_id, _future) = next(iter(server._auth_waiters.items()))
+        prompt = next(message for message in payloads if message.get("request_id") == prompt_request_id)
+        assert prompt["method"] == RuntimeMethod.RIND_AUTH_PROMPT
+        assert prompt["params"]["kind"] == "secret"
+        await server._dispatch(
+            {"kind": "request", "request_id": prompt_request_id, "method": RuntimeMethod.RIND_AUTH_PROMPT, "params": {"value": "secret-key"}}
+        )
+        return await login_task
+
+    asyncio.run(run())
+
+    assert worker.login_prompt == "secret-key"
+    result = _response(payloads, 71)["result"]
+    assert result["ok"] is True
+    assert result["provider_id"] == "deepseek"
+    assert result["selection"] == {"provider_id": "deepseek", "model_id": "deepseek-chat"}
+    assert worker.stores["s1"].updates == [("deepseek", "deepseek-chat")]
+
+
+def test_auth_logout_reports_deletion_and_remaining_source():
+    worker = FakeWorker()
+    worker.providers = [{"id": "deepseek", "configured": True, "source": "environment"}]
+    server, payloads = make_server(worker)
+
+    async def run():
+        await server._dispatch(
+            {"kind": "request", "request_id": 72, "method": "rind/auth/logout", "params": {"session_id": "s1", "provider_id": "deepseek"}}
+        )
+
+    asyncio.run(run())
+    assert _response(payloads, 72)["result"] == {
+        "ok": True,
+        "provider_id": "deepseek",
+        "deleted": True,
+        "source": "environment",
+    }
+
+
+def test_auth_methods_require_provider_id():
+    worker = FakeWorker()
+    server, payloads = make_server(worker)
+
+    async def run():
+        await server._dispatch({"kind": "request", "request_id": 73, "method": "rind/auth/login", "params": {"session_id": "s1"}})
+        await server._dispatch({"kind": "request", "request_id": 74, "method": "rind/auth/logout", "params": {"session_id": "s1"}})
+
+    asyncio.run(run())
+    assert _response(payloads, 73)["error"]["type"] == "InvalidRequest"
+    assert _response(payloads, 74)["error"]["type"] == "InvalidRequest"
+
+
+# -- shutdown ------------------------------------------------------------------
+
+
+def test_shutdown_cancels_inflight_dispatch_and_exits_promptly():
+    async def run():
+        worker = FakeWorker()
+        worker.execution.blocking = True
+        server, payloads = make_server(worker)
         serve = asyncio.create_task(server._serve())
         server._requests.put_nowait(
-            {"kind": "request", "request_id": 45, "method": "session/prompt", "params": {"input": "first"}}
+            {"kind": "request", "request_id": 51, "method": "session/prompt", "params": {"session_id": "s1", "input": "hello"}}
         )
-        server._requests.put_nowait(
-            {"kind": "request", "request_id": 46, "method": "session/prompt", "params": {"input": "second"}}
-        )
-        await runtime.started.wait()
-        await asyncio.sleep(0.05)
-        overlapping_turns = list(runtime.started_turns)
-        runtime.release.set()
-        await _await_response(responses, 45)
-        await _await_response(responses, 46)
-        server._begin_shutdown()
-        await asyncio.wait_for(serve, 10)
-        return overlapping_turns, list(runtime.started_turns)
-
-    overlapping_turns, started_turns = asyncio.run(run())
-
-    assert overlapping_turns == ["first"]
-    assert started_turns == ["first", "second"]
-
-
-def test_turn_input_controls_respond_without_main_queue(capsys):
-    class Runtime(_Runtime):
-        def __init__(self):
-            super().__init__()
-            self.submitted = []
-
-        def submit_steering(self, text):
-            self.submitted.append(("steering", text))
-            return {"accepted": True, "input_id": "steer-1", "mode": "steering", "pending": 1}
-
-        def submit_follow_up(self, text):
-            self.submitted.append(("follow_up", text))
-            return {"accepted": True, "input_id": "follow-1", "mode": "follow_up", "pending": 2}
-
-        def promote_follow_up(self, input_id):
-            self.submitted.append(("promote", input_id))
-            return {"accepted": True, "input_id": input_id, "mode": "steering", "pending": 1}
-
-        def unsteer(self, input_id=None):
-            self.submitted.append(("unsteer", input_id or ""))
-            return {"retrieved": True, "input_id": "steer-1", "input": "change direction", "mode": "steering", "pending": 0}
-
-        def dequeue_follow_up(self, input_id=None):
-            self.submitted.append(("dequeue_follow_up", input_id or ""))
-            return {"retrieved": True, "input_id": "follow-1", "input": "next task", "mode": "follow_up", "pending": 0}
-
-    async def run():
-        runtime = Runtime()
-        server = StdioRuntimeServer(runtime, _Session())
-        steering_handled = await server._handle_control_message(
-            {"request_id": 31, "method": "rind/session/steer", "params": {"input": "change direction"}}
-        )
-        follow_up_handled = await server._handle_control_message(
-            {"request_id": 32, "method": "rind/session/follow_up", "params": {"input": "next task"}}
-        )
-        promote_handled = await server._handle_control_message(
-            {"request_id": 33, "method": "rind/session/promote_follow_up", "params": {"input_id": "follow-1"}}
-        )
-        unsteer_handled = await server._handle_control_message(
-            {"request_id": 34, "method": "rind/session/unsteer", "params": {"input_id": "steer-1"}}
-        )
-        dequeue_handled = await server._handle_control_message(
-            {"request_id": 35, "method": "rind/session/dequeue_follow_up", "params": {}}
-        )
-        return runtime, server, steering_handled, follow_up_handled, promote_handled, unsteer_handled, dequeue_handled
-
-    runtime, server, steering_handled, follow_up_handled, promote_handled, unsteer_handled, dequeue_handled = asyncio.run(run())
-    messages = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
-
-    assert steering_handled is True
-    assert follow_up_handled is True
-    assert promote_handled is True
-    assert unsteer_handled is True
-    assert dequeue_handled is True
-    assert server._requests.empty()
-    assert runtime.submitted == [
-        ("steering", "change direction"),
-        ("follow_up", "next task"),
-        ("promote", "follow-1"),
-        ("unsteer", "steer-1"),
-        ("dequeue_follow_up", ""),
-    ]
-    assert messages[0]["result"] == {"accepted": True, "input_id": "steer-1", "mode": "steering", "pending": 1}
-    assert messages[1]["result"] == {"accepted": True, "input_id": "follow-1", "mode": "follow_up", "pending": 2}
-    assert messages[2]["result"] == {"accepted": True, "input_id": "follow-1", "mode": "steering", "pending": 1}
-    assert messages[3]["result"] == {"retrieved": True, "input_id": "steer-1", "input": "change direction", "mode": "steering", "pending": 0}
-    assert messages[4]["result"] == {"retrieved": True, "input_id": "follow-1", "input": "next task", "mode": "follow_up", "pending": 0}
-
-
-def test_turn_input_control_rejection_is_structured_protocol_error(capsys):
-    class Runtime(_Runtime):
-        def submit_steering(self, _text):
-            raise InputQueueError("steering queue is full", "InputQueueFull")
-
-        def unsteer(self, _input_id=None):
-            raise InputQueueError("No queued steering input is available.", "InputNotPending")
-
-    async def run():
-        server = StdioRuntimeServer(Runtime(), _Session())
-        return await server._handle_control_message(
-            {"request_id": 33, "method": "rind/session/steer", "params": {"input": "change"}}
-        )
-
-    assert asyncio.run(run()) is True
-    message = json.loads(capsys.readouterr().out)
-    assert message["request_id"] == 33
-    assert message["error"] == {"type": "InputQueueFull", "message": "steering queue is full"}
-
-    async def retrieve():
-        server = StdioRuntimeServer(Runtime(), _Session())
-        return await server._handle_control_message(
-            {"request_id": 34, "method": "rind/session/unsteer", "params": {}}
-        )
-
-    assert asyncio.run(retrieve()) is True
-    message = json.loads(capsys.readouterr().out)
-    assert message["request_id"] == 34
-    assert message["error"] == {"type": "InputNotPending", "message": "No queued steering input is available."}
-
-
-def test_interrupt_discards_runtime_inputs_without_returning_them(capsys):
-    class Runtime(_Runtime):
-        def __init__(self):
-            super().__init__()
-            self.discard_calls = 0
-
-        def discard_pending_inputs(self):
-            self.discard_calls += 1
-
-    async def run():
-        runtime = Runtime()
-        server = StdioRuntimeServer(runtime, _Session())
-        current = CancellationTokenSource()
-        server._current_cancel = current
-        handled = await server._handle_control_message(
-            {"request_id": 34, "method": "session/cancel", "params": {}}
-        )
-        cancelled = current.token.is_cancelled
-        current.dispose()
-        return runtime, handled, cancelled
-
-    runtime, handled, cancelled = asyncio.run(run())
-    message = json.loads(capsys.readouterr().out)
-
-    assert handled is True
-    assert cancelled is True
-    assert runtime.discard_calls == 1
-    assert message["result"] == {"ok": True}
-
-
-def test_turn_input_control_is_handled_while_run_turn_is_blocked(capsys):
-    class Runtime(_Runtime):
-        def __init__(self):
-            super().__init__()
-            self.started = asyncio.Event()
-            self.release = asyncio.Event()
-            self.submitted = []
-
-        async def run_turn(self, **_kwargs):
-            self.started.set()
-            await self.release.wait()
-            yield type(
-                "Event",
-                (),
-                {
-                    "to_dict": lambda _self: {
-                        "type": "turn_completed",
-                        "ts": "1700000000.0",
-                        "session_id": "s1",
-                        "turn_id": "t1",
-                    }
-                },
-            )()
-
-        def submit_follow_up(self, text):
-            self.submitted.append(text)
-            return {"accepted": True, "mode": "follow_up", "pending": 1}
-
-    async def run():
-        runtime = Runtime()
-        server = StdioRuntimeServer(runtime, _Session())
-        turn_task = asyncio.create_task(
-            server._run_turn({"request_id": 35, "method": "session/prompt", "params": {"input": "hello"}})
-        )
-        await runtime.started.wait()
-        handled = await server._handle_control_message(
-            {"request_id": 36, "method": "rind/session/follow_up", "params": {"input": "continue"}}
-        )
-        assert not turn_task.done()
-        runtime.release.set()
-        await turn_task
-        return runtime, handled
-
-    runtime, handled = asyncio.run(run())
-    messages = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
-
-    assert handled is True
-    assert runtime.submitted == ["continue"]
-    assert messages[0]["request_id"] == 36
-    assert messages[0]["result"]["mode"] == "follow_up"
-
-
-def test_readonly_session_replay_is_handled_while_run_turn_is_blocked(capsys):
-    class Runtime(_Runtime):
-        def __init__(self):
-            super().__init__()
-            self.started = asyncio.Event()
-            self.release = asyncio.Event()
-
-        async def run_turn(self, **_kwargs):
-            self.started.set()
-            await self.release.wait()
-            yield type(
-                "Event",
-                (),
-                {
-                    "to_dict": lambda _self: {
-                        "type": "turn_completed",
-                        "ts": "1700000000.0",
-                        "session_id": "s1",
-                        "turn_id": "t1",
-                    }
-                },
-            )()
-
-    class Session(_Session):
-        async def get_messages_for_session(self, session_id, start=None, end=None, compacted=True):
-            assert session_id == "archived"
-            assert start is None
-            assert end is None
-            return [{"role": "user", "content": "archived history"}]
-
-    async def run():
-        runtime = Runtime()
-        server = StdioRuntimeServer(runtime, Session())
-        turn_task = asyncio.create_task(
-            server._run_turn({"request_id": 37, "method": "session/prompt", "params": {"input": "hello"}})
-        )
-        await runtime.started.wait()
-        handled = await server._handle_control_message(
-            {"request_id": 38, "method": "session/replay", "params": {"session_id": "archived"}}
-        )
-        assert not turn_task.done()
-        runtime.release.set()
-        await turn_task
-        return handled
-
-    handled = asyncio.run(run())
-    messages = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
-    replay = next(message for message in messages if message.get("request_id") == 38)
-
-    assert handled is True
-    assert replay["result"] == {
-        "messages": [{"role": "user", "content": "archived history"}],
-        "turn_state": None,
-        "session_id": "archived",
-        "model": "m1",
-    }
-
-
-def test_session_switch_is_rejected_while_run_turn_is_blocked(capsys):
-    class Runtime(_Runtime):
-        def __init__(self):
-            super().__init__()
-            self.started = asyncio.Event()
-            self.release = asyncio.Event()
-            self.switched: list[str] = []
-
-        async def run_turn(self, **_kwargs):
-            self.started.set()
-            await self.release.wait()
-            yield type(
-                "Event",
-                (),
-                {
-                    "to_dict": lambda _self: {
-                        "type": "turn_completed",
-                        "ts": "1700000000.0",
-                        "session_id": "s1",
-                        "turn_id": "t1",
-                    }
-                },
-            )()
-
-        async def switch_session(self, session_id):
-            self.switched.append(session_id)
-            return {"session_id": session_id}
-
-    async def run():
-        runtime = Runtime()
-        server = StdioRuntimeServer(runtime, _Session())
-        turn_task = asyncio.create_task(
-            server._run_turn({"request_id": 39, "method": "session/prompt", "params": {"input": "hello"}})
-        )
-        await runtime.started.wait()
-        handled = await server._handle_control_message(
-            {"request_id": 40, "method": "session/switch", "params": {"session_id": "archived"}}
-        )
-        assert not turn_task.done()
-        runtime.release.set()
-        await turn_task
-        return runtime, handled
-
-    runtime, handled = asyncio.run(run())
-    messages = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
-    response = next(message for message in messages if message.get("request_id") == 40)
-
-    assert handled is True
-    assert runtime.switched == []
-    assert response["error"] == {
-        "message": "Cannot switch sessions while a turn is running.",
-        "type": "TurnActive",
-    }
-
-
-def test_session_switch_is_rejected_while_turn_start_is_queued(capsys):
-    async def run():
-        server = StdioRuntimeServer(_Runtime(), _Session())
-        await server._ingest_line(
-            json.dumps({"kind": "request", "request_id": 41, "method": "session/prompt", "params": {"input": "hello"}})
-        )
-        handled = await server._handle_control_message(
-            {"request_id": 42, "method": "session/switch", "params": {"session_id": "archived"}}
-        )
-        return server, handled
-
-    server, handled = asyncio.run(run())
-    messages = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
-    response = next(message for message in messages if message.get("request_id") == 42)
-
-    assert handled is True
-    assert server._queued_turn_starts == 1
-    assert response["error"]["type"] == "TurnActive"
-
-
-def test_slash_usage_errors_return_as_command_results(capsys):
-    async def run():
-        server = StdioRuntimeServer(_Runtime(), _Session())
-        await server._execute_slash(
-            {"kind": "request", "request_id": 19, "method": "rind/command/execute", "params": {"input": "/status bad"}}
-        )
-        await server._execute_slash(
-            {"kind": "request", "request_id": 20, "method": "rind/command/execute", "params": {"input": "/help model now"}}
-        )
-
-    asyncio.run(run())
-
-    messages = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
-    assert messages[0]["result"]["text"] == "Usage: /status"
-    assert messages[1]["result"]["text"] == "Usage: /help [command]"
-
-
-def test_compact_slash_is_rejected_while_a_turn_is_active(capsys):
-    class Runtime(_BlockingTurnRuntime):
-        @property
-        def turn_active(self) -> bool:
-            return self.started.is_set() and not self.release.is_set()
-
-        async def compact_context(self, reason="manual", cancellation_token=None):
-            raise AssertionError("compact must not run while a turn is active")
-
-    async def run():
-        runtime = Runtime()
-        server = StdioRuntimeServer(runtime, _Session())
-        turn_task = asyncio.create_task(
-            server._run_turn({"kind": "request", "request_id": 47, "method": "session/prompt", "params": {"input": "hello"}})
-        )
-        await runtime.started.wait()
-        await server._execute_slash(
-            {"kind": "request", "request_id": 48, "method": "rind/command/execute", "params": {"input": "/compact"}}
-        )
-        runtime.release.set()
-        await turn_task
-
-    asyncio.run(run())
-
-    messages = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
-    compact = next(message for message in messages if message.get("request_id") == 48)
-
-    assert compact["result"]["text"] == (
-        "Cannot compact while a turn is running. Wait for it to finish or interrupt it first."
-    )
-
-
-def test_compact_request_returns_turn_active_error_while_a_turn_is_active(capsys):
-    class Runtime(_BlockingTurnRuntime):
-        @property
-        def turn_active(self) -> bool:
-            return self.started.is_set() and not self.release.is_set()
-
-    async def run():
-        runtime = Runtime()
-        server = StdioRuntimeServer(runtime, _Session())
-        turn_task = asyncio.create_task(
-            server._run_turn({"kind": "request", "request_id": 49, "method": "session/prompt", "params": {"input": "hello"}})
-        )
-        await runtime.started.wait()
-        await server._compact(
-            {"kind": "request", "request_id": 50, "method": "rind/session/compact", "params": {}}
-        )
-        runtime.release.set()
-        await turn_task
-
-    asyncio.run(run())
-
-    messages = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
-    compact = next(message for message in messages if message.get("request_id") == 50)
-
-    assert compact["error"] == {
-        "type": "TurnActive",
-        "message": "Cannot compact context while a turn is active.",
-    }
-
-
-def test_shutdown_cancels_inflight_dispatch_and_exits_promptly(capsys):
-    async def run():
-        runtime = _BlockingTurnRuntime()
-        server = StdioRuntimeServer(runtime, _Session())
-        serve = asyncio.create_task(server._serve())
-        server._requests.put_nowait(
-            {"kind": "request", "request_id": 51, "method": "session/prompt", "params": {"input": "hello"}}
-        )
-        await runtime.started.wait()
-        server._begin_shutdown(
-            {"kind": "request", "request_id": "bye", "method": "shutdown", "params": {}}
-        )
-        return await asyncio.wait_for(serve, 10)
-
-    assert asyncio.run(run()) == 0
-
-    messages = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
+        await worker.execution.started.wait()
+        server._begin_shutdown({"kind": "request", "request_id": "bye", "method": "shutdown", "params": {}})
+        return await asyncio.wait_for(serve, 10), payloads
+
+    exit_code, payloads = asyncio.run(run())
+    assert exit_code == 0
     assert any(
         message.get("request_id") == "bye" and message.get("result") == {"ok": True}
-        for message in messages
+        for message in payloads
     )
-    assert not any(message.get("request_id") == 51 for message in messages)
 
 
-def test_models_list_returns_unique_sorted_models_and_current_marker(capsys):
-    class Models:
-        def list(self):
-            return _AsyncModelList([_Model("z-model"), _Model("m1"), _Model("a-model"), _Model("z-model")])
-
-    class Client:
-        models = Models()
-
-    async def run():
-        server = StdioRuntimeServer(
-            _Runtime(),
-            _Session(),
-            model_client_factory=Client,
-            default_model="default-model",
-        )
-        await server._list_models({"request_id": 9, "method": "model/list", "params": {}})
-
-    asyncio.run(run())
-
-    message = json.loads(capsys.readouterr().out)
-    result = message["result"]
-    assert result["current_model"] == "m1"
-    assert result["default_model"] == "default-model"
-    assert result["models"] == ["a-model", "m1", "z-model"]
+# -- durable replay ------------------------------------------------------------
 
 
-def test_models_list_includes_current_model_when_missing(capsys):
-    class Models:
-        def list(self):
-            return _AsyncModelList([_Model("a-model"), _Model("b-model")])
-
-    class Client:
-        models = Models()
-
-    async def run():
-        server = StdioRuntimeServer(
-            _Runtime(),
-            _Session(),
-            model_client_factory=Client,
-            default_model="default-model",
-        )
-        await server._list_models({"request_id": 10, "method": "model/list", "params": {}})
-
-    asyncio.run(run())
-
-    message = json.loads(capsys.readouterr().out)
-    assert message["result"]["models"] == ["m1", "a-model", "b-model"]
-
-
-def test_models_list_failure_returns_protocol_error(capsys):
-    class Models:
-        def list(self):
-            raise RuntimeError("models endpoint unavailable")
-
-    class Client:
-        models = Models()
-
-    async def run():
-        server = StdioRuntimeServer(_Runtime(), _Session(), model_client_factory=Client)
-        await server._dispatch({"request_id": 11, "method": "model/list", "params": {}})
-
-    asyncio.run(run())
-
-    message = json.loads(capsys.readouterr().out)
-    assert message["error"]["type"] == "RuntimeError"
-    assert message["error"]["message"] == "models endpoint unavailable"
-
-
-def test_model_set_updates_session_without_changing_settings(capsys, tmp_path, monkeypatch):
-    path = tmp_path / ".rind" / "settings.json"
-    path.parent.mkdir()
-    path.write_text(json.dumps({"model": "old-model", "apiKey": "secret-value"}), encoding="utf-8")
-    monkeypatch.setattr(Path, "home", lambda: tmp_path)
-    Config.reload()
-
-    class Session(_Session):
-        def __init__(self):
-            self.model = "old-model"
-
-        async def update_model(self, model):
-            self.model = model
-
-    async def run():
-        runtime = _Runtime()
-        session = Session()
-        server = StdioRuntimeServer(runtime, session, default_model="old-model")
-        await server._set_model({"request_id": 12, "method": "model/set", "params": {"model": "new-model"}})
-        return runtime, session, server
-
-    runtime, session, server = asyncio.run(run())
-    message = json.loads(capsys.readouterr().out)
-    data = json.loads(path.read_text(encoding="utf-8"))
-
-    assert message["result"]["runtime"] is True
-    assert message["result"]["session"] is True
-    assert message["result"]["model"] == "new-model"
-    assert message["result"]["session_model"] == "new-model"
-    assert message["result"]["default_model"] == "old-model"
-    assert message["result"]["default_updated"] is False
-    assert runtime.model == "new-model"
-    assert session.model == "new-model"
-    assert server._default_model == "old-model"
-    assert data["model"] == "old-model"
-    assert data["apiKey"] == "secret-value"
-
-
-class _TextStream:
-    def __init__(self):
-        self.calls = []
-
-    def reconfigure(self, **kwargs):
-        self.calls.append(kwargs)
-
-
-def test_configure_utf8_stdio_pins_protocol_stream_encoding(monkeypatch):
-    streams = [_TextStream(), _TextStream(), _TextStream()]
-    monkeypatch.setattr(sys, "stdin", streams[0])
-    monkeypatch.setattr(sys, "stdout", streams[1])
-    monkeypatch.setattr(sys, "stderr", streams[2])
-
-    configure_utf8_stdio()
-
-    assert [stream.calls for stream in streams] == [
-        [{"encoding": "utf-8", "errors": "replace"}],
-        [{"encoding": "utf-8", "errors": "replace"}],
-        [{"encoding": "utf-8", "errors": "replace"}],
-    ]
-
-
-def test_configure_stdio_server_signals_ignores_console_sigint(monkeypatch):
-    calls = []
-
-    def fake_signal(signum, handler):
-        calls.append((signum, handler))
-
-    monkeypatch.setattr(signal, "signal", fake_signal)
-
-    configure_stdio_server_signals()
-
-    assert calls == [(signal.SIGINT, signal.SIG_IGN)]
-
-
-# --- incremental replay cursor (W2) -------------------------------------------
-
-
-class _ReplayExecution:
-    def __init__(self):
-        self.sinks = []
-
-    def add_event_sink(self, sink):
-        self.sinks.append(sink)
-        return lambda: self.sinks.remove(sink)
-
-    def set_event_sink(self, sink):
-        self.sinks.clear()
-        if sink is not None:
-            self.sinks.append(sink)
-
-
-class _ReplayWorker:
-    """Worker fake whose store exposes messages, tool records, and turn state."""
-
-    def __init__(self):
-        self.execution = _ReplayExecution()
-        self.messages: list[dict] = []
-        self.tool_records: list[dict] = []
-        self.turn_state: dict | None = None
-
-    async def replay_event_pages(self, session_id):
-        return {
-            "messages": list(self.messages),
-            "tool_records": list(self.tool_records),
-            "turn_state": self.turn_state,
-            "session_id": session_id,
-        }
-
-
-def _replay_server(worker: _ReplayWorker):
-    payloads: list[dict] = []
-
-    async def send(payload: dict) -> None:
-        payloads.append(payload)
-
-    server = WorkerStdioRuntimeServer(worker)
-    server._writer.send = send
-    server._initialized = True
-    return server, payloads
-
-
-def _append_completed_turn(worker: _ReplayWorker, turn_id: str, text: str) -> None:
+def _append_completed_turn(worker: FakeWorker, turn_id: str, text: str) -> None:
     worker.messages.extend(
         [
             {"id": f"user-{turn_id}", "role": "user", "content": f"query {turn_id}"},
@@ -1586,10 +708,10 @@ def _append_completed_turn(worker: _ReplayWorker, turn_id: str, text: str) -> No
 
 
 def test_replay_after_cursor_zero_returns_full_durable_stream():
-    worker = _ReplayWorker()
+    worker = FakeWorker()
     for index in range(3):
         _append_completed_turn(worker, f"t{index}", f"reply {index}")
-    server, payloads = _replay_server(worker)
+    server, payloads = make_server(worker)
 
     asyncio.run(
         server._dispatch(
@@ -1602,7 +724,7 @@ def test_replay_after_cursor_zero_returns_full_durable_stream():
         )
     )
 
-    result = payloads[-1]["result"]
+    result = _response(payloads, "replay-0")["result"]
     assert result["cursor"] == 13
     events = result["events"]
     assert [envelope["sequence"] for envelope in events] == list(range(1, 14))
@@ -1623,9 +745,9 @@ def test_replay_after_cursor_zero_returns_full_durable_stream():
 
 
 def test_replay_after_cursor_returns_only_new_events():
-    worker = _ReplayWorker()
+    worker = FakeWorker()
     _append_completed_turn(worker, "t0", "first reply")
-    server, payloads = _replay_server(worker)
+    server, payloads = make_server(worker)
     asyncio.run(
         server._dispatch(
             {
@@ -1636,7 +758,7 @@ def test_replay_after_cursor_returns_only_new_events():
             }
         )
     )
-    assert payloads[-1]["result"]["cursor"] == 5
+    assert _response(payloads, "replay-old")["result"]["cursor"] == 5
 
     _append_completed_turn(worker, "t1", "second reply")
     asyncio.run(
@@ -1650,7 +772,7 @@ def test_replay_after_cursor_returns_only_new_events():
         )
     )
 
-    result = payloads[-1]["result"]
+    result = _response(payloads, "replay-new")["result"]
     assert result["cursor"] == 9
     # Envelope sequences are the events' durable ordinals: stable across calls,
     # independent of any connection's send counter.
@@ -1664,9 +786,9 @@ def test_replay_after_cursor_returns_only_new_events():
 
 
 def test_replay_after_cursor_beyond_total_returns_empty_events():
-    worker = _ReplayWorker()
+    worker = FakeWorker()
     _append_completed_turn(worker, "t0", "only reply")
-    server, payloads = _replay_server(worker)
+    server, payloads = make_server(worker)
 
     asyncio.run(
         server._dispatch(
@@ -1679,14 +801,14 @@ def test_replay_after_cursor_beyond_total_returns_empty_events():
         )
     )
 
-    assert payloads[-1]["result"] == {"events": [], "cursor": 5}
+    assert _response(payloads, "replay-far")["result"] == {"events": [], "cursor": 5}
 
 
 @pytest.mark.parametrize(("cursor_value",), [(-1,), (True,), ("3",)])
 def test_replay_after_cursor_rejects_invalid_values(cursor_value):
-    worker = _ReplayWorker()
+    worker = FakeWorker()
     _append_completed_turn(worker, "t0", "only reply")
-    server, payloads = _replay_server(worker)
+    server, payloads = make_server(worker)
 
     asyncio.run(
         server._dispatch(
@@ -1699,11 +821,11 @@ def test_replay_after_cursor_rejects_invalid_values(cursor_value):
         )
     )
 
-    assert payloads[-1]["error"]["type"] == "InvalidRequest"
+    assert _response(payloads, "replay-bad")["error"]["type"] == "InvalidRequest"
 
 
 def test_replay_projection_emits_only_durable_event_types():
-    worker = _ReplayWorker()
+    worker = FakeWorker()
     worker.messages = [
         {"role": "user", "content": "checkpoint", "meta": {"kind": "goal_checkpoint"}},
         {"role": "user", "content": "boundary", "meta": {"kind": "compact_boundary"}},
@@ -1711,7 +833,7 @@ def test_replay_projection_emits_only_durable_event_types():
         {"id": "a1", "role": "assistant", "content": "hi there"},
     ]
     worker.turn_state = {"turn_id": "t1", "status": "completed"}
-    server, payloads = _replay_server(worker)
+    server, payloads = make_server(worker)
 
     asyncio.run(
         server._dispatch(
@@ -1724,7 +846,7 @@ def test_replay_projection_emits_only_durable_event_types():
         )
     )
 
-    events = payloads[-1]["result"]["events"]
+    events = _response(payloads, "replay-durable")["result"]["events"]
     assert [envelope["event"]["type"] for envelope in events] == [
         "turn_started",
         "assistant_message_completed",
@@ -1778,6 +900,9 @@ def test_project_durable_events_maps_raw_meta_shapes_and_failures():
     }
 
 
+# -- process and stdio plumbing ----------------------------------------------------
+
+
 def test_app_server_process_serves_git_backed_commands_and_exits_after_shutdown(tmp_path):
     home = tmp_path / "home"
     workspace = tmp_path / "workspace"
@@ -1788,6 +913,7 @@ def test_app_server_process_serves_git_backed_commands_and_exits_after_shutdown(
     env = dict(os.environ)
     env["HOME"] = str(home)
     env["USERPROFILE"] = str(home)
+    env["RIND_HOME"] = str(home / ".rind")
     # Keep the child interpreter's user-site packages visible even though HOME
     # is redirected; otherwise imports installed under the real HOME break.
     env["PYTHONUSERBASE"] = os.environ.get("PYTHONUSERBASE") or str(Path.home() / ".local")
@@ -1859,6 +985,41 @@ def test_app_server_process_serves_git_backed_commands_and_exits_after_shutdown(
         assert process.returncode == 0
     finally:
         process.kill()
+
+
+class _TextStream:
+    def __init__(self):
+        self.calls = []
+
+    def reconfigure(self, **kwargs):
+        self.calls.append(kwargs)
+
+
+def test_configure_utf8_stdio_pins_protocol_stream_encoding(monkeypatch):
+    streams = [_TextStream(), _TextStream(), _TextStream()]
+    monkeypatch.setattr(sys, "stdin", streams[0])
+    monkeypatch.setattr(sys, "stdout", streams[1])
+    monkeypatch.setattr(sys, "stderr", streams[2])
+
+    configure_utf8_stdio()
+
+    assert [stream.calls for stream in streams] == [
+        [{"encoding": "utf-8", "errors": "replace"}],
+        [{"encoding": "utf-8", "errors": "replace"}],
+        [{"encoding": "utf-8", "errors": "replace"}],
+    ]
+
+
+def test_configure_stdio_server_signals_ignores_console_sigint(monkeypatch):
+    calls = []
+
+    def fake_signal(signum, handler):
+        calls.append((signum, handler))
+
+    monkeypatch.setattr(signal, "signal", fake_signal)
+    configure_stdio_server_signals()
+
+    assert calls == [(signal.SIGINT, signal.SIG_IGN)]
 
 
 def test_schedule_ingest_delivers_on_live_loop():

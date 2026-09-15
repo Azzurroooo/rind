@@ -62,19 +62,6 @@ class OpenAIChatClient(ChatClient):
     def model(self) -> str:
         return self._model
 
-    def set_model(self, model: str) -> None:
-        clean = str(model or "").strip()
-        if not clean:
-            raise ValueError("Model name is required.")
-        self._model = clean
-        self._reasoning_effort_disabled = False
-        self._prompt_cache_key_disabled = False
-
-    def set_reasoning_effort(self, effort: str) -> None:
-        from agent.infrastructure.config.settings_loader import normalize_reasoning_effort
-
-        self._reasoning_effort = normalize_reasoning_effort(effort) or None
-
     async def close(self) -> None:
         close = getattr(self._client, "close", None)
         if not callable(close):

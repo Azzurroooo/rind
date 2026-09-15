@@ -10,6 +10,8 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
+from agent.infrastructure.auth import CredentialStore
+from agent.infrastructure.llm import ProviderServiceImpl
 from agent.infrastructure.persistence import JsonlSessionStore
 from agent.runtime.server.stdio import WorkerStdioRuntimeServer
 from agent.runtime.server.worker import SessionRepository
@@ -32,7 +34,10 @@ class _FakeWorker:
         self.session_id = "20260907_alpha"
         self.session_dir = str(tmp_path / "sessions")
         self.execution = _FakeExecution(active)
-        self.repository = SessionRepository(session_dir=self.session_dir)
+        self.repository = SessionRepository(
+            session_dir=self.session_dir,
+            provider_service=ProviderServiceImpl(CredentialStore(tmp_path / "auth.json")),
+        )
 
     async def fork_session(self, session_id: str, before_message_id: str | None = None) -> dict:
         return await self.repository.fork(session_id, before_message_id)

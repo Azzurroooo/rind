@@ -85,21 +85,11 @@ class AgentRuntime:
                     code=type(exc).__name__,
                 ) from exc
             await self._sync_skill_catalog()
-            self._sync_turn_runner_config()
             self._initialized = True
 
     async def _sync_skill_catalog(self) -> None:
         if self._skill_turn_coordinator is not None:
             await self._skill_turn_coordinator.sync_catalog(self._session_store)
-
-    def _sync_turn_runner_config(self) -> str:
-        model = str(self._session_store.model or "").strip()
-        if model:
-            self._turn_runner.set_model(model)
-        effort = str(self._session_store.reasoning_effort or "").strip()
-        if effort:
-            self._turn_runner.set_reasoning_effort(effort)
-        return model
 
     @property
     def skill_repository(self):
@@ -171,38 +161,6 @@ class AgentRuntime:
             "follow_up": len(self._follow_up_queue),
         }
 
-    async def set_model(self, model: str) -> dict[str, bool]:
-        """Switch the active chat model and persist the session metadata."""
-        return await self._update_model_setting(
-            model,
-            persist=self._session_store.update_model,
-            apply=self._turn_runner.set_model,
-            error_label="Failed to persist model update",
-        )
-
-    async def set_reasoning_effort(self, effort: str) -> dict[str, bool]:
-        """Switch the active reasoning effort and persist the session metadata."""
-        return await self._update_model_setting(
-            effort,
-            persist=self._session_store.update_reasoning_effort,
-            apply=self._turn_runner.set_reasoning_effort,
-            error_label="Failed to persist reasoning effort update",
-        )
-
-    async def _update_model_setting(self, value: str, *, persist, apply, error_label: str) -> dict[str, bool]:
-        await self.initialize()
-        try:
-            await persist(value)
-        except asyncio.CancelledError:
-            raise
-        except Exception as exc:
-            raise PersistenceError(f"{error_label}: {exc}", code=type(exc).__name__) from exc
-        runtime_updated = False
-        if not self.turn_active:
-            apply(value)
-            runtime_updated = True
-        return {"runtime": runtime_updated, "session": True}
-
     async def get_goal(self) -> dict[str, str] | None:
         await self._require_goal_enabled()
         goal = await self._session_store.get_goal()
@@ -267,10 +225,9 @@ class AgentRuntime:
                     code=type(exc).__name__,
                 ) from exc
 
-            target_model = self._sync_turn_runner_config()
             return dict(result) if isinstance(result, dict) else {
                 "session_id": self._session_store.session_id,
-                "model": target_model,
+                "model": self._session_store.model,
             }
 
     async def compact_context(self, reason: str = "manual", cancellation_token: CancellationToken | None = None) -> dict:

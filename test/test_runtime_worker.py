@@ -567,6 +567,7 @@ def test_worker_replays_answer_received_before_question_responder_waits():
             enable_goal=False,
             enable_user_question=True,
             session_dir=None,
+            provider_service=SimpleNamespace(),
         )
         container = SimpleNamespace()
         active = SimpleNamespace(container=container, pending_answers={})
@@ -610,6 +611,7 @@ def test_worker_goal_continuation_persists_distinct_checkpoints():
             enable_goal=True,
             enable_user_question=False,
             session_dir=None,
+            provider_service=SimpleNamespace(),
         )
         turns = []
         events = []

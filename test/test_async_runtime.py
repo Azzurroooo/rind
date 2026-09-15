@@ -504,30 +504,6 @@ async def test_async_runtime_facade_initializes_session_once_for_concurrent_turn
 
 
 @pytest.mark.asyncio
-async def test_async_runtime_initialization_binds_loaded_session_model():
-    class FakeSession:
-        model = "meta-model"
-        reasoning_effort = ""
-
-        async def initialize(self):
-            return None
-
-    class FakeRunner:
-        def __init__(self):
-            self.model = "settings-model"
-
-        def set_model(self, model):
-            self.model = model
-
-    runner = FakeRunner()
-    runtime = AgentRuntime(runner, FakeSession())
-
-    await runtime.initialize()
-
-    assert runner.model == "meta-model"
-
-
-@pytest.mark.asyncio
 async def test_async_runtime_facade_manual_compact_uses_runner():
     class FakeSession:
         model = "test-model"
@@ -557,106 +533,6 @@ async def test_async_runtime_facade_manual_compact_uses_runner():
 
     assert record == {"id": "compact_1"}
     assert runner.called == (session, "manual", "manual", None)
-
-
-@pytest.mark.asyncio
-async def test_async_runtime_facade_set_model_updates_runner_and_session():
-    class FakeSession:
-        reasoning_effort = ""
-
-        def __init__(self):
-            self.model = "old-model"
-
-        async def initialize(self):
-            return None
-
-        async def update_model(self, model):
-            self.model = model
-
-    class FakeRunner:
-        def __init__(self):
-            self.model = "old-model"
-
-        def set_model(self, model):
-            self.model = model
-            return True
-
-    session = FakeSession()
-    runner = FakeRunner()
-    facade = AgentRuntime(turn_runner=runner, session_store=session)
-
-    result = await facade.set_model("new-model")
-
-    assert result == {"runtime": True, "session": True}
-    assert runner.model == "new-model"
-    assert session.model == "new-model"
-
-
-@pytest.mark.asyncio
-async def test_async_runtime_facade_set_reasoning_effort_updates_runner_and_session():
-    class FakeSession:
-        model = ""
-        reasoning_effort = ""
-
-        def __init__(self):
-            self.effort = "low"
-
-        async def initialize(self):
-            return None
-
-        async def update_reasoning_effort(self, effort):
-            self.effort = effort
-
-    class FakeRunner:
-        model = ""
-
-        def __init__(self):
-            self.effort = "low"
-
-        def set_model(self, model):
-            self.model = model
-
-        def set_reasoning_effort(self, effort):
-            self.effort = effort
-            return True
-
-    session = FakeSession()
-    runner = FakeRunner()
-    facade = AgentRuntime(turn_runner=runner, session_store=session)
-
-    result = await facade.set_reasoning_effort("max")
-
-    assert result == {"runtime": True, "session": True}
-    assert runner.effort == "max"
-    assert session.effort == "max"
-
-
-@pytest.mark.asyncio
-async def test_async_runtime_initialization_syncs_session_reasoning_effort_to_runner():
-    class Store:
-        model = "session-model"
-        reasoning_effort = "xhigh"
-
-        async def initialize(self):
-            return None
-
-    class Runner:
-        def __init__(self):
-            self.model = ""
-            self.effort = ""
-
-        def set_model(self, model):
-            self.model = model
-
-        def set_reasoning_effort(self, effort):
-            self.effort = effort
-
-    runner = Runner()
-    facade = AgentRuntime(runner, Store())
-    await facade.initialize()
-
-    assert runner.model == "session-model"
-    assert runner.effort == "xhigh"
 
 
 @pytest.mark.asyncio

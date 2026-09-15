@@ -12,28 +12,10 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from agent.runtime.server.commands import SlashCommandContext, SlashCommandInfo, SlashCommandRouter
-from agent.infrastructure.config import AppSettings, Config
+from agent.infrastructure.config import AppSettings
 from agent.infrastructure.persistence.jsonl_session_store import JsonlSessionStore
 from agent.infrastructure.skills.repository import SkillRepository
 from agent.infrastructure.team import initialize_team_project
-
-
-@pytest.fixture(autouse=True)
-def restore_config_state():
-    tracked_names = (
-        "SETTINGS",
-        "SETTINGS_PATH",
-        "SETTINGS_EXISTS",
-        "OPENAI_API_KEY",
-        "OPENAI_API_BASE",
-        "OPENAI_USER_AGENT",
-        "DEFAULT_MODEL",
-        "MODEL_REASONING_EFFORT",
-    )
-    attrs = {name: getattr(Config, name) for name in tracked_names if hasattr(Config, name)}
-    yield
-    for key, value in attrs.items():
-        setattr(Config, key, value)
 
 
 class FakeSession:
@@ -491,12 +473,6 @@ async def test_status_does_not_show_recent_tools() -> None:
 
 @pytest.mark.asyncio
 async def test_status_does_not_leak_api_key(monkeypatch) -> None:
-    monkeypatch.setattr(Config, "OPENAI_API_KEY", "secret-value")
-    monkeypatch.setattr(Config, "OPENAI_API_BASE", "https://example.com/v1")
-    monkeypatch.setattr(Config, "DEFAULT_MODEL", "test-model")
-    monkeypatch.setattr(Config, "MODEL_REASONING_EFFORT", "xhigh")
-    monkeypatch.setattr(Config, "SETTINGS_PATH", r"C:\Users\admin\.rind\settings.json")
-    monkeypatch.setattr(Config, "SETTINGS_EXISTS", True)
     settings = AppSettings(
         settings_path=Path(r"C:\Users\admin\.rind\settings.json"),
         settings_exists=True,
@@ -519,23 +495,24 @@ async def test_status_does_not_leak_api_key(monkeypatch) -> None:
 
 
 @pytest.mark.asyncio
-async def test_model_set_updates_session_without_changing_default_settings(tmp_path, monkeypatch) -> None:
-    path = tmp_path / ".rind" / "settings.json"
-    path.parent.mkdir()
+async def test_model_set_updates_session_selection_without_changing_settings(tmp_path, monkeypatch) -> None:
+    rind_home = tmp_path / ".rind"
+    rind_home.mkdir()
+    path = rind_home / "settings.json"
     path.write_text(
         json.dumps({"model": "model_a", "apiKey": "secret-value"}),
         encoding="utf-8",
     )
-    monkeypatch.setattr(Path, "home", lambda: tmp_path)
-    Config.reload()
-    runtime = FakeRuntime()
+    monkeypatch.setenv("RIND_HOME", str(rind_home))
     session = FakeSession()
+    session.provider = "openai"
 
-    async def update_model(model):
+    async def update_selection(provider, model):
+        session.provider = provider
         session.model = model
 
-    session.update_model = update_model
-    context = SlashCommandContext(runtime=runtime, session=session, debug=True)
+    session.update_selection = update_selection
+    context = SlashCommandContext(runtime=None, session=session, debug=True)
 
     result = await SlashCommandRouter().execute("/model set model_b", context)
     data = json.loads(path.read_text(encoding="utf-8"))
@@ -543,12 +520,9 @@ async def test_model_set_updates_session_without_changing_default_settings(tmp_p
     assert "Session model updated." in result.text
     assert "session model: model_b" in result.text
     assert "default model: model_a (unchanged)" in result.text
-    assert "active session: updated" in result.text
     assert data["model"] == "model_a"
     assert data["apiKey"] == "secret-value"
-    assert Config.DEFAULT_MODEL == "model_a"
-    assert session.model == "model_b"
-    assert runtime.model == "model_b"
+    assert (session.provider, session.model) == ("openai", "model_b")
     assert "secret-value" not in result.text
 
 

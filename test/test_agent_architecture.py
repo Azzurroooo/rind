@@ -95,7 +95,7 @@ def test_runtime_dependencies_type_is_not_reintroduced() -> None:
 
 
 def test_runtime_entrypoints_use_the_shared_composition_root() -> None:
-    entrypoints = (AGENT_ROOT / "runtime" / "server" / "app_server.py",)
+    entrypoints = (AGENT_ROOT / "runtime" / "server" / "worker.py",)
     missing: list[str] = []
     for path in entrypoints:
         tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
@@ -108,6 +108,10 @@ def test_runtime_entrypoints_use_the_shared_composition_root() -> None:
         if not calls_builder:
             missing.append(str(path.relative_to(PROJECT_ROOT)))
     assert not missing, f"Runtime entrypoints bypass composition root: {missing}"
+
+    app_server = (AGENT_ROOT / "runtime" / "server" / "app_server.py").read_text(encoding="utf-8")
+    assert "RuntimeWorker" in app_server
+    assert "build_agent_container" not in app_server
 
 
 def test_main_delegates_to_runtime_server() -> None:

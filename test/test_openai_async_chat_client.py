@@ -190,20 +190,6 @@ async def test_openai_async_client_retries_without_unsupported_prompt_cache_key(
 
 
 @pytest.mark.asyncio
-async def test_openai_async_client_set_model_updates_next_request():
-    mock_openai = MagicMock()
-    mock_openai.chat.completions.create = AsyncMock(return_value="Done")
-    client = OpenAIChatClient(mock_openai, "old-model")
-
-    client.set_model("new-model")
-    result = await client.create([{"role": "user", "content": "hi"}])
-
-    assert result == "Done"
-    assert client.model == "new-model"
-    assert mock_openai.chat.completions.create.call_args.kwargs["model"] == "new-model"
-
-
-@pytest.mark.asyncio
 async def test_openai_async_client_disables_unsupported_reasoning_effort_once():
     mock_openai = MagicMock()
     calls = []

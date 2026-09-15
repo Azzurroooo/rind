@@ -13,7 +13,6 @@ from agent.application.ports.session_store import SessionStore
 from agent.runtime.core import AgentRuntime, MessageStreamParser, TurnRunner
 from agent.application.tools import ToolCallProcessor, ToolExecutor, ToolResultNormalizer
 from agent.infrastructure.config import AppSettings, load_settings
-from agent.infrastructure.llm import OpenAIChatClient, OpenAIClientFactory
 from agent.infrastructure.persistence import JsonlSessionStore
 from agent.infrastructure.persistence import ToolOutputStore
 from agent.infrastructure.persistence.usage_ledger import append_usage_record, default_usage_ledger_path
@@ -38,7 +37,6 @@ class SharedRuntimeResources:
 @dataclass(frozen=True, slots=True)
 class AgentContainer:
     settings: AppSettings
-    provider_client_factory: OpenAIClientFactory | None
     chat_client: Any
     session_store: SessionStore
     tool_registry: DefaultToolRegistry
@@ -55,9 +53,8 @@ class AgentContainer:
 
 def build_agent_container(
     *,
+    chat_client,
     settings: AppSettings | None = None,
-    provider_client_factory: OpenAIClientFactory | None = None,
-    provider_async_client=None,
     session_dir: str | None = None,
     session_id: str | None = None,
     resume_latest: bool = False,
@@ -74,7 +71,6 @@ def build_agent_container(
     lock_workspace: bool = True,
     shared_resources: SharedRuntimeResources | None = None,
     session_runner: Callable[..., Awaitable[Any]] | None = None,
-    chat_client=None,
 ) -> AgentContainer:
     """Build the production runtime dependency graph explicitly."""
     skill_project_root = None
@@ -97,8 +93,6 @@ def build_agent_container(
             skill_project_root = str(agent_context.project.project_root)
             skill_agent_dir = str(agent_context.capsule.manifest_path.parent / "skills")
     settings = settings or load_settings(workspace_root)
-    if chat_client is None:
-        provider_client_factory = provider_client_factory or OpenAIClientFactory(settings)
     tool_output_store = shared_resources.tool_output_store if shared_resources else ToolOutputStore(session_dir)
     model = settings.model
     session_store: SessionStore = JsonlSessionStore(
@@ -205,17 +199,6 @@ def build_agent_container(
         tool_result_normalizer=tool_result_normalizer,
         tool_output_store=tool_output_store,
     )
-    if chat_client is None:
-        chat_client = OpenAIChatClient(
-            async_client=(
-                provider_async_client
-                if provider_async_client is not None
-                else provider_client_factory.create_async_client()
-            ),
-            model=model,
-            reasoning_effort=settings.reasoning_effort,
-            workspace_root=workspace_root,
-        )
     stream_parser = shared_resources.stream_parser if shared_resources else MessageStreamParser()
     context_manager = ContextManager(
         estimator=ContextEstimator(),
@@ -246,7 +229,6 @@ def build_agent_container(
     )
     return AgentContainer(
         settings=settings,
-        provider_client_factory=provider_client_factory,
         chat_client=chat_client,
         session_store=session_store,
         tool_registry=tool_registry,

@@ -14,7 +14,7 @@ import {
   turnScopedMethods,
   isRuntimeEventForTurn,
 } from "./runtime-protocol.js";
-import { executeLocalSlashCommand, loadLocalSettings } from "./local-slash-commands.js";
+import { executeLocalSlashCommand } from "./local-slash-commands.js";
 import { loadCliState, saveCliState } from "./cli-state-store.js";
 import { loadPromptHistory, savePromptHistory } from "./prompt-history-store.js";
 import { setTheme } from "./theme.js";
@@ -288,11 +288,7 @@ commandController = createCommandController({
     runContextBoard: runtimeController.runContextBoard,
     printContextReport: runtimeController.printContextReport,
     runLocalCommand: async (text) => {
-      if (!Object.keys(sessionState.settings).length) {
-        sessionState.settings = await loadLocalSettings(undefined, sessionState.info.workspace_root || sessionState.info.cwd || process.cwd());
-      }
       const result = await executeLocalSlashCommand(text, {
-        settings: sessionState.settings,
         sessionInfo: sessionState.info,
         cwd: sessionState.info.workspace_root || sessionState.info.cwd || process.cwd(),
         runtimeStarted: runtimeState.status === "starting" || runtimeState.status === "ready",
@@ -424,8 +420,7 @@ try {
   if (persistedState.theme) {
     setTheme(persistedState.theme);
   }
-  sessionState.settings = await loadLocalSettings(undefined, process.cwd());
-  sessionState.info = { cwd: process.cwd(), model: sessionState.settings.model };
+  sessionState.info = { cwd: process.cwd() };
   sessionState.commands = commandController.localCommands();
   await runtimeController.ensureRuntime();
   const startupInfo = { ...sessionState.info, resume_preview: "" };

@@ -24,7 +24,7 @@ from agent.application.tools import ToolResultNormalizer
 from agent.bootstrap import AgentContainer, SharedRuntimeResources, build_agent_container
 from agent.infrastructure.config import AppSettings
 from agent.infrastructure.config.settings_loader import DEFAULT_MODEL, load_settings
-from agent.infrastructure.llm import OpenAIClientFactory, ProviderServiceImpl, close_async_client
+from agent.infrastructure.llm import ProviderServiceImpl
 from agent.domain.models import ModelSelection
 from agent.infrastructure.persistence import JsonlSessionStore, ToolOutputStore, fork_session
 from agent.infrastructure.persistence.session_files import SessionFiles
@@ -55,9 +55,9 @@ class _ActiveExecution:
 class SessionRepository:
     """Read and write persisted sessions by explicit session ID."""
 
-    def __init__(self, *, session_dir: str | None):
+    def __init__(self, *, session_dir: str | None, provider_service: ProviderServiceImpl):
         self.session_dir = session_dir
-        self.provider_service: ProviderServiceImpl | None = None
+        self.provider_service = provider_service
 
     async def metadata(self, session_id: str) -> dict[str, Any]:
         clean = validate_session_id(session_id)
@@ -106,11 +106,8 @@ class SessionRepository:
         selection: ModelSelection | None = None,
     ) -> dict[str, Any]:
         root = _normalize_workspace_root(workspace_root)
-        if selection is None and self.provider_service is not None:
-            selection = self.provider_service.default_selection(root)
         if selection is None:
-            model, reasoning_effort, _, provider = _workspace_defaults(root)
-            selection = ModelSelection(provider, model, reasoning_effort)
+            selection = self.provider_service.default_selection(root)
         model, reasoning_effort, provider = selection.model_id, selection.reasoning_effort, selection.provider_id
         agent_context = discover_agent(root)
         if project_id is None and agent_context:
@@ -290,7 +287,7 @@ class ExecutionCoordinator:
         enable_goal: bool,
         enable_user_question: bool,
         session_dir: str | None,
-        provider_service: ProviderServiceImpl | None = None,
+        provider_service: ProviderServiceImpl,
     ):
         self._shared_resources = shared_resources
         self._repository = repository
@@ -665,28 +662,17 @@ class ExecutionCoordinator:
                 model=selection.model_id,
                 reasoning_effort=selection.reasoning_effort,
             )
-            provider_client_factory = None
-            provider_async_client = None
-            provider_chat_client = None
-            if self._provider_service is not None:
-                try:
-                    provider_chat_client = await self._provider_service.create_chat_client(root, selection)
-                except Exception as exc:
-                    if getattr(exc, "code", "") != "provider_not_configured":
-                        raise
-                    provider_chat_client = self._provider_service.unavailable_client(selection, str(exc))
-            else:
-                from agent.infrastructure.config import validate_settings
-                validate_settings(settings)
-                provider_client_factory = OpenAIClientFactory(settings)
-                provider_async_client = provider_client_factory.create_async_client()
+            try:
+                chat_client = await self._provider_service.create_chat_client(root, selection)
+            except Exception as exc:
+                if getattr(exc, "code", "") != "provider_not_configured":
+                    raise
+                chat_client = self._provider_service.unavailable_client(selection, str(exc))
             container = None
             try:
                 container = build_agent_container(
                     settings=settings,
-                    provider_client_factory=provider_client_factory,
-                    provider_async_client=provider_async_client,
-                    chat_client=provider_chat_client,
+                    chat_client=chat_client,
                     session_dir=self.session_dir,
                     session_id=clean,
                     enable_goal=self._enable_goal,
@@ -705,10 +691,7 @@ class ExecutionCoordinator:
                 )
                 await container.runtime.initialize()
             except BaseException:
-                if provider_chat_client is not None:
-                    await provider_chat_client.close()
-                else:
-                    await close_async_client(provider_async_client)
+                await chat_client.close()
                 raise
             self._active[clean] = _ActiveExecution(container=container)
             return container
@@ -746,28 +729,17 @@ class ExecutionCoordinator:
         with tempfile.TemporaryDirectory(prefix="rind-inspect-") as session_dir:
             with preserve_active_session_context():
                 settings = await asyncio.to_thread(load_settings, str(target.workspace_root))
-                provider_client_factory = None
-                provider_async_client = None
-                provider_chat_client = None
-                if self._provider_service is not None:
-                    selection = ModelSelection(settings.provider, settings.model, settings.reasoning_effort)
-                    try:
-                        provider_chat_client = await self._provider_service.create_chat_client(str(target.workspace_root), selection)
-                    except Exception as exc:
-                        if getattr(exc, "code", "") != "provider_not_configured":
-                            raise
-                        provider_chat_client = self._provider_service.unavailable_client(selection, str(exc))
-                else:
-                    from agent.infrastructure.config import validate_settings
-                    validate_settings(settings)
-                    provider_client_factory = OpenAIClientFactory(settings)
-                    provider_async_client = provider_client_factory.create_async_client()
+                selection = ModelSelection(settings.provider, settings.model, settings.reasoning_effort)
+                try:
+                    chat_client = await self._provider_service.create_chat_client(str(target.workspace_root), selection)
+                except Exception as exc:
+                    if getattr(exc, "code", "") != "provider_not_configured":
+                        raise
+                    chat_client = self._provider_service.unavailable_client(selection, str(exc))
                 try:
                     container = build_agent_container(
                         settings=settings,
-                        provider_client_factory=provider_client_factory,
-                        provider_async_client=provider_async_client,
-                        chat_client=provider_chat_client,
+                        chat_client=chat_client,
                         session_dir=session_dir,
                         enable_goal=False,
                         enable_user_question=False,
@@ -786,10 +758,7 @@ class ExecutionCoordinator:
                         cancellation_token,
                     )
                 finally:
-                    if provider_chat_client is not None:
-                        await provider_chat_client.close()
-                    else:
-                        await close_async_client(provider_async_client)
+                    await chat_client.close()
         return response, None
 
     async def _collect_delegated_turn(self, session_id: str, task: str, instruction: str, cancellation_token) -> dict[str, str]:
@@ -904,9 +873,8 @@ class RuntimeWorker:
             ),
             tool_output_store=tool_output_store,
         )
-        self.repository = SessionRepository(session_dir=session_dir)
         self.provider_service = ProviderServiceImpl()
-        self.repository.provider_service = self.provider_service
+        self.repository = SessionRepository(session_dir=session_dir, provider_service=self.provider_service)
         self.execution = ExecutionCoordinator(
             shared_resources=self._shared_resources,
             repository=self.repository,

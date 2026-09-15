@@ -354,6 +354,7 @@ def test_two_dispatchers_on_one_coordinator_both_receive_continuation_events():
             enable_goal=False,
             enable_user_question=False,
             session_dir=None,
+            provider_service=SimpleNamespace(),
         )
         worker = _SharedWorker(execution)
         writer_a = _CaptureWriter("a")
