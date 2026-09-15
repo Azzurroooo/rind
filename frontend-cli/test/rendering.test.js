@@ -353,16 +353,20 @@ test("slashMenuText keeps the selected command visible", () => {
   );
 });
 
-test("modelMenuText renders current model and selection", () => {
+test("modelMenuText renders provider groups, current model and selection", () => {
   assert.equal(
     modelMenuText([
+      { header: true, name: "openai" },
       { name: "model-a", current: true },
+      { header: true, name: "deepseek" },
       { name: "model-b", current: false },
-    ], 1),
+    ], 3),
     [
       "  Model deck",
-      "  · model-a                            current",
-      "  › model-b",
+      "  openai",
+      "    · model-a                            current",
+      "  deepseek",
+      "    › model-b",
       "    ↑↓ select · enter use · esc cancel",
       "",
     ].join("\n"),
@@ -379,14 +383,14 @@ test("modelMenuText keeps the selected model visible", () => {
     modelMenuText(models, 9),
     [
       "  Model deck 3-10/10",
-      "  · model-2",
-      "  · model-3",
-      "  · model-4",
-      "  · model-5",
-      "  · model-6",
-      "  · model-7",
-      "  · model-8",
-      "  › model-9",
+      "    · model-2",
+      "    · model-3",
+      "    · model-4",
+      "    · model-5",
+      "    · model-6",
+      "    · model-7",
+      "    · model-8",
+      "    › model-9",
       "    ↑↓ select · enter use · esc cancel",
       "",
     ].join("\n"),

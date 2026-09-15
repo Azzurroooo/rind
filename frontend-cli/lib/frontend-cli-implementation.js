@@ -386,6 +386,7 @@ inputActions = createCliInputActions({
   getCommandController: () => commandController,
   getTaskMonitor: () => taskMonitorController,
   getLineInput: () => input,
+  getEffortLevels: () => runtimeController.currentModelEfforts(),
   pausePrompt: () => inputController.pause(),
   resumePrompt: () => inputController.resume(),
   handleSigint,

@@ -551,11 +551,15 @@ export function modelMenuText(items, selectedIndex = 0) {
   }
   const lines = [dim(modelMenuTitle(visible))];
   for (const [index, item] of visible.items.entries()) {
+    if (item.header) {
+      lines.push(dim(`  ${item.name}`));
+      continue;
+    }
     const active = index === visible.activeIndex;
     const marker = active ? accent("›") : dim("·");
     const name = active ? bold(item.name) : dim(item.name);
     const suffix = item.current ? dim("current") : "";
-    lines.push(`  ${marker} ${padRight(name, 34)} ${suffix}`.trimEnd());
+    lines.push(`    ${marker} ${padRight(name, 34)} ${suffix}`.trimEnd());
   }
   lines.push(dim("    ↑↓ select · enter use · esc cancel"));
   return `${lines.join("\n")}\n`;

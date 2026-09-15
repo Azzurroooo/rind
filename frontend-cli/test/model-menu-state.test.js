@@ -3,22 +3,66 @@ import test from "node:test";
 
 import { createModelMenuState } from "../lib/model-menu-state.js";
 
-test("model menu defaults to the current model", () => {
-  const state = createModelMenuState(["model-a", "model-b", "model-c"], "model-b");
+test("model menu groups models by provider and defaults to the current model", () => {
+  const state = createModelMenuState(
+    [
+      { provider_id: "openai", id: "gpt-5.5", name: "GPT-5.5" },
+      { provider_id: "openai", id: "gpt-4o-mini", name: "GPT-4o mini" },
+      { provider_id: "deepseek", id: "deepseek-chat", name: "DeepSeek Chat" },
+    ],
+    { provider_id: "openai", model_id: "gpt-4o-mini" },
+  );
 
-  assert.equal(state.selectedIndex(), 1);
-  assert.equal(state.selectedModel().name, "model-b");
+  assert.deepEqual(
+    state.items().map((item) => item.header ? `header:${item.name}` : item.modelId),
+    ["header:openai", "gpt-5.5", "gpt-4o-mini", "header:deepseek", "deepseek-chat"],
+  );
+  assert.equal(state.selectedModel().modelId, "gpt-4o-mini");
+  assert.equal(state.selectedModel().current, true);
+});
+
+test("model menu handles plain string models without provider ids", () => {
+  const state = createModelMenuState(["model-a", "model-b"], "model-b");
+
+  assert.deepEqual(
+    state.items().map((item) => item.modelId),
+    ["model-a", "model-b"],
+  );
+  assert.equal(state.selectedModel().modelId, "model-b");
   assert.equal(state.selectedModel().current, true);
 });
 
 test("model menu includes current model when missing from server list", () => {
   const state = createModelMenuState(["model-a", "model-b"], "custom-model");
 
-  assert.deepEqual(state.items().map((item) => item.name), ["custom-model", "model-a", "model-b"]);
-  assert.equal(state.selectedModel().name, "custom-model");
+  assert.deepEqual(
+    state.items().map((item) => item.modelId),
+    ["custom-model", "model-a", "model-b"],
+  );
+  assert.equal(state.selectedModel().modelId, "custom-model");
+  assert.equal(state.selectedModel().current, true);
 });
 
-test("model menu can select beyond the first visible window", () => {
+test("model menu selection skips provider headers", () => {
+  const state = createModelMenuState(
+    [
+      { provider_id: "openai", id: "gpt-5.5" },
+      { provider_id: "deepseek", id: "deepseek-chat" },
+    ],
+    { provider_id: "openai", model_id: "gpt-5.5" },
+  );
+
+  assert.equal(state.handleKey({ name: "down" }), true);
+  assert.equal(state.selectedModel().modelId, "deepseek-chat");
+
+  assert.equal(state.handleKey({ name: "up" }), true);
+  assert.equal(state.selectedModel().modelId, "gpt-5.5");
+
+  assert.equal(state.handleKey({ name: "up" }), true);
+  assert.equal(state.selectedModel().modelId, "deepseek-chat");
+});
+
+test("model menu can page beyond the first visible window", () => {
   const models = Array.from({ length: 10 }, (_, index) => `model-${index}`);
   const state = createModelMenuState(models, "model-0");
 
@@ -26,16 +70,5 @@ test("model menu can select beyond the first visible window", () => {
     assert.equal(state.handleKey({ name: "down" }), true);
   }
 
-  assert.equal(state.selectedIndex(), 8);
-  assert.equal(state.selectedModel().name, "model-8");
-});
-
-test("model menu wraps around at list edges", () => {
-  const state = createModelMenuState(["model-a", "model-b"], "model-a");
-
-  assert.equal(state.handleKey({ name: "up" }), true);
-  assert.equal(state.selectedModel().name, "model-b");
-
-  assert.equal(state.handleKey({ name: "down" }), true);
-  assert.equal(state.selectedModel().name, "model-a");
+  assert.equal(state.selectedModel().modelId, "model-8");
 });

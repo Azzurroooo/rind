@@ -21,6 +21,7 @@ export function createCliInputActions({
   getCommandController,
   getTaskMonitor,
   getLineInput,
+  getEffortLevels,
   pausePrompt,
   resumePrompt,
   handleSigint,
@@ -481,9 +482,9 @@ export function createCliInputActions({
     });
   }
 
-  function askEffortMenu(currentEffort) {
+  function askEffortMenu(currentEffort, levels = REASONING_EFFORTS.slice()) {
     return new Promise((resolve) => {
-      const modelState = createModelMenuState(REASONING_EFFORTS.slice(), currentEffort);
+      const modelState = createModelMenuState(levels.slice(), currentEffort);
       const session = { mode: "model", inputText: "/effort", modelState, resolve };
       state.input.session = session;
       state.input.active = true;
@@ -493,9 +494,14 @@ export function createCliInputActions({
   }
 
   async function cycleReasoningEffort() {
-    const index = REASONING_EFFORTS.indexOf(String(state.session.info.reasoning_effort || "").toLowerCase());
-    const next = REASONING_EFFORTS[(index + 1 + REASONING_EFFORTS.length) % REASONING_EFFORTS.length];
     try {
+      const levels = await getEffortLevels();
+      if (!levels.length) {
+        output.writeError("The current model does not declare reasoning effort levels.\n");
+        return;
+      }
+      const index = levels.indexOf(String(state.session.info.reasoning_effort || "").toLowerCase());
+      const next = levels[(index + 1 + levels.length) % levels.length];
       await request(runtimeMethods.modelEffortSet, { reasoning_effort: next });
       state.session.info = { ...state.session.info, reasoning_effort: next };
       output.writeError(`Reasoning effort: ${next}\n`);

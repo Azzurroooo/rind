@@ -1,4 +1,3 @@
-import { REASONING_EFFORTS } from "./runtime-protocol.js";
 import { commandResultText, contextBoardText, goalCommandText, modelListErrorText, sessionSwitchedText, usageBoardText } from "./rendering.js";
 
 export function createCliRuntimeController({
@@ -377,8 +376,16 @@ export function createCliRuntimeController({
       log(() => modelListErrorText(error instanceof Error ? error.message : String(error), state.session.info.model));
       return;
     }
+    if (result?.warning) {
+      log(String(result.warning));
+    }
+    const models = Array.isArray(result?.models) ? result.models : [];
+    if (!models.length) {
+      log("No models available. Run /login to configure a provider.");
+      return;
+    }
     const currentModel = result?.current || result?.current_model || state.session.info.model || result?.default_model || "";
-    const selected = await askModelMenu(result?.models || [], currentModel);
+    const selected = await askModelMenu(models, currentModel);
     if (!selected || state.runtime.status === "closing") {
       return;
     }
@@ -391,22 +398,44 @@ export function createCliRuntimeController({
     }
   }
 
+  async function currentModelEfforts() {
+    const result = await request(methods.modelList);
+    const current = result?.current && typeof result.current === "object"
+      ? result.current
+      : { provider_id: state.session.info.provider, model_id: state.session.info.model };
+    const model = (Array.isArray(result?.models) ? result.models : []).find(
+      (item) => item?.provider_id === current.provider_id && item?.id === current.model_id,
+    );
+    return Array.isArray(model?.reasoning_efforts) ? model.reasoning_efforts.map(String) : [];
+  }
+
   async function runEffortCommand(value = "") {
     const requested = String(value || "").trim().toLowerCase();
+    let levels;
+    try {
+      levels = await currentModelEfforts();
+    } catch (error) {
+      log(`Command failed: ${error instanceof Error ? error.message : String(error)}`);
+      return;
+    }
+    if (!levels.length) {
+      log("The current model does not declare reasoning effort levels.");
+      return;
+    }
     if (!requested) {
       if (!askEffortMenu) {
-        log("Reasoning effort menu requires a TTY. Use /effort <low|medium|high|xhigh|max>.");
+        log(`Reasoning effort menu requires a TTY. Use /effort <${levels.join("|")}>.`);
         return;
       }
-      const selected = await askEffortMenu(currentReasoningEffort());
+      const selected = await askEffortMenu(currentReasoningEffort(), levels);
       if (!selected || state.runtime.status === "closing") {
         return;
       }
       await applyReasoningEffort(selected);
       return;
     }
-    if (!REASONING_EFFORTS.includes(requested)) {
-      log(`Unknown reasoning effort "${requested}". Available: ${REASONING_EFFORTS.join(", ")}.`);
+    if (!levels.includes(requested)) {
+      log(`Unknown reasoning effort "${requested}". Available: ${levels.join(", ")}.`);
       return;
     }
     await applyReasoningEffort(requested);
@@ -439,6 +468,7 @@ export function createCliRuntimeController({
     startCompactCommand,
     runModelSelector,
     runEffortCommand,
+    currentModelEfforts,
   };
 }
 
