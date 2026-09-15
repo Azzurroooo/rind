@@ -88,7 +88,11 @@ def _messages(messages):
             except (TypeError, ValueError):
                 arguments = {}
             content.append({"type": "tool_use", "id": str(call.get("id") or ""), "name": str(function.get("name") or ""), "input": arguments})
-        result.append({"role": "assistant" if role == "assistant" else "user", "content": content or ""})
+        plain_text = len(content) == 1 and content[0]["type"] == "text"
+        result.append({
+            "role": "assistant" if role == "assistant" else "user",
+            "content": content[0]["text"] if plain_text else (content or ""),
+        })
     return "\n\n".join(system), result
 
 

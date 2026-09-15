@@ -26,12 +26,14 @@ class OpenAIResponsesClient(ChatClient):
 
     async def stream(self, messages, tools=None, cancellation_token: CancellationToken | None = None) -> AsyncIterator[ModelStreamEvent]:
         payload = self._payload(messages, tools, stream=True)
+        call_ids: dict[str, str] = {}
+        response = None
         try:
             response = await _await(self._client.responses.create(**payload), cancellation_token)
             async for raw in response:
                 if cancellation_token and cancellation_token.is_cancelled:
                     raise asyncio.CancelledError(cancellation_token.reason)
-                for event in _events(raw):
+                for event in _events(raw, call_ids):
                     yield event
         except asyncio.CancelledError:
             raise
@@ -84,7 +86,7 @@ def _response_tool(tool: dict[str, Any]) -> dict[str, Any]:
     return {"type": "function", "name": function.get("name", ""), "description": function.get("description", ""), "parameters": function.get("parameters", {})}
 
 
-def _events(raw: Any) -> list[ModelStreamEvent]:
+def _events(raw: Any, call_ids: dict[str, str] | None = None) -> list[ModelStreamEvent]:
     kind = str(_get(raw, "type") or "")
     events: list[ModelStreamEvent] = []
     if kind == "response.output_text.delta":
@@ -94,11 +96,19 @@ def _events(raw: Any) -> list[ModelStreamEvent]:
     elif kind == "response.output_item.added":
         item = _get(raw, "item")
         if _get(item, "type") == "function_call":
-            events.append(ModelStreamEvent("tool_start", tool_call_id=str(_get(item, "call_id") or _get(item, "id") or ""), tool_name=str(_get(item, "name") or "")))
+            call_id = str(_get(item, "call_id") or _get(item, "id") or "")
+            item_id = str(_get(item, "id") or "")
+            if call_ids is not None and item_id:
+                call_ids[item_id] = call_id
+            events.append(ModelStreamEvent("tool_start", tool_call_id=call_id, tool_name=str(_get(item, "name") or "")))
     elif kind == "response.function_call_arguments.delta":
-        events.append(ModelStreamEvent("tool_arguments_delta", tool_call_id=str(_get(raw, "call_id") or _get(raw, "item_id") or ""), tool_name=str(_get(raw, "name") or ""), arguments=str(_get(raw, "delta") or "")))
+        item_id = str(_get(raw, "item_id") or "")
+        call_id = str(_get(raw, "call_id") or (call_ids or {}).get(item_id, "") or item_id)
+        events.append(ModelStreamEvent("tool_arguments_delta", tool_call_id=call_id, tool_name=str(_get(raw, "name") or ""), arguments=str(_get(raw, "delta") or "")))
     elif kind == "response.function_call_arguments.done":
-        events.append(ModelStreamEvent("tool_end", tool_call_id=str(_get(raw, "call_id") or _get(raw, "item_id") or ""), tool_name=str(_get(raw, "name") or "")))
+        item_id = str(_get(raw, "item_id") or "")
+        call_id = str(_get(raw, "call_id") or (call_ids or {}).get(item_id, "") or item_id)
+        events.append(ModelStreamEvent("tool_end", tool_call_id=call_id, tool_name=str(_get(raw, "name") or "")))
     elif kind in {"response.completed", "response.incomplete"}:
         response = _get(raw, "response") or raw
         usage = _usage(_get(response, "usage"))
