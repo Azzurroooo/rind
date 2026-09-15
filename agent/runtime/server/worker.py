@@ -986,22 +986,25 @@ class RuntimeWorker:
     async def login(self, provider_id: str, method: str, interaction, workspace_root: str | None = None) -> None:
         await self.provider_service.login(workspace_root or self.workspace_root, provider_id, method, interaction)
 
-    def logout(self, provider_id: str) -> None:
-        self.provider_service.logout(provider_id)
+    def logout(self, provider_id: str) -> bool:
+        return self.provider_service.logout(provider_id)
 
-    async def list_models(self, workspace_root: str | None = None, *, refresh: bool = False) -> list[dict[str, Any]]:
-        models = await self.provider_service.list_models(workspace_root or self.workspace_root, refresh=refresh)
-        return [
-            {
-                "provider_id": model.provider_id,
-                "id": model.id,
-                "name": model.name,
-                "api": model.api,
-                "reasoning_efforts": list(model.reasoning_efforts),
-                "context_window": model.context_window,
-            }
-            for model in models
-        ]
+    async def list_models(self, workspace_root: str | None = None, *, refresh: bool = False) -> dict[str, Any]:
+        catalog = await self.provider_service.list_models(workspace_root or self.workspace_root, refresh=refresh)
+        return {
+            "models": [
+                {
+                    "provider_id": model.provider_id,
+                    "id": model.id,
+                    "name": model.name,
+                    "api": model.api,
+                    "reasoning_efforts": list(model.reasoning_efforts),
+                    "context_window": model.context_window,
+                }
+                for model in catalog.models
+            ],
+            "warning": catalog.warning,
+        }
 
     async def close(self) -> None:
         await self.execution.close()

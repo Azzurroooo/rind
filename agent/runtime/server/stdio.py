@@ -1215,6 +1215,9 @@ class WorkerStdioRuntimeServer:
         await self._respond(request, {"providers": self._worker.list_providers()})
 
     async def _auth_login(self, request: dict[str, Any]) -> None:
+        session_id = await self._required_session_id(request)
+        if session_id is None:
+            return
         params = request.get("params") if isinstance(request.get("params"), dict) else {}
         provider_id = str(params.get("provider_id") or "").strip()
         method = str(params.get("method") or "api_key").strip()
@@ -1222,8 +1225,27 @@ class WorkerStdioRuntimeServer:
             await self._respond_error(request, "provider_id is required.", "InvalidRequest")
             return
         await self._worker.login(provider_id, method, _StdioAuthInteraction(self))
-        models = await self._worker.list_models(refresh=True)
-        await self._respond(request, {"ok": True, "provider_id": provider_id, "models_count": len(models)})
+        info = await self._worker.session(session_id)
+        listing = await self._worker.list_models(info.get("workspace_root"))
+        selection = await self._adopt_login_default(session_id, info, provider_id, listing["models"])
+        await self._respond(
+            request,
+            {"ok": True, "provider_id": provider_id, "models_count": len(listing["models"]), "selection": selection},
+        )
+
+    async def _adopt_login_default(self, session_id: str, info: dict[str, Any], provider_id: str, models: list[dict[str, Any]]) -> dict[str, str] | None:
+        """Switch the session to the provider default when its current model is unusable."""
+        current_provider = str(info.get("provider") or "")
+        current_model = str(info.get("model") or "")
+        if any(m.get("provider_id") == current_provider and m.get("id") == current_model for m in models):
+            return None
+        provider_models = [m for m in models if m.get("provider_id") == provider_id]
+        if not provider_models:
+            return None
+        chosen = next((m for m in provider_models if m.get("id") == current_model), provider_models[0])
+        store = await self._worker.repository.open_store(session_id, persist_system_prompt=False)
+        await store.update_selection(provider_id, str(chosen["id"]))
+        return {"provider_id": provider_id, "model_id": str(chosen["id"])}
 
     async def _auth_logout(self, request: dict[str, Any]) -> None:
         params = request.get("params") if isinstance(request.get("params"), dict) else {}
@@ -1231,8 +1253,17 @@ class WorkerStdioRuntimeServer:
         if not provider_id:
             await self._respond_error(request, "provider_id is required.", "InvalidRequest")
             return
-        self._worker.logout(provider_id)
-        await self._respond(request, {"ok": True, "provider_id": provider_id})
+        deleted = self._worker.logout(provider_id)
+        status = next((item for item in self._worker.list_providers() if item["id"] == provider_id), None)
+        await self._respond(
+            request,
+            {
+                "ok": True,
+                "provider_id": provider_id,
+                "deleted": deleted,
+                "source": status["source"] if status else "none",
+            },
+        )
 
     async def _initialize(self, request: dict[str, Any]) -> None:
         info = await self._worker.initialize()
@@ -1503,28 +1534,16 @@ class WorkerStdioRuntimeServer:
             session_id = (await self._worker.initialize())["session_id"]
         info = await self._worker.session(session_id)
         refresh = bool(params.get("refresh", False))
-        list_models = getattr(self._worker, "list_models", None)
-        if callable(list_models):
-            models = await list_models(info.get("workspace_root"), refresh=refresh)
-        else:
-            settings = await self._worker.repository.settings_for(session_id)
-            validate_settings(settings)
-            client = OpenAIClientFactory(settings).create_async_client()
-            try:
-                model_ids = await fetch_model_ids(client)
-            finally:
-                await close_async_client(client)
-            models = [{"provider_id": "openai-compatible", "id": model_id, "name": model_id, "api": "openai-chat", "reasoning_efforts": []} for model_id in merge_models(model_ids, str(info.get("model") or settings.model))]
+        listing = await self._worker.list_models(info.get("workspace_root"), refresh=refresh)
         current_model = str(info.get("model") or "")
         current_provider = str(info.get("provider") or "")
         await self._respond(
             request,
             {
-                "models": models,
+                **listing,
                 "current": {"provider_id": current_provider, "model_id": current_model},
                 "current_model": current_model,
                 "default_model": current_model,
-                "warning": None,
             },
         )
 

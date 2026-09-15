@@ -162,8 +162,7 @@ def test_load_settings_uses_defaults_when_file_missing(tmp_path, monkeypatch):
 
 def test_load_settings_ignores_environment_configuration(tmp_path, monkeypatch):
     monkeypatch.setattr(Path, "home", lambda: tmp_path)
-    monkeypatch.setenv("RIND_HOME", str(tmp_path / "other-home"))
-    monkeypatch.setenv("RIND_SETTINGS_PATH", str(tmp_path / "other-settings.json"))
+    monkeypatch.setenv("RIND_HOME", str(tmp_path / ".rind"))
     monkeypatch.setenv("OPENAI_API_KEY", "must-not-be-used")
     monkeypatch.setenv("OPENAI_API_BASE", "https://must-not-be-used.example/v1")
     monkeypatch.setenv("DEFAULT_MODEL", "must-not-be-used")
@@ -181,8 +180,7 @@ def test_load_settings_ignores_environment_configuration(tmp_path, monkeypatch):
 
 def test_ensure_user_settings_template_creates_shared_template(tmp_path, monkeypatch):
     monkeypatch.setattr(Path, "home", lambda: tmp_path)
-    monkeypatch.setenv("RIND_HOME", str(tmp_path / "ignored"))
-    monkeypatch.setenv("RIND_SETTINGS_PATH", str(tmp_path / "ignored.json"))
+    monkeypatch.setenv("RIND_HOME", str(tmp_path / ".rind"))
 
     path = ensure_user_settings_template()
 

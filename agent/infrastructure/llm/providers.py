@@ -5,9 +5,19 @@ from __future__ import annotations
 from agent.domain.models import ModelDefinition, ProviderDefinition
 
 
+def default_reasoning_efforts(api: str) -> tuple[str, ...]:
+    """Efforts an API dialect accepts; adapters without effort support declare none."""
+    return () if api == "anthropic-messages" else ("low", "medium", "high", "xhigh")
+
+
+def refreshable_models_api(api: str) -> bool:
+    """Whether the provider exposes an OpenAI-style GET /models catalog endpoint."""
+    return api != "anthropic-messages"
+
+
 def _models(provider_id: str, api: str, values: tuple[tuple[str, str], ...]) -> tuple[ModelDefinition, ...]:
     return tuple(
-        ModelDefinition(provider_id, model_id, name, api, ("low", "medium", "high", "xhigh"))
+        ModelDefinition(provider_id, model_id, name, api, default_reasoning_efforts(api))
         for model_id, name in values
     )
 

@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Protocol
 
 from agent.domain.models import (
+    ModelCatalog,
     ModelDefinition,
     ModelSelection,
     ProviderStatus,
@@ -20,7 +21,7 @@ class ProviderService(Protocol):
 
     def list_providers(self, workspace_root: str | None = None) -> list[ProviderStatus]: ...
 
-    async def list_models(self, workspace_root: str | None = None, *, refresh: bool = False) -> list[ModelDefinition]: ...
+    async def list_models(self, workspace_root: str | None = None, *, refresh: bool = False) -> ModelCatalog: ...
 
     async def login(self, workspace_root: str | None, provider_id: str, method: str, interaction) -> None: ...
 

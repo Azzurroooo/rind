@@ -498,10 +498,16 @@ async function runLogin(providerId = "") {
     }
     if (!selected) return;
     const result = await request(runtimeMethods.authLogin, { provider_id: selected, method: "api_key" });
-    logOutput(`Logged in to ${result?.provider_id || selected}.`);
-    await runtimeController.request(runtimeMethods.modelList);
+    const selection = result?.selection && typeof result.selection === "object" ? result.selection : null;
+    if (selection?.provider_id && selection.model_id) {
+      sessionState.info = { ...sessionState.info, provider: selection.provider_id, model: selection.model_id };
+      logOutput(`Logged in to ${result?.provider_id || selected}. Switched to ${selection.provider_id} / ${selection.model_id}.`);
+    } else {
+      logOutput(`Logged in to ${result?.provider_id || selected}.`);
+    }
   } catch (error) {
-    logOutput(`Login failed: ${error instanceof Error ? error.message : String(error)}`);
+    const message = error instanceof Error ? error.message : String(error);
+    logOutput(/cancel/i.test(message) ? "Login canceled." : `Login failed: ${message}`);
   }
 }
 
@@ -518,8 +524,15 @@ async function runLogout(providerId = "") {
       logOutput("No stored provider credentials.");
       return;
     }
-    await request(runtimeMethods.authLogout, { provider_id: selected });
-    logOutput(`Logged out of ${selected}.`);
+    const result = await request(runtimeMethods.authLogout, { provider_id: selected });
+    if (!result?.deleted) {
+      logOutput(`No stored credential for ${selected}.`);
+      return;
+    }
+    const suffix = result?.source === "environment"
+      ? " It is still configured through an environment variable."
+      : "";
+    logOutput(`Logged out of ${selected}.${suffix}`);
   } catch (error) {
     logOutput(`Logout failed: ${error instanceof Error ? error.message : String(error)}`);
   }

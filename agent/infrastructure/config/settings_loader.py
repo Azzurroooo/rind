@@ -11,6 +11,7 @@ from typing import Any
 from urllib.parse import urlparse
 import uuid
 
+from agent.infrastructure.paths import resolve_rind_home
 from agent.version import __version__
 
 
@@ -94,7 +95,7 @@ def validate_settings(settings: AppSettings) -> None:
 
 
 def default_settings_path() -> Path:
-    return (Path.home() / ".rind" / "settings.json").resolve()
+    return (resolve_rind_home() / "settings.json").resolve()
 
 
 def project_settings_path(workspace_root: str | Path) -> Path:

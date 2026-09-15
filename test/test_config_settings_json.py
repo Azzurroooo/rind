@@ -56,8 +56,7 @@ def test_config_reload_reads_shared_settings_json(tmp_path, monkeypatch):
 
 def test_config_ignores_api_configuration_environment_variables(tmp_path, monkeypatch):
     monkeypatch.setattr(Path, "home", lambda: tmp_path)
-    monkeypatch.setenv("RIND_HOME", str(tmp_path / "ignored"))
-    monkeypatch.setenv("RIND_SETTINGS_PATH", str(tmp_path / "ignored.json"))
+    monkeypatch.setenv("RIND_HOME", str(tmp_path / ".rind"))
     monkeypatch.setenv("OPENAI_API_KEY", "must-not-be-used")
     path = write_settings(tmp_path, {"apiKey": "settings-key"})
 

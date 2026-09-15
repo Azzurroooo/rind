@@ -46,6 +46,9 @@ class _Worker:
     def __init__(self):
         self.execution = _Execution()
 
+    def list_providers(self):
+        return []
+
     async def initialize(self):
         return {
             "session_id": self.session_id,

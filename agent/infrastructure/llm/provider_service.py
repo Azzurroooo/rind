@@ -9,11 +9,19 @@ from pathlib import Path
 from typing import Any
 
 from agent.domain.errors import ProviderError
-from agent.domain.models import Credential, ModelDefinition, ModelSelection, ProviderStatus, ModelStreamEvent
+from agent.domain.models import (
+    Credential,
+    ModelCatalog,
+    ModelDefinition,
+    ModelSelection,
+    ModelStreamEvent,
+    ProviderStatus,
+)
 from agent.infrastructure.auth import CredentialStore
-from agent.infrastructure.config.settings_loader import AppSettings, DEFAULT_BASE_URL, DEFAULT_MODEL, DEFAULT_USER_AGENT, load_settings
+from agent.infrastructure.config.settings_loader import AppSettings, load_settings
 
-from .providers import PROVIDERS, provider
+from .openai_chat_client import build_async_client
+from .providers import PROVIDERS, default_reasoning_efforts, refreshable_models_api
 
 
 class ProviderServiceImpl:
@@ -28,100 +36,29 @@ class ProviderServiceImpl:
 
     def resolve_selection(self, workspace_root: str | None, selection: ModelSelection) -> ModelDefinition:
         definition = self._provider(selection.provider_id)
-        for model in definition.fallback_models:
-            if model.id == selection.model_id:
-                return model
-        settings = load_settings(workspace_root)
-        api = settings.api if selection.provider_id == "openai-compatible" else definition.api
-        return ModelDefinition(selection.provider_id, selection.model_id, selection.model_id, api)
+        return self._selection_model(load_settings(workspace_root), definition, selection)
 
     def list_providers(self, workspace_root: str | None = None) -> list[ProviderStatus]:
         try:
-            settings = load_settings(workspace_root)
+            settings: AppSettings | None = load_settings(workspace_root)
         except (OSError, ValueError):
-            settings = AppSettings(Path("settings.json"), False, DEFAULT_MODEL, "", DEFAULT_BASE_URL, "", DEFAULT_USER_AGENT, provider="openai")
+            settings = None
         result = []
         for definition in self.providers.values():
             source = self._credential_source(settings, definition.id)
             result.append(ProviderStatus(definition.id, definition.name, definition.auth_methods, source != "none", source))
         return result
 
-    async def list_models(self, workspace_root: str | None = None, *, refresh: bool = False) -> list[ModelDefinition]:
+    async def list_models(self, workspace_root: str | None = None, *, refresh: bool = False) -> ModelCatalog:
         settings = load_settings(workspace_root)
-        cache = self._read_cache()
-        result: list[ModelDefinition] = []
+        failures: list[str] = []
         for definition in self.providers.values():
             if self._credential_source(settings, definition.id) == "none":
                 continue
-            values = cache.get(definition.id)
-            if refresh and definition.api in {"openai-chat", "openai-responses"}:
-                refreshed = await self._refresh_models(settings, definition)
-                if refreshed is not None:
-                    values = refreshed
-                    cache[definition.id] = refreshed
-            models = [self._model_from_cache(definition.id, definition.api, item) for item in values or ()]
-            if not models:
-                models = list(definition.fallback_models)
-            result.extend(models)
-        current = self.default_selection(workspace_root)
-        if current.provider_id in self.providers and not any(m.provider_id == current.provider_id and m.id == current.model_id for m in result):
-            result.append(self.resolve_selection(workspace_root, current))
-        return result
-
-    async def _refresh_models(self, settings: AppSettings, definition) -> list[dict[str, str]] | None:
-        credential = self._resolve_credential(settings, definition.id)
-        if credential is None:
-            return None
-        endpoint = self._endpoint(settings, definition)
-        try:
-            from openai import AsyncOpenAI
-            client = AsyncOpenAI(api_key=credential.key or credential.access, base_url=endpoint)
-            response = client.models.list()
-            if hasattr(response, "__await__"):
-                response = await response
-            data = getattr(response, "data", response)
-            if hasattr(data, "__aiter__"):
-                data = [item async for item in data]
-            models = [{"id": _item_id(item), "name": _item_id(item)} for item in (data or [])]
-            models = [item for item in models if item["id"]]
-            if models:
-                self._write_cache(self._read_cache() | {definition.id: models})
-            close = getattr(client, "close", None)
-            if callable(close):
-                value = close()
-                if hasattr(value, "__await__"):
-                    await value
-            return models or None
-        except Exception:
-            return None
-
-    async def create_chat_client(self, workspace_root: str | None, selection: ModelSelection):
-        settings = load_settings(workspace_root)
-        definition = self.resolve_selection(workspace_root, selection)
-        credential = self._resolve_credential(settings, definition.provider_id)
-        if credential is None:
-            raise ProviderError(
-                f"{self._provider(definition.provider_id).name} is not configured. Run /login or set {self._provider(definition.provider_id).environment_key}.",
-                status="rejected", code="provider_not_configured",
-            )
-        endpoint = self._endpoint(settings, self._provider(definition.provider_id))
-        key = credential.key or credential.access
-        if definition.api == "openai-chat":
-            from .openai_chat import OpenAIChatCompletionsClient
-            from openai import AsyncOpenAI
-            return OpenAIChatCompletionsClient(AsyncOpenAI(api_key=key, base_url=endpoint), selection.model_id, selection.reasoning_effort, workspace_root=workspace_root)
-        if definition.api == "openai-responses":
-            from .openai_responses import OpenAIResponsesClient
-            from openai import AsyncOpenAI
-            return OpenAIResponsesClient(AsyncOpenAI(api_key=key, base_url=endpoint), selection.model_id, selection.reasoning_effort, workspace_root=workspace_root)
-        if definition.api == "anthropic-messages":
-            from .anthropic_messages import AnthropicMessagesClient
-            return AnthropicMessagesClient(api_key=key, model=selection.model_id, reasoning_effort=selection.reasoning_effort, base_url=endpoint)
-            raise ProviderError(f"Unsupported provider API: {definition.api}", status="rejected", code="unsupported_api")
-
-    @staticmethod
-    def unavailable_client(selection: ModelSelection, message: str):
-        return _UnavailableChatClient(selection.model_id, message)
+            if refresh and not await self._fetch_models(settings, definition):
+                failures.append(f"failed to refresh {definition.name} models, showing saved models")
+        models = self._catalog(settings)
+        return ModelCatalog(models, "; ".join(failures) or None)
 
     async def login(self, workspace_root: str | None, provider_id: str, method: str, interaction) -> None:
         definition = self._provider(provider_id)
@@ -131,11 +68,88 @@ class ProviderServiceImpl:
             raise ValueError(f"{method} login is not implemented.")
         key = (await interaction.prompt("secret", f"{definition.name} API key")).strip()
         if not key:
-            raise ValueError("API key is required.")
+            raise ValueError("Login canceled.")
         self.credentials.set(provider_id, Credential(type="api_key", key=key))
+        await self._fetch_models(load_settings(workspace_root), definition)
 
-    def logout(self, provider_id: str) -> None:
-        self.credentials.delete(provider_id)
+    def logout(self, provider_id: str) -> bool:
+        return self.credentials.delete(provider_id)
+
+    async def create_chat_client(self, workspace_root: str | None, selection: ModelSelection):
+        settings = load_settings(workspace_root)
+        definition = self._provider(selection.provider_id)
+        credential = self._resolve_credential(settings, definition.id)
+        if credential is None:
+            raise ProviderError(
+                f"{definition.name} is not configured. Run /login or set {definition.environment_key}.",
+                status="rejected", code="provider_not_configured",
+            )
+        endpoint = self._endpoint(settings, definition)
+        key = credential.key or credential.access
+        if definition.api == "openai-chat":
+            from .openai_chat import OpenAIChatCompletionsClient
+
+            return OpenAIChatCompletionsClient(
+                build_async_client(key, endpoint), selection.model_id, selection.reasoning_effort, workspace_root=workspace_root
+            )
+        if definition.api == "openai-responses":
+            from .openai_responses import OpenAIResponsesClient
+
+            return OpenAIResponsesClient(
+                build_async_client(key, endpoint), selection.model_id, selection.reasoning_effort, workspace_root=workspace_root
+            )
+        if definition.api == "anthropic-messages":
+            from .anthropic_messages import AnthropicMessagesClient
+
+            return AnthropicMessagesClient(
+                api_key=key, model=selection.model_id, reasoning_effort=selection.reasoning_effort, base_url=endpoint
+            )
+        raise ProviderError(f"Unsupported provider API: {definition.api}", status="rejected", code="unsupported_api")
+
+    @staticmethod
+    def unavailable_client(selection: ModelSelection, message: str):
+        return _UnavailableChatClient(selection.model_id, message)
+
+    def _catalog(self, settings: AppSettings) -> list[ModelDefinition]:
+        cache = self._read_cache()
+        result: list[ModelDefinition] = []
+        for definition in self.providers.values():
+            if self._credential_source(settings, definition.id) == "none":
+                continue
+            api = _effective_api(settings, definition)
+            values = cache.get(definition.id) or ()
+            models = [_model(definition, api, item) for item in values] or list(definition.fallback_models)
+            result.extend(models)
+        current = ModelSelection(settings.provider, settings.model)
+        definition = self.providers.get(current.provider_id)
+        if definition is not None and not any(
+            model.provider_id == current.provider_id and model.id == current.model_id for model in result
+        ):
+            result.append(_selection_model(settings, definition, current))
+        return result
+
+    async def _fetch_models(self, settings: AppSettings, definition) -> bool:
+        if not refreshable_models_api(definition.api):
+            return True
+        credential = self._resolve_credential(settings, definition.id)
+        if credential is None:
+            return False
+        client = build_async_client(credential.key or credential.access, self._endpoint(settings, definition))
+        try:
+            response = await client.models.list()
+            data = getattr(response, "data", response)
+            if hasattr(data, "__aiter__"):
+                data = [item async for item in data]
+            models = [{"id": _item_id(item), "name": _item_id(item)} for item in data or []]
+            models = [item for item in models if item["id"]]
+            if not models:
+                return False
+            self._write_cache(self._read_cache() | {definition.id: models})
+            return True
+        except Exception:
+            return False
+        finally:
+            await _close(client)
 
     def _provider(self, provider_id: str):
         try:
@@ -143,9 +157,8 @@ class ProviderServiceImpl:
         except KeyError:
             return self.providers["openai-compatible"]
 
-    def _credential_source(self, settings: AppSettings, provider_id: str) -> str:
-        explicit = settings.api_key if settings.provider == provider_id else ""
-        if explicit:
+    def _credential_source(self, settings: AppSettings | None, provider_id: str) -> str:
+        if settings is not None and settings.provider == provider_id and settings.api_key:
             return "workspace"
         if self.credentials.get(provider_id) is not None:
             return "stored"
@@ -169,13 +182,18 @@ class ProviderServiceImpl:
     @staticmethod
     def _endpoint(settings: AppSettings, definition) -> str:
         configured = str(settings.base_url or "").strip()
-        if definition.id != "openai-compatible" and configured in {"", DEFAULT_BASE_URL}:
-            return definition.default_base_url
-        return configured or definition.default_base_url
+        if settings.provider == definition.id and configured:
+            return configured
+        return definition.default_base_url
 
     def _read_cache(self) -> dict[str, list[dict[str, Any]]]:
         if not self.cache_path.exists():
             return {}
+        try:
+            value = json.loads(self.cache_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return {}
+        return value if isinstance(value, dict) else {}
 
     def _write_cache(self, data: dict[str, Any]) -> None:
         self.cache_path.parent.mkdir(parents=True, exist_ok=True)
@@ -187,17 +205,6 @@ class ProviderServiceImpl:
             os.replace(temporary, self.cache_path)
         finally:
             temporary.unlink(missing_ok=True)
-        try:
-            value = json.loads(self.cache_path.read_text(encoding="utf-8"))
-            return value if isinstance(value, dict) else {}
-        except (OSError, json.JSONDecodeError):
-            return {}
-
-    @staticmethod
-    def _model_from_cache(provider_id: str, api: str, item: Any) -> ModelDefinition:
-        if isinstance(item, str):
-            return ModelDefinition(provider_id, item, item, api)
-        return ModelDefinition(provider_id, str(item.get("id") or ""), str(item.get("name") or item.get("id") or ""), api)
 
 
 class _UnavailableChatClient:
@@ -210,10 +217,36 @@ class _UnavailableChatClient:
 
     async def stream(self, *args, **kwargs):
         raise ProviderError(self.message, status="rejected", code="provider_not_configured")
-        yield ModelStreamEvent("completed", stop_reason="error")
 
     async def close(self) -> None:
         return None
+
+
+def _effective_api(settings: AppSettings, definition) -> str:
+    return settings.api if definition.id == "openai-compatible" else definition.api
+
+
+def _model(definition, api: str, item: Any) -> ModelDefinition:
+    if isinstance(item, str):
+        return ModelDefinition(definition.id, item, item, api, default_reasoning_efforts(api))
+    model_id = str(item.get("id") or "")
+    return ModelDefinition(definition.id, model_id, str(item.get("name") or model_id), api, default_reasoning_efforts(api))
+
+
+def _selection_model(settings: AppSettings, definition, selection: ModelSelection) -> ModelDefinition:
+    for model in definition.fallback_models:
+        if model.id == selection.model_id:
+            return model
+    api = _effective_api(settings, definition)
+    return ModelDefinition(definition.id, selection.model_id, selection.model_id, api, default_reasoning_efforts(api))
+
+
+async def _close(client: Any) -> None:
+    close = getattr(client, "close", None)
+    if callable(close):
+        value = close()
+        if hasattr(value, "__await__"):
+            await value
 
 
 def _item_id(item: Any) -> str:

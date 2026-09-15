@@ -519,14 +519,6 @@ async def test_status_does_not_leak_api_key(monkeypatch) -> None:
 
 
 @pytest.mark.asyncio
-async def test_login_mentions_shared_settings_path() -> None:
-    result = await SlashCommandRouter().execute("/login", _context())
-
-    assert "~/.rind" in result.text
-    assert "settings.json" in result.text
-
-
-@pytest.mark.asyncio
 async def test_model_set_updates_session_without_changing_default_settings(tmp_path, monkeypatch) -> None:
     path = tmp_path / ".rind" / "settings.json"
     path.parent.mkdir()

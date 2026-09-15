@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Literal
+from typing import Literal, NamedTuple
 
 from .tool_payload import ParsedToolCall
 
@@ -52,6 +52,11 @@ class Credential:
     access: str = ""
     refresh: str = ""
     expires_at: int | None = None
+
+
+class ModelCatalog(NamedTuple):
+    models: list["ModelDefinition"]
+    warning: str | None = None
 
 
 @dataclass(frozen=True, slots=True)

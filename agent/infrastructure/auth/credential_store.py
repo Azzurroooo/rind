@@ -11,11 +11,12 @@ from typing import Any
 from filelock import FileLock
 
 from agent.domain.models import Credential
+from agent.infrastructure.paths import resolve_rind_home
 
 
 class CredentialStore:
     def __init__(self, path: str | Path | None = None) -> None:
-        self.path = Path(path or (Path.home() / ".rind" / "auth.json")).expanduser().resolve()
+        self.path = Path(path or (resolve_rind_home() / "auth.json")).expanduser().resolve()
         self.lock = FileLock(str(self.path) + ".lock")
 
     def get(self, provider_id: str) -> Credential | None:

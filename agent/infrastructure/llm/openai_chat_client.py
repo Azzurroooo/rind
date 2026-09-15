@@ -26,6 +26,16 @@ from agent.infrastructure.llm.llm_trace import make_trace
 logger = logging.getLogger(__name__)
 
 
+def build_async_client(api_key: str, base_url: str) -> openai.AsyncOpenAI:
+    from agent.infrastructure.config.settings_loader import DEFAULT_USER_AGENT
+
+    return openai.AsyncOpenAI(
+        api_key=api_key,
+        base_url=base_url,
+        default_headers={"User-Agent": DEFAULT_USER_AGENT},
+    )
+
+
 class OpenAIChatClient(ChatClient):
     """Small wrapper around OpenAI async chat.completions API with resilient retries and cancellation support."""
 

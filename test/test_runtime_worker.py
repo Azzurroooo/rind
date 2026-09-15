@@ -91,16 +91,6 @@ class _ExecutionContainer:
         return self.runtime.active_turn_id
 
 
-class _ModelClient:
-    def __init__(self):
-        self.close_count = 0
-        self.models = self
-
-    def list(self):
-        return _ModelList(("model-a", "model-b"))
-
-    async def close(self):
-        self.close_count += 1
 
 
 class _ModelList:
@@ -228,43 +218,6 @@ def test_worker_routes_concurrent_sessions_without_crossed_events():
     assert responses["prompt-A"]["result"]["session_id"] == "A"
     assert responses["prompt-B"]["result"]["session_id"] == "B"
     assert worker.execution.active_session_ids() == set()
-
-
-def test_worker_model_list_creates_and_closes_workspace_client(monkeypatch):
-    clients = []
-
-    class Factory:
-        def __init__(self, _settings):
-            pass
-
-        def create_async_client(self):
-            client = _ModelClient()
-            clients.append(client)
-            return client
-
-    async def settings_for(_session_id):
-        return AppSettings(
-            settings_path=Path("settings.json"),
-            settings_exists=True,
-            model="default-model",
-            api_key="test-key",
-            base_url="https://example.com/v1",
-            reasoning_effort="",
-        )
-
-    async def run():
-        worker, server, messages = _server_with_messages()
-        worker.repository = SimpleNamespace(settings_for=settings_for)
-        monkeypatch.setattr("agent.runtime.server.stdio.OpenAIClientFactory", Factory)
-        await server._dispatch({"request_id": "models-1", "method": RuntimeMethod.MODEL_LIST, "params": {}})
-        await server._dispatch({"request_id": "models-2", "method": RuntimeMethod.MODEL_LIST, "params": {}})
-        return messages
-
-    messages = asyncio.run(run())
-    responses = [message for message in messages if message.get("kind") == "response"]
-    assert len(responses) == 2
-    assert len(clients) == 2
-    assert all(client.close_count == 1 for client in clients)
 
 
 def test_background_monitoring_survives_turn_execution_release():
