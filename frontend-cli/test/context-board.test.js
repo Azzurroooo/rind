@@ -12,7 +12,7 @@ import { createTui } from "../lib/tui/tui.js";
 import { Container } from "../lib/tui/component.js";
 import { ComposerArea } from "../lib/components/composer-area.js";
 import { MonitorStack } from "../lib/components/monitor-stack.js";
-import { contextBoardText, heatmapRows, occupancyTone, usageBoardText } from "../lib/rendering.js";
+import { contextBoardText, occupancyTone, usageBoardText } from "../lib/rendering.js";
 import { resetTheme, setTheme, flavorSwatch } from "../lib/theme.js";
 import { stripAnsi, textWidth } from "../lib/text-width.js";
 
@@ -42,7 +42,7 @@ const isoDay = (offset) => {
 };
 
 const SUMMARY = {
-  days: 90,
+  days: 5,
   totals: { input: 1240000, cached: 812000, output: 96000, reasoning: 41000, total: 1336000, samples: 214, compactions: 6 },
   by_day: [
     { day: isoDay(0), tokens: 38200 },
@@ -150,56 +150,18 @@ test("usage board page 2 renders the locked layout", () => {
   const text = page2();
   const lines = text.split("\n").map(stripAnsi);
 
-  assert.match(lines[0], /^┌ Token usage · last 90 days ─+ 2\/2 ┐$/);
+  assert.match(lines[0], /^┌ Token usage · last 5 days ─+ 2\/2 ┐$/);
   assert.equal(lines[1], "│ Input 1.24M   Cache hit 812K·65%   Output 96K   Reasoning 41K                                    │");
   assert.equal(lines[2], "│ 214 samples                                                                                      │");
   assert.match(lines[4], /^│ By day\s+│$/);
-  // GitHub-style heatmap: month header, fixed seven weekday rows, Less/More legend.
-  const monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-  assert.ok(lines[5].includes(monthNames[new Date().getMonth()]), "current month is labeled");
-  assert.ok((lines[5].match(/[A-Z][a-z]{2}/g) || []).length >= 3, "quarter window spans several months");
-  const weekdayLabels = ["   ", "Mon", "   ", "Wed", "   ", "Fri", "   "];
-  lines.slice(6, 13).forEach((line, index) => {
-    assert.match(line, new RegExp(`^│ ${weekdayLabels[index]}[ .:#@]`), `weekday row ${index}`);
-  });
-  assert.equal(lines[13], "│ Less . : # @ More                                                                                │");
-  assert.match(lines[todayRowIndex(lines)], /@ +│$/, "today's peak lands on its weekday row");
-  assert.match(lines[15], /^│ By model\s+│$/);
+  const dayLabel = (offset) => isoDay(offset).slice(5);
+  assert.match(lines[5], new RegExp(`^│ {3}${dayLabel(0)}  █+\\s+38\\.2K │$`));
+  assert.match(lines[6], new RegExp(`^│ {3}${dayLabel(1)}  █+\\s+21\\.4K │$`));
+  assert.match(lines[7], new RegExp(`^│ {3}${dayLabel(2)}  █+\\s+8\\.9K │$`));
+  assert.match(lines[9], /^│ By model\s+│$/);
   assert.match(lines.at(-2), /^│ 6 compaction calls · Tab switch page · Esc exit\s+│$/);
   assert.equal(page2(), page2());
 });
-
-function todayRowIndex(lines) {
-  const today = new Date().getDay();
-  const label = ["   ", "Mon", "   ", "Wed", "   ", "Fri", "   "][today];
-  return lines.findIndex((line) => line.startsWith(`│ ${label} `));
-}
-
-test("heatmap anchors month labels on each month's first day across a year boundary", () => {
-  resetTheme();
-  const now = new Date(2027, 0, 15, 12, 0, 0);
-  // Window spans Oct 28 2026 – Jan 15 2027; Nov 1 (Sun), Dec 1 (Tue), Jan 1 (Fri).
-  const byDay = [0, 14, 45, 75].map((offset) => ({ day: isoDayAt(now, offset), tokens: 50000 }));
-
-  const rows = heatmapRows(byDay, now).map(stripAnsi);
-
-  const header = rows[0];
-  for (const name of ["Nov", "Dec", "Jan"]) {
-    assert.ok(header.includes(name), `${name} label present in ${JSON.stringify(header)}`);
-  }
-  const labelX = (name) => header.indexOf(name);
-  assert.ok(labelX("Nov") < labelX("Dec") && labelX("Dec") < labelX("Jan"), "labels run left to right");
-  const cellAt = (row, x) => ".:#@".includes(row[x]);
-  assert.ok(cellAt(rows[1], labelX("Nov")), "Nov 1 cell sits under the Nov label");
-  assert.ok(cellAt(rows[3], labelX("Dec")), "Dec 1 cell sits under the Dec label");
-  assert.ok(cellAt(rows[6], labelX("Jan")), "Jan 1 cell sits under the Jan label");
-});
-
-function isoDayAt(now, offset) {
-  const date = new Date(now);
-  date.setDate(date.getDate() - offset);
-  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
-}
 
 test("stacked bar and day columns stretch between 60 and 100 columns without misaligned rows", () => {
   resetTheme();
@@ -397,14 +359,14 @@ test("non-TTY /context prints both pages as plain frame-less text", async () => 
 
   assert.deepEqual(requests.map((request) => request.method), [methods.contextInspect, methods.usageSummary]);
   assert.deepEqual(requests[0].params, { session_id: "session-a" });
-  assert.deepEqual(requests[1].params, { days: 90 });
+  assert.deepEqual(requests[1].params, { days: 5 });
   assert.equal(logs.length, 2);
   for (const text of logs) {
     assert.equal(text.includes("┌"), false, "frame-less output must not draw borders");
     assert.equal(text.includes("Tab switch page"), false, "interaction hints are meaningless in pipe output");
   }
   assert.match(logs[0], /Context · last sampling/);
-  assert.match(logs[1], /Token usage · last 90 days/);
+  assert.match(logs[1], /Token usage · last 5 days/);
 });
 
 test("/context routes to the board on a TTY and to the report otherwise", async () => {
@@ -447,7 +409,7 @@ test("/context with a custom range explains the fallback and still opens the boa
   await controller.handle("/context 30");
 
   assert.deepEqual(calls, [
-    ["log", "Custom ranges are not supported yet; showing the last 90 days."],
+    ["log", "Custom ranges are not supported yet; showing the last 5 days."],
     ["board"],
   ]);
 });
@@ -550,14 +512,14 @@ test("board renders full screen on a real TUI, Tab flips pages, Esc returns to t
   assert.match(flat, /Context · last sampling · turn 8f3a/);
   assert.match(flat, /1\/2/);
   assert.match(flat, /Tool results\s+15,980/);
-  assert.equal(flat.includes("Token usage · last 90 days"), false, "page 2 stays hidden on page 1");
+  assert.equal(flat.includes("Token usage · last 5 days"), false, "page 2 stays hidden on page 1");
 
   input.send("\t");
   await new Promise((resolve) => setTimeout(resolve, 25));
   await virtual.flush();
   viewport = virtual.getViewport().map((line) => stripAnsi(line)).filter((line) => line.trim());
   flat = viewport.join("\n");
-  assert.match(flat, /Token usage · last 90 days/);
+  assert.match(flat, /Token usage · last 5 days/);
   assert.match(flat, /2\/2/);
   assert.match(flat, /6 compaction calls/);
   assert.equal(flat.includes("Tool results"), false, "page 1 stays hidden on page 2");

@@ -472,7 +472,7 @@ export function createCliRuntimeController({
   };
 }
 
-const CONTEXT_BOARD_DAYS = 90;
+const CONTEXT_BOARD_DAYS = 5;
 
 function mergeSlashCommands(...groups) {
   const byName = new Map();

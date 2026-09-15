@@ -110,7 +110,7 @@ export function usageBoardText(page = {}, width) {
   lines.push(dim(`${boardNumber(totals.samples)} samples`));
   const byDay = Array.isArray(summary.by_day) ? summary.by_day : [];
   if (byDay.length) {
-    lines.push("", bold("By day"), ...heatmapRows(byDay));
+    lines.push("", bold("By day"), ...byDayRows(byDay, frameWidth - 4));
   }
   const byModel = Array.isArray(summary.by_model) ? summary.by_model : [];
   if (byModel.length) {
@@ -299,70 +299,22 @@ function usageHeroLines(totals, inner) {
   ];
 }
 
-const HEATMAP_WINDOW_DAYS = 90;
-// ASCII density scale only: middle dot and every shaded block (U+2580-U+259F,
-// U+00B7) are East Asian Ambiguous and render full-width in CJK terminals,
-// shattering the grid. ASCII glyphs keep one cell everywhere.
-const HEATMAP_LEVEL_CELLS = [" ", ".", ":", "#", "@"];
-const HEATMAP_MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-const HEATMAP_ROW_LABELS = ["   ", "Mon", "   ", "Wed", "   ", "Fri", "   "];
-
-export function heatmapRows(byDay, now = new Date()) {
-  const tokens = new Map(byDay.map((row) => [boardText(row?.day), Math.max(0, boardNumber(row?.tokens))]));
-  const end = startOfDay(now);
-  const first = addDays(end, 1 - HEATMAP_WINDOW_DAYS);
-  const weeks = [];
-  for (let cursor = addDays(first, -first.getDay()); cursor <= end; cursor = addDays(cursor, 7)) {
-    weeks.push(Array.from({ length: 7 }, (_value, offset) => {
-      const day = addDays(cursor, offset);
-      return day < first || day > end ? null : day;
-    }));
-  }
-  const peak = Math.max(1, ...tokens.values());
-  // A month name overhangs its 2-cell column like GitHub's header; the next
-  // label clips back to its own slot so drift never accumulates.
-  let monthLine = "";
-  weeks.forEach((week, index) => {
-    const firstOfMonth = week.find((day) => day && day.getDate() === 1);
-    if (firstOfMonth) {
-      monthLine = monthLine.slice(0, index * 2).padEnd(index * 2) + HEATMAP_MONTHS[firstOfMonth.getMonth()];
-    } else {
-      monthLine = monthLine.padEnd((index + 1) * 2, " ");
-    }
+function byDayRows(byDay, innerWidth) {
+  const values = byDay.map((row) => boardCompact(row?.tokens));
+  const valueWidth = Math.max(5, ...values.map(textWidth));
+  const peak = Math.max(1, ...byDay.map((row) => Math.max(0, boardNumber(row?.tokens))));
+  const barCells = Math.max(3, innerWidth - 11 - valueWidth);
+  return byDay.map((row, index) => {
+    const filled = Math.max(row && boardNumber(row.tokens) > 0 ? 1 : 0, Math.round((Math.max(0, boardNumber(row?.tokens)) / peak) * barCells));
+    const bar = accent(BOARD_BAR_CELL.repeat(Math.min(barCells, filled)));
+    const region = bar + " ".repeat(Math.max(0, barCells - Math.min(barCells, filled)));
+    return `  ${boardDayLabel(row?.day)}  ${region}  ${padLeft(values[index], valueWidth)}`;
   });
-  const rows = Array.from({ length: 7 }, () => "");
-  for (const week of weeks) {
-    week.forEach((day, rowIndex) => {
-      const cell = day === null ? " " : heatCell((tokens.get(dayKey(day)) || 0) / peak);
-      rows[rowIndex] += `${cell} `;
-    });
-  }
-  return [
-    `    ${monthLine}`,
-    ...rows.map((row, index) => `${HEATMAP_ROW_LABELS[index]} ${row}`),
-    dim(`Less ${HEATMAP_LEVEL_CELLS.slice(1).join(" ")} More`),
-  ];
 }
 
-function heatCell(share) {
-  const level = share <= 0 ? 0 : Math.min(4, 1 + Math.floor(share * 4));
-  return level === 0 ? " " : paint.success(HEATMAP_LEVEL_CELLS[level]);
-}
-
-function dayKey(date) {
-  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
-}
-
-function startOfDay(date) {
-  const value = new Date(date);
-  value.setHours(0, 0, 0, 0);
-  return value;
-}
-
-function addDays(date, count) {
-  const value = new Date(date);
-  value.setDate(value.getDate() + count);
-  return value;
+function boardDayLabel(day) {
+  const text = boardText(day);
+  return /^\d{4}-\d{2}-\d{2}$/.test(text) ? text.slice(5) : " ".repeat(5);
 }
 
 function rightRows(rows, innerWidth) {
