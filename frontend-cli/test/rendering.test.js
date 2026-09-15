@@ -22,6 +22,8 @@ import {
   inputHintText,
   interruptText,
   modelListErrorText,
+  authChoiceFrame,
+  authSecretFrame,
   modelMenuText,
   planUpdatedLine,
   sessionMenuText,
@@ -351,6 +353,52 @@ test("slashMenuText keeps the selected command visible", () => {
       "",
     ].join("\n"),
   );
+});
+
+test("authChoiceFrame renders a full provider box with selection", () => {
+  const text = authChoiceFrame({
+    title: "Provider",
+    options: ["openai · OpenAI · not configured", "deepseek · DeepSeek · stored"],
+    selectedIndex: 1,
+    width: 64,
+  });
+
+  const lines = text.split("\n");
+  assert.ok(lines[0].startsWith("┌─ Login · Provider "));
+  assert.ok(lines.at(-2).startsWith("└"));
+  assert.match(lines[1], /openai · OpenAI · not configured\s+│$/);
+  assert.ok(lines[2].startsWith("│ › deepseek"));
+  assert.match(lines[2], /deepseek · DeepSeek · stored\s+│$/);
+  assert.match(lines[4], /↑↓ select · enter choose · esc cancel/);
+  assert.equal(authChoiceFrame({ title: "Provider", options: [], selectedIndex: 0 }), "");
+});
+
+test("authSecretFrame masks secrets and places the caret", () => {
+  const frame = authSecretFrame({
+    title: "DeepSeek",
+    message: "API key",
+    kind: "secret",
+    value: "sk-test-1234",
+    width: 64,
+    cursor: { line: 0, column: 12 },
+  });
+
+  const lines = frame.text.split("\n");
+  assert.ok(lines[0].startsWith("┌─ Login · DeepSeek "));
+  assert.match(lines[1], /^│ API key\s+│$/);
+  assert.match(lines[2], /▷ •{12}\s+│$/);
+  assert.match(lines[4], /enter submit · esc cancel/);
+  assert.ok(lines.at(-2).startsWith("└"));
+  assert.deepEqual(frame.cursor, { line: 2, column: 18 });
+});
+
+test("authSecretFrame shows a placeholder and clips long values", () => {
+  const empty = authSecretFrame({ title: "DeepSeek", message: "API key", kind: "secret", value: "", width: 64 });
+  assert.match(empty.text.split("\n")[2], /▷ paste or type the key — hidden\s+│$/);
+
+  const long = authSecretFrame({ title: "x", kind: "text", value: "k".repeat(120), width: 64 });
+  const valueLine = long.text.split("\n")[1];
+  assert.ok(valueLine.length <= 64);
 });
 
 test("modelMenuText renders provider groups, current model and selection", () => {

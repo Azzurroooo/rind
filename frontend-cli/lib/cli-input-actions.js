@@ -188,14 +188,18 @@ export function createCliInputActions({
   }
 
   function askAuthText(message, kind) {
+    const prompt = String(message || "Input");
     if (!output.terminalUi) {
-      return askLine(`${String(message || "Input")}: `);
+      return askLine(`${prompt}: `);
     }
+    const keyMatch = prompt.match(/^(.+?)\s+API key$/i);
     return new Promise((resolve) => {
       const session = {
         mode: "auth",
         authKind: kind,
-        prompt: String(message || "Input"),
+        authTitle: keyMatch ? keyMatch[1] : prompt,
+        authMessage: keyMatch ? "API key" : prompt,
+        prompt,
         editor: createLineEditor(),
         resolve,
       };
@@ -215,7 +219,7 @@ export function createCliInputActions({
     }
     return new Promise((resolve) => {
       const choiceState = createChoiceMenuState(values, values[0]);
-      const session = { mode: "auth-choice", inputText: String(message || "Select"), choiceState, resolve };
+      const session = { mode: "auth-choice", authTitle: String(message || "Select"), choiceState, resolve };
       state.input.session = session;
       state.input.active = true;
       cancelActiveInput = () => completeTtyInput(session, "", false);

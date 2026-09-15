@@ -40,6 +40,8 @@ import { MonitorStack } from "./components/monitor-stack.js";
 import {
   inputHintText,
   interruptText,
+  authChoiceFrame,
+  authSecretFrame,
   modelMenuText,
   themeMenuText,
   questionMenuFrame,
@@ -634,23 +636,36 @@ function composeFrame(width = process.stdout.columns || 80) {
     };
   }
   if (session.mode === "auth-choice") {
+    const menuText = authChoiceFrame({
+      title: session.authTitle || "Provider",
+      options: session.choiceState.options(),
+      selectedIndex: session.choiceState.selectedIndex(),
+      width,
+    });
     return {
-      showCaret,
-      prompt: mainPromptText(width),
-      inputText: session.inputText,
-      cursor: { line: 0, column: session.inputText.length },
-      menuText: sessionMenuText(session.choiceState.options(), session.choiceState.selectedIndex()).trimEnd(),
+      showCaret: false,
+      prompt: "",
+      inputText: "",
+      cursor: { line: 0, column: 0 },
+      menuText: menuText.trimEnd(),
     };
   }
   if (session.mode === "auth") {
-    const value = session.editor.input();
-    const display = session.authKind === "secret" ? "*".repeat(value.length) : value;
+    const frame = authSecretFrame({
+      title: session.authTitle,
+      message: session.authMessage,
+      kind: session.authKind,
+      value: session.editor.input(),
+      width,
+      cursor: session.editor.cursorPosition(),
+    });
     return {
-      showCaret,
-      prompt: session.prompt,
-      inputText: display,
-      cursor: { line: 0, column: display.length },
-      menuText: "",
+      showCaret: true,
+      prompt: "",
+      inputText: "",
+      cursor: { line: 0, column: 0 },
+      menuText: frame.text.trimEnd(),
+      menuCursor: frame.cursor,
     };
   }
   if (session.mode === "theme") {

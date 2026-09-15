@@ -701,6 +701,74 @@ function customAnswerCursor(customText, editorCursor, firstRow, prefixWidth, lab
   };
 }
 
+
+export function authSecretFrame({
+  title = "",
+  message = "",
+  kind = "text",
+  value = "",
+  width = 76,
+  cursor = null,
+} = {}) {
+  const box = startupBannerWidth(width);
+  const masked = kind === "secret";
+  const prefix = "  ▷ ";
+  const valueWidth = box - 2 - textWidth(prefix) - 1;
+  const chars = graphemes(String(value || ""));
+  const shown = chars.length
+    ? clipCells(masked ? "•".repeat(chars.length) : chars.join(""), valueWidth)
+    : dim(clipCells(masked ? "paste or type the key — hidden" : "type and press enter", valueWidth));
+  const caret = Math.min(chars.length, Math.max(0, Math.floor(Number(cursor?.column) || 0)));
+  const lines = [
+    authFrameTitle(`Login · ${title}`.trim(), box),
+    ...(message && message !== title ? [startupBannerLine(dim(clipCells(message, box - 4)), box)] : []),
+    startupBannerLine(`${prefix}${shown}`, box),
+    startupBannerLine("", box),
+    startupBannerLine(dim("enter submit · esc cancel"), box),
+    startupBannerBorder("└", "┘", box),
+  ];
+  const valueRow = (message && message !== title ? 2 : 1);
+  const visibleCaret = chars.length
+    ? Math.min(valueWidth, textWidth(chars.slice(0, caret).join("")))
+    : 0;
+  return {
+    text: `${lines.join("\n")}\n`,
+    cursor: { line: valueRow, column: 2 + textWidth(prefix) + visibleCaret },
+  };
+}
+
+export function authChoiceFrame({ title = "", options = [], selectedIndex = 0, width = 76 } = {}) {
+  const box = startupBannerWidth(width);
+  const inner = box - 4;
+  const values = (Array.isArray(options) ? options : []).map((item) => String(item || "").trim()).filter(Boolean);
+  if (!values.length) {
+    return "";
+  }
+  const lines = [authFrameTitle(`Login · ${title}`.trim(), box)];
+  values.forEach((option, index) => {
+    const active = index === selectedIndex;
+    const marker = active ? accent("›") : dim("·");
+    const parts = option.split(" · ");
+    const id = clipCells(parts[0] || "", Math.max(8, inner - 8));
+    const rest = parts.length > 1 ? clipCells(`· ${parts.slice(1).join(" · ")}`, Math.max(0, inner - 6 - textWidth(id))) : "";
+    const content = `${marker} ${active ? bold(id) : id}${rest ? ` ${dim(rest)}` : ""}`;
+    lines.push(startupBannerLine(content, box));
+  });
+  lines.push(startupBannerLine("", box));
+  lines.push(startupBannerLine(dim("↑↓ select · enter choose · esc cancel"), box));
+  lines.push(startupBannerBorder("└", "┘", box));
+  return `${lines.join("\n")}\n`;
+}
+
+function authFrameTitle(title, box) {
+  const label = clipCells(String(title || "").trim(), Math.max(1, box - 6));
+  if (!label) {
+    return startupBannerBorder("┌", "┐", box);
+  }
+  const dashes = Math.max(1, box - 2 - visibleLength(label) - 2);
+  return dim(`┌─ ${label} ${"─".repeat(dashes)}┐`);
+}
+
 export function backgroundMonitorText(tasks = [], selectedIndex = 0, selectedTask = null, width = 76) {
   const items = Array.isArray(tasks) ? tasks : [];
   const lines = [dim("  ←→ page · ↑↓/j/k select · esc/ctrl+b close")];
