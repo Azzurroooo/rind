@@ -243,6 +243,20 @@ def test_build_async_client_sets_rind_user_agent() -> None:
 
 
 @pytest.mark.asyncio
+async def test_unavailable_client_stream_raises_provider_error_for_turns() -> None:
+    from agent.infrastructure.llm.provider_service import _UnavailableChatClient
+
+    client = _UnavailableChatClient("deepseek-chat", "DeepSeek is not configured. Run /login or set DEEPSEEK_API_KEY.")
+
+    with pytest.raises(ProviderError) as exc:
+        async for _event in client.stream([], None):
+            pass
+
+    assert exc.value.code == "provider_not_configured"
+    assert "Run /login" in str(exc.value)
+
+
+@pytest.mark.asyncio
 async def test_openai_chat_adapter_reuses_call_id_for_argument_deltas() -> None:
     chunks = [
         SimpleNamespace(choices=[SimpleNamespace(delta=SimpleNamespace(content=None, reasoning_content=None, tool_calls=[SimpleNamespace(index=0, id="call_1", function=SimpleNamespace(name="bash", arguments=""))]), finish_reason=None)], usage=None),

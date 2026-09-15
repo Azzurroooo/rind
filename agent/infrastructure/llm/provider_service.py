@@ -217,6 +217,7 @@ class _UnavailableChatClient:
 
     async def stream(self, *args, **kwargs):
         raise ProviderError(self.message, status="rejected", code="provider_not_configured")
+        yield  # unreachable; keeps stream an async iterator so turns see the ProviderError
 
     async def close(self) -> None:
         return None

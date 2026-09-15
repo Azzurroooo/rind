@@ -29,6 +29,7 @@ class FakeOpenAIServer:
     def __init__(self):
         self._lock = threading.Lock()
         self._script: list[dict] = []
+        self._models: list[str] = []
         self.requests: list[dict] = []
         self.port = 0
         self._server = None
@@ -51,6 +52,12 @@ class FakeOpenAIServer:
     def script_error(self, status: int = 500) -> None:
         with self._lock:
             self._script.append({"kind": "error", "status": status})
+
+    def set_models(self, model_ids: list[str]) -> None:
+        """Serve GET /models with a fixed catalog."""
+        with self._lock:
+            self._models = list(model_ids)
+
     # -- lifecycle -----------------------------------------------------------
 
     def start(self, port: int = 0) -> None:
@@ -61,6 +68,14 @@ class FakeOpenAIServer:
 
             def log_message(self, *args):
                 pass
+
+            def do_GET(self):
+                if not self.path.endswith("/models"):
+                    self._reply(404, {"error": "not found"})
+                    return
+                with server._lock:
+                    models = list(server._models)
+                self._reply(200, {"object": "list", "data": [{"id": model_id, "object": "model", "owned_by": "fake"} for model_id in models]})
 
             def do_POST(self):
                 if not self.path.endswith("/chat/completions"):

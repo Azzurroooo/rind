@@ -512,13 +512,16 @@ async function runLogout(providerId = "") {
     const providersResult = await request(runtimeMethods.authList);
     const stored = (providersResult?.providers || []).filter((item) => item.source === "stored");
     let selected = String(providerId || "").trim();
+    if (!selected && stored.length === 1) {
+      selected = String(stored[0].id || "");
+    }
+    if (!selected && !stored.length) {
+      logOutput("No stored provider credentials.");
+      return;
+    }
     if (!selected) {
       const choice = await inputActions.askAuthChoice("Provider", stored.map((item) => `${item.id} · ${item.name}`));
       selected = String(choice || "").split(" · ")[0].trim();
-    }
-    if (!selected) {
-      logOutput("No stored provider credentials.");
-      return;
     }
     const result = await request(runtimeMethods.authLogout, { provider_id: selected });
     if (!result?.deleted) {

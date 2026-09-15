@@ -209,7 +209,10 @@ export function createCliInputActions({
   function askAuthChoice(message, options) {
     const values = (Array.isArray(options) ? options : []).map((item) => String(item || "").trim()).filter(Boolean);
     if (!values.length) return Promise.resolve("");
-    if (!output.terminalUi) return askLine(`${String(message || "Select")}: `);
+    if (!output.terminalUi) {
+      const ids = values.map((value) => value.split(" · ")[0]).join(", ");
+      return askLine(`${String(message || "Select")} [${ids}]: `);
+    }
     return new Promise((resolve) => {
       const choiceState = createChoiceMenuState(values, values[0]);
       const session = { mode: "auth-choice", inputText: String(message || "Select"), choiceState, resolve };
