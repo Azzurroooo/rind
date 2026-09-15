@@ -91,10 +91,14 @@ class TurnRunner:
         self._tool_processor.set_user_question_responder(responder)
 
     def set_model(self, model: str) -> None:
-        self._chat_client.set_model(model)
+        setter = getattr(self._chat_client, "set_model", None)
+        if callable(setter):
+            setter(model)
 
     def set_reasoning_effort(self, effort: str) -> None:
-        self._chat_client.set_reasoning_effort(effort)
+        setter = getattr(self._chat_client, "set_reasoning_effort", None)
+        if callable(setter):
+            setter(effort)
 
     async def run_turn(
         self,

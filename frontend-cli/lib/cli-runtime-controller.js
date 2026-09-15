@@ -377,15 +377,15 @@ export function createCliRuntimeController({
       log(() => modelListErrorText(error instanceof Error ? error.message : String(error), state.session.info.model));
       return;
     }
-    const currentModel = result?.current_model || state.session.info.model || result?.default_model || "";
+    const currentModel = result?.current || result?.current_model || state.session.info.model || result?.default_model || "";
     const selected = await askModelMenu(result?.models || [], currentModel);
     if (!selected || state.runtime.status === "closing") {
       return;
     }
     try {
-      const update = await request(methods.modelSet, { model: selected });
-      state.session.info = { ...state.session.info, model: update?.model || selected };
-      log(() => modelSetResultText(update, selected));
+      const update = await request(methods.modelSet, { provider_id: selected.providerId || undefined, model_id: selected.modelId || selected.name });
+      state.session.info = { ...state.session.info, provider: update?.provider_id || selected.providerId, model: update?.model_id || selected.modelId || selected.name };
+      log(() => modelSetResultText(update, selected.modelId || selected.name));
     } catch (error) {
       log(`Command failed: ${error instanceof Error ? error.message : String(error)}`);
     }

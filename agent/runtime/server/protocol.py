@@ -50,6 +50,11 @@ class RuntimeMethod:
     MODEL_LIST = "model/list"
     MODEL_SET = "model/set"
     MODEL_EFFORT = "model/effort"
+    RIND_AUTH_LIST = "rind/auth/list"
+    RIND_AUTH_LOGIN = "rind/auth/login"
+    RIND_AUTH_LOGOUT = "rind/auth/logout"
+    RIND_AUTH_PROMPT = "rind/auth/prompt"
+    RIND_AUTH_UPDATE = "rind/auth/update"
     RIND_SESSION_STEER = "rind/session/steer"
     RIND_SESSION_FOLLOW_UP = "rind/session/follow_up"
     RIND_SESSION_PROMOTE_FOLLOW_UP = "rind/session/promote_follow_up"
@@ -80,6 +85,9 @@ SESSION_SCOPED_METHODS = frozenset(
         RuntimeMethod.SESSION_UNSUBSCRIBE,
         RuntimeMethod.SESSION_DELETE,
         RuntimeMethod.MODEL_SET,
+        RuntimeMethod.RIND_AUTH_LIST,
+        RuntimeMethod.RIND_AUTH_LOGIN,
+        RuntimeMethod.RIND_AUTH_LOGOUT,
         RuntimeMethod.RIND_SESSION_STEER,
         RuntimeMethod.RIND_SESSION_FOLLOW_UP,
         RuntimeMethod.RIND_SESSION_PROMOTE_FOLLOW_UP,
@@ -149,6 +157,7 @@ CAPABILITIES = (
     "rind/follow-up",
     "rind/input-retrieval",
     "rind/session-subscriptions",
+    "rind/auth",
     "rind/files",
 )
 

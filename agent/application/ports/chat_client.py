@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
-from typing import Any, Protocol, AsyncIterator
+from typing import Protocol, AsyncIterator
 from agent.domain.cancellation import CancellationToken
+from agent.domain.models import ModelCompletion, ModelStreamEvent
 
 
 class ChatClient(Protocol):
@@ -14,11 +15,8 @@ class ChatClient(Protocol):
         messages: list[dict],
         tools: list[dict] | None = None,
         cancellation_token: CancellationToken | None = None,
-    ) -> Any:
-        """
-        Execute a single completion request asynchronously.
-        Returns the provider-specific response object (e.g. ChatCompletion).
-        """
+    ) -> ModelCompletion:
+        """Execute one provider-neutral completion request."""
         ...
 
     async def stream(
@@ -26,13 +24,6 @@ class ChatClient(Protocol):
         messages: list[dict],
         tools: list[dict] | None = None,
         cancellation_token: CancellationToken | None = None,
-    ) -> AsyncIterator[Any]:
-        """
-        Execute a streaming completion request asynchronously.
-        Yields provider-specific chunk objects (e.g. ChatCompletionChunk).
-        """
-        ...
-
-    def set_model(self, model: str) -> None:
-        """Set the active provider model."""
+    ) -> AsyncIterator[ModelStreamEvent]:
+        """Stream provider-neutral model events."""
         ...

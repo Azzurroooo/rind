@@ -7,10 +7,11 @@ from typing import Callable, AsyncIterator, Any
 
 from agent.domain import ParsedToolCall
 from agent.domain.cancellation import CancellationToken
+from agent.domain.models import ModelStreamEvent
 
 
 class MessageStreamParser:
-    """Parses OpenAI-compatible message streams and structures."""
+    """Accumulates provider-neutral stream events into one model result."""
 
     async def consume_async_stream(
         self,
@@ -32,6 +33,25 @@ class MessageStreamParser:
         async for chunk in response:
             if cancellation_token and cancellation_token.is_cancelled:
                 raise asyncio.CancelledError(cancellation_token.reason)
+
+            if isinstance(chunk, ModelStreamEvent) or isinstance(getattr(chunk, "kind", None), str):
+                await self._consume_event(
+                    chunk,
+                    text_parts,
+                    reasoning_parts,
+                    merged_tool_calls,
+                    on_content_async,
+                    on_tool_input_started_async,
+                    on_tool_input_delta_async,
+                    on_tool_input_ended_async,
+                )
+                if getattr(chunk, "kind", "") == "usage" and getattr(chunk, "usage", None) is not None:
+                    usage = chunk.usage
+                if getattr(chunk, "kind", "") == "completed":
+                    finish_reason = getattr(chunk, "stop_reason", None)
+                if getattr(chunk, "kind", "") == "reasoning_delta":
+                    reasoning_seen = True
+                continue
 
             chunk_usage = getattr(chunk, "usage", None)
             if chunk_usage is not None:
@@ -89,3 +109,51 @@ class MessageStreamParser:
         ]
         reasoning_content = "".join(reasoning_parts) if reasoning_seen else None
         return "".join(text_parts), calls, usage, reasoning_content, finish_reason
+
+    async def _consume_event(
+        self,
+        event: ModelStreamEvent,
+        text_parts: list[str],
+        reasoning_parts: list[str],
+        merged_tool_calls: list[dict],
+        on_content_async: Callable[[str], Any],
+        on_tool_input_started_async: Callable[[str, str], Any] | None,
+        on_tool_input_delta_async: Callable[[str, str, str], Any] | None,
+        on_tool_input_ended_async: Callable[[str, str], Any] | None,
+    ) -> None:
+        if event.kind == "text_delta":
+            if event.text:
+                await on_content_async(event.text)
+                text_parts.append(event.text)
+            return
+        if event.kind == "reasoning_delta":
+            reasoning_parts.append(event.reasoning)
+            return
+        if event.kind == "usage":
+            return
+        if event.kind == "tool_start":
+            call = self._tool_call_slot(merged_tool_calls, event.tool_call_id)
+            call["name"] = event.tool_name
+            call["started"] = True
+            if on_tool_input_started_async:
+                await on_tool_input_started_async(event.tool_call_id, event.tool_name)
+            return
+        if event.kind == "tool_arguments_delta":
+            call = self._tool_call_slot(merged_tool_calls, event.tool_call_id)
+            call["name"] = event.tool_name or call["name"]
+            call["arguments"] += event.arguments
+            if on_tool_input_delta_async and event.arguments:
+                await on_tool_input_delta_async(event.tool_call_id, call["name"], event.arguments)
+            return
+        if event.kind == "tool_end" and on_tool_input_ended_async:
+            call = self._tool_call_slot(merged_tool_calls, event.tool_call_id)
+            await on_tool_input_ended_async(event.tool_call_id, event.tool_name or call["name"])
+
+    @staticmethod
+    def _tool_call_slot(calls: list[dict], call_id: str) -> dict:
+        for call in calls:
+            if call["id"] == call_id:
+                return call
+        call = {"id": call_id, "name": "", "arguments": "", "started": True, "emitted": 0}
+        calls.append(call)
+        return call

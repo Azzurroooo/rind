@@ -171,13 +171,14 @@ const runtimeClient = createRuntimeClient({
   cliArgs,
   onMessage: (message) => {
     eventProcessing = eventProcessing
-      .then(() => renderEvent(message))
+      .then(() => message?.method === runtimeMethods.authUpdate ? renderAuthUpdate(message) : renderEvent(message))
       .catch((error) => {
         if (runtimeState.status !== "closing") {
           writeErrorOutput(`${error instanceof Error ? error.message : String(error)}\n`);
         }
       });
   },
+  onRequest: (message) => inputActions?.handleAuthPrompt(message),
   onStderr: (chunk) => writeErrorOutput(chunk),
   onExit: (code, signal, { error }) => {
     const wasClosing = runtimeState.status === "closing";
@@ -273,6 +274,8 @@ commandController = createCommandController({
     runGoalCommand: runtimeController.runGoalCommand,
     runModelSelector: runtimeController.runModelSelector,
     runEffortCommand: (value) => runtimeController.runEffortCommand(value),
+    runLogin: (providerId) => runLogin(providerId),
+    runLogout: (providerId) => runLogout(providerId),
     runThemeSelector: async () => {
       const selected = await inputActions.askThemeMenu();
       if (selected) {
@@ -483,6 +486,52 @@ function resetContextUsage() {
   redrawInput();
 }
 
+async function runLogin(providerId = "") {
+  try {
+    const providersResult = await request(runtimeMethods.authList);
+    const providers = Array.isArray(providersResult?.providers) ? providersResult.providers : [];
+    let selected = String(providerId || "").trim();
+    if (!selected) {
+      const options = providers.map((item) => `${item.id} · ${item.name} · ${item.configured ? item.source : "not configured"}`);
+      const choice = await inputActions.askAuthChoice("Provider", options);
+      selected = String(choice || "").split(" · ")[0].trim();
+    }
+    if (!selected) return;
+    const result = await request(runtimeMethods.authLogin, { provider_id: selected, method: "api_key" });
+    logOutput(`Logged in to ${result?.provider_id || selected}.`);
+    await runtimeController.request(runtimeMethods.modelList);
+  } catch (error) {
+    logOutput(`Login failed: ${error instanceof Error ? error.message : String(error)}`);
+  }
+}
+
+async function runLogout(providerId = "") {
+  try {
+    const providersResult = await request(runtimeMethods.authList);
+    const stored = (providersResult?.providers || []).filter((item) => item.source === "stored");
+    let selected = String(providerId || "").trim();
+    if (!selected) {
+      const choice = await inputActions.askAuthChoice("Provider", stored.map((item) => `${item.id} · ${item.name}`));
+      selected = String(choice || "").split(" · ")[0].trim();
+    }
+    if (!selected) {
+      logOutput("No stored provider credentials.");
+      return;
+    }
+    await request(runtimeMethods.authLogout, { provider_id: selected });
+    logOutput(`Logged out of ${selected}.`);
+  } catch (error) {
+    logOutput(`Logout failed: ${error instanceof Error ? error.message : String(error)}`);
+  }
+}
+
+async function renderAuthUpdate(message) {
+  const event = message?.event || {};
+  const type = String(event.type || "info");
+  const value = String(event.message || event.text || event.url || event.code || "").trim();
+  if (value) logOutput(`[${type}] ${value}`);
+}
+
 async function renderEvent(message) {
   const sequence = Number(message?.sequence);
   if (!Number.isInteger(sequence) || sequence <= displayState.lastEventSequence) {
@@ -554,7 +603,7 @@ function composeFrame(width = process.stdout.columns || 80) {
   if (!session) {
     return null;
   }
-  const choiceMenu = ["model", "theme", "sessions", "team-blueprints", "fork"].includes(session.mode);
+  const choiceMenu = ["model", "theme", "sessions", "team-blueprints", "fork", "auth-choice"].includes(session.mode);
   if (session.mode === "prompt" && session.menuState) {
     session.menuState.setInput(session.editor.input());
   }
@@ -570,6 +619,26 @@ function composeFrame(width = process.stdout.columns || 80) {
       inputText: session.inputText,
       cursor: { line: 0, column: session.inputText.length },
       menuText: modelMenuText(session.modelState.items(), session.modelState.selectedIndex()).trimEnd(),
+    };
+  }
+  if (session.mode === "auth-choice") {
+    return {
+      showCaret,
+      prompt: mainPromptText(width),
+      inputText: session.inputText,
+      cursor: { line: 0, column: session.inputText.length },
+      menuText: sessionMenuText(session.choiceState.options(), session.choiceState.selectedIndex()).trimEnd(),
+    };
+  }
+  if (session.mode === "auth") {
+    const value = session.editor.input();
+    const display = session.authKind === "secret" ? "*".repeat(value.length) : value;
+    return {
+      showCaret,
+      prompt: session.prompt,
+      inputText: display,
+      cursor: { line: 0, column: display.length },
+      menuText: "",
     };
   }
   if (session.mode === "theme") {

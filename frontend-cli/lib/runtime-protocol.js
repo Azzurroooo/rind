@@ -15,6 +15,11 @@ export const runtimeMethods = Object.freeze({
   modelList: "model/list",
   modelSet: "model/set",
   modelEffortSet: "model/effort",
+  authList: "rind/auth/list",
+  authLogin: "rind/auth/login",
+  authLogout: "rind/auth/logout",
+  authPrompt: "rind/auth/prompt",
+  authUpdate: "rind/auth/update",
   sessionSteer: "rind/session/steer",
   sessionFollowUp: "rind/session/follow_up",
   sessionPromoteFollowUp: "rind/session/promote_follow_up",
@@ -81,6 +86,13 @@ export function isRuntimeEvent(message) {
     && typeof message.session_id === "string"
     && typeof message.turn_id === "string"
     && isRecord(message.event);
+}
+
+export function isRuntimeRequest(message) {
+  return message?.kind === "request"
+    && isRequestId(message.request_id)
+    && typeof message.method === "string"
+    && isRecord(message.params);
 }
 
 export function requireRuntimeInitialization(result) {

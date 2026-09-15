@@ -12,6 +12,7 @@ from collections.abc import Callable
 from typing import Any
 
 from agent.domain.cancellation import CancellationToken
+from agent.domain.models import ModelCompletion
 from agent.domain.compaction import COMPACT_CONTINUATION_USER_CONTENT
 from agent.domain.errors import PersistenceError
 from agent.prompts import build_compact_prompt
@@ -325,6 +326,8 @@ class CompactionService:
             return ""
 
     def _assistant_content(self, response: Any) -> str:
+        if isinstance(response, ModelCompletion):
+            return response.content
         output_text = getattr(response, "output_text", None)
         if isinstance(output_text, str):
             return output_text
@@ -338,6 +341,8 @@ class CompactionService:
         return ""
 
     def _assistant_reasoning_content(self, response: Any) -> str:
+        if isinstance(response, ModelCompletion):
+            return response.reasoning_content or ""
         choices = self._get(response, "choices")
         if isinstance(choices, list) and choices:
             message = self._get(choices[0], "message")

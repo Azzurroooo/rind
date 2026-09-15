@@ -45,6 +45,11 @@ export function createCommandController({
       output.exit?.();
       return true;
     }
+    const auth = parseAuthCommand(text);
+    if (auth) {
+      await (auth.action === "login" ? input.runLogin : input.runLogout)?.(auth.providerId);
+      return true;
+    }
     await runSlashCommand(text);
     return true;
   }
@@ -145,6 +150,12 @@ export function createCommandController({
     ].flatMap((command) => normalizeCommands([command])),
     applyResult,
   };
+}
+
+function parseAuthCommand(value) {
+  const match = String(value || "").trim().match(/^\/(login|logout)(?:\s+([^\s]+))?$/i);
+  if (!match) return null;
+  return { action: match[1].toLowerCase(), providerId: String(match[2] || "").trim() };
 }
 
 function singleWord(value) {

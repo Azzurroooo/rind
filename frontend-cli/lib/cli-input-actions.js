@@ -172,6 +172,53 @@ export function createCliInputActions({
     return askTtyInput(prompt, placeholder);
   }
 
+  async function handleAuthPrompt(request) {
+    pausePrompt();
+    output.closeAssistant();
+    const params = request?.params || {};
+    try {
+      if (String(params.kind || "") === "select") {
+        return await askAuthChoice(params.message, params.options);
+      }
+      return await askAuthText(params.message, String(params.kind || "text"));
+    } finally {
+      resumePrompt();
+    }
+  }
+
+  function askAuthText(message, kind) {
+    if (!output.terminalUi) {
+      return askLine(`${String(message || "Input")}: `);
+    }
+    return new Promise((resolve) => {
+      const session = {
+        mode: "auth",
+        authKind: kind,
+        prompt: String(message || "Input"),
+        editor: createLineEditor(),
+        resolve,
+      };
+      state.input.session = session;
+      state.input.active = true;
+      cancelActiveInput = () => completeTtyInput(session, "", false);
+      output.redraw(true);
+    });
+  }
+
+  function askAuthChoice(message, options) {
+    const values = (Array.isArray(options) ? options : []).map((item) => String(item || "").trim()).filter(Boolean);
+    if (!values.length) return Promise.resolve("");
+    if (!output.terminalUi) return askLine(`${String(message || "Select")}: `);
+    return new Promise((resolve) => {
+      const choiceState = createChoiceMenuState(values, values[0]);
+      const session = { mode: "auth-choice", inputText: String(message || "Select"), choiceState, resolve };
+      state.input.session = session;
+      state.input.active = true;
+      cancelActiveInput = () => completeTtyInput(session, "", false);
+      output.redraw(true);
+    });
+  }
+
   function askLine(prompt) {
     return new Promise((resolve, reject) => {
       const lineInput = getLineInput();
@@ -252,6 +299,14 @@ export function createCliInputActions({
     }
     if (session.mode === "model") {
       handleModelInput(session, event);
+      return;
+    }
+    if (session.mode === "auth") {
+      handleAuthInput(session, event);
+      return;
+    }
+    if (session.mode === "auth-choice") {
+      handleAuthChoiceInput(session, event);
       return;
     }
     if (session.mode === "theme") {
@@ -538,6 +593,33 @@ export function createCliInputActions({
     }
   }
 
+  function handleAuthInput(session, key) {
+    const modified = key.ctrl || key.alt || key.shift;
+    if (!modified && key.name === "escape") {
+      completeTtyInput(session, "", false);
+      return;
+    }
+    const result = session.editor.handleInput(key);
+    if (result === "submit") {
+      completeTtyInput(session, session.editor.input(), false);
+    } else if (result) {
+      output.redraw();
+    }
+  }
+
+  function handleAuthChoiceInput(session, key) {
+    const modified = key.ctrl || key.alt || key.shift;
+    if (!modified && (key.name === "enter" || key.name === "return")) {
+      completeTtyInput(session, session.choiceState.selectedOption() || "", false);
+      return;
+    }
+    if (!modified && key.name === "escape") {
+      completeTtyInput(session, "", false);
+      return;
+    }
+    if (!modified && session.choiceState.handleKey(key)) output.redraw();
+  }
+
   function handleSessionInput(session, key) {
     const modified = key.ctrl || key.alt || key.shift;
     if (!modified && (key.name === "enter" || key.name === "return")) {
@@ -642,6 +724,8 @@ export function createCliInputActions({
 
   return {
     ask,
+    handleAuthPrompt,
+    askAuthChoice,
     answerQuestion,
     restoreInputText,
     addPendingInput,

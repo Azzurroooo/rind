@@ -9,6 +9,7 @@ import json
 import signal
 import sys
 import threading
+import uuid
 from collections.abc import Callable
 from typing import Any
 
@@ -921,6 +922,33 @@ class _WorkerWriter:
             close()
 
 
+class _StdioAuthInteraction:
+    def __init__(self, server: WorkerStdioRuntimeServer) -> None:
+        self._server = server
+
+    async def prompt(self, kind: str, message: str, options=None) -> str:
+        request_id = f"auth-{uuid.uuid4().hex}"
+        future = asyncio.get_running_loop().create_future()
+        self._server._auth_waiters[request_id] = future
+        await self._server._writer.send({
+            "kind": "request",
+            "request_id": request_id,
+            "method": RuntimeMethod.RIND_AUTH_PROMPT,
+            "params": {"kind": kind, "message": message, "options": list(options or [])},
+        })
+        try:
+            return await future
+        finally:
+            self._server._auth_waiters.pop(request_id, None)
+
+    def notify(self, event: dict) -> None:
+        asyncio.create_task(self._server._writer.send({
+            "kind": "event",
+            "method": RuntimeMethod.RIND_AUTH_UPDATE,
+            "event": dict(event),
+        }))
+
+
 class _RepositoryGoalOps:
     """Runtime-shaped goal operations backed by the repository for inactive sessions."""
 
@@ -971,6 +999,7 @@ class WorkerStdioRuntimeServer:
         self._shutdown_response_sent = False
         self._subscribed: set[str] = set()
         self._remove_event_sink: Callable[[], None] | None = None
+        self._auth_waiters: dict[str, asyncio.Future[str]] = {}
         add_event_sink = getattr(self._worker.execution, "add_event_sink", None)
         if callable(add_event_sink):
             self._remove_event_sink = add_event_sink(self._send_event)
@@ -981,6 +1010,10 @@ class WorkerStdioRuntimeServer:
 
     def close(self) -> None:
         """Unregister this connection's sink and close the writer."""
+        for future in self._auth_waiters.values():
+            if not future.done():
+                future.cancel()
+        self._auth_waiters.clear()
         remover = self._remove_event_sink
         self._remove_event_sink = None
         if remover is not None:
@@ -1080,6 +1113,12 @@ class WorkerStdioRuntimeServer:
 
     async def _dispatch(self, request: dict[str, Any]) -> None:
         method = str(request.get("method") or "")
+        if method == RuntimeMethod.RIND_AUTH_PROMPT and str(request.get("request_id")) in self._auth_waiters:
+            future = self._auth_waiters[str(request["request_id"])]
+            params = request.get("params") if isinstance(request.get("params"), dict) else {}
+            if not future.done():
+                future.set_result(str(params.get("value") or ""))
+            return
         try:
             if method == RuntimeMethod.INITIALIZE:
                 await self._initialize(request)
@@ -1116,6 +1155,15 @@ class WorkerStdioRuntimeServer:
                 return
             if method == RuntimeMethod.MODEL_LIST:
                 await self._list_models(request)
+                return
+            if method == RuntimeMethod.RIND_AUTH_LIST:
+                await self._auth_list(request)
+                return
+            if method == RuntimeMethod.RIND_AUTH_LOGIN:
+                await self._auth_login(request)
+                return
+            if method == RuntimeMethod.RIND_AUTH_LOGOUT:
+                await self._auth_logout(request)
                 return
             if method == RuntimeMethod.SESSION_REPLAY:
                 await self._replay(request)
@@ -1163,6 +1211,28 @@ class WorkerStdioRuntimeServer:
         except Exception as exc:
             await self._respond_error(request, str(exc), type(exc).__name__)
 
+    async def _auth_list(self, request: dict[str, Any]) -> None:
+        await self._respond(request, {"providers": self._worker.list_providers()})
+
+    async def _auth_login(self, request: dict[str, Any]) -> None:
+        params = request.get("params") if isinstance(request.get("params"), dict) else {}
+        provider_id = str(params.get("provider_id") or "").strip()
+        method = str(params.get("method") or "api_key").strip()
+        if not provider_id:
+            await self._respond_error(request, "provider_id is required.", "InvalidRequest")
+            return
+        await self._worker.login(provider_id, method, _StdioAuthInteraction(self))
+        await self._respond(request, {"ok": True, "provider_id": provider_id})
+
+    async def _auth_logout(self, request: dict[str, Any]) -> None:
+        params = request.get("params") if isinstance(request.get("params"), dict) else {}
+        provider_id = str(params.get("provider_id") or "").strip()
+        if not provider_id:
+            await self._respond_error(request, "provider_id is required.", "InvalidRequest")
+            return
+        self._worker.logout(provider_id)
+        await self._respond(request, {"ok": True, "provider_id": provider_id})
+
     async def _initialize(self, request: dict[str, Any]) -> None:
         info = await self._worker.initialize()
         session_id = str(info.get("session_id") or "")
@@ -1172,6 +1242,7 @@ class WorkerStdioRuntimeServer:
             "session_id": info["session_id"],
             "draft": False,
             "model": info.get("model"),
+            "provider": info.get("provider"),
             "reasoning_effort": info.get("reasoning_effort"),
             "base_url": info.get("base_url"),
             "workspace_root": info.get("workspace_root"),
@@ -1183,6 +1254,7 @@ class WorkerStdioRuntimeServer:
             "turn_state": info.get("turn_state"),
             "live_turn": info.get("live_turn"),
             "commands": self._slash_command_infos(),
+            "providers": self._worker.list_providers(),
         }
         if self._goal_enabled:
             result["goal"] = info.get("goal")
@@ -1429,21 +1501,29 @@ class WorkerStdioRuntimeServer:
         else:
             session_id = (await self._worker.initialize())["session_id"]
         info = await self._worker.session(session_id)
-        settings = await self._worker.repository.settings_for(session_id)
-        validate_settings(settings)
-        client = OpenAIClientFactory(settings).create_async_client()
-        try:
-            models = await fetch_model_ids(client)
-        finally:
-            await close_async_client(client)
-        default_model = settings.model
-        current_model = str(info.get("model") or default_model)
+        refresh = bool(params.get("refresh", False))
+        list_models = getattr(self._worker, "list_models", None)
+        if callable(list_models):
+            models = await list_models(info.get("workspace_root"), refresh=refresh)
+        else:
+            settings = await self._worker.repository.settings_for(session_id)
+            validate_settings(settings)
+            client = OpenAIClientFactory(settings).create_async_client()
+            try:
+                model_ids = await fetch_model_ids(client)
+            finally:
+                await close_async_client(client)
+            models = [{"provider_id": "openai-compatible", "id": model_id, "name": model_id, "api": "openai-chat", "reasoning_efforts": []} for model_id in merge_models(model_ids, str(info.get("model") or settings.model))]
+        current_model = str(info.get("model") or "")
+        current_provider = str(info.get("provider") or "")
         await self._respond(
             request,
             {
-                "models": merge_models(models, current_model),
+                "models": models,
+                "current": {"provider_id": current_provider, "model_id": current_model},
                 "current_model": current_model,
-                "default_model": default_model,
+                "default_model": current_model,
+                "warning": None,
             },
         )
 
@@ -1545,17 +1625,16 @@ class WorkerStdioRuntimeServer:
         session_id = await self._required_session_id(request)
         if session_id is None:
             return
-        model = str(params.get("model") or "").strip()
+        provider_id = str(params.get("provider_id") or "").strip()
+        model = str(params.get("model_id") or params.get("model") or "").strip()
         if not model:
             await self._respond_error(request, "model/set requires model.", "InvalidRequest")
             return
         active = self._worker.execution.active_container(session_id)
-        if active is not None:
-            result = await set_active_model(active.runtime, active.session_store, model)
-            await self._respond(request, result)
-            return
-        store = await self._worker.repository.open_store(session_id, persist_system_prompt=False)
-        await self._respond(request, await set_active_model(None, store, model))
+        store = active.session_store if active is not None else await self._worker.repository.open_store(session_id, persist_system_prompt=False)
+        provider_id = provider_id or str(getattr(store, "provider", "openai-compatible") or "openai-compatible")
+        await store.update_selection(provider_id, model)
+        await self._respond(request, {"provider_id": provider_id, "model_id": model, "model": model, "session": True, "runtime": False})
 
     async def _set_reasoning_effort(self, request: dict[str, Any]) -> None:
         params = request.get("params") if isinstance(request.get("params"), dict) else {}

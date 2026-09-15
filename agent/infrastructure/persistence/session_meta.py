@@ -95,6 +95,7 @@ def new_session_meta(
     session_type: str | None = None,
     parent_session_id: str | None = None,
     reasoning_effort: str = "",
+    provider: str = "openai-compatible",
 ) -> dict[str, Any]:
     meta = {
         "schema_version": "2.0",
@@ -103,6 +104,7 @@ def new_session_meta(
         "created_at": now,
         "updated_at": now,
         "model": model,
+        "provider": provider,
         "cwd": cwd,
         "workspace_root": workspace_root,
         "message_count": 0,
