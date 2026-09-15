@@ -12,7 +12,7 @@ import { createTui } from "../lib/tui/tui.js";
 import { Container } from "../lib/tui/component.js";
 import { ComposerArea } from "../lib/components/composer-area.js";
 import { MonitorStack } from "../lib/components/monitor-stack.js";
-import { contextBoardText, occupancyTone, usageBoardText } from "../lib/rendering.js";
+import { contextBoardText, heatmapRows, occupancyTone, usageBoardText } from "../lib/rendering.js";
 import { resetTheme, setTheme, flavorSwatch } from "../lib/theme.js";
 import { stripAnsi, textWidth } from "../lib/text-width.js";
 
@@ -173,6 +173,32 @@ function todayRowIndex(lines) {
   const today = new Date().getDay();
   const label = ["   ", "Mon", "   ", "Wed", "   ", "Fri", "   "][today];
   return lines.findIndex((line) => line.startsWith(`│ ${label} `));
+}
+
+test("heatmap anchors month labels on each month's first day across a year boundary", () => {
+  resetTheme();
+  const now = new Date(2027, 0, 15, 12, 0, 0);
+  // Window spans Oct 28 2026 – Jan 15 2027; Nov 1 (Sun), Dec 1 (Tue), Jan 1 (Fri).
+  const byDay = [0, 14, 45, 75].map((offset) => ({ day: isoDayAt(now, offset), tokens: 50000 }));
+
+  const rows = heatmapRows(byDay, now).map(stripAnsi);
+
+  const header = rows[0];
+  for (const name of ["Nov", "Dec", "Jan"]) {
+    assert.ok(header.includes(name), `${name} label present in ${JSON.stringify(header)}`);
+  }
+  const labelX = (name) => header.indexOf(name);
+  assert.ok(labelX("Nov") < labelX("Dec") && labelX("Dec") < labelX("Jan"), "labels run left to right");
+  const cellAt = (row, x) => ".:#@".includes(row[x]);
+  assert.ok(cellAt(rows[1], labelX("Nov")), "Nov 1 cell sits under the Nov label");
+  assert.ok(cellAt(rows[3], labelX("Dec")), "Dec 1 cell sits under the Dec label");
+  assert.ok(cellAt(rows[6], labelX("Jan")), "Jan 1 cell sits under the Jan label");
+});
+
+function isoDayAt(now, offset) {
+  const date = new Date(now);
+  date.setDate(date.getDate() - offset);
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
 }
 
 test("stacked bar and day columns stretch between 60 and 100 columns without misaligned rows", () => {

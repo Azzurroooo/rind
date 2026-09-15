@@ -307,7 +307,7 @@ const HEATMAP_LEVEL_CELLS = [" ", ".", ":", "#", "@"];
 const HEATMAP_MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 const HEATMAP_ROW_LABELS = ["   ", "Mon", "   ", "Wed", "   ", "Fri", "   "];
 
-function heatmapRows(byDay, now = new Date()) {
+export function heatmapRows(byDay, now = new Date()) {
   const tokens = new Map(byDay.map((row) => [boardText(row?.day), Math.max(0, boardNumber(row?.tokens))]));
   const end = startOfDay(now);
   const first = addDays(end, 1 - HEATMAP_WINDOW_DAYS);
@@ -319,11 +319,15 @@ function heatmapRows(byDay, now = new Date()) {
     }));
   }
   const peak = Math.max(1, ...tokens.values());
-  const monthCells = Array.from({ length: weeks.length * 2 }, () => " ");
+  // A month name overhangs its 2-cell column like GitHub's header; the next
+  // label clips back to its own slot so drift never accumulates.
+  let monthLine = "";
   weeks.forEach((week, index) => {
     const firstOfMonth = week.find((day) => day && day.getDate() === 1);
     if (firstOfMonth) {
-      monthCells.splice(index * 2, 3, HEATMAP_MONTHS[firstOfMonth.getMonth()]);
+      monthLine = monthLine.slice(0, index * 2).padEnd(index * 2) + HEATMAP_MONTHS[firstOfMonth.getMonth()];
+    } else {
+      monthLine = monthLine.padEnd((index + 1) * 2, " ");
     }
   });
   const rows = Array.from({ length: 7 }, () => "");
@@ -334,7 +338,7 @@ function heatmapRows(byDay, now = new Date()) {
     });
   }
   return [
-    `    ${monthCells.join("")}`,
+    `    ${monthLine}`,
     ...rows.map((row, index) => `${HEATMAP_ROW_LABELS[index]} ${row}`),
     dim(`Less ${HEATMAP_LEVEL_CELLS.slice(1).join(" ")} More`),
   ];
