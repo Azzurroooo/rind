@@ -15,10 +15,13 @@ import threading
 import time
 from pathlib import Path
 
+import pytest
+
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
+from helpers.fake_gemini_server import FakeGeminiServer
 from helpers.fake_openai_server import FakeOpenAIServer
 
 
@@ -176,6 +179,82 @@ def test_provider_login_model_and_tool_turn_journey(tmp_path: Path):
 
         transcript = json.dumps(server.lines, ensure_ascii=False)
         assert "e2e-secret-key" not in transcript
+    finally:
+        server.close()
+        fixture.stop()
+
+
+def test_google_login_static_catalog_and_tool_turn_journey(tmp_path: Path):
+    pytest.importorskip("google.genai")
+    fixture = FakeGeminiServer()
+    fixture.script_tool_call("read_file", {"path": "note.txt"}, then_text=["note says: gemini works"])
+    fixture.start()
+
+    rind_home = tmp_path / "home"
+    rind_home.mkdir()
+    workspace = tmp_path / "workspace"
+    (workspace / ".rind").mkdir(parents=True)
+    (workspace / "note.txt").write_text("gemini works", encoding="utf-8")
+    (workspace / ".rind" / "settings.json").write_text(
+        json.dumps({"provider": "google", "baseUrl": fixture.base_url, "model": "gemini-3-flash"}),
+        encoding="utf-8",
+    )
+
+    server = _AppServerProcess(workspace, rind_home)
+    try:
+        server.send("init", "initialize")
+        initialize = server.response("init")
+        assert initialize["result"]["provider"] == "google"
+
+        server.send("login", "rind/auth/login", {
+            "session_id": initialize["result"]["session_id"],
+            "provider_id": "google",
+            "method": "api_key",
+        })
+        prompt = server.wait_for(
+            lambda message: message.get("kind") == "request" and message.get("method") == "rind/auth/prompt"
+        )
+        assert prompt["params"]["kind"] == "secret"
+        assert prompt["params"]["message"] == "Google API key"
+        server.send(prompt["request_id"], "rind/auth/prompt", {"value": "e2e-gemini-key"})
+        login = server.response("login")
+        assert login["result"]["ok"] is True
+        assert login["result"]["models_count"] == 2  # static catalog; Gemini has no OpenAI-style /models
+        assert login["result"]["selection"] is None
+
+        server.send("models", "model/list", {"session_id": initialize["result"]["session_id"]})
+        models = server.response("models")["result"]
+        assert [model["id"] for model in models["models"]] == ["gemini-3.1-pro-preview", "gemini-3-flash"]
+
+        server.send("turn", "session/prompt", {
+            "session_id": initialize["result"]["session_id"],
+            "input": "read the note and summarize",
+        })
+        turn = server.response("turn")
+        assert turn["result"]["ok"] is True
+        events = [
+            message for message in server.lines
+            if message.get("kind") == "event"
+            and message.get("session_id") == initialize["result"]["session_id"]
+        ]
+        types = [message["event"]["type"] for message in events]
+        assert "tool_requested" in types and "tool_result" in types and "turn_completed" in types
+        final = next(
+            message["event"]["content"] for message in events
+            if message["event"]["type"] == "assistant_message_completed"
+        )
+        assert "note says: gemini works" in final
+
+        # The follow-up request replays the function result back to Gemini,
+        # with the call id Gemini 3 models require for correlation.
+        replay = fixture.last_request()
+        function_response = replay["contents"][-1]["parts"][0]["functionResponse"]
+        assert function_response["name"] == "read_file"
+        assert function_response["id"] == "fc_test_1"
+        assert "gemini works" in function_response["response"]["output"]
+
+        transcript = json.dumps(server.lines, ensure_ascii=False)
+        assert "e2e-gemini-key" not in transcript
     finally:
         server.close()
         fixture.stop()

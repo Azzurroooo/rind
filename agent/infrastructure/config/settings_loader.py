@@ -109,7 +109,6 @@ def normalize_reasoning_effort(value: Any) -> str:
 
 def _build_settings(settings_path: Path, data: dict[str, Any]) -> AppSettings:
     provider = _string(data, "provider") or "openai-compatible"
-    api = _string(data, "api") or _default_api(provider)
     return AppSettings(
         settings_path=settings_path,
         settings_exists=settings_path.exists(),
@@ -120,7 +119,7 @@ def _build_settings(settings_path: Path, data: dict[str, Any]) -> AppSettings:
         user_agent=DEFAULT_USER_AGENT,
         server_token=_string(data, "serverToken"),
         provider=provider,
-        api=api,
+        api=_string(data, "api") or "openai-chat",
     )
 
 
@@ -136,24 +135,13 @@ def _read_optional_json_object(path: Path) -> dict[str, Any]:
 def _has_complete_project_settings(data: dict[str, Any]) -> bool:
     provider = _string(data, "provider")
     model = _string(data, "model")
-    if provider and model and provider in {"openai", "anthropic", "deepseek", "openrouter", "openai-compatible"}:
-        if provider != "openai-compatible" or _string(data, "baseUrl"):
-            return True
+    if provider and model and (provider != "openai-compatible" or _string(data, "baseUrl")):
+        return True
     api_key = _string(data, "apiKey")
     base_url = _string(data, "baseUrl")
     model = _string(data, "model")
     parsed = urlparse(base_url)
     return bool(api_key and model and parsed.scheme in {"http", "https"} and parsed.netloc)
-
-
-def _default_api(provider: str) -> str:
-    return {
-        "openai": "openai-responses",
-        "anthropic": "anthropic-messages",
-        "deepseek": "openai-chat",
-        "openrouter": "openai-chat",
-        "openai-compatible": "openai-chat",
-    }.get(provider, "openai-chat")
 
 
 def _read_json_object(path: Path) -> dict[str, Any]:

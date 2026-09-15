@@ -101,9 +101,11 @@ class ProviderServiceImpl:
         if definition.api == "anthropic-messages":
             from .anthropic_messages import AnthropicMessagesClient
 
-            return AnthropicMessagesClient(
-                api_key=key, model=selection.model_id, reasoning_effort=selection.reasoning_effort, base_url=endpoint
-            )
+            return AnthropicMessagesClient(api_key=key, model=selection.model_id, base_url=endpoint)
+        if definition.api == "google-generative-ai":
+            from .google_generative_ai import GoogleGenerativeAIClient
+
+            return GoogleGenerativeAIClient(api_key=key, model=selection.model_id, base_url=endpoint)
         raise ProviderError(f"Unsupported provider API: {definition.api}", status="rejected", code="unsupported_api")
 
     @staticmethod

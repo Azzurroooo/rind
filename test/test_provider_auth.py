@@ -6,7 +6,8 @@ from types import SimpleNamespace
 import pytest
 
 from agent.domain.errors import ProviderError
-from agent.domain.models import Credential, ModelSelection
+from agent.domain.models import Credential, ModelSelection, ModelUsage
+from agent.domain.tool_payload import ParsedToolCall
 from agent.infrastructure.auth import CredentialStore
 from agent.infrastructure.config.settings_loader import AppSettings
 from agent.infrastructure.llm.openai_chat import OpenAIChatCompletionsClient
@@ -395,3 +396,172 @@ def test_responses_adapter_converts_canonical_messages_to_input_items() -> None:
         {"type": "function_call", "call_id": "call_1", "name": "bash", "arguments": '{"command":"pwd"}'},
         {"type": "function_call_output", "call_id": "call_1", "output": "/workspace"},
     ]
+
+
+def test_registry_covers_mainstream_providers() -> None:
+    from agent.infrastructure.llm.providers import PROVIDERS, default_reasoning_efforts, refreshable_models_api
+
+    assert PROVIDERS["google"].api == "google-generative-ai"
+    assert PROVIDERS["google"].environment_key == "GEMINI_API_KEY"
+    assert [model.id for model in PROVIDERS["google"].fallback_models] == ["gemini-3.1-pro-preview", "gemini-3-flash"]
+    assert PROVIDERS["xai"].api == "openai-responses"
+    for provider_id, environment_key in (
+        ("groq", "GROQ_API_KEY"),
+        ("mistral", "MISTRAL_API_KEY"),
+        ("moonshot", "MOONSHOT_API_KEY"),
+        ("qwen", "DASHSCOPE_API_KEY"),
+        ("zai", "ZAI_API_KEY"),
+    ):
+        assert PROVIDERS[provider_id].api == "openai-chat"
+        assert PROVIDERS[provider_id].environment_key == environment_key
+        assert PROVIDERS[provider_id].default_base_url.startswith("https://")
+        assert len(PROVIDERS[provider_id].fallback_models) == 2
+    assert refreshable_models_api("openai-chat") and refreshable_models_api("openai-responses")
+    assert not refreshable_models_api("google-generative-ai") and not refreshable_models_api("anthropic-messages")
+    assert default_reasoning_efforts("google-generative-ai") == ()
+    assert default_reasoning_efforts("openai-chat") == ("low", "medium", "high", "xhigh")
+
+
+def _google_chunk(parts, finish_reason=None, usage=None):
+    return SimpleNamespace(
+        candidates=[SimpleNamespace(content=SimpleNamespace(parts=parts), finish_reason=finish_reason)],
+        usage_metadata=usage,
+    )
+
+
+@pytest.mark.asyncio
+async def test_google_adapter_streams_text_reasoning_and_tool_call() -> None:
+    from agent.infrastructure.llm.google_generative_ai import GoogleGenerativeAIClient
+
+    chunks = [
+        _google_chunk([SimpleNamespace(text="hel", thought=None, function_call=None)]),
+        _google_chunk([SimpleNamespace(text="ponder", thought=True, function_call=None)]),
+        _google_chunk(
+            [SimpleNamespace(text=None, thought=None, function_call={"id": "fc_1", "name": "bash", "args": {"command": "pwd"}})],
+            finish_reason="FinishReason.STOP",
+            usage={"prompt_token_count": 10, "candidates_token_count": 5, "thoughts_token_count": 3, "cached_content_token_count": 2},
+        ),
+    ]
+
+    class Provider:
+        class aio:
+            class models:
+                @staticmethod
+                async def generate_content_stream(**_kwargs):
+                    async def stream():
+                        for chunk in chunks:
+                            yield chunk
+                    return stream()
+
+    client = GoogleGenerativeAIClient(api_key="key", model="gemini-3-flash", client=Provider())
+    events = [event async for event in client.stream([], None)]
+
+    assert [(event.kind, event.tool_call_id) for event in events] == [
+        ("text_delta", ""),
+        ("reasoning_delta", ""),
+        ("usage", ""),
+        ("tool_start", "fc_1"),
+        ("tool_arguments_delta", "fc_1"),
+        ("tool_end", "fc_1"),
+        ("completed", ""),
+    ]
+    assert events[4].arguments == '{"command": "pwd"}'
+    assert events[2].usage == ModelUsage(10, 5, 2, 3)
+    assert events[6].stop_reason == "stop"
+
+
+@pytest.mark.asyncio
+async def test_google_adapter_create_maps_completion() -> None:
+    from agent.infrastructure.llm.google_generative_ai import GoogleGenerativeAIClient
+
+    response = _google_chunk(
+        [
+            SimpleNamespace(text="ponder", thought=True, function_call=None),
+            SimpleNamespace(text="hello", thought=None, function_call=None),
+            SimpleNamespace(text=None, thought=None, function_call={"id": "fc_1", "name": "bash", "args": {"command": "pwd"}}),
+        ],
+        finish_reason="FinishReason.STOP",
+        usage={"prompt_token_count": 4, "candidates_token_count": 6},
+    )
+
+    class Provider:
+        class aio:
+            class models:
+                @staticmethod
+                async def generate_content(**_kwargs):
+                    return response
+
+    client = GoogleGenerativeAIClient(api_key="key", model="gemini-3-flash", client=Provider())
+    completion = await client.create([], None)
+
+    assert completion.content == "hello"
+    assert completion.reasoning_content == "ponder"
+    assert completion.tool_calls == (ParsedToolCall("fc_1", "bash", '{"command": "pwd"}'),)
+    assert completion.usage == ModelUsage(4, 6, 0, 0)
+    assert completion.finish_reason == "stop"
+
+
+def test_google_adapter_converts_canonical_messages() -> None:
+    from agent.infrastructure.llm.google_generative_ai import _request
+
+    messages = [
+        {"role": "system", "content": "be brief"},
+        {"role": "user", "content": "hello"},
+        {"role": "assistant", "content": "", "tool_calls": [
+            {"id": "call_1", "function": {"name": "bash", "arguments": '{"command":"pwd"}'}},
+        ]},
+        {"role": "tool", "tool_call_id": "call_1", "content": "/workspace"},
+    ]
+    tools = [{"type": "function", "function": {"name": "bash", "description": "run", "parameters": {"type": "object"}}}]
+
+    contents, config = _request(messages, tools, True)
+
+    assert config == {
+        "system_instruction": "be brief",
+        "tools": [{"function_declarations": [{"name": "bash", "description": "run", "parameters": {"type": "object"}}]}],
+    }
+    assert contents == [
+        {"role": "user", "parts": [{"text": "hello"}]},
+        {"role": "model", "parts": [{"function_call": {"name": "bash", "args": {"command": "pwd"}, "id": "call_1"}}]},
+        {"role": "user", "parts": [{"function_response": {"name": "bash", "response": {"output": "/workspace"}, "id": "call_1"}}]},
+    ]
+
+
+def test_google_adapter_merges_tool_results_and_omits_ids_for_older_models() -> None:
+    from agent.infrastructure.llm.google_generative_ai import _request
+
+    messages = [
+        {"role": "assistant", "tool_calls": [
+            {"id": "a", "function": {"name": "bash", "arguments": "{}"}},
+            {"id": "b", "function": {"name": "read_file", "arguments": "{}"}},
+        ]},
+        {"role": "tool", "tool_call_id": "a", "content": "1"},
+        {"role": "tool", "tool_call_id": "b", "content": "2"},
+    ]
+
+    contents, config = _request(messages, None, False)
+
+    assert config == {}
+    assert contents == [
+        {"role": "model", "parts": [
+            {"function_call": {"name": "bash", "args": {}}},
+            {"function_call": {"name": "read_file", "args": {}}},
+        ]},
+        {"role": "user", "parts": [
+            {"function_response": {"name": "bash", "response": {"output": "1"}}},
+            {"function_response": {"name": "read_file", "response": {"output": "2"}}},
+        ]},
+    ]
+
+
+@pytest.mark.asyncio
+async def test_provider_service_creates_google_client_from_environment(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("GEMINI_API_KEY", "gem")
+    settings = _settings(tmp_path, provider="google", model="gemini-3-flash")
+    service = _service(tmp_path, settings, monkeypatch)
+
+    from agent.infrastructure.llm.google_generative_ai import GoogleGenerativeAIClient
+
+    client = await service.create_chat_client(str(tmp_path), ModelSelection("google", "gemini-3-flash", ""))
+    assert isinstance(client, GoogleGenerativeAIClient)
+    await client.close()

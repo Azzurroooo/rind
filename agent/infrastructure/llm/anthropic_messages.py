@@ -12,9 +12,11 @@ from agent.domain.errors import ProviderError
 from agent.domain.models import ModelCompletion, ModelStreamEvent, ModelUsage
 from agent.domain.tool_payload import ParsedToolCall
 
+from .cancellation import await_with_cancellation
+
 
 class AnthropicMessagesClient(ChatClient):
-    def __init__(self, api_key: str, model: str, reasoning_effort: str = "", base_url: str | None = None, async_client: Any | None = None) -> None:
+    def __init__(self, api_key: str, model: str, base_url: str | None = None, async_client: Any | None = None) -> None:
         if async_client is None:
             try:
                 import anthropic
@@ -26,7 +28,6 @@ class AnthropicMessagesClient(ChatClient):
             async_client = anthropic.AsyncAnthropic(**kwargs)
         self._client = async_client
         self._model = model
-        self._reasoning_effort = reasoning_effort
 
     async def create(self, messages, tools=None, cancellation_token: CancellationToken | None = None) -> ModelCompletion:
         system, converted = _messages(messages)
@@ -35,7 +36,7 @@ class AnthropicMessagesClient(ChatClient):
             payload["system"] = system
         if tools:
             payload["tools"] = [_anthropic_tool(tool) for tool in tools]
-        response = await _await(self._client.messages.create(**payload), cancellation_token)
+        response = await await_with_cancellation(self._client.messages.create(**payload), cancellation_token)
         return _completion(response)
 
     async def stream(self, messages, tools=None, cancellation_token: CancellationToken | None = None) -> AsyncIterator[ModelStreamEvent]:
@@ -46,7 +47,7 @@ class AnthropicMessagesClient(ChatClient):
         if tools:
             payload["tools"] = [_anthropic_tool(tool) for tool in tools]
         try:
-            response = await _await(self._client.messages.create(**payload), cancellation_token)
+            response = await await_with_cancellation(self._client.messages.create(**payload), cancellation_token)
             async for raw in response:
                 if cancellation_token and cancellation_token.is_cancelled:
                     raise asyncio.CancelledError(cancellation_token.reason)
@@ -148,21 +149,6 @@ def _usage(value):
     if value is None:
         return None
     return ModelUsage(int(_get(value, "input_tokens") or 0), int(_get(value, "output_tokens") or 0), int(_get(value, "cache_read_input_tokens") or 0), 0)
-
-
-async def _await(awaitable, cancellation_token):
-    task = asyncio.create_task(awaitable)
-    if cancellation_token is None:
-        return await task
-    cancel = asyncio.create_task(cancellation_token.wait())
-    done, _ = await asyncio.wait((task, cancel), return_when=asyncio.FIRST_COMPLETED)
-    if cancel in done:
-        task.cancel()
-        await asyncio.gather(task, return_exceptions=True)
-        raise asyncio.CancelledError(cancellation_token.reason)
-    cancel.cancel()
-    await asyncio.gather(cancel, return_exceptions=True)
-    return task.result()
 
 
 def _get(value, key):
