@@ -300,7 +300,10 @@ function usageHeroLines(totals, inner) {
 }
 
 const HEATMAP_WINDOW_DAYS = 90;
-const HEATMAP_LEVEL_CELLS = ["·", "░", "▒", "▓", "█"];
+// ASCII density scale only: middle dot and every shaded block (U+2580-U+259F,
+// U+00B7) are East Asian Ambiguous and render full-width in CJK terminals,
+// shattering the grid. ASCII glyphs keep one cell everywhere.
+const HEATMAP_LEVEL_CELLS = [" ", ".", ":", "#", "@"];
 const HEATMAP_MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 const HEATMAP_ROW_LABELS = ["   ", "Mon", "   ", "Wed", "   ", "Fri", "   "];
 
@@ -317,12 +320,10 @@ function heatmapRows(byDay, now = new Date()) {
   }
   const peak = Math.max(1, ...tokens.values());
   const monthCells = Array.from({ length: weeks.length * 2 }, () => " ");
-  let previousMonth = -1;
   weeks.forEach((week, index) => {
-    const anchor = week.find(Boolean);
-    if (anchor && anchor.getMonth() !== previousMonth) {
-      monthCells.splice(index * 2, 3, HEATMAP_MONTHS[anchor.getMonth()]);
-      previousMonth = anchor.getMonth();
+    const firstOfMonth = week.find((day) => day && day.getDate() === 1);
+    if (firstOfMonth) {
+      monthCells.splice(index * 2, 3, HEATMAP_MONTHS[firstOfMonth.getMonth()]);
     }
   });
   const rows = Array.from({ length: 7 }, () => "");
@@ -335,14 +336,13 @@ function heatmapRows(byDay, now = new Date()) {
   return [
     `    ${monthCells.join("")}`,
     ...rows.map((row, index) => `${HEATMAP_ROW_LABELS[index]} ${row}`),
-    dim(`Less ${HEATMAP_LEVEL_CELLS.join(" ")} More`),
+    dim(`Less ${HEATMAP_LEVEL_CELLS.slice(1).join(" ")} More`),
   ];
 }
 
 function heatCell(share) {
   const level = share <= 0 ? 0 : Math.min(4, 1 + Math.floor(share * 4));
-  const cell = HEATMAP_LEVEL_CELLS[level];
-  return level === 0 ? dim(cell) : paint.success(cell);
+  return level === 0 ? " " : paint.success(HEATMAP_LEVEL_CELLS[level]);
 }
 
 function dayKey(date) {

@@ -160,10 +160,10 @@ test("usage board page 2 renders the locked layout", () => {
   assert.ok((lines[5].match(/[A-Z][a-z]{2}/g) || []).length >= 3, "quarter window spans several months");
   const weekdayLabels = ["   ", "Mon", "   ", "Wed", "   ", "Fri", "   "];
   lines.slice(6, 13).forEach((line, index) => {
-    assert.match(line, new RegExp(`^│ ${weekdayLabels[index]}[ ·░▒▓█]`), `weekday row ${index}`);
+    assert.match(line, new RegExp(`^│ ${weekdayLabels[index]}[ .:#@]`), `weekday row ${index}`);
   });
-  assert.equal(lines[13], "│ Less · ░ ▒ ▓ █ More                                                                              │");
-  assert.match(lines[todayRowIndex(lines)], /█ +│$/, "today's peak lands on its weekday row");
+  assert.equal(lines[13], "│ Less . : # @ More                                                                                │");
+  assert.match(lines[todayRowIndex(lines)], /@ +│$/, "today's peak lands on its weekday row");
   assert.match(lines[15], /^│ By model\s+│$/);
   assert.match(lines.at(-2), /^│ 6 compaction calls · Tab switch page · Esc exit\s+│$/);
   assert.equal(page2(), page2());
