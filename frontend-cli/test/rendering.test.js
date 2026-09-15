@@ -6,6 +6,7 @@ import path from "node:path";
 import { AssistantRenderer } from "../lib/assistant-renderer.js";
 import { AssistantMessage } from "../lib/components/assistant-message.js";
 import { resetTheme, setTheme } from "../lib/theme.js";
+import { textWidth } from "../lib/text-width.js";
 import {
   answerPromptText,
   answerPlaceholderText,
@@ -47,7 +48,6 @@ import {
   turnCompletedLine,
   userInputText,
 } from "../lib/rendering.js";
-import { textWidth } from "../lib/text-width.js";
 
 test("startupText includes resume preview when provided", () => {
   assert.equal(
@@ -358,7 +358,7 @@ test("slashMenuText keeps the selected command visible", () => {
 test("authChoiceFrame renders a full provider box with selection", () => {
   const text = authChoiceFrame({
     title: "Provider",
-    options: ["openai · OpenAI · not configured", "deepseek · DeepSeek · stored"],
+    options: ["openai · OpenAI · not configured", "deepseek · DeepSeek · not configured"],
     selectedIndex: 1,
     width: 64,
   });
@@ -368,9 +368,10 @@ test("authChoiceFrame renders a full provider box with selection", () => {
   assert.ok(lines.at(-2).startsWith("└"));
   assert.match(lines[1], /openai · OpenAI · not configured\s+│$/);
   assert.ok(lines[2].startsWith("│ › deepseek"));
-  assert.match(lines[2], /deepseek · DeepSeek · stored\s+│$/);
+  assert.match(lines[2], /deepseek · DeepSeek · not configured\s+│$/);
   assert.match(lines[4], /↑↓ select · enter choose · esc cancel/);
   assert.equal(authChoiceFrame({ title: "Provider", options: [], selectedIndex: 0 }), "");
+  assert.equal(new Set(lines.filter(Boolean).map((line) => textWidth(line))).size, 1, "all box rows share one width");
 });
 
 test("authSecretFrame masks secrets and places the caret", () => {
@@ -390,6 +391,7 @@ test("authSecretFrame masks secrets and places the caret", () => {
   assert.match(lines[4], /enter submit · esc cancel/);
   assert.ok(lines.at(-2).startsWith("└"));
   assert.deepEqual(frame.cursor, { line: 2, column: 18 });
+  assert.equal(new Set(lines.filter(Boolean).map((line) => textWidth(line))).size, 1, "all box rows share one width");
 });
 
 test("authSecretFrame shows a placeholder and clips long values", () => {

@@ -761,11 +761,11 @@ export function authChoiceFrame({ title = "", options = [], selectedIndex = 0, w
 }
 
 function authFrameTitle(title, box) {
-  const label = clipCells(String(title || "").trim(), Math.max(1, box - 6));
+  const label = clipCells(String(title || "").trim(), Math.max(1, box - 7));
   if (!label) {
     return startupBannerBorder("┌", "┐", box);
   }
-  const dashes = Math.max(1, box - 2 - visibleLength(label) - 2);
+  const dashes = Math.max(1, box - visibleLength(label) - 5);
   return dim(`┌─ ${label} ${"─".repeat(dashes)}┐`);
 }
 
