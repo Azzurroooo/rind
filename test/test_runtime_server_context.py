@@ -12,6 +12,8 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
+from agent.infrastructure.auth import CredentialStore
+from agent.infrastructure.llm import ProviderServiceImpl
 from agent.infrastructure.persistence import JsonlSessionStore
 from agent.infrastructure.persistence.usage_ledger import append_usage_record
 from agent.runtime.server.stdio import WorkerStdioRuntimeServer
@@ -35,7 +37,10 @@ class _FakeWorker:
         self.session_id = SESSION_ID
         self.session_dir = str(tmp_path / "sessions")
         self.execution = _FakeExecution()
-        self.repository = SessionRepository(session_dir=self.session_dir)
+        self.repository = SessionRepository(
+            session_dir=self.session_dir,
+            provider_service=ProviderServiceImpl(CredentialStore(tmp_path / "auth.json")),
+        )
         self.summary_calls = []
 
     async def usage_summary(self, days: int) -> dict:

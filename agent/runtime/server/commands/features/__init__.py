@@ -5,7 +5,6 @@ from __future__ import annotations
 from .compact import COMMAND as COMPACT_COMMAND
 from .help import build_help_command
 from .init import COMMAND as INIT_COMMAND
-from .login import COMMAND as LOGIN_COMMAND
 from .model import COMMAND as MODEL_COMMAND
 from .sessions import COMMAND as SESSIONS_COMMAND
 from .skill import COMMAND as SKILL_COMMAND
@@ -26,7 +25,6 @@ def build_command_infos() -> tuple[SlashCommandInfo, ...]:
             INIT_COMMAND,
             COMPACT_COMMAND,
             MODEL_COMMAND,
-            LOGIN_COMMAND,
         )
     )
     return tuple(commands)

@@ -6,6 +6,7 @@ import {
   createRuntimeRequest,
   isRuntimeEvent,
   isRuntimeResponse,
+  isRuntimeRequest,
   runtimeMethods,
   runtimeRequestId,
 } from "./runtime-protocol.js";
@@ -51,6 +52,7 @@ export function createRuntimeClient({
   rindHome = process.env.RIND_HOME,
   runtimePath = process.env.RIND_RUNTIME_PATH || "",
   onMessage = null,
+  onRequest = null,
   onStderr = () => {},
   onExit = () => {},
 }) {
@@ -159,6 +161,21 @@ export function createRuntimeClient({
     }
     if (isRuntimeEvent(message)) {
       handleEvent(message);
+      return;
+    }
+    if (message?.kind === "event" && message.method === "rind/auth/update") {
+      handleEvent?.(message);
+      return;
+    }
+    if (isRuntimeRequest(message)) {
+      Promise.resolve(onRequest?.(message) || {})
+        .then((result) => child?.stdin?.write(JSON.stringify({ kind: "request", request_id: message.request_id, method: message.method, params: { value: result?.value ?? result ?? "" } }) + "\n"))
+        .catch((error) => child?.stdin?.write(JSON.stringify({
+          kind: "request",
+          request_id: message.request_id,
+          method: message.method,
+          params: { value: "" },
+        }) + "\n"));
     }
   }
 

@@ -48,7 +48,7 @@ def test_records_group_by_day_within_the_window():
     assert summary["days"] == 7
     assert summary["totals"]["samples"] == 3
     assert summary["totals"]["total"] == 600
-    assert [row["day"] for row in summary["by_day"]] == ["09-10", "09-09", "09-08"]
+    assert [row["day"] for row in summary["by_day"]] == ["2026-09-10", "2026-09-09", "2026-09-08"]
     assert [row["tokens"] for row in summary["by_day"]] == [300, 200, 100]
 
 
@@ -60,7 +60,7 @@ def test_days_filter_boundary_keeps_today_and_drops_day_eight():
 
     assert summary["totals"]["samples"] == 1
     assert summary["totals"]["total"] == 50
-    assert [row["day"] for row in summary["by_day"]] == ["09-03"]
+    assert [row["day"] for row in summary["by_day"]] == ["2026-09-03"]
 
 
 def test_by_model_adds_up_and_orders_by_volume():
@@ -77,6 +77,17 @@ def test_by_model_adds_up_and_orders_by_volume():
         ("small", 50, 1),
     ]
     assert sum(row["tokens"] for row in summary["by_model"]) == summary["totals"]["total"]
+
+
+def test_by_model_keeps_only_the_top_five_by_volume():
+    records = [
+        _record(_iso(NOW), model=f"m{index}", total=10 * (index + 1))
+        for index in range(7)
+    ]
+
+    summary = summarize_usage(records, 7, now=NOW)
+
+    assert [row["model"] for row in summary["by_model"]] == ["m6", "m5", "m4", "m3", "m2"]
 
 
 def test_compaction_samples_are_counted_separately():
@@ -133,7 +144,7 @@ def test_day_buckets_follow_the_record_own_offset():
 
     summary = summarize_usage([record], 7, now=NOW)
 
-    assert [row["day"] for row in summary["by_day"]] == ["09-10"]
+    assert [row["day"] for row in summary["by_day"]] == ["2026-09-10"]
     assert summary["by_day"][0]["tokens"] == 77
 
 

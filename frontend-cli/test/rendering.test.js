@@ -6,6 +6,7 @@ import path from "node:path";
 import { AssistantRenderer } from "../lib/assistant-renderer.js";
 import { AssistantMessage } from "../lib/components/assistant-message.js";
 import { resetTheme, setTheme } from "../lib/theme.js";
+import { textWidth } from "../lib/text-width.js";
 import {
   answerPromptText,
   answerPlaceholderText,
@@ -22,6 +23,8 @@ import {
   inputHintText,
   interruptText,
   modelListErrorText,
+  authChoiceFrame,
+  authSecretFrame,
   modelMenuText,
   planUpdatedLine,
   sessionMenuText,
@@ -45,7 +48,6 @@ import {
   turnCompletedLine,
   userInputText,
 } from "../lib/rendering.js";
-import { textWidth } from "../lib/text-width.js";
 
 test("startupText includes resume preview when provided", () => {
   assert.equal(
@@ -353,16 +355,85 @@ test("slashMenuText keeps the selected command visible", () => {
   );
 });
 
-test("modelMenuText renders current model and selection", () => {
+test("authChoiceFrame renders a full provider box with selection", () => {
+  const text = authChoiceFrame({
+    title: "Provider",
+    options: ["openai · OpenAI · not configured", "deepseek · DeepSeek · not configured"],
+    selectedIndex: 1,
+    width: 64,
+  });
+
+  const lines = text.split("\n");
+  assert.ok(lines[0].startsWith("┌─ Login · Provider "));
+  assert.ok(lines.at(-2).startsWith("└"));
+  assert.match(lines[1], /openai · OpenAI · not configured\s+│$/);
+  assert.ok(lines[2].startsWith("│ › deepseek"));
+  assert.match(lines[2], /deepseek · DeepSeek · not configured\s+│$/);
+  assert.match(lines[4], /↑↓ select · enter choose · esc cancel/);
+  assert.equal(authChoiceFrame({ title: "Provider", options: [], selectedIndex: 0 }), "");
+  assert.equal(new Set(lines.filter(Boolean).map((line) => textWidth(line))).size, 1, "all box rows share one width");
+});
+
+test("authChoiceFrame windows long provider lists to keep the selection visible", () => {
+  const options = Array.from({ length: 18 }, (_value, index) => `provider-${index} · Name ${index} · not configured`);
+
+  const top = authChoiceFrame({ title: "Provider", options, selectedIndex: 0, width: 76 }).split("\n");
+  assert.equal(top.filter(Boolean).length, 14); // title + 9 options + ellipsis + blank + hint + border
+  assert.ok(top[1].includes("provider-0"));
+  assert.ok(!top.some((line) => line.includes("provider-9")));
+  assert.ok(top.at(-5).includes("…"));
+  assert.ok(top.some((line) => line.includes("›")));
+
+  const bottom = authChoiceFrame({ title: "Provider", options, selectedIndex: 17, width: 76 }).split("\n");
+  assert.ok(bottom[1].includes("…"));
+  assert.ok(bottom.some((line) => line.includes("provider-17")));
+  assert.ok(!bottom.some((line) => line.includes("provider-7")));
+  assert.ok(bottom.some((line) => line.includes("›")));
+});
+
+test("authSecretFrame masks secrets and places the caret", () => {
+  const frame = authSecretFrame({
+    title: "DeepSeek",
+    message: "API key",
+    kind: "secret",
+    value: "sk-test-1234",
+    width: 64,
+    cursor: { line: 0, column: 12 },
+  });
+
+  const lines = frame.text.split("\n");
+  assert.ok(lines[0].startsWith("┌─ Login · DeepSeek "));
+  assert.match(lines[1], /^│ API key\s+│$/);
+  assert.match(lines[2], /▷ •{12}\s+│$/);
+  assert.match(lines[4], /enter submit · esc cancel/);
+  assert.ok(lines.at(-2).startsWith("└"));
+  assert.deepEqual(frame.cursor, { line: 2, column: 18 });
+  assert.equal(new Set(lines.filter(Boolean).map((line) => textWidth(line))).size, 1, "all box rows share one width");
+});
+
+test("authSecretFrame shows a placeholder and clips long values", () => {
+  const empty = authSecretFrame({ title: "DeepSeek", message: "API key", kind: "secret", value: "", width: 64 });
+  assert.match(empty.text.split("\n")[2], /▷ paste or type the key — hidden\s+│$/);
+
+  const long = authSecretFrame({ title: "x", kind: "text", value: "k".repeat(120), width: 64 });
+  const valueLine = long.text.split("\n")[1];
+  assert.ok(valueLine.length <= 64);
+});
+
+test("modelMenuText renders provider groups, current model and selection", () => {
   assert.equal(
     modelMenuText([
+      { header: true, name: "openai" },
       { name: "model-a", current: true },
+      { header: true, name: "deepseek" },
       { name: "model-b", current: false },
-    ], 1),
+    ], 3),
     [
       "  Model deck",
-      "  · model-a                            current",
-      "  › model-b",
+      "  openai",
+      "    · model-a                            current",
+      "  deepseek",
+      "    › model-b",
       "    ↑↓ select · enter use · esc cancel",
       "",
     ].join("\n"),
@@ -379,14 +450,14 @@ test("modelMenuText keeps the selected model visible", () => {
     modelMenuText(models, 9),
     [
       "  Model deck 3-10/10",
-      "  · model-2",
-      "  · model-3",
-      "  · model-4",
-      "  · model-5",
-      "  · model-6",
-      "  · model-7",
-      "  · model-8",
-      "  › model-9",
+      "    · model-2",
+      "    · model-3",
+      "    · model-4",
+      "    · model-5",
+      "    · model-6",
+      "    · model-7",
+      "    · model-8",
+      "    › model-9",
       "    ↑↓ select · enter use · esc cancel",
       "",
     ].join("\n"),

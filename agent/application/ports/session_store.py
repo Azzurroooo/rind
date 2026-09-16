@@ -17,6 +17,10 @@ class SessionStore(Protocol):
         ...
 
     @property
+    def provider(self) -> str:
+        ...
+
+    @property
     def system_prompt(self) -> str:
         ...
 
@@ -56,6 +60,9 @@ class SessionStore(Protocol):
 
     async def update_model(self, model: str) -> None:
         """Update the model recorded for the active session."""
+        ...
+
+    async def update_selection(self, provider: str, model: str) -> None:
         ...
 
     async def update_reasoning_effort(self, effort: str) -> None:

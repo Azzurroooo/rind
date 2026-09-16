@@ -10,8 +10,7 @@ import traceback
 from pathlib import Path
 from typing import Any
 
-from agent.bootstrap import build_agent_container
-from agent.infrastructure.config import Config, validate_settings
+from agent.infrastructure.config import load_settings
 from agent.infrastructure.persistence import JsonlSessionStore
 from agent.infrastructure.paths import validate_session_id
 from agent.infrastructure.tools.builtin.shell.tool import (
@@ -68,7 +67,7 @@ def _write_startup_error(label: str, exc: Exception, debug: bool) -> None:
 def _worker_server_token(workspace_root: str) -> str:
     """Resolve serverToken without strict settings validation; worker mode must still start."""
     try:
-        return Config.reload(workspace_root).server_token.strip()
+        return load_settings(workspace_root).server_token.strip()
     except Exception:
         return ""
 
@@ -88,90 +87,49 @@ async def async_main(argv: list[str] | None = None, *, server_class: type[Any]) 
         except ValueError as exc:
             _write_startup_error("Session error", exc, args.debug)
             return 1
+    if not getattr(server_class, "worker_mode", False):
+        raise ValueError(f"{server_class.__name__} must be a worker-mode runtime server.")
 
-    if getattr(server_class, "worker_mode", False):
-        from agent.runtime.server.worker import RuntimeWorker
+    from agent.runtime.server.worker import RuntimeWorker
 
-        worker = None
-        server_started = False
-        try:
-            worker = RuntimeWorker(
-                workspace_root=workspace_root,
-                session_id=args.session,
-                resume_latest=args.resume_latest,
-                session_dir=args.session_dir,
-                debug=args.debug,
-                enable_goal=True,
-                enable_user_question=not args.no_user_question,
-            )
-            network_kwargs: dict[str, Any] = {}
-            if getattr(server_class, "network_mode", False):
-                network_kwargs.update({"host": args.host, "port": args.port})
-                token = os.environ.get("RIND_SERVER_TOKEN") or _worker_server_token(workspace_root)
-                if token.strip():
-                    network_kwargs["server_token"] = token.strip()
-            server = server_class(
-                worker,
-                debug=args.debug,
-                background_list=background_list,
-                background_output=background_output,
-                goal_enabled=True,
-                **network_kwargs,
-            )
-            server_started = True
-            try:
-                return await server.run()
-            except Exception:
-                server_started = False
-                raise
-        except Exception as exc:
-            _write_startup_error("Runtime error", exc, args.debug)
-            return 1
-        finally:
-            if worker is not None and not server_started:
-                await worker.close()
-
-    previous_cwd = Path.cwd()
-    container = None
+    worker = None
+    server_started = False
     try:
-        Config.ensure_user_settings_template()
-        settings = Config.reload(workspace_root)
-        validate_settings(settings)
-        os.chdir(workspace_root)
-        container = build_agent_container(
-            settings=settings,
-            session_dir=args.session_dir,
+        worker = RuntimeWorker(
+            workspace_root=workspace_root,
             session_id=args.session,
             resume_latest=args.resume_latest,
+            session_dir=args.session_dir,
+            debug=args.debug,
             enable_goal=True,
             enable_user_question=not args.no_user_question,
-            workspace_root=workspace_root,
         )
+        network_kwargs: dict[str, Any] = {}
+        if getattr(server_class, "network_mode", False):
+            network_kwargs.update({"host": args.host, "port": args.port})
+            token = os.environ.get("RIND_SERVER_TOKEN") or _worker_server_token(workspace_root)
+            if token.strip():
+                network_kwargs["server_token"] = token.strip()
         server = server_class(
-            container.runtime,
-            container.session_store,
+            worker,
             debug=args.debug,
-            model_client_factory=container.provider_client_factory.create_async_client,
-            default_model=container.settings.model,
             background_list=background_list,
             background_output=background_output,
             goal_enabled=True,
+            **network_kwargs,
         )
-        return await server.run()
+        server_started = True
+        try:
+            return await server.run()
+        except Exception:
+            server_started = False
+            raise
     except Exception as exc:
         _write_startup_error("Runtime error", exc, args.debug)
         return 1
     finally:
-        if container is not None:
-            try:
-                await container.session_store.discard_if_empty()
-            except Exception as exc:
-                _write_startup_error("Shutdown error", exc, args.debug)
-            try:
-                await container.chat_client.close()
-            except Exception as exc:
-                _write_startup_error("Shutdown error", exc, args.debug)
-        os.chdir(previous_cwd)
+        if worker is not None and not server_started:
+            await worker.close()
 
 
 def main(argv: list[str] | None = None, *, server_class: type[Any]) -> int:

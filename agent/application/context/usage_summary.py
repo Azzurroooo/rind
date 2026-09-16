@@ -8,6 +8,7 @@ from typing import Any
 
 USAGE_SUMMARY_DEFAULT_DAYS = 7
 USAGE_SUMMARY_MAX_DAYS = 365
+USAGE_SUMMARY_MODEL_LIMIT = 5
 USAGE_SUMMARY_SESSION_LIMIT = 5
 
 
@@ -54,7 +55,7 @@ def summarize_usage(
         totals["samples"] += 1
         if record.get("sampling_kind") == "compact":
             totals["compactions"] += 1
-        day = ts.strftime("%m-%d")
+        day = ts.strftime("%Y-%m-%d")
         by_day[day] = by_day.get(day, 0) + volume
         model = str(record.get("model") or "unknown")
         model_bucket = by_model.setdefault(model, {"tokens": 0, "samples": 0})
@@ -89,7 +90,7 @@ def summarize_usage(
         ],
         "by_model": [
             {"model": model, "tokens": bucket["tokens"], "samples": bucket["samples"]}
-            for model, bucket in sorted(by_model.items(), key=lambda item: (-item[1]["tokens"], item[0]))
+            for model, bucket in sorted(by_model.items(), key=lambda item: (-item[1]["tokens"], item[0]))[:USAGE_SUMMARY_MODEL_LIMIT]
         ],
         "recent_sessions": sorted(
             sessions.values(),

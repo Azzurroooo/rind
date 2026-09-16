@@ -45,6 +45,11 @@ export function createCommandController({
       output.exit?.();
       return true;
     }
+    const auth = parseAuthCommand(text);
+    if (auth) {
+      await (auth.action === "login" ? input.runLogin : input.runLogout)?.(auth.providerId);
+      return true;
+    }
     await runSlashCommand(text);
     return true;
   }
@@ -77,7 +82,7 @@ export function createCommandController({
     if (isContextCommand(text)) {
       const argument = contextArgument(text);
       if (argument) {
-        output.log?.("Custom ranges are not supported yet; showing the last 7 days.");
+        output.log?.("Custom ranges are not supported yet; showing the last 5 days.");
       }
       if (input.isTerminal && input.runContextBoard) {
         await input.runContextBoard();
@@ -145,6 +150,12 @@ export function createCommandController({
     ].flatMap((command) => normalizeCommands([command])),
     applyResult,
   };
+}
+
+function parseAuthCommand(value) {
+  const match = String(value || "").trim().match(/^\/(login|logout)(?:\s+([^\s]+))?$/i);
+  if (!match) return null;
+  return { action: match[1].toLowerCase(), providerId: String(match[2] || "").trim() };
 }
 
 function singleWord(value) {

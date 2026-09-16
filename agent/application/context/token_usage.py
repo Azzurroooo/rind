@@ -145,7 +145,7 @@ def _non_negative_int(value: Any) -> int:
 def _nested_int_attr(value: Any, parent_name: str, child_name: str) -> int:
     parent = _get_attr(value, parent_name)
     if parent is None:
-        return 0
+        return _int_attr(value, child_name)
     return _int_attr(parent, child_name)
 
 

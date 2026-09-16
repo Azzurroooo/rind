@@ -9,12 +9,9 @@ if str(PROJECT_ROOT) not in sys.path:
 from agent.infrastructure.config.settings_loader import (
     DEFAULT_BASE_URL,
     DEFAULT_MODEL,
-    DEFAULT_SETTINGS_TEMPLATE,
     build_default_user_agent,
-    ensure_user_settings_template,
     load_settings,
     project_settings_path,
-    save_settings_patch,
 )
 from agent.version import __version__
 
@@ -162,8 +159,7 @@ def test_load_settings_uses_defaults_when_file_missing(tmp_path, monkeypatch):
 
 def test_load_settings_ignores_environment_configuration(tmp_path, monkeypatch):
     monkeypatch.setattr(Path, "home", lambda: tmp_path)
-    monkeypatch.setenv("RIND_HOME", str(tmp_path / "other-home"))
-    monkeypatch.setenv("RIND_SETTINGS_PATH", str(tmp_path / "other-settings.json"))
+    monkeypatch.setenv("RIND_HOME", str(tmp_path / ".rind"))
     monkeypatch.setenv("OPENAI_API_KEY", "must-not-be-used")
     monkeypatch.setenv("OPENAI_API_BASE", "https://must-not-be-used.example/v1")
     monkeypatch.setenv("DEFAULT_MODEL", "must-not-be-used")
@@ -177,46 +173,6 @@ def test_load_settings_ignores_environment_configuration(tmp_path, monkeypatch):
     assert settings.base_url == DEFAULT_BASE_URL
     assert settings.model == DEFAULT_MODEL
     assert settings.reasoning_effort == ""
-
-
-def test_ensure_user_settings_template_creates_shared_template(tmp_path, monkeypatch):
-    monkeypatch.setattr(Path, "home", lambda: tmp_path)
-    monkeypatch.setenv("RIND_HOME", str(tmp_path / "ignored"))
-    monkeypatch.setenv("RIND_SETTINGS_PATH", str(tmp_path / "ignored.json"))
-
-    path = ensure_user_settings_template()
-
-    assert path == tmp_path / ".rind" / "settings.json"
-    data = json.loads(path.read_text(encoding="utf-8"))
-    assert data == DEFAULT_SETTINGS_TEMPLATE
-
-
-def test_save_settings_patch_updates_shared_settings(tmp_path, monkeypatch):
-    monkeypatch.setattr(Path, "home", lambda: tmp_path)
-    path = write_settings(
-        tmp_path,
-        {"model": "old-model", "apiKey": "secret-key", "baseUrl": "https://example.com/v1"},
-    )
-
-    settings = save_settings_patch({"model": "new-model"})
-    data = json.loads(path.read_text(encoding="utf-8"))
-
-    assert settings.model == "new-model"
-    assert data["model"] == "new-model"
-    assert data["apiKey"] == "secret-key"
-    assert data["baseUrl"] == "https://example.com/v1"
-
-
-def test_save_settings_patch_creates_shared_settings_file(tmp_path, monkeypatch):
-    monkeypatch.setattr(Path, "home", lambda: tmp_path)
-
-    settings = save_settings_patch({"model": "new-model"})
-    path = tmp_path / ".rind" / "settings.json"
-    data = json.loads(path.read_text(encoding="utf-8"))
-
-    assert settings.settings_exists is True
-    assert settings.model == "new-model"
-    assert data["apiKey"] == ""
 
 
 def test_build_default_user_agent_uses_windows_terminal(monkeypatch):

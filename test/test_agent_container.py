@@ -21,12 +21,16 @@ from agent.infrastructure.team import initialize_team_project
 from agent.runtime.core import MessageStreamParser
 
 
-class FakeProviderClientFactory:
-    def __init__(self) -> None:
-        self.client = object()
+class FakeChatClient:
+    async def create(self, messages, tools=None, cancellation_token=None):
+        raise AssertionError("no model calls expected in container tests")
 
-    def create_async_client(self):
-        return self.client
+    async def stream(self, messages, tools=None, cancellation_token=None):
+        raise AssertionError("no model calls expected in container tests")
+        yield
+
+    async def close(self):
+        return None
 
 
 def test_container_explicitly_shares_production_dependencies() -> None:
@@ -41,20 +45,17 @@ def test_container_explicitly_shares_production_dependencies() -> None:
         reasoning_effort="high",
         user_agent="test-agent",
     )
-    provider_client_factory = FakeProviderClientFactory()
+    chat_client = FakeChatClient()
 
     with tempfile.TemporaryDirectory(dir=cache_dir) as session_dir:
         container = build_agent_container(
             settings=settings,
-            provider_client_factory=provider_client_factory,
+            chat_client=chat_client,
             session_dir=session_dir,
         )
 
         assert isinstance(container, AgentContainer)
         assert container.settings is settings
-        assert container.provider_client_factory is provider_client_factory
-        assert container.chat_client._client is provider_client_factory.client
-        assert container.chat_client.model == "test-model"
         assert container.runtime._turn_runner is container.turn_runner
         assert container.runtime._session_store is container.session_store
         assert container.turn_runner._tool_processor is container.tool_processor
@@ -76,7 +77,7 @@ def test_container_reuses_worker_safe_resources() -> None:
         reasoning_effort="high",
         user_agent="test-agent",
     )
-    provider_client_factory = FakeProviderClientFactory()
+    chat_client = FakeChatClient()
     shared = SharedRuntimeResources(
         tool_result_normalizer=ToolResultNormalizer(),
         stream_parser=MessageStreamParser(),
@@ -86,12 +87,12 @@ def test_container_reuses_worker_safe_resources() -> None:
     with tempfile.TemporaryDirectory() as session_dir:
         container = build_agent_container(
             settings=settings,
-            provider_client_factory=provider_client_factory,
+            chat_client=chat_client,
             session_dir=session_dir,
             shared_resources=shared,
         )
 
-    assert container.chat_client._client is provider_client_factory.client
+    assert container.chat_client is chat_client
     assert container.tool_processor._tool_result_normalizer is shared.tool_result_normalizer
     assert container.turn_runner._stream_parser is shared.stream_parser
     assert container.turn_runner._compaction_service is shared.compaction_service
@@ -113,7 +114,7 @@ def test_container_filters_tools_before_building_registry_and_schema() -> None:
     with tempfile.TemporaryDirectory(dir=cache_dir) as session_dir:
         container = build_agent_container(
             settings=settings,
-            provider_client_factory=FakeProviderClientFactory(),
+            chat_client=FakeChatClient(),
             session_dir=session_dir,
             enabled_tools=("read_file",),
         )
@@ -140,12 +141,12 @@ def test_container_can_disable_user_question_tool_for_worker_agents() -> None:
     with tempfile.TemporaryDirectory(dir=cache_dir) as session_dir:
         default_container = build_agent_container(
             settings=settings,
-            provider_client_factory=FakeProviderClientFactory(),
+            chat_client=FakeChatClient(),
             session_dir=session_dir,
         )
         worker_container = build_agent_container(
             settings=settings,
-            provider_client_factory=FakeProviderClientFactory(),
+            chat_client=FakeChatClient(),
             session_dir=session_dir,
             enable_user_question=False,
         )
@@ -174,7 +175,7 @@ def test_container_rejects_unknown_enabled_tools() -> None:
         with pytest.raises(ValueError, match=r"Unknown enabled tool\(s\): missing_tool"):
             build_agent_container(
                 settings=settings,
-                provider_client_factory=FakeProviderClientFactory(),
+                chat_client=FakeChatClient(),
                 session_dir=session_dir,
                 enabled_tools=("missing_tool",),
             )
@@ -195,7 +196,7 @@ def test_container_does_not_resolve_team_agent_outside_an_agent_directory(tmp_pa
 
     container = build_agent_container(
         settings=settings,
-        provider_client_factory=FakeProviderClientFactory(),
+        chat_client=FakeChatClient(),
         session_dir=str(tmp_path / "sessions"),
     )
 
@@ -210,7 +211,7 @@ def test_container_does_not_resolve_team_agent_outside_an_agent_directory(tmp_pa
         monkeypatch.chdir(cwd)
         container = build_agent_container(
             settings=settings,
-            provider_client_factory=FakeProviderClientFactory(),
+            chat_client=FakeChatClient(),
             session_dir=str(tmp_path / f"sessions-outside-{index}"),
         )
 
@@ -238,7 +239,7 @@ def test_container_resolves_team_agent_capsule_context_from_workspace(tmp_path, 
 
     container = build_agent_container(
         settings=settings,
-        provider_client_factory=FakeProviderClientFactory(),
+        chat_client=FakeChatClient(),
         session_dir=str(tmp_path / "sessions"),
     )
 
@@ -277,7 +278,7 @@ def test_explicit_team_workspace_does_not_change_process_cwd(tmp_path, monkeypat
 
     container = build_agent_container(
         settings=settings,
-        provider_client_factory=FakeProviderClientFactory(),
+        chat_client=FakeChatClient(),
         session_dir=str(tmp_path / "sessions"),
         workspace_root=str(workspace),
     )
@@ -310,7 +311,7 @@ def test_secondary_team_agent_cannot_delegate_or_create_agents(tmp_path) -> None
 
     container = build_agent_container(
         settings=settings,
-        provider_client_factory=FakeProviderClientFactory(),
+        chat_client=FakeChatClient(),
         session_dir=str(tmp_path / "sessions"),
         workspace_root=str(secondary_workspace),
     )
@@ -338,7 +339,7 @@ def test_container_rejects_invalid_team_agent_capsule(tmp_path, monkeypatch) -> 
     with pytest.raises(ValueError, match="must be located directly"):
         build_agent_container(
             settings=settings,
-            provider_client_factory=FakeProviderClientFactory(),
+            chat_client=FakeChatClient(),
             session_dir=str(tmp_path / "sessions"),
         )
 
@@ -361,7 +362,7 @@ def test_container_rind_doc_provider_injects_workspace_doc(tmp_path, monkeypatch
     with tempfile.TemporaryDirectory(dir=tmp_path) as session_dir:
         container = build_agent_container(
             settings=settings,
-            provider_client_factory=FakeProviderClientFactory(),
+            chat_client=FakeChatClient(),
             session_dir=session_dir,
             workspace_root=str(workspace),
         )

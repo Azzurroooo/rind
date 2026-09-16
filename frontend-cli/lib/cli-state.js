@@ -7,7 +7,6 @@ export function createCliState() {
     },
     session: {
       info: {},
-      settings: {},
       commands: [],
     },
     turn: {

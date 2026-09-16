@@ -35,13 +35,19 @@ const BREAKDOWN = {
 
 const LATEST_USAGE = { sampling_kind: "assistant", input_tokens: 43850 };
 
+const isoDay = (offset) => {
+  const date = new Date();
+  date.setDate(date.getDate() - offset);
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+};
+
 const SUMMARY = {
-  days: 7,
+  days: 5,
   totals: { input: 1240000, cached: 812000, output: 96000, reasoning: 41000, total: 1336000, samples: 214, compactions: 6 },
   by_day: [
-    { day: "09-09", tokens: 38200 },
-    { day: "09-08", tokens: 21400 },
-    { day: "09-07", tokens: 8900 },
+    { day: isoDay(0), tokens: 38200 },
+    { day: isoDay(1), tokens: 21400 },
+    { day: isoDay(2), tokens: 8900 },
   ],
   by_model: [
     { model: "deepseek-v4-flash", tokens: 1180000, samples: 180 },
@@ -144,13 +150,14 @@ test("usage board page 2 renders the locked layout", () => {
   const text = page2();
   const lines = text.split("\n").map(stripAnsi);
 
-  assert.match(lines[0], /^┌ Token usage · last 7 days ─+ 2\/2 ┐$/);
+  assert.match(lines[0], /^┌ Token usage · last 5 days ─+ 2\/2 ┐$/);
   assert.equal(lines[1], "│ Input 1.24M   Cache hit 812K·65%   Output 96K   Reasoning 41K                                    │");
   assert.equal(lines[2], "│ 214 samples                                                                                      │");
   assert.match(lines[4], /^│ By day\s+│$/);
-  assert.match(lines[5], /^│ {3}09-09  █+\s+38\.2K │$/);
-  assert.match(lines[6], /^│ {3}09-08  █+\s+21\.4K │$/);
-  assert.match(lines[7], /^│ {3}09-07  █+\s+8\.9K │$/);
+  const dayLabel = (offset) => isoDay(offset).slice(5);
+  assert.match(lines[5], new RegExp(`^│ {3}${dayLabel(0)}  █+\\s+38\\.2K │$`));
+  assert.match(lines[6], new RegExp(`^│ {3}${dayLabel(1)}  █+\\s+21\\.4K │$`));
+  assert.match(lines[7], new RegExp(`^│ {3}${dayLabel(2)}  █+\\s+8\\.9K │$`));
   assert.match(lines[9], /^│ By model\s+│$/);
   assert.match(lines.at(-2), /^│ 6 compaction calls · Tab switch page · Esc exit\s+│$/);
   assert.equal(page2(), page2());
@@ -352,14 +359,14 @@ test("non-TTY /context prints both pages as plain frame-less text", async () => 
 
   assert.deepEqual(requests.map((request) => request.method), [methods.contextInspect, methods.usageSummary]);
   assert.deepEqual(requests[0].params, { session_id: "session-a" });
-  assert.deepEqual(requests[1].params, { days: 7 });
+  assert.deepEqual(requests[1].params, { days: 5 });
   assert.equal(logs.length, 2);
   for (const text of logs) {
     assert.equal(text.includes("┌"), false, "frame-less output must not draw borders");
     assert.equal(text.includes("Tab switch page"), false, "interaction hints are meaningless in pipe output");
   }
   assert.match(logs[0], /Context · last sampling/);
-  assert.match(logs[1], /Token usage · last 7 days/);
+  assert.match(logs[1], /Token usage · last 5 days/);
 });
 
 test("/context routes to the board on a TTY and to the report otherwise", async () => {
@@ -402,7 +409,7 @@ test("/context with a custom range explains the fallback and still opens the boa
   await controller.handle("/context 30");
 
   assert.deepEqual(calls, [
-    ["log", "Custom ranges are not supported yet; showing the last 7 days."],
+    ["log", "Custom ranges are not supported yet; showing the last 5 days."],
     ["board"],
   ]);
 });
@@ -505,14 +512,14 @@ test("board renders full screen on a real TUI, Tab flips pages, Esc returns to t
   assert.match(flat, /Context · last sampling · turn 8f3a/);
   assert.match(flat, /1\/2/);
   assert.match(flat, /Tool results\s+15,980/);
-  assert.equal(flat.includes("Token usage · last 7 days"), false, "page 2 stays hidden on page 1");
+  assert.equal(flat.includes("Token usage · last 5 days"), false, "page 2 stays hidden on page 1");
 
   input.send("\t");
   await new Promise((resolve) => setTimeout(resolve, 25));
   await virtual.flush();
   viewport = virtual.getViewport().map((line) => stripAnsi(line)).filter((line) => line.trim());
   flat = viewport.join("\n");
-  assert.match(flat, /Token usage · last 7 days/);
+  assert.match(flat, /Token usage · last 5 days/);
   assert.match(flat, /2\/2/);
   assert.match(flat, /6 compaction calls/);
   assert.equal(flat.includes("Tool results"), false, "page 1 stays hidden on page 2");

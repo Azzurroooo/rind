@@ -9,8 +9,8 @@ import platform
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
-import uuid
 
+from agent.infrastructure.paths import resolve_rind_home
 from agent.version import __version__
 
 
@@ -60,15 +60,9 @@ def _sanitize_header_segment(value: str) -> str:
 
 DEFAULT_MODEL = "gpt-4o-mini"
 DEFAULT_BASE_URL = "https://api.openai.com/v1"
+DEFAULT_PROVIDER = "openai-compatible"
 REASONING_EFFORTS = ("low", "medium", "high", "xhigh", "max")
 DEFAULT_USER_AGENT = build_default_user_agent()
-DEFAULT_SETTINGS_TEMPLATE = {
-    "model": "gpt-5.5",
-    "apiKey": "",
-    "baseUrl": "",
-    "reasoningEffort": "xhigh",
-    "serverToken": "",
-}
 
 
 @dataclass(frozen=True, slots=True)
@@ -81,17 +75,12 @@ class AppSettings:
     reasoning_effort: str
     user_agent: str = DEFAULT_USER_AGENT
     server_token: str = ""
-
-
-def validate_settings(settings: AppSettings) -> None:
-    if not settings.api_key:
-        raise ValueError(
-            f"OpenAI apiKey is required. Set apiKey in {settings.settings_path}."
-        )
+    provider: str = DEFAULT_PROVIDER
+    api: str = "openai-chat"
 
 
 def default_settings_path() -> Path:
-    return (Path.home() / ".rind" / "settings.json").resolve()
+    return (resolve_rind_home() / "settings.json").resolve()
 
 
 def project_settings_path(workspace_root: str | Path) -> Path:
@@ -120,6 +109,7 @@ def normalize_reasoning_effort(value: Any) -> str:
 
 
 def _build_settings(settings_path: Path, data: dict[str, Any]) -> AppSettings:
+    provider = _string(data, "provider") or DEFAULT_PROVIDER
     return AppSettings(
         settings_path=settings_path,
         settings_exists=settings_path.exists(),
@@ -129,6 +119,8 @@ def _build_settings(settings_path: Path, data: dict[str, Any]) -> AppSettings:
         reasoning_effort=_string(data, "reasoningEffort"),
         user_agent=DEFAULT_USER_AGENT,
         server_token=_string(data, "serverToken"),
+        provider=provider,
+        api=_string(data, "api") or "openai-chat",
     )
 
 
@@ -142,32 +134,15 @@ def _read_optional_json_object(path: Path) -> dict[str, Any]:
 
 
 def _has_complete_project_settings(data: dict[str, Any]) -> bool:
+    provider = _string(data, "provider")
+    model = _string(data, "model")
+    if provider and model and (provider != "openai-compatible" or _string(data, "baseUrl")):
+        return True
     api_key = _string(data, "apiKey")
     base_url = _string(data, "baseUrl")
     model = _string(data, "model")
     parsed = urlparse(base_url)
     return bool(api_key and model and parsed.scheme in {"http", "https"} and parsed.netloc)
-
-
-def ensure_user_settings_template() -> Path | None:
-    settings_path = default_settings_path()
-    settings_path.parent.mkdir(parents=True, exist_ok=True)
-    if not settings_path.exists():
-        settings_path.write_text(
-            json.dumps(DEFAULT_SETTINGS_TEMPLATE, ensure_ascii=False, indent=2) + "\n",
-            encoding="utf-8",
-        )
-    return settings_path
-
-
-def save_settings_patch(patch: dict[str, Any]) -> AppSettings:
-    if not isinstance(patch, dict):
-        raise ValueError("Settings patch must be a JSON object")
-    settings_path = default_settings_path()
-    data = _read_json_object(settings_path) if settings_path.exists() else dict(DEFAULT_SETTINGS_TEMPLATE)
-    data.update(patch)
-    _write_json_object(settings_path, data)
-    return load_settings()
 
 
 def _read_json_object(path: Path) -> dict[str, Any]:
@@ -178,17 +153,6 @@ def _read_json_object(path: Path) -> dict[str, Any]:
     if not isinstance(value, dict):
         raise ValueError(f"Invalid settings.json: {path} must contain a JSON object")
     return value
-
-
-def _write_json_object(path: Path, data: dict[str, Any]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
-    try:
-        tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-        os.replace(tmp, path)
-    finally:
-        if tmp.exists():
-            tmp.unlink()
 
 
 def _string(data: dict[str, Any], key: str) -> str:

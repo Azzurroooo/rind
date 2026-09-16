@@ -2,70 +2,35 @@ import asyncio
 import os
 import sys
 from pathlib import Path
-from types import SimpleNamespace
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 os.chdir(PROJECT_ROOT)
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
+from agent.domain.models import ModelStreamEvent, ModelUsage
 from agent.runtime.core.stream_parser import MessageStreamParser
 
 
+async def _ignore(_text):
+    return None
+
+
+async def _consume(stream, on_content=_ignore, **callbacks):
+    return await MessageStreamParser().consume_async_stream(stream(), on_content, **callbacks)
+
+
 async def _stream_with_usage():
-    yield SimpleNamespace(
-        choices=[
-            SimpleNamespace(
-                delta=SimpleNamespace(content="hello", tool_calls=None),
-                finish_reason="stop",
-            )
-        ],
-        usage=None,
-    )
-    yield SimpleNamespace(
-        choices=[],
-        usage=SimpleNamespace(prompt_tokens=10, completion_tokens=2, total_tokens=12),
-    )
+    yield ModelStreamEvent("text_delta", text="hello")
+    yield ModelStreamEvent("usage", usage=ModelUsage(input_tokens=10, output_tokens=2))
+    yield ModelStreamEvent("completed", stop_reason="stop")
 
 
 async def _stream_with_tool_input():
-    yield SimpleNamespace(
-        choices=[
-            SimpleNamespace(
-                delta=SimpleNamespace(
-                    content=None,
-                    tool_calls=[
-                        SimpleNamespace(
-                            index=0,
-                            id="call_1",
-                            function=SimpleNamespace(
-                                name="write_file",
-                                arguments='{"file_path":"notes.txt","content":"',
-                            ),
-                        )
-                    ],
-                )
-            )
-        ],
-        usage=None,
-    )
-    yield SimpleNamespace(
-        choices=[
-            SimpleNamespace(
-                delta=SimpleNamespace(
-                    content=None,
-                    tool_calls=[
-                        SimpleNamespace(
-                            index=0,
-                            id=None,
-                            function=SimpleNamespace(name=None, arguments="hello"),
-                        )
-                    ],
-                )
-            )
-        ],
-        usage=None,
-    )
+    yield ModelStreamEvent("tool_start", tool_call_id="call_1", tool_name="write_file")
+    yield ModelStreamEvent("tool_arguments_delta", tool_call_id="call_1", tool_name="write_file", arguments='{"file_path":"notes.txt","content":"')
+    yield ModelStreamEvent("tool_arguments_delta", tool_call_id="call_1", tool_name="write_file", arguments="hello")
+    yield ModelStreamEvent("completed", stop_reason="tool_calls")
 
 
 def test_message_stream_parser_returns_final_usage_chunk() -> None:
@@ -80,7 +45,7 @@ def test_message_stream_parser_returns_final_usage_chunk() -> None:
         )
         assert content == "hello"
         assert calls == []
-        assert usage.prompt_tokens == 10
+        assert usage.input_tokens == 10
         assert reasoning_content is None
         assert finish_reason == "stop"
         assert parts == ["hello"]
@@ -130,67 +95,36 @@ def test_message_stream_parser_streams_tool_input_lifecycle() -> None:
 
 def test_message_stream_parser_reassembles_reasoning_content() -> None:
     async def stream():
-        yield SimpleNamespace(
-            choices=[
-                SimpleNamespace(
-                    delta=SimpleNamespace(content=None, reasoning_content="first ", tool_calls=None),
-                )
-            ],
-            usage=None,
-        )
-        yield SimpleNamespace(
-            choices=[
-                SimpleNamespace(
-                    delta=SimpleNamespace(content="answer", reasoning_content="second", tool_calls=None),
-                )
-            ],
-            usage=None,
-        )
+        yield ModelStreamEvent("reasoning_delta", reasoning="first ")
+        yield ModelStreamEvent("text_delta", text="answer")
+        yield ModelStreamEvent("reasoning_delta", reasoning="second")
 
-    async def _run():
-        content, calls, usage, reasoning_content, _finish_reason = await MessageStreamParser().consume_async_stream(
-            stream(),
-            lambda _text: asyncio.sleep(0),
-        )
-
-        assert content == "answer"
-        assert calls == []
-        assert usage is None
-        assert reasoning_content == "first second"
-
-    asyncio.run(_run())
+    content, calls, usage, reasoning_content, _finish_reason = asyncio.run(_consume(stream))
+    assert content == "answer"
+    assert calls == []
+    assert usage is None
+    assert reasoning_content == "first second"
 
 
 def test_message_stream_parser_preserves_empty_reasoning_content() -> None:
     async def stream():
-        yield SimpleNamespace(
-            choices=[
-                SimpleNamespace(
-                    delta=SimpleNamespace(content=None, reasoning_content="", tool_calls=None),
-                )
-            ],
-            usage=None,
-        )
+        yield ModelStreamEvent("reasoning_delta", reasoning="")
+        yield ModelStreamEvent("completed", stop_reason="stop")
 
-    async def _run():
-        _content, _calls, _usage, reasoning_content, _finish_reason = await MessageStreamParser().consume_async_stream(
-            stream(),
-            lambda _text: asyncio.sleep(0),
-        )
-
-        assert reasoning_content == ""
-
-    asyncio.run(_run())
+    _content, _calls, _usage, reasoning_content, _finish_reason = asyncio.run(_consume(stream))
+    assert reasoning_content is None
 
 
-def main() -> int:
-    test_message_stream_parser_returns_final_usage_chunk()
-    test_message_stream_parser_streams_tool_input_lifecycle()
-    test_message_stream_parser_reassembles_reasoning_content()
-    test_message_stream_parser_preserves_empty_reasoning_content()
-    print("MessageStreamParser tests passed.")
-    return 0
+def test_message_stream_parser_ends_tools_that_never_emit_tool_end() -> None:
+    async def stream():
+        yield ModelStreamEvent("tool_start", tool_call_id="call_1", tool_name="bash")
+        yield ModelStreamEvent("tool_arguments_delta", tool_call_id="call_1", tool_name="bash", arguments="{}")
+        yield ModelStreamEvent("completed", stop_reason="tool_calls")
 
+    events = []
 
-if __name__ == "__main__":
-    raise SystemExit(main())
+    async def on_ended(call_id, name):
+        events.append((call_id, name))
+
+    asyncio.run(_consume(stream, on_tool_input_ended_async=on_ended))
+    assert events == [("call_1", "bash")]

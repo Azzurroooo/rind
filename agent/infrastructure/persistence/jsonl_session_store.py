@@ -97,11 +97,13 @@ class JsonlSessionStore(SessionStore):
         session_type: str | None = None,
         parent_session_id: str | None = None,
         reasoning_effort: str = "",
+        provider: str = "openai-compatible",
     ):
         self._session_dir = session_dir
         self._session_id = session_id
         self._resume_latest = resume_latest
         self._model = model
+        self._provider = str(provider or "openai-compatible").strip()
         from agent.infrastructure.config.settings_loader import normalize_reasoning_effort
 
         self._reasoning_effort = normalize_reasoning_effort(reasoning_effort)
@@ -135,6 +137,10 @@ class JsonlSessionStore(SessionStore):
     @property
     def model(self) -> str | None:
         return self._model
+
+    @property
+    def provider(self) -> str:
+        return self._provider
 
     @property
     def reasoning_effort(self) -> str:
@@ -306,6 +312,7 @@ class JsonlSessionStore(SessionStore):
             session_type=self._session_type,
             parent_session_id=self._parent_session_id,
             reasoning_effort=self._reasoning_effort,
+            provider=self._provider,
         )
         self._files.write_json(self._session_paths["meta"], self._session_meta)
 
@@ -338,6 +345,9 @@ class JsonlSessionStore(SessionStore):
             self._session_meta["goal"] = normalize_goal(self._session_meta.get("goal"))
         configured_model = str(meta.get("model") or "").strip()
         self._model = configured_model or self._model
+        self._provider = str(meta.get("provider") or "openai-compatible").strip()
+        if not meta.get("provider"):
+            self._session_meta["provider"] = self._provider
         from agent.infrastructure.config.settings_loader import normalize_reasoning_effort
 
         try:
@@ -412,6 +422,7 @@ class JsonlSessionStore(SessionStore):
             "last_preview": self._last_preview,
             "projected_caches": dict(self._projected_caches),
             "model": self._model,
+            "provider": self._provider,
             "reasoning_effort": self._reasoning_effort,
             "msg_repo": self._msg_repo,
             "tool_repo": self._tool_repo,
@@ -718,6 +729,21 @@ class JsonlSessionStore(SessionStore):
                 self._session_meta["model"] = clean
                 self._persist_meta_sync()
 
+            await asyncio.to_thread(_persist)
+
+    async def update_selection(self, provider: str, model: str) -> None:
+        clean_provider = str(provider or "").strip()
+        clean_model = str(model or "").strip()
+        if not clean_provider or not clean_model:
+            raise ValueError("Provider and model are required.")
+        async with self._write_lock:
+            def _persist() -> None:
+                self._provider = clean_provider
+                self._model = clean_model
+                if self._session_meta and self._session_paths:
+                    self._session_meta["provider"] = clean_provider
+                    self._session_meta["model"] = clean_model
+                    self._persist_meta_sync()
             await asyncio.to_thread(_persist)
 
     async def update_reasoning_effort(self, effort: str) -> None:

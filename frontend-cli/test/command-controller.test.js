@@ -215,6 +215,7 @@ test("local command catalog stays complete before the runtime starts", async () 
     "help",
     "init",
     "login",
+    "logout",
     "model",
     "sessions",
     "skill",

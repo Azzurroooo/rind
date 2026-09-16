@@ -21,6 +21,7 @@ export function createCliInputActions({
   getCommandController,
   getTaskMonitor,
   getLineInput,
+  getEffortLevels,
   pausePrompt,
   resumePrompt,
   handleSigint,
@@ -172,6 +173,60 @@ export function createCliInputActions({
     return askTtyInput(prompt, placeholder);
   }
 
+  async function handleAuthPrompt(request) {
+    pausePrompt();
+    output.closeAssistant();
+    const params = request?.params || {};
+    try {
+      if (String(params.kind || "") === "select") {
+        return await askAuthChoice(params.message, params.options);
+      }
+      return await askAuthText(params.message, String(params.kind || "text"));
+    } finally {
+      resumePrompt();
+    }
+  }
+
+  function askAuthText(message, kind) {
+    const prompt = String(message || "Input");
+    if (!output.terminalUi) {
+      return askLine(`${prompt}: `);
+    }
+    const keyMatch = prompt.match(/^(.+?)\s+API key$/i);
+    return new Promise((resolve) => {
+      const session = {
+        mode: "auth",
+        authKind: kind,
+        authTitle: keyMatch ? keyMatch[1] : prompt,
+        authMessage: keyMatch ? "API key" : prompt,
+        prompt,
+        editor: createLineEditor(),
+        resolve,
+      };
+      state.input.session = session;
+      state.input.active = true;
+      cancelActiveInput = () => completeTtyInput(session, "", false);
+      output.redraw(true);
+    });
+  }
+
+  function askAuthChoice(message, options) {
+    const values = (Array.isArray(options) ? options : []).map((item) => String(item || "").trim()).filter(Boolean);
+    if (!values.length) return Promise.resolve("");
+    if (!output.terminalUi) {
+      const ids = values.map((value) => value.split(" · ")[0]).join(", ");
+      return askLine(`${String(message || "Select")} [${ids}]: `);
+    }
+    return new Promise((resolve) => {
+      const choiceState = createChoiceMenuState(values, values[0]);
+      const session = { mode: "auth-choice", authTitle: String(message || "Select"), choiceState, resolve };
+      state.input.session = session;
+      state.input.active = true;
+      cancelActiveInput = () => completeTtyInput(session, "", false);
+      output.redraw(true);
+    });
+  }
+
   function askLine(prompt) {
     return new Promise((resolve, reject) => {
       const lineInput = getLineInput();
@@ -254,6 +309,14 @@ export function createCliInputActions({
       handleModelInput(session, event);
       return;
     }
+    if (session.mode === "auth") {
+      handleAuthInput(session, event);
+      return;
+    }
+    if (session.mode === "auth-choice") {
+      handleAuthChoiceInput(session, event);
+      return;
+    }
     if (session.mode === "theme") {
       handleThemeInput(session, event);
       return;
@@ -330,8 +393,9 @@ export function createCliInputActions({
   function handleModelInput(session, key) {
     const modified = key.ctrl || key.alt || key.shift;
     if (!modified && (key.name === "enter" || key.name === "return")) {
-      const model = session.modelState.selectedModel()?.name || "";
-      completeTtyInput(session, model, Boolean(model), "", model ? `/model set ${model}` : "");
+      const item = session.modelState.selectedModel();
+      const model = item?.modelId || item?.name || "";
+      completeTtyInput(session, item || "", Boolean(model), "", model ? `/model set ${model}` : "");
       return;
     }
     if (!modified && key.name === "escape") {
@@ -410,9 +474,9 @@ export function createCliInputActions({
     session.resolve(value);
   }
 
-  function askModelMenu(models, currentModel) {
+  function askModelMenu(models, currentModel, providerNames) {
     return new Promise((resolve) => {
-      const modelState = createModelMenuState(models, currentModel);
+      const modelState = createModelMenuState(models, currentModel, providerNames);
       if (!modelState.items().length) {
         resolve("");
         return;
@@ -425,9 +489,9 @@ export function createCliInputActions({
     });
   }
 
-  function askEffortMenu(currentEffort) {
+  function askEffortMenu(currentEffort, levels = REASONING_EFFORTS.slice()) {
     return new Promise((resolve) => {
-      const modelState = createModelMenuState(REASONING_EFFORTS.slice(), currentEffort);
+      const modelState = createModelMenuState(levels.slice(), currentEffort);
       const session = { mode: "model", inputText: "/effort", modelState, resolve };
       state.input.session = session;
       state.input.active = true;
@@ -437,9 +501,14 @@ export function createCliInputActions({
   }
 
   async function cycleReasoningEffort() {
-    const index = REASONING_EFFORTS.indexOf(String(state.session.info.reasoning_effort || "").toLowerCase());
-    const next = REASONING_EFFORTS[(index + 1 + REASONING_EFFORTS.length) % REASONING_EFFORTS.length];
     try {
+      const levels = await getEffortLevels();
+      if (!levels.length) {
+        output.writeError("The current model does not declare reasoning effort levels.\n");
+        return;
+      }
+      const index = levels.indexOf(String(state.session.info.reasoning_effort || "").toLowerCase());
+      const next = levels[(index + 1 + levels.length) % levels.length];
       await request(runtimeMethods.modelEffortSet, { reasoning_effort: next });
       state.session.info = { ...state.session.info, reasoning_effort: next };
       output.writeError(`Reasoning effort: ${next}\n`);
@@ -536,6 +605,33 @@ export function createCliInputActions({
     if (!modified && session.questionState.handleNavigation(key)) {
       output.redraw();
     }
+  }
+
+  function handleAuthInput(session, key) {
+    const modified = key.ctrl || key.alt || key.shift;
+    if (!modified && key.name === "escape") {
+      completeTtyInput(session, "", false);
+      return;
+    }
+    const result = session.editor.handleInput(key);
+    if (result === "submit") {
+      completeTtyInput(session, session.editor.input(), false);
+    } else if (result) {
+      output.redraw();
+    }
+  }
+
+  function handleAuthChoiceInput(session, key) {
+    const modified = key.ctrl || key.alt || key.shift;
+    if (!modified && (key.name === "enter" || key.name === "return")) {
+      completeTtyInput(session, session.choiceState.selectedOption() || "", false);
+      return;
+    }
+    if (!modified && key.name === "escape") {
+      completeTtyInput(session, "", false);
+      return;
+    }
+    if (!modified && session.choiceState.handleKey(key)) output.redraw();
   }
 
   function handleSessionInput(session, key) {
@@ -642,6 +738,8 @@ export function createCliInputActions({
 
   return {
     ask,
+    handleAuthPrompt,
+    askAuthChoice,
     answerQuestion,
     restoreInputText,
     addPendingInput,

@@ -90,12 +90,6 @@ class TurnRunner:
         """Set the callback used when ask_user_question needs a user answer."""
         self._tool_processor.set_user_question_responder(responder)
 
-    def set_model(self, model: str) -> None:
-        self._chat_client.set_model(model)
-
-    def set_reasoning_effort(self, effort: str) -> None:
-        self._chat_client.set_reasoning_effort(effort)
-
     async def run_turn(
         self,
         session: SessionStore,
@@ -353,11 +347,13 @@ class TurnRunner:
                 error_type="StreamTruncated",
                 code="stream_truncated",
             )
+        code = "content_filter" if reason == "content_filter" else "stream_finish_reason"
+        message = "The model stopped because its output was filtered." if reason == "content_filter" else f"The model stream ended with unsupported finish reason: {reason}"
         raise ProviderError(
-            f"The model stream ended with unsupported finish reason: {reason}",
+            message,
             status="rejected",
             error_type="StreamFinishReasonError",
-            code="stream_finish_reason",
+            code=code,
         )
 
     async def _persist_recovery_state(self, session: SessionStore, turn_id: str, attempt: int) -> None:

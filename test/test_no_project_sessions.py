@@ -12,9 +12,16 @@ from agent.bootstrap import container
 from agent.infrastructure.config import AppSettings
 
 
-class FakeProviderClientFactory:
-    def create_async_client(self):
-        return object()
+class FakeChatClient:
+    async def create(self, messages, tools=None, cancellation_token=None):
+        raise AssertionError("no model calls expected")
+
+    async def stream(self, messages, tools=None, cancellation_token=None):
+        raise AssertionError("no model calls expected")
+        yield
+
+    async def close(self):
+        return None
 
 
 @pytest.mark.asyncio
@@ -37,7 +44,7 @@ async def test_build_dependencies_does_not_create_project_sessions(monkeypatch, 
 
     deps = container.build_agent_container(
         settings=settings,
-        provider_client_factory=FakeProviderClientFactory(),
+        chat_client=FakeChatClient(),
     )
     await deps.session_store.initialize()
 

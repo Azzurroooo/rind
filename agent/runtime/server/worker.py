@@ -22,9 +22,10 @@ from agent.application.context.token_usage import positive_int
 from agent.application.context.usage_summary import summarize_usage
 from agent.application.tools import ToolResultNormalizer
 from agent.bootstrap import AgentContainer, SharedRuntimeResources, build_agent_container
-from agent.infrastructure.config import AppSettings, validate_settings
+from agent.infrastructure.config import AppSettings
 from agent.infrastructure.config.settings_loader import DEFAULT_MODEL, load_settings
-from agent.infrastructure.llm import OpenAIClientFactory, close_async_client
+from agent.infrastructure.llm import ProviderServiceImpl
+from agent.domain.models import ModelSelection
 from agent.infrastructure.persistence import JsonlSessionStore, ToolOutputStore, fork_session
 from agent.infrastructure.persistence.session_files import SessionFiles
 from agent.infrastructure.persistence.session_index_repository import SessionIndexRepository
@@ -54,8 +55,9 @@ class _ActiveExecution:
 class SessionRepository:
     """Read and write persisted sessions by explicit session ID."""
 
-    def __init__(self, *, session_dir: str | None):
+    def __init__(self, *, session_dir: str | None, provider_service: ProviderServiceImpl):
         self.session_dir = session_dir
+        self.provider_service = provider_service
 
     async def metadata(self, session_id: str) -> dict[str, Any]:
         clean = validate_session_id(session_id)
@@ -82,6 +84,9 @@ class SessionRepository:
                 SessionFiles(), JsonlSessionStore.index_path_for(self.session_dir)
             ).remove_session(clean)
 
+        await asyncio.to_thread(_remove)
+        return {"session_id": clean, "workspace_root": str(meta.get("workspace_root") or "")}
+
     async def fork(self, session_id: str, before_message_id: str | None = None) -> dict[str, Any]:
         clean = validate_session_id(session_id)
         meta = await asyncio.to_thread(JsonlSessionStore.load_session_metadata, clean, self.session_dir)
@@ -89,9 +94,6 @@ class SessionRepository:
             raise ValueError("Delegated task sessions cannot be forked.")
         new_id = await asyncio.to_thread(fork_session, self.session_dir, clean, before_message_id=before_message_id)
         return {"session_id": new_id, "forked_from": clean}
-
-        await asyncio.to_thread(_remove)
-        return {"session_id": clean, "workspace_root": str(meta.get("workspace_root") or "")}
 
     async def create(
         self,
@@ -101,9 +103,12 @@ class SessionRepository:
         owner_agent_id: str | None = None,
         session_type: str | None = None,
         parent_session_id: str | None = None,
+        selection: ModelSelection | None = None,
     ) -> dict[str, Any]:
         root = _normalize_workspace_root(workspace_root)
-        model, reasoning_effort, _ = _workspace_defaults(root)
+        if selection is None:
+            selection = self.provider_service.default_selection(root)
+        model, reasoning_effort, provider = selection.model_id, selection.reasoning_effort, selection.provider_id
         agent_context = discover_agent(root)
         if project_id is None and agent_context:
             project_id = agent_context.project_id
@@ -126,12 +131,14 @@ class SessionRepository:
             session_type=session_type,
             parent_session_id=parent_session_id,
             reasoning_effort=reasoning_effort,
+            provider=provider,
         )
         await store.initialize()
         return {
             "session_id": store.session_id,
             "draft": False,
             "model": store.model,
+            "provider": store.provider,
             "reasoning_effort": store.reasoning_effort,
             "workspace_root": root,
             "turn_state": None,
@@ -142,6 +149,7 @@ class SessionRepository:
         workspace_root: str,
         session_id: str | None = None,
         resume_latest: bool = False,
+        selection: ModelSelection | None = None,
     ) -> dict[str, Any]:
         if session_id:
             return await self.info(session_id)
@@ -150,16 +158,17 @@ class SessionRepository:
             if not sessions:
                 raise ValueError("No existing session found to resume.")
             return await self.info(str(sessions[0]["id"]))
-        return await self.create(workspace_root)
+        return await self.create(workspace_root, selection=selection)
 
     async def info(self, session_id: str) -> dict[str, Any]:
         meta = await self.metadata(session_id)
         workspace_root = str(meta.get("workspace_root") or meta.get("cwd") or "")
-        default_model, default_effort, _ = await asyncio.to_thread(_workspace_defaults, workspace_root)
+        default_model, default_effort, _, default_provider = await asyncio.to_thread(_workspace_defaults, workspace_root)
         return {
             "session_id": str(meta.get("session_id") or session_id),
             "draft": False,
             "model": str(meta.get("model") or default_model),
+            "provider": str(meta.get("provider") or default_provider),
             "reasoning_effort": str(meta.get("reasoning_effort") or default_effort or ""),
             "workspace_root": workspace_root,
             "project_id": meta.get("project_id"),
@@ -241,6 +250,7 @@ class SessionRepository:
             session_dir=self.session_dir,
             session_id=clean,
             model=info["model"],
+            provider=info.get("provider") or "openai-compatible",
             system_prompt=build_system_prompt(root),
             workspace_root=root,
             reasoning_effort=info.get("reasoning_effort") or "",
@@ -277,6 +287,7 @@ class ExecutionCoordinator:
         enable_goal: bool,
         enable_user_question: bool,
         session_dir: str | None,
+        provider_service: ProviderServiceImpl,
     ):
         self._shared_resources = shared_resources
         self._repository = repository
@@ -289,6 +300,7 @@ class ExecutionCoordinator:
         self._goal_tasks: dict[str, asyncio.Task] = {}
         self._event_sinks: list[Callable[[dict[str, Any]], Awaitable[None] | None]] = []
         self._closed = False
+        self._provider_service = provider_service
         self._lock = asyncio.Lock()
 
     def add_event_sink(self, sink: Callable[[dict[str, Any]], Awaitable[None] | None]) -> Callable[[], None]:
@@ -639,20 +651,28 @@ class ExecutionCoordinator:
             info = await self._repository.info(clean)
             root = _normalize_workspace_root(info["workspace_root"])
             settings = await self._repository.settings_for(clean)
+            selection = ModelSelection(
+                str(info.get("provider") or settings.provider),
+                str(info.get("model") or settings.model),
+                str(info.get("reasoning_effort") or settings.reasoning_effort),
+            )
             settings = replace(
                 settings,
-                model=str(info.get("model") or settings.model),
-                reasoning_effort=str(info.get("reasoning_effort") or settings.reasoning_effort),
+                provider=selection.provider_id,
+                model=selection.model_id,
+                reasoning_effort=selection.reasoning_effort,
             )
-            validate_settings(settings)
-            provider_client_factory = OpenAIClientFactory(settings)
-            provider_async_client = provider_client_factory.create_async_client()
+            try:
+                chat_client = await self._provider_service.create_chat_client(root, selection)
+            except Exception as exc:
+                if getattr(exc, "code", "") != "provider_not_configured":
+                    raise
+                chat_client = self._provider_service.unavailable_client(selection, str(exc))
             container = None
             try:
                 container = build_agent_container(
                     settings=settings,
-                    provider_client_factory=provider_client_factory,
-                    provider_async_client=provider_async_client,
+                    chat_client=chat_client,
                     session_dir=self.session_dir,
                     session_id=clean,
                     enable_goal=self._enable_goal,
@@ -671,7 +691,7 @@ class ExecutionCoordinator:
                 )
                 await container.runtime.initialize()
             except BaseException:
-                await close_async_client(provider_async_client)
+                await chat_client.close()
                 raise
             self._active[clean] = _ActiveExecution(container=container)
             return container
@@ -709,14 +729,17 @@ class ExecutionCoordinator:
         with tempfile.TemporaryDirectory(prefix="rind-inspect-") as session_dir:
             with preserve_active_session_context():
                 settings = await asyncio.to_thread(load_settings, str(target.workspace_root))
-                validate_settings(settings)
-                provider_client_factory = OpenAIClientFactory(settings)
-                provider_async_client = provider_client_factory.create_async_client()
+                selection = ModelSelection(settings.provider, settings.model, settings.reasoning_effort)
+                try:
+                    chat_client = await self._provider_service.create_chat_client(str(target.workspace_root), selection)
+                except Exception as exc:
+                    if getattr(exc, "code", "") != "provider_not_configured":
+                        raise
+                    chat_client = self._provider_service.unavailable_client(selection, str(exc))
                 try:
                     container = build_agent_container(
                         settings=settings,
-                        provider_client_factory=provider_client_factory,
-                        provider_async_client=provider_async_client,
+                        chat_client=chat_client,
                         session_dir=session_dir,
                         enable_goal=False,
                         enable_user_question=False,
@@ -735,7 +758,7 @@ class ExecutionCoordinator:
                         cancellation_token,
                     )
                 finally:
-                    await close_async_client(provider_async_client)
+                    await chat_client.close()
         return response, None
 
     async def _collect_delegated_turn(self, session_id: str, task: str, instruction: str, cancellation_token) -> dict[str, str]:
@@ -850,7 +873,8 @@ class RuntimeWorker:
             ),
             tool_output_store=tool_output_store,
         )
-        self.repository = SessionRepository(session_dir=session_dir)
+        self.provider_service = ProviderServiceImpl()
+        self.repository = SessionRepository(session_dir=session_dir, provider_service=self.provider_service)
         self.execution = ExecutionCoordinator(
             shared_resources=self._shared_resources,
             repository=self.repository,
@@ -858,6 +882,7 @@ class RuntimeWorker:
             enable_goal=enable_goal,
             enable_user_question=enable_user_question,
             session_dir=session_dir,
+            provider_service=self.provider_service,
         )
         self._initialized = False
         self._tool_output_store = tool_output_store
@@ -869,6 +894,7 @@ class RuntimeWorker:
                 self.workspace_root,
                 self.session_id,
                 self._resume_latest,
+                self.provider_service.default_selection(self.workspace_root),
             )
             self.session_id = str(info["session_id"])
         self._initialized = True
@@ -913,6 +939,41 @@ class RuntimeWorker:
         records = await asyncio.to_thread(load_usage_records, default_usage_ledger_path())
         return summarize_usage(records, window)
 
+    def list_providers(self, workspace_root: str | None = None) -> list[dict[str, Any]]:
+        return [
+            {
+                "id": status.id,
+                "name": status.name,
+                "methods": list(status.methods),
+                "configured": status.configured,
+                "source": status.source,
+            }
+            for status in self.provider_service.list_providers(workspace_root or self.workspace_root)
+        ]
+
+    async def login(self, provider_id: str, method: str, interaction, workspace_root: str | None = None) -> None:
+        await self.provider_service.login(workspace_root or self.workspace_root, provider_id, method, interaction)
+
+    def logout(self, provider_id: str) -> bool:
+        return self.provider_service.logout(provider_id)
+
+    async def list_models(self, workspace_root: str | None = None, *, refresh: bool = False) -> dict[str, Any]:
+        catalog = await self.provider_service.list_models(workspace_root or self.workspace_root, refresh=refresh)
+        return {
+            "models": [
+                {
+                    "provider_id": model.provider_id,
+                    "id": model.id,
+                    "name": model.name,
+                    "api": model.api,
+                    "reasoning_efforts": list(model.reasoning_efforts),
+                    "context_window": model.context_window,
+                }
+                for model in catalog.models
+            ],
+            "warning": catalog.warning,
+        }
+
     async def close(self) -> None:
         await self.execution.close()
 
@@ -924,12 +985,12 @@ def _normalize_workspace_root(value: str) -> str:
     return os.path.normcase(str(root))
 
 
-def _workspace_defaults(workspace_root: str) -> tuple[str, str, str]:
+def _workspace_defaults(workspace_root: str) -> tuple[str, str, str, str]:
     try:
         settings = load_settings(workspace_root)
     except (OSError, ValueError):
-        return DEFAULT_MODEL, "", "https://api.openai.com/v1"
-    return settings.model, settings.reasoning_effort, settings.base_url
+        return DEFAULT_MODEL, "", "https://api.openai.com/v1", "openai-compatible"
+    return settings.model, settings.reasoning_effort, settings.base_url, settings.provider
 
 
 async def _close_container(container: AgentContainer) -> None:

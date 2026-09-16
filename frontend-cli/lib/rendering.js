@@ -314,7 +314,7 @@ function byDayRows(byDay, innerWidth) {
 
 function boardDayLabel(day) {
   const text = boardText(day);
-  return /^\d{2}-\d{2}$/.test(text) ? text : " ".repeat(5);
+  return /^\d{4}-\d{2}-\d{2}$/.test(text) ? text.slice(5) : " ".repeat(5);
 }
 
 function rightRows(rows, innerWidth) {
@@ -551,11 +551,15 @@ export function modelMenuText(items, selectedIndex = 0) {
   }
   const lines = [dim(modelMenuTitle(visible))];
   for (const [index, item] of visible.items.entries()) {
+    if (item.header) {
+      lines.push(dim(`  ${item.name}`));
+      continue;
+    }
     const active = index === visible.activeIndex;
     const marker = active ? accent("›") : dim("·");
     const name = active ? bold(item.name) : dim(item.name);
     const suffix = item.current ? dim("current") : "";
-    lines.push(`  ${marker} ${padRight(name, 34)} ${suffix}`.trimEnd());
+    lines.push(`    ${marker} ${padRight(name, 34)} ${suffix}`.trimEnd());
   }
   lines.push(dim("    ↑↓ select · enter use · esc cancel"));
   return `${lines.join("\n")}\n`;
@@ -695,6 +699,86 @@ function customAnswerCursor(customText, editorCursor, firstRow, prefixWidth, lab
     line: firstRow + chunks.length - 1,
     column: prefixWidth + textWidth(chunks[chunks.length - 1].text),
   };
+}
+
+
+export function authSecretFrame({
+  title = "",
+  message = "",
+  kind = "text",
+  value = "",
+  width = 76,
+  cursor = null,
+} = {}) {
+  const box = startupBannerWidth(width);
+  const masked = kind === "secret";
+  const prefix = "  ▷ ";
+  const valueWidth = box - 2 - textWidth(prefix) - 1;
+  const chars = graphemes(String(value || ""));
+  const shown = chars.length
+    ? clipCells(masked ? "•".repeat(chars.length) : chars.join(""), valueWidth)
+    : dim(clipCells(masked ? "paste or type the key — hidden" : "type and press enter", valueWidth));
+  const caret = Math.min(chars.length, Math.max(0, Math.floor(Number(cursor?.column) || 0)));
+  const lines = [
+    authFrameTitle(`Login · ${title}`.trim(), box),
+    ...(message && message !== title ? [startupBannerLine(dim(clipCells(message, box - 4)), box)] : []),
+    startupBannerLine(`${prefix}${shown}`, box),
+    startupBannerLine("", box),
+    startupBannerLine(dim("enter submit · esc cancel"), box),
+    startupBannerBorder("└", "┘", box),
+  ];
+  const valueRow = (message && message !== title ? 2 : 1);
+  const visibleCaret = chars.length
+    ? Math.min(valueWidth, textWidth(chars.slice(0, caret).join("")))
+    : 0;
+  return {
+    text: `${lines.join("\n")}\n`,
+    cursor: { line: valueRow, column: 2 + textWidth(prefix) + visibleCaret },
+  };
+}
+
+const AUTH_CHOICE_WINDOW = 9;
+
+export function authChoiceFrame({ title = "", options = [], selectedIndex = 0, width = 76 } = {}) {
+  const box = startupBannerWidth(width);
+  const inner = box - 4;
+  const values = (Array.isArray(options) ? options : []).map((item) => String(item || "").trim()).filter(Boolean);
+  if (!values.length) {
+    return "";
+  }
+  const start = values.length <= AUTH_CHOICE_WINDOW
+    ? 0
+    : Math.min(Math.max(0, selectedIndex - (AUTH_CHOICE_WINDOW - 2)), values.length - AUTH_CHOICE_WINDOW);
+  const end = Math.min(values.length, start + AUTH_CHOICE_WINDOW);
+  const lines = [authFrameTitle(`Login · ${title}`.trim(), box)];
+  if (start > 0) {
+    lines.push(startupBannerLine(dim("…"), box));
+  }
+  for (let index = start; index < end; index += 1) {
+    const active = index === selectedIndex;
+    const marker = active ? accent("›") : dim("·");
+    const parts = values[index].split(" · ");
+    const id = clipCells(parts[0] || "", Math.max(8, inner - 8));
+    const rest = parts.length > 1 ? clipCells(`· ${parts.slice(1).join(" · ")}`, Math.max(0, inner - 6 - textWidth(id))) : "";
+    const content = `${marker} ${active ? bold(id) : id}${rest ? ` ${dim(rest)}` : ""}`;
+    lines.push(startupBannerLine(content, box));
+  }
+  if (end < values.length) {
+    lines.push(startupBannerLine(dim("…"), box));
+  }
+  lines.push(startupBannerLine("", box));
+  lines.push(startupBannerLine(dim("↑↓ select · enter choose · esc cancel"), box));
+  lines.push(startupBannerBorder("└", "┘", box));
+  return `${lines.join("\n")}\n`;
+}
+
+function authFrameTitle(title, box) {
+  const label = clipCells(String(title || "").trim(), Math.max(1, box - 7));
+  if (!label) {
+    return startupBannerBorder("┌", "┐", box);
+  }
+  const dashes = Math.max(1, box - visibleLength(label) - 5);
+  return dim(`┌─ ${label} ${"─".repeat(dashes)}┐`);
 }
 
 export function backgroundMonitorText(tasks = [], selectedIndex = 0, selectedTask = null, width = 76) {

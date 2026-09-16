@@ -92,12 +92,7 @@ async def test_runtime_switch_session_updates_model_and_clears_pending_inputs():
             }
 
     class SwitchableRunner(CompletingRunner):
-        def __init__(self):
-            super().__init__()
-            self.model = "model-1"
-
-        def set_model(self, model):
-            self.model = model
+        pass
 
     session = SwitchableSession()
     runner = SwitchableRunner()
@@ -110,7 +105,6 @@ async def test_runtime_switch_session_updates_model_and_clears_pending_inputs():
 
     assert result["session_id"] == "session_2"
     assert session.session_id == "session_2"
-    assert runner.model == "model-2"
     assert runtime.input_queue_counts() == {"steering": 0, "follow_up": 0}
 
 
@@ -135,12 +129,7 @@ async def test_runtime_create_session_updates_model_and_clears_pending_inputs():
             return {"session_id": self.session_id, "model": self.model}
 
     class ModelRunner(CompletingRunner):
-        def __init__(self):
-            super().__init__()
-            self.model = "model-1"
-
-        def set_model(self, model):
-            self.model = model
+        pass
 
     session = NewSession()
     runner = ModelRunner()
@@ -152,7 +141,6 @@ async def test_runtime_create_session_updates_model_and_clears_pending_inputs():
     result = await runtime.create_session()
 
     assert result == {"session_id": "session_2", "model": "model-2"}
-    assert runner.model == "model-2"
     assert runtime.input_queue_counts() == {"steering": 0, "follow_up": 0}
 
 

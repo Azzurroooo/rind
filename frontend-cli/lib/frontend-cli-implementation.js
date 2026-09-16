@@ -14,7 +14,7 @@ import {
   turnScopedMethods,
   isRuntimeEventForTurn,
 } from "./runtime-protocol.js";
-import { executeLocalSlashCommand, loadLocalSettings } from "./local-slash-commands.js";
+import { executeLocalSlashCommand } from "./local-slash-commands.js";
 import { loadCliState, saveCliState } from "./cli-state-store.js";
 import { loadPromptHistory, savePromptHistory } from "./prompt-history-store.js";
 import { setTheme } from "./theme.js";
@@ -40,6 +40,8 @@ import { MonitorStack } from "./components/monitor-stack.js";
 import {
   inputHintText,
   interruptText,
+  authChoiceFrame,
+  authSecretFrame,
   modelMenuText,
   themeMenuText,
   questionMenuFrame,
@@ -171,13 +173,14 @@ const runtimeClient = createRuntimeClient({
   cliArgs,
   onMessage: (message) => {
     eventProcessing = eventProcessing
-      .then(() => renderEvent(message))
+      .then(() => message?.method === runtimeMethods.authUpdate ? renderAuthUpdate(message) : renderEvent(message))
       .catch((error) => {
         if (runtimeState.status !== "closing") {
           writeErrorOutput(`${error instanceof Error ? error.message : String(error)}\n`);
         }
       });
   },
+  onRequest: (message) => inputActions?.handleAuthPrompt(message),
   onStderr: (chunk) => writeErrorOutput(chunk),
   onExit: (code, signal, { error }) => {
     const wasClosing = runtimeState.status === "closing";
@@ -273,6 +276,8 @@ commandController = createCommandController({
     runGoalCommand: runtimeController.runGoalCommand,
     runModelSelector: runtimeController.runModelSelector,
     runEffortCommand: (value) => runtimeController.runEffortCommand(value),
+    runLogin: (providerId) => runLogin(providerId),
+    runLogout: (providerId) => runLogout(providerId),
     runThemeSelector: async () => {
       const selected = await inputActions.askThemeMenu();
       if (selected) {
@@ -285,11 +290,7 @@ commandController = createCommandController({
     runContextBoard: runtimeController.runContextBoard,
     printContextReport: runtimeController.printContextReport,
     runLocalCommand: async (text) => {
-      if (!Object.keys(sessionState.settings).length) {
-        sessionState.settings = await loadLocalSettings(undefined, sessionState.info.workspace_root || sessionState.info.cwd || process.cwd());
-      }
       const result = await executeLocalSlashCommand(text, {
-        settings: sessionState.settings,
         sessionInfo: sessionState.info,
         cwd: sessionState.info.workspace_root || sessionState.info.cwd || process.cwd(),
         runtimeStarted: runtimeState.status === "starting" || runtimeState.status === "ready",
@@ -387,6 +388,7 @@ inputActions = createCliInputActions({
   getCommandController: () => commandController,
   getTaskMonitor: () => taskMonitorController,
   getLineInput: () => input,
+  getEffortLevels: () => runtimeController.currentModelEfforts(),
   pausePrompt: () => inputController.pause(),
   resumePrompt: () => inputController.resume(),
   handleSigint,
@@ -421,8 +423,7 @@ try {
   if (persistedState.theme) {
     setTheme(persistedState.theme);
   }
-  sessionState.settings = await loadLocalSettings(undefined, process.cwd());
-  sessionState.info = { cwd: process.cwd(), model: sessionState.settings.model };
+  sessionState.info = { cwd: process.cwd() };
   sessionState.commands = commandController.localCommands();
   await runtimeController.ensureRuntime();
   const startupInfo = { ...sessionState.info, resume_preview: "" };
@@ -481,6 +482,68 @@ async function rebindSendEndpoint() {
 function resetContextUsage() {
   displayState.stats = { context_usage_percent: 0 };
   redrawInput();
+}
+
+async function runLogin(providerId = "") {
+  try {
+    const providersResult = await request(runtimeMethods.authList);
+    const providers = Array.isArray(providersResult?.providers) ? providersResult.providers : [];
+    let selected = String(providerId || "").trim();
+    if (!selected) {
+      const options = providers.map((item) => `${item.id} · ${item.name} · ${item.configured ? item.source : "not configured"}`);
+      const choice = await inputActions.askAuthChoice("Provider", options);
+      selected = String(choice || "").split(" · ")[0].trim();
+    }
+    if (!selected) return;
+    const result = await request(runtimeMethods.authLogin, { provider_id: selected, method: "api_key" });
+    const selection = result?.selection && typeof result.selection === "object" ? result.selection : null;
+    if (selection?.provider_id && selection.model_id) {
+      sessionState.info = { ...sessionState.info, provider: selection.provider_id, model: selection.model_id };
+      logOutput(`Logged in to ${result?.provider_id || selected}. Switched to ${selection.provider_id} / ${selection.model_id}.`);
+    } else {
+      logOutput(`Logged in to ${result?.provider_id || selected}.`);
+    }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    logOutput(/cancel/i.test(message) ? "Login canceled." : `Login failed: ${message}`);
+  }
+}
+
+async function runLogout(providerId = "") {
+  try {
+    const providersResult = await request(runtimeMethods.authList);
+    const stored = (providersResult?.providers || []).filter((item) => item.source === "stored");
+    let selected = String(providerId || "").trim();
+    if (!selected && stored.length === 1) {
+      selected = String(stored[0].id || "");
+    }
+    if (!selected && !stored.length) {
+      logOutput("No stored provider credentials.");
+      return;
+    }
+    if (!selected) {
+      const choice = await inputActions.askAuthChoice("Provider", stored.map((item) => `${item.id} · ${item.name}`));
+      selected = String(choice || "").split(" · ")[0].trim();
+    }
+    const result = await request(runtimeMethods.authLogout, { provider_id: selected });
+    if (!result?.deleted) {
+      logOutput(`No stored credential for ${selected}.`);
+      return;
+    }
+    const suffix = result?.source === "environment"
+      ? " It is still configured through an environment variable."
+      : "";
+    logOutput(`Logged out of ${selected}.${suffix}`);
+  } catch (error) {
+    logOutput(`Logout failed: ${error instanceof Error ? error.message : String(error)}`);
+  }
+}
+
+async function renderAuthUpdate(message) {
+  const event = message?.event || {};
+  const type = String(event.type || "info");
+  const value = String(event.message || event.text || event.url || event.code || "").trim();
+  if (value) logOutput(`[${type}] ${value}`);
 }
 
 async function renderEvent(message) {
@@ -554,7 +617,7 @@ function composeFrame(width = process.stdout.columns || 80) {
   if (!session) {
     return null;
   }
-  const choiceMenu = ["model", "theme", "sessions", "team-blueprints", "fork"].includes(session.mode);
+  const choiceMenu = ["model", "theme", "sessions", "team-blueprints", "fork", "auth-choice"].includes(session.mode);
   if (session.mode === "prompt" && session.menuState) {
     session.menuState.setInput(session.editor.input());
   }
@@ -570,6 +633,39 @@ function composeFrame(width = process.stdout.columns || 80) {
       inputText: session.inputText,
       cursor: { line: 0, column: session.inputText.length },
       menuText: modelMenuText(session.modelState.items(), session.modelState.selectedIndex()).trimEnd(),
+    };
+  }
+  if (session.mode === "auth-choice") {
+    const menuText = authChoiceFrame({
+      title: session.authTitle || "Provider",
+      options: session.choiceState.options(),
+      selectedIndex: session.choiceState.selectedIndex(),
+      width,
+    });
+    return {
+      showCaret: false,
+      prompt: "",
+      inputText: "",
+      cursor: { line: 0, column: 0 },
+      menuText: menuText.trimEnd(),
+    };
+  }
+  if (session.mode === "auth") {
+    const frame = authSecretFrame({
+      title: session.authTitle,
+      message: session.authMessage,
+      kind: session.authKind,
+      value: session.editor.input(),
+      width,
+      cursor: session.editor.cursorPosition(),
+    });
+    return {
+      showCaret: true,
+      prompt: "",
+      inputText: "",
+      cursor: { line: 0, column: 0 },
+      menuText: frame.text.trimEnd(),
+      menuCursor: frame.cursor,
     };
   }
   if (session.mode === "theme") {

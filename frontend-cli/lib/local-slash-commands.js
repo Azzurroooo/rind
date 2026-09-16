@@ -1,6 +1,3 @@
-import { readFile } from "node:fs/promises";
-import { homedir } from "node:os";
-import path from "node:path";
 import { currentTheme, setTheme, themeNames, themeOptions } from "./theme.js";
 
 export const LOCAL_SLASH_COMMANDS = Object.freeze([
@@ -11,86 +8,28 @@ export const LOCAL_SLASH_COMMANDS = Object.freeze([
   { name: "goal", description: "View or control the active goal", usage: "/goal [pause | resume | clear | objective]" },
   { name: "help", description: "Show commands", usage: "/help [command]" },
   { name: "init", description: "Draft RIND.md", usage: "/init [project|user]" },
-  { name: "login", description: "Show login setup guidance", usage: "/login" },
+  { name: "login", description: "Configure a provider", usage: "/login [provider]" },
+  { name: "logout", description: "Remove a stored provider credential", usage: "/logout [provider]" },
   { name: "model", description: "Show or change the active model", usage: "/model | /model set <model>" },
   { name: "sessions", description: "List recent sessions", usage: "/sessions [limit]" },
   { name: "skill", description: "List skills", usage: "/skill [list]" },
-  { name: "status", description: "Show config and assistant sampling", usage: "/status" },
+  { name: "status", description: "Show session and provider status", usage: "/status" },
   { name: "team", description: "Manage the current Team", usage: "/team create [project-id] | /team init | /team list | /team blueprint [id] | /team add <description>" },
   { name: "theme", description: "Switch the CLI color theme", usage: "/theme [latte | frappe | macchiato | mocha]" },
 ]);
-
-export async function loadLocalSettings(
-  rindHome = process.env.RIND_HOME || path.join(homedir(), ".rind"),
-  workspaceRoot = process.cwd(),
-) {
-  const userSettingsPath = path.join(rindHome, "settings.json");
-  const projectSettingsPath = path.resolve(workspaceRoot, ".rind", "settings.json");
-  const project = await readSettingsFile(projectSettingsPath);
-  if (project.exists && isCompleteProjectSettings(project.data)) {
-    return buildLocalSettings(projectSettingsPath, project.data, project.error, project.exists);
-  }
-  const settings = await readSettingsFile(userSettingsPath);
-  return buildLocalSettings(userSettingsPath, settings.data, settings.error, settings.exists);
-}
-
-async function readSettingsFile(settingsPath) {
-  let data = {};
-  let settingsExists = false;
-  let error = "";
-  try {
-    data = JSON.parse(await readFile(settingsPath, "utf8"));
-    settingsExists = true;
-    if (!data || typeof data !== "object" || Array.isArray(data)) {
-      throw new Error("settings.json must contain a JSON object");
-    }
-  } catch (cause) {
-    if (!data || typeof data !== "object" || Array.isArray(data)) data = {};
-    if (cause?.code !== "ENOENT") {
-      error = cause instanceof Error ? cause.message : String(cause);
-    }
-  }
-  return { data, exists: settingsExists, error };
-}
-
-function buildLocalSettings(settingsPath, data, error, exists) {
-  return {
-    path: settingsPath,
-    exists,
-    error,
-    model: stringValue(data.model) || "gpt-4o-mini",
-    baseUrl: stringValue(data.baseUrl) || "https://api.openai.com/v1",
-    reasoningEffort: stringValue(data.reasoningEffort) || "",
-    hasApiKey: Boolean(stringValue(data.apiKey)),
-  };
-}
-
-function isCompleteProjectSettings(data) {
-  if (!data || typeof data !== "object" || Array.isArray(data)) return false;
-  const apiKey = stringValue(data.apiKey);
-  const baseUrl = stringValue(data.baseUrl);
-  const model = stringValue(data.model);
-  try {
-    const url = new URL(baseUrl);
-    return Boolean(apiKey && model && url.hostname && (url.protocol === "http:" || url.protocol === "https:"));
-  } catch {
-    return false;
-  }
-}
 
 export async function executeLocalSlashCommand(input, context = {}) {
   const match = String(input || "").trim().match(/^\/([^\s]+)(?:\s+([\s\S]*))?$/);
   if (!match) return null;
   const name = match[1].toLowerCase();
   const argument = String(match[2] || "").trim();
-  if (name === "login") return argument ? usageResult("/login") : { text: "Login/config setup is not implemented yet.\nSet apiKey in ~/.rind/settings.json." };
   if (name === "status") {
     if (!argument && context.runtimeInitialized) return null;
     return statusResult(context, argument);
   }
   if (name === "help") return helpResult(argument, context.commands || []);
   if (name === "theme") return themeResult(argument, context);
-  if (name === "model" && !argument && !context.interactive) return { text: `Model: ${context.settings?.model || "unknown"}` };
+  if (name === "model" && !argument && !context.interactive) return { text: `Model: ${currentModelLabel(context)}` };
   return null;
 }
 
@@ -98,16 +37,24 @@ function usageResult(usage) {
   return { text: `Usage: ${usage}` };
 }
 
+function currentModelLabel(context) {
+  const info = context.sessionInfo || {};
+  const provider = String(info.provider || "").trim();
+  const model = String(info.model || "").trim() || "unknown";
+  return provider ? `${provider} / ${model}` : model;
+}
+
 function statusResult(context, argument) {
   if (argument) return usageResult("/status");
-  const settings = context.settings || {};
+  const info = context.sessionInfo || {};
+  const providers = Array.isArray(info.providers) ? info.providers : [];
+  const configured = providers.filter((item) => item?.configured).map((item) => String(item.id || ""));
   const entries = [
-    { label: "session", value: context.sessionInfo?.session_id || "none" },
-    { label: "settings", value: settings.path || "~/.rind/settings.json", state: settings.exists ? "found" : "missing" },
-    { label: "apiKey", value: settings.hasApiKey ? "set" : "unset" },
-    { label: "baseUrl", value: settings.baseUrl || "https://api.openai.com/v1" },
-    { label: "model", value: context.sessionInfo?.model || settings.model || "unknown" },
-    { label: "reasoningEffort", value: context.sessionInfo?.reasoning_effort || settings.reasoningEffort || "unset" },
+    { label: "session", value: info.session_id || "none" },
+    { label: "provider", value: info.provider || "unknown" },
+    { label: "model", value: info.model || "unknown" },
+    { label: "reasoningEffort", value: info.reasoning_effort || "unset" },
+    { label: "configured", value: configured.join(", ") || "none — run /login" },
   ];
   return {
     text: "Status",
@@ -159,8 +106,4 @@ function themeResult(argument, context = {}) {
       flavors: themeOptions(),
     },
   };
-}
-
-function stringValue(value) {
-  return typeof value === "string" ? value.trim() : "";
 }
