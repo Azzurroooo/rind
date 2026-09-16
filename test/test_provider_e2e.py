@@ -147,6 +147,8 @@ def test_provider_login_model_and_tool_turn_journey(tmp_path: Path):
         server.send("models", "model/list", {"session_id": initialize["result"]["session_id"]})
         models = server.response("models")["result"]
         assert [model["id"] for model in models["models"]] == ["fake-model-a", "fake-model-b"]
+        # Refreshed /models entries carry no effort metadata, so the dialect default applies.
+        assert models["models"][0]["reasoning_efforts"] == ["low", "medium", "high", "xhigh", "max"]
         assert models["current"] == {"provider_id": "openai-compatible", "model_id": "fake-model-a"}
         assert models["warning"] is None
 

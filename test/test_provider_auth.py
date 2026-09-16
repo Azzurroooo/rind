@@ -140,6 +140,8 @@ async def test_login_rejects_unsupported_method(tmp_path: Path, monkeypatch) -> 
 
 @pytest.mark.asyncio
 async def test_list_models_uses_cache_fallback_and_reports_refresh_warning(tmp_path: Path, monkeypatch) -> None:
+    from agent.infrastructure.llm.providers import default_reasoning_efforts
+
     settings = _settings(tmp_path)
     service = _service(tmp_path, settings, monkeypatch)
     service.credentials.set("deepseek", Credential(type="api_key", key="deepseek-key"))
@@ -148,6 +150,8 @@ async def test_list_models_uses_cache_fallback_and_reports_refresh_warning(tmp_p
     catalog = await service.list_models(str(tmp_path))
     assert [model.id for model in catalog.models] == ["cached-chat", "deepseek-chat"]
     assert catalog.warning is None
+    # Refreshed /models responses carry no effort metadata, so cache entries use the dialect default.
+    assert catalog.models[0].reasoning_efforts == default_reasoning_efforts("openai-chat")
 
     async def _failing_fetch(_settings, _definition):
         return False
@@ -434,7 +438,22 @@ def test_registry_covers_mainstream_providers() -> None:
     assert refreshable_models_api("openai-chat") and refreshable_models_api("openai-responses")
     assert not refreshable_models_api("google-generative-ai") and not refreshable_models_api("anthropic-messages")
     assert default_reasoning_efforts("google-generative-ai") == ()
-    assert default_reasoning_efforts("openai-chat") == ("low", "medium", "high", "xhigh")
+    assert default_reasoning_efforts("openai-chat") == ("low", "medium", "high", "xhigh", "max")
+
+
+def test_fallback_models_declare_per_model_reasoning_efforts() -> None:
+    from agent.infrastructure.llm.providers import PROVIDERS, default_reasoning_efforts
+
+    def _efforts(provider_id: str, model_id: str) -> tuple[str, ...]:
+        return next(model.reasoning_efforts for model in PROVIDERS[provider_id].fallback_models if model.id == model_id)
+
+    assert _efforts("openai", "gpt-5.5") == ("low", "medium", "high", "xhigh")
+    assert _efforts("openai", "gpt-4o-mini") == ()
+    assert _efforts("zhipu", "glm-5.3") == ("low", "high", "max")
+    assert _efforts("zhipu", "glm-5.2") == ("high", "max")
+    assert _efforts("moonshot", "kimi-k2.6") == ()
+    # DeepSeek entries carry no verified effort metadata, so they keep the dialect default.
+    assert _efforts("deepseek", "deepseek-chat") == default_reasoning_efforts("openai-chat")
 
 
 def _google_chunk(parts, finish_reason=None, usage=None):

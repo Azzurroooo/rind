@@ -12,6 +12,7 @@ const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), ".."
 function startFixture() {
   const script = [];
   const models = ["fake-model-a", "fake-model-b"];
+  const requests = [];
   const server = http.createServer((request, response) => {
     if (request.method === "GET" && request.url.endsWith("/models")) {
       const body = JSON.stringify({ object: "list", data: models.map((id) => ({ id, object: "model" })) });
@@ -27,6 +28,7 @@ function startFixture() {
     let raw = "";
     request.on("data", (chunk) => { raw += chunk; });
     request.on("end", () => {
+      requests.push(JSON.parse(raw || "{}"));
       const entry = script.shift() || { chunks: ["(no script)"] };
       response.writeHead(200, { "Content-Type": "text/event-stream", Connection: "close" });
       const chunk = (delta, finish = null) =>
@@ -45,6 +47,7 @@ function startFixture() {
     server.listen(0, "127.0.0.1", () => resolve({
       server,
       script,
+      requests,
       port: server.address().port,
       async stop() {
         await new Promise((done) => server.close(done));
@@ -122,6 +125,27 @@ test("interactive CLI journey: login, chat, logout", async () => {
 
     cli.send("hello there");
     const replyAt = await cli.waitFor("hi from fixture");
+    assert.equal(fixture.requests.at(-1).reasoning_effort, undefined);
+
+    // Refreshed /models entries carry no effort metadata, so the dialect default
+    // applies and /effort max is accepted and sent with the next request.
+    cli.send("/effort max");
+    await cli.waitFor("session effort: max");
+    // Turn state settles asynchronously after the completion event; input sent
+    // inside that window is misrouted as steering, so pace like a real user.
+    await new Promise((resolve) => setTimeout(resolve, 2000));
+    fixture.script.push({ chunks: ["second reply from fixture"] });
+    cli.send("one more");
+    let secondAt = -1;
+    for (let attempt = 0; attempt < 6 && secondAt < 0; attempt += 1) {
+      try {
+        secondAt = await cli.waitFor("second reply from fixture", 5000);
+      } catch {
+        cli.send("one more");
+      }
+    }
+    assert.ok(secondAt >= 0, `second turn never acknowledged:\n${cli.stdout}`);
+    assert.equal(fixture.requests.at(-1).reasoning_effort, "max");
 
     // The serial non-TTY prompt loop asks for the next line only after the
     // turn settles, so retype /logout like a user until the CLI accepts it.
