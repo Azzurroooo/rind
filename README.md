@@ -163,12 +163,14 @@ Three decisions make this shape work:
 | `/fork` `/sessions` `/compact` | branch, switch, or free context |
 | `/model` `/effort` `/theme` | pick model, reasoning effort, color theme |
 | `/goal` `/skill` `/team` `/help` | autonomous goal, skills, team, commands |
+| `/tour [page]` | interactive feature walkthrough in a simulated terminal |
 
 | Entry points | Meaning |
 | --- | --- |
 | `rind` / `rind --session <id>` | interactive |
 | `rind run --prompt "…" [--session <id>]` | headless, pipeable |
 | `rind send --session <id> "…"` | inject into a running session |
+| `rind tour [page]` | guided feature tour (same as `/tour`) |
 
 ## Documentation & development
 
