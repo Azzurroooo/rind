@@ -91,18 +91,6 @@ if (cliArgs[0] === "send") {
   }
   return;
 }
-// "rind help" is an alias for --help, not a session command.
-if (cliArgs[0] === "help") {
-  cliArgs = ["--help"];
-}
-
-if (cliArgs.some((arg) => arg === "--version" || arg === "--help" || arg === "-h")) {
-  if (cliArgs.includes("--help") || cliArgs.includes("-h")) {
-    process.stdout.write(`${cliHelp}\n\n`);
-  }
-  process.exit(runHelpVersion({ python, repoRoot, runtimePath, cliArgs }));
-}
-
 if (cliArgs[0] === "tour") {
   if (cliArgs.some((arg) => arg === "--help" || arg === "-h")) {
     process.stdout.write(`${tourHelp}\n`);
@@ -116,6 +104,17 @@ if (cliArgs[0] === "tour") {
   await runTour({ input: process.stdin, output: process.stdout, startPageId: cliArgs[1] || "" });
   saveCliState({ tourSeen: true });
   return;
+}
+// "rind help" is an alias for --help, not a session command.
+if (cliArgs[0] === "help") {
+  cliArgs = ["--help"];
+}
+
+if (cliArgs.some((arg) => arg === "--version" || arg === "--help" || arg === "-h")) {
+  if (cliArgs.includes("--help") || cliArgs.includes("-h")) {
+    process.stdout.write(`${cliHelp}\n\n`);
+  }
+  process.exit(runHelpVersion({ python, repoRoot, runtimePath, cliArgs }));
 }
 
 if (cliArgs[0] === "run") {
