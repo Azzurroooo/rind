@@ -174,7 +174,7 @@ Three decisions make this shape work:
 
 ## Documentation & development
 
-[Architecture](docs/architecture.md) · [CLI rendering](docs/cli-rendering.md) · [CLI turn flow](docs/cli-turn-flow.md) · [Main pipeline](docs/main_pipeline.md)
+[Architecture](docs/architecture.md) · [CLI rendering](docs/cli-rendering.md) · [CLI tour](docs/cli-tour.md) · [CLI turn flow](docs/cli-turn-flow.md) · [Main pipeline](docs/main_pipeline.md)
 
 ```bash
 pip install -r requirements.txt && pytest test/ -q   # runtime
