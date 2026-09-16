@@ -97,4 +97,4 @@ settling. `speed ∈ {0.5, 1, 2, 4}` scales the delays.
 (`tour-player.test.js`), catalog lint — unique ids, valid kinds, required
 fields, at least one note per page, clean closing step
 (`tour-content.test.js`), and full ANSI playback on an `@xterm/headless`
-virtual terminal (`tour-tui.test.js`).
+virtual terminal (`tour-tui.test.js`), and the in-session stop/run/replay recovery of the main transcript (`tour-insession.test.js`).
