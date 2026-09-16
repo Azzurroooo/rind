@@ -97,7 +97,8 @@ test("page frame titles the page and wraps every content line", () => {
     assert.ok(text.includes("zai/glm-4.7"), "model shown in banner");
     assert.ok(text.includes("You"), "user echo rendered");
     assert.ok(text.includes("/team create"), "submitted text rendered");
-    assert.ok(text.includes("Team created"), "result line rendered");
+    assert.ok(text.includes("✓ Team created"), "result line rendered with the check prefix");
+    assert.ok(text.includes("— .aiteam ready"), "result detail rendered");
     assert.ok(text.includes("Working"), "running composer shows the activity line");
   }
 });

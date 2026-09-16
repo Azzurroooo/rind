@@ -6,6 +6,7 @@ import {
   authSecretFrame,
   backgroundMonitorText,
   choiceMenuText,
+  commandResultText,
   contextBoardText,
   delegateMonitorText,
   inputHintText,
@@ -183,7 +184,9 @@ function blockLines(block, inner) {
     case "assistant":
       return assistantLines(block, inner);
     case "result":
-      return slashResultText({ text: block.text, display: block.display }, []).split("\n");
+      return block.display
+        ? slashResultText({ text: block.text, display: block.display }, []).split("\n")
+        : commandResultText(block.text, block.detail).split("\n");
     case "tool":
       return toolLines(block);
     case "turn-done":
