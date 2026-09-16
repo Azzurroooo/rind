@@ -147,7 +147,16 @@ test("right skips ahead instantly, left rebuilds the previous step exactly", () 
   player.key(key("left"));
   assert.equal(player.state().stepIndex, before, "left returns to the note");
   assert.equal(player.state().phase, "waiting", "landing on a note waits again");
+  assert.equal(player.state().paused, true, "left pauses for review");
+  clock.advance(2000);
+  assert.equal(player.state().stepIndex, before, "a paused note does not bounce forward");
 
+  player.key(key("space"));
+  assert.equal(player.state().paused, false, "space on a backed-away note resumes playback");
+  assert.equal(player.state().stepIndex, before + 1);
+
+  player.key(key("left"));
+  assert.equal(player.state().stepIndex, before);
   player.key(key("left"));
   assert.equal(player.state().stepIndex, 2);
   player.key(key("left"));

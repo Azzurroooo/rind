@@ -208,6 +208,7 @@ export function createTourPlayer({ topics, startPageId = "", stage, schedule = s
   }
 
   function advanceFromWait() {
+    playing = true;
     stage.settleStep(current());
     settled = true;
     emit();
@@ -232,19 +233,15 @@ export function createTourPlayer({ topics, startPageId = "", stage, schedule = s
     playStep(stepIndex + 1);
   }
 
+  // Back is a review action: rebuild the previous step and hold there, so a
+  // note you just backed away from does not bounce forward again on its own.
   function stepBack() {
     clearStepTimer();
+    playing = false;
     stage.rebuildTo(steps(), stepIndex - 1);
     stepIndex = Math.max(0, stepIndex - 1);
     settled = true;
-    if (timing(current().kind).waitKey) {
-      subPhase = "waiting";
-    } else {
-      subPhase = "after";
-      if (playing) {
-        scheduleStep("after", delay(timing(current().kind).afterMs || 300));
-      }
-    }
+    subPhase = timing(current().kind).waitKey ? "waiting" : "after";
     emit();
   }
 

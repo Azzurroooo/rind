@@ -68,7 +68,7 @@ settling. `speed ∈ {0.5, 1, 2, 4}` scales the delays.
 | Key | Page view | Catalog |
 | --- | --- | --- |
 | space | pause / resume / continue a note / next page at the end | — |
-| ← / → | rebuild previous step / skip to the next | — |
+| ← / → | back one step and pause for review / skip to the next | — |
 | enter | settle the current step instantly | play selection |
 | ↑ / ↓ | speed | move selection (wraps) |
 | r | replay the page | — |
