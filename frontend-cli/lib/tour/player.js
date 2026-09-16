@@ -323,13 +323,20 @@ export function createTourPlayer({ topics, startPageId = "", stage, schedule = s
       return;
     }
     if (event.kind === "text") {
-      // parseTerminalKey reports plain letters and space as text; the tour
-      // has no editor, so its letter commands arrive this way.
-      const mapped = { " ": "space", q: "q", r: "r" }[event.text];
-      if (!mapped || (mapped === "r" && view !== "page")) {
-        return;
+      // parseTerminalKey reports plain letters as text; the tour has no
+      // editor, so its letter commands arrive this way — possibly several
+      // batched into one chunk.
+      for (const char of event.text) {
+        const mapped = { " ": "space", q: "q", r: "r" }[char];
+        if (!mapped) {
+          continue;
+        }
+        if (mapped === "r" && view !== "page") {
+          continue;
+        }
+        key({ kind: "key", name: mapped, ctrl: false, alt: false, shift: false });
       }
-      event = { kind: "key", name: mapped, ctrl: false, alt: false, shift: false };
+      return;
     }
     if (event.ctrl && event.name === "c") {
       finish();

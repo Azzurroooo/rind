@@ -38,7 +38,7 @@ export function result(text, detail = "") {
 
 export function slashResult(displayResult) {
   return {
-    kind: "result",
+    kind: "slash-result",
     text: String(displayResult?.text || ""),
     detail: "",
     display: displayResult?.display || null,

@@ -281,3 +281,14 @@ test("text keystrokes are ignored", () => {
   player.key({ kind: "text", name: "", text: "x" });
   assert.equal(player.state().view, "catalog");
 });
+
+test("batched text chunks apply each letter and quit", async () => {
+  const stage = createTourStage();
+  const { player, clock } = makePlayer({ startPageId: "start.hello", stage });
+  player.start();
+  clock.advance(970);
+  player.key({ kind: "text", name: "", text: "xqy" });
+  assert.equal(player.state().view, "catalog", "q inside a batched chunk still navigates");
+  player.key({ kind: "text", name: "", text: "q" });
+  await player.finished;
+});

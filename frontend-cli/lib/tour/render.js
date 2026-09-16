@@ -184,9 +184,9 @@ function blockLines(block, inner) {
     case "assistant":
       return assistantLines(block, inner);
     case "result":
-      return block.display
-        ? slashResultText({ text: block.text, display: block.display }, []).split("\n")
-        : commandResultText(block.text, block.detail).split("\n");
+      return commandResultText(block.text, block.detail).split("\n");
+    case "slash-result":
+      return slashResultText({ text: block.text, display: block.display }, []).split("\n");
     case "tool":
       return toolLines(block);
     case "turn-done":

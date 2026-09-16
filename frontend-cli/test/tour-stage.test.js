@@ -74,6 +74,20 @@ test("submit echoes the composer text and starts running; turn-done clears both"
   assert.equal(snapshot.rind.composer.running, false);
 });
 
+test("submitting a slash command echoes it without starting the turn", () => {
+  const stage = createTourStage();
+  stage.beginStep({ kind: "startup", info: INFO });
+  stage.settleStep({ kind: "startup", info: INFO });
+  stage.beginStep({ kind: "type", text: "/team create" });
+  stage.settleStep({ kind: "type", text: "/team create" });
+  stage.beginStep({ kind: "submit", mode: "send" });
+  stage.settleStep({ kind: "submit", mode: "send" });
+
+  const snapshot = stage.snapshot();
+  assert.deepEqual(snapshot.rind.blocks[0], { kind: "user", text: "/team create" });
+  assert.equal(snapshot.rind.composer.running, false, "slash commands never run a turn");
+});
+
 test("queue and steer modes park the text in the composer pending list", () => {
   const stage = createTourStage();
   stage.beginStep({ kind: "startup", info: INFO });

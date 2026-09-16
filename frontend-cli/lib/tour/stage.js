@@ -54,10 +54,16 @@ export function createTourStage() {
         composer.text = "";
         break;
       }
-      case "result": {
+      case "result":
+      case "slash-result": {
         const composer = ensureRind().composer;
         composer.menu = null;
-        rind.blocks.push({ kind: "result", text: step.text, detail: step.detail, display: step.display || null });
+        rind.blocks.push({
+          kind: step.kind,
+          text: step.text,
+          detail: step.detail,
+          display: step.display || null,
+        });
         break;
       }
       case "tool":
@@ -159,8 +165,10 @@ export function createTourStage() {
         composer.menu = null;
         const mode = step.mode || "send";
         if (mode === "send") {
+          // Slash commands never start a turn in the real dispatch; only a
+          // plain prompt moves the composer into its running state.
           rind.blocks.push({ kind: "user", text: composer.text });
-          composer.running = true;
+          composer.running = !composer.text.startsWith("/");
         } else {
           composer.pending.push({ mode: mode === "queue" ? "follow_up" : "steering", input: composer.text });
         }
@@ -206,6 +214,7 @@ export function createTourStage() {
         break;
       }
       case "result":
+      case "slash-result":
       case "startup":
       case "note":
         break;

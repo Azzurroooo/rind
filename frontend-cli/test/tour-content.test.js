@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import { tourPages } from "../lib/tour/pages/index.js";
 
 const STEP_KINDS = new Set([
-  "shell", "shell-out", "startup", "type", "submit", "result",
+  "shell", "shell-out", "startup", "type", "submit", "result", "slash-result",
   "tool", "assistant", "menu", "turn-done", "exit", "note",
 ]);
 const MENU_KINDS = new Set([
