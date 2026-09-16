@@ -54,9 +54,12 @@ export function createTourStage() {
         composer.text = "";
         break;
       }
-      case "result":
-        ensureRind().blocks.push({ kind: "result", text: step.text, detail: step.detail, display: step.display || null });
+      case "result": {
+        const composer = ensureRind().composer;
+        composer.menu = null;
+        rind.blocks.push({ kind: "result", text: step.text, detail: step.detail, display: step.display || null });
         break;
+      }
       case "tool":
         ensureRind().blocks.push({ kind: "tool", name: step.name, detail: step.detail, outcome: step.outcome, running: true });
         break;
@@ -187,6 +190,7 @@ export function createTourStage() {
         const composer = ensureRind().composer;
         composer.running = false;
         composer.pending = [];
+        composer.menu = null;
         break;
       }
       case "exit": {
@@ -195,6 +199,7 @@ export function createTourStage() {
         composer.hidden = true;
         composer.running = false;
         composer.pending = [];
+        composer.text = "";
         rind.blocks.push({ kind: "goodbye" });
         break;
       }

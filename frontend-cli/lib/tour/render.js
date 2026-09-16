@@ -7,6 +7,7 @@ import {
   backgroundMonitorText,
   choiceMenuText,
   contextBoardText,
+  delegateMonitorText,
   inputHintText,
   modelMenuText,
   promptPlaceholderText,
@@ -251,6 +252,8 @@ function menuFrame(menu, inner) {
       return { text: choiceMenuText(menu.items, selected) };
     case "monitor":
       return { text: backgroundMonitorText(menu.tasks, 0, menu.task, inner) };
+    case "delegates":
+      return { text: delegateMonitorText(menu.delegates, 0, menu.delegate, inner) };
     case "board": {
       const page = menu.pages[selected] || {};
       return { text: page.breakdown ? contextBoardText(page, inner) : usageBoardText(page, inner) };
