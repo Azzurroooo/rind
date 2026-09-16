@@ -124,8 +124,10 @@ export function createTourStage() {
       case "menu": {
         const menu = rind?.composer.menu;
         if (!menu || typeof menu.target !== "number") return false;
-        menu.selected = Math.min(menu.target, (Number(menu.selected) || 0) + 1);
-        return menu.selected < menu.target;
+        const current = Number(menu.selected) || 0;
+        if (current === menu.target) return false;
+        menu.selected = current < menu.target ? current + 1 : current - 1;
+        return menu.selected !== menu.target;
       }
       default:
         return false;

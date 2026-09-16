@@ -1,8 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { startPages } from "../lib/tour/pages/start.js";
-import { teamPages } from "../lib/tour/pages/team.js";
+import { tourPages } from "../lib/tour/pages/index.js";
 
 const STEP_KINDS = new Set([
   "shell", "shell-out", "startup", "type", "submit", "result",
@@ -52,8 +51,11 @@ function validateStep(step, where) {
   }
   if (step.kind === "menu") {
     assert.ok(MENU_KINDS.has(step.menu?.kind), `${where}: unknown menu kind`);
-    if (typeof step.menu?.target === "number") {
-      assert.ok(step.menu.target >= (step.menu.selected || 0), `${where}: menu target behind selected`);
+    if (step.menu?.target !== undefined) {
+      assert.equal(typeof step.menu.target, "number", `${where}: menu target must be numeric`);
+    }
+    if (Array.isArray(step.menu?.items)) {
+      assert.ok(step.menu.items.length > 0, `${where}: menu items required`);
     }
   }
   if (step.kind === "turn-done") {
@@ -82,7 +84,8 @@ function validatePage(page, seen) {
 
 test("tour pages are well-formed and uniquely identified", () => {
   const seen = new Set();
-  for (const page of [...startPages, ...teamPages]) {
+  for (const page of tourPages()) {
     validatePage(page, seen);
   }
+  assert.ok(seen.size >= 16, `expected the full catalog, found ${seen.size} pages`);
 });
