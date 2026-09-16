@@ -9,6 +9,11 @@ from agent.domain.message_boundary import validate_compact_handoff_boundary
 
 INTERNAL_MESSAGE_KINDS = frozenset({"goal_checkpoint"})
 
+MISSING_TOOL_RESULT_CONTENT = (
+    "[tool result unavailable] rind was interrupted before this call's "
+    "result was saved; the call may or may not have run."
+)
+
 
 def project_messages(
     messages: list[dict[str, Any]],
@@ -249,6 +254,10 @@ def _missing_tool_messages(
             continue
         tool_record = tool_map.get(tool_call_id)
         if not isinstance(tool_record, dict):
+            missing.append(
+                {"role": "tool", "tool_call_id": tool_call_id, "content": MISSING_TOOL_RESULT_CONTENT}
+            )
+            emitted_tool_call_ids.add(tool_call_id)
             continue
         content = _build_tool_content(tool_record)
         item = {"role": "tool", "tool_call_id": tool_call_id, "content": content}

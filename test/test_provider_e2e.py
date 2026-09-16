@@ -13,6 +13,7 @@ import subprocess
 import sys
 import threading
 import time
+import asyncio
 from pathlib import Path
 
 import pytest
@@ -23,10 +24,12 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from helpers.fake_gemini_server import FakeGeminiServer
 from helpers.fake_openai_server import FakeOpenAIServer
+from agent.infrastructure.persistence.jsonl_session_store import JsonlSessionStore
+from agent.infrastructure.persistence.message_projector import MISSING_TOOL_RESULT_CONTENT
 
 
 class _AppServerProcess:
-    def __init__(self, workspace: Path, rind_home: Path):
+    def __init__(self, workspace: Path, rind_home: Path, extra_args: list[str] | None = None):
         env = dict(os.environ)
         env["RIND_HOME"] = str(rind_home)
         env["PYTHONIOENCODING"] = "utf-8"
@@ -34,7 +37,7 @@ class _AppServerProcess:
         self._lock = threading.Lock()
         self._stderr: list[str] = []
         self.process = subprocess.Popen(
-            [sys.executable, "main.py", "app-server", "--stdio", "--cwd", str(workspace)],
+            [sys.executable, "main.py", "app-server", "--stdio", "--cwd", str(workspace), *(extra_args or [])],
             cwd=PROJECT_ROOT,
             env=env,
             stdin=subprocess.PIPE,
@@ -255,6 +258,74 @@ def test_google_login_static_catalog_and_tool_turn_journey(tmp_path: Path):
 
         transcript = json.dumps(server.lines, ensure_ascii=False)
         assert "e2e-gemini-key" not in transcript
+    finally:
+        server.close()
+        fixture.stop()
+
+
+def test_resume_latest_repairs_interrupted_tool_call_journey(tmp_path: Path, monkeypatch):
+    fixture = FakeOpenAIServer()
+    fixture.set_models(["fake-model-a"])
+    fixture.script_text(["the date call was interrupted before its result was saved"])
+    fixture.start()
+
+    rind_home = tmp_path / "home"
+    rind_home.mkdir()
+    (rind_home / "auth.json").write_text(
+        json.dumps({"openai-compatible": {"type": "api_key", "key": "e2e-secret-key"}}),
+        encoding="utf-8",
+    )
+    workspace = tmp_path / "workspace"
+    (workspace / ".rind").mkdir(parents=True)
+    (workspace / ".rind" / "settings.json").write_text(
+        json.dumps({"provider": "openai-compatible", "baseUrl": fixture.base_url, "model": "fake-model-a"}),
+        encoding="utf-8",
+    )
+
+    # Seed the crash state: the assistant tool call was persisted, the tool
+    # result never was.
+    async def _seed_orphaned_turn():
+        store = JsonlSessionStore(
+            session_id="e2e-orphaned-turn",
+            model="fake-model-a",
+            provider="openai-compatible",
+            system_prompt="e2e system prompt",
+            workspace_root=str(workspace),
+        )
+        await store.initialize()
+        await store.persist_message("user", "run date")
+        await store.persist_message(
+            "assistant",
+            "",
+            meta={"tool_calls": [{"id": "call_e2e_1", "name": "bash", "raw_args": '{"command":"date"}'}]},
+        )
+
+    monkeypatch.setenv("RIND_HOME", str(rind_home))
+    asyncio.run(_seed_orphaned_turn())
+    monkeypatch.delenv("RIND_HOME")
+
+    server = _AppServerProcess(workspace, rind_home, extra_args=["--resume-latest"])
+    try:
+        server.send("init", "initialize")
+        initialize = server.response("init")
+        assert initialize["result"]["session_id"] == "e2e-orphaned-turn"
+
+        server.send("turn", "session/prompt", {
+            "session_id": "e2e-orphaned-turn",
+            "input": "what happened to the date command?",
+        })
+        turn = server.response("turn")
+        assert turn["result"]["ok"] is True
+
+        request_messages = fixture.last_request()["messages"]
+        tool_index = next(
+            index
+            for index, message in enumerate(request_messages)
+            if message.get("role") == "tool"
+            and message.get("tool_call_id") == "call_e2e_1"
+            and message.get("content") == MISSING_TOOL_RESULT_CONTENT
+        )
+        assert request_messages[tool_index - 1]["tool_calls"][0]["id"] == "call_e2e_1"
     finally:
         server.close()
         fixture.stop()

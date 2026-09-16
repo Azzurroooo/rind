@@ -21,6 +21,7 @@ from agent.infrastructure.persistence.session_index_repository import SessionInd
 import agent.infrastructure.persistence.session_files as session_files
 from agent.domain.compaction import COMPACT_CONTINUATION_USER_CONTENT, COMPACT_HANDOFF_REASONING_CONTENT
 from agent.domain.message_boundary import validate_model_message_boundary
+from agent.infrastructure.persistence.message_projector import MISSING_TOOL_RESULT_CONTENT
 from agent.infrastructure.tools.builtin.planning import update_plan
 
 @pytest.fixture
@@ -909,7 +910,7 @@ async def test_get_messages_slice_recovers_missing_tool_message_from_record(temp
 
 
 @pytest.mark.asyncio
-async def test_get_messages_slice_skips_interrupted_tool_call(temp_session_dir):
+async def test_get_messages_slice_drops_tool_call_without_arguments(temp_session_dir):
     store = JsonlSessionStore(session_dir=temp_session_dir, system_prompt="sys")
     await store.initialize()
     await store.persist_message(
@@ -919,6 +920,100 @@ async def test_get_messages_slice_skips_interrupted_tool_call(temp_session_dir):
     messages = await store.get_messages_slice()
 
     assert messages == [{"role": "system", "content": "sys"}]
+
+
+@pytest.mark.asyncio
+async def test_get_messages_slice_repairs_interrupted_tool_call(temp_session_dir):
+    store = JsonlSessionStore(session_dir=temp_session_dir, system_prompt="sys")
+    await store.initialize()
+    await store.persist_message("user", "run date")
+    await store.persist_message(
+        "assistant",
+        "",
+        meta={"tool_calls": [{"id": "call_1", "name": "bash", "raw_args": '{"command":"date"}'}]},
+    )
+
+    messages = await store.get_messages_slice()
+
+    assert messages == [
+        {"role": "system", "content": "sys"},
+        {"role": "user", "content": "run date"},
+        {
+            "role": "assistant",
+            "tool_calls": [
+                {
+                    "id": "call_1",
+                    "type": "function",
+                    "function": {"name": "bash", "arguments": '{"command":"date"}'},
+                }
+            ],
+        },
+        {"role": "tool", "tool_call_id": "call_1", "content": MISSING_TOOL_RESULT_CONTENT},
+    ]
+    assert validate_model_message_boundary(messages).ok
+
+
+@pytest.mark.asyncio
+async def test_get_messages_slice_repairs_only_interrupted_calls_in_batch(temp_session_dir):
+    store = JsonlSessionStore(session_dir=temp_session_dir, system_prompt="sys")
+    await store.initialize()
+    await store.persist_message("user", "run date")
+    await store.persist_message(
+        "assistant",
+        "",
+        meta={
+            "tool_calls": [
+                {"id": "call_1", "name": "bash", "raw_args": '{"command":"date"}'},
+                {"id": "call_2", "name": "read", "raw_args": '{"path":"a.txt"}'},
+            ]
+        },
+    )
+    await store.persist_tool_call(
+        call_id="call_2",
+        name="read",
+        parsed_args={"path": "a.txt"},
+        raw_args='{"path":"a.txt"}',
+        ts_start=store.now_iso(),
+        ts_end=store.now_iso(),
+        result_payload=json.dumps({"ok": True, "tool": "read", "data": "raw result"}),
+        model_content="read model content",
+        model_content_format="tool_result_v2",
+        model_content_policy={"truncated": False},
+    )
+
+    messages = await store.get_messages_slice()
+
+    assert messages[-2:] == [
+        {"role": "tool", "tool_call_id": "call_1", "content": MISSING_TOOL_RESULT_CONTENT},
+        {"role": "tool", "tool_call_id": "call_2", "content": "read model content"},
+    ]
+    assert validate_model_message_boundary(messages).ok
+
+
+@pytest.mark.asyncio
+async def test_get_messages_slice_repairs_interrupted_call_after_compaction(temp_session_dir):
+    store = JsonlSessionStore(session_dir=temp_session_dir, system_prompt="sys")
+    await store.initialize()
+    await store.persist_message("user", "old question")
+    await store.persist_message("assistant", "old answer")
+    await store.persist_compaction(
+        {
+            "handoff_message": {"role": "assistant", "content": "summary handoff"},
+            "continuation_user_message": {"role": "user", "content": "continue from summary"},
+        }
+    )
+    await store.persist_message("user", "run date")
+    await store.persist_message(
+        "assistant",
+        "",
+        meta={"tool_calls": [{"id": "call_1", "name": "bash", "raw_args": '{"command":"date"}'}]},
+    )
+
+    messages = await store.get_messages_slice()
+
+    assert messages[1] == {"role": "user", "content": "continue from summary"}
+    assert messages[-1] == {"role": "tool", "tool_call_id": "call_1", "content": MISSING_TOOL_RESULT_CONTENT}
+    assert validate_model_message_boundary(messages).ok
 
 
 @pytest.mark.asyncio
