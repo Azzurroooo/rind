@@ -50,6 +50,9 @@ export async function runTour({
   });
   tui.addChild(new TourScreen(player, stage, () => tui.rows));
   tui.onData((sequence) => player.key(parseTerminalKey(sequence)));
+  // Terminals (and automation) may deliver text as bracketed paste; the tour
+  // treats it the same as typed letters.
+  tui.onPaste((text) => player.key({ kind: "text", name: "", text: String(text || "") }));
   tui.start();
   player.start();
   await player.finished;

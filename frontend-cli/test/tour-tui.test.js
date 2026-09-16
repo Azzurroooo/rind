@@ -130,6 +130,25 @@ test("unknown page ids report the catalog on stderr without rendering", async ()
   assert.equal(output.getScrollBuffer().join("").trim(), "", "nothing rendered");
 });
 
+test("text keystrokes arrive as bracketed paste and still navigate", async () => {
+  const { output, input } = { output: createVirtualOutput({ columns: 90, rows: 30 }), input: createVirtualInput() };
+  const clock = fakeClock();
+  const running = runTour({
+    input,
+    output: output.output,
+    startPageId: "team.work",
+    schedule: clock.schedule,
+    cancel: clock.cancel,
+  });
+  await settle();
+  input.send("\x1b[200~q\x1b[201~");
+  await settle();
+  let screen = (await output.flushAndGetViewport()).join("\n");
+  assert.ok(screen.includes("Rind Tour"), "pasted q returns to the catalog");
+  input.send("\x1b[200~q\x1b[201~");
+  await running;
+});
+
 test("pages wrap inside narrow terminals", async () => {
   const { output, input } = { output: createVirtualOutput({ columns: 60, rows: 40 }), input: createVirtualInput() };
   const clock = fakeClock();
