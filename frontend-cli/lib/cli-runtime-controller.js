@@ -385,7 +385,12 @@ export function createCliRuntimeController({
       return;
     }
     const currentModel = result?.current || result?.current_model || state.session.info.model || result?.default_model || "";
-    const selected = await askModelMenu(models, currentModel);
+    const providerNames = new Map(
+      (Array.isArray(state.session.info.providers) ? state.session.info.providers : [])
+        .map((item) => [String(item?.id || ""), String(item?.name || "")])
+        .filter(([id, name]) => id && name),
+    );
+    const selected = await askModelMenu(models, currentModel, providerNames);
     if (!selected || state.runtime.status === "closing") {
       return;
     }

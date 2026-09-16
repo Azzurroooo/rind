@@ -116,7 +116,7 @@ test("interactive CLI journey: login, chat, logout", async () => {
   try {
     await cli.waitFor("fake-model-a");
     cli.send("/login openai-compatible");
-    await cli.waitFor("OpenAI compatible API key");
+    await cli.waitFor("OpenAI compatible (chat completions) API key");
     cli.send("e2e-cli-secret");
     await cli.waitFor("Logged in to openai-compatible");
 

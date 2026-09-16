@@ -1,5 +1,5 @@
-export function createModelMenuState(models, currentModel = "") {
-  const items = normalizeModels(models, currentModel);
+export function createModelMenuState(models, currentModel = "", providerNames = new Map()) {
+  const items = normalizeModels(models, currentModel, providerNames);
   let selected = initialSelection(items);
   return {
     items() {
@@ -28,7 +28,7 @@ export function createModelMenuState(models, currentModel = "") {
   };
 }
 
-function normalizeModels(models, currentModel) {
+function normalizeModels(models, currentModel, providerNames) {
   const current = typeof currentModel === "object"
     ? { providerId: String(currentModel.provider_id || "").trim(), modelId: String(currentModel.model_id || "").trim() }
     : { providerId: "", modelId: String(currentModel || "").trim() };
@@ -72,7 +72,7 @@ function normalizeModels(models, currentModel) {
   const items = [];
   if (providers.some((providerId) => providerId)) {
     for (const providerId of providers) {
-      items.push({ header: true, name: providerId });
+      items.push({ header: true, name: providerNames.get(providerId) || providerId });
       items.push(...byProvider.get(providerId));
     }
     return items;

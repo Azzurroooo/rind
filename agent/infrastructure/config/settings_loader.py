@@ -60,6 +60,7 @@ def _sanitize_header_segment(value: str) -> str:
 
 DEFAULT_MODEL = "gpt-4o-mini"
 DEFAULT_BASE_URL = "https://api.openai.com/v1"
+DEFAULT_PROVIDER = "openai-compatible"
 REASONING_EFFORTS = ("low", "medium", "high", "xhigh", "max")
 DEFAULT_USER_AGENT = build_default_user_agent()
 
@@ -74,7 +75,7 @@ class AppSettings:
     reasoning_effort: str
     user_agent: str = DEFAULT_USER_AGENT
     server_token: str = ""
-    provider: str = "openai-compatible"
+    provider: str = DEFAULT_PROVIDER
     api: str = "openai-chat"
 
 
@@ -108,7 +109,7 @@ def normalize_reasoning_effort(value: Any) -> str:
 
 
 def _build_settings(settings_path: Path, data: dict[str, Any]) -> AppSettings:
-    provider = _string(data, "provider") or "openai-compatible"
+    provider = _string(data, "provider") or DEFAULT_PROVIDER
     return AppSettings(
         settings_path=settings_path,
         settings_exists=settings_path.exists(),

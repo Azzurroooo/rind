@@ -474,9 +474,9 @@ export function createCliInputActions({
     session.resolve(value);
   }
 
-  function askModelMenu(models, currentModel) {
+  function askModelMenu(models, currentModel, providerNames) {
     return new Promise((resolve) => {
-      const modelState = createModelMenuState(models, currentModel);
+      const modelState = createModelMenuState(models, currentModel, providerNames);
       if (!modelState.items().length) {
         resolve("");
         return;

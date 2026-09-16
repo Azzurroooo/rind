@@ -92,7 +92,7 @@ PROVIDERS: dict[str, ProviderDefinition] = {
         fallback_models=(),
     ),
     "openai-compatible": ProviderDefinition(
-        "openai-compatible", "OpenAI compatible", "openai-chat", "", environment_key="OPENAI_API_KEY", fallback_models=(),
+        "openai-compatible", "OpenAI compatible (chat completions)", "openai-chat", "", environment_key="OPENAI_API_KEY", fallback_models=(),
     ),
 }
 

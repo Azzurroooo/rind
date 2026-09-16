@@ -21,6 +21,22 @@ test("model menu groups models by provider and defaults to the current model", (
   assert.equal(state.selectedModel().current, true);
 });
 
+test("model menu headers prefer provider display names when provided", () => {
+  const state = createModelMenuState(
+    [
+      { provider_id: "openai-compatible", id: "custom-model" },
+      { provider_id: "deepseek", id: "deepseek-chat" },
+    ],
+    { provider_id: "openai-compatible", model_id: "custom-model" },
+    new Map([["openai-compatible", "OpenAI compatible (chat completions)"]]),
+  );
+
+  assert.deepEqual(
+    state.items().map((item) => item.header ? `header:${item.name}` : item.modelId),
+    ["header:OpenAI compatible (chat completions)", "custom-model", "header:deepseek", "deepseek-chat"],
+  );
+});
+
 test("model menu handles plain string models without provider ids", () => {
   const state = createModelMenuState(["model-a", "model-b"], "model-b");
 
