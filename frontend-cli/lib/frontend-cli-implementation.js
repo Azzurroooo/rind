@@ -114,6 +114,7 @@ if (cliArgs[0] === "tour") {
     return;
   }
   await runTour({ input: process.stdin, output: process.stdout, startPageId: cliArgs[1] || "" });
+  saveCliState({ tourSeen: true });
   return;
 }
 
@@ -448,8 +449,9 @@ try {
   sessionState.commands = commandController.localCommands();
   await runtimeController.ensureRuntime();
   const startupInfo = { ...sessionState.info, resume_preview: "" };
+  const tourHint = persistedState.tourSeen ? [] : ["new to Rind? /tour walks you through it"];
   if (tui) {
-    outputController.showStartup(startupInfo);
+    outputController.showStartup(startupInfo, tourHint);
   } else {
     logOutput(startupText(startupInfo));
   }
@@ -516,7 +518,10 @@ async function enterInSessionTour(pageId) {
   tui.stop();
   process.off("SIGINT", handleSigint);
   try {
-    await runTour({ input: process.stdin, output: process.stdout, startPageId: pageId || "" });
+    const started = await runTour({ input: process.stdin, output: process.stdout, startPageId: pageId || "" });
+    if (started) {
+      saveCliState({ tourSeen: true });
+    }
   } catch (error) {
     writeErrorOutput(`${error instanceof Error ? error.message : String(error)}\n`);
   } finally {
