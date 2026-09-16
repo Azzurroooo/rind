@@ -119,8 +119,11 @@ class ProviderServiceImpl:
             if self._credential_source(settings, definition.id) == "none":
                 continue
             api = _effective_api(settings, definition)
-            values = cache.get(definition.id) or ()
-            models = [_model(definition, api, item) for item in values] or list(definition.fallback_models)
+            verified = {model.id: model.reasoning_efforts for model in definition.fallback_models}
+            models = [
+                _model(definition, api, item, verified.get(_item_id(item)))
+                for item in cache.get(definition.id) or ()
+            ] or list(definition.fallback_models)
             result.extend(models)
         current = ModelSelection(settings.provider, settings.model)
         definition = self.providers.get(current.provider_id)
@@ -229,11 +232,10 @@ def _effective_api(settings: AppSettings, definition) -> str:
     return settings.api if definition.id == "openai-compatible" else definition.api
 
 
-def _model(definition, api: str, item: Any) -> ModelDefinition:
-    if isinstance(item, str):
-        return ModelDefinition(definition.id, item, item, api, default_reasoning_efforts(api))
-    model_id = str(item.get("id") or "")
-    return ModelDefinition(definition.id, model_id, str(item.get("name") or model_id), api, default_reasoning_efforts(api))
+def _model(definition, api: str, item: Any, efforts: tuple[str, ...] | None = None) -> ModelDefinition:
+    model_id = _item_id(item)
+    name = str(item.get("name") or model_id) if isinstance(item, dict) else model_id
+    return ModelDefinition(definition.id, model_id, name, api, default_reasoning_efforts(api) if efforts is None else efforts)
 
 
 def _selection_model(settings: AppSettings, definition, selection: ModelSelection) -> ModelDefinition:

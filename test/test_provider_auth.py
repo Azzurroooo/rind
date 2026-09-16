@@ -191,6 +191,20 @@ async def test_list_models_keeps_other_providers_when_one_refresh_fails(tmp_path
 
 
 @pytest.mark.asyncio
+async def test_list_models_refreshed_entries_keep_verified_efforts(tmp_path: Path, monkeypatch) -> None:
+    from agent.infrastructure.llm.providers import default_reasoning_efforts
+
+    service = _service(tmp_path, _settings(tmp_path), monkeypatch)
+    service.credentials.set("zhipu", Credential(type="api_key", key="zhipu-key"))
+    service._write_cache({"zhipu": [{"id": "glm-5.3", "name": "GLM-5.3"}, {"id": "glm-4.5", "name": "GLM-4.5"}]})
+
+    catalog = await service.list_models(str(tmp_path))
+    efforts = {model.id: model.reasoning_efforts for model in catalog.models}
+    assert efforts["glm-5.3"] == ("low", "high", "max")
+    assert efforts["glm-4.5"] == default_reasoning_efforts("openai-chat")
+
+
+@pytest.mark.asyncio
 async def test_list_models_falls_back_to_builtin_catalog_without_cache(tmp_path: Path, monkeypatch) -> None:
     service = _service(tmp_path, _settings(tmp_path), monkeypatch)
     service.credentials.set("deepseek", Credential(type="api_key", key="deepseek-key"))
