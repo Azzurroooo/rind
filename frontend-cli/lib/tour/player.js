@@ -322,8 +322,17 @@ export function createTourPlayer({ topics, startPageId = "", stage, schedule = s
   }
 
   function key(event) {
-    if (!event || event.kind === "text") {
+    if (!event) {
       return;
+    }
+    if (event.kind === "text") {
+      // parseTerminalKey reports plain letters and space as text; the tour
+      // has no editor, so its letter commands arrive this way.
+      const mapped = { " ": "space", q: "q", r: "r" }[event.text];
+      if (!mapped || (mapped === "r" && view !== "page")) {
+        return;
+      }
+      event = { kind: "key", name: mapped, ctrl: false, alt: false, shift: false };
     }
     if (event.ctrl && event.name === "c") {
       finish();

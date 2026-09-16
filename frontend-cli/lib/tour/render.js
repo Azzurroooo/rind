@@ -61,26 +61,56 @@ function hintLine(keys, right, width) {
 
 // --- catalog ---------------------------------------------------------------
 
-export function renderTourCatalog(state, width) {
+// The catalog windows its rows like the app's own menus so it stays inside the
+// viewport on short terminals; `rows` is the terminal height.
+export function renderTourCatalog(state, width, rows = 24) {
+  const inner = Math.max(MIN_INNER, width - 4);
   const pages = state.topics.flatMap((topic) => topic.pages);
   const idWidth = Math.max(...pages.map((page) => page.id.length));
-  const body = [paint.dim("  Guided walkthroughs — watch each Rind feature in action, step by step.")];
-  let index = 0;
+  const plan = [];
   for (const topic of state.topics) {
-    body.push("", `  ${paint.dim(topic.title.toUpperCase())}`);
-    for (const page of topic.pages) {
-      const selected = index === state.selected;
-      const marker = selected ? paint.accent("›") : paint.dim("·");
-      const title = selected ? paint.bold(page.title) : paint.dim(page.title);
-      body.push(`  ${marker} ${paint.dim(`${index + 1}.`.padEnd(4))}${paint.dim(page.id.padEnd(idWidth))}  ${title}  ${paint.dim(`${page.steps.length} steps`)}`);
-      index += 1;
+    if (plan.length) {
+      plan.push({ blank: true });
     }
+    plan.push({ header: topic.title.toUpperCase() });
+    for (const page of topic.pages) {
+      plan.push({ page });
+    }
+  }
+  const selectedRow = plan.findIndex((row) => row.page === pages[state.selected]);
+  const budget = Math.max(6, rows - 8);
+  const start = plan.length <= budget
+    ? 0
+    : Math.min(Math.max(0, selectedRow - 3), plan.length - budget);
+  const visible = plan.slice(start, start + budget);
+
+  const body = [paint.dim("  Guided walkthroughs — watch each Rind feature in action, step by step.")];
+  if (start > 0) {
+    body.push(paint.dim("  …"));
+  }
+  for (const row of visible) {
+    if (row.blank) {
+      body.push("");
+      continue;
+    }
+    if (row.header) {
+      body.push(`  ${paint.dim(row.header)}`);
+      continue;
+    }
+    const index = pages.indexOf(row.page);
+    const selected = index === state.selected;
+    const marker = selected ? paint.accent("›") : paint.dim("·");
+    const title = selected ? paint.bold(row.page.title) : paint.dim(row.page.title);
+    body.push(`  ${marker} ${paint.dim(`${index + 1}.`.padEnd(4))}${paint.dim(row.page.id.padEnd(idWidth))}  ${title}  ${paint.dim(`${row.page.steps.length} steps`)}`);
+  }
+  if (start + budget < plan.length) {
+    body.push(paint.dim("  …"));
   }
   const lines = frameBlock({
     title: "Rind Tour",
     badge: `${state.selected + 1}/${pages.length}`,
     body,
-    inner: Math.max(MIN_INNER, width - 4),
+    inner,
   }, width);
   lines.push(hintLine(["↑↓ select", "enter play", "q quit"], "", width));
   return { lines, cursor: null };
