@@ -30,9 +30,10 @@ import { createCliState } from "./cli-state.js";
 import { createCliRuntimeController } from "./cli-runtime-controller.js";
 import { createCliOutputController } from "./cli-output-controller.js";
 import { createCliInputActions } from "./cli-input-actions.js";
-import { cliHelp, oneShotHelp, runOneShot } from "./one-shot.js";
+import { cliHelp, oneShotHelp, runOneShot, tourHelp } from "./one-shot.js";
 import { runSend, sendHelp } from "./send.js";
 import { listenIpc } from "./ipc.js";
+import { runTour } from "./tour/run-tour.js";
 import { createTui } from "./tui/tui.js";
 import { Container } from "./tui/component.js";
 import { ComposerArea } from "./components/composer-area.js";
@@ -90,11 +91,30 @@ if (cliArgs[0] === "send") {
   }
   return;
 }
+// "rind help" is an alias for --help, not a session command.
+if (cliArgs[0] === "help") {
+  cliArgs = ["--help"];
+}
+
 if (cliArgs.some((arg) => arg === "--version" || arg === "--help" || arg === "-h")) {
   if (cliArgs.includes("--help") || cliArgs.includes("-h")) {
     process.stdout.write(`${cliHelp}\n\n`);
   }
   process.exit(runHelpVersion({ python, repoRoot, runtimePath, cliArgs }));
+}
+
+if (cliArgs[0] === "tour") {
+  if (cliArgs.some((arg) => arg === "--help" || arg === "-h")) {
+    process.stdout.write(`${tourHelp}\n`);
+    return;
+  }
+  if (!process.stdin.isTTY || !process.stdout.isTTY) {
+    process.stderr.write("rind tour requires an interactive terminal.\n");
+    process.exitCode = 2;
+    return;
+  }
+  await runTour({ input: process.stdin, output: process.stdout, startPageId: cliArgs[1] || "" });
+  return;
 }
 
 if (cliArgs[0] === "run") {
@@ -284,6 +304,7 @@ commandController = createCommandController({
         await commandController.handle(`/theme ${selected}`);
       }
     },
+    runTour: (pageId) => enterInSessionTour(pageId),
     startCompactCommand: runtimeController.startCompactCommand,
     runSessionsSelector: runtimeController.runSessionsSelector,
     runForkSelector: runtimeController.runForkSelector,
@@ -482,6 +503,28 @@ async function rebindSendEndpoint() {
 function resetContextUsage() {
   displayState.stats = { context_usage_percent: 0 };
   redrawInput();
+}
+
+// In-session tour: suspend the main TUI (and its SIGINT handler, since raw
+// mode is released while the tour owns the terminal), play, then restore.
+async function enterInSessionTour(pageId) {
+  if (turnStateData.active || displayState.activeCompact) {
+    logOutput("/tour is available between turns.");
+    return;
+  }
+  inputController.pause();
+  tui.stop();
+  process.off("SIGINT", handleSigint);
+  try {
+    await runTour({ input: process.stdin, output: process.stdout, startPageId: pageId || "" });
+  } catch (error) {
+    writeErrorOutput(`${error instanceof Error ? error.message : String(error)}\n`);
+  } finally {
+    process.on("SIGINT", handleSigint);
+    tui.start();
+    tui.replayAll();
+    inputController.resume();
+  }
 }
 
 async function runLogin(providerId = "") {

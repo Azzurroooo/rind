@@ -16,6 +16,7 @@ export const LOCAL_SLASH_COMMANDS = Object.freeze([
   { name: "status", description: "Show session and provider status", usage: "/status" },
   { name: "team", description: "Manage the current Team", usage: "/team create [project-id] | /team init | /team list | /team blueprint [id] | /team add <description>" },
   { name: "theme", description: "Switch the CLI color theme", usage: "/theme [latte | frappe | macchiato | mocha]" },
+  { name: "tour", description: "Interactive feature walkthrough", usage: "/tour [page]" },
 ]);
 
 export async function executeLocalSlashCommand(input, context = {}) {

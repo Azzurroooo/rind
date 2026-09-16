@@ -222,6 +222,7 @@ test("local command catalog stays complete before the runtime starts", async () 
     "status",
     "team",
     "theme",
+    "tour",
   ]);
   for (const name of ["compact", "fork", "init", "sessions", "skill", "team"]) {
     const result = await executeLocalSlashCommand(`/${name}`, {
@@ -235,4 +236,35 @@ test("local command catalog stays complete before the runtime starts", async () 
     });
     assert.equal(result, null, `/${name} must fall through to the runtime`);
   }
+});
+
+test("/tour routes to the tour runner with its page argument", async () => {
+  const calls = [];
+  const controller = createCommandController({
+    request: async () => ({}),
+    turn: { submit() {} },
+    input: {
+      isTerminal: true,
+      runTour: async (pageId) => calls.push(pageId),
+    },
+    output: { log() {} },
+  });
+
+  assert.equal(await controller.handle("/tour"), true);
+  assert.equal(await controller.handle("/tour team.create"), true);
+  assert.equal(await controller.handle("/TOUR start.hello"), true);
+  assert.deepEqual(calls, ["", "team.create", "start.hello"]);
+});
+
+test("/tour without a terminal explains the requirement", async () => {
+  const logs = [];
+  const controller = createCommandController({
+    request: async () => ({}),
+    turn: { submit() {} },
+    input: { isTerminal: false },
+    output: { log: (text) => logs.push(text) },
+  });
+
+  assert.equal(await controller.handle("/tour"), true);
+  assert.deepEqual(logs, ["/tour requires an interactive terminal."]);
 });

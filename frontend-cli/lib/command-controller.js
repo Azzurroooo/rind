@@ -29,6 +29,14 @@ export function createCommandController({
       await input.runThemeSelector();
       return true;
     }
+    if (isTourCommand(text)) {
+      if (input.isTerminal && input.runTour) {
+        await input.runTour(tourArgument(text));
+      } else {
+        output.log?.("/tour requires an interactive terminal.");
+      }
+      return true;
+    }
     const localResult = await input.runLocalCommand?.(text);
     if (localResult) {
       await applyResult(localResult);
@@ -177,6 +185,14 @@ function effortArgument(value) {
 
 function isBareThemeCommand(value) {
   return String(value || "").trim().toLowerCase() === "/theme";
+}
+
+function isTourCommand(value) {
+  return /^\/tour\b/i.test(String(value || "").trim());
+}
+
+function tourArgument(value) {
+  return String(value || "").trim().replace(/^\/tour\b/i, "").trim();
 }
 
 function isLocalCommand(value, name) {
