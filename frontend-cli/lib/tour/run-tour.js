@@ -16,7 +16,7 @@ class TourScreen extends Component {
 
   render(width) {
     const height = this.rows?.() ?? 24;
-    if (width < 36 || height < 14) this.player.pause();
+    if (width < 36 || height < 14) this.player.pause("resize");
     const state = this.player.state();
     const out = state.help ? renderTourHelp(width, height) : state.view === "catalog"
       ? renderTourCatalog(state, width, height)
@@ -36,6 +36,7 @@ export async function runTour({
   startPageId = "",
   schedule = setTimeout,
   cancel = clearTimeout,
+  now = () => performance.now(),
   onPageComplete = () => {},
 } = {}) {
   if (startPageId && !findTourPage(startPageId)) {
@@ -50,6 +51,7 @@ export async function runTour({
     stage,
     schedule,
     cancel,
+    now,
     onPageComplete,
     onRender: () => tui.requestRender(),
   });

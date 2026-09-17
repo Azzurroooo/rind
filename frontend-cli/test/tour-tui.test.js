@@ -10,6 +10,7 @@ function fakeClock() {
   let nextId = 1;
   const pending = new Map();
   return {
+    now: () => now,
     schedule(fn, ms) {
       const id = nextId;
       nextId += 1;
@@ -187,7 +188,7 @@ test("a completed lesson keeps title, takeaway and navigation on an 80x24 termin
     let screen = (await output.flushAndGetViewport()).join("\n");
     assert.ok(screen.includes("Tour · Your first turn"), screen);
     assert.ok(screen.includes("Try it: exit this tour"), screen);
-    assert.ok(screen.includes("page complete"), screen);
+    assert.ok(screen.includes("COMPLETE"), screen);
     assert.equal(completed, 1);
     assert.equal(clock.pendingCount, 0);
     input.send("\x1b[5~");
@@ -205,7 +206,7 @@ test("a completed lesson keeps title, takeaway and navigation on an 80x24 termin
     await settle();
     screen = (await output.flushAndGetViewport()).join("\n");
     assert.ok(screen.includes("Tour · Your first turn"), screen);
-    assert.ok(screen.includes("page complete"), screen);
+    assert.ok(screen.includes("COMPLETE"), screen);
   } finally {
     input.send("\x03");
     await running;
@@ -226,4 +227,47 @@ test("closing input cleans up a playing tour", async () => {
   assert.equal(clock.pendingCount, 0);
   assert.equal(input.isRaw, false);
   assert.equal(input.listenerCount("end"), 0);
+});
+
+test("terminal clearly distinguishes an explanation stop from an automatic countdown", async () => {
+  const input = createVirtualInput();
+  const output = createVirtualOutput({ columns: 80, rows: 24 });
+  const clock = fakeClock();
+  const running = runTour({ input, output: output.output, startPageId: "start.hello", schedule: clock.schedule, cancel: clock.cancel, now: clock.now });
+  try {
+    await settle();
+    let screen = (await output.flushAndGetViewport()).join("\n");
+    assert.ok(screen.includes("PAUSED · Read this explanation"), screen);
+    assert.ok(screen.includes("space continue"));
+    assert.ok(screen.includes("Step 1/"));
+    input.send(" ");
+    clock.advance(96); // "rind" has just finished typing; hold for 300ms.
+    await settle();
+    screen = (await output.flushAndGetViewport()).join("\n");
+    assert.ok(screen.includes("AUTO · next step in 0.3s"), screen);
+    clock.advance(150);
+    await settle();
+    screen = (await output.flushAndGetViewport()).join("\n");
+    assert.ok(screen.includes("AUTO · next step in 0.2s"), screen);
+    input.send(" ");
+    clock.advance(5000);
+    await settle();
+    screen = (await output.flushAndGetViewport()).join("\n");
+    assert.ok(screen.includes("PAUSED · You paused playback"), screen);
+    assert.ok(!screen.includes("next step in"));
+    output.resize(36, 14);
+    await settle();
+    screen = (await output.flushAndGetViewport()).join("\n");
+    assert.ok(screen.includes("PAUSED · You paused playback"), screen);
+    assert.ok(screen.includes("Step 2/"));
+    input.send(" ");
+    clock.advance(150);
+    await settle();
+    screen = (await output.flushAndGetViewport()).join("\n");
+    assert.ok(screen.includes("Step 3/"), "resume uses the remaining 150ms");
+  } finally {
+    input.send("\x03");
+    await running;
+  }
+  assert.equal(clock.pendingCount, 0);
 });

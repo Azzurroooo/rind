@@ -160,8 +160,8 @@ function renderPage(snapshot, state, width, height) {
   appendCaption(captions, snapshot, { ...state, inner });
   const captionRows = captions.flatMap((row) => wrapTextWithAnsi(row, inner, inner));
   const footer = [
-    paint.dim(clipCells(statusKeys(state).join(" · "), width)),
-    paint.dim(clipCells(`${statusRight(state)} · ? controls`, width)),
+    paint.bold(clipCells(statusKeys(state, width).join(" · "), width)),
+    progressLine(state, width),
   ];
   const budget = Math.max(1, height - captionRows.length - footer.length - 4);
   const maxScroll = Math.max(0, wrapped.length - budget);
@@ -173,7 +173,7 @@ function renderPage(snapshot, state, width, height) {
   const visible = wrapped.slice(start, start + budget);
   const action = demoAction(state.page.steps?.[state.stepIndex]);
   const label = clipCells(`DEMO${action ? ` · ${action}` : ""}${maxScroll ? " · PgUp/PgDn" : ""}`, inner);
-  const body = [paint.dim(label), ...visible, paint.dim("─".repeat(inner)), ...captionRows];
+  const body = [paint.dim(label), ...visible, playbackBanner(state, inner), ...captionRows];
   const lines = frameBlock({
     title: `Tour · ${state.page.title}`,
     badge: `${state.pageIndex + 1}/${state.pageCount}`,
@@ -187,7 +187,7 @@ function renderPage(snapshot, state, width, height) {
 }
 
 function smallTerminal(width, rows) {
-  return { lines: ["Tour needs 36 columns × 14 rows.", "Resize to continue; Ctrl+C exits."].slice(0, rows).map((line) => clipCells(line, width)), cursor: null, maxScroll: 0 };
+  return { lines: ["PAUSED · terminal too small", "Tour needs 36 columns × 14 rows.", "Resize, then Space; Ctrl+C exits."].slice(0, rows).map((line) => clipCells(line, width)), cursor: null, maxScroll: 0 };
 }
 
 function demoAction(step) {
@@ -393,30 +393,55 @@ function appendCaption(rows, snapshot, state) {
   rows.push(...wrapTextWithAnsi(lines.join(" "), state.inner, state.inner).map((line) => paint.accent(line)));
 }
 
-function statusKeys(state) {
+function statusKeys(state, width) {
+  const exit = width >= 60 ? ["q contents"] : [];
   if (state.phase === "waiting") {
-    return ["space continue", "q contents"];
+    return ["space continue", "enter continue", ...exit];
   }
   if (state.phase === "end") {
-    return [state.pageIndex + 1 === state.pageCount ? "enter contents" : "enter next page", "r replay", "q contents"];
+    return [state.pageIndex + 1 === state.pageCount ? "enter contents" : "enter next page", "r replay", ...exit];
   }
   if (state.paused) {
-    return ["space resume", "←→ step", "q contents"];
+    return ["space resume", "←→ step", ...exit];
   }
-  return ["space pause", "←→ step", "q contents"];
+  if (state.phase === "after") return ["space pause", "enter next now", ...exit];
+  return ["space pause", "enter skip", ...exit];
 }
 
-function statusRight(state) {
-  const parts = [`${state.speed}×`];
+function playbackBanner(state, width) {
+  let label;
+  let style = paint.accent;
   if (state.phase === "end") {
-    parts.push("page complete");
+    label = "✓ COMPLETE · Try it in Rind";
+    style = paint.success;
+  } else if (state.phase === "waiting") {
+    label = "Ⅱ PAUSED · Read this explanation";
+    style = paint.warning;
+  } else if (state.paused) {
+    label = state.pauseReason === "review" ? "Ⅱ PAUSED · Reviewing this step"
+      : state.pauseReason === "resize" ? "Ⅱ PAUSED · Terminal resized"
+        : "Ⅱ PAUSED · You paused playback";
+    style = paint.warning;
+  } else if (state.phase === "after") {
+    label = Number.isFinite(state.remainingMs)
+      ? `▶ AUTO · next step in ${(Math.max(1, Math.ceil(state.remainingMs / 100)) / 10).toFixed(1)}s`
+      : "▶ AUTO · continuing shortly";
   } else {
-    parts.push(`step ${Math.min(state.stepIndex + 1, state.stepCount)}/${state.stepCount}`);
+    const kind = state.page.steps?.[state.stepIndex]?.kind;
+    const action = { type: "Typing in Rind", shell: "Typing a command", assistant: "Streaming reply", tool: "Tool demonstration", menu: "Menu demonstration", "shell-out": "Showing output" }[kind] || "Demonstration";
+    label = `▶ PLAYING · ${action}`;
   }
-  if (state.paused) {
-    parts.push("paused");
-  }
-  return parts.join(" · ");
+  return style(paint.bold(clipCells(label, width)));
+}
+
+function progressLine(state, width) {
+  const total = Math.max(1, state.stepCount);
+  const step = Math.min(state.stepIndex + 1, total);
+  const cells = width >= 60 ? 12 : 6;
+  const done = state.phase === "end" ? total : Math.max(0, step - 1);
+  const filled = Math.floor(done / total * cells);
+  const bar = paint.accent("━".repeat(filled)) + paint.dim("·".repeat(cells - filled));
+  return clipCells(`${paint.bold(`Step ${step}/${total}`)} [${bar}] ${state.speed}× · ? help`, width);
 }
 
 export function cursorMarker(lines, cursor) {

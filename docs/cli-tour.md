@@ -84,6 +84,18 @@ New inline captions extend the hold based on their text length. Explicit notes
 wait as long as the reader needs. `speed ∈ {0.5, 1, 2, 4}` scales delays and
 clamps at either end. Notes, help, paused pages and completed pages stop timers.
 
+The caption has an explicit playback banner: `PAUSED · Read this explanation`
+waits for Space/Enter, `PAUSED · You paused playback` waits for Space to resume,
+and `AUTO · next step in 2.4s` is a reading hold that advances on its own.
+`PLAYING` identifies animated demonstrations; `COMPLETE` identifies the final
+takeaway. These labels remain legible without color. The footer puts `Step 7/20`
+and a progress track before speed/help, even at 36 columns.
+
+Automatic holds use the same monotonic deadline as playback, refreshed while
+the simulated Rind is idle as well as running. Pausing/help freezes the remaining
+time; resuming preserves it. Speed changes scale the remaining time, not the
+entire hold. Tests inject `now` together with `schedule`/`cancel`.
+
 ## Keys
 
 | Key | Page view | Catalog |

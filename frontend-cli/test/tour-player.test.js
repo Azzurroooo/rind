@@ -36,6 +36,7 @@ function fakeClock() {
   let nextId = 1;
   const pending = new Map();
   return {
+    now: () => now,
     schedule(fn, ms) {
       const id = nextId;
       nextId += 1;
@@ -75,6 +76,7 @@ function makePlayer({ startPageId = "", topics = TOPICS, stage = createTourStage
     stage,
     schedule: clock.schedule,
     cancel: clock.cancel,
+    now: clock.now,
     onRender: () => renders.push(clock.pendingCount),
   });
   return { player, clock, stage, renders };
@@ -387,4 +389,66 @@ test("batched scroll keys accumulate before the next render", () => {
   assert.equal(player.state().scrollOffset, 10);
   player.key(key("pagedown"));
   assert.equal(player.state().scrollOffset, 5);
+});
+
+test("automatic holds expose a live deadline and resume from the remaining time", () => {
+  const { player, clock, renders } = makePlayer({ startPageId: "start.hello" });
+  player.start();
+  assert.equal(player.state().remainingMs, 400);
+  const rendered = renders.length;
+  clock.advance(200);
+  assert.ok(renders.length > rendered, "idle Rind still refreshes the tour countdown");
+  assert.equal(player.state().remainingMs, 200);
+  player.key(key("space"));
+  clock.advance(10000);
+  assert.equal(player.state().remainingMs, 200, "pause freezes the deadline");
+  assert.equal(player.state().pauseReason, "manual");
+  player.key(key("space"));
+  clock.advance(199);
+  assert.equal(player.state().stepIndex, 0);
+  clock.advance(1);
+  assert.equal(player.state().stepIndex, 1, "resume does not restart the entire hold");
+});
+
+test("speed changes scale only the remaining hold, including while paused", () => {
+  const { player, clock } = makePlayer({ startPageId: "start.hello" });
+  player.start();
+  clock.advance(200);
+  player.key(key("up"));
+  assert.equal(player.state().remainingMs, 100);
+  player.key(key("space"));
+  player.key(key("down"));
+  assert.equal(player.state().remainingMs, 200);
+  player.key(key("space"));
+  clock.advance(200);
+  assert.equal(player.state().stepIndex, 1);
+});
+
+test("explanations have no countdown or automatic advance", () => {
+  const { player, clock } = makePlayer({ startPageId: "start.hello" });
+  player.start();
+  clock.advance(970);
+  assert.equal(player.state().phase, "waiting");
+  assert.equal(player.state().remainingMs, null);
+  assert.equal(clock.pendingCount, 0);
+  clock.advance(30000);
+  assert.equal(player.state().stepIndex, 3);
+  player.key(key("enter"));
+  assert.equal(player.state().phase, "after");
+  assert.equal(player.state().remainingMs, 1200);
+});
+
+test("help preserves a countdown and rewinding discards the old deadline", () => {
+  const { player, clock } = makePlayer({ startPageId: "start.hello" });
+  player.start();
+  clock.advance(200);
+  player.key({ kind: "text", text: "?" });
+  clock.advance(5000);
+  player.key(key("enter"));
+  assert.equal(player.state().remainingMs, 200);
+  player.key(key("left"));
+  assert.equal(player.state().pauseReason, "review");
+  assert.equal(player.state().remainingMs, null);
+  player.key(key("space"));
+  assert.equal(player.state().remainingMs, 400, "rewound scene has its own full reading hold");
 });

@@ -180,7 +180,7 @@ test("caption notes render under the stage; end phase shows the outro", () => {
 
   const end = renderTourPage(snapshot, { ...pageState("end"), page: { title: "Create a Team" } }, 80);
   const endText = end.lines.map(stripAnsi).join("\n");
-  assert.ok(endText.includes("page complete"), "completion is explicit");
+  assert.ok(endText.includes("COMPLETE"), "completion is explicit");
   assert.ok(endText.includes("Read this first"), "completion retains the learning takeaway");
   assert.ok(endText.includes("r replay"), "outro hints shown");
 });
@@ -301,5 +301,31 @@ test("theme preview restores the user's theme and NO_COLOR is respected", () => 
     setTheme(previous);
     if (priorNoColor === undefined) delete process.env.NO_COLOR;
     else process.env.NO_COLOR = priorNoColor;
+  }
+});
+
+test("explanation, manual pause, automatic hold and playback have distinct visible states", () => {
+  const stage = createTourStage();
+  stage.rebuildTo([{ kind: "note", lines: ["Watch what happens next."] }], 0);
+  const cases = [
+    [{ phase: "waiting" }, "PAUSED · Read this explanation", "space continue"],
+    [{ phase: "after", paused: true }, "PAUSED · You paused playback", "space resume"],
+    [{ phase: "after", paused: true, pauseReason: "review" }, "PAUSED · Reviewing this step", "space resume"],
+    [{ phase: "after", remainingMs: 2340 }, "AUTO · next step in 2.4s", "enter next now"],
+    [{ phase: "anim" }, "PLAYING", "enter skip"],
+    [{ phase: "end" }, "COMPLETE", "enter next page"],
+  ];
+  for (const [changes, label, action] of cases) {
+    for (const width of [36, 80]) {
+      const state = { ...pageState("waiting"), stepIndex: 6, stepCount: 20, ...changes };
+      const out = renderTourPage(stage.snapshot(), state, width, 14);
+      const plain = out.lines.map(stripAnsi).join("\n");
+      assert.ok(plain.includes(label), plain);
+      assert.ok(plain.includes(action), plain);
+      assert.ok(plain.includes("Step 7/20"), "step number comes before speed and help");
+      assert.match(plain, /\[[━·]+\]/, "progress has a visible track");
+      assert.ok(out.lines.length <= 14);
+      if (changes.paused || changes.phase === "waiting") assert.ok(!plain.includes("next step in"));
+    }
   }
 });

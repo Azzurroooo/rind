@@ -20,7 +20,7 @@ const TIMING = {
   note: { waitKey: true, afterMs: 200 },
 };
 
-export function createTourPlayer({ topics, startPageId = "", stage, schedule = setTimeout, cancel = clearTimeout, onRender = () => {}, onPageComplete = () => {} }) {
+export function createTourPlayer({ topics, startPageId = "", stage, schedule = setTimeout, cancel = clearTimeout, now = () => performance.now(), onRender = () => {}, onPageComplete = () => {} }) {
   const pages = topics.flatMap((topic) => topic.pages);
   const startPageIndex = Math.max(0, pages.findIndex((page) => page.id === startPageId));
 
@@ -45,6 +45,9 @@ export function createTourPlayer({ topics, startPageId = "", stage, schedule = s
   let stepTimer = null;
   let stepTimerKind = null;
   let spinnerTimer = null;
+  let stepDeadline = null;
+  let frozenTimer = null;
+  let pauseReason = "";
 
   let resolveFinished;
   const finished = new Promise((resolve) => {
@@ -94,14 +97,18 @@ export function createTourPlayer({ topics, startPageId = "", stage, schedule = s
       stepTimer = null;
       stepTimerKind = null;
     }
+    stepDeadline = null;
   }
 
   function scheduleStep(kind, ms) {
     clearStepTimer();
+    frozenTimer = null;
     stepTimerKind = kind;
+    stepDeadline = now() + ms;
     stepTimer = schedule(() => {
       stepTimer = null;
       stepTimerKind = null;
+      stepDeadline = null;
       if (closed) return;
       fire(kind);
     }, ms);
@@ -119,8 +126,10 @@ export function createTourPlayer({ topics, startPageId = "", stage, schedule = s
       if (stage.snapshot().rind?.composer?.running) {
         frame += 1;
         elapsedMs += SPINNER_MS;
-        emit();
       }
+      // Refresh the actual deadline even when the simulated Rind is idle.
+      // Otherwise a reading hold looks frozen until the next scene begins.
+      emit();
       scheduleSpinner();
     }, SPINNER_MS);
   }
@@ -147,7 +156,6 @@ export function createTourPlayer({ topics, startPageId = "", stage, schedule = s
   function settleCurrent() {
     stage.settleStep(current());
     settled = true;
-    emit();
     if (stepIndex >= steps().length - 1) {
       enterEnd();
       return;
@@ -156,10 +164,12 @@ export function createTourPlayer({ topics, startPageId = "", stage, schedule = s
     if (playing) {
       scheduleStep("after", afterDelay());
     }
+    emit();
   }
 
   function playStep(index) {
     clearStepTimer();
+    frozenTimer = null;
     stepIndex = index;
     scrollOffset = null;
     settled = false;
@@ -203,6 +213,7 @@ export function createTourPlayer({ topics, startPageId = "", stage, schedule = s
   function enterEnd() {
     clearStepTimer();
     clearSpinner();
+    frozenTimer = null;
     subPhase = "end";
     if (!completed.has(page().id)) {
       completed.add(page().id);
@@ -220,11 +231,15 @@ export function createTourPlayer({ topics, startPageId = "", stage, schedule = s
     emit();
   }
 
-  function pause() {
+  function pause(reason = "manual") {
     if (!playing) {
       return;
     }
     playing = false;
+    pauseReason = reason;
+    if (stepTimer !== null) {
+      frozenTimer = { kind: stepTimerKind, remainingMs: Math.max(0, stepDeadline - now()) };
+    }
     clearStepTimer();
     clearSpinner();
     emit();
@@ -235,9 +250,12 @@ export function createTourPlayer({ topics, startPageId = "", stage, schedule = s
       return;
     }
     playing = true;
+    pauseReason = "";
     if (view === "page" && subPhase !== "waiting" && subPhase !== "end") {
       const timingSpec = timing(current().kind);
-      if (subPhase === "anim") {
+      if (frozenTimer) {
+        scheduleStep(frozenTimer.kind, Math.max(1, frozenTimer.remainingMs));
+      } else if (subPhase === "anim") {
         scheduleStep("tick", delay(timingSpec.tickMs));
       } else if (subPhase === "settling") {
         scheduleStep("settle", delay(timingSpec.settleMs));
@@ -251,6 +269,7 @@ export function createTourPlayer({ topics, startPageId = "", stage, schedule = s
 
   function advanceFromWait() {
     playing = true;
+    pauseReason = "";
     stage.settleStep(current());
     settled = true;
     emit();
@@ -282,7 +301,9 @@ export function createTourPlayer({ topics, startPageId = "", stage, schedule = s
   // note you just backed away from does not bounce forward again on its own.
   function stepBack() {
     clearStepTimer();
+    frozenTimer = null;
     playing = false;
+    pauseReason = "review";
     clearSpinner();
     stepIndex = Math.max(0, stepIndex - 1);
     stage.rebuildTo(steps(), stepIndex);
@@ -306,26 +327,20 @@ export function createTourPlayer({ topics, startPageId = "", stage, schedule = s
       return;
     }
     clearStepTimer();
-    stage.settleStep(current());
-    settled = true;
-    emit();
-    if (stepIndex >= steps().length - 1) {
-      enterEnd();
-      return;
-    }
-    subPhase = "after";
-    if (playing) {
-      scheduleStep("after", afterDelay());
-    }
+    frozenTimer = null;
+    settleCurrent();
   }
 
   function changeSpeed(direction) {
     const index = SPEEDS.indexOf(speed);
+    const previousSpeed = speed;
     speed = SPEEDS[Math.max(0, Math.min(SPEEDS.length - 1, index + direction))];
     if (stepTimer !== null) {
       const kind = stepTimerKind;
-      const spec = timing(current().kind);
-      scheduleStep(kind, kind === "after" ? afterDelay() : delay(kind === "tick" ? spec.tickMs : spec.settleMs));
+      const remaining = Math.max(1, (stepDeadline - now()) * previousSpeed / speed);
+      scheduleStep(kind, remaining);
+    } else if (frozenTimer) {
+      frozenTimer.remainingMs *= previousSpeed / speed;
     }
     emit();
   }
@@ -333,6 +348,7 @@ export function createTourPlayer({ topics, startPageId = "", stage, schedule = s
   function replay() {
     clearStepTimer();
     playing = true;
+    pauseReason = "";
     frame = 0;
     elapsedMs = 0;
     stage.reset();
@@ -346,6 +362,7 @@ export function createTourPlayer({ topics, startPageId = "", stage, schedule = s
     selected = index;
     view = "page";
     playing = true;
+    pauseReason = "";
     frame = 0;
     elapsedMs = 0;
     stage.reset();
@@ -364,6 +381,7 @@ export function createTourPlayer({ topics, startPageId = "", stage, schedule = s
 
   function toCatalog() {
     clearStepTimer();
+    frozenTimer = null;
     clearSpinner();
     view = "catalog";
     selected = pageIndex;
@@ -374,6 +392,7 @@ export function createTourPlayer({ topics, startPageId = "", stage, schedule = s
   function finish() {
     if (closed) return;
     closed = true;
+    frozenTimer = null;
     clearStepTimer();
     clearSpinner();
     resolveFinished();
@@ -414,7 +433,7 @@ export function createTourPlayer({ topics, startPageId = "", stage, schedule = s
     }
     if (event.name === "help") {
       resumeAfterHelp = playing;
-      pause();
+      pause("help");
       help = true;
       emit();
       return;
@@ -435,12 +454,12 @@ export function createTourPlayer({ topics, startPageId = "", stage, schedule = s
     }
     switch (event.name) {
       case "pageup":
-        pause();
+        pause("review");
         scrollOffset = Math.min(scrollLimit, (scrollOffset ?? visibleOffset) + 5);
         emit();
         break;
       case "pagedown":
-        pause();
+        pause("review");
         scrollOffset = Math.max(0, (scrollOffset ?? visibleOffset) - 5);
         emit();
         break;
@@ -507,6 +526,8 @@ export function createTourPlayer({ topics, startPageId = "", stage, schedule = s
         stepCount: steps().length,
         speed,
         paused: !playing,
+        pauseReason,
+        remainingMs: frozenTimer?.remainingMs ?? (stepDeadline === null ? null : Math.max(0, stepDeadline - now())),
         phase: subPhase,
         frame,
         elapsedMs,
