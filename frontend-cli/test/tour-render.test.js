@@ -14,15 +14,15 @@ const TOPICS = [
     id: "start",
     title: "Start",
     pages: [
-      { id: "start.hello", title: "Your first turn", steps: [{ kind: "shell", command: "rind" }] },
-      { id: "start.steer", title: "Steer and queue", steps: [{ kind: "shell", command: "rind" }] },
+      { id: "start.hello", feature: "rind", title: "Your first turn", steps: [{ kind: "shell", command: "rind" }] },
+      { id: "start.steer", feature: "Enter / Tab", title: "Steer and queue", steps: [{ kind: "shell", command: "rind" }] },
     ],
   },
   {
     id: "team",
     title: "Team",
     pages: [
-      { id: "team.create", title: "Create a Team", steps: [{ kind: "shell", command: "rind" }] },
+      { id: "team.create", feature: "/team create", title: "Create a Team", steps: [{ kind: "shell", command: "rind" }] },
     ],
   },
 ];
@@ -61,11 +61,11 @@ test("catalog groups pages under topics and marks the selection", () => {
   const text = plain.join("\n");
   assert.ok(text.includes("START"), "topic headers appear");
   assert.ok(text.includes("TEAM"), "topic headers appear");
-  assert.ok(text.includes("start.hello"), "page ids appear");
+  assert.ok(text.includes("Enter / Tab"), "feature names appear");
   assert.ok(text.includes("Create a Team"), "page titles appear");
-  const selectedRow = plain.find((line) => line.includes("team.create"));
+  const selectedRow = plain.find((line) => line.includes("/team create"));
   assert.ok(selectedRow.includes("›"), "selected page marked");
-  const unselectedRow = plain.find((line) => line.includes("start.hello"));
+  const unselectedRow = plain.find((line) => line.includes("Your first turn"));
   assert.ok(!unselectedRow.includes("›"), "unselected pages use the dim marker");
   const badge = plain.find((line) => line.includes("3/3"));
   assert.ok(badge, "selection badge shows position");
@@ -464,5 +464,28 @@ test("long introduction cards scroll from the top while keeping the start action
     assert.match(text, /PgUp\/PgDn/);
     assert.doesNotMatch(text, /PAUSED/);
     assert.ok(view.lines.length <= 14 && view.lines.every((line) => textWidth(line) <= 36));
+  }
+});
+
+test("catalog, introduction and demo preserve the same full feature name at every supported width", () => {
+  for (const [selected, page] of tourPages().entries()) {
+    for (const [width, height] of [[120, 30], [80, 24], [40, 16], [36, 14]]) {
+      const catalog = plainLines(renderTourCatalog({ topics: TOUR_TOPICS, selected }, width, height).lines);
+      const selectedRow = catalog.find((line) => line.includes("›"));
+      assert.ok(selectedRow.includes(page.feature), `${page.id}: catalog must retain ${page.feature} at ${width}`);
+      const stage = createTourStage();
+      for (const [stepIndex, phase] of [[0, "waiting"], [1, "anim"], [page.steps.length - 1, "end"]]) {
+        stage.rebuildTo(page.steps, stepIndex);
+        const state = { ...pageState(phase), page, pageIndex: selected, stepIndex, stepCount: page.steps.length };
+        const view = renderTourPage(stage.snapshot(), state, width, height);
+        const title = stripAnsi(view.lines[0]);
+        assert.ok(title.includes(`${stepIndex === 0 ? "TOUR" : "Demo"} · ${page.feature}`), `${page.id} at ${width}: ${title}`);
+        assert.ok(title.includes(`${selected + 1}/16`), "catalog position remains visible too");
+        assert.ok(textWidth(title) <= width);
+        if (width === 80 && stepIndex === 0) {
+          assert.ok(plainLines(view.lines).join("\n").includes(page.title), "introduction retains the descriptive subtitle");
+        }
+      }
+    }
   }
 });

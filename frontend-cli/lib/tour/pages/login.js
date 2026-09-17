@@ -4,6 +4,7 @@ import { closeMenu, menu, note, shell, slashResult, startup, submit, type } from
 export const loginPages = [
   {
     id: "login.provider",
+    feature: "/login",
     title: "Configure a provider",
     steps: [
       note([

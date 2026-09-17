@@ -135,6 +135,11 @@ page, Enter returns to the catalog.
 
 - The stage stores raw data only (raw markdown, raw tool outcomes, raw menu
   specs); the live transcript controller and components style it at render time.
+- Every page has a `feature` name (command, shortcut or named capability) and
+  a descriptive `title`. The catalog shows `/team add · Add a specialist`;
+  the introduction and demo headers keep `TOUR · /team add` and
+  `Demo · /team add`. The description stays in the introduction body. Full
+  feature names and page positions remain visible down to 36 columns.
 - With no visible simulated content (including prior session history), use a
   `TOUR` card with the lesson title, introduction and start action inside it.
   Readiness has no pause icon, countdown, speed or progress bar; the footer
@@ -142,14 +147,15 @@ page, Enter returns to the catalog.
   step number, so rewind and replay restore the introduction automatically.
   Padding adapts to terminal height; longer introductions scroll from the top
   with PgUp/PgDn while the action stays visible. Help and resizing preserve readiness.
-- The simulated terminal sits inside a `┌─ Demo · <title> ─…┐` panel, ending
+- The simulated terminal sits inside a `┌─ Demo · <feature> ─…┐` panel, ending
   with a complete bottom border. Guidance never appears inside that panel.
   `TOUR GUIDE` starts a separate region with a blank gap on taller terminals;
   its status, caption and controls stay visible. A bounded viewport follows
   the transcript. PgUp/PgDn reviews earlier content. Open menus take focus so
   old transcript does not hide their choices. Content wraps before cursor and
-  viewport coordinates are computed. The catalog windows rows and omits page
-  ids from narrow list rows (the selected id remains below the list).
+  viewport coordinates are computed. The catalog windows rows and truncates
+  descriptions before feature names. The selected `/tour <id>` link remains
+  below the list.
 - Supported layout starts at 36×14. Smaller terminals pause and show a resize
   prompt. The theme lesson previews Latte only during rendering and restores
   the caller's theme; it never saves a theme preference.

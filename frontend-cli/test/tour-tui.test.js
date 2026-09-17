@@ -74,7 +74,7 @@ test("tour plays on a real terminal buffer: catalog, page, return, exit", async 
   await settle();
   viewport = await output.flushAndGetViewport();
   const screen = viewport.join("\n");
-  assert.ok(screen.includes("TOUR · Steer and queue"), "enter opens the selected introduction");
+  assert.ok(screen.includes("TOUR · Enter / Tab"), "enter opens the selected introduction");
   assert.ok(screen.includes("READY · Enter / Space to start"), "introduction waits for a keypress");
 
   input.send(" ");
@@ -111,7 +111,7 @@ test("deep links jump straight into a page", async () => {
   clock.advance(1200);
   await settle();
   const screen = (await output.flushAndGetViewport()).join("\n");
-  assert.ok(screen.includes("TOUR · Work inside the team"), "deep-linked introduction opens directly");
+  assert.ok(screen.includes("TOUR · Team delegation"), "deep-linked introduction opens directly");
   input.send("q");
   await settle();
   input.send("\x1b");
@@ -147,7 +147,7 @@ test("pasted example text cannot navigate or quit the tour", async () => {
   input.send("\x1b[200~q\x1b[201~");
   await settle();
   let screen = (await output.flushAndGetViewport()).join("\n");
-  assert.ok(screen.includes("TOUR · Work inside the team"), "pasted q leaves the introduction intact");
+  assert.ok(screen.includes("TOUR · Team delegation"), "pasted q leaves the introduction intact");
   input.send("\x03");
   await running;
 });
@@ -189,7 +189,7 @@ test("a completed lesson keeps title, takeaway and navigation on an 80x24 termin
     for (let i = 2; i < findTourPage("start.hello").steps.length; i++) input.send("\x1b[C");
     await settle();
     let screen = (await output.flushAndGetViewport()).join("\n");
-    assert.ok(screen.includes("Demo · Your first turn"), screen);
+    assert.ok(screen.includes("Demo · rind"), screen);
     assert.ok(screen.includes("Try it: exit this tour"), screen);
     assert.ok(screen.includes("COMPLETE"), screen);
     assertGuideOutsideDemo(screen);
@@ -209,7 +209,7 @@ test("a completed lesson keeps title, takeaway and navigation on an 80x24 termin
     output.resize(40, 16);
     await settle();
     screen = (await output.flushAndGetViewport()).join("\n");
-    assert.ok(screen.includes("Demo · Your first turn"), screen);
+    assert.ok(screen.includes("Demo · rind"), screen);
     assert.ok(screen.includes("COMPLETE"), screen);
     assertGuideOutsideDemo(screen);
   } finally {
@@ -318,7 +318,7 @@ test("introduction survives resize and help, and returns on rewind or replay", a
   const assertReady = async () => {
     await settle();
     const screen = (await output.flushAndGetViewport()).join("\n");
-    assert.match(screen, /TOUR ·/);
+    assert.match(screen, /TOUR · \/team add/);
     assert.match(screen, /Add a specialist/);
     assert.match(screen, /READY · Enter \/ Space to start/);
     assert.match(screen, /Step 1\/15/);
@@ -340,7 +340,7 @@ test("introduction survives resize and help, and returns on rewind or replay", a
       input.send("\r");
       await settle();
       const screen = (await output.flushAndGetViewport()).join("\n");
-      assert.match(screen, /Demo ·/);
+      assert.match(screen, /Demo · \/team add/);
       assert.match(screen, /TOUR GUIDE/);
       assert.match(screen, /PLAYING/);
       assert.doesNotMatch(screen, /READY/);
@@ -348,6 +348,12 @@ test("introduction survives resize and help, and returns on rewind or replay", a
       await assertReady();
     }
     output.resize(80, 24);
+    await assertReady();
+    input.send("q");
+    await settle();
+    const catalog = (await output.flushAndGetViewport()).find((line) => line.includes("›"));
+    assert.ok(catalog.includes("/team add · Add a specialist"), catalog);
+    input.send("\r");
     await assertReady();
   } finally {
     input.send("\x03");

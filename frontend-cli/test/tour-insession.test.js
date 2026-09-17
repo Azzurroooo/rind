@@ -78,7 +78,7 @@ test("in-session recovery: stop main tui, run tour, replay main tui", async () =
   });
   await settle();
   let screen = (await output.flushAndGetViewport()).join("\n");
-  assert.ok(screen.includes("TOUR · Background monitor"), "introduction renders below the stopped main content");
+  assert.ok(screen.includes("TOUR · Ctrl+B"), "introduction renders below the stopped main content");
 
   input.send(" ");
   await settle();

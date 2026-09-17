@@ -27,7 +27,7 @@ const MIN_INNER = 1;
 // terminal content belongs in the demo frame; guidance stays outside it.
 function frameBlock({ title, badge, body, inner }) {
   const badgeText = badge ? ` ${badge} ` : "";
-  const headText = clipCells(` ${title} `, Math.max(1, inner - badgeText.length - 4));
+  const headText = clipCells(` ${title} `, Math.max(1, inner - textWidth(badgeText)));
   const dashes = Math.max(1, inner + 1 - textWidth(headText) - textWidth(badgeText));
   const lines = [
     paint.dim(`┌─`) + paint.accent(headText) + paint.dim(`${"─".repeat(dashes)}${badgeText}┐`),
@@ -53,7 +53,6 @@ export function renderTourCatalog(state, width, rows = 24) {
   if (width < 36 || rows < 14) return smallTerminal(width, rows);
   const inner = Math.max(MIN_INNER, width - 4);
   const pages = state.topics.flatMap((topic) => topic.pages);
-  const idWidth = Math.max(...pages.map((page) => page.id.length));
   const plan = [];
   for (const topic of state.topics) {
     if (plan.length) {
@@ -84,9 +83,10 @@ export function renderTourCatalog(state, width, rows = 24) {
     const index = pages.indexOf(row.page);
     const selected = index === state.selected;
     const marker = selected ? paint.accent("›") : state.completed?.includes(row.page.id) ? paint.success("✓") : paint.dim("·");
-    const title = selected ? paint.bold(row.page.title) : paint.dim(row.page.title);
-    const id = inner >= 70 ? `${paint.dim(row.page.id.padEnd(idWidth))}  ` : "";
-    body.push(clipCells(`  ${marker} ${paint.dim(`${index + 1}.`.padEnd(4))}${id}${title}`, inner));
+    const feature = row.page.feature || row.page.title;
+    const label = selected ? paint.bold(feature) : paint.dim(feature);
+    const description = row.page.feature ? paint.dim(` · ${row.page.title}`) : "";
+    body.push(clipCells(`  ${marker} ${paint.dim(`${index + 1}.`.padEnd(4))}${label}${description}`, inner));
   }
   body.push(paint.dim(clipCells(`Open: /tour ${pages[state.selected].id}`, inner)));
   body.push(paint.dim(clipCells(`${state.completed?.length || 0}/${pages.length} viewed · simulated examples`, inner)));
@@ -171,7 +171,7 @@ function renderPage(snapshot, state, width, height) {
   const visible = wrapped.slice(start, start + budget);
   const action = demoAction(state.page.steps?.[state.stepIndex]);
   const lines = frameBlock({
-    title: `Demo · ${state.page.title}`,
+    title: `Demo · ${state.page.feature || state.page.title}`,
     badge: `${state.pageIndex + 1}/${state.pageCount}`,
     body: visible,
     inner,
@@ -207,7 +207,7 @@ function renderTourCard(snapshot, state, width, height, inner) {
   const offset = Math.min(state.scrollOffset ?? maxScroll, maxScroll);
   const start = maxScroll - offset;
   const lines = frameBlock({
-    title: `TOUR · ${state.page.title}`,
+    title: `TOUR · ${state.page.feature || state.page.title}`,
     badge: `${state.pageIndex + 1}/${state.pageCount}`,
     body: [...gap, ...content.slice(start, start + budget), "", ...status, ...gap],
     inner,

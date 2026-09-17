@@ -69,6 +69,7 @@ function validateStep(step, where) {
 }
 
 function validatePage(page, seen) {
+  assert.ok(typeof page.feature === "string" && page.feature.trim(), `${page.id}: feature name required`);
   assert.match(page.id, /^[a-z0-9]+\.[a-z0-9-]+$/, `${page.id}: id shape`);
   assert.ok(!seen.has(page.id), `duplicate page id ${page.id}`);
   seen.add(page.id);

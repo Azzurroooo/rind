@@ -3,6 +3,7 @@ import { note, shell, shellOut } from "./steps.js";
 export const automationPages = [
   {
     id: "auto.run",
+    feature: "rind run",
     title: "One-shot runs",
     steps: [
       note([
@@ -22,6 +23,7 @@ export const automationPages = [
   },
   {
     id: "auto.send",
+    feature: "rind send",
     title: "Inject into a session",
     steps: [
       note([

@@ -5,6 +5,7 @@ import { themeOptions } from "../../theme.js";
 export const modelPages = [
   {
     id: "model.pick",
+    feature: "/model /effort",
     title: "Model and effort",
     steps: [
       note([
@@ -41,6 +42,7 @@ export const modelPages = [
   },
   {
     id: "model.theme",
+    feature: "/theme",
     title: "Themes",
     steps: [
       note([

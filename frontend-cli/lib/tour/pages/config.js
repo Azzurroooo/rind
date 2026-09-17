@@ -4,6 +4,7 @@ import { assistant, note, shell, slashResult, startup, submit, tool, turnDone, t
 export const configPages = [
   {
     id: "config.init",
+    feature: "/init /skill",
     title: "Project docs & skills",
     steps: [
       note([

@@ -41,6 +41,7 @@ function enterMainAgent({ explain = false } = {}) {
 export const teamPages = [
   {
     id: "team.create",
+    feature: "/team create",
     title: "Create a Team",
     steps: [
       note([
@@ -78,6 +79,7 @@ export const teamPages = [
   },
   {
     id: "team.add",
+    feature: "/team add",
     title: "Add a specialist",
     steps: [
       note([
@@ -109,6 +111,7 @@ export const teamPages = [
   },
   {
     id: "team.blueprint",
+    feature: "/team blueprint",
     title: "Create from blueprint",
     steps: [
       note([
@@ -148,6 +151,7 @@ export const teamPages = [
   },
   {
     id: "team.work",
+    feature: "Team delegation",
     title: "Work inside the team",
     steps: [
       note([

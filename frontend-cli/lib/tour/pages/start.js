@@ -20,6 +20,7 @@ const ROOT = demoInfo({ session: "20260917_101530_ab12cd34" });
 export const startPages = [
   {
     id: "start.hello",
+    feature: "rind",
     title: "Your first turn",
     steps: [
       note([
@@ -75,6 +76,7 @@ export const startPages = [
   },
   {
     id: "start.steer",
+    feature: "Enter / Tab",
     title: "Steer and queue",
     steps: [
       note([
@@ -117,6 +119,7 @@ export const startPages = [
   },
   {
     id: "start.monitor",
+    feature: "Ctrl+B",
     title: "Background monitor",
     steps: [
       note([

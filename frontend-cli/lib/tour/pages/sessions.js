@@ -4,6 +4,7 @@ import { assistant, closeMenu, info, menu, note, prefill, result, shell, startup
 export const sessionsPages = [
   {
     id: "sessions.resume",
+    feature: "rind --session",
     title: "Resume a session",
     steps: [
       note([
@@ -41,6 +42,7 @@ export const sessionsPages = [
   },
   {
     id: "sessions.fork",
+    feature: "/fork",
     title: "Fork at a message",
     steps: [
       note([
@@ -81,6 +83,7 @@ export const sessionsPages = [
   },
   {
     id: "sessions.context",
+    feature: "/context",
     title: "Context and compact",
     steps: [
       note([
