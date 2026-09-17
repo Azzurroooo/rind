@@ -1,5 +1,6 @@
 import asyncio
 import json
+from types import SimpleNamespace
 import os
 import subprocess
 import sys
@@ -51,6 +52,7 @@ def test_app_server_bootstraps_default_user_settings(tmp_path, monkeypatch):
     class FakeWorker:
         def __init__(self, **kwargs):
             self.options = kwargs
+            self.shell_tools = SimpleNamespace(list_backgrounds=None, snapshot_background=None)
 
     class FakeServer:
         worker_mode = True

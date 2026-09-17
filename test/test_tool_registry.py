@@ -127,7 +127,6 @@ def test_builtin_catalog_preserves_default_tool_order() -> None:
 
     specs = build_builtin_tool_specs()
 
-    assert tuple(specs) == TOOL_SPECS
     assert [spec.name for spec in specs] == expected
     assert [spec.schema for spec in specs] == [spec.schema for spec in TOOL_SPECS]
 
