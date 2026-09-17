@@ -169,6 +169,8 @@ test("assistant markdown renders through the real message pipeline", () => {
 
 test("caption notes render under the stage; end phase shows the outro", () => {
   const stage = createTourStage();
+  stage.beginStep({ kind: "startup", info: INFO });
+  stage.settleStep({ kind: "startup", info: INFO });
   stage.beginStep({ kind: "note", lines: ["Read this first", "it explains the flow"] });
   stage.settleStep({ kind: "note", lines: ["Read this first", "it explains the flow"] });
   const snapshot = stage.snapshot();
@@ -254,7 +256,7 @@ test("all lesson steps, contents and help fit supported terminal sizes", () => {
         const state = { ...pageState("waiting"), page, stepIndex: index, stepCount: page.steps.length };
         const out = renderTourPage(stage.snapshot(), state, width, height);
         fits(out, `${page.id}:${index}`);
-        assert.ok(out.lines.map(stripAnsi).join("\n").includes("space continue"));
+        assert.match(out.lines.map(stripAnsi).join("\n"), /space continue|READY · Enter \/ Space to start/);
       }
     }
   }
@@ -306,7 +308,7 @@ test("theme preview restores the user's theme and NO_COLOR is respected", () => 
 
 test("explanation, manual pause, automatic hold and playback have distinct visible states", () => {
   const stage = createTourStage();
-  stage.rebuildTo([{ kind: "note", lines: ["Watch what happens next."] }], 0);
+  stage.rebuildTo([{ kind: "startup", info: INFO }, { kind: "note", lines: ["Watch what happens next."] }], 1);
   const cases = [
     [{ phase: "waiting" }, "PAUSED · Read this explanation", "space continue"],
     [{ phase: "after", paused: true }, "PAUSED · You paused playback", "space resume"],
@@ -356,6 +358,7 @@ test("pause uses the pause pictograph and danger color rather than Roman numeral
   const tty = Object.getOwnPropertyDescriptor(process.stdout, "isTTY");
   const noColor = process.env.NO_COLOR;
   const stage = createTourStage();
+  stage.rebuildTo([{ kind: "startup", info: INFO }], 0);
   try {
     Object.defineProperty(process.stdout, "isTTY", { configurable: true, value: true });
     delete process.env.NO_COLOR;
@@ -379,3 +382,87 @@ test("pause uses the pause pictograph and danger color rather than Roman numeral
 function plainLines(lines) {
   return lines.map(stripAnsi);
 }
+
+test("every lesson opens with a populated introduction card and a start action", () => {
+  const noColor = process.env.NO_COLOR;
+  process.env.NO_COLOR = "1";
+  try {
+    for (const page of tourPages()) {
+      const stage = createTourStage();
+      stage.rebuildTo(page.steps, 0);
+      for (const [width, height] of [[120, 30], [80, 24], [40, 16], [36, 14]]) {
+        const state = { ...pageState("waiting"), page, stepIndex: 0, stepCount: page.steps.length };
+        const view = renderTourPage(stage.snapshot(), state, width, height);
+        const lines = view.lines;
+        const text = lines.join("\n");
+        assert.ok(lines[0].startsWith("┌─ TOUR ·"), page.id);
+        assert.doesNotMatch(text, /Demo ·|TOUR GUIDE|PAUSED|AUTO|1×|\[[━·]+\]/);
+        const border = lines.findIndex((line) => /^└─+┘$/.test(line));
+        const ready = lines.findIndex((line) => line.includes("READY · Enter / Space to start"));
+        assert.ok(ready > 1 && ready < border, "the start action belongs inside the card");
+        const body = lines.slice(1, ready).map((line) => line.slice(1, -1).trim()).join(" ").replace(/\s+/g, " ");
+        assert.ok(body.includes(stage.snapshot().caption.join(" ")), `${page.id} at ${width}: introduction is readable in full`);
+        assert.ok(lines.at(-1).startsWith(`Step 1/${page.steps.length}`));
+        assert.ok(lines.length <= height && lines.every((line) => textWidth(line) <= width));
+        assert.ok(lines.every((line) => line === stripAnsi(line)));
+        assert.equal(view.cursor, null);
+        assert.equal(view.maxScroll, 0, "authored introductions need no scrolling");
+      }
+    }
+  } finally {
+    if (noColor === undefined) delete process.env.NO_COLOR;
+    else process.env.NO_COLOR = noColor;
+  }
+});
+
+test("introduction layout depends on visible content rather than step position", () => {
+  const stage = createTourStage();
+  const state = { ...pageState("waiting"), stepIndex: 2 };
+  stage.rebuildTo([
+    { kind: "note", lines: ["First introduction."] },
+    { kind: "shell-out", lines: ["", "   "] },
+    { kind: "note", lines: ["A second introduction."] },
+  ], 2);
+  const card = plainLines(renderTourPage(stage.snapshot(), state, 80, 24).lines).join("\n");
+  assert.match(card, /TOUR ·/);
+  assert.match(card, /A second introduction/);
+  assert.match(card, /READY/);
+  assert.match(card, /Step 3\/8/);
+
+  stage.beginStep({ kind: "shell", command: "rind" });
+  const demo = renderTourPage(stage.snapshot(), { ...state, stepIndex: 0, phase: "anim" }, 80, 24);
+  assert.match(plainLines(demo.lines).join("\n"), /Demo ·/);
+  assert.ok(demo.cursor, "even an empty shell prompt is real demo content");
+
+  stage.rebuildTo([
+    { kind: "startup", info: INFO },
+    { kind: "exit" },
+    { kind: "shell", command: "rind" },
+    { kind: "note", lines: ["Session ended; review the transcript."] },
+  ], 3);
+  const history = stage.snapshot();
+  history.shell = { blocks: [], typing: null };
+  const retained = plainLines(renderTourPage(history, state, 80, 24).lines).join("\n");
+  assert.match(retained, /Demo ·/);
+  assert.match(retained, /Goodbye/);
+  assert.match(retained, /PAUSED · Read this explanation/);
+});
+
+test("long introduction cards scroll from the top while keeping the start action visible", () => {
+  const stage = createTourStage();
+  stage.rebuildTo([{ kind: "note", lines: ["First instruction. " + "Read this carefully. ".repeat(45) + "Last instruction."] }], 0);
+  const state = pageState("waiting");
+  const top = renderTourPage(stage.snapshot(), state, 36, 14);
+  const bottom = renderTourPage(stage.snapshot(), { ...state, scrollOffset: 0, paused: true }, 36, 14);
+  assert.ok(top.maxScroll > 0);
+  assert.equal(top.offset, top.maxScroll);
+  assert.match(plainLines(top.lines).join("\n"), /First instruction/);
+  assert.match(plainLines(bottom.lines).map((line) => line.replaceAll("│", "").trim()).join(" ").replace(/\s+/g, " "), /Last instruction/);
+  for (const view of [top, bottom]) {
+    const text = plainLines(view.lines).join("\n");
+    assert.match(text, /READY · Enter \/ Space to start/);
+    assert.match(text, /PgUp\/PgDn/);
+    assert.doesNotMatch(text, /PAUSED/);
+    assert.ok(view.lines.length <= 14 && view.lines.every((line) => textWidth(line) <= 36));
+  }
+});

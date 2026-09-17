@@ -78,7 +78,7 @@ test("in-session recovery: stop main tui, run tour, replay main tui", async () =
   });
   await settle();
   let screen = (await output.flushAndGetViewport()).join("\n");
-  assert.ok(screen.includes("Demo · Background monitor"), "tour renders below the stopped main content");
+  assert.ok(screen.includes("TOUR · Background monitor"), "introduction renders below the stopped main content");
 
   input.send(" ");
   await settle();
@@ -97,5 +97,6 @@ test("in-session recovery: stop main tui, run tour, replay main tui", async () =
     assert.ok(screen.includes(line), `replayed transcript keeps: ${line}`);
   }
   assert.ok(!screen.includes("Demo ·"), "tour content is gone after the replay");
+  assert.ok(!screen.includes("TOUR ·"), "tour introduction is gone after replay");
   assert.ok(!screen.includes("TOUR GUIDE"), "tour controls are also gone after replay");
 });

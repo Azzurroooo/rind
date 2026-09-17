@@ -23,8 +23,8 @@ import { renderTourTranscript } from "./transcript.js";
 
 const MIN_INNER = 1;
 
-// Only simulated terminal content belongs in the demo frame. Tour instructions
-// and playback controls sit outside its closing border, under their own label.
+// Shared border for tour cards and demo frames. Once simulation starts, only
+// terminal content belongs in the demo frame; guidance stays outside it.
 function frameBlock({ title, badge, body, inner }) {
   const badgeText = badge ? ` ${badge} ` : "";
   const headText = clipCells(` ${title} `, Math.max(1, inner - badgeText.length - 4));
@@ -132,6 +132,11 @@ function renderPage(snapshot, state, width, height) {
   appendShell(rows, snapshot.shell, write, point);
   const menuStart = rows.length;
   appendRind(rows, snapshot.rind, { ...state, inner, expanded: snapshot.expanded }, write, point);
+  // An explanation without terminal content is a tour card, wherever it
+  // occurs in the lesson. Rewind/replay naturally restores this introduction.
+  if (!rows.some((row) => stripAnsi(row).trim())) {
+    return renderTourCard(snapshot, state, width, height, inner);
+  }
   // Wrap before mapping the cursor or selecting a viewport. Otherwise a long
   // shell command moves the hardware cursor onto a completely different row.
   const wrapped = [];
@@ -176,6 +181,39 @@ function renderPage(snapshot, state, width, height) {
   const guideLabel = clipCells(`── TOUR GUIDE${maxScroll ? " · PgUp/PgDn" : ""}${width >= 80 && action ? ` · ${action}` : ""} ──`, width);
   lines.push(...guideGap, paint.dim(guideLabel), playbackBanner(state, width), ...captionRows, ...footer);
   return { lines, inner, cursor: focused, maxScroll, offset };
+}
+
+function renderTourCard(snapshot, state, width, height, inner) {
+  const ready = state.phase === "waiting";
+  const content = [
+    ...wrapTextWithAnsi(paint.bold(state.page.title), inner, inner),
+    "",
+    ...wrapTextWithAnsi((snapshot.caption || ["Watch this demo, then try it in Rind."]).join(" "), inner, inner),
+  ];
+  const status = ready
+    ? [paint.success(paint.bold("READY · Enter / Space to start"))]
+    : [playbackBanner(state, inner), paint.bold(clipCells(statusKeys(state, inner).join(" · "), inner))];
+  const step = Math.min(state.stepIndex + 1, Math.max(1, state.stepCount));
+  const footer = [clipCells(`${paint.bold(`Step ${step}/${state.stepCount}`)} · q contents · ? help`, width)];
+  // Keep the start action visible even on 36×14 screens. Long introductions
+  // scroll from the top, using the same PgUp/PgDn coordinates as the demo.
+  const gap = content.length + status.length + 6 <= height ? [""] : [];
+  let budget = Math.max(1, height - 3 - status.length - footer.length - gap.length * 2);
+  if (content.length > budget) {
+    footer.unshift(paint.dim("PgUp/PgDn · more introduction"));
+    budget = Math.max(1, budget - 1);
+  }
+  const maxScroll = Math.max(0, content.length - budget);
+  const offset = Math.min(state.scrollOffset ?? maxScroll, maxScroll);
+  const start = maxScroll - offset;
+  const lines = frameBlock({
+    title: `TOUR · ${state.page.title}`,
+    badge: `${state.pageIndex + 1}/${state.pageCount}`,
+    body: [...gap, ...content.slice(start, start + budget), "", ...status, ...gap],
+    inner,
+  });
+  lines.push(...footer);
+  return { lines, inner, cursor: null, maxScroll, offset };
 }
 
 function smallTerminal(width, rows) {

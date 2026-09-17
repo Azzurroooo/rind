@@ -3,7 +3,9 @@
 An interactive feature walkthrough: a simulated terminal plays a scripted
 animation — starting rind, typing commands, tool blocks, streamed replies —
 while caption notes explain what to do in a real session. Screens reuse the
-CLI's current renderers with fictional data. A closed `Demo` frame contains
+CLI's current renderers with fictional data. Before any simulated content
+appears, a populated `TOUR` introduction card explains the lesson and shows
+`READY · Enter / Space to start`. Once playback starts, a closed `Demo` frame contains
 only the simulated terminal. A separate `TOUR GUIDE` region below its bottom
 border owns the playback status, explanation, controls and progress track.
 Theme, width, CJK and `NO_COLOR` follow the CLI.
@@ -133,6 +135,13 @@ page, Enter returns to the catalog.
 
 - The stage stores raw data only (raw markdown, raw tool outcomes, raw menu
   specs); the live transcript controller and components style it at render time.
+- With no visible simulated content (including prior session history), use a
+  `TOUR` card with the lesson title, introduction and start action inside it.
+  Readiness has no pause icon, countdown, speed or progress bar; the footer
+  keeps the step count, contents and help. This depends on content rather than
+  step number, so rewind and replay restore the introduction automatically.
+  Padding adapts to terminal height; longer introductions scroll from the top
+  with PgUp/PgDn while the action stays visible. Help and resizing preserve readiness.
 - The simulated terminal sits inside a `┌─ Demo · <title> ─…┐` panel, ending
   with a complete bottom border. Guidance never appears inside that panel.
   `TOUR GUIDE` starts a separate region with a blank gap on taller terminals;
@@ -169,3 +178,5 @@ through an open menu.
 Playback tests run every lesson at 0.5×, 1× and 4× to verify countdown transitions.
 Team content uses the runtime's default `agents/<id>/` workspaces, `.aiteam/`
 configuration directories and `shared/` files for handoffs between agents.
+Introduction tests cover every lesson in monochrome, content-based layout
+selection, overflow, help, resizing, start, rewind and replay in a virtual terminal.

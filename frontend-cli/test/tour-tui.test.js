@@ -74,8 +74,8 @@ test("tour plays on a real terminal buffer: catalog, page, return, exit", async 
   await settle();
   viewport = await output.flushAndGetViewport();
   const screen = viewport.join("\n");
-  assert.ok(screen.includes("Demo · Steer and queue"), "enter opens the selected page");
-  assert.ok(screen.includes("space continue"), "opening note waits for a keypress");
+  assert.ok(screen.includes("TOUR · Steer and queue"), "enter opens the selected introduction");
+  assert.ok(screen.includes("READY · Enter / Space to start"), "introduction waits for a keypress");
 
   input.send(" ");
   await settle();
@@ -111,7 +111,7 @@ test("deep links jump straight into a page", async () => {
   clock.advance(1200);
   await settle();
   const screen = (await output.flushAndGetViewport()).join("\n");
-  assert.ok(screen.includes("Demo · Work inside the team"), "deep-linked page opens directly");
+  assert.ok(screen.includes("TOUR · Work inside the team"), "deep-linked introduction opens directly");
   input.send("q");
   await settle();
   input.send("\x1b");
@@ -147,7 +147,7 @@ test("pasted example text cannot navigate or quit the tour", async () => {
   input.send("\x1b[200~q\x1b[201~");
   await settle();
   let screen = (await output.flushAndGetViewport()).join("\n");
-  assert.ok(screen.includes("Demo · Work inside the team"), "pasted q leaves the page intact");
+  assert.ok(screen.includes("TOUR · Work inside the team"), "pasted q leaves the introduction intact");
   input.send("\x03");
   await running;
 });
@@ -234,7 +234,7 @@ test("closing input cleans up a playing tour", async () => {
   assert.equal(input.listenerCount("end"), 0);
 });
 
-test("terminal clearly distinguishes an explanation stop from an automatic countdown", async () => {
+test("terminal clearly distinguishes readiness, an automatic countdown and manual pause", async () => {
   const input = createVirtualInput();
   const output = createVirtualOutput({ columns: 80, rows: 24 });
   const clock = fakeClock();
@@ -242,9 +242,9 @@ test("terminal clearly distinguishes an explanation stop from an automatic count
   try {
     await settle();
     let screen = (await output.flushAndGetViewport()).join("\n");
-    assert.ok(screen.includes("PAUSED · Read this explanation"), screen);
-    assertGuideOutsideDemo(screen);
-    assert.ok(screen.includes("space continue"));
+    assert.ok(screen.includes("READY · Enter / Space to start"), screen);
+    assert.ok(!screen.includes("PAUSED"));
+    assert.ok(!screen.includes("TOUR GUIDE"));
     assert.ok(screen.includes("Step 1/"));
     input.send(" ");
     clock.advance(96); // "rind" has just finished typing; hold for 300ms.
@@ -309,3 +309,48 @@ function assertGuideOutsideDemo(screen) {
   const status = rows.findIndex((row) => /PAUSED|COMPLETE/.test(row));
   assert.ok(border >= 0 && guide > border && status > guide, screen);
 }
+
+test("introduction survives resize and help, and returns on rewind or replay", async () => {
+  const input = createVirtualInput();
+  const output = createVirtualOutput({ columns: 80, rows: 24 });
+  const clock = fakeClock();
+  const running = runTour({ input, output: output.output, startPageId: "team.add", schedule: clock.schedule, cancel: clock.cancel, now: clock.now });
+  const assertReady = async () => {
+    await settle();
+    const screen = (await output.flushAndGetViewport()).join("\n");
+    assert.match(screen, /TOUR ·/);
+    assert.match(screen, /Add a specialist/);
+    assert.match(screen, /READY · Enter \/ Space to start/);
+    assert.match(screen, /Step 1\/15/);
+    assert.doesNotMatch(screen, /Demo ·|TOUR GUIDE|PAUSED|AUTO|1×/);
+    assert.equal(clock.pendingCount, 0);
+  };
+  try {
+    await assertReady();
+    clock.advance(10000);
+    await assertReady();
+    output.resize(36, 14);
+    await assertReady();
+    input.send("?");
+    await settle();
+    assert.match((await output.flushAndGetViewport()).join("\n"), /Tour controls/);
+    input.send("\r");
+    await assertReady();
+    for (const action of ["\x1b[D", "r"]) {
+      input.send("\r");
+      await settle();
+      const screen = (await output.flushAndGetViewport()).join("\n");
+      assert.match(screen, /Demo ·/);
+      assert.match(screen, /TOUR GUIDE/);
+      assert.match(screen, /PLAYING/);
+      assert.doesNotMatch(screen, /READY/);
+      input.send(action);
+      await assertReady();
+    }
+    output.resize(80, 24);
+    await assertReady();
+  } finally {
+    input.send("\x03");
+    await running;
+  }
+});
