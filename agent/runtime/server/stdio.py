@@ -820,8 +820,11 @@ class WorkerStdioRuntimeServer:
         messages = materials.get("messages") if isinstance(materials.get("messages"), list) else []
         tool_records = materials.get("tool_records") if isinstance(materials.get("tool_records"), list) else []
         events = project_durable_events(messages, tool_records, materials.get("turn_state"), session_id)
-        envelopes = [event_envelope(event, index + 1) for index, event in enumerate(events)]
-        await self._respond(request, {"events": envelopes[after_cursor:], "cursor": len(events)})
+        envelopes = [
+            event_envelope(event, cursor)
+            for cursor, event in enumerate(events[after_cursor:], start=after_cursor + 1)
+        ]
+        await self._respond(request, {"events": envelopes, "cursor": len(events)})
 
     async def _file_request(self, request: dict[str, Any]) -> None:
         params = request.get("params") if isinstance(request.get("params"), dict) else {}

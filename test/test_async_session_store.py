@@ -30,6 +30,32 @@ def temp_session_dir():
     yield temp_dir
     shutil.rmtree(temp_dir)
 
+
+@pytest.mark.asyncio
+async def test_resume_reads_messages_once_and_projection_isolates_mutation(tmp_path, monkeypatch):
+    store = JsonlSessionStore(session_dir=str(tmp_path), session_id="resume", system_prompt="sys")
+    await store.initialize()
+    await store.persist_message("user", "hello")
+    await store.persist_message("assistant", "answer")
+    reads = []
+    read_jsonl = SessionFiles.read_jsonl
+
+    def counted_read(self, path):
+        reads.append(Path(path).name)
+        return read_jsonl(self, path)
+
+    monkeypatch.setattr(SessionFiles, "read_jsonl", counted_read)
+    resumed = JsonlSessionStore(session_dir=str(tmp_path), session_id="resume", system_prompt="sys")
+    await resumed.initialize()
+    assert reads.count("messages.jsonl") == 1
+    first = await resumed.get_messages_slice()
+    first[-1]["content"] = "caller mutation"
+    assert (await resumed.get_messages_slice())[-1]["content"] == "answer"
+    for index in range(12):
+        await store.persist_message("assistant", f"external {index}")
+        assert (await resumed.get_messages_slice())[-1]["content"] == f"external {index}"
+    assert len(resumed._projected_caches) == 1
+
 @pytest.mark.asyncio
 async def test_async_session_store_facade(temp_session_dir):
     async_store = JsonlSessionStore(session_dir=temp_session_dir)

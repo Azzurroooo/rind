@@ -183,10 +183,6 @@ class SessionRepository:
             "message_count": int(meta.get("message_count") or 0),
         }
 
-    async def settings_for(self, session_id: str) -> AppSettings:
-        info = await self.info(session_id)
-        return await asyncio.to_thread(load_settings, info["workspace_root"])
-
     async def replay(self, session_id: str, start: int | None = None, end: int | None = None) -> dict[str, Any]:
         info = await self.info(session_id)
         store = await self._open_store_from_info(
@@ -652,7 +648,7 @@ class ExecutionCoordinator:
                 return existing.container
             info = await self._repository.info(clean)
             root = _normalize_workspace_root(info["workspace_root"])
-            settings = await self._repository.settings_for(clean)
+            settings = await asyncio.to_thread(load_settings, root)
             selection = ModelSelection(
                 str(info.get("provider") or settings.provider),
                 str(info.get("model") or settings.model),
