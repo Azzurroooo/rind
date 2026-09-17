@@ -492,3 +492,53 @@ test("every lesson countdown leads to playback, never an explanation pause", () 
     }
   }
 });
+
+test("team creation waits for understanding before exit, workspace switch and verification", () => {
+  const { player, clock, stage } = makePlayer({ topics: TOUR_TOPICS, startPageId: "team.create" });
+  player.start();
+  const originalSession = player.state().page.steps.find((step) => step.kind === "startup").info.session_id;
+  const continueToExplanation = () => {
+    player.key(key("space"));
+    clock.advance(60000);
+    assert.equal(player.state().phase, "waiting");
+    assert.equal(player.state().remainingMs, null);
+    assert.equal(clock.pendingCount, 0);
+    const snapshot = stage.snapshot();
+    clock.advance(60000);
+    assert.deepEqual(stage.snapshot(), snapshot, "understanding time has no deadline");
+    return snapshot;
+  };
+
+  const created = continueToExplanation();
+  assert.equal(created.rind.info.cwd, "~/demo");
+  assert.equal(created.rind.info.session_id, originalSession);
+  assert.equal(created.rind.composer.hidden, false);
+  assert.match(created.rind.blocks.at(-1).text, /Team project created/);
+  assert.match(created.caption.join(" "), /does not switch workspaces/);
+  assert.equal(created.rind.composer.text, "", "exit has not started typing");
+
+  const shell = continueToExplanation();
+  assert.equal(shell.rind, null, "the session has exited before explaining shell navigation");
+  assert.equal(shell.history.at(-1).rind.composer.hidden, true);
+  assert.deepEqual(shell.shell.blocks.at(-1).lines, ["main-agent"]);
+  assert.ok(!shell.shell.blocks.some((block) => block.command?.startsWith("cd ")));
+  assert.match(shell.caption.join(" "), /coordinator/);
+
+  const directory = continueToExplanation();
+  assert.equal(directory.rind, null, "restart waits for the directory explanation");
+  assert.equal(directory.shell.blocks.at(-1).command, "cd agents/main-agent");
+  assert.match(directory.caption.join(" "), /identity and team context/);
+
+  const restarted = continueToExplanation();
+  assert.equal(restarted.rind.info.cwd, "~/demo/agents/main-agent");
+  assert.notEqual(restarted.rind.info.session_id, originalSession);
+  assert.equal(restarted.rind.blocks.length, 0, "verification waits for the new session explanation");
+  assert.match(restarted.caption.join(" "), /Check the banner/);
+
+  player.key(key("space"));
+  clock.advance(60000);
+  assert.equal(player.state().phase, "end");
+  assert.match(stage.snapshot().rind.blocks.at(-1).text, /Team Agents:\n- main-agent/);
+  assert.equal(clock.pendingCount, 0);
+  player.dispose();
+});

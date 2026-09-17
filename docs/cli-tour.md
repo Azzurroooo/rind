@@ -178,5 +178,9 @@ through an open menu.
 Playback tests run every lesson at 0.5×, 1× and 4× to verify countdown transitions.
 Team content uses the runtime's default `agents/<id>/` workspaces, `.aiteam/`
 configuration directories and `shared/` files for handoffs between agents.
+The create lesson explicitly waits after creation, before changing directories,
+before restarting Rind and at the new workspace banner. It explains that creation
+does not move the current session, then verifies the new main-agent session with
+`/team list`. Each explanation requires a keypress, with no reading deadline.
 Introduction tests cover every lesson in monochrome, content-based layout
 selection, overflow, help, resizing, start, rewind and replay in a virtual terminal.

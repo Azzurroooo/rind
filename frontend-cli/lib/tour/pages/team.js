@@ -19,14 +19,22 @@ import {
 const PROJECT = demoInfo({ session: "20260917_101530_ab12cd34" });
 const MAIN = demoInfo({ cwd: "~/demo/agents/main-agent", session: "20260917_103001_eff01a23" });
 
-function enterMainAgent() {
+function enterMainAgent({ explain = false } = {}) {
   return [
     shell("cd agents/main-agent"),
+    ...(explain ? [note([
+      "The shell is now in ~/demo/agents/main-agent. Start rind here so the new session",
+      "loads main-agent's identity and team context.",
+    ])] : []),
     shell("rind", null, MAIN.cwd),
     startup(MAIN, [
       "Starting rind inside an agent directory makes this session that agent:",
       "delegation and /team commands operate on the team project.",
     ]),
+    ...(explain ? [note([
+      "Check the banner: the workspace is now ~/demo/agents/main-agent.",
+      "This is a new main-agent session. Next, /team list verifies the team is available.",
+    ])] : []),
   ];
 }
 
@@ -46,14 +54,25 @@ export const teamPages = [
       type("/team create"),
       submit(),
       slashResult({ text: `Team project created: demo\nMain agent: main-agent\nWorkspace: ${MAIN.cwd}` }),
+      note([
+        "The team exists, but this session is still in ~/demo. /team create does not switch workspaces.",
+        "Next, /exit returns to your shell; the team stays on disk.",
+      ]),
       type("/exit"),
       exitRind(),
       shell("ls agents"),
       shellOut(["main-agent"]),
-      ...enterMainAgent(),
       note([
-        "That is the whole loop: create once, then work from the main agent.",
-        "Next pages add specialists, blueprints and delegation.",
+        "You are back in the shell at ~/demo. main-agent is the team's coordinator",
+        "and manages specialists. Next, cd agents/main-agent enters its workspace.",
+      ]),
+      ...enterMainAgent({ explain: true }),
+      type("/team list"),
+      submit(),
+      slashResult({ text: "Team Agents:\n- main-agent | Main Agent | Default Team entry agent." }),
+      note([
+        "Create the team once from the project root; start rind in agents/main-agent to manage it.",
+        "Next time, open that workspace directly. Next pages show how to add and delegate to specialists.",
       ]),
     ],
   },
