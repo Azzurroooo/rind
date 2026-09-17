@@ -42,7 +42,7 @@ class OpenAIResponsesClient(ChatClient):
         except Exception as exc:
             raise ProviderError(str(exc), status="unavailable", error_type=type(exc).__name__, code="stream_interrupted") from exc
         finally:
-            close = getattr(response if "response" in locals() else None, "aclose", None)
+            close = getattr(response, "aclose", None)
             if callable(close):
                 await close()
 

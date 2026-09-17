@@ -323,7 +323,7 @@ def load_team_project(project_root: str | Path) -> TeamProject:
     main_agent = _clean_id(spec.get("main_agent"), "main_agent")
     agents_root = _resolve_manifest_path(root / AITEAM_DIR, spec.get("agents_root") or "../agents")
     shared_root = _resolve_manifest_path(root / AITEAM_DIR, spec.get("shared_root") or "../shared")
-    if not _is_relative_to(agents_root, root) or not _is_relative_to(shared_root, root):
+    if not agents_root.is_relative_to(root) or not shared_root.is_relative_to(root):
         raise ValueError("Team paths must stay inside the project root.")
     if not agents_root.is_dir() or not shared_root.is_dir():
         raise ValueError("Team agents_root and shared_root must exist.")
@@ -693,9 +693,3 @@ def _cleanup_created(paths: list[Path]) -> None:
             pass
 
 
-def _is_relative_to(path: Path, root: Path) -> bool:
-    try:
-        path.relative_to(root)
-        return True
-    except ValueError:
-        return False

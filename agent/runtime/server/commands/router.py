@@ -83,8 +83,6 @@ class SlashCommandRouter:
             if inspect.isawaitable(result):
                 result = await result
             return result if isinstance(result, SlashCommandResult) else SlashCommandResult(str(result or ""))
-        except ValueError as exc:
-            return SlashCommandResult(f"Command failed: {exc}")
         except Exception as exc:
             return SlashCommandResult(f"Command failed: {exc}")
 

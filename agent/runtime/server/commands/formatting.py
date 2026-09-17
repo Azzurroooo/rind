@@ -17,14 +17,6 @@ def clip_text(value: object, limit: int, *, strip: bool = True) -> str:
     return f"{text[: max(0, limit - 3)]}..."
 
 
-def tail_clip_text(value: object, limit: int, *, strip: bool = True) -> str:
-    text = str(value or "")
-    if strip:
-        text = text.strip()
-    if len(text) <= limit:
-        return text
-    keep = max(0, limit - 3)
-    return "..." + (text[-keep:] if keep else "")
 
 
 def single_line(value: object) -> str:
