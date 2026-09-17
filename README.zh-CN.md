@@ -194,7 +194,13 @@ Rind 将客户端、执行过程和基础设施分开。自定义界面收发请
 
 设计细节见[架构](docs/architecture.md)、[CLI 渲染](docs/cli-rendering.md)与[导览实现](docs/cli-tour.md)（英文）。完整命令和快捷键可在 Rind 内通过 `/help` 和 `?` 查看。
 
-欢迎提交 [Issue](https://github.com/Azzurroooo/rind/issues) 或 Pull Request；开发环境和测试命令见[开发指南](docs/getting-started.zh-CN.md#开发与测试)。
+开发环境和测试命令见[开发指南](docs/getting-started.zh-CN.md#开发与测试)。
+
+---
+
+## 参与贡献
+
+贡献应兼顾轻量实现、完整功能与良好体验，保持接口清晰、依赖单向，避免冗余代码。提交 Pull Request 前请阅读[贡献指南](CONTRIBUTING.md)（英文），也欢迎提交 [Issue](https://github.com/Azzurroooo/rind/issues)。
 
 ---
 
