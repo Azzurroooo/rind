@@ -17,7 +17,10 @@ import {
 } from "./steps.js";
 
 const PROJECT = demoInfo({ session: "20260917_101530_ab12cd34" });
-const MAIN = demoInfo({ cwd: "~/demo/agents/main-agent", session: "20260917_103001_eff01a23" });
+const MAIN = {
+  ...demoInfo({ cwd: "~/demo/agents/main-agent", session: "20260917_103001_eff01a23" }),
+  team_main: { agent_id: "main-agent", project_name: "demo" },
+};
 
 function enterMainAgent({ explain = false } = {}) {
   return [
@@ -32,7 +35,7 @@ function enterMainAgent({ explain = false } = {}) {
       "delegation and /team commands operate on the team project.",
     ]),
     ...(explain ? [note([
-      "Check the banner: the workspace is now ~/demo/agents/main-agent.",
+      "The banner and status bar now show [TEAM]; the workspace is ~/demo/agents/main-agent.",
       "This is a new main-agent session. Next, /team list verifies the team is available.",
     ])] : []),
   ];
