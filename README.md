@@ -194,7 +194,13 @@ Rind separates clients, execution, and infrastructure. A custom interface consum
 
 For the design behind these boundaries, see [Architecture](docs/architecture.md), [CLI rendering](docs/cli-rendering.md), and [Tour internals](docs/cli-tour.md). For commands and shortcuts, use `/help` and `?` inside Rind.
 
-[Issues](https://github.com/Azzurroooo/rind/issues) and pull requests are welcome. The [development guide](docs/getting-started.md#development) covers setup and tests.
+The [development guide](docs/getting-started.md#development) covers setup and tests.
+
+---
+
+## Contributing
+
+Keep contributions lightweight and complete, with clear interfaces, one-way dependencies, and no redundant code. Read the [contribution guidelines](CONTRIBUTING.md) before opening a pull request; [issues](https://github.com/Azzurroooo/rind/issues) are welcome too.
 
 ---
 
