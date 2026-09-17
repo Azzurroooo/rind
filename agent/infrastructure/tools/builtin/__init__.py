@@ -11,7 +11,7 @@ from .agent_create import create_agent_create_tool_spec
 from .delegate import create_delegate_tool_spec
 from .goal import create_goal_tool_spec
 from .planning import create_plan_tool_spec
-from .shell import build_shell_tool_specs
+from .shell import ShellTools, build_shell_tool_specs
 from .skill import build_skill_tool_specs
 from .user_question import TOOL_SPECS as USER_QUESTION_TOOL_SPECS
 from .web import TOOL_SPECS as WEB_TOOL_SPECS
@@ -30,12 +30,17 @@ def build_builtin_tool_specs(
     shared_root: str | None = None,
     session_output_root: str | None = None,
     output_store=None,
+    shell_tools: ShellTools | None = None,
     session_base_provider: Callable[[], str | None] | None = None,
 ) -> tuple[ToolSpec, ...]:
     specs = list(build_file_tool_specs(workspace_root, allowed_roots, shared_root, session_output_root))
     if enable_user_question:
         specs[0:0] = USER_QUESTION_TOOL_SPECS
-    specs.extend(build_shell_tool_specs(workspace_root, output_store))
+    if shell_tools is None:
+        from agent.infrastructure.persistence import ToolOutputStore
+
+        shell_tools = ShellTools(output_store or ToolOutputStore())
+    specs.extend(build_shell_tool_specs(shell_tools, workspace_root))
     specs.append(create_plan_tool_spec(session_base_provider))
     specs.extend(build_skill_tool_specs(skill_repository))
     if delegate_handler is not None:

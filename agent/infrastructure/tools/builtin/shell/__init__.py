@@ -5,13 +5,10 @@ from __future__ import annotations
 from agent.domain.cancellation import CancellationToken
 
 from ...spec import ToolSpec
-from .tool import bash, bash_output
+from .tool import ShellTools
 
 
-def build_shell_tool_specs(workspace_root: str | None = None, output_store=None) -> tuple[ToolSpec, ...]:
-    if workspace_root is None:
-        return TOOL_SPECS
-
+def build_shell_tool_specs(shell_tools: ShellTools, workspace_root: str | None = None) -> tuple[ToolSpec, ...]:
     async def scoped_bash(
         command: str,
         run_in_background: bool = False,
@@ -21,7 +18,7 @@ def build_shell_tool_specs(workspace_root: str | None = None, output_store=None)
         _idempotency_key: str = "",
         _output_store=None,
     ) -> str:
-        return await bash(
+        return await shell_tools.bash(
             command,
             run_in_background,
             wait_ms,
@@ -29,10 +26,10 @@ def build_shell_tool_specs(workspace_root: str | None = None, output_store=None)
             _cancellation_token,
             workspace_root,
             _idempotency_key,
-            _output_store or output_store,
+            _output_store,
         )
 
-    return _specs(scoped_bash, bash_output)
+    return _specs(scoped_bash, shell_tools.bash_output)
 
 
 def _specs(bash_handler, bash_output_handler) -> tuple[ToolSpec, ...]:
@@ -61,7 +58,4 @@ def _specs(bash_handler, bash_output_handler) -> tuple[ToolSpec, ...]:
     )
 
 
-TOOL_SPECS = _specs(bash, bash_output)
-
-
-__all__ = ["TOOL_SPECS", "bash", "bash_output", "build_shell_tool_specs"]
+__all__ = ["ShellTools", "build_shell_tool_specs"]

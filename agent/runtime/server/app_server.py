@@ -13,10 +13,7 @@ from typing import Any
 from agent.infrastructure.config import ensure_user_settings, load_settings
 from agent.infrastructure.persistence import JsonlSessionStore
 from agent.infrastructure.paths import validate_session_id
-from agent.infrastructure.tools.builtin.shell.tool import (
-    list_backgrounds as background_list,
-    snapshot_background as background_output,
-)
+
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -117,8 +114,8 @@ async def async_main(argv: list[str] | None = None, *, server_class: type[Any]) 
         server = server_class(
             worker,
             debug=args.debug,
-            background_list=background_list,
-            background_output=background_output,
+            background_list=worker.shell_tools.list_backgrounds,
+            background_output=worker.shell_tools.snapshot_background,
             goal_enabled=True,
             **network_kwargs,
         )

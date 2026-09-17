@@ -36,6 +36,7 @@ from agent.infrastructure.persistence.usage_ledger import (
 )
 from agent.infrastructure.paths import resolve_session_base, validate_session_id
 from agent.infrastructure.planning import build_plan_snapshot
+from agent.infrastructure.tools.builtin.shell import ShellTools
 from agent.infrastructure.team import discover_agent
 from agent.prompts import build_goal_checkpoint_prompt, build_system_prompt
 from agent.domain.cancellation import CancellationTokenSource
@@ -280,6 +281,7 @@ class ExecutionCoordinator:
         self,
         *,
         shared_resources: SharedRuntimeResources,
+        shell_tools: ShellTools,
         repository: SessionRepository,
         debug: bool,
         enable_goal: bool,
@@ -288,6 +290,7 @@ class ExecutionCoordinator:
         provider_service: ProviderServiceImpl,
     ):
         self._shared_resources = shared_resources
+        self._shell_tools = shell_tools
         self._repository = repository
         self._debug = debug
         self._enable_goal = enable_goal
@@ -685,6 +688,7 @@ class ExecutionCoordinator:
                     session_type=info.get("session_type"),
                     parent_session_id=info.get("parent_session_id"),
                     shared_resources=self._shared_resources,
+                    shell_tools=self._shell_tools,
                     session_runner=self._run_delegated_session,
                 )
                 await container.runtime.initialize()
@@ -731,6 +735,7 @@ class ExecutionCoordinator:
                 if getattr(exc, "code", "") != "provider_not_configured":
                     raise
                 chat_client = self._provider_service.unavailable_client(selection, str(exc))
+            container = None
             try:
                 container = build_agent_container(
                     settings=settings,
@@ -753,7 +758,11 @@ class ExecutionCoordinator:
                     cancellation_token,
                 )
             finally:
-                await chat_client.close()
+                try:
+                    if container is not None:
+                        await container.shell_tools.close()
+                finally:
+                    await chat_client.close()
         return response, None
 
     async def _collect_delegated_turn(self, session_id: str, task: str, instruction: str, cancellation_token) -> dict[str, str]:
@@ -804,6 +813,7 @@ class ExecutionCoordinator:
                 self._live.pop(session_id, None)
                 released = execution
         if released is not None:
+            self._shell_tools.pool.close(session_id)
             await _close_container(released.container)
 
     async def release(self, session_id: str) -> None:
@@ -817,6 +827,7 @@ class ExecutionCoordinator:
                 self._live.pop(clean, None)
                 released = execution
         if released is not None:
+            self._shell_tools.pool.close(session_id)
             await _close_container(released.container)
 
     async def close(self) -> None:
@@ -868,10 +879,12 @@ class RuntimeWorker:
             ),
             tool_output_store=tool_output_store,
         )
+        self.shell_tools = ShellTools(tool_output_store)
         self.provider_service = ProviderServiceImpl()
         self.repository = SessionRepository(session_dir=session_dir, provider_service=self.provider_service)
         self.execution = ExecutionCoordinator(
             shared_resources=self._shared_resources,
+            shell_tools=self.shell_tools,
             repository=self.repository,
             debug=debug,
             enable_goal=enable_goal,
@@ -922,6 +935,8 @@ class RuntimeWorker:
 
     async def delete_session(self, session_id: str) -> dict[str, Any]:
         clean = validate_session_id(session_id)
+        await self.execution.release(clean)
+        await self.shell_tools.close_session(clean)
         return await self.repository.delete(clean)
 
     async def fork_session(self, session_id: str, before_message_id: str | None = None) -> dict[str, Any]:
@@ -970,7 +985,10 @@ class RuntimeWorker:
         }
 
     async def close(self) -> None:
-        await self.execution.close()
+        try:
+            await self.execution.close()
+        finally:
+            await self.shell_tools.close()
 
 
 def _normalize_workspace_root(value: str) -> str:
