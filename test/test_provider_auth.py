@@ -613,3 +613,10 @@ async def test_provider_service_creates_google_client_from_environment(tmp_path:
     client = await service.create_chat_client(str(tmp_path), ModelSelection("google", "gemini-3-flash", ""))
     assert isinstance(client, GoogleGenerativeAIClient)
     await client.close()
+
+
+def test_resolve_selection_uses_configured_model_definition(tmp_path, monkeypatch):
+    service = _service(tmp_path, _settings(tmp_path), monkeypatch)
+    model = service.resolve_selection(str(tmp_path), ModelSelection("deepseek", "deepseek-chat", ""))
+    assert model.id == "deepseek-chat"
+    assert model.provider_id == "deepseek"

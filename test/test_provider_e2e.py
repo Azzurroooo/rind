@@ -36,8 +36,10 @@ class _AppServerProcess:
         self.lines: list[dict] = []
         self._lock = threading.Lock()
         self._stderr: list[str] = []
+        runtime = os.environ.get("RIND_TEST_RUNTIME")
+        command = [runtime] if runtime else [sys.executable, "main.py"]
         self.process = subprocess.Popen(
-            [sys.executable, "main.py", "app-server", "--stdio", "--cwd", str(workspace), *(extra_args or [])],
+            [*command, "app-server", "--stdio", "--cwd", str(workspace), *(extra_args or [])],
             cwd=PROJECT_ROOT,
             env=env,
             stdin=subprocess.PIPE,
@@ -331,3 +333,125 @@ def test_resume_latest_repairs_interrupted_tool_call_journey(tmp_path: Path, mon
     finally:
         server.close()
         fixture.stop()
+
+
+@pytest.mark.parametrize("provider", ["openai", "anthropic"])
+def test_responses_and_anthropic_stream_and_offline_tokens(tmp_path, provider, monkeypatch):
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+    import tiktoken
+
+    query = "中文代码 abc def " * 80
+    expected_tokens = len(tiktoken.get_encoding("cl100k_base").encode(
+        json.dumps({"role": "user", "content": query}, ensure_ascii=False), disallowed_special=(),
+    ))
+    events = [
+        {"type": "response.output_text.delta", "delta": "frozen protocol works", "sequence_number": 1},
+        {"type": "response.completed", "response": {"status": "completed", "usage": {"input_tokens": 10, "output_tokens": 3}}, "sequence_number": 2},
+    ] if provider == "openai" else [
+        {"type": "message_start", "message": {"id": "msg", "type": "message", "role": "assistant", "model": "fixture", "content": [], "usage": {"input_tokens": 10, "output_tokens": 0}}},
+        {"type": "content_block_start", "index": 0, "content_block": {"type": "text", "text": ""}},
+        {"type": "content_block_delta", "index": 0, "delta": {"type": "text_delta", "text": "frozen protocol works"}},
+        {"type": "content_block_stop", "index": 0},
+        {"type": "message_delta", "delta": {"stop_reason": "end_turn", "stop_sequence": None}, "usage": {"output_tokens": 3}},
+        {"type": "message_stop"},
+    ]
+
+    class Handler(BaseHTTPRequestHandler):
+        def log_message(self, *args):
+            pass
+
+        def do_POST(self):
+            self.rfile.read(int(self.headers["Content-Length"]))
+            body = "".join(f"event: {event['type']}\ndata: {json.dumps(event)}\n\n" for event in events).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "text/event-stream")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+    http = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    thread = threading.Thread(target=http.serve_forever, daemon=True)
+    thread.start()
+    workspace = tmp_path / "workspace"
+    (workspace / ".rind").mkdir(parents=True)
+    (workspace / ".rind" / "settings.json").write_text(json.dumps({
+        "provider": provider, "apiKey": "fixture-key", "model": "fixture",
+        "baseUrl": f"http://127.0.0.1:{http.server_port}/v1",
+    }), encoding="utf-8")
+    monkeypatch.delenv("TIKTOKEN_CACHE_DIR", raising=False)
+    monkeypatch.delenv("DATA_GYM_CACHE_DIR", raising=False)
+    # Model traffic stays local; tokenizer downloads cannot use the network.
+    monkeypatch.setenv("HTTPS_PROXY", "http://127.0.0.1:1")
+    monkeypatch.setenv("NO_PROXY", "127.0.0.1,localhost")
+    server = _AppServerProcess(workspace, tmp_path / "home")
+    try:
+        server.send("init", "initialize")
+        sid = server.response("init")["result"]["session_id"]
+        server.send("turn", "session/prompt", {"session_id": sid, "input": query})
+        assert server.response("turn")["result"]["ok"]
+        assert any(message.get("event", {}).get("content") == "frozen protocol works" for message in server.lines)
+        server.send("context", "rind/context/inspect", {"session_id": sid})
+        sections = server.response("context")["result"]["breakdown"]["sections"]
+        assert next(section for section in sections if section["key"] == "chat_user")["tokens"] == expected_tokens
+    finally:
+        server.close()
+        http.shutdown()
+        http.server_close()
+        thread.join()
+
+
+def test_web_extraction_through_worker_and_http_proxy(tmp_path, monkeypatch):
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+    html = ("<html><body><article><h1>Fixture article</h1><p>"
+            + "中文正文 and English documentation. " * 40
+            + "</p><table><tr><th>Name</th><th>Value</th></tr><tr><td>row-key</td><td>42</td></tr></table>"
+            + "<pre><code>print('sample-code')</code></pre></article></body></html>").encode()
+    received = []
+
+    class Handler(BaseHTTPRequestHandler):
+        def log_message(self, *args):
+            pass
+
+        def do_GET(self):
+            received.append(self.path)
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(html)))
+            self.end_headers()
+            self.wfile.write(html)
+
+    proxy = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    thread = threading.Thread(target=proxy.serve_forever, daemon=True)
+    thread.start()
+    fixture = FakeOpenAIServer()
+    fixture.script_tool_call("fetch_web_page", {"url": "http://rind-fixture.invalid/article"}, then_text=["page extracted"])
+    fixture.start()
+    workspace = tmp_path / "workspace"
+    (workspace / ".rind").mkdir(parents=True)
+    (workspace / ".rind" / "settings.json").write_text(json.dumps({
+        "provider": "openai-compatible", "baseUrl": fixture.base_url,
+        "model": "fixture", "apiKey": "fixture-key",
+    }), encoding="utf-8")
+    monkeypatch.setenv("http_proxy", f"http://127.0.0.1:{proxy.server_port}")
+    monkeypatch.setenv("HTTP_PROXY", f"http://127.0.0.1:{proxy.server_port}")
+    monkeypatch.setenv("NO_PROXY", "127.0.0.1,localhost")
+    monkeypatch.setenv("no_proxy", "127.0.0.1,localhost")
+    server = _AppServerProcess(workspace, tmp_path / "home")
+    try:
+        server.send("init", "initialize")
+        sid = server.response("init")["result"]["session_id"]
+        server.send("turn", "session/prompt", {"session_id": sid, "input": "fetch the article"})
+        assert server.response("turn")["result"]["ok"]
+        messages = fixture.last_request()["messages"]
+        content = next(message["content"] for message in messages if message["role"] == "tool")
+        assert "中文正文" in content
+        assert "row-key" in content
+        assert "sample-code" in content
+        assert received == ["http://rind-fixture.invalid/article"]
+    finally:
+        server.close()
+        fixture.stop()
+        proxy.shutdown()
+        proxy.server_close()
+        thread.join()

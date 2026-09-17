@@ -20,6 +20,7 @@ from agent.domain.models import (
 from agent.infrastructure.auth import CredentialStore
 from agent.infrastructure.config.settings_loader import AppSettings, load_settings
 
+from .cancellation import close_resource
 from .providers import PROVIDERS, default_reasoning_efforts, refreshable_models_api
 
 
@@ -35,7 +36,7 @@ class ProviderServiceImpl:
 
     def resolve_selection(self, workspace_root: str | None, selection: ModelSelection) -> ModelDefinition:
         definition = self._provider(selection.provider_id)
-        return self._selection_model(load_settings(workspace_root), definition, selection)
+        return _selection_model(load_settings(workspace_root), definition, selection)
 
     def list_providers(self, workspace_root: str | None = None) -> list[ProviderStatus]:
         try:
@@ -157,7 +158,7 @@ class ProviderServiceImpl:
         except Exception:
             return False
         finally:
-            await _close(client)
+            await close_resource(client)
 
     def _provider(self, provider_id: str):
         try:
@@ -247,14 +248,6 @@ def _selection_model(settings: AppSettings, definition, selection: ModelSelectio
             return model
     api = _effective_api(settings, definition)
     return ModelDefinition(definition.id, selection.model_id, selection.model_id, api, default_reasoning_efforts(api))
-
-
-async def _close(client: Any) -> None:
-    close = getattr(client, "close", None)
-    if callable(close):
-        value = close()
-        if hasattr(value, "__await__"):
-            await value
 
 
 def _item_id(item: Any) -> str:
