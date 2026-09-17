@@ -105,12 +105,13 @@ class ContextManager:
         # Score the tagged list, not the stripped projection: the composition
         # snapshot re-estimates these exact payloads, keeping section sums
         # equal to stats["estimated_input_tokens"] with zero drift.
-        final_estimate = self._estimator.estimate_messages(messages)
+        token_cache = {} if allow_rescue else None
+        final_estimate = self._estimator.estimate_messages(messages, token_cache=token_cache)
 
         dropped_count = 0
         while allow_rescue and final_estimate.over_hard_limit and len(final_messages) > 2:
             messages, final_messages = self.rescue_context(messages, final_messages)
-            final_estimate = self._estimator.estimate_messages(messages)
+            final_estimate = self._estimator.estimate_messages(messages, token_cache=token_cache)
             dropped_count += 1
             if dropped_count > 50:
                 break

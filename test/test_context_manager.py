@@ -53,7 +53,7 @@ class FixedEstimator:
     def budget(self) -> ContextBudget:
         return self._budget
 
-    def estimate_messages(self, messages):
+    def estimate_messages(self, messages, *, token_cache=None):
         return ContextEstimate(
             message_count=len(messages),
             estimated_input_tokens=self._tokens,
