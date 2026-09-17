@@ -1668,6 +1668,27 @@ async def test_resume_normalizes_auto_compact_window_meta(temp_session_dir):
     assert repaired["auto_compact_window"] == {"ordinal": 1}
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("count", [2.0, True, "2", None])
+async def test_resume_repairs_count_types_before_appending(temp_session_dir, count):
+    store = JsonlSessionStore(session_dir=temp_session_dir, session_id="count-types", system_prompt="sys")
+    await store.initialize()
+    await store.persist_message("user", "hello")
+    path = Path(store.session_base_path) / "meta.json"
+    meta = json.loads(path.read_text(encoding="utf-8"))
+    meta.update(message_count=count, tool_call_count=0.0)
+    path.write_text(json.dumps(meta), encoding="utf-8")
+
+    resumed = JsonlSessionStore(session_dir=temp_session_dir, session_id=store.session_id)
+    await resumed.initialize()
+    await resumed.persist_message("assistant", "world")
+    repaired = json.loads(path.read_text(encoding="utf-8"))
+    assert type(repaired["message_count"]) is int
+    assert repaired["message_count"] == 3
+    assert type(repaired["tool_call_count"]) is int
+    assert repaired["tool_call_count"] == 0
+
+
 def main() -> int:
     async def _run_all():
         with tempfile.TemporaryDirectory() as tmp:
