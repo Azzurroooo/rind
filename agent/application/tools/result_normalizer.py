@@ -66,17 +66,21 @@ class ToolResultNormalizer:
         session_id: str = "",
         call_id: str = "",
     ) -> NormalizedToolResult:
-        rendered = self._render_stable(result_payload)
+        payload = self._canonicalize(self._compress_empty_bash_output_poll(self._parse_json(result_payload)))
+        rendered = payload if isinstance(payload, str) else json.dumps(payload, ensure_ascii=False, separators=(",", ": "))
+        if isinstance(payload, str):
+            payload = self._parse_json(payload)
         total_bytes, total_lines = self._text_metrics(rendered)
-        identity = self._projection_identity(rendered, tool_name, status, error_type)
-        existing_path, existing_truncated = self._existing_output_reference(rendered)
+        identity = self._projection_identity(payload, tool_name, status, error_type)
+        existing_path, existing_truncated = self._existing_output_reference(payload)
         is_read = identity[1] == "read_file"
         preview_required = total_bytes > self.max_preview_bytes or total_lines > self.max_preview_lines
         needs_preview = preview_required or existing_truncated
         output_path = existing_path
         if needs_preview and not is_read and not output_path and output_store is not None and session_id and call_id:
             output_path = await output_store.write(session_id, call_id, rendered)
-        source_metadata = self._read_metadata(rendered) if is_read else None
+        read_payload = self._read_payload(payload) if is_read else None
+        source_metadata = dict(read_payload["meta"]) if read_payload is not None else None
 
         terminal_content = self._project_by_bytes(
             rendered,
@@ -90,7 +94,7 @@ class ToolResultNormalizer:
         )
         if needs_preview:
             if is_read:
-                model_content = self._project_read_for_model(rendered, preview_required)
+                model_content = self._project_read_for_model(rendered, read_payload, preview_required)
             else:
                 model_content = self._project_for_model(rendered, total_bytes, total_lines, identity, output_path)
         else:
@@ -102,14 +106,6 @@ class ToolResultNormalizer:
             persisted_content=model_content,
             model_content_policy={"truncated": model_content != rendered},
         )
-
-    def _render_stable(self, payload: Any) -> str:
-        parsed = self._parse_json(payload)
-        if isinstance(parsed, str):
-            return parsed
-        parsed = self._compress_empty_bash_output_poll(parsed)
-        canonical = self._canonicalize(parsed)
-        return json.dumps(canonical, ensure_ascii=False, separators=(",", ": "))
 
     def _project_by_bytes(
         self,
@@ -161,8 +157,7 @@ class ToolResultNormalizer:
             truncation_marker=truncation_marker,
         )
 
-    def _project_read_for_model(self, rendered: str, preview_required: bool) -> str:
-        payload = self._read_payload(rendered)
+    def _project_read_for_model(self, rendered: str, payload: dict | None, preview_required: bool) -> str:
         if payload is None:
             return self._project_for_model(
                 rendered,
@@ -171,9 +166,7 @@ class ToolResultNormalizer:
                 None,
                 truncation_marker=_READ_PREVIEW_MARKER,
             )
-        data = payload.get("data")
-        if not isinstance(data, str):
-            return rendered
+        data = payload["data"]
         meta = dict(payload.get("meta") or {})
         meta.pop("output_path", None)
         meta["truncated"] = True
@@ -286,8 +279,7 @@ class ToolResultNormalizer:
         payload["meta"] = meta
         return json.dumps(payload, ensure_ascii=False, separators=(",", ": "))
 
-    def _existing_output_reference(self, rendered: str) -> tuple[str | None, bool]:
-        parsed = self._parse_json(rendered)
+    def _existing_output_reference(self, parsed: Any) -> tuple[str | None, bool]:
         if not isinstance(parsed, dict):
             return None, False
         meta = parsed.get("meta")
@@ -296,12 +288,7 @@ class ToolResultNormalizer:
         output_path = meta.get("output_path")
         return (str(output_path) if isinstance(output_path, str) and output_path else None), bool(meta.get("truncated"))
 
-    def _read_metadata(self, rendered: str) -> dict[str, Any] | None:
-        payload = self._read_payload(rendered)
-        return dict(payload["meta"]) if payload is not None else None
-
-    def _read_payload(self, rendered: str) -> dict[str, Any] | None:
-        parsed = self._parse_json(rendered)
+    def _read_payload(self, parsed: Any) -> dict[str, Any] | None:
         if not isinstance(parsed, dict) or parsed.get("tool") != "read_file":
             return None
         if not isinstance(parsed.get("data"), str) or not isinstance(parsed.get("meta"), dict):
@@ -310,12 +297,11 @@ class ToolResultNormalizer:
 
     def _projection_identity(
         self,
-        rendered: str,
+        parsed: Any,
         tool_name: str,
         status: str,
         error_type: str,
     ) -> tuple[bool, str, str]:
-        parsed = self._parse_json(rendered)
         if isinstance(parsed, dict):
             ok = parsed.get("ok") if isinstance(parsed.get("ok"), bool) else status == "completed"
             name = parsed.get("tool") if isinstance(parsed.get("tool"), str) else tool_name
