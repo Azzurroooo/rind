@@ -510,7 +510,9 @@ class ExecutionCoordinator:
             async with execution.turn_slot:
                 cancel_source = CancellationTokenSource(parent_token=cancellation_token)
                 execution.current_cancel = cancel_source
-                execution.container.runtime.set_user_question_responder(lambda event: self._answer_user_question(clean, event))
+                execution.container.runtime.set_user_question_responder(
+                    lambda event: self._answer_user_question(clean, event)
+                )
                 try:
                     run_kwargs: dict[str, Any] = {
                         "query": query,
@@ -643,13 +645,13 @@ class ExecutionCoordinator:
             existing = self._active.get(clean)
             if existing is not None:
                 return existing.container
-            info = await self._repository.metadata(clean)
-            root = _normalize_workspace_root(str(info.get("workspace_root") or info.get("cwd") or ""))
+            metadata = await self._repository.metadata(clean)
+            root = _normalize_workspace_root(str(metadata.get("workspace_root") or metadata.get("cwd") or ""))
             settings = await asyncio.to_thread(load_settings, root)
             selection = ModelSelection(
-                str(info.get("provider") or settings.provider),
-                str(info.get("model") or settings.model),
-                str(info.get("reasoning_effort") or settings.reasoning_effort),
+                str(metadata.get("provider") or settings.provider),
+                str(metadata.get("model") or settings.model),
+                str(metadata.get("reasoning_effort") or settings.reasoning_effort),
             )
             try:
                 chat_client = await self._provider_service.create_chat_client(settings, selection, workspace_root=root)
@@ -660,7 +662,12 @@ class ExecutionCoordinator:
             container = None
             try:
                 container = build_agent_container(
-                    settings=replace(settings, provider=selection.provider_id, model=selection.model_id, reasoning_effort=selection.reasoning_effort),
+                    settings=replace(
+                        settings,
+                        provider=selection.provider_id,
+                        model=selection.model_id,
+                        reasoning_effort=selection.reasoning_effort,
+                    ),
                     chat_client=chat_client,
                     session_dir=self.session_dir,
                     session_id=clean,
@@ -671,10 +678,10 @@ class ExecutionCoordinator:
                     enabled_tools=enabled_tools,
                     lock_workspace=lock_workspace,
                     workspace_root=root,
-                    project_id=info.get("project_id"),
-                    owner_agent_id=info.get("owner_agent_id"),
-                    session_type=info.get("session_type"),
-                    parent_session_id=info.get("parent_session_id"),
+                    project_id=metadata.get("project_id"),
+                    owner_agent_id=metadata.get("owner_agent_id"),
+                    session_type=metadata.get("session_type"),
+                    parent_session_id=metadata.get("parent_session_id"),
                     shared_resources=self._shared_resources,
                     shell_tools=self._shell_tools,
                     web_sessions=self._web_sessions,

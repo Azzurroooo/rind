@@ -18,7 +18,7 @@ def build_file_change_event(
     status: str,
     result: str,
 ) -> FileChangeEvent | None:
-    if status != "completed":
+    if status != "completed" or call.name not in {"write_file", "edit_file"}:
         return None
     try:
         payload = json.loads(result)
