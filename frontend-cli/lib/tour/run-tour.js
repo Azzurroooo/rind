@@ -2,7 +2,7 @@ import { parseTerminalKey } from "../terminal-key.js";
 import { Component } from "../tui/component.js";
 import { createTui } from "../tui/tui.js";
 import { findTourPage, TOUR_TOPICS, tourPages } from "./pages/index.js";
-import { renderTourCatalog, renderTourPage, cursorMarker } from "./render.js";
+import { renderTourCatalog, renderTourPage, renderTourHelp, cursorMarker } from "./render.js";
 import { createTourPlayer } from "./player.js";
 import { createTourStage } from "./stage.js";
 
@@ -15,10 +15,13 @@ class TourScreen extends Component {
   }
 
   render(width) {
+    const height = this.rows?.() ?? 24;
+    if (width < 36 || height < 14) this.player.pause();
     const state = this.player.state();
-    const out = state.view === "catalog"
-      ? renderTourCatalog(state, width, this.rows?.() ?? 24)
-      : renderTourPage(this.stage.snapshot(), state, width);
+    const out = state.help ? renderTourHelp(width, height) : state.view === "catalog"
+      ? renderTourCatalog(state, width, height)
+      : renderTourPage(this.stage.snapshot(), state, width, height);
+    if (!state.help && state.view === "page") this.player.setScrollLimit(out.maxScroll || 0, out.offset || 0);
     return cursorMarker(out.lines, out.cursor);
   }
 }
@@ -33,6 +36,7 @@ export async function runTour({
   startPageId = "",
   schedule = setTimeout,
   cancel = clearTimeout,
+  onPageComplete = () => {},
 } = {}) {
   if (startPageId && !findTourPage(startPageId)) {
     stderr.write(`Unknown tour page: ${startPageId}\nAvailable pages:\n${tourPages().map((page) => `  ${page.id} — ${page.title}`).join("\n")}\n`);
@@ -46,16 +50,27 @@ export async function runTour({
     stage,
     schedule,
     cancel,
+    onPageComplete,
     onRender: () => tui.requestRender(),
   });
   tui.addChild(new TourScreen(player, stage, () => tui.rows));
-  tui.onData((sequence) => player.key(parseTerminalKey(sequence)));
-  // Terminals (and automation) may deliver text as bracketed paste; the tour
-  // treats it the same as typed letters.
-  tui.onPaste((text) => player.key({ kind: "text", name: "", text: String(text || "") }));
-  tui.start();
-  player.start();
-  await player.finished;
-  tui.stop();
+  tui.onData((sequence) => {
+    const scrollKey = { "\x1b[5~": "pageup", "\x1b[6~": "pagedown" }[sequence];
+    player.key(scrollKey ? { kind: "key", name: scrollKey } : parseTerminalKey(sequence));
+  });
+  // Pasted commands are examples to read, never navigation instructions.
+  tui.onPaste(() => {});
+  input.on?.("end", player.dispose);
+  input.on?.("close", player.dispose);
+  try {
+    tui.start();
+    player.start();
+    await player.finished;
+  } finally {
+    player.dispose();
+    tui.stop();
+    input.off?.("end", player.dispose);
+    input.off?.("close", player.dispose);
+  }
   return true;
 }

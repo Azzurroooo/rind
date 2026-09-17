@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import { runTour } from "../lib/tour/run-tour.js";
+import { findTourPage } from "../lib/tour/pages/index.js";
 import { createVirtualInput, createVirtualOutput } from "./helpers/virtual-terminal.js";
 
 function fakeClock() {
@@ -34,6 +35,7 @@ function fakeClock() {
       }
       now = target;
     },
+    get pendingCount() { return pending.size; },
   };
 }
 
@@ -130,7 +132,7 @@ test("unknown page ids report the catalog on stderr without rendering", async ()
   assert.equal(output.getScrollBuffer().join("").trim(), "", "nothing rendered");
 });
 
-test("text keystrokes arrive as bracketed paste and still navigate", async () => {
+test("pasted example text cannot navigate or quit the tour", async () => {
   const { output, input } = { output: createVirtualOutput({ columns: 90, rows: 30 }), input: createVirtualInput() };
   const clock = fakeClock();
   const running = runTour({
@@ -144,8 +146,8 @@ test("text keystrokes arrive as bracketed paste and still navigate", async () =>
   input.send("\x1b[200~q\x1b[201~");
   await settle();
   let screen = (await output.flushAndGetViewport()).join("\n");
-  assert.ok(screen.includes("Rind Tour"), "pasted q returns to the catalog");
-  input.send("\x1b[200~q\x1b[201~");
+  assert.ok(screen.includes("Tour · Work inside the team"), "pasted q leaves the page intact");
+  input.send("\x03");
   await running;
 });
 
@@ -169,4 +171,59 @@ test("pages wrap inside narrow terminals", async () => {
   await settle();
   input.send("\x1b");
   await running;
+});
+
+test("a completed lesson keeps title, takeaway and navigation on an 80x24 terminal", async () => {
+  const output = createVirtualOutput({ columns: 80, rows: 24 });
+  const input = createVirtualInput();
+  const clock = fakeClock();
+  let completed = 0;
+  const running = runTour({ input, output: output.output, startPageId: "start.hello", schedule: clock.schedule, cancel: clock.cancel, onPageComplete: () => completed++ });
+  try {
+    await settle();
+    // Walk all beats of the first lesson with terminal input, not private player APIs.
+    for (let i = 1; i < findTourPage("start.hello").steps.length; i++) input.send("\x1b[C");
+    await settle();
+    let screen = (await output.flushAndGetViewport()).join("\n");
+    assert.ok(screen.includes("Tour · Your first turn"), screen);
+    assert.ok(screen.includes("Try it: exit this tour"), screen);
+    assert.ok(screen.includes("page complete"), screen);
+    assert.equal(completed, 1);
+    assert.equal(clock.pendingCount, 0);
+    input.send("\x1b[5~");
+    input.send("\x1b[5~");
+    input.send("\x1b[5~");
+    await settle();
+    screen = (await output.flushAndGetViewport()).join("\n");
+    assert.ok(screen.includes("Try it:"), "scrolling keeps the caption visible");
+    input.send("?");
+    await settle();
+    screen = (await output.flushAndGetViewport()).join("\n");
+    assert.ok(screen.includes("Tour controls"));
+    input.send("\r");
+    output.resize(40, 16);
+    await settle();
+    screen = (await output.flushAndGetViewport()).join("\n");
+    assert.ok(screen.includes("Tour · Your first turn"), screen);
+    assert.ok(screen.includes("page complete"), screen);
+  } finally {
+    input.send("\x03");
+    await running;
+  }
+  assert.equal(input.isRaw, false);
+  assert.equal(input.listenerCount("data"), 0);
+  assert.equal(clock.pendingCount, 0);
+});
+
+test("closing input cleans up a playing tour", async () => {
+  const input = createVirtualInput();
+  const output = createVirtualOutput();
+  const clock = fakeClock();
+  const running = runTour({ input, output: output.output, startPageId: "start.hello", schedule: clock.schedule, cancel: clock.cancel });
+  input.send(" ");
+  input.emit("end");
+  await running;
+  assert.equal(clock.pendingCount, 0);
+  assert.equal(input.isRaw, false);
+  assert.equal(input.listenerCount("end"), 0);
 });

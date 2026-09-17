@@ -1,7 +1,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { renderTourCatalog, renderTourPage } from "../lib/tour/render.js";
+import { renderTourCatalog, renderTourPage, renderTourHelp } from "../lib/tour/render.js";
+import { TOUR_TOPICS, tourPages } from "../lib/tour/pages/index.js";
+import { currentTheme, setTheme } from "../lib/theme.js";
 import { createTourStage } from "../lib/tour/stage.js";
 import { stripAnsi, textWidth } from "../lib/text-width.js";
 
@@ -142,14 +144,14 @@ test("tool blocks flip from running to their result line", () => {
   stage.beginStep({ kind: "tool", name: "bash", detail: "npm test", outcome: { status: "ok", output: "all green", durationMs: 900 } });
   const runningText = renderTourPage(stage.snapshot(), { ...pageState("idle"), page: { title: "T" } }, 80)
     .lines.map(stripAnsi).join("\n");
-  assert.ok(runningText.includes("Running command"), "running verb shown");
+  assert.ok(runningText.includes("◌") && runningText.includes("npm test"), "current CLI running tool shown");
 
   stage.settleStep({ kind: "tool", name: "bash", detail: "npm test", outcome: { status: "ok", output: "all green", durationMs: 900 } });
   stage.beginStep({ kind: "turn-done", durationMs: 4200, completed: 1, failed: 0 });
   stage.settleStep({ kind: "turn-done", durationMs: 4200, completed: 1, failed: 0 });
   const doneText = renderTourPage(stage.snapshot(), { ...pageState("idle"), page: { title: "T" } }, 80)
     .lines.map(stripAnsi).join("\n");
-  assert.ok(doneText.includes("Ran command"), "completed verb shown");
+  assert.ok(doneText.includes("npm test"), "completed command retains its arguments");
   assert.ok(doneText.includes("all green"), "tool output shown");
   assert.ok(doneText.includes("Worked for"), "turn summary shown");
 });
@@ -178,7 +180,8 @@ test("caption notes render under the stage; end phase shows the outro", () => {
 
   const end = renderTourPage(snapshot, { ...pageState("end"), page: { title: "Create a Team" } }, 80);
   const endText = end.lines.map(stripAnsi).join("\n");
-  assert.ok(endText.includes("End of Create a Team"), "outro headline shown");
+  assert.ok(endText.includes("page complete"), "completion is explicit");
+  assert.ok(endText.includes("Read this first"), "completion retains the learning takeaway");
   assert.ok(endText.includes("r replay"), "outro hints shown");
 });
 
@@ -229,4 +232,74 @@ test("goodbye closes the session back to the shell prompt", () => {
   assert.ok(text.includes("Goodbye."), "goodbye line shown");
   assert.ok(text.includes("~/demo $ ls"), "shell prompt returned");
   assert.ok(!text.includes("Ask Rind to do anything"), "composer hidden after exit");
+});
+
+test("all lesson steps, contents and help fit supported terminal sizes", () => {
+  for (const [width, height] of [[80, 24], [60, 20], [40, 16], [36, 14]]) {
+    const fits = (out, label) => {
+      assert.ok(out.lines.length <= height, `${label}: ${out.lines.length} rows > ${height}`);
+      assert.ok(out.lines.every((line) => textWidth(line) <= width), `${label}: width > ${width}`);
+      if (out.cursor) {
+        assert.ok(out.cursor.line < out.lines.length);
+        assert.ok(out.cursor.column < width);
+      }
+    };
+    fits(renderTourHelp(width, height), "help");
+    for (const [selected, page] of tourPages().entries()) {
+      fits(renderTourCatalog({ topics: TOUR_TOPICS, selected }, width, height), page.id);
+      const stage = createTourStage();
+      for (const [index, step] of page.steps.entries()) {
+        stage.beginStep(step);
+        stage.settleStep(step);
+        const state = { ...pageState("waiting"), page, stepIndex: index, stepCount: page.steps.length };
+        const out = renderTourPage(stage.snapshot(), state, width, height);
+        fits(out, `${page.id}:${index}`);
+        assert.ok(out.lines.map(stripAnsi).join("\n").includes("space continue"));
+      }
+    }
+  }
+});
+
+test("shell history stays in chronological order across exit and restart", () => {
+  const page = tourPages().find((page) => page.id === "team.create");
+  const stage = createTourStage();
+  stage.rebuildTo(page.steps, page.steps.length - 1);
+  const text = renderTourPage(stage.snapshot(), { ...pageState("end"), page }, 100).lines.map(stripAnsi).join("\n");
+  assert.ok(text.indexOf("Goodbye.") < text.indexOf("$ ls .aiteam/agents"));
+  assert.ok(text.indexOf("$ ls .aiteam/agents") < text.indexOf("$ cd .aiteam/agents/main-agent"));
+  assert.ok(text.includes("~/demo/.aiteam/agents/main-agent $ rind"));
+});
+
+test("wrapped shell cursor remains on the command and scrollback exposes earlier rows", () => {
+  const stage = createTourStage();
+  stage.beginStep({ kind: "shell", command: "1234567890".repeat(10) });
+  for (let i = 0; i < 45; i++) stage.tick();
+  const out = renderTourPage(stage.snapshot(), pageState("anim"), 40, 20);
+  assert.ok(stripAnsi(out.lines[out.cursor.line]).includes("5"));
+  assert.equal(out.cursor.column, 11, "cursor follows the last wrapped digit, after the frame inset");
+  const page = tourPages().find((page) => page.id === "start.hello");
+  stage.rebuildTo(page.steps, page.steps.length - 1);
+  const bottom = renderTourPage(stage.snapshot(), { ...pageState("end"), page }, 80, 24);
+  const top = renderTourPage(stage.snapshot(), { ...pageState("end"), page, scrollOffset: bottom.maxScroll }, 80, 24);
+  assert.ok(top.lines.map(stripAnsi).join("\n").includes("Rind v"));
+  assert.ok(top.lines.map(stripAnsi).join("\n").includes("Try it:"), "takeaway stays visible while scrolling");
+});
+
+test("theme preview restores the user's theme and NO_COLOR is respected", () => {
+  const previous = currentTheme().name;
+  const priorNoColor = process.env.NO_COLOR;
+  setTheme("frappe");
+  process.env.NO_COLOR = "1";
+  try {
+    const page = tourPages().find((page) => page.id === "model.theme");
+    const stage = createTourStage();
+    stage.rebuildTo(page.steps, page.steps.length - 1);
+    const out = renderTourPage(stage.snapshot(), { ...pageState("end"), page }, 80, 24);
+    assert.equal(currentTheme().name, "frappe");
+    assert.ok(out.lines.every((line) => line === stripAnsi(line)));
+  } finally {
+    setTheme(previous);
+    if (priorNoColor === undefined) delete process.env.NO_COLOR;
+    else process.env.NO_COLOR = priorNoColor;
+  }
 });

@@ -1,5 +1,4 @@
-import { demoInfo } from "./demo.js";
-import { note, shell, shellOut, startup } from "./steps.js";
+import { note, shell, shellOut } from "./steps.js";
 
 export const automationPages = [
   {
@@ -10,19 +9,14 @@ export const automationPages = [
         "rind run is the same agent, headless: the final reply lands on stdout,",
         "progress on stderr — built for hooks, cron and pipelines.",
       ]),
-      shell('rind run --prompt "Summarize the changes in src/" --dir /workspace/project'),
-      shellOut([
-        "◆ working · session 20260917_111203_5e01bb77",
-        "◌ read_file src/changes.md",
-        "◉ read_file src/changes.md · 180ms",
-      ]),
+      shell('rind run --prompt "Summarize the changes in src/" --dir /workspace/project 2>progress.log', ["This example redirects stderr to progress.log; only the final answer appears in the terminal. Replace /workspace/project with your own absolute path."]),
       shellOut([
         "Two refactorings landed this week: the JSONL store now streams",
         "appends, and the parser tokenizer walks grapheme clusters.",
       ]),
       note([
-        "A markdown run log with prompt, reply and tool count lands under",
-        "logs/. --session <id> continues an earlier run from any script.",
+        "Check progress.log for progress and errors, and logs/ in the workspace for the markdown run log.",
+        "Try rind run --prompt with a small task; use --session <id> to continue a saved session.",
       ]),
     ],
   },
@@ -35,22 +29,14 @@ export const automationPages = [
         "or script — the session id is the address.",
       ]),
       shell('rind send --session 20260917_103001_eff01a23 "Also update the README examples"'),
-      shellOut(["✓ delivered · steering 20260917_103001_eff01a23"]),
+      shellOut(["✓ sent to rind · session 20260917_103001_eff01a23"]),
       note([
         "If the session is mid-turn the message steers it; if it is idle,",
-        "send starts the turn. Now reopen that session to see it landed.",
-      ]),
-      shell("rind --session 20260917_103001_eff01a23"),
-      startup({
-        ...demoInfo({ session: "20260917_103001_eff01a23" }),
-        resume_preview: "- user: Have the test specialist cover the unicode parser cases\n- assistant: test-specialist finished; handoff at .aiteam/agents/…\n- user (via send): Also update the README examples",
-      }, [
-        "The injected message is part of the transcript, marked with its",
-        "origin — indistinguishable from typing it yourself.",
+        "send starts the turn. Read the reply in the already-open target session.",
       ]),
       note([
-        "One engine, many doors: CLI, desktop, web and IM gateways all reach",
-        "the same sessions, so automation and humans share one thread.",
+        "Try it from a second terminal while the target CLI session is still open on this machine.",
+        "Copy its id from /status. The confirmation means delivered, not finished; a closed session cannot receive rind send.",
       ]),
     ],
   },

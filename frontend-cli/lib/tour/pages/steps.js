@@ -12,8 +12,8 @@ function textLines(lines) {
   return (Array.isArray(lines) ? lines : [lines]).map((line) => String(line));
 }
 
-export function shell(command, note = null) {
-  return { kind: "shell", command: String(command), note: noteLines(note) };
+export function shell(command, note = null, cwd = null) {
+  return { kind: "shell", command: String(command), note: noteLines(note), ...(cwd ? { cwd } : {}) };
 }
 
 export function shellOut(lines) {
@@ -50,7 +50,7 @@ export function tool(name, detail, outcome) {
 }
 
 export function assistant(text, note = null) {
-  return { kind: "assistant", text: String(text), note: noteLines(note) };
+  return { kind: "assistant", text: Array.isArray(text) ? text.join("\n") : String(text), note: noteLines(note) };
 }
 
 export function turnDone(durationMs = 4200, completed = 0, failed = 0) {
@@ -68,3 +68,10 @@ export function note(lines) {
 export function menu(spec, note = null) {
   return { kind: "menu", menu: spec, note: noteLines(note) };
 }
+
+export const info = (value, clear = false) => ({ kind: "info", info: value, clear });
+export const closeMenu = (key = "Esc") => ({ kind: "close-menu", key });
+export const consume = (mode) => ({ kind: "consume", mode });
+export const turnStart = (input = "") => ({ kind: "turn-start", input });
+export const expandTools = (expanded = true) => ({ kind: "expand-tools", expanded });
+export const prefill = (text) => ({ kind: "prefill", text });

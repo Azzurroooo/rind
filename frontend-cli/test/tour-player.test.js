@@ -103,7 +103,7 @@ test("steps auto-advance with animation, pauses and waits", () => {
 
   player.key(key("space"));
   assert.equal(player.state().stepIndex, 4, "space continues past the note");
-  clock.advance(1100);
+  clock.advance(1500);
   assert.equal(player.state().phase, "end", "last step ends the page");
 });
 
@@ -166,8 +166,8 @@ test("right skips ahead instantly, left rebuilds the previous step exactly", () 
 
   player.key(key("left"));
   const expected = createTourStage();
-  expected.rebuildTo(TOPICS[0].pages[0].steps, -1);
-  assert.deepEqual(stage.snapshot(), expected.snapshot(), "back past the first step resets the stage");
+  expected.rebuildTo(TOPICS[0].pages[0].steps, 0);
+  assert.deepEqual(stage.snapshot(), expected.snapshot(), "back clamps to a visible first step");
 });
 
 test("enter settles the current step without advancing", () => {
@@ -211,7 +211,7 @@ test("spinner only advances while the composer is running", () => {
 
   clock.advance(320);
   player.key(key("space")); // past the note
-  clock.advance(1100); // result + turn-done
+  clock.advance(1500); // result + turn-done
   assert.equal(stage.snapshot().rind.composer.running, false, "turn-done resets running");
 });
 
@@ -255,7 +255,7 @@ test("r replays the page from the top", () => {
   player.start();
   clock.advance(970);
   player.key(key("space"));
-  clock.advance(1100);
+  clock.advance(1500);
   assert.equal(player.state().phase, "end");
   player.key(key("r"));
   assert.equal(player.state().phase, "after");
@@ -291,4 +291,100 @@ test("batched text chunks apply each letter and quit", async () => {
   assert.equal(player.state().view, "catalog", "q inside a batched chunk still navigates");
   player.key({ kind: "text", name: "", text: "q" });
   await player.finished;
+});
+
+test("leaving a paused page does not pause the next page", () => {
+  const { player, clock, stage } = makePlayer({ startPageId: "start.hello" });
+  player.start();
+  player.key(key("space"));
+  player.key(key("q"));
+  player.key(key("down"));
+  player.key(key("enter"));
+  assert.equal(player.state().paused, false);
+  clock.advance(500);
+  assert.equal(stage.snapshot().rind.composer.hidden, true);
+});
+
+test("replay works mid-animation; speed stops at its limits", () => {
+  const { player, clock } = makePlayer({ startPageId: "start.hello" });
+  player.start();
+  clock.advance(450);
+  player.key({ kind: "text", text: "r" });
+  assert.equal(player.state().stepIndex, 0);
+  for (let i = 0; i < 8; i++) player.key(key("up"));
+  assert.equal(player.state().speed, 4);
+  for (let i = 0; i < 8; i++) player.key(key("down"));
+  assert.equal(player.state().speed, 0.5);
+});
+
+test("finish cancels every timer and ignores subsequent keys", async () => {
+  const { player, clock, stage } = makePlayer({ startPageId: "start.hello" });
+  player.start();
+  clock.advance(740);
+  player.key(key("c", { ctrl: true }));
+  await player.finished;
+  const snapshot = stage.snapshot();
+  assert.equal(clock.pendingCount, 0);
+  player.key(key("r"));
+  player.key(key("right"));
+  clock.advance(10000);
+  assert.deepEqual(stage.snapshot(), snapshot);
+  assert.equal(clock.pendingCount, 0);
+});
+
+test("help freezes playback and restores the prior pause state", () => {
+  const { player, clock } = makePlayer({ startPageId: "start.hello" });
+  player.start();
+  clock.advance(435);
+  player.key({ kind: "text", text: "?" });
+  assert.equal(player.state().help, true);
+  clock.advance(10000);
+  assert.equal(player.state().stepIndex, 1);
+  player.key(key("escape"));
+  assert.equal(player.state().help, false);
+  assert.equal(player.state().paused, false);
+  player.key(key("space"));
+  player.key({ kind: "text", text: "?" });
+  player.key(key("enter"));
+  assert.equal(player.state().paused, true);
+});
+
+test("the final takeaway is complete without an extra empty end screen", () => {
+  const stage = createTourStage();
+  const clock = fakeClock();
+  const completed = [];
+  const player = createTourPlayer({
+    stage, schedule: clock.schedule, cancel: clock.cancel,
+    startPageId: "lesson.done",
+    topics: [{ pages: [{ id: "lesson.done", steps: [{ kind: "note", lines: ["Try this now"] }] }] }],
+    onPageComplete: (id) => completed.push(id),
+  });
+  player.start();
+  assert.equal(player.state().phase, "end");
+  assert.deepEqual(stage.snapshot().caption, ["Try this now"]);
+  assert.equal(clock.pendingCount, 0);
+  player.key(key("r"));
+  assert.deepEqual(completed, ["lesson.done"]);
+});
+
+test("paused right stepping reveals a complete next step and stays paused", () => {
+  const { player, clock, stage } = makePlayer({ startPageId: "start.hello" });
+  player.start();
+  player.key(key("space"));
+  player.key(key("right"));
+  assert.equal(stage.snapshot().rind.composer.text, "ab");
+  clock.advance(2000);
+  assert.equal(player.state().stepIndex, 1);
+  assert.equal(player.state().paused, true);
+});
+
+test("batched scroll keys accumulate before the next render", () => {
+  const { player } = makePlayer({ startPageId: "start.hello" });
+  player.start();
+  player.setScrollLimit(30, 0);
+  player.key(key("pageup"));
+  player.key(key("pageup"));
+  assert.equal(player.state().scrollOffset, 10);
+  player.key(key("pagedown"));
+  assert.equal(player.state().scrollOffset, 5);
 });

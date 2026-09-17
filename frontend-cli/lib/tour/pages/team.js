@@ -1,10 +1,10 @@
 import { demoInfo, DELEGATES } from "./demo.js";
 import {
   assistant,
+  closeMenu,
   exitRind,
   menu,
   note,
-  result,
   shell,
   shellOut,
   slashResult,
@@ -12,6 +12,7 @@ import {
   submit,
   tool,
   turnDone,
+  turnStart,
   type,
 } from "./steps.js";
 
@@ -21,7 +22,7 @@ const MAIN = demoInfo({ cwd: "~/demo/.aiteam/agents/main-agent", session: "20260
 function enterMainAgent() {
   return [
     shell("cd .aiteam/agents/main-agent"),
-    shell("rind"),
+    shell("rind", null, "~/demo/.aiteam/agents/main-agent"),
     startup(MAIN, [
       "Starting rind inside an agent directory makes this session that agent:",
       "delegation and /team commands operate on the team project.",
@@ -44,8 +45,7 @@ export const teamPages = [
       ]),
       type("/team create"),
       submit(),
-      tool("edit_file", ".aiteam/project.json", { status: "ok", output: "created team project", durationMs: 240 }),
-      result("Team created", ".aiteam ready — main agent: main-agent"),
+      slashResult({ text: "Team project created: demo\nMain agent: main-agent\nWorkspace: ~/demo/.aiteam/agents/main-agent" }),
       type("/exit"),
       exitRind(),
       shell("ls .aiteam/agents"),
@@ -62,14 +62,17 @@ export const teamPages = [
     title: "Add a specialist",
     steps: [
       note([
-        "Specialists are one command away. Each gets a stable id, its own",
-        "workspace, and a capsule that survives across sessions.",
+        "First create a team with /team create in the project root (see Create a Team).",
+        "Then start Rind in .aiteam/agents/main-agent to add a specialist.",
       ]),
       ...enterMainAgent(),
       type('/team add "Owns the test suite and CI wiring"'),
       submit(),
+      slashResult({ text: "Preparing a Team Agent for: Owns the test suite and CI wiring" }),
+      turnStart("Create a Team Agent for this responsibility: Owns the test suite and CI wiring"),
       tool("agent_create", "test-specialist", { status: "ok", output: "capsule created", durationMs: 900 }),
-      result("Team Agent created", "test-specialist · .aiteam/agents/test-specialist"),
+      assistant("Created test-specialist to own the test suite and CI wiring."),
+      turnDone(3400, 1, 0),
       type("/team list"),
       submit(),
       slashResult({
@@ -90,8 +93,8 @@ export const teamPages = [
     title: "Create from blueprint",
     steps: [
       note([
-        "Blueprints are curated specialist templates — faster than describing",
-        "a role from scratch, and consistent across projects.",
+        "Blueprints are local specialist templates in ~/.rind/blueprints (or RIND_HOME/blueprints).",
+        "This demo assumes a team and two installed templates; an empty installation has no blueprints.",
       ]),
       ...enterMainAgent(),
       type("/team blueprint"),
@@ -113,10 +116,11 @@ export const teamPages = [
         selected: 0,
         target: 1,
       }, [
-        "↑↓ select, enter confirm — the interactive menu you just saw is the",
-        "real one.",
+        "In Rind, ↑↓ selects an installed template and Enter creates that agent.",
       ]),
-      result("Blueprint applied", "documenter · .aiteam/agents/documenter"),
+      note(["The demo selected Documenter. If your list is empty, use /team add <description> to create a specialist without a blueprint."]),
+      closeMenu("Enter"),
+      slashResult({ text: "Team Agent created: documenter\nWorkspace: ~/demo/.aiteam/agents/documenter" }),
       note([
         "The new agent is ready for delegation immediately, with the",
         "blueprint's tool policy and prompt baked into its capsule.",
@@ -128,8 +132,8 @@ export const teamPages = [
     title: "Work inside the team",
     steps: [
       note([
-        "Delegation is just a prompt: the main agent picks the specialist from",
-        "the team catalog and hands over a task.",
+        "This example needs the team and test-specialist from the previous pages.",
+        "Ask the main agent to delegate a specific task with an expected output.",
       ]),
       ...enterMainAgent(),
       type("Have the test specialist cover the unicode parser cases"),
@@ -142,16 +146,18 @@ export const teamPages = [
         "ctrl+b shows running delegates too — watch progress without",
         "interrupting anyone.",
       ]),
+      note(["The demo opened Ctrl+B and switched to Delegates with →. In Rind, Esc closes this view while delegation continues."]),
+      closeMenu(),
       tool("delegate", "test-specialist", { status: "ok", output: "6 cases added to test/tokenizer.test.js", durationMs: 12400 }),
       assistant([
         "test-specialist finished: the unicode cases live in",
         "`test/tokenizer.test.js`, and the handoff summary is published at",
         "`.aiteam/agents/test-specialist/handoffs/unicode.md`.",
       ]),
-      turnDone(24800, 2, 0),
+      turnDone(24800, 1, 0),
       note([
-        "Results come back as real files in the team directories — nothing",
-        "lives only in a chat transcript.",
+        "Try a small task. Ask for output paths and review the files afterward.",
+        "An agent's workspace and permissions determine where it writes; these paths are examples.",
       ]),
     ],
   },

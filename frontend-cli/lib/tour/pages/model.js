@@ -1,5 +1,5 @@
 import { demoInfo, MODELS } from "./demo.js";
-import { menu, note, result, shell, slashResult, startup, submit, type } from "./steps.js";
+import { closeMenu, info, menu, note, shell, slashResult, startup, submit, type } from "./steps.js";
 import { themeOptions } from "../../theme.js";
 
 export const modelPages = [
@@ -13,6 +13,8 @@ export const modelPages = [
       ]),
       shell("rind"),
       startup(demoInfo({ session: "20260917_103001_eff01a23" })),
+      type("/model"),
+      submit(),
       menu({
         kind: "model",
         input: "/model",
@@ -23,13 +25,17 @@ export const modelPages = [
         "↑↓ moves through the deck, enter switches. The current model is",
         "marked; /model set <name> works without the menu too.",
       ]),
-      result("Model switched", "zai/glm-4.6"),
+      note(["The demo selected glm-4.6. In Rind, press Enter to use the selected model, or Esc to keep the current one."]),
+      closeMenu("Enter"),
+      info({ model: "zai/glm-4.6" }),
+      slashResult({ text: "Model switched to zai/glm-4.6" }),
       type("/effort high"),
       submit(),
-      result("Reasoning effort: high", "low · medium · high · xhigh · max"),
+      info({ reasoning_effort: "high" }),
+      slashResult({ text: "Reasoning effort: high" }),
       note([
-        "Effort scales how hard the model thinks per turn. ctrl+t cycles it",
-        "without leaving the composer.",
+        "Try /model or /effort high between turns. Ctrl+T cycles reasoning effort.",
+        "Available models and supported effort levels depend on your provider.",
       ]),
     ],
   },
@@ -43,6 +49,8 @@ export const modelPages = [
       ]),
       shell("rind"),
       startup(demoInfo({ session: "20260917_103001_eff01a23" })),
+      type("/theme"),
+      submit(),
       menu({
         kind: "theme",
         input: "/theme",
@@ -53,6 +61,9 @@ export const modelPages = [
         "Each row previews the flavor's palette. enter applies it and the",
         "whole transcript replays in the new colors.",
       ]),
+      note(["The demo highlights Latte. In Rind, Enter applies a flavor and Esc cancels. Colors depend on terminal support; NO_COLOR disables them."]),
+      closeMenu("Enter"),
+      info({ theme: "latte" }),
       slashResult({
         text: "Theme: latte",
         display: {
@@ -64,8 +75,8 @@ export const modelPages = [
         },
       }),
       note([
-        "This tour keeps its own theme, but in a session the choice persists",
-        "across restarts via /theme latte | frappe | macchiato | mocha.",
+        "This demo previews Latte without saving it. Your original theme returns when you leave this page.",
+        "Try /theme latte, frappe, macchiato or mocha in Rind to save your preference.",
       ]),
     ],
   },

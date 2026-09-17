@@ -1,5 +1,5 @@
 import { demoInfo, PROVIDERS } from "./demo.js";
-import { menu, note, result, shell, slashResult, startup } from "./steps.js";
+import { closeMenu, menu, note, shell, slashResult, startup, submit, type } from "./steps.js";
 
 export const loginPages = [
   {
@@ -7,30 +7,37 @@ export const loginPages = [
     title: "Configure a provider",
     steps: [
       note([
-        "Rind works with any OpenAI-compatible endpoint. Credentials live in",
-        "~/.rind/settings.json — the only API configuration source.",
+        "Before your first task, use /login to configure a provider.",
+        "Custom endpoint? Set model, apiKey and baseUrl in .rind/settings.json, or ~/.rind/settings.json as a fallback.",
       ]),
       shell("rind"),
       startup(demoInfo({ session: "20260917_101530_ab12cd34" })),
+      type("/login"),
+      submit(),
       menu({
         kind: "auth-choice",
         title: "Provider",
         options: PROVIDERS,
         selected: 0,
-        target: 1,
+        target: 0,
       }, [
         "/login lists providers discovered from settings and environment.",
         "Configured entries already show their source.",
       ]),
+      note(["The demo selects Z.ai. In Rind, choose your provider and press Enter; its available login flow determines the next prompts."]),
       menu({
         kind: "auth-secret",
-        title: "Zai",
+        title: "Z.ai",
         message: "API key",
-        value: "sk-9f21ab47c0",
+        value: "demo-key-only",
       }, [
         "Secrets are masked as you type; esc cancels the login.",
       ]),
-      result("Logged in to zai", "switched to zai / glm-4.7"),
+      note(["This is a masked example, not a credential field you can type into. Exit the tour before running /login for real."]),
+      closeMenu("Enter"),
+      slashResult({ text: "Logged in to zai. Switched to zai / glm-4.7." }),
+      type("/status"),
+      submit(),
       slashResult({
         text: "Status",
         display: {
@@ -53,8 +60,8 @@ export const loginPages = [
         },
       }),
       note([
-        "/status confirms the whole chain: session, provider, model and live",
-        "token usage for the current context window.",
+        "Try /login, then /status. Login credentials use ~/.rind/auth.json (or RIND_HOME/auth.json).",
+        "/logout removes stored credentials; settings or environment credentials may still apply.",
       ]),
     ],
   },

@@ -101,8 +101,13 @@ if (cliArgs[0] === "tour") {
     process.exitCode = 2;
     return;
   }
-  await runTour({ input: process.stdin, output: process.stdout, startPageId: cliArgs[1] || "" });
-  saveCliState({ tourSeen: true });
+  if (cliArgs.length > 2) {
+    process.stderr.write(`${tourHelp}\n`);
+    process.exitCode = 2;
+    return;
+  }
+  const started = await runTour({ input: process.stdin, output: process.stdout, startPageId: cliArgs[1] || "", onPageComplete: () => saveCliState({ tourSeen: true }) });
+  if (!started) process.exitCode = 2;
   return;
 }
 // "rind help" is an alias for --help, not a session command.
@@ -517,10 +522,7 @@ async function enterInSessionTour(pageId) {
   tui.stop();
   process.off("SIGINT", handleSigint);
   try {
-    const started = await runTour({ input: process.stdin, output: process.stdout, startPageId: pageId || "" });
-    if (started) {
-      saveCliState({ tourSeen: true });
-    }
+    await runTour({ input: process.stdin, output: process.stdout, startPageId: pageId || "", onPageComplete: () => saveCliState({ tourSeen: true }) });
   } catch (error) {
     writeErrorOutput(`${error instanceof Error ? error.message : String(error)}\n`);
   } finally {

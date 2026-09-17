@@ -105,7 +105,11 @@ test("queue and steer modes park the text in the composer pending list", () => {
 
   stage.beginStep({ kind: "turn-done", durationMs: 1, completed: 0, failed: 0 });
   stage.settleStep({ kind: "turn-done", durationMs: 1, completed: 0, failed: 0 });
+  assert.equal(stage.snapshot().rind.composer.pending.length, 2, "finishing a turn must not erase pending input");
+  animate(stage, { kind: "consume", mode: "steering" });
+  animate(stage, { kind: "consume", mode: "follow_up" });
   assert.deepEqual(stage.snapshot().rind.composer.pending, []);
+  assert.equal(stage.snapshot().rind.composer.running, true, "queued input starts another turn");
 });
 
 test("tool step animates as running and settles into its outcome", () => {
@@ -121,7 +125,7 @@ test("tool step animates as running and settles into its outcome", () => {
   assert.equal(block.outcome.output, "all green");
 });
 
-test("assistant reveal caps at the line count; menu tick moves to target", () => {
+test("assistant streams text chunks; menu tick moves to target", () => {
   const stage = createTourStage();
   stage.beginStep({ kind: "startup", info: INFO });
   stage.settleStep({ kind: "startup", info: INFO });
@@ -129,10 +133,10 @@ test("assistant reveal caps at the line count; menu tick moves to target", () =>
   const assistant = { kind: "assistant", text: "a\nb\nc" };
   stage.beginStep(assistant);
   assert.equal(stage.tick(), true);
-  assert.equal(stage.snapshot().rind.blocks.at(-1).reveal, 1);
+  assert.equal(stage.snapshot().rind.blocks.at(-1).reveal, 3);
   while (stage.tick());
   stage.settleStep(assistant);
-  assert.equal(stage.snapshot().rind.blocks.at(-1).reveal, 3);
+  assert.equal(stage.snapshot().rind.blocks.at(-1).reveal, 5);
 
   const menu = { kind: "menu", menu: { kind: "model", items: [{ name: "a" }, { name: "b" }, { name: "c" }], selected: 0, target: 2 } };
   stage.beginStep(menu);
@@ -196,6 +200,8 @@ test("rebuildTo with -1 resets to an empty stage", () => {
   animate(stage, { kind: "shell", command: "ls" });
   stage.rebuildTo([], -1);
   assert.deepEqual(stage.snapshot(), {
+    history: [],
+    expanded: false,
     shell: { blocks: [], typing: null },
     rind: null,
     caption: null,

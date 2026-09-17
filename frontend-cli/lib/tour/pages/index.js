@@ -8,12 +8,12 @@ import { teamPages } from "./team.js";
 
 export const TOUR_TOPICS = [
   { id: "start", title: "Start", pages: startPages },
-  { id: "team", title: "Team", pages: teamPages },
-  { id: "sessions", title: "Sessions", pages: sessionsPages },
+  { id: "login", title: "Connect a provider", pages: loginPages },
   { id: "model", title: "Model", pages: modelPages },
-  { id: "automation", title: "Automation", pages: automationPages },
-  { id: "login", title: "Login", pages: loginPages },
+  { id: "sessions", title: "Sessions", pages: sessionsPages },
   { id: "config", title: "Config", pages: configPages },
+  { id: "team", title: "Team", pages: teamPages },
+  { id: "automation", title: "Automation", pages: automationPages },
 ];
 
 export function tourPages() {

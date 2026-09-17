@@ -30,15 +30,15 @@ export const BLUEPRINTS = [
 ];
 
 export const SESSIONS = [
-  "20260917_103001_eff01a23 · current · parser work",
-  "20260916_181122_c88be701 · refactor jsonl store",
+  "20260917_103001_eff01a23 · parser work",
+  "20260916_181122_c88be701 · current · refactor jsonl store",
   "20260915_090412_a10f5c02 · tour docs draft",
 ];
 
 export const FORK_POINTS = [
-  "▷ You · Summarize how the parser handles unicode",
-  "◁ Assistant · The tokenizer splits on grapheme clusters…",
-  "▷ You · Now add tests for it",
+  "Fork at current end (keep full history)",
+  "10:32 · Now add tests for it",
+  "10:31 · Summarize how the parser handles unicode",
 ];
 
 export const TEST_TASK = {
@@ -72,6 +72,7 @@ export const BOARD_PAGES = [
         { key: "chat_user", label: "Conversation", tokens: 4200, messages: 6 },
         { key: "chat_assistant", label: "Conversation", tokens: 18300, messages: 6 },
         { key: "tool_specs", label: "Tool specs", tokens: 8400, messages: 14 },
+        { key: "tool:read_file", label: "Tool results", tokens: 11600, messages: 8 },
       ],
     },
   },
@@ -79,11 +80,11 @@ export const BOARD_PAGES = [
     index: 2,
     count: 2,
     summary: {
-      days: 7,
-      totals: { samples: 41, input: 284000, cached: 191000, output: 31200, reasoning: 9800, compactions: 1 },
+      days: 5,
+      totals: { samples: 41, input: 88000, cached: 58000, output: 14000, reasoning: 3000, compactions: 1 },
       by_day: [
-        { day: "2026-09-11", tokens: 21000 },
-        { day: "2026-09-12", tokens: 8000 },
+        { day: "2026-09-13", tokens: 21000 },
+        { day: "2026-09-14", tokens: 8000 },
         { day: "2026-09-16", tokens: 42000 },
         { day: "2026-09-17", tokens: 31000 },
       ],

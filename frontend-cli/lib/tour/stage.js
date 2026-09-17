@@ -8,6 +8,8 @@ export function createTourStage() {
   let rind = null;
   let caption = null;
   let active = null;
+  let history = [];
+  let expanded = false;
 
   function emptyComposer() {
     return { text: "", running: false, hidden: false, pending: [], menu: null };
@@ -30,6 +32,8 @@ export function createTourStage() {
     rind = null;
     caption = null;
     active = null;
+    history = [];
+    expanded = false;
   }
 
   function beginStep(step) {
@@ -39,7 +43,12 @@ export function createTourStage() {
     }
     switch (step.kind) {
       case "shell":
-        shell.typing = { command: step.command, revealed: 0 };
+        if (rind?.composer.hidden) {
+          history.push({ shell, rind });
+          shell = { blocks: [], typing: null };
+          rind = null;
+        }
+        shell.typing = { command: step.command, revealed: 0, ...(step.cwd ? { cwd: step.cwd } : {}) };
         break;
       case "shell-out":
         shell.typing = null;
@@ -84,10 +93,10 @@ export function createTourStage() {
         const composer = ensureRind().composer;
         composer.hidden = false;
         composer.menu = { ...step.menu };
+        if (step.menu.kind === "auth-secret") composer.menu.value = "";
         break;
       }
       case "submit":
-      case "turn-done":
       case "exit":
         break;
       case "note":
@@ -123,12 +132,18 @@ export function createTourStage() {
       case "assistant": {
         const block = lastBlock("assistant");
         if (!block) return false;
-        const total = block.text.split("\n").length;
-        block.reveal = Math.min(total, block.reveal + 1);
+        const total = graphemes(block.text).length;
+        block.reveal = Math.min(total, block.reveal + 3);
         return block.reveal < total;
       }
       case "menu": {
         const menu = rind?.composer.menu;
+        if (menu?.kind === "auth-secret") {
+          const chars = graphemes(active.menu.value || "");
+          const shown = Math.min(chars.length, graphemes(menu.value).length + 1);
+          menu.value = chars.slice(0, shown).join("");
+          return shown < chars.length;
+        }
         if (!menu || typeof menu.target !== "number") return false;
         const current = Number(menu.selected) || 0;
         if (current === menu.target) return false;
@@ -146,7 +161,7 @@ export function createTourStage() {
         const typing = shell.typing;
         shell.typing = null;
         if (typing) {
-          shell.blocks.push({ kind: "command", command: typing.command });
+          shell.blocks.push({ kind: "command", command: typing.command, ...(typing.cwd ? { cwd: typing.cwd } : {}) });
         }
         break;
       }
@@ -158,6 +173,9 @@ export function createTourStage() {
         break;
       }
       case "type":
+        ensureRind().composer.text = step.text;
+        break;
+      case "prefill":
         ensureRind().composer.text = step.text;
         break;
       case "submit": {
@@ -185,12 +203,13 @@ export function createTourStage() {
       case "assistant": {
         const block = lastBlock("assistant");
         if (block) {
-          block.reveal = block.text.split("\n").length;
+          block.reveal = graphemes(block.text).length;
         }
         break;
       }
       case "menu": {
         const menu = rind?.composer.menu;
+        if (menu?.kind === "auth-secret") menu.value = step.menu.value;
         if (menu && typeof menu.target === "number") {
           menu.selected = menu.target;
         }
@@ -199,7 +218,6 @@ export function createTourStage() {
       case "turn-done": {
         const composer = ensureRind().composer;
         composer.running = false;
-        composer.pending = [];
         composer.menu = null;
         break;
       }
@@ -218,6 +236,31 @@ export function createTourStage() {
       case "startup":
       case "note":
         break;
+      case "info":
+        ensureRind().info = { ...ensureRind().info, ...step.info };
+        if (step.clear) rind.blocks = [];
+        break;
+      case "close-menu":
+        ensureRind().composer.menu = null;
+        ensureRind().composer.text = "";
+        break;
+      case "consume": {
+        const composer = ensureRind().composer;
+        const index = composer.pending.findIndex((entry) => entry.mode === step.mode);
+        if (index >= 0) {
+          const [entry] = composer.pending.splice(index, 1);
+          rind.blocks.push({ kind: "user", text: entry.input, source: step.mode });
+          if (step.mode === "follow_up") composer.running = true;
+        }
+        break;
+      }
+      case "turn-start":
+        ensureRind().composer.running = true;
+        if (step.input) rind.blocks.push({ kind: "user", text: step.input });
+        break;
+      case "expand-tools":
+        expanded = step.expanded;
+        break;
     }
     active = null;
   }
@@ -232,6 +275,8 @@ export function createTourStage() {
 
   function snapshot() {
     return {
+      history: structuredClone(history),
+      expanded,
       shell: {
         blocks: shell.blocks.map((block) => ({ ...block })),
         typing: shell.typing ? { ...shell.typing } : null,

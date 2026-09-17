@@ -2,10 +2,12 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import { tourPages } from "../lib/tour/pages/index.js";
+import { createTourStage } from "../lib/tour/stage.js";
 
 const STEP_KINDS = new Set([
   "shell", "shell-out", "startup", "type", "submit", "result", "slash-result",
   "tool", "assistant", "menu", "turn-done", "exit", "note",
+  "info", "close-menu", "consume", "turn-start", "expand-tools", "prefill",
 ]);
 const MENU_KINDS = new Set([
   "slash", "model", "theme", "sessions", "choice",
@@ -88,4 +90,40 @@ test("tour pages are well-formed and uniquely identified", () => {
     validatePage(page, seen);
   }
   assert.ok(seen.size >= 16, `expected the full catalog, found ${seen.size} pages`);
+});
+
+test("every scene replays deterministically and ends without lost input or a running turn", () => {
+  for (const page of tourPages()) {
+    const stage = createTourStage();
+    for (const [index, step] of page.steps.entries()) {
+      const before = stage.snapshot();
+      if (["tool", "assistant"].includes(step.kind)) {
+        assert.equal(before.rind?.composer.running, true, `${page.id}: ${step.kind} needs a running turn`);
+      }
+      if (step.kind === "type") assert.equal(before.rind?.composer.menu, null, `${page.id}: close menu before typing`);
+      stage.beginStep(step);
+      while (stage.tick());
+      stage.settleStep(step);
+      const rebuilt = createTourStage();
+      rebuilt.rebuildTo(page.steps, index);
+      assert.deepEqual(stage.snapshot(), rebuilt.snapshot(), `${page.id} step ${index}`);
+    }
+    const final = stage.snapshot();
+    if (final.rind) {
+      assert.equal(final.rind.composer.running, false, page.id);
+      assert.deepEqual(final.rind.composer.pending, [], page.id);
+      assert.equal(final.rind.composer.menu, null, page.id);
+    }
+  }
+});
+
+test("fork demonstrates user-message boundary and editable prefill", () => {
+  const page = tourPages().find((page) => page.id === "sessions.fork");
+  const stage = createTourStage();
+  stage.rebuildTo(page.steps, page.steps.length - 1);
+  assert.equal(stage.snapshot().rind.composer.text, "Now add tests for it");
+  assert.ok(!stage.snapshot().rind.info.resume_preview.includes("Now add tests for it"));
+  const choices = page.steps.find((step) => step.kind === "menu").menu.items;
+  assert.match(choices[0], /keep full history/);
+  assert.ok(choices.every((choice) => !choice.includes("Assistant")));
 });

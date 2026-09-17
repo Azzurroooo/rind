@@ -18,17 +18,17 @@ import {
   slashResultText,
   startupText,
   themeMenuText,
-  toolRequestedLine,
-  toolResultLine,
+  taskMonitorTabs,
   turnCompletedLine,
   userInputText,
   usageBoardText,
 } from "../rendering.js";
-import { paint } from "../theme.js";
-import { clipCells, graphemes, textWidth, wrapTextWithAnsi } from "../text-width.js";
+import { paint, currentTheme, setTheme } from "../theme.js";
+import { clipCells, graphemes, stripAnsi, textWidth, wrapTextWithAnsi } from "../text-width.js";
 import { insertCursorMarker } from "../tui/cursor.js";
+import { renderToolRunning, renderToolFinished } from "../tool-display.js";
 
-const MIN_INNER = 24;
+const MIN_INNER = 1;
 
 // Framed page body: everything the audience sees lives inside a Tour panel so
 // the simulation reads as a simulation, and body content is wrapped (never
@@ -36,7 +36,7 @@ const MIN_INNER = 24;
 function frameBlock({ title, badge, body, inner }) {
   const badgeText = badge ? ` ${badge} ` : "";
   const headText = clipCells(` ${title} `, Math.max(1, inner - badgeText.length - 4));
-  const dashes = Math.max(1, inner - textWidth(headText) - badgeText.length);
+  const dashes = Math.max(1, inner + 1 - textWidth(headText) - textWidth(badgeText));
   const lines = [
     paint.dim(`┌─`) + paint.accent(headText) + paint.dim(`${"─".repeat(dashes)}${badgeText}┐`),
   ];
@@ -53,18 +53,12 @@ function padRight(text, width) {
   return `${text}${" ".repeat(Math.max(0, width - textWidth(text)))}`;
 }
 
-function hintLine(keys, right, width) {
-  const left = keys.join(" · ");
-  const pad = width - 4 - textWidth(left) - textWidth(right);
-  const tail = right && pad > 2 ? `${" ".repeat(pad)}${right}` : "";
-  return paint.dim(clipCells(`  ${left}${tail}`, Math.max(1, width - 2)));
-}
-
 // --- catalog ---------------------------------------------------------------
 
 // The catalog windows its rows like the app's own menus so it stays inside the
 // viewport on short terminals; `rows` is the terminal height.
 export function renderTourCatalog(state, width, rows = 24) {
+  if (width < 36 || rows < 14) return smallTerminal(width, rows);
   const inner = Math.max(MIN_INNER, width - 4);
   const pages = state.topics.flatMap((topic) => topic.pages);
   const idWidth = Math.max(...pages.map((page) => page.id.length));
@@ -79,16 +73,13 @@ export function renderTourCatalog(state, width, rows = 24) {
     }
   }
   const selectedRow = plan.findIndex((row) => row.page === pages[state.selected]);
-  const budget = Math.max(6, rows - 8);
+  const budget = Math.max(1, rows - 8);
   const start = plan.length <= budget
     ? 0
     : Math.min(Math.max(0, selectedRow - 3), plan.length - budget);
   const visible = plan.slice(start, start + budget);
 
-  const body = [paint.dim("  Guided walkthroughs — watch each Rind feature in action, step by step.")];
-  if (start > 0) {
-    body.push(paint.dim("  …"));
-  }
+  const body = [paint.dim("Watch a demo, then try it in Rind.")];
   for (const row of visible) {
     if (row.blank) {
       body.push("");
@@ -100,26 +91,39 @@ export function renderTourCatalog(state, width, rows = 24) {
     }
     const index = pages.indexOf(row.page);
     const selected = index === state.selected;
-    const marker = selected ? paint.accent("›") : paint.dim("·");
+    const marker = selected ? paint.accent("›") : state.completed?.includes(row.page.id) ? paint.success("✓") : paint.dim("·");
     const title = selected ? paint.bold(row.page.title) : paint.dim(row.page.title);
-    body.push(`  ${marker} ${paint.dim(`${index + 1}.`.padEnd(4))}${paint.dim(row.page.id.padEnd(idWidth))}  ${title}  ${paint.dim(`${row.page.steps.length} steps`)}`);
+    const id = inner >= 70 ? `${paint.dim(row.page.id.padEnd(idWidth))}  ` : "";
+    body.push(clipCells(`  ${marker} ${paint.dim(`${index + 1}.`.padEnd(4))}${id}${title}`, inner));
   }
-  if (start + budget < plan.length) {
-    body.push(paint.dim("  …"));
-  }
+  body.push(paint.dim(clipCells(`Open: /tour ${pages[state.selected].id}`, inner)));
+  body.push(paint.dim(clipCells(`${state.completed?.length || 0}/${pages.length} viewed · simulated examples`, inner)));
   const lines = frameBlock({
     title: "Rind Tour",
     badge: `${state.selected + 1}/${pages.length}`,
     body,
     inner,
   }, width);
-  lines.push(hintLine(["↑↓ select", "enter play", "q quit"], "", width));
+  lines.push(paint.dim(clipCells("↑↓ select · enter play · q quit · ? help", width)));
   return { lines, cursor: null };
 }
 
 // --- page ------------------------------------------------------------------
 
-export function renderTourPage(snapshot, state, width) {
+export function renderTourPage(snapshot, state, width, height = Infinity) {
+  const previous = currentTheme().name;
+  try {
+    if (snapshot.rind?.info.theme) setTheme(snapshot.rind.info.theme);
+    const out = renderPage(snapshot, state, width, height);
+    if (process.env.NO_COLOR !== undefined) out.lines = out.lines.map(stripAnsi);
+    return out;
+  } finally {
+    setTheme(previous);
+  }
+}
+
+function renderPage(snapshot, state, width, height) {
+  if (width < 36 || height < 14) return smallTerminal(width, height);
   const inner = Math.max(MIN_INNER, width - 4);
   const rows = [];
   let cursor = null;
@@ -129,25 +133,96 @@ export function renderTourPage(snapshot, state, width) {
   const point = (row, column) => {
     cursor = { row, column };
   };
+  for (const past of snapshot.history || []) {
+    appendShell(rows, past.shell, write, () => {});
+    appendRind(rows, past.rind, { ...state, inner, expanded: snapshot.expanded }, write, () => {});
+  }
   appendShell(rows, snapshot.shell, write, point);
-  appendRind(rows, snapshot.rind, { ...state, inner }, write, point);
-  appendCaption(rows, snapshot, { ...state, inner });
+  const menuStart = rows.length;
+  appendRind(rows, snapshot.rind, { ...state, inner, expanded: snapshot.expanded }, write, point);
+  // Wrap before mapping the cursor or selecting a viewport. Otherwise a long
+  // shell command moves the hardware cursor onto a completely different row.
+  const wrapped = [];
+  let mapped = null;
+  rows.forEach((row, index) => {
+    const segments = wrapTextWithAnsi(row, inner, inner);
+    if (cursor?.row === index) {
+      let column = cursor.column;
+      let offset = 0;
+      while (offset < segments.length - 1 && column >= textWidth(segments[offset])) {
+        column -= textWidth(segments[offset++]);
+      }
+      mapped = { row: wrapped.length + offset, column: Math.min(column, inner - 1) };
+    }
+    wrapped.push(...segments);
+  });
+  const captions = [];
+  appendCaption(captions, snapshot, { ...state, inner });
+  const captionRows = captions.flatMap((row) => wrapTextWithAnsi(row, inner, inner));
+  const footer = [
+    paint.dim(clipCells(statusKeys(state).join(" · "), width)),
+    paint.dim(clipCells(`${statusRight(state)} · ? controls`, width)),
+  ];
+  const budget = Math.max(1, height - captionRows.length - footer.length - 4);
+  const maxScroll = Math.max(0, wrapped.length - budget);
+  const menu = snapshot.rind?.composer.menu;
+  const menuTop = rows.slice(0, menuStart).flatMap((row) => wrapTextWithAnsi(row, inner, inner)).length;
+  const automaticOffset = menu ? Math.max(0, maxScroll - menuTop) : 0;
+  const offset = Math.min(state.scrollOffset ?? automaticOffset, maxScroll);
+  const start = Math.max(0, wrapped.length - budget - offset);
+  const visible = wrapped.slice(start, start + budget);
+  const action = demoAction(state.page.steps?.[state.stepIndex]);
+  const label = clipCells(`DEMO${action ? ` · ${action}` : ""}${maxScroll ? " · PgUp/PgDn" : ""}`, inner);
+  const body = [paint.dim(label), ...visible, paint.dim("─".repeat(inner)), ...captionRows];
   const lines = frameBlock({
     title: `Tour · ${state.page.title}`,
     badge: `${state.pageIndex + 1}/${state.pageCount}`,
-    body: rows,
+    body,
     inner,
   }, width);
-  const focused = cursor ? { line: cursor.row + 1, column: cursor.column + 2 } : null;
-  lines.push(hintLine(statusKeys(state), statusRight(state), width));
-  return { lines, inner, cursor: focused };
+  const focused = mapped && mapped.row >= start && mapped.row < start + visible.length
+    ? { line: mapped.row - start + 2, column: mapped.column + 2 } : null;
+  lines.push(...footer);
+  return { lines, inner, cursor: focused, maxScroll, offset };
+}
+
+function smallTerminal(width, rows) {
+  return { lines: ["Tour needs 36 columns × 14 rows.", "Resize to continue; Ctrl+C exits."].slice(0, rows).map((line) => clipCells(line, width)), cursor: null, maxScroll: 0 };
+}
+
+function demoAction(step) {
+  if (!step) return "";
+  if (step.kind === "submit") return step.mode === "queue" ? "Tab queues" : step.mode === "steer" ? "Enter steers" : "Enter submits";
+  if (step.kind === "type") return "typing in Rind";
+  if (step.kind === "shell") return "typing in the shell";
+  if (step.kind === "close-menu") return step.key === "Enter" ? "Enter confirms selection" : "Esc closes menu";
+  if (step.kind === "expand-tools") return "Ctrl+O toggles tool output";
+  if (step.kind === "menu") return step.menu.kind === "monitor" || step.menu.kind === "delegates" ? "Ctrl+B opens monitor" : "menu preview";
+  return "watch only";
+}
+
+export function renderTourHelp(width, rows = 24) {
+  if (width < 36 || rows < 14) return smallTerminal(width, rows);
+  return { lines: frameBlock({ title: "Tour controls", inner: width - 4, body: [
+    "A demo, not a live session.",
+    "No commands run or keys are saved.",
+    "Space     pause / resume / next",
+    "Enter     finish animation / next",
+    "← / →     previous / next step",
+    "↑ / ↓     faster / slower",
+    "PgUp/PgDn scroll demo (pauses)",
+    "r         replay this page",
+    "q / Esc   contents; again to exit",
+    "Ctrl+C    exit tour immediately",
+    "? / Enter close this help",
+  ].map((line) => clipCells(line, width - 4)) }), cursor: null };
 }
 
 function appendShell(rows, shell, write, point) {
-  const prompt = `${paint.path("~/demo")}${paint.dim(" $ ")}`;
+  const prompt = (cwd) => `${paint.path(cwd || "~/demo")}${paint.dim(" $ ")}`;
   for (const block of shell.blocks) {
     if (block.kind === "command") {
-      write(`${prompt}${block.command}`);
+      write(`${prompt(block.cwd)}${block.command}`);
     } else {
       for (const line of block.lines.slice(0, block.shown)) {
         write(line);
@@ -156,8 +231,8 @@ function appendShell(rows, shell, write, point) {
   }
   if (shell.typing) {
     const revealed = graphemes(shell.typing.command).slice(0, shell.typing.revealed).join("");
-    write(`${prompt}${revealed}`);
-    point(rows.length - 1, textWidth(`${prompt}${revealed}`));
+    write(`${prompt(shell.typing.cwd)}${revealed}`);
+    point(rows.length - 1, textWidth(`${prompt(shell.typing.cwd)}${revealed}`));
   }
 }
 
@@ -165,22 +240,24 @@ function appendRind(rows, rind, state, write, point) {
   if (!rind) {
     return;
   }
-  for (const line of startupText(rind.info, state.inner).split("\n")) {
-    write(line);
-  }
-  write("");
-  for (const block of rind.blocks) {
-    for (const line of blockLines(block, state.inner)) {
+  // An open menu owns focus. Older transcript stays in stage state and returns
+  // as soon as it closes, rather than pushing the choices off a short screen.
+  if (!rind.composer.menu) {
+    for (const line of startupText(rind.info, state.inner).split("\n")) {
       write(line);
+    }
+    write("");
+    for (const block of rind.blocks) {
+      for (const line of blockLines(block, state.inner, state.expanded)) write(line);
     }
   }
   appendComposer(rows, rind, state, write, point);
 }
 
-function blockLines(block, inner) {
+function blockLines(block, inner, expanded) {
   switch (block.kind) {
     case "user":
-      return userInputText(block.text, inner).split("\n");
+      return userInputText(block.text, inner, block.source).split("\n");
     case "assistant":
       return assistantLines(block, inner);
     case "result":
@@ -188,7 +265,7 @@ function blockLines(block, inner) {
     case "slash-result":
       return slashResultText({ text: block.text, display: block.display }, []).split("\n");
     case "tool":
-      return toolLines(block);
+      return toolLines(block, inner, expanded);
     case "turn-done":
       return turnCompletedLine(
         { duration_ms: block.durationMs },
@@ -202,36 +279,36 @@ function blockLines(block, inner) {
 }
 
 function assistantLines(block, inner) {
-  const message = new AssistantMessage({ color: true });
-  message.append(block.text.split("\n").slice(0, block.reveal).join("\n"));
+  const message = new AssistantMessage({ color: Boolean(process.stdout.isTTY) && process.env.NO_COLOR === undefined });
+  message.append(graphemes(block.text).slice(0, block.reveal).join(""));
   message.finish();
   return [assistantHeaderText(), ...message.render(inner)];
 }
 
-function toolLines(block) {
+function toolLines(block, width, expanded) {
+  const context = { name: block.name, args: toolArgs(block), expanded, fileChange: block.outcome.fileChange };
   if (block.running) {
-    return toolRequestedLine({
-      tool_name: block.name,
-      args_preview: JSON.stringify(toolArgs(block)),
-    }).split("\n");
+    return renderToolRunning(context, width);
   }
   const failed = block.outcome.status === "failed";
-  return toolResultLine({
-    tool_name: block.name,
+  const data = block.outcome.data ?? (block.name === "read_file" ? block.outcome.output : {
+    status: "completed", exit_code: failed ? 1 : 0, stdout: block.outcome.output || "",
+    agent_id: block.detail, summary: block.outcome.output || "",
+  });
+  return renderToolFinished({ ...context, event: {
     status: failed ? "failed" : "completed",
     error_type: failed ? "tool_error" : "",
     duration_ms: block.outcome.durationMs,
-    result: JSON.stringify({
-      data: { status: "completed", exit_code: failed ? 1 : 0, stdout: block.outcome.output || "" },
-    }),
-  }, null).split("\n");
+    result: JSON.stringify({ data }),
+  } }, width);
 }
 
 function toolArgs(block) {
   if (block.name === "bash") {
     return { command: block.detail };
   }
-  if (block.name === "delegate") {
+  if (block.name === "bash_output") return { bg_id: block.detail };
+  if (block.name === "delegate" || block.name === "agent_create") {
     return { agent_id: block.detail };
   }
   return { file_path: block.detail };
@@ -284,9 +361,9 @@ function menuFrame(menu, inner) {
     case "choice":
       return { text: choiceMenuText(menu.items, selected) };
     case "monitor":
-      return { text: backgroundMonitorText(menu.tasks, 0, menu.task, inner) };
+      return { text: taskMonitorTabs("background", menu.tasks.length, 0, inner) + "\n" + backgroundMonitorText(menu.tasks, selected, menu.task, inner) };
     case "delegates":
-      return { text: delegateMonitorText(menu.delegates, 0, menu.delegate, inner) };
+      return { text: taskMonitorTabs("delegates", 0, menu.delegates.length, inner) + "\n" + delegateMonitorText(menu.delegates, selected, menu.delegate, inner) };
     case "board": {
       const page = menu.pages[selected] || {};
       return { text: page.breakdown ? contextBoardText(page, inner) : usageBoardText(page, inner) };
@@ -309,36 +386,30 @@ function menuFrame(menu, inner) {
 }
 
 function appendCaption(rows, snapshot, state) {
-  const lines = state.phase === "end"
-    ? [`End of ${state.page.title}`, "enter next page · r replay · q catalog"]
-    : snapshot.caption;
+  const lines = snapshot.caption;
   if (!lines?.length) {
     return;
   }
-  rows.push("");
-  rows.push(`  ${paint.accent("◆")} ${paint.bold(lines[0])}`);
-  for (const line of lines.slice(1)) {
-    rows.push(...wrapTextWithAnsi(line, state.inner - 4, state.inner - 4).map((segment) => `    ${paint.dim(segment)}`));
-  }
+  rows.push(...wrapTextWithAnsi(lines.join(" "), state.inner, state.inner).map((line) => paint.accent(line)));
 }
 
 function statusKeys(state) {
   if (state.phase === "waiting") {
-    return ["space continue", "← back", "q catalog"];
+    return ["space continue", "q contents"];
   }
   if (state.phase === "end") {
-    return ["enter next page", "r replay", "q catalog"];
+    return [state.pageIndex + 1 === state.pageCount ? "enter contents" : "enter next page", "r replay", "q contents"];
   }
   if (state.paused) {
-    return ["space resume", "← back", "q catalog"];
+    return ["space resume", "←→ step", "q contents"];
   }
-  return ["space pause", "←→ step", "↑↓ speed", "enter skip", "q catalog"];
+  return ["space pause", "←→ step", "q contents"];
 }
 
 function statusRight(state) {
   const parts = [`${state.speed}×`];
   if (state.phase === "end") {
-    parts.push(`page ${state.pageIndex + 1}/${state.pageCount}`);
+    parts.push("page complete");
   } else {
     parts.push(`step ${Math.min(state.stepIndex + 1, state.stepCount)}/${state.stepCount}`);
   }
