@@ -118,8 +118,6 @@ class JsonlSessionStore(SessionStore):
         self._index_path = None
         self._session_paths = {}
         self._session_meta = None
-        self._message_count = 0
-        self._tool_call_count = 0
         self._has_user_message = False
         self._last_preview = ""
         self._projected_caches: dict[tuple[bool, bool, bool], tuple[tuple[Any, ...], list[dict[str, Any]]]] = {}
@@ -297,8 +295,6 @@ class JsonlSessionStore(SessionStore):
         self._invalidate_projection_cache()
 
         now = self.now_iso()
-        self._message_count = 0
-        self._tool_call_count = 0
         self._has_user_message = False
 
         self._session_meta = new_session_meta(
@@ -320,8 +316,6 @@ class JsonlSessionStore(SessionStore):
         self._session_id = None
         self._session_paths = {}
         self._session_meta = None
-        self._message_count = 0
-        self._tool_call_count = 0
         self._has_user_message = False
         self._last_preview = ""
         self._msg_repo = None
@@ -359,19 +353,19 @@ class JsonlSessionStore(SessionStore):
         normalized_window = normalize_auto_compact_window(original_window)
         self._session_meta["auto_compact_window"] = normalized_window
         messages = self._msg_repo.load_messages()
-        self._message_count = sum(
+        message_count = sum(
             1 for message in messages
             if isinstance(message, dict) and not _is_non_conversation_message(message)
         )
-        self._tool_call_count = len(self._tool_repo.load_tool_calls())
+        tool_call_count = len(self._tool_repo.load_tool_calls())
         self._has_user_message = any(
             _is_real_user_message(message) for message in messages
             if isinstance(message, dict) and not _is_non_conversation_message(message)
         )
         counts_changed = sync_session_counts(
             self._session_meta,
-            message_count=self._message_count,
-            tool_call_count=self._tool_call_count,
+            message_count=message_count,
+            tool_call_count=tool_call_count,
         )
         if counts_changed or original_window != normalized_window:
             self._persist_meta_sync(meta.get("updated_at"))
@@ -405,8 +399,6 @@ class JsonlSessionStore(SessionStore):
             "session_id": self._session_id,
             "session_paths": self._session_paths,
             "session_meta": self._session_meta,
-            "message_count": self._message_count,
-            "tool_call_count": self._tool_call_count,
             "last_preview": self._last_preview,
             "projected_caches": dict(self._projected_caches),
             "model": self._model,
@@ -423,8 +415,6 @@ class JsonlSessionStore(SessionStore):
             self._session_id = previous["session_id"]
             self._session_paths = previous["session_paths"]
             self._session_meta = previous["session_meta"]
-            self._message_count = previous["message_count"]
-            self._tool_call_count = previous["tool_call_count"]
             self._last_preview = previous["last_preview"]
             self._projected_caches = previous["projected_caches"]
             self._model = previous["model"]
@@ -526,8 +516,8 @@ class JsonlSessionStore(SessionStore):
         entry = session_index_entry(
             self._session_id,
             self._session_meta,
-            message_count=self._message_count,
-            tool_call_count=self._tool_call_count,
+            message_count=self._session_meta["message_count"],
+            tool_call_count=self._session_meta["tool_call_count"],
             preview=self._last_preview,
         )
         self._index_repo.update_index(entry)
@@ -623,9 +613,7 @@ class JsonlSessionStore(SessionStore):
         if not has_system and self._system_prompt:
             self._msg_repo.persist_message(self.now_iso(), "system", self._system_prompt)
             self._invalidate_projection_cache()
-            self._message_count += 1
-            if self._session_meta:
-                self._session_meta["message_count"] = self._message_count
+            self._session_meta["message_count"] += 1
             self._persist_meta_sync()
 
     def _materialize_draft_sync(self) -> None:
@@ -735,10 +723,8 @@ class JsonlSessionStore(SessionStore):
 
     async def get_skill_catalog(self) -> list[dict[str, str]]:
         async with self._write_lock:
-            return await asyncio.to_thread(
-                lambda: normalize_skill_catalog(
-                    self._session_meta.get("skill_catalog") if isinstance(self._session_meta, dict) else []
-                )
+            return normalize_skill_catalog(
+                self._session_meta.get("skill_catalog") if isinstance(self._session_meta, dict) else []
             )
 
     async def set_skill_catalog(self, entries: list[dict[str, str]]) -> None:
@@ -786,7 +772,7 @@ class JsonlSessionStore(SessionStore):
                 )
                 self._invalidate_projection_cache()
                 if not is_context_record:
-                    self._message_count += 1
+                    self._session_meta["message_count"] += 1
                 if role == "user" and not is_context_record and str(content or "").strip():
                     self._has_user_message = True
                 if role == "assistant" and content:
@@ -798,8 +784,6 @@ class JsonlSessionStore(SessionStore):
                     and self._session_meta.get("title") in {None, "", "Untitled"}
                 ):
                     self._session_meta["title"] = (content or "")[:40]
-                if self._session_meta:
-                    self._session_meta["message_count"] = self._message_count
                 self._persist_meta_sync()
 
             await asyncio.to_thread(_persist)
@@ -833,9 +817,7 @@ class JsonlSessionStore(SessionStore):
                     model_content_policy=model_content_policy,
                 )
                 self._invalidate_projection_cache()
-                self._tool_call_count += 1
-                if self._session_meta:
-                    self._session_meta["tool_call_count"] = self._tool_call_count
+                self._session_meta["tool_call_count"] += 1
                 self._persist_meta_sync()
 
             await asyncio.to_thread(_persist)
@@ -958,7 +940,8 @@ class JsonlSessionStore(SessionStore):
             await asyncio.to_thread(_persist)
 
     async def get_latest_sampling_usage(self) -> dict[str, Any] | None:
-        return await asyncio.to_thread(self._latest_meta_usage, "latest_sampling_usage")
+        async with self._write_lock:
+            return self._latest_meta_usage("latest_sampling_usage")
 
     async def persist_context_breakdown(self, snapshot: dict[str, Any]) -> None:
         """Store the latest context composition snapshot; overwrite = latest, travels with fork."""
@@ -972,7 +955,8 @@ class JsonlSessionStore(SessionStore):
             await asyncio.to_thread(_persist)
 
     async def get_latest_assistant_sampling_usage(self) -> dict[str, Any] | None:
-        return await asyncio.to_thread(self._latest_meta_usage, "latest_assistant_sampling_usage")
+        async with self._write_lock:
+            return self._latest_meta_usage("latest_assistant_sampling_usage")
 
     def _latest_meta_usage(self, key: str) -> dict[str, Any] | None:
         if not isinstance(self._session_meta, dict):
@@ -1010,18 +994,14 @@ class JsonlSessionStore(SessionStore):
             await asyncio.to_thread(_persist)
 
     async def get_turn_state(self) -> dict[str, Any] | None:
-        def _get():
+        async with self._write_lock:
             state = self._session_meta.get("turn_state") if isinstance(self._session_meta, dict) else None
             return dict(state) if isinstance(state, dict) else None
 
-        return await asyncio.to_thread(_get)
-
     async def get_goal(self) -> dict[str, str] | None:
-        def _get():
+        async with self._write_lock:
             goal = self._session_meta.get("goal") if isinstance(self._session_meta, dict) else None
             return dict(goal) if isinstance(goal, dict) else None
-
-        return await asyncio.to_thread(_get)
 
     async def set_goal(self, objective: str) -> dict[str, str]:
         normalized = normalize_goal_objective(objective)
@@ -1062,10 +1042,8 @@ class JsonlSessionStore(SessionStore):
             await asyncio.to_thread(_persist)
 
     async def get_compact_generation(self) -> int:
-        def _get():
+        async with self._write_lock:
             return int(self._auto_compact_window_sync().get("ordinal") or 1)
-
-        return await asyncio.to_thread(_get)
 
     async def persist_compaction(self, compaction: dict[str, Any]) -> dict[str, Any]:
         async with self._write_lock:
@@ -1085,19 +1063,17 @@ class JsonlSessionStore(SessionStore):
                     meta={"kind": "compact_boundary", "compact_id": compact_id},
                 )
                 self._invalidate_projection_cache()
-                self._message_count += 1
-                if self._session_meta:
-                    self._session_meta["message_count"] = self._message_count
-                    self._session_meta["latest_compaction"] = {
-                        "id": compact_id,
-                        "created_at": record.get("created_at"),
-                        "policy_version": record.get("policy_version"),
-                        "source": record.get("source"),
-                    }
-                    self._session_meta["auto_compact_window"] = {
-                        "ordinal": int(self._auto_compact_window_sync().get("ordinal") or 1) + 1,
-                    }
-                    self._session_meta.pop("latest_assistant_sampling_usage", None)
+                self._session_meta["message_count"] += 1
+                self._session_meta["latest_compaction"] = {
+                    "id": compact_id,
+                    "created_at": record.get("created_at"),
+                    "policy_version": record.get("policy_version"),
+                    "source": record.get("source"),
+                }
+                self._session_meta["auto_compact_window"] = {
+                    "ordinal": int(self._auto_compact_window_sync().get("ordinal") or 1) + 1,
+                }
+                self._session_meta.pop("latest_assistant_sampling_usage", None)
                 self._persist_meta_sync()
                 return record
 

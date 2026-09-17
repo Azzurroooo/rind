@@ -122,7 +122,7 @@ async def test_goal_checkpoint_is_hidden_from_replay_but_kept_for_context(temp_s
         "start",
         "Continue the active goal.",
     ]
-    assert store._message_count == 2
+    assert store.load_session_metadata(store.session_id, temp_session_dir)["message_count"] == 2
     assert store._has_user_message is True
 
 
