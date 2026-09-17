@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 from datetime import datetime
+from collections.abc import Iterator
 from typing import Any
 
 from agent.infrastructure.persistence.message_projector import (
@@ -22,19 +23,18 @@ _TERMINAL_EVENT_TYPES = {
 }
 
 
-def project_durable_events(
+def iter_durable_events(
     messages: list[dict[str, Any]],
     tool_records: list[dict[str, Any]],
     turn_state: dict[str, Any] | None,
     session_id: str,
-) -> list[dict[str, Any]]:
+) -> Iterator[dict[str, Any]]:
     """Rebuild durable events in chronological message order."""
     records = {
         str(record.get("id")): record
         for record in tool_records
         if isinstance(record, dict) and record.get("id")
     }
-    events: list[dict[str, Any]] = []
     for message in messages:
         if not isinstance(message, dict) or is_compact_boundary_message(message):
             continue
@@ -42,11 +42,10 @@ def project_durable_events(
         if meta.get("kind") in INTERNAL_MESSAGE_KINDS:
             continue
         record = records.get(str(message.get("tool_call_id") or ""))
-        events.extend(_project_message(message, meta, record, session_id))
+        yield from _project_message(message, meta, record, session_id)
     terminal = _terminal_event(turn_state, session_id)
     if terminal is not None:
-        events.append(terminal)
-    return events
+        yield terminal
 
 
 def _project_message(message: dict[str, Any], meta: dict[str, Any], record: dict[str, Any] | None, session_id: str) -> list[dict[str, Any]]:

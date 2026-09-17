@@ -23,7 +23,7 @@ from agent.version import __version__
 from agent.runtime.server.commands import SlashCommandContext, SlashCommandResult, SlashCommandRouter
 from agent.runtime.server.resume_preview import render_resume_preview
 from agent.runtime.server.files import FileMethodError, file_list, file_read, file_write
-from agent.runtime.server.replay_events import project_durable_events
+from agent.runtime.server.replay_events import iter_durable_events
 from agent.runtime.server.protocol import (
     CAPABILITIES,
     CORE_METHODS,
@@ -804,12 +804,13 @@ class WorkerStdioRuntimeServer:
         materials = await self._worker.replay_event_pages(session_id)
         messages = materials.get("messages") if isinstance(materials.get("messages"), list) else []
         tool_records = materials.get("tool_records") if isinstance(materials.get("tool_records"), list) else []
-        events = project_durable_events(messages, tool_records, materials.get("turn_state"), session_id)
-        envelopes = [
-            event_envelope(event, cursor)
-            for cursor, event in enumerate(events[after_cursor:], start=after_cursor + 1)
-        ]
-        await self._respond(request, {"events": envelopes, "cursor": len(events)})
+        events = iter_durable_events(messages, tool_records, materials.get("turn_state"), session_id)
+        envelopes = []
+        cursor = 0
+        for cursor, event in enumerate(events, start=1):
+            if cursor > after_cursor:
+                envelopes.append(event_envelope(event, cursor))
+        await self._respond(request, {"events": envelopes, "cursor": cursor})
 
     async def _file_request(self, request: dict[str, Any]) -> None:
         params = request.get("params") if isinstance(request.get("params"), dict) else {}

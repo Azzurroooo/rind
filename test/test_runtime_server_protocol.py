@@ -35,7 +35,7 @@ from agent.runtime.server.protocol import (
     event_envelope,
     validate_request,
 )
-from agent.runtime.server.replay_events import project_durable_events
+from agent.runtime.server.replay_events import iter_durable_events
 
 
 def _messages(capsys):
@@ -872,7 +872,7 @@ def test_replay_projection_emits_only_durable_event_types():
 
 
 def test_project_durable_events_maps_raw_meta_shapes_and_failures():
-    events = project_durable_events(
+    events = list(iter_durable_events(
         [
             {"role": "user", "content": "go", "meta": {"turn_id": "turn-9"}},
             {
@@ -885,7 +885,7 @@ def test_project_durable_events_maps_raw_meta_shapes_and_failures():
         [{"id": "call-1", "name": "bash", "ok": False, "error_type": "BashError", "model_content": "boom"}],
         {"turn_id": "turn-9", "status": "failed", "error": "model exploded"},
         "s1",
-    )
+    ))
 
     assert events[0] == {"type": "turn_started", "session_id": "s1", "turn_id": "turn-9", "user_message_chars": 2}
     assert events[1] == {
