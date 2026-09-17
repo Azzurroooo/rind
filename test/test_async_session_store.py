@@ -877,7 +877,7 @@ async def test_update_plan_tool_args_are_projected_into_next_context(temp_sessio
     raw_args = json.dumps({"plan": plan}, ensure_ascii=False)
 
     await store.persist_message("user", "track this work")
-    tool_result = update_plan(plan)
+    tool_result = update_plan(plan, store.session_base_path)
     await store.persist_message("assistant", "", meta={"tool_calls": [{"id": "plan_1", "name": "update_plan"}]})
     await store.persist_tool_call(
         call_id="plan_1",

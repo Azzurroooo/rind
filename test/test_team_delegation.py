@@ -6,7 +6,6 @@ import json
 import asyncio
 import shutil
 import sys
-from contextvars import Context
 from pathlib import Path
 
 import pytest
@@ -18,11 +17,6 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from agent.domain import AssistantMessageCompletedEvent
 from agent.bootstrap.delegation import TeamDelegator
-from agent.infrastructure.planning.store import (
-    preserve_active_session_context,
-    resolve_session_base,
-    set_active_session_context,
-)
 from agent.infrastructure.team import initialize_team_project
 
 
@@ -200,24 +194,19 @@ async def test_delegate_allows_concurrent_calls_to_the_same_agent(tmp_path: Path
     assert len(captured) == 2
 
 
-def test_nested_child_session_context_restores_the_parent_plan_target(tmp_path: Path) -> None:
-    session_root = tmp_path / "sessions"
-    parent_id = "parent-session"
-    child_id = "child-session"
-    (session_root / parent_id).mkdir(parents=True)
-    (session_root / child_id).mkdir()
+def test_child_plan_updates_do_not_rebind_parent_tool(tmp_path: Path) -> None:
+    from agent.infrastructure.tools.builtin.planning import create_plan_tool_spec
+    from agent.infrastructure.planning import build_plan_snapshot
 
-    def exercise() -> None:
-        set_active_session_context(str(session_root), parent_id)
-
-        with preserve_active_session_context():
-            set_active_session_context(str(session_root), child_id)
-            child_base, active_child = resolve_session_base()
-            assert child_base == session_root / child_id
-            assert active_child == child_id
-
-        parent_base, active_parent = resolve_session_base()
-        assert parent_base == session_root / parent_id
-        assert active_parent == parent_id
-
-    Context().run(exercise)
+    parent = tmp_path / "parent"
+    child = tmp_path / "child"
+    parent.mkdir()
+    child.mkdir()
+    parent_tool = create_plan_tool_spec(lambda: str(parent)).handler
+    child_tool = create_plan_tool_spec(lambda: str(child)).handler
+    parent_tool([{"step": "parent", "status": "pending"}])
+    child_tool([{"step": "child", "status": "pending"}])
+    parent_tool([{"step": "parent complete", "status": "completed"}])
+    assert "parent complete" in build_plan_snapshot(parent)
+    assert "child" in build_plan_snapshot(child)
+    assert "parent" not in build_plan_snapshot(child)

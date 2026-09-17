@@ -722,41 +722,38 @@ class ExecutionCoordinator:
             )
             return await self._collect_delegated_turn(session_id, task, instruction, cancellation_token), session_id
 
-        from agent.infrastructure.planning.store import preserve_active_session_context
-
         with tempfile.TemporaryDirectory(prefix="rind-inspect-") as session_dir:
-            with preserve_active_session_context():
-                settings = await asyncio.to_thread(load_settings, str(target.workspace_root))
-                selection = ModelSelection(settings.provider, settings.model, settings.reasoning_effort)
-                try:
-                    chat_client = await self._provider_service.create_chat_client(str(target.workspace_root), selection)
-                except Exception as exc:
-                    if getattr(exc, "code", "") != "provider_not_configured":
-                        raise
-                    chat_client = self._provider_service.unavailable_client(selection, str(exc))
-                try:
-                    container = build_agent_container(
-                        settings=settings,
-                        chat_client=chat_client,
-                        session_dir=session_dir,
-                        enable_goal=False,
-                        enable_user_question=False,
-                        enabled_tools=enabled_tools,
-                        lock_workspace=False,
-                        workspace_root=str(target.workspace_root),
-                        project_id=project.project_id,
-                        owner_agent_id=target.agent_id,
-                        session_type="inspect",
-                        shared_resources=self._shared_resources,
-                    )
-                    response = await self._collect_container_turn(
-                        container,
-                        task,
-                        instruction,
-                        cancellation_token,
-                    )
-                finally:
-                    await chat_client.close()
+            settings = await asyncio.to_thread(load_settings, str(target.workspace_root))
+            selection = ModelSelection(settings.provider, settings.model, settings.reasoning_effort)
+            try:
+                chat_client = await self._provider_service.create_chat_client(str(target.workspace_root), selection)
+            except Exception as exc:
+                if getattr(exc, "code", "") != "provider_not_configured":
+                    raise
+                chat_client = self._provider_service.unavailable_client(selection, str(exc))
+            try:
+                container = build_agent_container(
+                    settings=settings,
+                    chat_client=chat_client,
+                    session_dir=session_dir,
+                    enable_goal=False,
+                    enable_user_question=False,
+                    enabled_tools=enabled_tools,
+                    lock_workspace=False,
+                    workspace_root=str(target.workspace_root),
+                    project_id=project.project_id,
+                    owner_agent_id=target.agent_id,
+                    session_type="inspect",
+                    shared_resources=self._shared_resources,
+                )
+                response = await self._collect_container_turn(
+                    container,
+                    task,
+                    instruction,
+                    cancellation_token,
+                )
+            finally:
+                await chat_client.close()
         return response, None
 
     async def _collect_delegated_turn(self, session_id: str, task: str, instruction: str, cancellation_token) -> dict[str, str]:

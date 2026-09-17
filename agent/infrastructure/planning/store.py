@@ -5,81 +5,27 @@ from __future__ import annotations
 import json
 import os
 import uuid
-from contextlib import contextmanager
-from contextvars import ContextVar
 from pathlib import Path
 from typing import Any
 
 from agent.domain.planning import PLAN_SCHEMA_VERSION, normalize_plan
-from agent.infrastructure.paths import resolve_session_base as resolve_checked_session_base
-from agent.infrastructure.paths import validate_session_id
-
-_ACTIVE_SESSION_ROOT: ContextVar[str | None] = ContextVar("rind_plan_session_root", default=None)
-_ACTIVE_SESSION_ID: ContextVar[str | None] = ContextVar("rind_plan_session_id", default=None)
 
 
-def set_active_session_context(session_root: str, session_id: str) -> None:
-    root = str(session_root or "").strip()
-    sid = str(session_id or "").strip()
-    if not root or not sid:
-        return
-    _ACTIVE_SESSION_ROOT.set(root)
-    _ACTIVE_SESSION_ID.set(validate_session_id(sid))
+def plan_path(session_base: str | Path | None) -> Path:
+    if session_base is None or not Path(session_base).is_dir():
+        raise FileNotFoundError("No persisted session. Initialize the session before using plan tools.")
+    return Path(session_base) / "plan.json"
 
 
-def clear_active_session_context() -> None:
-    """Clear the plan target while a session is still an in-memory draft."""
-    _ACTIVE_SESSION_ROOT.set(None)
-    _ACTIVE_SESSION_ID.set(None)
-
-
-@contextmanager
-def preserve_active_session_context():
-    """Restore the caller's plan target after a nested runtime finishes."""
-    root_token = _ACTIVE_SESSION_ROOT.set(_ACTIVE_SESSION_ROOT.get())
-    id_token = _ACTIVE_SESSION_ID.set(_ACTIVE_SESSION_ID.get())
-    try:
-        yield
-    finally:
-        _ACTIVE_SESSION_ROOT.reset(root_token)
-        _ACTIVE_SESSION_ID.reset(id_token)
-
-
-def resolve_session_base() -> tuple[Path, str]:
-    context_root = _ACTIVE_SESSION_ROOT.get()
-    context_id = _ACTIVE_SESSION_ID.get()
-    if context_root and context_id:
-        base = resolve_checked_session_base(context_root, context_id)
-        if base.is_dir():
-            return base, context_id
-
-    env_root = os.getenv("AGENT_SESSION_ROOT")
-    env_id = os.getenv("AGENT_SESSION_ID")
-    if env_root and env_id:
-        env_id = validate_session_id(env_id)
-        base = resolve_checked_session_base(env_root, env_id)
-        if base.is_dir():
-            return base, env_id
-    raise FileNotFoundError(
-        "No active session context found. Ensure session is initialized before using plan tools "
-        "(missing task-local plan session context or AGENT_SESSION_ROOT / AGENT_SESSION_ID)."
-    )
-
-
-def plan_path() -> tuple[Path, str]:
-    base, session_id = resolve_session_base()
-    return base / "plan.json", session_id
-
-
-def load_plan_if_exists() -> list[dict[str, str]] | None:
-    path, session_id = plan_path()
+def load_plan_if_exists(session_base: str | Path | None) -> list[dict[str, str]] | None:
+    path = plan_path(session_base)
     if not path.exists():
         return None
 
     try:
         value = json.loads(path.read_text(encoding="utf-8"))
     except Exception as exc:
-        raise ValueError(f"Corrupted plan file for session {session_id}: {exc}") from exc
+        raise ValueError(f"Corrupted plan file for session {path.parent.name}: {exc}") from exc
 
     if not isinstance(value, dict):
         raise ValueError("Corrupted plan file: expected an object.")
@@ -93,8 +39,8 @@ def load_plan_if_exists() -> list[dict[str, str]] | None:
         raise ValueError(f"Corrupted v2 plan file: {exc}") from exc
 
 
-def write_plan(plan: list[dict[str, str]]) -> None:
-    path, _ = plan_path()
+def write_plan(plan: list[dict[str, str]], session_base: str | Path | None) -> None:
+    path = plan_path(session_base)
     payload: dict[str, Any] = {
         "schema_version": PLAN_SCHEMA_VERSION,
         "plan": plan,

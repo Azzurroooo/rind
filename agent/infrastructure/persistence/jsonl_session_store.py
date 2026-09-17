@@ -634,22 +634,12 @@ class JsonlSessionStore(SessionStore):
         self._setup_paths(create_directories=True)
         self._create_session(None)
         self._initialize_history_sync([])
-        from agent.infrastructure.planning.store import set_active_session_context
-
-        set_active_session_context(str(self._session_root), str(self._session_id))
 
     async def initialize(self, *, persist_system_prompt: bool = True) -> None:
         async with self._write_lock:
             messages = await asyncio.to_thread(self._ensure_session_sync)
             if persist_system_prompt:
                 await asyncio.to_thread(self._initialize_history_sync, messages)
-
-            from agent.infrastructure.planning.store import clear_active_session_context, set_active_session_context
-
-            if self._session_root and self._session_id:
-                set_active_session_context(str(self._session_root), str(self._session_id))
-            else:
-                clear_active_session_context()
 
     async def discard_if_empty(self) -> None:
         async with self._write_lock:
@@ -677,11 +667,6 @@ class JsonlSessionStore(SessionStore):
         async with self._write_lock:
             messages = await asyncio.to_thread(self._switch_session_sync, session_id)
             await asyncio.to_thread(self._initialize_history_sync, messages)
-
-            if self._session_root and self._session_id:
-                from agent.infrastructure.planning.store import set_active_session_context
-
-                set_active_session_context(str(self._session_root), str(self._session_id))
             return await asyncio.to_thread(self._session_info_sync)
 
     async def create_session(self) -> dict[str, Any]:
@@ -689,9 +674,6 @@ class JsonlSessionStore(SessionStore):
         async with self._write_lock:
             await asyncio.to_thread(self._setup_paths)
             await asyncio.to_thread(self._bind_draft_sync)
-            from agent.infrastructure.planning.store import clear_active_session_context
-
-            clear_active_session_context()
             return await asyncio.to_thread(self._session_info_sync)
 
     async def create_team_project(self, *, project_id: str | None = None) -> dict[str, Any]:
@@ -821,11 +803,6 @@ class JsonlSessionStore(SessionStore):
                 self._persist_meta_sync()
 
             await asyncio.to_thread(_persist)
-            if self._session_root and self._session_id:
-                from agent.infrastructure.planning.store import set_active_session_context
-
-                set_active_session_context(str(self._session_root), str(self._session_id))
-
     async def persist_tool_call(
         self,
         call_id: str,

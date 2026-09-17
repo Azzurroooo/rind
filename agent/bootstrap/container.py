@@ -181,6 +181,7 @@ def build_agent_container(
         shared_root=shared_root,
         session_output_root=session_output_root,
         output_store=tool_output_store,
+        session_base_provider=lambda: session_store.session_base_path,
     )
     if enabled_tools is None:
         tool_specs = catalog
