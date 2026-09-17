@@ -10,7 +10,7 @@ import traceback
 from pathlib import Path
 from typing import Any
 
-from agent.infrastructure.config import load_settings
+from agent.infrastructure.config import ensure_user_settings, load_settings
 from agent.infrastructure.persistence import JsonlSessionStore
 from agent.infrastructure.paths import validate_session_id
 from agent.infrastructure.tools.builtin.shell.tool import (
@@ -87,6 +87,10 @@ async def async_main(argv: list[str] | None = None, *, server_class: type[Any]) 
         except ValueError as exc:
             _write_startup_error("Session error", exc, args.debug)
             return 1
+    try:
+        ensure_user_settings()
+    except OSError as exc:
+        _write_startup_error("Settings warning", exc, args.debug)
     if not getattr(server_class, "worker_mode", False):
         raise ValueError(f"{server_class.__name__} must be a worker-mode runtime server.")
 

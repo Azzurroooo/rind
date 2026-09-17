@@ -20,6 +20,7 @@ lib/components/
 
 ## Core contracts
 
+- Session info exposes `team_main: { agent_id, project_name } | null` on initialize, create, and switch. The backend derives it from the workspace's Team manifests only for the configured main agent; it is not persisted. The CLI uses it for the startup badge/identity line and the persistent composer badge, and clears it when a switched session omits it. These badges use the active theme's `notice` color and remain readable as `[TEAM]` with `NO_COLOR`.
 - Components implement only `render(width) -> string[]`; height is the number of returned lines, with no layout negotiation.
 - After application state changes, call `tui.requestRender()`; the engine coalesces requests and throttles to 16ms.
 - Per frame: render the whole tree into a line array → extract cursor markers → reset SGR at line ends → diff line by line against the previous frame → rewrite only the changed region (wrapped in DEC 2026 synchronized output, a single write).

@@ -1,3 +1,4 @@
+import asyncio
 import json
 import os
 import subprocess
@@ -40,6 +41,35 @@ def test_app_server_web_command_selects_web_transport(monkeypatch):
     assert rind_main.main(["app-server", "--web", "--port", "9000"]) == 17
     assert received[0][0] == ["--web", "--port", "9000"]
     assert received[0][1].__name__ == "WebRuntimeServer"
+
+
+def test_app_server_bootstraps_default_user_settings(tmp_path, monkeypatch):
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    monkeypatch.setenv("RIND_HOME", str(tmp_path / "rind-home"))
+
+    class FakeWorker:
+        def __init__(self, **kwargs):
+            self.options = kwargs
+
+    class FakeServer:
+        worker_mode = True
+        network_mode = False
+
+        def __init__(self, worker, **kwargs):
+            self.worker = worker
+
+        async def run(self):
+            return 0
+
+    from agent.runtime.server.app_server import async_main
+
+    monkeypatch.setattr("agent.runtime.server.worker.RuntimeWorker", FakeWorker)
+    assert asyncio.run(async_main(["--stdio", "--cwd", str(workspace)], server_class=FakeServer)) == 0
+
+    settings = json.loads((tmp_path / "rind-home" / "settings.json").read_text(encoding="utf-8"))
+    assert settings["apiKey"] == ""
+    assert settings["model"] == "gpt-4o-mini"
 
 
 def test_app_server_stdio_subprocess_smoke(tmp_path):

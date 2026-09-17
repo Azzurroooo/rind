@@ -8,7 +8,7 @@ from types import SimpleNamespace
 from pathlib import Path
 
 from agent.infrastructure.config import AppSettings
-from agent.infrastructure.team import initialize_team_project
+from agent.infrastructure.team import initialize_team_agent, initialize_team_project
 from agent.runtime.server.worker import ExecutionCoordinator, RuntimeWorker
 from agent.runtime.server.protocol import RuntimeMethod
 from agent.runtime.server.stdio import WorkerStdioRuntimeServer
@@ -444,6 +444,32 @@ def test_worker_team_session_binding_matches_execution_context():
     assert meta["owner_agent_id"] == "main-agent"
     assert meta["session_type"] == "direct_agent_chat"
     assert "main agent for this Team project" in messages
+
+
+def test_team_display_identity_follows_manifests_and_session_workspace(tmp_path):
+    async def run():
+        project = initialize_team_project(tmp_path, name="研究项目", main_agent_id="coordinator")
+        member = initialize_team_agent(project, agent_id="main-agent", description="A member, despite its name")
+        main = tmp_path / "agents" / "coordinator"
+        ordinary = tmp_path / "ordinary"
+        ordinary.mkdir()
+        worker = RuntimeWorker(workspace_root=str(main), session_dir=str(tmp_path / "sessions"), enable_goal=False)
+        expected = {"agent_id": "coordinator", "project_name": "研究项目"}
+        try:
+            initial = await worker.initialize()
+            assert initial["team_main"] == expected
+            for workspace, identity in [(main, expected), (member.workspace_root, None), (ordinary, None), (tmp_path, None)]:
+                created = await worker.create_session(str(workspace))
+                assert created["team_main"] == identity
+                restored = await worker.session(created["session_id"])
+                assert restored["team_main"] == identity
+            manifest = tmp_path / ".aiteam" / "project.yaml"
+            manifest.write_text("kind: Invalid\n", encoding="utf-8")
+            assert (await worker.session(initial["session_id"]))["team_main"] is None
+        finally:
+            await worker.close()
+
+    asyncio.run(run())
 
 
 def test_worker_reopens_delegated_session_with_original_binding():
