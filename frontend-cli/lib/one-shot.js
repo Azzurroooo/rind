@@ -15,6 +15,17 @@ export const oneShotHelp = [
   '  rind run --prompt "Summarize the changes in src/" --dir "E:\\code\\my-project" --session 20260825_101530_ab12cd34',
 ].join("\n");
 
+export const tourHelp = [
+  "Usage: rind tour [page]",
+  "",
+  "Plays an interactive walkthrough of Rind's features in a simulated terminal.",
+  "Run without a page id to browse the catalog. Also available as /tour in a session.",
+  "Examples are simulated: no API calls, commands, or changes to your workspace.",
+  "Space pauses/continues; arrows step or change speed; ? shows all controls.",
+  "q/Esc returns to the catalog; Ctrl+C exits the tour and returns to your session.",
+  "Example: rind tour start.hello",
+].join("\n");
+
 export const cliHelp = [
   "Usage: rind [options]",
   "",
@@ -23,6 +34,8 @@ export const cliHelp = [
   oneShotHelp,
   "",
   sendHelp,
+  "",
+  tourHelp,
 ].join("\n");
 
 export function parseOneShotArgs(args) {

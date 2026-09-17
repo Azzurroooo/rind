@@ -16,8 +16,9 @@ import { DynamicBlock } from "./components/dynamic-block.js";
 import { AssistantMessage } from "./components/assistant-message.js";
 import { ToolBlock } from "./components/tool-block.js";
 import { argsFromResult } from "./tool-display.js";
+import { paint } from "./theme.js";
 
-export function createCliOutputController({ state, terminalUi, transcript }) {
+export function createCliOutputController({ state, terminalUi, transcript, animateTools = true }) {
   const legacyRenderer = new AssistantRenderer((text) => writeOutput(text));
   let assistantMessage = null;
   let blockCount = 0;
@@ -245,14 +246,15 @@ export function createCliOutputController({ state, terminalUi, transcript }) {
     redraw();
   }
 
-  function showStartup(info) {
+  function showStartup(info, footerLines = []) {
     if (!terminalUi) {
       return;
     }
     const source = { ...info };
     appendBlock(new DynamicBlock((width) => {
       const rendered = startupText(source, width);
-      return rendered ? rendered.split("\n") : [];
+      const lines = rendered ? rendered.split("\n") : [];
+      return footerLines.length ? [...lines, ...footerLines.map((line) => paint.dim(line))] : lines;
     }));
   }
 
@@ -281,6 +283,7 @@ export function createCliOutputController({ state, terminalUi, transcript }) {
     }
     const block = new ToolBlock({
       event,
+      animate: animateTools,
       onRequestRender: () => redraw(),
       leading: blockCount > 0,
     });
@@ -309,6 +312,7 @@ export function createCliOutputController({ state, terminalUi, transcript }) {
       }
       block = new ToolBlock({
         event,
+        animate: animateTools,
         onRequestRender: () => redraw(),
         leading: blockCount > 0,
       });

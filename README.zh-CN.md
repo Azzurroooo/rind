@@ -163,12 +163,14 @@ CLI / Desktop / Web / IM / 你的应用
 | `/fork` `/sessions` `/compact` | 分叉、切换、释放上下文 |
 | `/model` `/effort` `/theme` | 选模型、推理力度、配色主题 |
 | `/goal` `/skill` `/team` `/help` | 自主目标、技能、小队、命令表 |
+| `/tour [page]` | 模拟终端中的交互式功能导览 |
 
 | 入口 | 含义 |
 | --- | --- |
 | `rind` / `rind --session <id>` | 交互式 |
 | `rind run --prompt "…" [--session <id>]` | 无头执行，可接管道 |
 | `rind send --session <id> "…"` | 投递到正在运行的会话 |
+| `rind tour [page]` | 功能导览（与会话内 `/tour` 相同） |
 
 ## 文档与开发
 
