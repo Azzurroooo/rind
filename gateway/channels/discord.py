@@ -28,6 +28,7 @@ from pathlib import Path
 from typing import Any
 
 from .. import Attachment, ChannelCapabilities, InboundMessage, OutboundPayload, SendTarget
+from .. import attachment_kind
 from ..config import ChannelConfig
 
 logger = logging.getLogger(__name__)
@@ -63,16 +64,6 @@ class _MediaSource:
     source: Any
     kind: str  # Attachment.kind vocabulary
     content_type: str
-
-
-def _kind_of_content_type(content_type: str) -> str:
-    if content_type.startswith("image/"):
-        return "image"
-    if content_type.startswith("audio/"):
-        return "audio"
-    if content_type.startswith("video/"):
-        return "video"
-    return "document"
 
 
 def _safe_filename(raw: Any, fallback: str) -> str:
@@ -194,7 +185,7 @@ class DiscordChannel:
             except Exception as exc:
                 logger.warning("gateway discord: attachment %s download failed: %s", path.name, exc)
                 continue
-            saved.append(Attachment(path=path, content_type=content_type, kind=_kind_of_content_type(content_type)))
+            saved.append(Attachment(path=path, content_type=content_type, kind=attachment_kind(content_type)))
         return tuple(saved)
 
     def _attachment_dir(self) -> Path:

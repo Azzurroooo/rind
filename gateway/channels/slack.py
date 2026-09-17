@@ -26,6 +26,7 @@ from pathlib import Path
 from typing import Any
 
 from .. import Attachment, ChannelCapabilities, InboundMessage, OutboundPayload, SendTarget
+from .. import attachment_kind
 from ..config import ChannelConfig
 
 logger = logging.getLogger(__name__)
@@ -51,8 +52,6 @@ _EMOJI_NAMES = {"✅": "white_check_mark"}
 
 _EXTENSION_FOR_KIND = {"image": ".jpg", "audio": ".ogg", "video": ".mp4", "document": ".bin"}
 
-_KIND_BY_PREFIX = (("image/", "image"), ("audio/", "audio"), ("video/", "video"))
-
 
 def _load_sdk() -> Any:
     """Import slack_bolt (app + socket-mode adapter) on first use; ImportError
@@ -66,13 +65,6 @@ def _load_sdk() -> Any:
             f"channel 'slack' requires slack_bolt>=1.18 ({exc}); install it to enable the channel"
         ) from exc
     return async_app, adapter
-
-
-def _kind_of_content_type(content_type: str) -> str:
-    for prefix, kind in _KIND_BY_PREFIX:
-        if content_type.startswith(prefix):
-            return kind
-    return "document"
 
 
 def _safe_filename(raw: Any, fallback: str) -> str:
@@ -175,7 +167,7 @@ class SlackChannel:
                 continue
             content_type = str(file.get("mimetype") or "") or "application/octet-stream"
             url = str(file.get("url_private_download") or file.get("url_private") or "")
-            fallback = f"{event.get('ts', 'file')}-{position}{_EXTENSION_FOR_KIND[_kind_of_content_type(content_type)]}"
+            fallback = f"{event.get('ts', 'file')}-{position}{_EXTENSION_FOR_KIND[attachment_kind(content_type)]}"
             path = directory / _safe_filename(file.get("name"), fallback)
             if not url:
                 continue
@@ -185,7 +177,7 @@ class SlackChannel:
                 logger.warning("gateway slack: attachment %s download failed: %s", path.name, exc)
                 continue
             path.write_bytes(data)
-            saved.append(Attachment(path=path, content_type=content_type, kind=_kind_of_content_type(content_type)))
+            saved.append(Attachment(path=path, content_type=content_type, kind=attachment_kind(content_type)))
         return tuple(saved)
 
     async def _fetch_bytes(self, url: str) -> bytes:
