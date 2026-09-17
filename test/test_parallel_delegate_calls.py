@@ -19,6 +19,9 @@ from agent.domain import ParsedToolCall, ToolExecutionResult, tool_ok
 
 
 class _Session:
+    async def get_tool_records(self, **kwargs):
+        return []
+
     session_id = "parent"
 
     def __init__(self) -> None:

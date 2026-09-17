@@ -319,11 +319,6 @@ class ExecutionCoordinator:
 
         return remove
 
-    def set_event_sink(self, sink: Callable[[dict[str, Any]], Awaitable[None] | None] | None) -> None:
-        self._event_sinks.clear()
-        if sink is not None:
-            self._event_sinks.append(sink)
-
     async def _emit_to_event_sinks(self, event: dict[str, Any]) -> None:
         for sink in list(self._event_sinks):
             sink_result = sink(event)
@@ -399,7 +394,7 @@ class ExecutionCoordinator:
         execution = self._active.get(clean)
         if execution is None:
             return ""
-        return str(getattr(execution.container.runtime, "active_turn_id", "") or "")
+        return str(execution.container.runtime.active_turn_id or "")
 
     def live_turn(self, session_id: str) -> dict[str, Any] | None:
         clean = validate_session_id(session_id)
@@ -515,9 +510,7 @@ class ExecutionCoordinator:
             async with execution.turn_slot:
                 cancel_source = CancellationTokenSource(parent_token=cancellation_token)
                 execution.current_cancel = cancel_source
-                responder = getattr(execution.container.runtime, "set_user_question_responder", None)
-                if callable(responder):
-                    responder(lambda event: self._answer_user_question(clean, event))
+                execution.container.runtime.set_user_question_responder(lambda event: self._answer_user_question(clean, event))
                 try:
                     run_kwargs: dict[str, Any] = {
                         "query": query,
@@ -553,9 +546,7 @@ class ExecutionCoordinator:
         if execution is None:
             return False
         interrupted = False
-        discard_inputs = getattr(execution.container.runtime, "discard_pending_inputs", None)
-        if callable(discard_inputs):
-            discard_inputs()
+        execution.container.runtime.discard_pending_inputs()
         if execution.current_cancel is not None and not execution.current_cancel.token.is_cancelled:
             execution.current_cancel.cancel(reason)
             interrupted = True

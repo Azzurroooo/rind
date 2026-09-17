@@ -383,12 +383,7 @@ class ToolCallProcessor:
             )
 
     async def _load_tool_record(self, session: SessionStore, call: ParsedToolCall) -> dict[str, Any] | None:
-        loader = getattr(session, "get_tool_records", None)
-        if not callable(loader):
-            return None
-        records = await loader(call_ids=[call.call_id])
-        if not isinstance(records, list):
-            return None
+        records = await session.get_tool_records(call_ids=[call.call_id])
         for record in reversed(records):
             if (
                 isinstance(record, dict)

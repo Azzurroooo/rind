@@ -21,8 +21,8 @@ class _FakeExecution:
     def __init__(self, active=None):
         self._active = set(active or ())
 
-    def set_event_sink(self, sink):
-        pass
+    def add_event_sink(self, sink):
+        return lambda: None
 
     def active_session_ids(self):
         return set(self._active)

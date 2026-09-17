@@ -47,6 +47,9 @@ class _Store:
 
 
 class _Runtime:
+    def discard_pending_inputs(self):
+        return None
+
     def __init__(self, session_id: str):
         self.session_id = session_id
         self.started = asyncio.Event()
@@ -133,6 +136,9 @@ class _Worker:
 
 
 class _Execution:
+    def add_event_sink(self, sink):
+        return lambda: None
+
     def __init__(self, worker):
         self.worker = worker
         self.tokens = {}
@@ -661,7 +667,7 @@ def test_worker_goal_continuation_persists_distinct_checkpoints():
             events.append(event)
 
         execution.run_turn = run_turn
-        execution.set_event_sink(sink)
+        execution.add_event_sink(sink)
         started = await execution.start_goal_continuation("session-a")
         await next(iter(execution._goal_tasks.values()))
         return started, turns, events, repository.goal, repository.checkpoints

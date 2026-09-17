@@ -233,15 +233,8 @@ class WorkerStdioRuntimeServer:
         self._shutdown_request: dict[str, Any] | None = None
         self._shutdown_response_sent = False
         self._subscribed: set[str] = set()
-        self._remove_event_sink: Callable[[], None] | None = None
         self._auth_waiters: dict[str, asyncio.Future[str]] = {}
-        add_event_sink = getattr(self._worker.execution, "add_event_sink", None)
-        if callable(add_event_sink):
-            self._remove_event_sink = add_event_sink(self._send_event)
-        else:
-            set_event_sink = getattr(self._worker.execution, "set_event_sink", None)
-            if callable(set_event_sink):
-                set_event_sink(self._send_event)
+        self._remove_event_sink: Callable[[], None] | None = self._worker.execution.add_event_sink(self._send_event)
 
     def close(self) -> None:
         """Unregister this connection's sink and close the writer."""
@@ -801,22 +794,14 @@ class WorkerStdioRuntimeServer:
             return
         start = params.get("start") if isinstance(params.get("start"), int) else None
         end = params.get("end") if isinstance(params.get("end"), int) else None
-        replay = getattr(self._worker, "replay", None)
-        if callable(replay):
-            result = await replay(session_id, start=start, end=end)
-        else:
-            result = await self._worker.repository.replay(session_id, start=start, end=end)
+        result = await self._worker.replay(session_id, start=start, end=end)
         await self._respond(request, result)
 
     async def _replay_event_pages(self, request: dict[str, Any], after_cursor: int) -> None:
         session_id = await self._required_session_id(request)
         if session_id is None:
             return
-        loader = getattr(self._worker, "replay_event_pages", None)
-        if not callable(loader):
-            await self._respond_error(request, "Incremental replay is unavailable.", "UnsupportedOperation")
-            return
-        materials = await loader(session_id)
+        materials = await self._worker.replay_event_pages(session_id)
         messages = materials.get("messages") if isinstance(materials.get("messages"), list) else []
         tool_records = materials.get("tool_records") if isinstance(materials.get("tool_records"), list) else []
         events = project_durable_events(messages, tool_records, materials.get("turn_state"), session_id)

@@ -48,11 +48,6 @@ class _Execution:
 
         return remove
 
-    def set_event_sink(self, sink):
-        self._sinks.clear()
-        if sink is not None:
-            self._sinks.append(sink)
-
     async def run_turn(self, session_id, *, query, transient_system_messages=None, resume=False, continuation=False):
         self.prompted.append(session_id)
         turn_id = f"turn-{session_id}-{len(self.prompted)}"
