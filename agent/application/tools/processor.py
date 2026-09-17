@@ -534,7 +534,7 @@ class ToolCallProcessor:
             call.raw_args,
             ts_start,
             ts_end,
-            normalized_result.persisted_content,
+            normalized_result.model_content,
             model_content=normalized_result.model_content,
             model_content_format=normalized_result.model_content_format,
             model_content_policy=normalized_result.model_content_policy,

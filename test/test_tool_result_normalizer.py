@@ -33,7 +33,6 @@ async def test_small_output_reuses_stable_content_for_all_projections() -> None:
     expected = '{"ok": true,"tool": "bash","data": "done"}'
     assert result.terminal_content == expected
     assert result.model_content == expected
-    assert result.persisted_content == expected
     assert result.model_content_policy == {"truncated": False}
 
 
@@ -52,7 +51,6 @@ async def test_large_output_uses_one_absolute_output_path(tmp_path: Path) -> Non
 
     assert store.calls == [("session-a", "call-1")]
     assert len(result.model_content.encode("utf-8")) <= 25 * 1024
-    assert result.persisted_content == result.model_content
     payload = json.loads(result.model_content)
     assert payload["meta"]["truncated"] is True
     assert Path(payload["meta"]["output_path"]).is_absolute()

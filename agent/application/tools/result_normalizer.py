@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Protocol
 
 
@@ -33,13 +33,8 @@ class ToolOutputWriter(Protocol):
 class NormalizedToolResult:
     terminal_content: str
     model_content: str
-    persisted_content: str
     model_content_format: str = "tool_result_v2"
-    model_content_policy: dict[str, Any] | None = None
-
-    def __post_init__(self) -> None:
-        if self.model_content_policy is None:
-            self.model_content_policy = {}
+    model_content_policy: dict[str, Any] = field(default_factory=dict)
 
 
 class ToolResultNormalizer:
@@ -103,7 +98,6 @@ class ToolResultNormalizer:
         return NormalizedToolResult(
             terminal_content=terminal_content,
             model_content=model_content,
-            persisted_content=model_content,
             model_content_policy={"truncated": model_content != rendered},
         )
 
