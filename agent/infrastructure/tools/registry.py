@@ -5,15 +5,14 @@ from __future__ import annotations
 from collections.abc import Iterable
 from typing import Any
 
-from .builtin import TOOL_SPECS
 from .spec import ToolSpec
 
 
 class DefaultToolRegistry:
     """Adapter to expose tool implementations/schemas to application layer."""
 
-    def __init__(self, specs: Iterable[ToolSpec] | None = None):
-        catalog = TOOL_SPECS if specs is None else tuple(specs)
+    def __init__(self, specs: Iterable[ToolSpec]):
+        catalog = tuple(specs)
         specs_by_name: dict[str, ToolSpec] = {}
         for spec in catalog:
             if not isinstance(spec, ToolSpec):

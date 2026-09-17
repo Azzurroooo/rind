@@ -13,7 +13,9 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from agent.infrastructure.tools import DefaultToolRegistry, ToolSpec
-from agent.infrastructure.tools.builtin import TOOL_SPECS, build_builtin_tool_specs
+from agent.infrastructure.tools.builtin import build_builtin_tool_specs
+
+TOOL_SPECS = build_builtin_tool_specs()
 
 
 def _spec(name: str, handler) -> ToolSpec:
@@ -83,7 +85,7 @@ def test_duplicate_tool_names_are_rejected() -> None:
 
 
 def test_shell_schemas_hide_runtime_session_context() -> None:
-    registry = DefaultToolRegistry()
+    registry = DefaultToolRegistry(build_builtin_tool_specs())
     schemas = {schema["function"]["name"]: schema for schema in registry.schemas}
 
     for name in ("bash", "bash_output"):
@@ -95,7 +97,7 @@ def test_shell_schemas_hide_runtime_session_context() -> None:
 
 
 def test_user_question_schema_describes_structured_options() -> None:
-    schema = next(schema for schema in DefaultToolRegistry().schemas if schema["function"]["name"] == "ask_user_question")
+    schema = next(schema for schema in DefaultToolRegistry(build_builtin_tool_specs()).schemas if schema["function"]["name"] == "ask_user_question")
     options = schema["function"]["parameters"]["properties"]["options"]
 
     assert options["type"] == "array"

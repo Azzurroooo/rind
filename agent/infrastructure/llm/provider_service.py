@@ -20,7 +20,6 @@ from agent.domain.models import (
 from agent.infrastructure.auth import CredentialStore
 from agent.infrastructure.config.settings_loader import AppSettings, load_settings
 
-from .openai_chat_client import build_async_client
 from .providers import PROVIDERS, default_reasoning_efforts, refreshable_models_api
 
 
@@ -88,12 +87,14 @@ class ProviderServiceImpl:
         key = credential.key or credential.access
         if definition.api == "openai-chat":
             from .openai_chat import OpenAIChatCompletionsClient
+            from .openai_chat_client import build_async_client
 
             return OpenAIChatCompletionsClient(
                 build_async_client(key, endpoint, max_retries=14), selection.model_id, selection.reasoning_effort, workspace_root=workspace_root
             )
         if definition.api == "openai-responses":
             from .openai_responses import OpenAIResponsesClient
+            from .openai_chat_client import build_async_client
 
             return OpenAIResponsesClient(
                 build_async_client(key, endpoint), selection.model_id, selection.reasoning_effort, workspace_root=workspace_root
@@ -139,6 +140,8 @@ class ProviderServiceImpl:
         credential = self._resolve_credential(settings, definition.id)
         if credential is None:
             return False
+        from .openai_chat_client import build_async_client
+
         client = build_async_client(credential.key or credential.access, self._endpoint(settings, definition))
         try:
             response = await client.models.list()

@@ -11,6 +11,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from agent.domain.cancellation import CancellationTokenSource
+from agent.infrastructure.tools.builtin import build_builtin_tool_specs
 from agent.infrastructure.tools import DefaultToolRegistry
 from agent.infrastructure.tools.builtin.files.operations import glob as glob_tool
 from agent.infrastructure.tools.builtin.files.operations import grep, read_file
@@ -166,7 +167,7 @@ def test_sync_file_tools_return_cancelled_payload(tmp_path: Path) -> None:
 
 
 def test_schema_exposes_only_minimal_file_navigation_fields() -> None:
-    schemas = {item["function"]["name"]: item["function"] for item in DefaultToolRegistry().schemas}
+    schemas = {item["function"]["name"]: item["function"] for item in DefaultToolRegistry(build_builtin_tool_specs()).schemas}
     if "list_files" in schemas:
         raise AssertionError("list_files should not be registered")
     if "read_pdf" in schemas:

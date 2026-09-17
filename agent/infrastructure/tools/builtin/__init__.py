@@ -49,7 +49,4 @@ def build_builtin_tool_specs(
     return tuple(specs)
 
 
-TOOL_SPECS: tuple[ToolSpec, ...] = build_builtin_tool_specs()
-
-
-__all__ = ["TOOL_SPECS", "build_builtin_tool_specs", "create_goal_tool_spec"]
+__all__ = ["build_builtin_tool_specs", "create_goal_tool_spec"]

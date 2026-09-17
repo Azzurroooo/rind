@@ -11,6 +11,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from agent.infrastructure.planning import store as plan_store
+from agent.infrastructure.tools.builtin import build_builtin_tool_specs
 from agent.infrastructure.tools import DefaultToolRegistry
 from agent.infrastructure.tools.builtin.planning import update_plan
 
@@ -32,7 +33,7 @@ def payload(raw: str) -> dict:
 
 
 def test_registry_exposes_one_plan_tool_with_nested_schema() -> None:
-    schemas = DefaultToolRegistry().schemas
+    schemas = DefaultToolRegistry(build_builtin_tool_specs()).schemas
     plan_schemas = [schema["function"] for schema in schemas if schema["function"]["name"] == "update_plan"]
 
     assert len(plan_schemas) == 1

@@ -51,6 +51,7 @@ class ToolSpec:
             build_function_schema(
                 name=name,
                 func=handler,
+                signature=signature,
                 description=description,
                 param_descriptions=param_descriptions,
             ),
