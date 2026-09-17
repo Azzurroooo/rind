@@ -175,69 +175,11 @@ class ToolCallProcessor:
                                     execution.cancel()
                                     await asyncio.gather(execution, return_exceptions=True)
 
-            ts_end = session.now_iso()
-            normalized_result = await self._tool_result_normalizer.normalize(
-                outcome.result,
-                tool_name=call.name,
-                status=outcome.status,
-                error_type=outcome.error_type,
-                output_store=self._tool_output_store,
-                session_id=session.session_id or "",
-                call_id=call.call_id,
-            )
-            try:
-                if not reused:
-                    await self._persist_tool_result(
-                        session=session,
-                        call=call,
-                        parsed_args=parsed_args,
-                        ts_start=ts_start,
-                        ts_end=ts_end,
-                        normalized_result=normalized_result,
-                    )
-                persist_error = None
-            except asyncio.CancelledError:
-                raise
-            except Exception as exc:
-                persist_error = exc
-                outcome = _ToolCallOutcome(
-                    status="failed",
-                    error_type="PersistenceError",
-                    result=tool_error(call.name, f"Failed to persist tool result: {exc}", "PersistenceError"),
-                )
-                normalized_result = await self._tool_result_normalizer.normalize(
-                    outcome.result,
-                    tool_name=call.name,
-                    status=outcome.status,
-                    error_type=outcome.error_type,
-                )
-
-            duration_ms = int((time.perf_counter() - started_at) * 1000)
-            file_change_event = None if reused else build_file_change_event(
-                session=session,
-                turn_id=turn_id,
-                call=call,
-                parsed_args=parsed_args,
-                status=outcome.status,
-                result=outcome.result,
-            )
-            if file_change_event is not None:
-                yield file_change_event
-            yield ToolResultEvent(
-                **event_meta(session, turn_id),
-                tool_call_id=call.call_id,
-                tool_name=call.name,
-                status=outcome.status,
-                result=normalized_result.terminal_content,
-                error_type=outcome.error_type,
-                error_source="persistence" if persist_error is not None else "tool",
-                duration_ms=duration_ms,
-            )
-            if persist_error is not None:
-                raise PersistenceError(
-                    f"Failed to persist tool result for {call.call_id}: {persist_error}",
-                    code=type(persist_error).__name__,
-                ) from persist_error
+            async for event in self._finish_tool_call(
+                session=session, turn_id=turn_id, call=call, parsed_args=parsed_args,
+                outcome=outcome, reused=reused, ts_start=ts_start, started_at=started_at,
+            ):
+                yield event
 
     def _can_run_delegates_in_parallel(self, tool_calls: list[ParsedToolCall]) -> bool:
         if len(tool_calls) < 2 or any(call.name != "delegate" for call in tool_calls):
@@ -291,58 +233,87 @@ class ToolCallProcessor:
             raise
 
         for (call, parsed_args, ts_start, started_at), (outcome, reused) in zip(prepared, outcomes, strict=True):
-            ts_end = session.now_iso()
+            async for event in self._finish_tool_call(
+                session=session, turn_id=turn_id, call=call, parsed_args=parsed_args,
+                outcome=outcome, reused=reused, ts_start=ts_start, started_at=started_at,
+            ):
+                yield event
+
+    async def _finish_tool_call(
+        self,
+        *,
+        session: SessionStore,
+        turn_id: str,
+        call: ParsedToolCall,
+        parsed_args: dict,
+        outcome: _ToolCallOutcome,
+        reused: bool,
+        ts_start: str,
+        started_at: float,
+    ) -> AsyncIterator[RuntimeEvent]:
+        ts_end = session.now_iso()
+        normalized_result = await self._tool_result_normalizer.normalize(
+            outcome.result,
+            tool_name=call.name,
+            status=outcome.status,
+            error_type=outcome.error_type,
+            output_store=self._tool_output_store,
+            session_id=session.session_id or "",
+            call_id=call.call_id,
+        )
+        try:
+            if not reused:
+                await self._persist_tool_result(
+                    session=session,
+                    call=call,
+                    parsed_args=parsed_args,
+                    ts_start=ts_start,
+                    ts_end=ts_end,
+                    normalized_result=normalized_result,
+                )
+            persist_error = None
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            persist_error = exc
+            outcome = _ToolCallOutcome(
+                status="failed",
+                error_type="PersistenceError",
+                result=tool_error(call.name, f"Failed to persist tool result: {exc}", "PersistenceError"),
+            )
             normalized_result = await self._tool_result_normalizer.normalize(
                 outcome.result,
                 tool_name=call.name,
                 status=outcome.status,
                 error_type=outcome.error_type,
-                output_store=self._tool_output_store,
-                session_id=session.session_id or "",
-                call_id=call.call_id,
             )
-            try:
-                if not reused:
-                    await self._persist_tool_result(
-                        session=session,
-                        call=call,
-                        parsed_args=parsed_args,
-                        ts_start=ts_start,
-                        ts_end=ts_end,
-                        normalized_result=normalized_result,
-                    )
-                persist_error = None
-            except asyncio.CancelledError:
-                raise
-            except Exception as exc:
-                persist_error = exc
-                outcome = _ToolCallOutcome(
-                    status="failed",
-                    error_type="PersistenceError",
-                    result=tool_error("delegate", f"Failed to persist tool result: {exc}", "PersistenceError"),
-                )
-                normalized_result = await self._tool_result_normalizer.normalize(
-                    outcome.result,
-                    tool_name=call.name,
-                    status=outcome.status,
-                    error_type=outcome.error_type,
-                )
 
-            yield ToolResultEvent(
-                **event_meta(session, turn_id),
-                tool_call_id=call.call_id,
-                tool_name=call.name,
-                status=outcome.status,
-                result=normalized_result.terminal_content,
-                error_type=outcome.error_type,
-                error_source="persistence" if persist_error is not None else "tool",
-                duration_ms=int((time.perf_counter() - started_at) * 1000),
-            )
-            if persist_error is not None:
-                raise PersistenceError(
-                    f"Failed to persist tool result for {call.call_id}: {persist_error}",
-                    code=type(persist_error).__name__,
-                ) from persist_error
+        duration_ms = int((time.perf_counter() - started_at) * 1000)
+        file_change_event = None if reused else build_file_change_event(
+            session=session,
+            turn_id=turn_id,
+            call=call,
+            parsed_args=parsed_args,
+            status=outcome.status,
+            result=outcome.result,
+        )
+        if file_change_event is not None:
+            yield file_change_event
+        yield ToolResultEvent(
+            **event_meta(session, turn_id),
+            tool_call_id=call.call_id,
+            tool_name=call.name,
+            status=outcome.status,
+            result=normalized_result.terminal_content,
+            error_type=outcome.error_type,
+            error_source="persistence" if persist_error is not None else "tool",
+            duration_ms=duration_ms,
+        )
+        if persist_error is not None:
+            raise PersistenceError(
+                f"Failed to persist tool result for {call.call_id}: {persist_error}",
+                code=type(persist_error).__name__,
+            ) from persist_error
 
     async def _run_tool_call(
         self,
