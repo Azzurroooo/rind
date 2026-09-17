@@ -90,7 +90,7 @@ class ProviderServiceImpl:
             from .openai_chat import OpenAIChatCompletionsClient
 
             return OpenAIChatCompletionsClient(
-                build_async_client(key, endpoint), selection.model_id, selection.reasoning_effort, workspace_root=workspace_root
+                build_async_client(key, endpoint, max_retries=14), selection.model_id, selection.reasoning_effort, workspace_root=workspace_root
             )
         if definition.api == "openai-responses":
             from .openai_responses import OpenAIResponsesClient

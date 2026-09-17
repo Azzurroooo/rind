@@ -12,7 +12,7 @@ from agent.domain.errors import ProviderError
 from agent.domain.models import ModelCompletion, ModelStreamEvent, ModelUsage
 from agent.domain.tool_payload import ParsedToolCall
 
-from .cancellation import await_with_cancellation
+from .cancellation import await_with_cancellation, close_resource
 
 
 class AnthropicMessagesClient(ChatClient):
@@ -46,6 +46,7 @@ class AnthropicMessagesClient(ChatClient):
             payload["system"] = system
         if tools:
             payload["tools"] = [_anthropic_tool(tool) for tool in tools]
+        response = None
         try:
             response = await await_with_cancellation(self._client.messages.create(**payload), cancellation_token)
             async for raw in response:
@@ -59,12 +60,11 @@ class AnthropicMessagesClient(ChatClient):
         except Exception as exc:
             raise ProviderError(str(exc), status="unavailable", error_type=type(exc).__name__, code="stream_interrupted") from exc
 
+        finally:
+            await close_resource(response)
+
     async def close(self) -> None:
-        close = getattr(self._client, "close", None)
-        if callable(close):
-            result = close()
-            if hasattr(result, "__await__"):
-                await result
+        await close_resource(self._client)
 
 
 def _messages(messages):
