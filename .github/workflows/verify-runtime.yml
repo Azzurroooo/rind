@@ -37,7 +37,7 @@ jobs:
           token: ${{ secrets.DISTRIBUTION_TOKEN || github.token }}
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version: "3.12.13"
       - name: Build a clean frozen worker
         working-directory: rind-distribution
         run: python scripts/build_runtime.py --target ${{ matrix.target }} --source ../rind
