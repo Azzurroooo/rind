@@ -511,6 +511,7 @@ class WorkerStdioRuntimeServer:
             "reasoning_effort": info.get("reasoning_effort"),
             "base_url": info.get("base_url"),
             "workspace_root": info.get("workspace_root"),
+            "team_main": info.get("team_main"),
             "version": __version__,
             "protocol_version": PROTOCOL_VERSION,
             "capabilities": self._capabilities(),

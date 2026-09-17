@@ -142,6 +142,7 @@ class SessionRepository:
             "reasoning_effort": store.reasoning_effort,
             "workspace_root": root,
             "turn_state": None,
+            "team_main": _team_main_info(root),
         }
 
     async def initial(
@@ -171,6 +172,7 @@ class SessionRepository:
             "provider": str(meta.get("provider") or default_provider),
             "reasoning_effort": str(meta.get("reasoning_effort") or default_effort or ""),
             "workspace_root": workspace_root,
+            "team_main": await asyncio.to_thread(_team_main_info, workspace_root),
             "project_id": meta.get("project_id"),
             "owner_agent_id": meta.get("owner_agent_id"),
             "session_type": meta.get("session_type"),
@@ -983,6 +985,19 @@ def _normalize_workspace_root(value: str) -> str:
     if not root.is_dir():
         raise ValueError(f"Workspace directory does not exist: {root}")
     return os.path.normcase(str(root))
+
+
+def _team_main_info(workspace_root: str) -> dict[str, str] | None:
+    """Optional display identity, derived from the current Team manifests."""
+    if not workspace_root:
+        return None
+    try:
+        agent = discover_agent(workspace_root)
+    except (OSError, ValueError):
+        return None
+    if agent is None or agent.project is None or agent.agent_id != agent.project.main_agent:
+        return None
+    return {"agent_id": agent.agent_id, "project_name": agent.project.name}
 
 
 def _workspace_defaults(workspace_root: str) -> tuple[str, str, str, str]:

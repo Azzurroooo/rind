@@ -178,6 +178,21 @@ def test_initialize_response_includes_resume_preview_and_catalog():
     assert any(command["name"] == "status" for command in result["commands"])
 
 
+@pytest.mark.parametrize("identity", [None, {"agent_id": "lead", "project_name": "Team"}])
+def test_initialize_forwards_team_display_identity(identity):
+    worker = FakeWorker()
+    initialize = worker.initialize
+
+    async def initialize_with_team():
+        return {**await initialize(), "team_main": identity}
+
+    worker.initialize = initialize_with_team
+    server, payloads = make_server(worker)
+    server._initialized = False
+    asyncio.run(server._dispatch({"kind": "request", "request_id": "team-init", "method": "initialize", "params": {}}))
+    assert _response(payloads, "team-init")["result"]["team_main"] == identity
+
+
 def test_methods_before_initialize_are_rejected():
     worker = FakeWorker()
     server, payloads = make_server(worker)

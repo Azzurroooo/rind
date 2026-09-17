@@ -174,6 +174,39 @@ test("goal control does not submit a duplicate prompt", async () => {
   );
 });
 
+test("session restore retains Team identity and switching replaces or clears it", async () => {
+  const harness = createHarness();
+  const team = { agent_id: "coordinator", project_name: "Team A" };
+  harness.state.session.info.team_main = team;
+  await harness.controller.restoreSession();
+  assert.deepEqual(harness.state.session.info.team_main, team);
+  await harness.controller.restoreSession("session-b", { switchSession: true });
+  assert.equal(harness.state.session.info.team_main, null);
+
+  const request = harness.client.request.bind(harness.client);
+  const other = { agent_id: "lead", project_name: "Team B" };
+  harness.client.request = (method, params) => method === methods.sessionSwitch
+    ? Promise.resolve({ session_id: params.session_id, team_main: other })
+    : request(method, params);
+  await harness.controller.restoreSession("session-c", { switchSession: true });
+  assert.deepEqual(harness.state.session.info.team_main, other);
+});
+
+test("initialization supplies Team identity and workspace before the startup banner", async () => {
+  const harness = createHarness();
+  const team = { agent_id: "lead", project_name: "Team" };
+  const request = harness.client.request.bind(harness.client);
+  harness.client.request = async (method, params) => {
+    const result = await request(method, params);
+    return method === methods.initialize
+      ? { ...result, team_main: team, workspace_root: "E:/team/agents/lead" }
+      : result;
+  };
+  const info = await harness.controller.ensureRuntime();
+  assert.deepEqual(info.team_main, team);
+  assert.equal(info.cwd, "E:/team/agents/lead");
+});
+
 test("session selector requests the full list and updates the active workspace", async () => {
   const harness = createHarness({ selectedSession: { id: "session-b" } });
   harness.state.turn.active = false;

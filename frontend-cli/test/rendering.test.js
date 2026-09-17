@@ -248,7 +248,7 @@ test("promptText clips long session status", () => {
   const statusLine = text.split("\n")[1];
 
   assert.ok(statusLine.length <= 80);
-  assert.match(statusLine, /\.\.\.$/);
+  assert.match(statusLine, /\.\.\..*project$/);
 });
 
 test("promptText extends the divider to the terminal's right edge", () => {

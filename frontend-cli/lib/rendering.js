@@ -1570,9 +1570,11 @@ function startupBannerText(info, frameWidth) {
   const modelLine = `model ${singleLine(info.model) || "unknown"} · session ${singleLine(info.session_id) || "unknown"}`;
   const version = singleLine(info.version) || "unknown";
   const cwd = middleClip(info.cwd || process.cwd(), width - 4);
+  const team = info.team_main;
   return [
     startupBannerBorder("┌", "┐", width),
-    startupBannerLine(`${bold("Rind")} ${dim(`v${version}`)}`, width),
+    startupBannerLine(`${bold("Rind")} ${dim(`v${version}`)}${team ? `  ${teamBadge()}` : ""}`, width),
+    ...(team ? [startupBannerLine(`${bold(singleLine(team.agent_id))}${dim(" · ")}${singleLine(team.project_name)}`, width)] : []),
     startupBannerLine(modelLine, width),
     startupBannerLine(cwd, width),
     startupBannerBorder("└", "┘", width),
@@ -1598,7 +1600,7 @@ function startupBannerWidth(frameWidth) {
   if (!Number.isFinite(columns) || columns <= 0) {
     return MAX_STARTUP_BANNER_WIDTH;
   }
-  return Math.max(44, Math.min(MAX_STARTUP_BANNER_WIDTH, columns - 2));
+  return Math.max(4, Math.min(MAX_STARTUP_BANNER_WIDTH, columns - 2));
 }
 
 function helpRow(leftKey, leftText, rightKey = "", rightText = "") {
@@ -1696,25 +1698,42 @@ function promptHeaderLine(info, frameWidth) {
   if (delegateCount > 0) {
     taskHints.push(`[delegate:${delegateCount}]`);
   }
-  const taskHint = taskHints.length
-    ? dim(` · ${taskHints.join(" ")} (ctrl+b monitor)`)
-    : "";
-  const model = singleLine(info.model);
-  const effort = singleLine(info.reasoning_effort);
-  const cwd = middleClip(info.cwd, 56);
   const width = composerWidth(frameWidth);
-  const effortSegment = effort ? `${dim(" · ")}${promptModel(effort)}` : "";
-  if (model && cwd) {
-    const separator = " · ";
-    const pathWidth = width - visibleLength(model) - visibleLength(separator) - visibleLength(taskHint) - visibleLength(effortSegment);
-    if (pathWidth > 0) {
-      return `  ${promptModel(clipSingleLine(model, width))}${effortSegment}${dim(separator)}${promptPath(clipSingleLine(cwd, pathWidth))}${taskHint}`;
-    }
+  const badge = info.team_main ? `${teamBadge()} ` : "";
+  const available = Math.max(0, width - visibleLength(badge));
+  const counts = taskHints.length ? ` · ${taskHints.join(" ")}` : "";
+  let taskHint = counts ? `${counts} (ctrl+b monitor)` : "";
+  if (visibleLength(taskHint) + 20 > available) {
+    taskHint = counts;
   }
-  if (model) {
-    return `  ${promptModel(clipSingleLine(model, width))}${taskHint}`;
+  if (visibleLength(taskHint) + 8 > available) {
+    taskHint = "";
   }
-  return cwd ? `  ${promptPath(clipSingleLine(cwd, width))}${taskHint}` : "";
+  const details = promptDetails(info, available - visibleLength(taskHint));
+  const line = `${badge}${details}${dim(taskHint)}`.trimEnd();
+  return line ? `  ${clipCells(line, width)}` : "";
+}
+
+function teamBadge() {
+  return bold(paint.notice("[TEAM]"));
+}
+
+function promptDetails(info, width) {
+  const model = singleLine(info.model);
+  const cwd = singleLine(info.cwd);
+  if (!model) {
+    return promptPath(middleClip(cwd, width));
+  }
+  const effort = singleLine(info.reasoning_effort);
+  const effortSegment = effort && visibleLength(effort) + 3 + 8 <= width
+    ? `${dim(" · ")}${promptModel(effort)}` : "";
+  const remaining = width - visibleLength(effortSegment);
+  const pathReserve = cwd && remaining >= 24 ? Math.min(visibleLength(cwd), 16) + 3 : 0;
+  const modelText = clipSingleLine(model, Math.max(0, remaining - pathReserve));
+  const pathWidth = remaining - visibleLength(modelText) - 3;
+  const pathSegment = cwd && pathWidth >= 4
+    ? `${dim(" · ")}${promptPath(middleClip(cwd, pathWidth))}` : "";
+  return `${promptModel(modelText)}${effortSegment}${pathSegment}`;
 }
 
 function composerWidth(frameWidth) {

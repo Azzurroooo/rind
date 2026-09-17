@@ -63,6 +63,14 @@ DEFAULT_BASE_URL = "https://api.openai.com/v1"
 DEFAULT_PROVIDER = "openai-compatible"
 REASONING_EFFORTS = ("low", "medium", "high", "xhigh", "max")
 DEFAULT_USER_AGENT = build_default_user_agent()
+_DEFAULT_SETTINGS = (
+    ("provider", DEFAULT_PROVIDER),
+    ("api", "openai-chat"),
+    ("baseUrl", DEFAULT_BASE_URL),
+    ("apiKey", ""),
+    ("model", DEFAULT_MODEL),
+    ("reasoningEffort", ""),
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -81,6 +89,24 @@ class AppSettings:
 
 def default_settings_path() -> Path:
     return (resolve_rind_home() / "settings.json").resolve()
+
+
+def ensure_user_settings() -> Path:
+    path = default_settings_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    except FileExistsError:
+        return path
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+            descriptor = -1
+            json.dump(dict(_DEFAULT_SETTINGS), handle, ensure_ascii=False, indent=2)
+            handle.write("\n")
+    finally:
+        if descriptor != -1:
+            os.close(descriptor)
+    return path
 
 
 def project_settings_path(workspace_root: str | Path) -> Path:

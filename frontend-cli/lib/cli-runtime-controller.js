@@ -56,6 +56,7 @@ export function createCliRuntimeController({
       state.runtime.status = "starting";
       const info = requireInitialization(await client.request(methods.initialize));
       state.session.info = { ...state.session.info, ...(info || {}) };
+      state.session.info.cwd = info?.workspace_root || state.session.info.cwd;
       state.display.lastEventSequence = 0;
       state.runtime.status = "ready";
       const commandController = getCommands();
@@ -155,6 +156,7 @@ export function createCliRuntimeController({
       session_id: switchedId,
       cwd: workspaceRoot || state.session.info.cwd,
       workspace_root: workspaceRoot || state.session.info.workspace_root,
+      team_main: update?.team_main || null,
       model: replay?.model || update?.model || state.session.info.model,
       reasoning_effort: replay?.reasoning_effort || update?.reasoning_effort || currentReasoningEffort(),
       resume_preview: "",

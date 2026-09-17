@@ -10,6 +10,7 @@ from agent.infrastructure.config.settings_loader import (
     DEFAULT_BASE_URL,
     DEFAULT_MODEL,
     build_default_user_agent,
+    ensure_user_settings,
     load_settings,
     project_settings_path,
 )
@@ -155,6 +156,34 @@ def test_load_settings_uses_defaults_when_file_missing(tmp_path, monkeypatch):
     assert settings.api_key == ""
     assert settings.base_url == DEFAULT_BASE_URL
     assert settings.reasoning_effort == ""
+
+
+def test_ensure_user_settings_creates_empty_default_configuration(tmp_path, monkeypatch):
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+
+    path = ensure_user_settings()
+
+    assert path == tmp_path / ".rind" / "settings.json"
+    assert json.loads(path.read_text(encoding="utf-8")) == {
+        "provider": "openai-compatible",
+        "api": "openai-chat",
+        "baseUrl": DEFAULT_BASE_URL,
+        "apiKey": "",
+        "model": DEFAULT_MODEL,
+        "reasoningEffort": "",
+    }
+
+
+def test_ensure_user_settings_never_overwrites_existing_configuration(tmp_path, monkeypatch):
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    path = write_settings(tmp_path, {"apiKey": "existing-secret", "model": "existing-model"})
+
+    ensure_user_settings()
+
+    assert json.loads(path.read_text(encoding="utf-8")) == {
+        "apiKey": "existing-secret",
+        "model": "existing-model",
+    }
 
 
 def test_load_settings_ignores_environment_configuration(tmp_path, monkeypatch):
