@@ -12,7 +12,7 @@ cd your-project
 rind
 ```
 
-npm 包会依赖对应平台的运行时包。目前发布的平台为 Windows x64、macOS x64/arm64、Linux x64。也可以从 [Releases](https://github.com/Azzurroooo/rind/releases) 下载独立 CLI 安装包。
+npm 包会依赖对应平台的预编译程序包。目前发布的平台为 Windows x64、macOS x64/arm64、Linux x64。也可以从 [Releases](https://github.com/Azzurroooo/rind/releases) 下载独立 CLI 安装包。
 
 在 Rind 中，用 `/login` 选择供应商并输入 API Key，再用 `/model` 选择模型。`/effort` 提供当前模型支持的推理级别。登录凭据保存在 `~/.rind/auth.json`；设置 `RIND_HOME` 后则保存在对应目录下。
 
@@ -56,7 +56,7 @@ source .venv/bin/activate
 .\.venv\Scripts\Activate.ps1
 ```
 
-然后安装运行时依赖并启动 CLI：
+然后安装运行所需依赖并启动 CLI：
 
 ```bash
 python -m pip install -r requirements-runtime.txt

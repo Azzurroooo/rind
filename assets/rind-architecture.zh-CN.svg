@@ -8,7 +8,7 @@
 <path d="M48 36H96" fill="none" stroke="#5fd7ff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
 <path d="M96 36H128" fill="none" stroke="#f5c451" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
 <text x="48" y="68" font-size="19" font-weight="600" fill="#5fd7ff" text-anchor="start">RIND / 核心设计</text>
-<text x="1392" y="68" font-size="18" font-weight="500" fill="#a4b8c1" text-anchor="end">开源 / 本地运行时</text>
+<text x="1392" y="68" font-size="18" font-weight="500" fill="#a4b8c1" text-anchor="end">开源 / 本地引擎</text>
 <text x="48" y="130" font-size="49" font-weight="650" fill="#edf4f1" text-anchor="start">一个引擎，让工作持续积累。</text>
 <text x="48" y="170" font-size="24" font-weight="400" fill="#a4b8c1" text-anchor="start">持久化专家团队 · 可编程会话 · 按需执行的轻量 worker</text>
 <rect x="48" y="210" width="524" height="382" rx="16" fill="#13242b" stroke="#34505c"/>

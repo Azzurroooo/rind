@@ -57,7 +57,7 @@ COPY = {
         "title": "Rind：持久化专家团队、可编程会话与轻量 worker",
         "description": "CLI 界面与 worker 分进程运行。执行对象按需加载、空闲释放，会话历史保存在磁盘上。专家保留工作区，通过共享文件交付成果；脚本可使用 rind run 和 rind send。",
         "brand": "RIND / 核心设计",
-        "edition": "开源 / 本地运行时",
+        "edition": "开源 / 本地引擎",
         "headline": "一个引擎，让工作持续积累。",
         "subtitle": "持久化专家团队 · 可编程会话 · 按需执行的轻量 worker",
         "surface_tag": "01 / SURFACE 界面进程",
