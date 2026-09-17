@@ -1,11 +1,11 @@
 <p align="center">
-  <img src="assets/rind.svg" alt="Rind logo" width="118" />
+  <img src="assets/rind.svg" alt="Rind 标志" width="100" />
 </p>
 
 <h1 align="center">Rind</h1>
 
 <p align="center">
-  <strong>一个天生轻量的本地编码 Agent——可无人值守、可委派小队、可深度扩展、随处可达。</strong>
+  <strong>组建你的 Agent 团队，让每次工作都有积累。</strong>
 </p>
 
 <p align="center">
@@ -13,173 +13,141 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/Azzurroooo/rind/releases"><img src="https://img.shields.io/github/v/release/Azzurroooo/rind?label=release&color=DF7A3A" alt="Latest release" /></a>
-  <img src="https://img.shields.io/badge/Python-3.12%2B-3776AB" alt="Python 3.12+" />
-  <img src="https://img.shields.io/badge/Node-18%2B-3C873A" alt="Node 18+" />
-  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-16A085" alt="MIT license" /></a>
+  <a href="https://github.com/Azzurroooo/rind/releases"><img src="https://img.shields.io/github/v/release/Azzurroooo/rind?label=release" alt="最新版本" /></a>
+  <a href="https://www.npmjs.com/package/@rind-ai/cli"><img src="https://img.shields.io/npm/v/@rind-ai/cli" alt="npm 包" /></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue" alt="MIT 许可证" /></a>
 </p>
 
-<p align="center">
-  <img src="assets/rind-architecture.svg" alt="Rind 将交互、自动化、任务分派与自定义客户端接入同一个本地引擎" width="960" />
-</p>
+Rind 是一个支持**多智能体协作**的**开源 AI 编码 Agent**：为专家建立持久工作区，让会话接入脚本，并通过同一套运行时连接终端、桌面、浏览器和消息平台。它在你的机器上运行，连接你选择的模型供应商。
 
-## Rind 的不同之处
-
-四个决定，划定了 Rind 能为你做什么：
-
-### 把任务交出去，然后走人
-
-```bash
-rind run --prompt "总结 src/ 里的改动" --dir /workspace/project
-```
-
-One-shot 模式是同一个 Agent 的无头形态：最终回答走 `stdout`，过程走 `stderr`，完整运行日志落到 `logs/` 下的 markdown，`--session <id>` 续接早前任务。提问默认关闭，自动化不会被卡死；长命令转后台、会话继续干活，**Ctrl+B** 随时查看后台任务与子代理的实时监视器。
-
-> 钩子、定时任务、流水线拿到的是一个契约干净的 Agent。
-
-### 一支"带状态"的专家小队
-
-传统子代理即用即丢：提示词进去、摘要出来、记忆清零。Rind 的 Team 是文件系统原生且持久的——每个被委派的代理都是一等公民会话，**拥有自己的 workspace 目录、独立的工具集与工作区策略、持续累积的会话历史**（`.aiteam/agents/<name>/`）。专家创建一次（`/team init`、`/team blueprint`、`/team add`），之后的每个任务都从它已知、已写过的东西开始，成果以真实文件发布回来。
-
-> 专家在积累经验，而不是每个任务都从零开始。
-
-### 无状态的轻量内核
-
-worker 不驻留重型状态：agent 容器只在 turn 运行期间存在，结束即释放。所有持久内容——消息、工具调用、压缩记录、用量——都以 append-only JSONL 落在磁盘上。磁盘即真相，内存只做协调：崩溃不丢任何东西，常驻进程永远和新启动时一样轻。
-
-> 小 footprint、即时恢复、没有藏在内存里的状态。
-
-### 一个引擎，四扇门
-
-**CLI** 键盘流终端工作 · **Desktop** 可视化多项目总览 · **Web** 单一 WebSocket（浏览器中途合盖，重连即增量追平）· **IM 网关** 接入 Telegram / Discord。同一批会话、同一套协议、同一个引擎——门换了，工作不换。
-
-> 会话跟着你跨界面，而不是被锁死在一扇门里。
-
-**再补一个 `rind send`**：从任意终端或脚本把提示词投进正在运行的会话——`rind send --session <id> "…"`，空闲会话立即开 turn，忙碌会话自动转为转向；session id 就是地址。
-
-### 常规能力也做扎实了
-
-turn 运行中转向与排队后续 · 任意历史消息处分叉会话（`/fork`）· 实时上下文计量（`/context`，全部实测、估算带 `~` 标记）· append-only JSONL 会话（崩溃安全、可回放、`RIND_HOME` 隔离）· 运行中 turn 崩溃恢复 · 项目文档（`RIND.md`）自动注入上下文 · 技能与计划 · 四套 TTY 主题，流式 Markdown/表格渲染、CJK 宽度正确。
+- **[组建可复用的专家团队](#持久化-agent-团队)**：每个专家都有长期职责、工作目录，以及可供后续任务继续使用的文件。
+- **[让会话进入工作流](#可编程的会话)**：从脚本执行任务，也能向正在运行的终端会话投递新指令。
+- **[基于引擎构建自己的工具](#一个运行时多个客户端)**：新界面接入同一套工具、上下文管理和会话协议。
 
 ## 快速开始
 
-**安装**（三选一）：
+安装 **Node.js 18+** 后：
 
 ```bash
-# 1. GitHub Releases 下载预构建安装器（Windows/macOS/Linux）
-# 2. npm：
 npm install -g @rind-ai/cli
-# 3. 源码：
-git clone https://github.com/Azzurroooo/rind.git && cd rind
-python -m venv .venv && . .venv/bin/activate   # Windows: .\.venv\Scripts\Activate.ps1
-pip install -r requirements-runtime.txt
-node frontend-cli/bin/rind.js
+cd your-project
+rind
 ```
 
-**配置**——工作区里完整的 `.rind/settings.json`，缺省回退 `~/.rind/settings.json`：
+进入 Rind 后，用 `/login` 连接模型供应商，再用 `/model` 选择模型。内置适配支持 OpenAI、Anthropic、Google、DeepSeek 等供应商，也可配置自定义 OpenAI 兼容端点。
 
-```json
-{
-  "model": "your-model-name",
-  "apiKey": "your-api-key",
-  "baseUrl": "https://api.openai.com/v1",
-  "reasoningEffort": "high"
-}
-```
+也可以从 [Releases](https://github.com/Azzurroooo/rind/releases) 下载 **Windows、macOS 或 Linux CLI 安装包**。自定义端点、源码安装与其他客户端的启动方式见[安装与配置指南](docs/getting-started.zh-CN.md)。
 
-任意 OpenAI 兼容端点都可用。然后：
+**先看懂，再动手。** 交互导览用真实 CLI 布局演示模拟任务，支持暂停、回看和直接跳转到某个功能；不调用模型，也不需要 API Key。
 
 ```bash
-rind                          # 交互式 CLI
-rind --session <id>           # 打开指定会话
+rind tour team.create
 ```
 
-## 四张面孔，一个引擎
+导览已合并到 `main`，尚未包含在 v0.8.0 中；现在可通过[源码安装](docs/getting-started.zh-CN.md#从源码运行)体验。运行 `rind tour` 打开目录，也可在会话内输入 `/tour`。
 
-| 界面 | 适用场景 | 启动方式 |
-| --- | --- | --- |
-| **CLI** | 键盘流结对、终端工作流 | `rind` |
-| **Desktop** | 可视化多项目总览 | `npm --prefix desktop run dev`（源码） |
-| **Web** | 浏览器访问、远程机器、共享主机 | `docker compose up -d --build` → `http://localhost:8080` |
-| **IM 网关** | 用 Telegram / Discord 当前端 | `python main.py gateway --config .rind/gateway.yaml` |
+## 持久化 Agent 团队
 
-Web 界面背后是常驻 WebSocket worker：浏览器中途断开，重连后通过增量回放追平错过的 durable 事件——合盖走人，回来接着看。一个端点、一个 token、没有第二套 REST API。远程访问优先走私网（Tailscale/WireGuard）或 TLS 隧道（`cloudflared tunnel --url http://localhost:8080`）；切勿在无 TLS 时直接暴露 worker 端口。通过 `.env` 调整：
+**把反复出现的工作交给有固定工作区的专家。** 测试专家可以持续维护测试样例和注意事项，研究专家可以保存调研结论与参考材料；下次任务到来时，这些积累仍在。
 
-```dotenv
-RIND_WORKSPACE=/absolute/path/to/workspace
-RIND_HOME=/absolute/path/to/rind-data
-RIND_WEB_PORT=8080
-RIND_WEB_BIND=127.0.0.1
-RIND_SERVER_TOKEN=change-me
-```
-
-网关只发出站连接；`${VAR}` 从环境变量插值，未知键一律启动报错、绝不静默兜底；陌生发送者走一次性配对码（`python main.py gateway approve <CODE>`）。Docker 下按需启用：`docker compose --profile gateway up -d`。
-
-## 引擎之内
+一个 Team 就是一组普通目录。主代理负责协调专家，`shared/` 承载它们交换的文件：
 
 ```text
-CLI / Desktop / Web / IM / 你的应用
-          |
-          |  JSONL 请求 + session/update 事件
-          v
-      Rind Worker
-          |
-          +-- turn、转向与取消
-          +-- 模型适配（OpenAI 兼容）
-          +-- 工具与工作区
-          +-- 上下文管理与压缩
-          +-- append-only 会话记录（JSONL）
+my-project/
+├── .aiteam/project.yaml         # Team 信息与主代理选择
+├── agents/
+│   ├── main-agent/              # 协调者的工作区
+│   └── test-specialist/
+│       ├── .aiteam/agent.yaml   # 专家身份
+│       ├── .aiteam/prompts/     # 职责指令
+│       ├── memory/             # 值得保留的笔记
+│       ├── work/               # 工作文件
+│       └── outputs/            # 本地成果
+└── shared/                     # 共享输入与正式交付
 ```
 
-三个决定撑起这个形态：
+每次执行委派都会创建独立、可持久保存的会话。**跨任务延续的是专家职责和文件**：新任务可以检查已有成果，旧对话则作为独立记录保留。主代理收到简明结果和已发布文件的路径，可以直接核验交付物。
 
-- **一个 worker，任意客户端。** 会话标识工作，turn 圈定执行，每个事件都带会话/turn 身份和持久级别。新界面只需说同一套协议，而不是重写 turn 循环。
-- **磁盘即真相。** 会话是 `~/.rind`（或 `RIND_HOME`）下纯 append-only 的 JSONL。进程崩溃不丢任何东西；运行中的 turn 有快照可续；历史回放精确。
-- **小内核。** 模型客户端、会话存储、工具注册表、上下文管理、turn 调度、取消——一短串可替换的端口，你的代码与 Agent 循环之间没有框架图谱。
+互不依赖的任务可以并发委派。专家通过文件工具访问自己的工作区和共享目录，让内部工作材料与正式交付保持清晰边界。
 
-**给造轮子的人**，扩展点直接对应源码：
+### 组建第一支团队
 
-| 想替换/新增 | 起点 |
-| --- | --- |
-| 模型供应商 | `ChatClient` 及其工厂 |
-| 模型可用的能力 | `ToolSpec` 与 `ToolRegistry` |
-| 存储后端 | `SessionStore` |
-| 上下文策略 | Context 与压缩服务 |
-| 人用命令 | Worker 命令注册表或 Surface 命令 |
-| 新界面 | JSONL 协议与 `session/update` |
+先在项目根目录启动 Rind，然后输入：
 
-## CLI 速查
+```text
+/team create
+/exit
+```
 
-| 按键 | 含义 |
-| --- | --- |
-| **Enter** | 发送——turn 运行中即为转向 |
-| **Tab** | 排队后续 · **Alt+↑/↓** 召回排队/转向文本 · **Alt+→** 把后续提升为转向 |
-| **Ctrl+B** | 后台任务监视器 · **Ctrl+O** 展开工具输出 · **?** 快捷键表 |
-| **Ctrl+C** | 中断 turn / 退出 |
-
-| 命令 | 含义 |
-| --- | --- |
-| `/context` | 上下文构成 + 用量面板（真实 token） |
-| `/fork` `/sessions` `/compact` | 分叉、切换、释放上下文 |
-| `/model` `/effort` `/theme` | 选模型、推理力度、配色主题 |
-| `/goal` `/skill` `/team` `/help` | 自主目标、技能、小队、命令表 |
-| `/tour [page]` | 模拟终端中的交互式功能导览 |
-
-| 入口 | 含义 |
-| --- | --- |
-| `rind` / `rind --session <id>` | 交互式 |
-| `rind run --prompt "…" [--session <id>]` | 无头执行，可接管道 |
-| `rind send --session <id> "…"` | 投递到正在运行的会话 |
-| `rind tour [page]` | 功能导览（与会话内 `/tour` 相同） |
-
-## 文档与开发
-
-[架构](docs/architecture.md) · [CLI 渲染](docs/cli-rendering.md) · [CLI turn 流程](docs/cli-turn-flow.md) · [主流水线](docs/main_pipeline.md)（英文）
+创建 Team 不会自动切换当前会话。回到终端，进入协调者工作区重新启动：
 
 ```bash
-pip install -r requirements.txt && pytest test/ -q   # 运行时
-cd frontend-cli && npm install && npm test           # CLI
+cd agents/main-agent
+rind
 ```
+
+接着在 Rind 中输入：
+
+```text
+/team add 一个负责回归测试、持续维护测试笔记的测试专家
+/team list
+```
+
+把待处理材料放入项目的 `shared/` 目录，再向主代理提出任务：
+
+> 委派测试专家检查 shared/parser/，编写 Unicode 回归测试，并将测试文件和简短交接说明发布到 shared/。
+
+指定专家时可使用 `/team list` 显示的 Agent ID。按 **Ctrl+B** 查看委派进度。需要在其他项目复用专家配置时，可以把模板放在 `~/.rind/blueprints/`，再通过 `/team blueprint` 创建专家。
+
+## 可编程的会话
+
+**让脚本发起工作，也让脚本参与正在进行的工作。** Rind 为两种场景提供了直接入口：
+
+```bash
+# 生成可供其他程序使用的结果。
+rind run --prompt "检查当前 diff 是否包含破坏性 API 变更" > review.md
+
+# 从另一个终端向已打开的 Rind CLI 会话发送更新。
+rind send --session <id> "集成测试失败了，请先排查再继续。"
+```
+
+`run` 将最终回答写入 **stdout**、进度写入 **stderr**，并在启动目录的 `logs/` 下保存 Markdown 运行摘要。运行时关闭用户提问，失败返回非零退出码。加上 `--session <id>` 可续接已保存会话，`--dir <absolute-path>` 可指定工作区。
+
+`send` 通过会话 ID 找到同一台机器上正在运行的 CLI：空闲时启动新一轮任务，忙碌时将指令送入当前任务。会话 ID 可在启动 banner 或 `/status` 中查看。投递成功后立即确认，回答出现在目标会话中。测试监听器或本地脚本因此可以持续补充信息，无需接管你的终端。
+
+## 一个运行时，多个客户端
+
+**选择适合当下的工作界面，复用同一个 Agent 引擎。** 各客户端共享会话协议和运行时实现：
+
+| 客户端 | 适用场景 | 从这里开始 |
+| --- | --- | --- |
+| **CLI** | 终端交互、脚本集成 | `rind` |
+| **Desktop** | 可视化管理多个项目 | [从源码启动](docs/getting-started.zh-CN.md#桌面端) |
+| **Web** | 通过浏览器连接常驻 worker | [Docker 或本地部署](docs/getting-started.zh-CN.md#web-端) |
+| **消息网关** | 通过 Telegram、Discord、Slack、飞书等适配器工作 | [网关配置](docs/getting-started.zh-CN.md#消息网关) |
+
+使用 Web 端时，关闭浏览器不会终止 worker 中的任务；重新连接后恢复会话视图。本地客户端配置为使用同一个会话存储目录时，也可以重新打开已有会话。
+
+运行时在工作开始时创建 Agent 执行容器，空闲后释放。消息与工具调用历史以 JSONL 保存在磁盘上，因此无需在两次任务之间让模型客户端和整段对话一直驻留内存，也能重新打开会话。
+
+### 看清模型实际接收了什么
+
+`/context` 展示最近一次组装的上下文，拆分指令、对话、工具定义与工具结果，并区分本地 token 估算和可用的供应商用量数据；用量页还可汇总多个会话的使用情况。当上下文不断增长时，你可以先找到占用来源，再决定压缩或调整哪些内容。
+
+## 基于 Rind 扩展
+
+Rind 将客户端、执行过程和基础设施分开。自定义界面收发请求与 `session/update` 事件，新能力通过工具注册表接入。
+
+| 扩展方向 | 源码入口 |
+| --- | --- |
+| 客户端与集成 | [运行时协议](agent/runtime/server/protocol.py) |
+| 模型可调用的工具 | [ToolSpec](agent/infrastructure/tools/spec.py) 与[工具注册表](agent/infrastructure/tools/registry.py) |
+| 模型或存储适配器 | [应用层接口](agent/application/ports) |
+| 上下文组装与压缩 | [上下文服务](agent/application/context) |
+
+设计细节见[架构](docs/architecture.md)、[CLI 渲染](docs/cli-rendering.md)与[导览实现](docs/cli-tour.md)（英文）。完整命令和快捷键可在 Rind 内通过 `/help` 和 `?` 查看。
+
+欢迎提交 [Issue](https://github.com/Azzurroooo/rind/issues) 或 Pull Request；开发环境和测试命令见[开发指南](docs/getting-started.zh-CN.md#开发与测试)。
 
 ## 许可证
 
