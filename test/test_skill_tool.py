@@ -10,7 +10,6 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from agent.domain import parse_skill_markdown
 from agent.infrastructure.skills import SkillRepository
-from agent.infrastructure.tools.builtin import build_builtin_tool_specs
 from agent.infrastructure.tools import DefaultToolRegistry
 from agent.infrastructure.tools.builtin.skill import skill, skill_create
 
@@ -88,7 +87,7 @@ def test_skill_create_rejects_invalid_names_and_preserves_overwrite_policy(tmp_p
     assert overwritten["ok"] is True
 
 
-def test_skill_tools_are_registered_with_agent_scope() -> None:
+def test_skill_tools_are_registered_with_agent_scope(build_builtin_tool_specs) -> None:
     registry = DefaultToolRegistry(build_builtin_tool_specs())
     assert registry.has("skill")
     assert registry.has("skill_create")

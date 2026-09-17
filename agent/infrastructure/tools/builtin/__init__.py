@@ -20,6 +20,8 @@ from .web_sessions import WebSessions
 
 def build_builtin_tool_specs(
     *,
+    shell_tools: ShellTools,
+    web_sessions: WebSessions,
     enable_goal: bool = False,
     enable_user_question: bool = True,
     set_goal_status: Callable[[str], Awaitable[dict[str, str]]] | None = None,
@@ -31,17 +33,11 @@ def build_builtin_tool_specs(
     shared_root: str | None = None,
     session_output_root: str | None = None,
     output_store=None,
-    shell_tools: ShellTools | None = None,
-    web_sessions: WebSessions | None = None,
     session_base_provider: Callable[[], str | None] | None = None,
 ) -> tuple[ToolSpec, ...]:
     specs = list(build_file_tool_specs(workspace_root, allowed_roots, shared_root, session_output_root))
     if enable_user_question:
         specs[0:0] = USER_QUESTION_TOOL_SPECS
-    if shell_tools is None:
-        from agent.infrastructure.persistence import ToolOutputStore
-
-        shell_tools = ShellTools(output_store or ToolOutputStore())
     specs.extend(build_shell_tool_specs(shell_tools, workspace_root))
     specs.append(create_plan_tool_spec(session_base_provider))
     specs.extend(build_skill_tool_specs(skill_repository))
@@ -49,7 +45,7 @@ def build_builtin_tool_specs(
         specs.append(create_delegate_tool_spec(delegate_handler))
     if agent_create_project is not None:
         specs.append(create_agent_create_tool_spec(agent_create_project))
-    specs.extend(build_web_tool_specs(web_sessions or WebSessions()))
+    specs.extend(build_web_tool_specs(web_sessions))
     if enable_goal:
         if set_goal_status is None:
             raise ValueError("Goal tool requires a session goal status setter.")

@@ -15,7 +15,6 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from agent.infrastructure.tools.builtin import build_builtin_tool_specs
 from agent.infrastructure.tools import DefaultToolRegistry
 from agent.infrastructure.tools.builtin.files import edit_file, write_file
 from agent.infrastructure.tools.builtin.files import mutations
@@ -139,7 +138,7 @@ def test_diff_summary_is_bounded(tmp_path: Path) -> None:
     assert file_meta["diff"].endswith("... diff truncated ...")
 
 
-def test_file_mutation_schemas_are_versioned_and_apply_patch_is_absent() -> None:
+def test_file_mutation_schemas_are_versioned_and_apply_patch_is_absent(build_builtin_tool_specs) -> None:
     registry = DefaultToolRegistry(build_builtin_tool_specs())
     schemas = {item["function"]["name"]: item["function"] for item in registry.schemas}
 
