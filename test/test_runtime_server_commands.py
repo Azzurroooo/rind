@@ -12,6 +12,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from agent.runtime.server.commands import SlashCommandContext, SlashCommandInfo, SlashCommandRouter
+from agent.runtime.server.commands.features import build_command_infos
 from agent.infrastructure.config import AppSettings
 from agent.infrastructure.persistence.jsonl_session_store import JsonlSessionStore
 from agent.infrastructure.skills.repository import SkillRepository
@@ -79,7 +80,7 @@ def _context(session=None, runtime=None):
 
 @pytest.mark.asyncio
 async def test_help_returns_command_list() -> None:
-    result = await SlashCommandRouter().execute("/help", _context())
+    result = await SlashCommandRouter(build_command_infos()).execute("/help", _context())
 
     assert "Commands" in result.text
     assert "Operate" in result.text
@@ -94,7 +95,7 @@ async def test_help_returns_command_list() -> None:
 
 @pytest.mark.asyncio
 async def test_help_returns_command_specific_usage() -> None:
-    result = await SlashCommandRouter().execute("/help model", _context())
+    result = await SlashCommandRouter(build_command_infos()).execute("/help model", _context())
 
     assert result.text.startswith("# /model")
     assert "Show or change the active model" in result.text
@@ -107,7 +108,7 @@ async def test_help_returns_command_specific_usage() -> None:
 
 @pytest.mark.asyncio
 async def test_help_reports_unknown_command() -> None:
-    result = await SlashCommandRouter().execute("/help missing", _context())
+    result = await SlashCommandRouter(build_command_infos()).execute("/help missing", _context())
 
     assert "Unknown command: /missing" in result.text
     assert "/help" in result.text
@@ -115,20 +116,20 @@ async def test_help_reports_unknown_command() -> None:
 
 @pytest.mark.asyncio
 async def test_config_command_is_removed() -> None:
-    result = await SlashCommandRouter().execute("/config", _context())
+    result = await SlashCommandRouter(build_command_infos()).execute("/config", _context())
 
     assert result.text == "Unknown command: /config\nRun /help to see available commands."
 
 
 @pytest.mark.asyncio
 async def test_help_rejects_too_many_args() -> None:
-    result = await SlashCommandRouter().execute("/help model now", _context())
+    result = await SlashCommandRouter(build_command_infos()).execute("/help model now", _context())
 
     assert result.text == "Usage: /help [command]"
 
 
 def test_router_exposes_sorted_command_names() -> None:
-    names = SlashCommandRouter().command_names()
+    names = SlashCommandRouter(build_command_infos()).command_names()
 
     assert names == sorted(names)
     assert "help" in names
@@ -139,7 +140,7 @@ def test_router_exposes_sorted_command_names() -> None:
 
 
 def test_router_exposes_command_descriptions() -> None:
-    infos = SlashCommandRouter().command_infos()
+    infos = SlashCommandRouter(build_command_infos()).command_infos()
     descriptions = {info.name: info.description for info in infos}
     usages = {info.name: info.usage for info in infos}
 
@@ -226,7 +227,7 @@ async def test_sessions_lists_recent_sessions_with_current_marker() -> None:
             ]
 
     session = SessionWithRecent()
-    result = await SlashCommandRouter().execute("/sessions 5", _context(session=session))
+    result = await SlashCommandRouter(build_command_infos()).execute("/sessions 5", _context(session=session))
 
     assert session.requested_limit == 5
     assert "Recent sessions:" in result.text
@@ -242,7 +243,7 @@ async def test_sessions_lists_recent_sessions_with_current_marker() -> None:
 
 @pytest.mark.asyncio
 async def test_sessions_reports_no_recent_sessions() -> None:
-    result = await SlashCommandRouter().execute("/sessions", _context())
+    result = await SlashCommandRouter(build_command_infos()).execute("/sessions", _context())
 
     assert result.text == "No recent sessions."
     assert result.display == {
@@ -256,7 +257,7 @@ async def test_sessions_reports_no_recent_sessions() -> None:
 
 @pytest.mark.asyncio
 async def test_sessions_rejects_invalid_limit() -> None:
-    result = await SlashCommandRouter().execute("/sessions many", _context())
+    result = await SlashCommandRouter(build_command_infos()).execute("/sessions many", _context())
 
     assert result.text == "Usage: /sessions [limit]"
 
@@ -267,14 +268,14 @@ async def test_sessions_handles_unsupported_session_store() -> None:
         session_id = "session_1"
         model = "model_a"
 
-    result = await SlashCommandRouter().execute("/sessions", _context(session=UnsupportedSession()))
+    result = await SlashCommandRouter(build_command_infos()).execute("/sessions", _context(session=UnsupportedSession()))
 
     assert result.text == "Sessions are not supported by this session store."
 
 
 @pytest.mark.asyncio
 async def test_unknown_command_returns_friendly_error() -> None:
-    result = await SlashCommandRouter().execute("/missing", _context())
+    result = await SlashCommandRouter(build_command_infos()).execute("/missing", _context())
 
     assert "Unknown command: /missing" in result.text
     assert "/help" in result.text
@@ -286,7 +287,7 @@ async def test_team_create_initializes_project_without_handoff(tmp_path, monkeyp
     session = JsonlSessionStore(session_dir=str(tmp_path / "sessions"), session_id="bootstrap", system_prompt="sys")
     await session.initialize()
 
-    result = await SlashCommandRouter().execute("/team create quant-project", _context(session=session))
+    result = await SlashCommandRouter(build_command_infos()).execute("/team create quant-project", _context(session=session))
 
     workspace = tmp_path / "agents" / "main-agent"
     meta = json.loads((tmp_path / "sessions" / "bootstrap" / "meta.json").read_text(encoding="utf-8"))
@@ -315,8 +316,8 @@ async def test_team_management_lists_and_initializes_agents(tmp_path, monkeypatc
     context = _context(session=session)
     context.workspace_root = str(tmp_path / "agents" / "main-agent")
 
-    initialized = await SlashCommandRouter().execute("/team init", context)
-    listed = await SlashCommandRouter().execute("/team list", context)
+    initialized = await SlashCommandRouter(build_command_infos()).execute("/team init", context)
+    listed = await SlashCommandRouter(build_command_infos()).execute("/team list", context)
 
     assert initialized.display["type"] == "team_init"
     assert "weather-agent" in initialized.display["created"]
@@ -332,7 +333,7 @@ async def test_team_add_returns_main_agent_creation_prompt(tmp_path) -> None:
     context = _context(session=session)
     context.workspace_root = str(tmp_path / "agents" / "main-agent")
 
-    result = await SlashCommandRouter().execute("/team add Weather reports", context)
+    result = await SlashCommandRouter(build_command_infos()).execute("/team add Weather reports", context)
 
     assert result.next_prompt["input"].startswith("Create a Team Agent")
     assert result.next_prompt["transient_system_messages"]
@@ -340,7 +341,7 @@ async def test_team_add_returns_main_agent_creation_prompt(tmp_path) -> None:
 
 @pytest.mark.asyncio
 async def test_status_shows_config_and_empty_assistant_sampling() -> None:
-    result = await SlashCommandRouter().execute("/status", _context())
+    result = await SlashCommandRouter(build_command_infos()).execute("/status", _context())
 
     assert "Config:" in result.text
     assert "session: session_1" in result.text
@@ -356,7 +357,7 @@ async def test_status_shows_config_and_empty_assistant_sampling() -> None:
 
 @pytest.mark.asyncio
 async def test_status_rejects_extra_args() -> None:
-    result = await SlashCommandRouter().execute("/status now", _context())
+    result = await SlashCommandRouter(build_command_infos()).execute("/status now", _context())
 
     assert result.text == "Usage: /status"
 
@@ -374,7 +375,7 @@ async def test_status_shows_latest_sampling_usage() -> None:
                 "output_tokens": 2100,
             }
 
-    result = await SlashCommandRouter().execute("/status", _context(session=UsageSession()))
+    result = await SlashCommandRouter(build_command_infos()).execute("/status", _context(session=UsageSession()))
 
     assert "Assistant sampling:" in result.text
     assert "context: ▮▮▮▮▮▯▯▯▯▯ 46.9%" in result.text
@@ -409,7 +410,7 @@ async def test_status_ignores_compact_sampling_usage() -> None:
                 "output_tokens": 900,
             }
 
-    result = await SlashCommandRouter().execute("/status", _context(session=UsageSession()))
+    result = await SlashCommandRouter(build_command_infos()).execute("/status", _context(session=UsageSession()))
 
     assert "Assistant sampling:" in result.text
     assert "Latest request" not in result.text
@@ -430,7 +431,7 @@ async def test_status_tolerates_invalid_sampling_usage() -> None:
                 "output_tokens": None,
             }
 
-    result = await SlashCommandRouter().execute("/status", _context(session=UsageSession()))
+    result = await SlashCommandRouter(build_command_infos()).execute("/status", _context(session=UsageSession()))
 
     assert "Assistant sampling:" in result.text
     assert "input: 0" in result.text
@@ -463,7 +464,7 @@ async def test_status_does_not_show_recent_tools() -> None:
             ]
 
     session = ToolSession()
-    result = await SlashCommandRouter().execute("/status", _context(session=session))
+    result = await SlashCommandRouter(build_command_infos()).execute("/status", _context(session=session))
 
     assert session.tool_records_called is False
     assert "Assistant sampling:" in result.text
@@ -483,7 +484,7 @@ async def test_status_does_not_leak_api_key(monkeypatch) -> None:
     )
     monkeypatch.setattr("agent.runtime.server.commands.status_view.load_settings", lambda _: settings)
 
-    result = await SlashCommandRouter().execute("/status", _context())
+    result = await SlashCommandRouter(build_command_infos()).execute("/status", _context())
 
     assert "apiKey: set" in result.text
     assert "baseUrl: https://example.com/v1" in result.text
@@ -514,7 +515,7 @@ async def test_model_set_updates_session_selection_without_changing_settings(tmp
     session.update_selection = update_selection
     context = SlashCommandContext(runtime=None, session=session, debug=True)
 
-    result = await SlashCommandRouter().execute("/model set model_b", context)
+    result = await SlashCommandRouter(build_command_infos()).execute("/model set model_b", context)
     data = json.loads(path.read_text(encoding="utf-8"))
 
     assert "Session model updated." in result.text
@@ -528,7 +529,7 @@ async def test_model_set_updates_session_selection_without_changing_settings(tmp
 
 @pytest.mark.asyncio
 async def test_model_rejects_invalid_set_args() -> None:
-    result = await SlashCommandRouter().execute("/model set", _context())
+    result = await SlashCommandRouter(build_command_infos()).execute("/model set", _context())
 
     assert result.text == "Usage: /model or /model set <model>"
 
@@ -538,7 +539,7 @@ async def test_compact_calls_runtime_compact_context() -> None:
     session = FakeSession()
     runtime = FakeRuntime()
     context = SlashCommandContext(runtime=runtime, session=session, debug=True)
-    result = await SlashCommandRouter().execute("/compact", context)
+    result = await SlashCommandRouter(build_command_infos()).execute("/compact", context)
 
     assert runtime.compact_called is True
     assert "Compact complete." in result.text
@@ -554,7 +555,7 @@ async def test_compact_returns_friendly_message_for_empty_session() -> None:
 
     runtime = FakeRuntime()
     context = SlashCommandContext(runtime=runtime, session=EmptySession(), debug=True)
-    result = await SlashCommandRouter().execute("/compact", context)
+    result = await SlashCommandRouter(build_command_infos()).execute("/compact", context)
 
     assert runtime.compact_called is False
     assert result.text == "Not enough messages to compact. Send a message first."
@@ -571,7 +572,7 @@ async def test_skill_lists_project_skill(tmp_path, monkeypatch) -> None:
     )
     monkeypatch.chdir(tmp_path)
 
-    result = await SlashCommandRouter().execute("/skill", _context())
+    result = await SlashCommandRouter(build_command_infos()).execute("/skill", _context())
 
     assert "demo [project]" in result.text
     assert "Demo skill" in result.text
@@ -594,7 +595,7 @@ async def test_skill_lists_user_skill_from_rind_home(tmp_path, monkeypatch) -> N
     monkeypatch.chdir(workspace)
     monkeypatch.setenv("RIND_HOME", str(rind_home))
 
-    result = await SlashCommandRouter().execute("/skill", _context())
+    result = await SlashCommandRouter(build_command_infos()).execute("/skill", _context())
 
     assert "demo [user]" in result.text
     assert "User demo skill" in result.text
@@ -620,7 +621,7 @@ async def test_skill_lists_project_skill_from_cwd_not_parent_git_root(tmp_path, 
     )
     monkeypatch.chdir(nested)
 
-    result = await SlashCommandRouter().execute("/skill", _context())
+    result = await SlashCommandRouter(build_command_infos()).execute("/skill", _context())
 
     assert "nested [project]" in result.text
     assert "Nested skill" in result.text
@@ -654,7 +655,7 @@ async def test_skill_list_rescans_without_updating_session_catalog(tmp_path, mon
     runtime = FakeRuntime()
     runtime.skill_repository = repository
     context = SlashCommandContext(runtime=runtime, session=session, debug=True)
-    router = SlashCommandRouter()
+    router = SlashCommandRouter(build_command_infos())
 
     first = await router.execute("/skill list", context)
     assert "first [project]" in first.text
@@ -682,7 +683,7 @@ async def test_init_project_returns_turn_payload(tmp_path, monkeypatch) -> None:
     (project / ".git").mkdir()
     monkeypatch.chdir(project)
 
-    result = await SlashCommandRouter().execute("/init", _context())
+    result = await SlashCommandRouter(build_command_infos()).execute("/init", _context())
 
     assert "Initializing project RIND.md" in result.text
     assert result.next_prompt["input"].startswith("Initialize project RIND.md")
@@ -702,7 +703,7 @@ async def test_init_project_uses_cwd_not_parent_git_root(tmp_path, monkeypatch) 
     (project / ".git").mkdir()
     monkeypatch.chdir(nested)
 
-    result = await SlashCommandRouter().execute("/init project", _context())
+    result = await SlashCommandRouter(build_command_infos()).execute("/init project", _context())
 
     assert str(nested / "RIND.md") in result.next_prompt["input"]
     assert str(project / "RIND.md") not in result.next_prompt["input"]
@@ -718,7 +719,7 @@ async def test_init_project_accepts_string_workspace_root(tmp_path, monkeypatch)
     context = _context()
     context.workspace_root = str(workspace)
 
-    result = await SlashCommandRouter().execute("/init project", context)
+    result = await SlashCommandRouter(build_command_infos()).execute("/init project", context)
 
     assert result.next_prompt is not None
     assert str(workspace / "RIND.md") in result.next_prompt["input"]
@@ -730,7 +731,7 @@ async def test_init_user_returns_turn_payload(tmp_path, monkeypatch) -> None:
     user_home.mkdir()
     monkeypatch.setenv("RIND_HOME", str(user_home))
 
-    result = await SlashCommandRouter().execute("/init user", _context())
+    result = await SlashCommandRouter(build_command_infos()).execute("/init user", _context())
 
     assert "Initializing user RIND.md" in result.text
     assert result.next_prompt["input"].startswith("Initialize user RIND.md")
@@ -742,7 +743,7 @@ async def test_init_user_returns_turn_payload(tmp_path, monkeypatch) -> None:
 
 @pytest.mark.asyncio
 async def test_init_rejects_invalid_scope() -> None:
-    result = await SlashCommandRouter().execute("/init all", _context())
+    result = await SlashCommandRouter(build_command_infos()).execute("/init all", _context())
 
     assert result.text == "Usage: /init [project|user]"
     assert result.next_prompt is None

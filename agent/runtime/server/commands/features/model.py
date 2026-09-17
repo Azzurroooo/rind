@@ -4,7 +4,7 @@ from agent.infrastructure.config.settings_loader import DEFAULT_MODEL
 from agent.runtime.server.commands.formatting import display_value
 
 from ..model_control import _default_model, normalize_model_name
-from ..router import SlashCommandContext, SlashCommandInfo
+from ..contracts import SlashCommandContext, SlashCommandInfo
 
 
 async def handle_model(context: SlashCommandContext, args: list[str]) -> str:

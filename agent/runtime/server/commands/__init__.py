@@ -1,5 +1,6 @@
 """Slash command helpers for the CLI."""
 
-from .router import SlashCommandContext, SlashCommandInfo, SlashCommandResult, SlashCommandRouter
+from .contracts import SlashCommandContext, SlashCommandInfo, SlashCommandResult
+from .router import SlashCommandRouter
 
 __all__ = ["SlashCommandContext", "SlashCommandInfo", "SlashCommandResult", "SlashCommandRouter"]

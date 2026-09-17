@@ -2,7 +2,7 @@
 
 from agent.runtime.server.commands.formatting import clip_text, display_value, nonnegative_int, single_line
 
-from ..router import SlashCommandContext, SlashCommandInfo, SlashCommandResult
+from ..contracts import SlashCommandContext, SlashCommandInfo, SlashCommandResult
 
 
 async def handle_sessions(context: SlashCommandContext, args: list[str]) -> str | SlashCommandResult:

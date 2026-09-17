@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from agent.runtime.server.commands.features import build_command_infos
+
 import asyncio
 import copy
 import inspect
@@ -223,7 +225,7 @@ class WorkerStdioRuntimeServer:
         self._background_output = background_output
         self._goal_enabled = goal_enabled
         self._writer = _WorkerWriter(writer)
-        self._slash_router = SlashCommandRouter()
+        self._slash_router = SlashCommandRouter(build_command_infos())
         self._requests: asyncio.Queue[dict[str, Any] | None] = asyncio.Queue()
         self._dispatch_tasks: set[asyncio.Task] = set()
         self._initialized = False

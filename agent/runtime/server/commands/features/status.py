@@ -1,6 +1,6 @@
 """Status slash command."""
 
-from ..router import SlashCommandContext, SlashCommandInfo, SlashCommandResult
+from ..contracts import SlashCommandContext, SlashCommandInfo, SlashCommandResult
 from ..status_view import build_status_display, render_status_display
 
 

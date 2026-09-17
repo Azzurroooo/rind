@@ -10,7 +10,7 @@ from .sessions import COMMAND as SESSIONS_COMMAND
 from .skill import COMMAND as SKILL_COMMAND
 from .status import COMMAND as STATUS_COMMAND
 from .team import COMMAND as TEAM_COMMAND
-from ..router import SlashCommandInfo
+from ..contracts import SlashCommandInfo
 
 
 def build_command_infos() -> tuple[SlashCommandInfo, ...]:

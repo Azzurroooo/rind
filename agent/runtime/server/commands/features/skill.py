@@ -2,7 +2,7 @@
 
 from pathlib import Path
 
-from ..router import SlashCommandContext, SlashCommandInfo, SlashCommandResult
+from ..contracts import SlashCommandContext, SlashCommandInfo, SlashCommandResult
 
 
 async def handle_skill(context: SlashCommandContext, args: list[str]) -> str | SlashCommandResult:
