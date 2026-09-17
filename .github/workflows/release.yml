@@ -15,6 +15,7 @@ permissions:
 
 env:
   DISTRIBUTION_REPOSITORY: Azzurroooo/rind-distribution
+  DISTRIBUTION_REF: 401ae6ea900a3371cc89820c7dcef88825cfe96c
   SOURCE_REF: ${{ github.event_name == 'workflow_dispatch' && inputs.source_ref || github.ref }}
   RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.source_ref || github.ref_name }}
 
@@ -41,6 +42,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: ${{ env.DISTRIBUTION_REPOSITORY }}
+          ref: ${{ env.DISTRIBUTION_REF }}
           path: rind-distribution
           token: ${{ secrets.DISTRIBUTION_TOKEN || github.token }}
       - uses: actions/setup-python@v5
@@ -72,6 +74,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: ${{ env.DISTRIBUTION_REPOSITORY }}
+          ref: ${{ env.DISTRIBUTION_REF }}
           path: rind-distribution
           token: ${{ secrets.DISTRIBUTION_TOKEN || github.token }}
       - uses: actions/setup-python@v5
@@ -110,6 +113,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: ${{ env.DISTRIBUTION_REPOSITORY }}
+          ref: ${{ env.DISTRIBUTION_REF }}
           path: rind-distribution
           token: ${{ secrets.DISTRIBUTION_TOKEN || github.token }}
       - uses: actions/download-artifact@v4
