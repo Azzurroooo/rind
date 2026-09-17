@@ -135,6 +135,27 @@ test("page frame titles the page and wraps every content line", () => {
   }
 });
 
+test("team lessons show main-agent identity in the banner and status bar, including after rewind", () => {
+  for (const page of tourPages().filter((page) => page.id.startsWith("team."))) {
+    const stage = createTourStage();
+    const starts = page.steps.flatMap((step, index) => step.kind === "startup" ? [index] : []);
+    for (const index of [...starts, ...[...starts].reverse()]) {
+      stage.rebuildTo(page.steps, index);
+      const snapshot = stage.snapshot();
+      const isMain = snapshot.rind.info.cwd === "~/demo/agents/main-agent";
+      const view = renderTourPage(snapshot, { ...pageState("waiting"), page, stepIndex: index }, 120);
+      const lines = view.lines.map(stripAnsi);
+      const banner = lines.findLast((line) => line.includes("Rind v"));
+      const status = lines.findLast((line) => line.includes("glm-4.7") && line.includes("~/demo"));
+      assert.ok(banner, `${page.id}: startup banner visible`);
+      assert.ok(status, `${page.id}: status bar visible`);
+      assert.equal(banner.includes("[TEAM]"), isMain, `${page.id}: banner identity`);
+      assert.equal(status.includes("[TEAM]"), isMain, `${page.id}: status identity`);
+      assert.equal(lines.some((line) => line.includes("main-agent · demo")), isMain);
+    }
+  }
+});
+
 test("shell typing shows a prompt line with a hardware cursor point", () => {
   const stage = createTourStage();
   stage.beginStep({ kind: "shell", command: "rind" });
