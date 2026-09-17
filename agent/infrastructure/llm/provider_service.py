@@ -75,8 +75,7 @@ class ProviderServiceImpl:
     def logout(self, provider_id: str) -> bool:
         return self.credentials.delete(provider_id)
 
-    async def create_chat_client(self, workspace_root: str | None, selection: ModelSelection):
-        settings = load_settings(workspace_root)
+    async def create_chat_client(self, settings: AppSettings, selection: ModelSelection, *, workspace_root: str | None):
         definition = self._provider(selection.provider_id)
         credential = self._resolve_credential(settings, definition.id)
         if credential is None:

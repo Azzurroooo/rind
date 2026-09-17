@@ -227,10 +227,11 @@ async def test_list_models_hides_unconfigured_providers_and_appends_current(tmp_
 
 @pytest.mark.asyncio
 async def test_create_chat_client_requires_configuration(tmp_path: Path, monkeypatch) -> None:
-    service = _service(tmp_path, _settings(tmp_path), monkeypatch)
+    settings = _settings(tmp_path)
+    service = _service(tmp_path, settings, monkeypatch)
 
     with pytest.raises(ProviderError) as exc:
-        await service.create_chat_client(str(tmp_path), ModelSelection("deepseek", "deepseek-chat"))
+        await service.create_chat_client(settings, ModelSelection("deepseek", "deepseek-chat"), workspace_root=str(tmp_path))
 
     assert exc.value.code == "provider_not_configured"
     assert "/login" in str(exc.value)
@@ -248,7 +249,7 @@ async def test_create_chat_client_rejects_unknown_api(tmp_path: Path, monkeypatc
     )
 
     with pytest.raises(ProviderError) as exc:
-        await service.create_chat_client(str(tmp_path), ModelSelection("deepseek", "deepseek-chat"))
+        await service.create_chat_client(settings, ModelSelection("deepseek", "deepseek-chat"), workspace_root=str(tmp_path))
 
     assert exc.value.code == "unsupported_api"
 
@@ -610,7 +611,7 @@ async def test_provider_service_creates_google_client_from_environment(tmp_path:
 
     from agent.infrastructure.llm.google_generative_ai import GoogleGenerativeAIClient
 
-    client = await service.create_chat_client(str(tmp_path), ModelSelection("google", "gemini-3-flash", ""))
+    client = await service.create_chat_client(settings, ModelSelection("google", "gemini-3-flash", ""), workspace_root=str(tmp_path))
     assert isinstance(client, GoogleGenerativeAIClient)
     await client.close()
 

@@ -643,22 +643,16 @@ class ExecutionCoordinator:
             existing = self._active.get(clean)
             if existing is not None:
                 return existing.container
-            info = await self._repository.info(clean)
-            root = _normalize_workspace_root(info["workspace_root"])
+            info = await self._repository.metadata(clean)
+            root = _normalize_workspace_root(str(info.get("workspace_root") or info.get("cwd") or ""))
             settings = await asyncio.to_thread(load_settings, root)
             selection = ModelSelection(
                 str(info.get("provider") or settings.provider),
                 str(info.get("model") or settings.model),
                 str(info.get("reasoning_effort") or settings.reasoning_effort),
             )
-            settings = replace(
-                settings,
-                provider=selection.provider_id,
-                model=selection.model_id,
-                reasoning_effort=selection.reasoning_effort,
-            )
             try:
-                chat_client = await self._provider_service.create_chat_client(root, selection)
+                chat_client = await self._provider_service.create_chat_client(settings, selection, workspace_root=root)
             except Exception as exc:
                 if getattr(exc, "code", "") != "provider_not_configured":
                     raise
@@ -666,7 +660,7 @@ class ExecutionCoordinator:
             container = None
             try:
                 container = build_agent_container(
-                    settings=settings,
+                    settings=replace(settings, provider=selection.provider_id, model=selection.model_id, reasoning_effort=selection.reasoning_effort),
                     chat_client=chat_client,
                     session_dir=self.session_dir,
                     session_id=clean,
@@ -725,7 +719,7 @@ class ExecutionCoordinator:
             settings = await asyncio.to_thread(load_settings, str(target.workspace_root))
             selection = ModelSelection(settings.provider, settings.model, settings.reasoning_effort)
             try:
-                chat_client = await self._provider_service.create_chat_client(str(target.workspace_root), selection)
+                chat_client = await self._provider_service.create_chat_client(settings, selection, workspace_root=str(target.workspace_root))
             except Exception as exc:
                 if getattr(exc, "code", "") != "provider_not_configured":
                     raise

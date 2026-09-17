@@ -14,6 +14,45 @@ from agent.runtime.server.protocol import RuntimeMethod
 from agent.runtime.server.stdio import WorkerStdioRuntimeServer
 
 
+def test_execution_reads_configuration_once_and_refreshes_between_turns(tmp_path, monkeypatch):
+    import agent.runtime.server.worker as worker_module
+    from unittest.mock import AsyncMock
+
+    async def run():
+        monkeypatch.setenv("RIND_HOME", str(tmp_path / "home"))
+        worker = RuntimeWorker(workspace_root=str(tmp_path), session_dir=str(tmp_path / "sessions"))
+        info = await worker.initialize()
+        settings_loader = worker_module.load_settings
+        reads = []
+
+        def load(root):
+            reads.append(root)
+            return settings_loader(root)
+
+        configurations = []
+
+        async def create(settings, selection, *, workspace_root):
+            configurations.append(settings)
+            return SimpleNamespace(close=AsyncMock())
+
+        monkeypatch.setattr(worker_module, "load_settings", load)
+        monkeypatch.setattr(worker.provider_service, "create_chat_client", create)
+        try:
+            await worker.start_execution(info["session_id"])
+            await worker.release_execution(info["session_id"])
+            path = tmp_path / "home" / "settings.json"
+            path.parent.mkdir(exist_ok=True)
+            path.write_text(json.dumps({"baseUrl": "https://changed.example/v1"}), encoding="utf-8")
+            await worker.start_execution(info["session_id"])
+            assert len(reads) == 2
+            assert configurations[0].base_url != configurations[1].base_url
+            assert configurations[1].base_url == "https://changed.example/v1"
+        finally:
+            await worker.close()
+
+    asyncio.run(run())
+
+
 class _Event:
     def __init__(self, event_type: str, session_id: str, turn_id: str):
         self._data = {
