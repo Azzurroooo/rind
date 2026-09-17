@@ -182,8 +182,11 @@ test("a completed lesson keeps title, takeaway and navigation on an 80x24 termin
   const running = runTour({ input, output: output.output, startPageId: "start.hello", schedule: clock.schedule, cancel: clock.cancel, onPageComplete: () => completed++ });
   try {
     await settle();
-    // Walk all beats of the first lesson with terminal input, not private player APIs.
-    for (let i = 1; i < findTourPage("start.hello").steps.length; i++) input.send("\x1b[C");
+    // Pause on the shell animation, then review one step per keypress.
+    // Active playback may combine instant updates with their explanation.
+    input.send("\x1b[C");
+    input.send(" ");
+    for (let i = 2; i < findTourPage("start.hello").steps.length; i++) input.send("\x1b[C");
     await settle();
     let screen = (await output.flushAndGetViewport()).join("\n");
     assert.ok(screen.includes("Demo · Your first turn"), screen);
@@ -274,6 +277,29 @@ test("terminal clearly distinguishes an explanation stop from an automatic count
     await running;
   }
   assert.equal(clock.pendingCount, 0);
+});
+
+test("finishing the typed example immediately shows its explanation without AUTO", async () => {
+  const input = createVirtualInput();
+  const output = createVirtualOutput({ columns: 80, rows: 24 });
+  const clock = fakeClock();
+  const running = runTour({ input, output: output.output, startPageId: "start.hello", schedule: clock.schedule, cancel: clock.cancel, now: clock.now });
+  try {
+    for (let i = 0; i < 3; i++) input.send("\x1b[C");
+    await settle();
+    assert.ok((await output.flushAndGetViewport()).join("\n").includes("PLAYING · Typing in Rind"));
+    input.send("\r");
+    await settle();
+    const screen = (await output.flushAndGetViewport()).join("\n");
+    assert.ok(screen.includes("PAUSED · Read this explanation"), screen);
+    assert.ok(screen.includes("Step 5/"), screen);
+    assert.ok(!screen.includes("AUTO"));
+    assertGuideOutsideDemo(screen);
+    assert.equal(clock.pendingCount, 0);
+  } finally {
+    input.send("\x03");
+    await running;
+  }
 });
 
 function assertGuideOutsideDemo(screen) {

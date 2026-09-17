@@ -2,7 +2,7 @@ const SPEEDS = [0.5, 1, 2, 4];
 const SPINNER_MS = 120;
 
 // Timing per step kind at 1× (ms). tickMs animates a reveal cursor, settleMs
-// delays a tool outcome, afterMs is the pause after a step settles, waitKey
+// delays a tool outcome, afterMs is the reading hold after a step settles, waitKey
 // holds for a keypress.
 const TIMING = {
   shell: { tickMs: 24, afterMs: 300 },
@@ -17,7 +17,7 @@ const TIMING = {
   menu: { tickMs: 650, afterMs: 1800 },
   "turn-done": { afterMs: 500 },
   exit: { afterMs: 400 },
-  note: { waitKey: true, afterMs: 200 },
+  note: { waitKey: true },
 };
 
 export function createTourPlayer({ topics, startPageId = "", stage, schedule = setTimeout, cancel = clearTimeout, now = () => performance.now(), onRender = () => {}, onPageComplete = () => {} }) {
@@ -66,9 +66,25 @@ export function createTourPlayer({ topics, startPageId = "", stage, schedule = s
     return steps()[stepIndex];
   }
 
-  function timing(kind) {
-    if (kind === "menu" && current()?.menu.kind === "auth-secret") return { tickMs: 80, afterMs: 1800 };
+  function timing(kind, step = current()) {
+    if (kind === "menu" && step?.menu.kind === "auth-secret") return { tickMs: 80, afterMs: 1800 };
     return TIMING[kind] || { afterMs: 300 };
+  }
+
+  function continueAfterStep() {
+    // If only instant updates separate this frame from an explanation, show
+    // those updates and pause now. A countdown must lead to more playback,
+    // never just another stop (e.g. tool -> expand-tools -> note).
+    for (let index = stepIndex + 1; index < steps().length; index++) {
+      const next = steps()[index];
+      const spec = timing(next.kind, next);
+      if (spec.waitKey) {
+        playStep(stepIndex + 1);
+        return;
+      }
+      if (spec.tickMs || spec.settleMs) break;
+    }
+    scheduleStep("after", afterDelay());
   }
 
   function afterDelay() {
@@ -162,7 +178,7 @@ export function createTourPlayer({ topics, startPageId = "", stage, schedule = s
     }
     subPhase = "after";
     if (playing) {
-      scheduleStep("after", afterDelay());
+      continueAfterStep();
     }
     emit();
   }
@@ -260,7 +276,7 @@ export function createTourPlayer({ topics, startPageId = "", stage, schedule = s
       } else if (subPhase === "settling") {
         scheduleStep("settle", delay(timingSpec.settleMs));
       } else {
-        scheduleStep("after", afterDelay());
+        continueAfterStep();
       }
     }
     scheduleSpinner();

@@ -17,12 +17,12 @@ import {
 } from "./steps.js";
 
 const PROJECT = demoInfo({ session: "20260917_101530_ab12cd34" });
-const MAIN = demoInfo({ cwd: "~/demo/.aiteam/agents/main-agent", session: "20260917_103001_eff01a23" });
+const MAIN = demoInfo({ cwd: "~/demo/agents/main-agent", session: "20260917_103001_eff01a23" });
 
 function enterMainAgent() {
   return [
-    shell("cd .aiteam/agents/main-agent"),
-    shell("rind", null, "~/demo/.aiteam/agents/main-agent"),
+    shell("cd agents/main-agent"),
+    shell("rind", null, MAIN.cwd),
     startup(MAIN, [
       "Starting rind inside an agent directory makes this session that agent:",
       "delegation and /team commands operate on the team project.",
@@ -36,8 +36,8 @@ export const teamPages = [
     title: "Create a Team",
     steps: [
       note([
-        "A Rind Team is filesystem-native: every specialist is a directory with",
-        "its own workspace, tools and persistent history under .aiteam/.",
+        "A Rind Team keeps agent workspaces under agents/ and shared files under shared/.",
+        "The .aiteam/ directories hold project and agent configuration.",
       ]),
       shell("rind"),
       startup(PROJECT, [
@@ -45,10 +45,10 @@ export const teamPages = [
       ]),
       type("/team create"),
       submit(),
-      slashResult({ text: "Team project created: demo\nMain agent: main-agent\nWorkspace: ~/demo/.aiteam/agents/main-agent" }),
+      slashResult({ text: `Team project created: demo\nMain agent: main-agent\nWorkspace: ${MAIN.cwd}` }),
       type("/exit"),
       exitRind(),
-      shell("ls .aiteam/agents"),
+      shell("ls agents"),
       shellOut(["main-agent"]),
       ...enterMainAgent(),
       note([
@@ -63,7 +63,7 @@ export const teamPages = [
     steps: [
       note([
         "First create a team with /team create in the project root (see Create a Team).",
-        "Then start Rind in .aiteam/agents/main-agent to add a specialist.",
+        "Then start Rind in agents/main-agent to add a specialist.",
       ]),
       ...enterMainAgent(),
       type('/team add "Owns the test suite and CI wiring"'),
@@ -78,7 +78,7 @@ export const teamPages = [
       slashResult({
         text: [
           "Team Agents:",
-          "- main-agent | Main | Coordinates the project",
+          "- main-agent | Main Agent | Default Team entry agent.",
           "- test-specialist | Test Specialist | Owns the test suite and CI wiring",
         ].join("\n"),
       }),
@@ -102,25 +102,25 @@ export const teamPages = [
       slashResult({
         text: [
           "Available blueprints:",
-          "- reviewer | Code Reviewer | Reviews diffs against the project rules",
           "- documenter | Documenter | Keeps README and RIND.md current",
+          "- reviewer | Code Reviewer | Reviews diffs against the project rules",
         ].join("\n"),
       }),
       menu({
         kind: "choice",
         input: "/team blueprint",
         items: [
-          "reviewer · Code Reviewer · Reviews diffs against the project rules",
           "documenter · Documenter · Keeps README and RIND.md current",
+          "reviewer · Code Reviewer · Reviews diffs against the project rules",
         ],
         selected: 0,
-        target: 1,
+        target: 0,
       }, [
         "In Rind, ↑↓ selects an installed template and Enter creates that agent.",
       ]),
       note(["The demo selected Documenter. If your list is empty, use /team add <description> to create a specialist without a blueprint."]),
       closeMenu("Enter"),
-      slashResult({ text: "Team Agent created: documenter\nWorkspace: ~/demo/.aiteam/agents/documenter" }),
+      slashResult({ text: "Team Agent created: documenter\nWorkspace: ~/demo/agents/documenter" }),
       note([
         "The new agent is ready for delegation immediately, with the",
         "blueprint's tool policy and prompt baked into its capsule.",
@@ -133,10 +133,10 @@ export const teamPages = [
     steps: [
       note([
         "This example needs the team and test-specialist from the previous pages.",
-        "Ask the main agent to delegate a specific task with an expected output.",
+        "This demo assumes the parser source is in shared/parser/. Ask for test cases in shared/ too.",
       ]),
       ...enterMainAgent(),
-      type("Have the test specialist cover the unicode parser cases"),
+      type("Have test-specialist read ~/demo/shared/parser/ and write unicode tests and a handoff in ~/demo/shared/"),
       submit(),
       menu({
         kind: "delegates",
@@ -148,16 +148,16 @@ export const teamPages = [
       ]),
       note(["The demo opened Ctrl+B and switched to Delegates with →. In Rind, Esc closes this view while delegation continues."]),
       closeMenu(),
-      tool("delegate", "test-specialist", { status: "ok", output: "6 cases added to test/tokenizer.test.js", durationMs: 12400 }),
+      tool("delegate", "test-specialist", { status: "ok", output: "6 cases written to ~/demo/shared/tokenizer.test.js; handoff: ~/demo/shared/unicode.md", durationMs: 12400 }),
       assistant([
         "test-specialist finished: the unicode cases live in",
-        "`test/tokenizer.test.js`, and the handoff summary is published at",
-        "`.aiteam/agents/test-specialist/handoffs/unicode.md`.",
+        "`~/demo/shared/tokenizer.test.js`, and the handoff summary is published at",
+        "`~/demo/shared/unicode.md`, where the main agent can read it.",
       ]),
       turnDone(24800, 1, 0),
       note([
         "Try a small task. Ask for output paths and review the files afterward.",
-        "An agent's workspace and permissions determine where it writes; these paths are examples.",
+        "Agents have private work/, outputs/ and memory/ directories. Use shared/ for files other agents need to read.",
       ]),
     ],
   },

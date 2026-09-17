@@ -265,9 +265,9 @@ test("shell history stays in chronological order across exit and restart", () =>
   const stage = createTourStage();
   stage.rebuildTo(page.steps, page.steps.length - 1);
   const text = renderTourPage(stage.snapshot(), { ...pageState("end"), page }, 100).lines.map(stripAnsi).join("\n");
-  assert.ok(text.indexOf("Goodbye.") < text.indexOf("$ ls .aiteam/agents"));
-  assert.ok(text.indexOf("$ ls .aiteam/agents") < text.indexOf("$ cd .aiteam/agents/main-agent"));
-  assert.ok(text.includes("~/demo/.aiteam/agents/main-agent $ rind"));
+  assert.ok(text.indexOf("Goodbye.") < text.indexOf("$ ls agents"));
+  assert.ok(text.indexOf("$ ls agents") < text.indexOf("$ cd agents/main-agent"));
+  assert.ok(text.includes("~/demo/agents/main-agent $ rind"));
 });
 
 test("wrapped shell cursor remains on the command and scrollback exposes earlier rows", () => {

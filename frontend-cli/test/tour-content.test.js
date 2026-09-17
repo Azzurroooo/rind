@@ -127,3 +127,30 @@ test("fork demonstrates user-message boundary and editable prefill", () => {
   assert.match(choices[0], /keep full history/);
   assert.ok(choices.every((choice) => !choice.includes("Assistant")));
 });
+
+test("team lessons use default workspace roots and shared handoffs consistently", () => {
+  // initialize_team_project creates agents/ beside .aiteam/, whose manifests
+  // grant access to each agent's private directories and the project shared/.
+  const pages = tourPages().filter((page) => page.id.startsWith("team."));
+  const mainWorkspace = "~/demo/agents/main-agent";
+  for (const page of pages) {
+    assert.doesNotMatch(JSON.stringify(page), /\.aiteam\/agents|\.aiteam\/handoffs/, page.id);
+    const stage = createTourStage();
+    stage.rebuildTo(page.steps, page.steps.length - 1);
+    assert.equal(stage.snapshot().rind.info.cwd, mainWorkspace, `${page.id} runs inside the main agent`);
+    assert.ok(page.steps.some((step) => step.kind === "shell" && step.command === "cd agents/main-agent"));
+    assert.ok(page.steps.some((step) => step.kind === "shell" && step.command === "rind" && step.cwd === mainWorkspace));
+  }
+  const create = pages.find((page) => page.id === "team.create");
+  assert.ok(create.steps.some((step) => step.kind === "slash-result" && step.text.endsWith(`Workspace: ${mainWorkspace}`)));
+  const blueprint = pages.find((page) => page.id === "team.blueprint");
+  const choices = blueprint.steps.find((step) => step.kind === "menu").menu;
+  assert.ok(choices.items[choices.target].startsWith("documenter ·"));
+  assert.ok(blueprint.steps.some((step) => step.kind === "slash-result" && step.text.endsWith("Workspace: ~/demo/agents/documenter")));
+  const work = pages.find((page) => page.id === "team.work");
+  const result = work.steps.find((step) => step.kind === "tool" && step.name === "delegate").outcome.output;
+  const reply = work.steps.find((step) => step.kind === "assistant").text;
+  for (const path of ["~/demo/shared/tokenizer.test.js", "~/demo/shared/unicode.md"]) {
+    assert.ok(result.includes(path) && reply.includes(path), `${path} is shared consistently by delegate and main agent`);
+  }
+});

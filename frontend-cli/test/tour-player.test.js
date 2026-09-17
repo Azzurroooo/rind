@@ -3,11 +3,12 @@ import assert from "node:assert/strict";
 
 import { createTourPlayer } from "../lib/tour/player.js";
 import { createTourStage } from "../lib/tour/stage.js";
+import { TOUR_TOPICS, tourPages } from "../lib/tour/pages/index.js";
 
 const INFO = { version: "0.8.0", model: "zai/glm-4.7", session_id: "s1", cwd: "~/demo" };
 
-// start.hello timeline at 1×: startup settles at 0 (pause 400), type ticks at
-// 435/470 (pause 250), submit settles at 720 (pause 250), note waits at 970.
+// start.hello timeline at 1×: startup holds for 400ms, type ticks at
+// 435/470, then submit and the explanation appear together without a hold.
 const TOPICS = [
   {
     id: "start",
@@ -94,11 +95,7 @@ test("steps auto-advance with animation, pauses and waits", () => {
   clock.advance(400);
   assert.equal(player.state().stepIndex, 1, "typing starts after the startup pause");
   clock.advance(70);
-  assert.equal(player.state().stepIndex, 1, "typing settles on the last character");
-  clock.advance(250);
-  assert.equal(player.state().stepIndex, 2, "submit settles right after typing");
-  clock.advance(250);
-  assert.equal(player.state().stepIndex, 3);
+  assert.equal(player.state().stepIndex, 3, "finished typing submits and opens the explanation immediately");
   assert.equal(player.state().phase, "waiting", "note step waits for a key");
   clock.advance(2000);
   assert.equal(player.state().stepIndex, 3, "waiting ignores the clock");
@@ -118,7 +115,7 @@ test("typing animation reveals characters over time", () => {
   clock.advance(35);
   assert.equal(stage.snapshot().rind.composer.text, "a");
   clock.advance(35);
-  assert.equal(stage.snapshot().rind.composer.text, "ab", "typing completes");
+  assert.equal(stage.snapshot().rind.blocks.at(-1).text, "ab", "completed input is submitted before the explanation");
 });
 
 test("space pauses and resumes the clock", () => {
@@ -172,16 +169,16 @@ test("right skips ahead instantly, left rebuilds the previous step exactly", () 
   assert.deepEqual(stage.snapshot(), expected.snapshot(), "back clamps to a visible first step");
 });
 
-test("enter settles the current step without advancing", () => {
+test("enter finishes animation and opens its explanation without a countdown", () => {
   const stage = createTourStage();
   const { player, clock } = makePlayer({ startPageId: "start.hello", stage });
   player.start();
   clock.advance(400);
   player.key(key("enter"));
-  assert.equal(stage.snapshot().rind.composer.text, "ab", "type step settles instantly");
-  assert.equal(player.state().stepIndex, 1);
-  clock.advance(250);
-  assert.equal(player.state().stepIndex, 2, "flow continues after the settle pause");
+  assert.equal(stage.snapshot().rind.blocks.at(-1).text, "ab", "type and submit settle instantly");
+  assert.equal(player.state().stepIndex, 3);
+  assert.equal(player.state().phase, "waiting");
+  assert.equal(clock.pendingCount, 0);
 });
 
 test("speed controls scale the animation delays", () => {
@@ -194,7 +191,7 @@ test("speed controls scale the animation delays", () => {
   player.key(key("up"));
   assert.equal(player.state().speed, 4);
   clock.advance(18); // one 4× tick is round(35/4) = 9ms
-  assert.equal(stage.snapshot().rind.composer.text, "ab", "fast ticks still complete the reveal");
+  assert.equal(stage.snapshot().rind.blocks.at(-1).text, "ab", "fast ticks still complete the reveal");
   player.key(key("down"));
   assert.equal(player.state().speed, 2);
 });
@@ -203,17 +200,17 @@ test("spinner only advances while the composer is running", () => {
   const stage = createTourStage();
   const { player, clock } = makePlayer({ startPageId: "start.hello", stage });
   player.start();
-  clock.advance(649);
+  clock.advance(469);
   assert.equal(stage.snapshot().rind.composer.running, false, "not running before submit");
-  clock.advance(71); // submit settles at 720
+  clock.advance(1); // submit and explanation follow the last typing tick
   assert.equal(stage.snapshot().rind.composer.running, true);
   const runningFrame = player.state().frame;
   clock.advance(200);
-  assert.ok(player.state().frame > runningFrame, "frame increments while running");
-
-  clock.advance(320);
+  assert.equal(player.state().frame, runningFrame, "explanation freezes the simulation too");
   player.key(key("space")); // past the note
-  clock.advance(1500); // result + turn-done
+  clock.advance(200);
+  assert.ok(player.state().frame > runningFrame, "frame increments during active playback");
+  clock.advance(1300); // result + turn-done
   assert.equal(stage.snapshot().rind.composer.running, false, "turn-done resets running");
 });
 
@@ -451,4 +448,47 @@ test("help preserves a countdown and rewinding discards the old deadline", () =>
   assert.equal(player.state().remainingMs, null);
   player.key(key("space"));
   assert.equal(player.state().remainingMs, 400, "rewound scene has its own full reading hold");
+});
+
+test("resuming a reviewed frame before an explanation pauses directly, including after help", () => {
+  const { player, clock } = makePlayer({ startPageId: "start.hello" });
+  player.start();
+  clock.advance(470);
+  player.key(key("left")); // review the submit before the note
+  assert.equal(player.state().stepIndex, 2);
+  player.key(key("help"));
+  player.key(key("escape"));
+  assert.equal(player.state().paused, true);
+  player.key(key("space"));
+  assert.equal(player.state().phase, "waiting");
+  assert.equal(player.state().remainingMs, null);
+  assert.equal(clock.pendingCount, 0);
+});
+
+test("every lesson countdown leads to playback, never an explanation pause", () => {
+  for (const page of tourPages()) {
+    for (const speedKeys of [[], ["up", "up"], ["down"]]) {
+      const { player, clock } = makePlayer({ topics: TOUR_TOPICS, startPageId: page.id });
+      player.start();
+      for (const name of speedKeys) player.key(key(name));
+      let transitions = 0;
+      while (player.state().phase !== "end") {
+        assert.ok(transitions++ < 10000, `${page.id} must finish`);
+        const state = player.state();
+        if (state.phase === "waiting") {
+          assert.equal(state.remainingMs, null);
+          assert.equal(clock.pendingCount, 0);
+          player.key(key("space"));
+        } else {
+          assert.ok(state.remainingMs > 0, `${page.id}: playback needs a timer`);
+          clock.advance(state.remainingMs);
+          if (state.phase === "after") {
+            assert.notEqual(player.state().phase, "waiting", `${page.id} step ${state.stepIndex}: countdown must not lead to PAUSED`);
+          }
+        }
+      }
+      assert.equal(clock.pendingCount, 0);
+      player.dispose();
+    }
+  }
 });

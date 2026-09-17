@@ -92,6 +92,11 @@ Timing at 1× lives in `TIMING` (player.js): `shell` 24ms/grapheme,
 New inline captions extend the hold based on their text length. Explicit notes
 wait as long as the reader needs. `speed ∈ {0.5, 1, 2, 4}` scales delays and
 clamps at either end. Notes, help, paused pages and completed pages stop timers.
+When the next scene is an explanation, its reading countdown is omitted:
+the finished animation and any intervening instant updates (such as expanding
+tools or printing completion) lead directly to the explanation. Resuming a
+reviewed step follows the same rule. Automatic countdowns always lead to
+playback or completion, never directly to an explanation pause.
 
 The guide has a red, bold pause pictograph and explicit playback banner:
 `⏸ PAUSED · Read this explanation`
@@ -161,3 +166,6 @@ demo frame, including in monochrome and after resizing. Every authored step is c
 at 80×24, 60×20, 40×16 and 36×14. Content tests compare animated and rebuilt
 states for all pages and reject unfinished turns, lost pending input, or typing
 through an open menu.
+Playback tests run every lesson at 0.5×, 1× and 4× to verify countdown transitions.
+Team content uses the runtime's default `agents/<id>/` workspaces, `.aiteam/`
+configuration directories and `shared/` files for handoffs between agents.
