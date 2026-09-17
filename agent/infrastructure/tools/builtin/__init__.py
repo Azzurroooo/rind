@@ -14,7 +14,8 @@ from .planning import create_plan_tool_spec
 from .shell import ShellTools, build_shell_tool_specs
 from .skill import build_skill_tool_specs
 from .user_question import TOOL_SPECS as USER_QUESTION_TOOL_SPECS
-from .web import TOOL_SPECS as WEB_TOOL_SPECS
+from .web import build_web_tool_specs
+from .web_sessions import WebSessions
 
 
 def build_builtin_tool_specs(
@@ -31,6 +32,7 @@ def build_builtin_tool_specs(
     session_output_root: str | None = None,
     output_store=None,
     shell_tools: ShellTools | None = None,
+    web_sessions: WebSessions | None = None,
     session_base_provider: Callable[[], str | None] | None = None,
 ) -> tuple[ToolSpec, ...]:
     specs = list(build_file_tool_specs(workspace_root, allowed_roots, shared_root, session_output_root))
@@ -47,7 +49,7 @@ def build_builtin_tool_specs(
         specs.append(create_delegate_tool_spec(delegate_handler))
     if agent_create_project is not None:
         specs.append(create_agent_create_tool_spec(agent_create_project))
-    specs.extend(WEB_TOOL_SPECS)
+    specs.extend(build_web_tool_specs(web_sessions or WebSessions()))
     if enable_goal:
         if set_goal_status is None:
             raise ValueError("Goal tool requires a session goal status setter.")

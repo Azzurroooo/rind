@@ -589,6 +589,7 @@ def test_worker_replays_answer_received_before_question_responder_waits():
         execution = ExecutionCoordinator(
             shared_resources=SimpleNamespace(),
             shell_tools=SimpleNamespace(),
+            web_sessions=SimpleNamespace(),
             repository=SimpleNamespace(),
             debug=False,
             enable_goal=False,
@@ -634,6 +635,7 @@ def test_worker_goal_continuation_persists_distinct_checkpoints():
         execution = Execution(
             shared_resources=SimpleNamespace(),
             shell_tools=SimpleNamespace(),
+            web_sessions=SimpleNamespace(),
             repository=repository,
             debug=False,
             enable_goal=True,

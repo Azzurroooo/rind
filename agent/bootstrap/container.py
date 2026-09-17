@@ -22,6 +22,7 @@ from agent.infrastructure.skills import SkillRepository
 from agent.infrastructure.tools import DefaultToolRegistry
 from agent.infrastructure.tools.builtin import build_builtin_tool_specs
 from agent.infrastructure.tools.builtin.shell import ShellTools
+from agent.infrastructure.tools.builtin.web_sessions import WebSessions
 from agent.prompts import build_goal_policy_prompt, build_system_prompt
 
 
@@ -51,6 +52,7 @@ class AgentContainer:
     turn_runner: TurnRunner
     runtime: AgentRuntime
     shell_tools: ShellTools
+    web_sessions: WebSessions
 
 
 def build_agent_container(
@@ -73,6 +75,7 @@ def build_agent_container(
     lock_workspace: bool = True,
     shared_resources: SharedRuntimeResources | None = None,
     shell_tools: ShellTools | None = None,
+    web_sessions: WebSessions | None = None,
     session_runner: Callable[..., Awaitable[Any]] | None = None,
 ) -> AgentContainer:
     """Build the production runtime dependency graph explicitly."""
@@ -98,6 +101,7 @@ def build_agent_container(
     settings = settings or load_settings(workspace_root)
     tool_output_store = shared_resources.tool_output_store if shared_resources else ToolOutputStore(session_dir)
     shell_tools = shell_tools or ShellTools(tool_output_store)
+    web_sessions = web_sessions or WebSessions()
     model = settings.model
     session_store: SessionStore = JsonlSessionStore(
         session_dir=session_dir,
@@ -186,6 +190,7 @@ def build_agent_container(
         session_output_root=session_output_root,
         output_store=tool_output_store,
         shell_tools=shell_tools,
+        web_sessions=web_sessions,
         session_base_provider=lambda: session_store.session_base_path,
     )
     if enabled_tools is None:
@@ -248,4 +253,5 @@ def build_agent_container(
         turn_runner=turn_runner,
         runtime=runtime,
         shell_tools=shell_tools,
+        web_sessions=web_sessions,
     )

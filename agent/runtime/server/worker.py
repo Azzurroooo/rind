@@ -37,6 +37,7 @@ from agent.infrastructure.persistence.usage_ledger import (
 from agent.infrastructure.paths import resolve_session_base, validate_session_id
 from agent.infrastructure.planning import build_plan_snapshot
 from agent.infrastructure.tools.builtin.shell import ShellTools
+from agent.infrastructure.tools.builtin.web_sessions import WebSessions
 from agent.infrastructure.team import discover_agent
 from agent.prompts import build_goal_checkpoint_prompt, build_system_prompt
 from agent.domain.cancellation import CancellationTokenSource
@@ -282,6 +283,7 @@ class ExecutionCoordinator:
         *,
         shared_resources: SharedRuntimeResources,
         shell_tools: ShellTools,
+        web_sessions: WebSessions,
         repository: SessionRepository,
         debug: bool,
         enable_goal: bool,
@@ -291,6 +293,7 @@ class ExecutionCoordinator:
     ):
         self._shared_resources = shared_resources
         self._shell_tools = shell_tools
+        self._web_sessions = web_sessions
         self._repository = repository
         self._debug = debug
         self._enable_goal = enable_goal
@@ -689,6 +692,7 @@ class ExecutionCoordinator:
                     parent_session_id=info.get("parent_session_id"),
                     shared_resources=self._shared_resources,
                     shell_tools=self._shell_tools,
+                    web_sessions=self._web_sessions,
                     session_runner=self._run_delegated_session,
                 )
                 await container.runtime.initialize()
@@ -750,6 +754,7 @@ class ExecutionCoordinator:
                     owner_agent_id=target.agent_id,
                     session_type="inspect",
                     shared_resources=self._shared_resources,
+                    web_sessions=self._web_sessions,
                 )
                 response = await self._collect_container_turn(
                     container,
@@ -880,11 +885,13 @@ class RuntimeWorker:
             tool_output_store=tool_output_store,
         )
         self.shell_tools = ShellTools(tool_output_store)
+        self.web_sessions = WebSessions()
         self.provider_service = ProviderServiceImpl()
         self.repository = SessionRepository(session_dir=session_dir, provider_service=self.provider_service)
         self.execution = ExecutionCoordinator(
             shared_resources=self._shared_resources,
             shell_tools=self.shell_tools,
+            web_sessions=self.web_sessions,
             repository=self.repository,
             debug=debug,
             enable_goal=enable_goal,
@@ -988,7 +995,10 @@ class RuntimeWorker:
         try:
             await self.execution.close()
         finally:
-            await self.shell_tools.close()
+            try:
+                await self.shell_tools.close()
+            finally:
+                self.web_sessions.close()
 
 
 def _normalize_workspace_root(value: str) -> str:
