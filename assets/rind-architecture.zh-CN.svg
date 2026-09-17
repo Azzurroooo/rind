@@ -1,25 +1,25 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1440 1016" role="img" aria-labelledby="title desc">
-<title id="title">Rind: persistent teams, programmable sessions, a lean worker</title>
-<desc id="desc">The CLI surface and worker run in separate processes. Execution objects load on demand and release when idle; session history lives on disk. Specialists retain workspaces and publish shared artifacts. Scripts use rind run and rind send.</desc>
+<title id="title">Rind：持久化专家团队、可编程会话与轻量 worker</title>
+<desc id="desc">CLI 界面与 worker 分进程运行。执行对象按需加载、空闲释放，会话历史保存在磁盘上。专家保留工作区，通过共享文件交付成果；脚本可使用 rind run 和 rind send。</desc>
 <style>text { font-family: "Segoe UI", Arial, "Microsoft YaHei", "Noto Sans CJK SC", sans-serif; } .mono { font-family: Consolas, "Liberation Mono", monospace; }</style>
 <defs><marker id="arrow" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
 <path d="M1 1L7 4L1 7" fill="none" stroke="#5fd7ff" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></marker></defs>
 <rect x="0" y="0" width="1440" height="1016" rx="24" fill="#0b1115" stroke="#0b1115"/>
 <path d="M48 36H96" fill="none" stroke="#5fd7ff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
 <path d="M96 36H128" fill="none" stroke="#f5c451" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-<text x="48" y="68" font-size="19" font-weight="600" fill="#5fd7ff" text-anchor="start">RIND / CORE DESIGN</text>
-<text x="1392" y="68" font-size="18" font-weight="500" fill="#a4b8c1" text-anchor="end">OPEN SOURCE / LOCAL RUNTIME</text>
-<text x="48" y="130" font-size="49" font-weight="650" fill="#edf4f1" text-anchor="start">One engine. Work that lasts.</text>
-<text x="48" y="170" font-size="24" font-weight="400" fill="#a4b8c1" text-anchor="start">Persistent teams. Programmable sessions. A worker built to stay lean.</text>
+<text x="48" y="68" font-size="19" font-weight="600" fill="#5fd7ff" text-anchor="start">RIND / 核心设计</text>
+<text x="1392" y="68" font-size="18" font-weight="500" fill="#a4b8c1" text-anchor="end">开源 / 本地运行时</text>
+<text x="48" y="130" font-size="49" font-weight="650" fill="#edf4f1" text-anchor="start">一个引擎，让工作持续积累。</text>
+<text x="48" y="170" font-size="24" font-weight="400" fill="#a4b8c1" text-anchor="start">持久化专家团队 · 可编程会话 · 按需执行的轻量 worker</text>
 <rect x="48" y="210" width="524" height="382" rx="16" fill="#13242b" stroke="#34505c"/>
-<text x="76" y="249" font-size="18" font-weight="600" fill="#5fd7ff" text-anchor="start">01 / SURFACE PROCESS</text>
-<text x="76" y="293" font-size="31" font-weight="600" fill="#edf4f1" text-anchor="start">Your interface to the work</text>
+<text x="76" y="249" font-size="18" font-weight="600" fill="#5fd7ff" text-anchor="start">01 / SURFACE 界面进程</text>
+<text x="76" y="293" font-size="31" font-weight="600" fill="#edf4f1" text-anchor="start">与工作直接交互</text>
 <rect x="76" y="317" width="468" height="126" rx="10" fill="#0e1a20" stroke="#34505c"/>
 <text x="96" y="353" font-size="20" font-weight="600" fill="#f5c451" text-anchor="start" class="mono">[TEAM]</text>
 <text x="184" y="353" font-size="20" font-weight="400" fill="#a4b8c1" text-anchor="start" class="mono">model · effort · cwd</text>
 <path d="M96 373H524" fill="none" stroke="#34505c" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
 <text x="96" y="413" font-size="26" font-weight="400" fill="#5fd7ff" text-anchor="start">▷</text>
-<text x="128" y="413" font-size="24" font-weight="400" fill="#edf4f1" text-anchor="start">Review the current diff</text>
+<text x="128" y="413" font-size="24" font-weight="400" fill="#edf4f1" text-anchor="start">检查当前代码变更</text>
 <rect x="76" y="472" width="114" height="42" rx="8" fill="#0e1a20" stroke="#34505c"/>
 <text x="133" y="500" font-size="20" font-weight="400" fill="#a4b8c1" text-anchor="middle">CLI</text>
 <rect x="194" y="472" width="114" height="42" rx="8" fill="#0e1a20" stroke="#34505c"/>
@@ -28,55 +28,55 @@
 <text x="369" y="500" font-size="20" font-weight="400" fill="#a4b8c1" text-anchor="middle">Web</text>
 <rect x="430" y="472" width="114" height="42" rx="8" fill="#0e1a20" stroke="#34505c"/>
 <text x="487" y="500" font-size="20" font-weight="400" fill="#a4b8c1" text-anchor="middle">Gateway</text>
-<text x="76" y="558" font-size="23" font-weight="400" fill="#a4b8c1" text-anchor="start">Input, rendering, interaction</text>
-<text x="630" y="349" font-size="18" font-weight="400" fill="#a4b8c1" text-anchor="middle">requests</text>
+<text x="76" y="558" font-size="23" font-weight="400" fill="#a4b8c1" text-anchor="start">输入、渲染与交互</text>
+<text x="630" y="349" font-size="18" font-weight="400" fill="#a4b8c1" text-anchor="middle">请求</text>
 <path d="M590 370H668" fill="none" stroke="#5fd7ff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrow)"/>
 <path d="M668 415H590" fill="none" stroke="#5fd7ff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrow)"/>
-<text x="630" y="447" font-size="18" font-weight="400" fill="#a4b8c1" text-anchor="middle">events</text>
+<text x="630" y="447" font-size="18" font-weight="400" fill="#a4b8c1" text-anchor="middle">事件</text>
 <rect x="688" y="210" width="704" height="382" rx="16" fill="#13242b" stroke="#34505c"/>
-<text x="716" y="249" font-size="18" font-weight="600" fill="#f5c451" text-anchor="start">02 / WORKER PROCESS</text>
-<text x="716" y="293" font-size="31" font-weight="600" fill="#edf4f1" text-anchor="start">A lean session kernel</text>
+<text x="716" y="249" font-size="18" font-weight="600" fill="#f5c451" text-anchor="start">02 / WORKER 执行进程</text>
+<text x="716" y="293" font-size="31" font-weight="600" fill="#edf4f1" text-anchor="start">轻量、按需的会话内核</text>
 <rect x="716" y="320" width="198" height="95" rx="10" fill="#0e1a20" stroke="#34505c"/>
-<text x="815" y="357" font-size="24" font-weight="600" fill="#edf4f1" text-anchor="middle">Load session</text>
-<text x="815" y="389" font-size="20" font-weight="400" fill="#a4b8c1" text-anchor="middle">on demand</text>
+<text x="815" y="357" font-size="24" font-weight="600" fill="#edf4f1" text-anchor="middle">加载会话</text>
+<text x="815" y="389" font-size="20" font-weight="400" fill="#a4b8c1" text-anchor="middle">按需创建</text>
 <path d="M920 367h15" fill="none" stroke="#5fd7ff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrow)"/>
 <rect x="941" y="320" width="198" height="95" rx="10" fill="#0e1a20" stroke="#f5c451"/>
-<text x="1040" y="357" font-size="24" font-weight="600" fill="#f5c451" text-anchor="middle">Execute</text>
-<text x="1040" y="389" font-size="20" font-weight="400" fill="#a4b8c1" text-anchor="middle">models + tools</text>
+<text x="1040" y="357" font-size="24" font-weight="600" fill="#f5c451" text-anchor="middle">执行任务</text>
+<text x="1040" y="389" font-size="20" font-weight="400" fill="#a4b8c1" text-anchor="middle">模型与工具</text>
 <path d="M1145 367h15" fill="none" stroke="#5fd7ff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrow)"/>
 <rect x="1166" y="320" width="198" height="95" rx="10" fill="#0e1a20" stroke="#34505c"/>
-<text x="1265" y="357" font-size="24" font-weight="600" fill="#edf4f1" text-anchor="middle">Release</text>
-<text x="1265" y="389" font-size="20" font-weight="400" fill="#a4b8c1" text-anchor="middle">when idle</text>
+<text x="1265" y="357" font-size="24" font-weight="600" fill="#edf4f1" text-anchor="middle">释放资源</text>
+<text x="1265" y="389" font-size="20" font-weight="400" fill="#a4b8c1" text-anchor="middle">会话空闲后</text>
 <path d="M1040 415V447" fill="none" stroke="#5fd7ff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrow)"/>
 <rect x="716" y="455" width="648" height="74" rx="10" fill="#0e1a20" stroke="#34505c"/>
 <path d="M738 474h25v35h-25z M744 483h13 M744 491h13 M744 499h8" fill="none" stroke="#5fd7ff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-<text x="782" y="486" font-size="23" font-weight="600" fill="#edf4f1" text-anchor="start">Session history stays on disk</text>
-<text x="782" y="515" font-size="20" font-weight="400" fill="#a4b8c1" text-anchor="start">JSONL / messages / tool calls</text>
-<text x="716" y="566" font-size="23" font-weight="400" fill="#a4b8c1" text-anchor="start">Transient execution. Durable session state.</text>
+<text x="782" y="486" font-size="23" font-weight="600" fill="#edf4f1" text-anchor="start">会话历史保存在磁盘上</text>
+<text x="782" y="515" font-size="20" font-weight="400" fill="#a4b8c1" text-anchor="start">JSONL / 消息 / 工具调用</text>
+<text x="716" y="566" font-size="23" font-weight="400" fill="#a4b8c1" text-anchor="start">执行状态暂驻内存，会话历史持久保存。</text>
 <rect x="48" y="622" width="768" height="326" rx="16" fill="#13242b" stroke="#34505c"/>
-<text x="76" y="662" font-size="18" font-weight="600" fill="#5fd7ff" text-anchor="start">03 / PERSISTENT TEAMS</text>
-<text x="76" y="705" font-size="31" font-weight="600" fill="#edf4f1" text-anchor="start">Specialists with a home</text>
+<text x="76" y="662" font-size="18" font-weight="600" fill="#5fd7ff" text-anchor="start">03 / 持久化专家团队</text>
+<text x="76" y="705" font-size="31" font-weight="600" fill="#edf4f1" text-anchor="start">每个专家都有自己的工作区</text>
 <rect x="76" y="771" width="164" height="56" rx="10" fill="#0e1a20" stroke="#34505c"/>
 <text x="158" y="806" font-size="21" font-weight="500" fill="#f5c451" text-anchor="middle" class="mono">main-agent</text>
 <rect x="290" y="740" width="198" height="56" rx="10" fill="#0e1a20" stroke="#34505c"/>
-<text x="389" y="775" font-size="22" font-weight="400" fill="#edf4f1" text-anchor="middle">tester</text>
+<text x="389" y="775" font-size="22" font-weight="400" fill="#edf4f1" text-anchor="middle">测试专家</text>
 <rect x="290" y="816" width="198" height="56" rx="10" fill="#0e1a20" stroke="#34505c"/>
-<text x="389" y="851" font-size="22" font-weight="400" fill="#edf4f1" text-anchor="middle">researcher</text>
+<text x="389" y="851" font-size="22" font-weight="400" fill="#edf4f1" text-anchor="middle">研究专家</text>
 <path d="M240 799H264V768H281" fill="none" stroke="#5fd7ff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrow)"/>
 <path d="M264 799V844H281" fill="none" stroke="#5fd7ff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrow)"/>
 <path d="M488 768H516V796H550" fill="none" stroke="#5fd7ff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrow)"/>
 <path d="M488 844H516V812H550" fill="none" stroke="#5fd7ff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrow)"/>
 <rect x="558" y="765" width="230" height="78" rx="10" fill="#0e1a20" stroke="#f5c451"/>
 <text x="673" y="797" font-size="25" font-weight="600" fill="#f5c451" text-anchor="middle" class="mono">shared/</text>
-<text x="673" y="827" font-size="20" font-weight="400" fill="#a4b8c1" text-anchor="middle">published artifacts</text>
-<text x="76" y="916" font-size="23" font-weight="400" fill="#a4b8c1" text-anchor="start">Roles and files carry forward to the next task.</text>
+<text x="673" y="827" font-size="20" font-weight="400" fill="#a4b8c1" text-anchor="middle">正式交付的成果</text>
+<text x="76" y="916" font-size="23" font-weight="400" fill="#a4b8c1" text-anchor="start">职责与文件保留下来，供下一次任务继续使用。</text>
 <rect x="840" y="622" width="552" height="326" rx="16" fill="#13242b" stroke="#34505c"/>
-<text x="868" y="662" font-size="18" font-weight="600" fill="#f5c451" text-anchor="start">04 / PROGRAMMABLE SESSIONS</text>
-<text x="868" y="705" font-size="31" font-weight="600" fill="#edf4f1" text-anchor="start">Start it. Steer it.</text>
+<text x="868" y="662" font-size="18" font-weight="600" fill="#f5c451" text-anchor="start">04 / 可编程会话</text>
+<text x="868" y="705" font-size="31" font-weight="600" fill="#edf4f1" text-anchor="start">发起任务，也能中途引导</text>
 <text x="868" y="764" font-size="24" font-weight="400" fill="#5fd7ff" text-anchor="start" class="mono">$ rind run --prompt &quot;…&quot;</text>
-<text x="868" y="801" font-size="23" font-weight="400" fill="#a4b8c1" text-anchor="start">Scripts → final answer on stdout</text>
+<text x="868" y="801" font-size="23" font-weight="400" fill="#a4b8c1" text-anchor="start">脚本 → 最终回答写入 stdout</text>
 <path d="M868 823H1364" fill="none" stroke="#34505c" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
 <text x="868" y="868" font-size="24" font-weight="400" fill="#f5c451" text-anchor="start" class="mono">$ rind send --session &lt;id&gt;</text>
-<text x="868" y="906" font-size="23" font-weight="400" fill="#a4b8c1" text-anchor="start">New instructions → live CLI session</text>
-<text x="48" y="989" font-size="19" font-weight="400" fill="#a4b8c1" text-anchor="start">CLI process split shown. Desktop separates its worker too; Web and gateway connect over WebSocket.</text>
+<text x="868" y="906" font-size="23" font-weight="400" fill="#a4b8c1" text-anchor="start">新指令 → 正在运行的 CLI 会话</text>
+<text x="48" y="989" font-size="19" font-weight="400" fill="#a4b8c1" text-anchor="start">图示为 CLI 双进程结构；桌面端同样独立启动 worker，Web 与消息网关通过 WebSocket 接入。</text>
 </svg>
