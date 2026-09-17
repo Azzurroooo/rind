@@ -998,7 +998,7 @@ class RuntimeWorker:
             try:
                 await self.shell_tools.close()
             finally:
-                self.web_sessions.close()
+                await asyncio.to_thread(self.web_sessions.close)
 
 
 def _normalize_workspace_root(value: str) -> str:

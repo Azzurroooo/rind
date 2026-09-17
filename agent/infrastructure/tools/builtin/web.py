@@ -243,6 +243,8 @@ def fetch_web_page(
             response = None
             body = bytearray()
             for redirect_count in range(_MAX_REDIRECTS + 1):
+                if cancelled := _cancelled("fetch_web_page", _cancellation_token):
+                    return cancelled
                 with closing(session.get(
                     current_url,
                     headers=headers,

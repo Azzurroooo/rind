@@ -148,17 +148,29 @@ def test_search_closes_failed_response(engine):
 
 def test_web_sessions_lease_exclusively_and_close_outstanding_lease(monkeypatch):
     from types import SimpleNamespace
+    from threading import Event, Thread
 
     closed = []
+    closing_started = Event()
     sessions = WebSessions()
-    monkeypatch.setattr(sessions, "_create_session", lambda: SimpleNamespace(close=lambda: closed.append(True)))
+
+    def close_session():
+        closed.append(True)
+        closing_started.set()
+
+    monkeypatch.setattr(sessions, "_create_session", lambda: SimpleNamespace(close=close_session))
     with sessions.acquire() as first:
         with sessions.acquire() as second:
             assert first is not second
         with sessions.acquire() as reused:
             assert reused is second
-        sessions.close()
+        closing = Thread(target=sessions.close, daemon=True)
+        closing.start()
+        assert closing_started.wait(1)
+        assert closing.is_alive()
         assert len(closed) == 1
+    closing.join(1)
+    assert not closing.is_alive()
     assert len(closed) == 2
     sessions.close()
     with pytest.raises(RuntimeError):
