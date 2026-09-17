@@ -136,7 +136,12 @@ page, Enter returns to the catalog.
 - The stage stores raw data only (raw markdown, raw tool outcomes, raw menu
   specs); the live transcript controller and components style it at render time.
 - Every page has a `feature` name (command, shortcut or named capability) and
-  a descriptive `title`. The catalog shows `/team add · Add a specialist`;
+  a descriptive `title`. The catalog aligns number, feature, separator and
+  description columns using the whole catalog's display widths, so scrolling
+  never shifts the columns. Only the selected or completed row has a marker.
+  When fewer than 18 cells remain for descriptions, rows show full feature
+  names and a `Selected:` summary below the list follows the current selection.
+  For example, the wide catalog shows `/team add · Add a specialist`;
   the introduction and demo headers keep `TOUR · /team add` and
   `Demo · /team add`. The description stays in the introduction body. Full
   feature names and page positions remain visible down to 36 columns.

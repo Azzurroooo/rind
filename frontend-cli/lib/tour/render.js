@@ -53,6 +53,12 @@ export function renderTourCatalog(state, width, rows = 24) {
   if (width < 36 || rows < 14) return smallTerminal(width, rows);
   const inner = Math.max(MIN_INNER, width - 4);
   const pages = state.topics.flatMap((topic) => topic.pages);
+  // Measure the whole catalog so columns don't shift when scrolling between
+  // topics. Below 18 cells of description space, use a selected-item summary.
+  const numberWidth = String(pages.length).length + 1;
+  const featureWidth = Math.max(...pages.map((page) => textWidth(page.feature || page.title)));
+  const prefixWidth = numberWidth + 5;
+  const columns = inner - prefixWidth - featureWidth - 3 >= 18;
   const plan = [];
   for (const topic of state.topics) {
     if (plan.length) {
@@ -64,7 +70,7 @@ export function renderTourCatalog(state, width, rows = 24) {
     }
   }
   const selectedRow = plan.findIndex((row) => row.page === pages[state.selected]);
-  const budget = Math.max(1, rows - 8);
+  const budget = Math.max(1, rows - (columns ? 8 : 9));
   const start = plan.length <= budget
     ? 0
     : Math.min(Math.max(0, selectedRow - 3), plan.length - budget);
@@ -82,12 +88,14 @@ export function renderTourCatalog(state, width, rows = 24) {
     }
     const index = pages.indexOf(row.page);
     const selected = index === state.selected;
-    const marker = selected ? paint.accent("›") : state.completed?.includes(row.page.id) ? paint.success("✓") : paint.dim("·");
+    const marker = selected ? paint.accent("›") : state.completed?.includes(row.page.id) ? paint.success("✓") : " ";
     const feature = row.page.feature || row.page.title;
     const label = selected ? paint.bold(feature) : paint.dim(feature);
-    const description = row.page.feature ? paint.dim(` · ${row.page.title}`) : "";
-    body.push(clipCells(`  ${marker} ${paint.dim(`${index + 1}.`.padEnd(4))}${label}${description}`, inner));
+    const description = columns && row.page.feature
+      ? paint.dim(" · ") + (selected ? row.page.title : paint.dim(row.page.title)) : "";
+    body.push(clipCells(`  ${marker} ${paint.dim(`${index + 1}.`.padStart(numberWidth))} ${columns ? padRight(label, featureWidth) : label}${description}`, inner));
   }
+  if (!columns) body.push(paint.accent(clipCells(`Selected: ${pages[state.selected].title}`, inner)));
   body.push(paint.dim(clipCells(`Open: /tour ${pages[state.selected].id}`, inner)));
   body.push(paint.dim(clipCells(`${state.completed?.length || 0}/${pages.length} viewed · simulated examples`, inner)));
   const lines = frameBlock({

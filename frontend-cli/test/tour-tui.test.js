@@ -66,7 +66,7 @@ test("tour plays on a real terminal buffer: catalog, page, return, exit", async 
   input.send("[B");
   await settle();
   viewport = await output.flushAndGetViewport();
-  assert.ok(viewport.join("\n").includes("› 2."), "arrow moves the selection");
+  assert.match(viewport.join("\n"), /›\s+2\./, "arrow moves the selection");
 
   input.send("\r");
   await settle();
@@ -352,7 +352,7 @@ test("introduction survives resize and help, and returns on rewind or replay", a
     input.send("q");
     await settle();
     const catalog = (await output.flushAndGetViewport()).find((line) => line.includes("›"));
-    assert.ok(catalog.includes("/team add · Add a specialist"), catalog);
+    assert.match(catalog, /\/team add\s+· Add a specialist/);
     input.send("\r");
     await assertReady();
   } finally {

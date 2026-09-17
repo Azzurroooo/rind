@@ -78,6 +78,36 @@ test("catalog rows and hints stay inside narrow terminals", () => {
   }
 });
 
+test("catalog columns stay aligned across topics and scrolling; compact summaries follow selection", () => {
+  const pages = tourPages();
+  for (const width of [36, 40, 48, 60, 80, 120]) {
+    const featureColumns = new Set();
+    const descriptionColumns = new Set();
+    for (const [selected, page] of pages.entries()) {
+      const view = renderTourCatalog({ topics: TOUR_TOPICS, selected, completed: ["start.hello"] }, width, 14);
+      const lines = plainLines(view.lines);
+      for (const line of lines) {
+        const match = line.match(/^│\s+[›✓ ]\s+(\d+)\.\s+/);
+        if (!match) continue;
+        const entry = pages[Number(match[1]) - 1];
+        const featureIndex = line.indexOf(entry.feature);
+        assert.ok(featureIndex >= 0, "full feature names survive compact layout");
+        featureColumns.add(textWidth(line.slice(0, featureIndex)));
+        const separator = line.indexOf(" · ", featureIndex);
+        if (separator >= 0) descriptionColumns.add(textWidth(line.slice(0, separator)));
+      }
+      if (width < 48) {
+        assert.ok(lines.some((line) => line.includes(`Selected: ${page.title}`)));
+        assert.equal(descriptionColumns.size, 0, "short screens avoid fragments in a cramped description column");
+      } else {
+        assert.equal(descriptionColumns.size, 1, "all separators share a display column");
+      }
+      assert.ok(lines.length <= 14 && lines.every((line) => textWidth(line) <= width));
+    }
+    assert.equal(featureColumns.size, 1, "one- and two-digit numbers share the same feature column");
+  }
+});
+
 test("page frame titles the page and wraps every content line", () => {
   const { render } = playPage([
     { kind: "startup", info: INFO },
