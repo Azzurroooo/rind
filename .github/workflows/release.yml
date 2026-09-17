@@ -15,7 +15,7 @@ permissions:
 
 env:
   DISTRIBUTION_REPOSITORY: Azzurroooo/rind-distribution
-  DISTRIBUTION_REF: 401ae6ea900a3371cc89820c7dcef88825cfe96c
+  DISTRIBUTION_REF: bf65d8f43c41856c303245a1877b20e95b4ed106
   SOURCE_REF: ${{ github.event_name == 'workflow_dispatch' && inputs.source_ref || github.ref }}
   RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.source_ref || github.ref_name }}
 
