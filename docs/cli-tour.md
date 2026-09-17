@@ -3,8 +3,9 @@
 An interactive feature walkthrough: a simulated terminal plays a scripted
 animation — starting rind, typing commands, tool blocks, streamed replies —
 while caption notes explain what to do in a real session. Screens reuse the
-CLI's current renderers with fictional data. A persistent DEMO label separates
-the simulated session's shortcuts from the tour controls below the frame.
+CLI's current renderers with fictional data. A closed `Demo` frame contains
+only the simulated terminal. A separate `TOUR GUIDE` region below its bottom
+border owns the playback status, explanation, controls and progress track.
 Theme, width, CJK and `NO_COLOR` follow the CLI.
 
 Pure frontend. The tour never spawns the runtime and never touches `agent/`.
@@ -35,6 +36,7 @@ lib/tour/
 ├── player.js          # playback state machine, injected clock, catalog
 ├── stage.js           # pure stage state machine (begin/settle/tick/rebuildTo)
 ├── render.js          # stage + player state -> lines (frame, caption, status)
+├── transcript.js      # fictional events -> live CLI transcript controller
 └── pages/
     ├── index.js       # TOUR_TOPICS catalog, findTourPage
     ├── steps.js       # step constructors — the only vocabulary pages may use
@@ -74,8 +76,15 @@ Every step is plain data. Kinds: `shell`, `shell-out`, `startup`, `type`,
   not discard pending input. `prefill` demonstrates the editable user message
   restored by `/fork`, which branches **before** the selected user message.
 - Completed shell/session segments preserve chronological ordering across exit
-  and restart. Tool results use the same `tool-display.js` functions as ToolBlock,
-  including arguments, background status, file diffs and expanded output.
+  and restart. `transcript.js` sends the staged blocks through
+  `createCliOutputController`: startup, user input, assistant messages, tool
+  requests/results and completion logs use the live CLI's component assembly.
+  This includes leading blank rows, paragraph/code spacing, trimmed log endings,
+  background status, file diffs and expanded output. Tool animation is disabled
+  for these render-only snapshots, so no live interval timers are created.
+- Assistant blocks track completion separately from reveal position. Incomplete
+  Markdown remains streaming; table candidates and code fences are finalized
+  only when the assistant step finishes, just as in the live event pipeline.
 
 Timing at 1× lives in `TIMING` (player.js): `shell` 24ms/grapheme,
 `type` 35ms/grapheme, `assistant` 3 graphemes/30ms. Replies remain visible for
@@ -84,7 +93,8 @@ New inline captions extend the hold based on their text length. Explicit notes
 wait as long as the reader needs. `speed ∈ {0.5, 1, 2, 4}` scales delays and
 clamps at either end. Notes, help, paused pages and completed pages stop timers.
 
-The caption has an explicit playback banner: `PAUSED · Read this explanation`
+The guide has a red, bold pause pictograph and explicit playback banner:
+`⏸ PAUSED · Read this explanation`
 waits for Space/Enter, `PAUSED · You paused playback` waits for Space to resume,
 and `AUTO · next step in 2.4s` is a reading hold that advances on its own.
 `PLAYING` identifies animated demonstrations; `COMPLETE` identifies the final
@@ -117,11 +127,11 @@ page, Enter returns to the catalog.
 ## Rendering contract
 
 - The stage stores raw data only (raw markdown, raw tool outcomes, raw menu
-  specs); `render.js` styles at render time through `rendering.js`,
-  `AssistantMessage`, `markdown-lines.js` and `theme.js` — the same functions
-  the live session uses.
-- The page body sits inside a `┌─ Tour · <title> ─…┐` panel. The title, DEMO
-  action label, caption and controls stay visible; a bounded viewport follows
+  specs); the live transcript controller and components style it at render time.
+- The simulated terminal sits inside a `┌─ Demo · <title> ─…┐` panel, ending
+  with a complete bottom border. Guidance never appears inside that panel.
+  `TOUR GUIDE` starts a separate region with a blank gap on taller terminals;
+  its status, caption and controls stay visible. A bounded viewport follows
   the transcript. PgUp/PgDn reviews earlier content. Open menus take focus so
   old transcript does not hide their choices. Content wraps before cursor and
   viewport coordinates are computed. The catalog windows rows and omits page
@@ -143,7 +153,11 @@ page, Enter returns to the catalog.
 fields, at least one note per page, clean closing step
 (`tour-content.test.js`), and full ANSI playback on an `@xterm/headless`
 virtual terminal (`tour-tui.test.js`), and the in-session stop/run/replay recovery
-of the main transcript (`tour-insession.test.js`). Every authored step is checked
+of the main transcript (`tour-insession.test.js`). `tour-transcript.test.js`
+compares every rendered row against real CLI events at three widths, including
+blank rows and partial table/code streams. Layout and virtual-terminal tests
+assert that pause/completion states and instructions remain outside the closed
+demo frame, including in monochrome and after resizing. Every authored step is checked
 at 80×24, 60×20, 40×16 and 36×14. Content tests compare animated and rebuilt
 states for all pages and reject unfinished turns, lost pending input, or typing
 through an open menu.

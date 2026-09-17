@@ -74,7 +74,7 @@ test("tour plays on a real terminal buffer: catalog, page, return, exit", async 
   await settle();
   viewport = await output.flushAndGetViewport();
   const screen = viewport.join("\n");
-  assert.ok(screen.includes("Tour · Steer and queue"), "enter opens the selected page");
+  assert.ok(screen.includes("Demo · Steer and queue"), "enter opens the selected page");
   assert.ok(screen.includes("space continue"), "opening note waits for a keypress");
 
   input.send(" ");
@@ -111,7 +111,7 @@ test("deep links jump straight into a page", async () => {
   clock.advance(1200);
   await settle();
   const screen = (await output.flushAndGetViewport()).join("\n");
-  assert.ok(screen.includes("Tour · Work inside the team"), "deep-linked page opens directly");
+  assert.ok(screen.includes("Demo · Work inside the team"), "deep-linked page opens directly");
   input.send("q");
   await settle();
   input.send("\x1b");
@@ -147,7 +147,7 @@ test("pasted example text cannot navigate or quit the tour", async () => {
   input.send("\x1b[200~q\x1b[201~");
   await settle();
   let screen = (await output.flushAndGetViewport()).join("\n");
-  assert.ok(screen.includes("Tour · Work inside the team"), "pasted q leaves the page intact");
+  assert.ok(screen.includes("Demo · Work inside the team"), "pasted q leaves the page intact");
   input.send("\x03");
   await running;
 });
@@ -186,9 +186,10 @@ test("a completed lesson keeps title, takeaway and navigation on an 80x24 termin
     for (let i = 1; i < findTourPage("start.hello").steps.length; i++) input.send("\x1b[C");
     await settle();
     let screen = (await output.flushAndGetViewport()).join("\n");
-    assert.ok(screen.includes("Tour · Your first turn"), screen);
+    assert.ok(screen.includes("Demo · Your first turn"), screen);
     assert.ok(screen.includes("Try it: exit this tour"), screen);
     assert.ok(screen.includes("COMPLETE"), screen);
+    assertGuideOutsideDemo(screen);
     assert.equal(completed, 1);
     assert.equal(clock.pendingCount, 0);
     input.send("\x1b[5~");
@@ -205,8 +206,9 @@ test("a completed lesson keeps title, takeaway and navigation on an 80x24 termin
     output.resize(40, 16);
     await settle();
     screen = (await output.flushAndGetViewport()).join("\n");
-    assert.ok(screen.includes("Tour · Your first turn"), screen);
+    assert.ok(screen.includes("Demo · Your first turn"), screen);
     assert.ok(screen.includes("COMPLETE"), screen);
+    assertGuideOutsideDemo(screen);
   } finally {
     input.send("\x03");
     await running;
@@ -238,6 +240,7 @@ test("terminal clearly distinguishes an explanation stop from an automatic count
     await settle();
     let screen = (await output.flushAndGetViewport()).join("\n");
     assert.ok(screen.includes("PAUSED · Read this explanation"), screen);
+    assertGuideOutsideDemo(screen);
     assert.ok(screen.includes("space continue"));
     assert.ok(screen.includes("Step 1/"));
     input.send(" ");
@@ -254,6 +257,7 @@ test("terminal clearly distinguishes an explanation stop from an automatic count
     await settle();
     screen = (await output.flushAndGetViewport()).join("\n");
     assert.ok(screen.includes("PAUSED · You paused playback"), screen);
+    assertGuideOutsideDemo(screen);
     assert.ok(!screen.includes("next step in"));
     output.resize(36, 14);
     await settle();
@@ -271,3 +275,11 @@ test("terminal clearly distinguishes an explanation stop from an automatic count
   }
   assert.equal(clock.pendingCount, 0);
 });
+
+function assertGuideOutsideDemo(screen) {
+  const rows = screen.split("\n");
+  const border = rows.findIndex((row) => /^└─+┘$/.test(row));
+  const guide = rows.findIndex((row) => row.includes("TOUR GUIDE"));
+  const status = rows.findIndex((row) => /PAUSED|COMPLETE/.test(row));
+  assert.ok(border >= 0 && guide > border && status > guide, screen);
+}

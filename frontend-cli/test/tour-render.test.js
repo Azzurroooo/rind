@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 
 import { renderTourCatalog, renderTourPage, renderTourHelp } from "../lib/tour/render.js";
 import { TOUR_TOPICS, tourPages } from "../lib/tour/pages/index.js";
-import { currentTheme, setTheme } from "../lib/theme.js";
+import { currentTheme, setTheme, paintRaw } from "../lib/theme.js";
 import { createTourStage } from "../lib/tour/stage.js";
 import { stripAnsi, textWidth } from "../lib/text-width.js";
 
@@ -88,7 +88,7 @@ test("page frame titles the page and wraps every content line", () => {
   for (const width of [120, 80, 60]) {
     const { lines } = render(width);
     const plain = lines.map(stripAnsi);
-    assert.ok(plain[0].includes("Tour"), "top border carries the Tour title");
+    assert.ok(plain[0].includes("Demo"), "top border identifies the simulated terminal");
     assert.ok(plain[0].includes("Create a Team"), "top border carries the page title");
     assert.ok(plain[0].includes("3/16"), "top border carries the page position");
     for (const line of lines) {
@@ -329,3 +329,53 @@ test("explanation, manual pause, automatic hold and playback have distinct visib
     }
   }
 });
+
+test("all guidance is outside the closed simulated terminal, even without color", () => {
+  const stage = createTourStage();
+  stage.rebuildTo([
+    { kind: "startup", info: INFO },
+    { kind: "note", lines: ["GUIDANCE: read this explanation."] },
+  ], 1);
+  for (const phase of ["waiting", "after", "anim", "end"]) {
+    for (const [width, height] of [[80, 24], [36, 14]]) {
+      const view = renderTourPage(stage.snapshot(), { ...pageState(phase), remainingMs: 1200 }, width, height);
+      const lines = plainLines(view.lines);
+      const border = lines.findIndex((line) => /^└─+┘$/.test(line));
+      const guide = lines.findIndex((line) => line.includes("TOUR GUIDE"));
+      assert.ok(border >= 0 && guide > border, "the demo closes before the separate guide begins");
+      assert.ok(lines.findIndex((line) => /PAUSED|AUTO|PLAYING|COMPLETE/.test(line)) > guide);
+      assert.ok(lines.findIndex((line) => line.includes("GUIDANCE:")) > guide);
+      assert.ok(lines.findIndex((line) => line.includes("Step ")) > guide);
+      assert.ok(!lines.slice(0, border).some((line) => /PAUSED|COMPLETE|GUIDANCE/.test(line)));
+      if (view.cursor) assert.ok(view.cursor.line < border, "cursor remains inside the demo");
+    }
+  }
+});
+
+test("pause uses the pause pictograph and danger color rather than Roman numerals", () => {
+  const tty = Object.getOwnPropertyDescriptor(process.stdout, "isTTY");
+  const noColor = process.env.NO_COLOR;
+  const stage = createTourStage();
+  try {
+    Object.defineProperty(process.stdout, "isTTY", { configurable: true, value: true });
+    delete process.env.NO_COLOR;
+    const lines = renderTourPage(stage.snapshot(), pageState("waiting"), 80, 24).lines;
+    const banner = lines.find((line) => line.includes("PAUSED"));
+    assert.ok(stripAnsi(banner).startsWith("⏸ PAUSED"));
+    assert.ok(!banner.includes("Ⅱ"));
+    assert.ok(banner.startsWith(paintRaw.danger("marker").split("marker")[0]), "pause is red in the active theme");
+    process.env.NO_COLOR = "1";
+    const monochrome = renderTourPage(stage.snapshot(), pageState("waiting"), 80, 24).lines;
+    assert.ok(monochrome.some((line) => line.startsWith("⏸ PAUSED")));
+    assert.ok(monochrome.every((line) => line === stripAnsi(line)));
+  } finally {
+    if (tty) Object.defineProperty(process.stdout, "isTTY", tty);
+    else delete process.stdout.isTTY;
+    if (noColor === undefined) delete process.env.NO_COLOR;
+    else process.env.NO_COLOR = noColor;
+  }
+});
+
+function plainLines(lines) {
+  return lines.map(stripAnsi);
+}

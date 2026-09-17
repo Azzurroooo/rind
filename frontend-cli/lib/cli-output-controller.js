@@ -18,7 +18,7 @@ import { ToolBlock } from "./components/tool-block.js";
 import { argsFromResult } from "./tool-display.js";
 import { paint } from "./theme.js";
 
-export function createCliOutputController({ state, terminalUi, transcript }) {
+export function createCliOutputController({ state, terminalUi, transcript, animateTools = true }) {
   const legacyRenderer = new AssistantRenderer((text) => writeOutput(text));
   let assistantMessage = null;
   let blockCount = 0;
@@ -283,6 +283,7 @@ export function createCliOutputController({ state, terminalUi, transcript }) {
     }
     const block = new ToolBlock({
       event,
+      animate: animateTools,
       onRequestRender: () => redraw(),
       leading: blockCount > 0,
     });
@@ -311,6 +312,7 @@ export function createCliOutputController({ state, terminalUi, transcript }) {
       }
       block = new ToolBlock({
         event,
+        animate: animateTools,
         onRequestRender: () => redraw(),
         leading: blockCount > 0,
       });

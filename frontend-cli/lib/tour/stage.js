@@ -79,7 +79,7 @@ export function createTourStage() {
         ensureRind().blocks.push({ kind: "tool", name: step.name, detail: step.detail, outcome: step.outcome, running: true });
         break;
       case "assistant":
-        ensureRind().blocks.push({ kind: "assistant", text: step.text, reveal: 0 });
+        ensureRind().blocks.push({ kind: "assistant", text: step.text, reveal: 0, complete: false });
         break;
       case "turn-done":
         ensureRind().blocks.push({
@@ -204,6 +204,7 @@ export function createTourStage() {
         const block = lastBlock("assistant");
         if (block) {
           block.reveal = graphemes(block.text).length;
+          block.complete = true;
         }
         break;
       }

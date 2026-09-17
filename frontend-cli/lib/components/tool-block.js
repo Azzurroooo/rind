@@ -7,7 +7,7 @@ import {
 const TICKER_TOOLS = new Set(["bash", "bash_output", "delegate", "search_web", "fetch_web_page"]);
 
 export class ToolBlock {
-  constructor({ event, onRequestRender, leading = false }) {
+  constructor({ event, onRequestRender, leading = false, animate = true }) {
     this.name = event?.tool_name || "tool";
     this.args = parseToolArguments(event);
     this.phase = "running";
@@ -17,9 +17,10 @@ export class ToolBlock {
     this.resultEvent = null;
     this.expanded = false;
     this.leading = Boolean(leading);
+    this.animate = animate;
     this.timer = null;
     this.onRequestRender = onRequestRender;
-    if (TICKER_TOOLS.has(this.name)) {
+    if (animate && TICKER_TOOLS.has(this.name)) {
       this.timer = setInterval(() => {
         this.onRequestRender?.();
       }, 1000);
@@ -101,7 +102,7 @@ export class ToolBlock {
         name: this.name,
         args: this.args,
         phase: "running",
-        elapsedMs: Date.now() - this.startedAt,
+        elapsedMs: this.animate ? Date.now() - this.startedAt : 0,
         progressMessage: this.progressMessage,
       }, width);
     } else {

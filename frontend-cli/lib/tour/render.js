@@ -1,12 +1,9 @@
-import { AssistantMessage } from "../components/assistant-message.js";
 import { prepareComposerFrame } from "../composer-terminal.js";
 import {
-  assistantHeaderText,
   authChoiceFrame,
   authSecretFrame,
   backgroundMonitorText,
   choiceMenuText,
-  commandResultText,
   contextBoardText,
   delegateMonitorText,
   inputHintText,
@@ -15,24 +12,19 @@ import {
   promptText,
   sessionMenuText,
   slashMenuText,
-  slashResultText,
-  startupText,
   themeMenuText,
   taskMonitorTabs,
-  turnCompletedLine,
-  userInputText,
   usageBoardText,
 } from "../rendering.js";
 import { paint, currentTheme, setTheme } from "../theme.js";
 import { clipCells, graphemes, stripAnsi, textWidth, wrapTextWithAnsi } from "../text-width.js";
 import { insertCursorMarker } from "../tui/cursor.js";
-import { renderToolRunning, renderToolFinished } from "../tool-display.js";
+import { renderTourTranscript } from "./transcript.js";
 
 const MIN_INNER = 1;
 
-// Framed page body: everything the audience sees lives inside a Tour panel so
-// the simulation reads as a simulation, and body content is wrapped (never
-// clipped) to the panel's inner width.
+// Only simulated terminal content belongs in the demo frame. Tour instructions
+// and playback controls sit outside its closing border, under their own label.
 function frameBlock({ title, badge, body, inner }) {
   const badgeText = badge ? ` ${badge} ` : "";
   const headText = clipCells(` ${title} `, Math.max(1, inner - badgeText.length - 4));
@@ -163,7 +155,8 @@ function renderPage(snapshot, state, width, height) {
     paint.bold(clipCells(statusKeys(state, width).join(" · "), width)),
     progressLine(state, width),
   ];
-  const budget = Math.max(1, height - captionRows.length - footer.length - 4);
+  const guideGap = height >= 20 ? [""] : [];
+  const budget = Math.max(1, height - captionRows.length - footer.length - 4 - guideGap.length);
   const maxScroll = Math.max(0, wrapped.length - budget);
   const menu = snapshot.rind?.composer.menu;
   const menuTop = rows.slice(0, menuStart).flatMap((row) => wrapTextWithAnsi(row, inner, inner)).length;
@@ -172,17 +165,16 @@ function renderPage(snapshot, state, width, height) {
   const start = Math.max(0, wrapped.length - budget - offset);
   const visible = wrapped.slice(start, start + budget);
   const action = demoAction(state.page.steps?.[state.stepIndex]);
-  const label = clipCells(`DEMO${action ? ` · ${action}` : ""}${maxScroll ? " · PgUp/PgDn" : ""}`, inner);
-  const body = [paint.dim(label), ...visible, playbackBanner(state, inner), ...captionRows];
   const lines = frameBlock({
-    title: `Tour · ${state.page.title}`,
+    title: `Demo · ${state.page.title}`,
     badge: `${state.pageIndex + 1}/${state.pageCount}`,
-    body,
+    body: visible,
     inner,
   }, width);
   const focused = mapped && mapped.row >= start && mapped.row < start + visible.length
-    ? { line: mapped.row - start + 2, column: mapped.column + 2 } : null;
-  lines.push(...footer);
+    ? { line: mapped.row - start + 1, column: mapped.column + 2 } : null;
+  const guideLabel = clipCells(`── TOUR GUIDE${maxScroll ? " · PgUp/PgDn" : ""}${width >= 80 && action ? ` · ${action}` : ""} ──`, width);
+  lines.push(...guideGap, paint.dim(guideLabel), playbackBanner(state, width), ...captionRows, ...footer);
   return { lines, inner, cursor: focused, maxScroll, offset };
 }
 
@@ -243,75 +235,9 @@ function appendRind(rows, rind, state, write, point) {
   // An open menu owns focus. Older transcript stays in stage state and returns
   // as soon as it closes, rather than pushing the choices off a short screen.
   if (!rind.composer.menu) {
-    for (const line of startupText(rind.info, state.inner).split("\n")) {
-      write(line);
-    }
-    write("");
-    for (const block of rind.blocks) {
-      for (const line of blockLines(block, state.inner, state.expanded)) write(line);
-    }
+    for (const line of renderTourTranscript(rind, state.inner, state.expanded)) write(line);
   }
   appendComposer(rows, rind, state, write, point);
-}
-
-function blockLines(block, inner, expanded) {
-  switch (block.kind) {
-    case "user":
-      return userInputText(block.text, inner, block.source).split("\n");
-    case "assistant":
-      return assistantLines(block, inner);
-    case "result":
-      return commandResultText(block.text, block.detail).split("\n");
-    case "slash-result":
-      return slashResultText({ text: block.text, display: block.display }, []).split("\n");
-    case "tool":
-      return toolLines(block, inner, expanded);
-    case "turn-done":
-      return turnCompletedLine(
-        { duration_ms: block.durationMs },
-        { completed: block.completed, failed: block.failed },
-      ).split("\n");
-    case "goodbye":
-      return ["Goodbye."];
-    default:
-      return [];
-  }
-}
-
-function assistantLines(block, inner) {
-  const message = new AssistantMessage({ color: Boolean(process.stdout.isTTY) && process.env.NO_COLOR === undefined });
-  message.append(graphemes(block.text).slice(0, block.reveal).join(""));
-  message.finish();
-  return [assistantHeaderText(), ...message.render(inner)];
-}
-
-function toolLines(block, width, expanded) {
-  const context = { name: block.name, args: toolArgs(block), expanded, fileChange: block.outcome.fileChange };
-  if (block.running) {
-    return renderToolRunning(context, width);
-  }
-  const failed = block.outcome.status === "failed";
-  const data = block.outcome.data ?? (block.name === "read_file" ? block.outcome.output : {
-    status: "completed", exit_code: failed ? 1 : 0, stdout: block.outcome.output || "",
-    agent_id: block.detail, summary: block.outcome.output || "",
-  });
-  return renderToolFinished({ ...context, event: {
-    status: failed ? "failed" : "completed",
-    error_type: failed ? "tool_error" : "",
-    duration_ms: block.outcome.durationMs,
-    result: JSON.stringify({ data }),
-  } }, width);
-}
-
-function toolArgs(block) {
-  if (block.name === "bash") {
-    return { command: block.detail };
-  }
-  if (block.name === "bash_output") return { bg_id: block.detail };
-  if (block.name === "delegate" || block.name === "agent_create") {
-    return { agent_id: block.detail };
-  }
-  return { file_path: block.detail };
 }
 
 function appendComposer(rows, rind, state, write, point) {
@@ -415,13 +341,13 @@ function playbackBanner(state, width) {
     label = "✓ COMPLETE · Try it in Rind";
     style = paint.success;
   } else if (state.phase === "waiting") {
-    label = "Ⅱ PAUSED · Read this explanation";
-    style = paint.warning;
+    label = "⏸ PAUSED · Read this explanation";
+    style = paint.danger;
   } else if (state.paused) {
-    label = state.pauseReason === "review" ? "Ⅱ PAUSED · Reviewing this step"
-      : state.pauseReason === "resize" ? "Ⅱ PAUSED · Terminal resized"
-        : "Ⅱ PAUSED · You paused playback";
-    style = paint.warning;
+    label = state.pauseReason === "review" ? "⏸ PAUSED · Reviewing this step"
+      : state.pauseReason === "resize" ? "⏸ PAUSED · Terminal resized"
+        : "⏸ PAUSED · You paused playback";
+    style = paint.danger;
   } else if (state.phase === "after") {
     label = Number.isFinite(state.remainingMs)
       ? `▶ AUTO · next step in ${(Math.max(1, Math.ceil(state.remainingMs / 100)) / 10).toFixed(1)}s`
