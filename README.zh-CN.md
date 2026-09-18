@@ -27,7 +27,7 @@ Rind 是一个**轻量、开源的 AI 编码 Agent**：为专家建立持久工�
 - **[基于轻量 worker 扩展](#独立于界面的轻量-worker)**：界面与执行分进程运行，会话按需加载，通过清晰接口扩展引擎。
 
 <p align="center">
-  <img src="assets/rind-architecture.zh-CN.svg" alt="Rind 核心设计：surface 与 worker 分进程运行，执行对象按需加载与释放，会话落盘，专家工作区持久保存，run/send 接入脚本" width="1000" />
+  <img src="assets/rind-architecture.zh-CN.svg" alt="Rind 核心设计：CLI、桌面、Web 与消息网关多入口，CLI 界面与 worker 分进程运行，执行对象按需加载与释放，会话落盘，内置指南、持久化专家工作区与 run/send 脚本调用" width="1000" />
 </p>
 
 ---

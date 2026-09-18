@@ -27,7 +27,7 @@ Rind is a **lightweight, open-source AI coding agent** with persistent specialis
 - **[Build on a lean worker](#a-lean-worker-independent-of-the-interface).** Separate the interface from execution, load sessions on demand, and extend the engine through clear interfaces.
 
 <p align="center">
-  <img src="assets/rind-architecture.svg" alt="Rind overview: separate surface and worker processes, on-demand execution with disk-backed sessions, persistent specialist teams, and run/send automation" width="1000" />
+  <img src="assets/rind-architecture.svg" alt="Rind core design: CLI, desktop, web and gateway; separate CLI surface and worker processes; on-demand execution with disk-backed sessions; built-in guide, persistent specialist workspaces and run/send automation" width="1000" />
 </p>
 
 ---
