@@ -23,7 +23,7 @@ def _payload(raw: str) -> dict:
 
 
 @pytest.mark.asyncio
-async def test_plan_context_is_task_local_for_concurrent_sessions(tmp_path: Path, monkeypatch) -> None:
+async def test_plan_targets_are_explicit_for_concurrent_sessions(tmp_path: Path, monkeypatch) -> None:
     env_root = tmp_path / "env_root"
     env_sid = "env_session"
     (env_root / env_sid).mkdir(parents=True)
@@ -43,9 +43,10 @@ async def test_plan_context_is_task_local_for_concurrent_sessions(tmp_path: Path
             await asyncio.to_thread(
                 update_plan,
                 [{"step": step, "status": "in_progress"}],
+                session.session_base_path,
             )
         )
-        return result, build_plan_snapshot()
+        return result, build_plan_snapshot(session.session_base_path)
 
     first, second = await asyncio.gather(
         worker("session_a", "step A"),
@@ -66,3 +67,21 @@ async def test_plan_context_is_task_local_for_concurrent_sessions(tmp_path: Path
         assert f"[in_progress] {step}" in snapshot
 
     assert not (env_root / env_sid / "plan.json").exists()
+
+
+@pytest.mark.asyncio
+async def test_plan_binding_resolves_draft_after_materialization(tmp_path):
+    from agent.infrastructure.tools.builtin.planning import create_plan_tool_spec
+
+    session = JsonlSessionStore(session_dir=str(tmp_path))
+    tool = create_plan_tool_spec(lambda: session.session_base_path).handler
+    await session.initialize()
+    assert _payload(tool([]))["error_type"] == "NotFound"
+    await session.persist_message("user", "start")
+    assert _payload(tool([{"step": "first", "status": "pending"}]))["ok"]
+    first_base = Path(session.session_base_path)
+    await session.create_session()
+    await session.persist_message("user", "next")
+    assert _payload(tool([{"step": "second", "status": "pending"}]))["ok"]
+    assert "first" in build_plan_snapshot(first_base)
+    assert "second" in build_plan_snapshot(session.session_base_path)

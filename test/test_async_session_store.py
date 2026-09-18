@@ -30,6 +30,32 @@ def temp_session_dir():
     yield temp_dir
     shutil.rmtree(temp_dir)
 
+
+@pytest.mark.asyncio
+async def test_resume_reads_messages_once_and_projection_isolates_mutation(tmp_path, monkeypatch):
+    store = JsonlSessionStore(session_dir=str(tmp_path), session_id="resume", system_prompt="sys")
+    await store.initialize()
+    await store.persist_message("user", "hello")
+    await store.persist_message("assistant", "answer")
+    reads = []
+    read_jsonl = SessionFiles.read_jsonl
+
+    def counted_read(self, path):
+        reads.append(Path(path).name)
+        return read_jsonl(self, path)
+
+    monkeypatch.setattr(SessionFiles, "read_jsonl", counted_read)
+    resumed = JsonlSessionStore(session_dir=str(tmp_path), session_id="resume", system_prompt="sys")
+    await resumed.initialize()
+    assert reads.count("messages.jsonl") == 1
+    first = await resumed.get_messages_slice()
+    first[-1]["content"] = "caller mutation"
+    assert (await resumed.get_messages_slice())[-1]["content"] == "answer"
+    for index in range(12):
+        await store.persist_message("assistant", f"external {index}")
+        assert (await resumed.get_messages_slice())[-1]["content"] == f"external {index}"
+    assert len(resumed._projected_caches) == 1
+
 @pytest.mark.asyncio
 async def test_async_session_store_facade(temp_session_dir):
     async_store = JsonlSessionStore(session_dir=temp_session_dir)
@@ -96,7 +122,7 @@ async def test_goal_checkpoint_is_hidden_from_replay_but_kept_for_context(temp_s
         "start",
         "Continue the active goal.",
     ]
-    assert store._message_count == 2
+    assert store.load_session_metadata(store.session_id, temp_session_dir)["message_count"] == 2
     assert store._has_user_message is True
 
 
@@ -851,7 +877,7 @@ async def test_update_plan_tool_args_are_projected_into_next_context(temp_sessio
     raw_args = json.dumps({"plan": plan}, ensure_ascii=False)
 
     await store.persist_message("user", "track this work")
-    tool_result = update_plan(plan)
+    tool_result = update_plan(plan, store.session_base_path)
     await store.persist_message("assistant", "", meta={"tool_calls": [{"id": "plan_1", "name": "update_plan"}]})
     await store.persist_tool_call(
         call_id="plan_1",
@@ -1640,6 +1666,27 @@ async def test_resume_normalizes_auto_compact_window_meta(temp_session_dir):
 
     repaired = json.loads(meta_path.read_text(encoding="utf-8"))
     assert repaired["auto_compact_window"] == {"ordinal": 1}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("count", [2.0, True, "2", None])
+async def test_resume_repairs_count_types_before_appending(temp_session_dir, count):
+    store = JsonlSessionStore(session_dir=temp_session_dir, session_id="count-types", system_prompt="sys")
+    await store.initialize()
+    await store.persist_message("user", "hello")
+    path = Path(store.session_base_path) / "meta.json"
+    meta = json.loads(path.read_text(encoding="utf-8"))
+    meta.update(message_count=count, tool_call_count=0.0)
+    path.write_text(json.dumps(meta), encoding="utf-8")
+
+    resumed = JsonlSessionStore(session_dir=temp_session_dir, session_id=store.session_id)
+    await resumed.initialize()
+    await resumed.persist_message("assistant", "world")
+    repaired = json.loads(path.read_text(encoding="utf-8"))
+    assert type(repaired["message_count"]) is int
+    assert repaired["message_count"] == 3
+    assert type(repaired["tool_call_count"]) is int
+    assert repaired["tool_call_count"] == 0
 
 
 def main() -> int:

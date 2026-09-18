@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from agent.infrastructure.team import discover_agent, initialize_team_agents, list_agent_blueprints, list_team_agents, materialize_team_agent
-from ..router import SlashCommandContext, SlashCommandInfo, SlashCommandResult
+from ..contracts import SlashCommandContext, SlashCommandInfo, SlashCommandResult
 
 USAGE = "/team create [project-id] | /team init | /team list | /team blueprint [id] | /team add <description>"
 

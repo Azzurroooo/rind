@@ -4,34 +4,30 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
-import inspect
 import json
 import logging
 import os
 from typing import Any, AsyncIterator, Callable
 import openai
-from tenacity import (
-    retry,
-    stop_after_attempt,
-    wait_exponential,
-    retry_if_exception_type,
-)
+
 
 from agent.application.ports.chat_client import ChatClient
 from agent.domain.cancellation import CancellationToken
 from agent.domain.errors import ProviderError
 from agent.infrastructure.llm.llm_trace import make_trace
+from .cancellation import await_with_cancellation, close_resource
 
 
 logger = logging.getLogger(__name__)
 
 
-def build_async_client(api_key: str, base_url: str) -> openai.AsyncOpenAI:
+def build_async_client(api_key: str, base_url: str, *, max_retries: int = 2) -> openai.AsyncOpenAI:
     from agent.infrastructure.config.settings_loader import DEFAULT_USER_AGENT
 
     return openai.AsyncOpenAI(
         api_key=api_key,
         base_url=base_url,
+        max_retries=max_retries,
         default_headers={"User-Agent": DEFAULT_USER_AGENT},
     )
 
@@ -63,26 +59,7 @@ class OpenAIChatClient(ChatClient):
         return self._model
 
     async def close(self) -> None:
-        close = getattr(self._client, "close", None)
-        if not callable(close):
-            return
-        result = close()
-        if inspect.isawaitable(result):
-            await result
-
-    @property
-    def _retry_decorator(self):
-        return retry(
-            retry=retry_if_exception_type((
-                openai.RateLimitError,
-                openai.APITimeoutError,
-                openai.InternalServerError,
-                openai.APIConnectionError,
-            )),
-            wait=wait_exponential(multiplier=1, min=2, max=10),
-            stop=stop_after_attempt(5),
-            reraise=True,
-        )
+        await close_resource(self._client)
 
     async def create(
         self,
@@ -94,30 +71,8 @@ class OpenAIChatClient(ChatClient):
         if trace:
             trace.request(self._trace_payload(messages, tools, stream=False))
 
-        @self._retry_decorator
-        async def _do_create():
-            if cancellation_token and cancellation_token.is_cancelled:
-                raise asyncio.CancelledError(cancellation_token.reason)
-
-            kwargs = {
-                "model": self._model,
-                "messages": messages,
-                "stream": False,
-            }
-            if tools:
-                kwargs["tools"] = tools
-                kwargs["tool_choice"] = "auto"
-            self._add_prompt_cache_key(kwargs)
-
-            # For non-streaming create, we await it.
-            # To be fully responsive to cancellation mid-flight, we wrap it in a task.
-            return await self._await_with_cancellation(
-                self._create_with_optional_reasoning_effort(kwargs),
-                cancellation_token,
-            )
-
         try:
-            result = await _do_create()
+            result = await self._request(messages, tools, False, cancellation_token)
             if trace:
                 trace.response(result)
                 trace.end("completed")
@@ -144,29 +99,8 @@ class OpenAIChatClient(ChatClient):
         # We need to retry the initial connection, but not the entire stream
         # once it starts yielding chunks.
 
-        @self._retry_decorator
-        async def _do_connect():
-            if cancellation_token and cancellation_token.is_cancelled:
-                raise asyncio.CancelledError(cancellation_token.reason)
-
-            kwargs = {
-                "model": self._model,
-                "messages": messages,
-                "stream": True,
-                "stream_options": {"include_usage": True},
-            }
-            if tools:
-                kwargs["tools"] = tools
-                kwargs["tool_choice"] = "auto"
-            self._add_prompt_cache_key(kwargs)
-
-            return await self._await_with_cancellation(
-                self._create_with_optional_reasoning_effort(kwargs),
-                cancellation_token,
-            )
-
         try:
-            stream_response = await _do_connect()
+            stream_response = await self._request(messages, tools, True, cancellation_token)
         except asyncio.CancelledError:
             if trace:
                 trace.end("cancelled")
@@ -204,7 +138,7 @@ class OpenAIChatClient(ChatClient):
             if trace and not ended:
                 trace.end("completed")
             try:
-                await self._close_stream(stream_response)
+                await close_resource(stream_response)
             except asyncio.CancelledError:
                 raise
             except Exception as exc:
@@ -256,34 +190,19 @@ class OpenAIChatClient(ChatClient):
             status = "failed"
         return ProviderError(text, status=status, error_type=error_type, code=code)
 
-    async def _close_stream(self, stream_response: Any) -> None:
-        close = getattr(stream_response, "aclose", None) or getattr(stream_response, "close", None)
-        if not callable(close):
-            return
-        result = close()
-        if asyncio.iscoroutine(result):
-            await result
 
-    async def _await_with_cancellation(self, awaitable: Any, cancellation_token: CancellationToken | None) -> Any:
-        task = asyncio.create_task(awaitable)
-        if not cancellation_token:
-            return await task
-
-        cancel_task = asyncio.create_task(cancellation_token.wait())
-        try:
-            done, _ = await asyncio.wait(
-                [task, cancel_task],
-                return_when=asyncio.FIRST_COMPLETED,
-            )
-            if cancel_task in done:
-                task.cancel()
-                await asyncio.gather(task, return_exceptions=True)
-                raise asyncio.CancelledError(cancellation_token.reason)
-            return task.result()
-        finally:
-            if not cancel_task.done():
-                cancel_task.cancel()
-            await asyncio.gather(cancel_task, return_exceptions=True)
+    async def _request(self, messages, tools, stream, cancellation_token):
+        if cancellation_token and cancellation_token.is_cancelled:
+            raise asyncio.CancelledError(cancellation_token.reason)
+        payload = {"model": self._model, "messages": messages, "stream": stream}
+        if stream:
+            payload["stream_options"] = {"include_usage": True}
+        if tools:
+            payload.update(tools=tools, tool_choice="auto")
+        self._add_prompt_cache_key(payload)
+        return await await_with_cancellation(
+            self._create_with_optional_reasoning_effort(payload), cancellation_token
+        )
 
     async def _create_with_optional_reasoning_effort(self, kwargs: dict[str, Any]) -> Any:
         payload = dict(kwargs)

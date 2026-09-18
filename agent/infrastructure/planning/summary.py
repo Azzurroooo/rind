@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from agent.domain.planning import PLAN_STEP_STATUSES
 
 DEFAULT_SUMMARY_CHAR_LIMIT = 2200
@@ -25,11 +27,11 @@ def render_plan_summary(plan: list[dict[str, str]], char_limit: int = DEFAULT_SU
     return _truncate("\n".join(lines), char_limit)
 
 
-def build_plan_snapshot(char_limit: int = 1800) -> str:
+def build_plan_snapshot(session_base: str | Path | None, char_limit: int = 1800) -> str:
     try:
         from .store import load_plan_if_exists
 
-        plan = load_plan_if_exists()
+        plan = load_plan_if_exists(session_base)
     except Exception:
         return ""
     return render_plan_summary(plan or [], char_limit=max(0, int(char_limit)))

@@ -27,6 +27,9 @@ class _Repository:
 
 
 class _Execution:
+    def add_event_sink(self, sink):
+        return lambda: None
+
     def __init__(self):
         self.turn_id = ""
 

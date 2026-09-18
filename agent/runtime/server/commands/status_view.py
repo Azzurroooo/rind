@@ -5,7 +5,7 @@ from __future__ import annotations
 from agent.infrastructure.config import load_settings
 from agent.runtime.server.commands.formatting import display_value, nonnegative_int
 
-from .router import SlashCommandContext
+from .contracts import SlashCommandContext
 
 
 def render_status_display(display: dict) -> str:

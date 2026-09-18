@@ -11,6 +11,7 @@ from agent.domain.cancellation import CancellationToken
 from agent.domain.errors import ProviderError
 from agent.domain.models import ModelCompletion, ModelStreamEvent, ModelUsage
 from agent.domain.tool_payload import ParsedToolCall
+from .cancellation import await_with_cancellation, close_resource
 
 
 class OpenAIResponsesClient(ChatClient):
@@ -21,7 +22,7 @@ class OpenAIResponsesClient(ChatClient):
 
     async def create(self, messages, tools=None, cancellation_token: CancellationToken | None = None) -> ModelCompletion:
         payload = self._payload(messages, tools, stream=False)
-        response = await _await(self._client.responses.create(**payload), cancellation_token)
+        response = await await_with_cancellation(self._client.responses.create(**payload), cancellation_token)
         return _completion(response)
 
     async def stream(self, messages, tools=None, cancellation_token: CancellationToken | None = None) -> AsyncIterator[ModelStreamEvent]:
@@ -29,7 +30,7 @@ class OpenAIResponsesClient(ChatClient):
         call_ids: dict[str, str] = {}
         response = None
         try:
-            response = await _await(self._client.responses.create(**payload), cancellation_token)
+            response = await await_with_cancellation(self._client.responses.create(**payload), cancellation_token)
             async for raw in response:
                 if cancellation_token and cancellation_token.is_cancelled:
                     raise asyncio.CancelledError(cancellation_token.reason)
@@ -42,16 +43,10 @@ class OpenAIResponsesClient(ChatClient):
         except Exception as exc:
             raise ProviderError(str(exc), status="unavailable", error_type=type(exc).__name__, code="stream_interrupted") from exc
         finally:
-            close = getattr(response if "response" in locals() else None, "aclose", None)
-            if callable(close):
-                await close()
+            await close_resource(response)
 
     async def close(self) -> None:
-        close = getattr(self._client, "close", None)
-        if callable(close):
-            value = close()
-            if hasattr(value, "__await__"):
-                await value
+        await close_resource(self._client)
 
     def _payload(self, messages, tools, *, stream: bool) -> dict[str, Any]:
         payload: dict[str, Any] = {"model": self._model, "input": _input_items(messages), "stream": stream}
@@ -138,21 +133,6 @@ def _usage(value: Any) -> ModelUsage | None:
     if value is None:
         return None
     return ModelUsage(int(_get(value, "input_tokens") or 0), int(_get(value, "output_tokens") or 0), int(_get(value, "input_tokens_details") and _get(_get(value, "input_tokens_details"), "cached_tokens") or 0), int(_get(value, "reasoning_tokens") or 0))
-
-
-async def _await(awaitable, cancellation_token):
-    task = asyncio.create_task(awaitable)
-    if cancellation_token is None:
-        return await task
-    cancel = asyncio.create_task(cancellation_token.wait())
-    done, _ = await asyncio.wait((task, cancel), return_when=asyncio.FIRST_COMPLETED)
-    if cancel in done:
-        task.cancel()
-        await asyncio.gather(task, return_exceptions=True)
-        raise asyncio.CancelledError(cancellation_token.reason)
-    cancel.cancel()
-    await asyncio.gather(cancel, return_exceptions=True)
-    return task.result()
 
 
 def _get(value: Any, key: str) -> Any:

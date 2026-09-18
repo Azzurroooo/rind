@@ -1,5 +1,5 @@
 """rind package exports."""
 
-from agent.infrastructure.tools.builtin import TOOL_SPECS
+from agent.infrastructure.tools.builtin import build_builtin_tool_specs
 
-__all__ = ["TOOL_SPECS"]
+__all__ = ["build_builtin_tool_specs"]

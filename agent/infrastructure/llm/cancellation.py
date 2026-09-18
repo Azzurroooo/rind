@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 
 from agent.domain.cancellation import CancellationToken
 
@@ -12,11 +13,21 @@ async def await_with_cancellation(awaitable, cancellation_token: CancellationTok
         return await awaitable
     task = asyncio.create_task(awaitable)
     cancel = asyncio.create_task(cancellation_token.wait())
-    done, _ = await asyncio.wait((task, cancel), return_when=asyncio.FIRST_COMPLETED)
-    if cancel in done:
-        task.cancel()
-        await asyncio.gather(task, return_exceptions=True)
-        raise asyncio.CancelledError(cancellation_token.reason)
-    cancel.cancel()
-    await asyncio.gather(cancel, return_exceptions=True)
-    return task.result()
+    try:
+        done, _ = await asyncio.wait((task, cancel), return_when=asyncio.FIRST_COMPLETED)
+        if cancel in done:
+            raise asyncio.CancelledError(cancellation_token.reason)
+        return task.result()
+    finally:
+        for pending in (task, cancel):
+            if not pending.done():
+                pending.cancel()
+        await asyncio.gather(task, cancel, return_exceptions=True)
+
+
+async def close_resource(resource) -> None:
+    close = getattr(resource, "aclose", None) or getattr(resource, "close", None)
+    if callable(close):
+        result = close()
+        if inspect.isawaitable(result):
+            await result

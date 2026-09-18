@@ -32,6 +32,7 @@ from pathlib import Path
 from typing import Any
 
 from .. import Attachment, ChannelCapabilities, InboundMessage, OutboundPayload, SendTarget
+from .. import attachment_kind
 from ..config import ChannelConfig
 
 logger = logging.getLogger(__name__)
@@ -75,12 +76,6 @@ def normalize_subject(subject: str) -> str:
     """Subject base for thread_id: strip Re:/Fwd: prefixes, collapse, lowercase."""
     base = _SUBJECT_PREFIX.sub("", str(subject or ""))
     return re.sub(r"\s+", " ", base).strip().lower()
-
-
-def _kind_of_content_type(content_type: str) -> str:
-    return ("image" if content_type.startswith("image/") else
-            "audio" if content_type.startswith("audio/") else
-            "video" if content_type.startswith("video/") else "document")
 
 
 def _safe_filename(raw: Any, fallback: str) -> str:
@@ -217,7 +212,7 @@ class EmailChannel:
             fallback = f"{item['message_ref']}-{position}.bin"
             path = directory / _safe_filename(filename, fallback)
             path.write_bytes(payload)
-            saved.append(Attachment(path=path, content_type=content_type, kind=_kind_of_content_type(content_type)))
+            saved.append(Attachment(path=path, content_type=content_type, kind=attachment_kind(content_type)))
         self._thread_refs[item["thread_id"]] = (item["message_ref"], item["subject"])
         if self._sink is not None:
             await self._sink.inbound(InboundMessage(

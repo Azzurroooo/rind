@@ -115,3 +115,18 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
+
+
+def test_local_token_cache_reestimates_changed_payloads_without_count_drift():
+    estimator = ContextEstimator()
+    messages = [
+        {"role": "system", "content": "中文指令", "_context_kind": "skill_catalog"},
+        {"role": "assistant", "content": "x" * 1000, "tool_calls": [{"id": "call"}]},
+        {"role": "tool", "content": "output", "tool_call_id": "call"},
+    ]
+    cache = {}
+    assert estimator.estimate_messages(messages, token_cache=cache) == estimator.estimate_messages(messages)
+    messages[1]["content"] = "[DROPPED FOR CONTEXT RESCUE]"
+    assert estimator.estimate_messages(messages, token_cache=cache) == estimator.estimate_messages(messages)
+    messages[0]["_context_kind"] = "goal_policy"
+    assert estimator.estimate_messages(messages, token_cache=cache) == estimator.estimate_messages(messages)

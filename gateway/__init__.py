@@ -12,6 +12,11 @@ from pathlib import Path
 from typing import Protocol, runtime_checkable
 
 
+def attachment_kind(content_type: str) -> str:
+    kind = content_type.partition("/")[0]
+    return kind if kind in {"image", "audio", "video"} and "/" in content_type else "document"
+
+
 @dataclass(frozen=True, slots=True)
 class Attachment:
     """A file already persisted under the workspace uploads/ directory."""
@@ -87,6 +92,7 @@ class Channel(Protocol):
 
 __all__ = [
     "Attachment",
+    "attachment_kind",
     "Channel",
     "ChannelCapabilities",
     "InboundMessage",

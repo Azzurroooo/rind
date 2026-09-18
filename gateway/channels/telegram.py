@@ -27,6 +27,7 @@ from pathlib import Path
 from typing import Any
 
 from .. import Attachment, ChannelCapabilities, InboundMessage, OutboundPayload, SendTarget
+from .. import attachment_kind
 from ..config import ChannelConfig
 
 logger = logging.getLogger(__name__)
@@ -73,16 +74,6 @@ class _MediaSource:
     kind: str  # Attachment.kind vocabulary
     content_type: str
     filename: str | None
-
-
-def _kind_of_content_type(content_type: str) -> str:
-    if content_type.startswith("image/"):
-        return "image"
-    if content_type.startswith("audio/"):
-        return "audio"
-    if content_type.startswith("video/"):
-        return "video"
-    return "document"
 
 
 def _safe_filename(raw: Any, fallback: str) -> str:
@@ -256,7 +247,7 @@ class TelegramChannel:
         document = getattr(message, "document", None)
         if document is not None:
             content_type = str(getattr(document, "mime_type", "") or "application/octet-stream")
-            sources.append(_MediaSource(document, _kind_of_content_type(content_type), content_type,
+            sources.append(_MediaSource(document, attachment_kind(content_type), content_type,
                                         getattr(document, "file_name", None)))
         voice = getattr(message, "voice", None)
         if voice is not None:
@@ -264,7 +255,7 @@ class TelegramChannel:
         video = getattr(message, "video", None)
         if video is not None:
             content_type = str(getattr(video, "mime_type", "") or "video/mp4")
-            sources.append(_MediaSource(video, _kind_of_content_type(content_type), content_type,
+            sources.append(_MediaSource(video, attachment_kind(content_type), content_type,
                                         getattr(video, "file_name", None)))
         return sources
 

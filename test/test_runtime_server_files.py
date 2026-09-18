@@ -33,8 +33,8 @@ class _CaptureWriter:
 
 
 class _FakeExecution:
-    def set_event_sink(self, sink):
-        pass
+    def add_event_sink(self, sink):
+        return lambda: None
 
 
 class _FakeWorker:

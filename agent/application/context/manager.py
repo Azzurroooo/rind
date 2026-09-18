@@ -105,12 +105,13 @@ class ContextManager:
         # Score the tagged list, not the stripped projection: the composition
         # snapshot re-estimates these exact payloads, keeping section sums
         # equal to stats["estimated_input_tokens"] with zero drift.
-        final_estimate = self._estimator.estimate_messages(messages)
+        token_cache = {} if allow_rescue else None
+        final_estimate = self._estimator.estimate_messages(messages, token_cache=token_cache)
 
         dropped_count = 0
         while allow_rescue and final_estimate.over_hard_limit and len(final_messages) > 2:
             messages, final_messages = self.rescue_context(messages, final_messages)
-            final_estimate = self._estimator.estimate_messages(messages)
+            final_estimate = self._estimator.estimate_messages(messages, token_cache=token_cache)
             dropped_count += 1
             if dropped_count > 50:
                 break
@@ -418,32 +419,7 @@ class ContextManager:
             result = [dict(item) for item in extra_messages] + result
         return result
 
-    def _mark_context_kind(self, messages: list[dict], kind: str) -> list[dict]:
-        marked = []
-        for message in messages or []:
-            if not isinstance(message, dict):
-                continue
-            item = dict(message)
-            item.setdefault("_context_kind", kind)
-            marked.append(item)
-        return marked
 
-    def _insert_before_latest_user(self, messages: list[dict], extra_messages: list[dict]) -> list[dict]:
-        if not extra_messages:
-            return list(messages)
-        result = [dict(message) for message in messages]
-        insert_at = None
-        for index in range(len(result) - 1, -1, -1):
-            if result[index].get("role") == "user":
-                insert_at = index
-                break
-        rendered_extra = [dict(item) for item in extra_messages]
-        if insert_at is None:
-            prefix_end = 0
-            while prefix_end < len(result) and result[prefix_end].get("role") == "system":
-                prefix_end += 1
-            return result[:prefix_end] + rendered_extra + result[prefix_end:]
-        return result[:insert_at] + rendered_extra + result[insert_at:]
 
     def _is_conversation_message(self, message: dict) -> bool:
         if message.get("role") not in {"user", "assistant"}:

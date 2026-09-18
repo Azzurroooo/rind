@@ -165,8 +165,8 @@ def test_sync_file_tools_return_cancelled_payload(tmp_path: Path) -> None:
     assert_error(grep("needle", path=str(tmp_path), _cancellation_token=source.token), "Cancelled")
 
 
-def test_schema_exposes_only_minimal_file_navigation_fields() -> None:
-    schemas = {item["function"]["name"]: item["function"] for item in DefaultToolRegistry().schemas}
+def test_schema_exposes_only_minimal_file_navigation_fields(build_builtin_tool_specs) -> None:
+    schemas = {item["function"]["name"]: item["function"] for item in DefaultToolRegistry(build_builtin_tool_specs()).schemas}
     if "list_files" in schemas:
         raise AssertionError("list_files should not be registered")
     if "read_pdf" in schemas:
@@ -180,29 +180,3 @@ def test_schema_exposes_only_minimal_file_navigation_fields() -> None:
         actual = set(schemas[name]["parameters"]["properties"])
         if actual != fields:
             raise AssertionError(f"Unexpected {name} schema fields: {actual}")
-
-
-def main() -> int:
-    import tempfile
-
-    tests = [
-        test_glob_returns_files_sizes_and_skips_noise,
-        test_glob_limits_results,
-        test_grep_returns_matching_lines_and_honors_glob,
-        test_grep_limits_results_and_rejects_invalid_pattern,
-        test_read_file_paginates_with_encoding_and_next_offset,
-        test_read_file_rejects_missing_directory_binary_encoding_and_large_files,
-        test_read_file_rejects_invalid_offset_and_honors_limit_cap,
-        test_read_file_returns_sha256_for_empty_file,
-        test_sync_file_tools_return_cancelled_payload,
-    ]
-    for test in tests:
-        with tempfile.TemporaryDirectory() as temp_dir:
-            test(Path(temp_dir))
-    test_schema_exposes_only_minimal_file_navigation_fields()
-    print("File navigation tool tests passed.")
-    return 0
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())

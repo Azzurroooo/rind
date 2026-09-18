@@ -263,6 +263,14 @@ class ProcessSupervisor:
             return_exceptions=True,
         )
 
+    async def close(self) -> None:
+        records = list(self._processes.values())
+        self._processes.clear()
+        await asyncio.gather(
+            *(self._terminate(record, "cancelled") for record in records),
+            return_exceptions=True,
+        )
+
     def close_now(self) -> None:
         records = list(self._processes.values())
         self._processes.clear()

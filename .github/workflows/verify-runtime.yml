@@ -1,0 +1,65 @@
+name: Verify frozen Python worker
+
+on:
+  workflow_dispatch:
+    inputs:
+      distribution_ref:
+        description: "Published distribution commit SHA to validate (does not publish a release)"
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  runtime:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            target: windows-x64
+          - os: macos-15-intel
+            target: macos-x64
+          - os: macos-14
+            target: macos-arm64
+          - os: ubuntu-latest
+            target: linux-x64
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: rind
+      - uses: actions/checkout@v4
+        with:
+          repository: Azzurroooo/rind-distribution
+          ref: ${{ inputs.distribution_ref }}
+          path: rind-distribution
+          token: ${{ secrets.DISTRIBUTION_TOKEN || github.token }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12.13"
+      - name: Build a clean frozen worker
+        working-directory: rind-distribution
+        run: python scripts/build_runtime.py --target ${{ matrix.target }} --source ../rind
+      - name: Install test dependencies
+        run: python -m pip install -r rind/requirements.txt
+      - name: Verify all four model protocols and web extraction
+        working-directory: rind
+        shell: python
+        env:
+          TARGET: ${{ matrix.target }}
+        run: |
+          import os
+          from pathlib import Path
+          import subprocess
+          import sys
+
+          name = "rind-runtime.exe" if os.name == "nt" else "rind-runtime"
+          root = Path("../rind-distribution/artifacts/runtime") / os.environ["TARGET"] / "rind-runtime"
+          env = {**os.environ, "RIND_TEST_RUNTIME": str((root / name).resolve())}
+          subprocess.run([sys.executable, "-m", "pytest", "test/test_provider_e2e.py", "-q"], env=env, check=True)
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: runtime-${{ matrix.target }}
+          path: rind-distribution/artifacts/runtime/${{ matrix.target }}

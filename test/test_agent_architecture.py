@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ast
+import importlib.util
 from pathlib import Path
 
 
@@ -118,3 +119,40 @@ def test_main_delegates_to_runtime_server() -> None:
     source = (PROJECT_ROOT / "main.py").read_text(encoding="utf-8")
     assert "agent.runtime.server.app_server" in source
     assert "build_agent_container" not in source
+
+
+def test_python_module_dependencies_have_no_cycles() -> None:
+    paths = [*AGENT_ROOT.rglob("*.py"), *(PROJECT_ROOT / "gateway").rglob("*.py")]
+    modules = {
+        ".".join(path.relative_to(PROJECT_ROOT).with_suffix("").parts).removesuffix(".__init__"): path
+        for path in paths
+    }
+    edges = {name: set() for name in modules}
+    for name, path in modules.items():
+        package = name if path.name == "__init__.py" else name.rpartition(".")[0]
+        for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+            imports = []
+            if isinstance(node, ast.Import):
+                imports = [alias.name for alias in node.names]
+            elif isinstance(node, ast.ImportFrom):
+                base = node.module or ""
+                if node.level:
+                    base = importlib.util.resolve_name("." * node.level + base, package)
+                imports = [base, *(f"{base}.{alias.name}" for alias in node.names)]
+            edges[name].update(target for target in imports if target in modules and target != name)
+
+    visited = set()
+    visiting = []
+
+    def visit(name):
+        assert name not in visiting, "Dependency cycle: " + " -> ".join([*visiting, name])
+        if name in visited:
+            return
+        visiting.append(name)
+        for target in sorted(edges[name]):
+            visit(target)
+        visiting.pop()
+        visited.add(name)
+
+    for name in sorted(modules):
+        visit(name)

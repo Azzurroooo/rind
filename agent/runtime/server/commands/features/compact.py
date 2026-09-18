@@ -2,7 +2,7 @@
 
 from agent.runtime.server.commands.formatting import display_value
 
-from ..router import SlashCommandContext, SlashCommandInfo, SlashCommandResult
+from ..contracts import SlashCommandContext, SlashCommandInfo, SlashCommandResult
 
 
 async def handle_compact(context: SlashCommandContext, args: list[str]) -> SlashCommandResult | str:

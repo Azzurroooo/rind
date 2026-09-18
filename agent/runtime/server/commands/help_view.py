@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from .router import SlashCommandInfo
+from .contracts import SlashCommandInfo
 
 
 HELP_GROUPS = (

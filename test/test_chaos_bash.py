@@ -11,7 +11,6 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from agent.domain.cancellation import CancellationTokenSource
 from agent.infrastructure.tools.builtin.shell.capture import StreamCapture
-from agent.infrastructure.tools.builtin.shell.tool import _SUPERVISOR, bash
 
 
 def _python_command(code: str) -> str:
@@ -26,8 +25,8 @@ def run(coro):
     return asyncio.run(coro)
 
 
-def test_bash_truncation_large_output(monkeypatch):
-    res = run(bash(_python_command("print('A' * 60000)")))
+def test_bash_truncation_large_output(shell_tools, monkeypatch):
+    res = run(shell_tools.bash(_python_command("print('A' * 60000)")))
     parsed = json.loads(res)
 
     assert parsed["ok"] is True
@@ -76,24 +75,24 @@ def test_stream_capture_delta_survives_tail_rollover():
     assert next_cursor == 71000
     assert next_truncated is False
 
-def test_bash_timeout(monkeypatch):
+def test_bash_timeout(shell_tools, monkeypatch):
     """Test that a stuck process is killed after timeout."""
     # Temporarily reduce timeout for the test
-    original_timeout = _SUPERVISOR.timeout
-    _SUPERVISOR.timeout = 1
+    original_timeout = shell_tools.supervisor.timeout
+    shell_tools.supervisor.timeout = 1
 
     try:
         # Sleep for 3 seconds, which exceeds the 1 second timeout
-        res = run(bash(_python_command("import time; time.sleep(3)")))
+        res = run(shell_tools.bash(_python_command("import time; time.sleep(3)")))
         parsed = json.loads(res)
 
         assert parsed["ok"] is True
         assert "PROCESS TERMINATED: Command timed out" in parsed["data"]["stderr"]
     finally:
-        _SUPERVISOR.timeout = original_timeout
+        shell_tools.supervisor.timeout = original_timeout
 
 
-async def _run_cancelled_bash():
+async def _run_cancelled_bash(shell_tools):
     source = CancellationTokenSource()
 
     async def cancel_soon():
@@ -101,7 +100,7 @@ async def _run_cancelled_bash():
         source.cancel("test interrupt")
 
     asyncio.create_task(cancel_soon())
-    res = await bash(
+    res = await shell_tools.bash(
         _python_command("import time; time.sleep(3)"),
         _session_id="chaos_cancel",
         _cancellation_token=source.token,
@@ -113,23 +112,9 @@ async def _run_cancelled_bash():
     return json.loads(res), pending
 
 
-def test_bash_cancellation_settles_internal_tasks():
-    parsed, pending = run(_run_cancelled_bash())
+def test_bash_cancellation_settles_internal_tasks(shell_tools):
+    parsed, pending = run(_run_cancelled_bash(shell_tools))
 
     assert parsed["ok"] is True
     assert "PROCESS TERMINATED: Command cancelled: test interrupt" in parsed["data"]["stderr"]
     assert pending == []
-
-
-def main() -> int:
-    test_bash_truncation_large_output(None)
-    test_stream_capture_discards_100_mib_without_growing_retained_text()
-    test_stream_capture_delta_survives_tail_rollover()
-    test_bash_timeout(None)
-    test_bash_cancellation_settles_internal_tasks()
-    print("Chaos bash tests passed.")
-    return 0
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())

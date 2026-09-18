@@ -15,7 +15,7 @@ from agent.domain.errors import ProviderError
 from agent.domain.models import ModelCompletion, ModelStreamEvent, ModelUsage
 from agent.domain.tool_payload import ParsedToolCall
 
-from .cancellation import await_with_cancellation
+from .cancellation import await_with_cancellation, close_resource
 
 
 class GoogleGenerativeAIClient(ChatClient):
@@ -42,6 +42,7 @@ class GoogleGenerativeAIClient(ChatClient):
     async def stream(self, messages, tools=None, cancellation_token: CancellationToken | None = None) -> AsyncIterator[ModelStreamEvent]:
         contents, config = _request(messages, tools, self._send_tool_call_ids)
         fallback_id = _fallback_id_counter()
+        stream = None
         try:
             stream = await await_with_cancellation(
                 self._client.aio.models.generate_content_stream(model=self._model, contents=contents, config=config),
@@ -57,12 +58,14 @@ class GoogleGenerativeAIClient(ChatClient):
         except Exception as exc:
             raise ProviderError(str(exc), status="unavailable", error_type=type(exc).__name__, code="stream_interrupted") from exc
 
+        finally:
+            await close_resource(stream)
+
     async def close(self) -> None:
-        close = getattr(self._client, "close", None)
-        if callable(close):
-            result = close()
-            if hasattr(result, "__await__"):
-                await result
+        try:
+            await close_resource(self._client.aio)
+        finally:
+            await close_resource(self._client)
 
 
 def _request(messages, tools, send_tool_call_ids: bool) -> tuple[list[dict[str, Any]], dict[str, Any]]:

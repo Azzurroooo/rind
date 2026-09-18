@@ -10,6 +10,10 @@ from agent.domain.models import ModelCompletion, ModelStreamEvent
 class ChatClient(Protocol):
     """Protocol for asynchronous interaction with LLM providers."""
 
+    async def close(self) -> None:
+        """Release the provider's connections and resources."""
+        ...
+
     async def create(
         self,
         messages: list[dict],

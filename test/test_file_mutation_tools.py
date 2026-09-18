@@ -138,8 +138,8 @@ def test_diff_summary_is_bounded(tmp_path: Path) -> None:
     assert file_meta["diff"].endswith("... diff truncated ...")
 
 
-def test_file_mutation_schemas_are_versioned_and_apply_patch_is_absent() -> None:
-    registry = DefaultToolRegistry()
+def test_file_mutation_schemas_are_versioned_and_apply_patch_is_absent(build_builtin_tool_specs) -> None:
+    registry = DefaultToolRegistry(build_builtin_tool_specs())
     schemas = {item["function"]["name"]: item["function"] for item in registry.schemas}
 
     assert set(schemas["write_file"]["parameters"]["properties"]) == {

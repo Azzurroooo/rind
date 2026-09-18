@@ -32,7 +32,7 @@ class CompactionService:
     policy_version: str = "compact_boundary_v3"
     max_excerpt_chars: int = 2000
     max_compact_prompt_chars: int = 100000
-    plan_snapshot_provider: Callable[[], str] | None = None
+    plan_snapshot_provider: Callable[[str | None], str] | None = None
     usage_recorder: Callable[[dict[str, Any]], Any] | None = None
 
     async def compact_async(
@@ -94,7 +94,8 @@ class CompactionService:
             if hasattr(exc, "status"):
                 record["fallback_error"]["status"] = str(exc.status)
 
-        self._append_active_plan_snapshot(record)
+        if self.plan_snapshot_provider is not None:
+            self._append_active_plan_snapshot(record, session.session_base_path)
         try:
             return await session.persist_compaction(record)
         except Exception as exc:
@@ -304,8 +305,8 @@ class CompactionService:
             logger.debug("Best-effort latest compaction load failed.", exc_info=True)
         return None
 
-    def _append_active_plan_snapshot(self, record: dict[str, Any]) -> None:
-        snapshot = self._active_plan_snapshot()
+    def _append_active_plan_snapshot(self, record: dict[str, Any], session_base: str | None) -> None:
+        snapshot = self._active_plan_snapshot(session_base)
         if not snapshot:
             return
         handoff = record.get("handoff_message")
@@ -316,11 +317,11 @@ class CompactionService:
             return
         handoff["content"] = content.rstrip() + "\n\nPlan state at compact boundary:\n" + snapshot
 
-    def _active_plan_snapshot(self) -> str:
+    def _active_plan_snapshot(self, session_base: str | None) -> str:
         if self.plan_snapshot_provider is None:
             return ""
         try:
-            return str(self.plan_snapshot_provider() or "").strip()
+            return str(self.plan_snapshot_provider(session_base) or "").strip()
         except Exception:
             logger.debug("Best-effort plan snapshot failed.", exc_info=True)
             return ""

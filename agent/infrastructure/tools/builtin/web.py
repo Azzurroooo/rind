@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import re
-from typing import Any
+from contextlib import closing
 from urllib.parse import urljoin
 
 from bs4 import BeautifulSoup
@@ -11,22 +11,9 @@ from bs4 import BeautifulSoup
 from agent.domain.cancellation import CancellationToken
 from agent.domain import tool_cancelled, tool_error, tool_ok
 from agent.infrastructure.tools.spec import ToolSpec
+from .web_sessions import WebSessions
 
 
-# ---------------------------------------------------------------------------
-# HTTP session (curl_cffi with Chrome TLS fingerprint impersonation)
-# ---------------------------------------------------------------------------
-
-try:
-    from curl_cffi import requests as cffi_requests
-
-    _HAS_CFFI = True
-except ImportError:
-    import requests as cffi_requests  # type: ignore[no-redef]
-
-    _HAS_CFFI = False
-
-_SESSION = None
 _MAX_RESPONSE_BYTES = 10 * 1024 * 1024
 _MAX_REDIRECTS = 5
 
@@ -37,32 +24,20 @@ def _cancelled(tool_name: str, token: CancellationToken | None) -> str | None:
     return None
 
 
-def _get_session():
-    global _SESSION
-    if _SESSION is None:
-        kwargs: dict[str, Any] = {}
-        if _HAS_CFFI:
-            kwargs["impersonate"] = "chrome"
-        _SESSION = cffi_requests.Session(**kwargs)
-    return _SESSION
-
-
 # ---------------------------------------------------------------------------
 # Search engines
 # ---------------------------------------------------------------------------
 
-def _search_bing(query: str, max_results: int) -> list[dict[str, str]]:
-    session = _get_session()
+def _search_bing(query: str, max_results: int, session) -> list[dict[str, str]]:
     url = "https://cn.bing.com/search"
     params = {"q": query, "count": max_results}
     headers = {
         "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
         "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9",
     }
-    response = session.get(url, params=params, headers=headers, timeout=10)
-    response.raise_for_status()
-
-    soup = BeautifulSoup(response.text, "html.parser")
+    with closing(session.get(url, params=params, headers=headers, timeout=10)) as response:
+        response.raise_for_status()
+        soup = BeautifulSoup(response.text, "html.parser")
     results: list[dict[str, str]] = []
 
     for item in soup.find_all("li", class_="b_algo", limit=max_results):
@@ -89,18 +64,16 @@ def _search_bing(query: str, max_results: int) -> list[dict[str, str]]:
     return results
 
 
-def _search_baidu(query: str, max_results: int) -> list[dict[str, str]]:
-    session = _get_session()
+def _search_baidu(query: str, max_results: int, session) -> list[dict[str, str]]:
     url = "https://www.baidu.com/s"
     params = {"wd": query, "rn": str(min(max_results, 10))}
     headers = {
         "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
         "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9",
     }
-    response = session.get(url, params=params, headers=headers, timeout=10)
-    response.raise_for_status()
-
-    soup = BeautifulSoup(response.text, "html.parser")
+    with closing(session.get(url, params=params, headers=headers, timeout=10)) as response:
+        response.raise_for_status()
+        soup = BeautifulSoup(response.text, "html.parser")
     results: list[dict[str, str]] = []
 
     for item in soup.find_all("div", class_="c-container", limit=max_results * 3):
@@ -150,8 +123,7 @@ def _search_baidu(query: str, max_results: int) -> list[dict[str, str]]:
     return results
 
 
-def _search_ddg(query: str, max_results: int) -> list[dict[str, str]]:
-    session = _get_session()
+def _search_ddg(query: str, max_results: int, session) -> list[dict[str, str]]:
     url = "https://html.duckduckgo.com/html/"
     headers = {
         "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
@@ -159,10 +131,9 @@ def _search_ddg(query: str, max_results: int) -> list[dict[str, str]]:
         "Referer": "https://html.duckduckgo.com/",
     }
     data = {"q": query}
-    response = session.post(url, data=data, headers=headers, timeout=10)
-    response.raise_for_status()
-
-    soup = BeautifulSoup(response.text, "html.parser")
+    with closing(session.post(url, data=data, headers=headers, timeout=10)) as response:
+        response.raise_for_status()
+        soup = BeautifulSoup(response.text, "html.parser")
     results: list[dict[str, str]] = []
 
     for result_div in soup.find_all("div", class_="result", limit=max_results):
@@ -186,6 +157,8 @@ def search_web(
     query: str,
     max_results: int = 5,
     _cancellation_token: CancellationToken | None = None,
+    *,
+    _http_sessions: WebSessions,
 ) -> str:
     """
     Search the internet using multiple engines with automatic fallback (Bing -> Baidu -> DDG).
@@ -213,22 +186,23 @@ def search_web(
         ("ddg", _search_ddg),
     ]
 
-    for name, engine_fn in engines:
-        if cancelled := _cancelled("search_web", _cancellation_token):
-            return cancelled
-        try:
-            results = engine_fn(query, max_results)
+    with _http_sessions.acquire() as session:
+        for name, engine_fn in engines:
             if cancelled := _cancelled("search_web", _cancellation_token):
                 return cancelled
-            if results:
-                return tool_ok(
-                    "search_web",
-                    results,
-                    meta={"engine": name, "query": query, "matches": len(results)},
-                )
-        except Exception as e:
-            errors.append(f"{name}: {e}")
-            continue
+            try:
+                results = engine_fn(query, max_results, session)
+                if cancelled := _cancelled("search_web", _cancellation_token):
+                    return cancelled
+                if results:
+                    return tool_ok(
+                        "search_web",
+                        results,
+                        meta={"engine": name, "query": query, "matches": len(results)},
+                    )
+            except Exception as e:
+                errors.append(f"{name}: {e}")
+                continue
 
     return tool_ok(
         "search_web",
@@ -245,7 +219,9 @@ def _clamp_search_results(value) -> int:
     return max(1, min(parsed, 10))
 
 
-def fetch_web_page(url: str, _cancellation_token: CancellationToken | None = None) -> str:
+def fetch_web_page(
+    url: str, _cancellation_token: CancellationToken | None = None, *, _http_sessions: WebSessions,
+) -> str:
     """
     Fetch a web page and extract its main content as Markdown.
     Automatically strips navigation, ads, footers, and other boilerplate.
@@ -256,51 +232,53 @@ def fetch_web_page(url: str, _cancellation_token: CancellationToken | None = Non
             return cancelled
         import trafilatura
 
-        session = _get_session()
 
         # Keep download/parse memory bounded; extracted content is handled by ToolOutputStore later.
         headers = {
             "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9",
             "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
         }
-        current_url = url
-        response = None
-        body = bytearray()
-        for redirect_count in range(_MAX_REDIRECTS + 1):
-            response = session.get(
-                current_url,
-                headers=headers,
-                timeout=15,
-                allow_redirects=False,
-                stream=True,
-            )
-            if 300 <= response.status_code < 400:
-                location = response.headers.get("location")
-                if not location or redirect_count >= _MAX_REDIRECTS:
-                    return tool_error("fetch_web_page", "Too many redirects", "TooManyRedirects", meta={"url": url})
-                current_url = urljoin(current_url, location)
-                continue
-            response.raise_for_status()
-            content_length = response.headers.get("content-length")
-            if content_length and int(content_length) > _MAX_RESPONSE_BYTES:
-                return tool_error(
-                    "fetch_web_page",
-                    "Response body exceeds the 10 MiB network limit.",
-                    "ResponseTooLarge",
-                    meta={"url": url, "max_bytes": _MAX_RESPONSE_BYTES},
-                )
-            for chunk in response.iter_content(chunk_size=64 * 1024):
+        with _http_sessions.acquire() as session:
+            current_url = url
+            response = None
+            body = bytearray()
+            for redirect_count in range(_MAX_REDIRECTS + 1):
                 if cancelled := _cancelled("fetch_web_page", _cancellation_token):
                     return cancelled
-                body.extend(chunk)
-                if len(body) > _MAX_RESPONSE_BYTES:
-                    return tool_error(
-                        "fetch_web_page",
-                        "Response body exceeds the 10 MiB network limit.",
-                        "ResponseTooLarge",
-                        meta={"url": url, "max_bytes": _MAX_RESPONSE_BYTES},
-                    )
-            break
+                with closing(session.get(
+                    current_url,
+                    headers=headers,
+                    timeout=15,
+                    allow_redirects=False,
+                    stream=True,
+                )) as response:
+                    if 300 <= response.status_code < 400:
+                        location = response.headers.get("location")
+                        if not location or redirect_count >= _MAX_REDIRECTS:
+                            return tool_error("fetch_web_page", "Too many redirects", "TooManyRedirects", meta={"url": url})
+                        current_url = urljoin(current_url, location)
+                        continue
+                    response.raise_for_status()
+                    content_length = response.headers.get("content-length")
+                    if content_length and int(content_length) > _MAX_RESPONSE_BYTES:
+                        return tool_error(
+                            "fetch_web_page",
+                            "Response body exceeds the 10 MiB network limit.",
+                            "ResponseTooLarge",
+                            meta={"url": url, "max_bytes": _MAX_RESPONSE_BYTES},
+                        )
+                    for chunk in response.iter_content(chunk_size=64 * 1024):
+                        if cancelled := _cancelled("fetch_web_page", _cancellation_token):
+                            return cancelled
+                        body.extend(chunk)
+                        if len(body) > _MAX_RESPONSE_BYTES:
+                            return tool_error(
+                                "fetch_web_page",
+                                "Response body exceeds the 10 MiB network limit.",
+                                "ResponseTooLarge",
+                                meta={"url": url, "max_bytes": _MAX_RESPONSE_BYTES},
+                            )
+                    break
         if response is None:
             return tool_error("fetch_web_page", "Unable to fetch response", "FetchError", meta={"url": url})
         if cancelled := _cancelled("fetch_web_page", _cancellation_token):
@@ -356,17 +334,24 @@ def fetch_web_page(url: str, _cancellation_token: CancellationToken | None = Non
         return tool_error("fetch_web_page", f"Fetch error: {e}", type(e).__name__, meta={"url": url})
 
 
-TOOL_SPECS = (
-    ToolSpec(
-        name="search_web",
-        handler=search_web,
-        description="Search the internet. Automatically switches between search engines (Bing/Baidu/DDG); works for both English and Chinese queries and is reachable from mainland China.",
-        param_descriptions={"query": "Search keywords (English or Chinese)", "max_results": "Maximum number of results (default 5)"},
-    ),
-    ToolSpec(
-        name="fetch_web_page",
-        handler=fetch_web_page,
-        description="Fetch a web page and extract its main content (navigation, ads, and other clutter removed; outputs Markdown). Typically used after search_web returns URLs.",
-        param_descriptions={"url": "Web page URL"},
-    ),
-)
+def build_web_tool_specs(http_sessions: WebSessions) -> tuple[ToolSpec, ...]:
+    def search(query: str, max_results: int = 5, _cancellation_token: CancellationToken | None = None) -> str:
+        return search_web(query, max_results, _cancellation_token, _http_sessions=http_sessions)
+
+    def fetch(url: str, _cancellation_token: CancellationToken | None = None) -> str:
+        return fetch_web_page(url, _cancellation_token, _http_sessions=http_sessions)
+
+    return (
+        ToolSpec(
+            name="search_web",
+            handler=search,
+            description="Search the internet. Automatically switches between search engines (Bing/Baidu/DDG); works for both English and Chinese queries and is reachable from mainland China.",
+            param_descriptions={"query": "Search keywords (English or Chinese)", "max_results": "Maximum number of results (default 5)"},
+        ),
+        ToolSpec(
+            name="fetch_web_page",
+            handler=fetch,
+            description="Fetch a web page and extract its main content (navigation, ads, and other clutter removed; outputs Markdown). Typically used after search_web returns URLs.",
+            param_descriptions={"url": "Web page URL"},
+        ),
+    )

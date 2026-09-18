@@ -127,6 +127,9 @@ class FakeEmptyBashOutputExecutor:
 
 
 class FakeSession:
+    async def get_tool_records(self, **kwargs):
+        return []
+
     session_id = "session_1"
 
     def __init__(self):

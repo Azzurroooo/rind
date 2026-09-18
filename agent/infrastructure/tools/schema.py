@@ -41,11 +41,11 @@ def build_function_schema(
     *,
     name: str,
     func: Callable,
+    signature: inspect.Signature,
     description: str,
     param_descriptions: dict[str, str | dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     import typing
-    signature = inspect.signature(func)
     resolved_hints = typing.get_type_hints(func)
     properties: dict[str, dict[str, Any]] = {}
     required: list[str] = []

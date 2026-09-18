@@ -13,7 +13,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from agent.infrastructure.tools import DefaultToolRegistry, ToolSpec
-from agent.infrastructure.tools.builtin import TOOL_SPECS, build_builtin_tool_specs
+
 
 
 def _spec(name: str, handler) -> ToolSpec:
@@ -82,8 +82,8 @@ def test_duplicate_tool_names_are_rejected() -> None:
         DefaultToolRegistry((_spec("duplicate", first), _spec("duplicate", second)))
 
 
-def test_shell_schemas_hide_runtime_session_context() -> None:
-    registry = DefaultToolRegistry()
+def test_shell_schemas_hide_runtime_session_context(build_builtin_tool_specs) -> None:
+    registry = DefaultToolRegistry(build_builtin_tool_specs())
     schemas = {schema["function"]["name"]: schema for schema in registry.schemas}
 
     for name in ("bash", "bash_output"):
@@ -94,8 +94,8 @@ def test_shell_schemas_hide_runtime_session_context() -> None:
     assert registry.has("kill_shell") is False
 
 
-def test_user_question_schema_describes_structured_options() -> None:
-    schema = next(schema for schema in DefaultToolRegistry().schemas if schema["function"]["name"] == "ask_user_question")
+def test_user_question_schema_describes_structured_options(build_builtin_tool_specs) -> None:
+    schema = next(schema for schema in DefaultToolRegistry(build_builtin_tool_specs()).schemas if schema["function"]["name"] == "ask_user_question")
     options = schema["function"]["parameters"]["properties"]["options"]
 
     assert options["type"] == "array"
@@ -106,7 +106,7 @@ def test_user_question_schema_describes_structured_options() -> None:
     assert " (Recommended)" in options["description"]
 
 
-def test_builtin_catalog_preserves_default_tool_order() -> None:
+def test_builtin_catalog_preserves_default_tool_order(build_builtin_tool_specs) -> None:
     expected = [
         "ask_user_question",
         "read_file",
@@ -125,12 +125,11 @@ def test_builtin_catalog_preserves_default_tool_order() -> None:
 
     specs = build_builtin_tool_specs()
 
-    assert tuple(specs) == TOOL_SPECS
     assert [spec.name for spec in specs] == expected
-    assert [spec.schema for spec in specs] == [spec.schema for spec in TOOL_SPECS]
+    assert [spec.schema for spec in specs] == [spec.schema for spec in build_builtin_tool_specs()]
 
 
-def test_builtin_catalog_can_disable_user_questions_and_enable_goal() -> None:
+def test_builtin_catalog_can_disable_user_questions_and_enable_goal(build_builtin_tool_specs) -> None:
     async def set_goal_status(status: str) -> dict[str, str]:
         return {"status": status}
 

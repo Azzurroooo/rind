@@ -26,6 +26,7 @@ from pathlib import Path
 from typing import Any
 
 from .. import Attachment, ChannelCapabilities, InboundMessage, OutboundPayload, SendTarget
+from .. import attachment_kind
 from ..config import ChannelConfig
 
 logger = logging.getLogger(__name__)
@@ -63,16 +64,6 @@ def _load_sdk() -> Any:
     except ImportError as exc:
         raise ImportError(f"channel 'whatsapp' requires aiohttp>=3.9 ({exc}); install it to enable the channel") from exc
     return module
-
-
-def _kind_of_content_type(content_type: str) -> str:
-    if content_type.startswith("image/"):
-        return "image"
-    if content_type.startswith("audio/"):
-        return "audio"
-    if content_type.startswith("video/"):
-        return "video"
-    return "document"
 
 
 def _safe_filename(raw: Any, fallback: str) -> str:
@@ -206,7 +197,7 @@ class WhatsAppChannel:
         fallback = f"{reference}{_KIND_EXT.get(kind, '.bin')}"
         path = self._attachment_dir() / _safe_filename(block.get("filename"), fallback)
         path.write_bytes(data)
-        return (Attachment(path=path, content_type=content_type, kind=_kind_of_content_type(content_type)),)
+        return (Attachment(path=path, content_type=content_type, kind=attachment_kind(content_type)),)
 
     def _attachment_dir(self) -> Path:
         directory = self._uploads_root / CHANNEL_ID / datetime.now().strftime("%Y%m%d")

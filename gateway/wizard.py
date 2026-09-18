@@ -281,13 +281,13 @@ def _finish(args, selected, answers, lists, worker, worker_token, workspace, *, 
     if not start_now:
         return 0
 
-    from .main import _run
+    from .runner import run_gateway
     from .security import PairingStore
 
     runtime_dir = Path(workspace) / ".rind"
     config = build_config(parse_yaml(text, env=os.environ))
     try:
-        return asyncio.run(_run(config, runtime_dir, PairingStore(runtime_dir / "pairing.json")))
+        return asyncio.run(run_gateway(config, runtime_dir, PairingStore(runtime_dir / "pairing.json")))
     except KeyboardInterrupt:
         print("\nGateway stopped.")
         return 0

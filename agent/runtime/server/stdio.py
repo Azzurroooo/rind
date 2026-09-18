@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from agent.runtime.server.commands.features import build_command_infos
+
 import asyncio
 import copy
 import inspect
@@ -21,7 +23,7 @@ from agent.version import __version__
 from agent.runtime.server.commands import SlashCommandContext, SlashCommandResult, SlashCommandRouter
 from agent.runtime.server.resume_preview import render_resume_preview
 from agent.runtime.server.files import FileMethodError, file_list, file_read, file_write
-from agent.runtime.server.replay_events import project_durable_events
+from agent.runtime.server.replay_events import iter_durable_events
 from agent.runtime.server.protocol import (
     CAPABILITIES,
     CORE_METHODS,
@@ -223,7 +225,7 @@ class WorkerStdioRuntimeServer:
         self._background_output = background_output
         self._goal_enabled = goal_enabled
         self._writer = _WorkerWriter(writer)
-        self._slash_router = SlashCommandRouter()
+        self._slash_router = SlashCommandRouter(build_command_infos())
         self._requests: asyncio.Queue[dict[str, Any] | None] = asyncio.Queue()
         self._dispatch_tasks: set[asyncio.Task] = set()
         self._initialized = False
@@ -231,15 +233,8 @@ class WorkerStdioRuntimeServer:
         self._shutdown_request: dict[str, Any] | None = None
         self._shutdown_response_sent = False
         self._subscribed: set[str] = set()
-        self._remove_event_sink: Callable[[], None] | None = None
         self._auth_waiters: dict[str, asyncio.Future[str]] = {}
-        add_event_sink = getattr(self._worker.execution, "add_event_sink", None)
-        if callable(add_event_sink):
-            self._remove_event_sink = add_event_sink(self._send_event)
-        else:
-            set_event_sink = getattr(self._worker.execution, "set_event_sink", None)
-            if callable(set_event_sink):
-                set_event_sink(self._send_event)
+        self._remove_event_sink: Callable[[], None] | None = self._worker.execution.add_event_sink(self._send_event)
 
     def close(self) -> None:
         """Unregister this connection's sink and close the writer."""
@@ -799,27 +794,23 @@ class WorkerStdioRuntimeServer:
             return
         start = params.get("start") if isinstance(params.get("start"), int) else None
         end = params.get("end") if isinstance(params.get("end"), int) else None
-        replay = getattr(self._worker, "replay", None)
-        if callable(replay):
-            result = await replay(session_id, start=start, end=end)
-        else:
-            result = await self._worker.repository.replay(session_id, start=start, end=end)
+        result = await self._worker.replay(session_id, start=start, end=end)
         await self._respond(request, result)
 
     async def _replay_event_pages(self, request: dict[str, Any], after_cursor: int) -> None:
         session_id = await self._required_session_id(request)
         if session_id is None:
             return
-        loader = getattr(self._worker, "replay_event_pages", None)
-        if not callable(loader):
-            await self._respond_error(request, "Incremental replay is unavailable.", "UnsupportedOperation")
-            return
-        materials = await loader(session_id)
+        materials = await self._worker.replay_event_pages(session_id)
         messages = materials.get("messages") if isinstance(materials.get("messages"), list) else []
         tool_records = materials.get("tool_records") if isinstance(materials.get("tool_records"), list) else []
-        events = project_durable_events(messages, tool_records, materials.get("turn_state"), session_id)
-        envelopes = [event_envelope(event, index + 1) for index, event in enumerate(events)]
-        await self._respond(request, {"events": envelopes[after_cursor:], "cursor": len(events)})
+        events = iter_durable_events(messages, tool_records, materials.get("turn_state"), session_id)
+        envelopes = []
+        cursor = 0
+        for cursor, event in enumerate(events, start=1):
+            if cursor > after_cursor:
+                envelopes.append(event_envelope(event, cursor))
+        await self._respond(request, {"events": envelopes, "cursor": cursor})
 
     async def _file_request(self, request: dict[str, Any]) -> None:
         params = request.get("params") if isinstance(request.get("params"), dict) else {}

@@ -15,7 +15,6 @@ if str(PROJECT_ROOT) not in sys.path:
 from agent.application import CompactionService
 from agent.domain.compaction import COMPACT_CONTINUATION_USER_CONTENT
 from agent.infrastructure.planning import build_plan_snapshot
-from agent.infrastructure.planning.store import set_active_session_context
 
 
 class FakeSession:
@@ -59,9 +58,6 @@ def _set_plan_context(root: Path, plan: dict | str | None = None) -> Path:
         (base / "plan.json").write_text(json.dumps(plan, ensure_ascii=False), encoding="utf-8")
     elif isinstance(plan, str):
         (base / "plan.json").write_text(plan, encoding="utf-8")
-    os.environ["AGENT_SESSION_ROOT"] = str(root)
-    os.environ["AGENT_SESSION_ID"] = session_id
-    set_active_session_context(str(root), session_id)
     return base
 
 
@@ -184,8 +180,9 @@ async def test_compaction_service_falls_back_when_llm_compact_fails() -> None:
             raise RuntimeError("provider unavailable")
 
     with tempfile.TemporaryDirectory() as temp_dir:
-        _set_plan_context(Path(temp_dir))
+        base = _set_plan_context(Path(temp_dir))
         session = FakeSession()
+        session.session_base_path = str(base)
         record = await CompactionService().compact_async(
             session=session,
             context_messages=await session.load_messages(),
@@ -248,7 +245,7 @@ async def test_compaction_service_keeps_llm_handoff_when_usage_persist_fails() -
             )
 
     with tempfile.TemporaryDirectory() as temp_dir:
-        _set_plan_context(Path(temp_dir))
+        base = _set_plan_context(Path(temp_dir))
         session = UsageFailingSession()
         record = await CompactionService().compact_async(
             session=session,
@@ -276,8 +273,9 @@ async def test_compaction_service_keeps_llm_handoff_with_bad_context_stats() -> 
             )
 
     with tempfile.TemporaryDirectory() as temp_dir:
-        _set_plan_context(Path(temp_dir))
+        base = _set_plan_context(Path(temp_dir))
         session = FakeSession()
+        session.session_base_path = str(base)
         record = await CompactionService().compact_async(
             session=session,
             context_messages=await session.load_messages(),
@@ -303,6 +301,7 @@ async def test_compaction_service_appends_active_plan_snapshot_before_persist() 
     with tempfile.TemporaryDirectory() as temp_dir:
         base = _set_plan_context(Path(temp_dir), _active_plan())
         session = FakeSession()
+        session.session_base_path = str(base)
         record = await CompactionService(
             plan_snapshot_provider=build_plan_snapshot,
         ).compact_async(
@@ -341,8 +340,9 @@ async def test_compaction_service_skips_plan_snapshot_without_active_plan(plan) 
             return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content="LLM compact handoff"))])
 
     with tempfile.TemporaryDirectory() as temp_dir:
-        _set_plan_context(Path(temp_dir), plan)
+        base = _set_plan_context(Path(temp_dir), plan)
         session = FakeSession()
+        session.session_base_path = str(base)
         record = await CompactionService(
             plan_snapshot_provider=build_plan_snapshot,
         ).compact_async(
@@ -362,8 +362,9 @@ async def test_compaction_service_ignores_corrupt_plan_snapshot() -> None:
             return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content="LLM compact handoff"))])
 
     with tempfile.TemporaryDirectory() as temp_dir:
-        _set_plan_context(Path(temp_dir), "{bad json")
+        base = _set_plan_context(Path(temp_dir), "{bad json")
         session = FakeSession()
+        session.session_base_path = str(base)
         record = await CompactionService(
             plan_snapshot_provider=build_plan_snapshot,
         ).compact_async(

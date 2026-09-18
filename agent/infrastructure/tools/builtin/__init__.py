@@ -10,15 +10,18 @@ from .files import build_file_tool_specs
 from .agent_create import create_agent_create_tool_spec
 from .delegate import create_delegate_tool_spec
 from .goal import create_goal_tool_spec
-from .planning import TOOL_SPECS as PLANNING_TOOL_SPECS
-from .shell import build_shell_tool_specs
+from .planning import create_plan_tool_spec
+from .shell import ShellTools, build_shell_tool_specs
 from .skill import build_skill_tool_specs
 from .user_question import TOOL_SPECS as USER_QUESTION_TOOL_SPECS
-from .web import TOOL_SPECS as WEB_TOOL_SPECS
+from .web import build_web_tool_specs
+from .web_sessions import WebSessions
 
 
 def build_builtin_tool_specs(
     *,
+    shell_tools: ShellTools,
+    web_sessions: WebSessions,
     enable_goal: bool = False,
     enable_user_question: bool = True,
     set_goal_status: Callable[[str], Awaitable[dict[str, str]]] | None = None,
@@ -30,18 +33,19 @@ def build_builtin_tool_specs(
     shared_root: str | None = None,
     session_output_root: str | None = None,
     output_store=None,
+    session_base_provider: Callable[[], str | None] | None = None,
 ) -> tuple[ToolSpec, ...]:
     specs = list(build_file_tool_specs(workspace_root, allowed_roots, shared_root, session_output_root))
     if enable_user_question:
         specs[0:0] = USER_QUESTION_TOOL_SPECS
-    specs.extend(build_shell_tool_specs(workspace_root, output_store))
-    specs.extend(PLANNING_TOOL_SPECS)
+    specs.extend(build_shell_tool_specs(shell_tools, workspace_root))
+    specs.append(create_plan_tool_spec(session_base_provider))
     specs.extend(build_skill_tool_specs(skill_repository))
     if delegate_handler is not None:
         specs.append(create_delegate_tool_spec(delegate_handler))
     if agent_create_project is not None:
         specs.append(create_agent_create_tool_spec(agent_create_project))
-    specs.extend(WEB_TOOL_SPECS)
+    specs.extend(build_web_tool_specs(web_sessions))
     if enable_goal:
         if set_goal_status is None:
             raise ValueError("Goal tool requires a session goal status setter.")
@@ -49,7 +53,4 @@ def build_builtin_tool_specs(
     return tuple(specs)
 
 
-TOOL_SPECS: tuple[ToolSpec, ...] = build_builtin_tool_specs()
-
-
-__all__ = ["TOOL_SPECS", "build_builtin_tool_specs", "create_goal_tool_spec"]
+__all__ = ["build_builtin_tool_specs", "create_goal_tool_spec"]

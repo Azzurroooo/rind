@@ -36,6 +36,8 @@ from agent.infrastructure.persistence.usage_ledger import (
 )
 from agent.infrastructure.paths import resolve_session_base, validate_session_id
 from agent.infrastructure.planning import build_plan_snapshot
+from agent.infrastructure.tools.builtin.shell import ShellTools
+from agent.infrastructure.tools.builtin.web_sessions import WebSessions
 from agent.infrastructure.team import discover_agent
 from agent.prompts import build_goal_checkpoint_prompt, build_system_prompt
 from agent.domain.cancellation import CancellationTokenSource
@@ -183,10 +185,6 @@ class SessionRepository:
             "message_count": int(meta.get("message_count") or 0),
         }
 
-    async def settings_for(self, session_id: str) -> AppSettings:
-        info = await self.info(session_id)
-        return await asyncio.to_thread(load_settings, info["workspace_root"])
-
     async def replay(self, session_id: str, start: int | None = None, end: int | None = None) -> dict[str, Any]:
         info = await self.info(session_id)
         store = await self._open_store_from_info(
@@ -284,6 +282,8 @@ class ExecutionCoordinator:
         self,
         *,
         shared_resources: SharedRuntimeResources,
+        shell_tools: ShellTools,
+        web_sessions: WebSessions,
         repository: SessionRepository,
         debug: bool,
         enable_goal: bool,
@@ -292,6 +292,8 @@ class ExecutionCoordinator:
         provider_service: ProviderServiceImpl,
     ):
         self._shared_resources = shared_resources
+        self._shell_tools = shell_tools
+        self._web_sessions = web_sessions
         self._repository = repository
         self._debug = debug
         self._enable_goal = enable_goal
@@ -316,11 +318,6 @@ class ExecutionCoordinator:
                 pass
 
         return remove
-
-    def set_event_sink(self, sink: Callable[[dict[str, Any]], Awaitable[None] | None] | None) -> None:
-        self._event_sinks.clear()
-        if sink is not None:
-            self._event_sinks.append(sink)
 
     async def _emit_to_event_sinks(self, event: dict[str, Any]) -> None:
         for sink in list(self._event_sinks):
@@ -397,7 +394,7 @@ class ExecutionCoordinator:
         execution = self._active.get(clean)
         if execution is None:
             return ""
-        return str(getattr(execution.container.runtime, "active_turn_id", "") or "")
+        return str(execution.container.runtime.active_turn_id or "")
 
     def live_turn(self, session_id: str) -> dict[str, Any] | None:
         clean = validate_session_id(session_id)
@@ -513,9 +510,9 @@ class ExecutionCoordinator:
             async with execution.turn_slot:
                 cancel_source = CancellationTokenSource(parent_token=cancellation_token)
                 execution.current_cancel = cancel_source
-                responder = getattr(execution.container.runtime, "set_user_question_responder", None)
-                if callable(responder):
-                    responder(lambda event: self._answer_user_question(clean, event))
+                execution.container.runtime.set_user_question_responder(
+                    lambda event: self._answer_user_question(clean, event)
+                )
                 try:
                     run_kwargs: dict[str, Any] = {
                         "query": query,
@@ -551,9 +548,7 @@ class ExecutionCoordinator:
         if execution is None:
             return False
         interrupted = False
-        discard_inputs = getattr(execution.container.runtime, "discard_pending_inputs", None)
-        if callable(discard_inputs):
-            discard_inputs()
+        execution.container.runtime.discard_pending_inputs()
         if execution.current_cancel is not None and not execution.current_cancel.token.is_cancelled:
             execution.current_cancel.cancel(reason)
             interrupted = True
@@ -650,22 +645,16 @@ class ExecutionCoordinator:
             existing = self._active.get(clean)
             if existing is not None:
                 return existing.container
-            info = await self._repository.info(clean)
-            root = _normalize_workspace_root(info["workspace_root"])
-            settings = await self._repository.settings_for(clean)
+            metadata = await self._repository.metadata(clean)
+            root = _normalize_workspace_root(str(metadata.get("workspace_root") or metadata.get("cwd") or ""))
+            settings = await asyncio.to_thread(load_settings, root)
             selection = ModelSelection(
-                str(info.get("provider") or settings.provider),
-                str(info.get("model") or settings.model),
-                str(info.get("reasoning_effort") or settings.reasoning_effort),
-            )
-            settings = replace(
-                settings,
-                provider=selection.provider_id,
-                model=selection.model_id,
-                reasoning_effort=selection.reasoning_effort,
+                str(metadata.get("provider") or settings.provider),
+                str(metadata.get("model") or settings.model),
+                str(metadata.get("reasoning_effort") or settings.reasoning_effort),
             )
             try:
-                chat_client = await self._provider_service.create_chat_client(root, selection)
+                chat_client = await self._provider_service.create_chat_client(settings, selection, workspace_root=root)
             except Exception as exc:
                 if getattr(exc, "code", "") != "provider_not_configured":
                     raise
@@ -673,7 +662,12 @@ class ExecutionCoordinator:
             container = None
             try:
                 container = build_agent_container(
-                    settings=settings,
+                    settings=replace(
+                        settings,
+                        provider=selection.provider_id,
+                        model=selection.model_id,
+                        reasoning_effort=selection.reasoning_effort,
+                    ),
                     chat_client=chat_client,
                     session_dir=self.session_dir,
                     session_id=clean,
@@ -684,11 +678,13 @@ class ExecutionCoordinator:
                     enabled_tools=enabled_tools,
                     lock_workspace=lock_workspace,
                     workspace_root=root,
-                    project_id=info.get("project_id"),
-                    owner_agent_id=info.get("owner_agent_id"),
-                    session_type=info.get("session_type"),
-                    parent_session_id=info.get("parent_session_id"),
+                    project_id=metadata.get("project_id"),
+                    owner_agent_id=metadata.get("owner_agent_id"),
+                    session_type=metadata.get("session_type"),
+                    parent_session_id=metadata.get("parent_session_id"),
                     shared_resources=self._shared_resources,
+                    shell_tools=self._shell_tools,
+                    web_sessions=self._web_sessions,
                     session_runner=self._run_delegated_session,
                 )
                 await container.runtime.initialize()
@@ -726,39 +722,42 @@ class ExecutionCoordinator:
             )
             return await self._collect_delegated_turn(session_id, task, instruction, cancellation_token), session_id
 
-        from agent.infrastructure.planning.store import preserve_active_session_context
-
         with tempfile.TemporaryDirectory(prefix="rind-inspect-") as session_dir:
-            with preserve_active_session_context():
-                settings = await asyncio.to_thread(load_settings, str(target.workspace_root))
-                selection = ModelSelection(settings.provider, settings.model, settings.reasoning_effort)
+            settings = await asyncio.to_thread(load_settings, str(target.workspace_root))
+            selection = ModelSelection(settings.provider, settings.model, settings.reasoning_effort)
+            try:
+                chat_client = await self._provider_service.create_chat_client(settings, selection, workspace_root=str(target.workspace_root))
+            except Exception as exc:
+                if getattr(exc, "code", "") != "provider_not_configured":
+                    raise
+                chat_client = self._provider_service.unavailable_client(selection, str(exc))
+            container = None
+            try:
+                container = build_agent_container(
+                    settings=settings,
+                    chat_client=chat_client,
+                    session_dir=session_dir,
+                    enable_goal=False,
+                    enable_user_question=False,
+                    enabled_tools=enabled_tools,
+                    lock_workspace=False,
+                    workspace_root=str(target.workspace_root),
+                    project_id=project.project_id,
+                    owner_agent_id=target.agent_id,
+                    session_type="inspect",
+                    shared_resources=self._shared_resources,
+                    web_sessions=self._web_sessions,
+                )
+                response = await self._collect_container_turn(
+                    container,
+                    task,
+                    instruction,
+                    cancellation_token,
+                )
+            finally:
                 try:
-                    chat_client = await self._provider_service.create_chat_client(str(target.workspace_root), selection)
-                except Exception as exc:
-                    if getattr(exc, "code", "") != "provider_not_configured":
-                        raise
-                    chat_client = self._provider_service.unavailable_client(selection, str(exc))
-                try:
-                    container = build_agent_container(
-                        settings=settings,
-                        chat_client=chat_client,
-                        session_dir=session_dir,
-                        enable_goal=False,
-                        enable_user_question=False,
-                        enabled_tools=enabled_tools,
-                        lock_workspace=False,
-                        workspace_root=str(target.workspace_root),
-                        project_id=project.project_id,
-                        owner_agent_id=target.agent_id,
-                        session_type="inspect",
-                        shared_resources=self._shared_resources,
-                    )
-                    response = await self._collect_container_turn(
-                        container,
-                        task,
-                        instruction,
-                        cancellation_token,
-                    )
+                    if container is not None:
+                        await container.shell_tools.close()
                 finally:
                     await chat_client.close()
         return response, None
@@ -811,6 +810,7 @@ class ExecutionCoordinator:
                 self._live.pop(session_id, None)
                 released = execution
         if released is not None:
+            self._shell_tools.pool.close(session_id)
             await _close_container(released.container)
 
     async def release(self, session_id: str) -> None:
@@ -824,6 +824,7 @@ class ExecutionCoordinator:
                 self._live.pop(clean, None)
                 released = execution
         if released is not None:
+            self._shell_tools.pool.close(session_id)
             await _close_container(released.container)
 
     async def close(self) -> None:
@@ -875,10 +876,14 @@ class RuntimeWorker:
             ),
             tool_output_store=tool_output_store,
         )
+        self.shell_tools = ShellTools(tool_output_store)
+        self.web_sessions = WebSessions()
         self.provider_service = ProviderServiceImpl()
         self.repository = SessionRepository(session_dir=session_dir, provider_service=self.provider_service)
         self.execution = ExecutionCoordinator(
             shared_resources=self._shared_resources,
+            shell_tools=self.shell_tools,
+            web_sessions=self.web_sessions,
             repository=self.repository,
             debug=debug,
             enable_goal=enable_goal,
@@ -929,6 +934,8 @@ class RuntimeWorker:
 
     async def delete_session(self, session_id: str) -> dict[str, Any]:
         clean = validate_session_id(session_id)
+        await self.execution.release(clean)
+        await self.shell_tools.close_session(clean)
         return await self.repository.delete(clean)
 
     async def fork_session(self, session_id: str, before_message_id: str | None = None) -> dict[str, Any]:
@@ -977,7 +984,13 @@ class RuntimeWorker:
         }
 
     async def close(self) -> None:
-        await self.execution.close()
+        try:
+            await self.execution.close()
+        finally:
+            try:
+                await self.shell_tools.close()
+            finally:
+                await asyncio.to_thread(self.web_sessions.close)
 
 
 def _normalize_workspace_root(value: str) -> str:

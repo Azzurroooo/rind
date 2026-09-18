@@ -87,8 +87,8 @@ def test_skill_create_rejects_invalid_names_and_preserves_overwrite_policy(tmp_p
     assert overwritten["ok"] is True
 
 
-def test_skill_tools_are_registered_with_agent_scope() -> None:
-    registry = DefaultToolRegistry()
+def test_skill_tools_are_registered_with_agent_scope(build_builtin_tool_specs) -> None:
+    registry = DefaultToolRegistry(build_builtin_tool_specs())
     assert registry.has("skill")
     assert registry.has("skill_create")
     create_schema = next(schema for schema in registry.schemas if schema["function"]["name"] == "skill_create")

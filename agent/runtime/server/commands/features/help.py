@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Callable
 
 from ..help_view import render_command_help, render_help
-from ..router import SlashCommandContext, SlashCommandInfo, SlashCommandResult
+from ..contracts import SlashCommandContext, SlashCommandInfo, SlashCommandResult
 
 
 def build_help_command(command_infos: Callable[[], tuple[SlashCommandInfo, ...]]) -> SlashCommandInfo:

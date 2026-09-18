@@ -40,3 +40,6 @@ class ShellSessionPool:
     def close(self, session_id: str) -> None:
         """Close a shell state if it exists."""
         self._states.pop(session_id, None)
+
+    def clear(self) -> None:
+        self._states.clear()

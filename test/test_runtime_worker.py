@@ -14,6 +14,45 @@ from agent.runtime.server.protocol import RuntimeMethod
 from agent.runtime.server.stdio import WorkerStdioRuntimeServer
 
 
+def test_execution_reads_configuration_once_and_refreshes_between_turns(tmp_path, monkeypatch):
+    import agent.runtime.server.worker as worker_module
+    from unittest.mock import AsyncMock
+
+    async def run():
+        monkeypatch.setenv("RIND_HOME", str(tmp_path / "home"))
+        worker = RuntimeWorker(workspace_root=str(tmp_path), session_dir=str(tmp_path / "sessions"))
+        info = await worker.initialize()
+        settings_loader = worker_module.load_settings
+        reads = []
+
+        def load(root):
+            reads.append(root)
+            return settings_loader(root)
+
+        configurations = []
+
+        async def create(settings, selection, *, workspace_root):
+            configurations.append(settings)
+            return SimpleNamespace(close=AsyncMock())
+
+        monkeypatch.setattr(worker_module, "load_settings", load)
+        monkeypatch.setattr(worker.provider_service, "create_chat_client", create)
+        try:
+            await worker.start_execution(info["session_id"])
+            await worker.release_execution(info["session_id"])
+            path = tmp_path / "home" / "settings.json"
+            path.parent.mkdir(exist_ok=True)
+            path.write_text(json.dumps({"baseUrl": "https://changed.example/v1"}), encoding="utf-8")
+            await worker.start_execution(info["session_id"])
+            assert len(reads) == 2
+            assert configurations[0].base_url != configurations[1].base_url
+            assert configurations[1].base_url == "https://changed.example/v1"
+        finally:
+            await worker.close()
+
+    asyncio.run(run())
+
+
 class _Event:
     def __init__(self, event_type: str, session_id: str, turn_id: str):
         self._data = {
@@ -47,6 +86,9 @@ class _Store:
 
 
 class _Runtime:
+    def discard_pending_inputs(self):
+        return None
+
     def __init__(self, session_id: str):
         self.session_id = session_id
         self.started = asyncio.Event()
@@ -133,6 +175,9 @@ class _Worker:
 
 
 class _Execution:
+    def add_event_sink(self, sink):
+        return lambda: None
+
     def __init__(self, worker):
         self.worker = worker
         self.tokens = {}
@@ -588,6 +633,8 @@ def test_worker_replays_answer_received_before_question_responder_waits():
     async def run():
         execution = ExecutionCoordinator(
             shared_resources=SimpleNamespace(),
+            shell_tools=SimpleNamespace(),
+            web_sessions=SimpleNamespace(),
             repository=SimpleNamespace(),
             debug=False,
             enable_goal=False,
@@ -632,6 +679,8 @@ def test_worker_goal_continuation_persists_distinct_checkpoints():
 
         execution = Execution(
             shared_resources=SimpleNamespace(),
+            shell_tools=SimpleNamespace(),
+            web_sessions=SimpleNamespace(),
             repository=repository,
             debug=False,
             enable_goal=True,
@@ -657,7 +706,7 @@ def test_worker_goal_continuation_persists_distinct_checkpoints():
             events.append(event)
 
         execution.run_turn = run_turn
-        execution.set_event_sink(sink)
+        execution.add_event_sink(sink)
         started = await execution.start_goal_continuation("session-a")
         await next(iter(execution._goal_tasks.values()))
         return started, turns, events, repository.goal, repository.checkpoints

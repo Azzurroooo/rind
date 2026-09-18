@@ -93,7 +93,7 @@ class ContextEstimator:
         except Exception:
             return None
 
-    def estimate_messages(self, messages: list[dict]) -> ContextEstimate:
+    def estimate_messages(self, messages: list[dict], *, token_cache: dict[str, int] | None = None) -> ContextEstimate:
         system_tokens = 0
         conversation_tokens = 0
         tool_tokens = 0
@@ -103,7 +103,7 @@ class ContextEstimator:
         tool_chars = 0
 
         for message in messages:
-            tokens, chars = self._estimate_message_tokens(message)
+            tokens, chars = self._estimate_message_tokens(message, token_cache)
             if message.get("role") == "system":
                 system_tokens += tokens
                 system_chars += chars
@@ -134,17 +134,21 @@ class ContextEstimator:
         tokens, _ = self._estimate_message_tokens({"tools": tool_schemas})
         return max(0, tokens)
 
-    def _estimate_message_tokens(self, message: dict) -> tuple[int, int]:
+    def _estimate_message_tokens(self, message: dict, token_cache: dict[str, int] | None = None) -> tuple[int, int]:
         try:
             payload = json.dumps(message, ensure_ascii=False)
         except TypeError:
             payload = str(message)
 
         chars = len(payload)
+        if token_cache is not None and payload in token_cache:
+            return token_cache[payload], chars
 
         if self._tokenizer:
             try:
                 tokens = len(self._tokenizer.encode(payload, disallowed_special=()))
+                if token_cache is not None:
+                    token_cache[payload] = tokens
                 return tokens, chars
             except Exception:
                 logger.debug("Tokenizer failed; using heuristic context estimate.", exc_info=True)
@@ -154,4 +158,6 @@ class ContextEstimator:
         else:
             tokens = int(math.ceil(chars / 3.5))
 
+        if token_cache is not None:
+            token_cache[payload] = tokens
         return tokens, chars

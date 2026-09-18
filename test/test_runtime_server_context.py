@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timedelta, timezone
+
 import asyncio
 import sys
 from pathlib import Path
@@ -24,8 +26,8 @@ SESSION_ID = "20260910_alpha"
 
 
 class _FakeExecution:
-    def set_event_sink(self, sink):
-        pass
+    def add_event_sink(self, sink):
+        return lambda: None
 
     def active_session_ids(self):
         return set()
@@ -169,7 +171,7 @@ async def test_worker_usage_summary_reads_the_real_ledger(tmp_path, monkeypatch)
     monkeypatch.setenv("RIND_HOME", str(tmp_path))
     ledger = tmp_path / "usage.jsonl"
     append_usage_record(ledger, {
-        "ts": "2026-09-10T10:00:00+00:00",
+        "ts": (datetime.now(timezone.utc) - timedelta(hours=2)).isoformat(),
         "session_id": "s1",
         "model": "m1",
         "sampling_kind": "assistant",
@@ -183,7 +185,7 @@ async def test_worker_usage_summary_reads_the_real_ledger(tmp_path, monkeypatch)
         "context_usage_percent": 100 / 4096,
     })
     append_usage_record(ledger, {
-        "ts": "2026-09-10T11:00:00+00:00",
+        "ts": (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat(),
         "session_id": "s1",
         "model": "m1",
         "sampling_kind": "compact",

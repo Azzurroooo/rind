@@ -12,6 +12,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from agent.infrastructure.llm.openai_chat_client import OpenAIChatClient
+from agent.infrastructure.llm.cancellation import close_resource
 from agent.domain.cancellation import CancellationTokenSource
 from agent.domain.errors import ProviderError
 
@@ -107,7 +108,7 @@ async def test_openai_async_client_close_stream_prefers_aclose():
     stream = FakeStream()
     client = OpenAIChatClient(MagicMock(), "test-model")
 
-    await client._close_stream(stream)
+    await close_resource(stream)
 
     assert stream.closed is True
 
@@ -124,7 +125,7 @@ async def test_openai_async_client_close_stream_accepts_sync_close():
     stream = FakeStream()
     client = OpenAIChatClient(MagicMock(), "test-model")
 
-    await client._close_stream(stream)
+    await close_resource(stream)
 
     assert stream.closed is True
 

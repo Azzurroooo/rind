@@ -40,8 +40,8 @@ def build_file_tool_specs(
             else:
                 candidate = root / candidate
         candidate = candidate.resolve()
-        if allowed and not any(_is_relative_to(candidate, allowed_root) for allowed_root in allowed):
-            if allow_session_output and session_output is not None and _is_relative_to(candidate, session_output):
+        if allowed and not any(candidate.is_relative_to(allowed_root) for allowed_root in allowed):
+            if allow_session_output and session_output is not None and candidate.is_relative_to(session_output):
                 return str(candidate), None
             return None, tool_error(tool_name, f"Path is outside this Agent Capsule: {value}", "WorkspaceBoundary")
         return str(candidate), None
@@ -142,12 +142,6 @@ def _specs(read, write, edit, find, search) -> tuple[ToolSpec, ...]:
     )
 
 
-def _is_relative_to(path: Path, root: Path) -> bool:
-    try:
-        path.relative_to(root)
-        return True
-    except ValueError:
-        return False
 
 
 TOOL_SPECS = _specs(read_file, write_file, edit_file, glob, grep)

@@ -20,7 +20,7 @@ from agent.domain.models import (
 from agent.infrastructure.auth import CredentialStore
 from agent.infrastructure.config.settings_loader import AppSettings, load_settings
 
-from .openai_chat_client import build_async_client
+from .cancellation import close_resource
 from .providers import PROVIDERS, default_reasoning_efforts, refreshable_models_api
 
 
@@ -36,7 +36,7 @@ class ProviderServiceImpl:
 
     def resolve_selection(self, workspace_root: str | None, selection: ModelSelection) -> ModelDefinition:
         definition = self._provider(selection.provider_id)
-        return self._selection_model(load_settings(workspace_root), definition, selection)
+        return _selection_model(load_settings(workspace_root), definition, selection)
 
     def list_providers(self, workspace_root: str | None = None) -> list[ProviderStatus]:
         try:
@@ -75,8 +75,7 @@ class ProviderServiceImpl:
     def logout(self, provider_id: str) -> bool:
         return self.credentials.delete(provider_id)
 
-    async def create_chat_client(self, workspace_root: str | None, selection: ModelSelection):
-        settings = load_settings(workspace_root)
+    async def create_chat_client(self, settings: AppSettings, selection: ModelSelection, *, workspace_root: str | None):
         definition = self._provider(selection.provider_id)
         credential = self._resolve_credential(settings, definition.id)
         if credential is None:
@@ -88,12 +87,14 @@ class ProviderServiceImpl:
         key = credential.key or credential.access
         if definition.api == "openai-chat":
             from .openai_chat import OpenAIChatCompletionsClient
+            from .openai_chat_client import build_async_client
 
             return OpenAIChatCompletionsClient(
-                build_async_client(key, endpoint), selection.model_id, selection.reasoning_effort, workspace_root=workspace_root
+                build_async_client(key, endpoint, max_retries=14), selection.model_id, selection.reasoning_effort, workspace_root=workspace_root
             )
         if definition.api == "openai-responses":
             from .openai_responses import OpenAIResponsesClient
+            from .openai_chat_client import build_async_client
 
             return OpenAIResponsesClient(
                 build_async_client(key, endpoint), selection.model_id, selection.reasoning_effort, workspace_root=workspace_root
@@ -139,6 +140,8 @@ class ProviderServiceImpl:
         credential = self._resolve_credential(settings, definition.id)
         if credential is None:
             return False
+        from .openai_chat_client import build_async_client
+
         client = build_async_client(credential.key or credential.access, self._endpoint(settings, definition))
         try:
             response = await client.models.list()
@@ -154,7 +157,7 @@ class ProviderServiceImpl:
         except Exception:
             return False
         finally:
-            await _close(client)
+            await close_resource(client)
 
     def _provider(self, provider_id: str):
         try:
@@ -244,14 +247,6 @@ def _selection_model(settings: AppSettings, definition, selection: ModelSelectio
             return model
     api = _effective_api(settings, definition)
     return ModelDefinition(definition.id, selection.model_id, selection.model_id, api, default_reasoning_efforts(api))
-
-
-async def _close(client: Any) -> None:
-    close = getattr(client, "close", None)
-    if callable(close):
-        value = close()
-        if hasattr(value, "__await__"):
-            await value
 
 
 def _item_id(item: Any) -> str:

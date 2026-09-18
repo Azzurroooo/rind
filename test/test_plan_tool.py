@@ -12,17 +12,20 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from agent.infrastructure.planning import store as plan_store
 from agent.infrastructure.tools import DefaultToolRegistry
-from agent.infrastructure.tools.builtin.planning import update_plan
+from agent.infrastructure.tools.builtin.planning import create_plan_tool_spec
+from agent.infrastructure.paths import resolve_session_base
 
 
-@pytest.fixture(autouse=True)
-def session_context(tmp_path: Path):
-    os.environ["AGENT_SESSION_ROOT"] = str(tmp_path)
-    os.environ["AGENT_SESSION_ID"] = "test_plan_session"
-    (tmp_path / "test_plan_session").mkdir()
-    yield
-    os.environ.pop("AGENT_SESSION_ROOT", None)
-    os.environ.pop("AGENT_SESSION_ID", None)
+@pytest.fixture
+def session_base(tmp_path: Path):
+    base = tmp_path / "test_plan_session"
+    base.mkdir()
+    return base
+
+
+@pytest.fixture
+def update_plan(session_base):
+    return create_plan_tool_spec(lambda: str(session_base)).handler
 
 
 def payload(raw: str) -> dict:
@@ -31,8 +34,8 @@ def payload(raw: str) -> dict:
     return result
 
 
-def test_registry_exposes_one_plan_tool_with_nested_schema() -> None:
-    schemas = DefaultToolRegistry().schemas
+def test_registry_exposes_one_plan_tool_with_nested_schema(build_builtin_tool_specs) -> None:
+    schemas = DefaultToolRegistry(build_builtin_tool_specs()).schemas
     plan_schemas = [schema["function"] for schema in schemas if schema["function"]["name"] == "update_plan"]
 
     assert len(plan_schemas) == 1
@@ -49,7 +52,7 @@ def test_registry_exposes_one_plan_tool_with_nested_schema() -> None:
     assert "complete list" in function["description"]
 
 
-def test_update_plan_writes_v2_and_replaces_previous_list() -> None:
+def test_update_plan_writes_v2_and_replaces_previous_list(update_plan, session_base) -> None:
     first = [{"step": " Read code ", "status": "in_progress"}]
     second = [
         {"step": "Read code", "status": "completed"},
@@ -61,7 +64,7 @@ def test_update_plan_writes_v2_and_replaces_previous_list() -> None:
     assert result["tool"] == "update_plan"
     assert result["data"] == "Plan updated"
 
-    plan_file = Path(os.environ["AGENT_SESSION_ROOT"]) / "test_plan_session" / "plan.json"
+    plan_file = session_base / "plan.json"
     assert json.loads(plan_file.read_text(encoding="utf-8")) == {
         "schema_version": "2.0",
         "plan": [{"step": "Read code", "status": "in_progress"}],
@@ -72,11 +75,11 @@ def test_update_plan_writes_v2_and_replaces_previous_list() -> None:
     assert json.loads(plan_file.read_text(encoding="utf-8"))["plan"] == second
 
 
-def test_update_plan_allows_cancelled_and_empty_plan() -> None:
+def test_update_plan_allows_cancelled_and_empty_plan(update_plan, session_base) -> None:
     assert payload(update_plan([{"step": "obsolete", "status": "cancelled"}]))["ok"] is True
     assert payload(update_plan([]))["ok"] is True
 
-    plan_file = Path(os.environ["AGENT_SESSION_ROOT"]) / "test_plan_session" / "plan.json"
+    plan_file = session_base / "plan.json"
     assert json.loads(plan_file.read_text(encoding="utf-8")) == {"schema_version": "2.0", "plan": []}
 
 
@@ -92,25 +95,21 @@ def test_update_plan_allows_cancelled_and_empty_plan() -> None:
         [{"step": "one", "status": "in_progress"}, {"step": "two", "status": "in_progress"}],
     ],
 )
-def test_update_plan_rejects_invalid_lists(plan) -> None:
+def test_update_plan_rejects_invalid_lists(plan, update_plan) -> None:
     result = payload(update_plan(plan))
     assert result["ok"] is False
     assert result["tool"] == "update_plan"
     assert result["error_type"] == "ValidationError"
 
 
-def test_update_plan_rejects_invalid_session_id(monkeypatch) -> None:
-    monkeypatch.setenv("AGENT_SESSION_ID", "../escape")
-
-    result = payload(update_plan([]))
-
-    assert result["ok"] is False
-    assert result["error_type"] == "ValidationError"
+def test_session_path_rejects_invalid_session_id(tmp_path) -> None:
+    with pytest.raises(ValueError):
+        resolve_session_base(tmp_path, "../escape")
 
 
-def test_atomic_write_failure_keeps_old_file_and_cleans_temp(monkeypatch) -> None:
+def test_atomic_write_failure_keeps_old_file_and_cleans_temp(monkeypatch, update_plan, session_base) -> None:
     assert payload(update_plan([{"step": "old", "status": "pending"}]))["ok"] is True
-    plan_file, _ = plan_store.plan_path()
+    plan_file = plan_store.plan_path(session_base)
     original = plan_file.read_text(encoding="utf-8")
     real_replace = os.replace
 
