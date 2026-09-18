@@ -8,7 +8,7 @@ test("theme menu lists all flavors and defaults to the current theme", () => {
   resetTheme();
   const state = createThemeMenuState();
 
-  assert.deepEqual(state.items().map((item) => item.name), ["latte", "frappe", "macchiato", "mocha"]);
+  assert.deepEqual(state.items().map((item) => item.name), ["latte", "frappe", "macchiato", "mocha", "rind"]);
   assert.equal(state.selectedIndex(), 3);
   assert.equal(state.selectedTheme().name, "mocha");
   assert.equal(state.selectedTheme().current, true);
@@ -29,11 +29,14 @@ test("theme menu wraps around at list edges", () => {
   const state = createThemeMenuState();
 
   assert.equal(state.handleKey({ name: "down" }), true);
+  assert.equal(state.selectedTheme().name, "rind");
+
+  assert.equal(state.handleKey({ name: "down" }), true);
   assert.equal(state.selectedTheme().name, "latte");
 
   assert.equal(state.handleKey({ name: "up" }), true);
-  assert.equal(state.selectedTheme().name, "mocha");
+  assert.equal(state.selectedTheme().name, "rind");
 
   assert.equal(state.handleKey({ name: "up" }), true);
-  assert.equal(state.selectedTheme().name, "macchiato");
+  assert.equal(state.selectedTheme().name, "mocha");
 });

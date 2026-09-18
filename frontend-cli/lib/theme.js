@@ -1,4 +1,4 @@
-// Single source of truth for CLI colors: Catppuccin flavors mapped to a
+// Single source of truth for CLI colors: palettes mapped to a
 // handful of semantic roles. Every painter re-evaluates color support on
 // each call so runtime toggles (isTTY / NO_COLOR) behave like before.
 const FLAVORS = {
@@ -49,6 +49,17 @@ const FLAVORS = {
     code: "#fab387",
     fence: "#89dceb",
     dim: "#a6adc8",
+  },
+  rind: {
+    label: "Rind",
+    accent: "#d6df9a",
+    success: "#a8bf96",
+    danger: "#df9b87",
+    warning: "#d8bd83",
+    notice: "#ebeee4",
+    path: "#a7c4b5",
+    code: "#d3b59c",
+    fence: "#a5b0a4",
   },
 };
 
@@ -122,7 +133,7 @@ export function themeOptions() {
 }
 
 // Eight-color preview rendered in the target flavor regardless of active
-// theme: one narrow cell per Catppuccin hue family.
+// theme: one narrow cell per semantic color role.
 const SWATCH_ORDER = ["danger", "code", "warning", "success", "fence", "path", "accent", "notice"];
 
 export function flavorSwatch(name) {

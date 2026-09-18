@@ -418,7 +418,7 @@ test("every theme paints the board only with its own palette", () => {
   const originalIsTty = process.stdout.isTTY;
   try {
     process.stdout.isTTY = true;
-    for (const theme of ["latte", "frappe", "macchiato", "mocha"]) {
+    for (const theme of ["latte", "frappe", "macchiato", "mocha", "rind"]) {
       resetTheme();
       assert.equal(setTheme(theme)?.name, theme);
       // The theme deck swatch enumerates this flavor's eight role colors.

@@ -46,8 +46,8 @@ export const modelPages = [
     title: "Themes",
     steps: [
       note([
-        "Four Catppuccin flavors, applied instantly — markdown, tables and",
-        "tool blocks all recolor together.",
+        "Four Catppuccin flavors plus Rind's website-inspired greens.",
+        "Markdown, tables and tool blocks all recolor instantly.",
       ]),
       shell("rind"),
       startup(demoInfo({ session: "20260917_103001_eff01a23" })),
@@ -78,7 +78,7 @@ export const modelPages = [
       }),
       note([
         "This demo previews Latte without saving it. Your original theme returns when you leave this page.",
-        "Try /theme latte, frappe, macchiato or mocha in Rind to save your preference.",
+        "Try /theme to choose and save a palette. /theme rind brings the website's colors to dark terminals.",
       ]),
     ],
   },

@@ -1,6 +1,6 @@
 import { clipCells, graphemes, middleClipCells, stripAnsi, textWidth, wrapTextCells } from "./text-width.js";
 import { formatDuration } from "./tool-display.js";
-import { paint, flavorSwatch } from "./theme.js";
+import { paint, flavorSwatch, themeNames } from "./theme.js";
 import { homedir } from "node:os";
 
 const MAX_STARTUP_BANNER_WIDTH = 80;
@@ -1278,7 +1278,7 @@ function slashThemeText(display) {
     lines.push(`  ${marker} ${isCurrent ? bold(label) : dim(label)}  ${flavorSwatch(flavor.name)}${tag}`);
   }
   lines.push("");
-  lines.push(dim("  /theme <latte | frappe | macchiato | mocha>"));
+  lines.push(dim(`  /theme <${themeNames().join(" | ")}>`));
   return lines.join("\n");
 }
 
