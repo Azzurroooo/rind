@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <a href="README.md">English</a> | 简体中文
+  <a href="https://rindai.dev/zh/">官网</a> · <a href="README.md">English</a> | 简体中文
 </p>
 
 <p align="center">
@@ -20,12 +20,14 @@
 
 Rind 是一个**轻量、开源的 AI 编码 Agent**：为专家建立持久工作区，让会话接入脚本，并通过同一个 Agent 引擎连接终端、桌面、浏览器和消息平台。它在你的机器上运行，连接你选择的模型供应商。
 
+[到官网看看 Rind 如何工作](https://rindai.dev/zh/#tour)：安装前，先观看 CLI 操作、内置指南、专家团队与 One-shot 调用演示。
+
 - **[组建可复用的专家团队](#持久化-agent-团队)**：每个专家都有长期职责、工作目录，以及可供后续任务继续使用的文件。
 - **[让会话进入工作流](#可编程的会话)**：从脚本执行任务，也能向正在运行的终端会话投递新指令。
 - **[基于轻量 worker 扩展](#独立于界面的轻量-worker)**：界面与执行分进程运行，会话按需加载，通过清晰接口扩展引擎。
 
 <p align="center">
-  <img src="assets/rind-architecture.zh-CN.svg" alt="Rind 核心设计：surface 与 worker 分进程运行，执行对象按需加载与释放，会话落盘，专家工作区持久保存，run/send 接入脚本" width="1000" />
+  <img src="assets/rind-architecture.zh-CN.svg" alt="Rind 核心设计：CLI、桌面、Web 与消息网关多入口，CLI 界面与 worker 分进程运行，执行对象按需加载与释放，会话落盘，内置指南、持久化专家工作区与 run/send 脚本调用" width="1000" />
 </p>
 
 ---

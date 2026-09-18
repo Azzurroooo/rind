@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  English | <a href="README.zh-CN.md">简体中文</a>
+  <a href="https://rindai.dev/">Website</a> · English | <a href="README.zh-CN.md">简体中文</a>
 </p>
 
 <p align="center">
@@ -20,12 +20,14 @@
 
 Rind is a **lightweight, open-source AI coding agent** with persistent specialist workspaces, scriptable sessions, and a shared runtime for terminal, desktop, browser, and messaging clients. It runs on your machine and connects to your chosen model provider.
 
+[See Rind in action on the website](https://rindai.dev/#tour): watch the CLI, built-in guide, specialist teams, and one-shot runs before installing.
+
 - **[Build a reusable team](#persistent-multi-agent-teams).** Give specialists a lasting role, a working directory, and files they can build on across tasks.
 - **[Put sessions into your workflow](#programmable-sessions).** Run an agent from a script or send new instructions into a live terminal session.
 - **[Build on a lean worker](#a-lean-worker-independent-of-the-interface).** Separate the interface from execution, load sessions on demand, and extend the engine through clear interfaces.
 
 <p align="center">
-  <img src="assets/rind-architecture.svg" alt="Rind overview: separate surface and worker processes, on-demand execution with disk-backed sessions, persistent specialist teams, and run/send automation" width="1000" />
+  <img src="assets/rind-architecture.svg" alt="Rind core design: CLI, desktop, web and gateway; separate CLI surface and worker processes; on-demand execution with disk-backed sessions; built-in guide, persistent specialist workspaces and run/send automation" width="1000" />
 </p>
 
 ---
