@@ -1,6 +1,5 @@
 """File navigation tool implementations."""
 
-import hashlib
 import json
 from pathlib import Path
 import shutil
@@ -95,10 +94,6 @@ def read_file(
     try:
         with file_path.open("rb") as raw_file:
             sample = raw_file.read(8192)
-            digest = hashlib.sha256()
-            digest.update(sample)
-            for chunk in iter(lambda: raw_file.read(1024 * 1024), b""):
-                digest.update(chunk)
         if _looks_binary(sample):
             return tool_error("read_file", f"Binary file cannot be read as text: {path}", "BinaryFile")
 
@@ -154,7 +149,6 @@ def read_file(
                 "line_truncated": line_truncated,
                 "next_offset": shown_end + 1 if has_more else None,
                 "encoding": "utf-8",
-                "sha256": digest.hexdigest(),
             },
         )
     except PermissionError:

@@ -98,7 +98,6 @@ async def test_large_read_preview_keeps_source_metadata_without_output_store(tmp
                 "limit": 1000,
                 "next_offset": 1010,
                 "encoding": "utf-8",
-                "sha256": "abc123",
                 "truncated": True,
             },
         },

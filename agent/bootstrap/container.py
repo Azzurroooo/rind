@@ -21,6 +21,7 @@ from agent.infrastructure.rind_docs import build_rind_doc_context
 from agent.infrastructure.skills import SkillRepository
 from agent.infrastructure.tools import DefaultToolRegistry
 from agent.infrastructure.tools.builtin import build_builtin_tool_specs
+from agent.infrastructure.tools.builtin.files.queue import FileMutationQueue
 from agent.infrastructure.tools.builtin.shell import ShellTools
 from agent.infrastructure.tools.builtin.web_sessions import WebSessions
 from agent.prompts import build_goal_policy_prompt, build_system_prompt
@@ -34,6 +35,7 @@ class SharedRuntimeResources:
     stream_parser: MessageStreamParser
     compaction_service: CompactionService
     tool_output_store: ToolOutputStore = field(default_factory=ToolOutputStore)
+    file_mutation_queue: FileMutationQueue = field(default_factory=FileMutationQueue)
 
 
 @dataclass(frozen=True, slots=True)
@@ -191,6 +193,7 @@ def build_agent_container(
         output_store=tool_output_store,
         shell_tools=shell_tools,
         web_sessions=web_sessions,
+        mutation_queue=shared_resources.file_mutation_queue if shared_resources else None,
         session_base_provider=lambda: session_store.session_base_path,
     )
     if enabled_tools is None:

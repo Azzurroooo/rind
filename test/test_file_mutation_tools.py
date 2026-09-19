@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
 import json
 from pathlib import Path
 import stat
@@ -39,10 +38,6 @@ def _error(raw: str, error_type: str) -> dict:
     return value
 
 
-def _sha(path: Path) -> str:
-    return hashlib.sha256(path.read_bytes()).hexdigest()
-
-
 def _temp_files(directory: Path) -> list[Path]:
     return [path for path in directory.rglob("*.tmp") if path.name.startswith(".")]
 
@@ -60,52 +55,61 @@ def test_write_file_creates_new_file_with_diff_summary(tmp_path: Path) -> None:
     assert not _temp_files(tmp_path)
 
 
-def test_write_file_existing_requires_valid_matching_preimage(tmp_path: Path) -> None:
+def test_write_file_overwrites_existing_file(tmp_path: Path) -> None:
     path = tmp_path / "existing.txt"
     path.write_text("old\n", encoding="utf-8")
 
-    _error(write_file(str(path), "new\n"), "PreimageRequired")
-    _error(write_file(str(path), "new\n", "bad"), "InvalidExpectedSha256")
-    assert path.read_text(encoding="utf-8") == "old\n"
-
-    result = _ok(write_file(str(path), "new\n", _sha(path)))
+    result = _ok(write_file(str(path), "new\n"))
 
     assert path.read_text(encoding="utf-8") == "new\n"
     assert (result["meta"]["files"][0]["added_lines"], result["meta"]["files"][0]["removed_lines"]) == (1, 1)
 
 
-def test_edit_file_checks_preimage_and_exact_content(tmp_path: Path) -> None:
+def test_edit_file_checks_unique_exact_content(tmp_path: Path) -> None:
     path = tmp_path / "edit.txt"
     path.write_text("before\nunique\nafter\n", encoding="utf-8")
 
-    result = _ok(edit_file(str(path), "unique", "changed", _sha(path)))
+    result = _ok(edit_file(str(path), "unique", "changed"))
 
     assert path.read_text(encoding="utf-8") == "before\nchanged\nafter\n"
     file_meta = result["meta"]["files"][0]
     assert (file_meta["added_lines"], file_meta["removed_lines"]) == (1, 1)
     assert "-unique" in file_meta["diff"] and "+changed" in file_meta["diff"]
 
-    _error(edit_file(str(path), "missing", "x", _sha(path)), "OldStrNotFound")
+    _error(edit_file(str(path), "missing", "x"), "OldStrNotFound")
     path.write_text("same\nsame\n", encoding="utf-8")
-    _error(edit_file(str(path), "same", "x", _sha(path)), "OldStrNotUnique")
+    _error(edit_file(str(path), "same", "x"), "OldStrNotUnique")
+    assert path.read_text(encoding="utf-8") == "same\nsame\n"
+    path.write_text("ababa", encoding="utf-8")
+    _error(edit_file(str(path), "aba", "x"), "OldStrNotUnique")
+    assert path.read_text(encoding="utf-8") == "ababa"
 
 
-def test_mutations_reject_stale_preimage_invalid_encoding_and_paths(tmp_path: Path) -> None:
+@pytest.mark.parametrize("existing", [True, False])
+def test_mutations_detect_external_changes_before_commit(tmp_path: Path, monkeypatch, existing) -> None:
     path = tmp_path / "race.txt"
-    path.write_text("read version\n", encoding="utf-8")
-    stale_hash = _sha(path)
-    path.write_text("external version\n", encoding="utf-8")
+    if existing:
+        path.write_text("read version\n", encoding="utf-8")
+    stage = mutations._stage_file
 
-    error = _error(write_file(str(path), "agent version\n", stale_hash), "PreimageMismatch")
+    def change_target(*args):
+        staged = stage(*args)
+        path.write_text("external version\n", encoding="utf-8")
+        return staged
+
+    monkeypatch.setattr(mutations, "_stage_file", change_target)
+    _error(write_file(str(path), "agent version\n"), "PreimageMismatch")
 
     assert path.read_text(encoding="utf-8") == "external version\n"
-    assert error["meta"]["actual_sha256"] == _sha(path)
+    assert not _temp_files(tmp_path)
 
+
+def test_mutations_reject_invalid_encoding_and_paths(tmp_path: Path) -> None:
     invalid = tmp_path / "invalid.txt"
     invalid.write_bytes(b"valid\xfftext")
-    _error(edit_file(str(invalid), "a", "b", _sha(invalid)), "InvalidEncoding")
-    _error(edit_file(str(tmp_path / "missing.txt"), "a", "b", "0" * 64), "NotFound")
-    _error(write_file(str(tmp_path), "content", "0" * 64), "NotAFile")
+    _error(edit_file(str(invalid), "a", "b"), "InvalidEncoding")
+    _error(edit_file(str(tmp_path / "missing.txt"), "a", "b"), "NotFound")
+    _error(write_file(str(tmp_path), "content"), "NotAFile")
 
 
 def test_atomic_replace_preserves_permissions_and_cleans_temp_files(tmp_path: Path, monkeypatch) -> None:
@@ -114,7 +118,7 @@ def test_atomic_replace_preserves_permissions_and_cleans_temp_files(tmp_path: Pa
     path.chmod(0o640)
     original_mode = stat.S_IMODE(path.stat().st_mode)
 
-    _ok(write_file(str(path), "new\n", _sha(path)))
+    _ok(write_file(str(path), "new\n"))
     assert stat.S_IMODE(path.stat().st_mode) == original_mode
     assert not _temp_files(tmp_path)
 
@@ -122,7 +126,7 @@ def test_atomic_replace_preserves_permissions_and_cleans_temp_files(tmp_path: Pa
         raise OSError("replace failed")
 
     monkeypatch.setattr(mutations.os, "replace", fail_replace)
-    _error(write_file(str(path), "uncommitted\n", _sha(path)), "WriteError")
+    _error(write_file(str(path), "uncommitted\n"), "WriteError")
     assert path.read_text(encoding="utf-8") == "new\n"
     assert not _temp_files(tmp_path)
 
@@ -138,20 +142,19 @@ def test_diff_summary_is_bounded(tmp_path: Path) -> None:
     assert file_meta["diff"].endswith("... diff truncated ...")
 
 
-def test_file_mutation_schemas_are_versioned_and_apply_patch_is_absent(build_builtin_tool_specs) -> None:
+def test_file_mutation_schemas_need_no_hash_and_apply_patch_is_absent(build_builtin_tool_specs) -> None:
     registry = DefaultToolRegistry(build_builtin_tool_specs())
     schemas = {item["function"]["name"]: item["function"] for item in registry.schemas}
 
     assert set(schemas["write_file"]["parameters"]["properties"]) == {
         "file_path",
         "content",
-        "expected_sha256",
     }
     assert set(schemas["edit_file"]["parameters"]["properties"]) == {
         "file_path",
         "old_str",
         "new_str",
-        "expected_sha256",
     }
-    assert "expected_sha256" in schemas["edit_file"]["parameters"]["required"]
+    assert set(schemas["edit_file"]["parameters"]["required"]) == {"file_path", "old_str", "new_str"}
+    assert set(schemas["write_file"]["parameters"]["required"]) == {"file_path", "content"}
     assert not registry.has("apply_patch")
