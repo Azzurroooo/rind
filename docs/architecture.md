@@ -52,6 +52,15 @@ agent/runtime/
 
 ## Surface protocol
 
+`RuntimeWorker` starts one background model catalog refresh on its first initialization
+and cancels and joins it at shutdown. Model list reads use only `model-cache.json`;
+each provider entry stores `models`, `refreshed_at` (Unix seconds of the last successful
+refresh), and `base_url`. Entries expire after 24 hours and are hidden when their
+endpoint differs. Legacy list entries remain readable but expire immediately.
+Configured providers with a supported list API use a ten-second request deadline
+without SDK retries. Failed or empty responses preserve the cache. Login and explicit
+refresh use the same query path regardless of cache age; no periodic refresh runs.
+
 The protocol is defined in `agent/runtime/server/protocol.py`, mirrored for the frontend in `frontend-cli/lib/runtime-protocol.js`, and the Desktop allowlist of methods derives from `desktop/src/preload/types.ts`. Common methods use standard semantics:
 
 `initialize`, `shutdown`, `session/new`, `session/list`, `session/switch`, `session/replay`, `session/prompt`, `session/cancel`, `model/list`, `model/set`.

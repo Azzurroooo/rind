@@ -72,6 +72,7 @@ class RuntimeWorker:
             provider_service=self.provider_service,
         )
         self._initialized = False
+        self._model_refresh_task: asyncio.Task[None] | None = None
         self._initialize_lock = asyncio.Lock()
         self._tool_output_store = tool_output_store
 
@@ -87,6 +88,10 @@ class RuntimeWorker:
                 )
                 self.session_id = str(info["session_id"])
                 self._initialized = True
+                self._model_refresh_task = asyncio.create_task(
+                    self.provider_service.refresh_stale_models(self.workspace_root),
+                    name="refresh-stale-models",
+                )
         info = await self.repository.info(self.session_id)
         info["base_url"] = workspace_defaults(info["workspace_root"])[2]
         info["live_turn"] = self.execution.live_turn(self.session_id)
@@ -166,6 +171,10 @@ class RuntimeWorker:
         }
 
     async def close(self) -> None:
+        if self._model_refresh_task is not None:
+            self._model_refresh_task.cancel()
+            await asyncio.gather(self._model_refresh_task, return_exceptions=True)
+            self._model_refresh_task = None
         try:
             await self.execution.close()
         finally:

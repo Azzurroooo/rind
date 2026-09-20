@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { execFile, spawn } from "node:child_process";
-import { mkdtemp, mkdir, readFile, readdir, stat, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import http from "node:http";
@@ -178,7 +178,9 @@ test("interactive CLI journey: empty startup, login, send, chat, logout", async 
     assert.equal(code, 0);
   } finally {
     cli.child.kill();
+    await cli.exited;
     await fixture.stop().catch(() => {});
+    await rm(parent, { recursive: true, force: true });
   }
 });
 
@@ -217,6 +219,7 @@ test("one-shot run works against a configured endpoint", async () => {
   } finally {
     child.kill();
     await fixture.stop().catch(() => {});
+    await rm(parent, { recursive: true, force: true });
   }
 });
 
@@ -225,7 +228,13 @@ test("session lifecycle: run, send, empty sessions, compact and resume", { timeo
   const parent = await mkdtemp(path.join(tmpdir(), "rind-session-matrix-"));
   const home = path.join(parent, "home");
   const workspace = await makeWorkspace(parent, `http://127.0.0.1:${fixture.port}/v1`);
-  const env = { ...process.env, RIND_HOME: home, OPENAI_API_KEY: "matrix-key", NO_COLOR: "1" };
+  // A provider-specific environment key would also enable that remote provider's
+  // startup catalog refresh. Scope this fake credential to the local endpoint.
+  await writeFile(path.join(workspace, ".rind", "settings.json"), JSON.stringify({
+    provider: "openai-compatible", baseUrl: `http://127.0.0.1:${fixture.port}/v1`,
+    model: "fake-model-a", apiKey: "matrix-key",
+  }));
+  const env = { ...process.env, RIND_HOME: home, NO_COLOR: "1" };
   const clients = [];
   const base = (id) => path.join(home, "sessions", id);
   const absent = (id) => assert.rejects(stat(base(id)), { code: "ENOENT" });
@@ -240,7 +249,7 @@ test("session lifecycle: run, send, empty sessions, compact and resume", { timeo
     }
   }
   async function open(...args) {
-    const cli = spawnCli(workspace, home, { OPENAI_API_KEY: "matrix-key" }, args);
+    const cli = spawnCli(workspace, home, {}, args);
     clients.push(cli);
     await cli.waitFor("fake-model-a");
     const id = cli.stdout.match(/session\s+(\d{8}_\d{6}_[a-f0-9]+)/)?.[1];
@@ -392,6 +401,8 @@ test("session lifecycle: run, send, empty sessions, compact and resume", { timeo
     });
   } finally {
     for (const cli of clients) if (cli.child.exitCode === null) cli.child.kill();
+    await Promise.all(clients.map((cli) => cli.exited));
     await fixture.stop();
+    await rm(parent, { recursive: true, force: true });
   }
 });
