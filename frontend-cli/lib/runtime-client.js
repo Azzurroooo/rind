@@ -27,10 +27,15 @@ export function isTraceLlmEnvSet() {
   return TRACE_TRUTHY.has(String(process.env.RIND_TRACE_LLM || "").trim().toLowerCase());
 }
 
-// Turns stream for as long as the model runs; every other method must answer
-// within a bounded window so a stalled runtime surfaces as an error, not silence.
-const LONG_RUNNING_METHODS = new Set([runtimeMethods.sessionPrompt, runtimeMethods.sessionFollowUp]);
+// Model-backed operations stay pending until completion or cancellation.
+// Control requests remain bounded so a stalled runtime surfaces as an error.
+const LONG_RUNNING_METHODS = new Set([runtimeMethods.sessionPrompt, runtimeMethods.sessionFollowUp, runtimeMethods.sessionCompact]);
 const REQUEST_TIMEOUT_MS = 120_000;
+
+function isLongRunningRequest(method, params) {
+  return LONG_RUNNING_METHODS.has(method)
+    || (method === runtimeMethods.commandExecute && /^\/compact(?:\s|$)/i.test(String(params.input || "").trim()));
+}
 
 export function runHelpVersion({ python, repoRoot, runtimePath = "", cliArgs, cwd = process.cwd() }) {
   const executable = runtimePath
@@ -129,7 +134,7 @@ export function createRuntimeClient({
         return;
       }
       const entry = { resolve, reject };
-      if (!LONG_RUNNING_METHODS.has(method)) {
+      if (!isLongRunningRequest(method, params)) {
         entry.timer = setTimeout(() => {
           pending.delete(id);
           reject(new Error(`Runtime request timed out after ${REQUEST_TIMEOUT_MS / 1000}s: ${method}`));

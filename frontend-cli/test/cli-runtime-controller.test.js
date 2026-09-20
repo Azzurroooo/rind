@@ -12,6 +12,7 @@ const methods = {
   goalStatus: "rind/goal/status",
   goalClear: "rind/goal/clear",
   commandExecute: "rind/command/execute",
+  sessionCompact: "rind/session/compact",
   sessionSwitch: "session/switch",
   sessionFork: "session/fork",
   sessionReplay: "session/replay",
@@ -172,6 +173,33 @@ test("goal control does not submit a duplicate prompt", async () => {
     harness.requests.filter((item) => item.method === methods.goalSet).length,
     1,
   );
+});
+
+test("compact response cannot clear an ongoing queued turn or launch duplicate compact", async () => {
+  const h = createHarness();
+  h.state.runtime.status = "ready";
+  let finish;
+  const gate = new Promise((resolve) => { finish = resolve; });
+  let calls = 0;
+  h.client.request = (method) => {
+    assert.equal(method, methods.sessionCompact);
+    calls += 1;
+    return gate;
+  };
+  h.controller.startCompactCommand();
+  h.controller.startCompactCommand();
+  await Promise.resolve();
+  assert.equal(calls, 1);
+  assert.equal(h.state.display.activeCompact, true);
+  h.state.display.activeCompact = false;
+  h.state.display.activityLabel = "Working";
+  h.state.turn.active = true;
+  h.state.turn.interruptRequested = true;
+  finish({id: "compact-1"});
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(h.state.turn.active, true);
+  assert.equal(h.state.turn.interruptRequested, true);
+  assert.equal(h.state.display.activityLabel, "Working");
 });
 
 test("session restore retains Team identity and switching replaces or clears it", async () => {

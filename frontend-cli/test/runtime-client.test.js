@@ -1,8 +1,48 @@
 import assert from "node:assert/strict";
 import path from "node:path";
 import test from "node:test";
+import { mkdtemp, writeFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
 
 import { createRuntimeClient, resolveRuntimeLaunch } from "../lib/runtime-client.js";
+
+test("compact waits beyond 120 seconds while ordinary commands time out", async (t) => {
+  const root = await mkdtemp(path.join(tmpdir(), "rind-rpc-timeout-"));
+  await writeFile(path.join(root, "main.py"), `
+const pending = [];
+const reply = (r) => process.stdout.write(JSON.stringify({kind: "response", request_id: r.request_id, result: {ok: true}}) + "\\n");
+require("readline").createInterface({input: process.stdin}).on("line", (line) => {
+  const r = JSON.parse(line);
+  if (r.method === "initialize") reply(r);
+  else if (r.method === "release") { pending.splice(0).forEach(reply); reply(r); }
+  else if (r.method === "shutdown") { reply(r); process.exit(0); }
+  else pending.push(r);
+});
+`);
+  const client = createRuntimeClient({python: process.execPath, repoRoot: root, rindHome: path.join(root, "home")});
+  try {
+    client.start();
+    await client.request("initialize");
+    t.mock.timers.enable({ apis: ["setTimeout"] });
+    let settled = false;
+    const compacts = Promise.all([
+      client.request("rind/session/compact"),
+      client.request("rind/command/execute", { input: " /COMPACT " }),
+    ]).then(() => { settled = true; });
+    const short = assert.rejects(client.request("rind/command/execute", {input: "/help"}), /timed out after 120s/);
+    t.mock.timers.tick(120001);
+    await short;
+    assert.equal(settled, false);
+    t.mock.timers.reset();
+    await client.request("release");
+    await compacts;
+    assert.equal(settled, true);
+  } finally {
+    t.mock.timers.reset();
+    await client.shutdown();
+    await rm(root, {recursive: true, force: true});
+  }
+});
 
 test("source runtime launch uses the shared app-server entry", () => {
   const repoRoot = path.join("repo", "root");

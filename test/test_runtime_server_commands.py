@@ -538,7 +538,7 @@ async def test_model_rejects_invalid_set_args() -> None:
 async def test_compact_calls_runtime_compact_context() -> None:
     session = FakeSession()
     runtime = FakeRuntime()
-    context = SlashCommandContext(runtime=runtime, session=session, debug=True)
+    context = SlashCommandContext(runtime=runtime, session=session, debug=True, compact_context=runtime.compact_context)
     result = await SlashCommandRouter(build_command_infos()).execute("/compact", context)
 
     assert runtime.compact_called is True
@@ -549,12 +549,12 @@ async def test_compact_calls_runtime_compact_context() -> None:
 
 @pytest.mark.asyncio
 async def test_compact_returns_friendly_message_for_empty_session() -> None:
-    class EmptySession(FakeSession):
-        async def get_messages_slice(self, compacted=True):
-            return [{"role": "system", "content": "sys"}]
+    class EmptyRuntime(FakeRuntime):
+        async def compact_context(self, reason="manual"):
+            raise ValueError("Not enough messages to compact. Send a message first.")
 
-    runtime = FakeRuntime()
-    context = SlashCommandContext(runtime=runtime, session=EmptySession(), debug=True)
+    runtime = EmptyRuntime()
+    context = SlashCommandContext(runtime=runtime, session=FakeSession(), debug=True, compact_context=runtime.compact_context)
     result = await SlashCommandRouter(build_command_infos()).execute("/compact", context)
 
     assert runtime.compact_called is False

@@ -16,7 +16,10 @@ from agent.application.skill_selection import SkillTurnCoordinator
 from agent.runtime.core.turn_runner import TurnRunner
 from agent.domain.cancellation import CancellationToken
 from agent.domain.errors import PersistenceError
-from agent.domain.events import QueuedInputDeliveredEvent, RuntimeEvent, TurnStartedEvent, event_meta
+from agent.domain.events import (
+    ContextCompactedEvent, QueuedInputDeliveredEvent, RuntimeEvent,
+    TurnCancelledEvent, TurnCompletedEvent, TurnFailedEvent, TurnStartedEvent, event_meta,
+)
 
 
 MAX_QUEUED_INPUTS = 4
@@ -231,19 +234,19 @@ class AgentRuntime:
             }
 
     async def compact_context(self, reason: str = "manual", cancellation_token: CancellationToken | None = None) -> dict:
-        """Manually compact the current session through the turn runner."""
-        await self.initialize()
-        if self.turn_active:
-            raise RuntimeError("Cannot compact context while a turn is active.")
-        async with self._workspace_lock_guard(), self._turn_lock:
-            if self.turn_active:
-                raise RuntimeError("Cannot compact context while a turn is active.")
-            return await self._turn_runner.compact_context(
-                self._session_store,
-                reason=reason,
-                phase="manual",
-                cancellation_token=cancellation_token,
-            )
+        """Return the compact record; streaming callers use run_turn."""
+        record = None
+        failure = None
+        async for event in self.run_turn(compact=reason, cancellation_token=cancellation_token):
+            if event.type == "context_compacted" and record is None:
+                record = event.record
+            elif event.type == "turn_cancelled":
+                failure = asyncio.CancelledError(event.reason)
+            elif event.type == "turn_failed":
+                failure = RuntimeError(event.error)
+        if failure is not None:
+            raise failure
+        return record
 
     async def run_turn(
         self,
@@ -252,6 +255,7 @@ class AgentRuntime:
         cancellation_token: CancellationToken | None = None,
         transient_system_messages: list[dict] | None = None,
         resume: bool = False,
+        compact: str | None = None,
     ) -> AsyncIterator[RuntimeEvent]:
         """
         Run a single conversational turn asynchronously, yielding runtime events.
@@ -261,7 +265,13 @@ class AgentRuntime:
         for constructing one facade per session.
         """
         await self.initialize()
+        if compact and (self.turn_active or self._turn_lock.locked()):
+            raise RuntimeError("Cannot compact context while a turn is active.")
         async with self._workspace_lock_guard(), self._turn_lock:
+            if compact:
+                messages = await self._session_store.get_messages_slice()
+                if not any(message.get("role") != "system" for message in messages):
+                    raise ValueError("Not enough messages to compact. Send a message first.")
             turn_state = await self._session_store.get_turn_state() if resume else None
             if resume:
                 if not isinstance(turn_state, dict) or turn_state.get("status") != "running":
@@ -281,12 +291,43 @@ class AgentRuntime:
                 started_event = TurnStartedEvent(
                     **event_meta(self._session_store, turn_id),
                     user_message_chars=0 if resume else len(query or ""),
+                    operation="compact" if compact else "prompt",
                 )
+                if compact:
+                    yield started_event
+                    try:
+                        record = await self._turn_runner.compact_context(
+                            self._session_store, reason=compact, phase="manual",
+                            cancellation_token=cancellation_token,
+                        )
+                        yield ContextCompactedEvent(**event_meta(self._session_store, turn_id), record=record)
+                        if self._is_cancelled(cancellation_token):
+                            raise asyncio.CancelledError(cancellation_token.reason)
+                    except asyncio.CancelledError as exc:
+                        self._accepting_inputs = False
+                        yield TurnCancelledEvent(**event_meta(self._session_store, turn_id), reason=str(exc))
+                        return
+                    except Exception as exc:
+                        self._accepting_inputs = False
+                        yield TurnFailedEvent(**event_meta(self._session_store, turn_id), error=str(exc), error_type=type(exc).__name__)
+                        return
+                    queued = None if self._steering_queue else self._take_follow_up()
+                    if queued is None and not self._steering_queue:
+                        self._accepting_inputs = False
+                        yield TurnCompletedEvent(**event_meta(self._session_store, turn_id))
+                        return
+                    if queued is not None:
+                        await self._persist_user_input(queued.text)
+                        yield QueuedInputDeliveredEvent(
+                            **event_meta(self._session_store, turn_id),
+                            input_id=queued.input_id, input=queued.text, mode="follow_up",
+                        )
                 await self._persist_turn_state(
                     started_event,
                     recovery_attempt=turn_state.get("recovery_attempt") if isinstance(turn_state, dict) else None,
                 )
-                yield started_event
+                if not compact:
+                    yield started_event
 
                 total_duration_ms = 0
                 while True:

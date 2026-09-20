@@ -12,6 +12,7 @@ class SlashCommandContext:
     session: Any
     debug: bool = False
     workspace_root: str | None = None
+    compact_context: Callable[[], Awaitable[dict]] | None = None
 
 
 @dataclass(slots=True)

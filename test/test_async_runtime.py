@@ -512,6 +512,9 @@ async def test_async_runtime_facade_manual_compact_uses_runner():
         async def initialize(self):
             return None
 
+        async def get_messages_slice(self):
+            return [{"role": "user", "content": "task"}]
+
     class FakeRunner:
         model = ""
 
@@ -1231,7 +1234,7 @@ async def test_async_turn_runner_mid_turn_compact_does_not_preserve_raw_tail():
         context_manager=mock_context,
     )
 
-    context = await runner._run_compact(
+    context, _ = await runner._run_compact(
         session=session,
         context_messages=[dict(message) for message in session.raw_messages],
         context_stats={"context_window_tokens": 1000},

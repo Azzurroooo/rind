@@ -571,17 +571,11 @@ class WorkerStdioRuntimeServer:
 
     async def _compact(self, session_id: str, request: dict[str, Any]) -> None:
         container = self._worker.execution.active_container(session_id)
-        owns_execution = container is None
-        if owns_execution:
-            container = await self._worker.start_execution(session_id)
-        try:
-            if container.runtime.turn_active:
-                await self._respond_error(request, "Cannot compact context while a turn is active.", "TurnActive")
-                return
-            await self._respond(request, await container.runtime.compact_context(reason="manual"))
-        finally:
-            if owns_execution:
-                await self._worker.release_execution(session_id)
+        if container is not None and container.runtime.turn_active:
+            await self._respond_error(request, "Cannot compact context while a turn is active.", "TurnActive")
+            return
+        self._subscribed.add(session_id)
+        await self._respond(request, await self._worker.execution.compact_context(session_id))
 
     async def _handle_active_control(self, session_id: str, request: dict[str, Any]) -> None:
         method = request.get("method")
@@ -841,7 +835,9 @@ class WorkerStdioRuntimeServer:
             return
         raw_input = str(params.get("input") or "").strip()
         command = raw_input.split(maxsplit=1)[0].lstrip("/").lower() if raw_input else ""
-        needs_execution = command in {"compact", "team"}
+        needs_execution = command == "team"
+        if command == "compact":
+            self._subscribed.add(session_id)
         active = self._worker.execution.active_container(session_id)
         owns_execution = active is None and needs_execution
         if needs_execution:
@@ -858,6 +854,7 @@ class WorkerStdioRuntimeServer:
                     session=store,
                     debug=self._debug,
                     workspace_root=getattr(store, "workspace_root", None),
+                    compact_context=lambda: self._worker.execution.compact_context(session_id),
                 ),
             )
             await self._respond_slash_result(request, result)

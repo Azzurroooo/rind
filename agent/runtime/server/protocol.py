@@ -167,6 +167,7 @@ CAPABILITIES = (
 DURABLE_EVENT_TYPES = frozenset(
     {
         "turn_started",
+        "context_compacted",
         "assistant_message_completed",
         "tool_requested",
         "tool_result",

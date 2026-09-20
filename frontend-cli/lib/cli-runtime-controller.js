@@ -27,6 +27,7 @@ export function createCliRuntimeController({
   redraw,
 }) {
   let switchGeneration = 0;
+  let compactRequest = null;
 
   async function request(method, params = {}) {
     await ensureRuntime();
@@ -343,30 +344,30 @@ export function createCliRuntimeController({
   }
 
   function startCompactCommand() {
-    if (state.display.activeCompact) {
-      log("Compact is already running.");
+    if (state.turn.active || state.display.activeCompact || compactRequest) {
+      log("Wait for the current task to finish or interrupt it before compacting.");
       return;
     }
     state.display.activeCompact = true;
     state.display.activityLabel = "Compacting";
     state.turn.interruptRequested = false;
     refreshInputState();
-    void runCompactCommand().catch((error) => {
+    compactRequest = runCompactCommand().catch((error) => {
       if (state.runtime.status !== "closing") {
         writeError(`${error instanceof Error ? error.message : String(error)}\n`);
       }
-    });
+    }).finally(() => { compactRequest = null; });
   }
 
   async function runCompactCommand() {
     try {
-      const result = await request(methods.commandExecute, { input: "/compact" });
-      await getCommands().applyResult(result);
+      await request(methods.sessionCompact);
     } finally {
-      state.display.activeCompact = false;
-      state.display.activityLabel = "";
-      state.turn.interruptRequested = false;
-      refreshInputState();
+      if (state.display.activeCompact) {
+        state.display.activeCompact = false;
+        if (!state.turn.active) state.display.activityLabel = "";
+        refreshInputState();
+      }
     }
   }
 

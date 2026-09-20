@@ -5,6 +5,29 @@ import { createCliInputActions } from "../lib/cli-input-actions.js";
 import { createCliState } from "../lib/cli-state.js";
 import { createLineEditor } from "../lib/line-editor.js";
 
+test("manual compact keeps Enter and Tab input editable without premature echo", async () => {
+  const state = createCliState();
+  state.display.activeCompact = true;
+  const queued = [], echoes = [];
+  const actions = createCliInputActions({
+    state, request: async () => ({}),
+    output: {terminalUi: {}, redraw() {}, writeUserInput: (text) => echoes.push(text)},
+    getTurnController: () => ({submitFollowUp: (text) => queued.push(text)}),
+    getTaskMonitor: () => null, getLineInput: () => null,
+    pausePrompt() {}, resumePrompt() {}, handleSigint() {},
+  });
+  const follow = actions.ask("", "Ask Rind to do anything");
+  actions.handleTerminalInput("queued task");
+  actions.handleTerminalInput("\t");
+  assert.equal(await follow, "");
+  assert.deepEqual(queued, ["queued task"]);
+  const steer = actions.ask("", "Ask Rind to do anything");
+  actions.handleTerminalInput("redirect");
+  actions.handleTerminalInput("\r");
+  assert.equal(await steer, "redirect");
+  assert.deepEqual(echoes, []);
+});
+
 test("question arrows leave custom editing and discard its draft", async () => {
   const state = createCliState();
   state.runtime.status = "ready";
