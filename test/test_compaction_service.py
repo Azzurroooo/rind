@@ -1,3 +1,4 @@
+import asyncio
 import json
 import os
 import sys
@@ -14,6 +15,7 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from agent.application import CompactionService
 from agent.domain.compaction import COMPACT_CONTINUATION_USER_CONTENT
+from agent.domain.models import ModelCompletion, ModelUsage
 from agent.infrastructure.planning import build_plan_snapshot
 
 
@@ -203,7 +205,7 @@ async def test_compaction_service_falls_back_when_llm_compact_fails() -> None:
 
 
 @pytest.mark.asyncio
-async def test_compaction_service_preserves_handoff_reasoning_content() -> None:
+async def test_compaction_service_discards_summary_reasoning() -> None:
     class ReasoningClient:
         async def create(self, *args, **kwargs):
             return SimpleNamespace(
@@ -228,7 +230,96 @@ async def test_compaction_service_preserves_handoff_reasoning_content() -> None:
 
     assert record["strategy"] == "llm_inline"
     assert record["handoff_message"]["content"] == "Summarized handoff."
-    assert record["handoff_message"]["reasoning_content"] == "How the summary was built."
+    assert "reasoning_content" not in record["handoff_message"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("content, finish_reason, strategy", [
+    ("Summarized handoff.", "stop", "llm_inline"),
+    ("  ", "stop", "deterministic_fallback"),
+    ("Incomplete summary", "length", "deterministic_fallback"),
+    ("Filtered summary", "content_filter", "deterministic_fallback"),
+    ("Partial summary", "error", "deterministic_fallback"),
+    ("Unexpected tool request", "tool_calls", "deterministic_fallback"),
+])
+async def test_compaction_records_usage_even_when_summary_is_unusable(content, finish_reason, strategy):
+    class UsageSession(FakeSession):
+        async def persist_sampling_usage(self, usage):
+            persisted_usage.append(usage)
+
+    class Client:
+        async def create(self, **kwargs):
+            return ModelCompletion(
+                content=content,
+                reasoning_content="Summary generation reasoning",
+                finish_reason=finish_reason,
+                usage=ModelUsage(input_tokens=100, output_tokens=30, reasoning_tokens=20),
+            )
+
+    persisted_usage = []
+    ledger = []
+    session = UsageSession()
+    record = await CompactionService(usage_recorder=ledger.append).compact_async(
+        session, await session.load_messages(), Client(), reason="auto", phase="mid_turn",
+    )
+
+    assert record["strategy"] == strategy
+    assert persisted_usage == [record["usage"]]
+    assert len(ledger) == 1
+    assert ledger[0]["sampling_kind"] == "compact"
+    assert ledger[0]["input_tokens"] == 100
+    assert ledger[0]["output_tokens"] == 30
+    assert ledger[0]["reasoning_output_tokens"] == 20
+    assert "reasoning_content" not in record["handoff_message"]
+    if strategy == "llm_inline":
+        assert record["handoff_message"]["content"] == content
+    else:
+        assert record["fallback_error"]["type"] == "ValueError"
+        assert record["handoff_message"]["content"].startswith("Context compacted.")
+
+
+@pytest.mark.asyncio
+async def test_compaction_cancellation_does_not_commit_fallback() -> None:
+    class CancelledClient:
+        async def create(self, **kwargs):
+            raise asyncio.CancelledError()
+
+    session = FakeSession()
+    ledger = []
+    with pytest.raises(asyncio.CancelledError):
+        await CompactionService(usage_recorder=ledger.append).compact_async(
+            session, await session.load_messages(), CancelledClient(), reason="auto", phase="mid_turn",
+        )
+    assert session.records == []
+    assert ledger == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("status, strategy", [
+    ("completed", "llm_inline"),
+    ("incomplete", "deterministic_fallback"),
+    ("failed", "deterministic_fallback"),
+])
+async def test_compaction_respects_responses_status_and_records_usage(status, strategy):
+    from unittest.mock import AsyncMock
+    from agent.infrastructure.llm.openai_responses import OpenAIResponsesClient
+
+    provider = SimpleNamespace(responses=SimpleNamespace(create=AsyncMock(return_value={
+        "status": status,
+        "output": [{"type": "message", "content": [{"type": "output_text", "text": "Summary text"}]}],
+        "usage": {"input_tokens": 100, "output_tokens": 20},
+    })))
+    session = FakeSession()
+    ledger = []
+    record = await CompactionService(usage_recorder=ledger.append).compact_async(
+        session, await session.load_messages(), OpenAIResponsesClient(provider, "test-model"),
+    )
+    assert record["strategy"] == strategy
+    assert len(ledger) == 1
+    assert record["usage"]["input_tokens"] == ledger[0]["input_tokens"] == 100
+    assert record["usage"]["output_tokens"] == ledger[0]["output_tokens"] == 20
+    if status != "completed":
+        assert record["handoff_message"]["content"].startswith("Context compacted.")
 
 
 @pytest.mark.asyncio
@@ -378,8 +469,6 @@ async def test_compaction_service_ignores_corrupt_plan_snapshot() -> None:
 
 
 def main() -> int:
-    import asyncio
-
     test_compaction_service_uses_full_source_for_mid_turn()
     asyncio.run(test_compaction_service_falls_back_when_llm_compact_fails())
     asyncio.run(test_compaction_service_keeps_llm_handoff_when_usage_persist_fails())

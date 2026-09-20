@@ -70,14 +70,6 @@ class CompactionService:
                 tools=None,
                 cancellation_token=cancellation_token,
             )
-            content = self._assistant_content(response).strip()
-            if not content:
-                raise ValueError("compact model returned empty handoff")
-            record["strategy"] = "llm_inline"
-            record["handoff_message"] = {"role": "assistant", "content": content}
-            reasoning = self._assistant_reasoning_content(response).strip()
-            if reasoning:
-                record["handoff_message"]["reasoning_content"] = reasoning
             usage = self._sampling_usage(response, context_stats)
             if usage:
                 record["usage"] = usage
@@ -85,6 +77,11 @@ class CompactionService:
                 if usage_error:
                     record["usage_persist_error"] = usage_error
                 await self._record_usage(session, usage)
+            content = self._assistant_content(response).strip()
+            if not content:
+                raise ValueError("compact model returned empty handoff")
+            record["strategy"] = "llm_inline"
+            record["handoff_message"] = {"role": "assistant", "content": content}
         except Exception as exc:
             record["strategy"] = "deterministic_fallback"
             record["fallback_error"] = {
@@ -327,29 +324,23 @@ class CompactionService:
             return ""
 
     def _assistant_content(self, response: Any) -> str:
+        choices = self._get(response, "choices")
+        finish_reason = self._get(response, "finish_reason")
+        if isinstance(choices, list) and choices:
+            finish_reason = self._get(choices[0], "finish_reason")
+        if finish_reason not in (None, "stop"):
+            raise ValueError(f"compact model did not finish the handoff: {finish_reason}")
         if isinstance(response, ModelCompletion):
             return response.content
         output_text = getattr(response, "output_text", None)
         if isinstance(output_text, str):
             return output_text
-        choices = self._get(response, "choices")
         if isinstance(choices, list) and choices:
             first = choices[0]
             message = self._get(first, "message")
             content = self._get(message, "content")
             if isinstance(content, str):
                 return content
-        return ""
-
-    def _assistant_reasoning_content(self, response: Any) -> str:
-        if isinstance(response, ModelCompletion):
-            return response.reasoning_content or ""
-        choices = self._get(response, "choices")
-        if isinstance(choices, list) and choices:
-            message = self._get(choices[0], "message")
-            reasoning = self._get(message, "reasoning_content")
-            if isinstance(reasoning, str):
-                return reasoning
         return ""
 
     def _sampling_usage(self, response: Any, context_stats: dict[str, Any] | None) -> dict[str, Any] | None:

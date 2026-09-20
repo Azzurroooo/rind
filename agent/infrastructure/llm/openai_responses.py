@@ -126,7 +126,11 @@ def _completion(response: Any) -> ModelCompletion:
                     content.append(str(_get(part, "text") or ""))
         elif item_type == "function_call":
             calls.append(ParsedToolCall(str(_get(item, "call_id") or _get(item, "id") or ""), str(_get(item, "name") or ""), str(_get(item, "arguments") or "{}")))
-    return ModelCompletion("".join(content), tuple(calls), "".join(reasoning) or None, _usage(_get(response, "usage")), "tool_calls" if calls else "stop")
+    status = str(_get(response, "status") or "completed")
+    finish_reason = "tool_calls" if calls else "stop"
+    if status != "completed":
+        finish_reason = "length" if status == "incomplete" else "error"
+    return ModelCompletion("".join(content), tuple(calls), "".join(reasoning) or None, _usage(_get(response, "usage")), finish_reason)
 
 
 def _usage(value: Any) -> ModelUsage | None:
