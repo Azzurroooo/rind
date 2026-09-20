@@ -147,14 +147,14 @@ def test_file_mutation_schemas_need_no_hash_and_apply_patch_is_absent(build_buil
     schemas = {item["function"]["name"]: item["function"] for item in registry.schemas}
 
     assert set(schemas["write_file"]["parameters"]["properties"]) == {
-        "file_path",
+        "path",
         "content",
     }
     assert set(schemas["edit_file"]["parameters"]["properties"]) == {
-        "file_path",
+        "path",
         "old_str",
         "new_str",
     }
-    assert set(schemas["edit_file"]["parameters"]["required"]) == {"file_path", "old_str", "new_str"}
-    assert set(schemas["write_file"]["parameters"]["required"]) == {"file_path", "content"}
+    assert set(schemas["edit_file"]["parameters"]["required"]) == {"path", "old_str", "new_str"}
+    assert set(schemas["write_file"]["parameters"]["required"]) == {"path", "content"}
     assert not registry.has("apply_patch")

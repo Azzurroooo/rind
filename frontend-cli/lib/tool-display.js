@@ -448,10 +448,10 @@ function readRange(args) {
 function mutationRenderer(verb) {
   return {
     runningMain(context, width) {
-      return `${verb} ${accentPath(context.args.file_path, width, 10)}`;
+      return `${verb} ${accentPath(context.args.path || context.args.file_path, width, 10)}`;
     },
     finished(context, width, state) {
-      const main = `${verb} ${accentPath(context.args.file_path, width, 18)}${diffCountSuffix(context)}`;
+      const main = `${verb} ${accentPath(context.args.path || context.args.file_path, width, 18)}${diffCountSuffix(context)}`;
       return titleFor(state, main);
     },
     body(context, width, limit) {

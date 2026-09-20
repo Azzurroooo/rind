@@ -32,7 +32,7 @@ def build_file_change_event(
     return FileChangeEvent(
         **event_meta(session, turn_id),
         tool_call_id=call.call_id,
-        file_path=str(parsed_args.get("file_path") or ""),
+        file_path=str(parsed_args.get("path") or parsed_args.get("file_path") or ""),
         lines=lines,
     )
 

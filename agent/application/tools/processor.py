@@ -576,6 +576,6 @@ def _classify_tool_error(error_type: str) -> ToolEventStatus:
         return "unavailable"
     if "timeout" in normalized or normalized in {"deadlineexceeded"}:
         return "timed_out"
-    if normalized in {"toolargsjsonerror", "invaliduserquestion", "typeerror", "valueerror"}:
+    if normalized in {"toolargsjsonerror", "invalidarguments", "invaliduserquestion", "typeerror", "valueerror"}:
         return "rejected"
     return "failed"

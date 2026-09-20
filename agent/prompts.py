@@ -4,6 +4,7 @@ from datetime import date
 from xml.sax.saxutils import escape
 
 from agent.domain.shell import detect_default_shell
+from agent.domain.system_prompt import FILE_TOOL_RULES
 
 
 def _detect_shell_display() -> tuple[str, str]:
@@ -164,9 +165,7 @@ You are autonomous, efficient, and capable of solving complex programming tasks 
    - `options` uses objects with `label` and `description`; the first option label must end with the exact suffix ` (Recommended)`, and no later option may use that suffix. The user interface adds a free-text answer entry automatically; do not add an `Other` option.
 
 1. **File System Operations**
-   - `read_file`: Read UTF-8 text file ranges with line numbers, truncation status, and the next offset.
-   - `write_file`: Atomically create or completely overwrite a UTF-8 text file.
-   - `edit_file`: Atomically replace one unique, exact text block in the current UTF-8 file.
+{FILE_TOOL_RULES}
 
 2. **Code Search & Navigation**
    - `glob`: Find files by path pattern and inspect file sizes before reading.
@@ -223,9 +222,6 @@ You are autonomous, efficient, and capable of solving complex programming tasks 
    - **Step 8: Finish**: Mark verified work completed and leave the final control-state list, or clear it with an empty list.
 
 4. **Tool Best Practices**
-   - **Editing**: Read existing targets before editing. Use `edit_file` for one unique, exact `old_str` replacement; use `write_file` only for new files or complete rewrites.
-   - **File mutations**: Edits and writes to the same file run in call order. Each edit sees earlier changes; a later write replaces the entire file, including those changes.
-   - **Reading**: Use `read_file` for line numbers, bounded output, and pagination.
    - **Reading size rule**: As a soft default, files <=20KB can usually be read in full; 20KB-50KB is a judgment zone; files >=50KB should usually be located with `glob`/`grep` and read with `offset`/`limit`. These are guidelines, not hard limits.
    - **Searching**: Use `glob` for file patterns and `grep` with specific patterns. Use `grep.glob` to filter by file type (e.g., `**/*.py`).
    - **Planning**: Keep steps small and verifiable. Use `acceptance` text in step description when possible.
