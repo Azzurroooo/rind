@@ -136,4 +136,6 @@ npm --prefix frontend-cli install
 npm --prefix frontend-cli test
 ```
 
+These commands run automated regression tests. [User-scenario acceptance](../test/manual/README.md) is separate, runs only on explicit user request, and may consume live-model tokens. See the [testing guide](../test/README.md).
+
 See [Architecture](architecture.md) for module boundaries and [CLI rendering](cli-rendering.md) for the terminal component model. The [CLI turn flow](cli-turn-flow.md) and [main pipeline](main_pipeline.md) trace execution in more detail.

@@ -136,4 +136,6 @@ npm --prefix frontend-cli install
 npm --prefix frontend-cli test
 ```
 
+以上为自动回归。真实用户流程验收单独放在 [`test/manual/`](../test/manual/README.md)，仅在用户明确要求时执行，可能消耗真实模型 token，不属于默认测试命令。参见[测试分类](../test/README.md)。
+
 [架构文档](architecture.md)介绍模块边界，[CLI 渲染](cli-rendering.md)介绍终端组件模型。[CLI turn 流程](cli-turn-flow.md)和[主流水线](main_pipeline.md)进一步说明执行过程（均为英文）。
