@@ -19,8 +19,11 @@ class ChatClient(Protocol):
         messages: list[dict],
         tools: list[dict] | None = None,
         cancellation_token: CancellationToken | None = None,
+        *,
+        max_output_tokens: int | None = None,
+        reasoning_effort: str | None = None,
     ) -> ModelCompletion:
-        """Execute one provider-neutral completion request."""
+        """Complete with a request-local output cap and supported reasoning override."""
         ...
 
     async def stream(

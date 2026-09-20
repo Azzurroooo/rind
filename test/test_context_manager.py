@@ -16,7 +16,7 @@ class QueryOnlySession:
     def __init__(self, messages):
         self._messages = [dict(message) for message in messages]
 
-    async def get_messages_slice(self, start=None, end=None, roles=None, include_internal=False):
+    async def get_messages_slice(self, start=None, end=None, roles=None, include_internal=False, include_ids=False):
         messages = [dict(message) for message in self._messages]
         if not include_internal:
             messages = [

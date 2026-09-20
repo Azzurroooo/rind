@@ -1070,7 +1070,7 @@ async def test_async_turn_runner_auto_compacts_before_sampling():
             self.created = 0
             self.streamed = 0
 
-        async def create(self, messages, tools=None, cancellation_token=None):
+        async def create(self, messages, tools=None, cancellation_token=None, **options):
             self.created += 1
             return SimpleNamespace(
                 choices=[SimpleNamespace(message=SimpleNamespace(content="LLM handoff"))],
@@ -1132,7 +1132,7 @@ async def test_async_turn_runner_auto_compacts_before_sampling():
         decisions={},
     )
     mock_context = MagicMock()
-    mock_context.build_messages_async = AsyncMock(side_effect=[first_context, second_context])
+    mock_context.build_messages_async = AsyncMock(side_effect=[first_context, first_context, second_context])
     mock_context.select_active_skills_for_turn = None
 
     mock_parser = MagicMock()
@@ -1167,7 +1167,7 @@ async def test_async_turn_runner_mid_turn_compact_does_not_preserve_raw_tail():
         def __init__(self):
             self.prompt_messages = None
 
-        async def create(self, messages, tools=None, cancellation_token=None):
+        async def create(self, messages, tools=None, cancellation_token=None, **options):
             self.prompt_messages = messages
             return SimpleNamespace(
                 choices=[SimpleNamespace(message=SimpleNamespace(content="LLM handoff"))],
@@ -1221,7 +1221,9 @@ async def test_async_turn_runner_mid_turn_compact_does_not_preserve_raw_tail():
         decisions={},
     )
     mock_context = MagicMock()
-    mock_context.build_messages_async = AsyncMock(return_value=post_compact_context)
+    mock_context.build_messages_async = AsyncMock(side_effect=[
+        SimpleNamespace(messages=FakeSession().raw_messages, stats={}, decisions={}), post_compact_context,
+    ])
     mock_context.select_active_skills_for_turn = None
 
     chat_client = FakeChatClient()
@@ -1398,7 +1400,7 @@ async def test_context_length_recovery_hard_limit_is_turn_local():
                 )
             return LocalEmptyStream()
 
-        async def create(self, messages, tools=None, cancellation_token=None):
+        async def create(self, messages, tools=None, cancellation_token=None, **options):
             return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content="handoff"))])
 
     class FakeSession:

@@ -59,9 +59,10 @@ class ContextManager:
         transient_system_messages: list[dict] | None = None,
         allow_rescue: bool = False,
         include_skill_catalog: bool = True,
+        include_ids: bool = False,
     ) -> ContextBuildResult:
         try:
-            persisted = await session.get_messages_slice(include_internal=True)
+            persisted = await session.get_messages_slice(include_internal=True, include_ids=include_ids)
             persisted_messages = [dict(message) for message in persisted]
         except asyncio.CancelledError:
             raise

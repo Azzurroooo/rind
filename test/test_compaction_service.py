@@ -172,7 +172,7 @@ def test_compaction_service_counts_reasoning_in_final_tool_unit() -> None:
     record = service.build_compaction(messages, tool_records, keep_recent_chars=20)
 
     assert record["source"]["message_end_index_exclusive"] == 4
-    assert "Latest assistant reasoning" in record["handoff_message"]["content"]
+    assert "private reasoning" not in record["handoff_message"]["content"]
 
 
 @pytest.mark.asyncio

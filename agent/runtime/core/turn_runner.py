@@ -426,10 +426,8 @@ class TurnRunner:
         cancellation_token: CancellationToken | None = None,
         turn_id: str = "",
     ) -> dict:
-        context = await self._build_context(session, turn_id=turn_id)
         _, record = await self._run_compact(
             session=session,
-            context=context,
             reason=reason,
             phase=phase,
             cancellation_token=cancellation_token,
@@ -441,7 +439,7 @@ class TurnRunner:
         self,
         *,
         session: SessionStore,
-        context: ContextBuildResult,
+        context: ContextBuildResult | None = None,
         reason: str,
         phase: str,
         phase_detail: str | None = None,
@@ -449,10 +447,11 @@ class TurnRunner:
         cancellation_token: CancellationToken | None = None,
         turn_id: str = "",
     ) -> tuple[ContextBuildResult, dict]:
-        compaction_context = await self._compaction_context(
+        compaction_context = await self._build_context(
             session,
-            context,
             transient_system_messages=transient_system_messages,
+            include_skill_catalog=False,
+            include_ids=True,
         )
         record = await self._compaction_service.compact_async(
             session=session,
@@ -461,7 +460,7 @@ class TurnRunner:
             reason=reason,
             phase=phase,
             diagnostics=_compact_diagnostics(phase_detail),
-            context_stats=compaction_context.stats,
+            context_stats=context.stats if context is not None else compaction_context.stats,
             cancellation_token=cancellation_token,
         )
         await self._sync_skill_catalog(session)
@@ -485,22 +484,6 @@ class TurnRunner:
             **event_meta(session, turn_id), input_id=input_id, input=text, mode="steering",
         )
 
-    async def _compaction_context(
-        self,
-        session: SessionStore,
-        context,
-        *,
-        transient_system_messages: list[dict] | None = None,
-    ):
-        decisions = context.decisions if isinstance(context.decisions, dict) else {}
-        if not decisions.get("skill_catalog_injected"):
-            return context
-        return await self._build_context(
-            session,
-            transient_system_messages=transient_system_messages,
-            include_skill_catalog=False,
-        )
-
     async def _build_context(
         self,
         session: SessionStore,
@@ -508,12 +491,14 @@ class TurnRunner:
         allow_rescue: bool = False,
         include_skill_catalog: bool = True,
         turn_id: str = "",
+        include_ids: bool = False,
     ):
         context = await self._context_manager.build_messages_async(
             session=session,
             transient_system_messages=transient_system_messages,
             allow_rescue=allow_rescue,
             include_skill_catalog=include_skill_catalog,
+            include_ids=include_ids,
         )
         if include_skill_catalog:
             # Only assemblies that feed a model call update the board; the

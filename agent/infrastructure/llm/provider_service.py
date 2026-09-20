@@ -85,19 +85,22 @@ class ProviderServiceImpl:
             )
         endpoint = self._endpoint(settings, definition)
         key = credential.key or credential.access
+        efforts = next((model.reasoning_efforts for model in definition.fallback_models if model.id == selection.model_id), ())
         if definition.api == "openai-chat":
             from .openai_chat import OpenAIChatCompletionsClient
             from .openai_chat_client import build_async_client
 
             return OpenAIChatCompletionsClient(
-                build_async_client(key, endpoint, max_retries=14), selection.model_id, selection.reasoning_effort, workspace_root=workspace_root
+                build_async_client(key, endpoint, max_retries=14), selection.model_id, selection.reasoning_effort,
+                workspace_root=workspace_root, reasoning_efforts=efforts,
             )
         if definition.api == "openai-responses":
             from .openai_responses import OpenAIResponsesClient
             from .openai_chat_client import build_async_client
 
             return OpenAIResponsesClient(
-                build_async_client(key, endpoint), selection.model_id, selection.reasoning_effort, workspace_root=workspace_root
+                build_async_client(key, endpoint), selection.model_id, selection.reasoning_effort,
+                workspace_root=workspace_root, reasoning_efforts=efforts,
             )
         if definition.api == "anthropic-messages":
             from .anthropic_messages import AnthropicMessagesClient
