@@ -29,8 +29,8 @@ test("theme defaults to mocha and validates switches", () => {
   assert.deepEqual(setTheme("Macchiato"), { name: "macchiato", label: "Macchiato" });
   const current = themeOptions().find((option) => option.current);
   assert.equal(current.name, "macchiato");
-  assert.equal(themeOptions().length, 4);
-  assert.deepEqual(themeNames(), ["latte", "frappe", "macchiato", "mocha"]);
+  assert.equal(themeOptions().length, 5);
+  assert.deepEqual(themeNames(), ["latte", "frappe", "macchiato", "mocha", "rind"]);
   resetTheme();
 });
 
@@ -82,7 +82,7 @@ test("/theme command lists flavors and applies switches", async () => {
   const listed = await executeLocalSlashCommand("/theme", context);
   assert.equal(listed.display.type, "theme");
   assert.equal(listed.display.changed, false);
-  assert.equal(listed.display.flavors.length, 4);
+  assert.equal(listed.display.flavors.length, 5);
 
   const switched = await executeLocalSlashCommand("/theme macchiato", context);
   assert.equal(switched.display.changed, true);
@@ -98,13 +98,14 @@ test("/theme command lists flavors and applies switches", async () => {
 test("/theme persists only through the injected persistTheme hook", async () => {
   resetTheme();
   let persisted = null;
-  const switched = await executeLocalSlashCommand("/theme latte", {
+  const switched = await executeLocalSlashCommand("/theme rind", {
     persistTheme: (name) => {
       persisted = name;
     },
   });
-  assert.equal(persisted, "latte");
+  assert.equal(persisted, "rind");
   assert.equal(switched.display.changed, true);
+  assert.deepEqual(currentTheme(), { name: "rind", label: "Rind" });
 
   const bare = await executeLocalSlashCommand("/theme", {});
   assert.equal(bare.display.changed, false);
