@@ -52,7 +52,7 @@ test("Team badge follows the theme and keeps its identity with NO_COLOR", () => 
   process.stdout.isTTY = true;
   delete process.env.NO_COLOR;
   try {
-    for (const [theme, color] of [["mocha", "203;166;247"], ["latte", "136;57;239"]]) {
+    for (const [theme, color] of [["catppuccin-mocha", "203;166;247"], ["latte", "136;57;239"]]) {
       setTheme(theme);
       for (const output of [startupText(info, 80), promptText(info, {}, {}, 80)]) {
         assert.ok(output.includes(`\x1b[1m\x1b[38;2;${color}m[TEAM]`));

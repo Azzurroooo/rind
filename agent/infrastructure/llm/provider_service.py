@@ -2,8 +2,12 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
+import logging
+import math
 import os
+import time
 from pathlib import Path
 import tempfile
 from typing import Any
@@ -23,6 +27,11 @@ from agent.infrastructure.credentials import CredentialStore
 from agent.infrastructure.llm.cancellation import close_resource
 from agent.infrastructure.llm.catalog import PROVIDERS, default_reasoning_efforts, refreshable_models_api
 from agent.infrastructure.settings import AppSettings, load_settings
+
+
+logger = logging.getLogger(__name__)
+MODEL_CACHE_TTL = 24 * 60 * 60
+MODEL_LIST_TIMEOUT = 10
 
 
 def build_async_client(api_key: str, base_url: str, *, max_retries: int = 2) -> openai.AsyncOpenAI:
@@ -84,6 +93,30 @@ class ProviderServiceImpl:
         self.credentials.set(provider_id, Credential(type="api_key", key=key))
         await self._fetch_models(load_settings(workspace_root), definition)
 
+    async def refresh_stale_models(self, workspace_root: str | None = None) -> None:
+        """Refresh each configured provider once; ordinary reads remain offline."""
+        try:
+            settings = load_settings(workspace_root)
+            cache = self._read_cache()
+            for definition in self.providers.values():
+                if not refreshable_models_api(_effective_api(settings, definition)):
+                    continue
+                if self._resolve_credential(settings, definition.id) is None:
+                    continue
+                entry = cache.get(definition.id)
+                if isinstance(entry, dict) and entry.get("base_url") == self._endpoint(settings, definition):
+                    refreshed_at = entry.get("refreshed_at")
+                    if (
+                        self._cached_models(entry, settings, definition)
+                        and type(refreshed_at) in (int, float)
+                        and math.isfinite(refreshed_at)
+                        and 0 <= time.time() - refreshed_at < MODEL_CACHE_TTL
+                    ):
+                        continue
+                await self._fetch_models(settings, definition)
+        except Exception as exc:
+            logger.debug("Background model refresh failed (%s)", type(exc).__name__)
+
     def logout(self, provider_id: str) -> bool:
         return self.credentials.delete(provider_id)
 
@@ -136,7 +169,7 @@ class ProviderServiceImpl:
             verified = {model.id: model.reasoning_efforts for model in definition.fallback_models}
             models = [
                 _model(definition, api, item, verified.get(_item_id(item)))
-                for item in cache.get(definition.id) or ()
+                for item in self._cached_models(cache.get(definition.id), settings, definition)
             ] or list(definition.fallback_models)
             result.extend(models)
         current = ModelSelection(settings.provider, settings.model)
@@ -148,28 +181,53 @@ class ProviderServiceImpl:
         return result
 
     async def _fetch_models(self, settings: AppSettings, definition) -> bool:
-        if not refreshable_models_api(definition.api):
+        if not refreshable_models_api(_effective_api(settings, definition)):
             return True
         credential = self._resolve_credential(settings, definition.id)
         if credential is None:
             return False
 
-        client = build_async_client(credential.key or credential.access, self._endpoint(settings, definition))
+        client = None
         try:
-            response = await client.models.list()
-            data = getattr(response, "data", response)
-            if hasattr(data, "__aiter__"):
-                data = [item async for item in data]
-            models = [{"id": _item_id(item), "name": _item_id(item)} for item in data or []]
-            models = [item for item in models if item["id"]]
+            endpoint = self._endpoint(settings, definition)
+            client = build_async_client(credential.key or credential.access, endpoint, max_retries=0)
+            async with asyncio.timeout(MODEL_LIST_TIMEOUT):
+                response = await client.models.list(timeout=MODEL_LIST_TIMEOUT)
+                data = getattr(response, "data", response)
+                if hasattr(data, "__aiter__"):
+                    data = [item async for item in data]
+                if not isinstance(data, (list, tuple)):
+                    raise ValueError("Invalid model list")
+                if any(not isinstance(item.get("id") if isinstance(item, dict) else getattr(item, "id", None), str)
+                       for item in data):
+                    raise ValueError("Invalid model identifier")
+                models = [{"id": _item_id(item), "name": _item_id(item)} for item in data]
+                if any(not item["id"] for item in models):
+                    raise ValueError("Invalid model identifier")
             if not models:
+                logger.debug("Model refresh returned an empty list for %s", definition.id)
                 return False
-            self._write_cache(self._read_cache() | {definition.id: models})
+            self._write_cache(self._read_cache() | {definition.id: {
+                "models": models, "refreshed_at": time.time(), "base_url": endpoint,
+            }})
             return True
-        except Exception:
+        except Exception as exc:
+            logger.debug("Model refresh failed for %s (%s)", definition.id, type(exc).__name__)
             return False
         finally:
-            await close_resource(client)
+            if client is not None:
+                try:
+                    await close_resource(client)
+                except Exception as exc:
+                    logger.debug("Model client cleanup failed (%s)", type(exc).__name__)
+
+    def _cached_models(self, entry: Any, settings: AppSettings, definition) -> list:
+        # Legacy lists have no known endpoint or success time; read them until refreshed.
+        if isinstance(entry, dict):
+            if entry.get("base_url") != self._endpoint(settings, definition):
+                return []
+            entry = entry.get("models")
+        return [item for item in entry if _item_id(item)] if isinstance(entry, list) else []
 
     def _provider(self, provider_id: str):
         try:
@@ -206,7 +264,7 @@ class ProviderServiceImpl:
             return configured
         return definition.default_base_url
 
-    def _read_cache(self) -> dict[str, list[dict[str, Any]]]:
+    def _read_cache(self) -> dict[str, Any]:
         if not self.cache_path.exists():
             return {}
         try:

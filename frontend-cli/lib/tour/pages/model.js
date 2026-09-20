@@ -71,14 +71,14 @@ export const modelPages = [
         display: {
           type: "theme",
           changed: true,
-          previous: "mocha",
+          previous: "catppuccin-mocha",
           current: "latte",
           flavors: themeOptions(),
         },
       }),
       note([
         "This demo previews Latte without saving it. Your original theme returns when you leave this page.",
-        "Try /theme to choose and save a palette. /theme rind brings the website's colors to dark terminals.",
+        "Try /theme to choose and save a palette. /theme pistachio brings the website's colors to dark terminals.",
       ]),
     ],
   },
