@@ -180,15 +180,12 @@ def is_compact_boundary_message(message: dict[str, Any]) -> bool:
 def _compact_replacement_boundary(compaction: dict[str, Any]) -> list[dict[str, Any]]:
     handoff = compaction["handoff_message"]
     content = handoff["content"]
-    reasoning = handoff.get("reasoning_content")
-    if not isinstance(reasoning, str) or not reasoning:
-        reasoning = COMPACT_HANDOFF_REASONING_CONTENT
     user = compaction.get("continuation_user_message")
     if not _valid_message(user, {"user"}):
         user = {"role": "user", "content": COMPACT_CONTINUATION_USER_CONTENT}
     return [
         {"role": "user", "content": user["content"]},
-        {"role": "assistant", "content": content, "reasoning_content": reasoning},
+        {"role": "assistant", "content": content, "reasoning_content": COMPACT_HANDOFF_REASONING_CONTENT},
     ]
 
 

@@ -1345,13 +1345,63 @@ async def test_compaction_retains_recent_suffix_for_context_and_raw_history_for_
     assert context_messages[2] == {
         "role": "assistant",
         "content": "Real handoff.",
-        "reasoning_content": "How the summary was built.",
+        "reasoning_content": COMPACT_HANDOFF_REASONING_CONTENT,
     }
     assert {"role": "user", "content": "old question"} not in context_messages
     assert {"role": "user", "content": "recent question"} in display_messages
     assert {"role": "user", "content": "old question"} in display_messages
     assert all(m.get("content") != "Compacted prefix." for m in display_messages)
     assert all(m.get("tool_call_id") != "call_1" or m.get("content") == "tool result content" for m in display_messages)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("legacy_reasoning", [None, "Old summary reasoning " * 2000], ids=["new", "legacy"])
+async def test_compact_resume_preserves_recent_tool_reasoning_and_raw_history(tmp_path, legacy_reasoning):
+    store = JsonlSessionStore(session_dir=str(tmp_path), session_id="compact_resume", system_prompt="sys")
+    await store.initialize()
+    await store.persist_message("user", "old request")
+    await store.persist_message("assistant", "old answer", reasoning_content="old task reasoning")
+    await store.persist_message("user", "recent request")
+    await store.persist_message(
+        "assistant", "", reasoning_content="Original reasoning for retained tool call",
+        meta={"tool_calls": [{"id": "retained_call", "name": "read_file"}]},
+    )
+    await store.persist_tool_call(
+        call_id="retained_call", name="read_file", parsed_args={"path": "result.txt"},
+        raw_args='{"path":"result.txt"}', ts_start=store.now_iso(), ts_end=store.now_iso(),
+        result_payload='{"ok":true}', model_content="Verified result",
+    )
+    await store.persist_message("tool", "", tool_call_id="retained_call", tool_name="read_file")
+    handoff = {"role": "assistant", "content": "Summary of old request"}
+    if legacy_reasoning is not None:
+        handoff["reasoning_content"] = legacy_reasoning
+    await store.persist_compaction({
+        "id": "compact_resume_boundary", "created_at": store.now_iso(),
+        "source": {"message_start_index": 0, "message_end_index_exclusive": 3, "tool_call_ids": []},
+        "handoff_message": handoff,
+    })
+    await store.persist_message("assistant", "Task complete", reasoning_content="Verified retained result")
+    await store.persist_message("user", "Next turn")
+    expected = await store.get_messages_slice()
+    session_base = Path(store.session_base_path)
+    saved_history = (session_base / "messages.jsonl").read_bytes()
+    saved_compactions = (session_base / "compactions.jsonl").read_bytes()
+
+    resumed = JsonlSessionStore(session_dir=str(tmp_path), session_id=store.session_id, system_prompt="sys")
+    await resumed.initialize()
+    messages = await resumed.get_messages_slice()
+
+    assert messages == expected
+    assert validate_model_message_boundary(messages).ok
+    assert [m["role"] for m in messages] == ["system", "user", "assistant", "user", "assistant", "tool", "assistant", "user"]
+    assert messages[2]["reasoning_content"] == COMPACT_HANDOFF_REASONING_CONTENT
+    assert messages[4]["reasoning_content"] == "Original reasoning for retained tool call"
+    assert messages[4]["tool_calls"][0]["id"] == messages[5]["tool_call_id"] == "retained_call"
+    assert messages[5]["content"] == "Verified result"
+    assert messages[6]["reasoning_content"] == "Verified retained result"
+    assert (session_base / "messages.jsonl").read_bytes() == saved_history
+    assert (session_base / "compactions.jsonl").read_bytes() == saved_compactions
+    assert (await resumed.get_latest_compaction())["handoff_message"] == handoff
 
 
 @pytest.mark.asyncio
