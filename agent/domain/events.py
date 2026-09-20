@@ -71,6 +71,13 @@ class TurnStartedEvent(RuntimeEvent):
     """Fired when a user turn starts."""
     type: Literal["turn_started"] = "turn_started"
     user_message_chars: int = 0
+    operation: Literal["prompt", "compact"] = "prompt"
+
+
+@dataclass(slots=True)
+class ContextCompactedEvent(RuntimeEvent):
+    type: Literal["context_compacted"] = "context_compacted"
+    record: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(slots=True)

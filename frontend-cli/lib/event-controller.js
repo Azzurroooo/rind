@@ -30,6 +30,9 @@ export function createEventController({
       return;
     }
     switch (eventType) {
+      case "turn_started":
+      case "context_compacted":
+        return;
       case "assistant_delta":
         output.setActivityLabel?.("Working");
         output.assistantAppend?.(event.text || "");

@@ -26,6 +26,7 @@ from agent.domain.events import (
     AssistantMessageCompletedEvent,
     QueuedInputDeliveredEvent,
     ContextBuiltEvent,
+    ContextCompactedEvent,
     PlanUpdatedEvent,
     ToolRequestedEvent,
     TurnCompletedEvent,
@@ -108,6 +109,7 @@ class TurnRunner:
             trace_setter(lambda: str(getattr(session, "session_id", "") or ""))
         try:
             sampling_index = 0
+            steering_for_sampling = False
             force_rescue_next_build = False
             context_length_recovery_count = 0
             image_fallback_used = False
@@ -136,11 +138,9 @@ class TurnRunner:
                 force_rescue_next_build = False
                 yield _context_built(context, session, turn_id)
                 if context.decisions.get("auto_compact_token_limit_reached"):
-                    context = await self._run_compact(
+                    context, record = await self._run_compact(
                         session=session,
-                        context_messages=context.messages,
-                        context_stats=context.stats,
-                        context_decisions=context.decisions,
+                        context=context,
                         reason="auto",
                         phase="mid_turn",
                         phase_detail=self._compact_phase_detail(sampling_index),
@@ -148,8 +148,20 @@ class TurnRunner:
                         cancellation_token=cancellation_token,
                         turn_id=turn_id,
                     )
+                    yield ContextCompactedEvent(**event_meta(session, turn_id), record=record)
                     yield _context_built(context, session, turn_id)
 
+                if not steering_for_sampling:
+                    steering_item = self._next_steering(take_steering)
+                    if steering_item is not None:
+                        yield await self._deliver_steering(session, turn_id, steering_item)
+                        steering_for_sampling = True
+                        context = await self._build_context(
+                            session, transient_system_messages=transient_system_messages, turn_id=turn_id,
+                        )
+                        yield _context_built(context, session, turn_id)
+                if cancellation_token and cancellation_token.is_cancelled:
+                    continue
                 boundary = validate_model_message_boundary(context.messages) if context.messages else None
                 if boundary is not None and not boundary.ok:
                     raise RuntimeError(f"Invalid model message boundary: {boundary.reason}")
@@ -251,11 +263,9 @@ class TurnRunner:
                     if e.code == "context_length_exceeded":
                         context_length_recovery_count += 1
                         if context_length_recovery_count == 1:
-                            await self._run_compact(
+                            _, record = await self._run_compact(
                                 session=session,
-                                context_messages=context.messages,
-                                context_stats=context.stats,
-                                context_decisions=context.decisions,
+                                context=context,
                                 reason="context_length_error",
                                 phase="mid_turn",
                                 phase_detail="context_length_recovery",
@@ -263,6 +273,7 @@ class TurnRunner:
                                 cancellation_token=cancellation_token,
                                 turn_id=turn_id,
                             )
+                            yield ContextCompactedEvent(**event_meta(session, turn_id), record=record)
                         else:
                             self._context_manager.reduce_hard_limit(factor=0.8)
                             force_rescue_next_build = True
@@ -301,18 +312,9 @@ class TurnRunner:
                     continue
 
                 steering_item = self._next_steering(take_steering)
+                steering_for_sampling = steering_item is not None
                 if steering_item is not None:
-                    input_id, steering = steering_item
-                    if self._skill_turn_coordinator is not None:
-                        await self._skill_turn_coordinator.persist_user_input(session, steering)
-                    else:
-                        await self._persist_message(session, "user", steering)
-                    yield QueuedInputDeliveredEvent(
-                        **event_meta(session, turn_id),
-                        input_id=input_id,
-                        input=steering,
-                        mode="steering",
-                    )
+                    yield await self._deliver_steering(session, turn_id, steering_item)
 
                 if not parsed_tool_calls and steering_item is None:
                     break
@@ -424,49 +426,35 @@ class TurnRunner:
         cancellation_token: CancellationToken | None = None,
         turn_id: str = "",
     ) -> dict:
-        context = await self._build_context(session)
-        compaction_context = await self._compaction_context(session, context)
-        stats = dict(compaction_context.stats)
-        messages = list(compaction_context.messages)
-        record = await self._compaction_service.compact_async(
+        context = await self._build_context(session, turn_id=turn_id)
+        _, record = await self._run_compact(
             session=session,
-            context_messages=messages,
-            chat_client=self._chat_client,
+            context=context,
             reason=reason,
             phase=phase,
-            context_stats=stats,
             cancellation_token=cancellation_token,
+            turn_id=turn_id,
         )
-        await self._sync_skill_catalog(session)
-        context = await self._build_context(session, turn_id=turn_id)
-        self._validate_compact_context(context)
         return record
 
     async def _run_compact(
         self,
         *,
         session: SessionStore,
-        context_messages: list[dict],
-        context_stats: dict,
-        context_decisions: dict | None = None,
+        context: ContextBuildResult,
         reason: str,
         phase: str,
         phase_detail: str | None = None,
         transient_system_messages: list[dict] | None = None,
         cancellation_token: CancellationToken | None = None,
         turn_id: str = "",
-    ):
-        current_context = ContextBuildResult(
-            messages=context_messages,
-            stats=context_stats,
-            decisions=context_decisions or {},
-        )
+    ) -> tuple[ContextBuildResult, dict]:
         compaction_context = await self._compaction_context(
             session,
-            current_context,
+            context,
             transient_system_messages=transient_system_messages,
         )
-        await self._compaction_service.compact_async(
+        record = await self._compaction_service.compact_async(
             session=session,
             context_messages=compaction_context.messages,
             chat_client=self._chat_client,
@@ -483,7 +471,19 @@ class TurnRunner:
             turn_id=turn_id,
         )
         self._validate_compact_context(context)
-        return context
+        return context, record
+
+    async def _deliver_steering(
+        self, session: SessionStore, turn_id: str, item: tuple[str, str],
+    ) -> QueuedInputDeliveredEvent:
+        input_id, text = item
+        if self._skill_turn_coordinator is not None:
+            await self._skill_turn_coordinator.persist_user_input(session, text)
+        else:
+            await self._persist_message(session, "user", text)
+        return QueuedInputDeliveredEvent(
+            **event_meta(session, turn_id), input_id=input_id, input=text, mode="steering",
+        )
 
     async def _compaction_context(
         self,

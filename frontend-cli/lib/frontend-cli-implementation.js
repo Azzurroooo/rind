@@ -231,7 +231,7 @@ const runtimeClient = createRuntimeClient({
 });
 const turnState = {
   get activeTurn() {
-    return turnStateData.active;
+    return turnStateData.active || displayState.activeCompact;
   },
   set activeTurn(value) {
     turnStateData.active = Boolean(value);
@@ -616,22 +616,28 @@ async function renderEvent(message) {
     setTurnContext(nextTurnId);
     turnStateData.active = Boolean(turnStateData.id);
     turnStateData.interruptRequested = false;
-    displayState.activityLabel = "Working";
+    displayState.activeCompact = message.event.operation === "compact";
+    displayState.activityLabel = displayState.activeCompact ? "Compacting" : "Working";
     displayState.assistantHeaderShown = false;
     refreshInputState();
+  }
+  if (message?.event?.type === "context_compacted") {
+    if (displayState.activeCompact) logOutput("Compact complete.");
+    displayState.activeCompact = false;
+    displayState.activityLabel = "Working";
+    compactContextState.clear();
+    resetContextUsage();
   }
   const result = await eventController.handle(message);
   if (["turn_completed", "turn_failed", "turn_cancelled"].includes(message?.event?.type)) {
     turnStateData.id = "";
+    displayState.activeCompact = false;
     setTurnContext("");
     displayState.activityLabel = "";
     await runtimeController.refreshGoalState();
-    const goalActive = sessionState.info.goal?.status === "active";
-    turnStateData.active = goalActive;
+    turnStateData.active = false;
     turnStateData.interruptRequested = false;
-    if (!goalActive) {
-      clearActivityTimer();
-    }
+    clearActivityTimer();
     refreshInputState();
   }
   return result;
@@ -673,7 +679,7 @@ function composeFrame(width = process.stdout.columns || 80) {
   const slashMenuOpen = session.mode === "prompt"
     && session.menuState
     && session.menuState.matches().length > 0;
-  const showCaret = (!displayState.activeCompact && !choiceMenu && !slashMenuOpen)
+  const showCaret = (!choiceMenu && !slashMenuOpen)
     || (session.mode === "question" && session.questionState.isEditing());
   if (session.mode === "model") {
     return {

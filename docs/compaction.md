@@ -1,5 +1,9 @@
 # Context compaction
 
+Manual, automatic and context-length recovery compaction share the same runner pipeline: prepare the compression corpus, generate and persist a handoff, synchronize the skill catalog, rebuild context, and validate its message boundaries. Manual compaction builds its initial context; automatic compaction passes the context already built for sampling. Whether to continue sampling belongs to the caller, not the compression pipeline.
+
+Cancellation is checked before generation and again before starting the compact commit, including when the provider returns normally after cancellation. Known provider usage is retained even when that summary is discarded.
+
 Compaction replaces older context with a user continuation message and an assistant summary, followed by the retained recent conversation and any messages added after the boundary. Recent assistant tool calls remain paired with their results, including their original reasoning content. Raw history stays available on disk.
 
 The summary's generation reasoning is not stored in new compaction handoffs. When projecting either new or legacy handoffs into model messages, Rind supplies the existing fixed, nonempty `COMPACT_HANDOFF_REASONING_CONTENT` in place of generation reasoning. This preserves the assistant message contract without replaying the summary model's reasoning. Existing compaction files are not rewritten; ordinary assistant reasoning is unchanged.
@@ -7,3 +11,9 @@ The summary's generation reasoning is not stored in new compaction handoffs. Whe
 Provider-reported compact usage is recorded before validating the summary, including reasoning token counts. Empty summaries or explicit non-success finish reasons (such as a token limit) use the existing deterministic fallback rather than accepting partial text as a completed summary. Provider failures without reported usage cannot be assigned a known token cost. Cancellation propagates without committing a compaction boundary.
 
 Regression tests cover summary validation, usage accounting, message pairing, and session recovery. Real-provider acceptance runs separately, only when requested, and verifies auto-triggered compaction, tool continuation, the next turn, and recovery through the CLI in an isolated workspace and RIND_HOME. Clean up its processes, sessions, traces, and temporary settings afterwards. Compatibility claims apply to the providers actually tested.
+
+Manual compaction uses the worker's execution slot, input queues and cancellation token. Both `rind/session/compact` and `/compact` emit `turn_started` with `operation: compact`, then `context_compacted` with the committed `record`, followed by the usual delivery and terminal events. A compact-only operation does not persist a running conversation turn or start goal continuation. Accepted input continues within the same execution: steering takes priority and follow-ups wait for the preceding task to finish. With no input, compaction ends without a conversational model call.
+
+During automatic compaction the current turn remains active. Steering enters the next conversational sampling, at most one FIFO input per sampling; a steering input already delivered for that sampling keeps its place. Follow-ups wait until the current task completes. Inputs received during summary generation do not alter that summary request. Tool calls and results stay together before steering is inserted.
+
+The CLI treats compaction as a model-backed operation without the 120-second control-request timeout. Enter steers, Tab queues, and retrieval/promotion shortcuts remain available. Ctrl+C cancels the worker operation and discards pending input using the ordinary interruption rules. A committed summary is retained if cancellation arrives afterwards; a failed or cancelled summary never starts queued work. Local fake-provider tests cover these interactions; they are not real-model acceptance.

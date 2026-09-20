@@ -71,7 +71,7 @@ export function createCommandController({
       await input.runEffortCommand?.(effortArgument(text));
       return;
     }
-    if (isCompactCommand(text) && input.isTerminal) {
+    if (isCompactCommand(text) && input.startCompactCommand) {
       input.startCompactCommand?.();
       return;
     }

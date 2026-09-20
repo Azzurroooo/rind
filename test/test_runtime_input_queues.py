@@ -390,6 +390,7 @@ async def test_turn_runner_injects_one_fifo_steering_after_tool_chain_per_sampli
     class ToolProcessor:
         async def execute(self, **kwargs):
             order.append("tool_started")
+            steering.extend([("steer-1", "redirect once"), ("steer-2", "redirect twice")])
             assert not any(item[:2] == ("user", "redirect once") for item in session.messages)
             yield ToolResultEvent(
                 tool_call_id="call_1",
@@ -417,7 +418,7 @@ async def test_turn_runner_injects_one_fifo_steering_after_tool_chain_per_sampli
             await super().persist_message(role, content, **kwargs)
 
     session = OrderedSession()
-    steering = deque([("steer-1", "redirect once"), ("steer-2", "redirect twice")])
+    steering = deque()
 
     def take_steering():
         order.append("take_steering")
@@ -432,14 +433,13 @@ async def test_turn_runner_injects_one_fifo_steering_after_tool_chain_per_sampli
     )
     events = [event async for event in runner.run_turn(session, turn_id="turn_1", take_steering=take_steering)]
 
-    assert order.index("tool_finished") < order.index("take_steering")
-    assert order.index("take_steering") < order.index("persist:user:redirect once")
+    assert order.index("tool_finished") < order.index("persist:user:redirect once")
     assert [item[:2] for item in session.messages if item[0] == "user"] == [
         ("user", "redirect once"),
         ("user", "redirect twice"),
     ]
     assert order.count("sample") == 3
-    assert order.count("take_steering") == 3
+    assert order.count("take_steering") == 4
     assert [(event.input, event.mode) for event in events if isinstance(event, QueuedInputDeliveredEvent)] == [
         ("redirect once", "steering"),
         ("redirect twice", "steering"),

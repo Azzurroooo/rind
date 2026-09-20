@@ -481,6 +481,19 @@ test("hardware caret stays on the input line while a turn runs", async () => {
   // Turn completes: caret remains on the input line.
   writes.length = 0;
   state.turn.active = false;
+  state.display.activeCompact = true;
+  state.display.activityLabel = "Compacting";
+  editor.setInput("调整方向，保留输入");
+  tui.requestRender();
+  await settle(virtual);
+  assert.ok(virtual.getViewport().some((line) => line.includes("Compacting")));
+  assert.ok(virtual.getViewport().some((line) => line.includes("调整方向，保留输入")));
+  assert.ok(!writes.some((w) => w.includes("\x1b[?25l")), "compact keeps the caret available");
+  assert.equal(virtual.getViewport().findIndex((line) => line.includes("▷")), virtual.getCursorPosition().y);
+  state.display.activeCompact = false;
+
+  writes.length = 0;
+  state.turn.active = false;
   tui.requestRender();
   await settle(virtual);
   assert.ok(!writes.some((w) => w.includes("\x1b[?25l")), "idle frames never hide the caret");

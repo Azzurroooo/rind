@@ -46,6 +46,8 @@ class CompactionService:
         context_stats: dict[str, Any] | None = None,
         cancellation_token: CancellationToken | None = None,
     ) -> dict[str, Any]:
+        if cancellation_token and cancellation_token.is_cancelled:
+            raise asyncio.CancelledError(cancellation_token.reason)
         created_at = self._now()
         raw_messages = await self._load_raw_messages(session, context_messages)
         tool_records = await self._load_tool_records(session)
@@ -93,6 +95,8 @@ class CompactionService:
 
         if self.plan_snapshot_provider is not None:
             self._append_active_plan_snapshot(record, session.session_base_path)
+        if cancellation_token and cancellation_token.is_cancelled:
+            raise asyncio.CancelledError(cancellation_token.reason)
         try:
             return await session.persist_compaction(record)
         except Exception as exc:

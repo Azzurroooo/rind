@@ -348,7 +348,7 @@ export function createCliInputActions({
       output.redraw();
       return;
     }
-    if (session.mode === "prompt" && state.turn.active && !key.ctrl && !key.alt && !key.shift && key.name === "tab") {
+    if (session.mode === "prompt" && (state.turn.active || state.display.activeCompact) && !key.ctrl && !key.alt && !key.shift && key.name === "tab") {
       queueTtyInput(session);
       return;
     }
@@ -439,7 +439,7 @@ export function createCliInputActions({
     const command = session.menuState?.selectedCommand();
     const value = command ? `/${command.name}` : session.editor.input();
     if (session.mode === "prompt") recordPromptHistory(session.editor, value);
-    completeTtyInput(session, value, session.mode === "prompt" && !state.turn.active, session.mode === "line" ? "\n" : "");
+    completeTtyInput(session, value, session.mode === "prompt" && !state.turn.active && !state.display.activeCompact, session.mode === "line" ? "\n" : "");
   }
 
   function queueTtyInput(session) {
@@ -720,7 +720,7 @@ export function createCliInputActions({
     if (!value.trim()) {
       return;
     }
-    if (!state.turn.active && !value.startsWith("/")) {
+    if (!state.turn.active && !state.display.activeCompact && !value.startsWith("/")) {
       output.writeUserInput(value, "send");
     }
     void getCommandController().handle(value)

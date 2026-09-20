@@ -500,12 +500,16 @@ class ExecutionCoordinator:
         cancellation_token=None,
         resume: bool = False,
         continuation: bool = False,
+        compact: bool = False,
     ) -> AsyncIterator[dict[str, Any]]:
         clean = validate_session_id(session_id)
         await self.start(clean)
         execution = self._active[clean]
+        if compact and (execution.queued_turn_starts or execution.container.runtime.turn_active):
+            raise RuntimeError("Cannot compact context while a turn is active.")
         execution.queued_turn_starts += 1
         terminal_type = ""
+        business_started = not compact
         try:
             async with execution.turn_slot:
                 cancel_source = CancellationTokenSource(parent_token=cancellation_token)
@@ -521,8 +525,12 @@ class ExecutionCoordinator:
                     }
                     if resume:
                         run_kwargs["resume"] = True
+                    if compact:
+                        run_kwargs["compact"] = "manual"
                     async for event in execution.container.runtime.run_turn(**run_kwargs):
                         event_data = event.to_dict()
+                        if event_data.get("type") == "queued_input_delivered":
+                            business_started = True
                         if event_data.get("type") in {"turn_completed", "turn_failed", "turn_cancelled"}:
                             terminal_type = str(event_data["type"])
                         self.update_live_event(event_data)
@@ -539,8 +547,21 @@ class ExecutionCoordinator:
             execution.queued_turn_starts = max(0, execution.queued_turn_starts - 1)
             if not continuation:
                 await self._release_if_idle(clean, execution)
-            if not continuation and terminal_type == "turn_completed":
+            if not continuation and business_started and terminal_type == "turn_completed":
                 await self.start_goal_continuation(clean)
+
+    async def compact_context(self, session_id: str) -> dict[str, Any]:
+        record = None
+        failure = None
+        async for event in self.run_turn(session_id, query=None, compact=True):
+            await self._emit_to_event_sinks(event)
+            if event["type"] == "context_compacted" and event["record"].get("reason", "manual") == "manual":
+                record = event["record"]
+            elif event["type"] in {"turn_failed", "turn_cancelled"}:
+                failure = event.get("error") or event.get("reason") or "Compaction cancelled."
+        if record is None:
+            raise RuntimeError(failure or "Compaction did not complete.")
+        return record
 
     def interrupt(self, session_id: str, reason: str = "User interrupted") -> bool:
         clean = validate_session_id(session_id)
