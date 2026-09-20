@@ -186,3 +186,11 @@ def _string(data: dict[str, Any], key: str) -> str:
     if value is None:
         return ""
     return str(value).strip()
+
+
+def workspace_defaults(workspace_root: str) -> tuple[str, str, str, str]:
+    try:
+        settings = load_settings(workspace_root)
+    except (OSError, ValueError):
+        return DEFAULT_MODEL, "", "https://api.openai.com/v1", "openai-compatible"
+    return settings.model, settings.reasoning_effort, settings.base_url, settings.provider

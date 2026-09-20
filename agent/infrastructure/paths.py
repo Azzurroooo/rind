@@ -30,3 +30,10 @@ def validate_session_id(session_id: str) -> str:
 def resolve_session_base(session_root: str | Path, session_id: str) -> Path:
     root = Path(session_root).expanduser().resolve()
     return root / validate_session_id(session_id)
+
+
+def validate_workspace_root(value: str) -> str:
+    root = Path(value).expanduser().resolve()
+    if not root.is_dir():
+        raise ValueError(f"Workspace directory does not exist: {root}")
+    return os.path.normcase(str(root))

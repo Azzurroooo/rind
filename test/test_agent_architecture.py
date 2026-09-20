@@ -96,7 +96,7 @@ def test_runtime_dependencies_type_is_not_reintroduced() -> None:
 
 
 def test_runtime_entrypoints_use_the_shared_composition_root() -> None:
-    entrypoints = (AGENT_ROOT / "runtime" / "server" / "worker.py",)
+    entrypoints = (AGENT_ROOT / "runtime" / "server" / "execution.py",)
     missing: list[str] = []
     for path in entrypoints:
         tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))

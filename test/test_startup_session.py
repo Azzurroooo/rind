@@ -15,7 +15,7 @@ import pytest
 from agent.domain.errors import ProviderError
 from agent.domain.models import ModelCompletion, ModelStreamEvent
 from agent.infrastructure.persistence import JsonlSessionStore
-from agent.runtime.server.stdio import WorkerStdioRuntimeServer
+from agent.runtime.server.dispatcher import RuntimeDispatcher
 from agent.runtime.server.worker import RuntimeWorker
 
 
@@ -32,7 +32,7 @@ async def test_startup_queries_and_model_changes_do_not_create_files(worker, tmp
     async def send(payload):
         messages.append(payload)
 
-    server = WorkerStdioRuntimeServer(worker, writer=SimpleNamespace(send=send))
+    server = RuntimeDispatcher(worker, writer=SimpleNamespace(send=send))
     monkeypatch.setattr(worker.provider_service, "create_chat_client", AsyncMock(
         return_value=SimpleNamespace(close=AsyncMock()),
     ))
@@ -181,7 +181,7 @@ async def test_empty_compact_is_rejected_before_model_call(worker, tmp_path, mon
     client = SimpleNamespace(create=AsyncMock(return_value=ModelCompletion(content="unexpected")), close=AsyncMock())
     monkeypatch.setattr(worker.provider_service, "create_chat_client", AsyncMock(return_value=client))
     writer = SimpleNamespace(send=AsyncMock())
-    server = WorkerStdioRuntimeServer(worker, writer=writer)
+    server = RuntimeDispatcher(worker, writer=writer)
     try:
         await server.dispatch({"request_id": "init", "method": "initialize", "params": {}})
         await server.dispatch({"request_id": "compact", "method": method, "params": {

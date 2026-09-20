@@ -209,7 +209,7 @@ async def test_input_submitted_at_compact_completion_is_not_cleared():
 async def test_worker_compact_cancel_uses_active_token_and_releases_execution(tmp_path, monkeypatch, method):
     from agent.application.context.compaction import CompactionService
     from agent.runtime.server.worker import RuntimeWorker
-    from agent.runtime.server.stdio import WorkerStdioRuntimeServer
+    from agent.runtime.server.dispatcher import RuntimeDispatcher
 
     monkeypatch.setenv("RIND_HOME", str(tmp_path / "home"))
     worker = RuntimeWorker(workspace_root=str(tmp_path), session_dir=str(tmp_path / "sessions"))
@@ -235,7 +235,7 @@ async def test_worker_compact_cancel_uses_active_token_and_releases_execution(tm
     async def send(message):
         messages.append(message)
 
-    server = WorkerStdioRuntimeServer(worker, writer=SimpleNamespace(send=send))
+    server = RuntimeDispatcher(worker, writer=SimpleNamespace(send=send))
     try:
         await server.dispatch({"request_id": "init", "method": "initialize", "params": {}})
         task = asyncio.create_task(server.dispatch({"request_id": "compact", "method": method, "params": {"session_id": session_id, "input": "/compact"}}))

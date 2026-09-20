@@ -1,3 +1,4 @@
+from agent.runtime.server.stdio import JsonlWriter, StdioRuntimeServer
 import asyncio
 import io
 import json
@@ -10,7 +11,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from agent.runtime.server.app_server import async_main
-from agent.runtime.server.stdio import WorkerStdioRuntimeServer
+from agent.runtime.server.dispatcher import RuntimeDispatcher
 
 
 class _Event:
@@ -108,7 +109,7 @@ def test_invalid_json_and_invalid_request_return_structured_errors(monkeypatch, 
         ),
     )
 
-    assert asyncio.run(WorkerStdioRuntimeServer(_Worker()).run()) == 0
+    assert asyncio.run(StdioRuntimeServer(_Worker()).run()) == 0
 
     messages = _messages(capsys)
     assert messages == [
@@ -137,8 +138,8 @@ def test_eof_cancels_an_active_turn_and_exits(monkeypatch, capsys):
             '{"kind":"request","request_id":"turn-1","method":"session/prompt","params":{"session_id":"session-1","input":"hello"}}\n'
         )
         monkeypatch.setattr(sys, "stdin", standard_input)
-        server = WorkerStdioRuntimeServer(worker)
-        server._initialized = True
+        server = StdioRuntimeServer(worker)
+        await server._dispatcher.dispatch({"kind": "request", "request_id": "init", "method": "initialize", "params": {}})
         server_task = asyncio.create_task(server.run())
         await worker.execution.started.wait()
         standard_input.close()
@@ -147,7 +148,7 @@ def test_eof_cancels_an_active_turn_and_exits(monkeypatch, capsys):
     assert asyncio.run(run()) == 0
 
     messages = _messages(capsys)
-    assert messages[0]["method"] == "session/update"
+    assert any(message.get("method") == "session/update" for message in messages)
     responses = [message for message in messages if message.get("kind") == "response"]
     assert responses[-1]["request_id"] == "turn-1"
     assert responses[-1]["result"]["ok"] is True
@@ -156,8 +157,8 @@ def test_eof_cancels_an_active_turn_and_exits(monkeypatch, capsys):
 def test_shutdown_and_repeated_shutdown_each_receive_one_response(capsys):
     async def run():
         worker = _Worker()
-        server = WorkerStdioRuntimeServer(worker)
-        serve_task = asyncio.create_task(server._serve())
+        server = RuntimeDispatcher(worker, writer=JsonlWriter())
+        serve_task = asyncio.create_task(server.serve())
         server._initialized = True
         await server._requests.put(
             {"request_id": "turn-1", "method": "session/prompt", "params": {"session_id": "session-1", "input": "hello"}}
@@ -181,7 +182,7 @@ def test_shutdown_and_repeated_shutdown_each_receive_one_response(capsys):
 def test_repeated_interrupt_returns_recoverable_error(capsys):
     async def run():
         worker = _Worker()
-        server = WorkerStdioRuntimeServer(worker)
+        server = RuntimeDispatcher(worker, writer=JsonlWriter())
         server._initialized = True
         await server._dispatch({"request_id": "interrupt-1", "method": "session/cancel", "params": {"session_id": "session-1"}})
         await server._dispatch({"request_id": "interrupt-2", "method": "session/cancel", "params": {"session_id": "session-1"}})
@@ -198,7 +199,7 @@ def test_repeated_interrupt_returns_recoverable_error(capsys):
 
 def test_app_server_rejects_a_missing_workspace(capsys, tmp_path):
     exit_code = asyncio.run(
-        async_main(["--stdio", "--cwd", str(tmp_path / "missing")], server_class=WorkerStdioRuntimeServer)
+        async_main(["--stdio", "--cwd", str(tmp_path / "missing")], server_class=StdioRuntimeServer)
     )
 
     assert exit_code == 1

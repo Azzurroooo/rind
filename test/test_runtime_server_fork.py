@@ -13,8 +13,8 @@ if str(PROJECT_ROOT) not in sys.path:
 from agent.infrastructure.credentials import CredentialStore
 from agent.infrastructure.llm import ProviderServiceImpl
 from agent.infrastructure.persistence import JsonlSessionStore
-from agent.runtime.server.stdio import WorkerStdioRuntimeServer
-from agent.runtime.server.worker import SessionRepository
+from agent.runtime.server.dispatcher import RuntimeDispatcher
+from agent.runtime.server.session_service import SessionService
 
 
 class _FakeExecution:
@@ -34,7 +34,7 @@ class _FakeWorker:
         self.session_id = "20260907_alpha"
         self.session_dir = str(tmp_path / "sessions")
         self.execution = _FakeExecution(active)
-        self.repository = SessionRepository(
+        self.repository = SessionService(
             session_dir=self.session_dir,
             provider_service=ProviderServiceImpl(CredentialStore(tmp_path / "auth.json")),
         )
@@ -51,8 +51,8 @@ class _CaptureWriter:
         self.payloads.append(payload)
 
 
-def _make_server(worker: _FakeWorker) -> WorkerStdioRuntimeServer:
-    server = WorkerStdioRuntimeServer(worker, writer=_CaptureWriter())
+def _make_server(worker: _FakeWorker) -> RuntimeDispatcher:
+    server = RuntimeDispatcher(worker, writer=_CaptureWriter())
     server._initialized = True
     return server
 
@@ -61,7 +61,7 @@ def _request(method: str, params: dict) -> dict:
     return {"kind": "request", "request_id": f"{method}-1", "method": method, "params": params}
 
 
-def _last(server: WorkerStdioRuntimeServer) -> dict:
+def _last(server: RuntimeDispatcher) -> dict:
     return server._writer._writer.payloads[-1]
 
 

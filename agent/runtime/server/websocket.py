@@ -20,7 +20,7 @@ from websockets.exceptions import ConnectionClosed
 from websockets.http11 import Request, Response
 
 from agent.runtime.server.protocol import error_message, validate_request
-from agent.runtime.server.stdio import WorkerStdioRuntimeServer
+from agent.runtime.server.dispatcher import RuntimeDispatcher
 
 AUTH_CLOSE_CODE = 4401
 
@@ -120,7 +120,7 @@ class WebRuntimeServer:
         if not await self._authorize(websocket):
             return
         writer = WebSocketWriter(websocket)
-        server = WorkerStdioRuntimeServer(
+        server = RuntimeDispatcher(
             self._worker,
             debug=self._debug,
             background_list=self._background_list,

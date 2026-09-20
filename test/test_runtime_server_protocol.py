@@ -19,13 +19,8 @@ from helpers.fake_worker import FakeContainer, FakeRuntime, FakeStore, FakeWorke
 from agent.version import __version__
 
 from agent.runtime.core import InputQueueError
-from agent.runtime.server.stdio import (
-    JsonlWriter,
-    WorkerStdioRuntimeServer,
-    _schedule_ingest,
-    configure_stdio_server_signals,
-    configure_utf8_stdio,
-)
+from agent.runtime.server.stdio import JsonlWriter, _schedule_ingest, configure_stdio_server_signals, configure_utf8_stdio
+from agent.runtime.server.dispatcher import RuntimeDispatcher
 from agent.runtime.server.commands import SlashCommandInfo, SlashCommandRouter
 from agent.runtime.server.protocol import (
     CAPABILITIES,
@@ -265,7 +260,7 @@ def test_serve_answers_slash_commands_while_a_turn_occupies_the_runtime():
         worker = FakeWorker()
         worker.execution.blocking = True
         server, payloads = make_server(worker)
-        serve = asyncio.create_task(server._serve())
+        serve = asyncio.create_task(server.serve())
         server._requests.put_nowait(
             {"kind": "request", "request_id": 41, "method": "session/prompt", "params": {"session_id": "s1", "input": "hello"}}
         )
@@ -670,7 +665,7 @@ def test_shutdown_cancels_inflight_dispatch_and_exits_promptly():
         worker = FakeWorker()
         worker.execution.blocking = True
         server, payloads = make_server(worker)
-        serve = asyncio.create_task(server._serve())
+        serve = asyncio.create_task(server.serve())
         server._requests.put_nowait(
             {"kind": "request", "request_id": 51, "method": "session/prompt", "params": {"session_id": "s1", "input": "hello"}}
         )
