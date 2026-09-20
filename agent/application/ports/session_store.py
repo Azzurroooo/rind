@@ -54,7 +54,7 @@ class SessionStore(Protocol):
         """Switch this store instance to an existing session."""
         ...
 
-    async def create_session(self) -> dict[str, Any]:
+    async def create_session(self, *, session_id: str | None = None) -> dict[str, Any]:
         """Create and bind a new session."""
         ...
 

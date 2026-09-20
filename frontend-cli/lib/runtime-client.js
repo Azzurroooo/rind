@@ -66,6 +66,7 @@ export function createRuntimeClient({
 
   let nextId = 1;
   let stdoutBuffer = "";
+  let stderrBuffer = "";
   let closing = false;
   let killTimer = null;
   let exitHandled = false;
@@ -80,6 +81,7 @@ export function createRuntimeClient({
       throw new Error("Runtime is shutting down.");
     }
     stdoutBuffer = "";
+    stderrBuffer = "";
     exitHandled = false;
     child = spawn(launch.command, launch.args, {
       cwd,
@@ -100,7 +102,11 @@ export function createRuntimeClient({
         }
       }
     });
-    child.stderr.on("data", (chunk) => onStderr(chunk));
+    child.stderr.setEncoding("utf8");
+    child.stderr.on("data", (chunk) => {
+      stderrBuffer = (stderrBuffer + chunk).slice(-4096);
+      onStderr(chunk);
+    });
     child.once("error", (error) => {
       handleExit(null, null, error);
     });
@@ -116,7 +122,8 @@ export function createRuntimeClient({
     }
     exitHandled = true;
     clearKillTimer();
-    const error = cause || new Error(`Runtime exited with ${signal || code}`);
+    const startupError = stderrBuffer.match(/^(?:Startup|Session|Runtime) error: (.+)$/m)?.[1]?.trim();
+    const error = cause || new Error(startupError || `Runtime exited with ${signal || code}`);
     for (const entry of pending.values()) {
       clearRequestTimer(entry);
       entry.reject(error);

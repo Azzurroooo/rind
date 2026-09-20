@@ -63,6 +63,7 @@ def build_agent_container(
     settings: AppSettings | None = None,
     session_dir: str | None = None,
     session_id: str | None = None,
+    session_store: SessionStore | None = None,
     resume_latest: bool = False,
     enable_goal: bool = False,
     enable_user_question: bool = True,
@@ -105,7 +106,7 @@ def build_agent_container(
     shell_tools = shell_tools or ShellTools(tool_output_store)
     web_sessions = web_sessions or WebSessions()
     model = settings.model
-    session_store: SessionStore = JsonlSessionStore(
+    session_store = session_store if session_store is not None else JsonlSessionStore(
         session_dir=session_dir,
         session_id=session_id,
         resume_latest=resume_latest,

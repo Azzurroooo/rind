@@ -500,7 +500,7 @@ class WorkerStdioRuntimeServer:
             self._subscribed.add(session_id)
         result = {
             "session_id": info["session_id"],
-            "draft": False,
+            "draft": bool(info.get("draft")),
             "model": info.get("model"),
             "provider": info.get("provider"),
             "reasoning_effort": info.get("reasoning_effort"),

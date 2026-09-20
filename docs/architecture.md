@@ -74,6 +74,8 @@ sequenceDiagram
 
 Control requests duplicate no business logic: the Server calls the Runtime's `set_model`, `switch_session`, `compact_context`, goal APIs, and input queues; command handlers use the same runtime/session instances through `SlashCommandContext`.
 
+The default startup session reserves a stable ID in memory. Status, replay, login, and model selection do not create its session directory; the first user task or explicit goal writes it under the same ID. A draft cannot be resumed by another worker before that write. Explicit `session/new` requests still persist immediately, preserving gateway routing across worker restarts. The repository retains only the startup draft store, and execution receives that store through the composition root.
+
 ## Entry points
 
 ```text

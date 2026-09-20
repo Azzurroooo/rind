@@ -55,14 +55,28 @@ class _ActiveExecution:
 
 
 class SessionRepository:
-    """Read and write persisted sessions by explicit session ID."""
+    """Access sessions by ID, retaining only the unpersisted startup draft."""
 
     def __init__(self, *, session_dir: str | None, provider_service: ProviderServiceImpl):
         self.session_dir = session_dir
         self.provider_service = provider_service
+        self._draft_store: JsonlSessionStore | None = None
+
+    def draft_store(self, session_id: str) -> JsonlSessionStore | None:
+        self.release_persisted_draft()
+        if self._draft_store is not None and self._draft_store.session_id == session_id:
+            return self._draft_store
+        return None
+
+    def release_persisted_draft(self) -> None:
+        if self._draft_store is not None and self._draft_store.is_persisted:
+            self._draft_store = None
 
     async def metadata(self, session_id: str) -> dict[str, Any]:
         clean = validate_session_id(session_id)
+        draft = self.draft_store(clean)
+        if draft is not None:
+            return await draft.get_metadata()
         return await asyncio.to_thread(JsonlSessionStore.load_session_metadata, clean, self.session_dir)
 
     async def list(self, limit: int = 20, workspace_root: str | None = None) -> list[dict[str, Any]]:
@@ -75,7 +89,10 @@ class SessionRepository:
 
     async def delete(self, session_id: str) -> dict[str, Any]:
         clean = validate_session_id(session_id)
-        meta = await asyncio.to_thread(JsonlSessionStore.load_session_metadata, clean, self.session_dir)
+        meta = await self.metadata(clean)
+        if self.draft_store(clean) is not None:
+            self._draft_store = None
+            return {"session_id": clean, "workspace_root": str(meta.get("workspace_root") or "")}
 
         def _remove() -> None:
             root = JsonlSessionStore.resolve_session_root(self.session_dir)
@@ -91,6 +108,8 @@ class SessionRepository:
 
     async def fork(self, session_id: str, before_message_id: str | None = None) -> dict[str, Any]:
         clean = validate_session_id(session_id)
+        if self.draft_store(clean) is not None:
+            raise ValueError("Nothing to fork: the session has no user messages.")
         meta = await asyncio.to_thread(JsonlSessionStore.load_session_metadata, clean, self.session_dir)
         if meta.get("session_type") == "delegated_task":
             raise ValueError("Delegated task sessions cannot be forked.")
@@ -106,6 +125,7 @@ class SessionRepository:
         session_type: str | None = None,
         parent_session_id: str | None = None,
         selection: ModelSelection | None = None,
+        defer_persistence: bool = False,
     ) -> dict[str, Any]:
         root = _normalize_workspace_root(workspace_root)
         if selection is None:
@@ -135,10 +155,14 @@ class SessionRepository:
             reasoning_effort=reasoning_effort,
             provider=provider,
         )
-        await store.initialize()
+        if defer_persistence:
+            await store.create_session(session_id=store.session_id)
+            self._draft_store = store
+        else:
+            await store.initialize()
         return {
             "session_id": store.session_id,
-            "draft": False,
+            "draft": not store.is_persisted,
             "model": store.model,
             "provider": store.provider,
             "reasoning_effort": store.reasoning_effort,
@@ -161,7 +185,7 @@ class SessionRepository:
             if not sessions:
                 raise ValueError("No existing session found to resume.")
             return await self.info(str(sessions[0]["id"]))
-        return await self.create(workspace_root, selection=selection)
+        return await self.create(workspace_root, selection=selection, defer_persistence=True)
 
     async def info(self, session_id: str) -> dict[str, Any]:
         meta = await self.metadata(session_id)
@@ -169,7 +193,7 @@ class SessionRepository:
         default_model, default_effort, _, default_provider = await asyncio.to_thread(_workspace_defaults, workspace_root)
         return {
             "session_id": str(meta.get("session_id") or session_id),
-            "draft": False,
+            "draft": self.draft_store(session_id) is not None,
             "model": str(meta.get("model") or default_model),
             "provider": str(meta.get("provider") or default_provider),
             "reasoning_effort": str(meta.get("reasoning_effort") or default_effort or ""),
@@ -246,6 +270,11 @@ class SessionRepository:
     ):
         clean = validate_session_id(session_id)
         root = _normalize_workspace_root(workspace_root or info["workspace_root"])
+        draft = self.draft_store(clean)
+        if draft is not None:
+            if root != draft.workspace_root:
+                raise ValueError("Session workspace_root is immutable and does not match the requested agent context.")
+            return draft
         store = JsonlSessionStore(
             session_dir=self.session_dir,
             session_id=clean,
@@ -692,6 +721,7 @@ class ExecutionCoordinator:
                     chat_client=chat_client,
                     session_dir=self.session_dir,
                     session_id=clean,
+                    session_store=self._repository.draft_store(clean),
                     enable_goal=self._enable_goal,
                     enable_user_question=(
                         self._enable_user_question if enable_user_question is None else enable_user_question
@@ -831,6 +861,7 @@ class ExecutionCoordinator:
                 self._live.pop(session_id, None)
                 released = execution
         if released is not None:
+            self._repository.release_persisted_draft()
             self._shell_tools.pool.close(session_id)
             await _close_container(released.container)
 
@@ -845,6 +876,7 @@ class ExecutionCoordinator:
                 self._live.pop(clean, None)
                 released = execution
         if released is not None:
+            self._repository.release_persisted_draft()
             self._shell_tools.pool.close(session_id)
             await _close_container(released.container)
 
@@ -866,6 +898,7 @@ class ExecutionCoordinator:
             self._live.clear()
         if executions:
             await asyncio.gather(*(_close_container(item.container) for item in executions))
+        self._repository.release_persisted_draft()
         self._event_sinks.clear()
 
 
@@ -913,19 +946,21 @@ class RuntimeWorker:
             provider_service=self.provider_service,
         )
         self._initialized = False
+        self._initialize_lock = asyncio.Lock()
         self._tool_output_store = tool_output_store
 
     async def initialize(self) -> dict[str, Any]:
-        if not self._initialized:
-            await self._tool_output_store.cleanup()
-            info = await self.repository.initial(
-                self.workspace_root,
-                self.session_id,
-                self._resume_latest,
-                self.provider_service.default_selection(self.workspace_root),
-            )
-            self.session_id = str(info["session_id"])
-        self._initialized = True
+        async with self._initialize_lock:
+            if not self._initialized:
+                await self._tool_output_store.cleanup()
+                info = await self.repository.initial(
+                    self.workspace_root,
+                    self.session_id,
+                    self._resume_latest,
+                    self.provider_service.default_selection(self.workspace_root),
+                )
+                self.session_id = str(info["session_id"])
+                self._initialized = True
         info = await self.repository.info(self.session_id)
         info["base_url"] = _workspace_defaults(info["workspace_root"])[2]
         info["live_turn"] = self.execution.live_turn(self.session_id)

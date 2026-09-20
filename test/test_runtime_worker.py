@@ -477,9 +477,12 @@ def test_worker_team_session_binding_matches_execution_context():
             try:
                 info = await worker.initialize()
                 session_id = str(info["session_id"])
+                assert not (session_dir / session_id).exists()
+                container = await worker.start_execution(session_id)
+                assert not (session_dir / session_id).exists()
+                await container.session_store.persist_message("user", "hello team")
                 meta = json.loads((session_dir / session_id / "meta.json").read_text(encoding="utf-8"))
                 messages = (session_dir / session_id / "messages.jsonl").read_text(encoding="utf-8")
-                await worker.start_execution(session_id)
                 return meta, messages
             finally:
                 await worker.close()

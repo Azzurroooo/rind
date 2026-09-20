@@ -133,6 +133,14 @@ class JsonlSessionStore(SessionStore):
         return self._session_id
 
     @property
+    def is_persisted(self) -> bool:
+        return self._msg_repo is not None
+
+    async def get_metadata(self) -> dict[str, Any]:
+        async with self._write_lock:
+            return copy.deepcopy(self._session_meta or {})
+
+    @property
     def model(self) -> str | None:
         return self._model
 
@@ -254,15 +262,9 @@ class JsonlSessionStore(SessionStore):
             if current != expected:
                 raise ValueError(f"Session {key} is immutable and does not match the requested agent context.")
 
-    def _setup_paths(self, create_directories: bool = False) -> None:
+    def _setup_paths(self) -> None:
         self._session_root = self.resolve_session_root(self._session_dir)
         self._index_path = self.index_path_for(self._session_dir)
-
-        if create_directories:
-            os.makedirs(self._session_root, exist_ok=True)
-        if create_directories and self._index_path:
-            os.makedirs(os.path.dirname(self._index_path), exist_ok=True)
-
         self._index_repo = SessionIndexRepository(self._files, self._index_path)
 
     def _get_session_paths(self, session_id: str, session_root: str | None = None) -> dict:
@@ -280,26 +282,29 @@ class JsonlSessionStore(SessionStore):
         self._tool_repo = ToolCallRepository(self._files, self._session_paths["tool_calls"], looks_like_tool_payload)
         self._compaction_repo = CompactionRepository(self._files, self._session_paths["compactions"])
 
-    def _create_session(self, session_id: str | None = None) -> None:
-        if not session_id:
-            session_id = new_session_id()
+    def _create_session(self, session_id: str) -> None:
+        self._bind_draft_sync(session_id)
+        self._create_session_files_sync()
 
-        self._session_id = session_id
-        self._session_paths = self._get_session_paths(session_id)
-
+    def _create_session_files_sync(self) -> None:
         os.makedirs(self._session_paths["base"], exist_ok=True)
         open(self._session_paths["messages"], "a", encoding="utf-8").close()
         open(self._session_paths["tool_calls"], "a", encoding="utf-8").close()
-
+        self._files.write_json(self._session_paths["meta"], self._session_meta)
         self._setup_repos()
-        self._invalidate_projection_cache()
 
-        now = self.now_iso()
+    def _bind_draft_sync(self, session_id: str | None = None) -> None:
+        self._session_id = session_id
+        self._session_paths = self._get_session_paths(session_id) if session_id else {}
         self._has_user_message = False
-
+        self._last_preview = ""
+        self._msg_repo = None
+        self._tool_repo = None
+        self._compaction_repo = None
+        self._invalidate_projection_cache()
         self._session_meta = new_session_meta(
             session_id=session_id,
-            now=now,
+            now=self.now_iso(),
             model=self.model,
             cwd=self._resolve_workspace_root(),
             workspace_root=self._resolve_workspace_root(),
@@ -309,19 +314,7 @@ class JsonlSessionStore(SessionStore):
             parent_session_id=self._parent_session_id,
             reasoning_effort=self._reasoning_effort,
             provider=self._provider,
-        )
-        self._files.write_json(self._session_paths["meta"], self._session_meta)
-
-    def _bind_draft_sync(self) -> None:
-        self._session_id = None
-        self._session_paths = {}
-        self._session_meta = None
-        self._has_user_message = False
-        self._last_preview = ""
-        self._msg_repo = None
-        self._tool_repo = None
-        self._compaction_repo = None
-        self._invalidate_projection_cache()
+        ) if session_id else None
 
     def _load_session(self, session_id: str) -> list[dict[str, Any]]:
         self._session_id = session_id
@@ -440,7 +433,7 @@ class JsonlSessionStore(SessionStore):
             "workspace_root": meta.get("workspace_root"),
             "session_type": meta.get("session_type"),
             "parent_session_id": meta.get("parent_session_id"),
-            "draft": self._session_id is None,
+            "draft": not self.is_persisted,
         }
 
     def _find_latest_session_id(self) -> str | None:
@@ -523,10 +516,11 @@ class JsonlSessionStore(SessionStore):
         self._index_repo.update_index(entry)
 
     def _persist_meta_sync(self, updated_at: str | None = None) -> None:
-        if not self._session_meta or not self._session_paths:
-            self._update_index()
+        if not self._session_meta:
             return
         self._session_meta["updated_at"] = updated_at or self.now_iso()
+        if not self.is_persisted:
+            return
         self._files.write_json(self._session_paths["meta"], self._session_meta)
         self._update_index()
 
@@ -589,6 +583,9 @@ class JsonlSessionStore(SessionStore):
     def _ensure_session_sync(self) -> list[dict[str, Any]]:
         self._setup_paths()
 
+        if self._session_meta is not None and not self.is_persisted:
+            return []
+
         if self._session_id is not None:
             session_id = validate_session_id(self._session_id)
             session_paths = self._get_session_paths(session_id)
@@ -617,10 +614,11 @@ class JsonlSessionStore(SessionStore):
             self._persist_meta_sync()
 
     def _materialize_draft_sync(self) -> None:
-        if self._session_id is not None:
+        if self.is_persisted:
             return
-        self._setup_paths(create_directories=True)
-        self._create_session(None)
+        if self._session_id is None:
+            self._bind_draft_sync(new_session_id())
+        self._create_session_files_sync()
         self._initialize_history_sync([])
 
     async def initialize(self, *, persist_system_prompt: bool = True) -> None:
@@ -657,11 +655,14 @@ class JsonlSessionStore(SessionStore):
             await asyncio.to_thread(self._initialize_history_sync, messages)
             return await asyncio.to_thread(self._session_info_sync)
 
-    async def create_session(self) -> dict[str, Any]:
+    async def create_session(self, *, session_id: str | None = None) -> dict[str, Any]:
         """Bind a new in-memory draft without creating persistent session files."""
+        clean = validate_session_id(session_id) if session_id is not None else None
         async with self._write_lock:
             await asyncio.to_thread(self._setup_paths)
-            await asyncio.to_thread(self._bind_draft_sync)
+            if clean is not None and os.path.exists(self._get_session_paths(clean)["base"]):
+                raise ValueError(f"Session already exists: {clean}")
+            await asyncio.to_thread(self._bind_draft_sync, clean)
             return await asyncio.to_thread(self._session_info_sync)
 
     async def create_team_project(self, *, project_id: str | None = None) -> dict[str, Any]:
@@ -755,12 +756,10 @@ class JsonlSessionStore(SessionStore):
                 is_context_record = isinstance(meta, dict) and meta.get("kind") in (
                     {"skill_snapshot", "skill_catalog"} | INTERNAL_MESSAGE_KINDS
                 )
-                if self._session_id is None:
+                if not self.is_persisted:
                     if role != "user" or not str(content or "").strip() or is_context_record:
                         return
                     self._materialize_draft_sync()
-                if not self._msg_repo:
-                    return
                 self._msg_repo.persist_message(
                     self.now_iso(),
                     role,
@@ -1009,6 +1008,7 @@ class JsonlSessionStore(SessionStore):
             def _persist():
                 if not self._session_meta:
                     raise RuntimeError("Send a message before setting a goal for this draft session.")
+                self._materialize_draft_sync()
                 goal = {"objective": normalized, "status": "active"}
                 self._session_meta["goal"] = goal
                 self._persist_meta_sync()
