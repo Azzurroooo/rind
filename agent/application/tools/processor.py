@@ -274,6 +274,7 @@ class ToolCallProcessor:
                     ts_start=ts_start,
                     ts_end=ts_end,
                     normalized_result=normalized_result,
+                    result_content=outcome.result if call.name in {"edit_file", "write_file"} else normalized_result.model_content,
                 )
             persist_error = None
         except asyncio.CancelledError:
@@ -525,6 +526,7 @@ class ToolCallProcessor:
         ts_start: str,
         ts_end: str,
         normalized_result: NormalizedToolResult,
+        result_content: str,
     ) -> None:
         await session.persist_tool_call(
             call.call_id,
@@ -533,7 +535,7 @@ class ToolCallProcessor:
             call.raw_args,
             ts_start,
             ts_end,
-            normalized_result.model_content,
+            result_content,
             model_content=normalized_result.model_content,
             model_content_format=normalized_result.model_content_format,
             model_content_policy=normalized_result.model_content_policy,

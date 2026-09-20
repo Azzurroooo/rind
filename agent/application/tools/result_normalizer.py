@@ -69,10 +69,11 @@ class ToolResultNormalizer:
         identity = self._projection_identity(payload, tool_name, status, error_type)
         existing_path, existing_truncated = self._existing_output_reference(payload)
         is_read = identity[1] == "read_file"
+        is_mutation = identity[0] and identity[1] in {"edit_file", "write_file"}
         preview_required = total_bytes > self.max_preview_bytes or total_lines > self.max_preview_lines
         needs_preview = preview_required or existing_truncated
         output_path = existing_path
-        if needs_preview and not is_read and not output_path and output_store is not None and session_id and call_id:
+        if needs_preview and not is_read and not is_mutation and not output_path and output_store is not None and session_id and call_id:
             output_path = await output_store.write(session_id, call_id, rendered)
         read_payload = self._read_payload(payload) if is_read else None
         source_metadata = dict(read_payload["meta"]) if read_payload is not None else None
@@ -91,6 +92,8 @@ class ToolResultNormalizer:
             model_content = self._project_read_for_model(read_payload)
             if json.loads(model_content).get("ok") is False:
                 terminal_content = model_content
+        elif is_mutation and isinstance(payload, dict):
+            model_content = self._project_mutation_for_model(payload)
         elif needs_preview:
             model_content = self._project_for_model(
                 rendered, total_bytes, total_lines, identity, output_path,
@@ -201,6 +204,20 @@ class ToolResultNormalizer:
                 "meta": {"path": meta.get("path"), "offset": offset},
             }, ensure_ascii=False)
         return serialize(best_count)
+
+    def _project_mutation_for_model(self, payload: dict) -> str:
+        projected = dict(payload)
+        meta = dict(payload.get("meta") or {})
+        files = []
+        for item in meta.get("files", []):
+            entry = {key: value for key, value in item.items() if key != "diff"}
+            if payload["tool"] == "edit_file" and item.get("diff"):
+                diff = item["diff"]
+                preview = "\n".join(diff.splitlines()[:12])[:1200]
+                entry["diff"] = preview + ("\n... diff preview truncated ..." if preview != diff else "")
+            files.append(entry)
+        projected["meta"] = {**meta, "files": files}
+        return json.dumps(projected, ensure_ascii=False, separators=(",", ": "))
 
     def _bounded_projection(
         self,
