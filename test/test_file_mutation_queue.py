@@ -18,8 +18,8 @@ from agent.domain.events import ToolResultEvent
 from agent.infrastructure.persistence import JsonlSessionStore
 from agent.infrastructure.team import initialize_team_agent, initialize_team_project
 from agent.infrastructure.tools import DefaultToolRegistry
-from agent.infrastructure.tools.builtin.files import build_file_tool_specs, mutations
-from agent.infrastructure.tools.builtin.files.queue import FileMutationQueue
+from agent.infrastructure.tools.files import build_file_tool_specs, mutations
+from agent.infrastructure.tools.files.mutation_queue import FileMutationQueue
 from agent.runtime.server.worker import RuntimeWorker
 
 

@@ -10,7 +10,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from agent.application.context.usage_summary import summarize_usage
+from agent.application.usage_summary import summarize_usage
 
 
 NOW = datetime(2026, 9, 10, 12, 0, 0, tzinfo=timezone.utc)

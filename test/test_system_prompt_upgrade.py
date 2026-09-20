@@ -13,7 +13,7 @@ from agent.domain.events import ToolResultEvent, TurnCompletedEvent
 from agent.domain.models import ModelStreamEvent
 from agent.infrastructure.persistence.jsonl_session_store import JsonlSessionStore
 from agent.infrastructure.persistence.message_projector import project_messages
-from agent.infrastructure.tools.builtin.files import build_file_tool_specs
+from agent.infrastructure.tools.files.specs import build_file_tool_specs
 from agent.infrastructure.tools.registry import DefaultToolRegistry
 from agent.prompts import FILE_TOOL_RULES, build_system_prompt, refresh_builtin_file_rules
 from agent.runtime.core.stream_parser import MessageStreamParser
@@ -71,7 +71,7 @@ def test_unidentified_or_customized_prompt_is_not_replaced(content):
 
 
 def test_new_managed_block_refreshes_without_replacing_surrounding_context():
-    prompt = build_system_prompt("/project")
+    prompt = build_system_prompt("/project", environment="test environment")
     outdated = prompt.replace(FILE_TOOL_RULES, "<rind_file_tool_rules>obsolete built-in contract</rind_file_tool_rules>")
     assert refresh_builtin_file_rules(outdated) == prompt
 
@@ -85,7 +85,7 @@ async def test_reopen_upgrades_projection_without_rewriting_system_log(tmp_path,
     await store.persist_message("user", "Continue")
     path = tmp_path / "sessions" / store.session_id / "messages.jsonl"
     before = path.read_bytes()
-    reopened = JsonlSessionStore(session_dir=root, session_id=store.session_id, system_prompt=build_system_prompt(tmp_path))
+    reopened = JsonlSessionStore(session_dir=root, session_id=store.session_id, system_prompt=build_system_prompt(str(tmp_path), environment="test environment"))
     await reopened.initialize()
     messages = await reopened.get_messages_slice()
     assert FILE_TOOL_RULES in messages[0]["content"]

@@ -1,38 +1,4 @@
-import os
-import platform
-from datetime import date
 from xml.sax.saxutils import escape
-
-from agent.domain.shell import detect_default_shell
-
-
-def _detect_shell_display() -> tuple[str, str]:
-    detection = detect_default_shell()
-    shell_type = {
-        "bash": "Bash",
-        "sh": "POSIX sh",
-        "powershell": "PowerShell",
-        "unavailable": "Unavailable",
-    }.get(detection.backend, detection.backend)
-    return shell_type, detection.executable or "not found"
-
-
-def get_system_info(cwd: str | os.PathLike[str] | None = None):
-    """Collect dynamic system information."""
-    system = platform.system()
-    cwd = os.path.abspath(os.fspath(cwd)) if cwd is not None else os.getcwd()
-    current_date = date.today().isoformat()
-    shell_type, shell_executable = _detect_shell_display()
-
-    return f"""
-<environment_context>
-Operating System: {system}
-Current Date: {current_date}
-Current Working Directory (Project Root): {cwd}
-Shell Type: {shell_type}
-Shell Executable: {shell_executable}
-</environment_context>
-"""
 
 
 def build_rind_init_prompt(scope: str, target_path: str) -> str:
@@ -199,7 +165,7 @@ def refresh_builtin_file_rules(content: str) -> str:
     return content
 
 
-_DEFAULT_SYSTEM_INFO = get_system_info()
+_ENVIRONMENT_MARKER = "__RIND_ENVIRONMENT__"
 _WORKSPACE_ROOT_MARKER = "__RIND_WORKSPACE_ROOT__"
 
 
@@ -207,7 +173,7 @@ _SYSTEM_PROMPT_TEMPLATE = f"""
 You are Rind, an advanced AI software engineer and coding agent.
 You are autonomous, efficient, and capable of solving complex programming tasks using tools.
 
-{_DEFAULT_SYSTEM_INFO}
+{_ENVIRONMENT_MARKER}
 
 <core_capabilities>
 0. **User Clarification**
@@ -316,12 +282,7 @@ You are autonomous, efficient, and capable of solving complex programming tasks 
 </operational_guidelines>
 """
 
-SYSTEM_PROMPT = _SYSTEM_PROMPT_TEMPLATE.replace(_WORKSPACE_ROOT_MARKER, os.getcwd(), 1)
-
-
-def build_system_prompt(cwd: str | os.PathLike[str] | None = None) -> str:
-    if cwd is None:
-        return SYSTEM_PROMPT
-    workspace_root = os.path.abspath(os.fspath(cwd))
-    prompt = _SYSTEM_PROMPT_TEMPLATE.replace(_WORKSPACE_ROOT_MARKER, workspace_root, 1)
-    return prompt.replace(_DEFAULT_SYSTEM_INFO, get_system_info(workspace_root), 1)
+def build_system_prompt(workspace_root: str, *, environment: str) -> str:
+    return _SYSTEM_PROMPT_TEMPLATE.replace(_WORKSPACE_ROOT_MARKER, workspace_root, 1).replace(
+        _ENVIRONMENT_MARKER, environment, 1,
+    )

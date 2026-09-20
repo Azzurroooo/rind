@@ -12,10 +12,10 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from agent.runtime.server.commands import SlashCommandContext, SlashCommandInfo, SlashCommandRouter
-from agent.runtime.server.commands.features import build_command_infos
-from agent.infrastructure.config import AppSettings
+from agent.runtime.server.commands.catalog import build_command_infos
+from agent.infrastructure.settings import AppSettings
 from agent.infrastructure.persistence.jsonl_session_store import JsonlSessionStore
-from agent.infrastructure.skills.repository import SkillRepository
+from agent.infrastructure.skills import SkillRepository
 from agent.infrastructure.team import initialize_team_project
 
 
@@ -75,7 +75,7 @@ class EmptyStream:
 
 
 def _context(session=None, runtime=None):
-    return SlashCommandContext(runtime=runtime or FakeRuntime(), session=session or FakeSession(), debug=True)
+    return SlashCommandContext(runtime=runtime or FakeRuntime(), session=session or FakeSession(), debug=True, workspace_root=getattr(session, "workspace_root", None))
 
 
 @pytest.mark.asyncio
@@ -482,7 +482,7 @@ async def test_status_does_not_leak_api_key(monkeypatch) -> None:
         base_url="https://example.com/v1",
         reasoning_effort="xhigh",
     )
-    monkeypatch.setattr("agent.runtime.server.commands.status_view.load_settings", lambda _: settings)
+    monkeypatch.setattr("agent.runtime.server.commands.status.load_settings", lambda _: settings)
 
     result = await SlashCommandRouter(build_command_infos()).execute("/status", _context())
 

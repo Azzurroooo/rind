@@ -38,7 +38,7 @@ def test_skill_repository_scans_metadata_and_applies_scope_overrides(tmp_path: P
         agent_skill_dir=str(agent),
     )
     monkeypatch.setattr(
-        "agent.infrastructure.skills.repository.parse_skill_markdown",
+        "agent.infrastructure.skills.parse_skill_markdown",
         lambda *args, **kwargs: pytest.fail("metadata scan must not load skill bodies"),
     )
 

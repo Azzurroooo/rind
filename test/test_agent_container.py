@@ -16,7 +16,7 @@ if str(PROJECT_ROOT) not in sys.path:
 from agent.application.context import CompactionService
 from agent.application.tools import ToolResultNormalizer
 from agent.bootstrap import AgentContainer, SharedRuntimeResources, build_agent_container
-from agent.infrastructure.config import AppSettings
+from agent.infrastructure.settings import AppSettings
 from agent.infrastructure.team import initialize_team_project
 from agent.runtime.core import MessageStreamParser
 

@@ -10,7 +10,7 @@ import traceback
 from pathlib import Path
 from typing import Any
 
-from agent.infrastructure.config import ensure_user_settings, load_settings
+from agent.infrastructure.settings import ensure_user_settings, load_settings
 from agent.infrastructure.persistence import JsonlSessionStore
 from agent.infrastructure.paths import validate_session_id
 

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import inspect
 from collections.abc import Awaitable, Callable, Collection
 from dataclasses import dataclass, field
 from functools import partial
@@ -10,21 +11,22 @@ from typing import Any
 
 from agent.application.context import CompactionService, ContextEstimator, ContextManager
 from agent.application.ports.session_store import SessionStore
-from agent.runtime.core import AgentRuntime, MessageStreamParser, TurnRunner
 from agent.application.tools import ToolCallProcessor, ToolExecutor, ToolResultNormalizer
-from agent.infrastructure.config import AppSettings, load_settings
-from agent.infrastructure.persistence import JsonlSessionStore
-from agent.infrastructure.persistence import ToolOutputStore
+from agent.infrastructure.environment import get_system_info
+from agent.infrastructure.persistence import JsonlSessionStore, ToolOutputStore
+from agent.infrastructure.persistence.plan import build_plan_snapshot
 from agent.infrastructure.persistence.usage_ledger import append_usage_record, default_usage_ledger_path
-from agent.infrastructure.planning import build_plan_snapshot
 from agent.infrastructure.rind_docs import build_rind_doc_context
+from agent.infrastructure.settings import AppSettings, load_settings
 from agent.infrastructure.skills import SkillRepository
 from agent.infrastructure.tools import DefaultToolRegistry
-from agent.infrastructure.tools.builtin import build_builtin_tool_specs
-from agent.infrastructure.tools.builtin.files.queue import FileMutationQueue
-from agent.infrastructure.tools.builtin.shell import ShellTools
-from agent.infrastructure.tools.builtin.web_sessions import WebSessions
+from agent.infrastructure.tools.catalog import build_builtin_tool_specs
+from agent.infrastructure.tools.files.mutation_queue import FileMutationQueue
+from agent.infrastructure.tools.shell.tool import ShellTools
+from agent.infrastructure.tools.web.session_pool import WebSessions
+from agent.infrastructure.workspace_images import promote_user_images
 from agent.prompts import build_goal_policy_prompt, build_system_prompt
+from agent.runtime.core import AgentRuntime, MessageStreamParser, TurnRunner
 
 
 @dataclass(frozen=True, slots=True)
@@ -94,13 +96,14 @@ def build_agent_container(
             resolved_team_agent = agent_context
         agent_prompt = agent_context.capsule.system_prompt.strip()
         if system_prompt is None and agent_prompt:
-            system_prompt = f"{build_system_prompt(workspace_root)}\n\n{agent_prompt}"
+            system_prompt = f"{build_system_prompt(str(workspace_root), environment=get_system_info(workspace_root))}\n\n{agent_prompt}"
         project_id = project_id if project_id is not None else agent_context.project_id
         owner_agent_id = owner_agent_id or agent_context.agent_id
         session_type = session_type or "direct_agent_chat"
         if agent_context.project is not None:
             skill_project_root = str(agent_context.project.project_root)
             skill_agent_dir = str(agent_context.capsule.manifest_path.parent / "skills")
+    prompt_workspace = str(Path(workspace_root or Path.cwd()).expanduser().resolve())
     settings = settings or load_settings(workspace_root)
     tool_output_store = shared_resources.tool_output_store if shared_resources else ToolOutputStore(session_dir)
     shell_tools = shell_tools or ShellTools(tool_output_store)
@@ -111,7 +114,7 @@ def build_agent_container(
         session_id=session_id,
         resume_latest=resume_latest,
         model=model,
-        system_prompt=system_prompt or build_system_prompt(workspace_root),
+        system_prompt=system_prompt or build_system_prompt(prompt_workspace, environment=get_system_info(prompt_workspace)),
         workspace_root=workspace_root,
         project_id=project_id,
         owner_agent_id=owner_agent_id,
@@ -120,6 +123,9 @@ def build_agent_container(
         reasoning_effort=settings.reasoning_effort,
         provider=settings.provider,
     )
+    trace_setter = getattr(chat_client, "set_trace_session_id_provider", None)
+    if callable(trace_setter) and not inspect.iscoroutinefunction(trace_setter):
+        trace_setter(lambda: session_store.session_id)
     skill_repository = SkillRepository(
         project_root=skill_project_root,
         project_skill_dir=skill_project_dir,
@@ -165,7 +171,7 @@ def build_agent_container(
                     "_context_kind": "team_agent_catalog",
                 }
             )
-            from agent.bootstrap.delegation import TeamDelegator
+            from agent.infrastructure.team.delegation import TeamDelegator
 
             delegator = TeamDelegator(
                 project=project,
@@ -191,7 +197,6 @@ def build_agent_container(
         allowed_roots=allowed_roots,
         shared_root=shared_root,
         session_output_root=session_output_root,
-        output_store=tool_output_store,
         shell_tools=shell_tools,
         web_sessions=web_sessions,
         mutation_queue=shared_resources.file_mutation_queue if shared_resources else None,
@@ -229,6 +234,7 @@ def build_agent_container(
         tool_processor=tool_processor,
         stream_parser=stream_parser,
         tool_schemas=tool_registry.schemas,
+        image_promoter=promote_user_images,
         context_manager=context_manager,
         compaction_service=compaction_service,
         skill_repository=skill_repository,

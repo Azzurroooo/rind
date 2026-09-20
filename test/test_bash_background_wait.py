@@ -308,7 +308,7 @@ async def test_bash_output_wait_cancellation_kills_process(shell_tools) -> None:
 @pytest_asyncio.fixture
 async def shell_tools(tmp_path):
     from agent.infrastructure.persistence import ToolOutputStore
-    from agent.infrastructure.tools.builtin.shell import ShellTools
+    from agent.infrastructure.tools.shell.tool import ShellTools
 
     tools = ShellTools(ToolOutputStore(str(tmp_path)))
     try:

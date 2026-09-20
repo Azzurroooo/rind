@@ -1,4 +1,4 @@
-"""Configurable worker fake for WorkerStdioRuntimeServer protocol tests."""
+"""Configurable worker fake for StdioRuntimeServer protocol tests."""
 
 from __future__ import annotations
 
@@ -152,7 +152,7 @@ class FakeRepository:
 
 
 class FakeWorker:
-    """Worker double covering the WorkerStdioRuntimeServer surface."""
+    """Worker double covering the StdioRuntimeServer surface."""
 
     def __init__(self, workspace_root: str = "."):
         self.workspace_root = workspace_root
@@ -226,9 +226,9 @@ class _CaptureWriter:
 
 
 def make_server(worker: FakeWorker) -> tuple:
-    from agent.runtime.server.stdio import WorkerStdioRuntimeServer
+    from agent.runtime.server.dispatcher import RuntimeDispatcher
 
     writer = _CaptureWriter()
-    server = WorkerStdioRuntimeServer(worker, writer=writer)
+    server = RuntimeDispatcher(worker, writer=writer)
     server._initialized = True
     return server, writer.payloads

@@ -1,4 +1,5 @@
 from __future__ import annotations
+from agent.runtime.server.stdio import JsonlWriter
 
 import asyncio
 import json
@@ -7,15 +8,16 @@ import tempfile
 from types import SimpleNamespace
 from pathlib import Path
 
-from agent.infrastructure.config import AppSettings
+from agent.infrastructure.settings import AppSettings
 from agent.infrastructure.team import initialize_team_agent, initialize_team_project
-from agent.runtime.server.worker import ExecutionCoordinator, RuntimeWorker
+from agent.runtime.server.worker import RuntimeWorker
+from agent.runtime.server.execution import ExecutionCoordinator
 from agent.runtime.server.protocol import RuntimeMethod
-from agent.runtime.server.stdio import WorkerStdioRuntimeServer
+from agent.runtime.server.dispatcher import RuntimeDispatcher
 
 
 def test_execution_reads_configuration_once_and_refreshes_between_turns(tmp_path, monkeypatch):
-    import agent.runtime.server.worker as worker_module
+    import agent.runtime.server.execution as worker_module
     from unittest.mock import AsyncMock
 
     async def run():
@@ -222,7 +224,7 @@ class _Execution:
 
 def _server_with_messages():
     worker = _Worker()
-    server = WorkerStdioRuntimeServer(worker)
+    server = RuntimeDispatcher(worker, writer=JsonlWriter())
     messages = []
 
     async def send(payload):
@@ -338,7 +340,7 @@ def test_compact_does_not_release_an_active_turn():
 def test_worker_shutdown_interrupts_all_active_sessions():
     async def run():
         worker, server, messages = _server_with_messages()
-        serve_task = asyncio.create_task(server._serve())
+        serve_task = asyncio.create_task(server.serve())
         server._requests.put_nowait({
             "request_id": "prompt-A",
             "method": RuntimeMethod.SESSION_PROMPT,
@@ -385,7 +387,7 @@ def test_replay_does_not_create_active_execution():
                 session_dir=str(root / "sessions"),
                 enable_goal=False,
             )
-            server = WorkerStdioRuntimeServer(worker)
+            server = RuntimeDispatcher(worker, writer=JsonlWriter())
             messages = []
 
             async def send(payload):

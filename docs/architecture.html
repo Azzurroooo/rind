@@ -4,14 +4,20 @@
 <body>
 <main>
 <h1>Rind Architecture</h1>
-<p>Rind has two product surfaces, <code>frontend-cli</code> and <code>desktop</code>, backed by one Runtime Package.</p>
+<p>CLI, desktop, web and gateway clients share one Runtime Package.</p>
 <h2>Runtime Package</h2>
 <pre><code>agent/runtime/
   core/    execution core and turn lifecycle
-  server/  JSONL facade, protocol, commands, lifecycle</code></pre>
+  server/
+    stdio.py / websocket.py  transports
+    dispatcher.py           common requests and subscriptions
+    worker.py               shared resources and lifecycle
+    session_service.py      sessions and startup draft
+    execution.py            active tasks and input queues
+    commands/               slash command catalog and handlers</code></pre>
 <p>The server and core run in one process and share the composition root. There is no server-to-runtime RPC.</p>
 <h2>Protocol</h2>
-<p>Both surfaces use the same v2 methods: <code>initialize</code>, <code>session/new</code>, <code>session/list</code>, <code>session/switch</code>, <code>session/replay</code>, <code>session/prompt</code>, <code>session/cancel</code>, <code>model/list</code>, and <code>model/set</code>. Product extensions are namespaced under <code>rind/</code>.</p>
+<p>All clients use the same v2 methods: <code>initialize</code>, <code>session/new</code>, <code>session/list</code>, <code>session/switch</code>, <code>session/replay</code>, <code>session/prompt</code>, <code>session/cancel</code>, <code>model/list</code>, and <code>model/set</code>. Product extensions are namespaced under <code>rind/</code>.</p>
 <p>Runtime events use <code>method: session/update</code> with sequence, durability, session/turn identifiers, and a nested <code>event.type</code>.</p>
 <h2>Entrypoints</h2>
 <pre><code>frontend-cli/bin/rind.js

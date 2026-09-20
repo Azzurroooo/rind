@@ -32,7 +32,7 @@ npm 包会依赖对应平台的预编译程序包。目前发布的平台为 Win
 
 当前工作区中完整的 `.rind/settings.json` 优先于用户配置，两者不会逐字段合并。Team Agent 从各自工作目录启动：共享配置可放在用户目录，某个专家的独立配置则放在其工作区的 `.rind/` 下。
 
-`RIND_HOME` 可修改用户数据目录，默认是 `~/.rind`。其中保存配置、登录凭据、会话与用户蓝图。原生供应商 ID 和 API 类型见[供应商目录](../agent/infrastructure/llm/providers.py)。
+`RIND_HOME` 可修改用户数据目录，默认是 `~/.rind`。其中保存配置、登录凭据、会话与用户蓝图。原生供应商 ID 和 API 类型见[供应商目录](../agent/infrastructure/llm/catalog.py)。
 
 ## 从源码运行
 

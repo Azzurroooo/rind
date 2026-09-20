@@ -22,7 +22,7 @@ import agent.infrastructure.persistence.session_files as session_files
 from agent.domain.compaction import COMPACT_CONTINUATION_USER_CONTENT, COMPACT_HANDOFF_REASONING_CONTENT
 from agent.domain.message_boundary import validate_model_message_boundary
 from agent.infrastructure.persistence.message_projector import MISSING_TOOL_RESULT_CONTENT
-from agent.infrastructure.tools.builtin.planning import update_plan
+from agent.infrastructure.tools.planning import update_plan
 
 @pytest.fixture
 def temp_session_dir():
@@ -533,7 +533,7 @@ def test_session_files_read_jsonl_waits_for_active_writer(tmp_path):
     path = tmp_path / "messages.jsonl"
     files = SessionFiles()
 
-    with files._get_lock_for_path(str(path)):
+    with files.lock_for(str(path)):
         path.write_text('{"role": "user"', encoding="utf-8")
         read_result = []
 
@@ -557,7 +557,7 @@ def test_session_files_load_json_waits_for_active_writer(tmp_path):
     path = tmp_path / "meta.json"
     files = SessionFiles()
 
-    with files._get_lock_for_path(str(path)):
+    with files.lock_for(str(path)):
         path.write_text('{"schema_version": ', encoding="utf-8")
         read_result = []
 

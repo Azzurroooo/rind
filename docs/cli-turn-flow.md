@@ -73,7 +73,7 @@ flowchart TB
     AR[AgentRuntime\nturn lock / queues / turn state]
     TR[TurnRunner\nsampling loop / tool steps]
     TOOLS[Tool Registry / Tool Executor]
-    MODEL[OpenAIChatClient\nshared underlying client]
+    MODEL[OpenAIChatCompletionsClient\nshared underlying client]
     FILES[JSONL messages / meta / tool records]
 
     APP --> WS --> RW

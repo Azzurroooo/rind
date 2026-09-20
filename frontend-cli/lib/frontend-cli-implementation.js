@@ -628,18 +628,19 @@ async function renderEvent(message) {
     compactContextState.clear();
     resetContextUsage();
   }
-  const result = await eventController.handle(message);
-  if (["turn_completed", "turn_failed", "turn_cancelled"].includes(message?.event?.type)) {
+  const settled = ["turn_completed", "turn_failed", "turn_cancelled"].includes(message?.event?.type);
+  if (settled) {
     turnStateData.id = "";
     displayState.activeCompact = false;
     setTurnContext("");
     displayState.activityLabel = "";
-    await runtimeController.refreshGoalState();
     turnStateData.active = false;
     turnStateData.interruptRequested = false;
     clearActivityTimer();
     refreshInputState();
   }
+  const result = await eventController.handle(message);
+  if (settled) await runtimeController.refreshGoalState();
   return result;
 }
 

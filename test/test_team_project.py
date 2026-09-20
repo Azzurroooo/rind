@@ -28,8 +28,8 @@ from agent.infrastructure.team import (
     materialize_team_agent,
     resolve_team_agent,
 )
-from agent.infrastructure.tools.builtin.files import build_file_tool_specs
-from agent.infrastructure.tools.builtin.agent_create import create_agent_create_tool_spec
+from agent.infrastructure.tools.files.specs import build_file_tool_specs
+from agent.infrastructure.tools.agent_create import create_agent_create_tool_spec
 
 
 def test_initialize_team_project_creates_only_the_minimal_structure(tmp_path: Path) -> None:

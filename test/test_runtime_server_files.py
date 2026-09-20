@@ -12,7 +12,7 @@ os.chdir(PROJECT_ROOT)
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from agent.runtime.server.files import (
+from agent.runtime.server.workspace_files import (
     FILE_LIMIT_BYTES,
     FileMethodError,
     file_list,
@@ -21,7 +21,7 @@ from agent.runtime.server.files import (
     mime_for_suffix,
     resolve_workspace_path,
 )
-from agent.runtime.server.stdio import WorkerStdioRuntimeServer
+from agent.runtime.server.dispatcher import RuntimeDispatcher
 
 
 class _CaptureWriter:
@@ -42,11 +42,11 @@ class _FakeWorker:
     execution = _FakeExecution()
 
 
-def _make_server(workspace: Path) -> tuple[WorkerStdioRuntimeServer, _CaptureWriter]:
+def _make_server(workspace: Path) -> tuple[RuntimeDispatcher, _CaptureWriter]:
     writer = _CaptureWriter()
     worker = _FakeWorker()
     worker.workspace_root = str(workspace)
-    server = WorkerStdioRuntimeServer(worker, writer=writer)
+    server = RuntimeDispatcher(worker, writer=writer)
     server._initialized = True
     return server, writer
 

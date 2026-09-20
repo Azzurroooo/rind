@@ -14,7 +14,7 @@ if str(PROJECT_ROOT) not in sys.path:
 from agent.infrastructure.persistence import JsonlSessionStore
 from agent.infrastructure.persistence.session_files import SessionFiles
 from agent.infrastructure.persistence.session_index_repository import SessionIndexRepository
-from agent.runtime.server.stdio import WorkerStdioRuntimeServer
+from agent.runtime.server.dispatcher import RuntimeDispatcher
 
 
 class _FakeExecution:
@@ -67,8 +67,8 @@ class _CaptureWriter:
         self.payloads.append(payload)
 
 
-def _make_server(worker: _FakeWorker) -> WorkerStdioRuntimeServer:
-    server = WorkerStdioRuntimeServer(worker, writer=_CaptureWriter())
+def _make_server(worker: _FakeWorker) -> RuntimeDispatcher:
+    server = RuntimeDispatcher(worker, writer=_CaptureWriter())
     server._initialized = True
     return server
 
@@ -92,7 +92,7 @@ def _make_session(tmp_path: Path, session_id: str, workspace: Path) -> None:
     SessionFiles().write_json(str(index_path), index)
 
 
-def _last(server: WorkerStdioRuntimeServer) -> dict:
+def _last(server: RuntimeDispatcher) -> dict:
     return server._writer._writer.payloads[-1]
 
 
@@ -156,7 +156,7 @@ def test_delete_prunes_subscription_set(tmp_path):
 
 def test_ping_responds_ok_without_initialization(tmp_path):
     worker = _FakeWorker(tmp_path, session_id="20260907_now")
-    server = WorkerStdioRuntimeServer(worker, writer=_CaptureWriter())
+    server = RuntimeDispatcher(worker, writer=_CaptureWriter())
 
     asyncio.run(server.dispatch(_request("ping", {})))
 

@@ -8,7 +8,7 @@ os.chdir(PROJECT_ROOT)
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from agent.infrastructure.planning.summary import build_plan_snapshot, render_plan_summary
+from agent.infrastructure.persistence.plan import build_plan_snapshot, render_plan_summary
 
 
 def _set_session(tmp_path: Path) -> Path:

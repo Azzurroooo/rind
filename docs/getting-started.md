@@ -32,7 +32,7 @@ For an OpenAI-compatible Chat Completions endpoint, create `~/.rind/settings.jso
 
 A complete `.rind/settings.json` in the current workspace takes precedence over the user configuration. It is selected as a whole, not merged field by field. Team agents run from their own workspace directories; use user settings to share a configuration or put a complete configuration in an individual agent's `.rind/` directory.
 
-`RIND_HOME` changes the user data directory, whose default is `~/.rind`. It contains settings, saved credentials, sessions, and user blueprints. For native provider IDs and API dialects, see the [provider catalog](../agent/infrastructure/llm/providers.py).
+`RIND_HOME` changes the user data directory, whose default is `~/.rind`. It contains settings, saved credentials, sessions, and user blueprints. For native provider IDs and API dialects, see the [provider catalog](../agent/infrastructure/llm/catalog.py).
 
 ## From source
 

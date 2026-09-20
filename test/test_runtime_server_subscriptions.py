@@ -15,8 +15,8 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from agent.runtime.server.protocol import RuntimeMethod
-from agent.runtime.server.stdio import WorkerStdioRuntimeServer
-from agent.runtime.server.worker import ExecutionCoordinator
+from agent.runtime.server.dispatcher import RuntimeDispatcher
+from agent.runtime.server.execution import ExecutionCoordinator
 
 
 class _CaptureWriter:
@@ -83,9 +83,9 @@ class _Worker:
         return None
 
 
-def _make_server(worker: _Worker) -> tuple[WorkerStdioRuntimeServer, _CaptureWriter]:
+def _make_server(worker: _Worker) -> tuple[RuntimeDispatcher, _CaptureWriter]:
     writer = _CaptureWriter("writer")
-    server = WorkerStdioRuntimeServer(worker, writer=writer)
+    server = RuntimeDispatcher(worker, writer=writer)
     server._initialized = True
     return server, writer
 
@@ -356,8 +356,8 @@ def test_two_dispatchers_on_one_coordinator_both_receive_continuation_events():
         worker = _SharedWorker(execution)
         writer_a = _CaptureWriter("a")
         writer_b = _CaptureWriter("b")
-        server_a = WorkerStdioRuntimeServer(worker, writer=writer_a)
-        server_b = WorkerStdioRuntimeServer(worker, writer=writer_b)
+        server_a = RuntimeDispatcher(worker, writer=writer_a)
+        server_b = RuntimeDispatcher(worker, writer=writer_b)
         await server_a.dispatch(_request("init-a", RuntimeMethod.INITIALIZE, {}))
         await server_b.dispatch(_request("init-b", RuntimeMethod.INITIALIZE, {}))
         async for _event in execution.run_turn("alpha", query=None, continuation=True):

@@ -9,42 +9,43 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 import agent.prompts as prompts
-from agent.domain.shell import ShellDetection
+import agent.infrastructure.environment as environment
+from agent.infrastructure.environment import ShellDetection
 
 
 def test_system_info_omits_start_time(monkeypatch):
-    monkeypatch.setattr(prompts, "detect_default_shell", lambda: ShellDetection("/bin/bash", "bash"))
+    monkeypatch.setattr(environment, "detect_default_shell", lambda: ShellDetection("/bin/bash", "bash"))
 
-    info = prompts.get_system_info()
+    info = environment.get_system_info()
 
     assert "Start Time:" not in info
-    assert "Start Time:" not in prompts.SYSTEM_PROMPT
+    assert "Start Time:" not in prompts.build_system_prompt(str(PROJECT_ROOT), environment=environment.get_system_info(PROJECT_ROOT))
 
 
 def test_system_info_includes_current_date_without_time(monkeypatch):
-    monkeypatch.setattr(prompts, "detect_default_shell", lambda: ShellDetection("/bin/bash", "bash"))
+    monkeypatch.setattr(environment, "detect_default_shell", lambda: ShellDetection("/bin/bash", "bash"))
 
     today = date.today().isoformat()
-    info = prompts.get_system_info()
+    info = environment.get_system_info()
 
     assert f"Current Date: {today}" in info
-    assert f"Current Date: {today}" in prompts.SYSTEM_PROMPT
+    assert f"Current Date: {today}" in prompts.build_system_prompt(str(PROJECT_ROOT), environment=environment.get_system_info(PROJECT_ROOT))
     assert "Current Time:" not in info
-    assert "Current Time:" not in prompts.SYSTEM_PROMPT
+    assert "Current Time:" not in prompts.build_system_prompt(str(PROJECT_ROOT), environment=environment.get_system_info(PROJECT_ROOT))
 
 
 def test_system_info_uses_detected_shell_backend(monkeypatch):
     shell_path = r"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe"
-    monkeypatch.setattr(prompts, "detect_default_shell", lambda: ShellDetection(shell_path, "powershell"))
+    monkeypatch.setattr(environment, "detect_default_shell", lambda: ShellDetection(shell_path, "powershell"))
 
-    info = prompts.get_system_info()
+    info = environment.get_system_info()
 
     assert "Shell Type: PowerShell" in info
     assert f"Shell Executable: {shell_path}" in info
 
 
 def test_system_prompt_contains_rind_doc_rules():
-    text = prompts.SYSTEM_PROMPT
+    text = prompts.build_system_prompt(str(PROJECT_ROOT), environment=environment.get_system_info(PROJECT_ROOT))
 
     assert "`write_file`" in text
     assert "`edit_file`" in text
@@ -56,7 +57,7 @@ def test_system_prompt_contains_rind_doc_rules():
 
 
 def test_system_prompt_describes_file_mutation_contracts():
-    text = prompts.SYSTEM_PROMPT
+    text = prompts.build_system_prompt(str(PROJECT_ROOT), environment=environment.get_system_info(PROJECT_ROOT))
 
     assert "Atomically create or completely overwrite a UTF-8 text file" in text
     assert "Atomically replace one unique, exact text block" in text
@@ -65,13 +66,13 @@ def test_system_prompt_describes_file_mutation_contracts():
 
 
 def test_system_prompt_strongly_limits_emojis():
-    text = prompts.SYSTEM_PROMPT
+    text = prompts.build_system_prompt(str(PROJECT_ROOT), environment=environment.get_system_info(PROJECT_ROOT))
 
     assert 'Use emojis ONLY if the user explicitly requests them' in text
     assert 'AVOID using emojis in all communication unless asked' in text
 
 def test_system_prompt_describes_path_roots():
-    text = prompts.SYSTEM_PROMPT
+    text = prompts.build_system_prompt(str(PROJECT_ROOT), environment=environment.get_system_info(PROJECT_ROOT))
 
     assert "cd` only affects that command" in text
     assert "use `cd <dir> && <command>` when a command must run in another directory" in text
@@ -80,7 +81,7 @@ def test_system_prompt_describes_path_roots():
 
 
 def test_system_prompt_requires_parallel_independent_tool_calls():
-    text = prompts.SYSTEM_PROMPT
+    text = prompts.build_system_prompt(str(PROJECT_ROOT), environment=environment.get_system_info(PROJECT_ROOT))
 
     assert "independent" in text
     assert "in parallel in the same response" in text

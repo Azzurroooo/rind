@@ -6,10 +6,10 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from agent.domain import shell as shell_detection
-from agent.domain.shell import ShellDetection, detect_default_shell
-from agent.infrastructure.tools.builtin.shell import session_pool as bash_session_pool
-from agent.infrastructure.tools.builtin.shell.supervisor import ProcessSupervisor
+from agent.infrastructure import environment as shell_detection
+from agent.infrastructure.environment import ShellDetection, detect_default_shell
+from agent.infrastructure.tools.shell import session_pool as bash_session_pool
+from agent.infrastructure.tools.shell.supervisor import ProcessSupervisor
 
 
 def test_detect_shell_prefers_rind_bash_path(tmp_path, monkeypatch):

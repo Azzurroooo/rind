@@ -11,8 +11,8 @@ from agent.domain.cancellation import CancellationToken
 from agent.domain.errors import ProviderError
 from agent.domain.models import ModelCompletion, ModelStreamEvent, ModelUsage
 from agent.domain.tool_payload import ParsedToolCall
-from .cancellation import await_with_cancellation, close_resource
-from .providers import resolve_reasoning_effort
+from agent.infrastructure.llm.cancellation import await_with_cancellation, close_resource
+from agent.infrastructure.llm.catalog import resolve_reasoning_effort
 
 
 class OpenAIResponsesClient(ChatClient):

@@ -16,7 +16,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from agent.domain import AssistantMessageCompletedEvent
-from agent.bootstrap.delegation import TeamDelegator
+from agent.infrastructure.team.delegation import TeamDelegator
 from agent.infrastructure.team import initialize_team_project
 
 
@@ -195,8 +195,8 @@ async def test_delegate_allows_concurrent_calls_to_the_same_agent(tmp_path: Path
 
 
 def test_child_plan_updates_do_not_rebind_parent_tool(tmp_path: Path) -> None:
-    from agent.infrastructure.tools.builtin.planning import create_plan_tool_spec
-    from agent.infrastructure.planning import build_plan_snapshot
+    from agent.infrastructure.tools.planning import create_plan_tool_spec
+    from agent.infrastructure.persistence.plan import build_plan_snapshot
 
     parent = tmp_path / "parent"
     child = tmp_path / "child"

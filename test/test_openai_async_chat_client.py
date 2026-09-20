@@ -11,7 +11,7 @@ os.chdir(PROJECT_ROOT)
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from agent.infrastructure.llm.openai_chat_client import OpenAIChatClient
+from agent.infrastructure.llm.openai_chat import OpenAIChatCompletionsClient
 from agent.infrastructure.llm.cancellation import close_resource
 from agent.domain.cancellation import CancellationTokenSource
 from agent.domain.errors import ProviderError
@@ -31,7 +31,7 @@ async def test_openai_async_client_marks_stream_iteration_failure_as_recoverable
 
     mock_openai = MagicMock()
     mock_openai.chat.completions.create = AsyncMock(return_value=BrokenStream())
-    client = OpenAIChatClient(mock_openai, "test-model")
+    client = OpenAIChatCompletionsClient(mock_openai, "test-model")
 
     with pytest.raises(ProviderError) as error:
         async for _ in client.stream([{"role": "user", "content": "hi"}]):
@@ -47,12 +47,12 @@ async def test_openai_async_client_cancellation():
     # Simulate a slow API call
     async def slow_create(*args, **kwargs):
         await asyncio.sleep(0.5)
-        return "Done"
+        return {"choices": [{"message": {"content": "Done"}, "finish_reason": "stop"}]}
 
     mock_create.side_effect = slow_create
     mock_openai.chat.completions.create = mock_create
 
-    client = OpenAIChatClient(mock_openai, "test-model")
+    client = OpenAIChatCompletionsClient(mock_openai, "test-model")
     source = CancellationTokenSource()
 
     # Schedule cancellation
@@ -81,7 +81,7 @@ async def test_openai_async_client_cancellation_waits_for_api_task_cleanup():
             cleanup_finished.set()
 
     mock_openai.chat.completions.create = AsyncMock(side_effect=slow_create)
-    client = OpenAIChatClient(mock_openai, "test-model")
+    client = OpenAIChatCompletionsClient(mock_openai, "test-model")
     source = CancellationTokenSource()
 
     async def cancel_later():
@@ -106,7 +106,7 @@ async def test_openai_async_client_close_stream_prefers_aclose():
             self.closed = True
 
     stream = FakeStream()
-    client = OpenAIChatClient(MagicMock(), "test-model")
+    client = OpenAIChatCompletionsClient(MagicMock(), "test-model")
 
     await close_resource(stream)
 
@@ -123,7 +123,7 @@ async def test_openai_async_client_close_stream_accepts_sync_close():
             self.closed = True
 
     stream = FakeStream()
-    client = OpenAIChatClient(MagicMock(), "test-model")
+    client = OpenAIChatCompletionsClient(MagicMock(), "test-model")
 
     await close_resource(stream)
 
@@ -133,12 +133,12 @@ async def test_openai_async_client_close_stream_accepts_sync_close():
 @pytest.mark.asyncio
 async def test_openai_async_client_adds_reasoning_effort_when_configured():
     mock_openai = MagicMock()
-    mock_openai.chat.completions.create = AsyncMock(return_value="Done")
-    client = OpenAIChatClient(mock_openai, "test-model", reasoning_effort="xhigh")
+    mock_openai.chat.completions.create = AsyncMock(return_value={"choices": [{"message": {"content": "Done"}, "finish_reason": "stop"}]})
+    client = OpenAIChatCompletionsClient(mock_openai, "test-model", reasoning_effort="xhigh")
 
     result = await client.create([{"role": "user", "content": "hi"}])
 
-    assert result == "Done"
+    assert result.content == "Done"
     kwargs = mock_openai.chat.completions.create.call_args.kwargs
     assert kwargs["reasoning_effort"] == "xhigh"
 
@@ -146,8 +146,8 @@ async def test_openai_async_client_adds_reasoning_effort_when_configured():
 @pytest.mark.asyncio
 async def test_openai_async_client_adds_stable_prompt_cache_key():
     mock_openai = MagicMock()
-    mock_openai.chat.completions.create = AsyncMock(return_value="Done")
-    client = OpenAIChatClient(mock_openai, "test-model")
+    mock_openai.chat.completions.create = AsyncMock(return_value={"choices": [{"message": {"content": "Done"}, "finish_reason": "stop"}]})
+    client = OpenAIChatCompletionsClient(mock_openai, "test-model")
     messages = [
         {"role": "system", "content": "stable system"},
         {"role": "user", "content": "first"},
@@ -175,16 +175,16 @@ async def test_openai_async_client_retries_without_unsupported_prompt_cache_key(
                 response=MagicMock(status_code=400),
                 body=None,
             )
-        return "Done"
+        return {"choices": [{"message": {"content": "Done"}, "finish_reason": "stop"}]}
 
     mock_openai.chat.completions.create = AsyncMock(side_effect=fake_create)
-    client = OpenAIChatClient(mock_openai, "test-model")
+    client = OpenAIChatCompletionsClient(mock_openai, "test-model")
 
     result = await client.create([{"role": "user", "content": "hi"}])
     second = await client.create([{"role": "user", "content": "again"}])
 
-    assert result == "Done"
-    assert second == "Done"
+    assert result.content == "Done"
+    assert second.content == "Done"
     assert "prompt_cache_key" in calls[0]
     assert "prompt_cache_key" not in calls[1]
     assert "prompt_cache_key" not in calls[2]
@@ -203,16 +203,16 @@ async def test_openai_async_client_disables_unsupported_reasoning_effort_once():
                 response=MagicMock(status_code=400),
                 body=None,
             )
-        return "Done"
+        return {"choices": [{"message": {"content": "Done"}, "finish_reason": "stop"}]}
 
     mock_openai.chat.completions.create = AsyncMock(side_effect=fake_create)
-    client = OpenAIChatClient(mock_openai, "test-model", reasoning_effort="xhigh")
+    client = OpenAIChatCompletionsClient(mock_openai, "test-model", reasoning_effort="xhigh")
 
     result = await client.create([{"role": "user", "content": "hi"}])
     second = await client.create([{"role": "user", "content": "again"}])
 
-    assert result == "Done"
-    assert second == "Done"
+    assert result.content == "Done"
+    assert second.content == "Done"
     assert "reasoning_effort" in calls[0]
     assert "reasoning_effort" not in calls[1]
     assert "reasoning_effort" not in calls[2]
@@ -231,13 +231,13 @@ async def test_openai_async_client_retries_blocked_request_without_reasoning_eff
                 response=MagicMock(status_code=400),
                 body=None,
             )
-        return "Done"
+        return {"choices": [{"message": {"content": "Done"}, "finish_reason": "stop"}]}
 
     mock_openai.chat.completions.create = AsyncMock(side_effect=fake_create)
-    client = OpenAIChatClient(mock_openai, "test-model", reasoning_effort="xhigh")
+    client = OpenAIChatCompletionsClient(mock_openai, "test-model", reasoning_effort="xhigh")
 
     result = await client.create([{"role": "user", "content": "hi"}])
 
-    assert result == "Done"
+    assert result.content == "Done"
     assert "reasoning_effort" in calls[0]
     assert "reasoning_effort" not in calls[1]

@@ -11,7 +11,7 @@ if str(PROJECT_ROOT) not in sys.path:
 from agent.domain import parse_skill_markdown
 from agent.infrastructure.skills import SkillRepository
 from agent.infrastructure.tools import DefaultToolRegistry
-from agent.infrastructure.tools.builtin.skill import skill, skill_create
+from agent.infrastructure.tools.skill import skill, skill_create
 
 
 def _payload(result: str) -> dict:

@@ -10,9 +10,9 @@ os.chdir(PROJECT_ROOT)
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from agent.infrastructure.planning import store as plan_store
+from agent.infrastructure.persistence import plan as plan_store
 from agent.infrastructure.tools import DefaultToolRegistry
-from agent.infrastructure.tools.builtin.planning import create_plan_tool_spec
+from agent.infrastructure.tools.planning import create_plan_tool_spec
 from agent.infrastructure.paths import resolve_session_base
 
 

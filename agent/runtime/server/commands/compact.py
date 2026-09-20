@@ -1,0 +1,41 @@
+"""Context compaction slash command."""
+
+from agent.runtime.server.commands.formatting import display_value
+
+from agent.runtime.server.commands.contracts import SlashCommandContext, SlashCommandInfo, SlashCommandResult
+
+
+async def handle_compact(context: SlashCommandContext, args: list[str]) -> SlashCommandResult | str:
+    compact_context = context.compact_context
+    if not callable(compact_context):
+        return "Compact is not supported by this runtime."
+    if getattr(context.runtime, "turn_active", False):
+        return "Cannot compact while a turn is running. Wait for it to finish or interrupt it first."
+    try:
+        record = await compact_context()
+    except ValueError as exc:
+        return str(exc)
+    source = record.get("source") if isinstance(record, dict) else {}
+    if not isinstance(source, dict):
+        source = {}
+    start = source.get("message_start_index", "?")
+    end = source.get("message_end_index_exclusive", "?")
+    tool_count = len(source.get("tool_call_ids") or [])
+    return SlashCommandResult(
+        "\n".join(
+            [
+                "Compact complete.",
+                f"- id: {display_value(record.get('id') if isinstance(record, dict) else None)}",
+                f"- source: messages[{start}:{end}]",
+                f"- tool calls: {tool_count}",
+            ]
+        ),
+    )
+
+
+COMMAND = SlashCommandInfo(
+    name="compact",
+    description="Compact current session context",
+    usage="/compact",
+    handler=handle_compact,
+)

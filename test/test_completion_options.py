@@ -9,7 +9,6 @@ import pytest
 from agent.infrastructure.llm.anthropic_messages import AnthropicMessagesClient
 from agent.infrastructure.llm.google_generative_ai import GoogleGenerativeAIClient
 from agent.infrastructure.llm.openai_chat import OpenAIChatCompletionsClient
-from agent.infrastructure.llm.openai_chat_client import OpenAIChatClient
 from agent.infrastructure.llm.openai_responses import OpenAIResponsesClient
 
 
@@ -79,11 +78,11 @@ async def test_compatible_chat_keeps_cap_during_parameter_fallbacks():
         unsupported = "prompt_cache_key" if "prompt_cache_key" in payload else "max_tokens" if "max_tokens" in payload else None
         if unsupported:
             raise openai.BadRequestError(f"Unsupported parameter: {unsupported}", response=MagicMock(status_code=400), body=None)
-        return "summary"
+        return {"choices": [{"message": {"content": "summary"}, "finish_reason": "stop"}]}
 
     sdk.chat.completions.create = send
-    client = OpenAIChatClient(sdk, "model", "high", reasoning_efforts=("low", "high"))
-    assert await client.create([], max_output_tokens=8192, reasoning_effort="low") == "summary"
+    client = OpenAIChatCompletionsClient(sdk, "model", "high", reasoning_efforts=("low", "high"))
+    assert (await client.create([], max_output_tokens=8192, reasoning_effort="low")).content == "summary"
     assert len(calls) == 3
     assert all(p.get("max_tokens", p.get("max_completion_tokens")) == 8192 for p in calls)
     assert all(p["reasoning_effort"] == "low" for p in calls)
@@ -94,7 +93,7 @@ async def test_rejected_summary_effort_does_not_disable_normal_reasoning():
     sdk = MagicMock()
     error = openai.BadRequestError("Unsupported parameter: reasoning_effort", response=MagicMock(status_code=400), body=None)
     send = sdk.chat.completions.create = AsyncMock(side_effect=[error, "summary", "next reply"])
-    client = OpenAIChatClient(sdk, "model", "high", reasoning_efforts=("low", "high"))
+    client = OpenAIChatCompletionsClient(sdk, "model", "high", reasoning_efforts=("low", "high"))
     await client.create([], max_output_tokens=8192, reasoning_effort="low")
     await client.create([])
     first, retry, next_turn = (call.kwargs for call in send.call_args_list)
@@ -115,7 +114,7 @@ async def test_factory_passes_only_known_reasoning_capabilities(tmp_path, monkey
     monkeypatch.setenv("RIND_HOME", str(tmp_path / "home"))
     service = ProviderServiceImpl()
     monkeypatch.setattr(service, "_resolve_credential", lambda *_: Credential(type="api_key", key="test"))
-    monkeypatch.setattr("agent.infrastructure.llm.openai_chat_client.build_async_client", lambda *_args, **_kwargs: SimpleNamespace())
+    monkeypatch.setattr("agent.infrastructure.llm.provider_service.build_async_client", lambda *_args, **_kwargs: SimpleNamespace())
     factory = MagicMock()
     monkeypatch.setattr("agent.infrastructure.llm.openai_responses.OpenAIResponsesClient", factory)
     await service.create_chat_client(_settings(tmp_path, provider="openai"), ModelSelection("openai", model, "high"), workspace_root=str(tmp_path))

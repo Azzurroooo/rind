@@ -14,9 +14,9 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from agent.domain.cancellation import CancellationTokenSource
-from agent.infrastructure.tools.builtin.shell import process_tree
-from agent.infrastructure.tools.builtin.shell.session_pool import ShellSessionPool, ShellState
-from agent.infrastructure.tools.builtin.shell.supervisor import ProcessSupervisor
+from agent.infrastructure.tools.shell import process_tree
+from agent.infrastructure.tools.shell.session_pool import ShellSessionPool, ShellState
+from agent.infrastructure.tools.shell.supervisor import ProcessSupervisor
 
 
 def _payload(result) -> dict:

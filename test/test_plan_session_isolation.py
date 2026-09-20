@@ -12,8 +12,8 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from agent.infrastructure.persistence.jsonl_session_store import JsonlSessionStore
-from agent.infrastructure.planning import build_plan_snapshot
-from agent.infrastructure.tools.builtin.planning import update_plan
+from agent.infrastructure.persistence.plan import build_plan_snapshot
+from agent.infrastructure.tools.planning import update_plan
 
 
 def _payload(raw: str) -> dict:
@@ -71,7 +71,7 @@ async def test_plan_targets_are_explicit_for_concurrent_sessions(tmp_path: Path,
 
 @pytest.mark.asyncio
 async def test_plan_binding_resolves_draft_after_materialization(tmp_path):
-    from agent.infrastructure.tools.builtin.planning import create_plan_tool_spec
+    from agent.infrastructure.tools.planning import create_plan_tool_spec
 
     session = JsonlSessionStore(session_dir=str(tmp_path))
     tool = create_plan_tool_spec(lambda: session.session_base_path).handler

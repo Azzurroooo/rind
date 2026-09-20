@@ -7,7 +7,9 @@ os.chdir(PROJECT_ROOT)
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from agent.prompts import SYSTEM_PROMPT
+from agent.prompts import build_system_prompt
+
+SYSTEM_PROMPT = build_system_prompt("/test", environment="test environment")
 
 
 def test_system_prompt_describes_single_update_plan_protocol() -> None:
