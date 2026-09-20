@@ -16,6 +16,7 @@ from agent.domain.cancellation import CancellationToken
 from agent.domain.errors import ProviderError
 from agent.infrastructure.llm.llm_trace import make_trace
 from .cancellation import await_with_cancellation, close_resource
+from .providers import resolve_reasoning_effort
 
 
 logger = logging.getLogger(__name__)
@@ -41,10 +42,13 @@ class OpenAIChatClient(ChatClient):
         model: str,
         reasoning_effort: str | None = None,
         workspace_root: str | None = None,
+        *,
+        reasoning_efforts: tuple[str, ...] = (),
     ):
         self._client = async_client
         self._model = model
         self._reasoning_effort = (reasoning_effort or "").strip() or None
+        self._reasoning_efforts = reasoning_efforts
         self._reasoning_effort_disabled = False
         self._prompt_cache_key_disabled = False
         self._trace_session_id_provider: Callable[[], str] | None = None
@@ -66,13 +70,23 @@ class OpenAIChatClient(ChatClient):
         messages: list[dict],
         tools: list[dict] | None = None,
         cancellation_token: CancellationToken | None = None,
+        *,
+        max_output_tokens: int | None = None,
+        reasoning_effort: str | None = None,
     ) -> Any:
         trace = make_trace(self._trace_session_id_provider, label="create")
         if trace:
-            trace.request(self._trace_payload(messages, tools, stream=False))
+            payload = self._trace_payload(messages, tools, stream=False)
+            payload["reasoning_effort"] = resolve_reasoning_effort(self._reasoning_effort, reasoning_effort, self._reasoning_efforts)
+            if max_output_tokens is not None:
+                payload["max_tokens"] = max_output_tokens
+            trace.request(payload)
 
         try:
-            result = await self._request(messages, tools, False, cancellation_token)
+            result = await self._request(
+                messages, tools, False, cancellation_token,
+                max_output_tokens=max_output_tokens, reasoning_effort=reasoning_effort,
+            )
             if trace:
                 trace.response(result)
                 trace.end("completed")
@@ -191,39 +205,47 @@ class OpenAIChatClient(ChatClient):
         return ProviderError(text, status=status, error_type=error_type, code=code)
 
 
-    async def _request(self, messages, tools, stream, cancellation_token):
+    async def _request(self, messages, tools, stream, cancellation_token, *, max_output_tokens=None, reasoning_effort=None):
         if cancellation_token and cancellation_token.is_cancelled:
             raise asyncio.CancelledError(cancellation_token.reason)
         payload = {"model": self._model, "messages": messages, "stream": stream}
+        if max_output_tokens is not None:
+            payload["max_tokens"] = max_output_tokens
         if stream:
             payload["stream_options"] = {"include_usage": True}
         if tools:
             payload.update(tools=tools, tool_choice="auto")
         self._add_prompt_cache_key(payload)
         return await await_with_cancellation(
-            self._create_with_optional_reasoning_effort(payload), cancellation_token
+            self._create_with_optional_reasoning_effort(payload, reasoning_effort=reasoning_effort), cancellation_token
         )
 
-    async def _create_with_optional_reasoning_effort(self, kwargs: dict[str, Any]) -> Any:
+    async def _create_with_optional_reasoning_effort(self, kwargs: dict[str, Any], *, reasoning_effort: str | None = None) -> Any:
         payload = dict(kwargs)
-        if self._reasoning_effort and not self._reasoning_effort_disabled:
-            payload["reasoning_effort"] = self._reasoning_effort
-        try:
-            return await self._client.chat.completions.create(**payload)
-        except openai.APIStatusError as exc:
-            fallback_payload = dict(payload)
-            should_retry = False
-            if "reasoning_effort" in fallback_payload and self._should_retry_without_reasoning_effort(exc):
-                fallback_payload.pop("reasoning_effort", None)
-                self._reasoning_effort_disabled = True
-                should_retry = True
-            if "prompt_cache_key" in fallback_payload and self._should_retry_without_prompt_cache_key(exc):
-                fallback_payload.pop("prompt_cache_key", None)
-                self._prompt_cache_key_disabled = True
-                should_retry = True
-            if not should_retry:
-                raise
-            return await self._client.chat.completions.create(**fallback_payload)
+        effort = resolve_reasoning_effort(self._reasoning_effort, reasoning_effort, self._reasoning_efforts)
+        if effort and not self._reasoning_effort_disabled:
+            payload["reasoning_effort"] = effort
+        while True:
+            try:
+                return await self._client.chat.completions.create(**payload)
+            except openai.APIStatusError as exc:
+                if "max_tokens" in payload and self._should_retry_with_max_completion_tokens(exc):
+                    payload["max_completion_tokens"] = payload.pop("max_tokens")
+                elif "prompt_cache_key" in payload and self._should_retry_without_prompt_cache_key(exc):
+                    payload.pop("prompt_cache_key")
+                    self._prompt_cache_key_disabled = True
+                elif "reasoning_effort" in payload and self._should_retry_without_reasoning_effort(exc):
+                    payload.pop("reasoning_effort")
+                    if reasoning_effort is None:
+                        self._reasoning_effort_disabled = True
+                else:
+                    raise
+
+    def _should_retry_with_max_completion_tokens(self, exc: Exception) -> bool:
+        text = str(exc).lower()
+        return getattr(exc, "status_code", None) in {400, 422} and "max_tokens" in text and any(
+            marker in text for marker in ("unsupported", "unknown", "unrecognized", "not support", "extra_forbidden")
+        )
 
     def _add_prompt_cache_key(self, kwargs: dict[str, Any]) -> None:
         if self._prompt_cache_key_disabled:

@@ -31,8 +31,10 @@ class GoogleGenerativeAIClient(ChatClient):
         self._model = model
         self._send_tool_call_ids = _requires_tool_call_ids(model)
 
-    async def create(self, messages, tools=None, cancellation_token: CancellationToken | None = None) -> ModelCompletion:
+    async def create(self, messages, tools=None, cancellation_token: CancellationToken | None = None, *, max_output_tokens: int | None = None, reasoning_effort: str | None = None) -> ModelCompletion:
         contents, config = _request(messages, tools, self._send_tool_call_ids)
+        if max_output_tokens is not None:
+            config["max_output_tokens"] = max_output_tokens
         response = await await_with_cancellation(
             self._client.aio.models.generate_content(model=self._model, contents=contents, config=config),
             cancellation_token,

@@ -14,10 +14,10 @@ from typing import Any
 from agent.domain.cancellation import CancellationToken
 from agent.domain.models import ModelCompletion
 from agent.domain.compaction import COMPACT_CONTINUATION_USER_CONTENT
-from agent.domain.errors import PersistenceError
+from agent.domain.errors import BoundaryError, PersistenceError
 from agent.prompts import build_compact_prompt
 
-from .estimator import DEFAULT_CONTEXT_WINDOW_TOKENS
+from .estimator import ContextEstimator, DEFAULT_CONTEXT_WINDOW_TOKENS
 from .handoff import CompactionHandoffBuilder
 from .token_usage import build_usage_record, normalize_sampling_usage, positive_int
 
@@ -31,7 +31,6 @@ class CompactionService:
 
     policy_version: str = "compact_boundary_v3"
     max_excerpt_chars: int = 2000
-    max_compact_prompt_chars: int = 100000
     plan_snapshot_provider: Callable[[str | None], str] | None = None
     usage_recorder: Callable[[dict[str, Any]], Any] | None = None
 
@@ -64,13 +63,28 @@ class CompactionService:
             strategy="deterministic_fallback",
             keep_recent_chars=self._keep_recent_chars(context_stats),
         )
+        corpus = self.build_compression_corpus(context_messages)
+        cut = record["source"]["message_end_index_exclusive"]
+        retained = raw_messages[cut:]
+        retained_ids = {message["id"] for message in retained if message.get("id")}
+        retained_calls = {call_id for message in retained for call_id in self._tool_call_ids(message)}
+        recent_start = next((index for index, message in enumerate(corpus)
+                             if message.get("id") in retained_ids or message.get("tool_call_id") in retained_calls), len(corpus))
+        for message in corpus:
+            message.pop("id", None)
+        stats = context_stats or {}
+        window = positive_int(stats.get("context_window_tokens"), DEFAULT_CONTEXT_WINDOW_TOKENS)
+        max_output_tokens = max(1, min(8192, window // 10))
+        messages = await asyncio.to_thread(self._prepare_summary_request, corpus, recent_start, window, max_output_tokens)
+        if cancellation_token and cancellation_token.is_cancelled:
+            raise asyncio.CancelledError(cancellation_token.reason)
         try:
-            corpus = self.build_compression_corpus(context_messages)
-            payload = json.dumps(corpus, ensure_ascii=False, sort_keys=True, default=str)
             response = await chat_client.create(
-                messages=build_compact_prompt(self._limit_prompt_payload(payload)),
+                messages=messages,
                 tools=None,
                 cancellation_token=cancellation_token,
+                max_output_tokens=max_output_tokens,
+                reasoning_effort="low",
             )
             usage = self._sampling_usage(response, context_stats)
             if usage:
@@ -178,7 +192,9 @@ class CompactionService:
                 continue
             if handoff_builder.is_boundary(message) or message.get("role") == "system":
                 continue
-            corpus.append(handoff_builder.strip_internal_fields(message))
+            item = handoff_builder.strip_internal_fields(message)
+            item.pop("reasoning_content", None)
+            corpus.append(item)
         return corpus
 
     def _retention_cut(
@@ -380,11 +396,32 @@ class CompactionService:
         except Exception:
             logger.debug("Usage ledger append failed.", exc_info=True)
 
-    def _limit_prompt_payload(self, payload: str) -> str:
-        if len(payload) <= self.max_compact_prompt_chars:
-            return payload
-        half = max(1, (self.max_compact_prompt_chars - 44) // 2)
-        return payload[:half].rstrip() + "\n[compact_prompt_truncated]\n" + payload[-half:].lstrip()
+    def _prepare_summary_request(self, corpus: list[dict], recent_start: int, window: int, max_output_tokens: int) -> list[dict]:
+        input_budget = window - max_output_tokens - max(1, window // 20)
+        estimator = ContextEstimator()
+
+        def build_request():
+            payload = {"history": corpus[:recent_start], "retained_recent_messages": corpus[recent_start:]}
+            return build_compact_prompt(json.dumps(payload, ensure_ascii=False, sort_keys=True, default=str))
+
+        messages = build_request()
+        if estimator.estimate_messages(messages).estimated_input_tokens <= input_budget:
+            return messages
+        # Only shorten tool bodies; never cut user constraints or tool arguments.
+        for message in corpus:
+            content = message.get("content")
+            if message.get("role") == "tool" and isinstance(content, str) and len(content) > 4000:
+                omitted = len(content) - 4000
+                message["content"] = content[:2000] + f"\n[tool result: {omitted} characters omitted]\n" + content[-2000:]
+        messages = build_request()
+        estimated = estimator.estimate_messages(messages).estimated_input_tokens
+        if estimated > input_budget:
+            raise BoundaryError(
+                f"Compact input exceeds its budget ({estimated} estimated tokens, {input_budget} available). "
+                "History was preserved; use a model with a larger context window or start a new session.",
+                status="rejected", code="compact_input_too_large",
+            )
+        return messages
 
     def _get(self, value: Any, key: str) -> Any:
         if isinstance(value, dict):

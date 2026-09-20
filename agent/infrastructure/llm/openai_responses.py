@@ -12,16 +12,23 @@ from agent.domain.errors import ProviderError
 from agent.domain.models import ModelCompletion, ModelStreamEvent, ModelUsage
 from agent.domain.tool_payload import ParsedToolCall
 from .cancellation import await_with_cancellation, close_resource
+from .providers import resolve_reasoning_effort
 
 
 class OpenAIResponsesClient(ChatClient):
-    def __init__(self, async_client: Any, model: str, reasoning_effort: str = "", workspace_root: str | None = None) -> None:
+    def __init__(self, async_client: Any, model: str, reasoning_effort: str = "", workspace_root: str | None = None, *, reasoning_efforts: tuple[str, ...] = ()) -> None:
         self._client = async_client
         self._model = model
         self._reasoning_effort = reasoning_effort or ""
+        self._reasoning_efforts = reasoning_efforts
 
-    async def create(self, messages, tools=None, cancellation_token: CancellationToken | None = None) -> ModelCompletion:
+    async def create(self, messages, tools=None, cancellation_token: CancellationToken | None = None, *, max_output_tokens: int | None = None, reasoning_effort: str | None = None) -> ModelCompletion:
         payload = self._payload(messages, tools, stream=False)
+        if max_output_tokens is not None:
+            payload["max_output_tokens"] = max_output_tokens
+        effort = resolve_reasoning_effort(self._reasoning_effort, reasoning_effort, self._reasoning_efforts)
+        if effort:
+            payload["reasoning"] = {"effort": effort}
         response = await await_with_cancellation(self._client.responses.create(**payload), cancellation_token)
         return _completion(response)
 

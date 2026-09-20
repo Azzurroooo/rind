@@ -11,6 +11,12 @@ def default_reasoning_efforts(api: str) -> tuple[str, ...]:
     return () if api in ("anthropic-messages", "google-generative-ai") else REASONING_EFFORTS
 
 
+def resolve_reasoning_effort(configured: str | None, requested: str | None, supported: tuple[str, ...]) -> str | None:
+    if requested not in supported or (requested == "low" and configured in {"none", "off", "minimal"}):
+        return configured
+    return requested
+
+
 def refreshable_models_api(api: str) -> bool:
     """Whether the provider exposes an OpenAI-style GET /models catalog endpoint."""
     return api in ("openai-chat", "openai-responses")

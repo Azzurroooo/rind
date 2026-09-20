@@ -14,11 +14,13 @@ from .openai_chat_client import OpenAIChatClient
 
 
 class OpenAIChatCompletionsClient(ChatClient):
-    def __init__(self, async_client: Any, model: str, reasoning_effort: str = "", workspace_root: str | None = None) -> None:
-        self._client = OpenAIChatClient(async_client, model, reasoning_effort, workspace_root)
+    def __init__(self, async_client: Any, model: str, reasoning_effort: str = "", workspace_root: str | None = None, *, reasoning_efforts: tuple[str, ...] = ()) -> None:
+        self._client = OpenAIChatClient(async_client, model, reasoning_effort, workspace_root, reasoning_efforts=reasoning_efforts)
 
-    async def create(self, messages, tools=None, cancellation_token: CancellationToken | None = None) -> ModelCompletion:
-        return _completion(await self._client.create(messages, tools, cancellation_token))
+    async def create(self, messages, tools=None, cancellation_token: CancellationToken | None = None, *, max_output_tokens: int | None = None, reasoning_effort: str | None = None) -> ModelCompletion:
+        return _completion(await self._client.create(
+            messages, tools, cancellation_token, max_output_tokens=max_output_tokens, reasoning_effort=reasoning_effort,
+        ))
 
     async def stream(self, messages, tools=None, cancellation_token: CancellationToken | None = None) -> AsyncIterator[ModelStreamEvent]:
         call_ids: dict[int, str] = {}

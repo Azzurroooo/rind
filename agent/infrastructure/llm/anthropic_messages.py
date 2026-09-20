@@ -29,9 +29,9 @@ class AnthropicMessagesClient(ChatClient):
         self._client = async_client
         self._model = model
 
-    async def create(self, messages, tools=None, cancellation_token: CancellationToken | None = None) -> ModelCompletion:
+    async def create(self, messages, tools=None, cancellation_token: CancellationToken | None = None, *, max_output_tokens: int | None = None, reasoning_effort: str | None = None) -> ModelCompletion:
         system, converted = _messages(messages)
-        payload = {"model": self._model, "messages": converted, "max_tokens": 32768}
+        payload = {"model": self._model, "messages": converted, "max_tokens": max_output_tokens if max_output_tokens is not None else 32768}
         if system:
             payload["system"] = system
         if tools:
