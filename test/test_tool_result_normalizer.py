@@ -117,9 +117,10 @@ async def test_large_read_preview_keeps_source_metadata_without_output_store(tmp
     assert len(result.model_content.encode("utf-8")) <= 25 * 1024
     payload = json.loads(result.model_content)
     assert payload["meta"]["path"] == "C:/workspace/book.txt"
-    assert payload["meta"]["next_offset"] == 1010
+    assert payload["error_type"] == "InvalidReadResult"
+    assert "next_offset" not in payload["meta"]
     assert "output_path" not in payload["meta"]
-    assert "original path and next_offset" in payload["data"]
+    assert "original path again" in payload["error"]
 
 
 @pytest.mark.asyncio

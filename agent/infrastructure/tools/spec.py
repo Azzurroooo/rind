@@ -22,6 +22,7 @@ class ToolSpec:
     schema: dict[str, Any]
     is_async: bool
     accepted_arguments: frozenset[str] | None
+    normalize_arguments: Callable[[dict], dict] | None
 
     def __init__(
         self,
@@ -30,6 +31,7 @@ class ToolSpec:
         handler: Callable[..., Any],
         description: str,
         param_descriptions: dict[str, str | dict[str, Any]] | None = None,
+        normalize_arguments: Callable[[dict], dict] | None = None,
     ) -> None:
         if not isinstance(name, str) or not _TOOL_NAME_PATTERN.fullmatch(name):
             raise ValueError(f"Invalid tool name: {name!r}")
@@ -58,3 +60,4 @@ class ToolSpec:
         )
         object.__setattr__(self, "is_async", inspect.iscoroutinefunction(handler))
         object.__setattr__(self, "accepted_arguments", accepted_arguments)
+        object.__setattr__(self, "normalize_arguments", normalize_arguments)

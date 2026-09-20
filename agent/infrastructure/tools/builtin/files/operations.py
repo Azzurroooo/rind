@@ -101,7 +101,6 @@ def read_file(
         end_line = offset + effective_limit - 1
         selected: list[tuple[int, str]] = []
         has_more = False
-        line_truncated = False
         last_line = 0
         output_bytes = len(f"Showing lines {offset} to 0:".encode("utf-8"))
         with file_path.open("r", encoding="utf-8", newline=None) as text_file:
@@ -115,14 +114,18 @@ def read_file(
                     has_more = True
                     break
                 raw_line = line.rstrip("\r\n")
-                clipped = _clip_text(raw_line)
-                if len(clipped) < len(raw_line):
-                    line_truncated = True
-                line_bytes = len(f"{line_no:4d} | {clipped}\n".encode("utf-8"))
-                if selected and output_bytes + line_bytes > _READ_MAX_BYTES:
-                    has_more = True
-                    break
-                selected.append((line_no, clipped))
+                line_bytes = len(f"{line_no:4d} | {raw_line}\n".encode("utf-8"))
+                if output_bytes + line_bytes > _READ_MAX_BYTES:
+                    if selected:
+                        has_more = True
+                        break
+                    return tool_error(
+                        "read_file",
+                        f"Line {line_no} exceeds the read budget and was not displayed. "
+                        f"Use bash/Python to read this line in character slices, then resume at offset {line_no + 1}.",
+                        "LineTooLong", meta={"path": str(file_path), "offset": line_no},
+                    )
+                selected.append((line_no, raw_line))
                 output_bytes += line_bytes
                 if line_no % 1000 == 0 and (cancelled := _cancelled("read_file", _cancellation_token)):
                     return cancelled
@@ -145,8 +148,8 @@ def read_file(
                 "path": str(file_path),
                 "offset": offset,
                 "limit": effective_limit,
-                "truncated": has_more or line_truncated,
-                "line_truncated": line_truncated,
+                "truncated": has_more,
+                "line_truncated": False,
                 "next_offset": shown_end + 1 if has_more else None,
                 "encoding": "utf-8",
             },

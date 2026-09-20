@@ -261,6 +261,10 @@ class ToolCallProcessor:
             session_id=session.session_id or "",
             call_id=call.call_id,
         )
+        projected = _load_tool_payload(normalized_result.model_content)
+        projected_status = _classify_tool_payload(projected) if projected else None
+        if outcome.status == "completed" and projected_status:
+            outcome = _ToolCallOutcome(status=projected_status[0], error_type=projected_status[1], result=outcome.result)
         try:
             if not reused:
                 await self._persist_tool_result(
@@ -270,6 +274,7 @@ class ToolCallProcessor:
                     ts_start=ts_start,
                     ts_end=ts_end,
                     normalized_result=normalized_result,
+                    result_content=outcome.result if call.name in {"edit_file", "write_file"} else normalized_result.model_content,
                 )
             persist_error = None
         except asyncio.CancelledError:
@@ -521,6 +526,7 @@ class ToolCallProcessor:
         ts_start: str,
         ts_end: str,
         normalized_result: NormalizedToolResult,
+        result_content: str,
     ) -> None:
         await session.persist_tool_call(
             call.call_id,
@@ -529,7 +535,7 @@ class ToolCallProcessor:
             call.raw_args,
             ts_start,
             ts_end,
-            normalized_result.model_content,
+            result_content,
             model_content=normalized_result.model_content,
             model_content_format=normalized_result.model_content_format,
             model_content_policy=normalized_result.model_content_policy,
@@ -572,6 +578,6 @@ def _classify_tool_error(error_type: str) -> ToolEventStatus:
         return "unavailable"
     if "timeout" in normalized or normalized in {"deadlineexceeded"}:
         return "timed_out"
-    if normalized in {"toolargsjsonerror", "invaliduserquestion", "typeerror", "valueerror"}:
+    if normalized in {"toolargsjsonerror", "invalidarguments", "invaliduserquestion", "typeerror", "valueerror"}:
         return "rejected"
     return "failed"

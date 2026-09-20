@@ -332,3 +332,10 @@ test("argument and result parsing tolerate junk", () => {
   assert.deepEqual(parseToolArguments({ args_preview: "not json" }), {});
   assert.deepEqual(parseToolResult("nope"), {});
 });
+
+for (const name of ["write_file", "edit_file"]) {
+  test(`${name} renders canonical path during execution`, () => {
+    const lines = renderToolRunning({ name, args: { path: "src/target.py" }, phase: "running", elapsedMs: 10 }, WIDTH);
+    assert.match(lines.map(stripAnsi).join("\n"), /src\/target\.py/);
+  });
+}

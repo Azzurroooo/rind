@@ -166,11 +166,16 @@ def _file_meta(mutation: _Mutation) -> dict[str, object]:
     }
 
 
-def _success(tool_name: str, mutation: _Mutation) -> str:
+def _success(tool_name: str, mutation: _Mutation, *, start_line: int | None = None) -> str:
+    meta = _file_meta(mutation)
+    if tool_name == "write_file":
+        meta.update(created=mutation.before is None, size_bytes=len(mutation.after))
+    if start_line is not None:
+        meta["start_line"] = start_line
     return tool_ok(
         tool_name,
         "Successfully modified 1 file.",
-        meta={"files": [_file_meta(mutation)]},
+        meta={"files": [meta]},
     )
 
 
@@ -182,12 +187,12 @@ def _failure(tool_name: str, exc: Exception, fallback_type: str) -> str:
     return tool_error(tool_name, f"File operation failed: {exc}", fallback_type)
 
 
-def write_file(file_path: str, content: str) -> str:
+def write_file(path: str, content: str) -> str:
     """Create or fully overwrite a UTF-8 file."""
     try:
         if not isinstance(content, str):
             raise _MutationError("content must be a string.", "InvalidContent")
-        path = _resolve_path(file_path)
+        path = _resolve_path(path)
         if path.exists():
             before, _, mode = _read_existing(path)
         else:
@@ -199,12 +204,12 @@ def write_file(file_path: str, content: str) -> str:
         return _failure("write_file", exc, "WriteError")
 
 
-def edit_file(file_path: str, old_str: str, new_str: str) -> str:
+def edit_file(path: str, old_str: str, new_str: str) -> str:
     """Replace one unique, exact text occurrence in the current file."""
     try:
         if not isinstance(old_str, str) or not old_str or not isinstance(new_str, str):
             raise _MutationError("old_str must be a non-empty string and new_str must be a string.", "InvalidContent")
-        path = _resolve_path(file_path)
+        path = _resolve_path(path)
         before, text, mode = _read_existing(path)
         start = text.find(old_str)
         if start < 0:
@@ -216,6 +221,6 @@ def edit_file(file_path: str, old_str: str, new_str: str) -> str:
             )
         mutation = _Mutation(path, before, text.replace(old_str, new_str).encode("utf-8"), mode)
         _commit_mutation(mutation)
-        return _success("edit_file", mutation)
+        return _success("edit_file", mutation, start_line=text[:start].count("\n") + 1)
     except Exception as exc:
         return _failure("edit_file", exc, "EditError")

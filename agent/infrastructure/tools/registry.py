@@ -5,6 +5,8 @@ from __future__ import annotations
 from collections.abc import Iterable
 from typing import Any
 
+from agent.domain import tool_error
+
 from .spec import ToolSpec
 
 
@@ -36,13 +38,32 @@ class DefaultToolRegistry:
 
     def call(self, name: str, args: dict) -> Any:
         spec = self._specs_by_name[name]
-        return spec.handler(**self._filter_call_args(spec, args))
+        prepared = self._prepare_call_args(spec, args)
+        return prepared if isinstance(prepared, str) else spec.handler(**prepared)
 
     async def call_async(self, name: str, args: dict) -> Any:
         spec = self._specs_by_name[name]
-        return await spec.handler(**self._filter_call_args(spec, args))
+        prepared = self._prepare_call_args(spec, args)
+        return prepared if isinstance(prepared, str) else await spec.handler(**prepared)
 
-    def _filter_call_args(self, spec: ToolSpec, args: dict) -> dict:
+    def _prepare_call_args(self, spec: ToolSpec, args: dict) -> dict | str:
+        parameters = spec.schema["function"]["parameters"]
+        allowed = sorted(parameters["properties"])
+        try:
+            args = spec.normalize_arguments(dict(args)) if spec.normalize_arguments else args
+        except ValueError as exc:
+            return tool_error(spec.name, str(exc), "InvalidArguments", meta={"allowed": allowed})
+        missing = sorted(set(parameters["required"]) - args.keys())
+        unknown = sorted(
+            key for key in args if not key.startswith("_") and key not in allowed
+        ) if spec.accepted_arguments is not None else []
+        if missing or unknown:
+            return tool_error(
+                spec.name,
+                f"Missing arguments: {', '.join(missing) or 'none'}. "
+                f"Unknown arguments: {', '.join(unknown) or 'none'}. Allowed: {', '.join(allowed)}.",
+                "InvalidArguments", meta={"missing": missing, "unknown": unknown, "allowed": allowed},
+            )
         if spec.accepted_arguments is None:
             return args
         return {key: value for key, value in args.items() if key in spec.accepted_arguments}

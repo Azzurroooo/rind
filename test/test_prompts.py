@@ -61,7 +61,7 @@ def test_system_prompt_describes_file_mutation_contracts():
     assert "Atomically create or completely overwrite a UTF-8 text file" in text
     assert "Atomically replace one unique, exact text block" in text
     assert "Each edit sees earlier changes" in text
-    assert "hash" not in text.lower() and "SHA-256" not in text
+    assert "No hash parameter is required" in text and "SHA-256" not in text
 
 
 def test_system_prompt_strongly_limits_emojis():
