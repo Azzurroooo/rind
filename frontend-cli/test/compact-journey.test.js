@@ -84,7 +84,6 @@ test("CLI compact accepts rind send, resumes work and accepts the next turn", {t
     assert.equal(requests.filter((item) => item.stream).length, 1);
     finishCompact();
     await waitFor(() => /STEER_DELIVERED[\s\S]*Worked for/.test(stdout));
-    await new Promise((resolve) => setTimeout(resolve, 100));
     assert.ok(stdout.includes("Compact complete."), stdout);
     assert.equal(requests.filter((item) => item.stream).length, 2);
     send("next ordinary turn");
