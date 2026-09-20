@@ -732,12 +732,14 @@ test("prompt shows delegate count after background count", () => {
 test("themeMenuText renders flavor swatches with current marker", () => {
   const text = themeMenuText([
     { name: "latte", label: "Latte", current: false },
-    { name: "mocha", label: "Mocha", current: true },
+    { name: "catppuccin-mocha", label: "Catppuccin Mocha", current: true },
+    { name: "everforest-dark-medium", label: "Everforest Dark Medium", current: false },
   ], 1);
   const plain = text.replace(/\x1b\[[0-9;]*m/g, "");
   assert.match(plain, /Theme deck/);
   assert.match(plain, /· Latte/);
-  assert.match(plain, /› Mocha\s+████████\s+current/);
+  assert.match(plain, /› Catppuccin Mocha\s+████████\s+current/);
+  assert.match(plain, /· Everforest Dark Medium\s+████████/);
   assert.match(plain, /enter use · esc cancel/);
 });
 

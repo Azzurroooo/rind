@@ -1,6 +1,6 @@
 import { clipCells, graphemes, middleClipCells, stripAnsi, textWidth, wrapTextCells } from "./text-width.js";
 import { formatDuration } from "./tool-display.js";
-import { paint, flavorSwatch, themeNames } from "./theme.js";
+import { DEFAULT_THEME, paint, flavorSwatch, themeNames } from "./theme.js";
 import { homedir } from "node:os";
 
 const MAX_STARTUP_BANNER_WIDTH = 80;
@@ -571,10 +571,11 @@ export function themeMenuText(items, selectedIndex = 0) {
     return "";
   }
   const lines = [dim("  Theme deck")];
+  const labelWidth = Math.max(12, ...items.map((item) => visibleLength(clipSingleLine(item?.label || item?.name, 24))));
   for (const [index, item] of visible.items.entries()) {
     const active = index === visible.activeIndex;
     const marker = active ? accent("›") : dim("·");
-    const label = padRight(clipSingleLine(item?.label || item?.name, 16), 12);
+    const label = padRight(clipSingleLine(item?.label || item?.name, 24), labelWidth);
     const name = active ? bold(label) : dim(label);
     const suffix = item?.current ? dim("current") : "";
     lines.push(`  ${marker} ${name}  ${flavorSwatch(item?.name)}${suffix ? `  ${suffix}` : ""}`);
@@ -1254,7 +1255,7 @@ function slashConfigText(display) {
 
 function slashThemeText(display) {
   const flavors = Array.isArray(display.flavors) ? display.flavors : [];
-  const current = singleLine(display.current) || "mocha";
+  const current = singleLine(display.current) || DEFAULT_THEME;
   const meta = display.changed && display.previous
     ? `${singleLine(display.previous)} → ${current}`
     : current;
@@ -1264,8 +1265,8 @@ function slashThemeText(display) {
     return lines.join("\n");
   }
   const labelWidth = Math.min(
-    16,
-    Math.max(8, ...flavors.map((flavor) => visibleLength(clipSingleLine(flavor?.label, 16)))),
+    24,
+    Math.max(8, ...flavors.map((flavor) => visibleLength(clipSingleLine(flavor?.label, 24)))),
   );
   for (const flavor of flavors) {
     if (!flavor || typeof flavor !== "object") {
@@ -1273,7 +1274,7 @@ function slashThemeText(display) {
     }
     const isCurrent = Boolean(flavor.current);
     const marker = isCurrent ? accent("›") : dim("·");
-    const label = padRight(clipSingleLine(flavor.label || flavor.name, 16), labelWidth);
+    const label = padRight(clipSingleLine(flavor.label || flavor.name, 24), labelWidth);
     const tag = isCurrent ? dim(" · current") : "";
     lines.push(`  ${marker} ${isCurrent ? bold(label) : dim(label)}  ${flavorSwatch(flavor.name)}${tag}`);
   }

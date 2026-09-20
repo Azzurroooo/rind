@@ -26,20 +26,30 @@ const FLAVORS = {
     fence: "#99d1db",
     dim: "#a5adce",
   },
-  macchiato: {
-    label: "Macchiato",
-    accent: "#8aadf4",
-    success: "#a6da95",
-    danger: "#ed8796",
-    warning: "#eed49f",
-    notice: "#c6a0f6",
-    path: "#7dc4e4",
-    code: "#f5a97f",
-    fence: "#91d7e3",
-    dim: "#a5adcb",
+  dracula: {
+    label: "Dracula",
+    accent: "#bd93f9",
+    success: "#50fa7b",
+    danger: "#ff5555",
+    warning: "#f1fa8c",
+    notice: "#ff79c6",
+    path: "#8be9fd",
+    code: "#ffb86c",
+    fence: "#6272a4",
   },
-  mocha: {
-    label: "Mocha",
+  "gruvbox-dark": {
+    label: "Gruvbox Dark",
+    accent: "#83a598",
+    success: "#b8bb26",
+    danger: "#fb4934",
+    warning: "#fabd2f",
+    notice: "#d3869b",
+    path: "#8ec07c",
+    code: "#fe8019",
+    fence: "#928374",
+  },
+  "catppuccin-mocha": {
+    label: "Catppuccin Mocha",
     accent: "#89b4fa",
     success: "#a6e3a1",
     danger: "#f38ba8",
@@ -50,8 +60,41 @@ const FLAVORS = {
     fence: "#89dceb",
     dim: "#a6adc8",
   },
-  rind: {
-    label: "Rind",
+  "solarized-dark": {
+    label: "Solarized Dark",
+    accent: "#268bd2",
+    success: "#859900",
+    danger: "#dc322f",
+    warning: "#b58900",
+    notice: "#6c71c4",
+    path: "#2aa198",
+    code: "#cb4b16",
+    fence: "#586e75",
+  },
+  "rose-pine": {
+    label: "Rose Pine",
+    accent: "#c4a7e7",
+    success: "#9ccfd8",
+    danger: "#eb6f92",
+    warning: "#f6c177",
+    notice: "#ebbcba",
+    path: "#9ccfd8",
+    code: "#ebbcba",
+    fence: "#908caa",
+  },
+  "everforest-dark-medium": {
+    label: "Everforest Dark Medium",
+    accent: "#7fbbb3",
+    success: "#a7c080",
+    danger: "#e67e80",
+    warning: "#dbbc7f",
+    notice: "#d699b6",
+    path: "#83c092",
+    code: "#e69875",
+    fence: "#859289",
+  },
+  pistachio: {
+    label: "Pistachio",
     accent: "#d6df9a",
     success: "#a8bf96",
     danger: "#df9b87",
@@ -63,7 +106,7 @@ const FLAVORS = {
   },
 };
 
-export const DEFAULT_THEME = "mocha";
+export const DEFAULT_THEME = "catppuccin-mocha";
 
 let activeName = DEFAULT_THEME;
 
@@ -112,7 +155,9 @@ export function currentTheme() {
 }
 
 export function setTheme(name) {
-  const key = String(name || "").trim().toLowerCase();
+  const requested = String(name || "").trim().toLowerCase();
+  // Preserve saved selections made before the palette was renamed.
+  const key = requested === "rind" ? "pistachio" : requested;
   if (!FLAVORS[key]) {
     return null;
   }

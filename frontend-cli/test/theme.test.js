@@ -18,19 +18,22 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
-test("theme defaults to mocha and validates switches", () => {
+test("theme defaults to Catppuccin Mocha and validates switches", () => {
   resetTheme();
-  assert.equal(DEFAULT_THEME, "mocha");
-  assert.deepEqual(currentTheme(), { name: "mocha", label: "Mocha" });
+  assert.equal(DEFAULT_THEME, "catppuccin-mocha");
+  assert.deepEqual(currentTheme(), { name: "catppuccin-mocha", label: "Catppuccin Mocha" });
 
   assert.equal(setTheme("nope"), null);
-  assert.equal(currentTheme().name, "mocha");
+  assert.equal(setTheme("macchiato"), null);
+  assert.equal(setTheme("mocha"), null);
+  assert.equal(currentTheme().name, "catppuccin-mocha");
 
-  assert.deepEqual(setTheme("Macchiato"), { name: "macchiato", label: "Macchiato" });
+  assert.deepEqual(setTheme("Dracula"), { name: "dracula", label: "Dracula" });
   const current = themeOptions().find((option) => option.current);
-  assert.equal(current.name, "macchiato");
-  assert.equal(themeOptions().length, 5);
-  assert.deepEqual(themeNames(), ["latte", "frappe", "macchiato", "mocha", "rind"]);
+  assert.equal(current.name, "dracula");
+  assert.equal(themeOptions().length, 9);
+  assert.deepEqual(themeNames(), ["latte", "frappe", "dracula", "gruvbox-dark", "catppuccin-mocha", "solarized-dark", "rose-pine", "everforest-dark-medium", "pistachio"]);
+  assert.deepEqual(setTheme("rind"), { name: "pistachio", label: "Pistachio" });
   resetTheme();
 });
 
@@ -68,11 +71,15 @@ test("paint honors the environment and paintRaw always emits truecolor", () => {
 
 test("flavor swatches render in the target flavor regardless of active theme", () => {
   setTheme("latte");
-  const swatch = flavorSwatch("mocha");
+  const swatch = flavorSwatch("catppuccin-mocha");
   assert.ok(swatch.includes("\x1b[38;2;137;180;250m"), "uses mocha accent blue");
   assert.equal(swatch.match(/\x1b\[38;2;/g).length, 8, "shows eight hue cells");
   assert.ok(/^(█\x1b\[0m)+/.test(swatch.replace(/\x1b\[[0-9;]*m/g, "")) === false || swatch.endsWith("\x1b[0m"));
   assert.equal(swatch.replace(/\x1b\[[0-9;]*m/g, "").length, 8);
+  for (const name of themeNames()) {
+    assert.equal(flavorSwatch(name).replace(/\x1b\[[0-9;]*m/g, ""), "█".repeat(8));
+    assert.ok(!flavorSwatch(name).includes("\x1b[48;"), `${name} must preserve the terminal background`);
+  }
   resetTheme();
 });
 
@@ -82,30 +89,30 @@ test("/theme command lists flavors and applies switches", async () => {
   const listed = await executeLocalSlashCommand("/theme", context);
   assert.equal(listed.display.type, "theme");
   assert.equal(listed.display.changed, false);
-  assert.equal(listed.display.flavors.length, 5);
+  assert.equal(listed.display.flavors.length, 9);
 
-  const switched = await executeLocalSlashCommand("/theme macchiato", context);
+  const switched = await executeLocalSlashCommand("/theme dracula", context);
   assert.equal(switched.display.changed, true);
-  assert.equal(switched.display.previous, "mocha");
-  assert.equal(currentTheme().name, "macchiato");
+  assert.equal(switched.display.previous, "catppuccin-mocha");
+  assert.equal(currentTheme().name, "dracula");
 
-  const unknown = await executeLocalSlashCommand("/theme dracula", context);
+  const unknown = await executeLocalSlashCommand("/theme missing", context);
   assert.match(unknown.text, /Unknown theme/);
-  assert.equal(currentTheme().name, "macchiato");
+  assert.equal(currentTheme().name, "dracula");
   resetTheme();
 });
 
 test("/theme persists only through the injected persistTheme hook", async () => {
   resetTheme();
   let persisted = null;
-  const switched = await executeLocalSlashCommand("/theme rind", {
+  const switched = await executeLocalSlashCommand("/theme pistachio", {
     persistTheme: (name) => {
       persisted = name;
     },
   });
-  assert.equal(persisted, "rind");
+  assert.equal(persisted, "pistachio");
   assert.equal(switched.display.changed, true);
-  assert.deepEqual(currentTheme(), { name: "rind", label: "Rind" });
+  assert.deepEqual(currentTheme(), { name: "pistachio", label: "Pistachio" });
 
   const bare = await executeLocalSlashCommand("/theme", {});
   assert.equal(bare.display.changed, false);
@@ -123,8 +130,8 @@ test("cli state store merges patches atomically and tolerates corruption", async
 
     await writeFile(path.join(root, "cli-state.json"), "{broken", "utf8");
     assert.deepEqual(loadCliState(root), {});
-    assert.equal(saveCliState({ theme: "mocha" }, root), true);
-    assert.deepEqual(loadCliState(root), { theme: "mocha" });
+    assert.equal(saveCliState({ theme: "catppuccin-mocha" }, root), true);
+    assert.deepEqual(loadCliState(root), { theme: "catppuccin-mocha" });
     resetTheme();
   } finally {
     await rm(root, { recursive: true, force: true });

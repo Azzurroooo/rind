@@ -440,7 +440,7 @@ test("replayAll repaints viewport and scrollback with the active theme", async (
   assert.ok(!writes.some((w) => w.includes("\x1b[2J")));
 
   const replayStart = writes.length;
-  setTheme("macchiato");
+  setTheme("dracula");
   tui.replayAll();
   await settle(virtual);
 
@@ -449,7 +449,7 @@ test("replayAll repaints viewport and scrollback with the active theme", async (
     "replay clears the screen",
   );
   assert.ok(
-    writes.slice(replayStart).some((w) => w.includes("\x1b[38;2;138;173;244m")),
+    writes.slice(replayStart).some((w) => w.includes("\x1b[38;2;189;147;249m")),
     "repainted in new theme",
   );
   assert.ok(
