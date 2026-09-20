@@ -37,7 +37,8 @@ class ShellTools:
         _output_store: ToolOutputStore | None = None,
     ) -> str:
         """Execute a bash command. Use run_in_background=true for long-running commands like servers."""
-        status, reason = BashPolicy.classify(command)
+        state = self.pool.get_state(_session_id, workspace_root=_workspace_root)
+        status, reason = BashPolicy.classify(command, state.shell_backend)
 
         if status == "deny":
             return tool_error(
@@ -47,7 +48,6 @@ class ShellTools:
                 meta={"command": command[:500]},
             )
 
-        state = self.pool.get_state(_session_id, workspace_root=_workspace_root)
         output_store = _output_store or self.output_store
 
         if run_in_background:
