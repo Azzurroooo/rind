@@ -6,7 +6,7 @@ from typing import Any
 
 from agent.domain.compaction import COMPACT_CONTINUATION_USER_CONTENT, COMPACT_HANDOFF_REASONING_CONTENT
 from agent.domain.message_boundary import validate_compact_handoff_boundary
-from agent.domain.system_prompt import refresh_builtin_file_rules
+from agent.prompts import refresh_builtin_file_rules
 
 INTERNAL_MESSAGE_KINDS = frozenset({"goal_checkpoint"})
 
