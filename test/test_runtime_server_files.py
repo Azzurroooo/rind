@@ -12,7 +12,7 @@ os.chdir(PROJECT_ROOT)
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from agent.runtime.server.files import (
+from agent.runtime.server.workspace_files import (
     FILE_LIMIT_BYTES,
     FileMethodError,
     file_list,

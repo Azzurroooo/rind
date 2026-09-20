@@ -24,7 +24,7 @@ def main(argv: list[str] | None = None) -> int:
     if arguments[:1] == ["app-server"]:
         from agent.runtime.server.app_server import main as app_server_main
         if "--web" in arguments[1:]:
-            from agent.runtime.server.web import WebRuntimeServer as server_class
+            from agent.runtime.server.websocket import WebRuntimeServer as server_class
         else:
             from agent.runtime.server.stdio import WorkerStdioRuntimeServer as server_class
 

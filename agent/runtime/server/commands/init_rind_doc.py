@@ -1,0 +1,45 @@
+"""RIND.md initialization slash command."""
+
+from pathlib import Path
+
+from agent.runtime.server.commands.contracts import SlashCommandContext, SlashCommandInfo, SlashCommandResult
+
+
+async def handle_init(context: SlashCommandContext, args: list[str]) -> SlashCommandResult:
+    if len(args) > 1:
+        return SlashCommandResult("Usage: /init [project|user]")
+    scope = args[0].lower() if args else "project"
+    if scope not in {"project", "user"}:
+        return SlashCommandResult("Usage: /init [project|user]")
+
+    from agent.infrastructure.rind_docs import resolve_project_doc_path, resolve_user_doc_path
+    from agent.prompts import build_rind_init_prompt
+
+    project_root = Path(context.workspace_root) if context.workspace_root else None
+    target = (
+        resolve_project_doc_path(project_root)
+        if scope == "project"
+        else resolve_user_doc_path()
+    )
+    prompt = build_rind_init_prompt(scope, str(target))
+    return SlashCommandResult(
+        text=f"Initializing {scope} RIND.md: {target}",
+        next_prompt={
+            "input": f"Initialize {scope} RIND.md at {target}",
+            "transient_system_messages": [
+                {
+                    "role": "system",
+                    "content": prompt,
+                    "_context_kind": "rind_init",
+                }
+            ],
+        },
+    )
+
+
+COMMAND = SlashCommandInfo(
+    name="init",
+    description="Draft RIND.md",
+    usage="/init [project|user]",
+    handler=handle_init,
+)

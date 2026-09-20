@@ -8,8 +8,8 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from agent.domain import shell as shell_detection
 from agent.domain.shell import ShellDetection, detect_default_shell
-from agent.infrastructure.tools.builtin.shell import session_pool as bash_session_pool
-from agent.infrastructure.tools.builtin.shell.supervisor import ProcessSupervisor
+from agent.infrastructure.tools.shell import session_pool as bash_session_pool
+from agent.infrastructure.tools.shell.supervisor import ProcessSupervisor
 
 
 def test_detect_shell_prefers_rind_bash_path(tmp_path, monkeypatch):

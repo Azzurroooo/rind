@@ -32,7 +32,7 @@ class SessionIndexRepository:
             return
 
         try:
-            lock = self._files._get_lock_for_path(self._index_path)
+            lock = self._files.lock_for(self._index_path)
             with lock:
                 index_data = self.load_index()
                 sessions = index_data.get("sessions", [])
@@ -54,7 +54,7 @@ class SessionIndexRepository:
             return
 
         try:
-            lock = self._files._get_lock_for_path(self._index_path)
+            lock = self._files.lock_for(self._index_path)
             with lock:
                 index_data = self.load_index()
                 sessions = index_data.get("sessions", [])

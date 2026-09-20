@@ -7,7 +7,7 @@ import tempfile
 from types import SimpleNamespace
 from pathlib import Path
 
-from agent.infrastructure.config import AppSettings
+from agent.infrastructure.settings import AppSettings
 from agent.infrastructure.team import initialize_team_agent, initialize_team_project
 from agent.runtime.server.worker import ExecutionCoordinator, RuntimeWorker
 from agent.runtime.server.protocol import RuntimeMethod

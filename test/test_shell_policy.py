@@ -2,7 +2,7 @@
 
 import pytest
 
-from agent.infrastructure.tools.builtin.shell.policy import BashPolicy
+from agent.infrastructure.tools.shell.policy import BashPolicy
 
 
 @pytest.mark.parametrize("command", [

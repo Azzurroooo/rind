@@ -8,8 +8,8 @@ import pytest
 from agent.domain.errors import ProviderError
 from agent.domain.models import Credential, ModelSelection, ModelUsage
 from agent.domain.tool_payload import ParsedToolCall
-from agent.infrastructure.auth import CredentialStore
-from agent.infrastructure.config.settings_loader import AppSettings
+from agent.infrastructure.credentials import CredentialStore
+from agent.infrastructure.settings import AppSettings
 from agent.infrastructure.llm.openai_chat import OpenAIChatCompletionsClient
 from agent.infrastructure.llm.openai_chat_client import build_async_client
 from agent.infrastructure.llm.provider_service import ProviderServiceImpl
@@ -140,7 +140,7 @@ async def test_login_rejects_unsupported_method(tmp_path: Path, monkeypatch) -> 
 
 @pytest.mark.asyncio
 async def test_list_models_uses_cache_fallback_and_reports_refresh_warning(tmp_path: Path, monkeypatch) -> None:
-    from agent.infrastructure.llm.providers import default_reasoning_efforts
+    from agent.infrastructure.llm.catalog import default_reasoning_efforts
 
     settings = _settings(tmp_path)
     service = _service(tmp_path, settings, monkeypatch)
@@ -192,7 +192,7 @@ async def test_list_models_keeps_other_providers_when_one_refresh_fails(tmp_path
 
 @pytest.mark.asyncio
 async def test_list_models_refreshed_entries_keep_verified_efforts(tmp_path: Path, monkeypatch) -> None:
-    from agent.infrastructure.llm.providers import default_reasoning_efforts
+    from agent.infrastructure.llm.catalog import default_reasoning_efforts
 
     service = _service(tmp_path, _settings(tmp_path), monkeypatch)
     service.credentials.set("zhipu", Credential(type="api_key", key="zhipu-key"))
@@ -418,7 +418,7 @@ def test_responses_adapter_converts_canonical_messages_to_input_items() -> None:
 
 
 def test_registry_covers_mainstream_providers() -> None:
-    from agent.infrastructure.llm.providers import PROVIDERS, default_reasoning_efforts, refreshable_models_api
+    from agent.infrastructure.llm.catalog import PROVIDERS, default_reasoning_efforts, refreshable_models_api
 
     assert PROVIDERS["google"].api == "google-generative-ai"
     assert PROVIDERS["google"].environment_key == "GEMINI_API_KEY"
@@ -457,7 +457,7 @@ def test_registry_covers_mainstream_providers() -> None:
 
 
 def test_fallback_models_declare_per_model_reasoning_efforts() -> None:
-    from agent.infrastructure.llm.providers import PROVIDERS, default_reasoning_efforts
+    from agent.infrastructure.llm.catalog import PROVIDERS, default_reasoning_efforts
 
     def _efforts(provider_id: str, model_id: str) -> tuple[str, ...]:
         return next(model.reasoning_efforts for model in PROVIDERS[provider_id].fallback_models if model.id == model_id)

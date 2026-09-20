@@ -13,7 +13,7 @@ from agent.domain.events import ToolResultEvent, TurnCompletedEvent
 from agent.domain.models import ModelStreamEvent
 from agent.infrastructure.persistence.jsonl_session_store import JsonlSessionStore
 from agent.infrastructure.persistence.message_projector import project_messages
-from agent.infrastructure.tools.builtin.files import build_file_tool_specs
+from agent.infrastructure.tools.files.specs import build_file_tool_specs
 from agent.infrastructure.tools.registry import DefaultToolRegistry
 from agent.prompts import FILE_TOOL_RULES, build_system_prompt, refresh_builtin_file_rules
 from agent.runtime.core.stream_parser import MessageStreamParser

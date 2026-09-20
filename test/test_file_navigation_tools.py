@@ -11,8 +11,8 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from agent.domain.cancellation import CancellationTokenSource
 from agent.infrastructure.tools import DefaultToolRegistry
-from agent.infrastructure.tools.builtin.files.operations import glob as glob_tool
-from agent.infrastructure.tools.builtin.files.operations import grep, read_file
+from agent.infrastructure.tools.files.queries import glob as glob_tool
+from agent.infrastructure.tools.files.queries import grep, read_file
 
 
 def parse_payload(raw: str) -> dict:

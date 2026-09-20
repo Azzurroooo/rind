@@ -11,7 +11,7 @@ from agent.application.tools.result_normalizer import ToolResultNormalizer
 from agent.domain.tool_payload import ParsedToolCall
 from agent.infrastructure.persistence.jsonl_session_store import JsonlSessionStore
 from agent.infrastructure.tools.registry import DefaultToolRegistry
-from agent.infrastructure.tools.builtin.files import build_file_tool_specs, read_file
+from agent.infrastructure.tools.files.specs import build_file_tool_specs, read_file
 
 
 @pytest.mark.asyncio

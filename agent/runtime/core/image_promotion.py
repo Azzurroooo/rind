@@ -8,7 +8,7 @@ Chat Completions content parts: the original text (kept intact) plus one
 oversize, unsafe path, read error) degrades silently to the original text.
 
 Pure functions only; TurnRunner supplies the workspace root from the session
-store. Path safety mirrors agent/runtime/server/files.py without importing it
+store. Path safety mirrors agent/runtime/server/workspace_files.py without importing it
 (runtime/core must not depend on runtime/server).
 """
 
@@ -19,7 +19,7 @@ import os
 import re
 from pathlib import Path, PurePosixPath
 
-# Consistent with agent/runtime/server/files.py mime mapping.
+# Consistent with agent/runtime/server/workspace_files.py mime mapping.
 IMAGE_MIME_TYPES = {
     ".png": "image/png",
     ".jpg": "image/jpeg",

@@ -10,7 +10,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from agent.domain.cancellation import CancellationTokenSource
-from agent.infrastructure.tools.builtin.shell.capture import StreamCapture
+from agent.infrastructure.tools.shell.capture import StreamCapture
 
 
 def _python_command(code: str) -> str:

@@ -14,16 +14,16 @@ import openai
 from agent.application.ports.chat_client import ChatClient
 from agent.domain.cancellation import CancellationToken
 from agent.domain.errors import ProviderError
-from agent.infrastructure.llm.llm_trace import make_trace
-from .cancellation import await_with_cancellation, close_resource
-from .providers import resolve_reasoning_effort
+from agent.infrastructure.llm.trace import make_trace
+from agent.infrastructure.llm.cancellation import await_with_cancellation, close_resource
+from agent.infrastructure.llm.catalog import resolve_reasoning_effort
 
 
 logger = logging.getLogger(__name__)
 
 
 def build_async_client(api_key: str, base_url: str, *, max_retries: int = 2) -> openai.AsyncOpenAI:
-    from agent.infrastructure.config.settings_loader import DEFAULT_USER_AGENT
+    from agent.infrastructure.settings import DEFAULT_USER_AGENT
 
     return openai.AsyncOpenAI(
         api_key=api_key,

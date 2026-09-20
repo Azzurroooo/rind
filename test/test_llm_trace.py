@@ -5,8 +5,8 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from agent.infrastructure.llm import llm_trace
-from agent.infrastructure.llm.llm_trace import LlmCallTrace, make_trace, resolve_trace_dir, trace_enabled, _serialize
+from agent.infrastructure.llm import trace as llm_trace
+from agent.infrastructure.llm.trace import LlmCallTrace, make_trace, resolve_trace_dir, trace_enabled, _serialize
 from agent.infrastructure.llm.openai_chat_client import OpenAIChatClient
 
 

@@ -16,7 +16,7 @@ class SessionFiles:
     def __init__(self):
         self._locks = {}
 
-    def _get_lock_for_path(self, path: str):
+    def lock_for(self, path: str):
         lock_path = f"{path}.lock"
         if lock_path not in self._locks:
             self._locks[lock_path] = FileLock(lock_path, timeout=5)
@@ -26,7 +26,7 @@ class SessionFiles:
         if not os.path.exists(path):
             return None
         try:
-            with self._get_lock_for_path(path):
+            with self.lock_for(path):
                 with open(path, "r", encoding="utf-8") as f:
                     return json.load(f)
         except Timeout as e:
@@ -39,7 +39,7 @@ class SessionFiles:
     def write_json(self, path: str, data: dict) -> None:
         tmp = f"{path}.{uuid.uuid4().hex}.tmp"
         try:
-            with self._get_lock_for_path(path):
+            with self.lock_for(path):
                 with open(tmp, "w", encoding="utf-8") as f:
                     json.dump(data, f, ensure_ascii=False, indent=2)
                     f.flush()
@@ -65,7 +65,7 @@ class SessionFiles:
     def append_jsonl(self, path: str, data: dict) -> None:
         line = json.dumps(data, ensure_ascii=False)
         try:
-            with self._get_lock_for_path(path):
+            with self.lock_for(path):
                 with open(path, "a", encoding="utf-8") as f:
                     f.write(line + "\n")
                     f.flush()
@@ -77,7 +77,7 @@ class SessionFiles:
         if not os.path.exists(path):
             return []
         items = []
-        with self._get_lock_for_path(path):
+        with self.lock_for(path):
             with open(path, "r", encoding="utf-8") as f:
                 for line in f:
                     line = line.strip()
@@ -92,7 +92,7 @@ class SessionFiles:
     def write_jsonl(self, path: str, records: list[dict]) -> None:
         payload = "".join(json.dumps(record, ensure_ascii=False) + "\n" for record in records)
         try:
-            with self._get_lock_for_path(path):
+            with self.lock_for(path):
                 with open(path, "w", encoding="utf-8") as f:
                     f.write(payload)
                     f.flush()

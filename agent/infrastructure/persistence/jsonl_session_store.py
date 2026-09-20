@@ -104,7 +104,7 @@ class JsonlSessionStore(SessionStore):
         self._resume_latest = resume_latest
         self._model = model
         self._provider = str(provider or "openai-compatible").strip()
-        from agent.infrastructure.config.settings_loader import normalize_reasoning_effort
+        from agent.infrastructure.settings import normalize_reasoning_effort
 
         self._reasoning_effort = normalize_reasoning_effort(reasoning_effort)
         self._system_prompt = system_prompt
@@ -335,7 +335,7 @@ class JsonlSessionStore(SessionStore):
         self._provider = str(meta.get("provider") or "openai-compatible").strip()
         if not meta.get("provider"):
             self._session_meta["provider"] = self._provider
-        from agent.infrastructure.config.settings_loader import normalize_reasoning_effort
+        from agent.infrastructure.settings import normalize_reasoning_effort
 
         try:
             configured_effort = normalize_reasoning_effort(meta.get("reasoning_effort"))
@@ -706,7 +706,7 @@ class JsonlSessionStore(SessionStore):
             await asyncio.to_thread(_persist)
 
     async def update_reasoning_effort(self, effort: str) -> None:
-        from agent.infrastructure.config.settings_loader import normalize_reasoning_effort
+        from agent.infrastructure.settings import normalize_reasoning_effort
 
         clean = normalize_reasoning_effort(effort)
         if not clean:

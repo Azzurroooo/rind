@@ -19,11 +19,11 @@ from typing import Any
 
 from agent.application.context import CompactionService
 from agent.application.context.token_usage import positive_int
-from agent.application.context.usage_summary import summarize_usage
+from agent.application.usage_summary import summarize_usage
 from agent.application.tools import ToolResultNormalizer
 from agent.bootstrap import AgentContainer, SharedRuntimeResources, build_agent_container
-from agent.infrastructure.config import AppSettings
-from agent.infrastructure.config.settings_loader import DEFAULT_MODEL, load_settings
+from agent.infrastructure.settings import AppSettings
+from agent.infrastructure.settings import DEFAULT_MODEL, load_settings
 from agent.infrastructure.llm import ProviderServiceImpl
 from agent.domain.models import ModelSelection
 from agent.infrastructure.persistence import JsonlSessionStore, ToolOutputStore, fork_session
@@ -35,9 +35,9 @@ from agent.infrastructure.persistence.usage_ledger import (
     load_usage_records,
 )
 from agent.infrastructure.paths import resolve_session_base, validate_session_id
-from agent.infrastructure.planning import build_plan_snapshot
-from agent.infrastructure.tools.builtin.shell import ShellTools
-from agent.infrastructure.tools.builtin.web_sessions import WebSessions
+from agent.infrastructure.persistence.plan import build_plan_snapshot
+from agent.infrastructure.tools.shell.specs import ShellTools
+from agent.infrastructure.tools.web.session_pool import WebSessions
 from agent.infrastructure.team import discover_agent
 from agent.prompts import build_goal_checkpoint_prompt, build_system_prompt
 from agent.domain.cancellation import CancellationTokenSource

@@ -17,11 +17,11 @@ from agent.domain.models import (
     ModelStreamEvent,
     ProviderStatus,
 )
-from agent.infrastructure.auth import CredentialStore
-from agent.infrastructure.config.settings_loader import AppSettings, load_settings
+from agent.infrastructure.credentials import CredentialStore
+from agent.infrastructure.settings import AppSettings, load_settings
 
-from .cancellation import close_resource
-from .providers import PROVIDERS, default_reasoning_efforts, refreshable_models_api
+from agent.infrastructure.llm.cancellation import close_resource
+from agent.infrastructure.llm.catalog import PROVIDERS, default_reasoning_efforts, refreshable_models_api
 
 
 class ProviderServiceImpl:
@@ -87,27 +87,27 @@ class ProviderServiceImpl:
         key = credential.key or credential.access
         efforts = next((model.reasoning_efforts for model in definition.fallback_models if model.id == selection.model_id), ())
         if definition.api == "openai-chat":
-            from .openai_chat import OpenAIChatCompletionsClient
-            from .openai_chat_client import build_async_client
+            from agent.infrastructure.llm.openai_chat import OpenAIChatCompletionsClient
+            from agent.infrastructure.llm.openai_chat_client import build_async_client
 
             return OpenAIChatCompletionsClient(
                 build_async_client(key, endpoint, max_retries=14), selection.model_id, selection.reasoning_effort,
                 workspace_root=workspace_root, reasoning_efforts=efforts,
             )
         if definition.api == "openai-responses":
-            from .openai_responses import OpenAIResponsesClient
-            from .openai_chat_client import build_async_client
+            from agent.infrastructure.llm.openai_responses import OpenAIResponsesClient
+            from agent.infrastructure.llm.openai_chat_client import build_async_client
 
             return OpenAIResponsesClient(
                 build_async_client(key, endpoint), selection.model_id, selection.reasoning_effort,
                 workspace_root=workspace_root, reasoning_efforts=efforts,
             )
         if definition.api == "anthropic-messages":
-            from .anthropic_messages import AnthropicMessagesClient
+            from agent.infrastructure.llm.anthropic_messages import AnthropicMessagesClient
 
             return AnthropicMessagesClient(api_key=key, model=selection.model_id, base_url=endpoint)
         if definition.api == "google-generative-ai":
-            from .google_generative_ai import GoogleGenerativeAIClient
+            from agent.infrastructure.llm.google_generative_ai import GoogleGenerativeAIClient
 
             return GoogleGenerativeAIClient(api_key=key, model=selection.model_id, base_url=endpoint)
         raise ProviderError(f"Unsupported provider API: {definition.api}", status="rejected", code="unsupported_api")
@@ -143,7 +143,7 @@ class ProviderServiceImpl:
         credential = self._resolve_credential(settings, definition.id)
         if credential is None:
             return False
-        from .openai_chat_client import build_async_client
+        from agent.infrastructure.llm.openai_chat_client import build_async_client
 
         client = build_async_client(credential.key or credential.access, self._endpoint(settings, definition))
         try:

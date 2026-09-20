@@ -16,7 +16,7 @@ if str(PROJECT_ROOT) not in sys.path:
 from agent.application import CompactionService
 from agent.domain.compaction import COMPACT_CONTINUATION_USER_CONTENT
 from agent.domain.models import ModelCompletion, ModelUsage
-from agent.infrastructure.planning import build_plan_snapshot
+from agent.infrastructure.persistence.plan import build_plan_snapshot
 
 
 class FakeSession:

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from agent.runtime.server.commands.features import build_command_infos
+from agent.runtime.server.commands.catalog import build_command_infos
 
 import asyncio
 import copy
@@ -22,7 +22,7 @@ from agent.infrastructure.paths import validate_session_id
 from agent.version import __version__
 from agent.runtime.server.commands import SlashCommandContext, SlashCommandResult, SlashCommandRouter
 from agent.runtime.server.resume_preview import render_resume_preview
-from agent.runtime.server.files import FileMethodError, file_list, file_read, file_write
+from agent.runtime.server.workspace_files import FileMethodError, file_list, file_read, file_write
 from agent.runtime.server.replay_events import iter_durable_events
 from agent.runtime.server.protocol import (
     CAPABILITIES,

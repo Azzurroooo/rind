@@ -22,7 +22,7 @@ import agent.infrastructure.persistence.session_files as session_files
 from agent.domain.compaction import COMPACT_CONTINUATION_USER_CONTENT, COMPACT_HANDOFF_REASONING_CONTENT
 from agent.domain.message_boundary import validate_model_message_boundary
 from agent.infrastructure.persistence.message_projector import MISSING_TOOL_RESULT_CONTENT
-from agent.infrastructure.tools.builtin.planning import update_plan
+from agent.infrastructure.tools.planning import update_plan
 
 @pytest.fixture
 def temp_session_dir():

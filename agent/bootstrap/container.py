@@ -12,18 +12,18 @@ from agent.application.context import CompactionService, ContextEstimator, Conte
 from agent.application.ports.session_store import SessionStore
 from agent.runtime.core import AgentRuntime, MessageStreamParser, TurnRunner
 from agent.application.tools import ToolCallProcessor, ToolExecutor, ToolResultNormalizer
-from agent.infrastructure.config import AppSettings, load_settings
+from agent.infrastructure.settings import AppSettings, load_settings
 from agent.infrastructure.persistence import JsonlSessionStore
 from agent.infrastructure.persistence import ToolOutputStore
 from agent.infrastructure.persistence.usage_ledger import append_usage_record, default_usage_ledger_path
-from agent.infrastructure.planning import build_plan_snapshot
+from agent.infrastructure.persistence.plan import build_plan_snapshot
 from agent.infrastructure.rind_docs import build_rind_doc_context
 from agent.infrastructure.skills import SkillRepository
 from agent.infrastructure.tools import DefaultToolRegistry
-from agent.infrastructure.tools.builtin import build_builtin_tool_specs
-from agent.infrastructure.tools.builtin.files.queue import FileMutationQueue
-from agent.infrastructure.tools.builtin.shell import ShellTools
-from agent.infrastructure.tools.builtin.web_sessions import WebSessions
+from agent.infrastructure.tools.catalog import build_builtin_tool_specs
+from agent.infrastructure.tools.files.mutation_queue import FileMutationQueue
+from agent.infrastructure.tools.shell.specs import ShellTools
+from agent.infrastructure.tools.web.session_pool import WebSessions
 from agent.prompts import build_goal_policy_prompt, build_system_prompt
 
 
