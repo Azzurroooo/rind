@@ -58,9 +58,10 @@ def test_system_prompt_contains_rind_doc_rules():
 def test_system_prompt_describes_file_mutation_contracts():
     text = prompts.SYSTEM_PROMPT
 
-    assert "Atomically create a UTF-8 text file" in text
-    assert "Atomically replace one exact text block" in text
-    assert "Never reuse a hash after a successful mutation" in text
+    assert "Atomically create or completely overwrite a UTF-8 text file" in text
+    assert "Atomically replace one unique, exact text block" in text
+    assert "Each edit sees earlier changes" in text
+    assert "hash" not in text.lower() and "SHA-256" not in text
 
 
 def test_system_prompt_strongly_limits_emojis():
@@ -96,7 +97,7 @@ def test_rind_init_prompt_scopes_project_file():
     assert "Do not modify the other RIND.md level." in prompt
     assert "32 KiB byte budget" in prompt
     assert "Use `write_file` when the target does not exist" in prompt
-    assert "use `edit_file` with its latest SHA-256" in prompt
+    assert "use `edit_file` to preserve unrelated content" in prompt
 
 
 def test_rind_init_prompt_scopes_user_file():
@@ -107,7 +108,7 @@ def test_rind_init_prompt_scopes_user_file():
     assert "Do not invent preferences." in prompt
     assert r"C:\Users\me\.rind\RIND.md" in prompt
     assert "Use `write_file` when the target does not exist" in prompt
-    assert "use `edit_file` with its latest SHA-256" in prompt
+    assert "use `edit_file` to preserve unrelated content" in prompt
 
 
 def test_compact_prompt_has_stable_handoff_instructions():

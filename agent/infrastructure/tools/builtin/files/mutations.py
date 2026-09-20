@@ -1,19 +1,16 @@
-"""Version-checked, atomic UTF-8 file mutation tools."""
+"""Atomic UTF-8 file mutations with commit-time conflict detection."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 import difflib
-import hashlib
 import os
 from pathlib import Path
-import re
 import stat
 import tempfile
 
 from agent.domain import tool_error, tool_ok
 
-_SHA256_PATTERN = re.compile(r"^[0-9a-fA-F]{64}$")
 _MAX_WRITE_FILE_SIZE = 10 * 1024 * 1024
 _DIFF_MAX_LINES = 120
 _DIFF_MAX_CHARS = 12_000
@@ -34,19 +31,6 @@ class _Mutation:
     mode: int | None
 
 
-def _normalize_sha256(value: object, *, required: bool) -> str | None:
-    if value is None or value == "":
-        if required:
-            raise _MutationError(
-                "expected_sha256 from read_file is required before modifying an existing file.",
-                "PreimageRequired",
-            )
-        return None
-    if not isinstance(value, str) or not _SHA256_PATTERN.fullmatch(value):
-        raise _MutationError("expected_sha256 must be a 64-character hexadecimal SHA-256.", "InvalidExpectedSha256")
-    return value.lower()
-
-
 def _resolve_path(raw_path: object) -> Path:
     if not isinstance(raw_path, str) or not raw_path.strip():
         raise _MutationError("File path must not be empty.", "InvalidPath")
@@ -56,12 +40,11 @@ def _resolve_path(raw_path: object) -> Path:
         raise _MutationError(f"Invalid file path: {raw_path}: {exc}", "InvalidPath") from exc
 
 
-def _read_existing(path: Path, expected_sha256: object) -> tuple[bytes, str, int]:
+def _read_existing(path: Path) -> tuple[bytes, str, int]:
     if not path.exists():
         raise _MutationError(f"File does not exist: {path}", "NotFound")
     if not path.is_file():
         raise _MutationError(f"Path is not a file: {path}", "NotAFile")
-    expected = _normalize_sha256(expected_sha256, required=True)
     try:
         raw = path.read_bytes()
         mode = stat.S_IMODE(path.stat().st_mode)
@@ -75,13 +58,6 @@ def _read_existing(path: Path, expected_sha256: object) -> tuple[bytes, str, int
         text = raw.decode("utf-8")
     except UnicodeDecodeError as exc:
         raise _MutationError(f"File is not valid UTF-8 text: {path}", "InvalidEncoding") from exc
-    actual = hashlib.sha256(raw).hexdigest()
-    if actual != expected:
-        raise _MutationError(
-            f"File has changed since read; read it again before editing: {path}",
-            "PreimageMismatch",
-            {"path": str(path), "expected_sha256": expected, "actual_sha256": actual},
-        )
     return raw, text, mode
 
 
@@ -128,25 +104,17 @@ def _verify_unchanged(mutation: _Mutation) -> None:
         raise _MutationError(
             f"File changed before the write: {mutation.path}",
             "PreimageMismatch",
-            {"path": str(mutation.path), "actual_sha256": hashlib.sha256(current).hexdigest()},
+            {"path": str(mutation.path)},
         )
 
 
-def _commit_mutations(mutations: list[_Mutation]) -> None:
-    staged: dict[Path, Path] = {}
+def _commit_mutation(mutation: _Mutation) -> None:
+    staged = _stage_file(mutation.path, mutation.after, mutation.mode)
     try:
-        for mutation in mutations:
-            staged[mutation.path] = _stage_file(mutation.path, mutation.after, mutation.mode)
-        for mutation in mutations:
-            _verify_unchanged(mutation)
-        for mutation in mutations:
-            os.replace(staged[mutation.path], mutation.path)
+        _verify_unchanged(mutation)
+        os.replace(staged, mutation.path)
     finally:
-        for temp_path in staged.values():
-            try:
-                temp_path.unlink(missing_ok=True)
-            except OSError:
-                pass
+        staged.unlink(missing_ok=True)
 
 
 def _diff_stats(before: str, after: str) -> tuple[int, int]:
@@ -198,11 +166,11 @@ def _file_meta(mutation: _Mutation) -> dict[str, object]:
     }
 
 
-def _success(tool_name: str, mutations: list[_Mutation]) -> str:
+def _success(tool_name: str, mutation: _Mutation) -> str:
     return tool_ok(
         tool_name,
-        f"Successfully modified {len(mutations)} file{'s' if len(mutations) != 1 else ''}.",
-        meta={"files": [_file_meta(mutation) for mutation in mutations]},
+        "Successfully modified 1 file.",
+        meta={"files": [_file_meta(mutation)]},
     )
 
 
@@ -214,44 +182,40 @@ def _failure(tool_name: str, exc: Exception, fallback_type: str) -> str:
     return tool_error(tool_name, f"File operation failed: {exc}", fallback_type)
 
 
-def write_file(file_path: str, content: str, expected_sha256: str | None = None) -> str:
-    """Create a UTF-8 file, or atomically replace a version-checked existing file."""
+def write_file(file_path: str, content: str) -> str:
+    """Create or fully overwrite a UTF-8 file."""
     try:
         if not isinstance(content, str):
             raise _MutationError("content must be a string.", "InvalidContent")
         path = _resolve_path(file_path)
         if path.exists():
-            before, _, mode = _read_existing(path, expected_sha256)
+            before, _, mode = _read_existing(path)
         else:
-            supplied = _normalize_sha256(expected_sha256, required=False)
-            if supplied is not None:
-                raise _MutationError(f"Expected an existing file, but the target does not exist: {path}", "PreimageMismatch")
             before, mode = None, None
         mutation = _Mutation(path, before, content.encode("utf-8"), mode)
-        _commit_mutations([mutation])
-        return _success("write_file", [mutation])
+        _commit_mutation(mutation)
+        return _success("write_file", mutation)
     except Exception as exc:
         return _failure("write_file", exc, "WriteError")
 
 
-def edit_file(file_path: str, old_str: str, new_str: str, expected_sha256: str) -> str:
-    """Replace one exact text occurrence in a version-checked UTF-8 file."""
+def edit_file(file_path: str, old_str: str, new_str: str) -> str:
+    """Replace one unique, exact text occurrence in the current file."""
     try:
         if not isinstance(old_str, str) or not old_str or not isinstance(new_str, str):
             raise _MutationError("old_str must be a non-empty string and new_str must be a string.", "InvalidContent")
         path = _resolve_path(file_path)
-        before, text, mode = _read_existing(path, expected_sha256)
-        count = text.count(old_str)
-        if count == 0:
+        before, text, mode = _read_existing(path)
+        start = text.find(old_str)
+        if start < 0:
             raise _MutationError("The specified old_str was not found in the file.", "OldStrNotFound")
-        if count > 1:
+        if start != text.rfind(old_str):
             raise _MutationError(
-                f"Found {count} matches for old_str; provide unique context.",
+                "Found multiple matches for old_str; provide unique context.",
                 "OldStrNotUnique",
-                {"count": count},
             )
         mutation = _Mutation(path, before, text.replace(old_str, new_str).encode("utf-8"), mode)
-        _commit_mutations([mutation])
-        return _success("edit_file", [mutation])
+        _commit_mutation(mutation)
+        return _success("edit_file", mutation)
     except Exception as exc:
         return _failure("edit_file", exc, "EditError")

@@ -11,6 +11,7 @@ from agent.domain.cancellation import CancellationToken
 from ...spec import ToolSpec
 from .mutations import edit_file, write_file
 from .operations import glob, grep, read_file
+from .queue import FileMutationQueue
 
 
 def build_file_tool_specs(
@@ -18,9 +19,10 @@ def build_file_tool_specs(
     allowed_roots: Collection[str | Path] | None = None,
     shared_root: str | Path | None = None,
     session_output_root: str | Path | None = None,
+    *,
+    mutation_queue: FileMutationQueue | None = None,
 ) -> tuple[ToolSpec, ...]:
-    if workspace_root is None and allowed_roots is None and shared_root is None and session_output_root is None:
-        return TOOL_SPECS
+    mutation_queue = mutation_queue if mutation_queue is not None else FileMutationQueue()
     root = Path(workspace_root or Path.cwd()).expanduser().resolve()
     allowed = tuple(Path(path).expanduser().resolve() for path in (allowed_roots or ()))
     shared = Path(shared_root).expanduser().resolve() if shared_root is not None else None
@@ -55,13 +57,23 @@ def build_file_tool_specs(
         resolved, error = resolve_path("read_file", path, allow_session_output=True)
         return error or read_file(resolved, offset, limit, _cancellation_token)
 
-    def scoped_write_file(file_path: str, content: str, expected_sha256: str | None = None) -> str:
+    async def scoped_write_file(
+        file_path: str, content: str, _cancellation_token: CancellationToken | None = None,
+    ) -> str:
         resolved, error = resolve_path("write_file", file_path)
-        return error or write_file(resolved, content, expected_sha256)
+        return error or await mutation_queue.run(
+            resolved, lambda: write_file(resolved, content),
+            tool_name="write_file", cancellation_token=_cancellation_token,
+        )
 
-    def scoped_edit_file(file_path: str, old_str: str, new_str: str, expected_sha256: str) -> str:
+    async def scoped_edit_file(
+        file_path: str, old_str: str, new_str: str, _cancellation_token: CancellationToken | None = None,
+    ) -> str:
         resolved, error = resolve_path("edit_file", file_path)
-        return error or edit_file(resolved, old_str, new_str, expected_sha256)
+        return error or await mutation_queue.run(
+            resolved, lambda: edit_file(resolved, old_str, new_str),
+            tool_name="edit_file", cancellation_token=_cancellation_token,
+        )
 
     def scoped_glob(
         pattern: str,
@@ -90,7 +102,7 @@ def _specs(read, write, edit, find, search) -> tuple[ToolSpec, ...]:
         ToolSpec(
             name="read_file",
             handler=read,
-            description="Read a line range of a UTF-8 text file. A page holds at most 2000 lines and about 50 KiB, with a 25 KiB model preview; returns line numbers, truncation state, the next offset, and the full-file SHA-256.",
+            description="Read a line range of a UTF-8 text file. A page holds at most 2000 lines and about 50 KiB, with a 25 KiB model preview; returns line numbers, truncation state, and the next offset.",
             param_descriptions={
                 "path": "Absolute or relative file path",
                 "offset": "First line to read (default 1)",
@@ -100,22 +112,20 @@ def _specs(read, write, edit, find, search) -> tuple[ToolSpec, ...]:
         ToolSpec(
             name="write_file",
             handler=write,
-            description="Atomically create a UTF-8 text file, or fully overwrite an existing one when expected_sha256 matches.",
+            description="Atomically create or fully overwrite a UTF-8 text file. Use for new files or complete rewrites. Edits and writes to the same file run in order. No hash parameter is needed.",
             param_descriptions={
                 "file_path": "Absolute or relative file path",
                 "content": "Full file content",
-                "expected_sha256": "Required to overwrite an existing file; must be the sha256 returned by the most recent read_file. Omit when creating a new file.",
             },
         ),
         ToolSpec(
             name="edit_file",
             handler=edit,
-            description="Atomically replace a unique text block in an existing UTF-8 file when expected_sha256 matches. old_str must match the file content exactly.",
+            description="Atomically replace one unique, exact text block in the current UTF-8 file. Edits and writes to the same file run in order; later edits see earlier changes. No hash parameter is needed.",
             param_descriptions={
                 "file_path": "Absolute or relative file path",
                 "old_str": "Text block to replace. Include surrounding context to make it unique.",
                 "new_str": "Replacement text block for old_str.",
-                "expected_sha256": "Required; must be the sha256 returned by the most recent read_file.",
             },
         ),
         ToolSpec(
@@ -140,11 +150,4 @@ def _specs(read, write, edit, find, search) -> tuple[ToolSpec, ...]:
             },
         ),
     )
-
-
-
-
-TOOL_SPECS = _specs(read_file, write_file, edit_file, glob, grep)
-
-
-__all__ = ["TOOL_SPECS", "build_file_tool_specs", "edit_file", "glob", "grep", "read_file", "write_file"]
+__all__ = ["build_file_tool_specs", "edit_file", "glob", "grep", "read_file", "write_file"]
