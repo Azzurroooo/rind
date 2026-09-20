@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-
 from collections.abc import Callable
 
 from agent.runtime.server.commands.contracts import SlashCommandContext, SlashCommandInfo, SlashCommandResult

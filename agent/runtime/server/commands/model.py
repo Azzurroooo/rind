@@ -2,12 +2,11 @@
 
 from __future__ import annotations
 
-from agent.infrastructure.settings import load_settings
+from typing import Any
 
-from agent.infrastructure.settings import DEFAULT_MODEL
-from agent.runtime.server.commands.formatting import display_value
-
+from agent.infrastructure.settings import DEFAULT_MODEL, load_settings
 from agent.runtime.server.commands.contracts import SlashCommandContext, SlashCommandInfo
+from agent.runtime.server.commands.formatting import display_value
 
 
 async def handle_model(context: SlashCommandContext, args: list[str]) -> str:

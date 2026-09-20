@@ -91,12 +91,10 @@ main.py
   -> agent/runtime/server/app_server.py
      -> transport -> dispatcher.py -> worker.py
         -> execution.py -> agent/bootstrap/container.py
-        -> agent/runtime/core/runtime.py
-           -> agent/runtime/core/turn_runner.py
-              -> agent/application/context/*
-              -> agent/application/tools/*
-
-Concrete adapters are injected by bootstrap/container.py, not imported by core.
+           -> agent/runtime/core/runtime.py
+              -> agent/runtime/core/turn_runner.py
+                 -> agent/application/context/*
+                 -> agent/application/tools/*
 
 Surface clients:
   frontend-cli/lib/runtime-protocol.js
@@ -105,3 +103,5 @@ Surface clients:
   desktop/src/main/runtime.ts
   desktop/src/renderer/index.ts
 ```
+
+Concrete adapters are injected by `bootstrap/container.py`, not imported by core.

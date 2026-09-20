@@ -152,23 +152,23 @@ agent/ — Python agent engine
 
 ## Migration checklist and risks
 
-- [ ] Split server/stdio.py into transport and dispatcher; both stdio/WebSocket share dispatcher. HIGH: shutdown ordering, concurrent requests, auth futures, subscriptions, event sequencing.
-- [ ] Rename server/web.py to websocket.py and files.py to workspace_files.py. Update main.py and tests.
-- [ ] Split worker.py: SessionRepository becomes SessionService in session_service.py; ExecutionCoordinator and owned helpers move to execution.py; RuntimeWorker remains worker.py. HIGH: draft identity, ownership, steering/follow-up, background tasks.
-- [ ] Flatten commands/features into commands; move catalog builder into catalog.py; rename init to init_rind_doc; merge help_view/status_view/model_control into their commands. Update private-name cross-file uses and monkeypatch targets.
-- [ ] Split infrastructure/team.py into models/project/manifests/workspace_lock. Move bootstrap/delegation.py into team/delegation.py with injected runner. HIGH: manifests, paths, creation rollback, locks.
-- [ ] Remove JsonlSessionStore.create_team_project; Team command calls Team project API using explicit workspace.
-- [ ] Collapse config/settings_loader.py to settings.py; auth/credential_store.py to credentials.py; skills/repository.py to skills.py.
-- [ ] Merge infrastructure/planning/store.py and summary.py into persistence/plan.py.
-- [ ] Move application/context/usage_summary.py to application/usage_summary.py.
-- [ ] Move domain/shell.py and prompts host probing into infrastructure/environment.py; explicitly supply prompt environment from callers; no import-time environment probing. Preserve one prompts.py.
-- [ ] Move core/image_promotion.py to infrastructure/workspace_images.py and inject image callback at container. Preserve multimodal fallback.
-- [ ] Merge openai_chat.py and openai_chat_client.py into one ChatClient-conforming adapter; SDK factory goes to provider_service.py. HIGH: normalized completion/streams, raw traces, cancellation, retries, compaction limits.
-- [ ] Rename llm/providers.py to catalog.py; llm_trace.py to trace.py.
-- [ ] Remove tools/builtin nesting, catalog implementation to tools/catalog.py; file/shell registration to specs.py; rename operations to queries and queue to mutation_queue.
-- [ ] Split web tools into search/fetch/specs/session_pool.
-- [ ] Give SessionFiles lock access a public method; update index operations without changing lock range.
-- [ ] Update all ordinary/string imports, tests, README/documentation and architecture guards. No forwarding modules.
+- [x] Split server/stdio.py into transport and dispatcher; both stdio/WebSocket share dispatcher. HIGH: shutdown ordering, concurrent requests, auth futures, subscriptions, event sequencing.
+- [x] Rename server/web.py to websocket.py and files.py to workspace_files.py. Update main.py and tests.
+- [x] Split worker.py: SessionRepository becomes SessionService in session_service.py; ExecutionCoordinator and owned helpers move to execution.py; RuntimeWorker remains worker.py. HIGH: draft identity, ownership, steering/follow-up, background tasks.
+- [x] Flatten commands/features into commands; move catalog builder into catalog.py; rename init to init_rind_doc; merge help_view/status_view/model_control into their commands. Update private-name cross-file uses and monkeypatch targets.
+- [x] Split infrastructure/team.py into models/project/manifests/workspace_lock. Move bootstrap/delegation.py into team/delegation.py with injected runner. HIGH: manifests, paths, creation rollback, locks.
+- [x] Remove JsonlSessionStore.create_team_project; Team command calls Team project API using explicit workspace.
+- [x] Collapse config/settings_loader.py to settings.py; auth/credential_store.py to credentials.py; skills/repository.py to skills.py.
+- [x] Merge infrastructure/planning/store.py and summary.py into persistence/plan.py.
+- [x] Move application/context/usage_summary.py to application/usage_summary.py.
+- [x] Move domain/shell.py and prompts host probing into infrastructure/environment.py; explicitly supply prompt environment from callers; no import-time environment probing. Preserve one prompts.py.
+- [x] Move core/image_promotion.py to infrastructure/workspace_images.py and inject image callback at container. Preserve multimodal fallback.
+- [x] Merge openai_chat.py and openai_chat_client.py into one ChatClient-conforming adapter; SDK factory goes to provider_service.py. HIGH: normalized completion/streams, raw traces, cancellation, retries, compaction limits.
+- [x] Rename llm/providers.py to catalog.py; llm_trace.py to trace.py.
+- [x] Remove tools/builtin nesting, catalog implementation to tools/catalog.py; file/shell registration to specs.py; rename operations to queries and queue to mutation_queue.
+- [x] Split web tools into search/fetch/specs/session_pool.
+- [x] Give SessionFiles lock access a public method; update index operations without changing lock range.
+- [x] Update all ordinary/string imports, tests, README/documentation and architecture guards. No forwarding modules.
 
 Preserve existing state boundaries in JsonlSessionStore, core runtime and compaction; do not mechanically split by line count. Existing session format, protocol and model-facing schemas remain stable. Retain protocol.py location used by gateway.
 
@@ -186,3 +186,9 @@ Manual cleanup is mandatory: record owned root/PIDs, extract evidence summaries,
 
 - Initial state: clean main 5fca0a1; 133 Python files; previous read-only AST scan found no module cycles.
 - Plan persisted before code changes.
+
+- Implementation complete on refactor/agent-directory. No compatibility forwarding modules or new runtime dependencies were added.
+- Commits: 91106d0 (catalogs and paths), 019b814 (this plan), dd31636 (transports and worker), 5e06fd3 (Team/environment/images/OpenAI), ddec07d (CLI completion/input race exposed by acceptance).
+- Manual compact tracing was bound at container creation instead of first assistant sampling; this removes an execution-order dependency and covers compact immediately after reopening. A regression verifies the trace.
+- Final full deterministic suites: Python 1163 passed / 2 skipped; CLI 432 passed / 1 skipped; desktop 116 passed; web 251 passed. Command/import cleanup additionally passed 55 focused Python tests.
+- Manual acceptance was run through CLI with the configured model in isolated homes/workspaces. It exposed limitations beyond directory migration; see the final response for actual passes, failures, untested branches and cleanup. No claim of universal/manual full-suite success is made.

@@ -3,9 +3,8 @@
 from __future__ import annotations
 
 from agent.infrastructure.settings import load_settings
-from agent.runtime.server.commands.formatting import display_value, nonnegative_int
-
 from agent.runtime.server.commands.contracts import SlashCommandContext, SlashCommandInfo, SlashCommandResult
+from agent.runtime.server.commands.formatting import display_value, nonnegative_int
 
 
 async def handle_status(context: SlashCommandContext, args: list[str]) -> str | SlashCommandResult:
