@@ -10,7 +10,8 @@ from agent.application.tools.result_normalizer import ToolResultNormalizer
 from agent.domain.events import FileChangeEvent
 from agent.domain.tool_payload import ParsedToolCall
 from agent.infrastructure.persistence.jsonl_session_store import JsonlSessionStore
-from agent.infrastructure.tools.files.specs import build_file_tool_specs, edit_file, write_file
+from agent.infrastructure.tools.files.specs import build_file_tool_specs
+from agent.infrastructure.tools.files.mutations import edit_file, write_file
 from agent.infrastructure.tools.registry import DefaultToolRegistry
 
 

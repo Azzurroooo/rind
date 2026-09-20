@@ -1,7 +1,8 @@
+"""Model selection slash command."""
+
 from __future__ import annotations
 
 from agent.infrastructure.settings import load_settings
-"""Model selection slash command."""
 
 from agent.infrastructure.settings import DEFAULT_MODEL
 from agent.runtime.server.commands.formatting import display_value
@@ -56,7 +57,6 @@ def normalize_model_name(value: object) -> str | None:
     if len(text) > 128:
         return None
     return text
-
 
 
 def _default_model(session: Any) -> str:

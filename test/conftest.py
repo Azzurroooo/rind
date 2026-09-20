@@ -4,7 +4,7 @@ import pytest
 @pytest.fixture
 def shell_tools(tmp_path):
     from agent.infrastructure.persistence import ToolOutputStore
-    from agent.infrastructure.tools.shell.specs import ShellTools
+    from agent.infrastructure.tools.shell.tool import ShellTools
 
     tools = ShellTools(ToolOutputStore(str(tmp_path)))
     yield tools

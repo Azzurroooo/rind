@@ -1,14 +1,16 @@
 from __future__ import annotations
 
-import re
 from contextlib import closing
+import re
+from urllib.parse import urljoin
+
 from bs4 import BeautifulSoup
-from agent.domain.cancellation import CancellationToken
+
 from agent.domain import tool_cancelled, tool_error, tool_ok
+from agent.domain.cancellation import CancellationToken
+
 from .session_pool import WebSessions
 
-
-from urllib.parse import urljoin
 
 _MAX_RESPONSE_BYTES = 10 * 1024 * 1024
 _MAX_REDIRECTS = 5

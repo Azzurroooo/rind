@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import inspect
 import logging
 import time
 from collections.abc import Callable
@@ -39,7 +38,6 @@ from agent.domain.message_boundary import validate_compact_handoff_boundary, val
 from agent.domain import ParsedToolCall
 from agent.domain.tool_payload import parse_tool_args
 
-from .image_promotion import promote_user_images
 from .stream_parser import MessageStreamParser
 
 
@@ -75,6 +73,7 @@ class TurnRunner:
         compaction_service: CompactionService | None = None,
         skill_repository=None,
         usage_recorder: Callable[[dict], Any] | None = None,
+        image_promoter: Callable[[list[dict], str | None], tuple[list[dict], bool]] | None = None,
     ):
         self._chat_client = chat_client
         self._tool_processor = tool_processor
@@ -83,6 +82,7 @@ class TurnRunner:
         self._context_manager = context_manager
         self._compaction_service = compaction_service or CompactionService()
         self._usage_recorder = usage_recorder
+        self._image_promoter = image_promoter
         self._skill_turn_coordinator = (
             SkillTurnCoordinator(skill_repository) if skill_repository is not None else None
         )
@@ -104,9 +104,6 @@ class TurnRunner:
 
         turn_started_at = time.perf_counter()
         original_hard_limit = self._snapshot_context_hard_limit()
-        trace_setter = getattr(self._chat_client, "set_trace_session_id_provider", None)
-        if callable(trace_setter) and not inspect.iscoroutinefunction(trace_setter):
-            trace_setter(lambda: str(getattr(session, "session_id", "") or ""))
         try:
             sampling_index = 0
             steering_for_sampling = False
@@ -168,8 +165,8 @@ class TurnRunner:
 
                 request_messages = context.messages
                 promoted_any = False
-                if not image_fallback_used:
-                    request_messages, promoted_any = promote_user_images(
+                if not image_fallback_used and self._image_promoter is not None:
+                    request_messages, promoted_any = self._image_promoter(
                         context.messages,
                         getattr(session, "workspace_root", None),
                     )

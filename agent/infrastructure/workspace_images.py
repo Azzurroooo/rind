@@ -7,8 +7,8 @@ Chat Completions content parts: the original text (kept intact) plus one
 ``image_url`` data-URL part per reference. Any problem (missing file,
 oversize, unsafe path, read error) degrades silently to the original text.
 
-Pure functions only; TurnRunner supplies the workspace root from the session
-store. Path safety mirrors agent/runtime/server/workspace_files.py without importing it
+The composition root injects the image loader into TurnRunner; the session
+store supplies the workspace root. Path safety mirrors agent/runtime/server/workspace_files.py without importing it
 (runtime/core must not depend on runtime/server).
 """
 

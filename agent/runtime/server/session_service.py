@@ -1,18 +1,20 @@
 """Session access and the unpersisted startup draft."""
 
 from __future__ import annotations
-from agent.infrastructure.paths import validate_workspace_root
-from agent.infrastructure.settings import workspace_defaults
-from agent.infrastructure.persistence.session_meta import new_session_id
+
 import asyncio
 import shutil
 from typing import Any
-from agent.infrastructure.llm import ProviderServiceImpl
+
 from agent.domain.models import ModelSelection
+from agent.infrastructure.environment import get_system_info
+from agent.infrastructure.llm import ProviderServiceImpl
+from agent.infrastructure.paths import resolve_session_base, validate_session_id, validate_workspace_root
 from agent.infrastructure.persistence import JsonlSessionStore, fork_session
 from agent.infrastructure.persistence.session_files import SessionFiles
 from agent.infrastructure.persistence.session_index_repository import SessionIndexRepository
-from agent.infrastructure.paths import resolve_session_base, validate_session_id
+from agent.infrastructure.persistence.session_meta import new_session_id
+from agent.infrastructure.settings import workspace_defaults
 from agent.infrastructure.team import discover_agent
 from agent.prompts import build_system_prompt
 
@@ -101,7 +103,7 @@ class SessionService:
             owner_agent_id = agent_context.agent_id
         if session_type is None and agent_context:
             session_type = "direct_agent_chat"
-        system_prompt = build_system_prompt(root)
+        system_prompt = build_system_prompt(str(root), environment=get_system_info(root))
         agent_prompt = agent_context.capsule.system_prompt.strip() if agent_context else ""
         if agent_prompt:
             system_prompt = f"{system_prompt}\n\n{agent_prompt}"
@@ -243,7 +245,7 @@ class SessionService:
             session_id=clean,
             model=info["model"],
             provider=info.get("provider") or "openai-compatible",
-            system_prompt=build_system_prompt(root),
+            system_prompt=build_system_prompt(str(root), environment=get_system_info(root)),
             workspace_root=root,
             reasoning_effort=info.get("reasoning_effort") or "",
         )

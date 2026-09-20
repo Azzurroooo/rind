@@ -7,7 +7,9 @@ import pytest
 
 from agent.infrastructure.llm import trace as llm_trace
 from agent.infrastructure.llm.trace import LlmCallTrace, make_trace, resolve_trace_dir, trace_enabled, _serialize
-from agent.infrastructure.llm.openai_chat_client import OpenAIChatClient
+from agent.infrastructure.llm.openai_chat import OpenAIChatCompletionsClient
+from agent.bootstrap.container import build_agent_container
+from agent.infrastructure.settings import AppSettings
 
 
 def test_trace_enabled_respects_env(monkeypatch):
@@ -69,8 +71,8 @@ async def test_chat_client_stream_traces_when_enabled(monkeypatch, tmp_path):
     monkeypatch.setattr(llm_trace, "resolve_rind_home", lambda: tmp_path)
 
     chunks = [
-        SimpleNamespace(model_dump=lambda c=c: {"choices": [{"delta": payload}]})
-        for c, payload in enumerate([{"content": "Hi"}, {"tool_calls": [{"id": "call_1", "function": {"name": "bash"}}]}])
+        {"choices": [{"delta": payload}]}
+        for payload in [{"content": "Hi"}, {"tool_calls": [{"id": "call_1", "function": {"name": "bash"}}]}]
     ]
 
     async def _aiter():
@@ -80,7 +82,7 @@ async def test_chat_client_stream_traces_when_enabled(monkeypatch, tmp_path):
     mock_openai = MagicMock()
     mock_openai.chat.completions.create = AsyncMock(return_value=_aiter())
 
-    client = OpenAIChatClient(mock_openai, "test-model")
+    client = OpenAIChatCompletionsClient(mock_openai, "test-model")
     client.set_trace_session_id_provider(lambda: "sess-trace")
 
     received = []
@@ -112,7 +114,7 @@ async def test_chat_client_stream_does_not_trace_when_disabled(monkeypatch, tmp_
     mock_openai = MagicMock()
     mock_openai.chat.completions.create = AsyncMock(return_value=_aiter())
 
-    client = OpenAIChatClient(mock_openai, "test-model")
+    client = OpenAIChatCompletionsClient(mock_openai, "test-model")
     client.set_trace_session_id_provider(lambda: "sess-trace")
 
     async for _ in client.stream(messages=[{"role": "user", "content": "go"}]):
@@ -133,3 +135,38 @@ def test_call_trace_survives_missing_end(monkeypatch, tmp_path):
 
     lines = [json.loads(line) for line in trace.path.read_text(encoding="utf-8").splitlines()]
     assert [record["direction"] for record in lines] == ["request", "response"]
+
+
+@pytest.mark.asyncio
+async def test_manual_compact_traces_before_the_first_turn_in_a_worker(monkeypatch, tmp_path):
+    monkeypatch.setenv("RIND_HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("RIND_TRACE_LLM", "1")
+    sdk = MagicMock()
+    sdk.chat.completions.create = AsyncMock(return_value={
+        "choices": [{"message": {"content": "Keep the delivery code."}, "finish_reason": "stop"}],
+        "usage": {"prompt_tokens": 100, "completion_tokens": 8},
+    })
+    container = build_agent_container(
+        chat_client=OpenAIChatCompletionsClient(sdk, "trace-model"),
+        settings=AppSettings(
+            settings_path=tmp_path / "settings.json", settings_exists=False,
+            api_key="local-only", base_url="http://127.0.0.1:1/v1",
+            model="trace-model", reasoning_effort="",
+        ),
+        workspace_root=str(tmp_path),
+    )
+    try:
+        await container.session_store.initialize()
+        await container.session_store.persist_message("user", "Remember the delivery code.")
+        await container.session_store.persist_message("assistant", "Understood.")
+        record = await container.runtime.compact_context()
+        assert record["strategy"] == "llm_inline"
+        trace_files = list((tmp_path / "home" / "sessions" / container.session_store.session_id / "_llm_trace").glob("*.jsonl"))
+        assert len(trace_files) == 1
+        records = [json.loads(line) for line in trace_files[0].read_text(encoding="utf-8").splitlines()]
+        assert records[0]["stream"] is False
+        assert "Remember the delivery code." in json.dumps(records[0]["messages"])
+        assert records[-1]["reason"] == "completed"
+    finally:
+        await container.shell_tools.close()
+        container.web_sessions.close()

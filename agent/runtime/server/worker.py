@@ -1,26 +1,31 @@
 """Worker resources and lifecycle."""
 
 from __future__ import annotations
-from agent.runtime.server.session_service import SessionService
-from agent.runtime.server.execution import ExecutionCoordinator
-from agent.infrastructure.paths import validate_workspace_root
-from agent.infrastructure.settings import workspace_defaults
+
 import asyncio
 from functools import partial
 from typing import Any
+
 from agent.application.context import CompactionService
 from agent.application.context.token_usage import positive_int
-from agent.application.usage_summary import summarize_usage
 from agent.application.tools import ToolResultNormalizer
+from agent.application.usage_summary import summarize_usage
 from agent.bootstrap import AgentContainer, SharedRuntimeResources
 from agent.infrastructure.llm import ProviderServiceImpl
+from agent.infrastructure.paths import validate_session_id, validate_workspace_root
 from agent.infrastructure.persistence import ToolOutputStore
-from agent.infrastructure.persistence.usage_ledger import append_usage_record, default_usage_ledger_path, load_usage_records
-from agent.infrastructure.paths import validate_session_id
 from agent.infrastructure.persistence.plan import build_plan_snapshot
-from agent.infrastructure.tools.shell.specs import ShellTools
+from agent.infrastructure.persistence.usage_ledger import (
+    append_usage_record,
+    default_usage_ledger_path,
+    load_usage_records,
+)
+from agent.infrastructure.settings import workspace_defaults
+from agent.infrastructure.tools.shell.tool import ShellTools
 from agent.infrastructure.tools.web.session_pool import WebSessions
 from agent.runtime.core import MessageStreamParser
+from agent.runtime.server.execution import ExecutionCoordinator
+from agent.runtime.server.session_service import SessionService
 
 
 class RuntimeWorker:

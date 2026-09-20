@@ -533,7 +533,7 @@ test("team creation waits for understanding before exit, workspace switch and ve
   assert.equal(restarted.rind.info.cwd, "~/demo/agents/main-agent");
   assert.notEqual(restarted.rind.info.session_id, originalSession);
   assert.equal(restarted.rind.blocks.length, 0, "verification waits for the new session explanation");
-  assert.match(restarted.caption.join(" "), /Check the banner/);
+  assert.match(restarted.caption.join(" "), /banner and status bar.*\[TEAM\]/);
 
   player.key(key("space"));
   clock.advance(60000);

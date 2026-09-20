@@ -2,8 +2,16 @@
 
 from __future__ import annotations
 
-from agent.infrastructure.team import discover_agent, initialize_team_agents, list_agent_blueprints, list_team_agents, materialize_team_agent
+from agent.infrastructure.team import (
+    discover_agent,
+    initialize_team_agents,
+    initialize_team_project,
+    list_agent_blueprints,
+    list_team_agents,
+    materialize_team_agent,
+)
 from agent.runtime.server.commands.contracts import SlashCommandContext, SlashCommandInfo, SlashCommandResult
+
 
 USAGE = "/team create [project-id] | /team init | /team list | /team blueprint [id] | /team add <description>"
 
@@ -42,10 +50,12 @@ async def handle_team(context: SlashCommandContext, args: list[str]) -> SlashCom
 async def _create_project(context: SlashCommandContext, args: list[str]) -> SlashCommandResult:
     if len(args) > 1:
         return SlashCommandResult("Usage: /team create [project-id]")
-    create_team = getattr(context.session, "create_team_project", None)
-    if not callable(create_team):
-        return SlashCommandResult("Team project creation is not supported by this session store.")
-    created = await create_team(project_id=args[0] if args else None)
+    project = initialize_team_project(context.workspace_root, project_id=args[0] if args else None)
+    created = {
+        "project_id": project.project_id,
+        "main_agent": project.main_agent,
+        "workspace_root": str(project.agents_root / project.main_agent),
+    }
     text = f"Team project created: {created['project_id']}\nMain agent: {created['main_agent']}\nWorkspace: {created['workspace_root']}"
     return SlashCommandResult(text, display={"type": "team_create", **created})
 

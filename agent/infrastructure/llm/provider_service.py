@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import json
 import os
-import tempfile
 from pathlib import Path
+import tempfile
 from typing import Any
+
+import openai
 
 from agent.domain.errors import ProviderError
 from agent.domain.models import (
@@ -18,10 +20,20 @@ from agent.domain.models import (
     ProviderStatus,
 )
 from agent.infrastructure.credentials import CredentialStore
-from agent.infrastructure.settings import AppSettings, load_settings
-
 from agent.infrastructure.llm.cancellation import close_resource
 from agent.infrastructure.llm.catalog import PROVIDERS, default_reasoning_efforts, refreshable_models_api
+from agent.infrastructure.settings import AppSettings, load_settings
+
+
+def build_async_client(api_key: str, base_url: str, *, max_retries: int = 2) -> openai.AsyncOpenAI:
+    from agent.infrastructure.settings import DEFAULT_USER_AGENT
+
+    return openai.AsyncOpenAI(
+        api_key=api_key,
+        base_url=base_url,
+        max_retries=max_retries,
+        default_headers={"User-Agent": DEFAULT_USER_AGENT},
+    )
 
 
 class ProviderServiceImpl:
@@ -88,7 +100,6 @@ class ProviderServiceImpl:
         efforts = next((model.reasoning_efforts for model in definition.fallback_models if model.id == selection.model_id), ())
         if definition.api == "openai-chat":
             from agent.infrastructure.llm.openai_chat import OpenAIChatCompletionsClient
-            from agent.infrastructure.llm.openai_chat_client import build_async_client
 
             return OpenAIChatCompletionsClient(
                 build_async_client(key, endpoint, max_retries=14), selection.model_id, selection.reasoning_effort,
@@ -96,7 +107,6 @@ class ProviderServiceImpl:
             )
         if definition.api == "openai-responses":
             from agent.infrastructure.llm.openai_responses import OpenAIResponsesClient
-            from agent.infrastructure.llm.openai_chat_client import build_async_client
 
             return OpenAIResponsesClient(
                 build_async_client(key, endpoint), selection.model_id, selection.reasoning_effort,
@@ -143,7 +153,6 @@ class ProviderServiceImpl:
         credential = self._resolve_credential(settings, definition.id)
         if credential is None:
             return False
-        from agent.infrastructure.llm.openai_chat_client import build_async_client
 
         client = build_async_client(credential.key or credential.access, self._endpoint(settings, definition))
         try:

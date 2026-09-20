@@ -75,7 +75,7 @@ class EmptyStream:
 
 
 def _context(session=None, runtime=None):
-    return SlashCommandContext(runtime=runtime or FakeRuntime(), session=session or FakeSession(), debug=True)
+    return SlashCommandContext(runtime=runtime or FakeRuntime(), session=session or FakeSession(), debug=True, workspace_root=getattr(session, "workspace_root", None))
 
 
 @pytest.mark.asyncio

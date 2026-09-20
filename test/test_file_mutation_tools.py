@@ -15,7 +15,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from agent.infrastructure.tools import DefaultToolRegistry
-from agent.infrastructure.tools.files.specs import edit_file, write_file
+from agent.infrastructure.tools.files.mutations import edit_file, write_file
 from agent.infrastructure.tools.files import mutations
 
 

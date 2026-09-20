@@ -1,8 +1,9 @@
+"""Status slash command."""
+
 from __future__ import annotations
 
 from agent.infrastructure.settings import load_settings
 from agent.runtime.server.commands.formatting import display_value, nonnegative_int
-"""Status slash command."""
 
 from agent.runtime.server.commands.contracts import SlashCommandContext, SlashCommandInfo, SlashCommandResult
 
@@ -36,7 +37,6 @@ def render_status_display(display: dict) -> str:
     return "\n".join(lines)
 
 
-
 async def build_status_display(context: SlashCommandContext) -> dict:
     session = context.session
     entries = [{"label": "session", "value": display_value(getattr(session, "session_id", None))}]
@@ -67,7 +67,6 @@ async def build_status_display(context: SlashCommandContext) -> dict:
     return {"type": "status", "entries": entries, "usage": [_usage_display(usage)] if usage else []}
 
 
-
 async def _latest_assistant_sampling_usage(session) -> dict | None:
     get_usage = getattr(session, "get_latest_assistant_sampling_usage", None)
     if not callable(get_usage):
@@ -77,7 +76,6 @@ async def _latest_assistant_sampling_usage(session) -> dict | None:
         return dict(usage) if isinstance(usage, dict) else None
     except Exception:
         return None
-
 
 
 def _config_lines(entries: object) -> list[str]:
@@ -92,7 +90,6 @@ def _config_lines(entries: object) -> list[str]:
         state = f" ({entry['state']})" if entry.get("state") else ""
         lines.append(f"{label}: {value}{state}")
     return lines or ["settings           unavailable"]
-
 
 
 def _usage_lines(usage: dict) -> list[str]:
@@ -114,7 +111,6 @@ def _usage_lines(usage: dict) -> list[str]:
     return lines
 
 
-
 def _usage_display(usage: dict) -> dict:
     return {
         "input_tokens": nonnegative_int(usage.get("input_tokens")),
@@ -124,7 +120,6 @@ def _usage_display(usage: dict) -> dict:
         "cache_hit_rate": _numeric_percent(usage.get("cache_hit_rate")),
         "output_tokens": nonnegative_int(usage.get("output_tokens")),
     }
-
 
 
 def _format_count(value: object) -> str:
@@ -137,12 +132,10 @@ def _format_count(value: object) -> str:
     return str(int(number))
 
 
-
 def _format_percent(value: object) -> str:
     if not isinstance(value, int | float):
         return "0.0%"
     return f"{value * 100:.1f}%"
-
 
 
 def _numeric_percent(value: object) -> float:

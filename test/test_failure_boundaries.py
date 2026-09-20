@@ -8,7 +8,7 @@ from agent.domain.errors import (
     ProviderError,
 )
 from agent.domain.events import ToolResultEvent, TurnFailedEvent
-from agent.infrastructure.llm.openai_chat_client import OpenAIChatClient
+from agent.infrastructure.llm.openai_chat import OpenAIChatCompletionsClient
 
 
 class _Registry:
@@ -69,7 +69,7 @@ def test_boundary_statuses_are_serializable_and_distinct():
 
 
 def test_provider_error_classification_and_boundary_sources():
-    client = OpenAIChatClient(object(), "model")
+    client = OpenAIChatCompletionsClient(object(), "model")
     assert client._provider_error(TimeoutError("deadline")).status == "timed_out"
     assert ProviderError("offline", status="unavailable").source == "provider"
     assert PersistenceError("disk").source == "persistence"

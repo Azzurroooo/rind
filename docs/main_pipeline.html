@@ -8,11 +8,12 @@
 <h2>Startup</h2>
 <pre><code>surface -> main.py app-server --stdio
         -> agent/runtime/server/app_server.py
-        -> agent/bootstrap/container.py
+        -> stdio.py / websocket.py -> dispatcher.py
+        -> worker.py -> execution.py -> agent/bootstrap/container.py
         -> agent/runtime/core</code></pre>
 <h2>Requests and events</h2>
 <p>Requests carry <code>kind: request</code>, a <code>request_id</code>, a method, and params. Responses reuse the request id. Events use <code>method: session/update</code>, monotonic sequence, durability, session/turn ids, and <code>event.type</code>.</p>
-<p>Standard session and model methods are complemented by capability-gated <code>rind/</code> extensions. Both product surfaces consume the same contract.</p>
+<p>Standard session and model methods are complemented by capability-gated <code>rind/</code> extensions. All clients consume the same contract.</p>
 <p>See <a href="main_pipeline.md">main_pipeline.md</a> for the source document.</p>
 </main>
 </body>

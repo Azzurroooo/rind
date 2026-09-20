@@ -1,21 +1,33 @@
 """Shared client request processing, independent of the transport."""
 
 from __future__ import annotations
-from agent.runtime.server.commands.catalog import build_command_infos
+
 import asyncio
+from collections.abc import Callable
 import copy
 import inspect
-import uuid
-from collections.abc import Callable
 from typing import Any
-from agent.runtime.core import InputQueueError
+import uuid
+
 from agent.infrastructure.paths import validate_session_id
-from agent.version import __version__
+from agent.runtime.core import InputQueueError
 from agent.runtime.server.commands import SlashCommandContext, SlashCommandResult, SlashCommandRouter
+from agent.runtime.server.commands.catalog import build_command_infos
+from agent.runtime.server.protocol import (
+    CAPABILITIES,
+    CORE_METHODS,
+    PROTOCOL_VERSION,
+    RuntimeMethod,
+    SESSION_SCOPED_METHODS,
+    TURN_SCOPED_METHODS,
+    error_message,
+    event_envelope,
+    response_message,
+)
+from agent.runtime.server.replay_events import iter_durable_events
 from agent.runtime.server.resume_preview import render_resume_preview
 from agent.runtime.server.workspace_files import FileMethodError, file_list, file_read, file_write
-from agent.runtime.server.replay_events import iter_durable_events
-from agent.runtime.server.protocol import CAPABILITIES, CORE_METHODS, PROTOCOL_VERSION, RuntimeMethod, SESSION_SCOPED_METHODS, TURN_SCOPED_METHODS, error_message, event_envelope, response_message
+from agent.version import __version__
 
 
 def protocol_capabilities(background_enabled: bool, goal_enabled: bool) -> list[str]:
@@ -200,7 +212,6 @@ class RuntimeDispatcher:
 
     def schedule(self, request: dict[str, Any]) -> None:
         self._schedule_dispatch(request)
-
 
 
     async def serve(self) -> int:

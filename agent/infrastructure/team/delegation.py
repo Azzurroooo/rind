@@ -8,7 +8,8 @@ from typing import Any
 
 from agent.domain import tool_cancelled, tool_error, tool_ok
 from agent.domain.cancellation import CancellationToken
-from agent.infrastructure.team import TeamProject, resolve_team_agent
+from agent.infrastructure.team.models import TeamProject
+from agent.infrastructure.team.project import resolve_team_agent
 from agent.prompts import build_delegate_execute_prompt, build_delegate_inspect_prompt
 
 

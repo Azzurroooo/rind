@@ -3,14 +3,14 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Callable
 import hmac
+from http import HTTPStatus
 import ipaddress
 import json
 import secrets
 import sys
 import time
-from collections.abc import Callable
-from http import HTTPStatus
 from typing import Any
 from urllib.parse import parse_qs, urlsplit
 
@@ -19,8 +19,9 @@ from websockets.datastructures import Headers
 from websockets.exceptions import ConnectionClosed
 from websockets.http11 import Request, Response
 
-from agent.runtime.server.protocol import error_message, validate_request
 from agent.runtime.server.dispatcher import RuntimeDispatcher
+from agent.runtime.server.protocol import error_message, validate_request
+
 
 AUTH_CLOSE_CODE = 4401
 

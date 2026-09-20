@@ -1,6 +1,6 @@
-from __future__ import annotations
-
 """Help slash command."""
+
+from __future__ import annotations
 
 
 from collections.abc import Callable
@@ -60,7 +60,6 @@ HELP_GROUPS = (
 )
 
 
-
 def render_help(command_infos: tuple[SlashCommandInfo, ...]) -> str:
     by_name = {info.name: info for info in command_infos}
     command_width = max((len(info.name) for info in command_infos), default=0)
@@ -85,7 +84,6 @@ def render_help(command_infos: tuple[SlashCommandInfo, ...]) -> str:
     return "\n".join(["# Commands", "", *body, "", "Use `/help <command>` for usage."])
 
 
-
 def render_command_help(command_infos: tuple[SlashCommandInfo, ...], command: str) -> str:
     name = command.strip().lstrip("/").lower()
     info = _find_command_info(command_infos, name)
@@ -106,16 +104,13 @@ def render_command_help(command_infos: tuple[SlashCommandInfo, ...], command: st
     return "\n".join(lines)
 
 
-
 def _format_help_row(info: SlashCommandInfo, command_width: int) -> str:
     suffix = f" ({_alias_label(info.aliases)}: {_format_aliases(info.aliases)})" if info.aliases else ""
     return f"  /{info.name:<{command_width}}  {info.description}{suffix}"
 
 
-
 def _alias_label(aliases: tuple[str, ...]) -> str:
     return "alias" if len(aliases) == 1 else "aliases"
-
 
 
 def _format_aliases(aliases: tuple[str, ...]) -> str:

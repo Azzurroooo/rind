@@ -1,6 +1,6 @@
 import assert from "node:assert/strict"
 import { spawn } from "node:child_process"
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
+import { access, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
 import { once } from "node:events"
 import { dirname, join, resolve } from "node:path"
 import readline from "node:readline"
@@ -21,6 +21,7 @@ test("app-server supports desktop session lifecycle over JSONL", async () => {
       ...process.env,
       HOME: home,
       USERPROFILE: home,
+      RIND_HOME: rindHome,
     },
     stdio: ["pipe", "pipe", "pipe"],
     windowsHide: true,
@@ -61,7 +62,8 @@ test("app-server supports desktop session lifecycle over JSONL", async () => {
     assert.ok(initialize.result.capabilities.includes("sessions"))
     assert.ok(initialize.result.methods.includes("session/new"))
     assert.equal(typeof initialize.result.session_id, "string")
-    assert.equal(initialize.result.draft, false)
+    assert.equal(initialize.result.draft, true)
+    await assert.rejects(access(join(rindHome, "sessions", initialize.result.session_id)), { code: "ENOENT" })
     assert.ok(initialize.result.methods.includes("rind/background/list"))
 
     const listed = await request("sessions", "session/list", { limit: 10 })

@@ -1,13 +1,15 @@
-"""Host shell detection as a pure environment probe."""
+"""Host environment and shell discovery for prompts and execution."""
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+from datetime import date
 import os
+from pathlib import Path
 import platform
 import shutil
 import sys
-from dataclasses import dataclass
-from pathlib import Path
+
 
 SHELL_UNAVAILABLE_MESSAGE = (
     "No supported shell backend was found. Install Git for Windows, set "
@@ -65,3 +67,32 @@ def _detect_powershell() -> str | None:
             return path
     candidate = Path("C:/Windows/System32/WindowsPowerShell/v1.0/powershell.exe")
     return str(candidate) if candidate.is_file() else None
+
+
+def _detect_shell_display() -> tuple[str, str]:
+    detection = detect_default_shell()
+    shell_type = {
+        "bash": "Bash",
+        "sh": "POSIX sh",
+        "powershell": "PowerShell",
+        "unavailable": "Unavailable",
+    }.get(detection.backend, detection.backend)
+    return shell_type, detection.executable or "not found"
+
+
+def get_system_info(cwd: str | os.PathLike[str] | None = None):
+    """Collect dynamic system information."""
+    system = platform.system()
+    cwd = os.path.abspath(os.fspath(cwd)) if cwd is not None else os.getcwd()
+    current_date = date.today().isoformat()
+    shell_type, shell_executable = _detect_shell_display()
+
+    return f"""
+<environment_context>
+Operating System: {system}
+Current Date: {current_date}
+Current Working Directory (Project Root): {cwd}
+Shell Type: {shell_type}
+Shell Executable: {shell_executable}
+</environment_context>
+"""

@@ -1,38 +1,298 @@
-"""Provider-neutral adapter for OpenAI Chat Completions."""
+"""OpenAI Chat Completions with neutral results, retries and cancellation."""
 
 from __future__ import annotations
 
-from collections.abc import AsyncIterator
-from typing import Any
+import asyncio
+import hashlib
+import json
+import os
+from typing import Any, AsyncIterator, Callable
+
+import openai
 
 from agent.application.ports.chat_client import ChatClient
 from agent.domain.cancellation import CancellationToken
+from agent.domain.errors import ProviderError
 from agent.domain.models import ModelCompletion, ModelStreamEvent, ModelUsage
 from agent.domain.tool_payload import ParsedToolCall
-
-from .openai_chat_client import OpenAIChatClient
+from agent.infrastructure.llm.cancellation import await_with_cancellation, close_resource
+from agent.infrastructure.llm.catalog import resolve_reasoning_effort
+from agent.infrastructure.llm.trace import make_trace
 
 
 class OpenAIChatCompletionsClient(ChatClient):
-    def __init__(self, async_client: Any, model: str, reasoning_effort: str = "", workspace_root: str | None = None, *, reasoning_efforts: tuple[str, ...] = ()) -> None:
-        self._client = OpenAIChatClient(async_client, model, reasoning_effort, workspace_root, reasoning_efforts=reasoning_efforts)
+    """Small wrapper around OpenAI async chat.completions API with resilient retries and cancellation support."""
 
-    async def create(self, messages, tools=None, cancellation_token: CancellationToken | None = None, *, max_output_tokens: int | None = None, reasoning_effort: str | None = None) -> ModelCompletion:
-        return _completion(await self._client.create(
-            messages, tools, cancellation_token, max_output_tokens=max_output_tokens, reasoning_effort=reasoning_effort,
-        ))
+    def __init__(
+        self,
+        async_client: Any,
+        model: str,
+        reasoning_effort: str | None = None,
+        workspace_root: str | None = None,
+        *,
+        reasoning_efforts: tuple[str, ...] = (),
+    ):
+        self._client = async_client
+        self._model = model
+        self._reasoning_effort = (reasoning_effort or "").strip() or None
+        self._reasoning_efforts = reasoning_efforts
+        self._reasoning_effort_disabled = False
+        self._prompt_cache_key_disabled = False
+        self._trace_session_id_provider: Callable[[], str] | None = None
+        self._workspace_root = workspace_root
 
-    async def stream(self, messages, tools=None, cancellation_token: CancellationToken | None = None) -> AsyncIterator[ModelStreamEvent]:
-        call_ids: dict[int, str] = {}
-        async for chunk in self._client.stream(messages, tools, cancellation_token):
-            for event in _events(chunk, call_ids):
-                yield event
+    def set_trace_session_id_provider(self, provider: Callable[[], str] | None) -> None:
+        """Bind request traces to the active session."""
+        self._trace_session_id_provider = provider
+
+    @property
+    def model(self) -> str:
+        return self._model
 
     async def close(self) -> None:
-        await self._client.close()
+        await close_resource(self._client)
 
-    def set_trace_session_id_provider(self, provider) -> None:
-        self._client.set_trace_session_id_provider(provider)
+    async def create(
+        self,
+        messages: list[dict],
+        tools: list[dict] | None = None,
+        cancellation_token: CancellationToken | None = None,
+        *,
+        max_output_tokens: int | None = None,
+        reasoning_effort: str | None = None,
+    ) -> ModelCompletion:
+        trace = make_trace(self._trace_session_id_provider, label="create")
+        if trace:
+            payload = self._trace_payload(messages, tools, stream=False)
+            payload["reasoning_effort"] = resolve_reasoning_effort(self._reasoning_effort, reasoning_effort, self._reasoning_efforts)
+            if max_output_tokens is not None:
+                payload["max_tokens"] = max_output_tokens
+            trace.request(payload)
+
+        try:
+            result = await self._request(
+                messages, tools, False, cancellation_token,
+                max_output_tokens=max_output_tokens, reasoning_effort=reasoning_effort,
+            )
+            if trace:
+                trace.response(result)
+                trace.end("completed")
+            return _completion(result)
+        except asyncio.CancelledError:
+            if trace:
+                trace.end("cancelled")
+            raise
+        except Exception as exc:
+            if trace:
+                trace.end("error", str(exc))
+            raise self._provider_error(exc) from exc
+
+    async def stream(
+        self,
+        messages: list[dict],
+        tools: list[dict] | None = None,
+        cancellation_token: CancellationToken | None = None,
+    ) -> AsyncIterator[ModelStreamEvent]:
+        trace = make_trace(self._trace_session_id_provider, label="stream")
+        if trace:
+            trace.request(self._trace_payload(messages, tools, stream=True))
+
+        # We need to retry the initial connection, but not the entire stream
+        # once it starts yielding chunks.
+
+        try:
+            stream_response = await self._request(messages, tools, True, cancellation_token)
+        except asyncio.CancelledError:
+            if trace:
+                trace.end("cancelled")
+            raise
+        except Exception as exc:
+            if trace:
+                trace.end("connect_error", str(exc))
+            raise self._provider_error(exc) from exc
+
+        # Now consume the stream chunks with cancellation checks. Each chunk is
+        # recorded BEFORE it is yielded upstream so the trace reflects the raw
+        # provider output that the runtime then acted on.
+        ended = False
+        call_ids: dict[int, str] = {}
+        try:
+            async for chunk in stream_response:
+                if cancellation_token and cancellation_token.is_cancelled:
+                    ended = True
+                    if trace:
+                        trace.end("cancelled")
+                    raise asyncio.CancelledError(cancellation_token.reason)
+                if trace:
+                    trace.response_chunk(chunk)
+                for event in _events(chunk, call_ids):
+                    yield event
+        except asyncio.CancelledError:
+            if not ended and trace:
+                trace.end("cancelled")
+                ended = True
+            raise
+        except Exception as exc:
+            if trace:
+                trace.end("stream_error", str(exc))
+            ended = True
+            raise self._provider_error(exc, code="stream_interrupted") from exc
+        finally:
+            if trace and not ended:
+                trace.end("completed")
+            try:
+                await close_resource(stream_response)
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                raise self._provider_error(exc, code="stream_interrupted") from exc
+
+    def _trace_payload(self, messages: list[dict], tools: list[dict] | None, *, stream: bool) -> dict[str, Any]:
+        payload: dict[str, Any] = {
+            "model": self._model,
+            "messages": messages,
+            "tools": tools or [],
+            "tool_choice": "auto" if tools else None,
+            "stream": stream,
+            "reasoning_effort": self._reasoning_effort,
+            "reasoning_effort_disabled": self._reasoning_effort_disabled,
+            "prompt_cache_key_disabled": self._prompt_cache_key_disabled,
+        }
+        if stream:
+            payload["stream_options"] = {"include_usage": True}
+        return payload
+
+    def _provider_error(self, exc: Exception, code: str | None = None) -> ProviderError:
+        if isinstance(exc, ProviderError):
+            return exc
+        error_type = type(exc).__name__
+        text = str(exc)
+        lowered = text.lower()
+        if "context_length_exceeded" in lowered or "maximum context length" in lowered:
+            return ProviderError(
+                text,
+                status="rejected",
+                error_type=error_type,
+                code="context_length_exceeded",
+            )
+        if isinstance(exc, (asyncio.TimeoutError, TimeoutError, openai.APITimeoutError)):
+            status = "timed_out"
+        elif isinstance(exc, openai.APIStatusError):
+            status_code = getattr(exc, "status_code", None)
+            if status_code in {400, 401, 403, 404, 409, 422}:
+                status = "rejected"
+            elif status_code in {408, 504}:
+                status = "timed_out"
+            elif status_code == 429 or isinstance(status_code, int) and status_code >= 500:
+                status = "unavailable"
+            else:
+                status = "failed"
+        elif isinstance(exc, (openai.APIConnectionError, openai.RateLimitError, openai.InternalServerError)):
+            status = "unavailable"
+        else:
+            status = "failed"
+        return ProviderError(text, status=status, error_type=error_type, code=code)
+
+
+    async def _request(self, messages, tools, stream, cancellation_token, *, max_output_tokens=None, reasoning_effort=None):
+        if cancellation_token and cancellation_token.is_cancelled:
+            raise asyncio.CancelledError(cancellation_token.reason)
+        payload = {"model": self._model, "messages": messages, "stream": stream}
+        if max_output_tokens is not None:
+            payload["max_tokens"] = max_output_tokens
+        if stream:
+            payload["stream_options"] = {"include_usage": True}
+        if tools:
+            payload.update(tools=tools, tool_choice="auto")
+        self._add_prompt_cache_key(payload)
+        return await await_with_cancellation(
+            self._create_with_optional_reasoning_effort(payload, reasoning_effort=reasoning_effort), cancellation_token
+        )
+
+    async def _create_with_optional_reasoning_effort(self, kwargs: dict[str, Any], *, reasoning_effort: str | None = None) -> Any:
+        payload = dict(kwargs)
+        effort = resolve_reasoning_effort(self._reasoning_effort, reasoning_effort, self._reasoning_efforts)
+        if effort and not self._reasoning_effort_disabled:
+            payload["reasoning_effort"] = effort
+        while True:
+            try:
+                return await self._client.chat.completions.create(**payload)
+            except openai.APIStatusError as exc:
+                if "max_tokens" in payload and self._should_retry_with_max_completion_tokens(exc):
+                    payload["max_completion_tokens"] = payload.pop("max_tokens")
+                elif "prompt_cache_key" in payload and self._should_retry_without_prompt_cache_key(exc):
+                    payload.pop("prompt_cache_key")
+                    self._prompt_cache_key_disabled = True
+                elif "reasoning_effort" in payload and self._should_retry_without_reasoning_effort(exc):
+                    payload.pop("reasoning_effort")
+                    if reasoning_effort is None:
+                        self._reasoning_effort_disabled = True
+                else:
+                    raise
+
+    def _should_retry_with_max_completion_tokens(self, exc: Exception) -> bool:
+        text = str(exc).lower()
+        return getattr(exc, "status_code", None) in {400, 422} and "max_tokens" in text and any(
+            marker in text for marker in ("unsupported", "unknown", "unrecognized", "not support", "extra_forbidden")
+        )
+
+    def _add_prompt_cache_key(self, kwargs: dict[str, Any]) -> None:
+        if self._prompt_cache_key_disabled:
+            return
+        kwargs["prompt_cache_key"] = self._build_prompt_cache_key(
+            messages=kwargs.get("messages") or [],
+            tools=kwargs.get("tools") or [],
+        )
+
+    def _build_prompt_cache_key(self, *, messages: list[dict], tools: list[dict]) -> str:
+        system_parts = [
+            str(message.get("content") or "")
+            for message in messages
+            if isinstance(message, dict) and message.get("role") == "system"
+        ]
+        payload = {
+            "model": self._model,
+            "cwd": os.path.normcase(os.path.realpath(self._workspace_root or os.getcwd())),
+            "system": system_parts,
+            "tools": tools,
+        }
+        digest = hashlib.sha256(
+            json.dumps(payload, ensure_ascii=False, sort_keys=True, default=str).encode("utf-8")
+        ).hexdigest()[:24]
+        return f"rind:{digest}"
+
+    def _should_retry_without_reasoning_effort(self, exc: Exception) -> bool:
+        text = str(exc).lower()
+        return any(
+            marker in text
+            for marker in (
+                "reasoning_effort",
+                "request was blocked",
+                "blocked",
+                "unsupported",
+                "unknown",
+                "invalid",
+                "unrecognized",
+                "not support",
+                "not supported",
+                "extra_forbidden",
+            )
+        )
+
+    def _should_retry_without_prompt_cache_key(self, exc: Exception) -> bool:
+        text = str(exc).lower()
+        return "prompt_cache_key" in text and any(
+            marker in text
+            for marker in (
+                "unsupported",
+                "unknown",
+                "invalid",
+                "unrecognized",
+                "not support",
+                "not supported",
+                "extra_forbidden",
+            )
+        )
 
 
 def _events(chunk: Any, call_ids: dict[int, str] | None = None) -> list[ModelStreamEvent]:

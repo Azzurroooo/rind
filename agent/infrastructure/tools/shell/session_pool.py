@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass
 
-from agent.domain.shell import detect_default_shell
+from agent.infrastructure.environment import detect_default_shell
 
 
 @dataclass

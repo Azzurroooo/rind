@@ -533,7 +533,7 @@ def test_session_files_read_jsonl_waits_for_active_writer(tmp_path):
     path = tmp_path / "messages.jsonl"
     files = SessionFiles()
 
-    with files._get_lock_for_path(str(path)):
+    with files.lock_for(str(path)):
         path.write_text('{"role": "user"', encoding="utf-8")
         read_result = []
 
@@ -557,7 +557,7 @@ def test_session_files_load_json_waits_for_active_writer(tmp_path):
     path = tmp_path / "meta.json"
     files = SessionFiles()
 
-    with files._get_lock_for_path(str(path)):
+    with files.lock_for(str(path)):
         path.write_text('{"schema_version": ', encoding="utf-8")
         read_result = []
 

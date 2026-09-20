@@ -11,7 +11,7 @@ from agent.domain.tool_payload import ParsedToolCall
 from agent.infrastructure.credentials import CredentialStore
 from agent.infrastructure.settings import AppSettings
 from agent.infrastructure.llm.openai_chat import OpenAIChatCompletionsClient
-from agent.infrastructure.llm.openai_chat_client import build_async_client
+from agent.infrastructure.llm.provider_service import build_async_client
 from agent.infrastructure.llm.provider_service import ProviderServiceImpl
 
 

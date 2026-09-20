@@ -3,15 +3,16 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Callable
 import json
 import signal
 import sys
 import threading
-from collections.abc import Callable
 from typing import Any
 
 from agent.runtime.server.dispatcher import RuntimeDispatcher
 from agent.runtime.server.protocol import error_message, validate_request
+
 
 def _schedule_ingest(loop: asyncio.AbstractEventLoop, ingest: Callable, *args: Any):
     """The stdin pump is a daemon thread: once the loop has closed the process
@@ -46,7 +47,6 @@ def configure_utf8_stdio() -> None:
 
 def configure_stdio_server_signals() -> None:
     signal.signal(signal.SIGINT, signal.SIG_IGN)
-
 
 
 class StdioRuntimeServer:

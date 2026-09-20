@@ -9,7 +9,7 @@ import openai
 from agent.domain.cancellation import CancellationTokenSource
 from agent.infrastructure.llm.cancellation import await_with_cancellation
 from agent.infrastructure.llm.google_generative_ai import GoogleGenerativeAIClient
-from agent.infrastructure.llm.openai_chat_client import OpenAIChatClient
+from agent.infrastructure.llm.openai_chat import OpenAIChatCompletionsClient
 
 
 @pytest.mark.asyncio
@@ -94,7 +94,7 @@ async def test_sdk_is_the_only_retry_owner(monkeypatch):
         http_client=httpx.AsyncClient(transport=httpx.MockTransport(respond)),
     )
     monkeypatch.setattr(sdk, "_calculate_retry_timeout", lambda *args: 0)
-    client = OpenAIChatClient(sdk, "model")
+    client = OpenAIChatCompletionsClient(sdk, "model")
     try:
         from agent.domain.errors import ProviderError
         with pytest.raises(ProviderError):
@@ -120,7 +120,7 @@ async def test_cancellation_interrupts_sdk_retry_after():
         api_key="test", max_retries=14,
         http_client=httpx.AsyncClient(transport=httpx.MockTransport(respond)),
     )
-    client = OpenAIChatClient(sdk, "model")
+    client = OpenAIChatCompletionsClient(sdk, "model")
     task = asyncio.create_task(client.create([], cancellation_token=source.token))
     try:
         await requested.wait()

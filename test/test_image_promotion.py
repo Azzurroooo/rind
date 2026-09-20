@@ -28,8 +28,8 @@ from agent.domain.events import (
     TurnFailedEvent,
     TurnStepRetryEvent,
 )
-from agent.infrastructure.llm.openai_chat_client import OpenAIChatClient
-from agent.runtime.core.image_promotion import (
+from agent.infrastructure.llm.openai_chat import OpenAIChatCompletionsClient
+from agent.infrastructure.workspace_images import (
     IMAGE_MIME_TYPES,
     IMAGE_PART_MAX_BYTES,
     image_parts_for_text,
@@ -111,6 +111,7 @@ def _runner(chat_client, context_messages, consume_side_effect=None, context_man
             return_value=MagicMock(messages=context_messages, stats={}, decisions={})
         )
     return TurnRunner(
+        image_promoter=promote_user_images,
         chat_client=chat_client,
         tool_processor=MagicMock(),
         stream_parser=parser,
@@ -351,7 +352,7 @@ def test_context_length_error_keeps_existing_recovery_path(tmp_path):
     )
     context_manager = MagicMock()
     context_manager.build_messages_async = AsyncMock(
-        side_effect=[context_with_image, handoff_context, handoff_context]
+        side_effect=[context_with_image, context_with_image, handoff_context, handoff_context]
     )
     compaction_service = MagicMock()
     compaction_service.compact_async = AsyncMock(return_value={})
@@ -405,7 +406,7 @@ def test_prompts_without_image_references_produce_identical_requests(tmp_path):
 
 def test_openai_chat_client_passes_list_content_through_to_provider():
     capture = _ProviderCapture()
-    client = OpenAIChatClient(async_client=capture, model="test-model")
+    client = OpenAIChatCompletionsClient(async_client=capture, model="test-model")
     messages = [
         {"role": "system", "content": "sys"},
         {
@@ -428,7 +429,7 @@ def test_openai_chat_client_passes_list_content_through_to_provider():
 
 def test_openai_chat_client_keeps_string_content_path_unchanged():
     capture = _ProviderCapture()
-    client = OpenAIChatClient(async_client=capture, model="test-model")
+    client = OpenAIChatCompletionsClient(async_client=capture, model="test-model")
     messages = [
         {"role": "system", "content": "sys"},
         {"role": "user", "content": "plain string prompt"},

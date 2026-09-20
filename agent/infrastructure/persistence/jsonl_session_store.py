@@ -665,15 +665,6 @@ class JsonlSessionStore(SessionStore):
             await asyncio.to_thread(self._bind_draft_sync, clean)
             return await asyncio.to_thread(self._session_info_sync)
 
-    async def create_team_project(self, *, project_id: str | None = None) -> dict[str, Any]:
-        from agent.infrastructure.team import initialize_team_project
-
-        project = initialize_team_project(self._resolve_workspace_root(), project_id=project_id)
-        return {
-            "project_id": project.project_id,
-            "main_agent": project.main_agent,
-            "workspace_root": str(project.agents_root / project.main_agent),
-        }
 
     async def update_model(self, model: str) -> None:
         clean = str(model or "").strip()

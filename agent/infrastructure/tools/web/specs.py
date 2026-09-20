@@ -2,9 +2,10 @@ from __future__ import annotations
 
 from agent.domain.cancellation import CancellationToken
 from agent.infrastructure.tools.spec import ToolSpec
-from .session_pool import WebSessions
-from .search import search_web
+
 from .fetch import fetch_web_page
+from .search import search_web
+from .session_pool import WebSessions
 
 
 def build_web_tool_specs(http_sessions: WebSessions) -> tuple[ToolSpec, ...]:

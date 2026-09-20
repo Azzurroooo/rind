@@ -1,10 +1,13 @@
 from __future__ import annotations
 
-import re
 from contextlib import closing
+import re
+
 from bs4 import BeautifulSoup
-from agent.domain.cancellation import CancellationToken
+
 from agent.domain import tool_cancelled, tool_error, tool_ok
+from agent.domain.cancellation import CancellationToken
+
 from .session_pool import WebSessions
 
 
@@ -42,7 +45,6 @@ def _search_bing(query: str, max_results: int, session) -> list[dict[str, str]]:
             results.append({"title": title, "url": link, "snippet": snippet})
 
     return results
-
 
 
 def _search_baidu(query: str, max_results: int, session) -> list[dict[str, str]]:
@@ -104,7 +106,6 @@ def _search_baidu(query: str, max_results: int, session) -> list[dict[str, str]]
     return results
 
 
-
 def _search_ddg(query: str, max_results: int, session) -> list[dict[str, str]]:
     url = "https://html.duckduckgo.com/html/"
     headers = {
@@ -129,7 +130,6 @@ def _search_ddg(query: str, max_results: int, session) -> list[dict[str, str]]:
             })
 
     return results
-
 
 
 def search_web(
@@ -188,7 +188,6 @@ def search_web(
         [],
         meta={"engine": "none", "query": query, "errors": errors, "matches": 0},
     )
-
 
 
 def _clamp_search_results(value) -> int:

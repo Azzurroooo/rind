@@ -7,11 +7,10 @@ from pathlib import Path
 
 from agent.domain import tool_error
 from agent.domain.cancellation import CancellationToken
-
-from agent.infrastructure.tools.spec import ToolSpec
+from agent.infrastructure.tools.files.mutation_queue import FileMutationQueue
 from agent.infrastructure.tools.files.mutations import edit_file, write_file
 from agent.infrastructure.tools.files.queries import glob, grep, read_file
-from agent.infrastructure.tools.files.mutation_queue import FileMutationQueue
+from agent.infrastructure.tools.spec import ToolSpec
 
 
 def _normalize_path_arguments(args: dict) -> dict:

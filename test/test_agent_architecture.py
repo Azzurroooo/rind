@@ -40,13 +40,29 @@ def _assert_path_excludes(root: Path, forbidden: tuple[str, ...]) -> None:
 def test_layer_dependencies_point_inward() -> None:
     _assert_layer_excludes(
         "domain",
-        ("agent.application", "agent.infrastructure", "agent.bootstrap"),
+        ("agent.application", "agent.infrastructure", "agent.bootstrap", "agent.runtime"),
     )
     _assert_layer_excludes(
         "application",
-        ("agent.infrastructure", "agent.bootstrap"),
+        ("agent.infrastructure", "agent.bootstrap", "agent.runtime"),
     )
-    _assert_layer_excludes("infrastructure", ("agent.bootstrap",))
+    _assert_layer_excludes("infrastructure", ("agent.bootstrap", "agent.runtime"))
+
+
+def test_prompts_do_not_probe_adapters_or_runtime() -> None:
+    imports = _absolute_imports(AGENT_ROOT / "prompts.py")
+    assert not [name for name in imports if name.startswith((
+        "agent.infrastructure", "agent.bootstrap", "agent.runtime", "os", "platform", "subprocess",
+    ))]
+
+
+def test_transports_share_dispatch_without_importing_each_other() -> None:
+    for name, forbidden in (("stdio", "websocket"), ("websocket", "stdio")):
+        imports = _absolute_imports(AGENT_ROOT / "runtime" / "server" / f"{name}.py")
+        assert "agent.runtime.server.dispatcher" in imports
+        assert f"agent.runtime.server.{forbidden}" not in imports
+    imports = _absolute_imports(AGENT_ROOT / "runtime" / "server" / "dispatcher.py")
+    assert not imports.intersection({"agent.runtime.server.stdio", "agent.runtime.server.websocket"})
 
 
 def test_runtime_core_does_not_depend_on_server_or_adapters() -> None:
@@ -81,6 +97,22 @@ def test_legacy_structure_is_removed() -> None:
         "runtime/core/cancellation.py",
         "infrastructure/plans",
         "infrastructure/tools/impl",
+        "bootstrap/delegation.py",
+        "domain/shell.py",
+        "application/context/usage_summary.py",
+        "runtime/core/image_promotion.py",
+        "runtime/server/web.py",
+        "runtime/server/files.py",
+        "runtime/server/commands/features",
+        "infrastructure/config",
+        "infrastructure/auth",
+        "infrastructure/skills",
+        "infrastructure/planning",
+        "infrastructure/team.py",
+        "infrastructure/llm/openai_chat_client.py",
+        "infrastructure/llm/providers.py",
+        "infrastructure/llm/llm_trace.py",
+        "infrastructure/tools/builtin",
     )
     assert not [path for path in legacy_paths if (AGENT_ROOT / path).exists()]
 

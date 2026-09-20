@@ -1,6 +1,6 @@
 # Rind Main Flow and Runtime Data Flow
 
-This document describes how the two current product entry points share the Runtime Package. `frontend-cli` and Desktop are both surfaces; the Python entry point only starts the headless Runtime Server.
+CLI, desktop, browser and gateway clients share the Runtime Package. The Python entry point starts the headless Runtime Server.
 
 ## 1. Entry points and composition root
 
@@ -12,7 +12,7 @@ flowchart LR
     Server --> Bootstrap["agent/bootstrap/container.py"]
     Bootstrap --> Core["agent/runtime/core"]
     Core --> Application["agent/application"]
-    Core --> Infrastructure["agent/infrastructure"]
+    Bootstrap --> Infrastructure["agent/infrastructure"]
 ```
 
 `main.py --version` and `main.py --help` only report Runtime Package metadata; the actual run command is:
@@ -27,7 +27,7 @@ For a long-lived remote worker, start the WebSocket transport instead:
 python main.py app-server --web --host 127.0.0.1 --port 8765 --cwd <workspace>
 ```
 
-`agent/runtime/server/app_server.py` validates the workspace, loads shared settings, calls `build_agent_container()`, and hands the runtime and session store to `StdioRuntimeServer`. Server and core live in the same Runtime Package; there is no extra RPC from server to runtime.
+`agent/runtime/server/app_server.py` creates `RuntimeWorker` and selects the stdio or WebSocket transport. Both transports use `RuntimeDispatcher`. The worker owns shared resources, `SessionService` owns session access, and `ExecutionCoordinator` calls `build_agent_container()` only when execution is needed. Server and core live in the same Runtime Package; there is no extra RPC from server to runtime.
 
 ## 2. Surface startup
 
@@ -66,7 +66,7 @@ The public fields of an event envelope are `kind`, `method: "session/update"`, a
 ```mermaid
 sequenceDiagram
     participant Surface
-    participant Server as StdioRuntimeServer
+    participant Server as RuntimeDispatcher
     participant Runtime as AgentRuntime
     participant Runner as TurnRunner
     participant Store as SessionStore
@@ -89,12 +89,14 @@ sequenceDiagram
 ```text
 main.py
   -> agent/runtime/server/app_server.py
-     -> agent/bootstrap/container.py
+     -> transport -> dispatcher.py -> worker.py
+        -> execution.py -> agent/bootstrap/container.py
         -> agent/runtime/core/runtime.py
            -> agent/runtime/core/turn_runner.py
               -> agent/application/context/*
               -> agent/application/tools/*
-              -> agent/infrastructure/*
+
+Concrete adapters are injected by bootstrap/container.py, not imported by core.
 
 Surface clients:
   frontend-cli/lib/runtime-protocol.js

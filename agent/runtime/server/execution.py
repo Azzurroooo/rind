@@ -1,26 +1,27 @@
 """Active execution coordination and release."""
 
 from __future__ import annotations
-from agent.runtime.server.session_service import SessionService
-from agent.infrastructure.paths import validate_workspace_root
+
 import asyncio
+from collections.abc import AsyncIterator, Awaitable, Callable
 import copy
+from dataclasses import dataclass, field, replace
 import inspect
 import json
 import tempfile
-from dataclasses import dataclass, field, replace
-from collections.abc import AsyncIterator, Awaitable, Callable
 from typing import Any
+
 from agent.bootstrap import AgentContainer, SharedRuntimeResources, build_agent_container
-from agent.infrastructure.settings import load_settings
-from agent.infrastructure.llm import ProviderServiceImpl
-from agent.domain.models import ModelSelection
-from agent.infrastructure.paths import validate_session_id
-from agent.infrastructure.tools.shell.specs import ShellTools
-from agent.infrastructure.tools.web.session_pool import WebSessions
-from agent.prompts import build_goal_checkpoint_prompt
 from agent.domain.cancellation import CancellationTokenSource
 from agent.domain.events import UserQuestionRequestedEvent
+from agent.domain.models import ModelSelection
+from agent.infrastructure.llm import ProviderServiceImpl
+from agent.infrastructure.paths import validate_session_id, validate_workspace_root
+from agent.infrastructure.settings import load_settings
+from agent.infrastructure.tools.shell.tool import ShellTools
+from agent.infrastructure.tools.web.session_pool import WebSessions
+from agent.prompts import build_goal_checkpoint_prompt
+from agent.runtime.server.session_service import SessionService
 
 
 @dataclass(slots=True)
