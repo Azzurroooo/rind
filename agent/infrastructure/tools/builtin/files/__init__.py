@@ -102,7 +102,7 @@ def _specs(read, write, edit, find, search) -> tuple[ToolSpec, ...]:
         ToolSpec(
             name="read_file",
             handler=read,
-            description="Read a line range of a UTF-8 text file. A page holds at most 2000 lines and about 50 KiB, with a 25 KiB model preview; returns line numbers, truncation state, and the next offset.",
+            description="Read consecutive complete lines of a UTF-8 text file within a 25 KiB model output budget. Returns the actual line range and next_offset for the first undisplayed line. A LineTooLong error requires reading that line in character slices with bash/Python.",
             param_descriptions={
                 "path": "Absolute or relative file path",
                 "offset": "First line to read (default 1)",

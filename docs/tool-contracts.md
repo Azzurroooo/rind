@@ -1,0 +1,5 @@
+# File and shell tool contracts
+
+`read_file` model output contains consecutive complete lines starting at `offset`. The normalizer budgets the final UTF-8 JSON, updates the displayed range, and sets `next_offset` to the first undisplayed line. It never joins a page's head and tail. A line that cannot fit is reported as `LineTooLong`, without an automatic continuation cursor: use bash/Python to inspect that line in character slices, then resume at the following line. No content is silently described as fully read. Source output has its own 50 KiB bound; the model projection has a 25 KiB bound. Old previews containing gaps are limited to their consecutive prefix when explicitly normalized; persisted model projections are not rewritten on replay.
+
+Deterministic paging tests cover Chinese/ASCII/escaped text, CRLF, empty files, EOF without a newline, long lines and saved previews with gaps. Live-model reading quality remains a separate manual acceptance scenario.

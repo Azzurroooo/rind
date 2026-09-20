@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass, field
 from typing import Any, Protocol
 
@@ -20,8 +21,7 @@ _MAX_PREVIEW_BYTES = 25 * 1024
 _MAX_PREVIEW_LINES = 2_000
 _TRUNCATION_MARKER = "\n\nOutput truncated. Full output is available at {output_path}.\nUse read_file or bash to inspect it.\n"
 _READ_PAGE_MARKER = "\n\nRead output is limited to the requested page. Use the original path and next_offset in meta to continue reading.\n"
-_READ_PREVIEW_MARKER = "\n\nRead output preview truncated at 25 KiB. Use the original path and next_offset in meta to continue reading.\n"
-_READ_LINE_MARKER = "\n\nRead output contains a line truncated at the read limit. Use the original path to inspect the full line.\n"
+_READ_PREVIEW_MARKER = "\n\nRead preview is incomplete. Read the original path in smaller ranges.\n"
 
 
 class ToolOutputWriter(Protocol):
@@ -87,11 +87,15 @@ class ToolResultNormalizer:
             include_notice=False,
             metadata=source_metadata,
         )
-        if needs_preview:
-            if is_read:
-                model_content = self._project_read_for_model(rendered, read_payload, preview_required)
-            else:
-                model_content = self._project_for_model(rendered, total_bytes, total_lines, identity, output_path)
+        if read_payload is not None:
+            model_content = self._project_read_for_model(read_payload)
+            if json.loads(model_content).get("ok") is False:
+                terminal_content = model_content
+        elif needs_preview:
+            model_content = self._project_for_model(
+                rendered, total_bytes, total_lines, identity, output_path,
+                truncation_marker=_READ_PREVIEW_MARKER if is_read else _TRUNCATION_MARKER,
+            )
         else:
             model_content = rendered
 
@@ -151,48 +155,52 @@ class ToolResultNormalizer:
             truncation_marker=truncation_marker,
         )
 
-    def _project_read_for_model(self, rendered: str, payload: dict | None, preview_required: bool) -> str:
-        if payload is None:
-            return self._project_for_model(
-                rendered,
-                *self._text_metrics(rendered),
-                (True, "read_file", ""),
-                None,
-                truncation_marker=_READ_PREVIEW_MARKER,
-            )
-        data = payload["data"]
+    def _project_read_for_model(self, payload: dict) -> str:
         meta = dict(payload.get("meta") or {})
         meta.pop("output_path", None)
-        meta["truncated"] = True
-        if preview_required:
-            marker = _READ_PREVIEW_MARKER
-        elif meta.get("line_truncated"):
-            marker = _READ_LINE_MARKER
-        else:
-            marker = _READ_PAGE_MARKER
+        offset = int(meta.get("offset", 1))
+        header, *body = payload["data"].split("\n")
+        matched = re.fullmatch(rf"Showing lines {offset} to (\d+):", header)
+        if matched is None:
+            return json.dumps({"ok": False, "tool": "read_file", "error_type": "InvalidReadResult",
+                               "error": "Read result has no valid consecutive line range. Read the original path again.",
+                               "meta": {"path": meta.get("path"), "offset": offset}}, ensure_ascii=False)
+        lines = []
+        for line in body:
+            if not re.match(rf"\s*{offset + len(lines)} \|", line):
+                break
+            lines.append(line)
+        incomplete = offset + len(lines) - 1 < int(matched[1])
+        if meta.get("line_truncated"):
+            lines = lines[:next((i for i, line in enumerate(lines) if re.search(r"\.\.\.\(truncated:\d+\)$", line)), 0)]
 
-        def serialize(preview: str) -> str:
+        def serialize(count: int) -> str:
             projected = dict(payload)
-            projected["data"] = preview + marker
-            projected["meta"] = meta
+            next_offset = offset + count if count < len(lines) or incomplete or meta.get("line_truncated") else meta.get("next_offset")
+            projected["data"] = "\n".join([f"Showing lines {offset} to {offset + count - 1 if count else 0}:", *lines[:count]])
+            if next_offset is not None:
+                projected["data"] += _READ_PAGE_MARKER
+            projected["meta"] = {**meta, "limit": count, "next_offset": next_offset, "truncated": next_offset is not None, "line_truncated": False}
             return json.dumps(projected, ensure_ascii=False, separators=(",", ": "))
 
-        full_page = serialize(data)
-        if not preview_required and len(full_page.encode("utf-8")) <= self.max_preview_bytes:
-            return full_page
-
         low = 0
-        high = min(len(data), self.max_preview_bytes)
-        best = serialize("")
+        high = len(lines)
+        best_count = 0
         while low <= high:
-            preview_chars = (low + high) // 2
-            candidate = serialize(self._preview(data, preview_chars))
-            if len(candidate.encode("utf-8")) <= self.max_preview_bytes:
-                best = candidate
-                low = preview_chars + 1
+            count = (low + high) // 2
+            candidate = serialize(count)
+            if len(candidate.encode("utf-8")) <= self.max_preview_bytes and count + 1 <= self.max_preview_lines:
+                best_count = count
+                low = count + 1
             else:
-                high = preview_chars - 1
-        return best
+                high = count - 1
+        if not best_count and (lines or incomplete or meta.get("line_truncated")):
+            return json.dumps({
+                "ok": False, "tool": "read_file", "error_type": "LineTooLong",
+                "error": f"Line {offset} was not displayed in full. Use bash/Python to read it in character slices (splitlines()[{offset - 1}][start:end]), then resume at offset {offset + 1}.",
+                "meta": {"path": meta.get("path"), "offset": offset},
+            }, ensure_ascii=False)
+        return serialize(best_count)
 
     def _bounded_projection(
         self,

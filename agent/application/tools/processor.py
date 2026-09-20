@@ -261,6 +261,10 @@ class ToolCallProcessor:
             session_id=session.session_id or "",
             call_id=call.call_id,
         )
+        projected = _load_tool_payload(normalized_result.model_content)
+        projected_status = _classify_tool_payload(projected) if projected else None
+        if outcome.status == "completed" and projected_status:
+            outcome = _ToolCallOutcome(status=projected_status[0], error_type=projected_status[1], result=outcome.result)
         try:
             if not reused:
                 await self._persist_tool_result(
