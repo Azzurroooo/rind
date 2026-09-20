@@ -140,11 +140,12 @@ async def test_manual_compact_retrieval_promotion_and_duplicate_rejection():
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("auto", [False, True])
 @pytest.mark.parametrize("cancel", [False, True])
-async def test_manual_compact_failure_or_cancel_releases_inputs_and_allows_next_turn(cancel):
-    h = CompactHarness()
+async def test_compact_failure_or_cancel_releases_inputs_and_allows_next_turn(cancel, auto):
+    h = CompactHarness(auto=auto)
     source = CancellationTokenSource()
-    task = asyncio.create_task(h.collect(compact="manual", cancellation_token=source.token))
+    task = asyncio.create_task(h.collect(compact=None if auto else "manual", cancellation_token=source.token))
     await asyncio.wait_for(h.started.wait(), 2)
     h.runtime.submit_steering("must not run")
     h.runtime.submit_follow_up("must not run either")
@@ -157,9 +158,11 @@ async def test_manual_compact_failure_or_cancel_releases_inputs_and_allows_next_
     assert events[-1].type == ("turn_cancelled" if cancel else "turn_failed")
     assert not h.compacted
     assert not h.requests
-    assert not h.session.turn_states
+    if not auto:
+        assert not h.session.turn_states
     assert not h.runtime.turn_active
     assert h.runtime.input_queue_counts() == {"steering": 0, "follow_up": 0}
+    h.auto = False
     assert (await h.collect(query="next turn"))[-1].type == "turn_completed"
     assert h.requests[-1][-1]["content"] == "next turn"
 

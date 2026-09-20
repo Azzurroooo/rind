@@ -1,5 +1,9 @@
 # Context compaction
 
+Manual, automatic and context-length recovery compaction share the same runner pipeline: prepare the compression corpus, generate and persist a handoff, synchronize the skill catalog, rebuild context, and validate its message boundaries. Manual compaction builds its initial context; automatic compaction passes the context already built for sampling. Whether to continue sampling belongs to the caller, not the compression pipeline.
+
+Cancellation is checked before generation and again before starting the compact commit, including when the provider returns normally after cancellation. Known provider usage is retained even when that summary is discarded.
+
 Compaction replaces older context with a user continuation message and an assistant summary, followed by the retained recent conversation and any messages added after the boundary. Recent assistant tool calls remain paired with their results, including their original reasoning content. Raw history stays available on disk.
 
 The summary's generation reasoning is not stored in new compaction handoffs. When projecting either new or legacy handoffs into model messages, Rind supplies the existing fixed, nonempty `COMPACT_HANDOFF_REASONING_CONTENT` in place of generation reasoning. This preserves the assistant message contract without replaying the summary model's reasoning. Existing compaction files are not rewritten; ordinary assistant reasoning is unchanged.

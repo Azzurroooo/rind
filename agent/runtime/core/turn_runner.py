@@ -140,9 +140,7 @@ class TurnRunner:
                 if context.decisions.get("auto_compact_token_limit_reached"):
                     context, record = await self._run_compact(
                         session=session,
-                        context_messages=context.messages,
-                        context_stats=context.stats,
-                        context_decisions=context.decisions,
+                        context=context,
                         reason="auto",
                         phase="mid_turn",
                         phase_detail=self._compact_phase_detail(sampling_index),
@@ -267,9 +265,7 @@ class TurnRunner:
                         if context_length_recovery_count == 1:
                             _, record = await self._run_compact(
                                 session=session,
-                                context_messages=context.messages,
-                                context_stats=context.stats,
-                                context_decisions=context.decisions,
+                                context=context,
                                 reason="context_length_error",
                                 phase="mid_turn",
                                 phase_detail="context_length_recovery",
@@ -430,46 +426,32 @@ class TurnRunner:
         cancellation_token: CancellationToken | None = None,
         turn_id: str = "",
     ) -> dict:
-        context = await self._build_context(session)
-        compaction_context = await self._compaction_context(session, context)
-        stats = dict(compaction_context.stats)
-        messages = list(compaction_context.messages)
-        record = await self._compaction_service.compact_async(
+        context = await self._build_context(session, turn_id=turn_id)
+        _, record = await self._run_compact(
             session=session,
-            context_messages=messages,
-            chat_client=self._chat_client,
+            context=context,
             reason=reason,
             phase=phase,
-            context_stats=stats,
             cancellation_token=cancellation_token,
+            turn_id=turn_id,
         )
-        await self._sync_skill_catalog(session)
-        context = await self._build_context(session, turn_id=turn_id)
-        self._validate_compact_context(context)
         return record
 
     async def _run_compact(
         self,
         *,
         session: SessionStore,
-        context_messages: list[dict],
-        context_stats: dict,
-        context_decisions: dict | None = None,
+        context: ContextBuildResult,
         reason: str,
         phase: str,
         phase_detail: str | None = None,
         transient_system_messages: list[dict] | None = None,
         cancellation_token: CancellationToken | None = None,
         turn_id: str = "",
-    ):
-        current_context = ContextBuildResult(
-            messages=context_messages,
-            stats=context_stats,
-            decisions=context_decisions or {},
-        )
+    ) -> tuple[ContextBuildResult, dict]:
         compaction_context = await self._compaction_context(
             session,
-            current_context,
+            context,
             transient_system_messages=transient_system_messages,
         )
         record = await self._compaction_service.compact_async(

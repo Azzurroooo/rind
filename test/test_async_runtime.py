@@ -1236,8 +1236,10 @@ async def test_async_turn_runner_mid_turn_compact_does_not_preserve_raw_tail():
 
     context, _ = await runner._run_compact(
         session=session,
-        context_messages=[dict(message) for message in session.raw_messages],
-        context_stats={"context_window_tokens": 1000},
+        context=SimpleNamespace(
+            messages=[dict(message) for message in session.raw_messages],
+            stats={"context_window_tokens": 1000}, decisions={},
+        ),
         reason="auto",
         phase="mid_turn",
     )
