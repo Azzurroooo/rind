@@ -18,15 +18,15 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
-test("theme defaults to Catppuccin Mocha and validates switches", () => {
+test("theme defaults to Frappé and validates switches", () => {
   resetTheme();
-  assert.equal(DEFAULT_THEME, "catppuccin-mocha");
-  assert.deepEqual(currentTheme(), { name: "catppuccin-mocha", label: "Catppuccin Mocha" });
+  assert.equal(DEFAULT_THEME, "frappe");
+  assert.deepEqual(currentTheme(), { name: "frappe", label: "Frappé" });
 
   assert.equal(setTheme("nope"), null);
   assert.equal(setTheme("macchiato"), null);
   assert.equal(setTheme("mocha"), null);
-  assert.equal(currentTheme().name, "catppuccin-mocha");
+  assert.equal(currentTheme().name, "frappe");
 
   assert.deepEqual(setTheme("Dracula"), { name: "dracula", label: "Dracula" });
   const current = themeOptions().find((option) => option.current);
@@ -38,7 +38,7 @@ test("theme defaults to Catppuccin Mocha and validates switches", () => {
 });
 
 test("paint honors the environment and paintRaw always emits truecolor", () => {
-  resetTheme();
+  setTheme("catppuccin-mocha");
   const originalIsTty = process.stdout.isTTY;
   const originalNoColor = process.env.NO_COLOR;
   try {
@@ -56,6 +56,7 @@ test("paint honors the environment and paintRaw always emits truecolor", () => {
     assert.equal(paint.dim("y"), "y");
     assert.equal(paintRaw.notice("z"), "\x1b[38;2;203;166;247mz\x1b[0m");
   } finally {
+    resetTheme();
     if (originalIsTty === undefined) {
       delete process.stdout.isTTY;
     } else {
@@ -93,7 +94,7 @@ test("/theme command lists flavors and applies switches", async () => {
 
   const switched = await executeLocalSlashCommand("/theme dracula", context);
   assert.equal(switched.display.changed, true);
-  assert.equal(switched.display.previous, "catppuccin-mocha");
+  assert.equal(switched.display.previous, "frappe");
   assert.equal(currentTheme().name, "dracula");
 
   const unknown = await executeLocalSlashCommand("/theme missing", context);

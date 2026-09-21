@@ -184,7 +184,7 @@ test("promptText colors model and working directory with separate hierarchy", ()
   try {
     const line = promptText({ model: "glm-5.1", cwd: "E:\\project" }).split("\n")[1];
 
-    assert.match(line, /^  \x1b\[1m\x1b\[38;2;137;180;250mglm-5\.1\x1b\[0m\x1b\[0m\x1b\[2m · \x1b\[0m\x1b\[38;2;116;199;236mE:\\project\x1b\[0m$/);
+    assert.match(line, /^  \x1b\[1m\x1b\[38;2;140;170;238mglm-5\.1\x1b\[0m\x1b\[0m\x1b\[2m · \x1b\[0m\x1b\[38;2;133;193;220mE:\\project\x1b\[0m$/);
   } finally {
     process.stdout.isTTY = originalIsTty;
     if (originalNoColor === undefined) {
@@ -1233,13 +1233,13 @@ test("AssistantMessage restyles history when the theme changes", () => {
   message.append("## 标题\n- **重点**\n");
   message.finish();
   const before = message.render(80).join("\n");
-  assert.ok(before.includes("\x1b[38;2;137;180;250m"), "mocha heading color");
+  assert.ok(before.includes("\x1b[38;2;140;170;238m"), "frappe heading color");
 
   setTheme("latte");
   message.invalidate();
   const after = message.render(80).join("\n");
   assert.ok(after.includes("\x1b[38;2;30;102;245m"), "latte heading color after repaint");
-  assert.ok(!after.includes("137;180;250"), "old palette gone");
+  assert.ok(!after.includes("140;170;238"), "old palette gone");
   resetTheme();
 });
 
@@ -1337,10 +1337,10 @@ test("AssistantRenderer applies ansi styles when color is enabled", () => {
   renderer.append("## 标题\n**重点** 和 `code`\n```js\nconst x = 1;\n```\n");
   renderer.finish();
 
-  assert.match(output, /\x1b\[1m\x1b\[38;2;137;180;250m标题\x1b\[0m\x1b\[0m/);
-  assert.match(output, /\x1b\[1m\x1b\[38;2;249;226;175m重点\x1b\[0m\x1b\[0m/);
-  assert.match(output, /\x1b\[38;2;250;179;135mcode\x1b\[0m/);
-  assert.match(output, /\x1b\[38;2;137;220;235mconst x = 1;\x1b\[0m/);
+  assert.match(output, /\x1b\[1m\x1b\[38;2;140;170;238m标题\x1b\[0m\x1b\[0m/);
+  assert.match(output, /\x1b\[1m\x1b\[38;2;229;200;144m重点\x1b\[0m\x1b\[0m/);
+  assert.match(output, /\x1b\[38;2;239;159;118mcode\x1b\[0m/);
+  assert.match(output, /\x1b\[38;2;153;209;219mconst x = 1;\x1b\[0m/);
 });
 
 test("AssistantRenderer keeps markdown structure markers dim", () => {

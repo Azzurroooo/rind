@@ -9,8 +9,8 @@ test("theme menu lists all flavors and defaults to the current theme", () => {
   const state = createThemeMenuState();
 
   assert.deepEqual(state.items().map((item) => item.name), ["latte", "frappe", "dracula", "gruvbox-dark", "catppuccin-mocha", "solarized-dark", "rose-pine", "everforest-dark-medium", "pistachio"]);
-  assert.equal(state.selectedIndex(), 4);
-  assert.equal(state.selectedTheme().name, "catppuccin-mocha");
+  assert.equal(state.selectedIndex(), 1);
+  assert.equal(state.selectedTheme().name, "frappe");
   assert.equal(state.selectedTheme().current, true);
 });
 

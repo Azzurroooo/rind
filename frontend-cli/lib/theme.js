@@ -106,7 +106,7 @@ const FLAVORS = {
   },
 };
 
-export const DEFAULT_THEME = "catppuccin-mocha";
+export const DEFAULT_THEME = "frappe";
 
 let activeName = DEFAULT_THEME;
 

@@ -57,3 +57,7 @@ ARCHITECTURE_REFACTOR_GUIDE.md
 figs/
 .codex/
 .zcode/
+
+# Local scratch artifacts
+/.tmp_crops/
+/.feishu_oauth_code
