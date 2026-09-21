@@ -70,7 +70,8 @@ async def test_read_result_preserves_image_outside_text_budget(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_user_snapshot_survives_original_deletion(tmp_path, monkeypatch):
+@pytest.mark.parametrize("suffix", ["", ".", "。"])
+async def test_user_snapshot_survives_original_deletion(tmp_path, monkeypatch, suffix):
     monkeypatch.setenv("RIND_HOME", str(tmp_path / "home"))
     uploads = tmp_path / "uploads"
     uploads.mkdir()
@@ -78,7 +79,7 @@ async def test_user_snapshot_survives_original_deletion(tmp_path, monkeypatch):
     Image.new("RGB", (12, 10)).save(source)
     store = JsonlSessionStore(session_dir=str(tmp_path / "sessions"), workspace_root=str(tmp_path), system_prompt="test")
     await store.initialize()
-    await store.persist_user_input("Inspect uploads/example.png")
+    await store.persist_user_input("Inspect uploads/example.png" + suffix)
     messages = await store.get_messages_slice()
     ref = messages[-1]["attachments"][0]
     source.unlink()

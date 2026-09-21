@@ -18,7 +18,7 @@ class RequestImage(TypedDict):
 
 
 _UPLOAD_REFERENCE = re.compile(
-    r"(?<![\w./\\])(uploads/[A-Za-z0-9._\-/]+\.(?:png|jpg|jpeg|webp|gif|bmp))(?![\w.])",
+    r"(?<![\w./\\])(uploads/[A-Za-z0-9._\-/]+\.(?:png|jpg|jpeg|webp|gif|bmp))(?![\w/\\-]|\.+[\w/\\-])",
     re.IGNORECASE,
 )
 

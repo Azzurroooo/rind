@@ -19,6 +19,7 @@ import pytest
 
 from agent.application.images import prepare_image_messages
 from agent.domain.errors import ProviderError
+from agent.domain.images import upload_references
 from agent.domain.cancellation import CancellationTokenSource
 from agent.domain.models import ModelStreamEvent, ModelCompletion
 from agent.bootstrap.container import build_agent_container
@@ -145,6 +146,26 @@ async def test_capability_does_not_modify_history(capability):
 def test_upload_paths_reject_escape(tmp_path):
     assert resolve_upload_path(tmp_path, "uploads/../../secret.png") is None
     assert resolve_upload_path(tmp_path, "/uploads/photo.png") is None
+
+
+@pytest.mark.parametrize("text", [
+    "Inspect uploads/photo.jpg.",
+    "Inspect uploads/photo.jpg... Then explain it.",
+    "Read `uploads/photo.jpg`.",
+    "Read (uploads/photo.jpg).",
+    "查看 uploads/photo.jpg。",
+])
+def test_upload_reference_accepts_surrounding_punctuation(text):
+    assert upload_references(text) == ["uploads/photo.jpg"]
+
+
+@pytest.mark.parametrize("text", [
+    "uploads/photo.jpg.backup", "uploads/photo.jpg...backup", "uploads/photo.jpg-backup",
+    "uploads/photo.jpg/child", "uploads/photo.jpg\\child", "/uploads/photo.jpg",
+    "other/uploads/photo.jpg", "myuploads/photo.jpg",
+])
+def test_upload_reference_does_not_match_part_of_another_path(text):
+    assert upload_references(text) == []
 
 
 @pytest.mark.asyncio
