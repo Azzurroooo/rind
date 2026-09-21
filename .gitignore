@@ -61,3 +61,4 @@ figs/
 # Local scratch artifacts
 /.tmp_crops/
 /.feishu_oauth_code
+/preview_themes.py
