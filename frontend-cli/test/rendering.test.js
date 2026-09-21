@@ -5,7 +5,7 @@ import path from "node:path";
 
 import { AssistantRenderer } from "../lib/assistant-renderer.js";
 import { AssistantMessage } from "../lib/components/assistant-message.js";
-import { resetTheme, setTheme } from "../lib/theme.js";
+import { paintRaw, resetTheme, setTheme } from "../lib/theme.js";
 import { textWidth } from "../lib/text-width.js";
 import {
   answerPromptText,
@@ -14,6 +14,7 @@ import {
   cancelledText,
   commandResultText,
   contextBuiltLine,
+  systemNoticeLine,
   delegateMonitorText,
   errorLine,
   goalCommandText,
@@ -1354,4 +1355,17 @@ test("AssistantRenderer keeps markdown structure markers dim", () => {
   assert.match(output, /\x1b\[2m│ \x1b\[0mquote/);
   assert.match(output, /\x1b\[2m– \x1b\[0mitem/);
   assert.doesNotMatch(output, /\x1b\[(1;33|32)m/);
+});
+
+
+test("system notices use two-space indentation and theme warning only on the prefix", () => {
+  assert.equal(systemNoticeLine("notice", { color: false, level: "warning" }), "  · System: notice");
+  assert.equal(systemNoticeLine("notice", { color: true }), `  ${paintRaw.dim("· System: notice")}`);
+  try {
+    for (const theme of ["dracula", "catppuccin-mocha"]) {
+      setTheme(theme);
+      assert.equal(systemNoticeLine("notice", { color: true, level: "warning" }),
+        `  ${paintRaw.warning("· System:")} ${paintRaw.dim("notice")}`);
+    }
+  } finally { resetTheme(); }
 });

@@ -9,7 +9,7 @@ test("image notices use normal output without changing the input buffer", async 
   const lines = [];
   const controller = createEventController({ state, output: { log: (line) => lines.push(line()) } });
   await controller.handle({ event: { type: "context_built", decisions: { image_notice: "Images not sent: unsupported model." } } });
-  assert.deepEqual(lines, ["Images not sent: unsupported model."]);
+  assert.deepEqual(lines, ["  · System: Images not sent: unsupported model."]);
   assert.deepEqual(state, before);
 });
 
@@ -175,4 +175,33 @@ test("event controller exposes stream recovery as a working status", async () =>
   await controller.handle({ kind: "event", event: { type: "assistant_delta", text: "continued" } });
 
   assert.deepEqual(labels, ["Retrying 2", "Working"]);
+});
+
+
+test("image notices deduplicate by session, model, severity and newly seen images", async () => {
+  const state = { sessionInfo: { model: "unknown", provider: "fake", base_url: "local" } };
+  const lines = [];
+  const controller = createEventController({ state, output: { log: (line) => lines.push(line()) } });
+  const send = (images, level = "info", session = "s1") => controller.handle({ session_id: session,
+    event: { type: "context_built", decisions: { image_notice: "Image notice", image_notice_level: level, image_notice_images: images } } });
+  await send(["a"]);
+  await send(["a"]);
+  assert.equal(lines.length, 1);
+  await send(["a", "b"]);
+  await send(["a"]);
+  await send(["b"]);
+  assert.equal(lines.length, 2);
+  await send(["a"], "warning");
+  assert.equal(lines.length, 3);
+  await send(["a"], "warning", "s2");
+  await send(["a"], "warning");
+  assert.equal(lines.length, 4);
+  state.sessionInfo.model = "vision";
+  await controller.handle({ session_id: "s1", event: { type: "context_built", decisions: {} } });
+  state.sessionInfo.model = "unknown";
+  await send(["a"], "warning");
+  assert.equal(lines.length, 5);
+  state.sessionInfo.base_url = "another";
+  await send(["a"], "warning");
+  assert.equal(lines.length, 6);
 });

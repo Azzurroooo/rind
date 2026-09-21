@@ -1,6 +1,6 @@
 import { clipCells, graphemes, middleClipCells, stripAnsi, textWidth, wrapTextCells } from "./text-width.js";
 import { formatDuration } from "./tool-display.js";
-import { DEFAULT_THEME, paint, flavorSwatch, themeNames } from "./theme.js";
+import { DEFAULT_THEME, paint, paintRaw, flavorSwatch, themeNames } from "./theme.js";
 import { homedir } from "node:os";
 
 const MAX_STARTUP_BANNER_WIDTH = 80;
@@ -959,6 +959,13 @@ export function cancelledText() {
 export function commandResultText(text, detail = "") {
   const extra = clipSingleLine(detail, 96);
   return `${green("✓")} ${bold(clipSingleLine(text, 96))}${extra ? dim(` — ${extra}`) : ""}`;
+}
+
+export function systemNoticeLine(text, { level = "info", color = Boolean(process.stdout.isTTY) && process.env.NO_COLOR === undefined } = {}) {
+  const prefix = "· System:";
+  if (!color) return `  ${prefix} ${text}`;
+  if (level !== "warning") return `  ${paintRaw.dim(`${prefix} ${text}`)}`;
+  return `  ${paintRaw.warning(prefix)} ${paintRaw.dim(text)}`;
 }
 
 export function contextBuiltLine(event) {

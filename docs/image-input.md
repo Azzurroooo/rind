@@ -81,3 +81,11 @@ Deterministic tests cover actual image decoding, size limits, atomic writes, can
 Verification on 2026-09-21: the full Python regression suite passed 1,233 tests with two skipped; the CLI suite passed 435 tests with one skipped. Python source parsing, dependency-direction checks, obsolete image-path checks and `git diff --check` also passed.
 
 The subsequent fixed-catalog expansion passed 180 provider, image-request, settings and runtime-protocol regression tests with external connections disabled. All explicit catalog capabilities were compared with the fetched source data; existing models' reasoning settings were checked unchanged. This update required no generation requests.
+
+
+Image capability notices use a two-space-indented `· System:` label. Unknown
+capability is dim; unsupported input uses the active theme's warning color on
+the label and dim body text. Interactive CLI notices are deduplicated in memory
+per session and model: new image snapshots, changed capability severity or a
+model change allow another notice. Restarting the CLI resets this display state.
+`rind run` writes these notices to stderr, respecting its TTY and `NO_COLOR`.

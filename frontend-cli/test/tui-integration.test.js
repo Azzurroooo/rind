@@ -570,3 +570,35 @@ test("list items become bullets once their line completes", async () => {
   assert.ok(joined.includes("– run commands"), "second list marker rendered");
   harness.tui.stop();
 });
+
+
+test("image system notices preserve the composer and cursor through repeat events and resize", async () => {
+  const h = createHarness({ columns: 60, rows: 16 });
+  const editor = createLineEditor("");
+  editor.setInput("未发送 hello");
+  h.setSession({ mode: "prompt", editor });
+  const controller = createEventController({ state: h.state, output: h.output });
+  const event = { type: "context_built", decisions: {
+    image_notice: "Images not sent. Select a vision model.", image_notice_level: "warning", image_notice_images: ["a"] } };
+  h.tui.start();
+  try {
+    await settle(h.virtual);
+    const cursorX = h.virtual.getCursorPosition().x;
+    await controller.handle({ session_id: "s1", event });
+    await settle(h.virtual);
+    const before = h.virtual.getViewport();
+    assert.ok(before.some((line) => line.startsWith("  · System:")));
+    assert.equal(h.virtual.getCursorPosition().x, cursorX);
+    await controller.handle({ session_id: "s1", event });
+    await settle(h.virtual);
+    assert.deepEqual(h.virtual.getViewport(), before);
+    h.virtual.resize(32, 16);
+    await settle(h.virtual);
+    const lines = h.virtual.getViewport();
+    assert.equal(lines.filter((line) => line.includes("System:")).length, 1);
+    const cursor = h.virtual.getCursorPosition();
+    assert.ok(lines[cursor.y].includes("未发送 hello"));
+    assert.equal(editor.input(), "未发送 hello");
+    assert.equal(cursor.x, cursorX);
+  } finally { h.tui.stop(); }
+});

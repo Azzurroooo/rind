@@ -173,7 +173,11 @@ class TurnRunner:
                     notice = ("Images not sent: this model does not support image input. Select a vision model."
                               if self._image_input is False else "Image input capability is unconfirmed; trying this request with images.")
                     yield ContextBuiltEvent(**event_meta(session, turn_id), message_count=len(context.messages),
-                                            stats=dict(context.stats), decisions={"image_notice": notice})
+                                            stats=dict(context.stats), decisions={
+                                                "image_notice": notice,
+                                                "image_notice_level": "warning" if self._image_input is False else "info",
+                                                "image_notice_images": sorted({item["path"] for m in context.messages for item in m.get("attachments", [])}),
+                                            })
                     image_notice_sent = True
                 request_messages = (
                     await self._prepare_messages(context.messages) if self._prepare_messages else context.messages

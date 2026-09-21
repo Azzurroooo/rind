@@ -65,7 +65,10 @@ Models expose `image_input: true | false | null` in `model/list`. Matching endpo
 cache values override verified built-in values at official endpoints; everything
 else stays unknown. Execution uses the same resolver with its loaded settings.
 `context_built.decisions.image_notice`, when present, is a user-facing image
-warning emitted once per turn. CLI interactive output displays it normally;
+notice emitted once per turn, with `image_notice_level` (`info` or `warning`)
+and `image_notice_images` (snapshot paths). The CLI displays an indented system
+notice and suppresses repeats for the same session/model and previously seen
+images in its current process;
 `rind run` writes it to stderr. See [image input](image-input.md) for storage,
 provider wire contracts, capability sources and verification limits.
 

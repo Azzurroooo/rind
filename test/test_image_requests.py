@@ -256,6 +256,11 @@ async def test_runtime_read_image_reaches_next_request(tmp_path, monkeypatch, ca
             assert "attachments" not in next(m for m in raw if m["role"] == "tool")
         notices = [e.decisions["image_notice"] for e in events if e.type == "context_built" and e.decisions.get("image_notice")]
         assert len(notices) == (1 if capability is None else 0)
+        if capability is None:
+            decisions = next(e.decisions for e in events if e.type == "context_built" and e.decisions.get("image_notice"))
+            assert decisions["image_notice_level"] == "info"
+            assert decisions["image_notice_images"] == [records[0]["attachments"][0]["path"]]
+
         image.unlink()
         if capability is not False:
             restored = JsonlSessionStore(session_dir=str(tmp_path / "sessions"), session_id=container.session_store.session_id, workspace_root=str(tmp_path))
