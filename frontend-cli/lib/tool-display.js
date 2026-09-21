@@ -423,11 +423,12 @@ const READ_RENDERER = {
     return titleFor(state, morePages ? `${main} ${dim("(more pages)")}` : main);
   },
   body(context, width, limit) {
-    if (limit <= 0) {
-      return { lines: [], total: 0 };
-    }
     const { payload } = resultData(context);
     const content = typeof payload.data === "string" ? payload.data : "";
+    if (limit <= 0) {
+      if (!content.startsWith("Read image: ")) return { lines: [], total: 0 };
+      limit = 2;
+    }
     const lines = content.split(/\r\n|\r|\n/).filter((line) => line.trim());
     return {
       lines: lines.slice(0, limit).map((line) => dim(`    ${clipText(line, width, 6)}`)),

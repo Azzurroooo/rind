@@ -52,6 +52,7 @@ function normalizeModels(models, currentModel, providerNames) {
       modelId,
       providerId,
       current: isCurrent,
+      image_input: structured && typeof model.image_input === "boolean" ? model.image_input : null,
     });
   }
   if (current.modelId && !currentFound) {

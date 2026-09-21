@@ -3,6 +3,16 @@ import assert from "node:assert/strict";
 
 import { createEventController } from "../lib/event-controller.js";
 
+test("image notices use normal output without changing the input buffer", async () => {
+  const state = { inputBuffer: "未发送内容", cursorIndex: 3 };
+  const before = { ...state };
+  const lines = [];
+  const controller = createEventController({ state, output: { log: (line) => lines.push(line()) } });
+  await controller.handle({ event: { type: "context_built", decisions: { image_notice: "Images not sent: unsupported model." } } });
+  assert.deepEqual(lines, ["Images not sent: unsupported model."]);
+  assert.deepEqual(state, before);
+});
+
 test("event controller forwards assistant deltas and every announce event to the output layer", async () => {
   const assistant = [];
   const begun = [];

@@ -430,6 +430,7 @@ test("modelMenuText renders provider groups, current model and selection", () =>
     ], 3),
     [
       "  Model deck",
+      "  Image input: unknown",
       "  openai",
       "    · model-a                            current",
       "  deepseek",
@@ -450,6 +451,7 @@ test("modelMenuText keeps the selected model visible", () => {
     modelMenuText(models, 9),
     [
       "  Model deck 3-10/10",
+      "  Image input: unknown",
       "    · model-2",
       "    · model-3",
       "    · model-4",

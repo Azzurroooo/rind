@@ -2,6 +2,17 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { createModelMenuState } from "../lib/model-menu-state.js";
+import { modelMenuText } from "../lib/rendering.js";
+import { stripAnsi } from "../lib/text-width.js";
+
+test("model image capability is explicit and missing metadata stays unknown", () => {
+  for (const [value, expected] of [[true, "supported"], [false, "unsupported"], [null, "unknown"], ["true", "unknown"]]) {
+    const state = createModelMenuState([{ provider_id: "custom", id: "m", image_input: value }], "m");
+    const selected = state.selectedModel();
+    assert.equal(selected.image_input, typeof value === "boolean" ? value : null);
+    assert.match(stripAnsi(modelMenuText([selected], 0)), new RegExp(`Image input: ${expected}`));
+  }
+});
 
 test("model menu groups models by provider and defaults to the current model", () => {
   const state = createModelMenuState(

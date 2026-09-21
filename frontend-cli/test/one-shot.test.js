@@ -32,6 +32,7 @@ test("one-shot execution keeps stdout to the assistant and writes a compact log"
         return Promise.resolve({ protocol_version: "2", capabilities: [], methods: [], session_id: "s1", workspace_root: workspace, model: "m1" });
       }
       if (method === "session/prompt") promptParams = arguments[1];
+      options.onMessage({ session_id: "s1", turn_id: "t1", event: { type: "context_built", decisions: { image_notice: "Image capability unconfirmed" } } });
       options.onMessage({ session_id: "s1", turn_id: "t1", event: { type: "tool_requested", tool_name: "bash" } });
       options.onMessage({ session_id: "s1", turn_id: "t1", event: { type: "assistant_delta", text: "final" } });
       return Promise.resolve({ session_id: "s1", turn_id: "t1" });
@@ -58,6 +59,7 @@ test("one-shot execution keeps stdout to the assistant and writes a compact log"
   assert.equal(options.cliArgs.includes("--no-user-question"), true);
   assert.deepEqual(promptParams, { session_id: "s1", input: "hello" });
   assert.equal(errors.join("").includes("bash"), true);
+  assert.match(errors.join(""), /Image capability unconfirmed/);
   const logs = (await import("node:fs/promises")).readdir(path.join(workspace, "logs"));
   const log = await readFile(path.join(workspace, "logs", (await logs)[0]), "utf8");
   assert.match(log, /session_id: "s1"/);

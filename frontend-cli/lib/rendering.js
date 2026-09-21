@@ -550,6 +550,9 @@ export function modelMenuText(items, selectedIndex = 0) {
     return "";
   }
   const lines = [dim(modelMenuTitle(visible))];
+  const selected = visible.items[visible.activeIndex];
+  const vision = selected?.image_input === true ? "supported" : selected?.image_input === false ? "unsupported" : "unknown";
+  lines.push(dim(`  Image input: ${vision}`));
   for (const [index, item] of visible.items.entries()) {
     if (item.header) {
       lines.push(dim(`  ${item.name}`));

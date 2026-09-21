@@ -43,6 +43,10 @@ export function createEventController({
         return;
       }
       case "context_built": {
+        if (event.decisions?.image_notice) {
+          output.closeAssistant?.();
+          output.log?.(() => String(event.decisions.image_notice));
+        }
         if (output.handleContextBuilt?.(event)) {
           output.resetContextUsage?.();
         }
