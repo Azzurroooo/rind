@@ -29,6 +29,8 @@ Synthetic messages exist only during request conversion. Trace serialization red
 
 Resolution is endpoint-matched cache boolean → verified built-in value at the official endpoint → unknown. False is an explicit value. Expired caches remain usable at matching endpoints. Custom endpoints cannot inherit the official model's capability by name. Built-in defaults are never stamped into remote cache data.
 
+The generic `openai-compatible` provider also uses the catalog when its configured endpoint exactly matches an official service. It keeps its configured provider and API; only image capability is resolved from that service's exact model ID. DeepSeek's documented root URL `https://api.deepseek.com` and the existing `/v1` URL both match the DeepSeek catalog; trailing slashes are ignored for this lookup. Other paths, proxy hosts and unknown models remain unknown. Cache matching remains exact, so no cached metadata is transferred between addresses.
+
 Background refresh, login and explicit list refresh share one fetch/parser/merge path. A valid remote boolean replaces the old value; omitted/invalid metadata preserves the old boolean only for the same endpoint and ID. Removed models disappear, failed/empty responses preserve the entire cache. Refresh uses the existing ten-second deadline without SDK retries. Ordinary list reads stay offline. There are no generation probes or extra capability requests.
 
 Verified discovery schemas:
@@ -37,27 +39,36 @@ Verified discovery schemas:
 - [Mistral model list](https://docs.mistral.ai/api/endpoint/models): boolean `capabilities.vision`.
 - Other existing discovery APIs do not provide an implemented, verified capability schema and fall back locally.
 
-The small built-in catalog was checked on 2026-09-21 against [models.dev](https://models.dev/api.json), the catalog source also used by Pi's generation script. This is a development-time reference, not a runtime dependency. Provider IDs were matched to their corresponding services; no wildcard model-name rules are used.
+The built-in [catalog](../agent/infrastructure/llm/catalog.py) contains 122 provider/model entries across 17 named providers: 84 support images, 32 do not, and six retained legacy entries are unverified. The 2026-09-21 update added 90 entries. Every explicit capability was checked against the sources below; these are development-time references, not runtime dependencies. The generic provider has no duplicate model list. No wildcard model-name rules are used.
 
-| Built-in provider/model | image_input |
-| --- | --- |
-| OpenAI: gpt-5.5, gpt-4o-mini | true |
-| Anthropic: claude-sonnet-4-6 | true |
-| Anthropic: claude-3-5-haiku-latest | unknown: exact legacy alias not in the current catalog |
-| Google: gemini-3.1-pro-preview | true |
-| Google: gemini-3-flash | unknown: exact alias not verified |
-| DeepSeek: deepseek-chat, deepseek-reasoner | unknown: exact legacy aliases not in the current catalog |
-| Groq: llama-3.3-70b-versatile, openai/gpt-oss-120b | false |
-| Mistral: mistral-large-latest / devstral-medium-latest | true / false |
-| Z.AI and Zhipu, regular/coding endpoints: glm-5.3, glm-5.2 where listed | false |
-| Z.AI Coding and Zhipu Coding: glm-5.3-flash | true |
-| Kimi Coding: kimi-for-coding, k3 | true |
-| Moonshot global/CN: kimi-k3, kimi-k2.6 | true |
-| Qwen regular/coding: qwen3-coder-plus, qwen3-coder-flash, qwen-max where listed | false |
-| xAI: grok-4.5, grok-4.3 | true |
-| OpenRouter / generic compatible endpoint | No built-in model capability; matching remote metadata or unknown |
+Representative entries (the code contains the complete exact-ID list):
 
-For models.dev's provider naming, Rind's `zhipu*` maps to `zhipuai*`, `zai-coding` to `zai-coding-plan`, `kimi-coding` to `kimi-code-plan-global`, `moonshot*` to `moonshotai*`, and Qwen to Alibaba's corresponding catalog. The current [Anthropic model overview](https://platform.claude.com/docs/en/about-claude/models/overview) and [DeepSeek models](https://api-docs.deepseek.com/quick_start/pricing) no longer list the exact legacy aliases still present in Rind. These remain unknown rather than assigning a capability from their old names. Aliases may change; explicit refreshed metadata takes precedence where available. OpenAI documentation returned HTTP 403 in this environment; OpenAI request shapes were checked against the installed SDK and its actual HTTP serialization, and capability values against the catalog above.
+| Provider | Supports images | Does not support images |
+| --- | --- | --- |
+| OpenAI | GPT-6 Astra, GPT-5.6 Sol/Terra/Luna, GPT-5.5/5.4, GPT-4.1/4o, o3, o4-mini | o3-mini |
+| Anthropic | Fable 5.1, Opus 5/4.8/4.6, Sonnet 5/4.6, Haiku 4.5 | — |
+| Google | Gemini 3.8/3.5 Flash, 3.1 Pro Preview/Flash Lite, 3 Flash Preview, 2.5 Pro/Flash | — |
+| DeepSeek | deepseek-flash, deepseek-v4-flash, deepseek-v4-flash-vision-exp | deepseek-v4-pro |
+| Groq | qwen/qwen3.8-27b | Llama 3.3 70B/3.1 8B, GPT-OSS 120B/20B |
+| Mistral | Mistral Large/Medium/Small latest, Pixtral Large latest | Devstral Medium/Devstral latest, Codestral latest |
+| Z.AI and Zhipu regular endpoints | GLM-5.3 Flash/FlashX, GLM-5V Turbo, GLM-4.6V | GLM-5.3/5.2/4.7 |
+| Z.AI Coding | GLM-5.3 Flash | GLM-5.3/5.3 Highspeed/5.2/4.7 |
+| Zhipu Coding | GLM-5.3 Flash, GLM-4.6V | GLM-5.3/5.3 Highspeed |
+| Kimi Coding | kimi-for-coding, kimi-for-coding-highspeed, k3, k3-256k | — |
+| Moonshot global/CN | Kimi K3, K2.6, K2.7 Code/Code Highspeed | — |
+| Qwen regular endpoint | Qwen3.8 Max/Flash, Qwen3.7/3.5 Plus, Qwen3 VL Plus, Qwen VL Max | Qwen3.7 Max, Qwen3 Coder Plus, Qwen Max/Plus/Flash |
+| Qwen Coding (Beijing Token Plan endpoint) | Qwen3.8 Max/Flash, Qwen3.7/3.6 Plus, DeepSeek V4.1 Flash, Kimi K2.7 Code | Qwen3.7 Max, DeepSeek V4 Flash/V4 Pro, GLM-5.3 |
+| xAI | Grok 4.6/4.5/4.3, Grok Build 0.1, Grok 4.20 0309 reasoning/non-reasoning | — |
+| OpenRouter | GPT-5.5, Claude Sonnet/Opus 4.6, Gemini 3.1 Pro Preview, DeepSeek V4.1 Flash, Kimi K3, Qwen3.6 Plus | deepseek/deepseek-v4-flash, deepseek/deepseek-v4-pro |
+
+Sources and endpoint distinctions:
+
+- [DeepSeek models and pricing](https://api-docs.deepseek.com/quick_start/pricing) explicitly mark Flash as vision-capable and V4 Pro as unsupported. The old official Flash aliases now route to V4.1 Flash. [First API call](https://api-docs.deepseek.com/) documents the root URL. This does **not** transfer to Qwen/OpenRouter's separately hosted V4 Flash, whose own catalogs still declare text-only input.
+- Pi checkout `890f92088` (2026-09-21), `packages/ai/scripts/generate-models.ts`, explicitly defines the current DeepSeek and OpenAI models and consumes [models.dev](https://models.dev/api.json) for other providers. The local checkout has generated TypeScript wrappers but no generated provider JSON, so the referenced public source was fetched and checked directly. OpenAI's official model pages returned HTTP 403 here; its capability entries are supported by Pi and models.dev, not a claimed successful documentation fetch.
+- For models.dev, `zhipu` maps to `zhipuai`, `zai-coding` to `zai-coding-plan`, `zhipu-coding` to `zhipuai-coding-plan`, `kimi-coding` to `kimi-code-plan-global`, and `moonshot`/`moonshot-cn` to `moonshotai`/`moonshotai-cn`. Pi supplies the Kimi Anthropic endpoint mapping. Qwen uses **alibaba-cn**; Qwen Coding's configured Beijing Token Plan endpoint uses **alibaba-token-plan-cn**, not the separate Alibaba Coding Plan product.
+- OpenRouter entries were checked against its [public model catalog](https://openrouter.ai/api/v1/models) and complete `architecture.input_modalities` lists, preserving its own provider-prefixed model IDs.
+
+The retained unverified entries are `claude-3-5-haiku-latest`, `gemini-3-flash`, `deepseek-chat`, `deepseek-reasoner`, and Qwen Coding's `qwen3-coder-plus`/`qwen3-coder-flash`. Their exact IDs were absent from the corresponding current source. The last two no longer inherit text-only metadata from a different Alibaba product. They remain unknown rather than guessing availability or capability. Refreshed explicit metadata always takes precedence.
 
 ## Dependencies and validation
 
@@ -68,3 +79,5 @@ The SDK contract tests use OpenAI 2.50.0, Anthropic 1.5.0 and google-genai 2.23.
 Deterministic tests cover actual image decoding, size limits, atomic writes, cancellation, text regression, SDK request serialization, capability precedence and all refresh entries, tool-to-next-request delivery, queued uploads, snapshot recovery/forks/deletion, image budgeting/compaction, and CLI/trace behavior. Tests use mock transports or local fake providers, isolated RIND_HOME and no live model calls. Passing them establishes protocol and lifecycle behavior; real model visual quality remains an explicitly requested manual acceptance scenario.
 
 Verification on 2026-09-21: the full Python regression suite passed 1,233 tests with two skipped; the CLI suite passed 435 tests with one skipped. Python source parsing, dependency-direction checks, obsolete image-path checks and `git diff --check` also passed.
+
+The subsequent fixed-catalog expansion passed 180 provider, image-request, settings and runtime-protocol regression tests with external connections disabled. All explicit catalog capabilities were compared with the fetched source data; existing models' reasoning settings were checked unchanged. This update required no generation requests.

@@ -189,8 +189,15 @@ class ProviderServiceImpl:
         if isinstance(entry, dict) and entry.get("base_url") == endpoint:
             value = cached.get("image_input") if isinstance(cached, dict) else None
             capability = value if type(value) is bool else None
-        if capability is None and endpoint.rstrip("/") == definition.default_base_url.rstrip("/"):
-            capability = base.image_input
+        if capability is None:
+            catalog_endpoint = endpoint.rstrip("/")
+            if catalog_endpoint == "https://api.deepseek.com":
+                catalog_endpoint += "/v1"
+            candidates = self.providers.values() if definition.id == "openai-compatible" else (definition,)
+            for candidate in candidates:
+                if catalog_endpoint and catalog_endpoint == candidate.default_base_url.rstrip("/"):
+                    capability = next((model.image_input for model in candidate.fallback_models if model.id == model_id), None)
+                    break
         name = cached.get("name") if isinstance(cached, dict) else None
         return replace(base, name=name if isinstance(name, str) and name else base.name, image_input=capability)
 
