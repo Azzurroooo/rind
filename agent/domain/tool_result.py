@@ -8,6 +8,7 @@ from dataclasses import dataclass, field
 from typing import Any, Literal
 
 from .errors import FailureStatus
+from .images import ImageAttachment
 
 
 @dataclass(slots=True)
@@ -26,10 +27,12 @@ def _utc_now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-def tool_ok(tool: str, data: Any = None, meta: dict[str, Any] | None = None) -> str:
+def tool_ok(tool: str, data: Any = None, meta: dict[str, Any] | None = None, *, attachments: list[ImageAttachment] | None = None) -> str:
     payload: dict[str, Any] = {"ok": True, "tool": tool, "data": data, "ts": _utc_now_iso()}
     if meta is not None:
         payload["meta"] = meta
+    if attachments:
+        payload["attachments"] = attachments
     return json.dumps(payload, ensure_ascii=False)
 
 

@@ -539,6 +539,7 @@ class ToolCallProcessor:
             model_content=normalized_result.model_content,
             model_content_format=normalized_result.model_content_format,
             model_content_policy=normalized_result.model_content_policy,
+            **({"attachments": normalized_result.attachments} if normalized_result.attachments else {}),
         )
         await session.persist_message("tool", "", tool_call_id=call.call_id, tool_name=call.name)
 

@@ -35,9 +35,12 @@ def build_builtin_tool_specs(
     shared_root: str | None = None,
     session_output_root: str | None = None,
     session_base_provider: Callable[[], str | None] | None = None,
+    capture_image=None,
+    image_input: bool | None = None,
 ) -> tuple[ToolSpec, ...]:
     specs = list(build_file_tool_specs(
         workspace_root, allowed_roots, shared_root, session_output_root, mutation_queue=mutation_queue,
+        capture_image=capture_image, image_input=image_input, session_base_provider=session_base_provider,
     ))
     if enable_user_question:
         specs[0:0] = USER_QUESTION_TOOL_SPECS

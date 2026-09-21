@@ -733,6 +733,41 @@ class JsonlSessionStore(SessionStore):
 
             await asyncio.to_thread(_persist)
 
+    def capture_image(self, path, cancellation_token=None):
+        from agent.infrastructure.persistence.image_attachments import capture_image
+
+        if not self.session_base_path or not self.is_persisted:
+            raise ValueError("Image reading requires an active persisted session.")
+        return capture_image(self.session_base_path, path, cancellation_token)
+
+    async def load_image(self, attachment):
+        from agent.infrastructure.persistence.image_attachments import load_image
+
+        if not self.session_base_path:
+            raise ValueError("No active session for image loading.")
+        return await asyncio.to_thread(load_image, self.session_base_path, attachment)
+
+    async def persist_user_input(self, content: str, *, meta: dict | None = None) -> None:
+        from agent.infrastructure.images import process_image
+        from agent.infrastructure.persistence.image_attachments import save_image
+        from agent.infrastructure.workspace_images import upload_paths
+        from agent.application.images import check_image_budget
+
+        paths = upload_paths(content, self.workspace_root)
+        # Validate the entire group before creating files or writing a message.
+        processed = await asyncio.to_thread(lambda: [process_image(str(path)) for path in paths])
+        check_image_budget([{"size_bytes": len(item[0])} for item in processed])
+        if not processed:
+            await self.persist_message("user", content, meta=meta, attachments=[])
+            return
+        async with self._write_lock:
+            await asyncio.to_thread(self._materialize_draft_sync)
+            attachments = await asyncio.to_thread(lambda: [save_image(self.session_base_path, item) for item in processed])
+        notes = [f"{path.name}: {item[-1]}" for path, item in zip(paths, processed) if item[-1]]
+        if notes:
+            content += "\n[Image processing: " + " ".join(notes) + "]"
+        await self.persist_message("user", content, meta=meta, attachments=attachments)
+
     async def persist_message(
         self,
         role: str,
@@ -741,6 +776,7 @@ class JsonlSessionStore(SessionStore):
         tool_name: str | None = None,
         meta: dict[str, Any] | None = None,
         reasoning_content: str | None = None,
+        attachments: list[dict] | None = None,
     ) -> None:
         async with self._write_lock:
             def _persist():
@@ -759,6 +795,7 @@ class JsonlSessionStore(SessionStore):
                     tool_name,
                     meta,
                     reasoning_content,
+                    attachments,
                 )
                 self._invalidate_projection_cache()
                 if not is_context_record:
@@ -789,6 +826,7 @@ class JsonlSessionStore(SessionStore):
         model_content: str,
         model_content_format: str | None = None,
         model_content_policy: dict[str, Any] | None = None,
+        attachments: list[dict] | None = None,
     ) -> None:
         async with self._write_lock:
             def _persist():
@@ -805,6 +843,7 @@ class JsonlSessionStore(SessionStore):
                     model_content=model_content,
                     model_content_format=model_content_format,
                     model_content_policy=model_content_policy,
+                    attachments=attachments,
                 )
                 self._invalidate_projection_cache()
                 self._session_meta["tool_call_count"] += 1

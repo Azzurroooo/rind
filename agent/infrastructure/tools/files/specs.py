@@ -34,6 +34,9 @@ def build_file_tool_specs(
     session_output_root: str | Path | None = None,
     *,
     mutation_queue: FileMutationQueue | None = None,
+    capture_image=None,
+    image_input: bool | None = None,
+    session_base_provider=None,
 ) -> tuple[ToolSpec, ...]:
     mutation_queue = mutation_queue if mutation_queue is not None else FileMutationQueue()
     root = Path(workspace_root or Path.cwd()).expanduser().resolve()
@@ -58,6 +61,9 @@ def build_file_tool_specs(
         if allowed and not any(candidate.is_relative_to(allowed_root) for allowed_root in allowed):
             if allow_session_output and session_output is not None and candidate.is_relative_to(session_output):
                 return str(candidate), None
+            base = session_base_provider() if session_base_provider is not None else None
+            if allow_session_output and base and candidate.is_relative_to(Path(base).resolve() / "attachments"):
+                return str(candidate), None
             return None, tool_error(tool_name, f"Path is outside this Agent Capsule: {value}", "WorkspaceBoundary")
         return str(candidate), None
 
@@ -68,7 +74,7 @@ def build_file_tool_specs(
         _cancellation_token: CancellationToken | None = None,
     ) -> str:
         resolved, error = resolve_path("read_file", path, allow_session_output=True)
-        return error or read_file(resolved, offset, limit, _cancellation_token)
+        return error or read_file(resolved, offset, limit, _cancellation_token, capture_image=capture_image, image_input=image_input)
 
     async def scoped_write_file(
         path: str, content: str, _cancellation_token: CancellationToken | None = None,
@@ -116,7 +122,7 @@ def _specs(read, write, edit, find, search) -> tuple[ToolSpec, ...]:
             name="read_file",
             handler=read,
             normalize_arguments=_normalize_path_arguments,
-            description="Read consecutive complete lines of a UTF-8 text file within a 25 KiB model output budget. Returns the actual line range and next_offset for the first undisplayed line. A LineTooLong error requires reading that line in character slices with bash/Python.",
+            description="Read UTF-8 text or a local image (PNG, JPEG, WebP, GIF, BMP). Images are sent as attachments, resized to at most 2000 pixels per edge; animations use the first frame. Omit offset/limit for images. Text reads return complete lines within a 25 KiB model budget, including next_offset. For LineTooLong, read character slices with bash/Python.",
             param_descriptions={
                 "path": "Absolute or relative file path",
                 "offset": "First line to read (default 1)",
