@@ -33,7 +33,8 @@ function validateStep(step, where) {
     validLines(step.lines, where);
   }
   if (step.kind === "startup") {
-    for (const field of ["version", "model", "session_id", "cwd"]) {
+    assert.equal(Object.hasOwn(step.info, "version"), false, `${where}: version must be injected at runtime`);
+    for (const field of ["model", "session_id", "cwd"]) {
       assert.ok(step.info?.[field], `${where}: startup info.${field} required`);
     }
   }

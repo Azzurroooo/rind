@@ -3,7 +3,6 @@
 
 export function demoInfo({ cwd = "~/demo", session, model = "zai/glm-4.7" }) {
   return {
-    version: "0.8.0",
     model,
     session_id: session,
     cwd,

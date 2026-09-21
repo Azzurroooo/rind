@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 
 import { runTour } from "../lib/tour/run-tour.js";
 import { findTourPage } from "../lib/tour/pages/index.js";
+import { readCliVersion } from "../lib/version.js";
 import { createVirtualInput, createVirtualOutput } from "./helpers/virtual-terminal.js";
 
 function fakeClock() {
@@ -83,7 +84,7 @@ test("tour plays on a real terminal buffer: catalog, page, return, exit", async 
   await settle();
   viewport = await output.flushAndGetViewport();
   assert.ok(
-    viewport.join("\n").includes("Rind v0.8.0"),
+    viewport.join("\n").includes(`Rind v${readCliVersion()}`),
     "startup banner appears once the clock runs",
   );
 

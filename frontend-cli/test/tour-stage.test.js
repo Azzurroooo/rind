@@ -5,6 +5,16 @@ import { createTourStage } from "../lib/tour/stage.js";
 
 const INFO = { version: "0.8.0", model: "zai/glm-4.7", session_id: "s1", cwd: "~/demo" };
 
+test("injected tour version survives replay without changing page fixtures", () => {
+  const stage = createTourStage({ version: "9.8.7" });
+  const steps = [{ kind: "startup", info: INFO }];
+  stage.beginStep(steps[0]);
+  assert.equal(stage.snapshot().rind.info.version, "9.8.7");
+  stage.rebuildTo(steps, 0);
+  assert.equal(stage.snapshot().rind.info.version, "9.8.7");
+  assert.equal(INFO.version, "0.8.0");
+});
+
 function stepSet() {
   return [
     { kind: "shell", command: "rind", note: ["why the shell", "second line"] },

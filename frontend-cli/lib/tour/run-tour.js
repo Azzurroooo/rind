@@ -5,6 +5,7 @@ import { findTourPage, TOUR_TOPICS, tourPages } from "./pages/index.js";
 import { renderTourCatalog, renderTourPage, renderTourHelp, cursorMarker } from "./render.js";
 import { createTourPlayer } from "./player.js";
 import { createTourStage } from "./stage.js";
+import { readCliVersion } from "../version.js";
 
 class TourScreen extends Component {
   constructor(player, stage, rows) {
@@ -34,6 +35,7 @@ export async function runTour({
   output,
   stderr = process.stderr,
   startPageId = "",
+  version = readCliVersion(),
   schedule = setTimeout,
   cancel = clearTimeout,
   now = () => performance.now(),
@@ -43,7 +45,7 @@ export async function runTour({
     stderr.write(`Unknown tour page: ${startPageId}\nAvailable pages:\n${tourPages().map((page) => `  ${page.id} — ${page.title}`).join("\n")}\n`);
     return false;
   }
-  const stage = createTourStage();
+  const stage = createTourStage({ version });
   const tui = createTui({ input, output });
   const player = createTourPlayer({
     topics: TOUR_TOPICS,
