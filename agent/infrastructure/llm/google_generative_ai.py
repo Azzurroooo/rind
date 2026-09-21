@@ -15,7 +15,9 @@ from agent.domain.errors import ProviderError
 from agent.domain.models import ModelCompletion, ModelStreamEvent, ModelUsage
 from agent.domain.tool_payload import ParsedToolCall
 
-from .cancellation import await_with_cancellation, close_resource
+from .images import separate_tool_images
+from .errors import provider_error
+from .cancellation import await_with_cancellation, close_resource, iterate_with_cancellation
 
 
 class GoogleGenerativeAIClient(ChatClient):
@@ -35,10 +37,13 @@ class GoogleGenerativeAIClient(ChatClient):
         contents, config = _request(messages, tools, self._send_tool_call_ids)
         if max_output_tokens is not None:
             config["max_output_tokens"] = max_output_tokens
-        response = await await_with_cancellation(
-            self._client.aio.models.generate_content(model=self._model, contents=contents, config=config),
-            cancellation_token,
-        )
+        try:
+            response = await await_with_cancellation(
+                self._client.aio.models.generate_content(model=self._model, contents=contents, config=config),
+                cancellation_token,
+            )
+        except Exception as exc:
+            raise provider_error(exc) from None
         return _completion(response)
 
     async def stream(self, messages, tools=None, cancellation_token: CancellationToken | None = None) -> AsyncIterator[ModelStreamEvent]:
@@ -50,7 +55,7 @@ class GoogleGenerativeAIClient(ChatClient):
                 self._client.aio.models.generate_content_stream(model=self._model, contents=contents, config=config),
                 cancellation_token,
             )
-            async for raw in stream:
+            async for raw in iterate_with_cancellation(stream, cancellation_token):
                 if cancellation_token and cancellation_token.is_cancelled:
                     raise asyncio.CancelledError(cancellation_token.reason)
                 for event in _events(raw, fallback_id):
@@ -58,7 +63,7 @@ class GoogleGenerativeAIClient(ChatClient):
         except asyncio.CancelledError:
             raise
         except Exception as exc:
-            raise ProviderError(str(exc), status="unavailable", error_type=type(exc).__name__, code="stream_interrupted") from exc
+            raise provider_error(exc, code="stream_interrupted") from None
 
         finally:
             await close_resource(stream)
@@ -84,7 +89,7 @@ def _contents(messages, send_tool_call_ids: bool) -> tuple[str, list[dict[str, A
     system: list[str] = []
     contents: list[dict[str, Any]] = []
     names: dict[str, str] = {}
-    for message in messages:
+    for message in separate_tool_images(messages):
         role = message.get("role")
         if role == "system":
             system.append(str(message.get("content") or ""))
@@ -104,6 +109,8 @@ def _contents(messages, send_tool_call_ids: bool) -> tuple[str, list[dict[str, A
         parts: list[dict[str, Any]] = []
         if message.get("content"):
             parts.append({"text": str(message["content"])})
+        parts.extend({"inline_data": {"mime_type": image["mime_type"], "data": image["data"]}}
+                     for image in message.get("images", []))
         for call in message.get("tool_calls") or []:
             function = call.get("function") or {}
             call_id = str(call.get("id") or "")

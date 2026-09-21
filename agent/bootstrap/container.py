@@ -24,7 +24,7 @@ from agent.infrastructure.tools.catalog import build_builtin_tool_specs
 from agent.infrastructure.tools.files.mutation_queue import FileMutationQueue
 from agent.infrastructure.tools.shell.tool import ShellTools
 from agent.infrastructure.tools.web.session_pool import WebSessions
-from agent.infrastructure.workspace_images import promote_user_images
+from agent.application.images import prepare_image_messages
 from agent.prompts import build_goal_policy_prompt, build_system_prompt
 from agent.runtime.core import AgentRuntime, MessageStreamParser, TurnRunner
 
@@ -62,6 +62,7 @@ class AgentContainer:
 def build_agent_container(
     *,
     chat_client,
+    image_input: bool | None = None,
     settings: AppSettings | None = None,
     session_dir: str | None = None,
     session_id: str | None = None,
@@ -201,6 +202,8 @@ def build_agent_container(
         web_sessions=web_sessions,
         mutation_queue=shared_resources.file_mutation_queue if shared_resources else None,
         session_base_provider=lambda: session_store.session_base_path,
+        capture_image=session_store.capture_image,
+        image_input=image_input,
     )
     if enabled_tools is None:
         tool_specs = catalog
@@ -234,7 +237,8 @@ def build_agent_container(
         tool_processor=tool_processor,
         stream_parser=stream_parser,
         tool_schemas=tool_registry.schemas,
-        image_promoter=promote_user_images,
+        prepare_messages=partial(prepare_image_messages, load_image=session_store.load_image, image_input=image_input),
+        image_input=image_input,
         context_manager=context_manager,
         compaction_service=compaction_service,
         skill_repository=skill_repository,

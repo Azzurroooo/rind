@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import inspect
 import logging
 import uuid
 from collections import deque
@@ -15,7 +14,7 @@ from agent.application.ports.session_store import SessionStore
 from agent.application.skill_selection import SkillTurnCoordinator
 from agent.runtime.core.turn_runner import TurnRunner
 from agent.domain.cancellation import CancellationToken
-from agent.domain.errors import PersistenceError
+from agent.domain.errors import BoundaryError, PersistenceError
 from agent.domain.events import (
     ContextCompactedEvent, QueuedInputDeliveredEvent, RuntimeEvent,
     TurnCancelledEvent, TurnCompletedEvent, TurnFailedEvent, TurnStartedEvent, event_meta,
@@ -484,14 +483,14 @@ class AgentRuntime:
                 return
             except asyncio.CancelledError:
                 raise
-            except ValueError:
+            except (ValueError, BoundaryError):
                 raise
             except Exception as exc:
                 raise PersistenceError(
                     f"Failed to persist user input: {exc}",
                     code=type(exc).__name__,
                 ) from exc
-        await self._persist_message("user", content)
+        await self._session_store.persist_user_input(content)
 
     async def _persist_message(self, role: str, content: str, meta: dict | None = None) -> None:
         try:

@@ -77,9 +77,9 @@ class SkillTurnCoordinator:
                 ],
             }
         if mention_meta is None:
-            await session.persist_message("user", text)
+            await session.persist_user_input(text)
         else:
-            await session.persist_message("user", text, meta=mention_meta)
+            await session.persist_user_input(text, meta=mention_meta)
         for invocation, skill in loaded:
             await session.persist_message(
                 "user",

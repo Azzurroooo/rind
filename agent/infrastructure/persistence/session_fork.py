@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import shutil
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -42,34 +43,61 @@ def fork_session(session_dir: str | Path | None, source_id: str, *, before_messa
         if _compaction_end(record) < cut
     ]
 
+    retained_calls = set()
+    for message in retained:
+        if message.get("tool_call_id"):
+            retained_calls.add(message["tool_call_id"])
+        for call in (message.get("meta") or {}).get("tool_calls", []):
+            if call.get("id"):
+                retained_calls.add(call["id"])
+    tool_calls = [record for record in tool_calls if record.get("id") in retained_calls]
+    attachments = {item["path"]: item for record in [*retained, *tool_calls]
+                   for item in record.get("attachments", [])}
     new_id = new_session_id()
     target_base = str(resolve_session_base(root, new_id))
     os.makedirs(target_base, exist_ok=True)
-    files.write_jsonl(os.path.join(target_base, "messages.jsonl"), retained)
-    files.write_jsonl(os.path.join(target_base, "tool_calls.jsonl"), tool_calls)
-    if compactions:
-        files.write_jsonl(os.path.join(target_base, "compactions.jsonl"), compactions)
+    try:
+        from agent.infrastructure.persistence.image_attachments import attachment_path, load_image
+        for attachment in attachments.values():
+            payload = load_image(source_base, attachment)
+            target = attachment_path(target_base, attachment["path"])
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(payload)
+        for record in compactions:
+            handoff = record.get("handoff_message")
+            if isinstance(handoff, dict) and isinstance(handoff.get("content"), str):
+                handoff["content"] = handoff["content"].replace(
+                    Path(source_base).resolve().as_posix() + "/attachments/",
+                    Path(target_base).resolve().as_posix() + "/attachments/",
+                )
+        files.write_jsonl(os.path.join(target_base, "messages.jsonl"), retained)
+        files.write_jsonl(os.path.join(target_base, "tool_calls.jsonl"), tool_calls)
+        if compactions:
+            files.write_jsonl(os.path.join(target_base, "compactions.jsonl"), compactions)
 
-    message_count = sum(1 for message in retained if not _is_context_record(message))
-    forked_meta = _forked_meta(
-        dict(meta),
-        source_id=clean,
-        new_id=new_id,
-        compactions=compactions,
-        message_count=message_count,
-        tool_call_count=len(tool_calls),
-    )
-    files.write_json(os.path.join(target_base, "meta.json"), forked_meta)
-
-    SessionIndexRepository(files, JsonlSessionStore.index_path_for(session_dir)).update_index(
-        session_index_entry(
-            new_id,
-            forked_meta,
+        message_count = sum(1 for message in retained if not _is_context_record(message))
+        forked_meta = _forked_meta(
+            dict(meta),
+            source_id=clean,
+            new_id=new_id,
+            compactions=compactions,
             message_count=message_count,
             tool_call_count=len(tool_calls),
-            preview=_assistant_preview(retained),
         )
-    )
+        files.write_json(os.path.join(target_base, "meta.json"), forked_meta)
+
+        SessionIndexRepository(files, JsonlSessionStore.index_path_for(session_dir)).update_index(
+            session_index_entry(
+                new_id,
+                forked_meta,
+                message_count=message_count,
+                tool_call_count=len(tool_calls),
+                preview=_assistant_preview(retained),
+            )
+        )
+    except BaseException:
+        shutil.rmtree(target_base)
+        raise
     return new_id
 
 

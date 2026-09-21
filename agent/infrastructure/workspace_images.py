@@ -1,13 +1,9 @@
 """Resolve explicit uploads references when user input enters a session."""
 
 import os
-import re
 from pathlib import Path, PurePosixPath
 
-_UPLOADS_REF = re.compile(
-    r"(?<![\w./\\])(uploads/[A-Za-z0-9._\-/]+\.(?:png|jpg|jpeg|webp|gif|bmp))(?![\w.])",
-    re.IGNORECASE,
-)
+from agent.domain.images import upload_references
 
 
 def resolve_upload_path(workspace_root: str | Path | None, rel_path: str) -> Path | None:
@@ -15,7 +11,7 @@ def resolve_upload_path(workspace_root: str | Path | None, rel_path: str) -> Pat
     if not workspace_root or not rel_path:
         return None
     candidate = PurePosixPath(rel_path)
-    if candidate.is_absolute() or not candidate.parts:
+    if candidate.is_absolute() or not candidate.parts or candidate.parts[0] != "uploads":
         return None
     if any(part in ("", ".", "..") for part in candidate.parts):
         return None
@@ -34,13 +30,9 @@ def resolve_upload_path(workspace_root: str | Path | None, rel_path: str) -> Pat
 
 def upload_paths(text: str, workspace_root: str | None) -> list[Path]:
     paths = []
-    for relative in dict.fromkeys(match.group(1) for match in _UPLOADS_REF.finditer(text)):
+    for relative in upload_references(text):
         path = resolve_upload_path(workspace_root, relative)
         if path is None or not path.is_file():
             raise ValueError(f"Image reference is missing or outside the workspace: {relative}")
         paths.append(path)
     return paths
-
-
-def has_upload_reference(text: str) -> bool:
-    return _UPLOADS_REF.search(text) is not None

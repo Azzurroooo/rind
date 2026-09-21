@@ -135,6 +135,9 @@ class ContextEstimator:
         return max(0, tokens)
 
     def _estimate_message_tokens(self, message: dict, token_cache: dict[str, int] | None = None) -> tuple[int, int]:
+        attachments = message.get("attachments") or []
+        image_tokens = sum(math.ceil(item["width"] / 32) * math.ceil(item["height"] / 32) * 2 for item in attachments)
+        message = {key: value for key, value in message.items() if key != "attachments"}
         try:
             payload = json.dumps(message, ensure_ascii=False)
         except TypeError:
@@ -142,14 +145,14 @@ class ContextEstimator:
 
         chars = len(payload)
         if token_cache is not None and payload in token_cache:
-            return token_cache[payload], chars
+            return token_cache[payload] + image_tokens, chars
 
         if self._tokenizer:
             try:
                 tokens = len(self._tokenizer.encode(payload, disallowed_special=()))
                 if token_cache is not None:
                     token_cache[payload] = tokens
-                return tokens, chars
+                return tokens + image_tokens, chars
             except Exception:
                 logger.debug("Tokenizer failed; using heuristic context estimate.", exc_info=True)
 
@@ -160,4 +163,4 @@ class ContextEstimator:
 
         if token_cache is not None:
             token_cache[payload] = tokens
-        return tokens, chars
+        return tokens + image_tokens, chars

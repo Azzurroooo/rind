@@ -23,6 +23,7 @@ class ModelDefinition:
     api: str
     reasoning_efforts: tuple[str, ...] = ()
     context_window: int | None = None
+    image_input: bool | None = None
 
 
 @dataclass(frozen=True, slots=True)

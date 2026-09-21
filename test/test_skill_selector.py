@@ -14,6 +14,9 @@ from agent.infrastructure.skills import SkillRepository
 
 
 class RecordingSession:
+    async def persist_user_input(self, content, **kwargs):
+        await self.persist_message("user", content, **kwargs)
+
     def __init__(self):
         self.messages = []
 

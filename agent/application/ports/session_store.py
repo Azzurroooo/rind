@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 from typing import Protocol, Any
+from agent.domain.cancellation import CancellationToken
+from agent.domain.images import ImageAttachment
 
 
 class SessionStore(Protocol):
@@ -77,9 +79,9 @@ class SessionStore(Protocol):
         """Persist the effective Skill metadata catalog without changing activity timestamps."""
         ...
 
-    def capture_image(self, path: str, cancellation_token=None) -> tuple[dict, str]: ...
+    def capture_image(self, path: str, cancellation_token: CancellationToken | None = None) -> tuple[ImageAttachment, str]: ...
 
-    async def load_image(self, attachment: dict) -> bytes: ...
+    async def load_image(self, attachment: ImageAttachment) -> bytes: ...
 
     async def persist_user_input(self, content: str, *, meta: dict | None = None) -> None: ...
 

@@ -41,6 +41,28 @@ def test_serialize_handles_model_dump_and_primitives():
     assert _serialize([1, "a", True]) == [1, "a", True]
 
 
+def test_image_trace_redacts_every_wire_shape_and_error_echo(tmp_path):
+    import copy
+    import base64
+    payload = bytes(range(256))
+    encoded = base64.b64encode(payload).decode()
+    request = {"images": [{"mime_type": "image/png", "data": payload}], "content": [
+        {"type": "image_url", "image_url": {"url": "data:image/png;base64," + encoded}},
+        {"type": "input_image", "image_url": "data:image/png;base64," + encoded},
+        {"type": "image", "source": {"type": "base64", "media_type": "image/png", "data": encoded}},
+        {"inlineData": {"mimeType": "image/png", "data": encoded}},
+    ]}
+    before = copy.deepcopy(request)
+    trace = LlmCallTrace(tmp_path)
+    trace.request(request)
+    trace.response(request)
+    trace.end("error", "Provider echoed payload: " + encoded)
+    assert request == before
+    output = trace.path.read_text(encoding="utf-8")
+    assert encoded not in output and "data:image/" not in output
+    assert "image/png" in output and "omitted" in output
+
+
 def test_make_trace_off_by_default(monkeypatch, tmp_path):
     monkeypatch.delenv("RIND_TRACE_LLM", raising=False)
     monkeypatch.setattr(llm_trace, "resolve_rind_home", lambda: tmp_path)

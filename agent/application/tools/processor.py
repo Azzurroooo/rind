@@ -31,7 +31,7 @@ from agent.application.tools.executor import ToolExecutor
 from agent.application.tools.change_events import build_file_change_event
 from agent.application.tools.polling_guard import BashOutputPollingGuard
 from agent.application.tools.result_normalizer import NormalizedToolResult, ToolResultNormalizer
-from agent.domain.cancellation import CancellationToken
+from agent.domain.cancellation import CancellationToken, CancellationTokenSource
 
 UserQuestionResponder = Callable[[UserQuestionRequestedEvent], str | Awaitable[str]]
 _HEARTBEAT_TOOLS = frozenset({"bash", "bash_output"})
@@ -340,10 +340,20 @@ class ToolCallProcessor:
             if self._tool_executor.is_async_tool(call.name):
                 result = await self._tool_executor.execute_async(call.name, execution_args)
             else:
+                cancellation = CancellationTokenSource(cancellation_token)
+                execution_args["_cancellation_token"] = cancellation.token
                 def _sync_run():
                     return self._tool_executor.execute_sync(call.name, execution_args)
 
-                result = await asyncio.to_thread(_sync_run)
+                task = asyncio.create_task(asyncio.to_thread(_sync_run))
+                try:
+                    result = await asyncio.shield(task)
+                except asyncio.CancelledError:
+                    cancellation.cancel("Tool execution cancelled")
+                    await asyncio.gather(task, return_exceptions=True)
+                    raise
+                finally:
+                    cancellation.dispose()
 
             if result.status == "ok":
                 tool_result_str = result.result_str

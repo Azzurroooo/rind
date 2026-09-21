@@ -212,7 +212,7 @@ async def test_sync_tool_receives_cancellation_token_without_persisting_private_
         )
     ]
 
-    if executor.received_args.get("_cancellation_token") is not cancel_source.token:
+    if executor.received_args.get("_cancellation_token") is None or executor.received_args["_cancellation_token"].is_cancelled:
         raise AssertionError(f"Expected sync execution args to include cancellation token, got: {executor.received_args}")
     if executor.received_args.get("_session_id") != session.session_id:
         raise AssertionError(f"Expected sync execution args to include session ID, got: {executor.received_args}")

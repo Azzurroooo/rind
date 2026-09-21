@@ -11,8 +11,10 @@ from agent.domain.cancellation import CancellationToken
 from agent.domain.errors import ProviderError
 from agent.domain.models import ModelCompletion, ModelStreamEvent, ModelUsage
 from agent.domain.tool_payload import ParsedToolCall
-from agent.infrastructure.llm.cancellation import await_with_cancellation, close_resource
+from .errors import provider_error
+from agent.infrastructure.llm.cancellation import await_with_cancellation, close_resource, iterate_with_cancellation
 from agent.infrastructure.llm.catalog import resolve_reasoning_effort
+from agent.infrastructure.llm.images import image_data_url
 
 
 class OpenAIResponsesClient(ChatClient):
@@ -29,7 +31,10 @@ class OpenAIResponsesClient(ChatClient):
         effort = resolve_reasoning_effort(self._reasoning_effort, reasoning_effort, self._reasoning_efforts)
         if effort:
             payload["reasoning"] = {"effort": effort}
-        response = await await_with_cancellation(self._client.responses.create(**payload), cancellation_token)
+        try:
+            response = await await_with_cancellation(self._client.responses.create(**payload), cancellation_token)
+        except Exception as exc:
+            raise provider_error(exc) from None
         return _completion(response)
 
     async def stream(self, messages, tools=None, cancellation_token: CancellationToken | None = None) -> AsyncIterator[ModelStreamEvent]:
@@ -38,7 +43,7 @@ class OpenAIResponsesClient(ChatClient):
         response = None
         try:
             response = await await_with_cancellation(self._client.responses.create(**payload), cancellation_token)
-            async for raw in response:
+            async for raw in iterate_with_cancellation(response, cancellation_token):
                 if cancellation_token and cancellation_token.is_cancelled:
                     raise asyncio.CancelledError(cancellation_token.reason)
                 for event in _events(raw, call_ids):
@@ -48,7 +53,7 @@ class OpenAIResponsesClient(ChatClient):
         except ProviderError:
             raise
         except Exception as exc:
-            raise ProviderError(str(exc), status="unavailable", error_type=type(exc).__name__, code="stream_interrupted") from exc
+            raise provider_error(exc, code="stream_interrupted") from None
         finally:
             await close_resource(response)
 
@@ -68,8 +73,14 @@ def _input_items(messages: list[dict[str, Any]]) -> list[Any]:
     items: list[Any] = []
     for message in messages:
         role = message.get("role")
+        content = message.get("content") or ""
+        if message.get("images"):
+            content = [{"type": "input_text", "text": str(content)}, *(
+                {"type": "input_image", "detail": "auto", "image_url": image_data_url(image)}
+                for image in message["images"]
+            )]
         if role == "tool":
-            items.append({"type": "function_call_output", "call_id": str(message.get("tool_call_id") or ""), "output": str(message.get("content") or "")})
+            items.append({"type": "function_call_output", "call_id": str(message.get("tool_call_id") or ""), "output": content})
             continue
         calls = message.get("tool_calls") if role == "assistant" else None
         if calls:
@@ -79,7 +90,7 @@ def _input_items(messages: list[dict[str, Any]]) -> list[Any]:
                 function = call.get("function") or {}
                 items.append({"type": "function_call", "call_id": str(call.get("id") or ""), "name": str(function.get("name") or ""), "arguments": str(function.get("arguments") or "{}")})
             continue
-        items.append({"role": role, "content": message.get("content") or ""})
+        items.append({"role": role, "content": content})
     return items
 
 

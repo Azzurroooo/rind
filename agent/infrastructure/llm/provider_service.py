@@ -8,6 +8,7 @@ import logging
 import math
 import os
 import time
+from dataclasses import replace
 from pathlib import Path
 import tempfile
 from typing import Any
@@ -20,7 +21,6 @@ from agent.domain.models import (
     ModelCatalog,
     ModelDefinition,
     ModelSelection,
-    ModelStreamEvent,
     ProviderStatus,
 )
 from agent.infrastructure.credentials import CredentialStore
@@ -55,9 +55,10 @@ class ProviderServiceImpl:
         settings = load_settings(workspace_root)
         return ModelSelection(settings.provider, settings.model, settings.reasoning_effort)
 
-    def resolve_selection(self, workspace_root: str | None, selection: ModelSelection) -> ModelDefinition:
+    def resolve_selection(self, workspace_root: str | None, selection: ModelSelection, *, settings: AppSettings | None = None) -> ModelDefinition:
         definition = self._provider(selection.provider_id)
-        return _selection_model(load_settings(workspace_root), definition, selection)
+        settings = settings if settings is not None else load_settings(workspace_root)
+        return self._resolve_model(settings, definition, selection.model_id, self._read_cache().get(definition.id))
 
     def list_providers(self, workspace_root: str | None = None) -> list[ProviderStatus]:
         try:
@@ -165,20 +166,33 @@ class ProviderServiceImpl:
         for definition in self.providers.values():
             if self._credential_source(settings, definition.id) == "none":
                 continue
-            api = _effective_api(settings, definition)
-            verified = {model.id: model.reasoning_efforts for model in definition.fallback_models}
-            models = [
-                _model(definition, api, item, verified.get(_item_id(item)))
-                for item in self._cached_models(cache.get(definition.id), settings, definition)
-            ] or list(definition.fallback_models)
+            entry = cache.get(definition.id)
+            items = self._cached_models(entry, settings, definition)
+            models = [self._resolve_model(settings, definition, _item_id(item), entry, cached=item) for item in items]
+            if not models:
+                models = [self._resolve_model(settings, definition, model.id, entry) for model in definition.fallback_models]
             result.extend(models)
         current = ModelSelection(settings.provider, settings.model)
         definition = self.providers.get(current.provider_id)
         if definition is not None and not any(
             model.provider_id == current.provider_id and model.id == current.model_id for model in result
         ):
-            result.append(_selection_model(settings, definition, current))
+            result.append(self._resolve_model(settings, definition, current.model_id, cache.get(definition.id)))
         return result
+
+    def _resolve_model(self, settings, definition, model_id: str, entry, *, cached=None) -> ModelDefinition:
+        base = _selection_model(settings, definition, ModelSelection(definition.id, model_id))
+        if cached is None:
+            cached = next((item for item in self._cached_models(entry, settings, definition) if _item_id(item) == model_id), {})
+        capability = None
+        endpoint = self._endpoint(settings, definition)
+        if isinstance(entry, dict) and entry.get("base_url") == endpoint:
+            value = cached.get("image_input") if isinstance(cached, dict) else None
+            capability = value if type(value) is bool else None
+        if capability is None and endpoint.rstrip("/") == definition.default_base_url.rstrip("/"):
+            capability = base.image_input
+        name = cached.get("name") if isinstance(cached, dict) else None
+        return replace(base, name=name if isinstance(name, str) and name else base.name, image_input=capability)
 
     async def _fetch_models(self, settings: AppSettings, definition) -> bool:
         if not refreshable_models_api(_effective_api(settings, definition)):
@@ -201,13 +215,27 @@ class ProviderServiceImpl:
                 if any(not isinstance(item.get("id") if isinstance(item, dict) else getattr(item, "id", None), str)
                        for item in data):
                     raise ValueError("Invalid model identifier")
-                models = [{"id": _item_id(item), "name": _item_id(item)} for item in data]
+                models = []
+                for item in data:
+                    name = item.get("name") if isinstance(item, dict) else getattr(item, "name", None)
+                    models.append({"id": _item_id(item), "name": name if isinstance(name, str) and name.strip() else _item_id(item)})
                 if any(not item["id"] for item in models):
                     raise ValueError("Invalid model identifier")
             if not models:
                 logger.debug("Model refresh returned an empty list for %s", definition.id)
                 return False
-            self._write_cache(self._read_cache() | {definition.id: {
+            cache = self._read_cache()
+            previous = cache.get(definition.id)
+            old = {_item_id(item): item for item in self._cached_models(previous, settings, definition)
+                   if isinstance(item, dict)} if isinstance(previous, dict) else {}
+            for model, raw in zip(models, data):
+                capability = _remote_image_input(raw, definition.id)
+                if capability is None:
+                    value = old.get(model["id"], {}).get("image_input")
+                    capability = value if type(value) is bool else None
+                if capability is not None:
+                    model["image_input"] = capability
+            self._write_cache(cache | {definition.id: {
                 "models": models, "refreshed_at": time.time(), "base_url": endpoint,
             }})
             return True
@@ -305,12 +333,6 @@ def _effective_api(settings: AppSettings, definition) -> str:
     return settings.api if definition.id == "openai-compatible" else definition.api
 
 
-def _model(definition, api: str, item: Any, efforts: tuple[str, ...] | None = None) -> ModelDefinition:
-    model_id = _item_id(item)
-    name = str(item.get("name") or model_id) if isinstance(item, dict) else model_id
-    return ModelDefinition(definition.id, model_id, name, api, default_reasoning_efforts(api) if efforts is None else efforts)
-
-
 def _selection_model(settings: AppSettings, definition, selection: ModelSelection) -> ModelDefinition:
     for model in definition.fallback_models:
         if model.id == selection.model_id:
@@ -321,3 +343,18 @@ def _selection_model(settings: AppSettings, definition, selection: ModelSelectio
 
 def _item_id(item: Any) -> str:
     return str(item.get("id") or "").strip() if isinstance(item, dict) else str(getattr(item, "id", "") or "").strip()
+
+
+def _remote_image_input(item: Any, provider_id: str) -> bool | None:
+    data = item if isinstance(item, dict) else item.model_dump() if hasattr(item, "model_dump") else {}
+    if provider_id == "openrouter":
+        architecture = data.get("architecture")
+        values = architecture.get("input_modalities") if isinstance(architecture, dict) else None
+        if isinstance(values, list) and values and all(isinstance(value, str) for value in values):
+            return "image" in values
+    if provider_id == "mistral":
+        capabilities = data.get("capabilities")
+        vision = capabilities.get("vision") if isinstance(capabilities, dict) else None
+        if type(vision) is bool:
+            return vision
+    return None

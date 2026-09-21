@@ -4,11 +4,18 @@ from __future__ import annotations
 
 import asyncio
 import copy
-import json
 import os
 import shutil
 import uuid
 from typing import Any
+from pathlib import Path
+
+from agent.domain.cancellation import CancellationToken
+from agent.domain.images import ImageAttachment
+from agent.application.images import check_image_budget
+from agent.infrastructure.images import check_cancelled, process_image, run_image_io
+from agent.infrastructure.persistence.image_attachments import capture_image, load_image, save_image
+from agent.infrastructure.workspace_images import upload_paths
 from datetime import datetime, timezone
 
 from agent.application.ports.session_store import SessionStore
@@ -733,40 +740,58 @@ class JsonlSessionStore(SessionStore):
 
             await asyncio.to_thread(_persist)
 
-    def capture_image(self, path, cancellation_token=None):
-        from agent.infrastructure.persistence.image_attachments import capture_image
-
+    def capture_image(self, path: str, cancellation_token: CancellationToken | None = None) -> tuple[ImageAttachment, str]:
         if not self.session_base_path or not self.is_persisted:
             raise ValueError("Image reading requires an active persisted session.")
         return capture_image(self.session_base_path, path, cancellation_token)
 
-    async def load_image(self, attachment):
-        from agent.infrastructure.persistence.image_attachments import load_image
-
+    async def load_image(self, attachment: ImageAttachment) -> bytes:
         if not self.session_base_path:
             raise ValueError("No active session for image loading.")
-        return await asyncio.to_thread(load_image, self.session_base_path, attachment)
+        base = self.session_base_path
+        def load(token):
+            check_cancelled(token)
+            return load_image(base, attachment)
+        return await run_image_io(load)
 
     async def persist_user_input(self, content: str, *, meta: dict | None = None) -> None:
-        from agent.infrastructure.images import process_image
-        from agent.infrastructure.persistence.image_attachments import save_image
-        from agent.infrastructure.workspace_images import upload_paths
-        from agent.application.images import check_image_budget
-
-        paths = upload_paths(content, self.workspace_root)
-        # Validate the entire group before creating files or writing a message.
-        processed = await asyncio.to_thread(lambda: [process_image(str(path)) for path in paths])
-        check_image_budget([{"size_bytes": len(item[0])} for item in processed])
-        if not processed:
-            await self.persist_message("user", content, meta=meta, attachments=[])
-            return
         async with self._write_lock:
-            await asyncio.to_thread(self._materialize_draft_sync)
-            attachments = await asyncio.to_thread(lambda: [save_image(self.session_base_path, item) for item in processed])
-        notes = [f"{path.name}: {item[-1]}" for path, item in zip(paths, processed) if item[-1]]
-        if notes:
-            content += "\n[Image processing: " + " ".join(notes) + "]"
-        await self.persist_message("user", content, meta=meta, attachments=attachments)
+            def persist(token):
+                paths = upload_paths(content, self.workspace_root)
+                check_image_budget([{"size_bytes": 0} for path in paths])
+                # Validate the entire group before publishing any snapshot or message.
+                processed = [process_image(str(path), token) for path in paths]
+                check_image_budget([{"size_bytes": len(item[0])} for item in processed])
+                check_cancelled(token)
+                attachments = []
+                created = []
+                was_draft = not self.is_persisted
+                draft_metadata = copy.deepcopy(self._session_meta) if was_draft else None
+                try:
+                    if processed:
+                        self._materialize_draft_sync()
+                        existing = set(Path(self.session_base_path, "attachments").glob("*"))
+                        for item in processed:
+                            reference = save_image(self.session_base_path, item, token)
+                            path = Path(self.session_base_path, reference["path"])
+                            if path not in existing:
+                                created.append(path)
+                            attachments.append(reference)
+                    check_cancelled(token)
+                except BaseException:
+                    for path in created:
+                        path.unlink(missing_ok=True)
+                    if was_draft:
+                        self._discard_if_empty_sync()
+                        self._bind_draft_sync(self._session_id)
+                        if draft_metadata is not None:
+                            self._session_meta.update(draft_metadata)
+                    raise
+                notes = [f"{path.name}: {item[-1]}" for path, item in zip(paths, processed) if item[-1]]
+                text = content + ("\n[Image processing: " + " ".join(notes) + "]" if notes else "")
+                self._persist_message_sync("user", text, meta=meta, attachments=attachments)
+
+            await run_image_io(persist)
 
     async def persist_message(
         self,
@@ -779,41 +804,44 @@ class JsonlSessionStore(SessionStore):
         attachments: list[dict] | None = None,
     ) -> None:
         async with self._write_lock:
-            def _persist():
-                is_context_record = isinstance(meta, dict) and meta.get("kind") in (
-                    {"skill_snapshot", "skill_catalog"} | INTERNAL_MESSAGE_KINDS
-                )
-                if not self.is_persisted:
-                    if role != "user" or not str(content or "").strip() or is_context_record:
-                        return
-                    self._materialize_draft_sync()
-                self._msg_repo.persist_message(
-                    self.now_iso(),
-                    role,
-                    content,
-                    tool_call_id,
-                    tool_name,
-                    meta,
-                    reasoning_content,
-                    attachments,
-                )
-                self._invalidate_projection_cache()
-                if not is_context_record:
-                    self._session_meta["message_count"] += 1
-                if role == "user" and not is_context_record and str(content or "").strip():
-                    self._has_user_message = True
-                if role == "assistant" and content:
-                    self._last_preview = content[:200]
-                if (
-                    role == "user"
-                    and not is_context_record
-                    and self._session_meta
-                    and self._session_meta.get("title") in {None, "", "Untitled"}
-                ):
-                    self._session_meta["title"] = (content or "")[:40]
-                self._persist_meta_sync()
+            await asyncio.to_thread(self._persist_message_sync, role, content, tool_call_id, tool_name,
+                                    meta, reasoning_content, attachments)
 
-            await asyncio.to_thread(_persist)
+    def _persist_message_sync(self, role, content, tool_call_id=None, tool_name=None,
+                              meta=None, reasoning_content=None, attachments=None):
+        is_context_record = isinstance(meta, dict) and meta.get("kind") in (
+            {"skill_snapshot", "skill_catalog"} | INTERNAL_MESSAGE_KINDS
+        )
+        if not self.is_persisted:
+            if role != "user" or not str(content or "").strip() or is_context_record:
+                return
+            self._materialize_draft_sync()
+        self._msg_repo.persist_message(
+            self.now_iso(),
+            role,
+            content,
+            tool_call_id,
+            tool_name,
+            meta,
+            reasoning_content,
+            attachments,
+        )
+        self._invalidate_projection_cache()
+        if not is_context_record:
+            self._session_meta["message_count"] += 1
+        if role == "user" and not is_context_record and str(content or "").strip():
+            self._has_user_message = True
+        if role == "assistant" and content:
+            self._last_preview = content[:200]
+        if (
+            role == "user"
+            and not is_context_record
+            and self._session_meta
+            and self._session_meta.get("title") in {None, "", "Untitled"}
+        ):
+            self._session_meta["title"] = (content or "")[:40]
+        self._persist_meta_sync()
+
     async def persist_tool_call(
         self,
         call_id: str,

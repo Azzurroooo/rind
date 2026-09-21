@@ -7,9 +7,11 @@ from pathlib import Path
 
 from agent.domain import tool_error
 from agent.domain.cancellation import CancellationToken
+from agent.domain.errors import ProviderError
 from agent.infrastructure.tools.files.mutation_queue import FileMutationQueue
 from agent.infrastructure.tools.files.mutations import edit_file, write_file
 from agent.infrastructure.tools.files.queries import glob, grep, read_file
+from agent.infrastructure.persistence.image_attachments import attachment_path
 from agent.infrastructure.tools.spec import ToolSpec
 
 
@@ -62,7 +64,11 @@ def build_file_tool_specs(
             if allow_session_output and session_output is not None and candidate.is_relative_to(session_output):
                 return str(candidate), None
             base = session_base_provider() if session_base_provider is not None else None
-            if allow_session_output and base and candidate.is_relative_to(Path(base).resolve() / "attachments"):
+            if allow_session_output and base and candidate.parent == Path(base).resolve() / "attachments":
+                try:
+                    attachment_path(base, "attachments/" + candidate.name)
+                except ProviderError:
+                    return None, tool_error(tool_name, "Invalid image snapshot path.", "InvalidAttachment")
                 return str(candidate), None
             return None, tool_error(tool_name, f"Path is outside this Agent Capsule: {value}", "WorkspaceBoundary")
         return str(candidate), None

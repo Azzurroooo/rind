@@ -12,6 +12,7 @@ from agent.application.context.compaction import CompactionService
 from agent.application.context.manager import ContextBuildResult, ContextManager
 from agent.application.context.snapshot import build_context_snapshot
 from agent.application.context.token_usage import build_usage_record
+from agent.application.images import check_image_budget, image_budget_exceeded
 from agent.application.ports.chat_client import ChatClient
 from agent.application.ports.session_store import SessionStore
 from agent.runtime.core.stream_pump import ModelStreamResult, pump_model_stream_events
@@ -21,7 +22,6 @@ from agent.domain.cancellation import CancellationToken
 from agent.domain.errors import BoundaryError, PersistenceError, ProviderError
 from agent.domain.events import (
     RuntimeEvent,
-    AssistantDeltaEvent,
     AssistantMessageCompletedEvent,
     QueuedInputDeliveredEvent,
     ContextBuiltEvent,
@@ -73,7 +73,8 @@ class TurnRunner:
         compaction_service: CompactionService | None = None,
         skill_repository=None,
         usage_recorder: Callable[[dict], Any] | None = None,
-        image_promoter: Callable[[list[dict], str | None], tuple[list[dict], bool]] | None = None,
+        prepare_messages=None,
+        image_input: bool | None = None,
     ):
         self._chat_client = chat_client
         self._tool_processor = tool_processor
@@ -82,7 +83,8 @@ class TurnRunner:
         self._context_manager = context_manager
         self._compaction_service = compaction_service or CompactionService()
         self._usage_recorder = usage_recorder
-        self._image_promoter = image_promoter
+        self._prepare_messages = prepare_messages
+        self._image_input = image_input
         self._skill_turn_coordinator = (
             SkillTurnCoordinator(skill_repository) if skill_repository is not None else None
         )
@@ -109,7 +111,7 @@ class TurnRunner:
             steering_for_sampling = False
             force_rescue_next_build = False
             context_length_recovery_count = 0
-            image_fallback_used = False
+            image_notice_sent = False
             initial_recovery_attempt = await self._current_recovery_attempt(session)
             if resume:
                 pending_tool_calls = await self._pending_tool_calls(session)
@@ -134,7 +136,11 @@ class TurnRunner:
                 )
                 force_rescue_next_build = False
                 yield _context_built(context, session, turn_id)
-                if context.decisions.get("auto_compact_token_limit_reached"):
+                if context.decisions.get("auto_compact_token_limit_reached") or (self._image_input is not False and image_budget_exceeded(context.messages)):
+                    if self._image_input is not False:
+                        latest_group = max((i for i, m in enumerate(context.messages)
+                                            if m.get("role") == "user" or m.get("tool_calls")), default=0)
+                        check_image_budget([item for m in context.messages[latest_group:] for item in m.get("attachments", [])])
                     context, record = await self._run_compact(
                         session=session,
                         context=context,
@@ -163,13 +169,15 @@ class TurnRunner:
                 if boundary is not None and not boundary.ok:
                     raise RuntimeError(f"Invalid model message boundary: {boundary.reason}")
 
-                request_messages = context.messages
-                promoted_any = False
-                if not image_fallback_used and self._image_promoter is not None:
-                    request_messages, promoted_any = self._image_promoter(
-                        context.messages,
-                        getattr(session, "workspace_root", None),
-                    )
+                if not image_notice_sent and self._image_input is not True and any(m.get("attachments") for m in context.messages):
+                    notice = ("Images not sent: this model does not support image input. Select a vision model."
+                              if self._image_input is False else "Image input capability is unconfirmed; trying this request with images.")
+                    yield ContextBuiltEvent(**event_meta(session, turn_id), message_count=len(context.messages),
+                                            stats=dict(context.stats), decisions={"image_notice": notice})
+                    image_notice_sent = True
+                request_messages = (
+                    await self._prepare_messages(context.messages) if self._prepare_messages else context.messages
+                )
 
                 try:
                     recovery_attempt = initial_recovery_attempt
@@ -196,20 +204,6 @@ class TurnRunner:
                             self._validate_finish_reason(stream_result)
                             break
                         except ProviderError as e:
-                            if (
-                                promoted_any
-                                and not image_fallback_used
-                                and e.code != "context_length_exceeded"
-                                and e.status == "rejected"
-                            ):
-                                image_fallback_used = True
-                                request_messages = context.messages
-                                yield TurnStepRetryEvent(
-                                    **event_meta(session, turn_id),
-                                    attempt=1,
-                                    reason="image_fallback",
-                                )
-                                continue
                             if e.code != "stream_interrupted" or recovery_attempt >= MAX_STEP_RECOVERY_ATTEMPTS:
                                 raise
                             recovery_attempt += 1
@@ -253,7 +247,6 @@ class TurnRunner:
                             **event_meta(session, turn_id),
                             content=content_text,
                             content_chars=len(content_text),
-                            image_fallback=image_fallback_used,
                         )
 
                 except ProviderError as e:
@@ -319,7 +312,6 @@ class TurnRunner:
             yield TurnCompletedEvent(
                 **event_meta(session, turn_id),
                 duration_ms=int((time.perf_counter() - turn_started_at) * 1000),
-                image_fallback=image_fallback_used,
             )
 
         except asyncio.CancelledError as e:
@@ -457,6 +449,7 @@ class TurnRunner:
             reason=reason,
             phase=phase,
             diagnostics=_compact_diagnostics(phase_detail),
+            prepare_messages=self._prepare_messages,
             context_stats=context.stats if context is not None else compaction_context.stats,
             cancellation_token=cancellation_token,
         )
@@ -476,7 +469,7 @@ class TurnRunner:
         if self._skill_turn_coordinator is not None:
             await self._skill_turn_coordinator.persist_user_input(session, text)
         else:
-            await self._persist_message(session, "user", text)
+            await session.persist_user_input(text)
         return QueuedInputDeliveredEvent(
             **event_meta(session, turn_id), input_id=input_id, input=text, mode="steering",
         )

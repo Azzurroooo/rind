@@ -26,6 +26,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from agent.infrastructure.paths import resolve_rind_home
+from .images import redact_image_text
 
 _ENV_FLAG = "RIND_TRACE_LLM"
 _SUBDIR = "_llm_trace"
@@ -50,11 +51,17 @@ def _now() -> str:
 
 
 def _serialize(value: Any) -> Any:
-    if value is None or isinstance(value, (str, int, float, bool)):
+    if isinstance(value, str):
+        return redact_image_text(value)
+    if isinstance(value, bytes):
+        return f"[image bytes omitted: {len(value)} bytes]"
+    if value is None or isinstance(value, (int, float, bool)):
         return value
     if isinstance(value, list):
         return [_serialize(item) for item in value]
     if isinstance(value, dict):
+        if (value.get("type") == "base64" or "mime_type" in value or "mimeType" in value) and "data" in value:
+            value = {**value, "data": f"[image data omitted: {len(value['data'])} bytes/characters]"}
         return {str(key): _serialize(item) for key, item in value.items()}
     for attr in ("model_dump", "to_dict", "as_dict", "dict"):
         fn = getattr(value, attr, None)
@@ -66,7 +73,7 @@ def _serialize(value: Any) -> Any:
     public = getattr(value, "__dict__", None)
     if isinstance(public, dict) and public:
         return _serialize(public)
-    return repr(value)
+    return redact_image_text(repr(value))
 
 
 class LlmCallTrace:
@@ -80,7 +87,7 @@ class LlmCallTrace:
     def _emit(self, record: dict[str, Any]) -> None:
         if self._fh is None:
             self._fh = self.path.open("a", encoding="utf-8")
-        self._fh.write(json.dumps(record, ensure_ascii=False, default=str) + "\n")
+        self._fh.write(json.dumps(_serialize(record), ensure_ascii=False, default=str) + "\n")
         self._fh.flush()
 
     def request(self, payload: dict[str, Any]) -> None:

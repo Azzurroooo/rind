@@ -112,8 +112,6 @@ def read_file(
             except ProviderError as exc:
                 return tool_error("read_file", str(exc), exc.code)
             description = f"Read image: {file_path.name} · {attachment['width']}x{attachment['height']} · {attachment['mime_type']}"
-            if image_input is None:
-                note = (note + " Image input support is unconfirmed; the image will be sent with this task.").strip()
             return tool_ok("read_file", description + (f"\n{note}" if note else ""), attachments=[attachment])
         if _looks_binary(sample):
             return tool_error("read_file", f"Binary file cannot be read as text: {path}", "BinaryFile")

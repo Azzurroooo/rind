@@ -47,6 +47,90 @@ class _PromptInteraction:
         pass
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("cached,endpoint,expected", [
+    (False, "https://api.openai.com/v1", False),
+    (True, "https://api.openai.com/v1", True),
+    ("false", "https://api.openai.com/v1", True),
+    (None, "https://api.openai.com/v1", True),
+    (None, "https://proxy.example/v1", None),
+])
+async def test_image_capability_cache_builtin_unknown_agree_in_list_and_selection(tmp_path, monkeypatch, cached, endpoint, expected):
+    settings = _settings(tmp_path, provider="openai", model="gpt-4o-mini", api_key="test", base_url=endpoint)
+    service = _service(tmp_path, settings, monkeypatch)
+    service._write_cache({"openai": {"models": [{"id": "gpt-4o-mini", "image_input": cached}],
+                                     "base_url": endpoint, "refreshed_at": 1}})
+    monkeypatch.setattr("agent.infrastructure.llm.provider_service.build_async_client", lambda *a, **k: pytest.fail("Local reads must not use network"))
+    catalog = await service.list_models()
+    selected = service.resolve_selection(None, ModelSelection("openai", "gpt-4o-mini"))
+    assert selected.image_input is expected
+    assert next(m for m in catalog.models if m.provider_id == "openai" and m.id == selected.id).image_input is expected
+
+
+@pytest.mark.asyncio
+async def test_image_capability_does_not_inherit_another_endpoint_or_legacy_metadata(tmp_path, monkeypatch):
+    settings = _settings(tmp_path, provider="openai", model="custom", api_key="test", base_url="https://proxy.example/v1")
+    service = _service(tmp_path, settings, monkeypatch)
+    for entry in ([{"id": "custom", "image_input": True}],
+                  {"models": [{"id": "custom", "image_input": True}], "base_url": "https://other.example/v1", "refreshed_at": 1}):
+        service._write_cache({"openai": entry})
+        assert service.resolve_selection(None, ModelSelection("openai", "custom")).image_input is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("trigger", ["background", "login", "explicit"])
+@pytest.mark.parametrize("same_endpoint", [True, False])
+async def test_all_refresh_entries_merge_capabilities_by_endpoint(tmp_path, monkeypatch, trigger, same_endpoint):
+    from unittest.mock import AsyncMock, Mock
+    settings = _settings(tmp_path, provider="openrouter", model="new", api_key="test", base_url="https://openrouter.ai/api/v1")
+    service = _service(tmp_path, settings, monkeypatch)
+    for provider in service.providers.values():
+        monkeypatch.delenv(provider.environment_key or "UNUSED_TEST_KEY", raising=False)
+    service._write_cache({"openrouter": {"base_url": settings.base_url if same_endpoint else "https://old.example/v1", "refreshed_at": 0,
+        "models": [{"id": "old", "image_input": True}, {"id": "keep", "image_input": False}, {"id": "removed", "image_input": True}]}})
+    listing = AsyncMock(return_value=SimpleNamespace(data=[
+        {"id": "old", "architecture": {"input_modalities": ["text"]}},
+        {"id": "new", "name": "New vision model", "architecture": {"input_modalities": ["text", "image"]}},
+        {"id": "keep"}, {"id": "unknown", "vision": True},
+    ]))
+    client = SimpleNamespace(models=SimpleNamespace(list=listing), close=AsyncMock())
+    build = Mock(return_value=client)
+    monkeypatch.setattr("agent.infrastructure.llm.provider_service.build_async_client", build)
+    if trigger == "background":
+        await service.refresh_stale_models()
+    elif trigger == "login":
+        await service.login(None, "openrouter", "api_key", _PromptInteraction("stored-test"))
+    else:
+        await service.list_models(refresh=True)
+    assert build.call_args.kwargs["max_retries"] == 0
+    listing.assert_awaited_once_with(timeout=10)
+    client.close.assert_awaited_once()
+    entry = service._read_cache()["openrouter"]
+    models = {m["id"]: m for m in entry["models"]}
+    assert models["old"]["image_input"] is False
+    assert models["new"]["image_input"] is True
+    assert models["new"]["name"] == "New vision model"
+    assert models["keep"].get("image_input") is (False if same_endpoint else None)
+    assert "image_input" not in models["unknown"] and "removed" not in models
+    assert entry["refreshed_at"] > 0 and entry["base_url"] == settings.base_url
+
+
+@pytest.mark.parametrize("provider,item,expected", [
+    ("openrouter", {"architecture": {"input_modalities": ["image", "text"]}}, True),
+    ("openrouter", {"architecture": {"input_modalities": ["text"]}}, False),
+    ("openrouter", {"architecture": {"input_modalities": "image"}}, None),
+    ("openrouter", {"architecture": {"input_modalities": []}}, None),
+    ("openrouter", {"input_modalities": ["image"]}, None),
+    ("mistral", {"capabilities": {"vision": True}}, True),
+    ("mistral", {"capabilities": {"vision": False}}, False),
+    ("mistral", {"capabilities": {"vision": "false"}}, None),
+    ("openai", {"capabilities": {"vision": True}}, None),
+])
+def test_remote_image_capability_only_uses_verified_schemas(provider, item, expected):
+    from agent.infrastructure.llm.provider_service import _remote_image_input
+    assert _remote_image_input(item, provider) is expected
+
+
 def test_credential_list_redacts_secret(tmp_path: Path) -> None:
     store = CredentialStore(tmp_path / "auth.json")
     store.set("deepseek", Credential(type="api_key", key="test-secret"))

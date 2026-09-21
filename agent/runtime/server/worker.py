@@ -164,6 +164,7 @@ class RuntimeWorker:
                     "api": model.api,
                     "reasoning_efforts": list(model.reasoning_efforts),
                     "context_window": model.context_window,
+                    "image_input": model.image_input,
                 }
                 for model in catalog.models
             ],

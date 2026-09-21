@@ -9,13 +9,14 @@ import os
 from typing import Any, AsyncIterator, Callable
 
 import openai
+from agent.infrastructure.llm.images import chat_messages
 
 from agent.application.ports.chat_client import ChatClient
 from agent.domain.cancellation import CancellationToken
-from agent.domain.errors import ProviderError
+from .errors import provider_error
 from agent.domain.models import ModelCompletion, ModelStreamEvent, ModelUsage
 from agent.domain.tool_payload import ParsedToolCall
-from agent.infrastructure.llm.cancellation import await_with_cancellation, close_resource
+from agent.infrastructure.llm.cancellation import await_with_cancellation, close_resource, iterate_with_cancellation
 from agent.infrastructure.llm.catalog import resolve_reasoning_effort
 from agent.infrastructure.llm.trace import make_trace
 
@@ -85,7 +86,7 @@ class OpenAIChatCompletionsClient(ChatClient):
         except Exception as exc:
             if trace:
                 trace.end("error", str(exc))
-            raise self._provider_error(exc) from exc
+            raise provider_error(exc) from None
 
     async def stream(
         self,
@@ -109,7 +110,7 @@ class OpenAIChatCompletionsClient(ChatClient):
         except Exception as exc:
             if trace:
                 trace.end("connect_error", str(exc))
-            raise self._provider_error(exc) from exc
+            raise provider_error(exc) from None
 
         # Now consume the stream chunks with cancellation checks. Each chunk is
         # recorded BEFORE it is yielded upstream so the trace reflects the raw
@@ -117,7 +118,7 @@ class OpenAIChatCompletionsClient(ChatClient):
         ended = False
         call_ids: dict[int, str] = {}
         try:
-            async for chunk in stream_response:
+            async for chunk in iterate_with_cancellation(stream_response, cancellation_token):
                 if cancellation_token and cancellation_token.is_cancelled:
                     ended = True
                     if trace:
@@ -136,7 +137,7 @@ class OpenAIChatCompletionsClient(ChatClient):
             if trace:
                 trace.end("stream_error", str(exc))
             ended = True
-            raise self._provider_error(exc, code="stream_interrupted") from exc
+            raise provider_error(exc, code="stream_interrupted") from None
         finally:
             if trace and not ended:
                 trace.end("completed")
@@ -145,7 +146,7 @@ class OpenAIChatCompletionsClient(ChatClient):
             except asyncio.CancelledError:
                 raise
             except Exception as exc:
-                raise self._provider_error(exc, code="stream_interrupted") from exc
+                raise provider_error(exc, code="stream_interrupted") from None
 
     def _trace_payload(self, messages: list[dict], tools: list[dict] | None, *, stream: bool) -> dict[str, Any]:
         payload: dict[str, Any] = {
@@ -162,42 +163,10 @@ class OpenAIChatCompletionsClient(ChatClient):
             payload["stream_options"] = {"include_usage": True}
         return payload
 
-    def _provider_error(self, exc: Exception, code: str | None = None) -> ProviderError:
-        if isinstance(exc, ProviderError):
-            return exc
-        error_type = type(exc).__name__
-        text = str(exc)
-        lowered = text.lower()
-        if "context_length_exceeded" in lowered or "maximum context length" in lowered:
-            return ProviderError(
-                text,
-                status="rejected",
-                error_type=error_type,
-                code="context_length_exceeded",
-            )
-        if isinstance(exc, (asyncio.TimeoutError, TimeoutError, openai.APITimeoutError)):
-            status = "timed_out"
-        elif isinstance(exc, openai.APIStatusError):
-            status_code = getattr(exc, "status_code", None)
-            if status_code in {400, 401, 403, 404, 409, 422}:
-                status = "rejected"
-            elif status_code in {408, 504}:
-                status = "timed_out"
-            elif status_code == 429 or isinstance(status_code, int) and status_code >= 500:
-                status = "unavailable"
-            else:
-                status = "failed"
-        elif isinstance(exc, (openai.APIConnectionError, openai.RateLimitError, openai.InternalServerError)):
-            status = "unavailable"
-        else:
-            status = "failed"
-        return ProviderError(text, status=status, error_type=error_type, code=code)
-
-
     async def _request(self, messages, tools, stream, cancellation_token, *, max_output_tokens=None, reasoning_effort=None):
         if cancellation_token and cancellation_token.is_cancelled:
             raise asyncio.CancelledError(cancellation_token.reason)
-        payload = {"model": self._model, "messages": messages, "stream": stream}
+        payload = {"model": self._model, "messages": chat_messages(messages), "stream": stream}
         if max_output_tokens is not None:
             payload["max_tokens"] = max_output_tokens
         if stream:

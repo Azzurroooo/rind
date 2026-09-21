@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import asyncio
 import io
+from collections.abc import Callable
 from pathlib import Path
+from typing import TypeVar
 
 from PIL import Image, ImageOps, UnidentifiedImageError
 
-from agent.domain.cancellation import CancellationToken
+from agent.domain.cancellation import CancellationToken, CancellationTokenSource
 from agent.domain.errors import ProviderError
 
 MAX_SOURCE_BYTES = 20 * 1024 * 1024
@@ -16,6 +18,19 @@ MAX_IMAGE_PIXELS = 40_000_000
 MAX_IMAGE_BYTES = 3 * 1024 * 1024
 MAX_IMAGE_EDGE = 2000
 IMAGE_SUFFIXES = frozenset({".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp"})
+T = TypeVar("T")
+
+
+async def run_image_io(operation: Callable[[CancellationToken], T]) -> T:
+    cancellation = CancellationTokenSource()
+    task = asyncio.create_task(asyncio.to_thread(operation, cancellation.token))
+    try:
+        return await asyncio.shield(task)
+    except asyncio.CancelledError:
+        cancellation.cancel("Image operation cancelled")
+        # Pillow cannot interrupt a decode; settle the bounded worker before release.
+        await asyncio.gather(task, return_exceptions=True)
+        raise
 
 
 def is_image_file(path: Path, sample: bytes) -> bool:
@@ -45,6 +60,7 @@ def process_image(path: str, token: CancellationToken | None = None) -> tuple[by
             first_frame = getattr(source, "n_frames", 1) > 1
             source.seek(0)
             original = source.size
+            orientation = source.getexif().get(274, 1)
             rotated = ImageOps.exif_transpose(source)
             transparent = "A" in rotated.getbands() or "transparency" in rotated.info
             normalized = rotated.convert("RGBA" if transparent else "RGB")
@@ -52,6 +68,8 @@ def process_image(path: str, token: CancellationToken | None = None) -> tuple[by
             check_cancelled(token)
             normalized.thumbnail((MAX_IMAGE_EDGE, MAX_IMAGE_EDGE), Image.Resampling.LANCZOS)
             hints = ["First frame only."] if first_frame else []
+            if orientation != 1:
+                hints.append("EXIF orientation corrected.")
             if normalized.size != original:
                 hints.append(f"Original {original[0]}x{original[1]}; sent {normalized.width}x{normalized.height}.")
             for edge, quality in ((2000, 90), (1600, 80), (1200, 70), (800, 65)):

@@ -76,15 +76,24 @@ def save_image(session_base: str, processed: tuple[bytes, str, int, int, str], t
 
 
 def capture_image(session_base: str, path: str, token: CancellationToken | None = None) -> tuple[ImageAttachment, str]:
+    check_cancelled(token)
     source = Path(path).resolve()
     if source.parent == Path(session_base).resolve() / "attachments":
         relative = "attachments/" + source.name
         attachment_path(session_base, relative)
-        with Image.open(source) as image:
-            reference: ImageAttachment = {
-                "path": relative, "mime_type": "image/png" if source.suffix == ".png" else "image/jpeg",
-                "width": image.width, "height": image.height, "size_bytes": source.stat().st_size,
-            }
+        try:
+            with source.open("rb") as stream:
+                data = stream.read(MAX_IMAGE_BYTES + 1)
+            if len(data) > MAX_IMAGE_BYTES:
+                raise ValueError("oversized snapshot")
+            with Image.open(io.BytesIO(data)) as image:
+                reference: ImageAttachment = {
+                    "path": relative, "mime_type": "image/png" if source.suffix == ".png" else "image/jpeg",
+                    "width": image.width, "height": image.height, "size_bytes": len(data),
+                }
+        except (OSError, ValueError, Image.DecompressionBombError) as exc:
+            raise ProviderError("Image snapshot is missing or damaged. Read the original image again.",
+                                status="rejected", code="AttachmentUnavailable") from exc
         load_image(session_base, reference)
         check_cancelled(token)
         return reference, ""

@@ -5,10 +5,16 @@ from __future__ import annotations
 from collections.abc import Awaitable, Callable
 
 from agent.domain.errors import ProviderError
-from agent.domain.images import ImageAttachment
+from agent.domain.images import ImageAttachment, upload_references
 
 MAX_REQUEST_IMAGES = 8
 MAX_REQUEST_IMAGE_BYTES = 16 * 1024 * 1024
+LEGACY_IMAGE_NOTICE = "Older uploads references have no image snapshot. Resend the uploads reference or use read_file to inspect the image."
+
+
+def has_legacy_images(messages: list[dict]) -> bool:
+    return any(message.get("role") == "user" and "attachments" not in message
+               and upload_references(str(message.get("content") or "")) for message in messages)
 
 
 def check_image_budget(attachments: list[dict]) -> None:
@@ -42,8 +48,11 @@ async def prepare_image_messages(
         attachments = copied.pop("attachments", [])
         if attachments:
             if omitted:
-                copied["content"] = str(copied.get("content") or "") + "\n[" + omitted + "]"
+                sources = ", ".join(item["path"] for item in attachments)
+                copied["content"] = str(copied.get("content") or "") + f"\n[{omitted} References: {sources}]"
             else:
                 copied["images"] = [{"mime_type": item["mime_type"], "data": await load_image(item)} for item in attachments]
+        elif has_legacy_images([message]):
+            copied["content"] = str(copied.get("content") or "") + "\n[" + LEGACY_IMAGE_NOTICE + "]"
         result.append(copied)
     return result

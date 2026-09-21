@@ -171,7 +171,7 @@ def test_fork_title_suffix_is_idempotent(temp_session_dir):
     assert first_title.count("(fork)") == 1
 
 
-def test_fork_copies_tool_calls_verbatim(temp_session_dir):
+def test_fork_omits_unreferenced_tool_calls(temp_session_dir):
     _seed_history(temp_session_dir)
     tool_calls_path = Path(temp_session_dir) / "20260907_alpha" / "tool_calls.jsonl"
     SessionFiles().append_jsonl(
@@ -182,4 +182,56 @@ def test_fork_copies_tool_calls_verbatim(temp_session_dir):
     new_id = fork_session(temp_session_dir, "20260907_alpha")
 
     copied = SessionFiles().read_jsonl(str(Path(temp_session_dir) / new_id / "tool_calls.jsonl"))
-    assert copied == [{"id": "call-1", "name": "bash", "ok": True, "model_content": "done"}]
+    assert copied == []
+
+
+@pytest.mark.asyncio
+async def test_image_fork_keeps_only_retained_references_and_survives_source_delete(tmp_path):
+    from PIL import Image
+    from agent.infrastructure.persistence.image_attachments import load_image
+    source = tmp_path / "image.png"
+    sessions = tmp_path / "sessions"
+    store = JsonlSessionStore(session_dir=str(sessions), workspace_root=str(tmp_path))
+    await store.initialize()
+    await store.persist_user_input("first")
+    Image.new("RGB", (4, 4), "red").save(source)
+    early, _ = store.capture_image(str(source))
+    await store.persist_message("assistant", "", meta={"tool_calls": [{"id": "early", "name": "read_file", "raw_args": "{}"}]})
+    await store.persist_tool_call("early", "read_file", {}, "{}", "start", "end", "read", model_content="read", attachments=[early])
+    await store.persist_message("tool", "", tool_call_id="early", tool_name="read_file")
+    await store.persist_user_input("second")
+    cut_id = (await store.load_messages())[-1]["id"]
+    Image.new("RGB", (4, 4), "blue").save(source)
+    late, _ = store.capture_image(str(source))
+    await store.persist_message("assistant", "", meta={"tool_calls": [{"id": "late", "name": "read_file", "raw_args": "{}"}]})
+    await store.persist_tool_call("late", "read_file", {}, "{}", "start", "end", "read", model_content="read", attachments=[late])
+    await store.persist_message("tool", "", tool_call_id="late", tool_name="read_file")
+    new_id = fork_session(str(sessions), store.session_id, before_message_id=cut_id)
+    fork = sessions / new_id
+    copied = SessionFiles().read_jsonl(str(fork / "tool_calls.jsonl"))
+    assert [r["id"] for r in copied] == ["early"]
+    assert (fork / early["path"]).is_file() and not (fork / late["path"]).exists()
+    shutil.rmtree(store.session_base_path)
+    assert load_image(str(fork), early)
+    from agent.runtime.server.session_service import SessionService
+    await SessionService(session_dir=str(sessions), provider_service=None).delete(new_id)
+    assert not fork.exists()
+
+
+@pytest.mark.asyncio
+async def test_failed_image_fork_leaves_no_directory_or_index_entry(tmp_path):
+    from PIL import Image
+    sessions = tmp_path / "sessions"
+    source = tmp_path / "image.png"
+    Image.new("RGB", (4, 4)).save(source)
+    store = JsonlSessionStore(session_dir=str(sessions), workspace_root=str(tmp_path))
+    await store.initialize()
+    await store.persist_user_input("start")
+    ref, _ = store.capture_image(str(source))
+    await store.persist_message("user", "inspect", attachments=[ref])
+    Path(store.session_base_path, ref["path"]).unlink()
+    before = set(sessions.iterdir())
+    index = _index(str(sessions))
+    with pytest.raises(Exception, match="missing or damaged"):
+        fork_session(str(sessions), store.session_id)
+    assert set(sessions.iterdir()) == before and _index(str(sessions)) == index

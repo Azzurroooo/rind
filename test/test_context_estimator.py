@@ -8,6 +8,8 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from agent.application import ContextBudget, ContextEstimator
+
+
 from agent.application.context.estimator import (
     DEFAULT_AUTO_COMPACT_TOKEN_LIMIT_PERCENT,
     DEFAULT_CONTEXT_WINDOW_TOKENS,
@@ -130,3 +132,17 @@ def test_local_token_cache_reestimates_changed_payloads_without_count_drift():
     assert estimator.estimate_messages(messages, token_cache=cache) == estimator.estimate_messages(messages)
     messages[0]["_context_kind"] = "goal_policy"
     assert estimator.estimate_messages(messages, token_cache=cache) == estimator.estimate_messages(messages)
+
+
+def test_image_estimate_counts_pixels_without_counting_reference_text():
+    estimator = ContextEstimator()
+    text = {"role": "user", "content": "describe"}
+    reference = {"path": "attachments/" + "a" * 64 + ".png", "mime_type": "image/png", "width": 33, "height": 65, "size_bytes": 100}
+    message = {**text, "attachments": [reference]}
+    cache = {}
+    baseline = estimator.estimate_messages([text], token_cache=cache)
+    first = estimator.estimate_messages([message], token_cache=cache)
+    reference["path"] = "attachments/" + "b" * 64 + ".png"
+    second = estimator.estimate_messages([message], token_cache=cache)
+    assert first.estimated_input_tokens == second.estimated_input_tokens == baseline.estimated_input_tokens + 12
+    assert first.estimated_chars == baseline.estimated_chars

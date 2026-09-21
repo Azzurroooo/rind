@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from agent.application.images import LEGACY_IMAGE_NOTICE, has_legacy_images
 
 
 DEFAULT_RESUME_PREVIEW_LIMIT = 6
@@ -31,6 +32,8 @@ def render_resume_preview(
     ]
     if hidden:
         lines.append(f"Full context is still loaded; {hidden} older message(s) are hidden from the terminal.")
+    if has_legacy_images(messages):
+        lines.append(LEGACY_IMAGE_NOTICE)
     for message in shown:
         lines.append(f"- {message['role']}: {_preview(message['content'], preview_chars)}")
     lines.append("Use /status for details, /sessions to switch, or continue typing below.")
