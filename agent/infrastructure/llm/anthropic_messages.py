@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import asyncio
+import base64
+import json
 from collections.abc import AsyncIterator
 from typing import Any
 
@@ -12,7 +14,8 @@ from agent.domain.errors import ProviderError
 from agent.domain.models import ModelCompletion, ModelStreamEvent, ModelUsage
 from agent.domain.tool_payload import ParsedToolCall
 
-from .cancellation import await_with_cancellation, close_resource
+from .errors import provider_error
+from .cancellation import await_with_cancellation, close_resource, iterate_with_cancellation
 
 
 class AnthropicMessagesClient(ChatClient):
@@ -36,7 +39,10 @@ class AnthropicMessagesClient(ChatClient):
             payload["system"] = system
         if tools:
             payload["tools"] = [_anthropic_tool(tool) for tool in tools]
-        response = await await_with_cancellation(self._client.messages.create(**payload), cancellation_token)
+        try:
+            response = await await_with_cancellation(self._client.messages.create(**payload), cancellation_token)
+        except Exception as exc:
+            raise provider_error(exc) from None
         return _completion(response)
 
     async def stream(self, messages, tools=None, cancellation_token: CancellationToken | None = None) -> AsyncIterator[ModelStreamEvent]:
@@ -49,7 +55,7 @@ class AnthropicMessagesClient(ChatClient):
         response = None
         try:
             response = await await_with_cancellation(self._client.messages.create(**payload), cancellation_token)
-            async for raw in response:
+            async for raw in iterate_with_cancellation(response, cancellation_token):
                 if cancellation_token and cancellation_token.is_cancelled:
                     raise asyncio.CancelledError(cancellation_token.reason)
                 event = _event(raw)
@@ -58,7 +64,7 @@ class AnthropicMessagesClient(ChatClient):
         except asyncio.CancelledError:
             raise
         except Exception as exc:
-            raise ProviderError(str(exc), status="unavailable", error_type=type(exc).__name__, code="stream_interrupted") from exc
+            raise provider_error(exc, code="stream_interrupted") from None
 
         finally:
             await close_resource(response)
@@ -72,19 +78,35 @@ def _messages(messages):
     result: list[dict[str, Any]] = []
     for message in messages:
         role = message.get("role")
+        image_blocks = [{"type": "image", "source": {
+            "type": "base64", "media_type": image["mime_type"],
+            "data": base64.b64encode(image["data"]).decode("ascii"),
+        }} for image in message.get("images", [])]
         if role == "system":
             system.append(str(message.get("content") or ""))
             continue
         if role == "tool":
-            result.append({"role": "user", "content": [{"type": "tool_result", "tool_use_id": str(message.get("tool_call_id") or ""), "content": str(message.get("content") or "")} ]})
+            text = str(message.get("content") or "")
+            content = ([{"type": "text", "text": text}] if text else []) + image_blocks if image_blocks else text
+            block = {"type": "tool_result", "tool_use_id": str(message.get("tool_call_id") or ""), "content": content}
+            try:
+                payload = json.loads(text)
+            except (ValueError, TypeError):
+                payload = None
+            if message.get("is_error") or isinstance(payload, dict) and payload.get("ok") is False:
+                block["is_error"] = True
+            if result and result[-1]["role"] == "user" and isinstance(result[-1]["content"], list) and any(item["type"] == "tool_result" for item in result[-1]["content"]):
+                result[-1]["content"].append(block)
+            else:
+                result.append({"role": "user", "content": [block]})
             continue
         content: list[dict[str, Any]] = []
         if message.get("content"):
             content.append({"type": "text", "text": str(message["content"])})
+        content.extend(image_blocks)
         for call in message.get("tool_calls") or []:
             function = call.get("function") or {}
             try:
-                import json
                 arguments = json.loads(function.get("arguments") or "{}")
             except (TypeError, ValueError):
                 arguments = {}

@@ -9,12 +9,14 @@ import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from collections.abc import Callable
+from pathlib import Path
 from typing import Any
 
 from agent.domain.cancellation import CancellationToken
 from agent.domain.models import ModelCompletion
 from agent.domain.compaction import COMPACT_CONTINUATION_USER_CONTENT
 from agent.domain.errors import BoundaryError, PersistenceError
+from agent.application.images import image_budget_exceeded
 from agent.prompts import build_compact_prompt
 
 from .estimator import ContextEstimator, DEFAULT_CONTEXT_WINDOW_TOKENS
@@ -44,6 +46,7 @@ class CompactionService:
         diagnostics: dict[str, Any] | None = None,
         context_stats: dict[str, Any] | None = None,
         cancellation_token: CancellationToken | None = None,
+        prepare_messages=None,
     ) -> dict[str, Any]:
         if cancellation_token and cancellation_token.is_cancelled:
             raise asyncio.CancelledError(cancellation_token.reason)
@@ -78,6 +81,8 @@ class CompactionService:
         messages = await asyncio.to_thread(self._prepare_summary_request, corpus, recent_start, window, max_output_tokens)
         if cancellation_token and cancellation_token.is_cancelled:
             raise asyncio.CancelledError(cancellation_token.reason)
+        if prepare_messages is not None:
+            messages = await prepare_messages(messages, compact=True)
         try:
             response = await chat_client.create(
                 messages=messages,
@@ -107,6 +112,16 @@ class CompactionService:
             if hasattr(exc, "status"):
                 record["fallback_error"]["status"] = str(exc.status)
 
+        if any(message.get("attachments") for message in corpus):
+            if record["strategy"] != "llm_inline" or not any(message.get("images") for message in messages):
+                record["handoff_message"]["content"] += "\nImages were not re-examined for this summary; only prior observations were used."
+        retained_calls = {call_id for message in raw_messages[:cut] for call_id in self._tool_call_ids(message)}
+        references = {item["path"] for message in [*raw_messages[:cut], *(r for r in tool_records if r.get("id") in retained_calls)]
+                      for item in message.get("attachments", [])}
+        if references:
+            base = session.session_base_path
+            paths = [str(Path(base, path).resolve()).replace("\\", "/") for path in sorted(references)]
+            record["handoff_message"]["content"] += "\n\nImage snapshots (use read_file for details):\n" + "\n".join(paths)
         if self.plan_snapshot_provider is not None:
             self._append_active_plan_snapshot(record, session.session_base_path)
         if cancellation_token and cancellation_token.is_cancelled:
@@ -217,12 +232,21 @@ class CompactionService:
 
         retained_start, retained_end = units[-1]
         retained_size = self._unit_size(messages, retained_start, retained_end, tool_sizes)
+        tool_images = {record.get("id"): record.get("attachments", []) for record in tool_records}
+
+        def unit_images(start, end):
+            return [{"attachments": tool_images.get(m.get("tool_call_id"), m.get("attachments", []))}
+                    for m in messages[start:end]]
+
+        retained_images = unit_images(retained_start, retained_end)
         for unit_start, unit_end in reversed(units[:-1]):
             unit_size = self._unit_size(messages, unit_start, unit_end, tool_sizes)
-            if retained_size + unit_size > keep_recent_chars:
+            images = unit_images(unit_start, unit_end) + retained_images
+            if retained_size + unit_size > keep_recent_chars or image_budget_exceeded(images):
                 break
             retained_start = unit_start
             retained_size += unit_size
+            retained_images = images
         return retained_start
 
     def _conversation_units(
@@ -402,7 +426,14 @@ class CompactionService:
 
         def build_request():
             payload = {"history": corpus[:recent_start], "retained_recent_messages": corpus[recent_start:]}
-            return build_compact_prompt(json.dumps(payload, ensure_ascii=False, sort_keys=True, default=str))
+            messages = build_compact_prompt(json.dumps(payload, ensure_ascii=False, sort_keys=True, default=str))
+            attachments = [item for message in corpus for item in message.get("attachments", [])]
+            if attachments:
+                if image_budget_exceeded(corpus):
+                    messages[-1]["content"] += "\n[Images not re-examined: image request limit exceeded. Summarize prior observations and image references only.]"
+                else:
+                    messages[-1]["attachments"] = attachments
+            return messages
 
         messages = build_request()
         if estimator.estimate_messages(messages).estimated_input_tokens <= input_budget:

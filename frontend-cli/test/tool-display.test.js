@@ -12,6 +12,15 @@ import { stripAnsi } from "../lib/text-width.js";
 
 const WIDTH = 60;
 
+test("image reads display bounded summaries on narrow terminals", () => {
+  const result = JSON.stringify({ ok: true, tool: "read_file", data: "Read image: chart.png · 1600x900 · PNG\nFirst frame only." });
+  const lines = renderToolFinished({ name: "read_file", args: { path: "chart.png" }, phase: "done", expanded: false,
+    event: { status: "completed", result } }, 34).map(stripAnsi);
+  assert.match(lines.join("\n"), /Read image/);
+  assert.match(lines.join("\n"), /First frame only/);
+  assert.ok(lines.every((line) => line.length <= 34));
+});
+
 function bashResult({ stdout = "", stderr = "", exitCode = 0, totalBytes } = {}) {
   return JSON.stringify({
     ok: true,

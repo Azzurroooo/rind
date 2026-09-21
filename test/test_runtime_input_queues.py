@@ -39,6 +39,9 @@ class RecordingSession:
     async def initialize(self):
         return None
 
+    async def persist_user_input(self, content, **kwargs):
+        await self.persist_message("user", content, **kwargs)
+
     async def persist_message(self, role, content, **kwargs):
         self.messages.append((role, content, kwargs))
 

@@ -1,3 +1,5 @@
+import { systemNoticeLine } from "./rendering.js";
+
 const SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 const SPINNER_INTERVAL_MS = 120;
 const NAME_COLUMN_MAX = 26;
@@ -96,6 +98,11 @@ export function createOneShotProgress({ stderr, stream = null } = {}) {
 
     note(text) {
       emit(`${c.dim}· ${text}${c.reset}\n`);
+      resumeSpinner();
+    },
+
+    systemNotice(text, level) {
+      emit(`${systemNoticeLine(text, { level, color: useColor })}\n`);
       resumeSpinner();
     },
 

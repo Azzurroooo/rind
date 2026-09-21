@@ -8,8 +8,32 @@ import openai
 
 from agent.domain.cancellation import CancellationTokenSource
 from agent.infrastructure.llm.cancellation import await_with_cancellation
+from agent.infrastructure.llm.cancellation import iterate_with_cancellation
 from agent.infrastructure.llm.google_generative_ai import GoogleGenerativeAIClient
 from agent.infrastructure.llm.openai_chat import OpenAIChatCompletionsClient
+
+
+@pytest.mark.asyncio
+async def test_cancel_stream_waiting_between_chunks_reclaims_iterator():
+    cancellation = CancellationTokenSource()
+    waiting, closed = asyncio.Event(), asyncio.Event()
+    before = asyncio.all_tasks()
+    async def stream():
+        try:
+            yield "first"
+            waiting.set()
+            await asyncio.Event().wait()
+        finally:
+            closed.set()
+    iterator = iterate_with_cancellation(stream(), cancellation.token)
+    assert await anext(iterator) == "first"
+    task = asyncio.create_task(anext(iterator))
+    await asyncio.wait_for(waiting.wait(), 1)
+    cancellation.cancel("stop")
+    with pytest.raises(asyncio.CancelledError):
+        await asyncio.wait_for(task, 1)
+    await iterator.aclose()
+    assert closed.is_set() and asyncio.all_tasks() == before
 
 
 @pytest.mark.asyncio

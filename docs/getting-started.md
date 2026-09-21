@@ -16,6 +16,8 @@ The npm package includes a platform-specific runtime dependency. Published targe
 
 In Rind, use `/login` to select a provider and enter an API key, then `/model` to select a model. Use `/effort` for the reasoning levels supported by the selected model. Login credentials are stored in `~/.rind/auth.json`, or under `RIND_HOME` when set.
 
+To inspect an image, ask Rind to read its local path, or send an existing `uploads/...` image reference. `/model` shows image capability. Pictures are saved with the session, so history survives source changes. See [image input](image-input.md) for supported formats and limits.
+
 ## Custom endpoint
 
 For an OpenAI-compatible Chat Completions endpoint, create `~/.rind/settings.json` with your endpoint, model ID, and key:

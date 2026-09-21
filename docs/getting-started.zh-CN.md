@@ -16,6 +16,8 @@ npm 包会依赖对应平台的预编译程序包。目前发布的平台为 Win
 
 在 Rind 中，用 `/login` 选择供应商并输入 API Key，再用 `/model` 选择模型。`/effort` 提供当前模型支持的推理级别。登录凭据保存在 `~/.rind/auth.json`；设置 `RIND_HOME` 后则保存在对应目录下。
 
+让 Rind 读取本地图片路径，或发送已有的 `uploads/...` 图片引用，即可进行图片分析。`/model` 会显示识图能力；图片快照随会话保存，原图修改或删除不会影响历史。支持 PNG/JPEG/WebP/GIF/BMP，动画读取首帧；每次请求最多 8 张图片。未知能力会提示并尝试，明确不支持时会说明图片未发送。详见[图片输入说明](image-input.md)。
+
 ## 自定义端点
 
 对于 OpenAI 兼容的 Chat Completions 端点，在 `~/.rind/settings.json` 中填写地址、模型 ID 和密钥：

@@ -68,6 +68,9 @@ def read_file(
     offset: int = 1,
     limit: int = 1000,
     _cancellation_token: CancellationToken | None = None,
+    *,
+    capture_image=None,
+    image_input: bool | None = None,
 ) -> str:
     if cancelled := _cancelled("read_file", _cancellation_token):
         return cancelled
@@ -94,6 +97,22 @@ def read_file(
     try:
         with file_path.open("rb") as raw_file:
             sample = raw_file.read(8192)
+        from agent.infrastructure.images import is_image_file
+        from agent.domain.errors import ProviderError
+
+        if is_image_file(file_path, sample):
+            if offset != 1 or requested_limit != 1000:
+                return tool_error("read_file", "Image reads do not accept line pagination. Omit offset and limit.", "InvalidImagePagination")
+            if image_input is False:
+                return tool_error("read_file", "The current model does not support images. Select a vision model.", "ImageInputUnsupported")
+            if capture_image is None:
+                return tool_error("read_file", "Image reading requires an active session.", "ImageSessionRequired")
+            try:
+                attachment, note = capture_image(str(file_path), _cancellation_token)
+            except ProviderError as exc:
+                return tool_error("read_file", str(exc), exc.code)
+            description = f"Read image: {file_path.name} · {attachment['width']}x{attachment['height']} · {attachment['mime_type']}"
+            return tool_ok("read_file", description + (f"\n{note}" if note else ""), attachments=[attachment])
         if _looks_binary(sample):
             return tool_error("read_file", f"Binary file cannot be read as text: {path}", "BinaryFile")
 

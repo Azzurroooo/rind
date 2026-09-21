@@ -35,6 +35,7 @@ class NormalizedToolResult:
     model_content: str
     model_content_format: str = "tool_result_v2"
     model_content_policy: dict[str, Any] = field(default_factory=dict)
+    attachments: list[dict] = field(default_factory=list)
 
 
 class ToolResultNormalizer:
@@ -62,6 +63,7 @@ class ToolResultNormalizer:
         call_id: str = "",
     ) -> NormalizedToolResult:
         payload = self._canonicalize(self._compress_empty_bash_output_poll(self._parse_json(result_payload)))
+        attachments = payload.pop("attachments", []) if isinstance(payload, dict) else []
         rendered = payload if isinstance(payload, str) else json.dumps(payload, ensure_ascii=False, separators=(",", ": "))
         if isinstance(payload, str):
             payload = self._parse_json(payload)
@@ -106,6 +108,7 @@ class ToolResultNormalizer:
             terminal_content=terminal_content,
             model_content=model_content,
             model_content_policy={"truncated": model_content != rendered},
+            attachments=attachments,
         )
 
     def _project_by_bytes(

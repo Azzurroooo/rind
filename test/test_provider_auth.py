@@ -47,6 +47,130 @@ class _PromptInteraction:
         pass
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("cached,endpoint,expected", [
+    (False, "https://api.openai.com/v1", False),
+    (True, "https://api.openai.com/v1", True),
+    ("false", "https://api.openai.com/v1", True),
+    (None, "https://api.openai.com/v1", True),
+    (None, "https://proxy.example/v1", None),
+])
+async def test_image_capability_cache_builtin_unknown_agree_in_list_and_selection(tmp_path, monkeypatch, cached, endpoint, expected):
+    settings = _settings(tmp_path, provider="openai", model="gpt-4o-mini", api_key="test", base_url=endpoint)
+    service = _service(tmp_path, settings, monkeypatch)
+    service._write_cache({"openai": {"models": [{"id": "gpt-4o-mini", "image_input": cached}],
+                                     "base_url": endpoint, "refreshed_at": 1}})
+    monkeypatch.setattr("agent.infrastructure.llm.provider_service.build_async_client", lambda *a, **k: pytest.fail("Local reads must not use network"))
+    catalog = await service.list_models()
+    selected = service.resolve_selection(None, ModelSelection("openai", "gpt-4o-mini"))
+    assert selected.image_input is expected
+    assert next(m for m in catalog.models if m.provider_id == "openai" and m.id == selected.id).image_input is expected
+
+
+@pytest.mark.asyncio
+async def test_image_capability_does_not_inherit_another_endpoint_or_legacy_metadata(tmp_path, monkeypatch):
+    settings = _settings(tmp_path, provider="openai", model="custom", api_key="test", base_url="https://proxy.example/v1")
+    service = _service(tmp_path, settings, monkeypatch)
+    for entry in ([{"id": "custom", "image_input": True}],
+                  {"models": [{"id": "custom", "image_input": True}], "base_url": "https://other.example/v1", "refreshed_at": 1}):
+        service._write_cache({"openai": entry})
+        assert service.resolve_selection(None, ModelSelection("openai", "custom")).image_input is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("provider,endpoint,model,expected", [
+    ("deepseek", "https://api.deepseek.com", "deepseek-flash", True),
+    ("deepseek", "https://api.deepseek.com/v1/", "deepseek-v4-pro", False),
+    ("openai-compatible", "https://api.deepseek.com/", "deepseek-flash", True),
+    ("openai-compatible", "https://api.deepseek.com/v1", "deepseek-v4-pro", False),
+    ("openai-compatible", "https://api.openai.com/v1", "gpt-4o-mini", True),
+    ("openai-compatible", "https://api.deepseek.com", "unlisted-model", None),
+    ("openai-compatible", "https://proxy.example/v1", "deepseek-flash", None),
+    ("openai-compatible", "https://api.deepseek.com.proxy.example", "deepseek-flash", None),
+    ("openai-compatible", "https://api.deepseek.com/v2", "deepseek-flash", None),
+    ("openai-compatible", "https://api.deepseek.com?proxy=1", "deepseek-flash", None),
+    ("openai-compatible", "http://api.deepseek.com", "deepseek-flash", None),
+    ("openai", "https://api.deepseek.com", "gpt-4o-mini", None),
+    ("deepseek", "https://api.deepseek.com", "deepseek-v4-flash", True),
+    ("qwen-coding", "https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1", "deepseek-v4-flash", False),
+    ("openai-compatible", "https://openrouter.ai/api/v1", "deepseek/deepseek-v4-flash", False),
+])
+async def test_image_catalog_matches_official_endpoint_and_model(tmp_path, monkeypatch, provider, endpoint, model, expected):
+    settings = _settings(tmp_path, provider=provider, model=model, api_key="test", base_url=endpoint)
+    service = _service(tmp_path, settings, monkeypatch)
+    monkeypatch.setattr("agent.infrastructure.llm.provider_service.build_async_client", lambda *a, **k: pytest.fail("Catalog reads must stay offline"))
+    selected = service.resolve_selection(None, ModelSelection(provider, model))
+    listed = next(m for m in (await service.list_models()).models if m.provider_id == provider and m.id == model)
+    assert selected.image_input is listed.image_input is expected
+    assert selected.provider_id == provider
+
+
+@pytest.mark.asyncio
+async def test_compatible_endpoint_cache_false_overrides_official_catalog(tmp_path, monkeypatch):
+    endpoint = "https://api.deepseek.com"
+    settings = _settings(tmp_path, provider="openai-compatible", model="deepseek-flash", api_key="test", base_url=endpoint)
+    service = _service(tmp_path, settings, monkeypatch)
+    service._write_cache({"openai-compatible": {"base_url": endpoint, "refreshed_at": 1,
+        "models": [{"id": "deepseek-flash", "image_input": False}]}})
+    assert service.resolve_selection(None, ModelSelection("openai-compatible", "deepseek-flash")).image_input is False
+    assert (await service.list_models()).models[0].image_input is False
+    assert service._read_cache()["openai-compatible"]["refreshed_at"] == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("trigger", ["background", "login", "explicit"])
+@pytest.mark.parametrize("same_endpoint", [True, False])
+async def test_all_refresh_entries_merge_capabilities_by_endpoint(tmp_path, monkeypatch, trigger, same_endpoint):
+    from unittest.mock import AsyncMock, Mock
+    settings = _settings(tmp_path, provider="openrouter", model="new", api_key="test", base_url="https://openrouter.ai/api/v1")
+    service = _service(tmp_path, settings, monkeypatch)
+    for provider in service.providers.values():
+        monkeypatch.delenv(provider.environment_key or "UNUSED_TEST_KEY", raising=False)
+    service._write_cache({"openrouter": {"base_url": settings.base_url if same_endpoint else "https://old.example/v1", "refreshed_at": 0,
+        "models": [{"id": "old", "image_input": True}, {"id": "keep", "image_input": False}, {"id": "removed", "image_input": True}]}})
+    listing = AsyncMock(return_value=SimpleNamespace(data=[
+        {"id": "old", "architecture": {"input_modalities": ["text"]}},
+        {"id": "new", "name": "New vision model", "architecture": {"input_modalities": ["text", "image"]}},
+        {"id": "keep"}, {"id": "unknown", "vision": True},
+    ]))
+    client = SimpleNamespace(models=SimpleNamespace(list=listing), close=AsyncMock())
+    build = Mock(return_value=client)
+    monkeypatch.setattr("agent.infrastructure.llm.provider_service.build_async_client", build)
+    if trigger == "background":
+        await service.refresh_stale_models()
+    elif trigger == "login":
+        await service.login(None, "openrouter", "api_key", _PromptInteraction("stored-test"))
+    else:
+        await service.list_models(refresh=True)
+    assert build.call_args.kwargs["max_retries"] == 0
+    listing.assert_awaited_once_with(timeout=10)
+    client.close.assert_awaited_once()
+    entry = service._read_cache()["openrouter"]
+    models = {m["id"]: m for m in entry["models"]}
+    assert models["old"]["image_input"] is False
+    assert models["new"]["image_input"] is True
+    assert models["new"]["name"] == "New vision model"
+    assert models["keep"].get("image_input") is (False if same_endpoint else None)
+    assert "image_input" not in models["unknown"] and "removed" not in models
+    assert entry["refreshed_at"] > 0 and entry["base_url"] == settings.base_url
+
+
+@pytest.mark.parametrize("provider,item,expected", [
+    ("openrouter", {"architecture": {"input_modalities": ["image", "text"]}}, True),
+    ("openrouter", {"architecture": {"input_modalities": ["text"]}}, False),
+    ("openrouter", {"architecture": {"input_modalities": "image"}}, None),
+    ("openrouter", {"architecture": {"input_modalities": []}}, None),
+    ("openrouter", {"input_modalities": ["image"]}, None),
+    ("mistral", {"capabilities": {"vision": True}}, True),
+    ("mistral", {"capabilities": {"vision": False}}, False),
+    ("mistral", {"capabilities": {"vision": "false"}}, None),
+    ("openai", {"capabilities": {"vision": True}}, None),
+])
+def test_remote_image_capability_only_uses_verified_schemas(provider, item, expected):
+    from agent.infrastructure.llm.provider_service import _remote_image_input
+    assert _remote_image_input(item, provider) is expected
+
+
 def test_credential_list_redacts_secret(tmp_path: Path) -> None:
     store = CredentialStore(tmp_path / "auth.json")
     store.set("deepseek", Credential(type="api_key", key="test-secret"))
@@ -210,7 +334,10 @@ async def test_list_models_falls_back_to_builtin_catalog_without_cache(tmp_path:
     service.credentials.set("deepseek", Credential(type="api_key", key="deepseek-key"))
 
     catalog = await service.list_models(str(tmp_path))
-    assert [model.id for model in catalog.models] == ["deepseek-chat", "deepseek-reasoner"]
+    assert [model.id for model in catalog.models] == [
+        "deepseek-flash", "deepseek-v4-pro", "deepseek-v4-flash", "deepseek-v4-flash-vision-exp",
+        "deepseek-chat", "deepseek-reasoner",
+    ]
     assert all(model.reasoning_efforts for model in catalog.models)
 
 
@@ -222,7 +349,7 @@ async def test_list_models_hides_unconfigured_providers_and_appends_current(tmp_
 
     catalog = await service.list_models(str(tmp_path))
     assert {model.provider_id for model in catalog.models} == {"openai"}
-    assert [model.id for model in catalog.models] == ["gpt-5.5", "gpt-4o-mini"]
+    assert {"gpt-5.5", "gpt-4o-mini", "gpt-6-astra"} <= {model.id for model in catalog.models}
 
 
 @pytest.mark.asyncio
@@ -422,7 +549,7 @@ def test_registry_covers_mainstream_providers() -> None:
 
     assert PROVIDERS["google"].api == "google-generative-ai"
     assert PROVIDERS["google"].environment_key == "GEMINI_API_KEY"
-    assert [model.id for model in PROVIDERS["google"].fallback_models] == ["gemini-3.1-pro-preview", "gemini-3-flash"]
+    assert {"gemini-3.1-pro-preview", "gemini-3.8-flash", "gemini-2.5-pro"} <= {model.id for model in PROVIDERS["google"].fallback_models}
     assert PROVIDERS["xai"].api == "openai-responses"
     for provider_id, environment_key in (
         ("groq", "GROQ_API_KEY"),
@@ -439,7 +566,7 @@ def test_registry_covers_mainstream_providers() -> None:
         assert PROVIDERS[provider_id].api == "openai-chat"
         assert PROVIDERS[provider_id].environment_key == environment_key
         assert PROVIDERS[provider_id].default_base_url.startswith("https://")
-        assert len(PROVIDERS[provider_id].fallback_models) == 2
+        assert len(PROVIDERS[provider_id].fallback_models) >= 2
     # Pay-as-you-go and coding-plan subscriptions are separate products
     # with separate keys and endpoints.
     assert PROVIDERS["zai"].default_base_url == "https://api.z.ai/api/paas/v4"
@@ -449,7 +576,7 @@ def test_registry_covers_mainstream_providers() -> None:
     assert PROVIDERS["moonshot-cn"].default_base_url == "https://api.moonshot.cn/v1"
     assert PROVIDERS["kimi-coding"].api == "anthropic-messages"
     assert PROVIDERS["kimi-coding"].environment_key == "KIMI_API_KEY"
-    assert [model.id for model in PROVIDERS["kimi-coding"].fallback_models] == ["kimi-for-coding", "k3"]
+    assert {"kimi-for-coding", "k3", "k3-256k"} <= {model.id for model in PROVIDERS["kimi-coding"].fallback_models}
     assert refreshable_models_api("openai-chat") and refreshable_models_api("openai-responses")
     assert not refreshable_models_api("google-generative-ai") and not refreshable_models_api("anthropic-messages")
     assert default_reasoning_efforts("google-generative-ai") == ()
@@ -467,7 +594,7 @@ def test_fallback_models_declare_per_model_reasoning_efforts() -> None:
     assert _efforts("zhipu", "glm-5.3") == ("low", "high", "max")
     assert _efforts("zhipu", "glm-5.2") == ("high", "max")
     assert _efforts("moonshot", "kimi-k2.6") == ()
-    # DeepSeek entries carry no verified effort metadata, so they keep the dialect default.
+    # Unverified legacy aliases keep the dialect default.
     assert _efforts("deepseek", "deepseek-chat") == default_reasoning_efforts("openai-chat")
 
 

@@ -53,8 +53,13 @@ def project_messages(
                 "tool_call_id": tool_call_id,
                 "content": _build_tool_content(tool_map.get(str(tool_call_id))),
             }
+            if "attachments" in message:
+                projected["attachments"] = message["attachments"]
             if include_ids and message.get("id"):
                 projected["id"] = str(message["id"])
+            record = tool_map.get(str(tool_call_id)) or {}
+            if record.get("attachments"):
+                projected["attachments"] = record["attachments"]
             built_messages.append(projected)
             if tool_call_id:
                 emitted_tool_call_ids.add(str(tool_call_id))
@@ -81,6 +86,8 @@ def project_messages(
             projected = {"role": role, "content": message.get("content", "")}
             if role == "system":
                 projected["content"] = refresh_builtin_file_rules(projected["content"])
+            if "attachments" in message:
+                projected["attachments"] = message["attachments"]
             if include_ids and message.get("id"):
                 projected["id"] = str(message["id"])
             if role == "assistant":
@@ -261,6 +268,8 @@ def _missing_tool_messages(
             continue
         content = _build_tool_content(tool_record)
         item = {"role": "tool", "tool_call_id": tool_call_id, "content": content}
+        if tool_record.get("attachments"):
+            item["attachments"] = tool_record["attachments"]
         if include_ids and tool_record.get("id"):
             item["id"] = str(tool_record["id"])
         missing.append(item)

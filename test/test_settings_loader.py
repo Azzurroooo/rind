@@ -1,6 +1,8 @@
 import json
 import sys
 from pathlib import Path
+import pytest
+
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
@@ -15,6 +17,11 @@ from agent.infrastructure.settings import (
     project_settings_path,
 )
 from agent.version import __version__
+
+
+@pytest.fixture(autouse=True)
+def ignore_inherited_rind_home(monkeypatch):
+    monkeypatch.delenv("RIND_HOME", raising=False)
 
 
 def write_settings(home: Path, data: dict) -> Path:

@@ -370,6 +370,9 @@ taskMonitorController = createTaskMonitorController({
 });
 const eventController = createEventController({
   state: {
+    get sessionInfo() {
+      return sessionState.info;
+    },
     get runtimeClosing() {
       return runtimeState.status === "closing";
     },

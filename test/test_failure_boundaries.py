@@ -69,7 +69,7 @@ def test_boundary_statuses_are_serializable_and_distinct():
 
 
 def test_provider_error_classification_and_boundary_sources():
-    client = OpenAIChatCompletionsClient(object(), "model")
-    assert client._provider_error(TimeoutError("deadline")).status == "timed_out"
+    from agent.infrastructure.llm.errors import provider_error
+    assert provider_error(TimeoutError("deadline")).status == "timed_out"
     assert ProviderError("offline", status="unavailable").source == "provider"
     assert PersistenceError("disk").source == "persistence"

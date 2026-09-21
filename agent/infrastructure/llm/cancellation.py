@@ -31,3 +31,13 @@ async def close_resource(resource) -> None:
         result = close()
         if inspect.isawaitable(result):
             await result
+
+
+async def iterate_with_cancellation(stream, cancellation_token: CancellationToken | None):
+    iterator = aiter(stream)
+    while True:
+        try:
+            item = await await_with_cancellation(anext(iterator), cancellation_token)
+        except StopAsyncIteration:
+            return
+        yield item

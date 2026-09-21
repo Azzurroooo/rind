@@ -4,6 +4,7 @@ import {
   contextBuiltLine,
   errorLine,
   planUpdatedLine,
+  systemNoticeLine,
   turnCompletedLine,
 } from "./rendering.js";
 
@@ -15,6 +16,7 @@ export function createEventController({
 }) {
   const pendingFileChanges = new Map();
   const pendingPlanInputs = new Map();
+  const imageNotices = new Map();
   let toolStats = { completed: 0, failed: 0 };
 
   async function handle(message) {
@@ -43,6 +45,20 @@ export function createEventController({
         return;
       }
       case "context_built": {
+        const session = message.session_id || event.session_id || state.sessionInfo?.session_id || "";
+        const model = JSON.stringify([state.sessionInfo?.provider, state.sessionInfo?.model, state.sessionInfo?.base_url]);
+        if (imageNotices.get(session)?.model !== model) imageNotices.delete(session);
+        const decisions = event.decisions;
+        if (decisions?.image_notice) {
+          const level = decisions.image_notice_level || "info";
+          const images = decisions.image_notice_images || [];
+          const previous = imageNotices.get(session);
+          if (!previous || previous.level !== level || images.some((path) => !previous.images.has(path))) {
+            output.closeAssistant?.();
+            output.log?.(() => systemNoticeLine(String(decisions.image_notice), { level }));
+          }
+          imageNotices.set(session, { model, level, images: new Set([...(previous?.images || []), ...images]) });
+        }
         if (output.handleContextBuilt?.(event)) {
           output.resetContextUsage?.();
         }

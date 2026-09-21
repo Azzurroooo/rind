@@ -448,6 +448,7 @@ class ExecutionCoordinator:
                         reasoning_effort=selection.reasoning_effort,
                     ),
                     chat_client=chat_client,
+                    image_input=self._provider_service.resolve_selection(root, selection, settings=settings).image_input,
                     session_dir=self.session_dir,
                     session_id=clean,
                     session_store=self._repository.draft_store(clean),
@@ -516,6 +517,7 @@ class ExecutionCoordinator:
                 container = build_agent_container(
                     settings=settings,
                     chat_client=chat_client,
+                    image_input=self._provider_service.resolve_selection(str(target.workspace_root), selection, settings=settings).image_input,
                     session_dir=session_dir,
                     enable_goal=False,
                     enable_user_question=False,

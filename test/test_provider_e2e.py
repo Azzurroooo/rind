@@ -226,12 +226,13 @@ def test_google_login_static_catalog_and_tool_turn_journey(tmp_path: Path):
         server.send(prompt["request_id"], "rind/auth/prompt", {"value": "e2e-gemini-key"})
         login = server.response("login")
         assert login["result"]["ok"] is True
-        assert login["result"]["models_count"] == 2  # static catalog; Gemini has no OpenAI-style /models
+        assert login["result"]["models_count"] == 8  # static catalog; Gemini has no OpenAI-style /models
         assert login["result"]["selection"] is None
 
         server.send("models", "model/list", {"session_id": initialize["result"]["session_id"]})
         models = server.response("models")["result"]
-        assert [model["id"] for model in models["models"]] == ["gemini-3.1-pro-preview", "gemini-3-flash"]
+        assert {"gemini-3.1-pro-preview", "gemini-3.8-flash", "gemini-2.5-pro"} <= {model["id"] for model in models["models"]}
+        assert all(model["image_input"] is None for model in models["models"])  # local fake endpoint
 
         server.send("turn", "session/prompt", {
             "session_id": initialize["result"]["session_id"],

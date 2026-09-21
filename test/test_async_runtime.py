@@ -173,6 +173,9 @@ async def test_async_runtime_facade_emits_turn_started_first():
         async def initialize(self):
             return None
 
+        async def persist_user_input(self, content, **kwargs):
+            await self.persist_message("user", content, **kwargs)
+
         async def persist_message(self, role, content, **kwargs):
             self.persisted.append((role, content, kwargs))
 
@@ -213,6 +216,9 @@ async def test_async_runtime_holds_the_workspace_lock_for_the_entire_turn():
 
         async def initialize(self):
             return None
+
+        async def persist_user_input(self, content, **kwargs):
+            await self.persist_message("user", content, **kwargs)
 
         async def persist_message(self, role, content, **kwargs):
             return None
@@ -259,6 +265,9 @@ async def test_async_runtime_persists_terminal_turn_state():
         async def initialize(self):
             return None
 
+        async def persist_user_input(self, content, **kwargs):
+            await self.persist_message("user", content, **kwargs)
+
         async def persist_message(self, role, content, **kwargs):
             return None
 
@@ -303,6 +312,9 @@ async def test_async_runtime_facade_passes_transient_system_messages():
 
         async def initialize(self):
             return None
+
+        async def persist_user_input(self, content, **kwargs):
+            await self.persist_message("user", content, **kwargs)
 
         async def persist_message(self, role, content, **kwargs):
             self.persisted.append((role, content, kwargs))
@@ -353,6 +365,9 @@ async def test_async_runtime_completes_one_turn_with_active_goal_unchanged():
 
         async def initialize(self):
             return None
+
+        async def persist_user_input(self, content, **kwargs):
+            await self.persist_message("user", content, **kwargs)
 
         async def persist_message(self, role, content, **kwargs):
             self.persisted.append((role, content, kwargs))
@@ -411,6 +426,9 @@ async def test_async_runtime_delivers_follow_up_before_goal_continuation():
 
         async def initialize(self):
             return None
+
+        async def persist_user_input(self, content, **kwargs):
+            await self.persist_message("user", content, **kwargs)
 
         async def persist_message(self, role, content, **kwargs):
             self.persisted.append((role, content, kwargs))
@@ -476,6 +494,9 @@ async def test_async_runtime_facade_initializes_session_once_for_concurrent_turn
         async def initialize(self):
             self.initialize_calls += 1
             await asyncio.sleep(0)
+
+        async def persist_user_input(self, content, **kwargs):
+            await self.persist_message("user", content, **kwargs)
 
         async def persist_message(self, role, content, **kwargs):
             self.persisted.append((role, content, kwargs))
@@ -588,6 +609,9 @@ async def test_async_turn_runner_emits_tool_requested_before_tool_execution():
         def now_iso(self):
             return "2026-05-08T00:00:00Z"
 
+        async def persist_user_input(self, content, **kwargs):
+            await self.persist_message("user", content, **kwargs)
+
         async def persist_message(self, *args, **kwargs):
             self.persisted.append((args, kwargs))
 
@@ -668,6 +692,9 @@ async def test_async_turn_runner_emits_plan_snapshot_before_plan_execution():
 
         def now_iso(self):
             return "2026-05-08T00:00:00Z"
+
+        async def persist_user_input(self, content, **kwargs):
+            await self.persist_message("user", content, **kwargs)
 
         async def persist_message(self, *_args, **_kwargs):
             return None
@@ -794,6 +821,9 @@ async def test_async_turn_runner_fails_after_tool_persist_failure():
         def now_iso(self):
             return "2026-05-08T00:00:00Z"
 
+        async def persist_user_input(self, content, **kwargs):
+            await self.persist_message("user", content, **kwargs)
+
         async def persist_message(self, *args, **kwargs):
             self.persisted.append((args, kwargs))
 
@@ -879,6 +909,9 @@ async def test_async_turn_runner_emits_and_persists_sampling_usage():
         def now_iso(self):
             return "2026-05-08T00:00:00Z"
 
+        async def persist_user_input(self, content, **kwargs):
+            await self.persist_message("user", content, **kwargs)
+
         async def persist_message(self, *args, **kwargs):
             return None
 
@@ -944,6 +977,9 @@ async def test_async_turn_runner_usage_persistence_failure_does_not_fail_turn():
         def now_iso(self):
             return "2026-05-08T00:00:00Z"
 
+        async def persist_user_input(self, content, **kwargs):
+            await self.persist_message("user", content, **kwargs)
+
         async def persist_message(self, *args, **kwargs):
             self.messages.append((args, kwargs))
 
@@ -1004,6 +1040,9 @@ async def test_async_turn_runner_usage_tolerates_bad_context_stats():
 
         def now_iso(self):
             return "2026-05-08T00:00:00Z"
+
+        async def persist_user_input(self, content, **kwargs):
+            await self.persist_message("user", content, **kwargs)
 
         async def persist_message(self, *args, **kwargs):
             return None
@@ -1111,6 +1150,9 @@ async def test_async_turn_runner_auto_compacts_before_sampling():
 
         async def persist_sampling_usage(self, usage):
             return None
+
+        async def persist_user_input(self, content, **kwargs):
+            await self.persist_message("user", content, **kwargs)
 
         async def persist_message(self, *args, **kwargs):
             return None
@@ -1441,6 +1483,9 @@ async def test_context_length_recovery_hard_limit_is_turn_local():
 
         async def persist_sampling_usage(self, usage):
             return None
+
+        async def persist_user_input(self, content, **kwargs):
+            await self.persist_message("user", content, **kwargs)
 
         async def persist_message(self, *args, **kwargs):
             return None

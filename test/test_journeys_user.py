@@ -475,9 +475,13 @@ def test_j5_user_question_round_trip(worker_journey, model_server):
 # --- J6: attachments and multimodal promotion -----------------------------------------------------------
 
 
-def test_j6_attachment_upload_and_image_promotion(worker_journey, model_server):
+def test_j6_attachment_upload_and_image_snapshot(worker_journey, model_server):
     worker_journey.server.script_text(["I can see this image."])
-    png = base64.b64encode(b"\x89PNG\r\n\x1a\n" + b"0" * 64).decode()
+    import io
+    from PIL import Image
+    output = io.BytesIO()
+    Image.new("RGB", (4, 4), "red").save(output, format="PNG")
+    png = base64.b64encode(output.getvalue()).decode()
 
     async def run():
         client = JourneyClient(f"{worker_journey.ws_url}?token={TOKEN}")
@@ -488,7 +492,7 @@ def test_j6_attachment_upload_and_image_promotion(worker_journey, model_server):
             "file/write",
             {"path": "uploads/web/journey.png", "content_base64": png},
         )
-        assert written["size"] == len(b"\x89PNG\r\n\x1a\n" + b"0" * 64)
+        assert written["size"] == len(output.getvalue())
 
         client.reset_cursor()
         events, response = await _run_prompt_turn(client, session_id, "look at uploads/web/journey.png")
@@ -500,7 +504,7 @@ def test_j6_attachment_upload_and_image_promotion(worker_journey, model_server):
         content = user_messages[-1]["content"]
         assert isinstance(content, list), f"image reference was not promoted to a multimodal part: {content!r}"
         assert any(
-            part.get("type") == "image_url" and part["image_url"]["url"].startswith("data:image/png;base64,")
+            part.get("type") == "image_url" and part["image_url"]["url"] == "data:image/png;base64," + png
             for part in content
         ), f"no image_url part found: {content!r}"
         await client.close()

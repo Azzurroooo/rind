@@ -161,6 +161,7 @@ export async function runOneShot({ args, python, repoRoot, runtimePath, cwd = pr
         if (type === "assistant_delta") assistant += String(event.text || "");
         if (type === "assistant_message_completed") completed = String(event.content || "");
         if (type === "turn_failed") turnFailure = String(event.error || "Provider request failed.");
+        if (type === "context_built" && event.decisions?.image_notice) progress.systemNotice(String(event.decisions.image_notice), event.decisions.image_notice_level);
         const toolCallId = String(event?.tool_call_id || "");
         const trackedId = toolCallId || (type === "tool_requested" ? `anon:${(anonymousToolCounter += 1)}` : "");
         if (trackedId && (type === "tool_requested" || type === "tool_input_started") && !progress.hasTool(trackedId)) {

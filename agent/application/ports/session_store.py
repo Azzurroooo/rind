@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 from typing import Protocol, Any
+from agent.domain.cancellation import CancellationToken
+from agent.domain.images import ImageAttachment
 
 
 class SessionStore(Protocol):
@@ -77,6 +79,12 @@ class SessionStore(Protocol):
         """Persist the effective Skill metadata catalog without changing activity timestamps."""
         ...
 
+    def capture_image(self, path: str, cancellation_token: CancellationToken | None = None) -> tuple[ImageAttachment, str]: ...
+
+    async def load_image(self, attachment: ImageAttachment) -> bytes: ...
+
+    async def persist_user_input(self, content: str, *, meta: dict | None = None) -> None: ...
+
     async def persist_message(
         self,
         role: str,
@@ -85,6 +93,7 @@ class SessionStore(Protocol):
         tool_name: str | None = None,
         meta: dict[str, Any] | None = None,
         reasoning_content: str | None = None,
+        attachments: list[dict] | None = None,
     ) -> None:
         """Persist a single chat message asynchronously."""
         ...
@@ -101,6 +110,7 @@ class SessionStore(Protocol):
         model_content: str,
         model_content_format: str | None = None,
         model_content_policy: dict[str, Any] | None = None,
+        attachments: list[dict] | None = None,
     ) -> None:
         """Persist tool call execution details asynchronously."""
         ...

@@ -23,7 +23,7 @@ flowchart TB
 - `infrastructure` implements the LLM, the JSONL session store, tool registration, config, and workspace integration.
 - `bootstrap` is the only production composition root; the Server obtains its dependencies through `build_agent_container()`.
 
-`runtime/core` imports neither `runtime/server`, `bootstrap`, nor concrete infrastructure. The server calls core in the same process. `prompts.py` is the single prompt entry and receives environment text explicitly; `infrastructure/environment.py` probes the host. The container injects workspace image promotion into the runner. Team delegation receives its session runner explicitly and does not import bootstrap.
+`runtime/core` imports neither `runtime/server`, `bootstrap`, nor concrete infrastructure. The server calls core in the same process. `prompts.py` is the single prompt entry and receives environment text explicitly; `infrastructure/environment.py` probes the host. The container injects session image capture into file tools and the common attachment loader into normal and compact requests. Team delegation receives its session runner explicitly and does not import bootstrap.
 
 ## Runtime Package
 
@@ -60,6 +60,17 @@ endpoint differs. Legacy list entries remain readable but expire immediately.
 Configured providers with a supported list API use a ten-second request deadline
 without SDK retries. Failed or empty responses preserve the cache. Login and explicit
 refresh use the same query path regardless of cache age; no periodic refresh runs.
+
+Models expose `image_input: true | false | null` in `model/list`. Matching endpoint
+cache values override verified built-in values at official endpoints; everything
+else stays unknown. Execution uses the same resolver with its loaded settings.
+`context_built.decisions.image_notice`, when present, is a user-facing image
+notice emitted once per turn, with `image_notice_level` (`info` or `warning`)
+and `image_notice_images` (snapshot paths). The CLI displays an indented system
+notice and suppresses repeats for the same session/model and previously seen
+images in its current process;
+`rind run` writes it to stderr. See [image input](image-input.md) for storage,
+provider wire contracts, capability sources and verification limits.
 
 The protocol is defined in `agent/runtime/server/protocol.py`, mirrored for the frontend in `frontend-cli/lib/runtime-protocol.js`, and the Desktop allowlist of methods derives from `desktop/src/preload/types.ts`. Common methods use standard semantics:
 
