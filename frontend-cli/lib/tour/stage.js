@@ -3,7 +3,7 @@ import { graphemes } from "../text-width.js";
 // Pure presentation state machine for a tour page. Steps go in as plain data;
 // snapshot() comes out as plain data, so any settled step index can be replayed
 // deterministically via rebuildTo() and compared with the animated path.
-export function createTourStage() {
+export function createTourStage({ version } = {}) {
   let shell = { blocks: [], typing: null };
   let rind = null;
   let caption = null;
@@ -55,7 +55,7 @@ export function createTourStage() {
         shell.blocks.push({ kind: "output", lines: step.lines, shown: 0 });
         break;
       case "startup":
-        rind = { info: step.info, blocks: [], composer: emptyComposer() };
+        rind = { info: { ...step.info, ...(version ? { version } : {}) }, blocks: [], composer: emptyComposer() };
         break;
       case "type": {
         const composer = ensureRind().composer;
