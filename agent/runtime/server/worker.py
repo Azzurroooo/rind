@@ -121,6 +121,7 @@ class RuntimeWorker:
 
     async def delete_session(self, session_id: str) -> dict[str, Any]:
         clean = validate_session_id(session_id)
+        self.execution.interrupt(clean, "Session deleted")
         await self.execution.release(clean)
         await self.shell_tools.close_session(clean)
         return await self.repository.delete(clean)

@@ -90,7 +90,11 @@ class ToolResultNormalizer:
             include_notice=False,
             metadata=source_metadata,
         )
-        if read_payload is not None:
+        is_task = isinstance(payload, dict) and isinstance(payload.get("data"), dict) and payload["data"].get("task_id")
+        if is_task:
+            model_content = self._project_task(payload, self.max_preview_bytes, output_path)
+            terminal_content = self._project_task(payload, self.terminal_max_bytes, output_path)
+        elif read_payload is not None:
             model_content = self._project_read_for_model(read_payload)
             if json.loads(model_content).get("ok") is False:
                 terminal_content = model_content
@@ -110,6 +114,24 @@ class ToolResultNormalizer:
             model_content_policy={"truncated": model_content != rendered},
             attachments=attachments,
         )
+
+    def _project_task(self, payload: dict, limit: int, output_path: str | None) -> str:
+        data = {k: v for k, v in payload["data"].items() if k != "records"}
+        meta = dict(payload.get("meta", {}))
+        projected = {**payload, "data": data, "meta": meta}
+        def render():
+            return json.dumps(projected, ensure_ascii=False, separators=(",", ":"))
+        text = render()
+        while (len(text.encode("utf-8")) > limit or text.count("\\n") > self.max_preview_lines) and (data.get("stdout") or data.get("stderr")):
+            key = max(("stdout", "stderr"), key=lambda k: len(data.get(k, "")))
+            data[key] = data.get(key, "")[:len(data.get(key, "")) // 2]
+            data.pop("next_cursor", None)
+            meta["truncated"] = True
+            if output_path:
+                meta["output_path"] = output_path
+            meta["paging_notice"] = "Preview was shortened. Read the output_path with file paging, or restart task_control read from start_cursor with a smaller max_output_chars."
+            text = render()
+        return text
 
     def _project_by_bytes(
         self,

@@ -20,6 +20,8 @@ class ProcessRecord:
     shell_backend: str
     shell_executable: str | None
     call_id: str = ""
+    origin_turn_id: str = ""
+    request_id: str | None = None
     notify: str = "on_exit"
     process: asyncio.subprocess.Process | None = None
     status: str = "starting"
@@ -30,6 +32,7 @@ class ProcessRecord:
     stderr: StreamCapture = field(default_factory=StreamCapture)
     exit_code: int | None = None
     last_output_at: float = field(default_factory=time.monotonic)
+    last_output_event_at: float = 0
     finished: asyncio.Event = field(default_factory=asyncio.Event)
     started: asyncio.Event = field(default_factory=asyncio.Event)
     waiters: set[asyncio.Event] = field(default_factory=set)

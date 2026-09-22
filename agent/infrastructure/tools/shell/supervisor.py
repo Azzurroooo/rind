@@ -27,11 +27,15 @@ class ProcessSupervisor:
         self._origins: dict[tuple[str, str], str] = {}
         self._closed = False
         self.journal = journal
+        self._observer = None
+
+    def set_observer(self, observer) -> None:
+        self._observer = observer
 
     async def run(self, command: str, state: ShellState, session_id: str,
                   cancellation_token: CancellationToken | None = None, *, call_id: str = "",
                   output_store=None, yield_time_ms: int = 10000, timeout_ms: int | None = None,
-                  notify: str = "on_exit") -> ToolExecutionResult:
+                  notify: str = "on_exit", origin_turn_id: str = "", request_id: str | None = None) -> ToolExecutionResult:
         self._retire_finished()
         origin = (session_id, call_id)
         existing_id = self._origins.get(origin) if call_id else None
@@ -45,7 +49,8 @@ class ProcessSupervisor:
             return ToolExecutionResult(status="error", error_type="TaskLimitExceeded", error_msg=f"Running task limit reached ({self.max_tasks}).")
         record = ProcessRecord(task_id=f"task_{uuid.uuid4().hex}", session_id=session_id,
             command=command, cwd=state.cwd, shell_backend=state.shell_backend,
-            shell_executable=state.shell_executable, call_id=call_id, notify=notify)
+            shell_executable=state.shell_executable, call_id=call_id, notify=notify,
+            origin_turn_id=origin_turn_id, request_id=request_id)
         self._processes[record.task_id] = record
         if call_id:
             self._origins[origin] = record.task_id
@@ -163,7 +168,9 @@ class ProcessSupervisor:
             snapshot["pid"] = record.process.pid
         if record.status in TERMINAL_STATES:
             snapshot["event_id"] = f"{record.task_id}:1"
-        await self.journal.save(record.session_id, snapshot)
+        saved = await self.journal.save(record.session_id, snapshot)
+        if self._observer:
+            self._observer(saved)
 
     @staticmethod
     def _stored_result(tool, snapshot):
@@ -258,6 +265,10 @@ class ProcessSupervisor:
             if record.output:
                 await record.output.append(stream_name, raw, text)
             record.last_output_at = time.monotonic()
+            if self._observer and record.last_output_at - record.last_output_event_at >= 0.1:
+                record.last_output_event_at = record.last_output_at
+                self._observer({**task_snapshot(record), "type": "task_output",
+                    "stdout": record.stdout.render()[-2000:], "stderr": record.stderr.render()[-2000:]})
         text = decoder.decode(b"", True)
         capture.append(b"", text)
         if text and record.output:

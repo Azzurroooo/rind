@@ -6,6 +6,7 @@ import json
 import shutil
 import tempfile
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 from pathlib import Path
 
 from agent.infrastructure.settings import AppSettings
@@ -638,7 +639,7 @@ def test_worker_replays_answer_received_before_question_responder_waits():
     async def run():
         execution = ExecutionCoordinator(
             shared_resources=SimpleNamespace(),
-            shell_tools=SimpleNamespace(),
+            shell_tools=SimpleNamespace(supervisor=SimpleNamespace(journal=SimpleNamespace(records=AsyncMock(return_value={})), set_observer=lambda callback: None)),
             web_sessions=SimpleNamespace(),
             repository=SimpleNamespace(),
             debug=False,
@@ -684,7 +685,7 @@ def test_worker_goal_continuation_persists_distinct_checkpoints():
 
         execution = Execution(
             shared_resources=SimpleNamespace(),
-            shell_tools=SimpleNamespace(),
+            shell_tools=SimpleNamespace(supervisor=SimpleNamespace(journal=SimpleNamespace(records=AsyncMock(return_value={})), set_observer=lambda callback: None)),
             web_sessions=SimpleNamespace(),
             repository=repository,
             debug=False,
@@ -699,6 +700,8 @@ def test_worker_goal_continuation_persists_distinct_checkpoints():
         async def run_turn(_session_id, **kwargs):
             turn_id = f"turn-{len(turns) + 1}"
             turns.append(kwargs)
+            if kwargs.get("checkpoint"):
+                await Store().persist_message("user", kwargs["checkpoint"], meta={"kind": "goal_checkpoint"})
             events.append({"type": "turn_started", "session_id": "session-a", "turn_id": turn_id})
             yield events[-1]
             terminal = {"type": "turn_completed", "session_id": "session-a", "turn_id": turn_id}
@@ -713,7 +716,7 @@ def test_worker_goal_continuation_persists_distinct_checkpoints():
         execution.run_turn = run_turn
         execution.add_event_sink(sink)
         started = await execution.start_goal_continuation("session-a")
-        await next(iter(execution._goal_tasks.values()))
+        await next(iter(execution._continuations.values()))
         return started, turns, events, repository.goal, repository.checkpoints
 
     started, turns, events, goal, checkpoints = asyncio.run(run())

@@ -13,6 +13,8 @@ def task_snapshot(record: ProcessRecord) -> dict:
         "task_id": record.task_id,
         "owner_session_id": record.session_id,
         "origin_tool_call_id": record.call_id,
+        "origin_turn_id": record.origin_turn_id,
+        "request_id": record.request_id,
         "command": record.command,
         "cwd": record.cwd,
         "shell_backend": record.shell_backend,

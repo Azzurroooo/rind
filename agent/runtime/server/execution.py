@@ -9,8 +9,10 @@ from dataclasses import dataclass, field, replace
 import inspect
 import json
 import tempfile
+import uuid
 from typing import Any
 
+from agent.application.task_notifications import TaskNotifications, pending_notification, TERMINAL_STATES
 from agent.bootstrap import AgentContainer, SharedRuntimeResources, build_agent_container
 from agent.domain.cancellation import CancellationTokenSource
 from agent.domain.events import UserQuestionRequestedEvent
@@ -31,6 +33,14 @@ class _ActiveExecution:
     current_cancel: CancellationTokenSource | None = None
     pending_answers: dict[str, asyncio.Future[str]] = field(default_factory=dict)
     queued_turn_starts: int = 0
+
+
+@dataclass(slots=True)
+class _RequestScope:
+    request_id: str = field(default_factory=lambda: uuid.uuid4().hex)
+    changed: asyncio.Event = field(default_factory=asyncio.Event)
+    answer: str = ""
+    error: str = ""
 
 
 class ExecutionCoordinator:
@@ -59,7 +69,15 @@ class ExecutionCoordinator:
         self.session_dir = session_dir
         self._active: dict[str, _ActiveExecution] = {}
         self._live: dict[str, dict[str, Any]] = {}
-        self._goal_tasks: dict[str, asyncio.Task] = {}
+        self._continuations: dict[str, asyncio.Task] = {}
+        self._suppressed: set[str] = set()
+        self._pending_wakes: set[str] = set()
+        self._scopes: dict[str, _RequestScope] = {}
+        self._task_events: dict[str, dict] = {}
+        self._task_event_pump: asyncio.Task | None = None
+        self._task_notifications = TaskNotifications(shell_tools.supervisor.journal, self.task_changed,
+            lambda sid: self._scopes[sid].request_id if sid in self._scopes else None)
+        shell_tools.supervisor.set_observer(self.task_changed)
         self._event_sinks: list[Callable[[dict[str, Any]], Awaitable[None] | None]] = []
         self._closed = False
         self._provider_service = provider_service
@@ -83,61 +101,123 @@ class ExecutionCoordinator:
             if inspect.isawaitable(sink_result):
                 await sink_result
 
+    def task_changed(self, snapshot: dict) -> None:
+        if self._closed:
+            return
+        session_id = snapshot["owner_session_id"]
+        event_type = snapshot.get("type", "task_updated")
+        key = f"{snapshot['task_id']}:{event_type}"
+        self._task_events[key] = {"type": event_type, "session_id": session_id, "turn_id": "",
+            "origin_turn_id": snapshot.get("origin_turn_id", ""), "task": dict(snapshot)}
+        if self._task_event_pump is None:
+            self._task_event_pump = asyncio.create_task(self._publish_task_events())
+        scope = self._scopes.get(session_id)
+        if scope:
+            scope.changed.set()
+        if pending_notification(snapshot):
+            self._schedule_continuation(session_id)
+
+    async def _publish_task_events(self) -> None:
+        try:
+            while self._task_events:
+                _, event = self._task_events.popitem()
+                await self._emit_to_event_sinks(event)
+        finally:
+            self._task_event_pump = None
+
+    def _schedule_continuation(self, session_id: str) -> bool:
+        if self._closed or session_id in self._suppressed:
+            return False
+        self._pending_wakes.add(session_id)
+        if session_id in self._continuations:
+            return False
+        task = asyncio.create_task(self._run_continuation(session_id), name=f"rind-continuation-{session_id}")
+        self._continuations[session_id] = task
+        return True
+
     async def start_goal_continuation(self, session_id: str) -> bool:
         clean = validate_session_id(session_id)
-        goal = await self._repository.get_goal(clean)
-        if not goal or goal.get("status") != "active":
-            return False
-        async with self._lock:
-            if self._closed or clean in self._goal_tasks:
-                return False
-            execution = self._active.get(clean)
-            if execution is not None and (
-                execution.container.runtime.turn_active or execution.queued_turn_starts
-            ):
-                return False
-            task = asyncio.create_task(self._run_goal_continuation(clean), name=f"rind-goal-{clean}")
-            self._goal_tasks[clean] = task
-            task.add_done_callback(
-                lambda completed: self._goal_tasks.pop(clean, None)
-                if self._goal_tasks.get(clean) is completed
-                else None
-            )
-            return True
+        return self._schedule_continuation(clean)
 
-    async def _run_goal_continuation(self, session_id: str) -> None:
+    async def _run_continuation(self, session_id: str) -> None:
         try:
-            while True:
-                goal = await self._repository.get_goal(session_id)
-                if not goal or goal.get("status") != "active":
+            await asyncio.sleep(0)
+            while not self._closed and session_id not in self._suppressed:
+                self._pending_wakes.discard(session_id)
+                active = self._active.get(session_id)
+                if active and (active.queued_turn_starts or active.container.runtime.turn_active):
                     return
-                container = await self.start(session_id)
-                goal = await self._repository.get_goal(session_id)
-                if not goal or goal.get("status") != "active":
+                records = await self._task_notifications.store.records(session_id)
+                scope = self._scopes.get(session_id)
+                relevant = [r for r in records.values() if scope is None or r.get("request_id") == scope.request_id]
+                pending = any(pending_notification(r) for r in relevant)
+                waiting = any(r.get("notify") == "on_exit" and r["status"] not in TERMINAL_STATES for r in relevant)
+                goal = await self._repository.get_goal(session_id) if self._enable_goal else None
+                if goal and goal.get("status") in {"paused", "blocked", "budget_exhausted"}:
+                    if scope:
+                        scope.error = f"Goal does not allow continuation ({goal.get('status')})."
                     return
-                await container.session_store.persist_message(
-                    "user",
-                    build_goal_checkpoint_prompt(str(goal["objective"])),
-                    meta={"kind": "goal_checkpoint"},
-                )
+                if not pending and (waiting or not goal or goal.get("status") != "active"):
+                    return
+                active = self._active.get(session_id)
+                if active and (active.queued_turn_starts or active.container.runtime.turn_active):
+                    return
                 terminal = ""
-                async for event in self.run_turn(
-                    session_id,
-                    query=None,
-                    continuation=True,
-                ):
+                async for event in self.run_turn(session_id, query=None, continuation=True,
+                    checkpoint=str(goal["objective"]) if not pending and goal else None):
                     terminal = str(event.get("type") or terminal)
                 if terminal != "turn_completed":
+                    self._suppressed.add(session_id)
                     return
         except asyncio.CancelledError:
             raise
-        except Exception:
-            try:
-                await self._repository.set_goal_status(session_id, "blocked")
-            except Exception:
-                pass
+        except Exception as exc:
+            self._suppressed.add(session_id)
+            scope = self._scopes.get(session_id)
+            if scope:
+                scope.error = str(exc)
+            await self._emit_to_event_sinks({"type": "task_continuation_failed", "session_id": session_id,
+                "turn_id": "", "error": str(exc)})
         finally:
-            await self.release(session_id)
+            self._continuations.pop(session_id, None)
+            scope = self._scopes.get(session_id)
+            if scope:
+                scope.changed.set()
+            if session_id in self._pending_wakes:
+                self._pending_wakes.discard(session_id)
+                self._schedule_continuation(session_id)
+
+    def begin_request(self, session_id: str) -> str:
+        clean = validate_session_id(session_id)
+        if clean in self._scopes:
+            raise RuntimeError("A request is already active for this session.")
+        self._suppressed.discard(clean)
+        scope = _RequestScope()
+        self._scopes[clean] = scope
+        return scope.request_id
+
+    async def wait_request(self, session_id: str) -> dict:
+        scope = self._scopes[session_id]
+        try:
+            while True:
+                scope.changed.clear()
+                if self._closed or session_id in self._suppressed or scope.error:
+                    raise RuntimeError(scope.error or "Request interrupted.")
+                records = await self._task_notifications.store.records(session_id)
+                relevant = [r for r in records.values() if r.get("request_id") == scope.request_id]
+                waiting = any((r.get("notify") == "on_exit" and r["status"] not in TERMINAL_STATES)
+                              or pending_notification(r) for r in relevant)
+                active = self._active.get(session_id)
+                busy = active and (active.queued_turn_starts or active.container.runtime.turn_active)
+                if not waiting and not busy and session_id not in self._continuations:
+                    return {"request_id": scope.request_id, "answer": scope.answer}
+                await scope.changed.wait()
+        finally:
+            self._scopes.pop(session_id, None)
+
+    def abandon_request(self, session_id: str) -> None:
+        self.interrupt(session_id, "Request disconnected")
+        self._scopes.pop(session_id, None)
 
     def active_session_ids(self) -> set[str]:
         return set(self._active)
@@ -259,8 +339,11 @@ class ExecutionCoordinator:
         resume: bool = False,
         continuation: bool = False,
         compact: bool = False,
+        checkpoint: str | None = None,
     ) -> AsyncIterator[dict[str, Any]]:
         clean = validate_session_id(session_id)
+        if not continuation and not compact:
+            self._suppressed.discard(clean)
         await self.start(clean)
         execution = self._active[clean]
         if compact and (execution.queued_turn_starts or execution.container.runtime.turn_active):
@@ -270,6 +353,10 @@ class ExecutionCoordinator:
         business_started = not compact
         try:
             async with execution.turn_slot:
+                if continuation and (self._closed or clean in self._suppressed):
+                    return
+                if checkpoint:
+                    await execution.container.session_store.persist_message("user", build_goal_checkpoint_prompt(checkpoint), meta={"kind": "goal_checkpoint"})
                 cancel_source = CancellationTokenSource(parent_token=cancellation_token)
                 execution.current_cancel = cancel_source
                 execution.container.runtime.set_user_question_responder(
@@ -291,6 +378,13 @@ class ExecutionCoordinator:
                             business_started = True
                         if event_data.get("type") in {"turn_completed", "turn_failed", "turn_cancelled"}:
                             terminal_type = str(event_data["type"])
+                        scope = self._scopes.get(clean)
+                        if scope and event_data.get("type") == "assistant_message_completed":
+                            scope.answer = str(event_data.get("content") or "")
+                        if event_data.get("type") in {"turn_failed", "turn_cancelled"}:
+                            self._suppressed.add(clean)
+                            if scope:
+                                scope.error = str(event_data.get("error") or event_data.get("reason") or "Request failed.")
                         self.update_live_event(event_data)
                         if event_data.get("type") == "user_question_requested":
                             self._prepare_user_question(clean, str(event_data.get("tool_call_id") or ""))
@@ -303,8 +397,10 @@ class ExecutionCoordinator:
                     cancel_source.dispose()
         finally:
             execution.queued_turn_starts = max(0, execution.queued_turn_starts - 1)
-            if not continuation:
-                await self._release_if_idle(clean, execution)
+            await self._release_if_idle(clean, execution)
+            scope = self._scopes.get(clean)
+            if scope:
+                scope.changed.set()
             if not continuation and business_started and terminal_type == "turn_completed":
                 await self.start_goal_continuation(clean)
 
@@ -323,10 +419,15 @@ class ExecutionCoordinator:
 
     def interrupt(self, session_id: str, reason: str = "User interrupted") -> bool:
         clean = validate_session_id(session_id)
+        self._suppressed.add(clean)
+        scope = self._scopes.get(clean)
+        if scope:
+            scope.error = reason
+            scope.changed.set()
         execution = self._active.get(clean)
         if execution is None:
-            return False
-        interrupted = False
+            return True
+        interrupted = True
         execution.container.runtime.discard_pending_inputs()
         if execution.current_cancel is not None and not execution.current_cancel.token.is_cancelled:
             execution.current_cancel.cancel(reason)
@@ -349,6 +450,7 @@ class ExecutionCoordinator:
             else execution.container.runtime.submit_follow_up
         )
         result = submit(text)
+        self._shell_tools.supervisor.release_wait(clean)
         if isinstance(result, dict):
             self.record_live_input(clean, {**result, "session_id": clean, "mode": mode})
         return result
@@ -467,6 +569,7 @@ class ExecutionCoordinator:
                     shell_tools=self._shell_tools,
                     web_sessions=self._web_sessions,
                     session_runner=self._run_delegated_session,
+                    task_notifications=self._task_notifications,
                 )
                 await container.runtime.initialize()
             except BaseException:
@@ -614,12 +717,20 @@ class ExecutionCoordinator:
     async def close(self) -> None:
         async with self._lock:
             self._closed = True
-            goal_tasks = list(self._goal_tasks.values())
+            goal_tasks = list(self._continuations.values())
+            self._shell_tools.supervisor.set_observer(None)
         for task in goal_tasks:
             task.cancel()
         if goal_tasks:
             await asyncio.gather(*goal_tasks, return_exceptions=True)
-        self._goal_tasks.clear()
+        self._continuations.clear()
+        if self._task_event_pump:
+            self._task_event_pump.cancel()
+            await asyncio.gather(self._task_event_pump, return_exceptions=True)
+        self._task_events.clear()
+        for scope in self._scopes.values():
+            scope.error = "Worker shutting down."
+            scope.changed.set()
         executions = []
         async with self._lock:
             executions = list(self._active.values())

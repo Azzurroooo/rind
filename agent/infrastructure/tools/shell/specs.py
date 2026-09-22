@@ -22,10 +22,12 @@ def build_shell_tool_specs(shell_tools: ShellTools, workspace_root: str | None =
     async def scoped_bash(command: str, cwd: str | None = None, yield_time_ms: int = 10000,
                           timeout_ms: int | None = None, notify: str = "on_exit",
                           _session_id: str = "default", _cancellation_token: CancellationToken | None = None,
-                          _idempotency_key: str = "", _output_store=None) -> str:
+                          _idempotency_key: str = "", _output_store=None,
+                          _origin_turn_id: str = "", _request_id: str | None = None) -> str:
         return await shell_tools.bash(command, cwd, yield_time_ms, timeout_ms, notify,
             _session_id=_session_id, _cancellation_token=_cancellation_token,
-            _workspace_root=workspace_root, _idempotency_key=_idempotency_key, _output_store=_output_store)
+            _workspace_root=workspace_root, _idempotency_key=_idempotency_key, _output_store=_output_store,
+            _origin_turn_id=_origin_turn_id, _request_id=_request_id)
 
     return (
         ToolSpec(name="bash", handler=scoped_bash, normalize_arguments=normalize_bash_arguments,

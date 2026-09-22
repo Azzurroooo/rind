@@ -844,7 +844,7 @@ class RuntimeDispatcher:
             repository = self._worker.repository
             store = _RepositoryGoalOps(repository, session_id)
             start_continuation = lambda: self._start_goal_continuation(session_id)
-            interrupt = lambda: None
+            interrupt = lambda: self._worker.execution.interrupt(session_id)
 
         method = request.get("method")
         if method == RuntimeMethod.RIND_GOAL_GET:
@@ -934,7 +934,7 @@ class RuntimeDispatcher:
         params = request.get("params") if isinstance(request.get("params"), dict) else {}
         expected = params.get("turn_id")
         active = self._worker.execution.active_turn_id(session_id)
-        if request.get("method") == RuntimeMethod.SESSION_CANCEL and expected in {None, ""} and active:
+        if request.get("method") == RuntimeMethod.SESSION_CANCEL and expected in {None, ""}:
             return True
         if not isinstance(expected, str) or not expected.strip() or not active or expected != active:
             await self._respond_error(request, "The requested turn is no longer active.", "TurnNotActive")

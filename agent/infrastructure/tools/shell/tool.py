@@ -44,7 +44,8 @@ class ShellTools:
     async def bash(self, command: str, cwd: str | None = None, yield_time_ms: int = 10000,
                    timeout_ms: int | None = None, notify: str = "on_exit", *,
                    _session_id: str = "default", _cancellation_token: CancellationToken | None = None,
-                   _workspace_root: str | None = None, _idempotency_key: str = "", _output_store=None) -> str:
+                   _workspace_root: str | None = None, _idempotency_key: str = "", _output_store=None,
+                   _origin_turn_id: str = "", _request_id: str | None = None) -> str:
         try:
             if not isinstance(command, str) or not command.strip():
                 raise ValueError("command must be a nonempty string.")
@@ -68,7 +69,8 @@ class ShellTools:
             return tool_error("bash", f"Blocked forbidden command. {reason}", "DangerousCommandBlocked")
         return unwrap(await self.supervisor.run(command, state, _session_id, _cancellation_token,
             call_id=_idempotency_key, output_store=_output_store or self.output_store,
-            yield_time_ms=yield_time_ms, timeout_ms=timeout_ms, notify=notify), "bash")
+            yield_time_ms=yield_time_ms, timeout_ms=timeout_ms, notify=notify,
+            origin_turn_id=_origin_turn_id, request_id=_request_id), "bash")
 
     async def task_control(self, action: str, task_id: str | None = None, cursor: str | None = None,
                            wait_ms: int | None = None, max_output_chars: int = 20000,

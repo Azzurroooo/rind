@@ -47,6 +47,7 @@ class CompactionService:
         context_stats: dict[str, Any] | None = None,
         cancellation_token: CancellationToken | None = None,
         prepare_messages=None,
+        task_references: list[dict] | None = None,
     ) -> dict[str, Any]:
         if cancellation_token and cancellation_token.is_cancelled:
             raise asyncio.CancelledError(cancellation_token.reason)
@@ -124,6 +125,8 @@ class CompactionService:
             record["handoff_message"]["content"] += "\n\nImage snapshots (use read_file for details):\n" + "\n".join(paths)
         if self.plan_snapshot_provider is not None:
             self._append_active_plan_snapshot(record, session.session_base_path)
+        if task_references:
+            record["handoff_message"]["content"] += "\n\nManaged task references (runtime facts):\n" + json.dumps(task_references, ensure_ascii=False)
         if cancellation_token and cancellation_token.is_cancelled:
             raise asyncio.CancelledError(cancellation_token.reason)
         try:

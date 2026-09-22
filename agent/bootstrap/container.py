@@ -27,6 +27,7 @@ from agent.infrastructure.tools.web.session_pool import WebSessions
 from agent.application.images import prepare_image_messages
 from agent.prompts import build_goal_policy_prompt, build_system_prompt
 from agent.runtime.core import AgentRuntime, MessageStreamParser, TurnRunner
+from agent.application.task_notifications import TaskNotifications
 
 
 @dataclass(frozen=True, slots=True)
@@ -83,6 +84,7 @@ def build_agent_container(
     shell_tools: ShellTools | None = None,
     web_sessions: WebSessions | None = None,
     session_runner: Callable[..., Awaitable[Any]] | None = None,
+    task_notifications: TaskNotifications | None = None,
 ) -> AgentContainer:
     """Build the production runtime dependency graph explicitly."""
     skill_project_root = None
@@ -108,6 +110,7 @@ def build_agent_container(
     settings = settings or load_settings(workspace_root)
     tool_output_store = shared_resources.tool_output_store if shared_resources else ToolOutputStore(session_dir)
     shell_tools = shell_tools or ShellTools(tool_output_store)
+    task_notifications = task_notifications or TaskNotifications(shell_tools.supervisor.journal)
     web_sessions = web_sessions or WebSessions()
     model = settings.model
     session_store = session_store if session_store is not None else JsonlSessionStore(
@@ -221,6 +224,7 @@ def build_agent_container(
         tool_executor=tool_executor,
         tool_result_normalizer=tool_result_normalizer,
         tool_output_store=tool_output_store,
+        task_notifications=task_notifications,
     )
     stream_parser = shared_resources.stream_parser if shared_resources else MessageStreamParser()
     context_manager = ContextManager(
@@ -240,6 +244,7 @@ def build_agent_container(
         prepare_messages=partial(prepare_image_messages, load_image=session_store.load_image, image_input=image_input),
         image_input=image_input,
         context_manager=context_manager,
+        task_notifications=task_notifications,
         compaction_service=compaction_service,
         skill_repository=skill_repository,
         usage_recorder=usage_recorder,

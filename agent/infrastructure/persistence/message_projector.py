@@ -8,7 +8,7 @@ from agent.domain.compaction import COMPACT_CONTINUATION_USER_CONTENT, COMPACT_H
 from agent.domain.message_boundary import validate_compact_handoff_boundary
 from agent.prompts import refresh_builtin_file_rules
 
-INTERNAL_MESSAGE_KINDS = frozenset({"goal_checkpoint"})
+INTERNAL_MESSAGE_KINDS = frozenset({"goal_checkpoint", "task_notification"})
 
 MISSING_TOOL_RESULT_CONTENT = (
     "[tool result unavailable] rind was interrupted before this call's "

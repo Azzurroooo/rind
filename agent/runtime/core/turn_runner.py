@@ -18,6 +18,7 @@ from agent.application.ports.session_store import SessionStore
 from agent.runtime.core.stream_pump import ModelStreamResult, pump_model_stream_events
 from agent.application.skill_selection import SkillTurnCoordinator
 from agent.application.tools.processor import ToolCallProcessor
+from agent.application.task_notifications import TaskNotifications
 from agent.domain.cancellation import CancellationToken
 from agent.domain.errors import BoundaryError, PersistenceError, ProviderError
 from agent.domain.events import (
@@ -75,6 +76,7 @@ class TurnRunner:
         usage_recorder: Callable[[dict], Any] | None = None,
         prepare_messages=None,
         image_input: bool | None = None,
+        task_notifications: TaskNotifications | None = None,
     ):
         self._chat_client = chat_client
         self._tool_processor = tool_processor
@@ -85,6 +87,7 @@ class TurnRunner:
         self._usage_recorder = usage_recorder
         self._prepare_messages = prepare_messages
         self._image_input = image_input
+        self._task_notifications = task_notifications
         self._skill_turn_coordinator = (
             SkillTurnCoordinator(skill_repository) if skill_repository is not None else None
         )
@@ -128,6 +131,8 @@ class TurnRunner:
                     yield self._cancelled_event(session, turn_id, cancellation_token)
                     return
 
+                if self._task_notifications:
+                    await self._task_notifications.deliver(session)
                 context = await self._build_context(
                     session,
                     transient_system_messages=transient_system_messages,
@@ -311,6 +316,8 @@ class TurnRunner:
                     yield await self._deliver_steering(session, turn_id, steering_item)
 
                 if not parsed_tool_calls and steering_item is None:
+                    if self._task_notifications and await self._task_notifications.deliver(session):
+                        continue
                     break
 
             yield TurnCompletedEvent(
@@ -454,6 +461,7 @@ class TurnRunner:
             phase=phase,
             diagnostics=_compact_diagnostics(phase_detail),
             prepare_messages=self._prepare_messages,
+            task_references=await self._task_notifications.references(session.session_id) if self._task_notifications else None,
             context_stats=context.stats if context is not None else compaction_context.stats,
             cancellation_token=cancellation_token,
         )
