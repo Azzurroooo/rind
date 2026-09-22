@@ -19,7 +19,7 @@ class BashOutputPollingGuard:
         return self._counts_by_turn.setdefault(turn_id, {})
 
     def pre_guard(self, tool_name: str, parsed_args: dict, counts: dict[str, int]) -> str | None:
-        if tool_name != "bash_output":
+        if tool_name != "bash_output" or parsed_args.get("kill") is True:
             return None
         bg_id = str(parsed_args.get("bg_id") or "")
         if not bg_id or counts.get(bg_id, 0) < 6:

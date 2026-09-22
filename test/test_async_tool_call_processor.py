@@ -126,6 +126,21 @@ class FakeEmptyBashOutputExecutor:
         return ToolExecutionResult(status="ok", result_str=json.dumps(result))
 
 
+@pytest.mark.asyncio
+async def test_empty_poll_limit_does_not_block_explicit_kill():
+    executor = FakeEmptyBashOutputExecutor()
+    processor = ToolCallProcessor(tool_executor=executor)
+    session = FakeSession()
+    for index in range(7):
+        call = ParsedToolCall(
+            call_id=f"poll_{index}", name="bash_output",
+            raw_args=json.dumps({"bg_id": "bg_cancel", "kill": index == 6}),
+        )
+        events = [event async for event in processor.execute(session, [call], turn_id="turn_cancel")]
+    assert executor.calls == 7
+    assert events[-1].error_type != "RepeatedEmptyPoll"
+
+
 class FakeSession:
     async def get_tool_records(self, **kwargs):
         return []
