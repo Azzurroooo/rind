@@ -23,7 +23,7 @@ class DefaultToolRegistry:
                 raise ValueError(f"Duplicate tool name: {spec.name}")
             specs_by_name[spec.name] = spec
         self._specs_by_name = specs_by_name
-        self._schemas = [spec.schema for spec in catalog]
+        self._schemas = [spec.schema for spec in catalog if spec.advertised]
 
     @property
     def schemas(self) -> list[dict]:

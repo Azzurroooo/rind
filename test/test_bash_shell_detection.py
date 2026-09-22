@@ -116,7 +116,7 @@ def test_process_supervisor_builds_powershell_command(tmp_path):
         shell_executable=r"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe",
         shell_backend="powershell",
     )
-    command = ProcessSupervisor(timeout=1)._build_shell_cmd("Write-Output hello", state)
+    command = ProcessSupervisor()._build_shell_cmd("Write-Output hello", state)
 
     assert command[0].endswith("powershell.exe")
     assert "-Command" in command
@@ -131,7 +131,7 @@ def test_process_supervisor_returns_clear_error_when_shell_missing(tmp_path):
         shell_error="No supported shell backend was found.",
         shell_backend="unavailable",
     )
-    result = asyncio.run(ProcessSupervisor(timeout=1).run("echo hello", state, "test"))
+    result = asyncio.run(ProcessSupervisor().run("echo hello", state, "test"))
 
     assert result.status == "error"
     assert result.error_type == "RuntimeError"
@@ -169,12 +169,12 @@ def test_process_supervisor_detaches_child_stdin(tmp_path, monkeypatch):
         env={},
         shell_executable="bash",
     )
-    supervisor = ProcessSupervisor(timeout=1)
+    supervisor = ProcessSupervisor()
 
     async def run():
         await supervisor.run("echo hello", state, "session_1")
-        bg = await supervisor._spawn("echo hello", state, "session_1", True)
-        await bg.finished.wait()
+        await supervisor.run("echo hello", state, "session_1", yield_time_ms=0)
+        await supervisor.close()
 
     asyncio.run(run())
 

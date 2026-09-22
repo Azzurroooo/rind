@@ -9,35 +9,37 @@ from pathlib import Path
 from agent.infrastructure.tools.shell.capture import StreamCapture
 
 
-ProcessStatus = Literal[
-    "starting", "running", "completed", "failed", "cancelled", "timed_out"
-]
+TERMINAL_STATES = frozenset({"completed", "failed", "cancelled", "timed_out", "lost"})
 
 
 @dataclass(slots=True)
 class ProcessRecord:
-    process_id: str
+    task_id: str
     session_id: str
-    process: asyncio.subprocess.Process
+    command: str
     cwd: str
     shell_backend: str
     shell_executable: str | None
-    background: bool
-    expires_at: float | None
     call_id: str = ""
+    notify: str = "on_exit"
+    process: asyncio.subprocess.Process | None = None
     output_store: object | None = None
-    status: ProcessStatus = "starting"
+    status: str = "starting"
+    reason: str = ""
+    started_at: float = field(default_factory=time.time)
+    finished_at: float | None = None
     stdout: StreamCapture = field(default_factory=StreamCapture)
     stderr: StreamCapture = field(default_factory=StreamCapture)
-    stdout_cursor: int = 0
-    stderr_cursor: int = 0
-    sequence: int = 0
-    empty_observation_count: int = 0
     exit_code: int | None = None
     last_output_at: float = field(default_factory=time.monotonic)
     finished: asyncio.Event = field(default_factory=asyncio.Event)
-    readers: tuple[asyncio.Task[None], asyncio.Task[None]] | None = None
-    monitor: asyncio.Task[None] | None = None
+    started: asyncio.Event = field(default_factory=asyncio.Event)
+    waiters: set[asyncio.Event] = field(default_factory=set)
+    lock: asyncio.Lock = field(default_factory=asyncio.Lock)
+    handed_off: bool = False
+    readers: tuple[asyncio.Task, asyncio.Task] | None = None
+    monitor: asyncio.Task | None = None
+    deadline: asyncio.Task | None = None
     output_path: str | None = None
     _full_output_chunks: list[bytes] = field(default_factory=list, repr=False)
     _full_output_file: object | None = field(default=None, repr=False)
@@ -63,7 +65,7 @@ class ProcessRecord:
         path_for = getattr(self.output_store, "path_for", None)
         if not callable(path_for):
             return
-        self.output_path = str(path_for(self.session_id, self.call_id))
+        self.output_path = str(path_for(self.session_id, self.call_id or self.task_id))
         target = Path(self.output_path)
         target.parent.mkdir(parents=True, exist_ok=True)
         self._full_output_file = target.open("wb")

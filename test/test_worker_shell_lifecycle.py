@@ -25,8 +25,8 @@ async def test_workers_own_shells_and_idle_preserves_backgrounds(tmp_path, monke
     else:
         command = f"{shlex.quote(sys.executable)} -c {shlex.quote(code)}"
     try:
-        result = json.loads(await first.shell_tools.bash(command, True, 1000, sid))
-        bg_id = result["data"]["bg_id"]
+        result = json.loads(await first.shell_tools.bash(command, yield_time_ms=0, _session_id=sid))
+        bg_id = result["data"]["task_id"]
         assert await second.shell_tools.list_backgrounds(sid) == []
 
         async def close_client():
@@ -43,7 +43,7 @@ async def test_workers_own_shells_and_idle_preserves_backgrounds(tmp_path, monke
         await first.execution._release_if_idle(sid, execution)
         assert (await first.shell_tools.snapshot_background(bg_id, _session_id=sid))["status"] == "running"
         await first.shell_tools.close_session(sid)
-        assert await first.shell_tools.list_backgrounds(sid) == []
+        assert (await first.shell_tools.snapshot_background(bg_id, _session_id=sid))["status"] == "cancelled"
         assert await second.shell_tools.list_backgrounds(sid) == []
     finally:
         for worker in workers:

@@ -1,61 +1,40 @@
-"""Shell tool registration."""
-
+"""Shell tools and the narrow legacy invocation boundary."""
 from __future__ import annotations
 
 from agent.domain.cancellation import CancellationToken
-
 from agent.infrastructure.tools.spec import ToolSpec
-from agent.infrastructure.tools.shell.tool import ShellTools
+from agent.infrastructure.tools.shell.tool import ShellTools, integer
+
+
+def normalize_bash_arguments(args: dict) -> dict:
+    if "run_in_background" in args or "wait_ms" in args:
+        if any(key in args for key in ("yield_time_ms", "timeout_ms", "notify", "cwd")):
+            raise ValueError("Do not combine legacy run_in_background/wait_ms with new bash parameters.")
+        background = args.pop("run_in_background", False)
+        if type(background) is not bool:
+            raise ValueError("run_in_background must be boolean.")
+        wait = args.pop("wait_ms", 10000)
+        args["yield_time_ms"] = max(0, min(integer(wait, "wait_ms", 0), 60000)) if background else 10000
+    return args
 
 
 def build_shell_tool_specs(shell_tools: ShellTools, workspace_root: str | None = None) -> tuple[ToolSpec, ...]:
-    async def scoped_bash(
-        command: str,
-        run_in_background: bool = False,
-        wait_ms: int = 10000,
-        _session_id: str = "default",
-        _cancellation_token: CancellationToken | None = None,
-        _idempotency_key: str = "",
-        _output_store=None,
-    ) -> str:
-        return await shell_tools.bash(
-            command,
-            run_in_background,
-            wait_ms,
-            _session_id,
-            _cancellation_token,
-            workspace_root,
-            _idempotency_key,
-            _output_store,
-        )
+    async def scoped_bash(command: str, cwd: str | None = None, yield_time_ms: int = 10000,
+                          timeout_ms: int | None = None, notify: str = "on_exit",
+                          _session_id: str = "default", _cancellation_token: CancellationToken | None = None,
+                          _idempotency_key: str = "", _output_store=None) -> str:
+        return await shell_tools.bash(command, cwd, yield_time_ms, timeout_ms, notify,
+            _session_id=_session_id, _cancellation_token=_cancellation_token,
+            _workspace_root=workspace_root, _idempotency_key=_idempotency_key, _output_store=_output_store)
 
-    return _specs(scoped_bash, shell_tools.bash_output)
-
-
-def _specs(bash_handler, bash_output_handler) -> tuple[ToolSpec, ...]:
     return (
-        ToolSpec(
-            name="bash",
-            handler=bash_handler,
-            description="Run a shell command. Each call starts in the current project working directory; cd only applies within that command — use `cd <dir> && <command>` to run in another directory. Returns running, completed, failed, cancelled, or timed_out. With run_in_background=false the command runs in the foreground until completion or timeout; with run_in_background=true it first waits wait_ms, returns the result directly for short tasks, and only returns a bg_id for later bash_output polling while still running.",
-            param_descriptions={
-                "command": "The command to execute",
-                "run_in_background": "Allow the command to remain a background task after the wait window. Default False.",
-                "wait_ms": "Only effective with run_in_background=true: milliseconds to wait for new output or completion after background start, default 10000, range 1000-60000. Ignored by foreground execution.",
-            },
-        ),
-        ToolSpec(
-            name="bash_output",
-            handler=bash_output_handler,
-            description="Block on and read incremental output of a background process, or kill the whole process tree. While the process runs, always wait until it completes or wait_ms expires, then return the output accumulated during the wait; no_new_output=true means there is nothing new to return and you should poll again after suggested_next_wait_ms. If it returns RepeatedEmptyPoll, stop polling and tell the user the bg_id so they can check again later.",
-            param_descriptions={
-                "bg_id": "Background process ID (the bg_id returned by bash).",
-                "kill": "Set to true to terminate the process. Default False (read output only).",
-                "wait_ms": "Maximum milliseconds to block waiting for new output or completion, default 15000, range 5000-300000. When output is silent, waiting 120000 or 300000 is recommended.",
-                "max_output_chars": "Maximum characters of stdout/stderr delta returned per call, default 20000, maximum 40000.",
-            },
-        ),
+        ToolSpec(name="bash", handler=scoped_bash, normalize_arguments=normalize_bash_arguments,
+            description="Run a managed non-interactive shell command. After yield_time_ms the same process continues under its task_id. timeout_ms is a separate optional runtime deadline. cwd applies only to this command. Use task_control to inspect or cancel tasks; interactive stdin and detached daemons are unsupported.",
+            param_descriptions={"yield_time_ms": {"minimum": 0, "maximum": 60000},
+                "timeout_ms": {"type": ["integer", "null"], "minimum": 1}, "notify": {"enum": ["on_exit", "manual"]}}),
+        ToolSpec(name="task_control", handler=shell_tools.task_control,
+            description="Control a task owned by this session. list returns up to 50 tasks; read returns immediately; wait observes completion for a bounded interval without killing the task; cancel explicitly terminates its process tree. Reads are repeatable; use next_cursor for sequential output. No interactive stdin.",
+            param_descriptions={"action": {"enum": ["list", "read", "wait", "cancel"]}}),
+        ToolSpec(name="bash_output", handler=shell_tools.bash_output, advertised=False,
+            description="Legacy recovery only: kill maps to cancel, otherwise wait. Unknown old bg_id values cannot be restarted."),
     )
-
-
-__all__ = ["ShellTools", "build_shell_tool_specs"]

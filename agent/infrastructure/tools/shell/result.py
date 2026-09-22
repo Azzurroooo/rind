@@ -1,132 +1,53 @@
 from __future__ import annotations
 
+import time
+
 from agent.domain import tool_ok
 from agent.domain.tool_result import ToolExecutionResult
-
 from agent.infrastructure.tools.shell.process import ProcessRecord
-def completed_result(
-    tool: str,
-    record: ProcessRecord,
-    timeout: int,
-    cancellation_reason: str | None = None,
-) -> ToolExecutionResult:
-    stdout = record.stdout.render().strip()
-    stderr = record.stderr.render().strip()
-    if record.status == "cancelled":
-        message = "Command cancelled"
-        if cancellation_reason:
-            message += f": {cancellation_reason}"
-        stderr = _append_message(stderr, message)
-    elif record.status == "timed_out":
-        stderr = _append_message(stderr, f"Command timed out after {timeout} seconds.")
-    return ToolExecutionResult(
-        status="ok",
-        result_str=tool_ok(
-            tool,
-            {
-                "status": record.status,
-                "stdout": stdout,
-                "stderr": stderr,
-                "exit_code": display_exit_code(record),
-                "cwd": record.cwd,
-                "shell_backend": record.shell_backend,
-                "shell_executable": record.shell_executable,
-            },
-            meta=output_meta(record),
-        ),
-    )
 
 
-def cancelled_result(tool: str, record: ProcessRecord) -> ToolExecutionResult:
-    return ToolExecutionResult(
-        status="ok",
-        result_str=tool_ok(
-            tool,
-            {
-                "bg_id": record.process_id,
-                "status": "cancelled",
-                "stdout": record.stdout.render().strip(),
-                "stderr": record.stderr.render().strip(),
-                "exit_code": -1,
-            },
-            meta=output_meta(record),
-        ),
-    )
-
-
-def background_payload(
-    record: ProcessRecord,
-    stdout: str,
-    stderr: str,
-    wait_ms: int,
-    elapsed_ms: int,
-    no_new_output: bool,
-) -> dict:
-    if no_new_output and record.status == "running":
-        record.empty_observation_count += 1
-    else:
-        record.empty_observation_count = 0
-    record.sequence += 1
+def task_snapshot(record: ProcessRecord) -> dict:
     return {
-        "bg_id": record.process_id,
+        "task_id": record.task_id,
+        "owner_session_id": record.session_id,
+        "origin_tool_call_id": record.call_id,
+        "command": record.command,
+        "cwd": record.cwd,
+        "shell_backend": record.shell_backend,
+        "shell_executable": record.shell_executable,
         "status": record.status,
-        "stdout": stdout.strip(),
-        "stderr": stderr.strip(),
-        "exit_code": display_exit_code(record),
-        "delta": True,
-        "no_new_output": no_new_output,
-        "sequence": record.sequence,
-        "wait_ms": wait_ms,
-        "elapsed_ms": elapsed_ms,
-        "empty_observation_count": record.empty_observation_count,
-        "suggested_next_wait_ms": (
-            120000 if record.empty_observation_count <= 3 else 300000
-        ),
+        "exit_code": record.exit_code,
+        "notify": record.notify,
+        "started_at": record.started_at,
+        "finished_at": record.finished_at,
+        "elapsed_ms": max(0, int(((record.finished_at or time.time()) - record.started_at) * 1000)),
+        "reason": record.reason,
     }
 
 
-def delta_output(record: ProcessRecord, max_chars: int) -> tuple[str, str, bool]:
-    stdout, record.stdout_cursor, stdout_truncated = record.stdout.delta(
-        record.stdout_cursor, max_chars
-    )
-    stderr, record.stderr_cursor, stderr_truncated = record.stderr.delta(
-        record.stderr_cursor, max_chars
-    )
-    return stdout, stderr, stdout_truncated or stderr_truncated
-
-
-def output_meta(record: ProcessRecord, preview_truncated: bool = False) -> dict:
+def task_result(tool: str, record: ProcessRecord, return_reason: str, max_chars: int = 20000) -> ToolExecutionResult:
+    stdout = record.stdout.render()
+    stderr = record.stderr.render()
+    truncated = record.stdout.truncated or record.stderr.truncated or len(stdout) + len(stderr) > max_chars
+    stderr = stderr[-min(len(stderr), max_chars // 2):] if stderr else ""
+    stdout = stdout[-(max_chars - len(stderr)):] if stdout else ""
     meta = {
-        "truncated": record.stdout.truncated
-        or record.stderr.truncated
-        or preview_truncated,
+        "truncated": truncated,
         "total_bytes": record.stdout.byte_count + record.stderr.byte_count,
         "total_lines": record.stdout.line_count + record.stderr.line_count,
     }
     if record.output_path:
         meta["output_path"] = record.output_path
-    return meta
+    return ToolExecutionResult(status="ok", result_str=tool_ok(tool, {
+        **task_snapshot(record), "return_reason": return_reason, "stdout": stdout, "stderr": stderr,
+    }, meta=meta))
 
 
-def display_exit_code(record: ProcessRecord) -> int:
-    if record.status in {"cancelled", "timed_out"}:
-        return -1
-    return record.exit_code if record.exit_code is not None else -1
-
-
-def not_found(process_id: str) -> ToolExecutionResult:
-    return ToolExecutionResult(
-        status="error",
-        error_msg=f"No background process: {process_id}",
-        error_type="NotFound",
-    )
+def not_found(task_id: str) -> ToolExecutionResult:
+    return ToolExecutionResult(status="error", error_type="NotFound",
+        error_msg=f"Task {task_id} is no longer managed by this Worker (or belongs to another session). The command will not be restarted.")
 
 
 def error_result(exc: Exception) -> ToolExecutionResult:
-    return ToolExecutionResult(
-        status="error", error_msg=str(exc), error_type=type(exc).__name__
-    )
-
-
-def _append_message(stderr: str, message: str) -> str:
-    return f"{stderr}\n\n[PROCESS TERMINATED: {message}]".strip()
+    return ToolExecutionResult(status="error", error_msg=str(exc), error_type=type(exc).__name__)
