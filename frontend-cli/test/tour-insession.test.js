@@ -100,3 +100,27 @@ test("in-session recovery: stop main tui, run tour, replay main tui", async () =
   assert.ok(!screen.includes("TOUR ·"), "tour introduction is gone after replay");
   assert.ok(!screen.includes("TOUR GUIDE"), "tour controls are also gone after replay");
 });
+
+test("a second in-session tour still accepts input after escape exits the first", async () => {
+  const { output, input } = { output: createVirtualOutput({ columns: 80, rows: 30 }), input: createVirtualInput() };
+  const main = createTui({ input, output: output.output });
+  main.start();
+  await settle();
+
+  main.stop();
+  const first = runTour({ input, output: output.output, startPageId: "start.hello" });
+  await settle();
+  input.send("\x1b");
+  await first;
+
+  main.start();
+  await settle();
+  main.stop();
+  const second = runTour({ input, output: output.output });
+  await settle();
+  input.send("\x1b[B");
+  input.send("\x03");
+  await second;
+  assert.equal(input.isRaw, false);
+  assert.equal(input.listenerCount("data"), 0);
+});
