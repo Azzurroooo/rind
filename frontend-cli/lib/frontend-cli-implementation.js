@@ -522,15 +522,15 @@ async function enterInSessionTour(pageId) {
     return;
   }
   inputController.pause();
-  tui.stop();
+  tui.stop({ releaseInput: false });
   process.off("SIGINT", handleSigint);
   try {
-    await runTour({ input: process.stdin, output: process.stdout, startPageId: pageId || "", onPageComplete: () => saveCliState({ tourSeen: true }) });
+    await runTour({ input: process.stdin, output: process.stdout, startPageId: pageId || "", manageInput: false, onPageComplete: () => saveCliState({ tourSeen: true }) });
   } catch (error) {
     writeErrorOutput(`${error instanceof Error ? error.message : String(error)}\n`);
   } finally {
     process.on("SIGINT", handleSigint);
-    tui.start();
+    tui.start({ acquireInput: false });
     tui.replayAll();
     inputController.resume();
   }

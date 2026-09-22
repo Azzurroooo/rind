@@ -40,13 +40,14 @@ export async function runTour({
   cancel = clearTimeout,
   now = () => performance.now(),
   onPageComplete = () => {},
+  manageInput = true,
 } = {}) {
   if (startPageId && !findTourPage(startPageId)) {
     stderr.write(`Unknown tour page: ${startPageId}\nAvailable pages:\n${tourPages().map((page) => `  ${page.id} — ${page.title}`).join("\n")}\n`);
     return false;
   }
   const stage = createTourStage({ version });
-  const tui = createTui({ input, output });
+  const tui = createTui({ input, output, manageInput });
   const player = createTourPlayer({
     topics: TOUR_TOPICS,
     startPageId,

@@ -31,6 +31,7 @@ export function createTui(options = {}) {
 
   let started = false;
   let stopped = false;
+  const manageInput = options.manageInput !== false;
   let rawModeBeforeStart = false;
   let inputHandler = null;
   let pasteHandler = null;
@@ -117,21 +118,23 @@ export function createTui(options = {}) {
     pasteHandler = typeof handler === "function" ? handler : null;
   }
 
-  function start() {
+  function start({ acquireInput = manageInput } = {}) {
     if (started) {
       return;
     }
     started = true;
     stopped = false;
-    rawModeBeforeStart = Boolean(input.isRaw);
-    if (typeof input.setRawMode === "function") {
-      input.setRawMode(true);
-    }
-    if (typeof input.setEncoding === "function") {
-      input.setEncoding("utf8");
-    }
-    if (typeof input.resume === "function") {
-      input.resume();
+    if (acquireInput) {
+      rawModeBeforeStart = Boolean(input.isRaw);
+      if (typeof input.setRawMode === "function") {
+        input.setRawMode(true);
+      }
+      if (typeof input.setEncoding === "function") {
+        input.setEncoding("utf8");
+      }
+      if (typeof input.resume === "function") {
+        input.resume();
+      }
     }
     if (typeof input.on === "function") {
       input.on("data", handleInputData);
@@ -145,7 +148,7 @@ export function createTui(options = {}) {
     requestRender();
   }
 
-  function stop() {
+  function stop({ releaseInput = manageInput } = {}) {
     if (!started) {
       return;
     }
@@ -174,11 +177,13 @@ export function createTui(options = {}) {
     if (typeof input.off === "function") {
       input.off("data", handleInputData);
     }
-    if (typeof input.pause === "function") {
-      input.pause();
-    }
-    if (typeof input.setRawMode === "function") {
-      input.setRawMode(rawModeBeforeStart);
+    if (releaseInput) {
+      if (typeof input.pause === "function") {
+        input.pause();
+      }
+      if (typeof input.setRawMode === "function") {
+        input.setRawMode(rawModeBeforeStart);
+      }
     }
     write(PASTE_DISABLE);
     disableKeyboardProtocol();
