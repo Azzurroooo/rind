@@ -3,7 +3,6 @@ from __future__ import annotations
 import asyncio
 import os
 import signal
-import subprocess
 
 
 WINDOWS = os.name == "nt"
@@ -14,11 +13,22 @@ _SIGKILL = getattr(signal, "SIGKILL", 9)
 def spawn_group_args() -> dict:
     if WINDOWS:
         return {
-            "creationflags": getattr(
-                subprocess, "CREATE_NEW_PROCESS_GROUP", 0x00000200
-            )
+            "creationflags": 0x00000200 | 0x00000004 | 0x08000000,
         }
     return {"start_new_session": True}
+
+
+def own_process_tree(process: asyncio.subprocess.Process) -> int | None:
+    if WINDOWS and isinstance(process, asyncio.subprocess.Process):
+        from agent.infrastructure.tools.shell.windows_job import attach
+        return attach(process)
+    return None
+
+
+def close_process_tree(job: int | None) -> None:
+    if job is not None:
+        from agent.infrastructure.tools.shell.windows_job import close
+        close(job)
 
 
 async def wait_parent_exit(process: asyncio.subprocess.Process) -> int:
@@ -28,10 +38,13 @@ async def wait_parent_exit(process: asyncio.subprocess.Process) -> int:
 
 
 async def terminate_tree(
-    process: asyncio.subprocess.Process, grace_seconds: float
+    process: asyncio.subprocess.Process, grace_seconds: float, job: int | None = None
 ) -> None:
     if WINDOWS:
-        if not await _taskkill(process.pid):
+        if job is not None:
+            from agent.infrastructure.tools.shell.windows_job import terminate
+            terminate(job)
+        else:
             _kill_parent(process)
         return
 
@@ -41,7 +54,7 @@ async def terminate_tree(
         return
     try:
         await asyncio.wait_for(
-            asyncio.shield(wait_parent_exit(process)), grace_seconds
+            wait_parent_exit(process), grace_seconds
         )
     except asyncio.TimeoutError:
         pass
@@ -51,7 +64,7 @@ async def terminate_tree(
         pass
 
 
-def kill_tree_now(process: asyncio.subprocess.Process) -> None:
+def kill_tree_now(process: asyncio.subprocess.Process, job: int | None = None) -> None:
     if not WINDOWS:
         try:
             os.killpg(process.pid, _SIGKILL)
@@ -59,37 +72,11 @@ def kill_tree_now(process: asyncio.subprocess.Process) -> None:
         except ProcessLookupError:
             pass
     else:
-        try:
-            completed = subprocess.run(
-                ["taskkill", "/PID", str(process.pid), "/T", "/F"],
-                stdin=subprocess.DEVNULL,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                timeout=2,
-                check=False,
-            )
-            if completed.returncode == 0:
-                return
-        except (FileNotFoundError, OSError, subprocess.TimeoutExpired):
-            pass
+        if job is not None:
+            from agent.infrastructure.tools.shell.windows_job import terminate
+            terminate(job)
+            return
     _kill_parent(process)
-
-
-async def _taskkill(pid: int) -> bool:
-    try:
-        process = await asyncio.create_subprocess_exec(
-            "taskkill",
-            "/PID",
-            str(pid),
-            "/T",
-            "/F",
-            stdin=asyncio.subprocess.DEVNULL,
-            stdout=asyncio.subprocess.DEVNULL,
-            stderr=asyncio.subprocess.DEVNULL,
-        )
-        return await process.wait() == 0
-    except (FileNotFoundError, OSError):
-        return False
 
 
 def _kill_parent(process: asyncio.subprocess.Process) -> None:

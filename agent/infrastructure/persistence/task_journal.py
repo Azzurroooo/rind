@@ -14,7 +14,7 @@ from filelock import FileLock, Timeout
 from agent.infrastructure.paths import resolve_session_base
 
 
-TERMINAL_STATES = frozenset({"completed", "failed", "cancelled", "timed_out", "lost"})
+from agent.domain.tasks import TERMINAL_STATES
 
 
 class TaskJournal:
@@ -101,7 +101,7 @@ class TaskJournal:
             for update in updates:
                 self._append(path, update)
             expired = [r for r in records.values() if r.get("finished_at") and r["finished_at"] < time.time() - 86400
-                       and (r.get("delivered") or r.get("notify") == "manual") and "stdout" in r]
+                       and (r.get("consumed") or r.get("notify") == "manual" or r.get("status") == "cancelled") and "stdout" in r]
             if expired:
                 for record in expired:
                     output_path = record.get("meta", {}).get("output_path")

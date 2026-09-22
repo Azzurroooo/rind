@@ -1,6 +1,7 @@
 import asyncio
 import json
 import sys
+import os
 
 import pytest
 import pytest_asyncio
@@ -46,7 +47,7 @@ async def task_shell(tmp_path, monkeypatch):
         await process.exited.wait()
         return process.returncode
 
-    async def terminate(process, grace):
+    async def terminate(process, grace, job=None):
         if process.returncode is None:
             process.finish(-9)
 
@@ -162,6 +163,88 @@ async def test_bash_arguments_are_strict(task_shell, arguments):
     tools, processes = task_shell
     assert json.loads(await tools.bash("work", **arguments))["error_type"] == "InvalidArguments"
     assert not processes
+
+
+@pytest.mark.asyncio
+async def test_single_character_preview_respects_combined_limit(task_shell):
+    tools, processes = task_shell
+    task = data(await tools.bash("work", yield_time_ms=0))
+    processes[0].finish(stdout=b"stdout", stderr=b"stderr")
+    await tools.task_control("wait", task["task_id"])
+    for _ in range(2):
+        result = data(await tools.task_control("read", task["task_id"], max_output_chars=1))
+        assert len(result["stdout"] + result["stderr"]) == 1
+
+
+@pytest.mark.asyncio
+async def test_failed_running_journal_write_still_terminates_and_retains_fact(task_shell, monkeypatch):
+    tools, processes = task_shell
+    save = tools.supervisor.journal.save
+
+    async def failing_save(session_id, snapshot, **kwargs):
+        if snapshot["status"] == "running":
+            raise OSError("disk unavailable")
+        return await save(session_id, snapshot, **kwargs)
+
+    monkeypatch.setattr(tools.supervisor.journal, "save", failing_save)
+    result = data(await tools.bash("work", yield_time_ms=0))
+    assert result["status"] == "failed"
+    assert "disk unavailable" in result["reason"]
+    assert processes[0].returncode is not None
+    assert data(await tools.task_control("read", result["task_id"]))["status"] == "failed"
+
+
+@pytest.mark.asyncio
+async def test_cancelling_during_spawn_does_not_orphan_process(task_shell, monkeypatch):
+    tools, processes = task_shell
+    from agent.infrastructure.tools.shell import supervisor
+    spawn = supervisor.asyncio.create_subprocess_exec
+    entered, release = asyncio.Event(), asyncio.Event()
+
+    async def gated_spawn(*args, **kwargs):
+        entered.set()
+        await release.wait()
+        return await spawn(*args, **kwargs)
+
+    monkeypatch.setattr(supervisor.asyncio, "create_subprocess_exec", gated_spawn)
+    call = asyncio.create_task(tools.bash("work"))
+    await entered.wait()
+    call.cancel()
+    release.set()
+    with pytest.raises(asyncio.CancelledError):
+        await call
+    assert len(processes) == 1 and processes[0].returncode is not None
+
+
+@pytest.mark.asyncio
+async def test_parent_exit_cleans_inherited_pipe_descendant(tmp_path):
+    tools = ShellTools(ToolOutputStore(str(tmp_path)))
+    connected, disconnected = asyncio.Event(), asyncio.Event()
+
+    async def connection(reader, writer):
+        connected.set()
+        try:
+            await reader.read()
+        except ConnectionResetError:
+            pass
+        finally:
+            disconnected.set()
+            writer.close()
+
+    server = await asyncio.start_server(connection, "127.0.0.1", 0)
+    port = server.sockets[0].getsockname()[1]
+    child = f"import socket; s=socket.create_connection(('127.0.0.1', {port})); print('ready', flush=True); s.recv(1)"
+    parent = f"import subprocess,sys; p=subprocess.Popen([sys.executable,'-c',{child!r}],stdout=subprocess.PIPE); p.stdout.readline(); print('parent done')"
+    state = ShellState(cwd=str(tmp_path), env=dict(os.environ), shell_executable=sys.executable)
+    try:
+        result = await tools.supervisor.run(parent, state, "tree", output_store=tools.output_store)
+        assert data(result.result_str)["status"] == "completed"
+        await asyncio.wait_for(connected.wait(), 3)
+        await asyncio.wait_for(disconnected.wait(), 3)
+    finally:
+        server.close()
+        await server.wait_closed()
+        await tools.close()
 
 
 @pytest.mark.asyncio

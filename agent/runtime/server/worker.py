@@ -123,7 +123,7 @@ class RuntimeWorker:
     async def delete_session(self, session_id: str) -> dict[str, Any]:
         clean = validate_session_id(session_id)
         self.execution.interrupt(clean, "Session deleted")
-        await self.execution.release(clean)
+        await self.execution.release(clean, permanent=True)
         await self.shell_tools.close_session(clean)
         return await self.repository.delete(clean)
 
@@ -174,6 +174,7 @@ class RuntimeWorker:
         }
 
     async def close(self) -> None:
+        self.shell_tools.supervisor.stop_accepting()
         if self._model_refresh_task is not None:
             self._model_refresh_task.cancel()
             await asyncio.gather(self._model_refresh_task, return_exceptions=True)

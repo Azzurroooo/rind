@@ -31,12 +31,16 @@ def build_shell_tool_specs(shell_tools: ShellTools, workspace_root: str | None =
 
     return (
         ToolSpec(name="bash", handler=scoped_bash, normalize_arguments=normalize_bash_arguments,
-            description="Run a managed non-interactive shell command. After yield_time_ms the same process continues under its task_id. timeout_ms is a separate optional runtime deadline. cwd applies only to this command. Use task_control to inspect or cancel tasks; interactive stdin and detached daemons are unsupported.",
+            description="Run a managed non-interactive shell command. Wait up to yield_time_ms (default 10000); the same process then continues under its task_id. timeout_ms is an optional runtime deadline; null means no deadline. notify=on_exit automatically delivers completion and continues an idle session unless interrupted/paused: do not repeatedly poll. Use notify=manual for servers/watchers, and an explicit port/HTTP check to verify readiness. cwd applies only to this command. Use task_control for output or cancellation. No interactive stdin or independent daemons; Worker shutdown stops owned tasks.",
             param_descriptions={"yield_time_ms": {"minimum": 0, "maximum": 60000},
                 "timeout_ms": {"type": ["integer", "null"], "minimum": 1}, "notify": {"enum": ["on_exit", "manual"]}}),
         ToolSpec(name="task_control", handler=shell_tools.task_control,
             description="Control a task owned by this session. list returns up to 50 tasks; read returns immediately; wait observes completion for a bounded interval without killing the task; cancel explicitly terminates its process tree. Reads are repeatable; use next_cursor for sequential output. No interactive stdin.",
-            param_descriptions={"action": {"enum": ["list", "read", "wait", "cancel"]}}),
+            param_descriptions={"action": {"enum": ["list", "read", "wait", "cancel"]},
+                "wait_ms": {"minimum": 1000, "maximum": 60000, "description": "wait only; defaults to 30000."},
+                "max_output_chars": {"minimum": 1, "maximum": 50000},
+                "page_token": "list only; use next_page_token from the previous page.",
+                "cursor": "read/wait only. Omit for a bounded latest preview; start_cursor begins full stored output, next_cursor continues independently."}),
         ToolSpec(name="bash_output", handler=shell_tools.bash_output, advertised=False,
             description="Legacy recovery only: kill maps to cancel, otherwise wait. Unknown old bg_id values cannot be restarted."),
     )

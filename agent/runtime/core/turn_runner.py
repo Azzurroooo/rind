@@ -133,6 +133,7 @@ class TurnRunner:
 
                 if self._task_notifications:
                     await self._task_notifications.deliver(session)
+                task_context = await self._task_notifications.references(session.session_id) if self._task_notifications else []
                 context = await self._build_context(
                     session,
                     transient_system_messages=transient_system_messages,
@@ -251,6 +252,8 @@ class TurnRunner:
                             **persist_kwargs,
                         )
 
+                    if self._task_notifications:
+                        await self._task_notifications.model_consumed(session.session_id, task_context)
                     if content_text:
                         yield AssistantMessageCompletedEvent(
                             **event_meta(session, turn_id),

@@ -909,6 +909,8 @@ class RuntimeDispatcher:
         if action == "release_wait":
             if set(params) - {"task_id", "tool_call_id"} or not (params.get("task_id") or params.get("tool_call_id")):
                 raise ValueError("release_wait requires task_id or tool_call_id.")
+            if any(not isinstance(value, str) or not value.strip() for value in params.values()):
+                raise ValueError("Task and tool call IDs must be nonempty strings.")
             released = self._worker.shell_tools.supervisor.release_wait(session_id, params.get("task_id"), params.get("tool_call_id"))
             await self._respond(request, {"ok": True, "released": released})
             return

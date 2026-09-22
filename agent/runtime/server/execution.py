@@ -12,8 +12,9 @@ import tempfile
 import uuid
 from typing import Any
 
-from agent.application.task_notifications import TaskNotifications, pending_notification, TERMINAL_STATES
+from agent.application.task_notifications import TaskNotifications, pending_notification
 from agent.bootstrap import AgentContainer, SharedRuntimeResources, build_agent_container
+from agent.domain.tasks import TERMINAL_STATES, public_task
 from agent.domain.cancellation import CancellationTokenSource
 from agent.domain.events import UserQuestionRequestedEvent
 from agent.domain.models import ModelSelection
@@ -68,18 +69,21 @@ class ExecutionCoordinator:
         self._enable_user_question = enable_user_question
         self.session_dir = session_dir
         self._active: dict[str, _ActiveExecution] = {}
+        self._starting: dict[str, asyncio.Task] = {}
         self._live: dict[str, dict[str, Any]] = {}
         self._continuations: dict[str, asyncio.Task] = {}
         self._suppressed: set[str] = set()
         self._pending_wakes: set[str] = set()
         self._scopes: dict[str, _RequestScope] = {}
         self._task_events: dict[str, dict] = {}
+        self._task_resync_sessions: set[str] = set()
         self._task_event_pump: asyncio.Task | None = None
         self._task_notifications = TaskNotifications(shell_tools.supervisor.journal, self.task_changed,
             lambda sid: self._scopes[sid].request_id if sid in self._scopes else None)
         shell_tools.supervisor.set_observer(self.task_changed)
         self._event_sinks: list[Callable[[dict[str, Any]], Awaitable[None] | None]] = []
         self._closed = False
+        self._closed_sessions: set[str] = set()
         self._provider_service = provider_service
         self._lock = asyncio.Lock()
 
@@ -97,9 +101,13 @@ class ExecutionCoordinator:
 
     async def _emit_to_event_sinks(self, event: dict[str, Any]) -> None:
         for sink in list(self._event_sinks):
-            sink_result = sink(event)
-            if inspect.isawaitable(sink_result):
-                await sink_result
+            try:
+                sink_result = sink(event)
+                if inspect.isawaitable(sink_result):
+                    await sink_result
+            except Exception:
+                if sink in self._event_sinks:
+                    self._event_sinks.remove(sink)
 
     def task_changed(self, snapshot: dict) -> None:
         if self._closed:
@@ -107,8 +115,15 @@ class ExecutionCoordinator:
         session_id = snapshot["owner_session_id"]
         event_type = snapshot.get("type", "task_updated")
         key = f"{snapshot['task_id']}:{event_type}"
+        if snapshot.get("status") in TERMINAL_STATES:
+            self._task_events.pop(f"{snapshot['task_id']}:task_output", None)
+        if len(self._task_events) >= 128 and key not in self._task_events:
+            oldest = next((item for item in self._task_events if item.endswith(":task_output")), next(iter(self._task_events)))
+            dropped = self._task_events.pop(oldest)
+            if dropped["type"] == "task_updated":
+                self._task_resync_sessions.add(dropped["session_id"])
         self._task_events[key] = {"type": event_type, "session_id": session_id, "turn_id": "",
-            "origin_turn_id": snapshot.get("origin_turn_id", ""), "task": dict(snapshot)}
+            "origin_turn_id": snapshot.get("origin_turn_id", ""), "task": public_task(snapshot)}
         if self._task_event_pump is None:
             self._task_event_pump = asyncio.create_task(self._publish_task_events())
         scope = self._scopes.get(session_id)
@@ -119,14 +134,21 @@ class ExecutionCoordinator:
 
     async def _publish_task_events(self) -> None:
         try:
-            while self._task_events:
-                _, event = self._task_events.popitem()
-                await self._emit_to_event_sinks(event)
+            while self._task_events or self._task_resync_sessions:
+                if self._task_events:
+                    event = self._task_events.pop(next(iter(self._task_events)))
+                    await self._emit_to_event_sinks(event)
+                else:
+                    session_id = self._task_resync_sessions.pop()
+                    records = await self._task_notifications.store.records(session_id)
+                    for record in records.values():
+                        await self._emit_to_event_sinks({"type": "task_updated", "session_id": session_id,
+                            "turn_id": "", "origin_turn_id": record.get("origin_turn_id", ""), "task": public_task(record)})
         finally:
             self._task_event_pump = None
 
     def _schedule_continuation(self, session_id: str) -> bool:
-        if self._closed or session_id in self._suppressed:
+        if self._closed or session_id in self._suppressed or session_id in self._closed_sessions:
             return False
         self._pending_wakes.add(session_id)
         if session_id in self._continuations:
@@ -166,6 +188,8 @@ class ExecutionCoordinator:
                 async for event in self.run_turn(session_id, query=None, continuation=True,
                     checkpoint=str(goal["objective"]) if not pending and goal else None):
                     terminal = str(event.get("type") or terminal)
+                if not terminal:
+                    return
                 if terminal != "turn_completed":
                     self._suppressed.add(session_id)
                     return
@@ -353,8 +377,20 @@ class ExecutionCoordinator:
         business_started = not compact
         try:
             async with execution.turn_slot:
-                if continuation and (self._closed or clean in self._suppressed):
+                if self._closed or clean in self._suppressed or (continuation and execution.queued_turn_starts > 1):
                     return
+                if continuation:
+                    records = await self._task_notifications.store.records(clean)
+                    scope = self._scopes.get(clean)
+                    pending = any(pending_notification(r) for r in records.values()
+                                  if scope is None or r.get("request_id") == scope.request_id)
+                    goal = await self._repository.get_goal(clean) if self._enable_goal else None
+                    if execution.queued_turn_starts > 1 or clean in self._suppressed:
+                        return
+                    if goal and goal.get("status") in {"paused", "blocked", "budget_exhausted"}:
+                        return
+                    if not pending and (not checkpoint or not goal or goal.get("status") != "active"):
+                        return
                 if checkpoint:
                     await execution.container.session_store.persist_message("user", build_goal_checkpoint_prompt(checkpoint), meta={"kind": "goal_checkpoint"})
                 cancel_source = CancellationTokenSource(parent_token=cancellation_token)
@@ -383,6 +419,8 @@ class ExecutionCoordinator:
                             scope.answer = str(event_data.get("content") or "")
                         if event_data.get("type") in {"turn_failed", "turn_cancelled"}:
                             self._suppressed.add(clean)
+                            await self._task_notifications.continuation_failed(clean,
+                                str(event_data.get("error") or event_data.get("reason") or "Request failed."))
                             if scope:
                                 scope.error = str(event_data.get("error") or event_data.get("reason") or "Request failed.")
                         self.update_live_event(event_data)
@@ -526,57 +564,73 @@ class ExecutionCoordinator:
             existing = self._active.get(clean)
             if existing is not None:
                 return existing.container
-            metadata = await self._repository.metadata(clean)
-            root = validate_workspace_root(str(metadata.get("workspace_root") or metadata.get("cwd") or ""))
-            settings = await asyncio.to_thread(load_settings, root)
-            selection = ModelSelection(
-                str(metadata.get("provider") or settings.provider),
-                str(metadata.get("model") or settings.model),
-                str(metadata.get("reasoning_effort") or settings.reasoning_effort),
-            )
-            try:
-                chat_client = await self._provider_service.create_chat_client(settings, selection, workspace_root=root)
-            except Exception as exc:
-                if getattr(exc, "code", "") != "provider_not_configured":
-                    raise
-                chat_client = self._provider_service.unavailable_client(selection, str(exc))
-            container = None
-            try:
-                container = build_agent_container(
-                    settings=replace(
-                        settings,
-                        provider=selection.provider_id,
-                        model=selection.model_id,
-                        reasoning_effort=selection.reasoning_effort,
-                    ),
-                    chat_client=chat_client,
-                    image_input=self._provider_service.resolve_selection(root, selection, settings=settings).image_input,
-                    session_dir=self.session_dir,
-                    session_id=clean,
-                    session_store=self._repository.draft_store(clean),
-                    enable_goal=self._enable_goal,
-                    enable_user_question=(
-                        self._enable_user_question if enable_user_question is None else enable_user_question
-                    ),
-                    enabled_tools=enabled_tools,
-                    lock_workspace=lock_workspace,
-                    workspace_root=root,
-                    project_id=metadata.get("project_id"),
-                    owner_agent_id=metadata.get("owner_agent_id"),
-                    session_type=metadata.get("session_type"),
-                    parent_session_id=metadata.get("parent_session_id"),
-                    shared_resources=self._shared_resources,
-                    shell_tools=self._shell_tools,
-                    web_sessions=self._web_sessions,
-                    session_runner=self._run_delegated_session,
-                    task_notifications=self._task_notifications,
-                )
-                await container.runtime.initialize()
-            except BaseException:
-                await chat_client.close()
+            if self._closed or clean in self._closed_sessions:
+                raise RuntimeError("Worker is shutting down.")
+            task = self._starting.get(clean)
+            if task is None:
+                task = asyncio.create_task(self._build_execution(clean, enable_user_question, enabled_tools, lock_workspace))
+                self._starting[clean] = task
+        try:
+            return await asyncio.shield(task)
+        finally:
+            if task.done() and self._starting.get(clean) is task:
+                self._starting.pop(clean)
+
+    async def _build_execution(self, clean, enable_user_question, enabled_tools, lock_workspace):
+        metadata = await self._repository.metadata(clean)
+        root = validate_workspace_root(str(metadata.get("workspace_root") or metadata.get("cwd") or ""))
+        settings = await asyncio.to_thread(load_settings, root)
+        selection = ModelSelection(
+            str(metadata.get("provider") or settings.provider),
+            str(metadata.get("model") or settings.model),
+            str(metadata.get("reasoning_effort") or settings.reasoning_effort),
+        )
+        try:
+            chat_client = await self._provider_service.create_chat_client(settings, selection, workspace_root=root)
+        except Exception as exc:
+            if getattr(exc, "code", "") != "provider_not_configured":
                 raise
-            self._active[clean] = _ActiveExecution(container=container)
-            return container
+            chat_client = self._provider_service.unavailable_client(selection, str(exc))
+        container = None
+        try:
+            container = build_agent_container(
+                settings=replace(
+                    settings,
+                    provider=selection.provider_id,
+                    model=selection.model_id,
+                    reasoning_effort=selection.reasoning_effort,
+                ),
+                chat_client=chat_client,
+                image_input=self._provider_service.resolve_selection(root, selection, settings=settings).image_input,
+                session_dir=self.session_dir,
+                session_id=clean,
+                session_store=self._repository.draft_store(clean),
+                enable_goal=self._enable_goal,
+                enable_user_question=(
+                    self._enable_user_question if enable_user_question is None else enable_user_question
+                ),
+                enabled_tools=enabled_tools,
+                lock_workspace=lock_workspace,
+                workspace_root=root,
+                project_id=metadata.get("project_id"),
+                owner_agent_id=metadata.get("owner_agent_id"),
+                session_type=metadata.get("session_type"),
+                parent_session_id=metadata.get("parent_session_id"),
+                shared_resources=self._shared_resources,
+                shell_tools=self._shell_tools,
+                web_sessions=self._web_sessions,
+                session_runner=self._run_delegated_session,
+                task_notifications=self._task_notifications,
+            )
+            await container.runtime.initialize()
+        except BaseException:
+            await chat_client.close()
+            raise
+        if self._closed or clean in self._closed_sessions:
+            await _close_container(container)
+            raise RuntimeError("Worker is shutting down.")
+        self._active[clean] = _ActiveExecution(container=container)
+        return container
 
     async def _run_delegated_session(
         self,
@@ -699,8 +753,13 @@ class ExecutionCoordinator:
             self._shell_tools.pool.close(session_id)
             await _close_container(released.container)
 
-    async def release(self, session_id: str) -> None:
+    async def release(self, session_id: str, *, permanent: bool = False) -> None:
         clean = validate_session_id(session_id)
+        if permanent:
+            self._closed_sessions.add(clean)
+        starting = self._starting.get(clean)
+        if starting:
+            await asyncio.gather(asyncio.shield(starting), return_exceptions=True)
         released = None
         async with self._lock:
             execution = self._active.get(clean)
@@ -719,6 +778,9 @@ class ExecutionCoordinator:
             self._closed = True
             goal_tasks = list(self._continuations.values())
             self._shell_tools.supervisor.set_observer(None)
+        if self._starting:
+            await asyncio.gather(*self._starting.values(), return_exceptions=True)
+            self._starting.clear()
         for task in goal_tasks:
             task.cancel()
         if goal_tasks:
@@ -728,6 +790,7 @@ class ExecutionCoordinator:
             self._task_event_pump.cancel()
             await asyncio.gather(self._task_event_pump, return_exceptions=True)
         self._task_events.clear()
+        self._task_resync_sessions.clear()
         for scope in self._scopes.values():
             scope.error = "Worker shutting down."
             scope.changed.set()

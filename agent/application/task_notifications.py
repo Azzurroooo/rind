@@ -8,7 +8,7 @@ from agent.application.ports.task_store import TaskStore
 from agent.application.ports.session_store import SessionStore
 
 
-TERMINAL_STATES = frozenset({"completed", "failed", "cancelled", "timed_out", "lost"})
+from agent.domain.tasks import TERMINAL_STATES
 
 
 def pending_notification(record: dict) -> bool:
@@ -30,7 +30,12 @@ class TaskNotifications:
     async def result_committed(self, session_id: str, tool_name: str, call_id: str, result: str) -> None:
         if tool_name not in {"bash", "task_control", "bash_output"}:
             return
-        payload = json.loads(result)
+        try:
+            payload = json.loads(result)
+        except (ValueError, TypeError):
+            return
+        if not isinstance(payload, dict):
+            return
         data = payload.get("data")
         if not payload.get("ok") or not isinstance(data, dict) or not data.get("task_id"):
             return
@@ -42,6 +47,7 @@ class TaskNotifications:
             changes.update(committed=True, handoff=data.get("status") not in TERMINAL_STATES)
         if data.get("status") in TERMINAL_STATES:
             changes["delivered"] = True
+        changes = {key: value for key, value in changes.items() if record.get(key) != value}
         if changes:
             updated = await self.store.update(session_id, data["task_id"], **changes)
             if self.changed:
@@ -92,4 +98,17 @@ class TaskNotifications:
 
     async def references(self, session_id: str) -> list[dict]:
         return [task_reference(r) for r in (await self.store.records(session_id)).values()
-                if r.get("status") not in TERMINAL_STATES or pending_notification(r)]
+                if r.get("status") not in TERMINAL_STATES or pending_notification(r)
+                or (r.get("delivered") and not r.get("consumed"))]
+
+    async def model_consumed(self, session_id: str, references: list[dict]) -> None:
+        records = await self.store.records(session_id)
+        for reference in references:
+            record = records.get(reference["task_id"], {})
+            if record.get("delivered") and not record.get("consumed"):
+                await self.store.update(session_id, record["task_id"], consumed=True, continuation_error="")
+
+    async def continuation_failed(self, session_id: str, error: str) -> None:
+        for record in (await self.store.records(session_id)).values():
+            if record.get("delivered") and not record.get("consumed"):
+                await self.store.update(session_id, record["task_id"], continuation_error=error)

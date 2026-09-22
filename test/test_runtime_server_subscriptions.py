@@ -345,7 +345,10 @@ def test_two_dispatchers_on_one_coordinator_both_receive_continuation_events():
     async def run():
         execution = _SharedExecution(
             shared_resources=SimpleNamespace(),
-            shell_tools=SimpleNamespace(supervisor=SimpleNamespace(journal=SimpleNamespace(records=AsyncMock(return_value={})), set_observer=lambda callback: None), pool=SimpleNamespace(close=lambda sid: None)),
+            shell_tools=SimpleNamespace(supervisor=SimpleNamespace(journal=SimpleNamespace(records=AsyncMock(return_value={"task_a": {
+                "task_id": "task_a", "event_id": "task_a:1", "committed": True, "handoff": True,
+                "notify": "on_exit", "status": "completed",
+            }})), set_observer=lambda callback: None), pool=SimpleNamespace(close=lambda sid: None)),
             web_sessions=SimpleNamespace(),
             repository=SimpleNamespace(release_persisted_draft=lambda: None),
             debug=False,

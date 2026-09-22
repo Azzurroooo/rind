@@ -15,7 +15,7 @@ def task_snapshot(record: ProcessRecord) -> dict:
         "origin_tool_call_id": record.call_id,
         "origin_turn_id": record.origin_turn_id,
         "request_id": record.request_id,
-        "command": record.command,
+        "command": record.command[:2000],
         "cwd": record.cwd,
         "shell_backend": record.shell_backend,
         "shell_executable": record.shell_executable,
@@ -33,8 +33,7 @@ def task_result(tool: str, record: ProcessRecord, return_reason: str, max_chars:
     stdout = record.stdout.render()
     stderr = record.stderr.render()
     truncated = record.stdout.truncated or record.stderr.truncated or len(stdout) + len(stderr) > max_chars
-    stderr = stderr[-min(len(stderr), max_chars // 2):] if stderr else ""
-    stdout = stdout[-(max_chars - len(stderr)):] if stdout else ""
+    stdout, stderr = output_preview(stdout, stderr, max_chars)
     meta = {
         "truncated": truncated,
         "total_bytes": record.stdout.byte_count + record.stderr.byte_count,
@@ -45,11 +44,19 @@ def task_result(tool: str, record: ProcessRecord, return_reason: str, max_chars:
         meta["output_incomplete"] = bool(record.output.incomplete)
         if record.output.incomplete:
             meta["output_error"] = record.output.incomplete
+    if record.persistence_error:
+        meta["persistence_error"] = record.persistence_error
     return ToolExecutionResult(status="ok", result_str=tool_ok(tool, {
         **task_snapshot(record), "return_reason": return_reason, "stdout": stdout, "stderr": stderr,
         "next_cursor": encode_cursor(record.task_id, record.output.records_path.stat().st_size if record.output and record.output.records_path.exists() else 0),
         "start_cursor": encode_cursor(record.task_id, 0),
     }, meta=meta))
+
+
+def output_preview(stdout: str, stderr: str, limit: int) -> tuple[str, str]:
+    stderr_size = min(len(stderr), max(1, limit // 2))
+    stdout_size = limit - stderr_size
+    return stdout[-stdout_size:] if stdout_size else "", stderr[-stderr_size:] if stderr_size else ""
 
 
 def not_found(task_id: str) -> ToolExecutionResult:

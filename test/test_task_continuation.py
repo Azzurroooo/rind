@@ -132,3 +132,89 @@ async def test_request_waits_for_tasks_started_by_continuation(tmp_path, monkeyp
         assert len(tasks) == 2 and all(t["request_id"] == scope_id for t in tasks.values())
     finally:
         await worker.close()
+
+
+@pytest.mark.asyncio
+async def test_goal_waits_without_checkpoints_and_pause_wins_completion(tmp_path, monkeypatch, task_shell):
+    steps = [{"args": {"command": "work", "yield_time_ms": 0}}, "Waiting."]
+    worker, sid, processes, calls, clients = await worker_with_script(tmp_path, monkeypatch, task_shell, steps)
+    goal = {"status": "active", "objective": "Build"}
+    worker.execution._enable_goal = True
+    monkeypatch.setattr(worker.repository, "get_goal", AsyncMock(side_effect=lambda sid: dict(goal)))
+    try:
+        _ = [event async for event in worker.execution.run_turn(sid, query="Build")]
+        await worker.execution._continuations[sid]
+        assert len(calls) == 2 and all(client.closed for client in clients)
+        goal["status"] = "paused"
+        processes[0].finish()
+        task_id = (await worker.shell_tools.list_backgrounds(sid))[0]["task_id"]
+        await worker.shell_tools.task_control("wait", task_id, _session_id=sid)
+        continuation = worker.execution._continuations.get(sid)
+        if continuation:
+            await continuation
+        assert len(calls) == 2
+        record = (await worker.shell_tools.supervisor.journal.records(sid))[task_id]
+        assert not record["delivered"]
+    finally:
+        await worker.close()
+
+
+@pytest.mark.asyncio
+async def test_request_failure_keeps_notification_and_suppresses_retry(tmp_path, monkeypatch, task_shell):
+    steps = [{"args": {"command": "work", "yield_time_ms": 0}}, "Waiting."]
+    worker, sid, processes, calls, clients = await worker_with_script(tmp_path, monkeypatch, task_shell, steps)
+    try:
+        worker.execution.begin_request(sid)
+        _ = [event async for event in worker.execution.run_turn(sid, query="Build")]
+        processes[0].finish()
+        with pytest.raises(RuntimeError):
+            await asyncio.wait_for(worker.execution.wait_request(sid), 5)
+        assert len(calls) == 3
+        record = next(iter((await worker.shell_tools.supervisor.journal.records(sid)).values()))
+        assert record["delivered"] and not record.get("consumed")
+        assert record["continuation_error"]
+        assert not worker.execution._schedule_continuation(sid)
+    finally:
+        await worker.close()
+
+
+@pytest.mark.asyncio
+async def test_fork_does_not_copy_tasks_and_deletion_stops_future_starts(tmp_path, monkeypatch, task_shell):
+    steps = [{"args": {"command": "work", "yield_time_ms": 0}}, "Waiting."]
+    worker, sid, processes, calls, clients = await worker_with_script(tmp_path, monkeypatch, task_shell, steps)
+    try:
+        _ = [event async for event in worker.execution.run_turn(sid, query="Build")]
+        fork = await worker.fork_session(sid)
+        assert await worker.shell_tools.list_backgrounds(fork["session_id"]) == []
+        assert processes[0].returncode is None
+        await worker.delete_session(sid)
+        assert processes[0].returncode is not None
+        assert not await worker.shell_tools.supervisor.journal.records(fork["session_id"])
+        result = json.loads(await worker.shell_tools.bash("again", _session_id=sid))
+        assert not result["ok"] and len(processes) == 1
+        with pytest.raises(RuntimeError):
+            await worker.execution.start(sid)
+    finally:
+        await worker.close()
+
+
+@pytest.mark.asyncio
+async def test_bounded_event_queue_recovers_terminal_states_for_slow_client(tmp_path, monkeypatch, task_shell):
+    worker, sid, processes, calls, clients = await worker_with_script(tmp_path, monkeypatch, task_shell, [])
+    records = {f"task_{index}": {"task_id": f"task_{index}", "owner_session_id": sid, "status": "completed"}
+               for index in range(200)}
+    monkeypatch.setattr(worker.shell_tools.supervisor.journal, "records", AsyncMock(return_value=records))
+    seen = set()
+    def disconnected(event):
+        raise RuntimeError("Client disconnected")
+    worker.execution.add_event_sink(disconnected)
+    worker.execution.add_event_sink(lambda event: seen.add(event["task"]["task_id"]))
+    try:
+        for record in records.values():
+            worker.execution.task_changed(record)
+        assert len(worker.execution._task_events) == 128
+        await worker.execution._task_event_pump
+        assert seen == set(records)
+        assert calls == []
+    finally:
+        await worker.close()

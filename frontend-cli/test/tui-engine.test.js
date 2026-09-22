@@ -406,7 +406,7 @@ test("startup appends below existing terminal content without clearing", async (
 });
 
 test("replayAll repaints viewport and scrollback with the active theme", async () => {
-  resetTheme();
+  setTheme("catppuccin-mocha");
   const virtual = createVirtualOutput({ columns: 30, rows: 6 });
   const writes = [];
   const recordingOutput = Object.assign(Object.create(virtual.output), {

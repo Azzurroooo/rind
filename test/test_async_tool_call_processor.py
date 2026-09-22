@@ -116,18 +116,14 @@ class FakeEmptyBashOutputExecutor:
                 "status": "running",
                 "stdout": stdout,
                 "stderr": "",
-                "exit_code": -1,
-                "delta": True,
-                "no_new_output": stdout == "",
-                "empty_observation_count": self.calls,
-                "suggested_next_wait_ms": 15000,
+                "exit_code": None,
             },
         }
         return ToolExecutionResult(status="ok", result_str=json.dumps(result))
 
 
 @pytest.mark.asyncio
-async def test_empty_poll_limit_does_not_block_explicit_kill():
+async def test_repeated_observation_does_not_block_explicit_kill():
     executor = FakeEmptyBashOutputExecutor()
     processor = ToolCallProcessor(tool_executor=executor)
     session = FakeSession()
@@ -138,7 +134,7 @@ async def test_empty_poll_limit_does_not_block_explicit_kill():
         )
         events = [event async for event in processor.execute(session, [call], turn_id="turn_cancel")]
     assert executor.calls == 7
-    assert events[-1].error_type != "RepeatedEmptyPoll"
+    assert not events[-1].error_type
 
 
 class FakeSession:
@@ -522,70 +518,6 @@ async def test_tool_result_event_reports_tool_message_persist_failure() -> None:
         raise AssertionError(f"Expected structured persist failure payload, got: {payload}")
     if len(session.persisted_tool_calls) != 1:
         raise AssertionError(f"Expected tool call record attempt to persist first, got: {session.persisted_tool_calls}")
-
-
-@pytest.mark.asyncio
-async def test_async_tool_processor_limits_repeated_empty_bash_output() -> None:
-    executor = FakeEmptyBashOutputExecutor()
-    processor = ToolCallProcessor(tool_executor=executor)
-    session = FakeSession()
-    calls = [
-        ParsedToolCall(call_id=f"call_{idx}", name="bash_output", raw_args='{"bg_id":"bg_123"}')
-        for idx in range(7)
-    ]
-
-    events = [
-        event
-        async for event in processor.execute(
-            session=session,
-            tool_calls=calls,
-            turn_id="turn_empty_guard",
-        )
-    ]
-
-    result_events = [event for event in events if isinstance(event, ToolResultEvent)]
-    if executor.calls != 6:
-        raise AssertionError(f"Expected the 7th poll to be blocked before execution, got calls={executor.calls}")
-    if len(result_events) != 7:
-        raise AssertionError(f"Expected seven result events, got: {events}")
-    blocked = json.loads(result_events[-1].result)
-    if blocked.get("ok") is not False or blocked.get("error_type") != "RepeatedEmptyPoll":
-        raise AssertionError(f"Expected RepeatedEmptyPoll error, got: {blocked}")
-    meta = blocked.get("meta", {})
-    if meta.get("empty_observation_count") != 7 or meta.get("suggested_next_wait_ms") != 300000:
-        raise AssertionError(f"Expected 7th empty poll metadata with 300000ms wait, got: {blocked}")
-    error = blocked.get("error", "")
-    if "bg_123" not in error or "Stop calling bash_output" not in error or "user" not in error:
-        raise AssertionError(f"Expected blocked poll to tell the model to stop and return bg_id, got: {blocked}")
-        if result_events[-1].status != "rejected":
-            raise AssertionError(f"Expected rejected result event for blocked poll, got: {result_events[-1]}")
-
-
-@pytest.mark.asyncio
-async def test_async_tool_processor_resets_empty_bash_output_count_on_real_output() -> None:
-    executor = FakeEmptyBashOutputExecutor()
-    executor.output_by_call[3] = "ready"
-    processor = ToolCallProcessor(tool_executor=executor)
-    session = FakeSession()
-    calls = [
-        ParsedToolCall(call_id=f"call_{idx}", name="bash_output", raw_args='{"bg_id":"bg_reset"}')
-        for idx in range(6)
-    ]
-
-    events = [
-        event
-        async for event in processor.execute(
-            session=session,
-            tool_calls=calls,
-            turn_id="turn_empty_reset",
-        )
-    ]
-
-    result_events = [event for event in events if isinstance(event, ToolResultEvent)]
-    if executor.calls != 6:
-        raise AssertionError(f"Expected all polls to execute after real output reset, got calls={executor.calls}")
-    if any(event.status == "failed" for event in result_events):
-        raise AssertionError(f"Did not expect guard failure after count reset, got: {result_events}")
 
 
 @pytest.mark.asyncio

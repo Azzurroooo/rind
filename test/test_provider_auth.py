@@ -694,7 +694,7 @@ def test_google_adapter_converts_canonical_messages() -> None:
 
     assert config == {
         "system_instruction": "be brief",
-        "tools": [{"function_declarations": [{"name": "bash", "description": "run", "parameters": {"type": "object"}}]}],
+        "tools": [{"function_declarations": [{"name": "bash", "description": "run", "parameters_json_schema": {"type": "object"}}]}],
     }
     assert contents == [
         {"role": "user", "parts": [{"text": "hello"}]},

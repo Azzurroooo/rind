@@ -24,6 +24,7 @@ function bold(text) {
 const COLLAPSED_BODY_CAPS = {
   bash: 5,
   bash_output: 5,
+  task_control: 5,
   edit_file: 20,
   write_file: 20,
   grep: 0,
@@ -34,6 +35,7 @@ const COLLAPSED_BODY_CAPS = {
 const EXPANDED_HARD_CAPS = {
   bash: 400,
   bash_output: 400,
+  task_control: 400,
   edit_file: 400,
   write_file: 400,
   grep: 200,
@@ -217,6 +219,7 @@ function cancelledGlyph() {
 }
 
 function titleFor(state, main) {
+  if (state.kind === "running") return `${runningGlyph()} ${main}`;
   if (state.kind === "error") {
     return `${errorGlyph()} ${main}`;
   }
@@ -365,7 +368,8 @@ const BASH_RENDERER = {
   finished(context, width, state) {
     const command = commandArg(context.args.command, width, 12);
     const { data } = resultData(context);
-    if (state.kind === "ok" && String(data.status) === "running") {
+    state = taskFinishState(state, data);
+    if (state.kind === "running") {
       return `${runningGlyph()} ${bold("$")} ${command}`;
     }
     let main = `${bold("$")} ${command}`;
@@ -405,6 +409,32 @@ const BASH_OUTPUT_RENDERER = {
   },
   body(context, width, limit) {
     return shellOutputLines(context, limit);
+  },
+};
+
+function taskFinishState(state, data) {
+  if (state.kind !== "ok") return state;
+  if (["starting", "running", "cancelling"].includes(data.status)) return { kind: "running" };
+  if (["failed", "timed_out", "lost"].includes(data.status)) return { kind: "error" };
+  if (data.status === "cancelled") return { kind: "cancelled" };
+  return state;
+}
+
+const TASK_CONTROL_RENDERER = {
+  runningMain(context, width) {
+    const id = context.args.task_id ? ` ${commandArg(context.args.task_id, width, 18)}` : "";
+    return `task ${singleLineText(context.args.action)}${id}`;
+  },
+  finished(context, width, state) {
+    const { data } = resultData(context);
+    const title = this.runningMain(context, width);
+    const detail = Array.isArray(data.tasks) ? `${data.tasks.length} task${data.tasks.length === 1 ? "" : "s"}` : singleLineText(data.status);
+    return titleFor(taskFinishState(state, data), `${title}${detail ? ` · ${detail}` : ""}`);
+  },
+  body(context, width, limit) {
+    const { data } = resultData(context);
+    if (!Array.isArray(data.tasks)) return shellOutputLines(context, limit);
+    return { lines: data.tasks.slice(0, limit).map((task) => dim(`    ${clipText(`${task.task_id} · ${task.status} · ${task.command || ""}`, width, 6)}`)), total: data.tasks.length };
   },
 };
 
@@ -662,7 +692,7 @@ function commandArg(value, width, reserve) {
 export const TOOL_RENDERERS = {
   bash: BASH_RENDERER,
   bash_output: BASH_OUTPUT_RENDERER,
-  task_control: BASH_OUTPUT_RENDERER,
+  task_control: TASK_CONTROL_RENDERER,
   read_file: READ_RENDERER,
   edit_file: mutationRenderer("edit"),
   write_file: mutationRenderer("write"),

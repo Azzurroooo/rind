@@ -29,7 +29,6 @@ from agent.domain.events import (
 )
 from agent.application.tools.executor import ToolExecutor
 from agent.application.tools.change_events import build_file_change_event
-from agent.application.tools.polling_guard import BashOutputPollingGuard
 from agent.application.tools.result_normalizer import NormalizedToolResult, ToolResultNormalizer
 from agent.domain.cancellation import CancellationToken, CancellationTokenSource
 from agent.application.task_notifications import TaskNotifications
@@ -62,7 +61,6 @@ class ToolCallProcessor:
         self._tool_result_normalizer = tool_result_normalizer or ToolResultNormalizer()
         self._tool_output_store = tool_output_store
         self._user_question_responder = user_question_responder
-        self._polling_guard = BashOutputPollingGuard()
         self._task_notifications = task_notifications
 
     def set_user_question_responder(self, responder: UserQuestionResponder | None) -> None:
@@ -89,7 +87,6 @@ class ToolCallProcessor:
             ):
                 yield event
             return
-        empty_bash_output_counts = self._polling_guard.counts_for_turn(turn_id)
         for call in tool_calls:
             if cancellation_token and cancellation_token.is_cancelled:
                 break
@@ -116,68 +113,63 @@ class ToolCallProcessor:
                     ),
                 )
             else:
-                blocked_poll = self._polling_guard.pre_guard(call.name, parsed_args, empty_bash_output_counts)
-                if blocked_poll:
-                    outcome = _ToolCallOutcome(status="rejected", error_type="RepeatedEmptyPoll", result=blocked_poll)
-                else:
-                    yield ToolCallStartedEvent(
-                        **event_meta(session, turn_id),
-                        tool_call_id=call.call_id,
-                        tool_name=call.name,
-                    )
-                    if call.name == "ask_user_question":
-                        try:
-                            question_event = self._build_user_question_event(
-                                session=session,
-                                turn_id=turn_id,
-                                call=call,
-                                parsed_args=parsed_args,
-                            )
-                        except ValueError as exc:
-                            outcome = _ToolCallOutcome(
-                                status="rejected",
-                                error_type="InvalidUserQuestion",
-                                result=tool_error("ask_user_question", str(exc), "InvalidUserQuestion"),
-                            )
-                        else:
-                            yield question_event
-                            outcome = await self._run_user_question(question_event)
-                    else:
-                        tool_execution = self._run_tool_call(
+                yield ToolCallStartedEvent(
+                    **event_meta(session, turn_id),
+                    tool_call_id=call.call_id,
+                    tool_name=call.name,
+                )
+                if call.name == "ask_user_question":
+                    try:
+                        question_event = self._build_user_question_event(
+                            session=session,
+                            turn_id=turn_id,
                             call=call,
                             parsed_args=parsed_args,
-                            session_id=session.session_id or "default",
-                            cancellation_token=cancellation_token,
-                            empty_bash_output_counts=empty_bash_output_counts,
-                            turn_id=turn_id,
                         )
-                        if call.name not in _HEARTBEAT_TOOLS:
-                            outcome = await tool_execution
-                        else:
-                            execution = asyncio.create_task(tool_execution)
-                            try:
-                                while not execution.done():
-                                    done, _ = await asyncio.wait(
-                                        [execution], timeout=self.HEARTBEAT_INTERVAL
-                                    )
-                                    if done:
-                                        break
-                                    elapsed_seconds = max(
-                                        1, round(time.perf_counter() - started_at)
-                                    )
-                                    yield ToolProgressEvent(
-                                        **event_meta(session, turn_id),
-                                        tool_call_id=call.call_id,
-                                        tool_name=call.name,
-                                        payload={
-                                            "message": f"still running ({elapsed_seconds}s)"
-                                        },
-                                    )
-                                outcome = await execution
-                            finally:
-                                if not execution.done():
-                                    execution.cancel()
-                                    await asyncio.gather(execution, return_exceptions=True)
+                    except ValueError as exc:
+                        outcome = _ToolCallOutcome(
+                            status="rejected",
+                            error_type="InvalidUserQuestion",
+                            result=tool_error("ask_user_question", str(exc), "InvalidUserQuestion"),
+                        )
+                    else:
+                        yield question_event
+                        outcome = await self._run_user_question(question_event)
+                else:
+                    tool_execution = self._run_tool_call(
+                        call=call,
+                        parsed_args=parsed_args,
+                        session_id=session.session_id or "default",
+                        cancellation_token=cancellation_token,
+                        turn_id=turn_id,
+                    )
+                    if call.name not in _HEARTBEAT_TOOLS:
+                        outcome = await tool_execution
+                    else:
+                        execution = asyncio.create_task(tool_execution)
+                        try:
+                            while not execution.done():
+                                done, _ = await asyncio.wait(
+                                    [execution], timeout=self.HEARTBEAT_INTERVAL
+                                )
+                                if done:
+                                    break
+                                elapsed_seconds = max(
+                                    1, round(time.perf_counter() - started_at)
+                                )
+                                yield ToolProgressEvent(
+                                    **event_meta(session, turn_id),
+                                    tool_call_id=call.call_id,
+                                    tool_name=call.name,
+                                    payload={
+                                        "message": f"still running ({elapsed_seconds}s)"
+                                    },
+                                )
+                            outcome = await execution
+                        finally:
+                            if not execution.done():
+                                execution.cancel()
+                                await asyncio.gather(execution, return_exceptions=True)
 
             async for event in self._finish_tool_call(
                 session=session, turn_id=turn_id, call=call, parsed_args=parsed_args,
@@ -219,7 +211,6 @@ class ToolCallProcessor:
                     parsed_args=parsed_args,
                     session_id=session.session_id or "default",
                     cancellation_token=cancellation_token,
-                    empty_bash_output_counts={},
                     turn_id=turn_id,
                 ),
                 False,
@@ -334,7 +325,6 @@ class ToolCallProcessor:
         parsed_args: dict,
         session_id: str,
         cancellation_token: CancellationToken | None,
-        empty_bash_output_counts: dict[str, int],
         turn_id: str = "",
     ) -> _ToolCallOutcome:
         try:
@@ -377,11 +367,6 @@ class ToolCallProcessor:
                         error_type=payload_status[1],
                         result=tool_result_str,
                     )
-                self._polling_guard.record_observation(
-                    call.name,
-                    tool_result_str,
-                    empty_bash_output_counts,
-                )
                 return _ToolCallOutcome(status="completed", result=tool_result_str)
 
             error_type = result.error_type or "ToolExecutionError"

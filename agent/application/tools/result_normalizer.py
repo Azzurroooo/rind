@@ -62,7 +62,7 @@ class ToolResultNormalizer:
         session_id: str = "",
         call_id: str = "",
     ) -> NormalizedToolResult:
-        payload = self._canonicalize(self._compress_empty_bash_output_poll(self._parse_json(result_payload)))
+        payload = self._canonicalize(self._parse_json(result_payload))
         attachments = payload.pop("attachments", []) if isinstance(payload, dict) else []
         rendered = payload if isinstance(payload, str) else json.dumps(payload, ensure_ascii=False, separators=(",", ": "))
         if isinstance(payload, str):
@@ -130,6 +130,16 @@ class ToolResultNormalizer:
             if output_path:
                 meta["output_path"] = output_path
             meta["paging_notice"] = "Preview was shortened. Read the output_path with file paging, or restart task_control read from start_cursor with a smaller max_output_chars."
+            text = render()
+        while len(text.encode("utf-8")) > limit:
+            candidates = [(mapping, key) for mapping in (data, meta) for key in mapping
+                          if key in {"command", "cwd", "reason", "shell_executable", "output_path", "output_error", "persistence_error", "paging_notice"}
+                          and isinstance(mapping[key], str) and len(mapping[key]) > 32]
+            if not candidates:
+                break
+            mapping, key = max(candidates, key=lambda item: len(item[0][item[1]].encode("utf-8")))
+            mapping[key] = mapping[key][:len(mapping[key]) // 2] + "…"
+            meta["truncated"] = True
             text = render()
         return text
 
@@ -381,34 +391,6 @@ class ToolResultNormalizer:
             return json.loads(text)
         except (TypeError, ValueError):
             return payload
-
-    def _compress_empty_bash_output_poll(self, value: Any) -> Any:
-        if not isinstance(value, dict):
-            return value
-        if value.get("ok") is not True or value.get("tool") != "bash_output":
-            return value
-        data = value.get("data")
-        if not isinstance(data, dict):
-            return value
-        if data.get("status") != "running" or data.get("no_new_output") is not True:
-            return value
-        if data.get("stdout") or data.get("stderr"):
-            return value
-        compact_data = {
-            "bg_id": data.get("bg_id"),
-            "status": data.get("status"),
-            "no_new_output": True,
-            "empty_observation_count": data.get("empty_observation_count", 0),
-            "suggested_next_wait_ms": data.get("suggested_next_wait_ms"),
-        }
-        if "wait_ms" in data:
-            compact_data["wait_ms"] = data.get("wait_ms")
-        if "elapsed_ms" in data:
-            compact_data["elapsed_ms"] = data.get("elapsed_ms")
-        compact = {"ok": True, "tool": "bash_output", "data": compact_data}
-        if isinstance(value.get("meta"), dict):
-            compact["meta"] = value["meta"]
-        return compact
 
     def _canonicalize(self, value: Any) -> Any:
         if isinstance(value, dict):

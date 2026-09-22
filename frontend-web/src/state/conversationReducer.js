@@ -7,7 +7,7 @@
 //   - `assistant` deltas aggregate per turn into one streaming message;
 //   - `tool_requested` creates a tool block, `tool_result` merges by tool_call_id;
 //   - turn terminal events finalize the turn and flush streaming text;
-//   - every envelope with durability === "durable" advances the local cursor
+//   - durable conversation envelopes advance the local cursor; task state uses snapshots
 //     (which is what `session/replay { after_cursor }` resumes from).
 //
 // Queued inputs (steer / follow_up) live in the stream as `role: "queued"`

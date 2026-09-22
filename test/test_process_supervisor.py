@@ -127,13 +127,9 @@ class _FakeProcess:
 
 
 @pytest.mark.asyncio
-async def test_windows_tree_kill_falls_back_to_parent(monkeypatch) -> None:
+async def test_windows_unassigned_process_uses_owned_parent_handle(monkeypatch) -> None:
     process = _FakeProcess()
-    async def taskkill(_pid: int) -> bool:
-        return False
-
     monkeypatch.setattr(process_tree, "WINDOWS", True)
-    monkeypatch.setattr(process_tree, "_taskkill", taskkill)
     await process_tree.terminate_tree(process, 1)
 
     assert process.killed is True

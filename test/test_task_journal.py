@@ -100,3 +100,36 @@ async def test_completed_task_survives_new_worker_without_respawn(task_shell, tm
         assert data(await replacement.task_control("read", result["task_id"], cursor=page["next_cursor"]))["stdout"] == "d\n"
     finally:
         await replacement.close()
+
+
+@pytest.mark.asyncio
+async def test_retention_preserves_unconsumed_delivery_and_keeps_dedup_facts(tmp_path, monkeypatch):
+    from agent.infrastructure.persistence import task_journal
+    journal = TaskJournal(tmp_path)
+    monkeypatch.setattr(task_journal.time, "time", lambda: 90000)
+    record = {"task_id": "task_old", "status": "completed", "notify": "on_exit", "finished_at": 1,
+              "origin_tool_call_id": "once", "stdout": "retained", "delivered": True}
+    try:
+        await journal.save("session", record)
+        assert (await journal.records("session"))["task_old"]["stdout"] == "retained"
+        await journal.update("session", "task_old", consumed=True)
+        expired = (await journal.records("session"))["task_old"]
+        assert "stdout" not in expired and expired["meta"]["output_incomplete"]
+        assert (await journal.save("session", {**record, "task_id": "new"}, create=True))["task_id"] == "task_old"
+    finally:
+        await journal.close()
+
+
+@pytest.mark.asyncio
+async def test_foreign_worker_cannot_cancel_or_restart_live_task(task_shell, tmp_path):
+    tools, processes = task_shell
+    result = data(await tools.bash("work", yield_time_ms=0, _idempotency_key="same-call"))
+    other = ShellTools(ToolOutputStore(str(tmp_path)))
+    try:
+        cancelled = json.loads(await other.task_control("cancel", result["task_id"]))
+        assert cancelled["error_type"] == "TaskNotOwned"
+        recovered = data(await other.bash("work", yield_time_ms=0, _idempotency_key="same-call"))
+        assert recovered["task_id"] == result["task_id"]
+        assert len(processes) == 1 and processes[0].returncode is None
+    finally:
+        await other.close()

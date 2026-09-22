@@ -25,6 +25,18 @@ flowchart TB
 
 `runtime/core` imports neither `runtime/server`, `bootstrap`, nor concrete infrastructure. The server calls core in the same process. `prompts.py` is the single prompt entry and receives environment text explicitly; `infrastructure/environment.py` probes the host. The container injects session image capture into file tools and the common attachment loader into normal and compact requests. Team delegation receives its session runner explicitly and does not import bootstrap.
 
+## Task ownership and continuation
+
+The Worker owns `ShellTools` independently of turn containers. The shell supervisor publishes process facts through an injected observer after appending the per-session task journal; terminal facts and their stable completion event ID share one append. A Worker lease prevents another live Worker from adopting or signalling its processes. Restart recovery marks uncertain tasks `lost` and preserves the `(session_id, origin_tool_call_id)` execution deduplication record. A fork copies conversation history, not process ownership or task journals. Session deletion suppresses wakeups and closes its task start gate before removing storage.
+
+The application `TaskStore` port and `TaskNotifications` service separate durable completion facts, committed initial results, context delivery and successful model consumption. Tool results must be persisted before handoff notifications become eligible. Notifications are user-role messages with `meta.kind=task_notification`, stable event IDs and separate untrusted process output; they are inserted only after all tool-call/result pairs close. Recovery reconciles saved messages with journal acknowledgements. Compaction keeps deterministic references to active and unconsumed tasks. A failed model step retains the notification and failure reason; normal provider retries remain bounded, after which automatic continuation is suppressed until user input.
+
+`ExecutionCoordinator` arbitrates a single turn per session. User work, task completions and goal checkpoints share that path; eligibility is checked again after acquiring the turn slot. An active goal sleeps while awaiting an `on_exit` task, and paused/blocked/budget-exhausted goals prohibit automatic continuation. Client creation and disk work occur outside the global coordination lock. Idle containers and model clients are released even when tasks remain running; continuation uses the latest session settings. UI events are coalesced in a bounded queue, with durable state recoverable from the journal snapshot.
+
+Capability `rind/tasks` adds `rind/task/list`, `read`, `wait`, `cancel`, and `release_wait`. Cross-turn `task_updated` state events are durable; `task_output` carries bounded previews and is incremental. Their envelope uses `turn_id=""` and retains `origin_turn_id` without reactivating the old turn. Both replay modes include a current `tasks` snapshot. The `after_cursor` cursor remains the conversation's durable ordinal, excluding task events; clients replace task state from the snapshot, so completed tasks cannot shift message replay positions. Old `rind/background/*` methods remain non-consuming adapters.
+
+Capability `rind/request-completion` enables `session/prompt` with `completion_scope="request"`. The request ID includes tasks created by its continuations, excludes historical tasks and does not wait indefinitely for `manual` services. Response waits for all associated `on_exit` tasks and notifications plus active turns to finish; failures and interruption fail the request. `rind run` prints the response's final answer once, then closes the Worker and its remaining services. Delegate execution keeps its existing synchronous contract.
+
 ## Runtime Package
 
 ```text

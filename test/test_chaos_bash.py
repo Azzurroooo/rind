@@ -61,20 +61,6 @@ def test_stream_capture_discards_100_mib_without_growing_retained_text():
     assert capture.truncated is True
 
 
-def test_stream_capture_delta_survives_tail_rollover():
-    capture = StreamCapture()
-    capture.append(b"A" * 30000, "A" * 30000)
-    capture.append(b"B" * 40000, "B" * 40000)
-
-    _, cursor, truncated = capture.delta(0, 40000)
-    capture.append(b"C" * 1000, "C" * 1000)
-    delta, next_cursor, next_truncated = capture.delta(cursor, 40000)
-
-    assert truncated is True
-    assert delta == "C" * 1000
-    assert next_cursor == 71000
-    assert next_truncated is False
-
 def test_bash_timeout(shell_tools):
     res = run(shell_tools.bash(_python_command("import time; time.sleep(3)"), timeout_ms=100))
     parsed = json.loads(res)

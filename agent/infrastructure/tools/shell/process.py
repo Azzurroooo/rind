@@ -8,9 +8,6 @@ from agent.infrastructure.tools.shell.capture import StreamCapture
 from agent.infrastructure.persistence.task_output import TaskOutput
 
 
-TERMINAL_STATES = frozenset({"completed", "failed", "cancelled", "timed_out", "lost"})
-
-
 @dataclass(slots=True)
 class ProcessRecord:
     task_id: str
@@ -24,6 +21,9 @@ class ProcessRecord:
     request_id: str | None = None
     notify: str = "on_exit"
     process: asyncio.subprocess.Process | None = None
+    job: int | None = None
+    spawned_at: float = 0
+    persistence_error: str = ""
     status: str = "starting"
     reason: str = ""
     started_at: float = field(default_factory=time.time)
@@ -31,7 +31,6 @@ class ProcessRecord:
     stdout: StreamCapture = field(default_factory=StreamCapture)
     stderr: StreamCapture = field(default_factory=StreamCapture)
     exit_code: int | None = None
-    last_output_at: float = field(default_factory=time.monotonic)
     last_output_event_at: float = 0
     finished: asyncio.Event = field(default_factory=asyncio.Event)
     started: asyncio.Event = field(default_factory=asyncio.Event)
