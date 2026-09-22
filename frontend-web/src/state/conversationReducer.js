@@ -173,13 +173,26 @@ function applyEnvelope(state, envelope) {
     next = { ...next, seen };
   }
   next = applyTurnEvent(next, event, { sessionId, turnId, key });
-  if (String(envelope.durability) === "durable") next = { ...next, cursor: next.cursor + 1 };
+  if (String(envelope.durability) === "durable" && event.type !== "task_updated") next = { ...next, cursor: next.cursor + 1 };
   return next;
 }
 
 function applyTurnEvent(state, event, context) {
   const turnId = context.turnId;
   switch (event.type) {
+    case "task_updated": {
+      const task = event.task;
+      if (!task?.task_id) return state;
+      const id = `task:${task.task_id}`;
+      const entry = { id, role: "system", content: `Task ${task.task_id} · ${task.status}${task.notify ? ` · ${task.notify}` : ""}` };
+      return state.entries.some((item) => item.id === id)
+        ? { ...state, entries: state.entries.map((item) => item.id === id ? entry : item) }
+        : appendEntry(state, entry);
+    }
+    case "task_output":
+      return state;
+    case "task_continuation_failed":
+      return appendEntry(state, { role: "system", content: String(event.error || "Background continuation failed."), tone: "error" });
     case "turn_started":
       return { ...state, active: true, activeTurnId: turnId, streaming: { turnId, text: "" } };
 

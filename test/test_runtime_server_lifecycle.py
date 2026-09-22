@@ -193,7 +193,7 @@ def test_repeated_interrupt_returns_recoverable_error(capsys):
     assert messages[0]["result"] == {"ok": True}
     assert messages[1]["error"] == {
         "type": "TurnNotActive",
-        "message": "The requested turn is no longer active.",
+        "message": "No active turn to interrupt.",
     }
 
 

@@ -126,7 +126,7 @@ def _contents(messages, send_tool_call_ids: bool) -> tuple[str, list[dict[str, A
 
 def _declaration(tool):
     function = tool.get("function") or tool
-    return {"name": function.get("name", ""), "description": function.get("description", ""), "parameters": function.get("parameters", {})}
+    return {"name": function.get("name", ""), "description": function.get("description", ""), "parameters_json_schema": function.get("parameters", {})}
 
 
 def _arguments(raw: Any) -> dict[str, Any]:

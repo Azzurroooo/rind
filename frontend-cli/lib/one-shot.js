@@ -160,7 +160,9 @@ export async function runOneShot({ args, python, repoRoot, runtimePath, cwd = pr
         if (message?.turn_id) turnId = String(message.turn_id);
         if (type === "assistant_delta") assistant += String(event.text || "");
         if (type === "assistant_message_completed") completed = String(event.content || "");
-        if (type === "turn_failed") turnFailure = String(event.error || "Provider request failed.");
+        if (type === "turn_failed" || type === "turn_cancelled" || type === "task_continuation_failed") turnFailure = String(event.error || event.reason || "Request interrupted.");
+        if (type === "task_updated") progress.note(`task ${event.task?.task_id}: ${event.task?.status}`);
+        if (type === "assistant_message_completed" && sessionInfo?.capabilities?.includes("rind/request-completion")) progress.note(String(event.content || ""));
         if (type === "context_built" && event.decisions?.image_notice) progress.systemNotice(String(event.decisions.image_notice), event.decisions.image_notice_level);
         const toolCallId = String(event?.tool_call_id || "");
         const trackedId = toolCallId || (type === "tool_requested" ? `anon:${(anonymousToolCounter += 1)}` : "");
@@ -185,15 +187,18 @@ export async function runOneShot({ args, python, repoRoot, runtimePath, cwd = pr
       model: String(sessionInfo.model || ""),
       baseUrl: String(sessionInfo.base_url || ""),
     });
+    const requestCompletion = sessionInfo.capabilities.includes("rind/request-completion");
+    if (!requestCompletion) progress.note("This Worker completes one turn only; automatic background continuation is unavailable.");
     const result = await client.request(runtimeMethods.sessionPrompt, {
       session_id: sessionId,
       input: options.prompt,
+      ...(requestCompletion ? { completion_scope: "request" } : {}),
     });
     if (turnFailure) throw new Error(turnFailure);
     status = "completed";
     const responseTurnId = String(result?.turn_id || turnId || "");
     turnId = responseTurnId;
-    const finalText = completed || assistant;
+    const finalText = requestCompletion ? String(result?.answer ?? completed ?? assistant) : completed || assistant;
     const finishedAt = new Date();
     const logPath = await writeRunLog({
       workspace: cwd,
@@ -209,6 +214,7 @@ export async function runOneShot({ args, python, repoRoot, runtimePath, cwd = pr
     });
     progress.done(finishedAt - startedAt);
     progress.note(`log ${logPath}`);
+    if (requestCompletion) progress.note("Worker exiting; remaining managed services will be stopped.");
     stdout(finalText);
     return true;
   } catch (error) {

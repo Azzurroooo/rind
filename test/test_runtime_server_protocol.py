@@ -90,7 +90,7 @@ def test_golden_event_fixture_matches_python_envelope():
     requests = [message for message in messages if message["kind"] == "request"]
 
     assert [event_envelope(message["event"], message["sequence"]) for message in events] == events
-    assert [message["sequence"] for message in events] == [1, 2, 3, 4, 5]
+    assert [message["sequence"] for message in events] == [1, 2, 3, 4, 5, 6, 7]
     assert [validate_request(request) for request in requests] == [None] * len(requests)
     assert [request["method"] for request in requests] == [
         "file/list",
@@ -103,6 +103,7 @@ def test_golden_event_fixture_matches_python_envelope():
         "ping",
         "rind/context/inspect",
         "rind/usage/summary",
+        "rind/task/list", "rind/task/read", "rind/task/wait", "rind/task/cancel", "rind/task/release_wait",
     ]
     assert [(response["request_id"], "error" in response) for response in responses] == [
         ("turn-1", False),
@@ -117,6 +118,7 @@ def test_golden_event_fixture_matches_python_envelope():
         ("ping-1", False),
         ("context-inspect-1", False),
         ("usage-summary-1", False),
+        ("task-list-1", False), ("task-read-1", False), ("task-wait-1", False), ("task-cancel-1", False), ("task-release_wait-1", False),
     ]
 
 
@@ -811,7 +813,7 @@ def test_replay_after_cursor_beyond_total_returns_empty_events():
         )
     )
 
-    assert _response(payloads, "replay-far")["result"] == {"events": [], "cursor": 5}
+    assert _response(payloads, "replay-far")["result"] == {"events": [], "cursor": 5, "tasks": []}
 
 
 @pytest.mark.parametrize(("cursor_value",), [(-1,), (True,), ("3",)])

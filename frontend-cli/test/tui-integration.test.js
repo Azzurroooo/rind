@@ -11,6 +11,7 @@ import { createCliState } from "../lib/cli-state.js";
 import { createEventController } from "../lib/event-controller.js";
 import { promptPlaceholderText } from "../lib/rendering.js";
 import { createLineEditor } from "../lib/line-editor.js";
+import { createTaskMonitorController } from "../lib/task-monitor-controller.js";
 
 function createHarness({ columns = 40, rows = 12 } = {}) {
   const virtual = createVirtualOutput({ columns, rows });
@@ -61,6 +62,38 @@ async function settle(virtual) {
   await new Promise((resolve) => setTimeout(resolve, 25));
   await virtual.flush();
 }
+
+test("task events preserve CJK composer text and cursor across completion and resize", async () => {
+  const harness = createHarness({ columns: 54, rows: 14 });
+  const editor = createLineEditor("");
+  editor.setInput("继续检查输出 abc");
+  harness.setSession({ mode: "prompt", editor });
+  const state = { sessionInfo: { session_id: "s1", capabilities: ["rind/tasks"] }, inputActive: true };
+  const monitor = createTaskMonitorController({ state, terminalUi: true, request: async () => ({}), redraw: () => harness.tui.requestRender() });
+  const controller = createEventController({ state, monitor });
+  harness.tui.start();
+  try {
+    await settle(harness.virtual);
+    const before = harness.virtual.getCursorPosition();
+    for (const [type, status] of [["task_updated", "running"], ["task_output", "running"], ["task_updated", "completed"]]) {
+      await controller.handle({ kind: "event", method: "session/update", event: { type, session_id: "s1", turn_id: "",
+        task: { task_id: "task_1", status, stdout: "输出\n".repeat(200), finished_at: status === "completed" ? 1 : null } } });
+    }
+    monitor.recordResult({ result: JSON.stringify({ data: { task_id: "task_1", status: "running" } }) });
+    await settle(harness.virtual);
+    assert.deepEqual(harness.virtual.getCursorPosition(), before);
+    assert.equal(state.sessionInfo.background_count, 0);
+    harness.virtual.resize(36, 14);
+    await settle(harness.virtual);
+    assert.equal(editor.input(), "继续检查输出 abc");
+    assert.ok(harness.virtual.getViewport().some((line) => line.includes(editor.input())));
+    const position = harness.virtual.getCursorPosition();
+    assert.equal(position.y, harness.virtual.getViewport().findIndex((line) => line.includes("▷")));
+  } finally {
+    monitor.stop();
+    harness.tui.stop();
+  }
+});
 
 test("streaming assistant text renders above the composer and reflows on resize", async () => {
   const harness = createHarness({ columns: 40, rows: 14 });

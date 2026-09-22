@@ -32,6 +32,13 @@ export function createEventController({
       return;
     }
     switch (eventType) {
+      case "task_updated":
+      case "task_output":
+        monitor.recordTask?.(event);
+        return;
+      case "task_continuation_failed":
+        output.log?.(() => errorLine(event.error));
+        return;
       case "turn_started":
       case "context_compacted":
         return;
@@ -157,6 +164,7 @@ export function createEventController({
         output.clearQueuedInputs?.();
         output.clearCompactContext?.();
         output.closeAssistant?.();
+        if (state.sessionInfo?.background_count > 0) output.setActivityLabel?.("Waiting for background tasks");
         if (state.activeGoal?.status !== "active") {
           output.log?.(turnCompletedLine(event, toolStats));
         }

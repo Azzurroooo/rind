@@ -65,6 +65,11 @@ class RuntimeMethod:
     RIND_USER_QUESTION_RESPOND = "rind/user-question/respond"
     RIND_BACKGROUND_LIST = "rind/background/list"
     RIND_BACKGROUND_OUTPUT = "rind/background/output"
+    RIND_TASK_LIST = "rind/task/list"
+    RIND_TASK_READ = "rind/task/read"
+    RIND_TASK_WAIT = "rind/task/wait"
+    RIND_TASK_CANCEL = "rind/task/cancel"
+    RIND_TASK_RELEASE_WAIT = "rind/task/release_wait"
     RIND_GOAL_GET = "rind/goal/get"
     RIND_GOAL_SET = "rind/goal/set"
     RIND_GOAL_STATUS = "rind/goal/status"
@@ -98,6 +103,11 @@ SESSION_SCOPED_METHODS = frozenset(
         RuntimeMethod.RIND_USER_QUESTION_RESPOND,
         RuntimeMethod.RIND_BACKGROUND_LIST,
         RuntimeMethod.RIND_BACKGROUND_OUTPUT,
+        RuntimeMethod.RIND_TASK_LIST,
+        RuntimeMethod.RIND_TASK_READ,
+        RuntimeMethod.RIND_TASK_WAIT,
+        RuntimeMethod.RIND_TASK_CANCEL,
+        RuntimeMethod.RIND_TASK_RELEASE_WAIT,
         RuntimeMethod.RIND_GOAL_GET,
         RuntimeMethod.RIND_GOAL_SET,
         RuntimeMethod.RIND_GOAL_STATUS,
@@ -147,6 +157,11 @@ CORE_METHODS = (
     RuntimeMethod.RIND_USER_QUESTION_RESPOND,
     RuntimeMethod.RIND_CONTEXT_INSPECT,
     RuntimeMethod.RIND_USAGE_SUMMARY,
+    RuntimeMethod.RIND_TASK_LIST,
+    RuntimeMethod.RIND_TASK_READ,
+    RuntimeMethod.RIND_TASK_WAIT,
+    RuntimeMethod.RIND_TASK_CANCEL,
+    RuntimeMethod.RIND_TASK_RELEASE_WAIT,
 )
 
 CAPABILITIES = (
@@ -162,6 +177,8 @@ CAPABILITIES = (
     "rind/session-subscriptions",
     "rind/auth",
     "rind/files",
+    "rind/tasks",
+    "rind/request-completion",
 )
 
 DURABLE_EVENT_TYPES = frozenset(
@@ -174,6 +191,7 @@ DURABLE_EVENT_TYPES = frozenset(
         "turn_completed",
         "turn_failed",
         "turn_cancelled",
+        "task_updated",
     }
 )
 

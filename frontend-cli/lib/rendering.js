@@ -788,6 +788,7 @@ function authFrameTitle(title, box) {
 export function backgroundMonitorText(tasks = [], selectedIndex = 0, selectedTask = null, width = 76) {
   const items = Array.isArray(tasks) ? tasks : [];
   const lines = [dim("  ←→ page · ↑↓/j/k select · esc/ctrl+b close")];
+  if (items.some((task) => task.task_id)) lines.push(dim("  r release wait · c cancel task"));
   if (!items.length) {
     lines.push(dim("  No background tasks."));
     return lines.join("\n");
@@ -805,7 +806,7 @@ export function backgroundMonitorText(tasks = [], selectedIndex = 0, selectedTas
   if (!task) {
     return lines.join("\n");
   }
-  const heading = `${singleLine(task.bg_id) || "unknown"} · ${singleLine(task.status) || "unknown"}`;
+  const heading = `${singleLine(task.task_id || task.bg_id) || "unknown"} · ${singleLine(task.status) || "unknown"}${task.notify ? ` · ${task.notify} · ${Math.round((Number(task.elapsed_ms) || 0) / 1000)}s` : ""}`;
   lines.push(dim(`  ${heading}`));
   const rawOutput = [task.stdout, task.stderr]
     .filter((value) => String(value || ""))

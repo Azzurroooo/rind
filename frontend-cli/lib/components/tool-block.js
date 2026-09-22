@@ -4,7 +4,7 @@ import {
   renderToolRunning,
 } from "../tool-display.js";
 
-const TICKER_TOOLS = new Set(["bash", "bash_output", "delegate", "search_web", "fetch_web_page"]);
+const TICKER_TOOLS = new Set(["bash", "task_control", "bash_output", "delegate", "search_web", "fetch_web_page"]);
 
 export class ToolBlock {
   constructor({ event, onRequestRender, leading = false, animate = true }) {

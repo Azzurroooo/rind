@@ -378,7 +378,7 @@ const BASH_RENDERER = {
   body(context, width, limit) {
     const { data } = resultData(context);
     if (String(data.status) === "running") {
-      const bgId = singleLineText(data.bg_id);
+      const bgId = singleLineText(data.task_id || data.bg_id);
       const line = bgId ? `command running in background (bg ${bgId})` : "command running in background";
       return [dim(`    ↳ ${clipText(line, width, 8)}`)];
     }
@@ -388,11 +388,11 @@ const BASH_RENDERER = {
 
 const BASH_OUTPUT_RENDERER = {
   runningMain(context, width) {
-    return `${bold("bg")} ${commandArg(context.args.bg_id, width, 10)}`;
+    return `${bold("bg")} ${commandArg(context.args.task_id || context.args.bg_id, width, 10)}`;
   },
   finished(context, width, state) {
     const { data } = resultData(context);
-    const id = context.args.bg_id || data.bg_id;
+    const id = context.args.task_id || context.args.bg_id || data.task_id || data.bg_id;
     let main = `${bold("bg")} ${commandArg(id, width, 14)}`;
     if (state.kind === "cancelled") {
       main += ` ${dim("(cancelled)")}`;
@@ -662,6 +662,7 @@ function commandArg(value, width, reserve) {
 export const TOOL_RENDERERS = {
   bash: BASH_RENDERER,
   bash_output: BASH_OUTPUT_RENDERER,
+  task_control: BASH_OUTPUT_RENDERER,
   read_file: READ_RENDERER,
   edit_file: mutationRenderer("edit"),
   write_file: mutationRenderer("write"),

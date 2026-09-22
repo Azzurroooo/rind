@@ -214,7 +214,9 @@ class TurnPump:
         if key is None:
             logger.debug("gateway: event for unrouted session %s (%s)", session_id, etype)
             return
-        if envelope.get("durability") == "durable":  # cursor: durable ordinal, not transport sequence
+        if etype in {"task_updated", "task_output"}:
+            return
+        if envelope.get("durability") == "durable":  # conversation cursor excludes task snapshots
             self._router.update_cursor(key, self._router.cursor_for(key) + 1)
         position = self._position(key)
         await self._reactions.on_event(position, event, replayed=replayed)

@@ -73,6 +73,44 @@ test("prompt slugs remove filesystem-invalid characters", () => {
   assert.equal(promptSlug("A:/bad? prompt"), "A bad prompt");
 });
 
+test("one-shot waits across turns and prints the request answer once", async () => {
+  const workspace = await mkdtemp(path.join(os.tmpdir(), "rind-request-"));
+  const output = [];
+  const progress = [];
+  let deliver;
+  let finish;
+  let shutdown = false;
+  const running = runOneShot({
+    args: ["run", "--prompt", "Build"], cwd: workspace,
+    stdout: (text) => output.push(text), stderr: (text) => progress.push(text),
+    clientFactory: ({ onMessage }) => {
+      deliver = onMessage;
+      return {
+        start() {},
+        async request(method, params) {
+          if (method === "initialize") return { protocol_version: "2", capabilities: ["rind/tasks", "rind/request-completion"], methods: [], session_id: "s1" };
+          assert.equal(params.completion_scope, "request");
+          onMessage({ event: { type: "assistant_message_completed", content: "Waiting." } });
+          onMessage({ event: { type: "turn_completed" } });
+          return new Promise((resolve) => { finish = resolve; });
+        },
+        async shutdown() { shutdown = true; },
+      };
+    },
+  });
+  while (!finish) await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(output, []);
+  assert.equal(shutdown, false);
+  deliver({ event: { type: "assistant_message_completed", content: "Finished." } });
+  finish({ answer: "Finished.", turn_id: "t2" });
+  await running;
+  assert.deepEqual(output, ["Finished."]);
+  assert.equal(shutdown, true);
+  assert.match(progress.join(""), /Waiting/);
+  assert.doesNotMatch(output.join(""), /\x1b/);
+  await (await import("node:fs/promises")).rm(workspace, { recursive: true, force: true });
+});
+
 
 test("system notice colors follow stderr TTY and NO_COLOR", () => {
   const original = process.env.NO_COLOR;

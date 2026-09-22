@@ -2,6 +2,12 @@ import { backgroundMonitorText, delegateMonitorText, taskMonitorTabs } from "./r
 import { runtimeMethods } from "./runtime-protocol.js";
 
 const PAGES = ["background", "delegates"];
+const ACTIVE_STATES = new Set(["starting", "running", "cancelling"]);
+
+function mergeTask(previous, next) {
+  if (previous.finished_at && !next.finished_at) return previous;
+  return { ...previous, ...next };
+}
 
 export function createTaskMonitorController({
   request,
@@ -22,6 +28,31 @@ export function createTaskMonitorController({
   let generation = 0;
   let pollToken = 0;
 
+  const supportsTasks = () => state.sessionInfo?.capabilities?.includes("rind/tasks") === true;
+
+  function recordTask(event) {
+    const task = event?.task;
+    if (!task?.task_id || (event.session_id && event.session_id !== state.sessionInfo?.session_id)) return;
+    const previous = tasks.get(task.task_id) || {};
+    tasks.set(task.task_id, { ...mergeTask(previous, task), bg_id: task.task_id });
+    updateCount();
+    if (monitor) redraw();
+    if (!terminalUi && event.type === "task_updated" && previous.status !== task.status) {
+      log(`Task ${task.task_id}: ${task.status}${task.notify ? ` (${task.notify})` : ""}`);
+    }
+  }
+
+  async function controlSelected(action) {
+    const task = pageItems("background")[clampIndex(monitor?.selectedIndex)];
+    if (!supportsTasks() || !task || monitor?.page !== "background") return;
+    try {
+      const result = await request(action === "release" ? runtimeMethods.taskReleaseWait : runtimeMethods.taskCancel, { task_id: task.bg_id });
+      if (result?.task_id) recordTask({ type: "task_updated", task: result });
+    } catch (error) {
+      log(`Task control failed: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
   function refresh() {
     if (!terminalUi || state.runtimeClosing) {
       return Promise.resolve();
@@ -30,7 +61,7 @@ export function createTaskMonitorController({
       return listInFlight;
     }
     const requestGeneration = generation;
-    const promise = request(runtimeMethods.backgroundList)
+    const promise = request(supportsTasks() ? runtimeMethods.taskList : runtimeMethods.backgroundList)
       .then((result) => {
         if (requestGeneration !== generation) {
           return;
@@ -38,12 +69,12 @@ export function createTaskMonitorController({
         const listed = Array.isArray(result?.tasks) ? result.tasks : [];
         const ids = new Set();
         for (const task of listed) {
-          const bgId = String(task?.bg_id || "").trim();
+          const bgId = String(task?.task_id || task?.bg_id || "").trim();
           if (!bgId) {
             continue;
           }
           ids.add(bgId);
-          tasks.set(bgId, { ...(tasks.get(bgId) || {}), ...task, bg_id: bgId });
+          tasks.set(bgId, { ...mergeTask(tasks.get(bgId) || {}, task), bg_id: bgId });
         }
         for (const bgId of tasks.keys()) {
           if (!ids.has(bgId) && tasks.get(bgId)?.status === "running") {
@@ -66,7 +97,7 @@ export function createTaskMonitorController({
   }
 
   function updateCount() {
-    const backgroundCount = [...tasks.values()].filter((task) => task.status === "running").length;
+    const backgroundCount = [...tasks.values()].filter((task) => ACTIVE_STATES.has(task.status)).length;
     const delegateCount = [...delegates.values()].filter((delegate) => delegate.status === "running").length;
     if (
       Number(state.sessionInfo?.background_count) !== backgroundCount
@@ -87,7 +118,7 @@ export function createTaskMonitorController({
   }
 
   function startRefresh() {
-    if (refreshTimer || state.runtimeClosing) {
+    if (supportsTasks() || refreshTimer || state.runtimeClosing) {
       return;
     }
     refreshTimer = setInterval(() => {
@@ -138,13 +169,13 @@ export function createTaskMonitorController({
   function recordResult(event) {
     const parsed = parseObject(event?.result);
     const data = parsed.data && typeof parsed.data === "object" ? parsed.data : parsed;
-    const bgId = String(data?.bg_id || "").trim();
+    const bgId = String(data?.task_id || data?.bg_id || "").trim();
     if (!bgId) {
       return;
     }
     const previous = tasks.get(bgId) || {};
     const command = pendingCommands.get(event.tool_call_id) || previous.command || "";
-    tasks.set(bgId, { ...previous, ...data, bg_id: bgId, command });
+    tasks.set(bgId, { ...mergeTask(previous, data), bg_id: bgId, command });
     if (event.tool_call_id) {
       pendingCommands.delete(event.tool_call_id);
     }
@@ -236,7 +267,7 @@ export function createTaskMonitorController({
   }
 
   function startMonitorPolling() {
-    if (monitorTimer) {
+    if (supportsTasks() || monitorTimer) {
       return;
     }
     monitorTimer = setInterval(() => {
@@ -270,10 +301,11 @@ export function createTaskMonitorController({
     const requestToken = ++pollToken;
     monitorPollInFlight = true;
     try {
-      const result = await request(runtimeMethods.backgroundOutput, {
-        bg_id: selected.bg_id,
+      const response = await request(supportsTasks() ? runtimeMethods.taskRead : runtimeMethods.backgroundOutput, {
+        [supportsTasks() ? "task_id" : "bg_id"]: selected.bg_id,
         max_output_chars: 20000,
       });
+      const result = supportsTasks() ? { task: response } : response;
       if (requestGeneration === generation && result?.task && typeof result.task === "object") {
         tasks.set(selected.bg_id, {
           ...selected,
@@ -339,6 +371,14 @@ export function createTaskMonitorController({
     if (modified) {
       return true;
     }
+    if (key.text === "r") {
+      void controlSelected("release");
+      return true;
+    }
+    if (key.text === "c") {
+      void controlSelected("cancel");
+      return true;
+    }
     if (key.name === "up" || key.text === "k") {
       moveSelection(-1);
       return true;
@@ -361,7 +401,7 @@ export function createTaskMonitorController({
       : backgroundMonitorText(list, selectedIndex, list[selectedIndex], contentWidth);
     const lines = [...tabs, ...text.split("\n")];
     const selectedRow = list.length
-      ? tabs.length + 1 + selectedIndex
+      ? tabs.length + (page === "background" && list.some((task) => task.task_id) ? 2 : 1) + selectedIndex
       : Math.max(0, lines.length - 1);
     return {
       lines,
@@ -399,6 +439,7 @@ export function createTaskMonitorController({
   }
 
   return {
+    recordTask,
     refresh,
     recordCommand,
     recordResult,

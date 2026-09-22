@@ -339,6 +339,7 @@ export default function App() {
       const events = Array.isArray(result?.events) ? result.events : [];
       dispatchConnection({ type: "sync_start", total: events.length });
       await applyCatchUpEvents(events);
+      restoreTasks(result?.tasks, sessionId);
       const serverCursor = Number(result?.cursor);
       dispatchConversation({ kind: "set_cursor", cursor: Number.isFinite(serverCursor) && serverCursor >= 0 ? serverCursor : cursor });
       void refreshSessions(workspaceRef.current || infoRef.current.workspace_root);
@@ -353,6 +354,7 @@ export default function App() {
           const retryEvents = Array.isArray(retry?.events) ? retry.events : [];
           dispatchConnection({ type: "sync_start", total: retryEvents.length });
           await applyCatchUpEvents(retryEvents);
+          restoreTasks(retry?.tasks, sessionId);
           const retryCursor = Number(retry?.cursor);
           if (Number.isFinite(retryCursor) && retryCursor >= 0) {
             dispatchConversation({ kind: "set_cursor", cursor: retryCursor });
@@ -392,6 +394,13 @@ export default function App() {
       for (const envelope of batch) dispatchConversation(envelope);
       dispatchConnection({ type: "sync_progress", applied: batch.length });
       if (index + CATCH_UP_CHUNK < events.length) await new Promise((resolve) => window.setTimeout(resolve, 0));
+    }
+  }
+
+  function restoreTasks(tasks, sessionId) {
+    for (const task of tasks || []) {
+      dispatchConversation({ kind: "event", session_id: sessionId, turn_id: "",
+        event: { type: "task_updated", task } });
     }
   }
 
@@ -504,6 +513,7 @@ export default function App() {
       }
       dispatchConversation({ kind: "history", messages: replay?.messages });
       dispatchConversation({ kind: "live_turn", liveTurn: replay?.live_turn || null, sessionId: target });
+      restoreTasks(replay?.tasks, target);
       // Adopt the session's durable ordinal (an over-bound after_cursor returns
       // {events: [], cursor: total}) so a post-reload catch-up resumes from the
       // history instead of replaying it on top.

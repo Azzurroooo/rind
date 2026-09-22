@@ -3,6 +3,31 @@ import assert from "node:assert/strict";
 
 import { createTaskMonitorController } from "../lib/task-monitor-controller.js";
 
+test("task events preserve input and use release/cancel without model polling", async () => {
+  const calls = [];
+  const state = { sessionInfo: { session_id: "s1", capabilities: ["rind/tasks"] }, inputActive: true, input: "中文 pending" };
+  const controller = createTaskMonitorController({ terminalUi: true, state,
+    request: async (method, params) => {
+      calls.push([method, params]);
+      return method === "rind/task/list" ? { tasks: [{ task_id: "task_1", status: "running" }] } : {};
+    },
+  });
+  controller.recordTask({ type: "task_updated", session_id: "s1", task: { task_id: "task_1", status: "running", notify: "on_exit" } });
+  assert.equal(state.input, "中文 pending");
+  assert.equal(state.inputActive, true);
+  controller.enterMonitor();
+  await new Promise((resolve) => setImmediate(resolve));
+  controller.handleInput({ text: "r" });
+  controller.handleInput({ text: "c" });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.ok(calls.some(([method]) => method === "rind/task/release_wait"));
+  assert.ok(calls.some(([method]) => method === "rind/task/cancel"));
+  controller.recordTask({ type: "task_updated", session_id: "s1", task: { task_id: "task_1", status: "completed" } });
+  assert.equal(state.sessionInfo.background_count, 0);
+  assert.equal(state.input, "中文 pending");
+  controller.stop();
+});
+
 test("task monitor merges background commands and results", () => {
   const state = {
     runtimeClosing: false,

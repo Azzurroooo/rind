@@ -2126,6 +2126,17 @@ function handleRuntimeEvent(envelope: RuntimeEvent) {
   const sessionId = envelope.sessionId
   const eventSessionId = asRecordText(envelope.event.session_id)
   if (!sessionId || (eventSessionId && eventSessionId !== sessionId)) return
+  if (envelope.type === "task_updated" || envelope.type === "task_output") {
+    if (sessionId === state.viewedSessionId) {
+      const task = normalizeTask(envelope.event.task)
+      if (task.bg_id) {
+        state.taskMonitor.tasks = mergeTasks(state.taskMonitor.tasks, [...state.taskMonitor.tasks, task])
+        state.taskMonitor.outputs[task.bg_id] = task
+        renderTaskMonitorDock()
+      }
+    }
+    return
+  }
   // The worker is authoritative about turn generations: never drop terminals
   // (they reconcile local state) and let a new turn_started supersede the
   // remembered generation (goal continuation / post-restart turns).

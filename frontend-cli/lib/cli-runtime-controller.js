@@ -174,6 +174,9 @@ export function createCliRuntimeController({
     options.announce?.(state.session.info);
     renderHistory(replay?.messages);
     restoreLiveTurn(liveTurn);
+    for (const task of replay?.tasks || []) {
+      getTaskMonitor()?.recordTask?.({ type: "task_updated", session_id: switchedId, task });
+    }
     state.display.stats = usage;
     getCompactContextState().clear();
     refreshInputState();

@@ -22,7 +22,7 @@ export function mergeTasks(current: DesktopBackgroundTask[], listed: unknown): D
   const byId = new Map<string, DesktopBackgroundTask>()
   for (const task of rows) {
     const record = task && typeof task === "object" && !Array.isArray(task) ? task as Record<string, unknown> : {}
-    const bgId = typeof record.bg_id === "string" ? record.bg_id.trim() : ""
+    const bgId = String(record.task_id || record.bg_id || "").trim()
     if (!bgId) continue
     byId.set(bgId, normalizeTask({ ...current.find((item) => item.bg_id === bgId), ...record, bg_id: bgId }))
   }
@@ -36,7 +36,7 @@ export function mergeTasks(current: DesktopBackgroundTask[], listed: unknown): D
 export function normalizeTask(record: unknown): DesktopBackgroundTask {
   const value = record && typeof record === "object" && !Array.isArray(record) ? record as Record<string, unknown> : {}
   return {
-    bg_id: String(value.bg_id || "").trim(),
+    bg_id: String(value.task_id || value.bg_id || "").trim(),
     status: String(value.status || "unknown"),
     exit_code: typeof value.exit_code === "number" ? value.exit_code : undefined,
     cwd: typeof value.cwd === "string" ? value.cwd : undefined,
@@ -77,7 +77,7 @@ export function renderTaskMonitor(elements: TaskMonitorElements, state: TaskMoni
         <strong>Background tasks</strong>
         <button type="button" class="ghost-button" data-task-close title="Close task monitor">Close</button>
       </div>
-      <p class="task-monitor-empty">No background tasks in this session. Background shells started with trailing <code>&amp;</code> commands appear here.</p>
+      <p class="task-monitor-empty">No managed shell tasks in this session. Long commands appear here while the Worker keeps them running.</p>
     `
     return
   }
