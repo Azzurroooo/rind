@@ -5,6 +5,7 @@ import time
 from agent.domain import tool_ok
 from agent.domain.tool_result import ToolExecutionResult
 from agent.infrastructure.tools.shell.process import ProcessRecord
+from agent.infrastructure.persistence.task_output import encode_cursor
 
 
 def task_snapshot(record: ProcessRecord) -> dict:
@@ -37,10 +38,15 @@ def task_result(tool: str, record: ProcessRecord, return_reason: str, max_chars:
         "total_bytes": record.stdout.byte_count + record.stderr.byte_count,
         "total_lines": record.stdout.line_count + record.stderr.line_count,
     }
-    if record.output_path:
-        meta["output_path"] = record.output_path
+    if record.output:
+        meta["output_path"] = str(record.output.path)
+        meta["output_incomplete"] = bool(record.output.incomplete)
+        if record.output.incomplete:
+            meta["output_error"] = record.output.incomplete
     return ToolExecutionResult(status="ok", result_str=tool_ok(tool, {
         **task_snapshot(record), "return_reason": return_reason, "stdout": stdout, "stderr": stderr,
+        "next_cursor": encode_cursor(record.task_id, record.output.records_path.stat().st_size if record.output and record.output.records_path.exists() else 0),
+        "start_cursor": encode_cursor(record.task_id, 0),
     }, meta=meta))
 
 

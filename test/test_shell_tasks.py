@@ -85,10 +85,10 @@ async def test_yield_reuse_nonzero_repeatable_reads_and_session_isolation(task_s
 async def test_release_and_cancel_observation_keep_original_process(task_shell):
     tools, processes = task_shell
     call = asyncio.create_task(tools.bash("work", yield_time_ms=60000, _idempotency_key="release"))
-    for _ in range(10):
-        await asyncio.sleep(0)
-        if tools.supervisor.release_wait("default", call_id="release"):
-            break
+    async def release():
+        while not tools.supervisor.release_wait("default", call_id="release"):
+            await asyncio.sleep(0)
+    await asyncio.wait_for(release(), 2)
     result = data(await asyncio.wait_for(call, 1))
     assert result["status"] == "running" and result["return_reason"] == "released"
     cancellation = CancellationTokenSource()

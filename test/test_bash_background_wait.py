@@ -68,4 +68,3 @@ async def test_unknown_legacy_task_is_not_restarted(task_shell):
     assert result["error_type"] == "NotFound"
     assert "will not be restarted" in result["error"]
     assert not processes
-

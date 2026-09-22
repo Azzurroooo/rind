@@ -10,6 +10,7 @@ from agent.infrastructure.persistence import ToolOutputStore
 from agent.infrastructure.tools.shell.session_pool import ShellSessionPool
 from agent.infrastructure.tools.shell.policy import BashPolicy
 from agent.infrastructure.tools.shell.supervisor import ProcessSupervisor
+from agent.infrastructure.persistence.task_journal import TaskJournal
 
 
 def integer(value, name: str, minimum: int, maximum: int | None = None) -> int:
@@ -25,7 +26,7 @@ def unwrap(result, tool: str) -> str:
 class ShellTools:
     def __init__(self, output_store: ToolOutputStore):
         self.pool = ShellSessionPool()
-        self.supervisor = ProcessSupervisor()
+        self.supervisor = ProcessSupervisor(journal=TaskJournal(output_store.session_root))
         self.output_store = output_store
 
     async def close_session(self, session_id: str) -> None:
@@ -95,7 +96,7 @@ class ShellTools:
                 integer(wait_ms, "wait_ms", 1000, 60000)
             result = await self.supervisor.control(action, _session_id, task_id,
                 wait_ms=30000 if wait_ms is None else wait_ms, max_output_chars=max_output_chars,
-                cancellation_token=_cancellation_token, page_token=page_token)
+                cancellation_token=_cancellation_token, page_token=page_token, cursor=cursor)
             return unwrap(result, "task_control")
         except (ValueError, TypeError) as exc:
             return tool_error("task_control", str(exc), "InvalidArguments")
