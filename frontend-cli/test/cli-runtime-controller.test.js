@@ -273,7 +273,7 @@ test("session restore replays the current session without switching", async () =
 test("session replay restores authoritative waiting state and clears it on switch", async () => {
   const h = createHarness();
   const request = h.client.request;
-  const waiting = { count: 1, command: "python backtest.py", started_at: 123 };
+  const waiting = { count: 1, started_at: 123 };
   h.client.request = async (method, params) => {
     const result = await request(method, params);
     if (method === methods.sessionReplay && params.session_id === "session-a") {

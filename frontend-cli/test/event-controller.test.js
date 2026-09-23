@@ -13,7 +13,7 @@ test("background waits replace only the pending turn's completion line", async (
       setBackgroundWait: (waiting) => waits.push(waiting),
     },
   });
-  const waiting = { count: 1, command: "python backtest.py", started_at: 100 };
+  const waiting = { count: 1, started_at: 100 };
   await controller.handle({ event: { type: "turn_completed", background_wait: waiting } });
   assert.match(lines[0], /Waiting for background task/);
   assert.match(lines[0], /Will continue automatically when finished. You can keep typing./);

@@ -67,13 +67,13 @@ test("idle background waiting preserves the composer and stops on work, suppress
   const h = createHarness({ columns: 90, rows: 16 });
   const editor = createLineEditor("继续检查结果");
   h.setSession({ mode: "prompt", editor });
-  const waiting = { count: 1, command: "python backtest.py", started_at: Date.now() / 1000 - 222 };
+  const waiting = { count: 1, started_at: Date.now() / 1000 - 222 };
   h.tui.start();
   try {
     h.output.setBackgroundWait(waiting);
     await settle(h.virtual);
     let screen = h.virtual.getViewport().join("\n");
-    assert.match(screen, /Waiting · python backtest.py · running 03:4\d/);
+    assert.match(screen, /Waiting · 1 background task · running 03:4\d/);
     assert.match(screen, /enter send/);
     assert.doesNotMatch(screen, /Working|ctrl\+c interrupt/);
     const cursor = h.virtual.getCursorPosition();

@@ -62,7 +62,7 @@ async def test_idle_task_completion_reopens_client_and_finishes_request(tmp_path
         events = [event async for event in worker.execution.run_turn(sid, query="Build it")]
         assert events[-1]["type"] == "turn_completed", events[-1]
         summary = events[-1]["background_wait"]
-        assert summary["count"] == 1 and summary["command"] == "work"
+        assert summary["count"] == 1
         assert (await worker.replay(sid))["background_wait"] == summary
         assert len(calls) == 2 and clients[0].closed
         assert not worker.execution.active_session_ids()
@@ -156,7 +156,7 @@ async def test_background_wait_counts_only_committed_owned_on_exit_tasks(tmp_pat
     try:
         events = [event async for event in worker.execution.run_turn(sid, query="Run backtests")]
         summary = events[-1]["background_wait"]
-        assert summary["count"] == 2 and summary["command"] == "first backtest"
+        assert summary["count"] == 2
         raw = await worker.shell_tools.bash("uncommitted", yield_time_ms=0, _session_id=sid)
         assert json.loads(raw)["ok"]
         assert await worker.execution.background_wait(sid) == summary

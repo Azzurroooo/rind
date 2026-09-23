@@ -426,9 +426,9 @@ export function promptActivityLine(state = {}) {
     const waiting = state.backgroundWait;
     const seconds = Math.max(0, Math.floor((state.elapsedMs || 0) / 1000));
     const elapsed = `${String(Math.floor(seconds / 60)).padStart(2, "0")}:${String(seconds % 60).padStart(2, "0")}`;
-    const detail = waiting.count > 1 ? `${waiting.count} background tasks` : singleLine(waiting.command);
-    const prefix = `  ${breathingAccent("Waiting", (state.frame || 0) * 300)} · `;
-    const suffix = ` · ${dim(`running ${elapsed}`)}`;
+    const detail = `${waiting.count} background task${waiting.count === 1 ? "" : "s"}`;
+    const prefix = `  ${breathingAccent("Waiting", (state.frame || 0) * 300)} ${dim("·")} `;
+    const suffix = ` ${dim("·")} ${dim(`running ${elapsed}`)}`;
     const width = composerWidth(state.frameWidth);
     return clipCells(prefix + middleClipCells(detail, Math.max(0, width - textWidth(prefix + suffix))) + suffix, width);
   }

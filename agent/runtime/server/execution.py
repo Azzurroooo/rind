@@ -140,8 +140,7 @@ class ExecutionCoordinator:
                  and (scope is None or record.get("request_id") == scope.request_id)]
         if not tasks:
             return None
-        oldest = min(tasks, key=lambda record: record["started_at"])
-        return {"count": len(tasks), "command": oldest["command"][:160], "started_at": oldest["started_at"]}
+        return {"count": len(tasks), "started_at": min(record["started_at"] for record in tasks)}
 
     def refresh_background_wait(self, session_id: str) -> None:
         if self._closed:
