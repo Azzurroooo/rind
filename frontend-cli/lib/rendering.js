@@ -430,7 +430,7 @@ export function promptActivityLine(state = {}) {
     const prefix = `  ${breathingAccent("Waiting", (state.frame || 0) * 300)} ${dim("·")} `;
     const suffix = ` ${dim("·")} ${dim(`running ${elapsed}`)}`;
     const width = composerWidth(state.frameWidth);
-    return clipCells(prefix + middleClipCells(detail, Math.max(0, width - textWidth(prefix + suffix))) + suffix, width);
+    return clipCells(prefix + dim(middleClipCells(detail, Math.max(0, width - textWidth(prefix + suffix)))) + suffix, width);
   }
   if (!state.running) {
     return "";
