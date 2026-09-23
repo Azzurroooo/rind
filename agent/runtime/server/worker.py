@@ -115,6 +115,7 @@ class RuntimeWorker:
         result = await self.repository.replay(session_id, start=start, end=end)
         result["live_turn"] = self.execution.live_turn(session_id)
         result["tasks"] = await self.shell_tools.list_backgrounds(session_id)
+        result["background_wait"] = await self.execution.background_wait(session_id)
         return result
 
     async def replay_event_pages(self, session_id: str) -> dict[str, Any]:

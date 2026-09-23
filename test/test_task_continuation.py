@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock
 import pytest
 
 from agent.domain.message_boundary import validate_model_message_boundary
+from agent.application.task_notifications import TaskNotifications
 from agent.domain.models import ModelStreamEvent
 from agent.infrastructure.persistence import ToolOutputStore
 from agent.infrastructure.tools.shell.tool import ShellTools
@@ -60,6 +61,9 @@ async def test_idle_task_completion_reopens_client_and_finishes_request(tmp_path
         worker.execution.begin_request(sid)
         events = [event async for event in worker.execution.run_turn(sid, query="Build it")]
         assert events[-1]["type"] == "turn_completed", events[-1]
+        summary = events[-1]["background_wait"]
+        assert summary["count"] == 1 and summary["command"] == "work"
+        assert (await worker.replay(sid))["background_wait"] == summary
         assert len(calls) == 2 and clients[0].closed
         assert not worker.execution.active_session_ids()
         waiting = asyncio.create_task(worker.execution.wait_request(sid))
@@ -69,6 +73,7 @@ async def test_idle_task_completion_reopens_client_and_finishes_request(tmp_path
         processes[0].finish(stdout=b"completed build\n")
         result = await asyncio.wait_for(waiting, 5)
         assert result["answer"] == "Final answer."
+        assert await worker.execution.background_wait(sid) is None
         assert len(calls) == 3 and len(clients) == 2 and all(c.closed for c in clients)
         notifications = [m for m in calls[-1] if "runtime_notification" in m.get("content", "")]
         assert len(notifications) == 1 and notifications[0]["role"] == "user"
@@ -82,8 +87,15 @@ async def test_interrupted_idle_session_only_delivers_when_user_returns(tmp_path
     steps = [{"args": {"command": "work", "yield_time_ms": 0}}, "Waiting.", "Resumed answer."]
     worker, sid, processes, calls, clients = await worker_with_script(tmp_path, monkeypatch, task_shell, steps)
     try:
-        _ = [event async for event in worker.execution.run_turn(sid, query="Build")]
+        events = [event async for event in worker.execution.run_turn(sid, query="Build")]
+        assert events[-1]["background_wait"]["count"] == 1
+        cleared = asyncio.Event()
+        worker.execution.add_event_sink(lambda event: cleared.set()
+            if event["type"] == "background_wait_changed" and event["background_wait"] is None else None)
         assert worker.execution.interrupt(sid)
+        await asyncio.wait_for(cleared.wait(), 2)
+        assert processes[0].returncode is None
+        assert (await worker.replay(sid))["background_wait"] is None
         processes[0].finish(stdout=b"late completion\n")
         task_id = (await worker.shell_tools.list_backgrounds(sid))[0]["task_id"]
         await worker.shell_tools.task_control("wait", task_id, _session_id=sid)
@@ -101,7 +113,8 @@ async def test_manual_service_does_not_block_request_or_start_model(tmp_path, mo
     worker, sid, processes, calls, clients = await worker_with_script(tmp_path, monkeypatch, task_shell, steps)
     try:
         worker.execution.begin_request(sid)
-        _ = [event async for event in worker.execution.run_turn(sid, query="Start service")]
+        events = [event async for event in worker.execution.run_turn(sid, query="Start service")]
+        assert events[-1]["background_wait"] is None
         result = await asyncio.wait_for(worker.execution.wait_request(sid), 5)
         assert "Server managed" in result["answer"] and len(calls) == 2
         assert processes[0].returncode is None
@@ -135,6 +148,30 @@ async def test_request_waits_for_tasks_started_by_continuation(tmp_path, monkeyp
 
 
 @pytest.mark.asyncio
+async def test_background_wait_counts_only_committed_owned_on_exit_tasks(tmp_path, monkeypatch, task_shell):
+    steps = [{"id": "first", "args": {"command": "first backtest", "yield_time_ms": 0}},
+             {"id": "server", "args": {"command": "server", "yield_time_ms": 0, "notify": "manual"}},
+             {"id": "second", "args": {"command": "second backtest", "yield_time_ms": 0}}, "Waiting."]
+    worker, sid, processes, calls, clients = await worker_with_script(tmp_path, monkeypatch, task_shell, steps)
+    try:
+        events = [event async for event in worker.execution.run_turn(sid, query="Run backtests")]
+        summary = events[-1]["background_wait"]
+        assert summary["count"] == 2 and summary["command"] == "first backtest"
+        raw = await worker.shell_tools.bash("uncommitted", yield_time_ms=0, _session_id=sid)
+        assert json.loads(raw)["ok"]
+        assert await worker.execution.background_wait(sid) == summary
+        other = ShellTools(ToolOutputStore(str(tmp_path)))
+        try:
+            foreign = await other.bash("foreign task", yield_time_ms=0, _session_id=sid, _idempotency_key="foreign")
+            await TaskNotifications(other.supervisor.journal).result_committed(sid, "bash", "foreign", foreign)
+            assert await worker.execution.background_wait(sid) == summary
+        finally:
+            await other.close()
+    finally:
+        await worker.close()
+
+
+@pytest.mark.asyncio
 async def test_goal_waits_without_checkpoints_and_pause_wins_completion(tmp_path, monkeypatch, task_shell):
     steps = [{"args": {"command": "work", "yield_time_ms": 0}}, "Waiting."]
     worker, sid, processes, calls, clients = await worker_with_script(tmp_path, monkeypatch, task_shell, steps)
@@ -146,6 +183,7 @@ async def test_goal_waits_without_checkpoints_and_pause_wins_completion(tmp_path
         await worker.execution._continuations[sid]
         assert len(calls) == 2 and all(client.closed for client in clients)
         goal["status"] = "paused"
+        assert await worker.execution.background_wait(sid) is None
         processes[0].finish()
         task_id = (await worker.shell_tools.list_backgrounds(sid))[0]["task_id"]
         await worker.shell_tools.task_control("wait", task_id, _session_id=sid)
@@ -208,7 +246,8 @@ async def test_bounded_event_queue_recovers_terminal_states_for_slow_client(tmp_
     def disconnected(event):
         raise RuntimeError("Client disconnected")
     worker.execution.add_event_sink(disconnected)
-    worker.execution.add_event_sink(lambda event: seen.add(event["task"]["task_id"]))
+    worker.execution.add_event_sink(lambda event: seen.add(event["task"]["task_id"])
+                                    if event["type"] == "task_updated" else None)
     try:
         for record in records.values():
             worker.execution.task_changed(record)

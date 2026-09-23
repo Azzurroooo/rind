@@ -117,33 +117,65 @@ class ExecutionCoordinator:
         key = f"{snapshot['task_id']}:{event_type}"
         if snapshot.get("status") in TERMINAL_STATES:
             self._task_events.pop(f"{snapshot['task_id']}:task_output", None)
-        if len(self._task_events) >= 128 and key not in self._task_events:
-            oldest = next((item for item in self._task_events if item.endswith(":task_output")), next(iter(self._task_events)))
-            dropped = self._task_events.pop(oldest)
-            if dropped["type"] == "task_updated":
-                self._task_resync_sessions.add(dropped["session_id"])
-        self._task_events[key] = {"type": event_type, "session_id": session_id, "turn_id": "",
-            "origin_turn_id": snapshot.get("origin_turn_id", ""), "task": public_task(snapshot)}
-        if self._task_event_pump is None:
-            self._task_event_pump = asyncio.create_task(self._publish_task_events())
+        self._queue_task_event(key, {"type": event_type, "session_id": session_id, "turn_id": "",
+            "origin_turn_id": snapshot.get("origin_turn_id", ""), "task": public_task(snapshot)})
         scope = self._scopes.get(session_id)
         if scope:
             scope.changed.set()
         if pending_notification(snapshot):
             self._schedule_continuation(session_id)
 
+    async def background_wait(self, session_id: str) -> dict | None:
+        records = await self._task_notifications.store.records(session_id)
+        goal = await self._repository.get_goal(session_id) if self._enable_goal else None
+        if self._closed or session_id in self._suppressed or session_id in self._closed_sessions:
+            return None
+        if goal and goal.get("status") in {"paused", "blocked", "budget_exhausted"}:
+            return None
+        scope = self._scopes.get(session_id)
+        tasks = [record for record in records.values()
+                 if record.get("notify") == "on_exit" and record.get("status") == "running"
+                 and record.get("committed") and record.get("handoff")
+                 and record.get("worker_instance_id") == self._shell_tools.supervisor.journal.worker_instance_id
+                 and (scope is None or record.get("request_id") == scope.request_id)]
+        if not tasks:
+            return None
+        oldest = min(tasks, key=lambda record: record["started_at"])
+        return {"count": len(tasks), "command": oldest["command"][:160], "started_at": oldest["started_at"]}
+
+    def refresh_background_wait(self, session_id: str) -> None:
+        if self._closed:
+            return
+        self._queue_task_event(f"{session_id}:background_wait_changed", {
+            "type": "background_wait_changed", "session_id": session_id, "turn_id": ""})
+
+    def _queue_task_event(self, key: str, event: dict) -> None:
+        if len(self._task_events) >= 128 and key not in self._task_events:
+            oldest = next((item for item in self._task_events if item.endswith(":task_output")), next(iter(self._task_events)))
+            dropped = self._task_events.pop(oldest)
+            if dropped["type"] != "task_output":
+                self._task_resync_sessions.add(dropped["session_id"])
+        self._task_events[key] = event
+        if self._task_event_pump is None:
+            self._task_event_pump = asyncio.create_task(self._publish_task_events())
+
     async def _publish_task_events(self) -> None:
         try:
             while self._task_events or self._task_resync_sessions:
                 if self._task_events:
                     event = self._task_events.pop(next(iter(self._task_events)))
+                    if event["type"] == "background_wait_changed":
+                        event["background_wait"] = await self.background_wait(event["session_id"])
                     await self._emit_to_event_sinks(event)
+                    if event["type"] == "task_updated":
+                        self.refresh_background_wait(event["session_id"])
                 else:
                     session_id = self._task_resync_sessions.pop()
                     records = await self._task_notifications.store.records(session_id)
                     for record in records.values():
                         await self._emit_to_event_sinks({"type": "task_updated", "session_id": session_id,
                             "turn_id": "", "origin_turn_id": record.get("origin_turn_id", ""), "task": public_task(record)})
+                    self.refresh_background_wait(session_id)
         finally:
             self._task_event_pump = None
 
@@ -159,6 +191,7 @@ class ExecutionCoordinator:
 
     async def start_goal_continuation(self, session_id: str) -> bool:
         clean = validate_session_id(session_id)
+        self.refresh_background_wait(clean)
         return self._schedule_continuation(clean)
 
     async def _run_continuation(self, session_id: str) -> None:
@@ -197,6 +230,7 @@ class ExecutionCoordinator:
             raise
         except Exception as exc:
             self._suppressed.add(session_id)
+            self.refresh_background_wait(session_id)
             scope = self._scopes.get(session_id)
             if scope:
                 scope.error = str(exc)
@@ -423,6 +457,8 @@ class ExecutionCoordinator:
                                 str(event_data.get("error") or event_data.get("reason") or "Request failed."))
                             if scope:
                                 scope.error = str(event_data.get("error") or event_data.get("reason") or "Request failed.")
+                        if event_data.get("type") == "turn_completed":
+                            event_data["background_wait"] = await self.background_wait(clean)
                         self.update_live_event(event_data)
                         if event_data.get("type") == "user_question_requested":
                             self._prepare_user_question(clean, str(event_data.get("tool_call_id") or ""))
@@ -458,6 +494,7 @@ class ExecutionCoordinator:
     def interrupt(self, session_id: str, reason: str = "User interrupted") -> bool:
         clean = validate_session_id(session_id)
         self._suppressed.add(clean)
+        self.refresh_background_wait(clean)
         scope = self._scopes.get(clean)
         if scope:
             scope.error = reason

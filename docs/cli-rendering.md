@@ -49,6 +49,12 @@ Managed shell calls can return while their task is still running. The tool block
 
 Non-TTY sessions render task state as plain text. `rind run` uses request completion when advertised: stage replies, task progress and log paths go to stderr, and the final answer goes once to stdout. On an older Worker it reports the missing continuation capability and retains single-turn behavior. Remaining manual services stop at Worker shutdown. Desktop consumes task events with legacy snapshot fallback; Web restores task status from replay snapshots; gateway tolerates task events without changing typing or conversation cursor state.
 
+## Background waiting
+
+The Worker supplies `background_wait: { count, command, started_at } | null` on `turn_completed`, session replay, and the session-scoped `background_wait_changed` event. This is a derived snapshot of committed, handed-off, running `on_exit` tasks owned by that Worker; it respects request scope, interruption suppression and goal pause/block/budget states. It is not inferred from the total background count or model prose. Task status changes, cancellation and continuation failure refresh it; output chunks do not trigger snapshot reads.
+
+While the model is idle and this snapshot is present, the transcript uses a static `Waiting for background task` footer instead of `Worked for`, followed by `Will continue automatically when finished. You can keep typing.` The composer shows `Waiting`, the command (or task count), and task runtime. Only the theme accent brightness of `Waiting` breathes on a 4.2-second cycle; there is no spinner, movement or focus change. `NO_COLOR` keeps the label static. Active turns retain their existing Working display. Clearing the wait or switching sessions removes its status and stops the idle animation timer.
+
 ## Invariants
 
 - Single authoritative width: the engine's `columns()` is the only source, handed down via `render(width)`; components must not read `process.stdout.columns`.

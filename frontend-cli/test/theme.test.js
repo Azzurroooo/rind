@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 
 import {
   DEFAULT_THEME,
+  breathingAccent,
   currentTheme,
   flavorSwatch,
   paint,
@@ -17,6 +18,27 @@ import { cliStatePath, loadCliState, saveCliState } from "../lib/cli-state-store
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
+
+test("waiting breath changes only theme brightness and stays static without color", () => {
+  const tty = process.stdout.isTTY;
+  const noColor = process.env.NO_COLOR;
+  try {
+    process.stdout.isTTY = true;
+    delete process.env.NO_COLOR;
+    const low = breathingAccent("Waiting", 0);
+    const high = breathingAccent("Waiting", 2100);
+    assert.notEqual(low, high);
+    assert.equal(high, paint.accent("Waiting"));
+    assert.equal(low, breathingAccent("Waiting", 4200));
+    process.env.NO_COLOR = "1";
+    assert.equal(breathingAccent("Waiting", 0), "Waiting");
+    assert.equal(breathingAccent("Waiting", 2100), "Waiting");
+  } finally {
+    process.stdout.isTTY = tty;
+    if (noColor === undefined) delete process.env.NO_COLOR;
+    else process.env.NO_COLOR = noColor;
+  }
+});
 
 test("theme defaults to Frappé and validates switches", () => {
   resetTheme();

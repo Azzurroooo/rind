@@ -401,6 +401,7 @@ const eventController = createEventController({
       displayState.stats = stats;
     },
     setActivityLabel: outputController.setActivityLabel,
+    setBackgroundWait: outputController.setBackgroundWait,
     redraw: redrawInput,
     clearCompactContext: () => compactContextState.clear(),
     deliverQueuedInput: (...args) => inputActions.deliverQueuedInput(...args),
@@ -487,7 +488,7 @@ try {
 
 function updateGoalState(goal) {
   sessionState.info = { ...sessionState.info, goal: goal && typeof goal === "object" ? goal : null };
-  redrawInput();
+  refreshInputState();
 }
 
 async function rebindSendEndpoint() {

@@ -36,18 +36,33 @@ export function createCliOutputController({ state, terminalUi, transcript, anima
 
   function inputState() {
     const running = state.turn.active || state.display.activeCompact;
+    const backgroundWait = waitingForBackground();
     const inputSession = state.input.session;
     return {
       running,
+      backgroundWait,
       label: state.display.activityLabel || (state.display.activeCompact
         ? "Compacting"
         : "Working"),
       frame: state.display.activityFrame,
-      elapsedMs: running ? Date.now() - state.display.activityStartedAt : 0,
+      elapsedMs: running ? Date.now() - state.display.activityStartedAt
+        : backgroundWait ? Date.now() - backgroundWait.started_at * 1000 : 0,
       pendingInputs: state.input.pending,
       inputMode: inputSession?.mode || "prompt",
       menuOpen: Boolean(inputSession?.menuState?.matches?.()?.length),
     };
+  }
+
+  function waitingForBackground() {
+    if (state.runtime.status !== "ready" || state.turn.active || state.display.activeCompact
+      || state.turn.interruptRequested
+      || ["paused", "blocked", "budget_exhausted"].includes(state.session.info.goal?.status)) return null;
+    return state.display.backgroundWait;
+  }
+
+  function setBackgroundWait(waiting) {
+    state.display.backgroundWait = waiting || null;
+    refreshInputState();
   }
 
   function setActivityLabel(label = "") {
@@ -69,7 +84,7 @@ export function createCliOutputController({ state, terminalUi, transcript, anima
   }
 
   function updateActivityTimer() {
-    if (state.turn.active || state.display.activeCompact) {
+    if (state.turn.active || state.display.activeCompact || (terminalUi && waitingForBackground())) {
       if (!state.display.activityStartedAt) {
         state.display.activityStartedAt = Date.now();
       }
@@ -415,6 +430,7 @@ export function createCliOutputController({ state, terminalUi, transcript, anima
     refreshInputState,
     clearActivityTimer,
     setActivityLabel,
+    setBackgroundWait,
     mainPromptText,
     log,
     writeUserInput,

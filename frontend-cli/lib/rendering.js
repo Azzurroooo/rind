@@ -1,6 +1,6 @@
 import { clipCells, graphemes, middleClipCells, stripAnsi, textWidth, wrapTextCells } from "./text-width.js";
 import { formatDuration } from "./tool-display.js";
-import { DEFAULT_THEME, paint, paintRaw, flavorSwatch, themeNames } from "./theme.js";
+import { DEFAULT_THEME, paint, paintRaw, flavorSwatch, themeNames, breathingAccent } from "./theme.js";
 import { homedir } from "node:os";
 
 const MAX_STARTUP_BANNER_WIDTH = 80;
@@ -422,12 +422,27 @@ export function promptText(info = {}, _stats = {}, state = {}, frameWidth) {
 }
 
 export function promptActivityLine(state = {}) {
+  if (!state.running && state.backgroundWait) {
+    const waiting = state.backgroundWait;
+    const seconds = Math.max(0, Math.floor((state.elapsedMs || 0) / 1000));
+    const elapsed = `${String(Math.floor(seconds / 60)).padStart(2, "0")}:${String(seconds % 60).padStart(2, "0")}`;
+    const detail = waiting.count > 1 ? `${waiting.count} background tasks` : singleLine(waiting.command);
+    const prefix = `  ${breathingAccent("Waiting", (state.frame || 0) * 300)} · `;
+    const suffix = ` · ${dim(`running ${elapsed}`)}`;
+    const width = composerWidth(state.frameWidth);
+    return clipCells(prefix + middleClipCells(detail, Math.max(0, width - textWidth(prefix + suffix))) + suffix, width);
+  }
   if (!state.running) {
     return "";
   }
   const elapsed = formatActivityDuration(state.elapsedMs);
   const label = singleLine(state.label) || "Working";
   return `  ${accent(activityFrame(state.frame))} ${bold(label)} ${dim(`(${elapsed}) ctrl+c interrupt`)}`;
+}
+
+export function backgroundWaitingLine(count = 1) {
+  const label = count > 1 ? `Waiting for ${count} background tasks` : "Waiting for background task";
+  return `${dim("─")} ${bold(label)}\n  ${dim("Will continue automatically when finished. You can keep typing.")}`;
 }
 
 export function promptHintLine(state = {}) {
@@ -1626,7 +1641,7 @@ function helpRow(leftKey, leftText, rightKey = "", rightText = "") {
 
 function inputPromptFrame(header = "", state = {}, frameWidth) {
   const lines = [""];
-  const activity = promptActivityLine(state);
+  const activity = promptActivityLine({ ...state, frameWidth });
   if (activity) {
     lines.push(activity);
   }

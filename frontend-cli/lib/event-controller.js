@@ -6,6 +6,7 @@ import {
   planUpdatedLine,
   systemNoticeLine,
   turnCompletedLine,
+  backgroundWaitingLine,
 } from "./rendering.js";
 
 export function createEventController({
@@ -32,14 +33,20 @@ export function createEventController({
       return;
     }
     switch (eventType) {
+      case "background_wait_changed":
+        output.setBackgroundWait?.(event.background_wait);
+        return;
       case "task_updated":
       case "task_output":
         monitor.recordTask?.(event);
         return;
       case "task_continuation_failed":
+        output.setBackgroundWait?.(null);
         output.log?.(() => errorLine(event.error));
         return;
       case "turn_started":
+        output.setBackgroundWait?.(null);
+        return;
       case "context_compacted":
         return;
       case "assistant_delta":
@@ -147,6 +154,7 @@ export function createEventController({
         output.deliverQueuedInput?.(event.input || "", event.mode || "steering", event.input_id || "");
         return;
       case "turn_failed":
+        output.setBackgroundWait?.(null);
         output.clearQueuedInputs?.();
         output.clearCompactContext?.();
         output.closeAssistant?.();
@@ -154,6 +162,7 @@ export function createEventController({
         resetTurnState();
         return;
       case "turn_cancelled":
+        output.setBackgroundWait?.(null);
         output.clearQueuedInputs?.();
         output.clearCompactContext?.();
         output.closeAssistant?.();
@@ -164,8 +173,10 @@ export function createEventController({
         output.clearQueuedInputs?.();
         output.clearCompactContext?.();
         output.closeAssistant?.();
-        if (state.sessionInfo?.background_count > 0) output.setActivityLabel?.("Waiting for background tasks");
-        if (state.activeGoal?.status !== "active") {
+        output.setBackgroundWait?.(event.background_wait);
+        if (event.background_wait) {
+          output.log?.(() => backgroundWaitingLine(event.background_wait.count));
+        } else if (state.activeGoal?.status !== "active") {
           output.log?.(turnCompletedLine(event, toolStats));
         }
         resetTurnState();

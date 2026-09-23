@@ -145,6 +145,13 @@ function buildPainters(force) {
 export const paint = buildPainters(false);
 export const paintRaw = buildPainters(true);
 
+export function breathingAccent(text, elapsedMs) {
+  const intensity = 0.78 + 0.22 * (1 - Math.cos(2 * Math.PI * elapsedMs / 4200)) / 2;
+  const color = Number.parseInt(FLAVORS[activeName].accent.slice(1), 16);
+  const channels = [16, 8, 0].map((shift) => Math.round(((color >> shift) & 255) * intensity));
+  return wrap(`38;2;${channels.join(";")}`, text, false);
+}
+
 export function themeNames() {
   return Object.keys(FLAVORS);
 }

@@ -63,6 +63,56 @@ async function settle(virtual) {
   await virtual.flush();
 }
 
+test("idle background waiting preserves the composer and stops on work, suppression and completion", async () => {
+  const h = createHarness({ columns: 90, rows: 16 });
+  const editor = createLineEditor("继续检查结果");
+  h.setSession({ mode: "prompt", editor });
+  const waiting = { count: 1, command: "python backtest.py", started_at: Date.now() / 1000 - 222 };
+  h.tui.start();
+  try {
+    h.output.setBackgroundWait(waiting);
+    await settle(h.virtual);
+    let screen = h.virtual.getViewport().join("\n");
+    assert.match(screen, /Waiting · python backtest.py · running 03:4\d/);
+    assert.match(screen, /enter send/);
+    assert.doesNotMatch(screen, /Working|ctrl\+c interrupt/);
+    const cursor = h.virtual.getCursorPosition();
+    h.state.display.activityFrame = 7;
+    h.output.redraw(true);
+    await settle(h.virtual);
+    assert.deepEqual(h.virtual.getCursorPosition(), cursor);
+    assert.equal(editor.input(), "继续检查结果");
+    assert.ok(h.state.display.activityTimer);
+
+    h.state.turn.active = true;
+    h.output.refreshInputState();
+    assert.match(h.output.mainPromptText(90), /Working/);
+    assert.doesNotMatch(h.output.mainPromptText(90), /Waiting/);
+    h.state.turn.active = false;
+    h.state.turn.interruptRequested = true;
+    h.output.refreshInputState();
+    assert.doesNotMatch(h.output.mainPromptText(90), /Waiting/);
+    assert.equal(h.state.display.activityTimer, null);
+
+    h.state.turn.interruptRequested = false;
+    h.state.session.info.goal = { status: "paused" };
+    h.output.refreshInputState();
+    assert.doesNotMatch(h.output.mainPromptText(90), /Waiting/);
+    h.state.session.info.goal = null;
+    h.output.setBackgroundWait({ ...waiting, count: 2 });
+    assert.match(h.output.mainPromptText(90), /Waiting · 2 background tasks/);
+    h.virtual.resize(36, 16);
+    await settle(h.virtual);
+    assert.equal(editor.input(), "继续检查结果");
+    h.output.setBackgroundWait(null);
+    assert.equal(h.state.display.activityTimer, null);
+    assert.doesNotMatch(h.output.mainPromptText(36), /Waiting/);
+  } finally {
+    h.output.clearActivityTimer();
+    h.tui.stop();
+  }
+});
+
 test("task events preserve CJK composer text and cursor across completion and resize", async () => {
   const harness = createHarness({ columns: 54, rows: 14 });
   const editor = createLineEditor("");

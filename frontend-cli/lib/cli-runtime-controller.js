@@ -171,6 +171,7 @@ export function createCliRuntimeController({
     state.turn.id = "";
     state.turn.active = false;
     state.turn.interruptRequested = false;
+    state.display.backgroundWait = replay?.background_wait || null;
     options.announce?.(state.session.info);
     renderHistory(replay?.messages);
     restoreLiveTurn(liveTurn);

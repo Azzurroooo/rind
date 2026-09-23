@@ -270,6 +270,23 @@ test("session restore replays the current session without switching", async () =
   assert.equal(harness.history.length, 1);
 });
 
+test("session replay restores authoritative waiting state and clears it on switch", async () => {
+  const h = createHarness();
+  const request = h.client.request;
+  const waiting = { count: 1, command: "python backtest.py", started_at: 123 };
+  h.client.request = async (method, params) => {
+    const result = await request(method, params);
+    if (method === methods.sessionReplay && params.session_id === "session-a") {
+      return { ...result, background_wait: waiting };
+    }
+    return result;
+  };
+  await h.controller.restoreSession();
+  assert.deepEqual(h.state.display.backgroundWait, waiting);
+  await h.controller.restoreSession("session-b", { switchSession: true });
+  assert.equal(h.state.display.backgroundWait, null);
+});
+
 test("session selector refuses to switch during an active turn", async () => {
   const harness = createHarness({ selectedSession: { id: "session-b" } });
   harness.state.turn.active = true;
