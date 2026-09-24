@@ -29,6 +29,21 @@ def _models(provider_id: str, api: str, values: tuple[tuple[str, str, tuple[str,
     )
 
 
+_XIAOMI_MODELS = (
+    ("mimo-v2.6-pro", "MiMo-V2.6-Pro", (), True),
+    ("mimo-v2.6-flash", "MiMo-V2.6-Flash", (), True),
+)
+
+_TENCENT_HY_MODELS = (
+    ("hy3", "Hunyuan Hy3", (), False),
+    ("hy4-preview", "Hunyuan Hy4 Preview", (), False),
+)
+
+_MINIMAX_MODELS = (
+    ("MiniMax-M3", "MiniMax M3", (), True),
+)
+
+
 PROVIDERS: dict[str, ProviderDefinition] = {
     "openai": ProviderDefinition(
         "openai", "OpenAI", "openai-responses", "https://api.openai.com/v1", environment_key="OPENAI_API_KEY",
@@ -178,6 +193,72 @@ PROVIDERS: dict[str, ProviderDefinition] = {
             ("kimi-k2.7-code", "Kimi K2.7 Code", ("low", "medium", "high", "xhigh", "max"), True),
             ("kimi-k2.7-code-highspeed", "Kimi K2.7 Code HighSpeed", ("low", "medium", "high", "xhigh", "max"), True),
         )),
+    ),
+    "xiaomi": ProviderDefinition(
+        "xiaomi", "Xiaomi MiMo", "openai-chat", "https://api.xiaomimimo.com/v1", environment_key="XIAOMI_API_KEY",
+        fallback_models=_models("xiaomi", "openai-chat", _XIAOMI_MODELS),
+    ),
+    "xiaomi-token-plan-cn": ProviderDefinition(
+        "xiaomi-token-plan-cn", "Xiaomi MiMo Token Plan (China)", "openai-chat", "https://token-plan-cn.xiaomimimo.com/v1", environment_key="XIAOMI_TOKEN_PLAN_CN_API_KEY",
+        fallback_models=_models("xiaomi-token-plan-cn", "openai-chat", _XIAOMI_MODELS),
+    ),
+    "xiaomi-token-plan-ams": ProviderDefinition(
+        "xiaomi-token-plan-ams", "Xiaomi MiMo Token Plan (Europe)", "openai-chat", "https://token-plan-ams.xiaomimimo.com/v1", environment_key="XIAOMI_TOKEN_PLAN_AMS_API_KEY",
+        fallback_models=_models("xiaomi-token-plan-ams", "openai-chat", _XIAOMI_MODELS),
+    ),
+    "xiaomi-token-plan-sgp": ProviderDefinition(
+        "xiaomi-token-plan-sgp", "Xiaomi MiMo Token Plan (Singapore)", "openai-chat", "https://token-plan-sgp.xiaomimimo.com/v1", environment_key="XIAOMI_TOKEN_PLAN_SGP_API_KEY",
+        fallback_models=_models("xiaomi-token-plan-sgp", "openai-chat", _XIAOMI_MODELS),
+    ),
+    "hunyuan": ProviderDefinition(
+        "hunyuan", "Tencent Hunyuan", "openai-chat", "https://api.hunyuan.cloud.tencent.com/v1", environment_key="HUNYUAN_API_KEY",
+        fallback_models=_models("hunyuan", "openai-chat", (
+            ("hunyuan-turbos-latest", "Hunyuan Turbo S", (), False),
+        )),
+    ),
+    "tencent-coding-plan": ProviderDefinition(
+        "tencent-coding-plan", "Tencent Coding Plan", "openai-chat", "https://api.lkeap.cloud.tencent.com/coding/v3", environment_key="TENCENT_CODING_PLAN_API_KEY",
+        fallback_models=_models("tencent-coding-plan", "openai-chat", (
+            ("tc-code-latest", "Tencent Code Auto", (), False),
+            ("glm-5", "GLM-5", (), False),
+        )),
+    ),
+    "tencent-tokenhub": ProviderDefinition(
+        "tencent-tokenhub", "Tencent TokenHub (Hunyuan)", "openai-chat", "https://tokenhub.tencentmaas.com/v1", environment_key="TENCENT_TOKENHUB_API_KEY",
+        fallback_models=_models("tencent-tokenhub", "openai-chat", _TENCENT_HY_MODELS),
+    ),
+    "tencent-token-plan": ProviderDefinition(
+        "tencent-token-plan", "Tencent Token Plan", "openai-chat", "https://api.lkeap.cloud.tencent.com/plan/v3", environment_key="TENCENT_TOKEN_PLAN_API_KEY",
+        fallback_models=_models("tencent-token-plan", "openai-chat", _TENCENT_HY_MODELS),
+    ),
+    "volcengine": ProviderDefinition(
+        "volcengine", "Volcengine Ark (Doubao)", "openai-chat", "https://ark.cn-beijing.volces.com/api/v3", environment_key="ARK_API_KEY",
+        fallback_models=_models("volcengine", "openai-chat", (
+            ("doubao-seed-2-1-pro-260628", "Doubao Seed 2.1 Pro", (), True),
+        )),
+    ),
+    "volcengine-coding-plan": ProviderDefinition(
+        "volcengine-coding-plan", "Volcengine Ark Coding Plan", "openai-chat", "https://ark.cn-beijing.volces.com/api/coding/v3", environment_key="ARK_CODING_PLAN_API_KEY",
+        fallback_models=_models("volcengine-coding-plan", "openai-chat", (
+            ("ark-code-latest", "Ark Coding Plan Selected Model", (), None),
+            ("doubao-seed-2.1-pro", "Doubao Seed 2.1 Pro", (), True),
+        )),
+    ),
+    "minimax": ProviderDefinition(
+        "minimax", "MiniMax (minimax.io)", "anthropic-messages", "https://api.minimax.io/anthropic", environment_key="MINIMAX_API_KEY",
+        fallback_models=_models("minimax", "anthropic-messages", _MINIMAX_MODELS),
+    ),
+    "minimax-cn": ProviderDefinition(
+        "minimax-cn", "MiniMax (China)", "anthropic-messages", "https://api.minimax.cn/anthropic", environment_key="MINIMAX_CN_API_KEY",
+        fallback_models=_models("minimax-cn", "anthropic-messages", _MINIMAX_MODELS),
+    ),
+    "minimax-coding-plan": ProviderDefinition(
+        "minimax-coding-plan", "MiniMax Token Plan (Global)", "anthropic-messages", "https://api.minimax.io/anthropic", environment_key="MINIMAX_CODING_PLAN_API_KEY",
+        fallback_models=_models("minimax-coding-plan", "anthropic-messages", _MINIMAX_MODELS),
+    ),
+    "minimax-cn-coding-plan": ProviderDefinition(
+        "minimax-cn-coding-plan", "MiniMax Token Plan (China)", "anthropic-messages", "https://api.minimax.cn/anthropic", environment_key="MINIMAX_CN_CODING_PLAN_API_KEY",
+        fallback_models=_models("minimax-cn-coding-plan", "anthropic-messages", _MINIMAX_MODELS),
     ),
     "qwen": ProviderDefinition(
         "qwen", "Qwen", "openai-chat", "https://dashscope.aliyuncs.com/compatible-mode/v1", environment_key="DASHSCOPE_API_KEY",

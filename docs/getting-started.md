@@ -36,6 +36,8 @@ A complete `.rind/settings.json` in the current workspace takes precedence over 
 
 `RIND_HOME` changes the user data directory, whose default is `~/.rind`. It contains settings, saved credentials, sessions, and user blueprints. For native provider IDs and API dialects, see the [provider catalog](../agent/infrastructure/llm/catalog.py).
 
+The catalog includes regional and coding-plan endpoints for MiMo, Hunyuan, Doubao/Ark, and MiniMax. See the [provider additions](provider-catalog.md) for endpoint and credential boundaries.
+
 ## From source
 
 Requires Python 3.12+, Node.js 18+, and Git. The source branch includes changes that may not yet be in the latest release, including the tour added after v0.8.0.
