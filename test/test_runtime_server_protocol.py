@@ -556,7 +556,7 @@ def test_background_requests_use_control_callbacks(capsys):
 def test_model_list_returns_structured_models_current_and_warning():
     worker = FakeWorker()
     worker.models_listing = {
-        "models": [{"provider_id": "openai", "id": "gpt-5.5", "name": "GPT-5.5", "api": "openai-responses", "reasoning_efforts": ["low", "high"], "context_window": None}],
+        "models": [{"provider_id": "openai", "id": "gpt-5.5", "api": "openai-responses", "reasoning_efforts": ["low", "high"], "context_window": None}],
         "warning": "failed to refresh OpenAI models, showing saved models",
     }
     server, payloads = make_server(worker)

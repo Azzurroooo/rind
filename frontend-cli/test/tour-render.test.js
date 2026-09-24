@@ -267,7 +267,7 @@ test("pending queue and steering entries appear in the composer", () => {
 test("menu steps render through the real menu renderers", () => {
   const view = playPage([
     { kind: "startup", info: INFO },
-    { kind: "menu", menu: { kind: "model", items: [{ header: true, name: "zai" }, { name: "glm-4.7", current: true }], selected: 0, target: 1, input: "/model" } },
+    { kind: "menu", menu: { kind: "model", items: [{ header: true, name: "zai" }, { modelId: "glm-4.7", current: true }], selected: 0, target: 1, input: "/model" } },
   ]);
   const text = view.render().lines.map(stripAnsi).join("\n");
   assert.ok(text.includes("Model deck"), "model deck title shown");

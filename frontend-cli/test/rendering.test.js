@@ -425,9 +425,9 @@ test("modelMenuText renders provider groups, current model and selection", () =>
   assert.equal(
     modelMenuText([
       { header: true, name: "openai" },
-      { name: "model-a", current: true },
+      { modelId: "model-a", current: true },
       { header: true, name: "deepseek" },
-      { name: "model-b", current: false },
+      { modelId: "model-b", current: false },
     ], 3),
     [
       "  Model deck",
@@ -444,7 +444,7 @@ test("modelMenuText renders provider groups, current model and selection", () =>
 
 test("modelMenuText keeps the selected model visible", () => {
   const models = Array.from({ length: 10 }, (_, index) => ({
-    name: `model-${index}`,
+    modelId: `model-${index}`,
     current: index === 0,
   }));
 

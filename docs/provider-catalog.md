@@ -5,6 +5,10 @@ an entry and save its key, then `/model` to select a model. Each entry has an
 independent stored credential and environment variable; logging in to one does
 not configure its siblings. Environment variable names below are Rind settings.
 
+Models are identified and displayed by their API IDs throughout Rind. The model
+catalog, runtime responses and refreshed cache have no separate display-name
+field; names from provider responses or older caches are ignored.
+
 | Provider | Product / region | Base URL | Environment variable |
 | --- | --- | --- | --- |
 | `xiaomi` | Xiaomi MiMo API | `https://api.xiaomimimo.com/v1` | `XIAOMI_API_KEY` |

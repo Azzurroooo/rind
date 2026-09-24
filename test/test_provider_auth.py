@@ -149,7 +149,7 @@ async def test_all_refresh_entries_merge_capabilities_by_endpoint(tmp_path, monk
     models = {m["id"]: m for m in entry["models"]}
     assert models["old"]["image_input"] is False
     assert models["new"]["image_input"] is True
-    assert models["new"]["name"] == "New vision model"
+    assert "name" not in models["new"]
     assert models["keep"].get("image_input") is (False if same_endpoint else None)
     assert "image_input" not in models["unknown"] and "removed" not in models
     assert entry["refreshed_at"] > 0 and entry["base_url"] == settings.base_url
@@ -274,6 +274,7 @@ async def test_list_models_uses_cache_fallback_and_reports_refresh_warning(tmp_p
     catalog = await service.list_models(str(tmp_path))
     assert [model.id for model in catalog.models] == ["cached-chat", "deepseek-chat"]
     assert catalog.warning is None
+    assert all(not hasattr(model, "name") for model in catalog.models)
     # Refreshed /models responses carry no effort metadata, so cache entries use the dialect default.
     assert catalog.models[0].reasoning_efforts == default_reasoning_efforts("openai-chat")
 

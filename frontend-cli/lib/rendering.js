@@ -575,9 +575,9 @@ export function modelMenuText(items, selectedIndex = 0) {
     }
     const active = index === visible.activeIndex;
     const marker = active ? accent("›") : dim("·");
-    const name = active ? bold(item.name) : dim(item.name);
+    const modelId = active ? bold(item.modelId) : dim(item.modelId);
     const suffix = item.current ? dim("current") : "";
-    lines.push(`    ${marker} ${padRight(name, 34)} ${suffix}`.trimEnd());
+    lines.push(`    ${marker} ${padRight(modelId, 34)} ${suffix}`.trimEnd());
   }
   lines.push(dim("    ↑↓ select · enter use · esc cancel"));
   return `${lines.join("\n")}\n`;

@@ -12,10 +12,10 @@ export function demoInfo({ cwd = "~/demo", session, model = "zai/glm-4.7" }) {
 
 export const MODELS = [
   { header: true, name: "zai" },
-  { name: "glm-4.7", current: true },
-  { name: "glm-4.6" },
+  { modelId: "glm-4.7", current: true },
+  { modelId: "glm-4.6" },
   { header: true, name: "openai-compatible" },
-  { name: "local-llama" },
+  { modelId: "local-llama" },
 ];
 
 export const SLASH_MATCHES = [

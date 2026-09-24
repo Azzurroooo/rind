@@ -163,7 +163,6 @@ class RuntimeWorker:
                 {
                     "provider_id": model.provider_id,
                     "id": model.id,
-                    "name": model.name,
                     "api": model.api,
                     "reasoning_efforts": list(model.reasoning_efforts),
                     "context_window": model.context_window,

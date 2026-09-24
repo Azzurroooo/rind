@@ -94,7 +94,7 @@ async def test_fetch_preserves_or_upgrades_cache(service, monkeypatch, result):
     client.close.assert_awaited_once()
     cached = service._read_cache()
     if result == "success":
-        assert cached["deepseek"] == dict(entry(service), models=[{"id": "new", "name": "new"}])
+        assert cached["deepseek"] == dict(entry(service), models=[{"id": "new"}])
         assert "new" in [model.id for model in (await service.list_models()).models]
     else:
         assert cached == original
@@ -143,7 +143,9 @@ async def test_worker_startup_does_not_wait_and_shutdown_reclaims_request(servic
         task = worker._model_refresh_task
         assert (await worker.initialize())["session_id"] == info["session_id"]
         assert worker._model_refresh_task is task
-        assert "saved" in [model["id"] for model in (await worker.list_models())["models"]]
+        models = (await worker.list_models())["models"]
+        assert "saved" in [model["id"] for model in models]
+        assert all("name" not in model for model in models)
     finally:
         await asyncio.wait_for(worker.close(), 2)
     assert task.done()

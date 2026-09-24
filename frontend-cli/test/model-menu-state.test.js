@@ -30,6 +30,12 @@ test("model menu groups models by provider and defaults to the current model", (
   );
   assert.equal(state.selectedModel().modelId, "gpt-4o-mini");
   assert.equal(state.selectedModel().current, true);
+  const rendered = stripAnsi(modelMenuText(state.items(), state.selectedIndex()));
+  assert.ok(rendered.includes("gpt-4o-mini"));
+  assert.ok(rendered.includes("deepseek-chat"));
+  assert.ok(!rendered.includes("GPT-4o mini"));
+  assert.ok(!rendered.includes("DeepSeek Chat"));
+  assert.ok(!("name" in state.selectedModel()));
 });
 
 test("model menu headers prefer provider display names when provided", () => {

@@ -19,7 +19,6 @@ class ModelSelection:
 class ModelDefinition:
     provider_id: str
     id: str
-    name: str
     api: str
     reasoning_efforts: tuple[str, ...] = ()
     context_window: int | None = None

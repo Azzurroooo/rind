@@ -402,9 +402,9 @@ export function createCliRuntimeController({
       return;
     }
     try {
-      const update = await request(methods.modelSet, { provider_id: selected.providerId || undefined, model_id: selected.modelId || selected.name });
-      state.session.info = { ...state.session.info, provider: update?.provider_id || selected.providerId, model: update?.model_id || selected.modelId || selected.name };
-      log(() => modelSetResultText(update, selected.modelId || selected.name));
+      const update = await request(methods.modelSet, { provider_id: selected.providerId || undefined, model_id: selected.modelId });
+      state.session.info = { ...state.session.info, provider: update?.provider_id || selected.providerId, model: update?.model_id || selected.modelId };
+      log(() => modelSetResultText(update, selected.modelId));
     } catch (error) {
       log(`Command failed: ${error instanceof Error ? error.message : String(error)}`);
     }
