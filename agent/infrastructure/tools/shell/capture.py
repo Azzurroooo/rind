@@ -67,3 +67,23 @@ class StreamCapture:
         if not self.truncated:
             return head + tail
         return head + _OUTPUT_TRUNCATED + tail
+
+    def tail_preview(self, limit: int) -> str:
+        if limit <= 0:
+            return ""
+        chunks = []
+        remaining = limit
+        for chunk in reversed(self.tail):
+            piece = chunk[-remaining:]
+            chunks.append(piece)
+            remaining -= len(piece)
+            if remaining == 0:
+                return "".join(reversed(chunks))
+        if self.char_count <= _HEAD_LIMIT + _TAIL_LIMIT:
+            for chunk in reversed(self.head):
+                piece = chunk[-remaining:]
+                chunks.append(piece)
+                remaining -= len(piece)
+                if remaining == 0:
+                    break
+        return "".join(reversed(chunks))

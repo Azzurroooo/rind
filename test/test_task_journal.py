@@ -7,6 +7,7 @@ from agent.infrastructure.persistence.task_journal import TaskJournal
 from agent.infrastructure.persistence.task_output import TaskOutput, encode_cursor
 from agent.infrastructure.persistence import ToolOutputStore
 from agent.infrastructure.tools.shell.tool import ShellTools
+from agent.infrastructure.tools.shell.capture import StreamCapture
 from test_shell_tasks import task_shell, data
 
 
@@ -83,6 +84,26 @@ async def test_output_quota_or_write_failure_keeps_drain_alive(tmp_path, monkeyp
     assert output.path.stat().st_size <= 200
 
 
+def test_stream_tail_preview_bounds_work_without_rendering(monkeypatch):
+    capture = StreamCapture()
+    for _ in range(100):
+        capture.append(b"x" * 1024, "x" * 1024)
+    monkeypatch.setattr(StreamCapture, "render", lambda self: pytest.fail("rendered full output"))
+    assert capture.tail_preview(2000) == "x" * 2000
+    assert capture.tail_preview(0) == ""
+    short = StreamCapture()
+    short.append(b"last\n", "last\n")
+    assert short.tail_preview(2000) == "last\n"
+    boundary = StreamCapture()
+    boundary.append(b"a" * (24 * 1024 - 2), "a" * (24 * 1024 - 2))
+    boundary.append(b"bcde", "bcde")
+    assert boundary.tail_preview(6) == "aabcde"
+    lines = StreamCapture()
+    lines.append(b"x\n" * 2001, "x\n" * 2001)
+    assert lines.truncated
+    assert lines.tail_preview(4) == "x\nx\n"
+
+
 @pytest.mark.asyncio
 async def test_completed_task_survives_new_worker_without_respawn(task_shell, tmp_path):
     tools, processes = task_shell
@@ -116,6 +137,7 @@ async def test_retention_preserves_unconsumed_delivery_and_keeps_dedup_facts(tmp
         await journal.save("session", record)
         assert (await journal.records("session"))["task_old"]["stdout"] == "retained"
         await journal.update("session", "task_old", consumed=True)
+        await journal.maintain("session")
         expired = (await journal.records("session"))["task_old"]
         assert "stdout" not in expired and expired["meta"]["output_incomplete"]
         assert (await journal.save("session", {**record, "task_id": "new"}, create=True))["task_id"] == "task_old"
@@ -136,4 +158,3 @@ async def test_foreign_worker_cannot_cancel_or_restart_live_task(task_shell, tmp
         assert len(processes) == 1 and processes[0].returncode is None
     finally:
         await other.close()
-        await journal.maintain("session")

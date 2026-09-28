@@ -363,7 +363,7 @@ class ProcessSupervisor:
             if self._observer and now - record.last_output_event_at >= 0.1:
                 record.last_output_event_at = now
                 self._observer({**task_snapshot(record), "type": "task_output",
-                    "stdout": record.stdout.render()[-2000:], "stderr": record.stderr.render()[-2000:]})
+                    "stdout": record.stdout.tail_preview(2000), "stderr": record.stderr.tail_preview(2000)})
         text = decoder.decode(b"", True)
         capture.append(b"", text)
         if text and record.output:

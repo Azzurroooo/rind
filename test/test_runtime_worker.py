@@ -639,7 +639,7 @@ def test_worker_replays_answer_received_before_question_responder_waits():
     async def run():
         execution = ExecutionCoordinator(
             shared_resources=SimpleNamespace(),
-            shell_tools=SimpleNamespace(supervisor=SimpleNamespace(journal=SimpleNamespace(records=AsyncMock(return_value={})), set_observer=lambda callback: None)),
+            shell_tools=SimpleNamespace(supervisor=SimpleNamespace(journal=SimpleNamespace(relevant=AsyncMock(return_value={})), set_observer=lambda callback: None)),
             web_sessions=SimpleNamespace(),
             repository=SimpleNamespace(),
             debug=False,
@@ -685,7 +685,7 @@ def test_worker_goal_continuation_persists_distinct_checkpoints():
 
         execution = Execution(
             shared_resources=SimpleNamespace(),
-            shell_tools=SimpleNamespace(supervisor=SimpleNamespace(journal=SimpleNamespace(records=AsyncMock(return_value={})), set_observer=lambda callback: None)),
+            shell_tools=SimpleNamespace(supervisor=SimpleNamespace(journal=SimpleNamespace(relevant=AsyncMock(return_value={})), set_observer=lambda callback: None)),
             web_sessions=SimpleNamespace(),
             repository=repository,
             debug=False,
