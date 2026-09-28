@@ -51,6 +51,8 @@ Non-TTY sessions render task state as plain text. `rind run` uses request comple
 
 ## Background waiting
 
+The output controller owns the only activity timer. Running tools read its injected frame clock and never create timers. Working refreshes on 300 ms boundaries; colored Waiting samples the same 4.2-second breath every 150 ms, and uncolored Waiting refreshes only when its elapsed second changes. Non-TTY output starts no animation timer. Clearing activity cancels the scheduled callback.
+
 The Worker supplies `background_wait: { count, started_at } | null` on `turn_completed`, session replay, and the session-scoped `background_wait_changed` event. This is a derived snapshot of committed, handed-off, running `on_exit` tasks owned by that Worker; it respects request scope, interruption suppression and goal pause/block/budget states. It is not inferred from the total background count or model prose. Task status changes, cancellation and continuation failure refresh it; output chunks do not trigger snapshot reads.
 
 While the model is idle and this snapshot is present, the transcript uses a static `Waiting for background task` footer instead of `Worked for`, followed by `Will continue automatically when finished. You can keep typing.` The composer shows `Waiting · 1 background task · running 00:18` (plural `tasks` for multiple tasks), with dim separators and runtime measured from the oldest task. Only the theme accent brightness of `Waiting` breathes on a 4.2-second cycle; there is no spinner, movement or focus change. `NO_COLOR` keeps the label static. Active turns retain their existing Working display. Clearing the wait or switching sessions removes its status and stops the idle animation timer.

@@ -1699,7 +1699,7 @@ function pendingInputLines(entries, frameWidth) {
 
 function activityFrame(frame) {
   const frames = ["◐", "◓", "◑", "◒"];
-  const index = Math.abs(Number(frame) || 0) % frames.length;
+  const index = Math.floor(Math.abs(Number(frame) || 0)) % frames.length;
   return frames[index];
 }
 

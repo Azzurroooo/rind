@@ -110,7 +110,7 @@ export const DEFAULT_THEME = "frappe";
 
 let activeName = DEFAULT_THEME;
 
-function enabled() {
+export function colorEnabled() {
   return Boolean(process.stdout.isTTY) && !process.env.NO_COLOR;
 }
 
@@ -121,7 +121,7 @@ function truecolor(hex) {
 
 function wrap(code, text, force) {
   const body = String(text || "");
-  if (!body || (!force && !enabled())) {
+  if (!body || (!force && !colorEnabled())) {
     return body;
   }
   return `\x1b[${code}m${body}\x1b[0m`;

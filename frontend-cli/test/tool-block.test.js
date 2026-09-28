@@ -79,7 +79,6 @@ test("tool block starts running and mutates in place on finish", () => {
   }, { file_path: "src/app.ts", lines: [{ kind: "added", text: "hi" }] });
 
   assert.equal(block.isRunning, false);
-  assert.equal(block.timer, null, "ticker cleared after finish");
   assert.ok(renders.length >= 1, "mutations request re-renders");
 
   const doneLines = block.render(WIDTH).map(stripAnsi);
@@ -144,15 +143,10 @@ test("late-arriving tool_requested arguments enrich a bare running block", () =>
   assert.match(enriched[0], /^  ◌ \$ date/);
 });
 
-test("ticker only exists for long-running tools", () => {
-  const quick = new ToolBlock({ event: {
-    tool_call_id: "call-3",
-    tool_name: "read_file",
-    args_preview: '{"path":"a.txt"}',
-    arguments: { path: "a.txt" },
-  }, onRequestRender: () => {} });
-  assert.equal(quick.timer, null);
-
-  const slow = new ToolBlock({ event: editEvent(), onRequestRender: () => {} });
-  slow.finish({ status: "completed", duration_ms: 5, result: "{}" });
+test("running elapsed time comes from the owner's frame clock", () => {
+  let time = 1000;
+  const block = new ToolBlock({ event: { tool_name: "bash" }, now: () => time });
+  assert.match(stripAnsi(block.render(WIDTH)[0]), /0s/);
+  time += 2300;
+  assert.match(stripAnsi(block.render(WIDTH)[0]), /2s/);
 });
