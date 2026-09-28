@@ -279,6 +279,25 @@ test("only handed-off tasks enter Background and completed results remain", asyn
   controller.stop();
 });
 
+test("reopening a session keeps only tasks seen during the current opening", async () => {
+  const state = { sessionInfo: { session_id: "s1", capabilities: ["rind/tasks"] }, inputActive: false };
+  let listed = [{ task_id: "old", status: "running", handoff: true }];
+  const controller = createTaskMonitorController({ state, terminalUi: true,
+    request: async () => ({ tasks: listed }),
+  });
+  await controller.refresh();
+  controller.recordTask({ session_id: "s1", task: { task_id: "old", status: "completed", handoff: true } });
+  assert.match(controller.frame(80).lines.join("\n"), /Background \[1\]/);
+  controller.clear();
+  listed = [];
+  await controller.refresh();
+  assert.match(controller.frame(80).lines.join("\n"), /Background \[0\]/);
+  controller.recordTask({ session_id: "s1", task: { task_id: "new", status: "running", handoff: true } });
+  controller.recordTask({ session_id: "s1", task: { task_id: "new", status: "completed", handoff: true } });
+  assert.match(controller.frame(80).lines.join("\n"), /Background \[1\]/);
+  controller.stop();
+});
+
 test("foreground selection releases only the chosen task", async () => {
   const state = { sessionInfo: { session_id: "s1", capabilities: ["rind/tasks"] }, inputActive: false };
   const releases = [];

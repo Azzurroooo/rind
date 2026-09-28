@@ -118,6 +118,13 @@ class ShellTools:
         payload = json.loads(await self.task_control("list", _session_id=_session_id))
         return [{**task, "bg_id": task["task_id"]} for task in payload["data"]["tasks"]]
 
+    async def monitor_tasks(self, session_id: str, page_token: str | None = None) -> dict:
+        return await self.supervisor.monitor_tasks(session_id, page_token)
+
+    async def maintain_tasks(self, session_id: str) -> None:
+        if self.supervisor.journal:
+            await self.supervisor.journal.maintain(session_id)
+
     async def snapshot_background(self, bg_id: str, max_output_chars: int = 20000, _session_id: str = "default") -> dict:
         payload = json.loads(await self.task_control("read", bg_id, max_output_chars=max_output_chars, _session_id=_session_id))
         if not payload["ok"]:

@@ -142,6 +142,38 @@ async def test_release_then_completion_preserves_handoff(task_shell):
 
 
 @pytest.mark.asyncio
+async def test_monitor_shows_only_current_session_active_and_undelivered_tasks(task_shell):
+    tools, processes = task_shell
+    active = data(await tools.bash("active", yield_time_ms=0))
+    foreign = data(await tools.bash("foreign", yield_time_ms=0, _session_id="other"))
+    assert [task["task_id"] for task in (await tools.monitor_tasks("default"))["tasks"]] == [active["task_id"]]
+    processes[0].finish(stdout=b"done")
+    await tools.supervisor._processes[active["task_id"]].monitor
+    assert [task["task_id"] for task in (await tools.monitor_tasks("default"))["tasks"]] == [active["task_id"]]
+    await tools.supervisor.journal.update("default", active["task_id"], delivered=True, consumed=True)
+    assert (await tools.monitor_tasks("default"))["tasks"] == []
+    assert data(await tools.task_control("read", active["task_id"]))["status"] == "completed"
+    assert data(await tools.task_control("list"))["tasks"][0]["task_id"] == active["task_id"]
+    assert [task["task_id"] for task in (await tools.monitor_tasks("other"))["tasks"]] == [foreign["task_id"]]
+
+
+@pytest.mark.asyncio
+async def test_monitor_pages_all_relevant_tasks(task_shell):
+    tools, _ = task_shell
+    for i in range(55):
+        await tools.supervisor.journal.save("default", {
+            "task_id": f"task_{i}", "status": "completed", "handoff": True,
+            "started_at": i, "delivered": False,
+        }, create=True)
+    first = await tools.monitor_tasks("default")
+    second = await tools.monitor_tasks("default", first["next_page_token"])
+    assert len(first["tasks"]) == 50
+    assert len(second["tasks"]) == 5
+    assert second["next_page_token"] is None
+    assert len({task["task_id"] for task in first["tasks"] + second["tasks"]}) == 55
+
+
+@pytest.mark.asyncio
 async def test_quota_reserved_before_spawn_and_terminal_releases_slot(task_shell):
     tools, processes = task_shell
     tools.supervisor.max_tasks = 1

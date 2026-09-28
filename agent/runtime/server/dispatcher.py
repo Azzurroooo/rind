@@ -757,7 +757,7 @@ class RuntimeDispatcher:
         for cursor, event in enumerate(events, start=1):
             if cursor > after_cursor:
                 envelopes.append(event_envelope(event, cursor))
-        tasks = await self._worker.shell_tools.list_backgrounds(session_id)
+        tasks = (await self._worker.shell_tools.monitor_tasks(session_id))["tasks"]
         await self._respond(request, {"events": envelopes, "cursor": cursor, "tasks": tasks})
 
     async def _file_request(self, request: dict[str, Any]) -> None:
@@ -913,6 +913,14 @@ class RuntimeDispatcher:
                 raise ValueError("Task and tool call IDs must be nonempty strings.")
             released = self._worker.shell_tools.supervisor.release_wait(session_id, params.get("task_id"), params.get("tool_call_id"))
             await self._respond(request, {"ok": True, "released": released})
+            return
+        if action == "list":
+            if set(params) - {"page_token"}:
+                raise ValueError("Unknown task list parameters.")
+            token = params.get("page_token")
+            if token is not None and (not isinstance(token, str) or not token.isdecimal()):
+                raise ValueError("Invalid page_token.")
+            await self._respond(request, await self._worker.shell_tools.monitor_tasks(session_id, token))
             return
         if set(params) - {"task_id", "cursor", "wait_ms", "max_output_chars", "page_token"}:
             raise ValueError("Unknown task control parameters.")

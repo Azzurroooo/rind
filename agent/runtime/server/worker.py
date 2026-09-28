@@ -112,9 +112,10 @@ class RuntimeWorker:
         await self.execution.release(session_id)
 
     async def replay(self, session_id: str, start: int | None = None, end: int | None = None) -> dict[str, Any]:
+        await self.shell_tools.maintain_tasks(session_id)
         result = await self.repository.replay(session_id, start=start, end=end)
         result["live_turn"] = self.execution.live_turn(session_id)
-        result["tasks"] = await self.shell_tools.list_backgrounds(session_id)
+        result["tasks"] = (await self.shell_tools.monitor_tasks(session_id))["tasks"]
         result["background_wait"] = await self.execution.background_wait(session_id)
         return result
 

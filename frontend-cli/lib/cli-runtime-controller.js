@@ -183,7 +183,7 @@ export function createCliRuntimeController({
     refreshInputState();
     redraw();
     await onSessionRestored();
-    void getTaskMonitor()?.refresh().catch(() => {});
+    if (getTaskMonitor()) await getTaskMonitor().refresh();
     return true;
   }
 

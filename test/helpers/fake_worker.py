@@ -171,7 +171,8 @@ class FakeWorker:
         self.providers: list[dict] = []
         self.execution = FakeExecution(self)
         self.repository = FakeRepository(self)
-        self.shell_tools = SimpleNamespace(list_backgrounds=AsyncMock(return_value=[]))
+        self.shell_tools = SimpleNamespace(list_backgrounds=AsyncMock(return_value=[]),
+            monitor_tasks=AsyncMock(return_value={"tasks": [], "next_page_token": None}))
 
     def list_providers(self, workspace_root=None) -> list[dict]:
         return self.providers

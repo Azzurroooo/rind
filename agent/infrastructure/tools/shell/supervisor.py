@@ -198,6 +198,23 @@ class ProcessSupervisor:
             reason = await self._wait(record, wait_ms, cancellation_token)
         return await self._result("task_control", record, reason, max_output_chars, cursor)
 
+    async def monitor_tasks(self, session_id: str, page_token: str | None = None) -> dict:
+        self._retire_finished()
+        stored = await self.journal.relevant(session_id) if self.journal else {}
+        records = dict(stored)
+        for record in self._processes.values():
+            if record.session_id == session_id and (record.task_id in stored or record.persistence_error
+                    or not self.journal or record.status not in TERMINAL_STATES):
+                records[record.task_id] = {**task_snapshot(record), **{
+                    key: stored[record.task_id][key] for key in ("delivered", "consumed", "committed")
+                    if record.task_id in stored and key in stored[record.task_id]}}
+        visible = [r for r in records.values() if r.get("status") not in TERMINAL_STATES
+                   or (r.get("handoff") and not r.get("delivered"))]
+        visible.sort(key=lambda r: (r["status"] in TERMINAL_STATES, -r["started_at"], r["task_id"]))
+        offset = int(page_token or 0)
+        return {"tasks": [public_task(r) for r in visible[offset:offset + 50]],
+                "next_page_token": str(offset + 50) if offset + 50 < len(visible) else None}
+
     async def _result(self, tool, record, reason, max_chars=20000, cursor=None):
         if record.output:
             await record.output.flush()

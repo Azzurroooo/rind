@@ -34,6 +34,7 @@ function createHarness({
   forkError = null,
   switchMismatch = false,
   switchGate = null,
+  taskMonitor = null,
 } = {}) {
   const state = createCliState();
   state.session.info = { session_id: "session-a", model: "model-a" };
@@ -124,7 +125,7 @@ function createHarness({
     state,
     getCommands: () => commandController,
     getTurnController: () => ({ submit() {} }),
-    getTaskMonitor: () => null,
+    getTaskMonitor: () => taskMonitor,
     getCompactContextState: () => ({ clear() {} }),
     askModelMenu: async () => "",
     askSessionMenu: async () => selectedSession,
@@ -268,6 +269,22 @@ test("session restore replays the current session without switching", async () =
   );
   assert.equal(harness.state.session.info.resume_preview, "");
   assert.equal(harness.history.length, 1);
+});
+
+test("session restore waits for all monitor pages before returning", async () => {
+  let finish;
+  const monitor = { clearCount: 0, clear() { this.clearCount += 1; },
+    refresh: () => new Promise((resolve) => { finish = resolve; }),
+    recordTask() {} };
+  const harness = createHarness({ taskMonitor: monitor });
+  let restored = false;
+  const pending = harness.controller.restoreSession().then(() => { restored = true; });
+  while (!finish) await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(restored, false);
+  assert.equal(monitor.clearCount, 1);
+  finish();
+  await pending;
+  assert.equal(restored, true);
 });
 
 test("session replay restores authoritative waiting state and clears it on switch", async () => {
