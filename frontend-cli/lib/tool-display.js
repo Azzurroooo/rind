@@ -62,6 +62,9 @@ export function parseToolArguments(event) {
 }
 
 export function parseToolResult(result) {
+  if (result && typeof result === "object" && !Array.isArray(result)) {
+    return result;
+  }
   try {
     const parsed = JSON.parse(String(result || ""));
     if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
@@ -149,11 +152,12 @@ export function renderToolRunning(context, width) {
 }
 
 export function renderToolFinished(context, width) {
+  context = { ...context, payload: parseToolResult(context.event?.result) };
   const renderer = TOOL_RENDERERS[context.name] || GENERIC_RENDERER;
   const state = finishState(context.event);
   const lines = [clipCells(renderer.finished(context, width, state), Math.max(1, width))];
   if (state.kind === "error") {
-    const detail = errorDetail(context.event, width);
+    const detail = errorDetail(context, width);
     if (detail) {
       lines.push(detail);
     }
@@ -266,14 +270,13 @@ function bodyFooter(hidden, expanded) {
   return dim(`    … (${hidden} more lines${hint})`);
 }
 
-function errorDetail(event, width) {
-  const payload = parseToolResult(event?.result);
-  const message = singleLineText(payload.error || event?.error_type || "");
+function errorDetail(context, width) {
+  const message = singleLineText(context.payload.error || context.event?.error_type || "");
   return message ? dim(`    ↳ ${clipText(message, width, 8)}`) : "";
 }
 
 function resultData(context) {
-  const payload = parseToolResult(context.event?.result);
+  const payload = context.payload;
   return {
     payload,
     data: payload.data && typeof payload.data === "object" ? payload.data : {},

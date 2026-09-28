@@ -15,7 +15,6 @@ import { TextBlock } from "./components/text-block.js";
 import { DynamicBlock } from "./components/dynamic-block.js";
 import { AssistantMessage } from "./components/assistant-message.js";
 import { ToolBlock } from "./components/tool-block.js";
-import { argsFromResult } from "./tool-display.js";
 import { paint } from "./theme.js";
 
 export function createCliOutputController({ state, terminalUi, transcript, animateTools = true }) {
@@ -334,7 +333,6 @@ export function createCliOutputController({ state, terminalUi, transcript, anima
       toolBlocks.set(key, block);
       appendBlock(block);
     }
-    block.enrichArgs({ arguments: argsFromResult(event?.tool_name, event?.result) });
     block.finish(event, fileChange);
   }
 

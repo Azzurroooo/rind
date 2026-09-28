@@ -1,5 +1,7 @@
 import {
+  argsFromResult,
   parseToolArguments,
+  parseToolResult,
   renderToolFinished,
   renderToolRunning,
 } from "../tool-display.js";
@@ -9,12 +11,13 @@ const TICKER_TOOLS = new Set(["bash", "task_control", "bash_output", "delegate",
 export class ToolBlock {
   constructor({ event, onRequestRender, leading = false, animate = true }) {
     this.name = event?.tool_name || "tool";
-    this.args = parseToolArguments(event);
+    this.args = { ...parseToolArguments(event) };
     this.phase = "running";
     this.startedAt = Date.now();
     this.progressMessage = "";
     this.fileChange = null;
     this.resultEvent = null;
+    this.cache = null;
     this.expanded = false;
     this.leading = Boolean(leading);
     this.animate = animate;
@@ -37,6 +40,7 @@ export class ToolBlock {
       return;
     }
     this.progressMessage = next;
+    this.invalidate();
     this.onRequestRender?.();
   }
 
@@ -57,14 +61,18 @@ export class ToolBlock {
       }
     }
     if (changed) {
+      this.invalidate();
       this.onRequestRender?.();
     }
   }
 
   finish(event, fileChange) {
     this.phase = "done";
-    this.resultEvent = event || this.resultEvent || { status: "completed", result: "" };
+    const result = event || this.resultEvent || { status: "completed", result: "" };
+    this.resultEvent = { ...result, result: parseToolResult(result.result) };
+    this.enrichArgs({ arguments: argsFromResult(this.name, this.resultEvent.result) });
     this.fileChange = fileChange || null;
+    this.invalidate();
     this.clearTimer();
     this.onRequestRender?.();
   }
@@ -75,6 +83,7 @@ export class ToolBlock {
       return;
     }
     this.expanded = next;
+    this.invalidate();
     this.onRequestRender?.();
   }
 
@@ -91,11 +100,13 @@ export class ToolBlock {
   }
 
   invalidate() {
-    // No cached render state (blocks restyle every frame); keep the
-    // elapsed-time ticker alive across full repaints.
+    this.cache = null;
   }
 
   render(width) {
+    if (this.cache?.width === width) {
+      return this.cache.lines;
+    }
     let lines;
     if (this.phase === "running") {
       lines = renderToolRunning({
@@ -116,7 +127,10 @@ export class ToolBlock {
       }, width);
     }
     if (this.leading && lines.length) {
-      return ["", ...lines];
+      lines = ["", ...lines];
+    }
+    if (!this.isRunning) {
+      this.cache = { width, lines: Object.freeze(lines) };
     }
     return lines;
   }
