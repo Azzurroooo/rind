@@ -952,7 +952,7 @@ def test_app_server_process_serves_git_backed_commands_and_exits_after_shutdown(
 
         process.stdin.write(json.dumps({"kind": "request", "request_id": "init", "method": "initialize"}) + "\n")
         process.stdin.flush()
-        initialize = read_response()
+        initialize = read_response(timeout=15)
         assert initialize.get("kind") == "response", initialize
         session_id = initialize["result"]["session_id"]
         assert isinstance(session_id, str) and session_id

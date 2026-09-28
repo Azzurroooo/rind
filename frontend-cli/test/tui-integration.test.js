@@ -12,6 +12,7 @@ import { createEventController } from "../lib/event-controller.js";
 import { promptPlaceholderText } from "../lib/rendering.js";
 import { createLineEditor } from "../lib/line-editor.js";
 import { createTaskMonitorController } from "../lib/task-monitor-controller.js";
+import { parseTerminalKey } from "../lib/terminal-key.js";
 
 function createHarness({ columns = 40, rows = 12 } = {}) {
   const virtual = createVirtualOutput({ columns, rows });
@@ -268,7 +269,7 @@ test("monitor pane is capped so the composer stays visible", async () => {
     composer,
     monitor: {
       isMonitoring: () => true,
-      frame: (width) => ({ lines: [...monitorLines], focusRow: monitorLines.length - 1 }),
+      frame: (width, height) => ({ lines: monitorLines.slice(-height) }),
     },
     rows: () => tui.rows,
   });
@@ -281,6 +282,81 @@ test("monitor pane is capped so the composer stays visible", async () => {
   assert.ok(renderedMonitor.length <= 8 - 2, `monitor capped to remaining height, got ${renderedMonitor.length}`);
   assert.ok(viewport.some((line) => line.includes("input>")), "composer stays visible");
   tui.stop();
+});
+
+test("background monitor preserves preview, Unicode input and caret through resizing and key sequences", async () => {
+  const virtual = createVirtualOutput({ columns: 80, rows: 24 });
+  const input = createVirtualInput();
+  const tui = createTui({ input, output: virtual.output, renderIntervalMs: 0 });
+  const originalInput = `${"保留 é 中文 ".repeat(8)}input-tail`;
+  const editor = createLineEditor(originalInput);
+  const savedCursor = editor.cursorPosition();
+  const state = { sessionInfo: { session_id: "s1", capabilities: ["rind/tasks"] }, inputActive: true };
+  const reads = [];
+  const monitor = createTaskMonitorController({ state, terminalUi: true, redraw: () => tui.requestRender(),
+    request: async (method, params) => {
+      if (method === "rind/task/list") return { tasks: [] };
+      reads.push(params.task_id);
+      return { task_id: params.task_id, status: "completed", handoff: true,
+        stdout: Array.from({ length: 80 }, (_, i) => `output-${i} 回测`).join("\n") };
+    },
+  });
+  for (let i = 0; i < 120; i += 1) monitor.recordTask({ task: { task_id: `task-${i}`,
+    command: "命令 👩‍💻", status: "completed", handoff: true, started_at: i } });
+  const composer = new ComposerArea(() => ({ prompt: "  model · workspace\n  ▷ ",
+    inputText: editor.input(), cursor: editor.cursorPosition() }));
+  const stack = new MonitorStack({ composer, monitor, rows: () => tui.rows });
+  tui.addChild(stack);
+  tui.onData((raw) => { const key = parseTerminalKey(raw); if (key) monitor.handleInput(key); });
+  const noColor = process.env.NO_COLOR;
+  tui.start();
+  try {
+    monitor.enterMonitor();
+    await settle(virtual);
+    for (const [columns, rows] of [[80, 24], [100, 30], [160, 50], [32, 6], [80, 24]]) {
+      virtual.resize(columns, rows);
+      await settle(virtual);
+      const screen = virtual.getViewport();
+      assert.ok(stack.render(columns).length <= rows);
+      assert.ok(screen.some((line) => line.includes("task-119")));
+      assert.match(screen.join("\n"), /esc/);
+      assert.equal(editor.input(), originalInput);
+      assert.deepEqual(editor.cursorPosition(), savedCursor);
+      assert.ok(screen[virtual.getCursorPosition().y].includes("input-tail"), `${columns}x${rows} cursor remains on input`);
+      if (rows >= 24) {
+        assert.ok(screen.filter((line) => /output-\d+/.test(line)).length >= 6);
+        assert.match(screen.join("\n"), /output-79/);
+      }
+    }
+    const caret = virtual.getCursorPosition();
+    input.send("\x1b[5~");
+    await settle(virtual);
+    assert.doesNotMatch(virtual.getViewport().join("\n"), /output-79/);
+    assert.match(virtual.getViewport().join("\n"), /output-73/);
+    input.send("\x1b[6~");
+    await settle(virtual);
+    assert.match(virtual.getViewport().join("\n"), /output-79/);
+    input.send("\x1b[5~");
+    input.send("\x1b[4~");
+    process.env.NO_COLOR = "1";
+    tui.requestRender(true);
+    await settle(virtual);
+    assert.match(virtual.getViewport().join("\n"), /output-79/);
+    assert.deepEqual(virtual.getCursorPosition(), caret);
+    assert.deepEqual(reads, ["task-119"], "scroll and resize use only the selected bounded preview");
+    input.send("\x02");
+    await settle(virtual);
+    assert.equal(monitor.isMonitoring(), false);
+    monitor.recordTask({ task: { task_id: "new", status: "running", handoff: true } });
+    await settle(virtual);
+    assert.deepEqual(reads, ["task-119"]);
+    assert.equal(editor.input(), originalInput);
+  } finally {
+    monitor.stop();
+    tui.stop();
+    if (noColor === undefined) delete process.env.NO_COLOR;
+    else process.env.NO_COLOR = noColor;
+  }
 });
 
 test("tool blocks render rich per-tool output and respond to ctrl+o expansion", async () => {

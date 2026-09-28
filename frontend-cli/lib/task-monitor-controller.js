@@ -47,10 +47,10 @@ export function createTaskMonitorController({ request, state, redraw = () => {},
   const foregrounds = () => foregroundItems ??= supportsTasks() ? [...tasks.values()].filter((task) => !task.handoff && ACTIVE.has(task.status))
     .sort((a, b) => (Number(b.started_at) || 0) - (Number(a.started_at) || 0)
       || String(a.bg_id).localeCompare(String(b.bg_id))) : [];
-  const delegateItems = () => [...delegates.entries()].map(([id, item]) => ({ ...item, id }));
-  const selectedBackground = () => backgrounds().find((item) => item.bg_id === monitor?.backgroundId) || backgrounds()[0];
-  const selectedForeground = () => foregrounds().find((item) => item.bg_id === monitor?.foregroundId) || foregrounds()[0];
-  const selectedDelegate = () => delegateItems().find((item) => item.id === monitor?.delegateId) || delegateItems()[0];
+  const delegateItems = () => [...delegates.values()];
+  const selectedBackground = () => tasks.get(monitor?.backgroundId) || backgrounds()[0];
+  const selectedForeground = () => tasks.get(monitor?.foregroundId) || foregrounds()[0];
+  const selectedDelegate = () => delegates.get(monitor?.delegateId) || delegateItems()[0];
 
   function nearest(before, after, id, key) {
     if (after.some((item) => item[key] === id)) return id;
@@ -240,7 +240,7 @@ export function createTaskMonitorController({ request, state, redraw = () => {},
     const args = parseObject(event.args_preview);
     const agentId = String(args.agent_id || "").trim();
     if (!agentId) return;
-    delegates.set(event.tool_call_id, { agent_id: agentId, task: String(args.task || "").trim(), status: "running", summary: "" });
+    delegates.set(event.tool_call_id, { id: event.tool_call_id, agent_id: agentId, task: String(args.task || "").trim(), status: "running", summary: "" });
     if (monitor && !monitor.delegateId) monitor.delegateId = event.tool_call_id;
     updateCount();
     if (monitor?.page === "delegates") redraw();

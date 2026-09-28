@@ -159,7 +159,7 @@ const monitorStack = new MonitorStack({
   composer: composerArea,
   monitor: {
     isMonitoring: () => Boolean(taskMonitorController?.isMonitoring()),
-    frame: (width) => taskMonitorController?.frame(width),
+    frame: (width, height) => taskMonitorController?.frame(width, height),
   },
   rows: () => (tui ? tui.rows : 24),
 });

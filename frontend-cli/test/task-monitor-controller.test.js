@@ -265,7 +265,7 @@ test("only handed-off tasks enter Background and completed results remain", asyn
   controller.enterMonitor();
   await new Promise((resolve) => setImmediate(resolve));
   assert.match(controller.frame(80).lines.join("\n"), /Background \[0\]/);
-  assert.match(controller.frame(80).lines.join("\n"), /slow command.*r background/);
+  assert.match(controller.frame(80).lines.join("\n"), /Waiting 1\/1.*r background.*slow command/);
   assert.equal(state.sessionInfo.background_count, 0);
   controller.handleInput({ text: "r" });
   await new Promise((resolve) => setImmediate(resolve));

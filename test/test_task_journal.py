@@ -94,9 +94,12 @@ async def test_completed_task_survives_new_worker_without_respawn(task_shell, tm
     try:
         recovered = data(await replacement.bash("work", yield_time_ms=0, _idempotency_key="once"))
         assert recovered["task_id"] == result["task_id"] and recovered["status"] == "completed"
+        assert recovered["handoff"]
+        assert data(await replacement.task_control("list"))["tasks"][0]["handoff"]
         assert len(processes) == 1
         page = data(await replacement.task_control("read", result["task_id"], cursor=result["start_cursor"], max_output_chars=2))
         assert page["stdout"] == "en"
+        assert page["handoff"]
         assert data(await replacement.task_control("read", result["task_id"], cursor=page["next_cursor"]))["stdout"] == "d\n"
     finally:
         await replacement.close()

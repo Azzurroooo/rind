@@ -24,6 +24,10 @@ test("parses legacy and SS3 navigation keys", () => {
   assert.equal(parseTerminalKey("\x1b[D").name, "left");
   assert.equal(parseTerminalKey("\x1bOC").name, "right");
   assert.equal(parseTerminalKey("\x1bOH").name, "home");
+  assert.equal(parseTerminalKey("\x1b[5~").name, "pageup");
+  assert.equal(parseTerminalKey("\x1b[6~").name, "pagedown");
+  assert.equal(parseTerminalKey("\x1b[4~").name, "end");
+  assert.equal(parseTerminalKey("\x1b[5;5~").ctrl, true);
 });
 
 test("parses modified navigation and deletion keys", () => {
