@@ -3,6 +3,20 @@ import test from "node:test";
 
 import { clipCells, graphemes, middleClipCells, textWidth, wrapTextCells } from "../lib/text-width.js";
 
+test("printable ASCII bypasses segmentation; Unicode and controls retain their semantics", (t) => {
+  const segment = t.mock.method(Intl.Segmenter.prototype, "segment");
+  const ascii = Array.from({ length: 95 }, (_, i) => String.fromCharCode(i + 32)).join("");
+  assert.equal(textWidth(ascii), 95);
+  assert.equal(textWidth(`\x1b[31m${ascii}\x1b[0m`), 95);
+  assert.deepEqual(graphemes(ascii), ascii.split(""));
+  assert.equal(segment.mock.callCount(), 0);
+  for (const [text, width] of [["中文", 4], ["e\u0301", 1], ["👩‍💻", 2], ["✈️", 2], ["\u200b", 0], ["\t", 1], ["\x07", 1]]) {
+    assert.equal(textWidth(text), width);
+  }
+  assert.ok(segment.mock.callCount() >= 7);
+  assert.deepEqual(graphemes("\r\n"), ["\r\n"]);
+});
+
 test("text width treats keycap emoji as one grapheme and two cells", () => {
   assert.deepEqual(graphemes("9️⃣a"), ["9️⃣", "a"]);
   assert.equal(textWidth("9️⃣a"), 3);
