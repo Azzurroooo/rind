@@ -2,7 +2,8 @@ import { ANSI_SEQUENCE } from "./text-width.js";
 import { graphemes, stripAnsi, textWidth, wrapTextCells } from "./text-width.js";
 
 const DEFAULT_COLUMNS = 80;
-const INPUT_MARKER = "\n  ▷ ";
+// The marker line may style ▷ with SGR sequences (accent color).
+const INPUT_MARKER = /\n  (?:\x1b\[[0-9;]*m)*▷(?:\x1b\[[0-9;]*m)* /g;
 const SGR_SEQUENCE = /^\x1b\[([0-9;]*)m$/;
 
 export function prepareComposerFrame(frame = {}, columns = DEFAULT_COLUMNS) {
@@ -191,7 +192,10 @@ function terminalColumns(columns) {
 
 function splitPromptBlock(prompt) {
   const text = String(prompt || "");
-  const index = text.lastIndexOf(INPUT_MARKER);
+  let index = -1;
+  for (const match of text.matchAll(INPUT_MARKER)) {
+    index = match.index;
+  }
   if (index === -1) {
     return { leading: "", prefix: text, trailing: "" };
   }

@@ -194,6 +194,26 @@ test("promptText colors model and working directory with separate hierarchy", ()
     }
   }
 });
+
+test("promptText colors the composer marker with the accent color", () => {
+  const originalIsTty = process.stdout.isTTY;
+  const originalNoColor = process.env.NO_COLOR;
+  process.stdout.isTTY = true;
+  delete process.env.NO_COLOR;
+  try {
+    const marker = promptText({ model: "glm-5.1", cwd: "E:\\project" }).split("\n").at(-1);
+
+    assert.equal(marker, "  \x1b[38;2;140;170;238m▷\x1b[0m ");
+  } finally {
+    process.stdout.isTTY = originalIsTty;
+    if (originalNoColor === undefined) {
+      delete process.env.NO_COLOR;
+    } else {
+      process.env.NO_COLOR = originalNoColor;
+    }
+  }
+});
+
 test("promptText keeps the activity line separate from the input chrome", () => {
   assert.equal(
     promptText({}, {}, { running: true, frame: 1, elapsedMs: 1250 }),

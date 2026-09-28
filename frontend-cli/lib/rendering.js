@@ -1747,7 +1747,7 @@ function inputPromptFrame(header = "", state = {}, frameWidth) {
     lines.push(hint);
   }
   lines.push(inputDivider(frameWidth));
-  lines.push("  ▷ ");
+  lines.push(`  ${accent("▷")} `);
   return lines.join("\n");
 }
 
