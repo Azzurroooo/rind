@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from contextlib import aclosing
 import itertools
 import json
 import re
@@ -55,11 +56,10 @@ class GoogleGenerativeAIClient(ChatClient):
                 self._client.aio.models.generate_content_stream(model=self._model, contents=contents, config=config),
                 cancellation_token,
             )
-            async for raw in iterate_with_cancellation(stream, cancellation_token):
-                if cancellation_token and cancellation_token.is_cancelled:
-                    raise asyncio.CancelledError(cancellation_token.reason)
-                for event in _events(raw, fallback_id):
-                    yield event
+            async with aclosing(iterate_with_cancellation(stream, cancellation_token)) as chunks:
+                async for raw in chunks:
+                    for event in _events(raw, fallback_id):
+                        yield event
         except asyncio.CancelledError:
             raise
         except Exception as exc:

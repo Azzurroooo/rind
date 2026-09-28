@@ -39,6 +39,10 @@ Capability `rind/request-completion` enables `session/prompt` with `completion_s
 
 ## Runtime Package
 
+Model streaming uses one provider-independent batching boundary in `runtime/core/stream_pump.py`. A per-stream queue holds at most 256 events and 1 MiB of serialized event bytes. Text and tool-argument chunks are split at Unicode character boundaries before enqueueing; adjacent assistant text flushes after 25 ms or 8 KiB, and tool/usage/completion/error boundaries preserve order. Oversized non-text events fail explicitly. Producer completion and cancellation wake the reader outside the queue, so cleanup never waits to enqueue a sentinel into a full queue. These bounds cover transport buffering, not the accumulated model result or persisted conversation.
+
+Provider stream iteration owns one cancellation subscription and one current read task. Cancellation interrupts that read and wins over simultaneous completion. All adapters explicitly close the iterator scope before closing the SDK stream, including early consumer exit. No cancellation waiter is created for each chunk, and the no-token path creates no read tasks.
+
 ```text
 agent/runtime/
 ├── __init__.py

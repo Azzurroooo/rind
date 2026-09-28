@@ -14,6 +14,45 @@ from agent.infrastructure.llm.openai_chat import OpenAIChatCompletionsClient
 
 
 @pytest.mark.asyncio
+async def test_stream_uses_one_cancellation_subscription_and_unregisters_on_close(monkeypatch):
+    source = CancellationTokenSource()
+    original = source.token.register_callback
+    unsubscribed = Mock()
+
+    def register(callback):
+        remove = original(callback)
+        def unregister():
+            unsubscribed()
+            remove()
+        return unregister
+
+    subscribe = Mock(side_effect=register)
+    monkeypatch.setattr(source.token, "register_callback", subscribe)
+    async def stream():
+        for index in range(100):
+            yield index
+
+    iterator = iterate_with_cancellation(stream(), source.token)
+    for index in range(50):
+        assert await anext(iterator) == index
+    await iterator.aclose()
+    subscribe.assert_called_once()
+    unsubscribed.assert_called_once()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("end", [False, True])
+async def test_stream_simultaneous_read_and_cancel_prefers_cancellation(end):
+    source = CancellationTokenSource()
+    async def stream():
+        source.cancel("stop")
+        if not end:
+            yield "must not escape"
+    with pytest.raises(asyncio.CancelledError, match="stop"):
+        await anext(iterate_with_cancellation(stream(), source.token))
+
+
+@pytest.mark.asyncio
 async def test_cancel_stream_waiting_between_chunks_reclaims_iterator():
     cancellation = CancellationTokenSource()
     waiting, closed = asyncio.Event(), asyncio.Event()

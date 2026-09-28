@@ -35,9 +35,33 @@ async def close_resource(resource) -> None:
 
 async def iterate_with_cancellation(stream, cancellation_token: CancellationToken | None):
     iterator = aiter(stream)
-    while True:
-        try:
-            item = await await_with_cancellation(anext(iterator), cancellation_token)
-        except StopAsyncIteration:
-            return
-        yield item
+    if cancellation_token is None:
+        async for item in iterator:
+            yield item
+        return
+
+    read_task = None
+
+    def cancel_read():
+        if read_task is not None:
+            read_task.cancel(cancellation_token.reason)
+
+    deregister = cancellation_token.register_callback(cancel_read)
+    try:
+        while True:
+            if cancellation_token.is_cancelled:
+                raise asyncio.CancelledError(cancellation_token.reason)
+            read_task = asyncio.create_task(anext(iterator))
+            try:
+                item = await read_task
+            except StopAsyncIteration:
+                if cancellation_token.is_cancelled:
+                    raise asyncio.CancelledError(cancellation_token.reason)
+                return
+            finally:
+                read_task = None
+            if cancellation_token.is_cancelled:
+                raise asyncio.CancelledError(cancellation_token.reason)
+            yield item
+    finally:
+        deregister()

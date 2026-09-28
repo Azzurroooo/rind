@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from contextlib import aclosing
 import base64
 import json
 from collections.abc import AsyncIterator
@@ -55,12 +56,11 @@ class AnthropicMessagesClient(ChatClient):
         response = None
         try:
             response = await await_with_cancellation(self._client.messages.create(**payload), cancellation_token)
-            async for raw in iterate_with_cancellation(response, cancellation_token):
-                if cancellation_token and cancellation_token.is_cancelled:
-                    raise asyncio.CancelledError(cancellation_token.reason)
-                event = _event(raw)
-                if event:
-                    yield event
+            async with aclosing(iterate_with_cancellation(response, cancellation_token)) as chunks:
+                async for raw in chunks:
+                    event = _event(raw)
+                    if event:
+                        yield event
         except asyncio.CancelledError:
             raise
         except Exception as exc:

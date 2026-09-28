@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from contextlib import aclosing
 import hashlib
 import json
 import os
@@ -118,16 +119,12 @@ class OpenAIChatCompletionsClient(ChatClient):
         ended = False
         call_ids: dict[int, str] = {}
         try:
-            async for chunk in iterate_with_cancellation(stream_response, cancellation_token):
-                if cancellation_token and cancellation_token.is_cancelled:
-                    ended = True
+            async with aclosing(iterate_with_cancellation(stream_response, cancellation_token)) as chunks:
+                async for chunk in chunks:
                     if trace:
-                        trace.end("cancelled")
-                    raise asyncio.CancelledError(cancellation_token.reason)
-                if trace:
-                    trace.response_chunk(chunk)
-                for event in _events(chunk, call_ids):
-                    yield event
+                        trace.response_chunk(chunk)
+                    for event in _events(chunk, call_ids):
+                        yield event
         except asyncio.CancelledError:
             if not ended and trace:
                 trace.end("cancelled")
