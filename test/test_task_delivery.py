@@ -60,6 +60,20 @@ async def test_ui_read_does_not_acknowledge_but_committed_model_read_does(task_s
 
 
 @pytest.mark.asyncio
+async def test_result_commit_keeps_handoff_for_finished_task(task_shell):
+    tools, processes = task_shell
+    notifications = TaskNotifications(tools.supervisor.journal)
+    result = await tools.bash("work", yield_time_ms=0, _idempotency_key="a")
+    task_id = data(result)["task_id"]
+    processes[0].finish()
+    await tools.task_control("wait", task_id)
+    await notifications.result_committed("default", "bash", "a", result)
+    record = (await notifications.store.records("default"))[task_id]
+    assert record["handoff"] and record["committed"] and not record["delivered"]
+    assert await notifications.deliver(Session()) == 1
+
+
+@pytest.mark.asyncio
 async def test_projection_recovery_deduplicates_saved_event_ids(task_shell):
     tools, processes = task_shell
     notifications = TaskNotifications(tools.supervisor.journal)

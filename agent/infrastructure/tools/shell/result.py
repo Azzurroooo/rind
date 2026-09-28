@@ -20,6 +20,7 @@ def task_snapshot(record: ProcessRecord) -> dict:
         "shell_backend": record.shell_backend,
         "shell_executable": record.shell_executable,
         "status": record.status,
+        "handoff": record.handed_off,
         "exit_code": record.exit_code,
         "notify": record.notify,
         "started_at": record.started_at,

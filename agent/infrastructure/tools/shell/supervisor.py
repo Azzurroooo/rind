@@ -60,7 +60,7 @@ class ProcessSupervisor:
             if self.journal:
                 intent = await self.journal.save(session_id, {
                     **task_snapshot(record), "worker_instance_id": self.journal.worker_instance_id,
-                    "committed": False, "handoff": False, "delivered": False,
+                    "committed": False, "delivered": False,
                 }, create=True)
                 if intent["task_id"] != record.task_id:
                     self._processes.pop(record.task_id, None)
@@ -82,9 +82,9 @@ class ProcessSupervisor:
             reason = "released" if record.handed_off else await self._wait(record, remaining_ms, cancellation_token)
             if reason == "interrupted" and not record.handed_off:
                 await self._terminate(record, "cancelled", cancellation_token.reason or "User interrupted")
-            record.handed_off = not record.finished.is_set()
+            record.handed_off |= not record.finished.is_set()
             result = await self._result("bash", record, reason)
-            await self._save(record, handoff=record.handed_off)
+            await self._save(record)
             return result
         except asyncio.CancelledError:
             if record.process is not None and not record.handed_off:
@@ -149,7 +149,8 @@ class ProcessSupervisor:
             page = []
             page_bytes = 0
             for record in records[offset:offset + 50]:
-                item = {key: record.get(key) for key in ("task_id", "status", "notify", "command", "started_at", "finished_at", "elapsed_ms", "origin_tool_call_id")}
+                item = {key: record.get(key) for key in ("task_id", "status", "handoff", "notify", "command", "started_at", "finished_at", "elapsed_ms", "origin_tool_call_id")}
+                item["handoff"] = bool(item["handoff"])
                 item["command"] = str(item["command"] or "")[:160]
                 size = len(json.dumps(item, ensure_ascii=False).encode("utf-8"))
                 if page and page_bytes + size > 20000:
@@ -246,10 +247,11 @@ class ProcessSupervisor:
             if not record.handed_off and record.status not in TERMINAL_STATES:
                 record.handed_off = True
                 released = True
-            for waiter in record.waiters:
-                record.handed_off = True
-                waiter.set()
-                released = True
+            if record.status not in TERMINAL_STATES:
+                for waiter in record.waiters:
+                    record.handed_off = True
+                    waiter.set()
+                    released = True
         return released
 
     def stop_accepting(self) -> None:

@@ -4,5 +4,7 @@ TERMINAL_STATES = frozenset({"completed", "failed", "cancelled", "timed_out", "l
 
 
 def public_task(record: dict) -> dict:
-    return {key: value for key, value in record.items()
-            if key not in {"committed", "handoff", "delivered", "consumed", "worker_instance_id", "pid", "event_id", "type"}}
+    result = {key: value for key, value in record.items()
+              if key not in {"committed", "delivered", "consumed", "worker_instance_id", "pid", "event_id", "type"}}
+    result["handoff"] = bool(record.get("handoff"))
+    return result

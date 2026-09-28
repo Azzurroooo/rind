@@ -70,7 +70,7 @@ def data(raw):
 async def test_yield_reuse_nonzero_repeatable_reads_and_session_isolation(task_shell):
     tools, processes = task_shell
     first = data(await tools.bash("work", yield_time_ms=0, _idempotency_key="origin"))
-    assert first["status"] == "running" and first["exit_code"] is None
+    assert first["status"] == "running" and first["exit_code"] is None and first["handoff"]
     repeated = data(await tools.bash("work", yield_time_ms=0, _idempotency_key="origin"))
     assert repeated["task_id"] == first["task_id"] and len(processes) == 1
     processes[0].finish(7, b"  tail\n", b"error\r")
@@ -79,6 +79,8 @@ async def test_yield_reuse_nonzero_repeatable_reads_and_session_isolation(task_s
     assert result["stdout"] == "  tail\n" and result["stderr"] == "error\r"
     assert data(await tools.task_control("read", first["task_id"])) == result
     assert data(await tools.task_control("cancel", first["task_id"])) == result
+    assert result["handoff"]
+    assert data(await tools.task_control("list"))["tasks"][0]["handoff"]
     assert not json.loads(await tools.task_control("read", first["task_id"], _session_id="other"))["ok"]
 
 
@@ -91,7 +93,7 @@ async def test_release_and_cancel_observation_keep_original_process(task_shell):
             await asyncio.sleep(0)
     await asyncio.wait_for(release(), 2)
     result = data(await asyncio.wait_for(call, 1))
-    assert result["status"] == "running" and result["return_reason"] == "released"
+    assert result["status"] == "running" and result["return_reason"] == "released" and result["handoff"]
     cancellation = CancellationTokenSource()
     cancellation.cancel("stop observing")
     read = data(await tools.task_control("wait", result["task_id"], _cancellation_token=cancellation.token))
@@ -99,6 +101,7 @@ async def test_release_and_cancel_observation_keep_original_process(task_shell):
     assert processes[0].returncode is None and len(processes) == 1
     cancelled = data(await tools.task_control("cancel", result["task_id"]))
     assert cancelled["status"] == "cancelled"
+    assert cancelled["handoff"]
     assert processes[0].returncode == -9
 
 
@@ -108,7 +111,34 @@ async def test_initial_interrupt_terminates_unhanded_process(task_shell):
     cancellation = CancellationTokenSource()
     cancellation.cancel("initial interruption")
     result = data(await tools.bash("work", _cancellation_token=cancellation.token))
-    assert result["status"] == "cancelled" and processes[0].returncode == -9
+    assert result["status"] == "cancelled" and not result["handoff"] and processes[0].returncode == -9
+
+
+@pytest.mark.asyncio
+async def test_completion_during_initial_wait_never_hands_off(task_shell):
+    tools, processes = task_shell
+    call = asyncio.create_task(tools.bash("quick", yield_time_ms=60000))
+    while not processes:
+        await asyncio.sleep(0)
+    processes[0].finish()
+    result = data(await call)
+    assert result["status"] == "completed" and not result["handoff"]
+    assert not tools.supervisor.release_wait("default", task_id=result["task_id"])
+    assert not data(await tools.task_control("read", result["task_id"]))["handoff"]
+    assert not data(await tools.task_control("list"))["tasks"][0]["handoff"]
+
+
+@pytest.mark.asyncio
+async def test_release_then_completion_preserves_handoff(task_shell):
+    tools, processes = task_shell
+    call = asyncio.create_task(tools.bash("work", yield_time_ms=60000, _idempotency_key="race"))
+    while not processes:
+        await asyncio.sleep(0)
+    assert tools.supervisor.release_wait("default", call_id="race")
+    processes[0].finish()
+    result = data(await call)
+    assert result["handoff"]
+    assert data(await tools.task_control("read", result["task_id"]))["handoff"]
 
 
 @pytest.mark.asyncio

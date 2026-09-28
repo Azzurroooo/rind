@@ -44,7 +44,7 @@ class TaskNotifications:
             return
         changes = {}
         if tool_name == "bash" and record.get("origin_tool_call_id") == call_id:
-            changes.update(committed=True, handoff=data.get("status") not in TERMINAL_STATES)
+            changes["committed"] = True
         if data.get("status") in TERMINAL_STATES:
             changes["delivered"] = True
         changes = {key: value for key, value in changes.items() if record.get(key) != value}
