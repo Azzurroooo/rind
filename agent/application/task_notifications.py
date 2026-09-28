@@ -39,7 +39,7 @@ class TaskNotifications:
         data = payload.get("data")
         if not payload.get("ok") or not isinstance(data, dict) or not data.get("task_id"):
             return
-        record = (await self.store.records(session_id)).get(data["task_id"])
+        record = await self.store.get(session_id, data["task_id"])
         if record is None:
             return
         changes = {}
@@ -54,7 +54,7 @@ class TaskNotifications:
                 self.changed(updated)
 
     async def deliver(self, session: SessionStore) -> int:
-        records = await self.store.records(session.session_id)
+        records = await self.store.relevant(session.session_id)
         if not records:
             return 0
         messages = await session.load_messages()
@@ -74,17 +74,25 @@ class TaskNotifications:
         tool_messages = {m.get("tool_call_id"): m for m in messages if m.get("role") == "tool"}
         for tool in await session.get_tool_records(call_ids=list(tool_messages)):
             if tool.get("name") in {"task_control", "bash_output"}:
-                await self.result_committed(session.session_id, tool["name"], tool["id"], str(tool.get("model_content") or "{}"))
+                result = str(tool.get("model_content") or "{}")
+                try:
+                    payload = json.loads(result)
+                except ValueError:
+                    continue
+                data = payload.get("data") if isinstance(payload, dict) else None
+                if isinstance(data, dict) and data.get("task_id") in records:
+                    await self.result_committed(session.session_id, tool["name"], tool["id"], result)
         for record in records.values():
             origin = record.get("origin_tool_call_id")
             if not record.get("committed") and origin in tool_messages:
                 tools = await session.get_tool_records(call_ids=[origin])
                 if tools:
                     await self.result_committed(session.session_id, "bash", origin, str(tools[-1].get("model_content") or "{}"))
-        records = await self.store.records(session.session_id)
+        records = await self.store.relevant(session.session_id)
         pending = [r for r in records.values() if pending_notification(r)]
         fresh = [r for r in pending if r["event_id"] not in projected]
         if fresh:
+            fresh = [await self.store.get(session.session_id, r["task_id"]) for r in fresh]
             facts = [{**task_reference(r), "exit_code": r.get("exit_code"), "elapsed_ms": r.get("elapsed_ms"),
                       "reason": r.get("reason"), "output_path": r.get("meta", {}).get("output_path"),
                       "output_incomplete": r.get("meta", {}).get("output_incomplete", False)} for r in fresh]
@@ -97,18 +105,17 @@ class TaskNotifications:
         return len(fresh)
 
     async def references(self, session_id: str) -> list[dict]:
-        return [task_reference(r) for r in (await self.store.records(session_id)).values()
+        return [task_reference(r) for r in (await self.store.relevant(session_id)).values()
                 if r.get("status") not in TERMINAL_STATES or pending_notification(r)
                 or (r.get("delivered") and not r.get("consumed"))]
 
     async def model_consumed(self, session_id: str, references: list[dict]) -> None:
-        records = await self.store.records(session_id)
         for reference in references:
-            record = records.get(reference["task_id"], {})
-            if record.get("delivered") and not record.get("consumed"):
+            record = await self.store.get(session_id, reference["task_id"])
+            if record and record.get("delivered") and not record.get("consumed"):
                 await self.store.update(session_id, record["task_id"], consumed=True, continuation_error="")
 
     async def continuation_failed(self, session_id: str, error: str) -> None:
-        for record in (await self.store.records(session_id)).values():
+        for record in (await self.store.relevant(session_id)).values():
             if record.get("delivered") and not record.get("consumed"):
                 await self.store.update(session_id, record["task_id"], continuation_error=error)

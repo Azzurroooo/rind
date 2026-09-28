@@ -38,6 +38,10 @@ class ProcessSupervisor:
                   cancellation_token: CancellationToken | None = None, *, call_id: str = "",
                   output_store=None, yield_time_ms: int = 10000, timeout_ms: int | None = None,
                   notify: str = "on_exit", origin_turn_id: str = "", request_id: str | None = None) -> ToolExecutionResult:
+        for pending in list(self._processes.values()):
+            if pending.persistence_error and not await self._save(pending):
+                return ToolExecutionResult(status="error", error_type="TaskPersistenceError",
+                    error_msg=pending.persistence_error)
         self._retire_finished()
         origin = (session_id, call_id)
         existing_id = self._origins.get(origin) if call_id else None
@@ -47,7 +51,8 @@ class ProcessSupervisor:
             return await self._result("bash", record, "finished" if record.finished.is_set() else "yield_timeout")
         if self._closed or session_id in self._closed_sessions:
             return error_result(RuntimeError("Worker is shutting down."))
-        if sum(r.status not in TERMINAL_STATES for r in self._processes.values()) >= self.max_tasks:
+        if (len(self._processes) if self.journal else sum(
+                r.status not in TERMINAL_STATES for r in self._processes.values())) >= self.max_tasks:
             return ToolExecutionResult(status="error", error_type="TaskLimitExceeded", error_msg=f"Running task limit reached ({self.max_tasks}).")
         record = ProcessRecord(task_id=f"task_{uuid.uuid4().hex}", session_id=session_id,
             command=command, cwd=state.cwd, shell_backend=state.shell_backend,
@@ -56,12 +61,20 @@ class ProcessSupervisor:
         self._processes[record.task_id] = record
         if call_id:
             self._origins[origin] = record.task_id
+        intent_saved = False
         try:
             if self.journal:
-                intent = await self.journal.save(session_id, {
+                saving = asyncio.create_task(self.journal.save(session_id, {
                     **task_snapshot(record), "worker_instance_id": self.journal.worker_instance_id,
                     "committed": False, "delivered": False,
-                }, create=True)
+                }, create=True))
+                try:
+                    intent = await asyncio.shield(saving)
+                except asyncio.CancelledError:
+                    intent = await saving
+                    intent_saved = intent["task_id"] == record.task_id
+                    raise
+                intent_saved = True
                 if intent["task_id"] != record.task_id:
                     self._processes.pop(record.task_id, None)
                     self._origins.pop(origin, None)
@@ -96,7 +109,11 @@ class ProcessSupervisor:
                 record.finished.set()
                 if record.output:
                     await record.output.close()
-                await self._save(record)
+                if intent_saved:
+                    await self._save(record)
+                else:
+                    self._processes.pop(record.task_id, None)
+                    self._origins.pop(origin, None)
             raise
         except Exception as exc:
             if record.process is not None:
@@ -109,7 +126,11 @@ class ProcessSupervisor:
                 record.finished.set()
                 if record.output:
                     await record.output.close()
-                await self._save(record)
+                if intent_saved:
+                    await self._save(record)
+            if not intent_saved:
+                self._processes.pop(record.task_id, None)
+                self._origins.pop(origin, None)
             return error_result(exc)
         finally:
             record.started.set()
@@ -141,8 +162,8 @@ class ProcessSupervisor:
                       cancellation_token: CancellationToken | None = None,
                       page_token: str | None = None, cursor: str | None = None) -> ToolExecutionResult:
         self._retire_finished()
-        stored = await self.journal.records(session_id) if self.journal else {}
         if action == "list":
+            stored = await self.journal.records(session_id) if self.journal else {}
             records = {**stored, **{r.task_id: task_snapshot(r) for r in self._processes.values() if r.session_id == session_id}}
             records = sorted(records.values(), key=lambda r: (r["status"] in TERMINAL_STATES, -r["started_at"], r["task_id"]))
             offset = int(page_token or 0)
@@ -162,8 +183,8 @@ class ProcessSupervisor:
                 "next_page_token": str(offset + len(page)) if offset + len(page) < len(records) else None}))
         record = self._processes.get(task_id)
         if record is None or record.session_id != session_id:
-            if task_id in stored:
-                snapshot = stored[task_id]
+            snapshot = await self.journal.get(session_id, task_id) if self.journal else None
+            if snapshot is not None:
                 if action == "cancel" and snapshot["status"] not in TERMINAL_STATES:
                     return ToolExecutionResult(status="error", error_type="TaskNotOwned", error_msg="Task belongs to another active Worker; no process was signalled.")
                 return await self._read_stored(snapshot, cursor, max_output_chars)
@@ -267,8 +288,9 @@ class ProcessSupervisor:
                 raise RuntimeError(f"Cannot close session: termination of {record.task_id} is not confirmed.")
             if record.monitor:
                 await record.monitor
-            self._processes.pop(record.task_id, None)
-            self._origins.pop((session_id, record.call_id), None)
+            if not record.persistence_error:
+                self._processes.pop(record.task_id, None)
+                self._origins.pop((session_id, record.call_id), None)
 
     async def close(self) -> None:
         self._closed = True

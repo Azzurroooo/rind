@@ -126,7 +126,7 @@ class ExecutionCoordinator:
             self._schedule_continuation(session_id)
 
     async def background_wait(self, session_id: str) -> dict | None:
-        records = await self._task_notifications.store.records(session_id)
+        records = await self._task_notifications.store.relevant(session_id)
         goal = await self._repository.get_goal(session_id) if self._enable_goal else None
         if self._closed or session_id in self._suppressed or session_id in self._closed_sessions:
             return None
@@ -201,7 +201,7 @@ class ExecutionCoordinator:
                 active = self._active.get(session_id)
                 if active and (active.queued_turn_starts or active.container.runtime.turn_active):
                     return
-                records = await self._task_notifications.store.records(session_id)
+                records = await self._task_notifications.store.relevant(session_id)
                 scope = self._scopes.get(session_id)
                 relevant = [r for r in records.values() if scope is None or r.get("request_id") == scope.request_id]
                 pending = any(pending_notification(r) for r in relevant)
@@ -260,7 +260,7 @@ class ExecutionCoordinator:
                 scope.changed.clear()
                 if self._closed or session_id in self._suppressed or scope.error:
                     raise RuntimeError(scope.error or "Request interrupted.")
-                records = await self._task_notifications.store.records(session_id)
+                records = await self._task_notifications.store.relevant(session_id)
                 relevant = [r for r in records.values() if r.get("request_id") == scope.request_id]
                 waiting = any((r.get("notify") == "on_exit" and r["status"] not in TERMINAL_STATES)
                               or pending_notification(r) for r in relevant)
@@ -413,7 +413,7 @@ class ExecutionCoordinator:
                 if self._closed or clean in self._suppressed or (continuation and execution.queued_turn_starts > 1):
                     return
                 if continuation:
-                    records = await self._task_notifications.store.records(clean)
+                    records = await self._task_notifications.store.relevant(clean)
                     scope = self._scopes.get(clean)
                     pending = any(pending_notification(r) for r in records.values()
                                   if scope is None or r.get("request_id") == scope.request_id)

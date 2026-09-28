@@ -136,3 +136,4 @@ async def test_foreign_worker_cannot_cancel_or_restart_live_task(task_shell, tmp
         assert len(processes) == 1 and processes[0].returncode is None
     finally:
         await other.close()
+        await journal.maintain("session")
