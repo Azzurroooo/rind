@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
+import sys
 from collections import deque
 from dataclasses import dataclass, field
 from typing import Any, AsyncIterator, Awaitable, Callable
@@ -23,6 +25,8 @@ from agent.domain.events import (
     ToolInputStartedEvent,
     event_meta,
 )
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -126,9 +130,15 @@ async def pump_model_stream_events(
                 await persist_sampling_usage(session, normalized_usage)
                 await emit(TokenStatsUpdatedEvent(**event_meta(session, turn_id), stats=normalized_usage))
         finally:
+            failure = sys.exc_info()[1]
             close = getattr(stream_response, "aclose", None)
             if close:
-                await close()
+                try:
+                    await close()
+                except Exception:
+                    if failure is None:
+                        raise
+                    logger.debug("Failed to close interrupted model stream.", exc_info=True)
 
     consume_task = asyncio.create_task(_consume())
     consume_task.add_done_callback(lambda _: available.set())

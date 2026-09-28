@@ -105,3 +105,23 @@ async def test_simultaneous_sessions_never_share_batches():
         return "".join(event.text for event in events)
 
     assert await asyncio.gather(collect("a"), collect("b")) == ["a" * 20, "b" * 20]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("fail_read", [False, True])
+async def test_close_failure_does_not_hide_the_original_stream_error(fail_read):
+    class Stream:
+        def __aiter__(self):
+            return self
+
+        async def __anext__(self):
+            if fail_read:
+                raise ValueError("read failed")
+            raise StopAsyncIteration
+
+        async def aclose(self):
+            raise RuntimeError("close failed")
+
+    iterator, _ = pump(Stream())
+    with pytest.raises(ValueError if fail_read else RuntimeError, match="read failed" if fail_read else "close failed"):
+        await anext(iterator)
