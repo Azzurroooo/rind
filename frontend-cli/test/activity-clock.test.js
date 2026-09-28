@@ -51,3 +51,15 @@ test("non-TTY turns never start a rendering clock", () => {
     transcript: null, schedule: () => assert.fail("non-TTY timer") });
   controller.refreshInputState();
 });
+
+test("tool elapsed time excludes the idle time before it starts", () => {
+  const state = createCliState();
+  let time = 1000;
+  const transcript = createTranscript();
+  const controller = createCliOutputController({ state, transcript,
+    terminalUi: { requestRender() {} }, now: () => time });
+  time += 10000;
+  controller.beginTool({ tool_call_id: "new", tool_name: "bash" });
+  assert.match(transcript.render(80).join("\n"), /0s/);
+  assert.doesNotMatch(transcript.render(80).join("\n"), /10s/);
+});

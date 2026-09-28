@@ -314,6 +314,7 @@ export function createCliOutputController({ state, terminalUi, transcript, anima
       existing.enrichArgs(event);
       return;
     }
+    frameTime = now();
     const block = new ToolBlock({
       event,
       now: () => frameTime,
