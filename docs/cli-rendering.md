@@ -59,6 +59,8 @@ While the model is idle and this snapshot is present, the transcript uses a stat
 
 ## Invariants
 
+- Transcript mutations use `addChild`, `changed`, `clear`, or `invalidate`. The output controller announces assistant, tool and question mutations; activity alone reuses immutable transcript lines. TUI owns normalized root segments and skips their unchanged prefix during diff. Components may return frozen arrays for reuse; ordinary arrays remain supported and are normalized on every render. No caller may modify a frozen render result.
+
 - Single authoritative width: the engine's `columns()` is the only source, handed down via `render(width)`; components must not read `process.stdout.columns`.
 - All stdout writes must go through the engine; external text always becomes a transcript block — no side-channel writes.
 - When a rendered line's visible width exceeds the terminal width, the engine truncates defensively (`RIND_DEBUG_REDRAW=1` exposes why full redraws happen).

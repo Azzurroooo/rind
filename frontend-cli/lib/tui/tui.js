@@ -1,13 +1,13 @@
 import { textWidth, truncateToWidth } from "../text-width.js";
 import { createInputBuffer } from "./input-buffer.js";
+import { renderFrame } from "./frame.js";
 
-export const CURSOR_MARKER = "\x1b_pi:c\x07";
+export { CURSOR_MARKER } from "./frame.js";
 
 const SYNC_START = "\x1b[?2026h";
 const SYNC_END = "\x1b[?2026l";
 const SHOW_CURSOR = "\x1b[?25h";
 const HIDE_CURSOR = "\x1b[?25l";
-const LINE_RESET = "\x1b[0m";
 const PASTE_ENABLE = "\x1b[?2004h";
 const PASTE_DISABLE = "\x1b[?2004l";
 const KITTY_KEYBOARD_ENABLE = "\x1b[>7u\x1b[?u\x1b[c";
@@ -95,19 +95,6 @@ export function createTui(options = {}) {
     }
     children = [];
     requestRender();
-  }
-
-  function renderRoot(width) {
-    const lines = [];
-    for (const child of children) {
-      const rendered = child.render(width);
-      if (Array.isArray(rendered)) {
-        for (const line of rendered) {
-          lines.push(typeof line === "string" ? line : String(line ?? ""));
-        }
-      }
-    }
-    return lines;
   }
 
   function onData(handler) {
@@ -356,9 +343,9 @@ export function createTui(options = {}) {
       return targetScreenRow - currentScreenRow;
     };
 
-    let newLines = renderRoot(width);
-    const cursorPos = extractCursorPosition(newLines, height);
-    newLines = applyLineResets(newLines);
+    const newLines = renderFrame(children, width, previousLines.segments);
+    const cursorPos = newLines.cursor?.row >= Math.max(0, newLines.length - height)
+      ? newLines.cursor : null;
 
     const fullRender = (clear) => {
       let buffer = SYNC_START;
@@ -369,7 +356,7 @@ export function createTui(options = {}) {
         if (index > 0) {
           buffer += "\r\n";
         }
-        buffer += writableLine(newLines[index], width);
+        buffer += writableLine(newLines.at(index), width);
       }
       cursorRow = Math.max(0, newLines.length - 1);
       hardwareCursorRow = cursorRow;
@@ -412,9 +399,9 @@ export function createTui(options = {}) {
     let firstChanged = -1;
     let lastChanged = -1;
     const maxLines = Math.max(newLines.length, previousLines.length);
-    for (let index = 0; index < maxLines; index += 1) {
-      const oldLine = index < previousLines.length ? previousLines[index] : "";
-      const newLine = index < newLines.length ? newLines[index] : "";
+    for (let index = newLines.unchangedPrefix; index < maxLines; index += 1) {
+      const oldLine = index < previousLines.length ? previousLines.at(index) : "";
+      const newLine = index < newLines.length ? newLines.at(index) : "";
       if (oldLine !== newLine) {
         if (firstChanged === -1) {
           firstChanged = index;
@@ -526,7 +513,7 @@ export function createTui(options = {}) {
         buffer += "\r\n";
       }
       buffer += "\x1b[2K";
-      buffer += writableLine(newLines[index], width);
+      buffer += writableLine(newLines.at(index), width);
     }
 
     let finalCursorRow = renderEnd;
@@ -567,30 +554,6 @@ export function createTui(options = {}) {
       value = truncateToWidth(value, width);
     }
     return value;
-  }
-
-  function applyLineResets(lines) {
-    for (let index = 0; index < lines.length; index += 1) {
-      const line = lines[index];
-      lines[index] = line.includes("\x1b[") ? `${line}${LINE_RESET}` : line;
-    }
-    return lines;
-  }
-
-  function extractCursorPosition(lines, height) {
-    const viewportTop = Math.max(0, lines.length - height);
-    for (let row = lines.length - 1; row >= viewportTop; row -= 1) {
-      const line = lines[row];
-      const markerIndex = line.indexOf(CURSOR_MARKER);
-      if (markerIndex === -1) {
-        continue;
-      }
-      const beforeMarker = line.slice(0, markerIndex);
-      const col = textWidth(beforeMarker);
-      lines[row] = beforeMarker + line.slice(markerIndex + CURSOR_MARKER.length);
-      return { row, col };
-    }
-    return null;
   }
 
   function hardwareCursorSequence(cursorPos, lines) {

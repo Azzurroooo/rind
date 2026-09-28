@@ -1,6 +1,6 @@
 import { createCliOutputController } from "../cli-output-controller.js";
 import { createCliState } from "../cli-state.js";
-import { Container } from "../tui/component.js";
+import { createTranscript } from "../tui/transcript.js";
 import { commandResultText, slashResultText, turnCompletedLine } from "../rendering.js";
 import { graphemes } from "../text-width.js";
 
@@ -8,7 +8,7 @@ import { graphemes } from "../text-width.js";
 // This preserves block spacing, trailing-newline handling and unfinished
 // Markdown exactly as in a real turn. No terminal writes or tool timers.
 export function renderTourTranscript(rind, width, expanded = false) {
-  const transcript = new Container();
+  const transcript = createTranscript();
   const output = createCliOutputController({
     state: createCliState(),
     transcript,

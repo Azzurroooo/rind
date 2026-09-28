@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { createCliOutputController } from "../lib/cli-output-controller.js";
 import { createCliState } from "../lib/cli-state.js";
 import { createEventController } from "../lib/event-controller.js";
-import { Container } from "../lib/tui/component.js";
+import { createTranscript } from "../lib/tui/transcript.js";
 import { createTourStage } from "../lib/tour/stage.js";
 import { renderTourTranscript } from "../lib/tour/transcript.js";
 import { graphemes, stripAnsi } from "../lib/text-width.js";
@@ -12,7 +12,7 @@ const INFO = { version: "0.8.0", model: "demo", session_id: "s1", cwd: "~/demo" 
 const plain = (lines) => lines.map(stripAnsi);
 
 function liveSession() {
-  const transcript = new Container();
+  const transcript = createTranscript();
   const output = createCliOutputController({
     state: createCliState(), transcript, terminalUi: { requestRender() {} }, animateTools: false,
   });

@@ -35,7 +35,7 @@ import { runSend, sendHelp } from "./send.js";
 import { listenIpc } from "./ipc.js";
 import { runTour } from "./tour/run-tour.js";
 import { createTui } from "./tui/tui.js";
-import { Container } from "./tui/component.js";
+import { createTranscript } from "./tui/transcript.js";
 import { ComposerArea } from "./components/composer-area.js";
 import { MonitorStack } from "./components/monitor-stack.js";
 import {
@@ -153,7 +153,7 @@ const isTty = Boolean(process.stdin.isTTY && process.stdout.isTTY);
 const tui = isTty
   ? createTui({ input: process.stdin, output: process.stdout })
   : null;
-const transcriptContainer = new Container();
+const transcriptContainer = createTranscript();
 const composerArea = new ComposerArea((width) => composeFrame(width));
 const monitorStack = new MonitorStack({
   composer: composerArea,

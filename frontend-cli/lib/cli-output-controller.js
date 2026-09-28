@@ -27,6 +27,7 @@ export function createCliOutputController({ state, terminalUi, transcript, anima
   let questionBlock = null;
   let turnContext = "";
   let frameTime = now();
+  const runningTools = new Set();
 
   function redraw(force = false) {
     if (!terminalUi || state.runtime.status === "closing") {
@@ -105,6 +106,7 @@ export function createCliOutputController({ state, terminalUi, transcript, anima
       state.display.activityTimer = schedule(() => {
         state.display.activityTimer = null;
         state.display.activityFrame = (now() - state.display.activityStartedAt) / 300;
+        if (runningTools.size) transcript.changed();
         redraw();
         updateActivityTimer();
       }, delay);
@@ -227,6 +229,7 @@ export function createCliOutputController({ state, terminalUi, transcript, anima
     if (terminalUi) {
       if (assistantMessage) {
         assistantMessage.finish();
+        transcript.changed();
         assistantMessage = null;
       }
       state.display.assistantHeaderShown = false;
@@ -260,6 +263,7 @@ export function createCliOutputController({ state, terminalUi, transcript, anima
     questionBlock.state.event = event;
     questionBlock.state.answer = answer;
     questionBlock.block.invalidate();
+    transcript.changed();
     questionBlock = null;
     redraw();
   }
@@ -271,6 +275,7 @@ export function createCliOutputController({ state, terminalUi, transcript, anima
     }
     const message = ensureAssistantBlocks();
     message.append(text);
+    transcript.changed();
     redraw();
   }
 
@@ -313,10 +318,11 @@ export function createCliOutputController({ state, terminalUi, transcript, anima
       event,
       now: () => frameTime,
       animate: animateTools,
-      onRequestRender: () => redraw(),
+      onRequestRender: () => { transcript.changed(); redraw(); },
       leading: blockCount > 0,
     });
     toolBlocks.set(key, block);
+    runningTools.add(block);
     appendBlock(block);
   }
 
@@ -343,13 +349,14 @@ export function createCliOutputController({ state, terminalUi, transcript, anima
         event,
         now: () => frameTime,
         animate: animateTools,
-        onRequestRender: () => redraw(),
+        onRequestRender: () => { transcript.changed(); redraw(); },
         leading: blockCount > 0,
       });
       toolBlocks.set(key, block);
       appendBlock(block);
     }
     block.finish(event, fileChange);
+    runningTools.delete(block);
   }
 
   function setToolsExpanded(expanded) {

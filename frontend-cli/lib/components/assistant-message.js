@@ -149,7 +149,7 @@ export class AssistantMessage {
   }
 
   render(width) {
-    if (this.cacheLines && this.cacheWidth === width && !this.pending) {
+    if (this.cacheLines && this.cacheWidth === width) {
       return this.cacheLines;
     }
     if (this.cacheWidth !== width) {

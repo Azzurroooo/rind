@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { createCliState } from "../lib/cli-state.js";
 import { createCliOutputController } from "../lib/cli-output-controller.js";
-import { Container } from "../lib/tui/component.js";
+import { createTranscript } from "../lib/tui/transcript.js";
 
 test("one owned clock handles work and waiting, then stops without stale callbacks", () => {
   const state = createCliState();
@@ -12,7 +12,7 @@ test("one owned clock handles work and waiting, then stops without stale callbac
   let color = true;
   const pending = new Map();
   const controller = createCliOutputController({
-    state, transcript: new Container(), terminalUi: { requestRender() { renders++; } },
+    state, transcript: createTranscript(), terminalUi: { requestRender() { renders++; } },
     now: () => time, hasColor: () => color,
     schedule: (callback, delay) => { const id = {}; pending.set(id, { callback, delay }); return id; },
     cancelSchedule: (id) => pending.delete(id),

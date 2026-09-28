@@ -3,7 +3,7 @@ import test from "node:test";
 
 import { createVirtualOutput, createVirtualInput } from "./helpers/virtual-terminal.js";
 import { createTui } from "../lib/tui/tui.js";
-import { Container } from "../lib/tui/component.js";
+import { createTranscript } from "../lib/tui/transcript.js";
 import { ComposerArea } from "../lib/components/composer-area.js";
 import { MonitorStack } from "../lib/components/monitor-stack.js";
 import { createCliOutputController } from "../lib/cli-output-controller.js";
@@ -25,7 +25,7 @@ function createHarness({ columns = 40, rows = 12 } = {}) {
   });
   const state = createCliState();
   state.runtime.status = "ready";
-  const transcriptContainer = new Container();
+  const transcriptContainer = createTranscript();
   const composerArea = new ComposerArea((width) => composeFrame(width));
   const monitorStack = new MonitorStack({
     composer: composerArea,
@@ -501,7 +501,7 @@ test("hardware caret stays on the input line while a turn runs", async () => {
   });
   const state = createCliState();
   state.runtime.status = "ready";
-  const transcriptContainer = new Container();
+  const transcriptContainer = createTranscript();
   let session = null;
   const composerArea = new ComposerArea((width) => {
     if (!session) {
