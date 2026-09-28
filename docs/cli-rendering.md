@@ -59,6 +59,8 @@ While the model is idle and this snapshot is present, the transcript uses a stat
 
 ## Invariants
 
+- Regular frames coalesce at a 33 ms ceiling; forced input frames run on the next microtask without a zero-delay timer. When the terminal returns `false` from `write`, drawing pauses until `drain`. Only the latest render request is retained; transcript content remains available so native history appends are reconstructed without dropping text.
+
 - Transcript mutations use `addChild`, `changed`, `clear`, or `invalidate`. The output controller announces assistant, tool and question mutations; activity alone reuses immutable transcript lines. TUI owns normalized root segments and skips their unchanged prefix during diff. Components may return frozen arrays for reuse; ordinary arrays remain supported and are normalized on every render. No caller may modify a frozen render result.
 
 - Single authoritative width: the engine's `columns()` is the only source, handed down via `render(width)`; components must not read `process.stdout.columns`.

@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { EventEmitter } from "node:events";
 
 import { createVirtualOutput, createVirtualInput } from "./helpers/virtual-terminal.js";
 import { createTui, CURSOR_MARKER } from "../lib/tui/tui.js";
@@ -30,6 +31,41 @@ class StaticText {
     return [this.text];
   }
 }
+
+test("terminal backpressure coalesces frames without losing appended history", async () => {
+  const virtual = createVirtualOutput({ columns: 40, rows: 8 });
+  const events = new EventEmitter();
+  let blocked = false, renders = 0, writes = 0;
+  let lines = ["initial"];
+  const output = {
+    columns: 40, rows: 8,
+    on: (...args) => events.on(...args), off: (...args) => events.off(...args),
+    write(value) { writes++; virtual.output.write(value); return !blocked; },
+  };
+  const tui = createTui({ input: {}, output, manageInput: false, renderIntervalMs: 0 });
+  tui.addChild({ render() { renders++; return lines; } });
+  tui.start();
+  await settle(virtual);
+  blocked = true;
+  lines = [...lines, "accepted before drain"];
+  tui.requestRender(true);
+  await settle(virtual);
+  const before = { renders, writes };
+  for (let i = 0; i < 20; i++) {
+    lines = [...lines, `append ${i}`];
+    tui.requestRender(true);
+    await Promise.resolve();
+  }
+  assert.deepEqual({ renders, writes }, before);
+  blocked = false;
+  events.emit("drain");
+  await settle(virtual);
+  assert.equal(renders, before.renders + 1);
+  const text = virtual.getScrollBuffer().join("\n");
+  for (let i = 0; i < 20; i++) assert.ok(text.includes(`append ${i}`));
+  tui.stop();
+  assert.equal(events.listenerCount("drain"), 0);
+});
 
 async function settle(virtual) {
   await new Promise((resolve) => setTimeout(resolve, 25));

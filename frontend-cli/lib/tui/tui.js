@@ -17,7 +17,7 @@ const MODIFY_OTHER_KEYS_DISABLE = "\x1b[>4;0m";
 const KEYBOARD_QUERY_TIMEOUT_MS = 150;
 const DEFAULT_COLUMNS = 80;
 const DEFAULT_ROWS = 24;
-const DEFAULT_RENDER_INTERVAL_MS = 16;
+const DEFAULT_RENDER_INTERVAL_MS = 33;
 
 export function createTui(options = {}) {
   const input = options.input || process.stdin;
@@ -42,6 +42,7 @@ export function createTui(options = {}) {
   let renderMicrotaskQueued = false;
   let renderTimer = null;
   let lastRenderAt = 0;
+  let outputBlocked = false;
 
   let previousLines = [];
   let previousWidth = 0;
@@ -111,6 +112,7 @@ export function createTui(options = {}) {
     }
     started = true;
     stopped = false;
+    outputBlocked = Boolean(output.writableNeedDrain);
     if (acquireInput) {
       rawModeBeforeStart = Boolean(input.isRaw);
       if (typeof input.setRawMode === "function") {
@@ -128,6 +130,7 @@ export function createTui(options = {}) {
     }
     if (typeof output.on === "function") {
       output.on("resize", handleResize);
+      output.on("drain", handleDrain);
     }
     write(PASTE_ENABLE);
     enableKeyboardProtocol();
@@ -160,6 +163,7 @@ export function createTui(options = {}) {
     showCursor();
     if (typeof output.off === "function") {
       output.off("resize", handleResize);
+      output.off("drain", handleDrain);
     }
     if (typeof input.off === "function") {
       input.off("data", handleInputData);
@@ -243,6 +247,11 @@ export function createTui(options = {}) {
     requestRender();
   }
 
+  function handleDrain() {
+    outputBlocked = false;
+    if (renderRequested) queueRenderMicrotask();
+  }
+
   // Repaint the entire transcript (viewport + scrollback) with current
   // component state — used after appearance changes like theme switches.
   function replayAll() {
@@ -283,12 +292,14 @@ export function createTui(options = {}) {
   }
 
   function scheduleRender() {
-    if (stopped || renderTimer !== null || !renderRequested) {
+    if (stopped || outputBlocked || renderTimer !== null || !renderRequested) {
       return;
     }
-    const delay = renderForceRequested
-      ? 0
-      : Math.max(0, minRenderIntervalMs - (now() - lastRenderAt));
+    if (renderForceRequested) {
+      flushRender();
+      return;
+    }
+    const delay = Math.max(0, minRenderIntervalMs - (now() - lastRenderAt));
     renderTimer = schedule(() => {
       renderTimer = null;
       flushRender();
@@ -296,7 +307,7 @@ export function createTui(options = {}) {
   }
 
   function flushRender() {
-    if (stopped || !renderRequested) {
+    if (stopped || outputBlocked || !renderRequested) {
       return;
     }
     renderRequested = false;
@@ -604,7 +615,7 @@ export function createTui(options = {}) {
 
   function write(value) {
     if (value) {
-      output.write(value);
+      if (output.write(value) === false) outputBlocked = true;
     }
   }
 
