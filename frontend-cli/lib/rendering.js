@@ -871,6 +871,90 @@ export function delegateMonitorText(delegates = [], selectedIndex = 0, selectedD
   return lines.join("\n");
 }
 
+export function taskMonitorFrame({ page, backgroundCount, delegateCount, items, index, selected,
+  foreground, foregroundIndex, foregroundCount, focus, preview, previewOffset, loading, error, width, height }) {
+  const columns = Math.max(1, Math.floor(Number(width) || 80));
+  const rows = Math.max(1, Math.floor(Number(height) || 24));
+  const inner = Math.max(1, columns - 4);
+  const tabs = taskMonitorTabs(page, backgroundCount, delegateCount, inner).split("\n");
+  const foregroundLine = foreground && page === "background"
+    ? `  ${focus === "foreground" ? accent("›") : dim("·")} ${dim(`${foregroundIndex + 1}/${foregroundCount}`)}  ${clipSingleLine(foreground.command || foreground.bg_id, Math.max(1, inner - 28))}  ${dim("r background")}`
+    : "";
+  const footer = dim(rows < 7 ? "  esc close" : "  ←→ page · ↑↓ select · tab focus · r release · c cancel · esc close");
+  const list = Array.isArray(items) ? items : [];
+  const selectedRow = focus === "foreground" && foregroundLine ? foregroundLine
+    : list.length ? taskMonitorRow(page, selected, focus === "list", inner)
+      : dim(page === "delegates" ? "  No delegates." : "  No background tasks.");
+  if (rows <= 2) {
+    return { lines: rows === 1 ? [clipCells(`${selectedRow} ${dim("esc")}`, columns)] : [clipCells(selectedRow, columns), clipCells(footer, columns)] };
+  }
+  const lines = [];
+  if (rows >= 5) lines.push(...tabs.slice(0, rows >= 8 ? 2 : 1));
+  if (foregroundLine && rows - lines.length >= 4) lines.push(clipCells(foregroundLine, columns));
+  const status = error ? dim(`  ${error}`) : loading ? dim("  Loading tasks…") : "";
+  const fixed = lines.length + 1 + (status ? 1 : 0);
+  const capacity = Math.max(1, rows - fixed);
+  const detailRows = selected && capacity >= 3 ? 1 : 0;
+  const positionRows = list.length > 1 && capacity >= 4 ? 1 : 0;
+  const previewReserve = detailRows ? Math.min(6, Math.max(0, capacity - detailRows - positionRows - 1)) : 0;
+  const listSize = Math.min(5, list.length || 1,
+    Math.max(1, capacity - detailRows - positionRows - previewReserve));
+  const start = Math.min(Math.max(0, index - Math.floor(listSize / 2)), Math.max(0, list.length - listSize));
+  if (positionRows) lines.push(dim(`  ${index + 1}/${list.length}`));
+  if (list.length) {
+    for (const [offset, item] of list.slice(start, start + listSize).entries()) {
+      lines.push(taskMonitorRow(page, item, focus === "list" && start + offset === index, inner));
+    }
+  } else if (!foregroundLine || !lines.includes(clipCells(foregroundLine, columns))) lines.push(selectedRow);
+  if (detailRows) {
+    const available = Math.max(0, rows - lines.length - 1 - (status ? 1 : 0));
+    lines.push(...taskMonitorDetail(page, selected, preview, previewOffset, inner, available));
+  }
+  if (status && lines.length < rows - 1) lines.push(clipCells(status, columns));
+  lines.push(clipCells(footer, columns));
+  return { lines: lines.slice(0, rows) };
+}
+
+function taskMonitorRow(page, item, active, width) {
+  const marker = active ? accent("›") : dim("·");
+  const label = page === "delegates" ? item?.agent_id : item?.bg_id;
+  const detail = page === "delegates" ? item?.task : item?.command;
+  const prefix = `  ${marker} ${clipSingleLine(label, 14)}  ${clipSingleLine(item?.status, 10)}`;
+  const rest = Math.max(0, width - visibleLength(prefix) - 2);
+  return clipCells(`${prefix}  ${dim(clipSingleLine(detail, rest))}`.trimEnd(), width + 4);
+}
+
+function taskMonitorDetail(page, selected, preview, offset, width, maxRows) {
+  if (!selected) return [];
+  if (page === "delegates") return [
+    dim(`  ${clipSingleLine(`${selected.agent_id} · ${selected.status}`, width)}`),
+    ...(selected.task ? [dim(`  task: ${clipSingleLine(selected.task, width - 8)}`)] : []),
+    ...(selected.summary ? [dim(`  ↳ ${clipSingleLine(selected.summary, width - 5)}`)] : []),
+  ].slice(0, maxRows);
+  const heading = dim(`  ${clipSingleLine(`${selected.bg_id} · ${selected.status}`, width)}`);
+  if (!preview) return [heading, dim("  Loading output…")].slice(0, maxRows);
+  if (preview.error) return [heading, dim(`  Output unavailable: ${clipSingleLine(preview.error, width - 22)}`)].slice(0, maxRows);
+  const output = [preview.stdout, preview.stderr].filter(Boolean).join("\n");
+  const content = output ? output.split(/\r?\n/) : ["(no output)"];
+  const warnings = [];
+  if (preview.expired) warnings.push("Output expired; preview incomplete");
+  else if (preview.limited) warnings.push("Earlier output outside preview");
+  return [heading, ...previewWindow(content, offset, width, warnings, maxRows - 1)];
+}
+
+function previewWindow(content, offset, width, warnings, height) {
+  if (height <= 0) return [];
+  if (offset >= content.length) return [dim("  Earlier output unavailable in preview")];
+  const warningRows = Math.min(warnings.length, Math.max(0, height - 1));
+  const outputRows = Math.max(1, height - warningRows);
+  const start = Math.max(0, content.length - Math.max(0, offset) - outputRows);
+  const end = Math.max(start, content.length - Math.max(0, offset));
+  return [
+    ...content.slice(start, end).map((line) => `  ${clipSingleLine(line, width)}`),
+    ...warnings.slice(0, warningRows).map((warning) => dim(`  ${warning}`)),
+  ].slice(0, height);
+}
+
 function choiceMenuTextWithTitle(options, selectedIndex = 0, title = "Choices") {
   const visible = menuWindow(options, selectedIndex);
   if (!visible.items.length) {

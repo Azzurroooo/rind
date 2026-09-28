@@ -96,7 +96,6 @@ export function createEventController({
       case "tool_requested":
         output.closeAssistant?.();
         rememberPlanInputPreview(event);
-        monitor.recordCommand?.(event);
         monitor.recordDelegateRequest?.(event);
         output.beginTool?.(event);
         return;
