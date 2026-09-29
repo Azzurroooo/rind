@@ -1,3 +1,4 @@
+import { escapeHtml } from "./html-escape.ts"
 import hljs from "highlight.js/lib/core"
 import bash from "highlight.js/lib/languages/bash"
 import css from "highlight.js/lib/languages/css"
@@ -59,8 +60,3 @@ function languageForFile(name: string) {
   return extension ? LANGUAGE_BY_EXTENSION[extension] : undefined
 }
 
-function escapeHtml(value: string) {
-  return value.replace(/[&<>"']/g, (character) => ({
-    "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
-  })[character] ?? character)
-}

@@ -24,10 +24,6 @@ export interface TurnEventDecision {
   retired: boolean
 }
 
-export function isTurnSettled(type: string): boolean {
-  return TURN_SETTLED_TYPES.has(type)
-}
-
 export function decideTurnEvent(type: string, turnId: string, activeTurnId: string): TurnEventDecision {
   if (type === "turn_started") {
     // A new generation supersedes the remembered one (goal continuation,

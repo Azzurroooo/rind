@@ -1,3 +1,4 @@
+import { escapeAttribute, escapeHtml } from "./html-escape.ts"
 import { renderContextDisplay } from "./context-report.ts"
 import { desktopSlashCommands } from "./desktop-slash.ts"
 import { renderMarkdown } from "./markdown.ts"
@@ -141,12 +142,3 @@ function asRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {}
 }
 
-function escapeHtml(value: string) {
-  return value.replace(/[&<>'"]/g, (character) => ({
-    "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;",
-  })[character] ?? character)
-}
-
-function escapeAttribute(value: string) {
-  return escapeHtml(value).replace(/\n/g, "&#10;")
-}

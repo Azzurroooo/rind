@@ -1,5 +1,6 @@
 // /context and the context meter (spec section 8): turns the
 // rind/context/inspect record into a command result with a section breakdown.
+import { escapeHtml } from "./html-escape.ts"
 
 export type ContextSection = { key: string; label: string; tokens: number; messages: number }
 
@@ -80,6 +81,3 @@ function asRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {}
 }
 
-function escapeHtml(value: string) {
-  return value.replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;", "'": "&#39;" })[char] || char)
-}

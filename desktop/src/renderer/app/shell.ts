@@ -23,7 +23,6 @@ import { renderStream, syncWorkingTimer } from "./stream.ts"
 export function render() {
   const runtime = currentRuntimeSnapshot()
   state.runtime = runtime
-  const { conversation } = state
   connectionText.textContent = runtimeStatusLabel(runtime.status)
   connection.className = `connection connection-${runtime.status}`
   connection.hidden = runtime.status === "starting"

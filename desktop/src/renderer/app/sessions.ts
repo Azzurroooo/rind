@@ -6,7 +6,6 @@ import { createConversation } from "../timeline-model.ts"
 import { closeComposerSelectMenus } from "./composer-menus.ts"
 import { autoGrowPrompt } from "./composer.ts"
 import { projectList, prompt, requiredElement, sessionTitle } from "./dom.ts"
-import { loadDirectory } from "./files-panel.ts"
 import { asRecord } from "./html.ts"
 import { clampInspectorWidth } from "../inspector-model.ts"
 import { refreshInspector, resetInspectorData } from "./inspector.ts"
@@ -57,10 +56,6 @@ export async function forkSession(sessionId: string) {
   if (!sessionId) return
   if (sessionId !== state.viewedSessionId) await switchSession(sessionId)
   await forkCurrentSession()
-}
-
-export function activeProject() {
-  return viewedProject()
 }
 
 export function viewedProject() {
@@ -193,7 +188,7 @@ export function resolveNewChatProjectPath() {
   return defaultNewChatProjectPath(state.projects, state.recentSessions, state.fallbackProjectPath)
 }
 
-export async function addProject(createDraft = false) {
+export async function addProject() {
   const overview = await window.api.projects.add()
   if (!overview) return
   applyOverview(overview)
@@ -266,7 +261,7 @@ export async function startNewChat() {
   state.viewedProjectPath = state.chatProjectPath
   const project = chatProject()
   if (!project?.available) {
-    await addProject(true)
+    await addProject()
     return
   }
   state.viewedSessionId = ""

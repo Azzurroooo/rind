@@ -91,5 +91,4 @@ body[data-platform="darwin"] .topbar { padding-left: 80px; }
   text-transform: uppercase;
 }
 
-.session-list { display: grid; gap: 2px; font-size: 13px; }
 

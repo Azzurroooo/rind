@@ -137,13 +137,6 @@ function runtimeLaunch() {
 
 let runtimeGeneration = 0
 
-/** Monotonic id of the current worker process generation: sequence numbers
- *  reset to 1 on every (re)spawn, so clients must reset their watermark when
- *  this changes. */
-export function runtimeGenerationId(): number {
-  return runtimeGeneration
-}
-
 export function startRuntime(workspace: string) {
   if (worker.snapshot.status === "stopping") throw new Error("Runtime is shutting down.")
   if (worker.child && !worker.child.killed && worker.child.exitCode === null) return worker.snapshot

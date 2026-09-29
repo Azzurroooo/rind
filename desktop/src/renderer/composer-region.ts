@@ -1,3 +1,4 @@
+import { escapeAttribute, escapeHtml } from "./html-escape.ts"
 import { activePlan, clipLine, type ConversationState, type PlanEntry } from "./timeline-model.ts"
 
 export type PlanDockPresentation = {
@@ -279,16 +280,6 @@ function planProgress(plan: PlanEntry) {
       ? "running"
       : settled === plan.steps.length ? "completed" : "pending"
   return { completed, status, pip: status === "error" ? "pip-error" : status === "completed" ? "pip-done" : "pip-running" }
-}
-
-function escapeHtml(value: string) {
-  return value.replace(/[&<>'"]/g, (character) => ({
-    "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;",
-  })[character] ?? character)
-}
-
-function escapeAttribute(value: string) {
-  return escapeHtml(value).replace(/\n/g, "&#10;")
 }
 
 const METER_RADIUS = 6

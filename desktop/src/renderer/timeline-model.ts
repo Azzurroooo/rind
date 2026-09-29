@@ -132,7 +132,7 @@ export function reduceEvent(state: ConversationState, envelope: RuntimeEvent): C
       ...(tool.kind === "tool" ? {
         ...(Object.keys(asRecord(event.arguments)).length || asString(event.args_preview) || !tool.inputText ? {
           arguments: asRecord(event.arguments),
-          argsPreview: toolArgumentPreview(asString(event.tool_name), asRecord(event.arguments), asString(event.args_preview)),
+          argsPreview: toolArgumentPreview(asRecord(event.arguments), asString(event.args_preview)),
         } : {}),
         inputText: undefined,
       } : {}),
@@ -429,7 +429,7 @@ function reduceTool(state: ConversationState, envelope: RuntimeEvent, update: (t
     return { ...closed, plan: { ...plan, ...update(plan), id: `plan-${toolCallId || closed.nextEntryId}` } as PlanEntry }
   }
   if (toolName === "update_plan") return closed
-  const empty: ToolEntry = { kind: "tool", id: toolCallId ? `tool:${toolCallId}` : "", toolCallId, toolName, argsPreview: toolArgumentPreview(toolName, argumentsValue, asString(envelope.event.args_preview)), arguments: argumentsValue, status: "pending", output: "", errorType: "", durationMs: 0 }
+  const empty: ToolEntry = { kind: "tool", id: toolCallId ? `tool:${toolCallId}` : "", toolCallId, toolName, argsPreview: toolArgumentPreview(argumentsValue, asString(envelope.event.args_preview)), arguments: argumentsValue, status: "pending", output: "", errorType: "", durationMs: 0 }
   return appendEntry(closed, { ...empty, ...update(empty) } as ToolEntry)
 }
 
@@ -443,7 +443,7 @@ function appendReplayTool(state: ConversationState, value: unknown): Conversatio
   const steps = planSteps(toolName, argumentsValue)
   if (steps) return { ...state, plan: { kind: "plan", id: `plan-${toolCallId}`, toolCallId, toolName: "update_plan", status: "completed", steps, error: "", errorType: "", durationMs: 0 } }
   if (toolName === "update_plan") return Array.isArray(argumentsValue.plan) ? { ...state, plan: undefined } : state
-  return appendEntry(state, { kind: "tool", id: `tool:${toolCallId}`, toolCallId, toolName, argsPreview: toolArgumentPreview(toolName, argumentsValue, asString(functionInfo.arguments)), arguments: argumentsValue, status: "completed", output: "", errorType: "", durationMs: 0 })
+  return appendEntry(state, { kind: "tool", id: `tool:${toolCallId}`, toolCallId, toolName, argsPreview: toolArgumentPreview(argumentsValue, asString(functionInfo.arguments)), arguments: argumentsValue, status: "completed", output: "", errorType: "", durationMs: 0 })
 }
 
 function completeReplayTool(state: ConversationState, record: Record<string, unknown>): ConversationState {
@@ -525,7 +525,7 @@ function streamedInput(tool: ToolEntry, delta: string): ToolUpdate {
   if (!delta || (tool.inputText === undefined && Object.keys(tool.arguments).length)) return {}
   const inputText = appendInput(tool.inputText || "", delta)
   const argumentsValue = partialArguments(inputText)
-  return { inputText, arguments: argumentsValue, argsPreview: toolArgumentPreview(tool.toolName, argumentsValue) }
+  return { inputText, arguments: argumentsValue, argsPreview: toolArgumentPreview(argumentsValue) }
 }
 
 function resultStatus(eventStatus: string, errorType: string, ok: boolean | null): ToolStatus {
@@ -563,7 +563,7 @@ function planSteps(toolName: string, argumentsValue: Record<string, unknown>): P
   return steps.length ? steps : undefined
 }
 
-export function toolArgumentPreview(toolName: string, argumentsValue: Record<string, unknown>, fallback = ""): string {
+export function toolArgumentPreview(argumentsValue: Record<string, unknown>, fallback = ""): string {
   const key = ["path", "file_path", "command", "query", "pattern", "task", "objective", "url"].find((name) => typeof argumentsValue[name] === "string")
   return clipLine(key ? asString(argumentsValue[key]) : fallback, 120)
 }
