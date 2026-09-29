@@ -1,7 +1,6 @@
-import brandMarkUrl from "../assets/brand-mark.svg"
 import workingMarkUrl from "../assets/working-mark.svg"
 import { renderCommandResult } from "../command-results.ts"
-import { renderMarkdown } from "../markdown.ts"
+import { isStreamingAssistant, latestAssistantId } from "../message-view.ts"
 import { canConfirmQuestion } from "../question-state.ts"
 import { type Entry } from "../timeline-model.ts"
 import { foldWorkSegments, isWorkSegment, type StreamItem } from "../work-segments.ts"
@@ -10,9 +9,17 @@ import { jumpLatest, messageStream } from "./dom.ts"
 import { escapeAttribute, escapeHtml } from "./html.ts"
 import { activeTurnIdFor, questionSelectionFor, runtimeConversation, runtimeTurnActive } from "./runtime.ts"
 import { state, vars } from "./state.ts"
+import { renderAssistantMessage, renderEmptyState, renderErrorBlock, renderUserMessage } from "./messages.ts"
 import { renderFileChange, renderTool, renderWorkSegment } from "./tools.ts"
 
+/** Per-render context for message markup: which assistant is streaming and which is latest. */
+interface MessageContext {
+  readonly openAssistantId: string
+  readonly activeTurn: boolean
+  readonly latestAssistantId: string
+}
 
+const idleContext: MessageContext = { openAssistantId: "", activeTurn: false, latestAssistantId: "" }
 
 export function renderStream() {
   const stickToBottom = messageStream.scrollHeight - messageStream.scrollTop - messageStream.clientHeight < 80
@@ -23,13 +30,12 @@ export function renderStream() {
     if (node.dataset.entryId) existing.set(node.dataset.entryId, node)
   }
   const nextNodes: HTMLElement[] = []
-  const items = foldWorkSegments(entries, {
-    activeTurn: Boolean(activeTurnIdFor(state.viewedSessionId)),
-    awaitingToolCallId: conversation.question?.toolCallId,
-  })
+  const activeTurn = Boolean(activeTurnIdFor(state.viewedSessionId))
+  const items = foldWorkSegments(entries, { activeTurn, awaitingToolCallId: conversation.question?.toolCallId })
+  const context: MessageContext = { openAssistantId: conversation.openAssistantId, activeTurn, latestAssistantId: latestAssistantId(entries) }
   for (const entry of items) {
     const template = document.createElement("template")
-    template.innerHTML = renderStreamItem(entry)
+    template.innerHTML = renderStreamItem(entry, context)
     const next = template.content.firstElementChild as HTMLElement | null
     if (!next) continue
     const current = existing.get(entry.id)
@@ -71,7 +77,7 @@ export function renderStream() {
     if (!messageStream.querySelector(".stream-empty")) {
       const empty = document.createElement("div")
       empty.className = "stream-empty"
-      empty.innerHTML = `<img class="stream-empty-mark" src="${brandMarkUrl}" alt="" aria-hidden="true" /><h2>What would you like to work on?</h2><p class="subtle">${ready ? "Explore your project, solve a problem, or build something new." : "Add a project folder and configure a model to begin."}</p><div class="starter-actions"><button type="button" data-starter="Explain how this project is organized">Explore this project <span>↗</span></button><button type="button" data-starter="Review the code and suggest focused improvements">Review the code <span>↗</span></button><button type="button" data-starter="Help me plan and implement a new feature">Build a feature <span>↗</span></button></div>`
+      empty.innerHTML = renderEmptyState(ready)
       messageStream.append(empty)
     }
   } else {
@@ -105,26 +111,25 @@ export function replaceElementChildren(current: HTMLElement, next: HTMLElement) 
   if (selectionStart !== null && selectionEnd !== null) input.setSelectionRange(selectionStart, selectionEnd)
 }
 
-export function renderStreamItem(item: StreamItem): string {
-  return isWorkSegment(item) ? renderWorkSegment(item) : renderEntry(item)
+export function renderStreamItem(item: StreamItem, context: MessageContext = idleContext): string {
+  return isWorkSegment(item) ? renderWorkSegment(item) : renderEntry(item, context)
 }
 
-export function renderEntry(entry: Entry): string {
+export function renderEntry(entry: Entry, context: MessageContext = idleContext): string {
   switch (entry.kind) {
     case "user":
-      return `<article class="turn-user" data-entry-id="${escapeAttribute(entry.id)}"><div class="message-actions"><button type="button" class="ghost-button message-copy" data-copy-message="${escapeAttribute(entry.id)}" title="Copy message">Copy</button></div><div class="user-bubble">${renderMarkdown(entry.content)}</div></article>`
-    case "assistant": {
-      const actions = entry.content ? `<div class="message-actions"><button type="button" class="ghost-button message-copy" data-copy-message="${escapeAttribute(entry.id)}" title="Copy message">Copy</button></div>` : ""
-      return `<article class="turn-assistant" data-entry-id="${escapeAttribute(entry.id)}">${actions}${renderMarkdown(entry.content)}</article>`
-    }
+      return renderUserMessage(entry.id, entry.content)
+    case "assistant":
+      return renderAssistantMessage(entry.id, entry.content, {
+        streaming: isStreamingAssistant(entry.id, context.openAssistantId, context.activeTurn),
+        latest: entry.id === context.latestAssistantId,
+      })
     case "tool":
       return renderTool(entry)
     case "file":
       return renderFileChange(entry.id, entry.filePath)
-    case "error": {
-      const retryable = entry.retryable && canRetryLastPrompt() ? `<button type="button" class="ghost-button" data-retry-turn title="Resend the last prompt">Retry</button>` : ""
-      return `<div class="stream-card card-error" data-entry-id="${escapeAttribute(entry.id)}"><div class="card-label">${escapeHtml(entry.source)}</div><div class="card-body">${escapeHtml(entry.content)}</div>${retryable ? `<div class="card-actions">${retryable}</div>` : ""}</div>`
-    }
+    case "error":
+      return renderErrorBlock(entry.id, entry.source, entry.content, Boolean(entry.retryable) && canRetryLastPrompt())
     case "notice":
       return `<div class="stream-card card-notice" data-entry-id="${escapeAttribute(entry.id)}"><div class="card-label">${escapeHtml(entry.label)}</div><div class="card-body">${escapeHtml(entry.content)}</div></div>`
     case "system":
@@ -172,7 +177,7 @@ export function renderWorking(): string {
   }
   if (!turnId) return ""
   const elapsed = conversation.turnStartedAt ? Math.max(0, Math.round((Date.now() - conversation.turnStartedAt) / 1000)) : 0
-  return `<div class="working" data-stream-role="working"><img class="working-mark" src="${workingMarkUrl}" alt="" aria-hidden="true" /><span id="working-label">Working… ${elapsed}s</span></div>`
+  return `<div class="working" data-stream-role="working"><img class="working-mark" src="${workingMarkUrl}" alt="" aria-hidden="true" /><span id="working-label" class="working-label">Working… ${elapsed}s</span></div>`
 }
 
 export function syncWorkingTimer() {

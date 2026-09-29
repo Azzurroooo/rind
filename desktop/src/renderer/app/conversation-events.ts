@@ -1,9 +1,9 @@
 import { canConfirmQuestion, questionAnswer, selectQuestionOption, updateQuestionInput } from "../question-state.ts"
-import { autoGrowPrompt, retryLastPrompt, selectSlashCommand } from "./composer.ts"
-import { interrupt, jumpLatest, messageStream, planDock, planDockShell, prompt, requiredElement, retry } from "./dom.ts"
+import { retryLastPrompt, selectSlashCommand, setPrompt } from "./composer.ts"
+import { interrupt, jumpLatest, messageStream, planDock, planDockShell, requiredElement, retry } from "./dom.ts"
 import { answerQuestion, cancelActiveTurn, questionSelectionFor, restartRuntime, runAction } from "./runtime.ts"
 import { openToolFile } from "./files-panel.ts"
-import { chatProject, currentDraftKey, switchSession } from "./sessions.ts"
+import { chatProject, switchSession } from "./sessions.ts"
 import { render } from "./shell.ts"
 import { state, toolOpenRequests, vars } from "./state.ts"
 import { keepToolHeaderVisible, setToolExpanded, toolHeaderOffset } from "./stream.ts"
@@ -11,7 +11,7 @@ import { keepToolHeaderVisible, setToolExpanded, toolHeaderOffset } from "./stre
 export function bindConversationEvents(): void {
   messageStream.addEventListener("click", (event) => {
     const value = (event.target as HTMLElement).closest<HTMLButtonElement>("[data-starter]")?.dataset.starter
-    if (value) { prompt.value = value; state.drafts[currentDraftKey()] = value; autoGrowPrompt(); prompt.focus() }
+    if (value) setPrompt(value, true)
   })
 
   interrupt.addEventListener("click", () => cancelActiveTurn(state.viewedSessionId))
@@ -50,6 +50,12 @@ export function bindConversationEvents(): void {
       const entry = state.conversation.entries.find((item) => item.id === copyMessage)
       const content = entry && (entry.kind === "user" || entry.kind === "assistant") ? entry.content : ""
       if (content) runAction(() => navigator.clipboard.writeText(content))
+      return
+    }
+    const editMessage = target.closest<HTMLButtonElement>("[data-edit-message]")?.dataset.editMessage
+    if (editMessage) {
+      const entry = state.conversation.entries.find((item) => item.id === editMessage)
+      if (entry?.kind === "user") setPrompt(entry.content, true)
       return
     }
     if (target.closest<HTMLButtonElement>("[data-retry-turn]")) {

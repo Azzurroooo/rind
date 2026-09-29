@@ -290,15 +290,30 @@ body { min-height: 0; }
 .shortcut-row span { color: var(--text); }
 .shortcut-row code { color: var(--muted); font-family: var(--font-mono); font-size: 11px; }
 
-/* ---------- message actions (C12) ---------- */
+/* ---------- message action bars (spec section 4) ---------- */
 
-.message-actions { display: flex; justify-content: flex-end; opacity: 0; transition: opacity 120ms ease; }
+.message-actions { display: flex; gap: 4px; margin-top: 4px; opacity: 0; transition: opacity 150ms var(--ease); }
 .turn-user .message-actions { justify-content: flex-end; }
-.turn-assistant .message-actions { justify-content: flex-start; }
-.turn-user:hover .message-actions, .turn-assistant:hover .message-actions, .message-actions:focus-within { opacity: 1; }
-.message-copy { min-height: 22px; padding: 1px 7px; font-size: 10.5px; }
+.turn-assistant .message-actions { justify-content: flex-start; margin-left: -6px; }
+.turn-user:hover .message-actions, .turn-assistant:hover .message-actions, .message-actions:focus-within, .turn-assistant.latest .message-actions { opacity: 1; }
+.message-action {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  color: var(--dim);
+  background: transparent;
+  transition: color var(--dur-hover) var(--ease), background-color var(--dur-hover) var(--ease);
+}
+.message-action svg { width: 15px; height: 15px; }
+.message-action:hover { color: var(--text); background: var(--fill-1); }
+.message-action:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 .card-actions { display: flex; margin-top: 8px; }
 
 @media (prefers-reduced-motion: reduce) {
+  .message-actions, .message-action { transition: none; }
   .attachment-chip, .task-monitor-shell, .goal-panel-shell, .command-palette { animation: none; }
 }

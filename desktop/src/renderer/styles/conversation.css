@@ -53,9 +53,10 @@
 }
 .message-stream > * { max-width: var(--stream-width); margin-left: auto; margin-right: auto; }
 
+/* Optically centred: the extra bottom padding lifts the heading above the true centre. */
 .stream-empty {
-  min-height: min(52vh, 440px);
-  padding: 24px;
+  min-height: min(56vh, 480px);
+  padding: 24px 24px 64px;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -65,30 +66,81 @@
 }
 .stream-empty-mark { width: 46px; height: 46px; margin-bottom: 20px; opacity: 0.9; }
 .stream-empty p { margin: 0; }
-.stream-empty .subtle { margin-top: 10px; font-family: var(--font-ui); font-size: 13px; white-space: normal; }
+.stream-empty h2 { margin: 0; color: var(--text); font-size: 24px; font-weight: 600; letter-spacing: -.02em; }
+.stream-empty-hint { margin-top: 8px; color: var(--dim); font-size: 13px; }
+.starter-actions { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; max-width: 560px; margin-top: 24px; }
+.starter-chip {
+  min-height: 32px;
+  padding: 6px 14px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: var(--muted);
+  background: var(--bg);
+  font-size: 13px;
+  transition: color var(--dur-hover) var(--ease), background-color var(--dur-hover) var(--ease), border-color var(--dur-hover) var(--ease);
+}
+.starter-chip:hover { color: var(--text); background: var(--surface); border-color: var(--line-strong); }
+.starter-chip:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
-/* user bubble: right-aligned, warm tint — the only boxed message */
-.turn-user { display: flex; justify-content: flex-end; margin-bottom: 14px; }
+/* Spec section 4: 8 vertical padding per message, a 24 gap before each new turn. */
+.turn-user, .turn-assistant { padding: 8px 0; }
+.turn-user { display: flex; flex-direction: column; align-items: flex-end; margin-top: 24px; }
+.message-stream > .turn-user:first-child { margin-top: 0; }
 .user-bubble {
-  max-width: 78%;
-  padding: 8px 12px;
-  border: 1px solid var(--accent);
-  border-radius: 12px 12px 3px 12px;
+  max-width: 80%;
+  padding: 10px 14px;
+  border-radius: 14px 4px 14px 14px;
   color: var(--text);
-  background: var(--accent-soft);
+  background: var(--surface-soft);
   line-height: 1.55;
+  white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
 
-/* assistant text: full width, quiet, unboxed */
+/* assistant text: full width, unboxed */
 .turn-assistant {
-  margin-bottom: 14px;
   color: var(--text);
-  line-height: 1.62;
+  font-size: 15px;
+  line-height: 1.7;
   overflow-wrap: anywhere;
 }
-.turn-assistant > :first-child, .user-bubble > :first-child { margin-top: 0; }
-.turn-assistant > :last-child, .user-bubble > :last-child { margin-bottom: 0; }
+
+/* Streaming caret: 2x14 at the end of the text while the reply is still arriving. */
+.turn-assistant.streaming .message-body:empty::after,
+.turn-assistant.streaming .message-body > :is(p, h1, h2, h3, h4, h5, h6, blockquote):last-child::after,
+.turn-assistant.streaming .message-body > :is(ul, ol):last-child > li:last-child::after {
+  content: "";
+  display: inline-block;
+  width: 2px;
+  height: 14px;
+  margin-left: 2px;
+  vertical-align: -2px;
+  background: var(--text);
+  animation: caret-blink 1s steps(1, end) infinite;
+}
+@keyframes caret-blink { 50% { opacity: 0; } }
+
+/* Errors: a soft danger block with a 1px left rule (spec section 4). */
+.stream-error {
+  margin: 8px 0;
+  padding: 10px 12px;
+  border-left: 1px solid var(--danger);
+  border-radius: 6px;
+  background: var(--danger-soft);
+}
+.stream-error-label { margin-bottom: 2px; color: var(--danger); font-size: 12px; font-weight: 600; }
+.stream-error-body { color: var(--text); font-size: 13px; line-height: 1.55; white-space: pre-wrap; overflow-wrap: anywhere; }
+.error-retry { display: inline-flex; align-items: center; gap: 6px; min-height: 28px; padding: 3px 8px; }
+.error-retry svg { width: 14px; height: 14px; }
+
+@media (prefers-reduced-motion: reduce) {
+  .turn-assistant.streaming .message-body:empty::after,
+  .turn-assistant.streaming .message-body > :is(p, h1, h2, h3, h4, h5, h6, blockquote):last-child::after,
+  .turn-assistant.streaming .message-body > :is(ul, ol):last-child > li:last-child::after { animation: none; }
+  .starter-chip { transition: none; }
+}
+.message-body > :first-child { margin-top: 0; }
+.message-body > :last-child { margin-bottom: 0; }
 .turn-assistant h1, .turn-assistant h2, .turn-assistant h3, .turn-assistant h4, .turn-assistant h5, .turn-assistant h6 { margin: 18px 0 8px; color: var(--text); line-height: 1.3; }
 .turn-assistant h1 { font-size: 20px; }
 .turn-assistant h2 { font-size: 17px; }

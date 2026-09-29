@@ -1,6 +1,6 @@
 import brandMarkUrl from "../assets/brand-mark.svg"
 import { composerRegionMarkup } from "../composer-region.ts"
-import { Bell, Download, GitBranch, Keyboard, KeyRound, ListTodo, MonitorSmartphone, PanelLeft, PanelRight, renderIcon, Search, Settings, SlidersHorizontal, SunMoon, X } from "../icons.ts"
+import { ArrowDown, Bell, Download, GitBranch, Keyboard, KeyRound, ListTodo, MonitorSmartphone, PanelLeft, PanelRight, renderIcon, Search, Settings, SlidersHorizontal, SunMoon, X } from "../icons.ts"
 import { remoteAccessMarkup } from "../remote-access.ts"
 import { escapeHtml } from "./html.ts"
 
@@ -57,7 +57,7 @@ appRoot.innerHTML = `
         <div id="notice" class="notice" role="status" hidden><span id="notice-text"></span><button id="retry" type="button" class="ghost-button" hidden>Retry</button></div>
         <div class="stream-wrap">
           <div id="message-stream" class="message-stream" aria-live="polite"></div>
-          <button id="jump-latest" type="button" class="jump-latest" hidden>Jump to latest</button>
+          <button id="jump-latest" type="button" class="jump-latest" data-tooltip="Jump to latest" aria-label="Jump to latest" hidden>${renderIcon(ArrowDown)}</button>
         </div>
         ${composerRegionMarkup()}
       </section>
