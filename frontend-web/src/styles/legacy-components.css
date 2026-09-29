@@ -183,7 +183,7 @@
   /* iOS zooms focused inputs set below 16px — keep every field at 16px. */
   .composer-shell textarea, .question-custom input, .login-input-row input, .workspace-input-row input { font-size: 16px; }
   /* The desktop reading measure gives way; content goes full-bleed. */
-  .message, .tool-stack, .plan-block, .thinking-line, .change-summary { max-width: 100%; }
+  .message, .work-segment, .work-single, .plan-block, .thinking-line, .change-summary { max-width: 100%; }
   .composer-shell, .composer-status, .empty-conversation { max-width: 100%; }
   /* Long tables scroll inside their container instead of the page. */
   .markdown-content table { display: block; max-width: 100%; overflow-x: auto; }
@@ -202,7 +202,6 @@
   .queue-toggle button { padding: 0 6px; font-size: 10px; }
   .message { gap: 9px; margin-bottom: 23px; }
   .message-content { font-size: 15px; }
-  .tool-stack { padding-left: 37px; }
   .composer-wrap { padding: 8px 12px 14px; }
   .composer-status { font-size: 9px; }
   .composer-status > span:last-child { display: none; }
@@ -215,7 +214,6 @@
   .session-delete { flex-basis: 44px; }
   .send-button { width: 44px; height: 44px; }
   .stop-button, .secondary-action { min-height: 44px; }
-  .tool-title, .tool-expand-all { min-height: 44px; }
   .slash-suggestions button, .palette-item { min-height: 44px; }
   .session-confirm button { min-width: 44px; min-height: 44px; }
   .session-main { padding: 15px 6px 15px 9px; }

@@ -1,9 +1,10 @@
-import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from "react";
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
 import { ArrowDown, Check, ClipboardCopy, FileDiff, LoaderCircle, RefreshCw, Wrench, X } from "lucide-react";
 import { copyText } from "../lib/clipboard.js";
 import { MarkdownContent } from "./MarkdownContent.jsx";
 import { QuestionCard } from "./QuestionCard.jsx";
-import { ToolBlock } from "./ToolBlock.jsx";
+import { WorkSegment } from "./tools/WorkSegment.jsx";
+import { buildTimeline } from "../lib/workSegments.js";
 
 // Distance (px) from the bottom beyond which the user counts as "scrolled up"
 // and auto-follow pauses (audit #5: never disturb scroll).
@@ -26,9 +27,11 @@ const Conversation = forwardRef(function Conversation({
   onPromote,
   onRetry,
   onSuggestion,
+  onOpenFile,
 }, ref) {
   const transcriptRef = useRef(null);
   const [detached, setDetached] = useState(false);
+  const timeline = useMemo(() => buildTimeline(messages, { active }), [messages, active]);
 
   const distanceFromBottom = useCallback(() => {
     const node = transcriptRef.current;
@@ -61,7 +64,7 @@ const Conversation = forwardRef(function Conversation({
   useImperativeHandle(ref, () => ({ scrollToLatest }), [scrollToLatest]);
 
   function jumpToDiff(toolCallId) {
-    const node = transcriptRef.current?.querySelector(`[data-tool-id="${toolCallId}"]`);
+    const node = transcriptRef.current?.querySelector(`[data-tool-id="${toolCallId}"], [data-segment-calls~="${toolCallId}"]`);
     if (!node) return;
     node.scrollIntoView?.({ block: "center" });
     setDetached(distanceFromBottom() > DETACH_THRESHOLD_PX);
@@ -75,17 +78,19 @@ const Conversation = forwardRef(function Conversation({
             <div className="collapsed-divider" role="note">Earlier messages have been collapsed ({collapsedCount})</div>
           )}
           {!messages.length && !draft && <EmptyConversation onSuggestion={onSuggestion} />}
-          {messages.map((message, index) => (
+          {timeline.map((item) => (item.type === "segment" ? (
+            <WorkSegment key={item.key} segment={item} onOpenFile={onOpenFile} />
+          ) : (
             <Message
-              key={`${message.id || message.role}-${index}`}
-              message={message}
+              key={item.key}
+              message={item.entry}
               onAnswer={onAnswer}
               onExpire={onExpire}
               onRetrieve={onRetrieve}
               onPromote={onPromote}
               onRetry={active ? undefined : onRetry}
             />
-          ))}
+          )))}
           {draft && <article className="message assistant streaming"><div className="message-avatar">R</div><div className="message-body"><div className="message-meta">Rind <span>streaming</span></div><MarkdownContent value={draft} className="streaming-content" /><span className="cursor-block" /></div></article>}
           {plan?.length > 0 && <PlanBlock plan={plan} />}
           {!active && turnChanges && (
@@ -112,8 +117,7 @@ function EmptyConversation({ onSuggestion }) {
 }
 
 function Message({ message, onAnswer, onExpire, onRetrieve, onPromote, onRetry }) {
-  if (message.role === "tool") return <div className="tool-stack" data-tool-id={message.tool_call_id || ""}><ToolBlock tool={message} /></div>;
-  if (message.role === "question") return <div className="tool-stack question-stack"><QuestionCard entry={message} onAnswer={onAnswer} onExpire={onExpire} /></div>;
+  if (message.role === "question") return <div className="question-stack"><QuestionCard entry={message} onAnswer={onAnswer} onExpire={onExpire} /></div>;
   if (message.role === "queued") return <QueuedRow message={message} onRetrieve={onRetrieve} onPromote={onPromote} />;
   const assistant = message.role === "assistant";
   const system = message.role === "system";

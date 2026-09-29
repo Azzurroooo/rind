@@ -207,33 +207,6 @@ h1, h2, p { margin: 0; }
 .change-summary svg { color: var(--success); }
 .change-delta { color: var(--dim); font-variant-numeric: tabular-nums; }
 
-.tool-stack { max-width: 820px; margin: -7px auto 26px; padding-left: 41px; border-left: 1px solid var(--line); }
-.tool-block { margin: 7px 0; border: 1px solid var(--line); border-radius: 5px; background: var(--surface); overflow: hidden; }
-.tool-block.running { border-color: var(--warning); }
-.tool-block.failed { border-color: var(--danger); }
-.tool-title { width: 100%; min-height: 34px; display: flex; align-items: center; gap: 8px; padding: 0 11px; border: 0; background: transparent; color: var(--muted); font-size: 11px; text-align: left; cursor: pointer; }
-.tool-title strong { flex: 0 0 auto; color: var(--text); font: 11px var(--font-mono); }
-.tool-summary-line { min-width: 0; flex: 1; overflow: hidden; color: var(--muted); font: 11px var(--font-mono); text-overflow: ellipsis; white-space: nowrap; }
-.tool-title:hover .tool-summary-line { color: var(--text); }
-.tool-status { flex: 0 0 auto; color: var(--dim); font: 10px var(--font-mono); }
-.tool-icon { position: relative; width: 14px; height: 14px; display: inline-grid; place-items: center; color: var(--success); }
-.tool-icon-state, .tool-icon-running { grid-area: 1 / 1; display: inline-grid; place-items: center; transition: opacity var(--motion-pop) var(--ease), transform var(--motion-pop) var(--ease); }
-.tool-icon-running { opacity: 0; transform: scale(.5); color: var(--accent); }
-.tool-icon.is-running .tool-icon-running { opacity: 1; transform: scale(1); }
-.tool-icon.is-running .tool-icon-state { opacity: 0; transform: scale(1.3); }
-.tool-icon.is-failed { color: var(--danger); }
-.tool-chevron { flex: 0 0 auto; color: var(--dim); transition: transform var(--motion-pop) var(--ease); }
-.tool-chevron.open { transform: rotate(180deg); }
-.tool-body { border-top: 1px solid var(--line); }
-.tool-error { margin: 8px 12px 0; padding: 7px 10px; border-left: 2px solid var(--danger); background: var(--danger-soft); color: var(--danger); font: 11px/1.5 var(--font-mono); overflow-wrap: anywhere; }
-.tool-rows { display: flex; flex-direction: column; }
-.tool-rows > .tool-detail:first-child { border-top: 0; }
-.tool-detail { display: flex; gap: 10px; padding: 7px 12px; border-top: 1px solid var(--line); color: var(--muted); font: 10px/1.4 var(--font-mono); }.tool-detail span { color: var(--dim); flex: 0 0 auto; }.tool-detail strong { margin-left: auto; color: var(--text); font-weight: 400; text-align: right; overflow-wrap: anywhere; }
-.tool-items { border-top: 1px solid var(--line); }.tool-items > div, .tool-items > a { display: flex; flex-direction: column; gap: 2px; padding: 7px 12px; border-bottom: 1px solid var(--line); color: var(--text); font: 11px/1.4 var(--font-mono); text-decoration: none; }.tool-items > :last-child { border-bottom: 0; }.tool-items span { color: var(--muted); overflow-wrap: anywhere; }.tool-items a:hover strong { color: var(--info); }
-.tool-output { border-top: 1px solid var(--line); }.tool-output pre { max-height: 260px; margin: 0; padding: 10px 12px; overflow: auto; color: var(--muted); background: var(--surface-soft); font: 11px/1.55 var(--font-mono); white-space: pre-wrap; }
-.tool-expand-all { width: 100%; min-height: 30px; border: 0; border-top: 1px solid var(--line); background: transparent; color: var(--info); font: 10px var(--font-mono); cursor: pointer; }
-.tool-expand-all:hover { color: var(--text); }
-.tool-raw { border-top: 1px solid var(--line); }.tool-raw summary { display: flex; align-items: center; gap: 6px; padding: 8px 12px; color: var(--info); cursor: pointer; font: 10px var(--font-mono); list-style: none; }.tool-raw summary::-webkit-details-marker { display: none; }.tool-raw pre { max-height: 240px; margin: 0; padding: 10px 12px; border-top: 1px solid var(--line); overflow: auto; color: var(--muted); background: var(--surface-soft); font: 11px/1.55 var(--font-mono); white-space: pre-wrap; }
 .diff-view { border-top: 1px solid var(--line); }
 .diff-caption { padding: 7px 12px; border-bottom: 1px solid var(--line); color: var(--info); font: 10px var(--font-mono); overflow-wrap: anywhere; }
 .diff-body { overflow-x: auto; background: var(--surface-soft); font: 11px/1.55 var(--font-mono); }
