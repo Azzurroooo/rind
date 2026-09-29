@@ -121,7 +121,8 @@ body { min-height: 0; }
 .attachment-name { overflow: hidden; color: var(--text); font-size: 11.5px; text-overflow: ellipsis; white-space: nowrap; }
 .attachment-size { overflow: hidden; color: var(--dim); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
 .chip-spinner { display: block; width: 12px; height: 12px; border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%; color: var(--dim); animation: send-spin 720ms linear infinite; }
-.chip-delete, .chip-retry { min-height: 22px; padding: 1px 6px; font-size: 11px; }
+.chip-delete, .chip-retry { display: inline-flex; align-items: center; min-height: 22px; padding: 1px 6px; font-size: 11px; }
+.chip-delete svg { width: 12px; height: 12px; }
 .chip-delete:hover:not(:disabled) { color: var(--danger); }
 
 .composer.drag-over .prompt-wrap textarea, .composer.drag-over .composer-footer { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }

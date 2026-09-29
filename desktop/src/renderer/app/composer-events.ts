@@ -1,7 +1,7 @@
 import { composerKeyAction } from "../composer-keys.ts"
 import { sameProjectPath as samePath } from "../project-selection.ts"
 import { isExactSlashCommand, slashCommandMenu as buildSlashCommandMenu } from "../slash-commands.ts"
-import { addAttachmentFiles } from "./attachments-ui.ts"
+import { addAttachmentFiles, bindAttachmentEvents } from "./attachments-ui.ts"
 import { closeComposerSelectMenus, selectEffort, selectModel, toggleEffortMenu, toggleModelMenu, toggleProjectMenu } from "./composer-menus.ts"
 import { autoGrowPrompt, closeSlashCommandMenu, renderSlashCommandMenu, revealActiveSlashCommand, selectSlashCommand, sendPrompt, setPrompt } from "./composer.ts"
 import { attachButton, attachInput, compactContext, composerForm, contextMeter, composerMenuTrigger, effortMenu, effortMenuTrigger, modelMenu, modelMenuTrigger, projectMenu, projectMenuTrigger, prompt, requiredElement, slashCommandMenu } from "./dom.ts"
@@ -73,6 +73,8 @@ export function bindComposerEvents(): void {
     attachInput.value = ""
     attachInput.click()
   })
+
+  bindAttachmentEvents()
 
   attachInput.addEventListener("change", () => {
     const files = Array.from(attachInput.files || [])

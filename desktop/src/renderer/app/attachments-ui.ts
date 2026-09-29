@@ -1,3 +1,4 @@
+import { renderIcon, X } from "../icons.ts"
 import { FILE_LIMIT_BYTES, fileToBase64, formatBytes, isImageMime, uploadTargetPath } from "../attachments.ts"
 import { attachmentChips } from "./dom.ts"
 import { asRecord, asRecordText, escapeAttribute, escapeHtml } from "./html.ts"
@@ -36,7 +37,7 @@ export function renderAttachments() {
         <small class="attachment-size">${formatBytes(chip.size)}${chip.status === "uploading" ? " · uploading…" : chip.status === "failed" ? ` · ${escapeHtml(chip.error || "Upload failed")}` : ""}</small>
       </span>
       ${chip.status === "failed" ? `<button type="button" class="ghost-button chip-retry" data-chip-retry="${escapeAttribute(chip.id)}" title="Retry upload">Retry</button>` : chip.status === "ok" ? `<span class="status-pip pip-done" title="Uploaded"></span>` : `<span class="send-spinner chip-spinner" aria-hidden="true"></span>`}
-      <button type="button" class="ghost-button chip-delete" data-chip-delete="${escapeAttribute(chip.id)}" title="Remove attachment" aria-label="Remove attachment ${escapeAttribute(chip.name)}">✕</button>
+      <button type="button" class="ghost-button chip-delete" data-chip-delete="${escapeAttribute(chip.id)}" title="Remove attachment" aria-label="Remove attachment ${escapeAttribute(chip.name)}">${renderIcon(X)}</button>
     `
     if (attachmentChips.children[index] !== item) attachmentChips.append(item)
     existing.delete(chip.id)
@@ -115,6 +116,17 @@ export function removeAttachment(chipId: string) {
   state.attachments[state.chatProjectPath] = list.filter((item) => item.id !== chipId)
   chipFileBacklog.delete(chipId)
   renderAttachments()
+}
+
+/** Delegated clicks for the per-chip retry and remove buttons. */
+export function bindAttachmentEvents() {
+  attachmentChips.addEventListener("click", (event) => {
+    const target = event.target as HTMLElement
+    const retry = target.closest<HTMLElement>("[data-chip-retry]")
+    if (retry?.dataset.chipRetry) return retryAttachment(retry.dataset.chipRetry)
+    const remove = target.closest<HTMLElement>("[data-chip-delete]")
+    if (remove?.dataset.chipDelete) removeAttachment(remove.dataset.chipDelete)
+  })
 }
 
 export async function waitForAttachments() {
