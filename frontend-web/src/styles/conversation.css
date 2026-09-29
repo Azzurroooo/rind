@@ -73,21 +73,6 @@
 .starter-chip:hover { background: var(--fill-1); }
 .starter-chip svg { color: var(--dim); }
 
-/* Plan. */
-.plan-block { padding: var(--space-3) var(--space-4); border: 1px solid var(--line); border-radius: var(--radius-card); background: var(--surface); }
-.plan-heading { display: flex; align-items: center; gap: var(--space-2); color: var(--text); font-size: var(--text-dense); font-weight: 600; }
-.plan-count { margin-left: auto; color: var(--dim); font-weight: 400; font-variant-numeric: tabular-nums; }
-.plan-list { display: grid; gap: var(--space-1); margin: var(--space-2) 0 0; padding: 0; list-style: none; }
-.plan-row { display: flex; align-items: flex-start; gap: var(--space-2); color: var(--muted); font-size: var(--text-dense); line-height: 1.5; }
-.plan-row.in_progress { color: var(--text); font-weight: 500; }
-.plan-row.completed { color: var(--dim); text-decoration: line-through; }
-.plan-check {
-  flex: none; display: grid; place-items: center; width: 18px; height: 18px; margin-top: 1px;
-  border: 1px solid var(--line-strong); border-radius: 50%; color: var(--dim); font-size: 10px;
-}
-.plan-row.in_progress .plan-check { border-color: var(--accent); color: var(--accent); }
-.plan-row.completed .plan-check { border-color: var(--success); background: var(--success-soft); color: var(--success); }
-
 /* Change summary and working line. */
 .change-summary {
   align-self: flex-start; display: inline-flex; align-items: center; gap: var(--space-2);

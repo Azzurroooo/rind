@@ -80,7 +80,7 @@ export function Shell() {
             inspectorExpanded={layout.inspectorVisible}
             sidebarToggleRef={layout.sidebarToggleRef}
             inspectorToggleRef={layout.inspectorToggleRef}
-            showTasks={tabs.tabs.includes("tasks")}
+            showTasks={tabs.tabs.includes("activity")}
             menuItems={headerMenuItems({
               hasSession: Boolean(sessionId),
               active: view.active,
@@ -93,13 +93,12 @@ export function Shell() {
             })}
             onToggleSidebar={layout.toggleSidebar}
             onToggleInspector={layout.toggleInspector}
-            onOpenTasks={() => layout.openInspector("tasks")}
+            onOpenTasks={() => layout.openInspector("activity")}
           />
           <Conversation
             ref={refs.conversation}
             messages={view.messages}
             draft={view.draft}
-            plan={view.plan}
             active={view.active}
             collapsedCount={view.collapsedCount}
             turnChanges={view.turnChanges}
@@ -153,6 +152,8 @@ export function Shell() {
           stats={ctx.stats}
           contextSnapshot={ctx.contextSnapshot}
           contextInfo={ctx.contextInfo}
+          plan={view.plan}
+          backgroundWaitCount={view.backgroundWait?.count || 0}
           goal={ctx.goal}
           connected={connected}
           compacting={ctx.compacting}

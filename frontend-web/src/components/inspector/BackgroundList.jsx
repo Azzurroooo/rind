@@ -6,9 +6,12 @@ import { formatDuration } from "../../lib/toolDisplay.js";
 
 const POLL_MS = 3000;
 const OUTPUT_CHARS = 20000;
+const ACTIVE_STATES = new Set(["starting", "running", "cancelling"]);
 
-// Background shell jobs from rind/background/list, used when the runtime has
-// no durable task service (rind/task/list). Selecting a job reads its output.
+// Background shell jobs from rind/background/list, the fallback for runtimes
+// without the durable task service (rind/task/list). Like the task service
+// view, only jobs that are still running appear; finished ones stay in the
+// transcript. Selecting a job reads its output.
 export function BackgroundList({ sessionId, request }) {
   const [jobs, setJobs] = useState([]);
   const [error, setError] = useState("");
@@ -20,8 +23,10 @@ export function BackgroundList({ sessionId, request }) {
     try {
       const result = await request(methods.backgroundList, { session_id: sessionId });
       if (current !== generation.current) return;
-      setJobs(Array.isArray(result?.tasks) ? result.tasks : []);
+      const listed = Array.isArray(result?.tasks) ? result.tasks.filter((job) => ACTIVE_STATES.has(String(job.status))) : [];
+      setJobs(listed);
       setError("");
+      setSelected((current) => (current && listed.some((job) => (job.bg_id || job.task_id) === current) ? current : ""));
     } catch (cause) {
       if (current === generation.current) setError(errorText(cause));
     }
@@ -51,13 +56,13 @@ export function BackgroundList({ sessionId, request }) {
   return (
     <section className="inspector-section" aria-label="Background jobs">
       <div className="inspector-section-head">
-        <h3 className="inspector-section-title">Background jobs</h3>
+        <h3 className="inspector-section-title">Tasks</h3>
         <button type="button" className="icon-button small" aria-label="Refresh background jobs" onClick={() => void refresh()}>
           <RefreshCw size={14} aria-hidden="true" />
         </button>
       </div>
       {error && <p className="form-error" role="alert">{error}</p>}
-      {!jobs.length && !error && <p className="muted">No background jobs in this session.</p>}
+      {!jobs.length && !error && <p className="muted section-hint">No background commands are running. Commands Rind yields to the background appear here while they run.</p>}
       <ul className="task-list">
         {jobs.map((job) => {
           const id = job.bg_id || job.task_id;

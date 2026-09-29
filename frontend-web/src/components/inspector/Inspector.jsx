@@ -1,17 +1,15 @@
 import { useRef } from "react";
 import { X } from "lucide-react";
-import { TaskPanel } from "../TaskPanel.jsx";
-import { GoalPanel } from "../GoalPanel.jsx";
 import { FileTree } from "../FileTree.jsx";
 import { methods } from "../../methods.js";
 import { ContextTab } from "./ContextTab.jsx";
 import { UsageTab } from "./UsageTab.jsx";
-import { BackgroundList } from "./BackgroundList.jsx";
+import { ActivityTab } from "./ActivityTab.jsx";
 
-const TAB_LABELS = Object.freeze({ context: "Context", tasks: "Tasks", files: "Files", goal: "Goal", usage: "Usage" });
+const TAB_LABELS = Object.freeze({ context: "Context", activity: "Activity", files: "Files", usage: "Usage" });
 
-// Which tabs the connected runtime can back. Tasks and Usage only appear when
-// the runtime advertises their methods.
+// Which tabs the connected runtime can back. Activity needs a way to watch
+// background commands; Usage also appears when the runtime reports providers.
 export function visibleTabs(info) {
   const available = new Set(info?.methods || []);
   const capabilities = new Set(info?.capabilities || []);
@@ -20,9 +18,8 @@ export function visibleTabs(info) {
   return {
     tabs: [
       "context",
-      ...(tasks || background ? ["tasks"] : []),
+      ...(tasks || background ? ["activity"] : []),
       "files",
-      "goal",
       ...(available.has(methods.usageSummary) || available.has(methods.authList) ? ["usage"] : []),
     ],
     tasks,
@@ -33,7 +30,7 @@ export function visibleTabs(info) {
 }
 
 // Inspector (spec section 2), after LobeHub's right panel: a 360px column of
-// tabs (Context, Tasks, Files, Goal, Usage). Tabs follow the WAI-ARIA tabs
+// tabs (Context, Activity, Files, Usage). Tabs follow the WAI-ARIA tabs
 // pattern with roving arrow keys.
 export function Inspector({
   tab,
@@ -43,6 +40,8 @@ export function Inspector({
   stats,
   contextSnapshot,
   contextInfo,
+  plan,
+  backgroundWaitCount = 0,
   goal,
   connected,
   compacting,
@@ -106,21 +105,22 @@ export function Inspector({
         {current === "context" && (
           <ContextTab stats={stats} snapshot={contextSnapshot} contextInfo={contextInfo} compacting={compacting} canCompact={Boolean(sessionId)} onCompact={onCompact} />
         )}
-        {current === "tasks" && (
-          <div className="inspector-body">
-            {gates.tasks
-              ? <TaskPanel sessionId={sessionId} request={request} enabled />
-              : <BackgroundList sessionId={sessionId} request={request} />}
-          </div>
+        {current === "activity" && (
+          <ActivityTab
+            plan={plan}
+            sessionId={sessionId}
+            request={request}
+            taskService={gates.tasks}
+            background={gates.background}
+            waitingCount={backgroundWaitCount}
+            goal={goal}
+            goalDisabled={!sessionId || !connected}
+            onGoalAction={onGoalAction}
+          />
         )}
         {current === "files" && (
           <div className="inspector-body files-tab">
             <FileTree key={workspace || "none"} workspace={workspace} listFiles={listFiles} readFile={readFile} embedded openRequest={fileRequest} />
-          </div>
-        )}
-        {current === "goal" && (
-          <div className="inspector-body">
-            <GoalPanel key={sessionId} goal={goal} onAction={onGoalAction} disabled={!sessionId || !connected} />
           </div>
         )}
         {current === "usage" && <UsageTab request={request} usageEnabled={gates.usage} authEnabled={gates.auth} />}

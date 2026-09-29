@@ -5,7 +5,6 @@ import { WorkSegment } from "../tools/WorkSegment.jsx";
 import { buildTimeline } from "../../lib/workSegments.js";
 import { isServerMessageId } from "../../app/constants.js";
 import { EmptyConversation } from "./EmptyConversation.jsx";
-import { PlanBlock } from "./PlanBlock.jsx";
 import { AssistantMessage, StreamingMessage, SystemNote, UserMessage } from "./MessageItem.jsx";
 
 // Distance (px) from the bottom beyond which the user counts as "scrolled up"
@@ -29,7 +28,6 @@ function forkPointAfter(entries, index) {
 export const Conversation = forwardRef(function Conversation({
   messages,
   draft,
-  plan,
   active,
   collapsedCount = 0,
   turnChanges = null,
@@ -116,7 +114,6 @@ export const Conversation = forwardRef(function Conversation({
           {empty && <EmptyConversation onSuggestion={onSuggestion} />}
           {timeline.map(renderEntry)}
           {draft && <StreamingMessage text={draft} />}
-          {plan?.length > 0 && <PlanBlock plan={plan} />}
           {!active && turnChanges && (
             <button type="button" className="change-summary" onClick={() => jumpToDiff(turnChanges.firstToolCallId)}>
               <FileDiff size={14} aria-hidden="true" />{" "}

@@ -1,5 +1,5 @@
 /* Inspector (surface-design-v2 section 2 and 7), after LobeHub's right panel:
-   a tabbed column for Context, Tasks, Files, Goal and Usage. */
+   a tabbed column for Context, Activity, Files and Usage. */
 
 .inspector {
   flex: none; display: flex; flex-direction: column;
@@ -25,6 +25,8 @@
 .inspector-body { display: grid; align-content: start; gap: var(--space-4); padding: var(--space-4); }
 .inspector-body.files-tab { height: 100%; padding: 0; }
 .inspector-section { display: grid; gap: var(--space-2); }
+.section-note { color: var(--dim); font-size: var(--text-meta); font-variant-numeric: tabular-nums; }
+.section-hint { margin: 0; color: var(--muted); font-size: var(--text-meta); line-height: 1.6; }
 .inspector-section-head { display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); }
 .inspector-section-title, .section-title {
   display: flex; align-items: center; gap: var(--space-2);
@@ -67,8 +69,24 @@
 .provider-state { flex: none; color: var(--dim); font-size: var(--text-meta); }
 .provider-state.success { color: var(--success); }
 
-/* Background jobs. */
+/* Plan checklist (Activity tab). */
+.plan-list { display: grid; gap: var(--space-1); margin: 0; padding: 0; list-style: none; }
+.plan-row { display: flex; align-items: flex-start; gap: var(--space-2); color: var(--muted); font-size: var(--text-dense); line-height: 1.5; }
+.plan-row.in_progress { color: var(--text); font-weight: 500; }
+.plan-row.completed { color: var(--dim); text-decoration: line-through; }
+.plan-check {
+  flex: none; display: grid; place-items: center; width: 18px; height: 18px; margin-top: 1px;
+  border: 1px solid var(--line-strong); border-radius: 50%; color: var(--dim); font-size: 10px;
+}
+.plan-row.in_progress .plan-check { border-color: var(--accent); color: var(--accent); }
+.plan-row.completed .plan-check { border-color: var(--success); background: var(--success-soft); color: var(--success); }
+
+/* Running background commands (Activity tab). */
 .task-list { display: grid; gap: 2px; margin: 0; padding: 0; list-style: none; }
+.task-list > li { display: grid; gap: 2px; }
+.task-pip { flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--accent); }
+.task-pip.cancelling { background: var(--warning); }
+.task-detail { display: grid; gap: var(--space-1); padding: 0 var(--space-2) var(--space-2); }
 .task-list .task-row {
   display: flex; align-items: center; gap: var(--space-2); width: 100%;
   min-height: var(--control-md); padding: 4px var(--space-2);

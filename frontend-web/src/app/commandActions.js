@@ -24,7 +24,7 @@ export function createCommandActions(ctx) {
       },
       focusModel: () => focusChip("model"),
       focusEffort: () => focusChip("effort"),
-      focusGoal: () => ctx.layout.openInspector("goal"),
+      focusGoal: () => ctx.layout.openInspector("activity"),
       openContext: () => ctx.layout.openInspector("context"),
       compact: () => actions.compact(),
       stopTurn: () => actions.cancelTurn(),
