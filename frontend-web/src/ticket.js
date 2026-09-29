@@ -12,6 +12,24 @@ const TOKEN_KEY = "rind_token";
 export const TICKET_KEY = "rind_ticket";
 
 let memoryToken = "";
+let memoryScope = "";
+const SCOPE_KEY = "rind_credential_server";
+
+// Pairing codes travel only in the URL fragment, never in HTTP requests.
+// Clear the fragment before login so it is absent from copied page addresses.
+export function consumePairingCode() {
+  const fragment = new URLSearchParams(window.location.hash.slice(1));
+  const code = fragment.get("connect");
+  if (!code) return "";
+  fragment.delete("connect");
+  const rest = fragment.toString();
+  window.history.replaceState(null, "", `${window.location.pathname}${window.location.search}${rest ? `#${rest}` : ""}`);
+  return /^[A-Za-z0-9_-]{32}$/.test(code) ? code : "";
+}
+
+function matchesScope(scope) {
+  return !scope || (memoryScope || sessionStorageSafe()?.getItem(SCOPE_KEY)) === scope;
+}
 
 function sessionStorageSafe() {
   try {
@@ -21,23 +39,28 @@ function sessionStorageSafe() {
   }
 }
 
-export function readStoredToken() {
+export function readStoredToken(scope = "") {
+  if (!matchesScope(scope)) return "";
   if (memoryToken) return memoryToken;
   const storage = sessionStorageSafe();
   return storage ? String(storage.getItem(TOKEN_KEY) || "").trim() : "";
 }
 
-export function storeToken(token) {
+export function storeToken(token, scope = "") {
   const clean = String(token || "").trim();
   memoryToken = clean;
+  memoryScope = scope;
   const storage = sessionStorageSafe();
   if (storage) {
+    if (scope) storage.setItem(SCOPE_KEY, scope);
+    else storage.removeItem(SCOPE_KEY);
     if (clean) storage.setItem(TOKEN_KEY, clean);
     else storage.removeItem(TOKEN_KEY);
   }
 }
 
-export function readStoredTicket() {
+export function readStoredTicket(scope = "") {
+  if (!matchesScope(scope)) return "";
   const storage = sessionStorageSafe();
   return storage ? String(storage.getItem(TICKET_KEY) || "").trim() : "";
 }
@@ -53,14 +76,16 @@ export function storeTicket(ticket) {
 
 export function dropCredentials() {
   memoryToken = "";
+  memoryScope = "";
   const storage = sessionStorageSafe();
   if (!storage) return;
   storage.removeItem(TOKEN_KEY);
   storage.removeItem(TICKET_KEY);
+  storage.removeItem(SCOPE_KEY);
 }
 
-export function hasStoredCredential() {
-  return Boolean(readStoredToken() || readStoredTicket());
+export function hasStoredCredential(scope = "") {
+  return Boolean(readStoredToken(scope) || readStoredTicket(scope));
 }
 
 // Exchanges a server token for a one-time WS ticket (worker-core.md §4).
@@ -107,11 +132,11 @@ export async function fetchTicket(serverToken, { endpoint = "/ticket", fetchImpl
 
 export function loginErrorMessage(error) {
   const status = Number(error?.status);
-  if (status === 401 || status === 403) return "Token invalid or rejected. Check it and try again.";
-  if (status === 0) return "Cannot reach the server. Verify the worker address and try again.";
+  if (status === 401 || status === 403) return "Access code invalid or expired. Copy the current code from Rind Desktop and try again.";
+  if (status === 0) return "Cannot reach Rind. Keep Rind Desktop open and check that both devices are connected to the same network.";
   return error?.message ? `Connection failed: ${error.message}` : "Connection failed. Try again later.";
 }
 
 export function unauthorizedMessage() {
-  return "Session expired. Re-enter the token.";
+  return "Access has expired. Enter the current access code from Rind Desktop.";
 }

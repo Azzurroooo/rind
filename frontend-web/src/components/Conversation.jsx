@@ -1,5 +1,5 @@
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from "react";
-import { ArrowDown, Check, CircleStop, ClipboardCopy, FileDiff, LoaderCircle, RefreshCw, Wrench, X } from "lucide-react";
+import { ArrowDown, Check, ClipboardCopy, FileDiff, LoaderCircle, RefreshCw, Wrench, X } from "lucide-react";
 import { copyText } from "../lib/clipboard.js";
 import { MarkdownContent } from "./MarkdownContent.jsx";
 import { QuestionCard } from "./QuestionCard.jsx";
@@ -20,13 +20,12 @@ const Conversation = forwardRef(function Conversation({
   active,
   collapsedCount = 0,
   turnChanges = null,
-  interruptArmed = false,
-  onCancel,
   onAnswer,
   onExpire,
   onRetrieve,
   onPromote,
   onRetry,
+  onSuggestion,
 }, ref) {
   const transcriptRef = useRef(null);
   const [detached, setDetached] = useState(false);
@@ -70,16 +69,12 @@ const Conversation = forwardRef(function Conversation({
 
   return (
     <section className="conversation-panel">
-      <div className="conversation-header">
-        <div><span className="eyebrow">LIVE TRANSCRIPT</span><h1>{active ? "Working through the request" : "Ready for your next request"}</h1></div>
-        {active && <button className={`stop-button ${interruptArmed ? "armed" : ""}`} onClick={onCancel}><CircleStop size={16} /> {interruptArmed ? "Press Esc again to stop" : "Stop turn"}</button>}
-      </div>
       <div className="transcript-frame">
         <div className="transcript" ref={transcriptRef} onScroll={handleScroll} aria-live="polite">
           {collapsedCount > 0 && (
             <div className="collapsed-divider" role="note">Earlier messages have been collapsed ({collapsedCount})</div>
           )}
-          {!messages.length && !draft && <EmptyConversation />}
+          {!messages.length && !draft && <EmptyConversation onSuggestion={onSuggestion} />}
           {messages.map((message, index) => (
             <Message
               key={`${message.id || message.role}-${index}`}
@@ -112,8 +107,8 @@ const Conversation = forwardRef(function Conversation({
   );
 });
 
-function EmptyConversation() {
-  return <div className="empty-conversation"><div className="empty-orbit">R</div><h2>Start a conversation with your worker</h2><p>Your worker stays alive independently. Close this tab and reconnect later without losing the session.</p><div className="starter-grid"><span>Inspect the current workspace</span><span>Review recent changes</span><span>Plan the next task</span></div></div>;
+function EmptyConversation({ onSuggestion }) {
+  return <div className="empty-conversation"><img src="/rind.svg" alt="" className="welcome-mark" /><h2>What would you like to work on?</h2><p>A little clarity. A useful change. Your next idea.</p><div className="starter-grid">{["Explore this project", "Review recent changes", "Plan the next task"].map((text) => <button key={text} onClick={() => onSuggestion?.(text)}>{text}<span aria-hidden="true">↗</span></button>)}</div></div>;
 }
 
 function Message({ message, onAnswer, onExpire, onRetrieve, onPromote, onRetry }) {

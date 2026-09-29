@@ -1,10 +1,16 @@
-import { Activity, BrainCircuit, CircleGauge, Cloud, GitBranch, Goal, Server, Sparkles } from "lucide-react";
+import { useState } from "react";
+import { Activity, BrainCircuit, CircleGauge, Cloud, GitBranch, Goal, Server, Sparkles, X } from "lucide-react";
+import { TaskPanel } from "./TaskPanel.jsx";
+import { GoalPanel } from "./GoalPanel.jsx";
 import { formatDuration } from "../lib/toolDisplay.js";
 
 const RING_RADIUS = 18;
 const RING_CIRCUMFERENCE = 2 * Math.PI * RING_RADIUS;
 
-export function Inspector({ info, stats, goal, plan, models, effort, connection, onModel, onEffort, onRefreshModels, onCompact, compacting, currentModel, contextInfo = null, panelAttrs = {}, panelRef }) {
+export function Inspector({ info, stats, goal, plan, models, effort, connection, onModel, onEffort, onRefreshModels, onCompact, compacting, currentModel, contextInfo = null, panelAttrs = {}, panelRef, onClose, request, onGoalAction }) {
+  const [tab, setTab] = useState("details");
+  const [error, setError] = useState("");
+  async function change(action, value) { setError(""); try { await action?.(value); } catch (cause) { setError(cause.message); } }
   // Mobile drawer wiring (master plan §6.2): panelAttrs carries the drawer
   // class and aria/inert state below the breakpoint; empty on desktop.
   const { className: panelClassName = "", ...restPanelAttrs } = panelAttrs;
@@ -12,13 +18,16 @@ export function Inspector({ info, stats, goal, plan, models, effort, connection,
   const modelValue = currentModel || info?.model || info?.default_model || "";
   const modelOptions = Array.from(new Set([modelValue, ...models].filter(Boolean)));
   return <aside ref={panelRef} className={`inspector ${panelClassName}`.trim()} tabIndex={-1} {...restPanelAttrs}>
-    <div className="inspector-heading"><div><span className="eyebrow">RUNTIME</span><h2>Session state</h2></div><span className="live-pulse" /></div>
+    <div className="inspector-heading"><h2>Session details</h2>{onClose && <button className="icon-button subtle" aria-label="Close session details" onClick={onClose}><X size={17} /></button>}</div>
+    <div className="panel-tabs" role="tablist" aria-label="Session details"><button role="tab" aria-selected={tab === "details"} onClick={() => setTab("details")}>Overview</button><button role="tab" aria-selected={tab === "tasks"} onClick={() => setTab("tasks")}>Tasks</button></div>
+    {tab === "tasks" ? <TaskPanel sessionId={info.session_id} request={request} enabled={Boolean(info.capabilities?.includes?.("rind/tasks") || info.methods?.includes?.("rind/task/list"))} /> : <>
+    {error && <p className="form-error" role="alert">{error}</p>}
     <div className="state-list">
-      <StateRow icon={<Server size={15} />} label="Worker" value={connection === "connected" ? "online" : "offline"} tone={connection === "connected" ? "success" : ""} />
-      <StateRow icon={<Cloud size={15} />} label="Session" value={info?.session_id || "none"} />
+      <StateRow icon={<Server size={15} />} label="Connection" value={connection === "connected" ? "online" : "offline"} tone={connection === "connected" ? "success" : ""} />
+      <StateRow icon={<Cloud size={15} />} label="Conversation" value={info?.session_id ? "Ready" : "New"} />
       <StateRow icon={<GitBranch size={15} />} label="Workspace" value={shortPath(info?.workspace_root)} />
     </div>
-    <div className="inspector-section"><div className="section-title"><BrainCircuit size={15} /> Model</div><select value={modelValue} onFocus={onRefreshModels} onChange={(event) => onModel(event.target.value)}>{modelOptions.length ? modelOptions.map((model) => <option key={model} value={model}>{model}</option>) : <option value="">Select model</option>}</select><select value={effort || ""} onChange={(event) => onEffort(event.target.value)}><option value="">Reasoning effort</option>{["low", "medium", "high", "xhigh", "max"].map((item) => <option key={item} value={item}>{item}</option>)}</select></div>
+    <div className="inspector-section"><div className="section-title"><BrainCircuit size={15} /> Model</div><select aria-label="Model" value={modelValue} onFocus={onRefreshModels} onChange={(event) => change(onModel, event.target.value)}>{modelOptions.length ? modelOptions.map((model) => <option key={model} value={model}>{model}</option>) : <option value="">Select model</option>}</select><select aria-label="Reasoning effort" value={effort || ""} onChange={(event) => change(onEffort, event.target.value)}><option value="" disabled>Reasoning effort</option>{["low", "medium", "high", "xhigh", "max"].map((item) => <option key={item} value={item}>{item}</option>)}</select></div>
     {/* Context gauge (audit #15): ring + "tokens · % used" badge; the expandable
         detail carries window/cached plus last-turn duration & message count
         when the runtime reported them. No cost display — the kernel doesn't track $. */}
@@ -49,9 +58,10 @@ export function Inspector({ info, stats, goal, plan, models, effort, connection,
         </div>
       </details>
     </div>
-    <div className="inspector-section goal-section" tabIndex={-1}><div className="section-title"><Goal size={15} /> Goal</div>{goal?.objective ? <><strong className="goal-text">{goal.objective}</strong><span className={`goal-status ${goal.status}`}>{goal.status}</span></> : <span className="muted">No active goal</span>}</div>
+    <GoalPanel key={info.session_id} goal={goal} onAction={onGoalAction} disabled={!info.session_id || connection !== "connected"} />
     <div className="inspector-section"><div className="section-title"><Activity size={15} /> Actions</div><button className="secondary-action" onClick={onCompact} disabled={compacting}><Sparkles size={14} /> {compacting ? "Compacting..." : "Compact context"}</button></div>
     {plan?.length > 0 && <div className="inspector-section mini-plan"><div className="section-title"><Goal size={15} /> Current plan</div><span className="muted">{plan.filter((item) => item.status === "completed").length} of {plan.length} complete</span></div>}
+    </>}
   </aside>;
 }
 

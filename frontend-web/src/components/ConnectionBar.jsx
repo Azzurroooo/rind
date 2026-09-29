@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { CheckCircle2, CircleOff, LoaderCircle, PlugZap, RefreshCw } from "lucide-react";
+import { CircleOff, LoaderCircle, RefreshCw, Settings2 } from "lucide-react";
 
 const FADE_MS = 800; // strip fades out 800ms after syncing completes (web-ui.md §2.1)
 
@@ -7,7 +7,7 @@ const FADE_MS = 800; // strip fades out 800ms after syncing completes (web-ui.md
 //   online → nothing at all; reconnecting → 2px strip + "Reconnecting";
 //   syncing → strip + "Syncing… (N items)" with a countdown; offline → strip + "Disconnected" + retry.
 // The strip is position:fixed, so no transition ever shifts layout or scroll.
-export function ConnectionBar({ phase = "online", syncRemaining = 0, syncTotal = 0, url, onChangeUrl, onReconnect, onLogout }) {
+export function ConnectionBar({ phase = "online", syncRemaining = 0, syncTotal = 0, onReconnect, onLogout, onSettings }) {
   const [fading, setFading] = useState(false);
   const phaseRef = useRef(phase);
   const lastSyncRef = useRef({ remaining: 0, total: 0 });
@@ -52,20 +52,16 @@ export function ConnectionBar({ phase = "online", syncRemaining = 0, syncTotal =
           <img src="/rind.svg" alt="Rind" className="brand-mark" />
           <div>
             <div className="brand-name">Rind</div>
-            <div className="brand-subtitle">worker console</div>
+            <div className="brand-subtitle">Your agent workspace</div>
           </div>
         </div>
         <div className="connection-control">
           <span className={`connection-dot ${connected ? "online" : phase === "reconnecting" || phase === "connecting" ? "pending" : "offline"}`} />
-          <input aria-label="Worker WebSocket URL" value={url} onChange={(event) => onChangeUrl(event.target.value)} onKeyDown={(event) => event.key === "Enter" && onReconnect()} />
           <span className="connection-label">{phase === "online" ? "connected" : phase === "syncing" ? "syncing" : phase === "offline" || phase === "login" ? "offline" : "connecting"}</span>
+          {onSettings && <button className="icon-button subtle" title="Open settings" aria-label="Open settings" onClick={onSettings}><Settings2 size={16} /></button>}
           {connected
             ? <button className="icon-button subtle" title="Disconnect and clear this page's credentials" onClick={onLogout}><CircleOff size={16} /></button>
             : <button className="icon-button subtle" title="Reconnect to worker" onClick={onReconnect}>{phase === "reconnecting" || phase === "connecting" ? <LoaderCircle className="spin" size={16} /> : <RefreshCw size={16} />}</button>}
-        </div>
-        <div className="service-state">
-          {connected ? <CheckCircle2 size={15} /> : <PlugZap size={15} />}
-          <span>{connected ? "Worker available" : "Waiting for worker"}</span>
         </div>
       </header>
     </>

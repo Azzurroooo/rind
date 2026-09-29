@@ -2,6 +2,17 @@
 
 The web surface connects to a long-lived Rind worker over WebSocket. Closing or refreshing the browser only closes that client connection; the worker process keeps its sessions and active turns alive.
 
+## Connect through Rind Desktop
+
+In Desktop, open **Remote access** from the top toolbar and choose **Enable remote access**.
+Scan the QR code with a phone on the same trusted network, or copy the sign-in link to another
+browser. The page connects automatically; no server or WebSocket address setup is needed.
+Manual address and access-code entry is available in the desktop dialog as a fallback.
+
+Remote access is off by default. Keep Desktop running. **Generate new code** disconnects
+previous devices; **Turn off remote access** stops sharing without stopping local tasks.
+See `../docs/surface-upgrade.md` for HTTPS/private-network setup and validation boundaries.
+
 ## One-command deployment
 
 Install Docker Desktop or Docker Engine with Compose v2, then run from the repository root:
@@ -32,11 +43,14 @@ Start the web surface in another terminal:
 
 ```bash
 cd frontend-web
-npm install
+npm ci
 npm run dev -- --host 0.0.0.0
 ```
 
-Open `http://localhost:5173`. To connect to another worker, edit the WebSocket URL in the top bar or use `?ws=ws://host:8765`.
+Open `http://localhost:5173` and use the worker's access token on the sign-in screen. The Vite
+proxy connects `/ws` and `/ticket` to the local worker automatically. For a developer-managed
+deployment, configure the reverse proxy or `VITE_RIND_WS_URL` at build time. Ordinary users
+never configure transport addresses in the interface.
 
 The default worker bind host is loopback. Use a reverse proxy with authentication and TLS before exposing a worker outside a trusted network.
 
@@ -53,7 +67,7 @@ Codified from the shipped UI (`src/styles.css`). New components must follow thes
 
 ### Size floor
 
-- 12px is the floor for any text a user is meant to read (message body is 14px; list titles 12px).
+- 12px is the floor for any text a user is meant to read (message body is 15px; list titles 12px).
 - 9–11px is reserved for `var(--mono)` metadata and uppercase micro-labels (timestamps, eyebrows, tool summaries) — never for actions or body copy the user must act on.
 - Minimum interactive target: 34px desktop, 44px under `pointer: coarse` (see the media queries).
 
@@ -65,8 +79,8 @@ Codified from the shipped UI (`src/styles.css`). New components must follow thes
 
 ### Type stacks & rhythm
 
-- UI stack: `"Manrope", "Segoe UI", sans-serif` (loaded once; never per-component fonts). Code/metadata stack: `var(--mono)` = `"DM Mono", Consolas, monospace`.
-- Message body 14px/1.75; compact UI text 12px/1.45–1.5; code blocks 12px/1.6; metadata mono 10–11px/1.4.
+- UI stack: `Inter, "Segoe UI", "Microsoft YaHei UI", system-ui, sans-serif`. Code/metadata stack: `var(--mono)` = `"Cascadia Code", Consolas, monospace`. Fonts resolve locally without external font requests.
+- Message body 15px/1.8; compact UI text 12–14px; code blocks 12px/1.6; metadata mono 10–11px/1.4.
 - Headings use negative letter-spacing (`-.02em` to `-.035em`) and `text-wrap: balance`; body copy uses `text-wrap: pretty`; all text uses `overflow-wrap: anywhere` where user-generated content can appear.
 - Motion respects `prefers-reduced-motion: reduce` (global override); durations stay within `--t-fast/base/slow` (≤280ms).
 

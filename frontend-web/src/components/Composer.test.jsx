@@ -126,7 +126,7 @@ describe("Composer — queue mode toggle (audit #1)", () => {
     rerender(<Composer value="" onChange={() => {}} onSubmit={vi.fn()} active onQueueModeChange={onQueueModeChange} queueMode="follow_up" />);
     const group = screen.getByRole("group", { name: "Queue mode" });
     expect(group.querySelector("button.selected").textContent).toContain("Queue follow-up");
-    expect(screen.getByRole("textbox").placeholder).toContain("queue as follow-ups");
+    expect(screen.getByRole("textbox").placeholder).toBe("Add a follow-up while Rind works…");
 
     fireEvent.click(screen.getByTitle("Redirect the current turn immediately (steer)"));
     expect(onQueueModeChange).toHaveBeenCalledWith("steering");
@@ -136,7 +136,7 @@ describe("Composer — queue mode toggle (audit #1)", () => {
     renderComposer({ active: true, queueMode: "steering", onQueueModeChange: vi.fn() });
     const group = screen.getByRole("group", { name: "Queue mode" });
     expect(group.querySelector("button.selected").textContent).toContain("Redirect steer");
-    expect(screen.getByRole("textbox").placeholder).toContain("steer");
+    expect(screen.getByRole("textbox").placeholder).toBe("Guide what Rind does next…");
   });
 });
 

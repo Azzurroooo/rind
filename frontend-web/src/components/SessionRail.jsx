@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { Fragment, useMemo, useState } from "react";
 import { Bell, Check, ChevronRight, CirclePlus, FolderOpen, History, LoaderCircle, MessageSquareText, Search, Trash2 } from "lucide-react";
 import { FileTree } from "./FileTree.jsx";
 import { sessionIdOf } from "../methods.js";
@@ -18,6 +18,8 @@ export function SessionRail({
   activeId,
   loading,
   workspace,
+  workspaces = [],
+  onWorkspaceSelect,
   workspaceDraft,
   workspaceBusy,
   workspaceMessage,
@@ -64,15 +66,18 @@ export function SessionRail({
     <aside ref={panelRef} className={`session-rail ${panelClassName}`.trim()} tabIndex={-1} {...restPanelAttrs}>
       <div className="rail-heading">
         <div>
-          <span className="eyebrow">WORKSPACE</span>
-          <h2>Choose a directory</h2>
+          <h2>Workspace</h2>
         </div>
         <button className="icon-button" title="New session in selected workspace" onClick={onNew} disabled={!workspace}><CirclePlus size={18} /></button>
       </div>
       <div className="workspace-picker">
-        <label htmlFor="workspace-path">Selected directory</label>
-        <div className="workspace-input-row"><FolderOpen size={15} /><input id="workspace-path" value={workspaceDraft || ""} onChange={(event) => onWorkspaceDraftChange(event.target.value)} onKeyDown={(event) => event.key === "Enter" && onWorkspaceApply()} placeholder="E:\\projects\\rind" /><button className="icon-button subtle" title="Use selected directory" onClick={onWorkspaceApply} disabled={workspaceBusy || !(workspaceDraft || "").trim()}>{workspaceBusy ? <LoaderCircle className="spin" size={15} /> : <Check size={15} />}</button></div>
-        {workspaceMessage ? <div className="workspace-message">{workspaceMessage}</div> : <div className="workspace-hint">{workspace || "Choose the worker-visible path"}</div>}
+        <label htmlFor="workspace-select">Project</label>
+        <select id="workspace-select" aria-label="Project" value={workspace || ""} disabled={workspaceBusy} onChange={(event) => onWorkspaceSelect?.(event.target.value)}>{[...new Set([workspace, ...workspaces].filter(Boolean))].map((path) => <option key={path} value={path}>{path.replace(/[\\/]+$/, "").split(/[\\/]/).pop() || path}</option>)}</select>
+        <details className="workspace-location"><summary>Open another folder</summary>
+        <label htmlFor="workspace-path">Folder on your Rind computer</label>
+        <div className="workspace-input-row"><FolderOpen size={15} /><input id="workspace-path" value={workspaceDraft || ""} onChange={(event) => onWorkspaceDraftChange(event.target.value)} onKeyDown={(event) => !event.nativeEvent.isComposing && event.key === "Enter" && onWorkspaceApply()} placeholder="Path on the Rind computer" /><button className="icon-button subtle" title="Use selected directory" onClick={onWorkspaceApply} disabled={workspaceBusy || !(workspaceDraft || "").trim()}>{workspaceBusy ? <LoaderCircle className="spin" size={15} /> : <Check size={15} />}</button></div>
+        </details>
+        {workspaceMessage && <div className="workspace-message" role="alert">{workspaceMessage}</div>}
       </div>
       <div className="rail-rule" />
       <div className="sessions-heading"><span>Sessions</span><span>{visibleSessions.length}</span></div>
@@ -89,16 +94,20 @@ export function SessionRail({
       </div>
       {loading ? <div className="rail-empty"><LoaderCircle className="spin" size={16} /> Loading sessions</div> : visibleSessions.length ? (
         <nav className="session-list" aria-label="Sessions">
-          {visibleSessions.map((session) => {
+          {visibleSessions.map((session, index) => {
             const id = sessionIdOf(session);
             const current = id === activeId;
             const unread = !current && unreadIds?.has?.(id);
+            const group = sessionDateGroup(session.updated_at);
+            const date = new Date(session.updated_at);
             return (
-              <div key={id} className={`session-item ${current ? "selected" : ""}`} data-session-id={id}>
+              <Fragment key={id}>
+              {(index === 0 || sessionDateGroup(visibleSessions[index - 1].updated_at) !== group) && <div className="session-date-group">{group}</div>}
+              <div className={`session-item ${current ? "selected" : ""}`} data-session-id={id}>
                 {unread && <span className="session-unread" title="New activity" aria-label="Unread" />}
-                <button className="session-main" onClick={() => onSelect(id)}>
+                <button className="session-main" aria-current={current ? "page" : undefined} onClick={() => onSelect(id)}>
                   <MessageSquareText size={16} />
-                  <span className="session-copy"><strong>{session.title || session.preview || "Untitled session"}</strong><small>{session.updated_at || id}</small></span>
+                  <span className="session-copy"><strong>{session.title || session.preview || "Untitled session"}</strong><small title={Number.isNaN(date.getTime()) ? undefined : date.toLocaleString()}>{Number.isNaN(date.getTime()) ? "Conversation" : date.toLocaleDateString(undefined, { month: "short", day: "numeric" })}</small></span>
                   {current && <ChevronRight size={15} className="selected-arrow" />}
                 </button>
                 {current ? (
@@ -114,6 +123,7 @@ export function SessionRail({
                 )}
                 {deleteError[id] && <div className="session-delete-error" role="alert">{deleteError[id]}</div>}
               </div>
+              </Fragment>
             );
           })}
         </nav>
@@ -121,13 +131,22 @@ export function SessionRail({
       {!loading && hasMore && (
         <button type="button" className="load-more" onClick={() => onLoadMore?.()}>Load more</button>
       )}
-      <FileTree workspace={workspace} listFiles={fileTree?.listFiles} readFile={fileTree?.readFile} />
+      <FileTree key={workspace} workspace={workspace} listFiles={fileTree?.listFiles} readFile={fileTree?.readFile} />
       <div className="rail-footer">
-        <span>Long-lived worker · browser-safe disconnect</span>
+        <span>Connected to your Rind workspace.</span>
         {notificationPermission === "default" && onEnableNotifications && (
           <button className="notif-button" title="System notifications arrive only while the page is hidden" onClick={onEnableNotifications}><Bell size={12} /> Enable desktop notifications</button>
         )}
       </div>
     </aside>
   );
+}
+
+function sessionDateGroup(value) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "Sessions";
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  const yesterday = new Date(today); yesterday.setDate(today.getDate() - 1);
+  const week = new Date(today); week.setDate(today.getDate() - 7);
+  return date >= today ? "Today" : date >= yesterday ? "Yesterday" : date >= week ? "Previous 7 days" : "Earlier";
 }

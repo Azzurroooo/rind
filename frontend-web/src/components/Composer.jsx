@@ -27,6 +27,7 @@ const Composer = forwardRef(function Composer({
   active,
   onCancel,
   disabled,
+  loading = false,
   onUpload,
   queueMode = "follow_up", // "follow_up" | "steering" (kernel vocabulary)
   onQueueModeChange,
@@ -49,7 +50,13 @@ const Composer = forwardRef(function Composer({
 
   useEffect(() => () => {
     if (noticeTimer.current) window.clearTimeout(noticeTimer.current);
+    for (const chip of chipsRef.current) if (chip.previewUrl) URL.revokeObjectURL?.(chip.previewUrl);
   }, []);
+
+  useEffect(() => {
+    const input = textareaRef.current;
+    if (input) { input.style.height = "auto"; input.style.height = `${Math.min(220, Math.max(64, input.scrollHeight))}px`; }
+  }, [value]);
 
   const patchChip = useCallback((id, patch) => {
     setChips((current) => current.map((chip) => (chip.id === id ? { ...chip, ...patch } : chip)));
@@ -69,7 +76,9 @@ const Composer = forwardRef(function Composer({
   }, [onUpload, patchChip]);
 
   const addFiles = useCallback((fileList) => {
-    const files = Array.from(fileList || []).filter((file) => file && (file.size == null || file.size <= 8 * 1024 * 1024));
+    const incoming = Array.from(fileList || []);
+    const files = incoming.filter((file) => file && (file.size == null || file.size <= 6 * 1024 * 1024));
+    if (files.length !== incoming.length) setNotice("Files must be 6 MB or smaller. Larger files were skipped.");
     if (!files.length) return;
     const created = files.map((file) => ({
       id: `chip-${nextChipId++}`,
@@ -89,14 +98,16 @@ const Composer = forwardRef(function Composer({
   }, [onUpload, startUpload]);
 
   function sendMessage() {
-    if (disabled) return;
+    if (disabled || loading) return;
     const current = chipsRef.current;
     const uploading = current.filter((chip) => chip.status === "uploading");
     const sentPaths = current.filter((chip) => chip.status === "ok" && chip.path).map((chip) => chip.path);
     const composed = composeMessageWithAttachments(value, sentPaths);
+    if (!composed.trim()) return;
     onSubmit?.(composed);
     // Delivered chips leave the row; still-uploading chips stay for the next message.
     const delivered = new Set(current.filter((chip) => chip.status === "ok" && chip.path).map((chip) => chip.id));
+    for (const chip of current) if (delivered.has(chip.id) && chip.previewUrl) URL.revokeObjectURL?.(chip.previewUrl);
     setChips((next) => next.filter((chip) => !delivered.has(chip.id)));
     if (uploading.length) {
       setNotice(uploading.length === 1 ? "1 attachment still uploading; not sent with this message" : `${uploading.length} attachments still uploading; not sent with this message`);
@@ -144,10 +155,12 @@ const Composer = forwardRef(function Composer({
         )}
         {interruptArmed && <div className="interrupt-hint" role="status">Press Esc again to stop</div>}
         <textarea
+          aria-label="Message"
           ref={textareaRef}
           value={value}
           onChange={(event) => onChange(event.target.value)}
           onKeyDown={(event) => {
+            if (event.nativeEvent?.isComposing || event.keyCode === 229) return;
             if (event.key === "Enter" && !event.shiftKey) {
               event.preventDefault();
               sendMessage();
@@ -159,7 +172,8 @@ const Composer = forwardRef(function Composer({
               addFiles(event.clipboardData.files);
             }
           }}
-          placeholder={active ? (queueMode === "steering" ? "Redirect current turn immediately (steer)…" : "Turn in progress, messages will queue as follow-ups…") : "Ask your worker anything..."}
+          placeholder={loading ? "Opening conversation…" : active ? (queueMode === "steering" ? "Guide what Rind does next…" : "Add a follow-up while Rind works…") : "Message Rind…"}
+          readOnly={loading}
           disabled={disabled}
           rows={1}
         />
@@ -187,12 +201,13 @@ const Composer = forwardRef(function Composer({
             )}
             <span>Enter to send · Shift+Enter for new line</span>
           </div>
-          {active
-            ? <button className="send-button stop" title={interruptArmed ? "Press Esc again to stop" : "Stop active turn"} onClick={onCancel}><Square size={15} fill="currentColor" /></button>
-            : <button className="send-button" title="Send message" onClick={() => sendMessage()} disabled={(!value.trim() && !chips.some((chip) => chip.status === "ok" && chip.path)) || disabled}><ArrowUp size={18} /></button>}
+          <div className="composer-submit-actions">
+            {active && <button className="send-button stop" title={interruptArmed ? "Press Esc again to stop" : "Stop active turn"} onClick={onCancel}><Square size={15} fill="currentColor" /></button>}
+            <button className="send-button" title={active ? "Send queued message" : "Send message"} onClick={() => !loading && sendMessage()} disabled={(!value.trim() && !chips.some((chip) => chip.status === "ok" && chip.path)) || disabled || loading}><ArrowUp size={18} /></button>
+          </div>
         </div>
       </div>
-      <div className="composer-status"><span><span className="status-led" />{active ? "Turn in progress" : "Ready"}</span><span>Worker remains online when this tab closes</span></div>
+      <div className="composer-status"><span><span className="status-led" />{loading ? "Opening conversation…" : active ? "Rind is working" : "Ready"}</span><span>Tasks keep running when you close this tab</span></div>
     </div>
   );
 });

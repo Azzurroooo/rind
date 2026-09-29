@@ -171,12 +171,13 @@ describe("Conversation — turn-scoped change summary (audit #14)", () => {
   });
 });
 
-describe("Conversation — interrupt arming surface (audit #1)", () => {
-  it("the stop button mirrors the armed hint", () => {
-    const props = makeProps({ active: true });
-    const { rerender } = render(<Conversation {...props} interruptArmed={false} />);
-    expect(screen.getByRole("button", { name: /Stop turn/ })).not.toBeNull();
-    rerender(<Conversation {...props} interruptArmed={true} />);
-    expect(screen.getByRole("button", { name: /Press Esc again to stop/ })).not.toBeNull();
+describe("Conversation — editable starters", () => {
+  it("a starter fills the composer through the callback", () => {
+    const onSuggestion = vi.fn();
+    render(<Conversation {...makeProps()} onSuggestion={onSuggestion} />);
+    const button = document.querySelector(".starter-grid button");
+    expect(button).not.toBeNull();
+    fireEvent.click(button);
+    expect(onSuggestion).toHaveBeenCalledWith(expect.any(String));
   });
 });

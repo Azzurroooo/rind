@@ -70,7 +70,8 @@ function expectOpen(panel) {
 }
 
 beforeEach(() => {
-  sessionStorage.setItem("rind_token", "test-token"); // shell renders instead of LoginGate
+  sessionStorage.setItem("rind_token", "test-token");
+  sessionStorage.setItem("rind_credential_server", "ws://runtime.test"); // shell renders instead of LoginGate
 });
 
 afterEach(() => {
@@ -123,7 +124,7 @@ describe("App — narrow viewport: rail drawer", () => {
   it("selecting a session is the route-relevant action that closes it", async () => {
     stubMatchMedia(true);
     render(<App />);
-    await screen.findByText("First session");
+    await screen.findAllByText("First session");
     fireEvent.click(railToggle());
     expect(railPanel().className).toContain("drawer-open");
     fireEvent.click(document.querySelector(".session-item[data-session-id='s-2'] .session-main"));
@@ -169,9 +170,11 @@ describe("App — desktop viewport (>900px)", () => {
     render(<App />);
     expect(railToggle()).not.toBeNull(); // in the DOM, display:none via CSS
     expect(railPanel().className).toBe("session-rail");
-    expect(inspectorPanel().className).toBe("inspector");
+    expect(inspectorPanel().className).toBe("inspector details-hidden");
     expect(railPanel().getAttribute("aria-hidden")).toBeNull();
     expect(railPanel().hasAttribute("inert")).toBe(false);
+    expect(inspectorPanel().hasAttribute("inert")).toBe(true);
+    fireEvent.click(screen.getByRole("button", { name: "Toggle session details" }));
     expect(inspectorPanel().hasAttribute("inert")).toBe(false);
     fireEvent.click(railToggle());
     expect(railPanel().className).toBe("session-rail");

@@ -66,10 +66,45 @@ function typeAndSend(text) {
 const requests = () => h.hooks.current.requests;
 const called = (method) => requests().some((entry) => entry.method === method);
 
+it("keeps a late prompt failure in its original session draft", async () => {
+  await renderShell();
+  let rejectPrompt;
+  h.hooks.current.respond = async (method, params) => {
+    if (method === "session/prompt") return new Promise((_resolve, reject) => { rejectPrompt = reject; });
+    if (method === "session/switch") return { session_id: params.session_id, workspace_root: "E:/projects/rind" };
+    if (method === "session/replay") return { messages: [] };
+    return {};
+  };
+  const select = async (id) => {
+    fireEvent.click(document.querySelector(`[data-session-id="${id}"] .session-main`));
+    await waitFor(() => expect(document.querySelector(".main-column").getAttribute("aria-busy")).toBe("false"));
+  };
+  await select("p-1");
+  typeAndSend("Please keep this draft");
+  await waitFor(() => expect(rejectPrompt).toBeTypeOf("function"));
+  await select("p-2");
+  fireEvent.change(composerTextarea(), { target: { value: "Second conversation draft" } });
+  await act(async () => rejectPrompt(new Error("Connection interrupted")));
+  expect(composerTextarea().value).toBe("Second conversation draft");
+  expect(screen.queryByText(/Prompt failed:/)).toBeNull();
+  await select("p-1");
+  expect(composerTextarea().value).toBe("Please keep this draft");
+});
+
+it("manages the connection without exposing a server address setting", async () => {
+  await renderShell();
+  fireEvent.click(screen.getByLabelText("Open settings"));
+  const settings = document.querySelector("dialog.settings-dialog");
+  expect(settings.querySelectorAll("input")).toHaveLength(0);
+  expect(settings.textContent).not.toMatch(/WebSocket|ws:\/\//i);
+  expect(settings.textContent).toContain("Connection is managed automatically");
+});
+
 beforeEach(() => {
   sessionStorage.clear();
   localStorage.clear();
   sessionStorage.setItem("rind_token", "test-token");
+  sessionStorage.setItem("rind_credential_server", "ws://runtime.test");
 });
 
 afterEach(() => {
