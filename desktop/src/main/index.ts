@@ -30,8 +30,8 @@ const root = dirname(fileURLToPath(import.meta.url))
 const allowedRuntimeMethods = new Set<RuntimeMethod>(Object.values(runtimeMethods) as RuntimeMethod[])
 const themes: DesktopTheme[] = ["system", "dark", "light"]
 const themeSurfaces = {
-  dark: { background: "#171719", overlay: { color: "#171719", symbolColor: "#c9c9cf" } },
-  light: { background: "#ffffff", overlay: { color: "#ffffff", symbolColor: "#333339" } },
+  dark: { background: "#151d18", overlay: { color: "#151d18", symbolColor: "#a5b0a4" } },
+  light: { background: "#f7f6f0", overlay: { color: "#f7f6f0", symbolColor: "#64685e" } },
 } as const
 
 function isRuntimeMethod(method: string): method is RuntimeMethod {

@@ -17,6 +17,8 @@
     "package": "electron-builder --config electron-builder.config.ts"
   },
   "dependencies": {
+    "@fontsource-variable/manrope": "^5.3.0",
+    "@fontsource/dm-mono": "^5.3.0",
     "electron-log": "^5.4.3",
     "electron-window-state": "^5.0.3",
     "highlight.js": "^11.11.2",
