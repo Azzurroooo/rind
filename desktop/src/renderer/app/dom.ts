@@ -41,14 +41,14 @@ appRoot.innerHTML = `
           <button id="new-session" type="button" class="primary-button" title="Start a new chat in the active project">New chat</button>
         </div>
         <div class="sidebar-body">
-          <section id="recent-sessions" class="recent-sessions" hidden>
-            <div class="sidebar-heading"><span>Recent</span></div>
+          <div class="session-search-wrap">
+            ${renderIcon(Search, "session-search-icon")}
+            <input id="session-search" type="search" placeholder="Search sessions" aria-label="Search loaded sessions" autocomplete="off" />
+          </div>
+          <section id="recent-sessions" class="recent-sessions" aria-label="Recent sessions" hidden>
             <div id="recent-list" class="recent-list"></div>
           </section>
           <div class="sidebar-heading"><span>Projects</span><button id="sidebar-add-project" type="button" class="ghost-button" title="Add project">Add</button></div>
-          <div class="session-search-wrap">
-            <input id="session-search" type="search" placeholder="Search loaded sessions…" aria-label="Search loaded sessions" autocomplete="off" />
-          </div>
           <div id="project-list" class="project-list"></div>
         </div>
       </aside>

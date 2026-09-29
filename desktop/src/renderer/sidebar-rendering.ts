@@ -1,4 +1,5 @@
 import type { DesktopProject, DesktopRecentSession, DesktopSessionSummary } from "../preload/types.ts"
+import { timeGroupFor } from "./session-groups.ts"
 
 export type SidebarStructureState = {
   projects: DesktopProject[]
@@ -10,6 +11,7 @@ export type SidebarStructureState = {
   sessionSearch: string
   deleteConfirmId: string
   deleteBusyId: string
+  sessionMenuId?: string
 }
 
 // Client-side search over the sessions already loaded in the sidebar (B8).
@@ -30,6 +32,7 @@ export function projectListStructureKey(state: SidebarStructureState) {
     search,
     deleteConfirmId: state.deleteConfirmId || "",
     deleteBusyId: state.deleteBusyId || "",
+    sessionMenuId: state.sessionMenuId || "",
     projects: state.projects.map((project) => {
       const sessions = state.sessionPages[project.path] || project.sessions
       return {
@@ -50,11 +53,13 @@ export function recentListStructureKey(state: SidebarStructureState) {
     search: (state.sessionSearch || "").trim().toLocaleLowerCase(),
     deleteConfirmId: state.deleteConfirmId || "",
     deleteBusyId: state.deleteBusyId || "",
+    sessionMenuId: state.sessionMenuId || "",
     sessions: [...state.recentSessions]
       .sort((left, right) => right.lastInteractedAt.localeCompare(left.lastInteractedAt))
       .map((session) => ({
         ...sessionStructure(session),
         lastInteractedAt: session.lastInteractedAt,
+        group: timeGroupFor(session.lastInteractedAt).key,
       })),
   })
 }

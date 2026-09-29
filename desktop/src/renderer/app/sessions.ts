@@ -17,9 +17,15 @@ import { state, vars } from "./state.ts"
 export async function exportSession() {
   const sessionId = state.viewedSessionId
   if (!sessionId) return
-  const title = sessionTitle.textContent || "Rind conversation"
   const button = requiredElement<HTMLButtonElement>("export-session")
   button.disabled = true
+  try {
+    await exportSessionReplay(sessionId, sessionTitle.textContent || "Rind conversation")
+  } finally { button.disabled = false }
+}
+
+/** Downloads the complete replay of any session as Markdown. */
+export async function exportSessionReplay(sessionId: string, title: string) {
   try {
     const result = asRecord(await requestForSession(runtimeMethods.sessionReplay, sessionId))
     const text = replayMarkdown(Array.isArray(result.messages) ? result.messages : [], title)
@@ -30,11 +36,9 @@ export async function exportSession() {
     link.click()
     setTimeout(() => URL.revokeObjectURL(url), 1000)
   } catch (error) {
-    if (state.viewedSessionId === sessionId) {
-      state.notice = `Export failed: ${error instanceof Error ? error.message : String(error)}`
-      render()
-    }
-  } finally { button.disabled = false }
+    state.notice = `Export failed: ${error instanceof Error ? error.message : String(error)}`
+    render()
+  }
 }
 
 export async function forkCurrentSession() {
@@ -42,6 +46,13 @@ export async function forkCurrentSession() {
   const result = asRecord(await requestForSession(runtimeMethods.sessionFork, state.viewedSessionId))
   await loadSessions()
   if (typeof result.session_id === "string") await switchSession(result.session_id)
+}
+
+/** Forks from the sidebar: open the session first so the fork runs in its project. */
+export async function forkSession(sessionId: string) {
+  if (!sessionId) return
+  if (sessionId !== state.viewedSessionId) await switchSession(sessionId)
+  await forkCurrentSession()
 }
 
 export function activeProject() {

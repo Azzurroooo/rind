@@ -8,4 +8,6 @@
 @import "./styles/composer.css";
 @import "./styles/panels.css";
 @import "./styles/workspace.css";
+@import "./styles/sidebar-sessions.css";
+@import "./styles/menus.css";
 @import "./styles/dialogs.css";

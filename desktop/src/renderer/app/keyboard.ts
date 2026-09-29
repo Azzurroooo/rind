@@ -6,7 +6,7 @@ import { cancelActiveTurn, runAction, runtimeTurnActive } from "./runtime.ts"
 import { knownSessions, startNewChat, switchSession } from "./sessions.ts"
 import { openSettings } from "./settings.ts"
 import { render } from "./shell.ts"
-import { resetDeleteConfirm } from "./sidebar.ts"
+import { closeSessionMenu, resetDeleteConfirm } from "./sidebar.ts"
 import { state } from "./state.ts"
 import { type KeyBinding } from "./types.ts"
 
@@ -124,6 +124,11 @@ export const keyBindings: KeyBinding[] = [
         projectList.querySelector<HTMLButtonElement>(`[data-project-menu="${CSS.escape(menuPath)}"]`)?.focus()
         return
       }
+      if (state.sessionMenuId) {
+        event.preventDefault()
+        closeSessionMenu(true)
+        return
+      }
       if (state.sessionDeleteConfirmId) {
         resetDeleteConfirm()
         render()
@@ -167,6 +172,7 @@ export function bindKeyboard(): void {
     }
     if (state.slashMenuOpen && !(event.target as HTMLElement).closest(".prompt-wrap")) closeSlashCommandMenu()
     if (state.paletteOpen && !(event.target as HTMLElement).closest(".command-palette-box")) closePalette(false)
+    if (state.sessionMenuId && !(event.target as HTMLElement).closest(".session-menu-wrap")) closeSessionMenu()
     if (state.sessionDeleteConfirmId && !(event.target as HTMLElement).closest("[data-session-delete]")) {
       resetDeleteConfirm()
       render()

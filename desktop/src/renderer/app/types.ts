@@ -81,6 +81,7 @@ export type AppState = {
   effortChanging: boolean
   projectMenuOpen: boolean
   attachments: Record<string, AttachmentChip[]>
+  sessionMenuId: string
   sessionDeleteConfirmId: string
   sessionDeleteBusyId: string
   sessionSearch: string

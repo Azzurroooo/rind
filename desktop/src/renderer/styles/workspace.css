@@ -92,43 +92,6 @@ body { min-height: 0; }
 
 /* ---------- session search (B8) ---------- */
 
-.session-search-wrap { margin: 0 0 8px; }
-.session-search-wrap input {
-  width: 100%;
-  min-height: 36px;
-  padding: 7px 10px;
-  border: 1px solid var(--line);
-  border-radius: var(--radius-sm);
-  color: var(--text);
-  background: var(--surface-soft);
-  font-size: 12px;
-}
-.session-search-wrap input:focus { outline: none; border-color: var(--accent); }
-.session-search-empty { margin: 2px 0 4px; color: var(--dim); font-size: 11.5px; }
-
-/* ---------- inline session delete (B3) ---------- */
-
-.session-item-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2px; align-items: start; }
-.session-item-row .session-item { border-radius: var(--radius-sm) 0 0 var(--radius-sm); }
-.session-delete {
-  display: grid;
-  place-items: center;
-  width: 24px;
-  height: 24px;
-  margin-top: 3px;
-  padding: 0;
-  border: 0;
-  border-radius: 4px;
-  color: var(--dim);
-  background: transparent;
-  opacity: 0;
-  transition: opacity 120ms ease, color 120ms ease, background-color 120ms ease;
-}
-.session-item-row:hover .session-delete, .session-delete:focus-visible, .session-item-row.confirming .session-delete { opacity: 1; }
-.session-delete:hover:not(:disabled) { color: var(--danger); background: var(--fill-2); }
-.session-delete.confirm { color: var(--danger); border: 1px solid var(--danger); opacity: 1; width: auto; height: auto; min-height: 24px; padding: 2px 6px; font-size: 10px; }
-.session-delete-icon { width: 13px; height: 13px; }
-
 /* ---------- effort control (B1) ---------- */
 
 .effort-control { width: min(110px, 20vw); }

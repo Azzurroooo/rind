@@ -58,6 +58,7 @@ export const state: AppState = {
   effortChanging: false,
   projectMenuOpen: false,
   attachments: {},
+  sessionMenuId: "",
   sessionDeleteConfirmId: "",
   sessionDeleteBusyId: "",
   sessionSearch: "",
@@ -96,6 +97,7 @@ export const vars: {
   overviewVersion: number
   recentFlushPromise: Promise<void> | undefined
   attachmentSequence: number
+  sessionMenuUp: boolean
   deleteConfirmTimer: ReturnType<typeof setTimeout> | undefined
   taskMonitorTimer: ReturnType<typeof setInterval> | undefined
   goalLoadSequence: number
@@ -115,6 +117,7 @@ export const vars: {
   overviewVersion: 0,
   recentFlushPromise: undefined,
   attachmentSequence: 0,
+  sessionMenuUp: false,
   deleteConfirmTimer: undefined,
   taskMonitorTimer: undefined,
   goalLoadSequence: 0,

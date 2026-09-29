@@ -89,19 +89,3 @@ body[data-platform="darwin"] .topbar { padding-left: 80px; }
 
 .session-list { display: grid; gap: 2px; font-size: 13px; }
 
-.session-item {
-  display: grid;
-  gap: 1px;
-  width: 100%;
-  padding: 7px 9px;
-  border: 1px solid transparent;
-  border-radius: var(--radius-sm);
-  text-align: left;
-  color: var(--text);
-  background: transparent;
-}
-.session-item:hover { background: var(--fill-2); }
-.session-item.selected { border-color: var(--line-strong); background: var(--fill-2); }
-.session-item-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
-.session-item small { overflow: hidden; color: var(--dim); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
-.session-item-meta { font-variant-numeric: tabular-nums; }
