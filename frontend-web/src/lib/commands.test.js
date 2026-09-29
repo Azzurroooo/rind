@@ -22,6 +22,11 @@ function stubCtx() {
   };
 }
 
+const CATALOG = [
+  { name: "status", description: "Show runtime status", usage: "/status", aliases: [] },
+  { name: "doctor", description: "Diagnose", usage: "/doctor", aliases: ["dr"] },
+];
+
 describe("commands — single registry (audit #9)", () => {
   const commands = buildCommands(stubCtx());
 
@@ -84,7 +89,7 @@ describe("commands — single registry (audit #9)", () => {
 
   it("server slash commands route through runServerSlash", () => {
     const ctx = stubCtx();
-    const built = buildCommands(ctx);
+    const built = buildCommands(ctx, CATALOG);
     built.find((command) => command.id === "server.doctor").run(ctx, "verbose");
     expect(ctx.runServerSlash).toHaveBeenCalledWith("doctor", "verbose");
   });
@@ -111,7 +116,7 @@ describe("commands — palette fuzzy filter", () => {
 });
 
 describe("commands — slash sourcing for the Composer", () => {
-  const commands = buildCommands(stubCtx());
+  const commands = buildCommands(stubCtx(), CATALOG);
 
   it("prefix match on slash names only", () => {
     const names = matchingSlashCommands(commands, "m").map((command) => command.slash);
@@ -122,6 +127,7 @@ describe("commands — slash sourcing for the Composer", () => {
   it("exact resolution finds the command behind a submitted slash", () => {
     expect(findCommandBySlash(commands, "theme").id).toBe("view.theme");
     expect(findCommandBySlash(commands, "doctor").id).toBe("server.doctor");
+    expect(findCommandBySlash(commands, "dr").id).toBe("server.doctor");
     expect(findCommandBySlash(commands, "nope")).toBeNull();
   });
 });

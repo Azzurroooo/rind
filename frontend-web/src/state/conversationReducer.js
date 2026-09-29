@@ -58,6 +58,7 @@ export function emptyConversationState() {
     queued: [], // [{inputId, input, mode}] — inputs accepted but not yet delivered
     collapsedCount: 0, // entries dropped by the TRANSCRIPT_CAP (oldest first)
     turnChanges: null, // { fileCount, added, removed, firstToolCallId } — last finished turn's mutations
+    backgroundWait: null, // { count, startedAt } while the turn waits on background processes
     cursor: 0, // durable events applied for the current session
     seen: {}, // "session:turn:sequence" -> true (idempotence guard)
   };
@@ -148,6 +149,7 @@ export function conversationView(state) {
     queued: state.queued,
     collapsedCount: state.collapsedCount,
     turnChanges: state.turnChanges,
+    backgroundWait: state.backgroundWait,
     cursor: state.cursor,
   };
 }
@@ -215,14 +217,74 @@ function applyTurnEvent(state, event, context) {
       return next;
     }
 
-    case "tool_requested":
-    case "tool_call_started":
+    case "tool_input_started":
       return upsertTool(state, {
         id: String(event.tool_call_id || ""),
         name: String(event.tool_name || event.name || "tool"),
-        args: String(event.args_preview || ""),
         status: "running",
+        inputStreaming: true,
       });
+
+    case "tool_input_delta": {
+      // Streaming arguments accumulate into the args preview so the row can
+      // show what the model is writing before the call starts.
+      const id = String(event.tool_call_id || "");
+      const current = findTool(state, id);
+      return upsertTool(state, {
+        id,
+        name: event.tool_name ? String(event.tool_name) : undefined,
+        status: current?.status || "running",
+        inputStreaming: true,
+        args: String(current?.args || "") + String(event.delta || ""),
+      });
+    }
+
+    case "tool_input_ended":
+      return upsertTool(state, { id: String(event.tool_call_id || ""), inputStreaming: false });
+
+    case "tool_progress": {
+      const id = String(event.tool_call_id || "");
+      const line = progressMessage(event.payload);
+      if (!id || !line) return state;
+      const current = findTool(state, id);
+      const progress = [...(current?.progress || []), line].slice(-TOOL_PROGRESS_CAP);
+      return upsertTool(state, { id, name: event.tool_name ? String(event.tool_name) : undefined, progress });
+    }
+
+    case "tool_requested":
+    case "tool_call_started": {
+      const args = String(event.args_preview || "");
+      return upsertTool(state, {
+        id: String(event.tool_call_id || ""),
+        name: String(event.tool_name || event.name || "tool"),
+        args: args || undefined,
+        status: "running",
+        inputStreaming: false,
+      });
+    }
+
+    case "turn_step_retry": {
+      // The step restarts from scratch: drop the partial text it streamed.
+      const cleared = state.streaming ? { ...state, streaming: { ...state.streaming, text: "" } } : state;
+      const reason = String(event.reason || "").trim();
+      const attempt = Number(event.attempt) || 0;
+      const content = `Retrying step${attempt ? ` · attempt ${attempt}` : ""}${reason ? ` · ${reason}` : ""}`;
+      return appendEntry(cleared, { role: "system", tone: "notice", content });
+    }
+
+    case "context_compacted": {
+      const reason = String(event.record?.reason || event.reason || "").trim();
+      return appendEntry(state, { role: "system", tone: "notice", content: `Context compacted${reason ? ` · ${reason}` : ""}` });
+    }
+
+    case "background_wait_changed": {
+      const wait = event.background_wait;
+      const count = Number(wait?.count) || 0;
+      return {
+        ...state,
+        backgroundWait: wait && count > 0 ? { count, startedAt: wait.started_at ?? null } : null,
+      };
+    }
 
     case "tool_result": {
       const status = event.status === "error" || event.ok === false
@@ -230,6 +292,7 @@ function applyTurnEvent(state, event, context) {
         : String(event.status || "completed");
       const patch = {
         id: String(event.tool_call_id || ""),
+        inputStreaming: false,
         result: String(firstDefined(event.result, event.output, event.error, event.error_source) ?? ""),
         status,
         duration_ms: event.duration_ms,
@@ -300,6 +363,7 @@ function finalizeTurn(state, turnId) {
     active: false,
     activeTurnId: "",
     streaming: null,
+    backgroundWait: null,
     question: null, // pending question dies with its turn (§2.3 cancelled)
     turnChanges: summarizeChanges(entries),
   };
@@ -367,6 +431,21 @@ function markQuestionEntry(state, key, patch) {
   const entries = [...state.entries];
   entries[index] = { ...entries[index], ...definedOnly(patch) };
   return { ...state, entries };
+}
+
+// Progress lines kept per tool row (oldest dropped first).
+export const TOOL_PROGRESS_CAP = 20;
+
+function findTool(state, id) {
+  if (!id) return null;
+  return state.entries.find((entry) => entry.role === "tool" && entry.tool_call_id === id) || null;
+}
+
+function progressMessage(payload) {
+  if (payload == null) return "";
+  if (typeof payload !== "object") return String(payload).trim();
+  const value = firstDefined(payload.message, payload.status, payload.text);
+  return value == null ? "" : String(value).trim();
 }
 
 function upsertTool(state, patch) {
