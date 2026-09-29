@@ -11,6 +11,7 @@ import { asRecord } from "./html.ts"
 import { showGoalPanel, submitGoal } from "./inspector.ts"
 import { conversationFor, ensureRuntime, requestForSession, setConversationFor } from "./runtime.ts"
 import { forkCurrentSession } from "./sessions.ts"
+import { showToast } from "./overlays.ts"
 import { nextTheme, render, setTheme, toggleSidebar } from "./shell.ts"
 import { state } from "./state.ts"
 
@@ -26,9 +27,11 @@ export async function runDesktopSlash(input: string): Promise<boolean> {
 
 async function perform(action: DesktopSlashAction, input: string) {
   if (action.type === "error") {
-    state.notice = action.message
+    showToast(action.message, "danger")
   } else if (action.type === "theme") {
-    setTheme(action.theme || nextTheme())
+    const theme = action.theme || nextTheme()
+    setTheme(theme)
+    showToast(`Theme: ${theme}`)
   } else if (action.type === "model") {
     await (action.model ? selectModel(action.model) : toggleModelMenu())
   } else if (action.type === "effort") {
@@ -36,7 +39,7 @@ async function perform(action: DesktopSlashAction, input: string) {
   } else if (action.type === "goal") {
     await runGoal(action.objective)
   } else if (action.type === "fork") {
-    if (!state.viewedSessionId) state.notice = "Open a session to fork it."
+    if (!state.viewedSessionId) showToast("Open a session to fork it.")
     else await forkCurrentSession()
   } else if (action.type === "sessions") {
     await focusSessionSearch(action.query)
@@ -51,7 +54,7 @@ async function runGoal(objective: string) {
     return
   }
   if (!state.viewedSessionId) {
-    state.notice = "Open a session before setting a goal."
+    showToast("Open a session before setting a goal.")
     return
   }
   state.goal.draft = objective
@@ -71,7 +74,7 @@ async function focusSessionSearch(query: string) {
 export async function inspectContext(input = "/context") {
   const sessionId = state.viewedSessionId
   if (!sessionId) {
-    state.notice = "Open a session to inspect its context."
+    showToast("Open a session to inspect its context.")
     render()
     return
   }

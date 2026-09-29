@@ -10,6 +10,7 @@ import { loadDirectory } from "./files-panel.ts"
 import { asRecord } from "./html.ts"
 import { loadGoal, pollTaskMonitor, stopTaskMonitorPolling } from "./inspector.ts"
 import { activeTurnIdFor, loadReplay, requestForSession, resetConversationPresentation, runtimeTurnActive } from "./runtime.ts"
+import { showToast } from "./overlays.ts"
 import { render } from "./shell.ts"
 import { state, vars } from "./state.ts"
 
@@ -252,7 +253,7 @@ export async function removeProject(path: string) {
       applyOverview(await window.api.projects.updateLayout({ filesOpen: false }))
     }
   }
-  state.notice = "Project removed from Desktop."
+  showToast("Project removed from Desktop.", "success")
   render()
   if (state.filesOpen && activeProject()?.available) await loadDirectory("")
 }

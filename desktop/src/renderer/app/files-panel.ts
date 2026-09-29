@@ -13,7 +13,7 @@ export function renderFiles() {
   const project = viewedProject()
   filesToggle.disabled = !project?.available
   const filesLabel = state.filesOpen ? "Hide project files" : "Browse active project files"
-  filesToggle.title = filesLabel
+  filesToggle.dataset.tooltip = filesLabel
   filesToggle.setAttribute("aria-label", filesLabel)
   filesToggle.setAttribute("aria-expanded", String(state.filesOpen))
   if (!state.filesOpen || !project?.available) return

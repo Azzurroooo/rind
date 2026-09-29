@@ -41,7 +41,7 @@ export function render() {
   filePanel.inert = !state.filesOpen
   newSessionButton.title = chatProject()?.available ? `Start a new chat in ${chatProject()?.name}` : "Choose a project for a new chat"
   const sidebarLabel = state.sidebarOpen ? "Hide projects sidebar" : "Show projects sidebar"
-  sidebarToggle.title = sidebarLabel
+  sidebarToggle.dataset.tooltip = sidebarLabel
   sidebarToggle.setAttribute("aria-label", sidebarLabel)
   sidebarToggle.setAttribute("aria-expanded", String(state.sidebarOpen))
   const current = knownSessions().find((item) => item.id === state.viewedSessionId)
@@ -110,7 +110,7 @@ export function renderTheme() {
       toggle.innerHTML = renderIcon(icons[state.theme])
       toggle.dataset.themeIcon = state.theme
     }
-    toggle.title = label
+    toggle.dataset.tooltip = label
     toggle.setAttribute("aria-label", label)
   }
 }

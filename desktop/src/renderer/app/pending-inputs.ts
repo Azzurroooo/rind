@@ -6,6 +6,7 @@ import { setPrompt } from "./composer.ts"
 import { pendingInputDock, prompt } from "./dom.ts"
 import { asRecord, asRecordText } from "./html.ts"
 import { conversationFor, requestForSession, runAction, setConversationFor } from "./runtime.ts"
+import { showToast } from "./overlays.ts"
 import { render } from "./shell.ts"
 import { state } from "./state.ts"
 
@@ -65,7 +66,7 @@ export async function promoteFollowUp(inputId: string) {
       // inputs on settle. Invalidate the dock instead of surfacing the race.
       delete state.pendingInputs[sessionId]
       syncCurrentPendingInputs()
-      state.notice = "The turn has ended; queued input was discarded."
+      showToast("The turn has ended; queued input was discarded.")
       render()
       return
     }
@@ -105,7 +106,7 @@ export async function recallPendingInput(inputId: string) {
       if (index >= 0) pending.splice(index, 1)
       if (pending.length === 0) delete state.pendingInputs[sessionId]
       setPrompt([asRecordText(item.input), prompt.value].filter((value) => value.trim()).join("\n\n"), true)
-      state.notice = "The turn has ended; queued input was returned to the composer."
+      showToast("The turn has ended; queued input was returned to the composer.")
       render()
       return
     }

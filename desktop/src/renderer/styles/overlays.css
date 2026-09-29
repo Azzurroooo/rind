@@ -1,0 +1,52 @@
+/* Toasts and tooltips (spec section 7). */
+.toast-region {
+  position: fixed;
+  bottom: 24px;
+  left: 50%;
+  z-index: 90;
+  display: grid;
+  justify-items: center;
+  gap: 8px;
+  width: min(420px, calc(100vw - 32px));
+  transform: translateX(-50%);
+  pointer-events: none;
+}
+.toast {
+  max-width: 100%;
+  padding: 10px 14px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface);
+  box-shadow: var(--shadow-popover);
+  color: var(--text);
+  font-size: 13px;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+  animation: toast-in var(--dur-pop) var(--ease);
+}
+.toast-success { box-shadow: var(--shadow-popover), inset 3px 0 var(--success, var(--accent)); }
+.toast-danger { box-shadow: var(--shadow-popover), inset 3px 0 var(--danger); }
+@keyframes toast-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: none; }
+}
+
+.tooltip {
+  position: fixed;
+  z-index: 100;
+  max-width: 280px;
+  padding: 4px 8px;
+  border-radius: 6px;
+  background: var(--text);
+  color: var(--bg);
+  font-size: 12px;
+  line-height: 1.35;
+  white-space: normal;
+  pointer-events: none;
+  animation: tooltip-in var(--dur-hover) var(--ease);
+}
+.tooltip[hidden] { display: none; }
+@keyframes tooltip-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}

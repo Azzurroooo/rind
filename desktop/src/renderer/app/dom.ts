@@ -24,14 +24,14 @@ appRoot.innerHTML = `
       </div>
       <div class="topbar-actions">
         <span class="app-version" aria-label="Rind version">v${escapeHtml(appVersion)}</span>
-        <button id="toggle-tasks" type="button" class="icon-button topbar-button" title="Background tasks" aria-label="Toggle background task monitor" aria-expanded="false">${renderIcon(ListTodo)}<span id="task-count-badge" class="topbar-badge" hidden></span></button>
-        <button id="open-palette" type="button" class="icon-button topbar-button" title="Command palette (Ctrl+K)" aria-label="Command palette (Ctrl+K)">${renderIcon(Search)}</button>
-        <button id="open-remote" type="button" class="icon-button topbar-button" title="Remote access" aria-label="Remote access">${renderIcon(MonitorSmartphone)}</button>
-        <button id="toggle-theme" type="button" class="icon-button topbar-button" title="Switch theme" aria-label="Switch theme">${renderIcon(SunMoon)}</button>
-        <button id="toggle-sidebar" type="button" class="icon-button topbar-button" title="Toggle sidebar (Ctrl+B)" aria-label="Toggle sidebar (Ctrl+B)" aria-expanded="true">${renderIcon(PanelLeft)}</button>
-        <button id="toggle-files" type="button" class="icon-button topbar-button" title="Browse active project files" aria-label="Browse active project files" aria-expanded="false">${renderIcon(PanelRight)}</button>
-        <button id="open-shortcuts" type="button" class="icon-button topbar-button" title="Keyboard shortcuts (?)" aria-label="Keyboard shortcuts (?)">${renderIcon(Keyboard)}</button>
-        <button id="open-settings" type="button" class="icon-button topbar-button" title="Open settings" aria-label="Open settings">${renderIcon(Settings)}</button>
+        <button id="toggle-tasks" type="button" class="icon-button topbar-button" data-tooltip="Background tasks" aria-label="Toggle background task monitor" aria-expanded="false">${renderIcon(ListTodo)}<span id="task-count-badge" class="topbar-badge" hidden></span></button>
+        <button id="open-palette" type="button" class="icon-button topbar-button" data-tooltip="Command palette (Ctrl+K)" aria-label="Command palette (Ctrl+K)">${renderIcon(Search)}</button>
+        <button id="open-remote" type="button" class="icon-button topbar-button" data-tooltip="Remote access" aria-label="Remote access">${renderIcon(MonitorSmartphone)}</button>
+        <button id="toggle-theme" type="button" class="icon-button topbar-button" data-tooltip="Switch theme" aria-label="Switch theme">${renderIcon(SunMoon)}</button>
+        <button id="toggle-sidebar" type="button" class="icon-button topbar-button" data-tooltip="Toggle sidebar (Ctrl+B)" aria-label="Toggle sidebar (Ctrl+B)" aria-expanded="true">${renderIcon(PanelLeft)}</button>
+        <button id="toggle-files" type="button" class="icon-button topbar-button" data-tooltip="Browse active project files" aria-label="Browse active project files" aria-expanded="false">${renderIcon(PanelRight)}</button>
+        <button id="open-shortcuts" type="button" class="icon-button topbar-button" data-tooltip="Keyboard shortcuts (?)" aria-label="Keyboard shortcuts (?)">${renderIcon(Keyboard)}</button>
+        <button id="open-settings" type="button" class="icon-button topbar-button" data-tooltip="Open settings" aria-label="Open settings">${renderIcon(Settings)}</button>
       </div>
     </header>
     <main class="layout">

@@ -6,6 +6,7 @@ import { goalPanel, goalPanelShell, taskMonitorDock, taskMonitorShell } from "./
 import { asRecord } from "./html.ts"
 import { requestForSession, runAction } from "./runtime.ts"
 import { currentRuntimeSnapshot } from "./sessions.ts"
+import { showToast } from "./overlays.ts"
 import { render } from "./shell.ts"
 import { state, vars } from "./state.ts"
 
@@ -166,7 +167,7 @@ export async function clearGoal() {
   try {
     await window.api.goal.clear(sessionId)
     state.goal.value = undefined
-    state.notice = "Goal cleared."
+    showToast("Goal cleared.", "success")
   } catch (error) {
     state.notice = error instanceof Error ? error.message : String(error)
   } finally {

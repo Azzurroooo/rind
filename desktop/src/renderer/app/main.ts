@@ -19,6 +19,7 @@ import { bindSidebarEvents } from "./sidebar.ts"
 import { bindFilesPanelEvents } from "./files-panel.ts"
 import { bindInspectorEvents } from "./inspector.ts"
 import { bindPaletteEvents } from "./palette-ui.ts"
+import { bindOverlays } from "./overlays.ts"
 
 
 requiredElement("open-remote").addEventListener("click", remoteAccess.open)
@@ -34,6 +35,7 @@ bindSidebarEvents()
 bindFilesPanelEvents()
 bindInspectorEvents()
 bindPaletteEvents()
+bindOverlays()
 
 const unsubscribeStatus = window.api.runtime.subscribe((snapshot) => {
   state.runtime = snapshot

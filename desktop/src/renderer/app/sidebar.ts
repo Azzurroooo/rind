@@ -10,6 +10,7 @@ import { escapeAttribute, escapeHtml } from "./html.ts"
 import { focusFirstMenuItem, handleMenuKeydown } from "./menu-nav.ts"
 import { runAction } from "./runtime.ts"
 import { exportSessionReplay, forkSession, loadMoreSessions, loadSessions, projectSessions, removeProject, sessionTurnActive, switchSession, toggleProject } from "./sessions.ts"
+import { showToast } from "./overlays.ts"
 import { render } from "./shell.ts"
 import { state, vars } from "./state.ts"
 
@@ -251,7 +252,7 @@ export async function deleteSessionRequest(sessionId: string) {
     state.drafts = next.drafts
     vars.renderedProjectListStructureKey = ""
     vars.renderedRecentListStructureKey = ""
-    state.notice = "Session deleted."
+    showToast("Session deleted.", "success")
   } finally {
     state.sessionDeleteBusyId = ""
     resetDeleteConfirm()
