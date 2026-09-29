@@ -1,12 +1,10 @@
 import "./dom.ts"
 import { clearSlashCommandPending } from "./composer.ts"
 import { requiredElement } from "./dom.ts"
-import { loadDirectory } from "./files-panel.ts"
-import { stopTaskMonitorPolling } from "./inspector.ts"
 import { remoteAccess } from "./remote-instance.ts"
 import { handleRuntimeEvent } from "./runtime-events.ts"
 import { clearRuntimeTurnState, runAction } from "./runtime.ts"
-import { exportSession, forkCurrentSession, loadSessions, switchSession, viewedProject } from "./sessions.ts"
+import { exportSession, forkCurrentSession, loadSessions, switchSession } from "./sessions.ts"
 import { loadSettings, openSettings } from "./settings.ts"
 import { render, renderTheme } from "./shell.ts"
 import { state, vars } from "./state.ts"
@@ -17,7 +15,9 @@ import { bindShellEvents } from "./shell-events.ts"
 import { bindSettingsEvents } from "./settings.ts"
 import { bindSidebarEvents } from "./sidebar.ts"
 import { bindFilesPanelEvents } from "./files-panel.ts"
-import { bindInspectorEvents } from "./inspector.ts"
+import { bindInspectorEvents, refreshInspector } from "./inspector.ts"
+import { bindGoalEvents } from "./inspector-goal.ts"
+import { bindTasksEvents, stopTaskPolling } from "./inspector-tasks.ts"
 import { bindPaletteEvents } from "./palette-ui.ts"
 import { bindOverlays } from "./overlays.ts"
 
@@ -34,6 +34,8 @@ bindSettingsEvents()
 bindSidebarEvents()
 bindFilesPanelEvents()
 bindInspectorEvents()
+bindGoalEvents()
+bindTasksEvents()
 bindPaletteEvents()
 bindOverlays()
 
@@ -42,7 +44,7 @@ const unsubscribeStatus = window.api.runtime.subscribe((snapshot) => {
   if (snapshot.status !== "ready") {
     vars.lastRuntimeSequence = 0
     clearRuntimeTurnState()
-    stopTaskMonitorPolling()
+    stopTaskPolling()
   }
   if (snapshot.status === "error") {
     clearSlashCommandPending()
@@ -77,6 +79,6 @@ window.addEventListener("beforeunload", () => {
 runAction(async () => {
   await loadSessions()
   render()
-  if (state.filesOpen && viewedProject()?.available) await loadDirectory("")
+  await refreshInspector()
 })
 void loadSettings()

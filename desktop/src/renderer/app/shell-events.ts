@@ -1,11 +1,9 @@
-import { filesToggle, requiredElement, settingsNotifications, shortcutsDialog, sidebarToggle } from "./dom.ts"
-import { setFilesOpen } from "./files-panel.ts"
-import { toggleTaskMonitor } from "./inspector.ts"
+import { requiredElement, settingsNotifications, shortcutsDialog, sidebarResizeHandle, sidebarToggle } from "./dom.ts"
 import { openPalette } from "./palette-ui.ts"
 import { runAction } from "./runtime.ts"
 import { addProject, startNewChat } from "./sessions.ts"
 import { openSettings } from "./settings.ts"
-import { nextTheme, render, setTheme, toggleSidebar } from "./shell.ts"
+import { bindSidebarResize, nextTheme, render, setTheme, toggleSidebar } from "./shell.ts"
 import { state } from "./state.ts"
 
 export function bindShellEvents(): void {
@@ -17,14 +15,10 @@ export function bindShellEvents(): void {
 
   sidebarToggle.addEventListener("click", () => runAction(toggleSidebar))
 
-  requiredElement("close-files").addEventListener("click", () => runAction(() => setFilesOpen(false)))
-
-  filesToggle.addEventListener("click", () => runAction(() => setFilesOpen(!state.filesOpen)))
+  bindSidebarResize(sidebarResizeHandle)
 
   // ---------- topbar actions ----------
   
-  document.getElementById("toggle-tasks")?.addEventListener("click", () => toggleTaskMonitor())
-
   document.getElementById("open-palette")?.addEventListener("click", () => openPalette())
 
   document.getElementById("toggle-theme")?.addEventListener("click", () => setTheme(nextTheme()))

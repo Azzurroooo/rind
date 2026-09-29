@@ -1,7 +1,16 @@
 import { mergeSlashCatalog } from "../desktop-slash.ts"
+import { INSPECTOR_WIDTH } from "../inspector-model.ts"
 import { createTaskMonitorState } from "../task-monitor.ts"
 import { createConversation } from "../timeline-model.ts"
-import { type AppState } from "./types.ts"
+import { type AppState, type BackgroundHistoryState, type InspectorLoad } from "./types.ts"
+
+export function emptyLoad<T>(): InspectorLoad<T> {
+  return { sessionId: "", loading: false, error: "" }
+}
+
+export function createBackgroundHistory(): BackgroundHistoryState {
+  return { records: [], expandedId: "", outputs: {}, reading: new Set(), loading: false, error: "" }
+}
 
 
 
@@ -31,8 +40,12 @@ export const state: AppState = {
   sessionTotals: {},
   sidebarOpen: true,
   sidebarWidth: 264,
-  filesOpen: false,
-  filePanelWidth: 480,
+  inspectorOpen: false,
+  inspectorWidth: INSPECTOR_WIDTH.fallback,
+  inspectorTab: "context",
+  inspectorContext: emptyLoad(),
+  inspectorUsage: emptyLoad(),
+  backgroundHistory: createBackgroundHistory(),
   expandedProjects: new Set(),
   projectMenuPath: "",
   expandedDirectories: new Set([""]),
@@ -63,9 +76,8 @@ export const state: AppState = {
   sessionDeleteConfirmId: "",
   sessionDeleteBusyId: "",
   sessionSearch: "",
-  taskMonitorOpen: false,
   taskMonitor: createTaskMonitorState(),
-  goal: { busy: false, setOpen: false, visible: false, draft: "" },
+  goal: { busy: false, setOpen: false, draft: "" },
   theme: "system",
   notificationsEnabled: true,
   paletteOpen: false,
@@ -89,7 +101,7 @@ export const vars: {
   renderFrame: number | undefined
   renderTimer: ReturnType<typeof setTimeout> | undefined
   toolAnimationUntil: number
-  resizeStart: { target: "sidebar" | "files"; pointerId: number; x: number; width: number; lastWidth: number } | undefined
+  resizeStart: { target: "sidebar" | "inspector"; pointerId: number; x: number; width: number; lastWidth: number } | undefined
   renderedProjectListStructureKey: string
   renderedRecentListStructureKey: string
   modelMenuRequestId: number

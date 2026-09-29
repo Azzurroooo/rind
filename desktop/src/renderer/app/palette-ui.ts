@@ -3,9 +3,10 @@ import { clipLine } from "../timeline-model.ts"
 import { canOpenEffortMenu, canOpenModelMenu, closeModelMenu, reasoningEfforts, selectEffort, selectModel } from "./composer-menus.ts"
 import { closeSlashCommandMenu } from "./composer.ts"
 import { appRoot, paletteInput, paletteList, paletteOverlay, prompt, sessionTitle } from "./dom.ts"
-import { setFilesOpen } from "./files-panel.ts"
 import { escapeHtml } from "./html.ts"
-import { changeGoalStatus, clearGoal, showGoalPanel, toggleTaskMonitor } from "./inspector.ts"
+import { INSPECTOR_TAB_LABELS, INSPECTOR_TABS } from "../inspector-model.ts"
+import { closeInspector, openGoalTab, openInspector, toggleInspector } from "./inspector.ts"
+import { changeGoalStatus, clearGoal } from "./inspector-goal.ts"
 import { remoteAccess } from "./remote-instance.ts"
 import { runAction, runtimeTurnActive } from "./runtime.ts"
 import { exportSession, forkCurrentSession, knownSessions, startNewChat, switchSession } from "./sessions.ts"
@@ -29,9 +30,10 @@ export function paletteCommands(): PaletteCommand[] {
     { id: "fork-conversation", title: "Fork conversation", detail: "Continue in a separate session", run: () => runAction(forkCurrentSession), disabled: !state.viewedSessionId || runtimeTurnActive() },
     { id: "compact", title: "Compact context", detail: "Compact context", run: () => runAction(compactCurrentSession, state.viewedSessionId), disabled: !state.viewedSessionId },
     { id: "toggle-sidebar", title: "Toggle sidebar", detail: "Toggle projects sidebar", shortcut: "Ctrl+B", run: () => runAction(toggleSidebar) },
-    { id: "toggle-files", title: "Toggle files panel", detail: "Toggle project files", run: () => runAction(() => setFilesOpen(!state.filesOpen)) },
-    { id: "task-monitor", title: "Background tasks", detail: state.taskMonitorOpen ? "Close background task monitor" : "Open background task monitor", run: () => toggleTaskMonitor() },
-    { id: "goal-set", title: "Goal: set", detail: "Set a session goal", run: () => showGoalPanel(true), disabled: !state.viewedSessionId },
+    { id: "toggle-inspector", title: "Toggle inspector", detail: state.inspectorOpen ? "Hide the inspector" : "Show the inspector", run: () => runAction(() => toggleInspector()) },
+    ...INSPECTOR_TABS.map((tab): PaletteCommand => ({ id: `inspector-${tab}`, title: `Inspector: ${INSPECTOR_TAB_LABELS[tab]}`, detail: `Open the ${INSPECTOR_TAB_LABELS[tab]} tab`, run: () => runAction(() => openInspector(tab)) })),
+    ...(state.inspectorOpen ? [{ id: "close-inspector", title: "Close inspector", detail: "Hide the inspector", run: () => runAction(closeInspector) }] : []),
+    { id: "goal-set", title: "Goal: set", detail: "Set a session goal", run: () => runAction(openGoalTab), disabled: !state.viewedSessionId },
     { id: "goal-pause", title: "Goal: pause", detail: "Pause the active goal", disabled: !state.viewedSessionId || state.goal.value?.status !== "active", run: () => runAction(() => changeGoalStatus("paused"), state.viewedSessionId) },
     { id: "goal-resume", title: "Goal: resume", detail: "Resume a paused goal", disabled: !state.viewedSessionId || state.goal.value?.status !== "paused", run: () => runAction(() => changeGoalStatus("active"), state.viewedSessionId) },
     { id: "goal-clear", title: "Goal: clear", detail: "Clear the active goal", disabled: !state.viewedSessionId || !state.goal.value, run: () => runAction(clearGoal, state.viewedSessionId) },

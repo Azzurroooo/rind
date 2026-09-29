@@ -1,6 +1,7 @@
 import brandMarkUrl from "../assets/brand-mark.svg"
 import { composerRegionMarkup } from "../composer-region.ts"
 import { ArrowDown, Bell, Download, GitBranch, Keyboard, KeyRound, ListTodo, MonitorSmartphone, PanelLeft, PanelRight, renderIcon, Search, Settings, SlidersHorizontal, SunMoon, X } from "../icons.ts"
+import { INSPECTOR_TAB_LABELS, INSPECTOR_TABS } from "../inspector-model.ts"
 import { remoteAccessMarkup } from "../remote-access.ts"
 import { escapeHtml } from "./html.ts"
 
@@ -29,7 +30,7 @@ appRoot.innerHTML = `
         <button id="open-remote" type="button" class="icon-button topbar-button" data-tooltip="Remote access" aria-label="Remote access">${renderIcon(MonitorSmartphone)}</button>
         <button id="toggle-theme" type="button" class="icon-button topbar-button" data-tooltip="Switch theme" aria-label="Switch theme">${renderIcon(SunMoon)}</button>
         <button id="toggle-sidebar" type="button" class="icon-button topbar-button" data-tooltip="Toggle sidebar (Ctrl+B)" aria-label="Toggle sidebar (Ctrl+B)" aria-expanded="true">${renderIcon(PanelLeft)}</button>
-        <button id="toggle-files" type="button" class="icon-button topbar-button" data-tooltip="Browse active project files" aria-label="Browse active project files" aria-expanded="false">${renderIcon(PanelRight)}</button>
+        <button id="toggle-inspector" type="button" class="icon-button topbar-button" data-tooltip="Show inspector" aria-label="Show inspector" aria-controls="inspector" aria-expanded="false">${renderIcon(PanelRight)}</button>
         <button id="open-shortcuts" type="button" class="icon-button topbar-button" data-tooltip="Keyboard shortcuts (?)" aria-label="Keyboard shortcuts (?)">${renderIcon(Keyboard)}</button>
         <button id="open-settings" type="button" class="icon-button topbar-button" data-tooltip="Open settings" aria-label="Open settings">${renderIcon(Settings)}</button>
       </div>
@@ -61,13 +62,35 @@ appRoot.innerHTML = `
         </div>
         ${composerRegionMarkup()}
       </section>
-      <aside id="file-panel" class="file-panel" aria-label="Project files">
-        <div id="file-resize-handle" class="file-resize-handle" role="separator" aria-label="Resize file panel" aria-orientation="vertical"></div>
-        <div class="file-panel-head"><strong>Files</strong><button id="close-files" type="button" class="ghost-button" title="Close files">Close</button></div>
-        <div class="file-workspace">
-          <section id="file-preview" class="file-preview"><p class="subtle">Select a file to preview.</p></section>
-          <div id="file-tree" class="file-tree"></div>
+      <aside id="inspector" class="inspector" aria-label="Inspector">
+        <div id="inspector-resize-handle" class="inspector-resize-handle" role="separator" aria-label="Resize inspector" aria-orientation="vertical"></div>
+        <div class="inspector-head">
+          <div class="inspector-tabs" role="tablist" aria-label="Inspector sections">
+            ${INSPECTOR_TABS.map((tab) => `<button id="inspector-tab-${tab}" type="button" role="tab" class="inspector-tab" data-inspector-tab="${tab}" aria-controls="inspector-panel-${tab}" aria-selected="false" tabindex="-1">${INSPECTOR_TAB_LABELS[tab]}</button>`).join("")}
+          </div>
+          <button id="close-inspector" type="button" class="icon-button inspector-close" data-tooltip="Close inspector" aria-label="Close inspector">${renderIcon(X)}</button>
         </div>
+        <section id="inspector-panel-context" class="inspector-panel" role="tabpanel" aria-labelledby="inspector-tab-context" tabindex="0" hidden>
+          <div class="inspector-toolbar"><span class="subtle">Current context window</span><button type="button" class="ghost-button" data-inspector-refresh="context">Refresh</button></div>
+          <div id="inspector-context"></div>
+        </section>
+        <section id="inspector-panel-tasks" class="inspector-panel" role="tabpanel" aria-labelledby="inspector-tab-tasks" tabindex="0" hidden>
+          <section id="task-monitor" class="task-monitor" aria-label="Running background tasks"></section>
+          <div class="inspector-toolbar"><h3 class="inspector-section-title">Finished</h3><button type="button" class="ghost-button" data-inspector-refresh="tasks">Refresh</button></div>
+          <div id="task-history" aria-label="Finished background tasks"></div>
+        </section>
+        <section id="inspector-panel-files" class="inspector-panel inspector-files" role="tabpanel" aria-labelledby="inspector-tab-files" tabindex="0" hidden>
+          <p id="files-unavailable" class="inspector-empty" hidden>Choose an available project to browse its files.</p>
+          <section id="file-preview" class="file-preview" hidden></section>
+          <div id="file-tree" class="file-tree"></div>
+        </section>
+        <section id="inspector-panel-goal" class="inspector-panel" role="tabpanel" aria-labelledby="inspector-tab-goal" tabindex="0" hidden>
+          <section id="goal-panel" class="goal-panel" aria-label="Session goal"></section>
+        </section>
+        <section id="inspector-panel-usage" class="inspector-panel" role="tabpanel" aria-labelledby="inspector-tab-usage" tabindex="0" hidden>
+          <div class="inspector-toolbar"><span class="subtle">Last 7 days, all sessions</span><button type="button" class="ghost-button" data-inspector-refresh="usage">Refresh</button></div>
+          <div id="inspector-usage"></div>
+        </section>
       </aside>
     </main>
     ${remoteAccessMarkup()}
@@ -146,9 +169,8 @@ export const effortMenu = requiredElement("effort-menu")
 export const attachButton = requiredElement<HTMLButtonElement>("attach-button")
 export const attachInput = requiredElement<HTMLInputElement>("attach-input")
 export const attachmentChips = requiredElement("attachment-chips")
-export const taskMonitorShell = requiredElement("task-monitor-shell")
 export const taskMonitorDock = requiredElement("task-monitor")
-export const goalPanelShell = requiredElement("goal-panel-shell")
+export const taskHistory = requiredElement("task-history")
 export const goalPanel = requiredElement("goal-panel")
 export const sessionSearchInput = requiredElement<HTMLInputElement>("session-search")
 export const paletteOverlay = requiredElement("command-palette")
@@ -174,11 +196,14 @@ export const compactContext = requiredElement<HTMLButtonElement>("compact-contex
 export const slashCommandMenu = requiredElement("slash-command-menu")
 export const sidebar = requiredElement("sidebar")
 export const sidebarResizeHandle = requiredElement("sidebar-resize-handle")
-export const filePanel = requiredElement("file-panel")
-export const fileResizeHandle = requiredElement("file-resize-handle")
+export const inspector = requiredElement("inspector")
+export const inspectorResizeHandle = requiredElement("inspector-resize-handle")
+export const inspectorToggle = requiredElement<HTMLButtonElement>("toggle-inspector")
+export const inspectorContextBody = requiredElement("inspector-context")
+export const inspectorUsageBody = requiredElement("inspector-usage")
+export const filesUnavailable = requiredElement("files-unavailable")
 export const fileTree = requiredElement("file-tree")
 export const filePreview = requiredElement("file-preview")
-export const filesToggle = requiredElement<HTMLButtonElement>("toggle-files")
 export const newSessionButton = requiredElement<HTMLButtonElement>("new-session")
 export const sidebarToggle = requiredElement<HTMLButtonElement>("toggle-sidebar")
 export const settingsDialog = requiredElement<HTMLDialogElement>("settings-dialog")

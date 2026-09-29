@@ -48,12 +48,6 @@ export type ComposerView = {
 export function composerRegionMarkup() {
   return `
     <div class="composer-region">
-      <div id="task-monitor-shell" class="task-monitor-shell" hidden>
-        <section id="task-monitor" class="task-monitor" aria-label="Background tasks"></section>
-      </div>
-      <div id="goal-panel-shell" class="goal-panel-shell" hidden>
-        <section id="goal-panel" class="goal-panel" aria-label="Session goal"></section>
-      </div>
       <div id="plan-dock-shell" class="plan-dock-shell" hidden>
         <section id="plan-dock" class="plan-dock" aria-label="Plan progress"></section>
       </div>
@@ -86,7 +80,7 @@ export function composerRegionMarkup() {
             <button id="project-menu-trigger" type="button" class="composer-select-trigger" title="Choose working directory" aria-label="Choose working directory" aria-haspopup="listbox" aria-controls="project-menu" aria-expanded="false"><span id="project-menu-label" class="composer-select-label">Working directory</span><span class="composer-select-chevron" aria-hidden="true"></span></button>
             <div id="project-menu" class="composer-select-menu" role="listbox" aria-label="Working directories" hidden></div>
           </div>
-          <button type="button" id="context-meter" class="context-meter" data-tooltip="Inspect context" hidden></button>
+          <button type="button" id="context-meter" class="context-meter" data-tooltip="Open the Context tab" aria-controls="inspector" hidden></button>
           <span class="composer-spacer"></span>
           <button id="interrupt" type="button" class="ghost-button danger" title="Stop the running turn (Esc)">Stop</button>
           <button id="send" type="submit" class="primary-button"><span class="send-label">Send</span><span class="send-spinner" aria-hidden="true"></span></button>
@@ -192,10 +186,7 @@ export function renderComposer(elements: ComposerElements, view: ComposerView) {
     attach.disabled = !view.ready || view.compacting || view.slashCommandPending
     attach.title = view.ready ? "Attach files" : "Attach files after the runtime is ready"
   }
-  elements.contextMeter.hidden = view.contextUsagePercent === null
-  elements.contextMeter.textContent = view.contextUsagePercent === null ? "" : `${Math.round(view.contextUsagePercent * 100)}% ctx`
-  elements.contextMeter.setAttribute("aria-label", view.contextUsagePercent === null ? "Inspect context" : `Context ${Math.round(view.contextUsagePercent * 100)}% used. Inspect context`)
-  elements.contextMeter.classList.toggle("context-hot", view.contextUsagePercent !== null && view.contextUsagePercent >= 0.8)
+  renderContextMeter(elements.contextMeter, view.contextUsagePercent)
 }
 
 export function syncPendingInputDock(
@@ -298,4 +289,34 @@ function escapeHtml(value: string) {
 
 function escapeAttribute(value: string) {
   return escapeHtml(value).replace(/\n/g, "&#10;")
+}
+
+const METER_RADIUS = 6
+const METER_CIRCUMFERENCE = 2 * Math.PI * METER_RADIUS
+const METER_HOT = 0.8
+const meterMarkup = new WeakMap<HTMLElement, string>()
+
+/** 16px ring plus percentage (spec section 6); clicking it opens the Context tab. */
+export function contextMeterMarkup(fraction: number) {
+  const used = Math.min(1, Math.max(0, fraction))
+  const offset = (METER_CIRCUMFERENCE * (1 - used)).toFixed(2)
+  const circumference = METER_CIRCUMFERENCE.toFixed(2)
+  return `<svg class="context-ring" width="16" height="16" viewBox="0 0 16 16" aria-hidden="true" focusable="false"><circle class="context-ring-track" cx="8" cy="8" r="${METER_RADIUS}"></circle><circle class="context-ring-value" cx="8" cy="8" r="${METER_RADIUS}" stroke-dasharray="${circumference}" stroke-dashoffset="${offset}"></circle></svg><span>${Math.round(used * 100)}%</span>`
+}
+
+function renderContextMeter(meter: HTMLElement, fraction: number | null) {
+  meter.hidden = fraction === null
+  if (fraction === null) {
+    meter.textContent = ""
+    meterMarkup.delete(meter)
+    meter.setAttribute("aria-label", "Open the Context tab")
+    return
+  }
+  const markup = contextMeterMarkup(fraction)
+  if (meterMarkup.get(meter) !== markup) {
+    meter.innerHTML = markup
+    meterMarkup.set(meter, markup)
+  }
+  meter.setAttribute("aria-label", `Context ${Math.round(fraction * 100)}% used. Open the Context tab`)
+  meter.classList.toggle("context-hot", fraction >= METER_HOT)
 }

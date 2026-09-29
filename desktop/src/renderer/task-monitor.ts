@@ -2,6 +2,7 @@
 // state when switching sessions isolates responses that are still in flight.
 
 import type { DesktopBackgroundTask } from "../preload/types"
+import { escapeHtml } from "./app/html.ts"
 
 const ACTIVE_STATES = new Set(["starting", "running", "cancelling"])
 const TERMINAL_STATES = new Set(["completed", "failed", "cancelled", "timed_out", "lost"])
@@ -100,12 +101,6 @@ export async function readTaskOutput(state: TaskMonitorState, fetchOutput: (id: 
   }
 }
 
-function escapeHtml(value: string) {
-  return value.replace(/[&<>'"]/g, (character) => ({
-    "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;",
-  })[character] ?? character)
-}
-
 export function runningTaskCount(tasks: DesktopBackgroundTask[]) {
   return tasks.filter((task) => ACTIVE_STATES.has(task.status)).length
 }
@@ -116,20 +111,14 @@ export function taskStatusClass(task: DesktopBackgroundTask) {
   return "pip-done"
 }
 
-export type TaskMonitorElements = {
-  shell: HTMLElement
-  dock: HTMLElement
-}
-
-// DOM-sync renderer: one row per task, click to expand polled output.
-// Shell visibility (open/closed) is managed by the caller; interactions use
-// data-attribute delegation in index.ts (data-toggle-task / data-task-close).
-export function renderTaskMonitor(elements: TaskMonitorElements, state: TaskMonitorState) {
+// DOM-sync renderer for the inspector Tasks tab: one row per task, click to
+// expand polled output. Interactions use data-attribute delegation in
+// app/inspector-tasks.ts (data-toggle-task, data-task-output, data-task-action).
+export function renderTaskMonitor(dock: HTMLElement, state: TaskMonitorState) {
   if (!state.tasks.length) {
-    elements.dock.innerHTML = `
+    dock.innerHTML = `
       <div class="task-monitor-head">
-        <strong>Background tasks</strong>
-        <button type="button" class="ghost-button" data-task-close title="Close task monitor">Close</button>
+        <strong>Running</strong>
       </div>
       <p class="task-monitor-empty">${state.error ? escapeHtml(state.error) : state.refreshing ? "Loading tasks…" : "No background tasks in this conversation. Long commands appear here while Rind keeps them running."}</p>
     `
@@ -152,11 +141,10 @@ export function renderTaskMonitor(elements: TaskMonitorElements, state: TaskMoni
       </div>
     `
   }).join("")
-  elements.dock.innerHTML = `
+  dock.innerHTML = `
     <div class="task-monitor-head">
-      <strong>Background tasks</strong>
+      <strong>Running</strong>
       <span class="task-monitor-count">${runningTaskCount(state.tasks)} running</span>
-      <button type="button" class="ghost-button" data-task-close title="Close task monitor">Close</button>
     </div>
     <div class="task-monitor-list">${rows}</div>
     ${state.error ? `<p class="subtle" role="alert">${escapeHtml(state.error)}</p>` : ""}

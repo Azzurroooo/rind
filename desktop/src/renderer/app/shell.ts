@@ -5,10 +5,9 @@ import { renderComposer, renderPlanDock, syncPendingInputDock } from "../compose
 import { renderAttachments } from "./attachments-ui.ts"
 import { renderEffortMenu, renderModels, renderProjectControl } from "./composer-menus.ts"
 import { renderSlashCommandMenu } from "./composer.ts"
-import { appRoot, attachButton, compactContext, composerMenu, composerMenuTrigger, connection, connectionText, contextMeter, filePanel, interrupt, newSessionButton, notice, noticeText, pendingInputDock, planDock, planDockShell, prompt, requiredElement, retry, send, sessionIdLabel, sessionTitle, shortcutsDialog, shortcutTable, sidebar, sidebarToggle, slashCommandMenu } from "./dom.ts"
-import { renderFiles } from "./files-panel.ts"
+import { appRoot, attachButton, compactContext, composerMenu, composerMenuTrigger, connection, connectionText, contextMeter, interrupt, newSessionButton, notice, noticeText, pendingInputDock, planDock, planDockShell, prompt, requiredElement, retry, send, sessionIdLabel, sessionTitle, shortcutsDialog, shortcutTable, sidebar, sidebarToggle, slashCommandMenu } from "./dom.ts"
 import { escapeHtml } from "./html.ts"
-import { renderGoalDock, renderTaskMonitorDock } from "./inspector.ts"
+import { renderInspector } from "./inspector.ts"
 import { renderPalette } from "./palette-ui.ts"
 import { promoteFollowUp, recallPendingInput } from "./pending-inputs.ts"
 import { activeTurnIdFor, runAction, runtimeTurnActive } from "./runtime.ts"
@@ -24,21 +23,13 @@ export function render() {
   const runtime = currentRuntimeSnapshot()
   state.runtime = runtime
   const { conversation } = state
-  const wideFiles = usesWideFileLayout()
-  const filesWidth = state.filesOpen ? state.filePanelWidth : 0
   connectionText.textContent = runtimeStatusLabel(runtime.status)
   connection.className = `connection connection-${runtime.status}`
   connection.hidden = runtime.status === "starting"
   appRoot.classList.toggle("sidebar-open", state.sidebarOpen)
-  appRoot.classList.toggle("files-open", state.filesOpen)
-  appRoot.classList.toggle("files-wide", wideFiles)
-  appRoot.classList.toggle("file-preview-open", Boolean(state.filePreview))
   appRoot.style.setProperty("--sidebar-panel-width", `${state.sidebarOpen ? state.sidebarWidth : 0}px`)
-  appRoot.style.setProperty("--files-panel-width", `${filesWidth}px`)
   sidebar.setAttribute("aria-hidden", String(!state.sidebarOpen))
   sidebar.inert = !state.sidebarOpen
-  filePanel.setAttribute("aria-hidden", String(!state.filesOpen))
-  filePanel.inert = !state.filesOpen
   newSessionButton.title = chatProject()?.available ? `Start a new chat in ${chatProject()?.name}` : "Choose a project for a new chat"
   const sidebarLabel = state.sidebarOpen ? "Hide projects sidebar" : "Show projects sidebar"
   sidebarToggle.dataset.tooltip = sidebarLabel
@@ -58,8 +49,7 @@ export function render() {
   renderProjects()
   renderModels()
   renderEffortMenu()
-  renderTaskMonitorDock()
-  renderGoalDock()
+  renderInspector()
   renderPalette()
   renderPlanDock(
     { shell: planDockShell, dock: planDock },
@@ -92,7 +82,6 @@ export function render() {
   )
   renderSlashCommandMenu()
   renderAttachments()
-  renderFiles()
   renderSettings()
   renderTheme()
   renderShortcuts()
@@ -194,50 +183,37 @@ export async function toggleSidebar() {
   render()
 }
 
-export function usesWideFileLayout() {
-  if (!state.filesOpen || !state.filePreview || window.innerWidth < 1180) return false
-  const sidebarWidth = state.sidebarOpen ? state.sidebarWidth : 0
-  return state.filePanelWidth >= 520 && window.innerWidth - sidebarWidth - state.filePanelWidth >= 440
-}
-
-export function startResize(handle: HTMLElement, target: "sidebar" | "files") {
+/** Sidebar drag-resize; the inspector has its own handler in inspector.ts. */
+export function bindSidebarResize(handle: HTMLElement) {
   handle.addEventListener("pointerdown", (event) => {
-    if ((target === "sidebar" && !state.sidebarOpen) || (target !== "sidebar" && !state.filesOpen)) return
-    const width = target === "sidebar" ? state.sidebarWidth : state.filePanelWidth
-    vars.resizeStart = { target, pointerId: event.pointerId, x: event.clientX, width, lastWidth: width }
+    if (!state.sidebarOpen) return
+    const width = state.sidebarWidth
+    vars.resizeStart = { target: "sidebar", pointerId: event.pointerId, x: event.clientX, width, lastWidth: width }
     handle.setPointerCapture(event.pointerId)
     document.body.classList.add("resizing-panel")
     event.preventDefault()
   })
   handle.addEventListener("pointermove", (event) => {
-    if (!vars.resizeStart || vars.resizeStart.target !== target || vars.resizeStart.pointerId !== event.pointerId) return
-    const delta = target === "sidebar" ? event.clientX - vars.resizeStart.x : vars.resizeStart.x - event.clientX
-    const width = Math.round(vars.resizeStart.width + delta)
-    vars.resizeStart.lastWidth = width
-    if (target === "sidebar") state.sidebarWidth = Math.max(0, Math.min(SIDEBAR_MAX, width))
-    else state.filePanelWidth = Math.max(0, Math.min(900, width))
+    const start = vars.resizeStart
+    if (!start || start.target !== "sidebar" || start.pointerId !== event.pointerId) return
+    const width = Math.round(start.width + event.clientX - start.x)
+    vars.resizeStart = { ...start, lastWidth: width }
+    state.sidebarWidth = Math.max(0, Math.min(SIDEBAR_MAX, width))
     render()
   })
-  handle.addEventListener("pointerup", (event) => finishResize(handle, event))
+  handle.addEventListener("pointerup", (event) => finishSidebarResize(handle, event))
   handle.addEventListener("lostpointercapture", () => { vars.resizeStart = undefined; document.body.classList.remove("resizing-panel") })
 }
 
-export function finishResize(handle: HTMLElement, event: PointerEvent) {
-  if (!vars.resizeStart || vars.resizeStart.pointerId !== event.pointerId) return
-  const { target, lastWidth } = vars.resizeStart
+function finishSidebarResize(handle: HTMLElement, event: PointerEvent) {
+  if (!vars.resizeStart || vars.resizeStart.target !== "sidebar" || vars.resizeStart.pointerId !== event.pointerId) return
   handle.releasePointerCapture(event.pointerId)
   vars.resizeStart = undefined
   document.body.classList.remove("resizing-panel")
   runAction(async () => {
-    if (target === "sidebar") {
-      const sidebarOpen = state.sidebarWidth >= SIDEBAR_COLLAPSE
-      state.sidebarWidth = sidebarOpen ? Math.max(SIDEBAR_MIN, state.sidebarWidth) : SIDEBAR_DEFAULT
-      applyOverview(await window.api.projects.updateLayout({ sidebarOpen, sidebarWidth: state.sidebarWidth }))
-    } else {
-      const filesOpen = lastWidth >= 240
-      state.filePanelWidth = Math.max(280, state.filePanelWidth || 480)
-      applyOverview(await window.api.projects.updateLayout({ filesOpen, filePanelWidth: state.filePanelWidth }))
-    }
+    const sidebarOpen = state.sidebarWidth >= SIDEBAR_COLLAPSE
+    state.sidebarWidth = sidebarOpen ? Math.max(SIDEBAR_MIN, state.sidebarWidth) : SIDEBAR_DEFAULT
+    applyOverview(await window.api.projects.updateLayout({ sidebarOpen, sidebarWidth: state.sidebarWidth }))
     render()
   })
 }

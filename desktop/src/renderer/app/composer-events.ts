@@ -4,9 +4,8 @@ import { isExactSlashCommand, slashCommandMenu as buildSlashCommandMenu } from "
 import { addAttachmentFiles } from "./attachments-ui.ts"
 import { closeComposerSelectMenus, selectEffort, selectModel, toggleEffortMenu, toggleModelMenu, toggleProjectMenu } from "./composer-menus.ts"
 import { autoGrowPrompt, closeSlashCommandMenu, renderSlashCommandMenu, revealActiveSlashCommand, selectSlashCommand, sendPrompt, setPrompt } from "./composer.ts"
-import { inspectContext } from "./desktop-slash-runner.ts"
 import { attachButton, attachInput, compactContext, composerForm, contextMeter, composerMenuTrigger, effortMenu, effortMenuTrigger, modelMenu, modelMenuTrigger, projectMenu, projectMenuTrigger, prompt, requiredElement, slashCommandMenu } from "./dom.ts"
-import { showGoalPanel } from "./inspector.ts"
+import { openGoalTab, toggleInspector } from "./inspector.ts"
 import { runAction } from "./runtime.ts"
 import { currentDraftKey, selectChatProject, sessionTurnActive } from "./sessions.ts"
 import { render } from "./shell.ts"
@@ -61,7 +60,7 @@ export function bindComposerEvents(): void {
     runAction(() => sendPrompt(action === "steer" ? "steer" : "queue"), viewed)
   })
 
-  contextMeter.addEventListener("click", () => runAction(() => inspectContext(), state.viewedSessionId))
+  contextMeter.addEventListener("click", () => runAction(() => toggleInspector("context"), state.viewedSessionId))
 
   composerMenuTrigger.addEventListener("click", () => {
     closeComposerSelectMenus()
@@ -95,7 +94,7 @@ export function bindComposerEvents(): void {
 
   requiredElement("toggle-goal").addEventListener("click", () => {
     state.composerMenuOpen = false
-    showGoalPanel(!state.goal.visible)
+    runAction(openGoalTab, state.viewedSessionId)
   })
 
   composerForm.addEventListener("dragover", (event) => {

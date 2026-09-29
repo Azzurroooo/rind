@@ -8,7 +8,10 @@ import { autoGrowPrompt } from "./composer.ts"
 import { projectList, prompt, requiredElement, sessionTitle } from "./dom.ts"
 import { loadDirectory } from "./files-panel.ts"
 import { asRecord } from "./html.ts"
-import { loadGoal, pollTaskMonitor, stopTaskMonitorPolling } from "./inspector.ts"
+import { clampInspectorWidth } from "../inspector-model.ts"
+import { refreshInspector, resetInspectorData } from "./inspector.ts"
+import { resetGoal } from "./inspector-goal.ts"
+import { resetTasks, stopTaskPolling } from "./inspector-tasks.ts"
 import { activeTurnIdFor, loadReplay, requestForSession, resetConversationPresentation, runtimeTurnActive } from "./runtime.ts"
 import { showToast } from "./overlays.ts"
 import { render } from "./shell.ts"
@@ -118,8 +121,8 @@ export function applyOverview(overview: Awaited<ReturnType<typeof window.api.pro
   if (!projectForPath(state.projectMenuPath)) state.projectMenuPath = ""
   state.sidebarOpen = overview.sidebarOpen
   state.sidebarWidth = overview.sidebarWidth
-  state.filesOpen = overview.filesOpen
-  state.filePanelWidth = overview.filePanelWidth
+  state.inspectorOpen = overview.filesOpen
+  state.inspectorWidth = clampInspectorWidth(overview.filePanelWidth)
   state.theme = overview.theme
   state.notificationsEnabled = overview.notificationsEnabled
   state.sessionPages = nextPages
@@ -166,10 +169,17 @@ export function resetProjectView() {
   state.expandedDirectories = new Set([""])
   state.fileListings = {}
   state.filePreview = undefined
-  state.goal = { busy: false, setOpen: false, visible: false, draft: "" }
-  state.taskMonitor = createTaskMonitorState()
-  stopTaskMonitorPolling()
+  resetSessionPanels()
+  stopTaskPolling()
   vars.lastRenderedEntries = 0
+}
+
+/** Clears inspector data that belongs to the previously viewed session. */
+function resetSessionPanels() {
+  resetGoal()
+  resetTasks()
+  resetInspectorData()
+  state.taskMonitor = createTaskMonitorState()
 }
 
 export function currentDraftKey() { return state.viewedSessionId ? `${state.viewedSessionId}:draft` : state.chatProjectPath }
@@ -190,16 +200,10 @@ export async function addProject(createDraft = false) {
   resetProjectView()
   state.chatProjectPath = overview.activeProjectPath
   state.viewedProjectPath = overview.activeProjectPath
-  if (createDraft) {
-    state.filesOpen = false
-    state.filePreview = undefined
-    state.fileListings = {}
-    applyOverview(await window.api.projects.updateLayout({ filesOpen: false }))
-  }
   restoreProjectDraft()
   state.notice = ""
   render()
-  if (state.filesOpen) await loadDirectory("")
+  await refreshInspector()
 }
 
 export async function toggleProject(path: string) {
@@ -249,13 +253,10 @@ export async function removeProject(path: string) {
     state.viewedProjectPath = state.chatProjectPath
     resetProjectView()
     restoreProjectDraft()
-    if (!activeProject()?.available && state.filesOpen) {
-      applyOverview(await window.api.projects.updateLayout({ filesOpen: false }))
-    }
   }
   showToast("Project removed from Desktop.", "success")
   render()
-  if (state.filesOpen && activeProject()?.available) await loadDirectory("")
+  await refreshInspector()
 }
 
 export async function startNewChat() {
@@ -270,16 +271,15 @@ export async function startNewChat() {
   }
   state.viewedSessionId = ""
   state.model = state.settings.model
-  state.filesOpen = false
   state.filePreview = undefined
   state.fileListings = {}
   state.conversation = createConversation()
   resetConversationPresentation()
-  state.goal = { busy: false, setOpen: false, visible: false, draft: "" }
+  resetSessionPanels()
   restoreProjectDraft()
   state.notice = ""
-  applyOverview(await window.api.projects.updateLayout({ filesOpen: false }))
   render()
+  await refreshInspector()
 }
 
 export async function loadMoreSessions(path: string) {
@@ -311,13 +311,12 @@ export async function switchSession(nextSessionId: string) {
   state.fileListings = {}
   state.filePreview = undefined
   restoreProjectDraft()
-  state.taskMonitor = createTaskMonitorState()
+  resetSessionPanels()
+  stopTaskPolling()
   render()
   await loadReplay(nextSessionId)
   if (state.viewedSessionId !== nextSessionId) return
-  void loadGoal()
-  void pollTaskMonitor().catch(() => {})
-  if (state.filesOpen && viewedProject()?.available) await loadDirectory("")
+  await refreshInspector()
   render()
 }
 
@@ -337,8 +336,9 @@ export async function selectChatProject(path: string) {
   state.filePreview = undefined
   resetConversationPresentation()
   restoreProjectDraft()
-  if (state.filesOpen && project.available) await loadDirectory("")
+  resetSessionPanels()
   render()
+  await refreshInspector()
 }
 
 export function showCachedSession(sessionId: string) {

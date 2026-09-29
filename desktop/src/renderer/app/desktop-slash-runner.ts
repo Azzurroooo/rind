@@ -8,7 +8,8 @@ import { selectEffort, selectModel, toggleEffortMenu, toggleModelMenu } from "./
 import { clearSlashCommandPending } from "./composer.ts"
 import { sessionSearchInput } from "./dom.ts"
 import { asRecord } from "./html.ts"
-import { showGoalPanel, submitGoal } from "./inspector.ts"
+import { openGoalTab } from "./inspector.ts"
+import { submitGoal } from "./inspector-goal.ts"
 import { conversationFor, ensureRuntime, requestForSession, setConversationFor } from "./runtime.ts"
 import { forkCurrentSession } from "./sessions.ts"
 import { showToast } from "./overlays.ts"
@@ -54,14 +55,14 @@ async function perform(action: DesktopSlashAction, input: string) {
 
 async function runGoal(objective: string) {
   if (!objective) {
-    showGoalPanel(true)
+    await openGoalTab()
     return
   }
   if (!state.viewedSessionId) {
     showToast("Open a session before setting a goal.")
     return
   }
-  state.goal.draft = objective
+  state.goal = { ...state.goal, draft: objective }
   await submitGoal()
 }
 
@@ -75,7 +76,7 @@ async function focusSessionSearch(query: string) {
 }
 
 /** Shows the context breakdown as a command result in the viewed session. */
-export async function inspectContext(input = "/context") {
+async function inspectContext(input: string) {
   const sessionId = state.viewedSessionId
   if (!sessionId) {
     showToast("Open a session to inspect its context.")

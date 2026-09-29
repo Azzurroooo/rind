@@ -3,7 +3,9 @@ import { mergeTasks, normalizeTask } from "../task-monitor.ts"
 import { reduceEvent } from "../timeline-model.ts"
 import { decideTurnEvent } from "../turn-state.ts"
 import { asRecordText } from "./html.ts"
-import { loadGoal, pollTaskMonitor, renderTaskMonitorDock } from "./inspector.ts"
+import { refreshInspector } from "./inspector.ts"
+import { loadGoal } from "./inspector-goal.ts"
+import { renderTaskBadge, renderTasksTab } from "./inspector-tasks.ts"
 import { deliverPendingInput } from "./pending-inputs.ts"
 import { activeTurnIdFor, conversationFor, finalAssistantPreview, maybeNotify, runAction, setConversationFor } from "./runtime.ts"
 import { loadSessions, recordRecentSession } from "./sessions.ts"
@@ -35,7 +37,8 @@ export function handleRuntimeEvent(envelope: RuntimeEvent) {
         if (!state.taskMonitor.cursors[task.bg_id] && !state.taskMonitor.reading.has(task.bg_id) && (task.stdout !== undefined || task.stderr !== undefined)) {
           state.taskMonitor.outputs[task.bg_id] = task
         }
-        renderTaskMonitorDock()
+        renderTaskBadge()
+        if (state.inspectorOpen && state.inspectorTab === "tasks") renderTasksTab()
       }
     }
     return
@@ -70,7 +73,7 @@ export function handleRuntimeEvent(envelope: RuntimeEvent) {
     }
     if (sessionId === state.viewedSessionId) {
       void loadGoal()
-      if (state.taskMonitorOpen) void pollTaskMonitor().catch(() => {})
+      void refreshInspector().catch(() => {})
     }
     runAction(async () => {
       await loadSessions()

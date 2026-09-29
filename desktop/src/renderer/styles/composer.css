@@ -212,14 +212,30 @@
 .composer-select-empty { margin: 0; padding: 9px; color: var(--dim); font-size: 12px; }
 
 .context-meter {
-  padding: 2px 8px;
-  background: transparent;
-  font-family: inherit;
-  border: 1px solid var(--line);
-  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 24px;
+  padding: 2px 6px;
+  border: 0;
+  border-radius: var(--radius-sm);
   color: var(--dim);
+  background: transparent;
+  font-family: var(--font-mono);
   font-size: 11px;
   font-variant-numeric: tabular-nums;
+  cursor: pointer;
+  transition: color var(--dur-hover) var(--ease), background-color var(--dur-hover) var(--ease);
 }
-.context-meter:hover { color: var(--text); border-color: var(--line-strong); }
-.context-meter.context-hot { border-color: var(--accent); color: var(--accent); }
+.context-meter[hidden] { display: none; }
+.context-meter:hover { color: var(--text); background: var(--fill-2); }
+.context-meter:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.context-ring { flex: none; transform: rotate(-90deg); }
+.context-ring circle { fill: none; stroke-width: 2; }
+.context-ring-track { stroke: var(--line-strong); }
+.context-ring-value { stroke: var(--accent); stroke-linecap: round; transition: stroke-dashoffset var(--dur-panel) var(--ease); }
+.context-meter.context-hot { color: var(--warning); }
+.context-meter.context-hot .context-ring-value { stroke: var(--warning); }
+@media (prefers-reduced-motion: reduce) {
+  .context-meter, .context-ring-value { transition: none; }
+}

@@ -1,26 +1,27 @@
 import { sameProjectPath as samePath } from "../project-selection.ts"
 import { highlightFile } from "../syntax-highlight.ts"
 import { projectRelativePath } from "../tool-display.ts"
-import { filePreview, fileResizeHandle, filesToggle, fileTree, sidebarResizeHandle } from "./dom.ts"
+import { filePreview, filesUnavailable, fileTree } from "./dom.ts"
 import { escapeAttribute, escapeHtml } from "./html.ts"
 import { showToast } from "./overlays.ts"
 import { runAction } from "./runtime.ts"
-import { applyOverview, viewedProject } from "./sessions.ts"
-import { render, startResize } from "./shell.ts"
+import { openInspector } from "./inspector.ts"
+import { viewedProject } from "./sessions.ts"
+import { render } from "./shell.ts"
 import { state } from "./state.ts"
 
 
 
+/** Inspector Files tab: the project tree, or a preview that replaces it. */
 export function renderFiles() {
-  const project = viewedProject()
-  filesToggle.disabled = !project?.available
-  const filesLabel = state.filesOpen ? "Hide project files" : "Browse active project files"
-  filesToggle.dataset.tooltip = filesLabel
-  filesToggle.setAttribute("aria-label", filesLabel)
-  filesToggle.setAttribute("aria-expanded", String(state.filesOpen))
-  if (!state.filesOpen || !project?.available) return
+  const available = viewedProject()?.available === true
+  const preview = available ? state.filePreview : undefined
+  filesUnavailable.hidden = available
+  filesUnavailable.textContent = "Choose an available project to browse its files."
+  fileTree.hidden = !available || Boolean(preview)
+  filePreview.hidden = !preview
+  if (!available) return
   fileTree.innerHTML = renderDirectory("")
-  const preview = state.filePreview
   if (!preview) {
     filePreview.innerHTML = ""
   } else if (preview.kind === "text") {
@@ -46,17 +47,6 @@ export function renderDirectory(path: string, depth = 0): string {
   })
   const warning = listing.truncated ? `<p class="file-truncated">Only the first 500 items are shown.</p>` : ""
   return `<div class="file-branch">${rows.join("")}${warning}</div>`
-}
-
-export async function setFilesOpen(open: boolean) {
-  if (open && !viewedProject()?.available) {
-    state.notice = "Choose an available project before browsing files."
-    render()
-    return
-  }
-  applyOverview(await window.api.projects.updateLayout({ filesOpen: open }))
-  render()
-  if (open) await loadDirectory("")
 }
 
 export async function loadDirectory(path: string) {
@@ -118,10 +108,6 @@ export function bindFilesPanelEvents(): void {
       render()
     }
   })
-
-  startResize(sidebarResizeHandle, "sidebar")
-
-  startResize(fileResizeHandle, "files")
 }
 
 /** Opens a path from a read_file row in the Files tab (spec section 5.3). */
@@ -132,6 +118,6 @@ export async function openToolFile(path: string) {
     showToast(project?.available ? "That file is outside this project." : "Choose an available project to open files.")
     return
   }
-  if (!state.filesOpen) await setFilesOpen(true)
+  await openInspector("files")
   await previewFile(relative)
 }

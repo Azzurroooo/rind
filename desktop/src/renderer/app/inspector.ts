@@ -1,271 +1,231 @@
+// Inspector (spec section 2): a dismissible right column with Context, Tasks,
+// Files, Goal, and Usage tabs. Its open state and width persist through the
+// project layout (filesOpen and filePanelWidth keys in the main process).
+
 import { runtimeMethods } from "../../preload/types.ts"
-import { normalizeGoal, renderGoalPanel } from "../goal-panel.ts"
-import { readTaskOutput, refreshTaskPages, renderTaskMonitor, runningTaskCount } from "../task-monitor.ts"
-import { clipLine } from "../timeline-model.ts"
-import { goalPanel, goalPanelShell, taskMonitorDock, taskMonitorShell } from "./dom.ts"
-import { asRecord } from "./html.ts"
-import { requestForSession, runAction } from "./runtime.ts"
-import { currentRuntimeSnapshot } from "./sessions.ts"
-import { showToast } from "./overlays.ts"
+import { contextDisplayFrom, renderContextDisplay } from "../context-report.ts"
+import { clampInspectorWidth, INSPECTOR_CLOSE_WIDTH, INSPECTOR_TABS, INSPECTOR_WIDTH, inspectorFits, isInspectorTab, nextInspectorTab, normalizeUsageSummary, renderUsageSummary, type InspectorTab } from "../inspector-model.ts"
+import { appRoot, inspector, inspectorContextBody, inspectorResizeHandle, inspectorToggle, inspectorUsageBody, requiredElement } from "./dom.ts"
+import { loadDirectory, renderFiles } from "./files-panel.ts"
+import { escapeHtml } from "./html.ts"
+import { focusGoalInput, loadGoal, renderGoalTab } from "./inspector-goal.ts"
+import { loadBackgroundHistory, pollTasks, renderTaskBadge, renderTasksTab, syncTaskPolling } from "./inspector-tasks.ts"
+import { request, requestForSession, runAction } from "./runtime.ts"
+import { applyOverview, currentRuntimeSnapshot, viewedProject } from "./sessions.ts"
 import { render } from "./shell.ts"
-import { state, vars } from "./state.ts"
+import { emptyLoad, state, vars } from "./state.ts"
+import { type InspectorLoad } from "./types.ts"
 
+/** Matches the 760px drawer breakpoint used by the stylesheets. */
+const MOBILE_MAX_WIDTH = 760
+const USAGE_DAYS = 7
 
-
-// ---------- background task monitor (B6) ----------
-
-export function renderTaskMonitorDock() {
-  const monitor = state.taskMonitor
-  taskMonitorShell.hidden = !state.taskMonitorOpen
-  const toggle = document.getElementById("toggle-tasks")
-  const running = runningTaskCount(monitor.tasks)
-  const badge = document.getElementById("task-count-badge")
-  if (badge) {
-    badge.hidden = !running
-    badge.textContent = running ? String(running) : ""
-  }
-  if (toggle) {
-    toggle.setAttribute("aria-label", running ? `Toggle background task monitor, ${running} running` : "Toggle background task monitor")
-    toggle.setAttribute("aria-expanded", String(state.taskMonitorOpen))
-  }
-  if (!state.taskMonitorOpen) return
-  renderTaskMonitor({ shell: taskMonitorShell, dock: taskMonitorDock }, monitor)
+/** Open, and either on a mobile drawer or with room left for the conversation. */
+export function inspectorShown() {
+  if (!state.inspectorOpen) return false
+  if (window.innerWidth <= MOBILE_MAX_WIDTH) return true
+  return inspectorFits(window.innerWidth, state.sidebarOpen ? state.sidebarWidth : 0, state.inspectorWidth)
 }
 
-export function toggleTaskMonitor(open?: boolean) {
-  const next = open === undefined ? !state.taskMonitorOpen : open
-  state.taskMonitorOpen = next
-  if (!next) {
-    stopTaskMonitorPolling()
+export function renderInspector() {
+  const shown = inspectorShown()
+  appRoot.classList.toggle("inspector-open", shown)
+  appRoot.style.setProperty("--inspector-width", `${shown ? state.inspectorWidth : 0}px`)
+  inspector.setAttribute("aria-hidden", String(!shown))
+  inspector.inert = !shown
+  const label = state.inspectorOpen ? "Hide inspector" : "Show inspector"
+  inspectorToggle.dataset.tooltip = label
+  inspectorToggle.setAttribute("aria-label", label)
+  inspectorToggle.setAttribute("aria-expanded", String(shown))
+  renderTaskBadge()
+  for (const tab of INSPECTOR_TABS) {
+    const selected = tab === state.inspectorTab
+    const button = requiredElement(`inspector-tab-${tab}`)
+    button.setAttribute("aria-selected", String(selected))
+    button.tabIndex = selected ? 0 : -1
+    requiredElement(`inspector-panel-${tab}`).hidden = !selected
+  }
+  if (!shown) return
+  const renderers: Record<InspectorTab, () => void> = {
+    context: () => { inspectorContextBody.innerHTML = renderLoad(state.inspectorContext, "Loading context…", (display) => renderContextDisplay(display), contextEmptyText()) },
+    tasks: renderTasksTab,
+    files: renderFiles,
+    goal: renderGoalTab,
+    usage: () => { inspectorUsageBody.innerHTML = renderLoad(state.inspectorUsage, "Loading usage…", renderUsageSummary, "Usage appears once the runtime is ready.") },
+  }
+  renderers[state.inspectorTab]()
+}
+
+function contextEmptyText() {
+  return state.viewedSessionId ? "Context appears once the runtime is ready." : "Open a session to inspect its context."
+}
+
+function renderLoad<T>(load: InspectorLoad<T>, loadingText: string, present: (value: T) => string, emptyText: string) {
+  if (load.error) return `<p class="inspector-empty" role="alert">${escapeHtml(load.error)}</p>`
+  if (load.value !== undefined) return present(load.value)
+  return `<p class="inspector-empty">${escapeHtml(load.loading ? loadingText : emptyText)}</p>`
+}
+
+async function persistInspector(patch: { filesOpen?: boolean; filePanelWidth?: number }) {
+  applyOverview(await window.api.projects.updateLayout(patch))
+}
+
+/** Opens the inspector on a tab (the current one when omitted) and loads it. */
+export async function openInspector(tab: InspectorTab = state.inspectorTab) {
+  state.inspectorTab = tab
+  if (!state.inspectorOpen) {
+    state.inspectorOpen = true
+    render()
+    await persistInspector({ filesOpen: true })
+  }
+  render()
+  syncTaskPolling()
+  await loadInspectorTab(tab)
+}
+
+export async function closeInspector() {
+  state.inspectorOpen = false
+  render()
+  syncTaskPolling()
+  await persistInspector({ filesOpen: false })
+  render()
+}
+
+export async function toggleInspector(tab?: InspectorTab) {
+  if (state.inspectorOpen && (!tab || tab === state.inspectorTab)) await closeInspector()
+  else await openInspector(tab)
+}
+
+/** Reloads the visible tab; called after session switches and turn completion. */
+export async function refreshInspector() {
+  syncTaskPolling()
+  if (inspectorShown()) await loadInspectorTab(state.inspectorTab)
+}
+
+/** Drops data that belongs to the previous session. */
+export function resetInspectorData() {
+  state.inspectorContext = emptyLoad()
+}
+
+async function loadInspectorTab(tab: InspectorTab) {
+  if (tab === "context") await loadInspectorContext()
+  else if (tab === "usage") await loadInspectorUsage()
+  else if (tab === "goal") await loadGoal()
+  else if (tab === "files" && viewedProject()?.available) await loadDirectory("")
+}
+
+async function fetchInto<T>(
+  current: () => InspectorLoad<T>,
+  assign: (load: InspectorLoad<T>) => void,
+  sessionId: string,
+  fetchValue: () => Promise<T>,
+) {
+  if (current().loading || currentRuntimeSnapshot().status !== "ready") return
+  assign({ ...current(), sessionId, loading: true, error: "" })
+  render()
+  try {
+    const value = await fetchValue()
+    if (sessionId === current().sessionId) assign({ sessionId, loading: false, error: "", value })
+  } catch (error) {
+    if (sessionId === current().sessionId) assign({ sessionId, loading: false, error: error instanceof Error ? error.message : String(error) })
+  }
+  render()
+}
+
+export async function loadInspectorContext() {
+  const sessionId = state.viewedSessionId
+  if (!sessionId) {
+    state.inspectorContext = emptyLoad()
     render()
     return
   }
+  await fetchInto(() => state.inspectorContext, (load) => { state.inspectorContext = load }, sessionId,
+    async () => contextDisplayFrom(await requestForSession(runtimeMethods.contextInspect, sessionId)))
+}
+
+export async function loadInspectorUsage() {
+  await fetchInto(() => state.inspectorUsage, (load) => { state.inspectorUsage = load }, "",
+    async () => normalizeUsageSummary(await request(runtimeMethods.usageSummary, { days: USAGE_DAYS })))
+}
+
+export function selectInspectorTab(tab: InspectorTab, focus = false) {
+  state.inspectorTab = tab
   render()
-  void pollTaskMonitor().catch(() => {})
-  if (!vars.taskMonitorTimer && state.viewedSessionId && currentRuntimeSnapshot().status === "ready") {
-    vars.taskMonitorTimer = setInterval(() => { void pollTaskMonitor().catch(() => {}) }, 2000)
-  }
+  if (focus) requiredElement(`inspector-tab-${tab}`).focus()
+  syncTaskPolling()
+  runAction(() => loadInspectorTab(tab), state.viewedSessionId)
 }
 
-export function stopTaskMonitorPolling() {
-  if (vars.taskMonitorTimer) {
-    clearInterval(vars.taskMonitorTimer)
-    vars.taskMonitorTimer = undefined
-  }
+/** Opens the Goal tab with the objective input focused (/goal, #toggle-goal). */
+export async function openGoalTab() {
+  state.goal = { ...state.goal, setOpen: state.goal.setOpen || !state.goal.value }
+  await openInspector("goal")
+  focusGoalInput()
 }
 
-export async function pollTaskMonitor(more = false) {
-  if (!state.taskMonitorOpen || !state.viewedSessionId || currentRuntimeSnapshot().status !== "ready") {
-    stopTaskMonitorPolling()
-    return
-  }
-  const monitor = state.taskMonitor
-  if (monitor.refreshing) return
-  const sessionId = state.viewedSessionId
-  const pending = refreshTaskPages(monitor, (token) => requestForSession(runtimeMethods.taskList, sessionId, token ? { page_token: token } : {}), more)
-  renderTaskMonitorDock()
-  await pending
-  if (monitor !== state.taskMonitor) return
-  const expandedId = monitor.expandedId
-  if (expandedId && !monitor.reading.has(expandedId)) {
-    await loadTaskOutput(expandedId)
-  }
-  if (monitor === state.taskMonitor) renderTaskMonitorDock()
-}
-
-export async function loadTaskOutput(taskId: string, cursor = state.taskMonitor.cursors[taskId]) {
-  const monitor = state.taskMonitor
-  const sessionId = state.viewedSessionId
-  if (!sessionId) return
-  const pending = readTaskOutput(monitor, (id, position) => requestForSession(runtimeMethods.taskRead, sessionId, {
-    task_id: id, max_output_chars: 20000, ...(position ? { cursor: position } : {}),
-  }), taskId, cursor)
-  renderTaskMonitorDock()
-  await pending
-  if (monitor === state.taskMonitor) renderTaskMonitorDock()
-}
-
-// ---------- goal panel (B7) ----------
-
-export function renderGoalDock() {
-  goalPanelShell.hidden = !state.goal.visible
-  if (!state.goal.visible) return
-  renderGoalPanel({ shell: goalPanelShell, panel: goalPanel }, {
-    goal: state.goal.value,
-    busy: state.goal.busy,
-    setOpen: state.goal.setOpen,
-    draft: state.goal.draft,
+function bindResize() {
+  inspectorResizeHandle.addEventListener("pointerdown", (event) => {
+    if (!inspectorShown()) return
+    vars.resizeStart = { target: "inspector", pointerId: event.pointerId, x: event.clientX, width: state.inspectorWidth, lastWidth: state.inspectorWidth }
+    inspectorResizeHandle.setPointerCapture(event.pointerId)
+    document.body.classList.add("resizing-panel")
+    event.preventDefault()
   })
-}
-
-export function showGoalPanel(open = true) {
-  state.goal.visible = open
-  state.goal.setOpen = open && !state.goal.value ? true : open && state.goal.setOpen
-  render()
-  if (open) goalPanel.querySelector<HTMLInputElement>("#goal-objective-input")?.focus()
-}
-
-export async function loadGoal() {
-  const sessionId = state.viewedSessionId
-  if (!sessionId || currentRuntimeSnapshot().status !== "ready") {
-    state.goal.value = undefined
-    if (state.goal.visible) renderGoalDock()
-    return
-  }
-  const sequence = ++vars.goalLoadSequence
-  try {
-    const result = asRecord(await window.api.goal.get(sessionId))
-    if (sequence !== vars.goalLoadSequence || sessionId !== state.viewedSessionId) return
-    state.goal.value = normalizeGoal(result.goal)
-    if (state.goal.visible) renderGoalDock()
-  } catch {
-    if (sequence === vars.goalLoadSequence) state.goal.value = undefined
-  }
-}
-
-export async function submitGoal() {
-  const sessionId = state.viewedSessionId
-  const objective = state.goal.draft.trim()
-  if (!sessionId || !objective || state.goal.busy) return
-  state.goal.busy = true
-  renderGoalDock()
-  try {
-    const result = asRecord(await window.api.goal.set(sessionId, objective))
-    state.goal.value = normalizeGoal(result.goal)
-    state.goal.draft = ""
-    state.goal.setOpen = false
-    state.notice = state.goal.value ? `Goal set: ${clipLine(state.goal.value.objective, 80)}` : state.notice
-  } catch (error) {
-    state.notice = error instanceof Error ? error.message : String(error)
-  } finally {
-    state.goal.busy = false
+  inspectorResizeHandle.addEventListener("pointermove", (event) => {
+    const start = vars.resizeStart
+    if (!start || start.target !== "inspector" || start.pointerId !== event.pointerId) return
+    const width = Math.round(start.width + start.x - event.clientX)
+    vars.resizeStart = { ...start, lastWidth: width }
+    state.inspectorWidth = Math.max(INSPECTOR_CLOSE_WIDTH, Math.min(INSPECTOR_WIDTH.max, width))
     render()
-  }
-}
-
-export async function changeGoalStatus(status: "active" | "paused") {
-  const sessionId = state.viewedSessionId
-  if (!sessionId || state.goal.busy) return
-  state.goal.busy = true
-  renderGoalDock()
-  try {
-    const result = asRecord(await window.api.goal.status(sessionId, status))
-    state.goal.value = normalizeGoal(result.goal)
-  } catch (error) {
-    state.notice = error instanceof Error ? error.message : String(error)
-  } finally {
-    state.goal.busy = false
+  })
+  inspectorResizeHandle.addEventListener("pointerup", (event) => {
+    const start = vars.resizeStart
+    if (!start || start.target !== "inspector" || start.pointerId !== event.pointerId) return
+    inspectorResizeHandle.releasePointerCapture(event.pointerId)
+    vars.resizeStart = undefined
+    document.body.classList.remove("resizing-panel")
+    const keepOpen = start.lastWidth > INSPECTOR_CLOSE_WIDTH
+    state.inspectorWidth = keepOpen ? clampInspectorWidth(state.inspectorWidth) : start.width
+    if (!keepOpen) state.inspectorOpen = false
     render()
-  }
-}
-
-export async function clearGoal() {
-  const sessionId = state.viewedSessionId
-  if (!sessionId || state.goal.busy) return
-  state.goal.busy = true
-  renderGoalDock()
-  try {
-    await window.api.goal.clear(sessionId)
-    state.goal.value = undefined
-    showToast("Goal cleared.", "success")
-  } catch (error) {
-    state.notice = error instanceof Error ? error.message : String(error)
-  } finally {
-    state.goal.busy = false
-    render()
-  }
+    syncTaskPolling()
+    runAction(() => persistInspector({ filesOpen: keepOpen, filePanelWidth: state.inspectorWidth }))
+  })
+  inspectorResizeHandle.addEventListener("lostpointercapture", () => {
+    vars.resizeStart = undefined
+    document.body.classList.remove("resizing-panel")
+  })
 }
 
 export function bindInspectorEvents(): void {
-  // ---------- task monitor / goal panel / palette interactions ----------
-  
-  taskMonitorDock.addEventListener("click", (event) => {
-    const target = event.target as HTMLElement
-    if (target.closest("[data-task-more]")) {
-      void pollTaskMonitor(true)
-      return
-    }
-    const outputAction = target.closest<HTMLButtonElement>("[data-task-output]")
-    if (outputAction?.dataset.taskId) {
-      const taskId = outputAction.dataset.taskId
-      const output = state.taskMonitor.outputs[taskId]
-      const cursor = outputAction.dataset.taskOutput === "next" ? output?.next_cursor : outputAction.dataset.taskOutput === "start" ? output?.start_cursor : ""
-      void loadTaskOutput(taskId, cursor)
-      return
-    }
-    const action = target.closest<HTMLButtonElement>("[data-task-action]")
-    if (action) {
-      const sessionId = state.viewedSessionId
-      const taskId = action.dataset.taskId
-      if (!sessionId || !taskId) return
-      action.disabled = true
-      runAction(async () => {
-        try {
-          await requestForSession(action.dataset.taskAction === "cancel" ? runtimeMethods.taskCancel : runtimeMethods.taskReleaseWait, sessionId, { task_id: taskId })
-          if (state.viewedSessionId === sessionId) await pollTaskMonitor()
-        } finally { action.disabled = false }
-      }, sessionId)
-      return
-    }
-    if (target.closest<HTMLButtonElement>("[data-task-close]")) {
-      toggleTaskMonitor(false)
-      return
-    }
-    const bgId = target.closest<HTMLButtonElement>("[data-toggle-task]")?.dataset.toggleTask
-    if (!bgId) return
-    state.taskMonitor.expandedId = state.taskMonitor.expandedId === bgId ? "" : bgId
-    renderTaskMonitorDock()
-    if (state.taskMonitor.expandedId && state.viewedSessionId) {
-      void loadTaskOutput(state.taskMonitor.expandedId)
-    }
+  const tabList = inspector.querySelector<HTMLElement>("[role=tablist]")
+  tabList?.addEventListener("click", (event) => {
+    const tab = (event.target as HTMLElement).closest<HTMLElement>("[data-inspector-tab]")?.dataset.inspectorTab
+    if (isInspectorTab(tab)) selectInspectorTab(tab)
   })
-
-  goalPanel.addEventListener("click", (event) => {
-    const target = event.target as HTMLElement
-    if (target.closest<HTMLButtonElement>("[data-goal-pause]")) {
-      runAction(() => changeGoalStatus("paused"), state.viewedSessionId)
-      return
-    }
-    if (target.closest<HTMLButtonElement>("[data-goal-resume]")) {
-      runAction(() => changeGoalStatus("active"), state.viewedSessionId)
-      return
-    }
-    if (target.closest<HTMLButtonElement>("[data-goal-clear]")) {
-      runAction(clearGoal, state.viewedSessionId)
-      return
-    }
-    if (target.closest<HTMLButtonElement>("[data-toggle-goal-set]")) {
-      state.goal.setOpen = true
-      renderGoalDock()
-      goalPanel.querySelector<HTMLInputElement>("#goal-objective-input")?.focus()
-      return
-    }
-    if (target.closest<HTMLButtonElement>("[data-goal-cancel]")) {
-      state.goal.setOpen = false
-      state.goal.draft = ""
-      renderGoalDock()
-      return
-    }
-    if (target.closest<HTMLButtonElement>("[data-goal-close]")) {
-      showGoalPanel(false)
-      return
-    }
-    if (target.closest<HTMLButtonElement>("[data-goal-submit]")) {
-      runAction(submitGoal, state.viewedSessionId)
-    }
-  })
-
-  goalPanel.addEventListener("input", (event) => {
-    const input = event.target as HTMLElement
-    if (input.id !== "goal-objective-input" || !(input instanceof HTMLInputElement)) return
-    state.goal.draft = input.value
-    const submit = goalPanel.querySelector<HTMLButtonElement>("[data-goal-submit]")
-    if (submit) submit.disabled = state.goal.busy || !input.value.trim()
-  })
-
-  goalPanel.addEventListener("keydown", (event) => {
-    if (event.key !== "Enter" || !(event.target instanceof HTMLInputElement) || event.target.id !== "goal-objective-input") return
+  tabList?.addEventListener("keydown", (event) => {
+    const next = nextInspectorTab(state.inspectorTab, event.key)
+    if (!next) return
     event.preventDefault()
-    runAction(submitGoal, state.viewedSessionId)
+    selectInspectorTab(next, true)
   })
+  inspector.addEventListener("click", (event) => {
+    const refresh = (event.target as HTMLElement).closest<HTMLElement>("[data-inspector-refresh]")?.dataset.inspectorRefresh
+    if (refresh === "context") runAction(loadInspectorContext, state.viewedSessionId)
+    else if (refresh === "usage") runAction(loadInspectorUsage)
+    else if (refresh === "tasks") runAction(() => Promise.all([pollTasks(), loadBackgroundHistory()]).then(() => undefined), state.viewedSessionId)
+  })
+  inspector.addEventListener("keydown", (event) => {
+    if (event.key !== "Escape" || event.defaultPrevented) return
+    if ((event.target as HTMLElement).closest("input, textarea")) return
+    event.preventDefault()
+    event.stopPropagation()
+    runAction(closeInspector)
+    inspectorToggle.focus()
+  })
+  requiredElement("close-inspector").addEventListener("click", () => runAction(closeInspector))
+  inspectorToggle.addEventListener("click", () => runAction(() => toggleInspector()))
+  document.getElementById("toggle-tasks")?.addEventListener("click", () => runAction(() => toggleInspector("tasks")))
+  bindResize()
 }
