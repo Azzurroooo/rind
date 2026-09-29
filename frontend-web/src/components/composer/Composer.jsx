@@ -4,7 +4,8 @@ import { UploadChip } from "../UploadChip.jsx";
 import { Tooltip } from "../overlays/Tooltip.jsx";
 import { QueueTray } from "./QueueTray.jsx";
 import { SlashMenu } from "./SlashMenu.jsx";
-import { ContextRing, EffortChip, ModelChip } from "./ComposerChips.jsx";
+import { ContextRing, EffortChip } from "./ComposerChips.jsx";
+import { ModelPicker } from "./ModelPicker.jsx";
 import { useAttachments } from "./useAttachments.js";
 import { COMPOSER_ACTIONS, composerKeyAction, slashQuery } from "../../lib/composerKeys.js";
 import { matchingSlashCommands } from "../../lib/commands.js";
@@ -28,6 +29,8 @@ export const Composer = forwardRef(function Composer({
   lastPrompt = "",
   model = "",
   models = [],
+  providerId = "",
+  providerNames = {},
   effort = "",
   stats = null,
   hasSession = false,
@@ -188,7 +191,7 @@ export const Composer = forwardRef(function Composer({
             </Tooltip>
           </div>
           <div className="composer-actions">
-            <ModelChip model={model} models={models} disabled={!hasSession} onOpen={onRefreshModels} onSelect={(next) => guard(onModel, next)} />
+            <ModelPicker model={model} providerId={providerId} models={models} providerNames={providerNames} disabled={!hasSession} onOpen={onRefreshModels} onSelect={(next) => guard(onModel, next)} />
             <EffortChip effort={effort} disabled={!hasSession} onSelect={(next) => guard(onEffort, next)} />
             <ContextRing stats={stats} onOpen={onOpenContext} />
             {active && !hasContent ? (

@@ -1,5 +1,6 @@
 import { methods, sessionIdOf } from "../methods.js";
 import { fileToBase64, uploadTargetPath } from "../lib/files.js";
+import { findModelOption } from "../lib/models.js";
 import { questionKey } from "../state/conversationReducer.js";
 import { REASONING_EFFORTS, errorText } from "./constants.js";
 
@@ -171,16 +172,35 @@ export function createTurnActions(ctx) {
     refs.composer.current?.focus();
   }
 
-  async function setModel(model) {
-    const clean = String(model || "").trim();
-    if (!clean) return;
+  // Accepts the picker's { providerId, modelId } or a plain model name, which
+  // resolves against the loaded options so model/set carries provider_id.
+  async function setModel(selection) {
+    const option = typeof selection === "string" || selection == null
+      ? findModelOption(refs.info.current.models || [], selection)
+      : selection;
+    const modelId = String(option?.modelId ?? option?.id ?? selection ?? "").trim();
+    if (!modelId) return;
+    const providerId = String(option?.providerId ?? "").trim();
     const sessionId = refs.info.current.session_id;
     const loadId = refs.sessionLoad.current;
-    const result = await client().request(methods.modelSet, { session_id: sessionId, model: clean });
+    const result = await client().request(methods.modelSet, {
+      session_id: sessionId,
+      model: modelId,
+      ...(providerId ? { provider_id: providerId } : {}),
+    });
     if (loadId !== refs.sessionLoad.current || sessionId !== refs.info.current.session_id) return;
-    const next = String(result?.session_model || result?.model || clean).trim();
+    const next = String(result?.session_model || result?.model || modelId).trim();
+    const nextProvider = String(result?.provider_id ?? providerId ?? "").trim();
     ctx.setCurrentModel(next);
-    ctx.setInfo((current) => ({ ...current, model: next }));
+    ctx.setCurrentProvider(nextProvider);
+    ctx.setInfo((current) => {
+      const known = (current.models || []).some((model) => model.id === next && (model.providerId || "") === nextProvider);
+      return {
+        ...current,
+        model: next,
+        models: known ? current.models : [...(current.models || []), { id: next, providerId: nextProvider, contextWindow: null, imageInput: null }],
+      };
+    });
     say("system", `Model updated to ${next}.`);
   }
 

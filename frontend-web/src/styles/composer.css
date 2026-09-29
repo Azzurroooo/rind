@@ -53,6 +53,41 @@
 .composer-tools, .composer-actions { display: flex; align-items: center; gap: 2px; min-width: 0; }
 .composer-tools { flex: 1; flex-wrap: wrap; }
 .chip-menu { min-width: 0; }
+
+/* Provider-grouped model picker (after Jan's provider groups and LobeHub's panel). */
+.model-picker { min-width: 264px; max-width: 340px; display: grid; gap: 2px; padding: var(--space-1); }
+.model-search {
+  display: flex; align-items: center; gap: var(--space-2); height: var(--control-sm);
+  margin: 0 var(--space-1) var(--space-1); padding: 0 var(--space-2);
+  border: 1px solid var(--line); border-radius: var(--radius-control); background: var(--bg);
+  color: var(--dim);
+}
+.model-search input { flex: 1; min-width: 0; border: 0; background: transparent; color: var(--text); font-size: var(--text-dense); outline: none; }
+.model-search input::placeholder { color: var(--dim); }
+.model-picker-list { max-height: 280px; overflow-y: auto; display: grid; gap: var(--space-2); }
+.model-group { display: grid; gap: 1px; }
+.model-group-header {
+  display: flex; align-items: center; justify-content: space-between; gap: var(--space-2);
+  padding: 2px var(--space-2) var(--space-1);
+}
+.model-group-name {
+  color: var(--muted); font-size: var(--text-meta); font-weight: 600;
+  text-transform: uppercase; letter-spacing: .05em;
+}
+.model-group-count { color: var(--dim); font-size: var(--text-meta); font-variant-numeric: tabular-nums; }
+.model-option {
+  display: flex; align-items: center; gap: var(--space-2); width: 100%;
+  height: var(--control-md); padding: 0 var(--space-2);
+  border: 0; border-radius: var(--radius-control); background: transparent;
+  color: var(--text); font-size: var(--text-dense); text-align: left;
+}
+.model-option:hover:not(:disabled), .model-option:focus-visible { background: var(--fill-1); outline: none; }
+.model-option.selected { background: var(--accent-soft); }
+.model-option-check { flex: none; display: inline-grid; place-items: center; width: 16px; color: var(--accent); }
+.model-option-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--font-mono); font-size: var(--text-meta); }
+.model-option-vision { flex: none; display: inline-grid; place-items: center; color: var(--dim); }
+.model-option-meta { flex: none; color: var(--dim); font-size: var(--text-meta); font-variant-numeric: tabular-nums; }
+.model-picker-empty { padding: var(--space-2) var(--space-3); color: var(--muted); font-size: var(--text-dense); line-height: 1.6; }
 .composer-chip {
   display: inline-flex; align-items: center; gap: 4px; max-width: 200px;
   height: var(--control-sm); padding: 0 var(--space-2);
@@ -60,7 +95,6 @@
 }
 .composer-chip:hover:not(:disabled), .composer-chip[aria-expanded="true"] { background: var(--fill-1); color: var(--text); }
 .chip-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.chip-menu .menu { max-height: 280px; overflow-y: auto; }
 
 .context-ring-button {
   display: inline-grid; place-items: center; width: var(--control-sm); height: var(--control-sm); padding: 0;

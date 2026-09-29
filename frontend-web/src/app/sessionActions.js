@@ -1,5 +1,6 @@
 import { methods, sessionIdOf } from "../methods.js";
 import { exportConversation, writePreference } from "../lib/sessionPreferences.js";
+import { normalizeModelList } from "../lib/models.js";
 import { SESSION_LIMIT_MAX, SESSION_PAGE, errorText } from "./constants.js";
 
 // Session index, switching, subscriptions and per-session metadata (models,
@@ -65,14 +66,36 @@ export function createSessionActions(ctx) {
     try {
       const result = await refs.client.current.request(methods.modelList, { session_id: sessionId });
       if (stale()) return;
-      const nextModel = String(result?.current_model || refs.info.current.model || refs.info.current.default_model || refs.currentModel.current || "").trim();
-      const values = [nextModel, ...(Array.isArray(result?.models) ? result.models : [])].filter(Boolean);
+      const listing = normalizeModelList(result);
+      const nextModel = listing.current?.modelId
+        || String(refs.info.current.model || refs.info.current.default_model || refs.currentModel.current || "").trim();
+      const nextProvider = listing.current?.providerId || "";
+      const models = listing.current && !listing.models.some((model) => model.providerId === listing.current.providerId && model.id === listing.current.modelId)
+        ? [{ id: listing.current.modelId, providerId: nextProvider, contextWindow: null, imageInput: null }, ...listing.models]
+        : listing.models;
       ctx.setCurrentModel(nextModel);
-      ctx.setInfo((current) => ({ ...current, models: [...new Set(values)], model: nextModel || current.model }));
+      ctx.setCurrentProvider(nextProvider);
+      ctx.setInfo((current) => ({ ...current, models, model: nextModel || current.model }));
     } catch {
       if (stale()) return;
       const fallback = String(refs.info.current.model || refs.info.current.default_model || refs.currentModel.current || "").trim();
-      ctx.setInfo((current) => ({ ...current, models: fallback ? [fallback] : [] }));
+      ctx.setInfo((current) => ({ ...current, models: fallback ? [{ id: fallback, providerId: "", contextWindow: null, imageInput: null }] : [] }));
+    }
+  }
+
+  // Provider display names for the model picker (rind/auth/list). Read-only:
+  // credentials stay managed on the host.
+  async function refreshProviders() {
+    if (!refs.info.current.methods?.includes?.(methods.authList)) return;
+    try {
+      const result = await refs.client.current.request(methods.authList, {});
+      const names = {};
+      for (const provider of Array.isArray(result?.providers) ? result.providers : []) {
+        if (provider?.id) names[String(provider.id)] = String(provider?.name || "");
+      }
+      ctx.setProviderNames(names);
+    } catch {
+      // Names are cosmetic; the picker falls back to formatted provider ids.
     }
   }
 
@@ -284,7 +307,7 @@ export function createSessionActions(ctx) {
   }
 
   return {
-    refreshSessions, loadMoreSessions, syncSubscriptions, refreshModels, refreshContext, loadSession,
+    refreshSessions, loadMoreSessions, syncSubscriptions, refreshModels, refreshProviders, refreshContext, loadSession,
     createSession, selectWorkspace, clearActiveSession, forkSession, exportSession, handleSelectSession, deleteSession,
   };
 }

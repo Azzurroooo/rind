@@ -126,6 +126,8 @@ export function Shell() {
             lastPrompt={lastUserPrompt(view.messages)}
             model={ctx.currentModel || info.model || info.default_model || ""}
             models={info.models || []}
+            providerId={ctx.currentProvider || info.provider || ""}
+            providerNames={ctx.providerNames}
             effort={info.reasoning_effort || ""}
             stats={ctx.stats}
             hasSession={Boolean(sessionId)}

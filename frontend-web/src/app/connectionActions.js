@@ -179,6 +179,7 @@ export function createConnectionActions(ctx) {
         ctx.setWorkspaces([...new Set([workspace, refs.info.current.workspace_root, ...roots].filter(Boolean))]);
       }
       void call().refreshModels(refs.info.current.session_id);
+      void call().refreshProviders();
     } catch (error) {
       if (run === refs.connectionRun.current) call().dispatchMessage("system", errorText(error), "error");
       throw error;

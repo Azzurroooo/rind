@@ -31,6 +31,8 @@ export function useAppState() {
   const [stats, setStats] = useState({});
   const [goal, setGoal] = useState(null);
   const [currentModel, setCurrentModel] = useState("");
+  const [currentProvider, setCurrentProvider] = useState("");
+  const [providerNames, setProviderNames] = useState({});
   const [compacting, setCompacting] = useState(false);
   const [busySession, setBusySession] = useState(false);
   const [unreadIds, setUnreadIds] = useState(() => new Set());
@@ -58,6 +60,7 @@ export function useAppState() {
     workspace: useRef(""),
     info: useRef({}),
     currentModel: useRef(""),
+    currentProvider: useRef(""),
     conv: useRef(conversation),
     client: useRef(null),
     interruptTimer: useRef(null),
@@ -70,6 +73,7 @@ export function useAppState() {
   refs.workspace.current = selectedWorkspace;
   refs.info.current = info;
   refs.currentModel.current = currentModel;
+  refs.currentProvider.current = currentProvider;
   refs.conv.current = conversation;
   refs.paletteOpen.current = paletteOpen;
   refs.sessions.current = sessions;
@@ -91,6 +95,8 @@ export function useAppState() {
     stats, setStats,
     goal, setGoal,
     currentModel, setCurrentModel,
+    currentProvider, setCurrentProvider,
+    providerNames, setProviderNames,
     compacting, setCompacting,
     busySession, setBusySession,
     unreadIds, setUnreadIds,
