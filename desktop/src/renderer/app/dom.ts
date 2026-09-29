@@ -58,7 +58,7 @@ appRoot.innerHTML = `
             <span id="session-status" class="session-status" role="status" hidden><span class="session-status-dot" aria-hidden="true"></span><span id="session-status-text">Idle</span></span>
           </div>
           <div class="session-actions">
-            <button id="toggle-tasks" type="button" class="icon-button head-button" data-tooltip="Background tasks" aria-label="Background tasks" aria-controls="inspector" aria-expanded="false">${renderIcon(ListTodo)}<span id="task-count-badge" class="head-badge" hidden></span></button>
+            <button id="toggle-tasks" type="button" class="icon-button head-button" data-tooltip="Activity" aria-label="Activity" aria-controls="inspector" aria-expanded="false">${renderIcon(ListTodo)}<span id="task-count-badge" class="head-badge" hidden></span></button>
             <button id="toggle-inspector" type="button" class="icon-button head-button" data-tooltip="Show inspector" aria-label="Show inspector" aria-controls="inspector" aria-expanded="false">${renderIcon(PanelRight)}</button>
             <div class="session-head-menu-wrap">
               <button id="session-head-menu-trigger" type="button" class="icon-button head-button" data-tooltip="More actions" aria-label="More conversation actions" aria-haspopup="menu" aria-controls="session-head-menu" aria-expanded="false">${renderIcon(Ellipsis)}</button>
@@ -88,18 +88,15 @@ appRoot.innerHTML = `
           <div class="inspector-toolbar"><span class="subtle">Current context window</span><button type="button" class="ghost-button" data-inspector-refresh="context">Refresh</button></div>
           <div id="inspector-context"></div>
         </section>
-        <section id="inspector-panel-tasks" class="inspector-panel" role="tabpanel" aria-labelledby="inspector-tab-tasks" tabindex="0" hidden>
+        <section id="inspector-panel-activity" class="inspector-panel activity-panel" role="tabpanel" aria-labelledby="inspector-tab-activity" tabindex="0" hidden>
+          <div id="activity-plan" aria-label="Plan"></div>
           <section id="task-monitor" class="task-monitor" aria-label="Running background tasks"></section>
-          <div class="inspector-toolbar"><h3 class="inspector-section-title">Finished</h3><button type="button" class="ghost-button" data-inspector-refresh="tasks">Refresh</button></div>
-          <div id="task-history" aria-label="Finished background tasks"></div>
+          <section id="goal-panel" class="goal-panel" aria-label="Session goal"></section>
         </section>
         <section id="inspector-panel-files" class="inspector-panel inspector-files" role="tabpanel" aria-labelledby="inspector-tab-files" tabindex="0" hidden>
           <p id="files-unavailable" class="inspector-empty" hidden>Choose an available project to browse its files.</p>
           <section id="file-preview" class="file-preview" hidden></section>
           <div id="file-tree" class="file-tree"></div>
-        </section>
-        <section id="inspector-panel-goal" class="inspector-panel" role="tabpanel" aria-labelledby="inspector-tab-goal" tabindex="0" hidden>
-          <section id="goal-panel" class="goal-panel" aria-label="Session goal"></section>
         </section>
         <section id="inspector-panel-usage" class="inspector-panel" role="tabpanel" aria-labelledby="inspector-tab-usage" tabindex="0" hidden>
           <div class="inspector-toolbar"><span class="subtle">Last 7 days, all sessions</span><button type="button" class="ghost-button" data-inspector-refresh="usage">Refresh</button></div>
@@ -183,8 +180,8 @@ export const attachButton = requiredElement<HTMLButtonElement>("attach-button")
 export const attachInput = requiredElement<HTMLInputElement>("attach-input")
 export const attachmentChips = requiredElement("attachment-chips")
 export const taskMonitorDock = requiredElement("task-monitor")
-export const taskHistory = requiredElement("task-history")
 export const goalPanel = requiredElement("goal-panel")
+export const activityPlan = requiredElement("activity-plan")
 export const sessionSearchInput = requiredElement<HTMLInputElement>("session-search")
 export const paletteOverlay = requiredElement("command-palette")
 export const paletteInput = requiredElement<HTMLInputElement>("palette-input")
@@ -193,8 +190,6 @@ export const shortcutsDialog = requiredElement<HTMLDialogElement>("shortcuts-dia
 export const shortcutTable = requiredElement("shortcut-table")
 export const messageStream = requiredElement("message-stream")
 export const jumpLatest = requiredElement<HTMLButtonElement>("jump-latest")
-export const planDockShell = requiredElement("plan-dock-shell")
-export const planDock = requiredElement("plan-dock")
 export const pendingInputDock = requiredElement("pending-input-dock")
 export const notice = requiredElement("notice")
 export const noticeText = requiredElement("notice-text")

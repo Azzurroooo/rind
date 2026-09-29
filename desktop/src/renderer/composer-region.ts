@@ -1,16 +1,5 @@
-import { escapeAttribute, escapeHtml } from "./html-escape.ts"
-import { activePlan, clipLine, type ConversationState, type PlanEntry } from "./timeline-model.ts"
-
-export type PlanDockPresentation = {
-  collapsed: boolean
-  sessionId: string
-  dismissedPlanErrors: Set<string>
-}
-
-export type PlanDockElements = {
-  shell: HTMLElement
-  dock: HTMLElement
-}
+import { escapeHtml } from "./html-escape.ts"
+import { clipLine, type ConversationState } from "./timeline-model.ts"
 
 export type ComposerElements = {
   prompt: HTMLTextAreaElement
@@ -49,9 +38,6 @@ export type ComposerView = {
 export function composerRegionMarkup() {
   return `
     <div class="composer-region">
-      <div id="plan-dock-shell" class="plan-dock-shell" hidden>
-        <section id="plan-dock" class="plan-dock" aria-label="Plan progress"></section>
-      </div>
       <div id="pending-input-dock" class="pending-input-dock" aria-label="Queued messages" hidden></div>
       <div id="attachment-chips" class="attachment-chips" hidden></div>
       <form id="composer" class="composer">
@@ -93,59 +79,6 @@ export function composerRegionMarkup() {
 
 function paperclipIcon() {
   return `<svg class="attach-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" focusable="false" aria-hidden="true"><path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>`
-}
-
-export function renderPlanDock(
-  elements: PlanDockElements,
-  conversation: ConversationState,
-  sessionId: string,
-  presentation: PlanDockPresentation,
-) {
-  const scrollTop = elements.dock.querySelector<HTMLElement>(".plan-dock-content")?.scrollTop || 0
-  syncPlanDockSession(presentation, sessionId)
-  const plan = visiblePlan(conversation, sessionId, presentation)
-  if (!plan) {
-    elements.shell.hidden = true
-    elements.dock.replaceChildren()
-    return
-  }
-  const progress = planProgress(plan)
-  const preview = plan.steps.find((step) => step.status === "in_progress")
-    ?? plan.steps.find((step) => step.status === "pending")
-    ?? plan.steps.at(-1)
-  const collapsed = presentation.collapsed
-  elements.shell.hidden = false
-  elements.shell.className = `plan-dock-shell${collapsed ? " collapsed" : ""}`
-  elements.dock.className = `plan-dock${progress.status === "error" ? " plan-error" : ""}`
-  elements.dock.innerHTML = `
-    <button type="button" class="plan-dock-trigger" data-toggle-plan aria-expanded="${String(!collapsed)}">
-      <span class="status-pip ${progress.pip}"></span>
-      <strong>Plan</strong>
-      <span class="plan-progress">${progress.completed}/${plan.steps.length}</span>
-      ${preview ? `<span class="plan-preview">${escapeHtml(clipLine(preview.step, 72))}</span>` : ""}
-      <span class="plan-chevron" aria-hidden="true"></span>
-    </button>
-    <div class="plan-dock-body" aria-hidden="${String(collapsed)}">
-      <div class="plan-dock-content">
-        <ol class="plan-steps">${plan.steps.map((step) => `<li class="plan-step plan-${escapeAttribute(step.status)}"><span aria-hidden="true"></span><span>${escapeHtml(step.step)}</span></li>`).join("")}</ol>
-        ${plan.error ? `<p class="plan-error-text">${escapeHtml(plan.error)}</p>` : ""}
-      </div>
-    </div>
-  `
-  const content = elements.dock.querySelector<HTMLElement>(".plan-dock-content")
-  if (content) content.scrollTop = scrollTop
-}
-
-export function syncPlanDockSession(presentation: PlanDockPresentation, sessionId: string) {
-  if (presentation.sessionId === sessionId) return
-  presentation.sessionId = sessionId
-  presentation.collapsed = false
-}
-
-export function dismissPlanError(conversation: ConversationState, sessionId: string, presentation: PlanDockPresentation) {
-  const plan = activePlan(conversation)
-  if (!plan || !(plan.error || plan.status === "error") || !sessionId || !plan.id) return
-  presentation.dismissedPlanErrors.add(planErrorKey(sessionId, plan))
 }
 
 export function renderComposer(elements: ComposerElements, view: ComposerView) {
@@ -259,27 +192,6 @@ export function syncPendingInputDock(
 
   for (const stale of existing.values()) stale.remove()
   dock.hidden = inputs.length === 0
-}
-
-function visiblePlan(conversation: ConversationState, sessionId: string, presentation: PlanDockPresentation) {
-  const plan = activePlan(conversation)
-  if (!plan || !(plan.error || plan.status === "error")) return plan
-  return presentation.dismissedPlanErrors.has(planErrorKey(sessionId, plan)) ? undefined : plan
-}
-
-function planErrorKey(sessionId: string, plan: PlanEntry) {
-  return `${sessionId}:${plan.id}`
-}
-
-function planProgress(plan: PlanEntry) {
-  const completed = plan.steps.filter((step) => step.status === "completed").length
-  const settled = plan.steps.filter((step) => step.status === "completed" || step.status === "cancelled").length
-  const status = plan.error || plan.status === "error"
-    ? "error"
-    : plan.steps.some((step) => step.status === "in_progress")
-      ? "running"
-      : settled === plan.steps.length ? "completed" : "pending"
-  return { completed, status, pip: status === "error" ? "pip-error" : status === "completed" ? "pip-done" : "pip-running" }
 }
 
 const METER_RADIUS = 6

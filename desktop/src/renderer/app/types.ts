@@ -1,8 +1,8 @@
 import { type DesktopFileListing, type DesktopFilePreview, type DesktopGoal, type DesktopProject, type DesktopRecentSession, type DesktopSessionSummary, type DesktopSettings, type DesktopTheme, type RuntimeSnapshot } from "../../preload/types.ts"
-import { type PendingInput, type PlanDockPresentation } from "../composer-region.ts"
+import { type PendingInput } from "../composer-region.ts"
 import { type QuestionSelection } from "../question-state.ts"
 import { type ContextDisplay } from "../context-report.ts"
-import { type BackgroundOutput, type BackgroundRecord, type InspectorTab, type UsageSummary } from "../inspector-model.ts"
+import { type InspectorTab, type UsageSummary } from "../inspector-model.ts"
 import { type SlashCommand } from "../slash-commands.ts"
 import { type TaskMonitorState } from "../task-monitor.ts"
 import { type ConversationState } from "../timeline-model.ts"
@@ -33,15 +33,6 @@ export type InspectorLoad<T> = {
   loading: boolean
   error: string
   value?: T
-}
-
-export type BackgroundHistoryState = {
-  records: BackgroundRecord[]
-  expandedId: string
-  outputs: Record<string, BackgroundOutput>
-  reading: Set<string>
-  loading: boolean
-  error: string
 }
 
 export type AppState = {
@@ -75,7 +66,6 @@ export type AppState = {
   inspectorTab: InspectorTab
   inspectorContext: InspectorLoad<ContextDisplay>
   inspectorUsage: InspectorLoad<UsageSummary>
-  backgroundHistory: BackgroundHistoryState
   expandedProjects: Set<string>
   projectMenuPath: string
   expandedDirectories: Set<string>
@@ -90,7 +80,6 @@ export type AppState = {
   segmentFolds: ReadonlyMap<string, boolean>
   /** "id:all", "id:raw" and "id:details" toggles on tool bodies. */
   toolBodiesShown: ReadonlySet<string>
-  planDock: PlanDockPresentation
   composerMenuOpen: boolean
   compacting: boolean
   slashCommandPending: boolean

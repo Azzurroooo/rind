@@ -8,17 +8,16 @@ import {
   inspectorFits,
   isInspectorTab,
   nextInspectorTab,
-  normalizeBackgroundList,
-  normalizeBackgroundOutput,
   normalizeUsageSummary,
-  renderBackgroundHistory,
   renderUsageSummary,
 } from "../src/renderer/inspector-model.ts"
+import { planProgress, renderPlanSection } from "../src/renderer/plan-section.ts"
+import { createConversation, reduceEvent } from "../src/renderer/timeline-model.ts"
 
 test("inspector tabs follow the spec order", () => {
-  assert.deepEqual([...INSPECTOR_TABS], ["context", "tasks", "files", "goal", "usage"])
-  assert.equal(isInspectorTab("usage"), true)
-  assert.equal(isInspectorTab("plan"), false)
+  assert.deepEqual([...INSPECTOR_TABS], ["context", "activity", "files", "usage"])
+  assert.equal(isInspectorTab("activity"), true)
+  assert.equal(isInspectorTab("tasks"), false)
   assert.equal(isInspectorTab(3), false)
 })
 
@@ -37,12 +36,12 @@ test("inspectorFits leaves the conversation at least 420px", () => {
 })
 
 test("nextInspectorTab wraps with arrow keys and jumps with Home and End", () => {
-  assert.equal(nextInspectorTab("context", "ArrowRight"), "tasks")
+  assert.equal(nextInspectorTab("context", "ArrowRight"), "activity")
   assert.equal(nextInspectorTab("usage", "ArrowRight"), "context")
   assert.equal(nextInspectorTab("context", "ArrowLeft"), "usage")
-  assert.equal(nextInspectorTab("goal", "Home"), "context")
-  assert.equal(nextInspectorTab("goal", "End"), "usage")
-  assert.equal(nextInspectorTab("goal", "Enter"), undefined)
+  assert.equal(nextInspectorTab("activity", "Home"), "context")
+  assert.equal(nextInspectorTab("activity", "End"), "usage")
+  assert.equal(nextInspectorTab("activity", "Enter"), undefined)
 })
 
 test("normalizeUsageSummary reads rind/usage/summary and drops malformed rows", () => {
@@ -73,43 +72,28 @@ test("renderUsageSummary shows totals, days, and escaped model names", () => {
   assert.match(renderUsageSummary(normalizeUsageSummary({ days: 7 })), /No token usage recorded in the last 7 days/)
 })
 
-test("normalizeBackgroundList keeps finished tasks newest first", () => {
-  const records = normalizeBackgroundList({
-    tasks: [
-      { bg_id: "bg-1", status: "completed", command: "npm test", elapsed_ms: 4200 },
-      { bg_id: "bg-2", status: "running", command: "sleep 9" },
-      { bg_id: "bg-3", status: "failed", command: "make" },
-      { status: "completed" },
-    ],
-  })
-  assert.deepEqual(records.map((record) => record.bgId), ["bg-3", "bg-1"])
-  assert.equal(records[1].elapsedMs, 4200)
-  assert.deepEqual(normalizeBackgroundList(undefined), [])
-})
-
-test("normalizeBackgroundOutput joins streams and keeps the exit code", () => {
-  assert.deepEqual(normalizeBackgroundOutput({ task: { stdout: "ok", stderr: "warn", exit_code: 2, truncated: true } }), { text: "ok\nwarn", exitCode: 2, truncated: true })
-  assert.deepEqual(normalizeBackgroundOutput({}), { text: "", truncated: false })
-})
-
-test("renderBackgroundHistory expands one record and escapes output", () => {
-  const records = normalizeBackgroundList({ tasks: [{ bg_id: "bg-1", status: "completed", command: "echo <b>" }] })
-  const collapsed = renderBackgroundHistory({ records, expandedId: "", outputs: {}, reading: new Set(), loading: false, error: "" })
-  assert.match(collapsed, /data-history-task="bg-1"/)
-  assert.match(collapsed, /aria-expanded="false"/)
-  assert.match(collapsed, /echo &lt;b&gt;/)
-  const expanded = renderBackgroundHistory({ records, expandedId: "bg-1", outputs: { "bg-1": { text: "<done>", exitCode: 0, truncated: false } }, reading: new Set(), loading: false, error: "" })
-  assert.match(expanded, /aria-expanded="true"/)
-  assert.match(expanded, /&lt;done&gt;/)
-  assert.match(expanded, /exit 0/)
-  assert.match(renderBackgroundHistory({ records: [], expandedId: "", outputs: {}, reading: new Set(), loading: false, error: "" }), /No finished background tasks yet/)
-  assert.match(renderBackgroundHistory({ records: [], expandedId: "", outputs: {}, reading: new Set(), loading: false, error: "boom" }), /role="alert"/)
-})
-
 test("formatDuration uses ms, seconds, and minutes", () => {
   assert.equal(formatDuration(450), "450ms")
   assert.equal(formatDuration(4200), "4s")
   assert.equal(formatDuration(125000), "2m 5s")
+})
+
+test("renderPlanSection shows the active plan and escapes step text", () => {
+  const event = (type, payload) => ({ type, sequence: 1, durability: "durable", sessionId: "s", turnId: "t", event: payload })
+  let state = createConversation()
+  state = reduceEvent(state, event("turn_started", { turn_id: "t" }))
+  state = reduceEvent(state, event("plan_updated", { plan: [{ step: "Run <tests>", status: "completed" }, { step: "Ship it", status: "in_progress" }] }))
+  const html = renderPlanSection(state)
+  assert.match(html, /Plan/)
+  assert.match(html, /1\/2/)
+  assert.match(html, /Run &lt;tests&gt;/)
+  assert.match(html, /plan-completed/)
+  assert.match(html, /plan-in_progress/)
+  assert.equal(planProgress({ steps: [{ status: "completed" }, { status: "cancelled" }], status: "pending" }).status, "completed")
+})
+
+test("renderPlanSection stays empty without a live plan", () => {
+  assert.equal(renderPlanSection(createConversation()), "")
 })
 
 test("contextMeterMarkup draws a 16px ring with the rounded percentage", async () => {

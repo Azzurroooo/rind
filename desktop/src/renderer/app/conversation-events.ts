@@ -1,6 +1,6 @@
 import { canConfirmQuestion, questionAnswer, selectQuestionOption, updateQuestionInput } from "../question-state.ts"
 import { retryLastPrompt, selectSlashCommand, setPrompt } from "./composer.ts"
-import { interrupt, jumpLatest, messageStream, planDock, planDockShell, requiredElement, retry } from "./dom.ts"
+import { interrupt, jumpLatest, messageStream, requiredElement, retry } from "./dom.ts"
 import { answerQuestion, cancelActiveTurn, questionSelectionFor, restartRuntime, runAction } from "./runtime.ts"
 import { openToolFile } from "./files-panel.ts"
 import { chatProject, switchSession } from "./sessions.ts"
@@ -34,14 +34,6 @@ export function bindConversationEvents(): void {
     if (nearBottom) jumpLatest.hidden = true
   })
 
-  planDock.addEventListener("click", (event) => {
-    if (!(event.target as HTMLElement).closest("[data-toggle-plan]")) return
-    state.planDock.collapsed = !state.planDock.collapsed
-    planDockShell.classList.toggle("collapsed", state.planDock.collapsed)
-    const trigger = planDock.querySelector<HTMLButtonElement>("[data-toggle-plan]")
-    trigger?.setAttribute("aria-expanded", String(!state.planDock.collapsed))
-    planDock.querySelector<HTMLElement>(".plan-dock-body")?.setAttribute("aria-hidden", String(state.planDock.collapsed))
-  })
 
   messageStream.addEventListener("click", (event) => {
     const target = event.target as HTMLElement

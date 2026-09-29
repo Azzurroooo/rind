@@ -5,7 +5,7 @@ import { decideTurnEvent } from "../turn-state.ts"
 import { asRecordText } from "./html.ts"
 import { refreshInspector } from "./inspector.ts"
 import { loadGoal } from "./inspector-goal.ts"
-import { renderTaskBadge, renderTasksTab } from "./inspector-tasks.ts"
+import { renderTaskBadge, renderTasksSection } from "./inspector-tasks.ts"
 import { deliverPendingInput } from "./pending-inputs.ts"
 import { activeTurnIdFor, conversationFor, finalAssistantPreview, maybeNotify, runAction, setConversationFor } from "./runtime.ts"
 import { loadSessions, recordRecentSession } from "./sessions.ts"
@@ -38,7 +38,7 @@ export function handleRuntimeEvent(envelope: RuntimeEvent) {
           state.taskMonitor.outputs[task.bg_id] = task
         }
         renderTaskBadge()
-        if (state.inspectorOpen && state.inspectorTab === "tasks") renderTasksTab()
+        if (state.inspectorOpen && state.inspectorTab === "activity") renderTasksSection()
       }
     }
     return

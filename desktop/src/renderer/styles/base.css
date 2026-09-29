@@ -21,7 +21,6 @@
 .remote-qr-row img { flex: none; width: 160px; height: 160px; background: white; border-radius: 8px; }
 .remote-qr-row p { line-height: 1.6; margin: 8px 0 12px; }
 .task-control-actions { display: flex; gap: 6px; margin-top: 8px; }
-.task-monitor-more { justify-self: start; margin: 6px 8px 8px; }
 .goal-help { margin: 8px 0 0; font-size: 12px; color: var(--muted); line-height: 1.6; }
 @media (max-width: 480px) {
   .settings-dialog.remote-dialog { padding: 20px; }

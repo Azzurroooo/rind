@@ -1,18 +1,17 @@
 // Inspector (spec section 2): tab identity, width bounds, and the pure
 // normalizers and renderers for the Usage tab (rind/usage/summary) and the
-// finished-task history in the Tasks tab (rind/background/list + output).
-// The live task monitor and the goal panel keep their own modules.
+// plan checklist in the Activity tab. The task monitor and the goal panel
+// keep their own modules.
 
-import { asRecord, escapeAttribute, escapeHtml } from "./app/html.ts"
+import { asRecord, escapeHtml } from "./app/html.ts"
 
-export const INSPECTOR_TABS = ["context", "tasks", "files", "goal", "usage"] as const
+export const INSPECTOR_TABS = ["context", "activity", "files", "usage"] as const
 export type InspectorTab = typeof INSPECTOR_TABS[number]
 
 export const INSPECTOR_TAB_LABELS: Readonly<Record<InspectorTab, string>> = {
   context: "Context",
-  tasks: "Tasks",
+  activity: "Activity",
   files: "Files",
-  goal: "Goal",
   usage: "Usage",
 }
 
@@ -116,73 +115,6 @@ export function renderUsageSummary(summary: UsageSummary): string {
     ${days.length ? `<h3 class="inspector-section-title">By day</h3><div class="usage-days">${days.join("")}</div>` : ""}
     ${models.length ? `<h3 class="inspector-section-title">By model</h3><ul class="usage-models">${models.join("")}</ul>` : ""}
   `
-}
-
-// ---------- background task history ----------
-
-export type BackgroundRecord = {
-  bgId: string
-  status: string
-  command: string
-  elapsedMs: number
-}
-
-export type BackgroundOutput = {
-  text: string
-  exitCode?: number
-  truncated: boolean
-}
-
-export type BackgroundHistoryView = {
-  records: ReadonlyArray<BackgroundRecord>
-  expandedId: string
-  outputs: Readonly<Record<string, BackgroundOutput>>
-  reading: ReadonlySet<string>
-  loading: boolean
-  error: string
-}
-
-const ACTIVE_BACKGROUND = new Set(["starting", "running", "cancelling"])
-
-/** Finished background tasks, newest first; live ones stay in the task monitor. */
-export function normalizeBackgroundList(value: unknown): BackgroundRecord[] {
-  return rows(asRecord(value).tasks).flatMap((row) => {
-    const bgId = text(row.bg_id)
-    const status = text(row.status) || "unknown"
-    if (!bgId || ACTIVE_BACKGROUND.has(status)) return []
-    return [{ bgId, status, command: text(row.command), elapsedMs: count(row.elapsed_ms) }]
-  }).reverse()
-}
-
-export function normalizeBackgroundOutput(value: unknown): BackgroundOutput {
-  const task = asRecord(asRecord(value).task)
-  const exitCode = typeof task.exit_code === "number" && Number.isFinite(task.exit_code) ? task.exit_code : undefined
-  const output = [task.stdout, task.stderr].filter((item): item is string => typeof item === "string" && item.length > 0).join("\n")
-  return { text: output, truncated: task.truncated === true, ...(exitCode === undefined ? {} : { exitCode }) }
-}
-
-export function renderBackgroundHistory(view: BackgroundHistoryView): string {
-  if (view.error) return `<p class="inspector-empty" role="alert">${escapeHtml(view.error)}</p>`
-  if (!view.records.length) return view.loading ? `<p class="inspector-empty">Loading history…</p>` : `<p class="inspector-empty">No finished background tasks yet.</p>`
-  const items = view.records.map((record) => {
-    const expanded = view.expandedId === record.bgId
-    const output = view.outputs[record.bgId]
-    const body = !expanded ? "" : view.reading.has(record.bgId) && !output
-      ? `<p class="subtle">Loading output…</p>`
-      : `${output?.text ? `<pre><code>${escapeHtml(output.text)}</code></pre>` : `<p class="subtle">No output captured.</p>`}${output?.truncated ? `<span class="task-monitor-truncated">Output truncated.</span>` : ""}`
-    const exit = output?.exitCode === undefined ? "" : ` · exit ${output.exitCode}`
-    return `
-      <li class="task-history-item${expanded ? " open" : ""}">
-        <button type="button" class="task-monitor-trigger" data-history-task="${escapeAttribute(record.bgId)}" aria-expanded="${String(expanded)}">
-          <span class="status-pip ${record.status === "completed" ? "pip-done" : "pip-error"}"></span>
-          <code class="task-monitor-id">${escapeHtml(record.bgId)}</code>
-          <span class="task-monitor-status">${escapeHtml(record.status)}${exit}${record.elapsedMs ? ` · ${formatDuration(record.elapsedMs)}` : ""}</span>
-        </button>
-        ${record.command ? `<code class="task-history-command">${escapeHtml(record.command)}</code>` : ""}
-        ${expanded ? `<div class="task-monitor-output">${body}</div>` : ""}
-      </li>`
-  })
-  return `<ul class="task-history-list">${items.join("")}</ul>`
 }
 
 export function formatDuration(ms: number): string {

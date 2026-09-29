@@ -202,6 +202,10 @@ export type DesktopGoal = {
 export type DesktopBackgroundTask = {
   bg_id: string
   status: string
+  /** True once the agent yielded the call; the process keeps running. */
+  handoff?: boolean
+  command?: string
+  elapsed_ms?: number
   exit_code?: number
   cwd?: string
   stdout?: string

@@ -20,7 +20,7 @@ import {
   reduceEvent,
   relativeTime,
 } from "../src/renderer/timeline-model.ts"
-import { composerRegionMarkup, renderComposer, syncPlanDockSession } from "../src/renderer/composer-region.ts"
+import { composerRegionMarkup, renderComposer } from "../src/renderer/composer-region.ts"
 import { highlightFile } from "../src/renderer/syntax-highlight.ts"
 
 function event(type, data = {}, turnId = "turn-1") {
@@ -380,10 +380,9 @@ test("helper formatting stays compact", () => {
   assert.equal(parseToolResult('{"ok":false,"tool":"bash","error":"failed","error_type":"ExitCode"}').errorType, "ExitCode")
 })
 
-test("composer region keeps plan dock above a persistent input form", () => {
+test("composer region keeps the queued-input dock above a persistent input form", () => {
   const markup = composerRegionMarkup()
-  assert.equal(markup.indexOf('class="composer-region"') < markup.indexOf('id="plan-dock-shell"'), true)
-  assert.equal(markup.indexOf('id="plan-dock-shell"') < markup.indexOf('id="composer"'), true)
+  assert.doesNotMatch(markup, /plan-dock/)
   assert.equal(markup.indexOf('id="pending-input-dock"') < markup.indexOf('id="composer"'), true)
   assert.match(markup, /id="prompt" rows="2"/)
   assert.match(markup, /id="slash-command-menu" class="slash-command-menu" role="listbox"/)
@@ -434,14 +433,6 @@ test("composer exposes slash command work and blocks overlapping input", () => {
   assert.equal(elements.prompt.placeholder, "Running /status...")
   assert.equal(sendLabel.textContent, "Running")
   assert.equal(elements.send.title, "Running /status")
-})
-
-test("plan dock keeps a manual collapse through plan updates but resets for another session", () => {
-  const presentation = { collapsed: true, sessionId: "session-1", dismissedPlanErrors: new Set() }
-  syncPlanDockSession(presentation, "session-1")
-  assert.equal(presentation.collapsed, true)
-  syncPlanDockSession(presentation, "session-2")
-  assert.equal(presentation.collapsed, false)
 })
 
 test("file syntax highlighting escapes unknown files and colors known files", () => {

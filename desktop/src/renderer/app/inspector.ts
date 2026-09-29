@@ -1,15 +1,17 @@
-// Inspector (spec section 2): a dismissible right column with Context, Tasks,
-// Files, Goal, and Usage tabs. Its open state and width persist through the
-// project layout (filesOpen and filePanelWidth keys in the main process).
+// Inspector (spec section 2): a dismissible right column with Context,
+// Activity, Files, and Usage tabs. The Activity tab stacks the live plan,
+// yielded running tasks and the session goal. Open state and width persist
+// through the project layout (filesOpen and filePanelWidth keys).
 
 import { runtimeMethods } from "../../preload/types.ts"
 import { contextDisplayFrom, renderContextDisplay } from "../context-report.ts"
 import { clampInspectorWidth, INSPECTOR_CLOSE_WIDTH, INSPECTOR_TABS, INSPECTOR_WIDTH, inspectorFits, isInspectorTab, nextInspectorTab, normalizeUsageSummary, renderUsageSummary, type InspectorTab } from "../inspector-model.ts"
-import { appRoot, inspector, inspectorContextBody, inspectorResizeHandle, inspectorToggle, inspectorUsageBody, requiredElement } from "./dom.ts"
+import { renderPlanSection } from "../plan-section.ts"
+import { appRoot, activityPlan, inspector, inspectorContextBody, inspectorResizeHandle, inspectorToggle, inspectorUsageBody, requiredElement } from "./dom.ts"
 import { loadDirectory, renderFiles } from "./files-panel.ts"
 import { escapeHtml } from "./html.ts"
 import { focusGoalInput, loadGoal, renderGoalTab } from "./inspector-goal.ts"
-import { loadBackgroundHistory, pollTasks, renderTaskBadge, renderTasksTab, syncTaskPolling } from "./inspector-tasks.ts"
+import { pollTasks, renderTaskBadge, renderTasksSection, syncTaskPolling } from "./inspector-tasks.ts"
 import { request, requestForSession, runAction } from "./runtime.ts"
 import { applyOverview, currentRuntimeSnapshot, viewedProject } from "./sessions.ts"
 import { render } from "./shell.ts"
@@ -48,9 +50,8 @@ export function renderInspector() {
   if (!shown) return
   const renderers: Record<InspectorTab, () => void> = {
     context: () => { inspectorContextBody.innerHTML = renderLoad(state.inspectorContext, "Loading context…", (display) => renderContextDisplay(display), contextEmptyText()) },
-    tasks: renderTasksTab,
+    activity: renderActivityTab,
     files: renderFiles,
-    goal: renderGoalTab,
     usage: () => { inspectorUsageBody.innerHTML = renderLoad(state.inspectorUsage, "Loading usage…", renderUsageSummary, "Usage appears once the runtime is ready.") },
   }
   renderers[state.inspectorTab]()
@@ -107,10 +108,17 @@ export function resetInspectorData() {
   state.inspectorContext = emptyLoad()
 }
 
+/** The Activity column: plan section, yielded tasks, then the goal panel. */
+function renderActivityTab() {
+  activityPlan.innerHTML = renderPlanSection(state.conversation)
+  renderTasksSection()
+  renderGoalTab()
+}
+
 async function loadInspectorTab(tab: InspectorTab) {
   if (tab === "context") await loadInspectorContext()
   else if (tab === "usage") await loadInspectorUsage()
-  else if (tab === "goal") await loadGoal()
+  else if (tab === "activity") await loadGoal()
   else if (tab === "files" && viewedProject()?.available) await loadDirectory("")
 }
 
@@ -156,10 +164,10 @@ export function selectInspectorTab(tab: InspectorTab, focus = false) {
   runAction(() => loadInspectorTab(tab), state.viewedSessionId)
 }
 
-/** Opens the Goal tab with the objective input focused (/goal, #toggle-goal). */
+/** Opens the Activity tab with the objective input focused (/goal, #toggle-goal). */
 export async function openGoalTab() {
   state.goal = { ...state.goal, setOpen: state.goal.setOpen || !state.goal.value }
-  await openInspector("goal")
+  await openInspector("activity")
   focusGoalInput()
 }
 
@@ -214,7 +222,7 @@ export function bindInspectorEvents(): void {
     const refresh = (event.target as HTMLElement).closest<HTMLElement>("[data-inspector-refresh]")?.dataset.inspectorRefresh
     if (refresh === "context") runAction(loadInspectorContext, state.viewedSessionId)
     else if (refresh === "usage") runAction(loadInspectorUsage)
-    else if (refresh === "tasks") runAction(() => Promise.all([pollTasks(), loadBackgroundHistory()]).then(() => undefined), state.viewedSessionId)
+    else if (refresh === "tasks") runAction(() => pollTasks(), state.viewedSessionId)
   })
   inspector.addEventListener("keydown", (event) => {
     if (event.key !== "Escape" || event.defaultPrevented) return
@@ -226,6 +234,6 @@ export function bindInspectorEvents(): void {
   })
   requiredElement("close-inspector").addEventListener("click", () => runAction(closeInspector))
   inspectorToggle.addEventListener("click", () => runAction(() => toggleInspector()))
-  document.getElementById("toggle-tasks")?.addEventListener("click", () => runAction(() => toggleInspector("tasks")))
+  document.getElementById("toggle-tasks")?.addEventListener("click", () => runAction(() => toggleInspector("activity")))
   bindResize()
 }

@@ -1,5 +1,4 @@
 import { type RuntimeMethod, runtimeMethods, sessionScopedMethods, turnScopedMethods } from "../../preload/types.ts"
-import { dismissPlanError } from "../composer-region.ts"
 import { sameProjectPath as samePath } from "../project-selection.ts"
 import { createQuestionSelection, type QuestionSelection } from "../question-state.ts"
 import { mergeSlashCatalog } from "../desktop-slash.ts"
@@ -60,18 +59,13 @@ export function clearRuntimeTurnState() {
   )
 }
 
-export function resetConversationPresentation(resetPlanDock = true) {
+export function resetConversationPresentation() {
   state.expandedTools = new Set()
   state.revealedTools = new Set()
   state.segmentFolds = new Map()
   state.toolBodiesShown = new Set()
   toolOpenRequests.clear()
   vars.toolAnimationUntil = 0
-  if (resetPlanDock) {
-    state.planDock.collapsed = false
-    state.planDock.sessionId = ""
-  }
-  dismissPlanError(state.conversation, state.viewedSessionId, state.planDock)
   vars.lastRenderedEntries = 0
 }
 
@@ -236,7 +230,7 @@ export async function loadReplayNow(sessionId: string) {
     }
     const replayEffort = asRecordText(result.reasoning_effort)
     if (replayEffort) state.sessionEfforts[sessionId] = replayEffort
-    resetConversationPresentation(false)
+    resetConversationPresentation()
   }
 }
 

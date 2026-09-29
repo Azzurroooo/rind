@@ -1,11 +1,11 @@
 import { type DesktopTheme, type RuntimeSnapshot } from "../../preload/types.ts"
 import { type IconNode } from "lucide"
 import { Moon, renderIcon, Sun, SunMoon } from "../icons.ts"
-import { renderComposer, renderPlanDock, syncPendingInputDock } from "../composer-region.ts"
+import { renderComposer, syncPendingInputDock } from "../composer-region.ts"
 import { renderAttachments } from "./attachments-ui.ts"
 import { renderEffortMenu, renderModels, renderProjectControl } from "./composer-menus.ts"
 import { renderSlashCommandMenu } from "./composer.ts"
-import { appRoot, attachButton, compactContext, composerMenu, composerMenuTrigger, connection, connectionText, contextMeter, interrupt, newSessionButton, notice, noticeText, pendingInputDock, planDock, planDockShell, prompt, retry, send, shortcutsDialog, shortcutTable, sidebar, sidebarToggle, slashCommandMenu } from "./dom.ts"
+import { appRoot, attachButton, compactContext, composerMenu, composerMenuTrigger, connection, connectionText, contextMeter, interrupt, newSessionButton, notice, noticeText, pendingInputDock, prompt, retry, send, shortcutsDialog, shortcutTable, sidebar, sidebarToggle, slashCommandMenu } from "./dom.ts"
 import { escapeHtml } from "./html.ts"
 import { renderInspector } from "./inspector.ts"
 import { renderPalette } from "./palette-ui.ts"
@@ -46,12 +46,6 @@ export function render() {
   renderEffortMenu()
   renderInspector()
   renderPalette()
-  renderPlanDock(
-    { shell: planDockShell, dock: planDock },
-    state.conversation,
-    state.viewedSessionId,
-    state.planDock,
-  )
   syncPendingInputDock(
     pendingInputDock,
     state.pendingInputs[state.viewedSessionId] || [],

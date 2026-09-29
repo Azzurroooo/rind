@@ -5,35 +5,38 @@ import {
   createTaskMonitorState,
   mergeTasks,
   normalizeTask,
+  refreshTasks,
+  renderTaskMonitor,
   runningTaskCount,
   taskStatusClass,
-  refreshTaskPages,
   readTaskOutput,
 } from "../src/renderer/task-monitor.ts"
 
-test("mergeTasks adds listed tasks and drops vanished running tasks", () => {
+test("mergeTasks keeps only yielded tasks that are still running", () => {
   const current = [
-    { bg_id: "bg-1", status: "running" },
-    { bg_id: "bg-gone", status: "running" },
+    { bg_id: "bg-1", status: "running", handoff: true },
+    { bg_id: "bg-gone", status: "running", handoff: true },
   ]
   const listed = [
-    { bg_id: "bg-1", status: "running", stdout: "tick" },
-    { bg_id: "bg-2", status: "completed", exit_code: 0 },
+    { bg_id: "bg-1", status: "running", handoff: true, stdout: "tick" },
+    { bg_id: "bg-2", status: "running", handoff: false },
+    { bg_id: "bg-3", status: "completed", handoff: true, exit_code: 0 },
+    { bg_id: "bg-4", status: "running", handoff: true, command: "npm test" },
   ]
   const merged = mergeTasks(current, listed)
-  assert.deepEqual(merged.map((task) => task.bg_id), ["bg-1", "bg-2"])
+  assert.deepEqual(merged.map((task) => task.bg_id), ["bg-1", "bg-4"])
   assert.equal(merged[0].stdout, "tick")
-  assert.equal(runningTaskCount(merged), 1)
+  assert.equal(runningTaskCount(merged), 2)
 })
 
-test("mergeTasks keeps settled tasks that left the listing", () => {
-  const current = [{ bg_id: "bg-9", status: "completed", exit_code: 3 }]
-  const merged = mergeTasks(current, [])
-  assert.deepEqual(merged.map((task) => task.bg_id), ["bg-9"])
+test("mergeTasks keeps the fuller command across polls", () => {
+  const current = [{ bg_id: "bg-1", status: "running", handoff: true, command: "npm run dev --watch" }]
+  const merged = mergeTasks(current, [{ task_id: "bg-1", status: "running", handoff: true, command: "npm run d…" }])
+  assert.equal(merged[0].command, "npm run dev --watch")
 })
 
 test("mergeTasks ignores malformed rows", () => {
-  assert.deepEqual(mergeTasks([], [{}, null, { status: "running" }, "junk"]), [])
+  assert.deepEqual(mergeTasks([], [{}, null, { status: "running", handoff: true }, "junk"]), [])
 })
 
 test("normalizeTask coerces kernel task records", () => {
@@ -48,20 +51,42 @@ test("normalizeTask coerces kernel task records", () => {
 
 test("task status styling maps to pip classes", () => {
   assert.equal(taskStatusClass({ bg_id: "a", status: "running" }), "pip-running")
-  assert.equal(taskStatusClass({ bg_id: "a", status: "error" }), "pip-error")
-  assert.equal(taskStatusClass({ bg_id: "a", status: "completed" }), "pip-done")
+  assert.equal(taskStatusClass({ bg_id: "a", status: "cancelling" }), "pip-paused")
   assert.equal(runningTaskCount(createTaskMonitorState().tasks), 0)
 })
 
-test("task polling preserves loaded pages and output cursor", async () => {
+test("refreshTasks loads one page and drops the expanded row when it finishes", async () => {
   const state = createTaskMonitorState()
-  const list = async (token) => token ? { tasks: [{ task_id: "b", status: "running" }] }
-    : { tasks: [{ task_id: "a", status: "running" }], next_page_token: "page2" }
-  await refreshTaskPages(state, list)
-  await refreshTaskPages(state, list, true)
-  await refreshTaskPages(state, list)
-  assert.deepEqual(state.tasks.map((task) => task.bg_id), ["a", "b"])
-  assert.equal(state.pagesLoaded, 2)
+  state.expandedId = "bg-done"
+  await refreshTasks(state, async () => ({ tasks: [
+    { task_id: "bg-run", status: "running", handoff: true, command: "npm test" },
+    { task_id: "bg-done", status: "completed", handoff: true },
+  ] }))
+  assert.deepEqual(state.tasks.map((task) => task.bg_id), ["bg-run"])
+  assert.equal(state.expandedId, "")
+  assert.equal(state.error, "")
+  await refreshTasks(state, async () => { throw new Error("offline") })
+  assert.equal(state.error, "offline")
+})
+
+test("renderTaskMonitor shows commands and the running count", () => {
+  const state = createTaskMonitorState()
+  state.tasks = [{ bg_id: "bg-1", status: "running", handoff: true, command: "npm test", elapsed_ms: 4200 }]
+  state.expandedId = "bg-1"
+  const dock = { innerHTML: "" }
+  renderTaskMonitor(dock, state)
+  assert.match(dock.innerHTML, /npm test/)
+  assert.match(dock.innerHTML, /1 running/)
+  assert.match(dock.innerHTML, /4s/)
+  assert.match(dock.innerHTML, /Stop task/)
+  state.tasks = []
+  state.expandedId = ""
+  renderTaskMonitor(dock, state)
+  assert.match(dock.innerHTML, /No background commands are running/)
+})
+
+test("task polling reads the remembered output cursor", async () => {
+  const state = createTaskMonitorState()
   const seen = []
   const read = async (id, cursor) => {
     seen.push(cursor)

@@ -2,14 +2,10 @@ import { mergeSlashCatalog } from "../desktop-slash.ts"
 import { INSPECTOR_WIDTH } from "../inspector-model.ts"
 import { createTaskMonitorState } from "../task-monitor.ts"
 import { createConversation } from "../timeline-model.ts"
-import { type AppState, type BackgroundHistoryState, type InspectorLoad } from "./types.ts"
+import { type AppState, type InspectorLoad } from "./types.ts"
 
 export function emptyLoad<T>(): InspectorLoad<T> {
   return { sessionId: "", loading: false, error: "" }
-}
-
-export function createBackgroundHistory(): BackgroundHistoryState {
-  return { records: [], expandedId: "", outputs: {}, reading: new Set(), loading: false, error: "" }
 }
 
 
@@ -45,7 +41,6 @@ export const state: AppState = {
   inspectorTab: "context",
   inspectorContext: emptyLoad(),
   inspectorUsage: emptyLoad(),
-  backgroundHistory: createBackgroundHistory(),
   expandedProjects: new Set(),
   projectMenuPath: "",
   expandedDirectories: new Set([""]),
@@ -57,7 +52,6 @@ export const state: AppState = {
   revealedTools: new Set(),
   segmentFolds: new Map(),
   toolBodiesShown: new Set(),
-  planDock: { collapsed: false, sessionId: "", dismissedPlanErrors: new Set() },
   composerMenuOpen: false,
   compacting: false,
   slashCommandPending: false,
