@@ -1,6 +1,9 @@
 import { requiredElement, saveSettingsButton, settingsApiKey, settingsBaseUrl, settingsDialog, settingsForm, settingsKeyStatus, settingsModel, settingsNotifications, settingsReasoning } from "./dom.ts"
 import { bindProviderEvents, loadProviders, renderProviders } from "./providers-ui.ts"
-import { runAction } from "./runtime.ts"
+import { modelSelectionTargetForState } from "./composer-menus.ts"
+import { normalizeModelList, stringModelOptions } from "../composer-select.ts"
+import { requestForSession, runAction } from "./runtime.ts"
+import { runtimeMethods } from "../../preload/types.ts"
 import { render } from "./shell.ts"
 import { state } from "./state.ts"
 
@@ -42,8 +45,23 @@ export function renderSettings() {
   renderSettingsTabs()
 }
 
+// The runtime target reads model/list (provider-aware, all signed-in
+// providers); the settings target falls back to the main-process catalog
+// fetch of the configured OpenAI-compatible endpoint.
 export async function loadAvailableModels() {
-  state.models = await window.api.models.list(state.chatProjectPath || state.fallbackProjectPath)
+  if (modelSelectionTargetForState() === "runtime" && state.viewedSessionId) {
+    const sessionId = state.viewedSessionId
+    const listing = normalizeModelList(await requestForSession(runtimeMethods.modelList, sessionId))
+    if (sessionId !== state.viewedSessionId) return
+    state.models = listing.models
+    if (listing.currentProviderId) state.modelProvider = listing.currentProviderId
+    if (listing.currentModelId && listing.currentModelId !== state.model) {
+      state.model = listing.currentModelId
+      state.sessionModels = { ...state.sessionModels, [sessionId]: listing.currentModelId }
+    }
+    return
+  }
+  state.models = stringModelOptions(await window.api.models.list(state.chatProjectPath || state.fallbackProjectPath))
 }
 
 export async function loadSettings() {

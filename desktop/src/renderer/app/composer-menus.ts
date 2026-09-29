@@ -1,5 +1,5 @@
 import { runtimeMethods } from "../../preload/types.ts"
-import { modelChoices, modelSelectionTarget } from "../composer-select.ts"
+import { findModelOption, formatContextWindow, groupModelOptions, modelChoices, modelSelectionTarget, normalizeModelList, stringModelOptions, type ModelOption } from "../composer-select.ts"
 import { sameProjectPath as samePath, workingDirectorySelectionEnabled } from "../project-selection.ts"
 import { closeSlashCommandMenu } from "./composer.ts"
 import { effortMenu, effortMenuLabel, effortMenuTrigger, modelMenu, modelMenuLabel, modelMenuTrigger, projectMenu, projectMenuLabel, projectMenuTrigger } from "./dom.ts"
@@ -37,9 +37,12 @@ export function renderProjectControl() {
   }).join("")
 }
 
+// Provider-grouped listbox rows (after Jan's provider groups and LobeHub's
+// model panel). The runtime target groups by provider and shows the context
+// window; the settings target stays a flat id list.
 export function renderModels() {
   const activeModel = displayedModel()
-  const choices = modelChoices(state.models, activeModel)
+  const choices = modelChoices(state.models, activeModel, state.modelProvider)
   const canOpen = canOpenModelMenu()
   if (!canOpen) closeModelMenu()
   modelMenuLabel.textContent = activeModel || (state.modelMenuLoading ? "Loading models..." : "Model")
@@ -57,13 +60,26 @@ export function renderModels() {
     return
   }
   if (!choices.length) {
-    modelMenu.innerHTML = `<p class="composer-select-empty">No models available</p>`
+    modelMenu.innerHTML = `<p class="composer-select-empty">No models available. Sign in to a provider in Settings.</p>`
     return
   }
-  modelMenu.innerHTML = choices.map((model) => {
-    const selected = model === activeModel
-    return `<button type="button" class="composer-select-option composer-model-option${selected ? " selected" : ""}" role="option" aria-selected="${String(selected)}" data-model-choice="${escapeAttribute(model)}"${state.modelChanging ? " disabled" : ""}><span class="composer-select-option-main">${escapeHtml(model)}</span></button>`
-  }).join("")
+  const grouped = modelSelectionTargetForState() === "runtime"
+  const option = (model: ModelOption) => {
+    const selected = model.id === activeModel
+      && ((model.providerId || "") === (state.modelProvider || "") || !state.modelProvider || !model.providerId)
+    const context = grouped ? formatContextWindow(model.contextWindow) : ""
+    return `<button type="button" class="composer-select-option composer-model-option${selected ? " selected" : ""}" role="option" aria-selected="${String(selected)}" data-model-choice="${escapeAttribute(model.id)}" data-model-provider="${escapeAttribute(model.providerId)}"${state.modelChanging ? " disabled" : ""}><span class="composer-select-option-main">${escapeHtml(model.id)}</span>${context ? `<span class="composer-select-option-detail">${escapeHtml(context)}</span>` : ""}</button>`
+  }
+  if (!grouped) {
+    modelMenu.innerHTML = choices.map(option).join("")
+    return
+  }
+  modelMenu.innerHTML = groupModelOptions(choices, state.providerNames).map((group) => `
+    <div class="composer-select-group" role="group" aria-label="${escapeAttribute(group.name)}">
+      <div class="composer-select-group-title">${escapeHtml(group.name)}<span class="composer-select-group-count">${group.models.length}</span></div>
+      ${group.models.map(option).join("")}
+    </div>
+  `).join("")
 }
 
 export function displayedModel() {
@@ -127,8 +143,13 @@ export function isCurrentModelMenuRequest(requestId: number) {
   return requestId === vars.modelMenuRequestId && state.modelMenuOpen
 }
 
-export async function selectModel(model: string) {
-  if (!model || model === displayedModel() || state.modelChanging) {
+// Accepts the menu's ModelOption or a plain model name, which resolves
+// against the loaded options so provider_id rides along.
+export async function selectModel(selection: ModelOption | string) {
+  const option = typeof selection === "string" ? findModelOption(state.models, selection) : selection
+  const model = option ? option.id : String(selection || "")
+  const providerId = option?.providerId || ""
+  if (!model || (model === displayedModel() && (!providerId || providerId === state.modelProvider)) || state.modelChanging) {
     closeModelMenu()
     render()
     return
@@ -140,15 +161,20 @@ export async function selectModel(model: string) {
   render()
   try {
     if (target === "runtime") {
-      const result = asRecord(await requestForSession(runtimeMethods.modelSet, sessionId, { model }))
+      const result = asRecord(await requestForSession(runtimeMethods.modelSet, sessionId, {
+        model_id: model,
+        ...(providerId ? { provider_id: providerId } : {}),
+      }))
       if (state.viewedSessionId === sessionId) {
-        state.model = typeof result.model === "string" && result.model ? result.model : model
+        state.model = asRecordText(result.model) || model
+        state.modelProvider = asRecordText(result.provider_id) || providerId
+        state.sessionModels = { ...state.sessionModels, [sessionId]: state.model }
       }
     } else {
       state.settings = await window.api.settings.save({ model })
       if (!state.viewedSessionId) state.model = model
     }
-    state.models = modelChoices(state.models, displayedModel())
+    state.models = modelChoices(state.models, displayedModel(), state.modelProvider)
     closeModelMenu()
   } finally {
     state.modelChanging = false

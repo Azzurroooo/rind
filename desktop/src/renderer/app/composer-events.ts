@@ -132,8 +132,8 @@ export function bindComposerEvents(): void {
   modelMenuTrigger.addEventListener("click", () => runAction(toggleModelMenu))
 
   modelMenu.addEventListener("click", (event) => {
-    const model = (event.target as HTMLElement).closest<HTMLButtonElement>("[data-model-choice]")?.dataset.modelChoice
-    if (model) runAction(() => selectModel(model))
+    const option = (event.target as HTMLElement).closest<HTMLButtonElement>("[data-model-choice]")
+    if (option) runAction(() => selectModel({ id: option.dataset.modelChoice || "", providerId: option.dataset.modelProvider || "" }))
   })
 
   effortMenuTrigger.addEventListener("click", () => runAction(toggleEffortMenu))

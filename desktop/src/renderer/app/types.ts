@@ -1,5 +1,6 @@
 import { type DesktopFileListing, type DesktopFilePreview, type DesktopGoal, type DesktopProject, type DesktopRecentSession, type DesktopSessionSummary, type DesktopSettings, type DesktopTheme, type RuntimeSnapshot } from "../../preload/types.ts"
 import { type PendingInput } from "../composer-region.ts"
+import { type ModelOption } from "../composer-select.ts"
 import { type QuestionSelection } from "../question-state.ts"
 import { type ContextDisplay } from "../context-report.ts"
 import { type InspectorTab, type UsageSummary } from "../inspector-model.ts"
@@ -52,7 +53,10 @@ export type AppState = {
   sessionEfforts: Record<string, string>
   model: string
   effort: string
-  models: string[]
+  modelProvider: string
+  models: ModelOption[]
+  /** Provider display names from rind/auth/list, for the model menu headers. */
+  providerNames: Record<string, string>
   projects: DesktopProject[]
   recentSessions: DesktopRecentSession[]
   fallbackProjectPath: string

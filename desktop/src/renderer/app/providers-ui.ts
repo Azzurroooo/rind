@@ -81,6 +81,7 @@ export async function loadProviders() {
   setView({ loading: true, error: "" })
   try {
     const providers = (await window.api.auth.list()).map(normalizeProvider).filter((item): item is DesktopAuthProvider => item !== undefined)
+    state.providerNames = Object.fromEntries(providers.map((provider) => [provider.id, provider.name]))
     setView({ providers, loading: false })
   } catch (error) {
     setView({ loading: false, error: errorText(error) })

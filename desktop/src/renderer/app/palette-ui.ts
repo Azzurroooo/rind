@@ -57,9 +57,9 @@ export function paletteCommands(): PaletteCommand[] {
   if (canOpenModelMenu()) {
     for (const model of state.models.slice(0, 15)) {
       commands.push({
-        id: `model-${model}`,
-        title: `Model: ${model}`,
-        keywords: `model ${model}`,
+        id: `model-${model.providerId}-${model.id}`,
+        title: `Model: ${model.id}`,
+        keywords: `model ${model.id} ${model.providerId}`,
         run: () => runAction(() => selectModel(model)),
       })
     }

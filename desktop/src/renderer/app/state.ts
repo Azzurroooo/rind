@@ -1,5 +1,6 @@
 import { mergeSlashCatalog } from "../desktop-slash.ts"
 import { INSPECTOR_WIDTH } from "../inspector-model.ts"
+import { type ModelOption } from "../composer-select.ts"
 import { createTaskMonitorState } from "../task-monitor.ts"
 import { createConversation } from "../timeline-model.ts"
 import { type AppState, type InspectorLoad } from "./types.ts"
@@ -27,7 +28,9 @@ export const state: AppState = {
   sessionEfforts: {},
   model: "",
   effort: "",
-  models: [],
+  modelProvider: "",
+  models: [] as ModelOption[],
+  providerNames: {} as Record<string, string>,
   projects: [],
   recentSessions: [],
   fallbackProjectPath: "",
