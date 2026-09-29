@@ -13,7 +13,7 @@ const config: Configuration = {
     buildResources: "resources",
   },
   files: ["out/**/*"],
-  extraResources: [{ from: "resources/runtime", to: "runtime" }],
+  extraResources: [{ from: "resources/runtime", to: "runtime" }, { from: "../frontend-web/dist", to: "web" }],
   win: {
     target: ["nsis"],
     icon: "resources/icon.png",

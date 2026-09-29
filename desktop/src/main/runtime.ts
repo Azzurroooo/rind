@@ -141,7 +141,9 @@ export function startRuntime(workspace: string) {
         PYTHONPATH: process.env.PYTHONPATH ? `${repoRoot}${delimiter}${process.env.PYTHONPATH}` : repoRoot,
         PYTHONUTF8: "1",
       }
-    : process.env
+    : launch.command === process.execPath && /\.(?:c|m)?js$/i.test(process.env.RIND_RUNTIME_PATH || "")
+      ? { ...process.env, ELECTRON_RUN_AS_NODE: "1" }
+      : process.env
   const current = spawn(
     launch.command,
     [...launch.args, "app-server", "--stdio", "--cwd", workspace],

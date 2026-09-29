@@ -12,6 +12,9 @@ import { DesktopProjectStore, samePath } from "./projects"
 import { loadSettingsForWorkspace } from "./runtime-settings"
 import { readRindVersion } from "./version"
 import { wrapRuntimeIpcError } from "../shared/ipc-error"
+import { DesktopGateway } from "./gateway/server"
+import { workspaceFileRequest } from "./gateway/files"
+import type { GatewayOptions } from "../preload/types"
 import {
   getRuntimeSnapshot,
   initializeRuntime,
@@ -27,8 +30,8 @@ const root = dirname(fileURLToPath(import.meta.url))
 const allowedRuntimeMethods = new Set<RuntimeMethod>(Object.values(runtimeMethods) as RuntimeMethod[])
 const themes: DesktopTheme[] = ["system", "dark", "light"]
 const themeSurfaces = {
-  dark: { background: "#1a1a1f", overlay: { color: "#1a1a1f", symbolColor: "#c9c9cf" } },
-  light: { background: "#f4f4f6", overlay: { color: "#f4f4f6", symbolColor: "#3a3a42" } },
+  dark: { background: "#171719", overlay: { color: "#171719", symbolColor: "#c9c9cf" } },
+  light: { background: "#ffffff", overlay: { color: "#ffffff", symbolColor: "#333339" } },
 } as const
 
 function isRuntimeMethod(method: string): method is RuntimeMethod {
@@ -40,6 +43,20 @@ let quitting = false
 let runtimeShutdownComplete = false
 let windowFocused = false
 const maxSettingLength = 4096
+let remoteGateway: DesktopGateway | undefined
+
+function gateway() {
+  remoteGateway ||= new DesktopGateway({
+    initialize: initializeRuntime,
+    request: (method, params) => {
+      if (!isRuntimeMethod(method)) throw new Error("Unsupported remote method.")
+      return requestRuntime(method, params)
+    },
+    subscribe: subscribeRuntimeEvents,
+  }, app.isPackaged ? join(process.resourcesPath, "web") : join(app.getAppPath(), "../frontend-web/dist"),
+  (state) => mainWindow?.webContents.send("gateway-changed", state))
+  return remoteGateway
+}
 
 function configPath() {
   return join(app.getPath("userData"), "desktop-settings.json")
@@ -167,6 +184,10 @@ async function requireProject(path: unknown) {
 }
 
 function registerIpc() {
+  ipcMain.handle("gateway-get", () => gateway().state())
+  ipcMain.handle("gateway-start", (_event, options: GatewayOptions) => gateway().start(options))
+  ipcMain.handle("gateway-stop", async () => { await gateway().stop(); return gateway().state() })
+  ipcMain.handle("gateway-rotate", () => gateway().rotate())
   ipcMain.handle("runtime-start", async (_event, workspace: unknown) => {
     const projectPath = await requireProject(workspace)
     return startRuntime(projectPath)
@@ -230,6 +251,7 @@ function registerIpc() {
   })
   ipcMain.handle("project-files-list", async (_event, projectPath: unknown, path: unknown) => listProjectFiles(await requireProject(projectPath), path))
   ipcMain.handle("project-files-preview", async (_event, projectPath: unknown, path: unknown) => previewProjectFile(await requireProject(projectPath), path))
+  ipcMain.handle("project-files-upload", async (_event, projectPath: unknown, path: unknown, contentBase64: unknown) => workspaceFileRequest(await requireProject(projectPath), "file/write", { path, content_base64: contentBase64 }))
   ipcMain.handle("prefs-update", async (_event, patch: unknown) => {
     const input = asObject(patch)
     if (!input) throw new Error("Preferences must be an object.")
@@ -304,6 +326,7 @@ function createMainWindow() {
 }
 
 function notifyRuntime(snapshot: RuntimeSnapshot) {
+  if (["stopping", "stopped", "error"].includes(snapshot.status)) void remoteGateway?.stop()
   mainWindow?.webContents.send("runtime-status", snapshot)
 }
 
@@ -377,7 +400,7 @@ if (!hasLock) {
     event.preventDefault()
     if (quitting) return
     quitting = true
-    void shutdownRuntime().finally(() => {
+    void (async () => { await remoteGateway?.stop(); await shutdownRuntime() })().finally(() => {
       runtimeShutdownComplete = true
       app.quit()
     })

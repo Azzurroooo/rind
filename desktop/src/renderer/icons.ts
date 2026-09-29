@@ -8,4 +8,4 @@ export function renderIcon(icon: IconNode) {
   }).outerHTML
 }
 
-export { PanelLeft, PanelRight, Settings } from "lucide"
+export { PanelLeft, PanelRight, Settings, MonitorSmartphone, Download, GitBranch, Search } from "lucide"

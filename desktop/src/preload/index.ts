@@ -6,11 +6,22 @@ import { runtimeMethods, type DesktopApi, type DesktopNotificationPayload, type 
 // The main process returns worker errors as a wrapped envelope (never as a
 // rejected ipcMain.handle) — unwrap here so renderer call sites keep their
 // try/catch semantics with Error.name carrying the worker error type.
-function runtimeRequest(method: string, params: Record<string, unknown> = {}) {
-  return unwrapRuntimeIpcResult(ipcRenderer.invoke("runtime-request", method, params))
+async function runtimeRequest(method: string, params: Record<string, unknown> = {}) {
+  return unwrapRuntimeIpcResult(await ipcRenderer.invoke("runtime-request", method, params))
 }
 
 const api: DesktopApi = {
+  gateway: {
+    get: () => ipcRenderer.invoke("gateway-get"),
+    start: (options) => ipcRenderer.invoke("gateway-start", options),
+    stop: () => ipcRenderer.invoke("gateway-stop"),
+    rotate: () => ipcRenderer.invoke("gateway-rotate"),
+    subscribe: (listener) => {
+      const handler = (_event: Electron.IpcRendererEvent, state: Parameters<typeof listener>[0]) => listener(state)
+      ipcRenderer.on("gateway-changed", handler)
+      return () => ipcRenderer.removeListener("gateway-changed", handler)
+    },
+  },
   runtime: {
     start: (workspace) => ipcRenderer.invoke("runtime-start", workspace),
     initialize: () => ipcRenderer.invoke("runtime-initialize"),
@@ -41,7 +52,7 @@ const api: DesktopApi = {
   workspaceFiles: {
     list: (path = "") => runtimeRequest(runtimeMethods.fileList, { path }),
     read: (path) => runtimeRequest(runtimeMethods.fileRead, { path }),
-    write: (path, contentBase64) => runtimeRequest(runtimeMethods.fileWrite, { path, content_base64: contentBase64 }),
+    write: (projectPath, path, contentBase64) => ipcRenderer.invoke("project-files-upload", projectPath, path, contentBase64),
   },
   background: {
     list: (sessionId) => runtimeRequest(runtimeMethods.backgroundList, { session_id: sessionId }),

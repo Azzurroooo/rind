@@ -1,7 +1,9 @@
 import "./style.css"
 import brandMarkUrl from "./assets/brand-mark.svg"
 import workingMarkUrl from "./assets/working-mark.svg"
-import { PanelLeft, PanelRight, Settings, renderIcon } from "./icons"
+import { PanelLeft, PanelRight, Settings, MonitorSmartphone, Download, GitBranch, Search, renderIcon } from "./icons"
+import { bindRemoteAccess, remoteAccessMarkup } from "./remote-access"
+import { replayMarkdown, restoreFailedDraft } from "./session-actions"
 import { decideTurnEvent, isTurnNotActive } from "./turn-state"
 
 import {
@@ -90,6 +92,8 @@ import {
   createTaskMonitorState,
   mergeTasks,
   normalizeTask,
+  refreshTaskPages,
+  readTaskOutput,
   renderTaskMonitor,
   runningTaskCount,
   type TaskMonitorState,
@@ -271,7 +275,8 @@ appRoot.innerHTML = `
       <div class="topbar-actions">
         <span class="app-version" aria-label="Rind version">v${escapeHtml(appVersion)}</span>
         <button id="toggle-tasks" type="button" class="ghost-button" title="Background tasks" aria-label="Toggle background task monitor" aria-expanded="false">Tasks</button>
-        <button id="open-palette" type="button" class="ghost-button" title="Command palette (Ctrl+K)" aria-label="Open command palette">Ctrl+K</button>
+        <button id="open-palette" type="button" class="ghost-button" title="Command palette (Ctrl+K)" aria-label="Open command palette">${renderIcon(Search)}</button>
+        <button id="open-remote" type="button" class="ghost-button" title="Remote access" aria-label="Remote access">${renderIcon(MonitorSmartphone)}</button>
         <button id="toggle-theme" type="button" class="ghost-button" title="Switch theme" aria-label="Switch theme">Theme</button>
         <button id="toggle-sidebar" type="button" class="ghost-button" title="Toggle projects sidebar" aria-label="Toggle projects sidebar" aria-expanded="true">${renderIcon(PanelLeft)}</button>
         <button id="toggle-files" type="button" class="ghost-button" title="Browse active project files" aria-label="Browse active project files" aria-expanded="false">${renderIcon(PanelRight)}</button>
@@ -298,7 +303,7 @@ appRoot.innerHTML = `
         </div>
       </aside>
       <section class="conversation">
-        <div class="conversation-head"><div class="conversation-title"><strong id="session-title">New session</strong><span id="session-id" class="subtle"></span></div></div>
+        <div class="conversation-head"><div class="conversation-title"><strong id="session-title">New conversation</strong><span id="session-id" class="subtle"></span></div><div class="session-actions"><button id="export-session" class="ghost-button" title="Export conversation" aria-label="Export conversation">${renderIcon(Download)}</button><button id="fork-session" class="ghost-button" title="Fork conversation" aria-label="Fork conversation">${renderIcon(GitBranch)}</button></div></div>
         <div id="notice" class="notice" role="status" hidden><span id="notice-text"></span><button id="retry" type="button" class="ghost-button" hidden>Retry</button></div>
         <div class="stream-wrap">
           <div id="message-stream" class="message-stream" aria-live="polite"></div>
@@ -315,14 +320,17 @@ appRoot.innerHTML = `
         </div>
       </aside>
     </main>
-    <dialog id="settings-dialog" class="settings-dialog">
+    ${remoteAccessMarkup()}
+    <dialog id="settings-dialog" class="settings-dialog" aria-label="Settings">
       <form id="settings-form" method="dialog">
-        <div class="settings-heading"><strong>Runtime settings</strong><button id="close-settings" type="button" class="ghost-button" title="Close settings">Close</button></div>
+        <div class="settings-heading"><div><h2>Settings</h2><p class="subtle">Models, connection and preferences.</p></div><button id="close-settings" type="button" class="ghost-button" title="Close settings">Close</button></div>
+        <h3 class="settings-section-title">Model provider</h3>
         <label>API key<input id="settings-api-key" type="password" autocomplete="new-password" placeholder="Leave blank to keep the current key" /></label>
         <p id="settings-key-status" class="subtle"></p>
         <label>Base URL<input id="settings-base-url" type="url" placeholder="https://api.openai.com/v1" /></label>
         <label>Model<input id="settings-model" type="text" placeholder="Default model" /></label>
-        <label>Reasoning effort<input id="settings-reasoning" type="text" placeholder="high" /></label>
+        <label>Reasoning effort<select id="settings-reasoning"><option value="">Provider default</option><option value="low">Low</option><option value="medium">Medium</option><option value="high">High</option><option value="xhigh">Extra high</option><option value="max">Maximum</option></select></label>
+        <h3 class="settings-section-title">Preferences</h3>
         <label class="settings-check"><input id="settings-notifications" type="checkbox" /><span>Desktop notifications when the window is not focused</span></label>
         <div class="settings-actions"><button id="cancel-settings" type="button" class="ghost-button">Cancel</button><button id="save-settings" type="submit" class="primary-button">Save</button></div>
       </form>
@@ -402,7 +410,7 @@ const settingsForm = requiredElement<HTMLFormElement>("settings-form")
 const settingsApiKey = requiredElement<HTMLInputElement>("settings-api-key")
 const settingsBaseUrl = requiredElement<HTMLInputElement>("settings-base-url")
 const settingsModel = requiredElement<HTMLInputElement>("settings-model")
-const settingsReasoning = requiredElement<HTMLInputElement>("settings-reasoning")
+const settingsReasoning = requiredElement<HTMLSelectElement>("settings-reasoning")
 const settingsKeyStatus = requiredElement("settings-key-status")
 const settingsNotifications = requiredElement<HTMLInputElement>("settings-notifications")
 const saveSettingsButton = requiredElement<HTMLButtonElement>("save-settings")
@@ -424,10 +432,48 @@ const replayRequests = new Map<string, Promise<void>>()
 let overviewVersion = 0
 let recentFlushPromise: Promise<void> | undefined
 const uploadPromises = new Map<string, Promise<void>>()
+const preparingPrompts = new Set<string>()
 let attachmentSequence = 0
 let deleteConfirmTimer: ReturnType<typeof setTimeout> | undefined
 let taskMonitorTimer: ReturnType<typeof setInterval> | undefined
-let taskMonitorPollInFlight = false
+const remoteAccess = bindRemoteAccess()
+requiredElement("open-remote").addEventListener("click", remoteAccess.open)
+requiredElement("export-session").addEventListener("click", exportSession)
+requiredElement("fork-session").addEventListener("click", () => runAction(forkCurrentSession, state.viewedSessionId))
+messageStream.addEventListener("click", (event) => {
+  const value = (event.target as HTMLElement).closest<HTMLButtonElement>("[data-starter]")?.dataset.starter
+  if (value) { prompt.value = value; state.drafts[currentDraftKey()] = value; autoGrowPrompt(); prompt.focus() }
+})
+
+async function exportSession() {
+  const sessionId = state.viewedSessionId
+  if (!sessionId) return
+  const title = sessionTitle.textContent || "Rind conversation"
+  const button = requiredElement<HTMLButtonElement>("export-session")
+  button.disabled = true
+  try {
+    const result = asRecord(await requestForSession(runtimeMethods.sessionReplay, sessionId))
+    const text = replayMarkdown(Array.isArray(result.messages) ? result.messages : [], title)
+    const url = URL.createObjectURL(new Blob([text], { type: "text/markdown;charset=utf-8" }))
+    const link = document.createElement("a")
+    link.href = url
+    link.download = "rind-conversation.md"
+    link.click()
+    setTimeout(() => URL.revokeObjectURL(url), 1000)
+  } catch (error) {
+    if (state.viewedSessionId === sessionId) {
+      state.notice = `Export failed: ${error instanceof Error ? error.message : String(error)}`
+      render()
+    }
+  } finally { button.disabled = false }
+}
+
+async function forkCurrentSession() {
+  if (!state.viewedSessionId || runtimeTurnActive()) return
+  const result = asRecord(await requestForSession(runtimeMethods.sessionFork, state.viewedSessionId))
+  await loadSessions()
+  if (typeof result.session_id === "string") await switchSession(result.session_id)
+}
 let goalLoadSequence = 0
 
 function requiredElement<T extends HTMLElement = HTMLElement>(id: string) {
@@ -462,7 +508,10 @@ function render() {
   sidebarToggle.setAttribute("aria-expanded", String(state.sidebarOpen))
   const current = knownSessions().find((item) => item.id === state.viewedSessionId)
   sessionTitle.textContent = current?.title || (state.viewedSessionId ? "Session" : "New session")
-  sessionIdLabel.textContent = state.viewedSessionId || ""
+  sessionIdLabel.textContent = state.model || chatProject()?.name || "Select a project to begin"
+  sessionIdLabel.title = state.viewedSessionId || ""
+  requiredElement<HTMLButtonElement>("export-session").disabled = !state.conversation.entries.length
+  requiredElement<HTMLButtonElement>("fork-session").disabled = !state.viewedSessionId || runtimeTurnActive()
   noticeText.textContent = state.notice || runtime.message || ""
   retry.hidden = runtime.status !== "error"
   notice.hidden = !noticeText.textContent && retry.hidden
@@ -1090,7 +1139,7 @@ function startAttachmentUpload(projectPath: string, chipId: string, file: File) 
     try {
       const base64 = await fileToBase64(file)
       const path = uploadTargetPath(file.name || "pasted-image", new Date())
-      const result = asRecord(await window.api.workspaceFiles.write(path, base64))
+      const result = asRecord(await window.api.workspaceFiles.write(projectPath, path, base64))
       const chip = attachmentsFor(projectPath).find((item) => item.id === chipId)
       if (!chip) return
       chip.status = "ok"
@@ -1177,26 +1226,35 @@ function stopTaskMonitorPolling() {
   }
 }
 
-async function pollTaskMonitor() {
+async function pollTaskMonitor(more = false) {
   if (!state.taskMonitorOpen || !state.viewedSessionId || currentRuntimeSnapshot().status !== "ready") {
     stopTaskMonitorPolling()
     return
   }
-  if (taskMonitorPollInFlight) return
-  taskMonitorPollInFlight = true
-  try {
-    const sessionId = state.viewedSessionId
-    const result = asRecord(await requestForSession(runtimeMethods.backgroundList, sessionId))
-    state.taskMonitor.tasks = mergeTasks(state.taskMonitor.tasks, result.tasks)
-    const expandedId = state.taskMonitor.expandedId
-    if (expandedId && state.taskMonitor.tasks.some((task) => task.bg_id === expandedId)) {
-      const output = asRecord(await requestForSession(runtimeMethods.backgroundOutput, sessionId, { bg_id: expandedId }))
-      if (output.task) state.taskMonitor.outputs[expandedId] = normalizeTask(output.task)
-    }
-  } finally {
-    taskMonitorPollInFlight = false
-    if (state.taskMonitorOpen) renderTaskMonitorDock()
+  const monitor = state.taskMonitor
+  if (monitor.refreshing) return
+  const sessionId = state.viewedSessionId
+  const pending = refreshTaskPages(monitor, (token) => requestForSession(runtimeMethods.taskList, sessionId, token ? { page_token: token } : {}), more)
+  renderTaskMonitorDock()
+  await pending
+  if (monitor !== state.taskMonitor) return
+  const expandedId = monitor.expandedId
+  if (expandedId && !monitor.reading.has(expandedId)) {
+    await loadTaskOutput(expandedId)
   }
+  if (monitor === state.taskMonitor) renderTaskMonitorDock()
+}
+
+async function loadTaskOutput(taskId: string, cursor = state.taskMonitor.cursors[taskId]) {
+  const monitor = state.taskMonitor
+  const sessionId = state.viewedSessionId
+  if (!sessionId) return
+  const pending = readTaskOutput(monitor, (id, position) => requestForSession(runtimeMethods.taskRead, sessionId, {
+    task_id: id, max_output_chars: 20000, ...(position ? { cursor: position } : {}),
+  }), taskId, cursor)
+  renderTaskMonitorDock()
+  await pending
+  if (monitor === state.taskMonitor) renderTaskMonitorDock()
 }
 
 // ---------- goal panel (B7) ----------
@@ -1296,6 +1354,9 @@ function paletteCommands(): PaletteCommand[] {
   const commands: PaletteCommand[] = [
     { id: "new-chat", title: "New chat", detail: "Start a new chat", shortcut: "Ctrl+N", run: () => runAction(startNewChat) },
     { id: "open-settings", title: "Open settings", detail: "Runtime settings", shortcut: "Ctrl+,", run: () => openSettings() },
+    { id: "remote-access", title: "Remote access", detail: "Connect your phone or another browser", run: remoteAccess.open },
+    { id: "export-conversation", title: "Export conversation", detail: "Save as Markdown", run: exportSession, disabled: !state.conversation.entries.length },
+    { id: "fork-conversation", title: "Fork conversation", detail: "Continue in a separate session", run: () => runAction(forkCurrentSession), disabled: !state.viewedSessionId || runtimeTurnActive() },
     { id: "compact", title: "Compact context", detail: "Compact context", run: () => runAction(compactCurrentSession, state.viewedSessionId), disabled: !state.viewedSessionId },
     { id: "toggle-sidebar", title: "Toggle sidebar", detail: "Toggle projects sidebar", run: () => runAction(toggleSidebar) },
     { id: "toggle-files", title: "Toggle files panel", detail: "Toggle project files", run: () => runAction(() => setFilesOpen(!state.filesOpen)) },
@@ -1444,7 +1505,7 @@ function renderStream() {
     if (!messageStream.querySelector(".stream-empty")) {
       const empty = document.createElement("div")
       empty.className = "stream-empty"
-      empty.innerHTML = `<img class="stream-empty-mark" src="${brandMarkUrl}" alt="" aria-hidden="true" /><p>No messages yet</p><p class="subtle">${ready ? "Ask Rind to inspect, change, or explain something in this workspace." : "Pick a project and start a runtime to begin."}</p>`
+      empty.innerHTML = `<img class="stream-empty-mark" src="${brandMarkUrl}" alt="" aria-hidden="true" /><h2>What would you like to work on?</h2><p class="subtle">${ready ? "Explore your project, solve a problem, or build something new." : "Add a project folder and configure a model to begin."}</p><div class="starter-actions"><button type="button" data-starter="Explain how this project is organized">Explore this project <span>↗</span></button><button type="button" data-starter="Review the code and suggest focused improvements">Review the code <span>↗</span></button><button type="button" data-starter="Help me plan and implement a new feature">Build a feature <span>↗</span></button></div>`
       messageStream.append(empty)
     }
   } else {
@@ -2131,7 +2192,9 @@ function handleRuntimeEvent(envelope: RuntimeEvent) {
       const task = normalizeTask(envelope.event.task)
       if (task.bg_id) {
         state.taskMonitor.tasks = mergeTasks(state.taskMonitor.tasks, [...state.taskMonitor.tasks, task])
-        state.taskMonitor.outputs[task.bg_id] = task
+        if (!state.taskMonitor.cursors[task.bg_id] && !state.taskMonitor.reading.has(task.bg_id) && (task.stdout !== undefined || task.stderr !== undefined)) {
+          state.taskMonitor.outputs[task.bg_id] = task
+        }
         renderTaskMonitorDock()
       }
     }
@@ -2209,7 +2272,7 @@ function autoGrowPrompt() {
 
 function setPrompt(value: string, focus = false) {
   prompt.value = value
-  if (state.chatProjectPath) state.drafts[state.chatProjectPath] = value
+  if (state.chatProjectPath) state.drafts[currentDraftKey()] = value
   autoGrowPrompt()
   renderSlashCommandMenu()
   if (focus) prompt.focus()
@@ -2278,11 +2341,12 @@ function selectSlashCommand(command: SlashCommand) {
   requiredElement<HTMLFormElement>("composer").addEventListener("submit", (event) => { event.preventDefault(); runAction(sendPrompt, state.viewedSessionId) })
 
 prompt.addEventListener("input", () => {
-  if (state.chatProjectPath) state.drafts[state.chatProjectPath] = prompt.value
+  if (state.chatProjectPath) state.drafts[currentDraftKey()] = prompt.value
   autoGrowPrompt()
   renderSlashCommandMenu()
 })
 prompt.addEventListener("keydown", (event) => {
+  if (event.isComposing || event.keyCode === 229) return
   const menu = buildSlashCommandMenu(state.slashCommands, prompt.value)
   if (state.slashMenuOpen && menu && menu.commands.length) {
     if (event.key === "ArrowDown" || event.key === "ArrowUp") {
@@ -2447,6 +2511,7 @@ const keyBindings: KeyBinding[] = [
 ]
 
 document.addEventListener("keydown", (event) => {
+  if (event.isComposing || event.keyCode === 229 || document.getElementById("remote-dialog")?.hasAttribute("open")) return
   for (const binding of keyBindings) {
     if (binding.matches(event)) {
       binding.run(event)
@@ -2476,6 +2541,14 @@ document.addEventListener("pointerdown", (event) => {
 })
 
 async function sendPrompt() {
+  const draftKey = currentDraftKey()
+  if (preparingPrompts.has(draftKey)) return
+  preparingPrompts.add(draftKey)
+  try { await submitPrompt(draftKey) }
+  finally { preparingPrompts.delete(draftKey) }
+}
+
+async function submitPrompt(draftKey: string) {
   if (state.slashCommandPending) {
     state.notice = `Running ${state.slashCommandInput || "command"}...`
     render()
@@ -2491,7 +2564,7 @@ async function sendPrompt() {
   }
   if (rawInput.startsWith("/")) {
     prompt.value = ""
-    state.drafts[state.chatProjectPath] = ""
+    state.drafts[currentDraftKey()] = ""
     autoGrowPrompt()
     closeSlashCommandMenu()
     runAction(() => runSlash(rawInput), state.viewedSessionId)
@@ -2500,6 +2573,7 @@ async function sendPrompt() {
   // Wait for in-flight attachment uploads, then attach the ok chips' paths.
   if (attachmentsFor(state.chatProjectPath).length) {
     await waitForAttachments()
+    if (currentDraftKey() !== draftKey || prompt.value.trim() !== rawInput) return
     const chips = attachmentsFor(state.chatProjectPath)
     const failed = chips.filter((chip) => chip.status === "failed")
     if (failed.length) {
@@ -2511,61 +2585,62 @@ async function sendPrompt() {
   }
   const chips = attachmentsFor(state.chatProjectPath)
   const input = composeMessageWithAttachments(rawInput, chips.map((chip) => chip.path))
-  const promptValueWithAttachments = input
   // Clear the composer (and its draft) before the request so the draft is
   // never left duplicated after a queued prompt.
   prompt.value = ""
-  state.drafts[project.path] = ""
+  state.drafts[currentDraftKey()] = ""
   autoGrowPrompt()
   closeSlashCommandMenu()
   const projectPath = project.path
   const requestedSessionId = state.viewedSessionId
   const requestedModel = state.model || state.settings.model
-  await ensureRuntime()
-  const sessionId = await ensureSession(projectPath, requestedSessionId, requestedModel)
-  const active = sessionTurnActive(sessionId)
-  if (active) {
-    try {
-      const result = asRecord(await requestForSession(runtimeMethods.sessionFollowUp, sessionId, { input }))
-      addPendingInput(sessionId, input, result)
-      state.lastPrompts[sessionId] = input
-      state.attachments[projectPath] = []
-      renderAttachments()
-      syncCurrentPendingInputs()
-      render()
-      return
-    } catch (error) {
-      if (!isTurnNotActive(error)) {
-        state.notice = error instanceof Error ? error.message : String(error)
-        render()
-        return
-      }
-      // The turn ended worker-side while the user was typing (our terminal
-      // event was late/stale). Fall through to a fresh prompt — the message
-      // must never be lost to an outdated queue decision.
-      delete state.activeTurnIds[sessionId]
-      delete state.pendingInputs[sessionId]
-      syncCurrentPendingInputs()
-      if (state.viewedSessionId === sessionId) render()
-    }
+  let sessionId = requestedSessionId
+  let accepted = false
+  const clearSentAttachments = () => {
+    const sentIds = new Set(chips.map((chip) => chip.id))
+    state.attachments[projectPath] = attachmentsFor(projectPath).filter((chip) => !sentIds.has(chip.id))
   }
-  setConversationFor(sessionId, addUserMessage(conversationFor(sessionId), promptValueWithAttachments))
-  state.lastPrompts[sessionId] = promptValueWithAttachments
-  if (state.viewedSessionId === sessionId) render()
   try {
+    await ensureRuntime()
+    sessionId = await ensureSession(projectPath, requestedSessionId, requestedModel)
+    if (sessionTurnActive(sessionId)) {
+      try {
+        const result = asRecord(await requestForSession(runtimeMethods.sessionFollowUp, sessionId, { input }))
+        accepted = true
+        addPendingInput(sessionId, input, result)
+        state.lastPrompts[sessionId] = input
+        clearSentAttachments()
+        syncCurrentPendingInputs()
+        return
+      } catch (error) {
+        if (!isTurnNotActive(error)) throw error
+        // A turn may finish between the local queue decision and the RPC.
+        delete state.activeTurnIds[sessionId]
+        delete state.pendingInputs[sessionId]
+        syncCurrentPendingInputs()
+      }
+    }
+    setConversationFor(sessionId, addUserMessage(conversationFor(sessionId), input))
+    state.lastPrompts[sessionId] = input
+    if (state.viewedSessionId === sessionId) render()
     const result = await startTurn(sessionId, input)
-    state.attachments[projectPath] = []
+    accepted = true
+    clearSentAttachments()
     if (typeof result.session_id === "string" && result.session_id) {
       await loadSessions()
       await recordRecentSession(result.session_id)
     }
   } catch (error) {
-    // Keep the uploaded chips so the attachments can be re-sent after a retry.
-    state.notice = error instanceof Error ? error.message : String(error)
+    const key = sessionId ? `${sessionId}:draft` : draftKey
+    if (!accepted) {
+      restoreFailedDraft(state.drafts, key, rawInput)
+      if (currentDraftKey() === key) { prompt.value = state.drafts[key]; autoGrowPrompt() }
+    }
+    if (currentDraftKey() === key) state.notice = error instanceof Error ? error.message : String(error)
   } finally {
     renderAttachments()
+    if (state.viewedSessionId === sessionId) render()
   }
-  if (state.viewedSessionId === sessionId) render()
 }
 
 async function startTurn(sessionId: string, input: string, transientSystemMessages?: unknown) {
@@ -2891,6 +2966,32 @@ startResize(fileResizeHandle, "files")
 
 taskMonitorDock.addEventListener("click", (event) => {
   const target = event.target as HTMLElement
+  if (target.closest("[data-task-more]")) {
+    void pollTaskMonitor(true)
+    return
+  }
+  const outputAction = target.closest<HTMLButtonElement>("[data-task-output]")
+  if (outputAction?.dataset.taskId) {
+    const taskId = outputAction.dataset.taskId
+    const output = state.taskMonitor.outputs[taskId]
+    const cursor = outputAction.dataset.taskOutput === "next" ? output?.next_cursor : outputAction.dataset.taskOutput === "start" ? output?.start_cursor : ""
+    void loadTaskOutput(taskId, cursor)
+    return
+  }
+  const action = target.closest<HTMLButtonElement>("[data-task-action]")
+  if (action) {
+    const sessionId = state.viewedSessionId
+    const taskId = action.dataset.taskId
+    if (!sessionId || !taskId) return
+    action.disabled = true
+    runAction(async () => {
+      try {
+        await requestForSession(action.dataset.taskAction === "cancel" ? runtimeMethods.taskCancel : runtimeMethods.taskReleaseWait, sessionId, { task_id: taskId })
+        if (state.viewedSessionId === sessionId) await pollTaskMonitor()
+      } finally { action.disabled = false }
+    }, sessionId)
+    return
+  }
   if (target.closest<HTMLButtonElement>("[data-task-close]")) {
     toggleTaskMonitor(false)
     return
@@ -2900,11 +3001,7 @@ taskMonitorDock.addEventListener("click", (event) => {
   state.taskMonitor.expandedId = state.taskMonitor.expandedId === bgId ? "" : bgId
   renderTaskMonitorDock()
   if (state.taskMonitor.expandedId && state.viewedSessionId) {
-    runAction(async () => {
-      const output = asRecord(await requestForSession(runtimeMethods.backgroundOutput, state.viewedSessionId, { bg_id: state.taskMonitor.expandedId }))
-      if (output.task) state.taskMonitor.outputs[state.taskMonitor.expandedId] = normalizeTask(output.task)
-      renderTaskMonitorDock()
-    }, state.viewedSessionId)
+    void loadTaskOutput(state.taskMonitor.expandedId)
   }
 })
 
@@ -3186,8 +3283,10 @@ function resetProjectView() {
   lastRenderedEntries = 0
 }
 
+function currentDraftKey() { return state.viewedSessionId ? `${state.viewedSessionId}:draft` : state.chatProjectPath }
+
 function restoreProjectDraft() {
-  prompt.value = state.drafts[state.chatProjectPath] || ""
+  prompt.value = state.drafts[currentDraftKey()] || ""
   autoGrowPrompt()
 }
 
@@ -3272,7 +3371,7 @@ async function removeProject(path: string) {
 
 async function startNewChat() {
   closeComposerSelectMenus()
-  if (state.chatProjectPath) state.drafts[state.chatProjectPath] = prompt.value
+  if (state.chatProjectPath) state.drafts[currentDraftKey()] = prompt.value
   state.chatProjectPath = resolveNewChatProjectPath()
   state.viewedProjectPath = state.chatProjectPath
   const project = chatProject()
@@ -3429,6 +3528,8 @@ async function switchSession(nextSessionId: string) {
   state.expandedDirectories = new Set([""])
   state.fileListings = {}
   state.filePreview = undefined
+  restoreProjectDraft()
+  state.taskMonitor = createTaskMonitorState()
   render()
   await loadReplay(nextSessionId)
   if (state.viewedSessionId !== nextSessionId) return
@@ -3534,7 +3635,7 @@ async function selectChatProject(path: string) {
   const project = state.projects.find((item) => item.path === path)
   if (!project) return
   closeComposerSelectMenus()
-  if (state.chatProjectPath) state.drafts[state.chatProjectPath] = prompt.value
+  if (state.chatProjectPath) state.drafts[currentDraftKey()] = prompt.value
   state.chatProjectPath = project.path
   state.viewedProjectPath = project.path
   state.viewedSessionId = ""
@@ -3551,6 +3652,7 @@ async function selectChatProject(path: string) {
 
 function showCachedSession(sessionId: string) {
   if (sessionId === state.viewedSessionId) return
+  state.drafts[currentDraftKey()] = prompt.value
   const cache = { ...state.conversationCache }
   if (state.viewedSessionId) cache[state.viewedSessionId] = state.conversation
   state.viewedSessionId = sessionId
@@ -3636,6 +3738,7 @@ const themeMedia = window.matchMedia("(prefers-color-scheme: light)")
 const onThemeMediaChange = () => { if (state.theme === "system") renderTheme() }
 if (typeof themeMedia.addEventListener === "function") themeMedia.addEventListener("change", onThemeMediaChange)
 window.addEventListener("beforeunload", () => {
+  remoteAccess.dispose()
   unsubscribeStatus()
   unsubscribeEvents()
   unsubscribeNotifyActivate()

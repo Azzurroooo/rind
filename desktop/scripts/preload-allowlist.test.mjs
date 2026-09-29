@@ -34,8 +34,8 @@ test("unblocked desktop methods pass the runtime allowlist", () => {
 
 test("unknown methods are still rejected", () => {
   assert.equal(isRuntimeMethod("nope"), false)
-  assert.equal(isRuntimeMethod("session/switch"), false)
-  assert.equal(isRuntimeMethod("session/subscribe"), false)
+  assert.equal(isRuntimeMethod("session/switch"), true)
+  assert.equal(isRuntimeMethod("session/subscribe"), true)
   assert.equal(isRuntimeMethod(""), false)
   assert.equal(isRuntimeMethod("initialize"), false, "lifecycle methods are not runtime methods")
 })

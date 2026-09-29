@@ -56,6 +56,7 @@ export function renderGoalPanel(elements: GoalPanelElements, view: GoalPanelView
       <button type="button" class="primary-button" data-goal-submit${view.busy || !view.draft.trim() ? " disabled" : ""}>${goal ? "Replace" : "Set goal"}</button>
       ${goal ? `<button type="button" class="ghost-button" data-goal-cancel>Cancel</button>` : `<button type="button" class="ghost-button" data-goal-close title="Hide goal panel">Hide</button>`}
     </div>
+    <p class="goal-help">Rind will continue working automatically until the goal is reached or paused.</p>
   `
 }
 

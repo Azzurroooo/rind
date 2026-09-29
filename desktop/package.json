@@ -9,19 +9,26 @@
     "typecheck": "tsc --noEmit",
     "test": "node --test --test-concurrency=1 scripts/*.test.mjs",
     "dev": "electron-vite dev",
+    "build:web": "npm --prefix ../frontend-web run build",
+    "prebuild": "npm run build:web",
     "build": "electron-vite build",
     "preview": "electron-vite preview",
+    "prepackage": "npm run build",
     "package": "electron-builder --config electron-builder.config.ts"
   },
   "dependencies": {
     "electron-log": "^5.4.3",
     "electron-window-state": "^5.0.3",
     "highlight.js": "^11.11.2",
-    "lucide": "^1.31.0"
+    "lucide": "^1.31.0",
+    "qrcode": "^1.5.4",
+    "ws": "^8.22.0"
   },
   "devDependencies": {
     "@types/node": "^22.15.0",
-    "electron": "42.3.3",
+    "@types/qrcode": "^1.5.6",
+    "@types/ws": "^8.18.1",
+    "electron": "42.11.8",
     "electron-builder": "26.15.2",
     "electron-vite": "^5.0.0",
     "typescript": "~5.6.2",

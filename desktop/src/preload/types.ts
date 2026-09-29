@@ -19,6 +19,12 @@ export type RuntimeEvent = {
 export const runtimeProtocolVersion = "2"
 
 export const runtimeMethods = {
+  sessionList: "session/list",
+  sessionSwitch: "session/switch",
+  sessionFork: "session/fork",
+  sessionSubscribe: "session/subscribe",
+  contextInspect: "rind/context/inspect",
+  usageSummary: "rind/usage/summary",
   sessionNew: "session/new",
   sessionReplay: "session/replay",
   sessionPrompt: "session/prompt",
@@ -190,6 +196,8 @@ export type DesktopBackgroundTask = {
   stdout?: string
   stderr?: string
   truncated?: boolean
+  next_cursor?: string
+  start_cursor?: string
 }
 
 export type DesktopFileNode = {
@@ -216,7 +224,17 @@ export type DesktopFilePreview = {
   message?: string
 }
 
+export type GatewayOptions = { scope: "loopback" | "lan"; port?: number; externalOrigin?: string }
+export type GatewayState = { running: boolean; scope: "loopback" | "lan"; port: number; addresses: string[]; accessCode: string; clients: number }
+
 export type DesktopApi = {
+  gateway: {
+    get: () => Promise<GatewayState>
+    start: (options: GatewayOptions) => Promise<GatewayState>
+    stop: () => Promise<GatewayState>
+    rotate: () => Promise<GatewayState>
+    subscribe: (listener: (state: GatewayState) => void) => () => void
+  }
   runtime: {
     start: (workspace: string) => Promise<RuntimeSnapshot>
     initialize: () => Promise<unknown>
@@ -239,7 +257,7 @@ export type DesktopApi = {
   workspaceFiles: {
     list: (path?: string) => Promise<unknown>
     read: (path: string) => Promise<unknown>
-    write: (path: string, contentBase64: string) => Promise<unknown>
+    write: (projectPath: string, path: string, contentBase64: string) => Promise<unknown>
   }
   background: {
     list: (sessionId: string) => Promise<unknown>
