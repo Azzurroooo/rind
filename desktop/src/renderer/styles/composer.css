@@ -213,10 +213,13 @@
 
 .context-meter {
   padding: 2px 8px;
+  background: transparent;
+  font-family: inherit;
   border: 1px solid var(--line);
   border-radius: 999px;
   color: var(--dim);
   font-size: 11px;
   font-variant-numeric: tabular-nums;
 }
+.context-meter:hover { color: var(--text); border-color: var(--line-strong); }
 .context-meter.context-hot { border-color: var(--accent); color: var(--accent); }

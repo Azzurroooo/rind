@@ -2,7 +2,8 @@ import { type RuntimeMethod, runtimeMethods, sessionScopedMethods, turnScopedMet
 import { dismissPlanError } from "../composer-region.ts"
 import { sameProjectPath as samePath } from "../project-selection.ts"
 import { createQuestionSelection, type QuestionSelection } from "../question-state.ts"
-import { fallbackSlashCommands, parseSlashCommands, type SlashCommand } from "../slash-commands.ts"
+import { mergeSlashCatalog } from "../desktop-slash.ts"
+import { parseSlashCommands } from "../slash-commands.ts"
 import { clipLine, conversationFromLiveTurn, conversationFromReplay, type ConversationState, createConversation, mergeLiveConversation, mergeReplayConversation } from "../timeline-model.ts"
 import { isTurnNotActive } from "../turn-state.ts"
 import { asRecord, asRecordText } from "./html.ts"
@@ -247,15 +248,7 @@ export function applyRuntimeInitialization(result: unknown) {
     state.effort = initialize.reasoning_effort
   }
   const commands = parseSlashCommands(initialize.commands)
-  if (commands.length) state.slashCommands = mergeSlashCommands(fallbackSlashCommands, commands)
-}
-
-export function mergeSlashCommands(...groups: SlashCommand[][]) {
-  const unique = new Map<string, SlashCommand>()
-  for (const group of groups) {
-    for (const command of group) unique.set(command.name, command)
-  }
-  return [...unique.values()].sort((left, right) => left.name.localeCompare(right.name))
+  if (commands.length) state.slashCommands = mergeSlashCatalog(commands)
 }
 
 // ---------- OS notifications (B5) ----------

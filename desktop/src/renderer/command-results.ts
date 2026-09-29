@@ -1,3 +1,5 @@
+import { renderContextDisplay } from "./context-report.ts"
+import { desktopSlashCommands } from "./desktop-slash.ts"
 import { renderMarkdown } from "./markdown.ts"
 import { isDesktopHiddenSlashCommand } from "./slash-commands.ts"
 
@@ -22,6 +24,7 @@ function renderCommandDisplay(display: Record<string, unknown> | undefined): str
   if (type === "sessions") return renderSessionsDisplay(display)
   if (type === "skills") return renderSkillsDisplay(display)
   if (type === "status") return renderStatusDisplay(display)
+  if (type === "context") return renderContextDisplay(display)
   if (type === "team_create") return renderKeyValueDisplay([
     { label: "project", value: display.project_id },
     { label: "main agent", value: display.main_agent },
@@ -33,7 +36,7 @@ function renderCommandDisplay(display: Record<string, unknown> | undefined): str
 function renderHelpCommandDisplay(display: Record<string, unknown>) {
   const selected = asRecord(display.command)
   const commands = (typeof selected.name === "string" ? [selected] : recordList(display.commands))
-    .filter((command) => !isDesktopHiddenSlashCommand(typeof command.name === "string" ? command.name : ""))
+    .flatMap(desktopOwnedCommand)
   if (!commands.length) return ""
   const heading = typeof selected.name === "string" ? `/${selected.name}` : "Commands"
   return `<div class="command-display"><div class="command-display-title">${escapeHtml(heading)}</div><div class="command-list">${commands.map((command) => {
@@ -43,6 +46,15 @@ function renderHelpCommandDisplay(display: Record<string, unknown>) {
     const usage = typeof command.usage === "string" ? command.usage : `/${name}`
     return `<button type="button" class="command-list-item" data-command-prefill="${escapeAttribute(name)}"><span><code>/${escapeHtml(name)}</code><small>${escapeHtml(description)}</small></span><code>${escapeHtml(usage)}</code></button>`
   }).join("")}</div></div>`
+}
+
+// Runtime entries for commands the desktop owns (model, sessions) are swapped
+// for the desktop definition, so help never shows a usage the desktop rejects.
+function desktopOwnedCommand(command: Record<string, unknown>): Record<string, unknown>[] {
+  const name = typeof command.name === "string" ? command.name : ""
+  if (!isDesktopHiddenSlashCommand(name)) return [command]
+  const owned = desktopSlashCommands.find((item) => item.name === name)
+  return owned ? [owned] : []
 }
 
 function renderKeyValueDisplay(entries: unknown) {

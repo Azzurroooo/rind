@@ -1,4 +1,4 @@
-import { fallbackSlashCommands } from "../slash-commands.ts"
+import { mergeSlashCatalog } from "../desktop-slash.ts"
 import { createTaskMonitorState } from "../task-monitor.ts"
 import { createConversation } from "../timeline-model.ts"
 import { type AppState } from "./types.ts"
@@ -48,7 +48,7 @@ export const state: AppState = {
   compacting: false,
   slashCommandPending: false,
   slashCommandInput: "",
-  slashCommands: fallbackSlashCommands,
+  slashCommands: mergeSlashCatalog([]),
   slashMenuOpen: false,
   slashMenuActiveIndex: 0,
   modelMenuOpen: false,

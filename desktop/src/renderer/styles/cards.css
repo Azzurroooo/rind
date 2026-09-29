@@ -158,3 +158,13 @@
   font-size: 12px;
 }
 .jump-latest:hover { border-color: var(--accent); color: var(--text); }
+
+/* /context breakdown (spec section 8) */
+.context-rows { display: grid; gap: 6px; padding: 4px 11px 10px; }
+.context-row { display: grid; grid-template-columns: minmax(96px, 1fr) minmax(80px, 2fr) auto; gap: 10px; align-items: center; font-size: 12px; }
+.context-row-label { overflow: hidden; color: var(--muted); text-overflow: ellipsis; white-space: nowrap; }
+.context-row-bar { position: relative; height: 6px; overflow: hidden; border-radius: 3px; background: var(--surface-soft, var(--line)); }
+.context-row-bar i { position: absolute; inset: 0 auto 0 0; border-radius: 3px; background: var(--accent); }
+.context-row b { color: var(--text); font-family: var(--font-mono); font-size: 11px; font-weight: 500; font-variant-numeric: tabular-nums; }
+.context-display .command-display-title span { margin-left: 6px; color: var(--muted); font-weight: 500; }
+.context-meter { cursor: pointer; }

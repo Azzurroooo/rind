@@ -1,12 +1,14 @@
 import { runtimeMethods } from "../../preload/types.ts"
 import { executeLocalSlashCommand } from "../local-slash-commands.ts"
 import { sameProjectPath as samePath } from "../project-selection.ts"
-import { desktopSlashCommandNotice, fallbackSlashCommands, parseSlashCommands } from "../slash-commands.ts"
+import { mergeSlashCatalog } from "../desktop-slash.ts"
+import { parseSlashCommands } from "../slash-commands.ts"
 import { addCommandResult, addUserMessage } from "../timeline-model.ts"
 import { clearSlashCommandPending, setPrompt, startTurn } from "./composer.ts"
+import { runDesktopSlash } from "./desktop-slash-runner.ts"
 import { prompt } from "./dom.ts"
 import { asRecord, asRecordText } from "./html.ts"
-import { conversationFor, ensureRuntime, ensureSession, loadReplay, mergeSlashCommands, requestForSession, setConversationFor } from "./runtime.ts"
+import { conversationFor, ensureRuntime, ensureSession, loadReplay, requestForSession, setConversationFor } from "./runtime.ts"
 import { chatProject, currentRuntimeSnapshot, loadSessions, recordRecentSession } from "./sessions.ts"
 import { render } from "./shell.ts"
 import { state } from "./state.ts"
@@ -14,13 +16,7 @@ import { state } from "./state.ts"
 
 
 export async function runSlash(input: string) {
-  const localNotice = desktopSlashCommandNotice(input)
-  if (localNotice) {
-    state.notice = localNotice
-    clearSlashCommandPending()
-    render()
-    return
-  }
+  if (await runDesktopSlash(input)) return
   const localResult = executeLocalSlashCommand(input, {
     settings: state.settings,
     runtime: currentRuntimeSnapshot(),
@@ -61,7 +57,7 @@ export async function runSlash(input: string) {
     const commandSessionId = await ensureSession(projectPath, requestedSessionId, requestedModel)
     const result = asRecord(await requestForSession(runtimeMethods.commandExecute, commandSessionId, { input }))
     const commands = parseSlashCommands(asRecord(result.display).commands)
-    if (commands.length) state.slashCommands = mergeSlashCommands(fallbackSlashCommands, commands)
+    if (commands.length) state.slashCommands = mergeSlashCatalog(commands)
     const text = asRecordText(result.text)
     if (compacting && text.startsWith("Compact complete.")) {
       await loadReplay(commandSessionId)

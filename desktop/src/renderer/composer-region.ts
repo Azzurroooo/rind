@@ -86,7 +86,7 @@ export function composerRegionMarkup() {
             <button id="project-menu-trigger" type="button" class="composer-select-trigger" title="Choose working directory" aria-label="Choose working directory" aria-haspopup="listbox" aria-controls="project-menu" aria-expanded="false"><span id="project-menu-label" class="composer-select-label">Working directory</span><span class="composer-select-chevron" aria-hidden="true"></span></button>
             <div id="project-menu" class="composer-select-menu" role="listbox" aria-label="Working directories" hidden></div>
           </div>
-          <span id="context-meter" class="context-meter" hidden></span>
+          <button type="button" id="context-meter" class="context-meter" data-tooltip="Inspect context" hidden></button>
           <span class="composer-spacer"></span>
           <button id="interrupt" type="button" class="ghost-button danger" title="Stop the running turn (Esc)">Stop</button>
           <button id="send" type="submit" class="primary-button"><span class="send-label">Send</span><span class="send-spinner" aria-hidden="true"></span></button>
@@ -162,6 +162,8 @@ export function renderComposer(elements: ComposerElements, view: ComposerView) {
     ? "Compacting context..."
     : view.readOnly
     ? "Return to the current task to send a message"
+    : view.controllingTurn
+    ? "Enter to queue a follow-up, Alt+Enter to steer"
     : "Message Rind — Enter to send, Shift+Enter for a new line"
   elements.send.disabled = unavailable || view.starting
   const label = elements.send.querySelector<HTMLElement>(".send-label")
@@ -192,6 +194,7 @@ export function renderComposer(elements: ComposerElements, view: ComposerView) {
   }
   elements.contextMeter.hidden = view.contextUsagePercent === null
   elements.contextMeter.textContent = view.contextUsagePercent === null ? "" : `${Math.round(view.contextUsagePercent * 100)}% ctx`
+  elements.contextMeter.setAttribute("aria-label", view.contextUsagePercent === null ? "Inspect context" : `Context ${Math.round(view.contextUsagePercent * 100)}% used. Inspect context`)
   elements.contextMeter.classList.toggle("context-hot", view.contextUsagePercent !== null && view.contextUsagePercent >= 0.8)
 }
 

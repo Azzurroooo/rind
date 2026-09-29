@@ -38,11 +38,11 @@ export function isDesktopHiddenSlashCommand(name: string) {
   return DESKTOP_HIDDEN_COMMANDS.has(name.trim().toLocaleLowerCase())
 }
 
-export function desktopSlashCommandNotice(input: string) {
-  const command = input.trim()
-  if (/^\/sessions(?:\s|$)/i.test(command)) return "Use the left sidebar to switch sessions."
-  if (/^\/help\s+\/?sessions(?:\s|$)/i.test(command)) return "Use the left sidebar to switch sessions."
-  return undefined
+/** Splits "/name argument" into a lower-case name and trimmed argument. */
+export function parseSlashInput(input: string): { name: string; argument: string } | undefined {
+  const parts = input.trim().match(/^\/([^\s]+)(?:\s+([\s\S]*))?$/)
+  if (!parts) return undefined
+  return { name: parts[1].toLocaleLowerCase(), argument: (parts[2] || "").trim() }
 }
 
 export function slashCommandMenu(commands: SlashCommand[], input: string): SlashCommandMenu | undefined {

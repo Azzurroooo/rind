@@ -415,7 +415,7 @@ test("composer exposes slash command work and blocks overlapping input", () => {
     menu: { hidden: false },
     compactContext: { disabled: false, querySelector: () => compactLabel },
     slashCommandMenu: {},
-    contextMeter: { hidden: false, textContent: "", classList: { toggle() {} } },
+    contextMeter: { hidden: false, textContent: "", setAttribute() {}, classList: { toggle() {} } },
   }
   renderComposer(elements, {
     ready: true,

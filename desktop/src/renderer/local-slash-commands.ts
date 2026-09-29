@@ -1,5 +1,5 @@
 import type { DesktopSettings, RuntimeSnapshot } from "../preload/types"
-import type { SlashCommand } from "./slash-commands"
+import { parseSlashInput, type SlashCommand } from "./slash-commands.ts"
 
 export type LocalSlashResult = {
   text: string
@@ -15,10 +15,9 @@ type LocalSlashContext = {
 }
 
 export function executeLocalSlashCommand(input: string, context: LocalSlashContext): LocalSlashResult | undefined {
-  const parts = input.trim().match(/^\/([^\s]+)(?:\s+([\s\S]*))?$/)
-  if (!parts) return undefined
-  const name = parts[1].toLocaleLowerCase()
-  const argument = (parts[2] || "").trim()
+  const parsed = parseSlashInput(input)
+  if (!parsed) return undefined
+  const { name, argument } = parsed
 
   if (name === "config") return configResult(context.settings)
   if (name === "login") return { text: "Login/config setup is not implemented yet.\nSet apiKey in ~/.rind/settings.json." }

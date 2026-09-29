@@ -3,10 +3,10 @@ import test from "node:test"
 
 import {
   commandPrefill,
-  desktopSlashCommandNotice,
   fallbackSlashCommands,
   isExactSlashCommand,
   parseSlashCommands,
+  parseSlashInput,
   revealSlashCommandOption,
   slashCommandMenu,
 } from "../src/renderer/slash-commands.ts"
@@ -23,12 +23,12 @@ test("Desktop hides removed and sidebar-owned commands from fallback and Runtime
   assert.deepEqual(parsed.map((command) => command.name), ["status"])
 })
 
-test("Desktop handles removed session commands locally", () => {
-  assert.equal(desktopSlashCommandNotice("/sessions"), "Use the left sidebar to switch sessions.")
-  assert.equal(desktopSlashCommandNotice("/sessions 20"), "Use the left sidebar to switch sessions.")
-  assert.equal(desktopSlashCommandNotice("/help sessions"), "Use the left sidebar to switch sessions.")
-  assert.equal(desktopSlashCommandNotice("/help /sessions"), "Use the left sidebar to switch sessions.")
-  assert.equal(desktopSlashCommandNotice("/help status"), undefined)
+test("parseSlashInput splits the name and trims the argument", () => {
+  assert.deepEqual(parseSlashInput("/Help  status "), { name: "help", argument: "status" })
+  assert.deepEqual(parseSlashInput("/goal ship it\nnow"), { name: "goal", argument: "ship it\nnow" })
+  assert.deepEqual(parseSlashInput("/compact"), { name: "compact", argument: "" })
+  assert.equal(parseSlashInput("hello /compact"), undefined)
+  assert.equal(parseSlashInput("/"), undefined)
 })
 
 test("Desktop local commands do not require a project or Runtime", () => {

@@ -22,7 +22,7 @@ test("command results render structured help as a usable command entry", () => {
   assert.doesNotMatch(html, /\/model set &lt;model&gt;/)
 })
 
-test("structured Desktop help does not re-display the removed sessions command", () => {
+test("structured Desktop help shows the desktop sessions command, not the Runtime one", () => {
   const html = renderCommandResult({
     command: "/help",
     content: "Commands",
@@ -35,7 +35,9 @@ test("structured Desktop help does not re-display the removed sessions command",
     },
   })
 
-  assert.doesNotMatch(html, /data-command-prefill="sessions"/)
+  assert.match(html, /data-command-prefill="sessions"/)
+  assert.match(html, /\/sessions \[query\]/)
+  assert.doesNotMatch(html, /List recent sessions/)
   assert.match(html, /data-command-prefill="status"/)
 })
 

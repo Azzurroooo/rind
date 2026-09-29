@@ -112,15 +112,18 @@ export function selectSlashCommand(command: SlashCommand) {
   closeSlashCommandMenu()
 }
 
-export async function sendPrompt() {
+/** "queue" adds a follow-up to a running turn; "steer" injects it into the turn. */
+export type RunningSendMode = "queue" | "steer"
+
+export async function sendPrompt(mode: RunningSendMode = "queue") {
   const draftKey = currentDraftKey()
   if (preparingPrompts.has(draftKey)) return
   preparingPrompts.add(draftKey)
-  try { await submitPrompt(draftKey) }
+  try { await submitPrompt(draftKey, mode) }
   finally { preparingPrompts.delete(draftKey) }
 }
 
-export async function submitPrompt(draftKey: string) {
+export async function submitPrompt(draftKey: string, mode: RunningSendMode = "queue") {
   if (state.slashCommandPending) {
     state.notice = `Running ${state.slashCommandInput || "command"}...`
     render()
@@ -177,7 +180,7 @@ export async function submitPrompt(draftKey: string) {
     sessionId = await ensureSession(projectPath, requestedSessionId, requestedModel)
     if (sessionTurnActive(sessionId)) {
       try {
-        const result = asRecord(await requestForSession(runtimeMethods.sessionFollowUp, sessionId, { input }))
+        const result = asRecord(await requestForSession(mode === "steer" ? runtimeMethods.sessionSteer : runtimeMethods.sessionFollowUp, sessionId, { input }))
         accepted = true
         addPendingInput(sessionId, input, result)
         state.lastPrompts[sessionId] = input

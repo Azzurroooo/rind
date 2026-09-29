@@ -1,18 +1,20 @@
+import { composerKeyAction } from "../composer-keys.ts"
 import { sameProjectPath as samePath } from "../project-selection.ts"
 import { isExactSlashCommand, slashCommandMenu as buildSlashCommandMenu } from "../slash-commands.ts"
 import { addAttachmentFiles } from "./attachments-ui.ts"
 import { closeComposerSelectMenus, selectEffort, selectModel, toggleEffortMenu, toggleModelMenu, toggleProjectMenu } from "./composer-menus.ts"
-import { autoGrowPrompt, closeSlashCommandMenu, renderSlashCommandMenu, revealActiveSlashCommand, selectSlashCommand, sendPrompt } from "./composer.ts"
-import { attachButton, attachInput, compactContext, composerForm, composerMenuTrigger, effortMenu, effortMenuTrigger, modelMenu, modelMenuTrigger, projectMenu, projectMenuTrigger, prompt, requiredElement, slashCommandMenu } from "./dom.ts"
+import { autoGrowPrompt, closeSlashCommandMenu, renderSlashCommandMenu, revealActiveSlashCommand, selectSlashCommand, sendPrompt, setPrompt } from "./composer.ts"
+import { inspectContext } from "./desktop-slash-runner.ts"
+import { attachButton, attachInput, compactContext, composerForm, contextMeter, composerMenuTrigger, effortMenu, effortMenuTrigger, modelMenu, modelMenuTrigger, projectMenu, projectMenuTrigger, prompt, requiredElement, slashCommandMenu } from "./dom.ts"
 import { showGoalPanel } from "./inspector.ts"
 import { runAction } from "./runtime.ts"
-import { currentDraftKey, selectChatProject } from "./sessions.ts"
+import { currentDraftKey, selectChatProject, sessionTurnActive } from "./sessions.ts"
 import { render } from "./shell.ts"
 import { compactCurrentSession } from "./slash-runner.ts"
 import { state } from "./state.ts"
 
 export function bindComposerEvents(): void {
-    requiredElement<HTMLFormElement>("composer").addEventListener("submit", (event) => { event.preventDefault(); runAction(sendPrompt, state.viewedSessionId) })
+    requiredElement<HTMLFormElement>("composer").addEventListener("submit", (event) => { event.preventDefault(); runAction(() => sendPrompt(), state.viewedSessionId) })
 
   prompt.addEventListener("input", () => {
     if (state.chatProjectPath) state.drafts[currentDraftKey()] = prompt.value
@@ -43,11 +45,23 @@ export function bindComposerEvents(): void {
       closeSlashCommandMenu()
       return
     }
-    if (event.key === "Enter" && !event.shiftKey && !event.isComposing) {
-      event.preventDefault()
-      runAction(sendPrompt, state.viewedSessionId)
+    const viewed = state.viewedSessionId
+    const lastPrompt = state.lastPrompts[viewed] || ""
+    const action = composerKeyAction(event, {
+      running: Boolean(viewed) && sessionTurnActive(viewed),
+      empty: !prompt.value.trim(),
+      canRecall: Boolean(lastPrompt.trim()),
+    })
+    if (action === "default") return
+    event.preventDefault()
+    if (action === "recall") {
+      setPrompt(lastPrompt, true)
+      return
     }
+    runAction(() => sendPrompt(action === "steer" ? "steer" : "queue"), viewed)
   })
+
+  contextMeter.addEventListener("click", () => runAction(() => inspectContext(), state.viewedSessionId))
 
   composerMenuTrigger.addEventListener("click", () => {
     closeComposerSelectMenus()

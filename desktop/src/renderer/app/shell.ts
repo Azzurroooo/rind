@@ -150,6 +150,9 @@ export const shortcutRows: Array<[string, string]> = [
   ["Ctrl+1…9", "Switch to a loaded session"],
   ["Enter", "Send message"],
   ["Shift+Enter", "New line"],
+  ["Enter (running)", "Queue a follow-up"],
+  ["Alt+Enter (running)", "Steer the running turn"],
+  ["Up (empty composer)", "Recall the last prompt"],
   ["Esc", "Close menus / stop turn / focus composer"],
   ["?", "This cheat sheet"],
 ]
