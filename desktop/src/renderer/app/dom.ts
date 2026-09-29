@@ -1,0 +1,173 @@
+import brandMarkUrl from "../assets/brand-mark.svg"
+import { composerRegionMarkup } from "../composer-region.ts"
+import { Download, GitBranch, MonitorSmartphone, PanelLeft, PanelRight, renderIcon, Search, Settings } from "../icons.ts"
+import { remoteAccessMarkup } from "../remote-access.ts"
+import { escapeHtml } from "./html.ts"
+
+
+
+export const root = document.querySelector<HTMLElement>("#app")
+if (!root) throw new Error("Renderer root is missing.")
+export const appRoot: HTMLElement = root
+document.body.dataset.platform = window.api.platform
+export const appVersion = await window.api.version()
+
+appRoot.innerHTML = `
+  <div class="app-shell">
+    <header class="topbar">
+      <div class="identity">
+        <div class="brand-group">
+          <img class="brand-mark" src="${brandMarkUrl}" alt="" aria-hidden="true" />
+          <span class="brand">Rind</span>
+        </div>
+        <span id="connection" class="connection"><span class="status-pip"></span><span id="connection-text">Stopped</span></span>
+      </div>
+      <div class="topbar-actions">
+        <span class="app-version" aria-label="Rind version">v${escapeHtml(appVersion)}</span>
+        <button id="toggle-tasks" type="button" class="ghost-button" title="Background tasks" aria-label="Toggle background task monitor" aria-expanded="false">Tasks</button>
+        <button id="open-palette" type="button" class="ghost-button" title="Command palette (Ctrl+K)" aria-label="Open command palette">${renderIcon(Search)}</button>
+        <button id="open-remote" type="button" class="ghost-button" title="Remote access" aria-label="Remote access">${renderIcon(MonitorSmartphone)}</button>
+        <button id="toggle-theme" type="button" class="ghost-button" title="Switch theme" aria-label="Switch theme">Theme</button>
+        <button id="toggle-sidebar" type="button" class="ghost-button" title="Toggle projects sidebar" aria-label="Toggle projects sidebar" aria-expanded="true">${renderIcon(PanelLeft)}</button>
+        <button id="toggle-files" type="button" class="ghost-button" title="Browse active project files" aria-label="Browse active project files" aria-expanded="false">${renderIcon(PanelRight)}</button>
+        <button id="open-shortcuts" type="button" class="ghost-button" title="Keyboard shortcuts (?)" aria-label="Keyboard shortcuts">?</button>
+        <button id="open-settings" type="button" class="ghost-button" title="Open settings" aria-label="Open settings">${renderIcon(Settings)}</button>
+      </div>
+    </header>
+    <main class="layout">
+      <aside id="sidebar" class="sidebar" aria-label="Projects and sessions">
+        <div id="sidebar-resize-handle" class="sidebar-resize-handle" role="separator" aria-label="Resize projects sidebar" aria-orientation="vertical"></div>
+        <div class="sidebar-actions">
+          <button id="new-session" type="button" class="primary-button" title="Start a new chat in the active project">New chat</button>
+        </div>
+        <div class="sidebar-body">
+          <section id="recent-sessions" class="recent-sessions" hidden>
+            <div class="sidebar-heading"><span>Recent</span></div>
+            <div id="recent-list" class="recent-list"></div>
+          </section>
+          <div class="sidebar-heading"><span>Projects</span><button id="sidebar-add-project" type="button" class="ghost-button" title="Add project">Add</button></div>
+          <div class="session-search-wrap">
+            <input id="session-search" type="search" placeholder="Search loaded sessions…" aria-label="Search loaded sessions" autocomplete="off" />
+          </div>
+          <div id="project-list" class="project-list"></div>
+        </div>
+      </aside>
+      <section class="conversation">
+        <div class="conversation-head"><div class="conversation-title"><strong id="session-title">New conversation</strong><span id="session-id" class="subtle"></span></div><div class="session-actions"><button id="export-session" class="ghost-button" title="Export conversation" aria-label="Export conversation">${renderIcon(Download)}</button><button id="fork-session" class="ghost-button" title="Fork conversation" aria-label="Fork conversation">${renderIcon(GitBranch)}</button></div></div>
+        <div id="notice" class="notice" role="status" hidden><span id="notice-text"></span><button id="retry" type="button" class="ghost-button" hidden>Retry</button></div>
+        <div class="stream-wrap">
+          <div id="message-stream" class="message-stream" aria-live="polite"></div>
+          <button id="jump-latest" type="button" class="jump-latest" hidden>Jump to latest</button>
+        </div>
+        ${composerRegionMarkup()}
+      </section>
+      <aside id="file-panel" class="file-panel" aria-label="Project files">
+        <div id="file-resize-handle" class="file-resize-handle" role="separator" aria-label="Resize file panel" aria-orientation="vertical"></div>
+        <div class="file-panel-head"><strong>Files</strong><button id="close-files" type="button" class="ghost-button" title="Close files">Close</button></div>
+        <div class="file-workspace">
+          <section id="file-preview" class="file-preview"><p class="subtle">Select a file to preview.</p></section>
+          <div id="file-tree" class="file-tree"></div>
+        </div>
+      </aside>
+    </main>
+    ${remoteAccessMarkup()}
+    <dialog id="settings-dialog" class="settings-dialog" aria-label="Settings">
+      <form id="settings-form" method="dialog">
+        <div class="settings-heading"><div><h2>Settings</h2><p class="subtle">Models, connection and preferences.</p></div><button id="close-settings" type="button" class="ghost-button" title="Close settings">Close</button></div>
+        <h3 class="settings-section-title">Model provider</h3>
+        <label>API key<input id="settings-api-key" type="password" autocomplete="new-password" placeholder="Leave blank to keep the current key" /></label>
+        <p id="settings-key-status" class="subtle"></p>
+        <label>Base URL<input id="settings-base-url" type="url" placeholder="https://api.openai.com/v1" /></label>
+        <label>Model<input id="settings-model" type="text" placeholder="Default model" /></label>
+        <label>Reasoning effort<select id="settings-reasoning"><option value="">Provider default</option><option value="low">Low</option><option value="medium">Medium</option><option value="high">High</option><option value="xhigh">Extra high</option><option value="max">Maximum</option></select></label>
+        <h3 class="settings-section-title">Preferences</h3>
+        <label class="settings-check"><input id="settings-notifications" type="checkbox" /><span>Desktop notifications when the window is not focused</span></label>
+        <div class="settings-actions"><button id="cancel-settings" type="button" class="ghost-button">Cancel</button><button id="save-settings" type="submit" class="primary-button">Save</button></div>
+      </form>
+    </dialog>
+    <dialog id="shortcuts-dialog" class="settings-dialog shortcuts-dialog">
+      <form method="dialog">
+        <div class="settings-heading"><strong>Keyboard shortcuts</strong><button id="close-shortcuts" type="button" class="ghost-button" title="Close shortcuts">Close</button></div>
+        <div class="shortcut-table" id="shortcut-table"></div>
+        <div class="settings-actions"><button type="button" id="dismiss-shortcuts" class="ghost-button">Close</button></div>
+      </form>
+    </dialog>
+    <div id="command-palette" class="command-palette" role="dialog" aria-modal="true" aria-label="Command palette" hidden>
+      <div class="command-palette-box">
+        <input id="palette-input" type="text" placeholder="Type a command…" aria-label="Search commands" autocomplete="off" />
+        <div id="palette-list" class="command-palette-list" role="listbox" aria-label="Commands"></div>
+      </div>
+    </div>
+  </div>
+`
+
+export const connection = requiredElement("connection")
+export const connectionText = requiredElement("connection-text")
+export const projectMenuTrigger = requiredElement<HTMLButtonElement>("project-menu-trigger")
+export const projectMenuLabel = requiredElement("project-menu-label")
+export const projectMenu = requiredElement("project-menu")
+export const projectList = requiredElement("project-list")
+export const recentSessions = requiredElement("recent-sessions")
+export const recentList = requiredElement("recent-list")
+export const sessionTitle = requiredElement("session-title")
+export const sessionIdLabel = requiredElement("session-id")
+export const modelMenuTrigger = requiredElement<HTMLButtonElement>("model-menu-trigger")
+export const modelMenuLabel = requiredElement("model-menu-label")
+export const modelMenu = requiredElement("model-menu")
+export const effortMenuTrigger = requiredElement<HTMLButtonElement>("effort-menu-trigger")
+export const effortMenuLabel = requiredElement("effort-menu-label")
+export const effortMenu = requiredElement("effort-menu")
+export const attachButton = requiredElement<HTMLButtonElement>("attach-button")
+export const attachInput = requiredElement<HTMLInputElement>("attach-input")
+export const attachmentChips = requiredElement("attachment-chips")
+export const taskMonitorShell = requiredElement("task-monitor-shell")
+export const taskMonitorDock = requiredElement("task-monitor")
+export const goalPanelShell = requiredElement("goal-panel-shell")
+export const goalPanel = requiredElement("goal-panel")
+export const sessionSearchInput = requiredElement<HTMLInputElement>("session-search")
+export const paletteOverlay = requiredElement("command-palette")
+export const paletteInput = requiredElement<HTMLInputElement>("palette-input")
+export const paletteList = requiredElement("palette-list")
+export const shortcutsDialog = requiredElement<HTMLDialogElement>("shortcuts-dialog")
+export const shortcutTable = requiredElement("shortcut-table")
+export const messageStream = requiredElement("message-stream")
+export const jumpLatest = requiredElement<HTMLButtonElement>("jump-latest")
+export const planDockShell = requiredElement("plan-dock-shell")
+export const planDock = requiredElement("plan-dock")
+export const pendingInputDock = requiredElement("pending-input-dock")
+export const notice = requiredElement("notice")
+export const noticeText = requiredElement("notice-text")
+export const retry = requiredElement<HTMLButtonElement>("retry")
+export const contextMeter = requiredElement("context-meter")
+export const prompt = requiredElement<HTMLTextAreaElement>("prompt")
+export const send = requiredElement<HTMLButtonElement>("send")
+export const interrupt = requiredElement<HTMLButtonElement>("interrupt")
+export const composerMenuTrigger = requiredElement<HTMLButtonElement>("composer-menu-trigger")
+export const composerMenu = requiredElement("composer-menu")
+export const compactContext = requiredElement<HTMLButtonElement>("compact-context")
+export const slashCommandMenu = requiredElement("slash-command-menu")
+export const sidebar = requiredElement("sidebar")
+export const sidebarResizeHandle = requiredElement("sidebar-resize-handle")
+export const filePanel = requiredElement("file-panel")
+export const fileResizeHandle = requiredElement("file-resize-handle")
+export const fileTree = requiredElement("file-tree")
+export const filePreview = requiredElement("file-preview")
+export const filesToggle = requiredElement<HTMLButtonElement>("toggle-files")
+export const newSessionButton = requiredElement<HTMLButtonElement>("new-session")
+export const sidebarToggle = requiredElement<HTMLButtonElement>("toggle-sidebar")
+export const settingsDialog = requiredElement<HTMLDialogElement>("settings-dialog")
+export const settingsForm = requiredElement<HTMLFormElement>("settings-form")
+export const settingsApiKey = requiredElement<HTMLInputElement>("settings-api-key")
+export const settingsBaseUrl = requiredElement<HTMLInputElement>("settings-base-url")
+export const settingsModel = requiredElement<HTMLInputElement>("settings-model")
+export const settingsReasoning = requiredElement<HTMLSelectElement>("settings-reasoning")
+export const settingsKeyStatus = requiredElement("settings-key-status")
+export const settingsNotifications = requiredElement<HTMLInputElement>("settings-notifications")
+export const saveSettingsButton = requiredElement<HTMLButtonElement>("save-settings")
+
+export function requiredElement<T extends HTMLElement = HTMLElement>(id: string) {
+  const element = document.getElementById(id) as T | null
+  if (!element) throw new Error(`Missing ${id}.`)
+  return element
+}
+export const composerForm = requiredElement<HTMLFormElement>("composer")

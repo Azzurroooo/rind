@@ -1,0 +1,136 @@
+import { canConfirmQuestion, questionAnswer, selectQuestionOption, updateQuestionInput } from "../question-state.ts"
+import { autoGrowPrompt, retryLastPrompt, selectSlashCommand } from "./composer.ts"
+import { interrupt, jumpLatest, messageStream, planDock, planDockShell, prompt, requiredElement, retry } from "./dom.ts"
+import { answerQuestion, cancelActiveTurn, questionSelectionFor, restartRuntime, runAction } from "./runtime.ts"
+import { chatProject, currentDraftKey, switchSession } from "./sessions.ts"
+import { render } from "./shell.ts"
+import { state, toolOpenRequests, vars } from "./state.ts"
+import { keepToolHeaderVisible, setToolExpanded, toolHeaderOffset } from "./stream.ts"
+
+export function bindConversationEvents(): void {
+  messageStream.addEventListener("click", (event) => {
+    const value = (event.target as HTMLElement).closest<HTMLButtonElement>("[data-starter]")?.dataset.starter
+    if (value) { prompt.value = value; state.drafts[currentDraftKey()] = value; autoGrowPrompt(); prompt.focus() }
+  })
+
+  interrupt.addEventListener("click", () => cancelActiveTurn(state.viewedSessionId))
+
+  retry.addEventListener("click", () => runAction(async () => {
+    const project = chatProject()
+    if (!project?.available) return
+    await restartRuntime(project.path)
+    state.notice = ""
+    render()
+  }))
+
+  jumpLatest.addEventListener("click", () => {
+    messageStream.scrollTop = messageStream.scrollHeight
+    jumpLatest.hidden = true
+  })
+
+  messageStream.addEventListener("scroll", () => {
+    const nearBottom = messageStream.scrollHeight - messageStream.scrollTop - messageStream.clientHeight < 80
+    if (nearBottom) jumpLatest.hidden = true
+  })
+
+  planDock.addEventListener("click", (event) => {
+    if (!(event.target as HTMLElement).closest("[data-toggle-plan]")) return
+    state.planDock.collapsed = !state.planDock.collapsed
+    planDockShell.classList.toggle("collapsed", state.planDock.collapsed)
+    const trigger = planDock.querySelector<HTMLButtonElement>("[data-toggle-plan]")
+    trigger?.setAttribute("aria-expanded", String(!state.planDock.collapsed))
+    planDock.querySelector<HTMLElement>(".plan-dock-body")?.setAttribute("aria-hidden", String(state.planDock.collapsed))
+  })
+
+  messageStream.addEventListener("click", (event) => {
+    const target = event.target as HTMLElement
+    const copyMessage = target.closest<HTMLButtonElement>("[data-copy-message]")?.dataset.copyMessage
+    if (copyMessage) {
+      const entry = state.conversation.entries.find((item) => item.id === copyMessage)
+      const content = entry && (entry.kind === "user" || entry.kind === "assistant") ? entry.content : ""
+      if (content) runAction(() => navigator.clipboard.writeText(content))
+      return
+    }
+    if (target.closest<HTMLButtonElement>("[data-retry-turn]")) {
+      runAction(retryLastPrompt, state.viewedSessionId)
+      return
+    }
+    const toggle = target.closest<HTMLButtonElement>("[data-toggle-tool]")
+    if (toggle?.dataset.toggleTool) {
+      const id = toggle.dataset.toggleTool
+      const headerOffset = toolHeaderOffset(id)
+      if (state.expandedTools.has(id)) {
+        toolOpenRequests.set(id, (toolOpenRequests.get(id) || 0) + 1)
+        vars.toolAnimationUntil = performance.now() + 380
+        const next = new Set(state.expandedTools)
+        next.delete(id)
+        state.expandedTools = next
+        setToolExpanded(id, false)
+        keepToolHeaderVisible(id, headerOffset)
+        return
+      }
+      const requestId = (toolOpenRequests.get(id) || 0) + 1
+      toolOpenRequests.set(id, requestId)
+      vars.toolAnimationUntil = performance.now() + 380
+      state.revealedTools.add(id)
+      render()
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          if (!state.revealedTools.has(id) || toolOpenRequests.get(id) !== requestId) return
+          const next = new Set(state.expandedTools)
+          next.add(id)
+          state.expandedTools = next
+          setToolExpanded(id, true)
+          keepToolHeaderVisible(id, headerOffset)
+        })
+      })
+      return
+    }
+    const copy = target.closest<HTMLButtonElement>(".copy-code")
+    if (copy?.dataset.copy) {
+      runAction(() => navigator.clipboard.writeText(copy.dataset.copy || ""))
+      return
+    }
+    const commandName = target.closest<HTMLButtonElement>("[data-command-prefill]")?.dataset.commandPrefill
+    if (commandName) {
+      const command = state.slashCommands.find((item) => item.name === commandName)
+      if (command) selectSlashCommand(command)
+      return
+    }
+    const commandSessionId = target.closest<HTMLButtonElement>("[data-command-session-id]")?.dataset.commandSessionId
+    if (commandSessionId) {
+      runAction(() => switchSession(commandSessionId), commandSessionId)
+      return
+    }
+    const questionOption = target.closest<HTMLButtonElement>("[data-question-option-index]")
+    if (questionOption && state.conversation.question) {
+      const index = Number(questionOption.dataset.questionOptionIndex)
+      if (Number.isInteger(index)) {
+        const question = state.conversation.question
+        const selection = questionSelectionFor(question)
+        state.questionSelection = selectQuestionOption(selection, index, question.options.length)
+        render()
+        if (index === question.options.length) requiredElement<HTMLInputElement>("question-answer").focus()
+      }
+    }
+  })
+
+  messageStream.addEventListener("input", (event) => {
+    const target = event.target as HTMLElement
+    if (target.id !== "question-answer" || !(target instanceof HTMLInputElement) || !state.conversation.question) return
+    const selection = updateQuestionInput(questionSelectionFor(state.conversation.question), target.value)
+    state.questionSelection = selection
+    const form = requiredElement<HTMLFormElement>("question-form")
+    const confirm = form.querySelector<HTMLButtonElement>("[type=submit]")
+    if (confirm) confirm.disabled = !canConfirmQuestion(selection, state.conversation.question.options.length)
+  })
+
+  messageStream.addEventListener("submit", (event) => {
+    event.preventDefault()
+    if ((event.target as HTMLElement).id !== "question-form") return
+    const question = state.conversation.question
+    if (!question) return
+    const answer = questionAnswer(questionSelectionFor(question), question.options)
+    if (answer) runAction(() => answerQuestion(answer), state.viewedSessionId)
+  })
+}
