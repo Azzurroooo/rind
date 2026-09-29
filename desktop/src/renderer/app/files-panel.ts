@@ -1,7 +1,9 @@
 import { sameProjectPath as samePath } from "../project-selection.ts"
 import { highlightFile } from "../syntax-highlight.ts"
+import { projectRelativePath } from "../tool-display.ts"
 import { filePreview, fileResizeHandle, filesToggle, fileTree, sidebarResizeHandle } from "./dom.ts"
 import { escapeAttribute, escapeHtml } from "./html.ts"
+import { showToast } from "./overlays.ts"
 import { runAction } from "./runtime.ts"
 import { applyOverview, viewedProject } from "./sessions.ts"
 import { render, startResize } from "./shell.ts"
@@ -120,4 +122,16 @@ export function bindFilesPanelEvents(): void {
   startResize(sidebarResizeHandle, "sidebar")
 
   startResize(fileResizeHandle, "files")
+}
+
+/** Opens a path from a read_file row in the Files tab (spec section 5.3). */
+export async function openToolFile(path: string) {
+  const project = viewedProject()
+  const relative = project ? projectRelativePath(path, project.path) : undefined
+  if (!project?.available || !relative) {
+    showToast(project?.available ? "That file is outside this project." : "Choose an available project to open files.")
+    return
+  }
+  if (!state.filesOpen) await setFilesOpen(true)
+  await previewFile(relative)
 }

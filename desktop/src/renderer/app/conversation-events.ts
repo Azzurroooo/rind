@@ -2,6 +2,7 @@ import { canConfirmQuestion, questionAnswer, selectQuestionOption, updateQuestio
 import { autoGrowPrompt, retryLastPrompt, selectSlashCommand } from "./composer.ts"
 import { interrupt, jumpLatest, messageStream, planDock, planDockShell, prompt, requiredElement, retry } from "./dom.ts"
 import { answerQuestion, cancelActiveTurn, questionSelectionFor, restartRuntime, runAction } from "./runtime.ts"
+import { openToolFile } from "./files-panel.ts"
 import { chatProject, currentDraftKey, switchSession } from "./sessions.ts"
 import { render } from "./shell.ts"
 import { state, toolOpenRequests, vars } from "./state.ts"
@@ -55,11 +56,31 @@ export function bindConversationEvents(): void {
       runAction(retryLastPrompt, state.viewedSessionId)
       return
     }
-    const stepsId = target.closest<HTMLButtonElement>("[data-toggle-steps]")?.dataset.toggleSteps
-    if (stepsId) {
-      const expanded = target.closest<HTMLButtonElement>("[data-toggle-steps]")?.getAttribute("aria-expanded") === "true"
-      state.stepGroups = new Map([...state.stepGroups, [stepsId, !expanded]])
+    const segmentTrigger = target.closest<HTMLButtonElement>("[data-toggle-segment]")
+    if (segmentTrigger?.dataset.toggleSegment) {
+      const expanded = segmentTrigger.getAttribute("aria-expanded") === "true"
+      state.segmentFolds = new Map([...state.segmentFolds, [segmentTrigger.dataset.toggleSegment, !expanded]])
       render()
+      return
+    }
+    const earlierId = target.closest<HTMLButtonElement>("[data-segment-earlier]")?.dataset.segmentEarlier
+    if (earlierId) {
+      state.segmentFolds = new Map([...state.segmentFolds, [earlierId, true]])
+      render()
+      return
+    }
+    const moreKey = target.closest<HTMLButtonElement>("[data-tool-more]")?.dataset.toolMore
+    if (moreKey) {
+      const next = new Set(state.toolBodiesShown)
+      if (next.has(moreKey)) next.delete(moreKey)
+      else next.add(moreKey)
+      state.toolBodiesShown = next
+      render()
+      return
+    }
+    const openFile = target.closest<HTMLButtonElement>("[data-open-file]")?.dataset.openFile
+    if (openFile) {
+      runAction(() => openToolFile(openFile))
       return
     }
     const toggle = target.closest<HTMLButtonElement>("[data-toggle-tool]")

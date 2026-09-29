@@ -64,8 +64,10 @@ export type AppState = {
   questionSelection?: QuestionSelection
   expandedTools: Set<string>
   revealedTools: Set<string>
-  /** Explicit open or closed choice per "N steps" group; absent means automatic. */
-  stepGroups: ReadonlyMap<string, boolean>
+  /** Explicit open or closed choice per work segment; absent means automatic. */
+  segmentFolds: ReadonlyMap<string, boolean>
+  /** "id:all", "id:raw" and "id:details" toggles on tool bodies. */
+  toolBodiesShown: ReadonlySet<string>
   planDock: PlanDockPresentation
   composerMenuOpen: boolean
   compacting: boolean

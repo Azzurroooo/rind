@@ -63,7 +63,8 @@ export function clearRuntimeTurnState() {
 export function resetConversationPresentation(resetPlanDock = true) {
   state.expandedTools = new Set()
   state.revealedTools = new Set()
-  state.stepGroups = new Map()
+  state.segmentFolds = new Map()
+  state.toolBodiesShown = new Set()
   toolOpenRequests.clear()
   vars.toolAnimationUntil = 0
   if (resetPlanDock) {

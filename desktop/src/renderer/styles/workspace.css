@@ -81,8 +81,8 @@ body { min-height: 0; }
   scrollbar-width: thin;
   scrollbar-color: var(--line-strong) transparent;
 }
-.composer textarea::-webkit-scrollbar, .message-stream::-webkit-scrollbar, .recent-list::-webkit-scrollbar, .project-list::-webkit-scrollbar, .file-tree::-webkit-scrollbar, .file-preview::-webkit-scrollbar, .ledger-output::-webkit-scrollbar, .plan-dock-content::-webkit-scrollbar, .file-diff-lines::-webkit-scrollbar { width: 8px; height: 8px; }
-.composer textarea::-webkit-scrollbar-thumb, .message-stream::-webkit-scrollbar-thumb, .recent-list::-webkit-scrollbar-thumb, .project-list::-webkit-scrollbar-thumb, .file-tree::-webkit-scrollbar-thumb, .file-preview::-webkit-scrollbar-thumb, .ledger-output::-webkit-scrollbar-thumb, .plan-dock-content::-webkit-scrollbar-thumb, .file-diff-lines::-webkit-scrollbar-thumb { border: 2px solid transparent; border-radius: 5px; background: var(--line-strong); background-clip: padding-box; }
+.composer textarea::-webkit-scrollbar, .message-stream::-webkit-scrollbar, .recent-list::-webkit-scrollbar, .project-list::-webkit-scrollbar, .file-tree::-webkit-scrollbar, .file-preview::-webkit-scrollbar, .tool-terminal::-webkit-scrollbar, .plan-dock-content::-webkit-scrollbar, .file-diff-lines::-webkit-scrollbar { width: 8px; height: 8px; }
+.composer textarea::-webkit-scrollbar-thumb, .message-stream::-webkit-scrollbar-thumb, .recent-list::-webkit-scrollbar-thumb, .project-list::-webkit-scrollbar-thumb, .file-tree::-webkit-scrollbar-thumb, .file-preview::-webkit-scrollbar-thumb, .tool-terminal::-webkit-scrollbar-thumb, .plan-dock-content::-webkit-scrollbar-thumb, .file-diff-lines::-webkit-scrollbar-thumb { border: 2px solid transparent; border-radius: 5px; background: var(--line-strong); background-clip: padding-box; }
 @media (max-width: 760px) {
   #app .layout, #app.files-open .layout { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); }
   .sidebar { position: fixed; display: grid; top: 44px; bottom: 0; left: 0; width: min(84vw, 320px); z-index: 12; box-shadow: var(--shadow-dialog); transform: translateX(-100%); transition: transform 220ms cubic-bezier(.2, .8, .2, 1); }

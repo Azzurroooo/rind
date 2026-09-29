@@ -1,6 +1,6 @@
 import { type RuntimeEvent } from "../../preload/types.ts"
 import { mergeTasks, normalizeTask } from "../task-monitor.ts"
-import { reduceEvent, type Entry } from "../timeline-model.ts"
+import { reduceEvent } from "../timeline-model.ts"
 import { decideTurnEvent } from "../turn-state.ts"
 import { asRecordText } from "./html.ts"
 import { loadGoal, pollTaskMonitor, renderTaskMonitorDock } from "./inspector.ts"
@@ -13,13 +13,6 @@ import { state, vars } from "./state.ts"
 
 
 
-// Spec section 5: a failed call stays open so its error is visible.
-function keepFailedToolOpen(entries: readonly Entry[], toolCallId: string) {
-  const tool = toolCallId ? entries.find((entry) => entry.kind === "tool" && entry.toolCallId === toolCallId) : undefined
-  if (!tool || tool.kind !== "tool" || tool.status !== "error") return
-  state.expandedTools = new Set([...state.expandedTools, tool.id])
-  state.revealedTools = new Set([...state.revealedTools, tool.id])
-}
 
 export function handleRuntimeEvent(envelope: RuntimeEvent) {
   // Sequence numbers restart at 1 with every worker process generation; adopt
@@ -68,7 +61,6 @@ export function handleRuntimeEvent(envelope: RuntimeEvent) {
   }
   const nextConversation = reduceEvent(conversationFor(sessionId), envelope)
   setConversationFor(sessionId, nextConversation)
-  if (envelope.type === "tool_result" && sessionId === state.viewedSessionId) keepFailedToolOpen(nextConversation.entries, asRecordText(envelope.event.tool_call_id))
   if (turnSettled) {
     delete state.activeTurnIds[sessionId]
     delete state.pendingInputs[sessionId]

@@ -5,10 +5,6 @@ import { createConversation, reduceEvent } from "../src/renderer/timeline-model.
 import {
   backgroundWaitFrom,
   compactionLine,
-  foldToolRuns,
-  isStepGroup,
-  stepGroupOpen,
-  summarizeSteps,
 } from "../src/renderer/timeline-system.ts"
 
 function event(type, data = {}, turnId = "turn-1") {
@@ -91,42 +87,4 @@ test("turn_failed errors are retryable", () => {
   const entry = state.entries.at(-1)
   assert.equal(entry.kind, "error")
   assert.equal(entry.retryable, true)
-})
-
-const tool = (id, status = "completed") => ({ kind: "tool", id, status })
-const text = (id) => ({ kind: "assistant", id })
-
-test("foldToolRuns folds only runs longer than the threshold", () => {
-  const three = [tool("a"), tool("b"), tool("c")]
-  assert.deepEqual(foldToolRuns(three), three)
-  const entries = [text("m1"), tool("a"), tool("b"), tool("c"), tool("d"), text("m2"), tool("e")]
-  const items = foldToolRuns(entries)
-  assert.equal(items.length, 4)
-  assert.equal(items[0].id, "m1")
-  assert.ok(isStepGroup(items[1]))
-  assert.equal(items[1].id, "steps:a")
-  assert.deepEqual(items[1].items.map((item) => item.id), ["a", "b", "c", "d"])
-  assert.equal(items[2].id, "m2")
-  assert.equal(isStepGroup(items[3]), false)
-  assert.equal(foldToolRuns([tool("a"), tool("b")], 1).length, 1)
-})
-
-test("foldToolRuns never mutates its input", () => {
-  const entries = Object.freeze([tool("a"), tool("b"), tool("c"), tool("d")].map(Object.freeze))
-  const items = foldToolRuns(entries)
-  assert.equal(entries.length, 4)
-  assert.equal(items[0].items[0], entries[0])
-})
-
-test("summarizeSteps counts live and failed calls", () => {
-  const summary = summarizeSteps([tool("a", "running"), tool("b", "pending"), tool("c", "error"), tool("d")])
-  assert.deepEqual(summary, { total: 4, running: 2, failed: 1 })
-})
-
-test("stepGroupOpen follows live state unless the person chose", () => {
-  assert.equal(stepGroupOpen({ total: 4, running: 0, failed: 0 }, undefined), false)
-  assert.equal(stepGroupOpen({ total: 4, running: 1, failed: 0 }, undefined), true)
-  assert.equal(stepGroupOpen({ total: 4, running: 0, failed: 1 }, undefined), true)
-  assert.equal(stepGroupOpen({ total: 4, running: 1, failed: 0 }, false), false)
-  assert.equal(stepGroupOpen({ total: 4, running: 0, failed: 0 }, true), true)
 })

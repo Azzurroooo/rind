@@ -1,131 +1,107 @@
-import { diffLineCounts, extractDiffText, parseDiffLines } from "../diff-text.ts"
-import { fileMutationPreview, formatDuration, type ToolEntry } from "../timeline-model.ts"
-import { asRecord, escapeAttribute, escapeHtml } from "./html.ts"
-import { ChevronRight, CircleCheck, CircleX, Clock, LoaderCircle, renderIcon } from "../icons.ts"
+// Call rows and work-segment folds (spec sections 5.1 and 5.2). Content comes
+// from the pure formatters in tool-display.ts; this module only builds markup.
+
+import { formatDuration, type ToolEntry, type ToolStatus } from "../timeline-model.ts"
+import { toolView, type MetaPart, type ToolView } from "../tool-display.ts"
+import { segmentOpenMode, segmentSummary, trimmedCalls, type WorkSegment } from "../work-segments.ts"
+import { Ban, Check, ChevronRight, CircleX, Hand, LoaderCircle, renderIcon } from "../icons.ts"
+import { renderToolBody, renderToolError } from "./tool-bodies.ts"
+import { escapeAttribute, escapeHtml } from "./html.ts"
 import { state } from "./state.ts"
 
-const statusLabels: Record<ToolEntry["status"], string> = {
-  pending: "Waiting",
+export type RowStatus = ToolStatus | "waiting"
+
+const statusLabels: Record<RowStatus, string> = {
+  pending: "Starting",
   running: "Running",
   completed: "Done",
   error: "Failed",
+  cancelled: "Cancelled",
+  waiting: "Waiting on you",
 }
 
-/** 14px status glyph with an accessible label (spec section 5). */
-export function renderToolStatusIcon(status: ToolEntry["status"]): string {
-  const icon = status === "running" ? LoaderCircle : status === "error" ? CircleX : status === "completed" ? CircleCheck : Clock
+/** Bodies that stream while live stay open until the call finishes. */
+const liveBodies = new Set(["terminal", "code", "diff"])
+
+/** 14px status glyph with an accessible label. */
+export function renderToolStatusIcon(status: RowStatus): string {
+  const icon = status === "running" || status === "pending" ? LoaderCircle
+    : status === "error" ? CircleX
+      : status === "cancelled" ? Ban
+        : status === "waiting" ? Hand
+          : Check
   return `<span class="tool-status tool-status-${status}" role="img" aria-label="${statusLabels[status]}">${renderIcon(icon, "tool-status-icon")}</span>`
 }
 
+function renderMeta(parts: MetaPart[]): string {
+  if (!parts.length) return ""
+  return `<span class="tool-meta">${parts.map((part) => `<span class="tool-meta-part${part.tone ? ` tone-${part.tone}` : ""}">${escapeHtml(part.text)}</span>`).join("")}</span>`
+}
 
+function renderTarget(view: ToolView): string {
+  if (!view.target) return ""
+  return view.path
+    ? `<span class="tool-target tool-target-path"><bdi>${escapeHtml(view.target)}</bdi></span>`
+    : `<span class="tool-target">${escapeHtml(view.target)}</span>`
+}
 
 export function renderTool(tool: ToolEntry): string {
-  const open = state.expandedTools.has(tool.id)
+  const view = toolView(tool)
+  if (view.hidden) return ""
+  const live = tool.status === "running" || tool.status === "pending"
+  const body = view.body
+  const autoOpen = Boolean(body && live && liveBodies.has(body.type))
+  const open = Boolean(body) && (autoOpen || state.expandedTools.has(tool.id))
   const revealed = open || state.revealedTools.has(tool.id)
-  const duration = formatDuration(tool.durationMs)
-  // Prefer the unified diff recorded in the tool RESULT; requests without a
-  // result diff keep the argument-synthesized preview as a fallback.
-  const resultDiffLines = parseDiffLines(extractDiffText(tool.toolName, tool.result))
-  const argDiff = resultDiffLines.length ? undefined : fileMutationPreview(tool.toolName, tool.arguments)
-  const hasDiffPreview = Boolean(resultDiffLines.length || argDiff)
-  const body = renderToolDetails(tool, hasDiffPreview)
-  return `
-    <div class="ledger-row tool-${tool.status}${open ? " open" : ""}" data-entry-id="${escapeAttribute(tool.id)}" data-tool-id="${escapeAttribute(tool.id)}">
-      <button type="button" class="ledger-trigger" data-toggle-tool="${escapeAttribute(tool.id)}" aria-expanded="${body ? String(open) : "false"}" ${body ? "" : "disabled"}>
-        ${renderToolStatusIcon(tool.status)}
-        <span class="ledger-verb">${escapeHtml(tool.toolName)}</span>
-        ${tool.argsPreview ? `<code class="ledger-arg">${escapeHtml(tool.argsPreview)}</code>` : ""}
-        ${tool.errorType ? `<span class="ledger-error">${escapeHtml(tool.errorType)}</span>` : ""}
-        ${duration ? `<span class="ledger-duration">${duration}</span>` : ""}
-        ${body ? renderIcon(ChevronRight, "ledger-chevron") : ""}
-      </button>
-      ${resultDiffLines.length ? renderResultDiff(tool, resultDiffLines) : argDiff ? renderFileMutationPreview(argDiff) : ""}
-      ${body && revealed ? `<div class="tool-detail-shell" aria-hidden="${String(!open)}"><div class="tool-detail-clip">${body}</div></div>` : ""}
-    </div>
-  `
-}
-
-export function renderResultDiff(tool: ToolEntry, lines: ReturnType<typeof parseDiffLines>): string {
-  const { added, removed, capped } = diffLineCounts(lines)
-  const filePath = resultDiffPath(tool)
-  const rows = lines.map((line) => {
-    const sign = line.kind === "added" ? "+" : line.kind === "removed" ? "-" : " "
-    return `<div class="file-diff-line file-diff-${line.kind}"><span>${sign}</span><code>${escapeHtml(line.text || " ")}</code></div>`
-  }).join("")
-  return `
-    <section class="file-diff-preview" aria-label="File change diff">
-      <div class="file-diff-head">
-        <span class="file-diff-label">Diff</span>
-        ${filePath ? `<code class="file-diff-path">${escapeHtml(filePath)}</code>` : ""}
-        <span class="file-diff-stats">${added ? `<span class="file-diff-added-count">+${added}</span>` : ""}${removed ? `<span class="file-diff-removed-count">-${removed}</span>` : ""}${capped ? `<span class="file-diff-capped">Capped</span>` : ""}</span>
-      </div>
-      <div class="file-diff-lines">${rows || `<div class="file-diff-empty">Empty file</div>`}</div>
-    </section>
-  `
-}
-
-export function resultDiffPath(tool: ToolEntry): string {
-  const fromArgs = typeof tool.arguments.file_path === "string" ? tool.arguments.file_path : ""
-  if (fromArgs) return fromArgs
-  const metaFiles = tool.result?.meta?.files
-  if (Array.isArray(metaFiles)) {
-    for (const file of metaFiles) {
-      const record = file && typeof file === "object" ? file as Record<string, unknown> : {}
-      if (typeof record.path === "string") return record.path
-    }
-  }
-  return ""
-}
-
-export function renderToolDetails(tool: ToolEntry, hasMutationPreview: boolean): string {
-  const inputs = Object.entries(tool.arguments).filter(([key]) => !hasMutationPreview || !["file_path", "content", "old_str", "new_str", "expected_sha256"].includes(key)).map(([key, value]) => `
-    <div class="tool-detail-row"><span>${escapeHtml(key)}</span>${renderToolValue(value)}</div>
-  `).join("")
-  const result = tool.result
-  const outcome = result?.ok === false
-    ? `<section class="tool-detail-section tool-detail-error"><strong>${escapeHtml(result.error || "Tool failed")}</strong>${result.errorType ? `<small>${escapeHtml(result.errorType)}</small>` : ""}</section>`
-    : result?.ok === true && result.data !== undefined
-      ? `<section class="tool-detail-section"><span>Result</span>${renderToolValue(result.data)}</section>`
-      : ""
-  const resultMeta = hasMutationPreview ? Object.fromEntries(Object.entries(result?.meta || {}).filter(([key]) => key !== "files")) : result?.meta
-  const meta = resultMeta && Object.keys(resultMeta).length
-    ? `<section class="tool-detail-section"><span>Details</span>${renderToolValue(resultMeta)}</section>`
+  const bodyId = `tool-body-${tool.id}`
+  const head = `${renderToolStatusIcon(tool.status)}<span class="tool-verb">${escapeHtml(view.verb)}</span>${renderTarget(view)}${renderMeta(view.meta)}${body ? renderIcon(ChevronRight, "tool-chevron") : ""}`
+  const trigger = body
+    ? `<button type="button" class="tool-trigger" data-toggle-tool="${escapeAttribute(tool.id)}" aria-expanded="${String(open)}" aria-controls="${escapeAttribute(bodyId)}">${head}</button>`
+    : view.opensFile
+      ? `<button type="button" class="tool-trigger" data-open-file="${escapeAttribute(view.opensFile)}" data-tooltip="Open in Files">${head}</button>`
+      : `<div class="tool-trigger">${head}</div>`
+  const shell = body && revealed
+    ? `<div class="tool-detail-shell" id="${escapeAttribute(bodyId)}" aria-hidden="${String(!open)}"><div class="tool-detail-clip">${renderToolBody(tool.id, body, live)}</div></div>`
     : ""
-  const fallback = !result || result.ok === null
-    ? (tool.output ? `<pre class="ledger-output"><code>${escapeHtml(tool.output)}</code></pre>` : "")
-    : ""
-  const error = !result?.error && tool.errorType
-    ? `<section class="tool-detail-section tool-detail-error"><strong>${escapeHtml(tool.errorType)}</strong></section>`
-    : ""
-  const content = inputs || outcome || meta || fallback || error
-  return content ? `<div class="tool-details">${inputs ? `<section class="tool-detail-section"><span>Input</span>${inputs}</section>` : ""}${outcome}${error}${meta}${fallback}</div>` : ""
+  return `<div class="tool-row tool-${tool.status}${open ? " open" : ""}" data-entry-id="${escapeAttribute(tool.id)}" data-tool-id="${escapeAttribute(tool.id)}">${trigger}${view.error ? renderToolError(tool.id, view.error) : ""}${shell}</div>`
 }
 
-export function renderFileMutationPreview(diff: ReturnType<typeof fileMutationPreview>): string {
-  if (!diff) return ""
-  const removed = diff.removed.filter((line) => line !== "…").length
-  const added = diff.added.filter((line) => line !== "…").length
-  const capped = diff.removed.includes("…") || diff.added.includes("…")
-  const rows = [
-    ...diff.removed.map((line) => `<div class="file-diff-line file-diff-removed"><span>-</span><code>${escapeHtml(line || " ")}</code></div>`),
-    ...diff.added.map((line) => `<div class="file-diff-line file-diff-added"><span>+</span><code>${escapeHtml(line || " ")}</code></div>`),
+/** A file_change that no write or edit row in its segment already shows. */
+export function renderFileChange(id: string, filePath: string): string {
+  return `<div class="tool-row tool-completed" data-entry-id="${escapeAttribute(id)}"><div class="tool-trigger">${renderToolStatusIcon("completed")}<span class="tool-verb">Changed</span><span class="tool-target tool-target-path"><bdi>${escapeHtml(filePath)}</bdi></span></div></div>`
+}
+
+function segmentStatus(segment: WorkSegment, failed: number, cancelled: number): RowStatus {
+  if (segment.awaiting) return "waiting"
+  if (segment.live) return "running"
+  if (failed) return "error"
+  return cancelled === segment.tools.length ? "cancelled" : "completed"
+}
+
+/** One fold per work segment: summary row, then rows when open. */
+export function renderWorkSegment(segment: WorkSegment): string {
+  const mode = segmentOpenMode(segment, state.segmentFolds.get(segment.id))
+  const summary = segmentSummary(segment.tools)
+  const status = segmentStatus(segment, summary.failed, summary.cancelled)
+  const duration = segment.live ? "" : formatDuration(summary.durationMs)
+  const bodyId = `${segment.id}:calls`
+  const failures = [
+    summary.failed ? `<span class="segment-failed">${summary.failed} failed</span>` : "",
+    summary.cancelled ? `<span class="segment-cancelled">${summary.cancelled} cancelled</span>` : "",
   ].join("")
-  return `
-    <section class="file-diff-preview" aria-label="File change preview">
-      <div class="file-diff-head">
-        <span class="file-diff-label">Changed</span>
-        ${diff.filePath ? `<code class="file-diff-path">${escapeHtml(diff.filePath)}</code>` : ""}
-        <span class="file-diff-stats">${added ? `<span class="file-diff-added-count">+${added}</span>` : ""}${removed ? `<span class="file-diff-removed-count">-${removed}</span>` : ""}${capped ? `<span class="file-diff-capped">Capped</span>` : ""}</span>
-      </div>
-      <div class="file-diff-lines">${rows || `<div class="file-diff-empty">Empty file</div>`}</div>
-    </section>
-  `
-}
-
-export function renderToolValue(value: unknown): string {
-  if (value === null || value === undefined) return `<code class="tool-detail-value">None</code>`
-  if (typeof value === "string") return `<code class="tool-detail-value">${escapeHtml(value)}</code>`
-  if (typeof value === "number" || typeof value === "boolean") return `<code class="tool-detail-value">${escapeHtml(String(value))}</code>`
-  if (Array.isArray(value)) return `<span class="tool-detail-value">${value.map(renderToolValue).join("")}</span>`
-  return `<span class="tool-detail-value">${Object.entries(asRecord(value)).map(([key, item]) => `<span class="tool-detail-row"><span>${escapeHtml(key)}</span>${renderToolValue(item)}</span>`).join("")}</span>`
+  const trimmed = mode === "trimmed" ? trimmedCalls(segment.tools) : { shown: segment.tools, earlier: 0 }
+  const earlier = trimmed.earlier
+    ? `<button type="button" class="segment-earlier" data-segment-earlier="${escapeAttribute(segment.id)}">+${trimmed.earlier} earlier</button>`
+    : ""
+  const calls = mode === "closed" ? "" : `${earlier}${trimmed.shown.map(renderTool).join("")}`
+  return `<section class="work-segment${mode === "closed" ? "" : " open"}${segment.live ? " live" : ""}" data-entry-id="${escapeAttribute(segment.id)}">
+    <button type="button" class="segment-trigger" data-toggle-segment="${escapeAttribute(segment.id)}" aria-expanded="${String(mode !== "closed")}" aria-controls="${escapeAttribute(bodyId)}">
+      ${renderToolStatusIcon(status)}
+      <span class="segment-summary">${escapeHtml(summary.text)}</span>
+      ${failures}
+      ${duration ? `<span class="segment-duration">${escapeHtml(duration)}</span>` : ""}
+      ${renderIcon(ChevronRight, "tool-chevron")}
+    </button>
+    <div class="segment-calls" id="${escapeAttribute(bodyId)}"${mode === "closed" ? " hidden" : ""}>${calls}</div>
+  </section>`
 }

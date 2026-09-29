@@ -12,6 +12,7 @@ export function renderIcon(icon: IconNode, className = "topbar-icon") {
 export {
   ArrowDown,
   ArrowUp,
+  Ban,
   Bell,
   Check,
   ChevronRight,
@@ -23,6 +24,7 @@ export {
   Download,
   Ellipsis,
   GitBranch,
+  Hand,
   Keyboard,
   KeyRound,
   ListTodo,
