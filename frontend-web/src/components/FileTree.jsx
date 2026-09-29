@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { ChevronDown, ChevronRight, FileText, Folder, FolderOpen, RefreshCw, X } from "lucide-react";
 import { FILE_LIMIT_BYTES, base64ToDataUrl, decodeBase64ToText, formatBytes, isImageMime, isTextMime } from "../lib/files.js";
 
@@ -9,8 +9,11 @@ const PREVIEW_TEXT_CAP = 200_000;
 // at a time, files preview via file/read (text decoded, images as data URL,
 // oversize/binary → size + hint). Loading/empty/error states everywhere; all
 // protocol calls arrive via the listFiles/readFile props (App owns the client).
-export function FileTree({ workspace, listFiles, readFile }) {
-  const [open, setOpen] = useState(false);
+// `embedded` (the inspector Files tab) drops the collapsible header and loads
+// the root at once; `openRequest` ({ path, seq }) previews a file named by a tool row; seq lets
+// the same path be requested twice.
+export function FileTree({ workspace, listFiles, readFile, embedded = false, openRequest = null }) {
+  const [open, setOpen] = useState(embedded);
   const [dirs, setDirs] = useState({}); // path → { status: "loading"|"ready"|"error", entries, error }
   const [expanded, setExpanded] = useState({}); // path → bool
   const [preview, setPreview] = useState(null);
@@ -30,6 +33,14 @@ export function FileTree({ workspace, listFiles, readFile }) {
       setDirs((state) => ({ ...state, [path]: { status: "error", entries: [], error: errorMessage(error) } }));
     }
   }
+
+  useEffect(() => {
+    if (embedded && workspace && !dirs[""]) void loadDir("");
+  }, [embedded, workspace]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    if (openRequest?.path) void openPreview({ path: openRequest.path });
+  }, [openRequest]); // eslint-disable-line react-hooks/exhaustive-deps
 
   function togglePanel() {
     const next = !open;
@@ -72,12 +83,14 @@ export function FileTree({ workspace, listFiles, readFile }) {
   }
 
   return (
-    <div className="file-tree">
-      <button type="button" className="file-tree-header" aria-expanded={open} onClick={togglePanel}>
-        {open ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
-        <span>Workspace files</span>
-        <small>{workspace ? "read-only" : "no workspace"}</small>
-      </button>
+    <div className={`file-tree ${embedded ? "embedded" : ""}`.trim()}>
+      {!embedded && (
+        <button type="button" className="file-tree-header" aria-expanded={open} onClick={togglePanel}>
+          {open ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+          <span>Workspace files</span>
+          <small>{workspace ? "read-only" : "no workspace"}</small>
+        </button>
+      )}
       {open && (
         <div className="file-tree-body">
           {!workspace && <div className="tree-state">No workspace selected</div>}

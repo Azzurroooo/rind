@@ -529,9 +529,13 @@ function applyLiveTurn(state, liveTurn, sessionId) {
   return next;
 }
 
+const PROSE_TIME_ROLES = new Set(["user", "assistant"]);
+
 function appendEntry(state, entry) {
   const id = entry.id || `local-${state.entries.length}`;
-  return withCap({ ...state, entries: [...state.entries, { id, ...entry }] });
+  // Prose entries carry a local clock time for the message action bar.
+  const time = entry.time || (PROSE_TIME_ROLES.has(entry.role) ? Date.now() : undefined);
+  return withCap({ ...state, entries: [...state.entries, { id, ...entry, ...(time ? { time } : {}) }] });
 }
 
 // Drops the OLDEST entries beyond the cap; the count surfaces as the
@@ -570,6 +574,7 @@ export function normalizeHistoryMessages(values) {
         role: message.role,
         content: contentText(message.content),
         meta: "",
+        ...(message.created_at || message.timestamp ? { time: message.created_at || message.timestamp } : {}),
       };
     })
     .filter((message) => message.role === "tool" || message.content);

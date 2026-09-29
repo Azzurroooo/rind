@@ -30,13 +30,13 @@ vi.mock("./runtimeClient.js", () => ({
   },
 }));
 
-// jsdom has no matchMedia; the app reads (max-width: 900px) on mount and on
-// change. dispatch(next) simulates crossing the breakpoint.
+// jsdom has no matchMedia; the shell reads the narrow query (max-width: 767px)
+// on mount and on change. dispatch(next) simulates crossing the breakpoint.
 function stubMatchMedia(matches) {
   const listeners = new Set();
   const media = {
     matches,
-    media: "(max-width: 900px)",
+    media: "(max-width: 767px)",
     addEventListener: (type, listener) => { if (type === "change") listeners.add(listener); },
     removeEventListener: (type, listener) => { listeners.delete(listener); },
     addListener: (listener) => listeners.add(listener),
@@ -50,10 +50,10 @@ function stubMatchMedia(matches) {
   return media;
 }
 
-const railPanel = () => document.getElementById("session-rail-panel");
+const sidebarPanel = () => document.getElementById("sidebar-panel");
 const inspectorPanel = () => document.getElementById("inspector-panel");
-const railToggle = () => screen.getByRole("button", { name: "Sessions" });
-const inspectorToggle = () => screen.getByRole("button", { name: "Session state" });
+const sidebarToggle = () => screen.getByRole("button", { name: "Toggle sidebar" });
+const inspectorToggle = () => screen.getByRole("button", { name: "Toggle inspector" });
 
 function expectClosed(panel) {
   expect(panel.className).toContain("drawer-closed");
@@ -70,6 +70,7 @@ function expectOpen(panel) {
 }
 
 beforeEach(() => {
+  localStorage.clear();
   sessionStorage.setItem("rind_token", "test-token");
   sessionStorage.setItem("rind_credential_server", "ws://runtime.test"); // shell renders instead of LoginGate
 });
@@ -78,106 +79,119 @@ afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
   sessionStorage.clear();
+  localStorage.clear();
 });
 
-describe("App — narrow viewport (≤900px): drawers start closed", () => {
-  it("renders the compact header toggles wired to both off-canvas panels", () => {
+describe("Shell - narrow viewport (<768px): drawers start closed", () => {
+  it("renders header toggles wired to both off-canvas panels", () => {
     stubMatchMedia(true);
     render(<App />);
-    expect(railToggle().getAttribute("aria-expanded")).toBe("false");
+    expect(sidebarToggle().getAttribute("aria-expanded")).toBe("false");
     expect(inspectorToggle().getAttribute("aria-expanded")).toBe("false");
-    expect(railToggle().getAttribute("aria-controls")).toBe("session-rail-panel");
+    expect(sidebarToggle().getAttribute("aria-controls")).toBe("sidebar-panel");
     expect(inspectorToggle().getAttribute("aria-controls")).toBe("inspector-panel");
-    expectClosed(railPanel());
+    expectClosed(sidebarPanel());
     expectClosed(inspectorPanel());
     expect(document.querySelector(".drawer-backdrop")).toBeNull();
   });
 });
 
-describe("App — narrow viewport: rail drawer", () => {
-  it("hamburger opens it (focus moves in, backdrop appears); Esc closes and refocuses the toggle", () => {
+describe("Shell - narrow viewport: sidebar drawer", () => {
+  it("the toggle opens it (focus moves in, backdrop appears); Esc closes and refocuses the toggle", () => {
     stubMatchMedia(true);
     render(<App />);
-    fireEvent.click(railToggle());
-    expect(railToggle().getAttribute("aria-expanded")).toBe("true");
-    expectOpen(railPanel());
-    expect(inspectorPanel().className).toContain("drawer-closed");
+    fireEvent.click(sidebarToggle());
+    expect(sidebarToggle().getAttribute("aria-expanded")).toBe("true");
+    expectOpen(sidebarPanel());
+    expectClosed(inspectorPanel());
     expect(document.querySelector(".drawer-backdrop")).not.toBeNull();
-    expect(document.activeElement).toBe(railPanel());
+    expect(document.activeElement).toBe(sidebarPanel());
 
     fireEvent.keyDown(window, { key: "Escape" });
-    expect(railToggle().getAttribute("aria-expanded")).toBe("false");
-    expectClosed(railPanel());
+    expect(sidebarToggle().getAttribute("aria-expanded")).toBe("false");
+    expectClosed(sidebarPanel());
     expect(document.querySelector(".drawer-backdrop")).toBeNull();
-    expect(document.activeElement).toBe(railToggle());
+    expect(document.activeElement).toBe(sidebarToggle());
   });
 
   it("backdrop tap closes it", () => {
     stubMatchMedia(true);
     render(<App />);
-    fireEvent.click(railToggle());
+    fireEvent.click(sidebarToggle());
     fireEvent.click(document.querySelector(".drawer-backdrop"));
-    expectClosed(railPanel());
+    expectClosed(sidebarPanel());
     expect(document.querySelector(".drawer-backdrop")).toBeNull();
   });
 
-  it("selecting a session is the route-relevant action that closes it", async () => {
+  it("selecting a session closes it", async () => {
     stubMatchMedia(true);
     render(<App />);
-    await screen.findAllByText("First session");
-    fireEvent.click(railToggle());
-    expect(railPanel().className).toContain("drawer-open");
+    await screen.findAllByText("Second session");
+    fireEvent.click(sidebarToggle());
+    expect(sidebarPanel().className).toContain("drawer-open");
     fireEvent.click(document.querySelector(".session-item[data-session-id='s-2'] .session-main"));
-    await waitFor(() => expect(railPanel().className).toContain("drawer-closed"));
+    await waitFor(() => expect(sidebarPanel().className).toContain("drawer-closed"));
     expect(document.querySelector(".drawer-backdrop")).toBeNull();
   });
 });
 
-describe("App — narrow viewport: inspector drawer", () => {
-  it("opens from the right toggle and is exclusive with the rail drawer", () => {
+describe("Shell - narrow viewport: inspector drawer", () => {
+  it("opens from the right toggle and is exclusive with the sidebar drawer", () => {
     stubMatchMedia(true);
     render(<App />);
-    fireEvent.click(railToggle());
-    expectOpen(railPanel());
+    fireEvent.click(sidebarToggle());
+    expectOpen(sidebarPanel());
     fireEvent.click(inspectorToggle());
     expect(inspectorToggle().getAttribute("aria-expanded")).toBe("true");
     expectOpen(inspectorPanel());
-    expect(railToggle().getAttribute("aria-expanded")).toBe("false");
-    expectClosed(railPanel());
+    expect(sidebarToggle().getAttribute("aria-expanded")).toBe("false");
+    expectClosed(sidebarPanel());
     expect(document.activeElement).toBe(inspectorPanel());
     expect(document.querySelector(".drawer-backdrop")).not.toBeNull();
   });
 });
 
-describe("App — crossing the breakpoint", () => {
+describe("Shell - crossing the breakpoint", () => {
   it("force-closes an open drawer when the viewport becomes desktop-sized", () => {
     const media = stubMatchMedia(true);
     render(<App />);
-    fireEvent.click(railToggle());
-    expect(railPanel().className).toContain("drawer-open");
+    fireEvent.click(sidebarToggle());
+    expect(sidebarPanel().className).toContain("drawer-open");
     act(() => media.dispatch(false));
-    expect(railPanel().className).not.toContain("drawer-open");
-    expect(railPanel().className).not.toContain("drawer-closed");
-    expect(railPanel().getAttribute("aria-hidden")).toBeNull();
-    expect(railPanel().hasAttribute("inert")).toBe(false);
+    expect(sidebarPanel().className).toBe("sidebar");
+    expect(sidebarPanel().getAttribute("aria-hidden")).toBeNull();
+    expect(sidebarPanel().hasAttribute("inert")).toBe(false);
     expect(document.querySelector(".drawer-backdrop")).toBeNull();
   });
 });
 
-describe("App — desktop viewport (>900px)", () => {
-  it("panels are plain columns (no drawer classes/aria) and the hidden toggles are no-ops", () => {
+describe("Shell - desktop viewport", () => {
+  it("the sidebar is a column that collapses from the toggle and with Ctrl+B, and the choice persists", () => {
     stubMatchMedia(false);
     render(<App />);
-    expect(railToggle()).not.toBeNull(); // in the DOM, display:none via CSS
-    expect(railPanel().className).toBe("session-rail");
-    expect(inspectorPanel().className).toBe("inspector details-hidden");
-    expect(railPanel().getAttribute("aria-hidden")).toBeNull();
-    expect(railPanel().hasAttribute("inert")).toBe(false);
-    expect(inspectorPanel().hasAttribute("inert")).toBe(true);
-    fireEvent.click(screen.getByRole("button", { name: "Toggle session details" }));
-    expect(inspectorPanel().hasAttribute("inert")).toBe(false);
-    fireEvent.click(railToggle());
-    expect(railPanel().className).toBe("session-rail");
+    expect(sidebarPanel().className).toBe("sidebar");
+    expect(sidebarToggle().getAttribute("aria-expanded")).toBe("true");
+    expect(document.querySelector("[role='separator'][aria-label='Resize sidebar']")).not.toBeNull();
+
+    fireEvent.click(sidebarToggle());
+    expect(sidebarPanel().className).toContain("is-collapsed");
+    expect(sidebarPanel().hasAttribute("inert")).toBe(true);
+    expect(localStorage.getItem("rind.layout.sidebarCollapsed")).toBe("true");
+
+    fireEvent.keyDown(window, { key: "b", ctrlKey: true });
+    expect(sidebarPanel().className).toBe("sidebar");
     expect(document.querySelector(".drawer-backdrop")).toBeNull();
+  });
+
+  it("the inspector starts closed and opens from its toggle", () => {
+    stubMatchMedia(false);
+    render(<App />);
+    expect(inspectorPanel().className).toContain("is-collapsed");
+    expect(inspectorPanel().hasAttribute("inert")).toBe(true);
+    fireEvent.click(inspectorToggle());
+    expect(inspectorPanel().className).toBe("inspector");
+    expect(inspectorPanel().hasAttribute("inert")).toBe(false);
+    expect(screen.getByRole("tablist", { name: "Inspector sections" })).not.toBeNull();
+    expect(document.querySelector("[role='separator'][aria-label='Resize inspector']")).not.toBeNull();
   });
 });

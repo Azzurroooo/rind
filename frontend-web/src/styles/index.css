@@ -1,7 +1,12 @@
-/* Style entry: tokens first, then base, then area files. */
+/* Style entry: tokens first, then base, then shared layers, then area files. */
 @import "./tokens.css";
 @import "./base.css";
 @import "./overlays.css";
+@import "./components.css";
 @import "./tools.css";
-@import "./legacy-layout.css";
-@import "./legacy-components.css";
+@import "./shell.css";
+@import "./sidebar.css";
+@import "./conversation.css";
+@import "./composer.css";
+@import "./inspector.css";
+@import "./settings.css";

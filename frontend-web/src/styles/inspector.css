@@ -1,0 +1,90 @@
+/* Inspector (surface-design-v2 section 2 and 7), after LobeHub's right panel:
+   a tabbed column for Context, Tasks, Files, Goal and Usage. */
+
+.inspector {
+  flex: none; display: flex; flex-direction: column;
+  width: var(--inspector-width); min-width: 0; min-height: 0;
+  border-left: 1px solid var(--line); background: var(--panel);
+}
+.inspector:focus-visible { outline-offset: -2px; }
+.inspector-head {
+  flex: none; display: flex; align-items: center; gap: var(--space-1);
+  height: var(--header-height); padding: 0 var(--space-2); border-bottom: 1px solid var(--line);
+}
+.inspector-tabs { flex: 1; min-width: 0; display: flex; gap: 2px; overflow-x: auto; scrollbar-width: none; }
+.inspector-tab {
+  flex: none; height: var(--control-sm); padding: 0 var(--space-2);
+  border: 0; border-radius: var(--radius-control); background: transparent;
+  color: var(--muted); font-size: var(--text-dense); font-weight: 500;
+}
+.inspector-tab:hover { background: var(--fill-1); color: var(--text); }
+.inspector-tab[aria-selected="true"] { background: var(--fill-2); color: var(--text); }
+.inspector-tab:focus-visible { outline-offset: -2px; }
+
+.inspector-panel { flex: 1; min-height: 0; overflow-y: auto; }
+.inspector-body { display: grid; align-content: start; gap: var(--space-4); padding: var(--space-4); }
+.inspector-body.files-tab { height: 100%; padding: 0; }
+.inspector-section { display: grid; gap: var(--space-2); }
+.inspector-section-head { display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); }
+.inspector-section-title, .section-title {
+  display: flex; align-items: center; gap: var(--space-2);
+  color: var(--muted); font-size: var(--text-meta); font-weight: 600; text-transform: uppercase; letter-spacing: .05em;
+}
+.icon-button.small { width: 24px; height: 24px; }
+
+/* Context gauge. */
+.context-gauge { display: flex; align-items: center; gap: var(--space-4); }
+.context-gauge-ring { flex: none; width: 64px; height: 64px; color: var(--accent); }
+.context-gauge-ring.warning { color: var(--warning); }
+.context-gauge-ring.danger { color: var(--danger); }
+.context-gauge-text { display: grid; gap: 2px; min-width: 0; }
+.context-gauge-text strong { font-size: var(--text-lg); font-variant-numeric: tabular-nums; }
+.context-gauge-text span { color: var(--muted); font-size: var(--text-dense); }
+
+.stat-list { display: grid; gap: 0; margin: 0; }
+.stat-row {
+  display: flex; align-items: baseline; justify-content: space-between; gap: var(--space-3);
+  padding: 6px 0; border-bottom: 1px solid var(--line); font-size: var(--text-dense);
+}
+.stat-row:last-child { border-bottom: 0; }
+.stat-row dt { color: var(--muted); }
+.stat-row dd { margin: 0; color: var(--text); font-variant-numeric: tabular-nums; text-align: right; overflow-wrap: anywhere; }
+
+.breakdown-list, .usage-days { display: grid; gap: var(--space-2); margin: 0; padding: 0; list-style: none; }
+.breakdown-row { display: grid; gap: 4px; }
+.breakdown-label { display: flex; justify-content: space-between; gap: var(--space-2); font-size: var(--text-dense); }
+.breakdown-value { color: var(--muted); font-variant-numeric: tabular-nums; }
+.breakdown-bar { height: 4px; overflow: hidden; border-radius: var(--radius-pill); background: var(--fill-1); }
+.breakdown-bar > span { display: block; height: 100%; border-radius: inherit; background: var(--accent); }
+
+/* Providers (read-only). */
+.provider-list { display: grid; gap: 0; margin: 0; padding: 0; list-style: none; }
+.provider-row {
+  display: flex; align-items: center; justify-content: space-between; gap: var(--space-2);
+  padding: 6px 0; border-bottom: 1px solid var(--line); font-size: var(--text-dense);
+}
+.provider-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.provider-state { flex: none; color: var(--dim); font-size: var(--text-meta); }
+.provider-state.success { color: var(--success); }
+
+/* Background jobs. */
+.task-list { display: grid; gap: 2px; margin: 0; padding: 0; list-style: none; }
+.task-list .task-row {
+  display: flex; align-items: center; gap: var(--space-2); width: 100%;
+  min-height: var(--control-md); padding: 4px var(--space-2);
+  border: 0; border-radius: var(--radius-control); background: transparent;
+  color: var(--text); font-size: var(--text-dense); text-align: left;
+}
+.task-list .task-row:hover, .task-list .task-row.selected { background: var(--fill-1); }
+.task-list .task-row > svg { flex: none; color: var(--dim); }
+.task-command { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--font-mono); font-size: var(--text-meta); }
+.task-status { flex: none; color: var(--muted); font-size: var(--text-meta); }
+.task-status.running { color: var(--accent); }
+.task-status.failed, .task-status.killed { color: var(--danger); }
+.task-status.completed { color: var(--success); }
+.task-elapsed { flex: none; color: var(--dim); font-size: var(--text-meta); font-variant-numeric: tabular-nums; }
+.task-output {
+  max-height: 260px; overflow: auto; margin: var(--space-1) 0 var(--space-2);
+  padding: var(--space-2) var(--space-3); border-radius: var(--radius-control);
+  background: var(--surface-soft); font-size: 11px; line-height: 1.6; white-space: pre-wrap; overflow-wrap: anywhere;
+}

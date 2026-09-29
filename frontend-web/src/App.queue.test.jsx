@@ -1,7 +1,6 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import App from "./App.jsx";
-import { applyTheme } from "./lib/theme.js";
 
 // Queue + interrupt behaviours at the shell level (audit #1). The runtime
 // client is a recording stub: bootstrap RPCs succeed, a running live_turn can
@@ -94,7 +93,8 @@ it("keeps a late prompt failure in its original session draft", async () => {
 it("manages the connection without exposing a server address setting", async () => {
   await renderShell();
   fireEvent.click(screen.getByLabelText("Open settings"));
-  const settings = document.querySelector("dialog.settings-dialog");
+  const settings = document.querySelector(".dialog.settings-dialog");
+  fireEvent.click(screen.getByRole("button", { name: "Account" }));
   expect(settings.querySelectorAll("input")).toHaveLength(0);
   expect(settings.textContent).not.toMatch(/WebSocket|ws:\/\//i);
   expect(settings.textContent).toContain("Connection is managed automatically");
@@ -122,29 +122,30 @@ describe("App — queue mode (audit #1)", () => {
     expect(call.params).toMatchObject({ session_id: "s-1", input: "Queue a follow-up" });
     // the returned input_id is kept and the queued chip renders
     await waitFor(() => expect(document.querySelector(".queued-row[data-input-id='in-1']")).not.toBeNull());
-    expect(screen.getByText(/QUEUED/)).not.toBeNull();
+    expect(document.querySelector(".queued-row .queued-label").textContent).toBe("Queued");
     // the draft was consumed by the send
     expect(composerTextarea().value).toBe("");
   });
 
-  it("the composer switch flips the wire method to steer", async () => {
+  it("Alt+Enter sends as steer while a turn runs", async () => {
     await renderShell(runningTurn());
-    fireEvent.click(screen.getByTitle("Redirect the current turn immediately (steer)"));
-    typeAndSend("Redirect now");
+    const textarea = composerTextarea();
+    fireEvent.change(textarea, { target: { value: "Redirect now" } });
+    fireEvent.keyDown(textarea, { key: "Enter", altKey: true });
     await waitFor(() => expect(called("rind/session/steer")).toBe(true));
     expect(called("rind/session/follow_up")).toBe(false);
   });
 
-  it("Retrieve dequeues by input_id and restores the draft; Steer promotes to steering", async () => {
+  it("Edit dequeues by input_id and restores the draft; Promote turns a follow-up into a steer", async () => {
     await renderShell(runningTurn([{ input_id: "in-9", input: "queued text", mode: "follow_up" }]));
     expect(document.querySelector(".queued-row[data-input-id='in-9']")).not.toBeNull();
 
-    fireEvent.click(screen.getByRole("button", { name: "Steer" }));
+    fireEvent.click(screen.getByRole("button", { name: "Promote to steer the current turn" }));
     await waitFor(() => expect(called("rind/session/promote_follow_up")).toBe(true));
     expect(requests().find((entry) => entry.method === "rind/session/promote_follow_up").params).toMatchObject({ session_id: "s-1", input_id: "in-9" });
-    await waitFor(() => expect(screen.getByText("QUEUED · steer")).not.toBeNull());
+    await waitFor(() => expect(document.querySelector(".queued-row.steering .queued-label").textContent).toBe("Steering"));
 
-    fireEvent.click(screen.getByRole("button", { name: "Retrieve" }));
+    fireEvent.click(screen.getByRole("button", { name: "Edit queued message" }));
     await waitFor(() => expect(called("rind/session/unsteer")).toBe(true));
     expect(requests().find((entry) => entry.method === "rind/session/unsteer").params).toMatchObject({ session_id: "s-1", input_id: "in-9" });
     await waitFor(() => expect(document.querySelector(".queued-row")).toBeNull());
@@ -174,9 +175,10 @@ describe("App — queue mode (audit #1)", () => {
   it("loading a session restores the queue from live_turn pending_inputs (reconnect path)", async () => {
     await renderShell(runningTurn([{ input_id: "in-a", input: "restored", mode: "steering" }]));
     expect(document.querySelector(".queued-row[data-input-id='in-a']")).not.toBeNull();
-    expect(screen.getByText("QUEUED · steer")).not.toBeNull();
-    // steering items expose Retrieve only
-    expect(screen.queryByRole("button", { name: "Steer" })).toBeNull();
+    expect(document.querySelector(".queued-row.steering .queued-label").textContent).toBe("Steering");
+    // steering items can be edited or removed but not promoted again
+    expect(screen.queryByRole("button", { name: "Promote to steer the current turn" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Edit queued message" })).not.toBeNull();
   });
 });
 
@@ -234,8 +236,9 @@ describe("App — Ctrl/Cmd+K palette (audit #10)", () => {
   });
 
   it("executing Theme flips data-theme and persists the choice (audit #11)", async () => {
+    localStorage.setItem("rind.theme", "dark");
     await renderShell(null);
-    applyTheme("dark");
+    await waitFor(() => expect(document.documentElement.dataset.theme).toBe("dark"));
     fireEvent.keyDown(window, { key: "k", ctrlKey: true });
     fireEvent.click(screen.getByText("Theme"));
     await waitFor(() => expect(document.documentElement.dataset.theme).toBe("light"));
@@ -260,8 +263,9 @@ describe("App — session subscriptions (audit #13)", () => {
   it("unsubscribes a deleted session", async () => {
     await renderShell(null);
     const item = () => document.querySelector(".session-item[data-session-id='p-2']");
-    fireEvent.click(item().querySelector(".session-delete"));
-    fireEvent.click(item().querySelector(".confirm-yes"));
+    fireEvent.click(item().querySelector(".session-more"));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Delete" }));
+    fireEvent.click(document.querySelector(".confirm-yes"));
     await waitFor(() => expect(called("session/unsubscribe")).toBe(true));
     expect(requests().find((entry) => entry.method === "session/unsubscribe").params).toMatchObject({ session_id: "p-2" });
     await waitFor(() => expect(document.querySelector(".session-item[data-session-id='p-2']")).toBeNull());

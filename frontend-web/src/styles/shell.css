@@ -1,0 +1,91 @@
+/* Shell (surface-design-v2 section 2): sidebar | main column | inspector,
+   44px header, resize handles, connection strip and narrow-screen drawers. */
+
+/* 100dvh keeps the shell glued to the visual viewport so the composer rides
+   above the mobile keyboard. */
+.app-shell {
+  position: relative; display: flex; flex-direction: column;
+  height: 100vh; height: 100dvh; min-width: 320px; overflow: hidden; background: var(--bg);
+}
+.shell-grid { flex: 1; min-height: 0; display: flex; }
+.main-column { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; background: var(--bg); }
+.is-collapsed { display: none !important; }
+
+/* Resize handles: a 6px hit area over a 1px line; keyboard adjustable. */
+.resize-handle {
+  position: relative; z-index: 5; flex: none; width: 6px; margin: 0 -3px;
+  cursor: col-resize; touch-action: none; background: transparent;
+}
+.resize-handle::after {
+  content: ""; position: absolute; top: 0; bottom: 0; left: 50%; width: 1px;
+  background: transparent; transition: background var(--motion-fast) var(--ease);
+}
+.resize-handle:hover::after, .resize-handle:focus-visible::after, .resize-handle.dragging::after { width: 2px; background: var(--accent); }
+.resize-handle:focus-visible { outline: none; }
+
+/* Chat header: 44px, title left, actions right. */
+.chat-header {
+  flex: none; display: flex; align-items: center; gap: var(--space-2);
+  height: var(--header-height); padding: 0 var(--space-2) 0 var(--space-3);
+  border-bottom: 1px solid var(--line); background: var(--bg);
+}
+.chat-title {
+  min-width: 0; flex: 0 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-size: var(--text-ui); font-weight: 600;
+}
+.chat-header-actions { margin-left: auto; display: flex; align-items: center; gap: 2px; }
+.status-chip.accent { background: var(--accent-soft); color: var(--text); }
+.status-chip.danger { background: var(--danger-soft); color: var(--danger); }
+.status-chip.muted { background: var(--fill-1); color: var(--muted); }
+
+/* Connection strip: a 2px progress line with a floating chip. */
+.connection-strip { position: absolute; top: 0; left: 0; right: 0; z-index: 30; pointer-events: none; }
+.connection-strip-track { height: 2px; overflow: hidden; background: transparent; }
+.connection-strip-bar {
+  width: 40%; height: 100%; background: var(--accent);
+  transition: width var(--motion-panel) var(--ease);
+  animation: strip-slide 1.4s var(--ease) infinite;
+}
+.connection-strip.syncing .connection-strip-bar[style] { animation: none; }
+.connection-strip.offline .connection-strip-bar { width: 100%; background: var(--danger); animation: none; }
+.connection-strip-chip {
+  position: absolute; top: 8px; left: 50%; transform: translateX(-50%);
+  display: inline-flex; align-items: center; gap: 6px; height: 26px; padding: 0 var(--space-3);
+  border: 1px solid var(--line); border-radius: var(--radius-pill);
+  background: var(--surface); box-shadow: var(--shadow-popover);
+  color: var(--muted); font-size: var(--text-meta); pointer-events: auto;
+}
+.connection-strip-chip.is-error { color: var(--danger); border-color: var(--danger-soft); }
+.strip-retry {
+  min-height: 0; height: 20px; padding: 0 var(--space-2); border: 0; border-radius: var(--radius-pill);
+  background: var(--danger-soft); color: var(--danger); font-size: var(--text-meta); font-weight: 600;
+}
+.strip-retry:hover { filter: brightness(1.05); }
+@keyframes strip-slide { from { transform: translateX(-100%); } to { transform: translateX(250%); } }
+
+/* Narrow screens (below 768px): side panels become 320px drawers over a scrim. */
+.drawer-backdrop { display: none; }
+@media (max-width: 767px) {
+  .chat-header { height: 48px; }
+  .chat-header .icon-button { width: 36px; height: 36px; }
+  .sidebar, .inspector {
+    position: fixed; top: 0; bottom: 0; z-index: 50;
+    width: min(var(--drawer-width), calc(100vw - 48px)) !important;
+    box-shadow: var(--shadow-dialog);
+    transition: transform var(--motion-panel) var(--ease), visibility 0s linear var(--motion-panel);
+  }
+  .sidebar { left: 0; }
+  .inspector { right: 0; }
+  .sidebar.drawer-closed { transform: translateX(-100%); visibility: hidden; }
+  .inspector.drawer-closed { transform: translateX(100%); visibility: hidden; }
+  .sidebar.drawer-open, .inspector.drawer-open { transform: none; visibility: visible; transition-delay: 0s; }
+  .drawer-backdrop {
+    display: block; position: fixed; inset: 0; z-index: 45;
+    background: var(--drawer-scrim); animation: fade-in var(--motion-panel) var(--ease);
+  }
+}
+
+body.is-resizing { cursor: col-resize; user-select: none; }
+.connection-strip.fading { animation: fade-out 600ms var(--ease) forwards; }
+.connection-strip.fading .connection-strip-bar { width: 100%; animation: none; }
+@keyframes fade-out { to { opacity: 0; } }
