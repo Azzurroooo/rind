@@ -12,6 +12,7 @@ import { showGoalPanel, submitGoal } from "./inspector.ts"
 import { conversationFor, ensureRuntime, requestForSession, setConversationFor } from "./runtime.ts"
 import { forkCurrentSession } from "./sessions.ts"
 import { showToast } from "./overlays.ts"
+import { openSettings } from "./settings.ts"
 import { nextTheme, render, setTheme, toggleSidebar } from "./shell.ts"
 import { state } from "./state.ts"
 
@@ -43,6 +44,9 @@ async function perform(action: DesktopSlashAction, input: string) {
     else await forkCurrentSession()
   } else if (action.type === "sessions") {
     await focusSessionSearch(action.query)
+  } else if (action.type === "providers") {
+    openSettings("providers")
+    if (action.intent === "logout") showToast("Choose a signed-in provider and select Sign out.")
   } else if (action.type === "context") {
     await inspectContext(input)
   }

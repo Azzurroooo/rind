@@ -8,6 +8,8 @@ export const desktopSlashCommands: SlashCommand[] = [
   ["effort", "Choose reasoning effort", "/effort [low|medium|high|xhigh|max]"],
   ["fork", "Fork this session into a new one", "/fork"],
   ["goal", "Show the goal, or set a new objective", "/goal [objective]"],
+  ["login", "Sign in to a provider in Settings", "/login"],
+  ["logout", "Sign out of a provider in Settings", "/logout"],
   ["model", "Choose a model", "/model [name]"],
   ["sessions", "Search sessions in the sidebar", "/sessions [query]"],
   ["theme", "Switch theme", "/theme [system|dark|light]"],
@@ -21,6 +23,7 @@ export type DesktopSlashAction =
   | { type: "effort"; effort: string }
   | { type: "fork" }
   | { type: "goal"; objective: string }
+  | { type: "providers"; intent: "login" | "logout" }
   | { type: "model"; model: string }
   | { type: "sessions"; query: string }
   | { type: "theme"; theme: (typeof THEMES)[number] | "" }
@@ -34,6 +37,7 @@ export function desktopSlashAction(input: string): DesktopSlashAction | undefine
   if (name === "context") return { type: "context" }
   if (name === "fork") return { type: "fork" }
   if (name === "goal") return { type: "goal", objective: argument }
+  if (name === "login" || name === "logout") return { type: "providers", intent: name }
   if (name === "model") return { type: "model", model: argument }
   if (name === "sessions") return { type: "sessions", query: argument }
   if (name === "effort") {

@@ -52,6 +52,8 @@ test("desktopSlashAction maps desktop commands and validates arguments", () => {
   assert.deepEqual(desktopSlashAction("/sessions auth"), { type: "sessions", query: "auth" })
   assert.deepEqual(desktopSlashAction("/fork"), { type: "fork" })
   assert.deepEqual(desktopSlashAction("/context"), { type: "context" })
+  assert.deepEqual(desktopSlashAction("/login"), { type: "providers", intent: "login" })
+  assert.deepEqual(desktopSlashAction("/Logout"), { type: "providers", intent: "logout" })
   assert.equal(desktopSlashAction("/compact"), undefined)
   assert.equal(desktopSlashAction("hello"), undefined)
 })

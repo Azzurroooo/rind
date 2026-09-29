@@ -20,7 +20,6 @@ export function executeLocalSlashCommand(input: string, context: LocalSlashConte
   const { name, argument } = parsed
 
   if (name === "config") return configResult(context.settings)
-  if (name === "login") return { text: "Login/config setup is not implemented yet.\nSet apiKey in ~/.rind/settings.json." }
   if (name === "status") {
     if (context.runtime.status === "ready") return undefined
     return statusResult(context)

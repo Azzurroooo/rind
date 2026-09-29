@@ -46,6 +46,8 @@ test("Desktop local commands do not require a project or Runtime", () => {
   assert.equal(config?.display?.type, "config")
   assert.match(config?.text || "", /apiKey: set/)
   assert.equal(executeLocalSlashCommand("/model", context), undefined)
+  assert.equal(executeLocalSlashCommand("/login", context), undefined, "/login is routed to Settings > Providers")
+  assert.equal(fallbackSlashCommands.some((command) => command.name === "login"), false)
 })
 
 const commands = parseSlashCommands([

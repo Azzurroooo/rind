@@ -18,7 +18,6 @@ export const fallbackSlashCommands: SlashCommand[] = [
   ["doctor", "Run local setup diagnostics", "/doctor"],
   ["help", "Show commands", "/help [command]"],
   ["init", "Draft RIND.md", "/init [project|user]"],
-  ["login", "Show login setup guidance", "/login"],
   ["skill", "List skills", "/skill [list]"],
   ["status", "Show session status", "/status"],
   ["team", "Create a Team project", "/team create [project-id]"],
