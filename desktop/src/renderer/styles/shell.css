@@ -28,21 +28,6 @@ body[data-platform="darwin"] .topbar { padding-left: 80px; }
 .app-version { margin-right: 8px; color: var(--dim); font-size: var(--text-meta); }
 .topbar-button { position: relative; }
 .topbar-button[aria-expanded="true"] { color: var(--text); background: var(--fill-2); }
-.topbar-badge {
-  position: absolute;
-  top: 1px;
-  right: 1px;
-  min-width: 13px;
-  height: 13px;
-  padding: 0 3px;
-  border-radius: 7px;
-  color: var(--bg);
-  background: var(--accent);
-  font-size: 9.5px;
-  font-weight: 600;
-  line-height: 13px;
-  text-align: center;
-}
 
 .brand-group { display: flex; align-items: center; gap: 7px; min-width: 0; }
 .brand-mark { display: block; flex: none; width: 20px; height: 20px; }

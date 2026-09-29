@@ -1,6 +1,6 @@
 import brandMarkUrl from "../assets/brand-mark.svg"
 import { composerRegionMarkup } from "../composer-region.ts"
-import { ArrowDown, Bell, Download, GitBranch, Keyboard, KeyRound, ListTodo, MonitorSmartphone, PanelLeft, PanelRight, renderIcon, Search, Settings, SlidersHorizontal, SunMoon, X } from "../icons.ts"
+import { ArrowDown, Bell, Ellipsis, Keyboard, KeyRound, ListTodo, MonitorSmartphone, PanelLeft, PanelRight, renderIcon, Search, Settings, SlidersHorizontal, SunMoon, X } from "../icons.ts"
 import { INSPECTOR_TAB_LABELS, INSPECTOR_TABS } from "../inspector-model.ts"
 import { remoteAccessMarkup } from "../remote-access.ts"
 import { escapeHtml } from "./html.ts"
@@ -25,12 +25,10 @@ appRoot.innerHTML = `
       </div>
       <div class="topbar-actions">
         <span class="app-version" aria-label="Rind version">v${escapeHtml(appVersion)}</span>
-        <button id="toggle-tasks" type="button" class="icon-button topbar-button" data-tooltip="Background tasks" aria-label="Toggle background task monitor" aria-expanded="false">${renderIcon(ListTodo)}<span id="task-count-badge" class="topbar-badge" hidden></span></button>
         <button id="open-palette" type="button" class="icon-button topbar-button" data-tooltip="Command palette (Ctrl+K)" aria-label="Command palette (Ctrl+K)">${renderIcon(Search)}</button>
         <button id="open-remote" type="button" class="icon-button topbar-button" data-tooltip="Remote access" aria-label="Remote access">${renderIcon(MonitorSmartphone)}</button>
         <button id="toggle-theme" type="button" class="icon-button topbar-button" data-tooltip="Switch theme" aria-label="Switch theme">${renderIcon(SunMoon)}</button>
         <button id="toggle-sidebar" type="button" class="icon-button topbar-button" data-tooltip="Toggle sidebar (Ctrl+B)" aria-label="Toggle sidebar (Ctrl+B)" aria-expanded="true">${renderIcon(PanelLeft)}</button>
-        <button id="toggle-inspector" type="button" class="icon-button topbar-button" data-tooltip="Show inspector" aria-label="Show inspector" aria-controls="inspector" aria-expanded="false">${renderIcon(PanelRight)}</button>
         <button id="open-shortcuts" type="button" class="icon-button topbar-button" data-tooltip="Keyboard shortcuts (?)" aria-label="Keyboard shortcuts (?)">${renderIcon(Keyboard)}</button>
         <button id="open-settings" type="button" class="icon-button topbar-button" data-tooltip="Open settings" aria-label="Open settings">${renderIcon(Settings)}</button>
       </div>
@@ -54,7 +52,23 @@ appRoot.innerHTML = `
         </div>
       </aside>
       <section class="conversation">
-        <div class="conversation-head"><div class="conversation-title"><strong id="session-title">New conversation</strong><span id="session-id" class="subtle"></span></div><div class="session-actions"><button id="export-session" class="ghost-button" title="Export conversation" aria-label="Export conversation">${renderIcon(Download)}</button><button id="fork-session" class="ghost-button" title="Fork conversation" aria-label="Fork conversation">${renderIcon(GitBranch)}</button></div></div>
+        <header class="conversation-head">
+          <div class="conversation-title">
+            <h1 id="session-title" class="session-title">New session</h1>
+            <span id="session-status" class="session-status" role="status" hidden><span class="session-status-dot" aria-hidden="true"></span><span id="session-status-text">Idle</span></span>
+          </div>
+          <div class="session-actions">
+            <button id="toggle-tasks" type="button" class="icon-button head-button" data-tooltip="Background tasks" aria-label="Background tasks" aria-controls="inspector" aria-expanded="false">${renderIcon(ListTodo)}<span id="task-count-badge" class="head-badge" hidden></span></button>
+            <button id="toggle-inspector" type="button" class="icon-button head-button" data-tooltip="Show inspector" aria-label="Show inspector" aria-controls="inspector" aria-expanded="false">${renderIcon(PanelRight)}</button>
+            <div class="session-head-menu-wrap">
+              <button id="session-head-menu-trigger" type="button" class="icon-button head-button" data-tooltip="More actions" aria-label="More conversation actions" aria-haspopup="menu" aria-controls="session-head-menu" aria-expanded="false">${renderIcon(Ellipsis)}</button>
+              <div id="session-head-menu" class="menu session-head-menu" role="menu" aria-label="Conversation actions" hidden>
+                <button id="export-session" type="button" class="menu-item" role="menuitem" tabindex="-1">Export conversation</button>
+                <button id="fork-session" type="button" class="menu-item" role="menuitem" tabindex="-1">Fork conversation</button>
+              </div>
+            </div>
+          </div>
+        </header>
         <div id="notice" class="notice" role="status" hidden><span id="notice-text"></span><button id="retry" type="button" class="ghost-button" hidden>Retry</button></div>
         <div class="stream-wrap">
           <div id="message-stream" class="message-stream" aria-live="polite"></div>
@@ -159,7 +173,6 @@ export const projectList = requiredElement("project-list")
 export const recentSessions = requiredElement("recent-sessions")
 export const recentList = requiredElement("recent-list")
 export const sessionTitle = requiredElement("session-title")
-export const sessionIdLabel = requiredElement("session-id")
 export const modelMenuTrigger = requiredElement<HTMLButtonElement>("model-menu-trigger")
 export const modelMenuLabel = requiredElement("model-menu-label")
 export const modelMenu = requiredElement("model-menu")

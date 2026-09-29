@@ -1,7 +1,7 @@
 
 * { box-sizing: border-box; }
 
-.session-actions { display: flex; align-items: center; gap: 6px; flex: none; }
+.session-actions { display: flex; align-items: center; gap: 2px; flex: none; }
 .settings-dialog.remote-dialog { width: min(580px, calc(100vw - 48px)); max-height: calc(100dvh - 48px); padding: 28px; overflow-y: auto; }
 .remote-status { display: flex; align-items: center; gap: 8px; margin: 24px 0; }
 .remote-status strong { font-size: 14px; font-weight: 500; }

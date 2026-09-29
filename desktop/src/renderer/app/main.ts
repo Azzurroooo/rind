@@ -4,7 +4,8 @@ import { requiredElement } from "./dom.ts"
 import { remoteAccess } from "./remote-instance.ts"
 import { handleRuntimeEvent } from "./runtime-events.ts"
 import { clearRuntimeTurnState, runAction } from "./runtime.ts"
-import { exportSession, forkCurrentSession, loadSessions, switchSession } from "./sessions.ts"
+import { loadSessions, switchSession } from "./sessions.ts"
+import { bindSessionHeadEvents } from "./session-head.ts"
 import { loadSettings, openSettings } from "./settings.ts"
 import { render, renderTheme } from "./shell.ts"
 import { state, vars } from "./state.ts"
@@ -23,8 +24,7 @@ import { bindOverlays } from "./overlays.ts"
 
 
 requiredElement("open-remote").addEventListener("click", remoteAccess.open)
-requiredElement("export-session").addEventListener("click", exportSession)
-requiredElement("fork-session").addEventListener("click", () => runAction(forkCurrentSession, state.viewedSessionId))
+bindSessionHeadEvents()
 
 bindConversationEvents()
 bindComposerEvents()

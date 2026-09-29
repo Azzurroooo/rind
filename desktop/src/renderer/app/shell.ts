@@ -5,13 +5,14 @@ import { renderComposer, renderPlanDock, syncPendingInputDock } from "../compose
 import { renderAttachments } from "./attachments-ui.ts"
 import { renderEffortMenu, renderModels, renderProjectControl } from "./composer-menus.ts"
 import { renderSlashCommandMenu } from "./composer.ts"
-import { appRoot, attachButton, compactContext, composerMenu, composerMenuTrigger, connection, connectionText, contextMeter, interrupt, newSessionButton, notice, noticeText, pendingInputDock, planDock, planDockShell, prompt, requiredElement, retry, send, sessionIdLabel, sessionTitle, shortcutsDialog, shortcutTable, sidebar, sidebarToggle, slashCommandMenu } from "./dom.ts"
+import { appRoot, attachButton, compactContext, composerMenu, composerMenuTrigger, connection, connectionText, contextMeter, interrupt, newSessionButton, notice, noticeText, pendingInputDock, planDock, planDockShell, prompt, retry, send, shortcutsDialog, shortcutTable, sidebar, sidebarToggle, slashCommandMenu } from "./dom.ts"
 import { escapeHtml } from "./html.ts"
 import { renderInspector } from "./inspector.ts"
 import { renderPalette } from "./palette-ui.ts"
 import { promoteFollowUp, recallPendingInput } from "./pending-inputs.ts"
 import { activeTurnIdFor, runAction, runtimeTurnActive } from "./runtime.ts"
-import { applyOverview, chatProject, currentRuntimeSnapshot, knownSessions } from "./sessions.ts"
+import { applyOverview, chatProject, currentRuntimeSnapshot } from "./sessions.ts"
+import { renderSessionHead } from "./session-head.ts"
 import { renderSettings } from "./settings.ts"
 import { renderProjects, renderRecentSessions } from "./sidebar.ts"
 import { state, vars } from "./state.ts"
@@ -35,12 +36,7 @@ export function render() {
   sidebarToggle.dataset.tooltip = sidebarLabel
   sidebarToggle.setAttribute("aria-label", sidebarLabel)
   sidebarToggle.setAttribute("aria-expanded", String(state.sidebarOpen))
-  const current = knownSessions().find((item) => item.id === state.viewedSessionId)
-  sessionTitle.textContent = current?.title || (state.viewedSessionId ? "Session" : "New session")
-  sessionIdLabel.textContent = state.model || chatProject()?.name || "Select a project to begin"
-  sessionIdLabel.title = state.viewedSessionId || ""
-  requiredElement<HTMLButtonElement>("export-session").disabled = !state.conversation.entries.length
-  requiredElement<HTMLButtonElement>("fork-session").disabled = !state.viewedSessionId || runtimeTurnActive()
+  renderSessionHead()
   noticeText.textContent = state.notice || runtime.message || ""
   retry.hidden = runtime.status !== "error"
   notice.hidden = !noticeText.textContent && retry.hidden

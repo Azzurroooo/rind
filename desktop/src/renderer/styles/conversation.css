@@ -17,12 +17,54 @@
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  min-height: 70px;
-  padding: 12px 28px;
+  height: 44px;
+  padding: 0 8px 0 16px;
   border-bottom: 1px solid var(--line);
 }
-.conversation-title { min-width: 0; }
-.conversation-head strong { display: block; overflow: hidden; font-size: 14px; text-overflow: ellipsis; white-space: nowrap; }
+.conversation-title { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.session-title { min-width: 0; max-width: 360px; margin: 0; overflow: hidden; color: var(--text); font-size: 14px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+.session-status {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 5px;
+  height: 20px;
+  padding: 0 7px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: var(--dim);
+  font-size: 11px;
+  font-weight: 500;
+}
+.session-status[hidden] { display: none; }
+.session-status-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--dim); }
+.session-status.running { border-color: var(--accent-soft); color: var(--accent); background: var(--accent-soft); }
+.session-status.running .session-status-dot { background: var(--accent); animation: pip-pulse 1.1s ease-in-out infinite; }
+.session-actions .head-button { position: relative; width: 28px; height: 28px; }
+.head-button[aria-expanded="true"] { color: var(--text); background: var(--fill-2); }
+.head-button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.head-badge {
+  position: absolute;
+  top: 0;
+  right: 0;
+  min-width: 13px;
+  height: 13px;
+  padding: 0 3px;
+  border-radius: 7px;
+  color: var(--bg);
+  background: var(--accent);
+  font-size: 9.5px;
+  font-weight: 600;
+  line-height: 13px;
+  text-align: center;
+}
+.head-badge[hidden] { display: none; }
+.session-head-menu-wrap { position: relative; }
+.session-head-menu { top: calc(100% + 4px); right: 0; }
+.session-head-menu[hidden] { display: none; }
+@media (prefers-reduced-motion: reduce) {
+  .session-status.running .session-status-dot { animation: none; }
+}
 .subtle { display: block; overflow: hidden; color: var(--dim); font-family: var(--font-mono); font-size: 10.5px; text-overflow: ellipsis; white-space: nowrap; }
 
 .notice {

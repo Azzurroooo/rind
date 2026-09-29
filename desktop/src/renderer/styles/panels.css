@@ -112,7 +112,8 @@
     grid-template-rows: minmax(0, 1fr);
   }
   .sidebar { display: none; }
-  .conversation-head { padding-inline: 12px; }
+  .conversation-head { height: 48px; padding-inline: 12px 6px; }
+  .session-actions .head-button { width: 36px; height: 36px; }
   .composer { padding-inline: 10px; }
   .composer-footer { gap: 3px; padding-inline: 5px; }
   .slash-command-option, .command-list-item { grid-template-columns: minmax(0, 1fr); gap: 3px; }
