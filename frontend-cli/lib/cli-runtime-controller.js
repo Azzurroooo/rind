@@ -171,15 +171,19 @@ export function createCliRuntimeController({
     state.turn.id = "";
     state.turn.active = false;
     state.turn.interruptRequested = false;
+    state.display.backgroundWait = replay?.background_wait || null;
     options.announce?.(state.session.info);
     renderHistory(replay?.messages);
     restoreLiveTurn(liveTurn);
+    for (const task of replay?.tasks || []) {
+      getTaskMonitor()?.recordTask?.({ type: "task_updated", session_id: switchedId, task });
+    }
     state.display.stats = usage;
     getCompactContextState().clear();
     refreshInputState();
     redraw();
     await onSessionRestored();
-    void getTaskMonitor()?.refresh().catch(() => {});
+    if (getTaskMonitor()) await getTaskMonitor().refresh();
     return true;
   }
 
@@ -398,9 +402,9 @@ export function createCliRuntimeController({
       return;
     }
     try {
-      const update = await request(methods.modelSet, { provider_id: selected.providerId || undefined, model_id: selected.modelId || selected.name });
-      state.session.info = { ...state.session.info, provider: update?.provider_id || selected.providerId, model: update?.model_id || selected.modelId || selected.name };
-      log(() => modelSetResultText(update, selected.modelId || selected.name));
+      const update = await request(methods.modelSet, { provider_id: selected.providerId || undefined, model_id: selected.modelId });
+      state.session.info = { ...state.session.info, provider: update?.provider_id || selected.providerId, model: update?.model_id || selected.modelId };
+      log(() => modelSetResultText(update, selected.modelId));
     } catch (error) {
       log(`Command failed: ${error instanceof Error ? error.message : String(error)}`);
     }

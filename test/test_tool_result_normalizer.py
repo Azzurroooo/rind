@@ -160,24 +160,8 @@ async def test_stable_serialization_for_same_input() -> None:
 
 
 @pytest.mark.asyncio
-async def test_empty_bash_output_poll_is_compacted() -> None:
-    result = await ToolResultNormalizer().normalize(
-        {
-            "ok": True,
-            "tool": "bash_output",
-            "data": {
-                "bg_id": "bg_123",
-                "status": "running",
-                "stdout": "",
-                "stderr": "",
-                "no_new_output": True,
-                "empty_observation_count": 4,
-                "suggested_next_wait_ms": 30000,
-            },
-        }
-    )
-    assert '"bg_id": "bg_123"' in result.model_content
-    assert '"status": "running"' in result.model_content
-    assert '"no_new_output": true' in result.model_content
-    assert "stdout" not in result.model_content
-    assert "stderr" not in result.model_content
+async def test_task_status_and_empty_streams_remain_structured() -> None:
+    payload = {"ok": True, "tool": "task_control", "data": {
+        "task_id": "task_empty", "status": "running", "stdout": "", "stderr": "", "exit_code": None}}
+    result = await ToolResultNormalizer().normalize(payload)
+    assert json.loads(result.model_content) == {**payload, "meta": {}}

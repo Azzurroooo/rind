@@ -1,0 +1,13 @@
+{
+  "level": "L1",
+  "publicScoreEligible": false,
+  "cpuMs": [
+    140.625,
+    156.25,
+    156.25,
+    171.875,
+    156.25
+  ],
+  "medianCpuMs": 156.25,
+  "profile": "         820077 function calls in 0.465 seconds\n\n   Ordered by: internal time\n   List reduced from 43 to 18 due to restriction <18>\n\n   ncalls  tottime  percall  cumtime  percall filename:lineno(function)\n    30002    0.091    0.000    0.465    0.000 base_events.py:1960(_run_once)\n    30002    0.036    0.000    0.226    0.000 {method 'run' of '_contextvars.Context' objects}\n    30002    0.035    0.000    0.068    0.000 windows_events.py:762(_poll)\n    30002    0.030    0.000    0.054    0.000 base_events.py:852(_call_soon)\n    10001    0.026    0.000    0.065    0.000 base_events.py:461(create_task)\n    30002    0.022    0.000    0.079    0.000 base_events.py:823(call_soon)\n    20002    0.020    0.000    0.100    0.000 cancellation.py:36(iterate_with_cancellation)\n    30002    0.020    0.000    0.020    0.000 {built-in method _overlapped.GetQueuedCompletionStatus}\n    30002    0.018    0.000    0.244    0.000 events.py:87(_run)\n    30002    0.016    0.000    0.084    0.000 windows_events.py:444(select)\n    30002    0.014    0.000    0.018    0.000 events.py:36(__init__)\n    60004    0.012    0.000    0.012    0.000 {built-in method builtins.len}\n    20001    0.010    0.000    0.022    0.000 bench_cancellation.py:18(source)\n    10002    0.010    0.000    0.110    0.000 bench_cancellation.py:24(trial)\n    30002    0.009    0.000    0.015    0.000 base_events.py:772(time)\n    20000    0.009    0.000    0.012    0.000 tasks.py:703(sleep)\n    10003    0.008    0.000    0.011    0.000 _weakrefset.py:85(add)\n    10001    0.008    0.000    0.075    0.000 tasks.py:402(create_task)\n\n\n"
+}

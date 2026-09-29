@@ -29,7 +29,7 @@ from agent.domain import ParsedToolCall
 
 def make_runner(mock_parser):
     mock_client = AsyncMock()
-    mock_client.stream = MagicMock()
+    mock_client.stream = MagicMock(return_value=MagicMock(aclose=AsyncMock()))
     mock_context = MagicMock()
     mock_context.build_messages_async = AsyncMock(return_value=MagicMock(messages=[], stats={}, decisions={}))
     mock_context.select_active_skills_for_turn = None
@@ -64,15 +64,13 @@ async def test_async_turn_runner_stream():
 
     events = [event async for event in runner.run_turn(mock_session)]
 
-    assert len(events) == 5
+    assert len(events) == 4
     assert isinstance(events[0], ContextBuiltEvent)
     assert isinstance(events[1], AssistantDeltaEvent)
-    assert events[1].text == "Hello "
-    assert isinstance(events[2], AssistantDeltaEvent)
-    assert events[2].text == "World!"
-    assert isinstance(events[3], AssistantMessageCompletedEvent)
-    assert events[3].content_chars == len("Hello World!")
-    assert isinstance(events[4], TurnCompletedEvent)
+    assert events[1].text == "Hello World!"
+    assert isinstance(events[2], AssistantMessageCompletedEvent)
+    assert events[2].content_chars == len("Hello World!")
+    assert isinstance(events[3], TurnCompletedEvent)
 
 
 @pytest.mark.asyncio
@@ -94,6 +92,7 @@ async def test_async_turn_runner_persists_reasoning_content():
 @pytest.mark.asyncio
 async def test_async_turn_runner_yields_delta_before_stream_completes():
     delta_sent = asyncio.Event()
+    delta_visible = asyncio.Event()
     finish_stream = asyncio.Event()
 
     async def mock_consume(*args, **kwargs):
@@ -112,10 +111,12 @@ async def test_async_turn_runner_yields_delta_before_stream_completes():
     async def collect_events():
         async for event in runner.run_turn(mock_session):
             events.append(event)
+            if isinstance(event, AssistantDeltaEvent):
+                delta_visible.set()
 
     task = asyncio.create_task(collect_events())
     await asyncio.wait_for(delta_sent.wait(), timeout=1)
-    await asyncio.sleep(0)
+    await asyncio.wait_for(delta_visible.wait(), timeout=1)
 
     assert any(isinstance(event, AssistantDeltaEvent) and event.text == "partial" for event in events)
     assert not any(isinstance(event, AssistantMessageCompletedEvent) for event in events)

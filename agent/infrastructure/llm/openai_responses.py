@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from contextlib import aclosing
 from collections.abc import AsyncIterator
 from typing import Any
 
@@ -43,11 +44,10 @@ class OpenAIResponsesClient(ChatClient):
         response = None
         try:
             response = await await_with_cancellation(self._client.responses.create(**payload), cancellation_token)
-            async for raw in iterate_with_cancellation(response, cancellation_token):
-                if cancellation_token and cancellation_token.is_cancelled:
-                    raise asyncio.CancelledError(cancellation_token.reason)
-                for event in _events(raw, call_ids):
-                    yield event
+            async with aclosing(iterate_with_cancellation(response, cancellation_token)) as chunks:
+                async for raw in chunks:
+                    for event in _events(raw, call_ids):
+                        yield event
         except asyncio.CancelledError:
             raise
         except ProviderError:

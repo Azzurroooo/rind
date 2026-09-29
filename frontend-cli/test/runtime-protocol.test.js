@@ -83,8 +83,10 @@ test("runtime protocol recognizes the shared golden event fixture", () => {
     "tool_requested",
     "tool_result",
     "turn_completed",
+    "task_updated",
+    "task_output",
   ]);
-  assert.deepEqual(events.map((message) => message.sequence), [1, 2, 3, 4, 5]);
+  assert.deepEqual(events.map((message) => message.sequence), [1, 2, 3, 4, 5, 6, 7]);
   // Request/response sample pairs appended by later protocol methods must stay
   // parseable by the shared envelope guards; event lines remain the first five.
   assert.deepEqual(messages.filter((message) => message.kind === "request").map(runtimeRequestId), [
@@ -98,6 +100,7 @@ test("runtime protocol recognizes the shared golden event fixture", () => {
     "ping-1",
     "context-inspect-1",
     "usage-summary-1",
+    "task-list-1", "task-read-1", "task-wait-1", "task-cancel-1", "task-release_wait-1",
   ]);
   assert.deepEqual(responses.map(runtimeRequestId), [
     "turn-1",
@@ -112,6 +115,7 @@ test("runtime protocol recognizes the shared golden event fixture", () => {
     "ping-1",
     "context-inspect-1",
     "usage-summary-1",
+    "task-list-1", "task-read-1", "task-wait-1", "task-cancel-1", "task-release_wait-1",
   ]);
 });
 

@@ -39,7 +39,7 @@ Verified discovery schemas:
 - [Mistral model list](https://docs.mistral.ai/api/endpoint/models): boolean `capabilities.vision`.
 - Other existing discovery APIs do not provide an implemented, verified capability schema and fall back locally.
 
-The built-in [catalog](../agent/infrastructure/llm/catalog.py) contains 122 provider/model entries across 17 named providers: 84 support images, 32 do not, and six retained legacy entries are unverified. The 2026-09-21 update added 90 entries. Every explicit capability was checked against the sources below; these are development-time references, not runtime dependencies. The generic provider has no duplicate model list. No wildcard model-name rules are used.
+The built-in [catalog](../agent/infrastructure/llm/catalog.py) includes explicit per-model image capabilities and unknown values where support is unverified or depends on a console-selected model. The original catalog sources are listed below; the MiMo, Hunyuan, Doubao/Ark and MiniMax additions and official references are documented in [provider additions](provider-catalog.md). These are development-time references, not runtime dependencies. The generic provider has no duplicate model list. No wildcard model-name rules are used.
 
 Representative entries (the code contains the complete exact-ID list):
 

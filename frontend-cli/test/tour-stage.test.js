@@ -148,7 +148,7 @@ test("assistant streams text chunks; menu tick moves to target", () => {
   stage.settleStep(assistant);
   assert.equal(stage.snapshot().rind.blocks.at(-1).reveal, 5);
 
-  const menu = { kind: "menu", menu: { kind: "model", items: [{ name: "a" }, { name: "b" }, { name: "c" }], selected: 0, target: 2 } };
+  const menu = { kind: "menu", menu: { kind: "model", items: [{ modelId: "a" }, { modelId: "b" }, { modelId: "c" }], selected: 0, target: 2 } };
   stage.beginStep(menu);
   assert.equal(stage.tick(), true);
   assert.equal(stage.snapshot().rind.composer.menu.selected, 1);

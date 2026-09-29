@@ -122,7 +122,7 @@ async def test_async_turn_runner_stream_cancelled_error_is_cancelled_event():
 @pytest.mark.asyncio
 async def test_async_turn_runner_cancelled_error_prefers_token_reason():
     mock_client = AsyncMock()
-    mock_client.stream = MagicMock()
+    mock_client.stream = MagicMock(return_value=MagicMock(aclose=AsyncMock()))
 
     source = CancellationTokenSource()
 
@@ -864,7 +864,7 @@ async def test_async_turn_runner_fails_after_tool_persist_failure():
 @pytest.mark.asyncio
 async def test_async_turn_runner_emits_and_persists_sampling_usage():
     mock_client = AsyncMock()
-    mock_client.stream = MagicMock()
+    mock_client.stream = MagicMock(return_value=MagicMock(aclose=AsyncMock()))
 
     usage = SimpleNamespace(
         prompt_tokens=100,
@@ -945,7 +945,7 @@ async def test_async_turn_runner_emits_and_persists_sampling_usage():
 @pytest.mark.asyncio
 async def test_async_turn_runner_usage_persistence_failure_does_not_fail_turn():
     mock_client = AsyncMock()
-    mock_client.stream = MagicMock()
+    mock_client.stream = MagicMock(return_value=MagicMock(aclose=AsyncMock()))
 
     usage = SimpleNamespace(prompt_tokens=12, completion_tokens=3, total_tokens=15)
     mock_parser = MagicMock()
@@ -1009,7 +1009,7 @@ async def test_async_turn_runner_usage_persistence_failure_does_not_fail_turn():
 @pytest.mark.asyncio
 async def test_async_turn_runner_usage_tolerates_bad_context_stats():
     mock_client = AsyncMock()
-    mock_client.stream = MagicMock()
+    mock_client.stream = MagicMock(return_value=MagicMock(aclose=AsyncMock()))
 
     usage = SimpleNamespace(prompt_tokens=12, completion_tokens=3, total_tokens=15)
     mock_parser = MagicMock()
@@ -1071,7 +1071,7 @@ async def test_async_turn_runner_usage_tolerates_bad_context_stats():
 @pytest.mark.asyncio
 async def test_async_turn_runner_provider_unavailable_emits_failure():
     mock_client = AsyncMock()
-    mock_client.stream = MagicMock()
+    mock_client.stream = MagicMock(return_value=MagicMock(aclose=AsyncMock()))
 
     mock_parser = MagicMock()
     mock_parser.consume_async_stream = AsyncMock(

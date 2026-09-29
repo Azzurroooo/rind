@@ -13,3 +13,26 @@ New built-in prompts mark their file-tool instructions with `<rind_file_tool_rul
 Shell policy checks command positions using the selected Bash/sh or PowerShell backend. Comments, quoted data, Git format arguments and heredoc bodies are distinguished from invocations. Direct commands, common executable paths/extensions, chains, pipelines, common shell wrappers and simple command substitutions are checked. This is an invocation filter, not a general interpreter or sandbox: variable expansion, arbitrary embedded programs and dynamically generated commands are not fully analyzed. No dangerous commands are executed in the classification tests.
 
 Deterministic tests cover paging through Chinese/ASCII/escaped text, CRLF, EOF without a newline, long lines, argument compatibility, model receipts, persistence, prompt migration, and shell classification. Live-model reading quality remains a separate manual acceptance scenario.
+
+## Managed shell tasks
+
+`bash(command, cwd?, yield_time_ms=10000, timeout_ms=null, notify="on_exit")` has one execution path. Every successfully started command gets a stable `task_id`. Yield is a call waiting window (0–60000 ms), measured from process creation; expiration returns the running task without restarting or killing it. A positive `timeout_ms` independently terminates the process tree. There is no default runtime deadline. `cwd` affects only this command. Shell selection still follows host detection, including the PowerShell fallback on Windows.
+
+`task_control(action, task_id?, cursor?, wait_ms?, max_output_chars=20000, page_token?)` operates only within its session:
+
+| Action | Behavior |
+| --- | --- |
+| `list` | Up to 50 active/recent tasks; continue with `next_page_token`. Rejects task ID, cursor and wait interval. |
+| `read` | Immediate state and output; task ID required, wait interval rejected. |
+| `wait` | Observes until completion, release, interruption or the interval (default 30000, range 1000–60000 ms). Cancelling observation leaves the process running. |
+| `cancel` | Explicit process-tree termination; task ID required, cursor and wait interval rejected. Repeated cancellation returns the retained terminal state. |
+
+Results retain the `tool_ok`/`tool_error` envelope. `ok` means the control operation succeeded; process failure is `data.status=failed` with its real exit code. Unknown exit codes are null. `return_reason` describes this call (`finished`, `yield_timeout`, `released`, `interrupted`) independently of task state. States are `starting`, `running`, `cancelling`, `completed`, `failed`, `cancelled`, `timed_out`, `lost`. Unconfirmed termination stays `cancelling`; lost ownership never implies the process stopped. Only nonterminal tasks use the Worker-wide limit of eight.
+
+Read/wait without a cursor returns a bounded preview; `start_cursor` begins the stored output and `next_cursor` continues it. Each consumer owns its cursor. The combined stream preview accepts 1–50000 characters and the model result additionally obeys the existing JSON byte budget. If normalization shortens the preview, it removes the misleading continuation cursor and supplies a paging notice. Command summaries are capped at 2000 characters; original tool arguments remain in session history.
+
+Raw bytes and ordered decoded stream records are saved under the session's `tool-output/`. A bounded queue batches disk writes. Each task has a 32 MiB disk budget including its output index; excess output is drained and discarded with `output_incomplete` and an explicit cause. Output failures do not block process draining. Terminal output is retained for at least 24 hours and until required model delivery has been consumed; manual/cancelled tasks can expire after 24 hours. Cleanup happens on journal access and retains task identity/state and execution deduplication. Missing or expired output is reported, never silently treated as complete.
+
+The default `on_exit` policy delivers completion without model polling and can continue an idle session. Use `manual` for services/watchers; running does not mean ready, so verify a port or HTTP endpoint explicitly. Initial call cancellation terminates an unhanded command. Releasing its wait, including steering, hands the existing process to the Worker. Explicit cancellation does not independently trigger a model continuation. Interrupt suppresses future automatic continuation until new user input; switching sessions only changes the UI subscription. Worker shutdown closes the start gate and stops its owned trees. Windows uses a Job Object assigned before resuming the root; Unix uses a process group. Interactive stdin, PTY and daemons surviving Worker exit are outside this contract.
+
+New schemas expose `bash` and `task_control`. Historical `bash_output` remains callable only for recovery (`kill=true` → cancel, otherwise bounded wait). Old bash `run_in_background`/`wait_ms` arguments normalize at registration; mixing them with new controls is rejected. Saved results are replayed unchanged. An unknown old task is reported as no longer managed, never re-executed.

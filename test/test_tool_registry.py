@@ -86,7 +86,7 @@ def test_shell_schemas_hide_runtime_session_context(build_builtin_tool_specs) ->
     registry = DefaultToolRegistry(build_builtin_tool_specs())
     schemas = {schema["function"]["name"]: schema for schema in registry.schemas}
 
-    for name in ("bash", "bash_output"):
+    for name in ("bash", "task_control"):
         properties = schemas[name]["function"]["parameters"]["properties"]
         assert "session_id" not in properties
         assert "_session_id" not in properties
@@ -115,6 +115,7 @@ def test_builtin_catalog_preserves_default_tool_order(build_builtin_tool_specs) 
         "glob",
         "grep",
         "bash",
+        "task_control",
             "bash_output",
             "update_plan",
             "skill",

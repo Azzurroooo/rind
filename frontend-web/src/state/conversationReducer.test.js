@@ -22,16 +22,16 @@ function replay(envelopes) {
 describe("conversation reducer — golden replay (web-ui.md §3)", () => {
   const envelopes = loadGoldenEnvelopes();
 
-  it("fixture contains the five expected session/update envelopes", () => {
-    expect(envelopes).toHaveLength(5);
-    expect(envelopes.map((envelope) => envelope.sequence)).toEqual([1, 2, 3, 4, 5]);
+  it("fixture contains the seven expected session/update envelopes", () => {
+    expect(envelopes).toHaveLength(7);
+    expect(envelopes.map((envelope) => envelope.sequence)).toEqual([1, 2, 3, 4, 5, 6, 7]);
   });
 
   it("rebuilds the final UI state from the golden stream", () => {
     const state = replay(envelopes);
 
     // Final UI state snapshot: message count, tool block, turn/card state.
-    expect(state.entries).toHaveLength(2);
+    expect(state.entries).toHaveLength(3);
     expect(state.entries[0]).toMatchObject({
       role: "tool",
       tool_call_id: "call-1",
@@ -49,7 +49,7 @@ describe("conversation reducer — golden replay (web-ui.md §3)", () => {
 
   it("counts only durable envelopes toward the local cursor", () => {
     const state = replay(envelopes);
-    // seq 2 (assistant_delta) is incremental → cursor is 4, not 5.
+    // Conversation cursor excludes task snapshots and incremental output.
     expect(state.cursor).toBe(4);
   });
 
@@ -57,13 +57,13 @@ describe("conversation reducer — golden replay (web-ui.md §3)", () => {
     const once = replay(envelopes);
     const twice = envelopes.reduce((state, envelope) => reduceConversation(state, envelope), once);
     expect(twice).toEqual(once);
-    expect(twice.entries).toHaveLength(2);
+    expect(twice.entries).toHaveLength(3);
     expect(twice.cursor).toBe(4);
   });
 
   it("view mapping exposes the same stream as messages/draft/plan/active", () => {
     const view = conversationView(replay(envelopes));
-    expect(view.messages).toHaveLength(2);
+    expect(view.messages).toHaveLength(3);
     expect(view.draft).toBe("");
     expect(view.active).toBe(false);
     expect(view.cursor).toBe(4);

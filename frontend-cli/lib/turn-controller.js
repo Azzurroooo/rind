@@ -66,6 +66,7 @@ export function createTurnController({
     output.cancelInput();
     output.closeAssistant();
     output.logInterrupt();
+    output.refreshInputState();
     void request(runtimeMethods.sessionCancel).catch(() => {});
   }
 

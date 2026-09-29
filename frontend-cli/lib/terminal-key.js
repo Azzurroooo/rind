@@ -78,7 +78,8 @@ export function parseTerminalKey(raw = "") {
     if (tilde[3] === "3") {
       return null;
     }
-    return Number(tilde[1]) === 3 ? key("delete", Number(tilde[2] || 1)) : null;
+    const name = { 1: "home", 3: "delete", 4: "end", 5: "pageup", 6: "pagedown", 7: "home", 8: "end" }[Number(tilde[1])];
+    return name ? key(name, Number(tilde[2] || 1)) : null;
   }
   const csiKey = value.match(/^\x1b\[([ABCDHFZ])$/);
   if (csiKey) {

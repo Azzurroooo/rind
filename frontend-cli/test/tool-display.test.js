@@ -9,8 +9,18 @@ import {
   argsFromResult,
 } from "../lib/tool-display.js";
 import { stripAnsi } from "../lib/text-width.js";
+import { resetTheme, setTheme } from "../lib/theme.js";
 
 const WIDTH = 60;
+
+test("managed task results show process state and list entries", () => {
+  const render = (name, data, args = {}) => renderToolFinished({ name, args, phase: "done",
+    event: { status: "completed", result: JSON.stringify({ ok: true, data }) } }, 100).map(stripAnsi).join("\n");
+  assert.match(render("task_control", { tasks: [{ task_id: "task_1", status: "running", command: "build" }] }, { action: "list" }), /task_1 · running · build/);
+  assert.match(render("task_control", { status: "running", task_id: "task_1" }, { action: "read", task_id: "task_1" }), /◌ task read/);
+  assert.match(render("bash", { status: "failed", exit_code: 7 }, { command: "build" }), /⊘.*exit 7/);
+  assert.match(render("bash", { status: "cancelled", exit_code: 1 }, { command: "build" }), /cancelled/);
+});
 
 test("image reads display bounded summaries on narrow terminals", () => {
   const result = JSON.stringify({ ok: true, tool: "read_file", data: "Read image: chart.png · 1600x900 · PNG\nFirst frame only." });
@@ -98,7 +108,19 @@ test("background running bash keeps a pending presentation", () => {
   assert.match(plain.at(-1), /running in background \(bg bg9\)/);
 });
 
-test("edit_file title carries diff counts and body renders colored diff with footer", () => {
+test("edit_file title carries diff counts and body renders colored diff with footer", (t) => {
+  const isTTY = process.stdout.isTTY;
+  const noColor = process.env.NO_COLOR;
+  process.stdout.isTTY = true;
+  delete process.env.NO_COLOR;
+  setTheme("catppuccin-mocha");
+  t.after(() => {
+    if (isTTY === undefined) delete process.stdout.isTTY;
+    else process.stdout.isTTY = isTTY;
+    if (noColor === undefined) delete process.env.NO_COLOR;
+    else process.env.NO_COLOR = noColor;
+    resetTheme();
+  });
   const fileChange = {
     file_path: "src/app.ts",
     lines: [

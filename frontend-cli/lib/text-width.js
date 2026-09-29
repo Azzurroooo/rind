@@ -1,5 +1,6 @@
 const ANSI_RE = /\x1b\[[0-?]*[ -/]*[@-~]/g;
 const LINE_BREAK_RE = /\r\n|\r|\n/;
+const PRINTABLE_ASCII_RE = /^[\x20-\x7e]*$/;
 const segmenter = typeof Intl?.Segmenter === "function"
   ? new Intl.Segmenter(undefined, { granularity: "grapheme" })
   : null;
@@ -12,13 +13,16 @@ export function stripAnsi(value) {
 
 export function graphemes(value) {
   const text = String(value || "");
+  if (PRINTABLE_ASCII_RE.test(text)) return text.split("");
   return segmenter
     ? Array.from(segmenter.segment(text), (segment) => segment.segment)
     : Array.from(text);
 }
 
 export function textWidth(value) {
-  return graphemes(stripAnsi(value)).reduce((width, segment) => width + segmentWidth(segment), 0);
+  const text = stripAnsi(value);
+  if (PRINTABLE_ASCII_RE.test(text)) return text.length;
+  return graphemes(text).reduce((width, segment) => width + segmentWidth(segment), 0);
 }
 
 export function wrapTextCells(value, firstWidth, continuationWidth = firstWidth) {
@@ -277,6 +281,7 @@ function takeEndCells(value, maxWidth) {
 }
 
 function segmentWidth(segment) {
+  if (segment.length === 1 && segment >= " " && segment <= "~") return 1;
   const text = stripAnsi(segment);
   if (!text || isZeroWidth(text)) {
     return 0;

@@ -25,3 +25,15 @@
 {"kind":"response","request_id":"context-inspect-1","result":{"session_id":"session-1","breakdown":{"captured_at":"2026-01-01T00:00:04Z","turn_id":"turn-1","estimated_total":120,"context_window_tokens":1000,"sections":[{"key":"chat_user","label":"Chat · user inputs","tokens":120,"messages":1}]},"latest_usage":{"sampling_kind":"assistant","input_tokens":118,"cached_input_tokens":0,"cache_hit_rate":0.0,"output_tokens":21,"reasoning_output_tokens":0,"total_tokens":139,"context_window_tokens":1000,"context_usage_percent":0.118}}}
 {"kind":"request","request_id":"usage-summary-1","method":"rind/usage/summary","params":{"days":7}}
 {"kind":"response","request_id":"usage-summary-1","result":{"days":7,"totals":{"input":118,"cached":0,"output":21,"reasoning":0,"total":139,"samples":1,"compactions":0},"by_day":[{"day":"01-01","tokens":139}],"by_model":[{"model":"test-model","tokens":139,"samples":1}],"recent_sessions":[{"session_id":"session-1","updated_at":"2026-01-01T00:00:04Z","tokens":139,"samples":1}]}}
+{"kind": "request", "request_id": "task-list-1", "method": "rind/task/list", "params": {"session_id": "s1"}}
+{"kind": "response", "request_id": "task-list-1", "result": {"ok": true}}
+{"kind": "request", "request_id": "task-read-1", "method": "rind/task/read", "params": {"session_id": "s1", "task_id": "task_1"}}
+{"kind": "response", "request_id": "task-read-1", "result": {"ok": true}}
+{"kind": "request", "request_id": "task-wait-1", "method": "rind/task/wait", "params": {"session_id": "s1", "task_id": "task_1"}}
+{"kind": "response", "request_id": "task-wait-1", "result": {"ok": true}}
+{"kind": "request", "request_id": "task-cancel-1", "method": "rind/task/cancel", "params": {"session_id": "s1", "task_id": "task_1"}}
+{"kind": "response", "request_id": "task-cancel-1", "result": {"ok": true}}
+{"kind": "request", "request_id": "task-release_wait-1", "method": "rind/task/release_wait", "params": {"session_id": "s1", "task_id": "task_1"}}
+{"kind": "response", "request_id": "task-release_wait-1", "result": {"ok": true}}
+{"kind": "event", "method": "session/update", "sequence": 6, "durability": "durable", "session_id": "s1", "turn_id": "", "event": {"type": "task_updated", "session_id": "s1", "turn_id": "", "origin_turn_id": "t1", "task": {"task_id": "task_1", "status": "completed"}}}
+{"kind": "event", "method": "session/update", "sequence": 7, "durability": "incremental", "session_id": "s1", "turn_id": "", "event": {"type": "task_output", "session_id": "s1", "turn_id": "", "origin_turn_id": "t1", "task": {"task_id": "task_1", "status": "running"}}}

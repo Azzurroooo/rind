@@ -1,0 +1,322 @@
+import asyncio
+import json
+import sys
+import os
+
+import pytest
+import pytest_asyncio
+
+from agent.domain.cancellation import CancellationTokenSource
+from agent.infrastructure.persistence import ToolOutputStore
+from agent.infrastructure.tools.registry import DefaultToolRegistry
+from agent.infrastructure.tools.shell.session_pool import ShellState
+from agent.infrastructure.tools.shell.specs import build_shell_tool_specs
+from agent.infrastructure.tools.shell.tool import ShellTools
+
+
+class FakeProcess:
+    pid = 101
+
+    def __init__(self):
+        self.returncode = None
+        self.stdout = asyncio.StreamReader()
+        self.stderr = asyncio.StreamReader()
+        self.exited = asyncio.Event()
+
+    def finish(self, code=0, stdout=b"", stderr=b""):
+        self.returncode = code
+        self.stdout.feed_data(stdout)
+        self.stderr.feed_data(stderr)
+        self.stdout.feed_eof()
+        self.stderr.feed_eof()
+        self.exited.set()
+
+
+@pytest_asyncio.fixture
+async def task_shell(tmp_path, monkeypatch):
+    from agent.infrastructure.tools.shell import supervisor
+    tools = ShellTools(ToolOutputStore(str(tmp_path)))
+    spawned = []
+
+    async def spawn(*args, **kwargs):
+        process = FakeProcess()
+        spawned.append(process)
+        return process
+
+    async def wait(process):
+        await process.exited.wait()
+        return process.returncode
+
+    async def terminate(process, grace, job=None):
+        if process.returncode is None:
+            process.finish(-9)
+
+    monkeypatch.setattr(supervisor.asyncio, "create_subprocess_exec", spawn)
+    monkeypatch.setattr(supervisor, "wait_parent_exit", wait)
+    monkeypatch.setattr(supervisor, "terminate_tree", terminate)
+    try:
+        yield tools, spawned
+    finally:
+        await tools.close()
+
+
+def data(raw):
+    payload = json.loads(raw)
+    assert payload["ok"], payload
+    return payload["data"]
+
+
+@pytest.mark.asyncio
+async def test_yield_reuse_nonzero_repeatable_reads_and_session_isolation(task_shell):
+    tools, processes = task_shell
+    first = data(await tools.bash("work", yield_time_ms=0, _idempotency_key="origin"))
+    assert first["status"] == "running" and first["exit_code"] is None and first["handoff"]
+    repeated = data(await tools.bash("work", yield_time_ms=0, _idempotency_key="origin"))
+    assert repeated["task_id"] == first["task_id"] and len(processes) == 1
+    processes[0].finish(7, b"  tail\n", b"error\r")
+    result = data(await tools.task_control("wait", first["task_id"]))
+    assert result["status"] == "failed" and result["exit_code"] == 7
+    assert result["stdout"] == "  tail\n" and result["stderr"] == "error\r"
+    assert data(await tools.task_control("read", first["task_id"])) == result
+    assert data(await tools.task_control("cancel", first["task_id"])) == result
+    assert result["handoff"]
+    assert data(await tools.task_control("list"))["tasks"][0]["handoff"]
+    assert not json.loads(await tools.task_control("read", first["task_id"], _session_id="other"))["ok"]
+
+
+@pytest.mark.asyncio
+async def test_release_and_cancel_observation_keep_original_process(task_shell):
+    tools, processes = task_shell
+    call = asyncio.create_task(tools.bash("work", yield_time_ms=60000, _idempotency_key="release"))
+    async def release():
+        while not tools.supervisor.release_wait("default", call_id="release"):
+            await asyncio.sleep(0)
+    await asyncio.wait_for(release(), 2)
+    result = data(await asyncio.wait_for(call, 1))
+    assert result["status"] == "running" and result["return_reason"] == "released" and result["handoff"]
+    cancellation = CancellationTokenSource()
+    cancellation.cancel("stop observing")
+    read = data(await tools.task_control("wait", result["task_id"], _cancellation_token=cancellation.token))
+    assert read["return_reason"] == "interrupted" and read["status"] == "running"
+    assert processes[0].returncode is None and len(processes) == 1
+    cancelled = data(await tools.task_control("cancel", result["task_id"]))
+    assert cancelled["status"] == "cancelled"
+    assert cancelled["handoff"]
+    assert processes[0].returncode == -9
+
+
+@pytest.mark.asyncio
+async def test_initial_interrupt_terminates_unhanded_process(task_shell):
+    tools, processes = task_shell
+    cancellation = CancellationTokenSource()
+    cancellation.cancel("initial interruption")
+    result = data(await tools.bash("work", _cancellation_token=cancellation.token))
+    assert result["status"] == "cancelled" and not result["handoff"] and processes[0].returncode == -9
+
+
+@pytest.mark.asyncio
+async def test_completion_during_initial_wait_never_hands_off(task_shell):
+    tools, processes = task_shell
+    call = asyncio.create_task(tools.bash("quick", yield_time_ms=60000))
+    while not processes:
+        await asyncio.sleep(0)
+    processes[0].finish()
+    result = data(await call)
+    assert result["status"] == "completed" and not result["handoff"]
+    assert not tools.supervisor.release_wait("default", task_id=result["task_id"])
+    assert not data(await tools.task_control("read", result["task_id"]))["handoff"]
+    assert not data(await tools.task_control("list"))["tasks"][0]["handoff"]
+
+
+@pytest.mark.asyncio
+async def test_release_then_completion_preserves_handoff(task_shell):
+    tools, processes = task_shell
+    call = asyncio.create_task(tools.bash("work", yield_time_ms=60000, _idempotency_key="race"))
+    while not processes:
+        await asyncio.sleep(0)
+    assert tools.supervisor.release_wait("default", call_id="race")
+    processes[0].finish()
+    result = data(await call)
+    assert result["handoff"]
+    assert data(await tools.task_control("read", result["task_id"]))["handoff"]
+
+
+@pytest.mark.asyncio
+async def test_monitor_shows_only_current_session_active_and_undelivered_tasks(task_shell):
+    tools, processes = task_shell
+    active = data(await tools.bash("active", yield_time_ms=0))
+    foreign = data(await tools.bash("foreign", yield_time_ms=0, _session_id="other"))
+    assert [task["task_id"] for task in (await tools.monitor_tasks("default"))["tasks"]] == [active["task_id"]]
+    processes[0].finish(stdout=b"done")
+    await tools.supervisor._processes[active["task_id"]].monitor
+    assert [task["task_id"] for task in (await tools.monitor_tasks("default"))["tasks"]] == [active["task_id"]]
+    await tools.supervisor.journal.update("default", active["task_id"], delivered=True, consumed=True)
+    assert (await tools.monitor_tasks("default"))["tasks"] == []
+    assert data(await tools.task_control("read", active["task_id"]))["status"] == "completed"
+    assert data(await tools.task_control("list"))["tasks"][0]["task_id"] == active["task_id"]
+    assert [task["task_id"] for task in (await tools.monitor_tasks("other"))["tasks"]] == [foreign["task_id"]]
+
+
+@pytest.mark.asyncio
+async def test_monitor_pages_all_relevant_tasks(task_shell):
+    tools, _ = task_shell
+    for i in range(55):
+        await tools.supervisor.journal.save("default", {
+            "task_id": f"task_{i}", "status": "completed", "handoff": True,
+            "started_at": i, "delivered": False,
+        }, create=True)
+    first = await tools.monitor_tasks("default")
+    second = await tools.monitor_tasks("default", first["next_page_token"])
+    assert len(first["tasks"]) == 50
+    assert len(second["tasks"]) == 5
+    assert second["next_page_token"] is None
+    assert len({task["task_id"] for task in first["tasks"] + second["tasks"]}) == 55
+
+
+@pytest.mark.asyncio
+async def test_quota_reserved_before_spawn_and_terminal_releases_slot(task_shell):
+    tools, processes = task_shell
+    tools.supervisor.max_tasks = 1
+    results = await asyncio.gather(*(tools.bash("work", yield_time_ms=0) for _ in range(8)))
+    success = [data(result) for result in results if json.loads(result)["ok"]]
+    assert len(success) == len(processes) == 1
+    processes[0].finish()
+    await tools.task_control("wait", success[0]["task_id"])
+    assert data(await tools.bash("work", yield_time_ms=0))["status"] == "running"
+
+
+@pytest.mark.asyncio
+async def test_deadline_is_independent_of_yield(task_shell, monkeypatch):
+    tools, processes = task_shell
+    expired = asyncio.Event()
+    original_deadline = tools.supervisor._deadline
+
+    async def controlled_deadline(record, timeout_ms):
+        assert timeout_ms == 120001
+        await expired.wait()
+        await original_deadline(record, 0)
+
+    monkeypatch.setattr(tools.supervisor, "_deadline", controlled_deadline)
+    result = data(await tools.bash("work", yield_time_ms=0, timeout_ms=120001))
+    assert processes[0].returncode is None
+    expired.set()
+    terminal = data(await tools.task_control("wait", result["task_id"]))
+    assert terminal["status"] == "timed_out"
+
+
+@pytest.mark.asyncio
+async def test_registry_new_schema_and_legacy_recovery(task_shell):
+    tools, processes = task_shell
+    registry = DefaultToolRegistry(build_shell_tool_specs(tools))
+    schemas = {s["function"]["name"]: s["function"]["parameters"] for s in registry.schemas}
+    assert set(schemas) == {"bash", "task_control"}
+    assert set(schemas["bash"]["properties"]) == {"command", "cwd", "yield_time_ms", "timeout_ms", "notify"}
+    result = data(await registry.call_async("bash", {"command": "work", "run_in_background": True, "wait_ms": 0}))
+    assert result["status"] == "running"
+    assert data(await registry.call_async("bash_output", {"bg_id": result["task_id"], "kill": True}))["status"] == "cancelled"
+    conflict = json.loads(await registry.call_async("bash", {"command": "work", "run_in_background": True, "yield_time_ms": 0}))
+    assert conflict["error_type"] == "InvalidArguments"
+    assert len(processes) == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("arguments", [{"yield_time_ms": True}, {"yield_time_ms": -1}, {"yield_time_ms": 60001}, {"timeout_ms": 0}, {"notify": "other"}])
+async def test_bash_arguments_are_strict(task_shell, arguments):
+    tools, processes = task_shell
+    assert json.loads(await tools.bash("work", **arguments))["error_type"] == "InvalidArguments"
+    assert not processes
+
+
+@pytest.mark.asyncio
+async def test_single_character_preview_respects_combined_limit(task_shell):
+    tools, processes = task_shell
+    task = data(await tools.bash("work", yield_time_ms=0))
+    processes[0].finish(stdout=b"stdout", stderr=b"stderr")
+    await tools.task_control("wait", task["task_id"])
+    for _ in range(2):
+        result = data(await tools.task_control("read", task["task_id"], max_output_chars=1))
+        assert len(result["stdout"] + result["stderr"]) == 1
+
+
+@pytest.mark.asyncio
+async def test_failed_running_journal_write_still_terminates_and_retains_fact(task_shell, monkeypatch):
+    tools, processes = task_shell
+    save = tools.supervisor.journal.save
+
+    async def failing_save(session_id, snapshot, **kwargs):
+        if snapshot["status"] == "running":
+            raise OSError("disk unavailable")
+        return await save(session_id, snapshot, **kwargs)
+
+    monkeypatch.setattr(tools.supervisor.journal, "save", failing_save)
+    result = data(await tools.bash("work", yield_time_ms=0))
+    assert result["status"] == "failed"
+    assert "disk unavailable" in result["reason"]
+    assert processes[0].returncode is not None
+    assert data(await tools.task_control("read", result["task_id"]))["status"] == "failed"
+
+
+@pytest.mark.asyncio
+async def test_cancelling_during_spawn_does_not_orphan_process(task_shell, monkeypatch):
+    tools, processes = task_shell
+    from agent.infrastructure.tools.shell import supervisor
+    spawn = supervisor.asyncio.create_subprocess_exec
+    entered, release = asyncio.Event(), asyncio.Event()
+
+    async def gated_spawn(*args, **kwargs):
+        entered.set()
+        await release.wait()
+        return await spawn(*args, **kwargs)
+
+    monkeypatch.setattr(supervisor.asyncio, "create_subprocess_exec", gated_spawn)
+    call = asyncio.create_task(tools.bash("work"))
+    await entered.wait()
+    call.cancel()
+    release.set()
+    with pytest.raises(asyncio.CancelledError):
+        await call
+    assert len(processes) == 1 and processes[0].returncode is not None
+
+
+@pytest.mark.asyncio
+async def test_parent_exit_cleans_inherited_pipe_descendant(tmp_path):
+    tools = ShellTools(ToolOutputStore(str(tmp_path)))
+    connected, disconnected = asyncio.Event(), asyncio.Event()
+
+    async def connection(reader, writer):
+        connected.set()
+        try:
+            await reader.read()
+        except ConnectionResetError:
+            pass
+        finally:
+            disconnected.set()
+            writer.close()
+
+    server = await asyncio.start_server(connection, "127.0.0.1", 0)
+    port = server.sockets[0].getsockname()[1]
+    child = f"import socket; s=socket.create_connection(('127.0.0.1', {port})); print('ready', flush=True); s.recv(1)"
+    parent = f"import subprocess,sys; p=subprocess.Popen([sys.executable,'-c',{child!r}],stdout=subprocess.PIPE); p.stdout.readline(); print('parent done')"
+    state = ShellState(cwd=str(tmp_path), env=dict(os.environ), shell_executable=sys.executable)
+    try:
+        result = await tools.supervisor.run(parent, state, "tree", output_store=tools.output_store)
+        assert data(result.result_str)["status"] == "completed"
+        await asyncio.wait_for(connected.wait(), 3)
+        await asyncio.wait_for(disconnected.wait(), 3)
+    finally:
+        server.close()
+        await server.wait_closed()
+        await tools.close()
+
+
+@pytest.mark.asyncio
+async def test_local_subprocess_short_command(tmp_path):
+    tools = ShellTools(ToolOutputStore(str(tmp_path)))
+    state = ShellState(cwd=str(tmp_path), env={}, shell_executable=sys.executable)
+    try:
+        result = await tools.supervisor.run("print('tail'); raise SystemExit(7)", state, "local", output_store=tools.output_store)
+        payload = data(result.result_str)
+        assert payload["status"] == "failed" and payload["exit_code"] == 7
+        assert payload["stdout"] == "tail\r\n" if sys.platform == "win32" else payload["stdout"] == "tail\n"
+    finally:
+        await tools.close()

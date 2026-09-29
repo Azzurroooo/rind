@@ -119,6 +119,16 @@ test("deep links jump straight into a page", async () => {
   await running;
 });
 
+test("escape exits directly from a page", async () => {
+  const { output, input } = { output: createVirtualOutput({ columns: 90, rows: 30 }), input: createVirtualInput() };
+  const running = runTour({ input, output: output.output, startPageId: "start.hello" });
+  await settle();
+  input.send("\x1b");
+  await running;
+  assert.equal(input.isRaw, false);
+  assert.equal(input.listenerCount("data"), 0);
+});
+
 test("unknown page ids report the catalog on stderr without rendering", async () => {
   const { output, input } = { output: createVirtualOutput(), input: createVirtualInput() };
   const chunks = [];

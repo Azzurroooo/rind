@@ -15,10 +15,10 @@ import { TextBlock } from "./components/text-block.js";
 import { DynamicBlock } from "./components/dynamic-block.js";
 import { AssistantMessage } from "./components/assistant-message.js";
 import { ToolBlock } from "./components/tool-block.js";
-import { argsFromResult } from "./tool-display.js";
-import { paint } from "./theme.js";
+import { paint, colorEnabled } from "./theme.js";
 
-export function createCliOutputController({ state, terminalUi, transcript, animateTools = true }) {
+export function createCliOutputController({ state, terminalUi, transcript, animateTools = true,
+  now = Date.now, schedule = setTimeout, cancelSchedule = clearTimeout, hasColor = colorEnabled }) {
   const legacyRenderer = new AssistantRenderer((text) => writeOutput(text));
   let assistantMessage = null;
   let blockCount = 0;
@@ -26,28 +26,46 @@ export function createCliOutputController({ state, terminalUi, transcript, anima
   const legacyBegunTools = new Set();
   let questionBlock = null;
   let turnContext = "";
+  let frameTime = now();
+  const runningTools = new Set();
 
   function redraw(force = false) {
     if (!terminalUi || state.runtime.status === "closing") {
       return;
     }
+    frameTime = now();
     terminalUi.requestRender(force);
   }
 
   function inputState() {
     const running = state.turn.active || state.display.activeCompact;
+    const backgroundWait = waitingForBackground();
     const inputSession = state.input.session;
     return {
       running,
+      backgroundWait,
       label: state.display.activityLabel || (state.display.activeCompact
         ? "Compacting"
         : "Working"),
       frame: state.display.activityFrame,
-      elapsedMs: running ? Date.now() - state.display.activityStartedAt : 0,
+      elapsedMs: running ? frameTime - state.display.activityStartedAt
+        : backgroundWait ? frameTime - backgroundWait.started_at * 1000 : 0,
       pendingInputs: state.input.pending,
       inputMode: inputSession?.mode || "prompt",
       menuOpen: Boolean(inputSession?.menuState?.matches?.()?.length),
     };
+  }
+
+  function waitingForBackground() {
+    if (state.runtime.status !== "ready" || state.turn.active || state.display.activeCompact
+      || state.turn.interruptRequested
+      || ["paused", "blocked", "budget_exhausted"].includes(state.session.info.goal?.status)) return null;
+    return state.display.backgroundWait;
+  }
+
+  function setBackgroundWait(waiting) {
+    state.display.backgroundWait = waiting || null;
+    refreshInputState();
   }
 
   function setActivityLabel(label = "") {
@@ -64,22 +82,34 @@ export function createCliOutputController({ state, terminalUi, transcript, anima
   }
 
   function refreshInputState() {
+    if (state.display.activityTimer !== null) {
+      cancelSchedule(state.display.activityTimer);
+      state.display.activityTimer = null;
+    }
     updateActivityTimer();
     redraw();
   }
 
   function updateActivityTimer() {
-    if (state.turn.active || state.display.activeCompact) {
+    const running = state.turn.active || state.display.activeCompact;
+    const waiting = waitingForBackground();
+    if (terminalUi && (running || waiting)) {
       if (!state.display.activityStartedAt) {
-        state.display.activityStartedAt = Date.now();
+        state.display.activityStartedAt = now();
       }
       if (state.display.activityTimer) {
         return;
       }
-      state.display.activityTimer = setInterval(() => {
-        state.display.activityFrame += 1;
+      const interval = running ? 300 : hasColor() ? 150 : 1000;
+      const origin = running ? state.display.activityStartedAt : waiting.started_at * 1000;
+      const delay = interval - Math.max(0, now() - origin) % interval;
+      state.display.activityTimer = schedule(() => {
+        state.display.activityTimer = null;
+        state.display.activityFrame = (now() - state.display.activityStartedAt) / 300;
+        if (runningTools.size) transcript.changed();
         redraw();
-      }, 300);
+        updateActivityTimer();
+      }, delay);
       state.display.activityTimer.unref?.();
       return;
     }
@@ -88,7 +118,7 @@ export function createCliOutputController({ state, terminalUi, transcript, anima
 
   function clearActivityTimer() {
     if (state.display.activityTimer) {
-      clearInterval(state.display.activityTimer);
+      cancelSchedule(state.display.activityTimer);
     }
     state.display.activityTimer = null;
     state.display.activityFrame = 0;
@@ -199,6 +229,7 @@ export function createCliOutputController({ state, terminalUi, transcript, anima
     if (terminalUi) {
       if (assistantMessage) {
         assistantMessage.finish();
+        transcript.changed();
         assistantMessage = null;
       }
       state.display.assistantHeaderShown = false;
@@ -232,6 +263,7 @@ export function createCliOutputController({ state, terminalUi, transcript, anima
     questionBlock.state.event = event;
     questionBlock.state.answer = answer;
     questionBlock.block.invalidate();
+    transcript.changed();
     questionBlock = null;
     redraw();
   }
@@ -243,6 +275,7 @@ export function createCliOutputController({ state, terminalUi, transcript, anima
     }
     const message = ensureAssistantBlocks();
     message.append(text);
+    transcript.changed();
     redraw();
   }
 
@@ -281,13 +314,16 @@ export function createCliOutputController({ state, terminalUi, transcript, anima
       existing.enrichArgs(event);
       return;
     }
+    frameTime = now();
     const block = new ToolBlock({
       event,
+      now: () => frameTime,
       animate: animateTools,
-      onRequestRender: () => redraw(),
+      onRequestRender: () => { transcript.changed(); redraw(); },
       leading: blockCount > 0,
     });
     toolBlocks.set(key, block);
+    runningTools.add(block);
     appendBlock(block);
   }
 
@@ -312,15 +348,16 @@ export function createCliOutputController({ state, terminalUi, transcript, anima
       }
       block = new ToolBlock({
         event,
+        now: () => frameTime,
         animate: animateTools,
-        onRequestRender: () => redraw(),
+        onRequestRender: () => { transcript.changed(); redraw(); },
         leading: blockCount > 0,
       });
       toolBlocks.set(key, block);
       appendBlock(block);
     }
-    block.enrichArgs({ arguments: argsFromResult(event?.tool_name, event?.result) });
     block.finish(event, fileChange);
+    runningTools.delete(block);
   }
 
   function setToolsExpanded(expanded) {
@@ -415,6 +452,7 @@ export function createCliOutputController({ state, terminalUi, transcript, anima
     refreshInputState,
     clearActivityTimer,
     setActivityLabel,
+    setBackgroundWait,
     mainPromptText,
     log,
     writeUserInput,

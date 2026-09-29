@@ -112,8 +112,11 @@ class RuntimeWorker:
         await self.execution.release(session_id)
 
     async def replay(self, session_id: str, start: int | None = None, end: int | None = None) -> dict[str, Any]:
+        await self.shell_tools.maintain_tasks(session_id)
         result = await self.repository.replay(session_id, start=start, end=end)
         result["live_turn"] = self.execution.live_turn(session_id)
+        result["tasks"] = (await self.shell_tools.monitor_tasks(session_id))["tasks"]
+        result["background_wait"] = await self.execution.background_wait(session_id)
         return result
 
     async def replay_event_pages(self, session_id: str) -> dict[str, Any]:
@@ -121,7 +124,8 @@ class RuntimeWorker:
 
     async def delete_session(self, session_id: str) -> dict[str, Any]:
         clean = validate_session_id(session_id)
-        await self.execution.release(clean)
+        self.execution.interrupt(clean, "Session deleted")
+        await self.execution.release(clean, permanent=True)
         await self.shell_tools.close_session(clean)
         return await self.repository.delete(clean)
 
@@ -160,7 +164,6 @@ class RuntimeWorker:
                 {
                     "provider_id": model.provider_id,
                     "id": model.id,
-                    "name": model.name,
                     "api": model.api,
                     "reasoning_efforts": list(model.reasoning_efforts),
                     "context_window": model.context_window,
@@ -172,6 +175,7 @@ class RuntimeWorker:
         }
 
     async def close(self) -> None:
+        self.shell_tools.supervisor.stop_accepting()
         if self._model_refresh_task is not None:
             self._model_refresh_task.cancel()
             await asyncio.gather(self._model_refresh_task, return_exceptions=True)

@@ -110,7 +110,7 @@ export const DEFAULT_THEME = "frappe";
 
 let activeName = DEFAULT_THEME;
 
-function enabled() {
+export function colorEnabled() {
   return Boolean(process.stdout.isTTY) && !process.env.NO_COLOR;
 }
 
@@ -121,7 +121,7 @@ function truecolor(hex) {
 
 function wrap(code, text, force) {
   const body = String(text || "");
-  if (!body || (!force && !enabled())) {
+  if (!body || (!force && !colorEnabled())) {
     return body;
   }
   return `\x1b[${code}m${body}\x1b[0m`;
@@ -144,6 +144,13 @@ function buildPainters(force) {
 
 export const paint = buildPainters(false);
 export const paintRaw = buildPainters(true);
+
+export function breathingAccent(text, elapsedMs) {
+  const intensity = 0.78 + 0.22 * (1 - Math.cos(2 * Math.PI * elapsedMs / 4200)) / 2;
+  const color = Number.parseInt(FLAVORS[activeName].accent.slice(1), 16);
+  const channels = [16, 8, 0].map((shift) => Math.round(((color >> shift) & 255) * intensity));
+  return wrap(`38;2;${channels.join(";")}`, text, false);
+}
 
 export function themeNames() {
   return Object.keys(FLAVORS);

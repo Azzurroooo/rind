@@ -194,6 +194,26 @@ test("promptText colors model and working directory with separate hierarchy", ()
     }
   }
 });
+
+test("promptText colors the composer marker with the accent color", () => {
+  const originalIsTty = process.stdout.isTTY;
+  const originalNoColor = process.env.NO_COLOR;
+  process.stdout.isTTY = true;
+  delete process.env.NO_COLOR;
+  try {
+    const marker = promptText({ model: "glm-5.1", cwd: "E:\\project" }).split("\n").at(-1);
+
+    assert.equal(marker, "  \x1b[38;2;140;170;238m▷\x1b[0m ");
+  } finally {
+    process.stdout.isTTY = originalIsTty;
+    if (originalNoColor === undefined) {
+      delete process.env.NO_COLOR;
+    } else {
+      process.env.NO_COLOR = originalNoColor;
+    }
+  }
+});
+
 test("promptText keeps the activity line separate from the input chrome", () => {
   assert.equal(
     promptText({}, {}, { running: true, frame: 1, elapsedMs: 1250 }),
@@ -425,9 +445,9 @@ test("modelMenuText renders provider groups, current model and selection", () =>
   assert.equal(
     modelMenuText([
       { header: true, name: "openai" },
-      { name: "model-a", current: true },
+      { modelId: "model-a", current: true },
       { header: true, name: "deepseek" },
-      { name: "model-b", current: false },
+      { modelId: "model-b", current: false },
     ], 3),
     [
       "  Model deck",
@@ -444,7 +464,7 @@ test("modelMenuText renders provider groups, current model and selection", () =>
 
 test("modelMenuText keeps the selected model visible", () => {
   const models = Array.from({ length: 10 }, (_, index) => ({
-    name: `model-${index}`,
+    modelId: `model-${index}`,
     current: index === 0,
   }));
 

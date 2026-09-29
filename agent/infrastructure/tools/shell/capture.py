@@ -68,25 +68,22 @@ class StreamCapture:
             return head + tail
         return head + _OUTPUT_TRUNCATED + tail
 
-    def delta(self, cursor: int, max_chars: int) -> tuple[str, int, bool]:
-        cursor = cursor if 0 <= cursor <= self.char_count else 0
-        head = "".join(self.head)
-        tail = "".join(self.tail)
-        tail_start = self.char_count - self.tail_chars
-        lost = False
-
-        if cursor < len(head):
-            delta = head[cursor:]
-            if tail:
-                lost = tail_start > len(head)
-                delta += tail
-        elif cursor < tail_start:
-            delta = tail
-            lost = True
-        else:
-            delta = tail[cursor - tail_start :]
-
-        preview_truncated = lost or len(delta) > max_chars
-        if len(delta) > max_chars:
-            delta = delta[-max_chars:]
-        return delta, self.char_count, preview_truncated
+    def tail_preview(self, limit: int) -> str:
+        if limit <= 0:
+            return ""
+        chunks = []
+        remaining = limit
+        for chunk in reversed(self.tail):
+            piece = chunk[-remaining:]
+            chunks.append(piece)
+            remaining -= len(piece)
+            if remaining == 0:
+                return "".join(reversed(chunks))
+        if self.char_count <= _HEAD_LIMIT + _TAIL_LIMIT:
+            for chunk in reversed(self.head):
+                piece = chunk[-remaining:]
+                chunks.append(piece)
+                remaining -= len(piece)
+                if remaining == 0:
+                    break
+        return "".join(reversed(chunks))

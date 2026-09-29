@@ -149,7 +149,7 @@ async def test_all_refresh_entries_merge_capabilities_by_endpoint(tmp_path, monk
     models = {m["id"]: m for m in entry["models"]}
     assert models["old"]["image_input"] is False
     assert models["new"]["image_input"] is True
-    assert models["new"]["name"] == "New vision model"
+    assert "name" not in models["new"]
     assert models["keep"].get("image_input") is (False if same_endpoint else None)
     assert "image_input" not in models["unknown"] and "removed" not in models
     assert entry["refreshed_at"] > 0 and entry["base_url"] == settings.base_url
@@ -274,6 +274,7 @@ async def test_list_models_uses_cache_fallback_and_reports_refresh_warning(tmp_p
     catalog = await service.list_models(str(tmp_path))
     assert [model.id for model in catalog.models] == ["cached-chat", "deepseek-chat"]
     assert catalog.warning is None
+    assert all(not hasattr(model, "name") for model in catalog.models)
     # Refreshed /models responses carry no effort metadata, so cache entries use the dialect default.
     assert catalog.models[0].reasoning_efforts == default_reasoning_efforts("openai-chat")
 
@@ -560,13 +561,33 @@ def test_registry_covers_mainstream_providers() -> None:
         ("zhipu-coding", "ZHIPU_CODING_API_KEY"),
         ("moonshot", "MOONSHOT_API_KEY"),
         ("moonshot-cn", "MOONSHOT_CN_API_KEY"),
+        ("xiaomi", "XIAOMI_API_KEY"),
+        ("xiaomi-token-plan-cn", "XIAOMI_TOKEN_PLAN_CN_API_KEY"),
+        ("xiaomi-token-plan-ams", "XIAOMI_TOKEN_PLAN_AMS_API_KEY"),
+        ("xiaomi-token-plan-sgp", "XIAOMI_TOKEN_PLAN_SGP_API_KEY"),
+        ("hunyuan", "HUNYUAN_API_KEY"),
+        ("tencent-coding-plan", "TENCENT_CODING_PLAN_API_KEY"),
+        ("tencent-tokenhub", "TENCENT_TOKENHUB_API_KEY"),
+        ("tencent-token-plan", "TENCENT_TOKEN_PLAN_API_KEY"),
+        ("volcengine", "ARK_API_KEY"),
+        ("volcengine-coding-plan", "ARK_CODING_PLAN_API_KEY"),
         ("qwen", "DASHSCOPE_API_KEY"),
         ("qwen-coding", "QWEN_CODING_API_KEY"),
     ):
         assert PROVIDERS[provider_id].api == "openai-chat"
         assert PROVIDERS[provider_id].environment_key == environment_key
         assert PROVIDERS[provider_id].default_base_url.startswith("https://")
-        assert len(PROVIDERS[provider_id].fallback_models) >= 2
+        assert PROVIDERS[provider_id].fallback_models
+    for provider_id, environment_key in (
+        ("minimax", "MINIMAX_API_KEY"),
+        ("minimax-cn", "MINIMAX_CN_API_KEY"),
+        ("minimax-coding-plan", "MINIMAX_CODING_PLAN_API_KEY"),
+        ("minimax-cn-coding-plan", "MINIMAX_CN_CODING_PLAN_API_KEY"),
+    ):
+        assert PROVIDERS[provider_id].api == "anthropic-messages"
+        assert PROVIDERS[provider_id].environment_key == environment_key
+        assert PROVIDERS[provider_id].default_base_url.startswith("https://")
+        assert PROVIDERS[provider_id].fallback_models
     # Pay-as-you-go and coding-plan subscriptions are separate products
     # with separate keys and endpoints.
     assert PROVIDERS["zai"].default_base_url == "https://api.z.ai/api/paas/v4"
@@ -574,6 +595,12 @@ def test_registry_covers_mainstream_providers() -> None:
     assert PROVIDERS["zhipu"].default_base_url == "https://open.bigmodel.cn/api/paas/v4"
     assert PROVIDERS["zhipu-coding"].default_base_url == "https://open.bigmodel.cn/api/coding/paas/v4"
     assert PROVIDERS["moonshot-cn"].default_base_url == "https://api.moonshot.cn/v1"
+    assert PROVIDERS["xiaomi"].default_base_url == "https://api.xiaomimimo.com/v1"
+    assert PROVIDERS["xiaomi-token-plan-cn"].default_base_url == "https://token-plan-cn.xiaomimimo.com/v1"
+    assert PROVIDERS["hunyuan"].default_base_url == "https://api.hunyuan.cloud.tencent.com/v1"
+    assert PROVIDERS["volcengine"].default_base_url == "https://ark.cn-beijing.volces.com/api/v3"
+    assert PROVIDERS["minimax"].api == "anthropic-messages"
+    assert PROVIDERS["minimax-cn"].default_base_url == "https://api.minimax.cn/anthropic"
     assert PROVIDERS["kimi-coding"].api == "anthropic-messages"
     assert PROVIDERS["kimi-coding"].environment_key == "KIMI_API_KEY"
     assert {"kimi-for-coding", "k3", "k3-256k"} <= {model.id for model in PROVIDERS["kimi-coding"].fallback_models}
@@ -694,7 +721,7 @@ def test_google_adapter_converts_canonical_messages() -> None:
 
     assert config == {
         "system_instruction": "be brief",
-        "tools": [{"function_declarations": [{"name": "bash", "description": "run", "parameters": {"type": "object"}}]}],
+        "tools": [{"function_declarations": [{"name": "bash", "description": "run", "parameters_json_schema": {"type": "object"}}]}],
     }
     assert contents == [
         {"role": "user", "parts": [{"text": "hello"}]},
@@ -748,3 +775,68 @@ def test_resolve_selection_uses_configured_model_definition(tmp_path, monkeypatc
     model = service.resolve_selection(str(tmp_path), ModelSelection("deepseek", "deepseek-chat", ""))
     assert model.id == "deepseek-chat"
     assert model.provider_id == "deepseek"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("provider_id, endpoint", [
+    ("xiaomi", "https://api.xiaomimimo.com/v1/chat/completions"),
+    ("xiaomi-token-plan-cn", "https://token-plan-cn.xiaomimimo.com/v1/chat/completions"),
+    ("xiaomi-token-plan-ams", "https://token-plan-ams.xiaomimimo.com/v1/chat/completions"),
+    ("xiaomi-token-plan-sgp", "https://token-plan-sgp.xiaomimimo.com/v1/chat/completions"),
+    ("hunyuan", "https://api.hunyuan.cloud.tencent.com/v1/chat/completions"),
+    ("tencent-tokenhub", "https://tokenhub.tencentmaas.com/v1/chat/completions"),
+    ("tencent-token-plan", "https://api.lkeap.cloud.tencent.com/plan/v3/chat/completions"),
+    ("tencent-coding-plan", "https://api.lkeap.cloud.tencent.com/coding/v3/chat/completions"),
+    ("volcengine", "https://ark.cn-beijing.volces.com/api/v3/chat/completions"),
+    ("volcengine-coding-plan", "https://ark.cn-beijing.volces.com/api/coding/v3/chat/completions"),
+    ("minimax", "https://api.minimax.io/anthropic/v1/messages"),
+    ("minimax-cn", "https://api.minimax.cn/anthropic/v1/messages"),
+    ("minimax-coding-plan", "https://api.minimax.io/anthropic/v1/messages"),
+    ("minimax-cn-coding-plan", "https://api.minimax.cn/anthropic/v1/messages"),
+])
+async def test_added_providers_login_and_send_sdk_requests(tmp_path, monkeypatch, provider_id, endpoint):
+    import json
+    import httpx
+    import anthropic
+    from agent.infrastructure.llm.catalog import PROVIDERS
+
+    definition = PROVIDERS[provider_id]
+    settings = _settings(tmp_path)
+    service = _service(tmp_path, settings, monkeypatch)
+    for item in PROVIDERS.values():
+        if item.environment_key:
+            monkeypatch.delenv(item.environment_key, raising=False)
+    transport_http = __import__("httpx2") if definition.api == "anthropic-messages" and anthropic.__version__.startswith("1.") else httpx
+    captured = []
+
+    async def send(_self, request, **kwargs):
+        captured.append(request)
+        assert str(request.url) == endpoint
+        body = json.loads(request.content)
+        assert body["model"] == definition.fallback_models[0].id
+        assert "reasoning_effort" not in body
+        if definition.api == "anthropic-messages":
+            assert request.headers["x-api-key"] == "test-key"
+            result = {"id": "r", "type": "message", "role": "assistant", "model": body["model"],
+                      "content": [{"type": "text", "text": "ok"}], "stop_reason": "end_turn",
+                      "usage": {"input_tokens": 1, "output_tokens": 1}}
+        else:
+            assert request.headers["authorization"] == "Bearer test-key"
+            result = {"id": "r", "object": "chat.completion", "created": 1, "model": body["model"],
+                      "choices": [{"index": 0, "message": {"role": "assistant", "content": "ok"}, "finish_reason": "stop"}]}
+        return transport_http.Response(200, json=result, request=request)
+
+    monkeypatch.setattr(transport_http.AsyncClient, "send", send)
+    from unittest.mock import AsyncMock
+    monkeypatch.setattr(service, "_fetch_models", AsyncMock(return_value=False))
+    await service.login(str(tmp_path), provider_id, "api_key", _PromptInteraction("test-key"))
+    assert {item.id for item in service.list_providers(str(tmp_path)) if item.configured} == {provider_id}
+    model = (await service.list_models(str(tmp_path))).models[0]
+    assert model.provider_id == provider_id
+    client = await service.create_chat_client(settings, ModelSelection(provider_id, model.id), workspace_root=None)
+    try:
+        response = await client.create([{"role": "user", "content": "hello"}], max_output_tokens=16)
+        assert response.content == "ok"
+    finally:
+        await client.close()
+    assert len(captured) == 1

@@ -32,6 +32,28 @@ test("composer keeps pending input between activity and session details", () => 
   assert.equal(frame.cursorColumn, 9);
 });
 
+test("composer splits an accent-styled input marker line", () => {
+  const frame = prepareComposerFrame({
+    prompt: [
+      "",
+      "  model-a · E:\\project",
+      "  ──────────",
+      "  \x1b[38;2;140;170;238m▷\x1b[0m ",
+    ].join("\n"),
+    inputText: "hello",
+    cursor: { line: 0, column: 5 },
+  }, 40);
+
+  assert.deepEqual(frame.lines, [
+    "",
+    "  model-a · E:\\project",
+    "  ──────────",
+    "  \x1b[38;2;140;170;238m▷\x1b[0m hello",
+  ]);
+  assert.equal(frame.cursorRow, 3);
+  assert.equal(frame.cursorColumn, 9);
+});
+
 test("composer places an inline menu cursor on the custom answer row", () => {
   const frame = prepareComposerFrame({
     prompt: "\n  ▷ ",

@@ -1,0 +1,86 @@
+{
+  "level": "L1",
+  "publicScoreEligible": false,
+  "samples": [
+    {
+      "count": 400,
+      "trial": 0,
+      "wallMs": 0.08540333333333384,
+      "cpuMs": 0,
+      "bytes": 921,
+      "writes": 30
+    },
+    {
+      "count": 400,
+      "trial": 1,
+      "wallMs": 0.008166666666666818,
+      "cpuMs": 0,
+      "bytes": 930,
+      "writes": 30
+    },
+    {
+      "count": 400,
+      "trial": 2,
+      "wallMs": 0.00929333333333299,
+      "cpuMs": 0,
+      "bytes": 930,
+      "writes": 30
+    },
+    {
+      "count": 400,
+      "trial": 3,
+      "wallMs": 0.008646666666666646,
+      "cpuMs": 0,
+      "bytes": 951,
+      "writes": 30
+    },
+    {
+      "count": 400,
+      "trial": 4,
+      "wallMs": 0.01493000000000014,
+      "cpuMs": 0,
+      "bytes": 960,
+      "writes": 30
+    },
+    {
+      "count": 4000,
+      "trial": 0,
+      "wallMs": 0.013103333333333467,
+      "cpuMs": 0,
+      "bytes": 921,
+      "writes": 30
+    },
+    {
+      "count": 4000,
+      "trial": 1,
+      "wallMs": 0.006263333333333776,
+      "cpuMs": 0,
+      "bytes": 930,
+      "writes": 30
+    },
+    {
+      "count": 4000,
+      "trial": 2,
+      "wallMs": 0.00740333333333183,
+      "cpuMs": 0,
+      "bytes": 930,
+      "writes": 30
+    },
+    {
+      "count": 4000,
+      "trial": 3,
+      "wallMs": 0.0061033333333360435,
+      "cpuMs": 0,
+      "bytes": 951,
+      "writes": 30
+    },
+    {
+      "count": 4000,
+      "trial": 4,
+      "wallMs": 0.006183333333331121,
+      "cpuMs": 0,
+      "bytes": 960,
+      "writes": 30
+    }
+  ]
+}

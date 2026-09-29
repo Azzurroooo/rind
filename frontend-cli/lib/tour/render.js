@@ -202,7 +202,7 @@ function renderTourCard(snapshot, state, width, height, inner) {
     ? [paint.success(paint.bold("READY · Enter / Space to start"))]
     : [playbackBanner(state, inner), paint.bold(clipCells(statusKeys(state, inner).join(" · "), inner))];
   const step = Math.min(state.stepIndex + 1, Math.max(1, state.stepCount));
-  const footer = [clipCells(`${paint.bold(`Step ${step}/${state.stepCount}`)} · q contents · ? help`, width)];
+  const footer = [clipCells(`${paint.bold(`Step ${step}/${state.stepCount}`)} · q contents · Esc exit · ? help`, width)];
   // Keep the start action visible even on 36×14 screens. Long introductions
   // scroll from the top, using the same PgUp/PgDn coordinates as the demo.
   const gap = content.length + status.length + 6 <= height ? [""] : [];
@@ -250,7 +250,8 @@ export function renderTourHelp(width, rows = 24) {
     "↑ / ↓     faster / slower",
     "PgUp/PgDn scroll demo (pauses)",
     "r         replay this page",
-    "q / Esc   contents; again to exit",
+    "q         contents",
+    "Esc       exit tour",
     "Ctrl+C    exit tour immediately",
     "? / Enter close this help",
   ].map((line) => clipCells(line, width - 4)) }), cursor: null };
@@ -366,7 +367,7 @@ function appendCaption(rows, snapshot, state) {
 }
 
 function statusKeys(state, width) {
-  const exit = width >= 60 ? ["q contents"] : [];
+  const exit = width >= 60 ? ["q contents · Esc exit"] : [];
   if (state.phase === "waiting") {
     return ["space continue", "enter continue", ...exit];
   }

@@ -1,4 +1,5 @@
 import os
+import re
 import sys
 from pathlib import Path
 
@@ -29,6 +30,13 @@ def test_context_budget_codex_defaults() -> None:
         raise AssertionError(f"Unexpected auto compact percent: {budget.to_dict()}")
     if budget.resolved_auto_compact_token_limit() != DEFAULT_AUTO_COMPACT_TOKEN_LIMIT:
         raise AssertionError(f"Unexpected auto compact limit: {budget.to_dict()}")
+
+
+def test_tour_demo_window_matches_runtime_default() -> None:
+    demo_source = (PROJECT_ROOT / "frontend-cli/lib/tour/pages/demo.js").read_text(encoding="utf-8")
+    match = re.search(r"export const DEMO_CONTEXT_WINDOW_TOKENS = (\d+);", demo_source)
+    assert match is not None
+    assert int(match.group(1)) == DEFAULT_CONTEXT_WINDOW_TOKENS
 
 
 def test_context_budget_default_percent_threshold() -> None:

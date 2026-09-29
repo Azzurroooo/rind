@@ -1,3 +1,5 @@
+import { CURSOR_MARKER } from "../tui/frame.js";
+
 export class MonitorStack {
   constructor({ composer, monitor, rows }) {
     this.composer = composer;
@@ -6,30 +8,17 @@ export class MonitorStack {
   }
 
   render(width) {
-    const composerLines = this.composer.render(width);
-    const monitorFrame = typeof this.monitor?.frame === "function" && this.monitor.isMonitoring()
-      ? this.monitor.frame(width)
-      : null;
+    let composerLines = this.composer.render(width);
+    if (typeof this.monitor?.frame !== "function" || !this.monitor.isMonitoring()) return composerLines;
+    const rows = Math.max(1, Number(this.rows?.()) || 24);
+    const composerHeight = Math.max(0, rows - Math.min(2, rows - 1));
+    if (composerLines.length > composerHeight) {
+      const cursorRow = Math.max(0, composerLines.findIndex((line) => line.includes(CURSOR_MARKER)));
+      const start = Math.min(Math.max(0, cursorRow - composerHeight + 1), composerLines.length - composerHeight);
+      composerLines = composerLines.slice(start, start + composerHeight);
+    }
+    const monitorFrame = this.monitor.frame(width, rows - composerLines.length);
     const monitorLines = Array.isArray(monitorFrame?.lines) ? monitorFrame.lines : [];
-    if (!monitorLines.length) {
-      return composerLines;
-    }
-    const totalHeight = Number(this.rows?.()) || 24;
-    if (composerLines.length + monitorLines.length <= totalHeight) {
-      return [...composerLines, ...monitorLines];
-    }
-    const available = Math.max(1, totalHeight - Math.min(composerLines.length, Math.max(1, totalHeight - 1)));
-    const focusRow = clampIndex(monitorFrame.focusRow, monitorLines.length);
-    let start = Math.min(Math.max(0, focusRow - available + 1), monitorLines.length - available);
-    start = Math.max(0, start);
-    return [...composerLines, ...monitorLines.slice(start, start + available)];
+    return [...composerLines, ...monitorLines];
   }
-}
-
-function clampIndex(value, length) {
-  const index = Math.floor(Number(value) || 0);
-  if (!Number.isFinite(index)) {
-    return 0;
-  }
-  return Math.max(0, Math.min(length - 1, index));
 }

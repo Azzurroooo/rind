@@ -42,10 +42,10 @@ class FakeOpenAIServer:
         with self._lock:
             self._script.append({"kind": "text", "chunks": chunks, "delay_ms": delay_ms, "finish": finish})
 
-    def script_tool_call(self, name: str, arguments: dict | str, *, then_text: list[str] | None = None) -> None:
+    def script_tool_call(self, name: str, arguments: dict | str, *, then_text: list[str] | None = None, call_id: str = "call_test_1") -> None:
         """One assistant message that is a single complete tool call."""
         with self._lock:
-            self._script.append({"kind": "tool_call", "name": name, "arguments": arguments})
+            self._script.append({"kind": "tool_call", "name": name, "arguments": arguments, "call_id": call_id})
             if then_text is not None:
                 self._script.append({"kind": "text", "chunks": then_text, "delay_ms": 5, "finish": "stop"})
 
@@ -140,7 +140,7 @@ class FakeOpenAIServer:
                     arguments = script["arguments"]
                     arguments = arguments if isinstance(arguments, str) else json.dumps(arguments, ensure_ascii=False)
                     emit(self._chunk(request_id, created, model, {"role": "assistant", "content": None, "tool_calls": [
-                        {"index": 0, "id": "call_test_1", "type": "function",
+                        {"index": 0, "id": script["call_id"], "type": "function",
                          "function": {"name": script["name"], "arguments": arguments}},
                     ]}))
                     emit(self._chunk(request_id, created, model, {}, finish="tool_calls"))

@@ -394,7 +394,7 @@ export function createCliInputActions({
     const modified = key.ctrl || key.alt || key.shift;
     if (!modified && (key.name === "enter" || key.name === "return")) {
       const item = session.modelState.selectedModel();
-      const model = item?.modelId || item?.name || "";
+      const model = item?.modelId || "";
       completeTtyInput(session, item || "", Boolean(model), "", model ? `/model set ${model}` : "");
       return;
     }

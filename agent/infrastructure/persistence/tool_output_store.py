@@ -27,6 +27,10 @@ class ToolOutputStore:
         )
         self._retention_seconds = max(1, int(retention_seconds))
 
+    @property
+    def session_root(self) -> Path:
+        return self._session_root
+
     def session_output_root(self, session_id: str) -> Path:
         return resolve_session_base(self._session_root, validate_session_id(session_id)) / "tool-output"
 
@@ -60,7 +64,7 @@ class ToolOutputStore:
             if not output_dir.is_dir():
                 continue
             for path in output_dir.iterdir():
-                if not path.is_file() or path.name.startswith("."):
+                if not path.is_file() or path.name.startswith((".", "task_")):
                     continue
                 try:
                     if path.stat().st_mtime < cutoff:

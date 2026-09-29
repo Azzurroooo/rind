@@ -3,8 +3,53 @@ import test from "node:test";
 
 import { ToolBlock } from "../lib/components/tool-block.js";
 import { stripAnsi } from "../lib/text-width.js";
+import { setTheme, currentTheme } from "../lib/theme.js";
 
 const WIDTH = 60;
+
+test("completed blocks parse once and reuse immutable lines until display changes", (t) => {
+  const parse = t.mock.method(JSON, "parse");
+  const block = new ToolBlock({ event: { tool_name: "bash", arguments: {} }, animate: false });
+  block.finish({ status: "completed", result: JSON.stringify({ data: { stdout: "out\n".repeat(30) } }) });
+  assert.equal(parse.mock.callCount(), 1);
+  const first = block.render(WIDTH);
+  for (let frame = 0; frame < 100; frame++) assert.equal(block.render(WIDTH), first);
+  assert.throws(() => first.push("corruption"), TypeError);
+  block.setExpanded(false);
+  assert.equal(block.render(WIDTH), first);
+  block.enrichArgs({ arguments: { command: "echo late" } });
+  assert.match(block.render(WIDTH).map(stripAnsi).join("\n"), /echo late/);
+  block.setExpanded(true);
+  assert.ok(block.render(WIDTH).length > first.length);
+  const wide = block.render(WIDTH);
+  assert.notEqual(block.render(20), wide);
+  block.invalidate();
+  assert.deepEqual(block.render(WIDTH), wide);
+  assert.equal(parse.mock.callCount(), 1, "resize/expand/replay never reparse a result");
+});
+
+test("finished status, file changes and theme replay invalidate cached output", () => {
+  const block = new ToolBlock({ event: editEvent(), animate: false });
+  const result = { status: "completed", result: "{}" };
+  block.finish(result, { lines: [{ kind: "added", text: "first" }] });
+  const first = block.render(WIDTH);
+  block.finish(result, { lines: [{ kind: "removed", text: "second" }] });
+  assert.match(block.render(WIDTH).map(stripAnsi).join("\n"), /second/);
+  assert.notDeepEqual(block.render(WIDTH), first);
+  const theme = currentTheme().name;
+  try {
+    const before = block.render(WIDTH);
+    setTheme("latte");
+    block.invalidate();
+    assert.notDeepEqual(block.render(WIDTH), before);
+  } finally {
+    setTheme(theme);
+  }
+  block.finish({ status: "failed", result: '{"error":"broken"}' });
+  assert.match(block.render(WIDTH).map(stripAnsi).join("\n"), /broken/);
+  block.finish({ status: "cancelled", result: "{}" });
+  assert.match(block.render(WIDTH).map(stripAnsi).join("\n"), /cancelled/);
+});
 
 function editEvent() {
   return {
@@ -34,7 +79,6 @@ test("tool block starts running and mutates in place on finish", () => {
   }, { file_path: "src/app.ts", lines: [{ kind: "added", text: "hi" }] });
 
   assert.equal(block.isRunning, false);
-  assert.equal(block.timer, null, "ticker cleared after finish");
   assert.ok(renders.length >= 1, "mutations request re-renders");
 
   const doneLines = block.render(WIDTH).map(stripAnsi);
@@ -99,15 +143,10 @@ test("late-arriving tool_requested arguments enrich a bare running block", () =>
   assert.match(enriched[0], /^  ◌ \$ date/);
 });
 
-test("ticker only exists for long-running tools", () => {
-  const quick = new ToolBlock({ event: {
-    tool_call_id: "call-3",
-    tool_name: "read_file",
-    args_preview: '{"path":"a.txt"}',
-    arguments: { path: "a.txt" },
-  }, onRequestRender: () => {} });
-  assert.equal(quick.timer, null);
-
-  const slow = new ToolBlock({ event: editEvent(), onRequestRender: () => {} });
-  slow.finish({ status: "completed", duration_ms: 5, result: "{}" });
+test("running elapsed time comes from the owner's frame clock", () => {
+  let time = 1000;
+  const block = new ToolBlock({ event: { tool_name: "bash" }, now: () => time });
+  assert.match(stripAnsi(block.render(WIDTH)[0]), /0s/);
+  time += 2300;
+  assert.match(stripAnsi(block.render(WIDTH)[0]), /2s/);
 });

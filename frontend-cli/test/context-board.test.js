@@ -9,7 +9,7 @@ import { createCliState } from "../lib/cli-state.js";
 import { createCliOutputController } from "../lib/cli-output-controller.js";
 import { createVirtualOutput, createVirtualInput } from "./helpers/virtual-terminal.js";
 import { createTui } from "../lib/tui/tui.js";
-import { Container } from "../lib/tui/component.js";
+import { createTranscript } from "../lib/tui/transcript.js";
 import { ComposerArea } from "../lib/components/composer-area.js";
 import { MonitorStack } from "../lib/components/monitor-stack.js";
 import { contextBoardText, occupancyTone, usageBoardText } from "../lib/rendering.js";
@@ -457,7 +457,7 @@ test("board renders full screen on a real TUI, Tab flips pages, Esc returns to t
   });
   const state = createCliState();
   state.runtime.status = "ready";
-  const transcriptContainer = new Container();
+  const transcriptContainer = createTranscript();
   const composerArea = new ComposerArea((width) => composeFrame(width));
   const monitorStack = new MonitorStack({
     composer: composerArea,

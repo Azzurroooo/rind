@@ -1,13 +1,13 @@
 import { textWidth, truncateToWidth } from "../text-width.js";
 import { createInputBuffer } from "./input-buffer.js";
+import { renderFrame } from "./frame.js";
 
-export const CURSOR_MARKER = "\x1b_pi:c\x07";
+export { CURSOR_MARKER } from "./frame.js";
 
 const SYNC_START = "\x1b[?2026h";
 const SYNC_END = "\x1b[?2026l";
 const SHOW_CURSOR = "\x1b[?25h";
 const HIDE_CURSOR = "\x1b[?25l";
-const LINE_RESET = "\x1b[0m";
 const PASTE_ENABLE = "\x1b[?2004h";
 const PASTE_DISABLE = "\x1b[?2004l";
 const KITTY_KEYBOARD_ENABLE = "\x1b[>7u\x1b[?u\x1b[c";
@@ -17,7 +17,7 @@ const MODIFY_OTHER_KEYS_DISABLE = "\x1b[>4;0m";
 const KEYBOARD_QUERY_TIMEOUT_MS = 150;
 const DEFAULT_COLUMNS = 80;
 const DEFAULT_ROWS = 24;
-const DEFAULT_RENDER_INTERVAL_MS = 16;
+const DEFAULT_RENDER_INTERVAL_MS = 33;
 
 export function createTui(options = {}) {
   const input = options.input || process.stdin;
@@ -31,6 +31,7 @@ export function createTui(options = {}) {
 
   let started = false;
   let stopped = false;
+  const manageInput = options.manageInput !== false;
   let rawModeBeforeStart = false;
   let inputHandler = null;
   let pasteHandler = null;
@@ -41,6 +42,7 @@ export function createTui(options = {}) {
   let renderMicrotaskQueued = false;
   let renderTimer = null;
   let lastRenderAt = 0;
+  let outputBlocked = false;
 
   let previousLines = [];
   let previousWidth = 0;
@@ -96,19 +98,6 @@ export function createTui(options = {}) {
     requestRender();
   }
 
-  function renderRoot(width) {
-    const lines = [];
-    for (const child of children) {
-      const rendered = child.render(width);
-      if (Array.isArray(rendered)) {
-        for (const line of rendered) {
-          lines.push(typeof line === "string" ? line : String(line ?? ""));
-        }
-      }
-    }
-    return lines;
-  }
-
   function onData(handler) {
     inputHandler = typeof handler === "function" ? handler : null;
   }
@@ -117,27 +106,31 @@ export function createTui(options = {}) {
     pasteHandler = typeof handler === "function" ? handler : null;
   }
 
-  function start() {
+  function start({ acquireInput = manageInput } = {}) {
     if (started) {
       return;
     }
     started = true;
     stopped = false;
-    rawModeBeforeStart = Boolean(input.isRaw);
-    if (typeof input.setRawMode === "function") {
-      input.setRawMode(true);
-    }
-    if (typeof input.setEncoding === "function") {
-      input.setEncoding("utf8");
-    }
-    if (typeof input.resume === "function") {
-      input.resume();
+    outputBlocked = Boolean(output.writableNeedDrain);
+    if (acquireInput) {
+      rawModeBeforeStart = Boolean(input.isRaw);
+      if (typeof input.setRawMode === "function") {
+        input.setRawMode(true);
+      }
+      if (typeof input.setEncoding === "function") {
+        input.setEncoding("utf8");
+      }
+      if (typeof input.resume === "function") {
+        input.resume();
+      }
     }
     if (typeof input.on === "function") {
       input.on("data", handleInputData);
     }
     if (typeof output.on === "function") {
       output.on("resize", handleResize);
+      output.on("drain", handleDrain);
     }
     write(PASTE_ENABLE);
     enableKeyboardProtocol();
@@ -145,7 +138,7 @@ export function createTui(options = {}) {
     requestRender();
   }
 
-  function stop() {
+  function stop({ releaseInput = manageInput } = {}) {
     if (!started) {
       return;
     }
@@ -170,15 +163,18 @@ export function createTui(options = {}) {
     showCursor();
     if (typeof output.off === "function") {
       output.off("resize", handleResize);
+      output.off("drain", handleDrain);
     }
     if (typeof input.off === "function") {
       input.off("data", handleInputData);
     }
-    if (typeof input.pause === "function") {
-      input.pause();
-    }
-    if (typeof input.setRawMode === "function") {
-      input.setRawMode(rawModeBeforeStart);
+    if (releaseInput) {
+      if (typeof input.pause === "function") {
+        input.pause();
+      }
+      if (typeof input.setRawMode === "function") {
+        input.setRawMode(rawModeBeforeStart);
+      }
     }
     write(PASTE_DISABLE);
     disableKeyboardProtocol();
@@ -251,6 +247,11 @@ export function createTui(options = {}) {
     requestRender();
   }
 
+  function handleDrain() {
+    outputBlocked = false;
+    if (renderRequested) queueRenderMicrotask();
+  }
+
   // Repaint the entire transcript (viewport + scrollback) with current
   // component state — used after appearance changes like theme switches.
   function replayAll() {
@@ -291,12 +292,14 @@ export function createTui(options = {}) {
   }
 
   function scheduleRender() {
-    if (stopped || renderTimer !== null || !renderRequested) {
+    if (stopped || outputBlocked || renderTimer !== null || !renderRequested) {
       return;
     }
-    const delay = renderForceRequested
-      ? 0
-      : Math.max(0, minRenderIntervalMs - (now() - lastRenderAt));
+    if (renderForceRequested) {
+      flushRender();
+      return;
+    }
+    const delay = Math.max(0, minRenderIntervalMs - (now() - lastRenderAt));
     renderTimer = schedule(() => {
       renderTimer = null;
       flushRender();
@@ -304,7 +307,7 @@ export function createTui(options = {}) {
   }
 
   function flushRender() {
-    if (stopped || !renderRequested) {
+    if (stopped || outputBlocked || !renderRequested) {
       return;
     }
     renderRequested = false;
@@ -351,9 +354,9 @@ export function createTui(options = {}) {
       return targetScreenRow - currentScreenRow;
     };
 
-    let newLines = renderRoot(width);
-    const cursorPos = extractCursorPosition(newLines, height);
-    newLines = applyLineResets(newLines);
+    const newLines = renderFrame(children, width, previousLines.segments);
+    const cursorPos = newLines.cursor?.row >= Math.max(0, newLines.length - height)
+      ? newLines.cursor : null;
 
     const fullRender = (clear) => {
       let buffer = SYNC_START;
@@ -364,7 +367,7 @@ export function createTui(options = {}) {
         if (index > 0) {
           buffer += "\r\n";
         }
-        buffer += writableLine(newLines[index], width);
+        buffer += writableLine(newLines.at(index), width);
       }
       cursorRow = Math.max(0, newLines.length - 1);
       hardwareCursorRow = cursorRow;
@@ -407,9 +410,9 @@ export function createTui(options = {}) {
     let firstChanged = -1;
     let lastChanged = -1;
     const maxLines = Math.max(newLines.length, previousLines.length);
-    for (let index = 0; index < maxLines; index += 1) {
-      const oldLine = index < previousLines.length ? previousLines[index] : "";
-      const newLine = index < newLines.length ? newLines[index] : "";
+    for (let index = newLines.unchangedPrefix; index < maxLines; index += 1) {
+      const oldLine = index < previousLines.length ? previousLines.at(index) : "";
+      const newLine = index < newLines.length ? newLines.at(index) : "";
       if (oldLine !== newLine) {
         if (firstChanged === -1) {
           firstChanged = index;
@@ -521,7 +524,7 @@ export function createTui(options = {}) {
         buffer += "\r\n";
       }
       buffer += "\x1b[2K";
-      buffer += writableLine(newLines[index], width);
+      buffer += writableLine(newLines.at(index), width);
     }
 
     let finalCursorRow = renderEnd;
@@ -562,30 +565,6 @@ export function createTui(options = {}) {
       value = truncateToWidth(value, width);
     }
     return value;
-  }
-
-  function applyLineResets(lines) {
-    for (let index = 0; index < lines.length; index += 1) {
-      const line = lines[index];
-      lines[index] = line.includes("\x1b[") ? `${line}${LINE_RESET}` : line;
-    }
-    return lines;
-  }
-
-  function extractCursorPosition(lines, height) {
-    const viewportTop = Math.max(0, lines.length - height);
-    for (let row = lines.length - 1; row >= viewportTop; row -= 1) {
-      const line = lines[row];
-      const markerIndex = line.indexOf(CURSOR_MARKER);
-      if (markerIndex === -1) {
-        continue;
-      }
-      const beforeMarker = line.slice(0, markerIndex);
-      const col = textWidth(beforeMarker);
-      lines[row] = beforeMarker + line.slice(markerIndex + CURSOR_MARKER.length);
-      return { row, col };
-    }
-    return null;
   }
 
   function hardwareCursorSequence(cursorPos, lines) {
@@ -636,7 +615,7 @@ export function createTui(options = {}) {
 
   function write(value) {
     if (value) {
-      output.write(value);
+      if (output.write(value) === false) outputBlocked = true;
     }
   }
 

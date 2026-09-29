@@ -513,8 +513,10 @@ export function createTourPlayer({ topics, startPageId = "", stage, schedule = s
         replay();
         break;
       case "q":
-      case "escape":
         toCatalog();
+        break;
+      case "escape":
+        finish();
         break;
     }
   }

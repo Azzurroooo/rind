@@ -35,7 +35,7 @@ def test_bash_truncation_large_output(shell_tools, monkeypatch):
     stdout = parsed["data"]["stdout"]
 
     assert len(stdout) <= 50 * 1024
-    assert "TRUNCATED" in stdout
+    assert len(stdout) <= 20000
     assert stdout.startswith("A" * 100)
     assert stdout.strip().endswith("A" * 100)
     assert parsed["meta"]["truncated"] is True
@@ -61,35 +61,12 @@ def test_stream_capture_discards_100_mib_without_growing_retained_text():
     assert capture.truncated is True
 
 
-def test_stream_capture_delta_survives_tail_rollover():
-    capture = StreamCapture()
-    capture.append(b"A" * 30000, "A" * 30000)
-    capture.append(b"B" * 40000, "B" * 40000)
-
-    _, cursor, truncated = capture.delta(0, 40000)
-    capture.append(b"C" * 1000, "C" * 1000)
-    delta, next_cursor, next_truncated = capture.delta(cursor, 40000)
-
-    assert truncated is True
-    assert delta == "C" * 1000
-    assert next_cursor == 71000
-    assert next_truncated is False
-
-def test_bash_timeout(shell_tools, monkeypatch):
-    """Test that a stuck process is killed after timeout."""
-    # Temporarily reduce timeout for the test
-    original_timeout = shell_tools.supervisor.timeout
-    shell_tools.supervisor.timeout = 1
-
-    try:
-        # Sleep for 3 seconds, which exceeds the 1 second timeout
-        res = run(shell_tools.bash(_python_command("import time; time.sleep(3)")))
-        parsed = json.loads(res)
-
-        assert parsed["ok"] is True
-        assert "PROCESS TERMINATED: Command timed out" in parsed["data"]["stderr"]
-    finally:
-        shell_tools.supervisor.timeout = original_timeout
+def test_bash_timeout(shell_tools):
+    res = run(shell_tools.bash(_python_command("import time; time.sleep(3)"), timeout_ms=100))
+    parsed = json.loads(res)
+    assert parsed["ok"] is True
+    assert parsed["data"]["status"] == "timed_out"
+    assert "Runtime deadline" in parsed["data"]["reason"]
 
 
 async def _run_cancelled_bash(shell_tools):
@@ -116,5 +93,6 @@ def test_bash_cancellation_settles_internal_tasks(shell_tools):
     parsed, pending = run(_run_cancelled_bash(shell_tools))
 
     assert parsed["ok"] is True
-    assert "PROCESS TERMINATED: Command cancelled: test interrupt" in parsed["data"]["stderr"]
+    assert parsed["data"]["status"] == "cancelled"
+    assert parsed["data"]["reason"] == "test interrupt"
     assert pending == []

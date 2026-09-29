@@ -198,8 +198,7 @@ class ProviderServiceImpl:
                 if catalog_endpoint and catalog_endpoint == candidate.default_base_url.rstrip("/"):
                     capability = next((model.image_input for model in candidate.fallback_models if model.id == model_id), None)
                     break
-        name = cached.get("name") if isinstance(cached, dict) else None
-        return replace(base, name=name if isinstance(name, str) and name else base.name, image_input=capability)
+        return replace(base, image_input=capability)
 
     async def _fetch_models(self, settings: AppSettings, definition) -> bool:
         if not refreshable_models_api(_effective_api(settings, definition)):
@@ -222,10 +221,7 @@ class ProviderServiceImpl:
                 if any(not isinstance(item.get("id") if isinstance(item, dict) else getattr(item, "id", None), str)
                        for item in data):
                     raise ValueError("Invalid model identifier")
-                models = []
-                for item in data:
-                    name = item.get("name") if isinstance(item, dict) else getattr(item, "name", None)
-                    models.append({"id": _item_id(item), "name": name if isinstance(name, str) and name.strip() else _item_id(item)})
+                models = [{"id": _item_id(item)} for item in data]
                 if any(not item["id"] for item in models):
                     raise ValueError("Invalid model identifier")
             if not models:
@@ -345,7 +341,7 @@ def _selection_model(settings: AppSettings, definition, selection: ModelSelectio
         if model.id == selection.model_id:
             return model
     api = _effective_api(settings, definition)
-    return ModelDefinition(definition.id, selection.model_id, selection.model_id, api, default_reasoning_efforts(api))
+    return ModelDefinition(definition.id, selection.model_id, api, default_reasoning_efforts(api))
 
 
 def _item_id(item: Any) -> str:

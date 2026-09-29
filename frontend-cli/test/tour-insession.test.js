@@ -67,7 +67,7 @@ test("in-session recovery: stop main tui, run tour, replay main tui", async () =
   main.start();
   await settle();
 
-  main.stop();
+  main.stop({ releaseInput: false });
   const clock = fakeClock();
   const running = runTour({
     input,
@@ -75,6 +75,7 @@ test("in-session recovery: stop main tui, run tour, replay main tui", async () =
     startPageId: "start.monitor",
     schedule: clock.schedule,
     cancel: clock.cancel,
+    manageInput: false,
   });
   await settle();
   let screen = (await output.flushAndGetViewport()).join("\n");
@@ -89,7 +90,7 @@ test("in-session recovery: stop main tui, run tour, replay main tui", async () =
   input.send("q");
   await running;
 
-  main.start();
+  main.start({ acquireInput: false });
   main.replayAll();
   await settle();
   screen = (await output.flushAndGetViewport()).join("\n");
@@ -99,4 +100,36 @@ test("in-session recovery: stop main tui, run tour, replay main tui", async () =
   assert.ok(!screen.includes("Demo ·"), "tour content is gone after the replay");
   assert.ok(!screen.includes("TOUR ·"), "tour introduction is gone after replay");
   assert.ok(!screen.includes("TOUR GUIDE"), "tour controls are also gone after replay");
+  main.stop();
+});
+
+test("a second in-session tour still accepts input after escape exits the first", async () => {
+  const { output, input } = { output: createVirtualOutput({ columns: 80, rows: 30 }), input: createVirtualInput() };
+  const main = createTui({ input, output: output.output });
+  main.start();
+  await settle();
+
+  main.stop({ releaseInput: false });
+  const first = runTour({ input, output: output.output, startPageId: "start.hello", manageInput: false });
+  await settle();
+  input.send("\x1b");
+  await first;
+
+  main.start({ acquireInput: false });
+  await settle();
+  input.send("?");
+  await settle();
+  main.stop({ releaseInput: false });
+  const second = runTour({ input, output: output.output, manageInput: false });
+  await settle();
+  input.send("\x1b[B");
+  input.send("\x03");
+  await second;
+  assert.equal(input.isRaw, true);
+  assert.equal(input.listenerCount("data"), 0);
+
+  main.start({ acquireInput: false });
+  assert.equal(input.isRaw, true);
+  main.stop();
+  assert.equal(input.isRaw, false);
 });

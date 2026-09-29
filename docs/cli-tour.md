@@ -124,7 +124,8 @@ entire hold. Tests inject `now` together with `schedule`/`cancel`.
 | r | replay the page | — |
 | PgUp / PgDn | scroll the demo, pausing playback | — |
 | ? | help (pauses; restores prior playback state on close) | help |
-| q / esc | back to catalog | quit |
+| q | back to catalog | quit |
+| Esc | exit tour | quit |
 | ctrl+c | exit tour immediately | quit |
 
 Right while paused displays the next settled step and stays paused; Space

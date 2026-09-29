@@ -35,7 +35,7 @@ import { runSend, sendHelp } from "./send.js";
 import { listenIpc } from "./ipc.js";
 import { runTour } from "./tour/run-tour.js";
 import { createTui } from "./tui/tui.js";
-import { Container } from "./tui/component.js";
+import { createTranscript } from "./tui/transcript.js";
 import { ComposerArea } from "./components/composer-area.js";
 import { MonitorStack } from "./components/monitor-stack.js";
 import {
@@ -153,13 +153,13 @@ const isTty = Boolean(process.stdin.isTTY && process.stdout.isTTY);
 const tui = isTty
   ? createTui({ input: process.stdin, output: process.stdout })
   : null;
-const transcriptContainer = new Container();
+const transcriptContainer = createTranscript();
 const composerArea = new ComposerArea((width) => composeFrame(width));
 const monitorStack = new MonitorStack({
   composer: composerArea,
   monitor: {
     isMonitoring: () => Boolean(taskMonitorController?.isMonitoring()),
-    frame: (width) => taskMonitorController?.frame(width),
+    frame: (width, height) => taskMonitorController?.frame(width, height),
   },
   rows: () => (tui ? tui.rows : 24),
 });
@@ -401,6 +401,7 @@ const eventController = createEventController({
       displayState.stats = stats;
     },
     setActivityLabel: outputController.setActivityLabel,
+    setBackgroundWait: outputController.setBackgroundWait,
     redraw: redrawInput,
     clearCompactContext: () => compactContextState.clear(),
     deliverQueuedInput: (...args) => inputActions.deliverQueuedInput(...args),
@@ -487,7 +488,7 @@ try {
 
 function updateGoalState(goal) {
   sessionState.info = { ...sessionState.info, goal: goal && typeof goal === "object" ? goal : null };
-  redrawInput();
+  refreshInputState();
 }
 
 async function rebindSendEndpoint() {
@@ -522,15 +523,15 @@ async function enterInSessionTour(pageId) {
     return;
   }
   inputController.pause();
-  tui.stop();
+  tui.stop({ releaseInput: false });
   process.off("SIGINT", handleSigint);
   try {
-    await runTour({ input: process.stdin, output: process.stdout, startPageId: pageId || "", onPageComplete: () => saveCliState({ tourSeen: true }) });
+    await runTour({ input: process.stdin, output: process.stdout, startPageId: pageId || "", manageInput: false, onPageComplete: () => saveCliState({ tourSeen: true }) });
   } catch (error) {
     writeErrorOutput(`${error instanceof Error ? error.message : String(error)}\n`);
   } finally {
     process.on("SIGINT", handleSigint);
-    tui.start();
+    tui.start({ acquireInput: false });
     tui.replayAll();
     inputController.resume();
   }

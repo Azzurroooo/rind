@@ -14,7 +14,7 @@ from .token_usage import positive_int
 logger = logging.getLogger(__name__)
 
 
-DEFAULT_CONTEXT_WINDOW_TOKENS = 200000
+DEFAULT_CONTEXT_WINDOW_TOKENS = 256000
 DEFAULT_AUTO_COMPACT_TOKEN_LIMIT_PERCENT = 90
 
 

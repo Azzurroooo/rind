@@ -12,10 +12,10 @@ export function demoInfo({ cwd = "~/demo", session, model = "zai/glm-4.7" }) {
 
 export const MODELS = [
   { header: true, name: "zai" },
-  { name: "glm-4.7", current: true },
-  { name: "glm-4.6" },
+  { modelId: "glm-4.7", current: true },
+  { modelId: "glm-4.6" },
   { header: true, name: "openai-compatible" },
-  { name: "local-llama" },
+  { modelId: "local-llama" },
 ];
 
 export const SLASH_MATCHES = [
@@ -56,12 +56,14 @@ export const DELEGATES = [
   },
 ];
 
+export const DEMO_CONTEXT_WINDOW_TOKENS = 256000;
+
 export const BOARD_PAGES = [
   {
     index: 1,
     count: 2,
     breakdown: {
-      context_window_tokens: 200000,
+      context_window_tokens: DEMO_CONTEXT_WINDOW_TOKENS,
       estimated_total: 48200,
       turn_id: "t_9f21",
       captured_at: "2026-09-17T10:31:22Z",

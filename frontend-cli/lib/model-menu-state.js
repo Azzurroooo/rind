@@ -48,7 +48,6 @@ function normalizeModels(models, currentModel, providerNames) {
       && (!current.providerId || !providerId || providerId === current.providerId);
     currentFound ||= isCurrent;
     appendModel(byProvider, providers, providerId, {
-      name: structured ? String(model.name || modelId).trim() : modelId,
       modelId,
       providerId,
       current: isCurrent,
@@ -57,7 +56,6 @@ function normalizeModels(models, currentModel, providerNames) {
   }
   if (current.modelId && !currentFound) {
     const entry = {
-      name: current.modelId,
       modelId: current.modelId,
       providerId: current.providerId,
       current: true,

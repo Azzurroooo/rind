@@ -6,6 +6,7 @@ import asyncio
 from collections.abc import Callable
 import copy
 import inspect
+import json
 from typing import Any
 import uuid
 
@@ -353,6 +354,10 @@ class RuntimeDispatcher:
             if method in {RuntimeMethod.RIND_BACKGROUND_LIST, RuntimeMethod.RIND_BACKGROUND_OUTPUT}:
                 await self._background_request(request)
                 return
+            if method in {RuntimeMethod.RIND_TASK_LIST, RuntimeMethod.RIND_TASK_READ, RuntimeMethod.RIND_TASK_WAIT,
+                          RuntimeMethod.RIND_TASK_CANCEL, RuntimeMethod.RIND_TASK_RELEASE_WAIT}:
+                await self._task_request(request)
+                return
             if method in {RuntimeMethod.FILE_LIST, RuntimeMethod.FILE_READ, RuntimeMethod.FILE_WRITE}:
                 await self._file_request(request)
                 return
@@ -488,21 +493,32 @@ class RuntimeDispatcher:
         self._subscribed.add(session_id)
         turn_session_id = ""
         turn_id = ""
-        async for event in self._worker.execution.run_turn(
-            session_id,
-            query=query,
-            transient_system_messages=transient_system_messages,
-            resume=resume,
-        ):
-            turn_session_id = turn_session_id or str(event.get("session_id") or "")
-            turn_id = turn_id or str(event.get("turn_id") or "")
-            await self._send_event(event)
+        completion_scope = params.get("completion_scope", "turn")
+        if completion_scope not in {"turn", "request"}:
+            raise ValueError("completion_scope must be turn or request.")
+        request_result = {}
+        if completion_scope == "request":
+            self._worker.execution.begin_request(session_id)
+        try:
+            async for event in self._worker.execution.run_turn(
+                session_id, query=query, transient_system_messages=transient_system_messages, resume=resume,
+            ):
+                turn_session_id = turn_session_id or str(event.get("session_id") or "")
+                turn_id = turn_id or str(event.get("turn_id") or "")
+                await self._send_event(event)
+            if completion_scope == "request":
+                request_result = await self._worker.execution.wait_request(session_id)
+        except BaseException:
+            if completion_scope == "request":
+                self._worker.execution.abandon_request(session_id)
+            raise
         await self._respond(
             request,
             {
                 "ok": True,
                 "session_id": turn_session_id or session_id,
                 "turn_id": turn_id,
+                **request_result,
             },
         )
 
@@ -741,7 +757,8 @@ class RuntimeDispatcher:
         for cursor, event in enumerate(events, start=1):
             if cursor > after_cursor:
                 envelopes.append(event_envelope(event, cursor))
-        await self._respond(request, {"events": envelopes, "cursor": cursor})
+        tasks = (await self._worker.shell_tools.monitor_tasks(session_id))["tasks"]
+        await self._respond(request, {"events": envelopes, "cursor": cursor, "tasks": tasks})
 
     async def _file_request(self, request: dict[str, Any]) -> None:
         params = request.get("params") if isinstance(request.get("params"), dict) else {}
@@ -844,7 +861,7 @@ class RuntimeDispatcher:
             repository = self._worker.repository
             store = _RepositoryGoalOps(repository, session_id)
             start_continuation = lambda: self._start_goal_continuation(session_id)
-            interrupt = lambda: None
+            interrupt = lambda: self._worker.execution.interrupt(session_id)
 
         method = request.get("method")
         if method == RuntimeMethod.RIND_GOAL_GET:
@@ -880,6 +897,38 @@ class RuntimeDispatcher:
         start = getattr(self._worker.execution, "start_goal_continuation", None)
         if callable(start):
             await start(session_id)
+
+    async def _task_request(self, request: dict[str, Any]) -> None:
+        session_id = await self._required_session_id(request)
+        if session_id is None:
+            return
+        await self._worker.session(session_id)
+        params = dict(request.get("params") or {})
+        params.pop("session_id", None)
+        action = str(request["method"]).rsplit("/", 1)[-1]
+        if action == "release_wait":
+            if set(params) - {"task_id", "tool_call_id"} or not (params.get("task_id") or params.get("tool_call_id")):
+                raise ValueError("release_wait requires task_id or tool_call_id.")
+            if any(not isinstance(value, str) or not value.strip() for value in params.values()):
+                raise ValueError("Task and tool call IDs must be nonempty strings.")
+            released = self._worker.shell_tools.supervisor.release_wait(session_id, params.get("task_id"), params.get("tool_call_id"))
+            await self._respond(request, {"ok": True, "released": released})
+            return
+        if action == "list":
+            if set(params) - {"page_token"}:
+                raise ValueError("Unknown task list parameters.")
+            token = params.get("page_token")
+            if token is not None and (not isinstance(token, str) or not token.isdecimal()):
+                raise ValueError("Invalid page_token.")
+            await self._respond(request, await self._worker.shell_tools.monitor_tasks(session_id, token))
+            return
+        if set(params) - {"task_id", "cursor", "wait_ms", "max_output_chars", "page_token"}:
+            raise ValueError("Unknown task control parameters.")
+        payload = json.loads(await self._worker.shell_tools.task_control(action, _session_id=session_id, **params))
+        if not payload["ok"]:
+            await self._respond_error(request, payload["error"], payload.get("error_type", "TaskError"))
+            return
+        await self._respond(request, {**payload["data"], "meta": payload.get("meta", {})})
 
     async def _background_request(self, request: dict[str, Any]) -> None:
         session_id = await self._required_session_id(request)
@@ -934,7 +983,7 @@ class RuntimeDispatcher:
         params = request.get("params") if isinstance(request.get("params"), dict) else {}
         expected = params.get("turn_id")
         active = self._worker.execution.active_turn_id(session_id)
-        if request.get("method") == RuntimeMethod.SESSION_CANCEL and expected in {None, ""} and active:
+        if request.get("method") == RuntimeMethod.SESSION_CANCEL and expected in {None, ""}:
             return True
         if not isinstance(expected, str) or not expected.strip() or not active or expected != active:
             await self._respond_error(request, "The requested turn is no longer active.", "TurnNotActive")

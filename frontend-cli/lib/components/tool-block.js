@@ -1,31 +1,26 @@
 import {
+  argsFromResult,
   parseToolArguments,
+  parseToolResult,
   renderToolFinished,
   renderToolRunning,
 } from "../tool-display.js";
 
-const TICKER_TOOLS = new Set(["bash", "bash_output", "delegate", "search_web", "fetch_web_page"]);
-
 export class ToolBlock {
-  constructor({ event, onRequestRender, leading = false, animate = true }) {
+  constructor({ event, onRequestRender, leading = false, animate = true, now = Date.now }) {
     this.name = event?.tool_name || "tool";
-    this.args = parseToolArguments(event);
+    this.args = { ...parseToolArguments(event) };
     this.phase = "running";
-    this.startedAt = Date.now();
+    this.now = now;
+    this.startedAt = now();
     this.progressMessage = "";
     this.fileChange = null;
     this.resultEvent = null;
+    this.cache = null;
     this.expanded = false;
     this.leading = Boolean(leading);
     this.animate = animate;
-    this.timer = null;
     this.onRequestRender = onRequestRender;
-    if (animate && TICKER_TOOLS.has(this.name)) {
-      this.timer = setInterval(() => {
-        this.onRequestRender?.();
-      }, 1000);
-      this.timer.unref?.();
-    }
   }
 
   setProgress(message) {
@@ -37,6 +32,7 @@ export class ToolBlock {
       return;
     }
     this.progressMessage = next;
+    this.invalidate();
     this.onRequestRender?.();
   }
 
@@ -57,15 +53,18 @@ export class ToolBlock {
       }
     }
     if (changed) {
+      this.invalidate();
       this.onRequestRender?.();
     }
   }
 
   finish(event, fileChange) {
     this.phase = "done";
-    this.resultEvent = event || this.resultEvent || { status: "completed", result: "" };
+    const result = event || this.resultEvent || { status: "completed", result: "" };
+    this.resultEvent = { ...result, result: parseToolResult(result.result) };
+    this.enrichArgs({ arguments: argsFromResult(this.name, this.resultEvent.result) });
     this.fileChange = fileChange || null;
-    this.clearTimer();
+    this.invalidate();
     this.onRequestRender?.();
   }
 
@@ -75,6 +74,7 @@ export class ToolBlock {
       return;
     }
     this.expanded = next;
+    this.invalidate();
     this.onRequestRender?.();
   }
 
@@ -82,27 +82,21 @@ export class ToolBlock {
     return this.phase === "running";
   }
 
-  clearTimer() {
-    if (!this.timer) {
-      return;
-    }
-    clearInterval(this.timer);
-    this.timer = null;
-  }
-
   invalidate() {
-    // No cached render state (blocks restyle every frame); keep the
-    // elapsed-time ticker alive across full repaints.
+    this.cache = null;
   }
 
   render(width) {
+    if (this.cache?.width === width) {
+      return this.cache.lines;
+    }
     let lines;
     if (this.phase === "running") {
       lines = renderToolRunning({
         name: this.name,
         args: this.args,
         phase: "running",
-        elapsedMs: this.animate ? Date.now() - this.startedAt : 0,
+        elapsedMs: this.animate ? this.now() - this.startedAt : 0,
         progressMessage: this.progressMessage,
       }, width);
     } else {
@@ -116,7 +110,10 @@ export class ToolBlock {
       }, width);
     }
     if (this.leading && lines.length) {
-      return ["", ...lines];
+      lines = ["", ...lines];
+    }
+    if (!this.isRunning) {
+      this.cache = { width, lines: Object.freeze(lines) };
     }
     return lines;
   }
