@@ -1,5 +1,6 @@
 /* Style entry: tokens first, then base, then area files. */
 @import "./tokens.css";
 @import "./base.css";
+@import "./overlays.css";
 @import "./legacy-layout.css";
 @import "./legacy-components.css";
