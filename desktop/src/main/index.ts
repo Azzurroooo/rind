@@ -4,7 +4,7 @@ import windowState from "electron-window-state"
 import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
 
-import { runtimeMethods, type DesktopPrefsPatch, type DesktopSettings, type DesktopSettingsPatch, type DesktopTheme, type RuntimeEvent, type RuntimeMethod, type RuntimeSnapshot } from "../preload/types"
+import type { DesktopAuthPrompt, DesktopAuthUpdate, DesktopPrefsPatch, DesktopSettings, DesktopSettingsPatch, DesktopTheme, RuntimeEvent, RuntimeSnapshot } from "../preload/types"
 import { asObject, readJsonObject, writeJsonObject } from "./json-store"
 import { listAvailableModels } from "./model-catalog"
 import { listProjectFiles, previewProjectFile } from "./project-files"
@@ -15,10 +15,14 @@ import { wrapRuntimeIpcError } from "../shared/ipc-error"
 import { DesktopGateway } from "./gateway/server"
 import { workspaceFileRequest } from "./gateway/files"
 import type { GatewayOptions } from "../preload/types"
+import { isDesktopRuntimeMethod, isRemoteRuntimeMethod } from "./method-policy"
 import {
   getRuntimeSnapshot,
   initializeRuntime,
   requestRuntime,
+  respondAuthPrompt,
+  subscribeAuthPrompts,
+  subscribeAuthUpdates,
   shutdownRuntime,
   startRuntime,
   subscribeRuntime,
@@ -27,16 +31,12 @@ import {
 
 const appId = "ai.rind.desktop"
 const root = dirname(fileURLToPath(import.meta.url))
-const allowedRuntimeMethods = new Set<RuntimeMethod>(Object.values(runtimeMethods) as RuntimeMethod[])
 const themes: DesktopTheme[] = ["system", "dark", "light"]
 const themeSurfaces = {
   dark: { background: "#151d18", overlay: { color: "#151d18", symbolColor: "#a5b0a4" } },
   light: { background: "#f7f6f0", overlay: { color: "#f7f6f0", symbolColor: "#64685e" } },
 } as const
 
-function isRuntimeMethod(method: string): method is RuntimeMethod {
-  return allowedRuntimeMethods.has(method as RuntimeMethod)
-}
 let mainWindow: BrowserWindow | undefined
 let desktopProjectStore: DesktopProjectStore | undefined
 let quitting = false
@@ -49,7 +49,7 @@ function gateway() {
   remoteGateway ||= new DesktopGateway({
     initialize: initializeRuntime,
     request: (method, params) => {
-      if (!isRuntimeMethod(method)) throw new Error("Unsupported remote method.")
+      if (!isRemoteRuntimeMethod(method)) throw new Error("Unsupported remote method.")
       return requestRuntime(method, params)
     },
     subscribe: subscribeRuntimeEvents,
@@ -195,7 +195,7 @@ function registerIpc() {
   ipcMain.handle("runtime-initialize", () => initializeRuntime())
   ipcMain.handle("runtime-shutdown", () => shutdownRuntime())
   ipcMain.handle("runtime-request", async (_event, method: unknown, params: unknown) => {
-    if (typeof method !== "string" || !isRuntimeMethod(method)) {
+    if (!isDesktopRuntimeMethod(method)) {
       throw new Error("Runtime method is not available to the desktop client.")
     }
     const safeParams = params && typeof params === "object" ? params as Record<string, unknown> : {}
@@ -205,6 +205,13 @@ function registerIpc() {
     // console noise. The preload bridge unwraps and re-throws for the renderer.
     try {
       return await requestRuntime(method, safeParams)
+    } catch (error) {
+      return wrapRuntimeIpcError(error)
+    }
+  })
+  ipcMain.handle("auth-prompt-respond", async (_event, requestId: unknown, value: unknown) => {
+    try {
+      return await respondAuthPrompt(requestId, value)
     } catch (error) {
       return wrapRuntimeIpcError(error)
     }
@@ -334,6 +341,19 @@ function notifyRuntimeEvent(event: RuntimeEvent) {
   mainWindow?.webContents.send("runtime-event", event)
 }
 
+function notifyAuthPrompt(prompt: DesktopAuthPrompt) {
+  if (mainWindow) {
+    mainWindow.webContents.send("auth-prompt", prompt)
+    return
+  }
+  // No window can answer: cancel so the worker does not wait for the timeout.
+  void respondAuthPrompt(prompt.requestId, "").catch((error) => log.warn("auth prompt cancel failed", error))
+}
+
+function notifyAuthUpdate(update: DesktopAuthUpdate) {
+  mainWindow?.webContents.send("auth-update", update)
+}
+
 function showDesktopNotification(payload: { title?: unknown; body?: unknown; sessionId?: unknown }) {
   const title = typeof payload.title === "string" && payload.title.trim() ? payload.title.trim() : "Rind"
   const body = typeof payload.body === "string" ? payload.body : ""
@@ -370,6 +390,8 @@ if (!hasLock) {
     app.setAppUserModelId(appId)
     subscribeRuntime(notifyRuntime)
     subscribeRuntimeEvents(notifyRuntimeEvent)
+    subscribeAuthPrompts(notifyAuthPrompt)
+    subscribeAuthUpdates(notifyAuthUpdate)
     registerIpc()
     try {
       const overview = await projectStore().overview()

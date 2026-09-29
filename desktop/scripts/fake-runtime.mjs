@@ -13,6 +13,20 @@ const backgroundTasks = new Map([
   ["bg-0", { bg_id: "bg-0", status: "completed", exit_code: 0, cwd: "/workspace", stdout: "done\n", stderr: "" }],
 ])
 
+// Interactive auth: login writes a prompt *request* to stdout and waits for
+// the client to answer with a request carrying the same request_id.
+const authWaiters = new Map()
+let authSequence = 0
+const authProviders = new Map([
+  ["openai", { id: "openai", name: "OpenAI", methods: ["api_key"], configured: false, source: "" }],
+])
+
+function authPrompt(kind, message) {
+  const requestId = `auth-${++authSequence}`
+  output({ kind: "request", request_id: requestId, method: "rind/auth/prompt", params: { kind, message, options: [] } })
+  return new Promise((resolve) => authWaiters.set(requestId, resolve))
+}
+
 function requireParams(request) {
   return request.params && typeof request.params === "object" ? request.params : {}
 }
@@ -34,6 +48,36 @@ input.on("line", (line) => {
     return
   }
 
+  if (request.method === "rind/auth/prompt") {
+    const resolve = authWaiters.get(request.request_id)
+    authWaiters.delete(request.request_id)
+    resolve?.(String(request.params?.value ?? ""))
+    return
+  }
+  if (request.method === "rind/auth/list") {
+    respond(request, { providers: [...authProviders.values()] })
+    return
+  }
+  if (request.method === "rind/auth/login") {
+    const providerId = String(request.params?.provider_id ?? "")
+    const provider = authProviders.get(providerId)
+    if (!request.params?.session_id) return respondError(request, "InvalidParams", "session_id is required.")
+    if (!provider) return respondError(request, "InvalidParams", "Unknown provider.")
+    void authPrompt("secret", `${provider.name} API key`).then((value) => {
+      if (!value.trim()) return respondError(request, "AuthCancelled", "Login cancelled.")
+      authProviders.set(providerId, { ...provider, configured: true, source: "keychain" })
+      output({ kind: "event", method: "rind/auth/update", event: { type: "auth_configured", provider_id: providerId } })
+      respond(request, { ok: true, provider_id: providerId, models_count: 3, selection: null })
+    })
+    return
+  }
+  if (request.method === "rind/auth/logout") {
+    const providerId = String(request.params?.provider_id ?? "")
+    const provider = authProviders.get(providerId)
+    if (provider) authProviders.set(providerId, { ...provider, configured: false, source: "" })
+    respond(request, { ok: true, provider_id: providerId, deleted: Boolean(provider?.configured), source: provider?.source ?? "" })
+    return
+  }
   if (request.method === "initialize") {
     output({
       kind: "response",

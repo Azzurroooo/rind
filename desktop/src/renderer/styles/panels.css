@@ -1,30 +1,3 @@
-/* ---------- settings dialog ---------- */
-
-.settings-dialog {
-  width: min(460px, calc(100vw - 32px));
-  padding: 0;
-  border: 1px solid var(--line-strong);
-  border-radius: 10px;
-  color: var(--text);
-  background: var(--surface);
-}
-.settings-dialog::backdrop { background: var(--scrim); backdrop-filter: blur(2px); }
-.settings-dialog form { display: grid; gap: 12px; padding: 18px; }
-.settings-heading, .settings-actions { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-.settings-dialog label { display: grid; gap: 5px; color: var(--muted); font-size: 12.5px; }
-.settings-dialog input:not([type="checkbox"]) {
-  width: 100%;
-  min-height: 32px;
-  padding: 6px 9px;
-  border: 1px solid var(--line-strong);
-  border-radius: var(--radius-sm);
-  color: var(--text);
-  background: var(--surface-soft);
-}
-.settings-actions { justify-content: flex-end; margin-top: 4px; }
-.settings-dialog label.settings-check { display: flex; align-items: center; gap: 10px; line-height: 1.6; cursor: pointer; }
-.settings-check input[type="checkbox"] { width: 16px; height: 16px; min-height: 16px; margin: 0; flex: none; accent-color: var(--accent); }
-
 /* ---------- projects and files ---------- */
 
 .sidebar-actions {

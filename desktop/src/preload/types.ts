@@ -55,6 +55,9 @@ export const runtimeMethods = {
   goalSet: "rind/goal/set",
   goalStatus: "rind/goal/status",
   goalClear: "rind/goal/clear",
+  authList: "rind/auth/list",
+  authLogin: "rind/auth/login",
+  authLogout: "rind/auth/logout",
 } as const
 
 export type RuntimeMethod = typeof runtimeMethods[keyof typeof runtimeMethods]
@@ -87,6 +90,14 @@ export const sessionScopedMethods = new Set<RuntimeMethod>([
   runtimeMethods.goalSet,
   runtimeMethods.goalStatus,
   runtimeMethods.goalClear,
+  runtimeMethods.authLogin,
+])
+
+/** Methods that need the desktop window (interactive auth prompts, local
+ *  credential storage). The remote gateway must never forward them. */
+export const localOnlyRuntimeMethods = new Set<RuntimeMethod>([
+  runtimeMethods.authLogin,
+  runtimeMethods.authLogout,
 ])
 
 export const turnScopedMethods = new Set<RuntimeMethod>([
@@ -224,6 +235,32 @@ export type DesktopFilePreview = {
   message?: string
 }
 
+export type DesktopAuthProvider = {
+  id: string
+  name: string
+  methods: string[]
+  configured: boolean
+  source: string
+}
+
+export type DesktopAuthPromptKind = "select" | "secret" | "text"
+
+export type DesktopAuthPrompt = {
+  requestId: string
+  kind: DesktopAuthPromptKind
+  message: string
+  options: readonly string[]
+}
+
+export type DesktopAuthUpdate = Record<string, unknown> & { type: string }
+
+export type DesktopAuthLoginResult = {
+  ok: boolean
+  provider_id: string
+  models_count?: number
+  selection?: unknown
+}
+
 export type GatewayOptions = { scope: "loopback" | "lan"; port?: number; externalOrigin?: string }
 export type GatewayState = { running: boolean; scope: "loopback" | "lan"; port: number; addresses: string[]; accessCode: string; clients: number }
 
@@ -242,6 +279,14 @@ export type DesktopApi = {
     shutdown: () => Promise<unknown>
     subscribe: (listener: (snapshot: RuntimeSnapshot) => void) => () => void
     subscribeEvents: (listener: (event: RuntimeEvent) => void) => () => void
+  }
+  auth: {
+    list: () => Promise<DesktopAuthProvider[]>
+    login: (sessionId: string, providerId: string, method?: string) => Promise<DesktopAuthLoginResult>
+    logout: (providerId: string) => Promise<unknown>
+    respond: (requestId: string, value: string) => Promise<boolean>
+    onPrompt: (listener: (prompt: DesktopAuthPrompt) => void) => () => void
+    onUpdate: (listener: (update: DesktopAuthUpdate) => void) => () => void
   }
   settings: {
     get: (workspace?: string) => Promise<DesktopSettings>

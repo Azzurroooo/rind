@@ -7,12 +7,6 @@
 .starter-actions button { display: flex; justify-content: space-between; gap: 14px; text-align: left; padding: 13px 14px; color: var(--text); border: 1px solid var(--line); border-radius: 10px; background: var(--bg); font-size: 13px; }
 .starter-actions button:hover { background: var(--surface); border-color: var(--line-strong); }
 .starter-actions span { color: var(--dim); }
-.settings-section-title { margin: 24px 0 12px; font-size: 14px; font-weight: 600; }
-.settings-dialog .settings-heading { align-items: flex-start; }
-.settings-dialog h2 { margin: 0 0 8px; font-size: 22px; font-weight: 600; letter-spacing: -.03em; }
-.settings-dialog .subtle { font-family: var(--font-ui); font-size: 13px; line-height: 1.6; white-space: normal; }
-.settings-dialog select { width: 100%; min-height: 38px; border: 1px solid var(--line-strong); border-radius: 8px; padding: 8px; color: var(--text); background: var(--bg); }
-.settings-dialog input:not([type="checkbox"]) { min-height: 38px; }
 .settings-dialog.remote-dialog { width: min(580px, calc(100vw - 48px)); max-height: calc(100dvh - 48px); padding: 28px; overflow-y: auto; }
 .remote-status { display: flex; align-items: center; gap: 8px; margin: 24px 0; }
 .remote-status strong { font-size: 14px; font-weight: 500; }
@@ -89,6 +83,34 @@ button:disabled { cursor: not-allowed; opacity: 0.45; }
 }
 .primary-button:hover:not(:disabled) { filter: brightness(1.08); }
 .primary-button:active:not(:disabled) { transform: scale(0.96); }
+
+.secondary-button {
+  min-height: var(--control-md);
+  padding: 4px 14px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  background: var(--surface);
+  font-size: var(--text-dense);
+  font-weight: 500;
+}
+.secondary-button:hover:not(:disabled) { background: var(--fill-2); }
+.secondary-button:active:not(:disabled) { transform: scale(0.96); }
+
+.icon-button {
+  display: inline-grid;
+  place-items: center;
+  width: var(--control-sm);
+  height: var(--control-sm);
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-sm);
+  color: var(--muted);
+  background: transparent;
+  transition: background var(--dur-hover) var(--ease), color var(--dur-hover) var(--ease);
+}
+.icon-button:hover:not(:disabled) { color: var(--text); background: var(--fill-2); }
+.icon-button svg { width: 16px; height: 16px; }
 
 h1, h2, h3, h4 { font-weight: 600; }
 code, pre, kbd, samp { font-family: var(--font-mono); }

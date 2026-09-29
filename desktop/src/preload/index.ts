@@ -1,7 +1,7 @@
 import { contextBridge, ipcRenderer } from "electron"
 
 import { unwrapRuntimeIpcResult } from "../shared/ipc-error"
-import { runtimeMethods, type DesktopApi, type DesktopNotificationPayload, type DesktopPrefsPatch, type DesktopTheme, type RuntimeEvent, type RuntimeSnapshot } from "./types"
+import { runtimeMethods, type DesktopApi, type DesktopAuthPrompt, type DesktopAuthUpdate, type DesktopNotificationPayload, type DesktopPrefsPatch, type DesktopTheme, type RuntimeEvent, type RuntimeSnapshot } from "./types"
 
 // The main process returns worker errors as a wrapped envelope (never as a
 // rejected ipcMain.handle) — unwrap here so renderer call sites keep their
@@ -36,6 +36,25 @@ const api: DesktopApi = {
       const handler = (_event: Electron.IpcRendererEvent, event: RuntimeEvent) => listener(event)
       ipcRenderer.on("runtime-event", handler)
       return () => ipcRenderer.removeListener("runtime-event", handler)
+    },
+  },
+  auth: {
+    list: async () => {
+      const result = await runtimeRequest(runtimeMethods.authList) as { providers?: unknown }
+      return Array.isArray(result?.providers) ? result.providers : []
+    },
+    login: (sessionId, providerId, method = "api_key") => runtimeRequest(runtimeMethods.authLogin, { session_id: sessionId, provider_id: providerId, method }) as ReturnType<DesktopApi["auth"]["login"]>,
+    logout: (providerId) => runtimeRequest(runtimeMethods.authLogout, { provider_id: providerId }),
+    respond: async (requestId, value) => unwrapRuntimeIpcResult(await ipcRenderer.invoke("auth-prompt-respond", requestId, value)) as boolean,
+    onPrompt: (listener) => {
+      const handler = (_event: Electron.IpcRendererEvent, prompt: DesktopAuthPrompt) => listener(prompt)
+      ipcRenderer.on("auth-prompt", handler)
+      return () => ipcRenderer.removeListener("auth-prompt", handler)
+    },
+    onUpdate: (listener) => {
+      const handler = (_event: Electron.IpcRendererEvent, update: DesktopAuthUpdate) => listener(update)
+      ipcRenderer.on("auth-update", handler)
+      return () => ipcRenderer.removeListener("auth-update", handler)
     },
   },
   settings: {

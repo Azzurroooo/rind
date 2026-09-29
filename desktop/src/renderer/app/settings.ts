@@ -1,9 +1,36 @@
 import { requiredElement, saveSettingsButton, settingsApiKey, settingsBaseUrl, settingsDialog, settingsForm, settingsKeyStatus, settingsModel, settingsNotifications, settingsReasoning } from "./dom.ts"
+import { bindProviderEvents, loadProviders, renderProviders } from "./providers-ui.ts"
 import { runAction } from "./runtime.ts"
 import { render } from "./shell.ts"
 import { state } from "./state.ts"
 
+const settingsTabs = ["general", "providers", "preferences"] as const
+type SettingsTab = typeof settingsTabs[number]
+let activeSettingsTab: SettingsTab = "general"
 
+function isSettingsTab(value: unknown): value is SettingsTab {
+  return settingsTabs.includes(value as SettingsTab)
+}
+
+function renderSettingsTabs() {
+  for (const button of settingsDialog.querySelectorAll<HTMLButtonElement>("[data-settings-tab]")) {
+    const selected = button.dataset.settingsTab === activeSettingsTab
+    button.setAttribute("aria-selected", String(selected))
+    button.tabIndex = selected ? 0 : -1
+  }
+  for (const panel of settingsDialog.querySelectorAll<HTMLElement>("[data-settings-panel]")) {
+    panel.hidden = panel.dataset.settingsPanel !== activeSettingsTab
+  }
+  // Provider sign-in applies immediately; only the other sections need Save.
+  saveSettingsButton.hidden = activeSettingsTab === "providers"
+}
+
+export function selectSettingsTab(tab: SettingsTab, focus = false) {
+  activeSettingsTab = tab
+  renderSettingsTabs()
+  if (tab === "providers") void loadProviders()
+  if (focus) settingsDialog.querySelector<HTMLButtonElement>(`[data-settings-tab="${tab}"]`)?.focus()
+}
 
 export function renderSettings() {
   if (state.settingsOpen && !settingsDialog.open) settingsDialog.showModal()
@@ -12,6 +39,7 @@ export function renderSettings() {
   saveSettingsButton.disabled = state.settingsSaving
   saveSettingsButton.textContent = state.settingsSaving ? "Saving..." : "Save"
   settingsNotifications.checked = state.notificationsEnabled
+  renderSettingsTabs()
 }
 
 export async function loadAvailableModels() {
@@ -35,8 +63,11 @@ export async function loadSettings() {
   }
 }
 
-export function openSettings() {
+export function openSettings(tab: SettingsTab = "general") {
   state.settingsOpen = true
+  activeSettingsTab = tab
+  renderProviders()
+  if (tab === "providers") void loadProviders()
   settingsApiKey.value = ""
   settingsBaseUrl.value = state.settings.baseUrl
   settingsModel.value = state.settings.model
@@ -88,4 +119,18 @@ export function bindSettingsEvents(): void {
   requiredElement("cancel-settings").addEventListener("click", () => { state.settingsOpen = false; render() })
 
   settingsDialog.addEventListener("cancel", () => { state.settingsOpen = false; render() })
+
+  const tablist = settingsDialog.querySelector<HTMLElement>("[role=tablist]")
+  tablist?.addEventListener("click", (event) => {
+    const tab = event.target instanceof Element ? event.target.closest<HTMLElement>("[data-settings-tab]")?.dataset.settingsTab : undefined
+    if (isSettingsTab(tab)) selectSettingsTab(tab)
+  })
+  tablist?.addEventListener("keydown", (event) => {
+    const offset = event.key === "ArrowDown" ? 1 : event.key === "ArrowUp" ? -1 : 0
+    if (!offset) return
+    event.preventDefault()
+    const index = settingsTabs.indexOf(activeSettingsTab)
+    selectSettingsTab(settingsTabs[(index + offset + settingsTabs.length) % settingsTabs.length], true)
+  })
+  bindProviderEvents()
 }

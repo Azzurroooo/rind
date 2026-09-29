@@ -23,6 +23,7 @@ export function paletteCommands(): PaletteCommand[] {
   const commands: PaletteCommand[] = [
     { id: "new-chat", title: "New chat", detail: "Start a new chat", shortcut: "Ctrl+N", run: () => runAction(startNewChat) },
     { id: "open-settings", title: "Open settings", detail: "Runtime settings", shortcut: "Ctrl+,", run: () => openSettings() },
+    { id: "open-providers", title: "Manage providers", detail: "Sign in or out of model providers", run: () => openSettings("providers") },
     { id: "remote-access", title: "Remote access", detail: "Connect your phone or another browser", run: remoteAccess.open },
     { id: "export-conversation", title: "Export conversation", detail: "Save as Markdown", run: exportSession, disabled: !state.conversation.entries.length },
     { id: "fork-conversation", title: "Fork conversation", detail: "Continue in a separate session", run: () => runAction(forkCurrentSession), disabled: !state.viewedSessionId || runtimeTurnActive() },

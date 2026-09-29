@@ -1,6 +1,6 @@
 import brandMarkUrl from "../assets/brand-mark.svg"
 import { composerRegionMarkup } from "../composer-region.ts"
-import { Download, GitBranch, MonitorSmartphone, PanelLeft, PanelRight, renderIcon, Search, Settings } from "../icons.ts"
+import { Bell, Download, GitBranch, KeyRound, MonitorSmartphone, PanelLeft, PanelRight, renderIcon, Search, Settings, SlidersHorizontal, X } from "../icons.ts"
 import { remoteAccessMarkup } from "../remote-access.ts"
 import { escapeHtml } from "./html.ts"
 
@@ -71,18 +71,44 @@ appRoot.innerHTML = `
       </aside>
     </main>
     ${remoteAccessMarkup()}
-    <dialog id="settings-dialog" class="settings-dialog" aria-label="Settings">
-      <form id="settings-form" method="dialog">
-        <div class="settings-heading"><div><h2>Settings</h2><p class="subtle">Models, connection and preferences.</p></div><button id="close-settings" type="button" class="ghost-button" title="Close settings">Close</button></div>
-        <h3 class="settings-section-title">Model provider</h3>
-        <label>API key<input id="settings-api-key" type="password" autocomplete="new-password" placeholder="Leave blank to keep the current key" /></label>
-        <p id="settings-key-status" class="subtle"></p>
-        <label>Base URL<input id="settings-base-url" type="url" placeholder="https://api.openai.com/v1" /></label>
-        <label>Model<input id="settings-model" type="text" placeholder="Default model" /></label>
-        <label>Reasoning effort<select id="settings-reasoning"><option value="">Provider default</option><option value="low">Low</option><option value="medium">Medium</option><option value="high">High</option><option value="xhigh">Extra high</option><option value="max">Maximum</option></select></label>
-        <h3 class="settings-section-title">Preferences</h3>
-        <label class="settings-check"><input id="settings-notifications" type="checkbox" /><span>Desktop notifications when the window is not focused</span></label>
+    <dialog id="settings-dialog" class="settings-dialog settings-shell" aria-labelledby="settings-title">
+      <form id="settings-form" method="dialog" class="settings-layout">
+      <nav class="settings-nav" aria-label="Settings sections">
+        <h2 id="settings-title" class="settings-title">Settings</h2>
+        <div role="tablist" aria-orientation="vertical" aria-label="Settings sections" class="settings-tabs">
+        <button id="settings-tab-general" type="button" role="tab" class="settings-tab" data-settings-tab="general" aria-controls="settings-panel-general" aria-selected="true">${renderIcon(SlidersHorizontal, "settings-tab-icon")}<span>General</span></button>
+        <button id="settings-tab-providers" type="button" role="tab" class="settings-tab" data-settings-tab="providers" aria-controls="settings-panel-providers" aria-selected="false" tabindex="-1">${renderIcon(KeyRound, "settings-tab-icon")}<span>Providers</span></button>
+        <button id="settings-tab-preferences" type="button" role="tab" class="settings-tab" data-settings-tab="preferences" aria-controls="settings-panel-preferences" aria-selected="false" tabindex="-1">${renderIcon(Bell, "settings-tab-icon")}<span>Preferences</span></button>
+        </div>
+      </nav>
+      <div class="settings-content">
+        <button id="close-settings" type="button" class="icon-button settings-close" aria-label="Close settings" data-tooltip="Close">${renderIcon(X)}</button>
+        <section id="settings-panel-general" class="settings-panel" role="tabpanel" aria-labelledby="settings-tab-general" data-settings-panel="general">
+          <h3 class="settings-section-title">Model provider</h3>
+          <p class="settings-section-desc">Shared ~/.rind/settings.json used when no provider sign-in is configured.</p>
+          <div class="settings-row"><div class="settings-row-text"><span class="settings-row-label"><label for="settings-api-key">API key</label></span><span class="settings-row-desc"><span id="settings-key-status"></span></span></div><div class="settings-row-control"><input id="settings-api-key" type="password" autocomplete="new-password" placeholder="Leave blank to keep" /></div></div>
+          <div class="settings-row"><div class="settings-row-text"><span class="settings-row-label"><label for="settings-base-url">Base URL</label></span></div><div class="settings-row-control"><input id="settings-base-url" type="url" placeholder="https://api.openai.com/v1" /></div></div>
+          <div class="settings-row"><div class="settings-row-text"><span class="settings-row-label"><label for="settings-model">Model</label></span></div><div class="settings-row-control"><input id="settings-model" type="text" placeholder="Default model" /></div></div>
+          <div class="settings-row"><div class="settings-row-text"><span class="settings-row-label"><label for="settings-reasoning">Reasoning effort</label></span></div><div class="settings-row-control"><select id="settings-reasoning"><option value="">Provider default</option><option value="low">Low</option><option value="medium">Medium</option><option value="high">High</option><option value="xhigh">Extra high</option><option value="max">Maximum</option></select></div></div>
+        </section>
+        <section id="settings-panel-providers" class="settings-panel" role="tabpanel" aria-labelledby="settings-tab-providers" data-settings-panel="providers" hidden>
+          <h3 class="settings-section-title">Providers</h3>
+          <p class="settings-section-desc">Sign in to model providers. Keys are stored by the runtime on this computer and never shared with remote devices.</p>
+          <div id="settings-providers" class="provider-list" aria-live="polite"></div>
+        </section>
+        <section id="settings-panel-preferences" class="settings-panel" role="tabpanel" aria-labelledby="settings-tab-preferences" data-settings-panel="preferences" hidden>
+          <h3 class="settings-section-title">Preferences</h3>
+          <div class="settings-row"><div class="settings-row-text"><span class="settings-row-label"><label for="settings-notifications">Desktop notifications</label></span><span class="settings-row-desc"><span>Notify when a turn finishes while the window is not focused.</span></span></div><div class="settings-row-control"><input id="settings-notifications" type="checkbox" class="settings-switch" /></div></div>
+        </section>
         <div class="settings-actions"><button id="cancel-settings" type="button" class="ghost-button">Cancel</button><button id="save-settings" type="submit" class="primary-button">Save</button></div>
+      </div>
+      </form>
+    </dialog>
+    <dialog id="auth-prompt-dialog" class="settings-dialog auth-prompt-dialog" aria-labelledby="auth-prompt-title">
+      <form id="auth-prompt-form" method="dialog">
+        <div class="settings-heading"><h2 id="auth-prompt-title">Provider sign-in</h2></div>
+        <label id="auth-prompt-label" class="auth-prompt-label"><span id="auth-prompt-message"></span><span id="auth-prompt-field" class="auth-prompt-field"></span></label>
+        <div class="settings-actions"><button id="auth-prompt-cancel" type="button" class="ghost-button">Cancel</button><button id="auth-prompt-submit" type="submit" class="primary-button">Continue</button></div>
       </form>
     </dialog>
     <dialog id="shortcuts-dialog" class="settings-dialog shortcuts-dialog">
@@ -164,6 +190,11 @@ export const settingsReasoning = requiredElement<HTMLSelectElement>("settings-re
 export const settingsKeyStatus = requiredElement("settings-key-status")
 export const settingsNotifications = requiredElement<HTMLInputElement>("settings-notifications")
 export const saveSettingsButton = requiredElement<HTMLButtonElement>("save-settings")
+export const settingsProviders = requiredElement("settings-providers")
+export const authPromptDialog = requiredElement<HTMLDialogElement>("auth-prompt-dialog")
+export const authPromptForm = requiredElement<HTMLFormElement>("auth-prompt-form")
+export const authPromptMessage = requiredElement("auth-prompt-message")
+export const authPromptField = requiredElement("auth-prompt-field")
 
 export function requiredElement<T extends HTMLElement = HTMLElement>(id: string) {
   const element = document.getElementById(id) as T | null
