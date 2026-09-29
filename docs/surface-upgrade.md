@@ -33,9 +33,10 @@ specification and the reference study, rather than claiming a pixel match to a c
 | --- | --- | --- |
 | Navigation | Project selector, grouped history, search, mobile drawers | Native project folders, session search, recent/project navigation |
 | Conversation | Streaming, queue/steering, stop, tool events, user questions | Same runtime workflows, native window integration |
+| Plan | Live checklist in the inspector's Activity tab | Same; the composer plan dock was removed |
 | Session tools | Fork and complete replay export | Fork and complete replay export |
 | Composition | Per-session drafts, IME protection, growing input, attachments | Per-session drafts, IME protection, attachments written to the selected project |
-| Tasks | Paginated list/output, read from start/latest, cancel, release wait | Same task protocol and actions; refresh preserves the output page being read |
+| Tasks | Activity tab: only yielded, still-running background commands; output paging, read from start/latest, stop | Same filter and actions; rows lead with the command |
 | Goals | Read, set, pause/resume, clear through explicit actions | Existing goal controls aligned with explicit actions |
 | Settings | Theme, shortcuts, device sign-out; automatic connection | Grouped provider/appearance settings and separate remote access |
 | Remote use | Same-origin sign-in, automatic ticket renewal/reconnection | Authenticated Gateway, QR/link, device count, revocation and stop |

@@ -1,6 +1,3 @@
-import { escapeHtml } from "./html-escape.ts"
-import { clipLine, type ConversationState } from "./timeline-model.ts"
-
 export type ComposerElements = {
   prompt: HTMLTextAreaElement
   send: HTMLButtonElement

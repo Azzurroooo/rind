@@ -1,8 +1,8 @@
 import { requiredElement, saveSettingsButton, settingsApiKey, settingsBaseUrl, settingsDialog, settingsForm, settingsKeyStatus, settingsModel, settingsNotifications, settingsReasoning } from "./dom.ts"
 import { bindProviderEvents, loadProviders, renderProviders } from "./providers-ui.ts"
-import { modelSelectionTargetForState } from "./composer-menus.ts"
-import { normalizeModelList, stringModelOptions } from "../composer-select.ts"
-import { requestForSession, runAction } from "./runtime.ts"
+import { modelSelectionTarget, normalizeModelList, stringModelOptions } from "../composer-select.ts"
+import { requestForSession, runAction, runtimeTurnActive } from "./runtime.ts"
+import { currentRuntimeSnapshot } from "./sessions.ts"
 import { runtimeMethods } from "../../preload/types.ts"
 import { render } from "./shell.ts"
 import { state } from "./state.ts"
@@ -49,7 +49,10 @@ export function renderSettings() {
 // providers); the settings target falls back to the main-process catalog
 // fetch of the configured OpenAI-compatible endpoint.
 export async function loadAvailableModels() {
-  if (modelSelectionTargetForState() === "runtime" && state.viewedSessionId) {
+  const target = state.viewedSessionId
+    ? modelSelectionTarget(currentRuntimeSnapshot().status, runtimeTurnActive())
+    : "settings" as const
+  if (target === "runtime" && state.viewedSessionId) {
     const sessionId = state.viewedSessionId
     const listing = normalizeModelList(await requestForSession(runtimeMethods.modelList, sessionId))
     if (sessionId !== state.viewedSessionId) return

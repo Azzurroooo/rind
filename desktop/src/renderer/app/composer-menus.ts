@@ -65,8 +65,7 @@ export function renderModels() {
   }
   const grouped = modelSelectionTargetForState() === "runtime"
   const option = (model: ModelOption) => {
-    const selected = model.id === activeModel
-      && ((model.providerId || "") === (state.modelProvider || "") || !state.modelProvider || !model.providerId)
+    const selected = model.id === activeModel && (model.providerId || "") === (state.modelProvider || "")
     const context = grouped ? formatContextWindow(model.contextWindow) : ""
     return `<button type="button" class="composer-select-option composer-model-option${selected ? " selected" : ""}" role="option" aria-selected="${String(selected)}" data-model-choice="${escapeAttribute(model.id)}" data-model-provider="${escapeAttribute(model.providerId)}"${state.modelChanging ? " disabled" : ""}><span class="composer-select-option-main">${escapeHtml(model.id)}</span>${context ? `<span class="composer-select-option-detail">${escapeHtml(context)}</span>` : ""}</button>`
   }

@@ -75,7 +75,11 @@ Each status color has a `-soft` background (same hue, ~12% alpha).
   buttons (28 square, 16px glyphs): tasks, inspector toggle, overflow menu.
 - Conversation column: `min(800px, 100%)` centered with 16 inline padding. It keeps at least
   420px when the inspector is open; the inspector closes first when space runs out.
-- Inspector: tabs for Context, Tasks, Files, Goal, and Usage. It is dismissible, and its width persists.
+- Inspector: tabs for Context, Activity, Files, and Usage. It is dismissible, and its width persists.
+  The Activity tab is one scrollable column — after LobeHub's WorkingSidebar overview — stacking the
+  live plan checklist, background commands the agent yielded that are still running, and the goal
+  controls, each as a card with a compact uppercase section head. There is no plan deck beside the
+  composer: `update_plan` state lives in the Activity tab only.
 - Mobile (< 768): the sidebar and inspector become exclusive drawers (320, scrim
   `#0008`), and the header grows to 48 with 36 icon blocks.
 
@@ -157,7 +161,7 @@ mirrors LobeHub's `WorkflowCollapse` / `ProcessFold` and the CLI's per-tool caps
 | `delegate` | Delegated to `agent`: task summary | status, duration | the sub-agent's final answer (markdown, 24 lines) | internal transcript |
 | `agent_create`, `skill_create` | Created agent / skill `name` | | name and role / description | |
 | `ask_user_question` | no row; the interactive question card renders inline | | | |
-| `update_plan` | no row; updates a sticky plan checklist above the composer | | | |
+| `update_plan` | no row; updates the plan checklist in the inspector's Activity tab | | | |
 | `update_goal` | Updated goal | status | goal text | |
 | unknown tools | `tool_name` | | key/value arguments, result truncated at 40 lines, raw JSON behind a toggle | |
 
@@ -183,6 +187,13 @@ mirrors LobeHub's `WorkflowCollapse` / `ProcessFold` and the CLI's per-tool caps
   then Send (32 square, `--accent`), which becomes Stop (square icon, `--danger` ink on
   `--danger-soft`) while a turn is running. While running, Enter queues a follow-up and
   Alt+Enter sends it as steering.
+- Model picker (after Jan's provider groups and LobeHub's ModelSwitchPanel): the chip opens a
+  popover above the composer whose rows come from the runtime's `model/list` grouped by provider —
+  uppercase group headers with the provider display name from `rind/auth/list` and a count, then
+  model ids in mono with the context window ("128K ctx") and an image marker where known. More than
+  8 models adds a filter box at the top. Selecting sends `provider_id` with `model_id` so identical
+  ids across providers cannot collide. Desktop keeps the flat settings-catalog list for the
+  no-session target.
 - Slash menu: popover above the composer, 10 radius, rows 32, keyboard navigable. Its list
   comes from the runtime command catalog merged with local commands.
 
