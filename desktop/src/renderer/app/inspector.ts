@@ -18,8 +18,13 @@ export function renderTaskMonitorDock() {
   taskMonitorShell.hidden = !state.taskMonitorOpen
   const toggle = document.getElementById("toggle-tasks")
   const running = runningTaskCount(monitor.tasks)
+  const badge = document.getElementById("task-count-badge")
+  if (badge) {
+    badge.hidden = !running
+    badge.textContent = running ? String(running) : ""
+  }
   if (toggle) {
-    toggle.textContent = running ? `Tasks (${running})` : "Tasks"
+    toggle.setAttribute("aria-label", running ? `Toggle background task monitor, ${running} running` : "Toggle background task monitor")
     toggle.setAttribute("aria-expanded", String(state.taskMonitorOpen))
   }
   if (!state.taskMonitorOpen) return

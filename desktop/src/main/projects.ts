@@ -316,7 +316,10 @@ function mergeRecentRecords(records: StoredRecentSession[]) {
     .sort((left, right) => right.last_interacted_at.localeCompare(left.last_interacted_at) || left.session_id.localeCompare(right.session_id))
 }
 
-function validSidebarWidth(value: unknown) { return typeof value === "number" && Number.isFinite(value) ? Math.max(180, Math.min(420, Math.round(value))) : 248 }
+const SIDEBAR_MIN = 232
+const SIDEBAR_MAX = 360
+const SIDEBAR_DEFAULT = 264
+function validSidebarWidth(value: unknown) { return typeof value === "number" && Number.isFinite(value) ? Math.max(SIDEBAR_MIN, Math.min(SIDEBAR_MAX, Math.round(value))) : SIDEBAR_DEFAULT }
 function validFilePanelWidth(value: unknown) { return typeof value === "number" && Number.isFinite(value) ? Math.max(280, Math.min(900, Math.round(value))) : 480 }
 
 function storedFilePanelWidth(raw: Record<string, unknown>) {

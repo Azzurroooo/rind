@@ -30,7 +30,7 @@ export const state: AppState = {
   sessionPages: {},
   sessionTotals: {},
   sidebarOpen: true,
-  sidebarWidth: 248,
+  sidebarWidth: 264,
   filesOpen: false,
   filePanelWidth: 480,
   expandedProjects: new Set(),

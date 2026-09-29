@@ -39,7 +39,7 @@ test("project registry migrates the legacy workspace and pages its sessions", as
     assert.equal(migrated.projects.length, 1)
     assert.equal(migrated.activeProjectPath, firstProject)
     assert.equal(migrated.sidebarOpen, false)
-    assert.equal(migrated.sidebarWidth, 248)
+    assert.equal(migrated.sidebarWidth, 264)
     assert.equal(migrated.filePanelWidth, 300)
     assert.deepEqual(migrated.projects[0].sessions.map((session) => session.id), ["legacy", "new", "old"])
 

@@ -1,4 +1,6 @@
 import { type DesktopTheme, type RuntimeSnapshot } from "../../preload/types.ts"
+import { type IconNode } from "lucide"
+import { Moon, renderIcon, Sun, SunMoon } from "../icons.ts"
 import { renderComposer, renderPlanDock, syncPendingInputDock } from "../composer-region.ts"
 import { renderAttachments } from "./attachments-ui.ts"
 import { renderEffortMenu, renderModels, renderProjectControl } from "./composer-menus.ts"
@@ -102,9 +104,14 @@ export function renderTheme() {
   if (document.documentElement.dataset.theme !== resolved) document.documentElement.dataset.theme = resolved
   const toggle = document.getElementById("toggle-theme")
   if (toggle) {
-    const labels: Record<DesktopTheme, string> = { system: "Theme: system", dark: "Theme: dark", light: "Theme: light" }
-    toggle.textContent = labels[state.theme]
-    toggle.title = `Theme: ${state.theme}. Click to switch to ${nextTheme()}.`
+    const icons: Record<DesktopTheme, IconNode> = { system: SunMoon, dark: Moon, light: Sun }
+    const label = `Theme: ${state.theme}. Switch to ${nextTheme()}.`
+    if (toggle.dataset.themeIcon !== state.theme) {
+      toggle.innerHTML = renderIcon(icons[state.theme])
+      toggle.dataset.themeIcon = state.theme
+    }
+    toggle.title = label
+    toggle.setAttribute("aria-label", label)
   }
 }
 
@@ -138,6 +145,7 @@ export function renderShortcuts() {
 export const shortcutRows: Array<[string, string]> = [
   ["Ctrl+K", "Command palette"],
   ["Ctrl+N", "New chat"],
+  ["Ctrl+B", "Toggle sidebar"],
   ["Ctrl+,", "Open settings"],
   ["Ctrl+1…9", "Switch to a loaded session"],
   ["Enter", "Send message"],
@@ -172,6 +180,12 @@ export function scheduleRender() {
   })
 }
 
+// Sidebar width range from spec section 2; dragging below the collapse point closes it.
+const SIDEBAR_MIN = 232
+const SIDEBAR_MAX = 360
+const SIDEBAR_DEFAULT = 264
+const SIDEBAR_COLLAPSE = 160
+
 export async function toggleSidebar() {
   applyOverview(await window.api.projects.updateLayout({ sidebarOpen: !state.sidebarOpen }))
   render()
@@ -197,7 +211,7 @@ export function startResize(handle: HTMLElement, target: "sidebar" | "files") {
     const delta = target === "sidebar" ? event.clientX - vars.resizeStart.x : vars.resizeStart.x - event.clientX
     const width = Math.round(vars.resizeStart.width + delta)
     vars.resizeStart.lastWidth = width
-    if (target === "sidebar") state.sidebarWidth = Math.max(0, Math.min(420, width))
+    if (target === "sidebar") state.sidebarWidth = Math.max(0, Math.min(SIDEBAR_MAX, width))
     else state.filePanelWidth = Math.max(0, Math.min(900, width))
     render()
   })
@@ -213,8 +227,8 @@ export function finishResize(handle: HTMLElement, event: PointerEvent) {
   document.body.classList.remove("resizing-panel")
   runAction(async () => {
     if (target === "sidebar") {
-      const sidebarOpen = state.sidebarWidth >= 160
-      state.sidebarWidth = Math.max(180, state.sidebarWidth || 248)
+      const sidebarOpen = state.sidebarWidth >= SIDEBAR_COLLAPSE
+      state.sidebarWidth = sidebarOpen ? Math.max(SIDEBAR_MIN, state.sidebarWidth) : SIDEBAR_DEFAULT
       applyOverview(await window.api.projects.updateLayout({ sidebarOpen, sidebarWidth: state.sidebarWidth }))
     } else {
       const filesOpen = lastWidth >= 240

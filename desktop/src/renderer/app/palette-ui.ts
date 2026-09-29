@@ -28,7 +28,7 @@ export function paletteCommands(): PaletteCommand[] {
     { id: "export-conversation", title: "Export conversation", detail: "Save as Markdown", run: exportSession, disabled: !state.conversation.entries.length },
     { id: "fork-conversation", title: "Fork conversation", detail: "Continue in a separate session", run: () => runAction(forkCurrentSession), disabled: !state.viewedSessionId || runtimeTurnActive() },
     { id: "compact", title: "Compact context", detail: "Compact context", run: () => runAction(compactCurrentSession, state.viewedSessionId), disabled: !state.viewedSessionId },
-    { id: "toggle-sidebar", title: "Toggle sidebar", detail: "Toggle projects sidebar", run: () => runAction(toggleSidebar) },
+    { id: "toggle-sidebar", title: "Toggle sidebar", detail: "Toggle projects sidebar", shortcut: "Ctrl+B", run: () => runAction(toggleSidebar) },
     { id: "toggle-files", title: "Toggle files panel", detail: "Toggle project files", run: () => runAction(() => setFilesOpen(!state.filesOpen)) },
     { id: "task-monitor", title: "Background tasks", detail: state.taskMonitorOpen ? "Close background task monitor" : "Open background task monitor", run: () => toggleTaskMonitor() },
     { id: "goal-set", title: "Goal: set", detail: "Set a session goal", run: () => showGoalPanel(true), disabled: !state.viewedSessionId },

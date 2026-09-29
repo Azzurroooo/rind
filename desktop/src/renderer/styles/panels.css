@@ -139,13 +139,12 @@
   body[data-platform="darwin"] .topbar { padding-left: 80px; }
   .connection { display: none; }
   .topbar-actions { gap: 4px; }
-  .topbar-actions .ghost-button { padding-inline: 6px; }
   .layout, #app.files-open .layout {
     grid-template-columns: minmax(0, 1fr);
     grid-template-rows: minmax(0, 1fr);
   }
   .sidebar { display: none; }
-  .file-panel { position: fixed; top: 46px; right: 0; bottom: 0; width: min(88vw, 440px); z-index: 10; box-shadow: var(--shadow-dialog); }
+  .file-panel { position: fixed; top: 44px; right: 0; bottom: 0; width: min(88vw, 440px); z-index: 10; box-shadow: var(--shadow-dialog); }
   .file-resize-handle { display: none; }
   .conversation-head { padding-inline: 12px; }
   .composer { padding-inline: 10px; }

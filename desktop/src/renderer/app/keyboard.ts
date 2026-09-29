@@ -5,7 +5,7 @@ import { closePalette, openPalette } from "./palette-ui.ts"
 import { cancelActiveTurn, runAction, runtimeTurnActive } from "./runtime.ts"
 import { knownSessions, startNewChat, switchSession } from "./sessions.ts"
 import { openSettings } from "./settings.ts"
-import { render } from "./shell.ts"
+import { render, toggleSidebar } from "./shell.ts"
 import { closeSessionMenu, resetDeleteConfirm } from "./sidebar.ts"
 import { state } from "./state.ts"
 import { type KeyBinding } from "./types.ts"
@@ -42,6 +42,14 @@ export const keyBindings: KeyBinding[] = [
     run: (event) => {
       event.preventDefault()
       runAction(startNewChat)
+    },
+  },
+  {
+    id: "toggle-sidebar",
+    matches: (event) => modifierPressed(event) && !event.shiftKey && !event.altKey && event.key.toLowerCase() === "b",
+    run: (event) => {
+      event.preventDefault()
+      runAction(toggleSidebar)
     },
   },
   {

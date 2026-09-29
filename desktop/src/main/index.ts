@@ -79,7 +79,7 @@ function applyThemeSurface(theme: DesktopTheme) {
     mainWindow.setBackgroundColor(surfaces.background)
     if (process.platform === "win32" && mainWindow.setTitleBarOverlay) {
       try {
-        mainWindow.setTitleBarOverlay({ ...surfaces.overlay, height: 46 })
+        mainWindow.setTitleBarOverlay({ ...surfaces.overlay, height: 44 })
       } catch {
         // Title bar overlays are unavailable on some Linux/Windows configurations.
       }
@@ -305,7 +305,7 @@ function createMainWindow() {
     }),
     ...(isWin && {
       titleBarStyle: "hidden",
-      titleBarOverlay: { ...surfaces.overlay, height: 46 },
+      titleBarOverlay: { ...surfaces.overlay, height: 44 },
     }),
     webPreferences: {
       preload: join(root, "../preload/index.js"),
