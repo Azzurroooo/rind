@@ -110,21 +110,64 @@ Each status color has a `-soft` background (same hue, ~12% alpha).
 - Empty state: the welcome heading (24, weight 600) sits optically centered in the column, with
   the composer directly below and 3–4 suggestion chips that fill the composer rather than send.
 
-## 5. Tool calls (inspector rows)
+## 5. Tool activity
 
-- One collapsible row per call, 32 high, radius 6, hover `--fill-1`.
-- Title: status icon (14), tool name in 12px mono `--muted`, then a keyword chip (the path,
-  command or query extracted from the input), then the duration on the right in `--dim`.
-- Status: running (spinner), success (check, `--success`), error (x, `--danger`),
-  waiting on user (hand, `--info`), cancelled (ban, `--dim`).
-- Expand rules: auto-expand while input is streaming (`tool_input_delta` preview) and while
-  awaiting a user answer. Collapse automatically on success, and stay open on error. A tool
-  is "running" only until its own result arrives.
-- Body: arguments (compact key/value, raw JSON behind a toggle), progress lines
-  (`tool_progress`), then the result (truncated at 40 lines with "Show all").
-- Consecutive calls in one turn fold into a "N steps" group when there are more than 3.
+Tool output is the noisiest part of an agent transcript. Show what the user needs to judge
+progress and outcome, fold everything else, and never print raw payloads by default. This
+mirrors LobeHub's `WorkflowCollapse` / `ProcessFold` and the CLI's per-tool caps
+(`frontend-cli/lib/tool-display.js`).
+
+### 5.1 Activity folding (between messages)
+
+- A *work segment* is every tool call, reasoning line, retry notice and progress line that
+  sits between two pieces of visible prose (a user message or assistant text). All tool batches
+  in one segment render as a single fold, never as separate stacked cards.
+- Collapsed fold (32 row): status icon, then a generated summary such as
+  `Read 4 files, searched 2 patterns, ran 3 commands, edited app.ts +12 -3`, then the total duration
+  on the right. Verbs are grouped by tool kind, counts are merged, and failures are appended
+  as `1 failed` in `--danger`.
+- While the segment is live, the fold is open and shows only the running call plus the last
+  2 finished calls, with a "+N earlier" link above. When the segment ends it collapses to the
+  summary, unless a call failed or is waiting on the user, in which case it stays open.
+- Expanded fold: one 28 row per call (5.2), with no body unless the row itself is expanded.
+- A segment with a single call renders just that call's row, with no wrapper.
+
+### 5.2 Call row
+
+- 28 high, radius 6, hover `--fill-1`. It shows the status icon (14), a verb label (not the raw tool
+  name), the key target in 12px mono (paths truncate from the start), the tool-specific meta on the
+  right in `--dim`, and a chevron only when there is a body worth opening.
+- Status: running (spinner), success (no icon inside collapsed folds, a check when expanded),
+  error (x, `--danger`), waiting on user (hand, `--info`), cancelled (ban, `--dim`).
+- A call is "running" only until its own result arrives.
+
+### 5.3 Per-tool rendering
+
+| Tool | Label + target | Meta | Body (on expand) | Never show |
+| --- | --- | --- | --- | --- |
+| `read_file` | Read `path` | line range or `N lines` | none; clicking opens the file in the Files tab | file contents |
+| `write_file` | Wrote `path` | `+N` | highlighted content, 20 lines then "Show all" | argument echo |
+| `edit_file` | Edited `path` | `+A -R` in success/danger | unified diff hunks, 20 lines collapsed | old/new string JSON |
+| `grep` | Searched `pattern` | `N matches in M files` | paths with match counts; lines on demand | raw output; 0 matches shows "No matches" |
+| `glob` | Found `pattern` | `N files` | path list, 20 then "Show all" | |
+| `bash` | Ran `command` (first line) | exit code if non-zero, duration | terminal block: last 5 lines live, 5 collapsed, 400 expanded | empty stdout/stderr sections |
+| `bash_output`, `task_control` | Checked / Stopped `task label` | status | latest output tail, 5 lines | |
+| `search_web` | Searched the web `query` | `N results` | title + domain list | raw JSON |
+| `fetch_web_page` | Read `domain/path` | page title | title and first paragraph | full page text |
+| `delegate` | Delegated to `agent`: task summary | status, duration | the sub-agent's final answer (markdown, 24 lines) | internal transcript |
+| `agent_create`, `skill_create` | Created agent / skill `name` | | name and role / description | |
+| `ask_user_question` | no row; the interactive question card renders inline | | | |
+| `update_plan` | no row; updates a sticky plan checklist above the composer | | | |
+| `update_goal` | Updated goal | status | goal text | |
+| unknown tools | `tool_name` | | key/value arguments, result truncated at 40 lines, raw JSON behind a toggle | |
+
+- Streaming input (`tool_input_delta`): the row appears immediately and its target fills in as
+  the arguments parse; `write_file` and `edit_file` stream their content into the body.
+- `tool_progress` replaces the meta text; it does not append lines.
+- Errors: the row stays expanded and shows the error message (first 6 lines) in `--danger-soft`. Stack
+  traces go behind "Show details".
 - Retry notices (`turn_step_retry`) and compaction notices (`context_compacted`) render as
-  centered 12px system lines with a thin rule.
+  centered 12px system lines with a thin rule, outside folds.
 
 ## 6. Composer
 
