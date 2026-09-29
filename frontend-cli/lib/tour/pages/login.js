@@ -1,4 +1,4 @@
-import { demoInfo, PROVIDERS } from "./demo.js";
+import { DEMO_CONTEXT_WINDOW_TOKENS, demoInfo, PROVIDERS } from "./demo.js";
 import { closeMenu, menu, note, shell, slashResult, startup, submit, type } from "./steps.js";
 
 export const loginPages = [
@@ -51,8 +51,8 @@ export const loginPages = [
             { label: "configured", value: "zai" },
           ],
           usage: [{
-            context_window_tokens: 200000,
-            context_usage_percent: 0.24,
+            context_window_tokens: DEMO_CONTEXT_WINDOW_TOKENS,
+            context_usage_percent: 48200 / DEMO_CONTEXT_WINDOW_TOKENS,
             input_tokens: 48200,
             cached_input_tokens: 38900,
             cache_hit_rate: 0.81,
