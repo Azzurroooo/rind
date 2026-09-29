@@ -55,6 +55,13 @@ export function bindConversationEvents(): void {
       runAction(retryLastPrompt, state.viewedSessionId)
       return
     }
+    const stepsId = target.closest<HTMLButtonElement>("[data-toggle-steps]")?.dataset.toggleSteps
+    if (stepsId) {
+      const expanded = target.closest<HTMLButtonElement>("[data-toggle-steps]")?.getAttribute("aria-expanded") === "true"
+      state.stepGroups = new Map([...state.stepGroups, [stepsId, !expanded]])
+      render()
+      return
+    }
     const toggle = target.closest<HTMLButtonElement>("[data-toggle-tool]")
     if (toggle?.dataset.toggleTool) {
       const id = toggle.dataset.toggleTool

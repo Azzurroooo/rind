@@ -1,16 +1,27 @@
 import { diffLineCounts, extractDiffText, parseDiffLines } from "../diff-text.ts"
 import { fileMutationPreview, formatDuration, type ToolEntry } from "../timeline-model.ts"
 import { asRecord, escapeAttribute, escapeHtml } from "./html.ts"
+import { ChevronRight, CircleCheck, CircleX, Clock, LoaderCircle, renderIcon } from "../icons.ts"
 import { state } from "./state.ts"
+
+const statusLabels: Record<ToolEntry["status"], string> = {
+  pending: "Waiting",
+  running: "Running",
+  completed: "Done",
+  error: "Failed",
+}
+
+/** 14px status glyph with an accessible label (spec section 5). */
+export function renderToolStatusIcon(status: ToolEntry["status"]): string {
+  const icon = status === "running" ? LoaderCircle : status === "error" ? CircleX : status === "completed" ? CircleCheck : Clock
+  return `<span class="tool-status tool-status-${status}" role="img" aria-label="${statusLabels[status]}">${renderIcon(icon, "tool-status-icon")}</span>`
+}
 
 
 
 export function renderTool(tool: ToolEntry): string {
   const open = state.expandedTools.has(tool.id)
   const revealed = open || state.revealedTools.has(tool.id)
-  const pip = tool.status === "running" || tool.status === "pending"
-    ? "pip-running"
-    : tool.status === "error" ? "pip-error" : "pip-done"
   const duration = formatDuration(tool.durationMs)
   // Prefer the unified diff recorded in the tool RESULT; requests without a
   // result diff keep the argument-synthesized preview as a fallback.
@@ -21,12 +32,12 @@ export function renderTool(tool: ToolEntry): string {
   return `
     <div class="ledger-row tool-${tool.status}${open ? " open" : ""}" data-entry-id="${escapeAttribute(tool.id)}" data-tool-id="${escapeAttribute(tool.id)}">
       <button type="button" class="ledger-trigger" data-toggle-tool="${escapeAttribute(tool.id)}" aria-expanded="${body ? String(open) : "false"}" ${body ? "" : "disabled"}>
-        <span class="status-pip ${pip}"></span>
+        ${renderToolStatusIcon(tool.status)}
         <span class="ledger-verb">${escapeHtml(tool.toolName)}</span>
         ${tool.argsPreview ? `<code class="ledger-arg">${escapeHtml(tool.argsPreview)}</code>` : ""}
         ${tool.errorType ? `<span class="ledger-error">${escapeHtml(tool.errorType)}</span>` : ""}
         ${duration ? `<span class="ledger-duration">${duration}</span>` : ""}
-        ${body ? `<span class="ledger-chevron" aria-hidden="true"></span>` : ""}
+        ${body ? renderIcon(ChevronRight, "ledger-chevron") : ""}
       </button>
       ${resultDiffLines.length ? renderResultDiff(tool, resultDiffLines) : argDiff ? renderFileMutationPreview(argDiff) : ""}
       ${body && revealed ? `<div class="tool-detail-shell" aria-hidden="${String(!open)}"><div class="tool-detail-clip">${body}</div></div>` : ""}

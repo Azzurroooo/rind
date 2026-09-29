@@ -1,4 +1,16 @@
 import type { RuntimeEvent } from "../preload/types"
+import {
+  backgroundWaitFrom,
+  compactionLine,
+  contextBuiltLine,
+  contextSnapshotFrom,
+  continuationFailure,
+  retryLine,
+  type BackgroundWait,
+  type ContextSnapshot,
+  type SystemLine,
+  type SystemTone,
+} from "./timeline-system.ts"
 
 export type ToolStatus = "pending" | "running" | "completed" | "error"
 export type ToolResult = {
@@ -39,7 +51,8 @@ export type Entry =
   | { kind: "assistant"; id: string; content: string; turnId: string }
   | ToolEntry
   | { kind: "file"; id: string; filePath: string }
-  | { kind: "error"; id: string; content: string; source: string }
+  | { kind: "error"; id: string; content: string; source: string; retryable?: boolean }
+  | { kind: "system"; id: string; content: string; tone: SystemTone }
   | { kind: "notice"; id: string; content: string; label: string }
   | { kind: "command"; id: string; command: string; content: string; display?: Record<string, unknown> }
 export type QuestionOption = { label: string; description: string }
@@ -53,6 +66,8 @@ export type ConversationState = {
   plan?: PlanEntry
   openAssistantId: string
   nextEntryId: number
+  contextSnapshot?: ContextSnapshot
+  backgroundWait?: BackgroundWait | null
 }
 
 export const maxEntryChars = 30_000
@@ -89,7 +104,20 @@ export function reduceEvent(state: ConversationState, envelope: RuntimeEvent): C
       turnStartedAt: Date.now(),
       ...(state.plan && (state.plan.error || state.plan.status === "error") ? { plan: undefined } : {}),
     }
-    case "turn_step_retry": return resetActiveStep(state)
+    case "turn_step_retry": return appendSystem(resetActiveStep(state), retryLine(event))
+    case "context_compacted": return appendSystem(closeAssistant(state), compactionLine(event))
+    case "context_built": {
+      const snapshot = contextSnapshotFrom(event)
+      const next = {
+        ...state,
+        contextSnapshot: snapshot,
+        ...(snapshot.usagePercent !== null ? { contextUsagePercent: snapshot.usagePercent } : {}),
+      }
+      const line = contextBuiltLine(event)
+      return line ? appendSystem(closeAssistant(next), line) : next
+    }
+    case "background_wait_changed": return { ...state, backgroundWait: backgroundWaitFrom(event) }
+    case "task_continuation_failed": return appendEntry(closeAssistant(state), { kind: "error", id: "", content: continuationFailure(event), source: "Background task" })
     case "assistant_delta": return appendAssistantDelta(state, turnId, asString(event.text))
     case "assistant_message_completed": return completeAssistant(state, turnId, asString(event.content))
     case "plan_updated": return reducePlanSnapshot(state, envelope)
@@ -146,7 +174,7 @@ export function reduceEvent(state: ConversationState, envelope: RuntimeEvent): C
       const percent = typeof stats.context_usage_percent === "number" ? stats.context_usage_percent : null
       return percent === null ? state : { ...state, contextUsagePercent: percent }
     }
-    case "turn_failed": return finishTurn(appendEntry(closeAssistant(state), { kind: "error", id: "", content: asString(event.error) || "Turn failed", source: asString(event.error_source) || "Runtime error" }), turnId)
+    case "turn_failed": return finishTurn(appendEntry(closeAssistant(state), { kind: "error", id: "", content: asString(event.error) || "Turn failed", source: asString(event.error_source) || "Runtime error", retryable: true }), turnId)
     case "turn_cancelled": return finishTurn(appendEntry(closeAssistant(state), { kind: "notice", id: "", content: asString(event.reason) || "Stopped", label: "Interrupted" }), turnId)
     case "turn_completed": return finishTurn(markRunningTools(closeAssistant(state), "completed"), turnId)
     case "goal_continued": return appendEntry(closeAssistant(state), { kind: "notice", id: "", content: asString(event.objective) || asString(event.message) || "Goal continuation started", label: "Goal" })
@@ -211,6 +239,8 @@ export function mergeReplayConversation(replay: ConversationState, live: Convers
     turnStartedAt: live.activeTurnId ? live.turnStartedAt : replay.turnStartedAt,
     ...(hasLiveTurn && live.question ? { question: live.question } : {}),
     contextUsagePercent: hasLiveTurn ? live.contextUsagePercent ?? replay.contextUsagePercent : replay.contextUsagePercent,
+    contextSnapshot: live.contextSnapshot ?? replay.contextSnapshot,
+    backgroundWait: live.backgroundWait ?? replay.backgroundWait,
     ...(hasLiveTurn && live.plan ? { plan: live.plan } : {}),
     openAssistantId: openAssistantId && trimmed.some((entry) => entry.id === openAssistantId) ? openAssistantId : "",
     nextEntryId,
@@ -431,6 +461,10 @@ function completeReplayTool(state: ConversationState, record: Record<string, unk
     errorType: result.errorType,
   } as ToolEntry)
   return appendEntry(state, { kind: "tool", id: `tool:${toolCallId}`, toolCallId, toolName: asString(record.tool_name) || "Tool", argsPreview: "", arguments: {}, status: result.ok === false ? "error" : "completed", output: result.raw, result, errorType: result.errorType, durationMs: 0 })
+}
+
+function appendSystem(state: ConversationState, line: SystemLine): ConversationState {
+  return appendEntry(state, { kind: "system", id: "", content: line.content, tone: line.tone })
 }
 
 function appendEntry(state: ConversationState, entry: Entry): ConversationState {

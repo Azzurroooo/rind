@@ -42,6 +42,7 @@ export const state: AppState = {
   questionSelection: undefined,
   expandedTools: new Set(),
   revealedTools: new Set(),
+  stepGroups: new Map(),
   planDock: { collapsed: false, sessionId: "", dismissedPlanErrors: new Set() },
   composerMenuOpen: false,
   compacting: false,

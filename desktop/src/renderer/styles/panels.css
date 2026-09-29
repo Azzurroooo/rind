@@ -177,7 +177,7 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .pip-running, .connection-starting .status-pip, .ledger-row.tool-running .ledger-trigger, #send .send-spinner { animation: none; }
+  .pip-running, .connection-starting .status-pip, #send .send-spinner { animation: none; }
   .ledger-chevron, .plan-chevron, .file-chevron, .tool-detail-shell, .plan-dock-shell, .plan-dock, .plan-dock-body { transition: none; }
   .project-sessions { animation: none; }
 }

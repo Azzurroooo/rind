@@ -3,13 +3,15 @@ import workingMarkUrl from "../assets/working-mark.svg"
 import { renderCommandResult } from "../command-results.ts"
 import { renderMarkdown } from "../markdown.ts"
 import { canConfirmQuestion } from "../question-state.ts"
-import { type Entry } from "../timeline-model.ts"
+import { type Entry, type ToolEntry } from "../timeline-model.ts"
+import { foldToolRuns, isStepGroup, stepGroupOpen, summarizeSteps, type StepGroup, type StreamItem } from "../timeline-system.ts"
+import { ChevronRight, renderIcon } from "../icons.ts"
 import { canRetryLastPrompt } from "./composer.ts"
 import { jumpLatest, messageStream } from "./dom.ts"
 import { escapeAttribute, escapeHtml } from "./html.ts"
 import { activeTurnIdFor, questionSelectionFor, runtimeConversation, runtimeTurnActive } from "./runtime.ts"
 import { state, vars } from "./state.ts"
-import { renderTool } from "./tools.ts"
+import { renderTool, renderToolStatusIcon } from "./tools.ts"
 
 
 
@@ -18,13 +20,13 @@ export function renderStream() {
   const { conversation } = state
   const entries = conversation.entries
   const existing = new Map<string, HTMLElement>()
-  for (const node of messageStream.querySelectorAll<HTMLElement>("[data-entry-id]")) {
+  for (const node of messageStream.querySelectorAll<HTMLElement>(":scope > [data-entry-id]")) {
     if (node.dataset.entryId) existing.set(node.dataset.entryId, node)
   }
   const nextNodes: HTMLElement[] = []
-  for (const entry of entries) {
+  for (const entry of foldToolRuns(entries)) {
     const template = document.createElement("template")
-    template.innerHTML = renderEntry(entry)
+    template.innerHTML = renderStreamItem(entry)
     const next = template.content.firstElementChild as HTMLElement | null
     if (!next) continue
     const current = existing.get(entry.id)
@@ -100,6 +102,29 @@ export function replaceElementChildren(current: HTMLElement, next: HTMLElement) 
   if (selectionStart !== null && selectionEnd !== null) input.setSelectionRange(selectionStart, selectionEnd)
 }
 
+export function renderStreamItem(item: StreamItem<Entry>): string {
+  return isStepGroup(item) ? renderStepGroup(item) : renderEntry(item)
+}
+
+/** More than three consecutive calls fold into one "N steps" row (spec section 5). */
+export function renderStepGroup(group: StepGroup<Entry>): string {
+  const tools = group.items.filter((item): item is ToolEntry => item.kind === "tool")
+  const summary = summarizeSteps(tools)
+  const open = stepGroupOpen(summary, state.stepGroups.get(group.id))
+  const status: ToolEntry["status"] = summary.running ? "running" : summary.failed ? "error" : "completed"
+  const detail = summary.running ? `${summary.running} running` : summary.failed ? `${summary.failed} failed` : ""
+  const bodyId = `${group.id}:body`
+  return `<section class="step-group${open ? " open" : ""}" data-entry-id="${escapeAttribute(group.id)}">
+    <button type="button" class="step-group-trigger" data-toggle-steps="${escapeAttribute(group.id)}" aria-expanded="${String(open)}" aria-controls="${escapeAttribute(bodyId)}">
+      ${renderToolStatusIcon(status)}
+      <span class="step-group-label">${summary.total} steps</span>
+      ${detail ? `<span class="step-group-detail">${detail}</span>` : ""}
+      ${renderIcon(ChevronRight, "ledger-chevron")}
+    </button>
+    <div class="step-group-body" id="${escapeAttribute(bodyId)}"${open ? "" : " hidden"}>${open ? tools.map(renderTool).join("") : ""}</div>
+  </section>`
+}
+
 export function renderEntry(entry: Entry): string {
   switch (entry.kind) {
     case "user":
@@ -111,13 +136,15 @@ export function renderEntry(entry: Entry): string {
     case "tool":
       return renderTool(entry)
     case "file":
-      return `<div class="ledger-row ledger-file" data-entry-id="${escapeAttribute(entry.id)}"><span class="status-pip pip-done"></span><span class="ledger-verb">Edited</span><code class="ledger-arg">${escapeHtml(entry.filePath)}</code></div>`
+      return `<div class="ledger-row ledger-file" data-entry-id="${escapeAttribute(entry.id)}">${renderToolStatusIcon("completed")}<span class="ledger-verb">Edited</span><code class="ledger-arg">${escapeHtml(entry.filePath)}</code></div>`
     case "error": {
-      const retryable = canRetryLastPrompt() ? `<button type="button" class="ghost-button" data-retry-turn title="Resend the last prompt">Retry</button>` : ""
+      const retryable = entry.retryable && canRetryLastPrompt() ? `<button type="button" class="ghost-button" data-retry-turn title="Resend the last prompt">Retry</button>` : ""
       return `<div class="stream-card card-error" data-entry-id="${escapeAttribute(entry.id)}"><div class="card-label">${escapeHtml(entry.source)}</div><div class="card-body">${escapeHtml(entry.content)}</div>${retryable ? `<div class="card-actions">${retryable}</div>` : ""}</div>`
     }
     case "notice":
       return `<div class="stream-card card-notice" data-entry-id="${escapeAttribute(entry.id)}"><div class="card-label">${escapeHtml(entry.label)}</div><div class="card-body">${escapeHtml(entry.content)}</div></div>`
+    case "system":
+      return `<div class="system-line system-${entry.tone}" role="note" data-entry-id="${escapeAttribute(entry.id)}"><span>${escapeHtml(entry.content)}</span></div>`
     case "command":
       return `<div data-entry-id="${escapeAttribute(entry.id)}">${renderCommandResult(entry)}</div>`
   }
@@ -154,6 +181,11 @@ export function renderQuestion(): string {
 export function renderWorking(): string {
   const conversation = runtimeConversation()
   const turnId = activeTurnIdFor(state.viewedSessionId)
+  const wait = conversation.backgroundWait
+  if (!turnId && wait) {
+    const noun = wait.count === 1 ? "background task" : "background tasks"
+    return `<div class="working working-background" data-stream-role="working" role="status"><img class="working-mark" src="${workingMarkUrl}" alt="" aria-hidden="true" /><span>Waiting on ${wait.count} ${noun}</span></div>`
+  }
   if (!turnId) return ""
   const elapsed = conversation.turnStartedAt ? Math.max(0, Math.round((Date.now() - conversation.turnStartedAt) / 1000)) : 0
   return `<div class="working" data-stream-role="working"><img class="working-mark" src="${workingMarkUrl}" alt="" aria-hidden="true" /><span id="working-label">Working… ${elapsed}s</span></div>`
