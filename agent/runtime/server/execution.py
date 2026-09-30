@@ -322,6 +322,7 @@ class ExecutionCoordinator:
             if event_type != "turn_started":
                 return
             current = _new_live_turn(turn_id)
+            current["operation"] = str(event.get("operation") or "")
             self._live[session_id] = current
         if event_type == "assistant_delta":
             current["assistant_text"] = _bounded_live_text(current["assistant_text"] + str(event.get("text") or ""))
@@ -410,7 +411,9 @@ class ExecutionCoordinator:
         business_started = not compact
         try:
             async with execution.turn_slot:
-                if self._closed or clean in self._suppressed or (continuation and execution.queued_turn_starts > 1):
+                # Stop suppresses automatic continuation, not explicit maintenance.
+                # Keep the marker: compact must not restart a stopped goal afterward.
+                if self._closed or (clean in self._suppressed and not compact) or (continuation and execution.queued_turn_starts > 1):
                     return
                 if continuation:
                     records = await self._task_notifications.store.relevant(clean)
