@@ -15,6 +15,23 @@ function run(events, state = createConversation()) {
   return events.reduce((current, envelope) => reduceEvent(current, envelope), state)
 }
 
+test("tool events before assistant completion finalize the original prose without duplicates", () => {
+  const state = run([
+    event("turn_started"),
+    event("assistant_delta", { text: "Reading files." }),
+    event("tool_input_started", { tool_call_id: "c1", tool_name: "read_file" }),
+    event("tool_requested", { tool_call_id: "c1", tool_name: "read_file", arguments: { path: "README.md" } }),
+    event("assistant_message_completed", { content: "Reading files.", ts: "2026-09-29T06:34:10Z" }),
+    event("tool_result", { tool_call_id: "c1", result: "contents" }),
+    event("assistant_delta", { text: "The answer." }),
+    event("assistant_message_completed", { content: "The answer." }),
+  ])
+  assert.deepEqual(state.entries.map((entry) => entry.kind), ["assistant", "tool", "assistant"])
+  assert.equal(state.entries[0].content, "Reading files.")
+  assert.equal(state.entries[0].time, "2026-09-29T06:34:10Z")
+  assert.equal(state.entries[0].pendingCompletion, false)
+})
+
 test("turn_step_retry drops the in-flight step and adds a warning system line", () => {
   const state = run([
     event("turn_started"),

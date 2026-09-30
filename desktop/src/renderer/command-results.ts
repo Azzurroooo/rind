@@ -1,6 +1,5 @@
 import { escapeAttribute, escapeHtml } from "./html-escape.ts"
 import { renderContextDisplay } from "./context-report.ts"
-import { desktopSlashCommands } from "./desktop-slash.ts"
 import { renderMarkdown } from "./markdown.ts"
 import { isDesktopHiddenSlashCommand } from "./slash-commands.ts"
 
@@ -49,13 +48,8 @@ function renderHelpCommandDisplay(display: Record<string, unknown>) {
   }).join("")}</div></div>`
 }
 
-// Runtime entries for commands the desktop owns (model, sessions) are swapped
-// for the desktop definition, so help never shows a usage the desktop rejects.
 function desktopOwnedCommand(command: Record<string, unknown>): Record<string, unknown>[] {
-  const name = typeof command.name === "string" ? command.name : ""
-  if (!isDesktopHiddenSlashCommand(name)) return [command]
-  const owned = desktopSlashCommands.find((item) => item.name === name)
-  return owned ? [owned] : []
+  return isDesktopHiddenSlashCommand(String(command.name || "")) ? [] : [command]
 }
 
 function renderKeyValueDisplay(entries: unknown) {
@@ -102,15 +96,24 @@ function renderSkillsDisplay(display: Record<string, unknown>) {
 }
 
 function renderStatusDisplay(display: Record<string, unknown>) {
-  const git = asRecord(display.git)
-  const entries = [
-    { label: "session", value: display.session },
-    { label: "model", value: display.model },
-    { label: "messages", value: display.messages },
-    ...(git.branch ? [{ label: "git", value: `${displayText(git.branch)}${git.dirty ? " *" : ""}` }] : []),
-  ]
-  const usageRows = recordList(display.usage).map((item) => `<div class="command-usage"><strong>${escapeHtml(displayText(item.label))}</strong><span>Input <b>${escapeHtml(formatCount(item.input_tokens))}</b>${Number(item.context_window_tokens) > 0 ? ` / ${escapeHtml(formatCount(item.context_window_tokens))}` : ""}</span><span>Output <b>${escapeHtml(formatCount(item.output_tokens))}</b></span><span>Context <b>${escapeHtml(formatPercent(item.context_usage_percent))}</b></span></div>`)
-  return `<div class="command-display">${renderKeyValueDisplay(entries)}${usageRows.join("")}</div>`
+  const labels: Record<string, string> = { session: "Session", settings: "Settings", apiKey: "API key", baseUrl: "Endpoint", model: "Model", reasoningEffort: "Reasoning effort", runtime: "Runtime", workspace: "Workspace" }
+  const entries = recordList(display.entries)
+  const config = entries.map((entry) => {
+    const label = displayText(entry.label)
+    if (!label) return ""
+    return `<div><dt>${escapeHtml(labels[label] || label)}</dt><dd>${escapeHtml(displayText(entry.value) || "—")}${entry.state ? ` <small>${escapeHtml(displayText(entry.state))}</small>` : ""}</dd></div>`
+  }).join("")
+  const usage = recordList(display.usage).map((item) => {
+    const limit = Number(item.context_window_tokens)
+    const fraction = Number(item.context_usage_percent)
+    const meter = limit > 0 && Number.isFinite(fraction) ? `<div class="status-context"><span>Context</span><meter min="0" max="1" value="${Math.min(1, Math.max(0, fraction))}" aria-label="Context used"></meter><span>${formatPercent(fraction)}</span></div>` : ""
+    return `${meter}<dl class="status-metrics">
+      <div><dt>Input</dt><dd>${formatCount(item.input_tokens)}${limit > 0 ? ` <small>/ ${formatCount(limit)}</small>` : ""}</dd></div>
+      <div><dt>Cached input</dt><dd>${formatCount(item.cached_input_tokens)} <small>· ${formatPercent(item.cache_hit_rate)} hit</small></dd></div>
+      <div><dt>Output</dt><dd>${formatCount(item.output_tokens)}</dd></div>
+    </dl>`
+  }).join("")
+  return `<div class="status-display"><dl class="status-config">${config}</dl><section class="status-sampling" aria-label="Latest model response"><h4>Latest model response</h4>${usage || '<p class="status-empty">No completed sampling yet.</p>'}</section></div>`
 }
 
 function recordList(value: unknown): Record<string, unknown>[] {
@@ -130,15 +133,14 @@ function displayText(value: unknown) {
 
 function formatCount(value: unknown) {
   const count = Number(value)
-  return Number.isFinite(count) ? count.toLocaleString() : displayText(value)
+  return value != null && Number.isFinite(count) ? count.toLocaleString() : "—"
 }
 
 function formatPercent(value: unknown) {
   const percent = Number(value)
-  return Number.isFinite(percent) ? `${Math.round(percent * 100)}%` : ""
+  return value != null && Number.isFinite(percent) ? `${(percent * 100).toFixed(1)}%` : "—"
 }
 
 function asRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {}
 }
-

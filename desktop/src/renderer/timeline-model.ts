@@ -51,15 +51,16 @@ export type PlanEntry = {
   errorType: string
   durationMs: number
 }
-export type Entry =
+export type Entry = (
   | { kind: "user"; id: string; content: string; inputId?: string }
-  | { kind: "assistant"; id: string; content: string; turnId: string }
+  | { kind: "assistant"; id: string; content: string; turnId: string; pendingCompletion?: boolean }
   | ToolEntry
   | { kind: "file"; id: string; filePath: string }
   | { kind: "error"; id: string; content: string; source: string; retryable?: boolean }
   | { kind: "system"; id: string; content: string; tone: SystemTone }
   | { kind: "notice"; id: string; content: string; label: string }
   | { kind: "command"; id: string; command: string; content: string; display?: Record<string, unknown> }
+) & { time?: string | number }
 export type QuestionOption = { label: string; description: string }
 export type Question = { toolCallId: string; turnId: string; question: string; options: QuestionOption[] }
 export type ConversationState = {
@@ -87,9 +88,9 @@ export function boundText(value: string, limit = maxEntryChars) {
   return value.length > limit ? `${value.slice(0, limit)}\n\n[Output truncated]` : value
 }
 
-export function addUserMessage(state: ConversationState, content: string, inputId?: string): ConversationState {
+export function addUserMessage(state: ConversationState, content: string, inputId?: string, time: string | number = Date.now()): ConversationState {
   if (inputId && state.entries.some((entry) => entry.kind === "user" && entry.inputId === inputId)) return state
-  return appendEntry(closeAssistant(state), { kind: "user", id: "", content: boundText(content), ...(inputId ? { inputId } : {}) })
+  return appendEntry(closeAssistant(state), { kind: "user", id: "", content: boundText(content), time, ...(inputId ? { inputId } : {}) })
 }
 
 export function addCommandResult(
@@ -98,21 +99,30 @@ export function addCommandResult(
   content: string,
   display?: Record<string, unknown>,
 ): ConversationState {
-  return appendEntry(closeAssistant(state), { kind: "command", id: "", command, content: boundText(content), display })
+  return appendEntry(closeAssistant(state), { kind: "command", id: "", command, content: boundText(content), display, time: Date.now() })
 }
 
 export function reduceEvent(state: ConversationState, envelope: RuntimeEvent): ConversationState {
+  const next = reduceTurnEvent(state, envelope)
+  if (next.nextEntryId === state.nextEntryId) return next
+  const previousIds = new Set(state.entries.map((entry) => entry.id))
+  return { ...next, entries: next.entries.map((entry) =>
+    !previousIds.has(entry.id) && "content" in entry && !entry.time
+      ? { ...entry, time: asString(envelope.event.ts) || Date.now() } : entry) }
+}
+
+function reduceTurnEvent(state: ConversationState, envelope: RuntimeEvent): ConversationState {
   const event = envelope.event
   const turnId = envelope.turnId
   switch (envelope.type) {
     case "turn_started": return {
-      ...closeAssistant(asString(event.input) ? addUserMessage(state, asString(event.input), asString(event.client_input_id) || turnId) : state),
+      ...closeAssistant(asString(event.input) ? addUserMessage(state, asString(event.input), asString(event.client_input_id) || turnId, asString(event.ts) || Date.now()) : state),
       activeTurnId: turnId,
       operation: asString(event.operation),
       turnStartedAt: Date.now(),
       ...(state.plan && (state.plan.error || state.plan.status === "error") ? { plan: undefined } : {}),
     }
-    case "queued_input_delivered": return addUserMessage(state, asString(event.input), asString(event.input_id))
+    case "queued_input_delivered": return addUserMessage(state, asString(event.input), asString(event.input_id), asString(event.ts) || Date.now())
     case "turn_step_retry": return appendSystem(resetActiveStep(state), retryLine(event))
     case "context_compacted": return appendSystem(closeAssistant(state), compactionLine(event))
     case "context_built": {
@@ -127,8 +137,8 @@ export function reduceEvent(state: ConversationState, envelope: RuntimeEvent): C
     }
     case "background_wait_changed": return { ...state, backgroundWait: backgroundWaitFrom(event) }
     case "task_continuation_failed": return appendEntry(closeAssistant(state), { kind: "error", id: "", content: continuationFailure(event), source: "Background task" })
-    case "assistant_delta": return appendAssistantDelta(state, turnId, asString(event.text))
-    case "assistant_message_completed": return completeAssistant(state, turnId, asString(event.content))
+    case "assistant_delta": return appendAssistantDelta(state, turnId, asString(event.text), asString(event.ts))
+    case "assistant_message_completed": return completeAssistant(state, turnId, asString(event.content), asString(event.ts))
     case "plan_updated": return reducePlanSnapshot(state, envelope)
     case "tool_requested": return reduceTool(state, envelope, (tool) => ({
       status: "pending",
@@ -199,13 +209,14 @@ export function conversationFromReplay(messages: unknown[]): ConversationState {
     const record = asRecord(message)
     const id = asString(record.id)
     const role = asString(record.role)
+    const time = asString(record.ts) || asString(record.created_at) || asString(record.timestamp) || undefined
     if (role === "user") {
-      state = appendEntry(state, { kind: "user", id: id ? `message:${id}` : "", content: boundText(asString(record.content)) })
+      state = appendEntry(state, { kind: "user", id: id ? `message:${id}` : "", content: boundText(asString(record.content)), time })
       continue
     }
     if (role === "assistant") {
       const content = asString(record.content)
-      if (content) state = appendEntry(state, { kind: "assistant", id: id ? `message:${id}` : "", content: boundText(content), turnId: "" })
+      if (content) state = appendEntry(state, { kind: "assistant", id: id ? `message:${id}` : "", content: boundText(content), turnId: "", time })
       for (const toolCall of Array.isArray(record.tool_calls) ? record.tool_calls : []) state = appendReplayTool(state, toolCall)
       continue
     }
@@ -230,7 +241,7 @@ export function mergeReplayConversation(replay: ConversationState, live: Convers
     if (entry.kind === "user") return pendingUsers.includes(entry)
     if (entry.kind === "tool" && entry.toolCallId && persistedTools.has(entry.toolCallId)) return false
     if (entry.id && persistedIds.has(entry.id)) return false
-    if (entry.kind === "assistant") return entry.id === live.openAssistantId
+    if (entry.kind === "assistant") return entry.id === live.openAssistantId || entry.pendingCompletion === true
     return true
   })
   const usedIds = new Set(entries.map((entry) => entry.id))
@@ -359,13 +370,16 @@ export function latestPlan(state: ConversationState): PlanEntry | undefined {
   return state.plan
 }
 
-function appendAssistantDelta(state: ConversationState, turnId: string, text: string): ConversationState {
+function appendAssistantDelta(state: ConversationState, turnId: string, text: string, time = ""): ConversationState {
   if (!text) return state
   const current = state.entries.at(-1)
   if (current?.kind === "assistant" && current.id === state.openAssistantId && current.turnId === turnId) {
     return replaceEntry(state, current.id, { ...current, content: boundText(current.content + text) })
   }
-  const next = appendEntry(closeAssistant(state), { kind: "assistant", id: "", content: boundText(text), turnId })
+  // A new text segment after a tool is a new message, including on older
+  // runtimes that omit the previous segment's completion event.
+  const settled = { ...state, entries: state.entries.map((entry) => entry.kind === "assistant" && entry.pendingCompletion ? { ...entry, pendingCompletion: false } : entry) }
+  const next = appendEntry(closeAssistant(settled), { kind: "assistant", id: "", content: boundText(text), turnId, time: time || Date.now(), pendingCompletion: true })
   return { ...next, openAssistantId: next.entries.at(-1)?.id || "" }
 }
 
@@ -374,15 +388,17 @@ function resetActiveStep(state: ConversationState): ConversationState {
     if (entry.kind === "assistant" && entry.id === state.openAssistantId) return false
     return entry.kind !== "tool" || (entry.status !== "pending" && entry.status !== "running")
   })
-  return { ...state, entries, openAssistantId: "" }
+  return { ...state, entries: entries.map((entry) => entry.kind === "assistant" && entry.pendingCompletion ? { ...entry, pendingCompletion: false } : entry), openAssistantId: "" }
 }
 
-function completeAssistant(state: ConversationState, turnId: string, content: string): ConversationState {
-  const current = state.entries.at(-1)
-  if (content && current?.kind === "assistant" && current.id === state.openAssistantId && current.turnId === turnId) {
-    return closeAssistant(replaceEntry(state, current.id, { ...current, content: boundText(content) }))
+function completeAssistant(state: ConversationState, turnId: string, content: string, time = ""): ConversationState {
+  // Tool argument/request events can close the visible text stream before its
+  // durable completion arrives. Finalize that same entry in its original place.
+  const current = state.entries.find((entry) => entry.kind === "assistant" && entry.turnId === turnId && entry.pendingCompletion)
+  if (current?.kind === "assistant") {
+    return closeAssistant(replaceEntry(state, current.id, { ...current, content: content ? boundText(content) : current.content, time: time || current.time, pendingCompletion: false }))
   }
-  if (content) return appendEntry(closeAssistant(state), { kind: "assistant", id: "", content: boundText(content), turnId })
+  if (content) return appendEntry(closeAssistant(state), { kind: "assistant", id: "", content: boundText(content), turnId, time: time || Date.now() })
   return closeAssistant(state)
 }
 
@@ -502,7 +518,8 @@ function closeAssistant(state: ConversationState): ConversationState {
 function finishTurn(state: ConversationState, turnId: string): ConversationState {
   const cleared = !turnId || state.activeTurnId === turnId ? { activeTurnId: "", turnStartedAt: 0, operation: "" } : {}
   const question = state.question && (!turnId || state.question.turnId === turnId) ? { question: undefined } : {}
-  return { ...closeAssistant(state), ...cleared, ...question }
+  const entries = state.entries.map((entry) => entry.kind === "assistant" && entry.pendingCompletion && (!turnId || entry.turnId === turnId) ? { ...entry, pendingCompletion: false } : entry)
+  return { ...closeAssistant(state), entries, ...cleared, ...question }
 }
 
 function markRunningTools(state: ConversationState, status: ToolStatus): ConversationState {

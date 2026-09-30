@@ -72,7 +72,7 @@ export function formatContextWindow(tokens) {
   return `${Math.round(tokens / 1000)}K ctx`;
 }
 
-// `/model <name>` and other string callers resolve to the provider-aware
+// String model selections resolve to the provider-aware
 // option so model/set can carry provider_id.
 export function findModelOption(options, name) {
   const clean = String(name || "").trim().toLowerCase();

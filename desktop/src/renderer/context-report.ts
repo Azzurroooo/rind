@@ -1,4 +1,4 @@
-// /context and the context meter (spec section 8): turns the
+// The Context inspector and meter (spec section 8): turn the
 // rind/context/inspect record into a command result with a section breakdown.
 import { escapeHtml } from "./html-escape.ts"
 
@@ -80,4 +80,3 @@ function formatCount(value: number) {
 function asRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {}
 }
-

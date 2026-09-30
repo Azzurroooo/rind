@@ -45,7 +45,7 @@ export function bindConversationEvents(): void {
     const copyMessage = target.closest<HTMLButtonElement>("[data-copy-message]")?.dataset.copyMessage
     if (copyMessage) {
       const entry = state.conversation.entries.find((item) => item.id === copyMessage)
-      const content = entry && (entry.kind === "user" || entry.kind === "assistant") ? entry.content : ""
+      const content = entry && "content" in entry ? entry.content : ""
       if (content) runAction(() => navigator.clipboard.writeText(content))
       return
     }

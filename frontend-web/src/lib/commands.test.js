@@ -74,15 +74,14 @@ describe("commands — single registry (audit #9)", () => {
     expect(ctx.scrollToLatest).toHaveBeenCalledTimes(1);
   });
 
-  it("model/effort/goal focus without an argument and act with one", () => {
+  it("model and effort stay palette actions while goal accepts an objective", () => {
     const ctx = stubCtx();
     const built = buildCommands(ctx);
     built.find((command) => command.id === "model.select").run(ctx, "");
     expect(ctx.focusModel).toHaveBeenCalledTimes(1);
-    built.find((command) => command.id === "model.select").run(ctx, "gpt-x");
-    expect(ctx.setModel).toHaveBeenCalledWith("gpt-x");
+    expect(built.find((command) => command.id === "model.select").slash).toBeUndefined();
     built.find((command) => command.id === "model.effort").run(ctx, "high");
-    expect(ctx.setEffort).toHaveBeenCalledWith("high");
+    expect(ctx.focusEffort).toHaveBeenCalledTimes(1);
     built.find((command) => command.id === "context.goal").run(ctx, "clear");
     expect(ctx.runGoal).toHaveBeenCalledWith("clear");
   });
@@ -90,8 +89,8 @@ describe("commands — single registry (audit #9)", () => {
   it("server slash commands route through runServerSlash", () => {
     const ctx = stubCtx();
     const built = buildCommands(ctx, CATALOG);
-    built.find((command) => command.id === "server.doctor").run(ctx, "verbose");
-    expect(ctx.runServerSlash).toHaveBeenCalledWith("doctor", "verbose");
+    built.find((command) => command.id === "server.status").run(ctx, "");
+    expect(ctx.runServerSlash).toHaveBeenCalledWith("status", "");
   });
 });
 
@@ -119,15 +118,16 @@ describe("commands — slash sourcing for the Composer", () => {
   const commands = buildCommands(stubCtx(), CATALOG);
 
   it("prefix match on slash names only", () => {
-    const names = matchingSlashCommands(commands, "m").map((command) => command.slash);
-    expect(names).toContain("model");
+    const names = matchingSlashCommands(commands, "co").map((command) => command.slash);
+    expect(names).toContain("compact");
     expect(names).not.toContain("new");
   });
 
   it("exact resolution finds the command behind a submitted slash", () => {
-    expect(findCommandBySlash(commands, "theme").id).toBe("view.theme");
-    expect(findCommandBySlash(commands, "doctor").id).toBe("server.doctor");
-    expect(findCommandBySlash(commands, "dr").id).toBe("server.doctor");
+    expect(findCommandBySlash(commands, "theme")).toBeNull();
+    expect(findCommandBySlash(commands, "doctor")).toBeNull();
+    expect(findCommandBySlash(commands, "dr")).toBeNull();
+    expect(findCommandBySlash(commands, "status").id).toBe("server.status");
     expect(findCommandBySlash(commands, "nope")).toBeNull();
   });
 });

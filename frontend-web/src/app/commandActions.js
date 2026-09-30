@@ -30,12 +30,9 @@ export function createCommandActions(ctx) {
       stopTurn: () => actions.cancelTurn(),
       scrollToLatest: () => refs.conversation.current?.scrollToLatest(),
       toggleTheme: () => ctx.theme.toggle(),
-      setTheme: (value) => ctx.theme.set(String(value || "").trim().toLowerCase()),
       clearInput: () => ctx.setInput(""),
       focusComposer: () => refs.composer.current?.focus(),
       showHelp: () => showHelp(),
-      setModel: (model) => actions.setModel(model),
-      setEffort: (effort) => actions.setEffort(effort),
       runGoal: (argument) => actions.runGoalCommand(argument),
       runServerSlash: (name, argument) => runServerSlash(name, argument),
     };
@@ -48,36 +45,32 @@ export function createCommandActions(ctx) {
   async function runSlashCommand(text) {
     const parsed = parseSlashCommand(text);
     if (!parsed) return;
-    // CLI-compat quirk: `/model set gpt-x` normalizes to the plain model name.
-    const argument = parsed.name === "model" && parsed.argument.toLowerCase().startsWith("set ")
-      ? parsed.argument.slice(4).trim()
-      : parsed.argument;
     const command = findCommandBySlash(commandList, parsed.name);
     if (command) {
       try {
-        await command.run(commandCtx(), argument);
+        await command.run(commandCtx(), parsed.argument);
       } catch (error) {
         say("system", `Command failed: ${errorText(error)}`, "error");
       }
       return;
     }
-    try {
-      const result = await refs.client.current.request(methods.commandExecute, { session_id: refs.info.current.session_id, input: text });
-      say("system", result?.text || formatResult(result));
-    } catch (error) {
-      say("system", `Command failed: ${errorText(error)}`, "error");
-    }
+    say("system", "Command unavailable here. Use /help for chat commands, or open Settings and the command palette.");
   }
 
   async function runServerSlash(name, argument) {
+    if (!findCommandBySlash(commandList, name)) return;
     const text = argument ? `/${name} ${argument}` : `/${name}`;
-    const result = await refs.client.current.request(methods.commandExecute, { session_id: refs.info.current.session_id, input: text });
-    say("system", result?.text || formatResult(result));
+    const client = refs.client.current;
+    const sessionId = refs.info.current.session_id;
+    const result = await client.request(methods.commandExecute, { session_id: sessionId, input: text });
+    if (refs.client.current !== client || refs.info.current.session_id !== sessionId) return;
+    ctx.dispatchConversation({ kind: "message", role: "system", content: result?.text || formatResult(result), display: result?.display });
   }
 
   function showHelp() {
     const lines = commandList
-      .map((command) => `/${command.slash || command.id} — ${command.title}${command.keybind ? ` (${command.keybind})` : ""}`)
+      .filter((command) => command.slash)
+      .map((command) => `/${command.slash} — ${command.title}${command.keybind ? ` (${command.keybind})` : ""}`)
       .join("\n");
     say("system", `Available commands (Ctrl+K opens the command palette):\n${lines}`);
   }

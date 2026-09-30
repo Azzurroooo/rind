@@ -1,14 +1,11 @@
-// Runtime slash catalog merge (spec section 6 and 9): the composer and the
-// palette list the runtime's `initialize.commands` catalog merged with the
-// local commands. A local command wins when both define the same name, since
-// it drives richer UI (model picker, goal panel, theme) than the text result
-// of the server command; it still inherits the runtime description and
-// aliases. Runtime-only commands run verbatim through rind/command/execute.
+// Runtime catalog merged with local conversational actions. GUI-only commands
+// and their aliases never appear in the slash menu or execution registry.
 
 export const SERVER_CATEGORY = "Server commands";
 
-// Runtime commands that only make sense in a terminal.
-const TERMINAL_ONLY = new Set(["exit", "quit"]);
+const HIDDEN_COMMANDS = new Set([
+  "config", "context", "doctor", "login", "logout", "model", "effort", "session", "sessions", "theme", "exit", "quit",
+]);
 
 export function normalizeCatalog(catalog) {
   if (!Array.isArray(catalog)) return [];
@@ -16,13 +13,13 @@ export function normalizeCatalog(catalog) {
   const out = [];
   for (const item of catalog) {
     const name = cleanName(item?.name);
-    if (!name || seen.has(name) || TERMINAL_ONLY.has(name)) continue;
+    if (!name || seen.has(name) || HIDDEN_COMMANDS.has(name)) continue;
     seen.add(name);
     out.push({
       name,
       description: String(item?.description || "").trim(),
       usage: String(item?.usage || "").trim(),
-      aliases: (Array.isArray(item?.aliases) ? item.aliases : []).map(cleanName).filter((alias) => alias && alias !== name),
+      aliases: (Array.isArray(item?.aliases) ? item.aliases : []).map(cleanName).filter((alias) => alias && alias !== name && !HIDDEN_COMMANDS.has(alias)),
     });
   }
   return out;

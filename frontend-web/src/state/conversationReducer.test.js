@@ -78,7 +78,7 @@ describe("conversation reducer — streaming aggregation", () => {
       event(3, "incremental", { type: "assistant_delta", turn_id: "t1", text: "lo" }),
     ];
     let state = replay(envelopes);
-    expect(state.streaming).toEqual({ turnId: "t1", text: "hello" });
+    expect(state.streaming).toMatchObject({ turnId: "t1", text: "hello" });
     expect(conversationView(state).draft).toBe("hello");
 
     state = reduceConversation(state, event(4, "durable", { type: "assistant_message_completed", turn_id: "t1", content: "hello world" }));

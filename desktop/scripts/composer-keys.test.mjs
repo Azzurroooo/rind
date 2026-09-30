@@ -40,22 +40,14 @@ test("ArrowUp recalls the last prompt only in an empty composer", () => {
   assert.equal(composerKeyAction(key({ key: "a" }), idle), "default")
 })
 
-test("desktopSlashAction maps desktop commands and validates arguments", () => {
-  assert.deepEqual(desktopSlashAction("/model"), { type: "model", model: "" })
-  assert.deepEqual(desktopSlashAction("/model gpt-5"), { type: "model", model: "gpt-5" })
-  assert.deepEqual(desktopSlashAction("/EFFORT High"), { type: "effort", effort: "high" })
-  assert.equal(desktopSlashAction("/effort turbo")?.type, "error")
-  assert.deepEqual(desktopSlashAction("/theme"), { type: "theme", theme: "" })
-  assert.deepEqual(desktopSlashAction("/theme dark"), { type: "theme", theme: "dark" })
-  assert.equal(desktopSlashAction("/theme pink")?.type, "error")
-  assert.deepEqual(desktopSlashAction("/goal  ship the release "), { type: "goal", objective: "ship the release" })
-  assert.deepEqual(desktopSlashAction("/sessions auth"), { type: "sessions", query: "auth" })
+test("desktopSlashAction only maps conversational actions", () => {
+  for (const name of ["config", "context", "doctor", "login", "logout", "model", "effort", "session", "sessions", "theme"]) {
+    assert.equal(desktopSlashAction(`/${name}`), undefined)
+    assert.equal(desktopSlashAction(`/${name} value`), undefined)
+  }
+  assert.deepEqual(desktopSlashAction("/goal ship it"), { type: "goal", objective: "ship it" })
   assert.deepEqual(desktopSlashAction("/fork"), { type: "fork" })
-  assert.deepEqual(desktopSlashAction("/context"), { type: "context" })
-  assert.deepEqual(desktopSlashAction("/login"), { type: "providers", intent: "login" })
-  assert.deepEqual(desktopSlashAction("/Logout"), { type: "providers", intent: "logout" })
   assert.equal(desktopSlashAction("/compact"), undefined)
-  assert.equal(desktopSlashAction("hello"), undefined)
 })
 
 test("mergeSlashCatalog layers fallback, runtime and desktop commands", () => {
@@ -69,7 +61,7 @@ test("mergeSlashCatalog layers fallback, runtime and desktop commands", () => {
   assert.deepEqual(names, [...names].sort())
   assert.equal(new Set(names).size, names.length)
   assert.equal(merged.find((command) => command.name === "compact")?.description, "Runtime compact")
-  assert.equal(merged.find((command) => command.name === "theme")?.usage, "/theme [system|dark|light]")
+  assert.equal(merged.find((command) => command.name === "theme"), undefined)
   assert.deepEqual(merged.find((command) => command.name === "review")?.aliases, ["rv"])
   for (const command of [...fallbackSlashCommands, ...desktopSlashCommands]) assert.ok(names.includes(command.name))
 })

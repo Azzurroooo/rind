@@ -9,7 +9,7 @@ import { jumpLatest, messageStream } from "./dom.ts"
 import { escapeAttribute, escapeHtml } from "./html.ts"
 import { activeTurnIdFor, questionSelectionFor } from "./runtime.ts"
 import { state, vars } from "./state.ts"
-import { renderAssistantMessage, renderEmptyState, renderErrorBlock, renderUserMessage } from "./messages.ts"
+import { renderAssistantMessage, renderEmptyState, renderErrorBlock, renderMessageMeta, renderUserMessage } from "./messages.ts"
 import { renderFileChange, renderTool, renderWorkSegment } from "./tools.ts"
 
 /** Per-render context for message markup: which assistant is streaming and which is latest. */
@@ -129,13 +129,21 @@ export function renderStreamItem(item: StreamItem, context: MessageContext = idl
 }
 
 export function renderEntry(entry: Entry, context: MessageContext = idleContext): string {
+  const content = renderEntryContent(entry, context)
+  return ["system", "notice", "error", "command"].includes(entry.kind)
+    ? `<article class="turn-meta" data-entry-id="${escapeAttribute(entry.id)}">${content}${renderMessageMeta(entry.id, entry.time)}</article>`
+    : content
+}
+
+function renderEntryContent(entry: Entry, context: MessageContext): string {
   switch (entry.kind) {
     case "user":
-      return renderUserMessage(entry.id, entry.content)
+      return renderUserMessage(entry.id, entry.content, entry.time)
     case "assistant":
       return renderAssistantMessage(entry.id, entry.content, {
         streaming: isStreamingAssistant(entry.id, context.openAssistantId, context.activeTurn),
         latest: entry.id === context.latestAssistantId,
+        time: entry.time,
       })
     case "tool":
       return renderTool(entry)
@@ -148,7 +156,7 @@ export function renderEntry(entry: Entry, context: MessageContext = idleContext)
     case "system":
       return `<div class="system-line system-${entry.tone}" role="note" data-entry-id="${escapeAttribute(entry.id)}"><span>${escapeHtml(entry.content)}</span></div>`
     case "command":
-      return `<div data-entry-id="${escapeAttribute(entry.id)}">${renderCommandResult(entry)}</div>`
+      return renderCommandResult(entry)
   }
 }
 

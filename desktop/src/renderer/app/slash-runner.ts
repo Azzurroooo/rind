@@ -2,7 +2,7 @@ import { runtimeMethods } from "../../preload/types.ts"
 import { executeLocalSlashCommand } from "../local-slash-commands.ts"
 import { sameProjectPath as samePath } from "../project-selection.ts"
 import { mergeSlashCatalog } from "../desktop-slash.ts"
-import { parseSlashCommands } from "../slash-commands.ts"
+import { isExactSlashCommand, parseSlashCommands, parseSlashInput } from "../slash-commands.ts"
 import { addCommandResult, addUserMessage } from "../timeline-model.ts"
 import { clearSlashCommandPending, setPrompt, startTurn } from "./composer.ts"
 import { runDesktopSlash } from "./desktop-slash-runner.ts"
@@ -17,6 +17,13 @@ import { runtimeTurnActive } from "./runtime.ts"
 
 
 export async function runSlash(input: string) {
+  const parsed = parseSlashInput(input)
+  if (!parsed || !isExactSlashCommand(state.slashCommands, `/${parsed.name}`)) {
+    clearSlashCommandPending()
+    state.notice = "Command unavailable here. Use /help for chat commands, or open Settings and the command palette."
+    render()
+    return
+  }
   if (/^\/compact\s*$/i.test(input)) return compactCurrentSession()
   if (await runDesktopSlash(input)) return
   const localResult = executeLocalSlashCommand(input, {

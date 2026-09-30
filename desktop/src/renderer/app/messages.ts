@@ -1,3 +1,4 @@
+import { messageTime } from "../message-time.ts"
 import brandMarkUrl from "../assets/brand-mark.svg"
 import { Copy, Pencil, renderIcon, RotateCcw } from "../icons.ts"
 import { renderMarkdown } from "../markdown.ts"
@@ -11,23 +12,30 @@ const actionButtons: Record<MessageAction, (id: string) => string> = {
   edit: (id) => `<button type="button" class="message-action" data-edit-message="${escapeAttribute(id)}" data-tooltip="Edit and resend" aria-label="Edit and resend">${renderIcon(Pencil)}</button>`,
 }
 
-function renderActionBar(kind: "user" | "assistant", id: string): string {
+function renderActionBar(kind: "user" | "assistant", id: string, value?: string | number): string {
+  const time = messageTime(value)
+  const timestamp = time ? `<time class="message-time" datetime="${escapeAttribute(time.iso)}" title="${escapeAttribute(time.full)}">${escapeHtml(time.label)}</time>` : '<span class="message-time" title="This older message has no recorded timestamp.">Time unavailable</span>'
   const buttons = messageActions(kind).map((action) => actionButtons[action](id)).join("")
-  return `<div class="message-actions" role="toolbar" aria-label="Message actions">${buttons}</div>`
+  return `<div class="message-actions" role="toolbar" aria-label="Message actions">${buttons}${timestamp}</div>`
 }
 
-export function renderUserMessage(id: string, content: string): string {
-  return `<article class="turn-user" data-entry-id="${escapeAttribute(id)}"><div class="user-bubble" dir="auto">${escapeHtml(content)}</div>${renderActionBar("user", id)}</article>`
+export function renderMessageMeta(id: string, time?: string | number): string {
+  return renderActionBar("assistant", id, time)
+}
+
+export function renderUserMessage(id: string, content: string, time?: string | number): string {
+  return `<article class="turn-user" data-entry-id="${escapeAttribute(id)}"><div class="user-bubble" dir="auto">${escapeHtml(content)}</div>${renderActionBar("user", id, time)}</article>`
 }
 
 export interface AssistantMessageState {
   readonly streaming: boolean
   readonly latest: boolean
+  readonly time?: string | number
 }
 
 export function renderAssistantMessage(id: string, content: string, view: AssistantMessageState): string {
   const classes = ["turn-assistant", view.streaming ? "streaming" : "", view.latest ? "latest" : ""].filter(Boolean).join(" ")
-  const actions = content.trim() && !view.streaming ? renderActionBar("assistant", id) : ""
+  const actions = content.trim() && !view.streaming ? renderActionBar("assistant", id, view.time) : ""
   return `<article class="${classes}" data-entry-id="${escapeAttribute(id)}"><div class="message-body" dir="auto">${renderMarkdown(content)}</div>${actions}</article>`
 }
 

@@ -251,7 +251,7 @@ body { min-height: 0; }
 
 /* ---------- message action bars (spec section 4) ---------- */
 
-.message-actions { display: flex; gap: 4px; margin-top: 4px; opacity: 0; transition: opacity 150ms var(--ease); }
+.message-actions { display: flex; align-items: center; min-height: 28px; gap: 4px; margin-top: 4px; opacity: 0; transition: opacity 150ms var(--ease); }
 .turn-user .message-actions { justify-content: flex-end; }
 .turn-assistant .message-actions { justify-content: flex-start; margin-left: -6px; }
 .turn-user:hover .message-actions, .turn-assistant:hover .message-actions, .message-actions:focus-within, .turn-assistant.latest .message-actions { opacity: 1; }
@@ -276,3 +276,7 @@ body { min-height: 0; }
   .message-actions, .message-action { transition: none; }
   .attachment-chip, .command-palette { animation: none; }
 }
+
+.message-time { margin-left: 6px; color: var(--dim); font-size: 11px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+@media (hover: none) { .message-actions { opacity: 1; } }
+.turn-meta:hover .message-actions, .turn-meta:focus-within .message-actions { opacity: 1; }

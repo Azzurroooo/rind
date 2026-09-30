@@ -87,7 +87,15 @@ button.tool-trigger:hover, .tool-row.open .tool-trigger { background: var(--fill
 
 /* ---------- work segments: one fold per run of calls (spec section 5.1) ---------- */
 
-.work-segment { margin-bottom: 2px; }
+.work-segment, .work-single {
+  margin: 6px auto 16px;
+  padding: 3px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: var(--fill-1);
+}
+.work-segment .tool-target, .work-single .tool-target { color: var(--muted); }
+.work-segment .tool-status-completed, .work-single .tool-status-completed { color: var(--dim); }
 .segment-trigger {
   display: flex;
   align-items: center;
@@ -100,7 +108,7 @@ button.tool-trigger:hover, .tool-row.open .tool-trigger { background: var(--fill
   border-radius: 6px;
   color: var(--muted);
   background: transparent;
-  font-size: var(--text-dense);
+  font-size: 12px;
   text-align: left;
   transition: color var(--dur-hover) var(--ease), background-color var(--dur-hover) var(--ease);
 }

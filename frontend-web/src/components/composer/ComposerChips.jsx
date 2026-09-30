@@ -8,7 +8,7 @@ const RING_CIRCUMFERENCE = 2 * Math.PI * RING_RADIUS;
 
 // Composer toolbar chips (spec section 6): the effort chip opens a menu and
 // the 16px context ring opens the Context tab. The model picker lives in
-// ModelPicker.jsx. `data-composer-chip` lets the /model and /effort commands
+// ModelPicker.jsx. `data-composer-chip` lets the command palette
 // open them.
 export function EffortChip({ effort, disabled, onSelect }) {
   const labels = { low: "Low", medium: "Medium", high: "High", xhigh: "Extra high", max: "Max" };

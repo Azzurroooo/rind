@@ -10,12 +10,12 @@ export type SlashCommandMenu = {
   commands: SlashCommand[]
 }
 
-const DESKTOP_HIDDEN_COMMANDS = new Set(["model", "sessions"])
+const DESKTOP_HIDDEN_COMMANDS = new Set([
+  "config", "context", "doctor", "login", "logout", "model", "effort", "session", "sessions", "theme", "exit", "quit",
+])
 
 export const fallbackSlashCommands: SlashCommand[] = [
   ["compact", "Compact current session context", "/compact"],
-  ["config", "Show config guidance", "/config"],
-  ["doctor", "Run local setup diagnostics", "/doctor"],
   ["help", "Show commands", "/help [command]"],
   ["init", "Draft RIND.md", "/init [project|user]"],
   ["skill", "List skills", "/skill [list]"],

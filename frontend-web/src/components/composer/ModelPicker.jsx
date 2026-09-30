@@ -7,7 +7,7 @@ const SEARCH_THRESHOLD = 8;
 // Provider-grouped model picker (after Jan's provider groups and LobeHub's
 // ModelSwitchPanel): search when the catalog is long, provider headers, and
 // rows that show the context window and image support beside the name.
-// `data-composer-chip` lets the /model command open it.
+// `data-composer-chip` lets the command palette open it.
 export function ModelPicker({ model, providerId = "", models = [], providerNames = {}, disabled, onOpen, onSelect }) {
   const rootRef = useRef(null);
   const triggerRef = useRef(null);

@@ -13,6 +13,9 @@ import {
 import { executeLocalSlashCommand } from "../src/renderer/local-slash-commands.ts"
 
 test("Desktop hides removed and sidebar-owned commands from fallback and Runtime catalogs", () => {
+  const removed = ["config", "context", "doctor", "login", "logout", "model", "effort", "session", "sessions", "theme"]
+  assert.deepEqual(parseSlashCommands(removed.map((name) => ({ name, aliases: ["alias_" + name] }))), [])
+  assert.deepEqual(parseSlashCommands([{ name: "status", aliases: [...removed, "st"] }])[0].aliases, ["st"])
   assert.equal(fallbackSlashCommands.some((command) => command.name === "sessions"), false)
   assert.equal(fallbackSlashCommands.some((command) => command.name === "model"), false)
   const parsed = parseSlashCommands([
@@ -43,10 +46,9 @@ test("Desktop local commands do not require a project or Runtime", () => {
   assert.equal(status?.display?.type, "status")
   assert.match(status?.text || "", /Runtime: stopped/)
   const config = executeLocalSlashCommand("/config", context)
-  assert.equal(config?.display?.type, "config")
-  assert.match(config?.text || "", /apiKey: set/)
+  assert.equal(config, undefined)
   assert.equal(executeLocalSlashCommand("/model", context), undefined)
-  assert.equal(executeLocalSlashCommand("/login", context), undefined, "/login is routed to Settings > Providers")
+  assert.equal(executeLocalSlashCommand("/login", context), undefined, "/login has no slash form")
   assert.equal(fallbackSlashCommands.some((command) => command.name === "login"), false)
 })
 

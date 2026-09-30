@@ -104,7 +104,7 @@ export function formatContextWindow(tokens?: number): string {
   return `${Math.round(tokens / 1000)}K ctx`
 }
 
-/** `/model <name>` resolves against the loaded options so provider_id rides along. */
+/** Resolve string selections against loaded options so provider_id rides along. */
 export function findModelOption(options: ModelOption[], name: string): ModelOption | undefined {
   const clean = name.trim().toLowerCase()
   if (!clean) return undefined

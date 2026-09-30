@@ -18,10 +18,13 @@ export function basename(path) {
   return clean.split(/[\\/]/).pop() || clean;
 }
 
-export function formatClock(value) {
-  if (!value) return "";
-  if (typeof value === "string" && !/^\d/.test(value)) return value;
+export function messageTime(value) {
+  if (value == null || value === "") return null;
   const date = new Date(typeof value === "number" && value < 1e12 ? value * 1000 : value);
-  if (Number.isNaN(date.getTime())) return String(value);
-  return date.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
+  if (!Number.isFinite(date.getTime())) return null;
+  return {
+    iso: date.toISOString(),
+    label: date.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" }),
+    full: date.toLocaleString(undefined, { year: "numeric", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", second: "2-digit", timeZoneName: "short" }),
+  };
 }

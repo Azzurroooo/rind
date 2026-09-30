@@ -2,7 +2,8 @@ import { useEffect, useRef, useState } from "react";
 import { AlertTriangle, Check, Copy, GitFork, Info, Pencil, RefreshCw, X } from "lucide-react";
 import { MarkdownContent } from "../MarkdownContent.jsx";
 import { copyText } from "../../lib/clipboard.js";
-import { formatClock } from "../../lib/format.js";
+import { messageTime } from "../../lib/format.js";
+import { StatusMessage } from "./StatusMessage.jsx";
 
 const COPY_RESET_MS = 1600;
 
@@ -17,6 +18,7 @@ export function UserMessage({ message, onEdit }) {
         {onEdit && (
           <ActionButton label="Edit and resend" onClick={() => onEdit(message)}><Pencil size={14} /></ActionButton>
         )}
+        <MessageTime value={message.time} />
       </div>
     </article>
   );
@@ -25,7 +27,6 @@ export function UserMessage({ message, onEdit }) {
 // Assistant message: full-width prose with Copy, Fork from here and the time.
 // The action bar stays visible on the latest assistant message.
 export function AssistantMessage({ message, latest, onFork }) {
-  const time = formatClock(message.time);
   return (
     <article className={`message assistant${latest ? " is-latest" : ""}`} data-message-id={message.id || ""}>
       <MarkdownContent value={message.content} className="assistant-content" />
@@ -35,7 +36,7 @@ export function AssistantMessage({ message, latest, onFork }) {
         {onFork && (
           <ActionButton label="Fork from here" onClick={() => onFork(message)}><GitFork size={14} /></ActionButton>
         )}
-        {time && <span className="message-time">{time}</span>}
+        <MessageTime value={message.time} />
       </div>
     </article>
   );
@@ -55,15 +56,23 @@ export function StreamingMessage({ text }) {
 export function SystemNote({ message, onRetry }) {
   const error = message.tone === "error";
   return (
-    <div className={`system-note ${error ? "is-error" : "is-notice"}`} role={error ? "alert" : "note"} data-message-id={message.id || ""}>
-      {error ? <AlertTriangle size={15} aria-hidden="true" /> : <Info size={14} aria-hidden="true" />}
-      <span className="system-note-text">{message.content}</span>
-      {error && onRetry && (
-        <button type="button" className="button ghost small system-retry" onClick={() => onRetry(message)}>
-          <RefreshCw size={13} aria-hidden="true" />{" "}Retry
-        </button>
+    <article className="message system" data-message-id={message.id || ""}>
+      {message.display?.type === "status" ? <StatusMessage display={message.display} /> : (
+        <div className={`system-note ${error ? "is-error" : "is-notice"}`} role={error ? "alert" : "note"}>
+          {error ? <AlertTriangle size={15} aria-hidden="true" /> : <Info size={14} aria-hidden="true" />}
+          <span className="system-note-text">{message.content}</span>
+          {error && onRetry && (
+            <button type="button" className="button ghost small system-retry" onClick={() => onRetry(message)}>
+              <RefreshCw size={13} aria-hidden="true" />{" "}Retry
+            </button>
+          )}
+        </div>
       )}
-    </div>
+      <div className="message-actions">
+        <CopyButton text={message.content} />
+        <MessageTime value={message.time} />
+      </div>
+    </article>
   );
 }
 
@@ -94,4 +103,11 @@ function CopyButton({ text }) {
       {state === "copied" ? <Check size={14} /> : state === "failed" ? <X size={14} /> : <Copy size={14} />}
     </button>
   );
+}
+
+function MessageTime({ value }) {
+  const time = messageTime(value);
+  return time
+    ? <time className="message-time" dateTime={time.iso} title={time.full}>{time.label}</time>
+    : <span className="message-time" title="This older message has no recorded timestamp.">Time unavailable</span>;
 }

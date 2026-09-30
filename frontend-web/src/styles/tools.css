@@ -9,6 +9,17 @@
   margin: 0 auto var(--space-3);
 }
 
+.work-segment, .work-single {
+  margin-top: 6px;
+  margin-bottom: 16px;
+  padding: 3px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: var(--fill-1);
+}
+.work-segment .tool-verb, .work-single .tool-verb { color: var(--muted); }
+.work-segment .tool-status-icon.is-success, .work-single .tool-status-icon.is-success { color: var(--dim); }
+
 /* Fold header: 32 high, status icon, summary, duration on the right. */
 .work-segment-head {
   width: 100%;
@@ -21,7 +32,7 @@
   border-radius: 6px;
   background: transparent;
   color: var(--muted);
-  font: 13px var(--font-ui);
+  font: 12px var(--font-ui);
   text-align: left;
   cursor: pointer;
 }

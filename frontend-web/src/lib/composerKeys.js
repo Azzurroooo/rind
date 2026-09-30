@@ -47,7 +47,7 @@ export function composerKeyAction(event, state = {}) {
 }
 
 // Slash menu state for the current draft: open only while the first token is
-// being typed ("/mo" but not "/model gpt").
+// being typed ("/go" but not "/goal ship the release").
 export function slashQuery(value) {
   const text = String(value || "");
   if (!text.startsWith("/") || /\s/.test(text)) return null;

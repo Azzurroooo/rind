@@ -79,6 +79,8 @@ export function reduceConversation(state, action) {
         role: action.role || (action.kind === "system" ? "system" : "user"),
         content: String(action.content || ""),
         tone: action.tone || "",
+        ...(action.display ? { display: action.display } : {}),
+        ...(action.time ? { time: action.time } : {}),
         ...(action.inputId ? { inputId: action.inputId } : {}),
       });
     case "queue_input": {
@@ -117,7 +119,7 @@ export function reduceConversation(state, action) {
       };
     }
     case "queued_delivered":
-      return deliverQueued(state, action.inputId, action.input, action.mode);
+      return deliverQueued(state, action.inputId, action.input, action.mode, action.time);
     case "answered": {
       const key = String(action.key || "");
       if (!key) return state;
@@ -192,7 +194,7 @@ function applyTurnEvent(state, event, context) {
     case "task_continuation_failed":
       return appendEntry(state, { role: "system", content: String(event.error || "Background continuation failed."), tone: "error" });
     case "turn_started":
-      return { ...confirmPrompt(state, event.input, event.client_input_id || turnId), active: true, activeTurnId: turnId, operation: event.operation || "", streaming: { turnId, text: "" } };
+      return { ...confirmPrompt(state, event.input, event.client_input_id || turnId, event.ts), active: true, activeTurnId: turnId, operation: event.operation || "", streaming: { turnId, text: "" } };
 
     case "assistant_delta": {
       const streaming = state.streaming && state.streaming.turnId === turnId
@@ -201,14 +203,14 @@ function applyTurnEvent(state, event, context) {
       return {
         ...state,
         active: true,
-        streaming: { turnId, text: streaming.text + String(event.text || "") },
+        streaming: { turnId, text: streaming.text + String(event.text || ""), time: streaming.time || event.ts || Date.now() },
       };
     }
 
     case "assistant_message_completed": {
       const fromStream = state.streaming && state.streaming.turnId === turnId ? state.streaming.text : "";
       const content = String(event.content || fromStream || "");
-      let next = content ? appendEntry(state, { id: `msg:${context.key}`, role: "assistant", content }) : state;
+      let next = content ? appendEntry(state, { id: `msg:${context.key}`, role: "assistant", content, time: event.ts || state.streaming?.time }) : state;
       if (next.streaming && next.streaming.turnId === turnId) next = { ...next, streaming: null };
       return next;
     }
@@ -324,7 +326,7 @@ function applyTurnEvent(state, event, context) {
 
     case "queued_input_delivered":
       // The queued chip converts into a normal user message in place.
-      return deliverQueued(state, event.input_id, event.input, event.mode);
+      return deliverQueued(state, event.input_id, event.input, event.mode, event.ts);
 
     case "goal_continued":
       return appendEntry(state, { role: "system", content: `Goal continuation · round ${event.round || "?"}` });
@@ -355,7 +357,7 @@ function applyTurnEvent(state, event, context) {
 function finalizeTurn(state, turnId) {
   const streamingText = state.streaming ? state.streaming.text : "";
   const next = streamingText
-    ? appendEntry(state, { id: `msg:${state.activeTurnId || turnId}:final`, role: "assistant", content: streamingText })
+    ? appendEntry(state, { id: `msg:${state.activeTurnId || turnId}:final`, role: "assistant", content: streamingText, time: state.streaming?.time })
     : state;
   const entries = next.entries.some((entry) => entry.role === "question" && entry.status === "pending")
     ? next.entries.map((entry) => (entry.role === "question" && entry.status === "pending" ? { ...entry, status: "cancelled" } : entry))
@@ -376,7 +378,7 @@ function finalizeTurn(state, turnId) {
 // Queued chip → normal user message. With an input_id the exact chip is
 // converted; without one (legacy event) the oldest matching mode is delivered
 // first, mirroring the kernel's FIFO consumption.
-function deliverQueued(state, inputId, input, mode) {
+function deliverQueued(state, inputId, input, mode, time = Date.now()) {
   const cleanId = String(inputId || "").trim();
   if (cleanId && state.settledInputs[cleanId]) return state;
   let item = null;
@@ -393,6 +395,7 @@ function deliverQueued(state, inputId, input, mode) {
   const delivered = {
     id: `msg:delivered:${id}`,
     role: "user",
+    time,
     content,
     tone: "",
   };
@@ -413,13 +416,13 @@ function settleInput(state, id) {
 
 function flushStreaming(state) {
   return state.streaming?.text
-    ? { ...appendEntry(state, { role: "assistant", content: state.streaming.text }), streaming: null }
+    ? { ...appendEntry(state, { role: "assistant", content: state.streaming.text, time: state.streaming.time }), streaming: null }
     : state;
 }
 
-function confirmPrompt(state, input, inputId) {
+function confirmPrompt(state, input, inputId, time) {
   if (!input || state.entries.some((entry) => entry.role === "user" && entry.inputId === inputId)) return state;
-  return appendEntry(flushStreaming(state), { id: `msg:input:${inputId}`, role: "user", content: String(input), inputId });
+  return appendEntry(flushStreaming(state), { id: `msg:input:${inputId}`, role: "user", content: String(input), inputId, time });
 }
 
 // Question cards live in the stream so answered/cancelled history stays readable.
@@ -548,12 +551,12 @@ function applyLiveTurn(state, liveTurn, sessionId) {
   return next;
 }
 
-const PROSE_TIME_ROLES = new Set(["user", "assistant"]);
+const MESSAGE_TIME_ROLES = new Set(["user", "assistant", "system"]);
 
 function appendEntry(state, entry) {
   const id = entry.id || `local-${state.entries.length}`;
-  // Prose entries carry a local clock time for the message action bar.
-  const time = entry.time || (PROSE_TIME_ROLES.has(entry.role) ? Date.now() : undefined);
+  // Local messages use arrival time; persisted/live records supply their own time.
+  const time = entry.time || (MESSAGE_TIME_ROLES.has(entry.role) ? Date.now() : undefined);
   return withCap({ ...state, entries: [...state.entries, { id, ...entry, ...(time ? { time } : {}) }] });
 }
 
@@ -593,7 +596,7 @@ export function normalizeHistoryMessages(values) {
         role: message.role,
         content: contentText(message.content),
         meta: "",
-        ...(message.created_at || message.timestamp ? { time: message.created_at || message.timestamp } : {}),
+        ...(message.ts || message.created_at || message.timestamp ? { time: message.ts || message.created_at || message.timestamp } : {}),
       };
     })
     .filter((message) => message.role === "tool" || message.content);
