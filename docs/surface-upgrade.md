@@ -13,7 +13,10 @@ Local references:
 - LobeHub (`E:/code/agent1/ui-open-source/lobehub`): `DESIGN.md` and
   `src/routes/(main)/group/_layout/Sidebar/Topic/TopicListContent/ByTimeMode/GroupItem.tsx`.
   Applied neutral semantic surfaces, a 4px spacing rhythm, content-first hierarchy, and
-  compact time groups in Web history.
+  compact session rows. The September 30 interaction revision removes date groups.
+- This revision also studied Jan's `web-app/src/components/ui/popover.tsx` and LobeHub's
+  `src/features/Conversation/ChatInput/index.tsx`: stable composition while a run is active,
+  per-conversation queues, and popovers that stay inside the available viewport.
 - These are design and interaction references, not imported implementations or dependencies.
 
 The current specification is `surface-design-v2.md`: warm off-white/green canvases, restrained
@@ -135,6 +138,56 @@ Windows/Linux Web tests, Desktop typecheck/tests, and the combined production bu
 does not alter the existing CLI release process.
 
 ## Verification
+
+### September 30: live inputs, recent sessions, and remote composition
+
+This follow-up fixes the five reported interaction issues without changing Python sources:
+
+- Desktop's preparation lock now ends when a prompt is dispatched, rather than when its
+  full streaming RPC returns. Web waits for the starting turn's ID before routing another
+  input. Queue remains available during a run; both surfaces expose a clickable Steer action.
+  A turn settling during a Web queue request falls back to a normal prompt in the original
+  session. Drafts survive failures. Queue delivery is reconciled by input ID, including an
+  event arriving before the corresponding response and another client's queued input.
+- Desktop's runtime bridge attaches the accepted prompt and client input ID to the existing
+  `turn_started` event, preserving its sequence. Both viewers reconcile the originating
+  optimistic message instead of duplicating it. Remote delivered inputs render even when
+  they were not present in the viewer's local queue. Gateway and bridge code stay in `desktop/`.
+- Projects precede Recent with a dividing rule. Date grouping code/styles/tests were removed.
+  Initial lists contain 10 rows; Load more is explicit. Desktop uses store pagination and
+  retains the user's expanded list across advisory refreshes. Recent ordering uses the newest
+  visit or conversation update; Web's visit metadata is scoped to the connected host/tab.
+- New session uses the confirmed project on the Rind computer. A fresh browser initially
+  uses the worker's reported folder; a restored session uses its own workspace. The full path
+  is visible in the project selector. Unsubmitted/cancelled path edits cannot change it.
+  Each Gateway browser connection also keeps its own fallback workspace.
+- Mobile attachment and command controls no longer wrap. The model panel is anchored to
+  the input frame on small screens, and grid tracks may shrink below content width. Long
+  model/provider names truncate within the panel; the available models remain selectable.
+
+Verification for this revision:
+
+- Web: **356 tests passed**. Desktop: **220 tests passed**. Desktop typecheck and both
+  production builds passed; focused picker/sidebar tests passed after the final visual edits.
+- An isolated Electron main/preload/renderer, the **real Python Worker**, the actual Desktop
+  HTTP/ticket/WebSocket Gateway, and a Playwright mobile browser exercised the complete flow.
+  A local streaming chat-completions fixture controlled six model steps without calling an
+  external model. Desktop queue, direct steer, promote and recall reached the worker. Remote
+  prompt, steering and follow-up each appeared exactly once in both transcripts.
+- In-flight and idle composers were inspected at 320/390px, with additional 768/1280px checks.
+  Model-menu bounds, toolbar alignment, long names and horizontal overflow were measured.
+  An initial active-state grid overflow at 320px was found and corrected; repeat QA passed.
+- Screenshots were inspected against the existing v2 tokens: project/recent hierarchy,
+  unchanged cream/green palette, typography, single-row controls, panel edges and long-name
+  truncation. New visible copy is limited to folder location, pagination and Steer controls.
+  Browser/IAB had no enabled browser, so Playwright Chromium/Electron supplied the captures.
+- One parallel test run timed out during real-worker initialization. An isolated rerun and
+  the subsequent full Desktop suite passed. No worker implementation changes were made.
+
+Steering is applied at the worker's next model/tool checkpoint; it does not abort an in-flight
+model request. Hardware-phone keyboard/rotation behavior and packaged-installer execution
+remain outside this desktop automation pass. Temporary fixtures and screenshots are removed
+after review; no personal settings or real conversations are used.
 
 Local Windows verification on 2026-09-30, Node 22.19.0:
 

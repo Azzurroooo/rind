@@ -92,11 +92,13 @@ Each status color has a `-soft` background (same hue, ~12% alpha).
 
 - Top: project selector (32 row, folder icon, chevron) and a New session icon button.
 - Search field (32, 14px search prefix icon, `Ctrl/Cmd+K` also opens the command palette).
-- History grouped by time: Today, Yesterday, Previous 7 days, Previous 30 days, then month
-  names. Group labels are 12px, `--dim`, weight 600, 8px top padding, 28 high.
-  Dates use conversation activity, not when a user opens an old session. Desktop shows up to
-  50 saved sessions from registered projects. Recent sessions and Projects have separate
-  headings and a dividing rule; they share the sidebar's scroll area.
+- Projects appear above Recent sessions, with distinct headings and a dividing rule.
+  Recent is one chronological list with no date groups. Opening a conversation and
+  conversation activity both count as interaction; the latest timestamp determines order.
+  Both surfaces initially show 10 recent sessions and load more on demand. Desktop pages
+  the project store; Web increases the worker's list limit in steps of 10 (worker maximum 100).
+  The Web project selector shows the selected folder on the Rind computer. New session
+  uses this confirmed folder, never an unsubmitted path draft or the phone's filesystem.
 - Rows are 32 high with 6 radius and 8 inline padding. Hover is `--fill-1`; active is `--fill-2` with
   `--text` weight 500. A running session shows a 12px spinner before its title.
 - Row actions: a 24 square overflow button at the right edge, opacity 0 until row hover,
@@ -188,9 +190,16 @@ mirrors LobeHub's `WorkflowCollapse` / `ProcessFold` and the CLI's per-tool caps
   `--accent-soft` ring. Drag-over draws a dashed `--accent` border with the label "Drop files".
 - Queue tray: attached above the frame (radius 14 14 0 0, `--panel`). Each queued item is a 32 row
   with Promote (send as steer), Edit (restore to composer) and Remove.
+  A running turn must not hold the composer preparation lock. A direct Steer control is
+  available alongside Queue while composing during a run; Alt+Enter remains supported.
+  Inputs are reconciled by ID across local confirmation and remote delivery; reconnect
+  rebuilds the transcript from worker history.
 - Textarea: 15px, 12/14 padding, auto-grow up to 40vh, then scroll. Enter sends, Shift+Enter
   inserts a newline, and IME composition is guarded. ArrowUp in an empty composer recalls the last prompt.
 - Attachment strip: 28 chips, radius 6, max 180 wide, with a remove button.
+- On phones, attachment and command buttons stay on one row. Model/effort labels shrink
+  before actions do; popovers use the input frame's available width, including while a queue
+  and draft are present. Model/provider labels truncate inside the list.
 - Toolbar (8 padding, gap 4): left side has Attach and Commands (`/`); right side has the model chip,
   effort chip, context meter ring (16, shows the percentage used, and a click opens the Context tab),
   then Send (32 square, `--accent`), which becomes Stop (square icon, `--danger` ink on
