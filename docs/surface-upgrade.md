@@ -1,6 +1,6 @@
 # Web and desktop upgrade
 
-Completed on 2026-09-29 on `feature/web-desktop-upgrade`. The Python Worker, CLI, and existing
+Updated on 2026-09-30 on `feature/web-desktop-upgrade`. The Python Worker, CLI, and existing
 messaging gateway are unchanged. Both surfaces continue to use runtime protocol v2.
 
 ## Design and reference study
@@ -16,9 +16,9 @@ Local references:
   compact time groups in Web history.
 - These are design and interaction references, not imported implementations or dependencies.
 
-The specification uses white/charcoal canvases, a restrained amber accent, 14px primary UI
-text, 15px conversation text, 8–12px control corners, 256px navigation, and a readable
-760–820px conversation column. Secondary details are dismissible. Mobile navigation and
+The current specification is `surface-design-v2.md`: warm off-white/green canvases, restrained
+green accents, Manrope UI text, DM Mono details, 264px navigation, and a readable
+800px conversation column. Secondary details are dismissible. Mobile navigation and
 details use exclusive drawers. Suggestions fill the composer and remain editable.
 
 Connection is automatic. Web has no address field in its header, login, or settings; legacy
@@ -38,6 +38,7 @@ specification and the reference study, rather than claiming a pixel match to a c
 | Composition | Per-session drafts, IME protection, growing input, attachments | Per-session drafts, IME protection, attachments written to the selected project |
 | Tasks | Activity tab: only yielded, still-running background commands; output paging, read from start/latest, stop | Same filter and actions; rows lead with the command |
 | Goals | Read, set, pause/resume, clear through explicit actions | Existing goal controls aligned with explicit actions |
+| Information scope | Context/Activity belong to the session, Files to its workspace; Usage is a global sidebar dialog | Same hierarchy; Usage is also in the command palette |
 | Settings | Theme, shortcuts, device sign-out; automatic connection | Grouped provider/appearance settings and separate remote access |
 | Remote use | Same-origin sign-in, automatic ticket renewal/reconnection | Authenticated Gateway, QR/link, device count, revocation and stop |
 
@@ -48,6 +49,13 @@ the selected session's workspace without changing Python.
 
 Reliability fixes include stale socket/ticket isolation, per-session async-result guards,
 failed-send draft recovery, and awaiting IPC before unwrapping runtime errors in preload.
+Task records now replace by ID instead of appending duplicates; in-flight polls preserve
+newer events. Revalidation retains output, expansion, paging cursor, focus, and scroll position.
+Polling pauses when the Activity panel/window is hidden. The old separate Web background-list
+implementation was removed. Working/Waiting/Idle occupy the fixed session header, with no
+extra transcript row. Desktop's Recent queue attempts each queued session once, preventing
+an unpersisted draft from triggering an unbounded request loop. History dates reflect actual
+conversation updates rather than opening a session, and Recent/Projects have separate headings.
 Complete exports read replay data rather than the truncated display timeline. Gateway upload
 validation accepts the full 6 MB limit without regex stack overflow. Obsolete address UI,
 address persistence, superseded styles, and old Desktop background-task request paths were
@@ -61,7 +69,8 @@ removed. Electron was updated from 42.3.3 to 42.11.8, with compatible dependency
 
 The browser consumes the sign-in fragment, removes it from the address bar, and connects
 automatically. Manual address/code entry is available under the collapsed connection section.
-With multiple network adapters, select the address reachable by the other device there.
+With multiple network adapters, Rind recommends the physical Wi-Fi/Ethernet network first,
+using the outbound route to break ties. VPN and virtual adapter addresses remain alternatives.
 The loopback address works only on the desktop computer and does not show a phone QR code.
 
 The Gateway is off by default on every app launch. Its default port is 8766. Closing the
@@ -81,8 +90,15 @@ to the selected local port, preserving the external Host header or using the loc
 Host. Prefer **This computer** when the proxy runs on the same computer. A VPN connection
 directly to the computer normally uses **Local network** and its VPN adapter address.
 
-If a phone cannot connect, check the selected adapter, both devices' network, Desktop's
-running state, Windows firewall access on the private network, and Wi-Fi client/AP isolation.
+If a phone cannot open the page, expand **Can’t open the page?**. On Windows, **Allow Rind on
+the local network** requests UAC approval and creates a rule for this executable, its active TCP
+port, and `LocalSubnet`. It replaces matching Windows prompt-generated TCP blocks for that
+executable (including newer GUID-named rules), and verifies remaining effective block rules.
+Custom or managed rules, unrelated applications, and network profiles are not changed.
+The rule persists for this executable/port; Windows Firewall's **Rind Remote Access** group
+can remove it. It is updated if the repair action is run after choosing another port.
+Both devices must share a reachable network; guest Wi-Fi/AP isolation and phone VPN routing
+can still prevent access. No application can prove phone reachability from a local self-check.
 If the port is already used, choose a different port in Advanced connection. A missing Web
 build in a source checkout is fixed with `npm --prefix desktop run build:web`.
 
@@ -92,7 +108,8 @@ The implementation is entirely under `desktop/`:
   checks, rate/payload/client/request limits, revocation, and deterministic shutdown.
 - WebSocket ping/pong reclaims unreachable devices while preserving healthy connections.
 - Per-client subscriptions do not unsubscribe the shared Desktop Worker. Remote methods
-  use an explicit allowlist; Worker shutdown and credential mutation are unavailable.
+  share the Desktop method policy; Worker shutdown and credential mutation are unavailable.
+  Provider status and the provider-aware model catalog are supported without requiring a session ID.
 - Workspace files reject path traversal and escaping symlinks. Uploads are limited to
   `uploads/`, 6 MB, and exclusive creation; existing files are not overwritten.
 
@@ -119,24 +136,31 @@ does not alter the existing CLI release process.
 
 ## Verification
 
-Local Windows verification on 2026-09-29, Node 22.19.0:
+Local Windows verification on 2026-09-30, Node 22.19.0:
 
-- Web: 269 tests passed, including connection races, automatic-address behavior, pairing,
+- Web: 352 tests passed, including connection races, automatic-address behavior, pairing,
   mobile drawers, queues, tasks, goals, and composition.
-- Desktop: 127 tests passed, including runtime lifecycle, IPC error propagation, task
+- Desktop: 220 tests passed, including runtime lifecycle, IPC error propagation, task
   cursors, full replay export, Gateway isolation/revocation, upload boundaries, and heartbeat.
 - Desktop TypeScript check and Web/Desktop production builds passed.
-- `npm audit` reported zero vulnerabilities in both dependency trees at verification time.
-- Real Chromium: 1440×1000 and 390×844 viewports, light/dark, settings, navigation,
+- Real Chromium: 1440×960 and 390×844 viewports, light/dark, settings, navigation,
   drafts, tasks/goals, pairing-fragment removal, streaming, and revocation.
-- Real Electron main/preload/renderer with an isolated stdio fixture: settings, task
-  paging that survives refresh, LAN Gateway browser-to-Desktop messages, revocation,
-  shutdown that preserves the Worker, and draft recovery after a failed send/session switch.
+- Real Electron main/preload/renderer with isolated settings and a real Python Worker:
+  session history, remote pairing, Usage, and workspace files. Synthetic task events/read
+  responses exercise 100 duplicate updates, preserved focus/output/scroll, and unchanged
+  transcript/composer geometry across turn start/end. Web also verifies that closing the
+  Inspector stops polling. No model inference is needed for these checks.
+- The real-Worker smoke test now covers LAN HTTP assets, authenticated one-time ticket,
+  WebSocket initialization, sessions/replay/tasks, global usage, and read-only provider status.
+- Windows firewall repair was applied and its effective rules inspected. The user confirmed
+  that their phone could open the login page after the matching TCP block was removed.
+  Firewall regression tests cover legacy/GUID prompt rules, custom/managed blocks, unrelated
+  programs and UDP, without modifying the machine's firewall during the test suite.
 
 Browser/IAB was unavailable, so visual and interaction checks used Playwright Chromium and
 Electron. Screenshots were inspected with `view_image`. No live model calls, changes to
 personal settings, public deployment, or access to real sessions were used for visual QA.
-The Desktop suite also runs the existing real Python JSONL lifecycle smoke test without
+The Desktop suite runs the real Python JSONL and Gateway lifecycle smoke test without
 calling a provider. Temporary screenshots, fixture state, scripts, and processes are removed
 after verification.
 
@@ -145,15 +169,18 @@ Visual review ledger:
 | Check | Specification / observation | Result or correction |
 | --- | --- | --- |
 | Content hierarchy | Conversation and composer remain primary | Readable centered column; details dismissible |
-| Palette | Neutral light/dark surfaces, restrained amber | Both themes inspected; transition timing accounted for in screenshots |
+| Palette | v2 warm off-white/green surfaces and green accent | Existing tokens preserved; light/dark inspected after transitions |
 | Typography | Local UI/mono font stacks and consistent control sizing | Conversation, settings, task output and navigation inspected |
 | Settings controls | Clear labels and ordinary controls | Removed address inputs; repaired oversized Desktop checkboxes |
 | Remote access | Scan-first flow with secondary manual settings | Fixed dialog padding/scroll containment and loopback-specific guidance |
 | Mobile | Single-column conversation with exclusive drawers | 390px viewport checked for overflow; full drawer inspected after animation |
 | Visible copy | Product actions rather than transport configuration | No WS/token/ticket setup controls; only developer docs expose transport details |
+| Scope | Global vs. session vs. workspace | Usage footer/dialog, three inspector tabs, explicit scope label |
+| Task stability | One row per identity, no destructive output refresh | Native/React nodes, focus and scroll verified across updates |
+| Working state | Header status only | Transcript and composer bounding boxes unchanged at turn start/end |
 
 Native Desktop project/settings controls and Web's mobile navigation are intentionally
 different. There is no generated concept image or pixel-fidelity claim. Remaining validation
-boundaries: no complete installer-install test, real phone hardware, public HTTPS/proxy
+boundaries: no complete installer-install test, full authenticated workflow on phone hardware, public HTTPS/proxy
 deployment, or local macOS/Linux execution. The new hosted CI workflow has not been run from
 this local checkout.

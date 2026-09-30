@@ -75,11 +75,16 @@ Each status color has a `-soft` background (same hue, ~12% alpha).
   buttons (28 square, 16px glyphs): tasks, inspector toggle, overflow menu.
 - Conversation column: `min(800px, 100%)` centered with 16 inline padding. It keeps at least
   420px when the inspector is open; the inspector closes first when space runs out.
-- Inspector: tabs for Context, Activity, Files, and Usage. It is dismissible, and its width persists.
+- Inspector: tabs for Context, Activity, and Files. It is dismissible, and its width persists.
+  A scope line identifies Context/Activity as the current session, and Files as the workspace.
+  Usage is a separate global dialog reached from the sidebar footer (all projects and sessions).
   The Activity tab is one scrollable column — after LobeHub's WorkingSidebar overview — stacking the
   live plan checklist, background commands the agent yielded that are still running, and the goal
   controls, each as a card with a compact uppercase section head. There is no plan deck beside the
   composer: `update_plan` state lives in the Activity tab only.
+  Tasks are keyed by task/background ID: updates replace the existing row. Revalidation keeps
+  prior output, focus, expansion, history cursor, and scroll position. Poll only while visible;
+  isolate late responses when the viewed session changes.
 - Mobile (< 768): the sidebar and inspector become exclusive drawers (320, scrim
   `#0008`), and the header grows to 48 with 36 icon blocks.
 
@@ -89,13 +94,16 @@ Each status color has a `-soft` background (same hue, ~12% alpha).
 - Search field (32, 14px search prefix icon, `Ctrl/Cmd+K` also opens the command palette).
 - History grouped by time: Today, Yesterday, Previous 7 days, Previous 30 days, then month
   names. Group labels are 12px, `--dim`, weight 600, 8px top padding, 28 high.
+  Dates use conversation activity, not when a user opens an old session. Desktop shows up to
+  50 saved sessions from registered projects. Recent sessions and Projects have separate
+  headings and a dividing rule; they share the sidebar's scroll area.
 - Rows are 32 high with 6 radius and 8 inline padding. Hover is `--fill-1`; active is `--fill-2` with
   `--text` weight 500. A running session shows a 12px spinner before its title.
 - Row actions: a 24 square overflow button at the right edge, opacity 0 until row hover,
   focus-within, or open menu. The title fades with a mask
   (`linear-gradient(90deg,#000 calc(100% - 48px),transparent calc(100% - 24px))`) instead of a
   covering plate. Menu items: Fork, Export replay, separator, Delete (danger, confirms).
-- Footer: Settings (and Remote access on Desktop) as 32 rows.
+- Footer: global Usage; Web also has Settings. Desktop settings and remote access stay in its top bar.
 
 ## 4. Conversation
 
@@ -107,7 +115,8 @@ Each status color has a `-soft` background (same hue, ~12% alpha).
   in over 150ms on hover or focus-within. It stays visible while its menu is open and on the latest
   assistant message. Assistant: Copy, Fork from here (when supported), time label. User:
   Copy, Edit & resend (restores text into the composer).
-- Streaming: a blinking 2×14 caret at the end of the text, plus a shimmer on the "Working…" line.
+- Streaming: a blinking 2×14 caret at the end of the text. Working/Waiting/Idle use the existing
+  fixed-height session header. Starting or finishing a turn never inserts a status row into the transcript.
 - Errors: a `--danger-soft` block with a `--danger` 1px left rule, radius 6, and a Retry action.
 - Scroll: stick to the bottom while streaming. When the user scrolls up, a round 32 "Jump to latest"
   button appears at bottom center, 16 above the composer.
