@@ -4,8 +4,8 @@ import { Menu } from "../overlays/Menu.jsx";
 import { toDate } from "../../lib/sessionTime.js";
 
 // One 32px session row (spec section 3, after LobeHub's topic item): title with
-// a fade mask, a running spinner or unread dot, and a 24px overflow button that
-// appears on hover/focus. The overflow menu carries Fork, Export replay and a
+// ellipsis, a running spinner or unread dot, and a reserved 24px overflow button
+// that fades in on hover/focus. The menu carries Fork, Export replay and a
 // confirmed Delete; the current session cannot be deleted from here.
 export function SessionRow({ session, id, current, unread, running, canFork, canExport, onSelect, onFork, onExport, onRequestDelete }) {
   const [menuOpen, setMenuOpen] = useState(false);

@@ -465,3 +465,47 @@ mismatch was found in these inspected states. The timestamp projection is the
 documented scope exception. Temporary QA settings, sessions, model fixture, processes
 and screenshots were removed after inspection. This verification does not represent
 a newly packaged installer or a physical-phone test.
+
+## Sidebar pagination and title visibility — 2026-09-30
+
+This focused correction follows `docs/surface-design-v2.md`, section 3. References
+inspected: Jan's `web-app/src/containers/ThreadList.tsx` and
+`components/ui/sidebar.tsx` (reserved menu space and truncated titles), plus
+LobeHub's `src/features/NavPanel/components/NavItem.tsx` (hover/focus actions).
+Jan's reserved-space approach fits this sidebar; the old title-width gradient
+could erase one- and two-character titles entirely.
+
+- Both surfaces use a transparent, full-width Load more row with left-aligned
+  13px text, 32px height and a trailing chevron. Loading replaces the chevron with
+  a spinner, retains the same bounds, exposes busy state and disables the button.
+  Desktop project pagination shares the same styling.
+- Desktop reserves menu space at rest and uses ellipsis for long titles. Hover
+  changes only the menu opacity. Web keeps its separate action slot and reveals
+  it when the row receives keyboard focus.
+- Browser inspection exposed a second cause of missing titles: Web's implicit
+  grid column could grow to fit a long title, then scroll horizontally when an
+  offscreen action received focus. A shrinkable grid track and row minimum width
+  keep titles, actions and pagination inside the sidebar.
+- Removed the obsolete mask, old pagination selectors and stale fade-mask comment.
+  The design contract now documents stable title bounds and current row sizes.
+  Python Worker and gateway implementation were not changed.
+
+Verification: 10 Web sidebar tests and 10 Desktop sidebar/session tests passed;
+Desktop TypeScript and both production builds passed. Browser/IAB had no enabled
+surfaces, so Playwright exercised the built Electron app and Chromium through the
+real local Desktop gateway with isolated session data. The 35 recorded checks
+covered project/recent rows, selected rows, one/two-character Chinese and English
+titles, long titles, 232/264px Desktop sidebars and 1280/390/320px Web viewports.
+Hover/focus preserved title bounds, menu buttons stayed within the sidebar, and
+the Web list had no horizontal overflow. Pagination loaded 10 → 12 sessions and
+removed its control at the end. Delaying the Web pagination request also verified
+fixed loading bounds, busy/disabled state and one request despite a repeated click.
+
+Screenshots of light/dark, narrow, menu-open and loading states were read back
+with `view_image` against the existing design contract; no new bitmap concept was
+needed for this local fix. Checked text alignment, font size, neutral fills,
+chevron/spinner sizing, title truncation, menu boundaries and mobile fit. No
+navigation or visible copy was added or renamed, and no mismatch remained in the
+inspected states. Temporary QA profiles, sessions, scripts and screenshots were
+removed and their processes closed. This was not an installer or physical-phone
+test.

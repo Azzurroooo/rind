@@ -107,12 +107,19 @@ Each status color has a `-soft` background (same hue, ~12% alpha).
   the project store; Web increases the worker's list limit in steps of 10 (worker maximum 100).
   The Web project selector shows the selected folder on the Rind computer. New session
   uses this confirmed folder, never an unsubmitted path draft or the phone's filesystem.
-- Rows are 32 high with 6 radius and 8 inline padding. Hover is `--fill-1`; active is `--fill-2` with
-  `--text` weight 500. A running session shows a 12px spinner before its title.
+- Rows are 32 high on Desktop and 36 on Web, with 6 radius and 8 inline padding.
+  Hover is `--fill-1`; active is `--fill-2`. A running session shows a compact spinner.
 - Row actions: a 24 square overflow button at the right edge, opacity 0 until row hover,
-  focus-within, or open menu. The title fades with a mask
-  (`linear-gradient(90deg,#000 calc(100% - 48px),transparent calc(100% - 24px))`) instead of a
-  covering plate. Menu items: Fork, Export replay, separator, Delete (danger, confirms).
+  focus-within, or open menu; always visible on touch. Reserve its space at rest, after
+  Jan's sidebar menu action, so revealing it never changes the title width. Truncate
+  long titles with an ellipsis; never mask the title or cover short text with a gradient.
+  Keep the Web list's grid track shrinkable (`minmax(0, 1fr)`), so long titles cannot
+  widen the list or make focusing the menu scroll short titles out of view.
+  Menu items: Fork, Export replay, separator, Delete (danger, confirms).
+- Pagination: a full-width, 32px transparent row with 8px inline padding, muted 13px
+  left-aligned text and a 14px trailing chevron. Match session-row hover and focus styling;
+  no standalone button border or fill. Loading swaps the chevron for a spinner without
+  changing geometry, marks the row busy and disables repeat requests.
 - Footer: global Usage; Web also has Settings. Desktop settings and remote access stay in its top bar.
 
 ## 4. Conversation

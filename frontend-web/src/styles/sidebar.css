@@ -54,11 +54,11 @@
 }
 .sidebar-search-clear:hover { color: var(--text); background: var(--fill-2); }
 
-.session-list { flex: 1; min-height: 0; overflow-y: auto; display: grid; align-content: start; gap: var(--space-2); margin: 0 calc(var(--space-2) * -1); padding: 0 var(--space-2); }
+.session-list { flex: 1; min-height: 0; overflow-y: auto; display: grid; grid-template-columns: minmax(0, 1fr); align-content: start; gap: var(--space-2); margin: 0 calc(var(--space-2) * -1); padding: 0 var(--space-2); }
 .project-workspace { display: grid; gap: 2px; padding: 0 8px 8px; color: var(--dim); font-size: var(--text-meta); }
 .project-workspace code { overflow-wrap: anywhere; color: var(--muted); font-size: 11px; line-height: 1.5; }
 .session-item {
-  position: relative; display: flex; align-items: center;
+  position: relative; display: flex; align-items: center; min-width: 0;
   border-radius: var(--radius-control); color: var(--muted);
 }
 .session-item:hover, .session-item.menu-open { background: var(--fill-1); color: var(--text); }
@@ -72,8 +72,8 @@
 .session-running { flex: none; color: var(--accent); }
 .session-unread { flex: none; width: 6px; height: 6px; border-radius: 50%; background: var(--accent); }
 .session-menu { flex: none; opacity: 0; transition: opacity var(--motion-fast) var(--ease); }
-.session-item:hover .session-menu, .session-item.menu-open .session-menu,
-.session-item.selected .session-menu, .session-menu:focus-within { opacity: 1; }
+.session-item:hover .session-menu, .session-item:focus-within .session-menu, .session-item.menu-open .session-menu,
+.session-item.selected .session-menu { opacity: 1; }
 .session-more {
   display: inline-grid; place-items: center; width: 24px; height: 24px; margin-right: var(--space-1); padding: 0;
   border: 0; border-radius: var(--radius-chip); background: transparent; color: var(--muted);
@@ -82,11 +82,15 @@
 @media (hover: none) { .session-menu { opacity: 1; } }
 
 .sidebar-empty { display: flex; align-items: center; gap: var(--space-2); padding: var(--space-4) var(--space-2); color: var(--muted); font-size: var(--text-dense); }
-.load-more {
-  height: var(--control-md); margin-top: var(--space-1);
+.sidebar-load-more {
+  display: flex; align-items: center; justify-content: space-between; gap: var(--space-2);
+  width: 100%; min-width: 0; height: var(--control-md); margin-top: var(--space-1); padding: 0 var(--space-2);
   border: 0; border-radius: var(--radius-control); background: transparent; color: var(--muted); font-size: var(--text-dense);
+  text-align: left;
+  transition: background-color var(--motion-fast) var(--ease), color var(--motion-fast) var(--ease);
 }
-.load-more:hover { background: var(--fill-1); color: var(--text); }
+.sidebar-load-more:hover:not(:disabled) { background: var(--fill-1); color: var(--text); }
+.sidebar-load-more-icon { flex: none; color: var(--dim); }
 
 .sidebar-footer { display: flex; align-items: center; gap: var(--space-1); padding-top: var(--space-2); border-top: 1px solid var(--line); }
 .sidebar-footer-button {

@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { BarChart3, Bell, History, Search, Settings, SquarePen, X } from "lucide-react";
+import { BarChart3, Bell, ChevronDown, History, LoaderCircle, Search, Settings, SquarePen, X } from "lucide-react";
 import { ConfirmDialog } from "../overlays/ConfirmDialog.jsx";
 import { ProjectSelector } from "./ProjectSelector.jsx";
 import { SessionRow } from "./SessionRow.jsx";
@@ -107,10 +107,15 @@ export function Sidebar({
           );
         })}
         {hasMore && !search && (
-          <button type="button" className="load-more" disabled={loadingMore} onClick={async () => {
+          <button type="button" className="sidebar-load-more" disabled={loadingMore} aria-busy={loadingMore} onClick={async () => {
             setLoadingMore(true);
             try { await onLoadMore?.(); } finally { setLoadingMore(false); }
-          }}>{loadingMore ? "Loading…" : "Load more"}</button>
+          }}>
+            <span>{loadingMore ? "Loading…" : "Load more"}</span>
+            {loadingMore
+              ? <LoaderCircle size={14} className="sidebar-load-more-icon spin" aria-hidden="true" />
+              : <ChevronDown size={14} className="sidebar-load-more-icon" aria-hidden="true" />}
+          </button>
         )}
       </nav>
       <div className="sidebar-footer">
