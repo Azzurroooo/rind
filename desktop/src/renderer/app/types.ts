@@ -59,6 +59,9 @@ export type AppState = {
   providerNames: Record<string, string>
   projects: DesktopProject[]
   recentSessions: DesktopRecentSession[]
+  recentSessionTotal: number
+  recentLimit: number
+  recentLoading: boolean
   fallbackProjectPath: string
   pendingRecentSessionIds: Set<string>
   sessionPages: Record<string, DesktopSessionSummary[]>

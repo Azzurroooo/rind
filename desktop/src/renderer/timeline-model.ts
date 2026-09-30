@@ -52,7 +52,7 @@ export type PlanEntry = {
   durationMs: number
 }
 export type Entry =
-  | { kind: "user"; id: string; content: string }
+  | { kind: "user"; id: string; content: string; inputId?: string }
   | { kind: "assistant"; id: string; content: string; turnId: string }
   | ToolEntry
   | { kind: "file"; id: string; filePath: string }
@@ -86,8 +86,9 @@ export function boundText(value: string, limit = maxEntryChars) {
   return value.length > limit ? `${value.slice(0, limit)}\n\n[Output truncated]` : value
 }
 
-export function addUserMessage(state: ConversationState, content: string): ConversationState {
-  return appendEntry(closeAssistant(state), { kind: "user", id: "", content: boundText(content) })
+export function addUserMessage(state: ConversationState, content: string, inputId?: string): ConversationState {
+  if (inputId && state.entries.some((entry) => entry.kind === "user" && entry.inputId === inputId)) return state
+  return appendEntry(closeAssistant(state), { kind: "user", id: "", content: boundText(content), ...(inputId ? { inputId } : {}) })
 }
 
 export function addCommandResult(
@@ -104,11 +105,12 @@ export function reduceEvent(state: ConversationState, envelope: RuntimeEvent): C
   const turnId = envelope.turnId
   switch (envelope.type) {
     case "turn_started": return {
-      ...closeAssistant(state),
+      ...closeAssistant(asString(event.input) ? addUserMessage(state, asString(event.input), asString(event.client_input_id) || turnId) : state),
       activeTurnId: turnId,
       turnStartedAt: Date.now(),
       ...(state.plan && (state.plan.error || state.plan.status === "error") ? { plan: undefined } : {}),
     }
+    case "queued_input_delivered": return addUserMessage(state, asString(event.input), asString(event.input_id))
     case "turn_step_retry": return appendSystem(resetActiveStep(state), retryLine(event))
     case "context_compacted": return appendSystem(closeAssistant(state), compactionLine(event))
     case "context_built": {

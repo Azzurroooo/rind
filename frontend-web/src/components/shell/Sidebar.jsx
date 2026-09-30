@@ -3,11 +3,11 @@ import { BarChart3, Bell, History, Search, Settings, SquarePen, X } from "lucide
 import { ConfirmDialog } from "../overlays/ConfirmDialog.jsx";
 import { ProjectSelector } from "./ProjectSelector.jsx";
 import { SessionRow } from "./SessionRow.jsx";
-import { groupByTime } from "../../lib/timeGroups.js";
+import { interactionTime } from "../../lib/sessionActivity.js";
 import { sessionIdOf } from "../../methods.js";
 
 // Sidebar (spec section 3), after Jan's left panel and LobeHub's topic list:
-// project selector, New session, a title search, time-grouped 32px session
+// project selector, New session, a title search, recent 32px session
 // rows, "Load more", and a footer with notifications and Settings.
 export function Sidebar({
   sessions,
@@ -35,13 +35,14 @@ export function Sidebar({
   const { className: panelClassName = "", ...restPanelAttrs } = panelAttrs;
   const [search, setSearch] = useState("");
   const [pending, setPending] = useState(null); // { id, title, busy, error }
+  const [loadingMore, setLoadingMore] = useState(false);
 
-  const groups = useMemo(() => {
+  const recent = useMemo(() => {
     const needle = search.trim().toLowerCase();
     const list = needle
       ? sessions.filter((session) => String(session.title || session.preview || sessionIdOf(session)).toLowerCase().includes(needle))
       : sessions;
-    return groupByTime(list);
+    return [...list].sort((a, b) => interactionTime(b) - interactionTime(a));
   }, [sessions, search]);
 
   async function confirmDelete() {
@@ -58,13 +59,13 @@ export function Sidebar({
   return (
     <aside ref={panelRef} id="sidebar-panel" className={`sidebar ${panelClassName}`.trim()} tabIndex={-1} style={style} aria-label="Sessions sidebar" {...restPanelAttrs}>
       <div className="sidebar-head">
-        <span className="sidebar-section-label">Project</span>
+        <span className="sidebar-section-label">Projects</span>
         <ProjectSelector {...project} />
+        <button type="button" className="sidebar-new" title={project?.workspace ? `New session in ${project.workspace}` : undefined} onClick={onNew} disabled={!project?.workspace}>
+          <SquarePen size={16} aria-hidden="true" />
+          <span>New session</span>
+        </button>
       </div>
-      <button type="button" className="sidebar-new" onClick={onNew} disabled={!project?.workspace}>
-        <SquarePen size={16} aria-hidden="true" />
-        <span>New session</span>
-      </button>
       <div className="sidebar-search">
         <Search size={14} aria-hidden="true" />
         <input
@@ -83,35 +84,33 @@ export function Sidebar({
       </div>
       <nav className="session-list" aria-label="Sessions">
         <h2 className="sidebar-section-label">Recent sessions</h2>
-        {groups.length === 0 ? (
+        {recent.length === 0 ? (
           <div className="sidebar-empty"><History size={15} aria-hidden="true" />{" "}{search ? "No matching sessions" : "No sessions yet"}</div>
-        ) : groups.map((group) => (
-          <section key={group.id} className="session-group" aria-label={group.label}>
-            <h3 className="session-group-label">{group.label}</h3>
-            {group.items.map((session) => {
-              const id = sessionIdOf(session);
-              const current = id === activeId;
-              return (
-                <SessionRow
-                  key={id}
-                  session={session}
-                  id={id}
-                  current={current}
-                  unread={!current && Boolean(unreadIds?.has?.(id))}
-                  running={Boolean(runningIds?.has?.(id))}
-                  canFork={canFork}
-                  canExport={canExport}
-                  onSelect={onSelect}
-                  onFork={onFork}
-                  onExport={onExport}
-                  onRequestDelete={(targetId, title) => setPending({ id: targetId, title, busy: false, error: "" })}
-                />
-              );
-            })}
-          </section>
-        ))}
+        ) : recent.map((session) => {
+          const id = sessionIdOf(session);
+          const current = id === activeId;
+          return (
+            <SessionRow
+              key={id}
+              session={session}
+              id={id}
+              current={current}
+              unread={!current && Boolean(unreadIds?.has?.(id))}
+              running={Boolean(runningIds?.has?.(id))}
+              canFork={canFork}
+              canExport={canExport}
+              onSelect={onSelect}
+              onFork={onFork}
+              onExport={onExport}
+              onRequestDelete={(targetId, title) => setPending({ id: targetId, title, busy: false, error: "" })}
+            />
+          );
+        })}
         {hasMore && !search && (
-          <button type="button" className="load-more" onClick={() => onLoadMore?.()}>Load more</button>
+          <button type="button" className="load-more" disabled={loadingMore} onClick={async () => {
+            setLoadingMore(true);
+            try { await onLoadMore?.(); } finally { setLoadingMore(false); }
+          }}>{loadingMore ? "Loading…" : "Load more"}</button>
         )}
       </nav>
       <div className="sidebar-footer">

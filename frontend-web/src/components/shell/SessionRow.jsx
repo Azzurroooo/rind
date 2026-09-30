@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Download, GitFork, LoaderCircle, MoreHorizontal, Trash2 } from "lucide-react";
 import { Menu } from "../overlays/Menu.jsx";
-import { toDate } from "../../lib/timeGroups.js";
+import { toDate } from "../../lib/sessionTime.js";
 
 // One 32px session row (spec section 3, after LobeHub's topic item): title with
 // a fade mask, a running spinner or unread dot, and a 24px overflow button that

@@ -1,5 +1,5 @@
 export const REASONING_EFFORTS = Object.freeze(["low", "medium", "high", "xhigh", "max"]);
-export const SESSION_PAGE = 30; // session/list page size; the server caps limit at 100
+export const SESSION_PAGE = 10; // session/list page size; the server caps limit at 100
 export const SESSION_LIMIT_MAX = 100;
 export const INTERRUPT_ARM_MS = 3000; // second Esc within 3s cancels the turn
 // Below 768px the sidebar and inspector become exclusive drawers (spec §2).

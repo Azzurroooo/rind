@@ -1,9 +1,10 @@
 import type { DesktopProject, DesktopRecentSession, DesktopSessionSummary } from "../preload/types.ts"
-import { timeGroupFor } from "./session-groups.ts"
 
 export type SidebarStructureState = {
   projects: DesktopProject[]
   recentSessions: DesktopRecentSession[]
+  recentSessionTotal?: number
+  recentLoading?: boolean
   sessionPages: Record<string, DesktopSessionSummary[]>
   sessionTotals: Record<string, number>
   expandedProjects: Iterable<string>
@@ -50,6 +51,8 @@ export function projectListStructureKey(state: SidebarStructureState) {
 
 export function recentListStructureKey(state: SidebarStructureState) {
   return JSON.stringify({
+    total: state.recentSessionTotal,
+    loading: state.recentLoading,
     search: (state.sessionSearch || "").trim().toLocaleLowerCase(),
     deleteConfirmId: state.deleteConfirmId || "",
     deleteBusyId: state.deleteBusyId || "",
@@ -59,7 +62,6 @@ export function recentListStructureKey(state: SidebarStructureState) {
       .map((session) => ({
         ...sessionStructure(session),
         lastInteractedAt: session.lastInteractedAt,
-        group: timeGroupFor(session.lastInteractedAt).key,
       })),
   })
 }

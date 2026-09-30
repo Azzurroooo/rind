@@ -33,6 +33,9 @@ export const state: AppState = {
   providerNames: {} as Record<string, string>,
   projects: [],
   recentSessions: [],
+  recentSessionTotal: 0,
+  recentLimit: 10,
+  recentLoading: false,
   fallbackProjectPath: "",
   pendingRecentSessionIds: new Set(),
   sessionPages: {},
@@ -87,7 +90,7 @@ export const state: AppState = {
 export const toolOpenRequests = new Map<string, number>()
 export const replayRequests = new Map<string, Promise<void>>()
 export const uploadPromises = new Map<string, Promise<void>>()
-export const preparingPrompts = new Set<string>()
+export const preparingPrompts = new Map<string, symbol>()
 
 export const chipFileBacklog = new Map<string, File>()
 

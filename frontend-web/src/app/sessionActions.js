@@ -2,6 +2,7 @@ import { methods, sessionIdOf } from "../methods.js";
 import { exportConversation, writePreference } from "../lib/sessionPreferences.js";
 import { normalizeModelList } from "../lib/models.js";
 import { SESSION_LIMIT_MAX, SESSION_PAGE, errorText } from "./constants.js";
+import { applyInteractions, rememberInteraction } from "../lib/sessionActivity.js";
 
 // Session index, switching, subscriptions and per-session metadata (models,
 // context). The server has no list offset: pagination steps `limit` (max 100).
@@ -19,7 +20,7 @@ export function createSessionActions(ctx) {
       const result = await client.request(methods.sessionList, params);
       if (run !== refs.connectionRun.current || requestId !== refs.listRequest.current) return;
       const list = Array.isArray(result?.sessions) ? result.sessions : [];
-      ctx.setSessions(list);
+      ctx.setSessions(applyInteractions(list, client.url || endpoint));
       ctx.setHasMoreSessions(list.length >= limit && limit < SESSION_LIMIT_MAX);
       void syncSubscriptions(list);
     } catch {
@@ -193,7 +194,7 @@ export function createSessionActions(ctx) {
   }
 
   function targetWorkspace() {
-    return ctx.workspaceDraft.trim() || ctx.selectedWorkspace || ctx.info.workspace_root;
+    return ctx.selectedWorkspace || refs.info.current.workspace_root;
   }
 
   async function createSession() {
@@ -230,7 +231,7 @@ export function createSessionActions(ctx) {
       ctx.setSelectedWorkspace(workspace);
       ctx.setWorkspaceDraft(workspace);
       ctx.setWorkspaces((current) => [...new Set([...current, workspace])]);
-      ctx.setSessions(nextSessions);
+      ctx.setSessions(applyInteractions(nextSessions, refs.client.current.url || endpoint));
       ctx.setHasMoreSessions(nextSessions.length >= limit && limit < SESSION_LIMIT_MAX);
       void syncSubscriptions(nextSessions);
       const currentId = sessionIdOf(ctx.info);
@@ -290,6 +291,13 @@ export function createSessionActions(ctx) {
   async function handleSelectSession(sessionId) {
     ctx.layout.closeDrawersSilently();
     await loadSession(sessionId, true);
+    if (sessionId === refs.info.current.session_id) touchSession(sessionId);
+  }
+
+  function touchSession(sessionId) {
+    const key = refs.client.current?.url || endpoint;
+    rememberInteraction(key, sessionId);
+    ctx.setSessions((sessions) => applyInteractions(sessions, key));
   }
 
   // Server errors (InvalidRequest for the current session, TurnActive,
@@ -307,7 +315,7 @@ export function createSessionActions(ctx) {
   }
 
   return {
-    refreshSessions, loadMoreSessions, syncSubscriptions, refreshModels, refreshProviders, refreshContext, loadSession,
+    refreshSessions, loadMoreSessions, syncSubscriptions, refreshModels, refreshProviders, refreshContext, loadSession, touchSession,
     createSession, selectWorkspace, clearActiveSession, forkSession, exportSession, handleSelectSession, deleteSession,
   };
 }

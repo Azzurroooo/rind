@@ -1,4 +1,4 @@
-import { methods, sessionIdOf } from "../methods.js";
+import { methods } from "../methods.js";
 import { fileToBase64, uploadTargetPath } from "../lib/files.js";
 import { findModelOption } from "../lib/models.js";
 import { questionKey } from "../state/conversationReducer.js";
@@ -25,23 +25,27 @@ export function createTurnActions(ctx) {
   async function submit(composed, { mode = QUEUE_MODES.followUp } = {}) {
     const text = String(composed ?? ctx.input).trim();
     if (!text || !client() || refs.switching.current) return;
+    const run = refs.connectionRun.current;
     const submittedSession = refs.info.current.session_id || "";
     clearDraft(submittedSession);
     if (text.startsWith("/")) {
       await call().runSlashCommand(text);
       return;
     }
-    if (refs.conv.current.active) {
-      await queueInput(text, submittedSession, mode === QUEUE_MODES.steering ? QUEUE_MODES.steering : QUEUE_MODES.followUp);
+    const starting = refs.promptStarts.current.get(submittedSession);
+    if (starting && !starting.turnId) await starting.ready;
+    if (run !== refs.connectionRun.current) { restoreDraft(text, submittedSession); return; }
+    const turnId = starting?.turnId || (submittedSession === refs.info.current.session_id ? refs.conv.current.activeTurnId : "");
+    if (turnId || (submittedSession === refs.info.current.session_id && refs.conv.current.active)) {
+      await queueInput(text, submittedSession, mode === QUEUE_MODES.steering ? QUEUE_MODES.steering : QUEUE_MODES.followUp, turnId);
       return;
     }
     await sendPrompt(text, submittedSession);
   }
 
-  async function queueInput(text, sessionId, mode) {
+  async function queueInput(text, sessionId, mode, turnId) {
     const run = refs.connectionRun.current;
     const method = mode === QUEUE_MODES.steering ? methods.sessionSteer : methods.sessionFollowUp;
-    const turnId = refs.conv.current.activeTurnId;
     try {
       // Steer is turn-scoped: the kernel rejects it without the active turn_id.
       const params = mode === QUEUE_MODES.steering && turnId ? { session_id: sessionId, input: text, turn_id: turnId } : { session_id: sessionId, input: text };
@@ -49,9 +53,14 @@ export function createTurnActions(ctx) {
       if (run !== refs.connectionRun.current || sessionId !== refs.info.current.session_id) return;
       const inputId = String(result?.input_id || "").trim();
       if (inputId) dispatchConversation({ kind: "queue_input", inputId, input: text, mode });
-      else say("system", `Queued input accepted: ${text}`);
+      else throw new Error("The runtime did not confirm the queued message.");
     } catch (error) {
       if (run !== refs.connectionRun.current) return;
+      if (error?.type === "TurnNotActive" || error?.name === "TurnNotActive") {
+        // The reply may settle between the click and the queue RPC.
+        await sendPrompt(text, sessionId);
+        return;
+      }
       restoreDraft(text, sessionId);
       if (sessionId === refs.info.current.session_id) say("system", `Unable to queue input: ${errorText(error)}`, "error");
     }
@@ -61,9 +70,9 @@ export function createTurnActions(ctx) {
     const run = refs.connectionRun.current;
     const loadId = refs.sessionLoad.current;
     // First-message auto-session: a brand-new workspace has no session yet.
-    let sessionId = sessionIdOf(refs.info.current);
+    let sessionId = submittedSession;
     if (!sessionId) {
-      const workspace = ctx.workspaceDraft.trim() || ctx.selectedWorkspace || ctx.info.workspace_root;
+      const workspace = ctx.selectedWorkspace || refs.info.current.workspace_root;
       try {
         const result = await client().request(methods.sessionNew, { workspace_root: workspace });
         if (run !== refs.connectionRun.current) return;
@@ -80,13 +89,21 @@ export function createTurnActions(ctx) {
         return;
       }
     }
-    if (sessionId === refs.info.current.session_id) say("user", text);
+    const inputId = newInputId();
+    const starting = { turnId: "", resolve: () => {} };
+    starting.ready = new Promise((resolve) => { starting.resolve = resolve; });
+    refs.promptStarts.current.set(sessionId, starting);
+    if (sessionId === refs.info.current.session_id) dispatchConversation({ kind: "message", role: "user", content: text, inputId });
     try {
-      await client().request(methods.sessionPrompt, { session_id: sessionId, input: text });
+      await client().request(methods.sessionPrompt, { session_id: sessionId, input: text, client_input_id: inputId });
     } catch (error) {
       if (run !== refs.connectionRun.current) return;
       restoreDraft(text, sessionId);
       if (sessionId === refs.info.current.session_id) say("system", `Prompt failed: ${errorText(error)}`, "error");
+    } finally {
+      starting.turnId = "";
+      starting.resolve();
+      if (refs.promptStarts.current.get(sessionId) === starting) refs.promptStarts.current.delete(sessionId);
     }
   }
 
@@ -155,12 +172,7 @@ export function createTurnActions(ctx) {
     const before = entries.slice(0, index < 0 ? entries.length : index);
     const prompt = [...before].reverse().find((entry) => entry?.role === "user" && entry?.content)?.content || "";
     if (!prompt || !client()) return;
-    say("user", prompt);
-    try {
-      await client().request(methods.sessionPrompt, { session_id: refs.info.current.session_id, input: prompt });
-    } catch (error) {
-      say("system", `Prompt failed: ${errorText(error)}`, "error");
-    }
+    await submit(prompt);
   }
 
   // Edit & resend: the message text goes back into the composer.
@@ -340,4 +352,9 @@ export function createTurnActions(ctx) {
     setModel, setEffort, compact, cancelTurn, runGoalCommand, handleGoalAction,
     uploadAttachment, listFiles, readFile, answerQuestion,
   };
+}
+
+// LAN HTTP is not a secure context: randomUUID may not be available on phones.
+function newInputId() {
+  return `input-${Array.from(crypto.getRandomValues(new Uint32Array(4)), (part) => part.toString(16)).join("-")}`;
 }

@@ -336,6 +336,16 @@ describe("conversation reducer — queued inputs (audit #1)", () => {
     expect(state.entries.at(-1)).toMatchObject({ role: "user", content: "hi" });
   });
 
+  it("never consumes another client's queued entry and ignores late acknowledgments", () => {
+    let state = reduceConversation(emptyConversationState(), queueAction);
+    state = reduceConversation(state, event(1, "durable", { type: "queued_input_delivered", input_id: "remote", input: "Remote text", mode: "follow_up" }));
+    expect(state.queued.map((item) => item.inputId)).toEqual(["in-1"]);
+    state = reduceConversation(state, { kind: "queue_input", inputId: "remote", input: "Remote text", mode: "follow_up" });
+    expect(state.queued.map((item) => item.inputId)).toEqual(["in-1"]);
+    state = reduceConversation(state, event(2, "durable", { type: "queued_input_delivered", input_id: "remote", input: "Remote text" }));
+    expect(state.entries.filter((item) => item.content === "Remote text")).toHaveLength(1);
+  });
+
   it("unqueue removes the chip (retrieve) and requeue flips the mode in place (steer)", () => {
     let state = reduceConversation(emptyConversationState(), queueAction);
     state = reduceConversation(state, { kind: "unqueue", inputId: "in-1" });

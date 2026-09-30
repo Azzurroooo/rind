@@ -2,7 +2,7 @@
    frame with the queue tray above, the textarea, then a chip toolbar. */
 
 .composer-wrap {
-  position: relative; flex: none; display: grid; gap: var(--space-2);
+  position: relative; flex: none; display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--space-2); min-width: 0;
   width: 100%; max-width: calc(var(--conversation-width) + var(--space-6) * 2);
   margin: 0 auto; padding: 0 var(--space-6) var(--space-4);
 }
@@ -28,7 +28,7 @@
 .queued-actions .icon-button { width: 24px; height: 24px; }
 
 .composer-shell {
-  position: relative; display: grid; gap: var(--space-1);
+  position: relative; display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--space-1); min-width: 0;
   padding: var(--space-2) var(--space-2) var(--space-2) var(--space-3);
   border: 1px solid var(--line-strong); border-radius: var(--radius-frame);
   background: var(--surface); box-shadow: 0 1px 2px rgb(0 0 0 / .04);
@@ -51,7 +51,10 @@
 
 .composer-toolbar { display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); }
 .composer-tools, .composer-actions { display: flex; align-items: center; gap: 2px; min-width: 0; }
-.composer-tools { flex: 1; flex-wrap: wrap; }
+.composer-tools { flex: none; flex-wrap: nowrap; }
+.composer-actions { flex: 1; justify-content: flex-end; }
+.composer-actions > :not(.chip-menu) { flex-shrink: 0; }
+.composer-chip > svg { flex-shrink: 0; }
 .chip-menu { min-width: 0; }
 
 /* Provider-grouped model picker (after Jan's provider groups and LobeHub's panel). */
@@ -64,19 +67,20 @@
 }
 .model-search input { flex: 1; min-width: 0; border: 0; background: transparent; color: var(--text); font-size: var(--text-dense); outline: none; }
 .model-search input::placeholder { color: var(--dim); }
-.model-picker-list { max-height: 280px; overflow-y: auto; display: grid; gap: var(--space-2); }
-.model-group { display: grid; gap: 1px; }
+.model-picker-list { min-width: 0; max-height: 280px; overflow-y: auto; overflow-x: hidden; display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--space-2); }
+.model-group { min-width: 0; display: grid; grid-template-columns: minmax(0, 1fr); gap: 1px; }
 .model-group-header {
   display: flex; align-items: center; justify-content: space-between; gap: var(--space-2);
   padding: 2px var(--space-2) var(--space-1);
 }
 .model-group-name {
+  min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   color: var(--muted); font-size: var(--text-meta); font-weight: 600;
   text-transform: uppercase; letter-spacing: .05em;
 }
 .model-group-count { color: var(--dim); font-size: var(--text-meta); font-variant-numeric: tabular-nums; }
 .model-option {
-  display: flex; align-items: center; gap: var(--space-2); width: 100%;
+  display: flex; align-items: center; gap: var(--space-2); width: 100%; min-width: 0;
   height: var(--control-md); padding: 0 var(--space-2);
   border: 0; border-radius: var(--radius-control); background: transparent;
   color: var(--text); font-size: var(--text-dense); text-align: left;
@@ -89,7 +93,7 @@
 .model-option-meta { flex: none; color: var(--dim); font-size: var(--text-meta); font-variant-numeric: tabular-nums; }
 .model-picker-empty { padding: var(--space-2) var(--space-3); color: var(--muted); font-size: var(--text-dense); line-height: 1.6; }
 .composer-chip {
-  display: inline-flex; align-items: center; gap: 4px; max-width: 200px;
+  display: inline-flex; align-items: center; gap: 4px; min-width: 0; max-width: 200px;
   height: var(--control-sm); padding: 0 var(--space-2);
   border: 0; border-radius: var(--radius-pill); background: transparent; color: var(--muted); font-size: var(--text-dense);
 }
@@ -115,6 +119,7 @@
 .send-button:active:not(:disabled) { transform: scale(.95); }
 .send-button:disabled { background: var(--fill-2); color: var(--dim); opacity: 1; }
 .send-button.stop { background: var(--text); color: var(--bg); }
+.send-button.steer { background: var(--accent-soft); color: var(--accent); }
 
 /* Slash menu: anchored above the frame. */
 .slash-menu {
@@ -138,4 +143,20 @@
   .composer-wrap { padding: 0 var(--space-3) var(--space-3); }
   .composer-shell textarea { font-size: 16px; }
   .composer-tools .icon-button, .send-button { width: 36px; height: 36px; }
+  .composer-toolbar { gap: 4px; }
+  .composer-actions { gap: 2px; }
+  .composer-actions .composer-chip { padding-inline: 4px; max-width: 112px; }
+  .composer-actions .chip-menu { flex: 0 1 auto; }
+  .composer-actions .composer-chip > svg:first-child { display: none; }
+  /* Anchor the model panel to the full input frame on phones. Its bounds
+     follow the frame above the keyboard, not the narrow model chip. */
+  .composer-actions .chip-menu { position: static; }
+  .composer-actions .menu { left: 0; right: 0; min-width: 0; max-width: 100%; width: auto; }
+  .model-picker-list { max-height: min(280px, 45dvh); }
+}
+
+@media (max-width: 380px) {
+  .composer-actions .composer-chip { max-width: 76px; }
+  .composer-actions .context-ring-button { width: 24px; }
+  .composer-tools .icon-button, .send-button { width: 32px; height: 36px; }
 }

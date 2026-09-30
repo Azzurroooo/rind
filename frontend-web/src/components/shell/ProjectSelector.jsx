@@ -49,6 +49,7 @@ export function ProjectSelector({ workspace, workspaces = [], busy, message, dra
           </button>
         )}
       />
+      {workspace && <div className="project-workspace" title={workspace}><span>Folder on Rind computer</span><code>{workspace}</code></div>}
       {editing && (
         <div className="project-path-row">
           <label htmlFor="workspace-path" className="visually-hidden">Folder on your Rind computer</label>

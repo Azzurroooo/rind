@@ -1,7 +1,7 @@
-/* Sidebar search, history groups and session rows (spec section 3). */
+/* Sidebar search, recent history and session rows (spec section 3). */
 
 .sidebar-section-title { margin: 0; padding: 8px; color: var(--muted); font-size: 12px; font-weight: 700; letter-spacing: .02em; }
-.sidebar-projects { border-top: 1px solid var(--line); margin-top: 8px; padding-top: 8px; }
+.recent-sessions { border-top: 1px solid var(--line); margin-top: 12px; padding-top: 8px; }
 .sidebar-projects .sidebar-heading { margin: 0 0 4px; padding: 0; }
 .sidebar-footer { display: flex; border-top: 1px solid var(--line); margin-top: 8px; padding-top: 8px; }
 .sidebar-footer-button { display: flex; align-items: center; gap: 8px; width: 100%; min-height: 32px; padding: 6px 8px; border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--muted); text-align: left; font-size: 12px; }
@@ -22,17 +22,6 @@
 }
 .session-search-wrap input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
 .session-search-empty { margin: 2px 0 4px; color: var(--dim); font-size: var(--text-meta); }
-
-.session-group { display: grid; gap: 1px; }
-.session-group-label {
-  display: flex;
-  align-items: flex-end;
-  height: 28px;
-  padding: 8px 8px 4px;
-  color: var(--dim);
-  font-size: 12px;
-  font-weight: 600;
-}
 
 .session-item-row { position: relative; min-width: 0; }
 .session-item {

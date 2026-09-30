@@ -278,12 +278,86 @@ describe("App — rail search + pagination (audit #9)", () => {
     fireEvent.click(screen.getByText("Load more"));
     await waitFor(() => {
       const listCalls = requests().filter((entry) => entry.method === "session/list");
-      expect(listCalls.at(-1).params.limit).toBe(60);
+      expect(listCalls.at(-1).params.limit).toBe(20);
     });
 
     const search = screen.getByLabelText("Search sessions");
     fireEvent.change(search, { target: { value: "Session 5" } });
     expect(screen.queryByText("Session 1")).toBeNull();
     expect(screen.getByText("Session 5")).not.toBeNull();
+  });
+});
+
+describe("live input coordination across surfaces", () => {
+  const emit = (type, event = {}, sequence = 901) => act(async () => {
+    h.hooks.current.options.onEvent({ kind: "event", sequence, session_id: "s-1", turn_id: "live-1", durability: "durable", event: { type, ...event } });
+  });
+
+  it("creates sessions in the confirmed project, ignoring a cancelled folder draft", async () => {
+    await renderShell();
+    fireEvent.click(screen.getByRole("button", { name: "Project: rind" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Open another folder…" }));
+    fireEvent.change(screen.getByLabelText("Folder on your Rind computer"), { target: { value: "E:/unconfirmed" } });
+    fireEvent.click(screen.getByRole("button", { name: "Cancel", exact: true }));
+    fireEvent.click(screen.getByRole("button", { name: "New session" }));
+    await waitFor(() => expect(called("session/new")).toBe(true));
+    expect(requests().find((item) => item.method === "session/new").params.workspace_root).toBe("E:/projects/rind");
+  });
+
+  it("keeps queue and direct steer usable while the original prompt request is pending", async () => {
+    await renderShell();
+    let finishPrompt;
+    h.hooks.current.respond = async (method, params) => {
+      if (method === "session/prompt") return new Promise((resolve) => { finishPrompt = resolve; });
+      if (method === "rind/session/follow_up" || method === "rind/session/steer") return { input_id: params.input, mode: method.endsWith("steer") ? "steering" : "follow_up" };
+      return {};
+    };
+    typeAndSend("Start streaming");
+    await waitFor(() => expect(finishPrompt).toBeTypeOf("function"));
+    const prompt = requests().find((item) => item.method === "session/prompt");
+    await emit("turn_started", { user_message_chars: 15, input: "Start streaming", client_input_id: prompt.params.client_input_id });
+    typeAndSend("Queue while pending");
+    await waitFor(() => expect(called("rind/session/follow_up")).toBe(true));
+    fireEvent.change(composerTextarea(), { target: { value: "Steer from a phone" } });
+    fireEvent.click(screen.getByRole("button", { name: "Steer active turn" }));
+    await waitFor(() => expect(called("rind/session/steer")).toBe(true));
+    expect(requests().find((item) => item.method === "rind/session/steer").params.turn_id).toBe("live-1");
+    expect(screen.getAllByText("Start streaming")).toHaveLength(1);
+    await act(async () => finishPrompt({ ok: true }));
+  });
+
+  it("renders a remote user's prompt before its streaming reply without reopening", async () => {
+    await renderShell();
+    await emit("turn_started", { input: "Sent on the desktop", client_input_id: "remote-1", user_message_chars: 19 });
+    await emit("assistant_delta", { text: "Reply in progress" }, 902);
+    await screen.findByText("Sent on the desktop");
+    expect(screen.getAllByText("Sent on the desktop")).toHaveLength(1);
+    await screen.findByText("Reply in progress");
+  });
+
+  it("does not resurrect a queue chip when delivery beats its RPC response", async () => {
+    await renderShell(runningTurn());
+    let confirmQueue;
+    h.hooks.current.respond = async (method) => method === "rind/session/follow_up"
+      ? new Promise((resolve) => { confirmQueue = resolve; }) : {};
+    typeAndSend("Delivered quickly");
+    await waitFor(() => expect(confirmQueue).toBeTypeOf("function"));
+    await emit("queued_input_delivered", { input_id: "fast-1", input: "Delivered quickly", mode: "follow_up" });
+    await act(async () => confirmQueue({ input_id: "fast-1", mode: "follow_up" }));
+    await screen.findByText("Delivered quickly");
+    expect(document.querySelector('.queued-row[data-input-id="fast-1"]')).toBeNull();
+    expect(screen.getAllByText("Delivered quickly")).toHaveLength(1);
+  });
+
+  it("sends a new prompt if the turn settles during the queue request", async () => {
+    await renderShell(runningTurn());
+    h.hooks.current.respond = async (method) => {
+      if (method === "rind/session/follow_up") throw Object.assign(new Error("The requested turn is no longer active."), { type: "TurnNotActive" });
+      return {};
+    };
+    typeAndSend("Keep this message");
+    await waitFor(() => expect(called("session/prompt")).toBe(true));
+    expect(requests().find((item) => item.method === "session/prompt").params.input).toBe("Keep this message");
+    expect(screen.queryByText(/Unable to queue/)).toBeNull();
   });
 });

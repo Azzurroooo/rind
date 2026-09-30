@@ -1,6 +1,7 @@
 export type ComposerElements = {
   prompt: HTMLTextAreaElement
   send: HTMLButtonElement
+  steer?: HTMLButtonElement
   interrupt: HTMLButtonElement
   menuTrigger: HTMLButtonElement
   menu: HTMLElement
@@ -67,6 +68,7 @@ export function composerRegionMarkup() {
           <button type="button" id="context-meter" class="context-meter" data-tooltip="Open the Context tab" aria-controls="inspector" hidden></button>
           <span class="composer-spacer"></span>
           <button id="interrupt" type="button" class="ghost-button danger" title="Stop the running turn (Esc)">Stop</button>
+          <button id="steer" type="button" class="ghost-button" title="Steer the running turn (Alt+Enter)" hidden>Steer</button>
           <button id="send" type="submit" class="primary-button"><span class="send-label">Send</span><span class="send-spinner" aria-hidden="true"></span></button>
         </div>
       </form>
@@ -91,6 +93,10 @@ export function renderComposer(elements: ComposerElements, view: ComposerView) {
     ? "Enter to queue a follow-up, Alt+Enter to steer"
     : "Message Rind — Enter to send, Shift+Enter for a new line"
   elements.send.disabled = unavailable || view.starting
+  if (elements.steer) {
+    elements.steer.hidden = !view.active
+    elements.steer.disabled = unavailable || view.starting || !view.controllingTurn
+  }
   const label = elements.send.querySelector<HTMLElement>(".send-label")
   if (label) label.textContent = view.slashCommandPending
     ? "Running"

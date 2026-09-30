@@ -13,6 +13,7 @@ import { compactCurrentSession } from "./slash-runner.ts"
 import { state } from "./state.ts"
 
 export function bindComposerEvents(): void {
+  requiredElement<HTMLButtonElement>("steer").addEventListener("click", () => runAction(() => sendPrompt("steer"), state.viewedSessionId))
     requiredElement<HTMLFormElement>("composer").addEventListener("submit", (event) => { event.preventDefault(); runAction(() => sendPrompt(), state.viewedSessionId) })
 
   prompt.addEventListener("input", () => {

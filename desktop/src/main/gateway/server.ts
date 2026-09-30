@@ -15,7 +15,7 @@ type Bridge = {
   request: (method: string, params: Record<string, unknown>) => Promise<unknown>
   subscribe: (listener: (event: RuntimeEvent) => void) => () => void
 }
-type Client = { subscriptions: Set<string>; pending: Set<string | number>; selected: string; alive: boolean }
+type Client = { subscriptions: Set<string>; pending: Set<string | number>; selected: string; workspace: string; alive: boolean }
 const allowed = new Set(Object.values(runtimeMethods).filter(isRemoteRuntimeMethod))
 const unscoped = new Set(["session/new", "session/list", "rind/usage/summary", "rind/auth/list", "model/list"])
 const mime: Record<string, string> = { ".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8", ".css": "text/css; charset=utf-8", ".svg": "image/svg+xml", ".png": "image/png", ".ico": "image/x-icon", ".woff2": "font/woff2" }
@@ -195,7 +195,7 @@ export class DesktopGateway {
     ws.send(JSON.stringify(message))
   }
   private accept(ws: WebSocket) {
-    const client: Client = { subscriptions: new Set(), pending: new Set(), selected: "", alive: true }
+    const client: Client = { subscriptions: new Set(), pending: new Set(), selected: "", workspace: "", alive: true }
     const epoch = this.epoch
     this.clients.set(ws, client); this.publish()
     ws.on("pong", () => { client.alive = true })
@@ -221,6 +221,7 @@ export class DesktopGateway {
     if (method === "initialize") {
       const result = object(await this.bridge.initialize())
       client.selected = String(result.session_id || "")
+      client.workspace = String(result.workspace_root || "")
       if (client.selected) client.subscriptions.add(client.selected)
       return { ...result, methods: [...new Set([...allowed, "initialize", "ping", "session/subscribe", "session/unsubscribe"])], gateway: { desktop: true, files_follow_session: true } }
     }
@@ -238,10 +239,16 @@ export class DesktopGateway {
     }
     if (!isRemoteRuntimeMethod(method)) throw new Error("Method is not available through remote access.")
     if (!unscoped.has(method) && !sessionId) throw new Error("session_id is required.")
+    if (method === "session/new") {
+      const workspace = typeof params.workspace_root === "string" ? params.workspace_root.trim() : client.workspace
+      if (!workspace) throw new Error("Choose a project folder on the Rind computer first.")
+      params = { ...params, workspace_root: workspace }
+    }
     if (sessionId && client.subscriptions.size < 128) client.subscriptions.add(sessionId)
     const result = await this.bridge.request(method, params)
     if (method === "session/switch" || method === "session/new") {
       client.selected = String(object(result).session_id || sessionId)
+      client.workspace = String(object(result).workspace_root || params.workspace_root || client.workspace)
       if (client.selected) client.subscriptions.add(client.selected)
     }
     return result

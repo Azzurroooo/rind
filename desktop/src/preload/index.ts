@@ -107,6 +107,7 @@ const api: DesktopApi = {
     select: (path) => ipcRenderer.invoke("projects-select", path),
     remove: (path) => ipcRenderer.invoke("projects-remove", path),
     markRecent: (sessionId) => ipcRenderer.invoke("projects-mark-recent", sessionId),
+    recentPage: (offset, limit) => ipcRenderer.invoke("projects-recent-page", offset, limit),
     updateLayout: (patch) => ipcRenderer.invoke("projects-layout-update", patch),
     sessions: (path, offset, limit) => ipcRenderer.invoke("projects-sessions", path, offset, limit),
   },

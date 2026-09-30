@@ -44,5 +44,5 @@ export function decideTurnEvent(type: string, turnId: string, activeTurnId: stri
 }
 
 export function isTurnNotActive(error: unknown): boolean {
-  return error instanceof Error && error.name === "TurnNotActive"
+  return error instanceof Error && (error.name === "TurnNotActive" || /\bTurnNotActive:/.test(error.message))
 }

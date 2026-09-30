@@ -1,42 +1,7 @@
 import assert from "node:assert/strict"
 import test from "node:test"
 
-import { groupByTime, timeGroupFor } from "../src/renderer/session-groups.ts"
 import { withoutSession } from "../src/renderer/session-removal.ts"
-
-const now = new Date(2026, 8, 29, 15, 0)
-const at = (month, day, hour = 12, year = 2026) => new Date(year, month, day, hour).toISOString()
-
-test("timeGroupFor uses local calendar days", () => {
-  assert.equal(timeGroupFor(at(8, 29, 0), now).label, "Today")
-  assert.equal(timeGroupFor(at(8, 29, 23), now).label, "Today")
-  assert.equal(timeGroupFor(at(8, 28, 23), now).label, "Yesterday")
-  assert.equal(timeGroupFor(at(8, 22), now).label, "Previous 7 days")
-  assert.equal(timeGroupFor(at(8, 21), now).label, "Previous 30 days")
-  assert.equal(timeGroupFor(at(7, 30), now).label, "Previous 30 days")
-  assert.deepEqual(timeGroupFor(at(7, 29), now), { key: "2026-08", label: "August" })
-  assert.deepEqual(timeGroupFor(at(11, 3, 12, 2025), now), { key: "2025-12", label: "December 2025" })
-})
-
-test("timeGroupFor treats future and invalid times safely", () => {
-  assert.equal(timeGroupFor(at(9, 2), now).label, "Today")
-  assert.deepEqual(timeGroupFor("", now), { key: "older", label: "Older" })
-  assert.deepEqual(timeGroupFor("not a date", now), { key: "older", label: "Older" })
-})
-
-test("groupByTime keeps order and merges items into their group", () => {
-  const items = [
-    { id: "a", when: at(8, 29, 14) },
-    { id: "b", when: at(8, 29, 9) },
-    { id: "c", when: at(8, 28) },
-    { id: "d", when: at(6, 4) },
-    { id: "e", when: at(6, 2) },
-  ]
-  const groups = groupByTime(items, (item) => item.when, now)
-  assert.deepEqual(groups.map((group) => group.label), ["Today", "Yesterday", "July"])
-  assert.deepEqual(groups.map((group) => group.items.map((item) => item.id)), [["a", "b"], ["c"], ["d", "e"]])
-  assert.equal(items.length, 5)
-})
 
 function lists() {
   const shared = { id: "s1" }

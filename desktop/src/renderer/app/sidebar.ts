@@ -1,7 +1,6 @@
 import { type DesktopRecentSession, type DesktopSessionSummary } from "../../preload/types.ts"
 import { sameProjectPath as samePath } from "../project-selection.ts"
 import { Ellipsis, LoaderCircle, renderIcon } from "../icons.ts"
-import { groupByTime } from "../session-groups.ts"
 import { withoutSession } from "../session-removal.ts"
 import { filterSessions, projectListStructureKey, recentListStructureKey, type SidebarStructureState } from "../sidebar-rendering.ts"
 import { relativeTime } from "../timeline-model.ts"
@@ -20,6 +19,8 @@ function sidebarStructureState(): SidebarStructureState {
   return {
     projects: state.projects,
     recentSessions: state.recentSessions,
+    recentSessionTotal: state.recentSessionTotal,
+    recentLoading: state.recentLoading,
     sessionPages: state.sessionPages,
     sessionTotals: state.sessionTotals,
     expandedProjects: state.expandedProjects,
@@ -135,9 +136,9 @@ export function renderRecentSessions() {
   }
   const items = [...filtered].sort((left, right) => right.lastInteractedAt.localeCompare(left.lastInteractedAt))
   recentSessions.hidden = false
-  recentList.innerHTML = groupByTime(items, (item) => item.lastInteractedAt)
-    .map((group) => `<div class="session-group" role="group" aria-label="${escapeAttribute(group.label)}"><div class="session-group-label" aria-hidden="true">${escapeHtml(group.label)}</div>${group.items.map(renderRecentSession).join("")}</div>`)
-    .join("")
+  recentList.innerHTML = items.map(renderRecentSession).join("") +
+    (!state.sessionSearch.trim() && state.recentSessions.length < state.recentSessionTotal
+      ? `<button type="button" class="show-more" data-recent-more${state.recentLoading ? " disabled" : ""}>${state.recentLoading ? "Loading…" : "Load more"}</button>` : "")
   syncSidebarSelection()
   syncSidebarRunningState()
 }
@@ -324,6 +325,22 @@ export function bindSidebarEvents(): void {
 
   recentList.addEventListener("click", (event) => {
     const target = event.target as HTMLElement
+    if (target.closest("[data-recent-more]")) {
+      if (state.recentLoading) return
+      state.recentLoading = true
+      renderRecentSessions()
+      runAction(async () => {
+        try {
+          const page = await window.api.projects.recentPage(state.recentSessions.length, 10)
+          const sessions = new Map(state.recentSessions.map((session) => [session.id, session]))
+          for (const session of page.sessions) sessions.set(session.id, session)
+          state.recentSessions = [...sessions.values()].sort((a, b) => b.lastInteractedAt.localeCompare(a.lastInteractedAt))
+          state.recentLimit = Math.max(state.recentLimit, state.recentSessions.length)
+          state.recentSessionTotal = page.total
+        } finally { state.recentLoading = false; renderRecentSessions() }
+      })
+      return
+    }
     if (handleSessionMenuClick(target)) return
     const nextSessionId = target.closest<HTMLButtonElement>("[data-session-id]")?.dataset.sessionId
     if (nextSessionId) runAction(() => switchSession(nextSessionId), nextSessionId)

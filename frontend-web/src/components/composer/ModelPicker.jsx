@@ -134,6 +134,7 @@ export function ModelPicker({ model, providerId = "", models = [], providerNames
                       role="option"
                       data-model-option
                       aria-selected={selected}
+                      title={option.id}
                       className={`model-option${selected ? " selected" : ""}`}
                       onClick={(event) => {
                         event.stopPropagation();

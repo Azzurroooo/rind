@@ -44,12 +44,12 @@ appRoot.innerHTML = `
             ${renderIcon(Search, "session-search-icon")}
             <input id="session-search" type="search" placeholder="Search sessions" aria-label="Search loaded sessions" autocomplete="off" />
           </div>
+          <section class="sidebar-projects" aria-label="Projects"><div class="sidebar-heading"><h2 class="sidebar-section-title">Projects</h2><button id="sidebar-add-project" type="button" class="ghost-button" title="Add project">Add</button></div>
+          <div id="project-list" class="project-list"></div></section>
           <section id="recent-sessions" class="recent-sessions" aria-label="Recent sessions" hidden>
             <h2 class="sidebar-section-title">Recent sessions</h2>
             <div id="recent-list" class="recent-list"></div>
           </section>
-          <section class="sidebar-projects" aria-label="Projects"><div class="sidebar-heading"><h2 class="sidebar-section-title">Projects</h2><button id="sidebar-add-project" type="button" class="ghost-button" title="Add project">Add</button></div>
-          <div id="project-list" class="project-list"></div></section>
         </div>
         <div class="sidebar-footer"><button id="open-usage" type="button" class="sidebar-footer-button">${renderIcon(ChartNoAxesColumn)}<span>Usage</span></button></div>
       </aside>
@@ -197,6 +197,7 @@ export const retry = requiredElement<HTMLButtonElement>("retry")
 export const contextMeter = requiredElement("context-meter")
 export const prompt = requiredElement<HTMLTextAreaElement>("prompt")
 export const send = requiredElement<HTMLButtonElement>("send")
+export const steer = requiredElement<HTMLButtonElement>("steer")
 export const interrupt = requiredElement<HTMLButtonElement>("interrupt")
 export const composerMenuTrigger = requiredElement<HTMLButtonElement>("composer-menu-trigger")
 export const composerMenu = requiredElement("composer-menu")

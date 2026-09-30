@@ -26,9 +26,10 @@ export async function retryLastPrompt() {
   const input = state.lastPrompts[sessionId]?.trim()
   if (!sessionId || !input || sessionTurnActive(sessionId)) return
   await ensureRuntime()
-  setConversationFor(sessionId, addUserMessage(conversationFor(sessionId), input))
+  const inputId = crypto.randomUUID()
+  setConversationFor(sessionId, addUserMessage(conversationFor(sessionId), input, inputId))
   if (state.viewedSessionId === sessionId) render()
-  await startTurn(sessionId, input)
+  await startTurn(sessionId, input, undefined, inputId)
   await loadSessions()
   if (state.viewedSessionId === sessionId) render()
 }
@@ -118,12 +119,14 @@ export type RunningSendMode = "queue" | "steer"
 export async function sendPrompt(mode: RunningSendMode = "queue") {
   const draftKey = currentDraftKey()
   if (preparingPrompts.has(draftKey)) return
-  preparingPrompts.add(draftKey)
-  try { await submitPrompt(draftKey, mode) }
-  finally { preparingPrompts.delete(draftKey) }
+  const token = Symbol()
+  preparingPrompts.set(draftKey, token)
+  const release = () => { if (preparingPrompts.get(draftKey) === token) preparingPrompts.delete(draftKey) }
+  try { await submitPrompt(draftKey, mode, release) }
+  finally { release() }
 }
 
-export async function submitPrompt(draftKey: string, mode: RunningSendMode = "queue") {
+export async function submitPrompt(draftKey: string, mode: RunningSendMode = "queue", release = () => {}) {
   if (state.slashCommandPending) {
     state.notice = `Running ${state.slashCommandInput || "command"}...`
     render()
@@ -195,10 +198,15 @@ export async function submitPrompt(draftKey: string, mode: RunningSendMode = "qu
         syncCurrentPendingInputs()
       }
     }
-    setConversationFor(sessionId, addUserMessage(conversationFor(sessionId), input))
+    const inputId = crypto.randomUUID()
+    setConversationFor(sessionId, addUserMessage(conversationFor(sessionId), input, inputId))
     state.lastPrompts[sessionId] = input
     if (state.viewedSessionId === sessionId) render()
-    const result = await startTurn(sessionId, input)
+    // Protect preparation/session creation, not the entire streaming response.
+    // startTurn marks this session active synchronously before yielding.
+    const completion = startTurn(sessionId, input, undefined, inputId)
+    release()
+    const result = await completion
     accepted = true
     clearSentAttachments()
     if (typeof result.session_id === "string" && result.session_id) {
@@ -218,12 +226,13 @@ export async function submitPrompt(draftKey: string, mode: RunningSendMode = "qu
   }
 }
 
-export async function startTurn(sessionId: string, input: string, transientSystemMessages?: unknown) {
+export async function startTurn(sessionId: string, input: string, transientSystemMessages?: unknown, inputId?: string) {
   state.runtimeTurnPending[sessionId] = true
   if (state.viewedSessionId === sessionId) render()
   try {
     return asRecord(await requestForSession(runtimeMethods.sessionPrompt, sessionId, {
       input,
+      ...(inputId ? { client_input_id: inputId } : {}),
       ...(Array.isArray(transientSystemMessages) ? { transient_system_messages: transientSystemMessages } : {}),
     }))
   } finally {

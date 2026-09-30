@@ -245,6 +245,7 @@ function registerIpc() {
     const overview = await projectStore().remove(path)
     return overview
   })
+  ipcMain.handle("projects-recent-page", (_event, offset: number, limit?: number) => projectStore().recentPage(offset, limit))
   ipcMain.handle("projects-mark-recent", (_event, sessionId: unknown) => {
     if (typeof sessionId !== "string") throw new Error("Session id must be a string.")
     return projectStore().markRecent(sessionId)

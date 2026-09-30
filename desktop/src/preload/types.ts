@@ -185,6 +185,7 @@ export type DesktopProject = {
 export type DesktopProjectOverview = {
   projects: DesktopProject[]
   recentSessions: DesktopRecentSession[]
+  recentSessionTotal: number
   activeProjectPath: string
   sidebarOpen: boolean
   sidebarWidth: number
@@ -334,6 +335,7 @@ export type DesktopApi = {
     select: (path: string) => Promise<DesktopProjectOverview>
     remove: (path: string) => Promise<DesktopProjectOverview>
     markRecent: (sessionId: string) => Promise<DesktopProjectOverview>
+    recentPage: (offset: number, limit?: number) => Promise<{ sessions: DesktopRecentSession[]; total: number }>
     updateLayout: (patch: { sidebarOpen?: boolean; sidebarWidth?: number; filesOpen?: boolean; filePanelWidth?: number }) => Promise<DesktopProjectOverview>
     sessions: (path: string, offset: number, limit: number) => Promise<{ sessions: DesktopSessionSummary[]; total: number }>
   }

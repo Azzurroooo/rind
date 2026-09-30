@@ -56,6 +56,7 @@ export function emptyConversationState() {
     question: null, // { sessionId, toolCallId, question, options, status, requestedAt, ttlMs }
     resolvedQuestionKey: "",
     queued: [], // [{inputId, input, mode}] — inputs accepted but not yet delivered
+    settledInputs: {}, // delivery/retrieval can arrive before the queue RPC reply
     collapsedCount: 0, // entries dropped by the TRANSCRIPT_CAP (oldest first)
     turnChanges: null, // { fileCount, added, removed, firstToolCallId } — last finished turn's mutations
     backgroundWait: null, // { count, startedAt } while the turn waits on background processes
@@ -78,11 +79,13 @@ export function reduceConversation(state, action) {
         role: action.role || (action.kind === "system" ? "system" : "user"),
         content: String(action.content || ""),
         tone: action.tone || "",
+        ...(action.inputId ? { inputId: action.inputId } : {}),
       });
     case "queue_input": {
       const inputId = String(action.inputId || "").trim();
       const input = String(action.input || "");
       if (!inputId || !input) return state;
+      if (state.settledInputs[inputId] || state.queued.some((item) => item.inputId === inputId)) return state;
       const mode = action.mode === "steering" ? "steering" : "follow_up";
       const entry = { id: `queued:${inputId}`, role: "queued", inputId, input, mode };
       return withCap({
@@ -94,9 +97,9 @@ export function reduceConversation(state, action) {
     case "unqueue": {
       const inputId = String(action.inputId || "").trim();
       if (!inputId) return state;
-      if (!state.queued.some((item) => item.inputId === inputId)) return state;
       return {
         ...state,
+        settledInputs: settleInput(state, inputId),
         queued: state.queued.filter((item) => item.inputId !== inputId),
         entries: state.entries.filter((entry) => !(entry.role === "queued" && entry.inputId === inputId)),
       };
@@ -196,7 +199,7 @@ function applyTurnEvent(state, event, context) {
     case "task_continuation_failed":
       return appendEntry(state, { role: "system", content: String(event.error || "Background continuation failed."), tone: "error" });
     case "turn_started":
-      return { ...state, active: true, activeTurnId: turnId, streaming: { turnId, text: "" } };
+      return { ...confirmPrompt(state, event.input, event.client_input_id || turnId), active: true, activeTurnId: turnId, streaming: { turnId, text: "" } };
 
     case "assistant_delta": {
       const streaming = state.streaming && state.streaming.turnId === turnId
@@ -374,34 +377,48 @@ function finalizeTurn(state, turnId) {
 // first, mirroring the kernel's FIFO consumption.
 function deliverQueued(state, inputId, input, mode) {
   const cleanId = String(inputId || "").trim();
+  if (cleanId && state.settledInputs[cleanId]) return state;
   let item = null;
   if (cleanId) {
     item = state.queued.find((candidate) => candidate.inputId === cleanId) || null;
   }
-  if (!item) {
+  if (!item && !cleanId) {
     const wantedMode = mode === "steering" ? "steering" : mode === "follow_up" ? "follow_up" : "";
     item = state.queued.find((candidate) => (!wantedMode || candidate.mode === wantedMode)) || null;
   }
-  if (!item) {
-    // Nothing queued locally (e.g. delivery predates the snapshot): still show
-    // the message so the transcript stays faithful.
-    return appendEntry(state, { role: "user", content: String(input || ""), tone: "" });
-  }
+  const id = cleanId || item?.inputId;
+  const content = String(input || item?.input || "");
+  if (!content) return state;
   const delivered = {
-    id: `msg:delivered:${item.inputId}`,
+    id: `msg:delivered:${id}`,
     role: "user",
-    content: String(input || item.input),
+    content,
     tone: "",
   };
-  const index = state.entries.findIndex((entry) => entry.role === "queued" && entry.inputId === item.inputId);
-  const entries = [...state.entries];
-  if (index < 0) entries.push(delivered);
-  else entries[index] = delivered;
+  // The delivery belongs after the work it follows, not at its earlier enqueue position.
+  const next = flushStreaming(state);
+  const entries = [...next.entries.filter((entry) => entry.role !== "queued" || entry.inputId !== id), delivered];
   return withCap({
-    ...state,
-    queued: state.queued.filter((candidate) => candidate.inputId !== item.inputId),
+    ...next,
+    settledInputs: settleInput(state, id),
+    queued: state.queued.filter((candidate) => candidate.inputId !== id),
     entries,
   });
+}
+
+function settleInput(state, id) {
+  return Object.fromEntries([...Object.entries(state.settledInputs), [id, true]].slice(-TRANSCRIPT_CAP));
+}
+
+function flushStreaming(state) {
+  return state.streaming?.text
+    ? { ...appendEntry(state, { role: "assistant", content: state.streaming.text }), streaming: null }
+    : state;
+}
+
+function confirmPrompt(state, input, inputId) {
+  if (!input || state.entries.some((entry) => entry.role === "user" && entry.inputId === inputId)) return state;
+  return appendEntry(flushStreaming(state), { id: `msg:input:${inputId}`, role: "user", content: String(input), inputId });
 }
 
 // Question cards live in the stream so answered/cancelled history stays readable.

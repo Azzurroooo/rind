@@ -3,6 +3,7 @@ import { createInterface } from "node:readline"
 import { delimiter, dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
 import log from "electron-log/main"
+import { RuntimeInputs } from "./runtime-inputs.ts"
 
 import { buildAuthReply, parseAuthPrompt, parseAuthUpdate, validateAuthReply } from "./auth-messages.ts"
 import {
@@ -36,6 +37,7 @@ type RuntimeWorker = {
 
 const listeners = new Set<(snapshot: RuntimeSnapshot) => void>()
 const eventListeners = new Set<(event: RuntimeEvent) => void>()
+const inputs = new RuntimeInputs()
 const authPromptListeners = new Set<(prompt: DesktopAuthPrompt) => void>()
 const authUpdateListeners = new Set<(update: DesktopAuthUpdate) => void>()
 // Worker-initiated auth prompts still waiting for an answer from the window.
@@ -53,6 +55,7 @@ function setSnapshot(next: RuntimeSnapshot) {
 }
 
 function rejectPending(error: Error) {
+  inputs.clear()
   pendingAuthPrompts = new Set()
   for (const [requestId, request] of worker.pending) {
     clearTimeout(request.timer)
@@ -93,20 +96,22 @@ function handleLine(source: ChildProcessWithoutNullStreams, line: string) {
     return
   }
   if (isRuntimeEventEnvelope(message)) {
-    const type = String(message.event.type || "")
+    const enriched = inputs.enrich(message)
+    const type = String(enriched.event.type || "")
     for (const listener of eventListeners) listener({
       type,
       sequence: message.sequence,
       durability: message.durability,
       sessionId: message.session_id,
       turnId: message.turn_id,
-      event: message.event,
+      event: enriched.event,
       generation: runtimeGeneration,
     })
     return
   }
   if (!isRuntimeResponseEnvelope(message)) return
   const requestId = String(message.request_id)
+  inputs.finish(requestId)
   const request = worker.pending.get(requestId)
   if (!request) return
   worker.pending.delete(requestId)
@@ -196,14 +201,17 @@ function request(method: RuntimeServerMethod, params: Record<string, unknown> = 
   if (!worker.child?.stdin.writable) return Promise.reject(new Error("Runtime is not running."))
   const requestId = `desktop-${++worker.requestSequence}`
   const message: RuntimeRequestEnvelope = { kind: "request", request_id: requestId, method, params }
+  inputs.begin(requestId, method, params)
   return new Promise<unknown>((resolve, reject) => {
     const timer = setTimeout(() => {
       worker.pending.delete(requestId)
+      inputs.finish(requestId)
       reject(new Error(`Runtime request timed out: ${method}.`))
     }, timeoutMs)
     worker.pending.set(requestId, { resolve, reject, timer })
     worker.child?.stdin.write(`${JSON.stringify(message)}\n`, (error) => {
       if (!error) return
+      inputs.finish(requestId)
       clearTimeout(timer)
       worker.pending.delete(requestId)
       reject(error)

@@ -28,11 +28,16 @@ export function createHelpers(ctx) {
 
   // session/list carries no running flag, so sidebar spinners follow the
   // turn lifecycle events of every subscribed session.
-  function trackRunning(sessionId, type) {
+  function trackRunning(sessionId, type, turnId) {
     if (!sessionId) return;
     const starting = type === "turn_started";
     const ending = type === "turn_completed" || type === "turn_failed" || type === "turn_cancelled";
     if (!starting && !ending) return;
+    const pending = ctx.refs.promptStarts.current.get(sessionId);
+    if (pending) {
+      pending.turnId = starting ? String(turnId || "") : "";
+      pending.resolve();
+    }
     setRunningIds((current) => {
       if (starting === current.has(sessionId)) return current;
       const next = new Set(current);

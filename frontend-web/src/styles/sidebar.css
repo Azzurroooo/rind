@@ -1,5 +1,5 @@
 /* Sidebar (surface-design-v2 section 3), after LobeHub's session list: project
-   selector, New session, search, date-grouped rows with hover menus, footer. */
+   selector, New session, search, recent rows with hover menus, footer. */
 
 .sidebar {
   flex: none; display: flex; flex-direction: column; gap: var(--space-2);
@@ -55,11 +55,8 @@
 .sidebar-search-clear:hover { color: var(--text); background: var(--fill-2); }
 
 .session-list { flex: 1; min-height: 0; overflow-y: auto; display: grid; align-content: start; gap: var(--space-2); margin: 0 calc(var(--space-2) * -1); padding: 0 var(--space-2); }
-.session-group { display: grid; gap: 1px; }
-.session-group-label {
-  padding: var(--space-2) var(--space-2) var(--space-1);
-  color: var(--dim); font-size: var(--text-meta); font-weight: 600;
-}
+.project-workspace { display: grid; gap: 2px; padding: 0 8px 8px; color: var(--dim); font-size: var(--text-meta); }
+.project-workspace code { overflow-wrap: anywhere; color: var(--muted); font-size: 11px; line-height: 1.5; }
 .session-item {
   position: relative; display: flex; align-items: center;
   border-radius: var(--radius-control); color: var(--muted);

@@ -393,7 +393,7 @@ test("composer region keeps the queued-input dock above a persistent input form"
   assert.match(markup, /id="project-menu" class="composer-select-menu" role="listbox"/)
   assert.doesNotMatch(markup, /id="model-select"/)
   assert.doesNotMatch(markup, /id="project-select"/)
-  assert.doesNotMatch(markup, /id="steer"/)
+  assert.match(markup, /id="steer" type="button"/)
   assert.match(markup, /class="send-spinner"/)
 })
 

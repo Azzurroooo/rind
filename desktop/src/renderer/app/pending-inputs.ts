@@ -1,11 +1,10 @@
 import { runtimeMethods } from "../../preload/types.ts"
 import { syncPendingInputDock } from "../composer-region.ts"
-import { addUserMessage } from "../timeline-model.ts"
 import { isTurnNotActive } from "../turn-state.ts"
 import { setPrompt } from "./composer.ts"
 import { pendingInputDock, prompt } from "./dom.ts"
 import { asRecord, asRecordText } from "./html.ts"
-import { conversationFor, requestForSession, runAction, setConversationFor } from "./runtime.ts"
+import { conversationFor, requestForSession, runAction } from "./runtime.ts"
 import { showToast } from "./overlays.ts"
 import { render } from "./shell.ts"
 import { state } from "./state.ts"
@@ -25,6 +24,7 @@ export function addPendingInput(sessionId: string, input: string, result: Record
   const inputId = asRecordText(result.input_id)
   if (!inputId) throw new Error("Runtime accepted queued input without input_id.")
   const pending = state.pendingInputs[sessionId] || []
+  if (pending.some((item) => item.inputId === inputId) || conversationFor(sessionId).entries.some((entry) => entry.kind === "user" && entry.inputId === inputId)) return
   state.pendingInputs[sessionId] = [
     ...pending,
     { inputId, input, mode: result.mode === "steering" ? "steering" : "follow_up", promoting: false, recalling: false },
@@ -36,10 +36,8 @@ export function deliverPendingInput(sessionId: string, inputId: string) {
   const pending = state.pendingInputs[sessionId]
   const index = pending?.findIndex((item) => item.inputId === inputId) ?? -1
   if (index < 0 || !pending) return false
-  const input = pending[index]
   pending.splice(index, 1)
   if (!pending.length) delete state.pendingInputs[sessionId]
-  if (sessionId) setConversationFor(sessionId, addUserMessage(conversationFor(sessionId), input.input))
   return true
 }
 
@@ -56,7 +54,7 @@ export async function promoteFollowUp(inputId: string) {
     }
     item.mode = "steering"
     const pending = state.pendingInputs[sessionId]
-    if (pending) {
+    if (pending?.includes(item)) {
       pending.splice(pending.indexOf(item), 1)
       pending.push(item)
     }

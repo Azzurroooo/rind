@@ -1,5 +1,5 @@
 import { forwardRef, useEffect, useId, useImperativeHandle, useRef, useState } from "react";
-import { ArrowUp, Paperclip, Slash, Square, Upload } from "lucide-react";
+import { ArrowUp, CornerUpRight, Paperclip, Slash, Square, Upload } from "lucide-react";
 import { UploadChip } from "../UploadChip.jsx";
 import { Tooltip } from "../overlays/Tooltip.jsx";
 import { QueueTray } from "./QueueTray.jsx";
@@ -194,6 +194,13 @@ export const Composer = forwardRef(function Composer({
             <ModelPicker model={model} providerId={providerId} models={models} providerNames={providerNames} disabled={!hasSession} onOpen={onRefreshModels} onSelect={(next) => guard(onModel, next)} />
             <EffortChip effort={effort} disabled={!hasSession} onSelect={(next) => guard(onEffort, next)} />
             <ContextRing stats={stats} onOpen={onOpenContext} />
+            {active && hasContent && (
+              <Tooltip label="Steer this turn · Alt+Enter" side="top">
+                <button type="button" className="send-button steer" aria-label="Steer active turn" disabled={loading} onClick={() => send("steering")}>
+                  <CornerUpRight size={16} aria-hidden="true" />
+                </button>
+              </Tooltip>
+            )}
             {active && !hasContent ? (
               <button type="button" className="send-button stop" aria-label="Stop active turn" title={interruptArmed ? "Press Esc again to stop" : "Stop (Esc Esc)"} onClick={onCancel}>
                 <Square size={13} fill="currentColor" aria-hidden="true" />

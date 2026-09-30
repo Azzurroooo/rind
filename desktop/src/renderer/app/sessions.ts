@@ -108,7 +108,10 @@ export function applyOverview(overview: Awaited<ReturnType<typeof window.api.pro
     nextTotals[project.path] = project.totalSessions
   }
   state.projects = overview.projects
-  state.recentSessions = overview.recentSessions
+  const recent = new Map(state.recentSessions.filter((session) => overview.projects.some((project) => samePath(project.path, session.workspaceRoot))).map((session) => [session.id, session]))
+  for (const session of overview.recentSessions) recent.set(session.id, session)
+  state.recentSessions = [...recent.values()].sort((a, b) => b.lastInteractedAt.localeCompare(a.lastInteractedAt)).slice(0, state.recentLimit)
+  state.recentSessionTotal = overview.recentSessionTotal ?? overview.recentSessions.length
   state.fallbackProjectPath = overview.activeProjectPath
   state.chatProjectPath = projectForPath(state.chatProjectPath)?.path
     || defaultNewChatProjectPath(state.projects, state.recentSessions, state.fallbackProjectPath)

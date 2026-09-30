@@ -40,6 +40,17 @@ function renderSidebar(props = {}) {
 const row = (id) => document.querySelector(`.session-item[data-session-id="${id}"]`);
 
 describe("Sidebar", () => {
+  it("places projects above recent sessions and sorts interactions without date groups", () => {
+    renderSidebar({ sessions: [
+      { id: "old", title: "Old", updated_at: "2026-01-01" },
+      { id: "new", title: "New", updated_at: "2026-09-30" },
+      { id: "visited", title: "Visited", updated_at: "2026-01-01", last_interacted_at: "2026-10-01" },
+    ] });
+    expect([...document.querySelectorAll("[data-session-id]")].map((node) => node.dataset.sessionId)).toEqual(["visited", "new", "old"]);
+    expect(document.querySelectorAll(".session-group-label")).toHaveLength(0);
+    expect(document.querySelector(".sidebar-head").compareDocumentPosition(document.querySelector(".session-list")) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(screen.getByText("Folder on Rind computer")).not.toBeNull();
+  });
   it("marks the current, unread and running sessions", () => {
     renderSidebar();
     expect(row("a").className).toContain("selected");

@@ -67,6 +67,7 @@ export function useAppState() {
     paletteOpen: useRef(paletteOpen),
     sessions: useRef(sessions),
     subscribed: useRef(new Set()),
+    promptStarts: useRef(new Map()),
     contextRequest: useRef(0),
   };
   refs.input.current = input;

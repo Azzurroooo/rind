@@ -17,7 +17,8 @@ export function createConnectionActions(ctx) {
     if (!event || typeof event !== "object") return;
     const envelopeSession = String(message.session_id || event.session_id || "");
     const currentSession = String(refs.info.current.session_id || "");
-    call().trackRunning(envelopeSession || currentSession, event.type);
+    call().trackRunning(envelopeSession || currentSession, event.type, message.turn_id || event.turn_id);
+    if (event.type === "turn_started" || event.type === "queued_input_delivered") call().touchSession(envelopeSession || currentSession);
     if (refs.switching.current) { refs.loadingEvents.current.push(message); return; }
     // Events from other sessions never enter this conversation: a durable
     // event lights the unread dot instead; replay rebuilds it on open.

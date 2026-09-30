@@ -77,8 +77,9 @@ export async function runSlash(input: string) {
       : null
     const followUp = typeof nextPrompt?.input === "string" ? nextPrompt.input.trim() : ""
     if (followUp && canUpdateSlashSession(projectPath, commandSessionId)) {
-      setConversationFor(commandSessionId, addUserMessage(conversationFor(commandSessionId), followUp))
-      const turn = await startTurn(commandSessionId, followUp, nextPrompt?.transient_system_messages)
+      const inputId = crypto.randomUUID()
+      setConversationFor(commandSessionId, addUserMessage(conversationFor(commandSessionId), followUp, inputId))
+      const turn = await startTurn(commandSessionId, followUp, nextPrompt?.transient_system_messages, inputId)
       if (typeof turn.session_id === "string" && turn.session_id) {
         await loadSessions()
         await recordRecentSession(turn.session_id)

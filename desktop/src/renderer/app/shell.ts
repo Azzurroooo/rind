@@ -5,7 +5,7 @@ import { renderComposer, syncPendingInputDock } from "../composer-region.ts"
 import { renderAttachments } from "./attachments-ui.ts"
 import { renderEffortMenu, renderModels, renderProjectControl } from "./composer-menus.ts"
 import { renderSlashCommandMenu } from "./composer.ts"
-import { appRoot, attachButton, compactContext, composerMenu, composerMenuTrigger, connection, connectionText, contextMeter, interrupt, newSessionButton, notice, noticeText, pendingInputDock, prompt, retry, send, shortcutsDialog, shortcutTable, sidebar, sidebarToggle, slashCommandMenu } from "./dom.ts"
+import { appRoot, attachButton, compactContext, composerMenu, composerMenuTrigger, connection, connectionText, contextMeter, interrupt, newSessionButton, notice, noticeText, pendingInputDock, prompt, retry, send, steer, shortcutsDialog, shortcutTable, sidebar, sidebarToggle, slashCommandMenu } from "./dom.ts"
 import { escapeHtml } from "./html.ts"
 import { renderInspector } from "./inspector.ts"
 import { renderPalette } from "./palette-ui.ts"
@@ -54,7 +54,7 @@ export function render() {
   )
   renderStream()
   renderComposer(
-    { prompt, send, interrupt, menuTrigger: composerMenuTrigger, menu: composerMenu, compactContext, slashCommandMenu, contextMeter, attachButton },
+    { prompt, send, steer, interrupt, menuTrigger: composerMenuTrigger, menu: composerMenu, compactContext, slashCommandMenu, contextMeter, attachButton },
     {
       ready: chatProject()?.available === true && state.settings.hasApiKey,
       active: runtimeTurnActive(),
