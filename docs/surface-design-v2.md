@@ -78,6 +78,14 @@ Each status color has a `-soft` background (same hue, ~12% alpha).
 - Inspector: tabs for Context, Activity, and Files. It is dismissible, and its width persists.
   A scope line identifies Context/Activity as the current session, and Files as the workspace.
   Usage is a separate global dialog reached from the sidebar footer (all projects and sessions).
+  It includes cache-read tokens and a period-wide cache hit rate (cached input / input),
+  using the existing usage ledger. Cache reads are already included in input totals.
+  A missing cache field is labeled Not reported; a missing/zero denominator has no rate.
+  In Web Files, the directory and preview have independent scroll containers. With a
+  preview open, the directory takes about a quarter of the available height and the
+  preview takes the remainder, separated by a fixed filename/close header. Closing it
+  restores the full directory without losing its position. Late reads cannot replace
+  a newer selection or reopen a closed preview.
   The Activity tab is one scrollable column — after LobeHub's WorkingSidebar overview — stacking the
   live plan checklist, background commands the agent yielded that are still running, and the goal
   controls, each as a card with a compact uppercase section head. There is no plan deck beside the
@@ -144,10 +152,17 @@ mirrors LobeHub's `WorkflowCollapse` / `ProcessFold` and the CLI's per-tool caps
   on the right. Verbs are grouped by tool kind, counts are merged, and failures are appended
   as `1 failed` in `--danger`.
 - While the segment is live, the fold is open and shows only the running call plus the last
-  2 finished calls, with a "+N earlier" link above. When the segment ends it collapses to the
-  summary, unless a call failed or is waiting on the user, in which case it stays open.
+  2 finished calls, with a "+N earlier" link above. When the segment ends it settles for
+  600ms, then collapses to the summary with a 220ms height/opacity transition, unless a
+  call failed or is waiting on the user. A renewed live phase cancels the pending fold.
+  Manual expansion and interaction with a tool keep the fold open. Repeated stream
+  updates preserve the shell and keyed tool rows, including focus and scroll position.
+  Collapsed content is inert; reduced-motion suppresses transitions.
 - Expanded fold: one 28 row per call (5.2), with no body unless the row itself is expanded.
-- A segment with a single call renders just that call's row, with no wrapper.
+- A segment with a single call visually shows just that row. Its stable shell remains
+  mounted so a second call can reveal the summary without replacing the first row.
+- Background Task snapshots (`task_updated`, including `on_exit`) belong in Activity.
+  They do not add system cards to the transcript; actual tool output and failures remain.
 
 ### 5.2 Call row
 
@@ -218,11 +233,15 @@ mirrors LobeHub's `WorkflowCollapse` / `ProcessFold` and the CLI's per-tool caps
   ids across providers cannot collide. Both surfaces use a check column, CPU/brain chip icons,
   the same effort labels (Low / Medium / High / Extra high / Max), UI font for effort and
   mono for model identifiers. Menus support arrows, Escape and outside-pointer dismissal.
-  Desktop's no-session picker uses the settings catalog. Model/effort changes are disabled
-  during a running turn on both surfaces.
+  Both surfaces offer the provider-aware runtime catalog and effort before the first
+  message. No-session choices stay in the draft; session creation applies provider,
+  model and effort before submitting. Refreshing the catalog preserves those choices,
+  and selecting in the composer never changes the saved default configuration.
+  Model/effort changes are disabled during a running turn on both surfaces.
 - Working folder: the context row stays visible when navigation is closed. Web shows the
   folder name with a tap-to-expand full path labeled "Folder on Rind computer"; Desktop
-  shows its path and retains project selection before a session starts.
+  shows its path and retains project selection before a session starts. The whole
+  path control, including truncated text, fits within its padded hover/focus background.
 - Desktop questions: a neutral surface with a small "Your input needed" heading, native
   radio rows, optional custom textarea and Send answer. Selection does not submit. Keep
   the form and draft until confirmation, disable duplicate submissions, and show retryable

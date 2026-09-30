@@ -316,3 +316,72 @@ Verification used isolated settings, sessions and a local model fixture. No pers
 or conversations were used. Temporary captures, scripts, dependencies, data and processes are
 cleaned after inspection. This pass does not claim a new hardware-phone or installer test.
 Packaging this revision must include the small Worker fix together with the rebuilt surfaces.
+
+## New-session and inspection fixes — September 30, 2026
+
+This pass changes only `frontend-web/`, `desktop/` and surface documentation. It adds no
+Python Worker changes or production dependencies.
+
+- **New-session model and effort:** Desktop reads the provider-aware runtime catalog
+  before a session exists. Web omits an absent session ID instead of sending an invalid
+  empty ID. Both surfaces allow draft selections and apply provider, model and effort
+  before the first prompt. Catalog refreshes preserve draft choices; configuration
+  failures restore the message instead of sending with a different model. The composer
+  no longer writes a chosen model to global settings.
+- **Working-folder control:** the full path label lives inside a padded, width-bounded
+  hover target. Long paths truncate within the target rather than extending beyond it.
+- **Task noise:** background lifecycle snapshots no longer generate transcript cards.
+  Removed the obsolete replay-to-transcript task restoration path. Activity and actual
+  tool output remain available.
+- **Mobile Files:** a bounded directory region and a larger preview region scroll
+  independently, with a fixed filename/close header between them. Selected rows are
+  highlighted; stale reads cannot replace another file or reopen a closed preview.
+- **Cache usage:** both global Usage views show cache-read tokens and the weighted
+  period hit rate, `cached / input`. Input already includes cache reads. Missing fields,
+  invalid counters and an empty denominator do not produce fabricated percentages.
+- **Tool folds:** stable single-to-multiple-call shells, a 600ms completion grace period
+  and 220ms grid-height/opacity transitions. Explicit user choices and focused tool rows
+  stay open. Desktop reconciles keyed tool nodes instead of rebuilding their subtrees;
+  live tool details no longer flash open and shut automatically. Collapsed regions are
+  inert, and reduced-motion is respected.
+
+Reference implementations inspected locally:
+
+- Jan `web-app/src/components/ui/collapsible.tsx` and the existing provider-grouped
+  composer pattern.
+- LobeHub `src/features/Conversation/Messages/AssistantGroup/components/WorkflowCollapse.tsx`:
+  distinct streaming/completion phases, user expansion priority, and avoiding duplicate
+  completion folds.
+- LobeHub `src/features/Conversation/WorkingSidebar/Files/index.tsx`: a bounded scrollable
+  tree with fixed surrounding controls.
+- LobeHub `src/features/Conversation/Messages/components/Extras/Usage/UsageDetail/tokens.ts`:
+  cache reads separated from other input categories; Rind uses its own ledger semantics.
+
+Validation:
+
+| Check | Result |
+| --- | --- |
+| Web unit/integration suite | 372 passed |
+| Desktop suite, including real Worker/Gateway smoke | 227 passed |
+| Desktop TypeScript check | Passed |
+| Web and Desktop production builds | Passed |
+| Isolated Electron → Python Worker → Desktop Gateway → Chromium | Passed |
+
+The live run selected a different provider/model/effort in a new Desktop session and
+verified the created session metadata. A second first-message flow applied the chosen
+effort, executed three real Bash commands and read a file through a local model fixture.
+The remote browser replayed the same session without Task metadata cards. Both Usage
+views displayed 900 cache-read tokens out of 1,200 input tokens, or 75.0%; saved defaults
+remained unchanged.
+
+Rendered captures were inspected at Web widths 320, 390 and 1280px and in the native
+Windows Electron window. The 66-file directory scrolled independently of its preview;
+preview content remained immediately visible. Mobile model menus stayed within the
+viewport. Both tool folds showed intermediate heights during opening and closing while
+retaining the same shell node. Reduced-motion and absence of page errors were checked.
+Unit regressions also cover same-model/different-provider selection, a late catalog reply,
+selection-application failure, out-of-order file reads, missing cache data and fold focus.
+
+Validation used isolated settings, credentials, sessions and workspace files. Temporary
+test processes and artifacts were removed after inspection. This is a source/build
+verification; it does not claim a new installer or a hardware-phone test.
