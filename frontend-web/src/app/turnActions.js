@@ -23,6 +23,7 @@ export function createTurnActions(ctx) {
   // `composed` already carries attachment reference lines. While a turn runs
   // the text is queued: follow_up by default, steering with Alt+Enter.
   async function submit(composed, { mode = QUEUE_MODES.followUp } = {}) {
+    if (refs.conv.current.operation === "compact" || refs.compactions.current.has(refs.info.current.session_id)) return;
     const text = String(composed ?? ctx.input).trim();
     if (!text || !client() || refs.switching.current) return;
     const run = refs.connectionRun.current;
@@ -232,23 +233,29 @@ export function createTurnActions(ctx) {
   }
 
   async function compact() {
-    if (ctx.compacting || refs.conv.current.active) {
+    const sessionId = refs.info.current.session_id;
+    if (!sessionId || !client()) return;
+    if (refs.compactions.current.has(sessionId) || refs.conv.current.active) {
       say("system", refs.conv.current.active ? "Finish or stop the active turn before compacting." : "Compaction is already running.");
       return;
     }
-    ctx.setCompacting(true);
+    const run = refs.connectionRun.current;
+    const token = Symbol();
+    refs.compactions.current.set(sessionId, token);
+    ctx.setCompacting(sessionId);
     const loadId = refs.sessionLoad.current;
     try {
-      const result = await client().request(methods.sessionCompact, { session_id: refs.info.current.session_id });
-      if (loadId !== refs.sessionLoad.current) return;
-      const source = result?.source;
-      const range = source ? ` · messages ${source.message_start_index ?? "?"}-${source.message_end_index_exclusive ?? "?"}` : "";
-      say("system", `Context compacted${range}.`);
+      await client().request(methods.sessionCompact, { session_id: sessionId });
+      if (loadId !== refs.sessionLoad.current || run !== refs.connectionRun.current) return;
+      // The durable context_compacted event owns the transcript notice on all clients.
       void call().refreshContext();
     } catch (error) {
-      if (loadId === refs.sessionLoad.current) say("system", `Compaction failed: ${errorText(error)}`, "error");
+      if (loadId === refs.sessionLoad.current && run === refs.connectionRun.current) say("system", `Compaction failed: ${errorText(error)}`, "error");
     } finally {
-      ctx.setCompacting(false);
+      if (refs.compactions.current.get(sessionId) === token) {
+        refs.compactions.current.delete(sessionId);
+        ctx.setCompacting((current) => current === sessionId ? "" : current);
+      }
     }
   }
 

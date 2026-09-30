@@ -1,6 +1,6 @@
 import { renderCommandResult } from "../command-results.ts"
 import { isStreamingAssistant, latestAssistantId } from "../message-view.ts"
-import { canConfirmQuestion } from "../question-state.ts"
+import { questionCardMarkup, syncQuestionCard } from "../question-card.ts"
 import { type Entry } from "../timeline-model.ts"
 import { foldWorkSegments, isWorkSegment, type StreamItem } from "../work-segments.ts"
 import { canRetryLastPrompt } from "./composer.ts"
@@ -54,9 +54,7 @@ export function renderStream() {
   }
   for (const next of Array.from(extras.content.children) as HTMLElement[]) {
     const current = next.dataset.streamRole ? specialNodes.get(next.dataset.streamRole) : undefined
-    if (current && current.tagName === next.tagName) {
-      syncElementAttributes(current, next)
-      replaceElementChildren(current, next)
+    if (current && current.dataset.questionId === next.dataset.questionId) {
       nextNodes.push(current)
     } else {
       nextNodes.push(next)
@@ -71,6 +69,8 @@ export function renderStream() {
     if (node !== anchor) messageStream.insertBefore(node, anchor)
     anchor = node.nextElementSibling
   }
+  const questionCard = messageStream.querySelector<HTMLElement>(".card-question")
+  if (questionCard && conversation.question) syncQuestionCard(questionCard, questionSelectionFor(conversation.question), conversation.question.options.length)
   if (!entries.length && !conversation.question) {
     const ready = state.runtime.status === "ready"
     if (!messageStream.querySelector(".stream-empty")) {
@@ -141,29 +141,7 @@ export function renderEntry(entry: Entry, context: MessageContext = idleContext)
 export function renderQuestion(): string {
   const question = state.conversation.question
   if (!question) return ""
-  const selection = questionSelectionFor(question)
-  const customIndex = question.options.length
-  const customSelected = selection.selectedIndex === customIndex
-  const canConfirm = canConfirmQuestion(selection, question.options.length)
-  return `
-    <div class="stream-card card-question" data-stream-role="question">
-      <div class="card-label">Rind asks</div>
-      <div class="question-text">${escapeHtml(question.question)}</div>
-      <div class="question-options">${question.options.map((option, index) => `
-        <button type="button" class="question-option${selection.selectedIndex === index ? " selected" : ""}" data-question-option-index="${index}" aria-pressed="${String(selection.selectedIndex === index)}">
-          <strong>${escapeHtml(option.label)}</strong><small>${escapeHtml(option.description)}</small>
-        </button>
-      `).join("")}
-        <button type="button" class="question-option question-custom${customSelected ? " selected" : ""}" data-question-option-index="${customIndex}" aria-pressed="${String(customSelected)}">
-          <strong>Type your own answer</strong><small>Enter a custom response.</small>
-        </button>
-      </div>
-      <form id="question-form" class="question-form">
-        ${customSelected ? `<input id="question-answer" aria-label="Your answer" autocomplete="off" placeholder="Type your own answer" value="${escapeAttribute(selection.customInput)}" />` : ""}
-        <button type="submit" class="primary-button"${canConfirm ? "" : " disabled"}>Confirm</button>
-      </form>
-    </div>
-  `
+  return questionCardMarkup(question, questionSelectionFor(question))
 }
 
 export function toolHeaderOffset(id: string) {

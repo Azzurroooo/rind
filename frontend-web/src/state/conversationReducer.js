@@ -36,7 +36,7 @@
 // tracks the one card that can still be answered, while every card is ALSO a
 // stream entry (role "question") so the answered/cancelled card remains
 // readable in the transcript instead of vanishing.
-import { summarizeChanges } from "../lib/toolDisplay.js";
+import { parseToolResult, summarizeChanges } from "../lib/toolDisplay.js";
 
 // Stream length ceiling (audit #5): dropping the oldest keeps month-long
 // sessions bounded; the collapsed divider keeps the truncation honest.
@@ -199,7 +199,7 @@ function applyTurnEvent(state, event, context) {
     case "task_continuation_failed":
       return appendEntry(state, { role: "system", content: String(event.error || "Background continuation failed."), tone: "error" });
     case "turn_started":
-      return { ...confirmPrompt(state, event.input, event.client_input_id || turnId), active: true, activeTurnId: turnId, streaming: { turnId, text: "" } };
+      return { ...confirmPrompt(state, event.input, event.client_input_id || turnId), active: true, activeTurnId: turnId, operation: event.operation || "", streaming: { turnId, text: "" } };
 
     case "assistant_delta": {
       const streaming = state.streaming && state.streaming.turnId === turnId
@@ -303,7 +303,14 @@ function applyTurnEvent(state, event, context) {
       };
       const name = String(event.tool_name || event.name || "");
       if (name) patch.name = name;
-      return upsertTool(state, definedOnly(patch));
+      let next = upsertTool(state, definedOnly(patch));
+      if (state.question?.toolCallId === patch.id) {
+        const result = parseToolResult(patch.result);
+        const answer = result?.ok === true ? result?.data?.answer : undefined;
+        if (typeof answer === "string") next = markQuestionEntry(next, questionKey(state.question), { status: "answered", selectedAnswer: answer });
+        next = { ...next, question: null };
+      }
+      return next;
     }
 
     case "file_change":
@@ -365,6 +372,7 @@ function finalizeTurn(state, turnId) {
     entries,
     active: false,
     activeTurnId: "",
+    operation: "",
     streaming: null,
     backgroundWait: null,
     question: null, // pending question dies with its turn (§2.3 cancelled)
@@ -497,12 +505,13 @@ function applyHistory(state, messages) {
 // live_turn snapshot reconciliation (used right after a history load).
 function applyLiveTurn(state, liveTurn, sessionId) {
   if (!liveTurn || typeof liveTurn !== "object") {
-    return { ...state, active: false, activeTurnId: "", streaming: null, question: null, queued: [] };
+    return { ...state, active: false, activeTurnId: "", operation: "", streaming: null, question: null, queued: [] };
   }
   let next = {
     ...state,
     active: liveTurn.status === "running",
     activeTurnId: String(liveTurn.turn_id || ""),
+    operation: liveTurn.status === "running" ? String(liveTurn.operation || "") : "",
     streaming: { turnId: String(liveTurn.turn_id || ""), text: String(liveTurn.assistant_text || "") },
     // The snapshot is authoritative for the queue: rebuild it from
     // pending_inputs so a reconnect re-renders exactly what the kernel holds.

@@ -16,6 +16,8 @@ export function ModelPicker({ model, providerId = "", models = [], providerNames
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
 
+  useEffect(() => { if (disabled) { setOpen(false); setQuery(""); } }, [disabled]);
+
   useEffect(() => {
     if (!open) return undefined;
     onOpen?.();
@@ -29,9 +31,17 @@ export function ModelPicker({ model, providerId = "", models = [], providerNames
     const onPointer = (event) => {
       if (!rootRef.current?.contains(event.target)) close(false);
     };
-    document.addEventListener("mousedown", onPointer);
-    return () => document.removeEventListener("mousedown", onPointer);
+    document.addEventListener("pointerdown", onPointer);
+    return () => document.removeEventListener("pointerdown", onPointer);
   }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    // A catalog may arrive after the panel opens. Move focus once it exists,
+    // without taking it from someone already typing in the filter.
+    if (!open || document.activeElement !== triggerRef.current) return;
+    const nodes = optionNodes();
+    (searchRef.current || nodes.find((node) => node.getAttribute("aria-selected") === "true") || nodes[0])?.focus();
+  }, [open, models]); // eslint-disable-line react-hooks/exhaustive-deps
 
   function close(restore = true) {
     setOpen(false);
@@ -42,7 +52,7 @@ export function ModelPicker({ model, providerId = "", models = [], providerNames
   const groups = useMemo(() => {
     const clean = query.trim().toLowerCase();
     const filtered = clean
-      ? models.filter((option) => option.id.toLowerCase().includes(clean) || (option.providerId || "").toLowerCase().includes(clean))
+      ? models.filter((option) => `${option.id} ${option.providerId || ""} ${providerNames[option.providerId] || ""}`.toLowerCase().includes(clean))
       : models;
     return groupModelsByProvider(filtered, providerNames);
   }, [models, providerNames, query]);
@@ -50,6 +60,7 @@ export function ModelPicker({ model, providerId = "", models = [], providerNames
   const optionNodes = () => Array.from(listRef.current?.querySelectorAll("[data-model-option]:not([disabled])") || []);
 
   function onKeyDown(event) {
+    if (event.defaultPrevented) return;
     if (event.key === "Escape") {
       event.preventDefault();
       event.stopPropagation();
@@ -90,6 +101,7 @@ export function ModelPicker({ model, providerId = "", models = [], providerNames
         title={model || "Choose a model"}
         disabled={disabled}
         onClick={(event) => { event.stopPropagation(); setOpen((value) => !value); }}
+        onKeyDown={(event) => { if (event.key === "ArrowDown" || event.key === "ArrowUp") { event.preventDefault(); setOpen(true); } }}
       >
         <Cpu size={14} aria-hidden="true" />
         <span className="chip-text">{currentLabel}</span>

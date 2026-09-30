@@ -55,7 +55,7 @@ describe("Composer", () => {
 
   it("shows the interrupt hint when armed", () => {
     render(<Harness active interruptArmed onSubmit={vi.fn()} />);
-    expect(document.querySelector(".interrupt-hint").textContent).toContain("Press Esc again to stop");
+    expect(document.querySelector(".composer-activity.interrupt-hint").textContent).toContain("Esc again to stop");
   });
 
   it("opens the slash menu, filters by prefix and accepts with Enter", () => {
@@ -89,5 +89,43 @@ describe("Composer", () => {
     const ring = document.querySelector(".context-ring-button");
     expect(ring.getAttribute("aria-label")).toMatch(/^Context 75% used/);
     expect(ring.className).toContain("warning");
+  });
+
+  it("puts steer and stop in an accessible menu while the primary action queues", () => {
+    const onSubmit = vi.fn(), onCancel = vi.fn();
+    render(<Harness initial="adjust this" active onSubmit={onSubmit} onCancel={onCancel} />);
+    expect(screen.queryByRole("button", { name: "Steer active turn" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Message actions" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: /Steer this turn/ }));
+    expect(onSubmit).toHaveBeenCalledWith("adjust this", { mode: "steering" });
+    fireEvent.click(screen.getByRole("button", { name: "Message actions" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Stop active turn" }));
+    expect(onCancel).toHaveBeenCalledOnce();
+    expect(textarea().value).toBe("adjust this");
+  });
+
+  it("keeps the workspace and status slots mounted when running starts and ends", () => {
+    const { rerender } = render(<Composer value="" workspace="E:/work/project" active={false} />);
+    const row = document.querySelector(".composer-context"), status = document.querySelector(".composer-activity");
+    const folder = screen.getByLabelText("Working folder: E:/work/project");
+    expect(folder.textContent).toBe("project");
+    rerender(<Composer value="" workspace="E:/work/project" active />);
+    expect(document.querySelector(".composer-context")).toBe(row);
+    expect(document.querySelector(".composer-activity")).toBe(status);
+    expect(status.textContent).toContain("Working");
+    rerender(<Composer value="" workspace="E:/work/project" active={false} />);
+    expect(document.querySelector(".composer-activity")).toBe(status);
+    expect(status.textContent).toContain("Ready");
+  });
+
+  it("allows preparing a draft during compaction and keeps cancellation reachable", () => {
+    const onSubmit = vi.fn(), onCancel = vi.fn();
+    render(<Harness initial="next task" active compacting onSubmit={onSubmit} onCancel={onCancel} />);
+    fireEvent.keyDown(textarea(), { key: "Enter" });
+    expect(onSubmit).not.toHaveBeenCalled();
+    expect(textarea().readOnly).toBe(false);
+    fireEvent.click(screen.getByRole("button", { name: "Stop active turn" }));
+    expect(onCancel).toHaveBeenCalledOnce();
+    expect(textarea().value).toBe("next task");
   });
 });

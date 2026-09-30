@@ -120,7 +120,7 @@ describe("Menu", () => {
   it("closes on outside pointer down", () => {
     renderMenu();
     fireEvent.click(screen.getByRole("button", { name: "More" }));
-    fireEvent.mouseDown(document.body);
+    fireEvent.pointerDown(document.body);
     expect(screen.queryByRole("menu")).toBeNull();
   });
 });

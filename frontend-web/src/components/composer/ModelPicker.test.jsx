@@ -55,6 +55,9 @@ describe("ModelPicker", () => {
     expect(document.activeElement).toBe(search);
     fireEvent.change(search, { target: { value: "model-9" } });
     expect(screen.getAllByRole("option")).toHaveLength(1);
+    fireEvent.change(search, { target: { value: "" } });
+    fireEvent.keyDown(search, { key: "ArrowDown" });
+    expect(document.activeElement.textContent).toContain("model-0");
   });
 
   it("explains an empty catalog", () => {

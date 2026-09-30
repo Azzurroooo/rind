@@ -50,11 +50,12 @@ export function clearRuntimeTurnState() {
   state.runtimeTurnPending = {}
   state.activeTurnIds = {}
   state.pendingInputs = {}
-  state.conversation = { ...state.conversation, activeTurnId: "", turnStartedAt: 0 }
+  state.compactingSessions.clear()
+  state.conversation = { ...state.conversation, activeTurnId: "", turnStartedAt: 0, operation: "" }
   state.conversationCache = Object.fromEntries(
     Object.entries(state.conversationCache).map(([sessionId, conversation]) => [
       sessionId,
-      { ...conversation, activeTurnId: "", turnStartedAt: 0 },
+      { ...conversation, activeTurnId: "", turnStartedAt: 0, operation: "" },
     ]),
   )
 }
@@ -279,8 +280,18 @@ export async function answerQuestion(answer: string) {
   if (!sessionTurnActive(sessionId)) return
   const question = state.conversation.question
   if (!question) return
-  state.conversation = { ...state.conversation, question: undefined }
-  state.questionSelection = undefined
+  const selection = questionSelectionFor(question)
+  if (selection.submitting) return
+  state.questionSelection = { ...selection, submitting: true, error: "" }
   render()
-  await requestForSession(runtimeMethods.userQuestionRespond, sessionId, { tool_call_id: question.toolCallId, answer })
+  try {
+    await requestForSession(runtimeMethods.userQuestionRespond, sessionId, { tool_call_id: question.toolCallId, answer })
+    const conversation = conversationFor(sessionId)
+    if (conversation.question?.toolCallId === question.toolCallId) setConversationFor(sessionId, { ...conversation, question: undefined })
+    if (state.questionSelection?.questionId === question.toolCallId) state.questionSelection = undefined
+  } catch (error) {
+    if (state.questionSelection?.questionId === question.toolCallId) state.questionSelection = { ...selection, submitting: false, error: error instanceof Error ? error.message : String(error) }
+  } finally {
+    if (state.viewedSessionId === sessionId) render()
+  }
 }

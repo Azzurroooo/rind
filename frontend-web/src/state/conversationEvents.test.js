@@ -13,6 +13,22 @@ function run(events, start = emptyConversationState()) {
 
 const toolOf = (state, id = "c1") => state.entries.find((entry) => entry.role === "tool" && entry.tool_call_id === id);
 
+it("restores compact operation from live replay and clears it on completion", () => {
+  const state = reduceConversation(emptyConversationState(), { kind: "live_turn", sessionId: "s1", liveTurn: { turn_id: "c1", status: "running", operation: "compact" } });
+  expect(state.operation).toBe("compact");
+  expect(run([{ type: "turn_completed" }], state).operation).toBe("");
+});
+
+it("reflects an answer submitted on another surface before the turn ends", () => {
+  const state = run([
+    { type: "turn_started" },
+    { type: "user_question_requested", tool_call_id: "q1", question: "Which scope?", options: [] },
+    { type: "tool_result", tool_call_id: "q1", tool_name: "ask_user_question", result: JSON.stringify({ ok: true, data: { answer: "Focused" } }) },
+  ]);
+  expect(state.question).toBeNull();
+  expect(state.entries.find(item => item.role === "question")).toMatchObject({ status: "answered", selectedAnswer: "Focused" });
+});
+
 describe("conversation reducer — v2 tool input streaming", () => {
   it("creates a running row on tool_input_started and accumulates deltas as the args preview", () => {
     const state = run([

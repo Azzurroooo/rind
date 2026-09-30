@@ -65,6 +65,7 @@ export type Question = { toolCallId: string; turnId: string; question: string; o
 export type ConversationState = {
   entries: Entry[]
   activeTurnId: string
+  operation?: string
   turnStartedAt: number
   question?: Question
   contextUsagePercent: number | null
@@ -107,6 +108,7 @@ export function reduceEvent(state: ConversationState, envelope: RuntimeEvent): C
     case "turn_started": return {
       ...closeAssistant(asString(event.input) ? addUserMessage(state, asString(event.input), asString(event.client_input_id) || turnId) : state),
       activeTurnId: turnId,
+      operation: asString(event.operation),
       turnStartedAt: Date.now(),
       ...(state.plan && (state.plan.error || state.plan.status === "error") ? { plan: undefined } : {}),
     }
@@ -147,7 +149,7 @@ export function reduceEvent(state: ConversationState, envelope: RuntimeEvent): C
     case "tool_input_ended": return reduceTool(state, envelope, (tool) => ({ toolName: tool.toolName || asString(event.tool_name) }))
     case "tool_call_started": return reduceTool(state, envelope, (tool) => ({ status: "running", toolName: tool.toolName || asString(event.tool_name) }))
     case "tool_progress": return reduceTool(state, envelope, (tool) => tool.kind === "tool" ? progressUpdate(tool, event.payload) : {})
-    case "tool_result": return reduceTool(state, envelope, (tool) => {
+    case "tool_result": return reduceTool(state.question?.toolCallId === asString(event.tool_call_id) ? { ...state, question: undefined } : state, envelope, (tool) => {
       const result = parseToolResult(asString(event.result) || (tool.kind === "tool" ? tool.output : ""))
       const errorType = asString(event.error_type) || result.errorType
       const status = resultStatus(asString(event.status), errorType, result.ok)
@@ -245,6 +247,7 @@ export function mergeReplayConversation(replay: ConversationState, live: Convers
     ...replay,
     entries: trimmed,
     activeTurnId: live.activeTurnId || replay.activeTurnId,
+    operation: live.activeTurnId ? live.operation : replay.operation,
     turnStartedAt: live.activeTurnId ? live.turnStartedAt : replay.turnStartedAt,
     ...(hasLiveTurn && live.question ? { question: live.question } : {}),
     contextUsagePercent: hasLiveTurn ? live.contextUsagePercent ?? replay.contextUsagePercent : replay.contextUsagePercent,
@@ -280,7 +283,7 @@ export function conversationFromLiveTurn(value: unknown): ConversationState {
     durability: "incremental",
     sessionId: "",
     turnId,
-    event: {},
+    event: { operation: asString(snapshot.operation) },
   })
   const assistantText = asString(snapshot.assistant_text)
   if (assistantText) state = reduceEvent(state, {
@@ -334,7 +337,7 @@ export function conversationFromLiveTurn(value: unknown): ConversationState {
   if (question.tool_call_id) state = reduceEvent(state, eventForLive(turnId, "user_question_requested", question))
   const contextPercent = snapshot.context_usage_percent
   if (typeof contextPercent === "number") state = reduceEvent(state, eventForLive(turnId, "token_stats_updated", { stats: { context_usage_percent: contextPercent } }))
-  if (!active) state = { ...state, activeTurnId: "", turnStartedAt: 0 }
+  if (!active) state = { ...state, activeTurnId: "", turnStartedAt: 0, operation: "" }
   return state
 }
 
@@ -497,7 +500,7 @@ function closeAssistant(state: ConversationState): ConversationState {
 }
 
 function finishTurn(state: ConversationState, turnId: string): ConversationState {
-  const cleared = !turnId || state.activeTurnId === turnId ? { activeTurnId: "", turnStartedAt: 0 } : {}
+  const cleared = !turnId || state.activeTurnId === turnId ? { activeTurnId: "", turnStartedAt: 0, operation: "" } : {}
   const question = state.question && (!turnId || state.question.turnId === turnId) ? { question: undefined } : {}
   return { ...closeAssistant(state), ...cleared, ...question }
 }

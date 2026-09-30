@@ -12,6 +12,7 @@ export function QuestionCard({ entry, onAnswer, onExpire }) {
   const answered = status === "answered";
   const closed = status !== "pending";
   const [selected, setSelected] = useState(answered ? entry?.selectedAnswer || "" : "");
+  const selectedAnswer = answered ? entry?.selectedAnswer || selected : selected;
   const [customOpen, setCustomOpen] = useState(false);
   const [custom, setCustom] = useState(answered ? entry?.selectedAnswer || "" : "");
   const [submitting, setSubmitting] = useState(false);
@@ -68,7 +69,7 @@ export function QuestionCard({ entry, onAnswer, onExpire }) {
       <div className="question-card-options">
         {options.map((option, index) => {
           const value = String(option?.value || option?.label || "");
-          const active = selected === value;
+          const active = selectedAnswer === value;
           return (
             <button
               type="button"
@@ -104,7 +105,7 @@ export function QuestionCard({ entry, onAnswer, onExpire }) {
           </div>
         )}
       </div>
-      {answered && <div className="question-answer-note">Selected: {selected}</div>}
+      {answered && <div className="question-answer-note">Selected: {selectedAnswer}</div>}
       {error && <div className="question-card-error" role="alert">{error}</div>}
       {closed && status !== "answered" && <div className="question-closed-note">Question closed; answer not submitted.</div>}
     </article>

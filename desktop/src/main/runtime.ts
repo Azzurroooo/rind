@@ -4,10 +4,10 @@ import { delimiter, dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
 import log from "electron-log/main"
 import { RuntimeInputs } from "./runtime-inputs.ts"
+import { runtimeRequestTimeout } from "./runtime-request-policy.ts"
 
 import { buildAuthReply, parseAuthPrompt, parseAuthUpdate, validateAuthReply } from "./auth-messages.ts"
 import {
-  runtimeMethods,
   runtimeProtocolVersion,
   type DesktopAuthPrompt,
   type DesktopAuthUpdate,
@@ -241,15 +241,8 @@ async function initializeWorker() {
   }
 }
 
-const longRunningMethods = new Set<RuntimeMethod>([
-  runtimeMethods.sessionPrompt,
-  runtimeMethods.sessionFollowUp,
-  // Login blocks on interactive prompts answered by the person at the window.
-  runtimeMethods.authLogin,
-])
-
 export function requestRuntime(method: RuntimeMethod, params: Record<string, unknown> = {}) {
-  return request(method, params, longRunningMethods.has(method) ? 15 * 60_000 : 30_000)
+  return request(method, params, runtimeRequestTimeout(method))
 }
 
 /** Answer a worker auth prompt. An empty value cancels the login. */

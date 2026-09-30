@@ -3,10 +3,12 @@
 import { requiredElement, sessionTitle } from "./dom.ts"
 import { runAction, runtimeTurnActive } from "./runtime.ts"
 import { exportSession, forkCurrentSession, knownSessions } from "./sessions.ts"
-import { state, vars } from "./state.ts"
+import { sessionCompacting, state, vars } from "./state.ts"
 
 const statusChip = requiredElement("session-status")
 const statusText = requiredElement("session-status-text")
+const activity = requiredElement("composer-activity")
+const activityText = requiredElement("composer-activity-text")
 const menuTrigger = requiredElement<HTMLButtonElement>("session-head-menu-trigger")
 const menu = requiredElement("session-head-menu")
 const exportButton = requiredElement<HTMLButtonElement>("export-session")
@@ -29,9 +31,13 @@ export function renderSessionHead() {
 
 function renderWorkingStatus() {
   const running = runtimeTurnActive()
+  const compacting = sessionCompacting()
   const wait = state.conversation.backgroundWait
   const elapsed = state.conversation.turnStartedAt ? Math.max(0, Math.round((Date.now() - state.conversation.turnStartedAt) / 1000)) : 0
-  statusText.textContent = running ? `Working · ${elapsed}s` : wait ? `Waiting · ${wait.count}` : "Idle"
+  const label = compacting ? "Compacting" : state.conversation.question ? "Your input needed" : running ? "Working" : "Ready"
+  activity.classList.toggle("is-active", running || compacting)
+  activityText.textContent = label
+  statusText.textContent = compacting ? "Compacting" : running ? `Working · ${elapsed}s` : wait ? `Waiting · ${wait.count}` : "Idle"
   statusChip.title = wait && !running ? `Waiting on ${wait.count} background commands` : statusText.textContent
 }
 

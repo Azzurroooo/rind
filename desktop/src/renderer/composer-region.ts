@@ -1,3 +1,5 @@
+import { ArrowUp, Brain, ChevronDown, CornerUpRight, Cpu, Folder, ListPlus, Square, renderIcon } from "./icons.ts"
+
 export type ComposerElements = {
   prompt: HTMLTextAreaElement
   send: HTMLButtonElement
@@ -24,6 +26,7 @@ export type ComposerView = {
   active: boolean
   readOnly: boolean
   starting: boolean
+  hasContent?: boolean
   controllingTurn: boolean
   runtimeSessionId: string
   composerMenuOpen: boolean
@@ -39,6 +42,13 @@ export function composerRegionMarkup() {
       <div id="pending-input-dock" class="pending-input-dock" aria-label="Queued messages" hidden></div>
       <div id="attachment-chips" class="attachment-chips" hidden></div>
       <form id="composer" class="composer">
+        <div class="composer-context">
+          <div class="composer-select-wrap project-control">
+            <button id="project-menu-trigger" type="button" class="composer-select-trigger" title="Working folder" aria-label="Working folder" aria-haspopup="listbox" aria-controls="project-menu" aria-expanded="false">${renderIcon(Folder)}<span id="project-menu-label" class="composer-select-label">Working folder</span></button>
+            <div id="project-menu" class="composer-select-menu" role="listbox" aria-label="Working directories" hidden></div>
+          </div>
+          <span id="composer-activity" class="composer-activity" role="status"><span class="activity-motion" aria-hidden="true"><i></i><i></i><i></i></span><span id="composer-activity-text">Ready</span></span>
+        </div>
         <div class="prompt-wrap">
           <div id="slash-command-menu" class="slash-command-menu" role="listbox" aria-label="Slash commands" hidden></div>
           <textarea id="prompt" rows="2" placeholder="Message Rind — Enter to send, Shift+Enter for a new line" aria-label="Message Rind" aria-controls="slash-command-menu" aria-expanded="false" autocomplete="off"></textarea>
@@ -54,22 +64,25 @@ export function composerRegionMarkup() {
           <button id="attach-button" type="button" class="composer-menu-trigger attach-trigger" title="Attach files" aria-label="Attach files">${paperclipIcon()}</button>
           <input id="attach-input" type="file" multiple hidden />
           <div class="composer-select-wrap model-control">
-            <button id="model-menu-trigger" type="button" class="composer-select-trigger" title="Choose model" aria-label="Choose model" aria-haspopup="listbox" aria-controls="model-menu" aria-expanded="false"><span id="model-menu-label" class="composer-select-label">Model</span><span class="composer-select-chevron" aria-hidden="true"></span></button>
+            <button id="model-menu-trigger" type="button" class="composer-select-trigger" title="Choose model" aria-label="Choose model" aria-haspopup="listbox" aria-controls="model-menu" aria-expanded="false">${renderIcon(Cpu)}<span id="model-menu-label" class="composer-select-label">Model</span>${renderIcon(ChevronDown, "select-chevron")}</button>
             <div id="model-menu" class="composer-select-menu" role="listbox" aria-label="Models" hidden></div>
           </div>
           <div class="composer-select-wrap effort-control">
-            <button id="effort-menu-trigger" type="button" class="composer-select-trigger" title="Choose reasoning effort" aria-label="Choose reasoning effort" aria-haspopup="listbox" aria-controls="effort-menu" aria-expanded="false"><span id="effort-menu-label" class="composer-select-label">Effort</span><span class="composer-select-chevron" aria-hidden="true"></span></button>
+            <button id="effort-menu-trigger" type="button" class="composer-select-trigger" title="Choose reasoning effort" aria-label="Choose reasoning effort" aria-haspopup="listbox" aria-controls="effort-menu" aria-expanded="false">${renderIcon(Brain)}<span id="effort-menu-label" class="composer-select-label">Effort</span>${renderIcon(ChevronDown, "select-chevron")}</button>
             <div id="effort-menu" class="composer-select-menu" role="listbox" aria-label="Reasoning effort" hidden></div>
-          </div>
-          <div class="composer-select-wrap project-control">
-            <button id="project-menu-trigger" type="button" class="composer-select-trigger" title="Choose working directory" aria-label="Choose working directory" aria-haspopup="listbox" aria-controls="project-menu" aria-expanded="false"><span id="project-menu-label" class="composer-select-label">Working directory</span><span class="composer-select-chevron" aria-hidden="true"></span></button>
-            <div id="project-menu" class="composer-select-menu" role="listbox" aria-label="Working directories" hidden></div>
           </div>
           <button type="button" id="context-meter" class="context-meter" data-tooltip="Open the Context tab" aria-controls="inspector" hidden></button>
           <span class="composer-spacer"></span>
-          <button id="interrupt" type="button" class="ghost-button danger" title="Stop the running turn (Esc)">Stop</button>
-          <button id="steer" type="button" class="ghost-button" title="Steer the running turn (Alt+Enter)" hidden>Steer</button>
-          <button id="send" type="submit" class="primary-button"><span class="send-label">Send</span><span class="send-spinner" aria-hidden="true"></span></button>
+          <div class="send-control">
+            <button id="send" type="submit" class="send-button" aria-label="Send message"><span class="send-icon">${renderIcon(ArrowUp)}</span></button>
+            <button id="send-options" type="button" class="send-options" aria-label="Message actions" aria-haspopup="menu" aria-expanded="false" aria-controls="send-actions-menu">${renderIcon(ChevronDown)}</button>
+            <div id="send-actions-menu" class="composer-menu send-actions-menu" role="menu" aria-label="Running turn actions" hidden>
+              <button id="queue-message" type="button" role="menuitem">${renderIcon(ListPlus)}<span>Send after this turn</span><kbd>Enter</kbd></button>
+              <button id="steer" type="button" role="menuitem">${renderIcon(CornerUpRight)}<span>Steer this turn</span><kbd>Alt+Enter</kbd></button>
+              <div role="separator"></div>
+              <button id="interrupt" type="button" role="menuitem" class="danger">${renderIcon(Square)}<span>Stop active turn</span></button>
+            </div>
+          </div>
         </div>
       </form>
     </div>
@@ -82,29 +95,31 @@ function paperclipIcon() {
 
 export function renderComposer(elements: ComposerElements, view: ComposerView) {
   const unavailable = !view.ready || view.readOnly || view.compacting || view.slashCommandPending
-  elements.prompt.disabled = unavailable
+  elements.prompt.disabled = !view.ready || view.readOnly
   elements.prompt.placeholder = view.slashCommandPending
     ? `Running ${view.slashCommandInput || "command"}...`
     : view.compacting
-    ? "Compacting context..."
+    ? "Compacting context… You can prepare your next message."
     : view.readOnly
     ? "Return to the current task to send a message"
     : view.controllingTurn
     ? "Enter to queue a follow-up, Alt+Enter to steer"
     : "Message Rind — Enter to send, Shift+Enter for a new line"
-  elements.send.disabled = unavailable || view.starting
-  if (elements.steer) {
-    elements.steer.hidden = !view.active
-    elements.steer.disabled = unavailable || view.starting || !view.controllingTurn
+  const hasContent = view.hasContent ?? Boolean(elements.prompt.value.trim())
+  const stopping = view.active && (!hasContent || view.compacting)
+  elements.send.disabled = stopping ? !view.controllingTurn || view.readOnly : unavailable || view.starting || !hasContent
+  const action = stopping ? "stop" : view.active ? "queue" : "send"
+  if (elements.send.dataset.action !== action) {
+    elements.send.dataset.action = action
+    const icon = elements.send.querySelector(".send-icon")
+    if (icon) icon.innerHTML = renderIcon(stopping ? Square : view.active ? ListPlus : ArrowUp)
   }
-  const label = elements.send.querySelector<HTMLElement>(".send-label")
-  if (label) label.textContent = view.slashCommandPending
-    ? "Running"
-    : view.compacting ? "Compacting" : view.readOnly ? "Viewing" : view.active ? "Queue" : "Send"
-  const working = view.starting || view.slashCommandPending
-  elements.send.classList.toggle("is-starting", working)
-  elements.send.setAttribute("aria-busy", String(working))
-  elements.send.title = view.slashCommandPending
+  elements.send.classList.toggle("stop", stopping)
+  elements.send.setAttribute("aria-label", stopping ? "Stop active turn" : view.active ? "Send queued message" : "Send message")
+  if (elements.steer) {
+    elements.steer.disabled = unavailable || !hasContent || !view.controllingTurn
+  }
+  elements.send.title = stopping ? "Stop active turn (Esc)" : view.slashCommandPending
     ? `Running ${view.slashCommandInput || "command"}`
     : view.compacting
     ? "Context compaction is in progress"

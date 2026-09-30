@@ -8,18 +8,24 @@ import { attachButton, attachInput, compactContext, composerForm, contextMeter, 
 import { openGoalTab, toggleInspector } from "./inspector.ts"
 import { runAction } from "./runtime.ts"
 import { currentDraftKey, selectChatProject, sessionTurnActive } from "./sessions.ts"
-import { render } from "./shell.ts"
+import { render, renderComposerState } from "./shell.ts"
+import { bindSendActions } from "./send-actions.ts"
+import { bindMenuNavigation } from "../menu-navigation.ts"
 import { compactCurrentSession } from "./slash-runner.ts"
 import { state } from "./state.ts"
 
 export function bindComposerEvents(): void {
-  requiredElement<HTMLButtonElement>("steer").addEventListener("click", () => runAction(() => sendPrompt("steer"), state.viewedSessionId))
-    requiredElement<HTMLFormElement>("composer").addEventListener("submit", (event) => { event.preventDefault(); runAction(() => sendPrompt(), state.viewedSessionId) })
+  bindSendActions()
+  requiredElement<HTMLFormElement>("composer").addEventListener("submit", (event) => { event.preventDefault(); runAction(() => sendPrompt(), state.viewedSessionId) })
+  for (const [trigger, menu] of [[modelMenuTrigger, modelMenu], [effortMenuTrigger, effortMenu], [projectMenuTrigger, projectMenu]] as const) {
+    bindMenuNavigation(trigger, menu, () => { closeComposerSelectMenus(); render() })
+  }
 
   prompt.addEventListener("input", () => {
     if (state.chatProjectPath) state.drafts[currentDraftKey()] = prompt.value
     autoGrowPrompt()
     renderSlashCommandMenu()
+    renderComposerState()
   })
 
   prompt.addEventListener("keydown", (event) => {

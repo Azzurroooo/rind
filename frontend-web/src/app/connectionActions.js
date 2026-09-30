@@ -44,7 +44,7 @@ export function createConnectionActions(ctx) {
       void call().refreshSessions(refs.workspace.current || refs.info.current.workspace_root);
       void call().refreshContext();
     }
-    if (event.type === "compaction_completed") void call().refreshContext();
+    if (event.type === "context_compacted") void call().refreshContext();
     coalescer.push(message);
   }
 
@@ -71,6 +71,8 @@ export function createConnectionActions(ctx) {
 
   function handleStatus(status) {
     if (["connecting", "disconnected", "unauthorized"].includes(status?.state)) {
+      refs.compactions.current.clear();
+      ctx.setCompacting("");
       ++refs.connectionRun.current;
       ++refs.sessionLoad.current;
     }

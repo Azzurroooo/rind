@@ -10,9 +10,9 @@ import { asRecord, escapeAttribute, escapeHtml } from "./html.ts"
 import { addPendingInput, syncCurrentPendingInputs } from "./pending-inputs.ts"
 import { conversationFor, ensureRuntime, ensureSession, requestForSession, runAction, setConversationFor } from "./runtime.ts"
 import { chatProject, currentDraftKey, loadSessions, recordRecentSession, sessionTurnActive } from "./sessions.ts"
-import { render } from "./shell.ts"
+import { render, renderComposerState } from "./shell.ts"
 import { runSlash } from "./slash-runner.ts"
-import { preparingPrompts, state } from "./state.ts"
+import { preparingPrompts, sessionCompacting, state } from "./state.ts"
 
 
 
@@ -50,6 +50,7 @@ export function setPrompt(value: string, focus = false) {
   if (state.chatProjectPath) state.drafts[currentDraftKey()] = value
   autoGrowPrompt()
   renderSlashCommandMenu()
+  renderComposerState()
   if (focus) prompt.focus()
 }
 
@@ -127,6 +128,7 @@ export async function sendPrompt(mode: RunningSendMode = "queue") {
 }
 
 export async function submitPrompt(draftKey: string, mode: RunningSendMode = "queue", release = () => {}) {
+  if (sessionCompacting()) return
   if (state.slashCommandPending) {
     state.notice = `Running ${state.slashCommandInput || "command"}...`
     render()

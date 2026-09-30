@@ -3,7 +3,7 @@ import { useCallback, useEffect, useId, useRef, useState } from "react";
 // Dropdown menu with roving focus (ArrowUp/Down, Home/End), Esc and outside-click close.
 // Items: { id, label, icon?, danger?, disabled?, onSelect } or { separator: true }.
 // The trigger is a render prop so each call site keeps its own button styling.
-export function Menu({ label, items, trigger, align = "end", placement = "bottom", className = "", onOpenChange }) {
+export function Menu({ label, items, trigger, align = "end", placement = "bottom", className = "", onOpenChange, selection = false, disabled = false }) {
   const [open, setOpenState] = useState(false);
   const rootRef = useRef(null);
   const triggerRef = useRef(null);
@@ -20,19 +20,21 @@ export function Menu({ label, items, trigger, align = "end", placement = "bottom
     if (restore) triggerRef.current?.focus?.();
   }, [setOpen]);
 
+  useEffect(() => { if (disabled) close(false); }, [disabled, close]);
+
   useEffect(() => {
     if (!open) return undefined;
-    const first = listRef.current?.querySelector("[role='menuitem']:not([disabled])");
+    const first = listRef.current?.querySelector('[aria-selected="true"]') || listRef.current?.querySelector("button:not([disabled])");
     first?.focus();
     const onPointer = (event) => {
       if (!rootRef.current?.contains(event.target)) close(false);
     };
-    document.addEventListener("mousedown", onPointer);
-    return () => document.removeEventListener("mousedown", onPointer);
+    document.addEventListener("pointerdown", onPointer);
+    return () => document.removeEventListener("pointerdown", onPointer);
   }, [open, close]);
 
   const move = (event) => {
-    const nodes = Array.from(listRef.current?.querySelectorAll("[role='menuitem']:not([disabled])") || []);
+    const nodes = Array.from(listRef.current?.querySelectorAll("button:not([disabled])") || []);
     if (nodes.length === 0) return;
     const index = nodes.indexOf(document.activeElement);
     const pick = {
@@ -63,12 +65,15 @@ export function Menu({ label, items, trigger, align = "end", placement = "bottom
 
   const triggerProps = {
     ref: triggerRef,
-    "aria-haspopup": "menu",
+    "aria-haspopup": selection ? "listbox" : "menu",
     "aria-expanded": open,
     "aria-controls": open ? menuId : undefined,
     onClick: (event) => {
       event.stopPropagation();
       setOpen(!open);
+    },
+    onKeyDown: (event) => {
+      if (event.key === "ArrowDown" || event.key === "ArrowUp") { event.preventDefault(); setOpen(true); }
     },
   };
 
@@ -79,7 +84,7 @@ export function Menu({ label, items, trigger, align = "end", placement = "bottom
         <div
           ref={listRef}
           id={menuId}
-          role="menu"
+          role={selection ? "listbox" : "menu"}
           aria-label={label}
           className={`menu menu-${align} menu-${placement}`}
           onKeyDown={onKeyDown}
@@ -91,8 +96,9 @@ export function Menu({ label, items, trigger, align = "end", placement = "bottom
               <button
                 key={item.id}
                 type="button"
-                role="menuitem"
-                className={`menu-item${item.danger ? " danger" : ""}`}
+                role={selection ? "option" : "menuitem"}
+                aria-selected={selection ? Boolean(item.selected) : undefined}
+                className={`menu-item${item.danger ? " danger" : ""}${selection && item.selected ? " selected" : ""}`}
                 disabled={item.disabled}
                 onClick={(event) => {
                   event.stopPropagation();

@@ -1,5 +1,6 @@
 import assert from "node:assert/strict"
 import test from "node:test"
+import { JSDOM } from "jsdom"
 
 import {
   addUserMessage,
@@ -381,6 +382,7 @@ test("helper formatting stays compact", () => {
 })
 
 test("composer region keeps the queued-input dock above a persistent input form", () => {
+  globalThis.document = new JSDOM().window.document
   const markup = composerRegionMarkup()
   assert.doesNotMatch(markup, /plan-dock/)
   assert.equal(markup.indexOf('id="pending-input-dock"') < markup.indexOf('id="composer"'), true)
@@ -394,27 +396,18 @@ test("composer region keeps the queued-input dock above a persistent input form"
   assert.doesNotMatch(markup, /id="model-select"/)
   assert.doesNotMatch(markup, /id="project-select"/)
   assert.match(markup, /id="steer" type="button"/)
-  assert.match(markup, /class="send-spinner"/)
+  assert.match(markup, /id="send-actions-menu"/)
+  delete globalThis.document
 })
 
-test("composer exposes slash command work and blocks overlapping input", () => {
-  const sendLabel = { textContent: "" }
-  const compactLabel = { textContent: "" }
+test("composer lets users draft while blocking overlapping commands", () => {
+  globalThis.document = new JSDOM().window.document
+  document.body.innerHTML = composerRegionMarkup()
+  const element = (id) => document.getElementById(id)
   const elements = {
-    prompt: { disabled: false, placeholder: "", setAttribute() {}, style: {} },
-    send: {
-      disabled: false,
-      title: "",
-      classList: { toggle() {} },
-      setAttribute() {},
-      querySelector: () => sendLabel,
-    },
-    interrupt: { disabled: false },
-    menuTrigger: { disabled: false, setAttribute() {} },
-    menu: { hidden: false },
-    compactContext: { disabled: false, querySelector: () => compactLabel },
-    slashCommandMenu: {},
-    contextMeter: { hidden: false, textContent: "", setAttribute() {}, classList: { toggle() {} } },
+    prompt: element("prompt"), send: element("send"), interrupt: element("interrupt"),
+    menuTrigger: element("composer-menu-trigger"), menu: element("composer-menu"),
+    compactContext: element("compact-context"), slashCommandMenu: element("slash-command-menu"), contextMeter: element("context-meter"),
   }
   renderComposer(elements, {
     ready: true,
@@ -429,10 +422,11 @@ test("composer exposes slash command work and blocks overlapping input", () => {
     slashCommandInput: "/status",
     contextUsagePercent: null,
   })
-  assert.equal(elements.prompt.disabled, true)
+  assert.equal(elements.prompt.disabled, false)
   assert.equal(elements.prompt.placeholder, "Running /status...")
-  assert.equal(sendLabel.textContent, "Running")
+  assert.equal(elements.send.disabled, true)
   assert.equal(elements.send.title, "Running /status")
+  delete globalThis.document
 })
 
 test("file syntax highlighting escapes unknown files and colors known files", () => {

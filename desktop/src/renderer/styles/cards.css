@@ -94,39 +94,44 @@
 .command-usage strong { color: var(--muted); font-size: 11px; font-weight: 500; }
 .command-usage b { color: var(--text); font-family: var(--font-mono); font-weight: 500; font-variant-numeric: tabular-nums; }
 
-.card-question { border-color: var(--info); background: var(--info-soft); }
-.card-question .card-label { color: var(--info); }
-.question-text { margin-bottom: 10px; color: var(--text); font-weight: 500; }
+.card-question { padding: 18px; border-color: var(--line-strong); background: var(--surface); }
+.question-heading { display: flex; align-items: center; gap: 7px; margin-bottom: 12px; color: var(--muted); font-size: 11px; }
+.question-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); }
+.question-text { margin-bottom: 14px; color: var(--text); font-size: 15px; line-height: 1.6; font-weight: 600; }
 .question-options { display: flex; flex-direction: column; gap: 6px; }
 .question-option {
   display: flex;
-  flex-direction: column;
   align-items: flex-start;
-  gap: 2px;
-  min-width: 150px;
-  min-height: 28px;
-  padding: 4px 12px;
-  border: 1px solid var(--line-strong);
-  border-radius: 999px;
+  gap: 10px;
+  min-width: 0;
+  min-height: 42px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
   color: var(--text);
   background: transparent;
   font-size: 12.5px;
 }
 .question-option strong { color: inherit; font-size: 12.5px; font-weight: 500; }
-.question-option small { color: var(--dim); font-size: 10.5px; text-align: left; }
-.question-option:hover { border-color: var(--info); color: var(--text); }
-.question-option.selected { border-color: var(--info); background: var(--info-soft); }
-.question-form { display: flex; gap: 6px; margin-top: 10px; }
-.question-form input {
+.question-option small { display: block; margin-top: 3px; color: var(--muted); font-size: 12px; line-height: 1.5; text-align: left; }
+.question-option input { flex: none; margin: 3px 0 0; accent-color: var(--accent); }
+.question-option:hover { border-color: var(--accent); color: var(--text); cursor: pointer; }
+.question-option.selected { border-color: var(--accent); background: var(--accent-soft); }
+.question-form { display: grid; gap: 12px; }
+.question-form textarea {
   min-width: 0;
-  flex: 1;
-  min-height: 30px;
-  padding: 5px 9px;
+  width: 100%;
+  resize: vertical;
+  min-height: 70px;
+  padding: 10px 12px;
   border: 1px solid var(--line-strong);
   border-radius: var(--radius-sm);
   color: var(--text);
   background: var(--surface-soft);
+  font: 13px/1.6 var(--font-ui);
 }
+.question-footer { display: flex; align-items: center; justify-content: flex-end; gap: 12px; }
+.question-error { flex: 1; color: var(--danger); font-size: 12px; }
 
 
 /* Jump to latest: round 32 button, bottom centre, 16 above the composer (spec section 4) */

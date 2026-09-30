@@ -1,11 +1,13 @@
 import { forwardRef, useEffect, useId, useImperativeHandle, useRef, useState } from "react";
-import { ArrowUp, CornerUpRight, Paperclip, Slash, Square, Upload } from "lucide-react";
+import { Paperclip, Slash, Upload } from "lucide-react";
 import { UploadChip } from "../UploadChip.jsx";
 import { Tooltip } from "../overlays/Tooltip.jsx";
 import { QueueTray } from "./QueueTray.jsx";
 import { SlashMenu } from "./SlashMenu.jsx";
 import { ContextRing, EffortChip } from "./ComposerChips.jsx";
 import { ModelPicker } from "./ModelPicker.jsx";
+import { SendControl } from "./SendControl.jsx";
+import { ComposerContext } from "./ComposerContext.jsx";
 import { useAttachments } from "./useAttachments.js";
 import { COMPOSER_ACTIONS, composerKeyAction, slashQuery } from "../../lib/composerKeys.js";
 import { matchingSlashCommands } from "../../lib/commands.js";
@@ -23,6 +25,9 @@ export const Composer = forwardRef(function Composer({
   onSubmit,
   active = false,
   loading = false,
+  compacting = false,
+  workspace = "",
+  awaitingAnswer = false,
   interruptArmed = false,
   commands = [],
   queued = [],
@@ -76,7 +81,7 @@ export const Composer = forwardRef(function Composer({
   }
 
   function send(mode) {
-    if (loading) return;
+    if (loading || compacting) return;
     const composed = composeMessageWithAttachments(value, attachments.take());
     if (!composed.trim()) return;
     onSubmit?.(composed, { mode });
@@ -136,15 +141,16 @@ export const Composer = forwardRef(function Composer({
     },
   };
 
-  const placeholder = loading
+  const placeholder = compacting ? "Compacting context… You can prepare your next message."
+    : loading
     ? "Opening conversation…"
     : active ? "Queue a follow-up (Enter) or steer (Alt+Enter)…" : "Message Rind…";
 
   return (
     <div className="composer-wrap">
       {attachments.notice && <div className="upload-notice" role="status">{attachments.notice}</div>}
-      {interruptArmed && <div className="interrupt-hint" role="status">Press Esc again to stop</div>}
       <QueueTray entries={queued} onPromote={onPromote} onEdit={onEditQueued} onRemove={onRemoveQueued} />
+      <ComposerContext workspace={workspace} active={active} compacting={compacting} awaitingAnswer={awaitingAnswer} interruptArmed={interruptArmed} />
       <div className={`composer-shell${dragging ? " is-dragging" : ""}`} {...dropHandlers}>
         {menuOpen && <SlashMenu id={menuId} commands={suggestions} activeIndex={activeIndex} onPick={acceptCommand} onHover={setMenuIndex} />}
         {dragging && <div className="drop-overlay" aria-hidden="true"><Upload size={18} />{" "}Drop files</div>}
@@ -191,25 +197,10 @@ export const Composer = forwardRef(function Composer({
             </Tooltip>
           </div>
           <div className="composer-actions">
-            <ModelPicker model={model} providerId={providerId} models={models} providerNames={providerNames} disabled={!hasSession} onOpen={onRefreshModels} onSelect={(next) => guard(onModel, next)} />
-            <EffortChip effort={effort} disabled={!hasSession} onSelect={(next) => guard(onEffort, next)} />
+            <ModelPicker model={model} providerId={providerId} models={models} providerNames={providerNames} disabled={!hasSession || active || compacting} onOpen={onRefreshModels} onSelect={(next) => guard(onModel, next)} />
+            <EffortChip effort={effort} disabled={!hasSession || active || compacting} onSelect={(next) => guard(onEffort, next)} />
             <ContextRing stats={stats} onOpen={onOpenContext} />
-            {active && hasContent && (
-              <Tooltip label="Steer this turn · Alt+Enter" side="top">
-                <button type="button" className="send-button steer" aria-label="Steer active turn" disabled={loading} onClick={() => send("steering")}>
-                  <CornerUpRight size={16} aria-hidden="true" />
-                </button>
-              </Tooltip>
-            )}
-            {active && !hasContent ? (
-              <button type="button" className="send-button stop" aria-label="Stop active turn" title={interruptArmed ? "Press Esc again to stop" : "Stop (Esc Esc)"} onClick={onCancel}>
-                <Square size={13} fill="currentColor" aria-hidden="true" />
-              </button>
-            ) : (
-              <button type="button" className="send-button" aria-label={active ? "Send queued message" : "Send message"} disabled={!hasContent || loading} onClick={() => send("follow_up")}>
-                <ArrowUp size={17} aria-hidden="true" />
-              </button>
-            )}
+            <SendControl active={active} hasContent={hasContent} disabled={loading} compacting={compacting} onSend={send} onCancel={onCancel} />
           </div>
         </div>
       </div>

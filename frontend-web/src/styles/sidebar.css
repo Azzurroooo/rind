@@ -96,3 +96,5 @@
 }
 .sidebar-footer-button:last-child { margin-left: auto; }
 .sidebar-footer-button:hover { background: var(--fill-1); color: var(--text); }
+.sidebar-footer-button { flex: none; white-space: nowrap; }
+.sidebar-footer-button svg { flex: none; }

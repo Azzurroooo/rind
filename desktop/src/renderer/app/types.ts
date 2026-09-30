@@ -88,7 +88,7 @@ export type AppState = {
   /** "id:all", "id:raw" and "id:details" toggles on tool bodies. */
   toolBodiesShown: ReadonlySet<string>
   composerMenuOpen: boolean
-  compacting: boolean
+  compactingSessions: Set<string>
   slashCommandPending: boolean
   slashCommandInput: string
   slashCommands: SlashCommand[]

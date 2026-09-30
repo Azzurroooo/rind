@@ -1,5 +1,5 @@
 import { runtimeMethods } from "../../preload/types.ts"
-import { findModelOption, formatContextWindow, groupModelOptions, modelChoices, modelSelectionTarget, normalizeModelList, stringModelOptions, type ModelOption } from "../composer-select.ts"
+import { findModelOption, formatContextWindow, groupModelOptions, modelChoices, modelSelectionTarget, type ModelOption } from "../composer-select.ts"
 import { sameProjectPath as samePath, workingDirectorySelectionEnabled } from "../project-selection.ts"
 import { closeSlashCommandMenu } from "./composer.ts"
 import { effortMenu, effortMenuLabel, effortMenuTrigger, modelMenu, modelMenuLabel, modelMenuTrigger, projectMenu, projectMenuLabel, projectMenuTrigger } from "./dom.ts"
@@ -7,8 +7,29 @@ import { asRecord, asRecordText, escapeAttribute, escapeHtml } from "./html.ts"
 import { requestForSession, runtimeTurnActive } from "./runtime.ts"
 import { chatProject, currentRuntimeSnapshot } from "./sessions.ts"
 import { loadAvailableModels } from "./settings.ts"
+import { Check, Eye, Search, renderIcon } from "../icons.ts"
 import { render } from "./shell.ts"
-import { state, vars } from "./state.ts"
+import { sessionCompacting, state, vars } from "./state.ts"
+
+let modelQuery = ""
+const menuMarkup = new WeakMap<HTMLElement, string>()
+function updateMenu(menu: HTMLElement, markup: string) {
+  if (menuMarkup.get(menu) === markup) return
+  const focused = menu.contains(document.activeElement) ? document.activeElement as HTMLElement : null
+  const choice = focused?.getAttribute("data-model-choice") || focused?.getAttribute("data-effort-choice")
+  const provider = focused?.getAttribute("data-model-provider")
+  const scrollTop = menu.scrollTop
+  menu.innerHTML = markup
+  menuMarkup.set(menu, markup)
+  menu.scrollTop = scrollTop
+  if (choice) [...menu.querySelectorAll<HTMLElement>("[role=option]")].find((row) => (row.dataset.modelChoice || row.dataset.effortChoice) === choice && (!provider || row.dataset.modelProvider === provider))?.focus({ preventScroll: true })
+}
+
+modelMenu.addEventListener("input", (event) => {
+  if (!(event.target instanceof HTMLInputElement)) return
+  modelQuery = event.target.value
+  renderModels()
+})
 
 
 
@@ -16,7 +37,7 @@ export function renderProjectControl() {
   const active = chatProject()
   const canOpen = workingDirectorySelectionEnabled(state.projects.length, state.viewedSessionId)
   if (!canOpen) state.projectMenuOpen = false
-  projectMenuLabel.textContent = active?.available ? active.name : active ? `${active.name} (missing)` : "Working directory"
+  projectMenuLabel.textContent = active?.path || "Working folder"
   projectMenuTrigger.title = state.viewedSessionId
     ? `Session working directory: ${active?.path || "Unavailable"}`
     : active?.path || "Choose working directory"
@@ -47,38 +68,43 @@ export function renderModels() {
   if (!canOpen) closeModelMenu()
   modelMenuLabel.textContent = activeModel || (state.modelMenuLoading ? "Loading models..." : "Model")
   modelMenuTrigger.title = activeModel ? `Choose model: ${activeModel}` : "Choose model"
+  modelMenuTrigger.setAttribute("aria-label", `Model: ${activeModel || "not set"}`)
   modelMenuTrigger.disabled = !canOpen
   modelMenuTrigger.setAttribute("aria-expanded", String(state.modelMenuOpen))
   modelMenuTrigger.setAttribute("aria-busy", String(state.modelMenuLoading || state.modelChanging))
   modelMenu.hidden = !state.modelMenuOpen
   if (!state.modelMenuOpen) {
     modelMenu.replaceChildren()
+    menuMarkup.delete(modelMenu)
     return
   }
   if (state.modelMenuLoading) {
-    modelMenu.innerHTML = `<p class="composer-select-empty">Loading models...</p>`
+    updateMenu(modelMenu, `<p class="composer-select-empty">Loading models...</p>`)
     return
   }
   if (!choices.length) {
-    modelMenu.innerHTML = `<p class="composer-select-empty">No models available. Sign in to a provider in Settings.</p>`
+    updateMenu(modelMenu, `<p class="composer-select-empty">No models available. Sign in to a provider in Settings.</p>`)
     return
   }
   const grouped = modelSelectionTargetForState() === "runtime"
   const option = (model: ModelOption) => {
     const selected = model.id === activeModel && (model.providerId || "") === (state.modelProvider || "")
     const context = grouped ? formatContextWindow(model.contextWindow) : ""
-    return `<button type="button" class="composer-select-option composer-model-option${selected ? " selected" : ""}" role="option" aria-selected="${String(selected)}" data-model-choice="${escapeAttribute(model.id)}" data-model-provider="${escapeAttribute(model.providerId)}"${state.modelChanging ? " disabled" : ""}><span class="composer-select-option-main">${escapeHtml(model.id)}</span>${context ? `<span class="composer-select-option-detail">${escapeHtml(context)}</span>` : ""}</button>`
+    return `<button type="button" class="composer-select-option composer-model-option${selected ? " selected" : ""}" role="option" aria-selected="${String(selected)}" title="${escapeAttribute(model.id)}" data-model-choice="${escapeAttribute(model.id)}" data-model-provider="${escapeAttribute(model.providerId)}"${state.modelChanging ? " disabled" : ""}><span class="model-option-check">${selected ? renderIcon(Check) : ""}</span><span class="composer-select-option-main">${escapeHtml(model.id)}</span>${model.imageInput ? `<span role="img" aria-label="Supports images" class="model-option-vision">${renderIcon(Eye)}</span>` : ""}${context ? `<span class="composer-select-option-detail">${escapeHtml(context)}</span>` : ""}</button>`
   }
-  if (!grouped) {
-    modelMenu.innerHTML = choices.map(option).join("")
-    return
+  const filtered = choices.filter((model) => `${model.id} ${model.providerId} ${state.providerNames[model.providerId] || ""}`.toLowerCase().includes(modelQuery.trim().toLowerCase()))
+  // Keep the search input mounted while results change or stream events render.
+  if (!modelMenu.querySelector(".model-picker-list")) {
+    modelMenu.innerHTML = `${choices.length > 8 ? `<label class="model-search">${renderIcon(Search)}<input type="search" aria-label="Filter models" placeholder="Filter models" /></label>` : ""}<div class="model-picker-list"></div>`
   }
-  modelMenu.innerHTML = groupModelOptions(choices, state.providerNames).map((group) => `
+  const list = modelMenu.querySelector<HTMLElement>(".model-picker-list")!
+  const markup = groupModelOptions(filtered, state.providerNames).map((group) => `
     <div class="composer-select-group" role="group" aria-label="${escapeAttribute(group.name)}">
       <div class="composer-select-group-title">${escapeHtml(group.name)}<span class="composer-select-group-count">${group.models.length}</span></div>
       ${group.models.map(option).join("")}
     </div>
-  `).join("")
+  `).join("") || `<p class="composer-select-empty">No models match.</p>`
+  updateMenu(list, markup)
 }
 
 export function displayedModel() {
@@ -88,7 +114,7 @@ export function displayedModel() {
 
 export function canOpenModelMenu() {
   const target = modelSelectionTargetForState()
-  return Boolean(state.settings.hasApiKey && target !== "unavailable" && !state.modelChanging)
+  return Boolean(state.settings.hasApiKey && target !== "unavailable" && !state.modelChanging && !sessionCompacting())
 }
 
 export function modelSelectionTargetForState() {
@@ -100,6 +126,7 @@ export function closeModelMenu() {
   if (state.modelMenuOpen || state.modelMenuLoading) vars.modelMenuRequestId += 1
   state.modelMenuOpen = false
   state.modelMenuLoading = false
+  modelQuery = ""
 }
 
 export function closeComposerSelectMenus() {
@@ -134,6 +161,7 @@ export async function toggleModelMenu() {
     if (requestId === vars.modelMenuRequestId) {
       state.modelMenuLoading = false
       render()
+      if (state.modelMenuOpen) (modelMenu.querySelector<HTMLElement>("input") || modelMenu.querySelector<HTMLElement>('[aria-selected="true"]') || modelMenu.querySelector<HTMLElement>("[role=option]"))?.focus()
     }
   }
 }
@@ -206,14 +234,17 @@ export function displayedEffort() {
 }
 
 export function canOpenEffortMenu() {
-  return Boolean(state.viewedSessionId && currentRuntimeSnapshot().status === "ready" && !state.effortChanging)
+  return Boolean(state.viewedSessionId && currentRuntimeSnapshot().status === "ready" && !state.effortChanging && !runtimeTurnActive() && !sessionCompacting())
 }
+
+const effortLabels: Record<string, string> = { low: "Low", medium: "Medium", high: "High", xhigh: "Extra high", max: "Max" }
 
 export function renderEffortMenu() {
   const activeEffort = displayedEffort()
   const canOpen = canOpenEffortMenu()
   if (!canOpen) state.effortMenuOpen = false
-  effortMenuLabel.textContent = activeEffort || "Effort"
+  effortMenuLabel.textContent = effortLabels[activeEffort] || "Effort"
+  effortMenuTrigger.setAttribute("aria-label", `Reasoning effort: ${activeEffort || "default"}`)
   effortMenuTrigger.title = activeEffort
     ? `Reasoning effort: ${activeEffort}`
     : state.viewedSessionId ? "Choose reasoning effort" : "Start a session to change reasoning effort"
@@ -223,12 +254,13 @@ export function renderEffortMenu() {
   effortMenu.hidden = !state.effortMenuOpen
   if (!state.effortMenuOpen) {
     effortMenu.replaceChildren()
+    menuMarkup.delete(effortMenu)
     return
   }
-  effortMenu.innerHTML = reasoningEfforts.map((effort) => {
+  updateMenu(effortMenu, reasoningEfforts.map((effort) => {
     const selected = effort === activeEffort
-    return `<button type="button" class="composer-select-option composer-effort-option${selected ? " selected" : ""}" role="option" aria-selected="${String(selected)}" data-effort-choice="${escapeAttribute(effort)}"${state.effortChanging ? " disabled" : ""}><span class="composer-select-option-main">${escapeHtml(effort)}${selected ? " ✓" : ""}</span></button>`
-  }).join("")
+    return `<button type="button" class="composer-select-option composer-effort-option${selected ? " selected" : ""}" role="option" aria-selected="${String(selected)}" data-effort-choice="${escapeAttribute(effort)}"${state.effortChanging ? " disabled" : ""}><span class="model-option-check">${selected ? renderIcon(Check) : ""}</span><span class="composer-select-option-main">${effortLabels[effort]}</span></button>`
+  }).join(""))
 }
 
 export async function toggleEffortMenu() {
@@ -241,6 +273,7 @@ export async function toggleEffortMenu() {
     closeSlashCommandMenu()
   }
   render()
+  if (state.effortMenuOpen) (effortMenu.querySelector<HTMLElement>('[aria-selected="true"]') || effortMenu.querySelector<HTMLElement>("[role=option]"))?.focus()
 }
 
 export async function selectEffort(effort: string) {

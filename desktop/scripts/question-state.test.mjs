@@ -35,12 +35,12 @@ test("question selection stays unconfirmed until custom input is entered", () =>
   assert.equal(canConfirmQuestion(updateQuestionInput(custom, "custom answer"), 0), true)
 })
 
-test("leaving the custom option discards its draft", () => {
+test("leaving the custom option retains its draft without submitting it", () => {
   const selected = selectQuestionOption(createQuestionSelection("question-1", options.length), options.length, options.length)
   const drafted = updateQuestionInput(selected, "temporary answer")
   const switched = selectQuestionOption(drafted, 1, options.length)
 
   assert.equal(switched.selectedIndex, 1)
-  assert.equal(switched.customInput, "")
+  assert.equal(switched.customInput, "temporary answer")
   assert.equal(questionAnswer(switched, options), "Thorough")
 })

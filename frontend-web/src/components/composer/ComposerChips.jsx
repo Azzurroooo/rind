@@ -11,15 +11,19 @@ const RING_CIRCUMFERENCE = 2 * Math.PI * RING_RADIUS;
 // ModelPicker.jsx. `data-composer-chip` lets the /model and /effort commands
 // open them.
 export function EffortChip({ effort, disabled, onSelect }) {
+  const labels = { low: "Low", medium: "Medium", high: "High", xhigh: "Extra high", max: "Max" };
   const items = REASONING_EFFORTS.map((option) => ({
     id: `effort-${option}`,
-    label: option,
-    hint: option === effort ? <Check size={14} aria-label="Selected" /> : undefined,
+    label: labels[option] || option,
+    selected: option === effort,
+    icon: <span className="model-option-check">{option === effort && <Check size={14} />}</span>,
     onSelect: () => option !== effort && onSelect?.(option),
   }));
   return (
     <Menu
       label="Reasoning effort"
+      selection
+      disabled={disabled}
       items={items}
       placement="top"
       align="end"
@@ -27,7 +31,7 @@ export function EffortChip({ effort, disabled, onSelect }) {
       trigger={(props) => (
         <button type="button" className="composer-chip" data-composer-chip="effort" aria-label={`Reasoning effort: ${effort || "default"}`} disabled={disabled} {...props}>
           <Brain size={14} aria-hidden="true" />
-          <span className="chip-text">{effort || "Effort"}</span>
+          <span className="chip-text">{labels[effort] || "Effort"}</span>
           <ChevronDown size={12} aria-hidden="true" />
         </button>
       )}

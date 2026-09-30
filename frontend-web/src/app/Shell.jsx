@@ -27,6 +27,7 @@ export function Shell() {
   }
 
   const sessionId = info.session_id || "";
+  const compacting = ctx.compacting || ctx.conversation.operation === "compact";
   const available = info.methods || [];
   const canFork = available.includes(methods.sessionFork);
   const tabs = visibleTabs(info);
@@ -79,7 +80,7 @@ export function Shell() {
         <main className="main-column" aria-busy={ctx.busySession}>
           <ChatHeader
             title={sessionTitle(ctx.sessions, sessionId)}
-            status={headerStatus({ phase: connection.phase, active: view.active, compacting: ctx.compacting, waitingCount: view.backgroundWait?.count })}
+            status={headerStatus({ phase: connection.phase, active: view.active, compacting, waitingCount: view.backgroundWait?.count })}
             sidebarExpanded={layout.sidebarVisible}
             inspectorExpanded={layout.inspectorVisible}
             sidebarToggleRef={layout.sidebarToggleRef}
@@ -89,7 +90,7 @@ export function Shell() {
               hasSession: Boolean(sessionId),
               active: view.active,
               canFork,
-              compacting: ctx.compacting,
+              compacting,
               onPalette: () => ctx.setPaletteOpen(true),
               onFork: () => guardedFork(""),
               onExport: () => void actions.exportSession(sessionId),
@@ -124,6 +125,9 @@ export function Shell() {
             onSubmit={actions.submit}
             active={view.active}
             loading={ctx.busySession}
+            compacting={compacting}
+            workspace={info.workspace_root || ctx.selectedWorkspace}
+            awaitingAnswer={Boolean(ctx.conversation.question)}
             interruptArmed={ctx.interruptArmed}
             commands={ctx.commandList}
             queued={view.queued}
@@ -163,7 +167,7 @@ export function Shell() {
           backgroundWaitCount={view.backgroundWait?.count || 0}
           goal={ctx.goal}
           connected={connected}
-          compacting={ctx.compacting}
+          compacting={compacting || view.active}
           onCompact={() => void actions.compact()}
           onGoalAction={actions.handleGoalAction}
           request={request}

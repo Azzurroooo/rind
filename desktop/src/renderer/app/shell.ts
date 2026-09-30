@@ -15,7 +15,8 @@ import { applyOverview, chatProject, currentRuntimeSnapshot } from "./sessions.t
 import { renderSessionHead, syncWorkingTimer } from "./session-head.ts"
 import { renderSettings } from "./settings.ts"
 import { renderProjects, renderRecentSessions } from "./sidebar.ts"
-import { state, vars } from "./state.ts"
+import { sessionCompacting, state, vars } from "./state.ts"
+import { renderSendMenu } from "./send-actions.ts"
 import { renderStream } from "./stream.ts"
 
 
@@ -53,6 +54,17 @@ export function render() {
     (inputId) => runAction(() => recallPendingInput(inputId), state.viewedSessionId),
   )
   renderStream()
+  renderComposerState()
+  renderSlashCommandMenu()
+  renderAttachments()
+  renderSettings()
+  renderTheme()
+  renderShortcuts()
+  syncWorkingTimer()
+}
+
+export function renderComposerState() {
+  const runtime = currentRuntimeSnapshot()
   renderComposer(
     { prompt, send, steer, interrupt, menuTrigger: composerMenuTrigger, menu: composerMenu, compactContext, slashCommandMenu, contextMeter, attachButton },
     {
@@ -63,18 +75,13 @@ export function render() {
       controllingTurn: Boolean(activeTurnIdFor(state.viewedSessionId)),
       runtimeSessionId: state.viewedSessionId,
       composerMenuOpen: state.composerMenuOpen,
-      compacting: state.compacting,
+      compacting: sessionCompacting(),
       slashCommandPending: state.slashCommandPending,
       slashCommandInput: state.slashCommandInput,
       contextUsagePercent: state.conversation.contextUsagePercent,
     },
   )
-  renderSlashCommandMenu()
-  renderAttachments()
-  renderSettings()
-  renderTheme()
-  renderShortcuts()
-  syncWorkingTimer()
+  renderSendMenu()
 }
 
 export function renderTheme() {

@@ -128,22 +128,26 @@ export function bindConversationEvents(): void {
       runAction(() => switchSession(commandSessionId), commandSessionId)
       return
     }
-    const questionOption = target.closest<HTMLButtonElement>("[data-question-option-index]")
+  })
+
+  messageStream.addEventListener("change", (event) => {
+    const questionOption = (event.target as HTMLElement).closest<HTMLInputElement>("[data-question-option-index]")
     if (questionOption && state.conversation.question) {
       const index = Number(questionOption.dataset.questionOptionIndex)
       if (Number.isInteger(index)) {
         const question = state.conversation.question
         const selection = questionSelectionFor(question)
+        if (selection.submitting) return
         state.questionSelection = selectQuestionOption(selection, index, question.options.length)
         render()
-        if (index === question.options.length) requiredElement<HTMLInputElement>("question-answer").focus()
+        if (index === question.options.length) requiredElement<HTMLTextAreaElement>("question-answer").focus()
       }
     }
   })
 
   messageStream.addEventListener("input", (event) => {
     const target = event.target as HTMLElement
-    if (target.id !== "question-answer" || !(target instanceof HTMLInputElement) || !state.conversation.question) return
+    if (target.id !== "question-answer" || !(target instanceof HTMLTextAreaElement) || !state.conversation.question) return
     const selection = updateQuestionInput(questionSelectionFor(state.conversation.question), target.value)
     state.questionSelection = selection
     const form = requiredElement<HTMLFormElement>("question-form")

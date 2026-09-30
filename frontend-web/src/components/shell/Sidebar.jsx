@@ -116,9 +116,8 @@ export function Sidebar({
       <div className="sidebar-footer">
         {onOpenUsage && <button type="button" className="sidebar-footer-button" onClick={onOpenUsage}><BarChart3 size={15} aria-hidden="true" /><span>Usage</span></button>}
         {notificationPermission === "default" && onEnableNotifications && (
-          <button type="button" className="sidebar-footer-button" title="System notifications arrive only while the page is hidden" onClick={onEnableNotifications}>
+          <button type="button" className="sidebar-footer-button sidebar-notifications" aria-label="Enable desktop notifications" title="Enable desktop notifications while this page is hidden" onClick={onEnableNotifications}>
             <Bell size={15} aria-hidden="true" />
-            <span>Enable desktop notifications</span>
           </button>
         )}
         <button type="button" className="sidebar-footer-button" aria-label="Open settings" onClick={onOpenSettings}>

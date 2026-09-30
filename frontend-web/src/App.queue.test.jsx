@@ -293,6 +293,45 @@ describe("live input coordination across surfaces", () => {
     h.hooks.current.options.onEvent({ kind: "event", sequence, session_id: "s-1", turn_id: "live-1", durability: "durable", event: { type, ...event } });
   });
 
+  it("keeps compact session-scoped, blocks duplicate submissions and preserves the draft", async () => {
+    await renderShell();
+    let finish;
+    h.hooks.current.respond = async (method, params) => {
+      if (method === "rind/session/compact") return new Promise(resolve => { finish = resolve; });
+      if (method === "session/switch") return { session_id: params.session_id, workspace_root: "E:/projects/rind" };
+      if (method === "session/replay") return { messages: [] };
+      return {};
+    };
+    fireEvent.click(screen.getByRole("button", { name: "Session actions" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Compact context" }));
+    await waitFor(() => expect(finish).toBeTypeOf("function"));
+    typeAndSend("save this draft");
+    expect(called("session/prompt")).toBe(false);
+    expect(composerTextarea().value).toBe("save this draft");
+    await emit("turn_started", { operation: "compact" });
+    expect(document.querySelector(".composer-activity").textContent).toContain("Compacting");
+    fireEvent.click(document.querySelector('[data-session-id="p-1"] .session-main'));
+    await waitFor(() => expect(document.querySelector(".main-column").getAttribute("aria-busy")).toBe("false"));
+    expect(document.querySelector(".composer-activity").textContent).toContain("Ready");
+    await act(async () => finish({ source: {} }));
+    expect(screen.queryByText(/Context compacted/)).toBeNull();
+    expect(requests().filter(item => item.method === "rind/session/compact")).toHaveLength(1);
+  });
+
+  it("clears failed compact state and lets the user retry", async () => {
+    await renderShell();
+    h.hooks.current.respond = async (method) => {
+      if (method === "rind/session/compact") throw new Error("Unable to persist context");
+      return {};
+    };
+    fireEvent.click(screen.getByRole("button", { name: "Session actions" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Compact context" }));
+    await screen.findByText(/Compaction failed: Unable to persist context/);
+    expect(document.querySelector(".composer-activity").textContent).toContain("Ready");
+    fireEvent.click(screen.getByRole("button", { name: "Session actions" }));
+    expect(screen.getByRole("menuitem", { name: "Compact context" }).disabled).toBe(false);
+  });
+
   it("creates sessions in the confirmed project, ignoring a cancelled folder draft", async () => {
     await renderShell();
     fireEvent.click(screen.getByRole("button", { name: "Project: rind" }));
@@ -319,7 +358,8 @@ describe("live input coordination across surfaces", () => {
     typeAndSend("Queue while pending");
     await waitFor(() => expect(called("rind/session/follow_up")).toBe(true));
     fireEvent.change(composerTextarea(), { target: { value: "Steer from a phone" } });
-    fireEvent.click(screen.getByRole("button", { name: "Steer active turn" }));
+    fireEvent.click(screen.getByRole("button", { name: "Message actions" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: /Steer this turn/ }));
     await waitFor(() => expect(called("rind/session/steer")).toBe(true));
     expect(requests().find((item) => item.method === "rind/session/steer").params.turn_id).toBe("live-1");
     expect(screen.getAllByText("Start streaming")).toHaveLength(1);

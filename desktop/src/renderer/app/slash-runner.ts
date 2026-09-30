@@ -8,14 +8,16 @@ import { clearSlashCommandPending, setPrompt, startTurn } from "./composer.ts"
 import { runDesktopSlash } from "./desktop-slash-runner.ts"
 import { prompt } from "./dom.ts"
 import { asRecord, asRecordText } from "./html.ts"
-import { conversationFor, ensureRuntime, ensureSession, loadReplay, requestForSession, setConversationFor } from "./runtime.ts"
+import { conversationFor, ensureRuntime, ensureSession, requestForSession, setConversationFor } from "./runtime.ts"
 import { chatProject, currentRuntimeSnapshot, loadSessions, recordRecentSession } from "./sessions.ts"
 import { render } from "./shell.ts"
-import { state } from "./state.ts"
+import { sessionCompacting, state } from "./state.ts"
+import { runtimeTurnActive } from "./runtime.ts"
 
 
 
 export async function runSlash(input: string) {
+  if (/^\/compact\s*$/i.test(input)) return compactCurrentSession()
   if (await runDesktopSlash(input)) return
   const localResult = executeLocalSlashCommand(input, {
     settings: state.settings,
@@ -45,12 +47,8 @@ export async function runSlash(input: string) {
   const projectPath = project.path
   const requestedSessionId = state.viewedSessionId
   const requestedModel = state.model || state.settings.model
-  const compacting = /^\/compact\s*$/i.test(input)
   state.slashCommandPending = true
   state.slashCommandInput = input
-  if (compacting) {
-    state.compacting = true
-  }
   render()
   try {
     await ensureRuntime()
@@ -59,12 +57,7 @@ export async function runSlash(input: string) {
     const commands = parseSlashCommands(asRecord(result.display).commands)
     if (commands.length) state.slashCommands = mergeSlashCatalog(commands)
     const text = asRecordText(result.text)
-    if (compacting && text.startsWith("Compact complete.")) {
-      await loadReplay(commandSessionId)
-      if (isCurrentSlashView(projectPath, commandSessionId)) {
-        state.notice = "Context compacted. Session history remains visible."
-      }
-    } else if (text && canUpdateSlashSession(projectPath, commandSessionId)) {
+    if (text && canUpdateSlashSession(projectPath, commandSessionId)) {
       setConversationFor(
         commandSessionId,
         addCommandResult(conversationFor(commandSessionId), input, text, asRecord(result.display)),
@@ -86,7 +79,6 @@ export async function runSlash(input: string) {
       }
     }
   } finally {
-    state.compacting = false
     clearSlashCommandPending()
     render()
   }
@@ -106,26 +98,21 @@ export async function compactCurrentSession() {
   const project = chatProject()
   if (!project?.available || !state.viewedSessionId) return
   const sessionId = state.viewedSessionId
-  state.compacting = true
+  if (sessionCompacting(sessionId) || runtimeTurnActive()) {
+    state.notice = "Finish or stop the active turn before compacting."
+    render()
+    return
+  }
+  state.compactingSessions.add(sessionId)
   render()
   try {
     await ensureRuntime()
-    const record = asRecord(await requestForSession(runtimeMethods.sessionCompact, sessionId))
-    await loadReplay(sessionId)
-    if (state.viewedSessionId === sessionId) state.notice = compactNotice(record)
+    // The durable event updates the transcript and context on every surface.
+    // Replaying here would rebuild a live conversation and duplicate feedback.
+    await requestForSession(runtimeMethods.sessionCompact, sessionId)
   } finally {
-    state.compacting = false
+    state.compactingSessions.delete(sessionId)
     render()
-    prompt.focus()
+    if (state.viewedSessionId === sessionId) prompt.focus()
   }
-}
-
-export function compactNotice(record: Record<string, unknown>) {
-  const source = asRecord(record.source)
-  const start = source.message_start_index
-  const end = source.message_end_index_exclusive
-  if (typeof start === "number" && typeof end === "number") {
-    return `Context compacted from messages ${start + 1}-${end}. Session history remains visible.`
-  }
-  return "Context compacted. Session history remains visible."
 }

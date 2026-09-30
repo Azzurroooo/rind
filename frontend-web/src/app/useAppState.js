@@ -33,7 +33,7 @@ export function useAppState() {
   const [currentModel, setCurrentModel] = useState("");
   const [currentProvider, setCurrentProvider] = useState("");
   const [providerNames, setProviderNames] = useState({});
-  const [compacting, setCompacting] = useState(false);
+  const [compactingSession, setCompacting] = useState("");
   const [busySession, setBusySession] = useState(false);
   const [unreadIds, setUnreadIds] = useState(() => new Set());
   const [runningIds, setRunningIds] = useState(() => new Set());
@@ -68,6 +68,7 @@ export function useAppState() {
     sessions: useRef(sessions),
     subscribed: useRef(new Set()),
     promptStarts: useRef(new Map()),
+    compactions: useRef(new Map()),
     contextRequest: useRef(0),
   };
   refs.input.current = input;
@@ -98,7 +99,7 @@ export function useAppState() {
     currentModel, setCurrentModel,
     currentProvider, setCurrentProvider,
     providerNames, setProviderNames,
-    compacting, setCompacting,
+    compacting: Boolean(compactingSession && compactingSession === info.session_id), setCompacting,
     busySession, setBusySession,
     unreadIds, setUnreadIds,
     runningIds, setRunningIds,

@@ -59,7 +59,7 @@ export const state: AppState = {
   segmentFolds: new Map(),
   toolBodiesShown: new Set(),
   composerMenuOpen: false,
-  compacting: false,
+  compactingSessions: new Set(),
   slashCommandPending: false,
   slashCommandInput: "",
   slashCommands: mergeSlashCatalog([]),
@@ -91,6 +91,11 @@ export const toolOpenRequests = new Map<string, number>()
 export const replayRequests = new Map<string, Promise<void>>()
 export const uploadPromises = new Map<string, Promise<void>>()
 export const preparingPrompts = new Map<string, symbol>()
+
+export function sessionCompacting(sessionId = state.viewedSessionId) {
+  const conversation = sessionId === state.viewedSessionId ? state.conversation : state.conversationCache[sessionId]
+  return state.compactingSessions.has(sessionId) || conversation?.operation === "compact"
+}
 
 export const chipFileBacklog = new Map<string, File>()
 

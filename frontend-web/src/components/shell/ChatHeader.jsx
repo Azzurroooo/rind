@@ -78,6 +78,6 @@ export function headerMenuItems({ hasSession, active, canFork, compacting, onPal
     { separator: true },
     ...(canFork ? [{ id: "fork", label: "Fork session", icon: <GitFork size={14} />, disabled: !hasSession || active, onSelect: onFork }] : []),
     { id: "export", label: "Export replay", icon: <Download size={14} />, disabled: !hasSession, onSelect: onExport },
-    { id: "compact", label: compacting ? "Compacting…" : "Compact context", icon: <Sparkles size={14} />, disabled: !hasSession || compacting, onSelect: onCompact },
+    { id: "compact", label: compacting ? "Compacting…" : "Compact context", icon: <Sparkles size={14} />, disabled: !hasSession || compacting || active, onSelect: onCompact },
   ];
 }
