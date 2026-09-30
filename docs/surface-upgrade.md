@@ -385,3 +385,83 @@ selection-application failure, out-of-order file reads, missing cache data and f
 Validation used isolated settings, credentials, sessions and workspace files. Temporary
 test processes and artifacts were removed after inspection. This is a source/build
 verification; it does not claim a new installer or a hardware-phone test.
+
+## Command and transcript refinement — 2026-09-30
+
+The current design contract is `docs/surface-design-v2.md`, sections 4–6.
+This is a focused refinement within the existing design system, so no new bitmap
+concept or visual assets were introduced. References inspected: Jan's
+`web-app/src/containers/MessageItem.tsx` (shared user/assistant timestamp and action
+row) and LobeHub's `Conversation/Messages/AssistantGroup/components/WorkflowCollapse.tsx`
+(secondary tool workflow, stable folding and manual expansion).
+
+Changes:
+
+- Removed GUI-only slash forms for config, context, doctor, login, logout, model,
+  effort, session/sessions and theme. The filtered catalog governs menus, help and
+  execution; removed aliases and unregistered input cannot fall through to the
+  Worker. Existing settings, model/effort pickers and palette actions remain.
+- Both status views consume the CLI's actual `entries/usage` contract, including
+  settings state, API-key presence, endpoint, model/effort, context usage/capacity,
+  input/output, cached input and cache-hit rate. No completed sample is distinct
+  from a real sample with zero cache hits. Late Web results cannot enter a different
+  session after navigation.
+- Tool work has one muted surface, a fine border, smaller text and a subdued
+  completion icon, aligned with the prose column. Existing stable shells, delayed
+  automatic folding, manual expansion and reduced-motion support remain.
+- Message actions include a local clock and a full date/time/timezone tooltip.
+  Hover changes opacity only; touch keeps the actions/time visible. Replay and
+  remote events use actual recorded time. Missing legacy time is not invented.
+- Desktop now finalizes an existing prose entry when tool events precede its
+  completion event, avoiding duplicate text. New post-tool prose remains a
+  separate chronological message even if an older runtime omits completion.
+
+The only Python change retains the already-persisted `ts` alongside an opt-in
+message ID in UI projections. Default model-facing projections, the turn runner,
+tool execution and Worker lifecycle are unchanged. A regression asserts timestamp
+identity and that model payloads receive no UI metadata.
+
+Verification:
+
+| Check | Result |
+| --- | --- |
+| Web unit/integration suite | 380 passed |
+| Desktop suite, including real Worker/Gateway smoke | 232 passed |
+| Selected persistence, protocol, command, fork and projection tests | 174 passed |
+| Desktop TypeScript and both production builds | Passed |
+| Isolated Electron → real Python Worker → Gateway → Chromium | Passed |
+
+Web's parallel test workers caused the Desktop smoke's 15-second initialization
+budget to expire when both full suites ran together. The complete Desktop suite
+passed in isolation; the production startup timeout was not changed to mask it.
+
+The live fixture streamed prose, executed three real file reads and returned
+12,000 input tokens with 9,000 cached tokens. Both status views rendered 75.0%
+cache hits. The remote replay and reload preserved all three prose timestamps.
+Removed commands were absent from menus; manually entering a removed Desktop
+command produced the local unavailable notice. Hovering a user message left its
+bounding rectangle unchanged. A fresh touch browser authenticated with the
+desktop code, opened the session and displayed message times without hover.
+
+Browser/IAB reported no enabled surfaces, so Playwright controlled the real
+Windows Electron window and local Chromium. Captures at 1280×900, 390×844 and
+320×844, plus native Electron resolution, were read back with `view_image`.
+Light/dark, collapsed/expanded tools, status and slash-menu states were inspected.
+
+| Visual comparison against the design contract | Outcome |
+| --- | --- |
+| Shared reading-column alignment | Fixed a tool margin override; prose, tools and composer now align |
+| Main prose versus secondary tool typography | 15px prose stays prominent; 12px summaries and muted details recede |
+| Palette, icons and boundaries | Existing tokens and Lucide icons retained in both themes |
+| Hover/focus/touch metadata | Reserved action row; readable timestamp and full-date tooltip |
+| Status hierarchy and long values | Configuration separated from latest sampling; long paths wrap on phones |
+| Responsive width and menus | No document overflow at 320/390px; slash menu remains within the viewport |
+| Fold interaction | Manual expansion and subsequent collapse work without replacing the group |
+
+First-viewport copy was checked against the requested changes: additions are limited
+to message time, the unavailable-time fallback, status labels and unavailable-command
+guidance. No unrelated navigation or marketing copy was added. No remaining visual
+mismatch was found in these inspected states. The timestamp projection is the
+documented scope exception. Temporary QA settings, sessions, model fixture, processes
+and screenshots were removed after inspection. This verification does not represent
+a newly packaged installer or a physical-phone test.

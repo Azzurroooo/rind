@@ -1,8 +1,8 @@
 # Web and desktop design system v2
 
-Scope: `frontend-web/` and `desktop/` only. The Python Worker, CLI and messaging gateway are
-not changed. Both surfaces keep runtime protocol v2 and reach feature parity with the CLI
-where the runtime exposes the capability.
+Scope: `frontend-web/` and `desktop/`, retaining runtime protocol v2 and the existing
+Worker execution flow. UI replay also retains the already-persisted message timestamp
+alongside the opt-in message ID; default model-facing projections are unchanged.
 
 The specification is distilled from two mature open-source agent clients and the Rind
 website. Values are adopted, not invented; any deviation below states its reason.
@@ -124,7 +124,11 @@ Each status color has a `-soft` background (same hue, ~12% alpha).
 - Action bar under each message: 28 icon buttons, gap 4, `--dim` ink, opacity 0 and fading
   in over 150ms on hover or focus-within. It stays visible while its menu is open and on the latest
   assistant message. Assistant: Copy, Fork from here (when supported), time label. User:
-  Copy, Edit & resend (restores text into the composer).
+  Copy, Edit & resend (restores text into the composer), time label. System/command
+  messages also offer Copy and time. Use semantic `time` with local hour/minute and
+  a full date/time/timezone tooltip. Reserve action-row space so hover never shifts
+  content; touch devices keep it visible. Read the event/persisted timestamp, and
+  explicitly show “Time unavailable” for legacy messages without one.
 - Streaming: a blinking 2×14 caret at the end of the text. The session header retains its status.
   A permanent 26px composer context row also shows the working folder and Ready / Working /
   Your input needed / Compacting. Its three dots animate with opacity and transform only;
@@ -144,6 +148,10 @@ mirrors LobeHub's `WorkflowCollapse` / `ProcessFold` and the CLI's per-tool caps
 
 ### 5.1 Activity folding (between messages)
 
+- Keep tool work visually secondary: one `--fill-1` surface with a 1px `--line`
+  boundary, 9px radius, 3px inset, 12px summary, muted completion icon and 16px
+  separation below. Align it to the same reading column as prose. Both single
+  and grouped calls retain this container through running/completed transitions.
 - A *work segment* is every tool call, reasoning line, retry notice and progress line that
   sits between two pieces of visible prose (a user message or assistant text). All tool batches
   in one segment render as a single fold, never as separate stacked cards.
@@ -247,7 +255,16 @@ mirrors LobeHub's `WorkflowCollapse` / `ProcessFold` and the CLI's per-tool caps
   the form and draft until confirmation, disable duplicate submissions, and show retryable
   errors in place. Streaming events do not replace controls or disturb input selection.
 - Slash menu: popover above the composer, 10 radius, rows 32, keyboard navigable. Its list
-  comes from the runtime command catalog merged with local commands.
+  comes from the runtime command catalog merged with local commands. Filter
+  `config/context/doctor/login/logout/model/effort/session/sessions/theme` and terminal-only
+  commands, including aliases. The execution path accepts only this filtered catalog;
+  unknown input cannot bypass it through a runtime fallback. Settings and navigation
+  remain available in the UI/palette. Help lists actual slash forms only.
+- `/status` renders the CLI's `entries` and `usage` payload as a session snapshot:
+  settings state, endpoint, API-key presence (never the key), model/effort, then the
+  latest response's context meter, input/capacity, cached input and hit rate, and output.
+  An absent sample is explicitly distinguished from zero cache hits. Values wrap on
+  phones; global Usage remains a separate destination.
 
 ## 7. Overlays
 
@@ -273,7 +290,7 @@ mirrors LobeHub's `WorkflowCollapse` / `ProcessFold` and the CLI's per-tool caps
 | Provider auth | `rind/auth/list`, `login`, `logout`, `prompt`, `update` | status only | full |
 | Task continuation failure | `task_continuation_failed` | keep | add |
 | Slash catalog | runtime catalog plus local commands | from runtime | from runtime |
-| `/context`, `/fork`, `/model`, `/effort`, `/goal`, `/theme` | | add missing | add missing |
+| Conversational slash actions: `/fork`, `/goal`; settings/navigation use GUI entries | | aligned | aligned |
 
 Web shows provider auth status read-only: provider credentials stay managed on the host,
 consistent with the existing remote-access security model.
