@@ -5,7 +5,7 @@ import { closeSlashCommandMenu } from "./composer.ts"
 import { appRoot, paletteInput, paletteList, paletteOverlay, prompt, sessionTitle } from "./dom.ts"
 import { escapeHtml } from "./html.ts"
 import { INSPECTOR_TAB_LABELS, INSPECTOR_TABS } from "../inspector-model.ts"
-import { closeInspector, openGoalTab, openInspector, toggleInspector } from "./inspector.ts"
+import { closeInspector, openGoalTab, openInspector, openUsage, toggleInspector } from "./inspector.ts"
 import { changeGoalStatus, clearGoal } from "./inspector-goal.ts"
 import { remoteAccess } from "./remote-instance.ts"
 import { runAction, runtimeTurnActive } from "./runtime.ts"
@@ -26,6 +26,7 @@ export function paletteCommands(): PaletteCommand[] {
     { id: "open-settings", title: "Open settings", detail: "Runtime settings", shortcut: "Ctrl+,", run: () => openSettings() },
     { id: "open-providers", title: "Manage providers", detail: "Sign in or out of model providers", run: () => openSettings("providers") },
     { id: "remote-access", title: "Remote access", detail: "Connect your phone or another browser", run: remoteAccess.open },
+    { id: "usage", title: "Usage", detail: "Across all projects and sessions", run: openUsage },
     { id: "export-conversation", title: "Export conversation", detail: "Save as Markdown", run: exportSession, disabled: !state.conversation.entries.length },
     { id: "fork-conversation", title: "Fork conversation", detail: "Continue in a separate session", run: () => runAction(forkCurrentSession), disabled: !state.viewedSessionId || runtimeTurnActive() },
     { id: "compact", title: "Compact context", detail: "Compact context", run: () => runAction(compactCurrentSession, state.viewedSessionId), disabled: !state.viewedSessionId },

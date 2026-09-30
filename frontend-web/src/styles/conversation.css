@@ -84,14 +84,7 @@
 .change-delta { font-family: var(--font-mono); font-size: var(--text-meta); font-variant-numeric: tabular-nums; }
 .change-delta .added { color: var(--success); }
 .change-delta .removed { color: var(--danger); }
-.working-line { color: var(--muted); font-size: var(--text-dense); }
-.shimmer-text {
-  background: linear-gradient(90deg, var(--dim) 0%, var(--text) 50%, var(--dim) 100%);
-  background-size: 200% 100%; -webkit-background-clip: text; background-clip: text; color: transparent;
-  animation: shimmer 2s linear infinite;
-}
 @media (prefers-reduced-motion: reduce) {
-  .shimmer-text { animation: none; background: none; color: var(--muted); }
   .caret { animation: none; }
 }
 

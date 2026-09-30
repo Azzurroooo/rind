@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { Bell, History, Search, Settings, SquarePen, X } from "lucide-react";
+import { BarChart3, Bell, History, Search, Settings, SquarePen, X } from "lucide-react";
 import { ConfirmDialog } from "../overlays/ConfirmDialog.jsx";
 import { ProjectSelector } from "./ProjectSelector.jsx";
 import { SessionRow } from "./SessionRow.jsx";
@@ -27,6 +27,7 @@ export function Sidebar({
   onLoadMore,
   onEnableNotifications,
   onOpenSettings,
+  onOpenUsage,
   panelAttrs = {},
   panelRef,
   style,
@@ -57,6 +58,7 @@ export function Sidebar({
   return (
     <aside ref={panelRef} id="sidebar-panel" className={`sidebar ${panelClassName}`.trim()} tabIndex={-1} style={style} aria-label="Sessions sidebar" {...restPanelAttrs}>
       <div className="sidebar-head">
+        <span className="sidebar-section-label">Project</span>
         <ProjectSelector {...project} />
       </div>
       <button type="button" className="sidebar-new" onClick={onNew} disabled={!project?.workspace}>
@@ -80,6 +82,7 @@ export function Sidebar({
         )}
       </div>
       <nav className="session-list" aria-label="Sessions">
+        <h2 className="sidebar-section-label">Recent sessions</h2>
         {groups.length === 0 ? (
           <div className="sidebar-empty"><History size={15} aria-hidden="true" />{" "}{search ? "No matching sessions" : "No sessions yet"}</div>
         ) : groups.map((group) => (
@@ -112,6 +115,7 @@ export function Sidebar({
         )}
       </nav>
       <div className="sidebar-footer">
+        {onOpenUsage && <button type="button" className="sidebar-footer-button" onClick={onOpenUsage}><BarChart3 size={15} aria-hidden="true" /><span>Usage</span></button>}
         {notificationPermission === "default" && onEnableNotifications && (
           <button type="button" className="sidebar-footer-button" title="System notifications arrive only while the page is hidden" onClick={onEnableNotifications}>
             <Bell size={15} aria-hidden="true" />

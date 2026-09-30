@@ -1,6 +1,7 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { Inspector, visibleTabs } from "./Inspector.jsx";
+import { UsageDialog } from "./UsageDialog.jsx";
 
 afterEach(cleanup);
 
@@ -11,9 +12,10 @@ describe("visibleTabs", () => {
     expect(visibleTabs({}).tabs).toEqual(["context", "files"]);
   });
 
-  it("adds Activity and Usage when the runtime advertises their methods", () => {
+  it("keeps global Usage separate from session and workspace tabs", () => {
     const gates = visibleTabs({ methods: ["rind/background/list", "rind/usage/summary"] });
-    expect(gates.tabs).toEqual(["context", "activity", "files", "usage"]);
+    expect(gates.tabs).toEqual(["context", "activity", "files"]);
+    expect(gates.usage).toBe(true);
     expect(gates.tasks).toBe(false);
     expect(gates.background).toBe(true);
     expect(gates.auth).toBe(false);
@@ -25,15 +27,15 @@ describe("Inspector", () => {
     const onTab = vi.fn();
     render(<Inspector tab="context" onTab={onTab} info={{ methods: ["rind/task/list", "rind/usage/summary"] }} />);
     expect(screen.getByRole("tablist").getAttribute("aria-label")).toBe("Inspector sections");
-    expect(tabNames()).toEqual(["Context", "Activity", "Files", "Usage"]);
+    expect(tabNames()).toEqual(["Context", "Activity", "Files"]);
     const context = screen.getByRole("tab", { name: "Context" });
     expect(context.getAttribute("aria-selected")).toBe("true");
     fireEvent.keyDown(context, { key: "ArrowRight" });
     expect(onTab).toHaveBeenLastCalledWith("activity");
     fireEvent.keyDown(context, { key: "ArrowLeft" });
-    expect(onTab).toHaveBeenLastCalledWith("usage");
+    expect(onTab).toHaveBeenLastCalledWith("files");
     fireEvent.keyDown(context, { key: "End" });
-    expect(onTab).toHaveBeenLastCalledWith("usage");
+    expect(onTab).toHaveBeenLastCalledWith("files");
   });
 
   it("falls back to the first tab when the requested tab is unavailable", () => {
@@ -83,12 +85,14 @@ describe("Inspector", () => {
       }
       return {};
     });
-    render(<Inspector tab="usage" info={{ methods: ["rind/usage/summary", "rind/auth/list"] }} request={request} />);
+    render(<UsageDialog open onClose={() => {}} usageEnabled authEnabled request={request} />);
     await waitFor(() => expect(screen.getByText("Provider A")).not.toBeNull());
     expect(screen.getByText("Signed in (env)")).not.toBeNull();
     expect(screen.getByText("Not signed in")).not.toBeNull();
     expect(screen.getByText("Provider sign-in is managed in Rind Desktop or the CLI.")).not.toBeNull();
     expect(request.mock.calls.some(([method]) => method === "rind/usage/summary")).toBe(true);
+    expect(request).toHaveBeenCalledWith("rind/usage/summary", { days: 7 });
+    expect(screen.getByText("Across all projects and sessions on this Rind computer.")).not.toBeNull();
   });
 
   it("shows plan, yielded tasks and goal together on the Activity tab", async () => {

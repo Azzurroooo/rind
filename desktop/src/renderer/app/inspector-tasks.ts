@@ -4,16 +4,16 @@
 
 import { runtimeMethods } from "../../preload/types.ts"
 import { createTaskMonitorState, readTaskOutput, refreshTasks, renderTaskMonitor, runningTaskCount } from "../task-monitor.ts"
-import { taskMonitorDock } from "./dom.ts"
+import { inspector, taskMonitorDock } from "./dom.ts"
 import { requestForSession, runAction } from "./runtime.ts"
 import { currentRuntimeSnapshot } from "./sessions.ts"
 import { state, vars } from "./state.ts"
 
-const POLL_INTERVAL_MS = 2000
+const POLL_INTERVAL_MS = 4000
 const OUTPUT_CHARS = 20000
 
 function activityTabVisible() {
-  return state.inspectorOpen && state.inspectorTab === "activity"
+  return state.inspectorOpen && !inspector.inert && state.inspectorTab === "activity" && !document.hidden
 }
 
 function canPoll() {
@@ -40,7 +40,7 @@ export function renderTasksSection() {
   renderTaskMonitor(taskMonitorDock, state.taskMonitor)
 }
 
-/** Starts or stops the 2s poll so it only runs while the Activity tab is shown. */
+/** Poll only while the Activity tab and its window are visible. */
 export function syncTaskPolling() {
   const wanted = activityTabVisible() && canPoll()
   if (wanted && !vars.taskMonitorTimer) {
@@ -58,26 +58,27 @@ export function stopTaskPolling() {
 }
 
 export async function pollTasks() {
-  if (!canPoll()) return
+  if (!canPoll() || !activityTabVisible()) return
   const monitor = state.taskMonitor
   if (monitor.refreshing) return
   const sessionId = state.viewedSessionId
   const pending = refreshTasks(monitor, () => requestForSession(runtimeMethods.taskList, sessionId))
   renderActivityPanels()
   await pending
+  if (monitor !== state.taskMonitor) return
   const expandedId = monitor.expandedId
-  if (expandedId && !monitor.reading.has(expandedId)) await loadTaskOutput(expandedId)
+  if (expandedId && !monitor.cursors[expandedId] && !monitor.reading.has(expandedId)) await loadTaskOutput(expandedId, undefined, true)
   if (monitor === state.taskMonitor) renderActivityPanels()
 }
 
-export async function loadTaskOutput(taskId: string, cursor = state.taskMonitor.cursors[taskId]) {
+export async function loadTaskOutput(taskId: string, cursor = state.taskMonitor.cursors[taskId], silent = false) {
   const monitor = state.taskMonitor
   const sessionId = state.viewedSessionId
   if (!sessionId) return
   const pending = readTaskOutput(monitor, (id, position) => requestForSession(runtimeMethods.taskRead, sessionId, {
     task_id: id, max_output_chars: OUTPUT_CHARS, ...(position ? { cursor: position } : {}),
   }), taskId, cursor)
-  renderActivityPanels()
+  if (!silent) renderActivityPanels()
   await pending
   if (monitor === state.taskMonitor) renderActivityPanels()
 }
@@ -92,6 +93,7 @@ function renderActivityPanels() {
 }
 
 export function bindTasksEvents(): void {
+  document.addEventListener("visibilitychange", syncTaskPolling)
   taskMonitorDock.addEventListener("click", (event) => {
     const target = event.target as HTMLElement
     const outputAction = target.closest<HTMLButtonElement>("[data-task-output]")

@@ -7,7 +7,7 @@ export const NARROW_QUERY = "(max-width: 767px)";
 
 export const SIDEBAR_WIDTH = Object.freeze({ min: 232, max: 360, initial: 264 });
 export const INSPECTOR_WIDTH = Object.freeze({ min: 320, max: 640, initial: 360 });
-export const INSPECTOR_TABS = Object.freeze(["context", "activity", "files", "usage"]);
+export const INSPECTOR_TABS = Object.freeze(["context", "activity", "files"]);
 
 export const LAYOUT_KEYS = Object.freeze({
   sidebarWidth: "rind.layout.sidebarWidth",

@@ -21,11 +21,12 @@ const PHASE_STATUS = Object.freeze({
   offline: { label: "Offline", tone: "danger" },
 });
 
-export function headerStatus({ phase, active, compacting }) {
+export function headerStatus({ phase, active, compacting, waitingCount = 0 }) {
   if (PHASE_STATUS[phase]) return PHASE_STATUS[phase];
   if (compacting) return { label: "Compacting", tone: "accent" };
   if (active) return { label: "Working", tone: "accent" };
-  return null;
+  if (waitingCount > 0) return { label: `Waiting · ${waitingCount}`, tone: "muted" };
+  return { label: "Idle", tone: "muted" };
 }
 
 export function sessionTitle(sessions, sessionId) {

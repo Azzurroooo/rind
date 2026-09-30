@@ -12,11 +12,11 @@ import { renderPalette } from "./palette-ui.ts"
 import { promoteFollowUp, recallPendingInput } from "./pending-inputs.ts"
 import { activeTurnIdFor, runAction, runtimeTurnActive } from "./runtime.ts"
 import { applyOverview, chatProject, currentRuntimeSnapshot } from "./sessions.ts"
-import { renderSessionHead } from "./session-head.ts"
+import { renderSessionHead, syncWorkingTimer } from "./session-head.ts"
 import { renderSettings } from "./settings.ts"
 import { renderProjects, renderRecentSessions } from "./sidebar.ts"
 import { state, vars } from "./state.ts"
-import { renderStream, syncWorkingTimer } from "./stream.ts"
+import { renderStream } from "./stream.ts"
 
 
 

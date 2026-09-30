@@ -95,16 +95,18 @@ test("recent sessions keep only persisted sessions from registered projects", as
 
     const store = new DesktopProjectStore(configFile, sessionIndexFile, recentSessionsFile)
     const overview = await store.overview()
-    assert.equal(overview.recentSessions.length, 10)
+    assert.equal(overview.recentSessions.length, 12)
     assert.deepEqual(overview.recentSessions.map((session) => session.id), [
       "recent-11", "recent-10", "recent-09", "recent-08", "recent-07",
       "recent-06", "recent-05", "recent-04", "recent-03", "recent-02",
+      "recent-01", "recent-00",
     ])
     const refreshed = await store.markRecent("recent-02")
-    assert.equal(refreshed.recentSessions[0].id, "recent-02")
-    assert.equal(refreshed.recentSessions.length, 10)
+    assert.equal(refreshed.recentSessions[0].id, "recent-11")
+    assert.equal(refreshed.recentSessions.length, 12)
+    assert.equal(refreshed.recentSessions.find((session) => session.id === "recent-02").lastInteractedAt, "2026-03-03T00:00:00Z")
     const afterInvalidMark = await store.markRecent("empty")
-    assert.equal(afterInvalidMark.recentSessions[0].id, "recent-02")
+    assert.equal(afterInvalidMark.recentSessions[0].id, "recent-11")
     const stored = JSON.parse(await readFile(configFile, "utf8"))
     assert.equal(stored.recentSessions.length, 10)
     assert.equal(stored.recentSessions[0].session_id, "recent-02")

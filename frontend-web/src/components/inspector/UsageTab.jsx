@@ -21,7 +21,7 @@ function useRuntimeRead(enabled, read) {
   return { ...state, reload: () => setSeq((value) => value + 1) };
 }
 
-// Usage tab (spec section 7): the rind/usage/summary ledger for the last seven
+// Global Usage dialog: the rind/usage/summary ledger for the last seven
 // days, plus the provider list from rind/auth/list. Web shows auth read-only;
 // signing in to a provider happens in Rind Desktop or the CLI.
 export function UsageTab({ request, usageEnabled, authEnabled }) {

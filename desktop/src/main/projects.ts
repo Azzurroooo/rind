@@ -246,11 +246,12 @@ export class DesktopProjectStore {
     if (JSON.stringify(state.recentSessions) !== JSON.stringify(normalized)) {
       await this.writeState({ ...state, recentSessions: normalized })
     }
-    const byId = new Map(sessions.map((session) => [session.id, session]))
-    return normalized.flatMap((record) => {
-      const session = byId.get(record.session_id)
-      return session ? [{ ...session, lastInteractedAt: record.last_interacted_at }] : []
-    })
+    const visited = new Map(normalized.map((record) => [record.session_id, record.last_interacted_at]))
+    // History reflects conversation activity, not opening an old thread.
+    return sessions.filter((session) => this.sessionBelongsToProjects(session, state.projects))
+      .map((session) => ({ ...session, lastInteractedAt: Number.isFinite(Date.parse(session.updatedAt)) ? session.updatedAt : visited.get(session.id) || "" }))
+      .sort((left, right) => right.lastInteractedAt.localeCompare(left.lastInteractedAt))
+      .slice(0, 50)
   }
 
   private async readLegacyRecentSessions(): Promise<StoredRecentSession[] | undefined> {

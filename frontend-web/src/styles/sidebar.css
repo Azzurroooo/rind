@@ -8,6 +8,9 @@
 }
 .sidebar:focus-visible { outline-offset: -2px; }
 .sidebar-head { display: grid; gap: var(--space-1); }
+.sidebar-section-label { margin: 0; padding: 4px 8px; font-size: var(--text-meta); font-weight: 700; color: var(--muted); }
+.sidebar-head { border-bottom: 1px solid var(--line); padding-bottom: var(--space-2); }
+.session-list > .sidebar-section-label { padding-top: 8px; }
 
 .project-selector { display: grid; gap: var(--space-1); }
 .project-menu { display: flex; width: 100%; }

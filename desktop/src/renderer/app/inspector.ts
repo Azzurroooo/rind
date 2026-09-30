@@ -1,5 +1,5 @@
 // Inspector (spec section 2): a dismissible right column with Context,
-// Activity, Files, and Usage tabs. The Activity tab stacks the live plan,
+// Activity and Files tabs, plus the global Usage dialog. Activity stacks the live plan,
 // yielded running tasks and the session goal. Open state and width persist
 // through the project layout (filesOpen and filePanelWidth keys).
 
@@ -30,6 +30,9 @@ export function inspectorShown() {
 }
 
 export function renderInspector() {
+  const usageDialog = requiredElement<HTMLDialogElement>("usage-dialog")
+  if (usageDialog.open) inspectorUsageBody.innerHTML = renderLoad(state.inspectorUsage, "Loading usage…", renderUsageSummary, "Usage appears once the runtime is ready.")
+  requiredElement("inspector-scope").textContent = state.inspectorTab === "files" ? `Workspace · ${viewedProject()?.name || "No folder selected"}` : "Current session"
   const shown = inspectorShown()
   appRoot.classList.toggle("inspector-open", shown)
   appRoot.style.setProperty("--inspector-width", `${shown ? state.inspectorWidth : 0}px`)
@@ -52,7 +55,6 @@ export function renderInspector() {
     context: () => { inspectorContextBody.innerHTML = renderLoad(state.inspectorContext, "Loading context…", (display) => renderContextDisplay(display), contextEmptyText()) },
     activity: renderActivityTab,
     files: renderFiles,
-    usage: () => { inspectorUsageBody.innerHTML = renderLoad(state.inspectorUsage, "Loading usage…", renderUsageSummary, "Usage appears once the runtime is ready.") },
   }
   renderers[state.inspectorTab]()
 }
@@ -117,7 +119,6 @@ function renderActivityTab() {
 
 async function loadInspectorTab(tab: InspectorTab) {
   if (tab === "context") await loadInspectorContext()
-  else if (tab === "usage") await loadInspectorUsage()
   else if (tab === "activity") await loadGoal()
   else if (tab === "files" && viewedProject()?.available) await loadDirectory("")
 }
@@ -154,6 +155,11 @@ export async function loadInspectorContext() {
 export async function loadInspectorUsage() {
   await fetchInto(() => state.inspectorUsage, (load) => { state.inspectorUsage = load }, "",
     async () => normalizeUsageSummary(await request(runtimeMethods.usageSummary, { days: USAGE_DAYS })))
+}
+
+export function openUsage() {
+  requiredElement<HTMLDialogElement>("usage-dialog").showModal()
+  runAction(loadInspectorUsage)
 }
 
 export function selectInspectorTab(tab: InspectorTab, focus = false) {
@@ -207,6 +213,11 @@ function bindResize() {
 }
 
 export function bindInspectorEvents(): void {
+  const usageDialog = requiredElement<HTMLDialogElement>("usage-dialog")
+  requiredElement("open-usage").addEventListener("click", openUsage)
+  requiredElement("close-usage").addEventListener("click", () => usageDialog.close())
+  requiredElement("refresh-usage").addEventListener("click", () => runAction(loadInspectorUsage))
+  usageDialog.addEventListener("close", () => requiredElement("open-usage").focus())
   const tabList = inspector.querySelector<HTMLElement>("[role=tablist]")
   tabList?.addEventListener("click", (event) => {
     const tab = (event.target as HTMLElement).closest<HTMLElement>("[data-inspector-tab]")?.dataset.inspectorTab
@@ -221,7 +232,6 @@ export function bindInspectorEvents(): void {
   inspector.addEventListener("click", (event) => {
     const refresh = (event.target as HTMLElement).closest<HTMLElement>("[data-inspector-refresh]")?.dataset.inspectorRefresh
     if (refresh === "context") runAction(loadInspectorContext, state.viewedSessionId)
-    else if (refresh === "usage") runAction(loadInspectorUsage)
     else if (refresh === "tasks") runAction(() => pollTasks(), state.viewedSessionId)
   })
   inspector.addEventListener("keydown", (event) => {

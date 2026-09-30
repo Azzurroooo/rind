@@ -3,7 +3,7 @@
 import { requiredElement, sessionTitle } from "./dom.ts"
 import { runAction, runtimeTurnActive } from "./runtime.ts"
 import { exportSession, forkCurrentSession, knownSessions } from "./sessions.ts"
-import { state } from "./state.ts"
+import { state, vars } from "./state.ts"
 
 const statusChip = requiredElement("session-status")
 const statusText = requiredElement("session-status-text")
@@ -20,11 +20,27 @@ export function renderSessionHead() {
   const running = runtimeTurnActive()
   statusChip.hidden = !state.viewedSessionId
   statusChip.classList.toggle("running", running)
-  statusText.textContent = running ? "Running" : "Idle"
+  renderWorkingStatus()
   exportButton.disabled = !state.conversation.entries.length
   forkButton.disabled = !state.viewedSessionId || running
   menuTrigger.disabled = exportButton.disabled && forkButton.disabled
   if (menuTrigger.disabled) setMenuOpen(false)
+}
+
+function renderWorkingStatus() {
+  const running = runtimeTurnActive()
+  const wait = state.conversation.backgroundWait
+  const elapsed = state.conversation.turnStartedAt ? Math.max(0, Math.round((Date.now() - state.conversation.turnStartedAt) / 1000)) : 0
+  statusText.textContent = running ? `Working · ${elapsed}s` : wait ? `Waiting · ${wait.count}` : "Idle"
+  statusChip.title = wait && !running ? `Waiting on ${wait.count} background commands` : statusText.textContent
+}
+
+export function syncWorkingTimer() {
+  if (runtimeTurnActive() && !vars.workingTimer) vars.workingTimer = setInterval(renderWorkingStatus, 1000)
+  else if (!runtimeTurnActive() && vars.workingTimer) {
+    clearInterval(vars.workingTimer)
+    vars.workingTimer = undefined
+  }
 }
 
 function menuItems() {

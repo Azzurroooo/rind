@@ -23,7 +23,7 @@ function forkPointAfter(entries, index) {
 
 // Conversation column (spec section 4): an 800px reading column with user
 // bubbles, full-width assistant prose, folded work segments, questions, the
-// streaming caret and the "Working…" shimmer. Auto-follow sticks to the
+// streaming caret. Working status lives in the fixed chat header. Auto-follow sticks to the
 // bottom unless the user scrolled up; "Jump to latest" offers the way back.
 export const Conversation = forwardRef(function Conversation({
   messages,
@@ -101,7 +101,6 @@ export const Conversation = forwardRef(function Conversation({
     return <UserMessage key={item.key} message={entry} onEdit={active ? undefined : onEdit} />;
   }
 
-  const toolRunning = entries.some((entry) => entry.role === "tool" && entry.status === "running");
   const empty = !entries.length && !draft;
 
   return (
@@ -120,9 +119,6 @@ export const Conversation = forwardRef(function Conversation({
               <span>Changed {turnChanges.fileCount} {turnChanges.fileCount === 1 ? "file" : "files"}</span>{" "}
               <span className="change-delta"><span className="added">+{turnChanges.added}</span>{" "}<span className="removed">−{turnChanges.removed}</span></span>
             </button>
-          )}
-          {active && !draft && !toolRunning && (
-            <div className="working-line" role="status"><span className="shimmer-text">Working…</span></div>
           )}
         </div>
       </div>

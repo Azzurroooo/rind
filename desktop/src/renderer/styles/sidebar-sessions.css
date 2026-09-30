@@ -1,5 +1,13 @@
 /* Sidebar search, history groups and session rows (spec section 3). */
 
+.sidebar-section-title { margin: 0; padding: 8px; color: var(--muted); font-size: 12px; font-weight: 700; letter-spacing: .02em; }
+.sidebar-projects { border-top: 1px solid var(--line); margin-top: 8px; padding-top: 8px; }
+.sidebar-projects .sidebar-heading { margin: 0 0 4px; padding: 0; }
+.sidebar-footer { display: flex; border-top: 1px solid var(--line); margin-top: 8px; padding-top: 8px; }
+.sidebar-footer-button { display: flex; align-items: center; gap: 8px; width: 100%; min-height: 32px; padding: 6px 8px; border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--muted); text-align: left; font-size: 12px; }
+.sidebar-footer-button:hover { background: var(--fill-1); color: var(--text); }
+.sidebar-footer-button svg { width: 16px; height: 16px; }
+
 .session-search-wrap { position: relative; margin: 0 0 8px; }
 .session-search-icon { position: absolute; top: 9px; left: 9px; width: 14px; height: 14px; color: var(--dim); pointer-events: none; }
 .session-search-wrap input {

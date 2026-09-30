@@ -128,30 +128,6 @@
   background: var(--surface-soft);
 }
 
-/* working indicator */
-.working {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 6px 0;
-  color: var(--muted);
-  font-size: 12.5px;
-  font-variant-numeric: tabular-nums;
-}
-.working-mark { display: block; flex: none; width: 16px; height: 16px; }
-/* Spec section 4: a shimmer sweeps the "Working..." label while a turn runs. */
-.working-label {
-  color: transparent;
-  background: linear-gradient(90deg, var(--muted) 0%, var(--muted) 38%, var(--text) 50%, var(--muted) 62%, var(--muted) 100%);
-  background-size: 250% 100%;
-  -webkit-background-clip: text;
-  background-clip: text;
-  animation: working-shimmer 2.2s linear infinite;
-}
-@keyframes working-shimmer {
-  from { background-position: 100% 0; }
-  to { background-position: -150% 0; }
-}
 
 /* Jump to latest: round 32 button, bottom centre, 16 above the composer (spec section 4) */
 .jump-latest {
@@ -178,7 +154,6 @@
 .jump-latest:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
 @media (prefers-reduced-motion: reduce) {
-  .working-label { color: var(--muted); background: none; animation: none; }
   .jump-latest { transition: none; }
 }
 

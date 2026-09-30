@@ -35,6 +35,7 @@
 }
 .chat-header-actions { margin-left: auto; display: flex; align-items: center; gap: 2px; }
 .status-chip.accent { background: var(--accent-soft); color: var(--text); }
+.chat-header .status-chip { min-width: 54px; justify-content: center; white-space: nowrap; }
 .status-chip.danger { background: var(--danger-soft); color: var(--danger); }
 .status-chip.muted { background: var(--fill-1); color: var(--muted); }
 

@@ -142,9 +142,11 @@ export async function flushRecentSessions() {
     while (state.pendingRecentSessionIds.size) {
       const sessionIds = [...state.pendingRecentSessionIds]
       for (const sessionId of sessionIds) {
+        // Drafts have no persisted user message yet. Attempt each queued mark
+        // once; reopening/starting a turn will enqueue it again when appropriate.
+        state.pendingRecentSessionIds.delete(sessionId)
         const overview = await window.api.projects.markRecent(sessionId)
         applyOverview(overview)
-        if (overview.recentSessions.some((session) => session.id === sessionId)) state.pendingRecentSessionIds.delete(sessionId)
       }
     }
   })().finally(() => {

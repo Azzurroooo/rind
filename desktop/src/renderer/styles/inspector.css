@@ -1,9 +1,19 @@
 /* ---------- inspector (spec section 2) ---------- */
 
+.inspector-scope { padding: 8px 14px; border-bottom: 1px solid var(--line); color: var(--dim); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.settings-dialog.usage-dialog { width: min(680px, calc(100vw - 32px)); max-height: calc(100dvh - 48px); padding: 24px; overflow-y: auto; }
+.usage-dialog .settings-heading { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; }
+.usage-dialog .settings-heading h2 { margin: 0; }
+.usage-dialog .settings-heading p { color: var(--muted); font-size: 12px; line-height: 1.6; }
+.task-monitor-identity { display: grid; gap: 3px; flex: 1; min-width: 0; }
+.task-monitor-id { color: var(--dim); font-size: 10px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.activity-panel .task-monitor-trigger { min-height: 46px; }
+.activity-panel .task-control-actions { flex-wrap: wrap; }
+
 .inspector {
   position: relative;
   display: grid;
-  grid-template-rows: auto minmax(0, 1fr);
+  grid-template-rows: auto auto minmax(0, 1fr);
   min-width: 0;
   min-height: 0;
   overflow: hidden;

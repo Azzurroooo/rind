@@ -1,6 +1,6 @@
 import brandMarkUrl from "../assets/brand-mark.svg"
 import { composerRegionMarkup } from "../composer-region.ts"
-import { ArrowDown, Bell, Ellipsis, Keyboard, KeyRound, ListTodo, MonitorSmartphone, PanelLeft, PanelRight, renderIcon, Search, Settings, SlidersHorizontal, SunMoon, X } from "../icons.ts"
+import { ArrowDown, Bell, ChartNoAxesColumn, Ellipsis, Keyboard, KeyRound, ListTodo, MonitorSmartphone, PanelLeft, PanelRight, renderIcon, Search, Settings, SlidersHorizontal, SunMoon, X } from "../icons.ts"
 import { INSPECTOR_TAB_LABELS, INSPECTOR_TABS } from "../inspector-model.ts"
 import { remoteAccessMarkup } from "../remote-access.ts"
 import { escapeHtml } from "./html.ts"
@@ -45,11 +45,13 @@ appRoot.innerHTML = `
             <input id="session-search" type="search" placeholder="Search sessions" aria-label="Search loaded sessions" autocomplete="off" />
           </div>
           <section id="recent-sessions" class="recent-sessions" aria-label="Recent sessions" hidden>
+            <h2 class="sidebar-section-title">Recent sessions</h2>
             <div id="recent-list" class="recent-list"></div>
           </section>
-          <div class="sidebar-heading"><span>Projects</span><button id="sidebar-add-project" type="button" class="ghost-button" title="Add project">Add</button></div>
-          <div id="project-list" class="project-list"></div>
+          <section class="sidebar-projects" aria-label="Projects"><div class="sidebar-heading"><h2 class="sidebar-section-title">Projects</h2><button id="sidebar-add-project" type="button" class="ghost-button" title="Add project">Add</button></div>
+          <div id="project-list" class="project-list"></div></section>
         </div>
+        <div class="sidebar-footer"><button id="open-usage" type="button" class="sidebar-footer-button">${renderIcon(ChartNoAxesColumn)}<span>Usage</span></button></div>
       </aside>
       <section class="conversation">
         <header class="conversation-head">
@@ -84,6 +86,7 @@ appRoot.innerHTML = `
           </div>
           <button id="close-inspector" type="button" class="icon-button inspector-close" data-tooltip="Close inspector" aria-label="Close inspector">${renderIcon(X)}</button>
         </div>
+        <div id="inspector-scope" class="inspector-scope">Current session</div>
         <section id="inspector-panel-context" class="inspector-panel" role="tabpanel" aria-labelledby="inspector-tab-context" tabindex="0" hidden>
           <div class="inspector-toolbar"><span class="subtle">Current context window</span><button type="button" class="ghost-button" data-inspector-refresh="context">Refresh</button></div>
           <div id="inspector-context"></div>
@@ -98,12 +101,9 @@ appRoot.innerHTML = `
           <section id="file-preview" class="file-preview" hidden></section>
           <div id="file-tree" class="file-tree"></div>
         </section>
-        <section id="inspector-panel-usage" class="inspector-panel" role="tabpanel" aria-labelledby="inspector-tab-usage" tabindex="0" hidden>
-          <div class="inspector-toolbar"><span class="subtle">Last 7 days, all sessions</span><button type="button" class="ghost-button" data-inspector-refresh="usage">Refresh</button></div>
-          <div id="inspector-usage"></div>
-        </section>
       </aside>
     </main>
+    <dialog id="usage-dialog" class="settings-dialog usage-dialog" aria-labelledby="usage-title"><div class="settings-heading"><div><h2 id="usage-title">Usage</h2><p>Across all projects and sessions on this Rind computer.</p></div><button id="close-usage" type="button" class="icon-button" aria-label="Close usage">${renderIcon(X)}</button></div><div class="inspector-toolbar"><span class="subtle">Last 7 days</span><button id="refresh-usage" type="button" class="ghost-button">Refresh</button></div><div id="inspector-usage"></div></dialog>
     ${remoteAccessMarkup()}
     <dialog id="settings-dialog" class="settings-dialog settings-shell" aria-labelledby="settings-title">
       <form id="settings-form" method="dialog" class="settings-layout">

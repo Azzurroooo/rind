@@ -14,6 +14,7 @@ export {
   ArrowUp,
   Ban,
   Bell,
+  ChartNoAxesColumn,
   Check,
   ChevronRight,
   CircleAlert,

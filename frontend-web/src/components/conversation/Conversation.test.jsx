@@ -71,9 +71,14 @@ describe("Conversation", () => {
     expect(onRetry.mock.calls[0][0]).toMatchObject({ id: "local-1" });
   });
 
-  it("shows the streaming caret or the working line while active", () => {
-    const { rerender } = render(<Conversation messages={thread.slice(0, 1)} active />);
-    expect(document.querySelector(".working-line").textContent).toBe("Working…");
+  it("does not insert an extra transcript row when a turn starts or ends", () => {
+    const { rerender } = render(<Conversation messages={thread.slice(0, 1)} />);
+    const count = document.querySelectorAll(".message").length;
+    rerender(<Conversation messages={thread.slice(0, 1)} active />);
+    expect(document.querySelectorAll(".message")).toHaveLength(count);
+    expect(document.querySelector(".working-line")).toBeNull();
+    rerender(<Conversation messages={thread.slice(0, 1)} />);
+    expect(document.querySelectorAll(".message")).toHaveLength(count);
     rerender(<Conversation messages={thread.slice(0, 1)} active draft="Partial reply" />);
     expect(document.querySelector(".working-line")).toBeNull();
     expect(document.querySelector(".message.streaming .caret")).not.toBeNull();

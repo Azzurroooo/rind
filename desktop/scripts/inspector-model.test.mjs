@@ -15,7 +15,8 @@ import { planProgress, renderPlanSection } from "../src/renderer/plan-section.ts
 import { createConversation, reduceEvent } from "../src/renderer/timeline-model.ts"
 
 test("inspector tabs follow the spec order", () => {
-  assert.deepEqual([...INSPECTOR_TABS], ["context", "activity", "files", "usage"])
+  assert.deepEqual([...INSPECTOR_TABS], ["context", "activity", "files"])
+  assert.equal(isInspectorTab("usage"), false)
   assert.equal(isInspectorTab("activity"), true)
   assert.equal(isInspectorTab("tasks"), false)
   assert.equal(isInspectorTab(3), false)
@@ -37,10 +38,10 @@ test("inspectorFits leaves the conversation at least 420px", () => {
 
 test("nextInspectorTab wraps with arrow keys and jumps with Home and End", () => {
   assert.equal(nextInspectorTab("context", "ArrowRight"), "activity")
-  assert.equal(nextInspectorTab("usage", "ArrowRight"), "context")
-  assert.equal(nextInspectorTab("context", "ArrowLeft"), "usage")
+  assert.equal(nextInspectorTab("files", "ArrowRight"), "context")
+  assert.equal(nextInspectorTab("context", "ArrowLeft"), "files")
   assert.equal(nextInspectorTab("activity", "Home"), "context")
-  assert.equal(nextInspectorTab("activity", "End"), "usage")
+  assert.equal(nextInspectorTab("activity", "End"), "files")
   assert.equal(nextInspectorTab("activity", "Enter"), undefined)
 })
 

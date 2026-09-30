@@ -1,5 +1,5 @@
 /* Inspector (surface-design-v2 section 2 and 7), after LobeHub's right panel:
-   a tabbed column for Context, Activity, Files and Usage. */
+   a tabbed column for Context, Activity and Files; Usage is a global dialog. */
 
 .inspector {
   flex: none; display: flex; flex-direction: column;
@@ -7,6 +7,14 @@
   border-left: 1px solid var(--line); background: var(--panel);
 }
 .inspector:focus-visible { outline-offset: -2px; }
+.inspector-scope { flex: none; padding: 8px 16px; border-bottom: 1px solid var(--line); color: var(--dim); font-size: var(--text-meta); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.task-identity { display: grid; flex: 1; min-width: 0; gap: 3px; }
+.task-id { color: var(--dim); font-size: var(--text-meta); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.task-row .task-identity .task-command { display: block; }
+.usage-dialog .inspector-body { padding: 0; }
+.usage-dialog.dialog-lg { height: auto; max-height: calc(100dvh - 32px); grid-template-rows: auto auto minmax(0, 1fr); }
+.usage-dialog .dialog-description { margin: 0; padding: 16px 24px; font-size: var(--text-dense); line-height: 1.6; }
+.usage-dialog .dialog-body { padding: 0 24px 24px; overflow-y: auto; }
 .inspector-head {
   flex: none; display: flex; align-items: center; gap: var(--space-1);
   height: var(--header-height); padding: 0 var(--space-2); border-bottom: 1px solid var(--line);

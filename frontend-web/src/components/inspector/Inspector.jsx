@@ -3,13 +3,12 @@ import { X } from "lucide-react";
 import { FileTree } from "../FileTree.jsx";
 import { methods } from "../../methods.js";
 import { ContextTab } from "./ContextTab.jsx";
-import { UsageTab } from "./UsageTab.jsx";
 import { ActivityTab } from "./ActivityTab.jsx";
 
-const TAB_LABELS = Object.freeze({ context: "Context", activity: "Activity", files: "Files", usage: "Usage" });
+const TAB_LABELS = Object.freeze({ context: "Context", activity: "Activity", files: "Files" });
 
 // Which tabs the connected runtime can back. Activity needs a way to watch
-// background commands; Usage also appears when the runtime reports providers.
+// background commands; the global Usage entry may also show provider status.
 export function visibleTabs(info) {
   const available = new Set(info?.methods || []);
   const capabilities = new Set(info?.capabilities || []);
@@ -20,7 +19,6 @@ export function visibleTabs(info) {
       "context",
       ...(tasks || background ? ["activity"] : []),
       "files",
-      ...(available.has(methods.usageSummary) || available.has(methods.authList) ? ["usage"] : []),
     ],
     tasks,
     background,
@@ -30,7 +28,7 @@ export function visibleTabs(info) {
 }
 
 // Inspector (spec section 2), after LobeHub's right panel: a 360px column of
-// tabs (Context, Activity, Files, Usage). Tabs follow the WAI-ARIA tabs
+// tabs (Context, Activity, Files). Tabs follow the WAI-ARIA tabs
 // pattern with roving arrow keys.
 export function Inspector({
   tab,
@@ -43,7 +41,7 @@ export function Inspector({
   plan,
   backgroundWaitCount = 0,
   goal,
-  connected,
+  connected = true,
   compacting,
   onCompact,
   onGoalAction,
@@ -55,6 +53,7 @@ export function Inspector({
   panelRef,
   panelAttrs = {},
   style,
+  visible = true,
 }) {
   const gates = visibleTabs(info);
   const current = gates.tabs.includes(tab) ? tab : gates.tabs[0];
@@ -101,6 +100,7 @@ export function Inspector({
           <X size={16} aria-hidden="true" />
         </button>
       </div>
+      <div className="inspector-scope">{current === "files" ? `Workspace · ${String(workspace || "No folder selected").replace(/\\/g, "/").split("/").filter(Boolean).pop()}` : "Current session"}</div>
       <div className="inspector-panel" role="tabpanel" id="inspector-tabpanel" aria-labelledby={`inspector-tab-${current}`}>
         {current === "context" && (
           <ContextTab stats={stats} snapshot={contextSnapshot} contextInfo={contextInfo} compacting={compacting} canCompact={Boolean(sessionId)} onCompact={onCompact} />
@@ -116,6 +116,7 @@ export function Inspector({
             goal={goal}
             goalDisabled={!sessionId || !connected}
             onGoalAction={onGoalAction}
+            enabled={visible && connected}
           />
         )}
         {current === "files" && (
@@ -123,7 +124,6 @@ export function Inspector({
             <FileTree key={workspace || "none"} workspace={workspace} listFiles={listFiles} readFile={readFile} embedded openRequest={fileRequest} />
           </div>
         )}
-        {current === "usage" && <UsageTab request={request} usageEnabled={gates.usage} authEnabled={gates.auth} />}
       </div>
     </aside>
   );

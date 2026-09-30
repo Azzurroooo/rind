@@ -33,6 +33,7 @@ export function handleRuntimeEvent(envelope: RuntimeEvent) {
     if (sessionId === state.viewedSessionId) {
       const task = normalizeTask(envelope.event.task)
       if (task.bg_id) {
+        if (state.taskMonitor.refreshing) state.taskMonitor.updates[task.bg_id] = task
         state.taskMonitor.tasks = mergeTasks(state.taskMonitor.tasks, [...state.taskMonitor.tasks, task])
         if (!state.taskMonitor.cursors[task.bg_id] && !state.taskMonitor.reading.has(task.bg_id) && (task.stdout !== undefined || task.stderr !== undefined)) {
           state.taskMonitor.outputs[task.bg_id] = task

@@ -1,3 +1,5 @@
+import { useState } from "react";
+import { UsageDialog } from "../components/inspector/UsageDialog.jsx";
 import { LoginGate } from "../components/LoginGate.jsx";
 import { CommandPalette } from "../components/CommandPalette.jsx";
 import { ConnectionStrip } from "../components/shell/ConnectionStrip.jsx";
@@ -16,6 +18,7 @@ import { headerStatus, lastUserPrompt, panelAttrs, sessionTitle } from "./shellM
 // The v2 shell (spec section 2): sidebar | header + conversation + composer |
 // inspector. Below 768px the side panels become exclusive drawers over a scrim.
 export function Shell() {
+  const [usageOpen, setUsageOpen] = useState(false);
   const { ctx, actions, view, request, fileRequest, openFile } = useAppController();
   const { layout, info, connection, refs } = ctx;
 
@@ -65,6 +68,7 @@ export function Shell() {
           onLoadMore={actions.loadMoreSessions}
           onEnableNotifications={actions.enableNotifications}
           onOpenSettings={() => ctx.setSettingsOpen(true)}
+          onOpenUsage={tabs.usage || tabs.auth ? () => setUsageOpen(true) : undefined}
           panelRef={layout.sidebarPanelRef}
           panelAttrs={panelAttrs({ narrow: layout.narrow, visible: layout.sidebarVisible })}
           style={layout.narrow ? undefined : { width: layout.sidebarWidth }}
@@ -75,7 +79,7 @@ export function Shell() {
         <main className="main-column" aria-busy={ctx.busySession}>
           <ChatHeader
             title={sessionTitle(ctx.sessions, sessionId)}
-            status={headerStatus({ phase: connection.phase, active: view.active, compacting: ctx.compacting })}
+            status={headerStatus({ phase: connection.phase, active: view.active, compacting: ctx.compacting, waitingCount: view.backgroundWait?.count })}
             sidebarExpanded={layout.sidebarVisible}
             inspectorExpanded={layout.inspectorVisible}
             sidebarToggleRef={layout.sidebarToggleRef}
@@ -147,6 +151,7 @@ export function Shell() {
           <ResizeHandle label="Resize inspector" width={layout.inspectorWidth} min={INSPECTOR_WIDTH.min} max={INSPECTOR_WIDTH.max} edge="start" onResize={layout.setInspectorWidth} />
         )}
         <Inspector
+          visible={layout.inspectorVisible}
           tab={layout.inspectorTab}
           onTab={layout.setInspectorTab}
           onClose={layout.closeInspector}
@@ -178,6 +183,7 @@ export function Shell() {
         onTheme={ctx.theme.set}
         onLogout={() => { ctx.setSettingsOpen(false); void actions.logout(); }}
       />
+      <UsageDialog open={usageOpen} onClose={() => setUsageOpen(false)} request={request} usageEnabled={tabs.usage} authEnabled={tabs.auth} />
       <CommandPalette open={ctx.paletteOpen} commands={ctx.commandList} onClose={actions.closePalette} onRun={actions.runCommand} />
     </div>
   );

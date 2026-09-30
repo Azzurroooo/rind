@@ -1,18 +1,17 @@
 // Inspector (spec section 2): tab identity, width bounds, and the pure
-// normalizers and renderers for the Usage tab (rind/usage/summary) and the
+// normalizers and renderers for global Usage (rind/usage/summary) and the
 // plan checklist in the Activity tab. The task monitor and the goal panel
 // keep their own modules.
 
 import { asRecord, escapeHtml } from "./app/html.ts"
 
-export const INSPECTOR_TABS = ["context", "activity", "files", "usage"] as const
+export const INSPECTOR_TABS = ["context", "activity", "files"] as const
 export type InspectorTab = typeof INSPECTOR_TABS[number]
 
 export const INSPECTOR_TAB_LABELS: Readonly<Record<InspectorTab, string>> = {
   context: "Context",
   activity: "Activity",
   files: "Files",
-  usage: "Usage",
 }
 
 export const INSPECTOR_WIDTH = { min: 320, max: 640, fallback: 360 } as const

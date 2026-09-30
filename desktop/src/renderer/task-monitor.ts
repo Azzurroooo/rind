@@ -3,6 +3,7 @@
 
 import type { DesktopBackgroundTask } from "../preload/types"
 import { escapeHtml } from "./app/html.ts"
+import { patchChildren } from "./dom-patch.ts"
 
 const ACTIVE_STATES = new Set(["starting", "running", "cancelling"])
 
@@ -14,16 +15,18 @@ export type TaskMonitorState = {
   reads: Record<string, number>
   reading: Set<string>
   refreshing: boolean
+  loaded: boolean
+  updates: Record<string, DesktopBackgroundTask>
   error: string
 }
 
 export function createTaskMonitorState(): TaskMonitorState {
-  return { tasks: [], expandedId: "", outputs: {}, cursors: {}, reads: {}, reading: new Set(), refreshing: false, error: "" }
+  return { tasks: [], expandedId: "", outputs: {}, cursors: {}, reads: {}, reading: new Set(), refreshing: false, loaded: false, updates: {}, error: "" }
 }
 
 /** A task is listed only once the agent yielded it and it is still running. */
 export function isYieldedRunning(task: DesktopBackgroundTask) {
-  return ACTIVE_STATES.has(task.status)
+  return task.handoff === true && ACTIVE_STATES.has(task.status)
 }
 
 export function normalizeTask(record: unknown): DesktopBackgroundTask {
@@ -51,7 +54,8 @@ export function normalizeTask(record: unknown): DesktopBackgroundTask {
 export function mergeTasks(current: DesktopBackgroundTask[], listed: unknown): DesktopBackgroundTask[] {
   const rows = Array.isArray(listed) ? listed : []
   const previous = new Map(current.map((task) => [task.bg_id, task]))
-  return rows
+  const unique = new Map(rows.map((row) => { const task = normalizeTask(row); return [task.bg_id, task] }))
+  return [...unique.values()]
     .map((row) => {
       const task = normalizeTask(row)
       const prior = previous.get(task.bg_id)
@@ -67,9 +71,11 @@ export function mergeTasks(current: DesktopBackgroundTask[], listed: unknown): D
 export async function refreshTasks(state: TaskMonitorState, fetchPage: () => Promise<unknown>) {
   if (state.refreshing) return
   state.refreshing = true
+  state.updates = {}
   try {
     const result = await fetchPage() as { tasks?: unknown[] }
-    state.tasks = mergeTasks(state.tasks, Array.isArray(result?.tasks) ? result.tasks : [])
+    state.tasks = mergeTasks(state.tasks, [...(Array.isArray(result?.tasks) ? result.tasks : []), ...Object.values(state.updates)])
+    state.loaded = true
     if (!state.tasks.some((task) => task.bg_id === state.expandedId)) state.expandedId = ""
     state.error = ""
   } catch (error) {
@@ -109,12 +115,12 @@ export function taskStatusClass(task: DesktopBackgroundTask) {
 // data-task-output, data-task-action).
 export function renderTaskMonitor(dock: HTMLElement, state: TaskMonitorState) {
   if (!state.tasks.length) {
-    dock.innerHTML = `
+    patchChildren(dock, `
       <div class="task-monitor-head">
         <h3 class="inspector-section-title">Tasks</h3>
       </div>
-      <p class="inspector-empty">${state.error ? escapeHtml(state.error) : state.refreshing ? "Loading tasks…" : "No background commands are running. Commands Rind yields to the background appear here while they run."}</p>
-    `
+      <p class="inspector-empty">${state.error ? escapeHtml(state.error) : !state.loaded && state.refreshing ? "Loading tasks…" : "No background commands are running. Completed output stays in the conversation."}</p>
+    `)
     return
   }
   const rows = state.tasks.map((task) => {
@@ -122,10 +128,10 @@ export function renderTaskMonitor(dock: HTMLElement, state: TaskMonitorState) {
     const output = state.outputs[task.bg_id]
     const outputText = [output?.stdout, output?.stderr].filter((value) => typeof value === "string" && value.length).join("\n")
     return `
-      <div class="task-monitor-item${expanded ? " open" : ""}" data-task-id="${escapeHtml(task.bg_id)}">
+      <div class="task-monitor-item${expanded ? " open" : ""}" data-key="${escapeHtml(task.bg_id)}" data-task-id="${escapeHtml(task.bg_id)}">
         <button type="button" class="task-monitor-trigger" data-toggle-task="${escapeHtml(task.bg_id)}" aria-expanded="${String(expanded)}">
           <span class="status-pip ${taskStatusClass(task)}"></span>
-          <code class="task-monitor-command">${escapeHtml(task.command || task.bg_id)}</code>
+          <span class="task-monitor-identity"><code class="task-monitor-command">${escapeHtml(task.command || task.bg_id)}</code><span class="task-monitor-id">${escapeHtml(task.bg_id)} · ${escapeHtml(task.status)}</span></span>
           ${typeof task.elapsed_ms === "number" && task.elapsed_ms > 0 ? `<span class="task-monitor-status">${formatDuration(task.elapsed_ms)}</span>` : ""}
         </button>
         ${expanded ? `<div class="task-monitor-output">${outputText ? `<pre><code>${escapeHtml(outputText)}</code></pre>` : `<p class="subtle">${state.reading.has(task.bg_id) ? "Loading output…" : "No output yet."}</p>`}
@@ -134,14 +140,14 @@ export function renderTaskMonitor(dock: HTMLElement, state: TaskMonitorState) {
       </div>
     `
   }).join("")
-  dock.innerHTML = `
+  patchChildren(dock, `
     <div class="task-monitor-head">
       <h3 class="inspector-section-title">Tasks</h3>
       <span class="activity-note">${state.tasks.length} running</span>
     </div>
     <div class="task-monitor-list">${rows}</div>
     ${state.error ? `<p class="subtle" role="alert">${escapeHtml(state.error)}</p>` : ""}
-  `
+  `)
 }
 
 export function formatDuration(ms: number): string {

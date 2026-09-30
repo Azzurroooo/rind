@@ -1,6 +1,5 @@
 import { Goal } from "lucide-react";
 import { GoalPanel } from "../GoalPanel.jsx";
-import { BackgroundList } from "./BackgroundList.jsx";
 import { PlanSection } from "./PlanSection.jsx";
 import { RunningTasks } from "./RunningTasks.jsx";
 
@@ -17,15 +16,12 @@ export function ActivityTab({
   goal,
   goalDisabled,
   onGoalAction,
+  enabled,
 }) {
   return (
     <div className="inspector-body activity-tab">
       <PlanSection plan={plan} />
-      {taskService ? (
-        <RunningTasks sessionId={sessionId} request={request} waitingCount={waitingCount} />
-      ) : background ? (
-        <BackgroundList sessionId={sessionId} request={request} />
-      ) : null}
+      {(taskService || background) && <RunningTasks sessionId={sessionId} request={request} waitingCount={waitingCount} enabled={enabled} legacy={!taskService} />}
       <section className="inspector-section goal-section" aria-label="Goal">
         <div className="inspector-section-head">
           <h3 className="inspector-section-title"><Goal size={14} aria-hidden="true" /> Goal</h3>

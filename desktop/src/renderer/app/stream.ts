@@ -1,4 +1,3 @@
-import workingMarkUrl from "../assets/working-mark.svg"
 import { renderCommandResult } from "../command-results.ts"
 import { isStreamingAssistant, latestAssistantId } from "../message-view.ts"
 import { canConfirmQuestion } from "../question-state.ts"
@@ -7,7 +6,7 @@ import { foldWorkSegments, isWorkSegment, type StreamItem } from "../work-segmen
 import { canRetryLastPrompt } from "./composer.ts"
 import { jumpLatest, messageStream } from "./dom.ts"
 import { escapeAttribute, escapeHtml } from "./html.ts"
-import { activeTurnIdFor, questionSelectionFor, runtimeConversation, runtimeTurnActive } from "./runtime.ts"
+import { activeTurnIdFor, questionSelectionFor } from "./runtime.ts"
 import { state, vars } from "./state.ts"
 import { renderAssistantMessage, renderEmptyState, renderErrorBlock, renderUserMessage } from "./messages.ts"
 import { renderFileChange, renderTool, renderWorkSegment } from "./tools.ts"
@@ -48,7 +47,7 @@ export function renderStream() {
     }
   }
   const extras = document.createElement("template")
-  extras.innerHTML = `${renderQuestion()}${renderWorking()}`
+  extras.innerHTML = renderQuestion()
   const specialNodes = new Map<string, HTMLElement>()
   for (const node of messageStream.querySelectorAll<HTMLElement>("[data-stream-role]")) {
     if (node.dataset.streamRole) specialNodes.set(node.dataset.streamRole, node)
@@ -165,34 +164,6 @@ export function renderQuestion(): string {
       </form>
     </div>
   `
-}
-
-export function renderWorking(): string {
-  const conversation = runtimeConversation()
-  const turnId = activeTurnIdFor(state.viewedSessionId)
-  const wait = conversation.backgroundWait
-  if (!turnId && wait) {
-    const noun = wait.count === 1 ? "background task" : "background tasks"
-    return `<div class="working working-background" data-stream-role="working" role="status"><img class="working-mark" src="${workingMarkUrl}" alt="" aria-hidden="true" /><span>Waiting on ${wait.count} ${noun}</span></div>`
-  }
-  if (!turnId) return ""
-  const elapsed = conversation.turnStartedAt ? Math.max(0, Math.round((Date.now() - conversation.turnStartedAt) / 1000)) : 0
-  return `<div class="working" data-stream-role="working"><img class="working-mark" src="${workingMarkUrl}" alt="" aria-hidden="true" /><span id="working-label" class="working-label">Working… ${elapsed}s</span></div>`
-}
-
-export function syncWorkingTimer() {
-  const active = runtimeTurnActive()
-  if (active && !vars.workingTimer) {
-    vars.workingTimer = setInterval(() => {
-      const label = document.getElementById("working-label")
-      const started = state.conversation.turnStartedAt
-      if (label && started) label.textContent = `Working… ${Math.max(0, Math.round((Date.now() - started) / 1000))}s`
-    }, 1000)
-  }
-  if (!active && vars.workingTimer) {
-    clearInterval(vars.workingTimer)
-    vars.workingTimer = undefined
-  }
 }
 
 export function toolHeaderOffset(id: string) {
