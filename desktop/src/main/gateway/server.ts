@@ -1,11 +1,14 @@
 import { randomBytes, timingSafeEqual } from "node:crypto"
 import { readFile, realpath, stat } from "node:fs/promises"
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http"
-import { hostname, networkInterfaces } from "node:os"
+import { hostname } from "node:os"
 import { extname, relative, resolve, sep } from "node:path"
 import { WebSocket, WebSocketServer } from "ws"
 import type { GatewayOptions, GatewayState, RuntimeEvent } from "../../preload/types.ts"
 import { workspaceFileRequest } from "./files.ts"
+import { localAddresses, outboundAddress } from "./network.ts"
+import { isRemoteRuntimeMethod } from "../method-policy.ts"
+import { runtimeMethods } from "../../preload/types.ts"
 
 type Bridge = {
   initialize: () => Promise<unknown>
@@ -13,8 +16,8 @@ type Bridge = {
   subscribe: (listener: (event: RuntimeEvent) => void) => () => void
 }
 type Client = { subscriptions: Set<string>; pending: Set<string | number>; selected: string; alive: boolean }
-const allowed = new Set(["session/new", "session/list", "session/switch", "session/fork", "session/replay", "session/prompt", "session/cancel", "session/delete", "model/list", "model/set", "model/effort", "rind/session/steer", "rind/session/follow_up", "rind/session/promote_follow_up", "rind/session/unsteer", "rind/session/dequeue_follow_up", "rind/session/compact", "rind/command/execute", "rind/user-question/respond", "rind/goal/get", "rind/goal/set", "rind/goal/status", "rind/goal/clear", "rind/task/list", "rind/task/read", "rind/task/wait", "rind/task/cancel", "rind/task/release_wait", "rind/context/inspect", "rind/usage/summary"])
-const unscoped = new Set(["session/new", "session/list", "rind/usage/summary"])
+const allowed = new Set(Object.values(runtimeMethods).filter(isRemoteRuntimeMethod))
+const unscoped = new Set(["session/new", "session/list", "rind/usage/summary", "rind/auth/list", "model/list"])
 const mime: Record<string, string> = { ".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8", ".css": "text/css; charset=utf-8", ".svg": "image/svg+xml", ".png": "image/png", ".ico": "image/x-icon", ".woff2": "font/woff2" }
 const secret = () => randomBytes(24).toString("base64url")
 const object = (value: unknown): Record<string, unknown> => value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {}
@@ -66,10 +69,9 @@ export class DesktopGateway {
       this.options = { ...options, externalOrigin: external?.origin }
       this.accessCode = secret()
       const hosts = new Set(["localhost", "127.0.0.1", "[::1]", hostname().toLowerCase()])
-      const local = new Set<string>()
-      if (options.scope === "lan") for (const entries of Object.values(networkInterfaces())) for (const entry of entries || []) {
-        if (entry.family === "IPv4" && !entry.internal && !entry.address.startsWith("169.254.")) { hosts.add(entry.address); local.add(entry.address) }
-      }
+      const local = options.scope === "lan" ? localAddresses(undefined, await outboundAddress()).map((entry) => entry.address) : []
+      if (startEpoch !== this.epoch) throw new Error("Remote access startup cancelled.")
+      for (const address of local) hosts.add(address)
       if (external) hosts.add(external.hostname)
       this.allowedHosts = hosts
       const server = createServer((request, response) => { void this.http(request, response).catch(() => { if (!response.headersSent) this.json(response, 500, { error: "Unable to serve this request." }); else response.end() }) })
@@ -220,7 +222,7 @@ export class DesktopGateway {
       const result = object(await this.bridge.initialize())
       client.selected = String(result.session_id || "")
       if (client.selected) client.subscriptions.add(client.selected)
-      return { ...result, methods: [...allowed, "initialize", "ping", "session/subscribe", "session/unsubscribe", "file/list", "file/read", "file/write"], gateway: { desktop: true, files_follow_session: true } }
+      return { ...result, methods: [...new Set([...allowed, "initialize", "ping", "session/subscribe", "session/unsubscribe"])], gateway: { desktop: true, files_follow_session: true } }
     }
     const sessionId = typeof params.session_id === "string" ? params.session_id.trim() : ""
     if (method === "session/unsubscribe") { client.subscriptions.delete(sessionId); return { ok: true } }
@@ -234,7 +236,7 @@ export class DesktopGateway {
       if (typeof session.workspace_root !== "string") throw new Error("Session workspace unavailable.")
       return workspaceFileRequest(session.workspace_root, method, params)
     }
-    if (!allowed.has(method)) throw new Error("Method is not available through remote access.")
+    if (!isRemoteRuntimeMethod(method)) throw new Error("Method is not available through remote access.")
     if (!unscoped.has(method) && !sessionId) throw new Error("session_id is required.")
     if (sessionId && client.subscriptions.size < 128) client.subscriptions.add(sessionId)
     const result = await this.bridge.request(method, params)

@@ -274,6 +274,7 @@ export type DesktopApi = {
     start: (options: GatewayOptions) => Promise<GatewayState>
     stop: () => Promise<GatewayState>
     rotate: () => Promise<GatewayState>
+    allowNetwork: () => Promise<GatewayState>
     subscribe: (listener: (state: GatewayState) => void) => () => void
   }
   runtime: {

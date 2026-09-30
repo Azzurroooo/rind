@@ -16,6 +16,7 @@ const api: DesktopApi = {
     start: (options) => ipcRenderer.invoke("gateway-start", options),
     stop: () => ipcRenderer.invoke("gateway-stop"),
     rotate: () => ipcRenderer.invoke("gateway-rotate"),
+    allowNetwork: () => ipcRenderer.invoke("gateway-allow-network"),
     subscribe: (listener) => {
       const handler = (_event: Electron.IpcRendererEvent, state: Parameters<typeof listener>[0]) => listener(state)
       ipcRenderer.on("gateway-changed", handler)

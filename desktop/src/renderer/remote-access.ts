@@ -16,6 +16,10 @@ export function remoteAccessMarkup() {
       <label for="remote-address">1. Open this address on your other device</label><div class="remote-copy-row"><select id="remote-address"></select><button type="button" id="remote-copy-address" class="ghost-button">Copy</button></div>
       <label for="remote-code">2. Enter the access code</label><div class="remote-copy-row"><input id="remote-code" type="password" readonly autocomplete="off" /><button type="button" id="remote-reveal" class="ghost-button" aria-label="Show access code">Show</button><button type="button" id="remote-copy-code" class="ghost-button">Copy</button></div>
       </details>
+      <details class="remote-advanced"><summary>Can’t open the page?</summary>
+        <p class="subtle">Keep both devices on the same Wi-Fi, away from guest networks. If you use a VPN, choose the Wi-Fi address above or pause the VPN on your phone.</p>
+        <div id="remote-windows-help" hidden><p class="subtle">Windows may block incoming connections, especially on a public network. Allow access to Rind’s current port from your local network. Windows will request administrator approval; an automatic block for this copy of Rind will be replaced.</p><button type="button" id="remote-allow-network" class="ghost-button">Allow Rind on the local network</button></div>
+      </details>
       <p class="subtle">Keep the QR code, sign-in link and access code private: they grant access to your sessions, files and agent tools. Closing a browser leaves tasks running. Closing Rind ends remote access.</p>
       <button type="button" id="remote-rotate" class="ghost-button">Generate new code & disconnect devices</button>
     </div>
@@ -60,12 +64,13 @@ export function bindRemoteAccess() {
     element("remote-indicator").classList.toggle("pip-running", next.running)
     element("remote-clients").textContent = next.running ? `${next.clients} connected ${next.clients === 1 ? "device" : "devices"}` : ""
     element("remote-sharing").hidden = !next.running
+    element("remote-windows-help").hidden = window.api.platform !== "win32" || next.scope !== "lan"
     element("remote-setup").hidden = next.running
     toggle.textContent = next.running ? "Turn off remote access" : "Enable remote access"
     toggle.classList.toggle("danger", next.running)
     const selected = addresses.value
     if (JSON.stringify([...addresses.options].map((item) => item.value)) !== JSON.stringify(next.addresses)) {
-      addresses.replaceChildren(...next.addresses.map((address) => new Option(address, address)))
+      addresses.replaceChildren(...next.addresses.map((address, index) => new Option(`${address}${index === 0 ? " (recommended)" : ""}`, address)))
       if (next.addresses.includes(selected)) addresses.value = selected
     }
     code.value = next.accessCode
@@ -78,9 +83,10 @@ export function bindRemoteAccess() {
     if (busy) return
     busy = true; message.textContent = ""; toggle.disabled = true
     element<HTMLButtonElement>("remote-rotate").disabled = true
+    element<HTMLButtonElement>("remote-allow-network").disabled = true
     try { render(await run()); message.textContent = success }
     catch (error) { message.textContent = error instanceof Error ? error.message : String(error) }
-    finally { busy = false; toggle.disabled = false; element<HTMLButtonElement>("remote-rotate").disabled = false }
+    finally { busy = false; toggle.disabled = false; element<HTMLButtonElement>("remote-rotate").disabled = false; element<HTMLButtonElement>("remote-allow-network").disabled = false }
   }
   const open = () => { dialog.showModal(); void action(() => window.api.gateway.get()) }
   element("remote-close").addEventListener("click", () => dialog.close())
@@ -92,6 +98,7 @@ export function bindRemoteAccess() {
     return window.api.gateway.start({ scope: element<HTMLSelectElement>("remote-scope").value as "lan" | "loopback", port, externalOrigin: element<HTMLInputElement>("remote-origin").value.trim() || undefined })
   }))
   element("remote-rotate").addEventListener("click", () => void action(() => window.api.gateway.rotate(), "New access code generated. Previous devices have been disconnected."))
+  element("remote-allow-network").addEventListener("click", () => void action(() => window.api.gateway.allowNetwork(), "Rind is allowed on the local network. Scan the QR code again on your phone."))
   element("remote-reveal").addEventListener("click", () => { code.type = code.type === "password" ? "text" : "password"; element("remote-reveal").textContent = code.type === "password" ? "Show" : "Hide"; element("remote-reveal").setAttribute("aria-label", `${code.type === "password" ? "Show" : "Hide"} access code`) })
   addresses.addEventListener("change", () => void updateQr())
   for (const [id, value] of [["remote-copy-address", () => addresses.value], ["remote-copy-code", () => code.value], ["remote-copy-link", signInLink]] as const) {

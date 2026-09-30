@@ -13,6 +13,7 @@ import { loadSettingsForWorkspace } from "./runtime-settings"
 import { readRindVersion } from "./version"
 import { wrapRuntimeIpcError } from "../shared/ipc-error"
 import { DesktopGateway } from "./gateway/server"
+import { allowGatewayOnWindows } from "./gateway/firewall"
 import { workspaceFileRequest } from "./gateway/files"
 import type { GatewayOptions } from "../preload/types"
 import { isDesktopRuntimeMethod, isRemoteRuntimeMethod } from "./method-policy"
@@ -188,6 +189,12 @@ function registerIpc() {
   ipcMain.handle("gateway-start", (_event, options: GatewayOptions) => gateway().start(options))
   ipcMain.handle("gateway-stop", async () => { await gateway().stop(); return gateway().state() })
   ipcMain.handle("gateway-rotate", () => gateway().rotate())
+  ipcMain.handle("gateway-allow-network", async () => {
+    const current = gateway().state()
+    if (!current.running || current.scope !== "lan") throw new Error("Enable local-network access first.")
+    await allowGatewayOnWindows(process.execPath, current.port)
+    return gateway().state()
+  })
   ipcMain.handle("runtime-start", async (_event, workspace: unknown) => {
     const projectPath = await requireProject(workspace)
     return startRuntime(projectPath)
