@@ -1,7 +1,9 @@
 # Web and desktop upgrade
 
-Updated on 2026-09-30 on `feature/web-desktop-upgrade`. The Python Worker, CLI, and existing
-messaging gateway are unchanged. Both surfaces continue to use runtime protocol v2.
+Updated on 2026-09-30 on `feature/web-desktop-upgrade`. Both surfaces continue to use
+runtime protocol v2. The CLI and existing messaging gateway are unchanged. The current
+compaction fix makes two small Worker changes: explicit compaction bypasses the stopped-turn
+continuation block without clearing it, and live snapshots retain the operation kind.
 
 ## Design and reference study
 
@@ -18,6 +20,11 @@ Local references:
   `src/features/Conversation/ChatInput/index.tsx`: stable composition while a run is active,
   per-conversation queues, and popovers that stay inside the available viewport.
 - These are design and interaction references, not imported implementations or dependencies.
+- The composer refinement also reviewed LobeHub's `ChatInput/SendArea/SendButton.tsx`,
+  `Conversation/ChatInput/utils.ts`, `ModelSelect/ReasoningEffortSelect.tsx`, and
+  `ClarificationQuestions/index.tsx`: persistent run feedback, secondary send actions,
+  grouped choices, and keeping question drafts until acknowledged. Rind uses a single
+  primary control plus a click/touch menu to meet the requested lower button count.
 
 The current specification is `surface-design-v2.md`: warm off-white/green canvases, restrained
 green accents, Manrope UI text, DM Mono details, 264px navigation, and a readable
@@ -34,11 +41,12 @@ specification and the reference study, rather than claiming a pixel match to a c
 
 | Area | Web | Desktop |
 | --- | --- | --- |
-| Navigation | Project selector, grouped history, search, mobile drawers | Native project folders, session search, recent/project navigation |
+| Navigation | Project selector, chronological history, search, mobile drawers | Native project folders, session search, recent/project navigation |
 | Conversation | Streaming, queue/steering, stop, tool events, user questions | Same runtime workflows, native window integration |
 | Plan | Live checklist in the inspector's Activity tab | Same; the composer plan dock was removed |
 | Session tools | Fork and complete replay export | Fork and complete replay export |
-| Composition | Per-session drafts, IME protection, growing input, attachments | Per-session drafts, IME protection, attachments written to the selected project |
+| Composition | Per-session drafts, IME protection, growing input, attachments, unified send/effort controls | Same controls; attachments written to the selected project |
+| Compaction | Session-scoped progress, cancellation, reconnect recovery | Same; long requests also cover slash commands and Gateway forwarding |
 | Tasks | Activity tab: only yielded, still-running background commands; output paging, read from start/latest, stop | Same filter and actions; rows lead with the command |
 | Goals | Read, set, pause/resume, clear through explicit actions | Existing goal controls aligned with explicit actions |
 | Information scope | Context/Activity belong to the session, Files to its workspace; Usage is a global sidebar dialog | Same hierarchy; Usage is also in the command palette |
@@ -237,3 +245,74 @@ different. There is no generated concept image or pixel-fidelity claim. Remainin
 boundaries: no complete installer-install test, full authenticated workflow on phone hardware, public HTTPS/proxy
 deployment, or local macOS/Linux execution. The new hosted CI workflow has not been run from
 this local checkout.
+
+## Composer refinement and compact verification (2026-09-30)
+
+This is the current revision, following the baseline verification above.
+
+- One primary send/stop control and a secondary Message actions menu replace the separate
+  Stop / Steer / Queue button row. Enter still queues and Alt+Enter still steers. Stop is
+  accessible with an unsent draft, without discarding it. Menu slots never change width.
+- Model and effort chips share icons, labels, checked rows, provider grouping, filter behavior
+  and keyboard navigation. Desktop no longer uses the old mono effort list. The 320px Web
+  toolbar reserves two rows so model and effort remain readable.
+- The permanent composer context row shows the actual workspace and a three-dot running
+  indicator before the first token. Web's folder hint opens a full host path. No status row
+  is inserted or removed when a turn starts or finishes; reduced-motion is supported.
+- Desktop questions use neutral radio rows and a custom textarea. Controls remain mounted
+  across stream updates. Confirmation is acknowledged before removal; failures retain the
+  draft and allow retry. A question answered on one surface is reflected on the other.
+- Compact now uses the 15-minute long-request policy through Desktop and its Gateway,
+  including slash-command RPCs. The Desktop `/compact` action shares the direct path.
+  Progress is session-scoped, duplicate submissions are guarded, drafts remain editable,
+  and terminal events restore the normal controls. Durable events own success feedback;
+  redundant replay refreshes and success banners were removed.
+- A regression reproduced `Compaction did not complete` after Stop. The Worker change allows
+  explicit compact despite the automatic-continuation suppression marker, leaving that
+  marker intact. Live snapshots also carry `operation`, so reconnecting during compaction
+  restores the correct state. Model, summarization and tool execution algorithms are unchanged.
+
+Final local checks:
+
+| Check | Result |
+| --- | --- |
+| Web unit/integration suite | 363 passed |
+| Desktop suite, including real Worker/Gateway smoke | 224 passed |
+| Python compact, Worker and continuation regressions | 60 passed |
+| Desktop TypeScript check | Passed |
+| Web and Desktop production builds | Passed |
+| Electron → real Python Worker → Desktop Gateway → Chromium | Passed with an isolated local model fixture |
+
+The end-to-end run exercised remote queue and steer during a pending prompt, live local
+transcript updates, Stop with a preserved draft, manual compact after Stop, a **32-second**
+non-streaming summary crossing the old timeout, browser reload while compacting, Desktop
+`/compact`, a custom question answer, and reduced-motion. Both clients recovered to Ready,
+and the browser observed the Desktop-submitted answer. No page errors were recorded.
+Separate regression tests cover compaction cancellation/failure and session-switch isolation.
+
+Visual verification used the existing `docs/surface-design-v2.md` specification, not a new
+concept image. Browser/IAB reported no enabled browser, so Playwright drove the real Electron
+renderer and Chromium. Captures were inspected after finite menu/drawer animations settled.
+Web widths 320, 390, 768 and 1280px were measured; the native Windows Desktop viewport was
+also inspected. The idle/running composer bounds stayed stable while waiting for the first token.
+
+| Visual check | Evidence and correction |
+| --- | --- |
+| Palette and container hierarchy | Existing warm background, green accent, open conversation and restrained composer preserved |
+| Model/effort typography | Matching chips and checked rows; removed leftover Desktop mono effort styling |
+| Phone toolbar | Fixed rows at 320px keep the model readable; attachment and command icons remain aligned |
+| Popover boundaries | Model and send menus remain inside the composer/viewport at all four tested widths |
+| Question card | Neutral radio rows, clear question/description hierarchy, visible custom answer and submit state |
+| Workspace discoverability | Folder label visible with navigation closed; tap opens the full host path |
+| Motion | Permanent status slot; animated dots do not participate in layout; static in reduced-motion mode |
+| Copy and feedback | Intentional changes limited to working-folder/status labels, send menu, effort labels and question form; duplicate compact banner removed |
+
+The implementation was verified against the existing design specification with no outstanding
+material visual mismatches in the inspected states. Native project selection and Web's
+mobile folder popup remain intentional surface differences. A notification icon also replaces
+the overflowing long footer label, retaining its accessible name and tooltip.
+
+Verification used isolated settings, sessions and a local model fixture. No personal credentials
+or conversations were used. Temporary captures, scripts, dependencies, data and processes are
+cleaned after inspection. This pass does not claim a new hardware-phone or installer test.
+Packaging this revision must include the small Worker fix together with the rebuilt surfaces.

@@ -117,8 +117,10 @@ Each status color has a `-soft` background (same hue, ~12% alpha).
   in over 150ms on hover or focus-within. It stays visible while its menu is open and on the latest
   assistant message. Assistant: Copy, Fork from here (when supported), time label. User:
   Copy, Edit & resend (restores text into the composer).
-- Streaming: a blinking 2×14 caret at the end of the text. Working/Waiting/Idle use the existing
-  fixed-height session header. Starting or finishing a turn never inserts a status row into the transcript.
+- Streaming: a blinking 2×14 caret at the end of the text. The session header retains its status.
+  A permanent 26px composer context row also shows the working folder and Ready / Working /
+  Your input needed / Compacting. Its three dots animate with opacity and transform only;
+  reduced-motion keeps a static indicator. Starting or finishing never inserts a transcript row.
 - Errors: a `--danger-soft` block with a `--danger` 1px left rule, radius 6, and a Retry action.
 - Scroll: stick to the bottom while streaming. When the user scrolls up, a round 32 "Jump to latest"
   button appears at bottom center, 16 above the composer.
@@ -190,8 +192,8 @@ mirrors LobeHub's `WorkflowCollapse` / `ProcessFold` and the CLI's per-tool caps
   `--accent-soft` ring. Drag-over draws a dashed `--accent` border with the label "Drop files".
 - Queue tray: attached above the frame (radius 14 14 0 0, `--panel`). Each queued item is a 32 row
   with Promote (send as steer), Edit (restore to composer) and Remove.
-  A running turn must not hold the composer preparation lock. A direct Steer control is
-  available alongside Queue while composing during a run; Alt+Enter remains supported.
+  A running turn must not hold the composer preparation lock. Steer is in Message actions
+  beside the primary send control; Alt+Enter remains supported.
   Inputs are reconciled by ID across local confirmation and remote delivery; reconnect
   rebuilds the transcript from worker history.
 - Textarea: 15px, 12/14 padding, auto-grow up to 40vh, then scroll. Enter sends, Shift+Enter
@@ -199,19 +201,32 @@ mirrors LobeHub's `WorkflowCollapse` / `ProcessFold` and the CLI's per-tool caps
 - Attachment strip: 28 chips, radius 6, max 180 wide, with a remove button.
 - On phones, attachment and command buttons stay on one row. Model/effort labels shrink
   before actions do; popovers use the input frame's available width, including while a queue
-  and draft are present. Model/provider labels truncate inside the list.
+  and draft are present. At 380px and below, model/effort/context have their own permanent
+  row, with Attach/Commands and Send below. Model/provider labels truncate inside the list.
 - Toolbar (8 padding, gap 4): left side has Attach and Commands (`/`); right side has the model chip,
   effort chip, context meter ring (16, shows the percentage used, and a click opens the Context tab),
-  then Send (32 square, `--accent`), which becomes Stop (square icon, `--danger` ink on
-  `--danger-soft`) while a turn is running. While running, Enter queues a follow-up and
-  Alt+Enter sends it as steering.
+  then a fixed-width send control: Send while idle, Stop when running with an empty draft,
+  and Send after this turn when running with text. The adjacent chevron opens Queue,
+  Steer and Stop, so Stop stays available with a draft. Enter queues; Alt+Enter steers.
+  Idle keeps the chevron slot (disabled), preventing a toolbar shift. During compaction
+  the input remains editable, submission waits, and Stop remains available.
 - Model picker (after Jan's provider groups and LobeHub's ModelSwitchPanel): the chip opens a
   popover above the composer whose rows come from the runtime's `model/list` grouped by provider —
   uppercase group headers with the provider display name from `rind/auth/list` and a count, then
   model ids in mono with the context window ("128K ctx") and an image marker where known. More than
   8 models adds a filter box at the top. Selecting sends `provider_id` with `model_id` so identical
-  ids across providers cannot collide. Desktop keeps the flat settings-catalog list for the
-  no-session target.
+  ids across providers cannot collide. Both surfaces use a check column, CPU/brain chip icons,
+  the same effort labels (Low / Medium / High / Extra high / Max), UI font for effort and
+  mono for model identifiers. Menus support arrows, Escape and outside-pointer dismissal.
+  Desktop's no-session picker uses the settings catalog. Model/effort changes are disabled
+  during a running turn on both surfaces.
+- Working folder: the context row stays visible when navigation is closed. Web shows the
+  folder name with a tap-to-expand full path labeled "Folder on Rind computer"; Desktop
+  shows its path and retains project selection before a session starts.
+- Desktop questions: a neutral surface with a small "Your input needed" heading, native
+  radio rows, optional custom textarea and Send answer. Selection does not submit. Keep
+  the form and draft until confirmation, disable duplicate submissions, and show retryable
+  errors in place. Streaming events do not replace controls or disturb input selection.
 - Slash menu: popover above the composer, 10 radius, rows 32, keyboard navigable. Its list
   comes from the runtime command catalog merged with local commands.
 
