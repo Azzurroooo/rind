@@ -101,7 +101,7 @@ export function Inspector({
         </button>
       </div>
       <div className="inspector-scope">{current === "files" ? `Workspace · ${String(workspace || "No folder selected").replace(/\\/g, "/").split("/").filter(Boolean).pop()}` : "Current session"}</div>
-      <div className="inspector-panel" role="tabpanel" id="inspector-tabpanel" aria-labelledby={`inspector-tab-${current}`}>
+      <div className={`inspector-panel ${current === "files" ? "is-files" : ""}`} role="tabpanel" id="inspector-tabpanel" aria-labelledby={`inspector-tab-${current}`}>
         {current === "context" && (
           <ContextTab stats={stats} snapshot={contextSnapshot} contextInfo={contextInfo} compacting={compacting} canCompact={Boolean(sessionId)} onCompact={onCompact} />
         )}

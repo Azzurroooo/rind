@@ -3,6 +3,7 @@ import { RefreshCw } from "lucide-react";
 import { methods } from "../../methods.js";
 import { formatTokens } from "../../lib/format.js";
 import { errorText } from "../../app/constants.js";
+import { cacheHitRate } from "../../lib/usage.js";
 
 const USAGE_DAYS = 7;
 
@@ -28,6 +29,8 @@ export function UsageTab({ request, usageEnabled, authEnabled }) {
   const usage = useRuntimeRead(usageEnabled, () => request(methods.usageSummary, { days: USAGE_DAYS }));
   const auth = useRuntimeRead(authEnabled, () => request(methods.authList, {}));
   const totals = usage.data?.totals;
+  const hitRate = cacheHitRate(totals?.input, totals?.cached);
+  const cachedReported = typeof totals?.cached === "number" && Number.isFinite(totals.cached) && totals.cached >= 0;
   const models = Array.isArray(usage.data?.by_model) ? usage.data.by_model : [];
   const days = Array.isArray(usage.data?.by_day) ? usage.data.by_day : [];
   const peak = Math.max(1, ...days.map((day) => Number(day.tokens) || 0));
@@ -48,12 +51,18 @@ export function UsageTab({ request, usageEnabled, authEnabled }) {
             <dl className="stat-list">
               <Stat label="Total tokens" value={formatTokens(totals.total)} />
               <Stat label="Input" value={formatTokens(totals.input)} />
-              <Stat label="Cached" value={formatTokens(totals.cached)} />
               <Stat label="Output" value={formatTokens(totals.output)} />
               <Stat label="Model calls" value={String(totals.samples || 0)} />
               {Number(totals.compactions) > 0 && <Stat label="Compactions" value={String(totals.compactions)} />}
             </dl>
           )}
+          {totals && <div className="usage-cache">
+            <dl className="stat-list">
+              <Stat label="Cache read" value={cachedReported ? formatTokens(totals.cached) : "Not reported"} />
+              <Stat label="Cache hit rate" value={hitRate === null ? "—" : `${(hitRate * 100).toFixed(1)}%`} />
+            </dl>
+            <p className="section-hint">Reported cache-read tokens ÷ input tokens for this period. Cache reads are included in input.</p>
+          </div>}
           {days.length > 0 && (
             <ul className="usage-days" aria-label="Tokens by day">
               {days.map((day) => (

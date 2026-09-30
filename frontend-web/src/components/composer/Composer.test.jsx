@@ -13,6 +13,17 @@ function Harness({ initial = "", ...props }) {
 const textarea = () => screen.getByLabelText("Message");
 
 describe("Composer", () => {
+  it("lets a new session select provider models and effort before sending", () => {
+    const onModel = vi.fn();
+    const onEffort = vi.fn();
+    render(<Harness model="first" models={[{ id: "first", providerId: "alpha" }, { id: "second", providerId: "beta" }]} onModel={onModel} onEffort={onEffort} />);
+    fireEvent.click(screen.getByRole("button", { name: /Model:/ }));
+    fireEvent.click(screen.getByRole("option", { name: /second/ }));
+    expect(onModel).toHaveBeenCalledWith({ providerId: "beta", modelId: "second" });
+    fireEvent.click(screen.getByRole("button", { name: /Reasoning effort:/ }));
+    fireEvent.click(screen.getByRole("option", { name: "High" }));
+    expect(onEffort).toHaveBeenCalledWith("high");
+  });
   it("Enter sends as follow_up and Shift+Enter does not send", () => {
     const onSubmit = vi.fn();
     render(<Harness initial="hello" onSubmit={onSubmit} />);

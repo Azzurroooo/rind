@@ -60,6 +60,8 @@ export type UsageTotals = {
 export type UsageSummary = {
   days: number
   totals: UsageTotals
+  cacheHitRate: number | null
+  cachedReported: boolean
   byDay: ReadonlyArray<{ day: string; tokens: number }>
   byModel: ReadonlyArray<{ model: string; tokens: number; samples: number }>
 }
@@ -69,6 +71,8 @@ export function normalizeUsageSummary(value: unknown): UsageSummary {
   const totals = asRecord(root.totals)
   return {
     days: count(root.days),
+    cachedReported: typeof totals.cached === "number" && Number.isFinite(totals.cached) && totals.cached >= 0,
+    cacheHitRate: cacheHitRate(totals.input, totals.cached),
     totals: {
       input: count(totals.input),
       cached: count(totals.cached),
@@ -97,7 +101,6 @@ export function renderUsageSummary(summary: UsageSummary): string {
   const stats: ReadonlyArray<[string, number]> = [
     ["Total", totals.total],
     ["Input", totals.input],
-    ["Cached", totals.cached],
     ["Output", totals.output],
     ["Reasoning", totals.reasoning],
     ["Requests", totals.samples],
@@ -110,10 +113,17 @@ export function renderUsageSummary(summary: UsageSummary): string {
   const models = summary.byModel.map((row) => `<li><code>${escapeHtml(row.model)}</code><span>${escapeHtml(formatCount(row.tokens))} tokens, ${row.samples} ${row.samples === 1 ? "request" : "requests"}</span></li>`)
   return `
     <dl class="usage-stats">${stats.map(([label, value]) => `<div><dt>${label}</dt><dd>${escapeHtml(formatCount(value))}</dd></div>`).join("")}</dl>
+    <dl class="usage-stats usage-cache"><div><dt>Cache read</dt><dd>${summary.cachedReported ? escapeHtml(formatCount(totals.cached)) : "Not reported"}</dd></div><div><dt>Cache hit rate</dt><dd>${summary.cacheHitRate === null ? "—" : `${(summary.cacheHitRate * 100).toFixed(1)}%`}</dd></div></dl>
+    <p class="subtle usage-cache-note">Reported cache-read tokens ÷ input tokens for this period. Cache reads are included in input.</p>
     ${totals.compactions ? `<p class="subtle">${totals.compactions} ${totals.compactions === 1 ? "compaction" : "compactions"}</p>` : ""}
     ${days.length ? `<h3 class="inspector-section-title">By day</h3><div class="usage-days">${days.join("")}</div>` : ""}
     ${models.length ? `<h3 class="inspector-section-title">By model</h3><ul class="usage-models">${models.join("")}</ul>` : ""}
   `
+}
+
+export function cacheHitRate(input: unknown, cached: unknown): number | null {
+  if (typeof input !== "number" || !Number.isFinite(input) || input <= 0 || typeof cached !== "number" || !Number.isFinite(cached) || cached < 0 || cached > input) return null
+  return cached / input
 }
 
 export function formatDuration(ms: number): string {

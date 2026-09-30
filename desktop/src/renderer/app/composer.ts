@@ -8,7 +8,7 @@ import { attachmentsFor, renderAttachments, waitForAttachments } from "./attachm
 import { prompt, slashCommandMenu } from "./dom.ts"
 import { asRecord, escapeAttribute, escapeHtml } from "./html.ts"
 import { addPendingInput, syncCurrentPendingInputs } from "./pending-inputs.ts"
-import { conversationFor, ensureRuntime, ensureSession, requestForSession, runAction, setConversationFor } from "./runtime.ts"
+import { conversationFor, draftModelSelection, ensureRuntime, ensureSession, requestForSession, runAction, setConversationFor } from "./runtime.ts"
 import { chatProject, currentDraftKey, loadSessions, recordRecentSession, sessionTurnActive } from "./sessions.ts"
 import { render, renderComposerState } from "./shell.ts"
 import { runSlash } from "./slash-runner.ts"
@@ -173,7 +173,7 @@ export async function submitPrompt(draftKey: string, mode: RunningSendMode = "qu
   closeSlashCommandMenu()
   const projectPath = project.path
   const requestedSessionId = state.viewedSessionId
-  const requestedModel = state.model || state.settings.model
+  const selection = draftModelSelection()
   let sessionId = requestedSessionId
   let accepted = false
   const clearSentAttachments = () => {
@@ -182,7 +182,7 @@ export async function submitPrompt(draftKey: string, mode: RunningSendMode = "qu
   }
   try {
     await ensureRuntime()
-    sessionId = await ensureSession(projectPath, requestedSessionId, requestedModel)
+    sessionId = await ensureSession(projectPath, requestedSessionId, selection)
     if (sessionTurnActive(sessionId)) {
       try {
         const result = asRecord(await requestForSession(mode === "steer" ? runtimeMethods.sessionSteer : runtimeMethods.sessionFollowUp, sessionId, { input }))

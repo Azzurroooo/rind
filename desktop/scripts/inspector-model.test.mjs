@@ -73,6 +73,17 @@ test("renderUsageSummary shows totals, days, and escaped model names", () => {
   assert.match(renderUsageSummary(normalizeUsageSummary({ days: 7 })), /No token usage recorded in the last 7 days/)
 })
 
+test("Usage shows weighted cache hits and keeps missing input distinct from zero", () => {
+  const usage = (totals) => normalizeUsageSummary({ totals: { samples: 1, ...totals } })
+  assert.equal(usage({ input: 1200, cached: 300 }).cacheHitRate, .25)
+  assert.match(renderUsageSummary(usage({ input: 1200, cached: 300 })), /25.0%/)
+  assert.equal(usage({ input: 1200, cached: 0 }).cacheHitRate, 0)
+  assert.equal(usage({ input: 0, cached: 0 }).cacheHitRate, null)
+  assert.equal(usage({ input: 100 }).cacheHitRate, null)
+  assert.equal(usage({ input: 100, cached: 200 }).cacheHitRate, null)
+  assert.match(renderUsageSummary(usage({ input: 100 })), /Not reported/)
+})
+
 test("formatDuration uses ms, seconds, and minutes", () => {
   assert.equal(formatDuration(450), "450ms")
   assert.equal(formatDuration(4200), "4s")

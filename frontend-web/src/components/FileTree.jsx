@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ChevronDown, ChevronRight, FileText, Folder, FolderOpen, RefreshCw, X } from "lucide-react";
 import { FILE_LIMIT_BYTES, base64ToDataUrl, decodeBase64ToText, formatBytes, isImageMime, isTextMime } from "../lib/files.js";
 
@@ -17,6 +17,7 @@ export function FileTree({ workspace, listFiles, readFile, embedded = false, ope
   const [dirs, setDirs] = useState({}); // path → { status: "loading"|"ready"|"error", entries, error }
   const [expanded, setExpanded] = useState({}); // path → bool
   const [preview, setPreview] = useState(null);
+  const previewRequest = useRef(0);
 
   async function loadDir(path) {
     if (!listFiles) return;
@@ -58,9 +59,11 @@ export function FileTree({ workspace, listFiles, readFile, embedded = false, ope
 
   async function openPreview(entry) {
     const path = String(entry?.path || entry?.name || "");
-    setPreview({ path, status: "loading", size: entry?.size });
+    const requestId = ++previewRequest.current;
+    const show = (next) => { if (requestId === previewRequest.current) setPreview(next); };
+    show({ path, status: "loading", size: entry?.size });
     if (Number(entry?.size) > FILE_LIMIT_BYTES) {
-      setPreview({ path, status: "oversize", size: entry.size });
+      show({ path, status: "oversize", size: entry.size });
       return;
     }
     try {
@@ -68,17 +71,17 @@ export function FileTree({ workspace, listFiles, readFile, embedded = false, ope
       const mime = String(result?.mime || "");
       const base64 = String(result?.content_base64 || "");
       if (isImageMime(mime)) {
-        setPreview({ path, status: "image", mime, size: result?.size, dataUrl: base64ToDataUrl(base64, mime) });
+        show({ path, status: "image", mime, size: result?.size, dataUrl: base64ToDataUrl(base64, mime) });
         return;
       }
       if (isTextMime(mime)) {
         const text = decodeBase64ToText(base64);
-        setPreview({ path, status: "text", mime, size: result?.size, text: text.slice(0, PREVIEW_TEXT_CAP), truncated: text.length > PREVIEW_TEXT_CAP });
+        show({ path, status: "text", mime, size: result?.size, text: text.slice(0, PREVIEW_TEXT_CAP), truncated: text.length > PREVIEW_TEXT_CAP });
         return;
       }
-      setPreview({ path, status: "binary", mime, size: result?.size ?? entry?.size });
+      show({ path, status: "binary", mime, size: result?.size ?? entry?.size });
     } catch (error) {
-      setPreview({ path, status: "error", size: entry?.size, error: errorMessage(error) });
+      show({ path, status: "error", size: entry?.size, error: errorMessage(error) });
     }
   }
 
@@ -92,17 +95,19 @@ export function FileTree({ workspace, listFiles, readFile, embedded = false, ope
         </button>
       )}
       {open && (
-        <div className="file-tree-body">
+        <div className={`file-tree-body ${preview ? "has-preview" : ""}`}>
+          <div className="tree-directory" role="region" aria-label="Workspace directory">
           {!workspace && <div className="tree-state">No workspace selected</div>}
-          {workspace && <DirLevel path="" depth={0} state={dirs[""]} expanded={expanded} dirs={dirs} onToggleDir={toggleDir} onOpenFile={openPreview} onRetry={loadDir} />}
-          {preview && <PreviewPanel preview={preview} onClose={() => setPreview(null)} />}
+          {workspace && <DirLevel path="" depth={0} state={dirs[""]} expanded={expanded} dirs={dirs} selectedPath={preview?.path} onToggleDir={toggleDir} onOpenFile={openPreview} onRetry={loadDir} />}
+          </div>
+          {preview && <PreviewPanel preview={preview} onClose={() => { ++previewRequest.current; setPreview(null); }} />}
         </div>
       )}
     </div>
   );
 }
 
-function DirLevel({ path, depth, state, expanded, dirs, onToggleDir, onOpenFile, onRetry }) {
+function DirLevel({ path, depth, state, expanded, dirs, selectedPath, onToggleDir, onOpenFile, onRetry }) {
   if (!state || state.status === "loading") {
     return <div className="tree-state indent" style={indent(depth)}><RefreshCw className="spin" size={13} /> Loading…</div>;
   }
@@ -138,6 +143,7 @@ function DirLevel({ path, depth, state, expanded, dirs, onToggleDir, onOpenFile,
                   state={dirs[childPath]}
                   expanded={expanded}
                   dirs={dirs}
+                  selectedPath={selectedPath}
                   onToggleDir={onToggleDir}
                   onOpenFile={onOpenFile}
                   onRetry={onRetry}
@@ -147,7 +153,7 @@ function DirLevel({ path, depth, state, expanded, dirs, onToggleDir, onOpenFile,
           );
         }
         return (
-          <button type="button" key={childPath} className="tree-row file" style={indent(depth)} onClick={() => onOpenFile({ ...entry, path: childPath })} title={childPath}>
+          <button type="button" key={childPath} className="tree-row file" aria-current={selectedPath === childPath ? "true" : undefined} style={indent(depth)} onClick={() => onOpenFile({ ...entry, path: childPath })} title={childPath}>
             <FileText size={14} />
             <span className="tree-name">{entry.name}</span>
             {entry.size != null && <small>{formatBytes(entry.size)}</small>}
@@ -163,8 +169,9 @@ function PreviewPanel({ preview, onClose }) {
     <div className="tree-preview" role="region" aria-label={`File preview ${preview.path}`}>
       <div className="tree-preview-head">
         <span className="tree-preview-path" title={preview.path}>{preview.path}</span>
-        <button type="button" className="tree-preview-close" onClick={onClose} aria-label="Close preview">×</button>
+        <button type="button" className="tree-preview-close" onClick={onClose} aria-label="Close preview"><X size={16} aria-hidden="true" /></button>
       </div>
+      <div className="tree-preview-content" key={preview.path} tabIndex={0} aria-label="File contents">
       {preview.status === "loading" && <div className="tree-state"><RefreshCw className="spin" size={14} /> Loading…</div>}
       {preview.status === "error" && (
         <div className="tree-state error" role="alert">
@@ -189,6 +196,7 @@ function PreviewPanel({ preview, onClose }) {
           {preview.truncated ? "\n… (content too long, truncated)" : ""}
         </pre>
       )}
+      </div>
     </div>
   );
 }

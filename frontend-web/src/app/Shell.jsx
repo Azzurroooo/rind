@@ -138,7 +138,6 @@ export function Shell() {
             providerNames={ctx.providerNames}
             effort={info.reasoning_effort || ""}
             stats={ctx.stats}
-            hasSession={Boolean(sessionId)}
             onCancel={actions.cancelTurn}
             onUpload={actions.uploadAttachment}
             onPromote={actions.promoteQueued}

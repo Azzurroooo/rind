@@ -38,7 +38,6 @@ export const Composer = forwardRef(function Composer({
   providerNames = {},
   effort = "",
   stats = null,
-  hasSession = false,
   onCancel,
   onUpload,
   onPromote,
@@ -197,8 +196,8 @@ export const Composer = forwardRef(function Composer({
             </Tooltip>
           </div>
           <div className="composer-actions">
-            <ModelPicker model={model} providerId={providerId} models={models} providerNames={providerNames} disabled={!hasSession || active || compacting} onOpen={onRefreshModels} onSelect={(next) => guard(onModel, next)} />
-            <EffortChip effort={effort} disabled={!hasSession || active || compacting} onSelect={(next) => guard(onEffort, next)} />
+            <ModelPicker model={model} providerId={providerId} models={models} providerNames={providerNames} disabled={loading || active || compacting} onOpen={onRefreshModels} onSelect={(next) => guard(onModel, next)} />
+            <EffortChip effort={effort} disabled={loading || active || compacting} onSelect={(next) => guard(onEffort, next)} />
             <ContextRing stats={stats} onOpen={onOpenContext} />
             <SendControl active={active} hasContent={hasContent} disabled={loading} compacting={compacting} onSend={send} onCancel={onCancel} />
           </div>

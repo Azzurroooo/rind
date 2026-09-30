@@ -74,10 +74,19 @@ export function createTurnActions(ctx) {
     let sessionId = submittedSession;
     if (!sessionId) {
       const workspace = ctx.selectedWorkspace || refs.info.current.workspace_root;
+      const selection = { model: refs.currentModel.current || refs.info.current.model, provider: refs.currentProvider.current, effort: refs.info.current.reasoning_effort };
       try {
         const result = await client().request(methods.sessionNew, { workspace_root: workspace });
         if (run !== refs.connectionRun.current) return;
         sessionId = String(result?.session_id || "");
+        if (!sessionId) throw new Error("The runtime did not create a session.");
+        if (selection.model && (selection.model !== result.model || (selection.provider && selection.provider !== result.provider))) {
+          await client().request(methods.modelSet, { session_id: sessionId, model: selection.model, ...(selection.provider ? { provider_id: selection.provider } : {}) });
+        }
+        if (selection.effort && selection.effort !== result.reasoning_effort) {
+          await client().request(methods.modelEffort, { session_id: sessionId, reasoning_effort: selection.effort });
+        }
+        if (run !== refs.connectionRun.current) return;
         if (loadId === refs.sessionLoad.current) {
           ctx.setSelectedWorkspace(workspace);
           await call().loadSession(sessionId, true);
@@ -195,6 +204,15 @@ export function createTurnActions(ctx) {
     if (!modelId) return;
     const providerId = String(option?.providerId ?? "").trim();
     const sessionId = refs.info.current.session_id;
+    if (!sessionId) {
+      refs.currentModel.current = modelId;
+      refs.currentProvider.current = providerId;
+      refs.info.current = { ...refs.info.current, model: modelId, provider: providerId };
+      ctx.setCurrentModel(modelId);
+      ctx.setCurrentProvider(providerId);
+      ctx.setInfo((current) => ({ ...current, model: modelId, provider: providerId }));
+      return;
+    }
     const loadId = refs.sessionLoad.current;
     const result = await client().request(methods.modelSet, {
       session_id: sessionId,
@@ -225,6 +243,11 @@ export function createTurnActions(ctx) {
     }
     const sessionId = refs.info.current.session_id;
     const loadId = refs.sessionLoad.current;
+    if (!sessionId) {
+      refs.info.current = { ...refs.info.current, reasoning_effort: clean };
+      ctx.setInfo((current) => ({ ...current, reasoning_effort: clean }));
+      return;
+    }
     const result = await client().request(methods.modelEffort, { session_id: sessionId, reasoning_effort: clean });
     if (loadId !== refs.sessionLoad.current || sessionId !== refs.info.current.session_id) return;
     const next = String(result?.reasoning_effort || clean).trim();

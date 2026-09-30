@@ -65,7 +65,7 @@ export function createSessionActions(ctx) {
     const loadId = refs.sessionLoad.current;
     const stale = () => loadId !== refs.sessionLoad.current || sessionId !== refs.info.current.session_id;
     try {
-      const result = await refs.client.current.request(methods.modelList, { session_id: sessionId });
+      const result = await refs.client.current.request(methods.modelList, sessionId ? { session_id: sessionId } : {});
       if (stale()) return;
       const listing = normalizeModelList(result);
       const nextModel = listing.current?.modelId
@@ -74,13 +74,17 @@ export function createSessionActions(ctx) {
       const models = listing.current && !listing.models.some((model) => model.providerId === listing.current.providerId && model.id === listing.current.modelId)
         ? [{ id: listing.current.modelId, providerId: nextProvider, contextWindow: null, imageInput: null }, ...listing.models]
         : listing.models;
+      if (!sessionId) {
+        ctx.setInfo((current) => ({ ...current, models }));
+        return;
+      }
       ctx.setCurrentModel(nextModel);
       ctx.setCurrentProvider(nextProvider);
       ctx.setInfo((current) => ({ ...current, models, model: nextModel || current.model }));
     } catch {
       if (stale()) return;
       const fallback = String(refs.info.current.model || refs.info.current.default_model || refs.currentModel.current || "").trim();
-      ctx.setInfo((current) => ({ ...current, models: fallback ? [{ id: fallback, providerId: "", contextWindow: null, imageInput: null }] : [] }));
+      ctx.setInfo((current) => ({ ...current, models: current.models?.length ? current.models : fallback ? [{ id: fallback, providerId: refs.currentProvider.current || "", contextWindow: null, imageInput: null }] : [] }));
     }
   }
 
@@ -174,7 +178,6 @@ export function createSessionActions(ctx) {
       }
       dispatchConversation({ kind: "history", messages: replay?.messages });
       dispatchConversation({ kind: "live_turn", liveTurn: replay?.live_turn || null, sessionId: target });
-      call().restoreTasks(replay?.tasks, target);
       ctx.setGoal(switched?.goal || null);
       ctx.setStats(switched?.usage || {});
       ctx.setContextInfo({ lastTurnDurationMs: 0, messageCount: replay?.messages?.length || 0 });
@@ -259,6 +262,7 @@ export function createSessionActions(ctx) {
     ctx.setContextSnapshot(null);
     ctx.setInfo((current) => ({ ...current, session_id: "", turn_state: null, live_turn: null, workspace_root: workspace }));
     dispatchConversation({ kind: "reset" });
+    void refreshModels("");
   }
 
   // Fork at a user message (before_message_id) or the whole session. The

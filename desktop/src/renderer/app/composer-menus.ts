@@ -58,9 +58,7 @@ export function renderProjectControl() {
   }).join("")
 }
 
-// Provider-grouped listbox rows (after Jan's provider groups and LobeHub's
-// model panel). The runtime target groups by provider and shows the context
-// window; the settings target stays a flat id list.
+// Provider-grouped listbox rows, also available before the first message.
 export function renderModels() {
   const activeModel = displayedModel()
   const choices = modelChoices(state.models, activeModel, state.modelProvider)
@@ -108,17 +106,15 @@ export function renderModels() {
 }
 
 export function displayedModel() {
-  if (state.viewedSessionId) return state.model
-  return currentRuntimeSnapshot().status === "ready" ? state.model || state.settings.model : state.settings.model
+  return state.viewedSessionId ? state.model : state.model || state.settings.model
 }
 
 export function canOpenModelMenu() {
   const target = modelSelectionTargetForState()
-  return Boolean(state.settings.hasApiKey && target !== "unavailable" && !state.modelChanging && !sessionCompacting())
+  return Boolean(target === "runtime" && !state.modelChanging && !sessionCompacting())
 }
 
 export function modelSelectionTargetForState() {
-  if (!state.viewedSessionId) return "settings" as const
   return modelSelectionTarget(currentRuntimeSnapshot().status, runtimeTurnActive())
 }
 
@@ -182,12 +178,15 @@ export async function selectModel(selection: ModelOption | string) {
     return
   }
   const target = modelSelectionTargetForState()
-  if (target === "unavailable") return
+  if (target !== "runtime") return
   const sessionId = state.viewedSessionId
   state.modelChanging = true
   render()
   try {
-    if (target === "runtime") {
+    if (!sessionId) {
+      state.model = model
+      state.modelProvider = providerId
+    } else {
       const result = asRecord(await requestForSession(runtimeMethods.modelSet, sessionId, {
         model_id: model,
         ...(providerId ? { provider_id: providerId } : {}),
@@ -197,9 +196,6 @@ export async function selectModel(selection: ModelOption | string) {
         state.modelProvider = asRecordText(result.provider_id) || providerId
         state.sessionModels = { ...state.sessionModels, [sessionId]: state.model }
       }
-    } else {
-      state.settings = await window.api.settings.save({ model })
-      if (!state.viewedSessionId) state.model = model
     }
     state.models = modelChoices(state.models, displayedModel(), state.modelProvider)
     closeModelMenu()
@@ -234,7 +230,7 @@ export function displayedEffort() {
 }
 
 export function canOpenEffortMenu() {
-  return Boolean(state.viewedSessionId && currentRuntimeSnapshot().status === "ready" && !state.effortChanging && !runtimeTurnActive() && !sessionCompacting())
+  return Boolean(currentRuntimeSnapshot().status === "ready" && !state.effortChanging && !runtimeTurnActive() && !sessionCompacting())
 }
 
 const effortLabels: Record<string, string> = { low: "Low", medium: "Medium", high: "High", xhigh: "Extra high", max: "Max" }
@@ -247,7 +243,7 @@ export function renderEffortMenu() {
   effortMenuTrigger.setAttribute("aria-label", `Reasoning effort: ${activeEffort || "default"}`)
   effortMenuTrigger.title = activeEffort
     ? `Reasoning effort: ${activeEffort}`
-    : state.viewedSessionId ? "Choose reasoning effort" : "Start a session to change reasoning effort"
+    : "Choose reasoning effort"
   effortMenuTrigger.disabled = !canOpen
   effortMenuTrigger.setAttribute("aria-expanded", String(state.effortMenuOpen))
   effortMenuTrigger.setAttribute("aria-busy", String(state.effortChanging))
@@ -279,7 +275,13 @@ export async function toggleEffortMenu() {
 export async function selectEffort(effort: string) {
   const sessionId = state.viewedSessionId
   const clean = effort.trim().toLowerCase()
-  if (!sessionId || !reasoningEfforts.includes(clean as (typeof reasoningEfforts)[number]) || clean === displayedEffort() || state.effortChanging) {
+  if (!reasoningEfforts.includes(clean as (typeof reasoningEfforts)[number]) || clean === displayedEffort() || !canOpenEffortMenu()) {
+    state.effortMenuOpen = false
+    render()
+    return
+  }
+  if (!sessionId) {
+    state.effort = clean
     state.effortMenuOpen = false
     render()
     return

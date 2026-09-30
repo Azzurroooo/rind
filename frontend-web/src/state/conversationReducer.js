@@ -185,15 +185,8 @@ function applyEnvelope(state, envelope) {
 function applyTurnEvent(state, event, context) {
   const turnId = context.turnId;
   switch (event.type) {
-    case "task_updated": {
-      const task = event.task;
-      if (!task?.task_id) return state;
-      const id = `task:${task.task_id}`;
-      const entry = { id, role: "system", content: `Task ${task.task_id} · ${task.status}${task.notify ? ` · ${task.notify}` : ""}` };
-      return state.entries.some((item) => item.id === id)
-        ? { ...state, entries: state.entries.map((item) => item.id === id ? entry : item) }
-        : appendEntry(state, entry);
-    }
+    // Task lifecycle belongs in Activity; the Bash tool already owns output.
+    case "task_updated":
     case "task_output":
       return state;
     case "task_continuation_failed":

@@ -49,14 +49,20 @@ export function renderSettings() {
 // providers); the settings target falls back to the main-process catalog
 // fetch of the configured OpenAI-compatible endpoint.
 export async function loadAvailableModels() {
-  const target = state.viewedSessionId
-    ? modelSelectionTarget(currentRuntimeSnapshot().status, runtimeTurnActive())
-    : "settings" as const
-  if (target === "runtime" && state.viewedSessionId) {
+  const target = modelSelectionTarget(currentRuntimeSnapshot().status, runtimeTurnActive())
+  if (target === "runtime") {
     const sessionId = state.viewedSessionId
-    const listing = normalizeModelList(await requestForSession(runtimeMethods.modelList, sessionId))
-    if (sessionId !== state.viewedSessionId) return
+    const workspace = state.chatProjectPath
+    const listing = normalizeModelList(await (sessionId
+      ? requestForSession(runtimeMethods.modelList, sessionId)
+      : window.api.runtime.request(runtimeMethods.modelList, {})))
+    if (sessionId !== state.viewedSessionId || workspace !== state.chatProjectPath) return
     state.models = listing.models
+    // Catalog refresh must not overwrite a new-session draft selection.
+    if (!sessionId) {
+      if (!state.modelProvider && state.model === listing.currentModelId) state.modelProvider = listing.currentProviderId
+      return
+    }
     if (listing.currentProviderId) state.modelProvider = listing.currentProviderId
     if (listing.currentModelId && listing.currentModelId !== state.model) {
       state.model = listing.currentModelId

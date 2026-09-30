@@ -137,12 +137,6 @@ export function createConnectionActions(ctx) {
     refs.client.current.connect().catch(() => {});
   }
 
-  function restoreTasks(tasks, sessionId) {
-    for (const task of tasks || []) {
-      dispatchConversation({ kind: "event", session_id: sessionId, turn_id: "", event: { type: "task_updated", task } });
-    }
-  }
-
   async function initializeRuntime() {
     const run = refs.connectionRun.current;
     try {
@@ -189,5 +183,5 @@ export function createConnectionActions(ctx) {
     }
   }
 
-  return { handleEvent, acquireCredential, handleStatus, handleOpen, handleLogin, logout, reconnect, restoreTasks, initializeRuntime };
+  return { handleEvent, acquireCredential, handleStatus, handleOpen, handleLogin, logout, reconnect, initializeRuntime };
 }

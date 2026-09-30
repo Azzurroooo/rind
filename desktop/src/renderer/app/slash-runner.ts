@@ -8,7 +8,7 @@ import { clearSlashCommandPending, setPrompt, startTurn } from "./composer.ts"
 import { runDesktopSlash } from "./desktop-slash-runner.ts"
 import { prompt } from "./dom.ts"
 import { asRecord, asRecordText } from "./html.ts"
-import { conversationFor, ensureRuntime, ensureSession, requestForSession, setConversationFor } from "./runtime.ts"
+import { conversationFor, draftModelSelection, ensureRuntime, ensureSession, requestForSession, setConversationFor } from "./runtime.ts"
 import { chatProject, currentRuntimeSnapshot, loadSessions, recordRecentSession } from "./sessions.ts"
 import { render } from "./shell.ts"
 import { sessionCompacting, state } from "./state.ts"
@@ -46,13 +46,13 @@ export async function runSlash(input: string) {
   }
   const projectPath = project.path
   const requestedSessionId = state.viewedSessionId
-  const requestedModel = state.model || state.settings.model
+  const selection = draftModelSelection()
   state.slashCommandPending = true
   state.slashCommandInput = input
   render()
   try {
     await ensureRuntime()
-    const commandSessionId = await ensureSession(projectPath, requestedSessionId, requestedModel)
+    const commandSessionId = await ensureSession(projectPath, requestedSessionId, selection)
     const result = asRecord(await requestForSession(runtimeMethods.commandExecute, commandSessionId, { input }))
     const commands = parseSlashCommands(asRecord(result.display).commands)
     if (commands.length) state.slashCommands = mergeSlashCatalog(commands)

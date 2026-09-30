@@ -64,8 +64,8 @@
 .send-actions-menu .danger { color: var(--danger); }
 
 .composer-context { display: flex; align-items: center; justify-content: space-between; gap: 12px; height: 26px; min-width: 0; margin-bottom: 6px; padding-inline: 4px; }
-.composer-context .project-control { width: auto; flex: 0 1 auto; min-width: 0; }
-.composer-context .composer-select-trigger { min-height: 24px; padding: 0; font-size: 11px; }
+.composer-context .project-control { width: max-content; max-width: calc(100% - 110px); flex: 0 1 auto; min-width: 0; }
+.composer-context .composer-select-trigger { height: 26px; min-height: 26px; padding: 0 8px; border-radius: 6px; font-size: 11px; }
 .composer-context .composer-select-trigger:disabled { opacity: 1; }
 .composer-activity { display: inline-flex; flex: none; align-items: center; justify-content: flex-end; gap: 7px; min-width: 98px; color: var(--dim); font-size: 11px; white-space: nowrap; }
 .composer-activity.is-active { color: var(--accent); }

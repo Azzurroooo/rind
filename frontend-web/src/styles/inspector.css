@@ -15,6 +15,8 @@
 .usage-dialog.dialog-lg { height: auto; max-height: calc(100dvh - 32px); grid-template-rows: auto auto minmax(0, 1fr); }
 .usage-dialog .dialog-description { margin: 0; padding: 16px 24px; font-size: var(--text-dense); line-height: 1.6; }
 .usage-dialog .dialog-body { padding: 0 24px 24px; overflow-y: auto; }
+.usage-cache { padding: 10px 12px; border: 1px solid var(--line); border-radius: var(--radius-control); background: var(--surface); }
+.usage-cache .section-hint { margin-top: 6px; }
 .inspector-head {
   flex: none; display: flex; align-items: center; gap: var(--space-1);
   height: var(--header-height); padding: 0 var(--space-2); border-bottom: 1px solid var(--line);
@@ -31,7 +33,23 @@
 
 .inspector-panel { flex: 1; min-height: 0; overflow-y: auto; }
 .inspector-body { display: grid; align-content: start; gap: var(--space-4); padding: var(--space-4); }
-.inspector-body.files-tab { height: 100%; padding: 0; }
+.inspector-panel.is-files { overflow: hidden; }
+.inspector-body.files-tab { display: flex; height: 100%; min-height: 0; padding: 0; }
+.file-tree.embedded { display: flex; flex-direction: column; flex: 1; min-width: 0; min-height: 0; margin: 0; border: 0; }
+.file-tree.embedded .file-tree-body { flex: 1; display: grid; grid-template-rows: minmax(0, 1fr); min-height: 0; max-height: none; padding: 0; overflow: hidden; }
+.file-tree.embedded .file-tree-body.has-preview { grid-template-rows: minmax(80px, .32fr) minmax(0, 1fr); }
+.tree-directory { min-height: 0; overflow: auto; overscroll-behavior: contain; padding: 6px; }
+.tree-row[aria-current=true] { background: var(--accent-soft); color: var(--accent); }
+.file-tree.embedded .tree-preview { display: flex; flex-direction: column; min-height: 0; min-width: 0; margin: 0; border: 0; border-top: 1px solid var(--line-strong); border-radius: 0; }
+.tree-preview-head { flex: none; background: var(--panel); }
+.tree-preview-content { flex: 1; min-height: 0; overflow: auto; overscroll-behavior: contain; }
+.file-tree.embedded .tree-preview-text { max-height: none; overflow: visible; font-size: 12px; line-height: 1.7; padding: 12px; }
+.file-tree.embedded .tree-preview-image { max-height: none; }
+.file-tree.embedded .tree-preview-close { display: grid; place-items: center; width: 32px; height: 32px; flex-basis: 32px; }
+@media (max-width: 680px) {
+  .file-tree.embedded .tree-preview-close { width: 44px; height: 44px; flex-basis: 44px; }
+  .tree-directory .tree-row { min-height: 40px; }
+}
 .inspector-section { display: grid; gap: var(--space-2); }
 .section-note { color: var(--dim); font-size: var(--text-meta); font-variant-numeric: tabular-nums; }
 .section-hint { margin: 0; color: var(--muted); font-size: var(--text-meta); line-height: 1.6; }

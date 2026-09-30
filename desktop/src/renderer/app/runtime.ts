@@ -153,30 +153,39 @@ export function cancelActiveTurn(sessionId: string) {
   })
 }
 
-export async function ensureSession(workspaceRoot: string, requestedSessionId?: string, requestedModel = "") {
+export function draftModelSelection() {
+  return { model: state.model || state.settings.model, provider: state.modelProvider, effort: state.effort || state.settings.reasoningEffort }
+}
+
+export async function ensureSession(workspaceRoot: string, requestedSessionId?: string, selection = draftModelSelection()) {
   const currentSessionId = requestedSessionId === undefined ? state.viewedSessionId : requestedSessionId
   if (currentSessionId) return currentSessionId
   const created = asRecord(await request(runtimeMethods.sessionNew, { workspace_root: workspaceRoot }))
   const sessionId = asRecordText(created.session_id)
   if (!sessionId) throw new Error("Runtime did not create a session.")
-  const selectedModel = requestedModel.trim() || state.model.trim() || state.settings.model.trim()
-  const createdModel = asRecordText(created.model)
-  state.sessionModels[sessionId] = createdModel || selectedModel
-  const selectedEffort = asRecordText(created.reasoning_effort) || state.effort || state.settings.reasoningEffort
+  const selectedModel = selection.model.trim() || asRecordText(created.model)
+  const selectedProvider = selection.provider || asRecordText(created.provider)
+  const selectedEffort = selection.effort || asRecordText(created.reasoning_effort)
+  // Configure before binding/sending: provider identity is part of the choice,
+  // including when two providers expose the same model id.
+  if (selectedModel && (selectedModel !== created.model || selectedProvider !== created.provider)) {
+    await requestForSession(runtimeMethods.modelSet, sessionId, { model_id: selectedModel, ...(selectedProvider ? { provider_id: selectedProvider } : {}) })
+  }
+  if (selectedEffort && selectedEffort !== created.reasoning_effort) {
+    await requestForSession(runtimeMethods.modelEffort, sessionId, { reasoning_effort: selectedEffort })
+  }
+  state.sessionModels[sessionId] = selectedModel
   if (selectedEffort) state.sessionEfforts[sessionId] = selectedEffort
   const bindToView = !state.viewedSessionId && samePath(state.chatProjectPath, workspaceRoot)
   if (bindToView) {
     state.viewedSessionId = sessionId
     state.viewedProjectPath = workspaceRoot
     state.model = state.sessionModels[sessionId]
+    state.modelProvider = selectedProvider
+    state.effort = selectedEffort
     state.conversation = createConversation()
   } else {
     state.conversationCache = { ...state.conversationCache, [sessionId]: createConversation() }
-  }
-  if (selectedModel && selectedModel !== createdModel) {
-    await requestForSession(runtimeMethods.modelSet, sessionId, { model: selectedModel })
-    state.sessionModels[sessionId] = selectedModel
-    if (state.viewedSessionId === sessionId) state.model = selectedModel
   }
   await loadSessions()
   return sessionId

@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { FileTree } from "./FileTree.jsx";
 
@@ -70,6 +70,22 @@ describe("FileTree — panel and directory browsing (file/list)", () => {
 });
 
 describe("FileTree — file preview (file/read)", () => {
+  it("separates directory and preview and ignores a late read after another file is selected", async () => {
+    const reads = {};
+    const readFile = vi.fn((path) => new Promise((resolve) => { reads[path] = resolve; }));
+    const { container } = render(<FileTree embedded workspace="E:/w" listFiles={async () => ({ entries: rootEntries })} readFile={readFile} />);
+    fireEvent.click(await screen.findByText("README.md"));
+    fireEvent.click(screen.getByText("logo.png"));
+    await act(async () => reads["logo.png"]({ content_base64: b64("new"), mime: "text/plain" }));
+    await act(async () => reads["README.md"]({ content_base64: b64("old"), mime: "text/plain" }));
+    expect(screen.getByLabelText("File contents").textContent).toBe("new");
+    expect(container.querySelector(".tree-directory").contains(container.querySelector(".tree-preview"))).toBe(false);
+    expect(container.querySelector('[aria-current="true"]').title).toBe("logo.png");
+    fireEvent.click(screen.getByText("README.md"));
+    fireEvent.click(screen.getByLabelText("Close preview"));
+    await act(async () => reads["README.md"]({ content_base64: b64("late"), mime: "text/plain" }));
+    expect(container.querySelector(".tree-preview")).toBeNull();
+  });
   it("decodes text files from base64", async () => {
     const readFile = vi.fn(async () => ({ content_base64: b64("# hello"), mime: "text/markdown", size: 7 }));
     render(<FileTree workspace="E:/w" listFiles={vi.fn(async () => ({ entries: rootEntries }))} readFile={readFile} />);

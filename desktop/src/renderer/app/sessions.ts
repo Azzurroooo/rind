@@ -271,6 +271,8 @@ export async function startNewChat() {
   }
   state.viewedSessionId = ""
   state.model = state.settings.model
+  state.modelProvider = ""
+  state.effort = state.settings.reasoningEffort
   state.filePreview = undefined
   state.fileListings = {}
   state.conversation = createConversation()
@@ -330,6 +332,8 @@ export async function selectChatProject(path: string) {
   state.viewedProjectPath = project.path
   state.viewedSessionId = ""
   state.model = state.settings.model
+  state.modelProvider = ""
+  state.effort = state.settings.reasoningEffort
   state.conversation = createConversation()
   state.expandedDirectories = new Set([""])
   state.fileListings = {}
