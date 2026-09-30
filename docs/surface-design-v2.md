@@ -116,10 +116,14 @@ Each status color has a `-soft` background (same hue, ~12% alpha).
   Keep the Web list's grid track shrinkable (`minmax(0, 1fr)`), so long titles cannot
   widen the list or make focusing the menu scroll short titles out of view.
   Menu items: Fork, Export replay, separator, Delete (danger, confirms).
-- Pagination: a full-width, 32px transparent row with 8px inline padding, muted 13px
-  left-aligned text and a 14px trailing chevron. Match session-row hover and focus styling;
-  no standalone button border or fill. Loading swaps the chevron for a spinner without
-  changing geometry, marks the row busy and disables repeat requests.
+- Pagination: a 32px secondary button inset 8px from the list edges, with centered
+  muted 12px/500 text, a fine `--line` border, `--fill-1` background and 6px radius.
+  It must read as an action distinct from the left-aligned session titles. No idle
+  icon or disclosure chevron: pagination appends sessions rather than expanding a
+  menu or directory. Hover strengthens the border and fill; pressing changes fill
+  only. Loading adds a 12px spinner beside the label without changing button bounds,
+  marks the button busy and disables repeat requests. Both project and recent
+  pagination use this same control.
 - Footer: global Usage; Web also has Settings. Desktop settings and remote access stay in its top bar.
 
 ## 4. Conversation

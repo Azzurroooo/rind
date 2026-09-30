@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { BarChart3, Bell, ChevronDown, History, LoaderCircle, Search, Settings, SquarePen, X } from "lucide-react";
+import { BarChart3, Bell, History, LoaderCircle, Search, Settings, SquarePen, X } from "lucide-react";
 import { ConfirmDialog } from "../overlays/ConfirmDialog.jsx";
 import { ProjectSelector } from "./ProjectSelector.jsx";
 import { SessionRow } from "./SessionRow.jsx";
@@ -111,10 +111,8 @@ export function Sidebar({
             setLoadingMore(true);
             try { await onLoadMore?.(); } finally { setLoadingMore(false); }
           }}>
+            {loadingMore && <LoaderCircle size={12} className="sidebar-load-more-spinner spin" aria-hidden="true" />}
             <span>{loadingMore ? "Loading…" : "Load more"}</span>
-            {loadingMore
-              ? <LoaderCircle size={14} className="sidebar-load-more-icon spin" aria-hidden="true" />
-              : <ChevronDown size={14} className="sidebar-load-more-icon" aria-hidden="true" />}
           </button>
         )}
       </nav>

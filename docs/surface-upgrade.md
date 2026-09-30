@@ -509,3 +509,36 @@ navigation or visible copy was added or renamed, and no mismatch remained in the
 inspected states. Temporary QA profiles, sessions, scripts and screenshots were
 removed and their processes closed. This was not an installer or physical-phone
 test.
+
+## Pagination button affordance — 2026-09-30
+
+User feedback supersedes the transparent pagination row and trailing chevron
+described in the preceding sidebar entry. `Load more` and `View more sessions`
+now share a quiet secondary-button treatment: centered 12px/500 text, 32px height,
+8px inset, 6px radius, a fine token-based border and a restrained neutral fill.
+The resting button has no icon; a 12px spinner appears beside the loading label.
+Hover/press strengthen the fill without moving or resizing the control.
+
+References reviewed were Jan's `components/ui/button.tsx` secondary/outline
+variants and LobeHub's `features/AgentGoals/AgentGoalsPage.tsx` centered, small
+Load more button. The implementation retains Rind's own palette and radius scale.
+Removed the unused pagination-chevron imports and replaced the general pagination
+icon class with a loading-only spinner class. Existing paging and short-title
+visibility behavior remain; no Worker or gateway source changed.
+
+Verification: 10 Web sidebar tests, 10 Desktop sidebar/session tests, Desktop
+TypeScript and both production builds passed. With no Browser/IAB surface
+available, Playwright exercised the built Electron app and remote Web through an
+isolated real gateway. Desktop project paging advanced from 5 to 12 sessions and
+recent paging from 10 to 12; completed lists removed the control. Web paging at
+1280×900, 390×844 and 320×844 appended the remaining sessions, kept the disabled
+loading button's bounds unchanged and sent one request despite a repeated click.
+Desktop's 232px sidebar also retained the full button label.
+
+Light/dark, narrow/mobile and loading captures were read back with `view_image`
+against section 3 of the existing design contract. Inspected centered alignment,
+12px type, border/fill contrast, idle icon removal, spinner placement and viewport
+fit; no mismatch remained in the inspected states. Web dark mode also verified
+reduced-motion timing. Visible labels are unchanged. This is a local UI refinement
+with no new image concept or assets. Temporary captures, scripts, profiles and
+sessions were removed and their processes closed; no installer was produced.

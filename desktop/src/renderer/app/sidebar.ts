@@ -1,6 +1,6 @@
 import { type DesktopRecentSession, type DesktopSessionSummary } from "../../preload/types.ts"
 import { sameProjectPath as samePath } from "../project-selection.ts"
-import { ChevronDown, Ellipsis, LoaderCircle, renderIcon } from "../icons.ts"
+import { Ellipsis, LoaderCircle, renderIcon } from "../icons.ts"
 import { withoutSession } from "../session-removal.ts"
 import { filterSessions, projectListStructureKey, recentListStructureKey, type SidebarStructureState } from "../sidebar-rendering.ts"
 import { relativeTime } from "../timeline-model.ts"
@@ -69,7 +69,7 @@ export function renderProjects() {
         </div>
       </div>
       ${project.available ? "" : `<p class="project-missing">Folder is unavailable.</p>`}
-      ${showSessions ? `<div class="project-sessions">${sessions.map(renderProjectSession).join("") || `<p class="session-search-empty">No loaded sessions match.</p>`}${!searching && loaded.length < total ? `<button type="button" class="sidebar-load-more" data-show-more="${escapeAttribute(project.path)}"><span>View more sessions</span>${renderIcon(ChevronDown, "sidebar-load-more-icon")}</button>` : ""}</div>` : ""}
+      ${showSessions ? `<div class="project-sessions">${sessions.map(renderProjectSession).join("") || `<p class="session-search-empty">No loaded sessions match.</p>`}${!searching && loaded.length < total ? `<button type="button" class="sidebar-load-more" data-show-more="${escapeAttribute(project.path)}">View more sessions</button>` : ""}</div>` : ""}
     `
     projectList.append(projectNode)
   }
@@ -138,7 +138,7 @@ export function renderRecentSessions() {
   recentSessions.hidden = false
   recentList.innerHTML = items.map(renderRecentSession).join("") +
     (!state.sessionSearch.trim() && state.recentSessions.length < state.recentSessionTotal
-      ? `<button type="button" class="sidebar-load-more" data-recent-more aria-busy="${state.recentLoading}"${state.recentLoading ? " disabled" : ""}><span>${state.recentLoading ? "Loading…" : "Load more"}</span>${renderIcon(state.recentLoading ? LoaderCircle : ChevronDown, "sidebar-load-more-icon")}</button>` : "")
+      ? `<button type="button" class="sidebar-load-more" data-recent-more aria-busy="${state.recentLoading}"${state.recentLoading ? " disabled" : ""}>${state.recentLoading ? renderIcon(LoaderCircle, "sidebar-load-more-spinner") : ""}<span>${state.recentLoading ? "Loading…" : "Load more"}</span></button>` : "")
   syncSidebarSelection()
   syncSidebarRunningState()
 }
