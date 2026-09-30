@@ -60,7 +60,7 @@ test("foldWorkSegments folds every call between two pieces of prose", () => {
     tool("4", "bash"),
   ], { activeTurn: false })
   // The blank assistant entry is not a boundary; it trails the segment.
-  assert.deepEqual(kinds(items), ["user", "segment", "assistant", "assistant", "tool"])
+  assert.deepEqual(kinds(items), ["user", "segment", "assistant", "assistant", "segment"])
   assert.equal(items[1].id, "segment:1")
   assert.deepEqual(items[1].tools.map((entry) => entry.id), ["1", "2", "3"])
   assert.equal(items[1].live, false)

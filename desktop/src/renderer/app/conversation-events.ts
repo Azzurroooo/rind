@@ -9,6 +9,11 @@ import { state, toolOpenRequests, vars } from "./state.ts"
 import { keepToolHeaderVisible, setToolExpanded, toolHeaderOffset } from "./stream.ts"
 
 export function bindConversationEvents(): void {
+  messageStream.addEventListener("focusin", (event) => {
+    const target = event.target as HTMLElement
+    const segment = target.closest<HTMLElement>(".segment-calls")?.closest<HTMLElement>(".work-segment")
+    if (segment?.dataset.entryId) state.segmentFolds = new Map([...state.segmentFolds, [segment.dataset.entryId, true]])
+  })
   messageStream.addEventListener("click", (event) => {
     const value = (event.target as HTMLElement).closest<HTMLButtonElement>("[data-starter]")?.dataset.starter
     if (value) setPrompt(value, true)

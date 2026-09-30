@@ -88,7 +88,6 @@ button.tool-trigger:hover, .tool-row.open .tool-trigger { background: var(--fill
 /* ---------- work segments: one fold per run of calls (spec section 5.1) ---------- */
 
 .work-segment { margin-bottom: 2px; }
-.work-segment.open { margin-bottom: 8px; }
 .segment-trigger {
   display: flex;
   align-items: center;
@@ -111,7 +110,13 @@ button.tool-trigger:hover, .tool-row.open .tool-trigger { background: var(--fill
 .segment-cancelled { flex: none; color: var(--dim); font-size: var(--text-meta); }
 .segment-duration { flex: none; margin-left: auto; color: var(--dim); font-size: var(--text-meta); font-variant-numeric: tabular-nums; }
 .segment-calls { margin: 2px 0 0 14px; padding-left: 8px; border-left: 1px solid var(--line); }
-.segment-calls[hidden] { display: none; }
+.segment-heading, .segment-calls-shell { display: grid; grid-template-rows: 1fr; opacity: 1; transition: grid-template-rows 220ms cubic-bezier(.2,.8,.2,1), opacity 180ms ease; }
+.segment-heading[aria-hidden=true], .segment-calls-shell[aria-hidden=true] { grid-template-rows: 0fr; opacity: 0; visibility: hidden; transition: grid-template-rows 220ms cubic-bezier(.2,.8,.2,1), opacity 180ms ease, visibility 0s 220ms; }
+.segment-heading-clip, .segment-calls-clip { min-height: 0; overflow: hidden; }
+.work-single .segment-calls { margin: 0; padding: 0; border: 0; }
+@media (prefers-reduced-motion: reduce) {
+  .segment-heading, .segment-calls-shell, .segment-heading[aria-hidden=true], .segment-calls-shell[aria-hidden=true] { transition: none; }
+}
 .segment-earlier {
   min-height: 24px;
   padding: 2px 8px;

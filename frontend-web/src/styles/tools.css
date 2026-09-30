@@ -35,6 +35,13 @@
   padding-left: var(--space-2);
   border-left: 1px solid var(--line);
 }
+.work-segment-heading, .work-segment-shell { display: grid; grid-template-rows: 1fr; opacity: 1; transition: grid-template-rows 220ms cubic-bezier(.2,.8,.2,1), opacity 180ms ease; }
+.work-single > .work-segment-heading, .work-segment-shell[aria-hidden=true] { grid-template-rows: 0fr; opacity: 0; visibility: hidden; transition: grid-template-rows 220ms cubic-bezier(.2,.8,.2,1), opacity 180ms ease, visibility 0s 220ms; }
+.work-segment-clip { min-height: 0; overflow: hidden; }
+.work-single .work-segment-body { margin: 0; padding: 0; border: 0; }
+@media (prefers-reduced-motion: reduce) {
+  .work-segment-heading, .work-segment-shell, .work-single > .work-segment-heading, .work-segment-shell[aria-hidden=true] { transition: none; }
+}
 .work-segment-earlier {
   align-self: flex-start;
   min-height: 24px;

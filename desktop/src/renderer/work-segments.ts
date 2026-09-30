@@ -56,7 +56,6 @@ function segmentItems(tools: ToolEntry[], trailing: Entry[], options: FoldOption
   const visible = tools.filter((tool) => !hiddenTools.has(tool.toolName))
   const extras = trailing.filter((entry) => entry.kind !== "file" || !coveredByTool(entry.filePath, visible))
   if (!visible.length) return extras
-  if (visible.length === 1) return [visible[0], ...extras]
   const awaiting = tools.some((tool) => isLive(tool) && (tool.toolName === "ask_user_question" || tool.toolCallId === options.awaitingToolCallId))
   const live = visible.some(isLive) || (options.activeTurn && last)
   return [{ kind: "segment", id: `segment:${visible[0].id}`, tools: visible, live, awaiting }, ...extras]

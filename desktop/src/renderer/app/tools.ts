@@ -3,7 +3,7 @@
 
 import { formatDuration, type ToolEntry, type ToolStatus } from "../timeline-model.ts"
 import { toolView, type MetaPart, type ToolView } from "../tool-display.ts"
-import { segmentOpenMode, segmentSummary, trimmedCalls, type WorkSegment } from "../work-segments.ts"
+import { segmentOpenMode, segmentSummary, trimmedCalls, type SegmentOpenMode, type WorkSegment } from "../work-segments.ts"
 import { Ban, Check, ChevronRight, CircleX, Hand, LoaderCircle, renderIcon } from "../icons.ts"
 import { renderToolBody, renderToolError } from "./tool-bodies.ts"
 import { escapeAttribute, escapeHtml } from "./html.ts"
@@ -19,9 +19,6 @@ const statusLabels: Record<RowStatus, string> = {
   cancelled: "Cancelled",
   waiting: "Waiting on you",
 }
-
-/** Bodies that stream while live stay open until the call finishes. */
-const liveBodies = new Set(["terminal", "code", "diff"])
 
 /** 14px status glyph with an accessible label. */
 export function renderToolStatusIcon(status: RowStatus): string {
@@ -50,8 +47,7 @@ export function renderTool(tool: ToolEntry): string {
   if (view.hidden) return ""
   const live = tool.status === "running" || tool.status === "pending"
   const body = view.body
-  const autoOpen = Boolean(body && live && liveBodies.has(body.type))
-  const open = Boolean(body) && (autoOpen || state.expandedTools.has(tool.id))
+  const open = Boolean(body) && state.expandedTools.has(tool.id)
   const revealed = open || state.revealedTools.has(tool.id)
   const bodyId = `tool-body-${tool.id}`
   const head = `${renderToolStatusIcon(tool.status)}<span class="tool-verb">${escapeHtml(view.verb)}</span>${renderTarget(view)}${renderMeta(view.meta)}${body ? renderIcon(ChevronRight, "tool-chevron") : ""}`
@@ -79,8 +75,9 @@ function segmentStatus(segment: WorkSegment, failed: number, cancelled: number):
 }
 
 /** One fold per work segment: summary row, then rows when open. */
-export function renderWorkSegment(segment: WorkSegment): string {
-  const mode = segmentOpenMode(segment, state.segmentFolds.get(segment.id))
+export function renderWorkSegment(segment: WorkSegment, mode: SegmentOpenMode = segmentOpenMode(segment, state.segmentFolds.get(segment.id))): string {
+  const single = segment.tools.length === 1
+  if (single) mode = "all"
   const summary = segmentSummary(segment.tools)
   const status = segmentStatus(segment, summary.failed, summary.cancelled)
   const duration = segment.live ? "" : formatDuration(summary.durationMs)
@@ -94,7 +91,8 @@ export function renderWorkSegment(segment: WorkSegment): string {
     ? `<button type="button" class="segment-earlier" data-segment-earlier="${escapeAttribute(segment.id)}">+${trimmed.earlier} earlier</button>`
     : ""
   const calls = mode === "closed" ? "" : `${earlier}${trimmed.shown.map(renderTool).join("")}`
-  return `<section class="work-segment${mode === "closed" ? "" : " open"}${segment.live ? " live" : ""}" data-entry-id="${escapeAttribute(segment.id)}">
+  return `<section class="work-segment${single ? " work-single" : ""}${mode === "closed" ? "" : " open"}${segment.live ? " live" : ""}" data-entry-id="${escapeAttribute(segment.id)}">
+    <div class="segment-heading"${single ? ' aria-hidden="true" inert' : ""}><div class="segment-heading-clip">
     <button type="button" class="segment-trigger" data-toggle-segment="${escapeAttribute(segment.id)}" aria-expanded="${String(mode !== "closed")}" aria-controls="${escapeAttribute(bodyId)}">
       ${renderToolStatusIcon(status)}
       <span class="segment-summary">${escapeHtml(summary.text)}</span>
@@ -102,6 +100,7 @@ export function renderWorkSegment(segment: WorkSegment): string {
       ${duration ? `<span class="segment-duration">${escapeHtml(duration)}</span>` : ""}
       ${renderIcon(ChevronRight, "tool-chevron")}
     </button>
-    <div class="segment-calls" id="${escapeAttribute(bodyId)}"${mode === "closed" ? " hidden" : ""}>${calls}</div>
+    </div></div>
+    <div class="segment-calls-shell" id="${escapeAttribute(bodyId)}" aria-hidden="${String(mode === "closed")}"${mode === "closed" ? " inert" : ""}><div class="segment-calls-clip"><div class="segment-calls">${calls}</div></div></div>
   </section>`
 }

@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import { WorkSegment } from "./WorkSegment.jsx";
 import { ToolRow } from "./ToolRow.jsx";
 import { buildTimeline } from "../../lib/workSegments.js";
@@ -10,6 +10,28 @@ const bash = (id, command, extra = {}) => ({ id, role: "tool", tool_call_id: id,
 const segmentOf = (entries, options) => buildTimeline(entries, options).find((item) => item.type === "segment");
 
 describe("WorkSegment", () => {
+  it("preserves the first row as calls merge and settles before folding", () => {
+    vi.useFakeTimers();
+    try {
+      const a = bash("a", "one", { status: "running", result: "" });
+      const { container, rerender } = render(<WorkSegment segment={segmentOf([a], { active: true })} />);
+      const row = container.querySelector('[data-tool-id="a"]');
+      const calls = [bash("a", "one"), bash("b", "two")];
+      rerender(<WorkSegment segment={segmentOf(calls, { active: true })} />);
+      expect(container.querySelector('[data-tool-id="a"]')).toBe(row);
+      const head = screen.getByRole("button", { name: /Ran 2 commands/ });
+      rerender(<WorkSegment segment={segmentOf(calls)} />);
+      act(() => vi.advanceTimersByTime(500));
+      expect(head.getAttribute("aria-expanded")).toBe("true");
+      act(() => vi.advanceTimersByTime(100));
+      expect(head.getAttribute("aria-expanded")).toBe("false");
+      expect(container.querySelector('[data-tool-id="a"]')).toBe(row);
+      expect(container.querySelector(".work-segment-shell").hasAttribute("inert")).toBe(true);
+      fireEvent.click(head);
+      act(() => vi.advanceTimersByTime(1000));
+      expect(head.getAttribute("aria-expanded")).toBe("true");
+    } finally { vi.useRealTimers(); }
+  });
   it("renders a finished segment collapsed to its summary", () => {
     const { container } = render(<WorkSegment segment={segmentOf([bash("a", "ls"), bash("b", "pwd")])} />);
     const head = screen.getByRole("button", { name: /Ran 2 commands/ });

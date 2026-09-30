@@ -2,7 +2,8 @@ import { renderCommandResult } from "../command-results.ts"
 import { isStreamingAssistant, latestAssistantId } from "../message-view.ts"
 import { questionCardMarkup, syncQuestionCard } from "../question-card.ts"
 import { type Entry } from "../timeline-model.ts"
-import { foldWorkSegments, isWorkSegment, type StreamItem } from "../work-segments.ts"
+import { foldWorkSegments, isWorkSegment, segmentOpenMode, type StreamItem } from "../work-segments.ts"
+import { SegmentPresentation, reconcileToolElement } from "../segment-presentation.ts"
 import { canRetryLastPrompt } from "./composer.ts"
 import { jumpLatest, messageStream } from "./dom.ts"
 import { escapeAttribute, escapeHtml } from "./html.ts"
@@ -19,6 +20,9 @@ interface MessageContext {
 }
 
 const idleContext: MessageContext = { openAssistantId: "", activeTurn: false, latestAssistantId: "" }
+let folds = new SegmentPresentation()
+let foldSession = ""
+let foldTimer: ReturnType<typeof setTimeout> | undefined
 
 export function renderStream() {
   const stickToBottom = messageStream.scrollHeight - messageStream.scrollTop - messageStream.clientHeight < 80
@@ -31,16 +35,24 @@ export function renderStream() {
   const nextNodes: HTMLElement[] = []
   const activeTurn = Boolean(activeTurnIdFor(state.viewedSessionId))
   const items = foldWorkSegments(entries, { activeTurn, awaitingToolCallId: conversation.question?.toolCallId })
+  if (foldSession !== state.viewedSessionId) { folds = new SegmentPresentation(); foldSession = state.viewedSessionId }
+  folds.prune(new Set(items.filter(isWorkSegment).map((item) => item.id)))
+  clearTimeout(foldTimer)
   const context: MessageContext = { openAssistantId: conversation.openAssistantId, activeTurn, latestAssistantId: latestAssistantId(entries) }
   for (const entry of items) {
     const template = document.createElement("template")
-    template.innerHTML = renderStreamItem(entry, context)
+    template.innerHTML = isWorkSegment(entry)
+      ? renderWorkSegment(entry, folds.mode(entry.id, entry.tools.length === 1 ? "all" : segmentOpenMode(entry, state.segmentFolds.get(entry.id)), state.segmentFolds.has(entry.id), performance.now()))
+      : renderStreamItem(entry, context)
     const next = template.content.firstElementChild as HTMLElement | null
     if (!next) continue
     const current = existing.get(entry.id)
     if (current && current.tagName === next.tagName) {
-      syncElementAttributes(current, next)
-      replaceElementChildren(current, next)
+      if (isWorkSegment(entry)) reconcileToolElement(current, next)
+      else {
+        syncElementAttributes(current, next)
+        if (!current.isEqualNode(next)) replaceElementChildren(current, next)
+      }
       nextNodes.push(current)
     } else {
       nextNodes.push(next)
@@ -89,6 +101,8 @@ export function renderStream() {
     jumpLatest.hidden = false
   }
   vars.lastRenderedEntries = entries.length
+  const deadline = folds.deadline()
+  if (deadline !== null) foldTimer = setTimeout(renderStream, Math.max(0, deadline - performance.now()))
 }
 
 export function syncElementAttributes(current: HTMLElement, next: HTMLElement) {
