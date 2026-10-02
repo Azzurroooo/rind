@@ -1,5 +1,5 @@
 import assert from "node:assert/strict"
-import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises"
+import { mkdtemp, mkdir, readFile, realpath, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import test from "node:test"
@@ -49,8 +49,10 @@ test("project registry migrates the legacy workspace and pages its sessions", as
     assert.equal(page.total, 3)
 
     const remaining = await store.remove(firstProject)
-    assert.deepEqual(remaining.projects.map((project) => project.path), [secondProject])
-    assert.equal(remaining.activeProjectPath, secondProject)
+    // Registration canonicalizes paths, including Windows temporary 8.3 aliases.
+    const canonicalSecondProject = await realpath(secondProject)
+    assert.deepEqual(remaining.projects.map((project) => project.path), [canonicalSecondProject])
+    assert.equal(remaining.activeProjectPath, canonicalSecondProject)
     assert.equal((await readFile(sessionIndexFile, "utf8")).includes("\"old\""), true)
   })
 })
