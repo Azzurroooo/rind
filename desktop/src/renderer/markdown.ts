@@ -181,4 +181,3 @@ function renderInline(value: string) {
     .replace(/\n/g, "<br>")
   return rendered.replace(/\u0000(\d+)\u0000/g, (_match, index: string) => tokens[Number(index)] || "")
 }
-

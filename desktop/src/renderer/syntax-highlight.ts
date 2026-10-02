@@ -59,4 +59,3 @@ function languageForFile(name: string) {
   const extension = name.split(".").at(-1)?.toLowerCase()
   return extension ? LANGUAGE_BY_EXTENSION[extension] : undefined
 }
-

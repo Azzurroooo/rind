@@ -18,7 +18,7 @@ export function bindShellEvents(): void {
   bindSidebarResize(sidebarResizeHandle)
 
   // ---------- topbar actions ----------
-  
+
   document.getElementById("open-palette")?.addEventListener("click", () => openPalette())
 
   document.getElementById("toggle-theme")?.addEventListener("click", () => setTheme(nextTheme()))
