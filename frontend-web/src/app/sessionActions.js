@@ -285,7 +285,7 @@ export function createSessionActions(ctx) {
     try {
       const result = await refs.client.current.request(methods.sessionReplay, { session_id: sessionId });
       const title = refs.sessions.current.find((item) => sessionIdOf(item) === sessionId)?.title || "Rind conversation";
-      exportConversation(result?.messages || [], title);
+      await (ctx.platform?.exportConversation || exportConversation)(result?.messages || [], title);
     } catch (error) {
       call().dispatchMessage("system", `Export failed: ${errorText(error)}`, "error");
     }

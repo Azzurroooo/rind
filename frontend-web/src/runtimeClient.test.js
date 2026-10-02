@@ -23,6 +23,21 @@ function client(options = {}) {
 async function open(value) { const pending = value.connect(); await tick(); Socket.instances.at(-1).open(); await pending; await tick(); return Socket.instances.at(-1); }
 
 describe("runtime connection lifecycle", () => {
+  it("suspends polling without cancelling remote work, then obtains a fresh ticket on resume", async () => {
+    const credentialProvider = vi.fn().mockResolvedValue("ticket=one");
+    const value = client({ credentialProvider });
+    const first = await open(value);
+    const pending = value.request("session/prompt", { session_id: "s", input: "work" }).catch((error) => error);
+    await tick(); value.suspend();
+    expect((await pending).message).toMatch(/closed/);
+    await expect(value.request("rind/task/list")).rejects.toThrow(/paused/);
+    await vi.advanceTimersByTimeAsync(60000);
+    expect(Socket.instances).toHaveLength(1);
+    expect(first.sent.map((m) => m.method)).not.toContain("session/cancel");
+    const resumed = value.resume(); await tick(); Socket.instances.at(-1).open(); await resumed;
+    expect(credentialProvider).toHaveBeenCalledTimes(2);
+    expect(Socket.instances.at(-1).sent).toHaveLength(0);
+  });
   it("does not open a socket when a cancelled ticket exchange completes", async () => {
     let resolveTicket;
     const value = client({ credentialProvider: () => new Promise((resolve) => { resolveTicket = resolve; }) });

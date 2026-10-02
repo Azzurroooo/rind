@@ -12,11 +12,30 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from agent.runtime.server.websocket import WebRuntimeServer
+from websockets.datastructures import Headers
 
 
 class _Repository:
     async def replay(self, _session_id, **_kwargs):
         return {"messages": []}
+
+
+def test_mobile_origins_are_exact_and_still_require_authentication():
+    async def run():
+        runtime = WebRuntimeServer(_Worker(), server_token="mobile-secret")
+        assert runtime._origin_allowed(Headers({"Origin": "http://rind.local", "Host": "192.168.1.2"}))
+        assert runtime._origin_allowed(Headers({"Origin": "capacitor://rind.local", "Host": "192.168.1.2"}))
+        assert not runtime._origin_allowed(Headers({"Origin": "http://rind.local.evil.test", "Host": "192.168.1.2"}))
+        async with websockets.serve(runtime._handle_connection, "127.0.0.1", 0) as server:
+            port = server.sockets[0].getsockname()[1]
+            async with websockets.connect(f"ws://127.0.0.1:{port}/ws", origin="http://rind.local") as ws:
+                await ws.wait_closed()
+                assert ws.close_code == 4401
+            ticket = runtime._issue_ticket()
+            async with websockets.connect(f"ws://127.0.0.1:{port}/ws?ticket={ticket}", origin="capacitor://rind.local") as ws:
+                await ws.send(json.dumps({"kind": "request", "request_id": 1, "method": "initialize"}))
+                assert json.loads(await ws.recv())["result"]["session_id"] == "session-web"
+    asyncio.run(run())
 
 
 class _Execution:

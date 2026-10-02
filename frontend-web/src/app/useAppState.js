@@ -1,6 +1,7 @@
 import { useReducer, useRef, useState } from "react";
 import { initialRuntimeUrl } from "../runtimeClient.js";
-import { consumePairingCode, hasStoredCredential, storeToken } from "../ticket.js";
+import { consumePairingCode } from "../ticket.js";
+import { useSurfacePlatform } from "../platform.jsx";
 import { currentNotificationPermission } from "../lib/notifications.js";
 import { initialConnectionState, reduceConnection } from "../state/connection.js";
 import { emptyConversationState, reduceConversation } from "../state/conversationReducer.js";
@@ -10,9 +11,11 @@ import { SESSION_PAGE } from "./constants.js";
 // committed value so a long-running request can tell whether the world moved
 // on (session switched, connection restarted) before it applies its result.
 export function useAppState() {
+  const platform = useSurfacePlatform();
+  const { hasStoredCredential, storeToken } = platform.credentials;
   const [endpoint] = useState(() => {
-    const address = typeof initialRuntimeUrl === "function" ? initialRuntimeUrl() : initialRuntimeUrl;
-    const code = consumePairingCode();
+    const address = platform.endpoint || (typeof initialRuntimeUrl === "function" ? initialRuntimeUrl() : initialRuntimeUrl);
+    const code = platform.endpoint ? "" : consumePairingCode();
     if (code) storeToken(code, address);
     return address;
   });
@@ -81,6 +84,7 @@ export function useAppState() {
   refs.sessions.current = sessions;
 
   return {
+    platform,
     endpoint,
     connection, dispatchConnection,
     conversation, dispatchConversation,
