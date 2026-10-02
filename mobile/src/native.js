@@ -1,4 +1,4 @@
-import { Capacitor, CapacitorHttp, SystemBars, SystemBarsStyle } from "@capacitor/core";
+import { Capacitor, CapacitorHttp, registerPlugin, SystemBars, SystemBarsStyle } from "@capacitor/core";
 import { App } from "@capacitor/app";
 import { Browser } from "@capacitor/browser";
 import { Network } from "@capacitor/network";
@@ -11,6 +11,7 @@ import { createHostStore } from "./hostStore.js";
 import { parsePairing } from "./pairing.js";
 
 export const isNative = Capacitor.isNativePlatform();
+const RindAppearance = registerPlugin("RindAppearance");
 // Never invoke the secure-storage plugin's unencrypted browser implementation.
 export const hostStore = createHostStore(Preferences, isNative ? {
   get: (key) => SecureStorage.get(key, false, false),
@@ -78,7 +79,12 @@ export async function shareConversation(messages, title) {
   const path = `rind-exports/rind-${Date.now()}.md`;
   const file = await Filesystem.writeFile({ path, data: conversationMarkdown(messages, title), directory: Directory.Cache, encoding: Encoding.UTF8, recursive: true });
   // The receiving app may still be reading after the chooser closes. Expire later.
-  await Share.share({ title, files: [file.uri], dialogTitle: "Share conversation" });
+  try {
+    await Share.share({ title, files: [file.uri], dialogTitle: "Share conversation" });
+  } catch (error) {
+    // Closing the OS chooser is a normal user action, not an export failure.
+    if (error.message !== "Share canceled") throw error;
+  }
 }
 
 export function installNativeUI({ onLink, onBack }) {
@@ -87,8 +93,14 @@ export function installNativeUI({ onLink, onBack }) {
   const cleanups = [
     listen(() => App.addListener("appUrlOpen", ({ url }) => onLink(url))),
     listen(() => App.addListener("backButton", () => {
-      const modal = [...document.querySelectorAll("[aria-modal='true'], [role='menu']")].at(-1);
-      if (modal) { modal.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })); return; }
+      const overlay = [...document.querySelectorAll("[aria-modal='true'], [role='menu'], [role='listbox']")].at(-1);
+      if (overlay) {
+        // Combobox suggestions handle Escape on their input; model menus handle
+        // it on the listbox. Dismiss either before navigating away from a draft.
+        const owner = overlay.id && [...document.querySelectorAll("[aria-controls]")].find((element) => element.getAttribute("aria-controls").split(/\s+/).includes(overlay.id));
+        (owner || overlay).dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }));
+        return;
+      }
       const drawer = document.querySelector(".drawer-open");
       if (drawer) { window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })); return; }
       if (document.activeElement?.matches("textarea, input")) { document.activeElement.blur(); return; }
@@ -107,7 +119,10 @@ export function installNativeUI({ onLink, onBack }) {
   document.addEventListener("click", openLink);
   const status = () => {
     const dark = document.documentElement.dataset.theme === "dark" || (!document.documentElement.dataset.theme && matchMedia("(prefers-color-scheme: dark)").matches);
-    void SystemBars.setStyle({ style: dark ? SystemBarsStyle.Dark : SystemBarsStyle.Light }).catch(() => {});
+    const color = getComputedStyle(document.documentElement).getPropertyValue("--bg").trim();
+    void SystemBars.setStyle({ style: dark ? SystemBarsStyle.Dark : SystemBarsStyle.Light }).then(() => {
+      if (!disposed && color && Capacitor.getPlatform() === "android") return RindAppearance.setBackground({ color });
+    }).catch(() => {});
   };
   const observer = new MutationObserver(status);
   const appearance = matchMedia("(prefers-color-scheme: dark)");

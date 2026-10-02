@@ -60,17 +60,19 @@ The browser tool was unavailable; Playwright Chromium provided screenshots and
 interaction checks. Mobile smoke tests run the production bundle at 320, 390, 430
 and 768 px, plus 844×390 landscape and 390×420 reduced-height layouts, against the
 real Desktop Gateway and an isolated fake Worker bridge.
-They substitute native HTTP/WS-origin transport; this is not camera/keychain or
-physical phone acceptance. No real provider tokens are consumed.
+They substitute native HTTP/WS-origin transport; browser checks alone do not
+establish camera/keychain or physical phone acceptance. Separate Android device
+acceptance is recorded in [mobile-device-qa.md](mobile-device-qa.md). No real
+provider tokens are consumed.
 The page itself uses Android's `http://rind.local` origin, exercising the absence
 of secure-context-only browser APIs. Computer IDs use `getRandomValues`, which
 works in this context, rather than `randomUUID`.
 
-## Verified results — 2026-10-02
+## Verified results — 2026-10-02–03 (Asia/Shanghai)
 
 | Check | Result |
 | --- | --- |
-| Mobile unit/UI tests | 30 passed across 4 files |
+| Mobile unit/UI tests | 34 passed across 4 files, including Android Back, system-bar theme order and native share cancellation regressions |
 | Mobile production Gateway smoke | Passed pairing/authentication, replay, six viewports, drawers, files/upload, prompt/queue/stop, reconnect/draft retention, theme, credential isolation and forgetting |
 | Shared Web regression suite | 385 passed across 43 files; after adding the suspension regression, all 11 runtime-client tests passed |
 | Desktop regression suite | 234 passed; TypeScript check passed |
@@ -78,24 +80,36 @@ works in this context, rather than `randomUUID`.
 | Production bundles | Web, Desktop and Mobile built successfully |
 | Native project synchronization | Android and iOS passed |
 | Android debug build | `assembleDebug` passed using JDK 21, Gradle 8.14.3 and SDK 36 |
-| APK inspection | `aapt` metadata and `apksigner verify` passed; all 29 bundled Web assets match `mobile/dist` and the synced iOS assets |
+| APK inspection | `aapt` metadata and `apksigner verify` passed; all 29 bundled Web assets match `mobile/dist`; the installed APK hash matches the local artifact |
+| Android physical device | Passed on one Android 14 / API 34 device over wireless ADB with native HTTP/WS, real Gateway and Python Worker; local scripted model fixture |
+| User's Desktop connection | Scanned code authenticated and real session history loaded after applying the existing executable/port/local-subnet Windows firewall rule; no model prompt submitted |
+
+The shared Web, Desktop and Python results above are from the implementation
+verification on October 2. The device fixes only change Mobile code/configuration;
+Mobile tests, production smoke and Android build were rerun for the final APK.
 
 The locally built debug APK is at
 `mobile/android/app/build/outputs/apk/debug/app-debug.apk` (ignored build output):
 
 - Application ID: `dev.rind.mobile`; version `0.9.0-beta.1`, version code `1`.
 - Minimum/target Android SDK: 26/36. Camera hardware is optional.
-- Size: 36,299,988 bytes; debug signed with APK Signature Scheme v2.
-- SHA-256: `a2623b14a287cd75c82e18b1155039312aa93cb7ea13d91c4b5705ef2a25d6c6`.
+- Size: 36,300,183 bytes; debug signed with APK Signature Scheme v2.
+- SHA-256: `57a185bbc63082c852e08d07297fc56ccf9ba566d0cbe2177a68c2174bfb6ecb`.
 - Native logging is disabled; assets are bundled locally with no remote
   `server.url`. No Python files are packaged.
 
-This machine has no attached Android device or emulator. iOS plist/privacy
-metadata and package references were checked, but Windows cannot compile or sign
-the iOS project. Neither platform has passed physical-device acceptance here.
+Physical Android acceptance covers camera scanning, the native attachment picker,
+keyboard/Back behavior, light/dark system bars, rotation, native share cancellation,
+secure credentials, revocation and reconnect/background replay. See the device
+record for the full matrix and limits. This is evidence for the tested device and
+OS version, not every supported Android device.
+
+iOS plist/privacy metadata and package references were checked, but Windows cannot
+compile or sign the iOS project; iOS has not passed physical-device acceptance.
 The debug APK is a development artifact, not a store-signed release.
 
 The mobile CI workflow includes Android debug APK compilation and an unsigned iOS
 Simulator build. Configuring CI is not evidence that a remote CI run has passed.
-Store signing, physical device permissions, QR camera, sharing destinations and OS
-keyboard behavior require the corresponding device/build environment.
+Store signing, iOS device behavior and delivery to share destinations remain
+unverified. Android sharing was checked through file generation and the chooser,
+then cancelled without sending anything.

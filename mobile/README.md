@@ -23,6 +23,15 @@ including debug builds, to keep ticket Authorization headers out of device logs.
 Disconnect preserves pairing; sign-out and forgetting remove the saved code.
 Rotating the Desktop code revokes access.
 
+If scanning fills the form but **Connect** reports **Cannot reach Rind**, first
+check that Desktop's Remote access is enabled for **Local network**. On Windows,
+open **Remote access → Can’t open the page? → Allow Rind on the local network**
+and approve the administrator prompt. This permits only the current Desktop
+executable and gateway TCP port from the local subnet. A different installation
+or development checkout can need its own rule. Keep both devices on a reachable
+network and retry Connect; rescanning is only necessary if the address or code
+changed. An invalid/expired-code error instead requires the current Desktop code.
+
 Background/offline suspends the client socket, not remote work. Foreground gets a
 fresh one-time ticket and restores history without resending prompts. In-memory
 drafts survive reconnect, but not necessarily OS process eviction. No push service
@@ -63,6 +72,22 @@ Use `gradlew.bat` on Windows. Output:
 `npm run android` opens Android Studio. For store distribution, use `bundleRelease`
 with your own signing configuration; no keys are committed. Increase
 `-PrindVersionCode=N` each release. Version name comes from `agent/version.py`.
+
+For wireless device debugging, enable Developer options → Wireless debugging on
+the phone. Open **Pair device with pairing code** and use that dialog's pairing
+port; the main Wireless debugging screen has a separate connection port:
+
+```sh
+adb pair <phone-ip>:<pairing-port>
+# Enter the current six-digit code at the prompt.
+adb connect <phone-ip>:<connection-port>
+adb devices -l
+adb -s <phone-ip>:<connection-port> install -r android/app/build/outputs/apk/debug/app-debug.apk
+adb -s <phone-ip>:<connection-port> shell am start -n dev.rind.mobile/.MainActivity
+```
+
+Keep pairing codes and Gateway access codes out of scripts, logs and commits.
+Use the installed app on the same reachable network as the remote computer.
 
 ### iOS
 
@@ -118,3 +143,8 @@ signing behavior. Temporary workspace/servers are cleaned in `finally`.
 
 `npm run icons` regenerates native artwork from the existing Web SVG. Architecture,
 reference study and validation results live in `../docs/mobile-app.md`.
+
+The [Android device acceptance record](../docs/mobile-device-qa.md) documents the
+October 2–3, 2026 wireless-ADB run, fixes and remaining platform limits. It uses
+real native transport, Gateway and Python Worker with an isolated scripted model,
+and includes physical camera, system picker, keyboard and sharing checks.
