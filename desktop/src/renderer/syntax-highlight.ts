@@ -1,3 +1,4 @@
+import { escapeHtml } from "./html-escape.ts"
 import hljs from "highlight.js/lib/core"
 import bash from "highlight.js/lib/languages/bash"
 import css from "highlight.js/lib/languages/css"
@@ -57,10 +58,4 @@ export function highlightFile(name: string, content: string) {
 function languageForFile(name: string) {
   const extension = name.split(".").at(-1)?.toLowerCase()
   return extension ? LANGUAGE_BY_EXTENSION[extension] : undefined
-}
-
-function escapeHtml(value: string) {
-  return value.replace(/[&<>"']/g, (character) => ({
-    "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
-  })[character] ?? character)
 }

@@ -3,10 +3,14 @@ import { createInterface } from "node:readline"
 import { delimiter, dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
 import log from "electron-log/main"
+import { RuntimeInputs } from "./runtime-inputs.ts"
+import { runtimeRequestTimeout } from "./runtime-request-policy.ts"
 
+import { buildAuthReply, parseAuthPrompt, parseAuthUpdate, validateAuthReply } from "./auth-messages.ts"
 import {
-  runtimeMethods,
   runtimeProtocolVersion,
+  type DesktopAuthPrompt,
+  type DesktopAuthUpdate,
   type RuntimeEvent,
   type RuntimeEventEnvelope,
   type RuntimeMethod,
@@ -33,6 +37,11 @@ type RuntimeWorker = {
 
 const listeners = new Set<(snapshot: RuntimeSnapshot) => void>()
 const eventListeners = new Set<(event: RuntimeEvent) => void>()
+const inputs = new RuntimeInputs()
+const authPromptListeners = new Set<(prompt: DesktopAuthPrompt) => void>()
+const authUpdateListeners = new Set<(update: DesktopAuthUpdate) => void>()
+// Worker-initiated auth prompts still waiting for an answer from the window.
+let pendingAuthPrompts: ReadonlySet<string> = new Set()
 const maxStderrChars = 4096
 const worker: RuntimeWorker = {
   pending: new Map(),
@@ -46,6 +55,8 @@ function setSnapshot(next: RuntimeSnapshot) {
 }
 
 function rejectPending(error: Error) {
+  inputs.clear()
+  pendingAuthPrompts = new Set()
   for (const [requestId, request] of worker.pending) {
     clearTimeout(request.timer)
     request.reject(error)
@@ -73,21 +84,34 @@ function handleLine(source: ChildProcessWithoutNullStreams, line: string) {
     return
   }
 
+  const authPrompt = parseAuthPrompt(message)
+  if (authPrompt) {
+    pendingAuthPrompts = new Set([...pendingAuthPrompts, authPrompt.requestId])
+    for (const listener of authPromptListeners) listener(authPrompt)
+    return
+  }
+  const authUpdate = parseAuthUpdate(message)
+  if (authUpdate) {
+    for (const listener of authUpdateListeners) listener(authUpdate)
+    return
+  }
   if (isRuntimeEventEnvelope(message)) {
-    const type = String(message.event.type || "")
+    const enriched = inputs.enrich(message)
+    const type = String(enriched.event.type || "")
     for (const listener of eventListeners) listener({
       type,
       sequence: message.sequence,
       durability: message.durability,
       sessionId: message.session_id,
       turnId: message.turn_id,
-      event: message.event,
+      event: enriched.event,
       generation: runtimeGeneration,
     })
     return
   }
   if (!isRuntimeResponseEnvelope(message)) return
   const requestId = String(message.request_id)
+  inputs.finish(requestId)
   const request = worker.pending.get(requestId)
   if (!request) return
   worker.pending.delete(requestId)
@@ -118,13 +142,6 @@ function runtimeLaunch() {
 
 let runtimeGeneration = 0
 
-/** Monotonic id of the current worker process generation: sequence numbers
- *  reset to 1 on every (re)spawn, so clients must reset their watermark when
- *  this changes. */
-export function runtimeGenerationId(): number {
-  return runtimeGeneration
-}
-
 export function startRuntime(workspace: string) {
   if (worker.snapshot.status === "stopping") throw new Error("Runtime is shutting down.")
   if (worker.child && !worker.child.killed && worker.child.exitCode === null) return worker.snapshot
@@ -141,7 +158,9 @@ export function startRuntime(workspace: string) {
         PYTHONPATH: process.env.PYTHONPATH ? `${repoRoot}${delimiter}${process.env.PYTHONPATH}` : repoRoot,
         PYTHONUTF8: "1",
       }
-    : process.env
+    : launch.command === process.execPath && /\.(?:c|m)?js$/i.test(process.env.RIND_RUNTIME_PATH || "")
+      ? { ...process.env, ELECTRON_RUN_AS_NODE: "1" }
+      : process.env
   const current = spawn(
     launch.command,
     [...launch.args, "app-server", "--stdio", "--cwd", workspace],
@@ -182,14 +201,17 @@ function request(method: RuntimeServerMethod, params: Record<string, unknown> = 
   if (!worker.child?.stdin.writable) return Promise.reject(new Error("Runtime is not running."))
   const requestId = `desktop-${++worker.requestSequence}`
   const message: RuntimeRequestEnvelope = { kind: "request", request_id: requestId, method, params }
+  inputs.begin(requestId, method, params)
   return new Promise<unknown>((resolve, reject) => {
     const timer = setTimeout(() => {
       worker.pending.delete(requestId)
+      inputs.finish(requestId)
       reject(new Error(`Runtime request timed out: ${method}.`))
     }, timeoutMs)
     worker.pending.set(requestId, { resolve, reject, timer })
     worker.child?.stdin.write(`${JSON.stringify(message)}\n`, (error) => {
       if (!error) return
+      inputs.finish(requestId)
       clearTimeout(timer)
       worker.pending.delete(requestId)
       reject(error)
@@ -220,8 +242,28 @@ async function initializeWorker() {
 }
 
 export function requestRuntime(method: RuntimeMethod, params: Record<string, unknown> = {}) {
-  const longRunning = method === runtimeMethods.sessionPrompt || method === runtimeMethods.sessionFollowUp
-  return request(method, params, longRunning ? 15 * 60_000 : 30_000)
+  return request(method, params, runtimeRequestTimeout(method))
+}
+
+/** Answer a worker auth prompt. An empty value cancels the login. */
+export async function respondAuthPrompt(requestId: unknown, value: unknown): Promise<boolean> {
+  const reply = validateAuthReply(pendingAuthPrompts, requestId, value)
+  if (!worker.child?.stdin.writable) return Promise.reject(new Error("Runtime is not running."))
+  pendingAuthPrompts = new Set([...pendingAuthPrompts].filter((id) => id !== reply.requestId))
+  const envelope = buildAuthReply(reply.requestId, reply.value)
+  return new Promise<boolean>((resolve, reject) => {
+    worker.child?.stdin.write(`${JSON.stringify(envelope)}\n`, (error) => (error ? reject(error) : resolve(true)))
+  })
+}
+
+export function subscribeAuthPrompts(listener: (prompt: DesktopAuthPrompt) => void) {
+  authPromptListeners.add(listener)
+  return () => authPromptListeners.delete(listener)
+}
+
+export function subscribeAuthUpdates(listener: (update: DesktopAuthUpdate) => void) {
+  authUpdateListeners.add(listener)
+  return () => authUpdateListeners.delete(listener)
 }
 
 export function shutdownRuntime() {

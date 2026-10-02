@@ -1,3 +1,5 @@
+import { escapeAttribute, escapeHtml } from "./html-escape.ts"
+import { renderContextDisplay } from "./context-report.ts"
 import { renderMarkdown } from "./markdown.ts"
 import { isDesktopHiddenSlashCommand } from "./slash-commands.ts"
 
@@ -22,6 +24,7 @@ function renderCommandDisplay(display: Record<string, unknown> | undefined): str
   if (type === "sessions") return renderSessionsDisplay(display)
   if (type === "skills") return renderSkillsDisplay(display)
   if (type === "status") return renderStatusDisplay(display)
+  if (type === "context") return renderContextDisplay(display)
   if (type === "team_create") return renderKeyValueDisplay([
     { label: "project", value: display.project_id },
     { label: "main agent", value: display.main_agent },
@@ -33,7 +36,7 @@ function renderCommandDisplay(display: Record<string, unknown> | undefined): str
 function renderHelpCommandDisplay(display: Record<string, unknown>) {
   const selected = asRecord(display.command)
   const commands = (typeof selected.name === "string" ? [selected] : recordList(display.commands))
-    .filter((command) => !isDesktopHiddenSlashCommand(typeof command.name === "string" ? command.name : ""))
+    .flatMap(desktopOwnedCommand)
   if (!commands.length) return ""
   const heading = typeof selected.name === "string" ? `/${selected.name}` : "Commands"
   return `<div class="command-display"><div class="command-display-title">${escapeHtml(heading)}</div><div class="command-list">${commands.map((command) => {
@@ -43,6 +46,10 @@ function renderHelpCommandDisplay(display: Record<string, unknown>) {
     const usage = typeof command.usage === "string" ? command.usage : `/${name}`
     return `<button type="button" class="command-list-item" data-command-prefill="${escapeAttribute(name)}"><span><code>/${escapeHtml(name)}</code><small>${escapeHtml(description)}</small></span><code>${escapeHtml(usage)}</code></button>`
   }).join("")}</div></div>`
+}
+
+function desktopOwnedCommand(command: Record<string, unknown>): Record<string, unknown>[] {
+  return isDesktopHiddenSlashCommand(String(command.name || "")) ? [] : [command]
 }
 
 function renderKeyValueDisplay(entries: unknown) {
@@ -89,15 +96,24 @@ function renderSkillsDisplay(display: Record<string, unknown>) {
 }
 
 function renderStatusDisplay(display: Record<string, unknown>) {
-  const git = asRecord(display.git)
-  const entries = [
-    { label: "session", value: display.session },
-    { label: "model", value: display.model },
-    { label: "messages", value: display.messages },
-    ...(git.branch ? [{ label: "git", value: `${displayText(git.branch)}${git.dirty ? " *" : ""}` }] : []),
-  ]
-  const usageRows = recordList(display.usage).map((item) => `<div class="command-usage"><strong>${escapeHtml(displayText(item.label))}</strong><span>Input <b>${escapeHtml(formatCount(item.input_tokens))}</b>${Number(item.context_window_tokens) > 0 ? ` / ${escapeHtml(formatCount(item.context_window_tokens))}` : ""}</span><span>Output <b>${escapeHtml(formatCount(item.output_tokens))}</b></span><span>Context <b>${escapeHtml(formatPercent(item.context_usage_percent))}</b></span></div>`)
-  return `<div class="command-display">${renderKeyValueDisplay(entries)}${usageRows.join("")}</div>`
+  const labels: Record<string, string> = { session: "Session", settings: "Settings", apiKey: "API key", baseUrl: "Endpoint", model: "Model", reasoningEffort: "Reasoning effort", runtime: "Runtime", workspace: "Workspace" }
+  const entries = recordList(display.entries)
+  const config = entries.map((entry) => {
+    const label = displayText(entry.label)
+    if (!label) return ""
+    return `<div><dt>${escapeHtml(labels[label] || label)}</dt><dd>${escapeHtml(displayText(entry.value) || "—")}${entry.state ? ` <small>${escapeHtml(displayText(entry.state))}</small>` : ""}</dd></div>`
+  }).join("")
+  const usage = recordList(display.usage).map((item) => {
+    const limit = Number(item.context_window_tokens)
+    const fraction = Number(item.context_usage_percent)
+    const meter = limit > 0 && Number.isFinite(fraction) ? `<div class="status-context"><span>Context</span><meter min="0" max="1" value="${Math.min(1, Math.max(0, fraction))}" aria-label="Context used"></meter><span>${formatPercent(fraction)}</span></div>` : ""
+    return `${meter}<dl class="status-metrics">
+      <div><dt>Input</dt><dd>${formatCount(item.input_tokens)}${limit > 0 ? ` <small>/ ${formatCount(limit)}</small>` : ""}</dd></div>
+      <div><dt>Cached input</dt><dd>${formatCount(item.cached_input_tokens)} <small>· ${formatPercent(item.cache_hit_rate)} hit</small></dd></div>
+      <div><dt>Output</dt><dd>${formatCount(item.output_tokens)}</dd></div>
+    </dl>`
+  }).join("")
+  return `<div class="status-display"><dl class="status-config">${config}</dl><section class="status-sampling" aria-label="Latest model response"><h4>Latest model response</h4>${usage || '<p class="status-empty">No completed sampling yet.</p>'}</section></div>`
 }
 
 function recordList(value: unknown): Record<string, unknown>[] {
@@ -117,24 +133,14 @@ function displayText(value: unknown) {
 
 function formatCount(value: unknown) {
   const count = Number(value)
-  return Number.isFinite(count) ? count.toLocaleString() : displayText(value)
+  return value != null && Number.isFinite(count) ? count.toLocaleString() : "—"
 }
 
 function formatPercent(value: unknown) {
   const percent = Number(value)
-  return Number.isFinite(percent) ? `${Math.round(percent * 100)}%` : ""
+  return value != null && Number.isFinite(percent) ? `${(percent * 100).toFixed(1)}%` : "—"
 }
 
 function asRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {}
-}
-
-function escapeHtml(value: string) {
-  return value.replace(/[&<>'"]/g, (character) => ({
-    "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;",
-  })[character] ?? character)
-}
-
-function escapeAttribute(value: string) {
-  return escapeHtml(value).replace(/\n/g, "&#10;")
 }

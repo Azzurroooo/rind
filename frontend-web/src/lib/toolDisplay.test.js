@@ -1,155 +1,232 @@
 import { describe, expect, it } from "vitest";
-import {
-  extractDiffText,
-  failedMessage,
-  formatDuration,
-  parseToolArguments,
-  parseToolResult,
-  payloadParts,
-  rawPayloads,
-  toolDetails,
-  toolItems,
-  toolLabel,
-  toolOutput,
-  toolSummary,
-} from "./toolDisplay.js";
+import { formatDuration, parseToolArguments, parseToolResult, partialJsonStrings, summarizeChanges, taskFinishState, toolChangeStats, toolView } from "./toolDisplay.js";
 
-describe("toolDisplay — labels (ported mapping from frontend-cli/lib/tool-display.js)", () => {
-  it("maps known tools to stable labels", () => {
-    expect(toolLabel("bash")).toBe("Shell command");
-    expect(toolLabel("read_file")).toBe("Read file");
-    expect(toolLabel("write_file")).toBe("Write file");
-    expect(toolLabel("edit_file")).toBe("Edit file");
-    expect(toolLabel("glob")).toBe("Find files");
-    expect(toolLabel("grep")).toBe("Search files");
-    expect(toolLabel("search_web")).toBe("Web search");
-    expect(toolLabel("web_search")).toBe("Web search");
-    expect(toolLabel("fetch_web_page")).toBe("Fetch web page");
-    expect(toolLabel("update_plan")).toBe("Update plan");
-    expect(toolLabel("delegate")).toBe("Delegate task");
-  });
-
-  it("humanizes unknown tool names", () => {
-    expect(toolLabel("mcp__x__do_thing")).toBe("Mcp X Do Thing");
-    expect(toolLabel("")).toBe("tool");
-  });
+const ok = (data, meta) => JSON.stringify({ ok: true, data, meta });
+const tool = (name, args, result, extra = {}) => ({
+  id: `tool-${name}`,
+  role: "tool",
+  tool_call_id: `call-${name}`,
+  name,
+  status: "completed",
+  args: typeof args === "string" ? args : JSON.stringify(args),
+  result,
+  ...extra,
 });
+const metaText = (view) => view.meta.map((part) => part.text).join(" ");
 
-describe("toolDisplay — parsing helpers", () => {
-  it("parses args from JSON strings and objects", () => {
+describe("argument and result parsing", () => {
+  it("parses complete JSON, objects and plain-text results", () => {
     expect(parseToolArguments('{"command":"ls"}')).toEqual({ command: "ls" });
     expect(parseToolArguments({ path: "a" })).toEqual({ path: "a" });
-    expect(parseToolArguments("not json")).toEqual({});
-    expect(parseToolArguments(undefined)).toEqual({});
+    expect(parseToolResult("plain output")).toEqual({ data: "plain output" });
+    expect(parseToolResult('[{"a":1}]')).toEqual({ data: [{ a: 1 }] });
   });
 
-  it("wraps plain-string results as { data } and rejects arrays", () => {
-    expect(parseToolResult("plain")).toEqual({ data: "plain" });
-    expect(parseToolResult('{"ok":true}')).toEqual({ ok: true });
-    expect(parseToolResult("")).toEqual({});
-    expect(parseToolResult("[1,2]")).toEqual({});
-  });
-
-  it("payloadParts splits data/meta objects", () => {
-    const parts = payloadParts({ result: '{"data":{"stdout":"hi"},"meta":{"truncated":true}}' });
-    expect(parts.data).toEqual({ stdout: "hi" });
-    expect(parts.meta).toEqual({ truncated: true });
+  it("reads string fields out of streaming, incomplete JSON", () => {
+    expect(partialJsonStrings('{"path":"src/app.ts","content":"line 1\\nline')).toEqual({ path: "src/app.ts", content: "line 1\nline" });
+    expect(parseToolArguments('{"command":"npm te')).toEqual({ command: "npm te" });
+    expect(partialJsonStrings('{"path":"a\\')).toEqual({ path: "a" });
   });
 });
 
-describe("toolDisplay — one-line summaries (level 1)", () => {
-  it("summarizes shell commands with a $ prefix", () => {
-    expect(toolSummary("bash", { args: '{"command":"pytest -q"}' })).toBe("$ pytest -q");
-    expect(toolSummary("bash_output", { args: '{"bg_id":"7"}' })).toBe("bg 7");
+describe("read_file", () => {
+  it("labels Read path with a line range and never shows contents", () => {
+    const view = toolView(tool("read_file", { path: "src/app.ts", offset: 1 }, ok("secret contents\nmore", { path: "src/app.ts", offset: 1, next_offset: 41 })));
+    expect(view).toMatchObject({ verb: "Read", target: "src/app.ts", targetIsPath: true, body: null, openFile: "src/app.ts", status: "success" });
+    expect(metaText(view)).toBe("L1-40");
+    expect(JSON.stringify(view)).not.toContain("secret contents");
   });
 
-  it("summarizes file tools by path/pattern", () => {
-    expect(toolSummary("read_file", { args: '{"path":"src/app.py"}' })).toBe("src/app.py");
-    expect(toolSummary("write_file", { args: '{"file_path":"out.txt"}' })).toBe("out.txt");
-    expect(toolSummary("edit_file", {})).toBe("");
-    expect(toolSummary("glob", { args: '{"pattern":"**/*.py"}' })).toBe("**/*.py");
-    expect(toolSummary("grep", { args: '{"pattern":"foo"}' })).toBe("foo");
-    expect(toolSummary("search_web", { args: '{"query":"rind"}' })).toBe("rind");
-    expect(toolSummary("fetch_web_page", { args: '{"url":"https://x.test"}' })).toBe("https://x.test");
-  });
-
-  it("recovers the path from the result meta when args are missing", () => {
-    expect(toolSummary("read_file", { result: '{"meta":{"path":"recovered.md"},"data":"text"}' })).toBe("recovered.md");
-  });
-
-  it("falls back to the first key arg for generic tools", () => {
-    expect(toolSummary("unknown_tool", { args: '{"name":"worker"}' })).toBe("worker");
+  it("falls back to a line count", () => {
+    const view = toolView(tool("read_file", { file_path: "a.md" }, ok("one\ntwo\nthree", { path: "a.md" })));
+    expect(metaText(view)).toBe("3 lines");
   });
 });
 
-describe("toolDisplay — level 2 details/items/output", () => {
-  it("builds shell detail rows (exit, cwd) and joins output streams", () => {
-    const tool = { args: '{"command":"make"}', result: '{"data":{"exit_code":2,"cwd":"/w","stdout":"out\\n","stderr":"err"}}', duration_ms: 1250 };
-    const rows = toolDetails("bash", tool);
-    expect(rows).toEqual([
-      { label: "command", value: "make" },
-      { label: "cwd", value: "/w" },
-      { label: "exit", value: "2" },
-      { label: "duration", value: "1.25s" },
-    ]);
-    expect(toolOutput("bash", tool)).toBe("out\nerr");
+describe("write_file and edit_file", () => {
+  it("write_file shows +N and the content capped at 20 lines", () => {
+    const content = Array.from({ length: 30 }, (_, index) => `line ${index}`).join("\n");
+    const view = toolView(tool("write_file", { path: "notes.md", content }, ok(null, { files: [{ path: "notes.md", added_lines: 30, removed_lines: 0 }] })));
+    expect(view).toMatchObject({ verb: "Wrote", target: "notes.md" });
+    expect(view.meta).toEqual([{ text: "+30", tone: "success" }]);
+    expect(view.body).toMatchObject({ type: "code", cap: 20 });
+    expect(view.body.lines).toHaveLength(30);
   });
 
-  it("lists glob results with sizes and grep matches with line numbers", () => {
-    const glob = { result: '{"data":[{"path":"a.py","size_bytes":12},{"path":"b.py","size_bytes":2048}]}' };
-    expect(toolItems("glob", glob)).toEqual([
-      { title: "a.py", detail: "12 B" },
-      { title: "b.py", detail: "2.0 KiB" },
-    ]);
-    const grep = { result: '{"data":[{"file":"a.py","line":3,"text":"foo"}]}' };
-    expect(toolItems("grep", grep)).toEqual([{ title: "a.py:3", detail: "foo" }]);
+  it("write_file streams its content into the body while running", () => {
+    const view = toolView({ id: "t", name: "write_file", status: "running", inputStreaming: true, args: '{"path":"a.txt","content":"hello\\nwor' });
+    expect(view).toMatchObject({ status: "running", target: "a.txt" });
+    expect(view.body.lines).toEqual(["hello", "wor"]);
   });
 
-  it("summarizes mutation files with +/- line counts", () => {
-    const tool = { result: '{"meta":{"files":[{"path":"a.py","added_lines":4,"removed_lines":1}]}}' };
-    expect(toolItems("edit_file", tool)).toEqual([{ title: "a.py", detail: "+4 / -1 lines" }]);
-    expect(toolDetails("edit_file", tool)).toEqual([
-      { label: "file", value: "a.py" },
-      { label: "changes", value: "+4 / -1 lines" },
-    ]);
+  it("edit_file shows +A -R and a diff, never old/new JSON", () => {
+    const diff = "--- a/app.ts\n+++ b/app.ts\n@@ -1 +1 @@\n-old\n+new";
+    const view = toolView(tool("edit_file", { path: "app.ts", old_string: "OLDSTR", new_string: "NEWSTR" }, ok(null, { files: [{ path: "app.ts", added_lines: 12, removed_lines: 3, diff }] })));
+    expect(view).toMatchObject({ verb: "Edited", target: "app.ts", change: { added: 12, removed: 3 } });
+    expect(view.meta).toEqual([{ text: "+12", tone: "success" }, { text: "-3", tone: "danger" }]);
+    expect(view.body).toMatchObject({ type: "diff", diff, cap: 20 });
+    expect(JSON.stringify(view.body)).not.toContain("OLDSTR");
+  });
+
+  it("edit_file counts +/- from file_change lines when meta has none", () => {
+    const view = toolView(tool("edit_file", { path: "x.js" }, ok(null, {}), { file: "x.js", fileChange: { lines: [{ kind: "added", text: "a" }, { kind: "removed", text: "b" }, { kind: "added", text: "c" }] } }));
+    expect(view.change).toEqual({ added: 2, removed: 1 });
   });
 });
 
-describe("toolDisplay — diff extraction for DiffView", () => {
-  it("joins per-file diffs from the mutation meta", () => {
-    const tool = { result: '{"meta":{"files":[{"path":"a.py","diff":"--- a.py\\n+++ a.py\\n+one"}]}}' };
-    expect(extractDiffText("edit_file", tool)).toBe("--- a.py\n+++ a.py\n+one");
+describe("grep and glob", () => {
+  it("grep reports matches across files and groups paths with counts", () => {
+    const hits = [{ file: "a.js", line: 1, text: "x" }, { file: "a.js", line: 9, text: "y" }, { file: "b.js", line: 2, text: "z" }];
+    const view = toolView(tool("grep", { pattern: "TODO" }, ok(hits, { count: 3 })));
+    expect(view).toMatchObject({ verb: "Searched", target: "TODO" });
+    expect(metaText(view)).toBe("3 matches in 2 files");
+    expect(view.body.items.map((item) => [item.title, item.detail])).toEqual([["a.js", "2 matches"], ["b.js", "1 match"]]);
   });
 
-  it("rebuilds diff lines from file_change records as a fallback", () => {
-    const tool = { fileChange: { lines: [{ kind: "added", text: "new" }, { kind: "removed", text: "old" }, { kind: "context", text: "ctx" }] } };
-    expect(extractDiffText("edit_file", tool)).toBe("+new\n-old\n ctx");
+  it("grep with zero matches says No matches and has no body", () => {
+    const view = toolView(tool("grep", { pattern: "nope" }, ok([], { count: 0 })));
+    expect(metaText(view)).toBe("No matches");
+    expect(view.body).toBeNull();
   });
 
-  it("returns empty for non-mutation tools", () => {
-    expect(extractDiffText("bash", { result: '{"meta":{"files":[{"diff":"+x"}]}}' })).toBe("");
-  });
-});
-
-describe("toolDisplay — failures and raw payloads (level 3)", () => {
-  it("extracts the failure message", () => {
-    expect(failedMessage({ status: "failed", result: '{"ok":false,"error":"exit 1"}' })).toBe("exit 1");
-    expect(failedMessage({ status: "completed", result: '{"ok":true}' })).toBe("");
-  });
-
-  it("pretty-prints raw args/result JSON", () => {
-    const raw = rawPayloads({ args: '{"a":1}', result: "plain text" });
-    expect(raw.args).toBe('{\n  "a": 1\n}');
-    expect(raw.result).toBe("plain text");
-    expect(rawPayloads({}).result).toBe("");
+  it("glob lists paths with an N files meta", () => {
+    const view = toolView(tool("glob", { pattern: "**/*.css" }, ok([{ path: "a.css" }, { path: "b.css" }], { count: 2 })));
+    expect(view).toMatchObject({ verb: "Found", target: "**/*.css" });
+    expect(metaText(view)).toBe("2 files");
+    expect(view.body.items.map((item) => item.title)).toEqual(["a.css", "b.css"]);
   });
 });
 
-describe("toolDisplay — duration formatting", () => {
-  it("formats ms, seconds and minutes", () => {
-    expect(formatDuration(250)).toBe("250ms");
-    expect(formatDuration(1500)).toBe("1.50s");
-    expect(formatDuration(61000)).toBe("1m 01s");
+describe("bash, bash_output and task_control", () => {
+  it("bash shows the first command line, duration and a terminal tail", () => {
+    const view = toolView(tool("bash", { command: "npm test\n# second" }, ok({ stdout: "a\nb\n", stderr: "", exit_code: 0 }), { duration_ms: 1500 }));
+    expect(view).toMatchObject({ verb: "Ran", target: "npm test", status: "success" });
+    expect(metaText(view)).toBe("1.5s");
+    expect(view.body).toMatchObject({ type: "terminal", lines: ["a", "b"], cap: 5, expandedCap: 400 });
+  });
+
+  it("bash shows a non-zero exit code and omits empty sections", () => {
+    const view = toolView(tool("bash", { command: "false" }, ok({ stdout: "", stderr: "", exit_code: 2 })));
+    expect(view.meta[0]).toEqual({ text: "exit 2", tone: "danger" });
+    expect(view.body).toBeNull();
+  });
+
+  it("tool_progress replaces the meta while running", () => {
+    const view = toolView({ id: "t", name: "bash", status: "running", args: '{"command":"make"}', progress: ["compiling", "linking"] });
+    expect(view.meta).toEqual([{ text: "linking", tone: "dim" }]);
+  });
+
+  it("bash_output reads Checked task with status and a tail", () => {
+    const view = toolView(tool("bash_output", { task_id: "bg-1" }, ok({ status: "running", stdout: "tick\ntock" })));
+    expect(view).toMatchObject({ verb: "Checked", target: "bg-1", status: "success" });
+    expect(metaText(view)).toBe("running");
+    expect(view.body.lines).toEqual(["tick", "tock"]);
+  });
+
+  it("maps failed background task states to an error row", () => {
+    expect(taskFinishState("timed_out")).toBe("error");
+    expect(taskFinishState("cancelling")).toBe("running");
+    expect(taskFinishState("cancelled")).toBe("cancelled");
+    const view = toolView(tool("bash_output", { task_id: "bg-2" }, ok({ status: "lost" })));
+    expect(view.status).toBe("error");
+  });
+
+  it("task_control stop reads Stopped", () => {
+    const view = toolView(tool("task_control", { action: "stop", task_id: "bg-3" }, ok({ status: "cancelled" })));
+    expect(view).toMatchObject({ verb: "Stopped", target: "bg-3", kind: "stop" });
+  });
+});
+
+describe("web tools", () => {
+  it("search_web lists titles with domains", () => {
+    const view = toolView(tool("search_web", { query: "vite preview" }, ok([{ title: "Vite", url: "https://www.vitejs.dev/guide", snippet: "s" }], { matches: 1 })));
+    expect(view).toMatchObject({ verb: "Searched the web", target: "vite preview" });
+    expect(metaText(view)).toBe("1 result");
+    expect(view.body.items[0]).toEqual({ title: "Vite", detail: "vitejs.dev", href: "https://www.vitejs.dev/guide" });
+  });
+
+  it("fetch_web_page shows domain/path, the title and first paragraph only", () => {
+    const page = "# Guide\n\nFirst paragraph here.\nStill first.\n\nSecond paragraph FULLTEXT.";
+    const view = toolView(tool("fetch_web_page", { url: "https://example.com/docs/" }, ok(page, { url: "https://example.com/docs/" })));
+    expect(view).toMatchObject({ verb: "Read", target: "example.com/docs" });
+    expect(metaText(view)).toBe("Guide");
+    expect(view.body).toMatchObject({ type: "text", title: "Guide", lines: ["First paragraph here.", "Still first."] });
+    expect(JSON.stringify(view.body)).not.toContain("FULLTEXT");
+  });
+});
+
+describe("delegate, creation, goal, hidden and unknown tools", () => {
+  it("delegate shows agent and task with the final answer as markdown", () => {
+    const view = toolView(tool("delegate", { agent: "reviewer", task: "Review the diff" }, ok({ status: "completed", summary: "Looks good." }), { duration_ms: 65000 }));
+    expect(view).toMatchObject({ verb: "Delegated to", target: "reviewer: Review the diff", agent: "reviewer" });
+    expect(metaText(view)).toBe("1m 05s");
+    expect(view.body).toMatchObject({ type: "markdown", text: "Looks good.", cap: 24 });
+  });
+
+  it("agent_create and skill_create show the name and role or description", () => {
+    const agent = toolView(tool("agent_create", { name: "scout", role: "Finds files" }, ok({ agent_id: "a1", name: "scout" })));
+    expect(agent).toMatchObject({ verb: "Created agent", target: "scout" });
+    expect(agent.body.rows).toEqual([{ label: "name", value: "scout" }, { label: "role", value: "Finds files" }]);
+    const skill = toolView(tool("skill_create", { name: "deploy", description: "Ship it" }, ok({ name: "deploy" })));
+    expect(skill).toMatchObject({ verb: "Created skill", target: "deploy" });
+    expect(skill.body.rows[1]).toEqual({ label: "description", value: "Ship it" });
+  });
+
+  it("update_goal shows the status and the goal text", () => {
+    const view = toolView(tool("update_goal", { goal: "Ship v2", status: "active" }, ok({})));
+    expect(view).toMatchObject({ verb: "Updated goal" });
+    expect(metaText(view)).toBe("active");
+    expect(view.body.lines).toEqual(["Ship v2"]);
+  });
+
+  it("ask_user_question and update_plan are hidden; a running question waits", () => {
+    expect(toolView(tool("update_plan", {}, ok({}))).hidden).toBe(true);
+    expect(toolView({ id: "q", name: "ask_user_question", status: "running" })).toMatchObject({ hidden: true, status: "waiting" });
+  });
+
+  it("unknown tools show the raw name, key/value args and raw JSON behind a toggle", () => {
+    const view = toolView(tool("mcp__x__lookup", { id: 7, q: "a" }, "result text"));
+    expect(view).toMatchObject({ verb: "mcp__x__lookup", target: "7" });
+    expect(view.body.rows).toEqual([{ label: "id", value: "7" }, { label: "q", value: "a" }]);
+    expect(view.body).toMatchObject({ output: ["result text"], cap: 40 });
+    expect(view.body.raw.args).toContain("\"q\": \"a\"");
+  });
+});
+
+describe("status and errors", () => {
+  it("failed calls keep the first 6 lines and put stack traces behind details", () => {
+    const error = ["Boom", "line 2", "Traceback (most recent call last):", "  File \"x.py\"", "Err"].join("\n");
+    const view = toolView(tool("read_file", { path: "x" }, JSON.stringify({ ok: false, error }), { status: "failed" }));
+    expect(view.status).toBe("error");
+    expect(view.error.lines).toEqual(["Boom", "line 2"]);
+    expect(view.error.details).toContain("Traceback");
+  });
+
+  it("caps long error messages at 6 lines", () => {
+    const error = Array.from({ length: 9 }, (_, index) => `e${index}`).join("\n");
+    const view = toolView(tool("grep", { pattern: "a" }, JSON.stringify({ ok: false, error })));
+    expect(view.error.lines).toHaveLength(6);
+    expect(view.error.details).toBe("e6\ne7\ne8");
+  });
+
+  it("a running call whose turn ended is cancelled", () => {
+    expect(toolView({ id: "t", name: "bash", status: "running" }, { settled: true }).status).toBe("cancelled");
+  });
+});
+
+describe("change stats and durations", () => {
+  it("summarizes the trailing turn's file changes", () => {
+    const edit = tool("edit_file", { path: "a.ts" }, ok(null, { files: [{ path: "a.ts", added_lines: 2, removed_lines: 1 }] }));
+    const write = tool("write_file", { path: "b.ts", content: "x" }, ok(null, {}), { tool_call_id: "w" });
+    expect(toolChangeStats("write_file", write)).toEqual([{ path: "b.ts", added: 0, removed: 0 }]);
+    expect(summarizeChanges([{ role: "user" }, edit, write])).toEqual({ fileCount: 2, added: 2, removed: 1, firstToolCallId: "call-edit_file" });
+    expect(summarizeChanges([edit, { role: "user" }])).toBeNull();
+  });
+
+  it("formats durations", () => {
     expect(formatDuration(0)).toBe("");
+    expect(formatDuration(250)).toBe("250ms");
+    expect(formatDuration(2500)).toBe("2.5s");
+    expect(formatDuration(125000)).toBe("2m 05s");
   });
 });

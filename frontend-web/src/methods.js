@@ -27,6 +27,17 @@ export const methods = Object.freeze({
   fileList: "file/list",
   fileRead: "file/read",
   fileWrite: "file/write",
+  taskList: "rind/task/list",
+  taskRead: "rind/task/read",
+  taskWait: "rind/task/wait",
+  taskCancel: "rind/task/cancel",
+  taskReleaseWait: "rind/task/release_wait",
+  sessionFork: "session/fork",
+  contextInspect: "rind/context/inspect",
+  usageSummary: "rind/usage/summary",
+  authList: "rind/auth/list",
+  backgroundList: "rind/background/list",
+  backgroundOutput: "rind/background/output",
 });
 
 export function parseSlashCommand(value) {

@@ -1,7 +1,6 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import App from "./App.jsx";
-import { applyTheme } from "./lib/theme.js";
 
 // Queue + interrupt behaviours at the shell level (audit #1). The runtime
 // client is a recording stub: bootstrap RPCs succeed, a running live_turn can
@@ -66,10 +65,46 @@ function typeAndSend(text) {
 const requests = () => h.hooks.current.requests;
 const called = (method) => requests().some((entry) => entry.method === method);
 
+it("keeps a late prompt failure in its original session draft", async () => {
+  await renderShell();
+  let rejectPrompt;
+  h.hooks.current.respond = async (method, params) => {
+    if (method === "session/prompt") return new Promise((_resolve, reject) => { rejectPrompt = reject; });
+    if (method === "session/switch") return { session_id: params.session_id, workspace_root: "E:/projects/rind" };
+    if (method === "session/replay") return { messages: [] };
+    return {};
+  };
+  const select = async (id) => {
+    fireEvent.click(document.querySelector(`[data-session-id="${id}"] .session-main`));
+    await waitFor(() => expect(document.querySelector(".main-column").getAttribute("aria-busy")).toBe("false"));
+  };
+  await select("p-1");
+  typeAndSend("Please keep this draft");
+  await waitFor(() => expect(rejectPrompt).toBeTypeOf("function"));
+  await select("p-2");
+  fireEvent.change(composerTextarea(), { target: { value: "Second conversation draft" } });
+  await act(async () => rejectPrompt(new Error("Connection interrupted")));
+  expect(composerTextarea().value).toBe("Second conversation draft");
+  expect(screen.queryByText(/Prompt failed:/)).toBeNull();
+  await select("p-1");
+  expect(composerTextarea().value).toBe("Please keep this draft");
+});
+
+it("manages the connection without exposing a server address setting", async () => {
+  await renderShell();
+  fireEvent.click(screen.getByLabelText("Open settings"));
+  const settings = document.querySelector(".dialog.settings-dialog");
+  fireEvent.click(screen.getByRole("button", { name: "Account" }));
+  expect(settings.querySelectorAll("input")).toHaveLength(0);
+  expect(settings.textContent).not.toMatch(/WebSocket|ws:\/\//i);
+  expect(settings.textContent).toContain("Connection is managed automatically");
+});
+
 beforeEach(() => {
   sessionStorage.clear();
   localStorage.clear();
   sessionStorage.setItem("rind_token", "test-token");
+  sessionStorage.setItem("rind_credential_server", "ws://runtime.test");
 });
 
 afterEach(() => {
@@ -87,29 +122,30 @@ describe("App — queue mode (audit #1)", () => {
     expect(call.params).toMatchObject({ session_id: "s-1", input: "Queue a follow-up" });
     // the returned input_id is kept and the queued chip renders
     await waitFor(() => expect(document.querySelector(".queued-row[data-input-id='in-1']")).not.toBeNull());
-    expect(screen.getByText(/QUEUED/)).not.toBeNull();
+    expect(document.querySelector(".queued-row .queued-label").textContent).toBe("Queued");
     // the draft was consumed by the send
     expect(composerTextarea().value).toBe("");
   });
 
-  it("the composer switch flips the wire method to steer", async () => {
+  it("Alt+Enter sends as steer while a turn runs", async () => {
     await renderShell(runningTurn());
-    fireEvent.click(screen.getByTitle("Redirect the current turn immediately (steer)"));
-    typeAndSend("Redirect now");
+    const textarea = composerTextarea();
+    fireEvent.change(textarea, { target: { value: "Redirect now" } });
+    fireEvent.keyDown(textarea, { key: "Enter", altKey: true });
     await waitFor(() => expect(called("rind/session/steer")).toBe(true));
     expect(called("rind/session/follow_up")).toBe(false);
   });
 
-  it("Retrieve dequeues by input_id and restores the draft; Steer promotes to steering", async () => {
+  it("Edit dequeues by input_id and restores the draft; Promote turns a follow-up into a steer", async () => {
     await renderShell(runningTurn([{ input_id: "in-9", input: "queued text", mode: "follow_up" }]));
     expect(document.querySelector(".queued-row[data-input-id='in-9']")).not.toBeNull();
 
-    fireEvent.click(screen.getByRole("button", { name: "Steer" }));
+    fireEvent.click(screen.getByRole("button", { name: "Promote to steer the current turn" }));
     await waitFor(() => expect(called("rind/session/promote_follow_up")).toBe(true));
     expect(requests().find((entry) => entry.method === "rind/session/promote_follow_up").params).toMatchObject({ session_id: "s-1", input_id: "in-9" });
-    await waitFor(() => expect(screen.getByText("QUEUED · steer")).not.toBeNull());
+    await waitFor(() => expect(document.querySelector(".queued-row.steering .queued-label").textContent).toBe("Steering"));
 
-    fireEvent.click(screen.getByRole("button", { name: "Retrieve" }));
+    fireEvent.click(screen.getByRole("button", { name: "Edit queued message" }));
     await waitFor(() => expect(called("rind/session/unsteer")).toBe(true));
     expect(requests().find((entry) => entry.method === "rind/session/unsteer").params).toMatchObject({ session_id: "s-1", input_id: "in-9" });
     await waitFor(() => expect(document.querySelector(".queued-row")).toBeNull());
@@ -139,9 +175,10 @@ describe("App — queue mode (audit #1)", () => {
   it("loading a session restores the queue from live_turn pending_inputs (reconnect path)", async () => {
     await renderShell(runningTurn([{ input_id: "in-a", input: "restored", mode: "steering" }]));
     expect(document.querySelector(".queued-row[data-input-id='in-a']")).not.toBeNull();
-    expect(screen.getByText("QUEUED · steer")).not.toBeNull();
-    // steering items expose Retrieve only
-    expect(screen.queryByRole("button", { name: "Steer" })).toBeNull();
+    expect(document.querySelector(".queued-row.steering .queued-label").textContent).toBe("Steering");
+    // steering items can be edited or removed but not promoted again
+    expect(screen.queryByRole("button", { name: "Promote to steer the current turn" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Edit queued message" })).not.toBeNull();
   });
 });
 
@@ -199,8 +236,9 @@ describe("App — Ctrl/Cmd+K palette (audit #10)", () => {
   });
 
   it("executing Theme flips data-theme and persists the choice (audit #11)", async () => {
+    localStorage.setItem("rind.theme", "dark");
     await renderShell(null);
-    applyTheme("dark");
+    await waitFor(() => expect(document.documentElement.dataset.theme).toBe("dark"));
     fireEvent.keyDown(window, { key: "k", ctrlKey: true });
     fireEvent.click(screen.getByText("Theme"));
     await waitFor(() => expect(document.documentElement.dataset.theme).toBe("light"));
@@ -225,8 +263,9 @@ describe("App — session subscriptions (audit #13)", () => {
   it("unsubscribes a deleted session", async () => {
     await renderShell(null);
     const item = () => document.querySelector(".session-item[data-session-id='p-2']");
-    fireEvent.click(item().querySelector(".session-delete"));
-    fireEvent.click(item().querySelector(".confirm-yes"));
+    fireEvent.click(item().querySelector(".session-more"));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Delete" }));
+    fireEvent.click(document.querySelector(".confirm-yes"));
     await waitFor(() => expect(called("session/unsubscribe")).toBe(true));
     expect(requests().find((entry) => entry.method === "session/unsubscribe").params).toMatchObject({ session_id: "p-2" });
     await waitFor(() => expect(document.querySelector(".session-item[data-session-id='p-2']")).toBeNull());
@@ -239,12 +278,126 @@ describe("App — rail search + pagination (audit #9)", () => {
     fireEvent.click(screen.getByText("Load more"));
     await waitFor(() => {
       const listCalls = requests().filter((entry) => entry.method === "session/list");
-      expect(listCalls.at(-1).params.limit).toBe(60);
+      expect(listCalls.at(-1).params.limit).toBe(20);
     });
 
     const search = screen.getByLabelText("Search sessions");
     fireEvent.change(search, { target: { value: "Session 5" } });
     expect(screen.queryByText("Session 1")).toBeNull();
     expect(screen.getByText("Session 5")).not.toBeNull();
+  });
+});
+
+describe("live input coordination across surfaces", () => {
+  const emit = (type, event = {}, sequence = 901) => act(async () => {
+    h.hooks.current.options.onEvent({ kind: "event", sequence, session_id: "s-1", turn_id: "live-1", durability: "durable", event: { type, ...event } });
+  });
+
+  it("keeps compact session-scoped, blocks duplicate submissions and preserves the draft", async () => {
+    await renderShell();
+    let finish;
+    h.hooks.current.respond = async (method, params) => {
+      if (method === "rind/session/compact") return new Promise(resolve => { finish = resolve; });
+      if (method === "session/switch") return { session_id: params.session_id, workspace_root: "E:/projects/rind" };
+      if (method === "session/replay") return { messages: [] };
+      return {};
+    };
+    fireEvent.click(screen.getByRole("button", { name: "Session actions" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Compact context" }));
+    await waitFor(() => expect(finish).toBeTypeOf("function"));
+    typeAndSend("save this draft");
+    expect(called("session/prompt")).toBe(false);
+    expect(composerTextarea().value).toBe("save this draft");
+    await emit("turn_started", { operation: "compact" });
+    expect(document.querySelector(".composer-activity").textContent).toContain("Compacting");
+    fireEvent.click(document.querySelector('[data-session-id="p-1"] .session-main'));
+    await waitFor(() => expect(document.querySelector(".main-column").getAttribute("aria-busy")).toBe("false"));
+    expect(document.querySelector(".composer-activity").textContent).toContain("Ready");
+    await act(async () => finish({ source: {} }));
+    expect(screen.queryByText(/Context compacted/)).toBeNull();
+    expect(requests().filter(item => item.method === "rind/session/compact")).toHaveLength(1);
+  });
+
+  it("clears failed compact state and lets the user retry", async () => {
+    await renderShell();
+    h.hooks.current.respond = async (method) => {
+      if (method === "rind/session/compact") throw new Error("Unable to persist context");
+      return {};
+    };
+    fireEvent.click(screen.getByRole("button", { name: "Session actions" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Compact context" }));
+    await screen.findByText(/Compaction failed: Unable to persist context/);
+    expect(document.querySelector(".composer-activity").textContent).toContain("Ready");
+    fireEvent.click(screen.getByRole("button", { name: "Session actions" }));
+    expect(screen.getByRole("menuitem", { name: "Compact context" }).disabled).toBe(false);
+  });
+
+  it("creates sessions in the confirmed project, ignoring a cancelled folder draft", async () => {
+    await renderShell();
+    fireEvent.click(screen.getByRole("button", { name: "Project: rind" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Open another folder…" }));
+    fireEvent.change(screen.getByLabelText("Folder on your Rind computer"), { target: { value: "E:/unconfirmed" } });
+    fireEvent.click(screen.getByRole("button", { name: "Cancel", exact: true }));
+    fireEvent.click(screen.getByRole("button", { name: "New session" }));
+    await waitFor(() => expect(called("session/new")).toBe(true));
+    expect(requests().find((item) => item.method === "session/new").params.workspace_root).toBe("E:/projects/rind");
+  });
+
+  it("keeps queue and direct steer usable while the original prompt request is pending", async () => {
+    await renderShell();
+    let finishPrompt;
+    h.hooks.current.respond = async (method, params) => {
+      if (method === "session/prompt") return new Promise((resolve) => { finishPrompt = resolve; });
+      if (method === "rind/session/follow_up" || method === "rind/session/steer") return { input_id: params.input, mode: method.endsWith("steer") ? "steering" : "follow_up" };
+      return {};
+    };
+    typeAndSend("Start streaming");
+    await waitFor(() => expect(finishPrompt).toBeTypeOf("function"));
+    const prompt = requests().find((item) => item.method === "session/prompt");
+    await emit("turn_started", { user_message_chars: 15, input: "Start streaming", client_input_id: prompt.params.client_input_id });
+    typeAndSend("Queue while pending");
+    await waitFor(() => expect(called("rind/session/follow_up")).toBe(true));
+    fireEvent.change(composerTextarea(), { target: { value: "Steer from a phone" } });
+    fireEvent.click(screen.getByRole("button", { name: "Message actions" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: /Steer this turn/ }));
+    await waitFor(() => expect(called("rind/session/steer")).toBe(true));
+    expect(requests().find((item) => item.method === "rind/session/steer").params.turn_id).toBe("live-1");
+    expect(screen.getAllByText("Start streaming")).toHaveLength(1);
+    await act(async () => finishPrompt({ ok: true }));
+  });
+
+  it("renders a remote user's prompt before its streaming reply without reopening", async () => {
+    await renderShell();
+    await emit("turn_started", { input: "Sent on the desktop", client_input_id: "remote-1", user_message_chars: 19 });
+    await emit("assistant_delta", { text: "Reply in progress" }, 902);
+    await screen.findByText("Sent on the desktop");
+    expect(screen.getAllByText("Sent on the desktop")).toHaveLength(1);
+    await screen.findByText("Reply in progress");
+  });
+
+  it("does not resurrect a queue chip when delivery beats its RPC response", async () => {
+    await renderShell(runningTurn());
+    let confirmQueue;
+    h.hooks.current.respond = async (method) => method === "rind/session/follow_up"
+      ? new Promise((resolve) => { confirmQueue = resolve; }) : {};
+    typeAndSend("Delivered quickly");
+    await waitFor(() => expect(confirmQueue).toBeTypeOf("function"));
+    await emit("queued_input_delivered", { input_id: "fast-1", input: "Delivered quickly", mode: "follow_up" });
+    await act(async () => confirmQueue({ input_id: "fast-1", mode: "follow_up" }));
+    await screen.findByText("Delivered quickly");
+    expect(document.querySelector('.queued-row[data-input-id="fast-1"]')).toBeNull();
+    expect(screen.getAllByText("Delivered quickly")).toHaveLength(1);
+  });
+
+  it("sends a new prompt if the turn settles during the queue request", async () => {
+    await renderShell(runningTurn());
+    h.hooks.current.respond = async (method) => {
+      if (method === "rind/session/follow_up") throw Object.assign(new Error("The requested turn is no longer active."), { type: "TurnNotActive" });
+      return {};
+    };
+    typeAndSend("Keep this message");
+    await waitFor(() => expect(called("session/prompt")).toBe(true));
+    expect(requests().find((item) => item.method === "session/prompt").params.input).toBe("Keep this message");
+    expect(screen.queryByText(/Unable to queue/)).toBeNull();
   });
 });

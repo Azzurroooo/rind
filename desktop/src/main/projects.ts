@@ -5,7 +5,7 @@ import type { DesktopProject, DesktopProjectOverview, DesktopRecentSession, Desk
 import { asObject, readJsonObject, writeJsonObject } from "./json-store.ts"
 
 const recentSessionLimit = 5
-const recentDesktopSessionLimit = 10
+const recentDesktopSessionLimit = 200
 const sessionPageLimit = 20
 const maxSessionPageLimit = 50
 const themes: DesktopTheme[] = ["system", "dark", "light"]
@@ -46,9 +46,11 @@ export class DesktopProjectStore {
   async overview(): Promise<DesktopProjectOverview> {
     const [state, sessions] = await Promise.all([this.readState(), this.readSessionIndex()])
     const projects = await Promise.all(state.projects.map((path) => this.projectSummary(path, sessions)))
+    const recent = await this.recentSessions(state, sessions)
     return {
       projects,
-      recentSessions: await this.recentSessions(state, sessions),
+      recentSessions: recent.slice(0, 10),
+      recentSessionTotal: recent.length,
       activeProjectPath: state.activeProjectPath,
       sidebarOpen: state.sidebarOpen,
       sidebarWidth: state.sidebarWidth,
@@ -124,6 +126,14 @@ export class DesktopProjectStore {
     const next = this.recentWrite.then(() => this.markRecentNow(sessionId))
     this.recentWrite = next.then(() => undefined, () => undefined)
     return next
+  }
+
+  async recentPage(offset = 0, limit = 10) {
+    const [state, sessions] = await Promise.all([this.readState(), this.readSessionIndex()])
+    const recent = await this.recentSessions(state, sessions)
+    const start = Number.isInteger(offset) ? Math.max(0, offset) : 0
+    const count = Number.isInteger(limit) ? Math.max(1, Math.min(50, limit)) : 10
+    return { sessions: recent.slice(start, start + count), total: recent.length }
   }
 
   private async markRecentNow(sessionId: string): Promise<DesktopProjectOverview> {
@@ -246,11 +256,11 @@ export class DesktopProjectStore {
     if (JSON.stringify(state.recentSessions) !== JSON.stringify(normalized)) {
       await this.writeState({ ...state, recentSessions: normalized })
     }
-    const byId = new Map(sessions.map((session) => [session.id, session]))
-    return normalized.flatMap((record) => {
-      const session = byId.get(record.session_id)
-      return session ? [{ ...session, lastInteractedAt: record.last_interacted_at }] : []
-    })
+    const visited = new Map(normalized.map((record) => [record.session_id, record.last_interacted_at]))
+    // Opening a conversation and new messages both count as interaction.
+    return sessions.filter((session) => this.sessionBelongsToProjects(session, state.projects))
+      .map((session) => ({ ...session, lastInteractedAt: [Number.isFinite(Date.parse(session.updatedAt)) ? session.updatedAt : "", visited.get(session.id) || ""].sort().at(-1) || "" }))
+      .sort((left, right) => right.lastInteractedAt.localeCompare(left.lastInteractedAt))
   }
 
   private async readLegacyRecentSessions(): Promise<StoredRecentSession[] | undefined> {
@@ -316,7 +326,10 @@ function mergeRecentRecords(records: StoredRecentSession[]) {
     .sort((left, right) => right.last_interacted_at.localeCompare(left.last_interacted_at) || left.session_id.localeCompare(right.session_id))
 }
 
-function validSidebarWidth(value: unknown) { return typeof value === "number" && Number.isFinite(value) ? Math.max(180, Math.min(420, Math.round(value))) : 248 }
+const SIDEBAR_MIN = 232
+const SIDEBAR_MAX = 360
+const SIDEBAR_DEFAULT = 264
+function validSidebarWidth(value: unknown) { return typeof value === "number" && Number.isFinite(value) ? Math.max(SIDEBAR_MIN, Math.min(SIDEBAR_MAX, Math.round(value))) : SIDEBAR_DEFAULT }
 function validFilePanelWidth(value: unknown) { return typeof value === "number" && Number.isFinite(value) ? Math.max(280, Math.min(900, Math.round(value))) : 480 }
 
 function storedFilePanelWidth(raw: Record<string, unknown>) {

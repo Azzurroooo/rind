@@ -1,16 +1,28 @@
 import { contextBridge, ipcRenderer } from "electron"
 
 import { unwrapRuntimeIpcResult } from "../shared/ipc-error"
-import { runtimeMethods, type DesktopApi, type DesktopNotificationPayload, type DesktopPrefsPatch, type DesktopTheme, type RuntimeEvent, type RuntimeSnapshot } from "./types"
+import { runtimeMethods, type DesktopApi, type DesktopAuthPrompt, type DesktopAuthUpdate, type DesktopNotificationPayload, type DesktopPrefsPatch, type DesktopTheme, type RuntimeEvent, type RuntimeSnapshot } from "./types"
 
 // The main process returns worker errors as a wrapped envelope (never as a
 // rejected ipcMain.handle) — unwrap here so renderer call sites keep their
 // try/catch semantics with Error.name carrying the worker error type.
-function runtimeRequest(method: string, params: Record<string, unknown> = {}) {
-  return unwrapRuntimeIpcResult(ipcRenderer.invoke("runtime-request", method, params))
+async function runtimeRequest(method: string, params: Record<string, unknown> = {}) {
+  return unwrapRuntimeIpcResult(await ipcRenderer.invoke("runtime-request", method, params))
 }
 
 const api: DesktopApi = {
+  gateway: {
+    get: () => ipcRenderer.invoke("gateway-get"),
+    start: (options) => ipcRenderer.invoke("gateway-start", options),
+    stop: () => ipcRenderer.invoke("gateway-stop"),
+    rotate: () => ipcRenderer.invoke("gateway-rotate"),
+    allowNetwork: () => ipcRenderer.invoke("gateway-allow-network"),
+    subscribe: (listener) => {
+      const handler = (_event: Electron.IpcRendererEvent, state: Parameters<typeof listener>[0]) => listener(state)
+      ipcRenderer.on("gateway-changed", handler)
+      return () => ipcRenderer.removeListener("gateway-changed", handler)
+    },
+  },
   runtime: {
     start: (workspace) => ipcRenderer.invoke("runtime-start", workspace),
     initialize: () => ipcRenderer.invoke("runtime-initialize"),
@@ -27,6 +39,25 @@ const api: DesktopApi = {
       return () => ipcRenderer.removeListener("runtime-event", handler)
     },
   },
+  auth: {
+    list: async () => {
+      const result = await runtimeRequest(runtimeMethods.authList) as { providers?: unknown }
+      return Array.isArray(result?.providers) ? result.providers : []
+    },
+    login: (sessionId, providerId, method = "api_key") => runtimeRequest(runtimeMethods.authLogin, { session_id: sessionId, provider_id: providerId, method }) as ReturnType<DesktopApi["auth"]["login"]>,
+    logout: (providerId) => runtimeRequest(runtimeMethods.authLogout, { provider_id: providerId }),
+    respond: async (requestId, value) => unwrapRuntimeIpcResult(await ipcRenderer.invoke("auth-prompt-respond", requestId, value)) as boolean,
+    onPrompt: (listener) => {
+      const handler = (_event: Electron.IpcRendererEvent, prompt: DesktopAuthPrompt) => listener(prompt)
+      ipcRenderer.on("auth-prompt", handler)
+      return () => ipcRenderer.removeListener("auth-prompt", handler)
+    },
+    onUpdate: (listener) => {
+      const handler = (_event: Electron.IpcRendererEvent, update: DesktopAuthUpdate) => listener(update)
+      ipcRenderer.on("auth-update", handler)
+      return () => ipcRenderer.removeListener("auth-update", handler)
+    },
+  },
   settings: {
     get: (workspace) => ipcRenderer.invoke("settings-get", workspace),
     save: (patch, workspace) => ipcRenderer.invoke("settings-save", patch, workspace),
@@ -41,7 +72,7 @@ const api: DesktopApi = {
   workspaceFiles: {
     list: (path = "") => runtimeRequest(runtimeMethods.fileList, { path }),
     read: (path) => runtimeRequest(runtimeMethods.fileRead, { path }),
-    write: (path, contentBase64) => runtimeRequest(runtimeMethods.fileWrite, { path, content_base64: contentBase64 }),
+    write: (projectPath, path, contentBase64) => ipcRenderer.invoke("project-files-upload", projectPath, path, contentBase64),
   },
   background: {
     list: (sessionId) => runtimeRequest(runtimeMethods.backgroundList, { session_id: sessionId }),
@@ -76,6 +107,7 @@ const api: DesktopApi = {
     select: (path) => ipcRenderer.invoke("projects-select", path),
     remove: (path) => ipcRenderer.invoke("projects-remove", path),
     markRecent: (sessionId) => ipcRenderer.invoke("projects-mark-recent", sessionId),
+    recentPage: (offset, limit) => ipcRenderer.invoke("projects-recent-page", offset, limit),
     updateLayout: (patch) => ipcRenderer.invoke("projects-layout-update", patch),
     sessions: (path, offset, limit) => ipcRenderer.invoke("projects-sessions", path, offset, limit),
   },

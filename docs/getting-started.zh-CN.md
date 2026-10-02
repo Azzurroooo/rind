@@ -79,16 +79,24 @@ node frontend-cli/bin/rind.js tour team.create
 
 ## 桌面端
 
-桌面构建工具需要 Node.js 20.x 中的 20.19+ 版本，或 Node.js 22.12+。完成上述 Python 环境配置后，在仓库根目录执行：
+Web/Desktop 联合工具链与测试使用 Node.js 22.x 的 22.19+ 版本，或 Node.js 24+。完成上述 Python 环境配置后，在仓库根目录执行：
 
 ```bash
-npm --prefix desktop install
+npm --prefix frontend-web ci
+npm --prefix desktop ci
+npm --prefix desktop run build:web
 npm --prefix desktop run dev
 ```
 
 桌面端会启动自己的本地 worker。使用与 CLI 相同的 `RIND_HOME` 和会话目录，即可访问同一批已保存会话。
 
+如需在手机或浏览器继续使用，打开桌面顶栏的 **Remote access**，点击 **Enable remote access**，然后用同一可信网络中的手机扫码。浏览器会自动登录和连接，不需要填写 WebSocket 地址。使用期间保持桌面端运行。**Generate new code** 会撤销之前设备的访问；关闭远程访问不影响本地任务。
+
+`npm --prefix desktop run build` 会构建两端；`npm --prefix desktop run package` 会重新构建并将 Web 资源打入桌面包，打包前须将冻结的 Worker 放入 `desktop/resources/runtime`。完整说明见[桌面构建说明](../desktop/README.md)与[远程访问说明](surface-upgrade.md#remote-access)（英文）。
+
 ## Web 端
+
+已使用 Rind Desktop 时，直接通过 **Remote access** 的二维码或登录链接打开 Web 端即可。浏览器自动管理连接，不提供技术地址配置。以下 Docker 方式适用于独立部署服务。
 
 安装 Docker 和 Compose v2 后，在仓库根目录创建 `.env`：
 

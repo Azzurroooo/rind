@@ -79,16 +79,24 @@ It requires an interactive terminal and makes no model calls. `tour` without a p
 
 ## Desktop
 
-The desktop build tools require Node.js 20.19+ within the 20.x series, or Node.js 22.12+. After setting up the Python environment above, run from the repository root:
+Use Node.js 22.19+ (22.x) or Node.js 24+ for the combined Web/Desktop toolchain and tests. After setting up the Python environment above, run from the repository root:
 
 ```bash
-npm --prefix desktop install
+npm --prefix frontend-web ci
+npm --prefix desktop ci
+npm --prefix desktop run build:web
 npm --prefix desktop run dev
 ```
 
 The desktop app starts its own local worker. Use the same `RIND_HOME` and session directory as the CLI to access the same saved sessions.
 
+To continue on a phone or browser, open **Remote access** in Desktop, choose **Enable remote access**, and scan the QR code from the same trusted network. The browser signs in and connects automatically. Keep Desktop open. **Generate new code** disconnects previous devices; turning remote access off leaves local tasks running.
+
+`npm --prefix desktop run build` builds both surfaces. `npm --prefix desktop run package` rebuilds and bundles the Web client, and requires the frozen Worker in `desktop/resources/runtime`. See [Desktop build instructions](../desktop/README.md) and [remote-access details](surface-upgrade.md#remote-access).
+
 ## Web
+
+If Rind Desktop is already running, use its **Remote access** QR code or sign-in link. No WebSocket address or connection settings are needed in the browser. The following Docker deployment is an alternative for a standalone service.
 
 With Docker and Compose v2, create a `.env` at the repository root:
 

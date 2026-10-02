@@ -63,3 +63,50 @@ function defaultMatchMedia(query) {
     return null;
   }
 }
+
+// v2 adds an explicit "system" preference (spec section 1): nothing pinned on
+// <html>, so the tokens follow prefers-color-scheme live. "dark" and "light"
+// still pin a palette exactly as before.
+export const THEME_SYSTEM = "system";
+export const THEME_PREFERENCES = [THEME_SYSTEM, ...THEMES];
+
+export function readThemePreference(storage = safeLocalStorage()) {
+  return readStoredTheme(storage) || THEME_SYSTEM;
+}
+
+export function resolveTheme(preference, matchMedia = defaultMatchMedia) {
+  if (THEMES.includes(preference)) return preference;
+  try {
+    return matchMedia("(prefers-color-scheme: dark)")?.matches ? "dark" : "light";
+  } catch {
+    return "light";
+  }
+}
+
+export function applyThemePreference(preference, storage = safeLocalStorage()) {
+  if (THEMES.includes(preference)) {
+    storeTheme(preference, storage);
+    return applyTheme(preference);
+  }
+  storeTheme("", storage);
+  try {
+    delete document.documentElement.dataset.theme;
+  } catch {
+    // no document: nothing to clear
+  }
+  return THEME_SYSTEM;
+}
+
+// Subscribe to OS scheme changes; returns an unsubscribe function.
+export function watchSystemTheme(onChange, matchMedia = defaultMatchMedia) {
+  let query = null;
+  try {
+    query = matchMedia("(prefers-color-scheme: dark)");
+  } catch {
+    query = null;
+  }
+  if (!query?.addEventListener) return () => {};
+  const listener = (event) => onChange(event.matches ? "dark" : "light");
+  query.addEventListener("change", listener);
+  return () => query.removeEventListener("change", listener);
+}

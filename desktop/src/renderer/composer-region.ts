@@ -1,19 +1,9 @@
-import { activePlan, clipLine, type ConversationState, type PlanEntry } from "./timeline-model.ts"
-
-export type PlanDockPresentation = {
-  collapsed: boolean
-  sessionId: string
-  dismissedPlanErrors: Set<string>
-}
-
-export type PlanDockElements = {
-  shell: HTMLElement
-  dock: HTMLElement
-}
+import { ArrowUp, Brain, ChevronDown, CornerUpRight, Cpu, Folder, ListPlus, Square, renderIcon } from "./icons.ts"
 
 export type ComposerElements = {
   prompt: HTMLTextAreaElement
   send: HTMLButtonElement
+  steer?: HTMLButtonElement
   interrupt: HTMLButtonElement
   menuTrigger: HTMLButtonElement
   menu: HTMLElement
@@ -36,6 +26,7 @@ export type ComposerView = {
   active: boolean
   readOnly: boolean
   starting: boolean
+  hasContent?: boolean
   controllingTurn: boolean
   runtimeSessionId: string
   composerMenuOpen: boolean
@@ -48,18 +39,16 @@ export type ComposerView = {
 export function composerRegionMarkup() {
   return `
     <div class="composer-region">
-      <div id="task-monitor-shell" class="task-monitor-shell" hidden>
-        <section id="task-monitor" class="task-monitor" aria-label="Background tasks"></section>
-      </div>
-      <div id="goal-panel-shell" class="goal-panel-shell" hidden>
-        <section id="goal-panel" class="goal-panel" aria-label="Session goal"></section>
-      </div>
-      <div id="plan-dock-shell" class="plan-dock-shell" hidden>
-        <section id="plan-dock" class="plan-dock" aria-label="Plan progress"></section>
-      </div>
       <div id="pending-input-dock" class="pending-input-dock" aria-label="Queued messages" hidden></div>
       <div id="attachment-chips" class="attachment-chips" hidden></div>
       <form id="composer" class="composer">
+        <div class="composer-context">
+          <div class="composer-select-wrap project-control">
+            <button id="project-menu-trigger" type="button" class="composer-select-trigger" title="Working folder" aria-label="Working folder" aria-haspopup="listbox" aria-controls="project-menu" aria-expanded="false">${renderIcon(Folder)}<span id="project-menu-label" class="composer-select-label">Working folder</span></button>
+            <div id="project-menu" class="composer-select-menu" role="listbox" aria-label="Working directories" hidden></div>
+          </div>
+          <span id="composer-activity" class="composer-activity" role="status"><span class="activity-motion" aria-hidden="true"><i></i><i></i><i></i></span><span id="composer-activity-text">Ready</span></span>
+        </div>
         <div class="prompt-wrap">
           <div id="slash-command-menu" class="slash-command-menu" role="listbox" aria-label="Slash commands" hidden></div>
           <textarea id="prompt" rows="2" placeholder="Message Rind — Enter to send, Shift+Enter for a new line" aria-label="Message Rind" aria-controls="slash-command-menu" aria-expanded="false" autocomplete="off"></textarea>
@@ -69,27 +58,30 @@ export function composerRegionMarkup() {
             <button id="composer-menu-trigger" type="button" class="composer-menu-trigger" title="More chat actions" aria-label="More chat actions" aria-haspopup="menu" aria-expanded="false">+</button>
             <div id="composer-menu" class="composer-menu" role="menu" hidden>
               <button id="compact-context" type="button" role="menuitem"><span class="compact-label">Compact context</span></button>
-              <button id="toggle-goal" type="button" role="menuitem"><span class="goal-label">Set goal</span></button>
             </div>
           </div>
           <button id="attach-button" type="button" class="composer-menu-trigger attach-trigger" title="Attach files" aria-label="Attach files">${paperclipIcon()}</button>
           <input id="attach-input" type="file" multiple hidden />
           <div class="composer-select-wrap model-control">
-            <button id="model-menu-trigger" type="button" class="composer-select-trigger" title="Choose model" aria-label="Choose model" aria-haspopup="listbox" aria-controls="model-menu" aria-expanded="false"><span id="model-menu-label" class="composer-select-label">Model</span><span class="composer-select-chevron" aria-hidden="true"></span></button>
+            <button id="model-menu-trigger" type="button" class="composer-select-trigger" title="Choose model" aria-label="Choose model" aria-haspopup="listbox" aria-controls="model-menu" aria-expanded="false">${renderIcon(Cpu)}<span id="model-menu-label" class="composer-select-label">Model</span>${renderIcon(ChevronDown, "select-chevron")}</button>
             <div id="model-menu" class="composer-select-menu" role="listbox" aria-label="Models" hidden></div>
           </div>
           <div class="composer-select-wrap effort-control">
-            <button id="effort-menu-trigger" type="button" class="composer-select-trigger" title="Choose reasoning effort" aria-label="Choose reasoning effort" aria-haspopup="listbox" aria-controls="effort-menu" aria-expanded="false"><span id="effort-menu-label" class="composer-select-label">Effort</span><span class="composer-select-chevron" aria-hidden="true"></span></button>
+            <button id="effort-menu-trigger" type="button" class="composer-select-trigger" title="Choose reasoning effort" aria-label="Choose reasoning effort" aria-haspopup="listbox" aria-controls="effort-menu" aria-expanded="false">${renderIcon(Brain)}<span id="effort-menu-label" class="composer-select-label">Effort</span>${renderIcon(ChevronDown, "select-chevron")}</button>
             <div id="effort-menu" class="composer-select-menu" role="listbox" aria-label="Reasoning effort" hidden></div>
           </div>
-          <div class="composer-select-wrap project-control">
-            <button id="project-menu-trigger" type="button" class="composer-select-trigger" title="Choose working directory" aria-label="Choose working directory" aria-haspopup="listbox" aria-controls="project-menu" aria-expanded="false"><span id="project-menu-label" class="composer-select-label">Working directory</span><span class="composer-select-chevron" aria-hidden="true"></span></button>
-            <div id="project-menu" class="composer-select-menu" role="listbox" aria-label="Working directories" hidden></div>
-          </div>
-          <span id="context-meter" class="context-meter" hidden></span>
+          <button type="button" id="context-meter" class="context-meter" data-tooltip="Open the Context tab" aria-controls="inspector" hidden></button>
           <span class="composer-spacer"></span>
-          <button id="interrupt" type="button" class="ghost-button danger" title="Stop the running turn (Esc)">Stop</button>
-          <button id="send" type="submit" class="primary-button"><span class="send-label">Send</span><span class="send-spinner" aria-hidden="true"></span></button>
+          <div class="send-control">
+            <button id="send" type="submit" class="send-button" aria-label="Send message"><span class="send-icon">${renderIcon(ArrowUp)}</span></button>
+            <button id="send-options" type="button" class="send-options" aria-label="Message actions" aria-haspopup="menu" aria-expanded="false" aria-controls="send-actions-menu">${renderIcon(ChevronDown)}</button>
+            <div id="send-actions-menu" class="composer-menu send-actions-menu" role="menu" aria-label="Running turn actions" hidden>
+              <button id="queue-message" type="button" role="menuitem">${renderIcon(ListPlus)}<span>Send after this turn</span><kbd>Enter</kbd></button>
+              <button id="steer" type="button" role="menuitem">${renderIcon(CornerUpRight)}<span>Steer this turn</span><kbd>Alt+Enter</kbd></button>
+              <div role="separator"></div>
+              <button id="interrupt" type="button" role="menuitem" class="danger">${renderIcon(Square)}<span>Stop active turn</span></button>
+            </div>
+          </div>
         </div>
       </form>
     </div>
@@ -100,78 +92,33 @@ function paperclipIcon() {
   return `<svg class="attach-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" focusable="false" aria-hidden="true"><path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>`
 }
 
-export function renderPlanDock(
-  elements: PlanDockElements,
-  conversation: ConversationState,
-  sessionId: string,
-  presentation: PlanDockPresentation,
-) {
-  const scrollTop = elements.dock.querySelector<HTMLElement>(".plan-dock-content")?.scrollTop || 0
-  syncPlanDockSession(presentation, sessionId)
-  const plan = visiblePlan(conversation, sessionId, presentation)
-  if (!plan) {
-    elements.shell.hidden = true
-    elements.dock.replaceChildren()
-    return
-  }
-  const progress = planProgress(plan)
-  const preview = plan.steps.find((step) => step.status === "in_progress")
-    ?? plan.steps.find((step) => step.status === "pending")
-    ?? plan.steps.at(-1)
-  const collapsed = presentation.collapsed
-  elements.shell.hidden = false
-  elements.shell.className = `plan-dock-shell${collapsed ? " collapsed" : ""}`
-  elements.dock.className = `plan-dock${progress.status === "error" ? " plan-error" : ""}`
-  elements.dock.innerHTML = `
-    <button type="button" class="plan-dock-trigger" data-toggle-plan aria-expanded="${String(!collapsed)}">
-      <span class="status-pip ${progress.pip}"></span>
-      <strong>Plan</strong>
-      <span class="plan-progress">${progress.completed}/${plan.steps.length}</span>
-      ${preview ? `<span class="plan-preview">${escapeHtml(clipLine(preview.step, 72))}</span>` : ""}
-      <span class="plan-chevron" aria-hidden="true"></span>
-    </button>
-    <div class="plan-dock-body" aria-hidden="${String(collapsed)}">
-      <div class="plan-dock-content">
-        <ol class="plan-steps">${plan.steps.map((step) => `<li class="plan-step plan-${escapeAttribute(step.status)}"><span aria-hidden="true"></span><span>${escapeHtml(step.step)}</span></li>`).join("")}</ol>
-        ${plan.error ? `<p class="plan-error-text">${escapeHtml(plan.error)}</p>` : ""}
-      </div>
-    </div>
-  `
-  const content = elements.dock.querySelector<HTMLElement>(".plan-dock-content")
-  if (content) content.scrollTop = scrollTop
-}
-
-export function syncPlanDockSession(presentation: PlanDockPresentation, sessionId: string) {
-  if (presentation.sessionId === sessionId) return
-  presentation.sessionId = sessionId
-  presentation.collapsed = false
-}
-
-export function dismissPlanError(conversation: ConversationState, sessionId: string, presentation: PlanDockPresentation) {
-  const plan = activePlan(conversation)
-  if (!plan || !(plan.error || plan.status === "error") || !sessionId || !plan.id) return
-  presentation.dismissedPlanErrors.add(planErrorKey(sessionId, plan))
-}
-
 export function renderComposer(elements: ComposerElements, view: ComposerView) {
   const unavailable = !view.ready || view.readOnly || view.compacting || view.slashCommandPending
-  elements.prompt.disabled = unavailable
+  elements.prompt.disabled = !view.ready || view.readOnly
   elements.prompt.placeholder = view.slashCommandPending
     ? `Running ${view.slashCommandInput || "command"}...`
     : view.compacting
-    ? "Compacting context..."
+    ? "Compacting context… You can prepare your next message."
     : view.readOnly
     ? "Return to the current task to send a message"
+    : view.controllingTurn
+    ? "Enter to queue a follow-up, Alt+Enter to steer"
     : "Message Rind — Enter to send, Shift+Enter for a new line"
-  elements.send.disabled = unavailable || view.starting
-  const label = elements.send.querySelector<HTMLElement>(".send-label")
-  if (label) label.textContent = view.slashCommandPending
-    ? "Running"
-    : view.compacting ? "Compacting" : view.readOnly ? "Viewing" : view.active ? "Queue" : "Send"
-  const working = view.starting || view.slashCommandPending
-  elements.send.classList.toggle("is-starting", working)
-  elements.send.setAttribute("aria-busy", String(working))
-  elements.send.title = view.slashCommandPending
+  const hasContent = view.hasContent ?? Boolean(elements.prompt.value.trim())
+  const stopping = view.active && (!hasContent || view.compacting)
+  elements.send.disabled = stopping ? !view.controllingTurn || view.readOnly : unavailable || view.starting || !hasContent
+  const action = stopping ? "stop" : view.active ? "queue" : "send"
+  if (elements.send.dataset.action !== action) {
+    elements.send.dataset.action = action
+    const icon = elements.send.querySelector(".send-icon")
+    if (icon) icon.innerHTML = renderIcon(stopping ? Square : view.active ? ListPlus : ArrowUp)
+  }
+  elements.send.classList.toggle("stop", stopping)
+  elements.send.setAttribute("aria-label", stopping ? "Stop active turn" : view.active ? "Send queued message" : "Send message")
+  if (elements.steer) {
+    elements.steer.disabled = unavailable || !hasContent || !view.controllingTurn
+  }
+  elements.send.title = stopping ? "Stop active turn (Esc)" : view.slashCommandPending
     ? `Running ${view.slashCommandInput || "command"}`
     : view.compacting
     ? "Context compaction is in progress"
@@ -190,9 +137,7 @@ export function renderComposer(elements: ComposerElements, view: ComposerView) {
     attach.disabled = !view.ready || view.compacting || view.slashCommandPending
     attach.title = view.ready ? "Attach files" : "Attach files after the runtime is ready"
   }
-  elements.contextMeter.hidden = view.contextUsagePercent === null
-  elements.contextMeter.textContent = view.contextUsagePercent === null ? "" : `${Math.round(view.contextUsagePercent * 100)}% ctx`
-  elements.contextMeter.classList.toggle("context-hot", view.contextUsagePercent !== null && view.contextUsagePercent >= 0.8)
+  renderContextMeter(elements.contextMeter, view.contextUsagePercent)
 }
 
 export function syncPendingInputDock(
@@ -266,33 +211,32 @@ export function syncPendingInputDock(
   dock.hidden = inputs.length === 0
 }
 
-function visiblePlan(conversation: ConversationState, sessionId: string, presentation: PlanDockPresentation) {
-  const plan = activePlan(conversation)
-  if (!plan || !(plan.error || plan.status === "error")) return plan
-  return presentation.dismissedPlanErrors.has(planErrorKey(sessionId, plan)) ? undefined : plan
+const METER_RADIUS = 6
+const METER_CIRCUMFERENCE = 2 * Math.PI * METER_RADIUS
+const METER_HOT = 0.8
+const meterMarkup = new WeakMap<HTMLElement, string>()
+
+/** 16px ring plus percentage (spec section 6); clicking it opens the Context tab. */
+export function contextMeterMarkup(fraction: number) {
+  const used = Math.min(1, Math.max(0, fraction))
+  const offset = (METER_CIRCUMFERENCE * (1 - used)).toFixed(2)
+  const circumference = METER_CIRCUMFERENCE.toFixed(2)
+  return `<svg class="context-ring" width="16" height="16" viewBox="0 0 16 16" aria-hidden="true" focusable="false"><circle class="context-ring-track" cx="8" cy="8" r="${METER_RADIUS}"></circle><circle class="context-ring-value" cx="8" cy="8" r="${METER_RADIUS}" stroke-dasharray="${circumference}" stroke-dashoffset="${offset}"></circle></svg><span>${Math.round(used * 100)}%</span>`
 }
 
-function planErrorKey(sessionId: string, plan: PlanEntry) {
-  return `${sessionId}:${plan.id}`
-}
-
-function planProgress(plan: PlanEntry) {
-  const completed = plan.steps.filter((step) => step.status === "completed").length
-  const settled = plan.steps.filter((step) => step.status === "completed" || step.status === "cancelled").length
-  const status = plan.error || plan.status === "error"
-    ? "error"
-    : plan.steps.some((step) => step.status === "in_progress")
-      ? "running"
-      : settled === plan.steps.length ? "completed" : "pending"
-  return { completed, status, pip: status === "error" ? "pip-error" : status === "completed" ? "pip-done" : "pip-running" }
-}
-
-function escapeHtml(value: string) {
-  return value.replace(/[&<>'"]/g, (character) => ({
-    "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;",
-  })[character] ?? character)
-}
-
-function escapeAttribute(value: string) {
-  return escapeHtml(value).replace(/\n/g, "&#10;")
+function renderContextMeter(meter: HTMLElement, fraction: number | null) {
+  meter.hidden = fraction === null
+  if (fraction === null) {
+    meter.textContent = ""
+    meterMarkup.delete(meter)
+    meter.setAttribute("aria-label", "Open the Context tab")
+    return
+  }
+  const markup = contextMeterMarkup(fraction)
+  if (meterMarkup.get(meter) !== markup) {
+    meter.innerHTML = markup
+    meterMarkup.set(meter, markup)
+  }
+  meter.setAttribute("aria-label", `Context ${Math.round(fraction * 100)}% used. Open the Context tab`)
+  meter.classList.toggle("context-hot", fraction >= METER_HOT)
 }

@@ -36,7 +36,7 @@
 // tracks the one card that can still be answered, while every card is ALSO a
 // stream entry (role "question") so the answered/cancelled card remains
 // readable in the transcript instead of vanishing.
-import { summarizeChanges } from "../lib/toolDisplay.js";
+import { parseToolResult, summarizeChanges } from "../lib/toolDisplay.js";
 
 // Stream length ceiling (audit #5): dropping the oldest keeps month-long
 // sessions bounded; the collapsed divider keeps the truncation honest.
@@ -56,8 +56,10 @@ export function emptyConversationState() {
     question: null, // { sessionId, toolCallId, question, options, status, requestedAt, ttlMs }
     resolvedQuestionKey: "",
     queued: [], // [{inputId, input, mode}] — inputs accepted but not yet delivered
+    settledInputs: {}, // delivery/retrieval can arrive before the queue RPC reply
     collapsedCount: 0, // entries dropped by the TRANSCRIPT_CAP (oldest first)
     turnChanges: null, // { fileCount, added, removed, firstToolCallId } — last finished turn's mutations
+    backgroundWait: null, // { count, startedAt } while the turn waits on background processes
     cursor: 0, // durable events applied for the current session
     seen: {}, // "session:turn:sequence" -> true (idempotence guard)
   };
@@ -77,11 +79,15 @@ export function reduceConversation(state, action) {
         role: action.role || (action.kind === "system" ? "system" : "user"),
         content: String(action.content || ""),
         tone: action.tone || "",
+        ...(action.display ? { display: action.display } : {}),
+        ...(action.time ? { time: action.time } : {}),
+        ...(action.inputId ? { inputId: action.inputId } : {}),
       });
     case "queue_input": {
       const inputId = String(action.inputId || "").trim();
       const input = String(action.input || "");
       if (!inputId || !input) return state;
+      if (state.settledInputs[inputId] || state.queued.some((item) => item.inputId === inputId)) return state;
       const mode = action.mode === "steering" ? "steering" : "follow_up";
       const entry = { id: `queued:${inputId}`, role: "queued", inputId, input, mode };
       return withCap({
@@ -93,9 +99,9 @@ export function reduceConversation(state, action) {
     case "unqueue": {
       const inputId = String(action.inputId || "").trim();
       if (!inputId) return state;
-      if (!state.queued.some((item) => item.inputId === inputId)) return state;
       return {
         ...state,
+        settledInputs: settleInput(state, inputId),
         queued: state.queued.filter((item) => item.inputId !== inputId),
         entries: state.entries.filter((entry) => !(entry.role === "queued" && entry.inputId === inputId)),
       };
@@ -113,7 +119,7 @@ export function reduceConversation(state, action) {
       };
     }
     case "queued_delivered":
-      return deliverQueued(state, action.inputId, action.input, action.mode);
+      return deliverQueued(state, action.inputId, action.input, action.mode, action.time);
     case "answered": {
       const key = String(action.key || "");
       if (!key) return state;
@@ -148,6 +154,7 @@ export function conversationView(state) {
     queued: state.queued,
     collapsedCount: state.collapsedCount,
     turnChanges: state.turnChanges,
+    backgroundWait: state.backgroundWait,
     cursor: state.cursor,
   };
 }
@@ -180,21 +187,14 @@ function applyEnvelope(state, envelope) {
 function applyTurnEvent(state, event, context) {
   const turnId = context.turnId;
   switch (event.type) {
-    case "task_updated": {
-      const task = event.task;
-      if (!task?.task_id) return state;
-      const id = `task:${task.task_id}`;
-      const entry = { id, role: "system", content: `Task ${task.task_id} · ${task.status}${task.notify ? ` · ${task.notify}` : ""}` };
-      return state.entries.some((item) => item.id === id)
-        ? { ...state, entries: state.entries.map((item) => item.id === id ? entry : item) }
-        : appendEntry(state, entry);
-    }
+    // Task lifecycle belongs in Activity; the Bash tool already owns output.
+    case "task_updated":
     case "task_output":
       return state;
     case "task_continuation_failed":
       return appendEntry(state, { role: "system", content: String(event.error || "Background continuation failed."), tone: "error" });
     case "turn_started":
-      return { ...state, active: true, activeTurnId: turnId, streaming: { turnId, text: "" } };
+      return { ...confirmPrompt(state, event.input, event.client_input_id || turnId, event.ts), active: true, activeTurnId: turnId, operation: event.operation || "", streaming: { turnId, text: "" } };
 
     case "assistant_delta": {
       const streaming = state.streaming && state.streaming.turnId === turnId
@@ -203,26 +203,86 @@ function applyTurnEvent(state, event, context) {
       return {
         ...state,
         active: true,
-        streaming: { turnId, text: streaming.text + String(event.text || "") },
+        streaming: { turnId, text: streaming.text + String(event.text || ""), time: streaming.time || event.ts || Date.now() },
       };
     }
 
     case "assistant_message_completed": {
       const fromStream = state.streaming && state.streaming.turnId === turnId ? state.streaming.text : "";
       const content = String(event.content || fromStream || "");
-      let next = content ? appendEntry(state, { id: `msg:${context.key}`, role: "assistant", content }) : state;
+      let next = content ? appendEntry(state, { id: `msg:${context.key}`, role: "assistant", content, time: event.ts || state.streaming?.time }) : state;
       if (next.streaming && next.streaming.turnId === turnId) next = { ...next, streaming: null };
       return next;
     }
 
-    case "tool_requested":
-    case "tool_call_started":
+    case "tool_input_started":
       return upsertTool(state, {
         id: String(event.tool_call_id || ""),
         name: String(event.tool_name || event.name || "tool"),
-        args: String(event.args_preview || ""),
         status: "running",
+        inputStreaming: true,
       });
+
+    case "tool_input_delta": {
+      // Streaming arguments accumulate into the args preview so the row can
+      // show what the model is writing before the call starts.
+      const id = String(event.tool_call_id || "");
+      const current = findTool(state, id);
+      return upsertTool(state, {
+        id,
+        name: event.tool_name ? String(event.tool_name) : undefined,
+        status: current?.status || "running",
+        inputStreaming: true,
+        args: String(current?.args || "") + String(event.delta || ""),
+      });
+    }
+
+    case "tool_input_ended":
+      return upsertTool(state, { id: String(event.tool_call_id || ""), inputStreaming: false });
+
+    case "tool_progress": {
+      const id = String(event.tool_call_id || "");
+      const line = progressMessage(event.payload);
+      if (!id || !line) return state;
+      const current = findTool(state, id);
+      const progress = [...(current?.progress || []), line].slice(-TOOL_PROGRESS_CAP);
+      return upsertTool(state, { id, name: event.tool_name ? String(event.tool_name) : undefined, progress });
+    }
+
+    case "tool_requested":
+    case "tool_call_started": {
+      const args = String(event.args_preview || "");
+      return upsertTool(state, {
+        id: String(event.tool_call_id || ""),
+        name: String(event.tool_name || event.name || "tool"),
+        args: args || undefined,
+        status: "running",
+        inputStreaming: false,
+      });
+    }
+
+    case "turn_step_retry": {
+      // The step restarts from scratch: drop the partial text it streamed.
+      const cleared = state.streaming ? { ...state, streaming: { ...state.streaming, text: "" } } : state;
+      const reason = String(event.reason || "").trim();
+      const attempt = Number(event.attempt) || 0;
+      const content = `Retrying step${attempt ? ` · attempt ${attempt}` : ""}${reason ? ` · ${reason}` : ""}`;
+      return appendEntry(cleared, { role: "system", tone: "notice", content });
+    }
+
+    case "context_compacted": {
+      const reason = String(event.record?.reason || event.reason || "").trim();
+      return appendEntry(state, { role: "system", tone: "notice", content: `Context compacted${reason ? ` · ${reason}` : ""}` });
+    }
+
+    case "background_wait_changed": {
+      const wait = event.background_wait;
+      const count = Number(wait?.count) || 0;
+      return {
+        ...state,
+        backgroundWait: wait && count > 0 ? { count, startedAt: wait.started_at ?? null } : null,
+      };
+    }
 
     case "tool_result": {
       const status = event.status === "error" || event.ok === false
@@ -230,6 +290,7 @@ function applyTurnEvent(state, event, context) {
         : String(event.status || "completed");
       const patch = {
         id: String(event.tool_call_id || ""),
+        inputStreaming: false,
         result: String(firstDefined(event.result, event.output, event.error, event.error_source) ?? ""),
         status,
         duration_ms: event.duration_ms,
@@ -237,7 +298,14 @@ function applyTurnEvent(state, event, context) {
       };
       const name = String(event.tool_name || event.name || "");
       if (name) patch.name = name;
-      return upsertTool(state, definedOnly(patch));
+      let next = upsertTool(state, definedOnly(patch));
+      if (state.question?.toolCallId === patch.id) {
+        const result = parseToolResult(patch.result);
+        const answer = result?.ok === true ? result?.data?.answer : undefined;
+        if (typeof answer === "string") next = markQuestionEntry(next, questionKey(state.question), { status: "answered", selectedAnswer: answer });
+        next = { ...next, question: null };
+      }
+      return next;
     }
 
     case "file_change":
@@ -258,7 +326,7 @@ function applyTurnEvent(state, event, context) {
 
     case "queued_input_delivered":
       // The queued chip converts into a normal user message in place.
-      return deliverQueued(state, event.input_id, event.input, event.mode);
+      return deliverQueued(state, event.input_id, event.input, event.mode, event.ts);
 
     case "goal_continued":
       return appendEntry(state, { role: "system", content: `Goal continuation · round ${event.round || "?"}` });
@@ -289,7 +357,7 @@ function applyTurnEvent(state, event, context) {
 function finalizeTurn(state, turnId) {
   const streamingText = state.streaming ? state.streaming.text : "";
   const next = streamingText
-    ? appendEntry(state, { id: `msg:${state.activeTurnId || turnId}:final`, role: "assistant", content: streamingText })
+    ? appendEntry(state, { id: `msg:${state.activeTurnId || turnId}:final`, role: "assistant", content: streamingText, time: state.streaming?.time })
     : state;
   const entries = next.entries.some((entry) => entry.role === "question" && entry.status === "pending")
     ? next.entries.map((entry) => (entry.role === "question" && entry.status === "pending" ? { ...entry, status: "cancelled" } : entry))
@@ -299,7 +367,9 @@ function finalizeTurn(state, turnId) {
     entries,
     active: false,
     activeTurnId: "",
+    operation: "",
     streaming: null,
+    backgroundWait: null,
     question: null, // pending question dies with its turn (§2.3 cancelled)
     turnChanges: summarizeChanges(entries),
   };
@@ -308,36 +378,51 @@ function finalizeTurn(state, turnId) {
 // Queued chip → normal user message. With an input_id the exact chip is
 // converted; without one (legacy event) the oldest matching mode is delivered
 // first, mirroring the kernel's FIFO consumption.
-function deliverQueued(state, inputId, input, mode) {
+function deliverQueued(state, inputId, input, mode, time = Date.now()) {
   const cleanId = String(inputId || "").trim();
+  if (cleanId && state.settledInputs[cleanId]) return state;
   let item = null;
   if (cleanId) {
     item = state.queued.find((candidate) => candidate.inputId === cleanId) || null;
   }
-  if (!item) {
+  if (!item && !cleanId) {
     const wantedMode = mode === "steering" ? "steering" : mode === "follow_up" ? "follow_up" : "";
     item = state.queued.find((candidate) => (!wantedMode || candidate.mode === wantedMode)) || null;
   }
-  if (!item) {
-    // Nothing queued locally (e.g. delivery predates the snapshot): still show
-    // the message so the transcript stays faithful.
-    return appendEntry(state, { role: "user", content: String(input || ""), tone: "" });
-  }
+  const id = cleanId || item?.inputId;
+  const content = String(input || item?.input || "");
+  if (!content) return state;
   const delivered = {
-    id: `msg:delivered:${item.inputId}`,
+    id: `msg:delivered:${id}`,
     role: "user",
-    content: String(input || item.input),
+    time,
+    content,
     tone: "",
   };
-  const index = state.entries.findIndex((entry) => entry.role === "queued" && entry.inputId === item.inputId);
-  const entries = [...state.entries];
-  if (index < 0) entries.push(delivered);
-  else entries[index] = delivered;
+  // The delivery belongs after the work it follows, not at its earlier enqueue position.
+  const next = flushStreaming(state);
+  const entries = [...next.entries.filter((entry) => entry.role !== "queued" || entry.inputId !== id), delivered];
   return withCap({
-    ...state,
-    queued: state.queued.filter((candidate) => candidate.inputId !== item.inputId),
+    ...next,
+    settledInputs: settleInput(state, id),
+    queued: state.queued.filter((candidate) => candidate.inputId !== id),
     entries,
   });
+}
+
+function settleInput(state, id) {
+  return Object.fromEntries([...Object.entries(state.settledInputs), [id, true]].slice(-TRANSCRIPT_CAP));
+}
+
+function flushStreaming(state) {
+  return state.streaming?.text
+    ? { ...appendEntry(state, { role: "assistant", content: state.streaming.text, time: state.streaming.time }), streaming: null }
+    : state;
+}
+
+function confirmPrompt(state, input, inputId, time) {
+  if (!input || state.entries.some((entry) => entry.role === "user" && entry.inputId === inputId)) return state;
+  return appendEntry(flushStreaming(state), { id: `msg:input:${inputId}`, role: "user", content: String(input), inputId, time });
 }
 
 // Question cards live in the stream so answered/cancelled history stays readable.
@@ -367,6 +452,21 @@ function markQuestionEntry(state, key, patch) {
   const entries = [...state.entries];
   entries[index] = { ...entries[index], ...definedOnly(patch) };
   return { ...state, entries };
+}
+
+// Progress lines kept per tool row (oldest dropped first).
+export const TOOL_PROGRESS_CAP = 20;
+
+function findTool(state, id) {
+  if (!id) return null;
+  return state.entries.find((entry) => entry.role === "tool" && entry.tool_call_id === id) || null;
+}
+
+function progressMessage(payload) {
+  if (payload == null) return "";
+  if (typeof payload !== "object") return String(payload).trim();
+  const value = firstDefined(payload.message, payload.status, payload.text);
+  return value == null ? "" : String(value).trim();
 }
 
 function upsertTool(state, patch) {
@@ -401,12 +501,13 @@ function applyHistory(state, messages) {
 // live_turn snapshot reconciliation (used right after a history load).
 function applyLiveTurn(state, liveTurn, sessionId) {
   if (!liveTurn || typeof liveTurn !== "object") {
-    return { ...state, active: false, activeTurnId: "", streaming: null, question: null, queued: [] };
+    return { ...state, active: false, activeTurnId: "", operation: "", streaming: null, question: null, queued: [] };
   }
   let next = {
     ...state,
     active: liveTurn.status === "running",
     activeTurnId: String(liveTurn.turn_id || ""),
+    operation: liveTurn.status === "running" ? String(liveTurn.operation || "") : "",
     streaming: { turnId: String(liveTurn.turn_id || ""), text: String(liveTurn.assistant_text || "") },
     // The snapshot is authoritative for the queue: rebuild it from
     // pending_inputs so a reconnect re-renders exactly what the kernel holds.
@@ -450,9 +551,13 @@ function applyLiveTurn(state, liveTurn, sessionId) {
   return next;
 }
 
+const MESSAGE_TIME_ROLES = new Set(["user", "assistant", "system"]);
+
 function appendEntry(state, entry) {
   const id = entry.id || `local-${state.entries.length}`;
-  return withCap({ ...state, entries: [...state.entries, { id, ...entry }] });
+  // Local messages use arrival time; persisted/live records supply their own time.
+  const time = entry.time || (MESSAGE_TIME_ROLES.has(entry.role) ? Date.now() : undefined);
+  return withCap({ ...state, entries: [...state.entries, { id, ...entry, ...(time ? { time } : {}) }] });
 }
 
 // Drops the OLDEST entries beyond the cap; the count surfaces as the
@@ -491,6 +596,7 @@ export function normalizeHistoryMessages(values) {
         role: message.role,
         content: contentText(message.content),
         meta: "",
+        ...(message.ts || message.created_at || message.timestamp ? { time: message.ts || message.created_at || message.timestamp } : {}),
       };
     })
     .filter((message) => message.role === "tool" || message.content);

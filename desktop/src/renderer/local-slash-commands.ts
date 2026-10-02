@@ -1,5 +1,5 @@
 import type { DesktopSettings, RuntimeSnapshot } from "../preload/types"
-import type { SlashCommand } from "./slash-commands"
+import { parseSlashInput, type SlashCommand } from "./slash-commands.ts"
 
 export type LocalSlashResult = {
   text: string
@@ -15,43 +15,16 @@ type LocalSlashContext = {
 }
 
 export function executeLocalSlashCommand(input: string, context: LocalSlashContext): LocalSlashResult | undefined {
-  const parts = input.trim().match(/^\/([^\s]+)(?:\s+([\s\S]*))?$/)
-  if (!parts) return undefined
-  const name = parts[1].toLocaleLowerCase()
-  const argument = (parts[2] || "").trim()
+  const parsed = parseSlashInput(input)
+  if (!parsed) return undefined
+  const { name, argument } = parsed
 
-  if (name === "config") return configResult(context.settings)
-  if (name === "login") return { text: "Login/config setup is not implemented yet.\nSet apiKey in ~/.rind/settings.json." }
   if (name === "status") {
     if (context.runtime.status === "ready") return undefined
     return statusResult(context)
   }
-  if (name === "doctor") return doctorResult(context)
   if (name === "help") return helpResult(argument, context.commands)
   return undefined
-}
-
-function configResult(settings: DesktopSettings): LocalSlashResult {
-  const apiKey = settings.hasApiKey ? "set" : "unset"
-  const reasoning = settings.reasoningEffort || "unset"
-  const entries = [
-    { label: "settings", value: "~/.rind/settings.json" },
-    { label: "apiKey", value: apiKey },
-    { label: "baseUrl", value: settings.baseUrl || "https://api.openai.com/v1" },
-    { label: "model", value: settings.model || "unknown" },
-    { label: "reasoningEffort", value: reasoning },
-  ]
-  return {
-    text: [
-      "Config:",
-      "- settings: ~/.rind/settings.json",
-      `- apiKey: ${apiKey}`,
-      `- baseUrl: ${entries[2].value}`,
-      `- model: ${entries[3].value}`,
-      `- reasoningEffort: ${reasoning}`,
-    ].join("\n"),
-    display: { type: "config", entries },
-  }
 }
 
 function statusResult(context: LocalSlashContext): LocalSlashResult {
@@ -64,33 +37,16 @@ function statusResult(context: LocalSlashContext): LocalSlashResult {
       `Session: ${session}`,
       `Model: ${model}`,
       `Runtime: ${runtime}`,
-      "Messages: unknown",
+      `Reasoning effort: ${context.settings.reasoningEffort || "unset"}`,
+      `Workspace: ${context.projectPath || "not selected"}`,
+      "No completed sampling yet.",
     ].join("\n"),
-    display: { type: "status", session, model, debug: false, messages: "unknown", runtime },
+    display: { type: "status", entries: [
+      { label: "session", value: session }, { label: "model", value: model },
+      { label: "reasoningEffort", value: context.settings.reasoningEffort || "unset" },
+      { label: "runtime", value: runtime }, { label: "workspace", value: context.projectPath || "not selected" },
+    ], usage: [] },
   }
-}
-
-function doctorResult(context: LocalSlashContext): LocalSlashResult {
-  const checks = [
-    check(context.settings.hasApiKey, "API key", context.settings.hasApiKey ? "set" : "unset"),
-    check(Boolean(context.settings.model), "Model", context.settings.model || "unset"),
-    check(Boolean(context.projectPath), "Project", context.projectPath || "not selected"),
-    check(context.runtime.status !== "error", "Runtime", context.runtime.status),
-  ]
-  const failures = checks.filter((item) => item.status === "fail").length
-  const warnings = checks.filter((item) => item.status === "warn").length
-  return {
-    text: [
-      "Doctor:",
-      ...checks.map((item) => `- [${item.status}] ${item.name}: ${item.detail}`),
-      `Overall: ${failures} failure(s), ${warnings} warning(s).`,
-    ].join("\n"),
-    display: { type: "doctor", checks, failures, warnings, next_steps: [] },
-  }
-}
-
-function check(ok: boolean, name: string, detail: string) {
-  return { status: ok ? "ok" : "fail", name, detail }
 }
 
 function helpResult(argument: string, commands: SlashCommand[]): LocalSlashResult {

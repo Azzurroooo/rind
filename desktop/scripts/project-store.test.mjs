@@ -1,5 +1,5 @@
 import assert from "node:assert/strict"
-import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises"
+import { mkdtemp, mkdir, readFile, realpath, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import test from "node:test"
@@ -39,7 +39,7 @@ test("project registry migrates the legacy workspace and pages its sessions", as
     assert.equal(migrated.projects.length, 1)
     assert.equal(migrated.activeProjectPath, firstProject)
     assert.equal(migrated.sidebarOpen, false)
-    assert.equal(migrated.sidebarWidth, 248)
+    assert.equal(migrated.sidebarWidth, 264)
     assert.equal(migrated.filePanelWidth, 300)
     assert.deepEqual(migrated.projects[0].sessions.map((session) => session.id), ["legacy", "new", "old"])
 
@@ -49,8 +49,10 @@ test("project registry migrates the legacy workspace and pages its sessions", as
     assert.equal(page.total, 3)
 
     const remaining = await store.remove(firstProject)
-    assert.deepEqual(remaining.projects.map((project) => project.path), [secondProject])
-    assert.equal(remaining.activeProjectPath, secondProject)
+    // Registration canonicalizes paths, including Windows temporary 8.3 aliases.
+    const canonicalSecondProject = await realpath(secondProject)
+    assert.deepEqual(remaining.projects.map((project) => project.path), [canonicalSecondProject])
+    assert.equal(remaining.activeProjectPath, canonicalSecondProject)
     assert.equal((await readFile(sessionIndexFile, "utf8")).includes("\"old\""), true)
   })
 })
@@ -96,6 +98,7 @@ test("recent sessions keep only persisted sessions from registered projects", as
     const store = new DesktopProjectStore(configFile, sessionIndexFile, recentSessionsFile)
     const overview = await store.overview()
     assert.equal(overview.recentSessions.length, 10)
+    assert.equal(overview.recentSessionTotal, 12)
     assert.deepEqual(overview.recentSessions.map((session) => session.id), [
       "recent-11", "recent-10", "recent-09", "recent-08", "recent-07",
       "recent-06", "recent-05", "recent-04", "recent-03", "recent-02",
@@ -103,10 +106,15 @@ test("recent sessions keep only persisted sessions from registered projects", as
     const refreshed = await store.markRecent("recent-02")
     assert.equal(refreshed.recentSessions[0].id, "recent-02")
     assert.equal(refreshed.recentSessions.length, 10)
+    assert.ok(Date.parse(refreshed.recentSessions[0].lastInteractedAt) > Date.parse("2026-05-12T00:00:00Z"))
+    const nextPage = await store.recentPage(10, 10)
+    assert.deepEqual(nextPage.sessions.map((session) => session.id), ["recent-01", "recent-00"])
+    assert.equal(nextPage.total, 12)
+    assert.equal((await store.recentPage(20)).sessions.length, 0)
     const afterInvalidMark = await store.markRecent("empty")
     assert.equal(afterInvalidMark.recentSessions[0].id, "recent-02")
     const stored = JSON.parse(await readFile(configFile, "utf8"))
-    assert.equal(stored.recentSessions.length, 10)
+    assert.equal(stored.recentSessions.length, 12)
     assert.equal(stored.recentSessions[0].session_id, "recent-02")
     await assert.rejects(() => readFile(recentSessionsFile, "utf8"), { code: "ENOENT" })
   })

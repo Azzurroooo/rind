@@ -1,0 +1,92 @@
+/* ---------- shell ---------- */
+
+.app-shell { display: grid; min-height: 100vh; grid-template-rows: 44px minmax(0, 1fr); }
+
+.topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 0 12px;
+  border-bottom: 1px solid var(--line);
+  background: var(--surface);
+  -webkit-app-region: drag;
+}
+
+.topbar button,
+.topbar select,
+.topbar input,
+.topbar .brand-mark,
+.topbar .connection,
+.topbar .app-version { -webkit-app-region: no-drag; }
+
+body[data-platform="win32"] .topbar { padding-right: 142px; }
+body[data-platform="darwin"] .topbar { padding-left: 80px; }
+
+.identity, .topbar-actions { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.topbar-actions { gap: 2px; }
+.app-version { margin-right: 8px; color: var(--dim); font-size: var(--text-meta); }
+.topbar-button { position: relative; }
+.topbar-button[aria-expanded="true"] { color: var(--text); background: var(--fill-2); }
+
+.brand-group { display: flex; align-items: center; gap: 7px; min-width: 0; }
+.brand-mark { display: block; flex: none; width: 20px; height: 20px; }
+.brand { color: var(--text); font-weight: 700; letter-spacing: 0.02em; }
+
+.connection {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 12px;
+}
+.connection-ready { color: var(--success); }
+.connection-error { color: var(--danger); }
+
+.status-pip {
+  width: 7px;
+  height: 7px;
+  flex: none;
+  border-radius: 50%;
+  background: var(--dim);
+}
+.connection-ready .status-pip { background: var(--success); }
+.connection-error .status-pip { background: var(--danger); }
+.connection-starting .status-pip { background: var(--accent); animation: pip-pulse 1.1s ease-in-out infinite; }
+
+/* Shared status pips: sidebar sessions, tasks, goal, file edits. */
+.pip-running { background: var(--accent); animation: pip-pulse 1.1s ease-in-out infinite; }
+.pip-done { background: var(--success); }
+.pip-error { background: var(--danger); }
+@keyframes pip-pulse {
+  0%, 100% { opacity: 1; box-shadow: 0 0 0 0 var(--accent-soft); }
+  50% { opacity: 0.55; box-shadow: 0 0 0 4px var(--accent-soft); }
+}
+
+.topbar-icon { display: block; width: 16px; height: 16px; }
+.app-version { color: var(--dim); font-size: 11px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+
+/* ---------- layout ---------- */
+
+.layout { display: grid; min-height: 0; grid-template-columns: 232px minmax(0, 1fr); }
+
+.sidebar {
+  min-height: 0;
+  padding: 10px;
+  border-right: 1px solid var(--line);
+  overflow-y: auto;
+  background: var(--panel);
+}
+
+.sidebar-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+  padding: 0 4px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}

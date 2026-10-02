@@ -1,3 +1,5 @@
+import { mergeCommandCatalog, SERVER_CATEGORY } from "./commandCatalog.js";
+
 // Command registry (audit #9/#10, opencode pattern): ONE source of truth that
 // feeds the Ctrl/Cmd+K palette, the Composer's "/" autocomplete and any
 // keybind hints. Nothing renders a keybind or command list that is not
@@ -13,22 +15,11 @@ export const COMMAND_CATEGORIES = Object.freeze({
   context: "Context",
   transcript: "Transcript",
   view: "View",
-  server: "Server commands",
+  server: SERVER_CATEGORY,
 });
 
-// Server-side slash commands executed verbatim via rind/command/execute.
-const SERVER_SLASH_COMMANDS = [
-  { slash: "status", title: "Status", keywords: "status state" },
-  { slash: "doctor", title: "Doctor", keywords: "doctor diagnose health" },
-  { slash: "init", title: "Draft RIND.md", keywords: "init rind draft rind.md" },
-  { slash: "skill", title: "Skills", keywords: "skill skills list" },
-  { slash: "team", title: "Team", keywords: "team agents" },
-  { slash: "config", title: "Config", keywords: "config settings" },
-  { slash: "login", title: "Login settings", keywords: "login token auth" },
-];
-
-export function buildCommands(ctx = {}) {
-  const runServer = (name) => (context, argument) => context.runServerSlash?.(name, argument || "");
+// `catalog` is the runtime's initialize.commands list; see commandCatalog.js.
+export function buildCommands(ctx = {}, catalog = []) {
   const commands = [
     {
       id: "session.new",
@@ -39,11 +30,19 @@ export function buildCommands(ctx = {}) {
       run: (context) => context.newSession?.(),
     },
     {
+      id: "session.fork",
+      title: "Fork session",
+      category: COMMAND_CATEGORIES.session,
+      keywords: "fork branch copy duplicate",
+      slash: "fork",
+      description: "Copy this session into a new one",
+      run: (context) => context.forkSession?.(),
+    },
+    {
       id: "session.switch",
       title: "Switch session",
       category: COMMAND_CATEGORIES.session,
       keywords: "sessions switch search",
-      slash: "sessions",
       run: (context) => context.focusSessions?.(),
     },
     {
@@ -51,16 +50,14 @@ export function buildCommands(ctx = {}) {
       title: "Model",
       category: COMMAND_CATEGORIES.model,
       keywords: "model select switch",
-      slash: "model",
-      run: (context, argument) => (argument ? context.setModel?.(argument) : context.focusModel?.()),
+      run: (context) => context.focusModel?.(),
     },
     {
       id: "model.effort",
       title: "Reasoning effort",
       category: COMMAND_CATEGORIES.model,
       keywords: "effort reasoning",
-      slash: "effort",
-      run: (context, argument) => (argument ? context.setEffort?.(argument) : context.focusEffort?.()),
+      run: (context) => context.focusEffort?.(),
     },
     {
       id: "context.compact",
@@ -71,12 +68,20 @@ export function buildCommands(ctx = {}) {
       run: (context) => context.compact?.(),
     },
     {
+      id: "context.inspect",
+      title: "Inspect context",
+      category: COMMAND_CATEGORIES.context,
+      keywords: "context tokens window usage inspect",
+      description: "Show what fills the context window",
+      run: (context) => context.openContext?.(),
+    },
+    {
       id: "context.goal",
-      title: "Goal",
+      title: "Show goal",
       category: COMMAND_CATEGORIES.context,
       keywords: "goal objective",
       slash: "goal",
-      run: (context, argument) => (argument ? context.runGoal?.(argument) : context.focusGoal?.()),
+      run: (context, argument = "") => context.runGoal?.(argument),
     },
     {
       id: "turn.stop",
@@ -99,7 +104,7 @@ export function buildCommands(ctx = {}) {
       title: "Theme",
       category: COMMAND_CATEGORIES.view,
       keywords: "theme light dark",
-      slash: "theme",
+      description: "Switch theme: system, light or dark",
       run: (context) => context.toggleTheme?.(),
     },
     {
@@ -126,17 +131,7 @@ export function buildCommands(ctx = {}) {
       run: (context) => context.showHelp?.(),
     },
   ];
-  for (const server of SERVER_SLASH_COMMANDS) {
-    commands.push({
-      id: `server.${server.slash}`,
-      title: server.title,
-      category: COMMAND_CATEGORIES.server,
-      keywords: server.keywords,
-      slash: server.slash,
-      run: runServer(server.slash),
-    });
-  }
-  return commands;
+  return mergeCommandCatalog(commands, catalog, ctx.runServerSlash);
 }
 
 // Fuzzy filter for the palette: subsequence match over title/keywords/id with
@@ -162,14 +157,20 @@ export function filterCommands(commands, query) {
 // slash name only (typing "/" shows everything with a slash form).
 export function matchingSlashCommands(commands, query) {
   const clean = String(query || "").toLowerCase();
-  return commands.filter((command) => command.slash && command.slash.startsWith(clean)).slice(0, 6);
+  return commands
+    .filter((command) => command.slash && (command.slash.startsWith(clean) || (command.aliases || []).some((alias) => alias.startsWith(clean))))
+    .slice(0, SLASH_MENU_LIMIT);
 }
 
-// Exact slash-name resolution for submitted "/name ..." input.
+export const SLASH_MENU_LIMIT = 8;
+
+// Exact slash-name resolution for submitted "/name ..." input (aliases too).
 export function findCommandBySlash(commands, name) {
   const clean = String(name || "").toLowerCase();
   if (!clean) return null;
-  return commands.find((command) => command.slash === clean) || null;
+  return commands.find((command) => command.slash === clean)
+    || commands.find((command) => (command.aliases || []).includes(clean))
+    || null;
 }
 
 export function keybindHint(command) {

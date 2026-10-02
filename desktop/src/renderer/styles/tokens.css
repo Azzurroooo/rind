@@ -1,0 +1,165 @@
+/* Design system v2 tokens (docs/surface-design-v2.md section 1).
+   Components reference tokens only; themes re-tune this block, never component rules. */
+
+:root {
+  color-scheme: light;
+
+  --bg: #f7f6f0;
+  --panel: #efeee5;
+  --surface: #fdfcf8;
+  --surface-soft: #ecebe1;
+  --line: #e1e1d6;
+  --line-strong: #d5d7ca;
+  --text: #22271f;
+  --muted: #64685e;
+  --dim: #7d8176;
+  --accent: #334c37;
+  --accent-contrast: #f4f3eb;
+  --accent-soft: #d6df9a66;
+  --fill-1: rgb(34 39 31 / 3%);
+  --fill-2: rgb(34 39 31 / 6%);
+  --fill-3: rgb(34 39 31 / 10%);
+  --success: #3f7a4a;
+  --success-soft: rgb(63 122 74 / 12%);
+  --warning: #9a6208;
+  --warning-soft: rgb(154 98 8 / 12%);
+  --danger: #b4452f;
+  --danger-soft: rgb(180 69 47 / 12%);
+  --info: #3a6ea5;
+  --info-soft: rgb(58 110 165 / 12%);
+
+  --diff-added-text: #2f6a3b;
+  --diff-removed-text: #a13d29;
+  --diff-added-bg: rgb(63 122 74 / 12%);
+  --diff-removed-bg: rgb(180 69 47 / 10%);
+  --code-keyword: #6b4a8a;
+  --code-string: #2f6a3b;
+  --code-number: #8a5a08;
+  --code-title: #2f5f8f;
+  --code-type: #a13d29;
+
+  --scrim: #19241e66;
+  --drawer-scrim: #0008;
+  --shadow-popover: 0 8px 16px -4px #19241e24;
+  --shadow-dialog: 0 20px 40px -12px #19241e40;
+
+  --font-ui: "Manrope Variable", "PingFang SC", "Microsoft YaHei UI", system-ui, sans-serif;
+  --font-mono: "DM Mono", "Cascadia Code", Consolas, monospace;
+  --text-meta: 12px;
+  --text-dense: 13px;
+  --text-ui: 14px;
+  --text-chat: 15px;
+  --text-title: 20px;
+  --text-welcome: 24px;
+
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+
+  --radius-xs: 4px;
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+  --radius-pill: 9999px;
+
+  --control-sm: 28px;
+  --control-md: 32px;
+  --control-lg: 36px;
+  --panel-scroll-gap: 6px;
+
+  --ease: cubic-bezier(0.2, 0.7, 0.2, 1);
+  --dur-hover: 120ms;
+  --dur-pop: 180ms;
+  --dur-panel: 200ms;
+
+  --stream-width: 800px;
+  --header-height: 44px;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+
+    --bg: #151d18;
+    --panel: #111914;
+    --surface: #1a241e;
+    --surface-soft: #222d26;
+    --line: #2a352d;
+    --line-strong: #3d4a3f;
+    --text: #ebeee4;
+    --muted: #a5b0a4;
+    --dim: #86917f;
+    --accent: #d6df9a;
+    --accent-contrast: #19241e;
+    --accent-soft: #d6df9a1f;
+    --fill-1: rgb(235 238 228 / 4%);
+    --fill-2: rgb(235 238 228 / 7%);
+    --fill-3: rgb(235 238 228 / 12%);
+    --success: #8fc79a;
+    --success-soft: rgb(143 199 154 / 12%);
+    --warning: #e5b25c;
+    --warning-soft: rgb(229 178 92 / 12%);
+    --danger: #ec8a74;
+    --danger-soft: rgb(236 138 116 / 12%);
+    --info: #8ab4e8;
+    --info-soft: rgb(138 180 232 / 12%);
+
+    --diff-added-text: #8fc79a;
+    --diff-removed-text: #ec8a74;
+    --diff-added-bg: rgb(143 199 154 / 12%);
+    --diff-removed-bg: rgb(236 138 116 / 12%);
+    --code-keyword: #c9a8e8;
+    --code-string: #b5cf8a;
+    --code-number: #e5b25c;
+    --code-title: #8ab4e8;
+    --code-type: #ec8a74;
+
+    --shadow-popover: 0 8px 16px -4px #0006;
+    --shadow-dialog: 0 20px 40px -12px #0009;
+  }
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+
+  --bg: #151d18;
+  --panel: #111914;
+  --surface: #1a241e;
+  --surface-soft: #222d26;
+  --line: #2a352d;
+  --line-strong: #3d4a3f;
+  --text: #ebeee4;
+  --muted: #a5b0a4;
+  --dim: #86917f;
+  --accent: #d6df9a;
+  --accent-contrast: #19241e;
+  --accent-soft: #d6df9a1f;
+  --fill-1: rgb(235 238 228 / 4%);
+  --fill-2: rgb(235 238 228 / 7%);
+  --fill-3: rgb(235 238 228 / 12%);
+  --success: #8fc79a;
+  --success-soft: rgb(143 199 154 / 12%);
+  --warning: #e5b25c;
+  --warning-soft: rgb(229 178 92 / 12%);
+  --danger: #ec8a74;
+  --danger-soft: rgb(236 138 116 / 12%);
+  --info: #8ab4e8;
+  --info-soft: rgb(138 180 232 / 12%);
+
+  --diff-added-text: #8fc79a;
+  --diff-removed-text: #ec8a74;
+  --diff-added-bg: rgb(143 199 154 / 12%);
+  --diff-removed-bg: rgb(236 138 116 / 12%);
+  --code-keyword: #c9a8e8;
+  --code-string: #b5cf8a;
+  --code-number: #e5b25c;
+  --code-title: #8ab4e8;
+  --code-type: #ec8a74;
+
+  --shadow-popover: 0 8px 16px -4px #0006;
+  --shadow-dialog: 0 20px 40px -12px #0009;
+}

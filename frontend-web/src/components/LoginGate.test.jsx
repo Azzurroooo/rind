@@ -38,16 +38,16 @@ beforeEach(() => {
 describe("LoginGate — J1 first connection and login", () => {
   it("renders a single password card with description and no app chrome", () => {
     render(<LoginGate onSubmit={() => {}} />);
-    expect(screen.getByLabelText("Access token")).not.toBeNull();
-    expect(screen.getByLabelText("Access token").type).toBe("password");
-    expect(screen.getByText(/access token to connect/)).not.toBeNull();
+    expect(screen.getByLabelText("Access code")).not.toBeNull();
+    expect(screen.getByLabelText("Access code").type).toBe("password");
+    expect(screen.getByText(/access code shown in Rind Desktop/)).not.toBeNull();
     expect(screen.queryByText("Sessions")).toBeNull();
     expect(document.querySelector(".workspace-grid")).toBeNull();
   });
 
   it("submit button is disabled without a token", () => {
     render(<LoginGate onSubmit={() => {}} />);
-    expect(screen.getByTitle("Connect to worker").disabled).toBe(true);
+    expect(screen.getByTitle("Connect to Rind").disabled).toBe(true);
   });
 
   it("401 from GET /ticket shows an inline error, preserves input, stores nothing, never navigates", async () => {
@@ -55,15 +55,15 @@ describe("LoginGate — J1 first connection and login", () => {
     const fetchImpl = vi.fn(async () => ({ ok: false, status: 401 }));
     render(<Harness fetchImpl={fetchImpl} />);
 
-    const input = screen.getByLabelText("Access token");
+    const input = screen.getByLabelText("Access code");
     fireEvent.change(input, { target: { value: "wrong-token" } });
-    fireEvent.click(screen.getByTitle("Connect to worker"));
+    fireEvent.click(screen.getByTitle("Connect to Rind"));
 
-    await waitFor(() => expect(screen.getByRole("alert").textContent).toContain("Token invalid"));
+    await waitFor(() => expect(screen.getByRole("alert").textContent).toContain("Access code invalid"));
     expect(fetchImpl).toHaveBeenCalledWith("/ticket", expect.objectContaining({ method: "GET", headers: { Authorization: "Bearer wrong-token" } }));
 
     // Input preserved, no navigation, no credential persisted anywhere.
-    expect(screen.getByLabelText("Access token").value).toBe("wrong-token");
+    expect(screen.getByLabelText("Access code").value).toBe("wrong-token");
     expect(window.sessionStorage.getItem(TICKET_KEY)).toBeNull();
     expect(window.localStorage.getItem(TICKET_KEY)).toBeNull();
     expect(window.location.href).toBe(urlBefore);
@@ -75,16 +75,16 @@ describe("LoginGate — J1 first connection and login", () => {
       throw Object.assign(new Error("network unreachable"), { status: 0 });
     });
     render(<Harness fetchImpl={fetchImpl} />);
-    fireEvent.change(screen.getByLabelText("Access token"), { target: { value: "tok" } });
-    fireEvent.click(screen.getByTitle("Connect to worker"));
-    await waitFor(() => expect(screen.getByRole("alert").textContent).toContain("Cannot reach the server"));
+    fireEvent.change(screen.getByLabelText("Access code"), { target: { value: "tok" } });
+    fireEvent.click(screen.getByTitle("Connect to Rind"));
+    await waitFor(() => expect(screen.getByRole("alert").textContent).toContain("Cannot reach Rind"));
   });
 
   it("success stores the ticket in sessionStorage only (never localStorage)", async () => {
     const fetchImpl = vi.fn(async () => ({ ok: true, status: 200, json: async () => ({ ticket: "t-123" }) }));
     render(<Harness fetchImpl={fetchImpl} />);
-    fireEvent.change(screen.getByLabelText("Access token"), { target: { value: "good-token" } });
-    fireEvent.click(screen.getByTitle("Connect to worker"));
+    fireEvent.change(screen.getByLabelText("Access code"), { target: { value: "good-token" } });
+    fireEvent.click(screen.getByTitle("Connect to Rind"));
     await waitFor(() => expect(window.sessionStorage.getItem(TICKET_KEY)).toBe("t-123"));
     expect(window.localStorage.getItem(TICKET_KEY)).toBeNull();
     expect(screen.queryByRole("alert")).toBeNull();

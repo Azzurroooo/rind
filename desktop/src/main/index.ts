@@ -4,7 +4,7 @@ import windowState from "electron-window-state"
 import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
 
-import { runtimeMethods, type DesktopPrefsPatch, type DesktopSettings, type DesktopSettingsPatch, type DesktopTheme, type RuntimeEvent, type RuntimeMethod, type RuntimeSnapshot } from "../preload/types"
+import type { DesktopAuthPrompt, DesktopAuthUpdate, DesktopPrefsPatch, DesktopSettings, DesktopSettingsPatch, DesktopTheme, RuntimeEvent, RuntimeSnapshot } from "../preload/types"
 import { asObject, readJsonObject, writeJsonObject } from "./json-store"
 import { listAvailableModels } from "./model-catalog"
 import { listProjectFiles, previewProjectFile } from "./project-files"
@@ -12,10 +12,18 @@ import { DesktopProjectStore, samePath } from "./projects"
 import { loadSettingsForWorkspace } from "./runtime-settings"
 import { readRindVersion } from "./version"
 import { wrapRuntimeIpcError } from "../shared/ipc-error"
+import { DesktopGateway } from "./gateway/server"
+import { allowGatewayOnWindows } from "./gateway/firewall"
+import { workspaceFileRequest } from "./gateway/files"
+import type { GatewayOptions } from "../preload/types"
+import { isDesktopRuntimeMethod, isRemoteRuntimeMethod } from "./method-policy"
 import {
   getRuntimeSnapshot,
   initializeRuntime,
   requestRuntime,
+  respondAuthPrompt,
+  subscribeAuthPrompts,
+  subscribeAuthUpdates,
   shutdownRuntime,
   startRuntime,
   subscribeRuntime,
@@ -24,22 +32,32 @@ import {
 
 const appId = "ai.rind.desktop"
 const root = dirname(fileURLToPath(import.meta.url))
-const allowedRuntimeMethods = new Set<RuntimeMethod>(Object.values(runtimeMethods) as RuntimeMethod[])
 const themes: DesktopTheme[] = ["system", "dark", "light"]
 const themeSurfaces = {
-  dark: { background: "#1a1a1f", overlay: { color: "#1a1a1f", symbolColor: "#c9c9cf" } },
-  light: { background: "#f4f4f6", overlay: { color: "#f4f4f6", symbolColor: "#3a3a42" } },
+  dark: { background: "#151d18", overlay: { color: "#151d18", symbolColor: "#a5b0a4" } },
+  light: { background: "#f7f6f0", overlay: { color: "#f7f6f0", symbolColor: "#64685e" } },
 } as const
 
-function isRuntimeMethod(method: string): method is RuntimeMethod {
-  return allowedRuntimeMethods.has(method as RuntimeMethod)
-}
 let mainWindow: BrowserWindow | undefined
 let desktopProjectStore: DesktopProjectStore | undefined
 let quitting = false
 let runtimeShutdownComplete = false
 let windowFocused = false
 const maxSettingLength = 4096
+let remoteGateway: DesktopGateway | undefined
+
+function gateway() {
+  remoteGateway ||= new DesktopGateway({
+    initialize: initializeRuntime,
+    request: (method, params) => {
+      if (!isRemoteRuntimeMethod(method)) throw new Error("Unsupported remote method.")
+      return requestRuntime(method, params)
+    },
+    subscribe: subscribeRuntimeEvents,
+  }, app.isPackaged ? join(process.resourcesPath, "web") : join(app.getAppPath(), "../frontend-web/dist"),
+  (state) => mainWindow?.webContents.send("gateway-changed", state))
+  return remoteGateway
+}
 
 function configPath() {
   return join(app.getPath("userData"), "desktop-settings.json")
@@ -62,7 +80,7 @@ function applyThemeSurface(theme: DesktopTheme) {
     mainWindow.setBackgroundColor(surfaces.background)
     if (process.platform === "win32" && mainWindow.setTitleBarOverlay) {
       try {
-        mainWindow.setTitleBarOverlay({ ...surfaces.overlay, height: 46 })
+        mainWindow.setTitleBarOverlay({ ...surfaces.overlay, height: 44 })
       } catch {
         // Title bar overlays are unavailable on some Linux/Windows configurations.
       }
@@ -167,6 +185,16 @@ async function requireProject(path: unknown) {
 }
 
 function registerIpc() {
+  ipcMain.handle("gateway-get", () => gateway().state())
+  ipcMain.handle("gateway-start", (_event, options: GatewayOptions) => gateway().start(options))
+  ipcMain.handle("gateway-stop", async () => { await gateway().stop(); return gateway().state() })
+  ipcMain.handle("gateway-rotate", () => gateway().rotate())
+  ipcMain.handle("gateway-allow-network", async () => {
+    const current = gateway().state()
+    if (!current.running || current.scope !== "lan") throw new Error("Enable local-network access first.")
+    await allowGatewayOnWindows(process.execPath, current.port)
+    return gateway().state()
+  })
   ipcMain.handle("runtime-start", async (_event, workspace: unknown) => {
     const projectPath = await requireProject(workspace)
     return startRuntime(projectPath)
@@ -174,7 +202,7 @@ function registerIpc() {
   ipcMain.handle("runtime-initialize", () => initializeRuntime())
   ipcMain.handle("runtime-shutdown", () => shutdownRuntime())
   ipcMain.handle("runtime-request", async (_event, method: unknown, params: unknown) => {
-    if (typeof method !== "string" || !isRuntimeMethod(method)) {
+    if (!isDesktopRuntimeMethod(method)) {
       throw new Error("Runtime method is not available to the desktop client.")
     }
     const safeParams = params && typeof params === "object" ? params as Record<string, unknown> : {}
@@ -184,6 +212,13 @@ function registerIpc() {
     // console noise. The preload bridge unwraps and re-throws for the renderer.
     try {
       return await requestRuntime(method, safeParams)
+    } catch (error) {
+      return wrapRuntimeIpcError(error)
+    }
+  })
+  ipcMain.handle("auth-prompt-respond", async (_event, requestId: unknown, value: unknown) => {
+    try {
+      return await respondAuthPrompt(requestId, value)
     } catch (error) {
       return wrapRuntimeIpcError(error)
     }
@@ -210,6 +245,7 @@ function registerIpc() {
     const overview = await projectStore().remove(path)
     return overview
   })
+  ipcMain.handle("projects-recent-page", (_event, offset: number, limit?: number) => projectStore().recentPage(offset, limit))
   ipcMain.handle("projects-mark-recent", (_event, sessionId: unknown) => {
     if (typeof sessionId !== "string") throw new Error("Session id must be a string.")
     return projectStore().markRecent(sessionId)
@@ -230,6 +266,7 @@ function registerIpc() {
   })
   ipcMain.handle("project-files-list", async (_event, projectPath: unknown, path: unknown) => listProjectFiles(await requireProject(projectPath), path))
   ipcMain.handle("project-files-preview", async (_event, projectPath: unknown, path: unknown) => previewProjectFile(await requireProject(projectPath), path))
+  ipcMain.handle("project-files-upload", async (_event, projectPath: unknown, path: unknown, contentBase64: unknown) => workspaceFileRequest(await requireProject(projectPath), "file/write", { path, content_base64: contentBase64 }))
   ipcMain.handle("prefs-update", async (_event, patch: unknown) => {
     const input = asObject(patch)
     if (!input) throw new Error("Preferences must be an object.")
@@ -276,7 +313,7 @@ function createMainWindow() {
     }),
     ...(isWin && {
       titleBarStyle: "hidden",
-      titleBarOverlay: { ...surfaces.overlay, height: 46 },
+      titleBarOverlay: { ...surfaces.overlay, height: 44 },
     }),
     webPreferences: {
       preload: join(root, "../preload/index.js"),
@@ -304,11 +341,25 @@ function createMainWindow() {
 }
 
 function notifyRuntime(snapshot: RuntimeSnapshot) {
+  if (["stopping", "stopped", "error"].includes(snapshot.status)) void remoteGateway?.stop()
   mainWindow?.webContents.send("runtime-status", snapshot)
 }
 
 function notifyRuntimeEvent(event: RuntimeEvent) {
   mainWindow?.webContents.send("runtime-event", event)
+}
+
+function notifyAuthPrompt(prompt: DesktopAuthPrompt) {
+  if (mainWindow) {
+    mainWindow.webContents.send("auth-prompt", prompt)
+    return
+  }
+  // No window can answer: cancel so the worker does not wait for the timeout.
+  void respondAuthPrompt(prompt.requestId, "").catch((error) => log.warn("auth prompt cancel failed", error))
+}
+
+function notifyAuthUpdate(update: DesktopAuthUpdate) {
+  mainWindow?.webContents.send("auth-update", update)
 }
 
 function showDesktopNotification(payload: { title?: unknown; body?: unknown; sessionId?: unknown }) {
@@ -347,6 +398,8 @@ if (!hasLock) {
     app.setAppUserModelId(appId)
     subscribeRuntime(notifyRuntime)
     subscribeRuntimeEvents(notifyRuntimeEvent)
+    subscribeAuthPrompts(notifyAuthPrompt)
+    subscribeAuthUpdates(notifyAuthUpdate)
     registerIpc()
     try {
       const overview = await projectStore().overview()
@@ -377,7 +430,7 @@ if (!hasLock) {
     event.preventDefault()
     if (quitting) return
     quitting = true
-    void shutdownRuntime().finally(() => {
+    void (async () => { await remoteGateway?.stop(); await shutdownRuntime() })().finally(() => {
       runtimeShutdownComplete = true
       app.quit()
     })

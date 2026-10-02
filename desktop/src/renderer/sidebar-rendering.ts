@@ -3,6 +3,8 @@ import type { DesktopProject, DesktopRecentSession, DesktopSessionSummary } from
 export type SidebarStructureState = {
   projects: DesktopProject[]
   recentSessions: DesktopRecentSession[]
+  recentSessionTotal?: number
+  recentLoading?: boolean
   sessionPages: Record<string, DesktopSessionSummary[]>
   sessionTotals: Record<string, number>
   expandedProjects: Iterable<string>
@@ -10,6 +12,7 @@ export type SidebarStructureState = {
   sessionSearch: string
   deleteConfirmId: string
   deleteBusyId: string
+  sessionMenuId?: string
 }
 
 // Client-side search over the sessions already loaded in the sidebar (B8).
@@ -30,6 +33,7 @@ export function projectListStructureKey(state: SidebarStructureState) {
     search,
     deleteConfirmId: state.deleteConfirmId || "",
     deleteBusyId: state.deleteBusyId || "",
+    sessionMenuId: state.sessionMenuId || "",
     projects: state.projects.map((project) => {
       const sessions = state.sessionPages[project.path] || project.sessions
       return {
@@ -47,9 +51,12 @@ export function projectListStructureKey(state: SidebarStructureState) {
 
 export function recentListStructureKey(state: SidebarStructureState) {
   return JSON.stringify({
+    total: state.recentSessionTotal,
+    loading: state.recentLoading,
     search: (state.sessionSearch || "").trim().toLocaleLowerCase(),
     deleteConfirmId: state.deleteConfirmId || "",
     deleteBusyId: state.deleteBusyId || "",
+    sessionMenuId: state.sessionMenuId || "",
     sessions: [...state.recentSessions]
       .sort((left, right) => right.lastInteractedAt.localeCompare(left.lastInteractedAt))
       .map((session) => ({

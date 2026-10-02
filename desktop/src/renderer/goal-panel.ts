@@ -1,20 +1,13 @@
-// Goal panel (task B7): composer-adjacent presentation of the active goal
-// (objective + status) with set/clear/pause/resume. Rendering is a pure DOM
-// sync; the rind/goal/* protocol calls stay in index.ts. Ported from the web
-// surface's /goal command flows.
+// Activity displays an existing goal with clear, pause and resume actions.
+// Creating or replacing an objective belongs to /goal. Rendering is a pure DOM sync;
+// the rind/goal/* protocol calls live in app/inspector-goal.ts.
 
 import type { DesktopGoal } from "../preload/types"
-
-export type GoalPanelElements = {
-  shell: HTMLElement
-  panel: HTMLElement
-}
+import { escapeHtml } from "./app/html.ts"
 
 export type GoalPanelView = {
   goal?: DesktopGoal
   busy: boolean
-  setOpen: boolean
-  draft: string
 }
 
 export function normalizeGoal(value: unknown): DesktopGoal | undefined {
@@ -26,19 +19,22 @@ export function normalizeGoal(value: unknown): DesktopGoal | undefined {
   return { objective, status }
 }
 
-export function renderGoalPanel(elements: GoalPanelElements, view: GoalPanelView) {
-  elements.shell.hidden = false
+/**
+ * Preserve controls and focus during unrelated streaming updates.
+ */
+export function renderGoalPanel(panel: HTMLElement, view: GoalPanelView) {
   const goal = view.goal
-  if (goal && !view.setOpen) {
-    elements.shell.hidden = false
-    elements.panel.className = "goal-panel goal-active"
-    elements.panel.innerHTML = `
-      <button type="button" class="goal-trigger" data-toggle-goal-set aria-expanded="false" title="Set a new goal">
-        <span class="status-pip ${goal.status === "paused" ? "pip-paused" : "pip-running"}"></span>
-        <strong>Goal</strong>
-        <span class="goal-objective">${escapeHtml(goal.objective)}</span>
+  panel.hidden = !goal
+  const key = JSON.stringify([goal?.objective, goal?.status, view.busy])
+  if (panel.dataset.renderKey === key) return
+  panel.dataset.renderKey = key
+  if (goal) {
+    panel.innerHTML = `
+      <div class="goal-heading">
+        <h3 class="inspector-section-title">Goal</h3>
         <span class="goal-status">${escapeHtml(goal.status)}</span>
-      </button>
+      </div>
+      <p class="goal-objective">${escapeHtml(goal.objective)}</p>
       <div class="goal-actions">
         ${goal.status === "paused"
           ? `<button type="button" class="ghost-button" data-goal-resume${view.busy ? " disabled" : ""}>Resume</button>`
@@ -48,19 +44,5 @@ export function renderGoalPanel(elements: GoalPanelElements, view: GoalPanelView
     `
     return
   }
-  elements.panel.className = "goal-panel goal-set"
-  elements.panel.innerHTML = `
-    <div class="goal-set-row">
-      <strong>Goal</strong>
-      <input id="goal-objective-input" aria-label="Goal objective" autocomplete="off" placeholder="Set an objective for this session…" value="${escapeHtml(view.draft)}" />
-      <button type="button" class="primary-button" data-goal-submit${view.busy || !view.draft.trim() ? " disabled" : ""}>${goal ? "Replace" : "Set goal"}</button>
-      ${goal ? `<button type="button" class="ghost-button" data-goal-cancel>Cancel</button>` : `<button type="button" class="ghost-button" data-goal-close title="Hide goal panel">Hide</button>`}
-    </div>
-  `
-}
-
-export function escapeHtml(value: string) {
-  return value.replace(/[&<>'"]/g, (character) => ({
-    "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;",
-  })[character] ?? character)
+  panel.replaceChildren()
 }

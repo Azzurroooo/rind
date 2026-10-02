@@ -1,0 +1,146 @@
+/* Inspector (surface-design-v2 section 2 and 7), after LobeHub's right panel:
+   a tabbed column for Context, Activity and Files; Usage is a global dialog. */
+
+.inspector {
+  flex: none; display: flex; flex-direction: column;
+  width: var(--inspector-width); min-width: 0; min-height: 0;
+  border-left: 1px solid var(--line); background: var(--panel);
+}
+.inspector:focus-visible { outline-offset: -2px; }
+.inspector-scope { flex: none; padding: 8px 16px; border-bottom: 1px solid var(--line); color: var(--dim); font-size: var(--text-meta); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.task-identity { display: grid; flex: 1; min-width: 0; gap: 3px; }
+.task-id { color: var(--dim); font-size: var(--text-meta); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.task-row .task-identity .task-command { display: block; }
+.usage-dialog .inspector-body { padding: 0; }
+.usage-dialog.dialog-lg { height: auto; max-height: calc(100dvh - 32px); grid-template-rows: auto auto minmax(0, 1fr); }
+.usage-dialog .dialog-description { margin: 0; padding: 16px 24px; font-size: var(--text-dense); line-height: 1.6; }
+.usage-dialog .dialog-body { padding: 0 24px 24px; overflow-y: auto; }
+.usage-tab > .inspector-section { gap: 12px; }
+.usage-toolbar { min-height: 32px; }
+.usage-toolbar .inspector-section-title { margin: 0; }
+.usage-refresh { display: inline-flex; align-items: center; justify-content: center; gap: 6px; flex: none; min-height: 28px; padding: 2px 8px; border: 0; border-radius: var(--radius-control); background: transparent; color: var(--muted); font-size: var(--text-dense); }
+.usage-refresh:hover:not(:disabled) { background: var(--fill-2); color: var(--text); }
+.usage-refresh svg { flex: none; }
+.usage-cache { padding: 10px 12px; border: 1px solid var(--line); border-radius: var(--radius-control); background: var(--surface); }
+.usage-cache .section-hint { margin-top: 6px; }
+.inspector-head {
+  flex: none; display: flex; align-items: center; gap: var(--space-1);
+  height: var(--header-height); padding: 0 var(--space-2); border-bottom: 1px solid var(--line);
+}
+.inspector-tabs { flex: 1; min-width: 0; display: flex; gap: 2px; overflow-x: auto; scrollbar-width: none; }
+.inspector-tab {
+  flex: none; height: var(--control-sm); padding: 0 var(--space-2);
+  border: 0; border-radius: var(--radius-control); background: transparent;
+  color: var(--muted); font-size: var(--text-dense); font-weight: 500;
+}
+.inspector-tab:hover { background: var(--fill-1); color: var(--text); }
+.inspector-tab[aria-selected="true"] { background: var(--fill-2); color: var(--text); }
+.inspector-tab:focus-visible { outline-offset: -2px; }
+
+.inspector-panel { flex: 1; min-height: 0; overflow-y: auto; margin-inline-end: var(--panel-scroll-gap); }
+.inspector-body { display: grid; align-content: start; gap: var(--space-4); padding: var(--space-4) var(--panel-scroll-gap) var(--space-4) var(--space-4); }
+.inspector-panel.is-files { overflow: hidden; margin-inline-end: 0; }
+.inspector-body.files-tab { display: flex; height: 100%; min-height: 0; padding: 0; }
+.file-tree.embedded { display: flex; flex-direction: column; flex: 1; min-width: 0; min-height: 0; margin: 0; border: 0; }
+.file-tree.embedded .file-tree-body { flex: 1; display: grid; grid-template-rows: minmax(0, 1fr); min-height: 0; max-height: none; padding: 0; overflow: hidden; }
+.file-tree.embedded .file-tree-body.has-preview { grid-template-rows: minmax(80px, .32fr) minmax(0, 1fr); }
+.tree-directory { min-height: 0; overflow: auto; margin-inline-end: var(--panel-scroll-gap); padding: 6px; }
+.tree-row[aria-current=true] { background: var(--accent-soft); color: var(--accent); }
+.file-tree.embedded .tree-preview { display: flex; flex-direction: column; min-height: 0; min-width: 0; margin: 0; border: 0; border-top: 1px solid var(--line-strong); border-radius: 0; }
+.tree-preview-head { flex: none; background: var(--panel); }
+.tree-preview-content { flex: 1; min-height: 0; overflow: auto; margin-inline-end: var(--panel-scroll-gap); padding-inline-end: var(--panel-scroll-gap); }
+.file-tree.embedded .tree-preview-text { max-height: none; overflow: visible; font-size: 12px; line-height: 1.7; padding: 12px; }
+.file-tree.embedded .tree-preview-image { max-height: none; }
+.file-tree.embedded .tree-preview-close { display: grid; place-items: center; width: 32px; height: 32px; flex-basis: 32px; }
+@media (max-width: 680px) {
+  .file-tree.embedded .tree-preview-close { width: 44px; height: 44px; flex-basis: 44px; }
+  .tree-directory .tree-row { min-height: 40px; }
+}
+.inspector-section { display: grid; gap: var(--space-2); }
+.section-note { color: var(--dim); font-size: var(--text-meta); font-variant-numeric: tabular-nums; }
+.section-hint { margin: 0; color: var(--muted); font-size: var(--text-meta); line-height: 1.6; }
+.activity-empty { display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 48px 12px 24px; text-align: center; }
+.activity-empty-icon { width: 28px; height: 28px; margin-bottom: 8px; color: var(--dim); stroke-width: 1.5; }
+.activity-empty h3 { margin: 0; color: var(--text); font-size: 14px; font-weight: 600; line-height: 1.5; }
+.activity-empty p { max-width: 28ch; margin: 0; color: var(--muted); font-size: 12px; line-height: 1.7; }
+.activity-empty .activity-empty-hint { margin-top: 12px; color: var(--dim); }
+.activity-empty-hint code { display: block; margin-top: 4px; color: var(--muted); font-size: 11px; }
+.inspector-section-head { display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); }
+.inspector-section-title, .section-title {
+  display: flex; align-items: center; gap: var(--space-2);
+  color: var(--muted); font-size: var(--text-meta); font-weight: 600; text-transform: uppercase; letter-spacing: .05em;
+}
+.icon-button.small { width: 24px; height: 24px; }
+
+/* Context gauge. */
+.context-gauge { display: flex; align-items: center; gap: var(--space-4); }
+.context-gauge-ring { flex: none; width: 64px; height: 64px; color: var(--accent); }
+.context-gauge-ring.warning { color: var(--warning); }
+.context-gauge-ring.danger { color: var(--danger); }
+.context-gauge-text { display: grid; gap: 2px; min-width: 0; }
+.context-gauge-text strong { font-size: var(--text-lg); font-variant-numeric: tabular-nums; }
+.context-gauge-text span { color: var(--muted); font-size: var(--text-dense); }
+
+.stat-list { display: grid; gap: 0; margin: 0; }
+.stat-row {
+  display: flex; align-items: baseline; justify-content: space-between; gap: var(--space-3);
+  padding: 6px 0; border-bottom: 1px solid var(--line); font-size: var(--text-dense);
+}
+.stat-row:last-child { border-bottom: 0; }
+.stat-row dt { color: var(--muted); }
+.stat-row dd { margin: 0; color: var(--text); font-variant-numeric: tabular-nums; text-align: right; overflow-wrap: anywhere; }
+
+.breakdown-list, .usage-days { display: grid; gap: var(--space-2); margin: 0; padding: 0; list-style: none; }
+.breakdown-row { display: grid; gap: 4px; }
+.breakdown-label { display: flex; justify-content: space-between; gap: var(--space-2); font-size: var(--text-dense); }
+.breakdown-value { color: var(--muted); font-variant-numeric: tabular-nums; }
+.breakdown-bar { height: 4px; overflow: hidden; border-radius: var(--radius-pill); background: var(--fill-1); }
+.breakdown-bar > span { display: block; height: 100%; border-radius: inherit; background: var(--accent); }
+
+/* Providers (read-only). */
+.provider-list { display: grid; gap: 0; margin: 0; padding: 0; list-style: none; }
+.provider-row {
+  display: flex; align-items: center; justify-content: space-between; gap: var(--space-2);
+  padding: 6px 0; border-bottom: 1px solid var(--line); font-size: var(--text-dense);
+}
+.provider-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.provider-state { flex: none; color: var(--dim); font-size: var(--text-meta); }
+.provider-state.success { color: var(--success); }
+
+/* Plan checklist (Activity tab). */
+.plan-list { display: grid; gap: var(--space-1); margin: 0; padding: 0; list-style: none; }
+.plan-row { display: flex; align-items: flex-start; gap: var(--space-2); color: var(--muted); font-size: var(--text-dense); line-height: 1.5; }
+.plan-row.in_progress { color: var(--text); font-weight: 500; }
+.plan-row.completed { color: var(--dim); text-decoration: line-through; }
+.plan-check {
+  flex: none; display: grid; place-items: center; width: 18px; height: 18px; margin-top: 1px;
+  border: 1px solid var(--line-strong); border-radius: 50%; color: var(--dim); font-size: 10px;
+}
+.plan-row.in_progress .plan-check { border-color: var(--accent); color: var(--accent); }
+.plan-row.completed .plan-check { border-color: var(--success); background: var(--success-soft); color: var(--success); }
+
+/* Running background commands (Activity tab). */
+.task-list { display: grid; gap: 2px; margin: 0; padding: 0; list-style: none; }
+.task-list > li { display: grid; gap: 2px; }
+.task-pip { flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--accent); }
+.task-pip.cancelling { background: var(--warning); }
+.task-detail { display: grid; gap: var(--space-1); padding: 0 var(--space-2) var(--space-2); }
+.task-list .task-row {
+  display: flex; align-items: center; gap: var(--space-2); width: 100%;
+  min-height: var(--control-md); padding: 4px var(--space-2);
+  border: 0; border-radius: var(--radius-control); background: transparent;
+  color: var(--text); font-size: var(--text-dense); text-align: left;
+}
+.task-list .task-row:hover, .task-list .task-row.selected { background: var(--fill-1); }
+.task-list .task-row > svg { flex: none; color: var(--dim); }
+.task-command { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--font-mono); font-size: var(--text-meta); }
+.task-status { flex: none; color: var(--muted); font-size: var(--text-meta); }
+.task-status.running { color: var(--accent); }
+.task-status.failed, .task-status.killed { color: var(--danger); }
+.task-status.completed { color: var(--success); }
+.task-elapsed { flex: none; color: var(--dim); font-size: var(--text-meta); font-variant-numeric: tabular-nums; }
+.task-output {
+  max-height: 260px; overflow: auto; margin: var(--space-1) 0 var(--space-2);
+  padding: var(--space-2) var(--space-3); border-radius: var(--radius-control);
+  background: var(--surface-soft); font-size: 11px; line-height: 1.6; white-space: pre-wrap; overflow-wrap: anywhere;
+}

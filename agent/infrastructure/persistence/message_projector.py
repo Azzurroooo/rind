@@ -97,6 +97,18 @@ def project_messages(
                 projected["_rind_meta"] = {"kind": "skill_snapshot"}
             built_messages.append(projected)
 
+    # UI replay opts into persisted identity. Keep its timestamp alongside the
+    # id; default model-facing projections must remain free of UI metadata.
+    if include_ids:
+        timestamps = {
+            str(message["id"]): message["ts"]
+            for message in projected_messages
+            if isinstance(message, dict) and message.get("id") and message.get("ts")
+        }
+        for message in built_messages:
+            if message.get("id") in timestamps:
+                message["ts"] = timestamps[message["id"]]
+
     if not built_messages:
         return [{"role": "system", "content": system_prompt}]
     if compact_applied:

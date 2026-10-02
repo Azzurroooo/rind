@@ -1,0 +1,157 @@
+/* Design tokens v2 (docs/surface-design-v2.md section 1).
+   Palette and typography come from the Rind website (rind-web global.css);
+   the spacing, radius and control ladder follow LobeHub's layout tokens.
+   Components reference tokens only; a theme re-tunes this block and never
+   touches component rules.
+
+   Theme resolution: with no explicit choice the OS preference applies
+   (prefers-color-scheme); data-theme="light" | "dark" on <html> pins one. */
+
+:root {
+  --font-ui: "Manrope Variable", "PingFang SC", "Microsoft YaHei UI", system-ui, sans-serif;
+  --font-mono: "DM Mono", "Cascadia Code", Consolas, monospace;
+
+  --text-meta: 12px;
+  --text-dense: 13px;
+  --text-ui: 14px;
+  --text-chat: 15px;
+  --text-lg: 16px;
+  --text-title: 20px;
+  --text-hero: 24px;
+
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+
+  --radius-chip: 4px;
+  --radius-control: 6px;
+  --radius-card: 10px;
+  --radius-frame: 14px;
+  --radius-pill: 9999px;
+
+  --control-sm: 28px;
+  --control-md: 32px;
+  --control-lg: 36px;
+  --panel-scroll-gap: 6px;
+
+  --motion-fast: 120ms;
+  --motion-pop: 180ms;
+  --motion-panel: 200ms;
+  --ease: cubic-bezier(0.2, 0.7, 0.2, 1);
+
+  --sidebar-width: 264px;
+  --inspector-width: 360px;
+  --header-height: 44px;
+  --conversation-width: 800px;
+  --drawer-width: 320px;
+}
+
+/* Light (default when the OS asks for light or nothing is pinned). */
+:root,
+:root[data-theme="light"] {
+  color-scheme: light;
+  --bg: #f7f6f0;
+  --panel: #efeee5;
+  --surface: #fdfcf8;
+  --surface-soft: #ecebe1;
+  --line: #e1e1d6;
+  --line-strong: #d5d7ca;
+  --text: #22271f;
+  --muted: #64685e;
+  --dim: #7d8176;
+  --accent: #334c37;
+  --accent-contrast: #f4f3eb;
+  --accent-soft: #d6df9a66;
+  --fill-1: #22271f08;
+  --fill-2: #22271f0f;
+  --fill-3: #22271f1a;
+  --success: #3f7a4a;
+  --success-soft: #3f7a4a1f;
+  --warning: #9a6208;
+  --warning-soft: #9a62081f;
+  --danger: #b4452f;
+  --danger-soft: #b4452f1f;
+  --info: #3a6ea5;
+  --info-soft: #3a6ea51f;
+  --scrim: #19241e66;
+  --drawer-scrim: #0008;
+  --shadow-popover: 0 8px 16px -4px #19241e24;
+  --shadow-dialog: 0 20px 40px -12px #19241e40;
+}
+
+/* Dark: pinned explicitly, or following the OS when nothing is pinned. */
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #151d18;
+  --panel: #111914;
+  --surface: #1a241e;
+  --surface-soft: #222d26;
+  --line: #2a352d;
+  --line-strong: #3d4a3f;
+  --text: #ebeee4;
+  --muted: #a5b0a4;
+  --dim: #86917f;
+  --accent: #d6df9a;
+  --accent-contrast: #19241e;
+  --accent-soft: #d6df9a1f;
+  --fill-1: #ebeee40a;
+  --fill-2: #ebeee412;
+  --fill-3: #ebeee41f;
+  --success: #8fc79a;
+  --success-soft: #8fc79a1f;
+  --warning: #e5b25c;
+  --warning-soft: #e5b25c1f;
+  --danger: #ec8a74;
+  --danger-soft: #ec8a741f;
+  --info: #8ab4e8;
+  --info-soft: #8ab4e81f;
+  --scrim: #0a0f0c99;
+  --drawer-scrim: #0008;
+  --shadow-popover: 0 8px 16px -4px #00000066;
+  --shadow-dialog: 0 20px 40px -12px #00000080;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --bg: #151d18;
+    --panel: #111914;
+    --surface: #1a241e;
+    --surface-soft: #222d26;
+    --line: #2a352d;
+    --line-strong: #3d4a3f;
+    --text: #ebeee4;
+    --muted: #a5b0a4;
+    --dim: #86917f;
+    --accent: #d6df9a;
+    --accent-contrast: #19241e;
+    --accent-soft: #d6df9a1f;
+    --fill-1: #ebeee40a;
+    --fill-2: #ebeee412;
+    --fill-3: #ebeee41f;
+    --success: #8fc79a;
+    --success-soft: #8fc79a1f;
+    --warning: #e5b25c;
+    --warning-soft: #e5b25c1f;
+    --danger: #ec8a74;
+    --danger-soft: #ec8a741f;
+    --info: #8ab4e8;
+    --info-soft: #8ab4e81f;
+    --scrim: #0a0f0c99;
+    --drawer-scrim: #0008;
+    --shadow-popover: 0 8px 16px -4px #00000066;
+    --shadow-dialog: 0 20px 40px -12px #00000080;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --motion-fast: 0ms;
+    --motion-pop: 0ms;
+    --motion-panel: 0ms;
+  }
+}

@@ -7,6 +7,8 @@ export type QuestionSelection = {
   questionId: string
   selectedIndex: number
   customInput: string
+  submitting?: boolean
+  error?: string
 }
 
 export function createQuestionSelection(questionId: string, optionCount: number): QuestionSelection {
@@ -28,7 +30,7 @@ export function selectQuestionOption(
   return {
     ...selection,
     selectedIndex: nextIndex,
-    customInput: nextIndex === customIndex ? selection.customInput : "",
+    error: "",
   }
 }
 
@@ -38,7 +40,7 @@ export function updateQuestionInput(selection: QuestionSelection, customInput: s
 
 export function canConfirmQuestion(selection: QuestionSelection, optionCount: number): boolean {
   const customIndex = Math.max(0, Math.floor(optionCount))
-  return selection.selectedIndex >= 0
+  return !selection.submitting && selection.selectedIndex >= 0
     && (selection.selectedIndex < customIndex || Boolean(selection.customInput.trim()))
 }
 

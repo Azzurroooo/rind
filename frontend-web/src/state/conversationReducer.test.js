@@ -30,8 +30,8 @@ describe("conversation reducer — golden replay (web-ui.md §3)", () => {
   it("rebuilds the final UI state from the golden stream", () => {
     const state = replay(envelopes);
 
-    // Final UI state snapshot: message count, tool block, turn/card state.
-    expect(state.entries).toHaveLength(3);
+    // Task snapshots stay in Activity; the transcript contains the tool and reply.
+    expect(state.entries).toHaveLength(2);
     expect(state.entries[0]).toMatchObject({
       role: "tool",
       tool_call_id: "call-1",
@@ -57,13 +57,13 @@ describe("conversation reducer — golden replay (web-ui.md §3)", () => {
     const once = replay(envelopes);
     const twice = envelopes.reduce((state, envelope) => reduceConversation(state, envelope), once);
     expect(twice).toEqual(once);
-    expect(twice.entries).toHaveLength(3);
+    expect(twice.entries).toHaveLength(2);
     expect(twice.cursor).toBe(4);
   });
 
   it("view mapping exposes the same stream as messages/draft/plan/active", () => {
     const view = conversationView(replay(envelopes));
-    expect(view.messages).toHaveLength(3);
+    expect(view.messages).toHaveLength(2);
     expect(view.draft).toBe("");
     expect(view.active).toBe(false);
     expect(view.cursor).toBe(4);
@@ -78,7 +78,7 @@ describe("conversation reducer — streaming aggregation", () => {
       event(3, "incremental", { type: "assistant_delta", turn_id: "t1", text: "lo" }),
     ];
     let state = replay(envelopes);
-    expect(state.streaming).toEqual({ turnId: "t1", text: "hello" });
+    expect(state.streaming).toMatchObject({ turnId: "t1", text: "hello" });
     expect(conversationView(state).draft).toBe("hello");
 
     state = reduceConversation(state, event(4, "durable", { type: "assistant_message_completed", turn_id: "t1", content: "hello world" }));
@@ -334,6 +334,16 @@ describe("conversation reducer — queued inputs (audit #1)", () => {
   it("delivery of an unknown input still renders the message (transcript stays faithful)", () => {
     const state = reduceConversation(emptyConversationState(), event(1, "durable", { type: "queued_input_delivered", input_id: "ghost", input: "hi", mode: "steering" }));
     expect(state.entries.at(-1)).toMatchObject({ role: "user", content: "hi" });
+  });
+
+  it("never consumes another client's queued entry and ignores late acknowledgments", () => {
+    let state = reduceConversation(emptyConversationState(), queueAction);
+    state = reduceConversation(state, event(1, "durable", { type: "queued_input_delivered", input_id: "remote", input: "Remote text", mode: "follow_up" }));
+    expect(state.queued.map((item) => item.inputId)).toEqual(["in-1"]);
+    state = reduceConversation(state, { kind: "queue_input", inputId: "remote", input: "Remote text", mode: "follow_up" });
+    expect(state.queued.map((item) => item.inputId)).toEqual(["in-1"]);
+    state = reduceConversation(state, event(2, "durable", { type: "queued_input_delivered", input_id: "remote", input: "Remote text" }));
+    expect(state.entries.filter((item) => item.content === "Remote text")).toHaveLength(1);
   });
 
   it("unqueue removes the chip (retrieve) and requeue flips the mode in place (steer)", () => {

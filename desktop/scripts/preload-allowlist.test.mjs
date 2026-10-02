@@ -1,14 +1,8 @@
 import assert from "node:assert/strict"
 import test from "node:test"
 
+import { isDesktopRuntimeMethod as isRuntimeMethod } from "../src/main/method-policy.ts"
 import { runtimeMethods, sessionScopedMethods } from "../src/preload/types.ts"
-
-// Mirrors the main-process allowlist construction (src/main/index.ts).
-const allowedRuntimeMethods = new Set(Object.values(runtimeMethods))
-
-function isRuntimeMethod(method) {
-  return allowedRuntimeMethods.has(method)
-}
 
 test("unblocked desktop methods pass the runtime allowlist", () => {
   const required = [
@@ -34,8 +28,8 @@ test("unblocked desktop methods pass the runtime allowlist", () => {
 
 test("unknown methods are still rejected", () => {
   assert.equal(isRuntimeMethod("nope"), false)
-  assert.equal(isRuntimeMethod("session/switch"), false)
-  assert.equal(isRuntimeMethod("session/subscribe"), false)
+  assert.equal(isRuntimeMethod("session/switch"), true)
+  assert.equal(isRuntimeMethod("session/subscribe"), true)
   assert.equal(isRuntimeMethod(""), false)
   assert.equal(isRuntimeMethod("initialize"), false, "lifecycle methods are not runtime methods")
 })

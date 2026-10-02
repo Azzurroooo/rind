@@ -1,11 +1,54 @@
 import { createElement, type IconNode } from "lucide"
 
-export function renderIcon(icon: IconNode) {
+/** Decorative icon markup. Buttons that carry only an icon must set aria-label. */
+export function renderIcon(icon: IconNode, className = "topbar-icon") {
   return createElement(icon, {
-    class: "topbar-icon",
+    class: className,
     "aria-hidden": "true",
     focusable: "false",
   }).outerHTML
 }
 
-export { PanelLeft, PanelRight, Settings } from "lucide"
+export {
+  ArrowDown,
+  ArrowUp,
+  Ban,
+  Bell,
+  Brain,
+  ChartNoAxesColumn,
+  Check,
+  ChevronRight,
+  ChevronDown,
+  CornerUpRight,
+  Cpu,
+  CircleAlert,
+  CircleCheck,
+  CircleX,
+  Clock,
+  Copy,
+  Download,
+  Ellipsis,
+  Eye,
+  Folder,
+  GitBranch,
+  Hand,
+  Keyboard,
+  KeyRound,
+  ListTodo,
+  ListPlus,
+  LoaderCircle,
+  MonitorSmartphone,
+  Moon,
+  PanelLeft,
+  PanelRight,
+  Pencil,
+  RotateCcw,
+  Search,
+  Settings,
+  SlidersHorizontal,
+  Square,
+  Sun,
+  SunMoon,
+  Trash2,
+  X,
+} from "lucide"

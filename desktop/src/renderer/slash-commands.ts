@@ -10,15 +10,14 @@ export type SlashCommandMenu = {
   commands: SlashCommand[]
 }
 
-const DESKTOP_HIDDEN_COMMANDS = new Set(["model", "sessions"])
+const DESKTOP_HIDDEN_COMMANDS = new Set([
+  "config", "context", "doctor", "login", "logout", "model", "effort", "session", "sessions", "theme", "exit", "quit",
+])
 
 export const fallbackSlashCommands: SlashCommand[] = [
   ["compact", "Compact current session context", "/compact"],
-  ["config", "Show config guidance", "/config"],
-  ["doctor", "Run local setup diagnostics", "/doctor"],
   ["help", "Show commands", "/help [command]"],
   ["init", "Draft RIND.md", "/init [project|user]"],
-  ["login", "Show login setup guidance", "/login"],
   ["skill", "List skills", "/skill [list]"],
   ["status", "Show session status", "/status"],
   ["team", "Create a Team project", "/team create [project-id]"],
@@ -38,11 +37,11 @@ export function isDesktopHiddenSlashCommand(name: string) {
   return DESKTOP_HIDDEN_COMMANDS.has(name.trim().toLocaleLowerCase())
 }
 
-export function desktopSlashCommandNotice(input: string) {
-  const command = input.trim()
-  if (/^\/sessions(?:\s|$)/i.test(command)) return "Use the left sidebar to switch sessions."
-  if (/^\/help\s+\/?sessions(?:\s|$)/i.test(command)) return "Use the left sidebar to switch sessions."
-  return undefined
+/** Splits "/name argument" into a lower-case name and trimmed argument. */
+export function parseSlashInput(input: string): { name: string; argument: string } | undefined {
+  const parts = input.trim().match(/^\/([^\s]+)(?:\s+([\s\S]*))?$/)
+  if (!parts) return undefined
+  return { name: parts[1].toLocaleLowerCase(), argument: (parts[2] || "").trim() }
 }
 
 export function slashCommandMenu(commands: SlashCommand[], input: string): SlashCommandMenu | undefined {

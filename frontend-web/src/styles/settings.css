@@ -1,0 +1,43 @@
+/* Settings (surface-design-v2 section 8), after Jan: 760x560 with a 200px nav. */
+
+.settings-dialog .dialog-body { display: flex; min-height: 0; flex: 1; }
+.settings-dialog { display: flex; flex-direction: column; }
+.settings-layout { flex: 1; min-height: 0; display: grid; grid-template-columns: 200px minmax(0, 1fr); width: 100%; }
+.settings-nav {
+  display: grid; align-content: start; gap: 2px; padding: var(--space-2);
+  border-right: 1px solid var(--line); background: var(--panel);
+}
+.settings-nav-item {
+  display: flex; align-items: center; gap: var(--space-2);
+  height: var(--control-md); padding: 0 var(--space-2);
+  border: 0; border-radius: var(--radius-control); background: transparent;
+  color: var(--muted); text-align: left;
+}
+.settings-nav-item:hover { background: var(--fill-1); color: var(--text); }
+.settings-nav-item[aria-current="page"] { background: var(--fill-2); color: var(--text); font-weight: 500; }
+.settings-content { min-height: 0; overflow-y: auto; padding: var(--space-5); }
+.settings-content section { display: grid; gap: var(--space-3); justify-items: start; }
+.settings-heading { font-size: var(--text-lg); }
+.settings-row {
+  display: flex; align-items: center; justify-content: space-between; gap: var(--space-4);
+  width: 100%; padding: var(--space-2) 0; border-bottom: 1px solid var(--line);
+}
+.settings-row dt { color: var(--text); }
+.settings-row dd { margin: 0; }
+.shortcut-list { width: 100%; margin: 0; }
+
+.segmented { display: inline-flex; gap: 2px; padding: 2px; border-radius: var(--radius-control); background: var(--fill-1); }
+.segmented-item {
+  display: inline-flex; align-items: center; gap: 6px;
+  height: var(--control-sm); padding: 0 var(--space-3);
+  border: 0; border-radius: var(--radius-chip); background: transparent; color: var(--muted); font-size: var(--text-dense);
+}
+.segmented-item:hover { color: var(--text); }
+.segmented-item[aria-checked="true"] { background: var(--surface); color: var(--text); box-shadow: 0 1px 2px rgb(0 0 0 / .08); }
+
+@media (max-width: 767px) {
+  .dialog-lg { height: calc(100dvh - 32px); }
+  .settings-layout { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr); }
+  .settings-nav { display: flex; overflow-x: auto; border-right: 0; border-bottom: 1px solid var(--line); }
+  .settings-nav-item { flex: none; }
+}

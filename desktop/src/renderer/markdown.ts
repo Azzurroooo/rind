@@ -1,3 +1,5 @@
+import { escapeAttribute, escapeHtml } from "./html-escape.ts"
+
 export function renderMarkdown(value: string): string {
   const lines = value.replace(/\r\n?/g, "\n").split("\n")
   const blocks: string[] = []
@@ -178,14 +180,4 @@ function renderInline(value: string) {
     .replace(/(^|[^\w])([*_])(?=\S)([^\n]*?\S)\2/g, "$1<em>$3</em>")
     .replace(/\n/g, "<br>")
   return rendered.replace(/\u0000(\d+)\u0000/g, (_match, index: string) => tokens[Number(index)] || "")
-}
-
-function escapeHtml(value: string) {
-  return value.replace(/[&<>'\"]/g, (character) => ({
-    "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '\"': "&quot;",
-  })[character] ?? character)
-}
-
-function escapeAttribute(value: string) {
-  return escapeHtml(value).replace(/\n/g, "&#10;")
 }

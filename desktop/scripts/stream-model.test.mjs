@@ -1,5 +1,6 @@
 import assert from "node:assert/strict"
 import test from "node:test"
+import { JSDOM } from "jsdom"
 
 import {
   addUserMessage,
@@ -20,7 +21,7 @@ import {
   reduceEvent,
   relativeTime,
 } from "../src/renderer/timeline-model.ts"
-import { composerRegionMarkup, renderComposer, syncPlanDockSession } from "../src/renderer/composer-region.ts"
+import { composerRegionMarkup, renderComposer } from "../src/renderer/composer-region.ts"
 import { highlightFile } from "../src/renderer/syntax-highlight.ts"
 
 function event(type, data = {}, turnId = "turn-1") {
@@ -380,10 +381,10 @@ test("helper formatting stays compact", () => {
   assert.equal(parseToolResult('{"ok":false,"tool":"bash","error":"failed","error_type":"ExitCode"}').errorType, "ExitCode")
 })
 
-test("composer region keeps plan dock above a persistent input form", () => {
+test("composer region keeps the queued-input dock above a persistent input form", () => {
+  globalThis.document = new JSDOM().window.document
   const markup = composerRegionMarkup()
-  assert.equal(markup.indexOf('class="composer-region"') < markup.indexOf('id="plan-dock-shell"'), true)
-  assert.equal(markup.indexOf('id="plan-dock-shell"') < markup.indexOf('id="composer"'), true)
+  assert.doesNotMatch(markup, /plan-dock/)
   assert.equal(markup.indexOf('id="pending-input-dock"') < markup.indexOf('id="composer"'), true)
   assert.match(markup, /id="prompt" rows="2"/)
   assert.match(markup, /id="slash-command-menu" class="slash-command-menu" role="listbox"/)
@@ -394,28 +395,19 @@ test("composer region keeps plan dock above a persistent input form", () => {
   assert.match(markup, /id="project-menu" class="composer-select-menu" role="listbox"/)
   assert.doesNotMatch(markup, /id="model-select"/)
   assert.doesNotMatch(markup, /id="project-select"/)
-  assert.doesNotMatch(markup, /id="steer"/)
-  assert.match(markup, /class="send-spinner"/)
+  assert.match(markup, /id="steer" type="button"/)
+  assert.match(markup, /id="send-actions-menu"/)
+  delete globalThis.document
 })
 
-test("composer exposes slash command work and blocks overlapping input", () => {
-  const sendLabel = { textContent: "" }
-  const compactLabel = { textContent: "" }
+test("composer lets users draft while blocking overlapping commands", () => {
+  globalThis.document = new JSDOM().window.document
+  document.body.innerHTML = composerRegionMarkup()
+  const element = (id) => document.getElementById(id)
   const elements = {
-    prompt: { disabled: false, placeholder: "", setAttribute() {}, style: {} },
-    send: {
-      disabled: false,
-      title: "",
-      classList: { toggle() {} },
-      setAttribute() {},
-      querySelector: () => sendLabel,
-    },
-    interrupt: { disabled: false },
-    menuTrigger: { disabled: false, setAttribute() {} },
-    menu: { hidden: false },
-    compactContext: { disabled: false, querySelector: () => compactLabel },
-    slashCommandMenu: {},
-    contextMeter: { hidden: false, textContent: "", classList: { toggle() {} } },
+    prompt: element("prompt"), send: element("send"), interrupt: element("interrupt"),
+    menuTrigger: element("composer-menu-trigger"), menu: element("composer-menu"),
+    compactContext: element("compact-context"), slashCommandMenu: element("slash-command-menu"), contextMeter: element("context-meter"),
   }
   renderComposer(elements, {
     ready: true,
@@ -430,18 +422,11 @@ test("composer exposes slash command work and blocks overlapping input", () => {
     slashCommandInput: "/status",
     contextUsagePercent: null,
   })
-  assert.equal(elements.prompt.disabled, true)
+  assert.equal(elements.prompt.disabled, false)
   assert.equal(elements.prompt.placeholder, "Running /status...")
-  assert.equal(sendLabel.textContent, "Running")
+  assert.equal(elements.send.disabled, true)
   assert.equal(elements.send.title, "Running /status")
-})
-
-test("plan dock keeps a manual collapse through plan updates but resets for another session", () => {
-  const presentation = { collapsed: true, sessionId: "session-1", dismissedPlanErrors: new Set() }
-  syncPlanDockSession(presentation, "session-1")
-  assert.equal(presentation.collapsed, true)
-  syncPlanDockSession(presentation, "session-2")
-  assert.equal(presentation.collapsed, false)
+  delete globalThis.document
 })
 
 test("file syntax highlighting escapes unknown files and colors known files", () => {

@@ -1,0 +1,42 @@
+/* Popover menus (spec section 7): radius 10, padding 4, 32px rows. */
+
+.menu {
+  position: absolute;
+  z-index: 20;
+  display: grid;
+  min-width: 168px;
+  padding: 4px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  box-shadow: var(--shadow-popover);
+  animation: menu-in var(--dur-hover) var(--ease);
+}
+.menu-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  height: 32px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  background: transparent;
+  font-size: var(--text-dense);
+  text-align: left;
+  white-space: nowrap;
+}
+.menu-item:hover:not(:disabled), .menu-item:focus-visible { background: var(--fill-2); }
+.menu-item:disabled { color: var(--dim); cursor: default; }
+.menu-item-danger:not(:disabled) { color: var(--danger); }
+.menu-item-danger.confirm { background: var(--danger-soft); font-weight: 500; }
+.menu-separator { height: 1px; margin: 4px 6px; background: var(--line); }
+@keyframes menu-in {
+  from { opacity: 0; transform: translateY(-2px); }
+  to { opacity: 1; transform: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .menu { animation: none; }
+}

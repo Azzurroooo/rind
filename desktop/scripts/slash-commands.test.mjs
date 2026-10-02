@@ -3,16 +3,19 @@ import test from "node:test"
 
 import {
   commandPrefill,
-  desktopSlashCommandNotice,
   fallbackSlashCommands,
   isExactSlashCommand,
   parseSlashCommands,
+  parseSlashInput,
   revealSlashCommandOption,
   slashCommandMenu,
 } from "../src/renderer/slash-commands.ts"
 import { executeLocalSlashCommand } from "../src/renderer/local-slash-commands.ts"
 
 test("Desktop hides removed and sidebar-owned commands from fallback and Runtime catalogs", () => {
+  const removed = ["config", "context", "doctor", "login", "logout", "model", "effort", "session", "sessions", "theme"]
+  assert.deepEqual(parseSlashCommands(removed.map((name) => ({ name, aliases: ["alias_" + name] }))), [])
+  assert.deepEqual(parseSlashCommands([{ name: "status", aliases: [...removed, "st"] }])[0].aliases, ["st"])
   assert.equal(fallbackSlashCommands.some((command) => command.name === "sessions"), false)
   assert.equal(fallbackSlashCommands.some((command) => command.name === "model"), false)
   const parsed = parseSlashCommands([
@@ -23,12 +26,12 @@ test("Desktop hides removed and sidebar-owned commands from fallback and Runtime
   assert.deepEqual(parsed.map((command) => command.name), ["status"])
 })
 
-test("Desktop handles removed session commands locally", () => {
-  assert.equal(desktopSlashCommandNotice("/sessions"), "Use the left sidebar to switch sessions.")
-  assert.equal(desktopSlashCommandNotice("/sessions 20"), "Use the left sidebar to switch sessions.")
-  assert.equal(desktopSlashCommandNotice("/help sessions"), "Use the left sidebar to switch sessions.")
-  assert.equal(desktopSlashCommandNotice("/help /sessions"), "Use the left sidebar to switch sessions.")
-  assert.equal(desktopSlashCommandNotice("/help status"), undefined)
+test("parseSlashInput splits the name and trims the argument", () => {
+  assert.deepEqual(parseSlashInput("/Help  status "), { name: "help", argument: "status" })
+  assert.deepEqual(parseSlashInput("/goal ship it\nnow"), { name: "goal", argument: "ship it\nnow" })
+  assert.deepEqual(parseSlashInput("/compact"), { name: "compact", argument: "" })
+  assert.equal(parseSlashInput("hello /compact"), undefined)
+  assert.equal(parseSlashInput("/"), undefined)
 })
 
 test("Desktop local commands do not require a project or Runtime", () => {
@@ -43,9 +46,10 @@ test("Desktop local commands do not require a project or Runtime", () => {
   assert.equal(status?.display?.type, "status")
   assert.match(status?.text || "", /Runtime: stopped/)
   const config = executeLocalSlashCommand("/config", context)
-  assert.equal(config?.display?.type, "config")
-  assert.match(config?.text || "", /apiKey: set/)
+  assert.equal(config, undefined)
   assert.equal(executeLocalSlashCommand("/model", context), undefined)
+  assert.equal(executeLocalSlashCommand("/login", context), undefined, "/login has no slash form")
+  assert.equal(fallbackSlashCommands.some((command) => command.name === "login"), false)
 })
 
 const commands = parseSlashCommands([

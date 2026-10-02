@@ -19,6 +19,12 @@ export type RuntimeEvent = {
 export const runtimeProtocolVersion = "2"
 
 export const runtimeMethods = {
+  sessionList: "session/list",
+  sessionSwitch: "session/switch",
+  sessionFork: "session/fork",
+  sessionSubscribe: "session/subscribe",
+  contextInspect: "rind/context/inspect",
+  usageSummary: "rind/usage/summary",
   sessionNew: "session/new",
   sessionReplay: "session/replay",
   sessionPrompt: "session/prompt",
@@ -49,6 +55,9 @@ export const runtimeMethods = {
   goalSet: "rind/goal/set",
   goalStatus: "rind/goal/status",
   goalClear: "rind/goal/clear",
+  authList: "rind/auth/list",
+  authLogin: "rind/auth/login",
+  authLogout: "rind/auth/logout",
 } as const
 
 export type RuntimeMethod = typeof runtimeMethods[keyof typeof runtimeMethods]
@@ -81,6 +90,14 @@ export const sessionScopedMethods = new Set<RuntimeMethod>([
   runtimeMethods.goalSet,
   runtimeMethods.goalStatus,
   runtimeMethods.goalClear,
+  runtimeMethods.authLogin,
+])
+
+/** Methods that need the desktop window (interactive auth prompts, local
+ *  credential storage). The remote gateway must never forward them. */
+export const localOnlyRuntimeMethods = new Set<RuntimeMethod>([
+  runtimeMethods.authLogin,
+  runtimeMethods.authLogout,
 ])
 
 export const turnScopedMethods = new Set<RuntimeMethod>([
@@ -168,6 +185,7 @@ export type DesktopProject = {
 export type DesktopProjectOverview = {
   projects: DesktopProject[]
   recentSessions: DesktopRecentSession[]
+  recentSessionTotal: number
   activeProjectPath: string
   sidebarOpen: boolean
   sidebarWidth: number
@@ -185,11 +203,17 @@ export type DesktopGoal = {
 export type DesktopBackgroundTask = {
   bg_id: string
   status: string
+  /** True once the agent yielded the call; the process keeps running. */
+  handoff?: boolean
+  command?: string
+  elapsed_ms?: number
   exit_code?: number
   cwd?: string
   stdout?: string
   stderr?: string
   truncated?: boolean
+  next_cursor?: string
+  start_cursor?: string
 }
 
 export type DesktopFileNode = {
@@ -216,7 +240,44 @@ export type DesktopFilePreview = {
   message?: string
 }
 
+export type DesktopAuthProvider = {
+  id: string
+  name: string
+  methods: string[]
+  configured: boolean
+  source: string
+}
+
+export type DesktopAuthPromptKind = "select" | "secret" | "text"
+
+export type DesktopAuthPrompt = {
+  requestId: string
+  kind: DesktopAuthPromptKind
+  message: string
+  options: readonly string[]
+}
+
+export type DesktopAuthUpdate = Record<string, unknown> & { type: string }
+
+export type DesktopAuthLoginResult = {
+  ok: boolean
+  provider_id: string
+  models_count?: number
+  selection?: unknown
+}
+
+export type GatewayOptions = { scope: "loopback" | "lan"; port?: number; externalOrigin?: string }
+export type GatewayState = { running: boolean; scope: "loopback" | "lan"; port: number; addresses: string[]; accessCode: string; clients: number }
+
 export type DesktopApi = {
+  gateway: {
+    get: () => Promise<GatewayState>
+    start: (options: GatewayOptions) => Promise<GatewayState>
+    stop: () => Promise<GatewayState>
+    rotate: () => Promise<GatewayState>
+    allowNetwork: () => Promise<GatewayState>
+    subscribe: (listener: (state: GatewayState) => void) => () => void
+  }
   runtime: {
     start: (workspace: string) => Promise<RuntimeSnapshot>
     initialize: () => Promise<unknown>
@@ -224,6 +285,14 @@ export type DesktopApi = {
     shutdown: () => Promise<unknown>
     subscribe: (listener: (snapshot: RuntimeSnapshot) => void) => () => void
     subscribeEvents: (listener: (event: RuntimeEvent) => void) => () => void
+  }
+  auth: {
+    list: () => Promise<DesktopAuthProvider[]>
+    login: (sessionId: string, providerId: string, method?: string) => Promise<DesktopAuthLoginResult>
+    logout: (providerId: string) => Promise<unknown>
+    respond: (requestId: string, value: string) => Promise<boolean>
+    onPrompt: (listener: (prompt: DesktopAuthPrompt) => void) => () => void
+    onUpdate: (listener: (update: DesktopAuthUpdate) => void) => () => void
   }
   settings: {
     get: (workspace?: string) => Promise<DesktopSettings>
@@ -239,7 +308,7 @@ export type DesktopApi = {
   workspaceFiles: {
     list: (path?: string) => Promise<unknown>
     read: (path: string) => Promise<unknown>
-    write: (path: string, contentBase64: string) => Promise<unknown>
+    write: (projectPath: string, path: string, contentBase64: string) => Promise<unknown>
   }
   background: {
     list: (sessionId: string) => Promise<unknown>
@@ -266,6 +335,7 @@ export type DesktopApi = {
     select: (path: string) => Promise<DesktopProjectOverview>
     remove: (path: string) => Promise<DesktopProjectOverview>
     markRecent: (sessionId: string) => Promise<DesktopProjectOverview>
+    recentPage: (offset: number, limit?: number) => Promise<{ sessions: DesktopRecentSession[]; total: number }>
     updateLayout: (patch: { sidebarOpen?: boolean; sidebarWidth?: number; filesOpen?: boolean; filePanelWidth?: number }) => Promise<DesktopProjectOverview>
     sessions: (path: string, offset: number, limit: number) => Promise<{ sessions: DesktopSessionSummary[]; total: number }>
   }
