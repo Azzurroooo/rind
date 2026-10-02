@@ -113,13 +113,18 @@ export function taskStatusClass(task: DesktopBackgroundTask) {
 // running command, click to expand polled output. Interactions use
 // data-attribute delegation in app/inspector-tasks.ts (data-toggle-task,
 // data-task-output, data-task-action).
-export function renderTaskMonitor(dock: HTMLElement, state: TaskMonitorState) {
+export function renderTaskMonitor(dock: HTMLElement, state: TaskMonitorState, waitingCount = 0) {
+  dock.hidden = !state.tasks.length && !state.error && !waitingCount
+  if (dock.hidden) {
+    patchChildren(dock, "")
+    return
+  }
   if (!state.tasks.length) {
     patchChildren(dock, `
       <div class="task-monitor-head">
         <h3 class="inspector-section-title">Tasks</h3>
       </div>
-      <p class="inspector-empty">${state.error ? escapeHtml(state.error) : !state.loaded && state.refreshing ? "Loading tasks…" : "No background commands are running. Completed output stays in the conversation."}</p>
+      <p class="inspector-empty"${state.error ? ' role="alert"' : ''}>${state.error ? escapeHtml(state.error) : "Waiting on background commands. Yielded commands appear here."}</p>
     `)
     return
   }

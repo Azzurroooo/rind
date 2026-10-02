@@ -5,7 +5,7 @@ import { addAttachmentFiles, bindAttachmentEvents } from "./attachments-ui.ts"
 import { closeComposerSelectMenus, selectEffort, selectModel, toggleEffortMenu, toggleModelMenu, toggleProjectMenu } from "./composer-menus.ts"
 import { autoGrowPrompt, closeSlashCommandMenu, renderSlashCommandMenu, revealActiveSlashCommand, selectSlashCommand, sendPrompt, setPrompt } from "./composer.ts"
 import { attachButton, attachInput, compactContext, composerForm, contextMeter, composerMenuTrigger, effortMenu, effortMenuTrigger, modelMenu, modelMenuTrigger, projectMenu, projectMenuTrigger, prompt, requiredElement, slashCommandMenu } from "./dom.ts"
-import { openGoalTab, toggleInspector } from "./inspector.ts"
+import { toggleInspector } from "./inspector.ts"
 import { runAction } from "./runtime.ts"
 import { currentDraftKey, selectChatProject, sessionTurnActive } from "./sessions.ts"
 import { render, renderComposerState } from "./shell.ts"
@@ -99,11 +99,6 @@ export function bindComposerEvents(): void {
     state.composerMenuOpen = false
     render()
       runAction(compactCurrentSession, state.viewedSessionId)
-  })
-
-  requiredElement("toggle-goal").addEventListener("click", () => {
-    state.composerMenuOpen = false
-    runAction(openGoalTab, state.viewedSessionId)
   })
 
   composerForm.addEventListener("dragover", (event) => {

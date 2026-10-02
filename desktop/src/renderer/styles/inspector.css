@@ -90,12 +90,19 @@
 
 /* Activity tab: plan, yielded tasks and goal stacked in one column. */
 .activity-panel { display: grid; align-content: start; gap: 12px; padding: 12px var(--panel-scroll-gap) 12px 12px; }
+.activity-panel > [hidden] { display: none; }
 .activity-section { display: grid; gap: 8px; padding: 10px 12px 12px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface); }
 .activity-section .inspector-section-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .activity-section .inspector-section-title { color: var(--dim); font-size: 11px; font-weight: 600; letter-spacing: .05em; text-transform: uppercase; }
 .activity-note { color: var(--dim); font-family: var(--font-mono); font-size: 10.5px; font-variant-numeric: tabular-nums; }
 .activity-panel .task-monitor, .activity-panel .goal-panel { border: 0; padding: 0; background: transparent; }
 .activity-panel .task-monitor { overflow: visible; }
+.activity-empty { display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 48px 12px 24px; text-align: center; }
+.activity-empty-icon { width: 28px; height: 28px; margin-bottom: 8px; color: var(--dim); stroke-width: 1.5; }
+.activity-empty h3 { margin: 0; color: var(--text); font-size: 14px; font-weight: 600; line-height: 1.5; }
+.activity-empty p { max-width: 28ch; margin: 0; color: var(--muted); font-size: 12px; line-height: 1.7; }
+.activity-empty .activity-empty-hint { margin-top: 12px; color: var(--dim); }
+.activity-empty-hint code { display: block; margin-top: 4px; color: var(--muted); font-size: 11px; }
 
 /* narrow windows: the inspector becomes a drawer over the conversation */
 @media (max-width: 760px) {

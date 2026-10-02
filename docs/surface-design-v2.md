@@ -95,9 +95,17 @@ Each status color has a `-soft` background (same hue, ~12% alpha).
   restores the full directory without losing its position. Late reads cannot replace
   a newer selection or reopen a closed preview.
   The Activity tab is one scrollable column — after LobeHub's WorkingSidebar overview — stacking the
-  live plan checklist, background commands the agent yielded that are still running, and the goal
-  controls, each as a card with a compact uppercase section head. There is no plan deck beside the
-  composer: `update_plan` state lives in the Activity tab only.
+  live plan checklist, background commands the agent yielded that are still running, and an existing
+  goal with a compact section head. Render only populated sections, plus task failures or a pending
+  background wait. There is no plan deck beside the composer: `update_plan` state lives in Activity.
+  Goal creation and replacement use `/goal <objective>` only. The sidebar has no objective field,
+  create button or clickable goal heading. Existing goals retain Pause / Resume / Clear; empty goals
+  occupy no space. Desktop's redundant composer-menu and palette creation actions are removed.
+  When every section is empty, show one unframed, centered state with 48px top padding: a muted
+  28px ListTodo icon, 14px/600 heading, 12px explanation limited to 28ch, and subdued `/goal` guidance.
+  New conversations say "No activity yet"; existing sessions say "No active work" and explain where
+  completed output stays. Initial task loading is distinct, but background revalidation keeps the
+  settled empty state. Errors and pending tasks never disappear behind the empty-state guidance.
   Tasks are keyed by task/background ID: updates replace the existing row. Revalidation keeps
   prior output, focus, expansion, history cursor, and scroll position. Poll only while visible;
   isolate late responses when the viewed session changes.

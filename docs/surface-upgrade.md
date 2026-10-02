@@ -590,3 +590,52 @@ are limited to removing duplicate Close labels and exposing Web's Refresh label;
 navigation and pagination labels remain unchanged. No Worker or gateway source
 changed. Temporary QA profiles, sessions, files, captures and scripts were removed,
 and their processes closed. This verification is not an installer or physical-phone test.
+
+## Activity empty state and slash-only goal creation — 2026-10-02
+
+The existing design contract, section 2, now treats Activity as a session overview.
+References inspected: Jan's `containers/CoworkEmptyState.tsx` for contextual guidance
+and restrained typography, and LobeHub's `features/AgentTopicManager/EmptyState.tsx`
+for the icon/title/description hierarchy. This is a focused change within Rind's
+existing visual system, so no new image concept or bitmap assets were needed.
+
+- Removed the objective form and create/replace controls from both Activity panels.
+  Desktop's extra Set goal composer-menu and palette entries are also gone. Creation
+  and replacement use `/goal <objective>`; bare `/goal` shows the goal or explains
+  the syntax. Web's palette entry is explicitly named Show goal and only queries it.
+  Existing goals keep their status and Pause / Resume / Clear controls.
+- A single unframed empty state replaces the scattered task placeholder and goal
+  form. It has a muted ListTodo icon, compact heading, contextual explanation and
+  plain-text slash guidance. New conversations and existing idle sessions use
+  different descriptions. Populated plans, tasks and goals render independently;
+  unused sections consume no space. Task failures and pending waits remain visible.
+- Task polling retains the settled empty state during background revalidation,
+  then replaces it when a running task arrives. Removing the last goal restores
+  the empty state. Desktop goal updates now guard against completing into a
+  different viewed session, and a failed refresh preserves an already-loaded goal.
+- Removed the old form draft/toggle state, creation event handlers, bare-panel
+  option, obsolete form styling and unused task-placeholder selectors. The Web
+  management handler no longer accepts goal creation. Python Worker and gateway
+  sources were not changed.
+
+Verification: 31 targeted Desktop tests, 37 targeted Web tests, Desktop TypeScript
+and both production builds passed. Regression coverage includes absent/existing
+goals, pause/resume/clear, management failures, empty-to-task and goal-to-empty
+transitions, pending waits, task errors and stable content during slow revalidation.
+
+Browser/IAB exposed no enabled surface, so Playwright drove the built Electron app
+and Chromium through an isolated real Desktop gateway and Worker. At 1320×820 and
+390×844, `/goal` created a real session goal, Pause changed its status, and Clear
+restored the empty state. Desktop's bare command also showed syntax guidance.
+No objective fields or create buttons remained, and the panels had no horizontal
+overflow. The isolated model endpoint was loopback-only; no external provider was
+used. Temporary goal continuations were paused and cleared during the check.
+
+The latest screenshots were read back with `view_image` against the updated design
+contract: checked the unframed layout, icon scale/color, heading/body hierarchy,
+copy wrapping and whitespace, dark-theme contrast, and the mobile drawer boundary.
+Existing-goal controls were inspected separately. No mismatch remained in the
+inspected states. Visible copy changes are limited to Activity empty-state guidance,
+goal status/help and the Show goal palette label. Temporary QA scripts, profiles,
+session data and screenshots were removed and their processes closed. This was
+not an installer build or a physical-phone test.

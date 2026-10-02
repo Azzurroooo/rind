@@ -2,11 +2,6 @@
 .panel-actions { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 10px; }
 .panel-actions button { display: inline-flex; align-items: center; gap: 5px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); color: var(--text); font-size: 12px; padding: 5px 9px; cursor: pointer; }
 .panel-actions button:hover { background: var(--surface-soft); }
-.goal-section textarea { width: 100%; resize: vertical; color: var(--text); background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 10px; font-size: 13px; }
-.goal-section form p { margin: 8px 0 12px; font-size: 12px; line-height: 1.5; }
-@media (max-width: 900px) {
-  .goal-section textarea { font-size: 16px; }
-}
 .brand-lockup { display: flex; align-items: center; gap: 11px; min-width: 195px; }
 .brand-mark { width: 27px; height: 27px; }
 .brand-name { font-weight: 800; letter-spacing: -.02em; line-height: 1; }

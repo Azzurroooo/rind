@@ -77,7 +77,7 @@ export const state: AppState = {
   sessionDeleteBusyId: "",
   sessionSearch: "",
   taskMonitor: createTaskMonitorState(),
-  goal: { busy: false, setOpen: false, draft: "" },
+  goal: { busy: false },
   theme: "system",
   notificationsEnabled: true,
   paletteOpen: false,

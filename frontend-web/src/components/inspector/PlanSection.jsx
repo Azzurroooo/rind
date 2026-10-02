@@ -4,13 +4,17 @@ const STEP_STATES = new Set(["pending", "in_progress", "completed", "cancelled"]
 
 // The agent's live plan (update_plan), shown in the Activity tab. The deck
 // above the composer is gone; the checklist lives beside the conversation.
-export function PlanSection({ plan }) {
-  const steps = (Array.isArray(plan) ? plan : [])
+export function planSteps(plan) {
+  return (Array.isArray(plan) ? plan : [])
     .map((item) => ({
       text: String(item?.step || item?.title || "").trim(),
       status: STEP_STATES.has(item?.status) ? item.status : "pending",
     }))
     .filter((step) => step.text);
+}
+
+export function PlanSection({ plan }) {
+  const steps = planSteps(plan);
   if (!steps.length) return null;
   const done = steps.filter((step) => step.status === "completed").length;
   return (

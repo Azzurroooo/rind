@@ -77,11 +77,11 @@ export function buildCommands(ctx = {}, catalog = []) {
     },
     {
       id: "context.goal",
-      title: "Goal",
+      title: "Show goal",
       category: COMMAND_CATEGORIES.context,
       keywords: "goal objective",
       slash: "goal",
-      run: (context, argument) => (argument ? context.runGoal?.(argument) : context.focusGoal?.()),
+      run: (context, argument = "") => context.runGoal?.(argument),
     },
     {
       id: "turn.stop",

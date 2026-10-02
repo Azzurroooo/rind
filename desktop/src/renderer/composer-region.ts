@@ -58,7 +58,6 @@ export function composerRegionMarkup() {
             <button id="composer-menu-trigger" type="button" class="composer-menu-trigger" title="More chat actions" aria-label="More chat actions" aria-haspopup="menu" aria-expanded="false">+</button>
             <div id="composer-menu" class="composer-menu" role="menu" hidden>
               <button id="compact-context" type="button" role="menuitem"><span class="compact-label">Compact context</span></button>
-              <button id="toggle-goal" type="button" role="menuitem"><span class="goal-label">Set goal</span></button>
             </div>
           </div>
           <button id="attach-button" type="button" class="composer-menu-trigger attach-trigger" title="Attach files" aria-label="Attach files">${paperclipIcon()}</button>

@@ -8,6 +8,7 @@ import { inspector, taskMonitorDock } from "./dom.ts"
 import { requestForSession, runAction } from "./runtime.ts"
 import { currentRuntimeSnapshot } from "./sessions.ts"
 import { state, vars } from "./state.ts"
+import { renderActivityEmpty } from "./activity-empty.ts"
 
 const POLL_INTERVAL_MS = 4000
 const OUTPUT_CHARS = 20000
@@ -37,7 +38,8 @@ export function renderTaskBadge() {
 }
 
 export function renderTasksSection() {
-  renderTaskMonitor(taskMonitorDock, state.taskMonitor)
+  renderTaskMonitor(taskMonitorDock, state.taskMonitor, state.conversation.backgroundWait?.count || 0)
+  renderActivityEmpty()
 }
 
 /** Poll only while the Activity tab and its window are visible. */

@@ -24,8 +24,6 @@ export type AttachmentChip = {
 export type GoalPanelState = {
   value?: DesktopGoal
   busy: boolean
-  setOpen: boolean
-  draft: string
 }
 
 /** One inspector tab's fetched data; sessionId marks which session it describes. */

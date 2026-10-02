@@ -19,7 +19,7 @@ export function listedTasks(rows, legacy = false) {
 
 // Keep previous data during revalidation, and serialize polling instead of allowing
 // overlapping intervals. A session generation owns every async response.
-export function RunningTasks({ sessionId, request, waitingCount = 0, enabled = true, legacy = false }) {
+export function RunningTasks({ sessionId, request, waitingCount = 0, enabled = true, legacy = false, renderEmpty }) {
   const [tasks, setTasks] = useState([]);
   const [error, setError] = useState("");
   const [loaded, setLoaded] = useState(false);
@@ -121,13 +121,15 @@ export function RunningTasks({ sessionId, request, waitingCount = 0, enabled = t
     }
   }
 
+  if (!tasks.length && !error && !waitingCount) {
+    return renderEmpty?.({ loading: Boolean(sessionId && enabled && !loaded) }) || null;
+  }
+
   return <section className="inspector-section" aria-label="Running background tasks">
     <div className="inspector-section-head"><h3 className="inspector-section-title">Tasks</h3>
       <span className="section-note">{tasks.length ? tasks.length + " running" : ""}</span></div>
     {error && <p className="form-error" role="alert">{error}</p>}
-    {!tasks.length && !error && <p className="muted section-hint">{!loaded && enabled
-      ? "Loading tasks…" : waitingCount > 0 ? "Waiting on background commands. Yielded commands appear here."
-      : "No background commands are running. Completed output stays in the conversation."}</p>}
+    {!tasks.length && !error && <p className="muted section-hint">Waiting on background commands. Yielded commands appear here.</p>}
     <ul className="task-list">{tasks.map((task) => {
       const id = taskId(task), open = expanded === id, output = outputs[id];
       const text = [output?.stdout || output?.output, output?.stderr].filter(Boolean).join("\n");

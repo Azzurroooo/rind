@@ -3,18 +3,28 @@ import { afterEach, expect, it, vi } from "vitest";
 import { GoalPanel } from "./GoalPanel.jsx";
 afterEach(cleanup);
 
-it("treats an objective named pause as text, not a control action", async () => {
-  const onAction = vi.fn(async () => {});
-  render(<GoalPanel onAction={onAction} />);
-  fireEvent.change(screen.getByLabelText("Goal objective"), { target: { value: "pause" } });
-  fireEvent.click(screen.getByRole("button", { name: "Start goal" }));
-  await waitFor(() => expect(onAction).toHaveBeenCalledWith({ type: "start", objective: "pause" }));
+it("renders nothing when no goal exists, without a creation form", () => {
+  const { container } = render(<GoalPanel onAction={vi.fn()} />);
+  expect(container.childElementCount).toBe(0);
 });
 
-it("shows errors without losing the proposed objective", async () => {
-  render(<GoalPanel onAction={async () => { throw new Error("Offline"); }} />);
-  fireEvent.change(screen.getByLabelText("Goal objective"), { target: { value: "Review tests" } });
-  fireEvent.click(screen.getByRole("button", { name: "Start goal" }));
+it("retains pause, resume and clear for an existing goal", async () => {
+  const onAction = vi.fn(async () => {});
+  const { rerender } = render(<GoalPanel goal={{ objective: "Ship the release", status: "active" }} onAction={onAction} />);
+  expect(screen.queryByRole("textbox")).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "Pause" }));
+  await waitFor(() => expect(onAction).toHaveBeenCalledWith({ type: "pause" }));
+  rerender(<GoalPanel goal={{ objective: "Ship the release", status: "paused" }} onAction={onAction} />);
+  fireEvent.click(screen.getByRole("button", { name: "Resume" }));
+  await waitFor(() => expect(onAction).toHaveBeenCalledWith({ type: "resume" }));
+  await waitFor(() => expect(screen.getByRole("button", { name: "Clear goal" }).disabled).toBe(false));
+  fireEvent.click(screen.getByRole("button", { name: "Clear goal" }));
+  await waitFor(() => expect(onAction).toHaveBeenCalledWith({ type: "clear" }));
+});
+
+it("shows management errors without losing the existing goal", async () => {
+  render(<GoalPanel goal={{ objective: "Review tests", status: "active" }} onAction={async () => { throw new Error("Offline"); }} />);
+  fireEvent.click(screen.getByRole("button", { name: "Pause" }));
   expect(await screen.findByRole("alert")).toHaveProperty("textContent", "Offline");
-  expect(screen.getByLabelText("Goal objective").value).toBe("Review tests");
+  expect(screen.getByText("Review tests")).not.toBeNull();
 });

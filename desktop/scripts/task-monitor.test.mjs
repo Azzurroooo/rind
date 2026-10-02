@@ -83,7 +83,15 @@ test("renderTaskMonitor shows commands and the running count", () => {
   state.tasks = []
   state.expandedId = ""
   renderTaskMonitor(dock, state)
-  assert.match(dock.innerHTML, /No background commands are running/)
+  assert.equal(dock.hidden, true)
+  assert.equal(dock.childElementCount, 0)
+  renderTaskMonitor(dock, state, 1)
+  assert.equal(dock.hidden, false)
+  assert.match(dock.textContent, /Waiting on background commands/)
+  state.error = "Could not load tasks"
+  renderTaskMonitor(dock, state)
+  assert.equal(dock.hidden, false)
+  assert.equal(dock.querySelector('[role="alert"]').textContent, state.error)
 })
 
 test("task polling reads the remembered output cursor", async () => {

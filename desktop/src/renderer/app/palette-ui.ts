@@ -5,7 +5,7 @@ import { closeSlashCommandMenu } from "./composer.ts"
 import { appRoot, paletteInput, paletteList, paletteOverlay, prompt, sessionTitle } from "./dom.ts"
 import { escapeHtml } from "./html.ts"
 import { INSPECTOR_TAB_LABELS, INSPECTOR_TABS } from "../inspector-model.ts"
-import { closeInspector, openGoalTab, openInspector, openUsage, toggleInspector } from "./inspector.ts"
+import { closeInspector, openInspector, openUsage, toggleInspector } from "./inspector.ts"
 import { changeGoalStatus, clearGoal } from "./inspector-goal.ts"
 import { remoteAccess } from "./remote-instance.ts"
 import { runAction, runtimeTurnActive } from "./runtime.ts"
@@ -34,7 +34,6 @@ export function paletteCommands(): PaletteCommand[] {
     { id: "toggle-inspector", title: "Toggle inspector", detail: state.inspectorOpen ? "Hide the inspector" : "Show the inspector", run: () => runAction(() => toggleInspector()) },
     ...INSPECTOR_TABS.map((tab): PaletteCommand => ({ id: `inspector-${tab}`, title: `Inspector: ${INSPECTOR_TAB_LABELS[tab]}`, detail: `Open the ${INSPECTOR_TAB_LABELS[tab]} tab`, run: () => runAction(() => openInspector(tab)) })),
     ...(state.inspectorOpen ? [{ id: "close-inspector", title: "Close inspector", detail: "Hide the inspector", run: () => runAction(closeInspector) }] : []),
-    { id: "goal-set", title: "Goal: set", detail: "Set a session goal", run: () => runAction(openGoalTab), disabled: !state.viewedSessionId },
     { id: "goal-pause", title: "Goal: pause", detail: "Pause the active goal", disabled: !state.viewedSessionId || state.goal.value?.status !== "active", run: () => runAction(() => changeGoalStatus("paused"), state.viewedSessionId) },
     { id: "goal-resume", title: "Goal: resume", detail: "Resume a paused goal", disabled: !state.viewedSessionId || state.goal.value?.status !== "paused", run: () => runAction(() => changeGoalStatus("active"), state.viewedSessionId) },
     { id: "goal-clear", title: "Goal: clear", detail: "Clear the active goal", disabled: !state.viewedSessionId || !state.goal.value, run: () => runAction(clearGoal, state.viewedSessionId) },

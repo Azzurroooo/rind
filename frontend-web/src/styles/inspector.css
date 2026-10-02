@@ -59,6 +59,12 @@
 .inspector-section { display: grid; gap: var(--space-2); }
 .section-note { color: var(--dim); font-size: var(--text-meta); font-variant-numeric: tabular-nums; }
 .section-hint { margin: 0; color: var(--muted); font-size: var(--text-meta); line-height: 1.6; }
+.activity-empty { display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 48px 12px 24px; text-align: center; }
+.activity-empty-icon { width: 28px; height: 28px; margin-bottom: 8px; color: var(--dim); stroke-width: 1.5; }
+.activity-empty h3 { margin: 0; color: var(--text); font-size: 14px; font-weight: 600; line-height: 1.5; }
+.activity-empty p { max-width: 28ch; margin: 0; color: var(--muted); font-size: 12px; line-height: 1.7; }
+.activity-empty .activity-empty-hint { margin-top: 12px; color: var(--dim); }
+.activity-empty-hint code { display: block; margin-top: 4px; color: var(--muted); font-size: 11px; }
 .inspector-section-head { display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); }
 .inspector-section-title, .section-title {
   display: flex; align-items: center; gap: var(--space-2);

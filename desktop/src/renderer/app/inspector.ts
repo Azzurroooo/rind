@@ -10,7 +10,7 @@ import { renderPlanSection } from "../plan-section.ts"
 import { appRoot, activityPlan, inspector, inspectorContextBody, inspectorResizeHandle, inspectorToggle, inspectorUsageBody, requiredElement } from "./dom.ts"
 import { loadDirectory, renderFiles } from "./files-panel.ts"
 import { escapeHtml } from "./html.ts"
-import { focusGoalInput, loadGoal, renderGoalTab } from "./inspector-goal.ts"
+import { loadGoal, renderGoalTab } from "./inspector-goal.ts"
 import { pollTasks, renderTaskBadge, renderTasksSection, syncTaskPolling } from "./inspector-tasks.ts"
 import { request, requestForSession, runAction } from "./runtime.ts"
 import { applyOverview, currentRuntimeSnapshot, viewedProject } from "./sessions.ts"
@@ -113,6 +113,7 @@ export function resetInspectorData() {
 /** The Activity column: plan section, yielded tasks, then the goal panel. */
 function renderActivityTab() {
   activityPlan.innerHTML = renderPlanSection(state.conversation)
+  activityPlan.hidden = !activityPlan.childElementCount
   renderTasksSection()
   renderGoalTab()
 }
@@ -168,13 +169,6 @@ export function selectInspectorTab(tab: InspectorTab, focus = false) {
   if (focus) requiredElement(`inspector-tab-${tab}`).focus()
   syncTaskPolling()
   runAction(() => loadInspectorTab(tab), state.viewedSessionId)
-}
-
-/** Opens the Activity tab with the objective input focused (/goal, #toggle-goal). */
-export async function openGoalTab() {
-  state.goal = { ...state.goal, setOpen: state.goal.setOpen || !state.goal.value }
-  await openInspector("activity")
-  focusGoalInput()
 }
 
 function bindResize() {

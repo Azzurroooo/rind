@@ -7,7 +7,6 @@ function stubCtx() {
     focusSessions: vi.fn(),
     focusModel: vi.fn(),
     focusEffort: vi.fn(),
-    focusGoal: vi.fn(),
     compact: vi.fn(),
     stopTurn: vi.fn(),
     scrollToLatest: vi.fn(),
@@ -84,6 +83,8 @@ describe("commands — single registry (audit #9)", () => {
     expect(ctx.focusEffort).toHaveBeenCalledTimes(1);
     built.find((command) => command.id === "context.goal").run(ctx, "clear");
     expect(ctx.runGoal).toHaveBeenCalledWith("clear");
+    built.find((command) => command.id === "context.goal").run(ctx);
+    expect(ctx.runGoal).toHaveBeenLastCalledWith("");
   });
 
   it("server slash commands route through runServerSlash", () => {

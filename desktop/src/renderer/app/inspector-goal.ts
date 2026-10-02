@@ -1,4 +1,4 @@
-// Inspector Goal tab: loads and changes the session goal through rind/goal/*
+// Activity goal state: loads and changes the session goal through rind/goal/*
 // (window.api.goal) and renders it with goal-panel.ts.
 
 import { normalizeGoal, renderGoalPanel } from "../goal-panel.ts"
@@ -10,24 +10,18 @@ import { runAction } from "./runtime.ts"
 import { currentRuntimeSnapshot } from "./sessions.ts"
 import { render } from "./shell.ts"
 import { state, vars } from "./state.ts"
+import { renderActivityEmpty } from "./activity-empty.ts"
 
 export function renderGoalTab() {
   renderGoalPanel(goalPanel, {
     goal: state.goal.value,
     busy: state.goal.busy,
-    setOpen: state.goal.setOpen || !state.goal.value,
-    draft: state.goal.draft,
   })
-  const input = goalPanel.querySelector<HTMLInputElement>("#goal-objective-input")
-  if (input) input.disabled = !state.viewedSessionId
-}
-
-export function focusGoalInput() {
-  goalPanel.querySelector<HTMLInputElement>("#goal-objective-input")?.focus()
+  renderActivityEmpty()
 }
 
 export function resetGoal() {
-  state.goal = { busy: false, setOpen: false, draft: "" }
+  state.goal = { busy: false }
   vars.goalLoadSequence += 1
 }
 
@@ -44,7 +38,7 @@ export async function loadGoal() {
     if (sequence !== vars.goalLoadSequence || sessionId !== state.viewedSessionId) return
     state.goal = { ...state.goal, value: normalizeGoal(result.goal) }
   } catch {
-    if (sequence === vars.goalLoadSequence) state.goal = { ...state.goal, value: undefined }
+    if (sequence !== vars.goalLoadSequence || sessionId !== state.viewedSessionId) return
   }
   renderGoalTab()
 }
@@ -57,32 +51,35 @@ async function withGoalBusy(task: (sessionId: string) => Promise<void>) {
   try {
     await task(sessionId)
   } catch (error) {
-    state.notice = error instanceof Error ? error.message : String(error)
+    if (sessionId === state.viewedSessionId) state.notice = error instanceof Error ? error.message : String(error)
   } finally {
-    state.goal = { ...state.goal, busy: false }
+    if (sessionId === state.viewedSessionId) state.goal = { ...state.goal, busy: false }
     render()
   }
 }
 
-export async function submitGoal() {
-  const objective = state.goal.draft.trim()
+export async function submitGoal(input: string) {
+  const objective = input.trim()
   if (!objective) return
   await withGoalBusy(async (sessionId) => {
     const value = normalizeGoal(asRecord(await window.api.goal.set(sessionId, objective)).goal)
-    state.goal = { ...state.goal, value, draft: "", setOpen: false }
+    if (sessionId !== state.viewedSessionId) return
+    state.goal = { ...state.goal, value }
     if (value) showToast(`Goal set: ${clipLine(value.objective, 80)}`, "success")
   })
 }
 
 export async function changeGoalStatus(status: "active" | "paused") {
   await withGoalBusy(async (sessionId) => {
-    state.goal = { ...state.goal, value: normalizeGoal(asRecord(await window.api.goal.status(sessionId, status)).goal) }
+    const value = normalizeGoal(asRecord(await window.api.goal.status(sessionId, status)).goal)
+    if (sessionId === state.viewedSessionId) state.goal = { ...state.goal, value }
   })
 }
 
 export async function clearGoal() {
   await withGoalBusy(async (sessionId) => {
     await window.api.goal.clear(sessionId)
+    if (sessionId !== state.viewedSessionId) return
     state.goal = { ...state.goal, value: undefined }
     showToast("Goal cleared.", "success")
   })
@@ -98,29 +95,6 @@ export function bindGoalEvents(): void {
       runAction(() => changeGoalStatus("active"), sessionId)
     } else if (target.closest("[data-goal-clear]")) {
       runAction(clearGoal, sessionId)
-    } else if (target.closest("[data-toggle-goal-set]")) {
-      state.goal = { ...state.goal, setOpen: true }
-      renderGoalTab()
-      focusGoalInput()
-    } else if (target.closest("[data-goal-cancel]")) {
-      state.goal = { ...state.goal, setOpen: false, draft: "" }
-      renderGoalTab()
-    } else if (target.closest("[data-goal-submit]")) {
-      runAction(submitGoal, sessionId)
     }
-  })
-
-  goalPanel.addEventListener("input", (event) => {
-    const input = event.target
-    if (!(input instanceof HTMLInputElement) || input.id !== "goal-objective-input") return
-    state.goal = { ...state.goal, draft: input.value }
-    const submit = goalPanel.querySelector<HTMLButtonElement>("[data-goal-submit]")
-    if (submit) submit.disabled = state.goal.busy || !input.value.trim()
-  })
-
-  goalPanel.addEventListener("keydown", (event) => {
-    if (event.key !== "Enter" || !(event.target instanceof HTMLInputElement) || event.target.id !== "goal-objective-input") return
-    event.preventDefault()
-    runAction(submitGoal, state.viewedSessionId)
   })
 }

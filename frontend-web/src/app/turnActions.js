@@ -291,17 +291,21 @@ export function createTurnActions(ctx) {
     }
   }
 
-  // Goal command with an argument: set / clear / pause / resume (CLI parity).
+  // Goal creation belongs to the slash command; an empty argument shows status.
   async function runGoalCommand(argument) {
     const action = argument.trim().toLowerCase();
     const sessionId = refs.info.current.session_id;
     const loadId = refs.sessionLoad.current;
     const fresh = () => loadId === refs.sessionLoad.current;
+    if (!sessionId) {
+      say("system", "Start a conversation, then use /goal <objective> to set a goal.");
+      return;
+    }
     if (!action) {
       const result = await client().request(methods.goalGet, { session_id: sessionId });
       if (!fresh()) return;
       ctx.setGoal(result?.goal || null);
-      say("system", result?.goal?.objective ? `Active goal: ${result.goal.objective}` : "No active goal.");
+      say("system", result?.goal?.objective ? `Goal (${result.goal.status || "active"}): ${result.goal.objective}` : "No goal set. Use /goal <objective> to set one.");
       return;
     }
     if (action === "clear") {
@@ -327,9 +331,10 @@ export function createTurnActions(ctx) {
   async function handleGoalAction(action) {
     const sessionId = refs.info.current.session_id;
     const loadId = refs.sessionLoad.current;
-    if (!sessionId) throw new Error("Create a session before setting a goal.");
-    const method = action.type === "clear" ? methods.goalClear : action.type === "start" ? methods.goalSet : methods.goalStatus;
-    const params = action.type === "start" ? { objective: action.objective } : { status: action.type === "resume" ? "active" : "paused" };
+    if (!sessionId) throw new Error("Open a session to manage its goal.");
+    if (!["clear", "pause", "resume"].includes(action.type)) throw new Error("Use /goal <objective> to set a goal.");
+    const method = action.type === "clear" ? methods.goalClear : methods.goalStatus;
+    const params = action.type === "clear" ? {} : { status: action.type === "resume" ? "active" : "paused" };
     const result = await client().request(method, { session_id: sessionId, ...params });
     if (loadId === refs.sessionLoad.current && sessionId === refs.info.current.session_id) ctx.setGoal(action.type === "clear" ? null : result?.goal || null);
   }

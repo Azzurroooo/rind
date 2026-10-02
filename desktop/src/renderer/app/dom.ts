@@ -92,6 +92,12 @@ appRoot.innerHTML = `
           <div id="inspector-context"></div>
         </section>
         <section id="inspector-panel-activity" class="inspector-panel panel-scroll activity-panel" role="tabpanel" aria-labelledby="inspector-tab-activity" tabindex="0" hidden>
+          <div id="activity-empty" class="activity-empty" hidden>
+            ${renderIcon(ListTodo, "activity-empty-icon")}
+            <h3 id="activity-empty-title">No activity yet</h3>
+            <p id="activity-empty-description">Start a conversation to see its plan and running tasks here.</p>
+            <p class="activity-empty-hint">Set a goal with <code>/goal &lt;objective&gt;</code></p>
+          </div>
           <div id="activity-plan" aria-label="Plan"></div>
           <section id="task-monitor" class="task-monitor" aria-label="Running background tasks"></section>
           <section id="goal-panel" class="goal-panel" aria-label="Session goal"></section>
