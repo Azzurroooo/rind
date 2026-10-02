@@ -87,8 +87,10 @@ export function renderPalette() {
   state.paletteActiveIndex = Math.min(state.paletteActiveIndex, Math.max(0, matches.length - 1))
   paletteList.innerHTML = matches.length ? matches.map((match, index) => `
     <button type="button" class="palette-option${index === state.paletteActiveIndex ? " selected" : ""}" role="option" aria-selected="${String(index === state.paletteActiveIndex)}" data-palette-index="${index}"${match.command.disabled ? " disabled" : ""}>
-      <span class="palette-option-main">${escapeHtml(match.command.title)}</span>
-      ${match.command.detail ? `<span class="palette-option-detail">${escapeHtml(match.command.detail)}</span>` : ""}
+      <span class="palette-option-copy">
+        <span class="palette-option-main">${escapeHtml(match.command.title)}</span>
+        ${match.command.detail ? `<span class="palette-option-detail">${escapeHtml(match.command.detail)}</span>` : ""}
+      </span>
       ${match.command.shortcut ? `<span class="palette-option-shortcut">${escapeHtml(match.command.shortcut)}</span>` : ""}
     </button>
   `).join("") : `<p class="palette-empty">No matching command</p>`

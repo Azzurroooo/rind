@@ -71,6 +71,11 @@ Each status color has a `-soft` background (same hue, ~12% alpha).
 - Sidebar: `--panel` background. Width and open state persist per viewer. Collapse animates
   width over 200ms; transitions are disabled while dragging. The resize handle is a 6px hit
   area with a 1px line that turns `--line-strong` on hover.
+- Both sidebars use the shared `panel-scroll` primitive: a thin native scrollbar,
+  transparent track, `--line-strong` thumb and stable gutter where the platform reserves
+  one. Keep 6px between content and the scrollbar lane, and 6px between the lane and
+  the panel edge. Desktop panel shells clip without becoming extra scroll containers;
+  focus must not pan the shell sideways. Files retains its independent preview scrolling.
 - Header (44): session title (truncate, max 360), status chip, and right-aligned icon
   buttons (28 square, 16px glyphs): tasks, inspector toggle, overflow menu.
 - Conversation column: `min(800px, 100%)` centered with 16 inline padding. It keeps at least
@@ -81,6 +86,9 @@ Each status color has a `-soft` background (same hue, ~12% alpha).
   It includes cache-read tokens and a period-wide cache hit rate (cached input / input),
   using the existing usage ledger. Cache reads are already included in input totals.
   A missing cache field is labeled Not reported; a missing/zero denominator has no rate.
+  The period label and Refresh share a dedicated toolbar at least 32px high. Refresh
+  has a 28px target, and the toolbar has at least 12px separation from the statistics.
+  Hover changes the button fill without moving its bounds or overlapping the next section.
   In Web Files, the directory and preview have independent scroll containers. With a
   preview open, the directory takes about a quarter of the available height and the
   preview takes the remainder, separated by a fixed filename/close header. Closing it
@@ -284,6 +292,11 @@ mirrors LobeHub's `WorkflowCollapse` / `ProcessFold` and the CLI's per-tool caps
 - Dialogs: scrim `#19241e66` with 2px blur. Panel radius 14, padding 20, max-width 520
   (settings 760 × 560), fade plus scale .97 → 1 over 180ms, close button 28 at top-right.
   Esc closes, and focus is trapped and restored.
+- Keyboard shortcuts has one named close icon in its header, with no duplicate footer
+  Close action. Its heading labels the dialog; Escape remains supported.
+- Desktop command-palette rows place title and subtitle in one copy column with a 4px
+  gap, independently of the trailing shortcut column. Rows retain their natural content
+  height in the scrolling list; shortcut presence cannot change spacing or clip a subtitle.
 - Settings: 200 left nav (32 rows, 16 icons) and a content pane of titled sections, each made of
   rows (label and description on the left, control on the right, 1px `--line` between rows).
 - Toasts: bottom center, `--surface`, radius 10, popover shadow, 4s, at most 3 stacked.

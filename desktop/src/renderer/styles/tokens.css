@@ -69,6 +69,7 @@
   --control-sm: 28px;
   --control-md: 32px;
   --control-lg: 36px;
+  --panel-scroll-gap: 6px;
 
   --ease: cubic-bezier(0.2, 0.7, 0.2, 1);
   --dur-hover: 120ms;

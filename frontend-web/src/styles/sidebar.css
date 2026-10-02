@@ -54,7 +54,7 @@
 }
 .sidebar-search-clear:hover { color: var(--text); background: var(--fill-2); }
 
-.session-list { flex: 1; min-height: 0; overflow-y: auto; display: grid; grid-template-columns: minmax(0, 1fr); align-content: start; gap: var(--space-2); margin: 0 calc(var(--space-2) * -1); padding: 0 var(--space-2); }
+.session-list { flex: 1; min-height: 0; overflow-y: auto; display: grid; grid-template-columns: minmax(0, 1fr); align-content: start; gap: var(--space-2); margin: 0 calc(var(--panel-scroll-gap) - var(--space-2)) 0 calc(var(--space-2) * -1); padding: 0 var(--panel-scroll-gap) 0 var(--space-2); }
 .project-workspace { display: grid; gap: 2px; padding: 0 8px 8px; color: var(--dim); font-size: var(--text-meta); }
 .project-workspace code { overflow-wrap: anywhere; color: var(--muted); font-size: 11px; line-height: 1.5; }
 .session-item {

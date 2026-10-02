@@ -48,6 +48,11 @@ button:disabled { cursor: not-allowed; opacity: 0.45; }
 
 :focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 
+/* Both side panels reserve a native scrollbar lane; content never sits beneath it. */
+.panel-scroll { scrollbar-width: thin; scrollbar-color: var(--line-strong) transparent; scrollbar-gutter: stable; overscroll-behavior: contain; }
+.panel-scroll::-webkit-scrollbar { width: 8px; height: 8px; }
+.panel-scroll::-webkit-scrollbar-thumb { border: 2px solid transparent; border-radius: 5px; background: var(--line-strong); background-clip: padding-box; }
+
 .ghost-button {
   min-height: 32px;
   padding: 5px 10px;

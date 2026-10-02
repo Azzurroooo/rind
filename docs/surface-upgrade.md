@@ -542,3 +542,51 @@ fit; no mismatch remained in the inspected states. Web dark mode also verified
 reduced-motion timing. Visible labels are unchanged. This is a local UI refinement
 with no new image concept or assets. Temporary captures, scripts, profiles and
 sessions were removed and their processes closed; no installer was produced.
+
+## Panel scrollbars and dialog layout — 2026-10-02
+
+This focused correction follows sections 2 and 7 of `docs/surface-design-v2.md`.
+References reviewed were LobeHub's `features/NavPanel/SideBarLayout.tsx` (separate
+panel chrome and scroll viewport) and Jan's `containers/dialogs/SearchDialog.tsx`
+(independent text and action columns). Existing Rind tokens and component families
+remain the visual reference; this small UI fix needs no new bitmap concept.
+
+- Both surfaces share a `panel-scroll` primitive and 6px content/outer insets.
+  Desktop's panel shells use clipping without scrolling: the former hidden-overflow
+  shell could pan horizontally by 3px and offset the entire sidebar when focused.
+  Web's file directory and preview retain separate scroll containers with the same
+  thumb, track and inset rules. Removed superseded per-panel scrollbar selectors.
+- Desktop Keyboard shortcuts has one accessible header close icon. Removed the
+  duplicate footer control and its event listener; click and Escape still close it.
+  Web's keyboard settings already has one close control and retains that structure.
+- Usage places its period label and Refresh in a dedicated toolbar, separated from
+  statistics. Web adds a visible Refresh label to its existing refresh icon.
+- Desktop search groups the title/subtitle separately from the shortcut. Their gap
+  is always 4px. The scrolling grid also preserves intrinsic row height, fixing an
+  additional case where long result lists compressed rows and clipped subtitles.
+  Web's existing single-line search rows retain their independent action column.
+
+Verification: 23 targeted Desktop tests and 44 targeted Web tests, Desktop TypeScript
+and both production builds passed. Browser/IAB reported no enabled surface, so
+Playwright exercised the built Electron app and remote Web through an isolated
+Desktop gateway and real Worker, without making model calls. The fixture used 35
+sessions, 70 files and three usage samples with cache-read data.
+
+At 1320×820, measured scrollbar insets were 6px on both sides in Desktop and Web;
+native thumb dragging scrolled both panels. Context and Activity use the same
+scrollbar primitive. At 390×844, the Web drawers and independent file preview fit
+the viewport and retained the same inset rules with native overlay scrollbars.
+The shortcut dialog had exactly one button, and click/Escape both worked. All 41
+Desktop search results with descriptions had a 4px text gap and 60px row height,
+with no subtitle escaping its row. Refresh stayed fixed on hover and refreshed real
+usage data; its lower clearance was 18px on Desktop and 14px on Web, including mobile.
+
+Final screenshots were read back with `view_image` against the existing design
+contract. Checked scrollbar placement and theme contrast, dialog heading/close-icon
+alignment, Refresh padding and section separation, palette typography/row height,
+and mobile drawer/preview boundaries. Light/dark Desktop and desktop/mobile Web
+states showed no remaining mismatch in the inspected areas. Visible copy changes
+are limited to removing duplicate Close labels and exposing Web's Refresh label;
+navigation and pagination labels remain unchanged. No Worker or gateway source
+changed. Temporary QA profiles, sessions, files, captures and scripts were removed,
+and their processes closed. This verification is not an installer or physical-phone test.

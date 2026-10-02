@@ -39,7 +39,7 @@ appRoot.innerHTML = `
         <div class="sidebar-actions">
           <button id="new-session" type="button" class="primary-button" title="Start a new chat in the active project">New chat</button>
         </div>
-        <div class="sidebar-body">
+        <div class="sidebar-body panel-scroll">
           <div class="session-search-wrap">
             ${renderIcon(Search, "session-search-icon")}
             <input id="session-search" type="search" placeholder="Search sessions" aria-label="Search loaded sessions" autocomplete="off" />
@@ -87,23 +87,23 @@ appRoot.innerHTML = `
           <button id="close-inspector" type="button" class="icon-button inspector-close" data-tooltip="Close inspector" aria-label="Close inspector">${renderIcon(X)}</button>
         </div>
         <div id="inspector-scope" class="inspector-scope">Current session</div>
-        <section id="inspector-panel-context" class="inspector-panel" role="tabpanel" aria-labelledby="inspector-tab-context" tabindex="0" hidden>
+        <section id="inspector-panel-context" class="inspector-panel panel-scroll" role="tabpanel" aria-labelledby="inspector-tab-context" tabindex="0" hidden>
           <div class="inspector-toolbar"><span class="subtle">Current context window</span><button type="button" class="ghost-button" data-inspector-refresh="context">Refresh</button></div>
           <div id="inspector-context"></div>
         </section>
-        <section id="inspector-panel-activity" class="inspector-panel activity-panel" role="tabpanel" aria-labelledby="inspector-tab-activity" tabindex="0" hidden>
+        <section id="inspector-panel-activity" class="inspector-panel panel-scroll activity-panel" role="tabpanel" aria-labelledby="inspector-tab-activity" tabindex="0" hidden>
           <div id="activity-plan" aria-label="Plan"></div>
           <section id="task-monitor" class="task-monitor" aria-label="Running background tasks"></section>
           <section id="goal-panel" class="goal-panel" aria-label="Session goal"></section>
         </section>
-        <section id="inspector-panel-files" class="inspector-panel inspector-files" role="tabpanel" aria-labelledby="inspector-tab-files" tabindex="0" hidden>
+        <section id="inspector-panel-files" class="inspector-panel panel-scroll inspector-files" role="tabpanel" aria-labelledby="inspector-tab-files" tabindex="0" hidden>
           <p id="files-unavailable" class="inspector-empty" hidden>Choose an available project to browse its files.</p>
           <section id="file-preview" class="file-preview" hidden></section>
           <div id="file-tree" class="file-tree"></div>
         </section>
       </aside>
     </main>
-    <dialog id="usage-dialog" class="settings-dialog usage-dialog" aria-labelledby="usage-title"><div class="settings-heading"><div><h2 id="usage-title">Usage</h2><p>Across all projects and sessions on this Rind computer.</p></div><button id="close-usage" type="button" class="icon-button" aria-label="Close usage">${renderIcon(X)}</button></div><div class="inspector-toolbar"><span class="subtle">Last 7 days</span><button id="refresh-usage" type="button" class="ghost-button">Refresh</button></div><div id="inspector-usage"></div></dialog>
+    <dialog id="usage-dialog" class="settings-dialog usage-dialog" aria-labelledby="usage-title"><div class="settings-heading"><div><h2 id="usage-title">Usage</h2><p>Across all projects and sessions on this Rind computer.</p></div><button id="close-usage" type="button" class="icon-button" aria-label="Close usage">${renderIcon(X)}</button></div><div class="usage-toolbar"><span class="subtle">Last 7 days</span><button id="refresh-usage" type="button" class="ghost-button usage-refresh">Refresh</button></div><div id="inspector-usage"></div></dialog>
     ${remoteAccessMarkup()}
     <dialog id="settings-dialog" class="settings-dialog settings-shell" aria-labelledby="settings-title">
       <form id="settings-form" method="dialog" class="settings-layout">
@@ -145,11 +145,10 @@ appRoot.innerHTML = `
         <div class="settings-actions"><button id="auth-prompt-cancel" type="button" class="ghost-button">Cancel</button><button id="auth-prompt-submit" type="submit" class="primary-button">Continue</button></div>
       </form>
     </dialog>
-    <dialog id="shortcuts-dialog" class="settings-dialog shortcuts-dialog">
+    <dialog id="shortcuts-dialog" class="settings-dialog shortcuts-dialog" aria-labelledby="shortcuts-title">
       <form method="dialog">
-        <div class="settings-heading"><strong>Keyboard shortcuts</strong><button id="close-shortcuts" type="button" class="ghost-button" title="Close shortcuts">Close</button></div>
+        <div class="settings-heading"><h2 id="shortcuts-title">Keyboard shortcuts</h2><button id="close-shortcuts" type="button" class="icon-button" aria-label="Close shortcuts">${renderIcon(X)}</button></div>
         <div class="shortcut-table" id="shortcut-table"></div>
-        <div class="settings-actions"><button type="button" id="dismiss-shortcuts" class="ghost-button">Close</button></div>
       </form>
     </dialog>
     <div id="command-palette" class="command-palette" role="dialog" aria-modal="true" aria-label="Command palette" hidden>

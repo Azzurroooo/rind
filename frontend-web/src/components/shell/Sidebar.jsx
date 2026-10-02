@@ -82,7 +82,7 @@ export function Sidebar({
           </button>
         )}
       </div>
-      <nav className="session-list" aria-label="Sessions">
+      <nav className="session-list panel-scroll" aria-label="Sessions">
         <h2 className="sidebar-section-label">Recent sessions</h2>
         {recent.length === 0 ? (
           <div className="sidebar-empty"><History size={15} aria-hidden="true" />{" "}{search ? "No matching sessions" : "No sessions yet"}</div>

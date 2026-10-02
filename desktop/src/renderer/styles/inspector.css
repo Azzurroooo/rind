@@ -2,9 +2,12 @@
 
 .inspector-scope { padding: 8px 14px; border-bottom: 1px solid var(--line); color: var(--dim); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .settings-dialog.usage-dialog { width: min(680px, calc(100vw - 32px)); max-height: calc(100dvh - 48px); padding: 24px; overflow-y: auto; }
+.usage-dialog[open] { display: grid; gap: 16px; }
 .usage-dialog .settings-heading { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; }
 .usage-dialog .settings-heading h2 { margin: 0; }
-.usage-dialog .settings-heading p { color: var(--muted); font-size: 12px; line-height: 1.6; }
+.usage-dialog .settings-heading p { margin: 4px 0 0; color: var(--muted); font-size: 12px; line-height: 1.6; }
+.usage-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 32px; }
+.usage-refresh { flex: none; min-height: 28px; padding: 2px 8px; font-size: var(--text-dense); }
 .task-monitor-identity { display: grid; gap: 3px; flex: 1; min-width: 0; }
 .task-monitor-id { color: var(--dim); font-size: 10px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .activity-panel .task-monitor-trigger { min-height: 46px; }
@@ -16,7 +19,7 @@
   grid-template-rows: auto auto minmax(0, 1fr);
   min-width: 0;
   min-height: 0;
-  overflow: hidden;
+  overflow: clip;
   border-left: 1px solid var(--line);
   background: var(--panel);
   transition: opacity 160ms var(--ease), border-color var(--dur-panel) var(--ease);
@@ -57,9 +60,8 @@
   min-width: 0;
   min-height: 0;
   overflow: auto;
-  padding: 10px 12px 14px;
-  scrollbar-width: thin;
-  scrollbar-color: var(--line-strong) transparent;
+  margin-inline-end: var(--panel-scroll-gap);
+  padding: 10px var(--panel-scroll-gap) 14px 12px;
 }
 .inspector-panel[hidden] { display: none; }
 .inspector-panel > * { flex: none; }
@@ -87,7 +89,7 @@
 .usage-models span { flex: none; color: var(--dim); }
 
 /* Activity tab: plan, yielded tasks and goal stacked in one column. */
-.activity-panel { display: grid; align-content: start; gap: 12px; padding: 12px; }
+.activity-panel { display: grid; align-content: start; gap: 12px; padding: 12px var(--panel-scroll-gap) 12px 12px; }
 .activity-section { display: grid; gap: 8px; padding: 10px 12px 12px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface); }
 .activity-section .inspector-section-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .activity-section .inspector-section-title { color: var(--dim); font-size: 11px; font-weight: 600; letter-spacing: .05em; text-transform: uppercase; }

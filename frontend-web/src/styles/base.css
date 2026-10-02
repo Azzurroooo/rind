@@ -34,6 +34,11 @@ input:focus-visible, textarea:focus-visible, select:focus-visible { outline-offs
 
 * { scrollbar-width: thin; scrollbar-color: var(--line-strong) transparent; }
 
+/* Both side panels reserve a native scrollbar lane; content never sits beneath it. */
+.panel-scroll { scrollbar-width: thin; scrollbar-color: var(--line-strong) transparent; scrollbar-gutter: stable; overscroll-behavior: contain; }
+.panel-scroll::-webkit-scrollbar { width: 8px; height: 8px; }
+.panel-scroll::-webkit-scrollbar-thumb { border: 2px solid transparent; border-radius: 5px; background: var(--line-strong); background-clip: padding-box; }
+
 .visually-hidden {
   position: absolute !important; width: 1px; height: 1px; padding: 0; margin: -1px;
   overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0;

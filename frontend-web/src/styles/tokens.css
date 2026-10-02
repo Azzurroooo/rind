@@ -36,6 +36,7 @@
   --control-sm: 28px;
   --control-md: 32px;
   --control-lg: 36px;
+  --panel-scroll-gap: 6px;
 
   --motion-fast: 120ms;
   --motion-pop: 180ms;

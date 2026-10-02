@@ -30,8 +30,6 @@ export function bindShellEvents(): void {
 
   requiredElement("close-shortcuts").addEventListener("click", () => { state.shortcutsOpen = false; render() })
 
-  requiredElement("dismiss-shortcuts").addEventListener("click", () => { state.shortcutsOpen = false; render() })
-
   shortcutsDialog.addEventListener("cancel", () => { state.shortcutsOpen = false; render() })
 
   settingsNotifications.addEventListener("change", () => {

@@ -96,7 +96,7 @@ export function FileTree({ workspace, listFiles, readFile, embedded = false, ope
       )}
       {open && (
         <div className={`file-tree-body ${preview ? "has-preview" : ""}`}>
-          <div className="tree-directory" role="region" aria-label="Workspace directory">
+          <div className="tree-directory panel-scroll" role="region" aria-label="Workspace directory">
           {!workspace && <div className="tree-state">No workspace selected</div>}
           {workspace && <DirLevel path="" depth={0} state={dirs[""]} expanded={expanded} dirs={dirs} selectedPath={preview?.path} onToggleDir={toggleDir} onOpenFile={openPreview} onRetry={loadDir} />}
           </div>
@@ -171,7 +171,7 @@ function PreviewPanel({ preview, onClose }) {
         <span className="tree-preview-path" title={preview.path}>{preview.path}</span>
         <button type="button" className="tree-preview-close" onClick={onClose} aria-label="Close preview"><X size={16} aria-hidden="true" /></button>
       </div>
-      <div className="tree-preview-content" key={preview.path} tabIndex={0} aria-label="File contents">
+      <div className="tree-preview-content panel-scroll" key={preview.path} tabIndex={0} aria-label="File contents">
       {preview.status === "loading" && <div className="tree-state"><RefreshCw className="spin" size={14} /> Loading…</div>}
       {preview.status === "error" && (
         <div className="tree-state error" role="alert">

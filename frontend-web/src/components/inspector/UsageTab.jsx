@@ -40,10 +40,11 @@ export function UsageTab({ request, usageEnabled, authEnabled }) {
     <div className="inspector-body usage-tab">
       {usageEnabled && (
         <section className="inspector-section" aria-label="Token usage">
-          <div className="inspector-section-head">
+          <div className="inspector-section-head usage-toolbar">
             <h3 className="inspector-section-title">Last {usage.data?.days || USAGE_DAYS} days</h3>
-            <button type="button" className="icon-button small" aria-label="Refresh usage" onClick={usage.reload} disabled={usage.status === "loading"}>
+            <button type="button" className="usage-refresh" aria-label="Refresh usage" onClick={usage.reload} disabled={usage.status === "loading"}>
               <RefreshCw size={14} aria-hidden="true" className={usage.status === "loading" ? "spin" : ""} />
+              <span>Refresh</span>
             </button>
           </div>
           {usage.error && <p className="form-error" role="alert">{usage.error}</p>}
