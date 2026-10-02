@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { ArrowLeft, ArrowRight, Computer, LoaderCircle, Plus, QrCode, Settings2, Trash2 } from "lucide-react";
+import { ArrowLeft, ArrowRight, Computer, LoaderCircle, Moon, Plus, QrCode, Sun, Trash2 } from "lucide-react";
 import App from "@surface/App.jsx";
 import { ConfirmDialog } from "@surface/components/overlays/ConfirmDialog.jsx";
 import { fetchTicket, loginErrorMessage } from "@surface/ticket.js";
@@ -108,7 +108,7 @@ export default function MobileApp() {
   return <main className="mobile-home">
     <header className="mobile-home-header">
       <div className="brand-lockup"><img src="/rind.svg" alt="" className="brand-mark" /><span className="brand-name">Rind</span></div>
-      <button className="icon-button" aria-label={`Switch to ${theme.resolved === "dark" ? "light" : "dark"} theme`} onClick={theme.toggle}><Settings2 size={19} /></button>
+      <button className="icon-button" aria-label={`Switch to ${theme.resolved === "dark" ? "light" : "dark"} theme`} onClick={theme.toggle}>{theme.resolved === "dark" ? <Sun size={19} /> : <Moon size={19} />}</button>
     </header>
     <section className="mobile-connect">
       {form ? <>

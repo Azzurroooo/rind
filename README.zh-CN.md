@@ -177,6 +177,7 @@ rind send --session <id> "集成测试失败了，请先排查再继续。"
 | **CLI** | 终端交互、脚本集成 | `rind` |
 | **Desktop** | 可视化管理多个项目 | [从源码启动](docs/getting-started.zh-CN.md#桌面端) |
 | **Web** | 通过浏览器连接常驻 worker | [Docker 或本地部署](docs/getting-started.zh-CN.md#web-端) |
+| **Mobile** | Android／iOS 远程连接电脑上的 Rind | [手机 App 构建与连接](mobile/README.md) |
 | **消息网关** | 通过 Telegram、Discord、Slack、飞书等适配器工作 | [网关配置](docs/getting-started.zh-CN.md#消息网关) |
 
 使用 Web 端时，关闭浏览器不会终止 worker 中的任务；重新连接后恢复会话视图。本地客户端配置为使用同一个会话存储目录时，也可以重新打开已有会话。

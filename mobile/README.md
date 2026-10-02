@@ -18,8 +18,10 @@ refers to the phone. Public HTTP is rejected; TLS errors are never bypassed.
 
 Computer names/addresses are ordinary preferences. **Remember code** uses iOS
 Keychain (without iCloud sync) or Android Keystore-backed encrypted storage. Codes
-never enter WebView local/session storage. Disconnect preserves pairing; sign-out
-and forgetting remove the saved code. Rotating the Desktop code revokes access.
+never enter WebView local/session storage. Native bridge logging is disabled,
+including debug builds, to keep ticket Authorization headers out of device logs.
+Disconnect preserves pairing; sign-out and forgetting remove the saved code.
+Rotating the Desktop code revokes access.
 
 Background/offline suspends the client socket, not remote work. Foreground gets a
 fresh one-time ticket and restores history without resending prompts. In-memory
@@ -108,10 +110,11 @@ npm run test:e2e
 ```
 
 The smoke test uses the **real Desktop Gateway** and an isolated fake Worker. It
-checks pairing, replay, four viewport widths, drawers, files, prompt/queue/stop,
-reconnect/draft retention, secret isolation and forgetting. Only native HTTP/WS
-origin transport is substituted. It does not prove camera, keychain, OS keyboard
-or signing behavior. Temporary workspace/servers are cleaned in `finally`.
+checks pairing, replay, six viewports (including landscape/reduced height), drawers,
+files/uploads, prompt/queue/stop, reconnect/draft retention, secret isolation and
+forgetting. The page uses Android's `http://rind.local` origin; only native HTTP/WS
+transport is substituted. It does not prove camera, keychain, OS keyboard or
+signing behavior. Temporary workspace/servers are cleaned in `finally`.
 
 `npm run icons` regenerates native artwork from the existing Web SVG. Architecture,
 reference study and validation results live in `../docs/mobile-app.md`.

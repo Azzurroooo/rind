@@ -179,6 +179,7 @@ The result is a small idle execution footprint and clear extension boundaries: a
 | **CLI** | Direct terminal work and script integration | `rind` |
 | **Desktop** | A visual workspace for multiple projects | [Run from source](docs/getting-started.md#desktop) |
 | **Web** | Browser access to a long-lived worker | [Docker or local setup](docs/getting-started.md#web) |
+| **Mobile** | Android/iOS remote access to Rind on your computer | [Build and connect](mobile/README.md) |
 | **Messaging gateway** | Work through Telegram, Discord, Slack, Feishu, and other adapters | [Gateway setup](docs/getting-started.md#messaging-gateway) |
 
 With the Web client, closing the browser leaves the worker running; reconnecting restores the session view. Local clients can reopen saved sessions when configured to use the same session store.

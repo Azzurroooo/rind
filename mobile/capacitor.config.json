@@ -2,7 +2,7 @@
   "appId": "dev.rind.mobile",
   "appName": "Rind",
   "webDir": "dist",
-  "loggingBehavior": "debug",
+  "loggingBehavior": "none",
   "server": { "hostname": "rind.local", "androidScheme": "http", "iosScheme": "capacitor" },
   "plugins": {
     "SystemBars": { "insetsHandling": "native", "initialViewportFitValueHint": "cover" },

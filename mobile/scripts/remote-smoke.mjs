@@ -52,6 +52,12 @@ try {
   browser = await chromium.launch({ headless: true });
   const page = await browser.newPage({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, reducedMotion: "reduce" });
   page.on("pageerror", (error) => errors.push(error.message));
+  // Use the Android app's real HTTP origin, which is not a secure browser context.
+  await page.route("http://rind.local/**", async (route) => {
+    const url = new URL(route.request().url());
+    const response = await route.fetch({ url: `http://127.0.0.1:${port}${url.pathname}${url.search}` });
+    await route.fulfill({ response });
+  });
   await page.route(`${origin}/ticket`, async (route) => {
     const response = await fetch(`${origin}/ticket`, { headers: { Authorization: route.request().headers().authorization || "" } });
     await route.fulfill({ status: response.status, contentType: "application/json", body: await response.text() });
@@ -66,7 +72,8 @@ try {
     remote.on("error", () => route.close({ code: 1011 }));
     route.onClose(() => remote.close());
   });
-  await page.goto(`http://127.0.0.1:${port}`);
+  await page.goto("http://rind.local");
+  assert.equal(await page.evaluate(() => isSecureContext), false);
   const shots = process.env.RIND_QA_SHOTS;
   async function screenshot(name) { if (shots) { await mkdir(shots, { recursive: true }); await page.screenshot({ path: join(shots, `${name}.png`), animations: "disabled" }); } }
   await expect(page.getByRole("button", { name: "Add computer", exact: true })).toBeEnabled();
@@ -80,11 +87,11 @@ try {
   await page.getByRole("button", { name: "Connect", exact: true }).click();
   await expect(page.getByText("The remote connection is ready.", { exact: false })).toBeVisible();
   await screenshot("conversation-light");
-  for (const width of [320, 390, 430, 768]) {
-    await page.setViewportSize({ width, height: 844 });
+  for (const [width, height] of [[320, 640], [390, 844], [430, 932], [768, 1024], [844, 390], [390, 420]]) {
+    await page.setViewportSize({ width, height });
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false);
     const composer = await page.getByRole("combobox", { name: "Message" }).boundingBox();
-    assert.ok(composer && composer.x >= 0 && composer.x + composer.width <= width && composer.y + composer.height <= 844);
+    assert.ok(composer && composer.x >= 0 && composer.x + composer.width <= width && composer.y + composer.height <= height);
   }
   await page.setViewportSize({ width: 390, height: 844 });
   await page.getByRole("button", { name: "Toggle sidebar", exact: true }).click();
@@ -127,7 +134,7 @@ try {
   await page.getByRole("button", { name: "Forget computer", exact: true }).click();
   await expect(page.getByText("Bring your computer along", { exact: true })).toBeVisible();
   assert.deepEqual(errors, []);
-  console.log("PASS: pairing, authenticated gateway, replay, four viewports, drawers, files/upload, prompt/queue/stop, reconnect with draft, credential isolation and forget.");
+  console.log("PASS: pairing, authenticated gateway, replay, six viewports including landscape/reduced height, drawers, files/upload, prompt/queue/stop, reconnect with draft, credential isolation and forget.");
 } finally {
   endTurn?.(); for (const ws of sockets) ws.terminate();
   await browser?.close(); await gateway.stop();

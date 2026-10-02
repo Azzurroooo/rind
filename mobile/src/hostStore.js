@@ -2,6 +2,8 @@ import { parsePairing } from "./pairing.js";
 
 const KEY = "rind.mobile.hosts.v1";
 const credentialKey = (id) => `rind.mobile.code.${id}`;
+// Android's local HTTP origin lacks randomUUID, but supports getRandomValues.
+const createId = () => Array.from(crypto.getRandomValues(new Uint8Array(16)), (value) => value.toString(16).padStart(2, "0")).join("");
 
 export function createHostStore(preferences, vault) {
   async function list() {
@@ -21,7 +23,7 @@ export function createHostStore(preferences, vault) {
       const hosts = await list();
       const origin = parsePairing(host.origin).origin;
       const previous = hosts.find((entry) => entry.origin === origin);
-      const saved = { id: previous?.id || crypto.randomUUID(), name: host.name.trim().slice(0, 80) || new URL(origin).hostname, origin };
+      const saved = { id: previous?.id || createId(), name: host.name.trim().slice(0, 80) || new URL(origin).hostname, origin };
       // Write metadata before secrets: a failed metadata write cannot orphan a new code.
       await write([saved, ...hosts.filter((entry) => entry.id !== saved.id)]);
       if (remember) await vault.set(credentialKey(saved.id), token);

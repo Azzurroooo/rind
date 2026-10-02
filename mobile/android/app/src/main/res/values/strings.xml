@@ -3,5 +3,5 @@
     <string name="app_name">Rind</string>
     <string name="title_activity_main">Rind</string>
     <string name="package_name">dev.rind.mobile</string>
-    <string name="custom_url_scheme">dev.rind.mobile</string>
+    <string name="custom_url_scheme">rind</string>
 </resources>

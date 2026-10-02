@@ -1,6 +1,6 @@
 # Rind Current Code Architecture
 
-Rind shares one Python Runtime Package across `frontend-cli`, `desktop`, `frontend-web`, and gateway integrations. Python serves the runtime protocol; interaction and rendering belong to the clients.
+Rind shares one Python Runtime Package across `frontend-cli`, `desktop`, `frontend-web`, `mobile`, and gateway integrations. Python serves the runtime protocol; interaction and rendering belong to the clients. Mobile packages the shared Web surface with Capacitor and connects remotely; it never embeds the Python runtime. See [mobile architecture](mobile-app.md).
 
 ## Layering
 

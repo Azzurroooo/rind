@@ -1,5 +1,9 @@
 apply plugin: 'com.android.application'
 
+def rindVersionMatch = new File(rootProject.projectDir, '../../agent/version.py').text =~ /__version__ = "([^"]+)"/
+if (!rindVersionMatch.find()) throw new GradleException('Could not read the Rind version.')
+def rindVersion = rindVersionMatch.group(1)
+
 android {
     namespace = "dev.rind.mobile"
     compileSdk = rootProject.ext.compileSdkVersion
@@ -8,7 +12,7 @@ android {
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
         versionCode providers.gradleProperty('rindVersionCode').getOrElse('1').toInteger()
-        versionName (new File(rootProject.projectDir, '../../agent/version.py').text =~ /__version__ = "([^"]+)"/)[0][1]
+        versionName rindVersion
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.
              // Default: https://android.googlesource.com/platform/frameworks/base/+/282e181b58cf72b6ca770dc7ca5f91f135444502/tools/aapt/AaptAssets.cpp#61

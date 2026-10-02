@@ -16,6 +16,6 @@ export default defineConfig({
       "lucide-react": fileURLToPath(new URL("./node_modules/lucide-react", import.meta.url)),
     },
   },
-  server: { port: 5174, fs: { allow: [".."] } },
+  server: { port: 5174, fs: { allow: [".."] }, watch: { ignored: ["**/android/**", "**/ios/**", "**/.qa/**"] } },
   test: { environment: "jsdom", globals: true, include: ["src/**/*.test.{js,jsx}"] },
 });

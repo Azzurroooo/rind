@@ -12,15 +12,14 @@ import { parsePairing } from "./pairing.js";
 
 export const isNative = Capacitor.isNativePlatform();
 // Never invoke the secure-storage plugin's unencrypted browser implementation.
-const ephemeral = new Map();
 export const hostStore = createHostStore(Preferences, isNative ? {
   get: (key) => SecureStorage.get(key, false, false),
   set: (key, value) => SecureStorage.set(key, value, false, false),
   remove: (key) => SecureStorage.remove(key, false),
 } : {
-  get: async (key) => ephemeral.get(key),
-  set: async (key, value) => { ephemeral.set(key, value); },
-  remove: async (key) => { ephemeral.delete(key); },
+  get: async () => null,
+  set: async () => { throw new Error("Secure credential storage requires the installed app."); },
+  remove: async () => {},
 });
 
 export async function ticketFetch(endpoint, options) {

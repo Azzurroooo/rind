@@ -1,6 +1,7 @@
-import { beforeEach, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { createHostStore } from "./hostStore.js";
 let prefs, secrets, storage, store;
+afterEach(() => vi.unstubAllGlobals());
 beforeEach(() => {
   prefs = new Map(); secrets = new Map();
   storage = { get: async ({ key }) => ({ value: prefs.get(key) }), set: vi.fn(async ({ key, value }) => prefs.set(key, value)) };
@@ -12,6 +13,14 @@ it("persists only metadata outside the vault and deduplicates normalized origins
   expect(b.id).toBe(a.id); expect(await store.list()).toEqual([b]);
   expect([...prefs.values()].join()).not.toContain("code");
   expect(await store.token(a.id)).toBe("new-code");
+});
+it("can save and reload computers on a local HTTP origin without randomUUID", async () => {
+  vi.stubGlobal("crypto", { getRandomValues: crypto.getRandomValues.bind(crypto) });
+  const a = await store.save({ name: "A", origin: "http://192.168.1.2:8766" }, "a", true);
+  const b = await store.save({ name: "B", origin: "http://192.168.1.3:8766" }, "b", true);
+  expect(a.id).not.toBe(b.id);
+  expect(await store.list()).toEqual([b, a]);
+  expect(await store.token(a.id)).toBe("a");
 });
 it("forgetting one computer removes only its credential and metadata", async () => {
   const a = await store.save({ name: "A", origin: "https://a.test" }, "a", true);
