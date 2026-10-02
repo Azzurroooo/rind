@@ -48,6 +48,15 @@ test.txt
 src/
 !frontend-web/src/
 !frontend-web/src/**
+!mobile/src/
+!mobile/src/**
+!mobile/android/app/src/
+!mobile/android/app/src/**
+/mobile/android/.gradle/
+/mobile/android/local.properties
+/mobile/ios/App/Pods/
+/mobile/ios/App/build/
+/mobile/.qa/
 .claude/
 .agents/
 AGENTS.md

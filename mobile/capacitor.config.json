@@ -1,0 +1,11 @@
+{
+  "appId": "dev.rind.mobile",
+  "appName": "Rind",
+  "webDir": "dist",
+  "loggingBehavior": "debug",
+  "server": { "hostname": "rind.local", "androidScheme": "http", "iosScheme": "capacitor" },
+  "plugins": {
+    "SystemBars": { "insetsHandling": "native", "initialViewportFitValueHint": "cover" },
+    "Keyboard": { "resize": "body", "resizeOnFullScreen": true }
+  }
+}
