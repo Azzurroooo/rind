@@ -29,7 +29,7 @@ Synthetic messages exist only during request conversion. Trace serialization red
 
 Resolution is endpoint-matched cache boolean → verified built-in value at the official endpoint → unknown. False is an explicit value. Expired caches remain usable at matching endpoints. Custom endpoints cannot inherit the official model's capability by name. Built-in defaults are never stamped into remote cache data.
 
-The generic `openai-compatible` provider also uses the catalog when its configured endpoint exactly matches an official service. It keeps its configured provider and API; only image capability is resolved from that service's exact model ID. DeepSeek's documented root URL `https://api.deepseek.com` and the existing `/v1` URL both match the DeepSeek catalog; trailing slashes are ignored for this lookup. Other paths, proxy hosts and unknown models remain unknown. Cache matching remains exact, so no cached metadata is transferred between addresses.
+The generic `openai-compatible` provider also uses the catalog when its configured endpoint exactly matches an official service. It keeps its configured provider and API; image capability and context limits are resolved from that service's exact model ID. DeepSeek's documented root URL `https://api.deepseek.com` and the existing `/v1` URL both match the DeepSeek catalog; trailing slashes are ignored for this lookup. Other paths, proxy hosts and unknown models remain unknown. Cache matching remains exact, so no cached metadata is transferred between addresses.
 
 Background refresh, login and explicit list refresh share one fetch/parser/merge path. A valid remote boolean replaces the old value; omitted/invalid metadata preserves the old boolean only for the same endpoint and ID. Removed models disappear, failed/empty responses preserve the entire cache. Refresh uses the existing ten-second deadline without SDK retries. Ordinary list reads stay offline. There are no generation probes or extra capability requests.
 
@@ -41,10 +41,14 @@ Verified discovery schemas:
 
 The built-in [catalog](../agent/infrastructure/llm/catalog.py) includes explicit per-model image capabilities and unknown values where support is unverified or depends on a console-selected model. The original catalog sources are listed below; the MiMo, Hunyuan, Doubao/Ark and MiniMax additions and official references are documented in [provider additions](provider-catalog.md). These are development-time references, not runtime dependencies. The generic provider has no duplicate model list. No wildcard model-name rules are used.
 
+The [2026-10-03 review](model-catalog-review.md) supersedes the historical source
+notes below and documents LongCat, updated models and context metadata.
+
 Representative entries (the code contains the complete exact-ID list):
 
 | Provider | Supports images | Does not support images |
 | --- | --- | --- |
+| LongCat | LongCat-2.5-Preview | LongCat-2.0 |
 | OpenAI | GPT-6 Astra, GPT-5.6 Sol/Terra/Luna, GPT-5.5/5.4, GPT-4.1/4o, o3, o4-mini | o3-mini |
 | Anthropic | Fable 5.1, Opus 5/4.8/4.6, Sonnet 5/4.6, Haiku 4.5 | — |
 | Google | Gemini 3.8/3.5 Flash, 3.1 Pro Preview/Flash Lite, 3 Flash Preview, 2.5 Pro/Flash | — |
@@ -68,7 +72,7 @@ Sources and endpoint distinctions:
 - For models.dev, `zhipu` maps to `zhipuai`, `zai-coding` to `zai-coding-plan`, `zhipu-coding` to `zhipuai-coding-plan`, `kimi-coding` to `kimi-code-plan-global`, and `moonshot`/`moonshot-cn` to `moonshotai`/`moonshotai-cn`. Pi supplies the Kimi Anthropic endpoint mapping. Qwen uses **alibaba-cn**; Qwen Coding's configured Beijing Token Plan endpoint uses **alibaba-token-plan-cn**, not the separate Alibaba Coding Plan product.
 - OpenRouter entries were checked against its [public model catalog](https://openrouter.ai/api/v1/models) and complete `architecture.input_modalities` lists, preserving its own provider-prefixed model IDs.
 
-The retained unverified entries are `claude-3-5-haiku-latest`, `gemini-3-flash`, `deepseek-chat`, `deepseek-reasoner`, and Qwen Coding's `qwen3-coder-plus`/`qwen3-coder-flash`. Their exact IDs were absent from the corresponding current source. The last two no longer inherit text-only metadata from a different Alibaba product. They remain unknown rather than guessing availability or capability. Refreshed explicit metadata always takes precedence.
+The 2026-10-03 review removed unverified fallback entries `claude-3-5-haiku-latest`, `gemini-3-flash`, `deepseek-chat`, `deepseek-reasoner`, and Qwen Coding's `qwen3-coder-plus`/`qwen3-coder-flash`. Their exact IDs were absent from the corresponding current source. Explicit user selections remain available, with unknown capabilities unless matching cached metadata provides them. Refreshed explicit metadata always takes precedence.
 
 ## Dependencies and validation
 

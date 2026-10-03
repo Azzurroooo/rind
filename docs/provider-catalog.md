@@ -1,6 +1,7 @@
-# MiMo, Hunyuan, Doubao and MiniMax providers
+# MiMo, Hunyuan, Doubao, MiniMax and LongCat providers
 
-Verified against official documentation on 2026-09-24. Use `/login` to select
+Original additions reviewed on 2026-09-24; the [2026-10-03 catalog review](model-catalog-review.md)
+records current sources and verification boundaries, including secondary Ark evidence. Use `/login` to select
 an entry and save its key, then `/model` to select a model. Each entry has an
 independent stored credential and environment variable; logging in to one does
 not configure its siblings. Environment variable names below are Rind settings.
@@ -11,6 +12,7 @@ field; names from provider responses or older caches are ignored.
 
 | Provider | Product / region | Base URL | Environment variable |
 | --- | --- | --- | --- |
+| `longcat` | LongCat API | `https://api.longcat.chat/openai/v1` | `LONGCAT_API_KEY` |
 | `xiaomi` | Xiaomi MiMo API | `https://api.xiaomimimo.com/v1` | `XIAOMI_API_KEY` |
 | `xiaomi-token-plan-cn` | MiMo Token Plan, China | `https://token-plan-cn.xiaomimimo.com/v1` | `XIAOMI_TOKEN_PLAN_CN_API_KEY` |
 | `xiaomi-token-plan-ams` | MiMo Token Plan, Europe | `https://token-plan-ams.xiaomimimo.com/v1` | `XIAOMI_TOKEN_PLAN_AMS_API_KEY` |
@@ -33,6 +35,10 @@ MiMo documents both `api-key` and Bearer headers; the existing SDK uses Bearer.
 
 ## Product and model boundaries
 
+- LongCat includes `LongCat-2.5-Preview` (images) and `LongCat-2.0` (text).
+  Both use provider-default thinking; a saved OpenAI effort value is not sent.
+  See the [review](model-catalog-review.md#longcat) for current official sources
+  and the base-URL/example discrepancy.
 - MiMo API keys (`sk-`) and Token Plan keys (`tp-` / `ttp-`) are separate. The
   fallback list contains MiMo V2.6 Pro and Flash, documented for both products.
 - Tencent's legacy Hunyuan platform is migrating to TokenHub. New accounts
@@ -40,7 +46,8 @@ MiMo documents both `api-key` and Bearer headers; the existing SDK uses Bearer.
   TokenHub and Token Plan include Hy3 and Hy4 Preview. Coding Plan currently
   documents `tc-code-latest` and `glm-5`; older aggregated lists are not reused.
 - Ark API and Coding Plan use different endpoints and billing. The regular
-  fallback is `doubao-seed-2-1-pro-260628`; Coding Plan uses its own model aliases.
+  fallback is `doubao-seed-2-1-pro-260628`; Coding Plan uses `doubao-seed-2.1-turbo`
+  and its console-selected alias, based on the current secondary index.
   `ark-code-latest` follows the model selected in the console; its image support
   remains unknown because the selected model can change. Accounts using custom
   inference endpoints can set the `ep-...` model ID in their settings.
@@ -48,13 +55,14 @@ MiMo documents both `api-key` and Bearer headers; the existing SDK uses Bearer.
   is not interchangeable with pay-as-you-go API Keys. Separate entries prevent
   one login from overwriting the other, even though their URLs are identical.
 - MiniMax's fallback is M3, which supports images and defaults to thinking off.
-  M2.x models require returning complete thinking blocks across tool turns;
-  Rind's current Anthropic adapter does not preserve these blocks, so M2.x is
+  M2.x and M3.1 Flash Preview require returning complete thinking blocks across tool turns;
+  Rind's current Anthropic adapter does not preserve these blocks, so these models are
   not advertised in this fallback list. No unsupported effort levels are exposed.
 
 Model lists are small offline fallbacks, not claims that every account has
 access to every model. Existing model discovery remains best-effort. No new
-runtime dependencies, SDKs or provider-specific request branches are added.
+runtime dependencies or SDKs are added. LongCat suppresses unsupported effort
+fields before constructing the existing Chat adapter.
 
 ## Official sources
 

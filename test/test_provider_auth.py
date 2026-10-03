@@ -337,7 +337,7 @@ async def test_list_models_falls_back_to_builtin_catalog_without_cache(tmp_path:
     catalog = await service.list_models(str(tmp_path))
     assert [model.id for model in catalog.models] == [
         "deepseek-flash", "deepseek-v4-pro", "deepseek-v4-flash", "deepseek-v4-flash-vision-exp",
-        "deepseek-chat", "deepseek-reasoner",
+        "deepseek-chat",  # Explicit current selection survives removal from the fallback.
     ]
     assert all(model.reasoning_efforts for model in catalog.models)
 
@@ -611,7 +611,7 @@ def test_registry_covers_mainstream_providers() -> None:
 
 
 def test_fallback_models_declare_per_model_reasoning_efforts() -> None:
-    from agent.infrastructure.llm.catalog import PROVIDERS, default_reasoning_efforts
+    from agent.infrastructure.llm.catalog import PROVIDERS
 
     def _efforts(provider_id: str, model_id: str) -> tuple[str, ...]:
         return next(model.reasoning_efforts for model in PROVIDERS[provider_id].fallback_models if model.id == model_id)
@@ -621,8 +621,11 @@ def test_fallback_models_declare_per_model_reasoning_efforts() -> None:
     assert _efforts("zhipu", "glm-5.3") == ("low", "high", "max")
     assert _efforts("zhipu", "glm-5.2") == ("high", "max")
     assert _efforts("moonshot", "kimi-k2.6") == ()
-    # Unverified legacy aliases keep the dialect default.
-    assert _efforts("deepseek", "deepseek-chat") == default_reasoning_efforts("openai-chat")
+    assert _efforts("deepseek", "deepseek-v4-pro") == ("low", "high", "max")
+    assert _efforts("zhipu", "glm-4.7") == ()  # Thinking toggle, not effort levels.
+    assert _efforts("moonshot", "kimi-k2.7-code") == ()
+    assert _efforts("qwen", "qwen3.7-plus") == ()  # Token budget is not an effort enum.
+    assert _efforts("longcat", "LongCat-2.5-Preview") == ()
 
 
 def _google_chunk(parts, finish_reason=None, usage=None):
@@ -779,6 +782,7 @@ def test_resolve_selection_uses_configured_model_definition(tmp_path, monkeypatc
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("provider_id, endpoint", [
+    ("longcat", "https://api.longcat.chat/openai/v1/chat/completions"),
     ("xiaomi", "https://api.xiaomimimo.com/v1/chat/completions"),
     ("xiaomi-token-plan-cn", "https://token-plan-cn.xiaomimimo.com/v1/chat/completions"),
     ("xiaomi-token-plan-ams", "https://token-plan-ams.xiaomimimo.com/v1/chat/completions"),
