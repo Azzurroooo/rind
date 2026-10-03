@@ -20,6 +20,9 @@ const allowed = new Set(Object.values(runtimeMethods).filter(isRemoteRuntimeMeth
 const unscoped = new Set(["session/new", "session/list", "rind/usage/summary", "rind/auth/list", "model/list"])
 const mime: Record<string, string> = { ".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8", ".css": "text/css; charset=utf-8", ".svg": "image/svg+xml", ".png": "image/png", ".ico": "image/x-icon", ".woff2": "font/woff2" }
 const secret = () => randomBytes(24).toString("base64url")
+// Packaged Rind clients serve only bundled assets at these fixed origins.
+// Origin is not authentication: every upgrade still consumes a one-time ticket.
+const mobileOrigins = new Set(["http://rind.local", "capacitor://rind.local"])
 const object = (value: unknown): Record<string, unknown> => value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {}
 
 export class DesktopGateway {
@@ -83,7 +86,7 @@ export class DesktopGateway {
         const ticket = address?.searchParams.get("ticket") || ""
         const expires = this.tickets.get(ticket) || 0
         this.tickets.delete(ticket)
-        if (!address || address.pathname !== "/ws" || !this.validOrigin(request) || expires <= Date.now() || this.clients.size >= 16) { socket.end("HTTP/1.1 401 Unauthorized\r\nConnection: close\r\n\r\n"); return }
+        if (!address || address.pathname !== "/ws" || !(mobileOrigins.has(request.headers.origin || "") || this.validOrigin(request)) || expires <= Date.now() || this.clients.size >= 16) { socket.end("HTTP/1.1 401 Unauthorized\r\nConnection: close\r\n\r\n"); return }
         sockets.handleUpgrade(request, socket, head, (ws) => this.accept(ws))
       })
       await new Promise<void>((resolveReady, reject) => { server.once("error", reject); server.listen(options.port ?? 8766, options.scope === "lan" ? "0.0.0.0" : "127.0.0.1", () => { server.removeListener("error", reject); resolveReady() }) })

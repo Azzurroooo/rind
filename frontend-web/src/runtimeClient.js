@@ -24,6 +24,7 @@ export function createRuntimeClient({ url = defaultUrl(), credentialProvider = n
   let socket = null;
   let generation = 0;
   let stopped = true;
+  let suspended = false;
   let connecting = null;
   let cancelConnect = null;
   let reconnectTimer;
@@ -48,6 +49,7 @@ export function createRuntimeClient({ url = defaultUrl(), credentialProvider = n
   }
 
   function connect() {
+    if (suspended) return Promise.reject(new Error("Connection paused while the app is inactive or offline."));
     if (socket?.readyState === WebSocket.OPEN) return Promise.resolve();
     if (connecting) return connecting;
     stopped = false;
@@ -151,5 +153,11 @@ export function createRuntimeClient({ url = defaultUrl(), credentialProvider = n
     disconnect(); url = target.href;
   }
 
-  return { connect, request, disconnect, setUrl, setCredentialProvider: (provider) => { credential = provider; }, get url() { return url; }, get connected() { return socket?.readyState === WebSocket.OPEN; } };
+  return {
+    connect, request, disconnect, setUrl,
+    suspend: () => { suspended = true; disconnect(); },
+    resume: () => { suspended = false; return connect(); },
+    setCredentialProvider: (provider) => { credential = provider; },
+    get url() { return url; }, get connected() { return socket?.readyState === WebSocket.OPEN; },
+  };
 }

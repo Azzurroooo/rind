@@ -183,6 +183,9 @@ class WebRuntimeServer:
         origin = headers.get("Origin")
         if not origin:
             return True
+        # Bundled mobile clients still authenticate using a token/one-time ticket.
+        if origin in {"http://rind.local", "capacitor://rind.local"}:
+            return True
         origin_host = urlsplit(origin).hostname
         host = urlsplit(f"//{headers.get('Host', '')}").hostname
         return bool(origin_host and host) and origin_host.lower() == host.lower()

@@ -2,13 +2,14 @@ import { methods, sessionIdOf } from "../methods.js";
 import { isAuthError } from "../runtimeClient.js";
 import { finalAssistantText, showNotification, truncateFirstLine } from "../lib/notifications.js";
 import { readPreference } from "../lib/sessionPreferences.js";
-import { dropCredentials, fetchTicket, loginErrorMessage, readStoredTicket, readStoredToken, storeToken, unauthorizedMessage } from "../ticket.js";
+import { fetchTicket, loginErrorMessage, unauthorizedMessage } from "../ticket.js";
 import { SESSION_LIMIT_MAX, errorText } from "./constants.js";
 
 // Connection lifecycle: credentials, open/status handling, the initialize
 // bootstrap and the event intake. Cross-module calls go through ctx.call so
 // every module always sees the latest render's closures.
 export function createConnectionActions(ctx) {
+  const { dropCredentials, readStoredTicket, readStoredToken, storeToken } = ctx.platform.credentials;
   const { refs, endpoint, coalescer, controller, dispatchConnection, dispatchConversation } = ctx;
   const call = () => ctx.call.current;
 
@@ -59,7 +60,7 @@ export function createConnectionActions(ctx) {
     const token = readStoredToken(url || refs.client.current?.url || endpoint);
     if (token) {
       // Tickets are one-time: mint a fresh one for every (re)connect.
-      const ticket = await fetchTicket(token, { endpoint: ticketEndpoint(url) });
+      const ticket = await fetchTicket(token, { endpoint: ticketEndpoint(url), fetchImpl: ctx.platform.fetch });
       return `ticket=${encodeURIComponent(ticket)}`;
     }
     const stored = readStoredTicket(url || refs.client.current?.url || endpoint);
@@ -81,6 +82,7 @@ export function createConnectionActions(ctx) {
       ctx.setLoginToken("");
       refs.client.current?.disconnect();
       dispatchConnection({ type: "unauthorized", message: unauthorizedMessage() });
+      ctx.platform.onUnauthorized?.();
       return;
     }
     controller.handleStatus(status);
@@ -128,6 +130,7 @@ export function createConnectionActions(ctx) {
     dispatchConversation({ kind: "reset" });
     ctx.setSessions([]); ctx.setGoal(null); ctx.setStats({}); ctx.setBusySession(false); ctx.setCompacting(false);
     ctx.setContextSnapshot(null);
+    ctx.platform.onSignOut?.();
   }
 
   function reconnect() {

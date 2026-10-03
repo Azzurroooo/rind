@@ -132,11 +132,14 @@ class ProviderServiceImpl:
         endpoint = self._endpoint(settings, definition)
         key = credential.key or credential.access
         efforts = next((model.reasoning_efforts for model in definition.fallback_models if model.id == selection.model_id), ())
+        # LongCat documents a thinking toggle, not OpenAI reasoning_effort.
+        # A saved effort from a previous model must not become an unsupported field.
+        reasoning_effort = "" if definition.id == "longcat" else selection.reasoning_effort
         if definition.api == "openai-chat":
             from agent.infrastructure.llm.openai_chat import OpenAIChatCompletionsClient
 
             return OpenAIChatCompletionsClient(
-                build_async_client(key, endpoint, max_retries=14), selection.model_id, selection.reasoning_effort,
+                build_async_client(key, endpoint, max_retries=14), selection.model_id, reasoning_effort,
                 workspace_root=workspace_root, reasoning_efforts=efforts,
             )
         if definition.api == "openai-responses":
@@ -185,20 +188,27 @@ class ProviderServiceImpl:
         if cached is None:
             cached = next((item for item in self._cached_models(entry, settings, definition) if _item_id(item) == model_id), {})
         capability = None
+        context_window = None
         endpoint = self._endpoint(settings, definition)
         if isinstance(entry, dict) and entry.get("base_url") == endpoint:
             value = cached.get("image_input") if isinstance(cached, dict) else None
             capability = value if type(value) is bool else None
-        if capability is None:
+            context_window = _positive_integer(cached.get("context_window")) if isinstance(cached, dict) else None
+        if capability is None or context_window is None:
             catalog_endpoint = endpoint.rstrip("/")
             if catalog_endpoint == "https://api.deepseek.com":
                 catalog_endpoint += "/v1"
             candidates = self.providers.values() if definition.id == "openai-compatible" else (definition,)
             for candidate in candidates:
                 if catalog_endpoint and catalog_endpoint == candidate.default_base_url.rstrip("/"):
-                    capability = next((model.image_input for model in candidate.fallback_models if model.id == model_id), None)
+                    known = next((model for model in candidate.fallback_models if model.id == model_id), None)
+                    if known is not None:
+                        if capability is None:
+                            capability = known.image_input
+                        if context_window is None:
+                            context_window = known.context_window
                     break
-        return replace(base, image_input=capability)
+        return replace(base, image_input=capability, context_window=context_window)
 
     async def _fetch_models(self, settings: AppSettings, definition) -> bool:
         if not refreshable_models_api(_effective_api(settings, definition)):
@@ -238,6 +248,11 @@ class ProviderServiceImpl:
                     capability = value if type(value) is bool else None
                 if capability is not None:
                     model["image_input"] = capability
+                context_window = _remote_context_window(raw, definition.id)
+                if context_window is None:
+                    context_window = _positive_integer(old.get(model["id"], {}).get("context_window"))
+                if context_window is not None:
+                    model["context_window"] = context_window
             self._write_cache(cache | {definition.id: {
                 "models": models, "refreshed_at": time.time(), "base_url": endpoint,
             }})
@@ -361,3 +376,14 @@ def _remote_image_input(item: Any, provider_id: str) -> bool | None:
         if type(vision) is bool:
             return vision
     return None
+
+
+def _positive_integer(value: Any) -> int | None:
+    return value if type(value) is int and value > 0 else None
+
+
+def _remote_context_window(item: Any, provider_id: str) -> int | None:
+    """Only consume token limits from documented model-list schemas."""
+    data = item if isinstance(item, dict) else item.model_dump() if hasattr(item, "model_dump") else {}
+    field = {"openrouter": "context_length", "mistral": "max_context_length", "groq": "context_window"}.get(provider_id)
+    return _positive_integer(data.get(field)) if field else None

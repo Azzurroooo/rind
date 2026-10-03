@@ -1,11 +1,11 @@
 import { useEffect, useMemo } from "react";
 import { createRuntimeClient } from "../runtimeClient.js";
-import { hasStoredCredential } from "../ticket.js";
 
 // One runtime client per App mount. Its callbacks delegate through ctx.call,
 // so they always run the latest render's actions.
 export function useRuntimeClient(ctx) {
   const { endpoint, refs, coalescer } = ctx;
+  const { hasStoredCredential } = ctx.platform.credentials;
   const client = useMemo(() => createRuntimeClient({
     url: endpoint,
     credentialProvider: (url) => ctx.call.current.acquireCredential(url),
@@ -24,5 +24,13 @@ export function useRuntimeClient(ctx) {
   }, [client, endpoint]);
 
   useEffect(() => () => coalescer.dispose(), [coalescer]);
+  useEffect(() => ctx.platform.subscribeLifecycle?.((active) => {
+    if (!active) {
+      ctx.call.current.handleStatus({ state: "disconnected" });
+      client.suspend();
+    } else if (hasStoredCredential(endpoint)) {
+      client.resume().catch(() => {});
+    }
+  }), [client, endpoint]);
   return client;
 }

@@ -1,0 +1,48 @@
+/* Extend the shared Rind design; no separate palette or duplicated conversation. */
+html, body, #root { overflow: hidden; overscroll-behavior: none; }
+body { isolation: isolate; }
+#root { padding: env(safe-area-inset-top) env(safe-area-inset-right) 0 env(safe-area-inset-left); }
+.mobile-home { height: 100%; overflow-y: auto; padding: 0 24px max(24px, env(safe-area-inset-bottom)); }
+.mobile-home-header { display: flex; align-items: center; justify-content: space-between; height: 88px; max-width: 520px; margin: auto; }
+.mobile-home-header .brand-mark { width: 30px; height: 30px; }
+.mobile-home-header .brand-name { font-size: 23px; }
+.mobile-connect { max-width: 440px; margin: 24px auto 0; }
+.mobile-connect h1 { font-size: 30px; line-height: 1.25; letter-spacing: -.035em; font-weight: 600; }
+.mobile-intro { color: var(--muted); font-size: 15px; line-height: 1.75; margin-top: 16px; }
+.mobile-section-heading { display: flex; align-items: center; justify-content: space-between; margin: 36px 0 12px; }
+.mobile-section-heading h2 { font-size: 14px; }
+.mobile-empty { padding: 28px 24px; border: 1px dashed var(--line-strong); border-radius: var(--radius-card); text-align: center; color: var(--muted); }
+.mobile-empty > svg { color: var(--accent); margin-bottom: 12px; }
+.mobile-empty h3 { color: var(--text); font-size: 16px; margin-bottom: 8px; }
+.mobile-empty p { font-size: 14px; line-height: 1.7; max-width: 280px; margin: auto; }
+.mobile-primary { width: 100%; margin-top: 24px; min-height: 48px; font-size: 15px; }
+.mobile-scan { width: 100%; min-height: 48px; margin-top: 12px; }
+.mobile-footnote { margin-top: 24px; color: var(--muted); font-size: 12px; line-height: 1.8; }
+.mobile-computer { display: flex; align-items: center; gap: 4px; border-bottom: 1px solid var(--line); padding: 8px 0; }
+.mobile-computer-connect { display: flex; align-items: center; gap: 12px; background: transparent; border: 0; flex: 1; min-width: 0; text-align: left; padding: 8px 0; }
+.mobile-computer-icon { display: grid; place-items: center; flex: none; width: 44px; height: 44px; border-radius: var(--radius-card); color: var(--accent); background: var(--accent-soft); }
+.mobile-computer-connect > span:nth-child(2) { flex: 1; min-width: 0; }
+.mobile-computer-connect strong, .mobile-computer-connect small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mobile-computer-connect strong { font-size: 15px; font-weight: 600; }
+.mobile-computer-connect small { font-family: var(--font-mono); font-size: 11px; color: var(--muted); }
+.mobile-back { padding-left: 0; margin: -16px 0 16px; }
+.mobile-pair-form { display: grid; gap: 20px; margin-top: 24px; }
+.mobile-pair-form label { display: flex; flex-direction: column; gap: 8px; font-size: 13px; font-weight: 500; }
+.mobile-pair-form label > input:not([type='checkbox']) { width: 100%; height: 48px; min-width: 0; border: 1px solid var(--line-strong); border-radius: var(--radius-control); padding: 0 12px; background: var(--surface); font-size: 16px; }
+.mobile-pair-form .mobile-remember { flex-direction: row; align-items: center; gap: 10px; min-height: 44px; }
+.mobile-remember input { width: 20px; height: 20px; accent-color: var(--accent); }
+.mobile-pair-form .mobile-primary { margin-top: 0; }
+.mobile-error { color: var(--danger); background: var(--danger-soft); padding: 12px; border-radius: var(--radius-control); font-size: 13px; overflow-wrap: anywhere; }
+.mobile-session { height: 100%; display: flex; flex-direction: column; }
+.mobile-host-bar { display: flex; align-items: center; gap: 6px; padding: 2px 12px 2px 4px; border-bottom: 1px solid var(--line); flex: none; }
+.mobile-host-name { display: inline-flex; align-items: center; gap: 6px; min-width: 0; overflow: hidden; white-space: nowrap; font-size: 12px; font-weight: 600; }
+.mobile-host-origin { margin-left: auto; font-family: var(--font-mono); font-size: 10px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mobile-session .app-shell { height: auto; min-height: 0; flex: 1; min-width: 0; }
+.mobile-session .composer-wrap { padding-bottom: max(12px, env(safe-area-inset-bottom)); }
+.mobile-session .sidebar, .mobile-session .inspector { padding-top: env(safe-area-inset-top); padding-bottom: env(safe-area-inset-bottom); }
+.icon-button { min-width: 44px; min-height: 44px; }
+.chat-header .icon-button { min-width: 44px; min-height: 44px; }
+.dialog-scrim { padding-top: max(12px, env(safe-area-inset-top)); padding-bottom: max(12px, env(safe-area-inset-bottom)); }
+input, textarea, select { font-size: 16px; }
+@media (max-width: 359px) { .mobile-home { padding-left: 16px; padding-right: 16px; } .mobile-connect h1 { font-size: 27px; } .mobile-host-origin { max-width: 40%; } }
+@media (min-width: 768px) { .mobile-connect { margin-top: 60px; } }
