@@ -1,146 +1,35 @@
-name: Build and publish Rind release
+name: Request complete Rind release build
 
+# Tags identify reviewed source; publication follows complete inventory checks.
 on:
-  push:
-    tags: ["v*", "!v*-*"]
   workflow_dispatch:
     inputs:
       source_ref:
-        description: "Source branch, tag, or commit to package"
+        description: Committed source tag or SHA
         required: true
-        default: "main"
-
+      distribution_ref:
+        description: Committed distribution branch or tag
+        required: true
+        default: main
+      android_version_code:
+        description: Increasing Android versionCode
+        required: true
 permissions:
-  contents: write
-
-env:
-  DISTRIBUTION_REPOSITORY: Azzurroooo/rind-distribution
-  DISTRIBUTION_REF: bf65d8f43c41856c303245a1877b20e95b4ed106
-  SOURCE_REF: ${{ github.event_name == 'workflow_dispatch' && inputs.source_ref || github.ref }}
-  RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.source_ref || github.ref_name }}
-
+  contents: read
 jobs:
-  cli:
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - os: windows-latest
-            target: windows-x64
-          - os: macos-15-intel
-            target: macos-x64
-          - os: macos-14
-            target: macos-arm64
-          - os: ubuntu-latest
-            target: linux-x64
-    runs-on: ${{ matrix.os }}
+  request:
+    runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ env.SOURCE_REF }}
-          path: rind
-      - uses: actions/checkout@v4
-        with:
-          repository: ${{ env.DISTRIBUTION_REPOSITORY }}
-          ref: ${{ env.DISTRIBUTION_REF }}
-          path: rind-distribution
-          token: ${{ secrets.DISTRIBUTION_TOKEN || github.token }}
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12.13"
-      - uses: actions/setup-node@v4
-        with:
-          node-version: "20"
-      - name: Install Inno Setup
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: choco install innosetup --yes --no-progress
-      - name: Build CLI installer and runtime
-        working-directory: rind-distribution
-        run: python scripts/release.py cli --target ${{ matrix.target }} --source ../rind
-      - uses: actions/upload-artifact@v4
-        with:
-          name: rind-cli-${{ matrix.target }}
-          path: rind-distribution/artifacts
-
-  npm:
-    needs: cli
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: ${{ env.SOURCE_REF }}
-          path: rind
-      - uses: actions/checkout@v4
-        with:
-          repository: ${{ env.DISTRIBUTION_REPOSITORY }}
-          ref: ${{ env.DISTRIBUTION_REF }}
-          path: rind-distribution
-          token: ${{ secrets.DISTRIBUTION_TOKEN || github.token }}
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12.13"
-      - uses: actions/setup-node@v4
-        with:
-          node-version: "20"
-          registry-url: "https://registry.npmjs.org"
-      - uses: actions/download-artifact@v4
-        with:
-          pattern: rind-cli-*
-          path: rind-distribution/artifacts
-          merge-multiple: true
-      - name: Assemble npm packages
-        working-directory: rind-distribution
-        run: python scripts/release.py npm --source ../rind --pack
-      - name: Create npm publish bundle
-        working-directory: rind-distribution
-        run: python scripts/release.py npm-bundle --source ../rind
-      - uses: actions/upload-artifact@v4
-        with:
-          name: rind-npm
-          path: |
-            rind-distribution/artifacts/npm
-            rind-distribution/artifacts/release
-
-  release:
-    needs: [cli, npm]
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: ${{ env.SOURCE_REF }}
-          path: rind
-      - uses: actions/checkout@v4
-        with:
-          repository: ${{ env.DISTRIBUTION_REPOSITORY }}
-          ref: ${{ env.DISTRIBUTION_REF }}
-          path: rind-distribution
-          token: ${{ secrets.DISTRIBUTION_TOKEN || github.token }}
-      - uses: actions/download-artifact@v4
-        with:
-          pattern: rind-cli-*
-          path: rind-distribution/artifacts
-          merge-multiple: true
-      - uses: actions/download-artifact@v4
-        with:
-          name: rind-npm
-          path: rind-distribution/artifacts
-      - name: Create CLI checksums
-        working-directory: rind-distribution
-        run: python scripts/create_checksums.py --source ../rind --cli-only
-      - name: Create CLI release notes
-        working-directory: rind-distribution
-        run: python scripts/create_release_notes.py --source ../rind --cli-only
-      - name: Read release version
-        id: version
-        working-directory: rind
-        shell: bash
-        run: echo "version=$(python -c 'from agent.version import __version__; print(__version__)')" >> "$GITHUB_OUTPUT"
-      - name: Publish CLI GitHub Release
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ${{ env.RELEASE_TAG }}
-          name: Rind ${{ env.RELEASE_TAG }}
-          body_path: rind-distribution/artifacts/release/${{ steps.version.outputs.version }}/RELEASE_NOTES.md
-          files: |
-            rind-distribution/artifacts/release/*/*
+          ref: ${{ inputs.source_ref }}
+      - name: Dispatch complete distribution build (does not publish)
+        env:
+          GH_TOKEN: ${{ secrets.DISTRIBUTION_TOKEN }}
+          DISTRIBUTION_REF: ${{ inputs.distribution_ref }}
+          ANDROID_CODE: ${{ inputs.android_version_code }}
+        run: |
+          test -n "$GH_TOKEN"
+          gh workflow run build-release-assets.yml --repo Azzurroooo/rind-distribution \
+            --ref "$DISTRIBUTION_REF" -f source_ref="$(git rev-parse HEAD)" \
+            -f android_version_code="$ANDROID_CODE"
