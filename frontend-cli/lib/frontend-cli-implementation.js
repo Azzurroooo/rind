@@ -209,7 +209,7 @@ const runtimeClient = createRuntimeClient({
   onStderr: (chunk) => writeErrorOutput(chunk),
   onExit: (code, signal, { error }) => {
     const wasClosing = runtimeState.status === "closing";
-    runtimeState.status = "failed";
+    runtimeState.status = wasClosing ? "closing" : "failed";
     runtimeState.initialization = null;
     turnStateData.id = "";
     displayState.lastEventSequence = 0;
@@ -223,9 +223,6 @@ const runtimeClient = createRuntimeClient({
     if (!wasClosing) {
       runtimeState.failure = error;
       writeErrorOutput(`Runtime stopped (${signal || (code ?? "startup failure")}): ${error.message}. Runtime commands are unavailable until it restarts.\n`);
-    } else {
-      process.exitCode = 0;
-      scheduleProcessExit(0, 0);
     }
   },
 });
@@ -342,7 +339,7 @@ commandController = createCommandController({
       inputStateData.prefill = String(value || "");
     },
     shutdown: shutdownRuntime,
-    exit: () => process.exit(0),
+    exit: () => process.exit(process.exitCode ?? 0),
   },
 });
 taskMonitorController = createTaskMonitorController({
@@ -483,7 +480,7 @@ try {
     process.exitCode = 1;
   }
 } finally {
-  closeRuntime();
+  void shutdownRuntime();
 }
 
 function updateGoalState(goal) {
@@ -827,18 +824,6 @@ function exitFromSignal() {
   void shutdownRuntime();
 }
 
-function closeRuntime() {
-  if (runtimeState.status === "closing") {
-    return;
-  }
-  runtimeState.status = "closing";
-  clearActivityTimer();
-  taskMonitorController.stop();
-  void ipcServer?.close();
-  void runtimeClient.shutdown();
-  closeInput();
-}
-
 function forceCloseRuntime() {
   runtimeState.status = "closing";
   clearActivityTimer();
@@ -859,13 +844,15 @@ async function shutdownRuntime() {
   runtimeState.status = "closing";
   clearActivityTimer();
   taskMonitorController.stop();
+  void ipcServer?.close();
   try {
     await runtimeClient.shutdown();
-  } catch {
-    runtimeClient.forceShutdown();
+  } catch (error) {
+    writeErrorOutput(`Runtime shutdown failed: ${error instanceof Error ? error.message : String(error)}\n`);
+    process.exitCode = 1;
   } finally {
-    runtimeClient.closeInput();
     closeInput();
+    scheduleProcessExit(process.exitCode ?? 0, 0);
   }
 }
 

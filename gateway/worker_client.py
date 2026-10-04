@@ -93,11 +93,15 @@ class WorkerClient:
     async def stop(self) -> None:
         self._stopping = True
         self._up = False
-        for task in (self._reader, self._consumer, self._supervisor):
-            if task is not None:
-                task.cancel()
-        await self._transport.close()
-        self._fail_pending(WorkerConnectionError("worker client stopped"))
+        tasks = [task for task in (self._reader, self._consumer, self._supervisor) if task is not None]
+        for task in tasks:
+            task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
+        self._reader = self._consumer = self._supervisor = None
+        try:
+            await self._transport.close()
+        finally:
+            self._fail_pending(WorkerConnectionError("worker client stopped"))
 
     async def request(
         self,
@@ -162,8 +166,11 @@ class WorkerClient:
         reader, self._reader = self._reader, None
         if reader is not None:
             reader.cancel()
-        await self._transport.close()
-        self._fail_pending(WorkerConnectionError("worker connection lost"))
+            await asyncio.gather(reader, return_exceptions=True)
+        try:
+            await self._transport.close()
+        finally:
+            self._fail_pending(WorkerConnectionError("worker connection lost"))
 
     async def _supervise(self) -> None:
         while not self._stopping:

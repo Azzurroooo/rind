@@ -242,7 +242,10 @@ export async function runOneShot({ args, python, repoRoot, runtimePath, cwd = pr
     process.exitCode = 1;
     return true;
   } finally {
-    if (client) await client.shutdown().catch(() => client.forceShutdown());
+    if (client) await client.shutdown().catch((error) => {
+      stderr(`Runtime shutdown failed: ${error instanceof Error ? error.message : String(error)}\n`);
+      process.exitCode = 1;
+    });
   }
 }
 

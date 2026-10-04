@@ -279,6 +279,89 @@ async def test_cancelling_during_spawn_does_not_orphan_process(task_shell, monke
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("scope", ["worker", "session"])
+@pytest.mark.parametrize("failure", ["no_exit", "signal_error"])
+async def test_close_attempts_every_task_and_rejects_unconfirmed_exit(task_shell, monkeypatch, scope, failure):
+    from agent.infrastructure.tools.shell import supervisor
+    tools, processes = task_shell
+    tasks = [data(await tools.bash("work", yield_time_ms=0)) for _ in range(2)]
+    records = [tools.supervisor._processes[task["task_id"]] for task in tasks]
+    terminate = supervisor.terminate_tree
+
+    async def fail_first(process, grace, job=None):
+        if process is processes[0]:
+            if failure == "signal_error":
+                raise OSError("cannot terminate")
+            return
+        await terminate(process, grace, job)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(supervisor, "terminate_tree", fail_first)
+        patch.setattr(tools.supervisor, "TERMINATION_GRACE_SECONDS", 0.02)
+        close = tools.close() if scope == "worker" else tools.close_session("default")
+        with pytest.raises(ExceptionGroup) as error:
+            await asyncio.wait_for(close, 2)
+        assert any("not confirmed" in str(exc) or "cannot terminate" in str(exc) for exc in error.value.exceptions)
+        assert processes[0].returncode is None
+        assert processes[1].returncode is not None and records[1].monitor.done()
+        assert tasks[0]["task_id"] in tools.supervisor._processes
+    # A failed close keeps ownership, so retry can finish cleanup.
+    await tools.close()
+    assert all(record.finished.is_set() and record.monitor.done() for record in records)
+
+
+@pytest.mark.asyncio
+async def test_close_bounds_monitor_wait_after_parent_exit(task_shell, monkeypatch):
+    tools, processes = task_shell
+    task = data(await tools.bash("work", yield_time_ms=0))
+    record = tools.supervisor._processes[task["task_id"]]
+    entered, release = asyncio.Event(), asyncio.Event()
+    settle = tools.supervisor._settle_readers
+
+    async def slow_readers(record):
+        entered.set()
+        await release.wait()
+        await settle(record)
+
+    monkeypatch.setattr(tools.supervisor, "_settle_readers", slow_readers)
+    monkeypatch.setattr(tools.supervisor, "TERMINATION_GRACE_SECONDS", 0.02)
+    processes[0].finish()
+    await entered.wait()
+    try:
+        with pytest.raises(ExceptionGroup) as error:
+            await asyncio.wait_for(tools.close(), 2)
+        assert "not confirmed" in str(error.value.exceptions[0])
+        assert not record.monitor.done()
+    finally:
+        release.set()
+        await record.monitor
+
+
+@pytest.mark.asyncio
+async def test_cleanup_failure_is_not_retired_or_reported_as_confirmed(task_shell, monkeypatch):
+    from agent.infrastructure.tools.shell import supervisor
+    tools, processes = task_shell
+    task = data(await tools.bash("work", yield_time_ms=0))
+    record = tools.supervisor._processes[task["task_id"]]
+
+    async def fail_cleanup(*args):
+        raise OSError("descendant cleanup failed")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(supervisor, "terminate_tree", fail_cleanup)
+        processes[0].finish()
+        await record.monitor
+        assert record.status == "lost"
+        await tools.monitor_tasks("default")
+        assert task["task_id"] in tools.supervisor._processes
+        with pytest.raises(ExceptionGroup) as error:
+            await tools.close()
+        assert "descendant cleanup failed" in str(error.value.exceptions[0])
+    # Restore the simulated cleanup failure so fixture teardown can release its lease.
+    record.status = "completed"
+
+
+@pytest.mark.asyncio
 async def test_parent_exit_cleans_inherited_pipe_descendant(tmp_path):
     tools = ShellTools(ToolOutputStore(str(tmp_path)))
     connected, disconnected = asyncio.Event(), asyncio.Event()

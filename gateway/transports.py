@@ -17,6 +17,7 @@ from websockets.asyncio.client import connect
 from websockets.exceptions import ConnectionClosed
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
+SHUTDOWN_TIMEOUT_SECONDS = 30.0
 
 
 def _parse(raw: str | bytes) -> dict[str, Any] | None:
@@ -59,7 +60,7 @@ class _WebSocketTransport:
 
 
 class _StdioTransport:
-    """Spawns the app-server subprocess; identical semantics to WebSocket."""
+    """Owns the app-server subprocess and shuts it down through stdin EOF."""
 
     def __init__(self, command: list[str] | None = None) -> None:
         self._command = command or [sys.executable, str(PROJECT_ROOT / "main.py"), "app-server", "--stdio"]
@@ -88,10 +89,31 @@ class _StdioTransport:
         await self._process.stdin.drain()
 
     async def close(self) -> None:
-        if self._process is not None and self._process.returncode is None:
-            self._process.terminate()
-            await self._process.wait()
-        self._process = None
+        process = self._process
+        if process is None:
+            return
+        if process.stdin is not None:
+            process.stdin.close()
+
+        async def wait_for_exit() -> int:
+            if process.stdout is not None:
+                while await process.stdout.read(65536):
+                    pass
+            return await process.wait()
+
+        try:
+            try:
+                code = await asyncio.wait_for(wait_for_exit(), SHUTDOWN_TIMEOUT_SECONDS)
+            except asyncio.TimeoutError:
+                if process.returncode is None:
+                    process.kill()
+                await asyncio.wait_for(wait_for_exit(), 5)
+                raise TimeoutError("Worker shutdown timed out; forced termination.") from None
+            if code != 0:
+                raise RuntimeError(f"Worker exited during shutdown with code {code}.")
+        finally:
+            if process.returncode is not None:
+                self._process = None
 
 
 def build_transport(url: str, token: str | None) -> Any:

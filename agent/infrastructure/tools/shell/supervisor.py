@@ -257,7 +257,9 @@ class ProcessSupervisor:
     def _retire_finished(self):
         if self.journal:
             for task_id, record in list(self._processes.items()):
-                if record.finished.is_set() and not record.persistence_error and (record.monitor is None or record.monitor.done()):
+                if (record.finished.is_set() and not record.persistence_error
+                        and not (record.process is not None and record.status == "lost")
+                        and (record.monitor is None or record.monitor.done())):
                     self._processes.pop(task_id)
                     self._origins.pop((record.session_id, record.call_id), None)
 
@@ -298,24 +300,32 @@ class ProcessSupervisor:
     async def close_session(self, session_id: str) -> None:
         self._closed_sessions.add(session_id)
         records = [r for r in self._processes.values() if r.session_id == session_id]
-        await asyncio.gather(*(r.started.wait() for r in records))
-        await asyncio.gather(*(self._terminate(r, "cancelled", "Session closed") for r in records))
+        await self._close_records(records, "Session closed")
         for record in records:
-            if not record.finished.is_set():
-                raise RuntimeError(f"Cannot close session: termination of {record.task_id} is not confirmed.")
-            if record.monitor:
-                await record.monitor
             if not record.persistence_error:
                 self._processes.pop(record.task_id, None)
                 self._origins.pop((session_id, record.call_id), None)
 
     async def close(self) -> None:
         self._closed = True
-        records = list(self._processes.values())
-        await asyncio.gather(*(r.started.wait() for r in records))
-        await asyncio.gather(*(self._terminate(r, "cancelled", "Worker shutting down") for r in records))
+        await self._close_records(list(self._processes.values()), "Worker shutting down")
         if self.journal:
             await self.journal.close()
+
+    async def _close_records(self, records: list[ProcessRecord], reason: str) -> None:
+        async def close_record(record: ProcessRecord) -> None:
+            await record.started.wait()
+            await self._terminate(record, "cancelled", reason)
+            if not record.finished.is_set() or (record.process is not None and (
+                    record.process.returncode is None or record.status == "lost")):
+                raise RuntimeError(f"Termination of {record.task_id} is not confirmed: {record.reason}")
+            if record.monitor:
+                await record.monitor
+
+        results = await asyncio.gather(*(close_record(r) for r in records), return_exceptions=True)
+        errors = [result for result in results if isinstance(result, BaseException)]
+        if errors:
+            raise BaseExceptionGroup("Process cleanup failed: " + "; ".join(map(str, errors)), errors)
 
     def close_now(self) -> None:
         self._closed = True
@@ -337,7 +347,7 @@ class ProcessSupervisor:
             record.exit_code = await wait_parent_exit(record.process)
             await terminate_tree(record.process, self.TERMINATION_GRACE_SECONDS, record.job)
         except Exception as exc:
-            failure_status = "lost" if record.exit_code is None else "failed"
+            failure_status = "lost"
             record.reason = f"Process cleanup failed: {exc}"
         finally:
             await self._settle_readers(record)
@@ -389,16 +399,14 @@ class ProcessSupervisor:
             await asyncio.gather(*tasks.values(), return_exceptions=True)
 
     async def _terminate(self, record: ProcessRecord, status: str, reason: str) -> None:
-        if record.status in TERMINAL_STATES or record.process is None or record.process.returncode is not None:
-            if record.monitor and not record.finished.is_set():
-                await record.finished.wait()
+        if record.finished.is_set() or record.process is None:
             return
-        if record.termination_status is None:
-            record.status = "cancelling"
-            record.reason = reason
-            record.termination_status = status
-            await self._save(record)
-        if record.status not in TERMINAL_STATES:
+        if record.status not in TERMINAL_STATES and record.process.returncode is None:
+            if record.termination_status is None:
+                record.status = "cancelling"
+                record.reason = reason
+                record.termination_status = status
+                await self._save(record)
             await terminate_tree(record.process, self.TERMINATION_GRACE_SECONDS, record.job)
         try:
             await asyncio.wait_for(record.finished.wait(), self.TERMINATION_GRACE_SECONDS * 2)

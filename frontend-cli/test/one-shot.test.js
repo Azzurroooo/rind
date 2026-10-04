@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, readFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
@@ -71,6 +71,32 @@ test("one-shot execution keeps stdout to the assistant and writes a compact log"
 
 test("prompt slugs remove filesystem-invalid characters", () => {
   assert.equal(promptSlug("A:/bad? prompt"), "A bad prompt");
+});
+
+test("one-shot reports shutdown failure on stderr with a nonzero exit code", async (t) => {
+  const workspace = await mkdtemp(path.join(os.tmpdir(), "rind-shutdown-error-"));
+  const originalExitCode = process.exitCode;
+  t.after(async () => {
+    process.exitCode = originalExitCode;
+    await rm(workspace, { recursive: true, force: true });
+  });
+  const errors = [];
+  const output = [];
+  await runOneShot({
+    args: ["run", "--prompt", "hello"], cwd: workspace,
+    stdout: (text) => output.push(text), stderr: (text) => errors.push(text),
+    clientFactory: () => ({
+      start() {},
+      async request(method) {
+        if (method === "initialize") return { protocol_version: "2", capabilities: [], methods: [], session_id: "s1" };
+        return { session_id: "s1", turn_id: "t1" };
+      },
+      async shutdown() { throw new Error("termination not confirmed"); },
+    }),
+  });
+  assert.equal(process.exitCode, 1);
+  assert.match(errors.join(""), /Runtime shutdown failed: termination not confirmed/);
+  assert.doesNotMatch(output.join(""), /shutdown failed/);
 });
 
 test("one-shot waits across turns and prints the request answer once", async () => {

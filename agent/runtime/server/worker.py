@@ -181,9 +181,11 @@ class RuntimeWorker:
             await asyncio.gather(self._model_refresh_task, return_exceptions=True)
             self._model_refresh_task = None
         try:
-            await self.execution.close()
+            results = await asyncio.gather(
+                self.execution.close(), self.shell_tools.close(), return_exceptions=True,
+            )
+            errors = [result for result in results if isinstance(result, BaseException)]
+            if errors:
+                raise BaseExceptionGroup("Worker shutdown failed: " + "; ".join(map(str, errors)), errors)
         finally:
-            try:
-                await self.shell_tools.close()
-            finally:
-                await asyncio.to_thread(self.web_sessions.close)
+            await asyncio.to_thread(self.web_sessions.close)

@@ -223,8 +223,14 @@ class RuntimeDispatcher:
                     self._stopping = True
                     for session_id in self._worker.execution.active_session_ids():
                         self._worker.execution.interrupt(session_id, "Worker shutting down")
-                await self._drain_dispatch_tasks()
-                await self._worker.close()
+                try:
+                    try:
+                        await self._drain_dispatch_tasks()
+                    finally:
+                        await self._worker.close()
+                except Exception as exc:
+                    await self._respond_to_shutdown(exc)
+                    raise
                 await self._respond_to_shutdown()
                 return 0
             if str(request.get("method") or "") == RuntimeMethod.SHUTDOWN:
@@ -271,11 +277,14 @@ class RuntimeDispatcher:
         self._requests.put_nowait(None)
         return True
 
-    async def _respond_to_shutdown(self) -> None:
+    async def _respond_to_shutdown(self, error: Exception | None = None) -> None:
         if self._shutdown_request is None or self._shutdown_response_sent:
             return
         self._shutdown_response_sent = True
-        await self._respond(self._shutdown_request, {"ok": True})
+        if error is not None:
+            await self._respond_error(self._shutdown_request, str(error), "ShutdownFailed")
+        else:
+            await self._respond(self._shutdown_request, {"ok": True})
 
     async def _dispatch(self, request: dict[str, Any]) -> None:
         method = str(request.get("method") or "")

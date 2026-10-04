@@ -31,6 +31,7 @@ export function isTraceLlmEnvSet() {
 // Control requests remain bounded so a stalled runtime surfaces as an error.
 const LONG_RUNNING_METHODS = new Set([runtimeMethods.sessionPrompt, runtimeMethods.sessionFollowUp, runtimeMethods.sessionCompact]);
 const REQUEST_TIMEOUT_MS = 120_000;
+const SHUTDOWN_TIMEOUT_MS = 30_000;
 
 function isLongRunningRequest(method, params) {
   return LONG_RUNNING_METHODS.has(method)
@@ -68,6 +69,7 @@ export function createRuntimeClient({
   let stdoutBuffer = "";
   let stderrBuffer = "";
   let closing = false;
+  let shutdownPromise = null;
   let killTimer = null;
   let exitHandled = false;
   const pending = new Map();
@@ -110,7 +112,7 @@ export function createRuntimeClient({
     child.once("error", (error) => {
       handleExit(null, null, error);
     });
-    child.once("exit", (code, signal) => {
+    child.once("close", (code, signal) => {
       handleExit(code, signal);
     });
     return child;
@@ -214,21 +216,30 @@ export function createRuntimeClient({
   }
 
   function shutdown() {
-    if (closing) {
-      return Promise.resolve();
-    }
+    if (shutdownPromise) return shutdownPromise;
     closing = true;
-    if (!child) {
-      return Promise.resolve();
-    }
-    scheduleKill();
-    return request(runtimeMethods.shutdown).catch(() => {
-      forceShutdown();
-    }).finally(() => {
-      if (child?.stdin.writable) {
-        child.stdin.end();
-      }
+    if (!child) return Promise.resolve();
+    const runtime = child;
+    const exited = new Promise((resolve) => {
+      runtime.once("close", (code, signal) => resolve({ code, signal }));
+      runtime.once("error", (error) => resolve({ error }));
     });
+    let shutdownError = null;
+    killTimer = setTimeout(() => {
+      shutdownError = new Error(`Runtime shutdown timed out after ${SHUTDOWN_TIMEOUT_MS / 1000}s; forced termination.`);
+      forceShutdown();
+    }, SHUTDOWN_TIMEOUT_MS);
+    killTimer.unref?.();
+    shutdownPromise = request(runtimeMethods.shutdown).catch((error) => {
+      shutdownError ??= error;
+    }).then(async () => {
+      closeInput();
+      const { code, signal, error } = await exited;
+      if (shutdownError) throw shutdownError;
+      if (error) throw error;
+      if (code !== 0) throw new Error(`Runtime exited during shutdown with ${signal || code}`);
+    }).finally(clearKillTimer);
+    return shutdownPromise;
   }
 
   function forceShutdown() {
@@ -249,12 +260,6 @@ export function createRuntimeClient({
     }
   }
 
-  function scheduleKill() {
-    clearKillTimer();
-    killTimer = setTimeout(forceShutdown, 1500);
-    killTimer.unref?.();
-  }
-
   function clearKillTimer() {
     if (!killTimer) {
       return;
@@ -271,7 +276,6 @@ export function createRuntimeClient({
     request,
     shutdown,
     forceShutdown,
-    closeInput,
     isClosing: () => closing,
   };
 }
