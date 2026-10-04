@@ -9,6 +9,15 @@ import {
   backgroundWaitingLine,
 } from "./rendering.js";
 
+const WORKING_EVENTS = new Set([
+  "assistant_delta",
+  "assistant_message_completed",
+  "tool_input_started",
+  "tool_input_delta",
+  "tool_requested",
+  "tool_call_started",
+]);
+
 export function createEventController({
   state = {},
   input = {},
@@ -32,6 +41,9 @@ export function createEventController({
       }
       return;
     }
+    if (WORKING_EVENTS.has(eventType)) {
+      output.setActivityLabel?.("Working");
+    }
     switch (eventType) {
       case "background_wait_changed":
         output.setBackgroundWait?.(event.background_wait);
@@ -48,9 +60,9 @@ export function createEventController({
         output.setBackgroundWait?.(null);
         return;
       case "context_compacted":
+      case "assistant_message_completed":
         return;
       case "assistant_delta":
-        output.setActivityLabel?.("Working");
         output.assistantAppend?.(event.text || "");
         return;
       case "turn_step_retry": {

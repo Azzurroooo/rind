@@ -189,19 +189,47 @@ test("event controller ignores legacy goal continuation events", async () => {
   assert.deepEqual(chasing, []);
 });
 
-test("event controller exposes stream recovery as a working status", async () => {
+test("retry status clears when output resumes without requiring assistant text", async (t) => {
+  for (const event of [
+    { type: "assistant_delta", text: "continued" },
+    { type: "assistant_message_completed", content: "continued" },
+    { type: "tool_input_started", tool_call_id: "call-1", tool_name: "bash" },
+    { type: "tool_input_delta", tool_call_id: "call-1", tool_name: "bash", delta: "{}" },
+    { type: "tool_requested", tool_call_id: "call-1", tool_name: "bash", args_preview: "{}" },
+    { type: "tool_call_started", tool_call_id: "call-1", tool_name: "bash" },
+  ]) {
+    await t.test(event.type, async () => {
+      const labels = [];
+      const controller = createEventController({
+        output: { setActivityLabel: (label) => labels.push(label) },
+      });
+      await controller.handle({ event: { type: "turn_step_retry", attempt: 1 } });
+      await controller.handle({ event });
+      await controller.handle({ event: { type: "turn_step_retry", attempt: 2 } });
+      await controller.handle({ event });
+      assert.deepEqual(labels, ["Retrying 1", "Working", "Retrying 2", "Working"]);
+    });
+  }
+});
+
+test("background activity does not clear retry status; tool recovery stays working through the next step", async () => {
   const labels = [];
   const controller = createEventController({
-    output: {
-      setActivityLabel: (label) => labels.push(label),
-      assistantAppend() {},
-    },
+    output: { setActivityLabel: (label) => labels.push(label) },
   });
-
-  await controller.handle({ kind: "event", event: { type: "turn_step_retry", attempt: 2 } });
-  await controller.handle({ kind: "event", event: { type: "assistant_delta", text: "continued" } });
-
-  assert.deepEqual(labels, ["Retrying 2", "Working"]);
+  const send = (event) => controller.handle({ event });
+  await send({ type: "turn_step_retry", attempt: 2 });
+  await send({ type: "task_output", task_id: "background-1" });
+  await send({ type: "task_updated", task_id: "background-1", status: "completed" });
+  await send({ type: "token_stats_updated", stats: {} });
+  assert.deepEqual(labels, ["Retrying 2"]);
+  await send({ type: "tool_input_started", tool_call_id: "call-1", tool_name: "bash" });
+  await send({ type: "tool_requested", tool_call_id: "call-1", tool_name: "bash", args_preview: "{}" });
+  await send({ type: "tool_call_started", tool_call_id: "call-1", tool_name: "bash" });
+  await send({ type: "tool_result", tool_call_id: "call-1", tool_name: "bash", status: "completed" });
+  await send({ type: "context_built" });
+  assert.equal(labels.at(-1), "Working");
+  assert.ok(labels.slice(1).every((label) => label === "Working"));
 });
 
 
