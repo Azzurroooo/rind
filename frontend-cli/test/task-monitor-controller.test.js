@@ -321,6 +321,47 @@ test("foreground selection releases only the chosen task", async () => {
   controller.stop();
 });
 
+test("arrow navigation crosses waiting and handed-off background tasks", async () => {
+  const state = { sessionInfo: { capabilities: ["rind/tasks"] }, inputActive: false };
+  const controller = createTaskMonitorController({ state, terminalUi: true,
+    request: async (method) => method === "rind/task/list" ? { tasks: [] } : {} });
+  controller.recordTask({ task: { task_id: "waiting-1", command: "wait one", status: "running", handoff: false, started_at: 2 } });
+  controller.recordTask({ task: { task_id: "waiting-2", command: "wait two", status: "running", handoff: false, started_at: 1 } });
+  controller.recordTask({ task: { task_id: "background-1", command: "background one", status: "running", handoff: true, started_at: 3 } });
+  controller.recordTask({ task: { task_id: "finished", status: "completed", handoff: true } });
+  controller.enterMonitor();
+  await settled();
+  assert.match(controller.frame(100).lines.join("\n"), /Waiting 1\/2.*wait one/);
+  controller.handleInput({ name: "down" });
+  assert.match(controller.frame(100).lines.join("\n"), /Waiting 2\/2.*wait two/);
+  controller.handleInput({ name: "down" });
+  assert.match(controller.frame(100).lines.join("\n"), /› background-1/);
+  controller.handleInput({ name: "up" });
+  assert.match(controller.frame(100).lines.join("\n"), /› Waiting 2\/2.*wait two/);
+  controller.handleInput({ name: "up" });
+  controller.handleInput({ name: "up" });
+  assert.match(controller.frame(100).lines.join("\n"), /› finished/);
+  controller.handleInput({ name: "down" });
+  assert.match(controller.frame(100).lines.join("\n"), /› Waiting 1\/2.*wait one/);
+  controller.stop();
+});
+
+test("opening refresh does not reset a task selected with arrows", async () => {
+  let finishList;
+  const state = { sessionInfo: { capabilities: ["rind/tasks"] } };
+  const controller = createTaskMonitorController({ state, terminalUi: true,
+    request: async (method) => method === "rind/task/list"
+      ? new Promise((resolve) => { finishList = resolve; }) : {} });
+  controller.recordTask({ task: { task_id: "waiting", status: "running" } });
+  controller.recordTask({ task: { task_id: "background", status: "running", handoff: true } });
+  controller.enterMonitor();
+  controller.handleInput({ name: "down" });
+  finishList({ tasks: [] });
+  await settled();
+  assert.match(controller.frame(100).lines.join("\n"), /› background/);
+  controller.stop();
+});
+
 test("paged list merges all tasks and reports incomplete pages", async () => {
   const state = { sessionInfo: { session_id: "s1", capabilities: ["rind/tasks"] }, inputActive: false };
   let fail = false;

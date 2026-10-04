@@ -332,15 +332,8 @@ export function createTaskMonitorController({ request, state, redraw = () => {},
     }
   }
 
-  function moveSelection(delta) {
-    if (!monitor) return;
-    const foreground = monitor.page === "background" && monitor.focus === "foreground";
-    const items = monitor.page === "delegates" ? delegateItems() : foreground ? foregrounds() : backgrounds();
-    if (!items.length) return;
-    const field = monitor.page === "delegates" ? "delegateId" : foreground ? "foregroundId" : "backgroundId";
-    const key = monitor.page === "delegates" ? "id" : "bg_id";
-    const index = Math.max(0, items.findIndex((item) => item[key] === monitor[field]));
-    monitor[field] = items[(index + delta + items.length) % items.length][key];
+  function selectionChanged() {
+    monitor.pageChanged = true;
     monitor.previewOffset = 0;
     selectionVersion += 1;
     preview = null;
@@ -348,15 +341,30 @@ export function createTaskMonitorController({ request, state, redraw = () => {},
     redraw();
   }
 
+  function moveSelection(delta) {
+    if (!monitor) return;
+    const isDelegate = monitor.page === "delegates";
+    // Waiting tasks precede handed-off tasks in one continuous navigation order.
+    const waiting = isDelegate ? [] : foregrounds();
+    const items = isDelegate ? delegateItems() : [...waiting, ...backgrounds()];
+    if (!items.length) return;
+    const field = isDelegate ? "delegateId" : monitor.focus === "foreground" ? "foregroundId" : "backgroundId";
+    const key = isDelegate ? "id" : "bg_id";
+    const index = Math.max(0, items.findIndex((item) => item[key] === monitor[field]));
+    const next = ((index + delta) % items.length + items.length) % items.length;
+    if (isDelegate) monitor.delegateId = items[next].id;
+    else {
+      monitor.focus = next < waiting.length ? "foreground" : "list";
+      monitor[next < waiting.length ? "foregroundId" : "backgroundId"] = items[next].bg_id;
+    }
+    selectionChanged();
+  }
+
   function switchPage(delta) {
     if (!monitor) return;
     monitor.page = PAGES[(PAGES.indexOf(monitor.page) + delta + PAGES.length) % PAGES.length];
-    monitor.pageChanged = true;
     if (monitor.page === "background") monitor.focus = foregrounds().length ? "foreground" : "list";
-    selectionVersion += 1;
-    preview = null;
-    void readPreview();
-    redraw();
+    selectionChanged();
   }
 
   function handleInput(key) {
@@ -367,9 +375,7 @@ export function createTaskMonitorController({ request, state, redraw = () => {},
     if (!modified && key.name === "right") { switchPage(1); return true; }
     if (!modified && key.name === "tab" && monitor.page === "background" && foregrounds().length && backgrounds().length) {
       monitor.focus = monitor.focus === "foreground" ? "list" : "foreground";
-      selectionVersion += 1;
-      void readPreview();
-      redraw();
+      selectionChanged();
       return true;
     }
     if (modified) return true;

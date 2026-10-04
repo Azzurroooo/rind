@@ -915,8 +915,8 @@ export function taskMonitorFrame({ page, backgroundCount, delegateCount, items, 
   } else if (listSize) lines.push(emptyRow);
   if (detailRows) {
     const available = Math.max(0, rows - lines.length - footer.length - statusRows);
-    lines.push(...(focus === "foreground" && !preview
-      ? [dim("  Tab to view background output")]
+    lines.push(...(focus === "foreground"
+      ? [dim("  ↑↓ select task · r release waiting task")]
       : taskMonitorDetail(page, selected, preview, previewOffset, inner, available)));
   }
   if (statusRows) lines.push(status);
