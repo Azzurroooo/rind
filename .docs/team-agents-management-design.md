@@ -149,6 +149,6 @@ Rind 现无通用外部管理工具入口。实施时在 Worker 组合根注入�
 ## 后续实施修订：组织与会话宿主
 
 - Membership 增加 `reportsToAgentId`；省略时非根成员直属 main-agent。服务端校验单根、无环、成员关系，成员只向直属下级委派，并可查看子树任务。用户/Manager 可调整组织。现有任务继续按原 `parentTaskId` 汇报，子树等待逐级传递。
-- 管理页新增全局 Overview，Team 内为 Overview / Organization / Tasks。Team briefing 放在 Team Overview；组织树可折叠，成员下展示全部可见 Session，选定后在该成员 Workspace 进入原会话。
+- 管理页为 Sidebar（Inbox / Manager / Teams）+ Team 页（Organization / Tasks）。组织树可折叠，成员下嵌套该 Team 的会话及状态，选定后在该成员 Workspace 进入原会话；只展示 Team 会话。原全局 Overview 与 Team briefing 分别由 Inbox 与任务分组取代。纯键盘，不捕获鼠标。
 - `rind-runtime-client` 提供通用本地共享宿主；管理部件通过适配器接入，Python Runtime 不依赖 Team 模型。`session/open` 按 Session 注入外部工具与工作目录；执行容器、取消与用户问题均按 Session 隔离。
 - 受管 CLI 和后台任务共享 Worker。关闭 CLI 仅断开连接；重入正在运行的 Session 不产生重复执行。管理重启后由宿主回放校验状态，宿主丢失则保留 Unconfirmed，禁止盲目重试。

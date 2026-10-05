@@ -6,7 +6,7 @@
 
 - 仓库：Rind。
 - 分支：`feature/team-agents-management`。
-- 当前提交：`0baf9d4 feat(cli): refine agents terminal interaction`。
+- 当前提交：见 `git log`；本文最后更新于 `refactor(cli): drop mouse capture from the TUI engine` 之后。
 - 工作树在本次文档创建前干净；本文件是本次唯一新增文件。
 - CLI 继续使用现有 TypeScript/Node TUI。Rust + Ratatui 迁移没有作为 CLI surface 落地；不要重新创建 `cli-rs` 或以 Rust 替换当前 frontend-cli。
 - 设计规格：[`.docs/team-agents-management-design.md`](./team-agents-management-design.md)。
@@ -23,7 +23,9 @@
 5. `c91a8dd`：共享 Runtime 宿主和隔离 Session。
 6. `fdb67ff`：汇报树、权限边界和共享 Session 恢复。
 7. `ffbbc5f`：组织树、全局 Overview 和成员 Session 浏览。
-8. `0baf9d4`：TypeScript TUI 的全屏 Agents 页、终端主题、鼠标协议和更完整的键盘导航。
+8. `0baf9d4`：TypeScript TUI 的全屏 Agents 页、终端主题和更完整的键盘导航（其鼠标部分已在 10 中移除）。
+9. `e7713fa`：服务端 `listSessions { teamId[, agentId] }` / `{ manager: true }`，Team 视图只返回注册到该 Team 的会话。
+10. `0cf5aa9`、`60cbfeb`：以 Team 组织树为核心重建 Agents 页；会话嵌套在成员下；移除全部鼠标交互。
 
 ## 1. 产品定义
 
@@ -185,30 +187,32 @@ Workspace 已属于另一 Team 时，交互入口必须先显示归属并让用�
 - 不增加 `/manager`、`/agents` 等管理 slash command。Manager 是 Agents 页面中的导航项。
 - 普通 Rind、Team 成员会话、Manager 会话均以普通 Rind 对话形式打开；状态栏显示管理上下文。
 
-### 8.2 Agents 页面当前布局
+### 8.2 Agents 页面信息架构（已冻结）
 
-当前 `frontend-cli/lib/agents-page.js` + `agents-view.js` 已实现：
+```text
+Header   Agents › Team › Organization                 ! 2 need you  ● 1 working  ● connected
+Sidebar  Inbox · Manager · TEAMS(每个 Team 带最紧急状态) · New team
+Main     Team 页：Organization | Tasks（Tab / 1 / 2）；成员页：该成员在本 Team 的全部会话
+Detail   选中行说明 + Enter 的含义（宽屏在右侧，窄屏在列表下方）
+Notice   ✓/✕/• 结果消息，数秒后消失；执行中显示 spinner
+Keys     只显示当前选中行可用的键；? 与 esc 永远保留；整段丢弃不截断
+```
 
-- 独立全屏页面；默认启用 alternate screen，退出时恢复原终端。
-- 左侧导航：Global Overview、Manager、Create Team、各 Team。
-- Team 内三类视图：Overview、Organization、Tasks。
-- Organization 使用 `reportsToAgentId` 展示缩进层级，可折叠分支。
-- Team briefing 位于 Team Overview；Task 详情、Delivery、Notes、Artifacts 和执行历史可展开。
-- 进入成员后可列出历史 Session 与实时 Session；选中 Session 可以在该成员 Workspace 恢复或加入。
-- 表单、选择器、确认框复用已有 line editor / choice state；失败操作保留输入内容。
-- 已有搜索 `/`、状态过滤 `F`、新建 Team `N`、刷新 `R`、Space 操作菜单。
-- 当前最近实现启用了鼠标解析、点击、右键菜单和滚轮；这属于当前代码事实，不代表所有未来 UI 选择已经最终确定。
-- 当前最近实现增加 `j/k`、`g/G`、`Ctrl-U/Ctrl-D` 和 `1/2/3` 导航，同时保留方向键、Tab、Enter、Esc。
+- 纯键盘、不捕获鼠标。宽度 < 84 时 Sidebar 成为独立一屏（Esc 回到它，Enter 进入）。
+- Organization：汇报树（├─ └─ │ 引导线），成员下嵌套该 Team 的会话（状态 + 相对时间），每成员内联最多 3 个最紧急会话，其余折叠为 "+N more"。折叠分支显示被隐藏部分的最坏状态和隐藏数量（借鉴 Orca roll-up）。搜索/过滤保留命中项的祖先（借鉴 Paperclip filterOrgTree）。
+- 统一状态符号：`!` Needs input、`?` Unconfirmed、`●` Working、`…` Waiting、`◦` Queued、`○` Ready、`✓` Done、`·` Inactive、`×` Cancelled。定义在 `agents-model.js` 的 `STATUS`，任何地方不得另起一套。
+- Tasks：按 Needs you / In progress / Queued / Waiting on members / Delivered / Cancelled 分组；Enter 打开 Delivery（Space 动作、r 刷新）。原 Team briefing 由该分组取代。
+- Inbox：跨 Team 汇总阻塞任务、needs_attention、unknown run、提出问题的 Team 会话；Enter 直接回答/处理/加入。原 Global Overview 已删除。
+- 快捷键：`c` 新会话、`t` 派任务、`a` 添加（选中成员的直属下级）、`e` 编辑岗位、Space 全部动作、`n` 新 Team、`/` 搜索、`f` 过滤、`r` 刷新/重连、`?` 帮助。全部定义在 `agents-keys.js` 的 `KEYS`/`HELP_GROUPS`，footer、帮助层、菜单右侧快捷键共用。
+- 选择对话框：`1-9` 直接选择，右侧字母与页面快捷键一致；破坏性操作红框、默认 Cancel，`y`/`n`。表单失败保留输入，错误显示在对话框内。
+- 新建 Team 后直接进入"添加首个成员"（成为 Leader）；添加成员时始终提示"将向谁汇报"。
 
-### 8.3 当前 Session 展示语义的注意事项
+### 8.3 Session 展示语义（已统一）
 
-当前成员 Session 列表会把管理服务返回的历史和 live Session 合并，按状态排序：`Needs input`、`Unconfirmed`、`Working`、`Ready`、`Inactive`。
-
-但当前全局 `overviewRows()` 使用 `sessionRows(snapshot, null, ...)`，因此 `teamId` 为空的独立 Session 仍可能出现在 Global Overview 中；这是现有实现的真实行为，不要误认为已经完成“只展示 Team Session”的产品约束。Team 详情页和成员 Session 入口按成员/Team 关系工作。若产品最终要求全局也只显示 Team 关联 Session，应在 `frontend-cli/lib/agents-sessions.js` 和相应服务 snapshot 过滤处统一修改，并补测试，不能只在渲染层隐藏。
-
-### 8.4 当前 UI 的产品状态
-
-Agents 页已经从简单文本列表升级为可用 TUI，但它仍是“可验证的实现基线”，不是最终视觉规格。后续若重新打磨信息架构，应先确定：Team 是否为唯一一级入口、成员下如何嵌套 Session、全局 Overview 是否保留、鼠标是否保留、按钮/快捷键如何集中显示，再改布局和命中逻辑。不要在没有信息架构决策时继续增加零散快捷键或装饰色。
+- Agents 页面任何位置只展示 `teamId` 已登记的 Team 会话；独立会话和其他 Team 的会话一律不展示。
+- 数据来源：服务 `listSessions { teamId }`（`agent-management/src/history.ts`）提供标题/时间，snapshot 提供实时状态，二者在 `agents-model.js#teamSessions` 合并且再次按 `teamId` 过滤。
+- `rind agents sessions <team>[/<agent>]` 与页面使用同一服务接口；`rind agents sessions manager` 列出 Manager 历史。
+- Team 页打开时会请求历史，这会按需拉起共享 Runtime 宿主；宿主不可用时页面仍显示 live 会话并给出错误提示。
 
 ## 9. 代码地图
 
@@ -236,13 +240,16 @@ Agents 页已经从简单文本列表升级为可用 TUI，但它仍是“可验
 - `frontend-cli/lib/agents-client.js`：管理客户端和状态读取。
 - `frontend-cli/lib/agents-commands.js`：Manager/成员会话打开以及非 TTY `rind agents` 命令。
 - `frontend-cli/lib/agents-session.js`：管理作用域参数、服务准备和 Runtime 观察。
-- `frontend-cli/lib/agents-sessions.js`：Session 行和 Global Overview 投影。
-- `frontend-cli/lib/agents-page.js`：页面状态机、键盘/鼠标输入、表单、动作和服务请求。
-- `frontend-cli/lib/agents-view.js`：布局、层级列表、详情、对话框、状态颜色和命中测试。
-- `frontend-cli/lib/tui/tui.js`：终端模式、全屏、鼠标模式、增量渲染、同步输出和光标。
-- `frontend-cli/lib/terminal-key.js`：普通键、Kitty、CSI、SGR/传统鼠标解析。
+- `frontend-cli/lib/agents-model.js`：纯投影：状态表、相对时间、组织树（引导线/roll-up/过滤）、Team 会话合并、任务分组、Inbox、Sidebar。
+- `frontend-cli/lib/agents-keys.js`：唯一按键表、上下文 footer 提示、帮助分组。
+- `frontend-cli/lib/agents-detail.js`：选中行的详情文本。
+- `frontend-cli/lib/agents-actions.js`：多步流程（建 Team、加成员、派任务、成员/会话/任务动作、Delivery）。
+- `frontend-cli/lib/agents-page.js`：页面状态、导航、按键分发、服务与历史加载。
+- `frontend-cli/lib/agents-view.js`：布局、行渲染、对话框、帮助层、Delivery 视图。
+- `frontend-cli/lib/tui/tui.js`：终端模式、全屏、增量渲染、同步输出和光标。
+- `frontend-cli/lib/terminal-key.js`：普通键、Kitty、CSI 解析；鼠标报告解析为 null。
 - `frontend-cli/lib/theme.js`：语义主题、背景面板和选中状态。
-- `frontend-cli/lib/choice-menu-state.js`：选择器状态，支持键盘和按索引选择。
+- `agent-management/src/history.ts`：按 Team/Agent 作用域合并 Runtime 历史与已登记会话。
 
 ## 10. 已完成的功能面
 
@@ -265,14 +272,10 @@ Agents 页已经从简单文本列表升级为可用 TUI，但它仍是“可验
 
 按优先级：
 
-1. **确定并冻结最终信息架构。** 重点是 Team → 成员 → Session 的嵌套方式、Global Overview 的保留价值、Team briefing 的位置、状态/动作/帮助的固定区域。当前页面能工作，但仍有较多布局和交互细节待产品化。
-2. **统一 Session 过滤语义。** 明确是否任何全局页面都排除 `teamId` 为空的独立 Session；若是，服务投影和 `overviewRows` 必须一起修，保证 CLI、JSON 和未来 surface 一致。
-3. **决定鼠标是否长期保留。** 当前代码已经支持鼠标；如果产品最终不要鼠标，需要同时移除 Agents 页的 `mouse: true`、鼠标输入分支、命中测试和鼠标测试，不能只隐藏提示文字。
-4. **继续完善 Team 树视图。** 需要让 Leader、直属上级、职责、成员状态、Session 状态和 Task 状态在一屏内有稳定的视觉层级；避免把列表、详情、操作菜单互相嵌套成难读的卡片。
-5. **完成 Manager 的可观测调度体验。** Manager 当前能打开受控会话，但跨 Team 摘要、从建议跳到 Team/Task、待用户确认和一页式交付仍可继续增强。
-6. **增加 Codex/Claude Code adapters。** 复用 Adapter 接口和统一事件，不复制 Team 逻辑。
-7. **补齐真实终端 QA。** 继续使用 `@xterm/headless` 做确定性测试，并在 Windows Terminal、常见 ANSI/Kitty 终端、窄窗口、CJK/emoji、断线恢复场景手测。
-8. **最终清理和发行验证。** 检查旧 Python Team 可写入口、旧 `delegate` 注入和重复逻辑只保留迁移所需的只读桥；运行 staging 和干净 `RIND_HOME` 端到端流程。
+1. **完成 Manager 的可观测调度体验。** Manager 当前能打开受控会话，但跨 Team 摘要、从建议跳到 Team/Task、待用户确认和一页式交付仍可继续增强。
+2. **增加 Codex/Claude Code adapters。** 复用 Adapter 接口和统一事件，不复制 Team 逻辑。
+3. **补齐真实终端 QA。** 继续使用 `@xterm/headless` 做确定性测试，并在 Windows Terminal、常见 ANSI/Kitty 终端、窄窗口、CJK/emoji、断线恢复场景手测。
+4. **最终清理和发行验证。** 检查旧 Python Team 可写入口、旧 `delegate` 注入和重复逻辑只保留迁移所需的只读桥；运行 staging 和干净 `RIND_HOME` 端到端流程。
 
 ## 12. 验证基线
 
@@ -286,17 +289,19 @@ npm --prefix agent-management test
 
 当前基线结果：
 
-- `frontend-cli`：505 tests，504 pass，1 skipped，0 fail。
-- `agent-management`：25 tests，25 pass，0 fail。
+- `frontend-cli`：514 tests，513 pass，1 skipped，0 fail。
+- `agent-management`：28 tests，28 pass，0 fail。
 - 相关 `node --check` 已通过。
 - 主题测试需要清除继承的 `NO_COLOR`；有 `NO_COLOR` 时颜色断言失败是环境预期，不是业务逻辑失败。
 
 重点测试文件：
 
-- `frontend-cli/test/agents-page.test.js`：真实页面进入/返回、管理动作、成员/Session、Manager、草稿保留。
-- `frontend-cli/test/agents-view.test.js`：布局、组织树、详情、选择器、宽度和命中测试。
-- `frontend-cli/test/terminal-key.test.js`：键盘、Kitty、SGR/传统鼠标。
-- `frontend-cli/test/tui-engine.test.js`：全屏、鼠标模式、恢复、diff、光标和重绘。
+- `frontend-cli/test/agents-page.test.js`：真实服务 + 虚拟终端的完整键盘流程，含"独立会话不出现"断言。
+- `frontend-cli/test/agents-model.test.js`：组织树引导线、roll-up、过滤、任务分组、Inbox、会话作用域。
+- `frontend-cli/test/agents-view.test.js`：各尺寸布局边界、表单光标、帮助层、footer 不截断、控制序列清理。
+- `frontend-cli/test/terminal-key.test.js`：键盘、Kitty；鼠标报告被忽略。
+- `frontend-cli/test/tui-engine.test.js`：全屏不捕获鼠标、恢复、diff、光标和重绘。
+- `agent-management/test/history.test.js`：Team 会话作用域。
 - `frontend-cli/test/tui-integration.test.js`：完整 CLI TUI/Runtime 交互。
 - `agent-management/test/*.test.js`：权限、组织树、任务调度、共享 Workspace、恢复、报告和 Session scope。
 
@@ -305,7 +310,7 @@ npm --prefix agent-management test
 1. `git status --short --branch`，确认没有覆盖用户改动。
 2. 阅读本文、`.docs/team-agents-management-design.md`、`docs/agents-management.md` 和 `docs/cli-rendering.md`。
 3. 阅读 `agent-management/src/model.ts`、`organization.ts`、`projection.ts`、`service.ts`。
-4. 阅读 `frontend-cli/lib/agents-page.js`、`agents-view.js`、`agents-sessions.js` 和相关测试。
+4. 阅读 `frontend-cli/lib/agents-model.js`、`agents-keys.js`、`agents-page.js`、`agents-view.js` 和相关测试。
 5. 先运行两个测试套件，建立当前基线。
 6. 若要改 UI，先写/更新渲染和交互测试，再改布局或状态转换；不要先引入新的 TUI 框架。
 7. 若要改变 Session 归属或权限，必须同时修改服务投影、CLI 投影、非 TTY JSON 和测试。
