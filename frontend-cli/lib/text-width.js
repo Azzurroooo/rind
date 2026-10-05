@@ -1,4 +1,6 @@
 const ANSI_RE = /\x1b\[[0-?]*[ -/]*[@-~]/g;
+const ANSI_SPLIT_RE = /(\x1b\[[0-?]*[ -/]*[@-~])/;
+const ANSI_WHOLE_RE = /^\x1b\[[0-?]*[ -/]*[@-~]$/;
 const LINE_BREAK_RE = /\r\n|\r|\n/;
 const PRINTABLE_ASCII_RE = /^[\x20-\x7e]*$/;
 const segmenter = typeof Intl?.Segmenter === "function"
@@ -73,7 +75,7 @@ export function clipCells(value, maxWidth) {
   if (maxWidth <= suffixWidth) {
     return suffix.slice(0, Math.max(0, maxWidth));
   }
-  return `${takeStartCells(text, maxWidth - suffixWidth)}${suffix}`;
+  return closeAnsi(`${takeStartCells(text, maxWidth - suffixWidth)}${suffix}`);
 }
 
 export function truncateToWidth(value, maxWidth, ellipsis = "...") {
@@ -85,7 +87,7 @@ export function truncateToWidth(value, maxWidth, ellipsis = "...") {
   if (maxWidth <= suffixWidth) {
     return ellipsis.slice(0, Math.max(0, maxWidth));
   }
-  return `${takeStartCells(text, maxWidth - suffixWidth)}${ellipsis}`;
+  return closeAnsi(`${takeStartCells(text, maxWidth - suffixWidth)}${ellipsis}`);
 }
 
 
@@ -252,18 +254,32 @@ export function middleClipCells(value, maxWidth) {
   return `${takeStartCells(text, headWidth)}${suffix}${takeEndCells(text, tailWidth)}`;
 }
 
+// Escape sequences are kept whole and take no cells, so styled text is cut
+// at its visible width instead of at its raw length.
 function takeStartCells(value, maxWidth) {
   let output = "";
   let width = 0;
-  for (const segment of graphemes(value)) {
-    const nextWidth = segmentWidth(segment);
-    if (width + nextWidth > maxWidth) {
-      break;
+  for (const part of String(value).split(ANSI_SPLIT_RE)) {
+    if (!part) continue;
+    if (ANSI_WHOLE_RE.test(part)) {
+      output += part;
+      continue;
     }
-    output += segment;
-    width += nextWidth;
+    for (const segment of graphemes(part)) {
+      const nextWidth = segmentWidth(segment);
+      if (width + nextWidth > maxWidth) {
+        return output;
+      }
+      output += segment;
+      width += nextWidth;
+    }
   }
   return output;
+}
+
+// A cut can leave a style open; reset it so it cannot bleed into padding.
+function closeAnsi(text) {
+  return text.includes("\x1b[") && !text.endsWith("\x1b[0m") ? text + "\x1b[0m" : text;
 }
 
 function takeEndCells(value, maxWidth) {

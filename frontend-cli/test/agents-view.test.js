@@ -108,3 +108,22 @@ test("offline state and tiny terminals stay bounded", () => {
   assert.match(text(renderAgents(view, 120, 30)), /reconnecting/);
   for (const [width, rows] of [[20, 8], [4, 3], [39, 11]]) bounded(renderAgents(view, width, rows), width, rows);
 });
+
+test("colored rows with long roles keep every line exactly the terminal width", t => {
+  const tty = Object.getOwnPropertyDescriptor(process.stdout, "isTTY"), noColor = process.env.NO_COLOR;
+  Object.defineProperty(process.stdout, "isTTY", { value: true, configurable: true });
+  delete process.env.NO_COLOR;
+  t.after(() => { if (tty) Object.defineProperty(process.stdout, "isTTY", tty); else delete process.stdout.isTTY; if (noColor !== undefined) process.env.NO_COLOR = noColor; });
+  const view = fixture();
+  view.snapshot.memberships.forEach((m, i) => { m.position = "Sub-agent | Frontend/State " + "x".repeat(i); });
+  view.entries = [{ id: "add-member", kind: "add-member", title: "Add member", teamId: "team" }, ...organizationRows(view.snapshot, "team", teamSessions(view.snapshot, "team", []))];
+  for (const [width, rows] of [[60, 20], [84, 24], [131, 34], [160, 40]]) {
+    const lines = renderAgents(view, width, rows);
+    assert.match(lines.join(""), /\x1b\[/, "colors are on");
+    for (const line of lines) {
+      assert.equal(textWidth(line), width, "exact width " + width + ": " + JSON.stringify(stripAnsi(line)));
+      // A split escape (e.g. "\x1b[2") makes the terminal swallow the cells after it.
+      assert.doesNotMatch(line.replace(/\x1b\[[0-9;]*m/g, ""), /\x1b/, "only whole SGR sequences: " + JSON.stringify(line));
+    }
+  }
+});
