@@ -217,11 +217,31 @@ test("leader resumes after children return without a human polling every agent",
   f.starts[0].finish({ content: "waiting" });
   await eventually(() => f.store.state.tasks[parent.id].status === "blocked");
   await eventually(() => f.starts.length === 2);
+  const briefing = (await f.call("getTeam", { teamId: f.team.id })).briefing;
+  assert.equal(briefing.needsAttention.length, 0);
+  assert.equal(briefing.waiting[0].taskId, parent.id);
+  assert.equal((await f.call("snapshot")).memberships.find(m => m.agentId === f.leader.id).status, "Waiting");
   await f.call("updateTask", { taskId: child.id, report: { outcome: "done", summary: "Implemented", evidence: [], artifacts: [] } });
   f.starts[1].finish({ content: "done" });
   await eventually(() => f.starts.length === 3);
   assert.equal(f.starts[2].input.task.id, parent.id);
   assert.match(f.starts[2].input.instructions, /Implemented/);
+  assert.equal((await f.call("getTeam", { teamId: f.team.id })).briefing.delivered[0].summary, "Implemented");
+});
+
+test("team briefings preserve task visibility and members cannot reorder or cancel team work", async t => {
+  const f = await fixture(t), specialist = await f.member("specialist");
+  const own = await f.call("assignTask", { teamId: f.team.id, assigneeAgentId: specialist.id, brief: "Visible task", start: false });
+  const privateTask = await f.call("assignTask", { teamId: f.team.id, assigneeAgentId: f.leader.id, brief: "Leader's confidential context", start: false });
+  const session = await f.call("attachSession", { teamId: f.team.id, agentId: specialist.id });
+  const actor = { kind: "agent", sessionId: session.id };
+  const result = await f.call("getTeam", { teamId: f.team.id }, actor);
+  assert.deepEqual(result.briefing.inProgress.map(task => task.taskId), [own.id]);
+  assert.doesNotMatch(JSON.stringify(result), /confidential/);
+  await assert.rejects(f.call("cancelTask", { taskId: own.id }, actor), { code: "FORBIDDEN" });
+  await assert.rejects(f.call("setTaskPriority", { taskId: privateTask.id, priority: "high" }, actor), { code: "FORBIDDEN" });
+  const manager = await f.call("attachSession", { manager: true });
+  assert.equal((await f.call("getTeam", { teamId: f.team.id }, { kind: "manager", sessionId: manager.id })).briefing.inProgress.length, 2);
 });
 test("crash recovery retains workspace ownership and never repeats uncertain work", async t => {
   const f = await fixture(t);
