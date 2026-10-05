@@ -5,6 +5,7 @@ import { randomUUID } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import { managementPaths, privateDirectory } from "./paths.js";
+import { managementBuildId } from "./build.js";
 
 export async function connectClient({ endpoint, token, runtimeSessionId, onSnapshot, onDisconnect }: {
   endpoint: string; token: string; runtimeSessionId?: string;
@@ -53,7 +54,21 @@ export async function connectManagement(options: {
 } = {}) {
   const paths = managementPaths(options.home);
   const connect = async () => connectClient({ endpoint: paths.endpoint, token: (await readFile(paths.token, "utf8")).trim(), onSnapshot: options.onSnapshot, onDisconnect: options.onDisconnect });
-  try { return await connect(); } catch {}
+  // A service started from older code keeps serving it after an update. It is
+  // replaced only while no agent is working; otherwise the client keeps using
+  // it and reports the pending update.
+  async function checked(client: ManagementClient) {
+    const [info, expected] = await Promise.all([client.request("serviceInfo").catch(() => null), managementBuildId()]);
+    if (info?.buildId === expected) return Object.assign(client, { service: info });
+    if (info && info.working === 0) {
+      await client.request("serviceShutdown").catch(() => {});
+      client.close();
+      for (let i = 0; i < 50; i++) { try { (await connect()).close(); } catch { return null; } await new Promise(resolve => setTimeout(resolve, 100)); }
+      throw new Error("The outdated agents management service did not stop. See " + path.join(paths.state, "service.log"));
+    }
+    return Object.assign(client, { service: info, stale: { reason: info ? "busy" : "unknown", working: info?.working } });
+  }
+  try { const current = await checked(await connect()); if (current) return current; } catch {}
   await privateDirectory(paths.state);
   const log = await open(path.join(paths.state, "service.log"), "a", 0o600);
   const repoRoot = options.repoRoot || path.resolve(fileURLToPath(new URL("../..", import.meta.url)));
@@ -61,7 +76,7 @@ export async function connectManagement(options: {
   child.on("error", () => {}); child.unref(); await log.close();
   let last: unknown;
   for (let i = 0; i < 40; i++) {
-    try { return await connect(); } catch (error) { last = error; }
+    try { const client = await connect(); return Object.assign(client, { service: await client.request("serviceInfo").catch(() => null) }); } catch (error) { last = error; }
     await new Promise(resolve => setTimeout(resolve, 100));
   }
   throw new Error("Unable to start agents management. See " + path.join(paths.state, "service.log") + ": " + String(last));

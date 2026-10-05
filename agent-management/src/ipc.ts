@@ -8,11 +8,14 @@ import { openStore } from "./store.js";
 import { createService } from "./service.js";
 import { createRindAdapter } from "./adapters/rind.js";
 import { sessionHistory, independentHistory } from "./history.js";
+import { managementBuildId } from "./build.js";
+import { activeRun } from "./model.js";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import { connectSharedRuntime } from "../../rind-runtime-client/shared-runtime.js";
 
-export async function startServer(options: { home?: string; python?: string; repoRoot: string; runtimePath?: string }) {
+export async function startServer(options: { home?: string; python?: string; repoRoot: string; runtimePath?: string; onShutdown?: () => void }) {
+  const startedAt = new Date().toISOString();
   const paths = managementPaths(options.home);
   await privateDirectory(paths.state);
   if (process.platform !== "win32") {
@@ -153,6 +156,21 @@ export async function startServer(options: { home?: string; python?: string; rep
           const manager = store.state.agents[session.agentId].canonicalWorkspace === await realManager;
           if (session.shared) await executionHost();
           result = toolConfig({ kind: manager ? "manager" : "agent", sessionId: session.id });
+        } else if (message.method === "serviceInfo") {
+          requireValue(principal.kind === "user", "FORBIDDEN", "Only the user can inspect the service.");
+          result = { buildId: await managementBuildId(), pid: process.pid, startedAt, ...workload() };
+        } else if (message.method === "serviceShutdown") {
+          // Leaving Rind never calls this; it is the explicit "stop background services" action.
+          requireValue(principal.kind === "user", "FORBIDDEN", "Only the user can stop the service.");
+          const load = workload();
+          requireValue(message.params.stopAgents === true || load.working === 0, "SERVICE_BUSY", load.working + (load.working === 1 ? " agent is" : " agents are") + " still working. Wait for them, or stop all agents.", load);
+          send({ id, result: { stopping: true, ...load } });
+          void (async () => {
+            if (message.params.stopAgents === true) await stopConversations();
+            await close();
+            options.onShutdown?.();
+          })().catch(reportError);
+          return;
         } else if (message.method === "listSessions") {
           requireValue(principal.kind === "user", "FORBIDDEN", "Private session history is available only to the user.");
           const params = message.params || {};
@@ -182,6 +200,22 @@ export async function startServer(options: { home?: string; python?: string; rep
     socket.on("close", () => { sockets.delete(socket); unsubscribe?.(); if (service) void service.disconnect(attached).catch(() => {}); });
   });
   await new Promise<void>((resolve, reject) => { server.once("error", reject); server.listen(paths.endpoint, () => { server.off("error", reject); resolve(); }); });
+  const reportError = (error: unknown) => process.stderr.write("agents management: " + String((error as Error)?.stack || error) + "\n");
+  // Work that a restart would interrupt: running or starting runs. Unconfirmed
+  // runs are already outside this service's control.
+  function workload() {
+    const runs = Object.values(store.state.runs).filter(r => r.status === "starting" || r.status === "running");
+    return { working: runs.length, tasks: runs.filter(r => r.taskId).length, conversations: runs.filter(r => !r.taskId).length, unconfirmed: Object.values(store.state.runs).filter(r => r.status === "unknown").length };
+  }
+  // Direct conversations run in the shared Runtime, not here: cancel their
+  // turns there, then stop the host itself. Managed tasks stop with the service.
+  async function stopConversations() {
+    const host = runtime || await executionHost().catch(() => undefined);
+    if (!host) return;
+    const running = Object.values(store.state.runs).filter(r => activeRun(r) && !r.taskId).map(r => store.state.sessions[r.sessionId]?.runtimeSessionId).filter(Boolean);
+    await Promise.allSettled(running.map(sessionId => host.request("session/cancel", { session_id: sessionId })));
+    await host.request("runtime/shutdown").catch(() => {});
+  }
   let store: Awaited<ReturnType<typeof openStore>>;
   const realManager = (async () => { await privateDirectory(paths.manager); const { canonicalDirectory } = await import("./paths.js"); return canonicalDirectory(paths.manager); })();
   try {
@@ -196,14 +230,15 @@ export async function startServer(options: { home?: string; python?: string; rep
     readyResolve!();
     if (Object.values(store.state.sessions).some(s => s.shared && s.runtimeSessionId)) void executionHost().catch(() => {});
   } catch (error) { readyReject!(error); for (const socket of sockets) socket.destroy(); server.close(); throw error; }
-  return {
-    paths,
-    async close() {
+  let closed: Promise<void> | undefined;
+  function close() {
+    return closed ||= (async () => {
       closing = true;
       await service.stop();
       runtime?.close();
       for (const socket of sockets) socket.destroy();
       await new Promise<void>(resolve => server.close(() => resolve()));
-    },
-  };
+    })();
+  }
+  return { paths, close };
 }

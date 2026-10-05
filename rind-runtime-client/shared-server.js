@@ -4,6 +4,7 @@ import { randomBytes } from "node:crypto";
 import { readFile, writeFile, chmod, unlink } from "node:fs/promises";
 import { createRuntimeClient } from "./runtime-client.js";
 import { sharedRuntimePaths } from "./shared-runtime.js";
+import { runtimeBuildId } from "./build-id.js";
 
 export async function startSharedServer(options) {
   const paths = sharedRuntimePaths(options.rindHome);
@@ -14,6 +15,8 @@ export async function startSharedServer(options) {
     await unlink(paths.endpoint).catch(error => { if (error.code !== "ENOENT") throw error; });
   }
   let token, initialized, authOwner, stopping = false, closing;
+  const startedAt = new Date().toISOString();
+  const build = runtimeBuildId(options);
   const peers = new Set(), auth = new Map(), prompts = new Set();
   const client = createRuntimeClient({ ...options, python: options.python || "python", cwd: paths.directory, cliArgs: [],
     onMessage(event) { for (const peer of peers) if (peer.observe || peer.sessions.has(event.session_id)) peer.send({ event }); },
@@ -44,6 +47,12 @@ export async function startSharedServer(options) {
         const { method, params = {} } = message;
         if (typeof method !== "string" || !params || typeof params !== "object" || Array.isArray(params)) throw new Error("Expected a method and params object.");
         if (stopping) throw new Error("Runtime is shutting down.");
+        // Answered without starting the worker, so a client can decide whether this host is current.
+        if (method === "runtime/info") {
+          const attached = [...peers].filter(other => other !== peer && other.sessions.size > 0).length;
+          peer.send({ id, result: { buildId: await build, pid: process.pid, startedAt, busy: prompts.size, attached } });
+          return;
+        }
         const base = await initialize(); let result;
         if (method === "initialize") result = base;
         else if (method === "runtime/observe") { peer.observe = true; result = { pid: client.child.pid }; }

@@ -1,8 +1,7 @@
 import { startServer } from "./ipc.js";
 try {
-  const server = await startServer(JSON.parse(process.argv[2] || "{}"));
-  let closing = false;
-  const stop = async () => { if (closing) return; closing = true; await server.close(); };
+  const server = await startServer({ ...JSON.parse(process.argv[2] || "{}"), onShutdown: () => setImmediate(() => process.exit(0)) });
+  const stop = () => server.close();
   process.on("SIGTERM", () => { void stop(); });
   process.on("SIGINT", () => { void stop(); });
 } catch (error) {

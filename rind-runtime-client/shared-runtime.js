@@ -6,6 +6,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { readFile, open } from "node:fs/promises";
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
+import { runtimeBuildId } from "./build-id.js";
 
 export function sharedRuntimePaths(home = process.env.RIND_HOME || path.join(os.homedir(), ".rind")) {
   const directory = path.resolve(home, "runtime");
@@ -57,7 +58,23 @@ export async function connectSharedRuntime(options = {}) {
       close() { closed = true; socket.destroy(); },
     };
   };
-  try { return await connect(); } catch (error) { if (options.start === false) throw error; }
+  // A host started from older code keeps running it. Replace it when nothing
+  // depends on it; otherwise keep using it and report the pending update.
+  const checked = async connection => {
+    if (options.start === false || !(options.repoRoot || options.runtimePath)) return connection;
+    const [info, expected] = await Promise.all([connection.request("runtime/info").catch(() => null), runtimeBuildId(options)]);
+    if (info?.buildId === expected) return connection;
+    if (info && !info.busy && !info.attached) {
+      await connection.request("runtime/shutdown").catch(() => {});
+      connection.close();
+      for (let i = 0; i < 50; i++) { try { (await connect()).close(); } catch { return null; } await new Promise(resolve => setTimeout(resolve, 100)); }
+      throw new Error("The outdated shared Runtime did not stop. See " + path.join(paths.directory, "runtime.log"));
+    }
+    connection.stale = { reason: info ? "busy" : "unknown", ...(info ? { pid: info.pid, busy: info.busy, attached: info.attached } : {}) };
+    return connection;
+  };
+  try { const current = await checked(await connect()); if (current) return current; }
+  catch (error) { if (options.start === false) throw error; }
   await privateDirectory(paths.directory);
   const log = await open(path.join(paths.directory, "runtime.log"), "a", 0o600);
   const child = spawn(process.execPath, [fileURLToPath(new URL("./shared-server.js", import.meta.url)), JSON.stringify({ python: options.python, repoRoot: options.repoRoot, runtimePath: options.runtimePath, rindHome: options.rindHome || options.home })], { detached: true, windowsHide: true, stdio: ["ignore", log.fd, log.fd] });
