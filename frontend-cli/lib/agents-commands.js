@@ -55,6 +55,12 @@ export async function openAgentChat({ agent, teamId, manager = false, runtimeSes
   } finally { await handoff.dispose(); input.setRawMode?.(!!raw); input.resume?.(); }
 }
 
+// The last line Rind prints when its windows close.
+export function leaveSummary({ working = 0, notice = "" } = {}) {
+  if (notice) return notice;
+  return working > 0 ? "Left Rind · " + working + (working === 1 ? " agent keeps" : " agents keep") + " working in the background. Run `rind agents` to check on them." : "Left Rind.";
+}
+
 // Follows conversation-to-conversation moves until the user goes back to
 // Agents, returns, or leaves Rind.
 export async function followConversation(chat, { launch, input, open = openAgentChat }) {
@@ -68,7 +74,9 @@ export async function runAgentsCommand(args, launch) {
   if (args.includes("--help") || args.includes("-h")) { console.log(agentsHelp); return; }
   if (!args.length && process.stdin.isTTY && process.stdout.isTTY) {
     const { runAgentsPage } = await import("./agents-page.js");
-    await runAgentsPage({ launch, standalone: true }); return;
+    const result = await runAgentsPage({ launch, standalone: true });
+    if (result.leave) console.log(leaveSummary(result));
+    return;
   }
   if (args[0] === "stop") { await stopBackground(args.includes("--all"), launch, json); return; }
   const client = await managementClient(launch);
@@ -132,7 +140,12 @@ async function stopBackground(all, launch, json) {
   try { client = await managementClient({ ...launch, start: false }); }
   catch { console.log(json ? JSON.stringify({ stopped: false, running: false }) : "Background services are not running."); return; }
   try {
-    const result = await client.request("serviceShutdown", { stopAgents: all });
+    let result;
+    try { result = await client.request("serviceShutdown", { stopAgents: all }); }
+    catch (error) {
+      if (error.code !== "UNKNOWN_METHOD") throw error;
+      result = await stopLegacy(client, all, launch);
+    }
     console.log(json ? JSON.stringify({ stopped: true, ...result }) : all && result.working ? "Stopped " + result.working + (result.working === 1 ? " running agent" : " running agents") + " and the background services." : "Stopped the background services.");
   } catch (error) {
     if (error.code !== "SERVICE_BUSY") throw error;
@@ -141,11 +154,25 @@ async function stopBackground(all, launch, json) {
   } finally { client.close(); }
 }
 
+// A service from before serviceShutdown: end its process once its own
+// snapshot shows nothing running (or --all), then stop the Runtime it used.
+async function stopLegacy(client, all, launch) {
+  const { endLegacyService } = await import("../../agent-management/dist/client.js");
+  const result = await endLegacyService(client, launch.home, { force: all });
+  if (!result.ended && result.working) throw Object.assign(new Error(result.working + (result.working === 1 ? " agent is" : " agents are") + " still working."), { code: "SERVICE_BUSY", details: { working: result.working } });
+  if (!result.ended) throw new Error("A background service from an older Rind is running but its process could not be found.");
+  const { connectSharedRuntime } = await import("../../rind-runtime-client/shared-runtime.js");
+  const host = await connectSharedRuntime({ rindHome: launch.home, start: false }).catch(() => null);
+  if (host) { await host.request("runtime/shutdown").catch(() => {}); host.close(); }
+  return { stopping: true, working: result.working };
+}
+
 // `rind agents open|manager`: going back from the conversation shows Agents.
 async function showConversation(chat, launch) {
   const next = await followConversation(chat, { launch, input: process.stdin });
   if (next.action !== "agents") return;
   const { runAgentsPage } = await import("./agents-page.js");
-  await runAgentsPage({ launch, standalone: true, initialTeamId: chat.teamId });
+  const result = await runAgentsPage({ launch, standalone: true, initialTeamId: chat.teamId });
+  if (result.leave) console.log(leaveSummary(result));
 }
 function option(args, flag) { const index = args.indexOf(flag); return index === -1 ? undefined : args[index + 1]; }

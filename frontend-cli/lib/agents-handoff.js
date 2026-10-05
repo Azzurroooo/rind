@@ -15,13 +15,18 @@ import path from "node:path";
 export const HANDOFF_ENV = "RIND_AGENTS_HANDOFF";
 const ACTIONS = new Set(["agents", "leave", "open"]);
 
-export const handoffPath = (env = process.env) => env[HANDOFF_ENV] || "";
+// Read once at startup and removed from the environment, so background
+// services and tools started from this window never inherit it.
+export function takeHandoffPath(env = process.env) {
+  const file = env[HANDOFF_ENV] || "";
+  delete env[HANDOFF_ENV];
+  return file;
+}
 
-export async function writeHandoff(next, env = process.env) {
-  const file = handoffPath(env);
+// Best effort: a missing opener means there is nobody to hand off to.
+export async function writeHandoff(next, file) {
   if (!file) return false;
-  await writeFile(file, JSON.stringify(next), { mode: 0o600 });
-  return true;
+  try { await writeFile(file, JSON.stringify(next), { mode: 0o600 }); return true; } catch { return false; }
 }
 
 export async function createHandoff() {

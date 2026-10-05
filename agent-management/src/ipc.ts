@@ -16,6 +16,8 @@ import { connectSharedRuntime } from "../../rind-runtime-client/shared-runtime.j
 
 export async function startServer(options: { home?: string; python?: string; repoRoot: string; runtimePath?: string; onShutdown?: () => void }) {
   const startedAt = new Date().toISOString();
+  // Fingerprint the code this process loaded, before anything can rebuild it.
+  const build = managementBuildId();
   const paths = managementPaths(options.home);
   await privateDirectory(paths.state);
   if (process.platform !== "win32") {
@@ -44,9 +46,10 @@ export async function startServer(options: { home?: string; python?: string; rep
       if (!closing) await service.request({ kind: "user" }, "reconcileSession", { requestId: "missing-" + randomBytes(12).toString("hex"), sessionId: session.id, connected: false }).catch(() => {});
     }
   }
-  function executionHost() {
+  // start: false only reattaches to a running host and never spawns one.
+  function executionHost(start = true) {
     if (runtime) return Promise.resolve(runtime);
-    return runtimeConnecting ||= connectSharedRuntime({ ...options, rindHome: options.home,
+    return runtimeConnecting ||= connectSharedRuntime({ ...options, rindHome: options.home, start,
       onMessage(message: any) {
         if (!["turn_started", "turn_completed", "turn_failed", "turn_cancelled", "user_question_requested", "task_updated"].includes(message.event?.type) && !(message.event?.type === "tool_result" && message.event.tool_name === "ask_user_question")) return;
         const session = Object.values(store.state.sessions).find(s => s.runtimeSessionId === message.session_id);
@@ -54,13 +57,24 @@ export async function startServer(options: { home?: string; python?: string; rep
       },
       onDisconnect() {
         runtime = undefined;
-        if (!closing) for (const session of Object.values(store.state.sessions).filter(s => s.shared)) void service.request({ kind: "user" }, "reconcileSession", { requestId: "disconnect-" + randomBytes(12).toString("hex"), sessionId: session.id, connected: false }).catch(() => {});
+        if (closing) return;
+        for (const session of Object.values(store.state.sessions).filter(s => s.shared)) void service.request({ kind: "user" }, "reconcileSession", { requestId: "disconnect-" + randomBytes(12).toString("hex"), sessionId: session.id, connected: false }).catch(() => {});
+        void reattach();
       },
     }).then(async value => {
       runtime = value; await value.request("runtime/observe");
       await Promise.all(Object.values(store.state.sessions).map(reconcile));
       return value;
     }).finally(() => { runtimeConnecting = undefined; });
+  }
+  // A window may have replaced an outdated host; follow it to the new one
+  // instead of treating every shared session as lost. Never starts a host.
+  async function reattach() {
+    for (let attempt = 0; attempt < 20 && !closing && !runtime; attempt++) {
+      await new Promise(resolve => setTimeout(resolve, 250));
+      if (closing || runtime) return;
+      try { await executionHost(false); return; } catch {}
+    }
   }
   const bridge = fileURLToPath(new URL("./bridge.js", import.meta.url));
   function issue(principal: Principal, host = false) {
@@ -159,19 +173,16 @@ export async function startServer(options: { home?: string; python?: string; rep
         } else if (message.method === "serviceInfo") {
           requireValue(principal.kind === "user", "FORBIDDEN", "Only the user can inspect the service.");
           // Report the Runtime host only when it is already connected; asking must not start one.
-          const host = runtime ? await runtime.request("runtime/info").catch(() => null) : null;
-          result = { buildId: await managementBuildId(), pid: process.pid, startedAt, ...workload(), runtime: host };
+          // An older host does not know runtime/info; report it as legacy rather than absent.
+          const host = runtime ? await runtime.request("runtime/info").catch(() => ({ legacy: true })) : null;
+          result = { buildId: await build, pid: process.pid, startedAt, ...workload(), runtime: host && { ...host, stale: Boolean(runtime?.stale) } };
         } else if (message.method === "serviceShutdown") {
           // Leaving Rind never calls this; it is the explicit "stop background services" action.
           requireValue(principal.kind === "user", "FORBIDDEN", "Only the user can stop the service.");
           const load = workload();
           requireValue(message.params.stopAgents === true || load.working === 0, "SERVICE_BUSY", load.working + (load.working === 1 ? " agent is" : " agents are") + " still working. Wait for them, or stop all agents.", load);
           send({ id, result: { stopping: true, ...load } });
-          void (async () => {
-            if (message.params.stopAgents === true) await stopConversations();
-            await close();
-            options.onShutdown?.();
-          })().catch(reportError);
+          void stopEverything().catch(reportError).finally(() => options.onShutdown?.());
           return;
         } else if (message.method === "listSessions") {
           requireValue(principal.kind === "user", "FORBIDDEN", "Private session history is available only to the user.");
@@ -209,17 +220,27 @@ export async function startServer(options: { home?: string; python?: string; rep
     const runs = Object.values(store.state.runs).filter(r => r.status === "starting" || r.status === "running");
     return { working: runs.length, tasks: runs.filter(r => r.taskId).length, conversations: runs.filter(r => !r.taskId).length, unconfirmed: Object.values(store.state.runs).filter(r => r.status === "unknown").length };
   }
-  // Direct conversations run in the shared Runtime, not here: cancel their
-  // turns there, then stop the host itself. Managed tasks stop with the service.
-  async function stopConversations() {
-    const host = runtime || await executionHost().catch(() => undefined);
-    if (!host) return;
-    const running = Object.values(store.state.runs).filter(r => activeRun(r) && !r.taskId).map(r => store.state.sessions[r.sessionId]?.runtimeSessionId).filter(Boolean);
-    await Promise.allSettled(running.map(sessionId => host.request("session/cancel", { session_id: sessionId })));
-    await host.request("runtime/shutdown").catch(() => {});
+  // The services stop together; stopping one alone would leave the other
+  // serving windows that can no longer be managed. Order matters:
+  //   1. the scheduler stops, so managed tasks end as cancelled, not unconfirmed;
+  //   2. running conversation turns are cancelled in the Runtime;
+  //   3. the Runtime host stops (only a host that is already running is contacted);
+  //   4. this service closes.
+  async function stopEverything() {
+    const conversations = Object.values(store.state.runs).filter(r => activeRun(r) && !r.taskId).map(r => store.state.sessions[r.sessionId]?.runtimeSessionId).filter(Boolean);
+    await service.stop();
+    closing = true;
+    const host = runtime || await executionHost(false).catch(() => undefined);
+    if (host) {
+      await Promise.allSettled(conversations.map(sessionId => host.request("session/cancel", { session_id: sessionId })));
+      await host.request("runtime/shutdown").catch(() => {});
+    }
+    await close();
   }
   let store: Awaited<ReturnType<typeof openStore>>;
   const realManager = (async () => { await privateDirectory(paths.manager); const { canonicalDirectory } = await import("./paths.js"); return canonicalDirectory(paths.manager); })();
+  // Awaited by the requests that need it; a failure surfaces there, never as an unhandled rejection.
+  realManager.catch(() => {});
   try {
     if (process.platform !== "win32") await chmod(paths.endpoint, 0o600);
     try { userToken = (await readFile(paths.token, "utf8")).trim(); }
@@ -237,6 +258,8 @@ export async function startServer(options: { home?: string; python?: string; rep
     return closed ||= (async () => {
       closing = true;
       await service.stop();
+      // The Manager folder may still be being secured; finish before reporting closed.
+      await realManager.catch(() => {});
       runtime?.close();
       for (const socket of sockets) socket.destroy();
       await new Promise<void>(resolve => server.close(() => resolve()));

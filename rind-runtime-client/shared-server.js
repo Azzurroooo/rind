@@ -47,12 +47,14 @@ export async function startSharedServer(options) {
         const { method, params = {} } = message;
         if (typeof method !== "string" || !params || typeof params !== "object" || Array.isArray(params)) throw new Error("Expected a method and params object.");
         if (stopping) throw new Error("Runtime is shutting down.");
-        // Answered without starting the worker, so a client can decide whether this host is current.
+        // Answered without starting the worker, so a client can decide whether
+        // this host is current, and stop it, without spawning Python.
         if (method === "runtime/info") {
-          const attached = [...peers].filter(other => other !== peer && other.sessions.size > 0).length;
-          peer.send({ id, result: { buildId: await build, pid: process.pid, startedAt, busy: prompts.size, attached } });
+          const attached = [...peers].filter(other => other !== peer && (other.sessions.size > 0 || other.observe)).length;
+          peer.send({ id, result: { buildId: await build, pid: process.pid, startedAt, busy: prompts.size, attached, observed: [...peers].some(other => other !== peer && other.observe) } });
           return;
         }
+        if (method === "runtime/shutdown" && !initialized) { stopping = true; peer.send({ id, result: { stopped: true } }); await close(); return; }
         const base = await initialize(); let result;
         if (method === "initialize") result = base;
         else if (method === "runtime/observe") { peer.observe = true; result = { pid: client.child.pid }; }
@@ -85,7 +87,7 @@ export async function startSharedServer(options) {
     throw error;
   }
   function close() {
-    return closing ||= (async () => { stopping = true; await client.shutdown(); for (const peer of peers) peer.socket.end(); await new Promise(resolve => server.close(resolve)); })();
+    return closing ||= (async () => { stopping = true; if (initialized) await client.shutdown(); for (const peer of peers) peer.socket.end(); await new Promise(resolve => server.close(resolve)); })();
   }
   return { paths, close };
 }

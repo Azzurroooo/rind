@@ -29,13 +29,22 @@ export async function prepareManagement(args, launch, { interactive = !!process.
     process.stderr.write("Agents management disconnected; verifying runtime activity before reconnecting.\n");
     void reconnect().catch(error => process.stderr.write(error.message + "\n"));
   } };
+  // Reattach to a service that is restarting, but never start one: after an
+  // explicit stop this conversation simply continues untracked.
   function reconnect() {
     if (reconnecting) return reconnecting;
     reconnecting = (async () => {
-      const replacement = await managementClient(connectionOptions);
-      if (detached) { replacement.close(); return; }
-      client = replacement;
-      disconnected = false;
+      for (let attempt = 0; attempt < 20 && !detached; attempt++) {
+        await new Promise(resolve => setTimeout(resolve, 250));
+        try {
+          const replacement = await managementClient({ ...connectionOptions, start: false });
+          if (detached) { replacement.close(); return; }
+          client = replacement;
+          disconnected = false;
+          return;
+        } catch {}
+      }
+      if (!detached) throw new Error("Agents management is stopped; this conversation is no longer tracked. Reopen it from Agents to track it again.");
     })().finally(() => { reconnecting = null; });
     return reconnecting;
   }

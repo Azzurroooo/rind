@@ -317,8 +317,9 @@ export function backgroundRows(snapshot, service, { now = Date.now() } = {}) {
   rows.push({ id: "section:services", kind: "section", title: "Services" },
     { id: "svc:management", kind: "service", title: "Agents management", status: service ? "Ready" : "Inactive",
       note: service ? "pid " + service.pid + " · up " + age(service.startedAt) + (service.stale ? " · update waiting" : "") : "not connected", stale: Boolean(service?.stale) },
-    { id: "svc:runtime", kind: "service", title: "Shared Runtime", status: service?.runtime ? "Ready" : "Inactive",
-      note: service?.runtime ? "pid " + service.runtime.pid + " · up " + age(service.runtime.startedAt) + " · " + service.runtime.busy + " running" : "starts when a conversation needs it" });
+    { id: "svc:runtime", kind: "service", title: "Shared Runtime", status: service?.runtime ? "Ready" : "Inactive", stale: Boolean(service?.runtime?.stale || service?.runtime?.legacy),
+      note: !service?.runtime ? "starts when a conversation needs it" : service.runtime.legacy ? "started by an older Rind · stop to update"
+        : "pid " + service.runtime.pid + " · up " + age(service.runtime.startedAt) + " · " + service.runtime.busy + " running" + (service.runtime.stale ? " · update waiting" : "") });
   rows.push({ id: "section:actions", kind: "section", title: "Stop" },
     { id: "stop-all", kind: "stop-all", title: live.length ? "Stop all agents…" : "Stop background services…", working: live.length });
   return rows;

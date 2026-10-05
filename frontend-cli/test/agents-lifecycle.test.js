@@ -5,7 +5,7 @@ import { spawn } from "node:child_process";
 import path from "node:path";
 import os from "node:os";
 import { fileURLToPath } from "node:url";
-import { createHandoff, writeHandoff, HANDOFF_ENV } from "../lib/agents-handoff.js";
+import { createHandoff, writeHandoff, takeHandoffPath, HANDOFF_ENV } from "../lib/agents-handoff.js";
 import { followConversation } from "../lib/agents-commands.js";
 import { runAgentsPage } from "../lib/agents-page.js";
 import { startServer } from "../../agent-management/dist/ipc.js";
@@ -17,11 +17,15 @@ test("a handoff without a decision means return, and only valid decisions are ac
   const handoff = await createHandoff();
   t.after(() => handoff.dispose());
   assert.deepEqual(await handoff.read(), { action: "return" });
-  assert.equal(await writeHandoff({ action: "leave" }, {}), false, "a top-level window has nowhere to hand off");
-  await writeHandoff({ action: "open" }, { [HANDOFF_ENV]: handoff.file });
+  assert.equal(await writeHandoff({ action: "leave" }, ""), false, "a top-level window has nowhere to hand off");
+  assert.equal(await writeHandoff({ action: "leave" }, handoff.file + ".missing/x"), false, "a vanished opener is not an error");
+  await writeHandoff({ action: "open" }, handoff.file);
   assert.deepEqual(await handoff.read(), { action: "return" }, "open without a conversation is ignored");
-  await writeHandoff({ action: "leave" }, { [HANDOFF_ENV]: handoff.file });
+  await writeHandoff({ action: "leave" }, handoff.file);
   assert.deepEqual(await handoff.read(), { action: "leave" });
+  const env = { [HANDOFF_ENV]: handoff.file, OTHER: "1" };
+  assert.equal(takeHandoffPath(env), handoff.file);
+  assert.deepEqual(env, { OTHER: "1" }, "services started from the window do not inherit it");
 });
 
 test("moving between conversations replaces the window instead of nesting it", async () => {
@@ -33,15 +37,17 @@ test("moving between conversations replaces the window instead of nesting it", a
   assert.deepEqual(await followConversation({}, { launch: {}, open: async () => undefined }), { action: "return" });
 });
 
-async function cli(t, { handoff, columns = 100, rows = 26 } = {}) {
+async function cli(t, { handoff, columns = 100, rows = 26, tty = true } = {}) {
   const home = await mkdtemp(path.join(os.tmpdir(), "rind-lifecycle-"));
   const workspace = path.join(home, "workspace");
   await mkdir(path.join(workspace, ".rind"), { recursive: true });
   await writeFile(path.join(workspace, ".rind", "settings.json"), JSON.stringify({ provider: "openai-compatible", model: "fixture-model", baseUrl: "http://127.0.0.1:1/v1" }));
   const script = `
-    Object.defineProperty(process.stdin, 'isTTY', { value: true });
-    Object.defineProperty(process.stdout, 'isTTY', { value: true });
-    process.stdin.setRawMode = value => { process.stdin.isRaw = value; };
+    if (${tty}) {
+      Object.defineProperty(process.stdin, 'isTTY', { value: true });
+      Object.defineProperty(process.stdout, 'isTTY', { value: true });
+      process.stdin.setRawMode = value => { process.stdin.isRaw = value; };
+    }
     process.stdout.columns = ${columns}; process.stdout.rows = ${rows};
     const { runFrontendCliApp } = await import(${JSON.stringify(new URL("../lib/frontend-cli-implementation.js", import.meta.url).href)});
     await runFrontendCliApp(['--cwd', ${JSON.stringify(workspace)}]);
@@ -88,6 +94,15 @@ test("ctrl+c clears typing, then needs a second press to leave every window", { 
   app.key("\x03");
   assert.equal(await app.exited, 0);
   assert.deepEqual(await handoff.read(), { action: "leave" });
+});
+
+test("without a terminal a single ctrl+c leaves, since no hint could be seen", { timeout: 40000 }, async t => {
+  const app = await cli(t, { tty: false });
+  await app.visible("Ask Rind").catch(() => {});
+  await app.settle();
+  app.key("\x03");
+  const code = await Promise.race([app.exited, new Promise(resolve => setTimeout(() => resolve("still running"), 15000))]);
+  assert.equal(code, 0);
 });
 
 test("a top-level window leaves on the second ctrl+c", { timeout: 40000 }, async t => {

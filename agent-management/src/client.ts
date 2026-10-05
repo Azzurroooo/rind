@@ -6,6 +6,22 @@ import { fileURLToPath } from "node:url";
 import path from "node:path";
 import { managementPaths, privateDirectory } from "./paths.js";
 import { managementBuildId } from "./build.js";
+import { findServiceProcesses } from "./service-process.js";
+
+const sameFolder = (a: string, b: string) => process.platform === "win32" ? a.toLowerCase() === b.toLowerCase() : a === b;
+const active = (snapshot: any) => snapshot.runs.filter((run: any) => run.status === "starting" || run.status === "running").length;
+
+// A service started before serviceInfo existed. Its own snapshot says whether
+// anything runs; only then is its process ended so a current one can start.
+export async function endLegacyService(client: ManagementClient, home?: string, { force = false } = {}) {
+  const working = active(await client.request("snapshot"));
+  if (working && !force) return { ended: false, working };
+  const state = managementPaths(home).state;
+  const pids = await findServiceProcesses(fileURLToPath(new URL("./server.js", import.meta.url)), config => sameFolder(managementPaths(config.home).state, state));
+  client.close();
+  for (const pid of pids) { try { process.kill(pid); } catch {} }
+  return { ended: pids.length > 0, working };
+}
 
 export async function connectClient({ endpoint, token, runtimeSessionId, onSnapshot, onDisconnect }: {
   endpoint: string; token: string; runtimeSessionId?: string;
@@ -57,14 +73,24 @@ export async function connectManagement(options: {
   // A service started from older code keeps serving it after an update. It is
   // replaced only while no agent is working; otherwise the client keeps using
   // it and reports the pending update.
+  const stopped = async () => {
+    for (let i = 0; i < 50; i++) { try { (await connect()).close(); } catch { return true; } await new Promise(resolve => setTimeout(resolve, 100)); }
+    throw new Error("The outdated agents management service did not stop. See " + path.join(paths.state, "service.log"));
+  };
   async function checked(client: ManagementClient) {
-    const [info, expected] = await Promise.all([client.request("serviceInfo").catch(() => null), managementBuildId()]);
+    let legacy = false;
+    const [info, expected] = await Promise.all([client.request("serviceInfo").catch(error => { legacy = error.code === "UNKNOWN_METHOD"; return null; }), managementBuildId()]);
     if (info?.buildId === expected) return Object.assign(client, { service: info });
     if (info && info.working === 0) {
       await client.request("serviceShutdown").catch(() => {});
       client.close();
-      for (let i = 0; i < 50; i++) { try { (await connect()).close(); } catch { return null; } await new Promise(resolve => setTimeout(resolve, 100)); }
-      throw new Error("The outdated agents management service did not stop. See " + path.join(paths.state, "service.log"));
+      return (await stopped()) && null;
+    }
+    if (legacy) {
+      const result = await endLegacyService(client, options.home);
+      if (result.ended) return (await stopped()) && null;
+      if (!result.working) throw new Error("An agents management service from an older Rind is running and could not be stopped. End its process and try again.");
+      return Object.assign(client, { service: null, stale: { reason: "legacy", working: result.working } });
     }
     return Object.assign(client, { service: info, stale: { reason: info ? "busy" : "unknown", working: info?.working } });
   }

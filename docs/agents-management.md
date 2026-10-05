@@ -114,19 +114,19 @@ Rind is not one process: agents, tasks and the shared Runtime run in the backgro
 | --- | --- | --- |
 | Go back one level | `esc` on the Agents page · `←` on an empty input in a conversation | The page returns to the conversation that opened it; a conversation opened from Agents returns to the same Agents page. |
 | Leave Rind | `ctrl+c` twice when idle · `/exit` | Every Rind window closes. Agents, tasks and the shared Runtime **keep running**; the last window says how many are still working. |
-| Stop everything | Agents › **Background** › Stop all agents · `rind agents stop --all` | Running work is cancelled and the background services stop. Teams, tasks and conversation history are kept. |
+| Stop everything | Agents › **Background** › Stop all agents and leave Rind · `rind agents stop --all` | Managed tasks end as cancelled, running conversation turns are cancelled, then the shared Runtime and the management service stop and every Rind window closes. Teams, tasks and conversation history are kept. |
 
 `ctrl+c` always handles the most immediate thing first:
 
 1. While a turn runs, it interrupts that turn. A second press during the interrupt force-closes the window.
 2. With text in the input, it clears the text.
-3. When idle, the first press shows `ctrl+c again to leave Rind · agents keep running` for two seconds. A second press leaves; any other key (or `esc` on the Agents page) cancels.
+3. When idle, the first press shows `ctrl+c again to leave Rind · agents keep running` for two seconds. A second press leaves; any other key (or `esc` on the Agents page) cancels. Without a terminal (scripts, pipes) there is no hint to see, so a single interrupt leaves.
 
-Conversations opened from Agents never nest. When you move to Agents or to another conversation from inside one, it hands the move back to the window that opened it (through a private handoff file named by `RIND_AGENTS_HANDOFF`) and closes. There is at most one level, and leaving from anywhere closes everything.
+Conversations opened from Agents never nest. When you move to Agents or to another conversation from inside one, it hands the move back to the window that opened it and closes. The handoff goes through a private file named by `RIND_AGENTS_HANDOFF`; the window removes that variable from its environment at startup, so services and tools it starts never inherit it. There is at most one level, and leaving from anywhere closes everything. A conversation in an unregistered folder runs in the window's own worker; while it is working, moving away is refused instead of killing it.
 
-The **Background** page shows what keeps running after you leave: running tasks and conversations (with team, member and how long they have run), runs whose stop could not be confirmed, and both background services with their process ID and uptime. Its stop dialog selects Cancel first. It lists what is running, says what is kept, and offers **Stop all agents** or **Stop all agents and leave Rind**. After a stop the page stays disconnected until you press `r`.
+The **Background** page shows what keeps running after you leave: running tasks and conversations (with team, member and how long they have run), runs whose stop could not be confirmed, and both background services with their process ID and uptime. Its stop dialog selects Cancel first, lists what is running and says what is kept. Its single action is **Stop all agents and leave Rind**. Every open conversation depends on these services, so stopping always closes the windows too, rather than leaving them on a stopped Runtime.
 
-`rind agents stop` stops the background services only when nothing is running. Otherwise it lists the running work and exits with status 1. `--all` also stops running agents. It never starts a service just to stop it.
+`rind agents stop` stops both background services, but only when nothing is running; otherwise it lists the running work and exits with status 1. `--all` also stops running agents. It never starts a service just to stop it. Conversations still open elsewhere notice the stop, reattach if the service comes back on its own, and otherwise continue untracked; nothing restarts a service you stopped except opening Agents or pressing `r`.
 
 ### Updates and background services
 
@@ -134,6 +134,10 @@ The background services run detached, so after you update Rind they would otherw
 
 - **Idle and outdated:** the service is stopped and replaced transparently.
 - **Running agents:** the service is kept, so no work is interrupted. The Agents page says an update is waiting, and the Background page marks the service. Once its agents finish, the next connection replaces it, or you can stop it from Background.
+
+A fingerprint covers file names relative to the install and file contents only, so the same code installed elsewhere, spelled with another drive-letter case, or reinstalled matches. Each service fingerprints the code it loaded at startup. A Runtime that is still observed by the management service or used by a conversation is never replaced underneath it; when the host is replaced while idle, the management service reattaches to the new one.
+
+Services started by a Rind from before fingerprints cannot be asked to stop. Clients find their process by script and data folder, check through the service's own snapshot that nothing is running, then end it so a current one starts. `rind agents stop` uses the same path, and with `--all` it does so even while agents run.
 
 This follows the rule used by crush (`restartIfStale`, refused while busy) and orca (a stale daemon is preserved while it owns live sessions).
 

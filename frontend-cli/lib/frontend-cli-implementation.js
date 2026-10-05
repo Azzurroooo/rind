@@ -4,8 +4,8 @@ import { createInterface } from "node:readline";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { createRequire } from "node:module";
-import { runAgentsCommand, followConversation } from "./agents-commands.js";
-import { handoffPath, writeHandoff } from "./agents-handoff.js";
+import { runAgentsCommand, followConversation, leaveSummary } from "./agents-commands.js";
+import { takeHandoffPath, writeHandoff } from "./agents-handoff.js";
 import { runAgentsPage } from "./agents-page.js";
 import { prepareManagement, observeRuntime } from "./agents-session.js";
 
@@ -58,6 +58,10 @@ import {
 } from "./rendering.js";
 
 export async function runFrontendCliApp(cliArgs = process.argv.slice(2)) {
+// A conversation opened from Agents hands navigation back to the window that
+// opened it instead of nesting another window inside itself.
+const handoffFile = takeHandoffPath();
+const handoffWindow = Boolean(handoffFile);
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(scriptDir, "..", "..");
 const python = process.env.RIND_PYTHON || "python";
@@ -158,9 +162,6 @@ const runtimeState = cliState.runtime;
 const sessionState = cliState.session;
 const turnStateData = cliState.turn;
 const inputStateData = cliState.input;
-// A conversation opened from Agents hands navigation back to the window that
-// opened it instead of nesting another window inside itself.
-const handoffWindow = Boolean(handoffPath());
 // Created before any handler can run: SIGINT may arrive during startup.
 const leaveLatch = createLeaveLatch({ onChange: () => { cliState.display.leaveArmed = leaveLatch.armed; redrawInput(); } });
 const displayState = cliState.display;
@@ -566,7 +567,13 @@ async function enterInSessionTour(pageId) {
 async function enterManagement(chat) {
   if (!tui) { await runAgentsCommand(["list"], managementLaunch); return; }
   if (handoffWindow) {
-    await writeHandoff(chat ? { action: "open", chat: { ...chat, agent: chat.agent && { id: chat.agent.id, canonicalWorkspace: chat.agent.canonicalWorkspace } } } : { action: "agents" });
+    // A shared conversation keeps running after this window closes; one that
+    // runs in this window's own worker would be killed with it.
+    if (!management.shared && (turnStateData.active || displayState.activeCompact)) {
+      logOutput("This conversation runs in this window. Wait for it, or press ctrl+c to stop it, before leaving.");
+      return;
+    }
+    await writeHandoff(chat ? { action: "open", chat: { ...chat, agent: chat.agent && { id: chat.agent.id, canonicalWorkspace: chat.agent.canonicalWorkspace } } } : { action: "agents" }, handoffFile);
     await shutdownRuntime();
     return;
   }
@@ -581,7 +588,7 @@ async function enterManagement(chat) {
     if (chat) next = await followConversation(chat, { launch: managementLaunch, input: process.stdin });
     if (next.action === "agents") {
       const page = await runAgentsPage({ launch: managementLaunch, manageInput: false, signal: abort.signal, initialTeamId: management.chatContext?.teamId });
-      if (page.leave) next = { action: "leave", working: page.working };
+      if (page.leave) next = { action: "leave", working: page.working, notice: page.notice };
     }
   } finally {
     agentsPageAbort = null;
@@ -590,15 +597,15 @@ async function enterManagement(chat) {
     tui.replayAll();
     if (!inputStateData.session) { inputStateData.prefill = draft || ""; inputController.resume(); }
   }
-  if (next.action === "leave") await leaveRind(next.working);
+  if (next.action === "leave") await leaveRind(next.working, next.notice);
 }
 
 // Leaving closes this window and every window it was opened from. It only
 // detaches: background agents, tasks and the shared Runtime keep running.
-async function leaveRind(working = 0) {
+async function leaveRind(working = 0, notice = "") {
   leaveLatch.disarm();
-  if (handoffWindow) await writeHandoff({ action: "leave" });
-  else if (working > 0) logOutput("Left Rind · " + working + (working === 1 ? " agent keeps" : " agents keep") + " working in the background. Run `rind agents` to check on them.");
+  if (handoffWindow) await writeHandoff({ action: "leave" }, handoffFile);
+  else logOutput(leaveSummary({ working, notice }));
   await shutdownRuntime();
 }
 
@@ -874,11 +881,12 @@ function handleSigint() {
     activeTurn: !idle,
     interruptRequested: turnStateData.interruptRequested,
     runtimeClosing: runtimeState.status === "closing",
-    leaveArmed: leaveLatch.armed,
+    // Without a terminal there is no hint to see, so a single signal leaves (as scripts expect).
+    leaveArmed: leaveLatch.armed || !tui,
   });
   if (action === "interrupt") interruptTurn();
   else if (action === "arm-leave") leaveLatch.arm();
-  else if (action === "leave") void leaveRind();
+  else if (action === "leave") void leaveRind().catch(error => { writeErrorOutput(error.message + "\n"); exitFromSignal(); });
   else exitFromSignal();
 }
 

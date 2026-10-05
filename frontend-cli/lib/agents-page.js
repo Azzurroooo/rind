@@ -33,7 +33,9 @@ export async function runAgentsPage({ launch, input = process.stdin, output = pr
   const finished = new Promise(resolve => { finish = resolve; });
   let leaving = false;
   const close = () => { closed = true; if (!chatActive) finish(); };
-  const leave = () => { leaving = true; close(); };
+  let leaveNotice = "";
+  // notice: what to print once the windows have closed (e.g. after a stop).
+  const leave = notice => { leaving = true; if (notice) { leaveNotice = notice; view.snapshot = { ...view.snapshot, runs: [] }; } close(); };
   const leaveLatch = createLeaveLatch({ onChange: () => {
     view.leaveArmed = leaveLatch.armed;
     if (!leaveLatch.armed && view.notice?.text === LEAVE_HINT) view.notice = null;
@@ -144,16 +146,23 @@ export async function runAgentsPage({ launch, input = process.stdin, output = pr
     }
     project();
   };
-  function connect() {
+  // Opening the page or pressing r may start the service; a lost connection
+  // only reattaches, so a page never restarts services someone else stopped.
+  function connect({ start = true } = {}) {
     if (connecting || closed) return connecting;
     connecting = (async () => {
-      const replacement = await managementClient({ ...launch, onSnapshot: acceptSnapshot, onDisconnect() {
+      const options = { ...launch, onSnapshot: acceptSnapshot, onDisconnect() {
         if (closed) return;
         // After an explicit stop the services stay down until the user asks again.
         if (view.stopped) { view.connection = "stopped · r starts again"; view.service = null; redraw(); return; }
         view.connection = "reconnecting · status unconfirmed"; redraw();
-        void connect();
-      } });
+        void connect({ start: false });
+      } };
+      let replacement;
+      for (let attempt = 0; !replacement; attempt++) {
+        try { replacement = await managementClient({ ...options, start }); }
+        catch (error) { if (start || attempt >= 20 || closed) throw error; await new Promise(resolve => setTimeout(resolve, 250)); }
+      }
       if (closed) { replacement.close(); return; }
       client = replacement;
       view.connection = "connected"; view.stopped = false;
@@ -161,7 +170,7 @@ export async function runAgentsPage({ launch, input = process.stdin, output = pr
       if (replacement.stale) notify("A newer Rind is installed. Background services keep the old version until their agents finish.", "info");
       view.history = {}; view.managerHistory = null; view.independent = null;
       acceptSnapshot(await client.request("subscribe", { afterSeq: view.snapshot.seq || 0 }));
-    })().catch(error => { view.connection = "offline · r retries"; notify(error.message, "error"); })
+    })().catch(error => { view.connection = start ? "offline · r retries" : "stopped · r starts again"; if (start) notify(error.message, "error"); })
       .finally(() => { connecting = null; redraw(); });
     return connecting;
   }
@@ -263,7 +272,7 @@ export async function runAgentsPage({ launch, input = process.stdin, output = pr
     try { return await client.request("serviceShutdown", { stopAgents }); }
     catch (error) { view.stopped = false; throw error; }
   }
-  const ui = { view, request, choose, form, resolvePath: value => resolveInputPath(value), stopServices, leave: () => leave(), confirm, notify, showText, reopen, openTeam, openMember, setFilter, // Menu actions already run inside perform(); nesting would be refused as busy.
+  const ui = { view, request, choose, form, resolvePath: value => resolveInputPath(value), stopServices, leave, confirm, notify, showText, reopen, openTeam, openMember, setFilter, // Menu actions already run inside perform(); nesting would be refused as busy.
     chat: options => (view.busy ? chat(options) : perform(() => chat(options), null, "Opening conversation…")) };
   const actions = createActions(ui);
   const currentRow = () => (view.focus === "sidebar" ? view.sidebar.find(r => r.id === view.navId) : view.entries.find(r => r.id === view.selectedId));
@@ -473,7 +482,7 @@ export async function runAgentsPage({ launch, input = process.stdin, output = pr
     if (signal?.aborted) return { leave: false, working: 0 };
     realpath(managerWorkspace(launch)).then(value => { view.managerPath = process.platform === "win32" ? value.toLowerCase() : value; project(); }, () => {});
     project(); tui.start(); void connect(); await finished;
-    return { leave: leaving, working: view.snapshot.runs.filter(run => ["starting", "running"].includes(run.status)).length };
+    return { leave: leaving, notice: leaveNotice, working: view.snapshot.runs.filter(run => ["starting", "running"].includes(run.status)).length };
   } finally {
     closed = true; leaveLatch.disarm(); clearInterval(clock); clearInterval(spinner); clearTimeout(noticeTimer); client?.close(); tui.stop();
     input.off?.("end", close); input.off?.("close", close); signal?.removeEventListener("abort", close);
