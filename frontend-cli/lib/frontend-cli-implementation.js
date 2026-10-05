@@ -181,6 +181,7 @@ if (tui) {
 }
 let inputActions;
 let inputController;
+let agentsPageAbort = null;
 let eventProcessing = Promise.resolve();
 
 tui?.onData((sequence) => inputActions?.handleTerminalInput(sequence));
@@ -279,7 +280,7 @@ const runtimeController = createCliRuntimeController({
   restoreLiveTurn,
   renderHistory,
   onSessionRestored: rebindSendEndpoint,
-  openManagedSession: management.chatContext ? (runtimeSessionId, prefill) => enterManagement(management.chatContext.manager, { ...management.chatContext, runtimeSessionId, prefill }) : null,
+  openManagedSession: management.chatContext ? (runtimeSessionId, prefill) => enterManagement({ ...management.chatContext, runtimeSessionId, prefill }) : null,
   clearPendingInputs: (...args) => inputActions.clearPendingInputs(...args),
   closeAssistant,
   refreshInputState,
@@ -310,8 +311,6 @@ commandController = createCommandController({
   turn: turnController,
   input: {
     isTerminal: Boolean(tui),
-    runAgentsPage: () => enterManagement(false),
-    runManager: () => enterManagement(true),
     runGoalCommand: runtimeController.runGoalCommand,
     runModelSelector: runtimeController.runModelSelector,
     runEffortCommand: (value) => runtimeController.runEffortCommand(value),
@@ -433,9 +432,10 @@ inputActions = createCliInputActions({
   getTaskMonitor: () => taskMonitorController,
   getLineInput: () => input,
   getEffortLevels: () => runtimeController.currentModelEfforts(),
-  pausePrompt: () => inputController.pause(),
+  pausePrompt: () => { agentsPageAbort?.abort(); inputController.pause(); },
   resumePrompt: () => inputController.resume(),
   handleSigint,
+  openAgents: () => enterManagement(),
 });
 inputController = createInputController({
   terminalUi: tui,
@@ -553,21 +553,23 @@ async function enterInSessionTour(pageId) {
   }
 }
 
-async function enterManagement(manager, chat) {
+async function enterManagement(chat) {
   if (!tui) { await runAgentsCommand(["list"], managementLaunch); return; }
-  if (turnStateData.active || displayState.activeCompact) { logOutput("Open agents management between turns."); return; }
+  if (agentsPageAbort) return;
+  const abort = new AbortController(); agentsPageAbort = abort;
+  const draft = inputStateData.session?.mode === "prompt" ? inputStateData.session.editor.input() : inputStateData.prefill;
   inputController.pause();
   tui.stop({ releaseInput: false });
   process.off("SIGINT", handleSigint);
   try {
     if (chat) await openAgentChat({ ...chat, launch: managementLaunch });
-    else if (manager) await openAgentChat({ manager: true, launch: managementLaunch });
-    else await runAgentsPage({ launch: managementLaunch, manageInput: false });
+    else await runAgentsPage({ launch: managementLaunch, manageInput: false, signal: abort.signal, initialTeamId: management.chatContext?.teamId });
   } finally {
+    agentsPageAbort = null;
     process.on("SIGINT", handleSigint);
     tui.start({ acquireInput: false });
     tui.replayAll();
-    inputController.resume();
+    if (!inputStateData.session) { inputStateData.prefill = draft || ""; inputController.resume(); }
   }
 }
 

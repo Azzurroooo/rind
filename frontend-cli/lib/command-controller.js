@@ -25,14 +25,6 @@ export function createCommandController({
     if (!String(text || "").startsWith("/")) {
       return false;
     }
-    if (text.trim() === "/agents" || text.trim() === "/team") {
-      await input.runAgentsPage?.();
-      return true;
-    }
-    if (text.trim() === "/manager") {
-      await input.runManager?.();
-      return true;
-    }
     if (isBareThemeCommand(text) && input.isTerminal && input.runThemeSelector) {
       await input.runThemeSelector();
       return true;

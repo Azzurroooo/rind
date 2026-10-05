@@ -25,11 +25,13 @@ export function createCliInputActions({
   pausePrompt,
   resumePrompt,
   handleSigint,
+  openAgents = null,
   promptHistory = [],
   onPromptHistory = () => {},
 }) {
   let cancelActiveInput = null;
   const promptEditor = createLineEditor("", { history: promptHistory });
+  let openingAgents = false;
 
   function restoreInputText(text) {
     state.input.prefill = String(text || "");
@@ -338,6 +340,15 @@ export function createCliInputActions({
       return;
     }
     const key = event;
+    if (openAgents && session.mode === "prompt" && session.editor.input() === ""
+      && key.name === "left" && !key.ctrl && !key.alt && !key.shift) {
+      if (!openingAgents) {
+        openingAgents = true;
+        Promise.resolve().then(openAgents).catch(error => output.writeError(error.message + "\n"))
+          .finally(() => { openingAgents = false; });
+      }
+      return;
+    }
     const matches = session.menuState ? syncSlashMenu(session) : [];
     const menuKey = !key.ctrl && !key.alt && !key.shift && ["escape", "up", "down"].includes(key.name);
     if (session.menuState && matches.length && menuKey && session.menuState.handleKey("", key)) {

@@ -79,16 +79,6 @@ test("slash result can prefill input and start a follow-up turn", async () => {
   ]);
 });
 
-test("agents and manager open local surfaces without starting the runtime", async () => {
-  const calls = [];
-  const controller = createCommandController({
-    request: async () => { throw new Error("No runtime request expected"); },
-    turn: {}, input: { runAgentsPage: async () => calls.push("agents"), runManager: async () => calls.push("manager") },
-  });
-  await controller.handle("/agents"); await controller.handle("/manager");
-  assert.deepEqual(calls, ["agents", "manager"]);
-});
-
 test("slash result ignores malformed next prompts", async () => {
   let submitted = false;
   const controller = createCommandController({
@@ -182,8 +172,6 @@ test("local command catalog stays complete before the runtime starts", async () 
   assert.deepEqual(names, [
     "exit",
     "quit",
-    "agents",
-    "manager",
     "compact",
     "context",
     "effort",

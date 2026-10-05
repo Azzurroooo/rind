@@ -124,7 +124,7 @@ export const startPages = [
     steps: [
       note([
         "Commands that outlast their wait limit can continue in the background.",
-        "ctrl+b opens a live monitor for background tasks. /agents shows teams.",
+        "ctrl+b opens a live monitor for background tasks. Left from an empty prompt shows teams.",
       ]),
       shell("rind"),
       startup(demoInfo({ session: "20260917_104512_31cc09de" })),

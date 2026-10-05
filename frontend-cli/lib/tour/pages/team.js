@@ -1,11 +1,11 @@
 import { demoInfo } from "./demo.js";
-import { assistant, note, shell, shellOut, startup, slashResult, submit, tool, turnDone, type } from "./steps.js";
+import { assistant, note, shell, shellOut, startup, submit, tool, turnDone, type } from "./steps.js";
 
 export const teamPages = [
   {
-    id: "team.create", feature: "/agents", title: "Create a Team",
+    id: "team.create", feature: "← Agents", title: "Create a Team",
     steps: [
-      note(["Teams connect existing folders. No prescribed directory layout or agent manifest is needed.", "Use /agents for the interactive page, or the equivalent commands below."]),
+      note(["Teams connect existing folders. No prescribed directory layout or agent manifest is needed.", "Press Left from an empty prompt for the interactive page, or use the commands below."]),
       shell("rind agents team create product"),
       shellOut(["Team product created. Add folders and select a leader."]),
       shell("rind agents team add product ~/demo"),
@@ -13,9 +13,7 @@ export const teamPages = [
       note(["The team registry lives in your RIND_HOME. Adding a folder does not move its files."]),
       shell("rind", null, "~/demo"),
       startup({ ...demoInfo({ session: "demo-team" }), management_label: "Team: product" }),
-      type("/agents"), submit(),
-      slashResult({ text: "Agents Management / product\nLeader: demo · Inactive\nA add folder · G worktree · D assign · M manager" }),
-      note(["Enter opens a member's ordinary chat. Esc returns to your current conversation.", "The manager is also available through /manager."]),
+      note(["Enter opens a member's ordinary chat. Esc returns to your current conversation.", "Manager is the first selectable item in the Agents page."]),
     ],
   },
   {
@@ -49,7 +47,7 @@ export const teamPages = [
       startup({ ...demoInfo({ session: "demo-team" }), management_label: "Team: product" }),
       type("Ask the registered reviewer to check the parser and deliver a short findings report."), submit(),
       tool("agent_management", "assignTask", { status: "ok", output: "Reviewer task queued; delivery will wake the leader.", durationMs: 120 }),
-      assistant("The review is assigned. Open /agents to see its status and delivery. A blocker names who must respond and what is needed."),
+      assistant("The review is assigned. Press Left from an empty prompt to see its status and delivery. A blocker names who must respond and what is needed."),
       turnDone(2500, 1, 0),
       note(["A completed process is not a completed task: delivery also requires a report with summary and evidence.", "If a host disappears, its status becomes Unconfirmed. Confirm the old process stopped before retrying."]),
     ],

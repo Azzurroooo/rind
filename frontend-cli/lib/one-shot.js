@@ -31,7 +31,7 @@ export const cliHelp = [
   "Usage: rind [options]",
   "",
   "Start the interactive CLI.",
-  "  /agents or rind agents: manage teams and tasks. /manager: open the manager.",
+  "  Empty prompt: press Left to manage agents. Manager opens from that page.",
   "  --team <id> | --standalone: choose a shared workspace's session scope.",
   "",
   oneShotHelp,

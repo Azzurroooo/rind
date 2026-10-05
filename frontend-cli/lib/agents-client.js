@@ -16,13 +16,7 @@ export function selectRecord(records, value, label) {
   return matches[0];
 }
 export function agentStatus(snapshot, agentId, teamId) {
-  const sessions = snapshot.sessions.filter(s => s.agentId === agentId && s.teamId === teamId);
-  const runs = snapshot.runs.filter(r => sessions.some(s => s.id === r.sessionId));
-  if (runs.some(r => r.status === "unknown")) return "Unconfirmed";
-  if (runs.some(r => r.needsInput && r.status === "running")) return "Needs input";
-  if (snapshot.tasks.some(t => t.teamId === teamId && t.assigneeAgentId === agentId && ["blocked", "needs_attention"].includes(t.status))) return "Needs input";
-  if (runs.some(r => ["starting", "running"].includes(r.status))) return "Working";
-  return sessions.some(s => snapshot.connectedSessions?.includes(s.id)) ? "Ready" : "Inactive";
+  return snapshot.memberships.find(m => m.agentId === agentId && m.teamId === teamId)?.status || "Unconfirmed";
 }
 export function overviewText(snapshot) {
   const lines = ["Agents · " + snapshot.teams.length + " teams", ""];

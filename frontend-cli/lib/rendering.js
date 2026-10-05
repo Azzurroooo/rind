@@ -451,6 +451,8 @@ export function promptHintLine(state = {}) {
   }
   const text = state.inputMode === "question"
     ? "  ↑↓ choose · enter confirm · esc cancel"
+    : state.emptyInput
+      ? "  ← agents · / commands · ↑↓ history"
     : state.running
       ? "  enter steer · tab queue · ctrl+c stop · ctrl+b tasks"
       : "  enter send · ↑↓ history · / commands · ? help";

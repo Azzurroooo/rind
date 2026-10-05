@@ -62,7 +62,7 @@ export async function prepareManagement(args, launch, { interactive = !!process.
       if (metadata.workspace_root) {
         const explicitWorkspace = options.manager || argument(options.args, "--cwd") || argument(options.args, "--dir");
         const normalize = value => process.platform === "win32" ? value.toLowerCase() : value;
-        if (explicitWorkspace && normalize(await realpath(workspace)) !== normalize(await realpath(metadata.workspace_root))) throw new Error("That conversation belongs to another workspace. Open its member from /agents.");
+        if (explicitWorkspace && normalize(await realpath(workspace)) !== normalize(await realpath(metadata.workspace_root))) throw new Error("That conversation belongs to another workspace. Open its member from Agents management.");
         workspace = metadata.workspace_root;
       }
     }
@@ -70,7 +70,7 @@ export async function prepareManagement(args, launch, { interactive = !!process.
     if (process.platform === "win32") workspace = workspace.toLowerCase();
     const agent = snapshot.agents.find(a => a.canonicalWorkspace === workspace && a.adapter === "rind");
     if (!agent && !options.manager) {
-      if (options.team) throw new Error("This directory is not registered. Add it from /agents first.");
+      if (options.team) throw new Error("This directory is not registered. Add it from Agents management first.");
       client.close(); return { args: options.args };
     }
     let team;
@@ -109,7 +109,7 @@ export async function prepareManagement(args, launch, { interactive = !!process.
       },
       async before(method, params) {
         if (reconnecting || disconnected) await reconnect();
-        if (["session/new", "session/switch"].includes(method)) throw new Error("Use /agents to open another member, or start a separate rind session.");
+        if (["session/new", "session/switch"].includes(method)) throw new Error("Use Agents management to open another member, or start a separate rind session.");
         if (params?.session_id && runtimeSessionId && params.session_id !== runtimeSessionId) throw new Error("This process is attached to another registered runtime session.");
       },
       async after(method, result) {

@@ -234,7 +234,7 @@ export function createTaskMonitorController({ request, state, redraw = () => {},
       if (monitor !== openedMonitor) return;
       if (!tasks.size && !listError) {
         exitMonitor();
-        log("No background tasks. Use /agents for team tasks.");
+        log("No background tasks. Press Left from an empty prompt for team tasks.");
         return;
       }
       if (!monitor.pageChanged) {

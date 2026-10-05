@@ -11,7 +11,8 @@ export const agentsHelp = [
   "  team worktree <team> <name> <repository> <branch> [base]",
   "  team copy <team> <name> <source> [--confirm <preview-fingerprint>]",
   "  task <team> <agent> <brief>",
-  "  show <task> | start <task> | note <task> <text>",
+  "  show <task> | start <task> | cancel <task> | priority <task> high|normal|low",
+  "  note <task> <text> [--answer]",
   "  stop <run> | resolve <run> --confirm-stopped",
   "  artifact <artifact-id>",
   "  open <team>/<agent> | manager",
@@ -77,9 +78,9 @@ export async function runAgentsCommand(args, launch) {
     } else if (command === "task") {
       const selected = team(sub);
       result = await client.request("assignTask", { teamId: selected.id, assigneeAgentId: agent(rest[0], selected.id).id, brief: rest.slice(1).join(" ") });
-    } else if (["show", "start", "note"].includes(command)) {
+    } else if (["show", "start", "note", "cancel", "priority"].includes(command)) {
       const task = selectRecord(snapshot.tasks, sub, "Task");
-      result = await client.request({ show: "getTask", start: "startTask", note: "postTaskNote" }[command], { taskId: task.id, ...(command === "note" ? { text: rest.filter(s => s !== "--answer").join(" "), answer: rest.includes("--answer") } : {}) });
+      result = await client.request({ show: "getTask", start: "startTask", note: "postTaskNote", cancel: "cancelTask", priority: "setTaskPriority" }[command], { taskId: task.id, ...(command === "note" ? { text: rest.filter(s => s !== "--answer").join(" "), answer: rest.includes("--answer") } : {}), ...(command === "priority" ? { priority: rest[0] } : {}) });
     } else if (command === "stop") result = await client.request("cancelRun", { runId: sub });
     else if (command === "resolve") result = await client.request("resolveRun", { runId: sub, confirmStopped: rest.includes("--confirm-stopped") });
     else if (command === "artifact") result = await client.request("readArtifact", { artifactId: sub });

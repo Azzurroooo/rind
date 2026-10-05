@@ -1,8 +1,6 @@
 import { currentTheme, setTheme, themeNames, themeOptions } from "./theme.js";
 
 export const LOCAL_SLASH_COMMANDS = Object.freeze([
-  { name: "agents", description: "Teams, members, tasks and deliveries", usage: "/agents" },
-  { name: "manager", description: "Open the agents manager", usage: "/manager" },
   { name: "compact", description: "Compact current session context", usage: "/compact" },
   { name: "context", description: "Show context composition and token usage", usage: "/context" },
   { name: "effort", description: "Show or change reasoning effort", usage: "/effort [low | medium | high | xhigh | max]" },

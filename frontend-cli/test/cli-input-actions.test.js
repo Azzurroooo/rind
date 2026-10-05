@@ -28,6 +28,38 @@ test("manual compact keeps Enter and Tab input editable without premature echo",
   assert.deepEqual(echoes, []);
 });
 
+test("empty prompt left arrow opens agents management without dispatching text", async () => {
+  const state = createCliState();
+  state.runtime.status = "ready";
+  const opened = [];
+  const actions = createCliInputActions({
+    state, request: async () => ({}), output: { terminalUi: {}, redraw() {}, writeError() {} },
+    getTurnController: () => ({ submit() { throw new Error("must not submit"); } }),
+    getTaskMonitor: () => null, getLineInput: () => null,
+    pausePrompt() {}, resumePrompt() {}, handleSigint() {}, openAgents: async () => opened.push(true),
+  });
+  actions.ask("", "Ask Rind to do anything");
+  await Promise.resolve();
+  actions.handleTerminalInput("\x1b[D");
+  await new Promise(resolve => setImmediate(resolve));
+  assert.deepEqual(opened, [true]);
+  state.input.session.editor.setInput("draft");
+  actions.handleTerminalInput("\x1b[D");
+  assert.equal(state.input.session.editor.cursorPosition().column, 4);
+  actions.handleTerminalInput("\x1b[1;5D");
+  await new Promise(resolve => setImmediate(resolve));
+  assert.deepEqual(opened, [true]);
+  state.input.session.editor.setInput(" ");
+  actions.handleTerminalInput("\x1b[D");
+  await new Promise(resolve => setImmediate(resolve));
+  assert.deepEqual(opened, [true]);
+  state.input.session.editor.setInput(""); state.turn.active = true;
+  actions.handleTerminalInput("\x1b[D");
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(opened.length, 2);
+  actions.cancel();
+});
+
 test("question arrows leave custom editing and discard its draft", async () => {
   const state = createCliState();
   state.runtime.status = "ready";
