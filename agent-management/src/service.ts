@@ -8,7 +8,8 @@ import { activeRun, memberKey, requireValue, text, type State, type Principal, t
 import { canonicalDirectory, inside, privateDirectory, type Paths } from "./paths.js";
 import type { Store } from "./store.js";
 import { previewLegacyTeam } from "./legacy.js";
-import { sessionStatus, memberStatus, queuedReason, priorityRank, teamBriefing } from "./projection.js";
+import { sessionStatus, memberStatus, queuedReason, priorityRank, teamBriefing, projectionIndex } from "./projection.js";
+import { retain } from "./retention.js";
 
 import { supervisor, manages, setSupervisor } from "./organization.js";
 
@@ -31,6 +32,7 @@ export function createService({ store, paths, adapters, toolConfig }: {
     const result = serial.then(async () => {
       const next = structuredClone(store.state);
       const result = await work(next);
+      retain(next);
       const previousSeq = store.state.seq;
       await store.commit(next);
       if (store.state.seq !== previousSeq) for (const listener of listeners) listener();
@@ -170,13 +172,15 @@ export function createService({ store, paths, adapters, toolConfig }: {
     });
     const taskIds = new Set(tasks.map(t => t.id));
     const sessions = Object.values(state.sessions).filter(s => actor.kind !== "agent" || s.id === actor.sessionId || (s.teamId && allowedTeams.has(s.teamId)));
+    const sessionIds = new Set(sessions.map(s => s.id));
+    const index = projectionIndex(state, connected);
     return {
       seq: state.seq, teams: Object.values(state.teams).filter(t => allowedTeams.has(t.id)),
       agents: Object.values(state.agents).filter(a => agentIds.has(a.id)).map(a => actor.kind === "user" ? a : { id: a.id, name: a.name, adapter: a.adapter, ...(actor.kind === "manager" ? { canonicalWorkspace: a.canonicalWorkspace } : {}) }),
-      memberships: memberships.map(m => ({ ...m, reportsToAgentId: supervisor(state, m.teamId, m.agentId), status: memberStatus(state, m.agentId, m.teamId, connected) })),
-      tasks: tasks.map(task => ({ ...task, ...(task.status === "queued" ? { queueReason: queuedReason(state, task) } : {}) })), sessions: sessions.map(s => ({ ...(actor.kind === "user" ? s : { id: s.id, agentId: s.agentId, teamId: s.teamId, origin: s.origin }), ...sessionStatus(state, s.id, connected) })),
+      memberships: memberships.map(m => ({ ...m, reportsToAgentId: supervisor(state, m.teamId, m.agentId), status: memberStatus(index, m.agentId, m.teamId) })),
+      tasks: tasks.map(task => ({ ...task, ...(task.status === "queued" ? { queueReason: queuedReason(index, task) } : {}) })), sessions: sessions.map(s => ({ ...(actor.kind === "user" ? s : { id: s.id, agentId: s.agentId, teamId: s.teamId, origin: s.origin }), ...sessionStatus(index, s.id) })),
       connectedSessions: sessions.filter(s => connected.has(s.id)).map(s => s.id),
-      runs: Object.values(state.runs).filter(r => sessions.some(s => s.id === r.sessionId)),
+      runs: Object.values(state.runs).filter(r => sessionIds.has(r.sessionId)),
       notes: Object.values(state.notes).filter(n => taskIds.has(n.taskId)),
       artifacts: Object.values(state.artifacts).filter(a => taskIds.has(a.taskId)),
     };

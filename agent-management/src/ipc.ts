@@ -136,7 +136,15 @@ export async function startServer(options: { home?: string; python?: string; rep
           result = await service.request({ kind: "user" }, message.method, { ...message.params, sessionId: grant.principal.sessionId, runtimeSessionId: message.runtimeSessionId });
         } else if (message.method === "subscribe") {
           unsubscribe?.();
-          unsubscribe = service.onChange(() => send({ event: "snapshot", snapshot: service.snapshot(principal) }));
+          // A burst of host events becomes one snapshot per connection. Responses
+          // are written first, so a request is never answered with stale state.
+          let pending = false;
+          const stop = service.onChange(() => {
+            if (pending) return;
+            pending = true;
+            setImmediate(() => { pending = false; if (!socket.destroyed) send({ event: "snapshot", snapshot: service.snapshot(principal) }); });
+          });
+          unsubscribe = () => { pending = true; stop(); };
           result = service.snapshot(principal);
         } else if (message.method === "sessionTools") {
           requireValue(principal.kind === "user", "FORBIDDEN", "Only the host can issue session tools.");
