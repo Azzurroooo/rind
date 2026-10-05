@@ -19,7 +19,7 @@ export async function runAgentsPage({ launch, input = process.stdin, output = pr
     selections: {}, scroll: {}, tabs: {}, collapsed: {}, history: {}, managerHistory: null,
     query: "", filter: "All", searching: false, searchEditor: createLineEditor(), dialog: null, detail: null,
   };
-  let client, connecting, closed = false, chatActive = false, initialized = false, noticeTimer, spinner;
+  let client, connecting, closed = false, chatActive = false, initialized = false, noticeTimer, spinner, previousKey = "", chatCount = 0;
   // Keys typed while an action is saving are replayed afterwards instead of being lost.
   const typeAhead = [];
   let finish;
@@ -57,15 +57,29 @@ export async function runAgentsPage({ launch, input = process.stdin, output = pr
     if (view.member && !view.snapshot.memberships.some(m => m.teamId === view.member.teamId && m.agentId === view.member.agentId)) view.member = null;
     view.page = derivePage();
     view.pageKey = [view.page.kind, view.page.teamId, view.page.tab || view.page.agentId].filter(Boolean).join(":");
+    const previous = view.pageKey === previousKey ? view.entries : [];
+    previousKey = view.pageKey;
     view.entries = entriesFor(view.page);
     const remembered = view.selections[view.pageKey];
-    if (!view.entries.some(row => row.id === remembered && selectable(row))) {
-      const items = view.entries.filter(selectable);
-      view.selections[view.pageKey] = (items.find(row => !CREATE_KINDS.has(row.kind)) || items[0])?.id;
-    }
+    if (!view.entries.some(row => row.id === remembered && selectable(row))) view.selections[view.pageKey] = fallbackSelection(previous, remembered);
     view.selectedId = view.selections[view.pageKey];
     ensureHistory();
     redraw();
+  }
+
+  // When the selected row disappears (sorted into "+N more", filtered out or
+  // removed), stay near it instead of jumping to the top of the list.
+  function fallbackSelection(previous, id) {
+    const items = view.entries.filter(selectable);
+    const old = previous.find(row => row.id === id);
+    const near = old?.agentId && (items.find(row => row.id === "more:" + old.agentId) || items.find(row => row.id === "m:" + old.agentId));
+    if (near) return near.id;
+    const index = previous.indexOf(old);
+    if (index >= 0 && items.length) {
+      const after = view.entries.slice(index).find(selectable) || items.at(-1);
+      return after.id;
+    }
+    return (items.find(row => !CREATE_KINDS.has(row.kind)) || items[0])?.id;
   }
 
   function ensureHistory() {
@@ -110,6 +124,7 @@ export async function runAgentsPage({ launch, input = process.stdin, output = pr
       if (closed) { replacement.close(); return; }
       client = replacement;
       view.connection = "connected";
+      view.history = {}; view.managerHistory = null;
       acceptSnapshot(await client.request("subscribe", { afterSeq: view.snapshot.seq || 0 }));
     })().catch(error => { view.connection = "offline · r retries"; notify(error.message, "error"); })
       .finally(() => { connecting = null; redraw(); });
@@ -136,17 +151,21 @@ export async function runAgentsPage({ launch, input = process.stdin, output = pr
     if (dialog) dialog.error = "";
     spinner = setInterval(redraw, 100);
     redraw();
-    const detail = view.detail;
+    const detail = view.detail, chats = chatCount;
     try {
       await action();
-      if (detail && view.detail === detail && detail.refresh) await detail.refresh();
+      const followUp = view.dialog && view.dialog !== dialog;
+      if (detail && view.detail === detail && detail.refresh && !followUp) await detail.refresh();
       if (dialog && view.dialog === dialog) view.dialog = null;
     } catch (error) {
       if (dialog && view.dialog === dialog) dialog.error = error.message;
       else notify(error.message, "error");
     } finally {
       clearInterval(spinner); view.busy = false; project();
-      for (const key of typeAhead.splice(0)) keyInput(key);
+      // Keys typed for the old screen must never confirm a dialog the action
+      // just opened, or reopen a conversation that already ran.
+      const queued = typeAhead.splice(0);
+      if (!view.dialog && chats === chatCount) for (const key of queued) keyInput(key);
     }
   }
 
@@ -183,7 +202,7 @@ export async function runAgentsPage({ launch, input = process.stdin, output = pr
       manager = agent.canonicalWorkspace === (process.platform === "win32" ? workspace.toLowerCase() : workspace);
     }
     if (!manager && !agent) throw new Error("This member is no longer available.");
-    chatActive = true; tui.stop({ releaseInput: false });
+    chatActive = true; chatCount++; tui.stop({ releaseInput: false });
     try { await openChat({ agent, teamId: manager ? undefined : teamId, runtimeSessionId, manager, launch, input }); }
     finally {
       chatActive = false;

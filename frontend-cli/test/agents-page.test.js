@@ -146,6 +146,10 @@ test("team page edits members, nests team conversations and drives tasks from th
   key(" "); await visible("Queue priority"); key("p"); await visible("Running work is never interrupted"); key("1");
   await visible("Priority set to high");
   assert.equal((await h.client.request("getTask", { taskId: task.id })).priority, "high");
+  key("\r"); await visible("No report yet");
+  key(" "); await visible("Add note"); key("n"); await visible("Shared with the task owner");
+  paste("Check the changelog"); key("\r"); await visible("Note added"); await visible("Check the changelog");
+  key("\x1b"); await visible("QUEUED · 1");
   key(" "); await visible("Cancel task"); key("x"); await visible("Cancel this task?"); key("y");
   await visible("CANCELLED · 1");
   assert.equal((await h.client.request("getTask", { taskId: task.id })).status, "cancelled");
