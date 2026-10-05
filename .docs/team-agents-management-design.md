@@ -1,6 +1,6 @@
 # Team Agents Management：设计大纲
 
-> 状态：待审阅的实施规格。目标是先交付 CLI 上可用的本地版本；本文不代表已修改实现。参考仓库为 Rind、Orca、Paperclip 和 Codex（见文末）。
+> 状态：实施规格。入口已按后续产品要求修订：空输入按 ← 打开管理页，Manager 从页内进入，不新增管理 slash command。实现与验证现状见 `docs/agents-management.md`。参考仓库为 Rind、Orca、Paperclip、Codex 和 Crush。
 
 ## 1. 产品定义与取舍
 
@@ -38,7 +38,7 @@ Manager / Leader Rind ── 通用外部工具桥 ── 本地服务
 | `agent-management/src/adapters/rind.ts` | 启动/恢复 Rind Worker、将 Runtime 事件归一化；不导入 CLI 页面。 |
 | `agent-management/src/client.ts` | CLI 和未来 surface 共用的请求/订阅 API；本地连接失败给出明确状态。 |
 | `rind-runtime-client/` | 从现有 `frontend-cli/lib/runtime-client.js`、`runtime-protocol.js` 抽出无 UI 的传输代码；CLI 与 Rind Adapter 共用，避免复制协议实现或形成循环依赖。 |
-| `frontend-cli/lib/agents-*.js` | `/agents` 页面、表单/选择器、直接会话事件桥；只调用管理客户端。 |
+| `frontend-cli/lib/agents-*.js` | Agents 管理页面、表单/选择器、直接会话事件桥；只调用管理客户端。 |
 | Rind Python Runtime | 只增加**通用的可选外部工具桥**与受信启动配置；不导入 Team/Manager 数据模型。未接入时仍是普通 Rind。 |
 
 `agent-management` 使用 TypeScript 编译为 Node 18 可运行的 ESM JavaScript；运行时优先 Node 标准库，不依赖实验性 `node:sqlite` 或原生编译模块。CLI 包与发行包显式包含编译产物。`RIND_HOME` 的既有规则继续生效（默认 `~/.rind`）；服务数据置于 `<RIND_HOME>/agents-management/state/`，Manager 工作目录独立置于 `<RIND_HOME>/agents-management/manager/`，避免把状态库和凭据暴露给 Manager 的文件工具。
@@ -102,7 +102,7 @@ Manager 的跨 Team 元数据权限不自动扩展为文件权限；Manager Rind
 
 Rind Adapter 使用已有 `initialize`、`session/new`、`session/prompt`、`session/subscribe`、`session/replay`、`shutdown` 和 `session/update`。受管任务由服务启动并监督 Worker；用户直接打开的 CLI Worker 仍由 CLI 拥有，CLI 桥只发布经 Runtime 确认的开始/结束/需输入事实，并在断线后从 Runtime 快照校准。`session/replay` 是恢复会话状态的依据，不把流式 token 当管理事件，也不把会话游标误当 Run 事件游标。其他 surface 接入时实现同样的轻量桥，管理核心不变。
 
-Rind 现无通用外部管理工具入口。实施时在 Worker 组合根注入一个可选、与业务无关的工具桥：仅当受信 CLI/服务启动配置提供本地端点及**会话绑定凭据**时，向容器传入 `agent_management` 工具规范；该工具将动作与参数转发给服务，并返回结构化成功/拒绝。未配置时不注册。Manager 会话由 `/manager` 在专属工作目录启动，使用受限工具清单；Leader/成员的动作范围由服务端凭据决定，提示词只负责说明用法。旧 `delegate`、`agent_create` 不在新受管会话中暴露。适配器、CLI 和其他 surface 不直接读写管理状态文件。
+Rind 现无通用外部管理工具入口。实施时在 Worker 组合根注入一个可选、与业务无关的工具桥：仅当受信 CLI/服务启动配置提供本地端点及**会话绑定凭据**时，向容器传入 `agent_management` 工具规范；该工具将动作与参数转发给服务，并返回结构化成功/拒绝。未配置时不注册。Manager 会话由管理页内的 Manager 入口在专属工作目录启动，使用受限工具清单；Leader/成员的动作范围由服务端凭据决定，提示词只负责说明用法。旧 `delegate`、`agent_create` 不在新受管会话中暴露。适配器、CLI 和其他 surface 不直接读写管理状态文件。
 
 任务状态为 `queued → running → done | blocked | needs_attention | cancelled`；解除 `blocked` 后回 `queued`，明确重试可由 `needs_attention` 回 `queued`。进入 `blocked` 必须给出回应者与具体解阻动作，并向回应者显示提醒；纯文本「被阻塞」无路由则拒绝。Run 独立记录 `starting / running / succeeded / failed / cancelled / unknown`。进程消失、桥断线或恢复后无法确认活性时，Run 变 `unknown`、任务变 `needs_attention`；不自动重试可能已写入文件的工作。只有适配器确认执行结束，且提交了有效回执，任务才能 `done`。
 
@@ -120,8 +120,8 @@ Rind 现无通用外部管理工具入口。实施时在 Worker 组合根注入�
 
 ## 7. CLI 体验
 
-- `/agents` 打开专页；从普通会话进入时保留输入草稿和当前 Session。首页是所有 Team 的名称、Leader、成员数、运行/阻塞/待确认数；选中 Team 后看岗位、Workspace、任务与最新状态。搜索、状态筛选、打开成员、组装 Team、创建 worktree、派任务、进入 Manager 都在此完成。关键操作只显示「选择 Team → 选择目录/成员 → 确认职责/任务」；不要先要求用户理解 Capsule/Blueprint/注册清单。
-- `/manager` 打开受控 Manager 会话；页面也提供同一入口。返回普通会话时不切换它的 Workspace 或历史。Manager 给出的全局建议可跳到具体 Team/Task，敏感选择在 UI 中确认。
+- 空聊天输入时按 ← 打开专页；从普通会话进入时保留输入草稿和当前 Session。首页是所有 Team 的名称、Leader、成员数、运行/阻塞/待确认数；选中 Team 后看岗位、Workspace、任务与最新状态。搜索、状态筛选、打开成员、组装 Team、创建 worktree、派任务、进入 Manager 都在此完成。关键操作只显示「选择 Team → 选择目录/成员 → 确认职责/任务」；不要先要求用户理解 Capsule/Blueprint/注册清单。
+- 页面中的 Manager 导航项打开受控 Manager 会话，不注册 `/manager` 或 `/agents` 命令。返回普通会话时不切换它的 Workspace 或历史。Manager 给出的全局建议可跳到具体 Team/Task，敏感选择在 UI 中确认。
 - 非 TTY 提供对应文本命令，如 `rind agents list`、`rind agents team create <name>`、`rind agents team add <team> <path>`、`rind agents task <team> <agent> <brief>`、`rind agents open <team>/<agent>`，并提供 `--json` 供脚本使用。交互页与文本命令只调用同一服务；非 TTY 遇到共享目录等需用户选择的情况须报明确错误与选项，不偷偷选择。
 - 独立打开已注册 Agent 时继续呈现普通 Rind 聊天界面，只在状态栏标出当前 Team/独立归属与运行状态。工作中、需输入、空闲、离线/未知使用不同文字，不能只靠颜色。所有页面宽度与终端模式沿用现有 CLI TUI 组件树。
 
@@ -133,7 +133,7 @@ Rind 现无通用外部管理工具入口。实施时在 Worker 组合根注入�
 
 1. **控制面基础：** 完成数据模型、单实例服务、IPC 客户端、持久化和授权。测试重复注册、跨 Team 共享显式选择、成员删除后的启动拒绝、重复请求幂等、两 CLI 并发写与崩溃恢复。
 2. **执行接入：** 抽取共享 Rind Runtime 客户端；完成 Rind Adapter、服务拥有的任务运行、直接 CLI 会话桥、Workspace 运行锁和可选外部工具桥。测试普通 Rind 无插件不变、Leader 只能唤起当前 Team 成员、跨 Team 同目录串行、断线后显示未知而非运行中。
-3. **CLI 与 Manager：** 实现 `/agents`、`/manager`、文本命令和一屏交付；检查草稿/会话保留、非 TTY 歧义错误、Manager 无法读私有文件、阻塞提醒可路由。
+3. **CLI 与 Manager：** 实现空输入 ← 入口、页内 Manager、文本命令和一屏交付；检查草稿/会话保留、非 TTY 歧义错误、Manager 无法读私有文件、阻塞提醒可路由。
 4. **迁移与清理：** 导入旧 Team，删除旧写路径与重复逻辑，更新文档和发行打包。对现有 CLI Node 测试、Python Runtime 测试以及 Windows 命名管道/路径/Git worktree 场景做回归；用干净的 `RIND_HOME` 走完端到端。
 
 最终验收场景：用户从任意两个无清单目录组 Team，Leader 给已注册成员派任务并收到可核验摘要；试图派给未注册目录时**没有启动进程**；把同一财务 Workspace 加入第二 Team 时必须先选择复制或共享，选共享后直接打开时选择归属；同一仓库的两个 feature worktree 可并行工作；Manager 能概览所有 Team 的真实/未知状态但不能读取财务私有文件；进程异常退出后任务进入需处理状态，重启不会自动重复执行；旧 Team 能预览导入且原文件未被改动。

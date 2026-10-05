@@ -85,7 +85,7 @@ The tour is available on `main`, after v0.8.0; use the [source setup](docs/getti
 
 **Connect any folders into a team, then let its leader coordinate delivery.** A finance member keeps its invoices; a developer works in a feature worktree. Workspaces, skills and files persist between assignments.
 
-Open **`/agents`** for the team overview, member chats, tasks and reports. **`/manager`** opens a separate manager that can assemble and schedule teams using management tools. Ordinary member chats remain ordinary Rind sessions, with their team shown in the status bar.
+Press **← from an empty prompt** for the team overview, member chats, tasks and reports. Select **Manager** on this page to assemble and schedule teams. Ordinary member chats remain ordinary Rind sessions, with their team shown in the status bar.
 
 ```sh
 rind agents team create product

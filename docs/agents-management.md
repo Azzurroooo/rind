@@ -39,17 +39,21 @@ The folder basename is its initial agent name; position is a separate display la
 
 ## CLI surface
 
-`/agents` opens the interactive overview. At the team level it shows members, workspace paths and statuses; `Tab` switches to tasks. `A` adds a folder, `W` creates a workspace, `G` creates a worktree, `L` chooses a leader, `D` assigns work, `M` opens Manager, and `Enter` opens a member's ordinary Rind conversation. `/manager` starts the Manager in its dedicated workspace.
+Press **Left (←) while the chat input is empty** to open Agents Management. Typing and cursor navigation in a nonempty input remain unchanged. Manager is the first selectable navigation item on the page; management does not add slash commands. The shell entry remains `rind agents`.
 
-Non-TTY commands return JSON for mutation commands and support `--json` on list. `rind agents import <legacy-root>` previews old `.aiteam` files; add `--confirm` only after reviewing the fingerprint. Import never edits or removes legacy files.
+The page uses team navigation and a member/task list, with an adjacent detail pane on wide terminals and a compact single-column layout on narrow terminals. Select with Up/Down and Enter. Left/Esc returns to team navigation; Esc there returns to the original conversation. Tab switches members/tasks. The selected object remains selected across live updates.
 
-For delivery details, select a task and press `Enter`. `C` posts a note or answers a blocker addressed to the user, `R` explicitly retries, `S` stops a live managed run, and `U` reconciles an unknown task run after the old process has stopped. Text equivalents are `show`, `note --answer`, `start`, `stop` and `resolve --confirm-stopped`.
+- **Create team** and **Add member** are selectable rows. Adding offers an existing folder, new workspace or Git worktree. Forms reuse the ordinary editor: paste, cursor movement, undo and multiline text all work; Tab/Shift+Tab changes fields, Enter advances or saves. Failed operations retain the entered values.
+- **Manager** opens its dedicated, restricted conversation. Enter on a member opens ordinary chat. Space opens context actions: assign work, edit responsibility, choose a leader, remove membership, or reconcile an unknown run. Destructive actions use an explicit confirmation with Cancel selected initially.
+- **Task actions** offer delivery, notes/answers, queue priority, start/retry, cancellation and run recovery. A queued task explains whether it waits for a busy workspace, an unconfirmed run or an explicit start. High/normal/low priority orders only waiting work and never interrupts a live run.
+- **Team briefing** summarizes decisions needing the user, active work, members being waited on and delivered results. Delivery details include evidence, published files, notes and timestamped execution history. R refreshes an open briefing or delivery; task actions refresh its details after changes.
+- `/` searches within the member/task list; F opens a selectable status filter. N creates a team. These are page shortcuts, not chat slash commands. All primary actions are also selectable with arrows and Enter.
 
-On the member list, `X` removes membership while preserving the folder and history; `U` reconciles a direct conversation's unknown run. A leader must be replaced before it can be removed.
+Non-TTY commands support `--json`. Use `rind agents priority <task> high|normal|low`, `cancel <task>`, `show <task>`, `note <task> <text> --answer`, `start <task>`, `stop <run>` and `resolve <run> --confirm-stopped`. `rind agents import <legacy-root>` previews old `.aiteam` files; add `--confirm` after reviewing the preview. Import never edits legacy files.
 
 When a workspace belongs to multiple teams, a TTY asks which scope to attach. Non-TTY requires `--team <id>` or `--standalone`. Direct conversations are observed as runs, but their private messages are not broadcast. If the local service disconnects, the CLI reconnects and checks the Runtime replay before restoring activity; an unconfirmed run remains reserved until a human confirms it stopped.
 
-An attached Worker keeps one management conversation scope. `/sessions` and `/fork` open the selected history in another managed process, preserving the current conversation when you return; a fork also prefills its selected user message. Open another member through `/agents` or resume with `rind --session <runtime-id> --team <team-id>`. A conversation from another workspace or team cannot reuse the current scope. Unregistered ordinary Rind retains its existing session controls. The first adapter is Rind; external Codex/Claude processes are not automatically observed.
+An attached Worker keeps one management conversation scope. `/sessions` and `/fork` open the selected history in another managed process, preserving the current conversation when you return; a fork also prefills its selected user message. Open another member through the Agents page or resume with `rind --session <runtime-id> --team <team-id>`. A conversation from another workspace or team cannot reuse the current scope. Unregistered ordinary Rind retains its existing session controls. The first adapter is Rind; external Codex/Claude processes are not automatically observed.
 
 ## Boundaries
 
@@ -72,3 +76,10 @@ The destination must not exist. The script builds TypeScript, copies the CLI, se
 The service refuses to silently rebuild a corrupt journal. An incomplete final line is discarded; an earlier malformed record or sequence gap stops startup and leaves the files for repair. On restart, active runs become `unknown` and queued dispatch markers are cleared. Resolve an unknown run only after confirming its old process has stopped, then explicitly retry the task. Published artifacts are copied into the user-private Team/Task delivery directory and checked against the task owner workspace.
 
 If a process dies between creating a folder/worktree and registering it, an existing target is never overwritten on retry. Inspect and register the resulting folder through `team add`, or choose a different name. Repository changes and registry commits are separate local operations, not a filesystem transaction.
+
+
+## Interaction and scheduling references
+
+The UI follows the empty-prompt Left entry, identity-stable selection and selected-row details in Codex `codex-rs/tui/src/app/agents_overview_view.rs` and `bottom_pane/chat_composer.rs`. Crush `internal/ui/dialog/sessions.go`, `inline_editor.go` and `model/sidebar.go` informed scoped dialogs, editable fields, persistent keyboard help and width-dependent layout. This implementation reuses Rind's TUI, line editor, choice selector, composer cursor calculation and theme, without adding another terminal framework.
+
+Orca's `docs/reference/agent-status-store.md` informed the single status projection in the management package: runtime host facts take precedence, waiting for children is distinct from human action, and every surface receives the same summary. Paperclip's `doc/SPEC-implementation.md` informed queue ordering, explicit cancellation and actionable blockers. Task notes and run records provide the activity trail without a second activity database, company model or permissions framework.
