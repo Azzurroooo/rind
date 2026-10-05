@@ -175,6 +175,38 @@ test("same workspace queues while distinct worktrees run independently; reports 
   f.starts.find(s => s.input.task.id === second.id).finish({ content: "no report" });
   await eventually(() => f.store.state.tasks[second.id].status === "needs_attention");
 });
+
+test("priority affects only queued work, cancellation is durable and status comes from the service", async t => {
+  const f = await fixture(t);
+  const first = await f.call("assignTask", { teamId: f.team.id, assigneeAgentId: f.leader.id, brief: "First" });
+  await eventually(() => f.starts.length === 1);
+  const normal = await f.call("assignTask", { teamId: f.team.id, assigneeAgentId: f.leader.id, brief: "Normal" });
+  const urgent = await f.call("assignTask", { teamId: f.team.id, assigneeAgentId: f.leader.id, brief: "Urgent" });
+  await f.call("setTaskPriority", { taskId: urgent.id, priority: "high" });
+  await assert.rejects(f.call("setTaskPriority", { taskId: first.id, priority: "high" }), { code: "TASK_NOT_QUEUED" });
+  let snapshot = await f.call("snapshot");
+  assert.match(snapshot.tasks.find(task => task.id === urgent.id).queueReason, /workspace/);
+  assert.equal(snapshot.memberships[0].status, "Working");
+  f.starts[0].finish({ content: "no report" });
+  await eventually(() => f.starts.length === 2);
+  assert.equal(f.starts[1].input.task.id, urgent.id);
+  // A previous failed delivery must not hide a new live execution.
+  snapshot = await f.call("snapshot"); assert.equal(snapshot.memberships[0].status, "Working");
+  await f.call("cancelTask", { taskId: normal.id });
+  assert.equal(f.store.state.tasks[normal.id].status, "cancelled");
+  assert.equal(f.store.state.tasks[normal.id].dispatch, undefined);
+  assert.ok(Object.values(f.store.state.notes).some(note => note.taskId === normal.id && note.text === "Cancelled task."));
+});
+
+test("member responsibility edits respect team authority and apply to the next run", async t => {
+  const f = await fixture(t), specialist = await f.member("reviewer");
+  const direct = await f.call("attachSession", { teamId: f.team.id, agentId: specialist.id });
+  await assert.rejects(f.call("updateMember", { teamId: f.team.id, agentId: f.leader.id, responsibility: "Bad" }, { kind: "agent", sessionId: direct.id }), { code: "FORBIDDEN" });
+  await f.call("updateMember", { teamId: f.team.id, agentId: specialist.id, position: "Reviewer", responsibility: "Review tests and report evidence" });
+  await f.call("assignTask", { teamId: f.team.id, assigneeAgentId: specialist.id, brief: "Review" });
+  await eventually(() => f.starts.length === 1);
+  assert.match(f.starts[0].input.instructions, /Review tests and report evidence/);
+});
 test("leader resumes after children return without a human polling every agent", async t => {
   const f = await fixture(t);
   const specialist = await f.member("specialist");

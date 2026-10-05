@@ -8,6 +8,7 @@ import { activeRun, memberKey, requireValue, text, type State, type Principal, t
 import { canonicalDirectory, inside, privateDirectory, type Paths } from "./paths.js";
 import type { Store } from "./store.js";
 import { previewLegacyTeam } from "./legacy.js";
+import { memberStatus, queuedReason, priorityRank, teamBriefing } from "./projection.js";
 
 const git = promisify(execFile);
 type Params = Record<string, any>;
@@ -155,7 +156,8 @@ export function createService({ store, paths, adapters, toolConfig }: {
     return {
       seq: state.seq, teams: Object.values(state.teams).filter(t => allowedTeams.has(t.id)),
       agents: Object.values(state.agents).filter(a => agentIds.has(a.id)).map(a => actor.kind === "user" ? a : { id: a.id, name: a.name, adapter: a.adapter, ...(actor.kind === "manager" ? { canonicalWorkspace: a.canonicalWorkspace } : {}) }),
-      memberships, tasks, sessions: sessions.map(s => actor.kind === "user" ? s : { id: s.id, agentId: s.agentId, teamId: s.teamId, origin: s.origin }),
+      memberships: memberships.map(m => ({ ...m, status: memberStatus(state, m.agentId, m.teamId, connected) })),
+      tasks: tasks.map(task => ({ ...task, ...(task.status === "queued" ? { queueReason: queuedReason(state, task) } : {}) })), sessions: sessions.map(s => actor.kind === "user" ? s : { id: s.id, agentId: s.agentId, teamId: s.teamId, origin: s.origin }),
       connectedSessions: sessions.filter(s => connected.has(s.id)).map(s => s.id),
       runs: Object.values(state.runs).filter(r => sessions.some(s => s.id === r.sessionId)),
       notes: Object.values(state.notes).filter(n => taskIds.has(n.taskId)),
@@ -168,7 +170,11 @@ export function createService({ store, paths, adapters, toolConfig }: {
       case "snapshot": return filtered(state, actor);
       case "listTeams": return filtered(state, actor).teams;
       case "listAgents": return filtered(state, actor).agents;
-      case "getTeam": { teamAccess(state, actor, p.teamId); const view = filtered(state, actor); return { team: state.teams[p.teamId], members: view.memberships.filter(m => m.teamId === p.teamId), tasks: view.tasks.filter(t => t.teamId === p.teamId) }; }
+      case "getTeam": {
+        teamAccess(state, actor, p.teamId); const view = filtered(state, actor);
+        const tasks = view.tasks.filter(t => t.teamId === p.teamId);
+        return { team: state.teams[p.teamId], members: view.memberships.filter(m => m.teamId === p.teamId), tasks, briefing: teamBriefing(tasks, state.agents) };
+      }
       case "getTask": { const task = taskAccess(state, actor, p.taskId, true); return { ...task, notes: Object.values(state.notes).filter(n => n.taskId === task.id), artifacts: Object.values(state.artifacts).filter(a => a.taskId === task.id) }; }
       case "createTeam": {
         requireValue(actor.kind !== "agent", "FORBIDDEN", "Only the user or manager can create teams.");
@@ -197,6 +203,16 @@ export function createService({ store, paths, adapters, toolConfig }: {
         requireValue(actor.kind !== "agent", "FORBIDDEN", "Only the user or manager can change team leadership.");
         teamAccess(state, actor, p.teamId); requireMember(state, p.teamId, p.agentId);
         state.teams[p.teamId].leaderAgentId = p.agentId; return state.teams[p.teamId];
+      }
+      case "updateMember": {
+        teamAccess(state, actor, p.teamId, true); requireMember(state, p.teamId, p.agentId);
+        const member = state.memberships[memberKey(p.teamId, p.agentId)];
+        for (const field of ["position", "responsibility"] as const) {
+          if (p[field] === undefined) continue;
+          if (p[field] === "") delete member[field];
+          else member[field] = text(p[field], field, field === "position" ? 200 : 16000);
+        }
+        return member;
       }
       case "createWorkspace":
       case "createWorktree":
@@ -265,7 +281,22 @@ export function createService({ store, paths, adapters, toolConfig }: {
         requireMember(state, task.teamId, task.assigneeAgentId);
         requireValue(["queued", "blocked", "needs_attention"].includes(task.status), "TASK_BUSY", "Task is not ready to start.");
         requireValue(!Object.values(state.runs).some(r => r.taskId === task.id && activeRun(r)), "RUN_UNCONFIRMED", "Resolve the previous run before retrying.");
-        task.status = "queued"; task.dispatch = true; delete task.blockedOn; delete task.error; return task;
+        task.status = "queued"; task.dispatch = true; delete task.blockedOn; delete task.error;
+        note(state, task.id, author(state, actor), "Requested task start."); return task;
+      }
+      case "setTaskPriority": {
+        const task = taskAccess(state, actor, p.taskId); teamAccess(state, actor, task.teamId, true);
+        requireValue(task.status === "queued", "TASK_NOT_QUEUED", "Only queued tasks can change priority.");
+        requireValue(["high", "normal", "low"].includes(p.priority), "INVALID_INPUT", "Priority must be high, normal or low.");
+        if (p.priority === "normal") delete task.priority; else task.priority = p.priority;
+        note(state, task.id, author(state, actor), "Queue priority: " + p.priority); return task;
+      }
+      case "cancelTask": {
+        const task = taskAccess(state, actor, p.taskId); teamAccess(state, actor, task.teamId, true);
+        requireValue(!Object.values(state.runs).some(r => r.taskId === task.id && activeRun(r)), "RUN_ACTIVE", "Stop or resolve the active run before cancelling this task.");
+        requireValue(!["done", "cancelled"].includes(task.status), "TASK_FINISHED", "This task has already finished.");
+        task.status = "cancelled"; delete task.dispatch; delete task.blockedOn;
+        note(state, task.id, author(state, actor), "Cancelled task."); wakeParent(state, task); return task;
       }
       case "updateTask": {
         const task = taskAccess(state, actor, p.taskId);
@@ -291,6 +322,7 @@ export function createService({ store, paths, adapters, toolConfig }: {
           const report = validateReport(p.report);
           requireValue(report.artifacts.every(id => state.artifacts[id]?.taskId === task.id), "INVALID_ARTIFACT", "Report artifacts must be published by this task.");
           task.report = report;
+          note(state, task.id, author(state, actor), "Delivery submitted; awaiting confirmed execution completion.");
         } else requireValue(false, "INVALID_INPUT", "Provide a report or a blocker with responder and action.");
         return task;
       }
@@ -410,6 +442,7 @@ export function createService({ store, paths, adapters, toolConfig }: {
         const run = state.runs[p.runId]; requireValue(run?.taskId && live.has(run.id), "NOT_RUNNING", "Only a live managed task can be cancelled here.");
         const task = taskAccess(state, actor, run.taskId); teamAccess(state, actor, task.teamId, true);
         task.status = "cancelled"; delete task.dispatch;
+        note(state, task.id, author(state, actor), "Requested execution stop.");
         // The workspace remains reserved until the adapter confirms termination.
         return { runId: run.id, cancelling: true };
       }
@@ -500,7 +533,7 @@ export function createService({ store, paths, adapters, toolConfig }: {
     try {
       const starts = await transaction(async state => {
         const starts: { taskId: string; runId: string }[] = [];
-        for (const task of Object.values(state.tasks)) {
+        for (const task of Object.values(state.tasks).sort((a, b) => priorityRank(a) - priorityRank(b))) {
           if (task.status !== "queued" || !task.dispatch) continue;
           const team = state.teams[task.teamId];
           const agent = state.agents[task.assigneeAgentId];

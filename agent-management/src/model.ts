@@ -8,6 +8,7 @@ export interface Task {
   status: "queued" | "running" | "done" | "blocked" | "needs_attention" | "cancelled";
   parentTaskId?: string; blockedOn?: { responder: string; action: string };
   report?: Report; error?: string; dispatch?: boolean;
+  priority?: "high" | "low";
 }
 export interface Session { id: string; agentId: string; teamId?: string; runtimeSessionId: string; origin: "managed" | "direct" }
 export interface Run {
