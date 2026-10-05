@@ -1,0 +1,43 @@
+name: Verify agents management and CLI
+
+on:
+  pull_request:
+    paths: ["agent-management/**", "rind-runtime-client/**", "frontend-cli/**", "agent/**", "test/**", "requirements*.txt", ".github/workflows/verify-agents.yml"]
+  push:
+    branches: [main]
+    paths: ["agent-management/**", "rind-runtime-client/**", "frontend-cli/**", "agent/**", ".github/workflows/verify-agents.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest]
+        node: [18, 22]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+          cache-dependency-path: |
+            agent-management/package-lock.json
+            frontend-cli/package-lock.json
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m pip install -r requirements.txt
+      - run: npm --prefix agent-management ci
+      - run: npm --prefix frontend-cli ci
+      - run: npm --prefix agent-management test
+      - run: npm --prefix frontend-cli test
+      - run: python -m pytest test/test_agent_container.py test/test_runtime_worker.py test/test_runtime_server_commands.py test/test_file_mutation_queue.py test/test_app_server_entry.py test/test_async_runtime.py -q
+      - name: Stage distributable CLI components
+        shell: bash
+        run: node agent-management/stage.mjs "$RUNNER_TEMP/rind-cli-stage"

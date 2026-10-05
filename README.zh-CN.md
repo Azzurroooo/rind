@@ -83,56 +83,22 @@ rind tour team.create
 
 ## 持久化 Agent 团队
 
-**把反复出现的工作交给有固定工作区的专家。** 测试专家可以持续维护测试样例和注意事项，研究专家可以保存调研结论与参考材料；下次任务到来时，这些积累仍在。
+**把任意文件夹组成团队，由 Leader 调度任务并汇总交付。** 财务成员保留自己的票据，开发成员使用独立 feature worktree；文件、项目 Skill 和岗位资料会持续保留。
 
-一个 Team 就是一组普通目录。主代理负责协调专家，`shared/` 承载它们交换的文件：
+输入 **`/agents`** 打开总览、组装团队、查看任务和交付，或进入任一成员的普通聊天。**`/manager`** 打开独立的受控管理器，通过管理工具组队和调度任务。普通成员仍是普通 Rind，只在状态栏注明本次 Team 归属。
 
-```text
-my-project/
-├── .aiteam/project.yaml         # Team 信息与主代理选择
-├── agents/
-│   ├── main-agent/              # 协调者的工作区
-│   └── test-specialist/
-│       ├── .aiteam/agent.yaml   # 专家身份
-│       ├── .aiteam/prompts/     # 职责指令
-│       ├── memory/             # 值得保留的笔记
-│       ├── work/               # 工作文件
-│       └── outputs/            # 本地成果
-└── shared/                     # 共享输入与正式交付
+```sh
+rind agents team create product
+rind agents team add product /path/to/project
+rind agents team add product /path/to/reviewer --position Reviewer
+rind agents task product project "请安排 reviewer 检查修改，汇总简洁结论和验证证据。"
 ```
 
-每次执行委派都会创建独立、可持久保存的会话。**跨任务延续的是专家职责和文件**：新任务可以检查已有成果，旧对话则作为独立记录保留。主代理收到简明结果和已发布文件的路径，可以直接核验交付物。
+首个成员默认成为 Leader，可通过 `rind agents team leader <team> <agent>` 更换。无需 Capsule、Blueprint 或特定目录结构。跨团队复用目录时需明确选择建立副本或共享；同目录串行，不同 worktree 可并行。子任务回执会自动唤醒 Leader，阻塞必须指明回应者和所需动作。
 
-互不依赖的任务可以并发委派。专家通过文件工具访问自己的工作区和共享目录，让内部工作材料与正式交付保持清晰边界。
+交付需要有效回执和宿主确认执行结束；失联运行标为 **Unconfirmed（待确认）**，避免自动重复执行。私有对话不广播，交付文件需显式发布。
 
-### 组建第一支团队
-
-先在项目根目录启动 Rind，然后输入：
-
-```text
-/team create
-/exit
-```
-
-创建 Team 不会自动切换当前会话。回到终端，进入协调者工作区重新启动：
-
-```bash
-cd agents/main-agent
-rind
-```
-
-接着在 Rind 中输入：
-
-```text
-/team add 一个负责回归测试、持续维护测试笔记的测试专家
-/team list
-```
-
-把待处理材料放入项目的 `shared/` 目录，再向主代理提出任务：
-
-> 委派测试专家检查 shared/parser/，编写 Unicode 回归测试，并将测试文件和简短交接说明发布到 shared/。
-
-指定专家时可使用 `/team list` 显示的 Agent ID。按 **Ctrl+B** 查看委派进度。需要在其他项目复用专家配置时，可以把模板放在 `~/.rind/blueprints/`，再通过 `/team blueprint` 创建专家。
+详见 [Agents Management 使用说明](docs/agents-management.md)，涵盖源码构建、worktree、旧 Team 导入和异常恢复。脚本命令见 `rind agents --help`，支持 `--json`。
 
 ---
 

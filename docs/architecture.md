@@ -23,7 +23,7 @@ flowchart TB
 - `infrastructure` implements the LLM, the JSONL session store, tool registration, config, and workspace integration.
 - `bootstrap` is the only production composition root; the Server obtains its dependencies through `build_agent_container()`.
 
-`runtime/core` imports neither `runtime/server`, `bootstrap`, nor concrete infrastructure. The server calls core in the same process. `prompts.py` is the single prompt entry and receives environment text explicitly; `infrastructure/environment.py` probes the host. The container injects session image capture into file tools and the common attachment loader into normal and compact requests. Team delegation receives its session runner explicitly and does not import bootstrap.
+`runtime/core` imports neither `runtime/server`, `bootstrap`, nor concrete infrastructure. The server calls core in the same process. `prompts.py` is the single prompt entry and receives environment text explicitly; `infrastructure/environment.py` probes the host. The container injects session image capture into file tools and the common attachment loader into normal and compact requests. The optional external tool bridge receives trusted host configuration; the Worker has no Team registry or management dependency.
 
 ## Task ownership and continuation
 
@@ -145,3 +145,14 @@ The `desktop` main process isolates the worker, IPC, and project state; the rend
 - `desktop/scripts` covers the fake runtime lifecycle, project/session adapters, and an app-server smoke test; Node 22+ is required to run the TypeScript source tests directly.
 - `frontend-web/src` tests cover browser state and protocol adapters.
 - `test/manual` contains explicitly requested user-scenario acceptance, isolated from default commands and CI.
+
+
+## Agents Management
+
+`agent-management/` is an independent Node 18 TypeScript control plane: one local service owns registration, scoped credentials, tasks, scheduling and the durable journal. CLI pages and commands use its request/subscription API. Teams reference arbitrary canonical workspaces. Workspace admission serializes managed tasks and observed direct turns, including automatic continuations.
+
+`rind-runtime-client/` owns the shared Worker transport. The Rind adapter starts independent Workers and supplies a scoped external management tool; it never imports CLI UI. Python receives only a generic external tool, an optional tool allowlist and host lifecycle callbacks. Separate host credentials publish run facts; model credentials cannot impersonate the execution host. The Manager has only the management tool.
+
+Task reports and notes drive collaboration. A task finishes only after both a report and confirmed execution completion; child results resume the leader. Disconnects reserve the workspace as unknown until reconciliation. The service imports legacy `.aiteam` manifests read-only; old Team writers and in-Worker delegation have been removed. Historical tool messages remain renderable.
+
+See [usage, persistence and distribution](agents-management.md).
