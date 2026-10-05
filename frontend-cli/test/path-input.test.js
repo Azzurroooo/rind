@@ -42,3 +42,9 @@ test("folder inspection reports missing paths, files and Git repositories", asyn
   assert.equal(checkFolderName("feature-x"), "");
   assert.match(checkFolderName("a/b"), /no slashes/);
 });
+
+test("a bare drive letter means the drive root on Windows only", () => {
+  const sep = String.fromCharCode(92), drive = "D" + String.fromCharCode(58);
+  assert.equal(resolveInputPath(drive, "/base", "win32"), drive + sep);
+  assert.equal(resolveInputPath(drive, "/base", "linux"), path.resolve("/base", drive));
+});

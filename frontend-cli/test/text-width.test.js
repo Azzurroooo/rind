@@ -56,3 +56,12 @@ test("truncateToWidth measures styled text by visible cells and closes open styl
   }
   assert.equal(truncateToWidth("plain text", 6, "…"), "plain…");
 });
+
+test("middleClipCells keeps escape sequences whole and closes styles", () => {
+  const styled = "\x1b[31mabcdefghijklmnop\x1b[0m";
+  const cut = middleClipCells(styled, 9);
+  assert.equal(textWidth(cut), 9);
+  assert.equal(stripAnsi(cut), "abc...nop");
+  assert.doesNotMatch(cut.replace(/\x1b\[[0-9;]*m/g, ""), /\x1b|\[\d/);
+  assert.ok(cut.endsWith("\x1b[0m"));
+});

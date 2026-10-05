@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { renderAgents } from "../lib/agents-view.js";
+import { renderAgents, shortPath } from "../lib/agents-view.js";
 import { emptyAgentsSnapshot, sidebarRows, organizationRows, teamSessions, taskRows } from "../lib/agents-model.js";
 import { formatHints, hintsFor } from "../lib/agents-keys.js";
 import { createLineEditor } from "../lib/line-editor.js";
@@ -126,4 +126,14 @@ test("colored rows with long roles keep every line exactly the terminal width", 
       assert.doesNotMatch(line.replace(/\x1b\[[0-9;]*m/g, ""), /\x1b/, "only whole SGR sequences: " + JSON.stringify(line));
     }
   }
+});
+
+test("short paths replace only a whole home directory", () => {
+  assert.equal(shortPath("/Users/me/work/api", 40, "/Users/me", "linux"), "~/work/api");
+  assert.equal(shortPath("/Users/me2/work", 40, "/Users/me", "linux"), "/Users/me2/work");
+  assert.equal(shortPath("/USERS/ME/x", 40, "/Users/me", "linux"), "/USERS/ME/x");
+  const sep = String.fromCharCode(92), drive = "C" + String.fromCharCode(58);
+  const home = [drive, "Users", "me"].join(sep);
+  assert.equal(shortPath([drive, "Users", "Me", "x"].join(sep), 40, home, "win32"), "~" + sep + "x");
+  assert.equal(shortPath([drive, "Users", "Mel", "x"].join(sep), 40, home, "win32"), [drive, "Users", "Mel", "x"].join(sep));
 });

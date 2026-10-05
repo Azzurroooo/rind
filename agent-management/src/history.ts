@@ -47,7 +47,8 @@ export async function sessionHistory(state: State, scope: HistoryScope, list: Li
 
 export interface WorkspaceSession { runtimeSessionId: string; title: string; updatedAt?: string; sessionId?: string }
 export interface WorkspaceGroup { workspace: string; agentId?: string; name: string; teams: string[]; sessions: WorkspaceSession[] }
-type ListAll = () => Promise<Array<Record<string, unknown>>>;
+type ListQuery = { workspace_root?: string; exclude_workspace_roots?: string[] };
+type ListAll = (query: ListQuery) => Promise<Array<Record<string, unknown>>>;
 
 const workspaceKey = (value: string) => {
   const normal = value.replace(/[\\/]+$/, "");
@@ -62,7 +63,14 @@ export async function independentHistory(state: State, managerWorkspace: string,
   const agents = new Map(Object.values(state.agents).map(a => [workspaceKey(a.canonicalWorkspace), a]));
   const manager = workspaceKey(managerWorkspace);
   const groups = new Map<string, WorkspaceGroup>();
-  for (const raw of await list()) {
+  // Each registered folder gets its own page, and one more page covers every
+  // other folder, so busy team folders cannot crowd independent history out.
+  const registeredFolders = [...new Set(Object.values(state.agents).map(a => a.canonicalWorkspace))].filter(w => workspaceKey(w) !== manager);
+  const pages = await Promise.all([
+    ...registeredFolders.map(workspace => list({ workspace_root: workspace })),
+    list({ exclude_workspace_roots: [...registeredFolders, managerWorkspace] }),
+  ]);
+  for (const raw of pages.flat()) {
     const runtimeSessionId = string(raw.id) || string(raw.session_id);
     const workspace = string(raw.workspace_root);
     if (!runtimeSessionId || !workspace) continue;
@@ -73,7 +81,8 @@ export async function independentHistory(state: State, managerWorkspace: string,
     if (!group) {
       const agent = agents.get(key);
       const teams = agent ? Object.values(state.memberships).filter(m => m.agentId === agent.id).map(m => state.teams[m.teamId]?.name).filter((name): name is string => Boolean(name)) : [];
-      group = { workspace, ...(agent ? { agentId: agent.id } : {}), name: agent?.name || workspace.split(/[\\/]/).filter(Boolean).at(-1) || workspace, teams, sessions: [] };
+      // Registered folders are reported by their canonical path so clients can match them to agents.
+      group = { workspace: agent?.canonicalWorkspace || workspace, ...(agent ? { agentId: agent.id } : {}), name: agent?.name || workspace.split(/[\\/]/).filter(Boolean).at(-1) || workspace, teams, sessions: [] };
       groups.set(key, group);
     }
     if (group.sessions.some(s => s.runtimeSessionId === runtimeSessionId)) continue;

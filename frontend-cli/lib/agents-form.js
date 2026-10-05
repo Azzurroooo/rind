@@ -36,10 +36,11 @@ export function createForm({ title, fields, submit, description = [], base = pro
       const exists = !problem && await access(target).then(() => true, () => false);
       check = problem ? { tone: "error", text: problem } : exists ? { tone: "error", text: "Already exists: " + target } : { tone: "ok", text: "Creates " + target };
     }
-    if (token !== item.token) return;
+    if (token !== item.token) return false;
     item.check = check; item.suggestions = suggestions;
     if (item.pick >= suggestions.length) item.pick = -1;
     onChange();
+    return true;
   }
   function focus(index) {
     form.index = (index + form.fields.length) % form.fields.length;
@@ -73,7 +74,7 @@ export function createForm({ title, fields, submit, description = [], base = pro
   form.handleKey = (key, perform) => {
     const item = field();
     const suggesting = item.suggestions.length > 0;
-    if (key.name === "escape") { if (suggesting) { item.suggestions = []; item.pick = -1; return true; } return false; }
+    if (key.name === "escape") { if (suggesting) { item.suggestions = []; item.pick = -1; return true; } form.closed = true; return false; }
     if (key.name === "tab" && key.shift) { focus(form.index - 1); return true; }
     if (key.name === "tab") { if (item.kind === "path") complete(item); else focus(form.index + 1); return true; }
     if ((key.name === "up" || key.name === "down") && suggesting) {
@@ -88,12 +89,14 @@ export function createForm({ title, fields, submit, description = [], base = pro
     if ((key.name === "enter" || key.name === "return") && !key.shift && item.pick >= 0) { accept(item, item.suggestions[item.pick].value); return true; }
     if (item.editor.handleInput(key) !== "submit") { void refresh(item); return true; }
     // Checks are asynchronous; a fast Enter waits for the current text's result.
-    if (item.kind !== "text") { void refresh(item).then(() => { advance(item, perform); onChange(); }); return true; }
+    // Only the check for the text as it is now may decide; a newer edit or a
+    // closed form makes this Enter void.
+    if (item.kind !== "text") { void refresh(item).then(applied => { if (applied) { advance(item, perform); onChange(); } }); return true; }
     advance(item, perform);
     return true;
   };
   function advance(item, perform) {
-    if (item !== field()) return;
+    if (form.closed || item !== field()) return;
     const error = problem(item);
     if (error) { form.error = error; return; }
     if (form.index < form.fields.length - 1) { focus(form.index + 1); return; }

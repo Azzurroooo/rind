@@ -244,8 +244,14 @@ export function sidebarRows(snapshot) {
 // Conversations outside every team, grouped by folder. Saved history gives
 // titles; registered sessions add live status. Unregistered folders run in a
 // private Worker, so only their last saved activity is known.
+// One folder can be spelled with different case or a trailing separator.
+export const workspaceKey = (value, platform = process.platform) => {
+  const trimmed = String(value || "").replace(/[\\/]+$/, "");
+  return platform === "win32" ? trimmed.replace(/\//g, "\\").toLowerCase() : trimmed;
+};
+
 export function independentSessions(snapshot, groups = [], managerWorkspace = "") {
-  const byWorkspace = new Map(groups.map(group => [group.workspace, { ...group, sessions: group.sessions.map(s => ({ ...s })) }]));
+  const byWorkspace = new Map(groups.map(group => [workspaceKey(group.workspace), { ...group, sessions: group.sessions.map(s => ({ ...s })) }]));
   const live = new Map(snapshot.sessions.filter(s => !s.teamId && s.runtimeSessionId).map(s => [s.runtimeSessionId, s]));
   for (const group of byWorkspace.values()) for (const session of group.sessions) {
     const state = live.get(session.runtimeSessionId);
@@ -257,9 +263,9 @@ export function independentSessions(snapshot, groups = [], managerWorkspace = ""
   // A just-started conversation is live before it is written to history.
   for (const state of live.values()) {
     const agent = byId(snapshot.agents, state.agentId);
-    if (!agent || agent.canonicalWorkspace === managerWorkspace) continue;
-    const key = [...byWorkspace.keys()].find(workspace => workspace === agent.canonicalWorkspace) || agent.canonicalWorkspace;
-    const group = byWorkspace.get(key) || { workspace: key, agentId: agent.id, name: single(agent.name), teams: [], sessions: [] };
+    if (!agent || workspaceKey(agent.canonicalWorkspace) === workspaceKey(managerWorkspace)) continue;
+    const key = workspaceKey(agent.canonicalWorkspace);
+    const group = byWorkspace.get(key) || { workspace: agent.canonicalWorkspace, agentId: agent.id, name: single(agent.name), teams: [], sessions: [] };
     group.sessions.push({ runtimeSessionId: state.runtimeSessionId, title: state.runtimeSessionId, updatedAt: state.lastActivity, status: state.status || "Inactive", tracked: true });
     byWorkspace.set(key, group);
   }

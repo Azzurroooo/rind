@@ -611,7 +611,11 @@ class RuntimeDispatcher:
             if not isinstance(workspace_root, str) or not workspace_root.strip():
                 await self._respond_error(request, "workspace_root must be a non-empty string.", "InvalidRequest")
                 return
-        sessions = await self._worker.repository.list(limit=limit, workspace_root=workspace_root)
+        excluded = params.get("exclude_workspace_roots")
+        if excluded is not None and (not isinstance(excluded, list) or not all(isinstance(item, str) for item in excluded)):
+            await self._respond_error(request, "exclude_workspace_roots must be a list of strings.", "InvalidRequest")
+            return
+        sessions = await self._worker.repository.list(limit=limit, workspace_root=workspace_root, exclude_workspace_roots=excluded)
         await self._respond(
             request,
             {

@@ -251,7 +251,7 @@ export function middleClipCells(value, maxWidth) {
   const available = Math.max(0, maxWidth - textWidth(suffix));
   const headWidth = Math.ceil(available / 2);
   const tailWidth = Math.floor(available / 2);
-  return `${takeStartCells(text, headWidth)}${suffix}${takeEndCells(text, tailWidth)}`;
+  return closeAnsi(`${closeAnsi(takeStartCells(text, headWidth))}${suffix}${takeEndCells(text, tailWidth)}`);
 }
 
 // Escape sequences are kept whole and take no cells, so styled text is cut
@@ -282,16 +282,24 @@ function closeAnsi(text) {
   return text.includes("\x1b[") && !text.endsWith("\x1b[0m") ? text + "\x1b[0m" : text;
 }
 
+// Mirrors takeStartCells: escape sequences stay whole and take no cells.
 function takeEndCells(value, maxWidth) {
   let output = "";
   let width = 0;
-  for (const segment of graphemes(value).reverse()) {
-    const nextWidth = segmentWidth(segment);
-    if (width + nextWidth > maxWidth) {
-      break;
+  for (const part of String(value).split(ANSI_SPLIT_RE).reverse()) {
+    if (!part) continue;
+    if (ANSI_WHOLE_RE.test(part)) {
+      output = part + output;
+      continue;
     }
-    output = `${segment}${output}`;
-    width += nextWidth;
+    for (const segment of graphemes(part).reverse()) {
+      const nextWidth = segmentWidth(segment);
+      if (width + nextWidth > maxWidth) {
+        return output;
+      }
+      output = `${segment}${output}`;
+      width += nextWidth;
+    }
   }
   return output;
 }

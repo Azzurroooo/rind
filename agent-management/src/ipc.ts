@@ -160,7 +160,7 @@ export async function startServer(options: { home?: string; python?: string; rep
           const manager = managerPath ? Object.values(store.state.agents).find(a => a.canonicalWorkspace === managerPath) : undefined;
           if (params.independent === true) {
             const host = await executionHost();
-            result = { workspaces: await independentHistory(store.state, await realManager, async () => (await host.request("session/list", { limit: 100 })).sessions) };
+            result = { workspaces: await independentHistory(store.state, await realManager, async query => (await host.request("session/list", { limit: 100, ...query })).sessions) };
           } else if (params.manager === true && !manager) result = { sessions: [] };
           else {
             const host = await executionHost();

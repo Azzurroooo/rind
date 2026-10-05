@@ -525,11 +525,13 @@ export function createService({ store, paths, adapters, toolConfig }: {
     const requestId = text(params.requestId, "Request ID", 200);
     const key = (actor.kind === "user" ? "user" : actor.kind + "/" + actor.sessionId) + "/" + method + "/" + requestId;
     const input = JSON.stringify(params);
+    // Host observations restate facts and are safe to repeat, so they keep no receipt.
+    const remember = method !== "reconcileSession";
     const result = await transaction(async state => {
       const receipt = state.receipts[key];
       if (receipt) { requireValue(receipt.input === input, "REQUEST_ID_REUSED", "A request ID cannot be reused for different input."); return receipt.result; }
       const result = await operate(state, actor, method, params);
-      state.receipts[key] = { input, result: structuredClone(result) };
+      if (remember) state.receipts[key] = { input, result: structuredClone(result), at: Date.now() };
       return result;
     });
     if (method === "cancelRun") void live.get(params.runId)?.cancel().catch(error => failRun(params.runId, error));

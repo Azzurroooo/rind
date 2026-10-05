@@ -5,13 +5,19 @@ import { activeRun, type Run, type State } from "./model.js";
 // every write slower over time. These limits keep the state proportional to
 // what is in use while preserving everything a user or retry can still need.
 export const RECEIPT_LIMIT = 512;
+// A client retries a timed-out request within minutes; younger receipts always stay.
+export const RECEIPT_MIN_AGE_MS = 10 * 60 * 1000;
 export const TASK_RUN_LIMIT = 10;
 
-export function retain(state: State) {
-  // Receipts only make retries idempotent; retries happen within moments, so
-  // the newest few hundred are enough. Object keys keep insertion order.
+export function retain(state: State, now = Date.now()) {
+  // Receipts only make retries idempotent. Beyond the newest few hundred, old
+  // ones are dropped, oldest first (object keys keep insertion order), but
+  // never one recent enough to still be retried.
   const receipts = Object.keys(state.receipts);
-  for (const key of receipts.slice(0, Math.max(0, receipts.length - RECEIPT_LIMIT))) delete state.receipts[key];
+  for (const key of receipts.slice(0, Math.max(0, receipts.length - RECEIPT_LIMIT))) {
+    if (now - (state.receipts[key].at ?? 0) < RECEIPT_MIN_AGE_MS) break;
+    delete state.receipts[key];
+  }
 
   const groups = new Map<string, Run[]>();
   for (const run of Object.values(state.runs)) {

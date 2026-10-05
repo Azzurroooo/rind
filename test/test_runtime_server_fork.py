@@ -102,6 +102,22 @@ def test_fork_returns_new_session_and_lists_it(tmp_path):
     assert result["session_id"] in {entry["id"] for entry in listed}
 
 
+def test_session_list_excludes_workspaces_before_applying_the_limit(tmp_path):
+    session_dir = tmp_path / "sessions"
+    session_dir.mkdir()
+    busy, quiet = tmp_path / "busy", tmp_path / "quiet"
+    busy.mkdir()
+    quiet.mkdir()
+    entries = [{"id": f"2026100{i}_busy", "workspace_root": str(busy), "updated_at": f"2026-10-0{i}T00:00:00"} for i in range(2, 6)]
+    entries.append({"id": "20261001_quiet", "workspace_root": str(quiet), "updated_at": "2026-10-01T00:00:00"})
+    (session_dir / "index.json").write_text(json.dumps({"sessions": entries}), encoding="utf-8")
+
+    newest = JsonlSessionStore.list_session_metadata(str(session_dir), limit=2)
+    assert [entry["id"] for entry in newest] == ["20261005_busy", "20261004_busy"]
+    remaining = JsonlSessionStore.list_session_metadata(str(session_dir), limit=2, exclude_workspace_roots=[str(busy) + os.sep])
+    assert [entry["id"] for entry in remaining] == ["20261001_quiet"]
+
+
 def test_fork_before_message_truncates_history(tmp_path):
     worker = _FakeWorker(tmp_path)
     _seed_history(worker)

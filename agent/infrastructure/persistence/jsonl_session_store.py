@@ -220,6 +220,7 @@ class JsonlSessionStore(SessionStore):
         session_dir: str | None = None,
         limit: int = 20,
         workspace_root: str | None = None,
+        exclude_workspace_roots: list[str] | None = None,
     ) -> list[dict[str, Any]]:
         root = cls.resolve_session_root(session_dir)
         index_path = cls.index_path_for(session_dir)
@@ -228,9 +229,12 @@ class JsonlSessionStore(SessionStore):
         entries = index.get("sessions") if isinstance(index, dict) else []
         if not isinstance(entries, list):
             return []
-        expected_root = None
-        if workspace_root:
-            expected_root = os.path.normcase(os.path.realpath(os.path.abspath(os.path.expanduser(workspace_root))))
+        def normalize(value: str) -> str:
+            return os.path.normcase(os.path.realpath(os.path.abspath(os.path.expanduser(value))))
+
+        expected_root = normalize(workspace_root) if workspace_root else None
+        # Excluded before the limit applies, so callers can page past busy folders.
+        excluded = {normalize(value) for value in exclude_workspace_roots or [] if isinstance(value, str) and value}
         result = []
         for entry in entries:
             if not isinstance(entry, dict) or not _valid_session_id_value(entry.get("id")):
@@ -238,6 +242,8 @@ class JsonlSessionStore(SessionStore):
             if entry.get("has_user_message") is False:
                 continue
             entry_root = entry.get("workspace_root")
+            if excluded and isinstance(entry_root, str) and normalize(entry_root) in excluded:
+                continue
             if expected_root is not None:
                 if not isinstance(entry_root, str):
                     continue

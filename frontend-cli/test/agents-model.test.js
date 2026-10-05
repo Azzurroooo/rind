@@ -122,13 +122,17 @@ test("independent conversations merge live state, keep saved ones untracked and 
   const { snapshot } = fixture();
   const groups = [
     { workspace: "/home/me/scratch", name: "scratch", teams: [], sessions: [{ runtimeSessionId: "r-loose", title: "Idea", updatedAt: "2026-10-06T11:00:00Z" }] },
-    { workspace: "/w/lead", agentId: "lead", name: "Lead", teams: ["Product"], sessions: [{ runtimeSessionId: "r-independent", title: "Quick fix", updatedAt: "2026-10-06T09:00:00Z" }] },
+    { workspace: "/w/lead/", agentId: "lead", name: "Lead", teams: ["Product"], sessions: [{ runtimeSessionId: "r-independent", title: "Quick fix", updatedAt: "2026-10-06T09:00:00Z" }] },
   ];
-  snapshot.sessions.push({ id: "g", agentId: "web", runtimeSessionId: "r-new", status: "Working" }, { id: "m", agentId: "mgr", runtimeSessionId: "r-mgr", status: "Working" });
+  snapshot.sessions.push({ id: "g", agentId: "web", runtimeSessionId: "r-new", status: "Working" }, { id: "m", agentId: "mgr", runtimeSessionId: "r-mgr", status: "Working" },
+    { id: "h", agentId: "lead", runtimeSessionId: "r-fresh", status: "Working" });
   snapshot.agents.push({ id: "mgr", name: "Manager", canonicalWorkspace: "/rind/manager" });
   const merged = independentSessions(snapshot, groups, "/rind/manager");
-  assert.equal(merged.find(g => g.workspace === "/w/lead").sessions[0].status, "Ready");
-  assert.equal(merged.find(g => g.workspace === "/w/lead").sessions[0].tracked, true);
+  const lead = merged.filter(g => g.agentId === "lead");
+  assert.equal(lead.length, 1, "a live conversation joins its folder even when spelled differently");
+  assert.deepEqual(lead[0].sessions.map(s => s.runtimeSessionId), ["r-independent", "r-fresh"]);
+  assert.equal(lead[0].sessions[0].status, "Ready");
+  assert.equal(lead[0].sessions[0].tracked, true);
   assert.equal(merged.find(g => g.workspace === "/home/me/scratch").sessions[0].tracked, false);
   assert.ok(merged.some(g => g.workspace === "/w/web" && g.sessions[0].runtimeSessionId === "r-new"), "just-started conversations appear before they are saved");
   assert.ok(!merged.some(g => g.workspace === "/rind/manager"), "Manager conversations are not independent");

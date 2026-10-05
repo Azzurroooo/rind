@@ -1,16 +1,21 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { retain, RECEIPT_LIMIT, TASK_RUN_LIMIT } from "../dist/retention.js";
+import { retain, RECEIPT_LIMIT, RECEIPT_MIN_AGE_MS, TASK_RUN_LIMIT } from "../dist/retention.js";
 import { projectionIndex, sessionStatus, memberStatus } from "../dist/projection.js";
 import { emptyState } from "../dist/model.js";
 
 const at = minute => new Date(Date.UTC(2026, 9, 6, 0, minute)).toISOString();
 const run = (id, sessionId, minute, extra = {}) => ({ id, sessionId, status: "succeeded", startedAt: at(minute), lastObservedAt: at(minute), hostSequence: 0, ...extra });
 
-test("only the newest receipts are kept, in request order", () => {
+test("old receipts beyond the limit are pruned in request order, but recent ones survive any burst", () => {
+  const now = Date.now();
+  const burst = emptyState();
+  for (let i = 0; i < RECEIPT_LIMIT + 20; i++) burst.receipts["user/m/" + i] = { input: "{}", result: i, at: now - 1000 };
+  retain(burst, now);
+  assert.equal(Object.keys(burst.receipts).length, RECEIPT_LIMIT + 20, "a retry within minutes stays idempotent");
   const state = emptyState();
-  for (let i = 0; i < RECEIPT_LIMIT + 20; i++) state.receipts["user/m/" + i] = { input: "{}", result: i };
-  retain(state);
+  for (let i = 0; i < RECEIPT_LIMIT + 20; i++) state.receipts["user/m/" + i] = { input: "{}", result: i, at: i < 30 ? now - RECEIPT_MIN_AGE_MS - 1 : now };
+  retain(state, now);
   const keys = Object.keys(state.receipts);
   assert.equal(keys.length, RECEIPT_LIMIT);
   assert.equal(keys[0], "user/m/20");

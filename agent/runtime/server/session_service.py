@@ -40,12 +40,15 @@ class SessionService:
             return await draft.get_metadata()
         return await asyncio.to_thread(JsonlSessionStore.load_session_metadata, clean, self.session_dir)
 
-    async def list(self, limit: int = 20, workspace_root: str | None = None) -> list[dict[str, Any]]:
+    async def list(
+        self, limit: int = 20, workspace_root: str | None = None, exclude_workspace_roots: list[str] | None = None
+    ) -> list[dict[str, Any]]:
         return await asyncio.to_thread(
             JsonlSessionStore.list_session_metadata,
             self.session_dir,
             limit,
             workspace_root,
+            exclude_workspace_roots,
         )
 
     async def delete(self, session_id: str) -> dict[str, Any]:

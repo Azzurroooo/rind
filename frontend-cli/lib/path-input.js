@@ -4,11 +4,13 @@ import { readdir, stat } from "node:fs/promises";
 
 // Folder inputs accept absolute paths, ~ and paths relative to where the user
 // opened Rind. The service runs elsewhere, so the client always resolves.
-export function resolveInputPath(input, base = process.cwd()) {
+export function resolveInputPath(input, base = process.cwd(), platform = process.platform) {
   const text = String(input || "").trim().replace(/^["']|["']$/g, "");
   if (!text) return "";
   if (text === "~") return os.homedir();
   if (/^~[\\/]/.test(text)) return path.join(os.homedir(), text.slice(2));
+  // "C:" alone means the current folder of drive C to Windows; people mean the drive.
+  if (platform === "win32" && /^[A-Za-z]:$/.test(text)) return path.win32.resolve(text + "\\");
   return path.resolve(base, text);
 }
 

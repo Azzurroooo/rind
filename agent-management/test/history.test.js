@@ -58,7 +58,13 @@ test("independent history groups non-team conversations by workspace and skips t
     { id: "r-manager", workspace_root: "/rind/manager", title: "Coordinate" },
     { id: "r-loose", workspace_root: "/home/me/scratch", title: "duplicate" },
   ];
-  const groups = await independentHistory(state, "/rind/manager", async () => all);
+  const queries = [];
+  const groups = await independentHistory(state, "/rind/manager", async query => {
+    queries.push(query);
+    return query.workspace_root ? all.filter(e => e.workspace_root.replace(/\/$/, "") === query.workspace_root) : all.filter(e => !query.exclude_workspace_roots.some(w => e.workspace_root.startsWith(w)));
+  });
+  assert.deepEqual(queries.map(q => q.workspace_root || "others").sort(), ["/w/dev", "/w/lead", "others"], "each registered folder is listed on its own");
+  assert.deepEqual(queries.find(q => !q.workspace_root).exclude_workspace_roots.sort(), ["/rind/manager", "/w/dev", "/w/lead"]);
   assert.deepEqual(groups.map(g => g.name), ["scratch", "Lead"]);
   assert.deepEqual(groups[0].sessions.map(s => s.runtimeSessionId), ["r-loose"]);
   assert.equal(groups[0].agentId, undefined);

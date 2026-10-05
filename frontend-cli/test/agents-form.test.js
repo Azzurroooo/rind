@@ -67,3 +67,22 @@ test("submitting resolves relative paths, derives defaults and checks Git reposi
   assert.equal(submitted.length, 1);
   assert.deepEqual(submitted[0], { workspace: path.join(base, "projects", "api-server"), name: "api-server", repo: path.join(base, "projects", "repo") });
 });
+
+test("Escape or a newer edit cancels an Enter that is still waiting for its check", async t => {
+  const { form, perform, submitted } = await setup(t);
+  form.fields[0].editor.setInput("projects/api-server");
+  form.index = 2; form.fields[2].editor.setInput("projects/repo");
+  form.handleKey(key("enter"), perform);
+  assert.equal(form.handleKey(key("escape"), perform), false);
+  await settle();
+  assert.equal(submitted.length, 0, "a closed form never submits");
+
+  const second = await setup(t);
+  second.form.paste("."); await settle();
+  second.form.fields[0].editor.setInput("/definitely-missing-zz");
+  second.form.handleKey(key("enter"), second.perform);
+  second.form.handleKey(key("enter"), second.perform);
+  await settle();
+  assert.equal(second.form.index, 0);
+  assert.match(second.form.error, /No folder at/);
+});

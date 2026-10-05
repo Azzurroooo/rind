@@ -21,7 +21,7 @@ export interface State {
   seq: number; agents: Record<string, Agent>; teams: Record<string, Team>; memberships: Record<string, Membership>;
   tasks: Record<string, Task>; sessions: Record<string, Session>; runs: Record<string, Run>;
   notes: Record<string, Note>; artifacts: Record<string, Artifact>;
-  receipts: Record<string, { input: string; result: unknown }>;
+  receipts: Record<string, { input: string; result: unknown; at?: number }>;
 }
 export const emptyState = (): State => ({ seq: 0, agents: {}, teams: {}, memberships: {}, tasks: {}, sessions: {}, runs: {}, notes: {}, artifacts: {}, receipts: {} });
 export class ManagementError extends Error {

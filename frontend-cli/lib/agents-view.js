@@ -14,10 +14,14 @@ const SIDEBAR_AT = 84, DETAIL_AT = 90;
 
 const HOME = os.homedir();
 // Paths keep their final folder visible: "~/work/…/be-api".
-export const shortPath = (value, width) => {
-  const text = HOME && String(value).toLowerCase().startsWith(HOME.toLowerCase()) ? "~" + String(value).slice(HOME.length) : String(value);
-  return middleClipCells(text, Math.max(4, width));
-};
+// Only a whole home directory becomes ~; case is ignored where the file
+// system ignores it.
+export function shortPath(value, width, home = HOME, platform = process.platform) {
+  const text = String(value);
+  const fold = platform === "win32" || platform === "darwin" ? s => s.toLowerCase() : s => s;
+  const atHome = home && fold(text).startsWith(fold(home)) && (text.length === home.length || /[\\/]/.test(text[home.length]));
+  return middleClipCells(atHome ? "~" + text.slice(home.length) : text, Math.max(4, width));
+}
 const toned = (status, text) => (paint[statusMeta(status).tone] || paint.dim)(text);
 const glyph = status => toned(status, statusMeta(status).glyph);
 

@@ -118,7 +118,7 @@ class FakeRepository:
             "workspace_root": self.worker.workspace_root,
         }
 
-    async def list(self, limit=20, workspace_root=None) -> list[dict]:
+    async def list(self, limit=20, workspace_root=None, exclude_workspace_roots=None) -> list[dict]:
         return [{"id": session_id, "title": f"session {session_id}"} for session_id in self.worker.sessions][:limit]
 
     async def replay(self, session_id, start=None, end=None) -> dict:
