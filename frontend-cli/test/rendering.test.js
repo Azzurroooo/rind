@@ -303,9 +303,9 @@ test("helpText renders compact shortcuts and commands", () => {
       "  enter        send / steer         tab            queue follow-up",
       "  ↑ / ↓        history              ← / →          move cursor",
       "  home / end   line edges           del / backspace edit text",
-      "  ctrl+c       interrupt or quit    ?              show shortcuts",
+      "  ctrl+c       stop · clear · leave ?              show shortcuts",
             "  ctrl+b       task monitor         esc            close monitor",
-      "  ctrl+o       toggle tool detail",
+      "  ctrl+o       toggle tool detail   ← empty        agents",
     ].join("\n"),
   );
   assert.equal(
@@ -321,9 +321,9 @@ test("helpText renders compact shortcuts and commands", () => {
       "  enter        send / steer         tab            queue follow-up",
       "  ↑ / ↓        history              ← / →          move cursor",
       "  home / end   line edges           del / backspace edit text",
-      "  ctrl+c       interrupt or quit    ?              show shortcuts",
+      "  ctrl+c       stop · clear · leave ?              show shortcuts",
             "  ctrl+b       task monitor         esc            close monitor",
-      "  ctrl+o       toggle tool detail",
+      "  ctrl+o       toggle tool detail   ← empty        agents",
       "",
       `  ── Commands · 5 available ${"─".repeat(68)}`,
       "  /status",

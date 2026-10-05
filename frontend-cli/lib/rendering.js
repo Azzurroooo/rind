@@ -493,9 +493,9 @@ export function helpText(commands = []) {
     helpRow("enter", "send / steer", "tab", "queue follow-up"),
     helpRow("↑ / ↓", "history", "← / →", "move cursor"),
     helpRow("home / end", "line edges", "del / backspace", "edit text"),
-    helpRow("ctrl+c", "interrupt or quit", "?", "show shortcuts"),
+    helpRow("ctrl+c", "stop · clear · leave", "?", "show shortcuts"),
     helpRow("ctrl+b", "task monitor", "esc", "close monitor"),
-    helpRow("ctrl+o", "toggle tool detail", "", ""),
+    helpRow("ctrl+o", "toggle tool detail", "← empty", "agents"),
   ];
   const deckItems = Array.isArray(commands)
     ? commands.filter((item) => item && typeof item === "object")

@@ -39,7 +39,7 @@ The folder basename is its initial agent name; position is a separate display la
 
 ## CLI surface
 
-Press **Left (←) while the chat input is empty** to open Agents Management. A nonempty input keeps its normal editing behavior. Management adds no slash commands; the shell entry remains `rind agents`. The page is keyboard-only and never captures the mouse, so the terminal's own selection and scrollback keep working.
+Press **Left (←) while the chat input is empty** to open Agents Management; see [Back, leave and stop](#back-leave-and-stop) for how to get out again. A nonempty input keeps its normal editing behavior. Management adds no slash commands; the shell entry remains `rind agents`. The page is keyboard-only and never captures the mouse, so the terminal's own selection and scrollback keep working.
 
 ### Layout
 
@@ -60,7 +60,7 @@ Press **Left (←) while the chat input is empty** to open Agents Management. A 
 ```
 
 - **Header** — breadcrumb on the left; attention, activity and connection on the right.
-- **Sidebar** — Inbox, Manager, Independent, every team (with its most urgent status) and New team. Below 84 columns the sidebar becomes its own screen: Esc shows it, Enter opens the selection.
+- **Sidebar** — Inbox, Manager, Independent, Background, every team (with its most urgent status) and New team. Below 84 columns the sidebar becomes its own screen: Esc shows it, Enter opens the selection.
 - **Main view** — the selected page. A team has two views, Organization and Tasks (Tab, `1`, `2`).
 - **Detail pane** — what the selected row is and what Enter does; beside the list from 90 columns, below it on tall narrow terminals.
 - **Status line** — the result of the last action (✓, ✕ or •), which clears after a few seconds; a spinner while an action runs.
@@ -105,6 +105,37 @@ Every source asks for the same two optional fields:
 
 - **Role** — a short job title shown beside the name in the tree, e.g. Reviewer or Frontend. The leader also sees it when choosing who to delegate to.
 - **Responsibility** — what the member is in charge of, in a sentence. It is added to the member's instructions on every team task.
+
+### Back, leave and stop
+
+Rind is not one process: agents, tasks and the shared Runtime run in the background, and windows only watch them. So there are three different ways to get out, and none of them silently does another's job.
+
+| You want to | Do | What happens |
+| --- | --- | --- |
+| Go back one level | `esc` on the Agents page · `←` on an empty input in a conversation | The page returns to the conversation that opened it; a conversation opened from Agents returns to the same Agents page. |
+| Leave Rind | `ctrl+c` twice when idle · `/exit` | Every Rind window closes. Agents, tasks and the shared Runtime **keep running**; the last window says how many are still working. |
+| Stop everything | Agents › **Background** › Stop all agents · `rind agents stop --all` | Running work is cancelled and the background services stop. Teams, tasks and conversation history are kept. |
+
+`ctrl+c` always handles the most immediate thing first:
+
+1. While a turn runs, it interrupts that turn. A second press during the interrupt force-closes the window.
+2. With text in the input, it clears the text.
+3. When idle, the first press shows `ctrl+c again to leave Rind · agents keep running` for two seconds. A second press leaves; any other key (or `esc` on the Agents page) cancels.
+
+Conversations opened from Agents never nest. When you move to Agents or to another conversation from inside one, it hands the move back to the window that opened it (through a private handoff file named by `RIND_AGENTS_HANDOFF`) and closes. There is at most one level, and leaving from anywhere closes everything.
+
+The **Background** page shows what keeps running after you leave: running tasks and conversations (with team, member and how long they have run), runs whose stop could not be confirmed, and both background services with their process ID and uptime. Its stop dialog selects Cancel first. It lists what is running, says what is kept, and offers **Stop all agents** or **Stop all agents and leave Rind**. After a stop the page stays disconnected until you press `r`.
+
+`rind agents stop` stops the background services only when nothing is running. Otherwise it lists the running work and exits with status 1. `--all` also stops running agents. It never starts a service just to stop it.
+
+### Updates and background services
+
+The background services run detached, so after you update Rind they would otherwise keep running the old code. Each one reports a fingerprint of its code: `serviceInfo` for the management service and `runtime/info` for the shared Runtime, which answers without starting a worker. Every client compares that fingerprint with the code on disk when it connects:
+
+- **Idle and outdated:** the service is stopped and replaced transparently.
+- **Running agents:** the service is kept, so no work is interrupted. The Agents page says an update is waiting, and the Background page marks the service. Once its agents finish, the next connection replaces it, or you can stop it from Background.
+
+This follows the rule used by crush (`restartIfStale`, refused while busy) and orca (a stale daemon is preserved while it owns live sessions).
 
 ### Dialogs and forms
 

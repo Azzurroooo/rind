@@ -31,6 +31,8 @@
 13. `84d8997`：Independent 页面，按 workspace 监看非 Team 会话。
 14. `12ac83d`：添加成员表单的路径补全、实时校验与 Role/Responsibility 说明。
 15. `ce24181`：历史保留上限、快照索引投影、订阅推送合并。
+16. `ac45fef`：后台服务构建指纹；空闲的旧版本服务自动替换，忙碌时保留并提示（修复 Independent 页 "Agent not found"）。
+17. `8d617c9`：返回 / 离开 / 停止 三级生命周期；会话窗口不再嵌套；Background 页与 `rind agents stop`。
 
 ## 1. 产品定义
 
@@ -215,6 +217,16 @@ Keys     只显示当前选中行可用的键；? 与 esc 永远保留；整段�
 - 选择对话框：`1-9` 直接选择，右侧字母与页面快捷键一致；破坏性操作红框、默认 Cancel，`y`/`n`。表单失败保留输入，错误显示在对话框内。
 - 新建 Team 后直接进入"添加首个成员"（成为 Leader）；添加成员时始终提示"将向谁汇报"。
 
+### 8.2.1 返回 / 离开 / 停止（已冻结）
+
+Rind 不是单进程：Agent、任务与共享 Runtime 在后台运行，窗口只是观察者。三种退出互不替代：
+
+- **返回一级**：Agents 页 `esc`；从 Agents 打开的会话中空输入 `←` 回到同一个 Agents 页。
+- **离开 Rind（detach）**：空闲时 `ctrl+c` 两次（第一次显示 "ctrl+c again to leave Rind · agents keep running"，2 秒内有效，任意其他键/Agents 页 esc 取消），或 `/exit`。关闭所有窗口，后台 Agent、任务和 Runtime 继续运行。`ctrl+c` 优先级：运行中 → 中断；有输入 → 清空；空闲 → 预备离开。策略在 `interrupt-state.js#sigintAction`，两处（聊天与 Agents 页）共用 `createLeaveLatch`。
+- **停止一切**：Agents › Background › Stop all（确认框默认 Cancel，列出运行中的工作并说明保留什么），或 `rind agents stop [--all]`。服务端 `serviceShutdown` 在有 Agent 工作时拒绝，除非 `stopAgents: true`；它不会为了停止而启动服务。
+- **窗口不嵌套**：`openAgentChat` 为子窗口设置 `RIND_AGENTS_HANDOFF` 文件路径（`agents-handoff.js`）。子窗口要去 Agents / 另一个会话 / 离开时写入 `{action}` 后退出，由打开它的窗口执行（`followConversation`）。任何位置离开都能关闭全部窗口。
+- **版本漂移**：管理服务 `serviceInfo` 与 Runtime `runtime/info`（不启动 worker）返回代码指纹（`rind-runtime-client/build-id.js`）。客户端连接时比较：空闲则透明替换，忙碌则保留并标记 stale（借鉴 crush `restartIfStale` 与 orca "stale daemon preserved while it owns live sessions"）。
+
 ### 8.3 Session 展示语义（已统一）
 
 - Agents 页面任何位置只展示 `teamId` 已登记的 Team 会话；独立会话和其他 Team 的会话一律不展示。
@@ -260,6 +272,9 @@ Keys     只显示当前选中行可用的键；? 与 esc 永远保留；整段�
 - `agent-management/src/history.ts`：按 Team/Agent 作用域合并 Runtime 历史与已登记会话；`independentHistory` 按 workspace 分组非 Team 会话。
 - `agent-management/src/retention.ts`：每个事务内的历史保留上限（512 个 receipt、每会话最新一个已结束 run、每任务最近 10 个 run；活动与 unknown run 永不删除）。
 - `frontend-cli/lib/agents-form.js`、`path-input.js`：类型化表单字段、目录补全与实时校验。
+- `frontend-cli/lib/agents-handoff.js`：子窗口把导航交还给打开者的协议。
+- `frontend-cli/lib/interrupt-state.js`：Ctrl+C 策略与离开确认锁存。
+- `rind-runtime-client/build-id.js`、`agent-management/src/build.ts`：后台服务的代码指纹。
 
 ## 10. 已完成的功能面
 
@@ -299,8 +314,8 @@ npm --prefix agent-management test
 
 当前基线结果：
 
-- `frontend-cli`：528 tests，527 pass，1 skipped，0 fail。
-- `agent-management`：32 tests，32 pass，0 fail；Python `pytest test`：1364 passed，2 skipped。
+- `frontend-cli`：536 tests，535 pass，1 skipped，0 fail。
+- `agent-management`：34 tests，34 pass，0 fail；Python `pytest test`：1364 passed，2 skipped。
 - 颜色相关渲染测试会强制开启颜色并要求每一行的可见宽度恰好等于终端宽度、只含完整 SGR 序列；不要删除，它是截图类错位问题的回归防线。
 - 相关 `node --check` 已通过。
 - 主题测试需要清除继承的 `NO_COLOR`；有 `NO_COLOR` 时颜色断言失败是环境预期，不是业务逻辑失败。
@@ -313,6 +328,7 @@ npm --prefix agent-management test
 - `frontend-cli/test/terminal-key.test.js`：键盘、Kitty；鼠标报告被忽略。
 - `frontend-cli/test/tui-engine.test.js`：全屏不捕获鼠标、恢复、diff、光标和重绘。
 - `agent-management/test/history.test.js`：Team 会话作用域。
+- `frontend-cli/test/agents-lifecycle.test.js`：真实 CLI 子进程的 handoff（← 回 Agents、两次 ctrl+c 离开、ctrl+c 清空输入）与 Agents 页的会话链与离开。
 - `frontend-cli/test/tui-integration.test.js`：完整 CLI TUI/Runtime 交互。
 - `agent-management/test/*.test.js`：权限、组织树、任务调度、共享 Workspace、恢复、报告和 Session scope。
 
