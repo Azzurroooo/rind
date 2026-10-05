@@ -1,8 +1,12 @@
 import { paint } from "./theme.js";
-import { single, statusMeta, roleOf, needsUser, taskStatus } from "./agents-model.js";
+import { single, statusMeta, roleOf, needsUser, taskStatus, memberState } from "./agents-model.js";
 
 const tone = status => (paint[statusMeta(status).tone] || paint.dim)(statusMeta(status).glyph + " " + status);
 const field = (label, value) => [paint.dim(label), value || paint.dim("—"), ""];
+function memberLine(row) {
+  const { tone: status, label } = memberState(row.ownStatus || row.status, row.open);
+  return (paint[statusMeta(status).tone] || paint.dim)(statusMeta(status).glyph + " " + label[0].toUpperCase() + label.slice(1));
+}
 const byId = (items, id) => items.find(item => item.id === id);
 
 // Lines describing the selected row: what it is, its state, and what Enter does.
@@ -20,7 +24,7 @@ export function detailFor(view, row) {
       const position = single(membership?.position);
       const role = row.leader ? ["Leader", position].filter(Boolean).join(" · ") : roleOf(snapshot, row.teamId, row.agentId);
       return [paint.bold(row.title), paint.dim(role + (parent ? " · reports to " + single(parent.name) : row.leader ? " · reports to you" : "")), "",
-        tone(row.ownStatus || row.status), "",
+        memberLine(row), "",
         ...field("Workspace", paint.path(agent?.canonicalWorkspace || "Unavailable")),
         ...field("Responsibility", single(membership?.responsibility) || paint.dim("Not assigned · press e")),
         ...(current ? field("Current task", single(current.brief) + "\n" + paint.dim(taskStatus(current) + (current.blockedOn ? " · " + single(current.blockedOn.action) : ""))) : []),

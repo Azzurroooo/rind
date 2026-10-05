@@ -275,21 +275,42 @@ export async function runAgentsPage({ launch, input = process.stdin, output = pr
     if (view.focus === "main") { view.focus = "sidebar"; resetSearch(); project(); return; }
     close();
   }
-  function fold(open) {
+  // Conversation rows belong to the member row above them.
+  const ownerRow = row => (["session", "more"].includes(row?.kind) && view.page.kind === "team" ? view.entries.find(r => r.id === "m:" + row.agentId) : undefined);
+  const selectRow = id => { view.selections[view.pageKey] = id; project(); };
+  // Left always climbs: conversation -> its member -> sidebar. It never folds,
+  // so leaving a deep tree takes at most two presses.
+  function left() {
+    const owner = ownerRow(currentRow());
+    if (view.focus === "main" && owner) selectRow(owner.id);
+    else back();
+  }
+  function right() {
     const row = currentRow();
-    const teamId = view.page.teamId;
-    const collapsed = view.collapsed[teamId] ||= new Set();
-    if (row?.kind === "member" && row.expandable && row.expanded !== open && !view.query && view.filter === "All") {
-      if (open) collapsed.delete(row.agentId); else collapsed.add(row.agentId);
-      project(); return true;
+    if (view.focus === "sidebar") return activate();
+    if (row?.kind === "member" && row.expanded === false) return setFolded([row.agentId], false);
+    if (["member", "more", "team"].includes(row?.kind)) return activate();
+    return undefined;
+  }
+  function setFolded(agentIds, folded) {
+    const collapsed = view.collapsed[view.page.teamId] ||= new Set();
+    for (const id of agentIds) if (folded) collapsed.add(id); else collapsed.delete(id);
+    project();
+  }
+  function toggleFold(all) {
+    if (view.page.kind !== "team" || view.page.tab !== "org" || view.focus !== "main") return;
+    if (view.query || view.filter !== "All") { notify("Clear the search to fold branches.", "info"); return; }
+    const foldable = view.entries.filter(r => r.kind === "member" && r.expandable);
+    if (all) {
+      const anyOpen = foldable.some(r => r.expanded);
+      // Collapsing everything keeps the roots visible so their branches stay reachable.
+      setFolded(anyOpen ? foldable.filter(r => r.depth === 0 || r.expanded).map(r => r.agentId) : [...(view.collapsed[view.page.teamId] || [])], anyOpen);
+      return;
     }
-    if (!open && row && row.depth > 0) {
-      const index = view.entries.indexOf(row);
-      const parent = view.entries.slice(0, index).findLast(r => r.kind === "member" && r.depth < row.depth);
-      if (parent) { view.selections[view.pageKey] = parent.id; project(); return true; }
-    }
-    if (open && row?.kind === "member" && row.expanded) { move(1); return true; }
-    return false;
+    const row = ownerRow(currentRow()) || currentRow();
+    if (row?.kind !== "member" || !row.expandable) return;
+    view.selections[view.pageKey] = row.id;
+    setFolded([row.agentId], row.expanded);
   }
   function switchTab(tab) {
     if (view.page.kind !== "team") return;
@@ -363,8 +384,9 @@ export async function runAgentsPage({ launch, input = process.stdin, output = pr
     else if (key.name === "home" || text === "g") move(0, 0);
     else if (key.name === "end" || text === "G") move(0, Infinity);
     else if (key.name === "escape") back();
-    else if (key.name === "left" || text === "h") { if (view.focus !== "main" || !fold(false)) back(); }
-    else if (key.name === "right" || text === "l") { if (view.focus === "sidebar") activate(); else if (!fold(true) && ["member", "more", "team"].includes(row?.kind)) activate(); }
+    else if (key.name === "left" || text === "h") left();
+    else if (key.name === "right" || text === "l") right();
+    else if (text === "z" || text === "Z") toggleFold(text === "Z");
     else if (key.name === "enter") activate();
     else if (text === " ") rowActions();
     else if (key.name === "tab") switchTab();

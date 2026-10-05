@@ -18,6 +18,15 @@ const STATUS = {
   Cancelled: { glyph: "×", tone: "dim", rank: 8 },
 };
 export const STATUS_FILTERS = ["All", ...Object.keys(STATUS)];
+
+// A member's state is described in terms of the person, so a member whose
+// conversation is "Ready" reads "1 open" instead of repeating the child status.
+const MEMBER_STATE = { "Needs input": "needs you", Unconfirmed: "unconfirmed", Working: "working", Waiting: "waiting on team", Queued: "task queued" };
+export function memberState(status, open = 0) {
+  if (MEMBER_STATE[status]) return { tone: status, label: MEMBER_STATE[status] };
+  if (open) return { tone: "Ready", label: open + " open" };
+  return { tone: "Inactive", label: "idle" };
+}
 export const statusMeta = status => STATUS[status] || STATUS.Inactive;
 
 const TASK_STATUS = { running: "Working", queued: "Queued", blocked: "Needs input", needs_attention: "Needs input", done: "Done", cancelled: "Cancelled" };
@@ -101,7 +110,7 @@ export function organizationRows(snapshot, teamId, sessions, { collapsed = new S
     if (narrowed && !self && !shownSessions.length && !childRows.length) return [];
     const open = narrowed || !collapsed.has(member.agentId);
     const row = { id: "m:" + member.agentId, kind: "member", depth, title: single(agent?.name) || "Missing member", role: role === "Member" ? "" : role, status: member.status || "Inactive", ownStatus: member.status || "Inactive",
-      agentId: member.agentId, teamId, leader: role === "Leader", sessionCount: own.length, reportCount: reports(member.agentId).length,
+      agentId: member.agentId, teamId, leader: role === "Leader", sessionCount: own.length, open: own.filter(s => s.status !== "Inactive").length, reportCount: reports(member.agentId).length,
       expandable: own.length > 0 || reports(member.agentId).length > 0, expanded: open };
     if (!open) return [{ ...row, status: branchStatus(member.agentId) || row.status, hidden: own.length + descendants(member.agentId) }];
     const limit = narrowed ? Infinity : sessionLimit;

@@ -39,17 +39,17 @@ test("organization keeps the selection, its status and contextual keys visible a
     assert.match(screen, /esc back/);
     if (width >= 52) assert.match(screen, /Unconfirmed/);
     if (width >= 84) assert.match(screen, /Inbox/);
-    if (width >= 120) assert.match(screen, /Responsibility/, "wide layouts show details beside the tree");
+    if (width >= 120) assert.match(screen, /Responsibility/, "wide layouts show the selection's details");
   }
 });
 
 test("sessions render beneath their member and collapsed branches show the hidden count", () => {
   const view = fixture();
   const screen = text(renderAgents(view, 120, 30));
-  assert.match(screen, /工程师 7[\s\S]*└─ 修复登录流程/);
+  assert.match(screen, /工程师 7[\s\S]*└─ \? 修复登录流程/);
   view.entries = organizationRows(view.snapshot, "team", [], { collapsed: new Set(["member-4"]) });
   view.selectedId = "m:member-4";
-  assert.match(text(renderAgents(view, 120, 30)), /工程师 4 \+9/);
+  assert.match(text(renderAgents(view, 120, 30)), /▸ 工程师 4 \+9/);
 });
 
 test("tasks show sections and a delivery hint", () => {

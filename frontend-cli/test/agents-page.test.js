@@ -107,9 +107,19 @@ test("team page edits members, nests team conversations and drives tasks from th
   t.after(async () => { abort.abort(); await running; main.stop(); await h.cleanup(); });
   const { key, paste, visible, settle } = h;
 
-  await visible("Lead · Leader");
+  await visible("Leader"); await visible("Lead ");
   await visible("20261005_team_history");
   assert.doesNotMatch(h.screen(), /20261005_private_history/, "independent conversations never appear in a team");
+
+  // Left climbs one level at a time and never folds the tree on the way.
+  key("j"); await visible("enter join");
+  key("\x1b[D"); await visible("enter conversations");
+  key("\x1b[D"); await visible("back to chat");
+  assert.match(h.screen(), /20261005_team_history/, "leaving the tree keeps it expanded");
+  key("\r"); await visible("enter conversations");
+  key("z"); await visible("▸ Lead");
+  assert.doesNotMatch(h.screen(), /20261005_team_history/);
+  key("z"); await visible("20261005_team_history");
 
   key("e"); await visible("Role and responsibility");
   paste("Coordinator"); key("\r"); paste("Integrate release evidence"); key("\r");
@@ -187,7 +197,7 @@ test("a new team flows straight into adding its first member, who becomes the le
   const view = await h.client.request("snapshot");
   assert.equal(view.teams[0].leaderAgentId, view.agents[0].id);
   assert.equal(view.memberships[0].responsibility, "Reconcile invoices");
-  await visible("finance · Leader");
+  await visible("Leader"); await visible("finance ");
   key("?"); await visible("Keyboard"); key("?");
   for (const width of [40, 80, 120]) {
     h.output.resize(width, 20); await visible("Agents");

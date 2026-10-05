@@ -5,7 +5,8 @@ import { textWidth } from "./text-width.js";
 // action menus, so a key never means different things in different places.
 export const KEYS = {
   move: { key: "↑↓", label: "move" },
-  fold: { key: "←→", label: "fold" },
+  fold: { key: "z", label: "fold" },
+  up: { key: "←", label: "up" },
   back: { key: "esc", label: "back" },
   exit: { key: "esc", label: "back to chat" },
   open: { key: "enter", label: "open" },
@@ -41,7 +42,7 @@ export const KEYS = {
 };
 
 export const HELP_GROUPS = [
-  { title: "Navigate", items: [["↑↓ j k", "move"], ["← →", "collapse · expand · back"], ["enter", "open the selected item"], ["g G", "first · last"], ["pgup pgdn", "page"], ["tab 1 2", "Organization · Tasks"], ["esc", "back · return to chat"]] },
+  { title: "Navigate", items: [["↑↓ j k", "move"], ["←", "up: conversation › member › teams"], ["→", "open · expand"], ["z Z", "fold branch · fold all"], ["enter", "open the selected item"], ["g G", "first · last"], ["pgup pgdn", "page"], ["tab 1 2", "Organization · Tasks"], ["esc", "back · return to chat"]] },
   { title: "Team", items: [["c", "new conversation"], ["t", "assign a task"], ["a", "add member (direct report)"], ["e", "edit role"], ["space", "all actions for the item"], ["n", "new team"]] },
   { title: "View", items: [["/", "search this view"], ["f", "filter by status"], ["r", "refresh · reconnect"], ["?", "toggle this help"]] },
 ];
@@ -59,8 +60,8 @@ export function hintsFor(view, row) {
   const tail = [k("search"), k("filter"), k("help"), k("back")];
   const page = view.page.kind;
   if (page === "team" && view.page.tab === "org") {
-    if (row?.kind === "member") return [k("members"), k("chat"), k("task"), k("report"), k("actions"), k("fold"), k("view"), ...tail];
-    if (row?.kind === "session") return [k("join"), k("actions"), k("chat"), k("view"), ...tail];
+    if (row?.kind === "member") return [k("members"), k("chat"), k("task"), k("report"), k("actions"), ...(row.expandable ? [k("fold")] : []), k("view"), ...tail];
+    if (row?.kind === "session") return [k("join"), k("actions"), k("chat"), k("up"), k("view"), ...tail];
     if (row?.kind === "more") return [k("open"), k("chat"), k("view"), ...tail];
     return [row?.kind === "add-member" ? k("create") : k("start"), k("add"), k("view"), ...tail];
   }

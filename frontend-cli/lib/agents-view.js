@@ -3,12 +3,13 @@ import { textWidth, truncateToWidth, wrapTextWithAnsi } from "./text-width.js";
 import { insertCursorMarker } from "./tui/cursor.js";
 import { CURSOR_MARKER } from "./tui/frame.js";
 import { prepareComposerFrame } from "./composer-terminal.js";
-import { statusMeta, single, clean, selectable } from "./agents-model.js";
+import { statusMeta, single, clean, selectable, memberState } from "./agents-model.js";
 import { detailFor } from "./agents-detail.js";
 import { HELP_GROUPS, hintsFor, formatHints } from "./agents-keys.js";
 
 export const MIN_WIDTH = 40, MIN_ROWS = 12;
-const SIDEBAR_AT = 84, DETAIL_AT = 88;
+// The tree keeps at least ~60 columns before the detail pane moves beside it.
+const SIDEBAR_AT = 84, DETAIL_AT = 90;
 
 const toned = (status, text) => (paint[statusMeta(status).tone] || paint.dim)(text);
 const glyph = status => toned(status, statusMeta(status).glyph);
@@ -31,18 +32,22 @@ export function layout(view, width, rows) {
   const sidebarWidth = sidebar ? Math.max(22, Math.min(30, Math.floor(width * 0.22))) : width;
   const mainX = sidebar ? sidebarWidth + 1 : 0;
   const mainWidth = sidebar ? width - mainX : width;
-  const side = mainWidth >= DETAIL_AT ? Math.max(30, Math.min(48, Math.floor(mainWidth * 0.36))) : 0;
+  const side = mainWidth >= DETAIL_AT ? Math.max(28, Math.min(46, Math.floor(mainWidth * 0.32))) : 0;
   return { height, bodyHeight, sidebar, sidebarWidth, mainX, mainWidth, side };
 }
 
 // Keeps the selected row visible while scrolling as little as possible. The
 // offset is remembered per list so returning to a page restores its position.
+// A small margin keeps rows around the selection visible, so a selected
+// member's first conversation is never hidden just below the fold.
+const SCROLL_MARGIN = 2;
 function windowFor(view, key, rows, selectedId, height) {
   const index = Math.max(0, rows.findIndex(row => row.id === selectedId));
   const max = Math.max(0, rows.length - height);
+  const margin = Math.min(SCROLL_MARGIN, Math.floor((height - 1) / 2));
   let offset = Math.min(view.scroll?.[key] ?? 0, max);
-  if (index < offset) offset = index;
-  if (index >= offset + height) offset = index - height + 1;
+  if (index - margin < offset) offset = Math.max(0, index - margin);
+  if (index + margin >= offset + height) offset = Math.min(max, index + margin - height + 1);
   if (view.scroll) view.scroll[key] = offset;
   return { offset, index };
 }
@@ -55,7 +60,7 @@ function rightColumns(row, width) {
     return [word, time].filter(Boolean).join(" ");
   }
   if (row.kind === "task") return paint.dim(truncateToWidth(row.owner, 14, "…")) + (row.priority === "high" ? paint.warning(" ↑") : row.priority === "low" ? paint.dim(" ↓") : "  ");
-  if (row.kind === "team" && row.summary) return row.summary.needs ? paint.warning("! " + row.summary.needs) : row.summary.working ? paint.accent("● " + row.summary.working) : paint.dim(String(row.summary.members));
+  if (row.kind === "team" && row.summary) return row.summary.needs ? paint.warning("! " + row.summary.needs) : row.summary.working ? paint.accent("● " + row.summary.working) : "";
   if (row.kind === "inbox" && row.badge) return paint.warning(String(row.badge));
   if (row.context) return paint.dim(row.context);
   return "";
@@ -70,12 +75,42 @@ function leadIcon(row) {
   return " ";
 }
 
-function rowLine(row, width, selected, focused) {
+function memberChip(row, compact) {
+  const { tone, label } = memberState(row.status, row.open);
+  if (tone === "Inactive") return compact ? "" : paint.dim(label);
+  return toned(tone, statusMeta(tone).glyph + (compact ? "" : " " + label));
+}
+
+const RIGHT = 16;
+// Organization rows: tree guides carry the hierarchy, conversation glyphs sit
+// at their own depth, members get an aligned role column and a summary chip.
+function treeLine(row, width, nameColumn) {
+  const compact = width < 56;
+  const guide = paint.dim(row.guide);
+  let left, right = "";
+  if (row.kind === "member") {
+    const fold = row.expanded === false ? paint.accent("▸ ") : "";
+    const name = fold + paint.bold(single(row.title)) + (row.hidden ? paint.dim(" +" + row.hidden) : "");
+    const used = textWidth(row.guide) + textWidth(name);
+    const role = row.role && !compact ? " ".repeat(Math.max(1, nameColumn - used)) + paint.dim(row.role) : "";
+    left = guide + name + role;
+    right = memberChip(row, compact);
+  } else if (row.kind === "session") {
+    left = guide + glyph(row.status) + " " + single(row.title);
+    right = compact ? paint.dim(row.time || "") : toned(row.status, row.status) + " " + paint.dim((row.time || "").padStart(5));
+  } else left = guide + paint.dim(single(row.title));
+  const room = width - (right ? Math.max(RIGHT, textWidth(right)) + 1 : 0);
+  if (room < 8) return fitLine(left, width);
+  return fitLine(left, room) + (right ? " " + " ".repeat(Math.max(0, Math.max(RIGHT, textWidth(right)) - textWidth(right))) + right : "");
+}
+
+function rowLine(row, width, selected, focused, nameColumn) {
   if (row.kind === "section") {
     const label = " " + row.title.toUpperCase() + (row.count !== undefined ? " · " + row.count : "") + " ";
     return paint.dim("─" + label + "─".repeat(Math.max(0, width - textWidth(label) - 1)));
   }
   const marker = selected ? (focused ? paint.accent("›") : paint.dim("›")) : " ";
+  if (row.guide !== undefined) return marker + " " + treeLine(row, width - 2, nameColumn);
   let name = single(row.title);
   if (row.kind === "member" || row.kind === "team") name = paint.bold(name);
   else if (["add-member", "new-session", "assign", "new-team", "more", "clear"].includes(row.kind)) name = paint.dim(name);
@@ -90,9 +125,12 @@ function rowLine(row, width, selected, focused) {
 function listLines(view, key, rows, selectedId, width, height, focused, empty) {
   if (!rows.length) return fill([paint.dim("  " + empty)], height);
   const { offset } = windowFor(view, key, rows, selectedId, height);
+  // Roles line up in one column, capped so long names cannot push them off screen.
+  const members = rows.filter(row => row.kind === "member" && row.guide !== undefined);
+  const nameColumn = Math.min(Math.floor(width * 0.45), Math.max(0, ...members.map(row => textWidth(row.guide) + textWidth(single(row.title)) + (row.expanded === false ? 2 : 0) + (row.hidden ? String(row.hidden).length + 2 : 0))) + 2);
   return fill(rows.slice(offset, offset + height).map(row => {
     const selected = row.id === selectedId && selectable(row);
-    const line = rowLine(row, width, selected, focused);
+    const line = rowLine(row, width, selected, focused, nameColumn);
     return selected && focused ? paintBackground(line, "selection") : line;
   }), height);
 }
@@ -117,7 +155,7 @@ function pageHeader(view, width) {
   }
   const leader = snapshot.agents.find(a => a.id === team.leaderAgentId);
   const members = snapshot.memberships.filter(m => m.teamId === team.id).length;
-  return [paint.bold(single(team.name)) + paint.dim(" · " + members + " members · leader " + (single(leader?.name) || "not chosen")), tabs(view, width)];
+  return [paint.bold(single(team.name)) + paint.dim(" · " + members + (members === 1 ? " member" : " members") + " · leader " + (single(leader?.name) || "not chosen")), tabs(view, width)];
 }
 
 function searchLine(view, width) {
