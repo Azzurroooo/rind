@@ -158,7 +158,9 @@ export async function startServer(options: { home?: string; python?: string; rep
           result = toolConfig({ kind: manager ? "manager" : "agent", sessionId: session.id });
         } else if (message.method === "serviceInfo") {
           requireValue(principal.kind === "user", "FORBIDDEN", "Only the user can inspect the service.");
-          result = { buildId: await managementBuildId(), pid: process.pid, startedAt, ...workload() };
+          // Report the Runtime host only when it is already connected; asking must not start one.
+          const host = runtime ? await runtime.request("runtime/info").catch(() => null) : null;
+          result = { buildId: await managementBuildId(), pid: process.pid, startedAt, ...workload(), runtime: host };
         } else if (message.method === "serviceShutdown") {
           // Leaving Rind never calls this; it is the explicit "stop background services" action.
           requireValue(principal.kind === "user", "FORBIDDEN", "Only the user can stop the service.");

@@ -25,6 +25,7 @@ export function createCliInputActions({
   pausePrompt,
   resumePrompt,
   handleSigint,
+  disarmLeave = null,
   openAgents = null,
   promptHistory = [],
   onPromptHistory = () => {},
@@ -285,6 +286,7 @@ export function createCliInputActions({
       handleSigint();
       return;
     }
+    disarmLeave?.();
     if (event.ctrl && !event.alt && !event.shift && event.name === "o") {
       state.display.toolDetailsExpanded = !state.display.toolDetailsExpanded;
       output.setToolsExpanded?.(state.display.toolDetailsExpanded);

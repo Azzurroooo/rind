@@ -9,6 +9,7 @@ export const KEYS = {
   up: { key: "←", label: "up" },
   back: { key: "esc", label: "back" },
   exit: { key: "esc", label: "back to chat" },
+  leave: { key: "ctrl+c ×2", label: "leave Rind" },
   open: { key: "enter", label: "open" },
   focus: { key: "enter", label: "select" },
   members: { key: "enter", label: "conversations" },
@@ -45,6 +46,7 @@ export const HELP_GROUPS = [
   { title: "Navigate", items: [["↑↓ j k", "move"], ["←", "up: conversation › member › teams"], ["→", "open · expand"], ["z Z", "fold branch · fold all"], ["enter", "open the selected item"], ["g G", "first · last"], ["pgup pgdn", "page"], ["tab 1 2", "Organization · Tasks"], ["esc", "back · return to chat"]] },
   { title: "Team", items: [["c", "new conversation"], ["t", "assign a task"], ["a", "add member (direct report)"], ["e", "edit role"], ["space", "all actions for the item"], ["n", "new team"]] },
   { title: "View", items: [["/", "search this view"], ["f", "filter by status"], ["r", "refresh · reconnect"], ["?", "toggle this help"]] },
+  { title: "Leave", items: [["esc", "back one level"], ["ctrl+c ×2", "leave Rind · agents keep running"], ["Background", "stop all agents (in the sidebar)"]] },
 ];
 
 // Hints are listed most important first; the footer drops from the end so a
@@ -61,7 +63,8 @@ export function hintsFor(view, row) {
   }
   if (view.detail) return [k("scroll"), ...(view.detail.taskId ? [k("actions")] : []), k("refresh"), k("back")];
   if (view.searching) return [{ key: "type", label: "to search" }, k("keep"), k("clear")];
-  if (view.focus === "sidebar") return [k("move"), row?.kind === "new-team" ? k("create") : k("focus"), k("team"), k("help"), k("exit")];
+  if (view.leaveArmed) return [{ key: "ctrl+c", label: "again to leave Rind · agents keep running" }, { key: "esc", label: "stay" }];
+  if (view.focus === "sidebar") return [k("move"), row?.kind === "new-team" ? k("create") : k("focus"), k("team"), k("help"), view.standalone ? k("close") : k("exit"), k("leave")];
   const tail = [k("search"), k("filter"), k("help"), k("back")];
   const page = view.page.kind;
   if (page === "team" && view.page.tab === "org") {
@@ -73,6 +76,7 @@ export function hintsFor(view, row) {
   if (page === "team") return [row?.kind === "task" ? k("delivery") : k("create"), ...(row?.kind === "task" ? [k("actions")] : []), k("task"), k("view"), ...tail];
   if (page === "member") return [row?.kind === "session" ? k("join") : k("start"), ...(row?.kind === "session" ? [k("actions")] : []), k("task"), ...tail];
   if (page === "manager") return [row?.kind === "session" ? k("join") : k("start"), k("search"), k("help"), k("back")];
+  if (page === "background") return [row?.kind === "stop-all" ? { key: "enter", label: "stop…" } : row?.kind === "live" ? k("open") : row?.kind === "run" ? k("resolve") : k("refresh"), k("refresh"), k("help"), k("back")];
   if (page === "independent") return [row?.kind === "session" ? k("join") : k("chat"), ...(row?.kind === "session" ? [k("up")] : []), k("search"), k("filter"), k("refresh"), k("help"), k("back")];
   return [row?.kind === "team" ? k("open") : row?.kind === "new-team" ? k("create") : k("resolve"), k("team"), k("refresh"), k("help"), k("back")];
 }

@@ -5,8 +5,9 @@ import { createLineEditor } from "./line-editor.js";
 import { createForm } from "./agents-form.js";
 import { resolveInputPath } from "./path-input.js";
 import { managementClient } from "./agents-client.js";
-import { openAgentChat, managerWorkspace } from "./agents-commands.js";
-import { emptyAgentsSnapshot, clean, sidebarRows, inboxRows, organizationRows, taskRows, memberSessionRows, managerRows, teamSessions, independentSessions, independentRows, selectable } from "./agents-model.js";
+import { openAgentChat, managerWorkspace, followConversation } from "./agents-commands.js";
+import { createLeaveLatch, LEAVE_HINT } from "./interrupt-state.js";
+import { emptyAgentsSnapshot, clean, sidebarRows, inboxRows, organizationRows, taskRows, memberSessionRows, managerRows, teamSessions, independentSessions, independentRows, backgroundRows, selectable } from "./agents-model.js";
 import { renderAgents } from "./agents-view.js";
 import { createActions } from "./agents-actions.js";
 
@@ -15,20 +16,29 @@ const NOTICE_MS = 6000, CLOCK_MS = 30000, TYPE_AHEAD = 16;
 // Unregistered folders cannot push updates, so their saved activity is polled.
 const INDEPENDENT_REFRESH_MS = 30000;
 
-export async function runAgentsPage({ launch, input = process.stdin, output = process.stdout, manageInput = true, signal, initialTeamId, openChat = openAgentChat }) {
+// Resolves to { leave: true } when the user chose to leave Rind from here,
+// so the window that opened the page closes as well.
+export async function runAgentsPage({ launch, input = process.stdin, output = process.stdout, manageInput = true, signal, initialTeamId, openChat = openAgentChat, standalone = false }) {
   const tui = createTui({ input, output, manageInput, alternateScreen: true });
   const view = {
     snapshot: emptyAgentsSnapshot(), connection: "connecting…", busy: false, busyLabel: "", notice: null, help: false,
     sidebar: [], navId: "inbox", focus: "sidebar", member: null, page: { kind: "inbox" }, pageKey: "inbox", entries: [], selectedId: "",
-    selections: {}, scroll: {}, tabs: {}, collapsed: {}, history: {}, managerHistory: null, independent: null, managerPath: "",
-    query: "", filter: "All", searching: false, searchEditor: createLineEditor(), dialog: null, detail: null,
+    selections: {}, scroll: {}, tabs: {}, collapsed: {}, history: {}, managerHistory: null, independent: null, managerPath: "", service: null, stopped: false,
+    query: "", filter: "All", searching: false, searchEditor: createLineEditor(), dialog: null, detail: null, standalone, leaveArmed: false,
   };
-  let client, connecting, closed = false, chatActive = false, initialized = false, noticeTimer, spinner, previousKey = "", chatCount = 0;
+  let client, connecting, closed = false, chatActive = false, initialized = false, noticeTimer, spinner, previousKey = "";
   // Keys typed while an action is saving are replayed afterwards instead of being lost.
   const typeAhead = [];
   let finish;
   const finished = new Promise(resolve => { finish = resolve; });
+  let leaving = false;
   const close = () => { closed = true; if (!chatActive) finish(); };
+  const leave = () => { leaving = true; close(); };
+  const leaveLatch = createLeaveLatch({ onChange: () => {
+    view.leaveArmed = leaveLatch.armed;
+    if (!leaveLatch.armed && view.notice?.text === LEAVE_HINT) view.notice = null;
+    redraw();
+  } });
   // Nothing may paint while a conversation owns the terminal.
   const redraw = () => { if (!closed && !chatActive) tui.requestRender(); };
   const clock = setInterval(() => project(), CLOCK_MS);
@@ -47,6 +57,7 @@ export async function runAgentsPage({ launch, input = process.stdin, output = pr
     const options = { query: view.query, filter: view.filter };
     if (page.kind === "inbox") return inboxRows(view.snapshot);
     if (page.kind === "manager") return managerRows(view.managerHistory?.entries, options);
+    if (page.kind === "background") return backgroundRows(view.snapshot, view.service);
     if (page.kind === "independent") return independentRows(independentSessions(view.snapshot, view.independent?.workspaces, view.managerPath), options);
     if (page.kind === "new-team") return [{ id: "new-team", kind: "new-team", title: "Name your new team" }];
     const sessions = teamSessions(view.snapshot, page.teamId, view.history[page.teamId]?.entries);
@@ -96,7 +107,14 @@ export async function runAgentsPage({ launch, input = process.stdin, output = pr
       if (!current || (current.key !== key && !current.loading)) void loadHistory(teamId, key);
     }
     if (view.page.kind === "manager" && view.connection === "connected" && !view.managerHistory) void loadManagerHistory();
+    if (view.page.kind === "background" && view.connection === "connected" && !view.serviceLoading && Date.now() - (view.serviceAt || 0) > 5000) void loadService();
     if (view.page.kind === "independent" && view.connection === "connected" && !view.independent?.loading && Date.now() - (view.independent?.at || 0) > INDEPENDENT_REFRESH_MS) void loadIndependent();
+  }
+  async function loadService() {
+    view.serviceLoading = true;
+    try { view.service = { ...(await client.request("serviceInfo")), stale: view.service?.stale }; } catch {}
+    view.serviceLoading = false; view.serviceAt = Date.now();
+    project();
   }
   async function loadIndependent() {
     view.independent = { ...view.independent, loading: true };
@@ -131,12 +149,16 @@ export async function runAgentsPage({ launch, input = process.stdin, output = pr
     connecting = (async () => {
       const replacement = await managementClient({ ...launch, onSnapshot: acceptSnapshot, onDisconnect() {
         if (closed) return;
+        // After an explicit stop the services stay down until the user asks again.
+        if (view.stopped) { view.connection = "stopped · r starts again"; view.service = null; redraw(); return; }
         view.connection = "reconnecting · status unconfirmed"; redraw();
         void connect();
       } });
       if (closed) { replacement.close(); return; }
       client = replacement;
-      view.connection = "connected";
+      view.connection = "connected"; view.stopped = false;
+      view.service = replacement.service ? { ...replacement.service, stale: replacement.stale } : null;
+      if (replacement.stale) notify("A newer Rind is installed. Background services keep the old version until their agents finish.", "info");
       view.history = {}; view.managerHistory = null; view.independent = null;
       acceptSnapshot(await client.request("subscribe", { afterSeq: view.snapshot.seq || 0 }));
     })().catch(error => { view.connection = "offline · r retries"; notify(error.message, "error"); })
@@ -164,7 +186,7 @@ export async function runAgentsPage({ launch, input = process.stdin, output = pr
     if (dialog) dialog.error = "";
     spinner = setInterval(redraw, 100);
     redraw();
-    const detail = view.detail, chats = chatCount;
+    const detail = view.detail;
     try {
       await action();
       const followUp = view.dialog && view.dialog !== dialog;
@@ -175,10 +197,9 @@ export async function runAgentsPage({ launch, input = process.stdin, output = pr
       else notify(error.message, "error");
     } finally {
       clearInterval(spinner); view.busy = false; project();
-      // Keys typed for the old screen must never confirm a dialog the action
-      // just opened, or reopen a conversation that already ran.
+      // Keys typed for the old screen must never confirm a dialog the action just opened.
       const queued = typeAhead.splice(0);
-      if (!view.dialog && chats === chatCount) for (const key of queued) keyInput(key);
+      if (!view.dialog) for (const key of queued) keyInput(key);
     }
   }
 
@@ -216,9 +237,15 @@ export async function runAgentsPage({ launch, input = process.stdin, output = pr
       manager = agent.canonicalWorkspace === (process.platform === "win32" ? workspace.toLowerCase() : workspace);
     }
     if (!manager && !agent) throw new Error("This member is no longer available.");
-    chatActive = true; chatCount++; tui.stop({ releaseInput: false });
-    try { await openChat({ agent, teamId: manager ? undefined : teamId, runtimeSessionId, manager, launch, input }); }
-    finally {
+    // Keys pressed before the conversation opened were meant for this page
+    // (a second Enter would reopen it); keys after it returns still count.
+    typeAhead.length = 0;
+    chatActive = true; tui.stop({ releaseInput: false });
+    try {
+      // Moving between conversations replaces the window; it never nests.
+      const next = await followConversation({ agent, teamId: manager ? undefined : teamId, runtimeSessionId, manager }, { launch, input, open: openChat });
+      if (next.action === "leave") leave();
+    } finally {
       chatActive = false;
       if (closed) finish();
       else {
@@ -230,7 +257,13 @@ export async function runAgentsPage({ launch, input = process.stdin, output = pr
     }
   }
 
-  const ui = { view, request, choose, form, resolvePath: value => resolveInputPath(value), confirm, notify, showText, reopen, openTeam, openMember, setFilter, // Menu actions already run inside perform(); nesting would be refused as busy.
+  // Stopping drops this connection on purpose; it is not a lost connection.
+  async function stopServices(stopAgents) {
+    view.stopped = true;
+    try { return await client.request("serviceShutdown", { stopAgents }); }
+    catch (error) { view.stopped = false; throw error; }
+  }
+  const ui = { view, request, choose, form, resolvePath: value => resolveInputPath(value), stopServices, leave: () => leave(), confirm, notify, showText, reopen, openTeam, openMember, setFilter, // Menu actions already run inside perform(); nesting would be refused as busy.
     chat: options => (view.busy ? chat(options) : perform(() => chat(options), null, "Opening conversation…")) };
   const actions = createActions(ui);
   const currentRow = () => (view.focus === "sidebar" ? view.sidebar.find(r => r.id === view.navId) : view.entries.find(r => r.id === view.selectedId));
@@ -251,6 +284,8 @@ export async function runAgentsPage({ launch, input = process.stdin, output = pr
       case "assign": return actions.assignTask(row.teamId);
       case "task": return view.page.kind === "inbox" && row.answer ? actions.answer(row.taskId) : perform(() => actions.delivery(row.taskId), null, "Loading delivery…");
       case "run": { const run = view.snapshot.runs.find(r => r.id === row.runId); return run && actions.resolveRun(run); }
+      case "live": return row.taskId ? perform(() => actions.delivery(row.taskId), null, "Loading delivery…") : row.sessionId ? ui.chat({ agentId: row.agentId, teamId: row.teamId, runtimeSessionId: row.sessionId }) : undefined;
+      case "stop-all": return actions.stopAll(row.working);
       case "team": return openTeam(row.teamId);
       case "new-team": return actions.createTeam();
       default: return undefined;
@@ -374,7 +409,13 @@ export async function runAgentsPage({ launch, input = process.stdin, output = pr
 
   function keyInput(key) {
     if (!key) return;
-    if (key.ctrl && key.name === "c") { close(); return; }
+    if (key.ctrl && key.name === "c") {
+      if (leaveLatch.armed) { leave(); return; }
+      leaveLatch.arm(); notify(LEAVE_HINT, "info"); return;
+    }
+    // While leaving is armed, Esc only means "stay".
+    if (leaveLatch.armed && key.name === "escape") { leaveLatch.disarm(); return; }
+    leaveLatch.disarm();
     if (view.busy) { if (!chatActive && typeAhead.length < TYPE_AHEAD) typeAhead.push(key); return; }
     if (view.help) { if (key.name === "escape" || key.text === "?" || key.text === "q" || key.name === "enter") view.help = false; redraw(); return; }
     if (view.dialog) { dialogKey(key); redraw(); return; }
@@ -414,6 +455,7 @@ export async function runAgentsPage({ launch, input = process.stdin, output = pr
     if (view.page.teamId) delete view.history[view.page.teamId];
     if (view.page.kind === "manager") view.managerHistory = null;
     if (view.page.kind === "independent") view.independent = null;
+    if (view.page.kind === "background") view.serviceAt = 0;
     void perform(async () => acceptSnapshot(await client.request("snapshot")), null, "Refreshing…");
   }
 
@@ -428,11 +470,12 @@ export async function runAgentsPage({ launch, input = process.stdin, output = pr
   });
   input.on?.("end", close); input.on?.("close", close); signal?.addEventListener("abort", close, { once: true });
   try {
-    if (signal?.aborted) return;
+    if (signal?.aborted) return { leave: false, working: 0 };
     realpath(managerWorkspace(launch)).then(value => { view.managerPath = process.platform === "win32" ? value.toLowerCase() : value; project(); }, () => {});
     project(); tui.start(); void connect(); await finished;
+    return { leave: leaving, working: view.snapshot.runs.filter(run => ["starting", "running"].includes(run.status)).length };
   } finally {
-    closed = true; clearInterval(clock); clearInterval(spinner); clearTimeout(noticeTimer); client?.close(); tui.stop();
+    closed = true; leaveLatch.disarm(); clearInterval(clock); clearInterval(spinner); clearTimeout(noticeTimer); client?.close(); tui.stop();
     input.off?.("end", close); input.off?.("close", close); signal?.removeEventListener("abort", close);
   }
 }

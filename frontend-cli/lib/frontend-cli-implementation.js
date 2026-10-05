@@ -4,7 +4,8 @@ import { createInterface } from "node:readline";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { createRequire } from "node:module";
-import { runAgentsCommand, openAgentChat } from "./agents-commands.js";
+import { runAgentsCommand, followConversation } from "./agents-commands.js";
+import { handoffPath, writeHandoff } from "./agents-handoff.js";
 import { runAgentsPage } from "./agents-page.js";
 import { prepareManagement, observeRuntime } from "./agents-session.js";
 
@@ -28,7 +29,7 @@ import { createTaskMonitorController } from "./task-monitor-controller.js";
 import { createEventController } from "./event-controller.js";
 import { createInputController } from "./input-controller.js";
 import { isInputClosed } from "./input-errors.js";
-import { sigintAction } from "./interrupt-state.js";
+import { sigintAction, createLeaveLatch } from "./interrupt-state.js";
 import { CUSTOM_ANSWER_LABEL } from "./question-menu-state.js";
 import { createCliState } from "./cli-state.js";
 import { createCliRuntimeController } from "./cli-runtime-controller.js";
@@ -157,6 +158,11 @@ const runtimeState = cliState.runtime;
 const sessionState = cliState.session;
 const turnStateData = cliState.turn;
 const inputStateData = cliState.input;
+// A conversation opened from Agents hands navigation back to the window that
+// opened it instead of nesting another window inside itself.
+const handoffWindow = Boolean(handoffPath());
+// Created before any handler can run: SIGINT may arrive during startup.
+const leaveLatch = createLeaveLatch({ onChange: () => { cliState.display.leaveArmed = leaveLatch.armed; redrawInput(); } });
 const displayState = cliState.display;
 const promptHistory = loadPromptHistory();
 let input = null;
@@ -354,7 +360,8 @@ commandController = createCommandController({
     setInputPrefill: (value) => {
       inputStateData.prefill = String(value || "");
     },
-    shutdown: shutdownRuntime,
+    // /exit leaves Rind from any window; background agents keep running.
+    shutdown: () => leaveRind(),
     exit: () => process.exit(process.exitCode ?? 0),
   },
 });
@@ -436,6 +443,7 @@ inputActions = createCliInputActions({
   resumePrompt: () => inputController.resume(),
   handleSigint,
   openAgents: () => enterManagement(),
+  disarmLeave: () => leaveLatch.disarm(),
 });
 inputController = createInputController({
   terminalUi: tui,
@@ -557,15 +565,24 @@ async function enterInSessionTour(pageId) {
 
 async function enterManagement(chat) {
   if (!tui) { await runAgentsCommand(["list"], managementLaunch); return; }
+  if (handoffWindow) {
+    await writeHandoff(chat ? { action: "open", chat: { ...chat, agent: chat.agent && { id: chat.agent.id, canonicalWorkspace: chat.agent.canonicalWorkspace } } } : { action: "agents" });
+    await shutdownRuntime();
+    return;
+  }
   if (agentsPageAbort) return;
   const abort = new AbortController(); agentsPageAbort = abort;
   const draft = inputStateData.session?.mode === "prompt" ? inputStateData.session.editor.input() : inputStateData.prefill;
   inputController.pause();
   tui.stop({ releaseInput: false });
   process.off("SIGINT", handleSigint);
+  let next = { action: "agents" };
   try {
-    if (chat) await openAgentChat({ ...chat, launch: managementLaunch });
-    else await runAgentsPage({ launch: managementLaunch, manageInput: false, signal: abort.signal, initialTeamId: management.chatContext?.teamId });
+    if (chat) next = await followConversation(chat, { launch: managementLaunch, input: process.stdin });
+    if (next.action === "agents") {
+      const page = await runAgentsPage({ launch: managementLaunch, manageInput: false, signal: abort.signal, initialTeamId: management.chatContext?.teamId });
+      if (page.leave) next = { action: "leave", working: page.working };
+    }
   } finally {
     agentsPageAbort = null;
     process.on("SIGINT", handleSigint);
@@ -573,6 +590,16 @@ async function enterManagement(chat) {
     tui.replayAll();
     if (!inputStateData.session) { inputStateData.prefill = draft || ""; inputController.resume(); }
   }
+  if (next.action === "leave") await leaveRind(next.working);
+}
+
+// Leaving closes this window and every window it was opened from. It only
+// detaches: background agents, tasks and the shared Runtime keep running.
+async function leaveRind(working = 0) {
+  leaveLatch.disarm();
+  if (handoffWindow) await writeHandoff({ action: "leave" });
+  else if (working > 0) logOutput("Left Rind · " + working + (working === 1 ? " agent keeps" : " agents keep") + " working in the background. Run `rind agents` to check on them.");
+  await shutdownRuntime();
 }
 
 async function runLogin(providerId = "") {
@@ -834,16 +861,25 @@ function composeFrame(width = process.stdout.columns || 80) {
 }
 
 function handleSigint() {
+  const idle = !(turnStateData.active || displayState.activeCompact);
+  // Like a shell, Ctrl+C first clears what is being typed.
+  const editor = inputStateData.session?.mode === "prompt" ? inputStateData.session.editor : null;
+  if (idle && editor?.input() && runtimeState.status !== "closing") {
+    editor.setInput("");
+    leaveLatch.disarm();
+    redrawInput();
+    return;
+  }
   const action = sigintAction({
-    activeTurn: turnStateData.active || displayState.activeCompact,
+    activeTurn: !idle,
     interruptRequested: turnStateData.interruptRequested,
     runtimeClosing: runtimeState.status === "closing",
+    leaveArmed: leaveLatch.armed,
   });
-  if (action === "interrupt") {
-    interruptTurn();
-  } else {
-    exitFromSignal();
-  }
+  if (action === "interrupt") interruptTurn();
+  else if (action === "arm-leave") leaveLatch.arm();
+  else if (action === "leave") void leaveRind();
+  else exitFromSignal();
 }
 
 function interruptTurn() {

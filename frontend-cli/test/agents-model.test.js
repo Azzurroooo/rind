@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { emptyAgentsSnapshot, organizationRows, teamSessions, taskRows, inboxRows, sidebarRows, memberSessionRows, relativeTime, teamStatus, independentSessions, independentRows } from "../lib/agents-model.js";
+import { emptyAgentsSnapshot, organizationRows, teamSessions, taskRows, inboxRows, sidebarRows, memberSessionRows, relativeTime, teamStatus, independentSessions, independentRows, backgroundRows } from "../lib/agents-model.js";
 
 const NOW = Date.parse("2026-10-06T12:00:00Z");
 function fixture() {
@@ -148,4 +148,23 @@ test("relative time is compact and never negative", () => {
   assert.equal(relativeTime("2026-10-04T12:00:00Z", NOW), "2d");
   assert.equal(relativeTime("2026-10-06T13:00:00Z", NOW), "now");
   assert.equal(relativeTime(undefined, NOW), "");
+});
+
+test("background lists running work, services and a single stop action", () => {
+  const { snapshot } = fixture();
+  snapshot.tasks.push({ id: "t-run", teamId: "team", assigneeAgentId: "api", brief: "Migrate schema", status: "running" });
+  snapshot.runs.push({ id: "w1", sessionId: "a", taskId: "t-run", status: "running", startedAt: "2026-10-06T11:50:00Z" },
+    { id: "w2", sessionId: "b", status: "running", needsInput: true, startedAt: "2026-10-06T11:58:00Z" }, { id: "w3", sessionId: "a", status: "unknown", startedAt: "2026-10-06T10:00:00Z" });
+  const rows = backgroundRows(snapshot, { pid: 7, startedAt: "2026-10-06T09:00:00Z", runtime: { pid: 8, startedAt: "2026-10-06T09:00:00Z", busy: 2 }, stale: { reason: "busy" } }, { now: NOW });
+  const live = rows.filter(r => r.kind === "live");
+  assert.deepEqual(live.map(r => [r.title, r.status, r.context, r.time]), [["Migrate schema", "Working", "Product › Lead", "10m"], ["Conversation", "Needs input", "Product › DB", "2m"]]);
+  assert.equal(rows.find(r => r.kind === "run").runId, "w3");
+  assert.match(rows.find(r => r.id === "svc:management").note, /pid 7 · up 3h · update waiting/);
+  assert.match(rows.find(r => r.id === "svc:runtime").note, /2 running/);
+  assert.deepEqual(rows.filter(r => r.kind === "stop-all").map(r => [r.title, r.working]), [["Stop all agents…", 2]]);
+  assert.equal(sidebarRows(snapshot).find(r => r.id === "background").badge, 2);
+  const idle = backgroundRows(fixture().snapshot, null, { now: NOW });
+  assert.equal(idle.find(r => r.kind === "clear").title, "No agent is working. Leaving Rind stops nothing.");
+  assert.equal(idle.find(r => r.kind === "stop-all").title, "Stop background services…");
+  assert.equal(idle.find(r => r.id === "svc:runtime").note, "starts when a conversation needs it");
 });

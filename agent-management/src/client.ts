@@ -49,7 +49,7 @@ export async function connectClient({ endpoint, token, runtimeSessionId, onSnaps
   };
 }
 export async function connectManagement(options: {
-  home?: string; python?: string; repoRoot?: string; runtimePath?: string;
+  home?: string; python?: string; repoRoot?: string; runtimePath?: string; start?: boolean;
   onSnapshot?: (snapshot: any) => void; onDisconnect?: () => void;
 } = {}) {
   const paths = managementPaths(options.home);
@@ -68,6 +68,7 @@ export async function connectManagement(options: {
     }
     return Object.assign(client, { service: info, stale: { reason: info ? "busy" : "unknown", working: info?.working } });
   }
+  if (options.start === false) return Object.assign(await connect(), { service: null });
   try { const current = await checked(await connect()); if (current) return current; } catch {}
   await privateDirectory(paths.state);
   const log = await open(path.join(paths.state, "service.log"), "a", 0o600);

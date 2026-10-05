@@ -73,6 +73,19 @@ export function detailFor(view, row) {
         "Enter opens the team."];
     }
     case "inbox": return [paint.bold("Inbox"), paint.dim("Everything waiting on you, across teams"), "", "Answers, unconfirmed runs and conversations that asked a question appear here first."];
+    case "background": return [paint.bold("Background"), paint.dim("What keeps running after you leave Rind"), "",
+      "Leaving Rind (ctrl+c twice, or /exit) only closes windows. Agents, tasks and the shared Runtime keep working.", "",
+      "Stop them here when you want everything to end."];
+    case "live": return [paint.bold(row.title), paint.dim(row.context), "", tone(row.status) + paint.dim(" · started " + (row.time || "now") + " ago"), "",
+      row.taskId ? "Enter opens the task delivery." : "Enter joins this conversation.", "",
+      paint.dim("It keeps running if you leave Rind.")];
+    case "service": return [paint.bold(row.title), paint.dim(row.note), "",
+      row.id === "svc:management" ? "Keeps teams, tasks and their state, and schedules work. Starts on demand." : "Hosts every shared conversation and task in isolated sessions. Starts when a conversation needs it.",
+      ...(row.stale ? ["", paint.warning("A newer Rind is installed. This service still runs the old code because agents are working; it is replaced automatically once they finish, or stop it here.")] : [])];
+    case "stop-all": return [paint.bold(paint.danger(row.title.replace("…", ""))), "",
+      row.working ? row.working + (row.working === 1 ? " agent is" : " agents are") + " working. Stopping cancels their running work." : "Nothing is running. This only stops the background services.", "",
+      "Teams, members, tasks and conversation history are kept. Services start again when you next need them.", "",
+      paint.dim("Leaving Rind never does this.")];
     case "independent": return [paint.bold("Independent"), paint.dim("Conversations outside any team"), "", "Grouped by folder. Folders that are not team members appear here too, with their last saved activity.", "", "Enter lists them."];
     case "manager": return [paint.bold("Manager"), paint.dim("Coordinates every team"), "", "Assembles teams, delegates to leaders and reviews published reports. Members' private conversations stay with them.", "", "Enter lists Manager conversations."];
     case "new-team": return [paint.bold("Create a team"), "", "Name it, then add folders as members. The first member becomes the leader; others report to the leader unless you choose a supervisor."];

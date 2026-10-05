@@ -3,6 +3,7 @@ import path from "node:path";
 import os from "node:os";
 import { fileURLToPath } from "node:url";
 import { managementClient, overviewText, selectRecord } from "./agents-client.js";
+import { createHandoff, HANDOFF_ENV } from "./agents-handoff.js";
 
 export const agentsHelp = [
   "Usage: rind agents [list | team | task | open | manager | import] [--json]",
@@ -21,15 +22,19 @@ export const agentsHelp = [
   "  artifact <artifact-id>",
   "  open <team>/<agent> | manager",
   "  import <legacy-team-root> [--confirm] [--share]",
+  "  stop [--all]   stop background services when idle; --all also stops running agents",
   "Names and unique ID prefixes are accepted. Shared directories require an explicit choice.",
 ].join("\n");
 
 export const managerWorkspace = launch => path.resolve(launch.home || process.env.RIND_HOME || path.join(os.homedir(), ".rind"), "agents-management", "manager");
 
+// Runs one conversation window and returns where the user went next:
+// { action: "agents" | "leave" | "return" } or { action: "open", chat }.
 export async function openAgentChat({ agent, teamId, manager = false, runtimeSessionId, prefill, launch, input = process.stdin }) {
   const raw = input.isRaw;
   input.setRawMode?.(false);
   input.pause?.();
+  const handoff = await createHandoff();
   try {
     const args = manager ? ["--manager"] : ["--cwd", agent.canonicalWorkspace, ...(teamId ? ["--team", teamId] : ["--standalone"])];
     if (runtimeSessionId) args.push("--session", runtimeSessionId);
@@ -37,12 +42,25 @@ export async function openAgentChat({ agent, teamId, manager = false, runtimeSes
     await new Promise((resolve, reject) => {
       const child = spawn(process.execPath, [fileURLToPath(new URL("../bin/rind.js", import.meta.url)), ...args], {
         cwd: manager ? managerWorkspace(launch) : agent.canonicalWorkspace,
-        stdio: "inherit", windowsHide: true, env: { ...process.env, RIND_HOME: launch.home || process.env.RIND_HOME, RIND_PYTHON: launch.python || "python", RIND_RUNTIME_PATH: launch.runtimePath || "" },
+        stdio: "inherit", windowsHide: true, env: { ...process.env, RIND_HOME: launch.home || process.env.RIND_HOME, RIND_PYTHON: launch.python || "python", RIND_RUNTIME_PATH: launch.runtimePath || "", [HANDOFF_ENV]: handoff.file },
       });
       child.once("error", reject);
-      child.once("close", code => code === 0 ? resolve() : reject(new Error("Agent session exited with " + code)));
+      child.once("close", code => resolve(code));
+    }).then(async code => {
+      const next = await handoff.read();
+      // A window that failed without saying where to go reports the failure.
+      if (code !== 0 && next.action === "return") throw new Error("Agent session exited with " + code);
+      return next;
     });
-  } finally { input.setRawMode?.(!!raw); input.resume?.(); }
+  } finally { await handoff.dispose(); input.setRawMode?.(!!raw); input.resume?.(); }
+}
+
+// Follows conversation-to-conversation moves until the user goes back to
+// Agents, returns, or leaves Rind.
+export async function followConversation(chat, { launch, input, open = openAgentChat }) {
+  let next = { action: "open", chat };
+  while (next.action === "open") next = (await open({ ...next.chat, launch, input })) || { action: "return" };
+  return next;
 }
 export async function runAgentsCommand(args, launch) {
   const json = args.includes("--json");
@@ -50,8 +68,9 @@ export async function runAgentsCommand(args, launch) {
   if (args.includes("--help") || args.includes("-h")) { console.log(agentsHelp); return; }
   if (!args.length && process.stdin.isTTY && process.stdout.isTTY) {
     const { runAgentsPage } = await import("./agents-page.js");
-    await runAgentsPage({ launch }); return;
+    await runAgentsPage({ launch, standalone: true }); return;
   }
+  if (args[0] === "stop") { await stopBackground(args.includes("--all"), launch, json); return; }
   const client = await managementClient(launch);
   try {
     const snapshot = await client.request("snapshot");
@@ -60,7 +79,7 @@ export async function runAgentsCommand(args, launch) {
     let result;
     const [command, sub, ...rest] = args;
     if (!command || command === "list") { result = snapshot; if (!json) { console.log(overviewText(snapshot)); return; } }
-    else if (command === "manager") { await openAgentChat({ manager: true, launch }); return; }
+    else if (command === "manager") { await showConversation({ manager: true }, launch); return; }
     else if (command === "sessions") {
       const [teamValue, agentValue] = (sub || "").split("/");
       if (teamValue === "manager" && !agentValue) result = await client.request("listSessions", { manager: true });
@@ -72,7 +91,7 @@ export async function runAgentsCommand(args, launch) {
     else if (command === "open") {
       const [teamValue, agentValue] = (sub || "").split("/");
       const selectedTeam = team(teamValue);
-      await openAgentChat({ agent: agent(agentValue, selectedTeam.id), teamId: selectedTeam.id, runtimeSessionId: option(rest, "--session"), launch }); return;
+      await showConversation({ agent: agent(agentValue, selectedTeam.id), teamId: selectedTeam.id, runtimeSessionId: option(rest, "--session") }, launch); return;
     } else if (command === "team") {
       if (sub === "create") result = await client.request("createTeam", { name: rest.slice(0, rest.includes("--root") ? rest.indexOf("--root") : rest.length).join(" "), createRoot: option(rest, "--root") });
       else {
@@ -105,5 +124,28 @@ export async function runAgentsCommand(args, launch) {
     } else throw new Error(agentsHelp);
     console.log(JSON.stringify(result, null, 2));
   } finally { client.close(); }
+}
+// Stopping is explicit and separate from leaving Rind. Without --all it only
+// stops services that have nothing running, so no work is lost by accident.
+async function stopBackground(all, launch, json) {
+  let client;
+  try { client = await managementClient({ ...launch, start: false }); }
+  catch { console.log(json ? JSON.stringify({ stopped: false, running: false }) : "Background services are not running."); return; }
+  try {
+    const result = await client.request("serviceShutdown", { stopAgents: all });
+    console.log(json ? JSON.stringify({ stopped: true, ...result }) : all && result.working ? "Stopped " + result.working + (result.working === 1 ? " running agent" : " running agents") + " and the background services." : "Stopped the background services.");
+  } catch (error) {
+    if (error.code !== "SERVICE_BUSY") throw error;
+    process.exitCode = 1;
+    console.log(json ? JSON.stringify({ stopped: false, ...error.details }) : error.message + "\nRun `rind agents stop --all` to stop them too.");
+  } finally { client.close(); }
+}
+
+// `rind agents open|manager`: going back from the conversation shows Agents.
+async function showConversation(chat, launch) {
+  const next = await followConversation(chat, { launch, input: process.stdin });
+  if (next.action !== "agents") return;
+  const { runAgentsPage } = await import("./agents-page.js");
+  await runAgentsPage({ launch, standalone: true, initialTeamId: chat.teamId });
 }
 function option(args, flag) { const index = args.indexOf(flag); return index === -1 ? undefined : args[index + 1]; }

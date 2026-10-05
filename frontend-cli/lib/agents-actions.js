@@ -212,9 +212,34 @@ export function createActions(ui) {
     ], { taskId, refresh: () => delivery(taskId) });
   }
 
+  // Stop is destructive and separate from leaving: Cancel is the default, the
+  // dialog says what keeps existing, and the button names what it does.
+  function stopAll(working) {
+    const live = snap().runs.filter(run => ["starting", "running"].includes(run.status));
+    const names = live.slice(0, 5).map(run => {
+      const session = snap().sessions.find(s => s.id === run.sessionId);
+      const task = snap().tasks.find(t => t.id === run.taskId);
+      return "• " + agentName(session?.agentId) + " — " + (task ? single(task.brief) : "conversation");
+    });
+    const description = [
+      ...(working ? [working + (working === 1 ? " agent is" : " agents are") + " working:", ...names, ...(live.length > 5 ? ["  and " + (live.length - 5) + " more"] : []), ""] : ["Nothing is running."]),
+      "Running work is cancelled now and cannot be resumed where it stopped. Teams, members, tasks and conversation history are kept.",
+    ];
+    const stop = async andLeave => {
+      const result = await ui.stopServices(true);
+      ui.notify(result.working ? "Stopped " + result.working + (result.working === 1 ? " agent" : " agents") + " and the background services." : "Background services stopped.", "success");
+      if (andLeave) ui.leave();
+    };
+    ui.choose(working ? "Stop all agents?" : "Stop background services?", [
+      { label: "Cancel", key: "n", description: "Keep everything running", action() {} },
+      { label: working ? "Stop all agents" : "Stop services", key: "y", danger: true, action: () => stop(false) },
+      { label: (working ? "Stop all agents" : "Stop services") + " and leave Rind", key: "l", danger: true, action: () => stop(true) },
+    ], { description, danger: true });
+  }
+
   function chooseFilter() {
     ui.choose("Show only", STATUS_FILTERS.map(status => ({ label: status, description: status === "All" ? "Everything in this view" : undefined, action() { ui.setFilter(status); } })), { selected: ui.view.filter });
   }
 
-  return { createTeam, addMember, assignTask, editMember, memberActions, sessionActions, taskActions, answer, delivery, resolveRun, chooseFilter };
+  return { createTeam, addMember, assignTask, editMember, memberActions, sessionActions, taskActions, answer, delivery, resolveRun, chooseFilter, stopAll };
 }

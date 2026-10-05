@@ -73,6 +73,9 @@ function rightColumns(row, width) {
   if (row.kind === "task") return paint.dim(truncateToWidth(row.owner, 14, "…")) + (row.priority === "high" ? paint.warning(" ↑") : row.priority === "low" ? paint.dim(" ↓") : "  ");
   if (row.kind === "team" && row.summary) return row.summary.needs ? paint.warning("! " + row.summary.needs) : row.summary.working ? paint.accent("● " + row.summary.working) : "";
   if (row.kind === "inbox" && row.badge) return paint.warning(String(row.badge));
+  if (row.kind === "background" && row.badge) return paint.accent("● " + row.badge);
+  if (row.kind === "live") return paint.dim(truncateToWidth(row.context || "", 24, "…") + " · " + (row.time || "").padStart(3));
+  if (row.kind === "service") return (row.stale ? paint.warning : paint.dim)(row.note);
   if (row.context) return paint.dim(row.context);
   return "";
 }
@@ -83,6 +86,9 @@ function leadIcon(row) {
   if (row.kind === "more") return paint.dim("…");
   if (row.kind === "manager") return paint.notice("◆");
   if (row.kind === "independent") return paint.path("◇");
+  if (row.kind === "background") return row.badge ? paint.accent("●") : paint.dim("○");
+  if (row.kind === "live" || row.kind === "service") return glyph(row.status);
+  if (row.kind === "stop-all") return paint.danger("■");
   if (row.kind === "team" || row.kind === "inbox") return row.status ? glyph(row.status) : paint.dim("○");
   return " ";
 }
@@ -135,7 +141,8 @@ function rowLine(row, width, selected, focused, nameColumn) {
   let name = single(row.title);
   if (row.kind === "member" || row.kind === "team") name = paint.bold(name);
   else if (["add-member", "new-session", "assign", "new-team", "more", "clear"].includes(row.kind)) name = paint.dim(name);
-  const extra = (row.role ? paint.dim(" · " + row.role) : "") + (row.hidden ? paint.dim(" +" + row.hidden) : "") + (row.note && width >= 60 ? paint.dim(" — " + row.note) : "");
+  else if (row.kind === "stop-all") name = paint.danger(name);
+  const extra = (row.role ? paint.dim(" · " + row.role) : "") + (row.hidden ? paint.dim(" +" + row.hidden) : "") + (row.note && row.kind !== "service" && width >= 60 ? paint.dim(" — " + row.note) : "");
   const left = marker + " " + leadIcon(row) + " " + paint.dim(row.guide || "") + name + extra;
   const right = rightColumns(row, width);
   const room = width - textWidth(right) - 1;
@@ -169,6 +176,7 @@ function pageHeader(view, width) {
   if (page.kind === "inbox") return [paint.bold("Inbox") + paint.dim(" · everything waiting on you")];
   if (page.kind === "manager") return [paint.bold("Manager") + paint.dim(" · conversations that coordinate every team")];
   if (page.kind === "independent") return [paint.bold("Independent") + paint.dim(" · conversations outside any team, by folder")];
+  if (page.kind === "background") return [paint.bold("Background") + paint.dim(" · what keeps running after you leave Rind")];
   if (page.kind === "new-team") return [paint.bold("New team")];
   if (!team) return [paint.dim("Team removed")];
   if (page.kind === "member") {
@@ -321,7 +329,7 @@ function renderDelivery(view, width, height) {
 function headerLine(view, width) {
   const { snapshot, page } = view;
   const team = snapshot.teams.find(t => t.id === page.teamId);
-  const crumbs = ["Agents", page.kind === "inbox" ? "Inbox" : page.kind === "manager" ? "Manager" : page.kind === "independent" ? "Independent" : page.kind === "new-team" ? "New team" : single(team?.name) || ""];
+  const crumbs = ["Agents", page.kind === "inbox" ? "Inbox" : page.kind === "manager" ? "Manager" : page.kind === "independent" ? "Independent" : page.kind === "background" ? "Background" : page.kind === "new-team" ? "New team" : single(team?.name) || ""];
   if (page.kind === "member") crumbs.push(single(snapshot.agents.find(a => a.id === page.agentId)?.name));
   else if (page.kind === "team") crumbs.push(page.tab === "tasks" ? "Tasks" : "Organization");
   const left = " " + paint.bold(crumbs[0]) + paint.dim(crumbs.slice(1).filter(Boolean).map(c => " › " + c).join(""));

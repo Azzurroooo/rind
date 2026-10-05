@@ -177,6 +177,7 @@ test("team page edits members, nests team conversations and drives tasks from th
   assert.equal(chats[4].teamId, undefined);
 
   // Independent lists conversations outside every team, grouped by folder.
+  await visible("Manager ·"); await settle();
   key("\x1b"); await settle(); assert.doesNotMatch(h.screen(), /esc clears/, "the first esc clears the search");
   key("\x1b"); await settle(); key("j"); await visible("conversations outside any team, by folder");
   await visible("20261005_private_history");

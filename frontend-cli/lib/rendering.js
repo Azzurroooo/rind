@@ -449,7 +449,9 @@ export function promptHintLine(state = {}) {
   if (state.menuOpen) {
     return "";
   }
-  const text = state.inputMode === "question"
+  const text = state.leaveArmed
+    ? "  ctrl+c again to leave Rind · agents keep running in the background"
+    : state.inputMode === "question"
     ? "  ↑↓ choose · enter confirm · esc cancel"
     : state.emptyInput
       ? "  ← agents · / commands · ↑↓ history"

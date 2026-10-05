@@ -235,6 +235,7 @@ export function sidebarRows(snapshot) {
     { id: "inbox", kind: "inbox", title: "Inbox", badge: attention, status: attention ? "Needs input" : undefined },
     { id: "manager", kind: "manager", title: "Manager" },
     { id: "independent", kind: "independent", title: "Independent" },
+    { id: "background", kind: "background", title: "Background", badge: snapshot.runs.filter(run => ["starting", "running"].includes(run.status)).length },
     { id: "section:teams", kind: "section", title: "Teams", count: snapshot.teams.length },
     ...snapshot.teams.map(team => ({ id: team.id, kind: "team", title: single(team.name), status: teamStatus(snapshot, team.id, inbox), teamId: team.id, summary: teamSummary(snapshot, team.id, inbox) })),
     { id: "new-team", kind: "new-team", title: "New team" },
@@ -287,6 +288,40 @@ export function independentRows(workspaces, { query = "", filter = "All", now = 
       time: relativeTime(session.updatedAt, now), sessionId: session.runtimeSessionId, agentId: group.agentId, workspace: group.workspace, tracked: session.tracked, independent: true });
   }
   return withGuides(rows);
+}
+
+// What keeps running after you leave Rind, and the only place that stops it.
+export function backgroundRows(snapshot, service, { now = Date.now() } = {}) {
+  const name = id => single(byId(snapshot.agents, id)?.name) || "Agent";
+  const teamName = id => single(byId(snapshot.teams, id)?.name);
+  const live = snapshot.runs.filter(run => ["starting", "running"].includes(run.status));
+  const unconfirmed = snapshot.runs.filter(run => run.status === "unknown");
+  const describe = run => {
+    const session = snapshot.sessions.find(s => s.id === run.sessionId);
+    const task = snapshot.tasks.find(t => t.id === run.taskId);
+    const where = [teamName(session?.teamId), name(session?.agentId)].filter(Boolean).join(" › ");
+    return { session, task, where };
+  };
+  const rows = [{ id: "section:running", kind: "section", title: "Running now", count: live.length }];
+  if (!live.length) rows.push({ id: "idle", kind: "clear", title: "No agent is working. Leaving Rind stops nothing." });
+  for (const run of live) {
+    const { session, task, where } = describe(run);
+    rows.push({ id: "live:" + run.id, kind: "live", title: task ? single(task.brief) : "Conversation", status: run.needsInput ? "Needs input" : "Working", context: where,
+      time: relativeTime(run.startedAt, now), runId: run.id, taskId: task?.id, agentId: session?.agentId, teamId: session?.teamId, sessionId: session?.runtimeSessionId });
+  }
+  if (unconfirmed.length) {
+    rows.push({ id: "section:unconfirmed", kind: "section", title: "Unconfirmed", count: unconfirmed.length });
+    for (const run of unconfirmed) rows.push({ id: "r:" + run.id, kind: "run", status: "Unconfirmed", title: "Confirm the previous run stopped", context: describe(run).where, runId: run.id });
+  }
+  const age = value => relativeTime(value, now);
+  rows.push({ id: "section:services", kind: "section", title: "Services" },
+    { id: "svc:management", kind: "service", title: "Agents management", status: service ? "Ready" : "Inactive",
+      note: service ? "pid " + service.pid + " · up " + age(service.startedAt) + (service.stale ? " · update waiting" : "") : "not connected", stale: Boolean(service?.stale) },
+    { id: "svc:runtime", kind: "service", title: "Shared Runtime", status: service?.runtime ? "Ready" : "Inactive",
+      note: service?.runtime ? "pid " + service.runtime.pid + " · up " + age(service.runtime.startedAt) + " · " + service.runtime.busy + " running" : "starts when a conversation needs it" });
+  rows.push({ id: "section:actions", kind: "section", title: "Stop" },
+    { id: "stop-all", kind: "stop-all", title: live.length ? "Stop all agents…" : "Stop background services…", working: live.length });
+  return rows;
 }
 
 export const selectable = row => row && !["section", "clear"].includes(row.kind);

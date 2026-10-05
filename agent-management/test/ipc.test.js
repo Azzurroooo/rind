@@ -101,3 +101,22 @@ test("the service reports its build and refuses to stop while an agent is workin
   await assert.rejects(client.request("serviceShutdown"), { code: "SERVICE_BUSY", message: /1 agent is still working/ });
   assert.equal(shutdowns, 0, "a busy service keeps running");
 });
+
+test("stopping with stopAgents ends a busy service, and the next client starts a fresh one", async t => {
+  const home = await mkdtemp(path.join(os.tmpdir(), "rind-ipc-stop-"));
+  const options = { home, repoRoot: fileURLToPath(new URL("../..", import.meta.url)) };
+  let stopped;
+  const exited = new Promise(resolve => { stopped = resolve; });
+  const server = await startServer({ ...options, onShutdown: stopped });
+  t.after(async () => { await server.close(); await rm(home, { recursive: true, force: true }); });
+  const client = await connectClient({ endpoint: server.paths.endpoint, token: (await readFile(server.paths.token, "utf8")).trim() });
+  const workspace = path.join(home, "workspace"); await mkdir(workspace);
+  const agent = await client.request("registerAgent", { workspace });
+  const session = await client.request("attachSession", { agentId: agent.id });
+  await client.request("bindSession", { sessionId: session.id, runtimeSessionId: "live" });
+  await client.request("beginRun", { sessionId: session.id });
+  const result = await client.request("serviceShutdown", { stopAgents: true });
+  assert.deepEqual([result.stopping, result.working], [true, 1]);
+  await exited;
+  await assert.rejects(connectClient({ endpoint: server.paths.endpoint, token: "x" }), "the endpoint is closed after stopping");
+});
