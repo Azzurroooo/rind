@@ -4,6 +4,9 @@ import { createInterface } from "node:readline";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { createRequire } from "node:module";
+import { runAgentsCommand, openAgentChat } from "./agents-commands.js";
+import { runAgentsPage } from "./agents-page.js";
+import { prepareManagement, observeRuntime } from "./agents-session.js";
 
 import { createCompactContextState } from "./compact-context-state.js";
 import { createRuntimeClient, runHelpVersion } from "./runtime-client.js";
@@ -57,6 +60,12 @@ const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(scriptDir, "..", "..");
 const python = process.env.RIND_PYTHON || "python";
 const runtimePath = process.env.RIND_RUNTIME_PATH || resolveInstalledRuntime();
+const managementLaunch = { python, repoRoot, runtimePath };
+if (cliArgs[0] === "agents") {
+  try { await runAgentsCommand(cliArgs.slice(1), managementLaunch); }
+  catch (error) { process.stderr.write(error.message + "\n"); process.exitCode = 2; }
+  return;
+}
 
 function resolveInstalledRuntime() {
   const packageNames = {
@@ -139,6 +148,9 @@ if (cliArgs[0] === "run") {
   return;
 }
 
+let management;
+try { management = await prepareManagement(cliArgs, managementLaunch); cliArgs = management.args; }
+catch (error) { process.stderr.write(error.message + "\n"); process.exitCode = 2; return; }
 const cliState = createCliState();
 const runtimeState = cliState.runtime;
 const sessionState = cliState.session;
@@ -191,12 +203,14 @@ const {
   setTurnContext,
 } = outputController;
 
-const runtimeClient = createRuntimeClient({
+const runtimeClient = observeRuntime(createRuntimeClient({
   python,
   repoRoot,
   runtimePath,
   cliArgs,
+  externalTools: management.externalTools,
   onMessage: (message) => {
+    management.event?.(message);
     eventProcessing = eventProcessing
       .then(() => message?.method === runtimeMethods.authUpdate ? renderAuthUpdate(message) : renderEvent(message))
       .catch((error) => {
@@ -221,11 +235,12 @@ const runtimeClient = createRuntimeClient({
     clearActivityTimer();
     inputActions?.clearPendingInputs();
     if (!wasClosing) {
+      void management.close?.().catch(error => writeErrorOutput(error.message + "\n"));
       runtimeState.failure = error;
       writeErrorOutput(`Runtime stopped (${signal || (code ?? "startup failure")}): ${error.message}. Runtime commands are unavailable until it restarts.\n`);
     }
   },
-});
+}), management);
 const turnState = {
   get activeTurn() {
     return turnStateData.active || displayState.activeCompact;
@@ -260,7 +275,6 @@ const runtimeController = createCliRuntimeController({
   askEffortMenu: (...args) => inputActions.askEffortMenu(...args),
   askSessionMenu: (...args) => inputActions.askSessionMenu(...args),
   askForkPointMenu: (...args) => inputActions.askForkPointMenu(...args),
-  askTeamBlueprint: (...args) => inputActions.askTeamBlueprint(...args),
   askContextBoard: (...args) => inputActions.askContextBoard(...args),
   restoreLiveTurn,
   renderHistory,
@@ -295,6 +309,8 @@ commandController = createCommandController({
   turn: turnController,
   input: {
     isTerminal: Boolean(tui),
+    runAgentsPage: () => enterManagement(false),
+    runManager: () => enterManagement(true),
     runGoalCommand: runtimeController.runGoalCommand,
     runModelSelector: runtimeController.runModelSelector,
     runEffortCommand: (value) => runtimeController.runEffortCommand(value),
@@ -450,10 +466,11 @@ try {
   if (persistedState.theme) {
     setTheme(persistedState.theme);
   }
-  sessionState.info = { cwd: process.cwd() };
+  sessionState.info = { cwd: process.cwd(), management_label: management.label };
   sessionState.commands = commandController.localCommands();
   await runtimeController.ensureRuntime();
   const startupInfo = { ...sessionState.info, resume_preview: "" };
+  if (management.label) logOutput(management.label);
   const tourHint = persistedState.tourSeen ? [] : ["new to Rind? /tour walks you through it"];
   if (tui) {
     outputController.showStartup(startupInfo, tourHint);
@@ -526,6 +543,23 @@ async function enterInSessionTour(pageId) {
     await runTour({ input: process.stdin, output: process.stdout, startPageId: pageId || "", manageInput: false, onPageComplete: () => saveCliState({ tourSeen: true }) });
   } catch (error) {
     writeErrorOutput(`${error instanceof Error ? error.message : String(error)}\n`);
+  } finally {
+    process.on("SIGINT", handleSigint);
+    tui.start({ acquireInput: false });
+    tui.replayAll();
+    inputController.resume();
+  }
+}
+
+async function enterManagement(manager) {
+  if (!tui) { await runAgentsCommand(["list"], managementLaunch); return; }
+  if (turnStateData.active || displayState.activeCompact) { logOutput("Open agents management between turns."); return; }
+  inputController.pause();
+  tui.stop({ releaseInput: false });
+  process.off("SIGINT", handleSigint);
+  try {
+    if (manager) await openAgentChat({ manager: true, launch: managementLaunch });
+    else await runAgentsPage({ launch: managementLaunch, manageInput: false });
   } finally {
     process.on("SIGINT", handleSigint);
     tui.start({ acquireInput: false });
@@ -674,7 +708,7 @@ function composeFrame(width = process.stdout.columns || 80) {
   if (!session) {
     return null;
   }
-  const choiceMenu = ["model", "theme", "sessions", "team-blueprints", "fork", "auth-choice"].includes(session.mode);
+  const choiceMenu = ["model", "theme", "sessions", "fork", "auth-choice"].includes(session.mode);
   if (session.mode === "prompt" && session.menuState) {
     session.menuState.setInput(session.editor.input());
   }
@@ -756,7 +790,7 @@ function composeFrame(width = process.stdout.columns || 80) {
       menuCursor: editing ? menu.cursor : null,
     };
   }
-  if (session.mode === "sessions" || session.mode === "team-blueprints" || session.mode === "fork") {
+  if (session.mode === "sessions" || session.mode === "fork") {
     return {
       showCaret,
       prompt: mainPromptText(width),

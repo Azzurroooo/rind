@@ -2,6 +2,8 @@ import path from "node:path";
 import os from "node:os";
 import { realpath, stat, mkdir, chmod } from "node:fs/promises";
 import { createHash } from "node:crypto";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 import { requireValue } from "./model.js";
 
 export function managementPaths(rindHome = process.env.RIND_HOME || path.join(os.homedir(), ".rind")) {
@@ -23,6 +25,10 @@ export function inside(root: string, target: string) {
   return relative === "" || (!relative.startsWith(".." + path.sep) && relative !== ".." && !path.isAbsolute(relative));
 }
 export async function privateDirectory(root: string) {
-  await mkdir(root, { recursive: true, mode: 0o700 });
+  const created = await mkdir(root, { recursive: true, mode: 0o700 });
   if (process.platform !== "win32") await chmod(root, 0o700);
+  else if (created) {
+    const user = [process.env.USERDOMAIN, os.userInfo().username].filter(Boolean).join("\\");
+    await promisify(execFile)("icacls.exe", [root, "/inheritance:r", "/grant:r", user + ":(OI)(CI)F"], { windowsHide: true });
+  }
 }

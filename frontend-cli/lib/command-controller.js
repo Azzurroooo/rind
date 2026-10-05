@@ -25,6 +25,14 @@ export function createCommandController({
     if (!String(text || "").startsWith("/")) {
       return false;
     }
+    if (text.trim() === "/agents" || text.trim() === "/team") {
+      await input.runAgentsPage?.();
+      return true;
+    }
+    if (text.trim() === "/manager") {
+      await input.runManager?.();
+      return true;
+    }
     if (isBareThemeCommand(text) && input.isTerminal && input.runThemeSelector) {
       await input.runThemeSelector();
       return true;
@@ -108,14 +116,6 @@ export function createCommandController({
   async function applyResult(result = {}) {
     const text = () => slashResultText(result, state.slashCommands || []);
     output.log?.(text);
-    if (result.display?.type === "team_blueprints" && input.askTeamBlueprint) {
-      const blueprints = Array.isArray(result.display.blueprints) ? result.display.blueprints : [];
-      const selected = await input.askTeamBlueprint(blueprints);
-      if (selected?.id) {
-        await runSlashCommand(`/team blueprint ${selected.id}`);
-      }
-      return;
-    }
     if (result.prompt_prefill) {
       output.setInputPrefill?.(result.prompt_prefill);
     }

@@ -56,8 +56,14 @@ export async function openStore(directory: string, rotateEvery = 256) {
           try { await file.writeFile(JSON.stringify(state)); await file.sync(); }
           finally { await file.close(); }
           await rename(temporary, snapshot);
+          if (process.platform !== "win32") {
+            const parent = await open(directory, "r");
+            try { await parent.sync(); } finally { await parent.close(); }
+          }
           // Either the previous journal or an empty journal can recover from this snapshot.
-          await truncate(journal, 0);
+          const journalFile = await open(journal, "r+");
+          try { await journalFile.truncate(0); await journalFile.sync(); }
+          finally { await journalFile.close(); }
         }
       } catch (error) { fatal = error; throw error; }
     },

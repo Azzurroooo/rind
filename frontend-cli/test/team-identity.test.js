@@ -41,7 +41,7 @@ test("Team header fits narrow widths with long CJK fields and task counts", () =
     assert.ok(startupText(long, width).split("\n").every((line) => textWidth(line) <= width));
   }
   const header = promptText(long, {}, {}, 80).split("\n")[1];
-  assert.match(header, /\[bg:2\] \[delegate:1\]/);
+  assert.match(header, /\[bg:2\]/);
   const pathHeader = promptText({ ...long, model: "m1", background_count: 0, delegate_count: 0 }, {}, {}, 60).split("\n")[1];
   assert.match(pathHeader, /\.\.\..*coordinator$/);
 });

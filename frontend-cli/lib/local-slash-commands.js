@@ -1,6 +1,8 @@
 import { currentTheme, setTheme, themeNames, themeOptions } from "./theme.js";
 
 export const LOCAL_SLASH_COMMANDS = Object.freeze([
+  { name: "agents", description: "Teams, members, tasks and deliveries", usage: "/agents" },
+  { name: "manager", description: "Open the agents manager", usage: "/manager" },
   { name: "compact", description: "Compact current session context", usage: "/compact" },
   { name: "context", description: "Show context composition and token usage", usage: "/context" },
   { name: "effort", description: "Show or change reasoning effort", usage: "/effort [low | medium | high | xhigh | max]" },
@@ -14,7 +16,6 @@ export const LOCAL_SLASH_COMMANDS = Object.freeze([
   { name: "sessions", description: "List recent sessions", usage: "/sessions [limit]" },
   { name: "skill", description: "List skills", usage: "/skill [list]" },
   { name: "status", description: "Show session and provider status", usage: "/status" },
-  { name: "team", description: "Manage the current Team", usage: "/team create [project-id] | /team init | /team list | /team blueprint [id] | /team add <description>" },
   { name: "theme", description: "Switch the CLI color theme", usage: `/theme [${themeNames().join(" | ")}]` },
   { name: "tour", description: "Interactive feature walkthrough", usage: "/tour [page]" },
 ]);

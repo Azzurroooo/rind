@@ -112,7 +112,7 @@ test("deep links jump straight into a page", async () => {
   clock.advance(1200);
   await settle();
   const screen = (await output.flushAndGetViewport()).join("\n");
-  assert.ok(screen.includes("TOUR · Team delegation"), "deep-linked introduction opens directly");
+  assert.ok(screen.includes("TOUR · Team tasks"), "deep-linked introduction opens directly");
   input.send("q");
   await settle();
   input.send("\x1b");
@@ -158,7 +158,7 @@ test("pasted example text cannot navigate or quit the tour", async () => {
   input.send("\x1b[200~q\x1b[201~");
   await settle();
   let screen = (await output.flushAndGetViewport()).join("\n");
-  assert.ok(screen.includes("TOUR · Team delegation"), "pasted q leaves the introduction intact");
+  assert.ok(screen.includes("TOUR · Team tasks"), "pasted q leaves the introduction intact");
   input.send("\x03");
   await running;
 });
@@ -329,10 +329,10 @@ test("introduction survives resize and help, and returns on rewind or replay", a
   const assertReady = async () => {
     await settle();
     const screen = (await output.flushAndGetViewport()).join("\n");
-    assert.match(screen, /TOUR · \/team add/);
+    assert.match(screen, /TOUR · Any folder/);
     assert.match(screen, /Add a specialist/);
     assert.match(screen, /READY · Enter \/ Space to start/);
-    assert.match(screen, /Step 1\/15/);
+    assert.match(screen, /Step 1\/7/);
     assert.doesNotMatch(screen, /Demo ·|TOUR GUIDE|PAUSED|AUTO|1×/);
     assert.equal(clock.pendingCount, 0);
   };
@@ -351,7 +351,7 @@ test("introduction survives resize and help, and returns on rewind or replay", a
       input.send("\r");
       await settle();
       const screen = (await output.flushAndGetViewport()).join("\n");
-      assert.match(screen, /Demo · \/team add/);
+      assert.match(screen, /Demo · Any folder/);
       assert.match(screen, /TOUR GUIDE/);
       assert.match(screen, /PLAYING/);
       assert.doesNotMatch(screen, /READY/);
@@ -363,7 +363,7 @@ test("introduction survives resize and help, and returns on rewind or replay", a
     input.send("q");
     await settle();
     const catalog = (await output.flushAndGetViewport()).find((line) => line.includes("›"));
-    assert.match(catalog, /\/team add\s+· Add a specialist/);
+    assert.match(catalog, /Any folder\s+· Add a specialist/);
     input.send("\r");
     await assertReady();
   } finally {

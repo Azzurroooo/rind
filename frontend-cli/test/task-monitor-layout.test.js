@@ -13,7 +13,7 @@ function fixture(count = 100) {
 }
 
 test("both monitor pages obey every height budget and keep their selected row", () => {
-  for (const page of ["background", "delegates"]) {
+  for (const page of ["background"]) {
     for (const width of [4, 16, 32, 80, 100, 160]) {
       for (let height = 0; height <= 50; height += 1) {
         const params = { ...fixture(), page, width, height };
@@ -63,8 +63,8 @@ test("preview reports bounded and expired output and scrolls inside its retained
   assert.match(text({ preview: { ...params.preview, expired: true } }), /Output expired; preview incomplete/);
 });
 
-test("formatting work stays bounded as background and delegate history grows", () => {
-  for (const page of ["background", "delegates"]) {
+test("formatting work stays bounded as background history grows", () => {
+  for (const page of ["background"]) {
     for (const count of [100, 10000]) {
       const params = { ...fixture(count), page };
       let reads = 0;

@@ -1,9 +1,10 @@
 import { randomUUID, createHash } from "node:crypto";
-import { mkdir, realpath, stat, copyFile, readFile, readdir, lstat } from "node:fs/promises";
+import { createReadStream, constants } from "node:fs";
+import { mkdir, realpath, stat, copyFile, readFile, readdir, lstat, chmod } from "node:fs/promises";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import path from "node:path";
-import { activeRun, memberKey, requireValue, text, type State, type Principal, type Session, type Task, type Report, type Adapter, type AdapterHandle } from "./model.js";
+import { activeRun, memberKey, requireValue, text, type State, type Principal, type Session, type Run, type Task, type Report, type Adapter, type AdapterHandle } from "./model.js";
 import { canonicalDirectory, inside, privateDirectory, type Paths } from "./paths.js";
 import type { Store } from "./store.js";
 import { previewLegacyTeam } from "./legacy.js";
@@ -21,6 +22,7 @@ export function createService({ store, paths, adapters, toolConfig }: {
   const live = new Map<string, AdapterHandle>();
   const executions = new Set<Promise<void>>();
   const listeners = new Set<() => void>();
+  const connected = new Set<string>();
   function transaction<T>(work: (state: State) => Promise<T> | T): Promise<T> {
     const result = serial.then(async () => {
       const next = structuredClone(store.state);
@@ -48,13 +50,13 @@ export function createService({ store, paths, adapters, toolConfig }: {
     requireValue(!leader || team.leaderAgentId === session.agentId, "FORBIDDEN", "Only the team leader can coordinate this team.");
     return team;
   }
-  function taskAccess(state: State, actor: Principal, taskId: string) {
+  function taskAccess(state: State, actor: Principal, taskId: string, responding = false) {
     const task = state.tasks[taskId];
     requireValue(task, "NOT_FOUND", "Task not found.");
     const team = teamAccess(state, actor, task.teamId);
     if (actor.kind === "agent") {
       const session = sessionOf(state, actor)!;
-      requireValue(session.agentId === task.assigneeAgentId || team.leaderAgentId === session.agentId, "FORBIDDEN", "Only the task owner or team leader can update this task.");
+      requireValue(session.agentId === task.assigneeAgentId || team.leaderAgentId === session.agentId || (responding && task.blockedOn?.responder === session.agentId), "FORBIDDEN", "Only the task owner, leader or named responder can access this task.");
     }
     return task;
   }
@@ -69,10 +71,12 @@ export function createService({ store, paths, adapters, toolConfig }: {
   function requireMember(state: State, teamId: string, agentId: string) {
     requireValue(state.memberships[memberKey(teamId, agentId)], "NOT_TEAM_MEMBER", "The target is not registered in this team. Add it before starting work.");
   }
-  function addMember(state: State, actor: Principal, p: Params) {
+  async function addMember(state: State, actor: Principal, p: Params) {
     teamAccess(state, actor, p.teamId, true);
     const agent = state.agents[p.agentId];
     requireValue(agent, "NOT_FOUND", "Agent not found.");
+    await privateDirectory(paths.manager);
+    requireValue(agent.canonicalWorkspace !== await canonicalDirectory(paths.manager), "FORBIDDEN", "The manager workspace cannot join a team.");
     const conflicts = Object.values(state.memberships).filter(m => m.teamId !== p.teamId && state.agents[m.agentId].canonicalWorkspace === agent.canonicalWorkspace);
     if (conflicts.length) {
       requireValue(actor.kind === "user" && p.share === true, "WORKSPACE_SHARED", "This workspace already belongs to another team. Create an independent copy (recommended), or explicitly share it.", { teams: conflicts.map(m => state.teams[m.teamId].name), workspace: agent.canonicalWorkspace });
@@ -83,8 +87,9 @@ export function createService({ store, paths, adapters, toolConfig }: {
   }
   async function register(state: State, p: Params) {
     const canonicalWorkspace = await canonicalDirectory(text(p.workspace, "Workspace"));
+    requireValue(!inside(await canonicalDirectory(paths.state), canonicalWorkspace), "FORBIDDEN", "The management state directory cannot be an agent workspace.");
     const adapter = p.adapter || "rind";
-    requireValue(adapters[adapter], "UNSUPPORTED_ADAPTER", "No installed execution adapter: " + adapter);
+    requireValue(Object.hasOwn(adapters, adapter), "UNSUPPORTED_ADAPTER", "No installed execution adapter: " + adapter);
     const existing = Object.values(state.agents).find(a => a.canonicalWorkspace === canonicalWorkspace && a.adapter === adapter);
     if (existing) return existing;
     const agent = { id: randomUUID(), name: p.name ? text(p.name, "Name", 200) : path.basename(canonicalWorkspace), canonicalWorkspace, adapter,
@@ -101,7 +106,17 @@ export function createService({ store, paths, adapters, toolConfig }: {
   function wakeParent(state: State, child: Task) {
     if (!child.parentTaskId) return;
     const parent = state.tasks[child.parentTaskId];
-    if (!parent || parent.status !== "blocked" || parent.blockedOn?.responder !== "children") return;
+    if (!parent || parent.status !== "blocked") return;
+    if (parent.blockedOn?.responder === child.assigneeAgentId) {
+      if (child.status === "done" && child.report) {
+        note(state, parent.id, child.assigneeAgentId, child.report.summary);
+        parent.status = "queued"; parent.dispatch = true; delete parent.blockedOn;
+      } else if (["blocked", "needs_attention", "cancelled"].includes(child.status)) {
+        parent.status = "needs_attention"; parent.error = "The named responder needs help. Inspect task " + child.id;
+      }
+      return;
+    }
+    if (parent.blockedOn?.responder !== "children") return;
     const children = Object.values(state.tasks).filter(t => t.parentTaskId === parent.id);
     if (children.some(t => ["queued", "running"].includes(t.status))) return;
     parent.status = "queued";
@@ -112,7 +127,7 @@ export function createService({ store, paths, adapters, toolConfig }: {
   function workspaceBusy(state: State, workspace: string) {
     return Object.values(state.runs).some(r => activeRun(r) && state.agents[state.sessions[r.sessionId]?.agentId]?.canonicalWorkspace === workspace);
   }
-  function newRun(state: State, sessionId: string, taskId?: string) {
+  function newRun(state: State, sessionId: string, taskId?: string): Run {
     const session = state.sessions[sessionId];
     const agent = state.agents[session.agentId];
     requireValue(!workspaceBusy(state, agent.canonicalWorkspace), "WORKSPACE_BUSY", "Another run owns this workspace. Wait for it to finish or resolve its unknown status.");
@@ -133,14 +148,15 @@ export function createService({ store, paths, adapters, toolConfig }: {
     else agentIds.add(sessionOf(state, actor)!.agentId);
     const tasks = Object.values(state.tasks).filter(t => {
       if (!allowedTeams.has(t.teamId)) return false;
-      return actor.kind !== "agent" || state.teams[t.teamId].leaderAgentId === sessionOf(state, actor)!.agentId || t.assigneeAgentId === sessionOf(state, actor)!.agentId;
+      return actor.kind !== "agent" || state.teams[t.teamId].leaderAgentId === sessionOf(state, actor)!.agentId || t.assigneeAgentId === sessionOf(state, actor)!.agentId || t.blockedOn?.responder === sessionOf(state, actor)!.agentId;
     });
     const taskIds = new Set(tasks.map(t => t.id));
-    const sessions = Object.values(state.sessions).filter(s => actor.kind === "user" || (s.teamId && allowedTeams.has(s.teamId)));
+    const sessions = Object.values(state.sessions).filter(s => actor.kind !== "agent" || s.id === actor.sessionId || (s.teamId && allowedTeams.has(s.teamId)));
     return {
       seq: state.seq, teams: Object.values(state.teams).filter(t => allowedTeams.has(t.id)),
-      agents: Object.values(state.agents).filter(a => agentIds.has(a.id)).map(a => actor.kind === "user" ? a : { id: a.id, name: a.name, adapter: a.adapter }),
+      agents: Object.values(state.agents).filter(a => agentIds.has(a.id)).map(a => actor.kind === "user" ? a : { id: a.id, name: a.name, adapter: a.adapter, ...(actor.kind === "manager" ? { canonicalWorkspace: a.canonicalWorkspace } : {}) }),
       memberships, tasks, sessions: sessions.map(s => actor.kind === "user" ? s : { id: s.id, agentId: s.agentId, teamId: s.teamId, origin: s.origin }),
+      connectedSessions: sessions.filter(s => connected.has(s.id)).map(s => s.id),
       runs: Object.values(state.runs).filter(r => sessions.some(s => s.id === r.sessionId)),
       notes: Object.values(state.notes).filter(n => taskIds.has(n.taskId)),
       artifacts: Object.values(state.artifacts).filter(a => taskIds.has(a.taskId)),
@@ -153,7 +169,7 @@ export function createService({ store, paths, adapters, toolConfig }: {
       case "listTeams": return filtered(state, actor).teams;
       case "listAgents": return filtered(state, actor).agents;
       case "getTeam": { teamAccess(state, actor, p.teamId); const view = filtered(state, actor); return { team: state.teams[p.teamId], members: view.memberships.filter(m => m.teamId === p.teamId), tasks: view.tasks.filter(t => t.teamId === p.teamId) }; }
-      case "getTask": { const task = taskAccess(state, actor, p.taskId); return { ...task, notes: Object.values(state.notes).filter(n => n.taskId === task.id), artifacts: Object.values(state.artifacts).filter(a => a.taskId === task.id) }; }
+      case "getTask": { const task = taskAccess(state, actor, p.taskId, true); return { ...task, notes: Object.values(state.notes).filter(n => n.taskId === task.id), artifacts: Object.values(state.artifacts).filter(a => a.taskId === task.id) }; }
       case "createTeam": {
         requireValue(actor.kind !== "agent", "FORBIDDEN", "Only the user or manager can create teams.");
         const id = randomUUID();
@@ -195,6 +211,7 @@ export function createService({ store, paths, adapters, toolConfig }: {
         try { await lstat(target); throw new Error("exists"); } catch (error) { requireValue((error as NodeJS.ErrnoException).code === "ENOENT", "PATH_EXISTS", "Target already exists; it will not be overwritten."); }
         if (method === "createWorktree") {
           const repo = await canonicalDirectory(text(p.repository, "Repository"));
+          requireValue(actor.kind === "user" || Object.values(state.memberships).some(m => m.teamId === team.id && state.agents[m.agentId].canonicalWorkspace === repo), "FORBIDDEN", "Choose a repository already registered in this team.");
           const branch = text(p.branch, "Branch", 200);
           const base = text(p.base || "HEAD", "Base reference", 200);
           requireValue(!base.startsWith("-") && !branch.startsWith("-"), "INVALID_REF", "Git references cannot start with '-'.");
@@ -214,7 +231,7 @@ export function createService({ store, paths, adapters, toolConfig }: {
           }
         } else await mkdir(target);
         const agent = await register(state, { ...p, workspace: target });
-        addMember(state, actor, { ...p, agentId: agent.id });
+        await addMember(state, actor, { ...p, agentId: agent.id });
         return agent;
       }
       case "previewCopy": userOnly(actor); return copyPreview(text(p.source, "Source"));
@@ -228,7 +245,7 @@ export function createService({ store, paths, adapters, toolConfig }: {
         state.teams[id] = { id, name: preview.name, createRoot: path.join(paths.workspaces, id) };
         for (const source of preview.agents) {
           const agent = await register(state, source);
-          addMember(state, actor, { teamId: id, agentId: agent.id, responsibility: source.responsibility, share: p.share === true });
+          await addMember(state, actor, { teamId: id, agentId: agent.id, responsibility: source.responsibility, share: p.share === true });
           if (source.legacyId === preview.leader) state.teams[id].leaderAgentId = agent.id;
         }
         return state.teams[id];
@@ -253,11 +270,22 @@ export function createService({ store, paths, adapters, toolConfig }: {
       case "updateTask": {
         const task = taskAccess(state, actor, p.taskId);
         if (p.status === "blocked") {
+          requireValue(["running", "blocked"].includes(task.status), "TASK_NOT_RUNNING", "Only an active task can request help.");
           const responder = text(p.blockedOn?.responder, "Blocker responder", 200);
           requireValue(responder === "user" || !!state.memberships[memberKey(task.teamId, responder)], "INVALID_RESPONDER", "Choose the user or a current team member as responder.");
+          requireValue(responder !== task.assigneeAgentId, "INVALID_RESPONDER", "A blocker needs someone other than its owner.");
+          let ancestor = task.parentTaskId ? state.tasks[task.parentTaskId] : undefined;
+          while (ancestor) {
+            requireValue(ancestor.createdBy !== "system" || ancestor.assigneeAgentId !== responder, "BLOCKER_CYCLE", "This responder is already waiting in the blocker chain. Route the unresolved decision to the user.");
+            ancestor = ancestor.parentTaskId ? state.tasks[ancestor.parentTaskId] : undefined;
+          }
           task.blockedOn = { responder, action: text(p.blockedOn?.action, "Unblocking action") };
           task.status = "blocked";
           note(state, task.id, author(state, actor), "Needs " + responder + ": " + task.blockedOn.action);
+          if (responder !== "user" && !Object.values(state.tasks).some(t => t.parentTaskId === task.id && t.assigneeAgentId === responder && !["done", "cancelled"].includes(t.status))) {
+            const id = randomUUID();
+            state.tasks[id] = { id, teamId: task.teamId, assigneeAgentId: responder, createdBy: "system", brief: "Resolve the blocker on task " + task.id + ": " + task.blockedOn.action + ". Inspect getTask for context, then submit your own report; the blocked task resumes with your answer.", status: "queued", parentTaskId: task.id, dispatch: true };
+          }
         } else if (p.report) {
           requireValue(task.status === "running", "TASK_NOT_RUNNING", "Submit a report from an active task.");
           const report = validateReport(p.report);
@@ -267,8 +295,13 @@ export function createService({ store, paths, adapters, toolConfig }: {
         return task;
       }
       case "postTaskNote": {
-        const task = taskAccess(state, actor, p.taskId);
-        return note(state, task.id, author(state, actor), text(p.text, "Note"));
+        const task = taskAccess(state, actor, p.taskId, true);
+        const result = note(state, task.id, author(state, actor), text(p.text, "Note"));
+        if (p.answer === true) {
+          requireValue(task.status === "blocked" && task.blockedOn?.responder === author(state, actor), "FORBIDDEN", "Only the named responder can resolve this blocker.");
+          task.status = "queued"; task.dispatch = true; delete task.blockedOn;
+        }
+        return result;
       }
       case "publishArtifact": {
         const task = taskAccess(state, actor, p.taskId);
@@ -276,14 +309,15 @@ export function createService({ store, paths, adapters, toolConfig }: {
         requireValue(actor.kind === "user" || (actor.kind === "agent" && sessionOf(state, actor)!.agentId === task.assigneeAgentId), "FORBIDDEN", "Only the task owner can publish its files.");
         const source = await realpath(path.resolve(workspace, text(p.path, "Artifact path")));
         requireValue(inside(workspace, source) && (await stat(source)).isFile(), "INVALID_ARTIFACT", "Publish a file inside the task owner's workspace.");
-        const data = await readFile(source);
         const id = randomUUID();
         const directory = path.join(paths.artifacts, task.teamId, task.id);
         await privateDirectory(directory);
         const output = path.join(directory, id);
-        const { writeFile } = await import("node:fs/promises");
-        await writeFile(output, data, { flag: "wx", mode: 0o600 });
-        const artifact = { id, taskId: task.id, name: path.basename(source), size: data.length, sha256: createHash("sha256").update(data).digest("hex") };
+        await copyFile(source, output, constants.COPYFILE_EXCL);
+        if (process.platform !== "win32") await chmod(output, 0o600);
+        const hash = createHash("sha256");
+        for await (const data of createReadStream(output)) hash.update(data);
+        const artifact = { id, taskId: task.id, name: path.basename(source), size: (await stat(output)).size, sha256: hash.digest("hex") };
         state.artifacts[id] = artifact; return artifact;
       }
       case "readArtifact": {
@@ -311,6 +345,7 @@ export function createService({ store, paths, adapters, toolConfig }: {
       case "bindSession": {
         const session = ownSession(state, actor, p.sessionId);
         requireValue(!session.runtimeSessionId || session.runtimeSessionId === p.runtimeSessionId, "SESSION_MISMATCH", "Cannot change the runtime identity of an attached session.");
+        requireValue(!Object.values(state.sessions).some(s => s.id !== session.id && s.runtimeSessionId === p.runtimeSessionId && (s.teamId !== session.teamId || s.agentId !== session.agentId)), "SESSION_SCOPE_CONFLICT", "This conversation belongs to a different team or agent. Start a new session.");
         session.runtimeSessionId = text(p.runtimeSessionId, "Runtime session"); return session;
       }
       case "beginRun": {
@@ -318,11 +353,43 @@ export function createService({ store, paths, adapters, toolConfig }: {
         if (session.teamId) requireMember(state, session.teamId, session.agentId);
         return newRun(state, session.id);
       }
+      case "reattachSession": {
+        userOnly(actor);
+        const session = ownSession(state, actor, p.sessionId);
+        requireValue(session.origin === "direct" && session.runtimeSessionId === p.runtimeSessionId, "SESSION_MISMATCH", "Reconnection must match the original direct session.");
+        if (session.teamId) requireMember(state, session.teamId, session.agentId);
+        for (const run of Object.values(state.runs)) if (run.sessionId === session.id && activeRun(run)) {
+          run.status = p.active === true ? "running" : "failed";
+          run.lastObservedAt = new Date().toISOString();
+        }
+        return session;
+      }
+      case "hostTurnStart": {
+        userOnly(actor);
+        const session = ownSession(state, actor, p.sessionId);
+        requireValue(session.runtimeSessionId === "" || session.runtimeSessionId === p.runtimeSessionId, "SESSION_MISMATCH", "Runtime session does not match its host credential.");
+        session.runtimeSessionId = p.runtimeSessionId;
+        if (session.teamId) requireMember(state, session.teamId, session.agentId);
+        const run = Object.values(state.runs).find(r => r.sessionId === session.id && activeRun(r)) || newRun(state, session.id);
+        run.status = "running"; run.needsInput = false; run.lastObservedAt = new Date().toISOString();
+        return run;
+      }
+      case "hostTurnEnd": {
+        userOnly(actor);
+        const session = ownSession(state, actor, p.sessionId);
+        const run = Object.values(state.runs).find(r => r.sessionId === session.id && activeRun(r));
+        if (run) {
+          run.lastObservedAt = new Date().toISOString();
+          if (session.origin === "direct" && !p.pending) run.status = p.outcome === "turn_completed" ? "succeeded" : p.outcome === "turn_cancelled" ? "cancelled" : "failed";
+          run.needsInput = false;
+        }
+        return { observed: true };
+      }
       case "reportRunEvent": {
         userOnly(actor); const run = state.runs[p.runId]; requireValue(run && run.sessionId === p.sessionId, "NOT_FOUND", "Run not found.");
         requireValue(Number.isSafeInteger(p.hostSequence) && p.hostSequence > 0, "INVALID_INPUT", "A host sequence is required.");
         if (p.hostSequence <= run.hostSequence) return run;
-        requireValue(activeRun(run), "RUN_FINISHED", "A completed run cannot be reopened.");
+        if (!activeRun(run)) return run;
         requireValue(["working", "needs_input", "completed", "failed", "cancelled", "unknown"].includes(p.type), "INVALID_INPUT", "Invalid run event.");
         run.hostSequence = p.hostSequence; run.lastObservedAt = new Date().toISOString();
         run.status = p.type === "completed" ? "succeeded" : ["working", "needs_input"].includes(p.type) ? "running" : p.type;
@@ -363,14 +430,17 @@ export function createService({ store, paths, adapters, toolConfig }: {
       return result;
     });
     if (method === "cancelRun") void live.get(params.runId)?.cancel().catch(error => failRun(params.runId, error));
-    void schedule().catch(() => {});
+    if (method === "attachSession" || method === "reattachSession") connected.add((result as Session).id);
+    if (method === "detachSession") connected.delete(params.sessionId);
+    if (["attachSession", "reattachSession", "detachSession"].includes(method)) for (const listener of listeners) listener();
+    void schedule().catch(reportServiceError);
     return result;
   }
   async function failRun(runId: string, error: unknown) {
     await transaction(state => {
       const run = state.runs[runId];
       if (!run) return;
-      run.status = "unknown"; run.lastObservedAt = new Date().toISOString();
+      run.status = (error as { code?: string })?.code === "EXECUTION_FAILED" ? "failed" : "unknown"; run.lastObservedAt = new Date().toISOString();
       if (run.taskId) { const task = state.tasks[run.taskId]; task.status = "needs_attention"; task.error = String(error); delete task.dispatch; wakeParent(state, task); }
     });
   }
@@ -382,6 +452,7 @@ export function createService({ store, paths, adapters, toolConfig }: {
       const agent = state.agents[session.agentId];
       const role = state.memberships[memberKey(task.teamId, agent.id)];
       const children = Object.values(state.tasks).filter(t => t.parentTaskId === task.id).map(t => ({ id: t.id, status: t.status, report: t.report, blockedOn: t.blockedOn }));
+      const observedChildren = new Set(children.map(t => t.id));
       const instructions = [
         agent.hint || "", role?.responsibility || "",
         "You are a registered member of team " + task.teamId + ". Your agent ID is " + agent.id + "; task ID is " + task.id + ".",
@@ -397,7 +468,7 @@ export function createService({ store, paths, adapters, toolConfig }: {
           const run = next.runs[runId];
           if (!activeRun(run) || event.sequence <= run.hostSequence) return;
           run.status = "running"; run.hostSequence = event.sequence; run.needsInput = event.type === "needs_input"; run.lastObservedAt = new Date().toISOString();
-        }).catch(() => {});
+        }).catch(reportServiceError);
       });
       live.set(runId, handle);
       await transaction(next => { next.sessions[session.id].runtimeSessionId = handle.runtimeSessionId; next.runs[runId].status = "running"; });
@@ -407,20 +478,21 @@ export function createService({ store, paths, adapters, toolConfig }: {
         const run = next.runs[runId]; const task = next.tasks[taskId];
         run.status = task.status === "cancelled" ? "cancelled" : "succeeded";
         run.lastObservedAt = new Date().toISOString(); run.needsInput = false;
-        delete task.dispatch;
+        if (task.status !== "queued") delete task.dispatch;
         const children = Object.values(next.tasks).filter(t => t.parentTaskId === task.id);
         if (task.status === "cancelled") { /* Explicit human stop suppresses continuation. */ }
+        else if (task.status === "queued" && task.dispatch) { /* A routed answer arrived before this run ended. */ }
+        else if (task.status === "blocked") { /* Preserve explicitly routed blockers. */ }
         else if (children.some(t => ["queued", "running"].includes(t.status))) {
           task.status = "blocked"; task.blockedOn = { responder: "children", action: "Waiting for assigned members to return." }; delete task.report;
-        } else if (task.status === "blocked") { /* Preserve explicitly routed blockers. */ }
-        else if (task.report) { task.status = "done"; delete task.blockedOn; }
-        else if (children.length && children.some(t => !Object.values(next.notes).some(n => n.taskId === task.id && n.text.includes("Child tasks have returned")))) {
+        } else if (task.report) { task.status = "done"; delete task.blockedOn; }
+        else if (children.some(t => !observedChildren.has(t.id))) {
           task.status = "queued"; task.dispatch = true; note(next, task.id, "system", "Child tasks have returned. Review and integrate their reports.");
         } else { task.status = "needs_attention"; task.error = "Execution ended without a delivery report. Review the session and retry when ready."; }
         wakeParent(next, task);
       });
     } catch (error) { await failRun(runId, error); }
-    finally { live.delete(runId); void schedule().catch(() => {}); }
+    finally { live.delete(runId); void schedule().catch(reportServiceError); }
   }
   async function schedule() {
     if (scheduling || stopped) return;
@@ -432,7 +504,7 @@ export function createService({ store, paths, adapters, toolConfig }: {
           if (task.status !== "queued" || !task.dispatch) continue;
           const team = state.teams[task.teamId];
           const agent = state.agents[task.assigneeAgentId];
-          if (!team?.leaderAgentId || !state.memberships[memberKey(task.teamId, task.assigneeAgentId)]) { task.status = "needs_attention"; task.error = "Team leadership or membership changed."; delete task.dispatch; continue; }
+          if (!team?.leaderAgentId || !state.memberships[memberKey(task.teamId, task.assigneeAgentId)] || (!["user", "manager", "system"].includes(task.createdBy) && task.createdBy !== team.leaderAgentId)) { task.status = "needs_attention"; task.error = "Team leadership or membership changed."; delete task.dispatch; continue; }
           if (workspaceBusy(state, agent.canonicalWorkspace)) continue;
           try { await canonicalDirectory(agent.canonicalWorkspace); }
           catch (error) { task.status = "needs_attention"; task.error = String(error); delete task.dispatch; continue; }
@@ -464,10 +536,21 @@ export function createService({ store, paths, adapters, toolConfig }: {
       }
       for (const task of Object.values(state.tasks)) if (task.dispatch) { delete task.dispatch; if (task.status === "queued") { task.status = "needs_attention"; task.error = "Service restarted before dispatch. Start explicitly to continue."; } }
     }); },
-    async disconnect(sessionIds: string[]) { await transaction(state => { for (const run of Object.values(state.runs)) if (sessionIds.includes(run.sessionId) && activeRun(run)) run.status = "unknown"; }); },
+    isConnected: (sessionId: string) => connected.has(sessionId),
+    async disconnect(sessionIds: string[]) {
+      for (const id of sessionIds) connected.delete(id);
+      await transaction(state => { for (const run of Object.values(state.runs)) if (sessionIds.includes(run.sessionId) && activeRun(run)) run.status = "unknown"; });
+      for (const listener of listeners) listener();
+    },
     async stop() {
       stopped = true;
       await serial;
+      await transaction(state => {
+        for (const runId of live.keys()) {
+          const run = state.runs[runId];
+          if (run?.taskId && activeRun(run)) state.tasks[run.taskId].status = "cancelled";
+        }
+      });
       await Promise.allSettled([...live.values()].map(h => h.cancel()));
       await Promise.allSettled([...executions]);
       await serial;
@@ -477,6 +560,7 @@ export function createService({ store, paths, adapters, toolConfig }: {
 export function validateReport(p: Params): Report {
   return { outcome: text(p.outcome, "Outcome", 200), summary: text(p.summary, "Summary", 4000), evidence: strings(p.evidence, "Evidence"), artifacts: strings(p.artifacts, "Artifacts"), ...(p.nextAction ? { nextAction: text(p.nextAction, "Next action") } : {}) };
 }
+function reportServiceError(error: unknown) { console.error("Agents management state update failed:", error); }
 function strings(value: unknown, label: string): string[] {
   requireValue(Array.isArray(value) && value.length <= 100 && value.every(v => typeof v === "string" && v.length <= 4000), "INVALID_INPUT", label + " must be a list of at most 100 strings.");
   return value;

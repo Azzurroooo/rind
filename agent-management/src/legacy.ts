@@ -26,7 +26,19 @@ export async function previewLegacyTeam(rootPath: string) {
         requireValue(inside(workspace, source), "INVALID_LEGACY_TEAM", "Prompt references a file outside its member workspace.");
         promptParts.push(await readFile(source, "utf8"));
       }
-      agents.push({ legacyId: entry.name, name: manifest.metadata?.name || entry.name, workspace, hint: promptParts.join("\n"), skillRefs: manifest.spec?.skills?.enabled || [], responsibility: manifest.metadata?.description || "" });
+      const skillRefs = [];
+      for (const name of manifest.spec?.skills?.enabled || []) {
+        const candidate = path.join(manifestRoot, "skills", name, "SKILL.md");
+        try {
+          const source = await realpath(candidate);
+          requireValue(inside(workspace, source), "INVALID_LEGACY_TEAM", "Skill references a file outside its member workspace.");
+          skillRefs.push(source);
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+          skillRefs.push(name);
+        }
+      }
+      agents.push({ legacyId: entry.name, name: manifest.metadata?.name || entry.name, workspace, hint: promptParts.join("\n"), skillRefs, responsibility: manifest.metadata?.description || "" });
     } catch (error) { errors.push(entry.name + ": " + String(error)); }
   }
   requireValue(agents.some(a => a.legacyId === project.spec?.main_agent), "INVALID_LEGACY_TEAM", "Legacy leader is missing or invalid.");

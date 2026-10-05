@@ -329,10 +329,6 @@ export function createCliInputActions({
       handleSessionInput(session, event);
       return;
     }
-    if (session.mode === "team-blueprints") {
-      handleTeamBlueprintInput(session, event);
-      return;
-    }
     if (session.mode === "fork") {
       handleForkInput(session, event);
       return;
@@ -549,25 +545,6 @@ export function createCliInputActions({
     });
   }
 
-  function askTeamBlueprint(blueprints) {
-    return new Promise((resolve) => {
-      const items = (Array.isArray(blueprints) ? blueprints : []).map((item) => ({
-        id: String(item?.id || ""),
-        label: [item?.id, item?.name, item?.description].filter(Boolean).join(" · "),
-      })).filter((item) => item.id);
-      if (!items.length) {
-        resolve(null);
-        return;
-      }
-      const choiceState = createChoiceMenuState(items.map((item) => item.label), items[0].label);
-      const session = { mode: "team-blueprints", inputText: "/team blueprint", choiceState, items, resolve };
-      state.input.session = session;
-      state.input.active = true;
-      cancelActiveInput = () => completeTtyInput(session, null, false);
-      output.redraw(true);
-    });
-  }
-
   function handleQuestionInput(session, key) {
     const modified = key.ctrl || key.alt || key.shift;
     if (session.questionState.isEditing()) {
@@ -638,16 +615,6 @@ export function createCliInputActions({
     const modified = key.ctrl || key.alt || key.shift;
     if (!modified && (key.name === "enter" || key.name === "return")) {
       completeTtyInput(session, session.sessions[session.choiceState.selectedIndex()] || null, false);
-      return;
-    }
-    if (!modified && key.name === "escape") return completeTtyInput(session, null, false);
-    if (!modified && session.choiceState.handleKey(key)) output.redraw();
-  }
-
-  function handleTeamBlueprintInput(session, key) {
-    const modified = key.ctrl || key.alt || key.shift;
-    if (!modified && (key.name === "enter" || key.name === "return")) {
-      completeTtyInput(session, session.items[session.choiceState.selectedIndex()] || null, false);
       return;
     }
     if (!modified && key.name === "escape") return completeTtyInput(session, null, false);
@@ -752,7 +719,6 @@ export function createCliInputActions({
     askEffortMenu,
     askThemeMenu,
     askSessionMenu,
-    askTeamBlueprint,
     askForkPointMenu,
     askContextBoard,
     cancel: () => cancelActiveInput?.(),

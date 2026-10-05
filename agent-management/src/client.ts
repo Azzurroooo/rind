@@ -14,9 +14,10 @@ export async function connectClient({ endpoint, token, runtimeSessionId, onSnaps
   await new Promise<void>((resolve, reject) => { socket.once("connect", resolve); socket.once("error", reject); });
   socket.setEncoding("utf8");
   let buffer = "";
+  let closed = false;
   const pending = new Map<string, { resolve: (value: any) => void; reject: (error: Error) => void; timer: NodeJS.Timeout }>();
   socket.on("error", () => {});
-  socket.on("close", () => { for (const p of pending.values()) { clearTimeout(p.timer); p.reject(new Error("Management connection lost; status is unconfirmed.")); } pending.clear(); onDisconnect?.(); });
+  socket.on("close", () => { for (const p of pending.values()) { clearTimeout(p.timer); p.reject(new Error("Management connection lost; status is unconfirmed.")); } pending.clear(); if (!closed) onDisconnect?.(); });
   socket.on("data", chunk => {
     buffer += chunk;
     if (buffer.length > 32 * 1024 * 1024) { socket.destroy(new Error("Management response too large.")); return; }
@@ -43,7 +44,7 @@ export async function connectClient({ endpoint, token, runtimeSessionId, onSnaps
         socket.write(JSON.stringify({ id, token, runtimeSessionId, method, params: { requestId: id, ...params } }) + "\n");
       });
     },
-    close() { socket.destroy(); },
+    close() { closed = true; socket.destroy(); },
   };
 }
 export async function connectManagement(options: {

@@ -9,6 +9,7 @@
     "node": ">=18"
   },
   "scripts": {
+    "build": "npm --prefix ../agent-management run build",
     "test": "node --test \"test/*.test.js\""
   },
   "devDependencies": {

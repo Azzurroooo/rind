@@ -1,190 +1,57 @@
-import { demoInfo, DELEGATES } from "./demo.js";
-import {
-  assistant,
-  closeMenu,
-  exitRind,
-  menu,
-  note,
-  shell,
-  shellOut,
-  slashResult,
-  startup,
-  submit,
-  tool,
-  turnDone,
-  turnStart,
-  type,
-} from "./steps.js";
-
-const PROJECT = demoInfo({ session: "20260917_101530_ab12cd34" });
-const MAIN = {
-  ...demoInfo({ cwd: "~/demo/agents/main-agent", session: "20260917_103001_eff01a23" }),
-  team_main: { agent_id: "main-agent", project_name: "demo" },
-};
-
-function enterMainAgent({ explain = false } = {}) {
-  return [
-    shell("cd agents/main-agent"),
-    ...(explain ? [note([
-      "The shell is now in ~/demo/agents/main-agent. Start rind here so the new session",
-      "loads main-agent's identity and team context.",
-    ])] : []),
-    shell("rind", null, MAIN.cwd),
-    startup(MAIN, [
-      "Starting rind inside an agent directory makes this session that agent:",
-      "delegation and /team commands operate on the team project.",
-    ]),
-    ...(explain ? [note([
-      "The banner and status bar now show [TEAM]; the workspace is ~/demo/agents/main-agent.",
-      "This is a new main-agent session. Next, /team list verifies the team is available.",
-    ])] : []),
-  ];
-}
+import { demoInfo } from "./demo.js";
+import { assistant, note, shell, shellOut, startup, slashResult, submit, tool, turnDone, type } from "./steps.js";
 
 export const teamPages = [
   {
-    id: "team.create",
-    feature: "/team create",
-    title: "Create a Team",
+    id: "team.create", feature: "/agents", title: "Create a Team",
     steps: [
-      note([
-        "A Rind Team keeps agent workspaces under agents/ and shared files under shared/.",
-        "The .aiteam/ directories hold project and agent configuration.",
-      ]),
-      shell("rind"),
-      startup(PROJECT, [
-        "Teams start in the project root — a regular session does the creating.",
-      ]),
-      type("/team create"),
-      submit(),
-      slashResult({ text: `Team project created: demo\nMain agent: main-agent\nWorkspace: ${MAIN.cwd}` }),
-      note([
-        "The team exists, but this session is still in ~/demo. /team create does not switch workspaces.",
-        "Next, /exit returns to your shell; the team stays on disk.",
-      ]),
-      type("/exit"),
-      exitRind(),
-      shell("ls agents"),
-      shellOut(["main-agent"]),
-      note([
-        "You are back in the shell at ~/demo. main-agent is the team's coordinator",
-        "and manages specialists. Next, cd agents/main-agent enters its workspace.",
-      ]),
-      ...enterMainAgent({ explain: true }),
-      type("/team list"),
-      submit(),
-      slashResult({ text: "Team Agents:\n- main-agent | Main Agent | Default Team entry agent." }),
-      note([
-        "Create the team once from the project root; start rind in agents/main-agent to manage it.",
-        "Next time, open that workspace directly. Next pages show how to add and delegate to specialists.",
-      ]),
+      note(["Teams connect existing folders. No prescribed directory layout or agent manifest is needed.", "Use /agents for the interactive page, or the equivalent commands below."]),
+      shell("rind agents team create product"),
+      shellOut(["Team product created. Add folders and select a leader."]),
+      shell("rind agents team add product ~/demo"),
+      shellOut(["demo joined product. The first member becomes leader."]),
+      note(["The team registry lives in your RIND_HOME. Adding a folder does not move its files."]),
+      shell("rind", null, "~/demo"),
+      startup({ ...demoInfo({ session: "demo-team" }), management_label: "Team: product" }),
+      type("/agents"), submit(),
+      slashResult({ text: "Agents Management / product\nLeader: demo · Inactive\nA add folder · G worktree · D assign · M manager" }),
+      note(["Enter opens a member's ordinary chat. Esc returns to your current conversation.", "The manager is also available through /manager."]),
     ],
   },
   {
-    id: "team.add",
-    feature: "/team add",
-    title: "Add a specialist",
+    id: "team.add", feature: "Any folder", title: "Add a specialist",
     steps: [
-      note([
-        "First create a team with /team create in the project root (see Create a Team).",
-        "Then start Rind in agents/main-agent to add a specialist.",
-      ]),
-      ...enterMainAgent(),
-      type('/team add "Owns the test suite and CI wiring"'),
-      submit(),
-      slashResult({ text: "Preparing a Team Agent for: Owns the test suite and CI wiring" }),
-      turnStart("Create a Team Agent for this responsibility: Owns the test suite and CI wiring"),
-      tool("agent_create", "test-specialist", { status: "ok", output: "capsule created", durationMs: 900 }),
-      assistant("Created test-specialist to own the test suite and CI wiring."),
-      turnDone(3400, 1, 0),
-      type("/team list"),
-      submit(),
-      slashResult({
-        text: [
-          "Team Agents:",
-          "- main-agent | Main Agent | Default Team entry agent.",
-          "- test-specialist | Test Specialist | Owns the test suite and CI wiring",
-        ].join("\n"),
-      }),
-      note([
-        "The capsule directory keeps the agent's history and files, so next",
-        "week's task starts from everything it already knows.",
-      ]),
+      note(["A specialist keeps its own workspace, project skills and files. Position and responsibility are optional."]),
+      shell("rind agents team add product ~/finance --position Finance --responsibility 'Reconcile invoices'"),
+      shellOut(["finance joined product. Workspace: ~/finance"]),
+      note(["If this folder already belongs to another team, choose an independent copy (recommended) or explicitly share it.", "Shared folders run one task at a time; each team's conversations and reports remain separate."]),
+      shell("rind agents open product/finance"),
+      startup({ ...demoInfo({ cwd: "~/finance", session: "demo-finance" }), management_label: "Team: product" }),
+      note(["You can talk to any member directly. The team observes activity without broadcasting this private conversation."]),
     ],
   },
   {
-    id: "team.blueprint",
-    feature: "/team blueprint",
-    title: "Create from blueprint",
+    id: "team.worktree", feature: "Worktrees", title: "Parallel features",
     steps: [
-      note([
-        "Blueprints are local specialist templates in ~/.rind/blueprints (or RIND_HOME/blueprints).",
-        "This demo assumes a team and two installed templates; an empty installation has no blueprints.",
-      ]),
-      ...enterMainAgent(),
-      type("/team blueprint"),
-      submit(),
-      slashResult({
-        text: [
-          "Available blueprints:",
-          "- documenter | Documenter | Keeps README and RIND.md current",
-          "- reviewer | Code Reviewer | Reviews diffs against the project rules",
-        ].join("\n"),
-      }),
-      menu({
-        kind: "choice",
-        input: "/team blueprint",
-        items: [
-          "documenter · Documenter · Keeps README and RIND.md current",
-          "reviewer · Code Reviewer · Reviews diffs against the project rules",
-        ],
-        selected: 0,
-        target: 0,
-      }, [
-        "In Rind, ↑↓ selects an installed template and Enter creates that agent.",
-      ]),
-      note(["The demo selected Documenter. If your list is empty, use /team add <description> to create a specialist without a blueprint."]),
-      closeMenu("Enter"),
-      slashResult({ text: "Team Agent created: documenter\nWorkspace: ~/demo/agents/documenter" }),
-      note([
-        "The new agent is ready for delegation immediately, with the",
-        "blueprint's tool policy and prompt baked into its capsule.",
-      ]),
+      note(["Different feature worktrees have different directories, so they can run in parallel."]),
+      shell("rind agents team worktree product search ~/demo feature/search"),
+      shellOut(["Created search and registered it in product. Branch: feature/search"]),
+      shell("rind agents team worktree product export ~/demo feature/export"),
+      shellOut(["Created export and registered it in product. Branch: feature/export"]),
+      note(["The leader can create workspaces and worktrees within the team's creation root too.", "Only members registered in the current team can receive team tasks."]),
     ],
   },
   {
-    id: "team.work",
-    feature: "Team delegation",
-    title: "Work inside the team",
+    id: "team.work", feature: "Team tasks", title: "Team delivery",
     steps: [
-      note([
-        "This example needs the team and test-specialist from the previous pages.",
-        "This demo assumes the parser source is in shared/parser/. Ask for test cases in shared/ too.",
-      ]),
-      ...enterMainAgent(),
-      type("Have test-specialist read ~/demo/shared/parser/ and write unicode tests and a handoff in ~/demo/shared/"),
-      submit(),
-      menu({
-        kind: "delegates",
-        delegates: DELEGATES,
-        delegate: DELEGATES[0],
-      }, [
-        "ctrl+b shows running delegates too — watch progress without",
-        "interrupting anyone.",
-      ]),
-      note(["The demo opened Ctrl+B and switched to Delegates with →. In Rind, Esc closes this view while delegation continues."]),
-      closeMenu(),
-      tool("delegate", "test-specialist", { status: "ok", output: "6 cases written to ~/demo/shared/tokenizer.test.js; handoff: ~/demo/shared/unicode.md", durationMs: 12400 }),
-      assistant([
-        "test-specialist finished: the unicode cases live in",
-        "`~/demo/shared/tokenizer.test.js`, and the handoff summary is published at",
-        "`~/demo/shared/unicode.md`, where the main agent can read it.",
-      ]),
-      turnDone(24800, 1, 0),
-      note([
-        "Try a small task. Ask for output paths and review the files afterward.",
-        "Agents have private work/, outputs/ and memory/ directories. Use shared/ for files other agents need to read.",
-      ]),
+      note(["Give the leader the outcome you want. It assigns tasks, receives child reports, and integrates delivery.", "Humans handle decisions and blockers, rather than polling each parallel agent."]),
+      shell("rind", null, "~/demo"),
+      startup({ ...demoInfo({ session: "demo-team" }), management_label: "Team: product" }),
+      type("Ask the registered reviewer to check the parser and deliver a short findings report."), submit(),
+      tool("agent_management", "assignTask", { status: "ok", output: "Reviewer task queued; delivery will wake the leader.", durationMs: 120 }),
+      assistant("The review is assigned. Open /agents to see its status and delivery. A blocker names who must respond and what is needed."),
+      turnDone(2500, 1, 0),
+      note(["A completed process is not a completed task: delivery also requires a report with summary and evidence.", "If a host disappears, its status becomes Unconfirmed. Confirm the old process stopped before retrying."]),
     ],
   },
 ];

@@ -602,19 +602,8 @@ export function themeMenuText(items, selectedIndex = 0) {
   return `${lines.join("\n")}\n`;
 }
 
-export function taskMonitorTabs(page = "background", backgroundCount = 0, delegateCount = 0, width = 76) {
-  const background = Math.max(0, Math.floor(Number(backgroundCount) || 0));
-  const delegates = Math.max(0, Math.floor(Number(delegateCount) || 0));
-  const tabs = [
-    { page: "background", label: "Background", count: background },
-    { page: "delegates", label: "Delegates", count: delegates },
-  ].map((tab) => tab.page === page
-    ? `${bold(accent(`› ${tab.label}`))} ${dim(`[${tab.count}]`)}`
-    : dim(`  ${tab.label} [${tab.count}]`));
-  const inline = tabs.join("    ");
-  return textWidth(inline) <= Math.max(1, Number(width) || 76)
-    ? inline
-    : tabs.join("\n");
+export function taskMonitorTabs(_page = "background", backgroundCount = 0) {
+  return `${bold(accent("› Background"))} ${dim(`[${Math.max(0, Number(backgroundCount) || 0)}]`)}`;
 }
 
 export function choiceMenuText(options, selectedIndex = 0) {
@@ -838,55 +827,22 @@ export function backgroundMonitorText(tasks = [], selectedIndex = 0, selectedTas
   return lines.join("\n");
 }
 
-export function delegateMonitorText(delegates = [], selectedIndex = 0, selectedDelegate = null, width = 76) {
-  const items = Array.isArray(delegates) ? delegates : [];
-  const lines = [dim("  ←→ page · ↑↓/j/k select · esc/ctrl+b close")];
-  if (!items.length) {
-    lines.push(dim("  No delegates."));
-    return lines.join("\n");
-  }
-  for (const [index, delegate] of items.entries()) {
-    const active = index === selectedIndex;
-    const marker = active ? accent("›") : dim("·");
-    const agent = padRight(clipSingleLine(delegate?.agent_id, 28), 28);
-    const status = padRight(clipSingleLine(delegate?.status, 10), 10);
-    const task = clipSingleLine(delegate?.task, Math.max(12, width - 44));
-    lines.push(`  ${marker} ${agent} ${status} ${dim(task)}`.trimEnd());
-  }
-  lines.push("");
-  const delegate = selectedDelegate || items[selectedIndex];
-  if (!delegate) {
-    return lines.join("\n");
-  }
-  const heading = `${singleLine(delegate.agent_id) || "unknown"} · ${singleLine(delegate.status) || "unknown"}`;
-  lines.push(dim(`  ${heading}`));
-  const task = clipSingleLine(delegate.task, width);
-  if (task) {
-    lines.push(dim(`  task: ${task}`));
-  }
-  const summary = clipSingleLine(delegate.summary, width);
-  if (summary) {
-    lines.push(dim(`  ↳ ${summary}`));
-  }
-  return lines.join("\n");
-}
-
-export function taskMonitorFrame({ page, backgroundCount, delegateCount, items, index, selected,
+export function taskMonitorFrame({ page, backgroundCount, items, index, selected,
   foreground, foregroundIndex, foregroundCount, focus, preview, previewOffset, loading, error, width, height }) {
   const columns = Math.max(1, Math.floor(Number(width) || 80));
   const rows = Math.max(0, Math.floor(Number(height ?? 24) || 0));
   if (!rows) return { lines: [] };
   const inner = Math.max(1, columns - 4);
-  const tabs = taskMonitorTabs(page, backgroundCount, delegateCount, columns).split("\n");
+  const tabs = taskMonitorTabs(page, backgroundCount).split("\n");
   const foregroundLine = foreground && page === "background"
     ? `  ${focus === "foreground" ? accent("›") : dim("·")} ${dim(`Waiting ${foregroundIndex + 1}/${foregroundCount} · r background ·`)} ${clipSingleLine(foreground.command || foreground.bg_id, inner)}`
     : "";
   const footer = (rows >= 14 && columns >= 65 ? [
-    "  ←→ page · ↑↓ select · tab focus · r release · c cancel",
+    "  ↑↓ select · tab focus · r release · c cancel",
     "  PgUp/PgDn output · End tail · esc/ctrl+b close",
   ] : [rows >= 7 && columns >= 60 ? "  ↑↓ select · tab focus · r release · c cancel · esc close" : "  esc close"]).map(dim);
   const list = Array.isArray(items) ? items : [];
-  const emptyRow = dim(page === "delegates" ? "  No delegates." : "  No background tasks.");
+  const emptyRow = dim("  No background tasks.");
   if (rows <= 2) {
     const selectedRow = focus === "foreground" && foregroundLine ? foregroundLine
       : list.length ? taskMonitorRow(page, selected, focus === "list", inner) : emptyRow;
@@ -896,7 +852,7 @@ export function taskMonitorFrame({ page, backgroundCount, delegateCount, items, 
   }
   const lines = [];
   if (rows >= 8) lines.push(...tabs);
-  else if (rows >= 5) lines.push(tabs.length === 1 ? tabs[0] : tabs[page === "delegates" ? 1 : 0]);
+  else if (rows >= 5) lines.push(tabs.length === 1 ? tabs[0] : tabs[0]);
   if (foregroundLine) lines.push(foregroundLine);
   const status = error ? dim(`  ${error}`) : loading ? dim("  Loading tasks…") : "";
   const statusRows = status && rows - lines.length - footer.length >= 2 ? 1 : 0;
@@ -926,8 +882,8 @@ export function taskMonitorFrame({ page, backgroundCount, delegateCount, items, 
 
 function taskMonitorRow(page, item, active, width) {
   const marker = active ? accent("›") : dim("·");
-  const label = page === "delegates" ? item?.agent_id : item?.bg_id;
-  const detail = page === "delegates" ? item?.task : item?.command;
+  const label = item?.bg_id;
+  const detail = item?.command;
   const prefix = `  ${marker} ${clipSingleLine(label, 14)}  ${clipSingleLine(item?.status, 10)}`;
   const rest = Math.max(0, width - visibleLength(prefix) - 2);
   return clipCells(`${prefix}  ${dim(clipSingleLine(detail, rest))}`.trimEnd(), width + 4);
@@ -935,11 +891,6 @@ function taskMonitorRow(page, item, active, width) {
 
 function taskMonitorDetail(page, selected, preview, offset, width, maxRows) {
   if (!selected) return [];
-  if (page === "delegates") return [
-    dim(`  ${clipSingleLine(`${selected.agent_id} · ${selected.status}`, width)}`),
-    ...(selected.task ? [dim(`  task: ${clipSingleLine(selected.task, width - 8)}`)] : []),
-    ...(selected.summary ? [dim(`  ↳ ${clipSingleLine(selected.summary, width - 5)}`)] : []),
-  ].slice(0, maxRows);
   const heading = dim(`  ${clipSingleLine(`${selected.bg_id} · ${selected.status}`, width)}`);
   if (!preview) return [heading, dim("  Loading output…")].slice(0, maxRows);
   if (preview.error) return [heading, dim(`  Output unavailable: ${clipSingleLine(preview.error, width - 22)}`)].slice(0, maxRows);
@@ -1810,16 +1761,12 @@ function visibleLength(text) {
 
 function promptHeaderLine(info, frameWidth) {
   const backgroundCount = Number(info.background_count);
-  const delegateCount = Number(info.delegate_count);
   const taskHints = [];
   if (backgroundCount > 0) {
     taskHints.push(`[bg:${backgroundCount}]`);
   }
-  if (delegateCount > 0) {
-    taskHints.push(`[delegate:${delegateCount}]`);
-  }
   const width = composerWidth(frameWidth);
-  const badge = info.team_main ? `${teamBadge()} ` : "";
+  const badge = info.management_label ? `${bold(paint.notice(`[${singleLine(info.management_label)}]`))} ` : info.team_main ? `${teamBadge()} ` : "";
   const available = Math.max(0, width - visibleLength(badge));
   const counts = taskHints.length ? ` · ${taskHints.join(" ")}` : "";
   let taskHint = counts ? `${counts} (ctrl+b monitor)` : "";

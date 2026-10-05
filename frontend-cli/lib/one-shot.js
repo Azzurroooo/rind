@@ -5,6 +5,7 @@ import { createRuntimeClient } from "./runtime-client.js";
 import { requireRuntimeInitialization, runtimeMethods } from "./runtime-protocol.js";
 import { createOneShotProgress } from "./one-shot-progress.js";
 import { sendHelp } from "./send.js";
+import { prepareManagement, observeRuntime } from "./agents-session.js";
 
 export const oneShotHelp = [
   "Usage: rind run --prompt <text> [--dir <absolute-path>] [--session <id>]",
@@ -30,6 +31,8 @@ export const cliHelp = [
   "Usage: rind [options]",
   "",
   "Start the interactive CLI.",
+  "  /agents or rind agents: manage teams and tasks. /manager: open the manager.",
+  "  --team <id> | --standalone: choose a shared workspace's session scope.",
   "",
   oneShotHelp,
   "",
@@ -51,7 +54,8 @@ export function parseOneShotArgs(args) {
       result.traceLlm = true;
       continue;
     }
-    if (!["--dir", "--session", "--prompt"].includes(flag)) {
+    if (flag === "--standalone") { result.standalone = true; continue; }
+    if (!["--dir", "--session", "--prompt", "--team"].includes(flag)) {
       throw new Error(`Unknown run option: ${flag}`);
     }
     const value = args[index + 1];
@@ -59,8 +63,8 @@ export function parseOneShotArgs(args) {
       throw new Error(`${flag} requires a value.`);
     }
     index += 1;
-    const key = { "--dir": "dir", "--session": "session", "--prompt": "prompt" }[flag];
-    if (result[key] !== null) throw new Error(`${flag} may only be specified once.`);
+    const key = { "--dir": "dir", "--session": "session", "--prompt": "prompt", "--team": "team" }[flag];
+    if (result[key] != null) throw new Error(`${flag} may only be specified once.`);
     result[key] = value;
   }
   if (!result.prompt?.trim()) throw new Error("--prompt requires a non-empty value.");
@@ -146,15 +150,21 @@ export async function runOneShot({ args, python, repoRoot, runtimePath, cwd = pr
   const progress = createOneShotProgress({ stderr, stream: process.stderr });
   let anonymousToolCounter = 0;
   let client;
+  let management;
   try {
+    management = clientFactory === createRuntimeClient
+      ? await prepareManagement([...runtimeArgs, ...(options.team ? ["--team", options.team] : []), ...(options.standalone ? ["--standalone"] : [])], { python, repoRoot, runtimePath }, { interactive: false })
+      : { args: runtimeArgs };
     progress.begin();
-    client = clientFactory({
+    client = observeRuntime(clientFactory({
       python,
       repoRoot,
       runtimePath,
       cwd: options.dir || cwd,
-      cliArgs: runtimeArgs,
+      cliArgs: management.args,
+      externalTools: management.externalTools,
       onMessage: (message) => {
+        management.event?.(message);
         const event = message?.event;
         const type = event?.type;
         if (message?.turn_id) turnId = String(message.turn_id);
@@ -177,7 +187,7 @@ export async function runOneShot({ args, python, repoRoot, runtimePath, cwd = pr
       onStderr: (text) => {
         if (options.debug) stderr(`${String(text).trimEnd()}\n`);
       },
-    });
+    }), management);
     client.start();
     sessionInfo = requireRuntimeInitialization(await client.request(runtimeMethods.initialize));
     const sessionId = String(sessionInfo.session_id || options.session || "").trim();
@@ -246,6 +256,7 @@ export async function runOneShot({ args, python, repoRoot, runtimePath, cwd = pr
       stderr(`Runtime shutdown failed: ${error instanceof Error ? error.message : String(error)}\n`);
       process.exitCode = 1;
     });
+    else await management?.close?.();
   }
 }
 

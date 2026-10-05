@@ -7,6 +7,35 @@ import { fileURLToPath } from "node:url";
 import { startServer } from "../dist/ipc.js";
 import { connectClient } from "../dist/client.js";
 
+test("direct host can reconcile after restart while its model cannot revive an expired session", async t => {
+  const home = await mkdtemp(path.join(os.tmpdir(), "rind-ipc-restart-"));
+  const options = { home, repoRoot: fileURLToPath(new URL("../..", import.meta.url)) };
+  let server = await startServer(options);
+  const clients = [];
+  t.after(async () => { clients.forEach(c => c.close()); await server.close(); await rm(home, { recursive: true, force: true }); });
+  const token = (await readFile(server.paths.token, "utf8")).trim();
+  const connect = async (credential = token, runtimeSessionId) => {
+    const client = await connectClient({ endpoint: server.paths.endpoint, token: credential, runtimeSessionId }); clients.push(client); return client;
+  };
+  const a = await connect();
+  const workspace = path.join(home, "workspace"); await mkdir(workspace);
+  const agent = await a.request("registerAgent", { workspace });
+  const session = await a.request("attachSession", { agentId: agent.id });
+  await a.request("bindSession", { sessionId: session.id, runtimeSessionId: "live" });
+  const config = await a.request("sessionTools", { sessionId: session.id });
+  await a.request("beginRun", { sessionId: session.id });
+  await server.close(); server = await startServer(options);
+  const model = await connect(config.env.RIND_MANAGEMENT_TOKEN, "live");
+  await assert.rejects(model.request("snapshot"), { code: "SESSION_EXPIRED" });
+  const b = await connect();
+  assert.equal((await b.request("snapshot")).runs[0].status, "unknown");
+  await b.request("reattachSession", { sessionId: session.id, runtimeSessionId: "live", active: true });
+  assert.ok((await model.request("snapshot")).sessions.some(s => s.id === session.id));
+  const host = await connect(config.lifecycle.env.RIND_MANAGEMENT_TOKEN, "live");
+  await host.request("hostTurnEnd", { outcome: "turn_completed", pending: false });
+  assert.equal((await b.request("snapshot")).runs[0].status, "succeeded");
+});
+
 test("local service has one writer, scoped credentials, subscription and disconnect reconciliation", async t => {
   const home = await mkdtemp(path.join(os.tmpdir(), "rind-ipc-"));
   const options = { home, repoRoot: fileURLToPath(new URL("../..", import.meta.url)) };
@@ -29,10 +58,15 @@ test("local service has one writer, scoped credentials, subscription and disconn
   await a.request("addMember", { teamId: team.id, agentId: agent.id });
   await a.request("setLeader", { teamId: team.id, agentId: agent.id });
   const session = await a.request("attachSession", { agentId: agent.id, teamId: team.id });
+  await a.request("bindSession", { sessionId: session.id, runtimeSessionId: "runtime-1" });
   const config = await a.request("sessionTools", { sessionId: session.id });
   const runtime = await connectClient({ endpoint: server.paths.endpoint, token: config.env.RIND_MANAGEMENT_TOKEN, runtimeSessionId: "runtime-1" });
   clients.push(runtime);
   assert.equal((await runtime.request("listTeams")).length, 1);
+  await assert.rejects(runtime.request("hostTurnEnd", { outcome: "turn_completed" }), { code: "FORBIDDEN" });
+  const host = await connectClient({ endpoint: server.paths.endpoint, token: config.lifecycle.env.RIND_MANAGEMENT_TOKEN, runtimeSessionId: "runtime-1" });
+  clients.push(host);
+  await assert.rejects(host.request("createTeam", { name: "bad-host" }), { code: "FORBIDDEN" });
   await assert.rejects(runtime.request("createTeam", { name: "bad" }), { code: "FORBIDDEN" });
   const impostor = await connectClient({ endpoint: server.paths.endpoint, token: config.env.RIND_MANAGEMENT_TOKEN, runtimeSessionId: "runtime-2" });
   clients.push(impostor);

@@ -166,7 +166,6 @@ export function createCliRuntimeController({
       turn_state: turnState,
       usage,
       background_count: 0,
-      delegate_count: 0,
     };
     state.turn.id = "";
     state.turn.active = false;

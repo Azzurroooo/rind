@@ -135,23 +135,16 @@ test("page frame titles the page and wraps every content line", () => {
   }
 });
 
-test("team lessons show main-agent identity in the banner and status bar, including after rewind", () => {
-  for (const page of tourPages().filter((page) => page.id.startsWith("team."))) {
+test("team lessons show ordinary chat with the selected team in its status bar", () => {
+  for (const page of tourPages().filter(page => page.id.startsWith("team."))) {
     const stage = createTourStage();
-    const starts = page.steps.flatMap((step, index) => step.kind === "startup" ? [index] : []);
-    for (const index of [...starts, ...[...starts].reverse()]) {
+    for (const [index, step] of page.steps.entries()) {
+      if (step.kind !== "startup") continue;
       stage.rebuildTo(page.steps, index);
-      const snapshot = stage.snapshot();
-      const isMain = snapshot.rind.info.cwd === "~/demo/agents/main-agent";
-      const view = renderTourPage(snapshot, { ...pageState("waiting"), page, stepIndex: index }, 120);
-      const lines = view.lines.map(stripAnsi);
-      const banner = lines.findLast((line) => line.includes("Rind v"));
-      const status = lines.findLast((line) => line.includes("glm-4.7") && line.includes("~/demo"));
-      assert.ok(banner, `${page.id}: startup banner visible`);
-      assert.ok(status, `${page.id}: status bar visible`);
-      assert.equal(banner.includes("[TEAM]"), isMain, `${page.id}: banner identity`);
-      assert.equal(status.includes("[TEAM]"), isMain, `${page.id}: status identity`);
-      assert.equal(lines.some((line) => line.includes("main-agent · demo")), isMain);
+      const view = renderTourPage(stage.snapshot(), { ...pageState("waiting"), page, stepIndex: index }, 120);
+      const text = view.lines.map(stripAnsi).join("\n");
+      assert.match(text, /Rind v/);
+      assert.match(text, /Team: product/);
     }
   }
 });
@@ -313,14 +306,12 @@ test("all lesson steps, contents and help fit supported terminal sizes", () => {
   }
 });
 
-test("shell history stays in chronological order across exit and restart", () => {
-  const page = tourPages().find((page) => page.id === "team.create");
-  const stage = createTourStage();
-  stage.rebuildTo(page.steps, page.steps.length - 1);
+test("team command history precedes ordinary member chat", () => {
+  const page = tourPages().find(page => page.id === "team.create");
+  const stage = createTourStage(); stage.rebuildTo(page.steps, page.steps.length - 1);
   const text = renderTourPage(stage.snapshot(), { ...pageState("end"), page }, 100).lines.map(stripAnsi).join("\n");
-  assert.ok(text.indexOf("Goodbye.") < text.indexOf("$ ls agents"));
-  assert.ok(text.indexOf("$ ls agents") < text.indexOf("$ cd agents/main-agent"));
-  assert.ok(text.includes("~/demo/agents/main-agent $ rind"));
+  assert.ok(text.indexOf("team create product") < text.indexOf("team add product"));
+  assert.ok(text.includes("Team: product"));
 });
 
 test("wrapped shell cursor remains on the command and scrollback exposes earlier rows", () => {

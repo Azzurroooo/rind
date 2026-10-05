@@ -108,7 +108,6 @@ export function createEventController({
       case "tool_requested":
         output.closeAssistant?.();
         rememberPlanInputPreview(event);
-        monitor.recordDelegateRequest?.(event);
         output.beginTool?.(event);
         return;
       case "tool_call_started":
@@ -121,7 +120,6 @@ export function createEventController({
         pendingFileChanges.delete(event.tool_call_id);
         const planInput = takePlanInput(event);
         monitor.recordResult?.(event);
-        monitor.recordDelegateResult?.(event);
         recordToolResult(event);
         const plan = event.tool_name === "update_plan" && event.status === "completed"
           ? parsePlanInput(planInput)
@@ -216,7 +214,6 @@ export function createEventController({
     toolStats = { completed: 0, failed: 0 };
     pendingFileChanges.clear();
     pendingPlanInputs.clear();
-    monitor.clearDelegates?.();
   }
 
   function recordToolResult(event) {

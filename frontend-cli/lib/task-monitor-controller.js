@@ -1,7 +1,6 @@
 import { taskMonitorFrame } from "./rendering.js";
 import { runtimeMethods } from "./runtime-protocol.js";
 
-const PAGES = ["background", "delegates"];
 const ACTIVE = new Set(["starting", "running", "cancelling"]);
 const TERMINAL = new Set(["completed", "failed", "cancelled", "timed_out", "lost"]);
 
@@ -24,7 +23,6 @@ function parseObject(value) {
 
 export function createTaskMonitorController({ request, state, redraw = () => {}, log = () => {}, terminalUi = false }) {
   const tasks = new Map();
-  const delegates = new Map();
   let monitor = null;
   let monitorInputWasActive = false;
   let refreshTimer = null;
@@ -47,10 +45,8 @@ export function createTaskMonitorController({ request, state, redraw = () => {},
   const foregrounds = () => foregroundItems ??= supportsTasks() ? [...tasks.values()].filter((task) => !task.handoff && ACTIVE.has(task.status))
     .sort((a, b) => (Number(b.started_at) || 0) - (Number(a.started_at) || 0)
       || String(a.bg_id).localeCompare(String(b.bg_id))) : [];
-  const delegateItems = () => [...delegates.values()];
   const selectedBackground = () => tasks.get(monitor?.backgroundId) || backgrounds()[0];
   const selectedForeground = () => tasks.get(monitor?.foregroundId) || foregrounds()[0];
-  const selectedDelegate = () => delegates.get(monitor?.delegateId) || delegateItems()[0];
 
   function nearest(before, after, id, key) {
     if (after.some((item) => item[key] === id)) return id;
@@ -178,9 +174,8 @@ export function createTaskMonitorController({ request, state, redraw = () => {},
 
   function updateCount() {
     const backgroundCount = [...tasks.values()].filter((task) => task.handoff && ACTIVE.has(task.status)).length;
-    const delegateCount = [...delegates.values()].filter((item) => item.status === "running").length;
-    if (Number(state.sessionInfo?.background_count) !== backgroundCount || Number(state.sessionInfo?.delegate_count) !== delegateCount) {
-      state.sessionInfo = { ...state.sessionInfo, background_count: backgroundCount, delegate_count: delegateCount };
+    if (Number(state.sessionInfo?.background_count) !== backgroundCount) {
+      state.sessionInfo = { ...state.sessionInfo, background_count: backgroundCount };
       redraw();
     }
     if (backgroundCount && !supportsTasks() && !refreshTimer && !state.runtimeClosing) {
@@ -200,27 +195,18 @@ export function createTaskMonitorController({ request, state, redraw = () => {},
     tasks.clear();
     backgroundItems = null;
     foregroundItems = null;
-    delegates.clear();
     preview = null;
     listLoading = false;
     listError = "";
     if (monitor) {
       monitor.backgroundId = null;
       monitor.foregroundId = null;
-      monitor.delegateId = null;
       monitor.followId = null;
       monitor.previewOffset = 0;
     }
     if (refreshTimer) clearInterval(refreshTimer);
     refreshTimer = null;
     updateCount();
-  }
-
-  function clearDelegates() {
-    delegates.clear();
-    if (monitor) monitor.delegateId = null;
-    updateCount();
-    if (monitor?.page === "delegates") redraw();
   }
 
   function recordResult(event) {
@@ -235,51 +221,24 @@ export function createTaskMonitorController({ request, state, redraw = () => {},
     if (monitor?.backgroundId === (data.task_id || data.bg_id)) void readPreview();
   }
 
-  function recordDelegateRequest(event) {
-    if (event?.tool_name !== "delegate" || !event.tool_call_id) return;
-    const args = parseObject(event.args_preview);
-    const agentId = String(args.agent_id || "").trim();
-    if (!agentId) return;
-    delegates.set(event.tool_call_id, { id: event.tool_call_id, agent_id: agentId, task: String(args.task || "").trim(), status: "running", summary: "" });
-    if (monitor && !monitor.delegateId) monitor.delegateId = event.tool_call_id;
-    updateCount();
-    if (monitor?.page === "delegates") redraw();
-  }
-
-  function recordDelegateResult(event) {
-    if (event?.tool_name !== "delegate" || !event.tool_call_id) return;
-    const previous = delegates.get(event.tool_call_id);
-    if (!previous) return;
-    const parsed = parseObject(event.result);
-    const data = parsed.data && typeof parsed.data === "object" ? parsed.data : parsed;
-    delegates.set(event.tool_call_id, { ...previous, status: String(data.status || event.status || "completed").trim(),
-      summary: String(data.summary || "").trim() });
-    updateCount();
-    if (monitor?.page === "delegates") redraw();
-  }
-
-  function initialPage() {
-    return backgrounds().length || foregrounds().length ? "background" : "delegates";
-  }
-
   function enterMonitor() {
     if (monitor || state.runtimeClosing) return;
     monitorInputWasActive = state.inputActive;
-    monitor = { page: initialPage(), pageChanged: false, backgroundId: backgrounds()[0]?.bg_id || null,
-      foregroundId: foregrounds()[0]?.bg_id || null, delegateId: delegateItems()[0]?.id || null,
+    monitor = { page: "background", pageChanged: false, backgroundId: backgrounds()[0]?.bg_id || null,
+      foregroundId: foregrounds()[0]?.bg_id || null,
       focus: foregrounds().length ? "foreground" : "list", previewOffset: 0, followId: null };
     const openedMonitor = monitor;
     state.inputActive = true;
     redraw(true);
     void refresh().then(() => {
       if (monitor !== openedMonitor) return;
-      if (!tasks.size && !delegates.size && !listError) {
+      if (!tasks.size && !listError) {
         exitMonitor();
-        log("No background tasks or delegates.");
+        log("No background tasks. Use /agents for team tasks.");
         return;
       }
       if (!monitor.pageChanged) {
-        monitor.page = initialPage();
+        monitor.page = "background";
         monitor.focus = foregrounds().length ? "foreground" : "list";
       }
       if (!supportsTasks() && !monitorTimer) {
@@ -343,27 +302,16 @@ export function createTaskMonitorController({ request, state, redraw = () => {},
 
   function moveSelection(delta) {
     if (!monitor) return;
-    const isDelegate = monitor.page === "delegates";
     // Waiting tasks precede handed-off tasks in one continuous navigation order.
-    const waiting = isDelegate ? [] : foregrounds();
-    const items = isDelegate ? delegateItems() : [...waiting, ...backgrounds()];
+    const waiting = foregrounds();
+    const items = [...waiting, ...backgrounds()];
     if (!items.length) return;
-    const field = isDelegate ? "delegateId" : monitor.focus === "foreground" ? "foregroundId" : "backgroundId";
-    const key = isDelegate ? "id" : "bg_id";
+    const field = monitor.focus === "foreground" ? "foregroundId" : "backgroundId";
+    const key = "bg_id";
     const index = Math.max(0, items.findIndex((item) => item[key] === monitor[field]));
     const next = ((index + delta) % items.length + items.length) % items.length;
-    if (isDelegate) monitor.delegateId = items[next].id;
-    else {
-      monitor.focus = next < waiting.length ? "foreground" : "list";
-      monitor[next < waiting.length ? "foregroundId" : "backgroundId"] = items[next].bg_id;
-    }
-    selectionChanged();
-  }
-
-  function switchPage(delta) {
-    if (!monitor) return;
-    monitor.page = PAGES[(PAGES.indexOf(monitor.page) + delta + PAGES.length) % PAGES.length];
-    if (monitor.page === "background") monitor.focus = foregrounds().length ? "foreground" : "list";
+    monitor.focus = next < waiting.length ? "foreground" : "list";
+    monitor[next < waiting.length ? "foregroundId" : "backgroundId"] = items[next].bg_id;
     selectionChanged();
   }
 
@@ -371,8 +319,6 @@ export function createTaskMonitorController({ request, state, redraw = () => {},
     if (!monitor) return true;
     const modified = key.ctrl || key.alt || key.shift;
     if ((!modified && key.name === "escape") || (key.ctrl && key.name === "b")) { exitMonitor(); return true; }
-    if (!modified && key.name === "left") { switchPage(-1); return true; }
-    if (!modified && key.name === "right") { switchPage(1); return true; }
     if (!modified && key.name === "tab" && monitor.page === "background" && foregrounds().length && backgrounds().length) {
       monitor.focus = monitor.focus === "foreground" ? "list" : "foreground";
       selectionChanged();
@@ -390,14 +336,14 @@ export function createTaskMonitorController({ request, state, redraw = () => {},
   }
 
   function frame(width, height = 24) {
-    const page = monitor?.page || initialPage();
-    const items = page === "delegates" ? delegateItems() : backgrounds();
-    const selected = page === "delegates" ? selectedDelegate() : selectedBackground();
-    const index = Math.max(0, items.findIndex((item) => page === "delegates" ? item.id === selected?.id : item.bg_id === selected?.bg_id));
+    const page = "background";
+    const items = backgrounds();
+    const selected = selectedBackground();
+    const index = Math.max(0, items.findIndex((item) => item.bg_id === selected?.bg_id));
     const foregroundItems = page === "background" ? foregrounds() : [];
     const foreground = selectedForeground();
     const foregroundIndex = foregroundItems.findIndex((item) => item === foreground);
-    return taskMonitorFrame({ page, backgroundCount: backgrounds().length, delegateCount: delegates.size,
+    return taskMonitorFrame({ page, backgroundCount: backgrounds().length,
       items, index, selected, foreground, foregroundIndex, foregroundCount: foregroundItems.length,
       focus: monitor?.focus || "list", preview: preview?.id === selected?.bg_id ? preview : null,
       previewOffset: monitor?.previewOffset || 0, loading: listLoading, error: listError, width, height });
@@ -415,9 +361,8 @@ export function createTaskMonitorController({ request, state, redraw = () => {},
     tasks.clear();
     backgroundItems = null;
     foregroundItems = null;
-    delegates.clear();
   }
 
-  return { recordTask, refresh, recordResult, recordDelegateRequest, recordDelegateResult, clearDelegates,
+  return { recordTask, refresh, recordResult,
     enterMonitor, exitMonitor, handleInput, clear, stop, frame, isMonitoring: () => Boolean(monitor), moveSelection };
 }

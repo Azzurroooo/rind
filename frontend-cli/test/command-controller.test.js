@@ -79,39 +79,14 @@ test("slash result can prefill input and start a follow-up turn", async () => {
   ]);
 });
 
-test("team blueprint menu selection reuses the slash command path", async () => {
+test("agents and manager open local surfaces without starting the runtime", async () => {
   const calls = [];
   const controller = createCommandController({
-    request: async (method, params) => {
-      calls.push({ method, params });
-      return { text: "created" };
-    },
-    turn: { submit() {} },
-    input: {
-      askTeamBlueprint: async (blueprints) => blueprints[1],
-    },
-    output: { log: (text) => calls.push({ log: typeof text === "function" ? text() : text }) },
+    request: async () => { throw new Error("No runtime request expected"); },
+    turn: {}, input: { runAgentsPage: async () => calls.push("agents"), runManager: async () => calls.push("manager") },
   });
-
-  await controller.applyResult({
-    text: "Available Team blueprints:",
-    display: {
-      type: "team_blueprints",
-      blueprints: [
-        { id: "research", name: "Research" },
-        { id: "weather", name: "Weather" },
-      ],
-    },
-  });
-
-  assert.deepEqual(calls, [
-    { log: "Available Team blueprints:" },
-    {
-      method: "rind/command/execute",
-      params: { input: "/team blueprint weather" },
-    },
-    { log: "created" },
-  ]);
+  await controller.handle("/agents"); await controller.handle("/manager");
+  assert.deepEqual(calls, ["agents", "manager"]);
 });
 
 test("slash result ignores malformed next prompts", async () => {
@@ -207,6 +182,8 @@ test("local command catalog stays complete before the runtime starts", async () 
   assert.deepEqual(names, [
     "exit",
     "quit",
+    "agents",
+    "manager",
     "compact",
     "context",
     "effort",
@@ -220,11 +197,10 @@ test("local command catalog stays complete before the runtime starts", async () 
     "sessions",
     "skill",
     "status",
-    "team",
     "theme",
     "tour",
   ]);
-  for (const name of ["compact", "fork", "init", "sessions", "skill", "team"]) {
+  for (const name of ["compact", "fork", "init", "sessions", "skill"]) {
     const result = await executeLocalSlashCommand(`/${name}`, {
       settings: { model: "m" },
       sessionInfo: {},
