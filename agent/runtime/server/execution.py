@@ -8,7 +8,6 @@ import copy
 from dataclasses import dataclass, field, replace
 import inspect
 import json
-import tempfile
 import uuid
 from typing import Any
 
@@ -431,6 +430,8 @@ class ExecutionCoordinator:
                         return
                 if checkpoint:
                     await execution.container.session_store.persist_message("user", build_goal_checkpoint_prompt(checkpoint), meta={"kind": "goal_checkpoint"})
+                if self._external_tool and not compact:
+                    await self._external_tool.notify("before", clean, {})
                 cancel_source = CancellationTokenSource(parent_token=cancellation_token)
                 execution.current_cancel = cancel_source
                 execution.container.runtime.set_user_question_responder(
@@ -470,6 +471,13 @@ class ExecutionCoordinator:
                             await self._emit_to_event_sinks(event_data)
                         yield event_data
                 finally:
+                    if self._external_tool and terminal_type and not compact:
+                        records = await self._task_notifications.store.relevant(clean)
+                        pending = any(record.get("status") not in TERMINAL_STATES for record in records.values())
+                        try:
+                            await self._external_tool.notify("after", clean, {"outcome": terminal_type, "pending": pending})
+                        except Exception:
+                            self._suppressed.add(clean)
                     if execution.current_cancel is cancel_source:
                         execution.current_cancel = None
                     cancel_source.dispose()
@@ -598,7 +606,6 @@ class ExecutionCoordinator:
         *,
         enable_user_question: bool | None = None,
         enabled_tools=None,
-        lock_workspace: bool = True,
     ) -> AgentContainer:
         clean = validate_session_id(session_id)
         async with self._lock:
@@ -609,7 +616,7 @@ class ExecutionCoordinator:
                 raise RuntimeError("Worker is shutting down.")
             task = self._starting.get(clean)
             if task is None:
-                task = asyncio.create_task(self._build_execution(clean, enable_user_question, enabled_tools, lock_workspace))
+                task = asyncio.create_task(self._build_execution(clean, enable_user_question, enabled_tools))
                 self._starting[clean] = task
         try:
             return await asyncio.shield(task)
@@ -617,7 +624,7 @@ class ExecutionCoordinator:
             if task.done() and self._starting.get(clean) is task:
                 self._starting.pop(clean)
 
-    async def _build_execution(self, clean, enable_user_question, enabled_tools, lock_workspace):
+    async def _build_execution(self, clean, enable_user_question, enabled_tools):
         metadata = await self._repository.metadata(clean)
         root = validate_workspace_root(str(metadata.get("workspace_root") or metadata.get("cwd") or ""))
         settings = await asyncio.to_thread(load_settings, root)
@@ -651,7 +658,6 @@ class ExecutionCoordinator:
                     self._enable_user_question if enable_user_question is None else enable_user_question
                 ),
                 enabled_tools=enabled_tools,
-                lock_workspace=lock_workspace,
                 workspace_root=root,
                 project_id=metadata.get("project_id"),
                 owner_agent_id=metadata.get("owner_agent_id"),
@@ -660,7 +666,6 @@ class ExecutionCoordinator:
                 shared_resources=self._shared_resources,
                 shell_tools=self._shell_tools,
                 web_sessions=self._web_sessions,
-                session_runner=self._run_delegated_session,
                 task_notifications=self._task_notifications,
                 external_tool=self._external_tool,
             )
@@ -674,112 +679,9 @@ class ExecutionCoordinator:
         self._active[clean] = _ActiveExecution(container=container)
         return container
 
-    async def _run_delegated_session(
-        self,
-        *,
-        target,
-        project,
-        parent_session_id: str | None,
-        task: str,
-        instruction: str,
-        cancellation_token,
-        persistent: bool,
-        enabled_tools=None,
-    ) -> tuple[dict[str, str], str | None]:
-        if persistent:
-            info = await self._repository.create(
-                str(target.workspace_root),
-                project_id=project.project_id,
-                owner_agent_id=target.agent_id,
-                session_type="delegated_task",
-                parent_session_id=parent_session_id,
-            )
-            session_id = str(info["session_id"])
-            await self.start_with_options(
-                session_id,
-                enable_user_question=False,
-                lock_workspace=False,
-            )
-            return await self._collect_delegated_turn(session_id, task, instruction, cancellation_token), session_id
 
-        with tempfile.TemporaryDirectory(prefix="rind-inspect-") as session_dir:
-            settings = await asyncio.to_thread(load_settings, str(target.workspace_root))
-            selection = ModelSelection(settings.provider, settings.model, settings.reasoning_effort)
-            try:
-                chat_client = await self._provider_service.create_chat_client(settings, selection, workspace_root=str(target.workspace_root))
-            except Exception as exc:
-                if getattr(exc, "code", "") != "provider_not_configured":
-                    raise
-                chat_client = self._provider_service.unavailable_client(selection, str(exc))
-            container = None
-            try:
-                container = build_agent_container(
-                    settings=settings,
-                    chat_client=chat_client,
-                    image_input=self._provider_service.resolve_selection(str(target.workspace_root), selection, settings=settings).image_input,
-                    session_dir=session_dir,
-                    enable_goal=False,
-                    enable_user_question=False,
-                    enabled_tools=enabled_tools,
-                    lock_workspace=False,
-                    workspace_root=str(target.workspace_root),
-                    project_id=project.project_id,
-                    owner_agent_id=target.agent_id,
-                    session_type="inspect",
-                    shared_resources=self._shared_resources,
-                    web_sessions=self._web_sessions,
-                )
-                response = await self._collect_container_turn(
-                    container,
-                    task,
-                    instruction,
-                    cancellation_token,
-                )
-            finally:
-                try:
-                    if container is not None:
-                        await container.shell_tools.close()
-                finally:
-                    await chat_client.close()
-        return response, None
 
-    async def _collect_delegated_turn(self, session_id: str, task: str, instruction: str, cancellation_token) -> dict[str, str]:
-        return await self._collect_events(
-            self.run_turn(
-                session_id,
-                query=task,
-                transient_system_messages=[{"role": "system", "content": instruction, "_context_kind": "delegate"}],
-                cancellation_token=cancellation_token,
-            )
-        )
 
-    async def _collect_container_turn(self, container, task: str, instruction: str, cancellation_token) -> dict[str, str]:
-        return await self._collect_events(
-            container.runtime.run_turn(
-                query=task,
-                cancellation_token=cancellation_token,
-                transient_system_messages=[{"role": "system", "content": instruction, "_context_kind": "delegate"}],
-            )
-        )
-
-    async def _collect_events(self, events) -> dict[str, str]:
-        text = ""
-        terminal: dict[str, str] | None = None
-        async for event in events:
-            event_data = event.to_dict() if hasattr(event, "to_dict") else event
-            event_type = str(event_data.get("type") or "")
-            if event_type == "assistant_message_completed":
-                text = str(event_data.get("content") or "")
-            elif event_type == "turn_cancelled":
-                terminal = {"error": str(event_data.get("reason") or "cancelled"), "error_type": "Cancelled"}
-            elif event_type == "turn_failed":
-                terminal = {
-                    "error": str(event_data.get("error") or "Delegated turn failed."),
-                    "error_type": str(event_data.get("error_type") or "DelegatedTurnFailed"),
-                }
-        if terminal is not None:
-            return terminal
-        return {"content": text}
 
     async def _release_if_idle(self, session_id: str, execution: _ActiveExecution) -> None:
         if execution.current_cancel is not None or execution.queued_turn_starts or execution.container.runtime.turn_active:

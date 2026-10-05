@@ -9,7 +9,6 @@ from agent.runtime.server.commands.model import COMMAND as MODEL_COMMAND
 from agent.runtime.server.commands.sessions import COMMAND as SESSIONS_COMMAND
 from agent.runtime.server.commands.skill import COMMAND as SKILL_COMMAND
 from agent.runtime.server.commands.status import COMMAND as STATUS_COMMAND
-from agent.runtime.server.commands.team import COMMAND as TEAM_COMMAND
 from agent.runtime.server.commands.contracts import SlashCommandInfo
 
 
@@ -19,7 +18,6 @@ def build_command_infos() -> tuple[SlashCommandInfo, ...]:
     commands.extend(
         (
             STATUS_COMMAND,
-            TEAM_COMMAND,
             SESSIONS_COMMAND,
             SKILL_COMMAND,
             INIT_COMMAND,

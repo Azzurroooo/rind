@@ -15,7 +15,6 @@ from agent.infrastructure.persistence.session_files import SessionFiles
 from agent.infrastructure.persistence.session_index_repository import SessionIndexRepository
 from agent.infrastructure.persistence.session_meta import new_session_id
 from agent.infrastructure.settings import workspace_defaults
-from agent.infrastructure.team import discover_agent
 from agent.prompts import build_system_prompt
 
 
@@ -96,17 +95,7 @@ class SessionService:
         if selection is None:
             selection = self.provider_service.default_selection(root)
         model, reasoning_effort, provider = selection.model_id, selection.reasoning_effort, selection.provider_id
-        agent_context = discover_agent(root)
-        if project_id is None and agent_context:
-            project_id = agent_context.project_id
-        if owner_agent_id is None and agent_context:
-            owner_agent_id = agent_context.agent_id
-        if session_type is None and agent_context:
-            session_type = "direct_agent_chat"
         system_prompt = build_system_prompt(str(root), environment=get_system_info(root))
-        agent_prompt = agent_context.capsule.system_prompt.strip() if agent_context else ""
-        if agent_prompt:
-            system_prompt = f"{system_prompt}\n\n{agent_prompt}"
         store = JsonlSessionStore(
             session_dir=self.session_dir,
             session_id=new_session_id(),
@@ -133,7 +122,7 @@ class SessionService:
             "reasoning_effort": store.reasoning_effort,
             "workspace_root": root,
             "turn_state": None,
-            "team_main": _team_main_info(root),
+            "team_main": None,
         }
 
     async def initial(
@@ -163,7 +152,7 @@ class SessionService:
             "provider": str(meta.get("provider") or default_provider),
             "reasoning_effort": str(meta.get("reasoning_effort") or default_effort or ""),
             "workspace_root": workspace_root,
-            "team_main": await asyncio.to_thread(_team_main_info, workspace_root),
+            "team_main": None,
             "project_id": meta.get("project_id"),
             "owner_agent_id": meta.get("owner_agent_id"),
             "session_type": meta.get("session_type"),
@@ -267,16 +256,3 @@ class SessionService:
     async def clear_goal(self, session_id: str) -> None:
         store = await self.open_store(session_id)
         await store.clear_goal()
-
-
-def _team_main_info(workspace_root: str) -> dict[str, str] | None:
-    """Optional display identity, derived from the current Team manifests."""
-    if not workspace_root:
-        return None
-    try:
-        agent = discover_agent(workspace_root)
-    except (OSError, ValueError):
-        return None
-    if agent is None or agent.project is None or agent.agent_id != agent.project.main_agent:
-        return None
-    return {"agent_id": agent.agent_id, "project_name": agent.project.name}
