@@ -26,6 +26,11 @@
 8. `0baf9d4`：TypeScript TUI 的全屏 Agents 页、终端主题和更完整的键盘导航（其鼠标部分已在 10 中移除）。
 9. `e7713fa`：服务端 `listSessions { teamId[, agentId] }` / `{ manager: true }`，Team 视图只返回注册到该 Team 的会话。
 10. `0cf5aa9`、`60cbfeb`：以 Team 组织树为核心重建 Agents 页；会话嵌套在成员下；移除全部鼠标交互。
+11. `c6c9415`：修复带颜色文本截断按字节计宽、切断转义序列导致的列错位（截图 1.png 的根因）。
+12. `980f51d`、`0b4ce98`：成员与会话分层展示、Left 逐级上移、z/Z 折叠；运行中任务提问进入 Inbox。
+13. `84d8997`：Independent 页面，按 workspace 监看非 Team 会话。
+14. `12ac83d`：添加成员表单的路径补全、实时校验与 Role/Responsibility 说明。
+15. `ce24181`：历史保留上限、快照索引投影、订阅推送合并。
 
 ## 1. 产品定义
 
@@ -191,7 +196,7 @@ Workspace 已属于另一 Team 时，交互入口必须先显示归属并让用�
 
 ```text
 Header   Agents › Team › Organization                 ! 2 need you  ● 1 working  ● connected
-Sidebar  Inbox · Manager · TEAMS(每个 Team 带最紧急状态) · New team
+Sidebar  Inbox · Manager · Independent · TEAMS(每个 Team 带最紧急状态) · New team
 Main     Team 页：Organization | Tasks（Tab / 1 / 2）；成员页：该成员在本 Team 的全部会话
 Detail   选中行说明 + Enter 的含义（宽屏在右侧，窄屏在列表下方）
 Notice   ✓/✕/• 结果消息，数秒后消失；执行中显示 spinner
@@ -199,10 +204,13 @@ Keys     只显示当前选中行可用的键；? 与 esc 永远保留；整段�
 ```
 
 - 纯键盘、不捕获鼠标。宽度 < 84 时 Sidebar 成为独立一屏（Esc 回到它，Enter 进入）。
-- Organization：汇报树（├─ └─ │ 引导线），成员下嵌套该 Team 的会话（状态 + 相对时间），每成员内联最多 3 个最紧急会话，其余折叠为 "+N more"。折叠分支显示被隐藏部分的最坏状态和隐藏数量（借鉴 Orca roll-up）。搜索/过滤保留命中项的祖先（借鉴 Paperclip filterOrgTree）。
+- Organization：汇报树（├─ └─ │ 引导线）。成员行没有状态符号，只有加粗名字、对齐的 Role 列和右侧以"人"为主语的摘要（`● working` / `! needs you` / `○ 1 open` / `idle`，见 `agents-model.js#memberState`）；会话行的状态符号位于树引导线内部自己的层级，带状态词与相对时间。这样成员与会话在视觉上绝不同级。每成员内联最多 3 个最紧急会话，其余折叠为 "+N more"。折叠分支（`▸`）显示被隐藏部分的最坏状态和隐藏数量（借鉴 Orca roll-up）。搜索/过滤保留命中项的祖先（借鉴 Paperclip filterOrgTree）。
+- 导航：Left 永远只上移一级（会话 → 成员 → Sidebar），从不折叠；Right 展开或进入；`z` 折叠当前分支、`Z` 全部折叠/展开。列表保留 2 行滚动边距。
 - 统一状态符号：`!` Needs input、`?` Unconfirmed、`●` Working、`…` Waiting、`◦` Queued、`○` Ready、`✓` Done、`·` Inactive、`×` Cancelled。定义在 `agents-model.js` 的 `STATUS`，任何地方不得另起一套。
 - Tasks：按 Needs you / In progress / Queued / Waiting on members / Delivered / Cancelled 分组；Enter 打开 Delivery（Space 动作、r 刷新）。原 Team briefing 由该分组取代。
-- Inbox：跨 Team 汇总阻塞任务、needs_attention、unknown run、提出问题的 Team 会话；Enter 直接回答/处理/加入。原 Global Overview 已删除。
+- Inbox：跨 Team 汇总阻塞任务、needs_attention、unknown run、运行中任务提问（"Task asks: …"）以及提出问题的 Team 会话；同一任务不重复。Enter 直接回答/处理/加入。原 Global Overview 已删除。
+- Independent：按 workspace 分组监看不属于任何 Team 的会话（排除 Manager）。经管理服务打开的会话显示实时状态；普通 Rind 窗口的会话由独立 Worker 运行，无法上报状态，因此诚实显示 `saved` 与最后保存时间（借鉴 Orca "show the gap, not a verdict"）。页面每 30 秒刷新；Enter 在该目录继续会话且不加入任何 Team。
+- 添加成员表单（`agents-form.js` + `path-input.js`）：路径字段支持绝对/`~`/相对路径（客户端解析为绝对路径后再提交，服务进程 cwd 不同），输入即列出匹配目录，Tab 补全、↑↓+Enter 选择、Esc 先关闭列表；实时检查显示解析后的路径、是否 Git 仓库或不可用原因，有问题的字段不能离开。新目录名字段预览完整路径并拒绝非法/已存在名称。Position 改称 Role（树中名字旁的短职位，Leader 委派时可见）；Responsibility 说明会被加入成员每个 Team 任务的指令。
 - 快捷键：`c` 新会话、`t` 派任务、`a` 添加（选中成员的直属下级）、`e` 编辑岗位、Space 全部动作、`n` 新 Team、`/` 搜索、`f` 过滤、`r` 刷新/重连、`?` 帮助。全部定义在 `agents-keys.js` 的 `KEYS`/`HELP_GROUPS`，footer、帮助层、菜单右侧快捷键共用。
 - 选择对话框：`1-9` 直接选择，右侧字母与页面快捷键一致；破坏性操作红框、默认 Cancel，`y`/`n`。表单失败保留输入，错误显示在对话框内。
 - 新建 Team 后直接进入"添加首个成员"（成为 Leader）；添加成员时始终提示"将向谁汇报"。
@@ -220,7 +228,7 @@ Keys     只显示当前选中行可用的键；? 与 esc 永远保留；整段�
 
 - `agent-management/src/model.ts`：共享类型、状态、校验和 Adapter 契约。
 - `agent-management/src/organization.ts`：直属上级、子树、无环校验和 Leader 相关组织逻辑。
-- `agent-management/src/projection.ts`：成员/Session 状态、队列原因、Team briefing。
+- `agent-management/src/projection.ts`：每次快照构建一次 `projectionIndex`，成员/Session 状态、队列原因均为线性计算；Team briefing。订阅推送在 `ipc.ts` 中按连接合并，同一批宿主事件只推一次快照，且总在请求响应之后。
 - `agent-management/src/service.ts`：权限、注册、Team/成员、Workspace/worktree、Task、Run、Session、调度和恢复，是唯一业务写入边界。
 - `agent-management/src/store.ts`：单写入 JSONL journal、snapshot、序列号和崩溃恢复。
 - `agent-management/src/ipc.ts`、`server.ts`、`client.ts`：本地服务启动、认证、请求、订阅和断线处理。
@@ -249,7 +257,9 @@ Keys     只显示当前选中行可用的键；? 与 esc 永远保留；整段�
 - `frontend-cli/lib/tui/tui.js`：终端模式、全屏、增量渲染、同步输出和光标。
 - `frontend-cli/lib/terminal-key.js`：普通键、Kitty、CSI 解析；鼠标报告解析为 null。
 - `frontend-cli/lib/theme.js`：语义主题、背景面板和选中状态。
-- `agent-management/src/history.ts`：按 Team/Agent 作用域合并 Runtime 历史与已登记会话。
+- `agent-management/src/history.ts`：按 Team/Agent 作用域合并 Runtime 历史与已登记会话；`independentHistory` 按 workspace 分组非 Team 会话。
+- `agent-management/src/retention.ts`：每个事务内的历史保留上限（512 个 receipt、每会话最新一个已结束 run、每任务最近 10 个 run；活动与 unknown run 永不删除）。
+- `frontend-cli/lib/agents-form.js`、`path-input.js`：类型化表单字段、目录补全与实时校验。
 
 ## 10. 已完成的功能面
 
@@ -289,8 +299,9 @@ npm --prefix agent-management test
 
 当前基线结果：
 
-- `frontend-cli`：514 tests，513 pass，1 skipped，0 fail。
-- `agent-management`：28 tests，28 pass，0 fail。
+- `frontend-cli`：524 tests，523 pass，1 skipped，0 fail。
+- `agent-management`：32 tests，32 pass，0 fail。
+- 颜色相关渲染测试会强制开启颜色并要求每一行的可见宽度恰好等于终端宽度、只含完整 SGR 序列；不要删除，它是截图类错位问题的回归防线。
 - 相关 `node --check` 已通过。
 - 主题测试需要清除继承的 `NO_COLOR`；有 `NO_COLOR` 时颜色断言失败是环境预期，不是业务逻辑失败。
 

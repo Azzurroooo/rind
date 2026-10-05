@@ -44,65 +44,71 @@ Press **Left (←) while the chat input is empty** to open Agents Management. A 
 ### Layout
 
 ```text
- Agents › Product › Organization                      ! 2 need you  ● 1 working  ● connected
-  ! Inbox              2│Product · 4 members · leader Lead
+ Agents › Product › Organization                        ! 1 need you  ● 1 working  ● connected
+  ! Inbox              1│Product · 4 members · leader Lead
   ◆ Manager             │ Organization   Tasks 1
-─ TEAMS · 1 ────────────│
-› ! Product          ! 2│  + Add member                          │ API
-  + New team            │  ● Lead · Leader          Working      │ Backend · reports to Lead
-                        │  ● ├─ Plan the release    Working  now │
-                        │› ! ├─ API · Backend       Needs input  │ ! Needs input
-                        │  ! │  ├─ Fix the login    Needs input  │
-                        │  ○ │  └─ DB               Ready        │ Workspace
-                        │  · └─ Web                 Inactive     │ /work/api
+  ◇ Independent         │
+─ TEAMS · 1 ────────────│  + Add member                                   │ API
+› ! Product          ! 1│  Lead          Leader                 ● working │ Backend · reports to Lead
+  + New team            │  ├─ ● Plan the release          Working     now │
+                        │  ├─ API        Backend            ! needs you   │ ! Needs you
+                        │  │  ├─ ! Fix the login          Needs input  2m │
+                        │  │  └─ DB      Database                   idle │ Workspace
+                        │  └─ Web        Frontend               ○ 1 open │ ~/work/api
  ✓ Member added
- enter conversations  c new chat  t assign task  a add report  space actions  ? help  esc back
+ enter conversations  c new chat  t assign task  a add report  space actions  z fold  ? help  esc back
 ```
 
 - **Header** — breadcrumb on the left; attention, activity and connection on the right.
-- **Sidebar** — Inbox, Manager, every team (with its most urgent status) and New team. Below 84 columns the sidebar becomes its own screen: Esc shows it, Enter opens the selection.
+- **Sidebar** — Inbox, Manager, Independent, every team (with its most urgent status) and New team. Below 84 columns the sidebar becomes its own screen: Esc shows it, Enter opens the selection.
 - **Main view** — the selected page. A team has two views, Organization and Tasks (Tab, `1`, `2`).
-- **Detail pane** — what the selected row is and what Enter does; beside the list on wide terminals, below it on tall narrow ones.
+- **Detail pane** — what the selected row is and what Enter does; beside the list from 90 columns, below it on tall narrow terminals.
 - **Status line** — the result of the last action (✓, ✕ or •), which clears after a few seconds; a spinner while an action runs.
 - **Key bar** — only the keys valid for the selected row, most important first. `?` and `esc` are always kept and hints are dropped whole, never cut in half.
 
 ### Organization
 
-The reporting tree, rooted at the leader; members without a supervisor report to the leader. **Conversations are nested under their member** with their status and how recently they were active. The three most urgent are shown inline and the rest collapse into a "+N more" row. Statuses use one glyph set everywhere: `!` Needs input, `?` Unconfirmed, `●` Working, `…` Waiting on members, `◦` Queued, `○` Ready, `✓` Done, `·` Inactive.
+The reporting tree, rooted at the leader; members without a supervisor report to the leader. Members and their conversations are drawn differently so their levels never blur:
 
-Left collapses a member's branch, or moves to its parent; Right expands. A collapsed member shows the most urgent status hidden inside it and the number of hidden rows. `/` searches and `f` filters by status; matches keep their ancestors visible and ignore collapsed branches, and Esc clears them.
+- A **member** row is the name in bold, its role in an aligned column, and a summary on the right in words about the person: `● working`, `! needs you`, `○ 1 open`, or a dim `idle`. A member has no status glyph of its own in the tree.
+- A **conversation** sits under its member, inside the tree guides, with its own glyph, status and age: `├─ ● Plan the release   Working   now`. The three most urgent are shown inline; the rest collapse into a "+N more" row.
 
-Only conversations attached to the team are listed. A member folder's independent conversations never appear here. The service enforces this through `listSessions { teamId }`, so `rind agents sessions <team>` returns the same set.
+Statuses use one glyph set everywhere: `!` Needs input, `?` Unconfirmed, `●` Working, `…` Waiting on members, `◦` Queued, `○` Ready, `✓` Done, `·` Inactive.
+
+**Left always moves up one level** — from a conversation to its member, from a member to the sidebar — and never collapses anything, so leaving the tree takes at most two presses. Right expands a collapsed member or opens it. `z` folds the selected branch and `Z` folds or unfolds all; a folded member shows `▸`, the number of hidden rows and the most urgent status hidden inside. Lists keep two rows of context around the selection while scrolling. `/` searches and `f` filters by status; matches keep their ancestors visible, and Esc clears them.
+
+Only conversations attached to the team are listed; a member folder's other conversations are on the Independent page. The service enforces this through `listSessions { teamId }`, so `rind agents sessions <team>` returns the same set.
 
 Enter on a member opens its page: every conversation it has in this team, newest and most urgent first, with **New conversation** on top. Enter on a conversation joins it in the member's workspace. Contextual keys act on the selected member: `c` new conversation, `t` assign a task, `a` add a member reporting to it, `e` edit role and responsibility, Space for all actions (change supervisor, make leader, resolve an unconfirmed run, remove from team).
 
 ### Tasks
 
-Tasks are grouped by what you do first: Needs you, In progress, Queued, Waiting on members, Delivered and Cancelled. Each row shows the owner and priority. On wide terminals it also shows the blocker, queue reason or delivery summary.
+Tasks are grouped by what you do first: Needs you, In progress, Queued, Waiting on members, Delivered and Cancelled. Each row shows the owner and priority; wide terminals add the blocker, queue reason or delivery summary. Enter opens the delivery view: outcome, evidence, artifacts, notes and recent runs; there Space opens task actions (answer or note, start or retry, queue priority, stop or cancel, resolve an unconfirmed run) and `r` refreshes. Priority only reorders waiting work; it never interrupts a running task.
 
-Enter opens the delivery view: outcome, evidence, artifacts, notes and run history. From there, Space opens task actions and `r` refreshes. Task actions:
+### Inbox, Manager and Independent
 
-- answer the blocker or add a note
-- start now or retry
-- queue priority
-- stop or cancel
-- resolve an unconfirmed run
+The **Inbox** collects everything waiting on you across teams: blocked tasks, tasks that need attention, runs whose stop could not be confirmed, running tasks that stopped to ask a question ("Task asks: …") and team conversations waiting for an answer. Enter answers, resolves or joins. Below that, every team is listed with its activity.
 
-Priority only reorders waiting work; it never interrupts a running task.
+**Manager** lists Manager conversations and starts new ones in its restricted workspace.
 
-### Inbox and Manager
+**Independent** monitors conversations that belong to no team, grouped by folder. Folders that are team members show their team; other folders appear under their basename. Conversations opened through Agents management or a registered folder show live status. Conversations from a plain Rind window run in their own Worker, which cannot report state, so they show `saved` and their last saved activity instead of a guess. Active folders sort first, and the page refreshes every 30 seconds. Enter continues a conversation in its folder (it stays outside every team); Enter on a folder, or `c`, starts a new one. The service method is `listSessions { independent: true }`.
 
-The **Inbox** collects everything waiting on you, across all teams:
+### Adding members
 
-- blocked tasks or tasks that need attention
-- runs whose stop could not be confirmed
-- team conversations that asked a question
+**Add member** offers three sources; each says who the new member will report to, and the first member of a team becomes its leader.
 
-Enter answers, resolves or joins the selected item. Below that, every team is listed with its member and activity counts. **Manager** lists Manager conversations and starts new ones in its restricted workspace.
+- **Existing folder** — `Folder` accepts an absolute path, `~/…` or a path relative to where you opened Rind. Matching folders are listed as you type: Tab completes like a shell, ↑↓ and Enter pick a folder, Esc hides the list. Below the input a live check shows the resolved path and whether it is a Git repository, or why it cannot be used. `Name` defaults to the folder name.
+- **New empty workspace** — `Folder name` previews the full path inside the team's workspace area and rejects names with slashes or ones that already exist.
+- **New Git worktree** — asked in the order you think about it: `Repository` (must be a Git repository), `New branch`, `Folder name` (derived from the branch) and `Start from` (HEAD by default).
+
+Every source asks for the same two optional fields:
+
+- **Role** — a short job title shown beside the name in the tree, e.g. Reviewer or Frontend. The leader also sees it when choosing who to delegate to.
+- **Responsibility** — what the member is in charge of, in a sentence. It is added to the member's instructions on every team task.
 
 ### Dialogs and forms
 
-Choice dialogs number their options: `1`–`9` pick directly, and the letter shown at the right runs the same action as the page shortcut. Destructive dialogs are framed in red, preselect Cancel (`n`), and require `y` or an explicit selection. Forms reuse the chat editor, so paste, cursor movement, undo and Shift+Enter work. Tab moves between fields, as do ↑↓ on single-line fields. Enter moves to the next field and saves on the last one. A failed save keeps what you typed and shows the error inside the dialog. Creating a team flows straight into adding its first member, who becomes the leader. Every add-member step says who the new member will report to.
+Choice dialogs number their options: `1`–`9` pick directly, and the letter shown at the right runs the same action as the page shortcut. Destructive dialogs are framed in red, preselect Cancel (`n`), and require `y` or an explicit selection. Dialogs open at a fixed position, so they do not jump while you type. Forms reuse the chat editor, so paste, cursor movement, undo and Shift+Enter work. Enter moves to the next field and saves on the last one; Shift+Tab goes back, and Tab moves on (in folder fields it completes). A field with a problem cannot be left, and a failed save keeps what you typed and shows the error inside the dialog. Keys typed while a save is running are replayed afterwards, unless the save opened a new dialog.
 
 Non-TTY commands support `--json`. Use `rind agents priority <task> high|normal|low`, `cancel <task>`, `show <task>`, `note <task> <text> --answer`, `start <task>`, `stop <run>` and `resolve <run> --confirm-stopped`. `rind agents import <legacy-root>` previews old `.aiteam` files; add `--confirm` after reviewing the preview. Import never edits legacy files.
 
@@ -128,7 +134,7 @@ The destination must not exist. The script builds TypeScript, copies the CLI, se
 
 ## Recovery
 
-The service refuses to silently rebuild a corrupt journal. An incomplete final line is discarded; an earlier malformed record or sequence gap stops startup and leaves the files for repair. On management restart, active runs first become `unknown`; shared Sessions are reconciled against the still-running Runtime. Queued dispatch markers are cleared. A crashed Runtime is never automatically replayed as a new execution. Resolve an unknown run only after confirming its old process has stopped, then explicitly retry the task. Published artifacts are copied into the user-private Team/Task delivery directory and checked against the task owner workspace.
+History is bounded so writes stay fast: the newest 512 request receipts (used only for retries), the latest finished run of each conversation and the last 10 runs of each task are kept; active and unconfirmed runs are never pruned. The service refuses to silently rebuild a corrupt journal. An incomplete final line is discarded; an earlier malformed record or sequence gap stops startup and leaves the files for repair. On management restart, active runs first become `unknown`; shared Sessions are reconciled against the still-running Runtime. Queued dispatch markers are cleared. A crashed Runtime is never automatically replayed as a new execution. Resolve an unknown run only after confirming its old process has stopped, then explicitly retry the task. Published artifacts are copied into the user-private Team/Task delivery directory and checked against the task owner workspace.
 
 If a process dies between creating a folder/worktree and registering it, an existing target is never overwritten on retry. Inspect and register the resulting folder through `team add`, or choose a different name. Repository changes and registry commits are separate local operations, not a filesystem transaction.
 
