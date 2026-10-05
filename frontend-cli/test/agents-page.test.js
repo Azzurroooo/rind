@@ -10,6 +10,7 @@ import { connectClient } from "../../agent-management/dist/client.js";
 import { runAgentsPage } from "../lib/agents-page.js";
 import { managementArgs } from "../lib/agents-session.js";
 import { createVirtualInput, createVirtualOutput } from "./helpers/virtual-terminal.js";
+import { connectSharedRuntime } from "../../rind-runtime-client/shared-runtime.js";
 import { createTui } from "../lib/tui/tui.js";
 
 test("manager keeps its dedicated workspace and rejects mixed session scopes", () => {
@@ -37,7 +38,7 @@ test("real CLI empty-prompt entry returns to an editable conversation repeatedly
   child.stdout.on("data", value => output.output.write(value));
   let errors = ""; child.stderr.on("data", value => { errors += value; });
   const exited = new Promise(resolve => child.once("exit", resolve));
-  t.after(async () => { if (child.exitCode === null) child.kill(); await exited; await server.close(); await rm(home, { recursive: true, force: true }); });
+  t.after(async () => { if (child.exitCode === null) child.kill(); await exited; await server.close(); await rm(home, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }); });
   async function visible(text) {
     for (let i = 0; i < 600; i++) {
       const screen = (await output.flushAndGetViewport()).join("\n");
@@ -74,7 +75,10 @@ test("page actions retain failed edits, selection across updates, task controls 
   main.addChild({ render: () => ["Original conversation", "Draft preserved"] }); main.start();
   await new Promise(resolve => setTimeout(resolve, 40)); main.stop({ releaseInput: false });
   const running = runAgentsPage({ launch, input, output: output.output, initialTeamId: team.id, manageInput: false, signal: abort.signal, openChat: async context => { chats.push(context); } });
-  t.after(async () => { abort.abort(); await running; main.stop(); client.close(); await server.close(); await rm(home, { recursive: true, force: true }); });
+  t.after(async () => { abort.abort(); await running; main.stop(); client.close(); await server.close();
+    const host = await connectSharedRuntime({ home, start: false }).catch(() => null);
+    if (host) { await host.request("runtime/shutdown").catch(() => {}); host.close(); await new Promise(resolve => setTimeout(resolve, 300)); }
+    await rm(home, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }); });
   const visible = async text => {
     for (let i = 0; i < 150; i++) {
       const screen = (await output.flushAndGetViewport()).join("\n");
@@ -86,21 +90,27 @@ test("page actions retain failed edits, selection across updates, task controls 
   const key = sequence => input.send(sequence);
   const paste = text => key("\x1b[200~" + text + "\x1b[201~");
   const back = async () => { key("\x1b"); await new Promise(resolve => setTimeout(resolve, 80)); };
-  await visible("1 teams"); key("\r"); await visible("Enter chat");
+  await visible("1 teams"); key("\r"); await visible("Team briefing"); key("\r"); await visible("In progress"); await visible("Review release"); await back(); key("\t"); await visible("Enter sessions");
   key("\r"); await visible("Use existing folder"); key("\r"); await visible("Workspace path");
   paste(path.join(home, "missing")); key("\r"); key("\r"); key("\r");
   await visible("ENOENT"); assert.match(output.getViewport().join("\n"), /missing/);
-  await back(); await visible("Enter chat");
-  key("\x1b[B"); key("\r"); await visible("In progress"); await visible("Review release"); await back();
+  await back(); await visible("Enter sessions");
   key("\x1b[B"); key(" "); await visible("Edit role and responsibility");
-  key("\x1b[B"); key("\x1b[B"); key("\r"); await visible("Member responsibility");
+  key("\x1b[B"); key("\x1b[B"); key("\x1b[B"); key("\r"); await visible("Member responsibility");
   paste("Coordinator"); key("\r"); paste("Integrate release evidence"); key("\r"); await visible("Integrate release evidence");
   await client.request("createWorkspace", { teamId: team.id, name: "Reviewer" });
-  await visible("Reviewer"); key("\r");
+  await visible("Reviewer"); key("\r"); await visible("+ New conversation"); key("\r");
   for (let i = 0; !chats.length && i < 100; i++) await new Promise(resolve => setTimeout(resolve, 20));
   assert.equal(chats[0]?.agent.id, lead.id, "live updates must preserve selected member identity");
-  await visible("Enter chat"); key("\t"); await visible("+ Assign task");
-  key("\x1b[B"); key("\x1b[B"); key(" "); await visible("Change queue priority");
+  const saved = await client.request("attachSession", { agentId: lead.id, teamId: team.id });
+  await client.request("bindSession", { sessionId: saved.id, runtimeSessionId: "20261005_selected_history" });
+  await visible("20261005_selected_history"); key("\x1b[B"); key("\r");
+  for (let i = 0; chats.length < 2 && i < 100; i++) await new Promise(resolve => setTimeout(resolve, 20));
+  assert.equal(chats[1]?.runtimeSessionId, "20261005_selected_history");
+  assert.equal(chats[1]?.agent.canonicalWorkspace, lead.canonicalWorkspace);
+  assert.equal(chats[1]?.teamId, team.id);
+  await visible("+ New conversation"); await back(); await visible("Enter sessions"); key("\t"); await visible("+ Assign task");
+  key("\x1b[B"); key(" "); await visible("Change queue priority");
   key("\x1b[B"); key("\x1b[B"); key("\x1b[B"); key("\r"); await visible("Queue priority");
   key("\x1b[A"); key("\r"); await visible("high priority");
   assert.equal((await client.request("getTask", { taskId: task.id })).priority, "high");
@@ -108,10 +118,19 @@ test("page actions retain failed edits, selection across updates, task controls 
   for (let i = 0; i < 4; i++) key("\x1b[B");
   key("\r"); await visible("Cancel task?"); key("\x1b[B"); key("\r"); await visible("Cancelled");
   assert.equal((await client.request("getTask", { taskId: task.id })).status, "cancelled");
-  key("\x1b[D"); await visible("Enter open"); key("\x1b[H"); key("\r");
-  for (let i = 0; chats.length < 2 && i < 100; i++) await new Promise(resolve => setTimeout(resolve, 20));
-  assert.equal(chats[1]?.manager, true);
-  await visible("Enter open"); abort.abort(); await running;
+  key("\x1b[D"); await visible("Enter open"); key("\x1b[H"); key("\x1b[B"); key("\r");
+  for (let i = 0; chats.length < 3 && i < 100; i++) await new Promise(resolve => setTimeout(resolve, 20));
+  assert.equal(chats[2]?.manager, true);
+  await visible("Enter open");
+  const managerSession = await client.request("attachSession", { manager: true });
+  await client.request("bindSession", { sessionId: managerSession.id, runtimeSessionId: "20261005_manager_history" });
+  key("\x1b[H"); key("\r"); await visible("20261005_manager_history");
+  key("/"); key("manager_history"); key("\r"); key("\r");
+  for (let i = 0; chats.length < 4 && i < 100; i++) await new Promise(resolve => setTimeout(resolve, 20));
+  assert.equal(chats[3]?.manager, true, "Manager history must retain its restricted identity from global Overview");
+  assert.equal(chats[3]?.runtimeSessionId, "20261005_manager_history");
+  assert.equal(chats[3]?.teamId, undefined);
+  abort.abort(); await running;
   assert.equal(input.listenerCount("data"), 0);
   assert.equal(input.isRaw, true);
   main.start({ acquireInput: false }); main.replayAll(); await visible("Original conversation");
@@ -126,7 +145,7 @@ test("agents page assembles arbitrary folders, chooses the first leader and pres
   const client = await connectClient({ endpoint: server.paths.endpoint, token: (await readFile(server.paths.token, "utf8")).trim() });
   const input = createVirtualInput(), output = createVirtualOutput();
   const running = runAgentsPage({ launch, input, output: output.output });
-  t.after(async () => { input.send("\x03"); await running; client.close(); await server.close(); await rm(home, { recursive: true, force: true }); });
+  t.after(async () => { input.send("\x03"); await running; client.close(); await server.close(); await rm(home, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }); });
   async function visible(text) {
     t.diagnostic("Waiting for " + text);
     for (let i = 0; i < 100; i++) {
@@ -137,7 +156,7 @@ test("agents page assembles arbitrary folders, chooses the first leader and pres
     assert.fail("Expected screen: " + text + "\n" + output.getViewport().join("\n"));
   }
   const paste = text => input.send("\x1b[200~" + text + "\x1b[201~");
-  await visible("+ Create team"); input.send("\r"); await visible("Team name");
+  await visible("+ Create team"); input.send("n"); await visible("Team name");
   paste("Accounts"); input.send("\r"); await visible("+ Add member");
   input.send("\r"); await visible("Use existing folder"); input.send("\r"); await visible("Workspace path"); paste(workspace); input.send("\r");
   paste("Finance"); input.send("\r"); paste("Reconcile invoices"); input.send("\r");

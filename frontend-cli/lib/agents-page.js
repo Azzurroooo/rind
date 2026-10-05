@@ -1,15 +1,17 @@
 import path from "node:path";
+import { realpath } from "node:fs/promises";
+import { sessionRows, overviewRows } from "./agents-sessions.js";
 import { createTui } from "./tui/tui.js";
 import { parseTerminalKey } from "./terminal-key.js";
 import { createLineEditor } from "./line-editor.js";
 import { createChoiceMenuState } from "./choice-menu-state.js";
 import { managementClient } from "./agents-client.js";
-import { openAgentChat } from "./agents-commands.js";
+import { openAgentChat, managerWorkspace } from "./agents-commands.js";
 import { emptyAgentsSnapshot, navigationRows, memberRows, renderAgents, clean } from "./agents-view.js";
 
 export async function runAgentsPage({ launch, input = process.stdin, output = process.stdout, manageInput = true, signal, initialTeamId, openChat = openAgentChat }) {
   const tui = createTui({ input, output, manageInput });
-  const view = { snapshot: emptyAgentsSnapshot(), nav: [], entries: [], navId: "new", selectedId: "add", teamId: "", focus: "nav", tab: "members", query: "", filter: "All", searching: false, searchEditor: createLineEditor(), dialog: null, detail: null, notice: "", connection: "Connecting…", busy: false };
+  const view = { snapshot: emptyAgentsSnapshot(), nav: [], entries: [], navId: "overview", selectedId: "add", teamId: "", focus: "nav", tab: "overview", memberId: "", memberReturnId: "", history: [], collapsed: new Set(), query: "", filter: "All", searching: false, searchEditor: createLineEditor(), dialog: null, detail: null, notice: "", connection: "Connecting…", busy: false };
   let client, connecting, closed = false, chatActive = false, initialized = false;
   let finish;
   const finished = new Promise(resolve => { finish = resolve; });
@@ -19,7 +21,9 @@ export async function runAgentsPage({ launch, input = process.stdin, output = pr
     view.nav = navigationRows(view.snapshot);
     if (!view.nav.some(row => row.id === view.navId)) view.navId = "new";
     if (view.teamId && !view.snapshot.teams.some(team => team.id === view.teamId)) { view.teamId = ""; view.focus = "nav"; }
-    view.entries = memberRows(view.snapshot, view.teamId, view.tab, view.query, view.filter);
+    view.entries = view.memberId ? [{ id: "new-session", kind: "new-session", title: "+ New conversation", caption: "Start in this member's workspace" }, ...sessionRows(view.snapshot, view.memberId, view.history, view.query, view.filter)]
+      : view.navId === "overview" ? overviewRows(view.snapshot, view.query, view.filter)
+      : memberRows(view.snapshot, view.teamId, view.tab, view.query, view.filter, view.collapsed);
     if (!view.entries.some(row => row.id === view.selectedId)) view.selectedId = view.entries[0]?.id;
     redraw();
   }
@@ -28,7 +32,7 @@ export async function runAgentsPage({ launch, input = process.stdin, output = pr
     view.snapshot = snapshot;
     if (!initialized) {
       initialized = true;
-      const first = snapshot.teams.find(t => t.id === initialTeamId) || snapshot.teams[0];
+      const first = snapshot.teams.find(t => t.id === initialTeamId);
       if (first) { view.teamId = first.id; view.navId = first.id; }
     }
     project();
@@ -82,18 +86,17 @@ export async function runAgentsPage({ launch, input = process.stdin, output = pr
   function confirm(title, description, label, action) {
     choose(title, [{ label: "Cancel", description: "Return without changing anything", action() {} }, { label, description: "Confirm this action", action }], description);
   }
-  function selectTeam(id) { view.teamId = id; view.navId = id; view.focus = "list"; view.selectedId = "add"; view.query = ""; view.searchEditor.setInput(""); view.filter = "All"; project(); }
+  function selectTeam(id) { view.teamId = id; view.navId = id; view.focus = "list"; view.memberId = ""; view.tab = "overview"; view.selectedId = "summary"; view.query = ""; view.searchEditor.setInput(""); view.filter = "All"; project(); }
   function createTeam() {
     form("Create team", [{ key: "name", label: "Team name", hint: "For example: Product or Finance" }], async values => {
       const created = await request("createTeam", values);
-      selectTeam(created.id); view.notice = "Team created. Add its first member to choose a leader.";
+      selectTeam(created.id); view.tab = "members"; view.selectedId = "add"; view.notice = "Team created. Add its first member to choose a leader.";
     });
   }
   async function finishMember(teamId, member) {
     const agentId = member.agentId || member.id;
-    if (!view.snapshot.teams.find(t => t.id === teamId)?.leaderAgentId) await request("setLeader", { teamId, agentId });
     if (view.teamId === teamId) { view.selectedId = agentId; view.tab = "members"; }
-    view.notice = "Member added. Enter opens chat; Space shows actions.";
+    view.notice = "Member added. Enter shows sessions; Space shows actions.";
   }
   async function addExisting(teamId, values, share = false) {
     try {
@@ -116,7 +119,7 @@ export async function runAgentsPage({ launch, input = process.stdin, output = pr
           const preview = await request("previewCopy", { source: values.workspace });
           const destination = path.join(view.snapshot.teams.find(t => t.id === teamId).createRoot, name);
           choose("Review copy", [
-            { label: "Copy these files", description: preview.files.length + " files · " + preview.bytes + " bytes", action: async () => finishMember(teamId, await request("copyWorkspace", { teamId, name, source: values.workspace, position: values.position, responsibility: values.responsibility, confirmation: preview.fingerprint })) },
+            { label: "Copy these files", description: preview.files.length + " files · " + preview.bytes + " bytes", action: async () => finishMember(teamId, await request("copyWorkspace", { teamId, name, source: values.workspace, position: values.position, responsibility: values.responsibility, reportsToAgentId: values.reportsToAgentId, confirmation: preview.fingerprint })) },
             { label: "View file list", description: "Included files and exclusions", action() {
               const previous = view.dialog;
               view.dialog = null;
@@ -133,16 +136,16 @@ export async function runAgentsPage({ launch, input = process.stdin, output = pr
     const fields = [{ key: "name", label: "Folder name" }, ...(worktree ? [
       { key: "repository", label: "Repository path", value: source.workspace }, { key: "branch", label: "New branch" }, { key: "base", label: "Base reference", value: "HEAD" },
     ] : [])];
-    form(worktree ? "Create worktree" : "New workspace", fields, async values => finishMember(teamId, await request(worktree ? "createWorktree" : "createWorkspace", { teamId, position: source.position, responsibility: source.responsibility, ...values })), ["Create inside: " + root]);
+    form(worktree ? "Create worktree" : "New workspace", fields, async values => finishMember(teamId, await request(worktree ? "createWorktree" : "createWorkspace", { teamId, position: source.position, responsibility: source.responsibility, reportsToAgentId: source.reportsToAgentId, ...values })), ["Create inside: " + root]);
   }
-  function addMember(teamId) {
+  function addMember(teamId, reportsToAgentId) {
     choose("Add member", [
       { label: "Use existing folder", description: "Keep its files, skills and working context", action: () => form("Add existing folder", [
         { key: "workspace", label: "Workspace path", hint: "Paste a folder path; files stay in place" },
         { key: "position", label: "Position", optional: true }, { key: "responsibility", label: "Responsibility", optional: true },
-      ], values => addExisting(teamId, values)) },
-      { label: "Create workspace", description: "An empty folder for a new role", action: () => createWorkspace(teamId, false) },
-      { label: "Create Git worktree", description: "Develop a feature on its own branch", action: () => createWorkspace(teamId, true) },
+      ], values => addExisting(teamId, { ...values, reportsToAgentId })) },
+      { label: "Create workspace", description: "An empty folder for a new role", action: () => createWorkspace(teamId, false, { reportsToAgentId }) },
+      { label: "Create Git worktree", description: "Develop a feature on its own branch", action: () => createWorkspace(teamId, true, { reportsToAgentId }) },
     ]);
   }
   function assignTask(teamId, agentId) {
@@ -158,11 +161,22 @@ export async function runAgentsPage({ launch, input = process.stdin, output = pr
       view.tab = "tasks"; view.selectedId = task.id; view.notice = "Task queued. Track its progress here.";
     }, ["Owner: " + view.snapshot.agents.find(a => a.id === agentId)?.name]);
   }
-  async function chat(manager = false, agentId) {
+  async function sessions(agentId) {
+    const result = await request("listSessions", { agentId });
+    if (!view.memberId) view.memberReturnId = view.selectedId;
+    view.memberId = agentId; view.history = result.sessions; view.selectedId = "new-session"; view.focus = "list";
+    view.query = ""; view.filter = "All"; project();
+  }
+  async function chat(manager = false, agentId, runtimeSessionId, teamId = view.teamId) {
     const agent = view.snapshot.agents.find(a => a.id === agentId);
+    if (agent) {
+      const workspace = await realpath(managerWorkspace(launch));
+      manager ||= agent.canonicalWorkspace === (process.platform === "win32" ? workspace.toLowerCase() : workspace);
+    }
+    if (manager) teamId = undefined;
     if (!manager && !agent) throw new Error("Member is no longer available.");
     chatActive = true; tui.stop({ releaseInput: false });
-    try { await openChat({ agent, teamId: view.teamId, manager, launch, input }); }
+    try { await openChat({ agent, teamId, runtimeSessionId, manager, launch, input }); }
     finally { chatActive = false; if (closed) finish(); else { tui.start({ acquireInput: false }); tui.replayAll(); } }
   }
   async function delivery(taskId) {
@@ -199,13 +213,18 @@ export async function runAgentsPage({ launch, input = process.stdin, output = pr
     const teamId = view.teamId, member = view.snapshot.agents.find(a => a.id === agentId);
     const run = view.snapshot.runs.find(r => r.status === "unknown" && view.snapshot.sessions.some(s => s.id === r.sessionId && s.agentId === agentId && s.teamId === teamId));
     choose(member?.name || "Member", [
-      { label: "Open chat", description: "Talk directly to this member", action: () => chat(false, agentId) },
+      { label: "View sessions", description: "Resume or join a live conversation", action: () => sessions(agentId) },
+      { label: "New conversation", description: "Talk directly to this member", action: () => chat(false, agentId) },
       { label: "Assign task", description: "Track progress and delivery", action: () => assignTask(teamId, agentId) },
       { label: "Edit role and responsibility", description: "Clarify what this member owns", action() {
         const membership = view.snapshot.memberships.find(m => m.teamId === teamId && m.agentId === agentId);
         form("Member responsibility", [{ key: "position", label: "Position", optional: true, value: membership?.position }, { key: "responsibility", label: "Responsibility", optional: true, value: membership?.responsibility }], values => request("updateMember", { teamId, agentId, ...values }));
       } },
-      ...(team()?.leaderAgentId !== agentId ? [{ label: "Make team leader", description: "Coordinate this team's members", action: () => request("setLeader", { teamId, agentId }) }] : []),
+      { label: "Add direct report", description: "Add a workspace below this member", action: () => addMember(teamId, agentId) },
+      ...(team()?.leaderAgentId !== agentId ? [{ label: "Change supervisor", description: "Move this member and its branch", action() {
+        const candidates = view.snapshot.memberships.filter(m => m.teamId === teamId && m.agentId !== agentId);
+        choose("Reports to", candidates.map(m => ({ label: view.snapshot.agents.find(a => a.id === m.agentId)?.name + " · " + m.agentId.slice(0, 6), description: m.position || "Member", action: () => request("setSupervisor", { teamId, agentId, reportsToAgentId: m.agentId }) })));
+      } }, { label: "Make team leader", description: "Coordinate this team's members", action: () => request("setLeader", { teamId, agentId }) }] : []),
       ...(run ? [{ label: "Resolve unknown run", description: "Confirm the old process stopped", action: () => resolveUnknown(run) }] : []),
       { label: "Remove from team", description: "Preserve workspace and history", action: () => confirm("Remove member?", [member?.name || agentId, "The folder and history will be kept."], "Remove membership", () => request("removeMember", { teamId, agentId })) },
     ]);
@@ -213,13 +232,26 @@ export async function runAgentsPage({ launch, input = process.stdin, output = pr
   function activate(actions = false) {
     const row = currentRow();
     if (!row) return;
+    if (row.kind === "overview") { view.navId = "overview"; view.teamId = ""; view.memberId = ""; view.focus = "list"; project(); return; }
+    if (row.kind === "session") {
+      view.teamId = row.teamId || "";
+      if (!actions) return perform(() => chat(false, row.agentId, row.id, row.teamId || null));
+      const session = view.snapshot.sessions.find(s => s.runtimeSessionId === row.id);
+      return choose("Session actions", [
+        { label: "Open conversation", description: row.title, action: () => chat(false, row.agentId, row.id, row.teamId || null) },
+        { label: "Member sessions", description: "All conversations in this workspace", action: () => sessions(row.agentId) },
+        ...(session?.taskId ? [{ label: "View task delivery", description: "Report and task history", action: () => delivery(session.taskId) }] : []),
+      ]);
+    }
+    if (row.kind === "new-session") return perform(() => chat(false, view.memberId));
     if (row.kind === "manager") return perform(() => chat(true));
     if (row.kind === "new") return createTeam();
     if (row.kind === "team") return selectTeam(row.id);
     if (row.kind === "summary") return perform(briefing);
     if (row.kind === "add") return view.tab === "members" ? addMember(view.teamId) : assignTask(view.teamId);
     if (row.kind === "task") return actions ? taskActions(row.id) : perform(() => delivery(row.id));
-    return actions ? memberActions(row.id) : perform(() => chat(false, row.id));
+    if (row.teamId) view.teamId = row.teamId;
+    return actions ? memberActions(row.agentId || row.id) : perform(() => sessions(row.agentId || row.id));
   }
   function move(delta, absolute) {
     const rows = view.focus === "nav" ? view.nav : view.entries;
@@ -228,6 +260,7 @@ export async function runAgentsPage({ launch, input = process.stdin, output = pr
     view[field] = rows[Math.max(0, Math.min(rows.length - 1, absolute ?? index + delta))]?.id;
     if (view.focus === "nav") {
       const selected = view.nav.find(r => r.id === view.navId);
+      view.memberId = ""; view.tab = "overview";
       view.teamId = selected?.kind === "team" ? selected.id : "";
       view.query = ""; view.searchEditor.setInput(""); view.filter = "All"; view.selectedId = "add";
     }
@@ -275,15 +308,18 @@ export async function runAgentsPage({ launch, input = process.stdin, output = pr
     else if (key.name === "pageup" || key.name === "pagedown") move(key.name === "pageup" ? -5 : 5);
     else if (key.name === "home" || key.name === "end") move(0, key.name === "home" ? 0 : Infinity);
     else if (key.name === "escape" || key.name === "left") {
-      if (view.focus === "list") { view.focus = "nav"; view.query = ""; view.filter = "All"; project(); }
+      if (view.memberId) { view.selectedId = view.memberReturnId; view.memberId = ""; view.tab = "members"; project(); }
+      else if (view.focus === "list") { view.focus = "nav"; view.query = ""; view.filter = "All"; project(); }
       else close();
+    } else if (key.name === "right" && currentRow()?.kind === "member" && currentRow().hasChildren) {
+      const id = currentRow().id; if (view.collapsed.has(id)) view.collapsed.delete(id); else view.collapsed.add(id); project();
     } else if (key.name === "enter" || key.name === "right") activate();
-    else if (key.name === "tab" && view.teamId) { view.focus = "list"; view.tab = view.tab === "members" ? "tasks" : "members"; view.selectedId = "add"; view.filter = "All"; view.query = ""; project(); }
+    else if (key.name === "tab" && view.navId === view.teamId && view.teamId && !view.memberId) { view.focus = "list"; view.tab = ["overview", "members", "tasks"][( ["overview", "members", "tasks"].indexOf(view.tab) + 1) % 3]; view.selectedId = "add"; view.filter = "All"; view.query = ""; project(); }
     else if (key.text === " ") activate(true);
     else if (key.text === "/" && view.focus === "list") { view.searching = true; view.searchEditor.setInput(view.query); }
     else if (key.text?.toLowerCase() === "f" && view.focus === "list") choose("Filter " + view.tab, ["All", "Needs input", "Unconfirmed", "Working", "Waiting", "Queued", "Ready", "Done", "Inactive", "Cancelled"].map(status => ({ label: status, description: status === "All" ? "Show every item" : "Show " + status.toLowerCase(), action() { view.filter = status; view.selectedId = "add"; } })), [], view.filter);
     else if (key.text?.toLowerCase() === "n") createTeam();
-    else if (key.text?.toLowerCase() === "r" && view.connection !== "connected") void connect();
+    else if (key.text?.toLowerCase() === "r") { if (view.connection !== "connected") void connect(); else if (view.memberId) void perform(() => sessions(view.memberId)); }
     redraw();
   }
   tui.addChild({ render: width => renderAgents(view, width, tui.rows) });

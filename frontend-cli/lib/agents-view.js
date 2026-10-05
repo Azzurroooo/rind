@@ -17,6 +17,7 @@ export function statusText(status) {
 }
 export function navigationRows(snapshot) {
   return [
+    { id: "overview", kind: "overview", title: "Overview", caption: "All teams and live sessions", details: ["All teams", "See activity across every team and enter any member session."] },
     { id: "manager", kind: "manager", title: "Manager", caption: "Coordinate all teams", details: ["Manager", "Assemble teams, delegate to leaders, and review progress.", "", "The manager sees team status and published reports. Members' private conversations stay with them."] },
     { id: "new", kind: "new", title: "+ Create team", caption: "Start with any folder", details: ["Create a team", "Choose a name, then add folders as members. The first member becomes the leader."] },
     ...snapshot.teams.map(team => {
@@ -31,10 +32,14 @@ export function navigationRows(snapshot) {
     }),
   ];
 }
-export function memberRows(snapshot, teamId, tab, query = "", filter = "All") {
+export function memberRows(snapshot, teamId, tab, query = "", filter = "All", collapsed = new Set()) {
   const team = snapshot.teams.find(t => t.id === teamId);
   const matches = text => single(text).toLowerCase().includes(query.toLowerCase());
   const members = snapshot.memberships.filter(m => m.teamId === teamId);
+  if (tab === "overview") {
+    const tasks = snapshot.tasks.filter(t => t.teamId === teamId);
+    return [{ id: "summary", kind: "summary", title: "Team briefing", caption: "Decisions, progress and delivered results", details: [team?.name || "Team", "Main agent: " + (snapshot.agents.find(a => a.id === team?.leaderAgentId)?.name || "Choose a leader"), "", ...tasks.filter(t => t.status === "needs_attention" || t.blockedOn?.responder === "user").map(t => "! " + t.brief + " — " + (t.blockedOn?.action || t.error)), "", "Tab to organization / tasks"] }];
+  }
   let rows = tab === "tasks" ? snapshot.tasks.filter(t => t.teamId === teamId).map(task => {
     const owner = snapshot.agents.find(a => a.id === task.assigneeAgentId);
     const responder = snapshot.agents.find(a => a.id === task.blockedOn?.responder)?.name || task.blockedOn?.responder;
@@ -45,12 +50,26 @@ export function memberRows(snapshot, teamId, tab, query = "", filter = "All") {
     const tasks = snapshot.tasks.filter(t => t.teamId === teamId && t.assigneeAgentId === member.agentId);
     const recent = tasks.find(t => t.status === "running") || tasks.findLast(t => ["blocked", "needs_attention"].includes(t.status)) || tasks.at(-1);
     const role = member.agentId === team?.leaderAgentId ? "Leader" : member.position || "Member";
-    return { id: member.agentId, kind: "member", title: agent?.name || "Missing member", status: agentStatus(snapshot, member.agentId, teamId), caption: role,
-      details: [agent?.name || "Missing member", role, agent?.canonicalWorkspace || "Unavailable", "", "Responsibility", member.responsibility || "No responsibility assigned", ...(recent ? ["", "Latest task", recent.brief, recent.report?.summary || recent.blockedOn?.action || recent.error || taskStatus(recent.status)] : [])] };
+    const sessions = snapshot.sessions.filter(s => s.agentId === member.agentId && s.teamId === teamId);
+    const parent = member.reportsToAgentId || (member.agentId !== team?.leaderAgentId ? team?.leaderAgentId : undefined);
+    return { id: member.agentId, parent, kind: "member", title: agent?.name || "Missing member", status: agentStatus(snapshot, member.agentId, teamId), caption: role + " · " + sessions.length + " sessions",
+      details: [agent?.name || "Missing member", role, "Reports to: " + (snapshot.agents.find(a => a.id === parent)?.name || "User"), agent?.canonicalWorkspace || "Unavailable", "", "Responsibility", member.responsibility || "No responsibility assigned", ...(recent ? ["", "Latest task", recent.brief, recent.report?.summary || recent.blockedOn?.action || recent.error || taskStatus(recent.status)] : [])] };
   });
+  if (tab === "members") {
+    const ordered = [], visited = new Set();
+    function visit(row, depth) {
+      if (visited.has(row.id)) return;
+      visited.add(row.id);
+      const children = rows.filter(r => r.parent === row.id);
+      ordered.push({ ...row, depth, hasChildren: children.length > 0, collapsed: collapsed.has(row.id), caption: row.caption + (children.length ? " · " + children.length + " direct reports" : "") });
+      if (!collapsed.has(row.id) || query || filter !== "All") children.forEach(child => visit(child, depth + 1));
+    }
+    rows.filter(row => !row.parent || !rows.some(r => r.id === row.parent)).forEach(row => visit(row, 0));
+    rows = ordered;
+  }
   rows = rows.filter(row => matches([row.title, row.caption, ...row.details].join(" ")) && (filter === "All" || row.status === filter));
-  rows.sort((a, b) => priority(a.status) - priority(b.status));
-  return [{ id: "add", kind: "add", title: tab === "tasks" ? "+ Assign task" : "+ Add member", caption: tab === "tasks" ? "Choose an owner and expected delivery" : "Existing folder, new workspace or worktree" }, { id: "summary", kind: "summary", title: "Team briefing", caption: "Deliveries, decisions and running work" }, ...rows];
+  if (tab === "tasks") rows.sort((a, b) => priority(a.status) - priority(b.status));
+  return [{ id: "add", kind: "add", title: tab === "tasks" ? "+ Assign task" : "+ Add member", caption: tab === "tasks" ? "Choose an owner and expected delivery" : "Existing folder, new workspace or worktree" }, ...rows];
 }
 const pad = (text, width) => {
   const marker = text.indexOf(CURSOR_MARKER);
@@ -77,7 +96,7 @@ function listLines(rows, selectedId, width, height, active) {
   for (const row of rows.slice(offset, offset + count)) {
     const focused = row.id === rows[selected]?.id;
     const marker = focused ? (active ? "› " : "▸ ") : "  ";
-    const name = single(row.title);
+    const name = (row.depth !== undefined ? "  ".repeat(Math.min(row.depth, 6)) + (row.hasChildren ? row.collapsed ? "▸ " : "▾ " : row.depth ? "└ " : "") : "") + single(row.title);
     const status = row.status && width >= 28 ? statusText(row.status) : "";
     const available = width - textWidth(status) - (status ? 3 : 0) - 2;
     const title = truncateToWidth(name, Math.max(4, available));
@@ -148,7 +167,7 @@ export function renderAgents(view, width, rows) {
     const mainWidth = wide ? width - navWidth - 1 : width;
     const selected = entries.find(r => r.id === selectedId);
     const main = () => {
-      const title = (tab === "members" ? "Members" : "Tasks") + " · Tab " + (tab === "members" ? "tasks" : "members");
+      const title = view.memberId ? "Sessions · " + (snapshot.agents.find(a => a.id === view.memberId)?.name || "Member") : view.navId === "overview" ? "All teams · Sessions" : ({ overview: "Team overview", members: "Organization", tasks: "Tasks" }[tab] || tab) + " · Tab switch";
       const interior = Math.max(1, mainWidth - 4);
       const search = view.searching ? editorLines(view.searchEditor, interior, 1) : [paint.dim("/ Search" + (query ? ": " + single(query) : "") + " · " + filter)];
       const available = bodyHeight - 4;
@@ -161,21 +180,23 @@ export function renderAgents(view, width, rows) {
       }
       const detailSize = bodyHeight >= 13 ? Math.min(7, Math.max(4, Math.floor(available / 3))) : 0;
       const list = listLines(entries, selectedId, interior, Math.max(1, available - detailSize - 1), focus === "list");
-      if (entries.length === 2) list.splice(4, 0, paint.dim(query || filter !== "All" ? "No matches. Clear search or filter." : tab === "members" ? "Add a folder to start this team." : "Assign a goal to your team leader."));
+      if (!entries.length || (entries.length === 1 && entries[0].kind === "add")) list.splice(entries.length * 2, 0, paint.dim(query || filter !== "All" ? "No matches. Clear search or filter." : tab === "members" ? "Add a folder to start this team." : "Assign a goal to your team leader."));
       const preview = detailSize ? [paint.dim("─".repeat(interior)), ...wrapped(selected?.details || [selected?.caption || ""], interior).slice(0, detailSize - 1)] : [];
       return box(title, [...search, "", ...fit(list, Math.max(1, available - detailSize - 1)), ...preview], mainWidth, bodyHeight, focus === "list");
     };
     const left = box("Teams", listLines(nav, navId, navWidth - 4, bodyHeight - 2, focus === "nav"), navWidth, bodyHeight, focus === "nav");
     if (wide) {
-      const right = team ? main() : box("Overview", wrapped(current?.details || ["Choose a team or open Manager."], mainWidth - 4), mainWidth, bodyHeight);
+      const right = team || view.navId === "overview" || view.memberId ? main() : box("Overview", wrapped(current?.details || ["Choose a team or open Manager."], mainWidth - 4), mainWidth, bodyHeight);
       body = left.map((line, i) => pad(line, navWidth) + " " + (right[i] || ""));
     } else body = focus === "nav" ? left : main();
   }
   const hint = dialog ? "Esc cancels · values stay editable"
     : detail ? (detail.taskId ? "↑↓ scroll · Space actions · R refresh · Esc back" : "↑↓ scroll · R refresh · Esc back")
     : focus === "nav" ? "↑↓ select · Enter open · Esc chat"
-    : tab === "members" ? "Enter chat · Space actions · ← teams"
+    : view.memberId || view.navId === "overview" ? "Enter session · Space actions · Esc back"
+    : tab === "overview" ? "Enter briefing · Tab organization · ← teams"
+    : tab === "members" ? "Enter sessions · Space actions · → fold"
     : "Enter delivery · Space actions · ← teams";
-  const message = busy ? "Working…" : notice || (!dialog && !detail ? (focus === "nav" ? "Manager coordinates all teams · N new team" : "Tab members / tasks · / search · F filter") : "");
+  const message = busy ? "Working…" : notice || (!dialog && !detail ? (focus === "nav" ? "Manager coordinates all teams · N new team" : view.memberId ? "R refresh history · / search · F filter" : view.navId === "overview" ? "All teams · / search · F filter" : "Tab overview / organization / tasks · / search · F filter") : "");
   return [...top.map(line => truncateToWidth(line, width)), ...fit(body, bodyHeight), paint.dim(truncateToWidth("  " + single(message), width)), paint.dim(truncateToWidth("  " + hint, width))].slice(0, height);
 }

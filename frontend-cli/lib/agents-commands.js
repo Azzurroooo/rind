@@ -1,4 +1,6 @@
 import { spawn } from "node:child_process";
+import path from "node:path";
+import os from "node:os";
 import { fileURLToPath } from "node:url";
 import { managementClient, overviewText, selectRecord } from "./agents-client.js";
 
@@ -7,6 +9,8 @@ export const agentsHelp = [
   "  team create <name> [--root <existing-directory>]",
   "  team add <team> <workspace> [--share] [--position <name>] [--responsibility <text>]",
   "  team leader <team> <agent> | team remove <team> <agent>",
+  "  team reports-to <team> <agent> <supervisor>",
+  "  sessions <agent> | open <team>/<agent> [--session <id>]",
   "  team workspace <team> <name>",
   "  team worktree <team> <name> <repository> <branch> [base]",
   "  team copy <team> <name> <source> [--confirm <preview-fingerprint>]",
@@ -20,6 +24,8 @@ export const agentsHelp = [
   "Names and unique ID prefixes are accepted. Shared directories require an explicit choice.",
 ].join("\n");
 
+export const managerWorkspace = launch => path.resolve(launch.home || process.env.RIND_HOME || path.join(os.homedir(), ".rind"), "agents-management", "manager");
+
 export async function openAgentChat({ agent, teamId, manager = false, runtimeSessionId, prefill, launch, input = process.stdin }) {
   const raw = input.isRaw;
   input.setRawMode?.(false);
@@ -30,6 +36,7 @@ export async function openAgentChat({ agent, teamId, manager = false, runtimeSes
     if (prefill) args.push("--prefill", prefill);
     await new Promise((resolve, reject) => {
       const child = spawn(process.execPath, [fileURLToPath(new URL("../bin/rind.js", import.meta.url)), ...args], {
+        cwd: manager ? managerWorkspace(launch) : agent.canonicalWorkspace,
         stdio: "inherit", windowsHide: true, env: { ...process.env, RIND_HOME: launch.home || process.env.RIND_HOME, RIND_PYTHON: launch.python || "python", RIND_RUNTIME_PATH: launch.runtimePath || "" },
       });
       child.once("error", reject);
@@ -54,19 +61,20 @@ export async function runAgentsCommand(args, launch) {
     const [command, sub, ...rest] = args;
     if (!command || command === "list") { result = snapshot; if (!json) { console.log(overviewText(snapshot)); return; } }
     else if (command === "manager") { await openAgentChat({ manager: true, launch }); return; }
+    else if (command === "sessions") result = await client.request("listSessions", { agentId: agent(sub).id });
     else if (command === "open") {
       const [teamValue, agentValue] = (sub || "").split("/");
       const selectedTeam = team(teamValue);
-      await openAgentChat({ agent: agent(agentValue, selectedTeam.id), teamId: selectedTeam.id, launch }); return;
+      await openAgentChat({ agent: agent(agentValue, selectedTeam.id), teamId: selectedTeam.id, runtimeSessionId: option(rest, "--session"), launch }); return;
     } else if (command === "team") {
       if (sub === "create") result = await client.request("createTeam", { name: rest.slice(0, rest.includes("--root") ? rest.indexOf("--root") : rest.length).join(" "), createRoot: option(rest, "--root") });
       else {
         const selected = team(rest[0]);
         if (sub === "add") {
           result = await client.request("addMember", { teamId: selected.id, workspace: rest[1], share: rest.includes("--share"), position: option(rest, "--position"), responsibility: option(rest, "--responsibility") });
-          if (!selected.leaderAgentId) await client.request("setLeader", { teamId: selected.id, agentId: result.agentId });
         }
         else if (sub === "leader" || sub === "remove") result = await client.request(sub === "leader" ? "setLeader" : "removeMember", { teamId: selected.id, agentId: agent(rest[1], selected.id).id });
+        else if (sub === "reports-to") result = await client.request("setSupervisor", { teamId: selected.id, agentId: agent(rest[1], selected.id).id, reportsToAgentId: agent(rest[2], selected.id).id });
         else if (sub === "workspace") result = await client.request("createWorkspace", { teamId: selected.id, name: rest[1] });
         else if (sub === "worktree") result = await client.request("createWorktree", { teamId: selected.id, name: rest[1], repository: rest[2], branch: rest[3], base: rest[4] });
         else if (sub === "copy") {

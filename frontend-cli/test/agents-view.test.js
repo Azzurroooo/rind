@@ -5,6 +5,7 @@ import { createLineEditor } from "../lib/line-editor.js";
 import { textWidth, stripAnsi } from "../lib/text-width.js";
 import { CURSOR_MARKER } from "../lib/tui/frame.js";
 import { createChoiceMenuState } from "../lib/choice-menu-state.js";
+import { sessionRows, overviewRows } from "../lib/agents-sessions.js";
 
 function fixture() {
   const snapshot = emptyAgentsSnapshot();
@@ -64,4 +65,30 @@ test("waiting for children does not request human attention and tiny terminals s
     assert.ok(lines.length < rows);
     assert.ok(lines.every(line => textWidth(line) <= width));
   }
+});
+
+test("organization keeps parent order and collapse while briefing belongs to the team overview", () => {
+  const view = fixture();
+  view.snapshot.memberships.find(m => m.agentId === "member-7").reportsToAgentId = "member-4";
+  const rows = memberRows(view.snapshot, "team", "members");
+  assert.equal(rows.find(row => row.id === "lead").depth, 0);
+  assert.equal(rows.find(row => row.id === "member-7").depth, 2);
+  assert.ok(rows.findIndex(r => r.id === "member-4") < rows.findIndex(r => r.id === "member-7"));
+  assert.ok(!rows.some(row => row.kind === "summary"));
+  assert.equal(memberRows(view.snapshot, "team", "overview")[0].kind, "summary");
+  assert.ok(!memberRows(view.snapshot, "team", "members", "", "All", new Set(["member-4"])).some(r => r.id === "member-7"));
+  assert.ok(memberRows(view.snapshot, "team", "members", "工程师 7", "All", new Set(["member-4"])).some(r => r.id === "member-7"));
+});
+
+test("session projection merges live and saved history without changing team scope", () => {
+  const { snapshot } = fixture();
+  snapshot.sessions.push({ id: "m1", runtimeSessionId: "r1", agentId: "lead", teamId: "team", status: "Working", lastActivity: "2026-10-05" });
+  const history = [{ runtimeSessionId: "r1", title: "Release" }, { runtimeSessionId: "r2", title: "Private conversation" }];
+  const rows = sessionRows(snapshot, "lead", history);
+  assert.equal(rows.length, 2);
+  assert.equal(rows[0].title, "Release"); assert.equal(rows[0].status, "Working"); assert.equal(rows[0].teamId, "team");
+  assert.equal(rows[1].teamId, undefined);
+  assert.ok(overviewRows(snapshot).some(r => r.id === "r1"));
+  assert.ok(overviewRows(snapshot).some(r => r.agentId === "member-7"));
+  assert.equal(overviewRows(snapshot, "", "Working").every(r => r.status === "Working"), true);
 });

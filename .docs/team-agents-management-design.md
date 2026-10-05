@@ -1,6 +1,6 @@
 # Team Agents Management：设计大纲
 
-> 状态：实施规格。入口已按后续产品要求修订：空输入按 ← 打开管理页，Manager 从页内进入，不新增管理 slash command。实现与验证现状见 `docs/agents-management.md`。参考仓库为 Rind、Orca、Paperclip、Codex 和 Crush。
+> 状态：实施规格。后续修订已增加单根组织树、Session 级监视和共享 Runtime；最新行为与边界见 `docs/agents-management.md`。入口已按后续产品要求修订：空输入按 ← 打开管理页，Manager 从页内进入，不新增管理 slash command。实现与验证现状见 `docs/agents-management.md`。参考仓库为 Rind、Orca、Paperclip、Codex 和 Crush。
 
 ## 1. 产品定义与取舍
 
@@ -144,3 +144,11 @@ Rind 现无通用外部管理工具入口。实施时在 Worker 组合根注入�
 - Orca：`E:\code\agent1\orca\docs\reference\agent-status-store.md`、`docs\reference\worktree-scan-fingerprint.md`、`src\main\worktree-removal-safety.ts`。采用执行宿主拥有活性事实、恢复状态不得伪装为实时、避免持续全量扫描和谨慎处理 worktree 路径的原则。
 - Paperclip：`E:\code\agent1\paperclip\doc\SPEC-implementation.md`、`doc\execution-semantics.md`、`server\src\adapters\registry.ts`。采用任务单一负责人、组织/归属/执行分离、阻塞必须可路由、适配器统一契约与清晰交付；不照搬其公司、预算、审批和完整数据库体系。
 - Codex：`E:\code\agent1\codex\codex-rs\tui\src\app\agents_overview.rs`、`agents_overview_view.rs`。借鉴总览分组、搜索、打开/创建入口与断线状态提示；Rind 的页面仍按自身 CLI 组件和产品目标实现。
+
+
+## 后续实施修订：组织与会话宿主
+
+- Membership 增加 `reportsToAgentId`；省略时非根成员直属 main-agent。服务端校验单根、无环、成员关系，成员只向直属下级委派，并可查看子树任务。用户/Manager 可调整组织。现有任务继续按原 `parentTaskId` 汇报，子树等待逐级传递。
+- 管理页新增全局 Overview，Team 内为 Overview / Organization / Tasks。Team briefing 放在 Team Overview；组织树可折叠，成员下展示全部可见 Session，选定后在该成员 Workspace 进入原会话。
+- `rind-runtime-client` 提供通用本地共享宿主；管理部件通过适配器接入，Python Runtime 不依赖 Team 模型。`session/open` 按 Session 注入外部工具与工作目录；执行容器、取消与用户问题均按 Session 隔离。
+- 受管 CLI 和后台任务共享 Worker。关闭 CLI 仅断开连接；重入正在运行的 Session 不产生重复执行。管理重启后由宿主回放校验状态，宿主丢失则保留 Unconfirmed，禁止盲目重试。

@@ -13,7 +13,7 @@ export const teamPages = [
       note(["The team registry lives in your RIND_HOME. Adding a folder does not move its files."]),
       shell("rind", null, "~/demo"),
       startup({ ...demoInfo({ session: "demo-team" }), management_label: "Team: product" }),
-      note(["Enter opens a member's ordinary chat. Esc returns to your current conversation.", "Manager is the first selectable item in the Agents page."]),
+      note(["Enter on a member lists its sessions; choose one to open chat. Esc returns to your current conversation.", "Manager is available in the Agents navigation."]),
     ],
   },
   {
