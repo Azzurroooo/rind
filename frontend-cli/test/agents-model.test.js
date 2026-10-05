@@ -99,6 +99,18 @@ test("inbox and sidebar only count team-scoped attention", () => {
   assert.equal(teamStatus(snapshot, "team"), "Needs input");
 });
 
+test("a running task that asks a question reaches the inbox once", () => {
+  const { snapshot } = fixture();
+  snapshot.tasks.push({ id: "run-task", teamId: "team", assigneeAgentId: "api", brief: "Migrate schema", status: "running" },
+    { id: "blocked", teamId: "team", assigneeAgentId: "lead", brief: "Pick", status: "blocked", blockedOn: { responder: "user", action: "Pick a date" } });
+  snapshot.sessions.push({ id: "e", agentId: "api", teamId: "team", runtimeSessionId: "r-task", status: "Needs input", taskId: "run-task" },
+    { id: "f", agentId: "lead", teamId: "team", runtimeSessionId: "r-blocked", status: "Needs input", taskId: "blocked" });
+  const items = inboxRows(snapshot).filter(r => r.kind === "session" || r.kind === "task");
+  assert.deepEqual(items.map(r => r.id).sort(), ["s:r-db", "s:r-task", "t:blocked"]);
+  assert.equal(items.find(r => r.id === "s:r-task").title, "Task asks: Migrate schema");
+  assert.equal(sidebarRows(snapshot)[0].badge, 3);
+});
+
 test("member pages list every team conversation with new conversation first", () => {
   const { sessions } = fixture();
   const rows = memberSessionRows(sessions, "lead", { now: NOW });

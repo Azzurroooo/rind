@@ -209,9 +209,13 @@ export function inboxItems(snapshot) {
     if (!session?.teamId) continue;
     items.push({ id: "r:" + run.id, kind: "run", status: "Unconfirmed", title: "Confirm the previous run stopped", context: teamName(session.teamId) + " › " + name(session.agentId), runId: run.id, teamId: session.teamId, agentId: session.agentId });
   }
-  for (const session of snapshot.sessions.filter(s => s.teamId && s.runtimeSessionId && s.status === "Needs input" && !s.taskId)) {
-    items.push({ id: "s:" + session.runtimeSessionId, kind: "session", status: "Needs input", title: "Conversation is waiting for your answer", context: teamName(session.teamId) + " › " + name(session.agentId),
-      sessionId: session.runtimeSessionId, agentId: session.agentId, teamId: session.teamId });
+  // A running task that stops to ask a question is only visible through its
+  // conversation; it is listed unless the task itself is already listed.
+  const listed = new Set(items.map(item => item.taskId).filter(Boolean));
+  for (const session of snapshot.sessions.filter(s => s.teamId && s.runtimeSessionId && s.status === "Needs input" && !listed.has(s.taskId))) {
+    const task = snapshot.tasks.find(t => t.id === session.taskId);
+    items.push({ id: "s:" + session.runtimeSessionId, kind: "session", status: "Needs input", title: task ? "Task asks: " + single(task.brief) : "Conversation is waiting for your answer",
+      context: teamName(session.teamId) + " › " + name(session.agentId), sessionId: session.runtimeSessionId, agentId: session.agentId, teamId: session.teamId, ...(task ? { taskId: task.id } : {}) });
   }
   return items;
 }
