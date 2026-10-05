@@ -1,4 +1,4 @@
-"""Session access and the unpersisted startup draft."""
+"""Session access and independent unpersisted drafts."""
 
 from __future__ import annotations
 
@@ -19,22 +19,19 @@ from agent.prompts import build_system_prompt
 
 
 class SessionService:
-    """Access sessions by ID, retaining only the unpersisted startup draft."""
+    """Access sessions by ID and retain drafts until their first turn."""
 
     def __init__(self, *, session_dir: str | None, provider_service: ProviderServiceImpl):
         self.session_dir = session_dir
         self.provider_service = provider_service
-        self._draft_store: JsonlSessionStore | None = None
+        self._drafts: dict[str, JsonlSessionStore] = {}
 
     def draft_store(self, session_id: str) -> JsonlSessionStore | None:
         self.release_persisted_draft()
-        if self._draft_store is not None and self._draft_store.session_id == session_id:
-            return self._draft_store
-        return None
+        return self._drafts.get(session_id)
 
     def release_persisted_draft(self) -> None:
-        if self._draft_store is not None and self._draft_store.is_persisted:
-            self._draft_store = None
+        self._drafts = {sid: store for sid, store in self._drafts.items() if not store.is_persisted}
 
     async def metadata(self, session_id: str) -> dict[str, Any]:
         clean = validate_session_id(session_id)
@@ -55,7 +52,7 @@ class SessionService:
         clean = validate_session_id(session_id)
         meta = await self.metadata(clean)
         if self.draft_store(clean) is not None:
-            self._draft_store = None
+            self._drafts.pop(clean, None)
             return {"session_id": clean, "workspace_root": str(meta.get("workspace_root") or "")}
 
         def _remove() -> None:
@@ -111,7 +108,7 @@ class SessionService:
         )
         if defer_persistence:
             await store.create_session(session_id=store.session_id)
-            self._draft_store = store
+            self._drafts[store.session_id] = store
         else:
             await store.initialize()
         return {

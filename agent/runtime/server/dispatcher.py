@@ -174,8 +174,10 @@ class RuntimeDispatcher:
         background_output: Callable[..., Any] | None = None,
         goal_enabled: bool = True,
         writer: Any,
+        allow_session_configuration: bool = False,
     ):
         self._worker = worker
+        self._allow_session_configuration = allow_session_configuration
         self._debug = debug
         self._background_list = background_list
         self._background_output = background_output
@@ -303,6 +305,13 @@ class RuntimeDispatcher:
                 return
             if not self._initialized:
                 await self._respond_error(request, "Runtime worker is not initialized.", "ServerNotReady")
+                return
+            if method == RuntimeMethod.SESSION_OPEN:
+                if not self._allow_session_configuration:
+                    raise ValueError("Session configuration requires the local execution host.")
+                result = await self._worker.open_session(request.get("params") or {})
+                self._subscribed.add(result["session_id"])
+                await self._respond(request, result)
                 return
             if method == RuntimeMethod.SESSION_LIST:
                 await self._list_sessions(request)
@@ -477,7 +486,10 @@ class RuntimeDispatcher:
         return protocol_capabilities(background_enabled(self._background_list, self._background_output), self._goal_enabled)
 
     def _methods(self) -> list[str]:
-        return protocol_methods(background_enabled(self._background_list, self._background_output), self._goal_enabled)
+        methods = protocol_methods(background_enabled(self._background_list, self._background_output), self._goal_enabled)
+        if self._allow_session_configuration:
+            methods.append(RuntimeMethod.SESSION_OPEN)
+        return methods
 
     def _slash_command_infos(self) -> list[dict[str, Any]]:
         return slash_command_infos(self._slash_router)

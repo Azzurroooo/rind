@@ -1062,3 +1062,26 @@ def test_schedule_ingest_drops_delivery_after_loop_close():
         raise AssertionError("dropped delivery must never run")
 
     assert _schedule_ingest(loop, ingest) is None
+
+
+def test_only_local_host_may_configure_session_tools():
+    from unittest.mock import AsyncMock
+
+    worker = FakeWorker()
+    worker.open_session = AsyncMock(return_value={"session_id": "s1"})
+    server, payloads = make_server(worker)
+    request = {"kind": "request", "request_id": "open", "method": RuntimeMethod.SESSION_OPEN,
+               "params": {"workspace_root": ".", "external_tools": {"command": "tool"}}}
+
+    async def run():
+        assert RuntimeMethod.SESSION_OPEN not in server._methods()
+        await server._dispatch(request)
+        worker.open_session.assert_not_called()
+        assert "local execution host" in _response(payloads, "open")["error"]["message"]
+        server._allow_session_configuration = True
+        assert RuntimeMethod.SESSION_OPEN in server._methods()
+        await server._dispatch({**request, "request_id": "local-open"})
+        worker.open_session.assert_awaited_once_with(request["params"])
+        assert _response(payloads, "local-open")["result"]["session_id"] == "s1"
+
+    asyncio.run(run())

@@ -86,7 +86,27 @@ class ExecutionCoordinator:
         self._closed_sessions: set[str] = set()
         self._provider_service = provider_service
         self._external_tool = external_tool
+        self._session_options: dict[str, tuple] = {}
         self._lock = asyncio.Lock()
+
+    async def configure_session(self, session_id: str, external_tool, enable_user_question: bool) -> None:
+        clean = validate_session_id(session_id)
+        options = (external_tool, enable_user_question)
+        async with self._lock:
+            previous = self._session_options.get(clean)
+            if previous == options or (previous and previous[0] == external_tool and clean in self._active):
+                return
+            if previous and previous[0] and external_tool and clean in self._active and replace(previous[0], instructions=external_tool.instructions) == external_tool:
+                return
+            if clean in self._active or clean in self._starting:
+                raise ValueError("Cannot change a running session's execution configuration.")
+            self._session_options[clean] = options
+
+    def external_tool(self, session_id: str):
+        return self._session_options.get(session_id, (self._external_tool, self._enable_user_question))[0]
+
+    def owns_session(self, session_id: str) -> bool:
+        return session_id in self._session_options or session_id in self._active
 
     def add_event_sink(self, sink: Callable[[dict[str, Any]], Awaitable[None] | None]) -> Callable[[], None]:
         """Register an event sink and return a callable that unregisters it."""
@@ -430,8 +450,8 @@ class ExecutionCoordinator:
                         return
                 if checkpoint:
                     await execution.container.session_store.persist_message("user", build_goal_checkpoint_prompt(checkpoint), meta={"kind": "goal_checkpoint"})
-                if self._external_tool and not compact:
-                    await self._external_tool.notify("before", clean, {})
+                if self.external_tool(clean) and not compact:
+                    await self.external_tool(clean).notify("before", clean, {})
                 cancel_source = CancellationTokenSource(parent_token=cancellation_token)
                 execution.current_cancel = cancel_source
                 execution.container.runtime.set_user_question_responder(
@@ -471,11 +491,11 @@ class ExecutionCoordinator:
                             await self._emit_to_event_sinks(event_data)
                         yield event_data
                 finally:
-                    if self._external_tool and terminal_type and not compact:
+                    if self.external_tool(clean) and terminal_type and not compact:
                         records = await self._task_notifications.store.relevant(clean)
                         pending = any(record.get("status") not in TERMINAL_STATES for record in records.values())
                         try:
-                            await self._external_tool.notify("after", clean, {"outcome": terminal_type, "pending": pending})
+                            await self.external_tool(clean).notify("after", clean, {"outcome": terminal_type, "pending": pending})
                         except Exception:
                             self._suppressed.add(clean)
                     if execution.current_cancel is cancel_source:
@@ -567,10 +587,9 @@ class ExecutionCoordinator:
         if execution is None:
             raise LookupError("No pending user question.")
         future = execution.pending_answers.get(tool_call_id)
-        if future is None:
+        if future is None or future.done():
             raise LookupError("No pending user question.")
-        if not future.done():
-            future.set_result(answer)
+        future.set_result(answer)
         snapshot = self._live.get(clean)
         question = snapshot.get("question") if isinstance(snapshot, dict) else None
         if isinstance(question, dict) and question.get("tool_call_id") == tool_call_id:
@@ -625,6 +644,7 @@ class ExecutionCoordinator:
                 self._starting.pop(clean)
 
     async def _build_execution(self, clean, enable_user_question, enabled_tools):
+        external_tool, question_enabled = self._session_options.get(clean, (self._external_tool, self._enable_user_question))
         metadata = await self._repository.metadata(clean)
         root = validate_workspace_root(str(metadata.get("workspace_root") or metadata.get("cwd") or ""))
         settings = await asyncio.to_thread(load_settings, root)
@@ -655,7 +675,7 @@ class ExecutionCoordinator:
                 session_store=self._repository.draft_store(clean),
                 enable_goal=self._enable_goal,
                 enable_user_question=(
-                    self._enable_user_question if enable_user_question is None else enable_user_question
+                    question_enabled if enable_user_question is None else enable_user_question
                 ),
                 enabled_tools=enabled_tools,
                 workspace_root=root,
@@ -667,7 +687,7 @@ class ExecutionCoordinator:
                 shell_tools=self._shell_tools,
                 web_sessions=self._web_sessions,
                 task_notifications=self._task_notifications,
-                external_tool=self._external_tool,
+                external_tool=external_tool,
             )
             await container.runtime.initialize()
         except BaseException:

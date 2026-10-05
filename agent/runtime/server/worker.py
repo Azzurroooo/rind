@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import asyncio
+import json
+import os
 from functools import partial
 from typing import Any
 
@@ -22,6 +24,7 @@ from agent.infrastructure.persistence.usage_ledger import (
 )
 from agent.infrastructure.settings import workspace_defaults
 from agent.infrastructure.tools.shell.tool import ShellTools
+from agent.infrastructure.tools.external import ExternalTool
 from agent.infrastructure.tools.web.session_pool import WebSessions
 from agent.runtime.core import MessageStreamParser
 from agent.runtime.server.execution import ExecutionCoordinator
@@ -107,6 +110,18 @@ class RuntimeWorker:
     async def create_session(self, workspace_root: str | None = None) -> dict[str, Any]:
         return await self.repository.create(workspace_root or self.workspace_root)
 
+    async def open_session(self, params: dict) -> dict[str, Any]:
+        root = validate_workspace_root(params.get("workspace_root") or self.workspace_root)
+        info = await self.repository.initial(root, params.get("session_id"), params.get("resume_latest") is True)
+        if os.path.normcase(info["workspace_root"]) != os.path.normcase(root):
+            raise ValueError("Session workspace does not match the requested workspace.")
+        session_id = info["session_id"]
+        tool = ExternalTool.from_json(json.dumps(params["external_tools"])) if params.get("external_tools") else None
+        await self.execution.configure_session(session_id, tool, params.get("enable_user_question") is not False)
+        result = await self.session(session_id)
+        result["base_url"] = workspace_defaults(root)[2]
+        return result
+
     async def start_execution(self, session_id: str) -> AgentContainer:
         return await self.execution.start(session_id)
 
@@ -117,6 +132,7 @@ class RuntimeWorker:
         await self.shell_tools.maintain_tasks(session_id)
         result = await self.repository.replay(session_id, start=start, end=end)
         result["live_turn"] = self.execution.live_turn(session_id)
+        result["hosted"] = self.execution.owns_session(session_id)
         result["tasks"] = (await self.shell_tools.monitor_tasks(session_id))["tasks"]
         result["background_wait"] = await self.execution.background_wait(session_id)
         return result

@@ -59,7 +59,7 @@ class StdioRuntimeServer:
         self._dispatcher = RuntimeDispatcher(
             worker, debug=debug, writer=self._writer,
             background_list=background_list, background_output=background_output,
-            goal_enabled=goal_enabled,
+            goal_enabled=goal_enabled, allow_session_configuration=True,
         )
 
     async def run(self) -> int:

@@ -2,6 +2,7 @@ from __future__ import annotations
 from agent.runtime.server.stdio import JsonlWriter
 
 import asyncio
+import pytest
 import json
 import shutil
 import tempfile
@@ -542,6 +543,8 @@ def test_worker_replays_answer_received_before_question_responder_waits():
         execution._active["session-a"] = active
         execution._prepare_user_question("session-a", "call-early")
         await execution.answer_user_question("session-a", "call-early", "yes")
+        with pytest.raises(LookupError, match="No pending user question"):
+            await execution.answer_user_question("session-a", "call-early", "second answer")
         event = SimpleNamespace(tool_call_id="call-early")
         return await execution._answer_user_question("session-a", event)
 

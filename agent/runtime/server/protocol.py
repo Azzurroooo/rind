@@ -34,6 +34,7 @@ class RuntimeMethod:
     INITIALIZE = "initialize"
     SHUTDOWN = "shutdown"
     SESSION_NEW = "session/new"
+    SESSION_OPEN = "session/open"
     SESSION_LIST = "session/list"
     SESSION_SWITCH = "session/switch"
     SESSION_FORK = "session/fork"
