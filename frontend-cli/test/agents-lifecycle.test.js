@@ -103,7 +103,11 @@ test("the Agents page follows conversation moves and leaving closes it for its o
   const launch = { home, repoRoot: fileURLToPath(new URL("../..", import.meta.url)) };
   const server = await startServer(launch);
   const client = await connectClient({ endpoint: server.paths.endpoint, token: (await readFile(server.paths.token, "utf8")).trim() });
+  let stopPage = async () => {};
+  // One ordered teardown: close the page first, or it would reconnect by
+  // starting a detached service in this temporary home when the server stops.
   t.after(async () => {
+    await stopPage();
     client.close(); await server.close();
     // Loading team history starts a shared Runtime in this home; stop it before removing the folder.
     const host = await connectSharedRuntime({ home, start: false }).catch(() => null);
@@ -122,7 +126,7 @@ test("the Agents page follows conversation moves and leaving closes it for its o
     { action: "leave" }];
   const abort = new AbortController();
   const running = runAgentsPage({ launch, input, output: output.output, initialTeamId: team.id, signal: abort.signal, openChat: async chat => { opened.push(chat.runtimeSessionId || "new"); return steps.shift(); } });
-  t.after(async () => { abort.abort(); await running; });
+  stopPage = async () => { abort.abort(); await running; };
   const until = async (check, label) => { for (let i = 0; i < 150 && !check(); i++) await new Promise(r => setTimeout(r, 20)); assert.ok(check(), label); };
   await visible("Leader"); await visible("connected");
   input.send("c");
