@@ -35,6 +35,7 @@ function createHarness({
   switchMismatch = false,
   switchGate = null,
   taskMonitor = null,
+  openManagedSession = null,
 } = {}) {
   const state = createCliState();
   state.session.info = { session_id: "session-a", model: "model-a" };
@@ -133,6 +134,7 @@ function createHarness({
     restoreLiveTurn() {},
     renderHistory: (messages) => history.push(messages),
     onSessionRestored: () => restored.push(state.session.info.session_id),
+    openManagedSession,
     clearPendingInputs() {},
     closeAssistant() {},
     refreshInputState() {},
@@ -143,6 +145,24 @@ function createHarness({
   });
   return { state, client, requests, history, logs, restored, controller };
 }
+
+test("managed history opens separately and leaves the current conversation intact", async () => {
+  const opened = [];
+  const harness = createHarness({ selectedSession: { id: "session-b" }, openManagedSession: async (...args) => opened.push(args) });
+  await harness.controller.runSessionsSelector();
+  assert.deepEqual(opened, [["session-b"]]);
+  assert.equal(harness.state.session.info.session_id, "session-a");
+  assert.equal(harness.requests.some(request => request.method === methods.sessionSwitch), false);
+});
+
+test("managed forks open separately with editable input and preserve the source session", async () => {
+  const opened = [];
+  const harness = createHarness({ selectedFork: { id: "u2", text: "Revise this request" }, openManagedSession: async (...args) => opened.push(args) });
+  await harness.controller.runForkSelector();
+  assert.deepEqual(opened, [["session-fork-1", "Revise this request"]]);
+  assert.equal(harness.state.session.info.session_id, "session-a");
+  assert.equal(harness.requests.some(request => request.method === methods.sessionSwitch), false);
+});
 
 test("runtime controller shares initialization and injects session and turn IDs", async () => {
   const harness = createHarness();

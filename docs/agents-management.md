@@ -49,7 +49,7 @@ On the member list, `X` removes membership while preserving the folder and histo
 
 When a workspace belongs to multiple teams, a TTY asks which scope to attach. Non-TTY requires `--team <id>` or `--standalone`. Direct conversations are observed as runs, but their private messages are not broadcast. If the local service disconnects, the CLI reconnects and checks the Runtime replay before restoring activity; an unconfirmed run remains reserved until a human confirms it stopped.
 
-An attached Worker keeps one management conversation scope. Open another member through `/agents` or resume an existing conversation with `rind --session <runtime-id> --team <team-id>` in a separate process. In-process session switching/forking is currently rejected for attached Workers. Unregistered ordinary Rind retains its existing session controls. The first adapter is Rind; external Codex/Claude processes are not automatically observed.
+An attached Worker keeps one management conversation scope. `/sessions` and `/fork` open the selected history in another managed process, preserving the current conversation when you return; a fork also prefills its selected user message. Open another member through `/agents` or resume with `rind --session <runtime-id> --team <team-id>`. A conversation from another workspace or team cannot reuse the current scope. Unregistered ordinary Rind retains its existing session controls. The first adapter is Rind; external Codex/Claude processes are not automatically observed.
 
 ## Boundaries
 

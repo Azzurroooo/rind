@@ -279,6 +279,7 @@ const runtimeController = createCliRuntimeController({
   restoreLiveTurn,
   renderHistory,
   onSessionRestored: rebindSendEndpoint,
+  openManagedSession: management.chatContext ? (runtimeSessionId, prefill) => enterManagement(management.chatContext.manager, { ...management.chatContext, runtimeSessionId, prefill }) : null,
   clearPendingInputs: (...args) => inputActions.clearPendingInputs(...args),
   closeAssistant,
   refreshInputState,
@@ -478,6 +479,7 @@ try {
     logOutput(startupText(startupInfo));
   }
   await runtimeController.restoreSession();
+  if (management.prefill) inputStateData.prefill = management.prefill;
   if (tui) {
     inputController.start();
   } else {
@@ -551,14 +553,15 @@ async function enterInSessionTour(pageId) {
   }
 }
 
-async function enterManagement(manager) {
+async function enterManagement(manager, chat) {
   if (!tui) { await runAgentsCommand(["list"], managementLaunch); return; }
   if (turnStateData.active || displayState.activeCompact) { logOutput("Open agents management between turns."); return; }
   inputController.pause();
   tui.stop({ releaseInput: false });
   process.off("SIGINT", handleSigint);
   try {
-    if (manager) await openAgentChat({ manager: true, launch: managementLaunch });
+    if (chat) await openAgentChat({ ...chat, launch: managementLaunch });
+    else if (manager) await openAgentChat({ manager: true, launch: managementLaunch });
     else await runAgentsPage({ launch: managementLaunch, manageInput: false });
   } finally {
     process.on("SIGINT", handleSigint);

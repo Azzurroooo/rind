@@ -6,19 +6,20 @@ import { createInterface } from "node:readline/promises";
 import { managementClient, selectRecord } from "./agents-client.js";
 
 export function managementArgs(args) {
-  const remaining = []; let team, standalone = false, manager = false;
+  const remaining = []; let team, standalone = false, manager = false, prefill;
   for (let i = 0; i < args.length; i++) {
     if (args[i] === "--team") { if (!args[i + 1] || args[i + 1].startsWith("--")) throw new Error("--team requires a team ID or name."); team = args[++i]; }
     else if (args[i] === "--standalone") standalone = true;
     else if (args[i] === "--manager") manager = true;
+    else if (args[i] === "--prefill") { if (args[i + 1] === undefined) throw new Error("--prefill requires text."); prefill = args[++i]; }
     else remaining.push(args[i]);
   }
   if ((team && standalone) || (manager && (team || standalone))) throw new Error("Choose one of --team, --standalone or --manager.");
-  return { args: remaining, team, standalone, manager };
+  return { args: remaining, team, standalone, manager, prefill };
 }
 export async function prepareManagement(args, launch, { interactive = !!process.stdin.isTTY, chooseTeam } = {}) {
   const options = managementArgs(args);
-  const root = path.resolve(process.env.RIND_HOME || path.join(os.homedir(), ".rind"), "agents-management");
+  const root = path.resolve(launch.home || process.env.RIND_HOME || path.join(os.homedir(), ".rind"), "agents-management");
   if (!options.manager && !options.team && !existsSync(path.join(root, "state", "user-token"))) return { args: options.args };
   let client, runtime, session, runtimeSessionId = "", reconnecting, detached = false, disconnected = false;
   const connectionOptions = { ...launch, onDisconnect: () => {
@@ -53,11 +54,16 @@ export async function prepareManagement(args, launch, { interactive = !!process.
     const snapshot = await client.request("snapshot");
     let workspace = options.manager ? path.join(root, "manager") : path.resolve(argument(options.args, "--cwd") || argument(options.args, "--dir") || process.cwd());
     const resumeId = argument(options.args, "--session");
-    if (resumeId && !options.manager && !argument(options.args, "--cwd") && !argument(options.args, "--dir")) {
+    if (resumeId) {
       if (!/^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$/.test(resumeId) || resumeId.includes("..")) throw new Error("Invalid session ID.");
       const sessions = argument(options.args, "--session-dir") || path.join(path.dirname(root), "sessions");
       const metadata = JSON.parse(await readFile(path.join(sessions, resumeId, "meta.json"), "utf8"));
-      if (metadata.workspace_root) workspace = metadata.workspace_root;
+      if (metadata.workspace_root) {
+        const explicitWorkspace = options.manager || argument(options.args, "--cwd") || argument(options.args, "--dir");
+        const normalize = value => process.platform === "win32" ? value.toLowerCase() : value;
+        if (explicitWorkspace && normalize(await realpath(workspace)) !== normalize(await realpath(metadata.workspace_root))) throw new Error("That conversation belongs to another workspace. Open its member from /agents.");
+        workspace = metadata.workspace_root;
+      }
     }
     workspace = await realpath(workspace);
     if (process.platform === "win32") workspace = workspace.toLowerCase();
@@ -88,10 +94,12 @@ export async function prepareManagement(args, launch, { interactive = !!process.
       snapshot.memberships.find(m => m.agentId === agent?.id && m.teamId === team?.id)?.responsibility || "",
       agent.skillRefs?.length ? "Use assigned skills: " + agent.skillRefs.join(", ") : "",
     ].filter(Boolean).join("\n");
-    const runtimeArgs = options.manager ? ["--cwd", workspace] : options.args;
+    const runtimeArgs = options.manager ? ["--cwd", workspace, ...options.args] : options.args;
     let queue = Promise.resolve();
     return {
       setRuntime(value) { runtime = value; },
+      chatContext: { agent, teamId: team?.id, manager: options.manager },
+      prefill: options.prefill,
       args: runtimeArgs, externalTools, label: options.manager ? "Manager" : team ? "Team: " + team.name : "Independent member session",
       async bind(info) {
         if (runtimeSessionId && info.session_id !== runtimeSessionId) throw new Error("Open another registered session in a separate rind process.");
@@ -100,7 +108,7 @@ export async function prepareManagement(args, launch, { interactive = !!process.
       },
       async before(method, params) {
         if (reconnecting || disconnected) await reconnect();
-        if (["session/new", "session/fork", "session/switch"].includes(method)) throw new Error("Use /agents to open another member, or start a separate rind session.");
+        if (["session/new", "session/switch"].includes(method)) throw new Error("Use /agents to open another member, or start a separate rind session.");
         if (params?.session_id && runtimeSessionId && params.session_id !== runtimeSessionId) throw new Error("This process is attached to another registered runtime session.");
       },
       async after(method, result) {

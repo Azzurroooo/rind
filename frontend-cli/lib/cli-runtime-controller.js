@@ -18,6 +18,7 @@ export function createCliRuntimeController({
   restoreLiveTurn,
   renderHistory = () => {},
   onSessionRestored = () => {},
+  openManagedSession = null,
   clearPendingInputs,
   closeAssistant,
   refreshInputState,
@@ -212,6 +213,7 @@ export function createCliRuntimeController({
       return;
     }
     try {
+      if (openManagedSession) { await openManagedSession(selectedId); return; }
       await restoreSession(selectedId, {
         switchSession: true,
         workspaceRoot: selected?.workspace_root,
@@ -266,6 +268,11 @@ export function createCliRuntimeController({
     const newId = String(fork?.session_id || "");
     if (!newId) {
       log("Fork failed: the runtime returned no session id.");
+      return;
+    }
+    if (openManagedSession) {
+      try { await openManagedSession(newId, selected.text || ""); }
+      catch (error) { log(`Forked to ${newId}, but opening failed: ${error instanceof Error ? error.message : String(error)}`); }
       return;
     }
     try {

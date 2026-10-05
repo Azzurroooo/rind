@@ -19,15 +19,17 @@ export const agentsHelp = [
   "Names and unique ID prefixes are accepted. Shared directories require an explicit choice.",
 ].join("\n");
 
-export async function openAgentChat({ agent, teamId, manager = false, launch, input = process.stdin }) {
+export async function openAgentChat({ agent, teamId, manager = false, runtimeSessionId, prefill, launch, input = process.stdin }) {
   const raw = input.isRaw;
   input.setRawMode?.(false);
   input.pause?.();
   try {
     const args = manager ? ["--manager"] : ["--cwd", agent.canonicalWorkspace, ...(teamId ? ["--team", teamId] : ["--standalone"])];
+    if (runtimeSessionId) args.push("--session", runtimeSessionId);
+    if (prefill) args.push("--prefill", prefill);
     await new Promise((resolve, reject) => {
       const child = spawn(process.execPath, [fileURLToPath(new URL("../bin/rind.js", import.meta.url)), ...args], {
-        stdio: "inherit", windowsHide: true, env: { ...process.env, RIND_PYTHON: launch.python || "python", RIND_RUNTIME_PATH: launch.runtimePath || "" },
+        stdio: "inherit", windowsHide: true, env: { ...process.env, RIND_HOME: launch.home || process.env.RIND_HOME, RIND_PYTHON: launch.python || "python", RIND_RUNTIME_PATH: launch.runtimePath || "" },
       });
       child.once("error", reject);
       child.once("close", code => code === 0 ? resolve() : reject(new Error("Agent session exited with " + code)));
