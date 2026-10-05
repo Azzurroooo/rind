@@ -7,6 +7,7 @@ import { managementPaths, privateDirectory } from "./paths.js";
 import { openStore } from "./store.js";
 import { createService } from "./service.js";
 import { createRindAdapter } from "./adapters/rind.js";
+import { sessionHistory } from "./history.js";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import { connectSharedRuntime } from "../../rind-runtime-client/shared-runtime.js";
@@ -146,15 +147,15 @@ export async function startServer(options: { home?: string; python?: string; rep
           result = toolConfig({ kind: manager ? "manager" : "agent", sessionId: session.id });
         } else if (message.method === "listSessions") {
           requireValue(principal.kind === "user", "FORBIDDEN", "Private session history is available only to the user.");
-          const agent = store.state.agents[message.params.agentId];
-          requireValue(agent, "NOT_FOUND", "Agent not found.");
-          const host = await executionHost();
-          const history = await host.request("session/list", { workspace_root: agent.canonicalWorkspace, limit: 100 });
-          const registered = Object.values(store.state.sessions).filter(s => s.agentId === agent.id);
-          result = { sessions: history.sessions.map((entry: any) => {
-            const scope = registered.find(s => s.runtimeSessionId === (entry.id || entry.session_id));
-            return { ...entry, runtimeSessionId: entry.id || entry.session_id, ...(scope ? { teamId: scope.teamId } : {}) };
-          }) };
+          const params = message.params || {};
+          const managerPath = params.manager === true ? await realManager : undefined;
+          const manager = managerPath ? Object.values(store.state.agents).find(a => a.canonicalWorkspace === managerPath) : undefined;
+          if (params.manager === true && !manager) result = { sessions: [] };
+          else {
+            const host = await executionHost();
+            const list = async (workspace: string) => (await host.request("session/list", { workspace_root: workspace, limit: 100 })).sessions;
+            result = { sessions: await sessionHistory(store.state, manager ? { agentId: manager.id } : { agentId: params.agentId, teamId: params.teamId }, list) };
+          }
         } else {
           result = await service.request(principal, message.method, message.params);
           if (message.method === "attachSession" || message.method === "reattachSession") attached.push(result.id);

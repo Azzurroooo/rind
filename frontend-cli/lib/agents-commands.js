@@ -10,7 +10,7 @@ export const agentsHelp = [
   "  team add <team> <workspace> [--share] [--position <name>] [--responsibility <text>]",
   "  team leader <team> <agent> | team remove <team> <agent>",
   "  team reports-to <team> <agent> <supervisor>",
-  "  sessions <agent> | open <team>/<agent> [--session <id>]",
+  "  sessions <team>[/<agent>] | sessions manager",
   "  team workspace <team> <name>",
   "  team worktree <team> <name> <repository> <branch> [base]",
   "  team copy <team> <name> <source> [--confirm <preview-fingerprint>]",
@@ -61,7 +61,14 @@ export async function runAgentsCommand(args, launch) {
     const [command, sub, ...rest] = args;
     if (!command || command === "list") { result = snapshot; if (!json) { console.log(overviewText(snapshot)); return; } }
     else if (command === "manager") { await openAgentChat({ manager: true, launch }); return; }
-    else if (command === "sessions") result = await client.request("listSessions", { agentId: agent(sub).id });
+    else if (command === "sessions") {
+      const [teamValue, agentValue] = (sub || "").split("/");
+      if (teamValue === "manager" && !agentValue) result = await client.request("listSessions", { manager: true });
+      else {
+        const selectedTeam = team(teamValue);
+        result = await client.request("listSessions", { teamId: selectedTeam.id, ...(agentValue ? { agentId: agent(agentValue, selectedTeam.id).id } : {}) });
+      }
+    }
     else if (command === "open") {
       const [teamValue, agentValue] = (sub || "").split("/");
       const selectedTeam = team(teamValue);
