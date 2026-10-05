@@ -22,7 +22,7 @@ export async function prepareManagement(args, launch, { interactive = !!process.
   const options = managementArgs(args);
   const root = path.resolve(launch.home || process.env.RIND_HOME || path.join(os.homedir(), ".rind"), "agents-management");
   if (!options.manager && !options.team && !existsSync(path.join(root, "state", "user-token"))) return { args: options.args };
-  let client, runtime, session, runtimeSessionId = "", reconnecting, detached = false, disconnected = false;
+  let client, session, runtimeSessionId = "", reconnecting, detached = false, disconnected = false;
   const connectionOptions = { ...launch, onDisconnect: () => {
     if (detached) return;
     disconnected = true;
@@ -33,15 +33,9 @@ export async function prepareManagement(args, launch, { interactive = !!process.
     if (reconnecting) return reconnecting;
     reconnecting = (async () => {
       const replacement = await managementClient(connectionOptions);
-      try {
-        if (session && runtimeSessionId && runtime) {
-          const replay = await runtime.request("session/replay", { session_id: runtimeSessionId });
-          await replacement.request("reattachSession", { sessionId: session.id, runtimeSessionId, active: replay.live_turn?.status === "running" || replay.tasks?.some(task => ["starting", "running", "cancelling"].includes(task.status)) });
-        }
-        if (detached) { replacement.close(); return; }
-        client = replacement;
-        disconnected = false;
-      } catch (error) { replacement.close(); throw error; }
+      if (detached) { replacement.close(); return; }
+      client = replacement;
+      disconnected = false;
     })().finally(() => { reconnecting = null; });
     return reconnecting;
   }
@@ -54,8 +48,10 @@ export async function prepareManagement(args, launch, { interactive = !!process.
   try {
     const snapshot = await client.request("snapshot");
     let workspace = options.manager ? path.join(root, "manager") : path.resolve(argument(options.args, "--cwd") || argument(options.args, "--dir") || process.cwd());
-    const resumeId = argument(options.args, "--session");
-    if (resumeId) {
+    let resumeId = argument(options.args, "--session");
+    let registeredSession = resumeId && snapshot.sessions.find(s => s.runtimeSessionId === resumeId);
+    if (registeredSession && !options.manager && !argument(options.args, "--cwd") && !argument(options.args, "--dir")) workspace = snapshot.agents.find(a => a.id === registeredSession.agentId).canonicalWorkspace;
+    if (resumeId && !registeredSession) {
       if (!/^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$/.test(resumeId) || resumeId.includes("..")) throw new Error("Invalid session ID.");
       const sessions = argument(options.args, "--session-dir") || path.join(path.dirname(root), "sessions");
       const metadata = JSON.parse(await readFile(path.join(sessions, resumeId, "meta.json"), "utf8"));
@@ -73,9 +69,21 @@ export async function prepareManagement(args, launch, { interactive = !!process.
       if (options.team) throw new Error("This directory is not registered. Add it from Agents management first.");
       client.close(); return { args: options.args };
     }
+    if (options.args.includes("--trace-llm")) throw new Error("Shared Runtime tracing is host-wide. Set RIND_TRACE_LLM=1 before starting the shared host instead of --trace-llm.");
+    const sessionDir = argument(options.args, "--session-dir");
+    if (sessionDir && path.resolve(sessionDir) !== path.resolve(path.dirname(root), "sessions")) throw new Error("Shared conversations use RIND_HOME/sessions. Set RIND_HOME to select another shared history directory; omit --session-dir.");
+    if (!resumeId && agent && (options.args.includes("--resume-latest") || options.args.includes("-c"))) {
+      const history = await client.request("listSessions", { agentId: agent.id });
+      resumeId = history.sessions[0]?.runtimeSessionId;
+      if (resumeId) {
+        registeredSession = snapshot.sessions.find(s => s.runtimeSessionId === resumeId);
+        options.args = [...options.args.filter(arg => !["--resume-latest", "-c"].includes(arg)), "--session", resumeId];
+      }
+    }
     let team;
     const teams = snapshot.teams.filter(t => snapshot.memberships.some(m => m.teamId === t.id && m.agentId === agent?.id));
     if (options.team) team = selectRecord(teams, options.team, "Workspace team");
+    else if (!options.standalone && registeredSession) team = teams.find(t => t.id === registeredSession.teamId);
     else if (!options.standalone && teams.length === 1) team = teams[0];
     else if (!options.standalone && teams.length > 1 && !options.manager) {
       if (!interactive) throw new Error("This workspace belongs to multiple teams. Use --team <id> or --standalone.");
@@ -87,21 +95,13 @@ export async function prepareManagement(args, launch, { interactive = !!process.
       const answer = String(await choose(teams));
       if (answer !== "0") { team = teams[Number(answer) - 1]; if (!team) throw new Error("Select a listed team, or 0 for an independent session."); }
     }
-    session = await client.request("attachSession", { agentId: agent?.id, teamId: team?.id, manager: options.manager });
+    session = await client.request("attachSession", { agentId: agent?.id, teamId: team?.id, manager: options.manager, runtimeSessionId: resumeId, shared: true });
     const externalTools = await client.request("sessionTools", { sessionId: session.id });
-    if (!options.manager) externalTools.instructions = [
-      agent.hint || "", "Current team: " + (team?.name || "independent session") + ".",
-      team ? "Team ID: " + team.id + "; Agent ID: " + agent.id + ". Use agent_management for registered team collaboration. Call snapshot for the roster. Tasks and published reports are visible to the team; private conversation stays here." : "This conversation has no team authority.",
-      snapshot.memberships.find(m => m.agentId === agent?.id && m.teamId === team?.id)?.responsibility || "",
-      agent.skillRefs?.length ? "Use assigned skills: " + agent.skillRefs.join(", ") : "",
-    ].filter(Boolean).join("\n");
-    const runtimeArgs = options.manager ? ["--cwd", workspace, ...options.args] : options.args;
-    let queue = Promise.resolve();
+    const runtimeArgs = !argument(options.args, "--cwd") && !argument(options.args, "--dir") ? ["--cwd", workspace, ...options.args] : options.args;
     return {
-      setRuntime(value) { runtime = value; },
       chatContext: { agent, teamId: team?.id, manager: options.manager },
       prefill: options.prefill,
-      args: runtimeArgs, externalTools, label: options.manager ? "Manager" : team ? "Team: " + team.name : "Independent member session",
+      shared: true, args: runtimeArgs, externalTools, label: options.manager ? "Manager" : team ? "Team: " + team.name : "Independent member session",
       async bind(info) {
         if (runtimeSessionId && info.session_id !== runtimeSessionId) throw new Error("Open another registered session in a separate rind process.");
         runtimeSessionId = info.session_id;
@@ -115,18 +115,9 @@ export async function prepareManagement(args, launch, { interactive = !!process.
       async after(method, result) {
         if (method === "initialize") await this.bind(result);
       },
-      event(message) {
-        if (message.event?.type !== "user_question_requested") return;
-        queue = queue.catch(() => {}).then(async () => {
-          const view = await client.request("snapshot");
-          const run = view.runs.find(r => r.sessionId === session.id && ["starting", "running"].includes(r.status));
-          if (run) await client.request("reportRunEvent", { sessionId: session.id, runId: run.id, hostSequence: run.hostSequence + 1, type: "needs_input" });
-        });
-        queue.catch(error => process.stderr.write(error.message + "\n"));
-      },
       async close() {
         if (detached) return; detached = true;
-        try { await queue; await client.request("detachSession", { sessionId: session.id }); }
+        try { await client.request("detachSession", { sessionId: session.id }); }
         finally { client.close(); }
       },
     };
@@ -136,7 +127,6 @@ function argument(args, flag) { const index = args.indexOf(flag); return index >
 
 export function observeRuntime(client, management) {
   if (!management.before) return client;
-  management.setRuntime(client);
   return {
     ...client,
     get child() { return client.child; },

@@ -1,10 +1,10 @@
-import { createRuntimeClient } from "../../../rind-runtime-client/runtime-client.js";
+import { createSharedRuntimeClient } from "../../../rind-runtime-client/shared-runtime.js";
 import { ManagementError, type Adapter } from "../model.js";
 export function createRindAdapter(options: { home?: string; python?: string; repoRoot: string; runtimePath?: string }): Adapter {
   return {
     async start(input, emit) {
       let sequence = 0;
-      const client = createRuntimeClient({
+      const client = createSharedRuntimeClient({
         ...options, rindHome: options.home, cwd: input.agent.canonicalWorkspace,
         cliArgs: ["--cwd", input.agent.canonicalWorkspace, "--no-user-question", ...(input.session.runtimeSessionId ? ["--session", input.session.runtimeSessionId] : [])],
         externalTools: input.externalTools,
@@ -26,12 +26,12 @@ export function createRindAdapter(options: { home?: string; python?: string; rep
         }).then(result => {
           if (cancelled) return { content: "" };
           return { content: result.answer || "" };
-        }).catch(error => { if (cancelled) return { content: "" }; throw new ManagementError("EXECUTION_FAILED", String(error)); }).finally(() => client.shutdown());
+        }).catch(error => { if (cancelled) return { content: "" }; throw new ManagementError((error as { code?: string }).code === "EXECUTION_UNCONFIRMED" ? "EXECUTION_UNCONFIRMED" : "EXECUTION_FAILED", String(error)); }).finally(() => client.shutdown());
         return {
           runtimeSessionId, completion,
           async cancel() { cancelled = true; await client.request("session/cancel", { session_id: runtimeSessionId }); await client.shutdown(); },
         };
-      } catch (error) { await client.shutdown(); throw new ManagementError("EXECUTION_FAILED", String(error)); }
+      } catch (error) { await client.shutdown(); throw new ManagementError((error as { code?: string }).code === "EXECUTION_UNCONFIRMED" ? "EXECUTION_UNCONFIRMED" : "EXECUTION_FAILED", String(error)); }
     },
   };
 }

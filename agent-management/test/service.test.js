@@ -61,6 +61,61 @@ test("import previews and registers legacy files without changing them", async t
 });
 
 const user = { kind: "user" };
+test("three levels of delegation wait for grandchildren and deliver back through the original task chain", async t => {
+  const f = await fixture(t), a = await f.member("a"), a1 = await f.member("a1");
+  await f.call("setSupervisor", { teamId: f.team.id, agentId: a1.id, reportsToAgentId: a.id });
+  const root = await f.call("assignTask", { teamId: f.team.id, assigneeAgentId: f.leader.id, brief: "Integrate" });
+  await eventually(() => f.starts.length === 1);
+  const mid = await f.call("assignTask", { teamId: f.team.id, assigneeAgentId: a.id, brief: "Build" }, { kind: "agent", sessionId: f.starts[0].input.session.id });
+  await eventually(() => f.starts.length === 2);
+  const leaf = await f.call("assignTask", { teamId: f.team.id, assigneeAgentId: a1.id, brief: "Implement" }, { kind: "agent", sessionId: f.starts[1].input.session.id });
+  await eventually(() => f.starts.length === 3);
+  f.starts[1].finish({ content: "Waiting for a1" });
+  await eventually(() => f.store.state.tasks[mid.id].status === "blocked");
+  f.starts[0].finish({ content: "Waiting for a" });
+  await eventually(() => f.store.state.tasks[root.id].status === "blocked");
+  assert.equal(f.starts.length, 3);
+  await f.call("updateTask", { taskId: leaf.id, report: { outcome: "done", summary: "Leaf delivery", evidence: [], artifacts: [] } });
+  f.starts[2].finish({ content: "Done" });
+  await eventually(() => f.starts.length === 4);
+  assert.equal(f.starts[3].input.task.id, mid.id);
+  assert.equal(f.starts[3].input.session.id, f.starts[1].input.session.id, "continuations preserve session identity");
+  await f.call("updateTask", { taskId: mid.id, report: { outcome: "done", summary: "Integrated child", evidence: [], artifacts: [] } });
+  f.starts[3].finish({ content: "Done" });
+  await eventually(() => f.starts.length === 5);
+  assert.equal(f.starts[4].input.task.id, root.id);
+});
+test("adding the first member establishes the root without a separate UI mutation", async t => {
+  const f = await fixture(t);
+  const team = await f.call("createTeam", { name: "New organization" });
+  const first = await f.call("createWorkspace", { teamId: team.id, name: "main" });
+  const second = await f.call("createWorkspace", { teamId: team.id, name: "member" });
+  const snapshot = await f.call("snapshot");
+  assert.equal(snapshot.teams.find(t => t.id === team.id).leaderAgentId, first.id);
+  assert.equal(snapshot.memberships.find(m => m.agentId === second.id).reportsToAgentId, first.id);
+});
+
+test("organization enforces direct delegation, subtree visibility and acyclic reassignment", async t => {
+  const f = await fixture(t);
+  const a = await f.member("a"), a1 = await f.member("a1"), a11 = await f.member("a11"), b = await f.member("b");
+  await f.call("setSupervisor", { teamId: f.team.id, agentId: a1.id, reportsToAgentId: a.id });
+  await f.call("setSupervisor", { teamId: f.team.id, agentId: a11.id, reportsToAgentId: a1.id });
+  const as = async agent => ({ kind: "agent", sessionId: (await f.call("attachSession", { teamId: f.team.id, agentId: agent.id })).id });
+  const aActor = await as(a), a1Actor = await as(a1), bActor = await as(b);
+  const own = await f.call("assignTask", { teamId: f.team.id, assigneeAgentId: a1.id, brief: "Coordinate", start: false }, aActor);
+  const child = await f.call("assignTask", { teamId: f.team.id, assigneeAgentId: a11.id, brief: "Implement", start: false }, a1Actor);
+  await assert.rejects(f.call("assignTask", { teamId: f.team.id, assigneeAgentId: a11.id, brief: "Skip level" }, aActor), { code: "FORBIDDEN" });
+  await assert.rejects(f.call("getTask", { taskId: child.id }, bActor), { code: "FORBIDDEN" });
+  assert.deepEqual((await f.call("getTeam", { teamId: f.team.id }, aActor)).tasks.map(t => t.id), [own.id, child.id]);
+  await assert.rejects(f.call("setSupervisor", { teamId: f.team.id, agentId: a.id, reportsToAgentId: a11.id }), { code: "ORGANIZATION_CYCLE" });
+  await assert.rejects(f.call("removeMember", { teamId: f.team.id, agentId: a.id }), { code: "HAS_REPORTS" });
+  const added = await f.call("createWorkspace", { teamId: f.team.id, name: "a-new" }, aActor);
+  assert.equal((await f.call("snapshot")).memberships.find(m => m.agentId === added.id).reportsToAgentId, a.id);
+  await f.call("setLeader", { teamId: f.team.id, agentId: a11.id });
+  const roster = (await f.call("snapshot")).memberships;
+  assert.equal(roster.filter(m => !m.reportsToAgentId).length, 1);
+  assert.equal(roster.find(m => m.agentId === f.leader.id).reportsToAgentId, a11.id);
+});
 test("feature worktrees stay under the team root, reject reused branches and preserve source files", async t => {
   const f = await fixture(t);
   const git = promisify(execFile);

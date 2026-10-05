@@ -9,6 +9,7 @@ import { createService } from "./service.js";
 import { createRindAdapter } from "./adapters/rind.js";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
+import { connectSharedRuntime } from "../../rind-runtime-client/shared-runtime.js";
 
 export async function startServer(options: { home?: string; python?: string; repoRoot: string; runtimePath?: string }) {
   const paths = managementPaths(options.home);
@@ -25,6 +26,38 @@ export async function startServer(options: { home?: string; python?: string; rep
   const sockets = new Set<net.Socket>();
   let service: ReturnType<typeof createService>;
   let userToken = "";
+  let runtime: Awaited<ReturnType<typeof connectSharedRuntime>> | undefined;
+  let runtimeConnecting: Promise<any> | undefined;
+  let closing = false;
+  async function reconcile(session: any) {
+    if (!runtime || !session.runtimeSessionId || !session.shared) return;
+    try {
+      const replay = await runtime.request("session/replay", { session_id: session.runtimeSessionId });
+      await service.request({ kind: "user" }, "reconcileSession", { requestId: "observe-" + randomBytes(12).toString("hex"), sessionId: session.id, connected: replay.hosted === true,
+        active: replay.live_turn?.status === "running" || replay.tasks?.some((t: any) => ["starting", "running", "cancelling"].includes(t.status)), needsInput: !!replay.live_turn?.question,
+        outcome: replay.live_turn?.status || replay.turn_state?.status });
+    } catch {
+      if (!closing) await service.request({ kind: "user" }, "reconcileSession", { requestId: "missing-" + randomBytes(12).toString("hex"), sessionId: session.id, connected: false }).catch(() => {});
+    }
+  }
+  function executionHost() {
+    if (runtime) return Promise.resolve(runtime);
+    return runtimeConnecting ||= connectSharedRuntime({ ...options, rindHome: options.home,
+      onMessage(message: any) {
+        if (!["turn_started", "turn_completed", "turn_failed", "turn_cancelled", "user_question_requested", "task_updated"].includes(message.event?.type) && !(message.event?.type === "tool_result" && message.event.tool_name === "ask_user_question")) return;
+        const session = Object.values(store.state.sessions).find(s => s.runtimeSessionId === message.session_id);
+        if (session) void reconcile(session);
+      },
+      onDisconnect() {
+        runtime = undefined;
+        if (!closing) for (const session of Object.values(store.state.sessions).filter(s => s.shared)) void service.request({ kind: "user" }, "reconcileSession", { requestId: "disconnect-" + randomBytes(12).toString("hex"), sessionId: session.id, connected: false }).catch(() => {});
+      },
+    }).then(async value => {
+      runtime = value; await value.request("runtime/observe");
+      await Promise.all(Object.values(store.state.sessions).map(reconcile));
+      return value;
+    }).finally(() => { runtimeConnecting = undefined; });
+  }
   const bridge = fileURLToPath(new URL("./bridge.js", import.meta.url));
   function issue(principal: Principal, host = false) {
     const payload = Buffer.from(JSON.stringify({ principal, host })).toString("base64url");
@@ -42,13 +75,18 @@ export async function startServer(options: { home?: string; python?: string; rep
     const token = issue(principal);
     const hostToken = issue(principal, true);
     const session = principal.kind === "user" ? undefined : store.state.sessions[principal.sessionId];
-    const skills = session ? store.state.agents[session.agentId]?.skillRefs || [] : [];
+    const agent = session ? store.state.agents[session.agentId] : undefined;
+    const skills = agent?.skillRefs || [];
+    const role = session?.teamId ? store.state.memberships[session.teamId + "/" + session.agentId] : undefined;
     return {
       skill_files: principal.kind === "manager" ? [] : skills.filter(ref => path.isAbsolute(ref)),
       command: process.execPath, args: [bridge], env: { RIND_MANAGEMENT_ENDPOINT: paths.endpoint, RIND_MANAGEMENT_TOKEN: token },
       lifecycle: { before: "hostTurnStart", after: "hostTurnEnd", env: { RIND_MANAGEMENT_ENDPOINT: paths.endpoint, RIND_MANAGEMENT_TOKEN: hostToken } },
       name: "agent_management",
-      description: "Manage registered teams and tasks. Call snapshot to discover IDs. Actions: getTeam(teamId) returns a concise team briefing; createTeam(name), addMember(teamId,workspace,position?,responsibility?), setLeader(teamId,agentId), updateMember(teamId,agentId,position?,responsibility?), createWorkspace(teamId,name), createWorktree(teamId,name,repository,branch,base?), assignTask(teamId,assigneeAgentId,brief), getTask(taskId), updateTask(taskId,report:{outcome,summary,evidence:[],artifacts:[]}) or updateTask(taskId,status:blocked,blockedOn:{responder,action}), postTaskNote(taskId,text), publishArtifact(taskId,path), readArtifact(artifactId), startTask(taskId), setTaskPriority(taskId,priority:high|normal|low), cancelTask(taskId), cancelRun(runId). Only registered members may run. Share/copy choices require the user interface.",
+      description: "Manage registered teams and tasks. Call snapshot to discover IDs. Actions: getTeam(teamId) returns a concise team briefing; createTeam(name), addMember(teamId,workspace,position?,responsibility?), setLeader(teamId,agentId), setSupervisor(teamId,agentId,reportsToAgentId), updateMember(teamId,agentId,position?,responsibility?), createWorkspace(teamId,name), createWorktree(teamId,name,repository,branch,base?), assignTask(teamId,assigneeAgentId,brief), getTask(taskId), updateTask(taskId,report:{outcome,summary,evidence:[],artifacts:[]}) or updateTask(taskId,status:blocked,blockedOn:{responder,action}), postTaskNote(taskId,text), publishArtifact(taskId,path), readArtifact(artifactId), startTask(taskId), setTaskPriority(taskId,priority:high|normal|low), cancelTask(taskId), cancelRun(runId). Only registered members may run. Share/copy choices require the user interface.",
+      ...(principal.kind !== "manager" ? { instructions: [agent?.hint, role?.responsibility,
+        session?.teamId ? "Team ID: " + session.teamId + "; Agent ID: " + session.agentId + ". Use snapshot for the organization tree. Delegate only to direct reports; integrate their delivery before reporting to your supervisor. Private conversations stay in their session." : "This conversation has no team authority.",
+        skills.length ? "Assigned skills: " + skills.join(", ") : ""].filter(Boolean).join("\n") } : {}),
       ...(principal.kind === "manager" ? { enabled_tools: ["agent_management"], instructions: "You are the user's agents manager. Use agent_management to inspect all teams, assemble teams and assign work to their leaders. Keep delivery concise: progress, blockers needing the user, and links to tasks. You cannot browse members' private files. Sharing/copying workspaces requires the user's explicit choice." } : {}),
     };
   }
@@ -86,7 +124,7 @@ export async function startServer(options: { home?: string; python?: string; rep
         connectionPrincipal = principal;
         if (grant) {
           const session = store.state.sessions[grant.principal.kind === "user" ? "" : grant.principal.sessionId];
-          requireValue(session && (session.origin === "direct" ? service.isConnected(session.id) : Object.values(store.state.runs).some(r => r.sessionId === session.id && ["starting", "running"].includes(r.status))), "SESSION_EXPIRED", "The execution host no longer owns this session.");
+          requireValue(session && (session.origin === "direct" ? service.isConnected(session.id) : (session.shared && service.isConnected(session.id)) || Object.values(store.state.runs).some(r => r.sessionId === session.id && ["starting", "running"].includes(r.status))), "SESSION_EXPIRED", "The execution host no longer owns this session.");
           requireValue(typeof message.runtimeSessionId === "string" && message.runtimeSessionId, "UNAUTHORIZED", "Runtime session identity is required.");
           requireValue(!grant.host || ["hostTurnStart", "hostTurnEnd"].includes(message.method), "FORBIDDEN", "Host credentials can only publish lifecycle facts.");
           requireValue(!session.runtimeSessionId || session.runtimeSessionId === message.runtimeSessionId, "UNAUTHORIZED", "Credential does not match the attached conversation.");
@@ -102,12 +140,25 @@ export async function startServer(options: { home?: string; python?: string; rep
         } else if (message.method === "sessionTools") {
           requireValue(principal.kind === "user", "FORBIDDEN", "Only the host can issue session tools.");
           const session = store.state.sessions[message.params.sessionId];
-          requireValue(session && session.origin === "direct", "NOT_FOUND", "Direct session not found.");
+          requireValue(session, "NOT_FOUND", "Session not found.");
           const manager = store.state.agents[session.agentId].canonicalWorkspace === await realManager;
+          if (session.shared) await executionHost();
           result = toolConfig({ kind: manager ? "manager" : "agent", sessionId: session.id });
+        } else if (message.method === "listSessions") {
+          requireValue(principal.kind === "user", "FORBIDDEN", "Private session history is available only to the user.");
+          const agent = store.state.agents[message.params.agentId];
+          requireValue(agent, "NOT_FOUND", "Agent not found.");
+          const host = await executionHost();
+          const history = await host.request("session/list", { workspace_root: agent.canonicalWorkspace, limit: 100 });
+          const registered = Object.values(store.state.sessions).filter(s => s.agentId === agent.id);
+          result = { sessions: history.sessions.map((entry: any) => {
+            const scope = registered.find(s => s.runtimeSessionId === (entry.id || entry.session_id));
+            return { ...entry, runtimeSessionId: entry.id || entry.session_id, ...(scope ? { teamId: scope.teamId } : {}) };
+          }) };
         } else {
           result = await service.request(principal, message.method, message.params);
           if (message.method === "attachSession" || message.method === "reattachSession") attached.push(result.id);
+          if (message.method === "bindSession") await reconcile(result);
         }
         send({ id, result });
       } catch (error) {
@@ -127,14 +178,18 @@ export async function startServer(options: { home?: string; python?: string; rep
     catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
     if (!userToken) { userToken = randomBytes(32).toString("hex"); await writeFile(paths.token, userToken, { mode: 0o600, flag: "wx" }); }
     store = await openStore(paths.state);
-    service = createService({ store, paths, adapters: { rind: createRindAdapter(options) }, toolConfig });
+    const rind = createRindAdapter(options);
+    service = createService({ store, paths, adapters: { rind: { async start(input, emit) { await executionHost(); return rind.start(input, emit); } } }, toolConfig });
     await service.recover();
     readyResolve!();
+    if (Object.values(store.state.sessions).some(s => s.shared && s.runtimeSessionId)) void executionHost().catch(() => {});
   } catch (error) { readyReject!(error); for (const socket of sockets) socket.destroy(); server.close(); throw error; }
   return {
     paths,
     async close() {
+      closing = true;
       await service.stop();
+      runtime?.close();
       for (const socket of sockets) socket.destroy();
       await new Promise<void>(resolve => server.close(() => resolve()));
     },

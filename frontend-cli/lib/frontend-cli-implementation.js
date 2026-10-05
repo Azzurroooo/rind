@@ -9,6 +9,7 @@ import { runAgentsPage } from "./agents-page.js";
 import { prepareManagement, observeRuntime } from "./agents-session.js";
 
 import { createCompactContextState } from "./compact-context-state.js";
+import { createSharedRuntimeClient } from "../../rind-runtime-client/shared-runtime.js";
 import { createRuntimeClient, runHelpVersion } from "./runtime-client.js";
 import {
   requireRuntimeInitialization,
@@ -204,14 +205,13 @@ const {
   setTurnContext,
 } = outputController;
 
-const runtimeClient = observeRuntime(createRuntimeClient({
+const runtimeClient = observeRuntime((management.shared ? createSharedRuntimeClient : createRuntimeClient)({
   python,
   repoRoot,
   runtimePath,
   cliArgs,
   externalTools: management.externalTools,
   onMessage: (message) => {
-    management.event?.(message);
     eventProcessing = eventProcessing
       .then(() => message?.method === runtimeMethods.authUpdate ? renderAuthUpdate(message) : renderEvent(message))
       .catch((error) => {
@@ -491,6 +491,7 @@ try {
     });
     process.stdin.on("data", handleStdinData);
   }
+  if (sessionState.info.live_turn?.question) void inputActions.answerQuestion({ ...sessionState.info.live_turn.question, type: "user_question_requested" });
   await inputController.promptLoop();
 } catch (error) {
   closeAssistant();
@@ -499,6 +500,7 @@ try {
     process.exitCode = 1;
   }
 } finally {
+  if (!tui && management.shared) await turnController.waitForIdle();
   void shutdownRuntime();
 }
 

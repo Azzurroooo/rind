@@ -36,3 +36,11 @@ export function teamBriefing(tasks: Task[], agents: State["agents"]) {
     delivered: tasks.filter(t => t.status === "done").slice(-10).reverse().map(item),
   };
 }
+
+export function sessionStatus(state: State, sessionId: string, connected: Set<string>) {
+  const runs = Object.values(state.runs).filter(r => r.sessionId === sessionId);
+  const active = runs.find(r => activeRun(r));
+  const last = active || runs.at(-1);
+  return { status: active?.status === "unknown" ? "Unconfirmed" : active?.needsInput ? "Needs input" : active ? "Working" : connected.has(sessionId) ? "Ready" : "Inactive",
+    ...(last ? { lastActivity: last.lastObservedAt, ...(last.taskId ? { taskId: last.taskId } : {}) } : {}) };
+}

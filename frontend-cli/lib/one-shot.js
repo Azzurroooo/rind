@@ -1,6 +1,7 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 
+import { createSharedRuntimeClient } from "../../rind-runtime-client/shared-runtime.js";
 import { createRuntimeClient } from "./runtime-client.js";
 import { requireRuntimeInitialization, runtimeMethods } from "./runtime-protocol.js";
 import { createOneShotProgress } from "./one-shot-progress.js";
@@ -156,7 +157,7 @@ export async function runOneShot({ args, python, repoRoot, runtimePath, cwd = pr
       ? await prepareManagement([...runtimeArgs, ...(options.team ? ["--team", options.team] : []), ...(options.standalone ? ["--standalone"] : [])], { python, repoRoot, runtimePath }, { interactive: false })
       : { args: runtimeArgs };
     progress.begin();
-    client = observeRuntime(clientFactory({
+    client = observeRuntime((management.shared && clientFactory === createRuntimeClient ? createSharedRuntimeClient : clientFactory)({
       python,
       repoRoot,
       runtimePath,
@@ -164,7 +165,6 @@ export async function runOneShot({ args, python, repoRoot, runtimePath, cwd = pr
       cliArgs: management.args,
       externalTools: management.externalTools,
       onMessage: (message) => {
-        management.event?.(message);
         const event = message?.event;
         const type = event?.type;
         if (message?.turn_id) turnId = String(message.turn_id);
