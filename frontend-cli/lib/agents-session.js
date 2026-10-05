@@ -15,6 +15,7 @@ export function managementArgs(args) {
     else remaining.push(args[i]);
   }
   if ((team && standalone) || (manager && (team || standalone))) throw new Error("Choose one of --team, --standalone or --manager.");
+  if (manager && remaining.some(arg => arg === "--cwd" || arg === "--dir")) throw new Error("Manager uses its dedicated workspace; omit --cwd/--dir.");
   return { args: remaining, team, standalone, manager, prefill };
 }
 export async function prepareManagement(args, launch, { interactive = !!process.stdin.isTTY, chooseTeam } = {}) {

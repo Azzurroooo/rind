@@ -7,7 +7,14 @@ import { fileURLToPath } from "node:url";
 import { startServer } from "../../agent-management/dist/ipc.js";
 import { connectClient } from "../../agent-management/dist/client.js";
 import { runAgentsPage } from "../lib/agents-page.js";
+import { managementArgs } from "../lib/agents-session.js";
 import { createVirtualInput, createVirtualOutput } from "./helpers/virtual-terminal.js";
+
+test("manager keeps its dedicated workspace and rejects mixed session scopes", () => {
+  assert.throws(() => managementArgs(["--manager", "--cwd", "private"]), /dedicated workspace/);
+  assert.throws(() => managementArgs(["--team", "A", "--standalone"]), /Choose one/);
+  assert.deepEqual(managementArgs(["--manager", "--session", "history", "--prefill", "draft"]).args, ["--session", "history"]);
+});
 
 test("agents page assembles arbitrary folders, chooses the first leader and preserves return controls", { timeout: 15000 }, async t => {
   const home = await mkdtemp(path.join(os.tmpdir(), "rind-agents-page-"));
