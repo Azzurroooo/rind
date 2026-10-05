@@ -44,14 +44,6 @@ export function parseTerminalKey(raw = "") {
     return { kind: "text", name: "", text: value };
   }
 
-  const sgrMouse = value.match(/^\x1b\[<(\d+);(\d+);(\d+)([Mm])$/);
-  if (sgrMouse) {
-    return mouseEvent(Number(sgrMouse[1]), Number(sgrMouse[2]), Number(sgrMouse[3]), sgrMouse[4] === "m");
-  }
-  if (value.startsWith("\x1b[M") && value.length === 6) {
-    return mouseEvent(value.charCodeAt(3) - 32, value.charCodeAt(4) - 32, value.charCodeAt(5) - 32, false);
-  }
-
   const kitty = value.match(/^\x1b\[(\d+)(?::(\d*))?(?::(\d+))?(?:;(\d+))?(?::(\d+))?u$/);
   if (kitty) {
     const codepoint = Number(kitty[1]);
@@ -119,15 +111,6 @@ export function parseTerminalKey(raw = "") {
     return null;
   }
   return { kind: "text", name: "", text: value };
-}
-
-function mouseEvent(code, column, row, released) {
-  if (!Number.isSafeInteger(code) || !Number.isSafeInteger(column) || !Number.isSafeInteger(row) || column < 1 || row < 1) return null;
-  const wheel = Boolean(code & 64);
-  const button = wheel ? (code & 1 ? "down" : "up") : ["left", "middle", "right"][code & 3];
-  if (!button || code & 32) return null;
-  return { kind: "mouse", name: released ? "release" : wheel ? "scroll" : "press", button, x: column - 1, y: row - 1,
-    shift: Boolean(code & 4), alt: Boolean(code & 8), ctrl: Boolean(code & 16), text: "" };
 }
 
 function key(name, modifier = 1) {

@@ -85,15 +85,8 @@ test("parses Kitty printable keys, special keys, and ignores releases", () => {
   assert.equal(parseTerminalKey("\x1b[1;1:3A"), null);
 });
 
-test("parses SGR and legacy mouse clicks and wheel without treating them as text", () => {
-  assert.deepEqual(parseTerminalKey("\x1b[<0;12;4M"), {
-    kind: "mouse", name: "press", button: "left", x: 11, y: 3,
-    shift: false, alt: false, ctrl: false, text: "",
-  });
-  assert.equal(parseTerminalKey("\x1b[<0;12;4m").name, "release");
-  assert.equal(parseTerminalKey("\x1b[<64;12;4M").button, "up");
-  assert.equal(parseTerminalKey("\x1b[<65;12;4M").button, "down");
-  assert.equal(parseTerminalKey("\x1b[M" + String.fromCharCode(32, 44, 36)).x, 11);
-  assert.equal(parseTerminalKey("\x1b[<0;0;4M"), null);
-  assert.equal(parseTerminalKey("\x1b[<32;12;4M"), null);
+test("stray mouse reports are ignored instead of being treated as text", () => {
+  assert.equal(parseTerminalKey("\x1b[<0;12;4M"), null);
+  assert.equal(parseTerminalKey("\x1b[<64;12;4M"), null);
+  assert.equal(parseTerminalKey("\x1b[M" + String.fromCharCode(32, 44, 36)), null);
 });

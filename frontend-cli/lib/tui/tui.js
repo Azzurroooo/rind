@@ -12,8 +12,6 @@ const PASTE_ENABLE = "\x1b[?2004h";
 const PASTE_DISABLE = "\x1b[?2004l";
 const ALTERNATE_SCREEN_ENABLE = "\x1b[?1049h";
 const ALTERNATE_SCREEN_DISABLE = "\x1b[?1049l";
-const MOUSE_ENABLE = "\x1b[?1000h\x1b[?1006h";
-const MOUSE_DISABLE = "\x1b[?1006l\x1b[?1000l";
 const KITTY_KEYBOARD_ENABLE = "\x1b[>7u\x1b[?u\x1b[c";
 const KITTY_KEYBOARD_DISABLE = "\x1b[<u";
 const MODIFY_OTHER_KEYS_ENABLE = "\x1b[>4;2m";
@@ -30,7 +28,6 @@ export function createTui(options = {}) {
   const cancelSchedule = options.clearTimeout || clearTimeout;
   const now = options.now || Date.now;
   const alternateScreen = options.alternateScreen === true;
-  const mouse = options.mouse === true;
   const minRenderIntervalMs = Number.isFinite(options.renderIntervalMs)
     ? Math.max(0, options.renderIntervalMs)
     : DEFAULT_RENDER_INTERVAL_MS;
@@ -149,7 +146,6 @@ export function createTui(options = {}) {
       maxLinesRendered = 0;
       previousViewportTop = 0;
     }
-    if (mouse) write(MOUSE_ENABLE);
     write(PASTE_ENABLE);
     enableKeyboardProtocol();
     hideCursor();
@@ -196,7 +192,6 @@ export function createTui(options = {}) {
     }
     write(PASTE_DISABLE);
     disableKeyboardProtocol();
-    if (mouse) write(MOUSE_DISABLE);
     if (alternateScreen) write(ALTERNATE_SCREEN_DISABLE);
     inputBuffer.clear();
   }

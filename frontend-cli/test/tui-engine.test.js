@@ -82,22 +82,23 @@ test("first render writes lines to the screen", async () => {
   tui.stop();
 });
 
-test("alternate page restores the original terminal and releases mouse capture", async () => {
+test("alternate page restores the original terminal without capturing the mouse", async () => {
   const virtual = createVirtualOutput({ columns: 40, rows: 8 });
   virtual.output.write("Original conversation");
   const writes = [];
   const output = { ...virtual.output, write(value) { writes.push(value); return virtual.output.write(value); } };
   const input = createVirtualInput();
-  const tui = createTui({ input, output, alternateScreen: true, mouse: true, renderIntervalMs: 0 });
+  const tui = createTui({ input, output, alternateScreen: true, renderIntervalMs: 0 });
   tui.addChild(new StaticText("Agents overview"));
   tui.start();
   await settle(virtual);
   assert.match(virtual.getViewport().join("\n"), /Agents overview/);
-  assert.ok(writes.join("").includes("\x1b[?1049h\x1b[?1000h\x1b[?1006h"));
+  assert.ok(writes.join("").includes("\x1b[?1049h"));
   tui.stop();
   await virtual.flush();
   assert.match(virtual.getViewport().join("\n"), /Original conversation/);
-  assert.ok(writes.join("").includes("\x1b[?1006l\x1b[?1000l\x1b[?1049l"));
+  assert.ok(writes.join("").includes("\x1b[?1049l"));
+  assert.doesNotMatch(writes.join(""), /\x1b\[\?100[06]h/);
   assert.equal(input.isRaw, false);
 });
 

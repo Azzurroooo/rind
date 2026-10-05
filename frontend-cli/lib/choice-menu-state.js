@@ -14,11 +14,6 @@ export function createChoiceMenuState(options, selectedValue = "") {
     selectedOption() {
       return items[selected] || "";
     },
-    select(index) {
-      if (!Number.isInteger(index) || index < 0 || index >= items.length) return false;
-      selected = index;
-      return true;
-    },
     handleKey(key = {}) {
       if (!items.length) {
         return false;
