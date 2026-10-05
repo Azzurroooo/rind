@@ -12,7 +12,7 @@ export function createActions(ui) {
   const membership = (teamId, agentId) => snap().memberships.find(m => m.teamId === teamId && m.agentId === agentId);
 
   function createTeam() {
-    ui.form("New team", [{ key: "name", label: "Team name", hint: "For example: Product, Research or Finance" }], async values => {
+    ui.form("New team", [{ key: "name", label: "Team name", hint: "What the team works on, e.g. Product, Research or Finance." }], async values => {
       const team = await ui.request("createTeam", values);
       ui.openTeam(team.id, "org");
       ui.notify("Team " + single(team.name) + " created. Add its first member; they become the leader.", "success");
@@ -33,13 +33,19 @@ export function createActions(ui) {
     return "Reports to " + agentName(reportsToAgentId || team.leaderAgentId) + ".";
   }
 
+  // Shared by every way of adding a member, so the wording never drifts.
+  const roleFields = (current = {}) => [
+    { key: "position", label: "Role", optional: true, value: current.position, hint: "A short job title shown beside the name in the team tree, e.g. Reviewer or Frontend. The leader also sees it when choosing who to delegate to." },
+    { key: "responsibility", label: "Responsibility", optional: true, value: current.responsibility, hint: "What this member is in charge of, in a sentence. It is added to the member's instructions on every team task, e.g. \"Owns the login and payment pages and their tests.\"" },
+  ];
+
   function addMember(teamId, reportsToAgentId) {
     const where = placement(teamId, reportsToAgentId);
     ui.choose("Add member", [
       { label: "Existing folder", description: "Keep its files, skills and history", action: () => ui.form("Add existing folder", [
-        { key: "workspace", label: "Folder path", hint: "Paste or type a path. Files stay where they are." },
-        { key: "position", label: "Position", optional: true, hint: "Shown next to the name, e.g. Backend" },
-        { key: "responsibility", label: "Responsibility", optional: true, hint: "What this member owns" },
+        { key: "workspace", label: "Folder", kind: "path", require: "folder", hint: "Tab completes folder names; ↑↓ choose a suggestion. Files stay where they are." },
+        { key: "name", label: "Name", optional: true, derive: values => (values.workspace ? path.basename(ui.resolvePath(values.workspace)) : ""), hint: "How the member is called in the team. Defaults to the folder name." },
+        ...roleFields(),
       ], values => addExisting(teamId, { ...values, reportsToAgentId }), { description: [where] }) },
       { label: "New empty workspace", description: "A fresh folder for a new role", action: () => createWorkspace(teamId, false, { reportsToAgentId }) },
       { label: "New Git worktree", description: "Parallel work on its own branch", action: () => createWorkspace(teamId, true, { reportsToAgentId }) },
@@ -63,7 +69,7 @@ export function createActions(ui) {
     const extra = { position: values.position, responsibility: values.responsibility, reportsToAgentId: values.reportsToAgentId };
     ui.choose("Independent copy", [
       { label: "Git worktree", description: "A new branch of the same repository", action: () => createWorkspace(teamId, true, { ...extra, workspace: values.workspace }) },
-      { label: "Copy folder", description: "Review the files first; secrets and build output are skipped", action: () => ui.form("Copy folder", [{ key: "name", label: "New folder name" }], async ({ name }) => {
+      { label: "Copy folder", description: "Review the files first; secrets and build output are skipped", action: () => ui.form("Copy folder", [{ key: "name", label: "New folder name", kind: "name", root: teamOf(teamId).createRoot, derive: () => path.basename(values.workspace) + "-copy" }], async ({ name }) => {
         const preview = await ui.request("previewCopy", { source: values.workspace });
         const destination = path.join(teamOf(teamId).createRoot, name);
         ui.choose("Review copy", [
@@ -75,10 +81,18 @@ export function createActions(ui) {
     ]);
   }
 
+  // A worktree is described in the order people think about it: which
+  // repository, which branch, then where it lives (derived from the branch).
   function createWorkspace(teamId, worktree, source = {}) {
-    const fields = [{ key: "name", label: "Folder name", hint: "Created inside " + teamOf(teamId)?.createRoot }, ...(worktree ? [
-      { key: "repository", label: "Repository", value: source.workspace }, { key: "branch", label: "New branch" }, { key: "base", label: "Start from", value: "HEAD" },
-    ] : [])];
+    const root = teamOf(teamId)?.createRoot;
+    const folder = { key: "name", label: "Folder name", kind: "name", root, hint: "A new folder inside the team's workspace area." };
+    const fields = worktree ? [
+      { key: "repository", label: "Repository", kind: "path", require: "git", value: source.workspace, hint: "The Git repository to branch from. Tab completes folder names." },
+      { key: "branch", label: "New branch", hint: "Created for this member, e.g. feature/search. Must not exist yet." },
+      { ...folder, derive: values => values.branch.replace(/[^\p{L}\p{N}_.-]+/gu, "-").replace(/^-+|-+$/g, "") },
+      { key: "base", label: "Start from", value: "HEAD", hint: "Branch, tag or commit the new branch starts at. HEAD is the repository's current commit." },
+      ...(source.position || source.responsibility ? [] : roleFields()),
+    ] : [folder, ...roleFields()];
     ui.form(worktree ? "New Git worktree" : "New workspace", fields, async values => memberAdded(teamId, await ui.request(worktree ? "createWorktree" : "createWorkspace",
       { teamId, position: source.position, responsibility: source.responsibility, reportsToAgentId: source.reportsToAgentId, ...values })), { description: [placement(teamId, source.reportsToAgentId)] });
   }
@@ -102,10 +116,7 @@ export function createActions(ui) {
 
   function editMember(teamId, agentId) {
     const current = membership(teamId, agentId);
-    ui.form("Role and responsibility", [
-      { key: "position", label: "Position", optional: true, value: current?.position },
-      { key: "responsibility", label: "Responsibility", optional: true, value: current?.responsibility },
-    ], async values => { await ui.request("updateMember", { teamId, agentId, ...values }); ui.notify("Updated " + agentName(agentId) + ".", "success"); }, { description: [agentName(agentId)] });
+    ui.form("Role and responsibility", roleFields(current), async values => { await ui.request("updateMember", { teamId, agentId, ...values }); ui.notify("Updated " + agentName(agentId) + ".", "success"); }, { description: [agentName(agentId)] });
   }
 
   function changeSupervisor(teamId, agentId) {

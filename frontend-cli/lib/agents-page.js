@@ -2,6 +2,8 @@ import { realpath } from "node:fs/promises";
 import { createTui } from "./tui/tui.js";
 import { parseTerminalKey } from "./terminal-key.js";
 import { createLineEditor } from "./line-editor.js";
+import { createForm } from "./agents-form.js";
+import { resolveInputPath } from "./path-input.js";
 import { managementClient } from "./agents-client.js";
 import { openAgentChat, managerWorkspace } from "./agents-commands.js";
 import { emptyAgentsSnapshot, clean, sidebarRows, inboxRows, organizationRows, taskRows, memberSessionRows, managerRows, teamSessions, independentSessions, independentRows, selectable } from "./agents-model.js";
@@ -185,7 +187,7 @@ export async function runAgentsPage({ launch, input = process.stdin, output = pr
     view.dialog = { kind: "choice", title, items, description, index, danger, error: "" }; redraw();
   }
   function form(title, fields, submit, { description = [] } = {}) {
-    view.dialog = { kind: "form", title, fields: fields.map(field => ({ ...field, editor: createLineEditor(field.value || "") })), index: 0, description, submit, error: "" }; redraw();
+    view.dialog = createForm({ title, fields, submit, description, onChange: redraw }); redraw();
   }
   function confirm(title, description, label, action) {
     choose(title, [{ label: "Cancel", key: "n", description: "Change nothing", action() {} }, { label, key: "y", danger: true, action }], { description, danger: true });
@@ -228,7 +230,7 @@ export async function runAgentsPage({ launch, input = process.stdin, output = pr
     }
   }
 
-  const ui = { view, request, choose, form, confirm, notify, showText, reopen, openTeam, openMember, setFilter, // Menu actions already run inside perform(); nesting would be refused as busy.
+  const ui = { view, request, choose, form, resolvePath: value => resolveInputPath(value), confirm, notify, showText, reopen, openTeam, openMember, setFilter, // Menu actions already run inside perform(); nesting would be refused as busy.
     chat: options => (view.busy ? chat(options) : perform(() => chat(options), null, "Opening conversation…")) };
   const actions = createActions(ui);
   const currentRow = () => (view.focus === "sidebar" ? view.sidebar.find(r => r.id === view.navId) : view.entries.find(r => r.id === view.selectedId));
@@ -336,6 +338,7 @@ export async function runAgentsPage({ launch, input = process.stdin, output = pr
 
   function dialogKey(key) {
     const dialog = view.dialog;
+    if (dialog.kind === "form") { if (!dialog.handleKey(key, perform)) view.dialog = null; return; }
     if (key.name === "escape") { view.dialog = null; return; }
     if (dialog.kind === "choice") {
       const pick = index => { const item = dialog.items[index]; if (item) { dialog.index = index; void perform(item.action, dialog); } };
@@ -346,20 +349,7 @@ export async function runAgentsPage({ launch, input = process.stdin, output = pr
       else if (key.name === "end") dialog.index = dialog.items.length - 1;
       else if (/^[1-9]$/.test(key.text || "")) pick(Number(key.text) - 1);
       else if (key.text) { const index = dialog.items.findIndex(item => item.key === key.text.toLowerCase()); if (index >= 0) pick(index); }
-      return;
     }
-    if (key.name === "tab") { dialog.index = (dialog.index + (key.shift ? -1 : 1) + dialog.fields.length) % dialog.fields.length; dialog.error = ""; return; }
-    if ((key.name === "up" || key.name === "down") && !dialog.fields[dialog.index].editor.input().includes("\n")) {
-      dialog.index = Math.max(0, Math.min(dialog.fields.length - 1, dialog.index + (key.name === "up" ? -1 : 1))); return;
-    }
-    const field = dialog.fields[dialog.index];
-    if (field.editor.handleInput(key) !== "submit") return;
-    if (!field.optional && !field.editor.input().trim()) { dialog.error = field.label + " is required."; return; }
-    if (dialog.index < dialog.fields.length - 1) { dialog.index++; dialog.error = ""; return; }
-    const missing = dialog.fields.findIndex(item => !item.optional && !item.editor.input().trim());
-    if (missing >= 0) { dialog.index = missing; dialog.error = dialog.fields[missing].label + " is required."; return; }
-    const values = Object.fromEntries(dialog.fields.map(item => [item.key, item.editor.input().trim()]));
-    void perform(() => dialog.submit(values), dialog, "Saving…");
   }
   function detailKey(key) {
     const detail = view.detail;
@@ -431,9 +421,10 @@ export async function runAgentsPage({ launch, input = process.stdin, output = pr
   tui.onData(raw => keyInput(parseTerminalKey(raw)));
   tui.onPaste(value => {
     if (view.busy) return;
-    const editor = view.dialog?.kind === "form" ? view.dialog.fields[view.dialog.index].editor : view.searching ? view.searchEditor : null;
-    editor?.handleInput({ kind: "paste", text: clean(value) });
-    if (view.searching) { view.query = view.searchEditor.input(); project(); } else redraw();
+    if (view.dialog?.kind === "form") { view.dialog.paste(clean(value)); redraw(); return; }
+    if (!view.searching) return;
+    view.searchEditor.handleInput({ kind: "paste", text: clean(value) });
+    view.query = view.searchEditor.input(); project();
   });
   input.on?.("end", close); input.on?.("close", close); signal?.addEventListener("abort", close, { once: true });
   try {

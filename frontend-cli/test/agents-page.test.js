@@ -126,9 +126,9 @@ test("team page edits members, nests team conversations and drives tasks from th
   await visible("Integrate release evidence"); await visible("Updated Lead");
   assert.equal((await h.client.request("snapshot")).memberships[0].position, "Coordinator");
 
-  key("a"); await visible("Existing folder"); await visible("Reports to Lead"); key("\r"); await visible("Folder path");
-  paste(path.join(h.home, "missing")); key("\r"); key("\r"); key("\r");
-  await visible("ENOENT"); assert.match(h.screen(), /missing/, "a failed submit keeps what was typed");
+  key("a"); await visible("Existing folder"); await visible("Reports to Lead"); key("\r"); await visible("Tab completes folder names");
+  paste(path.join(h.home, "missing")); key("\r");
+  await visible("No folder at"); assert.match(h.screen(), /missing/, "an invalid folder keeps what was typed and stays on the field");
   key("\x1b"); await settle();
 
   await h.client.request("createWorkspace", { teamId: team.id, name: "Reviewer" });
@@ -203,7 +203,10 @@ test("a new team flows straight into adding its first member, who becomes the le
   await visible("New team"); await visible("Create your first team");
   key("n"); await visible("Team name"); paste("Accounts"); key("\r");
   await visible("Existing folder"); await visible("The first member becomes the team leader"); key("\r");
-  await visible("Folder path"); paste(workspace); key("\r"); paste("Finance"); key("\r"); paste("Reconcile invoices"); key("\r");
+  await visible("Tab completes folder names"); paste(workspace); await visible("✓"); key("\r");
+  await visible("Defaults to the folder name"); key("\r");
+  await visible("A short job title"); paste("Finance"); key("\r");
+  await visible("It is added to the"); paste("Reconcile invoices"); key("\r");
   await visible("is the team leader");
   const view = await h.client.request("snapshot");
   assert.equal(view.teams[0].leaderAgentId, view.agents[0].id);

@@ -256,11 +256,18 @@ function dialogBox(dialog, width, maxHeight, busy) {
       lines.push(selected ? paintBackground(line, "selection") : line);
     });
   } else {
+    const checkLine = check => ({ ok: paint.success("✓ "), error: paint.danger("✕ "), hint: paint.dim("  ") }[check.tone] || "") + (check.tone === "error" ? paint.danger : paint.dim)(shortPath(single(check.text), inner - 4));
     dialog.fields.forEach((item, index) => {
       const active = index === dialog.index;
-      lines.push((active ? paint.accent("› " + item.label) : paint.dim("  " + item.label)) + (item.optional ? paint.dim("  optional") : ""));
+      const mark = !active && item.check?.tone === "ok" ? paint.success(" ✓") : !active && item.check?.tone === "error" ? paint.danger(" ✕") : "";
+      lines.push((active ? paint.accent("› " + item.label) : paint.dim("  " + item.label)) + (item.optional ? paint.dim("  optional") : "") + mark);
       if (active) {
         lines.push(...editorLines(item.editor, inner, 4, paint.accent("┃ ")));
+        // Suggestions sit directly under the input, like a shell completion menu.
+        const suggestions = item.suggestions || [];
+        suggestions.slice(0, 6).forEach((suggestion, i) => lines.push((i === item.pick ? paint.accent("  › ") : "    ") + (i === item.pick ? paint.bold(suggestion.name) : paint.path(suggestion.name)) + paint.dim("/")));
+        if (suggestions.length > 6) lines.push(paint.dim("    +" + (suggestions.length - 6) + " more · keep typing to narrow"));
+        if (item.check) lines.push("  " + checkLine(item.check));
         if (item.hint) lines.push(...wrap([item.hint], inner - 2).map(line => paint.dim("  " + line)));
       } else lines.push("  " + (item.editor.input() ? truncateToWidth(single(item.editor.input()), inner - 2, "…") : paint.dim("—")));
       if (index < dialog.fields.length - 1) lines.push("");
@@ -288,8 +295,9 @@ function helpBox(width, maxHeight) {
   return box("Keyboard", lines.slice(0, Math.max(1, maxHeight - 2)), width);
 }
 
+// Panels open at a fixed row so they do not jump while their content grows.
 function overlay(base, panel, width) {
-  const top = Math.max(0, Math.floor((base.length - panel.length) / 3));
+  const top = Math.max(0, Math.min(1, base.length - panel.length));
   const left = Math.max(0, Math.floor((width - textWidth(panel[0] || "")) / 2));
   return base.map((line, index) => {
     const content = panel[index - top];

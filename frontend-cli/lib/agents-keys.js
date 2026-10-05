@@ -53,7 +53,12 @@ export function hintsFor(view, row) {
   const k = name => KEYS[name];
   if (view.help) return [k("close")];
   if (view.dialog?.kind === "choice") return [k("choose"), k("confirm"), ...(view.dialog.items.length > 1 ? [k("pick")] : []), k("cancel")];
-  if (view.dialog) return [k("next"), k("field"), k("cancel")];
+  if (view.dialog) {
+    const field = view.dialog.fields[view.dialog.index];
+    if (field?.suggestions?.length) return [{ key: "tab", label: "complete" }, { key: "↑↓", label: "choose" }, { key: "enter", label: field.pick >= 0 ? "use folder" : "next" }, { key: "esc", label: "hide list" }];
+    if (field?.kind === "path") return [{ key: "tab", label: "complete" }, k("next"), { key: "⇧tab", label: "previous" }, k("cancel")];
+    return [k("next"), k("field"), k("cancel")];
+  }
   if (view.detail) return [k("scroll"), ...(view.detail.taskId ? [k("actions")] : []), k("refresh"), k("back")];
   if (view.searching) return [{ key: "type", label: "to search" }, k("keep"), k("clear")];
   if (view.focus === "sidebar") return [k("move"), row?.kind === "new-team" ? k("create") : k("focus"), k("team"), k("help"), k("exit")];
