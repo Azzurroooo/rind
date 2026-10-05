@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { emptyAgentsSnapshot, navigationRows, memberRows, renderAgents } from "../lib/agents-view.js";
+import { emptyAgentsSnapshot, navigationRows, memberRows, renderAgents, hitTestAgents } from "../lib/agents-view.js";
 import { createLineEditor } from "../lib/line-editor.js";
 import { textWidth, stripAnsi } from "../lib/text-width.js";
 import { CURSOR_MARKER } from "../lib/tui/frame.js";
@@ -29,6 +29,16 @@ test("agents layout preserves selection, status and controls at narrow and wide 
     assert.match(text, /Space actions/);
     if (width >= 96) { assert.match(text, /Manager/); assert.match(text, /Teams/); }
   }
+});
+
+test("mouse hit targets follow the rendered navigation, tabs and scrolled list", () => {
+  const view = fixture();
+  assert.deepEqual(hitTestAgents(view, 120, 30, 4, 6), { kind: "nav", id: "manager" });
+  assert.deepEqual(hitTestAgents(view, 120, 30, 49, 4), { kind: "tab", id: "members" });
+  assert.deepEqual(hitTestAgents(view, 120, 30, 38, 15), { kind: "entry", id: "member-7" });
+  assert.equal(hitTestAgents(view, 120, 30, 110, 15), null, "detail pane does not activate the list");
+  view.focus = "nav";
+  assert.deepEqual(hitTestAgents(view, 60, 20, 4, 8), { kind: "nav", id: "new" });
 });
 test("form uses the shared editor cursor, wraps CJK and keeps the active field visible", () => {
   const view = fixture();

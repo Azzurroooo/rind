@@ -7,10 +7,10 @@ import { createLineEditor } from "./line-editor.js";
 import { createChoiceMenuState } from "./choice-menu-state.js";
 import { managementClient } from "./agents-client.js";
 import { openAgentChat, managerWorkspace } from "./agents-commands.js";
-import { emptyAgentsSnapshot, navigationRows, memberRows, renderAgents, clean } from "./agents-view.js";
+import { emptyAgentsSnapshot, navigationRows, memberRows, renderAgents, hitTestAgents, clean } from "./agents-view.js";
 
 export async function runAgentsPage({ launch, input = process.stdin, output = process.stdout, manageInput = true, signal, initialTeamId, openChat = openAgentChat }) {
-  const tui = createTui({ input, output, manageInput });
+  const tui = createTui({ input, output, manageInput, alternateScreen: true, mouse: true });
   const view = { snapshot: emptyAgentsSnapshot(), nav: [], entries: [], navId: "overview", selectedId: "add", teamId: "", focus: "nav", tab: "overview", memberId: "", memberReturnId: "", history: [], collapsed: new Set(), query: "", filter: "All", searching: false, searchEditor: createLineEditor(), dialog: null, detail: null, notice: "", connection: "Connecting…", busy: false };
   let client, connecting, closed = false, chatActive = false, initialized = false;
   let finish;
@@ -177,7 +177,7 @@ export async function runAgentsPage({ launch, input = process.stdin, output = pr
     if (!manager && !agent) throw new Error("Member is no longer available.");
     chatActive = true; tui.stop({ releaseInput: false });
     try { await openChat({ agent, teamId, runtimeSessionId, manager, launch, input }); }
-    finally { chatActive = false; if (closed) finish(); else { tui.start({ acquireInput: false }); tui.replayAll(); } }
+    finally { chatActive = false; if (closed) finish(); else tui.start({ acquireInput: false }); }
   }
   async function delivery(taskId) {
     const task = await request("getTask", { taskId });
@@ -287,6 +287,7 @@ export async function runAgentsPage({ launch, input = process.stdin, output = pr
   }
   function keyInput(key) {
     if (!key) return;
+    if (key.kind === "mouse") { mouseInput(key); return; }
     if (key.ctrl && key.name === "c") { close(); return; }
     if (view.busy) { if (key.name === "escape" && !chatActive) close(); return; }
     if (view.dialog) { dialogKey(key); redraw(); return; }
@@ -303,10 +304,17 @@ export async function runAgentsPage({ launch, input = process.stdin, output = pr
       else view.searchEditor.handleInput(key);
       view.query = view.searchEditor.input(); project(); return;
     }
+    if (key.ctrl && !key.alt && !key.shift && (key.name === "u" || key.name === "d")) {
+      move(key.name === "u" ? -5 : 5);
+      return;
+    }
     if (key.ctrl || key.alt || key.shift) return;
     if (key.name === "up" || key.name === "down") move(key.name === "up" ? -1 : 1);
     else if (key.name === "pageup" || key.name === "pagedown") move(key.name === "pageup" ? -5 : 5);
     else if (key.name === "home" || key.name === "end") move(0, key.name === "home" ? 0 : Infinity);
+    else if (key.text === "j" || key.text === "k") move(key.text === "j" ? 1 : -1);
+    else if (key.text === "g") move(0, 0);
+    else if (key.text === "G") move(0, Infinity);
     else if (key.name === "escape" || key.name === "left") {
       if (view.memberId) { view.selectedId = view.memberReturnId; view.memberId = ""; view.tab = "members"; project(); }
       else if (view.focus === "list") { view.focus = "nav"; view.query = ""; view.filter = "All"; project(); }
@@ -315,11 +323,55 @@ export async function runAgentsPage({ launch, input = process.stdin, output = pr
       const id = currentRow().id; if (view.collapsed.has(id)) view.collapsed.delete(id); else view.collapsed.add(id); project();
     } else if (key.name === "enter" || key.name === "right") activate();
     else if (key.name === "tab" && view.navId === view.teamId && view.teamId && !view.memberId) { view.focus = "list"; view.tab = ["overview", "members", "tasks"][( ["overview", "members", "tasks"].indexOf(view.tab) + 1) % 3]; view.selectedId = "add"; view.filter = "All"; view.query = ""; project(); }
+    else if (view.navId === view.teamId && view.teamId && !view.memberId && ["1", "2", "3"].includes(key.text)) { view.focus = "list"; view.tab = ["overview", "members", "tasks"][Number(key.text) - 1]; view.selectedId = view.tab === "overview" ? "summary" : "add"; view.filter = "All"; view.query = ""; project(); }
     else if (key.text === " ") activate(true);
     else if (key.text === "/" && view.focus === "list") { view.searching = true; view.searchEditor.setInput(view.query); }
     else if (key.text?.toLowerCase() === "f" && view.focus === "list") choose("Filter " + view.tab, ["All", "Needs input", "Unconfirmed", "Working", "Waiting", "Queued", "Ready", "Done", "Inactive", "Cancelled"].map(status => ({ label: status, description: status === "All" ? "Show every item" : "Show " + status.toLowerCase(), action() { view.filter = status; view.selectedId = "add"; } })), [], view.filter);
     else if (key.text?.toLowerCase() === "n") createTeam();
     else if (key.text?.toLowerCase() === "r") { if (view.connection !== "connected") void connect(); else if (view.memberId) void perform(() => sessions(view.memberId)); }
+    redraw();
+  }
+  function mouseInput(event) {
+    if (view.busy || event.name === "release") return;
+    const hit = hitTestAgents(view, tui.columns, tui.rows, event.x, event.y);
+    if (event.name === "scroll") {
+      const direction = event.button === "up" ? -1 : 1;
+      if (view.dialog?.kind === "choice") {
+        view.dialog.selection.handleKey({ name: direction < 0 ? "up" : "down" });
+      } else if (view.detail) {
+        view.detail.offset = Math.max(0, view.detail.offset + direction * 3);
+      } else if (hit?.kind === "nav" || hit?.kind === "entry") {
+        view.focus = hit.kind === "nav" ? "nav" : "list";
+        move(direction * 3);
+      }
+      redraw();
+      return;
+    }
+    if (!hit || view.dialog?.kind === "form") return;
+    if (hit.kind === "choice") {
+      if (event.button !== "left") return;
+      const dialog = view.dialog;
+      if (dialog.selection.selectedIndex() === hit.index) void perform(dialog.items[hit.index].action, dialog);
+      else dialog.selection.select(hit.index);
+    } else if (hit.kind === "nav") {
+      if (event.button !== "left") return;
+      view.focus = "nav";
+      view.navId = hit.id;
+      activate();
+    } else if (hit.kind === "tab") {
+      if (event.button !== "left") return;
+      view.focus = "list";
+      view.tab = hit.id;
+      view.selectedId = "add";
+      project();
+    } else if (hit.kind === "entry") {
+      const selected = view.focus === "list" && view.selectedId === hit.id;
+      view.focus = "list";
+      view.selectedId = hit.id;
+      if (event.button === "right") activate(true);
+      else if (selected) activate();
+      else project();
+    }
     redraw();
   }
   tui.addChild({ render: width => renderAgents(view, width, tui.rows) });

@@ -4,6 +4,9 @@
 const FLAVORS = {
   latte: {
     label: "Latte",
+    surface: "#eff1f5",
+    surfaceActive: "#e6e9ef",
+    selection: "#ccd7ed",
     accent: "#1e66f5",
     success: "#40a02b",
     danger: "#d20f39",
@@ -16,6 +19,9 @@ const FLAVORS = {
   },
   frappe: {
     label: "Frappé",
+    surface: "#303446",
+    surfaceActive: "#414559",
+    selection: "#515b78",
     accent: "#8caaee",
     success: "#a6d189",
     danger: "#e78284",
@@ -28,6 +34,9 @@ const FLAVORS = {
   },
   dracula: {
     label: "Dracula",
+    surface: "#282a36",
+    surfaceActive: "#343746",
+    selection: "#44475a",
     accent: "#bd93f9",
     success: "#50fa7b",
     danger: "#ff5555",
@@ -39,6 +48,9 @@ const FLAVORS = {
   },
   "gruvbox-dark": {
     label: "Gruvbox Dark",
+    surface: "#282828",
+    surfaceActive: "#32302f",
+    selection: "#504945",
     accent: "#83a598",
     success: "#b8bb26",
     danger: "#fb4934",
@@ -50,6 +62,9 @@ const FLAVORS = {
   },
   "catppuccin-mocha": {
     label: "Catppuccin Mocha",
+    surface: "#1e1e2e",
+    surfaceActive: "#313244",
+    selection: "#45475a",
     accent: "#89b4fa",
     success: "#a6e3a1",
     danger: "#f38ba8",
@@ -62,6 +77,9 @@ const FLAVORS = {
   },
   "solarized-dark": {
     label: "Solarized Dark",
+    surface: "#002b36",
+    surfaceActive: "#073642",
+    selection: "#154653",
     accent: "#268bd2",
     success: "#859900",
     danger: "#dc322f",
@@ -73,6 +91,9 @@ const FLAVORS = {
   },
   "rose-pine": {
     label: "Rose Pine",
+    surface: "#191724",
+    surfaceActive: "#26233a",
+    selection: "#403d52",
     accent: "#c4a7e7",
     success: "#9ccfd8",
     danger: "#eb6f92",
@@ -84,6 +105,9 @@ const FLAVORS = {
   },
   "everforest-dark-medium": {
     label: "Everforest Dark Medium",
+    surface: "#2d353b",
+    surfaceActive: "#343f44",
+    selection: "#475258",
     accent: "#7fbbb3",
     success: "#a7c080",
     danger: "#e67e80",
@@ -95,6 +119,9 @@ const FLAVORS = {
   },
   pistachio: {
     label: "Pistachio",
+    surface: "#292f2e",
+    surfaceActive: "#38413d",
+    selection: "#536259",
     accent: "#d6df9a",
     success: "#a8bf96",
     danger: "#df9b87",
@@ -144,6 +171,16 @@ function buildPainters(force) {
 
 export const paint = buildPainters(false);
 export const paintRaw = buildPainters(true);
+
+export function paintBackground(text, role = "surface") {
+  const body = String(text ?? "");
+  if (!colorEnabled()) return body;
+  const hex = FLAVORS[activeName][role];
+  if (!hex) return body;
+  const code = truecolor(hex).replace(/^38/, "48");
+  const background = `\x1b[${code}m`;
+  return background + body.replace(/\x1b\[(?:0)?m/g, reset => reset + background) + "\x1b[0m";
+}
 
 export function breathingAccent(text, elapsedMs) {
   const intensity = 0.78 + 0.22 * (1 - Math.cos(2 * Math.PI * elapsedMs / 4200)) / 2;

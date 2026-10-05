@@ -1,4 +1,4 @@
-import { paint } from "./theme.js";
+import { paint, paintBackground } from "./theme.js";
 import { textWidth, truncateToWidth, wrapTextWithAnsi } from "./text-width.js";
 import { insertCursorMarker } from "./tui/cursor.js";
 import { CURSOR_MARKER } from "./tui/frame.js";
@@ -7,6 +7,7 @@ import { agentStatus } from "./agents-client.js";
 
 export const emptyAgentsSnapshot = () => ({ teams: [], memberships: [], agents: [], tasks: [], runs: [], sessions: [], notes: [], artifacts: [] });
 export const clean = value => String(value ?? "").replace(/\x1b\][^\x07]*(?:\x07|\x1b\\)/g, "").replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, "").replace(/[\x00-\x08\x0b-\x1f\x7f]/g, "");
+const SELECTED_ROW = "\x1b_pi:selected\x07";
 const single = value => clean(value).replace(/\s+/g, " ");
 const priority = status => ["Needs input", "Unconfirmed", "Working", "Waiting", "Queued", "Ready", "Done", "Inactive", "Cancelled"].indexOf(status);
 const taskStatus = status => ({ running: "Working", queued: "Queued", blocked: "Needs input", needs_attention: "Needs input", done: "Done", cancelled: "Cancelled" }[status] || status);
@@ -72,10 +73,13 @@ export function memberRows(snapshot, teamId, tab, query = "", filter = "All", co
   return [{ id: "add", kind: "add", title: tab === "tasks" ? "+ Assign task" : "+ Add member", caption: tab === "tasks" ? "Choose an owner and expected delivery" : "Existing folder, new workspace or worktree" }, ...rows];
 }
 const pad = (text, width) => {
+  const selected = text.startsWith(SELECTED_ROW);
+  if (selected) text = text.slice(SELECTED_ROW.length);
   const marker = text.indexOf(CURSOR_MARKER);
   const visible = text.replace(CURSOR_MARKER, "");
   const padded = truncateToWidth(visible, width) + " ".repeat(Math.max(0, width - textWidth(visible)));
-  return marker < 0 ? padded : insertCursorMarker(padded, Math.min(width - 1, textWidth(text.slice(0, marker))));
+  const result = marker < 0 ? padded : insertCursorMarker(padded, Math.min(width - 1, textWidth(text.slice(0, marker))));
+  return selected ? SELECTED_ROW + result : result;
 };
 const fit = (lines, height) => [...lines.slice(0, height), ...Array(Math.max(0, height - lines.length)).fill("")];
 const wrapped = (lines, width) => lines.flatMap(line => wrapTextWithAnsi(clean(line), Math.max(1, width)));
@@ -83,15 +87,24 @@ function box(title, lines, width, height, active = false) {
   if (height < 3 || width < 8) return fit(lines.map(line => truncateToWidth(line, width)), height);
   const border = active ? paint.accent : paint.dim;
   const heading = truncateToWidth(" " + single(title) + " ", width - 4);
-  return [border("╭─" + heading + "─".repeat(Math.max(0, width - textWidth(heading) - 3)) + "╮"),
-    ...fit(lines, height - 2).map(line => border("│") + " " + pad(line, width - 4) + " " + border("│")),
-    border("╰" + "─".repeat(width - 2) + "╯")];
+  const surface = active ? "surfaceActive" : "surface";
+  return [paintBackground(border("╭─" + heading + "─".repeat(Math.max(0, width - textWidth(heading) - 3)) + "╮"), surface),
+    ...fit(lines, height - 2).map(line => {
+      const selected = line.startsWith(SELECTED_ROW);
+      if (selected) line = line.slice(SELECTED_ROW.length);
+      return paintBackground(border("│") + " " + pad(line, width - 4) + " " + border("│"), selected ? "selection" : surface);
+    }),
+    paintBackground(border("╰" + "─".repeat(width - 2) + "╯"), surface)];
 }
-function listLines(rows, selectedId, width, height, active) {
-  const selected = Math.max(0, rows.findIndex(r => r.id === selectedId));
+function listWindow(rows, selectedId, height) {
+  const selected = Math.max(0, rows.findIndex(row => row.id === selectedId));
   const perRow = height >= 6 ? 2 : 1;
   const count = Math.max(1, Math.floor((height - 1) / perRow));
   const offset = Math.min(Math.max(0, selected - Math.floor(count / 2)), Math.max(0, rows.length - count));
+  return { selected, perRow, count, offset };
+}
+function listLines(rows, selectedId, width, height, active) {
+  const { selected, perRow, count, offset } = listWindow(rows, selectedId, height);
   const lines = [];
   for (const row of rows.slice(offset, offset + count)) {
     const focused = row.id === rows[selected]?.id;
@@ -100,12 +113,73 @@ function listLines(rows, selectedId, width, height, active) {
     const status = row.status && width >= 28 ? statusText(row.status) : "";
     const available = width - textWidth(status) - (status ? 3 : 0) - 2;
     const title = truncateToWidth(name, Math.max(4, available));
-    lines.push((focused ? paint.accent(marker) + paint.bold(title) : marker + title)
+    lines.push((focused && active ? SELECTED_ROW : "") + (focused ? paint.accent(marker) + paint.bold(title) : marker + title)
       + (status && width >= 28 ? " ".repeat(Math.max(1, width - textWidth(title) - textWidth(status) - 2)) + status : ""));
-    if (perRow === 2) lines.push("  " + paint.dim(truncateToWidth(single(row.caption), width - 2)));
+    if (perRow === 2) lines.push((focused && active ? SELECTED_ROW : "") + "  " + paint.dim(truncateToWidth(single(row.caption), width - 2)));
   }
   if (rows.length > count) lines.push(paint.dim("  " + (selected + 1) + "/" + rows.length + " · ↑↓ scroll"));
   return fit(lines, height);
+}
+const TABS = [{ id: "overview", label: "Overview" }, { id: "members", label: "Organization" }, { id: "tasks", label: "Tasks" }];
+function tabSegments() {
+  let start = 0;
+  return TABS.map(tab => {
+    const segment = { ...tab, start, end: start + textWidth(tab.label) + 2 };
+    start = segment.end + 2;
+    return segment;
+  });
+}
+function pageLayout(view, width, rows) {
+  const height = Math.max(1, rows - 1);
+  const bodyY = 3;
+  const bodyHeight = Math.max(3, height - bodyY - 2);
+  const wide = width >= 96;
+  const navWidth = wide ? Math.min(32, Math.floor(width * 0.27)) : width;
+  const mainX = wide ? navWidth + 1 : 0;
+  const mainWidth = wide ? width - navWidth - 1 : width;
+  const tabs = Boolean(view.teamId && view.navId === view.teamId && !view.memberId);
+  const interior = Math.max(1, mainWidth - 4);
+  const available = bodyHeight - 4 - Number(tabs);
+  const preview = interior >= 80 ? 0 : bodyHeight >= 13 ? Math.min(7, Math.max(4, Math.floor(available / 3))) : 0;
+  return { bodyY, bodyHeight, wide, navWidth, mainX, mainWidth, interior, tabs, available,
+    listY: bodyY + 3 + Number(tabs), listHeight: interior >= 80 ? available : Math.max(1, available - preview - 1), preview };
+}
+function rowAt(rows, selectedId, height, offset) {
+  const window = listWindow(rows, selectedId, height);
+  const index = window.offset + Math.floor(offset / window.perRow);
+  return offset >= 0 && index < window.offset + window.count ? rows[index] : undefined;
+}
+
+export function hitTestAgents(view, width, rows, x, y) {
+  if (width < 32 || rows < 12) return null;
+  const layout = pageLayout(view, width, rows);
+  if (y < layout.bodyY + 1 || y >= layout.bodyY + layout.bodyHeight - 1) return null;
+  if (view.dialog) {
+    if (view.dialog.kind !== "choice") return null;
+    const capacity = Math.max(1, layout.bodyHeight - 5);
+    const description = wrapped(view.dialog.description || [], Math.max(1, width - 4));
+    const lines = description.slice(0, Math.max(0, Math.min(3, capacity - 3)));
+    const choices = view.dialog.items.map((item, index) => ({ id: String(index) }));
+    const selectedId = String(view.dialog.selection.selectedIndex());
+    const row = rowAt(choices, selectedId, capacity - lines.length, y - layout.bodyY - 1 - lines.length);
+    return x >= 2 && x < width - 2 && row ? { kind: "choice", index: Number(row.id) } : null;
+  }
+  if (view.detail) return { kind: "detail" };
+  if ((layout.wide || view.focus === "nav") && x >= 2 && x < layout.navWidth - 2) {
+    const row = rowAt(view.nav, view.navId, layout.bodyHeight - 2, y - layout.bodyY - 1);
+    return row ? { kind: "nav", id: row.id } : null;
+  }
+  if (!layout.wide && view.focus !== "list") return null;
+  if (x < layout.mainX + 2 || x >= layout.mainX + layout.mainWidth - 2) return null;
+  if (layout.tabs && y === layout.bodyY + 1) {
+    const column = x - layout.mainX - 2;
+    const tab = tabSegments().find(item => column >= item.start && column < item.end);
+    return tab ? { kind: "tab", id: tab.id } : null;
+  }
+  if (y < layout.listY || y >= layout.listY + layout.listHeight) return null;
+  if (layout.interior >= 80 && x >= layout.mainX + 2 + Math.floor(layout.interior * 0.55)) return null;
+  const row = rowAt(view.entries, view.selectedId, layout.listHeight, y - layout.listY);
+  return row ? { kind: "entry", id: row.id } : null;
 }
 function editorLines(editor, width, maxRows = 3) {
   const frame = prepareComposerFrame({ prompt: "  ", inputText: editor.input(), cursor: editor.cursorPosition() }, width);
@@ -143,7 +217,7 @@ function renderDialog(dialog, width, height, busy) {
   return box(dialog.title, [...fit(visible, capacity), error, paint.dim(truncateToWidth(footer, inner))], width, height, true);
 }
 export function renderAgents(view, width, rows) {
-  width = Math.max(1, width); const height = Math.max(1, rows - 1);
+  width = Math.max(1, width); const layout = pageLayout(view, width, rows); const height = Math.max(1, rows - 1);
   if (width < 32 || rows < 12) return ["Agents", "Enlarge terminal (32 × 12)", "Esc back"].slice(0, height).map(line => truncateToWidth(line, width));
   const { snapshot, nav, entries, navId, selectedId, teamId, focus, tab, query, filter, dialog, detail, notice, connection, busy } = view;
   const team = snapshot.teams.find(t => t.id === teamId);
@@ -154,7 +228,7 @@ export function renderAgents(view, width, rows) {
   const header = paint.bold("  Agents") + paint.dim(team ? " / " + single(team.name) : " / Overview");
   const summary = "  " + snapshot.teams.length + " teams · " + active + " running · " + attention + " need input";
   const top = [header, connection === "connected" ? paint.dim(summary) : paint.warning("  " + connection), ""];
-  const bodyHeight = Math.max(3, height - top.length - 2);
+  const bodyHeight = layout.bodyHeight;
   let body;
   if (dialog) body = renderDialog(dialog, width, bodyHeight, busy);
   else if (detail) {
@@ -162,27 +236,26 @@ export function renderAgents(view, width, rows) {
     const offset = Math.min(detail.offset, Math.max(0, lines.length - bodyHeight + 2));
     body = box((detail.title || "Delivery") + " · " + (offset + 1) + "/" + Math.max(1, lines.length), lines.slice(offset), width, bodyHeight, true);
   } else {
-    const wide = width >= 96;
-    const navWidth = wide ? Math.min(32, Math.floor(width * 0.27)) : width;
-    const mainWidth = wide ? width - navWidth - 1 : width;
+    const { wide, navWidth, mainWidth } = layout;
     const selected = entries.find(r => r.id === selectedId);
     const main = () => {
-      const title = view.memberId ? "Sessions · " + (snapshot.agents.find(a => a.id === view.memberId)?.name || "Member") : view.navId === "overview" ? "All teams · Sessions" : ({ overview: "Team overview", members: "Organization", tasks: "Tasks" }[tab] || tab) + " · Tab switch";
+      const title = view.memberId ? "Sessions · " + (snapshot.agents.find(a => a.id === view.memberId)?.name || "Member") : view.navId === "overview" ? "All teams · Sessions" : ({ overview: "Team overview", members: "Organization", tasks: "Tasks" }[tab] || tab);
       const interior = Math.max(1, mainWidth - 4);
+      const tabs = layout.tabs ? tabSegments().map(item => (item.id === tab ? paintBackground(paint.bold(" " + item.label + " "), "selection") : paint.dim(" " + item.label + " "))).join("  ") : null;
       const search = view.searching ? editorLines(view.searchEditor, interior, 1) : [paint.dim("/ Search" + (query ? ": " + single(query) : "") + " · " + filter)];
-      const available = bodyHeight - 4;
+      const available = layout.available;
       if (interior >= 80) {
         const listWidth = Math.floor(interior * 0.55), previewWidth = interior - listWidth - 3;
         const list = listLines(entries, selectedId, listWidth, available, focus === "list");
         const preview = fit([paint.dim("DETAILS"), "", ...wrapped(selected?.details || [selected?.caption || ""], previewWidth)], available);
         const columns = list.map((line, index) => pad(line, listWidth) + paint.dim(" │ ") + preview[index]);
-        return box(title, [...search, "", ...columns], mainWidth, bodyHeight, focus === "list");
+        return box(title, [...(tabs ? [tabs] : []), ...search, "", ...columns], mainWidth, bodyHeight, focus === "list");
       }
-      const detailSize = bodyHeight >= 13 ? Math.min(7, Math.max(4, Math.floor(available / 3))) : 0;
+      const detailSize = layout.preview;
       const list = listLines(entries, selectedId, interior, Math.max(1, available - detailSize - 1), focus === "list");
       if (!entries.length || (entries.length === 1 && entries[0].kind === "add")) list.splice(entries.length * 2, 0, paint.dim(query || filter !== "All" ? "No matches. Clear search or filter." : tab === "members" ? "Add a folder to start this team." : "Assign a goal to your team leader."));
       const preview = detailSize ? [paint.dim("─".repeat(interior)), ...wrapped(selected?.details || [selected?.caption || ""], interior).slice(0, detailSize - 1)] : [];
-      return box(title, [...search, "", ...fit(list, Math.max(1, available - detailSize - 1)), ...preview], mainWidth, bodyHeight, focus === "list");
+      return box(title, [...(tabs ? [tabs] : []), ...search, "", ...fit(list, Math.max(1, available - detailSize - 1)), ...preview], mainWidth, bodyHeight, focus === "list");
     };
     const left = box("Teams", listLines(nav, navId, navWidth - 4, bodyHeight - 2, focus === "nav"), navWidth, bodyHeight, focus === "nav");
     if (wide) {
@@ -190,13 +263,15 @@ export function renderAgents(view, width, rows) {
       body = left.map((line, i) => pad(line, navWidth) + " " + (right[i] || ""));
     } else body = focus === "nav" ? left : main();
   }
-  const hint = dialog ? "Esc cancels · values stay editable"
+  const hint = dialog ? "Click a choice · Esc cancels · values stay editable"
     : detail ? (detail.taskId ? "↑↓ scroll · Space actions · R refresh · Esc back" : "↑↓ scroll · R refresh · Esc back")
-    : focus === "nav" ? "↑↓ select · Enter open · Esc chat"
-    : view.memberId || view.navId === "overview" ? "Enter session · Space actions · Esc back"
+    : focus === "nav" ? "Click or ↑↓ select · Enter open · Esc chat"
+    : view.memberId || view.navId === "overview" ? "Click select / open · Right click actions · Esc back"
     : tab === "overview" ? "Enter briefing · Tab organization · ← teams"
     : tab === "members" ? "Enter sessions · Space actions · → fold"
     : "Enter delivery · Space actions · ← teams";
   const message = busy ? "Working…" : notice || (!dialog && !detail ? (focus === "nav" ? "Manager coordinates all teams · N new team" : view.memberId ? "R refresh history · / search · F filter" : view.navId === "overview" ? "All teams · / search · F filter" : "Tab overview / organization / tasks · / search · F filter") : "");
-  return [...top.map(line => truncateToWidth(line, width)), ...fit(body, bodyHeight), paint.dim(truncateToWidth("  " + single(message), width)), paint.dim(truncateToWidth("  " + hint, width))].slice(0, height);
+  return [...top.map(line => paintBackground(pad(line, width), "surfaceActive")), ...fit(body, bodyHeight),
+    paintBackground(pad("  " + single(message), width), "surface"),
+    paintBackground(pad("  " + hint, width), "surface")].slice(0, height);
 }

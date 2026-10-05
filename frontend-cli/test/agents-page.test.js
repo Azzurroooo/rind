@@ -156,11 +156,15 @@ test("agents page assembles arbitrary folders, chooses the first leader and pres
     assert.fail("Expected screen: " + text + "\n" + output.getViewport().join("\n"));
   }
   const paste = text => input.send("\x1b[200~" + text + "\x1b[201~");
-  await visible("+ Create team"); input.send("n"); await visible("Team name");
+  await visible("+ Create team"); input.send("\x1b[<0;5;9M"); await visible("Team name");
   paste("Accounts"); input.send("\r"); await visible("+ Add member");
-  input.send("\r"); await visible("Use existing folder"); input.send("\r"); await visible("Workspace path"); paste(workspace); input.send("\r");
+  input.send("\x1b[<0;5;5M"); await visible("Team briefing");
+  input.send("\x1b[<0;15;5M"); await visible("+ Add member");
+  input.send("\x1b[<0;5;8M"); await visible("Use existing folder");
+  input.send("\x1b[<0;5;5M"); await visible("Workspace path"); paste(workspace); input.send("\r");
   paste("Finance"); input.send("\r"); paste("Reconcile invoices"); input.send("\r");
   await visible("Member added");
+  input.send("\x1b[<2;5;10M"); await visible("Edit role and responsibility"); input.send("\x1b");
   const view = await client.request("snapshot");
   assert.equal(view.teams[0].leaderAgentId, view.agents[0].id);
   assert.equal(view.memberships[0].responsibility, "Reconcile invoices");
