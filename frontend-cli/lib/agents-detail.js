@@ -31,9 +31,18 @@ export function detailFor(view, row) {
         ...field("Conversations", row.sessionCount ? row.sessionCount + " in this team" : paint.dim("None yet · press c to start one")),
         ...(row.reportCount ? field("Direct reports", String(row.reportCount)) : [])];
     }
+    case "workspace": return [paint.bold(row.title), paint.dim(row.agentId ? "Registered folder" + (row.teams.length ? " · member of " + row.teams.join(", ") : "") : "Folder not in any team"), "",
+      ...field("Folder", paint.path(row.workspace)),
+      ...field("Conversations", row.sessionCount + (row.working ? " · " + row.working + " working" : "")),
+      "Enter starts a new conversation in this folder."];
     case "session":
     case "more":
     case "new-session": {
+      if (row.independent) return [paint.bold(row.title), paint.dim(row.workspace), "",
+        row.tracked ? tone(row.status) + (row.time ? paint.dim(" · " + row.time) : "") : paint.dim("Last saved " + (row.time ? row.time + " ago" : "—")), "",
+        ...(row.tracked ? [] : [paint.dim("Live status is shown for conversations opened through Agents management. This one runs in its own window, so only its saved activity is known."), ""]),
+        ...field("Session", paint.dim(row.sessionId)),
+        "Enter continues this conversation in its folder. It stays outside every team."];
       if (row.manager) return [paint.bold("Manager"), paint.dim("Coordinates every team"), "", "Assembles teams, delegates to leaders and reviews published reports. Members' private conversations stay with them.", "", ...(row.kind === "session" ? field("Conversation", row.title) : [])];
       const task = byId(snapshot.tasks, row.taskId);
       const owner = paint.dim((single(agent?.name) || "Member") + " · " + (single(team?.name) || "Team"));
@@ -64,6 +73,7 @@ export function detailFor(view, row) {
         "Enter opens the team."];
     }
     case "inbox": return [paint.bold("Inbox"), paint.dim("Everything waiting on you, across teams"), "", "Answers, unconfirmed runs and conversations that asked a question appear here first."];
+    case "independent": return [paint.bold("Independent"), paint.dim("Conversations outside any team"), "", "Grouped by folder. Folders that are not team members appear here too, with their last saved activity.", "", "Enter lists them."];
     case "manager": return [paint.bold("Manager"), paint.dim("Coordinates every team"), "", "Assembles teams, delegates to leaders and reviews published reports. Members' private conversations stay with them.", "", "Enter lists Manager conversations."];
     case "new-team": return [paint.bold("Create a team"), "", "Name it, then add folders as members. The first member becomes the leader; others report to the leader unless you choose a supervisor."];
     case "add-member": return [paint.bold("Add a member"), "", "Use an existing folder, create an empty workspace, or create a Git worktree for parallel work.", "", row.firstMember ? "The first member becomes the team leader." : "New members report to the leader unless added below another member with a."];

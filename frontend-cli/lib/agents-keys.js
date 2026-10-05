@@ -68,6 +68,7 @@ export function hintsFor(view, row) {
   if (page === "team") return [row?.kind === "task" ? k("delivery") : k("create"), ...(row?.kind === "task" ? [k("actions")] : []), k("task"), k("view"), ...tail];
   if (page === "member") return [row?.kind === "session" ? k("join") : k("start"), ...(row?.kind === "session" ? [k("actions")] : []), k("task"), ...tail];
   if (page === "manager") return [row?.kind === "session" ? k("join") : k("start"), k("search"), k("help"), k("back")];
+  if (page === "independent") return [row?.kind === "session" ? k("join") : k("chat"), ...(row?.kind === "session" ? [k("up")] : []), k("search"), k("filter"), k("refresh"), k("help"), k("back")];
   return [row?.kind === "team" ? k("open") : row?.kind === "new-team" ? k("create") : k("resolve"), k("team"), k("refresh"), k("help"), k("back")];
 }
 

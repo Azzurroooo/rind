@@ -44,3 +44,44 @@ export async function sessionHistory(state: State, scope: HistoryScope, list: Li
   }));
   return groups.flat().sort((a, b) => (b.updatedAt || "").localeCompare(a.updatedAt || ""));
 }
+
+export interface WorkspaceSession { runtimeSessionId: string; title: string; updatedAt?: string; sessionId?: string }
+export interface WorkspaceGroup { workspace: string; agentId?: string; name: string; teams: string[]; sessions: WorkspaceSession[] }
+type ListAll = () => Promise<Array<Record<string, unknown>>>;
+
+const workspaceKey = (value: string) => {
+  const normal = value.replace(/[\\/]+$/, "");
+  return process.platform === "win32" ? normal.replace(/\//g, "\\").toLowerCase() : normal;
+};
+
+// Conversations outside every team, grouped by the folder they run in. Team
+// and Manager conversations are excluded; the folder is named after its agent
+// when it is registered, otherwise after its basename.
+export async function independentHistory(state: State, managerWorkspace: string, list: ListAll): Promise<WorkspaceGroup[]> {
+  const registered = new Map(Object.values(state.sessions).filter(s => s.runtimeSessionId).map(s => [s.runtimeSessionId, s]));
+  const agents = new Map(Object.values(state.agents).map(a => [workspaceKey(a.canonicalWorkspace), a]));
+  const manager = workspaceKey(managerWorkspace);
+  const groups = new Map<string, WorkspaceGroup>();
+  for (const raw of await list()) {
+    const runtimeSessionId = string(raw.id) || string(raw.session_id);
+    const workspace = string(raw.workspace_root);
+    if (!runtimeSessionId || !workspace) continue;
+    const owner = registered.get(runtimeSessionId);
+    const key = workspaceKey(workspace);
+    if (owner?.teamId || key === manager) continue;
+    let group = groups.get(key);
+    if (!group) {
+      const agent = agents.get(key);
+      const teams = agent ? Object.values(state.memberships).filter(m => m.agentId === agent.id).map(m => state.teams[m.teamId]?.name).filter((name): name is string => Boolean(name)) : [];
+      group = { workspace, ...(agent ? { agentId: agent.id } : {}), name: agent?.name || workspace.split(/[\\/]/).filter(Boolean).at(-1) || workspace, teams, sessions: [] };
+      groups.set(key, group);
+    }
+    if (group.sessions.some(s => s.runtimeSessionId === runtimeSessionId)) continue;
+    const named = string(raw.title);
+    group.sessions.push({ runtimeSessionId, title: (named !== "Untitled" ? named : undefined) || string(raw.first_user_message) || runtimeSessionId,
+      ...(string(raw.updated_at) ? { updatedAt: string(raw.updated_at) } : {}), ...(owner ? { sessionId: owner.id } : {}) });
+  }
+  const latest = (group: WorkspaceGroup) => group.sessions.reduce((max, s) => (s.updatedAt || "") > max ? s.updatedAt || "" : max, "");
+  for (const group of groups.values()) group.sessions.sort((a, b) => (b.updatedAt || "").localeCompare(a.updatedAt || ""));
+  return [...groups.values()].sort((a, b) => latest(b).localeCompare(latest(a)));
+}

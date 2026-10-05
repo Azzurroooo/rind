@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { sessionHistory } from "../dist/history.js";
+import { sessionHistory, independentHistory } from "../dist/history.js";
 import { emptyState } from "../dist/model.js";
 
 function fixture() {
@@ -46,4 +46,23 @@ test("history scopes are validated before reading any workspace", async () => {
   await assert.rejects(sessionHistory(state, { teamId: "missing" }, list), /Team not found/);
   await assert.rejects(sessionHistory(state, { teamId: "b", agentId: "lead" }, list), /not a member/);
   await assert.rejects(sessionHistory(state, {}, list), /Agent not found/);
+});
+
+test("independent history groups non-team conversations by workspace and skips team and Manager history", async () => {
+  const { state } = fixture();
+  state.sessions.s5 = { id: "s5", agentId: "lead", runtimeSessionId: "r-standalone", origin: "direct" };
+  const all = [
+    { id: "r-team", workspace_root: "/w/lead", title: "Team work", updated_at: "2026-10-06T05:00:00Z" },
+    { id: "r-standalone", workspace_root: "/w/lead/", title: "Untitled", first_user_message: "Quick fix", updated_at: "2026-10-06T04:00:00Z" },
+    { id: "r-loose", workspace_root: "/home/me/scratch", title: "Try an idea", updated_at: "2026-10-06T06:00:00Z" },
+    { id: "r-manager", workspace_root: "/rind/manager", title: "Coordinate" },
+    { id: "r-loose", workspace_root: "/home/me/scratch", title: "duplicate" },
+  ];
+  const groups = await independentHistory(state, "/rind/manager", async () => all);
+  assert.deepEqual(groups.map(g => g.name), ["scratch", "Lead"]);
+  assert.deepEqual(groups[0].sessions.map(s => s.runtimeSessionId), ["r-loose"]);
+  assert.equal(groups[0].agentId, undefined);
+  assert.equal(groups[1].agentId, "lead");
+  assert.deepEqual(groups[1].teams, ["A"]);
+  assert.deepEqual(groups[1].sessions, [{ runtimeSessionId: "r-standalone", title: "Quick fix", updatedAt: "2026-10-06T04:00:00Z", sessionId: "s5" }]);
 });

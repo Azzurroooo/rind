@@ -143,6 +143,13 @@ export function createActions(ui) {
 
   function sessionActions(row) {
     const task = snap().tasks.find(t => t.id === row.taskId);
+    if (row.independent) {
+      ui.choose(row.title, [
+        { label: "Continue conversation", key: "enter", description: "Outside any team", action: () => ui.chat({ agentId: row.agentId, runtimeSessionId: row.sessionId, workspace: row.workspace }) },
+        { label: "New conversation in this folder", key: "c", action: () => ui.chat({ agentId: row.agentId, workspace: row.workspace }) },
+      ], { description: [row.workspace] });
+      return;
+    }
     ui.choose(row.title, [
       { label: "Join conversation", key: "enter", description: row.manager ? "Continue with the Manager" : "Continue in " + agentName(row.agentId) + "'s workspace", action: () => ui.chat({ agentId: row.agentId, teamId: row.teamId, runtimeSessionId: row.sessionId, manager: row.manager }) },
       ...(row.manager ? [] : [

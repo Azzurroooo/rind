@@ -234,10 +234,53 @@ export function sidebarRows(snapshot) {
   return [
     { id: "inbox", kind: "inbox", title: "Inbox", badge: attention, status: attention ? "Needs input" : undefined },
     { id: "manager", kind: "manager", title: "Manager" },
+    { id: "independent", kind: "independent", title: "Independent" },
     { id: "section:teams", kind: "section", title: "Teams", count: snapshot.teams.length },
     ...snapshot.teams.map(team => ({ id: team.id, kind: "team", title: single(team.name), status: teamStatus(snapshot, team.id, inbox), teamId: team.id, summary: teamSummary(snapshot, team.id, inbox) })),
     { id: "new-team", kind: "new-team", title: "New team" },
   ];
+}
+
+// Conversations outside every team, grouped by folder. Saved history gives
+// titles; registered sessions add live status. Unregistered folders run in a
+// private Worker, so only their last saved activity is known.
+export function independentSessions(snapshot, groups = [], managerWorkspace = "") {
+  const byWorkspace = new Map(groups.map(group => [group.workspace, { ...group, sessions: group.sessions.map(s => ({ ...s })) }]));
+  const live = new Map(snapshot.sessions.filter(s => !s.teamId && s.runtimeSessionId).map(s => [s.runtimeSessionId, s]));
+  for (const group of byWorkspace.values()) for (const session of group.sessions) {
+    const state = live.get(session.runtimeSessionId);
+    session.status = state?.status || "Inactive";
+    session.tracked = Boolean(state);
+    if (state?.lastActivity) session.updatedAt = later(session.updatedAt, state.lastActivity);
+    live.delete(session.runtimeSessionId);
+  }
+  // A just-started conversation is live before it is written to history.
+  for (const state of live.values()) {
+    const agent = byId(snapshot.agents, state.agentId);
+    if (!agent || agent.canonicalWorkspace === managerWorkspace) continue;
+    const key = [...byWorkspace.keys()].find(workspace => workspace === agent.canonicalWorkspace) || agent.canonicalWorkspace;
+    const group = byWorkspace.get(key) || { workspace: key, agentId: agent.id, name: single(agent.name), teams: [], sessions: [] };
+    group.sessions.push({ runtimeSessionId: state.runtimeSessionId, title: state.runtimeSessionId, updatedAt: state.lastActivity, status: state.status || "Inactive", tracked: true });
+    byWorkspace.set(key, group);
+  }
+  return [...byWorkspace.values()];
+}
+
+export function independentRows(workspaces, { query = "", filter = "All", now = Date.now() } = {}) {
+  const rank = group => Math.min(...group.sessions.map(s => statusMeta(s.status).rank), 99);
+  const latest = group => group.sessions.reduce((max, s) => later(max, s.updatedAt), "");
+  const rows = [];
+  for (const group of [...workspaces].sort((a, b) => rank(a) - rank(b) || latest(b).localeCompare(latest(a)))) {
+    const self = matches(query, group.name, group.workspace);
+    const sessions = group.sessions.filter(s => (self || matches(query, s.title)) && statusOk(filter, s.status)).sort(bySessionPriority);
+    if (!sessions.length && !(self && filter === "All")) continue;
+    const working = group.sessions.filter(s => s.status === "Working").length;
+    rows.push({ id: "w:" + group.workspace, kind: "workspace", depth: 0, title: single(group.name), workspace: group.workspace, agentId: group.agentId, teams: group.teams,
+      status: group.sessions.map(s => s.status).sort((a, b) => statusMeta(a).rank - statusMeta(b).rank)[0] || "Inactive", sessionCount: group.sessions.length, working });
+    for (const session of sessions) rows.push({ id: "s:" + session.runtimeSessionId, kind: "session", depth: 1, title: single(session.title) || session.runtimeSessionId, status: session.status,
+      time: relativeTime(session.updatedAt, now), sessionId: session.runtimeSessionId, agentId: group.agentId, workspace: group.workspace, tracked: session.tracked, independent: true });
+  }
+  return withGuides(rows);
 }
 
 export const selectable = row => row && !["section", "clear"].includes(row.kind);

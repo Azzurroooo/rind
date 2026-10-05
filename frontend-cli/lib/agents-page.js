@@ -4,19 +4,21 @@ import { parseTerminalKey } from "./terminal-key.js";
 import { createLineEditor } from "./line-editor.js";
 import { managementClient } from "./agents-client.js";
 import { openAgentChat, managerWorkspace } from "./agents-commands.js";
-import { emptyAgentsSnapshot, clean, sidebarRows, inboxRows, organizationRows, taskRows, memberSessionRows, managerRows, teamSessions, selectable } from "./agents-model.js";
+import { emptyAgentsSnapshot, clean, sidebarRows, inboxRows, organizationRows, taskRows, memberSessionRows, managerRows, teamSessions, independentSessions, independentRows, selectable } from "./agents-model.js";
 import { renderAgents } from "./agents-view.js";
 import { createActions } from "./agents-actions.js";
 
 const CREATE_KINDS = new Set(["add-member", "assign", "new-session", "new-team"]);
 const NOTICE_MS = 6000, CLOCK_MS = 30000, TYPE_AHEAD = 16;
+// Unregistered folders cannot push updates, so their saved activity is polled.
+const INDEPENDENT_REFRESH_MS = 30000;
 
 export async function runAgentsPage({ launch, input = process.stdin, output = process.stdout, manageInput = true, signal, initialTeamId, openChat = openAgentChat }) {
   const tui = createTui({ input, output, manageInput, alternateScreen: true });
   const view = {
     snapshot: emptyAgentsSnapshot(), connection: "connecting…", busy: false, busyLabel: "", notice: null, help: false,
     sidebar: [], navId: "inbox", focus: "sidebar", member: null, page: { kind: "inbox" }, pageKey: "inbox", entries: [], selectedId: "",
-    selections: {}, scroll: {}, tabs: {}, collapsed: {}, history: {}, managerHistory: null,
+    selections: {}, scroll: {}, tabs: {}, collapsed: {}, history: {}, managerHistory: null, independent: null, managerPath: "",
     query: "", filter: "All", searching: false, searchEditor: createLineEditor(), dialog: null, detail: null,
   };
   let client, connecting, closed = false, chatActive = false, initialized = false, noticeTimer, spinner, previousKey = "", chatCount = 0;
@@ -28,6 +30,7 @@ export async function runAgentsPage({ launch, input = process.stdin, output = pr
   // Nothing may paint while a conversation owns the terminal.
   const redraw = () => { if (!closed && !chatActive) tui.requestRender(); };
   const clock = setInterval(() => project(), CLOCK_MS);
+  // project() also re-polls the Independent page once its data is stale.
   clock.unref?.();
 
   function derivePage() {
@@ -42,6 +45,7 @@ export async function runAgentsPage({ launch, input = process.stdin, output = pr
     const options = { query: view.query, filter: view.filter };
     if (page.kind === "inbox") return inboxRows(view.snapshot);
     if (page.kind === "manager") return managerRows(view.managerHistory?.entries, options);
+    if (page.kind === "independent") return independentRows(independentSessions(view.snapshot, view.independent?.workspaces, view.managerPath), options);
     if (page.kind === "new-team") return [{ id: "new-team", kind: "new-team", title: "Name your new team" }];
     const sessions = teamSessions(view.snapshot, page.teamId, view.history[page.teamId]?.entries);
     if (page.kind === "member") return memberSessionRows(sessions, page.agentId, options);
@@ -90,6 +94,13 @@ export async function runAgentsPage({ launch, input = process.stdin, output = pr
       if (!current || (current.key !== key && !current.loading)) void loadHistory(teamId, key);
     }
     if (view.page.kind === "manager" && view.connection === "connected" && !view.managerHistory) void loadManagerHistory();
+    if (view.page.kind === "independent" && view.connection === "connected" && !view.independent?.loading && Date.now() - (view.independent?.at || 0) > INDEPENDENT_REFRESH_MS) void loadIndependent();
+  }
+  async function loadIndependent() {
+    view.independent = { ...view.independent, loading: true };
+    try { view.independent = { workspaces: (await client.request("listSessions", { independent: true })).workspaces, at: Date.now() }; }
+    catch (error) { view.independent = { workspaces: view.independent?.workspaces || [], at: Date.now() }; notify("Could not load independent conversations: " + error.message, "error"); }
+    project();
   }
   async function loadHistory(teamId, key = view.history[teamId]?.key) {
     view.history[teamId] = { ...view.history[teamId], key, loading: true };
@@ -124,7 +135,7 @@ export async function runAgentsPage({ launch, input = process.stdin, output = pr
       if (closed) { replacement.close(); return; }
       client = replacement;
       view.connection = "connected";
-      view.history = {}; view.managerHistory = null;
+      view.history = {}; view.managerHistory = null; view.independent = null;
       acceptSnapshot(await client.request("subscribe", { afterSeq: view.snapshot.seq || 0 }));
     })().catch(error => { view.connection = "offline · r retries"; notify(error.message, "error"); })
       .finally(() => { connecting = null; redraw(); });
@@ -195,8 +206,9 @@ export async function runAgentsPage({ launch, input = process.stdin, output = pr
   }
   function setFilter(status) { view.filter = status; project(); }
 
-  async function chat({ agentId, teamId, runtimeSessionId, manager = false }) {
-    const agent = view.snapshot.agents.find(a => a.id === agentId);
+  async function chat({ agentId, teamId, runtimeSessionId, manager = false, workspace }) {
+    // Independent folders need not be registered; they open as a plain conversation there.
+    const agent = view.snapshot.agents.find(a => a.id === agentId) || (workspace ? { canonicalWorkspace: workspace } : undefined);
     if (agent && !manager) {
       const workspace = await realpath(managerWorkspace(launch));
       manager = agent.canonicalWorkspace === (process.platform === "win32" ? workspace.toLowerCase() : workspace);
@@ -210,7 +222,7 @@ export async function runAgentsPage({ launch, input = process.stdin, output = pr
       else {
         tui.start({ acquireInput: false });
         // A finished conversation may have created history that the lists should show.
-        if (manager) view.managerHistory = null; else if (teamId) delete view.history[teamId];
+        if (manager) view.managerHistory = null; else if (teamId) delete view.history[teamId]; else view.independent = null;
         project();
       }
     }
@@ -230,7 +242,8 @@ export async function runAgentsPage({ launch, input = process.stdin, output = pr
     switch (row.kind) {
       case "member":
       case "more": return openMember(row.teamId, row.agentId);
-      case "session": return ui.chat({ agentId: row.agentId, teamId: row.teamId, runtimeSessionId: row.sessionId, manager: row.manager });
+      case "session": return ui.chat({ agentId: row.agentId, teamId: row.teamId, runtimeSessionId: row.sessionId, manager: row.manager, workspace: row.workspace });
+      case "workspace": return ui.chat({ agentId: row.agentId, workspace: row.workspace });
       case "new-session": return ui.chat({ agentId: row.agentId, teamId: row.teamId || view.page.teamId, manager: row.manager });
       case "add-member": return actions.addMember(row.teamId);
       case "assign": return actions.assignTask(row.teamId);
@@ -276,7 +289,10 @@ export async function runAgentsPage({ launch, input = process.stdin, output = pr
     close();
   }
   // Conversation rows belong to the member row above them.
-  const ownerRow = row => (["session", "more"].includes(row?.kind) && view.page.kind === "team" ? view.entries.find(r => r.id === "m:" + row.agentId) : undefined);
+  const ownerRow = row => {
+    if (row?.kind === "session" && view.page.kind === "independent") return view.entries.find(r => r.id === "w:" + row.workspace);
+    return ["session", "more"].includes(row?.kind) && view.page.kind === "team" ? view.entries.find(r => r.id === "m:" + row.agentId) : undefined;
+  };
   const selectRow = id => { view.selections[view.pageKey] = id; project(); };
   // Left always climbs: conversation -> its member -> sidebar. It never folds,
   // so leaving a deep tree takes at most two presses.
@@ -393,10 +409,11 @@ export async function runAgentsPage({ launch, input = process.stdin, output = pr
     else if (text === "1" || text === "2") switchTab(text === "1" ? "org" : "tasks");
     else if (text === "?") view.help = true;
     else if (text === "/" && view.focus === "main" && view.page.kind !== "new-team") { view.searching = true; view.searchEditor.setInput(view.query); }
-    else if (text === "f" && view.focus === "main" && ["team", "member"].includes(view.page.kind)) actions.chooseFilter();
+    else if (text === "f" && view.focus === "main" && ["team", "member", "independent"].includes(view.page.kind)) actions.chooseFilter();
     else if (text === "n" || text === "N") actions.createTeam();
     else if (text === "r") refresh();
-    else if (text === "c" && contextMember()) { const m = contextMember(); ui.chat(m); }
+    else if (text === "c" && view.focus === "main" && view.page.kind === "independent" && row?.workspace) ui.chat({ agentId: row.agentId, workspace: row.workspace });
+    else if (text === "c" && contextMember()) ui.chat(contextMember());
     else if (text === "t" && view.focus === "main" && view.page.teamId) actions.assignTask(view.page.teamId, contextMember()?.agentId);
     else if (text === "a" && view.focus === "main" && view.page.kind === "team") actions.addMember(view.page.teamId, row?.kind === "member" ? row.agentId : undefined);
     else if (text === "e" && contextMember()) actions.editMember(contextMember().teamId, contextMember().agentId);
@@ -406,6 +423,7 @@ export async function runAgentsPage({ launch, input = process.stdin, output = pr
     if (view.connection !== "connected") { void connect(); return; }
     if (view.page.teamId) delete view.history[view.page.teamId];
     if (view.page.kind === "manager") view.managerHistory = null;
+    if (view.page.kind === "independent") view.independent = null;
     void perform(async () => acceptSnapshot(await client.request("snapshot")), null, "Refreshing…");
   }
 
@@ -420,6 +438,7 @@ export async function runAgentsPage({ launch, input = process.stdin, output = pr
   input.on?.("end", close); input.on?.("close", close); signal?.addEventListener("abort", close, { once: true });
   try {
     if (signal?.aborted) return;
+    realpath(managerWorkspace(launch)).then(value => { view.managerPath = process.platform === "win32" ? value.toLowerCase() : value; project(); }, () => {});
     project(); tui.start(); void connect(); await finished;
   } finally {
     closed = true; clearInterval(clock); clearInterval(spinner); clearTimeout(noticeTimer); client?.close(); tui.stop();

@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { emptyAgentsSnapshot, organizationRows, teamSessions, taskRows, inboxRows, sidebarRows, memberSessionRows, relativeTime, teamStatus } from "../lib/agents-model.js";
+import { emptyAgentsSnapshot, organizationRows, teamSessions, taskRows, inboxRows, sidebarRows, memberSessionRows, relativeTime, teamStatus, independentSessions, independentRows } from "../lib/agents-model.js";
 
 const NOW = Date.parse("2026-10-06T12:00:00Z");
 function fixture() {
@@ -116,6 +116,26 @@ test("member pages list every team conversation with new conversation first", ()
   const rows = memberSessionRows(sessions, "lead", { now: NOW });
   assert.deepEqual(rows.map(r => r.title), ["New conversation", "Plan release", "Kickoff"]);
   assert.deepEqual(memberSessionRows(sessions, "lead", { query: "kick" }).map(r => r.title), ["New conversation", "Kickoff"]);
+});
+
+test("independent conversations merge live state, keep saved ones untracked and rank active folders first", () => {
+  const { snapshot } = fixture();
+  const groups = [
+    { workspace: "/home/me/scratch", name: "scratch", teams: [], sessions: [{ runtimeSessionId: "r-loose", title: "Idea", updatedAt: "2026-10-06T11:00:00Z" }] },
+    { workspace: "/w/lead", agentId: "lead", name: "Lead", teams: ["Product"], sessions: [{ runtimeSessionId: "r-independent", title: "Quick fix", updatedAt: "2026-10-06T09:00:00Z" }] },
+  ];
+  snapshot.sessions.push({ id: "g", agentId: "web", runtimeSessionId: "r-new", status: "Working" }, { id: "m", agentId: "mgr", runtimeSessionId: "r-mgr", status: "Working" });
+  snapshot.agents.push({ id: "mgr", name: "Manager", canonicalWorkspace: "/rind/manager" });
+  const merged = independentSessions(snapshot, groups, "/rind/manager");
+  assert.equal(merged.find(g => g.workspace === "/w/lead").sessions[0].status, "Ready");
+  assert.equal(merged.find(g => g.workspace === "/w/lead").sessions[0].tracked, true);
+  assert.equal(merged.find(g => g.workspace === "/home/me/scratch").sessions[0].tracked, false);
+  assert.ok(merged.some(g => g.workspace === "/w/web" && g.sessions[0].runtimeSessionId === "r-new"), "just-started conversations appear before they are saved");
+  assert.ok(!merged.some(g => g.workspace === "/rind/manager"), "Manager conversations are not independent");
+  const rows = independentRows(merged, { now: NOW });
+  assert.deepEqual(rows.filter(r => r.kind === "workspace").map(r => r.title), ["Web", "Lead", "scratch"]);
+  assert.equal(rows.find(r => r.id === "s:r-loose").guide, "└─ ");
+  assert.deepEqual(independentRows(merged, { query: "idea" }).map(r => r.title), ["scratch", "Idea"]);
 });
 
 test("relative time is compact and never negative", () => {

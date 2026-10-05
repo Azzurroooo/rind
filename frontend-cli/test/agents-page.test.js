@@ -176,6 +176,17 @@ test("team page edits members, nests team conversations and drives tasks from th
   assert.equal(chats[4].runtimeSessionId, "20261005_manager_history");
   assert.equal(chats[4].teamId, undefined);
 
+  // Independent lists conversations outside every team, grouped by folder.
+  key("\x1b"); await settle(); assert.doesNotMatch(h.screen(), /esc clears/, "the first esc clears the search");
+  key("\x1b"); await settle(); key("j"); await visible("conversations outside any team, by folder");
+  await visible("20261005_private_history");
+  assert.doesNotMatch(h.screen(), /20261005_team_history/, "team conversations stay on their team");
+  key("\r"); key("j"); await visible("enter join"); key("\r");
+  await waitFor(() => chats.length === 6, "independent conversation");
+  assert.equal(chats[5].runtimeSessionId, "20261005_private_history");
+  assert.equal(chats[5].teamId, undefined);
+  assert.equal(chats[5].agent.canonicalWorkspace, lead.canonicalWorkspace);
+
   abort.abort(); await running;
   assert.equal(h.input.listenerCount("data"), 0);
   assert.equal(h.input.isRaw, true);

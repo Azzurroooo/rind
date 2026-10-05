@@ -7,7 +7,7 @@ import { managementPaths, privateDirectory } from "./paths.js";
 import { openStore } from "./store.js";
 import { createService } from "./service.js";
 import { createRindAdapter } from "./adapters/rind.js";
-import { sessionHistory } from "./history.js";
+import { sessionHistory, independentHistory } from "./history.js";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import { connectSharedRuntime } from "../../rind-runtime-client/shared-runtime.js";
@@ -150,7 +150,10 @@ export async function startServer(options: { home?: string; python?: string; rep
           const params = message.params || {};
           const managerPath = params.manager === true ? await realManager : undefined;
           const manager = managerPath ? Object.values(store.state.agents).find(a => a.canonicalWorkspace === managerPath) : undefined;
-          if (params.manager === true && !manager) result = { sessions: [] };
+          if (params.independent === true) {
+            const host = await executionHost();
+            result = { workspaces: await independentHistory(store.state, await realManager, async () => (await host.request("session/list", { limit: 100 })).sessions) };
+          } else if (params.manager === true && !manager) result = { sessions: [] };
           else {
             const host = await executionHost();
             const list = async (workspace: string) => (await host.request("session/list", { workspace_root: workspace, limit: 100 })).sessions;

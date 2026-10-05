@@ -1,5 +1,6 @@
 import { paint, paintBackground } from "./theme.js";
-import { textWidth, truncateToWidth, wrapTextWithAnsi } from "./text-width.js";
+import os from "node:os";
+import { textWidth, truncateToWidth, wrapTextWithAnsi, middleClipCells } from "./text-width.js";
 import { insertCursorMarker } from "./tui/cursor.js";
 import { CURSOR_MARKER } from "./tui/frame.js";
 import { prepareComposerFrame } from "./composer-terminal.js";
@@ -11,6 +12,12 @@ export const MIN_WIDTH = 40, MIN_ROWS = 12;
 // The tree keeps at least ~60 columns before the detail pane moves beside it.
 const SIDEBAR_AT = 84, DETAIL_AT = 90;
 
+const HOME = os.homedir();
+// Paths keep their final folder visible: "~/work/…/be-api".
+export const shortPath = (value, width) => {
+  const text = HOME && String(value).toLowerCase().startsWith(HOME.toLowerCase()) ? "~" + String(value).slice(HOME.length) : String(value);
+  return middleClipCells(text, Math.max(4, width));
+};
 const toned = (status, text) => (paint[statusMeta(status).tone] || paint.dim)(text);
 const glyph = status => toned(status, statusMeta(status).glyph);
 
@@ -71,6 +78,7 @@ function leadIcon(row) {
   if (["add-member", "new-session", "assign", "new-team"].includes(row.kind)) return paint.accent("+");
   if (row.kind === "more") return paint.dim("…");
   if (row.kind === "manager") return paint.notice("◆");
+  if (row.kind === "independent") return paint.path("◇");
   if (row.kind === "team" || row.kind === "inbox") return row.status ? glyph(row.status) : paint.dim("○");
   return " ";
 }
@@ -88,7 +96,14 @@ function treeLine(row, width, nameColumn) {
   const compact = width < 56;
   const guide = paint.dim(row.guide);
   let left, right = "";
-  if (row.kind === "member") {
+  if (row.kind === "workspace") {
+    const name = paint.bold(single(row.title));
+    right = row.working ? paint.accent("● " + row.working + " working") : paint.dim(row.sessionCount + (row.sessionCount === 1 ? " conversation" : " conversations"));
+    const gap = Math.max(1, nameColumn - textWidth(name));
+    const room = width - textWidth(name) - gap - Math.max(RIGHT, textWidth(right)) - 2;
+    const where = !compact && room > 6 ? " ".repeat(gap) + paint.dim((row.teams?.length ? "in " + single(row.teams.join(", ")) + " · " : "") + shortPath(row.workspace, room - (row.teams?.length ? textWidth("in " + row.teams.join(", ") + " · ") : 0))) : "";
+    left = name + where;
+  } else if (row.kind === "member") {
     const fold = row.expanded === false ? paint.accent("▸ ") : "";
     const name = fold + paint.bold(single(row.title)) + (row.hidden ? paint.dim(" +" + row.hidden) : "");
     const used = textWidth(row.guide) + textWidth(name);
@@ -97,7 +112,9 @@ function treeLine(row, width, nameColumn) {
     right = memberChip(row, compact);
   } else if (row.kind === "session") {
     left = guide + glyph(row.status) + " " + single(row.title);
-    right = compact ? paint.dim(row.time || "") : toned(row.status, row.status) + " " + paint.dim((row.time || "").padStart(5));
+    // Untracked conversations have no live state, only their last save.
+    const word = row.tracked === false ? paint.dim("saved") : toned(row.status, row.status);
+    right = compact ? paint.dim(row.time || "") : word + " " + paint.dim((row.time || "").padStart(5));
   } else left = guide + paint.dim(single(row.title));
   const room = width - (right ? Math.max(RIGHT, textWidth(right)) + 1 : 0);
   if (room < 8) return fitLine(left, width);
@@ -126,7 +143,7 @@ function listLines(view, key, rows, selectedId, width, height, focused, empty) {
   if (!rows.length) return fill([paint.dim("  " + empty)], height);
   const { offset } = windowFor(view, key, rows, selectedId, height);
   // Roles line up in one column, capped so long names cannot push them off screen.
-  const members = rows.filter(row => row.kind === "member" && row.guide !== undefined);
+  const members = rows.filter(row => ["member", "workspace"].includes(row.kind) && row.guide !== undefined);
   const nameColumn = Math.min(Math.floor(width * 0.45), Math.max(0, ...members.map(row => textWidth(row.guide) + textWidth(single(row.title)) + (row.expanded === false ? 2 : 0) + (row.hidden ? String(row.hidden).length + 2 : 0))) + 2);
   return fill(rows.slice(offset, offset + height).map(row => {
     const selected = row.id === selectedId && selectable(row);
@@ -147,6 +164,7 @@ function pageHeader(view, width) {
   const team = snapshot.teams.find(t => t.id === page.teamId);
   if (page.kind === "inbox") return [paint.bold("Inbox") + paint.dim(" · everything waiting on you")];
   if (page.kind === "manager") return [paint.bold("Manager") + paint.dim(" · conversations that coordinate every team")];
+  if (page.kind === "independent") return [paint.bold("Independent") + paint.dim(" · conversations outside any team, by folder")];
   if (page.kind === "new-team") return [paint.bold("New team")];
   if (!team) return [paint.dim("Team removed")];
   if (page.kind === "member") {
@@ -291,7 +309,7 @@ function renderDelivery(view, width, height) {
 function headerLine(view, width) {
   const { snapshot, page } = view;
   const team = snapshot.teams.find(t => t.id === page.teamId);
-  const crumbs = ["Agents", page.kind === "inbox" ? "Inbox" : page.kind === "manager" ? "Manager" : page.kind === "new-team" ? "New team" : single(team?.name) || ""];
+  const crumbs = ["Agents", page.kind === "inbox" ? "Inbox" : page.kind === "manager" ? "Manager" : page.kind === "independent" ? "Independent" : page.kind === "new-team" ? "New team" : single(team?.name) || ""];
   if (page.kind === "member") crumbs.push(single(snapshot.agents.find(a => a.id === page.agentId)?.name));
   else if (page.kind === "team") crumbs.push(page.tab === "tasks" ? "Tasks" : "Organization");
   const left = " " + paint.bold(crumbs[0]) + paint.dim(crumbs.slice(1).filter(Boolean).map(c => " › " + c).join(""));
