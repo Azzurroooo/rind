@@ -113,7 +113,7 @@ test("team page edits members, nests team conversations and drives tasks from th
 
   key("e"); await visible("Role and responsibility");
   paste("Coordinator"); key("\r"); paste("Integrate release evidence"); key("\r");
-  await visible("Integrate release evidence");
+  await visible("Integrate release evidence"); await visible("Updated Lead");
   assert.equal((await h.client.request("snapshot")).memberships[0].position, "Coordinator");
 
   key("a"); await visible("Existing folder"); await visible("Reports to Lead"); key("\r"); await visible("Folder path");

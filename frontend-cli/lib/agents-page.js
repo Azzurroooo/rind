@@ -9,7 +9,7 @@ import { renderAgents } from "./agents-view.js";
 import { createActions } from "./agents-actions.js";
 
 const CREATE_KINDS = new Set(["add-member", "assign", "new-session", "new-team"]);
-const NOTICE_MS = 6000, CLOCK_MS = 30000;
+const NOTICE_MS = 6000, CLOCK_MS = 30000, TYPE_AHEAD = 16;
 
 export async function runAgentsPage({ launch, input = process.stdin, output = process.stdout, manageInput = true, signal, initialTeamId, openChat = openAgentChat }) {
   const tui = createTui({ input, output, manageInput, alternateScreen: true });
@@ -20,6 +20,8 @@ export async function runAgentsPage({ launch, input = process.stdin, output = pr
     query: "", filter: "All", searching: false, searchEditor: createLineEditor(), dialog: null, detail: null,
   };
   let client, connecting, closed = false, chatActive = false, initialized = false, noticeTimer, spinner;
+  // Keys typed while an action is saving are replayed afterwards instead of being lost.
+  const typeAhead = [];
   let finish;
   const finished = new Promise(resolve => { finish = resolve; });
   const close = () => { closed = true; if (!chatActive) finish(); };
@@ -142,7 +144,10 @@ export async function runAgentsPage({ launch, input = process.stdin, output = pr
     } catch (error) {
       if (dialog && view.dialog === dialog) dialog.error = error.message;
       else notify(error.message, "error");
-    } finally { clearInterval(spinner); view.busy = false; project(); }
+    } finally {
+      clearInterval(spinner); view.busy = false; project();
+      for (const key of typeAhead.splice(0)) keyInput(key);
+    }
   }
 
   function choose(title, items, { description = [], selected, danger = false } = {}) {
@@ -324,7 +329,7 @@ export async function runAgentsPage({ launch, input = process.stdin, output = pr
   function keyInput(key) {
     if (!key) return;
     if (key.ctrl && key.name === "c") { close(); return; }
-    if (view.busy) return;
+    if (view.busy) { if (!chatActive && typeAhead.length < TYPE_AHEAD) typeAhead.push(key); return; }
     if (view.help) { if (key.name === "escape" || key.text === "?" || key.text === "q" || key.name === "enter") view.help = false; redraw(); return; }
     if (view.dialog) { dialogKey(key); redraw(); return; }
     if (view.detail) { detailKey(key); redraw(); return; }
