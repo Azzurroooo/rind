@@ -41,6 +41,7 @@ class RuntimeWorker:
         debug: bool = False,
         enable_goal: bool = True,
         enable_user_question: bool = True,
+        external_tool=None,
     ):
         self.workspace_root = validate_workspace_root(workspace_root)
         self.session_id = session_id
@@ -70,6 +71,7 @@ class RuntimeWorker:
             enable_user_question=enable_user_question,
             session_dir=session_dir,
             provider_service=self.provider_service,
+            external_tool=external_tool,
         )
         self._initialized = False
         self._model_refresh_task: asyncio.Task[None] | None = None

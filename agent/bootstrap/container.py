@@ -85,6 +85,7 @@ def build_agent_container(
     web_sessions: WebSessions | None = None,
     session_runner: Callable[..., Awaitable[Any]] | None = None,
     task_notifications: TaskNotifications | None = None,
+    external_tool=None,
 ) -> AgentContainer:
     """Build the production runtime dependency graph explicitly."""
     skill_project_root = None
@@ -92,7 +93,7 @@ def build_agent_container(
     resolved_team_agent = None
     from agent.infrastructure.team import discover_agent
 
-    agent_context = discover_agent(workspace_root) if workspace_root else discover_agent()
+    agent_context = None if external_tool else (discover_agent(workspace_root) if workspace_root else discover_agent())
     if agent_context is not None:
         workspace_root = str(agent_context.workspace_root)
         if agent_context.project is not None:
@@ -136,6 +137,11 @@ def build_agent_container(
         agent_skill_dir=skill_agent_dir,
     )
     runtime_system_messages: list[dict] = []
+    if external_tool:
+        if external_tool.instructions:
+            runtime_system_messages.append({"role": "system", "content": external_tool.instructions, "_context_kind": "external_tools"})
+        if external_tool.enabled_tools is not None:
+            enabled_tools = external_tool.enabled_tools
     if enable_goal:
         runtime_system_messages.append(
             {
@@ -208,6 +214,8 @@ def build_agent_container(
         capture_image=session_store.capture_image,
         image_input=image_input,
     )
+    if external_tool:
+        catalog = (*catalog, external_tool.spec(session_store.session_id))
     if enabled_tools is None:
         tool_specs = catalog
     else:

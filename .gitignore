@@ -46,6 +46,8 @@ prompt.txt
 test_web.py
 test.txt
 src/
+!agent-management/src/
+!agent-management/src/**
 !frontend-web/src/
 !frontend-web/src/**
 !mobile/src/

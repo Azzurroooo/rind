@@ -1,0 +1,24 @@
+{
+  "name": "@rind-ai/agent-management",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=18"
+  },
+  "exports": {
+    ".": "./dist/client.js",
+    "./service": "./dist/service.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "test": "npm run build && node --test test/*.test.js"
+  },
+  "devDependencies": {
+    "@types/node": "^18.19.0",
+    "typescript": "^5.8.3"
+  },
+  "dependencies": {
+    "yaml": "^2.9.1"
+  }
+}

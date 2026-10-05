@@ -59,6 +59,7 @@ class ExecutionCoordinator:
         enable_user_question: bool,
         session_dir: str | None,
         provider_service: ProviderServiceImpl,
+        external_tool=None,
     ):
         self._shared_resources = shared_resources
         self._shell_tools = shell_tools
@@ -85,6 +86,7 @@ class ExecutionCoordinator:
         self._closed = False
         self._closed_sessions: set[str] = set()
         self._provider_service = provider_service
+        self._external_tool = external_tool
         self._lock = asyncio.Lock()
 
     def add_event_sink(self, sink: Callable[[dict[str, Any]], Awaitable[None] | None]) -> Callable[[], None]:
@@ -660,6 +662,7 @@ class ExecutionCoordinator:
                 web_sessions=self._web_sessions,
                 session_runner=self._run_delegated_session,
                 task_notifications=self._task_notifications,
+                external_tool=self._external_tool,
             )
             await container.runtime.initialize()
         except BaseException:
