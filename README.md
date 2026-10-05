@@ -69,7 +69,7 @@ node frontend-cli/bin/rind.js
 
 For the examples below, source users can substitute `node /absolute/path/to/rind/frontend-cli/bin/rind.js` for `rind`.
 
-Inside Rind, run `/login` to connect a provider, then `/model` to choose a model. Built-in adapters cover OpenAI, Anthropic, Google, DeepSeek, and more; custom OpenAI-compatible endpoints are configurable too. See the [setup guide](docs/getting-started.md) for configuration and other clients.
+Inside Rind, run `/login` to connect a provider, then `/model` to choose a model. Built-in adapters cover OpenAI, Anthropic, Google, DeepSeek, and more; custom OpenAI-compatible endpoints are configurable too. See the [implementation and setup guide](docs/internals/README.md) for configuration and other clients.
 
 **Explore before spending tokens.** The interactive tour demonstrates real CLI layouts with simulated tasks: pause, rewind, and jump straight to a feature. It makes no model calls and needs no API key.
 
@@ -77,7 +77,7 @@ Inside Rind, run `/login` to connect a provider, then `/model` to choose a model
 rind tour team.create
 ```
 
-The tour is available on `main`, after v0.8.0; use the [source setup](docs/getting-started.md#from-source) to try it today. Run `rind tour` for the catalog, or `/tour` inside a session.
+The tour is available on `main`, after v0.8.0; use the [source setup](docs/internals/07-surfaces/interactive-cli.md#从源码运行) to try it today. Run `rind tour` for the catalog, or `/tour` inside a session.
 
 ---
 
@@ -177,10 +177,10 @@ The result is a small idle execution footprint and clear extension boundaries: a
 | Client | What it gives you | Start here |
 | --- | --- | --- |
 | **CLI** | Direct terminal work and script integration | `rind` |
-| **Desktop** | A visual workspace for multiple projects | [Run from source](docs/getting-started.md#desktop) |
-| **Web** | Browser access to a long-lived worker | [Docker or local setup](docs/getting-started.md#web) |
+| **Desktop** | A visual workspace for multiple projects | [Run from source](docs/internals/07-surfaces/desktop.md#构建与远程访问) |
+| **Web** | Browser access to a long-lived worker | [Docker or local setup](docs/internals/07-surfaces/web-and-mobile.md#两种远程入口) |
 | **Mobile** | Android/iOS remote access to Rind on your computer | [Build and connect](mobile/README.md) |
-| **Messaging gateway** | Work through Telegram, Discord, Slack, Feishu, and other adapters | [Gateway setup](docs/getting-started.md#messaging-gateway) |
+| **Messaging gateway** | Work through Telegram, Discord, Slack, Feishu, and other adapters | [Gateway setup](docs/internals/07-surfaces/gateway.md#配置入口) |
 
 With the Web client, closing the browser leaves the worker running; reconnecting restores the session view. Local clients can reopen saved sessions when configured to use the same session store.
 
@@ -197,9 +197,9 @@ Rind separates clients, execution, and infrastructure. A custom interface consum
 | Provider or storage adapter | [Application ports](agent/application/ports) |
 | Context assembly and compaction | [Context services](agent/application/context) |
 
-For the design behind these boundaries, see [Architecture](docs/architecture.md), [CLI rendering](docs/cli-rendering.md), and [Tour internals](docs/cli-tour.md). For commands and shortcuts, use `/help` and `?` inside Rind.
+For the design behind these boundaries, see [Architecture](docs/internals/00-architecture/layers-and-composition.md), [CLI rendering](docs/internals/07-surfaces/interactive-cli.md), and [Tour internals](docs/internals/07-surfaces/interactive-cli.md#tour真实渲染器模拟执行). For commands and shortcuts, use `/help` and `?` inside Rind.
 
-The [development guide](docs/getting-started.md#development) covers setup and tests.
+The [development guide](docs/internals/08-engineering/verification.md) covers setup and tests.
 
 ---
 

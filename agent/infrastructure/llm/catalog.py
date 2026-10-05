@@ -1,4 +1,4 @@
-"""Offline provider/model snapshot reviewed 2026-10-03; see docs/model-catalog-review.md."""
+"""Offline provider/model snapshot reviewed 2026-10-03; see docs/internals/06-models/model-catalog.md for resolution semantics."""
 
 from __future__ import annotations
 
