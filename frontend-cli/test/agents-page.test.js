@@ -50,128 +50,145 @@ test("real CLI empty-prompt entry returns to an editable conversation repeatedly
   }
   await visible("← agents");
   for (let i = 0; i < 2; i++) {
-    child.stdin.write("\x1b[D"); await visible("+ Create team");
+    child.stdin.write("\x1b[D"); await visible("New team");
     child.stdin.write("\x1b"); await visible("← agents");
   }
   child.stdin.write("retained draft"); await visible("retained draft");
   child.stdin.write("\x1b[D"); await new Promise(resolve => setTimeout(resolve, 80));
-  assert.doesNotMatch(output.getViewport().join("\n"), /Create team/);
+  assert.doesNotMatch(output.getViewport().join("\n"), /New team/);
   child.stdin.write("\x05\x15/exit\r");
   assert.equal(await exited, 0, errors);
 });
 
-test("page actions retain failed edits, selection across updates, task controls and Manager return", { timeout: 20000 }, async t => {
-  const home = await mkdtemp(path.join(os.tmpdir(), "rind-agents-actions-"));
+async function harness({ columns = 120, rows = 30, prefix }) {
+  const home = await mkdtemp(path.join(os.tmpdir(), prefix));
   const launch = { home, repoRoot: fileURLToPath(new URL("../..", import.meta.url)) };
   const server = await startServer(launch);
   const client = await connectClient({ endpoint: server.paths.endpoint, token: (await readFile(server.paths.token, "utf8")).trim() });
-  const team = await client.request("createTeam", { name: "Product" });
-  const lead = await client.request("createWorkspace", { teamId: team.id, name: "Lead" });
-  await client.request("setLeader", { teamId: team.id, agentId: lead.id });
-  const task = await client.request("assignTask", { teamId: team.id, assigneeAgentId: lead.id, brief: "Review release", start: false });
-  const input = createVirtualInput(), output = createVirtualOutput({ columns: 120, rows: 30 });
-  const chats = [], abort = new AbortController();
-  const main = createTui({ input, output: output.output });
-  main.addChild({ render: () => ["Original conversation", "Draft preserved"] }); main.start();
-  await new Promise(resolve => setTimeout(resolve, 40)); main.stop({ releaseInput: false });
-  const running = runAgentsPage({ launch, input, output: output.output, initialTeamId: team.id, manageInput: false, signal: abort.signal, openChat: async context => { chats.push(context); } });
-  t.after(async () => { abort.abort(); await running; main.stop(); client.close(); await server.close();
-    const host = await connectSharedRuntime({ home, start: false }).catch(() => null);
-    if (host) { await host.request("runtime/shutdown").catch(() => {}); host.close(); await new Promise(resolve => setTimeout(resolve, 300)); }
-    await rm(home, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }); });
+  const input = createVirtualInput(), output = createVirtualOutput({ columns, rows });
+  const screen = () => output.getViewport().join("\n");
   const visible = async text => {
-    for (let i = 0; i < 150; i++) {
-      const screen = (await output.flushAndGetViewport()).join("\n");
-      if (screen.includes(text)) return screen;
-      await new Promise(resolve => setTimeout(resolve, 20));
-    }
-    assert.fail("Expected " + text + "\n" + output.getViewport().join("\n"));
-  };
-  const key = sequence => input.send(sequence);
-  const paste = text => key("\x1b[200~" + text + "\x1b[201~");
-  const back = async () => { key("\x1b"); await new Promise(resolve => setTimeout(resolve, 80)); };
-  await visible("1 teams"); key("\r"); await visible("Team briefing"); key("\r"); await visible("In progress"); await visible("Review release"); await back(); key("\t"); await visible("Enter sessions");
-  key("\r"); await visible("Use existing folder"); key("\r"); await visible("Workspace path");
-  paste(path.join(home, "missing")); key("\r"); key("\r"); key("\r");
-  await visible("ENOENT"); assert.match(output.getViewport().join("\n"), /missing/);
-  await back(); await visible("Enter sessions");
-  key("\x1b[B"); key(" "); await visible("Edit role and responsibility");
-  key("\x1b[B"); key("\x1b[B"); key("\x1b[B"); key("\r"); await visible("Member responsibility");
-  paste("Coordinator"); key("\r"); paste("Integrate release evidence"); key("\r"); await visible("Integrate release evidence");
-  await client.request("createWorkspace", { teamId: team.id, name: "Reviewer" });
-  await visible("Reviewer"); key("\r"); await visible("+ New conversation"); key("\r");
-  for (let i = 0; !chats.length && i < 100; i++) await new Promise(resolve => setTimeout(resolve, 20));
-  assert.equal(chats[0]?.agent.id, lead.id, "live updates must preserve selected member identity");
-  const saved = await client.request("attachSession", { agentId: lead.id, teamId: team.id });
-  await client.request("bindSession", { sessionId: saved.id, runtimeSessionId: "20261005_selected_history" });
-  await visible("20261005_selected_history"); key("\x1b[B"); key("\r");
-  for (let i = 0; chats.length < 2 && i < 100; i++) await new Promise(resolve => setTimeout(resolve, 20));
-  assert.equal(chats[1]?.runtimeSessionId, "20261005_selected_history");
-  assert.equal(chats[1]?.agent.canonicalWorkspace, lead.canonicalWorkspace);
-  assert.equal(chats[1]?.teamId, team.id);
-  await visible("+ New conversation"); await back(); await visible("Enter sessions"); key("\t"); await visible("+ Assign task");
-  key("\x1b[B"); key(" "); await visible("Change queue priority");
-  key("\x1b[B"); key("\x1b[B"); key("\x1b[B"); key("\r"); await visible("Queue priority");
-  key("\x1b[A"); key("\r"); await visible("high priority");
-  assert.equal((await client.request("getTask", { taskId: task.id })).priority, "high");
-  key(" "); await visible("Cancel task");
-  for (let i = 0; i < 4; i++) key("\x1b[B");
-  key("\r"); await visible("Cancel task?"); key("\x1b[B"); key("\r"); await visible("Cancelled");
-  assert.equal((await client.request("getTask", { taskId: task.id })).status, "cancelled");
-  key("\x1b[D"); await visible("Enter open"); key("\x1b[H"); key("\x1b[B"); key("\r");
-  for (let i = 0; chats.length < 3 && i < 100; i++) await new Promise(resolve => setTimeout(resolve, 20));
-  assert.equal(chats[2]?.manager, true);
-  await visible("Enter open");
-  const managerSession = await client.request("attachSession", { manager: true });
-  await client.request("bindSession", { sessionId: managerSession.id, runtimeSessionId: "20261005_manager_history" });
-  key("\x1b[H"); key("\r"); await visible("20261005_manager_history");
-  key("/"); key("manager_history"); key("\r"); key("\r");
-  for (let i = 0; chats.length < 4 && i < 100; i++) await new Promise(resolve => setTimeout(resolve, 20));
-  assert.equal(chats[3]?.manager, true, "Manager history must retain its restricted identity from global Overview");
-  assert.equal(chats[3]?.runtimeSessionId, "20261005_manager_history");
-  assert.equal(chats[3]?.teamId, undefined);
-  abort.abort(); await running;
-  assert.equal(input.listenerCount("data"), 0);
-  assert.equal(input.isRaw, true);
-  main.start({ acquireInput: false }); main.replayAll(); await visible("Original conversation");
-  assert.doesNotMatch(output.getViewport().join("\n"), /Team briefing|Manager coordinates/);
-});
-
-test("agents page assembles arbitrary folders, chooses the first leader and preserves return controls", { timeout: 15000 }, async t => {
-  const home = await mkdtemp(path.join(os.tmpdir(), "rind-agents-page-"));
-  const workspace = path.join(home, "finance"); await mkdir(workspace);
-  const launch = { home, repoRoot: fileURLToPath(new URL("../..", import.meta.url)) };
-  const server = await startServer(launch);
-  const client = await connectClient({ endpoint: server.paths.endpoint, token: (await readFile(server.paths.token, "utf8")).trim() });
-  const input = createVirtualInput(), output = createVirtualOutput();
-  const running = runAgentsPage({ launch, input, output: output.output });
-  t.after(async () => { input.send("\x03"); await running; client.close(); await server.close(); await rm(home, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }); });
-  async function visible(text) {
-    t.diagnostic("Waiting for " + text);
-    for (let i = 0; i < 100; i++) {
+    for (let i = 0; i < 250; i++) {
       const viewport = (await output.flushAndGetViewport()).join("\n");
       if (viewport.includes(text)) return viewport;
       await new Promise(resolve => setTimeout(resolve, 20));
     }
-    assert.fail("Expected screen: " + text + "\n" + output.getViewport().join("\n"));
-  }
-  const paste = text => input.send("\x1b[200~" + text + "\x1b[201~");
-  await visible("+ Create team"); input.send("\x1b[<0;5;9M"); await visible("Team name");
-  paste("Accounts"); input.send("\r"); await visible("+ Add member");
-  input.send("\x1b[<0;5;5M"); await visible("Team briefing");
-  input.send("\x1b[<0;15;5M"); await visible("+ Add member");
-  input.send("\x1b[<0;5;8M"); await visible("Use existing folder");
-  input.send("\x1b[<0;5;5M"); await visible("Workspace path"); paste(workspace); input.send("\r");
-  paste("Finance"); input.send("\r"); paste("Reconcile invoices"); input.send("\r");
-  await visible("Member added");
-  input.send("\x1b[<2;5;10M"); await visible("Edit role and responsibility"); input.send("\x1b");
-  const view = await client.request("snapshot");
+    assert.fail("Expected " + text + "\n" + screen());
+  };
+  const settle = () => new Promise(resolve => setTimeout(resolve, 80));
+  const cleanup = async () => {
+    client.close(); await server.close();
+    const host = await connectSharedRuntime({ home, start: false }).catch(() => null);
+    if (host) { await host.request("runtime/shutdown").catch(() => {}); host.close(); await new Promise(resolve => setTimeout(resolve, 300)); }
+    await rm(home, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+  };
+  return { home, launch, client, input, output, screen, visible, settle, cleanup, key: sequence => input.send(sequence), paste: text => input.send("\x1b[200~" + text + "\x1b[201~") };
+}
+async function waitFor(check, label) {
+  for (let i = 0; i < 150; i++) { if (check()) return; await new Promise(resolve => setTimeout(resolve, 20)); }
+  assert.fail("Timed out waiting for " + label);
+}
+
+test("team page edits members, nests team conversations and drives tasks from the keyboard", { timeout: 40000 }, async t => {
+  const h = await harness({ prefix: "rind-agents-actions-" });
+  const team = await h.client.request("createTeam", { name: "Product" });
+  const lead = await h.client.request("createWorkspace", { teamId: team.id, name: "Lead" });
+  await h.client.request("setLeader", { teamId: team.id, agentId: lead.id });
+  const task = await h.client.request("assignTask", { teamId: team.id, assigneeAgentId: lead.id, brief: "Review release", start: false });
+  const scoped = await h.client.request("attachSession", { agentId: lead.id, teamId: team.id });
+  await h.client.request("bindSession", { sessionId: scoped.id, runtimeSessionId: "20261005_team_history" });
+  const independent = await h.client.request("attachSession", { agentId: lead.id });
+  await h.client.request("bindSession", { sessionId: independent.id, runtimeSessionId: "20261005_private_history" });
+  const chats = [], abort = new AbortController();
+  const main = createTui({ input: h.input, output: h.output.output });
+  main.addChild({ render: () => ["Original conversation", "Draft preserved"] }); main.start();
+  await new Promise(resolve => setTimeout(resolve, 40)); main.stop({ releaseInput: false });
+  const running = runAgentsPage({ launch: h.launch, input: h.input, output: h.output.output, initialTeamId: team.id, manageInput: false, signal: abort.signal, openChat: async context => { chats.push(context); } });
+  t.after(async () => { abort.abort(); await running; main.stop(); await h.cleanup(); });
+  const { key, paste, visible, settle } = h;
+
+  await visible("Lead · Leader");
+  await visible("20261005_team_history");
+  assert.doesNotMatch(h.screen(), /20261005_private_history/, "independent conversations never appear in a team");
+
+  key("e"); await visible("Role and responsibility");
+  paste("Coordinator"); key("\r"); paste("Integrate release evidence"); key("\r");
+  await visible("Integrate release evidence");
+  assert.equal((await h.client.request("snapshot")).memberships[0].position, "Coordinator");
+
+  key("a"); await visible("Existing folder"); await visible("Reports to Lead"); key("\r"); await visible("Folder path");
+  paste(path.join(h.home, "missing")); key("\r"); key("\r"); key("\r");
+  await visible("ENOENT"); assert.match(h.screen(), /missing/, "a failed submit keeps what was typed");
+  key("\x1b"); await settle();
+
+  await h.client.request("createWorkspace", { teamId: team.id, name: "Reviewer" });
+  await visible("Reviewer");
+
+  key("\r"); await visible("conversations in this team"); await visible("New conversation");
+  assert.doesNotMatch(h.screen(), /20261005_private_history/);
+  key("g"); key("\r");
+  await waitFor(() => chats.length === 1, "new conversation");
+  assert.equal(chats[0].agent.id, lead.id);
+  assert.equal(chats[0].teamId, team.id);
+  await visible("20261005_team_history"); key("j"); key("\r");
+  await waitFor(() => chats.length === 2, "joined conversation");
+  assert.equal(chats[1].runtimeSessionId, "20261005_team_history");
+  assert.equal(chats[1].agent.canonicalWorkspace, lead.canonicalWorkspace);
+  assert.equal(chats[1].teamId, team.id);
+
+  key("\x1b"); await visible("Leader · Coordinator");
+  key(" "); await visible("Add direct report"); key("c");
+  await waitFor(() => chats.length === 3, "conversation from the member menu");
+  assert.equal(chats[2].agent.id, lead.id);
+  assert.equal(chats[2].teamId, team.id);
+  await visible("Leader · Coordinator");
+  key("2"); await visible("QUEUED · 1"); await visible("Review release");
+  key(" "); await visible("Queue priority"); key("p"); await visible("Running work is never interrupted"); key("1");
+  await visible("Priority set to high");
+  assert.equal((await h.client.request("getTask", { taskId: task.id })).priority, "high");
+  key(" "); await visible("Cancel task"); key("x"); await visible("Cancel this task?"); key("y");
+  await visible("CANCELLED · 1");
+  assert.equal((await h.client.request("getTask", { taskId: task.id })).status, "cancelled");
+
+  key("\x1b"); await settle(); key("g"); key("j"); await visible("conversations that coordinate every team"); key("\r"); key("\r");
+  await waitFor(() => chats.length === 4, "manager conversation");
+  assert.equal(chats[3].manager, true);
+  const managerSession = await h.client.request("attachSession", { manager: true });
+  await h.client.request("bindSession", { sessionId: managerSession.id, runtimeSessionId: "20261005_manager_history" });
+  key("r"); await visible("20261005_manager_history");
+  key("/"); paste("manager_history"); key("\r"); key("j"); key("\r");
+  await waitFor(() => chats.length === 5, "manager history");
+  assert.equal(chats[4].manager, true, "Manager history keeps its restricted identity");
+  assert.equal(chats[4].runtimeSessionId, "20261005_manager_history");
+  assert.equal(chats[4].teamId, undefined);
+
+  abort.abort(); await running;
+  assert.equal(h.input.listenerCount("data"), 0);
+  assert.equal(h.input.isRaw, true);
+  main.start({ acquireInput: false }); main.replayAll(); await visible("Original conversation");
+  assert.doesNotMatch(h.screen(), /Leader · Coordinator|Organization/);
+});
+
+test("a new team flows straight into adding its first member, who becomes the leader", { timeout: 20000 }, async t => {
+  const h = await harness({ columns: 100, rows: 24, prefix: "rind-agents-page-" });
+  const workspace = path.join(h.home, "finance"); await mkdir(workspace);
+  const running = runAgentsPage({ launch: h.launch, input: h.input, output: h.output.output });
+  t.after(async () => { h.input.send("\x03"); await running; await h.cleanup(); });
+  const { key, paste, visible } = h;
+  await visible("New team"); await visible("Create your first team");
+  key("n"); await visible("Team name"); paste("Accounts"); key("\r");
+  await visible("Existing folder"); await visible("The first member becomes the team leader"); key("\r");
+  await visible("Folder path"); paste(workspace); key("\r"); paste("Finance"); key("\r"); paste("Reconcile invoices"); key("\r");
+  await visible("is the team leader");
+  const view = await h.client.request("snapshot");
   assert.equal(view.teams[0].leaderAgentId, view.agents[0].id);
   assert.equal(view.memberships[0].responsibility, "Reconcile invoices");
+  await visible("finance · Leader");
+  key("?"); await visible("Keyboard"); key("?");
   for (const width of [40, 80, 120]) {
-    output.resize(width, 20); await visible("Agents");
-    assert.ok(output.getViewport().every(line => line.length <= width));
+    h.output.resize(width, 20); await visible("Agents");
+    assert.ok(h.output.getViewport().every(line => line.length <= width));
   }
-  input.send("\x1b"); await new Promise(resolve => setTimeout(resolve, 80)); await visible("Enter open"); input.send("\x1b"); await running;
-  assert.equal(input.isRaw, false);
+  key("\x1b"); await h.settle(); await visible("back to chat"); key("\x1b"); await running;
+  assert.equal(h.input.isRaw, false);
 });

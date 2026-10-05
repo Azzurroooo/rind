@@ -3,275 +3,298 @@ import { textWidth, truncateToWidth, wrapTextWithAnsi } from "./text-width.js";
 import { insertCursorMarker } from "./tui/cursor.js";
 import { CURSOR_MARKER } from "./tui/frame.js";
 import { prepareComposerFrame } from "./composer-terminal.js";
-import { agentStatus } from "./agents-client.js";
+import { statusMeta, single, clean, selectable } from "./agents-model.js";
+import { detailFor } from "./agents-detail.js";
+import { HELP_GROUPS, hintsFor, formatHints } from "./agents-keys.js";
 
-export const emptyAgentsSnapshot = () => ({ teams: [], memberships: [], agents: [], tasks: [], runs: [], sessions: [], notes: [], artifacts: [] });
-export const clean = value => String(value ?? "").replace(/\x1b\][^\x07]*(?:\x07|\x1b\\)/g, "").replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, "").replace(/[\x00-\x08\x0b-\x1f\x7f]/g, "");
-const SELECTED_ROW = "\x1b_pi:selected\x07";
-const single = value => clean(value).replace(/\s+/g, " ");
-const priority = status => ["Needs input", "Unconfirmed", "Working", "Waiting", "Queued", "Ready", "Done", "Inactive", "Cancelled"].indexOf(status);
-const taskStatus = status => ({ running: "Working", queued: "Queued", blocked: "Needs input", needs_attention: "Needs input", done: "Done", cancelled: "Cancelled" }[status] || status);
-export function statusText(status) {
-  const style = { "Needs input": paint.warning, Unconfirmed: paint.danger, Working: paint.accent, Waiting: paint.notice, Done: paint.success, Ready: paint.success }[status] || paint.dim;
-  const symbol = { "Needs input": "!", Unconfirmed: "?", Working: "●", Done: "✓", Ready: "○" }[status] || "·";
-  return style(symbol + " " + status);
-}
-export function navigationRows(snapshot) {
-  return [
-    { id: "overview", kind: "overview", title: "Overview", caption: "All teams and live sessions", details: ["All teams", "See activity across every team and enter any member session."] },
-    { id: "manager", kind: "manager", title: "Manager", caption: "Coordinate all teams", details: ["Manager", "Assemble teams, delegate to leaders, and review progress.", "", "The manager sees team status and published reports. Members' private conversations stay with them."] },
-    { id: "new", kind: "new", title: "+ Create team", caption: "Start with any folder", details: ["Create a team", "Choose a name, then add folders as members. The first member becomes the leader."] },
-    ...snapshot.teams.map(team => {
-      const members = snapshot.memberships.filter(m => m.teamId === team.id);
-      const tasks = snapshot.tasks.filter(t => t.teamId === team.id);
-      const statuses = members.map(m => agentStatus(snapshot, m.agentId, team.id));
-      const attention = statuses.filter(s => ["Needs input", "Unconfirmed"].includes(s)).length;
-      const working = statuses.filter(s => s === "Working").length;
-      const leader = snapshot.agents.find(a => a.id === team.leaderAgentId);
-      return { id: team.id, kind: "team", title: team.name, caption: members.length + " members" + (attention ? " · " + attention + " need input" : working ? " · " + working + " working" : ""),
-        details: [team.name, members.length + " members · " + tasks.filter(t => t.status === "done").length + " delivered", "", "Leader", leader?.name || "Choose a leader", "", "New workspaces", team.createRoot, "", "Enter to see members and tasks."] };
-    }),
-  ];
-}
-export function memberRows(snapshot, teamId, tab, query = "", filter = "All", collapsed = new Set()) {
-  const team = snapshot.teams.find(t => t.id === teamId);
-  const matches = text => single(text).toLowerCase().includes(query.toLowerCase());
-  const members = snapshot.memberships.filter(m => m.teamId === teamId);
-  if (tab === "overview") {
-    const tasks = snapshot.tasks.filter(t => t.teamId === teamId);
-    return [{ id: "summary", kind: "summary", title: "Team briefing", caption: "Decisions, progress and delivered results", details: [team?.name || "Team", "Main agent: " + (snapshot.agents.find(a => a.id === team?.leaderAgentId)?.name || "Choose a leader"), "", ...tasks.filter(t => t.status === "needs_attention" || t.blockedOn?.responder === "user").map(t => "! " + t.brief + " — " + (t.blockedOn?.action || t.error)), "", "Tab to organization / tasks"] }];
-  }
-  let rows = tab === "tasks" ? snapshot.tasks.filter(t => t.teamId === teamId).map(task => {
-    const owner = snapshot.agents.find(a => a.id === task.assigneeAgentId);
-    const responder = snapshot.agents.find(a => a.id === task.blockedOn?.responder)?.name || task.blockedOn?.responder;
-    return { id: task.id, kind: "task", title: task.brief, status: task.status === "blocked" && responder === "children" ? "Waiting" : taskStatus(task.status), caption: (owner?.name || "Removed member") + (task.priority ? " · " + task.priority + " priority" : "") + (task.parentTaskId ? " · Subtask" : ""),
-      details: [task.brief, "Owner: " + (owner?.name || "Removed member"), "", ...(task.queueReason ? [task.queueReason, ""] : []), ...(task.blockedOn ? [responder === "children" ? "Waiting for assigned members" : "Needs " + responder, task.blockedOn.action, ""] : []), ...(task.error ? [task.error, ""] : []), task.report?.summary || "No delivery yet. Open task actions to inspect or respond."] };
-  }) : members.map(member => {
-    const agent = snapshot.agents.find(a => a.id === member.agentId);
-    const tasks = snapshot.tasks.filter(t => t.teamId === teamId && t.assigneeAgentId === member.agentId);
-    const recent = tasks.find(t => t.status === "running") || tasks.findLast(t => ["blocked", "needs_attention"].includes(t.status)) || tasks.at(-1);
-    const role = member.agentId === team?.leaderAgentId ? "Leader" : member.position || "Member";
-    const sessions = snapshot.sessions.filter(s => s.agentId === member.agentId && s.teamId === teamId);
-    const parent = member.reportsToAgentId || (member.agentId !== team?.leaderAgentId ? team?.leaderAgentId : undefined);
-    return { id: member.agentId, parent, kind: "member", title: agent?.name || "Missing member", status: agentStatus(snapshot, member.agentId, teamId), caption: role + " · " + sessions.length + " sessions",
-      details: [agent?.name || "Missing member", role, "Reports to: " + (snapshot.agents.find(a => a.id === parent)?.name || "User"), agent?.canonicalWorkspace || "Unavailable", "", "Responsibility", member.responsibility || "No responsibility assigned", ...(recent ? ["", "Latest task", recent.brief, recent.report?.summary || recent.blockedOn?.action || recent.error || taskStatus(recent.status)] : [])] };
-  });
-  if (tab === "members") {
-    const ordered = [], visited = new Set();
-    function visit(row, depth) {
-      if (visited.has(row.id)) return;
-      visited.add(row.id);
-      const children = rows.filter(r => r.parent === row.id);
-      ordered.push({ ...row, depth, hasChildren: children.length > 0, collapsed: collapsed.has(row.id), caption: row.caption + (children.length ? " · " + children.length + " direct reports" : "") });
-      if (!collapsed.has(row.id) || query || filter !== "All") children.forEach(child => visit(child, depth + 1));
-    }
-    rows.filter(row => !row.parent || !rows.some(r => r.id === row.parent)).forEach(row => visit(row, 0));
-    rows = ordered;
-  }
-  rows = rows.filter(row => matches([row.title, row.caption, ...row.details].join(" ")) && (filter === "All" || row.status === filter));
-  if (tab === "tasks") rows.sort((a, b) => priority(a.status) - priority(b.status));
-  return [{ id: "add", kind: "add", title: tab === "tasks" ? "+ Assign task" : "+ Add member", caption: tab === "tasks" ? "Choose an owner and expected delivery" : "Existing folder, new workspace or worktree" }, ...rows];
-}
-const pad = (text, width) => {
-  const selected = text.startsWith(SELECTED_ROW);
-  if (selected) text = text.slice(SELECTED_ROW.length);
+export const MIN_WIDTH = 40, MIN_ROWS = 12;
+const SIDEBAR_AT = 84, DETAIL_AT = 88;
+
+const toned = (status, text) => (paint[statusMeta(status).tone] || paint.dim)(text);
+const glyph = status => toned(status, statusMeta(status).glyph);
+
+// Pads or truncates to exactly `width` cells, keeping a cursor marker in place.
+export function fitLine(text, width) {
   const marker = text.indexOf(CURSOR_MARKER);
-  const visible = text.replace(CURSOR_MARKER, "");
-  const padded = truncateToWidth(visible, width) + " ".repeat(Math.max(0, width - textWidth(visible)));
-  const result = marker < 0 ? padded : insertCursorMarker(padded, Math.min(width - 1, textWidth(text.slice(0, marker))));
-  return selected ? SELECTED_ROW + result : result;
-};
-const fit = (lines, height) => [...lines.slice(0, height), ...Array(Math.max(0, height - lines.length)).fill("")];
-const wrapped = (lines, width) => lines.flatMap(line => wrapTextWithAnsi(clean(line), Math.max(1, width)));
-function box(title, lines, width, height, active = false) {
-  if (height < 3 || width < 8) return fit(lines.map(line => truncateToWidth(line, width)), height);
-  const border = active ? paint.accent : paint.dim;
-  const heading = truncateToWidth(" " + single(title) + " ", width - 4);
-  const surface = active ? "surfaceActive" : "surface";
-  return [paintBackground(border("╭─" + heading + "─".repeat(Math.max(0, width - textWidth(heading) - 3)) + "╮"), surface),
-    ...fit(lines, height - 2).map(line => {
-      const selected = line.startsWith(SELECTED_ROW);
-      if (selected) line = line.slice(SELECTED_ROW.length);
-      return paintBackground(border("│") + " " + pad(line, width - 4) + " " + border("│"), selected ? "selection" : surface);
-    }),
-    paintBackground(border("╰" + "─".repeat(width - 2) + "╯"), surface)];
+  const visible = marker < 0 ? text : text.replace(CURSOR_MARKER, "");
+  const body = truncateToWidth(visible, width, "…");
+  const line = body + " ".repeat(Math.max(0, width - textWidth(body)));
+  return marker < 0 ? line : insertCursorMarker(line, Math.min(width - 1, textWidth(visible.slice(0, marker))));
 }
-function listWindow(rows, selectedId, height) {
-  const selected = Math.max(0, rows.findIndex(row => row.id === selectedId));
-  const perRow = height >= 6 ? 2 : 1;
-  const count = Math.max(1, Math.floor((height - 1) / perRow));
-  const offset = Math.min(Math.max(0, selected - Math.floor(count / 2)), Math.max(0, rows.length - count));
-  return { selected, perRow, count, offset };
-}
-function listLines(rows, selectedId, width, height, active) {
-  const { selected, perRow, count, offset } = listWindow(rows, selectedId, height);
-  const lines = [];
-  for (const row of rows.slice(offset, offset + count)) {
-    const focused = row.id === rows[selected]?.id;
-    const marker = focused ? (active ? "› " : "▸ ") : "  ";
-    const name = (row.depth !== undefined ? "  ".repeat(Math.min(row.depth, 6)) + (row.hasChildren ? row.collapsed ? "▸ " : "▾ " : row.depth ? "└ " : "") : "") + single(row.title);
-    const status = row.status && width >= 28 ? statusText(row.status) : "";
-    const available = width - textWidth(status) - (status ? 3 : 0) - 2;
-    const title = truncateToWidth(name, Math.max(4, available));
-    lines.push((focused && active ? SELECTED_ROW : "") + (focused ? paint.accent(marker) + paint.bold(title) : marker + title)
-      + (status && width >= 28 ? " ".repeat(Math.max(1, width - textWidth(title) - textWidth(status) - 2)) + status : ""));
-    if (perRow === 2) lines.push((focused && active ? SELECTED_ROW : "") + "  " + paint.dim(truncateToWidth(single(row.caption), width - 2)));
-  }
-  if (rows.length > count) lines.push(paint.dim("  " + (selected + 1) + "/" + rows.length + " · ↑↓ scroll"));
-  return fit(lines, height);
-}
-const TABS = [{ id: "overview", label: "Overview" }, { id: "members", label: "Organization" }, { id: "tasks", label: "Tasks" }];
-function tabSegments() {
-  let start = 0;
-  return TABS.map(tab => {
-    const segment = { ...tab, start, end: start + textWidth(tab.label) + 2 };
-    start = segment.end + 2;
-    return segment;
-  });
-}
-function pageLayout(view, width, rows) {
+const wrap = (lines, width) => lines.flatMap(line => wrapTextWithAnsi(line, Math.max(1, width)));
+const fill = (lines, height) => [...lines.slice(0, height), ...Array(Math.max(0, height - lines.length)).fill("")];
+
+export function layout(view, width, rows) {
   const height = Math.max(1, rows - 1);
-  const bodyY = 3;
-  const bodyHeight = Math.max(3, height - bodyY - 2);
-  const wide = width >= 96;
-  const navWidth = wide ? Math.min(32, Math.floor(width * 0.27)) : width;
-  const mainX = wide ? navWidth + 1 : 0;
-  const mainWidth = wide ? width - navWidth - 1 : width;
-  const tabs = Boolean(view.teamId && view.navId === view.teamId && !view.memberId);
-  const interior = Math.max(1, mainWidth - 4);
-  const available = bodyHeight - 4 - Number(tabs);
-  const preview = interior >= 80 ? 0 : bodyHeight >= 13 ? Math.min(7, Math.max(4, Math.floor(available / 3))) : 0;
-  return { bodyY, bodyHeight, wide, navWidth, mainX, mainWidth, interior, tabs, available,
-    listY: bodyY + 3 + Number(tabs), listHeight: interior >= 80 ? available : Math.max(1, available - preview - 1), preview };
-}
-function rowAt(rows, selectedId, height, offset) {
-  const window = listWindow(rows, selectedId, height);
-  const index = window.offset + Math.floor(offset / window.perRow);
-  return offset >= 0 && index < window.offset + window.count ? rows[index] : undefined;
+  const bodyHeight = Math.max(1, height - 3);
+  const sidebar = width >= SIDEBAR_AT;
+  const sidebarWidth = sidebar ? Math.max(22, Math.min(30, Math.floor(width * 0.22))) : width;
+  const mainX = sidebar ? sidebarWidth + 1 : 0;
+  const mainWidth = sidebar ? width - mainX : width;
+  const side = mainWidth >= DETAIL_AT ? Math.max(30, Math.min(48, Math.floor(mainWidth * 0.36))) : 0;
+  return { height, bodyHeight, sidebar, sidebarWidth, mainX, mainWidth, side };
 }
 
-export function hitTestAgents(view, width, rows, x, y) {
-  if (width < 32 || rows < 12) return null;
-  const layout = pageLayout(view, width, rows);
-  if (y < layout.bodyY + 1 || y >= layout.bodyY + layout.bodyHeight - 1) return null;
-  if (view.dialog) {
-    if (view.dialog.kind !== "choice") return null;
-    const capacity = Math.max(1, layout.bodyHeight - 5);
-    const description = wrapped(view.dialog.description || [], Math.max(1, width - 4));
-    const lines = description.slice(0, Math.max(0, Math.min(3, capacity - 3)));
-    const choices = view.dialog.items.map((item, index) => ({ id: String(index) }));
-    const selectedId = String(view.dialog.selection.selectedIndex());
-    const row = rowAt(choices, selectedId, capacity - lines.length, y - layout.bodyY - 1 - lines.length);
-    return x >= 2 && x < width - 2 && row ? { kind: "choice", index: Number(row.id) } : null;
-  }
-  if (view.detail) return { kind: "detail" };
-  if ((layout.wide || view.focus === "nav") && x >= 2 && x < layout.navWidth - 2) {
-    const row = rowAt(view.nav, view.navId, layout.bodyHeight - 2, y - layout.bodyY - 1);
-    return row ? { kind: "nav", id: row.id } : null;
-  }
-  if (!layout.wide && view.focus !== "list") return null;
-  if (x < layout.mainX + 2 || x >= layout.mainX + layout.mainWidth - 2) return null;
-  if (layout.tabs && y === layout.bodyY + 1) {
-    const column = x - layout.mainX - 2;
-    const tab = tabSegments().find(item => column >= item.start && column < item.end);
-    return tab ? { kind: "tab", id: tab.id } : null;
-  }
-  if (y < layout.listY || y >= layout.listY + layout.listHeight) return null;
-  if (layout.interior >= 80 && x >= layout.mainX + 2 + Math.floor(layout.interior * 0.55)) return null;
-  const row = rowAt(view.entries, view.selectedId, layout.listHeight, y - layout.listY);
-  return row ? { kind: "entry", id: row.id } : null;
+// Keeps the selected row visible while scrolling as little as possible. The
+// offset is remembered per list so returning to a page restores its position.
+function windowFor(view, key, rows, selectedId, height) {
+  const index = Math.max(0, rows.findIndex(row => row.id === selectedId));
+  const max = Math.max(0, rows.length - height);
+  let offset = Math.min(view.scroll?.[key] ?? 0, max);
+  if (index < offset) offset = index;
+  if (index >= offset + height) offset = index - height + 1;
+  if (view.scroll) view.scroll[key] = offset;
+  return { offset, index };
 }
-function editorLines(editor, width, maxRows = 3) {
-  const frame = prepareComposerFrame({ prompt: "  ", inputText: editor.input(), cursor: editor.cursorPosition() }, width);
+
+function rightColumns(row, width) {
+  if (row.kind === "section") return "";
+  if (["member", "session"].includes(row.kind) && row.status) {
+    const word = width >= 52 ? toned(row.status, row.status.padEnd(11)) : "";
+    const time = width >= 40 && row.kind === "session" ? paint.dim((row.time || "").padStart(4)) : width >= 40 ? "    " : "";
+    return [word, time].filter(Boolean).join(" ");
+  }
+  if (row.kind === "task") return paint.dim(truncateToWidth(row.owner, 14, "…")) + (row.priority === "high" ? paint.warning(" ↑") : row.priority === "low" ? paint.dim(" ↓") : "  ");
+  if (row.kind === "team" && row.summary) return row.summary.needs ? paint.warning("! " + row.summary.needs) : row.summary.working ? paint.accent("● " + row.summary.working) : paint.dim(String(row.summary.members));
+  if (row.kind === "inbox" && row.badge) return paint.warning(String(row.badge));
+  if (row.context) return paint.dim(row.context);
+  return "";
+}
+
+function leadIcon(row) {
+  if (row.kind === "member" || row.kind === "session" || row.kind === "task" || row.kind === "run") return glyph(row.status);
+  if (["add-member", "new-session", "assign", "new-team"].includes(row.kind)) return paint.accent("+");
+  if (row.kind === "more") return paint.dim("…");
+  if (row.kind === "manager") return paint.notice("◆");
+  if (row.kind === "team" || row.kind === "inbox") return row.status ? glyph(row.status) : paint.dim("○");
+  return " ";
+}
+
+function rowLine(row, width, selected, focused) {
+  if (row.kind === "section") {
+    const label = " " + row.title.toUpperCase() + (row.count !== undefined ? " · " + row.count : "") + " ";
+    return paint.dim("─" + label + "─".repeat(Math.max(0, width - textWidth(label) - 1)));
+  }
+  const marker = selected ? (focused ? paint.accent("›") : paint.dim("›")) : " ";
+  let name = single(row.title);
+  if (row.kind === "member" || row.kind === "team") name = paint.bold(name);
+  else if (["add-member", "new-session", "assign", "new-team", "more", "clear"].includes(row.kind)) name = paint.dim(name);
+  const extra = (row.role ? paint.dim(" · " + row.role) : "") + (row.hidden ? paint.dim(" +" + row.hidden) : "") + (row.note && width >= 60 ? paint.dim(" — " + row.note) : "");
+  const left = marker + " " + leadIcon(row) + " " + paint.dim(row.guide || "") + name + extra;
+  const right = rightColumns(row, width);
+  const room = width - textWidth(right) - 1;
+  if (!right || room < 12) return fitLine(left, width);
+  return fitLine(truncateToWidth(left, room, "…"), room) + " " + right;
+}
+
+function listLines(view, key, rows, selectedId, width, height, focused, empty) {
+  if (!rows.length) return fill([paint.dim("  " + empty)], height);
+  const { offset } = windowFor(view, key, rows, selectedId, height);
+  return fill(rows.slice(offset, offset + height).map(row => {
+    const selected = row.id === selectedId && selectable(row);
+    const line = rowLine(row, width, selected, focused);
+    return selected && focused ? paintBackground(line, "selection") : line;
+  }), height);
+}
+
+function tabs(view, width) {
+  const team = view.page.tab;
+  const openTasks = view.snapshot.tasks.filter(t => t.teamId === view.page.teamId && !["done", "cancelled"].includes(t.status)).length;
+  const tab = (id, label) => id === team ? paintBackground(paint.bold(" " + label + " "), "selection") : paint.dim(" " + label + " ");
+  return truncateToWidth(tab("org", "Organization") + " " + tab("tasks", "Tasks" + (openTasks ? " " + openTasks : "")), width, "…");
+}
+
+function pageHeader(view, width) {
+  const { snapshot, page } = view;
+  const team = snapshot.teams.find(t => t.id === page.teamId);
+  if (page.kind === "inbox") return [paint.bold("Inbox") + paint.dim(" · everything waiting on you")];
+  if (page.kind === "manager") return [paint.bold("Manager") + paint.dim(" · conversations that coordinate every team")];
+  if (page.kind === "new-team") return [paint.bold("New team")];
+  if (!team) return [paint.dim("Team removed")];
+  if (page.kind === "member") {
+    const agent = snapshot.agents.find(a => a.id === page.agentId);
+    return [paint.dim(single(team.name) + " › ") + paint.bold(single(agent?.name) || "Member") + paint.dim(" · conversations in this team")];
+  }
+  const leader = snapshot.agents.find(a => a.id === team.leaderAgentId);
+  const members = snapshot.memberships.filter(m => m.teamId === team.id).length;
+  return [paint.bold(single(team.name)) + paint.dim(" · " + members + " members · leader " + (single(leader?.name) || "not chosen")), tabs(view, width)];
+}
+
+function searchLine(view, width) {
+  if (view.searching) return editorLines(view.searchEditor, width, 1, paint.accent("/ "))[0];
+  if (!view.query && view.filter === "All") return null;
+  return paint.dim([view.query && "/ " + single(view.query), view.filter !== "All" && "status: " + view.filter].filter(Boolean).join(" · ") + " · esc clears");
+}
+
+function emptyText(view) {
+  if (view.query || view.filter !== "All") return "No matches · esc clears the search";
+  if (view.page.kind === "new-team") return "Press enter to name your new team";
+  return "Nothing here yet";
+}
+
+function mainLines(view, width, height) {
+  const header = pageHeader(view, width);
+  const search = searchLine(view, width);
+  const top = [...header, ...(search ? [search] : []), ""];
+  const focused = view.focus === "main";
+  const listHeight = Math.max(1, height - top.length);
+  const row = view.entries.find(r => r.id === view.selectedId);
+  const position = view.entries.filter(selectable).length > listHeight ? paint.dim(" " + (view.entries.filter(selectable).findIndex(r => r.id === view.selectedId) + 1) + "/" + view.entries.filter(selectable).length) : "";
+  if (position) top[0] = fitLine(top[0], width - textWidth(position)) + position;
+  return { top, list: (w, h) => listLines(view, view.pageKey, view.entries, view.selectedId, w, h, focused, emptyText(view)), listHeight, row };
+}
+
+function renderMain(view, width, height) {
+  const { top, list, listHeight, row } = mainLines(view, width, height);
+  const detail = detailFor(view, row);
+  const lay = view.layout;
+  if (lay.side && width === lay.mainWidth) {
+    const listWidth = width - lay.side - 3;
+    const left = list(listWidth, listHeight);
+    const right = fill(wrap(detail, lay.side), listHeight);
+    return [...top.map(line => fitLine(line, width)), ...left.map((line, i) => fitLine(line, listWidth) + paint.dim(" │ ") + fitLine(right[i], lay.side))];
+  }
+  const below = listHeight >= 14 && detail.length ? Math.min(6, Math.floor(listHeight / 3)) : 0;
+  const lines = list(width, listHeight - (below ? below + 1 : 0));
+  const extra = below ? [paint.dim("─".repeat(width)), ...fill(wrap(detail, width).slice(0, below), below)] : [];
+  return [...top, ...lines, ...extra].map(line => fitLine(line, width));
+}
+
+function renderSidebar(view, width, height) {
+  return listLines(view, "sidebar", view.sidebar, view.navId, width, height, view.focus === "sidebar", "").map(line => fitLine(line, width));
+}
+
+function editorLines(editor, width, maxRows, prompt = "  ") {
+  const frame = prepareComposerFrame({ prompt: "  ", inputText: editor.input(), cursor: editor.cursorPosition() }, Math.max(4, width));
   frame.lines[frame.cursorRow] = insertCursorMarker(frame.lines[frame.cursorRow] + " ", frame.cursorColumn);
   const offset = Math.max(0, frame.cursorRow - maxRows + 1);
-  return frame.lines.slice(offset, offset + maxRows);
+  return frame.lines.slice(offset, offset + maxRows).map((line, index) => (index === 0 && offset === 0 ? prompt + line.slice(2) : line));
 }
-function renderDialog(dialog, width, height, busy) {
-  const inner = Math.max(1, width - 4);
-  const capacity = Math.max(1, height - 5);
-  const footer = busy ? "Saving…" : dialog.kind === "form" ? "Enter next / save · Tab field · Esc cancel" : "↑↓ choose · Enter confirm · Esc cancel";
-  const description = wrapped(dialog.description || [], inner);
-  const lines = dialog.kind === "choice" ? description.slice(0, Math.max(0, Math.min(3, capacity - 3))) : description;
-  if (lines.length && dialog.kind === "form") lines.push("");
-  if (dialog.kind === "form") {
-    const field = dialog.fields[dialog.index];
-    lines.push(paint.dim("Field " + (dialog.index + 1) + " of " + dialog.fields.length));
-    for (const [index, item] of dialog.fields.entries()) {
-      if (index === dialog.index) {
-        lines.push(paint.accent("› " + item.label) + (item.optional ? paint.dim(" (optional)") : ""));
-        lines.push(...editorLines(item.editor, inner));
-        if (item.hint) lines.push(...wrapped([item.hint], inner).map(paint.dim));
-      } else lines.push(paint.dim("  " + item.label + ": ") + truncateToWidth(single(item.editor.input() || "—"), inner - textWidth(item.label) - 4));
-    }
-    if (!field) return [];
+
+function box(title, lines, width, accent = paint.accent) {
+  const heading = truncateToWidth(" " + single(title) + " ", Math.max(1, width - 4), "…");
+  return [accent("╭─") + paint.bold(heading) + accent("─".repeat(Math.max(0, width - textWidth(heading) - 3)) + "╮"),
+    ...lines.map(line => accent("│") + " " + fitLine(line, width - 4) + " " + accent("│")),
+    accent("╰" + "─".repeat(Math.max(0, width - 2)) + "╯")].map(line => paintBackground(line, "surfaceActive"));
+}
+
+function dialogBox(dialog, width, maxHeight, busy) {
+  const inner = width - 4;
+  // Descriptions quote paths, errors and names: untrusted text is cleaned before painting.
+  const described = wrap((dialog.description || []).map(clean), inner);
+  // Choices always keep room for a few options; the description is clipped instead.
+  const limit = dialog.kind === "choice" ? Math.max(1, maxHeight - 4 - Math.min(dialog.items.length, 5)) : described.length;
+  const lines = described.slice(0, limit).map((line, i) => paint.dim(i === limit - 1 && described.length > limit ? truncateToWidth(line + "…", inner, "…") : line));
+  if (lines.length) lines.push("");
+  if (dialog.kind === "choice") {
+    const capacity = Math.max(1, maxHeight - 2 - lines.length - (dialog.error ? 2 : 0));
+    const offset = Math.max(0, Math.min(dialog.index - capacity + 1, dialog.items.length - capacity));
+    dialog.items.slice(offset, offset + capacity).forEach((item, i) => {
+      const index = offset + i, selected = index === dialog.index;
+      const number = dialog.items.length > 1 && index < 9 ? String(index + 1) : " ";
+      const label = item.danger ? paint.danger(item.label) : selected ? paint.bold(item.label) : item.label;
+      const key = item.key ? paint.dim(item.key) : "";
+      const room = inner - textWidth(key) - 1;
+      const body = (selected ? paint.accent("›") : " ") + " " + paint.dim(number) + "  " + label + (item.description ? paint.dim("  " + single(item.description)) : "");
+      const line = fitLine(truncateToWidth(body, room, "…"), room) + " " + key;
+      lines.push(selected ? paintBackground(line, "selection") : line);
+    });
   } else {
-    const rows = dialog.items.map(item => ({ id: item.label, title: item.label, caption: item.description }));
-    lines.push(...listLines(rows, dialog.selection.selectedOption(), inner, capacity - lines.length, true));
+    dialog.fields.forEach((item, index) => {
+      const active = index === dialog.index;
+      lines.push((active ? paint.accent("› " + item.label) : paint.dim("  " + item.label)) + (item.optional ? paint.dim("  optional") : ""));
+      if (active) {
+        lines.push(...editorLines(item.editor, inner, 4, paint.accent("┃ ")));
+        if (item.hint) lines.push(...wrap([item.hint], inner - 2).map(line => paint.dim("  " + line)));
+      } else lines.push("  " + (item.editor.input() ? truncateToWidth(single(item.editor.input()), inner - 2, "…") : paint.dim("—")));
+      if (index < dialog.fields.length - 1) lines.push("");
+    });
   }
-  const error = dialog.error ? paint.danger(truncateToWidth(single(dialog.error), inner)) : "";
-  // Keep the current field and controls visible even on short terminals.
-  let visible = lines.slice(0, capacity);
+  if (dialog.error) lines.push("", paint.danger("! " + single(dialog.error)));
+  if (busy) lines.push("", paint.accent("… saving"));
   const cursor = lines.findIndex(line => line.includes(CURSOR_MARKER));
-  if (cursor >= capacity) visible = lines.slice(Math.max(0, cursor - capacity + 2), Math.max(0, cursor - capacity + 2) + capacity);
-  return box(dialog.title, [...fit(visible, capacity), error, paint.dim(truncateToWidth(footer, inner))], width, height, true);
+  const room = Math.max(1, maxHeight - 2);
+  const start = cursor >= room ? cursor - room + 2 : 0;
+  return box(dialog.title, lines.slice(start, start + room), width, dialog.danger ? paint.danger : paint.accent);
 }
-export function renderAgents(view, width, rows) {
-  width = Math.max(1, width); const layout = pageLayout(view, width, rows); const height = Math.max(1, rows - 1);
-  if (width < 32 || rows < 12) return ["Agents", "Enlarge terminal (32 × 12)", "Esc back"].slice(0, height).map(line => truncateToWidth(line, width));
-  const { snapshot, nav, entries, navId, selectedId, teamId, focus, tab, query, filter, dialog, detail, notice, connection, busy } = view;
-  const team = snapshot.teams.find(t => t.id === teamId);
-  const current = (focus === "nav" ? nav.find(r => r.id === navId) : entries.find(r => r.id === selectedId));
-  const attention = snapshot.tasks.filter(t => t.status === "needs_attention" || (t.status === "blocked" && t.blockedOn?.responder === "user")).length
-    + snapshot.runs.filter(r => !r.taskId && r.status === "running" && r.needsInput).length;
-  const active = snapshot.runs.filter(r => ["starting", "running"].includes(r.status)).length;
-  const header = paint.bold("  Agents") + paint.dim(team ? " / " + single(team.name) : " / Overview");
-  const summary = "  " + snapshot.teams.length + " teams · " + active + " running · " + attention + " need input";
-  const top = [header, connection === "connected" ? paint.dim(summary) : paint.warning("  " + connection), ""];
-  const bodyHeight = layout.bodyHeight;
+
+// Groups stack in one column, or split into two when the box is wide enough.
+function helpBox(width, maxHeight) {
+  const keyWidth = Math.max(...HELP_GROUPS.flatMap(group => group.items.map(([key]) => textWidth(key)))) + 2;
+  const group = (item, index) => [...(index ? [""] : []), paint.bold(item.title), ...item.items.map(([key, label]) => " " + paint.accent(key.padEnd(keyWidth)) + paint.dim(label))];
+  const inner = width - 4, half = Math.floor((inner - 2) / 2);
+  let lines;
+  if (half >= 34) {
+    const left = group(HELP_GROUPS[0], 0), right = HELP_GROUPS.slice(1).flatMap(group);
+    lines = Array.from({ length: Math.max(left.length, right.length) }, (_, i) => fitLine(left[i] || "", half) + "  " + (right[i] || ""));
+  } else lines = HELP_GROUPS.flatMap(group);
+  lines.push("", paint.dim("Shortcuts never fire while you are typing in a field."));
+  return box("Keyboard", lines.slice(0, Math.max(1, maxHeight - 2)), width);
+}
+
+function overlay(base, panel, width) {
+  const top = Math.max(0, Math.floor((base.length - panel.length) / 3));
+  const left = Math.max(0, Math.floor((width - textWidth(panel[0] || "")) / 2));
+  return base.map((line, index) => {
+    const content = panel[index - top];
+    return content === undefined ? line : " ".repeat(left) + content + " ".repeat(Math.max(0, width - left - textWidth(content.replace(CURSOR_MARKER, ""))));
+  });
+}
+
+function renderDelivery(view, width, height) {
+  const lines = wrap(view.detail.lines.map(clean), Math.max(1, width - 2));
+  const room = Math.max(1, height - 2);
+  const offset = Math.min(view.detail.offset, Math.max(0, lines.length - room));
+  view.detail.offset = offset;
+  const position = lines.length > room ? paint.dim(" " + (offset + 1) + "–" + Math.min(lines.length, offset + room) + " of " + lines.length) : "";
+  return [fitLine(paint.bold(view.detail.title), width - textWidth(position)) + position, "", ...fill(lines.slice(offset, offset + room).map(line => " " + line), room)].map(line => fitLine(line, width));
+}
+
+function headerLine(view, width) {
+  const { snapshot, page } = view;
+  const team = snapshot.teams.find(t => t.id === page.teamId);
+  const crumbs = ["Agents", page.kind === "inbox" ? "Inbox" : page.kind === "manager" ? "Manager" : page.kind === "new-team" ? "New team" : single(team?.name) || ""];
+  if (page.kind === "member") crumbs.push(single(snapshot.agents.find(a => a.id === page.agentId)?.name));
+  else if (page.kind === "team") crumbs.push(page.tab === "tasks" ? "Tasks" : "Organization");
+  const left = " " + paint.bold(crumbs[0]) + paint.dim(crumbs.slice(1).filter(Boolean).map(c => " › " + c).join(""));
+  const working = snapshot.memberships.filter(m => m.status === "Working").length;
+  const needs = view.sidebar[0]?.badge || 0;
+  // Breadcrumbs win over status: drop to compact chips before truncating the path.
+  const wide = [needs ? paint.warning("! " + needs + " need you") : "", working ? paint.accent("● " + working + " working") : "", paint.success("●") + paint.dim(" connected")];
+  const compact = [needs ? paint.warning("! " + needs) : "", working ? paint.accent("● " + working) : "", paint.success("●")];
+  const candidates = view.connection === "connected" ? [wide, compact].map(parts => parts.filter(Boolean).join("  ")) : [paint.warning("○ " + view.connection), paint.warning("○")];
+  const status = candidates.find(item => width - textWidth(item) - 1 >= textWidth(left)) || candidates.at(-1);
+  const room = width - textWidth(status) - 1;
+  return room > 10 ? fitLine(left, room - 1) + " " + status + " " : fitLine(left, width);
+}
+
+const SPINNER = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+function noticeLine(view, width, now) {
+  if (view.busy) return paint.accent(" " + SPINNER[Math.floor(now / 100) % SPINNER.length] + " " + (view.busyLabel || "Working…"));
+  if (!view.notice) return "";
+  const badge = { error: paint.danger(" ✕ "), success: paint.success(" ✓ "), info: paint.accent(" • ") }[view.notice.tone] || " ";
+  return badge + single(view.notice.text);
+}
+
+export function renderAgents(view, width, rows, now = Date.now()) {
+  width = Math.max(1, width);
+  const lay = layout(view, width, rows);
+  view.layout = lay;
+  if (width < MIN_WIDTH || rows < MIN_ROWS) return ["Agents", "Needs " + MIN_WIDTH + "×" + MIN_ROWS, "Esc: chat"].slice(0, lay.height).map(line => fitLine(line, width));
+  const showSidebar = lay.sidebar || view.focus === "sidebar";
+  const sidebarWidth = lay.sidebar ? lay.sidebarWidth : width;
+  const mainWidth = lay.sidebar ? lay.mainWidth : width;
+  const mainContent = view.detail ? renderDelivery(view, mainWidth, lay.bodyHeight) : renderMain(view, mainWidth, lay.bodyHeight);
+  let main = view.dialog ? overlay(mainContent, dialogBox(view.dialog, Math.min(mainWidth - 2, 76), lay.bodyHeight, view.busy), mainWidth) : mainContent;
+  main = main.map(line => fitLine(line, mainWidth));
   let body;
-  if (dialog) body = renderDialog(dialog, width, bodyHeight, busy);
-  else if (detail) {
-    const lines = wrapped(detail.lines, Math.max(1, width - 4));
-    const offset = Math.min(detail.offset, Math.max(0, lines.length - bodyHeight + 2));
-    body = box((detail.title || "Delivery") + " · " + (offset + 1) + "/" + Math.max(1, lines.length), lines.slice(offset), width, bodyHeight, true);
-  } else {
-    const { wide, navWidth, mainWidth } = layout;
-    const selected = entries.find(r => r.id === selectedId);
-    const main = () => {
-      const title = view.memberId ? "Sessions · " + (snapshot.agents.find(a => a.id === view.memberId)?.name || "Member") : view.navId === "overview" ? "All teams · Sessions" : ({ overview: "Team overview", members: "Organization", tasks: "Tasks" }[tab] || tab);
-      const interior = Math.max(1, mainWidth - 4);
-      const tabs = layout.tabs ? tabSegments().map(item => (item.id === tab ? paintBackground(paint.bold(" " + item.label + " "), "selection") : paint.dim(" " + item.label + " "))).join("  ") : null;
-      const search = view.searching ? editorLines(view.searchEditor, interior, 1) : [paint.dim("/ Search" + (query ? ": " + single(query) : "") + " · " + filter)];
-      const available = layout.available;
-      if (interior >= 80) {
-        const listWidth = Math.floor(interior * 0.55), previewWidth = interior - listWidth - 3;
-        const list = listLines(entries, selectedId, listWidth, available, focus === "list");
-        const preview = fit([paint.dim("DETAILS"), "", ...wrapped(selected?.details || [selected?.caption || ""], previewWidth)], available);
-        const columns = list.map((line, index) => pad(line, listWidth) + paint.dim(" │ ") + preview[index]);
-        return box(title, [...(tabs ? [tabs] : []), ...search, "", ...columns], mainWidth, bodyHeight, focus === "list");
-      }
-      const detailSize = layout.preview;
-      const list = listLines(entries, selectedId, interior, Math.max(1, available - detailSize - 1), focus === "list");
-      if (!entries.length || (entries.length === 1 && entries[0].kind === "add")) list.splice(entries.length * 2, 0, paint.dim(query || filter !== "All" ? "No matches. Clear search or filter." : tab === "members" ? "Add a folder to start this team." : "Assign a goal to your team leader."));
-      const preview = detailSize ? [paint.dim("─".repeat(interior)), ...wrapped(selected?.details || [selected?.caption || ""], interior).slice(0, detailSize - 1)] : [];
-      return box(title, [...(tabs ? [tabs] : []), ...search, "", ...fit(list, Math.max(1, available - detailSize - 1)), ...preview], mainWidth, bodyHeight, focus === "list");
-    };
-    const left = box("Teams", listLines(nav, navId, navWidth - 4, bodyHeight - 2, focus === "nav"), navWidth, bodyHeight, focus === "nav");
-    if (wide) {
-      const right = team || view.navId === "overview" || view.memberId ? main() : box("Overview", wrapped(current?.details || ["Choose a team or open Manager."], mainWidth - 4), mainWidth, bodyHeight);
-      body = left.map((line, i) => pad(line, navWidth) + " " + (right[i] || ""));
-    } else body = focus === "nav" ? left : main();
-  }
-  const hint = dialog ? "Click a choice · Esc cancels · values stay editable"
-    : detail ? (detail.taskId ? "↑↓ scroll · Space actions · R refresh · Esc back" : "↑↓ scroll · R refresh · Esc back")
-    : focus === "nav" ? "Click or ↑↓ select · Enter open · Esc chat"
-    : view.memberId || view.navId === "overview" ? "Click select / open · Right click actions · Esc back"
-    : tab === "overview" ? "Enter briefing · Tab organization · ← teams"
-    : tab === "members" ? "Enter sessions · Space actions · → fold"
-    : "Enter delivery · Space actions · ← teams";
-  const message = busy ? "Working…" : notice || (!dialog && !detail ? (focus === "nav" ? "Manager coordinates all teams · N new team" : view.memberId ? "R refresh history · / search · F filter" : view.navId === "overview" ? "All teams · / search · F filter" : "Tab overview / organization / tasks · / search · F filter") : "");
-  return [...top.map(line => paintBackground(pad(line, width), "surfaceActive")), ...fit(body, bodyHeight),
-    paintBackground(pad("  " + single(message), width), "surface"),
-    paintBackground(pad("  " + hint, width), "surface")].slice(0, height);
+  if (lay.sidebar) {
+    const side = renderSidebar(view, sidebarWidth, lay.bodyHeight);
+    body = side.map((line, i) => line + paint.dim("│") + (main[i] || " ".repeat(mainWidth)));
+  } else body = showSidebar && !view.dialog ? renderSidebar(view, width, lay.bodyHeight) : main;
+  if (view.help) body = overlay(fill(body, lay.bodyHeight).map(line => fitLine(line, width)), helpBox(Math.min(width - 2, 84), lay.bodyHeight), width);
+  const row = view.focus === "sidebar" ? view.sidebar.find(r => r.id === view.navId) : view.entries.find(r => r.id === view.selectedId);
+  return [paintBackground(headerLine(view, width), "surfaceActive"), ...fill(body, lay.bodyHeight).map(line => fitLine(line, width)),
+    paintBackground(fitLine(noticeLine(view, width, now), width), "surface"),
+    paintBackground(fitLine(" " + formatHints(hintsFor(view, row), width - 2), width), "surface")].slice(0, lay.height);
 }

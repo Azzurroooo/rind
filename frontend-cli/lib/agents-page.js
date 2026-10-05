@@ -1,39 +1,99 @@
-import path from "node:path";
 import { realpath } from "node:fs/promises";
-import { sessionRows, overviewRows } from "./agents-sessions.js";
 import { createTui } from "./tui/tui.js";
 import { parseTerminalKey } from "./terminal-key.js";
 import { createLineEditor } from "./line-editor.js";
-import { createChoiceMenuState } from "./choice-menu-state.js";
 import { managementClient } from "./agents-client.js";
 import { openAgentChat, managerWorkspace } from "./agents-commands.js";
-import { emptyAgentsSnapshot, navigationRows, memberRows, renderAgents, hitTestAgents, clean } from "./agents-view.js";
+import { emptyAgentsSnapshot, clean, sidebarRows, inboxRows, organizationRows, taskRows, memberSessionRows, managerRows, teamSessions, selectable } from "./agents-model.js";
+import { renderAgents } from "./agents-view.js";
+import { createActions } from "./agents-actions.js";
+
+const CREATE_KINDS = new Set(["add-member", "assign", "new-session", "new-team"]);
+const NOTICE_MS = 6000, CLOCK_MS = 30000;
 
 export async function runAgentsPage({ launch, input = process.stdin, output = process.stdout, manageInput = true, signal, initialTeamId, openChat = openAgentChat }) {
-  const tui = createTui({ input, output, manageInput, alternateScreen: true, mouse: true });
-  const view = { snapshot: emptyAgentsSnapshot(), nav: [], entries: [], navId: "overview", selectedId: "add", teamId: "", focus: "nav", tab: "overview", memberId: "", memberReturnId: "", history: [], collapsed: new Set(), query: "", filter: "All", searching: false, searchEditor: createLineEditor(), dialog: null, detail: null, notice: "", connection: "Connecting…", busy: false };
-  let client, connecting, closed = false, chatActive = false, initialized = false;
+  const tui = createTui({ input, output, manageInput, alternateScreen: true });
+  const view = {
+    snapshot: emptyAgentsSnapshot(), connection: "connecting…", busy: false, busyLabel: "", notice: null, help: false,
+    sidebar: [], navId: "inbox", focus: "sidebar", member: null, page: { kind: "inbox" }, pageKey: "inbox", entries: [], selectedId: "",
+    selections: {}, scroll: {}, tabs: {}, collapsed: {}, history: {}, managerHistory: null,
+    query: "", filter: "All", searching: false, searchEditor: createLineEditor(), dialog: null, detail: null,
+  };
+  let client, connecting, closed = false, chatActive = false, initialized = false, noticeTimer, spinner;
   let finish;
   const finished = new Promise(resolve => { finish = resolve; });
   const close = () => { closed = true; if (!chatActive) finish(); };
-  function redraw() { if (!closed) tui.requestRender(); }
+  // Nothing may paint while a conversation owns the terminal.
+  const redraw = () => { if (!closed && !chatActive) tui.requestRender(); };
+  const clock = setInterval(() => project(), CLOCK_MS);
+  clock.unref?.();
+
+  function derivePage() {
+    const nav = view.sidebar.find(row => row.id === view.navId);
+    if (nav?.kind === "team") {
+      if (view.member?.teamId === nav.teamId) return { kind: "member", teamId: nav.teamId, agentId: view.member.agentId };
+      return { kind: "team", teamId: nav.teamId, tab: view.tabs[nav.teamId] || "org" };
+    }
+    return { kind: nav?.kind || "inbox" };
+  }
+  function entriesFor(page) {
+    const options = { query: view.query, filter: view.filter };
+    if (page.kind === "inbox") return inboxRows(view.snapshot);
+    if (page.kind === "manager") return managerRows(view.managerHistory?.entries, options);
+    if (page.kind === "new-team") return [{ id: "new-team", kind: "new-team", title: "Name your new team" }];
+    const sessions = teamSessions(view.snapshot, page.teamId, view.history[page.teamId]?.entries);
+    if (page.kind === "member") return memberSessionRows(sessions, page.agentId, options);
+    if (page.tab === "tasks") return taskRows(view.snapshot, page.teamId, options);
+    const first = !view.snapshot.memberships.some(m => m.teamId === page.teamId);
+    const tree = organizationRows(view.snapshot, page.teamId, sessions, { ...options, collapsed: view.collapsed[page.teamId] || new Set() });
+    return [{ id: "add-member", kind: "add-member", title: first ? "Add the first member" : "Add member", teamId: page.teamId, firstMember: first }, ...tree];
+  }
   function project() {
-    view.nav = navigationRows(view.snapshot);
-    if (!view.nav.some(row => row.id === view.navId)) view.navId = "new";
-    if (view.teamId && !view.snapshot.teams.some(team => team.id === view.teamId)) { view.teamId = ""; view.focus = "nav"; }
-    view.entries = view.memberId ? [{ id: "new-session", kind: "new-session", title: "+ New conversation", caption: "Start in this member's workspace" }, ...sessionRows(view.snapshot, view.memberId, view.history, view.query, view.filter)]
-      : view.navId === "overview" ? overviewRows(view.snapshot, view.query, view.filter)
-      : memberRows(view.snapshot, view.teamId, view.tab, view.query, view.filter, view.collapsed);
-    if (!view.entries.some(row => row.id === view.selectedId)) view.selectedId = view.entries[0]?.id;
+    if (closed || chatActive) return;
+    view.sidebar = sidebarRows(view.snapshot);
+    if (!view.sidebar.some(row => row.id === view.navId)) { view.navId = "inbox"; view.member = null; view.focus = "sidebar"; }
+    if (view.member && !view.snapshot.memberships.some(m => m.teamId === view.member.teamId && m.agentId === view.member.agentId)) view.member = null;
+    view.page = derivePage();
+    view.pageKey = [view.page.kind, view.page.teamId, view.page.tab || view.page.agentId].filter(Boolean).join(":");
+    view.entries = entriesFor(view.page);
+    const remembered = view.selections[view.pageKey];
+    if (!view.entries.some(row => row.id === remembered && selectable(row))) {
+      const items = view.entries.filter(selectable);
+      view.selections[view.pageKey] = (items.find(row => !CREATE_KINDS.has(row.kind)) || items[0])?.id;
+    }
+    view.selectedId = view.selections[view.pageKey];
+    ensureHistory();
     redraw();
   }
+
+  function ensureHistory() {
+    const teamId = view.page.teamId;
+    if (teamId && view.connection === "connected") {
+      const key = view.snapshot.sessions.filter(s => s.teamId === teamId && s.runtimeSessionId).map(s => s.runtimeSessionId).sort().join(",");
+      const current = view.history[teamId];
+      if (!current || (current.key !== key && !current.loading)) void loadHistory(teamId, key);
+    }
+    if (view.page.kind === "manager" && view.connection === "connected" && !view.managerHistory) void loadManagerHistory();
+  }
+  async function loadHistory(teamId, key = view.history[teamId]?.key) {
+    view.history[teamId] = { ...view.history[teamId], key, loading: true };
+    try { view.history[teamId] = { key, entries: (await client.request("listSessions", { teamId })).sessions }; }
+    catch (error) { view.history[teamId] = { key, entries: view.history[teamId]?.entries || [] }; notify("Could not load conversations: " + error.message, "error"); }
+    project();
+  }
+  async function loadManagerHistory() {
+    view.managerHistory = { entries: view.managerHistory?.entries || [] };
+    try { view.managerHistory = { entries: (await client.request("listSessions", { manager: true })).sessions }; }
+    catch (error) { notify("Could not load Manager conversations: " + error.message, "error"); }
+    project();
+  }
+
   const acceptSnapshot = snapshot => {
     if (closed) return;
     view.snapshot = snapshot;
     if (!initialized) {
       initialized = true;
-      const first = snapshot.teams.find(t => t.id === initialTeamId);
-      if (first) { view.teamId = first.id; view.navId = first.id; }
+      if (snapshot.teams.some(t => t.id === initialTeamId)) { view.navId = initialTeamId; view.focus = "main"; }
     }
     project();
   };
@@ -42,28 +102,37 @@ export async function runAgentsPage({ launch, input = process.stdin, output = pr
     connecting = (async () => {
       const replacement = await managementClient({ ...launch, onSnapshot: acceptSnapshot, onDisconnect() {
         if (closed) return;
-        view.connection = "Disconnected · status unconfirmed"; redraw();
+        view.connection = "reconnecting · status unconfirmed"; redraw();
         void connect();
       } });
       if (closed) { replacement.close(); return; }
       client = replacement;
-      acceptSnapshot(await client.request("subscribe", { afterSeq: view.snapshot.seq || 0 }));
       view.connection = "connected";
-    })().catch(error => { view.connection = "Unavailable · R retry · Esc back"; view.notice = error.message; })
+      acceptSnapshot(await client.request("subscribe", { afterSeq: view.snapshot.seq || 0 }));
+    })().catch(error => { view.connection = "offline · r retries"; notify(error.message, "error"); })
       .finally(() => { connecting = null; redraw(); });
     return connecting;
   }
   async function request(method, params) {
     if (connecting) await connecting;
-    if (view.connection !== "connected") throw new Error("Management is disconnected. Press R to reconnect before making changes.");
+    if (view.connection !== "connected") throw new Error("Agents management is offline. Press r to reconnect, then try again.");
     const result = await client.request(method, params);
     if (!closed) acceptSnapshot(await client.request("snapshot"));
     return result;
   }
-  async function perform(action, dialog = view.dialog) {
+
+  function notify(text, tone = "info") {
+    clearTimeout(noticeTimer);
+    view.notice = { text, tone };
+    noticeTimer = setTimeout(() => { view.notice = null; redraw(); }, NOTICE_MS);
+    noticeTimer.unref?.();
+    redraw();
+  }
+  async function perform(action, dialog = view.dialog, label = "Working…") {
     if (view.busy || closed) return;
-    view.busy = true; view.notice = "";
+    view.busy = true; view.busyLabel = label;
     if (dialog) dialog.error = "";
+    spinner = setInterval(redraw, 100);
     redraw();
     const detail = view.detail;
     try {
@@ -72,308 +141,228 @@ export async function runAgentsPage({ launch, input = process.stdin, output = pr
       if (dialog && view.dialog === dialog) view.dialog = null;
     } catch (error) {
       if (dialog && view.dialog === dialog) dialog.error = error.message;
-      else view.notice = error.message;
-    } finally { view.busy = false; project(); }
+      else notify(error.message, "error");
+    } finally { clearInterval(spinner); view.busy = false; project(); }
   }
-  const currentRow = () => (view.focus === "nav" ? view.nav.find(r => r.id === view.navId) : view.entries.find(r => r.id === view.selectedId));
-  const team = () => view.snapshot.teams.find(t => t.id === view.teamId);
-  function choose(title, items, description = [], selected = items[0]?.label) {
-    view.dialog = { kind: "choice", title, items, description, selection: createChoiceMenuState(items.map(item => item.label), selected), error: "" }; redraw();
+
+  function choose(title, items, { description = [], selected, danger = false } = {}) {
+    const index = Math.max(0, items.findIndex(item => (item.id ?? item.label) === selected));
+    view.dialog = { kind: "choice", title, items, description, index, danger, error: "" }; redraw();
   }
-  function form(title, fields, submit, description = []) {
+  function form(title, fields, submit, { description = [] } = {}) {
     view.dialog = { kind: "form", title, fields: fields.map(field => ({ ...field, editor: createLineEditor(field.value || "") })), index: 0, description, submit, error: "" }; redraw();
   }
   function confirm(title, description, label, action) {
-    choose(title, [{ label: "Cancel", description: "Return without changing anything", action() {} }, { label, description: "Confirm this action", action }], description);
+    choose(title, [{ label: "Cancel", key: "n", description: "Change nothing", action() {} }, { label, key: "y", danger: true, action }], { description, danger: true });
   }
-  function selectTeam(id) { view.teamId = id; view.navId = id; view.focus = "list"; view.memberId = ""; view.tab = "overview"; view.selectedId = "summary"; view.query = ""; view.searchEditor.setInput(""); view.filter = "All"; project(); }
-  function createTeam() {
-    form("Create team", [{ key: "name", label: "Team name", hint: "For example: Product or Finance" }], async values => {
-      const created = await request("createTeam", values);
-      selectTeam(created.id); view.tab = "members"; view.selectedId = "add"; view.notice = "Team created. Add its first member to choose a leader.";
-    });
+  function showText(title, lines, { taskId, refresh, back } = {}) {
+    view.dialog = null;
+    view.detail = { title, lines, offset: view.detail?.title === title ? view.detail.offset : 0, taskId, refresh, back };
   }
-  async function finishMember(teamId, member) {
-    const agentId = member.agentId || member.id;
-    if (view.teamId === teamId) { view.selectedId = agentId; view.tab = "members"; }
-    view.notice = "Member added. Enter shows sessions; Space shows actions.";
-  }
-  async function addExisting(teamId, values, share = false) {
-    try {
-      const member = await request("addMember", { teamId, ...values, share });
-      await finishMember(teamId, member);
-    } catch (error) {
-      if (error.code !== "WORKSPACE_SHARED") throw error;
-      choose("Workspace already in a team", [
-        { label: "Create independent copy (recommended)", description: "Separate files and conversation", action: () => chooseCopy(teamId, values) },
-        { label: "Share this workspace", description: "Same files; runs are serialized across teams", action: () => addExisting(teamId, values, true) },
-        { label: "Cancel", description: "Keep the existing team unchanged", action() {} },
-      ], ["Used by: " + error.details.teams.join(", "), values.workspace]);
-    }
-  }
-  function chooseCopy(teamId, values) {
-    choose("Independent workspace", [
-      { label: "Git worktree", description: "A new branch in the same repository", action: () => createWorkspace(teamId, true, values) },
-      { label: "Copy folder", description: "Preview included files; credentials and build folders are excluded", action() {
-        form("Copy folder", [{ key: "name", label: "New folder name" }], async ({ name }) => {
-          const preview = await request("previewCopy", { source: values.workspace });
-          const destination = path.join(view.snapshot.teams.find(t => t.id === teamId).createRoot, name);
-          choose("Review copy", [
-            { label: "Copy these files", description: preview.files.length + " files · " + preview.bytes + " bytes", action: async () => finishMember(teamId, await request("copyWorkspace", { teamId, name, source: values.workspace, position: values.position, responsibility: values.responsibility, reportsToAgentId: values.reportsToAgentId, confirmation: preview.fingerprint })) },
-            { label: "View file list", description: "Included files and exclusions", action() {
-              const previous = view.dialog;
-              view.dialog = null;
-              view.detail = { lines: ["Copy to " + destination, "", "Included", ...preview.files, "", "Excluded", ...preview.excluded], offset: 0, back: () => { view.dialog = previous; } };
-            } },
-            { label: "Cancel", description: "Return without copying", action() {} },
-          ], ["Destination: " + destination, "Excluded: " + (preview.excluded.slice(0, 4).join(", ") || "none")], "View file list");
-        });
-      } },
-    ]);
-  }
-  function createWorkspace(teamId, worktree, source = {}) {
-    const root = view.snapshot.teams.find(t => t.id === teamId)?.createRoot;
-    const fields = [{ key: "name", label: "Folder name" }, ...(worktree ? [
-      { key: "repository", label: "Repository path", value: source.workspace }, { key: "branch", label: "New branch" }, { key: "base", label: "Base reference", value: "HEAD" },
-    ] : [])];
-    form(worktree ? "Create worktree" : "New workspace", fields, async values => finishMember(teamId, await request(worktree ? "createWorktree" : "createWorkspace", { teamId, position: source.position, responsibility: source.responsibility, reportsToAgentId: source.reportsToAgentId, ...values })), ["Create inside: " + root]);
-  }
-  function addMember(teamId, reportsToAgentId) {
-    choose("Add member", [
-      { label: "Use existing folder", description: "Keep its files, skills and working context", action: () => form("Add existing folder", [
-        { key: "workspace", label: "Workspace path", hint: "Paste a folder path; files stay in place" },
-        { key: "position", label: "Position", optional: true }, { key: "responsibility", label: "Responsibility", optional: true },
-      ], values => addExisting(teamId, { ...values, reportsToAgentId })) },
-      { label: "Create workspace", description: "An empty folder for a new role", action: () => createWorkspace(teamId, false, { reportsToAgentId }) },
-      { label: "Create Git worktree", description: "Develop a feature on its own branch", action: () => createWorkspace(teamId, true, { reportsToAgentId }) },
-    ]);
-  }
-  function assignTask(teamId, agentId) {
-    const members = view.snapshot.memberships.filter(m => m.teamId === teamId);
-    if (!agentId) {
-      if (!members.length) { view.notice = "Add a member before assigning work."; return; }
-      const leader = view.snapshot.teams.find(t => t.id === teamId)?.leaderAgentId;
-      choose("Choose task owner", members.slice().sort((a, b) => Number(b.agentId === leader) - Number(a.agentId === leader)).map(m => ({ label: view.snapshot.agents.find(a => a.id === m.agentId).name + (m.agentId === leader ? " · Leader" : " · " + m.agentId.slice(0, 8)), description: m.responsibility || m.position || "Member", action: () => assignTask(teamId, m.agentId) })));
-      return;
-    }
-    form("Assign task", [{ key: "brief", label: "Task and expected delivery", hint: "Shift+Enter adds a line" }], async values => {
-      const task = await request("assignTask", { teamId, assigneeAgentId: agentId, ...values });
-      view.tab = "tasks"; view.selectedId = task.id; view.notice = "Task queued. Track its progress here.";
-    }, ["Owner: " + view.snapshot.agents.find(a => a.id === agentId)?.name]);
-  }
-  async function sessions(agentId) {
-    const result = await request("listSessions", { agentId });
-    if (!view.memberId) view.memberReturnId = view.selectedId;
-    view.memberId = agentId; view.history = result.sessions; view.selectedId = "new-session"; view.focus = "list";
-    view.query = ""; view.filter = "All"; project();
-  }
-  async function chat(manager = false, agentId, runtimeSessionId, teamId = view.teamId) {
-    const agent = view.snapshot.agents.find(a => a.id === agentId);
-    if (agent) {
-      const workspace = await realpath(managerWorkspace(launch));
-      manager ||= agent.canonicalWorkspace === (process.platform === "win32" ? workspace.toLowerCase() : workspace);
-    }
-    if (manager) teamId = undefined;
-    if (!manager && !agent) throw new Error("Member is no longer available.");
-    chatActive = true; tui.stop({ releaseInput: false });
-    try { await openChat({ agent, teamId, runtimeSessionId, manager, launch, input }); }
-    finally { chatActive = false; if (closed) finish(); else tui.start({ acquireInput: false }); }
-  }
-  async function delivery(taskId) {
-    const task = await request("getTask", { taskId });
-    const owner = view.snapshot.agents.find(a => a.id === task.assigneeAgentId)?.name || "Removed member";
-    const responder = view.snapshot.agents.find(a => a.id === task.blockedOn?.responder)?.name || task.blockedOn?.responder;
-    const artifacts = await Promise.all((task.report?.artifacts || []).map(async artifactId => { const artifact = await request("readArtifact", { artifactId }); return artifact.name + "\n" + artifact.path; }));
-    const runs = view.snapshot.runs.filter(run => run.taskId === taskId);
-    view.detail = { taskId, offset: 0, lines: [task.brief, "Owner: " + owner + " · " + task.status, "", ...(task.blockedOn ? ["Needs " + responder, task.blockedOn.action, ""] : []), ...(task.error ? [task.error, ""] : []), ...(task.report ? ["Outcome: " + task.report.outcome, task.report.summary, "", "Evidence", ...task.report.evidence, "", "Artifacts", ...artifacts, "", task.report.nextAction || ""] : ["No delivery report yet."]), "Notes", ...task.notes.map(note => note.createdAt + " · " + (view.snapshot.agents.find(a => a.id === note.author)?.name || note.author) + ": " + note.text), "", "Execution history", ...runs.map(run => run.startedAt + " · " + run.status + " · last observed " + run.lastObservedAt)] };
-    view.detail.refresh = () => delivery(taskId);
-  }
-  async function briefing() {
-    const result = await request("getTeam", { teamId: view.teamId });
-    const titles = { needsAttention: "Needs your attention", inProgress: "In progress", waiting: "Waiting on members", delivered: "Delivered" };
-    view.detail = { title: "Team briefing", offset: 0, lines: [result.team.name, "", ...Object.entries(result.briefing).flatMap(([key, items]) => [titles[key], ...(items.length ? items.flatMap(task => [task.owner + " · " + task.brief, (task.responder ? "Needs " + task.responder + ": " : "") + task.summary, ""]) : ["None", ""])])] };
-    view.detail.refresh = briefing;
-  }
-  function taskActions(taskId) {
-    const task = view.snapshot.tasks.find(t => t.id === taskId);
-    if (!task) return;
-    const run = view.snapshot.runs.find(r => r.taskId === taskId && ["starting", "running", "unknown"].includes(r.status));
-    const answer = task.blockedOn?.responder === "user";
-    choose("Task actions", [
-      { label: "View delivery", description: "Summary, evidence, artifacts and notes", action: () => delivery(taskId) },
-      { label: answer ? "Answer blocker" : "Add note", description: answer ? task.blockedOn.action : "Share progress with the task owner", action: () => form(answer ? "Answer and resume" : "Task note", [{ key: "text", label: answer ? "Your answer" : "Note" }], values => request("postTaskNote", { taskId, ...values, answer })) },
-      ...(!run && ["queued", "blocked", "needs_attention"].includes(task.status) ? [{ label: "Start / retry task", description: "Run this task explicitly", action: () => request("startTask", { taskId }) }] : []),
-      ...(task.status === "queued" ? [{ label: "Change queue priority", description: "High, normal or low; active work is not interrupted", action: () => choose("Queue priority", ["high", "normal", "low"].map(priority => ({ label: priority, description: priority === "high" ? "Run before other waiting tasks" : "Run after higher priority work", action: () => request("setTaskPriority", { taskId, priority }) })), [], task.priority || "normal") }] : []),
-      ...(!run && !["done", "cancelled"].includes(task.status) ? [{ label: "Cancel task", description: "Remove this task from the queue", action: () => confirm("Cancel task?", [task.brief], "Cancel task", () => request("cancelTask", { taskId })) }] : []),
-      ...(run?.status === "unknown" ? [{ label: "Resolve unknown run", description: "Confirm the old process stopped", action: () => resolveUnknown(run) }] : run ? [{ label: "Stop task", description: "Cancel its managed execution", action: () => confirm("Stop task?", [task.brief], "Stop execution", () => request("cancelRun", { runId: run.id })) }] : []),
-    ]);
-  }
-  function resolveUnknown(run) { confirm("Release workspace?", ["Only continue after the old process has stopped. Its workspace is reserved until then."], "Process stopped · release", () => request("resolveRun", { runId: run.id, confirmStopped: true })); }
-  function memberActions(agentId) {
-    const teamId = view.teamId, member = view.snapshot.agents.find(a => a.id === agentId);
-    const run = view.snapshot.runs.find(r => r.status === "unknown" && view.snapshot.sessions.some(s => s.id === r.sessionId && s.agentId === agentId && s.teamId === teamId));
-    choose(member?.name || "Member", [
-      { label: "View sessions", description: "Resume or join a live conversation", action: () => sessions(agentId) },
-      { label: "New conversation", description: "Talk directly to this member", action: () => chat(false, agentId) },
-      { label: "Assign task", description: "Track progress and delivery", action: () => assignTask(teamId, agentId) },
-      { label: "Edit role and responsibility", description: "Clarify what this member owns", action() {
-        const membership = view.snapshot.memberships.find(m => m.teamId === teamId && m.agentId === agentId);
-        form("Member responsibility", [{ key: "position", label: "Position", optional: true, value: membership?.position }, { key: "responsibility", label: "Responsibility", optional: true, value: membership?.responsibility }], values => request("updateMember", { teamId, agentId, ...values }));
-      } },
-      { label: "Add direct report", description: "Add a workspace below this member", action: () => addMember(teamId, agentId) },
-      ...(team()?.leaderAgentId !== agentId ? [{ label: "Change supervisor", description: "Move this member and its branch", action() {
-        const candidates = view.snapshot.memberships.filter(m => m.teamId === teamId && m.agentId !== agentId);
-        choose("Reports to", candidates.map(m => ({ label: view.snapshot.agents.find(a => a.id === m.agentId)?.name + " · " + m.agentId.slice(0, 6), description: m.position || "Member", action: () => request("setSupervisor", { teamId, agentId, reportsToAgentId: m.agentId }) })));
-      } }, { label: "Make team leader", description: "Coordinate this team's members", action: () => request("setLeader", { teamId, agentId }) }] : []),
-      ...(run ? [{ label: "Resolve unknown run", description: "Confirm the old process stopped", action: () => resolveUnknown(run) }] : []),
-      { label: "Remove from team", description: "Preserve workspace and history", action: () => confirm("Remove member?", [member?.name || agentId, "The folder and history will be kept."], "Remove membership", () => request("removeMember", { teamId, agentId })) },
-    ]);
-  }
-  function activate(actions = false) {
-    const row = currentRow();
-    if (!row) return;
-    if (row.kind === "overview") { view.navId = "overview"; view.teamId = ""; view.memberId = ""; view.focus = "list"; project(); return; }
-    if (row.kind === "session") {
-      view.teamId = row.teamId || "";
-      if (!actions) return perform(() => chat(false, row.agentId, row.id, row.teamId || null));
-      const session = view.snapshot.sessions.find(s => s.runtimeSessionId === row.id);
-      return choose("Session actions", [
-        { label: "Open conversation", description: row.title, action: () => chat(false, row.agentId, row.id, row.teamId || null) },
-        { label: "Member sessions", description: "All conversations in this workspace", action: () => sessions(row.agentId) },
-        ...(session?.taskId ? [{ label: "View task delivery", description: "Report and task history", action: () => delivery(session.taskId) }] : []),
-      ]);
-    }
-    if (row.kind === "new-session") return perform(() => chat(false, view.memberId));
-    if (row.kind === "manager") return perform(() => chat(true));
-    if (row.kind === "new") return createTeam();
-    if (row.kind === "team") return selectTeam(row.id);
-    if (row.kind === "summary") return perform(briefing);
-    if (row.kind === "add") return view.tab === "members" ? addMember(view.teamId) : assignTask(view.teamId);
-    if (row.kind === "task") return actions ? taskActions(row.id) : perform(() => delivery(row.id));
-    if (row.teamId) view.teamId = row.teamId;
-    return actions ? memberActions(row.agentId || row.id) : perform(() => sessions(row.agentId || row.id));
-  }
-  function move(delta, absolute) {
-    const rows = view.focus === "nav" ? view.nav : view.entries;
-    const field = view.focus === "nav" ? "navId" : "selectedId";
-    const index = Math.max(0, rows.findIndex(r => r.id === view[field]));
-    view[field] = rows[Math.max(0, Math.min(rows.length - 1, absolute ?? index + delta))]?.id;
-    if (view.focus === "nav") {
-      const selected = view.nav.find(r => r.id === view.navId);
-      view.memberId = ""; view.tab = "overview";
-      view.teamId = selected?.kind === "team" ? selected.id : "";
-      view.query = ""; view.searchEditor.setInput(""); view.filter = "All"; view.selectedId = "add";
-    }
+  function reopen(dialog) { view.dialog = dialog; }
+  function resetSearch() { view.query = ""; view.filter = "All"; view.searching = false; view.searchEditor.setInput(""); }
+  function openTeam(teamId, tab = view.tabs[teamId] || "org", selectId) {
+    view.navId = teamId; view.member = null; view.tabs[teamId] = tab; view.focus = "main"; view.detail = null; resetSearch();
+    if (selectId) view.selections[["team", teamId, tab].join(":")] = selectId;
     project();
   }
+  function openMember(teamId, agentId) {
+    view.navId = teamId; view.member = { teamId, agentId }; view.focus = "main"; view.detail = null; resetSearch(); project();
+  }
+  function setFilter(status) { view.filter = status; project(); }
+
+  async function chat({ agentId, teamId, runtimeSessionId, manager = false }) {
+    const agent = view.snapshot.agents.find(a => a.id === agentId);
+    if (agent && !manager) {
+      const workspace = await realpath(managerWorkspace(launch));
+      manager = agent.canonicalWorkspace === (process.platform === "win32" ? workspace.toLowerCase() : workspace);
+    }
+    if (!manager && !agent) throw new Error("This member is no longer available.");
+    chatActive = true; tui.stop({ releaseInput: false });
+    try { await openChat({ agent, teamId: manager ? undefined : teamId, runtimeSessionId, manager, launch, input }); }
+    finally {
+      chatActive = false;
+      if (closed) finish();
+      else {
+        tui.start({ acquireInput: false });
+        // A finished conversation may have created history that the lists should show.
+        if (manager) view.managerHistory = null; else if (teamId) delete view.history[teamId];
+        project();
+      }
+    }
+  }
+
+  const ui = { view, request, choose, form, confirm, notify, showText, reopen, openTeam, openMember, setFilter, // Menu actions already run inside perform(); nesting would be refused as busy.
+    chat: options => (view.busy ? chat(options) : perform(() => chat(options), null, "Opening conversation…")) };
+  const actions = createActions(ui);
+  const currentRow = () => (view.focus === "sidebar" ? view.sidebar.find(r => r.id === view.navId) : view.entries.find(r => r.id === view.selectedId));
+
+  function activate(row = currentRow()) {
+    if (!row) return;
+    if (view.focus === "sidebar") {
+      if (row.kind === "new-team") return actions.createTeam();
+      view.focus = "main"; return project();
+    }
+    switch (row.kind) {
+      case "member":
+      case "more": return openMember(row.teamId, row.agentId);
+      case "session": return ui.chat({ agentId: row.agentId, teamId: row.teamId, runtimeSessionId: row.sessionId, manager: row.manager });
+      case "new-session": return ui.chat({ agentId: row.agentId, teamId: row.teamId || view.page.teamId, manager: row.manager });
+      case "add-member": return actions.addMember(row.teamId);
+      case "assign": return actions.assignTask(row.teamId);
+      case "task": return view.page.kind === "inbox" && row.answer ? actions.answer(row.taskId) : perform(() => actions.delivery(row.taskId), null, "Loading delivery…");
+      case "run": { const run = view.snapshot.runs.find(r => r.id === row.runId); return run && actions.resolveRun(run); }
+      case "team": return openTeam(row.teamId);
+      case "new-team": return actions.createTeam();
+      default: return undefined;
+    }
+  }
+  function rowActions(row = currentRow()) {
+    if (!row || view.focus === "sidebar") return;
+    if (row.kind === "member") actions.memberActions(row.teamId, row.agentId);
+    else if (row.kind === "session") actions.sessionActions(row);
+    else if (row.kind === "task") actions.taskActions(row.taskId);
+    else activate(row);
+  }
+  // The member a contextual shortcut (c, t, a, e) applies to.
+  function contextMember(row = currentRow()) {
+    if (view.focus !== "main" || !view.page.teamId) return null;
+    const agentId = view.page.kind === "member" ? view.page.agentId : row?.agentId;
+    return agentId ? { teamId: view.page.teamId, agentId } : null;
+  }
+
+  function move(delta, absolute) {
+    const rows = view.focus === "sidebar" ? view.sidebar : view.entries;
+    const items = rows.filter(selectable);
+    if (!items.length) return;
+    const current = Math.max(0, items.findIndex(r => r.id === (view.focus === "sidebar" ? view.navId : view.selectedId)));
+    const next = items[Math.max(0, Math.min(items.length - 1, absolute ?? current + delta))].id;
+    if (view.focus === "sidebar") {
+      if (next !== view.navId) { view.navId = next; view.member = null; resetSearch(); }
+    } else view.selections[view.pageKey] = next;
+    project();
+  }
+  function back() {
+    if (view.focus === "main" && (view.query || view.filter !== "All")) { resetSearch(); project(); return; }
+    if (view.page.kind === "member") {
+      const { teamId, agentId } = view.page;
+      view.member = null; view.selections[["team", teamId, view.tabs[teamId] || "org"].join(":")] = "m:" + agentId; resetSearch(); project(); return;
+    }
+    if (view.focus === "main") { view.focus = "sidebar"; resetSearch(); project(); return; }
+    close();
+  }
+  function fold(open) {
+    const row = currentRow();
+    const teamId = view.page.teamId;
+    const collapsed = view.collapsed[teamId] ||= new Set();
+    if (row?.kind === "member" && row.expandable && row.expanded !== open && !view.query && view.filter === "All") {
+      if (open) collapsed.delete(row.agentId); else collapsed.add(row.agentId);
+      project(); return true;
+    }
+    if (!open && row && row.depth > 0) {
+      const index = view.entries.indexOf(row);
+      const parent = view.entries.slice(0, index).findLast(r => r.kind === "member" && r.depth < row.depth);
+      if (parent) { view.selections[view.pageKey] = parent.id; project(); return true; }
+    }
+    if (open && row?.kind === "member" && row.expanded) { move(1); return true; }
+    return false;
+  }
+  function switchTab(tab) {
+    if (view.page.kind !== "team") return;
+    view.tabs[view.page.teamId] = tab ?? (view.page.tab === "org" ? "tasks" : "org");
+    view.focus = "main"; resetSearch(); project();
+  }
+
   function dialogKey(key) {
     const dialog = view.dialog;
     if (key.name === "escape") { view.dialog = null; return; }
     if (dialog.kind === "choice") {
-      if (key.name === "enter" || key.name === "return") { const selected = dialog.items[dialog.selection.selectedIndex()]; if (selected) void perform(selected.action, dialog); }
-      else dialog.selection.handleKey(key);
+      const pick = index => { const item = dialog.items[index]; if (item) { dialog.index = index; void perform(item.action, dialog); } };
+      if (key.name === "enter" || key.name === "return") pick(dialog.index);
+      else if (key.name === "up" || key.text === "k") dialog.index = (dialog.index - 1 + dialog.items.length) % dialog.items.length;
+      else if (key.name === "down" || key.text === "j") dialog.index = (dialog.index + 1) % dialog.items.length;
+      else if (key.name === "home") dialog.index = 0;
+      else if (key.name === "end") dialog.index = dialog.items.length - 1;
+      else if (/^[1-9]$/.test(key.text || "")) pick(Number(key.text) - 1);
+      else if (key.text) { const index = dialog.items.findIndex(item => item.key === key.text.toLowerCase()); if (index >= 0) pick(index); }
       return;
     }
     if (key.name === "tab") { dialog.index = (dialog.index + (key.shift ? -1 : 1) + dialog.fields.length) % dialog.fields.length; dialog.error = ""; return; }
-    const result = dialog.fields[dialog.index].editor.handleInput(key);
-    if (result !== "submit") return;
+    if ((key.name === "up" || key.name === "down") && !dialog.fields[dialog.index].editor.input().includes("\n")) {
+      dialog.index = Math.max(0, Math.min(dialog.fields.length - 1, dialog.index + (key.name === "up" ? -1 : 1))); return;
+    }
     const field = dialog.fields[dialog.index];
+    if (field.editor.handleInput(key) !== "submit") return;
     if (!field.optional && !field.editor.input().trim()) { dialog.error = field.label + " is required."; return; }
     if (dialog.index < dialog.fields.length - 1) { dialog.index++; dialog.error = ""; return; }
-    const missing = dialog.fields.findIndex(field => !field.optional && !field.editor.input().trim());
+    const missing = dialog.fields.findIndex(item => !item.optional && !item.editor.input().trim());
     if (missing >= 0) { dialog.index = missing; dialog.error = dialog.fields[missing].label + " is required."; return; }
-    const values = Object.fromEntries(dialog.fields.map(field => [field.key, field.editor.input().trim()]));
-    void perform(() => dialog.submit(values), dialog);
+    const values = Object.fromEntries(dialog.fields.map(item => [item.key, item.editor.input().trim()]));
+    void perform(() => dialog.submit(values), dialog, "Saving…");
   }
+  function detailKey(key) {
+    const detail = view.detail;
+    const page = Math.max(1, (view.layout?.bodyHeight || 10) - 3);
+    if (key.name === "escape" || key.name === "left" || key.text === "h") { view.detail = null; detail.back?.(); }
+    else if (key.text === " " && detail.taskId) actions.taskActions(detail.taskId);
+    else if (key.text === "r" && detail.refresh) void perform(detail.refresh, null, "Refreshing…");
+    else if (key.name === "up" || key.text === "k") detail.offset = Math.max(0, detail.offset - 1);
+    else if (key.name === "down" || key.text === "j") detail.offset += 1;
+    else if (key.name === "pageup" || (key.ctrl && key.name === "u")) detail.offset = Math.max(0, detail.offset - page);
+    else if (key.name === "pagedown" || key.text === " " || (key.ctrl && key.name === "d")) detail.offset += page;
+    else if (key.name === "home" || key.text === "g") detail.offset = 0;
+    else if (key.name === "end" || key.text === "G") detail.offset = Infinity;
+  }
+  function searchKey(key) {
+    if (key.name === "escape") { view.searching = false; view.searchEditor.setInput(""); }
+    else if (key.name === "enter" || key.name === "down" || key.name === "up") view.searching = false;
+    else view.searchEditor.handleInput(key);
+    view.query = view.searchEditor.input().replace(/\n/g, " ");
+    project();
+  }
+
   function keyInput(key) {
     if (!key) return;
-    if (key.kind === "mouse") { mouseInput(key); return; }
     if (key.ctrl && key.name === "c") { close(); return; }
-    if (view.busy) { if (key.name === "escape" && !chatActive) close(); return; }
+    if (view.busy) return;
+    if (view.help) { if (key.name === "escape" || key.text === "?" || key.text === "q" || key.name === "enter") view.help = false; redraw(); return; }
     if (view.dialog) { dialogKey(key); redraw(); return; }
-    if (view.detail) {
-      if (key.name === "escape" || key.name === "left") { const back = view.detail.back; view.detail = null; back?.(); }
-      else if (key.text === " " && view.detail.taskId) taskActions(view.detail.taskId);
-      else if (key.text?.toLowerCase() === "r" && view.detail.refresh) void perform(view.detail.refresh);
-      else if (["up", "down", "pageup", "pagedown", "home"].includes(key.name)) view.detail.offset = key.name === "home" ? 0 : Math.max(0, view.detail.offset + ({ up: -1, down: 1, pageup: -8, pagedown: 8 }[key.name]));
-      redraw(); return;
-    }
-    if (view.searching) {
-      if (key.name === "escape") { view.searching = false; view.searchEditor.setInput(""); }
-      else if (key.name === "enter") view.searching = false;
-      else view.searchEditor.handleInput(key);
-      view.query = view.searchEditor.input(); project(); return;
-    }
-    if (key.ctrl && !key.alt && !key.shift && (key.name === "u" || key.name === "d")) {
-      move(key.name === "u" ? -5 : 5);
-      return;
-    }
-    if (key.ctrl || key.alt || key.shift) return;
-    if (key.name === "up" || key.name === "down") move(key.name === "up" ? -1 : 1);
-    else if (key.name === "pageup" || key.name === "pagedown") move(key.name === "pageup" ? -5 : 5);
-    else if (key.name === "home" || key.name === "end") move(0, key.name === "home" ? 0 : Infinity);
-    else if (key.text === "j" || key.text === "k") move(key.text === "j" ? 1 : -1);
-    else if (key.text === "g") move(0, 0);
-    else if (key.text === "G") move(0, Infinity);
-    else if (key.name === "escape" || key.name === "left") {
-      if (view.memberId) { view.selectedId = view.memberReturnId; view.memberId = ""; view.tab = "members"; project(); }
-      else if (view.focus === "list") { view.focus = "nav"; view.query = ""; view.filter = "All"; project(); }
-      else close();
-    } else if (key.name === "right" && currentRow()?.kind === "member" && currentRow().hasChildren) {
-      const id = currentRow().id; if (view.collapsed.has(id)) view.collapsed.delete(id); else view.collapsed.add(id); project();
-    } else if (key.name === "enter" || key.name === "right") activate();
-    else if (key.name === "tab" && view.navId === view.teamId && view.teamId && !view.memberId) { view.focus = "list"; view.tab = ["overview", "members", "tasks"][( ["overview", "members", "tasks"].indexOf(view.tab) + 1) % 3]; view.selectedId = "add"; view.filter = "All"; view.query = ""; project(); }
-    else if (view.navId === view.teamId && view.teamId && !view.memberId && ["1", "2", "3"].includes(key.text)) { view.focus = "list"; view.tab = ["overview", "members", "tasks"][Number(key.text) - 1]; view.selectedId = view.tab === "overview" ? "summary" : "add"; view.filter = "All"; view.query = ""; project(); }
-    else if (key.text === " ") activate(true);
-    else if (key.text === "/" && view.focus === "list") { view.searching = true; view.searchEditor.setInput(view.query); }
-    else if (key.text?.toLowerCase() === "f" && view.focus === "list") choose("Filter " + view.tab, ["All", "Needs input", "Unconfirmed", "Working", "Waiting", "Queued", "Ready", "Done", "Inactive", "Cancelled"].map(status => ({ label: status, description: status === "All" ? "Show every item" : "Show " + status.toLowerCase(), action() { view.filter = status; view.selectedId = "add"; } })), [], view.filter);
-    else if (key.text?.toLowerCase() === "n") createTeam();
-    else if (key.text?.toLowerCase() === "r") { if (view.connection !== "connected") void connect(); else if (view.memberId) void perform(() => sessions(view.memberId)); }
+    if (view.detail) { detailKey(key); redraw(); return; }
+    if (view.searching) { searchKey(key); return; }
+    if (key.ctrl && !key.alt && (key.name === "u" || key.name === "d")) { move(key.name === "u" ? -10 : 10); return; }
+    if (key.ctrl || key.alt) return;
+    const text = key.text || "";
+    const row = currentRow();
+    if (key.name === "up" || text === "k") move(-1);
+    else if (key.name === "down" || text === "j") move(1);
+    else if (key.name === "pageup" || key.name === "pagedown") move(key.name === "pageup" ? -10 : 10);
+    else if (key.name === "home" || text === "g") move(0, 0);
+    else if (key.name === "end" || text === "G") move(0, Infinity);
+    else if (key.name === "escape") back();
+    else if (key.name === "left" || text === "h") { if (view.focus !== "main" || !fold(false)) back(); }
+    else if (key.name === "right" || text === "l") { if (view.focus === "sidebar") activate(); else if (!fold(true) && ["member", "more", "team"].includes(row?.kind)) activate(); }
+    else if (key.name === "enter") activate();
+    else if (text === " ") rowActions();
+    else if (key.name === "tab") switchTab();
+    else if (text === "1" || text === "2") switchTab(text === "1" ? "org" : "tasks");
+    else if (text === "?") view.help = true;
+    else if (text === "/" && view.focus === "main" && view.page.kind !== "new-team") { view.searching = true; view.searchEditor.setInput(view.query); }
+    else if (text === "f" && view.focus === "main" && ["team", "member"].includes(view.page.kind)) actions.chooseFilter();
+    else if (text === "n" || text === "N") actions.createTeam();
+    else if (text === "r") refresh();
+    else if (text === "c" && contextMember()) { const m = contextMember(); ui.chat(m); }
+    else if (text === "t" && view.focus === "main" && view.page.teamId) actions.assignTask(view.page.teamId, contextMember()?.agentId);
+    else if (text === "a" && view.focus === "main" && view.page.kind === "team") actions.addMember(view.page.teamId, row?.kind === "member" ? row.agentId : undefined);
+    else if (text === "e" && contextMember()) actions.editMember(contextMember().teamId, contextMember().agentId);
     redraw();
   }
-  function mouseInput(event) {
-    if (view.busy || event.name === "release") return;
-    const hit = hitTestAgents(view, tui.columns, tui.rows, event.x, event.y);
-    if (event.name === "scroll") {
-      const direction = event.button === "up" ? -1 : 1;
-      if (view.dialog?.kind === "choice") {
-        view.dialog.selection.handleKey({ name: direction < 0 ? "up" : "down" });
-      } else if (view.detail) {
-        view.detail.offset = Math.max(0, view.detail.offset + direction * 3);
-      } else if (hit?.kind === "nav" || hit?.kind === "entry") {
-        view.focus = hit.kind === "nav" ? "nav" : "list";
-        move(direction * 3);
-      }
-      redraw();
-      return;
-    }
-    if (!hit || view.dialog?.kind === "form") return;
-    if (hit.kind === "choice") {
-      if (event.button !== "left") return;
-      const dialog = view.dialog;
-      if (dialog.selection.selectedIndex() === hit.index) void perform(dialog.items[hit.index].action, dialog);
-      else dialog.selection.select(hit.index);
-    } else if (hit.kind === "nav") {
-      if (event.button !== "left") return;
-      view.focus = "nav";
-      view.navId = hit.id;
-      activate();
-    } else if (hit.kind === "tab") {
-      if (event.button !== "left") return;
-      view.focus = "list";
-      view.tab = hit.id;
-      view.selectedId = "add";
-      project();
-    } else if (hit.kind === "entry") {
-      const selected = view.focus === "list" && view.selectedId === hit.id;
-      view.focus = "list";
-      view.selectedId = hit.id;
-      if (event.button === "right") activate(true);
-      else if (selected) activate();
-      else project();
-    }
-    redraw();
+  function refresh() {
+    if (view.connection !== "connected") { void connect(); return; }
+    if (view.page.teamId) delete view.history[view.page.teamId];
+    if (view.page.kind === "manager") view.managerHistory = null;
+    void perform(async () => acceptSnapshot(await client.request("snapshot")), null, "Refreshing…");
   }
+
   tui.addChild({ render: width => renderAgents(view, width, tui.rows) });
   tui.onData(raw => keyInput(parseTerminalKey(raw)));
   tui.onPaste(value => {
@@ -387,7 +376,7 @@ export async function runAgentsPage({ launch, input = process.stdin, output = pr
     if (signal?.aborted) return;
     project(); tui.start(); void connect(); await finished;
   } finally {
-    closed = true; client?.close(); tui.stop();
+    closed = true; clearInterval(clock); clearInterval(spinner); clearTimeout(noticeTimer); client?.close(); tui.stop();
     input.off?.("end", close); input.off?.("close", close); signal?.removeEventListener("abort", close);
   }
 }

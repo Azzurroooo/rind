@@ -39,15 +39,70 @@ The folder basename is its initial agent name; position is a separate display la
 
 ## CLI surface
 
-Press **Left (←) while the chat input is empty** to open Agents Management. Typing and cursor navigation in a nonempty input remain unchanged. Overview and Manager are selectable navigation items on the page; management does not add slash commands. The shell entry remains `rind agents`.
+Press **Left (←) while the chat input is empty** to open Agents Management. A nonempty input keeps its normal editing behavior. Management adds no slash commands; the shell entry remains `rind agents`. The page is keyboard-only and never captures the mouse, so the terminal's own selection and scrollback keep working.
 
-The page opens on a global Overview of sessions across teams (including members without sessions). Team navigation leads to Overview, Organization and Tasks tabs, with an adjacent detail pane on wide terminals and a compact single-column layout on narrow terminals. Select with Up/Down, `j/k`, mouse clicks or the wheel, then press Enter. `g/G` jumps to the first or last item and `Ctrl-U/Ctrl-D` pages through a list. Left/Esc returns to team navigation; Esc there returns to the original conversation. Tab or `1/2/3` switches the three team tabs. Right folds/unfolds a selected organization branch. Enter on a member opens its Session list; Enter on a Session joins or resumes it in that member's workspace. The selected object remains selected across live updates.
+### Layout
 
-- **Create team** and **Add member** are selectable rows. Adding offers an existing folder, new workspace or Git worktree. Forms reuse the ordinary editor: paste, cursor movement, undo and multiline text all work; Tab/Shift+Tab changes fields, Enter advances or saves. Failed operations retain the entered values.
-- **Manager** opens its dedicated, restricted conversation. The member Session list merges recorded history with live activity, preserving the original Team or independent scope. R refreshes historical entries; live states update through subscriptions. New conversation starts a fresh Session. Space opens context actions: assign work, edit responsibility, change a supervisor, add a direct report, choose the main agent, remove membership, or reconcile an unknown run. Destructive actions use an explicit confirmation with Cancel selected initially.
-- **Task actions** offer delivery, notes/answers, queue priority, start/retry, cancellation and run recovery. A queued task explains whether it waits for a busy workspace, an unconfirmed run or an explicit start. High/normal/low priority orders only waiting work and never interrupts a live run.
-- **Team briefing**, in the Team Overview tab, summarizes decisions needing the user, active work, members being waited on and delivered results. Delivery details include evidence, published files, notes and timestamped execution history. R refreshes an open briefing or delivery; task actions refresh its details after changes.
-- `/` searches within the member/task list; F opens a selectable status filter. N creates a team. These are page shortcuts, not chat slash commands. All primary actions are also selectable with arrows and Enter.
+```text
+ Agents › Product › Organization                      ! 2 need you  ● 1 working  ● connected
+  ! Inbox              2│Product · 4 members · leader Lead
+  ◆ Manager             │ Organization   Tasks 1
+─ TEAMS · 1 ────────────│
+› ! Product          ! 2│  + Add member                          │ API
+  + New team            │  ● Lead · Leader          Working      │ Backend · reports to Lead
+                        │  ● ├─ Plan the release    Working  now │
+                        │› ! ├─ API · Backend       Needs input  │ ! Needs input
+                        │  ! │  ├─ Fix the login    Needs input  │
+                        │  ○ │  └─ DB               Ready        │ Workspace
+                        │  · └─ Web                 Inactive     │ /work/api
+ ✓ Member added
+ enter conversations  c new chat  t assign task  a add report  space actions  ? help  esc back
+```
+
+- **Header** — breadcrumb on the left; attention, activity and connection on the right.
+- **Sidebar** — Inbox, Manager, every team (with its most urgent status) and New team. Below 84 columns the sidebar becomes its own screen: Esc shows it, Enter opens the selection.
+- **Main view** — the selected page. A team has two views, Organization and Tasks (Tab, `1`, `2`).
+- **Detail pane** — what the selected row is and what Enter does; beside the list on wide terminals, below it on tall narrow ones.
+- **Status line** — the result of the last action (✓, ✕ or •), which clears after a few seconds; a spinner while an action runs.
+- **Key bar** — only the keys valid for the selected row, most important first. `?` and `esc` are always kept and hints are dropped whole, never cut in half.
+
+### Organization
+
+The reporting tree, rooted at the leader; members without a supervisor report to the leader. **Conversations are nested under their member** with their status and how recently they were active. The three most urgent are shown inline and the rest collapse into a "+N more" row. Statuses use one glyph set everywhere: `!` Needs input, `?` Unconfirmed, `●` Working, `…` Waiting on members, `◦` Queued, `○` Ready, `✓` Done, `·` Inactive.
+
+Left collapses a member's branch, or moves to its parent; Right expands. A collapsed member shows the most urgent status hidden inside it and the number of hidden rows. `/` searches and `f` filters by status; matches keep their ancestors visible and ignore collapsed branches, and Esc clears them.
+
+Only conversations attached to the team are listed. A member folder's independent conversations never appear here. The service enforces this through `listSessions { teamId }`, so `rind agents sessions <team>` returns the same set.
+
+Enter on a member opens its page: every conversation it has in this team, newest and most urgent first, with **New conversation** on top. Enter on a conversation joins it in the member's workspace. Contextual keys act on the selected member: `c` new conversation, `t` assign a task, `a` add a member reporting to it, `e` edit role and responsibility, Space for all actions (change supervisor, make leader, resolve an unconfirmed run, remove from team).
+
+### Tasks
+
+Tasks are grouped by what you do first: Needs you, In progress, Queued, Waiting on members, Delivered and Cancelled. Each row shows the owner and priority. On wide terminals it also shows the blocker, queue reason or delivery summary.
+
+Enter opens the delivery view: outcome, evidence, artifacts, notes and run history. From there, Space opens task actions and `r` refreshes. Task actions:
+
+- answer the blocker or add a note
+- start now or retry
+- queue priority
+- stop or cancel
+- resolve an unconfirmed run
+
+Priority only reorders waiting work; it never interrupts a running task.
+
+### Inbox and Manager
+
+The **Inbox** collects everything waiting on you, across all teams:
+
+- blocked tasks or tasks that need attention
+- runs whose stop could not be confirmed
+- team conversations that asked a question
+
+Enter answers, resolves or joins the selected item. Below that, every team is listed with its member and activity counts. **Manager** lists Manager conversations and starts new ones in its restricted workspace.
+
+### Dialogs and forms
+
+Choice dialogs number their options: `1`–`9` pick directly, and the letter shown at the right runs the same action as the page shortcut. Destructive dialogs are framed in red, preselect Cancel (`n`), and require `y` or an explicit selection. Forms reuse the chat editor, so paste, cursor movement, undo and Shift+Enter work. Tab moves between fields, as do ↑↓ on single-line fields. Enter moves to the next field and saves on the last one. A failed save keeps what you typed and shows the error inside the dialog. Creating a team flows straight into adding its first member, who becomes the leader. Every add-member step says who the new member will report to.
 
 Non-TTY commands support `--json`. Use `rind agents priority <task> high|normal|low`, `cancel <task>`, `show <task>`, `note <task> <text> --answer`, `start <task>`, `stop <run>` and `resolve <run> --confirm-stopped`. `rind agents import <legacy-root>` previews old `.aiteam` files; add `--confirm` after reviewing the preview. Import never edits legacy files.
 
@@ -80,9 +135,14 @@ If a process dies between creating a folder/worktree and registering it, an exis
 
 ## Interaction and scheduling references
 
-The UI follows the empty-prompt Left entry, identity-stable selection and selected-row details in Codex `codex-rs/tui/src/app/agents_overview_view.rs` and `bottom_pane/chat_composer.rs`. Crush `internal/ui/dialog/sessions.go`, `inline_editor.go` and `model/sidebar.go` informed scoped dialogs, editable fields, persistent keyboard help and width-dependent layout. This implementation reuses Rind's TUI, line editor, choice selector, composer cursor calculation and theme, without adding another terminal framework.
+The page reuses Rind's TUI engine, line editor, composer cursor maths and theme; it adds no terminal framework.
 
-Orca's `docs/reference/agent-status-store.md` informed the single status projection in the management package: runtime host facts take precedence, waiting for children is distinct from human action, and every surface receives the same summary. Paperclip's `doc/SPEC-implementation.md` informed queue ordering, explicit cancellation and actionable blockers. Task notes and run records provide the activity trail without a second activity database, company model or permissions framework.
+- Codex `codex-rs/tui` (`resume_picker.rs`, `footer.rs`, `key_hint.rs`, `list_selection_view.rs`): the key-bold/label-dim hint bar that drops whole hints by priority, numbered choice shortcuts, compact relative time and identity-stable selection.
+- Crush `internal/ui` (`dialog/sessions.go`, `dialog/common.go`, `model/status.go`): context-dependent short help with a full `?` overlay, in-place destructive confirmation with the safe choice preselected, and a typed status message that expires.
+- Orca (`docs/reference/agent-status-store.md`, `worktree-status.ts`, `smart-attention.ts`): one status projection, the worst-status roll-up for collapsed branches and teams, attention-first ordering (needs you, unconfirmed, working, idle) and "unconfirmed" as missing evidence rather than failure.
+- Paperclip (`ui/src/pages/Agents.tsx` `filterOrgTree`, `lib/attention.ts`, `doc/execution-semantics.md`): a filtered org tree that keeps matching branches' ancestors, one inbox of what needs the human, queue ordering, explicit cancellation and actionable blockers.
+
+Task notes and run records provide the activity trail without a second activity database, company model or permissions framework.
 
 ## Shared Runtime
 
@@ -96,8 +156,8 @@ Examples:
 
 ```sh
 rind agents team reports-to product frontend engineering
-rind agents sessions frontend --json
+rind agents sessions product/frontend --json
 rind agents open product/frontend --session <runtime-session-id>
 ```
 
-Session history currently lists the most recent 100 saved conversations per workspace, together with registered live Sessions. Cross-Team history keeps its original scope; opening it never silently assigns that history to the currently selected Team. LLM tracing is host-wide: set `RIND_TRACE_LLM=1` before starting the host; per-window `--trace-llm` is rejected rather than silently ignored. Shared history is stored in `RIND_HOME/sessions`; use `RIND_HOME` to select another installation rather than a custom `--session-dir`. The first adapter remains Rind.
+`rind agents sessions <team>[/<agent>]` lists conversations registered to that team (up to 100 saved conversations per workspace plus registered live Sessions); `rind agents sessions manager` lists Manager history. A conversation keeps the scope it was created with; opening a team never adopts independent or other-team history. LLM tracing is host-wide: set `RIND_TRACE_LLM=1` before starting the host; per-window `--trace-llm` is rejected rather than silently ignored. Shared history is stored in `RIND_HOME/sessions`; use `RIND_HOME` to select another installation rather than a custom `--session-dir`. The first adapter remains Rind.
