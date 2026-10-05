@@ -1,14 +1,15 @@
 import sharp from "sharp";
-import { readdir, readFile } from "node:fs/promises";
+import { readdir } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { COLORS, logoSvg } from "../../design/brand.mjs";
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const logo = await readFile(resolve(root, "../frontend-web/public/rind.svg"));
-async function icon(path, size, markSize, background = "#f7f6f0") {
+const logo = Buffer.from(logoSvg());
+async function icon(path, size, markSize, background = COLORS.paper) {
   const mark = await sharp(logo).resize(markSize).png().toBuffer();
   const canvas = sharp({ create: { width: size, height: size, channels: 4, background } }).composite([{ input: mark, gravity: "centre" }]);
   if (background !== "#00000000") canvas.removeAlpha();
-  await canvas.png().toFile(path);
+  await canvas.png({ compressionLevel: 9 }).toFile(path);
 }
 const res = resolve(root, "android/app/src/main/res");
 for (const [density, scale] of Object.entries({ mdpi: 1, hdpi: 1.5, xhdpi: 2, xxhdpi: 3, xxxhdpi: 4 })) {
@@ -17,13 +18,11 @@ for (const [density, scale] of Object.entries({ mdpi: 1, hdpi: 1.5, xhdpi: 2, xx
 }
 for (const folder of await readdir(res)) {
   if (!folder.startsWith("drawable")) continue;
+  if (!(await readdir(`${res}/${folder}`)).includes("splash.png")) continue;
   const path = `${res}/${folder}/splash.png`;
-  try {
-    const { width, height } = await sharp(path).metadata();
-    const mark = await sharp(logo).resize(Math.round(Math.min(width, height) * .2)).png().toBuffer();
-    await sharp({ create: { width, height, channels: 4, background: "#f7f6f0" } }).composite([{ input: mark, gravity: "centre" }]).png().toFile(`${path}.new`);
-    const { rename } = await import("node:fs/promises"); await rename(`${path}.new`, path);
-  } catch (error) { if (!error.message.includes("Input file is missing")) throw error; }
+  const { width, height } = await sharp(path).metadata();
+  const mark = await sharp(logo).resize(Math.round(Math.min(width, height) * .2)).png().toBuffer();
+  await sharp({ create: { width, height, channels: 4, background: COLORS.paper } }).composite([{ input: mark, gravity: "centre" }]).removeAlpha().png({ compressionLevel: 9 }).toFile(path);
 }
 const assets = resolve(root, "ios/App/App/Assets.xcassets");
 await icon(`${assets}/AppIcon.appiconset/AppIcon-512@2x.png`, 1024, 760);

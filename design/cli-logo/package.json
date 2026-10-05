@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Terminal-rendered Rind mark via half-block cells and ANSI 256-colour.",
+  "description": "Shared green Rind mark rendered with terminal half-block cells and true color.",
   "main": "logo.js",
   "scripts": {
     "demo": "node demo.js"

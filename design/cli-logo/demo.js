@@ -1,9 +1,9 @@
-import { renderMark } from "./logo.js";
+import { PALETTE, renderMark } from "./logo.js";
 
 const RESET = "\x1b[0m";
 const BOLD = "\x1b[1m";
 const DIM = "\x1b[2m";
-const ACCENT = "\x1b[38;5;81m";
+const ACCENT = `\x1b[38;${PALETTE.core}m`;
 
 const mark = renderMark(26).split("\n");
 const side = [
@@ -13,9 +13,9 @@ const side = [
 
 const rows = Math.max(mark.length, side.length);
 for (let i = 0; i < rows; i += 1) {
-  const m = (mark[i] ?? "").padEnd(54, " ");
+  const m = mark[i] ?? " ".repeat(26);
   const t = side[i] ?? "";
-  process.stdout.write(`${m}${t}\n`);
+  process.stdout.write(`${m}    ${t}\n`);
 }
 
 process.stdout.write(`${DIM}${"─".repeat(58)}${RESET}\n`);
