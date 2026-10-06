@@ -248,6 +248,14 @@ Rind 不是单进程：Agent、任务与共享 Runtime 在后台运行，窗口�
 - 会话文件夹：`agents-session.js#sessionWorkspace` 先问 Runtime（`runtime/sessions`），再读保存的元数据；子窗口启动失败经 handoff `{ action: "failed", error }` 回传原因。
 - 选择：选中行存在时从不自动移动（实时数据重排也不会改变 Enter 的目标）；行消失时就近回退。
 
+### 8.2.5 窗口扁平化与 Open 语义（已冻结）
+
+- Open = 此刻在屏幕上显示。被 Agents 页盖住的窗口通过 `runtime/visibility { visible:false }` 报告（`live-sessions.js#hide/show`），其会话显示 Idle（运行中则 Working）；多个终端可各有一个 Open。被盖住的窗口不接收 `rind send`。
+- 不叠窗口：Agents 页只保存一个返回目标 `view.returnTo`（刚离开的会话，标 `↩` 并选中）；侧栏 esc 重新打开它（`goBack`），之前访问过的会话只是在后台。起始窗口自己的会话为 `{ own: true }`，esc 或选中它都直接回到已加载的会话，不另开窗口。返回目标若是从未发消息的草稿，则在原处新开会话。
+- 子窗口离开时在 handoff 中带 `from: { runtimeSessionId, workspace }`；`followConversation` 返回最后打开的 `chat`；`returnTarget(next)` 合成返回目标。
+- ctrl+c 从不导航：子窗口强制关闭（中断中再按 ctrl+c）也同步写 `{ action: "leave" }`（`writeHandoffSync`），否则打开者会读到 "return" 而重新显示 Agents —— 这正是"ctrl+c 一层层退回"的原因。打开者在子窗口占用终端期间忽略 SIGINT。
+- 不进会话的入口：`rind agents`；esc 在访问过会话前关闭页面。
+
 ### 8.2.4 交付审阅、删除 Team 与 Manager 审批（已冻结）
 
 - 按键：`agents-keys.js#ACTIONS` 是唯一按键表；`available(view,row)` 决定选中行提供哪些动作，按键分发（`actionFor`）、footer 与 `?` 帮助都从它生成。行未提供的键无效；Space 不回落到 Enter。标签说明对该行的效果（open member / join / open report / add member below / decide）。
@@ -351,7 +359,7 @@ npm --prefix agent-management test
 
 当前基线结果：
 
-- `frontend-cli`：560 tests，559 pass，1 skipped，0 fail。
+- `frontend-cli`：566 tests，565 pass，1 skipped，0 fail。
 - `agent-management`：47 tests，47 pass，0 fail；Python `pytest test`：1364 passed，2 skipped。
 - 颜色相关渲染测试会强制开启颜色并要求每一行的可见宽度恰好等于终端宽度、只含完整 SGR 序列；不要删除，它是截图类错位问题的回归防线。
 - 相关 `node --check` 已通过。
@@ -369,6 +377,7 @@ npm --prefix agent-management test
 - `frontend-cli/test/tui-integration.test.js`：完整 CLI TUI/Runtime 交互。
 - `agent-management/test/*.test.js`：权限、组织树、任务调度、共享 Workspace、恢复、报告和 Session scope；`stewardship.test.js` 覆盖审阅/返工、删除归档、Agent 注销与 Manager 审批。
 - `frontend-cli/test/agents-keys.test.js`：footer 提示与按键分发一致、未提供的键无效。
+- `frontend-cli/test/agents-flat.test.js`：被盖住窗口不算 Open（真实 Runtime）、esc 只回到刚离开的会话、回到起始窗口自己的会话不另开窗口；`agents-lifecycle.test.js` 中"ctrl+c only ever leaves"复现并覆盖强制关闭时的 handoff。
 - `frontend-cli/test/agents-report.test.js`、`agents-teams.test.js`：报告渲染与按键、Inbox/Archive 投影、从侧栏删除 Team、Manager 审批端到端。
 
 ## 13. 新 session 启动顺序

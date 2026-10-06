@@ -77,17 +77,17 @@ Statuses use one glyph set everywhere: `!` Needs input, `?` Unconfirmed, `●` W
 
 ### What a status means
 
-The shared Runtime hosts the conversation of every interactive Rind window and every task, and it keeps a small live table: for each conversation its folder, whether a turn is running or waiting for an answer, and how many windows show it. The table is updated from requests and events the Runtime already handles, so nothing polls, and it is pushed to the Agents page once per burst of changes.
+The shared Runtime hosts the conversation of every interactive Rind window and every task, and it keeps a small live table: for each conversation its folder, whether a turn is running or waiting for an answer, and how many windows show it on screen. The table is updated from requests and events the Runtime already handles, so nothing polls, and it is pushed to the Agents page once per burst of changes.
 
 | Status | Meaning |
 | --- | --- |
 | `●` Working | A turn or task is running, whether or not any window shows it. |
 | `!` Needs input | It stopped to ask a question, or a task is blocked on you. |
 | `?` Unconfirmed | A run's outcome could not be confirmed after a service was lost; confirm the old process stopped before retrying. |
-| `○` Open | Nothing runs, and at least one Rind window shows it. |
+| `○` Open | Nothing runs, and a Rind window shows it on screen right now. Several terminals can each have one open. |
 | `·` Idle | Nothing runs and no window shows it; the time is its last activity. |
 
-Closing a window turns an open conversation idle; it never stops a running turn. A new conversation with no message yet is not listed anywhere, except in the window that has it open.
+Open means on screen. A window covered by the Agents page still holds its conversation but tells the Runtime (`runtime/visibility`), so that conversation shows Idle, or Working while its turn runs. Closing or covering a window never stops a running turn. A new conversation with no message yet is not listed anywhere, except as the way back from the window that has it.
 
 ### Several windows on one conversation
 
@@ -170,7 +170,9 @@ Rind is not one process: agents, tasks and the shared Runtime run in the backgro
 
 | You want to | Do | What happens |
 | --- | --- | --- |
-| Go back one level | `esc` on the Agents page · `←` on an empty input in a conversation | The page returns to the conversation that opened it; a conversation opened from Agents returns to the same Agents page. |
+| Go to Agents | `←` on an empty input in a conversation | The Agents page opens. The conversation you left is marked `↩` and selected. |
+| Go back to it | `esc` from the Agents sidebar | Reopens the conversation you just left (`esc back to conversation`). Only that one: every conversation you visited before is simply in the background. |
+| Open another | Enter on a conversation | It replaces the one on screen; windows never stack. |
 | Leave Rind | `ctrl+c` twice when idle · `/exit` | Every Rind window closes. Agents, tasks and the shared Runtime **keep running**; the last window says how many are still working. |
 | Stop everything | Agents › **Background** › Stop all agents and leave Rind · `rind agents stop --all` | Managed tasks end as cancelled, running conversation turns are cancelled, then the shared Runtime and the management service stop and every Rind window closes. Teams, tasks and conversation history are kept. |
 
@@ -180,7 +182,9 @@ Rind is not one process: agents, tasks and the shared Runtime run in the backgro
 2. With text in the input, it clears the text.
 3. When idle, the first press shows `ctrl+c again to leave Rind · agents keep running` for two seconds. A second press leaves; any other key (or `esc` on the Agents page) cancels. Without a terminal (scripts, pipes) there is no hint to see, so a single interrupt leaves.
 
-Conversations opened from Agents never nest. When you move to Agents or to another conversation from inside one, it hands the move back to the window that opened it and closes. The handoff goes through a private file named by `RIND_AGENTS_HANDOFF`; the window removes that variable from its environment at startup, so services and tools it starts never inherit it. There is at most one level, and leaving from anywhere closes everything. A conversation in an unregistered folder runs in the window's own worker; while it is working, moving away is refused instead of killing it.
+`ctrl+c` never navigates: in any window it interrupts, clears, or leaves Rind, and Agents is reached only with `←`. To open Agents without entering a conversation, run `rind agents`; `esc` there closes it until you have visited a conversation, and then goes back to that one.
+
+Conversations opened from Agents never nest. When you move to Agents or to another conversation from inside one, it hands the move back to the window that opened it, says which conversation it was on, and closes. A forced close (a second `ctrl+c` while a turn is being interrupted) also says "leave", so the window that opened it closes too instead of showing Agents again. The window you started Rind in keeps its own conversation loaded behind the page; choosing that conversation again, or `esc` while it is the one marked `↩`, returns to it without a second window. The handoff goes through a private file named by `RIND_AGENTS_HANDOFF`; the window removes that variable from its environment at startup, so services and tools it starts never inherit it. There is at most one conversation on screen, and leaving from anywhere closes everything. A conversation in an unregistered folder runs in the window's own worker; while it is working, moving away is refused instead of killing it.
 
 The **Background** page shows what keeps running after you leave. **Running now** lists every running turn and task in the shared Runtime, from any Rind window, in a team or not, with where it runs and for how long. Below are runs whose stop could not be confirmed, and both background services with their process ID and uptime. Enter on a service shows its recent log; when a newer Rind is installed, the management service offers **Restart to load the update**, which keeps every conversation running while windows reconnect. The shared Runtime keeps old code while windows use it and updates once they are all closed. Stop is a quiet `[ Stop all agents… ]` button at the end, also on `S`. Its dialog selects Cancel first, lists what is running and says what is kept. Its single action is **Stop all agents and leave Rind**. Every open conversation depends on these services, so stopping always closes the windows too, rather than leaving them on a stopped Runtime.
 
