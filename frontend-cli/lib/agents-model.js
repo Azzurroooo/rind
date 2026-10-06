@@ -211,8 +211,11 @@ export function teamStatus(snapshot, teamId, inbox = inboxItems(snapshot)) {
   return statuses.sort((a, b) => statusMeta(a).rank - statusMeta(b).rank)[0] || "Idle";
 }
 
-// A delivery nobody has accepted or sent back yet.
-export const unreviewed = task => task.status === "done" && Boolean(task.report) && !task.review;
+// A delivery the user has not accepted or sent back yet: a top-level task the
+// user or Manager gave out. Work members hand each other, and deliveries from
+// before reviews existed (no deliveredAt), are not marked new.
+export const unreviewed = task => task.status === "done" && Boolean(task.report && task.deliveredAt) && !task.review && !task.parentTaskId && ["user", "manager"].includes(task.createdBy);
+const FRESH_LIMIT = 20;
 
 export function inboxItems(snapshot) {
   const items = [];
@@ -250,7 +253,7 @@ export function inboxRows(snapshot) {
   const finished = task => task.deliveredAt || snapshot.runs.filter(run => run.taskId === task.id).reduce((max, run) => later(max, run.lastObservedAt), "");
   const done = snapshot.tasks.filter(task => task.status === "done").map(task => ({ task, at: finished(task) })).sort((a, b) => b.at.localeCompare(a.at));
   const fresh = done.filter(({ task }) => unreviewed(task));
-  const delivered = [...fresh, ...done.filter(({ task }) => !unreviewed(task)).slice(0, Math.max(0, 8 - fresh.length))];
+  const delivered = [...fresh.slice(0, FRESH_LIMIT), ...done.filter(({ task }) => !unreviewed(task)).slice(0, Math.max(0, 8 - fresh.length))];
   if (delivered.length) rows.push({ id: "section:delivered", kind: "section", title: "Recently delivered" + (fresh.length ? " · " + fresh.length + " new" : ""), count: undefined },
     ...delivered.map(({ task, at }) => ({ id: "d:" + task.id, kind: "task", status: "Done", fresh: unreviewed(task), reworked: task.review?.decision === "rework", title: single(task.brief), note: single(task.report?.summary),
       context: (single(byId(snapshot.teams, task.teamId)?.name) || "Team") + " › " + (single(byId(snapshot.agents, task.assigneeAgentId)?.name) || "Removed member") + (at ? " · " + relativeTime(at) : ""),
@@ -280,7 +283,7 @@ export function archiveRows(archive, { query = "" } = {}) {
   for (const team of archive.teams) {
     const owner = id => single(team.archive?.members?.[id]) || "Removed member";
     const tasks = team.tasks.filter(task => matches(query, task.brief, owner(task.assigneeAgentId), task.report?.summary))
-      .sort((a, b) => (b.deliveredAt || "").localeCompare(a.deliveredAt || ""));
+      .sort((a, b) => (b.deliveredAt || "").localeCompare(a.deliveredAt || "") || single(a.brief).localeCompare(single(b.brief)));
     if (!tasks.length) continue;
     rows.push({ id: "section:" + team.id, kind: "section", title: single(team.name) + " · deleted " + relativeTime(team.archive?.at), count: undefined },
       ...tasks.map(task => ({ id: "x:" + task.id, kind: "task", archived: true, status: taskStatus(task), title: single(task.brief), note: single(task.report?.summary), owner: owner(task.assigneeAgentId), taskId: task.id, teamId: team.id })));

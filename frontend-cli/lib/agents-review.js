@@ -36,9 +36,12 @@ export function createReviewActions(ui, { agentName, display, teamOf, assignTask
     };
     const delivered = task.status === "done" && !task.review && !archived;
     const owner = !archived && snap().memberships.some(m => m.teamId === task.teamId && m.agentId === task.assigneeAgentId);
+    // Rework goes back to the same owner, so it needs the owner still in the team.
+    const review = delivered ? [{ key: "a", label: "accept", run: () => ui.run(() => accept(task)) }, ...(owner ? [{ key: "b", label: "send back", run: () => sendBack(task, report.owner) }] : [])] : [];
+    report.decide = review.length ? (owner ? "a accept · b send back for rework" : "a accept · the owner left the team, so it cannot be sent back") : "";
     const blocked = task.status === "blocked" && task.blockedOn?.responder === "user";
     const actions = [
-      ...(delivered ? [{ key: "a", label: "accept", run: () => ui.run(() => accept(task)) }, { key: "b", label: "send back", run: () => sendBack(task, report.owner) }] : []),
+      ...review,
       ...(!archived ? [{ key: "n", label: blocked ? "answer" : "add note", run: () => answer(taskId) }] : []),
       ...(artifacts.length || owner ? [{ key: "o", label: artifacts.length ? "open files" : "conversations", run: () => openFrom(task, artifacts, owner) }] : []),
       ...(task.notes.length || report.runs.length || report.subtasks.length ? [{ key: "z", label: "history", run: detail => { detail.expanded = !detail.expanded; } }] : []),
@@ -87,7 +90,7 @@ export function createReviewActions(ui, { agentName, display, teamOf, assignTask
     const tasks = snap().tasks.filter(task => task.teamId === teamId);
     const sessions = new Set(snap().sessions.filter(s => s.teamId === teamId).map(s => s.id));
     const running = snap().runs.filter(run => sessions.has(run.sessionId) && ["starting", "running", "unknown"].includes(run.status)).length;
-    if (running) { ui.notify("Stop or resolve the team's " + running + " running " + (running === 1 ? "task" : "tasks") + " before deleting it.", "error"); return; }
+    if (running) { ui.notify("The team still has running or unconfirmed work. Stop or resolve it on the Tasks tab or in Background first.", "error"); return; }
     const unfinished = tasks.filter(task => !["done", "cancelled"].includes(task.status)).length;
     const members = snap().memberships.filter(m => m.teamId === teamId).length;
     const teamName = single(team.name);
@@ -98,7 +101,7 @@ export function createReviewActions(ui, { agentName, display, teamOf, assignTask
       }, { danger: true, description: [
         members + (members === 1 ? " member is" : " members are") + " released" + (unfinished ? " and " + unfinished + " unfinished " + (unfinished === 1 ? "task is" : "tasks are") + " cancelled." : "."),
         tasks.length ? "Delivered work stays readable, read-only, under Archive." : "The team has no tasks, so nothing is archived.",
-        "Folders, their files and conversation history are never touched.",
+        "Folders, their files and conversation history are never touched. Open conversations keep working outside the team.",
       ] });
   }
 

@@ -7,7 +7,7 @@ import { textWidth } from "../lib/text-width.js";
 
 const NOW = Date.parse("2026-10-06T12:00:00Z");
 const strip = value => value.replace(/\x1b\[[0-9;]*m/g, "");
-const done = (id, extra = {}) => ({ id, teamId: "team", assigneeAgentId: "lead", brief: "Task " + id, status: "done", deliveredAt: "2026-10-06T11:0" + id.length + ":00Z",
+const done = (id, extra = {}) => ({ id, teamId: "team", assigneeAgentId: "lead", brief: "Task " + id, status: "done", createdBy: "user", deliveredAt: "2026-10-06T11:0" + id.length + ":00Z",
   report: { outcome: "completed", summary: "Summary " + id, evidence: [], artifacts: [] }, ...extra });
 
 function snapshot() {
@@ -28,6 +28,8 @@ test("the Inbox puts Manager approvals first and marks deliveries not reviewed y
   const delivered = rows.filter(row => row.id.startsWith("d:"));
   assert.deepEqual(delivered.map(row => [row.taskId, Boolean(row.fresh), Boolean(row.reworked)]), [["bb", true, false], ["ccc", false, true], ["a", false, false]], "new deliveries first, then the newest reviewed");
   assert.match(rows.find(row => row.id === "section:delivered").title, /1 new/);
+  s.tasks.push(done("dddd", { createdBy: "lead", parentTaskId: "bb" }), done("eeeee", { deliveredAt: undefined }));
+  assert.deepEqual(inboxRows(s).filter(row => row.fresh).map(row => row.taskId), ["bb"], "delegated work and deliveries from before reviews are not new");
   assert.equal(sidebarRows(s)[0].badge, 1, "an approval needs the user");
   assert.equal(available({ focus: "main", page: { kind: "inbox" } }, rows[1])[0].label, "decide");
 });
@@ -48,7 +50,7 @@ test("deleted teams appear under Archive, read-only", () => {
 test("a report aligns its blocks, says what needs deciding and folds its history", () => {
   const task = { ...done("a"), priority: "high", notes: [{ id: "n", author: "lead", text: "Started", createdAt: "2026-10-06T10:00:00Z" }],
     report: { outcome: "completed", summary: "Shipped the new login page with a much longer summary that has to wrap onto a second line", evidence: ["unit tests pass", "screenshot attached"], artifacts: ["f"], nextAction: "Announce it" } };
-  const report = { task, team: "Product", owner: "Lead", artifacts: [{ name: "login.png", path: "/a/login.png" }], runs: [{ startedAt: "2026-10-06T10:00:00Z", status: "succeeded" }], subtasks: [], archived: false, name: id => id === "lead" ? "Lead" : id };
+  const report = { task, team: "Product", owner: "Lead", artifacts: [{ name: "login.png", path: "/a/login.png" }], runs: [{ startedAt: "2026-10-06T10:00:00Z", status: "succeeded" }], subtasks: [], archived: false, decide: "a accept · b send back for rework", name: id => id === "lead" ? "Lead" : id };
   const lines = renderReport(report, 60, { now: NOW }).map(strip);
   assert.match(lines[0], /✓ Done · Product › Lead · delivered 59m ago · high priority/);
   assert.match(lines.join("\n"), /New delivery · a accept · b send back for rework/);
@@ -98,4 +100,9 @@ test("report keys accept a delivery or send it back with feedback", async () => 
   s.archivedTeams.push({ id: "team", name: "Product", archivedAt: "x" });
   await review.delivery("a");
   assert.deepEqual(shown.actions.map(action => action.key), ["r"], "archived reports are read-only");
+
+  s.archivedTeams.length = 0;
+  s.memberships.length = 0;
+  await review.delivery("a");
+  assert.deepEqual(shown.actions.map(action => action.key), ["a", "n", "space", "r"], "no rework once the owner left the team");
 });

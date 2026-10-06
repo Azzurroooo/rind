@@ -85,7 +85,7 @@ export function detailFor(view, row) {
       "Leaving Rind (ctrl+c twice, or /exit) only closes windows. Agents, tasks and the shared Runtime keep working.", "",
       "Stop them here when you want everything to end."];
     case "live": return [paint.bold(row.title), paint.dim(row.context), "", tone(row.status) + paint.dim(" · started " + (row.time || "now") + " ago"), "",
-      row.taskId ? "Enter opens the task delivery." : "Enter joins this conversation.", "",
+      row.taskId ? "Enter opens the task report." : "Enter joins this conversation.", "",
       paint.dim("It keeps running if you leave Rind.")];
     case "service": return [paint.bold(row.title), paint.dim(row.note), "",
       row.id === "svc:management" ? "Keeps teams, tasks and their state, and schedules work. Starts on demand." : "Hosts every conversation of every Rind window, and every task, in isolated sessions. Starts when a conversation needs it.",

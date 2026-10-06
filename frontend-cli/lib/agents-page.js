@@ -16,6 +16,8 @@ const CREATE_KINDS = new Set(["add-member", "assign", "new-session", "new-team"]
 const NOTICE_MS = 6000, CLOCK_MS = 30000, TYPE_AHEAD = 16;
 // Unregistered folders cannot push updates, so their saved activity is polled.
 const INDEPENDENT_REFRESH_MS = 30000;
+// A list that failed to load is tried again after this pause.
+const RETRY_MS = 10000;
 
 // Resolves to { leave: true } when the user chose to leave Rind from here,
 // so the window that opened the page closes as well.
@@ -125,14 +127,15 @@ export async function runAgentsPage({ launch, input = process.stdin, output = pr
     if (view.page.kind === "manager" && view.connection === "connected" && !view.managerHistory) void loadManagerHistory();
     // Deleted teams change rarely; the list is read again only when one is added.
     const archiveKey = (view.snapshot.archivedTeams || []).map(team => team.id + "@" + team.archivedAt).join(",");
-    if (view.page.kind === "archive" && view.connection === "connected" && !view.archiveLoading && view.archive?.key !== archiveKey) void loadArchive(archiveKey);
+    if (view.page.kind === "archive" && view.connection === "connected" && !view.archiveLoading && view.archive?.key !== archiveKey && Date.now() - (view.archive?.failedAt || 0) > RETRY_MS) void loadArchive(archiveKey);
     if (view.page.kind === "background" && view.connection === "connected" && !view.serviceLoading && Date.now() - (view.serviceAt || 0) > 5000) void loadService();
     if (["independent", "folder"].includes(view.page.kind) && view.connection === "connected" && !view.independent?.loading && Date.now() - (view.independent?.at || 0) > INDEPENDENT_REFRESH_MS) void loadIndependent();
   }
   async function loadArchive(key) {
     view.archiveLoading = true;
     try { view.archive = { key, teams: (await client.request("listArchive")).teams }; }
-    catch (error) { view.archive = { key, teams: view.archive?.teams || [] }; notify("Could not load the archive: " + error.message, "error"); }
+    // A failed load keeps no key, so it is tried again after a pause, or at once with r.
+    catch (error) { view.archive = { key: null, failedAt: Date.now(), teams: view.archive?.teams || [] }; notify("Could not load the archive: " + error.message, "error"); }
     view.archiveLoading = false;
     project();
   }
@@ -255,7 +258,7 @@ export async function runAgentsPage({ launch, input = process.stdin, output = pr
     const same = view.detail?.title === title;
     view.dialog = null;
     view.detail = { title, render, actions, refresh, back, offset: same ? view.detail.offset : 0, expanded: same && view.detail.expanded,
-      hints: [...actions.map(action => ({ key: action.key, label: action.label })), { key: "↑↓", label: "scroll" }, { key: "esc", label: "back" }] };
+      hints: [...actions.map(action => ({ key: action.key, label: action.label })), { key: actions.some(action => action.key === "space") ? "↑↓" : "↑↓ space", label: "scroll" }, { key: "esc", label: "back" }] };
   }
   function reopen(dialog) { view.dialog = dialog; }
   function resetSearch() { view.query = ""; view.filter = "All"; view.searching = false; view.searchEditor.setInput(""); }
@@ -563,6 +566,7 @@ export async function runAgentsPage({ launch, input = process.stdin, output = pr
     if (view.page.kind === "manager") view.managerHistory = null;
     if (["independent", "folder"].includes(view.page.kind)) view.independent = null;
     if (view.page.kind === "background") view.serviceAt = 0;
+    if (view.page.kind === "archive") view.archive = null;
     void perform(async () => acceptSnapshot(await client.request("snapshot")), null, "Refreshing…");
   }
 

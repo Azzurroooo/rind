@@ -26,7 +26,7 @@ function standing(report, width, now) {
   if (archived) return [paint.dim(single(team) + " was deleted. This report is kept read-only.")];
   if (task.status === "done" && task.review?.decision === "accepted") return [paint.success("✓ Accepted " + ago(task.review.at, now))];
   if (task.status === "done" && task.review?.decision === "rework") return [paint.warning("↺ Sent back for rework " + ago(task.review.at, now)), ...block("Feedback", [task.review.feedback], width)];
-  if (task.status === "done") return [paint.accent("New delivery · a accept · b send back for rework")];
+  if (task.status === "done" && report.decide) return [paint.accent("New delivery · " + report.decide)];
   if (needsUser(task) && task.blockedOn) return block("Needs you", [task.blockedOn.action], width, paint.warning);
   if (task.blockedOn) return block("Waiting on", [report.name(task.blockedOn.responder) + ": " + task.blockedOn.action], width);
   if (task.error) return block("Problem", [task.error], width, paint.warning);
@@ -59,7 +59,8 @@ function history({ task, runs, subtasks, name }, width, expanded) {
 }
 
 // report: { task (with notes), team, owner, artifacts [{name, path}], runs,
-// subtasks, archived, name(id) for note authors and responders }.
+// subtasks, archived, decide (the review keys offered, e.g. "a accept"),
+// name(id) for note authors and responders }.
 export function renderReport(report, width, { expanded = false, now = Date.now() } = {}) {
   const { task } = report;
   const when = task.deliveredAt ? "delivered " + ago(task.deliveredAt, now) : "";
