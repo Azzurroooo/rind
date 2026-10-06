@@ -30,6 +30,19 @@ test("turn events and viewers become one compact table, pushed once per burst", 
   assert.deepEqual(live.list().map(s => [s.turn, s.watchers]), [["idle", 1]]);
 });
 
+test("a crashed worker ends every running turn instead of leaving it working forever", () => {
+  const { live, pushes, flush } = setup();
+  live.event({ session_id: "s1", event: { type: "turn_started" } });
+  live.event({ session_id: "s2", event: { type: "user_question_requested" } });
+  flush(); pushes.length = 0;
+  live.reset();
+  flush();
+  assert.deepEqual(live.list().map(s => s.turn), ["idle", "idle"]);
+  assert.equal(pushes.length, 1);
+  live.reset(); flush();
+  assert.equal(pushes.length, 1, "nothing to report when every turn is already idle");
+});
+
 test("a window shows one session at a time, and idle unwatched sessions are forgotten", () => {
   const { live, flush, advance } = setup();
   const w = {};

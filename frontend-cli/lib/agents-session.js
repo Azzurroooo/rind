@@ -23,15 +23,24 @@ export function managementArgs(args) {
 // so every window and the Agents page see it live, and leaving a window does
 // not stop its work. Scripts keep a private worker that ends with them, and
 // options the shared host cannot honour per window keep it private too.
-export function plainSession(args, interactive) {
+export async function plainSession(args, interactive, home) {
   const sharedOk = interactive && !args.includes("--trace-llm") && !argument(args, "--session-dir");
-  return { args, shared: sharedOk };
+  if (!sharedOk) return { args, shared: false };
+  // The shared Runtime opens a conversation in a folder, so resuming one from
+  // elsewhere names the folder it was saved in (a private worker read it itself).
+  const resume = argument(args, "--session");
+  if (resume && !argument(args, "--cwd") && !argument(args, "--dir") && /^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$/.test(resume) && !resume.includes("..")) {
+    const meta = await readFile(path.join(home, "sessions", resume, "meta.json"), "utf8").then(JSON.parse, () => null);
+    if (meta?.workspace_root) return { args: ["--cwd", meta.workspace_root, ...args], shared: true };
+  }
+  return { args, shared: true };
 }
 
 export async function prepareManagement(args, launch, { interactive = !!process.stdin.isTTY, chooseTeam } = {}) {
   const options = managementArgs(args);
   const root = path.resolve(launch.home || process.env.RIND_HOME || path.join(os.homedir(), ".rind"), "agents-management");
-  if (!options.manager && !options.team && !existsSync(path.join(root, "state", "user-token"))) return plainSession(options.args, interactive);
+  const rindHome = path.dirname(root);
+  if (!options.manager && !options.team && !existsSync(path.join(root, "state", "user-token"))) return plainSession(options.args, interactive, rindHome);
   let client, session, runtimeSessionId = "", reconnecting, detached = false, disconnected = false;
   const connectionOptions = { ...launch, onDisconnect: () => {
     if (detached) return;
@@ -61,7 +70,7 @@ export async function prepareManagement(args, launch, { interactive = !!process.
   try {
     client = await managementClient(connectionOptions);
   } catch (error) {
-    if (options.standalone) return plainSession(options.args, interactive);
+    if (options.standalone) return plainSession(options.args, interactive, rindHome);
     throw error;
   }
   try {
@@ -86,7 +95,7 @@ export async function prepareManagement(args, launch, { interactive = !!process.
     const agent = snapshot.agents.find(a => a.canonicalWorkspace === workspace && a.adapter === "rind");
     if (!agent && !options.manager) {
       if (options.team) throw new Error("This directory is not registered. Add it from Agents management first.");
-      client.close(); return plainSession(options.args, interactive);
+      client.close(); return plainSession(options.args, interactive, rindHome);
     }
     if (options.args.includes("--trace-llm")) throw new Error("Shared Runtime tracing is host-wide. Set RIND_TRACE_LLM=1 before starting the shared host instead of --trace-llm.");
     const sessionDir = argument(options.args, "--session-dir");

@@ -49,6 +49,12 @@ export function createLiveSessions({ onChange = () => {}, now = () => Date.now()
       if (viewers.get(viewer) !== id) { viewers.set(viewer, id); changed(); }
     },
     leave(viewer) { if (viewers.delete(viewer)) changed(); },
+    // The worker went away: no turn can still be running.
+    reset() {
+      let any = false;
+      for (const item of sessions.values()) if (item.turn !== "idle") { item.turn = "idle"; item.updatedAt = new Date(now()).toISOString(); any = true; }
+      if (any) changed();
+    },
     event(message) {
       const id = message?.session_id;
       const turn = TURN_EVENTS[message?.event?.type] || (message?.event?.type === "tool_result" && message.event.tool_name === "ask_user_question" ? "running" : undefined);

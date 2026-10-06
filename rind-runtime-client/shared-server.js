@@ -24,8 +24,11 @@ export async function startSharedServer(options) {
     onMessage(event) { live.event(event); for (const peer of peers) if (peer.observe || peer.sessions.has(event.session_id)) peer.send({ event }); },
     onRequest(prompt) { return new Promise(resolve => { if (!authOwner) { resolve(""); return; } auth.set(prompt.request_id, { peer: authOwner, resolve }); authOwner.send({ prompt }); }); },
     onStderr: text => process.stderr.write(text),
-    onExit() { if (!stopping) for (const peer of peers) peer.socket.destroy(); initialized = null; },
+    // A crashed worker ends every turn it was running; nothing will report their end.
+    onExit() { live.reset(); if (!stopping) for (const peer of peers) peer.socket.destroy(); initialized = null; },
   });
+  // A request can finish after its window closed; a closed window shows nothing.
+  const viewIfOpen = (peer, id, workspace) => { if (peers.has(peer)) live.view(peer, id, workspace); };
   const initialize = () => initialized ||= (async () => { client.start(); return client.request("initialize"); })();
   let readyResolve, readyReject;
   const ready = new Promise((resolve, reject) => { readyResolve = resolve; readyReject = reject; });
@@ -51,8 +54,10 @@ export async function startSharedServer(options) {
         if (stopping) throw new Error("Runtime is shutting down.");
         // Answered without starting the worker, so a client can decide whether
         // this host is current, and stop it, without spawning Python.
+        // Windows count as attached; the management service only observes and
+        // follows a replaced host by itself, so it never blocks an update.
         if (method === "runtime/info") {
-          const attached = [...peers].filter(other => other !== peer && (other.sessions.size > 0 || other.observe)).length;
+          const attached = [...peers].filter(other => other !== peer && other.sessions.size > 0).length;
           peer.send({ id, result: { buildId: await build, pid: process.pid, startedAt, busy: prompts.size, attached, observed: [...peers].some(other => other !== peer && other.observe) } });
           return;
         }
@@ -72,8 +77,8 @@ export async function startSharedServer(options) {
           if (method === "session/unsubscribe") { peer.sessions.delete(params.session_id); result = { ok: true }; }
           try { if (method !== "session/unsubscribe") result = await client.request(method, params); }
           finally { if (method === "rind/auth/login") authOwner = null; if (method === "session/prompt") prompts.delete(params.session_id); }
-          if (["session/open", "session/new", "session/switch"].includes(method)) { peer.sessions.add(result.session_id); live.view(peer, result.session_id, result.workspace_root); }
-          if (method === "session/prompt") live.view(peer, params.session_id);
+          if (["session/open", "session/new", "session/switch"].includes(method)) { peer.sessions.add(result.session_id); viewIfOpen(peer, result.session_id, result.workspace_root); }
+          if (method === "session/prompt") viewIfOpen(peer, params.session_id);
         }
         peer.send({ id, result });
       } catch (error) { peer.send({ id, error: { message: error.message, code: error.code } }); }

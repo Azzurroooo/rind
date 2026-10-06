@@ -82,7 +82,8 @@ export async function connectManagement(options: {
     const [info, expected] = await Promise.all([client.request("serviceInfo").catch(error => { legacy = error.code === "UNKNOWN_METHOD"; return null; }), managementBuildId()]);
     if (info?.buildId === expected) return Object.assign(client, { service: info });
     if (info && info.working === 0) {
-      await client.request("serviceShutdown").catch(() => {});
+      // Replace only this service; the shared Runtime and its windows keep running.
+      await client.request("serviceShutdown", { restart: true }).catch(() => {});
       client.close();
       return (await stopped()) && null;
     }

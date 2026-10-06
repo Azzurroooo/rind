@@ -289,6 +289,8 @@ export async function runAgentsPage({ launch, input = process.stdin, output = pr
     }
     view.stopped = false;
     await connect();
+    // connect() reports its own failures; only a live connection means it worked.
+    if (view.connection !== "connected") throw new Error("Agents management did not come back. Press r to retry.");
   }
   const ui = { view, request, choose, form, restartService, launch, resolvePath: value => resolveInputPath(value), stopServices, leave, confirm, notify, showText, reopen, openTeam, openMember, setFilter, // Menu actions already run inside perform(); nesting would be refused as busy.
     chat: options => (view.busy ? chat(options) : perform(() => chat(options), null, "Opening conversation…")) };
@@ -313,7 +315,7 @@ export async function runAgentsPage({ launch, input = process.stdin, output = pr
       case "run": { const run = view.snapshot.runs.find(r => r.id === row.runId); return run && actions.resolveRun(run); }
       case "live": return row.taskId ? perform(() => actions.delivery(row.taskId), null, "Loading delivery…") : row.sessionId ? ui.chat({ agentId: row.agentId, teamId: row.teamId, runtimeSessionId: row.sessionId }) : undefined;
       case "stop-all": return actions.stopAll(row.working);
-      case "service": return actions.serviceActions(row);
+      case "service": return perform(() => actions.serviceActions(row), null, "Loading…");
       case "team": return openTeam(row.teamId);
       case "new-team": return actions.createTeam();
       default: return undefined;
@@ -398,11 +400,17 @@ export async function runAgentsPage({ launch, input = process.stdin, output = pr
     project();
   }
   // [ and ] jump between folders (or top-level members) instead of row by row.
+  // A group starts at a folder, a top-level member, or the first row after a section header.
   function jumpGroup(step) {
-    const heads = view.entries.filter(r => r.kind === "workspace" || (r.kind === "member" && r.depth === 0) || r.kind === "section").filter(selectable);
+    const starts = view.entries.map((row, i) => {
+      if (row.kind === "workspace" || (row.kind === "member" && row.depth === 0)) return i;
+      if (row.kind !== "section") return -1;
+      const next = view.entries.findIndex((other, j) => j > i && selectable(other));
+      return next > i && !view.entries.slice(i + 1, next).some(other => other.kind === "section") ? next : -1;
+    }).filter(i => i >= 0);
     const index = view.entries.indexOf(currentRow());
-    const target = step > 0 ? heads.find(r => view.entries.indexOf(r) > index) : heads.filter(r => view.entries.indexOf(r) < index).at(-1);
-    if (target) { view.selections[view.pageKey] = target.id; project(); }
+    const target = step > 0 ? starts.find(i => i > index) : starts.filter(i => i < index).at(-1);
+    if (target !== undefined) { view.selections[view.pageKey] = view.entries[target].id; project(); }
   }
   function toggleFold(all) {
     if (view.page.kind === "independent" && view.focus === "main") return toggleFolders(all);

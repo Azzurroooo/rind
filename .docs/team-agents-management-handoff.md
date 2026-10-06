@@ -326,7 +326,7 @@ npm --prefix agent-management test
 
 当前基线结果：
 
-- `frontend-cli`：541 tests，540 pass，1 skipped，0 fail。
+- `frontend-cli`：543 tests，542 pass，1 skipped，0 fail。
 - `agent-management`：37 tests，37 pass，0 fail；Python `pytest test`：1364 passed，2 skipped。
 - 颜色相关渲染测试会强制开启颜色并要求每一行的可见宽度恰好等于终端宽度、只含完整 SGR 序列；不要删除，它是截图类错位问题的回归防线。
 - 相关 `node --check` 已通过。

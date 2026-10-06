@@ -48,10 +48,16 @@ test("a plain window's turn is visible to management while it runs, and its pres
   assert.deepEqual(rows.filter(r => r.kind === "live").map(r => [r.status, r.context]), [["Working", "notes"]], "RUNNING NOW lists the plain window's turn");
   assert.equal(independentSessions(running, [], "").find(g => g.name === "notes").sessions[0].status, "Working");
   assert.equal(running.agents.length, 0, "a plain session never becomes an agent");
-  await window.request("session/cancel", { session_id: info.session_id }).catch(() => {});
+  // Leaving while the turn runs: the window closes, the turn goes on, and the
+  // conversation must not stay "open" once its request finishes later.
+  await window.shutdown();
+  await until(snapshot => mine(snapshot)?.watchers === 0 && mine(snapshot)?.turn === "running", "the turn keeps running with nobody watching");
   held.forEach(response => response.destroy());
   await prompt;
-  await until(snapshot => mine(snapshot)?.turn === "idle", "the finished turn is reported");
-  await window.shutdown();
-  await until(snapshot => mine(snapshot)?.watchers === 0, "closing the window is reported");
+  const admin = createSharedRuntimeClient({ rindHome: home, python: process.env.RIND_PYTHON || "python", repoRoot, cliArgs: ["--cwd", folder, "--session", info.session_id], onMessage() {} });
+  await admin.request("initialize");
+  await admin.request("session/cancel", { session_id: info.session_id }).catch(() => {});
+  await admin.shutdown();
+  const done = await until(snapshot => mine(snapshot)?.turn === "idle" && mine(snapshot)?.watchers === 0, "the finished turn is idle with no stale watcher");
+  assert.equal(backgroundRows(done, null).filter(r => r.kind === "live").length, 0);
 });

@@ -82,7 +82,7 @@ export function detailFor(view, row) {
       row.id === "svc:management" ? "Keeps teams, tasks and their state, and schedules work. Starts on demand." : "Hosts every conversation of every Rind window, and every task, in isolated sessions. Starts when a conversation needs it.",
       ...(row.stale ? ["", paint.warning(row.id === "svc:management"
         ? "A newer Rind is installed. Restart this service to load it; conversations keep running."
-        : "A newer Rind is installed. The Runtime keeps the old code while windows use it, and updates by itself once every Rind window is closed.")] : []),
+        : "A newer Rind is installed. The Runtime keeps the old code while Rind windows use it, and updates by itself when the next window opens after they are all closed.")] : []),
       "", "Enter for actions and its log."];
     case "stop-all": return [paint.bold(row.title.replace("…", "")), "",
       row.working ? row.working + (row.working === 1 ? " agent is" : " agents are") + " working. Stopping cancels their running work." : "Nothing is running. This only stops the background services.", "",

@@ -47,9 +47,17 @@ export async function startServer(options: { home?: string; python?: string; rep
     }
   }
   // start: false only reattaches to a running host and never spawns one.
-  function executionHost(start = true) {
+  // start: true may spawn a host; start: false only attaches to a running one.
+  // They never share a pending attempt, so a task that needs a host is not
+  // handed a probe that is allowed to fail.
+  let probing: Promise<any> | undefined;
+  function executionHost(start = true): Promise<any> {
     if (runtime) return Promise.resolve(runtime);
-    return runtimeConnecting ||= connectSharedRuntime({ ...options, rindHome: options.home, start,
+    if (!start) return runtimeConnecting || (probing ||= attachHost(false).finally(() => { probing = undefined; }));
+    return runtimeConnecting ||= (probing ? probing.catch(() => undefined).then(value => value || attachHost(true)) : attachHost(true)).finally(() => { runtimeConnecting = undefined; });
+  }
+  function attachHost(start: boolean): Promise<any> {
+    return connectSharedRuntime({ ...options, rindHome: options.home, start,
       onMessage(message: any) {
         if (message?.kind === "runtime" && message.type === "sessions_changed") { service.setLive(message.sessions || []); return; }
         if (!["turn_started", "turn_completed", "turn_failed", "turn_cancelled", "user_question_requested", "task_updated"].includes(message.event?.type) && !(message.event?.type === "tool_result" && message.event.tool_name === "ask_user_question")) return;
@@ -64,12 +72,14 @@ export async function startServer(options: { home?: string; python?: string; rep
         void reattach();
       },
     }).then(async value => {
+      if (closing) { value.close(); throw new Error("Agents management is closing."); }
+      if (runtime) { value.close(); return runtime; }
       runtime = value; await value.request("runtime/observe");
       // A host from before the live table does not know runtime/sessions.
       service.setLive((await value.request("runtime/sessions").catch(() => ({ sessions: [] }))).sessions || []);
       await Promise.all(Object.values(store.state.sessions).map(reconcile));
       return value;
-    }).finally(() => { runtimeConnecting = undefined; });
+    });
   }
   // While someone watches the Agents page, attach to a Runtime that windows
   // started on their own, so their conversations appear live. It only ever
@@ -79,7 +89,7 @@ export async function startServer(options: { home?: string; python?: string; rep
   function watchRuntime(added: boolean) {
     watchers = Math.max(0, watchers + (added ? 1 : -1));
     if (watchers && !probe) {
-      const attempt = () => { if (!runtime && !runtimeConnecting && !closing) void executionHost(false).catch(() => {}); };
+      const attempt = () => { if (!runtime && !closing) void executionHost(false).catch(() => {}); };
       attempt();
       probe = setInterval(attempt, 3000);
       probe.unref?.();

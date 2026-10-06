@@ -1,6 +1,5 @@
 import path from "node:path";
 import { open } from "node:fs/promises";
-import { managementPaths } from "../../agent-management/dist/paths.js";
 
 // The last lines of a log, read from its end so a large log costs nothing.
 async function tail(file, bytes = 16384) {
@@ -254,8 +253,10 @@ export function createActions(ui) {
   }
 
   // Services: restart management to load an update, or read the end of a log.
-  function serviceActions(row) {
+  async function serviceActions(row) {
     const management = row.id === "svc:management";
+    // Loaded on demand: a plain chat must start even before the service is built.
+    const { managementPaths } = await import("../../agent-management/dist/paths.js");
     const paths = managementPaths(ui.launch.home);
     const log = management ? path.join(paths.state, "service.log") : path.join(path.dirname(paths.root), "runtime", "runtime.log");
     ui.choose(row.title, [

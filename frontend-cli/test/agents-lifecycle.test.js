@@ -8,10 +8,23 @@ import { fileURLToPath } from "node:url";
 import { createHandoff, writeHandoff, takeHandoffPath, HANDOFF_ENV } from "../lib/agents-handoff.js";
 import { followConversation } from "../lib/agents-commands.js";
 import { runAgentsPage } from "../lib/agents-page.js";
+import { plainSession } from "../lib/agents-session.js";
 import { startServer } from "../../agent-management/dist/ipc.js";
 import { connectClient } from "../../agent-management/dist/client.js";
 import { createVirtualInput, createVirtualOutput } from "./helpers/virtual-terminal.js";
 import { removeRindHome } from "./helpers/rind-home.js";
+
+test("resuming a plain conversation from another folder opens it in the folder it was saved in", async t => {
+  const home = await mkdtemp(path.join(os.tmpdir(), "rind-resume-"));
+  t.after(() => rm(home, { recursive: true, force: true }));
+  await mkdir(path.join(home, "sessions", "20261006_abc"), { recursive: true });
+  await writeFile(path.join(home, "sessions", "20261006_abc", "meta.json"), JSON.stringify({ workspace_root: "/work/notes" }));
+  assert.deepEqual(await plainSession(["--session", "20261006_abc"], true, home), { args: ["--cwd", "/work/notes", "--session", "20261006_abc"], shared: true });
+  assert.deepEqual(await plainSession(["--session", "20261006_abc", "--cwd", "/x"], true, home), { args: ["--session", "20261006_abc", "--cwd", "/x"], shared: true }, "an explicit folder is kept");
+  assert.deepEqual(await plainSession(["--session", "../escape"], true, home), { args: ["--session", "../escape"], shared: true });
+  assert.deepEqual(await plainSession(["--session", "20261006_abc"], false, home), { args: ["--session", "20261006_abc"], shared: false }, "scripts keep a private worker");
+  assert.equal((await plainSession(["--trace-llm"], true, home)).shared, false);
+});
 
 test("a handoff without a decision means return, and only valid decisions are accepted", async t => {
   const handoff = await createHandoff();
