@@ -51,21 +51,39 @@ export async function startServer(options: { home?: string; python?: string; rep
     if (runtime) return Promise.resolve(runtime);
     return runtimeConnecting ||= connectSharedRuntime({ ...options, rindHome: options.home, start,
       onMessage(message: any) {
+        if (message?.kind === "runtime" && message.type === "sessions_changed") { service.setLive(message.sessions || []); return; }
         if (!["turn_started", "turn_completed", "turn_failed", "turn_cancelled", "user_question_requested", "task_updated"].includes(message.event?.type) && !(message.event?.type === "tool_result" && message.event.tool_name === "ask_user_question")) return;
         const session = Object.values(store.state.sessions).find(s => s.runtimeSessionId === message.session_id);
         if (session) void reconcile(session);
       },
       onDisconnect() {
         runtime = undefined;
+        service.setLive([]);
         if (closing) return;
         for (const session of Object.values(store.state.sessions).filter(s => s.shared)) void service.request({ kind: "user" }, "reconcileSession", { requestId: "disconnect-" + randomBytes(12).toString("hex"), sessionId: session.id, connected: false }).catch(() => {});
         void reattach();
       },
     }).then(async value => {
       runtime = value; await value.request("runtime/observe");
+      // A host from before the live table does not know runtime/sessions.
+      service.setLive((await value.request("runtime/sessions").catch(() => ({ sessions: [] }))).sessions || []);
       await Promise.all(Object.values(store.state.sessions).map(reconcile));
       return value;
     }).finally(() => { runtimeConnecting = undefined; });
+  }
+  // While someone watches the Agents page, attach to a Runtime that windows
+  // started on their own, so their conversations appear live. It only ever
+  // connects to a running host (start: false); the probe is a failed local
+  // connect every few seconds, and stops when nobody is watching.
+  let watchers = 0, probe: NodeJS.Timeout | undefined;
+  function watchRuntime(added: boolean) {
+    watchers = Math.max(0, watchers + (added ? 1 : -1));
+    if (watchers && !probe) {
+      const attempt = () => { if (!runtime && !runtimeConnecting && !closing) void executionHost(false).catch(() => {}); };
+      attempt();
+      probe = setInterval(attempt, 3000);
+      probe.unref?.();
+    } else if (!watchers && probe) { clearInterval(probe); probe = undefined; }
   }
   // A window may have replaced an outdated host; follow it to the new one
   // instead of treating every shared session as lost. Never starts a host.
@@ -152,6 +170,8 @@ export async function startServer(options: { home?: string; python?: string; rep
           requireValue(grant?.host && grant.principal.kind !== "user", "FORBIDDEN", "Only the execution host can publish lifecycle facts.");
           result = await service.request({ kind: "user" }, message.method, { ...message.params, sessionId: grant.principal.sessionId, runtimeSessionId: message.runtimeSessionId });
         } else if (message.method === "subscribe") {
+          // A connection counts once, however often it resubscribes.
+          if (!unsubscribe) watchRuntime(true);
           unsubscribe?.();
           // A burst of host events becomes one snapshot per connection. Responses
           // are written first, so a request is never answered with stale state.
@@ -180,6 +200,14 @@ export async function startServer(options: { home?: string; python?: string; rep
           // Leaving Rind never calls this; it is the explicit "stop background services" action.
           requireValue(principal.kind === "user", "FORBIDDEN", "Only the user can stop the service.");
           const load = workload();
+          // restart: replace only this service (to load an update). The Runtime and
+          // every conversation keep running; windows reattach to the new service.
+          if (message.params.restart === true) {
+            requireValue(load.tasks === 0, "SERVICE_BUSY", load.tasks + (load.tasks === 1 ? " task is" : " tasks are") + " running here. Restart when they finish.", load);
+            send({ id, result: { restarting: true, ...load } });
+            void close().catch(reportError).finally(() => options.onShutdown?.());
+            return;
+          }
           requireValue(message.params.stopAgents === true || load.working === 0, "SERVICE_BUSY", load.working + (load.working === 1 ? " agent is" : " agents are") + " still working. Wait for them, or stop all agents.", load);
           send({ id, result: { stopping: true, ...load } });
           void stopEverything().catch(reportError).finally(() => options.onShutdown?.());
@@ -210,7 +238,7 @@ export async function startServer(options: { home?: string; python?: string; rep
       }
     }
     socket.on("error", () => {});
-    socket.on("close", () => { sockets.delete(socket); unsubscribe?.(); if (service) void service.disconnect(attached).catch(() => {}); });
+    socket.on("close", () => { sockets.delete(socket); if (unsubscribe) watchRuntime(false); unsubscribe?.(); if (service) void service.disconnect(attached).catch(() => {}); });
   });
   await new Promise<void>((resolve, reject) => { server.once("error", reject); server.listen(paths.endpoint, () => { server.off("error", reject); resolve(); }); });
   const reportError = (error: unknown) => process.stderr.write("agents management: " + String((error as Error)?.stack || error) + "\n");
@@ -257,6 +285,7 @@ export async function startServer(options: { home?: string; python?: string; rep
   function close() {
     return closed ||= (async () => {
       closing = true;
+      if (probe) clearInterval(probe);
       await service.stop();
       // The Manager folder may still be being secured; finish before reporting closed.
       await realManager.catch(() => {});

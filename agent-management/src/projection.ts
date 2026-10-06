@@ -2,9 +2,13 @@ import { activeRun, memberKey, type Run, type Session, type State, type Task } f
 
 // Lookups shared by one snapshot. Built once, so projecting every member,
 // session and queued task is linear in the state instead of quadratic.
+// What the shared Runtime reports for one session right now.
+export interface LiveSession { id: string; workspace: string; turn: "idle" | "running" | "question"; startedAt: string; updatedAt: string; watchers: number }
+
 export interface ProjectionIndex {
   state: State;
   connected: Set<string>;
+  live: Map<string, LiveSession>;
   runsBySession: Map<string, Run[]>;
   sessionsByMember: Map<string, Session[]>;
   tasksByMember: Map<string, Task[]>;
@@ -13,7 +17,7 @@ export interface ProjectionIndex {
 
 const push = <T>(map: Map<string, T[]>, key: string, value: T) => { const list = map.get(key); if (list) list.push(value); else map.set(key, [value]); };
 
-export function projectionIndex(state: State, connected: Set<string>): ProjectionIndex {
+export function projectionIndex(state: State, connected: Set<string>, live: Map<string, LiveSession> = new Map()): ProjectionIndex {
   const runsBySession = new Map<string, Run[]>(), sessionsByMember = new Map<string, Session[]>(), tasksByMember = new Map<string, Task[]>(), reservedWorkspaces = new Map<string, Run>();
   for (const run of Object.values(state.runs)) {
     push(runsBySession, run.sessionId, run);
@@ -22,20 +26,28 @@ export function projectionIndex(state: State, connected: Set<string>): Projectio
   }
   for (const session of Object.values(state.sessions)) push(sessionsByMember, memberKey(session.teamId || "", session.agentId), session);
   for (const task of Object.values(state.tasks)) push(tasksByMember, memberKey(task.teamId, task.assigneeAgentId), task);
-  return { state, connected, runsBySession, sessionsByMember, tasksByMember, reservedWorkspaces };
+  return { state, connected, live, runsBySession, sessionsByMember, tasksByMember, reservedWorkspaces };
+}
+
+// Open: at least one window shows the conversation. Shared conversations are
+// counted by the Runtime that hosts them; a private one by its own window.
+function isOpen(index: ProjectionIndex, session: Session) {
+  const live = index.live.get(session.runtimeSessionId);
+  return live ? live.watchers > 0 : !session.shared && index.connected.has(session.id);
 }
 
 export function memberStatus(index: ProjectionIndex, agentId: string, teamId: string) {
   const sessions = index.sessionsByMember.get(memberKey(teamId, agentId)) || [];
   const runs = sessions.flatMap(s => index.runsBySession.get(s.id) || []);
+  const turns = sessions.map(s => index.live.get(s.runtimeSessionId)?.turn);
   if (runs.some(r => r.status === "unknown")) return "Unconfirmed";
-  if (runs.some(r => r.status === "running" && r.needsInput)) return "Needs input";
-  if (runs.some(r => ["starting", "running"].includes(r.status))) return "Working";
+  if (turns.includes("question") || runs.some(r => r.status === "running" && r.needsInput)) return "Needs input";
+  if (turns.includes("running") || runs.some(r => ["starting", "running"].includes(r.status))) return "Working";
   const tasks = index.tasksByMember.get(memberKey(teamId, agentId)) || [];
   if (tasks.some(t => t.status === "needs_attention" || (t.status === "blocked" && t.blockedOn?.responder !== "children"))) return "Needs input";
   if (tasks.some(t => t.status === "blocked" && t.blockedOn?.responder === "children")) return "Waiting";
   if (tasks.some(t => t.status === "queued" && t.dispatch)) return "Queued";
-  return sessions.some(s => index.connected.has(s.id)) ? "Ready" : "Inactive";
+  return sessions.some(s => isOpen(index, s)) ? "Open" : "Idle";
 }
 
 export function queuedReason(index: ProjectionIndex, task: Task) {
@@ -61,9 +73,15 @@ export function teamBriefing(tasks: Task[], agents: State["agents"]) {
 }
 
 export function sessionStatus(index: ProjectionIndex, sessionId: string) {
+  const session = index.state.sessions[sessionId];
   const runs = index.runsBySession.get(sessionId) || [];
   const active = runs.find(r => activeRun(r));
   const last = active || runs.at(-1);
-  return { status: active?.status === "unknown" ? "Unconfirmed" : active?.needsInput ? "Needs input" : active ? "Working" : index.connected.has(sessionId) ? "Ready" : "Inactive",
-    ...(last ? { lastActivity: last.lastObservedAt, ...(last.taskId ? { taskId: last.taskId } : {}) } : {}) };
+  const live = session && index.live.get(session.runtimeSessionId);
+  const status = active?.status === "unknown" ? "Unconfirmed"
+    : live?.turn === "question" || active?.needsInput ? "Needs input"
+    : live?.turn === "running" || active ? "Working"
+    : session && isOpen(index, session) ? "Open" : "Idle";
+  const lastActivity = [last?.lastObservedAt, live?.updatedAt].filter(Boolean).sort().at(-1);
+  return { status, ...(lastActivity ? { lastActivity } : {}), ...(last?.taskId ? { taskId: last.taskId } : {}), ...(live ? { watchers: live.watchers } : {}) };
 }

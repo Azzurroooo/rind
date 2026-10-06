@@ -43,8 +43,22 @@ test("indexed projections report the same statuses after pruning", () => {
   for (let i = 0; i < 5; i++) state.runs["r" + i] = run("r" + i, "s", i);
   retain(state);
   const index = projectionIndex(state, new Set(["s"]));
-  assert.deepEqual(sessionStatus(index, "s"), { status: "Ready", lastActivity: at(4) });
-  assert.equal(memberStatus(index, "a", "t"), "Ready");
+  assert.deepEqual(sessionStatus(index, "s"), { status: "Open", lastActivity: at(4) });
+  assert.equal(memberStatus(index, "a", "t"), "Open");
   state.runs.x = run("x", "s", 9, { status: "running", needsInput: true });
   assert.equal(memberStatus(projectionIndex(state, new Set()), "a", "t"), "Needs input");
+});
+
+test("shared conversations take their state from the Runtime: open only while a window shows them", () => {
+  const state = emptyState();
+  state.agents.a = { id: "a", name: "A", canonicalWorkspace: "/w/a", adapter: "rind" };
+  state.sessions.s = { id: "s", agentId: "a", teamId: "t", runtimeSessionId: "r", origin: "direct", shared: true };
+  const connected = new Set(["s"]);
+  const live = (turn, watchers) => new Map([["r", { id: "r", workspace: "/w/a", turn, startedAt: "", updatedAt: at(5), watchers }]]);
+  assert.equal(sessionStatus(projectionIndex(state, connected, live("idle", 0)), "s").status, "Idle", "a hosted session nobody shows is idle");
+  assert.equal(sessionStatus(projectionIndex(state, connected, live("idle", 2)), "s").watchers, 2);
+  assert.equal(sessionStatus(projectionIndex(state, connected, live("running", 0)), "s").status, "Working", "a turn keeps running after its window closes");
+  assert.equal(memberStatus(projectionIndex(state, connected, live("question", 0)), "a", "t"), "Needs input");
+  assert.equal(memberStatus(projectionIndex(state, connected, live("idle", 1)), "a", "t"), "Open");
+  assert.equal(memberStatus(projectionIndex(state, connected), "a", "t"), "Idle", "without a Runtime report a shared session is not assumed open");
 });

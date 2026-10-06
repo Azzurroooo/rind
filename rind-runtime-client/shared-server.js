@@ -5,6 +5,7 @@ import { readFile, writeFile, chmod, unlink } from "node:fs/promises";
 import { createRuntimeClient } from "./runtime-client.js";
 import { sharedRuntimePaths } from "./shared-runtime.js";
 import { runtimeBuildId } from "./build-id.js";
+import { createLiveSessions } from "./live-sessions.js";
 
 export async function startSharedServer(options) {
   const paths = sharedRuntimePaths(options.rindHome);
@@ -18,8 +19,9 @@ export async function startSharedServer(options) {
   const startedAt = new Date().toISOString();
   const build = runtimeBuildId(options);
   const peers = new Set(), auth = new Map(), prompts = new Set();
+  const live = createLiveSessions({ onChange(sessions) { for (const peer of peers) if (peer.observe) peer.send({ event: { kind: "runtime", type: "sessions_changed", sessions } }); } });
   const client = createRuntimeClient({ ...options, python: options.python || "python", cwd: paths.directory, cliArgs: [],
-    onMessage(event) { for (const peer of peers) if (peer.observe || peer.sessions.has(event.session_id)) peer.send({ event }); },
+    onMessage(event) { live.event(event); for (const peer of peers) if (peer.observe || peer.sessions.has(event.session_id)) peer.send({ event }); },
     onRequest(prompt) { return new Promise(resolve => { if (!authOwner) { resolve(""); return; } auth.set(prompt.request_id, { peer: authOwner, resolve }); authOwner.send({ prompt }); }); },
     onStderr: text => process.stderr.write(text),
     onExit() { if (!stopping) for (const peer of peers) peer.socket.destroy(); initialized = null; },
@@ -32,7 +34,7 @@ export async function startSharedServer(options) {
     socket.setEncoding("utf8"); let buffer = "";
     const peer = { socket, sessions: new Set(), observe: false, send(message) { if (!socket.destroyed) { if (socket.writableLength > 4 * 1024 * 1024) socket.destroy(); else socket.write(JSON.stringify(message) + "\n"); } } };
     peers.add(peer); socket.on("error", () => {});
-    socket.on("close", () => { peers.delete(peer); for (const [id, entry] of auth) if (entry.peer === peer) { entry.resolve(""); auth.delete(id); } });
+    socket.on("close", () => { peers.delete(peer); live.leave(peer); for (const [id, entry] of auth) if (entry.peer === peer) { entry.resolve(""); auth.delete(id); } });
     socket.on("data", chunk => {
       buffer += chunk;
       if (buffer.length > 8 * 1024 * 1024) { socket.destroy(); return; }
@@ -54,12 +56,14 @@ export async function startSharedServer(options) {
           peer.send({ id, result: { buildId: await build, pid: process.pid, startedAt, busy: prompts.size, attached, observed: [...peers].some(other => other !== peer && other.observe) } });
           return;
         }
+        // Answered from the host's own table, without starting the worker.
+        if (method === "runtime/sessions") { peer.send({ id, result: { sessions: live.list() } }); return; }
         if (method === "runtime/shutdown" && !initialized) { stopping = true; peer.send({ id, result: { stopped: true } }); await close(); return; }
         const base = await initialize(); let result;
         if (method === "initialize") result = base;
         else if (method === "runtime/observe") { peer.observe = true; result = { pid: client.child.pid }; }
         else if (method === "runtime/shutdown") { stopping = true; await client.shutdown(); peer.send({ id, result: { stopped: true } }); await close(); return; }
-        else if (method === "shutdown") { result = { detached: true }; peer.sessions.clear(); }
+        else if (method === "shutdown") { result = { detached: true }; peer.sessions.clear(); live.leave(peer); }
         else {
           if (method === "session/prompt" && prompts.has(params.session_id)) throw new Error("This session already has an active request. Use steering or follow-up input.");
           if (method === "session/prompt") prompts.add(params.session_id);
@@ -68,7 +72,8 @@ export async function startSharedServer(options) {
           if (method === "session/unsubscribe") { peer.sessions.delete(params.session_id); result = { ok: true }; }
           try { if (method !== "session/unsubscribe") result = await client.request(method, params); }
           finally { if (method === "rind/auth/login") authOwner = null; if (method === "session/prompt") prompts.delete(params.session_id); }
-          if (["session/open", "session/new", "session/switch"].includes(method)) peer.sessions.add(result.session_id);
+          if (["session/open", "session/new", "session/switch"].includes(method)) { peer.sessions.add(result.session_id); live.view(peer, result.session_id, result.workspace_root); }
+          if (method === "session/prompt") live.view(peer, params.session_id);
         }
         peer.send({ id, result });
       } catch (error) { peer.send({ id, error: { message: error.message, code: error.code } }); }

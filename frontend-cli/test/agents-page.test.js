@@ -10,7 +10,7 @@ import { connectClient } from "../../agent-management/dist/client.js";
 import { runAgentsPage } from "../lib/agents-page.js";
 import { managementArgs } from "../lib/agents-session.js";
 import { createVirtualInput, createVirtualOutput } from "./helpers/virtual-terminal.js";
-import { connectSharedRuntime } from "../../rind-runtime-client/shared-runtime.js";
+import { removeRindHome } from "./helpers/rind-home.js";
 import { createTui } from "../lib/tui/tui.js";
 
 test("manager keeps its dedicated workspace and rejects mixed session scopes", () => {
@@ -38,7 +38,7 @@ test("real CLI empty-prompt entry returns to an editable conversation repeatedly
   child.stdout.on("data", value => output.output.write(value));
   let errors = ""; child.stderr.on("data", value => { errors += value; });
   const exited = new Promise(resolve => child.once("exit", resolve));
-  t.after(async () => { if (child.exitCode === null) child.kill(); await exited; await server.close(); await rm(home, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }); });
+  t.after(async () => { if (child.exitCode === null) child.kill(); await exited; await server.close(); await removeRindHome(home); });
   async function visible(text) {
     for (let i = 0; i < 600; i++) {
       const screen = (await output.flushAndGetViewport()).join("\n");
@@ -78,9 +78,7 @@ async function harness({ columns = 120, rows = 30, prefix }) {
   const settle = () => new Promise(resolve => setTimeout(resolve, 80));
   const cleanup = async () => {
     client.close(); await server.close();
-    const host = await connectSharedRuntime({ home, start: false }).catch(() => null);
-    if (host) { await host.request("runtime/shutdown").catch(() => {}); host.close(); await new Promise(resolve => setTimeout(resolve, 300)); }
-    await rm(home, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+    await removeRindHome(home);
   };
   return { home, launch, client, input, output, screen, visible, settle, cleanup, key: sequence => input.send(sequence), paste: text => input.send("\x1b[200~" + text + "\x1b[201~") };
 }

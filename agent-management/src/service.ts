@@ -8,7 +8,7 @@ import { activeRun, memberKey, requireValue, text, type State, type Principal, t
 import { canonicalDirectory, inside, privateDirectory, type Paths } from "./paths.js";
 import type { Store } from "./store.js";
 import { previewLegacyTeam } from "./legacy.js";
-import { sessionStatus, memberStatus, queuedReason, priorityRank, teamBriefing, projectionIndex } from "./projection.js";
+import { sessionStatus, memberStatus, queuedReason, priorityRank, teamBriefing, projectionIndex, type LiveSession } from "./projection.js";
 import { retain } from "./retention.js";
 
 import { supervisor, manages, setSupervisor } from "./organization.js";
@@ -28,6 +28,8 @@ export function createService({ store, paths, adapters, toolConfig }: {
   const executions = new Set<Promise<void>>();
   const listeners = new Set<() => void>();
   const connected = new Set<string>();
+  // Pushed by the shared Runtime; not persisted, since it only describes now.
+  let runtimeSessions = new Map<string, LiveSession>();
   function transaction<T>(work: (state: State) => Promise<T> | T): Promise<T> {
     const result = serial.then(async () => {
       const next = structuredClone(store.state);
@@ -173,13 +175,15 @@ export function createService({ store, paths, adapters, toolConfig }: {
     const taskIds = new Set(tasks.map(t => t.id));
     const sessions = Object.values(state.sessions).filter(s => actor.kind !== "agent" || s.id === actor.sessionId || (s.teamId && allowedTeams.has(s.teamId)));
     const sessionIds = new Set(sessions.map(s => s.id));
-    const index = projectionIndex(state, connected);
+    const index = projectionIndex(state, connected, runtimeSessions);
     return {
       seq: state.seq, teams: Object.values(state.teams).filter(t => allowedTeams.has(t.id)),
       agents: Object.values(state.agents).filter(a => agentIds.has(a.id)).map(a => actor.kind === "user" ? a : { id: a.id, name: a.name, adapter: a.adapter, ...(actor.kind === "manager" ? { canonicalWorkspace: a.canonicalWorkspace } : {}) }),
       memberships: memberships.map(m => ({ ...m, reportsToAgentId: supervisor(state, m.teamId, m.agentId), status: memberStatus(index, m.agentId, m.teamId) })),
       tasks: tasks.map(task => ({ ...task, ...(task.status === "queued" ? { queueReason: queuedReason(index, task) } : {}) })), sessions: sessions.map(s => ({ ...(actor.kind === "user" ? s : { id: s.id, agentId: s.agentId, teamId: s.teamId, origin: s.origin }), ...sessionStatus(index, s.id) })),
       connectedSessions: sessions.filter(s => connected.has(s.id)).map(s => s.id),
+      // Every conversation in the shared Runtime, including plain ones outside any team.
+      ...(actor.kind === "user" ? { live: [...runtimeSessions.values()] } : {}),
       runs: Object.values(state.runs).filter(r => sessionIds.has(r.sessionId)),
       notes: Object.values(state.notes).filter(n => taskIds.has(n.taskId)),
       artifacts: Object.values(state.artifacts).filter(a => taskIds.has(a.taskId)),
@@ -644,6 +648,10 @@ export function createService({ store, paths, adapters, toolConfig }: {
       for (const task of Object.values(state.tasks)) if (task.dispatch) { delete task.dispatch; if (task.status === "queued") { task.status = "needs_attention"; task.error = "Service restarted before dispatch. Start explicitly to continue."; } }
     }); },
     isConnected: (sessionId: string) => connected.has(sessionId),
+    setLive(sessions: LiveSession[]) {
+      runtimeSessions = new Map(sessions.map(session => [session.id, session]));
+      for (const listener of listeners) listener();
+    },
     async disconnect(sessionIds: string[]) {
       sessionIds = sessionIds.filter(id => !store.state.sessions[id]?.shared);
       for (const id of sessionIds) connected.delete(id);

@@ -11,7 +11,7 @@ import { runAgentsPage } from "../lib/agents-page.js";
 import { startServer } from "../../agent-management/dist/ipc.js";
 import { connectClient } from "../../agent-management/dist/client.js";
 import { createVirtualInput, createVirtualOutput } from "./helpers/virtual-terminal.js";
-import { connectSharedRuntime } from "../../rind-runtime-client/shared-runtime.js";
+import { removeRindHome } from "./helpers/rind-home.js";
 
 test("a handoff without a decision means return, and only valid decisions are accepted", async t => {
   const handoff = await createHandoff();
@@ -59,7 +59,7 @@ async function cli(t, { handoff, columns = 100, rows = 26, tty = true } = {}) {
   child.stdout.on("data", value => output.output.write(value));
   let errors = ""; child.stderr.on("data", value => { errors += value; });
   const exited = new Promise(resolve => child.once("exit", resolve));
-  t.after(async () => { if (child.exitCode === null) child.kill(); await exited; await rm(home, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }); });
+  t.after(async () => { if (child.exitCode === null) child.kill(); await exited; await removeRindHome(home); });
   const screen = async () => (await output.flushAndGetViewport()).join("\n");
   return {
     key: value => child.stdin.write(value), exited, screen,
@@ -124,10 +124,7 @@ test("the Agents page follows conversation moves and leaving closes it for its o
   t.after(async () => {
     await stopPage();
     client.close(); await server.close();
-    // Loading team history starts a shared Runtime in this home; stop it before removing the folder.
-    const host = await connectSharedRuntime({ home, start: false }).catch(() => null);
-    if (host) { await host.request("runtime/shutdown").catch(() => {}); host.close(); await new Promise(resolve => setTimeout(resolve, 300)); }
-    await rm(home, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+    await removeRindHome(home);
   });
   const team = await client.request("createTeam", { name: "Crew" });
   const lead = await client.request("createWorkspace", { teamId: team.id, name: "Lead" });
