@@ -8,6 +8,9 @@ import { folderSuggestions, commonCompletion, inspectFolder, resolveInputPath, c
 //   path  { require: "folder" | "git" }  completes folders with Tab and checks them live
 //   name  { root }   a new folder name inside `root`, previewed and checked live
 // `derive(values)` fills an empty field when it gains focus.
+// Enough to browse a large folder; beyond this, typing narrows faster than scrolling.
+const SUGGESTION_LIMIT = 200;
+
 export function createForm({ title, fields, submit, description = [], base = process.cwd(), onChange = () => {} }) {
   const form = {
     kind: "form", title, description, submit, error: "", index: 0, base,
@@ -21,7 +24,9 @@ export function createForm({ title, fields, submit, description = [], base = pro
     const text = item.editor.input().trim();
     let check = null, suggestions = [];
     if (item.kind === "path") {
-      const [found, folder] = await Promise.all([suggest && text ? folderSuggestions(text, base) : [], inspectFolder(text, base)]);
+      const [found, folder] = await Promise.all([suggest && text ? folderSuggestions(text, base, SUGGESTION_LIMIT + 1) : [], inspectFolder(text, base)]);
+      item.more = found.length > SUGGESTION_LIMIT;
+      found.length = Math.min(found.length, SUGGESTION_LIMIT);
       suggestions = found.filter(s => s.value.replace(/[\\/]$/, "") !== text.replace(/[\\/]$/, ""));
       // While the path is still being typed, matching folders are guidance, not an error.
       check = folder.kind === "empty" ? { tone: "hint", text: "Absolute, ~ or relative to " + base }

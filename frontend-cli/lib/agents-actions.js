@@ -1,4 +1,20 @@
 import path from "node:path";
+import { open } from "node:fs/promises";
+import { managementPaths } from "../../agent-management/dist/paths.js";
+
+// The last lines of a log, read from its end so a large log costs nothing.
+async function tail(file, bytes = 16384) {
+  let handle;
+  try {
+    handle = await open(file, "r");
+    const { size } = await handle.stat();
+    const buffer = Buffer.alloc(Math.min(bytes, size));
+    await handle.read(buffer, 0, buffer.length, size - buffer.length);
+    const lines = buffer.toString("utf8").split(/\r?\n/);
+    return (size > bytes ? lines.slice(1) : lines).slice(-80);
+  } catch { return ["No log yet."]; }
+  finally { await handle?.close(); }
+}
 import { single, roleOf, STATUS_FILTERS } from "./agents-model.js";
 
 // Multi-step management flows. Each flow only talks to the page through the
@@ -237,9 +253,21 @@ export function createActions(ui) {
     ], { description: [...description, "", "Every Rind window closes; open conversations cannot continue without these services."], danger: true });
   }
 
+  // Services: restart management to load an update, or read the end of a log.
+  function serviceActions(row) {
+    const management = row.id === "svc:management";
+    const paths = managementPaths(ui.launch.home);
+    const log = management ? path.join(paths.state, "service.log") : path.join(path.dirname(paths.root), "runtime", "runtime.log");
+    ui.choose(row.title, [
+      ...(management && row.stale ? [{ label: "Restart to load the update", key: "r", description: "Conversations keep running; windows reconnect by themselves",
+        action: async () => { await ui.restartService(); ui.notify("Agents management restarted on the current version.", "success"); } }] : []),
+      { label: "Show recent log", key: "l", description: log, action: async () => ui.showText(row.title + " log", [log, "", ...(await tail(log)) ]) },
+    ], { description: [row.note] });
+  }
+
   function chooseFilter() {
     ui.choose("Show only", STATUS_FILTERS.map(status => ({ label: status, description: status === "All" ? "Everything in this view" : undefined, action() { ui.setFilter(status); } })), { selected: ui.view.filter });
   }
 
-  return { createTeam, addMember, assignTask, editMember, memberActions, sessionActions, taskActions, answer, delivery, resolveRun, chooseFilter, stopAll };
+  return { createTeam, addMember, assignTask, editMember, memberActions, sessionActions, taskActions, answer, delivery, resolveRun, chooseFilter, stopAll, serviceActions };
 }

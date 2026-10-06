@@ -12,28 +12,31 @@ const STATUS = {
   Working: { glyph: "●", tone: "accent", rank: 2 },
   Waiting: { glyph: "…", tone: "notice", rank: 3 },
   Queued: { glyph: "◦", tone: "notice", rank: 4 },
-  Ready: { glyph: "○", tone: "success", rank: 5 },
+  Open: { glyph: "○", tone: "success", rank: 5 },
   Done: { glyph: "✓", tone: "success", rank: 6 },
-  Inactive: { glyph: "·", tone: "dim", rank: 7 },
+  Idle: { glyph: "·", tone: "dim", rank: 7 },
   Cancelled: { glyph: "×", tone: "dim", rank: 8 },
 };
 export const STATUS_FILTERS = ["All", ...Object.keys(STATUS)];
 
 // A member's state is described in terms of the person, so a member whose
-// conversation is "Ready" reads "1 open" instead of repeating the child status.
+// conversation is open in a window reads "1 open" instead of repeating the child status.
 const MEMBER_STATE = { "Needs input": "needs you", Unconfirmed: "unconfirmed", Working: "working", Waiting: "waiting on team", Queued: "task queued" };
 export function memberState(status, open = 0) {
   if (MEMBER_STATE[status]) return { tone: status, label: MEMBER_STATE[status] };
-  if (open) return { tone: "Ready", label: open + " open" };
-  return { tone: "Inactive", label: "idle" };
+  if (open) return { tone: "Open", label: open + " open" };
+  return { tone: "Idle", label: "idle" };
 }
-export const statusMeta = status => STATUS[status] || STATUS.Inactive;
+export const statusMeta = status => STATUS[status] || STATUS.Idle;
+
+// A conversation's state as the shared Runtime reports it.
+export const liveStatus = live => live.turn === "question" ? "Needs input" : live.turn === "running" ? "Working" : live.watchers > 0 ? "Open" : "Idle";
 
 const TASK_STATUS = { running: "Working", queued: "Queued", blocked: "Needs input", needs_attention: "Needs input", done: "Done", cancelled: "Cancelled" };
 export const needsUser = task => task.status === "needs_attention" || (task.status === "blocked" && task.blockedOn?.responder === "user");
 export function taskStatus(task) {
   if (task.status === "blocked" && !needsUser(task)) return "Waiting";
-  return TASK_STATUS[task.status] || "Inactive";
+  return TASK_STATUS[task.status] || "Idle";
 }
 
 export function relativeTime(value, now = Date.now()) {
@@ -65,12 +68,12 @@ export function roleOf(snapshot, teamId, agentId) {
 export function teamSessions(snapshot, teamId, history = []) {
   const sessions = new Map();
   for (const entry of history) if (entry.teamId === teamId && entry.runtimeSessionId) {
-    sessions.set(entry.runtimeSessionId, { id: entry.runtimeSessionId, agentId: entry.agentId, teamId, title: single(entry.title) || entry.runtimeSessionId, updatedAt: entry.updatedAt, status: "Inactive" });
+    sessions.set(entry.runtimeSessionId, { id: entry.runtimeSessionId, agentId: entry.agentId, teamId, title: single(entry.title) || entry.runtimeSessionId, updatedAt: entry.updatedAt, status: "Idle" });
   }
   for (const live of snapshot.sessions) if (live.teamId === teamId && live.runtimeSessionId) {
     const saved = sessions.get(live.runtimeSessionId);
     sessions.set(live.runtimeSessionId, { id: live.runtimeSessionId, agentId: live.agentId, teamId, title: saved?.title || live.runtimeSessionId,
-      updatedAt: later(saved?.updatedAt, live.lastActivity), status: live.status || "Inactive", ...(live.taskId ? { taskId: live.taskId } : {}) });
+      updatedAt: later(saved?.updatedAt, live.lastActivity), status: live.status || "Idle", ...(live.taskId ? { taskId: live.taskId } : {}) });
   }
   return [...sessions.values()];
 }
@@ -109,8 +112,9 @@ export function organizationRows(snapshot, teamId, sessions, { collapsed = new S
     const childRows = reports(member.agentId).flatMap(child => branch(child, depth + 1));
     if (narrowed && !self && !shownSessions.length && !childRows.length) return [];
     const open = narrowed || !collapsed.has(member.agentId);
-    const row = { id: "m:" + member.agentId, kind: "member", depth, title: single(agent?.name) || "Missing member", role: role === "Member" ? "" : role, status: member.status || "Inactive", ownStatus: member.status || "Inactive",
-      agentId: member.agentId, teamId, leader: role === "Leader", sessionCount: own.length, open: own.filter(s => s.status !== "Inactive").length, reportCount: reports(member.agentId).length,
+    const row = { id: "m:" + member.agentId, kind: "member", depth, title: single(agent?.name) || "Missing member", role: role === "Member" ? "" : role, status: member.status || "Idle", ownStatus: member.status || "Idle",
+      agentId: member.agentId, teamId, leader: role === "Leader", sessionCount: own.length,
+      tasks: snapshot.tasks.filter(t => t.teamId === teamId && t.assigneeAgentId === member.agentId && !["done", "cancelled"].includes(t.status)).length, open: own.filter(s => s.status !== "Idle").length, reportCount: reports(member.agentId).length,
       expandable: own.length > 0 || reports(member.agentId).length > 0, expanded: open };
     if (!open) return [{ ...row, status: branchStatus(member.agentId) || row.status, hidden: own.length + descendants(member.agentId) }];
     const limit = narrowed ? Infinity : sessionLimit;
@@ -177,10 +181,11 @@ export function memberSessionRows(sessions, agentId, { query = "", filter = "All
   return [{ id: "new:" + agentId, kind: "new-session", title: "New conversation", agentId }, ...own.map(session => sessionRow(session, 0, now))];
 }
 
-export function managerRows(history = [], { query = "", now = Date.now() } = {}) {
+const liveById = (live, id) => { const item = live.find(entry => entry.id === id); return item ? liveStatus(item) : "Idle"; };
+export function managerRows(history = [], { query = "", now = Date.now(), live = [] } = {}) {
   return [{ id: "new:manager", kind: "new-session", title: "New conversation with Manager", manager: true },
     ...history.filter(entry => matches(query, entry.title)).map(entry => ({ id: "s:" + entry.runtimeSessionId, kind: "session", depth: 0, title: single(entry.title) || entry.runtimeSessionId,
-      status: "Inactive", time: relativeTime(entry.updatedAt, now), sessionId: entry.runtimeSessionId, manager: true }))];
+      status: liveById(live, entry.runtimeSessionId), time: relativeTime(entry.updatedAt, now), sessionId: entry.runtimeSessionId, manager: true }))];
 }
 
 export function teamSummary(snapshot, teamId, inbox = inboxItems(snapshot)) {
@@ -192,8 +197,8 @@ export function teamSummary(snapshot, teamId, inbox = inboxItems(snapshot)) {
 
 // The worst status in a team drives its sidebar glyph.
 export function teamStatus(snapshot, teamId, inbox = inboxItems(snapshot)) {
-  const statuses = [...snapshot.memberships.filter(m => m.teamId === teamId).map(m => m.status || "Inactive"), ...inbox.filter(item => item.teamId === teamId).map(item => item.status)];
-  return statuses.sort((a, b) => statusMeta(a).rank - statusMeta(b).rank)[0] || "Inactive";
+  const statuses = [...snapshot.memberships.filter(m => m.teamId === teamId).map(m => m.status || "Idle"), ...inbox.filter(item => item.teamId === teamId).map(item => item.status)];
+  return statuses.sort((a, b) => statusMeta(a).rank - statusMeta(b).rank)[0] || "Idle";
 }
 
 export function inboxItems(snapshot) {
@@ -223,9 +228,15 @@ export function inboxItems(snapshot) {
 export function inboxRows(snapshot) {
   const items = inboxItems(snapshot);
   const rows = items.length ? [{ id: "section:needs", kind: "section", title: "Needs you", count: items.length }, ...items] : [{ id: "clear", kind: "clear", title: "Nothing needs you right now" }];
-  if (snapshot.teams.length) rows.push({ id: "section:teams", kind: "section", title: "Teams", count: snapshot.teams.length },
-    ...snapshot.teams.map(team => ({ id: "team:" + team.id, kind: "team", title: single(team.name), status: teamStatus(snapshot, team.id, items), teamId: team.id, summary: teamSummary(snapshot, team.id, items) })));
-  else rows.push({ id: "new-team", kind: "new-team", title: "Create your first team" });
+  // What was delivered lately, newest first: the other thing people check daily.
+  const finished = task => snapshot.runs.filter(run => run.taskId === task.id).reduce((max, run) => later(max, run.lastObservedAt), "");
+  const delivered = snapshot.tasks.filter(task => task.status === "done").map(task => ({ task, at: finished(task) }))
+    .sort((a, b) => b.at.localeCompare(a.at)).slice(0, 8);
+  if (delivered.length) rows.push({ id: "section:delivered", kind: "section", title: "Recently delivered", count: delivered.length },
+    ...delivered.map(({ task, at }) => ({ id: "d:" + task.id, kind: "task", status: "Done", title: single(task.brief), note: single(task.report?.summary),
+      context: (single(byId(snapshot.teams, task.teamId)?.name) || "Team") + " › " + (single(byId(snapshot.agents, task.assigneeAgentId)?.name) || "Removed member") + (at ? " · " + relativeTime(at) : ""),
+      owner: single(byId(snapshot.agents, task.assigneeAgentId)?.name), taskId: task.id, teamId: task.teamId })));
+  if (!snapshot.teams.length) rows.push({ id: "new-team", kind: "new-team", title: "Create your first team" });
   return rows;
 }
 
@@ -235,45 +246,56 @@ export function sidebarRows(snapshot) {
     { id: "inbox", kind: "inbox", title: "Inbox", badge: attention, status: attention ? "Needs input" : undefined },
     { id: "manager", kind: "manager", title: "Manager" },
     { id: "independent", kind: "independent", title: "Independent" },
-    { id: "background", kind: "background", title: "Background", badge: snapshot.runs.filter(run => ["starting", "running"].includes(run.status)).length },
+    { id: "background", kind: "background", title: "Background", badge: runningCount(snapshot) },
     { id: "section:teams", kind: "section", title: "Teams", count: snapshot.teams.length },
     ...snapshot.teams.map(team => ({ id: team.id, kind: "team", title: single(team.name), status: teamStatus(snapshot, team.id, inbox), teamId: team.id, summary: teamSummary(snapshot, team.id, inbox) })),
     { id: "new-team", kind: "new-team", title: "New team" },
   ];
 }
 
-// Conversations outside every team, grouped by folder. Saved history gives
-// titles; registered sessions add live status. Unregistered folders run in a
-// private Worker, so only their last saved activity is known.
 // One folder can be spelled with different case or a trailing separator.
 export const workspaceKey = (value, platform = process.platform) => {
   const trimmed = String(value || "").replace(/[\\/]+$/, "");
   return platform === "win32" ? trimmed.replace(/\//g, "\\").toLowerCase() : trimmed;
 };
 
+// Conversations outside every team, grouped by folder. Saved history gives
+// titles; the shared Runtime's live table gives what runs and what is open,
+// including plain conversations that management never registered.
 export function independentSessions(snapshot, groups = [], managerWorkspace = "") {
-  const byWorkspace = new Map(groups.map(group => [workspaceKey(group.workspace), { ...group, sessions: group.sessions.map(s => ({ ...s })) }]));
-  const live = new Map(snapshot.sessions.filter(s => !s.teamId && s.runtimeSessionId).map(s => [s.runtimeSessionId, s]));
-  for (const group of byWorkspace.values()) for (const session of group.sessions) {
-    const state = live.get(session.runtimeSessionId);
-    session.status = state?.status || "Inactive";
-    session.tracked = Boolean(state);
-    if (state?.lastActivity) session.updatedAt = later(session.updatedAt, state.lastActivity);
-    live.delete(session.runtimeSessionId);
+  const byWorkspace = new Map(groups.map(group => [workspaceKey(group.workspace), { ...group, sessions: group.sessions.map(s => ({ ...s, status: "Idle" })) }]));
+  const scoped = new Set(snapshot.sessions.filter(s => s.teamId && s.runtimeSessionId).map(s => s.runtimeSessionId));
+  const manager = workspaceKey(managerWorkspace);
+  for (const item of snapshot.live || []) {
+    if (scoped.has(item.id)) continue;
+    const key = workspaceKey(item.workspace);
+    let found;
+    for (const group of byWorkspace.values()) found ||= group.sessions.find(s => s.runtimeSessionId === item.id);
+    if (found) { found.status = liveStatus(item); found.updatedAt = later(found.updatedAt, item.updatedAt); continue; }
+    // A conversation that started after the last history refresh.
+    if (!item.workspace || key === manager) continue;
+    const agent = snapshot.agents.find(a => workspaceKey(a.canonicalWorkspace) === key);
+    const group = byWorkspace.get(key) || { workspace: agent?.canonicalWorkspace || item.workspace, ...(agent ? { agentId: agent.id } : {}), name: single(agent?.name) || item.workspace.split(/[\\/]/).filter(Boolean).at(-1) || item.workspace, teams: [], sessions: [] };
+    group.sessions.push({ runtimeSessionId: item.id, title: "New conversation", updatedAt: item.updatedAt, status: liveStatus(item) });
+    byWorkspace.set(key, group);
   }
-  // A just-started conversation is live before it is written to history.
-  for (const state of live.values()) {
-    const agent = byId(snapshot.agents, state.agentId);
-    if (!agent || workspaceKey(agent.canonicalWorkspace) === workspaceKey(managerWorkspace)) continue;
+  // Conversations management registered outside any team, in case history
+  // has not caught up (or could not be read).
+  const listed = new Set([...byWorkspace.values()].flatMap(group => group.sessions.map(s => s.runtimeSessionId)));
+  for (const session of snapshot.sessions) {
+    if (session.teamId || !session.runtimeSessionId || listed.has(session.runtimeSessionId)) continue;
+    const agent = byId(snapshot.agents, session.agentId);
+    if (!agent || workspaceKey(agent.canonicalWorkspace) === manager) continue;
     const key = workspaceKey(agent.canonicalWorkspace);
     const group = byWorkspace.get(key) || { workspace: agent.canonicalWorkspace, agentId: agent.id, name: single(agent.name), teams: [], sessions: [] };
-    group.sessions.push({ runtimeSessionId: state.runtimeSessionId, title: state.runtimeSessionId, updatedAt: state.lastActivity, status: state.status || "Inactive", tracked: true });
+    group.sessions.push({ runtimeSessionId: session.runtimeSessionId, title: session.runtimeSessionId, updatedAt: session.lastActivity, status: session.status || "Idle" });
     byWorkspace.set(key, group);
   }
   return [...byWorkspace.values()];
 }
 
-export function independentRows(workspaces, { query = "", filter = "All", now = Date.now() } = {}) {
+// Folders show their most urgent few conversations; the rest open on the folder's own page.
+export function independentRows(workspaces, { query = "", filter = "All", now = Date.now(), collapsed = new Set(), sessionLimit = 3 } = {}) {
   const rank = group => Math.min(...group.sessions.map(s => statusMeta(s.status).rank), 99);
   const latest = group => group.sessions.reduce((max, s) => later(max, s.updatedAt), "");
   const rows = [];
@@ -282,46 +304,100 @@ export function independentRows(workspaces, { query = "", filter = "All", now = 
     const sessions = group.sessions.filter(s => (self || matches(query, s.title)) && statusOk(filter, s.status)).sort(bySessionPriority);
     if (!sessions.length && !(self && filter === "All")) continue;
     const working = group.sessions.filter(s => s.status === "Working").length;
+    const narrowed = Boolean(query) || filter !== "All";
+    const open = narrowed || !collapsed.has(group.workspace);
     rows.push({ id: "w:" + group.workspace, kind: "workspace", depth: 0, title: single(group.name), workspace: group.workspace, agentId: group.agentId, teams: group.teams,
-      status: group.sessions.map(s => s.status).sort((a, b) => statusMeta(a).rank - statusMeta(b).rank)[0] || "Inactive", sessionCount: group.sessions.length, working });
-    for (const session of sessions) rows.push({ id: "s:" + session.runtimeSessionId, kind: "session", depth: 1, title: single(session.title) || session.runtimeSessionId, status: session.status,
-      time: relativeTime(session.updatedAt, now), sessionId: session.runtimeSessionId, agentId: group.agentId, workspace: group.workspace, tracked: session.tracked, independent: true });
+      status: group.sessions.map(s => s.status).sort((a, b) => statusMeta(a).rank - statusMeta(b).rank)[0] || "Idle", sessionCount: group.sessions.length, working, expanded: open });
+    if (!open) continue;
+    const limit = narrowed ? Infinity : sessionLimit;
+    for (const session of sessions.slice(0, limit)) rows.push(independentSessionRow(session, group, 1, now));
+    if (sessions.length > limit) rows.push({ id: "more:" + group.workspace, kind: "more", depth: 1, title: "+" + (sessions.length - limit) + " more conversations", workspace: group.workspace });
   }
   return withGuides(rows);
 }
 
+function independentSessionRow(session, group, depth, now) {
+  return { id: "s:" + session.runtimeSessionId, kind: "session", depth, title: single(session.title) || session.runtimeSessionId, status: session.status,
+    time: relativeTime(session.updatedAt, now), sessionId: session.runtimeSessionId, agentId: group.agentId, workspace: group.workspace, independent: true };
+}
+
+// Every conversation of one folder: running and open first, then by age.
+export function folderRows(group, { query = "", filter = "All", now = Date.now() } = {}) {
+  if (!group) return [];
+  const rows = [{ id: "new:" + group.workspace, kind: "new-session", title: "New conversation in this folder", workspace: group.workspace, agentId: group.agentId }];
+  const sessions = group.sessions.filter(s => matches(query, s.title) && statusOk(filter, s.status));
+  const active = sessions.filter(s => s.status !== "Idle").sort(bySessionPriority);
+  const day = 86400000, age = s => now - (Date.parse(s.updatedAt || "") || 0);
+  const sections = [
+    ["Active", active],
+    ["Today", sessions.filter(s => s.status === "Idle" && age(s) < day)],
+    ["This week", sessions.filter(s => s.status === "Idle" && age(s) >= day && age(s) < 7 * day)],
+    ["Earlier", sessions.filter(s => s.status === "Idle" && age(s) >= 7 * day)],
+  ];
+  for (const [title, items] of sections) {
+    if (!items.length) continue;
+    rows.push({ id: "section:" + title, kind: "section", title, count: items.length });
+    if (title !== "Active") items.sort((a, b) => (b.updatedAt || "").localeCompare(a.updatedAt || ""));
+    rows.push(...items.map(session => independentSessionRow(session, group, 0, now)));
+  }
+  return rows;
+}
+
+// Conversations with a turn in the shared Runtime, plus managed runs it has not reported yet.
+export function runningCount(snapshot) {
+  const live = new Set((snapshot.live || []).filter(item => item.turn !== "idle").map(item => item.id));
+  const pending = snapshot.runs.filter(run => ["starting", "running"].includes(run.status))
+    .filter(run => !live.has(snapshot.sessions.find(s => s.id === run.sessionId)?.runtimeSessionId)).length;
+  return live.size + pending;
+}
+
 // What keeps running after you leave Rind, and the only place that stops it.
+// Every running conversation in the shared Runtime is listed, in a team or
+// not; managed tasks that are still starting come from their run.
 export function backgroundRows(snapshot, service, { now = Date.now() } = {}) {
   const name = id => single(byId(snapshot.agents, id)?.name) || "Agent";
   const teamName = id => single(byId(snapshot.teams, id)?.name);
-  const live = snapshot.runs.filter(run => ["starting", "running"].includes(run.status));
-  const unconfirmed = snapshot.runs.filter(run => run.status === "unknown");
-  const describe = run => {
-    const session = snapshot.sessions.find(s => s.id === run.sessionId);
-    const task = snapshot.tasks.find(t => t.id === run.taskId);
-    const where = [teamName(session?.teamId), name(session?.agentId)].filter(Boolean).join(" › ");
-    return { session, task, where };
-  };
-  const rows = [{ id: "section:running", kind: "section", title: "Running now", count: live.length }];
-  if (!live.length) rows.push({ id: "idle", kind: "clear", title: "No agent is working. Leaving Rind stops nothing." });
-  for (const run of live) {
-    const { session, task, where } = describe(run);
-    rows.push({ id: "live:" + run.id, kind: "live", title: task ? single(task.brief) : "Conversation", status: run.needsInput ? "Needs input" : "Working", context: where,
-      time: relativeTime(run.startedAt, now), runId: run.id, taskId: task?.id, agentId: session?.agentId, teamId: session?.teamId, sessionId: session?.runtimeSessionId });
+  const folder = value => String(value || "").split(/[\\/]/).filter(Boolean).at(-1) || "Conversation";
+  const running = [];
+  const seen = new Set();
+  for (const item of snapshot.live || []) {
+    if (item.turn === "idle") continue;
+    const session = snapshot.sessions.find(s => s.runtimeSessionId === item.id);
+    const run = session && snapshot.runs.find(r => r.sessionId === session.id && ["starting", "running"].includes(r.status));
+    const task = run?.taskId && snapshot.tasks.find(t => t.id === run.taskId);
+    seen.add(item.id);
+    running.push({ id: "live:" + item.id, kind: "live", title: task ? single(task.brief) : "Conversation", status: liveStatus(item),
+      context: session ? [teamName(session.teamId), name(session.agentId)].filter(Boolean).join(" › ") : folder(item.workspace),
+      time: relativeTime(item.startedAt || item.updatedAt, now), taskId: task?.id, agentId: session?.agentId, teamId: session?.teamId, sessionId: item.id, workspace: item.workspace });
   }
+  for (const run of snapshot.runs.filter(r => ["starting", "running"].includes(r.status))) {
+    const session = snapshot.sessions.find(s => s.id === run.sessionId);
+    if (session?.runtimeSessionId && seen.has(session.runtimeSessionId)) continue;
+    const task = snapshot.tasks.find(t => t.id === run.taskId);
+    running.push({ id: "run:" + run.id, kind: "live", title: task ? single(task.brief) : "Conversation", status: run.needsInput ? "Needs input" : "Working",
+      context: [teamName(session?.teamId), name(session?.agentId)].filter(Boolean).join(" › "), time: relativeTime(run.startedAt, now), taskId: task?.id,
+      agentId: session?.agentId, teamId: session?.teamId, sessionId: session?.runtimeSessionId });
+  }
+  const unconfirmed = snapshot.runs.filter(run => run.status === "unknown");
+  const rows = [{ id: "section:running", kind: "section", title: "Running now", count: running.length }];
+  if (!running.length) rows.push({ id: "idle", kind: "clear", title: "Nothing is running. Leaving Rind stops nothing." });
+  rows.push(...running.sort((a, b) => statusMeta(a.status).rank - statusMeta(b.status).rank));
   if (unconfirmed.length) {
     rows.push({ id: "section:unconfirmed", kind: "section", title: "Unconfirmed", count: unconfirmed.length });
-    for (const run of unconfirmed) rows.push({ id: "r:" + run.id, kind: "run", status: "Unconfirmed", title: "Confirm the previous run stopped", context: describe(run).where, runId: run.id });
+    for (const run of unconfirmed) {
+      const session = snapshot.sessions.find(s => s.id === run.sessionId);
+      rows.push({ id: "r:" + run.id, kind: "run", status: "Unconfirmed", title: "Confirm the previous run stopped", context: [teamName(session?.teamId), name(session?.agentId)].filter(Boolean).join(" › "), runId: run.id });
+    }
   }
   const age = value => relativeTime(value, now);
   rows.push({ id: "section:services", kind: "section", title: "Services" },
-    { id: "svc:management", kind: "service", title: "Agents management", status: service ? "Ready" : "Inactive",
-      note: service ? "pid " + service.pid + " · up " + age(service.startedAt) + (service.stale ? " · update waiting" : "") : "not connected", stale: Boolean(service?.stale) },
-    { id: "svc:runtime", kind: "service", title: "Shared Runtime", status: service?.runtime ? "Ready" : "Inactive", stale: Boolean(service?.runtime?.stale || service?.runtime?.legacy),
-      note: !service?.runtime ? "starts when a conversation needs it" : service.runtime.legacy ? "started by an older Rind · stop to update"
+    { id: "svc:management", kind: "service", title: "Agents management", up: Boolean(service), stale: Boolean(service?.stale),
+      note: service ? "pid " + service.pid + " · up " + age(service.startedAt) + (service.stale ? " · update waiting" : "") : "not connected" },
+    { id: "svc:runtime", kind: "service", title: "Shared Runtime", up: Boolean(service?.runtime), stale: Boolean(service?.runtime?.stale || service?.runtime?.legacy), legacy: Boolean(service?.runtime?.legacy),
+      note: !service?.runtime ? "starts when a conversation needs it" : service.runtime.legacy ? "started by an older Rind · restart to update"
         : "pid " + service.runtime.pid + " · up " + age(service.runtime.startedAt) + " · " + service.runtime.busy + " running" + (service.runtime.stale ? " · update waiting" : "") });
-  rows.push({ id: "section:actions", kind: "section", title: "Stop" },
-    { id: "stop-all", kind: "stop-all", title: live.length ? "Stop all agents…" : "Stop background services…", working: live.length });
+  // A button, not a list entry: it is also reachable with S from anywhere on the page.
+  rows.push({ id: "gap", kind: "clear", title: "" }, { id: "stop-all", kind: "stop-all", title: running.length ? "Stop all agents…" : "Stop background services…", working: running.length });
   return rows;
 }
 

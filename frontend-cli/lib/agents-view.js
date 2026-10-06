@@ -87,16 +87,17 @@ function leadIcon(row) {
   if (row.kind === "manager") return paint.notice("◆");
   if (row.kind === "independent") return paint.path("◇");
   if (row.kind === "background") return row.badge ? paint.accent("●") : paint.dim("○");
-  if (row.kind === "live" || row.kind === "service") return glyph(row.status);
-  if (row.kind === "stop-all") return paint.danger("■");
+  if (row.kind === "live") return glyph(row.status);
+  if (row.kind === "service") return row.up ? paint.success("●") : paint.dim("·");
   if (row.kind === "team" || row.kind === "inbox") return row.status ? glyph(row.status) : paint.dim("○");
   return " ";
 }
 
 function memberChip(row, compact) {
   const { tone, label } = memberState(row.status, row.open);
-  if (tone === "Inactive") return compact ? "" : paint.dim(label);
-  return toned(tone, statusMeta(tone).glyph + (compact ? "" : " " + label));
+  const tasks = !compact && row.tasks ? paint.dim(" · " + row.tasks + (row.tasks === 1 ? " task" : " tasks")) : "";
+  if (tone === "Idle") return compact ? "" : paint.dim(label) + tasks;
+  return toned(tone, statusMeta(tone).glyph + (compact ? "" : " " + label)) + tasks;
 }
 
 const RIGHT = 16;
@@ -107,7 +108,7 @@ function treeLine(row, width, nameColumn) {
   const guide = paint.dim(row.guide);
   let left, right = "";
   if (row.kind === "workspace") {
-    const name = paint.bold(single(row.title));
+    const name = (row.expanded === false ? paint.accent("▸ ") : "") + paint.bold(single(row.title));
     right = row.working ? paint.accent("● " + row.working + " working") : paint.dim(row.sessionCount + (row.sessionCount === 1 ? " conversation" : " conversations"));
     const gap = Math.max(1, nameColumn - textWidth(name));
     const room = width - textWidth(name) - gap - Math.max(RIGHT, textWidth(right)) - 2;
@@ -122,9 +123,7 @@ function treeLine(row, width, nameColumn) {
     right = memberChip(row, compact);
   } else if (row.kind === "session") {
     left = guide + glyph(row.status) + " " + single(row.title);
-    // Untracked conversations have no live state, only their last save.
-    const word = row.tracked === false ? paint.dim("saved") : toned(row.status, row.status);
-    right = compact ? paint.dim(row.time || "") : word + " " + paint.dim((row.time || "").padStart(5));
+    right = compact ? paint.dim(row.time || "") : toned(row.status, row.status) + " " + paint.dim((row.time || "").padStart(5));
   } else left = guide + paint.dim(single(row.title));
   const room = width - (right ? Math.max(RIGHT, textWidth(right)) + 1 : 0);
   if (room < 8) return fitLine(left, width);
@@ -137,11 +136,15 @@ function rowLine(row, width, selected, focused, nameColumn) {
     return paint.dim("─" + label + "─".repeat(Math.max(0, width - textWidth(label) - 1)));
   }
   const marker = selected ? (focused ? paint.accent("›") : paint.dim("›")) : " ";
+  // An action, drawn as a button: quiet until selected, never a red warning line.
+  if (row.kind === "stop-all") {
+    const label = "[ " + single(row.title) + " ]";
+    return fitLine(marker + " " + (selected && focused ? paint.bold(paint.danger(label)) : paint.dim(label)) + paint.dim("  S"), width);
+  }
   if (row.guide !== undefined) return marker + " " + treeLine(row, width - 2, nameColumn);
   let name = single(row.title);
   if (row.kind === "member" || row.kind === "team") name = paint.bold(name);
   else if (["add-member", "new-session", "assign", "new-team", "more", "clear"].includes(row.kind)) name = paint.dim(name);
-  else if (row.kind === "stop-all") name = paint.danger(name);
   const extra = (row.role ? paint.dim(" · " + row.role) : "") + (row.hidden ? paint.dim(" +" + row.hidden) : "") + (row.note && row.kind !== "service" && width >= 60 ? paint.dim(" — " + row.note) : "");
   const left = marker + " " + leadIcon(row) + " " + paint.dim(row.guide || "") + name + extra;
   const right = rightColumns(row, width);
@@ -177,6 +180,7 @@ function pageHeader(view, width) {
   if (page.kind === "manager") return [paint.bold("Manager") + paint.dim(" · conversations that coordinate every team")];
   if (page.kind === "independent") return [paint.bold("Independent") + paint.dim(" · conversations outside any team, by folder")];
   if (page.kind === "background") return [paint.bold("Background") + paint.dim(" · what keeps running after you leave Rind")];
+  if (page.kind === "folder") return [paint.dim("Independent › ") + paint.bold(shortPath(page.workspace, Math.max(10, width - 30))) + paint.dim(" · every conversation in this folder")];
   if (page.kind === "new-team") return [paint.bold("New team")];
   if (!team) return [paint.dim("Team removed")];
   if (page.kind === "member") {
@@ -276,9 +280,14 @@ function dialogBox(dialog, width, maxHeight, busy) {
       if (active) {
         lines.push(...editorLines(item.editor, inner, 4, paint.accent("┃ ")));
         // Suggestions sit directly under the input, like a shell completion menu.
+        // A six-row window that follows the highlighted folder, so every match is reachable.
         const suggestions = item.suggestions || [];
-        suggestions.slice(0, 6).forEach((suggestion, i) => lines.push((i === item.pick ? paint.accent("  › ") : "    ") + (i === item.pick ? paint.bold(suggestion.name) : paint.path(suggestion.name)) + paint.dim("/")));
-        if (suggestions.length > 6) lines.push(paint.dim("    +" + (suggestions.length - 6) + " more · keep typing to narrow"));
+        const top = Math.max(0, Math.min(item.pick - 5, suggestions.length - 6));
+        suggestions.slice(top, top + 6).forEach((suggestion, i) => {
+          const picked = top + i === item.pick;
+          lines.push((picked ? paint.accent("  › ") : "    ") + (picked ? paint.bold(suggestion.name) : paint.path(suggestion.name)) + paint.dim("/"));
+        });
+        if (suggestions.length > 6) lines.push(paint.dim("    " + (top + 1) + "–" + Math.min(suggestions.length, top + 6) + " of " + suggestions.length + (item.more ? "+" : "") + " · ↑↓ to see more · type to narrow"));
         if (item.check) lines.push("  " + checkLine(item.check));
         if (item.hint) lines.push(...wrap([item.hint], inner - 2).map(line => paint.dim("  " + line)));
       } else lines.push("  " + (item.editor.input() ? truncateToWidth(single(item.editor.input()), inner - 2, "…") : paint.dim("—")));
@@ -329,7 +338,7 @@ function renderDelivery(view, width, height) {
 function headerLine(view, width) {
   const { snapshot, page } = view;
   const team = snapshot.teams.find(t => t.id === page.teamId);
-  const crumbs = ["Agents", page.kind === "inbox" ? "Inbox" : page.kind === "manager" ? "Manager" : page.kind === "independent" ? "Independent" : page.kind === "background" ? "Background" : page.kind === "new-team" ? "New team" : single(team?.name) || ""];
+  const crumbs = ["Agents", page.kind === "inbox" ? "Inbox" : page.kind === "manager" ? "Manager" : page.kind === "independent" ? "Independent" : page.kind === "background" ? "Background" : page.kind === "folder" ? "Independent" : page.kind === "new-team" ? "New team" : single(team?.name) || ""];
   if (page.kind === "member") crumbs.push(single(snapshot.agents.find(a => a.id === page.agentId)?.name));
   else if (page.kind === "team") crumbs.push(page.tab === "tasks" ? "Tasks" : "Organization");
   const left = " " + paint.bold(crumbs[0]) + paint.dim(crumbs.slice(1).filter(Boolean).map(c => " › " + c).join(""));

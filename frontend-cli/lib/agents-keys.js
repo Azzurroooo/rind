@@ -43,7 +43,7 @@ export const KEYS = {
 };
 
 export const HELP_GROUPS = [
-  { title: "Navigate", items: [["↑↓ j k", "move"], ["←", "up: conversation › member › teams"], ["→", "open · expand"], ["z Z", "fold branch · fold all"], ["enter", "open the selected item"], ["g G", "first · last"], ["pgup pgdn", "page"], ["tab 1 2", "Organization · Tasks"], ["esc", "back · return to chat"]] },
+  { title: "Navigate", items: [["↑↓ j k", "move"], ["←", "up: conversation › member › teams"], ["→", "open · expand"], ["z Z", "fold branch · fold all"], ["[ ]", "previous · next group"], ["enter", "open the selected item"], ["g G", "first · last"], ["pgup pgdn", "page"], ["tab 1 2", "Organization · Tasks"], ["esc", "back · return to chat"]] },
   { title: "Team", items: [["c", "new conversation"], ["t", "assign a task"], ["a", "add member (direct report)"], ["e", "edit role"], ["space", "all actions for the item"], ["n", "new team"]] },
   { title: "View", items: [["/", "search this view"], ["f", "filter by status"], ["r", "refresh · reconnect"], ["?", "toggle this help"]] },
   { title: "Leave", items: [["esc", "back one level"], ["ctrl+c ×2", "leave Rind · agents keep running"], ["Background", "stop all agents (in the sidebar)"]] },
@@ -76,8 +76,10 @@ export function hintsFor(view, row) {
   if (page === "team") return [row?.kind === "task" ? k("delivery") : k("create"), ...(row?.kind === "task" ? [k("actions")] : []), k("task"), k("view"), ...tail];
   if (page === "member") return [row?.kind === "session" ? k("join") : k("start"), ...(row?.kind === "session" ? [k("actions")] : []), k("task"), ...tail];
   if (page === "manager") return [row?.kind === "session" ? k("join") : k("start"), k("search"), k("help"), k("back")];
-  if (page === "background") return [row?.kind === "stop-all" ? { key: "enter", label: "stop…" } : row?.kind === "live" ? k("open") : row?.kind === "run" ? k("resolve") : k("refresh"), k("refresh"), k("help"), k("back")];
-  if (page === "independent") return [row?.kind === "session" ? k("join") : k("chat"), ...(row?.kind === "session" ? [k("up")] : []), k("search"), k("filter"), k("refresh"), k("help"), k("back")];
+  if (page === "background") return [row?.kind === "live" ? k("open") : row?.kind === "run" ? k("resolve") : row?.kind === "service" ? k("actions") : row?.kind === "stop-all" ? { key: "enter", label: "stop…" } : k("refresh"),
+    { key: "S", label: "stop all…" }, k("refresh"), k("help"), k("back")];
+  if (page === "folder") return [row?.kind === "session" ? k("join") : k("start"), k("chat"), k("search"), k("filter"), k("refresh"), k("help"), k("back")];
+  if (page === "independent") return [row?.kind === "session" ? k("join") : k("open"), k("chat"), ...(row?.kind === "session" ? [k("up")] : []), { key: "[ ]", label: "folder" }, k("fold"), k("search"), k("filter"), k("help"), k("back")];
   return [row?.kind === "team" ? k("open") : row?.kind === "new-team" ? k("create") : k("resolve"), k("team"), k("refresh"), k("help"), k("back")];
 }
 

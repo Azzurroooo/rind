@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { emptyAgentsSnapshot, organizationRows, teamSessions, taskRows, inboxRows, sidebarRows, memberSessionRows, relativeTime, teamStatus, independentSessions, independentRows, backgroundRows } from "../lib/agents-model.js";
+import { emptyAgentsSnapshot, organizationRows, teamSessions, taskRows, inboxRows, sidebarRows, memberSessionRows, relativeTime, teamStatus, independentSessions, independentRows, folderRows, backgroundRows } from "../lib/agents-model.js";
 
 const NOW = Date.parse("2026-10-06T12:00:00Z");
 function fixture() {
@@ -118,28 +118,33 @@ test("member pages list every team conversation with new conversation first", ()
   assert.deepEqual(memberSessionRows(sessions, "lead", { query: "kick" }).map(r => r.title), ["New conversation", "Kickoff"]);
 });
 
-test("independent conversations merge live state, keep saved ones untracked and rank active folders first", () => {
+test("independent folders take live state from the Runtime, include plain sessions, and fold extra conversations", () => {
   const { snapshot } = fixture();
   const groups = [
-    { workspace: "/home/me/scratch", name: "scratch", teams: [], sessions: [{ runtimeSessionId: "r-loose", title: "Idea", updatedAt: "2026-10-06T11:00:00Z" }] },
+    { workspace: "/home/me/scratch", name: "scratch", teams: [], sessions: ["a", "b", "c", "d", "e"].map((id, i) => ({ runtimeSessionId: "r-" + id, title: "Idea " + id, updatedAt: "2026-10-0" + (6 - i) + "T09:00:00Z" })) },
     { workspace: "/w/lead/", agentId: "lead", name: "Lead", teams: ["Product"], sessions: [{ runtimeSessionId: "r-independent", title: "Quick fix", updatedAt: "2026-10-06T09:00:00Z" }] },
   ];
-  snapshot.sessions.push({ id: "g", agentId: "web", runtimeSessionId: "r-new", status: "Working" }, { id: "m", agentId: "mgr", runtimeSessionId: "r-mgr", status: "Working" },
-    { id: "h", agentId: "lead", runtimeSessionId: "r-fresh", status: "Working" });
-  snapshot.agents.push({ id: "mgr", name: "Manager", canonicalWorkspace: "/rind/manager" });
+  snapshot.live = [
+    { id: "r-independent", workspace: "/w/lead", turn: "idle", watchers: 1, updatedAt: "2026-10-06T11:00:00Z" },
+    { id: "r-e", workspace: "/home/me/scratch", turn: "running", watchers: 0, updatedAt: "2026-10-06T11:59:00Z" },
+    { id: "r-plain", workspace: "/home/me/notes", turn: "question", watchers: 1, updatedAt: "2026-10-06T11:58:00Z" },
+    { id: "r-lead", workspace: "/w/lead", turn: "running", watchers: 1, updatedAt: "2026-10-06T11:58:00Z" },
+    { id: "r-mgr", workspace: "/rind/manager", turn: "running", watchers: 1, updatedAt: "2026-10-06T11:58:00Z" },
+  ];
   const merged = independentSessions(snapshot, groups, "/rind/manager");
-  const lead = merged.filter(g => g.agentId === "lead");
-  assert.equal(lead.length, 1, "a live conversation joins its folder even when spelled differently");
-  assert.deepEqual(lead[0].sessions.map(s => s.runtimeSessionId), ["r-independent", "r-fresh"]);
-  assert.equal(lead[0].sessions[0].status, "Ready");
-  assert.equal(lead[0].sessions[0].tracked, true);
-  assert.equal(merged.find(g => g.workspace === "/home/me/scratch").sessions[0].tracked, false);
-  assert.ok(merged.some(g => g.workspace === "/w/web" && g.sessions[0].runtimeSessionId === "r-new"), "just-started conversations appear before they are saved");
+  const lead = merged.find(g => g.agentId === "lead");
+  assert.deepEqual(lead.sessions.map(s => [s.runtimeSessionId, s.status]), [["r-independent", "Open"]], "team conversations stay on their team");
+  assert.equal(merged.find(g => g.name === "scratch").sessions.find(s => s.runtimeSessionId === "r-e").status, "Working");
+  assert.deepEqual(merged.find(g => g.name === "notes").sessions.map(s => s.status), ["Needs input"], "a plain session in an unregistered folder appears live");
   assert.ok(!merged.some(g => g.workspace === "/rind/manager"), "Manager conversations are not independent");
   const rows = independentRows(merged, { now: NOW });
-  assert.deepEqual(rows.filter(r => r.kind === "workspace").map(r => r.title), ["Web", "Lead", "scratch"]);
-  assert.equal(rows.find(r => r.id === "s:r-loose").guide, "└─ ");
-  assert.deepEqual(independentRows(merged, { query: "idea" }).map(r => r.title), ["scratch", "Idea"]);
+  assert.deepEqual(rows.filter(r => r.kind === "workspace").map(r => r.title), ["notes", "scratch", "Lead"]);
+  const scratch = rows.filter(r => r.workspace === "/home/me/scratch" && r.kind !== "workspace");
+  assert.deepEqual(scratch.map(r => r.title), ["Idea e", "Idea a", "Idea b", "+2 more conversations"], "running first, then the newest, the rest behind one row");
+  assert.equal(independentRows(merged, { collapsed: new Set(["/home/me/scratch"]) }).filter(r => r.workspace === "/home/me/scratch").length, 1);
+  assert.deepEqual(independentRows(merged, { query: "idea d" }).map(r => r.title), ["scratch", "Idea d"]);
+  const folder = folderRows(merged.find(g => g.name === "scratch"), { now: NOW });
+  assert.deepEqual(folder.map(r => r.kind === "section" ? "#" + r.title : r.title), ["New conversation in this folder", "#Active", "Idea e", "#Today", "Idea a", "#This week", "Idea b", "Idea c", "Idea d"]);
 });
 
 test("relative time is compact and never negative", () => {
@@ -150,21 +155,40 @@ test("relative time is compact and never negative", () => {
   assert.equal(relativeTime(undefined, NOW), "");
 });
 
-test("background lists running work, services and a single stop action", () => {
+test("background lists every running conversation, services and one stop action", () => {
   const { snapshot } = fixture();
   snapshot.tasks.push({ id: "t-run", teamId: "team", assigneeAgentId: "api", brief: "Migrate schema", status: "running" });
-  snapshot.runs.push({ id: "w1", sessionId: "a", taskId: "t-run", status: "running", startedAt: "2026-10-06T11:50:00Z" },
-    { id: "w2", sessionId: "b", status: "running", needsInput: true, startedAt: "2026-10-06T11:58:00Z" }, { id: "w3", sessionId: "a", status: "unknown", startedAt: "2026-10-06T10:00:00Z" });
+  snapshot.sessions.push({ id: "e", agentId: "api", teamId: "team", runtimeSessionId: "r-task" });
+  snapshot.runs.push({ id: "w1", sessionId: "e", taskId: "t-run", status: "running", startedAt: "2026-10-06T11:50:00Z" },
+    { id: "w2", sessionId: "a", status: "starting", startedAt: "2026-10-06T11:59:00Z" }, { id: "w3", sessionId: "a", status: "unknown", startedAt: "2026-10-06T10:00:00Z" });
+  snapshot.live = [
+    { id: "r-task", workspace: "/w/api", turn: "running", watchers: 0, startedAt: "2026-10-06T11:50:00Z", updatedAt: "2026-10-06T11:50:00Z" },
+    { id: "r-plain", workspace: "/home/me/notes", turn: "question", watchers: 1, startedAt: "2026-10-06T11:58:00Z", updatedAt: "2026-10-06T11:58:00Z" },
+    { id: "r-idle", workspace: "/home/me/notes", turn: "idle", watchers: 1, updatedAt: "2026-10-06T11:58:00Z" },
+  ];
   const rows = backgroundRows(snapshot, { pid: 7, startedAt: "2026-10-06T09:00:00Z", runtime: { pid: 8, startedAt: "2026-10-06T09:00:00Z", busy: 2 }, stale: { reason: "busy" } }, { now: NOW });
   const live = rows.filter(r => r.kind === "live");
-  assert.deepEqual(live.map(r => [r.title, r.status, r.context, r.time]), [["Migrate schema", "Working", "Product › Lead", "10m"], ["Conversation", "Needs input", "Product › DB", "2m"]]);
+  assert.deepEqual(live.map(r => [r.title, r.status, r.context, r.time]), [["Conversation", "Needs input", "notes", "2m"], ["Migrate schema", "Working", "Product › API", "10m"], ["Conversation", "Working", "Product › Lead", "1m"]],
+    "a plain window's turn is listed, a managed task once, and a run the Runtime has not reported yet");
   assert.equal(rows.find(r => r.kind === "run").runId, "w3");
   assert.match(rows.find(r => r.id === "svc:management").note, /pid 7 · up 3h · update waiting/);
   assert.match(rows.find(r => r.id === "svc:runtime").note, /2 running/);
-  assert.deepEqual(rows.filter(r => r.kind === "stop-all").map(r => [r.title, r.working]), [["Stop all agents…", 2]]);
-  assert.equal(sidebarRows(snapshot).find(r => r.id === "background").badge, 2);
+  assert.deepEqual(rows.filter(r => r.kind === "stop-all").map(r => [r.title, r.working]), [["Stop all agents…", 3]]);
+  assert.equal(sidebarRows(snapshot).find(r => r.id === "background").badge, 3);
   const idle = backgroundRows(fixture().snapshot, null, { now: NOW });
-  assert.equal(idle.find(r => r.kind === "clear").title, "No agent is working. Leaving Rind stops nothing.");
+  assert.equal(idle.find(r => r.id === "idle").title, "Nothing is running. Leaving Rind stops nothing.");
   assert.equal(idle.find(r => r.kind === "stop-all").title, "Stop background services…");
   assert.equal(idle.find(r => r.id === "svc:runtime").note, "starts when a conversation needs it");
+});
+
+test("the inbox shows recent deliveries instead of repeating the team list", () => {
+  const { snapshot } = fixture();
+  snapshot.tasks.push({ id: "d1", teamId: "team", assigneeAgentId: "api", brief: "Ship login", status: "done", report: { summary: "Merged and released" } });
+  snapshot.runs.push({ id: "x", sessionId: "a", taskId: "d1", status: "succeeded", startedAt: "2026-10-06T10:00:00Z", lastObservedAt: "2026-10-06T11:00:00Z" });
+  const rows = inboxRows(snapshot);
+  assert.ok(!rows.some(r => r.kind === "team"));
+  const delivered = rows.find(r => r.id === "d:d1");
+  assert.deepEqual([delivered.title, delivered.note, delivered.status], ["Ship login", "Merged and released", "Done"]);
+  assert.match(delivered.context, /^Product › API · /);
+  assert.equal(organizationRows(snapshot, "team", []).find(r => r.agentId === "api").tasks, 0, "delivered work is not an open task");
 });

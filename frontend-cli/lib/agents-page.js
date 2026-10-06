@@ -7,7 +7,7 @@ import { resolveInputPath } from "./path-input.js";
 import { managementClient } from "./agents-client.js";
 import { openAgentChat, managerWorkspace, followConversation } from "./agents-commands.js";
 import { createLeaveLatch, LEAVE_HINT } from "./interrupt-state.js";
-import { emptyAgentsSnapshot, clean, sidebarRows, inboxRows, organizationRows, taskRows, memberSessionRows, managerRows, teamSessions, independentSessions, independentRows, backgroundRows, selectable } from "./agents-model.js";
+import { emptyAgentsSnapshot, clean, sidebarRows, inboxRows, organizationRows, taskRows, memberSessionRows, managerRows, teamSessions, independentSessions, independentRows, folderRows, backgroundRows, workspaceKey, selectable } from "./agents-model.js";
 import { renderAgents } from "./agents-view.js";
 import { createActions } from "./agents-actions.js";
 
@@ -22,7 +22,7 @@ export async function runAgentsPage({ launch, input = process.stdin, output = pr
   const tui = createTui({ input, output, manageInput, alternateScreen: true });
   const view = {
     snapshot: emptyAgentsSnapshot(), connection: "connecting…", busy: false, busyLabel: "", notice: null, help: false,
-    sidebar: [], navId: "inbox", focus: "sidebar", member: null, page: { kind: "inbox" }, pageKey: "inbox", entries: [], selectedId: "",
+    sidebar: [], navId: "inbox", focus: "sidebar", member: null, folder: null, page: { kind: "inbox" }, pageKey: "inbox", entries: [], selectedId: "",
     selections: {}, scroll: {}, tabs: {}, collapsed: {}, history: {}, managerHistory: null, independent: null, managerPath: "", service: null, stopped: false,
     query: "", filter: "All", searching: false, searchEditor: createLineEditor(), dialog: null, detail: null, standalone, leaveArmed: false,
   };
@@ -53,14 +53,17 @@ export async function runAgentsPage({ launch, input = process.stdin, output = pr
       if (view.member?.teamId === nav.teamId) return { kind: "member", teamId: nav.teamId, agentId: view.member.agentId };
       return { kind: "team", teamId: nav.teamId, tab: view.tabs[nav.teamId] || "org" };
     }
+    if (nav?.kind === "independent" && view.folder) return { kind: "folder", workspace: view.folder };
     return { kind: nav?.kind || "inbox" };
   }
+  const independentGroups = () => independentSessions(view.snapshot, view.independent?.workspaces, view.managerPath);
   function entriesFor(page) {
     const options = { query: view.query, filter: view.filter };
     if (page.kind === "inbox") return inboxRows(view.snapshot);
-    if (page.kind === "manager") return managerRows(view.managerHistory?.entries, options);
+    if (page.kind === "manager") return managerRows(view.managerHistory?.entries, { ...options, live: view.snapshot.live || [] });
+    if (page.kind === "folder") return folderRows(independentGroups().find(group => workspaceKey(group.workspace) === workspaceKey(page.workspace)), options);
     if (page.kind === "background") return backgroundRows(view.snapshot, view.service);
-    if (page.kind === "independent") return independentRows(independentSessions(view.snapshot, view.independent?.workspaces, view.managerPath), options);
+    if (page.kind === "independent") return independentRows(independentGroups(), { ...options, collapsed: view.collapsed.independent || new Set() });
     if (page.kind === "new-team") return [{ id: "new-team", kind: "new-team", title: "Name your new team" }];
     const sessions = teamSessions(view.snapshot, page.teamId, view.history[page.teamId]?.entries);
     if (page.kind === "member") return memberSessionRows(sessions, page.agentId, options);
@@ -75,7 +78,7 @@ export async function runAgentsPage({ launch, input = process.stdin, output = pr
     if (!view.sidebar.some(row => row.id === view.navId)) { view.navId = "inbox"; view.member = null; view.focus = "sidebar"; }
     if (view.member && !view.snapshot.memberships.some(m => m.teamId === view.member.teamId && m.agentId === view.member.agentId)) view.member = null;
     view.page = derivePage();
-    view.pageKey = [view.page.kind, view.page.teamId, view.page.tab || view.page.agentId].filter(Boolean).join(":");
+    view.pageKey = [view.page.kind, view.page.teamId, view.page.tab || view.page.agentId || view.page.workspace].filter(Boolean).join(":");
     const previous = view.pageKey === previousKey ? view.entries : [];
     previousKey = view.pageKey;
     view.entries = entriesFor(view.page);
@@ -110,7 +113,7 @@ export async function runAgentsPage({ launch, input = process.stdin, output = pr
     }
     if (view.page.kind === "manager" && view.connection === "connected" && !view.managerHistory) void loadManagerHistory();
     if (view.page.kind === "background" && view.connection === "connected" && !view.serviceLoading && Date.now() - (view.serviceAt || 0) > 5000) void loadService();
-    if (view.page.kind === "independent" && view.connection === "connected" && !view.independent?.loading && Date.now() - (view.independent?.at || 0) > INDEPENDENT_REFRESH_MS) void loadIndependent();
+    if (["independent", "folder"].includes(view.page.kind) && view.connection === "connected" && !view.independent?.loading && Date.now() - (view.independent?.at || 0) > INDEPENDENT_REFRESH_MS) void loadIndependent();
   }
   async function loadService() {
     view.serviceLoading = true;
@@ -233,6 +236,9 @@ export async function runAgentsPage({ launch, input = process.stdin, output = pr
     if (selectId) view.selections[["team", teamId, tab].join(":")] = selectId;
     project();
   }
+  function openFolder(workspace) {
+    view.navId = "independent"; view.folder = workspace; view.focus = "main"; view.detail = null; resetSearch(); project();
+  }
   function openMember(teamId, agentId) {
     view.navId = teamId; view.member = { teamId, agentId }; view.focus = "main"; view.detail = null; resetSearch(); project();
   }
@@ -272,7 +278,19 @@ export async function runAgentsPage({ launch, input = process.stdin, output = pr
     try { return await client.request("serviceShutdown", { stopAgents }); }
     catch (error) { view.stopped = false; throw error; }
   }
-  const ui = { view, request, choose, form, resolvePath: value => resolveInputPath(value), stopServices, leave, confirm, notify, showText, reopen, openTeam, openMember, setFilter, // Menu actions already run inside perform(); nesting would be refused as busy.
+  // Replace only the management service so it loads an update; conversations keep running.
+  async function restartService() {
+    view.stopped = true;
+    try { await client.request("serviceShutdown", { restart: true }); }
+    catch (error) { view.stopped = false; throw error; }
+    for (let attempt = 0; attempt < 40 && client && !closed; attempt++) {
+      await new Promise(resolve => setTimeout(resolve, 150));
+      if (view.connection !== "connected") break;
+    }
+    view.stopped = false;
+    await connect();
+  }
+  const ui = { view, request, choose, form, restartService, launch, resolvePath: value => resolveInputPath(value), stopServices, leave, confirm, notify, showText, reopen, openTeam, openMember, setFilter, // Menu actions already run inside perform(); nesting would be refused as busy.
     chat: options => (view.busy ? chat(options) : perform(() => chat(options), null, "Opening conversation…")) };
   const actions = createActions(ui);
   const currentRow = () => (view.focus === "sidebar" ? view.sidebar.find(r => r.id === view.navId) : view.entries.find(r => r.id === view.selectedId));
@@ -284,17 +302,18 @@ export async function runAgentsPage({ launch, input = process.stdin, output = pr
       view.focus = "main"; return project();
     }
     switch (row.kind) {
-      case "member":
-      case "more": return openMember(row.teamId, row.agentId);
+      case "member": return openMember(row.teamId, row.agentId);
+      case "more": return row.workspace ? openFolder(row.workspace) : openMember(row.teamId, row.agentId);
+      case "workspace": return openFolder(row.workspace);
       case "session": return ui.chat({ agentId: row.agentId, teamId: row.teamId, runtimeSessionId: row.sessionId, manager: row.manager, workspace: row.workspace });
-      case "workspace": return ui.chat({ agentId: row.agentId, workspace: row.workspace });
-      case "new-session": return ui.chat({ agentId: row.agentId, teamId: row.teamId || view.page.teamId, manager: row.manager });
+      case "new-session": return ui.chat({ agentId: row.agentId, teamId: row.teamId || view.page.teamId, manager: row.manager, workspace: row.workspace });
       case "add-member": return actions.addMember(row.teamId);
       case "assign": return actions.assignTask(row.teamId);
       case "task": return view.page.kind === "inbox" && row.answer ? actions.answer(row.taskId) : perform(() => actions.delivery(row.taskId), null, "Loading delivery…");
       case "run": { const run = view.snapshot.runs.find(r => r.id === row.runId); return run && actions.resolveRun(run); }
       case "live": return row.taskId ? perform(() => actions.delivery(row.taskId), null, "Loading delivery…") : row.sessionId ? ui.chat({ agentId: row.agentId, teamId: row.teamId, runtimeSessionId: row.sessionId }) : undefined;
       case "stop-all": return actions.stopAll(row.working);
+      case "service": return actions.serviceActions(row);
       case "team": return openTeam(row.teamId);
       case "new-team": return actions.createTeam();
       default: return undefined;
@@ -321,12 +340,16 @@ export async function runAgentsPage({ launch, input = process.stdin, output = pr
     const current = Math.max(0, items.findIndex(r => r.id === (view.focus === "sidebar" ? view.navId : view.selectedId)));
     const next = items[Math.max(0, Math.min(items.length - 1, absolute ?? current + delta))].id;
     if (view.focus === "sidebar") {
-      if (next !== view.navId) { view.navId = next; view.member = null; resetSearch(); }
+      if (next !== view.navId) { view.navId = next; view.member = null; view.folder = null; resetSearch(); }
     } else view.selections[view.pageKey] = next;
     project();
   }
   function back() {
     if (view.focus === "main" && (view.query || view.filter !== "All")) { resetSearch(); project(); return; }
+    if (view.page.kind === "folder") {
+      const { workspace } = view.page;
+      view.folder = null; view.selections.independent = "w:" + workspace; resetSearch(); project(); return;
+    }
     if (view.page.kind === "member") {
       const { teamId, agentId } = view.page;
       view.member = null; view.selections[["team", teamId, view.tabs[teamId] || "org"].join(":")] = "m:" + agentId; resetSearch(); project(); return;
@@ -336,7 +359,7 @@ export async function runAgentsPage({ launch, input = process.stdin, output = pr
   }
   // Conversation rows belong to the member row above them.
   const ownerRow = row => {
-    if (row?.kind === "session" && view.page.kind === "independent") return view.entries.find(r => r.id === "w:" + row.workspace);
+    if (["session", "more"].includes(row?.kind) && view.page.kind === "independent") return view.entries.find(r => r.id === "w:" + row.workspace);
     return ["session", "more"].includes(row?.kind) && view.page.kind === "team" ? view.entries.find(r => r.id === "m:" + row.agentId) : undefined;
   };
   const selectRow = id => { view.selections[view.pageKey] = id; project(); };
@@ -359,7 +382,30 @@ export async function runAgentsPage({ launch, input = process.stdin, output = pr
     for (const id of agentIds) if (folded) collapsed.add(id); else collapsed.delete(id);
     project();
   }
+  // Independent folders fold like team branches; their key is the folder.
+  function toggleFolders(all) {
+    const collapsed = view.collapsed.independent ||= new Set();
+    const folders = view.entries.filter(r => r.kind === "workspace");
+    if (all) {
+      const anyOpen = folders.some(r => r.expanded);
+      for (const r of folders) if (anyOpen) collapsed.add(r.workspace); else collapsed.delete(r.workspace);
+    } else {
+      const row = ownerRow(currentRow()) || currentRow();
+      if (row?.kind !== "workspace") return;
+      view.selections[view.pageKey] = row.id;
+      if (row.expanded) collapsed.add(row.workspace); else collapsed.delete(row.workspace);
+    }
+    project();
+  }
+  // [ and ] jump between folders (or top-level members) instead of row by row.
+  function jumpGroup(step) {
+    const heads = view.entries.filter(r => r.kind === "workspace" || (r.kind === "member" && r.depth === 0) || r.kind === "section").filter(selectable);
+    const index = view.entries.indexOf(currentRow());
+    const target = step > 0 ? heads.find(r => view.entries.indexOf(r) > index) : heads.filter(r => view.entries.indexOf(r) < index).at(-1);
+    if (target) { view.selections[view.pageKey] = target.id; project(); }
+  }
   function toggleFold(all) {
+    if (view.page.kind === "independent" && view.focus === "main") return toggleFolders(all);
     if (view.page.kind !== "team" || view.page.tab !== "org" || view.focus !== "main") return;
     if (view.query || view.filter !== "All") { notify("Clear the search to fold branches.", "info"); return; }
     const foldable = view.entries.filter(r => r.kind === "member" && r.expandable);
@@ -443,16 +489,18 @@ export async function runAgentsPage({ launch, input = process.stdin, output = pr
     else if (key.name === "left" || text === "h") left();
     else if (key.name === "right" || text === "l") right();
     else if (text === "z" || text === "Z") toggleFold(text === "Z");
+    else if ((text === "[" || text === "]") && view.focus === "main") jumpGroup(text === "]" ? 1 : -1);
+    else if (text === "S" && view.page.kind === "background" && view.focus === "main") actions.stopAll(view.entries.filter(r => r.kind === "live").length);
     else if (key.name === "enter") activate();
     else if (text === " ") rowActions();
     else if (key.name === "tab") switchTab();
     else if (text === "1" || text === "2") switchTab(text === "1" ? "org" : "tasks");
     else if (text === "?") view.help = true;
     else if (text === "/" && view.focus === "main" && view.page.kind !== "new-team") { view.searching = true; view.searchEditor.setInput(view.query); }
-    else if (text === "f" && view.focus === "main" && ["team", "member", "independent"].includes(view.page.kind)) actions.chooseFilter();
+    else if (text === "f" && view.focus === "main" && ["team", "member", "independent", "folder"].includes(view.page.kind)) actions.chooseFilter();
     else if (text === "n" || text === "N") actions.createTeam();
     else if (text === "r") refresh();
-    else if (text === "c" && view.focus === "main" && view.page.kind === "independent" && row?.workspace) ui.chat({ agentId: row.agentId, workspace: row.workspace });
+    else if (text === "c" && view.focus === "main" && ["independent", "folder"].includes(view.page.kind) && (row?.workspace || view.page.workspace)) ui.chat({ agentId: row?.agentId, workspace: row?.workspace || view.page.workspace });
     else if (text === "c" && contextMember()) ui.chat(contextMember());
     else if (text === "t" && view.focus === "main" && view.page.teamId) actions.assignTask(view.page.teamId, contextMember()?.agentId);
     else if (text === "a" && view.focus === "main" && view.page.kind === "team") actions.addMember(view.page.teamId, row?.kind === "member" ? row.agentId : undefined);
@@ -463,7 +511,7 @@ export async function runAgentsPage({ launch, input = process.stdin, output = pr
     if (view.connection !== "connected") { void connect(); return; }
     if (view.page.teamId) delete view.history[view.page.teamId];
     if (view.page.kind === "manager") view.managerHistory = null;
-    if (view.page.kind === "independent") view.independent = null;
+    if (["independent", "folder"].includes(view.page.kind)) view.independent = null;
     if (view.page.kind === "background") view.serviceAt = 0;
     void perform(async () => acceptSnapshot(await client.request("snapshot")), null, "Refreshing…");
   }
