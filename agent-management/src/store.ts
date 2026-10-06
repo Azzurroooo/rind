@@ -10,7 +10,8 @@ export async function openStore(directory: string, rotateEvery = 256) {
   const journal = path.join(directory, "events.jsonl");
   const snapshot = path.join(directory, "snapshot.json");
   let state = emptyState();
-  try { state = JSON.parse(await readFile(snapshot, "utf8")); }
+  // Tables added later start empty for snapshots written before them.
+  try { state = { ...emptyState(), ...JSON.parse(await readFile(snapshot, "utf8")) }; }
   catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
   requireValue(Number.isSafeInteger(state.seq), "CORRUPT_STORE", "Invalid management snapshot.");
   let raw = "";

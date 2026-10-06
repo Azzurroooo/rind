@@ -1,6 +1,7 @@
 export type Principal = { kind: "user" } | { kind: "manager"; sessionId: string } | { kind: "agent"; sessionId: string };
 export interface Agent { id: string; name: string; canonicalWorkspace: string; adapter: string; hint?: string; skillRefs?: string[] }
-export interface Team { id: string; name: string; leaderAgentId?: string; createRoot: string }
+// A deleted team with history keeps its record as a read-only archive.
+export interface Team { id: string; name: string; leaderAgentId?: string; createRoot: string; archive?: { at: string; members: Record<string, string> } }
 export interface Membership { teamId: string; agentId: string; reportsToAgentId?: string; position?: string; responsibility?: string }
 export interface Report { outcome: string; summary: string; evidence: string[]; artifacts: string[]; nextAction?: string }
 export interface Task {
@@ -9,7 +10,11 @@ export interface Task {
   parentTaskId?: string; blockedOn?: { responder: string; action: string };
   report?: Report; error?: string; dispatch?: boolean;
   priority?: "high" | "low";
+  deliveredAt?: string; reworkOf?: string;
+  review?: { decision: "accepted" | "rework"; at: string; feedback?: string; reworkTaskId?: string };
 }
+// Destructive requests from the Manager wait in the user's Inbox.
+export interface Approval { id: string; kind: "deleteTeam" | "cancelRun"; teamId: string; runId?: string; taskId?: string; title: string; requestedBy: string; createdAt: string }
 export interface Session { id: string; agentId: string; teamId?: string; runtimeSessionId: string; origin: "managed" | "direct"; shared?: boolean }
 export interface Run {
   id: string; sessionId: string; taskId?: string; status: "starting" | "running" | "succeeded" | "failed" | "cancelled" | "unknown";
@@ -20,10 +25,10 @@ export interface Artifact { id: string; taskId: string; name: string; size: numb
 export interface State {
   seq: number; agents: Record<string, Agent>; teams: Record<string, Team>; memberships: Record<string, Membership>;
   tasks: Record<string, Task>; sessions: Record<string, Session>; runs: Record<string, Run>;
-  notes: Record<string, Note>; artifacts: Record<string, Artifact>;
+  notes: Record<string, Note>; artifacts: Record<string, Artifact>; approvals: Record<string, Approval>;
   receipts: Record<string, { input: string; result: unknown; at?: number }>;
 }
-export const emptyState = (): State => ({ seq: 0, agents: {}, teams: {}, memberships: {}, tasks: {}, sessions: {}, runs: {}, notes: {}, artifacts: {}, receipts: {} });
+export const emptyState = (): State => ({ seq: 0, agents: {}, teams: {}, memberships: {}, tasks: {}, sessions: {}, runs: {}, notes: {}, artifacts: {}, approvals: {}, receipts: {} });
 export class ManagementError extends Error {
   constructor(public code: string, message: string, public details?: unknown) { super(message); }
 }

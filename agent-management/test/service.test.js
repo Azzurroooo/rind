@@ -9,6 +9,7 @@ import { randomUUID } from "node:crypto";
 import { createService } from "../dist/service.js";
 import { openStore } from "../dist/store.js";
 import { managementPaths } from "../dist/paths.js";
+import { fixture, eventually, user } from "./fixture.js";
 
 test("a named member receives a blocker and its report resumes the blocked owner", async t => {
   const f = await fixture(t);
@@ -60,7 +61,6 @@ test("import previews and registers legacy files without changing them", async t
   assert.equal((await f.call("importTeam", { root, confirmation: preview.fingerprint })).id, imported.id);
 });
 
-const user = { kind: "user" };
 test("three levels of delegation wait for grandchildren and deliver back through the original task chain", async t => {
   const f = await fixture(t), a = await f.member("a"), a1 = await f.member("a1");
   await f.call("setSupervisor", { teamId: f.team.id, agentId: a1.id, reportsToAgentId: a.id });
@@ -165,36 +165,6 @@ test("host admission covers automatic continuations and only replay reconciliati
   await assert.rejects(f.call("hostTurnStart", { sessionId: direct.id, runtimeSessionId: "live" }), { code: "WORKSPACE_BUSY" });
 });
 
-async function fixture(t) {
-  const home = await mkdtemp(path.join(os.tmpdir(), "rind-management-"));
-  const paths = managementPaths(home);
-  const store = await openStore(paths.state, 5);
-  const starts = [];
-  const adapter = { async start(input) {
-    let finish, fail;
-    const completion = new Promise((resolve, reject) => { finish = resolve; fail = reject; });
-    starts.push({ input, finish, fail });
-    return { runtimeSessionId: randomUUID(), completion, async cancel() { finish({ content: "" }); } };
-  } };
-  const service = createService({ store, paths, adapters: { rind: adapter }, toolConfig: () => ({}) });
-  t.after(async () => { await service.stop(); await rm(home, { recursive: true, force: true }); });
-  const call = (method, params = {}, actor = user) => service.request(actor, method, { requestId: randomUUID(), ...params });
-  const team = await call("createTeam", { name: "Product" });
-  async function member(name, workspace) {
-    workspace ||= path.join(home, name);
-    await mkdir(workspace, { recursive: true });
-    const agent = await call("registerAgent", { workspace, name });
-    await call("addMember", { teamId: team.id, agentId: agent.id });
-    return agent;
-  }
-  const leader = await member("leader");
-  await call("setLeader", { teamId: team.id, agentId: leader.id });
-  return { home, paths, store, service, call, team, leader, member, starts };
-}
-async function eventually(check) {
-  for (let i = 0; i < 100; i++) { if (check()) return; await new Promise(resolve => setTimeout(resolve, 10)); }
-  assert.ok(check(), "state did not converge");
-}
 test("registration, explicit sharing, scoped roles and durable idempotency", async t => {
   const f = await fixture(t);
   const again = await f.call("registerAgent", { workspace: f.leader.canonicalWorkspace });

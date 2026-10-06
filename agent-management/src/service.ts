@@ -4,7 +4,7 @@ import { mkdir, realpath, stat, copyFile, readFile, readdir, lstat, chmod } from
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import path from "node:path";
-import { activeRun, memberKey, requireValue, text, type State, type Principal, type Session, type Run, type Task, type Report, type Adapter, type AdapterHandle } from "./model.js";
+import { activeRun, memberKey, requireValue, text, type State, type Principal, type Session, type Run, type Task, type Report, type Adapter, type AdapterHandle, type Approval } from "./model.js";
 import { canonicalDirectory, inside, privateDirectory, type Paths } from "./paths.js";
 import type { Store } from "./store.js";
 import { previewLegacyTeam } from "./legacy.js";
@@ -12,11 +12,12 @@ import { sessionStatus, memberStatus, queuedReason, priorityRank, teamBriefing, 
 import { retain } from "./retention.js";
 
 import { supervisor, manages, setSupervisor } from "./organization.js";
+import { dissolveTeam, pruneAgents, unbindSessions } from "./teams.js";
 
 const git = promisify(execFile);
 type Params = Record<string, any>;
 const awaitingDelivery = (task: Task) => ["queued", "running"].includes(task.status) || (task.status === "blocked" && task.blockedOn?.responder === "children");
-const reads = new Set(["snapshot", "listTeams", "getTeam", "listAgents", "getTask", "previewCopy", "previewImport", "readArtifact"]);
+const reads = new Set(["snapshot", "listTeams", "getTeam", "listAgents", "getTask", "previewCopy", "previewImport", "readArtifact", "listArchive"]);
 export function createService({ store, paths, adapters, toolConfig }: {
   store: Store; paths: Paths; adapters: Record<string, Adapter>;
   toolConfig: (principal: Principal, session: Session) => object;
@@ -49,18 +50,19 @@ export function createService({ store, paths, adapters, toolConfig }: {
     requireValue(session, "SESSION_EXPIRED", "This management session is no longer registered.");
     return session;
   }
-  function teamAccess(state: State, actor: Principal, teamId: string) {
+  function teamAccess(state: State, actor: Principal, teamId: string, read = false) {
     const team = state.teams[teamId];
     requireValue(team, "NOT_FOUND", "Team not found.");
+    requireValue(read || !team.archive, "TEAM_ARCHIVED", "This team was deleted; its deliveries are kept read-only.");
     if (actor.kind !== "agent") return team;
     const session = sessionOf(state, actor)!;
     requireValue(session.teamId === teamId && state.memberships[memberKey(teamId, session.agentId)], "FORBIDDEN", "This session cannot access that team.");
     return team;
   }
-  function taskAccess(state: State, actor: Principal, taskId: string, responding = false) {
+  function taskAccess(state: State, actor: Principal, taskId: string, responding = false, read = false) {
     const task = state.tasks[taskId];
     requireValue(task, "NOT_FOUND", "Task not found.");
-    teamAccess(state, actor, task.teamId);
+    teamAccess(state, actor, task.teamId, read);
     if (actor.kind === "agent") {
       const session = sessionOf(state, actor)!;
       requireValue(session.agentId === task.assigneeAgentId || manages(state, task.teamId, session.agentId, task.assigneeAgentId) || task.createdBy === session.agentId || (responding && task.blockedOn?.responder === session.agentId), "FORBIDDEN", "Only the task owner, its supervisors, delegator or named responder can access this task.");
@@ -146,6 +148,25 @@ export function createService({ store, paths, adapters, toolConfig }: {
     delete parent.blockedOn;
     note(state, parent.id, "system", "Child tasks have returned. Inspect their reports and blockers, then continue or deliver the combined result.");
   }
+  function deliver(task: Task) { task.status = "done"; task.deliveredAt = new Date().toISOString(); delete task.blockedOn; }
+  function deleteTeam(state: State, teamId: string) {
+    requireValue(!Object.values(state.runs).some(r => activeRun(r) && state.sessions[r.sessionId]?.teamId === teamId), "TEAM_BUSY", "Stop or resolve the team's running work before deleting it.");
+    return dissolveTeam(state, teamId, (taskId, message) => note(state, taskId, "system", message));
+  }
+  function stopRun(state: State, by: string, run: Run, task: Task) {
+    task.status = "cancelled"; delete task.dispatch;
+    note(state, task.id, by, "Requested execution stop.");
+    // The workspace remains reserved until the adapter confirms termination.
+    return { runId: run.id, cancelling: true };
+  }
+  // One pending request per decision; asking again returns the same one.
+  function askUser(state: State, actor: Principal, request: Pick<Approval, "kind" | "teamId" | "title"> & Partial<Approval>) {
+    const pending = Object.values(state.approvals).find(a => a.kind === request.kind && a.teamId === request.teamId && a.runId === request.runId);
+    if (pending) return { approval: pending };
+    const id = randomUUID();
+    state.approvals[id] = { ...request, id, requestedBy: author(state, actor), createdAt: new Date().toISOString() };
+    return { approval: state.approvals[id] };
+  }
   function workspaceBusy(state: State, workspace: string) {
     return Object.values(state.runs).some(r => activeRun(r) && state.agents[state.sessions[r.sessionId]?.agentId]?.canonicalWorkspace === workspace);
   }
@@ -160,6 +181,7 @@ export function createService({ store, paths, adapters, toolConfig }: {
   }
   function filtered(state: State, actor: Principal) {
     const allowedTeams = new Set(Object.keys(state.teams).filter(id => {
+      if (state.teams[id].archive) return false;
       if (actor.kind !== "agent") return true;
       const s = sessionOf(state, actor)!;
       return s.teamId === id && !!state.memberships[memberKey(id, s.agentId)];
@@ -184,6 +206,8 @@ export function createService({ store, paths, adapters, toolConfig }: {
       connectedSessions: sessions.filter(s => connected.has(s.id)).map(s => s.id),
       // Every conversation in the shared Runtime, including plain ones outside any team.
       ...(actor.kind === "user" ? { live: [...runtimeSessions.values()] } : {}),
+      // Archived work is read on demand (listArchive) so it never weighs on live pushes.
+      ...(actor.kind !== "agent" ? { approvals: Object.values(state.approvals), archivedTeams: Object.values(state.teams).filter(t => t.archive).map(t => ({ id: t.id, name: t.name, archivedAt: t.archive!.at })) } : {}),
       runs: Object.values(state.runs).filter(r => sessionIds.has(r.sessionId)),
       notes: Object.values(state.notes).filter(n => taskIds.has(n.taskId)),
       artifacts: Object.values(state.artifacts).filter(a => taskIds.has(a.taskId)),
@@ -196,11 +220,11 @@ export function createService({ store, paths, adapters, toolConfig }: {
       case "listTeams": return filtered(state, actor).teams;
       case "listAgents": return filtered(state, actor).agents;
       case "getTeam": {
-        teamAccess(state, actor, p.teamId); const view = filtered(state, actor);
+        teamAccess(state, actor, p.teamId, true); const view = filtered(state, actor);
         const tasks = view.tasks.filter(t => t.teamId === p.teamId);
         return { team: state.teams[p.teamId], members: view.memberships.filter(m => m.teamId === p.teamId), tasks, briefing: teamBriefing(tasks, state.agents) };
       }
-      case "getTask": { const task = taskAccess(state, actor, p.taskId, true); return { ...task, notes: Object.values(state.notes).filter(n => n.taskId === task.id), artifacts: Object.values(state.artifacts).filter(a => a.taskId === task.id) }; }
+      case "getTask": { const task = taskAccess(state, actor, p.taskId, true, true); return { ...task, notes: Object.values(state.notes).filter(n => n.taskId === task.id), artifacts: Object.values(state.artifacts).filter(a => a.taskId === task.id) }; }
       case "createTeam": {
         requireValue(actor.kind !== "agent", "FORBIDDEN", "Only the user or manager can create teams.");
         const id = randomUUID();
@@ -223,7 +247,24 @@ export function createService({ store, paths, adapters, toolConfig }: {
         requireValue(!Object.values(state.runs).some(r => activeRun(r) && state.sessions[r.sessionId].teamId === p.teamId && state.sessions[r.sessionId].agentId === p.agentId), "MEMBER_BUSY", "Stop or resolve this member's run first.");
         delete state.memberships[memberKey(p.teamId, p.agentId)];
         for (const task of Object.values(state.tasks)) if (task.teamId === p.teamId && task.assigneeAgentId === p.agentId && !["done", "cancelled"].includes(task.status)) { task.status = "needs_attention"; delete task.dispatch; task.error = "Member removed from team."; }
+        unbindSessions(state, s => s.teamId === p.teamId && s.agentId === p.agentId);
+        pruneAgents(state);
         return { removed: true };
+      }
+      case "deleteTeam": {
+        requireValue(actor.kind !== "agent", "FORBIDDEN", "Only the user or Manager can delete teams.");
+        const team = teamAccess(state, actor, p.teamId);
+        if (actor.kind === "user") requireValue(p.confirmName === team.name, "CONFIRMATION_REQUIRED", "Type the team name exactly to delete it.");
+        else if (Object.values(state.tasks).some(t => t.teamId === team.id)) {
+          requireValue(!Object.values(state.runs).some(r => activeRun(r) && state.sessions[r.sessionId]?.teamId === team.id), "TEAM_BUSY", "Stop or resolve the team's running work before deleting it.");
+          return askUser(state, actor, { kind: "deleteTeam", teamId: team.id, title: "Delete team " + team.name });
+        }
+        return deleteTeam(state, team.id);
+      }
+      case "listArchive": {
+        requireValue(actor.kind !== "agent", "FORBIDDEN", "Only the user or Manager can read deleted teams.");
+        const teams = Object.values(state.teams).filter(t => t.archive).sort((a, b) => b.archive!.at.localeCompare(a.archive!.at));
+        return { teams: teams.map(team => ({ ...team, tasks: Object.values(state.tasks).filter(t => t.teamId === team.id) })) };
       }
       case "setLeader": {
         requireValue(actor.kind !== "agent", "FORBIDDEN", "Only the user or manager can change team leadership.");
@@ -369,6 +410,25 @@ export function createService({ store, paths, adapters, toolConfig }: {
         } else requireValue(false, "INVALID_INPUT", "Provide a report or a blocker with responder and action.");
         return task;
       }
+      case "reviewTask": {
+        userOnly(actor);
+        const task = taskAccess(state, actor, p.taskId);
+        requireValue(task.status === "done" && task.report, "TASK_NOT_DELIVERED", "Only a delivered task can be accepted or sent back.");
+        requireValue(!task.review, "ALREADY_REVIEWED", "This delivery was already reviewed.");
+        const at = new Date().toISOString();
+        if (p.decision === "accept") { task.review = { decision: "accepted", at }; note(state, task.id, "user", "Accepted the delivery."); return { task }; }
+        requireValue(p.decision === "rework", "INVALID_INPUT", "Choose accept or rework.");
+        const feedback = text(p.feedback, "Feedback");
+        requireMember(state, task.teamId, task.assigneeAgentId);
+        // Rework is a new task for the same owner, so the reviewed delivery stays as it was.
+        const id = randomUUID();
+        const rework: Task = { id, teamId: task.teamId, assigneeAgentId: task.assigneeAgentId, createdBy: "user", brief: "Rework: " + task.brief, status: "queued", reworkOf: task.id, dispatch: true, ...(task.priority ? { priority: task.priority } : {}) };
+        state.tasks[id] = rework;
+        note(state, id, "user", "Feedback on the previous delivery: " + feedback);
+        task.review = { decision: "rework", at, feedback, reworkTaskId: id };
+        note(state, task.id, "user", "Sent back for rework: " + feedback);
+        return { task, rework };
+      }
       case "postTaskNote": {
         const task = taskAccess(state, actor, p.taskId, true);
         const result = note(state, task.id, author(state, actor), text(p.text, "Note"));
@@ -397,7 +457,7 @@ export function createService({ store, paths, adapters, toolConfig }: {
       }
       case "readArtifact": {
         const artifact = state.artifacts[p.artifactId]; requireValue(artifact, "NOT_FOUND", "Artifact not found.");
-        const task = taskAccess(state, actor, artifact.taskId);
+        const task = taskAccess(state, actor, artifact.taskId, false, true);
         const location = path.join(paths.artifacts, task.teamId, task.id, artifact.id);
         if (actor.kind === "user") return { ...artifact, path: location };
         requireValue(artifact.size <= 64 * 1024, "ARTIFACT_TOO_LARGE", "Ask the user to open this artifact; inline preview is limited to 64 KiB.");
@@ -492,7 +552,7 @@ export function createService({ store, paths, adapters, toolConfig }: {
             if (p.active && task.status === "needs_attention") { task.status = "running"; delete task.error; }
             else if (p.connected && !p.active && ["completed", "failed", "cancelled"].includes(p.outcome)) {
               run.status = p.outcome === "completed" ? "succeeded" : p.outcome;
-              if (task.report && p.outcome === "completed") task.status = "done";
+              if (task.report && p.outcome === "completed") deliver(task);
               else if (task.status !== "blocked") { task.status = "needs_attention"; task.error = "Execution finished while management was disconnected. Inspect the session before retrying."; }
               wakeParent(state, task);
             }
@@ -515,10 +575,22 @@ export function createService({ store, paths, adapters, toolConfig }: {
       case "cancelRun": {
         const run = state.runs[p.runId]; requireValue(run?.taskId && live.has(run.id), "NOT_RUNNING", "Only a live managed task can be cancelled here.");
         const task = taskAccess(state, actor, run.taskId); taskControl(state, actor, task);
-        task.status = "cancelled"; delete task.dispatch;
-        note(state, task.id, author(state, actor), "Requested execution stop.");
-        // The workspace remains reserved until the adapter confirms termination.
-        return { runId: run.id, cancelling: true };
+        if (actor.kind === "manager") return askUser(state, actor, { kind: "cancelRun", teamId: task.teamId, runId: run.id, taskId: task.id, title: "Stop " + task.brief });
+        return stopRun(state, author(state, actor), run, task);
+      }
+      case "resolveApproval": {
+        userOnly(actor);
+        const approval = state.approvals[p.approvalId];
+        requireValue(approval, "NOT_FOUND", "This request was already handled.");
+        delete state.approvals[approval.id];
+        if (p.approve !== true) {
+          if (approval.taskId && state.tasks[approval.taskId]) note(state, approval.taskId, "user", "Declined: " + approval.title);
+          return { declined: true };
+        }
+        if (approval.kind === "deleteTeam") return state.teams[approval.teamId] && !state.teams[approval.teamId].archive ? deleteTeam(state, approval.teamId) : { expired: true };
+        const run = state.runs[approval.runId!];
+        if (!run?.taskId || !live.has(run.id) || !activeRun(run)) return { expired: true };
+        return stopRun(state, "user", run, state.tasks[run.taskId]);
       }
       default: requireValue(false, "UNKNOWN_METHOD", "Unknown management operation: " + method);
     }
@@ -538,7 +610,8 @@ export function createService({ store, paths, adapters, toolConfig }: {
       if (remember) state.receipts[key] = { input, result: structuredClone(result), at: Date.now() };
       return result;
     });
-    if (method === "cancelRun") void live.get(params.runId)?.cancel().catch(error => failRun(params.runId, error));
+    const stopping = (result as { cancelling?: boolean; runId?: string })?.cancelling ? (result as { runId: string }).runId : undefined;
+    if (stopping) void live.get(stopping)?.cancel().catch(error => failRun(stopping, error));
     if (method === "reconcileSession") { if (params.connected) connected.add(params.sessionId); else connected.delete(params.sessionId); for (const listener of listeners) listener(); }
     if (method === "attachSession" || method === "reattachSession") connected.add((result as Session).id);
     if (method === "detachSession" && (!store.state.sessions[params.sessionId]?.shared || !store.state.sessions[params.sessionId]?.runtimeSessionId)) connected.delete(params.sessionId);
@@ -573,6 +646,7 @@ export function createService({ store, paths, adapters, toolConfig }: {
         "Assigned skills: " + (agent.skillRefs || []).join(", "),
         "Child results: " + JSON.stringify(children),
         "Task notes: " + JSON.stringify(Object.values(state.notes).filter(n => n.taskId === task.id).slice(-20)),
+        task.reworkOf ? "This task reworks task " + task.reworkOf + ", whose delivery was sent back: " + JSON.stringify(state.tasks[task.reworkOf]?.report) + ". Address the user's feedback in the task notes." : "",
       ].filter(Boolean).join("\n");
       const handle = await adapters[agent.adapter].start({ agent, session, task, instructions, externalTools: toolConfig({ kind: "agent", sessionId: session.id }, session) }, event => {
         void transaction(next => {
@@ -597,7 +671,7 @@ export function createService({ store, paths, adapters, toolConfig }: {
         else if (task.status === "blocked") { /* Preserve explicitly routed blockers. */ }
         else if (children.some(awaitingDelivery)) {
           task.status = "blocked"; task.blockedOn = { responder: "children", action: "Waiting for assigned members to return." }; delete task.report;
-        } else if (task.report) { task.status = "done"; delete task.blockedOn; }
+        } else if (task.report) deliver(task);
         else if (children.some(t => !observedChildren.has(t.id))) {
           task.status = "queued"; task.dispatch = true; note(next, task.id, "system", "Child tasks have returned. Review and integrate their reports.");
         } else { task.status = "needs_attention"; task.error = "Execution ended without a delivery report. Review the session and retry when ready."; }
@@ -620,8 +694,8 @@ export function createService({ store, paths, adapters, toolConfig }: {
           if (workspaceBusy(state, agent.canonicalWorkspace)) continue;
           try { await canonicalDirectory(agent.canonicalWorkspace); }
           catch (error) { task.status = "needs_attention"; task.error = String(error); delete task.dispatch; continue; }
-          const previous = Object.values(state.runs).filter(r => r.taskId === task.id).at(-1);
-          const session: Session = previous ? state.sessions[previous.sessionId] : { id: randomUUID(), agentId: agent.id, teamId: task.teamId, runtimeSessionId: "", origin: "managed", shared: true };
+          const previous = Object.values(state.runs).filter(r => r.taskId === task.id).map(r => state.sessions[r.sessionId]).filter(Boolean).at(-1);
+          const session: Session = previous || { id: randomUUID(), agentId: agent.id, teamId: task.teamId, runtimeSessionId: "", origin: "managed", shared: true };
           session.shared = true;
           state.sessions[session.id] = session;
           const run = newRun(state, session.id, task.id);
