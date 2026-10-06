@@ -15,6 +15,7 @@ async function tail(file, bytes = 16384) {
   finally { await handle?.close(); }
 }
 import { single, roleOf, STATUS_FILTERS } from "./agents-model.js";
+import { createReviewActions } from "./agents-review.js";
 
 // Multi-step management flows. Each flow only talks to the page through the
 // small `ui` surface, so the key handling and the service calls stay separate.
@@ -25,6 +26,8 @@ export function createActions(ui) {
   const display = id => single(snap().agents.find(a => a.id === id)?.name) || id;
   const teamOf = id => snap().teams.find(t => t.id === id);
   const membership = (teamId, agentId) => snap().memberships.find(m => m.teamId === teamId && m.agentId === agentId);
+  const review = createReviewActions(ui, { agentName, display, teamOf, assignTask, taskActions, answer });
+  const { delivery } = review;
 
   function createTeam() {
     ui.form("New team", [{ key: "name", label: "Team name", hint: "What the team works on, e.g. Product, Research or Finance." }], async values => {
@@ -152,7 +155,7 @@ export function createActions(ui) {
   function memberActions(teamId, agentId) {
     const team = teamOf(teamId), run = unknownRun(teamId, agentId);
     ui.choose(agentName(agentId), [
-      { label: "Conversations", key: "enter", description: "Every conversation in this team", action: () => ui.openMember(teamId, agentId) },
+      { label: "Open member", key: "enter", description: "Every conversation in this team", action: () => ui.openMember(teamId, agentId) },
       { label: "New conversation", key: "c", description: "Talk to this member directly", action: () => ui.startNew({ agentId, teamId }) },
       { label: "Assign task", key: "t", description: "Tracked work with a delivery report", action: () => assignTask(teamId, agentId) },
       { label: "Add member below", key: "a", description: "Add a member below " + agentName(agentId), action: () => addMember(teamId, agentId) },
@@ -182,7 +185,7 @@ export function createActions(ui) {
         { label: "All conversations of " + agentName(row.agentId), action: () => ui.openMember(row.teamId, row.agentId) },
         { label: "New conversation", key: "c", action: () => ui.startNew(row) },
       ]),
-      ...(task ? [{ label: "Task delivery", description: single(task.brief), action: () => delivery(task.id) }] : []),
+      ...(task ? [{ label: "Task report", description: single(task.brief), action: () => delivery(task.id) }] : []),
     ]);
   }
 
@@ -199,7 +202,7 @@ export function createActions(ui) {
     if (!task) return;
     const run = snap().runs.find(r => r.taskId === taskId && ["starting", "running", "unknown"].includes(r.status));
     ui.choose("Task", [
-      { label: "Delivery", key: "enter", description: "Summary, evidence, artifacts and notes", action: () => delivery(taskId) },
+      { label: "Open report", key: "enter", description: "Outcome, evidence, files and history", action: () => delivery(taskId) },
       { label: task.blockedOn?.responder === "user" ? "Answer blocker" : "Add note", key: "n", description: task.blockedOn?.responder === "user" ? single(task.blockedOn.action) : "Share context with the owner", action: () => answer(taskId) },
       ...(!run && ["queued", "blocked", "needs_attention"].includes(task.status) ? [{ label: task.status === "queued" ? "Start now" : "Retry", key: "s", action: async () => { await ui.request("startTask", { taskId }); ui.notify("Task started.", "success"); } }] : []),
       ...(task.status === "queued" ? [{ label: "Queue priority", key: "p", description: "Currently " + (task.priority || "normal"), action: () => ui.choose("Queue priority", ["high", "normal", "low"].map(priority => ({ label: priority[0].toUpperCase() + priority.slice(1),
@@ -209,22 +212,6 @@ export function createActions(ui) {
         : run ? [{ label: "Stop", key: "x", danger: true, action: () => ui.confirm("Stop this task?", [single(task.brief)], "Stop execution", async () => { await ui.request("cancelRun", { runId: run.id }); ui.notify("Stopping the task.", "success"); }) }] : []),
       ...(!run && !["done", "cancelled"].includes(task.status) ? [{ label: "Cancel task", key: "x", danger: true, action: () => ui.confirm("Cancel this task?", [single(task.brief)], "Cancel task", async () => { await ui.request("cancelTask", { taskId }); ui.notify("Task cancelled.", "success"); }) }] : []),
     ], { description: [single(task.brief)] });
-  }
-
-  async function delivery(taskId) {
-    const task = await ui.request("getTask", { taskId });
-    const artifacts = await Promise.all((task.report?.artifacts || []).map(async artifactId => { const artifact = await ui.request("readArtifact", { artifactId }); return "  " + artifact.name + "  " + artifact.path; }));
-    const runs = snap().runs.filter(run => run.taskId === taskId);
-    const section = (title, lines) => lines.length ? ["", title.toUpperCase(), ...lines] : [];
-    ui.showText(single(task.brief), [
-      "Owner " + agentName(task.assigneeAgentId) + " · " + task.status + (task.priority ? " · " + task.priority + " priority" : ""),
-      ...section("Needs " + display(task.blockedOn?.responder), task.blockedOn ? [task.blockedOn.action] : []),
-      ...section("Problem", task.error ? [task.error] : []),
-      ...(task.report ? [...section("Delivery · " + task.report.outcome, [task.report.summary]), ...section("Evidence", task.report.evidence.map(item => "  • " + item)), ...section("Artifacts", artifacts),
-        ...section("Next", task.report.nextAction ? [task.report.nextAction] : [])] : section("Delivery", ["No report yet."])),
-      ...section("Notes", task.notes.map(note => note.createdAt.slice(0, 16).replace("T", " ") + "  " + display(note.author) + ": " + note.text)),
-      ...section("Runs", runs.map(run => run.startedAt.slice(0, 16).replace("T", " ") + "  " + run.status)),
-    ], { taskId, refresh: () => delivery(taskId) });
   }
 
   // Stop is destructive and separate from leaving: Cancel is the default, the
@@ -270,5 +257,5 @@ export function createActions(ui) {
     ui.choose("Show only", STATUS_FILTERS.map(status => ({ label: status, description: status === "All" ? "Everything in this view" : undefined, action() { ui.setFilter(status); } })), { selected: ui.view.filter });
   }
 
-  return { createTeam, addMember, assignTask, editMember, memberActions, sessionActions, taskActions, answer, delivery, resolveRun, chooseFilter, stopAll, serviceActions };
+  return { ...review, createTeam, addMember, assignTask, editMember, memberActions, sessionActions, taskActions, answer, resolveRun, chooseFilter, stopAll, serviceActions };
 }

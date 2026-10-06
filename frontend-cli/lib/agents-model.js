@@ -1,7 +1,7 @@
 // Pure projections from the management snapshot into the rows the Agents page
 // renders. Nothing here touches the terminal or the service.
 
-export const emptyAgentsSnapshot = () => ({ teams: [], memberships: [], agents: [], tasks: [], runs: [], sessions: [], notes: [], artifacts: [] });
+export const emptyAgentsSnapshot = () => ({ teams: [], memberships: [], agents: [], tasks: [], runs: [], sessions: [], notes: [], artifacts: [], approvals: [], archivedTeams: [] });
 
 // A new conversation with no message yet is not a conversation to manage. It
 // is hidden everywhere except from the window that has it open (`keep`).
@@ -211,10 +211,17 @@ export function teamStatus(snapshot, teamId, inbox = inboxItems(snapshot)) {
   return statuses.sort((a, b) => statusMeta(a).rank - statusMeta(b).rank)[0] || "Idle";
 }
 
+// A delivery nobody has accepted or sent back yet.
+export const unreviewed = task => task.status === "done" && Boolean(task.report) && !task.review;
+
 export function inboxItems(snapshot) {
   const items = [];
   const name = id => single(byId(snapshot.agents, id)?.name) || "Removed member";
   const teamName = id => single(byId(snapshot.teams, id)?.name) || "Team";
+  // The Manager's destructive requests wait for the user's decision first.
+  for (const approval of snapshot.approvals || []) {
+    items.push({ id: "a:" + approval.id, kind: "approval", status: "Needs input", title: "Approve: " + single(approval.title), context: teamName(approval.teamId) + " › Manager", approvalId: approval.id, teamId: approval.teamId });
+  }
   for (const task of snapshot.tasks.filter(needsUser)) {
     items.push({ id: "t:" + task.id, kind: "task", status: "Needs input", title: task.status === "blocked" ? "Answer: " + single(task.blockedOn.action) : "Review: " + single(task.error || task.brief),
       context: teamName(task.teamId) + " › " + name(task.assigneeAgentId), owner: name(task.assigneeAgentId), taskId: task.id, teamId: task.teamId, answer: task.status === "blocked" });
@@ -238,12 +245,14 @@ export function inboxItems(snapshot) {
 export function inboxRows(snapshot) {
   const items = inboxItems(snapshot);
   const rows = items.length ? [{ id: "section:needs", kind: "section", title: "Needs you", count: items.length }, ...items] : [{ id: "clear", kind: "clear", title: "Nothing needs you right now" }];
-  // What was delivered lately, newest first: the other thing people check daily.
-  const finished = task => snapshot.runs.filter(run => run.taskId === task.id).reduce((max, run) => later(max, run.lastObservedAt), "");
-  const delivered = snapshot.tasks.filter(task => task.status === "done").map(task => ({ task, at: finished(task) }))
-    .sort((a, b) => b.at.localeCompare(a.at)).slice(0, 8);
-  if (delivered.length) rows.push({ id: "section:delivered", kind: "section", title: "Recently delivered", count: delivered.length },
-    ...delivered.map(({ task, at }) => ({ id: "d:" + task.id, kind: "task", status: "Done", title: single(task.brief), note: single(task.report?.summary),
+  // What was delivered lately: every delivery not reviewed yet (marked new),
+  // then the latest reviewed ones, newest first.
+  const finished = task => task.deliveredAt || snapshot.runs.filter(run => run.taskId === task.id).reduce((max, run) => later(max, run.lastObservedAt), "");
+  const done = snapshot.tasks.filter(task => task.status === "done").map(task => ({ task, at: finished(task) })).sort((a, b) => b.at.localeCompare(a.at));
+  const fresh = done.filter(({ task }) => unreviewed(task));
+  const delivered = [...fresh, ...done.filter(({ task }) => !unreviewed(task)).slice(0, Math.max(0, 8 - fresh.length))];
+  if (delivered.length) rows.push({ id: "section:delivered", kind: "section", title: "Recently delivered" + (fresh.length ? " · " + fresh.length + " new" : ""), count: undefined },
+    ...delivered.map(({ task, at }) => ({ id: "d:" + task.id, kind: "task", status: "Done", fresh: unreviewed(task), reworked: task.review?.decision === "rework", title: single(task.brief), note: single(task.report?.summary),
       context: (single(byId(snapshot.teams, task.teamId)?.name) || "Team") + " › " + (single(byId(snapshot.agents, task.assigneeAgentId)?.name) || "Removed member") + (at ? " · " + relativeTime(at) : ""),
       owner: single(byId(snapshot.agents, task.assigneeAgentId)?.name), taskId: task.id, teamId: task.teamId })));
   if (!snapshot.teams.length) rows.push({ id: "new-team", kind: "new-team", title: "Create your first team" });
@@ -260,7 +269,23 @@ export function sidebarRows(snapshot) {
     { id: "section:teams", kind: "section", title: "Teams", count: snapshot.teams.length },
     ...snapshot.teams.map(team => ({ id: team.id, kind: "team", title: single(team.name), status: teamStatus(snapshot, team.id, inbox), teamId: team.id, summary: teamSummary(snapshot, team.id, inbox) })),
     { id: "new-team", kind: "new-team", title: "New team" },
+    ...(snapshot.archivedTeams?.length ? [{ id: "archive", kind: "archive", title: "Archive", badge: snapshot.archivedTeams.length }] : []),
   ];
+}
+
+// Deleted teams, newest first, with what they delivered. Read-only.
+export function archiveRows(archive, { query = "" } = {}) {
+  if (!archive) return [{ id: "loading", kind: "clear", title: "Loading…" }];
+  const rows = [];
+  for (const team of archive.teams) {
+    const owner = id => single(team.archive?.members?.[id]) || "Removed member";
+    const tasks = team.tasks.filter(task => matches(query, task.brief, owner(task.assigneeAgentId), task.report?.summary))
+      .sort((a, b) => (b.deliveredAt || "").localeCompare(a.deliveredAt || ""));
+    if (!tasks.length) continue;
+    rows.push({ id: "section:" + team.id, kind: "section", title: single(team.name) + " · deleted " + relativeTime(team.archive?.at), count: undefined },
+      ...tasks.map(task => ({ id: "x:" + task.id, kind: "task", archived: true, status: taskStatus(task), title: single(task.brief), note: single(task.report?.summary), owner: owner(task.assigneeAgentId), taskId: task.id, teamId: team.id })));
+  }
+  return rows.length ? rows : [{ id: "clear", kind: "clear", title: query ? "Nothing matches" : "No deleted teams" }];
 }
 
 // One folder can be spelled with different case or a trailing separator.

@@ -74,6 +74,7 @@ function rightColumns(row, width) {
   if (row.kind === "team" && row.summary) return row.summary.needs ? paint.warning("! " + row.summary.needs) : row.summary.working ? paint.accent("● " + row.summary.working) : "";
   if (row.kind === "inbox" && row.badge) return paint.warning(String(row.badge));
   if (row.kind === "background" && row.badge) return paint.accent("● " + row.badge);
+  if (row.kind === "archive") return paint.dim(String(row.badge));
   if (row.kind === "live") return paint.dim(truncateToWidth(row.context || "", 24, "…") + " · " + (row.time || "").padStart(3));
   if (row.kind === "service") return (row.stale ? paint.warning : paint.dim)(row.note);
   if (row.context) return paint.dim(row.context);
@@ -81,6 +82,10 @@ function rightColumns(row, width) {
 }
 
 function leadIcon(row) {
+  if (row.fresh) return paint.accent("●");
+  if (row.reworked) return paint.warning("↺");
+  if (row.kind === "approval") return glyph(row.status);
+  if (row.kind === "archive") return paint.dim("▤");
   if (row.kind === "member" || row.kind === "session" || row.kind === "task" || row.kind === "run") return glyph(row.status);
   if (["add-member", "new-session", "assign", "new-team"].includes(row.kind)) return paint.accent("+");
   if (row.kind === "more") return paint.dim("…");
@@ -143,7 +148,7 @@ function rowLine(row, width, selected, focused, nameColumn) {
   }
   if (row.guide !== undefined) return marker + " " + treeLine(row, width - 2, nameColumn);
   let name = single(row.title);
-  if (row.kind === "member" || row.kind === "team") name = paint.bold(name);
+  if (row.kind === "member" || row.kind === "team" || row.fresh) name = paint.bold(name);
   else if (["add-member", "new-session", "assign", "new-team", "more", "clear"].includes(row.kind)) name = paint.dim(name);
   const extra = (row.role ? paint.dim(" · " + row.role) : "") + (row.hidden ? paint.dim(" +" + row.hidden) : "") + (row.note && row.kind !== "service" && width >= 60 ? paint.dim(" — " + row.note) : "");
   const left = marker + " " + leadIcon(row) + " " + paint.dim(row.guide || "") + name + extra;
@@ -329,7 +334,8 @@ function overlay(base, panel, width) {
 }
 
 function renderDelivery(view, width, height) {
-  const lines = wrap(view.detail.lines.map(clean), Math.max(1, width - 2));
+  const inner = Math.max(1, width - 2);
+  const lines = view.detail.render ? wrap(view.detail.render(inner, view.detail), inner) : wrap(view.detail.lines.map(clean), inner);
   const room = Math.max(1, height - 2);
   const offset = Math.min(view.detail.offset, Math.max(0, lines.length - room));
   view.detail.offset = offset;

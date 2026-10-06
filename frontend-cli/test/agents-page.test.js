@@ -1,16 +1,16 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, mkdir, rm, readFile, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, writeFile } from "node:fs/promises";
 import { spawn } from "node:child_process";
 import path from "node:path";
 import os from "node:os";
 import { fileURLToPath } from "node:url";
 import { startServer } from "../../agent-management/dist/ipc.js";
-import { connectClient } from "../../agent-management/dist/client.js";
 import { runAgentsPage } from "../lib/agents-page.js";
 import { managementArgs } from "../lib/agents-session.js";
-import { createVirtualInput, createVirtualOutput } from "./helpers/virtual-terminal.js";
+import { createVirtualOutput } from "./helpers/virtual-terminal.js";
 import { removeRindHome } from "./helpers/rind-home.js";
+import { harness, waitFor } from "./helpers/agents-harness.js";
 import { createTui } from "../lib/tui/tui.js";
 
 test("manager keeps its dedicated workspace and rejects mixed session scopes", () => {
@@ -59,33 +59,6 @@ test("real CLI empty-prompt entry returns to an editable conversation repeatedly
   child.stdin.write("\x05\x15/exit\r");
   assert.equal(await exited, 0, errors);
 });
-
-async function harness({ columns = 120, rows = 30, prefix }) {
-  const home = await mkdtemp(path.join(os.tmpdir(), prefix));
-  const launch = { home, repoRoot: fileURLToPath(new URL("../..", import.meta.url)) };
-  const server = await startServer(launch);
-  const client = await connectClient({ endpoint: server.paths.endpoint, token: (await readFile(server.paths.token, "utf8")).trim() });
-  const input = createVirtualInput(), output = createVirtualOutput({ columns, rows });
-  const screen = () => output.getViewport().join("\n");
-  const visible = async text => {
-    for (let i = 0; i < 250; i++) {
-      const viewport = (await output.flushAndGetViewport()).join("\n");
-      if (viewport.includes(text)) return viewport;
-      await new Promise(resolve => setTimeout(resolve, 20));
-    }
-    assert.fail("Expected " + text + "\n" + screen());
-  };
-  const settle = () => new Promise(resolve => setTimeout(resolve, 80));
-  const cleanup = async () => {
-    client.close(); await server.close();
-    await removeRindHome(home);
-  };
-  return { home, launch, client, input, output, screen, visible, settle, cleanup, key: sequence => input.send(sequence), paste: text => input.send("\x1b[200~" + text + "\x1b[201~") };
-}
-async function waitFor(check, label) {
-  for (let i = 0; i < 150; i++) { if (check()) return; await new Promise(resolve => setTimeout(resolve, 20)); }
-  assert.fail("Timed out waiting for " + label);
-}
 
 test("team page edits members, nests team conversations and drives tasks from the keyboard", { timeout: 40000 }, async t => {
   const h = await harness({ prefix: "rind-agents-actions-" });
@@ -156,7 +129,8 @@ test("team page edits members, nests team conversations and drives tasks from th
   assert.equal((await h.client.request("getTask", { taskId: task.id })).priority, "high");
   key("\r"); await visible("No report yet");
   key(" "); await visible("Add note"); key("n"); await visible("Shared with the task owner");
-  paste("Check the changelog"); key("\r"); await visible("Note added"); await visible("Check the changelog");
+  paste("Check the changelog"); key("\r"); await visible("Note added"); await visible("Notes 3");
+  key("z"); await visible("Check the changelog");
   key("\x1b"); await visible("QUEUED · 1");
   key(" "); await visible("Cancel task"); key("x"); await visible("Cancel this task?"); key("y");
   await visible("CANCELLED · 1");

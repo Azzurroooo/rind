@@ -8,7 +8,7 @@ import { textWidth } from "./text-width.js";
 //   key:  how it is shown;  help: its line in the ? overlay
 export const ACTIONS = {
   open: { keys: ["enter"], key: "enter", label: "open", help: "open the selected item" },
-  actions: { keys: ["space"], key: "space", label: "more actions", help: "all actions for the selected item" },
+  actions: { keys: ["space"], key: "space", label: "more actions", help: "all actions for the selected item or team" },
   chat: { keys: ["c"], key: "c", label: "new conversation", help: "new conversation with a member or folder" },
   edit: { keys: ["e"], key: "e", label: "edit role", help: "edit a member's role and responsibility" },
   task: { keys: ["t"], key: "t", label: "assign task", help: "give a member, or the leader, a task" },
@@ -37,6 +37,7 @@ const act = (name, label) => ({ id: name, label: label || ACTIONS[name].label })
 function enterLabel(view, row) {
   if (!row) return "";
   if (view.focus === "sidebar") return row.kind === "new-team" ? "create team" : "open";
+  if (row.archived) return "open report";
   switch (row.kind) {
     case "member": return "open member";
     case "session": return "join";
@@ -48,6 +49,7 @@ function enterLabel(view, row) {
     case "team": return "open team";
     case "new-team": return "create team";
     case "run": return "resolve";
+    case "approval": return "decide";
     case "service": return "actions";
     case "stop-all": return "stop…";
     case "live": return row.taskId ? "open report" : row.sessionId ? "join" : "";
@@ -63,8 +65,8 @@ export function available(view, row) {
   const list = [];
   const enter = enterLabel(view, row);
   if (enter) list.push(act("open", enter));
-  if (view.focus === "sidebar") return [...list, act("newTeam"), act("refresh"), act("help")];
-  if (["member", "session", "task", "service"].includes(row?.kind) && !(row.kind === "task" && row.answer)) list.push(act("actions"));
+  if (view.focus === "sidebar") return [...list, ...(row?.kind === "team" ? [act("actions")] : []), act("newTeam"), act("refresh"), act("help")];
+  if (["member", "session", "task", "service"].includes(row?.kind) && !(row.kind === "task" && (row.answer || row.archived))) list.push(act("actions"));
   const folder = ["independent", "folder"].includes(page) && (row?.workspace || view.page.workspace);
   if ((org && ["member", "session", "more"].includes(row?.kind)) || page === "member" || folder) list.push(act("chat"));
   if (row?.kind === "member" || page === "member") list.push(act("edit"));
@@ -72,7 +74,7 @@ export function available(view, row) {
   if (org) list.push(act("add", row?.kind === "member" ? "add member below" : undefined));
   if (page === "team") list.push(act("tabs"));
   if (org || page === "independent") list.push(act("fold"), act("foldAll"));
-  if (["independent", "folder", "inbox", "background"].includes(page) || (page === "team" && view.page.tab === "tasks")) list.push(act("group"));
+  if (["independent", "folder", "inbox", "background", "archive"].includes(page) || (page === "team" && view.page.tab === "tasks")) list.push(act("group"));
   if (page === "background") list.push(act("stop"));
   if (page !== "new-team") list.push(act("search"));
   if (["team", "member", "independent", "folder"].includes(page)) list.push(act("filter"));

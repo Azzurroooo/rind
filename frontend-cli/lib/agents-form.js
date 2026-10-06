@@ -7,13 +7,14 @@ import { folderSuggestions, commonCompletion, inspectFolder, resolveInputPath, c
 //   text  (default)  free text; `optional` fields may stay empty
 //   path  { require: "folder" | "git" }  completes folders with Tab and checks them live
 //   name  { root }   a new folder name inside `root`, previewed and checked live
+// Any field may add validate(text) returning an error message, or "" when valid.
 // `derive(values)` fills an empty field when it gains focus.
 // Enough to browse a large folder; beyond this, typing narrows faster than scrolling.
 const SUGGESTION_LIMIT = 200;
 
-export function createForm({ title, fields, submit, description = [], base = process.cwd(), onChange = () => {} }) {
+export function createForm({ title, fields, submit, description = [], danger = false, base = process.cwd(), onChange = () => {} }) {
   const form = {
-    kind: "form", title, description, submit, error: "", index: 0, base,
+    kind: "form", title, description, danger, submit, error: "", index: 0, base,
     fields: fields.map(field => ({ kind: "text", ...field, editor: createLineEditor(field.value || ""), suggestions: [], pick: -1, check: null, token: 0 })),
   };
   const field = () => form.fields[form.index];
@@ -72,6 +73,8 @@ export function createForm({ title, fields, submit, description = [], base = pro
   // only partly matches cannot be left either.
   function problem(item) {
     if (!item.editor.input().trim()) return item.optional ? "" : item.label + " is required.";
+    const invalid = item.validate?.(item.editor.input().trim());
+    if (invalid) return invalid;
     if (item.kind === "path" && item.check?.tone === "hint") return "Finish the folder path: Tab completes, ↑↓ choose.";
     return item.check?.tone === "error" ? item.check.text : "";
   }

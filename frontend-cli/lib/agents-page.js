@@ -8,7 +8,7 @@ import { managementClient } from "./agents-client.js";
 import { openAgentChat, managerWorkspace, followConversation } from "./agents-commands.js";
 import { createLeaveLatch, LEAVE_HINT } from "./interrupt-state.js";
 import { actionFor } from "./agents-keys.js";
-import { emptyAgentsSnapshot, withoutDrafts, clean, sidebarRows, inboxRows, organizationRows, taskRows, memberSessionRows, managerRows, teamSessions, independentSessions, independentRows, folderRows, backgroundRows, workspaceKey, selectable } from "./agents-model.js";
+import { emptyAgentsSnapshot, withoutDrafts, clean, sidebarRows, inboxRows, organizationRows, taskRows, memberSessionRows, managerRows, teamSessions, independentSessions, independentRows, folderRows, backgroundRows, archiveRows, workspaceKey, selectable } from "./agents-model.js";
 import { renderAgents } from "./agents-view.js";
 import { createActions } from "./agents-actions.js";
 
@@ -66,6 +66,7 @@ export async function runAgentsPage({ launch, input = process.stdin, output = pr
     if (page.kind === "manager") return managerRows(view.managerHistory?.entries, { ...options, live: view.snapshot.live || [] });
     if (page.kind === "folder") return folderRows(independentGroups().find(group => workspaceKey(group.workspace) === workspaceKey(page.workspace)), options);
     if (page.kind === "background") return backgroundRows(view.snapshot, view.service);
+    if (page.kind === "archive") return archiveRows(view.archive, options);
     if (page.kind === "independent") return independentRows(independentGroups(), { ...options, collapsed: view.collapsed.independent || new Set() });
     if (page.kind === "new-team") return [{ id: "new-team", kind: "new-team", title: "Name your new team" }];
     const sessions = teamSessions(view.snapshot, page.teamId, view.history[page.teamId]?.entries);
@@ -122,8 +123,18 @@ export async function runAgentsPage({ launch, input = process.stdin, output = pr
       if (!current || (current.key !== key && !current.loading)) void loadHistory(teamId, key);
     }
     if (view.page.kind === "manager" && view.connection === "connected" && !view.managerHistory) void loadManagerHistory();
+    // Deleted teams change rarely; the list is read again only when one is added.
+    const archiveKey = (view.snapshot.archivedTeams || []).map(team => team.id + "@" + team.archivedAt).join(",");
+    if (view.page.kind === "archive" && view.connection === "connected" && !view.archiveLoading && view.archive?.key !== archiveKey) void loadArchive(archiveKey);
     if (view.page.kind === "background" && view.connection === "connected" && !view.serviceLoading && Date.now() - (view.serviceAt || 0) > 5000) void loadService();
     if (["independent", "folder"].includes(view.page.kind) && view.connection === "connected" && !view.independent?.loading && Date.now() - (view.independent?.at || 0) > INDEPENDENT_REFRESH_MS) void loadIndependent();
+  }
+  async function loadArchive(key) {
+    view.archiveLoading = true;
+    try { view.archive = { key, teams: (await client.request("listArchive")).teams }; }
+    catch (error) { view.archive = { key, teams: view.archive?.teams || [] }; notify("Could not load the archive: " + error.message, "error"); }
+    view.archiveLoading = false;
+    project();
   }
   async function loadService() {
     view.serviceLoading = true;
@@ -229,15 +240,22 @@ export async function runAgentsPage({ launch, input = process.stdin, output = pr
     const index = Math.max(0, items.findIndex(item => (item.id ?? item.label) === selected));
     view.dialog = { kind: "choice", title, items, description, index, danger, error: "" }; redraw();
   }
-  function form(title, fields, submit, { description = [] } = {}) {
-    view.dialog = createForm({ title, fields, submit, description, onChange: redraw }); redraw();
+  function form(title, fields, submit, { description = [], danger = false } = {}) {
+    view.dialog = createForm({ title, fields, submit, description, danger, onChange: redraw }); redraw();
   }
   function confirm(title, description, label, action) {
     choose(title, [{ label: "Cancel", key: "n", description: "Change nothing", action() {} }, { label, key: "y", danger: true, action }], { description, danger: true });
   }
-  function showText(title, lines, { taskId, refresh, back } = {}) {
+  function showText(title, lines, { refresh, back } = {}) {
     view.dialog = null;
-    view.detail = { title, lines, offset: view.detail?.title === title ? view.detail.offset : 0, taskId, refresh, back };
+    view.detail = { title, lines, offset: view.detail?.title === title ? view.detail.offset : 0, refresh, back };
+  }
+  // A report declares its own keys; the footer is built from the same list.
+  function showReport(title, { render, actions, refresh, back }) {
+    const same = view.detail?.title === title;
+    view.dialog = null;
+    view.detail = { title, render, actions, refresh, back, offset: same ? view.detail.offset : 0, expanded: same && view.detail.expanded,
+      hints: [...actions.map(action => ({ key: action.key, label: action.label })), { key: "↑↓", label: "scroll" }, { key: "esc", label: "back" }] };
   }
   function reopen(dialog) { view.dialog = dialog; }
   function resetSearch() { view.query = ""; view.filter = "All"; view.searching = false; view.searchEditor.setInput(""); }
@@ -307,7 +325,7 @@ export async function runAgentsPage({ launch, input = process.stdin, output = pr
   // Menu actions already run inside perform(); nesting would be refused as busy.
   const open = options => (view.busy ? chat(options) : perform(() => chat(options), null, "Opening conversation…"));
   const where = row => ({ agentId: row.agentId, teamId: row.teamId, workspace: row.workspace, manager: row.manager });
-  const ui = { view, request, choose, form, restartService, launch, resolvePath: value => resolveInputPath(value), stopServices, leave, confirm, notify, showText, reopen, openTeam, openMember, setFilter,
+  const ui = { view, request, choose, form, showReport, run: (action, label) => perform(action, null, label), restartService, launch, resolvePath: value => resolveInputPath(value), stopServices, leave, confirm, notify, showText, reopen, openTeam, openMember, setFilter,
     join: row => open({ ...where(row), runtimeSessionId: row.sessionId }), startNew: target => open(where(target)) };
   const actions = createActions(ui);
   const currentRow = () => (view.focus === "sidebar" ? view.sidebar.find(r => r.id === view.navId) : view.entries.find(r => r.id === view.selectedId));
@@ -326,9 +344,10 @@ export async function runAgentsPage({ launch, input = process.stdin, output = pr
       case "new-session": return ui.startNew({ ...row, teamId: row.teamId || view.page.teamId });
       case "add-member": return actions.addMember(row.teamId);
       case "assign": return actions.assignTask(row.teamId);
-      case "task": return view.page.kind === "inbox" && row.answer ? actions.answer(row.taskId) : perform(() => actions.delivery(row.taskId), null, "Loading delivery…");
+      case "task": return view.page.kind === "inbox" && row.answer ? actions.answer(row.taskId) : perform(() => actions.delivery(row.taskId), null, "Loading report…");
+      case "approval": return actions.approval(row.approvalId);
       case "run": { const run = view.snapshot.runs.find(r => r.id === row.runId); return run && actions.resolveRun(run); }
-      case "live": return row.taskId ? perform(() => actions.delivery(row.taskId), null, "Loading delivery…") : row.sessionId ? ui.join(row) : undefined;
+      case "live": return row.taskId ? perform(() => actions.delivery(row.taskId), null, "Loading report…") : row.sessionId ? ui.join(row) : undefined;
       case "stop-all": return actions.stopAll(row.working);
       case "service": return perform(() => actions.serviceActions(row), null, "Loading…");
       case "team": return openTeam(row.teamId);
@@ -337,7 +356,8 @@ export async function runAgentsPage({ launch, input = process.stdin, output = pr
     }
   }
   function rowActions(row = currentRow()) {
-    if (row?.kind === "member") actions.memberActions(row.teamId, row.agentId);
+    if (row?.kind === "team") actions.teamActions(row.teamId);
+    else if (row?.kind === "member") actions.memberActions(row.teamId, row.agentId);
     else if (row?.kind === "session") actions.sessionActions(row);
     else if (row?.kind === "task") actions.taskActions(row.taskId);
     else if (row?.kind === "service") activate(row);
@@ -466,8 +486,9 @@ export async function runAgentsPage({ launch, input = process.stdin, output = pr
   function detailKey(key) {
     const detail = view.detail;
     const page = Math.max(1, (view.layout?.bodyHeight || 10) - 3);
+    const action = detail.actions?.find(item => item.key === "space" ? key.text === " " : item.key === key.text);
     if (key.name === "escape" || key.name === "left" || key.text === "h") { view.detail = null; detail.back?.(); }
-    else if (key.text === " " && detail.taskId) actions.taskActions(detail.taskId);
+    else if (action) action.run(detail);
     else if (key.text === "r" && detail.refresh) void perform(detail.refresh, null, "Refreshing…");
     else if (key.name === "up" || key.text === "k") detail.offset = Math.max(0, detail.offset - 1);
     else if (key.name === "down" || key.text === "j") detail.offset += 1;

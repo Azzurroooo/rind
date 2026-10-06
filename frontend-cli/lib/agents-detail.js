@@ -52,7 +52,15 @@ export function detailFor(view, row) {
         ...field("Session", paint.dim(row.sessionId)),
         row.status === "Needs input" ? paint.warning("Waiting for your answer. Enter joins the conversation.") : "Enter joins this conversation in its workspace."];
     }
+    case "approval": {
+      const approval = (snapshot.approvals || []).find(item => item.id === row.approvalId);
+      return [paint.bold(row.title.replace(/^Approve: /, "")), paint.dim(row.context), "", paint.warning("! The Manager asks for your approval"), "",
+        approval?.kind === "deleteTeam" ? "Deleting keeps delivered work readable under Archive; folders and history are never touched." : "Stopping cancels the running task; its conversation is kept.", "",
+        "Enter to approve or decline. Nothing happens until you decide."];
+    }
+    case "archive": return [paint.bold("Archive"), paint.dim("Deleted teams, read-only"), "", "What deleted teams delivered: reports, evidence and files. Nothing here can run or change.", "", "Enter lists them."];
     case "task": {
+      if (row.archived) return [paint.bold(row.title), paint.dim("Owner: " + row.owner), "", tone(row.status), "", ...field("Delivery", row.note || paint.dim("No report")), paint.dim("Read-only: the team was deleted."), "", "Enter opens the report."];
       const task = byId(snapshot.tasks, row.taskId);
       if (!task) return [];
       return [paint.bold(single(task.brief)), paint.dim("Owner: " + row.owner + (task.priority ? " · " + task.priority + " priority" : "") + (task.parentTaskId ? " · subtask" : "")), "", tone(row.status), "",
@@ -60,7 +68,8 @@ export function detailFor(view, row) {
         ...(task.blockedOn ? field(needsUser(task) ? "Needs your answer" : "Waiting on", single(task.blockedOn.action)) : []),
         ...(task.error ? field("Problem", single(task.error)) : []),
         ...(task.report ? field("Delivery · " + task.report.outcome, single(task.report.summary)) : field("Delivery", paint.dim("No report yet"))),
-        "Enter shows delivery, evidence and notes."];
+        ...(row.fresh ? [paint.accent("● New delivery. Open it to accept it or send it back."), ""] : task.review?.decision === "accepted" ? [paint.success("✓ Accepted"), ""] : task.review?.decision === "rework" ? [paint.warning("↺ Sent back for rework"), ""] : []),
+        "Enter opens the report: outcome, evidence, files and history."];
     }
     case "team": {
       const leader = byId(snapshot.agents, team?.leaderAgentId);
@@ -69,9 +78,9 @@ export function detailFor(view, row) {
         ...field("Members", s.members + (s.working ? " · " + s.working + " working" : "")),
         ...field("Tasks", (s.needs ? paint.warning(s.needs + " need you") + " · " : "") + s.queued + " queued · " + s.delivered + " delivered"),
         ...field("New workspaces", paint.path(team?.createRoot || "")),
-        "Enter opens the team."];
+        "Enter opens the team; Space for more, including delete."];
     }
-    case "inbox": return [paint.bold("Inbox"), paint.dim("Everything waiting on you, across teams"), "", "Answers, unconfirmed runs and conversations that asked a question appear here first."];
+    case "inbox": return [paint.bold("Inbox"), paint.dim("Everything waiting on you, across teams"), "", "Answers, the Manager's requests for approval, unconfirmed runs and conversations that asked a question come first; then recent deliveries, with ● on the ones you have not reviewed."];
     case "background": return [paint.bold("Background"), paint.dim("What keeps running after you leave Rind"), "",
       "Leaving Rind (ctrl+c twice, or /exit) only closes windows. Agents, tasks and the shared Runtime keep working.", "",
       "Stop them here when you want everything to end."];
