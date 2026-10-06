@@ -127,6 +127,10 @@ export function createCliInputActions({
     output.redraw();
   }
 
+  // The question this window is asking. Another window watching the same
+  // session may answer it first; the Runtime then broadcasts the answer.
+  let openQuestion = null;
+
   async function answerQuestion(event) {
     pausePrompt();
     output.closeAssistant();
@@ -135,26 +139,38 @@ export function createCliInputActions({
     } else {
       output.log(() => questionText(event));
     }
+    const question = { toolCallId: String(event.tool_call_id || ""), answeredElsewhere: null };
+    openQuestion = question;
     try {
       const options = Array.isArray(event.options) ? event.options : [];
-      const answer = output.terminalUi
+      const typed = output.terminalUi
         ? await askQuestionMenu(event)
         : selectAnswer((await ask(answerPromptText(), answerPlaceholderText())).trim(), options);
-      if (state.turn.interruptRequested || state.runtime.status === "closing") {
+      // From here this window's own broadcast must not dismiss anything.
+      openQuestion = null;
+      const elsewhere = question.answeredElsewhere !== null;
+      if (!elsewhere && (state.turn.interruptRequested || state.runtime.status === "closing")) {
         return;
       }
-      await request(runtimeMethods.userQuestionRespond, {
-        tool_call_id: event.tool_call_id,
-        answer,
-      });
+      const answer = elsewhere ? question.answeredElsewhere : typed;
+      if (!elsewhere) await request(runtimeMethods.userQuestionRespond, { tool_call_id: event.tool_call_id, answer });
+      const shown = elsewhere ? answer + " (answered in another window)" : answer;
       if (output.finishQuestion) {
-        output.finishQuestion(event, answer);
+        output.finishQuestion(event, shown);
       } else {
-        output.log(() => questionAnswerText(event, answer));
+        output.log(() => questionAnswerText(event, shown));
       }
     } finally {
+      if (openQuestion === question) openQuestion = null;
       resumePrompt();
     }
+  }
+
+  function questionAnswered(event) {
+    const question = openQuestion;
+    if (!question || question.toolCallId !== String(event.tool_call_id || "")) return;
+    question.answeredElsewhere = String(event.answer ?? "");
+    cancelActiveInput?.();
   }
 
   function selectAnswer(raw, options) {
@@ -721,6 +737,7 @@ export function createCliInputActions({
     handleAuthPrompt,
     askAuthChoice,
     answerQuestion,
+    questionAnswered,
     restoreInputText,
     addPendingInput,
     deliverQueuedInput,

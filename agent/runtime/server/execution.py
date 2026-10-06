@@ -594,6 +594,8 @@ class ExecutionCoordinator:
         question = snapshot.get("question") if isinstance(snapshot, dict) else None
         if isinstance(question, dict) and question.get("tool_call_id") == tool_call_id:
             snapshot["question"] = None
+        # Every window showing this session closes its copy of the question.
+        await self._emit_to_event_sinks({"type": "user_question_answered", "session_id": clean, "tool_call_id": tool_call_id, "answer": answer})
 
     def _prepare_user_question(self, session_id: str, tool_call_id: str) -> None:
         value = str(tool_call_id or "").strip()

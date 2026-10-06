@@ -542,13 +542,18 @@ def test_worker_replays_answer_received_before_question_responder_waits():
         active = SimpleNamespace(container=container, pending_answers={})
         execution._active["session-a"] = active
         execution._prepare_user_question("session-a", "call-early")
+        broadcast = []
+        execution.add_event_sink(broadcast.append)
         await execution.answer_user_question("session-a", "call-early", "yes")
         with pytest.raises(LookupError, match="No pending user question"):
             await execution.answer_user_question("session-a", "call-early", "second answer")
         event = SimpleNamespace(tool_call_id="call-early")
-        return await execution._answer_user_question("session-a", event)
+        return await execution._answer_user_question("session-a", event), broadcast
 
-    assert asyncio.run(run()) == "yes"
+    answer, broadcast = asyncio.run(run())
+    assert answer == "yes"
+    # Every window showing the session learns the question is settled, exactly once.
+    assert broadcast == [{"type": "user_question_answered", "session_id": "session-a", "tool_call_id": "call-early", "answer": "yes"}]
 
 
 def test_worker_goal_continuation_persists_distinct_checkpoints():

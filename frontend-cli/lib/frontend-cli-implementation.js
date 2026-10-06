@@ -405,7 +405,7 @@ const eventController = createEventController({
     },
     debug: cliArgs.includes("--debug"),
   },
-  input: { answerQuestion: (...args) => inputActions.answerQuestion(...args) },
+  input: { answerQuestion: (...args) => inputActions.answerQuestion(...args), questionAnswered: (...args) => inputActions.questionAnswered(...args) },
   monitor: taskMonitorController,
   output: {
     assistantAppend: outputController.assistantAppend,
