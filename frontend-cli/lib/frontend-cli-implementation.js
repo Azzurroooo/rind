@@ -957,7 +957,9 @@ function scheduleProcessExit(code, delayMs) {
     return;
   }
   process.exitCode = code;
-  displayState.processExitTimer = setTimeout(() => {
+  displayState.processExitTimer = setTimeout(async () => {
+    // Read a terminal answer that is still on its way, or the shell would print it.
+    await tui?.drainKeyboardQuery?.();
     try {
       closeInput();
     } finally {

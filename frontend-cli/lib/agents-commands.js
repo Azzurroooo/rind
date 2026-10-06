@@ -4,6 +4,7 @@ import os from "node:os";
 import { fileURLToPath } from "node:url";
 import { managementClient, overviewText, selectRecord } from "./agents-client.js";
 import { createHandoff, HANDOFF_ENV } from "./agents-handoff.js";
+import { terminalKeyboard, TERMINAL_KEYBOARD_ENV } from "./tui/tui.js";
 
 export const agentsHelp = [
   "Usage: rind agents [list | team | task | open | manager | import] [--json]",
@@ -42,7 +43,7 @@ export async function openAgentChat({ agent, teamId, manager = false, runtimeSes
     await new Promise((resolve, reject) => {
       const child = spawn(process.execPath, [fileURLToPath(new URL("../bin/rind.js", import.meta.url)), ...args], {
         cwd: manager ? managerWorkspace(launch) : agent.canonicalWorkspace,
-        stdio: "inherit", windowsHide: true, env: { ...process.env, RIND_HOME: launch.home || process.env.RIND_HOME, RIND_PYTHON: launch.python || "python", RIND_RUNTIME_PATH: launch.runtimePath || "", [HANDOFF_ENV]: handoff.file },
+        stdio: "inherit", windowsHide: true, env: { ...process.env, RIND_HOME: launch.home || process.env.RIND_HOME, RIND_PYTHON: launch.python || "python", RIND_RUNTIME_PATH: launch.runtimePath || "", [HANDOFF_ENV]: handoff.file, [TERMINAL_KEYBOARD_ENV]: terminalKeyboard() },
       });
       child.once("error", reject);
       child.once("close", code => resolve(code));
