@@ -73,7 +73,21 @@ The reporting tree, rooted at the leader; members without a supervisor report to
 - A **member** row is the name in bold, its role in an aligned column, and a summary on the right in words about the person: `● working`, `! needs you`, `○ 1 open`, or a dim `idle`. A member has no status glyph of its own in the tree.
 - A **conversation** sits under its member, inside the tree guides, with its own glyph, status and age: `├─ ● Plan the release   Working   now`. The three most urgent are shown inline; the rest collapse into a "+N more" row.
 
-Statuses use one glyph set everywhere: `!` Needs input, `?` Unconfirmed, `●` Working, `…` Waiting on members, `◦` Queued, `○` Ready, `✓` Done, `·` Inactive.
+Statuses use one glyph set everywhere: `!` Needs input, `?` Unconfirmed, `●` Working, `…` Waiting on members, `◦` Queued, `○` Open, `✓` Done, `·` Idle. A member's summary also counts its open tasks (`○ 1 open · 2 tasks`).
+
+### What a status means
+
+The shared Runtime hosts the conversation of every interactive Rind window and every task, and it keeps a small live table: for each conversation its folder, whether a turn is running or waiting for an answer, and how many windows show it. The table is updated from requests and events the Runtime already handles, so nothing polls, and it is pushed to the Agents page once per burst of changes.
+
+| Status | Meaning |
+| --- | --- |
+| `●` Working | A turn or task is running, whether or not any window shows it. |
+| `!` Needs input | It stopped to ask a question, or a task is blocked on you. |
+| `?` Unconfirmed | A run's outcome could not be confirmed after a service was lost; confirm the old process stopped before retrying. |
+| `○` Open | Nothing runs, and at least one Rind window shows it. |
+| `·` Idle | Nothing runs and no window shows it; the time is its last activity. |
+
+Closing a window turns an open conversation idle; it never stops a running turn.
 
 **Left always moves up one level** — from a conversation to its member, from a member to the sidebar — and never collapses anything, so leaving the tree takes at most two presses. Right expands a collapsed member or opens it. `z` folds the selected branch and `Z` folds or unfolds all; a folded member shows `▸`, the number of hidden rows and the most urgent status hidden inside. Lists keep two rows of context around the selection while scrolling. `/` searches and `f` filters by status; matches keep their ancestors visible, and Esc clears them.
 
@@ -87,11 +101,11 @@ Tasks are grouped by what you do first: Needs you, In progress, Queued, Waiting 
 
 ### Inbox, Manager and Independent
 
-The **Inbox** collects everything waiting on you across teams: blocked tasks, tasks that need attention, runs whose stop could not be confirmed, running tasks that stopped to ask a question ("Task asks: …") and team conversations waiting for an answer. Enter answers, resolves or joins. Below that, every team is listed with its activity.
+The **Inbox** collects everything waiting on you across teams: blocked tasks, tasks that need attention, runs whose stop could not be confirmed, running tasks that stopped to ask a question ("Task asks: …") and team conversations waiting for an answer. Enter answers, resolves or joins. Below that, **Recently delivered** lists the newest finished tasks with their summary; Enter opens the delivery. Teams themselves are only in the sidebar.
 
 **Manager** lists Manager conversations and starts new ones in its restricted workspace.
 
-**Independent** monitors conversations that belong to no team, grouped by folder. Folders that are team members show their team; other folders appear under their basename. Conversations opened through Agents management or a registered folder show live status. Conversations from a plain Rind window run in their own Worker, which cannot report state, so they show `saved` and their last saved activity instead of a guess. Active folders sort first, and the page refreshes every 30 seconds. Enter continues a conversation in its folder (it stays outside every team); Enter on a folder, or `c`, starts a new one. The service method is `listSessions { independent: true }`.
+**Independent** shows every conversation that belongs to no team, grouped by folder, live. A conversation outside a team is a plain session: it never becomes an agent; only team members are bound to a folder. Folders that are team members show their team; other folders appear under their basename. Running and open folders sort first. Each folder shows its three most urgent conversations and a "+N more" row; Enter on the folder (or the row) opens the folder's page with every conversation grouped as Active, Today, This week and Earlier, searchable with `/`. `[` and `]` jump between folders, `z` / `Z` fold them, and `c` starts a new conversation in the selected folder. Enter on a conversation continues it in its folder, outside every team. History is read through `listSessions { independent: true }` and refreshed every 30 seconds; live state arrives as it changes.
 
 ### Adding members
 
@@ -124,7 +138,7 @@ Rind is not one process: agents, tasks and the shared Runtime run in the backgro
 
 Conversations opened from Agents never nest. When you move to Agents or to another conversation from inside one, it hands the move back to the window that opened it and closes. The handoff goes through a private file named by `RIND_AGENTS_HANDOFF`; the window removes that variable from its environment at startup, so services and tools it starts never inherit it. There is at most one level, and leaving from anywhere closes everything. A conversation in an unregistered folder runs in the window's own worker; while it is working, moving away is refused instead of killing it.
 
-The **Background** page shows what keeps running after you leave: running tasks and conversations (with team, member and how long they have run), runs whose stop could not be confirmed, and both background services with their process ID and uptime. Its stop dialog selects Cancel first, lists what is running and says what is kept. Its single action is **Stop all agents and leave Rind**. Every open conversation depends on these services, so stopping always closes the windows too, rather than leaving them on a stopped Runtime.
+The **Background** page shows what keeps running after you leave. **Running now** lists every running turn and task in the shared Runtime, from any Rind window, in a team or not, with where it runs and for how long. Below are runs whose stop could not be confirmed, and both background services with their process ID and uptime. Enter on a service shows its recent log; when a newer Rind is installed, the management service offers **Restart to load the update**, which keeps every conversation running while windows reconnect. The shared Runtime keeps old code while windows use it and updates once they are all closed. Stop is a quiet `[ Stop all agents… ]` button at the end, also on `S`. Its dialog selects Cancel first, lists what is running and says what is kept. Its single action is **Stop all agents and leave Rind**. Every open conversation depends on these services, so stopping always closes the windows too, rather than leaving them on a stopped Runtime.
 
 `rind agents stop` stops both background services, but only when nothing is running; otherwise it lists the running work and exits with status 1. `--all` also stops running agents. It never starts a service just to stop it. Conversations still open elsewhere notice the stop, reattach if the service comes back on its own, and otherwise continue untracked; nothing restarts a service you stopped except opening Agents or pressing `r`.
 

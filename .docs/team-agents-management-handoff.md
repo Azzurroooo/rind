@@ -33,6 +33,8 @@
 15. `ce24181`：历史保留上限、快照索引投影、订阅推送合并。
 16. `ac45fef`：后台服务构建指纹；空闲的旧版本服务自动替换，忙碌时保留并提示（修复 Independent 页 "Agent not found"）。
 17. `8d617c9`：返回 / 离开 / 停止 三级生命周期；会话窗口不再嵌套；Background 页与 `rind agents stop`。
+18. `628c57d`：共享 Runtime 实时会话表（运行/提问/观看者）；所有交互窗口走共享 Runtime；状态改为 Open / Idle；RUNNING NOW 覆盖任意窗口。
+19. `8db81cc`：Background 服务可操作、停止按钮化；Independent 折叠与文件夹页；Inbox 最近交付；成员任务数；路径建议可滚动。
 
 ## 1. 产品定义
 
@@ -227,6 +229,13 @@ Rind 不是单进程：Agent、任务与共享 Runtime 在后台运行，窗口�
 - **窗口不嵌套**：`openAgentChat` 为子窗口设置 `RIND_AGENTS_HANDOFF` 文件路径（`agents-handoff.js`）。子窗口要去 Agents / 另一个会话 / 离开时写入 `{action}` 后退出，由打开它的窗口执行（`followConversation`）。任何位置离开都能关闭全部窗口。
 - **版本漂移**：管理服务 `serviceInfo` 与 Runtime `runtime/info`（不启动 worker）返回代码指纹（`rind-runtime-client/build-id.js`）。客户端连接时比较：空闲则透明替换，忙碌则保留并标记 stale（借鉴 crush `restartIfStale` 与 orca "stale daemon preserved while it owns live sessions"）。
 
+### 8.2.2 实时状态与全局统一（已冻结）
+
+- 共享 Runtime（`rind-runtime-client/live-sessions.js`）维护实时会话表：workspace、turn（idle / running / question）、watchers（正在显示它的窗口数）。由宿主已经处理的请求与事件驱动，无轮询；同一 tick 合并后推送给 observer（管理服务）。闲置且无人观看的条目 10 分钟后遗忘。`runtime/sessions` 不启动 worker。
+- 所有交互式 rind 窗口都使用共享 Runtime（`agents-session.js#plainSession`）。不在任何 Team 中的会话是普通 session：不注册 Agent、无管理作用域（Agent=目录 只约束 Team 成员）。脚本/非 TTY、`--trace-llm`、`--session-dir` 仍用私有 worker。
+- 管理服务在有 Agents 页订阅时，每 3 秒尝试连接已在运行的 Runtime（`executionHost(false)`，绝不启动），用户快照携带 `live`。
+- 状态：Working / Needs input 来自实时 turn 或托管 run；Open = 至少一个窗口在显示；Idle = 无运行且无人观看。旧的 Ready / Inactive 已删除（Ready 曾等于"Runtime 本次启动后打开过"，没有意义）。
+
 ### 8.3 Session 展示语义（已统一）
 
 - Agents 页面任何位置只展示 `teamId` 已登记的 Team 会话；独立会话和其他 Team 的会话一律不展示。
@@ -274,6 +283,9 @@ Rind 不是单进程：Agent、任务与共享 Runtime 在后台运行，窗口�
 - `frontend-cli/lib/agents-form.js`、`path-input.js`：类型化表单字段、目录补全与实时校验。
 - `frontend-cli/lib/agents-handoff.js`：子窗口把导航交还给打开者的协议。
 - `frontend-cli/lib/interrupt-state.js`：Ctrl+C 策略与离开确认锁存。
+- `rind-runtime-client/live-sessions.js`：共享 Runtime 的实时会话表。
+- `frontend-cli/test/agents-live.test.js`：普通窗口的 turn 在另一窗口的管理页中实时可见（RUNNING NOW → Open → 关闭）。
+- `frontend-cli/test/helpers/rind-home.js`：测试清理临时 RIND_HOME 前先停止其共享 Runtime。
 - `rind-runtime-client/build-id.js`、`agent-management/src/build.ts`：后台服务的代码指纹。
 
 ## 10. 已完成的功能面
@@ -314,8 +326,8 @@ npm --prefix agent-management test
 
 当前基线结果：
 
-- `frontend-cli`：537 tests，536 pass，1 skipped，0 fail。
-- `agent-management`：36 tests，36 pass，0 fail；Python `pytest test`：1364 passed，2 skipped。
+- `frontend-cli`：541 tests，540 pass，1 skipped，0 fail。
+- `agent-management`：37 tests，37 pass，0 fail；Python `pytest test`：1364 passed，2 skipped。
 - 颜色相关渲染测试会强制开启颜色并要求每一行的可见宽度恰好等于终端宽度、只含完整 SGR 序列；不要删除，它是截图类错位问题的回归防线。
 - 相关 `node --check` 已通过。
 - 主题测试需要清除继承的 `NO_COLOR`；有 `NO_COLOR` 时颜色断言失败是环境预期，不是业务逻辑失败。
