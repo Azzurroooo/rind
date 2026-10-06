@@ -87,7 +87,15 @@ The shared Runtime hosts the conversation of every interactive Rind window and e
 | `○` Open | Nothing runs, and at least one Rind window shows it. |
 | `·` Idle | Nothing runs and no window shows it; the time is its last activity. |
 
-Closing a window turns an open conversation idle; it never stops a running turn.
+Closing a window turns an open conversation idle; it never stops a running turn. A new conversation with no message yet is not listed anywhere, except in the window that has it open.
+
+### Several windows on one conversation
+
+Any number of Rind windows can show the same conversation; the shared Runtime keeps them in step.
+
+- When the agent asks a question, every window shows it. Answering in one closes it in the others, which show the answer as "answered in another window".
+- `rind send --session <id> "…"` goes to the window that most recently showed the conversation, as if typed there. With no window open, a conversation the Runtime is still running continues in the background (a queued follow-up while a turn runs). A conversation nobody has open is refused rather than run without the tools and scope its window configured.
+- Every page opens a conversation the same way, by its session and its folder (or team member, or Manager), so Background, Independent and the team pages behave alike. A conversation's folder comes from the Runtime first, so one without saved history can still be opened. When a conversation window cannot start, the Agents page shows why.
 
 **Left always moves up one level** — from a conversation to its member, from a member to the sidebar — and never collapses anything, so leaving the tree takes at most two presses. Right expands a collapsed member or opens it. `z` folds the selected branch and `Z` folds or unfolds all; a folded member shows `▸`, the number of hidden rows and the most urgent status hidden inside. Lists keep two rows of context around the selection while scrolling. `/` searches and `f` filters by status; matches keep their ancestors visible, and Esc clears them.
 

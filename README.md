@@ -118,7 +118,7 @@ rind send --session <id> "The integration tests failed; investigate before conti
 
 With a current Worker, `run` waits for its managed background tasks and necessary follow-up turns, including tasks started during those turns, then prints one final answer. Long commands automatically release their initial waiting window and report completion without polling. Services started with `notify="manual"` do not hold the request open and stop when the Worker exits. Older Workers report that automatic background continuation is unavailable.
 
-`send` addresses a running CLI session on the same machine: it starts a turn when idle and steers the current turn when busy. Find the session ID in the startup banner or `/status`. Delivery is acknowledged immediately; the answer appears in the target session. This lets a test watcher or local script contribute findings without taking over your terminal.
+`send` addresses a session on the same machine through the shared Runtime. The window that most recently showed the session receives the prompt as if typed there: it starts a turn when idle and steers the current turn when busy. With no window open, a session that is still running continues in the background, and `send` says so. Find the session ID in the startup banner or `/status`. Delivery is acknowledged immediately. This lets a test watcher or local script contribute findings without taking over your terminal.
 
 ---
 

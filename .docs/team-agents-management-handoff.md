@@ -35,6 +35,7 @@
 17. `8d617c9`：返回 / 离开 / 停止 三级生命周期；会话窗口不再嵌套；Background 页与 `rind agents stop`。
 18. `628c57d`：共享 Runtime 实时会话表（运行/提问/观看者）；所有交互窗口走共享 Runtime；状态改为 Open / Idle；RUNNING NOW 覆盖任意窗口。
 19. `8db81cc`：Background 服务可操作、停止按钮化；Independent 折叠与文件夹页；Inbox 最近交付；成员任务数；路径建议可滚动。
+20. `1b75dce`、`878e855`、`aa41974`：多窗口同步——提问在一处回答后所有窗口关闭；`rind send` 经共享 Runtime 投递；统一打开入口、隐藏空草稿、文件夹以 Runtime 为准、子窗口失败原因回传。
 
 ## 1. 产品定义
 
@@ -236,6 +237,16 @@ Rind 不是单进程：Agent、任务与共享 Runtime 在后台运行，窗口�
 - 管理服务在有 Agents 页订阅时，每 3 秒尝试连接已在运行的 Runtime（`executionHost(false)`，绝不启动），用户快照携带 `live`。
 - 状态：Working / Needs input 来自实时 turn 或托管 run；Open = 至少一个窗口在显示；Idle = 无运行且无人观看。旧的 Ready / Inactive 已删除（Ready 曾等于"Runtime 本次启动后打开过"，没有意义）。
 
+### 8.2.3 多窗口同看一个会话（已冻结）
+
+- 会话属于共享 Runtime，窗口只是显示与输入端。
+- 提问：Runtime 在 `answer_user_question` 后广播 `user_question_answered`；仍在提问的窗口关闭菜单并显示"answered in another window"，不重复提交（`cli-input-actions.js#questionAnswered`）。
+- `rind send`：`runtime/send` 投递给最近显示该会话且已 `runtime/accept-input` 的窗口（`{ deliver }` → `dispatchExternal`）；无窗口时，仅当前 worker 已托管（`live.hosted`）的会话在后台起 turn 或排队 follow-up，否则 `SESSION_NOT_OPEN`。共享窗口不再开 send 监听口；私有 worker（`--trace-llm`、`--session-dir`）保留并作为回退。
+- 打开会话只有一条路：`ui.join(row)` / `ui.startNew(target)`，按会话 ID 与所在位置（Team 成员 / 普通文件夹 / Manager）。
+- 空草稿：实时表记录 `draft`，`withoutDrafts(snapshot, currentSessionId)` 在 `acceptSnapshot` 一处过滤；打开 Agents 页的窗口自己的草稿除外。
+- 会话文件夹：`agents-session.js#sessionWorkspace` 先问 Runtime（`runtime/sessions`），再读保存的元数据；子窗口启动失败经 handoff `{ action: "failed", error }` 回传原因。
+- 选择：页面在用户未主动选择前始终指向第一项（`pick` 标记已选择），避免数据晚到时停在任意行。
+
 ### 8.3 Session 展示语义（已统一）
 
 - Agents 页面任何位置只展示 `teamId` 已登记的 Team 会话；独立会话和其他 Team 的会话一律不展示。
@@ -286,6 +297,7 @@ Rind 不是单进程：Agent、任务与共享 Runtime 在后台运行，窗口�
 - `rind-runtime-client/live-sessions.js`：共享 Runtime 的实时会话表。
 - `frontend-cli/test/agents-live.test.js`：普通窗口的 turn 在另一窗口的管理页中实时可见（RUNNING NOW → Open → 关闭）。
 - `frontend-cli/test/helpers/rind-home.js`：测试清理临时 RIND_HOME 前先停止其共享 Runtime。
+- `frontend-cli/test/send-routing.test.js`：`rind send` 投递到最新窗口、无窗口后台运行、未打开会话被拒绝与回退。
 - `rind-runtime-client/build-id.js`、`agent-management/src/build.ts`：后台服务的代码指纹。
 
 ## 10. 已完成的功能面
@@ -326,7 +338,7 @@ npm --prefix agent-management test
 
 当前基线结果：
 
-- `frontend-cli`：543 tests，542 pass，1 skipped，0 fail。
+- `frontend-cli`：548 tests，547 pass，1 skipped，0 fail。
 - `agent-management`：37 tests，37 pass，0 fail；Python `pytest test`：1364 passed，2 skipped。
 - 颜色相关渲染测试会强制开启颜色并要求每一行的可见宽度恰好等于终端宽度、只含完整 SGR 序列；不要删除，它是截图类错位问题的回归防线。
 - 相关 `node --check` 已通过。
