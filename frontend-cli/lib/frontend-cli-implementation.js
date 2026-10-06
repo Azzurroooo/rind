@@ -4,8 +4,8 @@ import { createInterface } from "node:readline";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { createRequire } from "node:module";
-import { runAgentsCommand, followConversation, leaveSummary } from "./agents-commands.js";
-import { takeHandoffPath, writeHandoff } from "./agents-handoff.js";
+import { runAgentsCommand, followConversation, leaveSummary, returnTarget } from "./agents-commands.js";
+import { takeHandoffPath, writeHandoff, writeHandoffSync } from "./agents-handoff.js";
 import { runAgentsPage } from "./agents-page.js";
 import { prepareManagement, observeRuntime } from "./agents-session.js";
 
@@ -584,7 +584,8 @@ async function enterManagement(chat) {
       logOutput("This conversation runs in this window. Wait for it, or press ctrl+c to stop it, before leaving.");
       return;
     }
-    await writeHandoff(chat ? { action: "open", chat: { ...chat, agent: chat.agent && { id: chat.agent.id, canonicalWorkspace: chat.agent.canonicalWorkspace } } } : { action: "agents" }, handoffFile);
+    const from = { runtimeSessionId: sessionState.info.session_id || "", workspace: sessionState.info.workspace_root || sessionState.info.cwd || "" };
+    await writeHandoff(chat ? { action: "open", chat: { ...chat, agent: chat.agent && { id: chat.agent.id, canonicalWorkspace: chat.agent.canonicalWorkspace } } } : { action: "agents", from }, handoffFile);
     await shutdownRuntime();
     return;
   }
@@ -594,15 +595,18 @@ async function enterManagement(chat) {
   inputController.pause();
   tui.stop({ releaseInput: false });
   process.off("SIGINT", handleSigint);
+  // This window's conversation stays here but is no longer on screen.
+  void runtimeClient.setVisible?.(false);
   let next = { action: "agents" };
   try {
     if (chat) next = await followConversation(chat, { launch: managementLaunch, input: process.stdin });
     if (next.action === "agents") {
-      const page = await runAgentsPage({ launch: managementLaunch, manageInput: false, signal: abort.signal, initialTeamId: management.chatContext?.teamId, currentSessionId: sessionState.info.session_id });
+      const page = await runAgentsPage({ launch: managementLaunch, manageInput: false, signal: abort.signal, initialTeamId: management.chatContext?.teamId, currentSessionId: sessionState.info.session_id, returnTo: chat ? returnTarget(next) : undefined });
       if (page.leave) next = { action: "leave", working: page.working, notice: page.notice };
     }
   } finally {
     agentsPageAbort = null;
+    if (next.action !== "leave") void runtimeClient.setVisible?.(true);
     process.on("SIGINT", handleSigint);
     tui.start({ acquireInput: false });
     tui.replayAll();
@@ -912,6 +916,9 @@ function handleStdinData(chunk) {
 }
 
 function exitFromSignal() {
+  // ctrl+c only ever leaves. A forced close says so too, or the window that
+  // opened this one would read "no decision" and show Agents again.
+  if (handoffWindow) writeHandoffSync({ action: "leave" }, handoffFile);
   if (runtimeState.status === "closing") {
     forceCloseRuntime();
     scheduleProcessExit(0, 0);

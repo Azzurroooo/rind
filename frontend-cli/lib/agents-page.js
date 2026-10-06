@@ -5,7 +5,7 @@ import { createLineEditor } from "./line-editor.js";
 import { createForm } from "./agents-form.js";
 import { resolveInputPath } from "./path-input.js";
 import { managementClient } from "./agents-client.js";
-import { openAgentChat, managerWorkspace, followConversation } from "./agents-commands.js";
+import { openAgentChat, managerWorkspace, followConversation, returnTarget } from "./agents-commands.js";
 import { createLeaveLatch, LEAVE_HINT } from "./interrupt-state.js";
 import { actionFor } from "./agents-keys.js";
 import { emptyAgentsSnapshot, withoutDrafts, clean, sidebarRows, inboxRows, organizationRows, taskRows, memberSessionRows, managerRows, teamSessions, independentSessions, independentRows, folderRows, backgroundRows, archiveRows, workspaceKey, selectable } from "./agents-model.js";
@@ -23,13 +23,16 @@ const RETRY_MS = 10000;
 // so the window that opened the page closes as well.
 // currentSessionId: the conversation of the window that opened this page; it
 // stays listed even while it is still an empty draft.
-export async function runAgentsPage({ launch, input = process.stdin, output = process.stdout, manageInput = true, signal, initialTeamId, openChat = openAgentChat, standalone = false, currentSessionId = "" }) {
+export async function runAgentsPage({ launch, input = process.stdin, output = process.stdout, manageInput = true, signal, initialTeamId, openChat = openAgentChat, standalone = false, currentSessionId = "", returnTo }) {
   const tui = createTui({ input, output, manageInput, alternateScreen: true });
   const view = {
     snapshot: emptyAgentsSnapshot(), connection: "connecting…", busy: false, busyLabel: "", notice: null, help: false,
     sidebar: [], navId: "inbox", focus: "sidebar", member: null, folder: null, page: { kind: "inbox" }, pageKey: "inbox", entries: [], selectedId: "",
     selections: {}, scroll: {}, tabs: {}, collapsed: {}, history: {}, managerHistory: null, independent: null, managerPath: "", service: null, stopped: false,
     query: "", filter: "All", searching: false, searchEditor: createLineEditor(), dialog: null, detail: null, standalone, leaveArmed: false,
+    // The conversation Esc goes back to: the one just left. `own` is this
+    // window's own conversation, which is still loaded behind the page.
+    returnTo: returnTo !== undefined ? returnTo : currentSessionId ? { own: true, runtimeSessionId: currentSessionId } : null,
   };
   let client, connecting, closed = false, chatActive = false, initialized = false, noticeTimer, spinner, previousKey = "";
   // Keys typed while an action is saving are replayed afterwards instead of being lost.
@@ -87,7 +90,8 @@ export async function runAgentsPage({ launch, input = process.stdin, output = pr
     view.pageKey = [view.page.kind, view.page.teamId, view.page.tab || view.page.agentId || view.page.workspace].filter(Boolean).join(":");
     const previous = view.pageKey === previousKey ? view.entries : [];
     previousKey = view.pageKey;
-    view.entries = entriesFor(view.page);
+    const back = view.returnTo?.runtimeSessionId;
+    view.entries = entriesFor(view.page).map(row => back && row.sessionId === back && ["session", "live"].includes(row.kind) ? { ...row, back: true } : row);
     // The selection never moves by itself while its row exists, so Enter acts on
     // the highlighted row even as live rows arrive and re-sort around it.
     const remembered = view.selections[view.pageKey];
@@ -166,7 +170,8 @@ export async function runAgentsPage({ launch, input = process.stdin, output = pr
 
   const acceptSnapshot = snapshot => {
     if (closed) return;
-    view.snapshot = withoutDrafts(snapshot, currentSessionId);
+    // An empty conversation is listed only while it is the one to go back to.
+    view.snapshot = withoutDrafts(snapshot, view.returnTo?.own ? currentSessionId : "");
     if (!initialized) {
       initialized = true;
       if (snapshot.teams.some(t => t.id === initialTeamId)) { view.navId = initialTeamId; view.focus = "main"; }
@@ -276,6 +281,9 @@ export async function runAgentsPage({ launch, input = process.stdin, output = pr
   function setFilter(status) { view.filter = status; project(); }
 
   async function chat({ agentId, teamId, runtimeSessionId, manager = false, workspace }) {
+    // This window's own conversation is still loaded: go back to it rather
+    // than open it a second time.
+    if (runtimeSessionId && runtimeSessionId === currentSessionId) { view.returnTo = { own: true, runtimeSessionId }; close(); return; }
     // Independent folders need not be registered; they open as a plain conversation there.
     const agent = view.snapshot.agents.find(a => a.id === agentId) || (workspace ? { canonicalWorkspace: workspace } : undefined);
     if (agent && !manager) {
@@ -291,6 +299,9 @@ export async function runAgentsPage({ launch, input = process.stdin, output = pr
       // Moving between conversations replaces the window; it never nests.
       const next = await followConversation({ agent, teamId: manager ? undefined : teamId, runtimeSessionId, manager }, { launch, input, open: openChat });
       if (next.action === "leave") leave();
+      // The conversation just left is the one Esc goes back to; any earlier
+      // one is simply in the background now.
+      else view.returnTo = returnTarget(next);
     } finally {
       chatActive = false;
       if (closed) finish();
@@ -299,8 +310,22 @@ export async function runAgentsPage({ launch, input = process.stdin, output = pr
         // A finished conversation may have created history that the lists should show.
         if (manager) view.managerHistory = null; else if (teamId) delete view.history[teamId]; else view.independent = null;
         project();
+        selectReturn();
       }
     }
+  }
+  // Coming back from a conversation lands on its row, when this page lists it.
+  function selectReturn() {
+    const row = view.entries.find(item => item.back && selectable(item));
+    if (row) { view.focus = "main"; pick(view.pageKey, row.id); view.selectedId = row.id; redraw(); }
+  }
+  // Esc from the sidebar: back to the conversation just left, or close.
+  function goBack() {
+    const target = view.returnTo;
+    if (!target || target.own) return close();
+    // A conversation that never got a message was not saved; start a new one there instead.
+    const draft = (view.snapshot.live || []).some(item => item.id === target.runtimeSessionId && item.draft);
+    return open(draft ? { ...target, runtimeSessionId: undefined } : target);
   }
 
   // Stopping drops this connection on purpose; it is not a lost connection.
@@ -394,7 +419,7 @@ export async function runAgentsPage({ launch, input = process.stdin, output = pr
       view.member = null; pick(["team", teamId, view.tabs[teamId] || "org"].join(":"), "m:" + agentId); resetSearch(); project(); return;
     }
     if (view.focus === "main") { view.focus = "sidebar"; resetSearch(); project(); return; }
-    close();
+    goBack();
   }
   // Conversation rows belong to the member row above them.
   const ownerRow = row => {

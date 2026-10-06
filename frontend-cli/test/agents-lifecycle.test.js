@@ -2,11 +2,12 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { mkdtemp, mkdir, rm, writeFile, readFile } from "node:fs/promises";
 import { spawn } from "node:child_process";
+import http from "node:http";
 import path from "node:path";
 import os from "node:os";
 import { fileURLToPath } from "node:url";
 import { createHandoff, writeHandoff, takeHandoffPath, HANDOFF_ENV } from "../lib/agents-handoff.js";
-import { followConversation } from "../lib/agents-commands.js";
+import { followConversation, returnTarget } from "../lib/agents-commands.js";
 import { runAgentsPage } from "../lib/agents-page.js";
 import { plainSession } from "../lib/agents-session.js";
 import { startServer } from "../../agent-management/dist/ipc.js";
@@ -50,15 +51,24 @@ test("moving between conversations replaces the window instead of nesting it", a
   const steps = [{ action: "open", chat: { runtimeSessionId: "b" } }, { action: "open", chat: { runtimeSessionId: "c" } }, { action: "agents" }];
   const next = await followConversation({ runtimeSessionId: "a" }, { launch: {}, open: async chat => { opened.push(chat.runtimeSessionId); return steps.shift(); } });
   assert.deepEqual(opened, ["a", "b", "c"]);
-  assert.deepEqual(next, { action: "agents" });
-  assert.deepEqual(await followConversation({}, { launch: {}, open: async () => undefined }), { action: "return" });
+  assert.deepEqual(next, { action: "agents", chat: { runtimeSessionId: "c" } }, "it reports the last conversation opened");
+  assert.deepEqual(await followConversation({}, { launch: {}, open: async () => undefined }), { action: "return", chat: {} });
 });
 
-async function cli(t, { handoff, columns = 100, rows = 26, tty = true } = {}) {
+test("Esc goes back to the conversation just left, never further", () => {
+  const chat = { agent: { id: "a", canonicalWorkspace: "/w/a" }, teamId: "t", runtimeSessionId: "opened" };
+  assert.deepEqual(returnTarget({ action: "agents", chat, from: { runtimeSessionId: "ended", workspace: "/w/a" } }),
+    { agentId: "a", teamId: "t", manager: false, workspace: "/w/a", runtimeSessionId: "ended" }, "the session the window ended on wins");
+  assert.equal(returnTarget({ action: "return", chat }).runtimeSessionId, "opened");
+  assert.equal(returnTarget({ action: "agents", chat: { agent: { canonicalWorkspace: "/w" } } }), null, "a conversation without a session cannot be reopened");
+  assert.equal(returnTarget({ action: "leave", chat }), null);
+});
+
+async function cli(t, { handoff, columns = 100, rows = 26, tty = true, baseUrl = "http://127.0.0.1:1/v1" } = {}) {
   const home = await mkdtemp(path.join(os.tmpdir(), "rind-lifecycle-"));
   const workspace = path.join(home, "workspace");
   await mkdir(path.join(workspace, ".rind"), { recursive: true });
-  await writeFile(path.join(workspace, ".rind", "settings.json"), JSON.stringify({ provider: "openai-compatible", model: "fixture-model", baseUrl: "http://127.0.0.1:1/v1" }));
+  await writeFile(path.join(workspace, ".rind", "settings.json"), JSON.stringify({ provider: "openai-compatible", model: "fixture-model", apiKey: "fixture", baseUrl }));
   const script = `
     if (${tty}) {
       Object.defineProperty(process.stdin, 'isTTY', { value: true });
@@ -94,7 +104,9 @@ test("a conversation window hands Agents navigation back to the window that open
   await app.visible("← agents");
   app.key("\x1b[D");
   assert.equal(await app.exited, 0);
-  assert.deepEqual(await handoff.read(), { action: "agents" }, "Left asks the opener for Agents instead of nesting a page");
+  const next = await handoff.read();
+  assert.equal(next.action, "agents", "Left asks the opener for Agents instead of nesting a page");
+  assert.match(next.from.runtimeSessionId, /^\d{8}_/, "it says which conversation it left, so Esc can go back to it");
 });
 
 test("ctrl+c clears typing, then needs a second press to leave every window", { timeout: 40000 }, async t => {
@@ -111,6 +123,30 @@ test("ctrl+c clears typing, then needs a second press to leave every window", { 
   app.key("\x03");
   assert.equal(await app.exited, 0);
   assert.deepEqual(await handoff.read(), { action: "leave" });
+});
+
+test("ctrl+c in a conversation window only ever leaves, even while a turn is being interrupted", { timeout: 60000 }, async t => {
+  const held = [];
+  const provider = http.createServer((request, response) => {
+    if (request.method === "GET") { response.end(JSON.stringify({ data: [{ id: "fixture-model" }] })); return; }
+    request.resume(); request.on("end", () => held.push(response));
+  });
+  await new Promise(resolve => provider.listen(0, "127.0.0.1", resolve));
+  t.after(() => { held.forEach(response => response.destroy()); return new Promise(resolve => provider.close(resolve)); });
+  const handoff = await createHandoff(); t.after(() => handoff.dispose());
+  const app = await cli(t, { handoff, baseUrl: "http://127.0.0.1:" + provider.address().port + "/v1" });
+  await app.visible("← agents");
+  app.key("hello\r");
+  for (let i = 0; i < 200 && !held.length; i++) await new Promise(resolve => setTimeout(resolve, 50));
+  assert.ok(held.length, "the turn reached the provider");
+  // Interrupt, then press again at once: the forced close must still say "leave".
+  app.key("\x03"); await new Promise(resolve => setTimeout(resolve, 5)); app.key("\x03");
+  for (let i = 0; i < 20; i++) {
+    const code = await Promise.race([app.exited, new Promise(resolve => setTimeout(() => resolve("running"), 400))]);
+    if (code !== "running") break;
+    app.key("\x03");
+  }
+  assert.deepEqual(await handoff.read(), { action: "leave" }, "the opener closes too instead of showing Agents again");
 });
 
 test("without a terminal a single ctrl+c leaves, since no hint could be seen", { timeout: 40000 }, async t => {

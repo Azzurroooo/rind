@@ -127,7 +127,7 @@ function treeLine(row, width, nameColumn) {
     left = guide + name + role;
     right = memberChip(row, compact);
   } else if (row.kind === "session") {
-    left = guide + glyph(row.status) + " " + single(row.title);
+    left = guide + glyph(row.status) + " " + (row.back ? paint.accent("↩ ") : "") + single(row.title);
     right = compact ? paint.dim(row.time || "") : toned(row.status, row.status) + " " + paint.dim((row.time || "").padStart(5));
   } else left = guide + paint.dim(single(row.title));
   const room = width - (right ? Math.max(RIGHT, textWidth(right)) + 1 : 0);
@@ -151,7 +151,7 @@ function rowLine(row, width, selected, focused, nameColumn) {
   if (row.kind === "member" || row.kind === "team" || row.fresh) name = paint.bold(name);
   else if (["add-member", "new-session", "assign", "new-team", "more", "clear"].includes(row.kind)) name = paint.dim(name);
   const extra = (row.role ? paint.dim(" · " + row.role) : "") + (row.hidden ? paint.dim(" +" + row.hidden) : "") + (row.note && row.kind !== "service" && width >= 60 ? paint.dim(" — " + row.note) : "");
-  const left = marker + " " + leadIcon(row) + " " + paint.dim(row.guide || "") + name + extra;
+  const left = marker + " " + leadIcon(row) + " " + paint.dim(row.guide || "") + (row.back ? paint.accent("↩ ") : "") + name + extra;
   const right = rightColumns(row, width);
   const room = width - textWidth(right) - 1;
   if (!right || room < 12) return fitLine(left, width);

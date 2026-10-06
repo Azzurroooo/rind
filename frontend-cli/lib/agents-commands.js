@@ -35,6 +35,11 @@ export async function openAgentChat({ agent, teamId, manager = false, runtimeSes
   const raw = input.isRaw;
   input.setRawMode?.(false);
   input.pause?.();
+  // The conversation owns the terminal and handles ctrl+c itself. A signal that
+  // reaches this window too (while the child is between terminal modes) must
+  // not end it, or the child would be left without its opener.
+  const ignore = () => {};
+  process.on("SIGINT", ignore);
   const handoff = await createHandoff();
   try {
     const args = manager ? ["--manager"] : ["--cwd", agent.canonicalWorkspace, ...(teamId ? ["--team", teamId] : ["--standalone"])];
@@ -54,7 +59,7 @@ export async function openAgentChat({ agent, teamId, manager = false, runtimeSes
       if (code !== 0 && next.action === "return") throw new Error("The conversation window closed unexpectedly (exit " + code + ").");
       return next;
     });
-  } finally { await handoff.dispose(); input.setRawMode?.(!!raw); input.resume?.(); }
+  } finally { process.off("SIGINT", ignore); await handoff.dispose(); input.setRawMode?.(!!raw); input.resume?.(); }
 }
 
 // The last line Rind prints when its windows close.
@@ -64,11 +69,22 @@ export function leaveSummary({ working = 0, notice = "" } = {}) {
 }
 
 // Follows conversation-to-conversation moves until the user goes back to
-// Agents, returns, or leaves Rind.
+// Agents, returns, or leaves Rind. `chat` is the last conversation opened.
 export async function followConversation(chat, { launch, input, open = openAgentChat }) {
   let next = { action: "open", chat };
-  while (next.action === "open") next = (await open({ ...next.chat, launch, input })) || { action: "return" };
-  return next;
+  let last = chat;
+  while (next.action === "open") { last = next.chat; next = (await open({ ...next.chat, launch, input })) || { action: "return" }; }
+  return { ...next, chat: last };
+}
+
+// The conversation the user just left, so Esc on the Agents page goes back to
+// it. Windows never stack: this is a place to reopen, not a window kept open.
+export function returnTarget(next) {
+  if (!["agents", "return"].includes(next?.action) || !next.chat) return null;
+  const runtimeSessionId = next.from?.runtimeSessionId || next.chat.runtimeSessionId;
+  if (!runtimeSessionId) return null;
+  const { agent, teamId, manager } = next.chat;
+  return { agentId: agent?.id, teamId, manager: Boolean(manager), workspace: next.from?.workspace || agent?.canonicalWorkspace, runtimeSessionId };
 }
 export async function runAgentsCommand(args, launch) {
   const json = args.includes("--json");
@@ -174,7 +190,7 @@ async function showConversation(chat, launch) {
   const next = await followConversation(chat, { launch, input: process.stdin });
   if (next.action !== "agents") return;
   const { runAgentsPage } = await import("./agents-page.js");
-  const result = await runAgentsPage({ launch, standalone: true, initialTeamId: chat.teamId });
+  const result = await runAgentsPage({ launch, standalone: true, initialTeamId: chat.teamId, returnTo: returnTarget(next) });
   if (result.leave) console.log(leaveSummary(result));
 }
 function option(args, flag) { const index = args.indexOf(flag); return index === -1 ? undefined : args[index + 1]; }
