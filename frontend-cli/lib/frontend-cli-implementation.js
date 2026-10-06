@@ -156,7 +156,11 @@ if (cliArgs[0] === "run") {
 
 let management;
 try { management = await prepareManagement(cliArgs, managementLaunch); cliArgs = management.args; }
-catch (error) { process.stderr.write(error.message + "\n"); process.exitCode = 2; return; }
+catch (error) {
+  // A window opened from Agents tells its opener why it could not start.
+  if (handoffWindow) await writeHandoff({ action: "failed", error: error.message }, handoffFile);
+  process.stderr.write(error.message + "\n"); process.exitCode = 2; return;
+}
 const cliState = createCliState();
 const runtimeState = cliState.runtime;
 const sessionState = cliState.session;
@@ -591,7 +595,7 @@ async function enterManagement(chat) {
   try {
     if (chat) next = await followConversation(chat, { launch: managementLaunch, input: process.stdin });
     if (next.action === "agents") {
-      const page = await runAgentsPage({ launch: managementLaunch, manageInput: false, signal: abort.signal, initialTeamId: management.chatContext?.teamId });
+      const page = await runAgentsPage({ launch: managementLaunch, manageInput: false, signal: abort.signal, initialTeamId: management.chatContext?.teamId, currentSessionId: sessionState.info.session_id });
       if (page.leave) next = { action: "leave", working: page.working, notice: page.notice };
     }
   } finally {

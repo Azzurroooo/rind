@@ -4,6 +4,24 @@ import path from "node:path";
 import os from "node:os";
 import { createInterface } from "node:readline/promises";
 import { managementClient, selectRecord } from "./agents-client.js";
+import { connectSharedRuntime } from "../../rind-runtime-client/shared-runtime.js";
+
+const SESSION_ID = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$/;
+
+// The folder a conversation lives in. The shared Runtime knows every session it
+// runs, including a new one with nothing saved yet; saved history covers the rest.
+export async function sessionWorkspace(home, sessionId) {
+  if (!SESSION_ID.test(sessionId) || sessionId.includes("..")) throw new Error("Invalid session ID.");
+  const host = await connectSharedRuntime({ rindHome: home, start: false }).catch(() => null);
+  if (host) {
+    try {
+      const live = (await host.request("runtime/sessions").catch(() => ({ sessions: [] }))).sessions?.find(item => item.id === sessionId);
+      if (live?.workspace) return live.workspace;
+    } finally { host.close(); }
+  }
+  const meta = await readFile(path.join(home, "sessions", sessionId, "meta.json"), "utf8").then(JSON.parse, () => null);
+  return typeof meta?.workspace_root === "string" ? meta.workspace_root : "";
+}
 
 export function managementArgs(args) {
   const remaining = []; let team, standalone = false, manager = false, prefill;
@@ -27,11 +45,11 @@ export async function plainSession(args, interactive, home) {
   const sharedOk = interactive && !args.includes("--trace-llm") && !argument(args, "--session-dir");
   if (!sharedOk) return { args, shared: false };
   // The shared Runtime opens a conversation in a folder, so resuming one from
-  // elsewhere names the folder it was saved in (a private worker read it itself).
+  // elsewhere names the folder it lives in (a private worker read it itself).
   const resume = argument(args, "--session");
-  if (resume && !argument(args, "--cwd") && !argument(args, "--dir") && /^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$/.test(resume) && !resume.includes("..")) {
-    const meta = await readFile(path.join(home, "sessions", resume, "meta.json"), "utf8").then(JSON.parse, () => null);
-    if (meta?.workspace_root) return { args: ["--cwd", meta.workspace_root, ...args], shared: true };
+  if (resume && !argument(args, "--cwd") && !argument(args, "--dir") && SESSION_ID.test(resume) && !resume.includes("..")) {
+    const workspace = await sessionWorkspace(home, resume);
+    if (workspace) return { args: ["--cwd", workspace, ...args], shared: true };
   }
   return { args, shared: true };
 }
@@ -80,14 +98,14 @@ export async function prepareManagement(args, launch, { interactive = !!process.
     let registeredSession = resumeId && snapshot.sessions.find(s => s.runtimeSessionId === resumeId);
     if (registeredSession && !options.manager && !argument(options.args, "--cwd") && !argument(options.args, "--dir")) workspace = snapshot.agents.find(a => a.id === registeredSession.agentId).canonicalWorkspace;
     if (resumeId && !registeredSession) {
-      if (!/^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$/.test(resumeId) || resumeId.includes("..")) throw new Error("Invalid session ID.");
-      const sessions = argument(options.args, "--session-dir") || path.join(path.dirname(root), "sessions");
-      const metadata = JSON.parse(await readFile(path.join(sessions, resumeId, "meta.json"), "utf8"));
-      if (metadata.workspace_root) {
+      // A conversation without saved history (a new one) is checked by the Runtime when it opens.
+      const known = argument(options.args, "--session-dir") ? "" : await sessionWorkspace(rindHome, resumeId);
+      if (known) {
         const explicitWorkspace = options.manager || argument(options.args, "--cwd") || argument(options.args, "--dir");
         const normalize = value => process.platform === "win32" ? value.toLowerCase() : value;
-        if (explicitWorkspace && normalize(await realpath(workspace)) !== normalize(await realpath(metadata.workspace_root))) throw new Error("That conversation belongs to another workspace. Open its member from Agents management.");
-        workspace = metadata.workspace_root;
+        const canonical = value => realpath(value).then(normalize, () => { throw new Error("The folder of that conversation no longer exists: " + value); });
+        if (explicitWorkspace && await canonical(workspace) !== await canonical(known)) throw new Error("That conversation belongs to another workspace. Open its member from Agents management.");
+        workspace = known;
       }
     }
     workspace = await realpath(workspace);

@@ -36,6 +36,10 @@ test("a handoff without a decision means return, and only valid decisions are ac
   assert.deepEqual(await handoff.read(), { action: "return" }, "open without a conversation is ignored");
   await writeHandoff({ action: "leave" }, handoff.file);
   assert.deepEqual(await handoff.read(), { action: "leave" });
+  await writeHandoff({ action: "failed" }, handoff.file);
+  assert.deepEqual(await handoff.read(), { action: "return" }, "a failure without a reason is ignored");
+  await writeHandoff({ action: "failed", error: "That conversation no longer exists." }, handoff.file);
+  assert.deepEqual(await handoff.read(), { action: "failed", error: "That conversation no longer exists." });
   const env = { [HANDOFF_ENV]: handoff.file, OTHER: "1" };
   assert.equal(takeHandoffPath(env), handoff.file);
   assert.deepEqual(env, { OTHER: "1" }, "services started from the window do not inherit it");

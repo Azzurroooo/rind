@@ -10,10 +10,11 @@ import path from "node:path";
 //   { action: "agents" }               show the Agents page
 //   { action: "leave" }                leave Rind entirely; agents keep running
 //   { action: "open", chat: {...} }    open another conversation instead
+//   { action: "failed", error }        it could not start; the opener shows why
 // A window that exits without a decision reads as { action: "return" }: go
 // back to whatever opened it.
 export const HANDOFF_ENV = "RIND_AGENTS_HANDOFF";
-const ACTIONS = new Set(["agents", "leave", "open"]);
+const ACTIONS = new Set(["agents", "leave", "open", "failed"]);
 
 // Read once at startup and removed from the environment, so background
 // services and tools started from this window never inherit it.
@@ -37,7 +38,8 @@ export async function createHandoff() {
     async read() {
       try {
         const value = JSON.parse(await readFile(file, "utf8"));
-        if (ACTIONS.has(value?.action) && (value.action !== "open" || value.chat)) return value;
+        const complete = value?.action === "open" ? Boolean(value.chat) : value?.action === "failed" ? typeof value.error === "string" : true;
+        if (ACTIONS.has(value?.action) && complete) return value;
       } catch {}
       return { action: "return" };
     },

@@ -153,7 +153,7 @@ export function createActions(ui) {
     const team = teamOf(teamId), run = unknownRun(teamId, agentId);
     ui.choose(agentName(agentId), [
       { label: "Conversations", key: "enter", description: "Every conversation in this team", action: () => ui.openMember(teamId, agentId) },
-      { label: "New conversation", key: "c", description: "Talk to this member directly", action: () => ui.chat({ agentId, teamId }) },
+      { label: "New conversation", key: "c", description: "Talk to this member directly", action: () => ui.startNew({ agentId, teamId }) },
       { label: "Assign task", key: "t", description: "Tracked work with a delivery report", action: () => assignTask(teamId, agentId) },
       { label: "Add direct report", key: "a", description: "Add a member below " + agentName(agentId), action: () => addMember(teamId, agentId) },
       { label: "Edit role and responsibility", key: "e", action: () => editMember(teamId, agentId) },
@@ -171,16 +171,16 @@ export function createActions(ui) {
     const task = snap().tasks.find(t => t.id === row.taskId);
     if (row.independent) {
       ui.choose(row.title, [
-        { label: "Continue conversation", key: "enter", description: "Outside any team", action: () => ui.chat({ agentId: row.agentId, runtimeSessionId: row.sessionId, workspace: row.workspace }) },
-        { label: "New conversation in this folder", key: "c", action: () => ui.chat({ agentId: row.agentId, workspace: row.workspace }) },
+        { label: "Continue conversation", key: "enter", description: "Outside any team", action: () => ui.join(row) },
+        { label: "New conversation in this folder", key: "c", action: () => ui.startNew(row) },
       ], { description: [row.workspace] });
       return;
     }
     ui.choose(row.title, [
-      { label: "Join conversation", key: "enter", description: row.manager ? "Continue with the Manager" : "Continue in " + agentName(row.agentId) + "'s workspace", action: () => ui.chat({ agentId: row.agentId, teamId: row.teamId, runtimeSessionId: row.sessionId, manager: row.manager }) },
+      { label: "Join conversation", key: "enter", description: row.manager ? "Continue with the Manager" : "Continue in " + agentName(row.agentId) + "'s workspace", action: () => ui.join(row) },
       ...(row.manager ? [] : [
         { label: "All conversations of " + agentName(row.agentId), action: () => ui.openMember(row.teamId, row.agentId) },
-        { label: "New conversation", key: "c", action: () => ui.chat({ agentId: row.agentId, teamId: row.teamId }) },
+        { label: "New conversation", key: "c", action: () => ui.startNew(row) },
       ]),
       ...(task ? [{ label: "Task delivery", description: single(task.brief), action: () => delivery(task.id) }] : []),
     ]);

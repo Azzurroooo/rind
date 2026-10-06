@@ -9,6 +9,9 @@ import { startServer } from "../../agent-management/dist/ipc.js";
 import { connectClient } from "../../agent-management/dist/client.js";
 import { createSharedRuntimeClient } from "../../rind-runtime-client/shared-runtime.js";
 import { backgroundRows, independentSessions } from "../lib/agents-model.js";
+import { runAgentsPage } from "../lib/agents-page.js";
+import { sessionWorkspace } from "../lib/agents-session.js";
+import { createVirtualInput, createVirtualOutput } from "./helpers/virtual-terminal.js";
 import { removeRindHome } from "./helpers/rind-home.js";
 
 // One Rind window runs a turn in a folder that belongs to no team. Another
@@ -32,6 +35,10 @@ test("a plain window's turn is visible to management while it runs, and its pres
     await new Promise(resolve => provider.close(resolve)); await removeRindHome(home);
   });
   const info = await window.request("initialize");
+  // A new conversation has no saved history yet; the Runtime still knows its folder,
+  // so another window can open it instead of failing on missing metadata.
+  assert.equal(path.resolve(await sessionWorkspace(home, info.session_id)).toLowerCase(), path.resolve(folder).toLowerCase());
+  assert.equal(await sessionWorkspace(home, "20990101_unknown"), "");
   // The Agents page subscribes; management then attaches to the window's Runtime by itself.
   let latest;
   client = await connectClient({ endpoint: server.paths.endpoint, token: (await readFile(server.paths.token, "utf8")).trim(), onSnapshot: snapshot => { latest = snapshot; } });
@@ -48,6 +55,22 @@ test("a plain window's turn is visible to management while it runs, and its pres
   assert.deepEqual(rows.filter(r => r.kind === "live").map(r => [r.status, r.context]), [["Working", "notes"]], "RUNNING NOW lists the plain window's turn");
   assert.equal(independentSessions(running, [], "").find(g => g.name === "notes").sessions[0].status, "Working");
   assert.equal(running.agents.length, 0, "a plain session never becomes an agent");
+
+  // Enter on it in Background › Running now opens it in its folder, as Independent does.
+  const input = createVirtualInput(), output = createVirtualOutput({ columns: 120, rows: 30 });
+  const opened = [], abort = new AbortController();
+  const page = runAgentsPage({ launch: { home, repoRoot }, input, output: output.output, signal: abort.signal, openChat: async chat => { opened.push(chat); return { action: "return" }; } });
+  const shows = async text => { for (let i = 0; i < 200; i++) { if ((await output.flushAndGetViewport()).join("\n").includes(text)) return; await new Promise(resolve => setTimeout(resolve, 25)); } assert.fail("Expected " + text + "\n" + output.getViewport().join("\n")); };
+  await shows("Inbox");
+  input.send("jjj"); await shows("what keeps running after you leave Rind");
+  input.send("\r"); await shows("RUNNING NOW · 1");
+  input.send("\r");
+  for (let i = 0; i < 300 && !opened.length; i++) await new Promise(resolve => setTimeout(resolve, 40));
+  abort.abort(); await page;
+  assert.equal(opened.length, 1, "the running conversation opens instead of failing");
+  assert.equal(opened[0].runtimeSessionId, info.session_id);
+  assert.equal(path.resolve(opened[0].agent.canonicalWorkspace).toLowerCase(), path.resolve(folder).toLowerCase());
+  assert.equal(opened[0].teamId, undefined);
   // Leaving while the turn runs: the window closes, the turn goes on, and the
   // conversation must not stay "open" once its request finishes later.
   await window.shutdown();

@@ -7,7 +7,7 @@ import { resolveInputPath } from "./path-input.js";
 import { managementClient } from "./agents-client.js";
 import { openAgentChat, managerWorkspace, followConversation } from "./agents-commands.js";
 import { createLeaveLatch, LEAVE_HINT } from "./interrupt-state.js";
-import { emptyAgentsSnapshot, clean, sidebarRows, inboxRows, organizationRows, taskRows, memberSessionRows, managerRows, teamSessions, independentSessions, independentRows, folderRows, backgroundRows, workspaceKey, selectable } from "./agents-model.js";
+import { emptyAgentsSnapshot, withoutDrafts, clean, sidebarRows, inboxRows, organizationRows, taskRows, memberSessionRows, managerRows, teamSessions, independentSessions, independentRows, folderRows, backgroundRows, workspaceKey, selectable } from "./agents-model.js";
 import { renderAgents } from "./agents-view.js";
 import { createActions } from "./agents-actions.js";
 
@@ -18,12 +18,14 @@ const INDEPENDENT_REFRESH_MS = 30000;
 
 // Resolves to { leave: true } when the user chose to leave Rind from here,
 // so the window that opened the page closes as well.
-export async function runAgentsPage({ launch, input = process.stdin, output = process.stdout, manageInput = true, signal, initialTeamId, openChat = openAgentChat, standalone = false }) {
+// currentSessionId: the conversation of the window that opened this page; it
+// stays listed even while it is still an empty draft.
+export async function runAgentsPage({ launch, input = process.stdin, output = process.stdout, manageInput = true, signal, initialTeamId, openChat = openAgentChat, standalone = false, currentSessionId = "" }) {
   const tui = createTui({ input, output, manageInput, alternateScreen: true });
   const view = {
     snapshot: emptyAgentsSnapshot(), connection: "connecting…", busy: false, busyLabel: "", notice: null, help: false,
     sidebar: [], navId: "inbox", focus: "sidebar", member: null, folder: null, page: { kind: "inbox" }, pageKey: "inbox", entries: [], selectedId: "",
-    selections: {}, scroll: {}, tabs: {}, collapsed: {}, history: {}, managerHistory: null, independent: null, managerPath: "", service: null, stopped: false,
+    selections: {}, chosen: new Set(), scroll: {}, tabs: {}, collapsed: {}, history: {}, managerHistory: null, independent: null, managerPath: "", service: null, stopped: false,
     query: "", filter: "All", searching: false, searchEditor: createLineEditor(), dialog: null, detail: null, standalone, leaveArmed: false,
   };
   let client, connecting, closed = false, chatActive = false, initialized = false, noticeTimer, spinner, previousKey = "";
@@ -82,8 +84,11 @@ export async function runAgentsPage({ launch, input = process.stdin, output = pr
     const previous = view.pageKey === previousKey ? view.entries : [];
     previousKey = view.pageKey;
     view.entries = entriesFor(view.page);
+    // Until someone picks a row, a page points at its first item, even while its
+    // rows are still arriving; after that the pick is kept or stays nearby.
     const remembered = view.selections[view.pageKey];
-    if (!view.entries.some(row => row.id === remembered && selectable(row))) view.selections[view.pageKey] = fallbackSelection(previous, remembered);
+    if (!view.chosen.has(view.pageKey)) view.selections[view.pageKey] = firstItem();
+    else if (!view.entries.some(row => row.id === remembered && selectable(row))) view.selections[view.pageKey] = fallbackSelection(previous, remembered);
     view.selectedId = view.selections[view.pageKey];
     ensureHistory();
     redraw();
@@ -91,6 +96,12 @@ export async function runAgentsPage({ launch, input = process.stdin, output = pr
 
   // When the selected row disappears (sorted into "+N more", filtered out or
   // removed), stay near it instead of jumping to the top of the list.
+  function firstItem() {
+    const items = view.entries.filter(selectable);
+    return (items.find(row => !CREATE_KINDS.has(row.kind)) || items[0])?.id;
+  }
+  // Every deliberate selection goes through here, so the page knows it was chosen.
+  function pick(key, id) { view.selections[key] = id; view.chosen.add(key); }
   function fallbackSelection(previous, id) {
     const items = view.entries.filter(selectable);
     const old = previous.find(row => row.id === id);
@@ -101,7 +112,7 @@ export async function runAgentsPage({ launch, input = process.stdin, output = pr
       const after = view.entries.slice(index).find(selectable) || items.at(-1);
       return after.id;
     }
-    return (items.find(row => !CREATE_KINDS.has(row.kind)) || items[0])?.id;
+    return firstItem();
   }
 
   function ensureHistory() {
@@ -142,7 +153,7 @@ export async function runAgentsPage({ launch, input = process.stdin, output = pr
 
   const acceptSnapshot = snapshot => {
     if (closed) return;
-    view.snapshot = snapshot;
+    view.snapshot = withoutDrafts(snapshot, currentSessionId);
     if (!initialized) {
       initialized = true;
       if (snapshot.teams.some(t => t.id === initialTeamId)) { view.navId = initialTeamId; view.focus = "main"; }
@@ -233,7 +244,7 @@ export async function runAgentsPage({ launch, input = process.stdin, output = pr
   function resetSearch() { view.query = ""; view.filter = "All"; view.searching = false; view.searchEditor.setInput(""); }
   function openTeam(teamId, tab = view.tabs[teamId] || "org", selectId) {
     view.navId = teamId; view.member = null; view.tabs[teamId] = tab; view.focus = "main"; view.detail = null; resetSearch();
-    if (selectId) view.selections[["team", teamId, tab].join(":")] = selectId;
+    if (selectId) pick(["team", teamId, tab].join(":"), selectId);
     project();
   }
   function openFolder(workspace) {
@@ -292,8 +303,13 @@ export async function runAgentsPage({ launch, input = process.stdin, output = pr
     // connect() reports its own failures; only a live connection means it worked.
     if (view.connection !== "connected") throw new Error("Agents management did not come back. Press r to retry.");
   }
-  const ui = { view, request, choose, form, restartService, launch, resolvePath: value => resolveInputPath(value), stopServices, leave, confirm, notify, showText, reopen, openTeam, openMember, setFilter, // Menu actions already run inside perform(); nesting would be refused as busy.
-    chat: options => (view.busy ? chat(options) : perform(() => chat(options), null, "Opening conversation…")) };
+  // The one way every page opens a conversation: by its session (none for a new
+  // one) and where it lives: a team member, a plain folder, or the Manager.
+  // Menu actions already run inside perform(); nesting would be refused as busy.
+  const open = options => (view.busy ? chat(options) : perform(() => chat(options), null, "Opening conversation…"));
+  const where = row => ({ agentId: row.agentId, teamId: row.teamId, workspace: row.workspace, manager: row.manager });
+  const ui = { view, request, choose, form, restartService, launch, resolvePath: value => resolveInputPath(value), stopServices, leave, confirm, notify, showText, reopen, openTeam, openMember, setFilter,
+    join: row => open({ ...where(row), runtimeSessionId: row.sessionId }), startNew: target => open(where(target)) };
   const actions = createActions(ui);
   const currentRow = () => (view.focus === "sidebar" ? view.sidebar.find(r => r.id === view.navId) : view.entries.find(r => r.id === view.selectedId));
 
@@ -307,13 +323,13 @@ export async function runAgentsPage({ launch, input = process.stdin, output = pr
       case "member": return openMember(row.teamId, row.agentId);
       case "more": return row.workspace ? openFolder(row.workspace) : openMember(row.teamId, row.agentId);
       case "workspace": return openFolder(row.workspace);
-      case "session": return ui.chat({ agentId: row.agentId, teamId: row.teamId, runtimeSessionId: row.sessionId, manager: row.manager, workspace: row.workspace });
-      case "new-session": return ui.chat({ agentId: row.agentId, teamId: row.teamId || view.page.teamId, manager: row.manager, workspace: row.workspace });
+      case "session": return ui.join(row);
+      case "new-session": return ui.startNew({ ...row, teamId: row.teamId || view.page.teamId });
       case "add-member": return actions.addMember(row.teamId);
       case "assign": return actions.assignTask(row.teamId);
       case "task": return view.page.kind === "inbox" && row.answer ? actions.answer(row.taskId) : perform(() => actions.delivery(row.taskId), null, "Loading delivery…");
       case "run": { const run = view.snapshot.runs.find(r => r.id === row.runId); return run && actions.resolveRun(run); }
-      case "live": return row.taskId ? perform(() => actions.delivery(row.taskId), null, "Loading delivery…") : row.sessionId ? ui.chat({ agentId: row.agentId, teamId: row.teamId, runtimeSessionId: row.sessionId }) : undefined;
+      case "live": return row.taskId ? perform(() => actions.delivery(row.taskId), null, "Loading delivery…") : ui.join(row);
       case "stop-all": return actions.stopAll(row.working);
       case "service": return perform(() => actions.serviceActions(row), null, "Loading…");
       case "team": return openTeam(row.teamId);
@@ -343,18 +359,18 @@ export async function runAgentsPage({ launch, input = process.stdin, output = pr
     const next = items[Math.max(0, Math.min(items.length - 1, absolute ?? current + delta))].id;
     if (view.focus === "sidebar") {
       if (next !== view.navId) { view.navId = next; view.member = null; view.folder = null; resetSearch(); }
-    } else view.selections[view.pageKey] = next;
+    } else pick(view.pageKey, next);
     project();
   }
   function back() {
     if (view.focus === "main" && (view.query || view.filter !== "All")) { resetSearch(); project(); return; }
     if (view.page.kind === "folder") {
       const { workspace } = view.page;
-      view.folder = null; view.selections.independent = "w:" + workspace; resetSearch(); project(); return;
+      view.folder = null; pick("independent", "w:" + workspace); resetSearch(); project(); return;
     }
     if (view.page.kind === "member") {
       const { teamId, agentId } = view.page;
-      view.member = null; view.selections[["team", teamId, view.tabs[teamId] || "org"].join(":")] = "m:" + agentId; resetSearch(); project(); return;
+      view.member = null; pick(["team", teamId, view.tabs[teamId] || "org"].join(":"), "m:" + agentId); resetSearch(); project(); return;
     }
     if (view.focus === "main") { view.focus = "sidebar"; resetSearch(); project(); return; }
     close();
@@ -364,7 +380,7 @@ export async function runAgentsPage({ launch, input = process.stdin, output = pr
     if (["session", "more"].includes(row?.kind) && view.page.kind === "independent") return view.entries.find(r => r.id === "w:" + row.workspace);
     return ["session", "more"].includes(row?.kind) && view.page.kind === "team" ? view.entries.find(r => r.id === "m:" + row.agentId) : undefined;
   };
-  const selectRow = id => { view.selections[view.pageKey] = id; project(); };
+  const selectRow = id => { pick(view.pageKey, id); project(); };
   // Left always climbs: conversation -> its member -> sidebar. It never folds,
   // so leaving a deep tree takes at most two presses.
   function left() {
@@ -394,7 +410,7 @@ export async function runAgentsPage({ launch, input = process.stdin, output = pr
     } else {
       const row = ownerRow(currentRow()) || currentRow();
       if (row?.kind !== "workspace") return;
-      view.selections[view.pageKey] = row.id;
+      pick(view.pageKey, row.id);
       if (row.expanded) collapsed.add(row.workspace); else collapsed.delete(row.workspace);
     }
     project();
@@ -410,7 +426,7 @@ export async function runAgentsPage({ launch, input = process.stdin, output = pr
     }).filter(i => i >= 0);
     const index = view.entries.indexOf(currentRow());
     const target = step > 0 ? starts.find(i => i > index) : starts.filter(i => i < index).at(-1);
-    if (target !== undefined) { view.selections[view.pageKey] = view.entries[target].id; project(); }
+    if (target !== undefined) { pick(view.pageKey, view.entries[target].id); project(); }
   }
   function toggleFold(all) {
     if (view.page.kind === "independent" && view.focus === "main") return toggleFolders(all);
@@ -425,7 +441,7 @@ export async function runAgentsPage({ launch, input = process.stdin, output = pr
     }
     const row = ownerRow(currentRow()) || currentRow();
     if (row?.kind !== "member" || !row.expandable) return;
-    view.selections[view.pageKey] = row.id;
+    pick(view.pageKey, row.id);
     setFolded([row.agentId], row.expanded);
   }
   function switchTab(tab) {
@@ -508,8 +524,8 @@ export async function runAgentsPage({ launch, input = process.stdin, output = pr
     else if (text === "f" && view.focus === "main" && ["team", "member", "independent", "folder"].includes(view.page.kind)) actions.chooseFilter();
     else if (text === "n" || text === "N") actions.createTeam();
     else if (text === "r") refresh();
-    else if (text === "c" && view.focus === "main" && ["independent", "folder"].includes(view.page.kind) && (row?.workspace || view.page.workspace)) ui.chat({ agentId: row?.agentId, workspace: row?.workspace || view.page.workspace });
-    else if (text === "c" && contextMember()) ui.chat(contextMember());
+    else if (text === "c" && view.focus === "main" && ["independent", "folder"].includes(view.page.kind) && (row?.workspace || view.page.workspace)) ui.startNew({ agentId: row?.agentId, workspace: row?.workspace || view.page.workspace });
+    else if (text === "c" && contextMember()) ui.startNew(contextMember());
     else if (text === "t" && view.focus === "main" && view.page.teamId) actions.assignTask(view.page.teamId, contextMember()?.agentId);
     else if (text === "a" && view.focus === "main" && view.page.kind === "team") actions.addMember(view.page.teamId, row?.kind === "member" ? row.agentId : undefined);
     else if (text === "e" && contextMember()) actions.editMember(contextMember().teamId, contextMember().agentId);

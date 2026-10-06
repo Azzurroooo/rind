@@ -49,7 +49,8 @@ export async function openAgentChat({ agent, teamId, manager = false, runtimeSes
     }).then(async code => {
       const next = await handoff.read();
       // A window that failed without saying where to go reports the failure.
-      if (code !== 0 && next.action === "return") throw new Error("Agent session exited with " + code);
+      if (next.action === "failed") throw new Error(next.error);
+      if (code !== 0 && next.action === "return") throw new Error("The conversation window closed unexpectedly (exit " + code + ").");
       return next;
     });
   } finally { await handoff.dispose(); input.setRawMode?.(!!raw); input.resume?.(); }

@@ -3,6 +3,14 @@
 
 export const emptyAgentsSnapshot = () => ({ teams: [], memberships: [], agents: [], tasks: [], runs: [], sessions: [], notes: [], artifacts: [] });
 
+// A new conversation with no message yet is not a conversation to manage. It
+// is hidden everywhere except from the window that has it open (`keep`).
+export function withoutDrafts(snapshot, keep = "") {
+  const drafts = new Set((snapshot.live || []).filter(item => item.draft && item.id !== keep).map(item => item.id));
+  if (!drafts.size) return snapshot;
+  return { ...snapshot, live: snapshot.live.filter(item => !drafts.has(item.id)), sessions: snapshot.sessions.filter(session => !drafts.has(session.runtimeSessionId)) };
+}
+
 export const clean = value => String(value ?? "").replace(/\x1b\][^\x07]*(?:\x07|\x1b\\)/g, "").replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, "").replace(/[\x00-\x08\x0b-\x1f\x7f]/g, "");
 export const single = value => clean(value).replace(/\s+/g, " ").trim();
 

@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { emptyAgentsSnapshot, organizationRows, teamSessions, taskRows, inboxRows, sidebarRows, memberSessionRows, relativeTime, teamStatus, independentSessions, independentRows, folderRows, backgroundRows } from "../lib/agents-model.js";
+import { emptyAgentsSnapshot, organizationRows, teamSessions, taskRows, inboxRows, sidebarRows, memberSessionRows, relativeTime, teamStatus, independentSessions, independentRows, folderRows, backgroundRows, withoutDrafts } from "../lib/agents-model.js";
 
 const NOW = Date.parse("2026-10-06T12:00:00Z");
 function fixture() {
@@ -179,6 +179,23 @@ test("background lists every running conversation, services and one stop action"
   assert.equal(idle.find(r => r.id === "idle").title, "Nothing is running. Leaving Rind stops nothing.");
   assert.equal(idle.find(r => r.kind === "stop-all").title, "Stop background services…");
   assert.equal(idle.find(r => r.id === "svc:runtime").note, "starts when a conversation needs it");
+});
+
+test("empty drafts are hidden everywhere except from the window that has them open", () => {
+  const { snapshot } = fixture();
+  snapshot.sessions.push({ id: "z", agentId: "lead", teamId: "team", runtimeSessionId: "r-draft-team" });
+  snapshot.live = [
+    { id: "r-draft-team", workspace: "/w/lead", turn: "idle", draft: true, watchers: 1 },
+    { id: "r-draft-mine", workspace: "/notes", turn: "idle", draft: true, watchers: 1 },
+    { id: "r-real", workspace: "/notes", turn: "idle", draft: false, watchers: 1 },
+  ];
+  const visible = withoutDrafts(snapshot, "r-draft-mine");
+  assert.deepEqual(visible.live.map(item => item.id), ["r-draft-mine", "r-real"]);
+  assert.ok(!visible.sessions.some(s => s.runtimeSessionId === "r-draft-team"), "a registered team draft is hidden too");
+  assert.ok(!teamSessions(visible, "team").some(s => s.id === "r-draft-team"));
+  assert.deepEqual(independentSessions(visible).find(g => g.workspace === "/notes").sessions.map(s => s.runtimeSessionId).sort(), ["r-draft-mine", "r-real"]);
+  const plain = { ...snapshot, live: [] };
+  assert.equal(withoutDrafts(plain), plain, "nothing to hide returns the snapshot as is");
 });
 
 test("the inbox shows recent deliveries instead of repeating the team list", () => {
