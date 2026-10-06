@@ -248,6 +248,15 @@ Rind 不是单进程：Agent、任务与共享 Runtime 在后台运行，窗口�
 - 会话文件夹：`agents-session.js#sessionWorkspace` 先问 Runtime（`runtime/sessions`），再读保存的元数据；子窗口启动失败经 handoff `{ action: "failed", error }` 回传原因。
 - 选择：选中行存在时从不自动移动（实时数据重排也不会改变 Enter 的目标）；行消失时就近回退。
 
+### 8.2.4 交付审阅、删除 Team 与 Manager 审批（已冻结）
+
+- 按键：`agents-keys.js#ACTIONS` 是唯一按键表；`available(view,row)` 决定选中行提供哪些动作，按键分发（`actionFor`）、footer 与 `?` 帮助都从它生成。行未提供的键无效；Space 不回落到 Enter。标签说明对该行的效果（open member / join / open report / add member below / decide）。
+- 报告：`agents-report.js#renderReport` 纯渲染（头部状态·Team›负责人·交付时间；待你决定的事；Outcome/Summary/Evidence/Files/Next 对齐；Notes/Runs/Subtasks 折叠在 z 后）。`agents-review.js` 声明报告自己的按键（a 接受、b 返工、n 备注/回答、o 打开文件或负责人会话、space 任务动作、r 刷新），footer 由同一列表生成。
+- 审阅：`reviewTask` 仅用户，每个交付只能审一次；返工是同一负责人的新任务（`reworkOf`），带反馈和被审阅的报告；原报告不变，显示"已退回返工"。Inbox 的 Recently delivered 先列全部未审阅（● 粗体），再补最近已审阅（↺ 表示返工）。
+- 删除 Team：侧栏 Team 上 Space → Delete team…，输入 Team 名确认；有运行中的工作时拒绝。未完成任务取消、成员关系与会话登记解除（会话变回普通会话，历史和文件夹不动；窗口正显示的会话保留无 Team 登记 `released`，turn 与 detach 照常，detach 时才移除）；有任务的 Team 以 `team.archive` 只读归档（侧栏 Archive，`listArchive` 按需读取，不进实时快照），无任务的直接删除。只注销本次释放、且无人引用、且没有自带指令或技能的 Agent（`teams.ts#pruneAgents`）；删除后再次导入同一旧 Team 会建新 Team。
+- Manager：可直接建 Team、派活、移除成员、删除空 Team（无成员/任务/会话）；其余删除与停止运行中的任务变为 `approvals`，在 Inbox 第一位"Approve: …"，默认 Decline；`resolveApproval` 仅用户；目标消失的请求在每个事务中自动移除（`expireApprovals`）。
+- "新交付"只标记用户或 Manager 派出的顶层任务且有 `deliveredAt`，最多 20 条；成员互派的子任务和升级前的交付不标记。
+
 ### 8.3 Session 展示语义（已统一）
 
 - Agents 页面任何位置只展示 `teamId` 已登记的 Team 会话；独立会话和其他 Team 的会话一律不展示。
@@ -262,7 +271,8 @@ Rind 不是单进程：Agent、任务与共享 Runtime 在后台运行，窗口�
 - `agent-management/src/model.ts`：共享类型、状态、校验和 Adapter 契约。
 - `agent-management/src/organization.ts`：直属上级、子树、无环校验和 Leader 相关组织逻辑。
 - `agent-management/src/projection.ts`：每次快照构建一次 `projectionIndex`，成员/Session 状态、队列原因均为线性计算；Team briefing。订阅推送在 `ipc.ts` 中按连接合并，同一批宿主事件只推一次快照，且总在请求响应之后。
-- `agent-management/src/service.ts`：权限、注册、Team/成员、Workspace/worktree、Task、Run、Session、调度和恢复，是唯一业务写入边界。
+- `agent-management/src/service.ts`：权限、注册、Team/成员、Workspace/worktree、Task、Run、Session、审阅、审批、调度和恢复，是唯一业务写入边界。
+- `agent-management/src/teams.ts`：删除 Team（取消、解除、归档）、解除会话登记、注销无人引用的 Agent。
 - `agent-management/src/store.ts`：单写入 JSONL journal、snapshot、序列号和崩溃恢复。
 - `agent-management/src/ipc.ts`、`server.ts`、`client.ts`：本地服务启动、认证、请求、订阅和断线处理。
 - `agent-management/src/adapters/rind.ts`：Rind Runtime Adapter。
@@ -282,11 +292,12 @@ Rind 不是单进程：Agent、任务与共享 Runtime 在后台运行，窗口�
 - `frontend-cli/lib/agents-commands.js`：Manager/成员会话打开以及非 TTY `rind agents` 命令。
 - `frontend-cli/lib/agents-session.js`：管理作用域参数、服务准备和 Runtime 观察。
 - `frontend-cli/lib/agents-model.js`：纯投影：状态表、相对时间、组织树（引导线/roll-up/过滤）、Team 会话合并、任务分组、Inbox、Sidebar。
-- `frontend-cli/lib/agents-keys.js`：唯一按键表、上下文 footer 提示、帮助分组。
+- `frontend-cli/lib/agents-keys.js`：唯一动作表（ACTIONS/available/actionFor），按键分发、footer 提示与帮助分组同源。
+- `frontend-cli/lib/agents-report.js`、`agents-review.js`：结构化交付报告渲染；报告按键、接受/返工、删除 Team、Manager 审批流程。
 - `frontend-cli/lib/agents-detail.js`：选中行的详情文本。
-- `frontend-cli/lib/agents-actions.js`：多步流程（建 Team、加成员、派任务、成员/会话/任务动作、Delivery）。
+- `frontend-cli/lib/agents-actions.js`：多步流程（建 Team、加成员、派任务、成员/会话/任务动作、停止、服务），并组合 `agents-review.js`。
 - `frontend-cli/lib/agents-page.js`：页面状态、导航、按键分发、服务与历史加载。
-- `frontend-cli/lib/agents-view.js`：布局、行渲染、对话框、帮助层、Delivery 视图。
+- `frontend-cli/lib/agents-view.js`：布局、行渲染、对话框、帮助层、报告/文本视图。
 - `frontend-cli/lib/tui/tui.js`：终端模式、全屏、增量渲染、同步输出和光标。
 - `frontend-cli/lib/terminal-key.js`：普通键、Kitty、CSI 解析；鼠标报告解析为 null。
 - `frontend-cli/lib/theme.js`：语义主题、背景面板和选中状态。
@@ -323,7 +334,7 @@ Rind 不是单进程：Agent、任务与共享 Runtime 在后台运行，窗口�
 
 按优先级：
 
-1. **完成 Manager 的可观测调度体验。** Manager 当前能打开受控会话，但跨 Team 摘要、从建议跳到 Team/Task、待用户确认和一页式交付仍可继续增强。
+1. **完成 Manager 的可观测调度体验。** 破坏性操作已走 Inbox 审批；跨 Team 摘要、从建议跳到 Team/Task 仍可继续增强。
 2. **增加 Codex/Claude Code adapters。** 复用 Adapter 接口和统一事件，不复制 Team 逻辑。
 3. **补齐真实终端 QA。** 继续使用 `@xterm/headless` 做确定性测试，并在 Windows Terminal、常见 ANSI/Kitty 终端、窄窗口、CJK/emoji、断线恢复场景手测。
 4. **最终清理和发行验证。** 检查旧 Python Team 可写入口、旧 `delegate` 注入和重复逻辑只保留迁移所需的只读桥；运行 staging 和干净 `RIND_HOME` 端到端流程。
@@ -340,8 +351,8 @@ npm --prefix agent-management test
 
 当前基线结果：
 
-- `frontend-cli`：549 tests，548 pass，1 skipped，0 fail。
-- `agent-management`：37 tests，37 pass，0 fail；Python `pytest test`：1364 passed，2 skipped。
+- `frontend-cli`：560 tests，559 pass，1 skipped，0 fail。
+- `agent-management`：47 tests，47 pass，0 fail；Python `pytest test`：1364 passed，2 skipped。
 - 颜色相关渲染测试会强制开启颜色并要求每一行的可见宽度恰好等于终端宽度、只含完整 SGR 序列；不要删除，它是截图类错位问题的回归防线。
 - 相关 `node --check` 已通过。
 - 主题测试需要清除继承的 `NO_COLOR`；有 `NO_COLOR` 时颜色断言失败是环境预期，不是业务逻辑失败。
@@ -356,7 +367,9 @@ npm --prefix agent-management test
 - `agent-management/test/history.test.js`：Team 会话作用域。
 - `frontend-cli/test/agents-lifecycle.test.js`：真实 CLI 子进程的 handoff（← 回 Agents、两次 ctrl+c 离开、ctrl+c 清空输入）与 Agents 页的会话链与离开。
 - `frontend-cli/test/tui-integration.test.js`：完整 CLI TUI/Runtime 交互。
-- `agent-management/test/*.test.js`：权限、组织树、任务调度、共享 Workspace、恢复、报告和 Session scope。
+- `agent-management/test/*.test.js`：权限、组织树、任务调度、共享 Workspace、恢复、报告和 Session scope；`stewardship.test.js` 覆盖审阅/返工、删除归档、Agent 注销与 Manager 审批。
+- `frontend-cli/test/agents-keys.test.js`：footer 提示与按键分发一致、未提供的键无效。
+- `frontend-cli/test/agents-report.test.js`、`agents-teams.test.js`：报告渲染与按键、Inbox/Archive 投影、从侧栏删除 Team、Manager 审批端到端。
 
 ## 13. 新 session 启动顺序
 

@@ -105,11 +105,47 @@ Enter on a member opens its page: every conversation it has in this team, newest
 
 ### Tasks
 
-Tasks are grouped by what you do first: Needs you, In progress, Queued, Waiting on members, Delivered and Cancelled. Each row shows the owner and priority; wide terminals add the blocker, queue reason or delivery summary. Enter opens the delivery view: outcome, evidence, artifacts, notes and recent runs; there Space opens task actions (answer or note, start or retry, queue priority, stop or cancel, resolve an unconfirmed run) and `r` refreshes. Priority only reorders waiting work; it never interrupts a running task.
+Tasks are grouped by what you do first: Needs you, In progress, Queued, Waiting on members, Delivered and Cancelled. Each row shows the owner and priority; wide terminals add the blocker, queue reason or delivery summary. Priority only reorders waiting work; it never interrupts a running task.
+
+Enter opens the task's **report**:
+
+```text
+ Ship the login page
+ ✓ Done · Product › Web · delivered 12m ago · high priority
+
+ New delivery · a accept · b send back for rework
+
+ Outcome   completed
+ Summary   Replaced the login form and added rate limiting; the old
+           endpoint now redirects.
+ Evidence  • unit tests pass
+           • screenshot of the new page
+ Files     login.png  ~/.rind/agents/artifacts/…/login.png
+ Next      Announce it in the release notes
+
+ ▸ Notes 3 · Runs 1   z to show
+ a accept  b send back  n add note  o open files  z history  space more actions  r refresh  esc back
+```
+
+The header says where the task stands; the next line says what, if anything, is yours to decide (an answer, a problem, a delivery to review); the delivery follows in aligned blocks, and notes, runs and subtasks stay folded until `z`. The keys the report offers are the ones in its footer:
+
+- `a` **accept** — the delivery is reviewed; the Inbox stops marking it new.
+- `b` **send back for rework** — asks what should change, then gives the same owner a new task with your feedback and the delivery you reviewed. The reviewed report stays as it was and says it was sent back. Offered only while the owner is still in the team.
+- `n` add a note, or answer when the task is waiting on you; `o` opens a published file in place, or the owner's conversations; Space opens task actions (start or retry, queue priority, stop or cancel, resolve an unconfirmed run); `r` refreshes.
+
+### Deleting a team
+
+Space on a team in the sidebar offers **Delete team…**. Type the team's name to confirm; the dialog first says how many members are released and how many unfinished tasks are cancelled. Deletion is refused while the team has running work, so stop or resolve it first. Members leave the team and their team conversations become plain conversations in their folders; one that is open in a window keeps working there, outside the team. Folders, their files and conversation history are never touched. A released folder that is in no other team and has no instructions or skills of its own is no longer registered as an agent; one with its own instructions keeps them.
+
+What the team delivered is kept read-only under **Archive** in the sidebar (shown once a team has been deleted): every task with its report, evidence and files. Archived work cannot run, be reviewed or change. A team that never had a task leaves nothing behind.
+
+### What the Manager may do
+
+The Manager assembles teams and assigns work directly. It may also remove members and delete a team that is still empty (no members, tasks or conversations). Anything that destroys history or stops running work — deleting a team that has anything in it, stopping a running task — becomes a request in your **Inbox** ("Approve: Delete team Product"). Enter shows what it would do; Decline is the default. Nothing changes until you decide, and a request whose target has meanwhile finished or disappeared leaves the Inbox by itself.
 
 ### Inbox, Manager and Independent
 
-The **Inbox** collects everything waiting on you across teams: blocked tasks, tasks that need attention, runs whose stop could not be confirmed, running tasks that stopped to ask a question ("Task asks: …") and team conversations waiting for an answer. Enter answers, resolves or joins. Below that, **Recently delivered** lists the newest finished tasks with their summary; Enter opens the delivery. Teams themselves are only in the sidebar.
+The **Inbox** collects everything waiting on you across teams: the Manager's requests for approval, blocked tasks, tasks that need attention, runs whose stop could not be confirmed, running tasks that stopped to ask a question ("Task asks: …") and team conversations waiting for an answer. Enter decides, answers, resolves or joins. Below that, **Recently delivered** lists the deliveries you have not reviewed yet — tasks you or the Manager gave out, not work members hand each other — marked `●` and in bold, then the latest reviewed ones (`↺` when sent back for rework); Enter opens the report. Teams themselves are only in the sidebar.
 
 **Manager** lists Manager conversations and starts new ones in its restricted workspace.
 
@@ -176,6 +212,8 @@ Each managed Session keeps one management scope; the shared Worker hosts many is
 ## Boundaries
 
 The service owns authorization, persistence, scheduling, workspace locks, reports and subscriptions. The adapter connects to the shared Runtime and translates lifecycle events. The management service observes session status from the execution host; it never treats closing a CLI as execution completion. Python receives a generic external tool configuration per Session and an optional list of absolute Skill files; it has no Team model. Model credentials cannot publish lifecycle facts, and host credentials cannot call management mutations. Manager sessions receive only the management tool and cannot browse member files.
+
+Reviewing and removing work goes through the same boundary. `reviewTask { taskId, decision: "accept" | "rework", feedback }` is user-only and applies once per delivery; rework is a new task (`reworkOf`) for the same owner. `deleteTeam { teamId, confirmName }` requires the exact name from the user, refuses while the team has a run, and either archives the team (`team.archive`, read through `listArchive`) or, without tasks, removes it. Archived teams are read-only to every method (team reads included) and absent from live snapshots, which list them only as `archivedTeams`; importing a deleted legacy team again makes a new team. A conversation released while a window shows it keeps a teamless registration (`released`) so its turns and detach still work, and is dropped on detach. Only the folders an operation released are unregistered, and only when nothing live refers to them and they have no instructions or skills. The Manager's `deleteTeam` on a team with members, tasks or conversations and its `cancelRun` return `{ approval }` instead of acting; snapshots for the user carry `approvals`, which are removed as soon as their target is gone, and `resolveApproval { approvalId, approve }` (user-only) carries one out or declines it.
 
 The old Python Team discovery, `agent_create` and in-Worker `delegate` paths are removed. The read-only importer is the sole legacy bridge. `rind-runtime-client/` is shared by the CLI and adapter so the transport is not duplicated.
 
