@@ -8,6 +8,7 @@ import { managementClient } from "./agents-client.js";
 import { openAgentChat, managerWorkspace, followConversation, returnTarget } from "./agents-commands.js";
 import { createLeaveLatch, LEAVE_HINT } from "./interrupt-state.js";
 import { actionFor } from "./agents-keys.js";
+import { sessionWorkspace } from "./agents-session.js";
 import { emptyAgentsSnapshot, withoutDrafts, clean, sidebarRows, inboxRows, organizationRows, taskRows, memberSessionRows, managerRows, teamSessions, independentSessions, independentRows, folderRows, backgroundRows, archiveRows, workspaceKey, selectable } from "./agents-model.js";
 import { renderAgents } from "./agents-view.js";
 import { createActions } from "./agents-actions.js";
@@ -326,9 +327,13 @@ export async function runAgentsPage({ launch, input = process.stdin, output = pr
   function goBack() {
     const target = view.returnTo;
     if (!target || target.own) return close();
-    // A conversation that never got a message was not saved; start a new one there instead.
-    const draft = (view.received.live || []).some(item => item.id === target.runtimeSessionId && item.draft);
-    return open(draft ? { ...target, runtimeSessionId: undefined } : target);
+    return open(target, { resume: true });
+  }
+  // A conversation that never got a message is forgotten once no window holds
+  // it, so going back to one starts a new conversation in the same place.
+  async function stillExists(target) {
+    if ((view.received.live || []).some(item => item.id === target.runtimeSessionId && item.draft)) return false;
+    return Boolean(await sessionWorkspace(launch.home, target.runtimeSessionId).catch(() => ""));
   }
 
   // Stopping drops this connection on purpose; it is not a lost connection.
@@ -354,7 +359,10 @@ export async function runAgentsPage({ launch, input = process.stdin, output = pr
   // The one way every page opens a conversation: by its session (none for a new
   // one) and where it lives: a team member, a plain folder, or the Manager.
   // Menu actions already run inside perform(); nesting would be refused as busy.
-  const open = options => (view.busy ? chat(options) : perform(() => chat(options), null, "Opening conversation…"));
+  const open = (options, { resume = false } = {}) => {
+    const go = async () => chat(resume && options.runtimeSessionId && !(await stillExists(options)) ? { ...options, runtimeSessionId: undefined } : options);
+    return view.busy ? go() : perform(go, null, "Opening conversation…");
+  };
   const where = row => ({ agentId: row.agentId, teamId: row.teamId, workspace: row.workspace, manager: row.manager });
   const ui = { view, request, choose, form, showReport, run: (action, label) => perform(action, null, label), restartService, launch, resolvePath: value => resolveInputPath(value), stopServices, leave, confirm, notify, showText, reopen, openTeam, openMember, setFilter,
     join: row => open({ ...where(row), runtimeSessionId: row.sessionId }), startNew: target => open(where(target)) };

@@ -45,6 +45,9 @@ async function teamWithConversations(h, ids) {
   for (const id of ids) {
     const session = await h.client.request("attachSession", { agentId: lead.id, teamId: team.id });
     await h.client.request("bindSession", { sessionId: session.id, runtimeSessionId: id });
+    // Saved conversations: going back to one reopens it rather than starting anew.
+    await mkdir(path.join(h.home, "sessions", id), { recursive: true });
+    await writeFile(path.join(h.home, "sessions", id, "meta.json"), JSON.stringify({ workspace_root: lead.canonicalWorkspace }));
   }
   return { team, lead };
 }
@@ -138,4 +141,63 @@ test("an empty conversation disappears from the list once another conversation b
   await toSidebar(); await sidebar("Independent"); key("\r"); await settle(); await settle();
   assert.doesNotMatch(h.screen(), /New conversation/, "the empty conversation is no longer the way back, so it is not listed");
   assert.equal(team.name, "Product");
+});
+
+// Nothing keeps a conversation that never got a message once no window holds
+// it: not the Runtime's table, not the worker. A saved one is kept.
+test("the Runtime forgets an empty conversation when its last window lets go of it", { timeout: 60000 }, async t => {
+  const home = await mkdtemp(path.join(os.tmpdir(), "rind-forget-"));
+  const repoRoot = fileURLToPath(new URL("../..", import.meta.url));
+  const folder = path.join(home, "notes"); await mkdir(folder);
+  await writeFile(path.join(home, "settings.json"), JSON.stringify({ provider: "openai-compatible", model: "fixture", apiKey: "fixture", baseUrl: "http://127.0.0.1:1/v1" }));
+  const open = (args = []) => createSharedRuntimeClient({ rindHome: home, python: process.env.RIND_PYTHON || "python", repoRoot, cliArgs: ["--cwd", folder, ...args], onMessage() {} });
+  const first = open(), second = open(), probe = open();
+  t.after(async () => { await first.shutdown(); await second.shutdown(); await probe.shutdown(); await removeRindHome(home); });
+  const draft = (await first.request("initialize")).session_id;
+  await probe.request("initialize");
+  const table = async () => (await probe.request("runtime/sessions")).sessions;
+  const until = async (check, label) => {
+    for (let i = 0; i < 100; i++) { if (check(await table())) return; await new Promise(resolve => setTimeout(resolve, 50)); }
+    assert.fail(label + " " + JSON.stringify(await table()));
+  };
+  await until(list => list.some(item => item.id === draft && item.draft), "the empty conversation is a draft");
+
+  // Another window holding it keeps it alive.
+  await second.request("initialize");
+  await second.request("session/subscribe", { session_id: draft });
+  await first.request("session/unsubscribe", { session_id: draft });
+  await new Promise(resolve => setTimeout(resolve, 200));
+  assert.ok((await table()).some(item => item.id === draft), "still held by the second window");
+
+  await second.request("session/unsubscribe", { session_id: draft });
+  await until(list => !list.some(item => item.id === draft), "forgotten once nobody holds it");
+  await assert.rejects(probe.request("session/subscribe", { session_id: draft }), /not found|SessionNotFound|No session/i, "the worker no longer knows it");
+
+  // Closing the window that has a draft open forgets it the same way.
+  const closing = open();
+  const other = (await closing.request("initialize")).session_id;
+  await until(list => list.some(item => item.id === other), "the second draft is listed");
+  await closing.shutdown();
+  await until(list => !list.some(item => item.id === other), "a closed window's draft is forgotten");
+  // A saved conversation is never forgotten: see test_runtime_forget_draft.py.
+});
+
+test("going back to an empty conversation that was forgotten starts a new one in the same place", { timeout: 30000 }, async t => {
+  const h = await harness({ prefix: "rind-agents-gone-" });
+  const { team, lead } = await teamWithConversations(h, ["20261007_saved"]);
+  const opened = [];
+  const abort = new AbortController();
+  // The child window ends on a draft that no longer exists anywhere.
+  const running = runAgentsPage({ launch: h.launch, input: h.input, output: h.output.output, manageInput: false, signal: abort.signal, initialTeamId: team.id,
+    openChat: async chat => { opened.push(chat); return { action: "agents", chat, from: { runtimeSessionId: "20261007_000000_deadbeef", workspace: lead.canonicalWorkspace } }; } });
+  t.after(async () => { abort.abort(); await running; await h.cleanup(); });
+  await select(h, "20261007_saved"); h.key("\r");
+  for (let i = 0; i < 100 && opened.length < 1; i++) await h.settle();
+  for (let i = 0; i < 4 && !(await h.output.flushAndGetViewport()).join("\n").includes("esc back to conversation"); i++) { h.key("\x1b[D"); await h.settle(); }
+  h.key("\x1b");
+  for (let i = 0; i < 100 && opened.length < 2; i++) await h.settle();
+  assert.equal(opened.length, 2);
+  assert.equal(opened[1].runtimeSessionId, undefined, "a new conversation, not a missing one");
+  assert.equal(opened[1].teamId, team.id);
+  assert.equal(opened[1].agent.id, lead.id, "in the same member's folder");
 });
