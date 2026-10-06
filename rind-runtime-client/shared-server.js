@@ -28,19 +28,17 @@ export async function startSharedServer(options) {
     onExit() { live.reset(); if (!stopping) for (const peer of peers) peer.socket.destroy(); initialized = null; },
   });
   // `rind send`: the window that most recently showed the session takes the
-  // input as if typed there. Without one, a session this worker already runs
-  // gets a background turn (or a queued follow-up); anything else would run
-  // without the tools and scope its window configured, so it is refused.
+  // input as if typed there. Without one, a turn that is still running takes it
+  // as a follow-up. Nothing else is started: a new turn needs the tools and
+  // scope that only a window (or management, for a task) configures.
   async function deliver(sessionId, input) {
     if (!sessionId || !input.trim()) throw Object.assign(new Error("A session and a non-empty prompt are required."), { code: "INVALID_INPUT" });
     const window = live.newestViewer(sessionId, other => other.acceptsInput && peers.has(other));
     if (window) { window.send({ deliver: { session_id: sessionId, input } }); return { delivered: "window" }; }
-    if (!live.hosted(sessionId)) throw Object.assign(new Error("No Rind window has session " + sessionId + " open."), { code: "SESSION_NOT_OPEN" });
+    if (live.turn(sessionId) === "idle") throw Object.assign(new Error("No Rind window has session " + sessionId + " open, and it is not running."), { code: "SESSION_NOT_OPEN" });
     await initialize();
-    if (prompts.has(sessionId)) { await client.request("rind/session/follow_up", { session_id: sessionId, input }); return { delivered: "queued" }; }
-    prompts.add(sessionId);
-    void client.request("session/prompt", { session_id: sessionId, input }).catch(() => {}).finally(() => prompts.delete(sessionId));
-    return { delivered: "started" };
+    await client.request("rind/session/follow_up", { session_id: sessionId, input });
+    return { delivered: "queued" };
   }
   // A request can finish after its window closed; a closed window shows nothing.
   const viewIfOpen = (peer, id, details) => { if (peers.has(peer)) live.view(peer, id, details); };

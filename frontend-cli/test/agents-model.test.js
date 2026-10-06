@@ -194,6 +194,8 @@ test("empty drafts are hidden everywhere except from the window that has them op
   assert.ok(!visible.sessions.some(s => s.runtimeSessionId === "r-draft-team"), "a registered team draft is hidden too");
   assert.ok(!teamSessions(visible, "team").some(s => s.id === "r-draft-team"));
   assert.deepEqual(independentSessions(visible).find(g => g.workspace === "/notes").sessions.map(s => s.runtimeSessionId).sort(), ["r-draft-mine", "r-real"]);
+  const starting = { ...snapshot, runs: [...snapshot.runs, { id: "x", sessionId: "z", status: "unknown" }] };
+  assert.ok(withoutDrafts(starting).sessions.some(s => s.runtimeSessionId === "r-draft-team"), "a session with a run is never hidden as a draft");
   const plain = { ...snapshot, live: [] };
   assert.equal(withoutDrafts(plain), plain, "nothing to hide returns the snapshot as is");
 });

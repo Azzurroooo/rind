@@ -102,7 +102,9 @@ export function createSharedRuntimeClient(options) {
     const client = await start();
     if (method === "initialize") {
       // A window that takes `rind send` input says so before it opens its session.
-      initialization ||= client.request("initialize").then(async base => (options.onDeliver && await client.request("runtime/accept-input"), { ...base, ...await client.request("session/open", {
+      // A host from before `rind send` routing does not know this; the window then
+      // keeps its own send endpoint (client.acceptsInput stays false).
+      initialization ||= client.request("initialize").then(async base => (options.onDeliver && (client.acceptsInput = await client.request("runtime/accept-input").then(() => true, () => false)), { ...base, ...await client.request("session/open", {
         workspace_root: arg("--cwd") || arg("--dir") || options.cwd || process.cwd(), session_id: arg("--session"), resume_latest: args.includes("--resume-latest") || args.includes("-c"),
         external_tools: options.externalTools || null, enable_user_question: !args.includes("--no-user-question"),
       }) }));

@@ -6,7 +6,9 @@ export const emptyAgentsSnapshot = () => ({ teams: [], memberships: [], agents: 
 // A new conversation with no message yet is not a conversation to manage. It
 // is hidden everywhere except from the window that has it open (`keep`).
 export function withoutDrafts(snapshot, keep = "") {
-  const drafts = new Set((snapshot.live || []).filter(item => item.draft && item.id !== keep).map(item => item.id));
+  // A session with a run (a task starting, an unconfirmed run) is never a mere draft.
+  const runs = new Set(snapshot.runs.map(run => snapshot.sessions.find(s => s.id === run.sessionId)?.runtimeSessionId).filter(Boolean));
+  const drafts = new Set((snapshot.live || []).filter(item => item.draft && item.id !== keep && !runs.has(item.id)).map(item => item.id));
   if (!drafts.size) return snapshot;
   return { ...snapshot, live: snapshot.live.filter(item => !drafts.has(item.id)), sessions: snapshot.sessions.filter(session => !drafts.has(session.runtimeSessionId)) };
 }

@@ -35,8 +35,7 @@ export function createLiveSessions({ onChange = () => {}, now = () => Date.now()
     for (const item of sessions.values()) {
       const count = watchers.get(item.id) || 0;
       if (!count && item.turn === "idle" && Date.parse(item.updatedAt) < cutoff) { sessions.delete(item.id); continue; }
-      const { hosted, ...shown } = item;
-      out.push({ ...shown, watchers: count });
+      out.push({ ...item, watchers: count });
     }
     return out;
   }
@@ -49,7 +48,6 @@ export function createLiveSessions({ onChange = () => {}, now = () => Date.now()
       const item = entry(id);
       const was = viewers.get(viewer);
       if (workspace) item.workspace = workspace;
-      item.hosted = true;
       if (typeof draft === "boolean" && item.draft !== draft) { item.draft = draft; changed(); }
       // Re-inserting keeps the map ordered by recency, newest last.
       viewers.delete(viewer);
@@ -62,16 +60,15 @@ export function createLiveSessions({ onChange = () => {}, now = () => Date.now()
       for (const [viewer, shown] of viewers) if (shown === id && accept(viewer)) found = viewer;
       return found;
     },
-    // Opened in the current worker, so it has its tools and scope configured.
-    hosted: id => Boolean(sessions.get(id)?.hosted),
+    turn: id => sessions.get(id)?.turn || "idle",
     leave(viewer) { if (viewers.delete(viewer)) changed(); },
-    // The worker went away: no turn can still be running, and a new worker
-    // has configured no session until a window opens it again.
+    // The worker went away: no turn can still be running. What it knew about
+    // drafts is gone too; a session it opened is no longer known to be empty.
     reset() {
       let any = false;
       for (const item of sessions.values()) {
-        item.hosted = false;
-        if (item.turn !== "idle") { item.turn = "idle"; item.updatedAt = new Date(now()).toISOString(); any = true; }
+        if (item.turn === "idle" && !item.draft) continue;
+        item.turn = "idle"; item.draft = false; item.updatedAt = new Date(now()).toISOString(); any = true;
       }
       if (any) changed();
     },

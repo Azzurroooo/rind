@@ -44,11 +44,11 @@ test("drafts, the newest viewer and what the current worker hosts", () => {
   assert.equal(live.newestViewer("s1", viewer => viewer.accepts), a, "showing a session again makes the window newest");
   live.event({ session_id: "s1", event: { type: "turn_started" } });
   assert.equal(live.list()[0].draft, false, "the first turn ends the draft");
-  assert.equal(live.hosted("s1"), true);
-  assert.equal(live.hosted("never-opened"), false);
-  assert.ok(!("hosted" in live.list()[0]), "hosting is internal to the host");
+  assert.equal(live.turn("s1"), "running");
+  assert.equal(live.turn("never-opened"), "idle");
+  live.view(c, "s2", { draft: true });
   live.reset();
-  assert.equal(live.hosted("s1"), false, "a new worker has configured nothing");
+  assert.deepEqual(live.list().map(s => [s.id, s.turn, s.draft]), [["s1", "idle", false], ["s2", "idle", false]], "a crash forgets turns and drafts");
 });
 
 test("a crashed worker ends every running turn instead of leaving it working forever", () => {

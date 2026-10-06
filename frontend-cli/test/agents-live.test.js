@@ -64,7 +64,7 @@ test("a plain window's turn is visible to management while it runs, and its pres
   await shows("Inbox");
   input.send("jjj"); await shows("what keeps running after you leave Rind");
   input.send("\r"); await shows("RUNNING NOW · 1");
-  input.send("\r");
+  input.send("g"); input.send("\r");
   for (let i = 0; i < 300 && !opened.length; i++) await new Promise(resolve => setTimeout(resolve, 40));
   abort.abort(); await page;
   assert.equal(opened.length, 1, "the running conversation opens instead of failing");

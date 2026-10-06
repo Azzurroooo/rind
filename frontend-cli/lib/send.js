@@ -7,7 +7,7 @@ export const sendHelp = [
   "",
   "Sends a prompt to the rind session with that id. Find the id in its startup",
   "banner or /status. A window showing the session takes it as if typed there;",
-  "with none, a session that is still running continues in the background.",
+  "with none, a turn that is still running takes it as a follow-up.",
   "Delivery is acknowledged immediately.",
 ].join("\n");
 
@@ -43,19 +43,23 @@ export function parseSendArgs(args) {
   return result;
 }
 
-const DELIVERED = { window: "sent to rind", queued: "queued for the running turn", started: "started in the background", ipc: "sent to rind" };
+const DELIVERED = { window: "sent to rind", queued: "queued for the running turn", ipc: "sent to rind" };
 
 // The shared Runtime knows every interactive window. A window with its own
-// private worker (--trace-llm, --session-dir) still listens on its own endpoint.
+// private worker (--trace-llm, --session-dir), or one on a Runtime from before
+// this routing, still listens on its own endpoint.
 async function deliver(session, input, connect) {
+  let refused;
   const host = await connect().catch(() => null);
   if (host) {
     try { return { ok: true, delivered: (await host.request("runtime/send", { session_id: session, input })).delivered }; }
-    catch (error) { if (error.code !== "SESSION_NOT_OPEN") return { ok: false, message: error.message }; }
-    finally { host.close(); }
+    catch (error) {
+      if (error.code === "INVALID_INPUT") return { ok: false, message: error.message };
+      if (error.code === "SESSION_NOT_OPEN") refused = error.message;
+    } finally { host.close(); }
   }
   const result = await sendIpc({ session, input });
-  return result.ok ? { ok: true, delivered: "ipc" } : result;
+  return result.ok ? { ok: true, delivered: "ipc" } : { ok: false, message: refused || result.message };
 }
 
 export async function runSend({ args, stdout = process.stdout, stderr = process.stderr, connect = () => connectSharedRuntime({ start: false }) }) {

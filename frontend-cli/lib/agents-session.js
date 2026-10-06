@@ -9,17 +9,18 @@ import { connectSharedRuntime } from "../../rind-runtime-client/shared-runtime.j
 const SESSION_ID = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$/;
 
 // The folder a conversation lives in. The shared Runtime knows every session it
-// runs, including a new one with nothing saved yet; saved history covers the rest.
-export async function sessionWorkspace(home, sessionId) {
+// runs, including a new one with nothing saved yet; saved history covers the
+// rest. A custom history folder (--session-dir) is never the shared Runtime's.
+export async function sessionWorkspace(home, sessionId, sessionDir = "") {
   if (!SESSION_ID.test(sessionId) || sessionId.includes("..")) throw new Error("Invalid session ID.");
-  const host = await connectSharedRuntime({ rindHome: home, start: false }).catch(() => null);
+  const host = sessionDir ? null : await connectSharedRuntime({ rindHome: home, start: false }).catch(() => null);
   if (host) {
     try {
       const live = (await host.request("runtime/sessions").catch(() => ({ sessions: [] }))).sessions?.find(item => item.id === sessionId);
       if (live?.workspace) return live.workspace;
     } finally { host.close(); }
   }
-  const meta = await readFile(path.join(home, "sessions", sessionId, "meta.json"), "utf8").then(JSON.parse, () => null);
+  const meta = await readFile(path.join(sessionDir || path.join(home, "sessions"), sessionId, "meta.json"), "utf8").then(JSON.parse, () => null);
   return typeof meta?.workspace_root === "string" ? meta.workspace_root : "";
 }
 
@@ -99,7 +100,7 @@ export async function prepareManagement(args, launch, { interactive = !!process.
     if (registeredSession && !options.manager && !argument(options.args, "--cwd") && !argument(options.args, "--dir")) workspace = snapshot.agents.find(a => a.id === registeredSession.agentId).canonicalWorkspace;
     if (resumeId && !registeredSession) {
       // A conversation without saved history (a new one) is checked by the Runtime when it opens.
-      const known = argument(options.args, "--session-dir") ? "" : await sessionWorkspace(rindHome, resumeId);
+      const known = await sessionWorkspace(rindHome, resumeId, argument(options.args, "--session-dir"));
       if (known) {
         const explicitWorkspace = options.manager || argument(options.args, "--cwd") || argument(options.args, "--dir");
         const normalize = value => process.platform === "win32" ? value.toLowerCase() : value;

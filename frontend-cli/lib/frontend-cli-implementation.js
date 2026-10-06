@@ -225,6 +225,9 @@ const runtimeClient = observeRuntime((management.shared ? createSharedRuntimeCli
   // `rind send` input, routed here by the shared Runtime because this window shows the session.
   onDeliver: ({ session_id: target, input }) => { if (target === sessionState.info.session_id) inputActions.dispatchExternal(input); },
   onMessage: (message) => {
+    // Events are rendered one at a time, and an open question holds that queue
+    // until it is answered; an answer from another window must jump the queue.
+    if (message?.event?.type === "user_question_answered") { inputActions.questionAnswered(message.event); return; }
     eventProcessing = eventProcessing
       .then(() => message?.method === runtimeMethods.authUpdate ? renderAuthUpdate(message) : renderEvent(message))
       .catch((error) => {
@@ -411,7 +414,7 @@ const eventController = createEventController({
     },
     debug: cliArgs.includes("--debug"),
   },
-  input: { answerQuestion: (...args) => inputActions.answerQuestion(...args), questionAnswered: (...args) => inputActions.questionAnswered(...args) },
+  input: { answerQuestion: (...args) => inputActions.answerQuestion(...args) },
   monitor: taskMonitorController,
   output: {
     assistantAppend: outputController.assistantAppend,
@@ -526,7 +529,7 @@ function updateGoalState(goal) {
 
 // A private worker has no shared Runtime to route `rind send`; it listens itself.
 async function rebindSendEndpoint() {
-  if (management.shared) return;
+  if (management.shared && runtimeClient.child?.acceptsInput) return;
   try {
     await ipcServer?.close();
     ipcServer = null;

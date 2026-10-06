@@ -25,7 +25,7 @@ export async function runAgentsPage({ launch, input = process.stdin, output = pr
   const view = {
     snapshot: emptyAgentsSnapshot(), connection: "connecting…", busy: false, busyLabel: "", notice: null, help: false,
     sidebar: [], navId: "inbox", focus: "sidebar", member: null, folder: null, page: { kind: "inbox" }, pageKey: "inbox", entries: [], selectedId: "",
-    selections: {}, chosen: new Set(), scroll: {}, tabs: {}, collapsed: {}, history: {}, managerHistory: null, independent: null, managerPath: "", service: null, stopped: false,
+    selections: {}, scroll: {}, tabs: {}, collapsed: {}, history: {}, managerHistory: null, independent: null, managerPath: "", service: null, stopped: false,
     query: "", filter: "All", searching: false, searchEditor: createLineEditor(), dialog: null, detail: null, standalone, leaveArmed: false,
   };
   let client, connecting, closed = false, chatActive = false, initialized = false, noticeTimer, spinner, previousKey = "";
@@ -84,11 +84,10 @@ export async function runAgentsPage({ launch, input = process.stdin, output = pr
     const previous = view.pageKey === previousKey ? view.entries : [];
     previousKey = view.pageKey;
     view.entries = entriesFor(view.page);
-    // Until someone picks a row, a page points at its first item, even while its
-    // rows are still arriving; after that the pick is kept or stays nearby.
+    // The selection never moves by itself while its row exists, so Enter acts on
+    // the highlighted row even as live rows arrive and re-sort around it.
     const remembered = view.selections[view.pageKey];
-    if (!view.chosen.has(view.pageKey)) view.selections[view.pageKey] = firstItem();
-    else if (!view.entries.some(row => row.id === remembered && selectable(row))) view.selections[view.pageKey] = fallbackSelection(previous, remembered);
+    if (!view.entries.some(row => row.id === remembered && selectable(row))) view.selections[view.pageKey] = fallbackSelection(previous, remembered);
     view.selectedId = view.selections[view.pageKey];
     ensureHistory();
     redraw();
@@ -100,8 +99,7 @@ export async function runAgentsPage({ launch, input = process.stdin, output = pr
     const items = view.entries.filter(selectable);
     return (items.find(row => !CREATE_KINDS.has(row.kind)) || items[0])?.id;
   }
-  // Every deliberate selection goes through here, so the page knows it was chosen.
-  function pick(key, id) { view.selections[key] = id; view.chosen.add(key); }
+  function pick(key, id) { view.selections[key] = id; }
   function fallbackSelection(previous, id) {
     const items = view.entries.filter(selectable);
     const old = previous.find(row => row.id === id);
@@ -329,7 +327,7 @@ export async function runAgentsPage({ launch, input = process.stdin, output = pr
       case "assign": return actions.assignTask(row.teamId);
       case "task": return view.page.kind === "inbox" && row.answer ? actions.answer(row.taskId) : perform(() => actions.delivery(row.taskId), null, "Loading delivery…");
       case "run": { const run = view.snapshot.runs.find(r => r.id === row.runId); return run && actions.resolveRun(run); }
-      case "live": return row.taskId ? perform(() => actions.delivery(row.taskId), null, "Loading delivery…") : ui.join(row);
+      case "live": return row.taskId ? perform(() => actions.delivery(row.taskId), null, "Loading delivery…") : row.sessionId ? ui.join(row) : undefined;
       case "stop-all": return actions.stopAll(row.working);
       case "service": return perform(() => actions.serviceActions(row), null, "Loading…");
       case "team": return openTeam(row.teamId);
