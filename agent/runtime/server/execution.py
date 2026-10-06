@@ -108,6 +108,12 @@ class ExecutionCoordinator:
     def owns_session(self, session_id: str) -> bool:
         return session_id in self._session_options or session_id in self._active
 
+    def forget_options(self, session_id: str) -> None:
+        """Drop an idle session's tool configuration; opening it again sets it anew."""
+        clean = validate_session_id(session_id)
+        if clean not in self._active and clean not in self._starting:
+            self._session_options.pop(clean, None)
+
     def add_event_sink(self, sink: Callable[[dict[str, Any]], Awaitable[None] | None]) -> Callable[[], None]:
         """Register an event sink and return a callable that unregisters it."""
         self._event_sinks.append(sink)

@@ -100,3 +100,19 @@ test("a window covered by Agents does not count as showing its session until it 
   live.show(b);
   assert.equal(live.list().find(s => s.id === "s2").watchers, 0, "a closed window never comes back");
 });
+
+test("a forgotten conversation leaves the table and every window that pointed at it", () => {
+  const { live, flush, pushes } = setup();
+  const a = {}, b = {};
+  live.view(a, "draft", { draft: true }); live.view(b, "kept");
+  live.hide(a);
+  flush(); pushes.length = 0;
+  assert.equal(live.isDraft("draft"), true);
+  assert.equal(live.isDraft("kept"), false);
+  live.forget("draft");
+  flush();
+  assert.deepEqual(live.list().map(s => s.id), ["kept"]);
+  assert.equal(pushes.length, 1);
+  live.show(a);
+  assert.deepEqual(live.list().map(s => [s.id, s.watchers]), [["kept", 1]], "a window that held it shows nothing");
+});

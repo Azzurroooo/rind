@@ -325,6 +325,9 @@ class RuntimeDispatcher:
             if method == RuntimeMethod.SESSION_DELETE:
                 await self._delete_session(request)
                 return
+            if method == RuntimeMethod.RIND_SESSION_FORGET_DRAFT:
+                await self._forget_draft(request)
+                return
             if method == RuntimeMethod.SESSION_FORK:
                 await self._fork_session(request)
                 return
@@ -657,6 +660,19 @@ class RuntimeDispatcher:
         await self._worker.delete_session(session_id)
         self._subscribed.discard(session_id)
         await self._respond(request, {"ok": True, "deleted": session_id})
+
+    async def _forget_draft(self, request: dict[str, Any]) -> None:
+        """Drop a conversation that never got a message, once nothing holds it."""
+        session_id = await self._required_session_id(request)
+        if session_id is None:
+            return
+        if session_id in self._worker.execution.active_session_ids():
+            await self._respond(request, {"forgotten": False})
+            return
+        forgotten = await self._worker.forget_draft(session_id)
+        if forgotten:
+            self._subscribed.discard(session_id)
+        await self._respond(request, {"forgotten": forgotten})
 
     async def _fork_session(self, request: dict[str, Any]) -> None:
         session_id = await self._required_session_id(request)

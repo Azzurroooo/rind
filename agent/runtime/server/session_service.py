@@ -33,6 +33,14 @@ class SessionService:
     def release_persisted_draft(self) -> None:
         self._drafts = {sid: store for sid, store in self._drafts.items() if not store.is_persisted}
 
+    def forget_draft(self, session_id: str) -> bool:
+        """Drop an unsaved draft from memory. A saved conversation is never touched."""
+        store = self.draft_store(validate_session_id(session_id))
+        if store is None:
+            return False
+        self._drafts.pop(store.session_id, None)
+        return True
+
     async def metadata(self, session_id: str) -> dict[str, Any]:
         clean = validate_session_id(session_id)
         draft = self.draft_store(clean)

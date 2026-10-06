@@ -65,6 +65,14 @@ export function createLiveSessions({ onChange = () => {}, now = () => Date.now()
       return found;
     },
     turn: id => sessions.get(id)?.turn || "idle",
+    isDraft: id => sessions.get(id)?.draft === true,
+    // The conversation no longer exists (an unsaved draft nobody holds).
+    forget(id) {
+      if (!sessions.delete(id)) return;
+      for (const [viewer, shown] of viewers) if (shown === id) viewers.delete(viewer);
+      for (const [viewer, held] of covered) if (held === id) covered.delete(viewer);
+      changed();
+    },
     // The window is covered (the Agents page is in front) or back on screen.
     hide(viewer) {
       if (!viewers.has(viewer)) return;
@@ -76,10 +84,16 @@ export function createLiveSessions({ onChange = () => {}, now = () => Date.now()
       if (!covered.has(viewer)) return;
       const id = covered.get(viewer);
       covered.delete(viewer);
+      if (!sessions.has(id)) return;
       viewers.set(viewer, id);
       changed();
     },
-    leave(viewer) { const known = covered.delete(viewer); if (viewers.delete(viewer) || known) changed(); },
+    // The window closed, or (with `id`) stopped holding that conversation.
+    leave(viewer, id) {
+      if (id !== undefined && viewers.get(viewer) !== id && covered.get(viewer) !== id) return;
+      const known = covered.delete(viewer);
+      if (viewers.delete(viewer) || known) changed();
+    },
     // The worker went away: no turn can still be running. What it knew about
     // drafts is gone too; a session it opened is no longer known to be empty.
     reset() {

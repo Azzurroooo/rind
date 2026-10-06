@@ -128,6 +128,15 @@ class RuntimeWorker:
     async def release_execution(self, session_id: str) -> None:
         await self.execution.release(session_id)
 
+    async def forget_draft(self, session_id: str) -> bool:
+        """Forget a conversation that never got a message; it was never saved."""
+        clean = validate_session_id(session_id)
+        if clean == self.session_id or self.repository.draft_store(clean) is None:
+            return False
+        await self.execution.release(clean)
+        self.execution.forget_options(clean)
+        return self.repository.forget_draft(clean)
+
     async def replay(self, session_id: str, start: int | None = None, end: int | None = None) -> dict[str, Any]:
         await self.shell_tools.maintain_tasks(session_id)
         result = await self.repository.replay(session_id, start=start, end=end)

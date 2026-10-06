@@ -35,6 +35,10 @@ test("one host isolates workspaces and tools, runs sessions concurrently and sur
   assert.equal(path.resolve(infoB.workspace_root).toLowerCase(), b.toLowerCase());
   const pidA = await first.request("runtime/observe"), pidB = await second.request("runtime/observe");
   assert.equal(pidA.pid, pidB.pid);
+  // These conversations have no message yet; one held by no connection is
+  // forgotten, so the admin connection holds them while the windows reconnect.
+  await admin.request("session/subscribe", { session_id: infoA.session_id });
+  await admin.request("session/subscribe", { session_id: infoB.session_id });
   // Use separate ordinary connections to test event filtering, without observe-all.
   await first.shutdown(); await second.shutdown();
   const one = createSharedRuntimeClient({ ...options, cliArgs: ["--cwd", a, "--session", infoA.session_id], externalTools: tool, onMessage: e => eventsA.push(e) });
