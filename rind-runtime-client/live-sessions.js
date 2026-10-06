@@ -1,5 +1,6 @@
 // What every session in the shared Runtime is doing right now: whether a turn
-// runs or waits for an answer, and how many windows show it. The host already
+// runs or waits for an answer, and how many windows show it on screen. A
+// window covered by the Agents page still holds its session but shows nothing. The host already
 // sees every request and event, so this costs no polling; observers get the
 // whole (small) table pushed when it changes, coalesced per tick.
 const TURN_EVENTS = {
@@ -14,7 +15,8 @@ const FORGET_AFTER_MS = 10 * 60 * 1000;
 
 export function createLiveSessions({ onChange = () => {}, now = () => Date.now(), schedule = fn => setImmediate(fn) } = {}) {
   const sessions = new Map();
-  const viewers = new Map(); // viewer -> session id it shows
+  const viewers = new Map(); // viewer -> session id it shows on screen
+  const covered = new Map(); // viewer -> session id it holds while covered
   let pending = false;
 
   const entry = id => {
@@ -49,6 +51,8 @@ export function createLiveSessions({ onChange = () => {}, now = () => Date.now()
       const was = viewers.get(viewer);
       if (workspace) item.workspace = workspace;
       if (typeof draft === "boolean" && item.draft !== draft) { item.draft = draft; changed(); }
+      // A request finishing while the window is covered does not uncover it.
+      if (covered.has(viewer)) { covered.set(viewer, id); return; }
       // Re-inserting keeps the map ordered by recency, newest last.
       viewers.delete(viewer);
       viewers.set(viewer, id);
@@ -61,7 +65,21 @@ export function createLiveSessions({ onChange = () => {}, now = () => Date.now()
       return found;
     },
     turn: id => sessions.get(id)?.turn || "idle",
-    leave(viewer) { if (viewers.delete(viewer)) changed(); },
+    // The window is covered (the Agents page is in front) or back on screen.
+    hide(viewer) {
+      if (!viewers.has(viewer)) return;
+      covered.set(viewer, viewers.get(viewer));
+      viewers.delete(viewer);
+      changed();
+    },
+    show(viewer) {
+      if (!covered.has(viewer)) return;
+      const id = covered.get(viewer);
+      covered.delete(viewer);
+      viewers.set(viewer, id);
+      changed();
+    },
+    leave(viewer) { const known = covered.delete(viewer); if (viewers.delete(viewer) || known) changed(); },
     // The worker went away: no turn can still be running. What it knew about
     // drafts is gone too; a session it opened is no longer known to be empty.
     reset() {

@@ -77,6 +77,8 @@ export async function startSharedServer(options) {
         // Answered from the host's own table, without starting the worker.
         if (method === "runtime/sessions") { peer.send({ id, result: { sessions: live.list() } }); return; }
         if (method === "runtime/accept-input") { peer.acceptsInput = true; peer.send({ id, result: { ok: true } }); return; }
+        // Open means on screen: a window covered by the Agents page reports it.
+        if (method === "runtime/visibility") { if (params.visible === false) live.hide(peer); else live.show(peer); peer.send({ id, result: { ok: true } }); return; }
         if (method === "runtime/send") { peer.send({ id, result: await deliver(String(params.session_id || ""), String(params.input || "")) }); return; }
         if (method === "runtime/shutdown" && !initialized) { stopping = true; peer.send({ id, result: { stopped: true } }); await close(); return; }
         const base = await initialize(); let result;

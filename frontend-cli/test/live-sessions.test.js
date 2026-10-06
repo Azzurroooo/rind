@@ -77,3 +77,26 @@ test("a window shows one session at a time, and idle unwatched sessions are forg
   live.leave(w);
   assert.deepEqual(live.list().map(s => s.id), ["s3"]);
 });
+
+test("a window covered by Agents does not count as showing its session until it is back", () => {
+  const { live, flush, pushes } = setup();
+  const a = {}, b = {};
+  live.view(a, "s1"); live.view(b, "s2");
+  flush(); pushes.length = 0;
+  live.hide(a);
+  flush();
+  assert.deepEqual(live.list().map(s => [s.id, s.watchers]), [["s1", 0], ["s2", 1]], "only on-screen windows make a session Open");
+  assert.equal(live.newestViewer("s1"), undefined, "a covered window takes no rind send input");
+  live.view(a, "s1", { draft: false });
+  assert.equal(live.list().find(s => s.id === "s1").watchers, 0, "a late request does not uncover the window");
+  live.hide(a);
+  flush();
+  assert.equal(pushes.length, 1, "hiding twice is one change");
+  live.show(a);
+  assert.deepEqual(live.list().map(s => [s.id, s.watchers]), [["s1", 1], ["s2", 1]]);
+  assert.equal(live.newestViewer("s1"), a);
+  live.hide(b); live.leave(b);
+  assert.equal(live.list().find(s => s.id === "s2").watchers, 0);
+  live.show(b);
+  assert.equal(live.list().find(s => s.id === "s2").watchers, 0, "a closed window never comes back");
+});

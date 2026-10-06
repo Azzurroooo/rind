@@ -113,5 +113,11 @@ export function createSharedRuntimeClient(options) {
     return client.request(method, params);
   }
   function close() { closed = true; connection?.close(); starting?.then(c => c.close()).catch(() => {}); }
-  return { start, request, shutdown: async () => close(), forceShutdown: close, closeInput: close, get child() { return connection || null; } };
+  // Covered by the Agents page, the window still holds its session but no
+  // longer shows it. Best effort: an older host does not know this request.
+  async function setVisible(visible) {
+    if (!connection || closed) return;
+    try { await connection.request("runtime/visibility", { visible }); } catch {}
+  }
+  return { start, request, setVisible, shutdown: async () => close(), forceShutdown: close, closeInput: close, get child() { return connection || null; } };
 }
