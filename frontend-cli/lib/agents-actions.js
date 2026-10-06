@@ -155,7 +155,7 @@ export function createActions(ui) {
       { label: "Conversations", key: "enter", description: "Every conversation in this team", action: () => ui.openMember(teamId, agentId) },
       { label: "New conversation", key: "c", description: "Talk to this member directly", action: () => ui.startNew({ agentId, teamId }) },
       { label: "Assign task", key: "t", description: "Tracked work with a delivery report", action: () => assignTask(teamId, agentId) },
-      { label: "Add direct report", key: "a", description: "Add a member below " + agentName(agentId), action: () => addMember(teamId, agentId) },
+      { label: "Add member below", key: "a", description: "Add a member below " + agentName(agentId), action: () => addMember(teamId, agentId) },
       { label: "Edit role and responsibility", key: "e", action: () => editMember(teamId, agentId) },
       ...(team?.leaderAgentId !== agentId ? [
         { label: "Change supervisor", key: "s", action: () => changeSupervisor(teamId, agentId) },

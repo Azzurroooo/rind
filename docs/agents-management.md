@@ -56,7 +56,7 @@ Press **Left (←) while the chat input is empty** to open Agents Management; se
                         │  │  └─ DB      Database                   idle │ Workspace
                         │  └─ Web        Frontend               ○ 1 open │ ~/work/api
  ✓ Member added
- enter conversations  c new chat  t assign task  a add report  space actions  z fold  ? help  esc back
+ enter open member  space more actions  c new conversation  e edit role  t assign task  a add member below  ? help  esc back
 ```
 
 - **Header** — breadcrumb on the left; attention, activity and connection on the right.
@@ -64,7 +64,7 @@ Press **Left (←) while the chat input is empty** to open Agents Management; se
 - **Main view** — the selected page. A team has two views, Organization and Tasks (Tab, `1`, `2`).
 - **Detail pane** — what the selected row is and what Enter does; beside the list from 90 columns, below it on tall narrow terminals.
 - **Status line** — the result of the last action (✓, ✕ or •), which clears after a few seconds; a spinner while an action runs.
-- **Key bar** — only the keys valid for the selected row, most important first. `?` and `esc` are always kept and hints are dropped whole, never cut in half.
+- **Key bar** — only the keys valid for the selected row, most important first, each named for what it does to that row (`enter open member`, `enter join`, `enter open report`). `?` and `esc` are always kept and hints are dropped whole, never cut in half. One table in `frontend-cli/lib/agents-keys.js` declares every action, so the key bar, the `?` overlay and the keys themselves always agree: a key that is not offered for the selected row does nothing, and Space never falls back to Enter.
 
 ### Organization
 
@@ -101,7 +101,7 @@ Any number of Rind windows can show the same conversation; the shared Runtime ke
 
 Only conversations attached to the team are listed; a member folder's other conversations are on the Independent page. The service enforces this through `listSessions { teamId }`, so `rind agents sessions <team>` returns the same set.
 
-Enter on a member opens its page: every conversation it has in this team, newest and most urgent first, with **New conversation** on top. Enter on a conversation joins it in the member's workspace. Contextual keys act on the selected member: `c` new conversation, `t` assign a task, `a` add a member reporting to it, `e` edit role and responsibility, Space for all actions (change supervisor, make leader, resolve an unconfirmed run, remove from team).
+Enter on a member opens its page: every conversation it has in this team, newest and most urgent first, with **New conversation** on top. Enter on a conversation joins it in the member's workspace. Contextual keys act on the selected member: `c` new conversation, `t` assign a task, `a` add a member below it, `e` edit role and responsibility, Space for all actions (change supervisor, make leader, resolve an unconfirmed run, remove from team).
 
 ### Tasks
 

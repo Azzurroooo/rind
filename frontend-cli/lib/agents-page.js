@@ -7,6 +7,7 @@ import { resolveInputPath } from "./path-input.js";
 import { managementClient } from "./agents-client.js";
 import { openAgentChat, managerWorkspace, followConversation } from "./agents-commands.js";
 import { createLeaveLatch, LEAVE_HINT } from "./interrupt-state.js";
+import { actionFor } from "./agents-keys.js";
 import { emptyAgentsSnapshot, withoutDrafts, clean, sidebarRows, inboxRows, organizationRows, taskRows, memberSessionRows, managerRows, teamSessions, independentSessions, independentRows, folderRows, backgroundRows, workspaceKey, selectable } from "./agents-model.js";
 import { renderAgents } from "./agents-view.js";
 import { createActions } from "./agents-actions.js";
@@ -336,11 +337,10 @@ export async function runAgentsPage({ launch, input = process.stdin, output = pr
     }
   }
   function rowActions(row = currentRow()) {
-    if (!row || view.focus === "sidebar") return;
-    if (row.kind === "member") actions.memberActions(row.teamId, row.agentId);
-    else if (row.kind === "session") actions.sessionActions(row);
-    else if (row.kind === "task") actions.taskActions(row.taskId);
-    else activate(row);
+    if (row?.kind === "member") actions.memberActions(row.teamId, row.agentId);
+    else if (row?.kind === "session") actions.sessionActions(row);
+    else if (row?.kind === "task") actions.taskActions(row.taskId);
+    else if (row?.kind === "service") activate(row);
   }
   // The member a contextual shortcut (c, t, a, e) applies to.
   function contextMember(row = currentRow()) {
@@ -510,24 +510,31 @@ export async function runAgentsPage({ launch, input = process.stdin, output = pr
     else if (key.name === "escape") back();
     else if (key.name === "left" || text === "h") left();
     else if (key.name === "right" || text === "l") right();
-    else if (text === "z" || text === "Z") toggleFold(text === "Z");
-    else if ((text === "[" || text === "]") && view.focus === "main") jumpGroup(text === "]" ? 1 : -1);
-    else if (text === "S" && view.page.kind === "background" && view.focus === "main") actions.stopAll(view.entries.filter(r => r.kind === "live").length);
-    else if (key.name === "enter") activate();
-    else if (text === " ") rowActions();
-    else if (key.name === "tab") switchTab();
-    else if (text === "1" || text === "2") switchTab(text === "1" ? "org" : "tasks");
-    else if (text === "?") view.help = true;
-    else if (text === "/" && view.focus === "main" && view.page.kind !== "new-team") { view.searching = true; view.searchEditor.setInput(view.query); }
-    else if (text === "f" && view.focus === "main" && ["team", "member", "independent", "folder"].includes(view.page.kind)) actions.chooseFilter();
-    else if (text === "n" || text === "N") actions.createTeam();
-    else if (text === "r") refresh();
-    else if (text === "c" && view.focus === "main" && ["independent", "folder"].includes(view.page.kind) && (row?.workspace || view.page.workspace)) ui.startNew({ agentId: row?.agentId, workspace: row?.workspace || view.page.workspace });
-    else if (text === "c" && contextMember()) ui.startNew(contextMember());
-    else if (text === "t" && view.focus === "main" && view.page.teamId) actions.assignTask(view.page.teamId, contextMember()?.agentId);
-    else if (text === "a" && view.focus === "main" && view.page.kind === "team") actions.addMember(view.page.teamId, row?.kind === "member" ? row.agentId : undefined);
-    else if (text === "e" && contextMember()) actions.editMember(contextMember().teamId, contextMember().agentId);
+    else runAction(actionFor(view, row, key)?.id, row, key);
     redraw();
+  }
+  // Only actions the selected row offers (agents-keys.js#available) ever run.
+  function runAction(name, row, key) {
+    const member = contextMember(row);
+    switch (name) {
+      case "open": return activate(row);
+      case "actions": return rowActions(row);
+      case "chat": return ["independent", "folder"].includes(view.page.kind) ? ui.startNew({ agentId: row?.agentId, workspace: row?.workspace || view.page.workspace }) : member && ui.startNew(member);
+      case "edit": return member && actions.editMember(member.teamId, member.agentId);
+      case "task": return actions.assignTask(view.page.teamId, member?.agentId);
+      case "add": return actions.addMember(view.page.teamId, row?.kind === "member" ? row.agentId : undefined);
+      case "tabs": return switchTab(key.text === "1" ? "org" : key.text === "2" ? "tasks" : undefined);
+      case "newTeam": return actions.createTeam();
+      case "search": view.searching = true; view.searchEditor.setInput(view.query); return undefined;
+      case "filter": return actions.chooseFilter();
+      case "fold": return toggleFold(false);
+      case "foldAll": return toggleFold(true);
+      case "group": return jumpGroup(key.text === "]" ? 1 : -1);
+      case "refresh": return refresh();
+      case "stop": return actions.stopAll(view.entries.filter(r => r.kind === "live").length);
+      case "help": view.help = true; return undefined;
+      default: return undefined;
+    }
   }
   function refresh() {
     if (view.connection !== "connected") { void connect(); return; }

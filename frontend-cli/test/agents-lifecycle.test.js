@@ -161,12 +161,12 @@ test("the Agents page follows conversation moves and leaving closes it for its o
   input.send("c");
   await until(() => opened.length === 2, "a move from one conversation to another reuses the page's slot");
   assert.deepEqual(opened, ["new", "second"]);
-  await visible("c new chat");
+  await visible("c new conversation");
   input.send("\x03"); await visible("again to leave Rind");
   input.send("\x1b");
   for (let i = 0; i < 50 && output.getViewport().join("\n").includes("again to leave Rind"); i++) await output.flushAndGetViewport();
   assert.doesNotMatch((await output.flushAndGetViewport()).join("\n"), /again to leave Rind/, "esc cancels leaving");
-  assert.match(output.getViewport().join("\n"), /c new chat/, "esc did not navigate away while cancelling");
+  assert.match(output.getViewport().join("\n"), /c new conversation/, "esc did not navigate away while cancelling");
   input.send("c");
   const result = await Promise.race([running, new Promise(r => setTimeout(() => r("timeout"), 5000))]);
   assert.equal(result.leave, true, "leaving from a conversation closes the page for its opener");

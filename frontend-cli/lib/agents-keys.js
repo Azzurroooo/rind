@@ -1,86 +1,126 @@
 import { paint } from "./theme.js";
 import { textWidth } from "./text-width.js";
 
-// One table drives the footer hints, the ? overlay and the shortcut column of
-// action menus, so a key never means different things in different places.
-export const KEYS = {
-  move: { key: "↑↓", label: "move" },
-  fold: { key: "z", label: "fold" },
-  up: { key: "←", label: "up" },
-  back: { key: "esc", label: "back" },
-  exit: { key: "esc", label: "back to chat" },
-  leave: { key: "ctrl+c ×2", label: "leave Rind" },
-  open: { key: "enter", label: "open" },
-  focus: { key: "enter", label: "select" },
-  members: { key: "enter", label: "conversations" },
-  join: { key: "enter", label: "join" },
-  start: { key: "enter", label: "start" },
-  delivery: { key: "enter", label: "delivery" },
-  resolve: { key: "enter", label: "resolve" },
-  create: { key: "enter", label: "create" },
-  actions: { key: "space", label: "actions" },
-  chat: { key: "c", label: "new chat" },
-  task: { key: "t", label: "assign task" },
-  add: { key: "a", label: "add member" },
-  report: { key: "a", label: "add report" },
-  edit: { key: "e", label: "edit role" },
-  team: { key: "n", label: "new team" },
-  view: { key: "tab", label: "switch view" },
-  search: { key: "/", label: "search" },
-  filter: { key: "f", label: "filter" },
-  refresh: { key: "r", label: "refresh" },
-  help: { key: "?", label: "help" },
-  scroll: { key: "↑↓", label: "scroll" },
-  choose: { key: "↑↓", label: "choose" },
-  pick: { key: "1-9", label: "pick" },
-  confirm: { key: "enter", label: "confirm" },
-  cancel: { key: "esc", label: "cancel" },
-  next: { key: "enter", label: "next / save" },
-  field: { key: "tab", label: "field" },
-  keep: { key: "enter", label: "keep filter" },
-  clear: { key: "esc", label: "clear" },
-  close: { key: "esc", label: "close" },
+// Every key on the Agents page is declared here once. available() says which
+// actions the selected row offers, so the footer, the ? overlay and the key
+// dispatcher can never disagree about what a key does.
+//   keys: what triggers it ("enter", "space", "tab", or a typed character)
+//   key:  how it is shown;  help: its line in the ? overlay
+export const ACTIONS = {
+  open: { keys: ["enter"], key: "enter", label: "open", help: "open the selected item" },
+  actions: { keys: ["space"], key: "space", label: "more actions", help: "all actions for the selected item" },
+  chat: { keys: ["c"], key: "c", label: "new conversation", help: "new conversation with a member or folder" },
+  edit: { keys: ["e"], key: "e", label: "edit role", help: "edit a member's role and responsibility" },
+  task: { keys: ["t"], key: "t", label: "assign task", help: "give a member, or the leader, a task" },
+  add: { keys: ["a"], key: "a", label: "add member", help: "add a member, below the selected one" },
+  tabs: { keys: ["tab", "1", "2"], key: "tab", label: "Organization · Tasks", help: "Organization (1) · Tasks (2)" },
+  newTeam: { keys: ["n"], key: "n", label: "new team", help: "create a team" },
+  search: { keys: ["/"], key: "/", label: "search", help: "search this list; esc clears" },
+  filter: { keys: ["f"], key: "f", label: "filter", help: "filter by status" },
+  fold: { keys: ["z"], key: "z", label: "fold", help: "fold or unfold the selected branch" },
+  foldAll: { keys: ["Z"], key: "Z", label: "fold all", help: "fold or unfold everything" },
+  group: { keys: ["[", "]"], key: "[ ]", label: "previous · next group", help: "previous or next folder, branch, section" },
+  refresh: { keys: ["r"], key: "r", label: "refresh", help: "reload, or reconnect when offline" },
+  stop: { keys: ["S"], key: "S", label: "stop all…", help: "stop every agent and the services" },
+  help: { keys: ["?"], key: "?", label: "help", help: "show or hide this help" },
 };
 
-export const HELP_GROUPS = [
-  { title: "Navigate", items: [["↑↓ j k", "move"], ["←", "up: conversation › member › teams"], ["→", "open · expand"], ["z Z", "fold branch · fold all"], ["[ ]", "previous · next group"], ["enter", "open the selected item"], ["g G", "first · last"], ["pgup pgdn", "page"], ["tab 1 2", "Organization · Tasks"], ["esc", "back · return to chat"]] },
-  { title: "Team", items: [["c", "new conversation"], ["t", "assign a task"], ["a", "add member (direct report)"], ["e", "edit role"], ["space", "all actions for the item"], ["n", "new team"]] },
-  { title: "View", items: [["/", "search this view"], ["f", "filter by status"], ["r", "refresh · reconnect"], ["?", "toggle this help"]] },
-  { title: "Leave", items: [["esc", "back one level"], ["ctrl+c ×2", "leave Rind · agents keep running"], ["Background", "stop all agents (in the sidebar)"]] },
+// Navigation is handled before actions and is the same on every page.
+const NAVIGATION = [
+  ["↑↓ j k", "move"], ["g G", "first · last"], ["pgup pgdn", "page"], ["←", "up: conversation › member › sidebar"],
+  ["→", "open · unfold"], ["esc", "back; from the sidebar, to chat"], ["ctrl+c ×2", "leave Rind · agents keep running"],
 ];
 
-// Hints are listed most important first; the footer drops from the end so a
-// hint is never cut in half.
+const act = (name, label) => ({ id: name, label: label || ACTIONS[name].label });
+
+// What Enter does on the selected row, in plain words.
+function enterLabel(view, row) {
+  if (!row) return "";
+  if (view.focus === "sidebar") return row.kind === "new-team" ? "create team" : "open";
+  switch (row.kind) {
+    case "member": return "open member";
+    case "session": return "join";
+    case "more": return "show all";
+    case "workspace": return "open folder";
+    case "new-session": return "start";
+    case "add-member": return "add member";
+    case "assign": return "assign task";
+    case "team": return "open team";
+    case "new-team": return "create team";
+    case "run": return "resolve";
+    case "service": return "actions";
+    case "stop-all": return "stop…";
+    case "live": return row.taskId ? "open report" : row.sessionId ? "join" : "";
+    case "task": return row.answer ? "answer" : row.status === "Done" ? "open report" : "open task";
+    default: return "";
+  }
+}
+
+// What the selected row offers, most useful first; this is the footer order.
+export function available(view, row) {
+  const page = view.page.kind;
+  const org = page === "team" && view.page.tab === "org";
+  const list = [];
+  const enter = enterLabel(view, row);
+  if (enter) list.push(act("open", enter));
+  if (view.focus === "sidebar") return [...list, act("newTeam"), act("refresh"), act("help")];
+  if (["member", "session", "task", "service"].includes(row?.kind) && !(row.kind === "task" && row.answer)) list.push(act("actions"));
+  const folder = ["independent", "folder"].includes(page) && (row?.workspace || view.page.workspace);
+  if ((org && ["member", "session", "more"].includes(row?.kind)) || page === "member" || folder) list.push(act("chat"));
+  if (row?.kind === "member" || page === "member") list.push(act("edit"));
+  if (page === "team" || page === "member") list.push(act("task"));
+  if (org) list.push(act("add", row?.kind === "member" ? "add member below" : undefined));
+  if (page === "team") list.push(act("tabs"));
+  if (org || page === "independent") list.push(act("fold"), act("foldAll"));
+  if (["independent", "folder", "inbox", "background"].includes(page) || (page === "team" && view.page.tab === "tasks")) list.push(act("group"));
+  if (page === "background") list.push(act("stop"));
+  if (page !== "new-team") list.push(act("search"));
+  if (["team", "member", "independent", "folder"].includes(page)) list.push(act("filter"));
+  if (page === "team" || page === "member") list.push(act("newTeam"));
+  list.push(act("refresh"), act("help"));
+  return list;
+}
+
+const matches = (key, spec) => spec === "enter" ? key.name === "enter" || key.name === "return"
+  : spec === "space" ? key.text === " "
+  : spec === "tab" ? key.name === "tab" && !key.shift
+  : key.text === spec;
+
+// The available action a key triggers, if any.
+export function actionFor(view, row, key) {
+  return available(view, row).find(action => ACTIONS[action.id].keys.some(spec => matches(key, spec)));
+}
+
+// The ? overlay, built from the same table.
+export function helpGroups() {
+  const pick = names => names.map(name => [ACTIONS[name].key === "tab" ? "tab 1 2" : ACTIONS[name].key, ACTIONS[name].help]);
+  return [
+    { title: "Navigate", items: NAVIGATION },
+    { title: "Selected item", items: pick(["open", "actions", "chat", "edit"]) },
+    { title: "Teams", items: pick(["task", "add", "tabs", "newTeam"]) },
+    { title: "Lists", items: pick(["search", "filter", "fold", "foldAll", "group", "refresh", "help"]) },
+    { title: "Background", items: [...pick(["stop"]), ["", "leaving Rind never stops agents"]] },
+  ];
+}
+
+// Footer hints. Dialogs, reports, search and the leave prompt have their own;
+// lists show what available() offers for the selected row.
 export function hintsFor(view, row) {
-  const k = name => KEYS[name];
-  if (view.help) return [k("close")];
-  if (view.dialog?.kind === "choice") return [k("choose"), k("confirm"), ...(view.dialog.items.length > 1 ? [k("pick")] : []), k("cancel")];
+  const hint = (key, label) => ({ key, label });
+  if (view.help) return [hint("esc", "close")];
+  if (view.dialog?.kind === "choice") return [hint("↑↓", "choose"), hint("enter", "confirm"), ...(view.dialog.items.length > 1 ? [hint("1-9", "pick")] : []), hint("esc", "cancel")];
   if (view.dialog) {
     const field = view.dialog.fields[view.dialog.index];
-    if (field?.suggestions?.length) return [{ key: "tab", label: "complete" }, { key: "↑↓", label: "choose" }, { key: "enter", label: field.pick >= 0 ? "use folder" : "next" }, { key: "esc", label: "hide list" }];
-    if (field?.kind === "path") return [{ key: "tab", label: "complete" }, k("next"), { key: "⇧tab", label: "previous" }, k("cancel")];
-    return [k("next"), k("field"), k("cancel")];
+    if (field?.suggestions?.length) return [hint("tab", "complete"), hint("↑↓", "choose"), hint("enter", field.pick >= 0 ? "use folder" : "next"), hint("esc", "hide list")];
+    if (field?.kind === "path") return [hint("tab", "complete"), hint("enter", "next / save"), hint("⇧tab", "previous"), hint("esc", "cancel")];
+    return [hint("enter", "next / save"), hint("tab", "next field"), hint("esc", "cancel")];
   }
-  if (view.detail) return [k("scroll"), ...(view.detail.taskId ? [k("actions")] : []), k("refresh"), k("back")];
-  if (view.searching) return [{ key: "type", label: "to search" }, k("keep"), k("clear")];
-  if (view.leaveArmed) return [{ key: "ctrl+c", label: "again to leave Rind · agents keep running" }, { key: "esc", label: "stay" }];
-  if (view.focus === "sidebar") return [k("move"), row?.kind === "new-team" ? k("create") : k("focus"), k("team"), k("help"), view.standalone ? k("close") : k("exit"), k("leave")];
-  const tail = [k("search"), k("filter"), k("help"), k("back")];
-  const page = view.page.kind;
-  if (page === "team" && view.page.tab === "org") {
-    if (row?.kind === "member") return [k("members"), k("chat"), k("task"), k("report"), k("actions"), ...(row.expandable ? [k("fold")] : []), k("view"), ...tail];
-    if (row?.kind === "session") return [k("join"), k("actions"), k("chat"), k("up"), k("view"), ...tail];
-    if (row?.kind === "more") return [k("open"), k("chat"), k("view"), ...tail];
-    return [row?.kind === "add-member" ? k("create") : k("start"), k("add"), k("view"), ...tail];
-  }
-  if (page === "team") return [row?.kind === "task" ? k("delivery") : k("create"), ...(row?.kind === "task" ? [k("actions")] : []), k("task"), k("view"), ...tail];
-  if (page === "member") return [row?.kind === "session" ? k("join") : k("start"), ...(row?.kind === "session" ? [k("actions")] : []), k("task"), ...tail];
-  if (page === "manager") return [row?.kind === "session" ? k("join") : k("start"), k("search"), k("help"), k("back")];
-  if (page === "background") return [row?.kind === "live" ? k("open") : row?.kind === "run" ? k("resolve") : row?.kind === "service" ? k("actions") : row?.kind === "stop-all" ? { key: "enter", label: "stop…" } : k("refresh"),
-    { key: "S", label: "stop all…" }, k("refresh"), k("help"), k("back")];
-  if (page === "folder") return [row?.kind === "session" ? k("join") : k("start"), k("chat"), k("search"), k("filter"), k("refresh"), k("help"), k("back")];
-  if (page === "independent") return [row?.kind === "session" ? k("join") : k("open"), k("chat"), ...(row?.kind === "session" ? [k("up")] : []), { key: "[ ]", label: "folder" }, k("fold"), k("search"), k("filter"), k("help"), k("back")];
-  return [row?.kind === "team" ? k("open") : row?.kind === "new-team" ? k("create") : k("resolve"), k("team"), k("refresh"), k("help"), k("back")];
+  if (view.detail) return view.detail.hints || [hint("↑↓", "scroll"), hint("esc", "back")];
+  if (view.searching) return [hint("type", "to search"), hint("enter", "keep filter"), hint("esc", "clear")];
+  if (view.leaveArmed) return [hint("ctrl+c", "again to leave Rind · agents keep running"), hint("esc", "stay")];
+  const list = available(view, row).filter(action => !["help", "foldAll"].includes(action.id)).map(action => hint(ACTIONS[action.id].key, action.label));
+  const back = view.focus === "sidebar" ? hint("esc", view.standalone ? "close" : "back to chat") : hint("esc", "back");
+  return [...list, ...(view.focus === "sidebar" ? [hint("ctrl+c ×2", "leave Rind")] : []), hint("?", "help"), back];
 }
 
 const SEPARATOR = "  ";

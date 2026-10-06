@@ -6,7 +6,7 @@ import { CURSOR_MARKER } from "./tui/frame.js";
 import { prepareComposerFrame } from "./composer-terminal.js";
 import { statusMeta, single, clean, selectable, memberState } from "./agents-model.js";
 import { detailFor } from "./agents-detail.js";
-import { HELP_GROUPS, hintsFor, formatHints } from "./agents-keys.js";
+import { helpGroups, hintsFor, formatHints } from "./agents-keys.js";
 
 export const MIN_WIDTH = 40, MIN_ROWS = 12;
 // The tree keeps at least ~60 columns before the detail pane moves beside it.
@@ -304,14 +304,16 @@ function dialogBox(dialog, width, maxHeight, busy) {
 
 // Groups stack in one column, or split into two when the box is wide enough.
 function helpBox(width, maxHeight) {
-  const keyWidth = Math.max(...HELP_GROUPS.flatMap(group => group.items.map(([key]) => textWidth(key)))) + 2;
+  const groups = helpGroups();
+  const keyWidth = Math.max(...groups.flatMap(group => group.items.map(([key]) => textWidth(key)))) + 2;
   const group = (item, index) => [...(index ? [""] : []), paint.bold(item.title), ...item.items.map(([key, label]) => " " + paint.accent(key.padEnd(keyWidth)) + paint.dim(label))];
   const inner = width - 4, half = Math.floor((inner - 2) / 2);
+  const widest = Math.max(...groups.flatMap(group => group.items.map(([, label]) => 1 + keyWidth + textWidth(label))));
   let lines;
-  if (half >= 34) {
-    const left = group(HELP_GROUPS[0], 0), right = HELP_GROUPS.slice(1).flatMap(group);
+  if (half >= widest) {
+    const left = groups.slice(0, 2).flatMap(group), right = groups.slice(2).flatMap(group);
     lines = Array.from({ length: Math.max(left.length, right.length) }, (_, i) => fitLine(left[i] || "", half) + "  " + (right[i] || ""));
-  } else lines = HELP_GROUPS.flatMap(group);
+  } else lines = groups.flatMap(group);
   lines.push("", paint.dim("Shortcuts never fire while you are typing in a field."));
   return box("Keyboard", lines.slice(0, Math.max(1, maxHeight - 2)), width);
 }
@@ -377,7 +379,7 @@ export function renderAgents(view, width, rows, now = Date.now()) {
     const side = renderSidebar(view, sidebarWidth, lay.bodyHeight);
     body = side.map((line, i) => line + paint.dim("│") + (main[i] || " ".repeat(mainWidth)));
   } else body = showSidebar && !view.dialog ? renderSidebar(view, width, lay.bodyHeight) : main;
-  if (view.help) body = overlay(fill(body, lay.bodyHeight).map(line => fitLine(line, width)), helpBox(Math.min(width - 2, 84), lay.bodyHeight), width);
+  if (view.help) body = overlay(fill(body, lay.bodyHeight).map(line => fitLine(line, width)), helpBox(Math.min(width - 2, 112), lay.bodyHeight), width);
   const row = view.focus === "sidebar" ? view.sidebar.find(r => r.id === view.navId) : view.entries.find(r => r.id === view.selectedId);
   return [paintBackground(headerLine(view, width), "surfaceActive"), ...fill(body, lay.bodyHeight).map(line => fitLine(line, width)),
     paintBackground(fitLine(noticeLine(view, width, now), width), "surface"),

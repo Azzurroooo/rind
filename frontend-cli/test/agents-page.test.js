@@ -111,10 +111,10 @@ test("team page edits members, nests team conversations and drives tasks from th
 
   // Left climbs one level at a time and never folds the tree on the way.
   key("j"); await visible("enter join");
-  key("\x1b[D"); await visible("enter conversations");
+  key("\x1b[D"); await visible("enter open member");
   key("\x1b[D"); await visible("back to chat");
   assert.match(h.screen(), /20261005_team_history/, "leaving the tree keeps it expanded");
-  key("\r"); await visible("enter conversations");
+  key("\r"); await visible("enter open member");
   key("z"); await visible("▸ Lead");
   assert.doesNotMatch(h.screen(), /20261005_team_history/);
   key("z"); await visible("20261005_team_history");
@@ -145,7 +145,7 @@ test("team page edits members, nests team conversations and drives tasks from th
   assert.equal(chats[1].teamId, team.id);
 
   key("\x1b"); await visible("Leader · Coordinator");
-  key(" "); await visible("Add direct report"); key("c");
+  key(" "); await visible("Add member below"); key("c");
   await waitFor(() => chats.length === 3, "conversation from the member menu");
   assert.equal(chats[2].agent.id, lead.id);
   assert.equal(chats[2].teamId, team.id);

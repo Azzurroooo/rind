@@ -60,7 +60,7 @@ test("tasks show sections and a delivery hint", () => {
   view.selectedId = "t:t";
   const screen = text(renderAgents(view, 120, 30));
   assert.match(screen, /NEEDS YOU · 1/);
-  assert.match(screen, /enter delivery/);
+  assert.match(screen, /enter open task/);
   assert.match(screen, /Tasks 1/);
 });
 
@@ -92,7 +92,8 @@ test("long choice lists keep the selected item visible and untrusted text cannot
 test("help lists every shortcut group and the footer never cuts a hint in half", () => {
   const view = { ...fixture(), help: true };
   const screen = text(renderAgents(view, 120, 30));
-  for (const label of ["Navigate", "Team", "View", "new conversation", "filter by status"]) assert.match(screen, new RegExp(label));
+  for (const label of ["Navigate", "Selected item", "Teams", "Lists", "Background", "new conversation", "filter by status"]) assert.match(screen, new RegExp(label));
+  assert.doesNotMatch(screen, /…/, "help lines fit the overlay");
   view.help = false;
   const row = view.entries.find(r => r.id === view.selectedId);
   for (const width of [20, 36, 60]) {
