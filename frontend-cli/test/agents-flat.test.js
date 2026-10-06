@@ -103,3 +103,39 @@ test("Esc from Agents returns to this window's own conversation without reopenin
   assert.equal(result.leave, false);
   assert.deepEqual(opened, [], "no second window for a conversation this one holds");
 });
+
+// Screenshot-free regression of "the new session is still listed": the push
+// that follows a conversation closing arrives before the way back moves on, so
+// drafts must be filtered against the current way back, not the one at push time.
+test("an empty conversation disappears from the list once another conversation becomes the way back", { timeout: 60000 }, async t => {
+  const h = await harness({ prefix: "rind-agents-draft-" });
+  const repoRoot = h.launch.repoRoot;
+  const folder = path.join(h.home, "notes"); await mkdir(folder);
+  await writeFile(path.join(h.home, "settings.json"), JSON.stringify({ provider: "openai-compatible", model: "fixture", apiKey: "fixture", baseUrl: "http://127.0.0.1:1/v1" }));
+  const window = createSharedRuntimeClient({ rindHome: h.home, python: process.env.RIND_PYTHON || "python", repoRoot, cliArgs: ["--cwd", folder], onMessage() {} });
+  const draft = (await window.request("initialize")).session_id;
+  const { team } = await teamWithConversations(h, ["20261007_member"]);
+  const abort = new AbortController();
+  const running = runAgentsPage({ launch: h.launch, input: h.input, output: h.output.output, manageInput: false, signal: abort.signal, currentSessionId: draft,
+    openChat: async chat => ({ action: "agents", chat, from: { runtimeSessionId: chat.runtimeSessionId } }) });
+  t.after(async () => { abort.abort(); await running; await window.shutdown(); await h.cleanup(); });
+  const { key, visible, settle } = h;
+
+  const fresh = async () => (await h.output.flushAndGetViewport()).join("\n");
+  // Moves the sidebar selection to `name` (Inbox, Manager, Independent, Background, Product).
+  const sidebar = async name => {
+    for (let i = 0; i < 10 && !(await fresh()).split("\n").some(line => line.startsWith("›") && line.includes(name)); i++) { key(i < 5 ? "k" : "j"); await settle(); }
+  };
+  // Left climbs one level per press until the sidebar has focus (it shows the leave hint).
+  // Esc there would go back to the conversation instead.
+  const toSidebar = async () => { for (let i = 0; i < 4 && !(await fresh()).includes("ctrl+c ×2 leave Rind"); i++) { key("\x1b[D"); await settle(); } };
+  await visible("Independent");
+  await sidebar("Independent"); key("\r");
+  await visible("↩ New conversation");
+  await toSidebar(); await sidebar("Product"); key("\r"); await visible("20261007_member");
+  await select(h, "20261007_member"); key("\r");
+  await visible("↩ 20261007_member");
+  await toSidebar(); await sidebar("Independent"); key("\r"); await settle(); await settle();
+  assert.doesNotMatch(h.screen(), /New conversation/, "the empty conversation is no longer the way back, so it is not listed");
+  assert.equal(team.name, "Product");
+});

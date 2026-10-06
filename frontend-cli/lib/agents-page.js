@@ -26,7 +26,8 @@ const RETRY_MS = 10000;
 export async function runAgentsPage({ launch, input = process.stdin, output = process.stdout, manageInput = true, signal, initialTeamId, openChat = openAgentChat, standalone = false, currentSessionId = "", returnTo }) {
   const tui = createTui({ input, output, manageInput, alternateScreen: true });
   const view = {
-    snapshot: emptyAgentsSnapshot(), connection: "connecting…", busy: false, busyLabel: "", notice: null, help: false,
+    // received: the snapshot as the service sent it; snapshot: what the page shows.
+    received: emptyAgentsSnapshot(), snapshot: emptyAgentsSnapshot(), connection: "connecting…", busy: false, busyLabel: "", notice: null, help: false,
     sidebar: [], navId: "inbox", focus: "sidebar", member: null, folder: null, page: { kind: "inbox" }, pageKey: "inbox", entries: [], selectedId: "",
     selections: {}, scroll: {}, tabs: {}, collapsed: {}, history: {}, managerHistory: null, independent: null, managerPath: "", service: null, stopped: false,
     query: "", filter: "All", searching: false, searchEditor: createLineEditor(), dialog: null, detail: null, standalone, leaveArmed: false,
@@ -43,7 +44,7 @@ export async function runAgentsPage({ launch, input = process.stdin, output = pr
   const close = () => { closed = true; if (!chatActive) finish(); };
   let leaveNotice = "";
   // notice: what to print once the windows have closed (e.g. after a stop).
-  const leave = notice => { leaving = true; if (notice) { leaveNotice = notice; view.snapshot = { ...view.snapshot, runs: [] }; } close(); };
+  const leave = notice => { leaving = true; if (notice) { leaveNotice = notice; view.received = { ...view.received, runs: [] }; view.snapshot = { ...view.snapshot, runs: [] }; } close(); };
   const leaveLatch = createLeaveLatch({ onChange: () => {
     view.leaveArmed = leaveLatch.armed;
     if (!leaveLatch.armed && view.notice?.text === LEAVE_HINT) view.notice = null;
@@ -83,6 +84,9 @@ export async function runAgentsPage({ launch, input = process.stdin, output = pr
   }
   function project() {
     if (closed || chatActive) return;
+    // An empty conversation is listed only while it is this window's way back.
+    // Filtered on every projection, since the way back can move without a push.
+    view.snapshot = withoutDrafts(view.received, view.returnTo?.own ? currentSessionId : "");
     view.sidebar = sidebarRows(view.snapshot);
     if (!view.sidebar.some(row => row.id === view.navId)) { view.navId = "inbox"; view.member = null; view.focus = "sidebar"; }
     if (view.member && !view.snapshot.memberships.some(m => m.teamId === view.member.teamId && m.agentId === view.member.agentId)) view.member = null;
@@ -170,8 +174,7 @@ export async function runAgentsPage({ launch, input = process.stdin, output = pr
 
   const acceptSnapshot = snapshot => {
     if (closed) return;
-    // An empty conversation is listed only while it is the one to go back to.
-    view.snapshot = withoutDrafts(snapshot, view.returnTo?.own ? currentSessionId : "");
+    view.received = snapshot;
     if (!initialized) {
       initialized = true;
       if (snapshot.teams.some(t => t.id === initialTeamId)) { view.navId = initialTeamId; view.focus = "main"; }
@@ -324,7 +327,7 @@ export async function runAgentsPage({ launch, input = process.stdin, output = pr
     const target = view.returnTo;
     if (!target || target.own) return close();
     // A conversation that never got a message was not saved; start a new one there instead.
-    const draft = (view.snapshot.live || []).some(item => item.id === target.runtimeSessionId && item.draft);
+    const draft = (view.received.live || []).some(item => item.id === target.runtimeSessionId && item.draft);
     return open(draft ? { ...target, runtimeSessionId: undefined } : target);
   }
 
