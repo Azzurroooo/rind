@@ -138,3 +138,29 @@ test("short paths replace only a whole home directory", () => {
   assert.equal(shortPath([drive, "Users", "Me", "x"].join(sep), 40, home, "win32"), "~" + sep + "x");
   assert.equal(shortPath([drive, "Users", "Mel", "x"].join(sep), 40, home, "win32"), [drive, "Users", "Mel", "x"].join(sep));
 });
+
+// Screenshot regression: a marked row once measured one cell wider than the
+// terminal drew it, shifting its columns and the pane divider left.
+test("rows with the return arrow and pictographic titles keep the pane divider in one column", async () => {
+  const { independentRows } = await import("../lib/agents-model.js");
+  const now = Date.parse("2026-10-07T12:00:00Z");
+  const sessions = ["请严格按顺序执行以下操作，用于测试：", "你好", "▶ 发布 ✔ ©", "你好"].map((title, i) => ({ runtimeSessionId: "r" + i, title, status: "Idle", updatedAt: "2026-10-07T11:5" + i + ":00Z" }));
+  const rows = independentRows([{ workspace: "/work/test/2", name: "2", teams: [], sessions }], { now, sessionLimit: 4 })
+    .map(row => row.sessionId === "r1" ? { ...row, back: true } : row);
+  const view = { ...fixture(), navId: "independent", page: { kind: "independent" }, pageKey: "independent", entries: rows, selectedId: rows[0].id, returnTo: { runtimeSessionId: "r1" } };
+  // Measured as a terminal draws it, not with the code under test.
+  const { Terminal } = (await import("@xterm/headless")).default;
+  for (const width of [120, 150]) {
+    const lines = renderAgents(view, width, 20).map(stripAnsi);
+    const terminal = new Terminal({ cols: width, rows: lines.length, allowProposedApi: true });
+    await new Promise(resolve => terminal.write(lines.join("\r\n"), resolve));
+    const columns = new Set();
+    for (let y = 2; y < 2 + rows.length; y++) {
+      const line = terminal.buffer.active.getLine(y);
+      for (let x = 40; x < width; x++) if (line.getCell(x).getChars() === "│") { columns.add(x); break; }
+    }
+    terminal.dispose();
+    assert.match(lines.join("\n"), /↩ 你好/);
+    assert.equal(columns.size, 1, "divider columns at width " + width + ": " + [...columns] + "\n" + lines.join("\n"));
+  }
+});

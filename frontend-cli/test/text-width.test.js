@@ -65,3 +65,22 @@ test("middleClipCells keeps escape sequences whole and closes styles", () => {
   assert.doesNotMatch(cut.replace(/\x1b\[[0-9;]*m/g, ""), /\x1b|\[\d/);
   assert.ok(cut.endsWith("\x1b[0m"));
 });
+
+// Symbols that default to text presentation take one cell in a terminal, even
+// though they are pictographic; only emoji presentation takes two.
+test("text-presentation symbols take one cell, as a terminal draws them", async () => {
+  const { Terminal } = (await import("@xterm/headless")).default;
+  const samples = ["↩", "▶", "✔", "©", "☀", "↔", "😀", "✅", "⌚", "↩\ufe0f", "你"];
+  const terminal = new Terminal({ cols: 80, rows: 2, allowProposedApi: true });
+  await new Promise(resolve => terminal.write(samples.join("|"), resolve));
+  const line = terminal.buffer.active.getLine(0);
+  const drawn = [];
+  for (let x = 0, width = 0; x < 80; x++) {
+    const cell = line.getCell(x);
+    if (cell.getChars() === "|") { drawn.push(width); width = 0; } else width += cell.getWidth();
+  }
+  const expected = { "↩": 1, "▶": 1, "✔": 1, "©": 1, "☀": 1, "↔": 1, "😀": 2, "✅": 2, "⌚": 2, "↩\ufe0f": 2, "你": 2 };
+  assert.deepEqual(samples.map(text => [text, textWidth(text)]), samples.map(text => [text, expected[text]]));
+  assert.deepEqual(drawn.slice(0, 6), [1, 1, 1, 1, 1, 1], "the terminal draws text-presentation symbols in one cell");
+  terminal.dispose();
+});

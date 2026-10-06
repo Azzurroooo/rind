@@ -325,11 +325,13 @@ function isZeroWidth(text) {
   return /^[\u0300-\u036f\u0483-\u0489\u200b-\u200f\u20d0-\u20ff\ufe00-\ufe0f]+$/u.test(text);
 }
 
+// Two cells only for emoji presentation. Pictographic symbols such as \u21a9 \u25b6 \u2714 \u00a9
+// default to text presentation and take one cell, unless FE0F asks for emoji.
 function isEmoji(text) {
   return /^[0-9#*]\ufe0f?\u20e3$/u.test(text)
     || /[\u{1f1e6}-\u{1f1ff}]/u.test(text)
-    || /\p{Extended_Pictographic}/u.test(text)
-    || text.includes("\u200d")
+    || /\p{Emoji_Presentation}/u.test(text)
+    || (text.includes("\u200d") && /\p{Extended_Pictographic}/u.test(text))
     || text.includes("\ufe0f");
 }
 
