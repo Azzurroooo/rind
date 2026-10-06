@@ -13,7 +13,7 @@ function setup() {
 test("turn events and viewers become one compact table, pushed once per burst", () => {
   const { live, pushes, flush } = setup();
   const a = {}, b = {};
-  live.view(a, "s1", "/w/one");
+  live.view(a, "s1", { workspace: "/w/one" });
   live.event({ session_id: "s1", event: { type: "turn_started" } });
   live.event({ session_id: "s1", event: { type: "text_delta" } });
   flush();
@@ -28,6 +28,27 @@ test("turn events and viewers become one compact table, pushed once per burst", 
   live.leave(a);
   flush();
   assert.deepEqual(live.list().map(s => [s.turn, s.watchers]), [["idle", 1]]);
+});
+
+test("drafts, the newest viewer and what the current worker hosts", () => {
+  const { live, flush } = setup();
+  const a = { accepts: true }, b = { accepts: false }, c = { accepts: true };
+  live.view(a, "s1", { workspace: "/w", draft: true });
+  live.view(b, "s1");
+  flush();
+  assert.equal(live.list()[0].draft, true, "an empty new conversation is a draft");
+  assert.equal(live.newestViewer("s1"), b, "the newest viewer wins");
+  assert.equal(live.newestViewer("s1", viewer => viewer.accepts), a, "a filter skips viewers that cannot take input");
+  live.view(c, "s1");
+  live.view(a, "s1");
+  assert.equal(live.newestViewer("s1", viewer => viewer.accepts), a, "showing a session again makes the window newest");
+  live.event({ session_id: "s1", event: { type: "turn_started" } });
+  assert.equal(live.list()[0].draft, false, "the first turn ends the draft");
+  assert.equal(live.hosted("s1"), true);
+  assert.equal(live.hosted("never-opened"), false);
+  assert.ok(!("hosted" in live.list()[0]), "hosting is internal to the host");
+  live.reset();
+  assert.equal(live.hosted("s1"), false, "a new worker has configured nothing");
 });
 
 test("a crashed worker ends every running turn instead of leaving it working forever", () => {
@@ -46,8 +67,8 @@ test("a crashed worker ends every running turn instead of leaving it working for
 test("a window shows one session at a time, and idle unwatched sessions are forgotten", () => {
   const { live, flush, advance } = setup();
   const w = {};
-  live.view(w, "s1", "/w");
-  live.view(w, "s2", "/w");
+  live.view(w, "s1", { workspace: "/w" });
+  live.view(w, "s2", { workspace: "/w" });
   flush();
   assert.deepEqual(live.list().map(s => [s.id, s.watchers]), [["s1", 0], ["s2", 1]], "switching moves the viewer");
   live.event({ session_id: "s3", event: { type: "turn_started" } });

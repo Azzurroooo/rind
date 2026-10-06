@@ -27,8 +27,23 @@ export async function startSharedServer(options) {
     // A crashed worker ends every turn it was running; nothing will report their end.
     onExit() { live.reset(); if (!stopping) for (const peer of peers) peer.socket.destroy(); initialized = null; },
   });
+  // `rind send`: the window that most recently showed the session takes the
+  // input as if typed there. Without one, a session this worker already runs
+  // gets a background turn (or a queued follow-up); anything else would run
+  // without the tools and scope its window configured, so it is refused.
+  async function deliver(sessionId, input) {
+    if (!sessionId || !input.trim()) throw Object.assign(new Error("A session and a non-empty prompt are required."), { code: "INVALID_INPUT" });
+    const window = live.newestViewer(sessionId, other => other.acceptsInput && peers.has(other));
+    if (window) { window.send({ deliver: { session_id: sessionId, input } }); return { delivered: "window" }; }
+    if (!live.hosted(sessionId)) throw Object.assign(new Error("No Rind window has session " + sessionId + " open."), { code: "SESSION_NOT_OPEN" });
+    await initialize();
+    if (prompts.has(sessionId)) { await client.request("rind/session/follow_up", { session_id: sessionId, input }); return { delivered: "queued" }; }
+    prompts.add(sessionId);
+    void client.request("session/prompt", { session_id: sessionId, input }).catch(() => {}).finally(() => prompts.delete(sessionId));
+    return { delivered: "started" };
+  }
   // A request can finish after its window closed; a closed window shows nothing.
-  const viewIfOpen = (peer, id, workspace) => { if (peers.has(peer)) live.view(peer, id, workspace); };
+  const viewIfOpen = (peer, id, details) => { if (peers.has(peer)) live.view(peer, id, details); };
   const initialize = () => initialized ||= (async () => { client.start(); return client.request("initialize"); })();
   let readyResolve, readyReject;
   const ready = new Promise((resolve, reject) => { readyResolve = resolve; readyReject = reject; });
@@ -63,6 +78,8 @@ export async function startSharedServer(options) {
         }
         // Answered from the host's own table, without starting the worker.
         if (method === "runtime/sessions") { peer.send({ id, result: { sessions: live.list() } }); return; }
+        if (method === "runtime/accept-input") { peer.acceptsInput = true; peer.send({ id, result: { ok: true } }); return; }
+        if (method === "runtime/send") { peer.send({ id, result: await deliver(String(params.session_id || ""), String(params.input || "")) }); return; }
         if (method === "runtime/shutdown" && !initialized) { stopping = true; peer.send({ id, result: { stopped: true } }); await close(); return; }
         const base = await initialize(); let result;
         if (method === "initialize") result = base;
@@ -71,14 +88,13 @@ export async function startSharedServer(options) {
         else if (method === "shutdown") { result = { detached: true }; peer.sessions.clear(); live.leave(peer); }
         else {
           if (method === "session/prompt" && prompts.has(params.session_id)) throw new Error("This session already has an active request. Use steering or follow-up input.");
-          if (method === "session/prompt") prompts.add(params.session_id);
+          if (method === "session/prompt") { prompts.add(params.session_id); viewIfOpen(peer, params.session_id); }
           if (method === "rind/auth/login") { if (authOwner) throw new Error("Another connection is signing in."); authOwner = peer; }
           if (method === "session/subscribe" || method === "session/prompt") peer.sessions.add(params.session_id);
           if (method === "session/unsubscribe") { peer.sessions.delete(params.session_id); result = { ok: true }; }
           try { if (method !== "session/unsubscribe") result = await client.request(method, params); }
           finally { if (method === "rind/auth/login") authOwner = null; if (method === "session/prompt") prompts.delete(params.session_id); }
-          if (["session/open", "session/new", "session/switch"].includes(method)) { peer.sessions.add(result.session_id); viewIfOpen(peer, result.session_id, result.workspace_root); }
-          if (method === "session/prompt") viewIfOpen(peer, params.session_id);
+          if (["session/open", "session/new", "session/switch"].includes(method)) { peer.sessions.add(result.session_id); viewIfOpen(peer, result.session_id, { workspace: result.workspace_root, draft: result.draft === true }); }
         }
         peer.send({ id, result });
       } catch (error) { peer.send({ id, error: { message: error.message, code: error.code } }); }

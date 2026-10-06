@@ -218,6 +218,8 @@ const runtimeClient = observeRuntime((management.shared ? createSharedRuntimeCli
   runtimePath,
   cliArgs,
   externalTools: management.externalTools,
+  // `rind send` input, routed here by the shared Runtime because this window shows the session.
+  onDeliver: ({ session_id: target, input }) => { if (target === sessionState.info.session_id) inputActions.dispatchExternal(input); },
   onMessage: (message) => {
     eventProcessing = eventProcessing
       .then(() => message?.method === runtimeMethods.authUpdate ? renderAuthUpdate(message) : renderEvent(message))
@@ -518,7 +520,9 @@ function updateGoalState(goal) {
   refreshInputState();
 }
 
+// A private worker has no shared Runtime to route `rind send`; it listens itself.
 async function rebindSendEndpoint() {
+  if (management.shared) return;
   try {
     await ipcServer?.close();
     ipcServer = null;

@@ -34,6 +34,7 @@ export async function connectSharedRuntime(options = {}) {
         try {
           const message = JSON.parse(line);
           if (message.event) { options.onMessage?.(message.event); continue; }
+          if (message.deliver) { options.onDeliver?.(message.deliver); continue; }
           if (message.prompt) {
             Promise.resolve(options.onRequest?.(message.prompt)).then(value => send({ authReply: message.prompt.request_id, value: value?.value ?? value ?? "" })).catch(() => send({ authReply: message.prompt.request_id, value: "" }));
             continue;
@@ -100,7 +101,8 @@ export function createSharedRuntimeClient(options) {
   async function request(method, params = {}) {
     const client = await start();
     if (method === "initialize") {
-      initialization ||= client.request("initialize").then(async base => ({ ...base, ...await client.request("session/open", {
+      // A window that takes `rind send` input says so before it opens its session.
+      initialization ||= client.request("initialize").then(async base => (options.onDeliver && await client.request("runtime/accept-input"), { ...base, ...await client.request("session/open", {
         workspace_root: arg("--cwd") || arg("--dir") || options.cwd || process.cwd(), session_id: arg("--session"), resume_latest: args.includes("--resume-latest") || args.includes("-c"),
         external_tools: options.externalTools || null, enable_user_question: !args.includes("--no-user-question"),
       }) }));
