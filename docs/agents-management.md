@@ -87,7 +87,7 @@ The shared Runtime hosts the conversation of every interactive Rind window and e
 | `○` Open | Nothing runs, and a Rind window shows it on screen right now. Several terminals can each have one open. |
 | `·` Idle | Nothing runs and no window shows it; the time is its last activity. |
 
-Open means on screen. A window covered by the Agents page still holds its conversation but tells the Runtime (`runtime/visibility`), so that conversation shows Idle, or Working while its turn runs. Closing or covering a window never stops a running turn. A new conversation with no message yet is not listed anywhere, except as the way back from the window that has it.
+Open means on screen. A window covered by the Agents page still holds its conversation but tells the Runtime (`runtime/visibility`), so that conversation shows Idle, or Working while its turn runs. Closing or covering a window never stops a running turn. A new conversation with no message yet is not listed anywhere, except as the way back from the window that has it. It exists only in memory: once no connection holds it and nothing runs in it, the shared Runtime forgets it at once (`rind/session/forget_draft`), in its live table and in the worker, and nothing is written to disk. The window you started Rind in keeps its own empty conversation while it is open, hidden from every list, since that is what it shows if you return to it; it is forgotten when that window closes. Going back (`esc`) to an empty conversation that was forgotten starts a new one in the same place. A saved conversation is never forgotten.
 
 ### Several windows on one conversation
 
