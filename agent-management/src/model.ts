@@ -15,7 +15,8 @@ export interface Task {
 }
 // Destructive requests from the Manager wait in the user's Inbox.
 export interface Approval { id: string; kind: "deleteTeam" | "cancelRun"; teamId: string; runId?: string; taskId?: string; title: string; requestedBy: string; createdAt: string }
-export interface Session { id: string; agentId: string; teamId?: string; runtimeSessionId: string; origin: "managed" | "direct"; shared?: boolean }
+// released: the session's team or membership ended while a window showed it; it is dropped on detach.
+export interface Session { id: string; agentId: string; teamId?: string; runtimeSessionId: string; origin: "managed" | "direct"; shared?: boolean; released?: boolean }
 export interface Run {
   id: string; sessionId: string; taskId?: string; status: "starting" | "running" | "succeeded" | "failed" | "cancelled" | "unknown";
   startedAt: string; lastObservedAt: string; hostSequence: number; needsInput?: boolean;

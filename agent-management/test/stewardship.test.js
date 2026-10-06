@@ -1,5 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { mkdir, writeFile } from "node:fs/promises";
+import path from "node:path";
 import { fixture, eventually } from "./fixture.js";
 
 const report = summary => ({ outcome: "completed", summary, evidence: ["tests pass"], artifacts: [] });
@@ -59,6 +61,7 @@ test("deleting a team keeps its deliveries read-only and releases its members an
   await eventually(() => !activeRunOf(f, running.id));
   await assert.rejects(f.call("deleteTeam", { teamId: f.team.id, confirmName: "product" }), { code: "CONFIRMATION_REQUIRED" });
 
+  await f.call("detachSession", { sessionId: session.id });
   const result = await f.call("deleteTeam", { teamId: f.team.id, confirmName: "Product" });
   assert.equal(result.archived, true);
   const state = f.store.state;
@@ -86,6 +89,7 @@ test("a team without history is removed completely, and removing a member releas
   const f = await fixture(t);
   const helper = await f.member("helper");
   const session = await f.call("attachSession", { agentId: helper.id, teamId: f.team.id, runtimeSessionId: "helper-chat" });
+  await f.call("detachSession", { sessionId: session.id });
   await f.call("removeMember", { teamId: f.team.id, agentId: helper.id });
   assert.equal(f.store.state.sessions[session.id], undefined);
   assert.equal(f.store.state.agents[helper.id], undefined, "a member in no other team is unregistered");
@@ -125,7 +129,7 @@ test("Manager deletes empty teams directly but asks the user before deleting his
   assert.equal(Object.keys(f.store.state.approvals).length, 0);
 });
 
-test("an approval whose target is gone expires instead of failing forever", async t => {
+test("an approval whose target is gone leaves the Inbox by itself", async t => {
   const f = await fixture(t);
   const managerSession = await f.call("attachSession", { manager: true });
   const manager = { kind: "manager", sessionId: managerSession.id };
@@ -134,6 +138,72 @@ test("an approval whose target is gone expires instead of failing forever", asyn
   const asked = await f.call("cancelRun", { runId: activeRunOf(f, task.id).id }, manager);
   f.starts[0].finish({ content: "finished on its own" });
   await eventually(() => !activeRunOf(f, task.id));
-  assert.deepEqual(await f.call("resolveApproval", { approvalId: asked.approval.id, approve: true }), { expired: true });
-  assert.equal(Object.keys(f.store.state.approvals).length, 0);
+  await eventually(() => Object.keys(f.store.state.approvals).length === 0);
+  await assert.rejects(f.call("resolveApproval", { approvalId: asked.approval.id, approve: true }), { code: "NOT_FOUND", message: /already handled/ });
+});
+
+test("a conversation open in a window keeps working after its member leaves, and is released when the window closes", async t => {
+  const f = await fixture(t);
+  const helper = await f.member("helper");
+  const open = await f.call("attachSession", { agentId: helper.id, teamId: f.team.id, runtimeSessionId: "helper-open", shared: true });
+  f.service.setLive([{ id: "helper-open", workspace: helper.canonicalWorkspace, turn: "idle", startedAt: "", updatedAt: "", watchers: 1 }]);
+  await f.call("removeMember", { teamId: f.team.id, agentId: helper.id });
+  const kept = f.store.state.sessions[open.id];
+  assert.equal(kept.teamId, undefined, "it becomes a plain conversation");
+  assert.ok(f.store.state.agents[helper.id], "its folder stays registered while the window uses it");
+  await f.call("hostTurnStart", { sessionId: open.id, runtimeSessionId: "helper-open" });
+  await f.call("hostTurnEnd", { sessionId: open.id, outcome: "turn_completed" });
+  await f.call("detachSession", { sessionId: open.id });
+  assert.equal(f.store.state.sessions[open.id], undefined);
+  assert.equal(f.store.state.agents[helper.id], undefined, "released once the window closes");
+});
+
+test("only released folders without instructions are unregistered", async t => {
+  const f = await fixture(t);
+  await mkdir(path.join(f.home, "pending"));
+  const pending = await f.call("registerAgent", { workspace: path.join(f.home, "pending"), name: "pending" });
+  await mkdir(path.join(f.home, "expert"));
+  const expert = await f.call("registerAgent", { workspace: path.join(f.home, "expert"), name: "expert", hint: "Always cite sources" });
+  await f.call("addMember", { teamId: f.team.id, agentId: expert.id });
+  const plain = await f.member("plain");
+  await f.call("removeMember", { teamId: f.team.id, agentId: plain.id });
+  await f.call("removeMember", { teamId: f.team.id, agentId: expert.id });
+  assert.equal(f.store.state.agents[plain.id], undefined);
+  assert.ok(f.store.state.agents[expert.id], "a folder with its own instructions keeps them");
+  assert.ok(f.store.state.agents[pending.id], "an agent registered for a later addMember is not touched");
+});
+
+test("approvals disappear once they no longer apply, and the Manager asks before deleting a team with members", async t => {
+  const f = await fixture(t);
+  const managerSession = await f.call("attachSession", { manager: true });
+  const manager = { kind: "manager", sessionId: managerSession.id };
+  const asked = await f.call("deleteTeam", { teamId: f.team.id }, manager);
+  assert.equal(asked.approval.kind, "deleteTeam", "members are history too");
+
+  const task = await f.call("assignTask", { teamId: f.team.id, assigneeAgentId: f.leader.id, brief: "Quick" });
+  await eventually(() => activeRunOf(f, task.id)?.status === "running");
+  await f.call("cancelRun", { runId: activeRunOf(f, task.id).id }, manager);
+  assert.equal((await f.call("snapshot")).approvals.length, 2);
+  f.starts[0].finish({ content: "finished on its own" });
+  await eventually(() => !activeRunOf(f, task.id));
+  await f.call("snapshot");
+  await eventually(() => Object.values(f.store.state.approvals).length === 1);
+  assert.deepEqual((await f.call("snapshot")).approvals.map(a => a.kind), ["deleteTeam"]);
+});
+
+test("a deleted imported team can be imported again, and archived teams do not answer team reads", async t => {
+  const f = await fixture(t);
+  const legacy = path.join(f.home, "legacy"), agentDir = path.join(legacy, "agents", "main", ".aiteam");
+  await mkdir(agentDir, { recursive: true }); await mkdir(path.join(legacy, ".aiteam"));
+  await writeFile(path.join(legacy, ".aiteam", "project.yaml"), JSON.stringify({ kind: "Project", metadata: { name: "Legacy" }, spec: { main_agent: "main", agents_root: "../agents" } }));
+  await writeFile(path.join(agentDir, "agent.yaml"), JSON.stringify({ kind: "Agent", metadata: { name: "Main" }, spec: {} }));
+  const preview = await f.call("previewImport", { root: legacy });
+  const first = await f.call("importTeam", { root: legacy, confirmation: preview.fingerprint });
+  await f.call("assignTask", { teamId: first.id, assigneeAgentId: first.leaderAgentId, brief: "Keep", start: false });
+  await f.call("deleteTeam", { teamId: first.id, confirmName: "Legacy" });
+  await assert.rejects(f.call("getTeam", { teamId: first.id }), { code: "TEAM_ARCHIVED" });
+  const second = await f.call("importTeam", { root: legacy, confirmation: preview.fingerprint });
+  assert.notEqual(second.id, first.id);
+  assert.equal(second.archive, undefined);
+  assert.equal((await f.call("importTeam", { root: legacy, confirmation: preview.fingerprint })).id, second.id, "importing again stays idempotent");
 });
