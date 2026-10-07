@@ -124,3 +124,41 @@ async def test_a_fork_is_not_given_the_same_name(tmp_path):
     meta = JsonlSessionStore.load_session_metadata(forked, str(tmp_path / "sessions"))
     assert "name" not in meta
     assert meta["title"] == "Release checks (fork)", "the fork is told apart from its source"
+
+
+@pytest.mark.asyncio
+async def test_rename_during_a_running_turn_takes_effect_and_survives_the_turn(tmp_path, monkeypatch):
+    import asyncio
+
+    monkeypatch.setenv("RIND_HOME", str(tmp_path / "home"))
+    worker = RuntimeWorker(workspace_root=str(tmp_path), session_dir=str(tmp_path / "sessions"))
+    started, release = asyncio.Event(), asyncio.Event()
+
+    async def stream(*args, **kwargs):
+        started.set()
+        await release.wait()
+        yield ModelStreamEvent(kind="text_delta", text="finished")
+        yield ModelStreamEvent(kind="completed", stop_reason="stop")
+
+    monkeypatch.setattr(worker.provider_service, "create_chat_client", AsyncMock(return_value=SimpleNamespace(stream=stream, close=AsyncMock())))
+    server, request, messages = _server(worker)
+    try:
+        await request("initialize")
+        session_id = (await request("session/create", workspace_root=str(tmp_path)))["session_id"]
+        turn = asyncio.create_task(server.dispatch({"request_id": "turn", "method": "session/prompt", "params": {"session_id": session_id, "input": "a long running task"}}))
+        await asyncio.wait_for(started.wait(), 5)
+        assert worker.execution.active_session_ids() == {session_id}, "the turn is running"
+
+        renamed = await asyncio.wait_for(request("rind/command/execute", session_id=session_id, input="/rename Mid-turn name"), 5)
+        assert renamed["display"]["name"] == "Mid-turn name", "a rename does not wait for the turn"
+        assert _listed(tmp_path)[session_id]["title"] == "Mid-turn name", "every list shows it while the turn runs"
+
+        release.set()
+        await asyncio.wait_for(turn, 5)
+        meta = JsonlSessionStore.load_session_metadata(session_id, str(tmp_path / "sessions"))
+        assert meta["name"] == "Mid-turn name", "the turn's own metadata writes keep the name"
+        assert meta["title"] == "a long running task"
+        assert _listed(tmp_path)[session_id]["title"] == "Mid-turn name"
+    finally:
+        server.close()
+        await worker.close()
