@@ -1,4 +1,4 @@
-"""Startup drafts retain their identity without creating session files."""
+"""A conversation exists only after its first message: opening a window creates nothing."""
 
 from __future__ import annotations
 
@@ -25,45 +25,45 @@ def worker(tmp_path, monkeypatch):
     return RuntimeWorker(workspace_root=str(tmp_path), session_dir=str(tmp_path / "sessions"))
 
 
-@pytest.mark.asyncio
-async def test_startup_queries_and_model_changes_do_not_create_files(worker, tmp_path, monkeypatch):
+def _server(worker):
     messages = []
 
     async def send(payload):
         messages.append(payload)
 
     server = RuntimeDispatcher(worker, writer=SimpleNamespace(send=send))
-    monkeypatch.setattr(worker.provider_service, "create_chat_client", AsyncMock(
-        return_value=SimpleNamespace(close=AsyncMock()),
-    ))
 
-    async def request(method, **params):
+    async def request(method, expect_error=False, **params):
         await server.dispatch({"request_id": method, "method": method, "params": params})
-        response = messages[-1]
-        assert "error" not in response, response
-        return response["result"]
+        response = next(message for message in reversed(messages) if message.get("request_id") == method)
+        assert ("error" in response) == expect_error, response
+        return response.get("error") if expect_error else response["result"]
 
+    return server, request, messages
+
+
+def _stream(text="done"):
+    async def stream(*args, **kwargs):
+        yield ModelStreamEvent(kind="text_delta", text=text)
+        yield ModelStreamEvent(kind="completed", stop_reason="stop")
+
+    return stream
+
+
+@pytest.mark.asyncio
+async def test_opening_a_window_creates_no_conversation(worker, tmp_path):
+    server, request, _ = _server(worker)
     try:
         info = await request("initialize")
-        session_id = info["session_id"]
-        assert session_id and info["draft"] is True
-        assert (await request("initialize"))["session_id"] == session_id
-        assert (await request("session/switch", session_id=session_id))["draft"] is True
-        await request("session/subscribe", session_id=session_id)
-        await request("session/replay", session_id=session_id)
-        await request("session/replay", session_id=session_id, after_cursor=0)
-        await request("rind/context/inspect", session_id=session_id)
-        assert (await request("rind/goal/get", session_id=session_id))["goal"] is None
-        for command in ("/status", "/sessions", "/compact", "/team list"):
-            await request("rind/command/execute", session_id=session_id, input=command)
-        await request("model/set", session_id=session_id, provider_id="anthropic", model="chosen-model")
-        await request("model/effort", session_id=session_id, reasoning_effort="high")
-        selected = await worker.session(session_id)
-        assert (selected["provider"], selected["model"], selected["reasoning_effort"]) == (
-            "anthropic", "chosen-model", "high",
-        )
+        assert info["session_id"] == "" and "draft" not in info
+        assert info["model"] and info["provider"] and info["workspace_root"]
+        assert (await request("initialize"))["session_id"] == ""
+        listing = await request("rind/command/execute", input="/sessions")
+        assert listing["display"]["sessions"] == [], "listing needs no conversation"
+        other = await request("rind/command/execute", input="/compact")
+        assert "first message" in json.dumps(other), "commands that need a conversation say how to start one"
         assert (await request("session/list"))["sessions"] == []
-        assert worker.execution.active_session_ids() == set()
+        assert worker.repository.draft_store("x") is None
     finally:
         server.close()
         await worker.close()
@@ -71,11 +71,10 @@ async def test_startup_queries_and_model_changes_do_not_create_files(worker, tmp
 
 
 @pytest.mark.asyncio
-async def test_simultaneous_initialization_shares_one_draft(worker, tmp_path):
+async def test_simultaneous_initialization_creates_nothing(worker, tmp_path):
     try:
         results = await asyncio.gather(*(worker.initialize() for _ in range(8)))
-        assert len({info["session_id"] for info in results}) == 1
-        assert all(info["draft"] for info in results)
+        assert {info["session_id"] for info in results} == {""}
         assert not (tmp_path / "sessions").exists()
     finally:
         await worker.close()
@@ -83,15 +82,14 @@ async def test_simultaneous_initialization_shares_one_draft(worker, tmp_path):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("outcome", ["completed", "failed", "cancelled"])
-async def test_first_turn_persists_before_model_and_remains_resumable(worker, tmp_path, monkeypatch, outcome):
-    info = await worker.initialize()
+async def test_first_message_creates_and_saves_the_conversation(worker, tmp_path, monkeypatch, outcome):
+    await worker.initialize()
+    info = await worker.create_conversation({"workspace_root": str(tmp_path), "provider_id": "openai-compatible", "model_id": "chosen-model", "reasoning_effort": "high"})
     session_id = info["session_id"]
+    assert session_id and (info["model"], info["reasoning_effort"]) == ("chosen-model", "high")
+    assert not (tmp_path / "sessions").exists(), "created on submit, saved by the message itself"
     base = tmp_path / "sessions" / session_id
-    store = await worker.repository.open_store(session_id)
-    await store.update_selection("openai-compatible", "chosen-model")
-    await store.update_reasoning_effort("high")
-    store_ref = weakref.ref(store)
-    del store
+    store_ref = weakref.ref(await worker.repository.open_store(session_id))
     closed = AsyncMock()
 
     async def stream(*args, **kwargs):
@@ -122,7 +120,7 @@ async def test_first_turn_persists_before_model_and_remains_resumable(worker, tm
     resumed = RuntimeWorker(workspace_root=str(tmp_path), session_dir=str(tmp_path / "sessions"), resume_latest=True)
     try:
         restored = await resumed.initialize()
-        assert restored["session_id"] == session_id and restored["draft"] is False
+        assert restored["session_id"] == session_id
         assert restored["model"] == "chosen-model"
         assert restored["turn_state"]["status"] == outcome
         assert [entry["id"] for entry in await resumed.repository.list()] == [session_id]
@@ -134,27 +132,61 @@ async def test_first_turn_persists_before_model_and_remains_resumable(worker, tm
 
 
 @pytest.mark.asyncio
-async def test_goal_materializes_draft_and_explicit_new_session_survives_restart(worker, tmp_path):
+async def test_a_first_prompt_that_fails_before_saving_leaves_nothing(worker, tmp_path, monkeypatch):
+    factory = AsyncMock(side_effect=RuntimeError("client initialization failed"))
+    monkeypatch.setattr(worker.provider_service, "create_chat_client", factory)
+    server, request, messages = _server(worker)
     try:
-        startup = await worker.initialize()
-        session_id = startup["session_id"]
+        await request("initialize")
+        session_id = (await request("session/create", workspace_root=str(tmp_path)))["session_id"]
+        error = await request("session/prompt", expect_error=True, session_id=session_id, input="hello")
+        assert "client initialization failed" in json.dumps(error)
+        discarded = [m for m in messages if m.get("event", {}).get("type") == "session_discarded"]
+        assert [m["event"]["session_id"] for m in discarded] == [session_id], "every observer learns it is gone"
+        with pytest.raises(LookupError):
+            await worker.session(session_id)
+        assert not (tmp_path / "sessions").exists()
+
+        factory.side_effect = None
+        factory.return_value = SimpleNamespace(stream=_stream("recovered"), close=AsyncMock())
+        retry = (await request("session/create", workspace_root=str(tmp_path)))["session_id"]
+        await request("session/prompt", session_id=retry, input="retry")
+        assert [path.name for path in (tmp_path / "sessions").iterdir() if path.is_dir()] == [retry]
+        assert len([m for m in messages if m.get("event", {}).get("type") == "session_discarded"]) == 1
+    finally:
+        server.close()
+        await worker.close()
+
+
+@pytest.mark.asyncio
+async def test_a_conversation_created_but_never_prompted_is_discarded_later(worker, tmp_path):
+    clock = [1000.0]
+    worker.repository.now = lambda: clock[0]
+    try:
+        abandoned = (await worker.create_conversation({"workspace_root": str(tmp_path)}))["session_id"]
+        clock[0] += 30
+        kept = (await worker.create_conversation({"workspace_root": str(tmp_path)}))["session_id"]
+        assert worker.repository.draft_store(abandoned) is not None, "still within its first-message window"
+        clock[0] += 61
+        await worker.create_conversation({"workspace_root": str(tmp_path)})
+        assert worker.repository.draft_store(abandoned) is None
+        assert worker.repository.draft_store(kept) is None
+        assert not (tmp_path / "sessions").exists()
+    finally:
+        await worker.close()
+
+
+@pytest.mark.asyncio
+async def test_goal_saves_a_created_conversation_and_fork_needs_a_message(worker, tmp_path):
+    try:
+        session_id = (await worker.create_conversation({"workspace_root": str(tmp_path)}))["session_id"]
         with pytest.raises(ValueError, match="Nothing to fork"):
             await worker.fork_session(session_id)
         goal = await worker.repository.set_goal(session_id, "finish the task")
         meta = JsonlSessionStore.load_session_metadata(session_id, str(tmp_path / "sessions"))
         assert meta["goal"] == goal
-        created = await worker.create_session()
-        assert created["draft"] is False
     finally:
         await worker.close()
-    restored = RuntimeWorker(
-        workspace_root=str(tmp_path), session_dir=str(tmp_path / "sessions"), session_id=created["session_id"],
-    )
-    try:
-        assert (await restored.initialize())["session_id"] == created["session_id"]
-        assert (await restored.replay(created["session_id"]))["turn_state"] is None
-    finally:
-        await restored.close()
 
 
 @pytest.mark.asyncio
@@ -184,9 +216,8 @@ async def test_empty_compact_is_rejected_before_model_call(worker, tmp_path, mon
     server = RuntimeDispatcher(worker, writer=writer)
     try:
         await server.dispatch({"request_id": "init", "method": "initialize", "params": {}})
-        await server.dispatch({"request_id": "compact", "method": method, "params": {
-            "session_id": worker.session_id, "input": "/compact",
-        }})
+        session_id = (await worker.create_conversation({"workspace_root": str(tmp_path)}))["session_id"]
+        await server.dispatch({"request_id": "compact", "method": method, "params": {"session_id": session_id, "input": "/compact"}})
         response = writer.send.call_args.args[0]
         assert "Not enough messages to compact" in json.dumps(response)
         client.create.assert_not_awaited()
@@ -198,37 +229,9 @@ async def test_empty_compact_is_rejected_before_model_call(worker, tmp_path, mon
 
 
 @pytest.mark.asyncio
-async def test_execution_start_failure_can_retry_same_draft(worker, tmp_path, monkeypatch):
-    session_id = (await worker.initialize())["session_id"]
-    factory = AsyncMock(side_effect=RuntimeError("client initialization failed"))
-    monkeypatch.setattr(worker.provider_service, "create_chat_client", factory)
-    try:
-        with pytest.raises(RuntimeError, match="client initialization failed"):
-            await worker.start_execution(session_id)
-        assert not worker.execution.active_session_ids()
-        assert not (tmp_path / "sessions").exists()
-        assert (await worker.session(session_id))["draft"] is True
-
-        async def stream(*args, **kwargs):
-            yield ModelStreamEvent(kind="text_delta", text="recovered")
-            yield ModelStreamEvent(kind="completed", stop_reason="stop")
-
-        factory.side_effect = None
-        factory.return_value = SimpleNamespace(stream=stream, close=AsyncMock())
-        events = [event async for event in worker.execution.run_turn(session_id, query="retry")]
-        assert events[-1]["type"] == "turn_completed"
-        assert (await worker.session(session_id))["draft"] is False
-        assert [path.name for path in (tmp_path / "sessions").iterdir() if path.is_dir()] == [session_id]
-    finally:
-        await worker.close()
-
-
-@pytest.mark.asyncio
-async def test_deleting_startup_draft_releases_it_without_files(worker, tmp_path):
-    session_id = (await worker.initialize())["session_id"]
-    store = await worker.repository.open_store(session_id)
-    store_ref = weakref.ref(store)
-    del store
+async def test_deleting_an_unsaved_conversation_releases_it_without_files(worker, tmp_path):
+    session_id = (await worker.create_conversation({"workspace_root": str(tmp_path)}))["session_id"]
+    store_ref = weakref.ref(await worker.repository.open_store(session_id))
     try:
         await worker.delete_session(session_id)
         gc.collect()
@@ -237,4 +240,25 @@ async def test_deleting_startup_draft_releases_it_without_files(worker, tmp_path
         with pytest.raises(LookupError):
             await worker.session(session_id)
     finally:
+        await worker.close()
+
+
+@pytest.mark.asyncio
+async def test_a_window_retries_its_first_message_under_the_same_identity(worker, tmp_path, monkeypatch):
+    factory = AsyncMock(side_effect=RuntimeError("no key"))
+    monkeypatch.setattr(worker.provider_service, "create_chat_client", factory)
+    server, request, _ = _server(worker)
+    try:
+        await request("initialize")
+        first = (await request("session/create", workspace_root=str(tmp_path)))["session_id"]
+        await request("session/prompt", expect_error=True, session_id=first, input="hello")
+        factory.side_effect = None
+        factory.return_value = SimpleNamespace(stream=_stream(), close=AsyncMock())
+        again = (await request("session/create", workspace_root=str(tmp_path), session_id=first))["session_id"]
+        assert again == first, "a team window stays bound to one conversation"
+        await request("session/prompt", session_id=first, input="hello")
+        error = await request("session/create", expect_error=True, workspace_root=str(tmp_path), session_id=first)
+        assert "already exists" in json.dumps(error), "a saved conversation is never taken over"
+    finally:
+        server.close()
         await worker.close()

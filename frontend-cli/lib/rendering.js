@@ -944,7 +944,7 @@ function choiceMenuTitle(visible, title = "Choices") {
 }
 
 export function sessionSwitchedText(info = {}) {
-  const sessionId = singleLine(info.session_id) || "unknown";
+  const sessionId = singleLine(info.session_id) || "new";
   const model = singleLine(info.model);
   const goal = goalText(info.goal, true);
   const preview = resumePreviewText(info.resume_preview);
@@ -1642,7 +1642,7 @@ function resumePreviewLine(line) {
 
 function startupBannerText(info, frameWidth) {
   const width = startupBannerWidth(frameWidth);
-  const modelLine = `model ${singleLine(info.model) || "unknown"} · session ${singleLine(info.session_id) || "unknown"}`;
+  const modelLine = `model ${singleLine(info.model) || "unknown"} · session ${singleLine(info.session_id) || "new"}`;
   const version = singleLine(info.version) || "unknown";
   const cwd = middleClip(info.cwd || process.cwd(), width - 4);
   const team = info.team_main;

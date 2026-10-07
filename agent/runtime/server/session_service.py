@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import shutil
+import time
 from typing import Any
 
 from agent.domain.models import ModelSelection
@@ -18,13 +19,21 @@ from agent.infrastructure.settings import workspace_defaults
 from agent.prompts import build_system_prompt
 
 
+# A conversation is created when its first message is submitted and saved by
+# that message. One created but never prompted (its window went away first)
+# is discarded once this old.
+UNSAVED_LIMIT_SECONDS = 60
+
+
 class SessionService:
-    """Access sessions by ID and retain drafts until their first turn."""
+    """Access sessions by ID. A created conversation stays in memory until its first message saves it."""
 
     def __init__(self, *, session_dir: str | None, provider_service: ProviderServiceImpl):
         self.session_dir = session_dir
         self.provider_service = provider_service
         self._drafts: dict[str, JsonlSessionStore] = {}
+        self._created: dict[str, float] = {}
+        self.now = time.monotonic
 
     def draft_store(self, session_id: str) -> JsonlSessionStore | None:
         self.release_persisted_draft()
@@ -32,14 +41,53 @@ class SessionService:
 
     def release_persisted_draft(self) -> None:
         self._drafts = {sid: store for sid, store in self._drafts.items() if not store.is_persisted}
+        self._created = {sid: at for sid, at in self._created.items() if sid in self._drafts}
 
-    def forget_draft(self, session_id: str) -> bool:
-        """Drop an unsaved draft from memory. A saved conversation is never touched."""
+    def discard_unsaved(self, session_id: str) -> bool:
+        """Drop a created conversation that no message saved. A saved one is never touched."""
         store = self.draft_store(validate_session_id(session_id))
         if store is None:
             return False
         self._drafts.pop(store.session_id, None)
+        self._created.pop(store.session_id, None)
         return True
+
+    def abandoned(self) -> list[str]:
+        """Created conversations whose first message never came."""
+        self.release_persisted_draft()
+        cutoff = self.now() - UNSAVED_LIMIT_SECONDS
+        return [sid for sid, at in self._created.items() if at < cutoff]
+
+    async def exists(self, session_id: str) -> bool:
+        """Saved on disk (an unsaved conversation is only in memory)."""
+        try:
+            await asyncio.to_thread(JsonlSessionStore.load_session_metadata, validate_session_id(session_id), self.session_dir)
+            return True
+        except LookupError:
+            return False
+
+    def listing_store(self, workspace_root: str) -> JsonlSessionStore:
+        """A read-only handle for listing this folder's history; it never creates a session."""
+        return JsonlSessionStore(session_dir=self.session_dir, workspace_root=validate_workspace_root(workspace_root))
+
+    async def blank(self, workspace_root: str, selection: ModelSelection | None = None) -> dict[str, Any]:
+        """What a window shows before its first message: a folder and its settings, no session."""
+        root = validate_workspace_root(workspace_root)
+        default_model, default_effort, _, default_provider = await asyncio.to_thread(workspace_defaults, str(root))
+        if selection is None:
+            selection = self.provider_service.default_selection(root)
+        return {
+            "session_id": "",
+            "model": str(selection.model_id or default_model),
+            "provider": str(selection.provider_id or default_provider),
+            "reasoning_effort": str(selection.reasoning_effort or default_effort or ""),
+            "workspace_root": str(root),
+            "team_main": None,
+            "turn_state": None,
+            "goal": None,
+            "usage": None,
+            "message_count": 0,
+        }
 
     async def metadata(self, session_id: str) -> dict[str, Any]:
         clean = validate_session_id(session_id)
@@ -98,6 +146,7 @@ class SessionService:
         parent_session_id: str | None = None,
         selection: ModelSelection | None = None,
         defer_persistence: bool = False,
+        session_id: str | None = None,
     ) -> dict[str, Any]:
         root = validate_workspace_root(workspace_root)
         if selection is None:
@@ -106,7 +155,7 @@ class SessionService:
         system_prompt = build_system_prompt(str(root), environment=get_system_info(root))
         store = JsonlSessionStore(
             session_dir=self.session_dir,
-            session_id=new_session_id(),
+            session_id=session_id or new_session_id(),
             model=model,
             system_prompt=system_prompt,
             workspace_root=root,
@@ -120,11 +169,11 @@ class SessionService:
         if defer_persistence:
             await store.create_session(session_id=store.session_id)
             self._drafts[store.session_id] = store
+            self._created[store.session_id] = self.now()
         else:
             await store.initialize()
         return {
             "session_id": store.session_id,
-            "draft": not store.is_persisted,
             "model": store.model,
             "provider": store.provider,
             "reasoning_effort": store.reasoning_effort,
@@ -147,7 +196,7 @@ class SessionService:
             if not sessions:
                 raise ValueError("No existing session found to resume.")
             return await self.info(str(sessions[0]["id"]))
-        return await self.create(workspace_root, selection=selection, defer_persistence=True)
+        return await self.blank(workspace_root, selection)
 
     async def info(self, session_id: str) -> dict[str, Any]:
         meta = await self.metadata(session_id)
@@ -155,7 +204,6 @@ class SessionService:
         default_model, default_effort, _, default_provider = await asyncio.to_thread(workspace_defaults, workspace_root)
         return {
             "session_id": str(meta.get("session_id") or session_id),
-            "draft": self.draft_store(session_id) is not None,
             "model": str(meta.get("model") or default_model),
             "provider": str(meta.get("provider") or default_provider),
             "reasoning_effort": str(meta.get("reasoning_effort") or default_effort or ""),

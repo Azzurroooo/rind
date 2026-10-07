@@ -213,7 +213,8 @@ async def test_worker_compact_cancel_uses_active_token_and_releases_execution(tm
 
     monkeypatch.setenv("RIND_HOME", str(tmp_path / "home"))
     worker = RuntimeWorker(workspace_root=str(tmp_path), session_dir=str(tmp_path / "sessions"))
-    info = await worker.initialize()
+    await worker.initialize()
+    info = await worker.create_conversation({})
     session_id = info["session_id"]
     store = await worker.repository.open_store(session_id)
     await store.persist_message("user", "original task")

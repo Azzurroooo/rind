@@ -496,7 +496,8 @@ try {
   } else {
     logOutput(startupText(startupInfo));
   }
-  await runtimeController.restoreSession();
+  // A window opened on an existing conversation shows its history; a new one has none yet.
+  if (sessionState.info.session_id) await runtimeController.restoreSession();
   if (management.prefill) inputStateData.prefill = management.prefill;
   if (tui) {
     inputController.start();

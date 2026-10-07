@@ -128,7 +128,7 @@ export function hintsFor(view, row) {
   if (view.searching) return [hint("type", "to search"), hint("enter", "keep filter"), hint("esc", "clear")];
   if (view.leaveArmed) return [hint("ctrl+c", "again to leave Rind · agents keep running"), hint("esc", "stay")];
   const list = available(view, row).filter(action => !["help", "foldAll"].includes(action.id)).map(action => hint(ACTIONS[action.id].key, action.label));
-  const back = view.focus === "sidebar" ? hint("esc", view.returnTo ? "back to conversation" : view.standalone ? "close" : "back to chat") : hint("esc", "back");
+  const back = view.focus === "sidebar" ? hint("esc", view.returnTo?.own ? "back to chat" : view.returnTo ? "back to conversation" : "close") : hint("esc", "back");
   return [...list, ...(view.focus === "sidebar" ? [hint("ctrl+c ×2", "leave Rind")] : []), hint("?", "help"), back];
 }
 

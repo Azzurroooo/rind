@@ -38,7 +38,8 @@ test("direct session remains observable after detach and management restart, and
   const config = await user.request("sessionTools", { sessionId: session.id });
   const first = createSharedRuntimeClient({ ...options, rindHome: home, cliArgs: ["--cwd", workspace], externalTools: config });
   t.after(async () => { response?.end(); await first.shutdown(); await viewer?.shutdown(); user.close(); await server.close(); await stopRuntime(home); await new Promise(resolve => provider.close(resolve)); await rm(home, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }); });
-  const info = await first.request("initialize");
+  assert.equal((await first.request("initialize")).session_id, "", "a window has no conversation before its first message");
+  const info = await first.request("session/create", {});
   await user.request("bindSession", { sessionId: session.id, runtimeSessionId: info.session_id });
   const pending = first.request("session/prompt", { session_id: info.session_id, input: "Work in background" }).catch(error => error);
   for (let i = 0; !response && i < 200; i++) await new Promise(resolve => setTimeout(resolve, 20));

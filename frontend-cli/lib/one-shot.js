@@ -190,6 +190,8 @@ export async function runOneShot({ args, python, repoRoot, runtimePath, cwd = pr
     }), management);
     client.start();
     sessionInfo = requireRuntimeInitialization(await client.request(runtimeMethods.initialize));
+    // Without --session the prompt below is a new conversation's first message.
+    if (!sessionInfo.session_id && !options.session) sessionInfo = { ...sessionInfo, ...await client.request(runtimeMethods.sessionCreate, {}) };
     const sessionId = String(sessionInfo.session_id || options.session || "").trim();
     if (!sessionId) throw new Error("Runtime initialization did not return a session_id.");
     progress.session({

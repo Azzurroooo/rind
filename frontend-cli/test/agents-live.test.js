@@ -34,7 +34,8 @@ test("a plain window's turn is visible to management while it runs, and its pres
     held.forEach(response => response.destroy()); client?.close(); await window.shutdown(); await server.close();
     await new Promise(resolve => provider.close(resolve)); await removeRindHome(home);
   });
-  const info = await window.request("initialize");
+  await window.request("initialize");
+  const info = await window.request("session/create", {});
   // A new conversation has no saved history yet; the Runtime still knows its folder,
   // so another window can open it instead of failing on missing metadata.
   assert.equal(path.resolve(await sessionWorkspace(home, info.session_id)).toLowerCase(), path.resolve(folder).toLowerCase());

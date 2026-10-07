@@ -207,3 +207,15 @@ test("a deleted imported team can be imported again, and archived teams do not a
   assert.equal(second.archive, undefined);
   assert.equal((await f.call("importTeam", { root: legacy, confirmation: preview.fingerprint })).id, second.id, "importing again stays idempotent");
 });
+
+test("a window that leaves before its first message leaves no conversation behind", async t => {
+  const f = await fixture(t);
+  const session = await f.call("attachSession", { agentId: f.leader.id, teamId: f.team.id });
+  assert.equal(f.store.state.sessions[session.id].runtimeSessionId, "");
+  await f.call("detachSession", { sessionId: session.id });
+  assert.equal(f.store.state.sessions[session.id], undefined);
+  assert.ok(f.store.state.agents[f.leader.id], "the member itself stays");
+  const bound = await f.call("attachSession", { agentId: f.leader.id, teamId: f.team.id, runtimeSessionId: "20261007_120000_aaaaaaaa" });
+  await f.call("detachSession", { sessionId: bound.id });
+  assert.ok(f.store.state.sessions[bound.id], "a conversation that exists keeps its registration");
+});

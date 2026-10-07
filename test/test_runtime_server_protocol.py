@@ -954,8 +954,8 @@ def test_app_server_process_serves_git_backed_commands_and_exits_after_shutdown(
         process.stdin.flush()
         initialize = read_response(timeout=15)
         assert initialize.get("kind") == "response", initialize
-        session_id = initialize["result"]["session_id"]
-        assert isinstance(session_id, str) and session_id
+        # A window has no conversation before its first message; reading commands still work.
+        assert initialize["result"]["session_id"] == ""
 
         process.stdin.write(
             json.dumps(
@@ -963,7 +963,7 @@ def test_app_server_process_serves_git_backed_commands_and_exits_after_shutdown(
                     "kind": "request",
                     "request_id": "status",
                     "method": "rind/command/execute",
-                    "params": {"session_id": session_id, "input": "/status"},
+                    "params": {"input": "/status"},
                 }
             )
             + "\n"

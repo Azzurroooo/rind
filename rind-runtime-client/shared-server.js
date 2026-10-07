@@ -21,7 +21,12 @@ export async function startSharedServer(options) {
   const peers = new Set(), auth = new Map(), prompts = new Set();
   const live = createLiveSessions({ onChange(sessions) { for (const peer of peers) if (peer.observe) peer.send({ event: { kind: "runtime", type: "sessions_changed", sessions } }); } });
   const client = createRuntimeClient({ ...options, python: options.python || "python", cwd: paths.directory, cliArgs: [],
-    onMessage(event) { live.event(event); for (const peer of peers) if (peer.observe || peer.sessions.has(event.session_id)) peer.send({ event }); },
+    onMessage(event) {
+      live.event(event);
+      for (const peer of peers) if (peer.observe || peer.sessions.has(event.session_id)) peer.send({ event });
+      // A first prompt failed before its message saved the conversation: it never existed.
+      if (event?.event?.type === "session_discarded") { live.forget(event.session_id); for (const peer of peers) peer.sessions.delete(event.session_id); }
+    },
     onRequest(prompt) { return new Promise(resolve => { if (!authOwner) { resolve(""); return; } auth.set(prompt.request_id, { peer: authOwner, resolve }); authOwner.send({ prompt }); }); },
     onStderr: text => process.stderr.write(text),
     // A crashed worker ends every turn it was running; nothing will report their end.
@@ -42,17 +47,6 @@ export async function startSharedServer(options) {
   }
   // A request can finish after its window closed; a closed window shows nothing.
   const viewIfOpen = (peer, id, details) => { if (peers.has(peer)) live.view(peer, id, details); };
-  // A conversation that never got a message exists only in memory. Once no
-  // connection holds it and nothing runs in it, it is gone: from the table
-  // and from the worker. A saved conversation is kept (its history is on disk).
-  async function releaseIfDraft(id) {
-    if (!id || !live.isDraft(id) || live.turn(id) !== "idle" || prompts.has(id) || [...peers].some(other => other.sessions.has(id))) return;
-    live.forget(id);
-    if (!initialized) return;
-    try { await client.request("rind/session/forget_draft", { session_id: id }); } catch {}
-  }
-  // A window let go of these conversations (unsubscribed, switched away or closed).
-  function released(ids) { for (const id of ids) void releaseIfDraft(id); }
   const initialize = () => initialized ||= (async () => { client.start(); return client.request("initialize"); })();
   let readyResolve, readyReject;
   const ready = new Promise((resolve, reject) => { readyResolve = resolve; readyReject = reject; });
@@ -61,7 +55,7 @@ export async function startSharedServer(options) {
     socket.setEncoding("utf8"); let buffer = "";
     const peer = { socket, sessions: new Set(), observe: false, send(message) { if (!socket.destroyed) { if (socket.writableLength > 4 * 1024 * 1024) socket.destroy(); else socket.write(JSON.stringify(message) + "\n"); } } };
     peers.add(peer); socket.on("error", () => {});
-    socket.on("close", () => { peers.delete(peer); live.leave(peer); released(peer.sessions); for (const [id, entry] of auth) if (entry.peer === peer) { entry.resolve(""); auth.delete(id); } });
+    socket.on("close", () => { peers.delete(peer); live.leave(peer); for (const [id, entry] of auth) if (entry.peer === peer) { entry.resolve(""); auth.delete(id); } });
     socket.on("data", chunk => {
       buffer += chunk;
       if (buffer.length > 8 * 1024 * 1024) { socket.destroy(); return; }
@@ -96,16 +90,17 @@ export async function startSharedServer(options) {
         if (method === "initialize") result = base;
         else if (method === "runtime/observe") { peer.observe = true; result = { pid: client.child.pid }; }
         else if (method === "runtime/shutdown") { stopping = true; await client.shutdown(); peer.send({ id, result: { stopped: true } }); await close(); return; }
-        else if (method === "shutdown") { result = { detached: true }; const held = [...peer.sessions]; peer.sessions.clear(); live.leave(peer); released(held); }
+        else if (method === "shutdown") { result = { detached: true }; peer.sessions.clear(); live.leave(peer); }
         else {
           if (method === "session/prompt" && prompts.has(params.session_id)) throw new Error("This session already has an active request. Use steering or follow-up input.");
           if (method === "session/prompt") { prompts.add(params.session_id); viewIfOpen(peer, params.session_id); }
           if (method === "rind/auth/login") { if (authOwner) throw new Error("Another connection is signing in."); authOwner = peer; }
           if (method === "session/subscribe" || method === "session/prompt") peer.sessions.add(params.session_id);
-          if (method === "session/unsubscribe") { peer.sessions.delete(params.session_id); live.leave(peer, params.session_id); result = { ok: true }; released([params.session_id]); }
+          if (method === "session/unsubscribe") { peer.sessions.delete(params.session_id); live.leave(peer, params.session_id); result = { ok: true }; }
           try { if (method !== "session/unsubscribe") result = await client.request(method, params); }
           finally { if (method === "rind/auth/login") authOwner = null; if (method === "session/prompt") prompts.delete(params.session_id); }
-          if (["session/open", "session/new", "session/switch"].includes(method)) { peer.sessions.add(result.session_id); viewIfOpen(peer, result.session_id, { workspace: result.workspace_root, draft: result.draft === true }); }
+          // A window before its first message has no session; session/create makes one.
+          if (["session/open", "session/new", "session/switch", "session/create"].includes(method) && result.session_id) { peer.sessions.add(result.session_id); viewIfOpen(peer, result.session_id, { workspace: result.workspace_root }); }
         }
         peer.send({ id, result });
       } catch (error) { peer.send({ id, error: { message: error.message, code: error.code } }); }

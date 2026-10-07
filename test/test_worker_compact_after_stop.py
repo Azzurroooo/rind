@@ -13,7 +13,8 @@ async def test_manual_compact_after_stop_keeps_automatic_continuations_suppresse
     monkeypatch.setenv("RIND_HOME", str(tmp_path / "home"))
     worker = RuntimeWorker(workspace_root=str(tmp_path), session_dir=str(tmp_path / "sessions"))
     try:
-        info = await worker.initialize()
+        await worker.initialize()
+        info = await worker.create_conversation({})
         session_id = info["session_id"]
         store = await worker.repository.open_store(session_id)
         await store.persist_message("user", "Keep the workspace choice.")

@@ -81,10 +81,12 @@ export async function followConversation(chat, { launch, input, open = openAgent
 // it. Windows never stack: this is a place to reopen, not a window kept open.
 export function returnTarget(next) {
   if (!["agents", "return"].includes(next?.action) || !next.chat) return null;
-  const runtimeSessionId = next.from?.runtimeSessionId || next.chat.runtimeSessionId;
-  if (!runtimeSessionId) return null;
+  // A window left before its first message comes back as a new conversation there.
+  const runtimeSessionId = next.from ? next.from.runtimeSessionId || undefined : next.chat.runtimeSessionId;
   const { agent, teamId, manager } = next.chat;
-  return { agentId: agent?.id, teamId, manager: Boolean(manager), workspace: next.from?.workspace || agent?.canonicalWorkspace, runtimeSessionId };
+  const workspace = next.from?.workspace || agent?.canonicalWorkspace;
+  if (!runtimeSessionId && !workspace && !manager) return null;
+  return { agentId: agent?.id, teamId, manager: Boolean(manager), workspace, runtimeSessionId };
 }
 export async function runAgentsCommand(args, launch) {
   const json = args.includes("--json");

@@ -22,7 +22,7 @@ export function createLiveSessions({ onChange = () => {}, now = () => Date.now()
 
   const entry = id => {
     let item = sessions.get(id);
-    if (!item) { item = { id, workspace: "", turn: "idle", draft: false, background: null, startedAt: "", updatedAt: new Date(now()).toISOString() }; sessions.set(id, item); }
+    if (!item) { item = { id, workspace: "", turn: "idle", background: null, startedAt: "", updatedAt: new Date(now()).toISOString() }; sessions.set(id, item); }
     return item;
   };
   const changed = () => {
@@ -45,13 +45,11 @@ export function createLiveSessions({ onChange = () => {}, now = () => Date.now()
   return {
     list,
     // A window now shows `id` (opened, created, switched to or prompted).
-    // `draft` is true while the conversation has no message yet.
-    view(viewer, id, { workspace, draft } = {}) {
+    view(viewer, id, { workspace } = {}) {
       if (!id) return;
       const item = entry(id);
       const was = viewers.get(viewer);
       if (workspace) item.workspace = workspace;
-      if (typeof draft === "boolean" && item.draft !== draft) { item.draft = draft; changed(); }
       // A request finishing while the window is covered does not uncover it.
       if (covered.has(viewer)) { covered.set(viewer, id); return; }
       // Re-inserting keeps the map ordered by recency, newest last.
@@ -66,8 +64,7 @@ export function createLiveSessions({ onChange = () => {}, now = () => Date.now()
       return found;
     },
     turn: id => sessions.get(id)?.turn || "idle",
-    isDraft: id => sessions.get(id)?.draft === true,
-    // The conversation no longer exists (an unsaved draft nobody holds).
+    // The conversation no longer exists (its first prompt failed before saving it).
     forget(id) {
       if (!sessions.delete(id)) return;
       for (const [viewer, shown] of viewers) if (shown === id) viewers.delete(viewer);
@@ -95,13 +92,12 @@ export function createLiveSessions({ onChange = () => {}, now = () => Date.now()
       const known = covered.delete(viewer);
       if (viewers.delete(viewer) || known) changed();
     },
-    // The worker went away: no turn can still be running. What it knew about
-    // drafts is gone too; a session it opened is no longer known to be empty.
+    // The worker went away: no turn or job can still be running.
     reset() {
       let any = false;
       for (const item of sessions.values()) {
-        if (item.turn === "idle" && !item.draft && !item.background) continue;
-        item.turn = "idle"; item.draft = false; item.background = null; item.updatedAt = new Date(now()).toISOString(); any = true;
+        if (item.turn === "idle" && !item.background) continue;
+        item.turn = "idle"; item.background = null; item.updatedAt = new Date(now()).toISOString(); any = true;
       }
       if (any) changed();
     },
@@ -124,7 +120,6 @@ export function createLiveSessions({ onChange = () => {}, now = () => Date.now()
       if (item.turn === turn) return;
       const at = new Date(now()).toISOString();
       if (turn === "running" && item.turn === "idle") item.startedAt = at;
-      if (turn === "running") item.draft = false;
       item.turn = turn;
       item.updatedAt = at;
       changed();

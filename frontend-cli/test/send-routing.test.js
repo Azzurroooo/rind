@@ -24,7 +24,8 @@ test("rind send reaches the newest window showing a session, or a turn that keep
   const delivered = { first: [], second: [] };
   const first = createSharedRuntimeClient({ ...options, cliArgs: ["--cwd", folder], onMessage() {}, onDeliver: value => delivered.first.push(value) });
   t.after(async () => { held.forEach(response => response.destroy()); await first.shutdown(); await host.close(); await new Promise(resolve => provider.close(resolve)); await rm(home, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }); });
-  const { session_id: sessionId } = await first.request("initialize");
+  await first.request("initialize");
+  const { session_id: sessionId } = await first.request("session/create", {});
   const sender = () => connectSharedRuntime({ ...options, start: false });
   const send = async input => { const sendHost = await sender(); try { return await sendHost.request("runtime/send", { session_id: sessionId, input }); } finally { sendHost.close(); } };
 

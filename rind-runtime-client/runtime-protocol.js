@@ -26,7 +26,7 @@ export const runtimeMethods = Object.freeze({
   sessionUnsteer: "rind/session/unsteer",
   sessionDequeueFollowUp: "rind/session/dequeue_follow_up",
   sessionCompact: "rind/session/compact",
-  sessionForgetDraft: "rind/session/forget_draft",
+  sessionCreate: "session/create",
   commandExecute: "rind/command/execute",
   userQuestionRespond: "rind/user-question/respond",
   backgroundList: "rind/background/list",

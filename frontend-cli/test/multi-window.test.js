@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, mkdir, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, writeFile, readdir } from "node:fs/promises";
 import { spawn } from "node:child_process";
 import path from "node:path";
 import os from "node:os";
@@ -67,10 +67,12 @@ test("answering a question in one window closes it in another window on the same
 
   const first = window(windows, home, workspace, []);
   const banner = await first.visible("← agents");
-  const sessionId = banner.match(/session (\d{8}_\d{6}_[0-9a-f]+)/)?.[1];
-  assert.ok(sessionId, "the banner names the session");
+  assert.match(banner, /session new/, "nothing exists before the first message");
   first.key("please ask me\r");
   await first.visible("Ship it now?");
+  // The first message created and saved the conversation.
+  const [sessionId] = (await readdir(path.join(home, "sessions"), { withFileTypes: true })).filter(entry => entry.isDirectory() && /^\d{8}_/.test(entry.name)).map(entry => entry.name);
+  assert.ok(sessionId, "the first message saved a conversation");
 
   const second = window(windows, home, workspace, ["--session", sessionId]);
   await second.visible("Ship it now?");

@@ -159,8 +159,10 @@ export async function prepareManagement(args, launch, { interactive = !!process.
         if (["session/new", "session/switch"].includes(method)) throw new Error("Use Agents management to open another member, or start a separate rind session.");
         if (params?.session_id && runtimeSessionId && params.session_id !== runtimeSessionId) throw new Error("This process is attached to another registered runtime session.");
       },
+      // A window opened on a conversation binds at once; a new one when its
+      // first message creates the conversation.
       async after(method, result) {
-        if (method === "initialize") await this.bind(result);
+        if (["initialize", "session/create"].includes(method) && result?.session_id) await this.bind(result);
       },
       async close() {
         if (detached) return; detached = true;

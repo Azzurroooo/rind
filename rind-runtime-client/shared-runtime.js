@@ -98,18 +98,22 @@ export function createSharedRuntimeClient(options) {
     starting ||= connectSharedRuntime({ ...options, onDisconnect() { options.onExit?.(null, null, { closing: closed, error: new Error("Shared Runtime disconnected. Reopen the session to reconnect.") }); } }).then(value => { connection = value; return value; });
     return starting;
   }
+  // Where this window works and what its conversation may use; a conversation
+  // opened (an existing one) or created (on the first message) gets the same.
+  const scope = () => ({ workspace_root: arg("--cwd") || arg("--dir") || options.cwd || process.cwd(), external_tools: options.externalTools || null, enable_user_question: !args.includes("--no-user-question") });
   async function request(method, params = {}) {
     const client = await start();
     if (method === "initialize") {
       // A window that takes `rind send` input says so before it opens its session.
       // A host from before `rind send` routing does not know this; the window then
       // keeps its own send endpoint (client.acceptsInput stays false).
+      // Without --session nothing is created yet: the first message does that.
       initialization ||= client.request("initialize").then(async base => (options.onDeliver && (client.acceptsInput = await client.request("runtime/accept-input").then(() => true, () => false)), { ...base, ...await client.request("session/open", {
-        workspace_root: arg("--cwd") || arg("--dir") || options.cwd || process.cwd(), session_id: arg("--session"), resume_latest: args.includes("--resume-latest") || args.includes("-c"),
-        external_tools: options.externalTools || null, enable_user_question: !args.includes("--no-user-question"),
+        ...scope(), session_id: arg("--session"), resume_latest: args.includes("--resume-latest") || args.includes("-c"),
       }) }));
       return initialization;
     }
+    if (method === "session/create") return client.request(method, { ...scope(), ...params });
     return client.request(method, params);
   }
   function close() { closed = true; connection?.close(); starting?.then(c => c.close()).catch(() => {}); }

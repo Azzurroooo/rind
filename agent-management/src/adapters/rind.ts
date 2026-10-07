@@ -15,7 +15,9 @@ export function createRindAdapter(options: { home?: string; python?: string; rep
       });
       client.start();
       try {
-        const info = await client.request("initialize");
+        const opened = await client.request("initialize");
+        // A task's first run creates its conversation; later runs reopen it (--session).
+        const info = opened.session_id ? opened : await client.request("session/create", {});
         const runtimeSessionId = info.session_id || info.session?.session_id;
         if (!runtimeSessionId) throw new Error("Rind did not return a runtime session ID.");
         await client.request("session/subscribe", { session_id: runtimeSessionId });

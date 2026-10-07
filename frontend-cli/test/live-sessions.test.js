@@ -30,25 +30,24 @@ test("turn events and viewers become one compact table, pushed once per burst", 
   assert.deepEqual(live.list().map(s => [s.turn, s.watchers]), [["idle", 1]]);
 });
 
-test("drafts, the newest viewer and what the current worker hosts", () => {
+test("the newest viewer and what the current worker hosts", () => {
   const { live, flush } = setup();
   const a = { accepts: true }, b = { accepts: false }, c = { accepts: true };
-  live.view(a, "s1", { workspace: "/w", draft: true });
+  live.view(a, "s1", { workspace: "/w" });
   live.view(b, "s1");
   flush();
-  assert.equal(live.list()[0].draft, true, "an empty new conversation is a draft");
+  assert.equal("draft" in live.list()[0], false, "a listed conversation exists: there are no drafts");
   assert.equal(live.newestViewer("s1"), b, "the newest viewer wins");
   assert.equal(live.newestViewer("s1", viewer => viewer.accepts), a, "a filter skips viewers that cannot take input");
   live.view(c, "s1");
   live.view(a, "s1");
   assert.equal(live.newestViewer("s1", viewer => viewer.accepts), a, "showing a session again makes the window newest");
   live.event({ session_id: "s1", event: { type: "turn_started" } });
-  assert.equal(live.list()[0].draft, false, "the first turn ends the draft");
   assert.equal(live.turn("s1"), "running");
   assert.equal(live.turn("never-opened"), "idle");
-  live.view(c, "s2", { draft: true });
+  live.view(c, "s2");
   live.reset();
-  assert.deepEqual(live.list().map(s => [s.id, s.turn, s.draft]), [["s1", "idle", false], ["s2", "idle", false]], "a crash forgets turns and drafts");
+  assert.deepEqual(live.list().map(s => [s.id, s.turn]), [["s1", "idle"], ["s2", "idle"]], "a crash ends every turn");
 });
 
 test("a crashed worker ends every running turn instead of leaving it working forever", () => {
@@ -87,7 +86,7 @@ test("a window covered by Agents does not count as showing its session until it 
   flush();
   assert.deepEqual(live.list().map(s => [s.id, s.watchers]), [["s1", 0], ["s2", 1]], "only on-screen windows make a session Open");
   assert.equal(live.newestViewer("s1"), undefined, "a covered window takes no rind send input");
-  live.view(a, "s1", { draft: false });
+  live.view(a, "s1");
   assert.equal(live.list().find(s => s.id === "s1").watchers, 0, "a late request does not uncover the window");
   live.hide(a);
   flush();
@@ -101,14 +100,12 @@ test("a window covered by Agents does not count as showing its session until it 
   assert.equal(live.list().find(s => s.id === "s2").watchers, 0, "a closed window never comes back");
 });
 
-test("a forgotten conversation leaves the table and every window that pointed at it", () => {
+test("a discarded conversation leaves the table and every window that pointed at it", () => {
   const { live, flush, pushes } = setup();
   const a = {}, b = {};
-  live.view(a, "draft", { draft: true }); live.view(b, "kept");
+  live.view(a, "draft"); live.view(b, "kept");
   live.hide(a);
   flush(); pushes.length = 0;
-  assert.equal(live.isDraft("draft"), true);
-  assert.equal(live.isDraft("kept"), false);
   live.forget("draft");
   flush();
   assert.deepEqual(live.list().map(s => s.id), ["kept"]);

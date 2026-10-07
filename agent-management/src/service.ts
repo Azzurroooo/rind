@@ -576,7 +576,9 @@ export function createService({ store, paths, adapters, toolConfig }: {
       case "detachSession": {
         userOnly(actor); const session = ownSession(state, actor, p.sessionId);
         for (const run of Object.values(state.runs)) if (!session.shared && run.sessionId === session.id && activeRun(run)) run.status = "unknown";
-        if (session.released && !Object.values(state.runs).some(r => r.sessionId === session.id && activeRun(r))) { dropSession(state, session.id); pruneAgents(state, [session.agentId]); }
+        // Released from its team, or left before its first message created a conversation: nothing to keep.
+        const unused = session.released || (!session.runtimeSessionId && !Object.values(state.runs).some(r => r.sessionId === session.id));
+        if (unused && !Object.values(state.runs).some(r => r.sessionId === session.id && activeRun(r))) { dropSession(state, session.id); pruneAgents(state, [session.agentId]); }
         return { detached: true };
       }
       case "resolveRun": {

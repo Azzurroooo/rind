@@ -212,7 +212,8 @@ async def test_worker_sessions_share_file_queue(tmp_path, monkeypatch, blocked_s
     ))
     tasks = []
     try:
-        parent_info = await worker.initialize()
+        await worker.initialize()
+        parent_info = await worker.create_conversation({})
         child_info = await worker.repository.create(
             str(workspace), parent_session_id=parent_info["session_id"],
         )

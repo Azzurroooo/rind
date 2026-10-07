@@ -60,7 +60,9 @@ test("Esc goes back to the conversation just left, never further", () => {
   assert.deepEqual(returnTarget({ action: "agents", chat, from: { runtimeSessionId: "ended", workspace: "/w/a" } }),
     { agentId: "a", teamId: "t", manager: false, workspace: "/w/a", runtimeSessionId: "ended" }, "the session the window ended on wins");
   assert.equal(returnTarget({ action: "return", chat }).runtimeSessionId, "opened");
-  assert.equal(returnTarget({ action: "agents", chat: { agent: { canonicalWorkspace: "/w" } } }), null, "a conversation without a session cannot be reopened");
+  assert.deepEqual(returnTarget({ action: "agents", chat: { agent: { canonicalWorkspace: "/w" } }, from: { runtimeSessionId: "", workspace: "/w" } }),
+    { agentId: undefined, teamId: undefined, manager: false, workspace: "/w", runtimeSessionId: undefined }, "left before its first message: a new conversation in the same place");
+  assert.equal(returnTarget({ action: "agents", chat: {} }), null, "nowhere to go back to");
   assert.equal(returnTarget({ action: "leave", chat }), null);
 });
 
@@ -106,7 +108,8 @@ test("a conversation window hands Agents navigation back to the window that open
   assert.equal(await app.exited, 0);
   const next = await handoff.read();
   assert.equal(next.action, "agents", "Left asks the opener for Agents instead of nesting a page");
-  assert.match(next.from.runtimeSessionId, /^\d{8}_/, "it says which conversation it left, so Esc can go back to it");
+  assert.equal(next.from.runtimeSessionId, "", "left before its first message, so there is no conversation yet");
+  assert.ok(next.from.workspace, "it says where it was, so Esc starts a new conversation there");
 });
 
 test("ctrl+c clears typing, then needs a second press to leave every window", { timeout: 40000 }, async t => {

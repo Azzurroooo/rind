@@ -244,9 +244,17 @@ Rind 不是单进程：Agent、任务与共享 Runtime 在后台运行，窗口�
 - `rind send`：`runtime/send` 投递给最近显示该会话且已 `runtime/accept-input` 的窗口（`{ deliver }` → `dispatchExternal`）；无窗口时，只有仍在运行的 turn 会以 follow-up 接收，否则 `SESSION_NOT_OPEN`（不会在没有窗口工具与作用域的情况下新起 turn）。共享窗口不再开 send 监听口；私有 worker（`--trace-llm`、`--session-dir`）或旧版 Runtime 下保留监听口并作为回退。
 - 提问广播 `user_question_answered` 在进入串行事件队列之前处理（`onMessage`），否则会被仍在等待回答的提问阻塞。
 - 打开会话只有一条路：`ui.join(row)` / `ui.startNew(target)`，按会话 ID 与所在位置（Team 成员 / 普通文件夹 / Manager）。
-- 空草稿：实时表记录 `draft`，`withoutDrafts(snapshot, currentSessionId)` 在 `acceptSnapshot` 一处过滤；打开 Agents 页的窗口自己的草稿除外。
+- 会话只在首条消息时存在（见 8.2.7）；不再有草稿概念。
 - 会话文件夹：`agents-session.js#sessionWorkspace` 先问 Runtime（`runtime/sessions`），再读保存的元数据；子窗口启动失败经 handoff `{ action: "failed", error }` 回传原因。
 - 选择：选中行存在时从不自动移动（实时数据重排也不会改变 Enter 的目标）；行消失时就近回退。
+
+### 8.2.7 会话在首条消息时才存在（已冻结）
+
+- 打开窗口：`initialize` / `session/open`（无 --session）只返回文件夹与设置，`session_id` 为空；worker、共享 Runtime、管理服务、Agents 页都看不到它。横幅显示 `session new`。
+- 首条消息：`cli-runtime-controller#request` 在无会话的 `session/prompt` 前调用 `session/create`（带 `/model`、`/effort`、`/login` 选好的设置；共享 Runtime 补上文件夹与工具配置），绑定管理服务（`agents-session#after`），再发 prompt。worker 的 `create_conversation` 只在内存建立，首条用户消息落盘。
+- 首个 turn 启动失败（未落盘）：dispatcher 在异常路径调用 `worker.discard_unsaved` 并广播 `session_discarded`，窗口回到"新"状态；重试带 `session_id` 复用同一身份（已保存的拒绝接管）。创建后从未 prompt 的在 60 秒后由下一次创建清理。
+- 未发消息前：`/sessions`、`/status` 用只读 listing store；`/goal`、`/compact`、`/context`、`/fork` 提示需先发消息；`rind run` 与 Team 任务 adapter 同样先 `session/create`。管理服务中从未绑定的会话登记在 detach 时删除。
+- 删除：worker 草稿遗忘、`rind/session/forget_draft`、实时表 `draft`、共享 Runtime 的释放逻辑、`withoutDrafts`、`view.received`、`stillExists`、起始窗口草稿隐藏。
 
 ### 8.2.6 状态词表：Running job 与 Delegated（已冻结）
 
@@ -261,7 +269,7 @@ Rind 不是单进程：Agent、任务与共享 Runtime 在后台运行，窗口�
 - 子窗口离开时在 handoff 中带 `from: { runtimeSessionId, workspace }`；`followConversation` 返回最后打开的 `chat`；`returnTarget(next)` 合成返回目标。
 - ctrl+c 从不导航：子窗口强制关闭（中断中再按 ctrl+c）也同步写 `{ action: "leave" }`（`writeHandoffSync`），否则打开者会读到 "return" 而重新显示 Agents —— 这正是"ctrl+c 一层层退回"的原因。打开者在子窗口占用终端期间忽略 SIGINT。
 - 不进会话的入口：`rind agents`；esc 在访问过会话前关闭页面。
-- 空草稿（从未发消息）只在内存中：最后一个持有它的连接退订/关闭且无运行时，共享 Runtime 立即从实时表删除，并调用 worker 的 `rind/session/forget_draft`（`SessionService.forget_draft` 只删未落盘草稿，`ExecutionManager.forget_options` 删工具配置），磁盘不读写；已保存会话从不遗忘。管理页保存原始快照 `view.received`，每次投影按当前返回目标过滤草稿。起始窗口在存活期间保留自己的空草稿（列表中隐藏），窗口关闭时被遗忘——Team 窗口绑定单一会话，无法原地换新草稿，提前释放会留下指向不存在会话的窗口。esc 回到已被遗忘的草稿时在原处新开会话（`stillExists`）。
+- （旧的草稿遗忘逻辑已被 8.2.7 取代并删除。）
 
 ### 8.2.4 交付审阅、删除 Team 与 Manager 审批（已冻结）
 
@@ -384,8 +392,8 @@ npm --prefix agent-management test
 - `frontend-cli/test/tui-integration.test.js`：完整 CLI TUI/Runtime 交互。
 - `agent-management/test/*.test.js`：权限、组织树、任务调度、共享 Workspace、恢复、报告和 Session scope；`stewardship.test.js` 覆盖审阅/返工、删除归档、Agent 注销与 Manager 审批。
 - `frontend-cli/test/agents-keys.test.js`：footer 提示与按键分发一致、未提供的键无效。
-- `test/test_runtime_forget_draft.py`：只遗忘未保存草稿、运行中不遗忘、分发路由。
-- `frontend-cli/test/agents-flat.test.js`：空草稿在最后一个连接退订/关闭后被 Runtime 遗忘（真实 Runtime）、返回目标移走后草稿立即从列表消失、回到已遗忘草稿时新开会话；被盖住窗口不算 Open（真实 Runtime）、esc 只回到刚离开的会话、回到起始窗口自己的会话不另开窗口；`agents-lifecycle.test.js` 中"ctrl+c only ever leaves"复现并覆盖强制关闭时的 handoff。
+- `test/test_startup_session.py`：打开窗口不创建会话；首条消息创建并保存；首个 prompt 启动失败不留痕迹并广播 `session_discarded`；重试复用身份；未 prompt 的被清理。
+- `frontend-cli/test/agents-flat.test.js`：首条消息前任何地方都不列出（真实 Runtime）、回到首条消息前离开的窗口时在原处新开会话；被盖住窗口不算 Open（真实 Runtime）、esc 只回到刚离开的会话、回到起始窗口自己的会话不另开窗口；`agents-lifecycle.test.js` 中"ctrl+c only ever leaves"复现并覆盖强制关闭时的 handoff。
 - `frontend-cli/test/agents-report.test.js`、`agents-teams.test.js`：报告渲染与按键、Inbox/Archive 投影、从侧栏删除 Team、Manager 审批端到端。
 
 ## 13. 新 session 启动顺序

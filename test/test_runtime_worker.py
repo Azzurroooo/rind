@@ -24,7 +24,8 @@ def test_execution_reads_configuration_once_and_refreshes_between_turns(tmp_path
     async def run():
         monkeypatch.setenv("RIND_HOME", str(tmp_path / "home"))
         worker = RuntimeWorker(workspace_root=str(tmp_path), session_dir=str(tmp_path / "sessions"))
-        info = await worker.initialize()
+        await worker.initialize()
+        info = await worker.create_conversation({})
         settings_loader = worker_module.load_settings
         reads = []
 
@@ -396,7 +397,7 @@ def test_replay_does_not_create_active_execution():
 
             server._writer.send = send
             await server._dispatch({"request_id": "init", "method": RuntimeMethod.INITIALIZE, "params": {}})
-            session_id = worker.session_id
+            session_id = (await worker.create_conversation({}))["session_id"]
             await server._dispatch({
                 "request_id": "replay",
                 "method": RuntimeMethod.SESSION_REPLAY,
@@ -483,7 +484,7 @@ def test_worker_replay_includes_active_live_turn_without_creating_execution():
                 enable_goal=False,
             )
             await worker.initialize()
-            session_id = worker.session_id
+            session_id = (await worker.create_conversation({}))["session_id"]
             worker.execution.update_live_event({
                 "type": "turn_started",
                 "session_id": session_id,

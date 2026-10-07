@@ -49,7 +49,8 @@ async def worker_with_script(tmp_path, monkeypatch, task_shell, steps):
         return client
 
     monkeypatch.setattr(worker.provider_service, "create_chat_client", create)
-    info = await worker.initialize()
+    await worker.initialize()
+    info = await worker.create_conversation({})
     return worker, info["session_id"], processes, calls, clients
 
 

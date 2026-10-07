@@ -12,6 +12,7 @@ from agent.application.context import CompactionService
 from agent.application.context.token_usage import positive_int
 from agent.application.tools import ToolResultNormalizer
 from agent.application.usage_summary import summarize_usage
+from agent.domain.models import ModelSelection
 from agent.bootstrap import AgentContainer, SharedRuntimeResources
 from agent.infrastructure.llm import ProviderServiceImpl
 from agent.infrastructure.paths import validate_session_id, validate_workspace_root
@@ -91,15 +92,24 @@ class RuntimeWorker:
                     self._resume_latest,
                     self.provider_service.default_selection(self.workspace_root),
                 )
-                self.session_id = str(info["session_id"])
+                self.session_id = str(info["session_id"]) or None
                 self._initialized = True
                 self._model_refresh_task = asyncio.create_task(
                     self.provider_service.refresh_stale_models(self.workspace_root),
                     name="refresh-stale-models",
                 )
-        info = await self.repository.info(self.session_id)
+        if self.session_id:
+            info = await self.repository.info(self.session_id)
+            info["live_turn"] = self.execution.live_turn(self.session_id)
+        else:
+            info = await self.blank_info()
         info["base_url"] = workspace_defaults(info["workspace_root"])[2]
-        info["live_turn"] = self.execution.live_turn(self.session_id)
+        return info
+
+    async def blank_info(self, workspace_root: str | None = None) -> dict[str, Any]:
+        root = workspace_root or self.workspace_root
+        info = await self.repository.blank(root, self.provider_service.default_selection(root))
+        info["live_turn"] = None
         return info
 
     async def session(self, session_id: str) -> dict[str, Any]:
@@ -116,6 +126,11 @@ class RuntimeWorker:
         if os.path.normcase(info["workspace_root"]) != os.path.normcase(root):
             raise ValueError("Session workspace does not match the requested workspace.")
         session_id = info["session_id"]
+        if not session_id:
+            # Nothing exists yet; session/create configures the conversation on its first message.
+            result = await self.blank_info(str(root))
+            result["base_url"] = workspace_defaults(root)[2]
+            return result
         tool = ExternalTool.from_json(json.dumps(params["external_tools"])) if params.get("external_tools") else None
         await self.execution.configure_session(session_id, tool, params.get("enable_user_question") is not False)
         result = await self.session(session_id)
@@ -128,14 +143,38 @@ class RuntimeWorker:
     async def release_execution(self, session_id: str) -> None:
         await self.execution.release(session_id)
 
-    async def forget_draft(self, session_id: str) -> bool:
-        """Forget a conversation that never got a message; it was never saved."""
+    async def create_conversation(self, params: dict) -> dict[str, Any]:
+        """Create a conversation for its first message. The message saves it; nothing is written before."""
+        for abandoned in self.repository.abandoned():
+            await self.discard_unsaved(abandoned)
+        root = validate_workspace_root(params.get("workspace_root") or self.workspace_root)
+        default = self.provider_service.default_selection(root)
+        selection = ModelSelection(
+            provider_id=str(params.get("provider_id") or default.provider_id),
+            model_id=str(params.get("model_id") or default.model_id),
+            reasoning_effort=str(params["reasoning_effort"]) if params.get("reasoning_effort") is not None else default.reasoning_effort,
+        )
+        # A window may propose the identity it was given before a failed first prompt.
+        proposed = validate_session_id(params["session_id"]) if params.get("session_id") else None
+        if proposed and (self.repository.draft_store(proposed) is not None or await self.repository.exists(proposed)):
+            raise ValueError("This conversation already exists.")
+        info = await self.repository.create(str(root), selection=selection, defer_persistence=True, session_id=proposed)
+        session_id = info["session_id"]
+        if "external_tools" in params or "enable_user_question" in params:
+            tool = ExternalTool.from_json(json.dumps(params["external_tools"])) if params.get("external_tools") else None
+            await self.execution.configure_session(session_id, tool, params.get("enable_user_question") is not False)
+        result = await self.session(session_id)
+        result["base_url"] = workspace_defaults(root)[2]
+        return result
+
+    async def discard_unsaved(self, session_id: str) -> bool:
+        """Drop a conversation that no message saved; it never existed on disk."""
         clean = validate_session_id(session_id)
-        if clean == self.session_id or self.repository.draft_store(clean) is None:
+        if self.repository.draft_store(clean) is None or clean in self.execution.active_session_ids():
             return False
         await self.execution.release(clean)
         self.execution.forget_options(clean)
-        return self.repository.forget_draft(clean)
+        return self.repository.discard_unsaved(clean)
 
     async def replay(self, session_id: str, start: int | None = None, end: int | None = None) -> dict[str, Any]:
         await self.shell_tools.maintain_tasks(session_id)

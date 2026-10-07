@@ -29,16 +29,14 @@ test("one host isolates workspaces and tools, runs sessions concurrently and sur
   const second = createSharedRuntimeClient({ ...options, cliArgs: ["--cwd", b], onMessage: event => eventsB.push(event) });
   const admin = await connectSharedRuntime({ ...options, start: false });
   t.after(async () => { await first.shutdown(); await second.shutdown(); admin.close(); responses.forEach(r => r.end()); await host.close(); await new Promise(resolve => provider.close(resolve)); await rm(home, { recursive: true, force: true }); });
-  const infoA = await first.request("initialize"), infoB = await second.request("initialize");
+  // Each window's first message creates its conversation.
+  await first.request("initialize"); await second.request("initialize");
+  const infoA = await first.request("session/create", {}), infoB = await second.request("session/create", {});
   assert.notEqual(infoA.session_id, infoB.session_id);
   assert.equal(path.resolve(infoA.workspace_root).toLowerCase(), a.toLowerCase());
   assert.equal(path.resolve(infoB.workspace_root).toLowerCase(), b.toLowerCase());
   const pidA = await first.request("runtime/observe"), pidB = await second.request("runtime/observe");
   assert.equal(pidA.pid, pidB.pid);
-  // These conversations have no message yet; one held by no connection is
-  // forgotten, so the admin connection holds them while the windows reconnect.
-  await admin.request("session/subscribe", { session_id: infoA.session_id });
-  await admin.request("session/subscribe", { session_id: infoB.session_id });
   // Use separate ordinary connections to test event filtering, without observe-all.
   await first.shutdown(); await second.shutdown();
   const one = createSharedRuntimeClient({ ...options, cliArgs: ["--cwd", a, "--session", infoA.session_id], externalTools: tool, onMessage: e => eventsA.push(e) });

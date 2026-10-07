@@ -23,8 +23,10 @@ test("a window covered by Agents stops making its conversation Open", { timeout:
   const other = createSharedRuntimeClient({ rindHome: home, python: process.env.RIND_PYTHON || "python", repoRoot, cliArgs: ["--cwd", folder], onMessage() {} });
   let client, latest;
   t.after(async () => { client?.close(); await window.shutdown(); await other.shutdown(); await server.close(); await removeRindHome(home); });
-  const mine = (await window.request("initialize")).session_id;
-  const theirs = (await other.request("initialize")).session_id;
+  // Each window has sent its first message, so each shows a conversation.
+  await window.request("initialize"); await other.request("initialize");
+  const mine = (await window.request("session/create", {})).session_id;
+  const theirs = (await other.request("session/create", {})).session_id;
   client = await connectClient({ endpoint: server.paths.endpoint, token: (await readFile(server.paths.token, "utf8")).trim(), onSnapshot: snapshot => { latest = snapshot; } });
   latest = await client.request("subscribe", {});
   const watchers = () => Object.fromEntries((latest.live || []).map(item => [item.id, item.watchers]));
@@ -107,89 +109,39 @@ test("Esc from Agents returns to this window's own conversation without reopenin
   assert.deepEqual(opened, [], "no second window for a conversation this one holds");
 });
 
-// Screenshot-free regression of "the new session is still listed": the push
-// that follows a conversation closing arrives before the way back moves on, so
-// drafts must be filtered against the current way back, not the one at push time.
-test("an empty conversation disappears from the list once another conversation becomes the way back", { timeout: 60000 }, async t => {
-  const h = await harness({ prefix: "rind-agents-draft-" });
-  const repoRoot = h.launch.repoRoot;
-  const folder = path.join(h.home, "notes"); await mkdir(folder);
-  await writeFile(path.join(h.home, "settings.json"), JSON.stringify({ provider: "openai-compatible", model: "fixture", apiKey: "fixture", baseUrl: "http://127.0.0.1:1/v1" }));
-  const window = createSharedRuntimeClient({ rindHome: h.home, python: process.env.RIND_PYTHON || "python", repoRoot, cliArgs: ["--cwd", folder], onMessage() {} });
-  const draft = (await window.request("initialize")).session_id;
-  const { team } = await teamWithConversations(h, ["20261007_member"]);
-  const abort = new AbortController();
-  const running = runAgentsPage({ launch: h.launch, input: h.input, output: h.output.output, manageInput: false, signal: abort.signal, currentSessionId: draft,
-    openChat: async chat => ({ action: "agents", chat, from: { runtimeSessionId: chat.runtimeSessionId } }) });
-  t.after(async () => { abort.abort(); await running; await window.shutdown(); await h.cleanup(); });
-  const { key, visible, settle } = h;
-
-  const fresh = async () => (await h.output.flushAndGetViewport()).join("\n");
-  // Moves the sidebar selection to `name` (Inbox, Manager, Independent, Background, Product).
-  const sidebar = async name => {
-    for (let i = 0; i < 10 && !(await fresh()).split("\n").some(line => line.startsWith("›") && line.includes(name)); i++) { key(i < 5 ? "k" : "j"); await settle(); }
-  };
-  // Left climbs one level per press until the sidebar has focus (it shows the leave hint).
-  // Esc there would go back to the conversation instead.
-  const toSidebar = async () => { for (let i = 0; i < 4 && !(await fresh()).includes("ctrl+c ×2 leave Rind"); i++) { key("\x1b[D"); await settle(); } };
-  await visible("Independent");
-  await sidebar("Independent"); key("\r");
-  await visible("↩ New conversation");
-  await toSidebar(); await sidebar("Product"); key("\r"); await visible("20261007_member");
-  await select(h, "20261007_member"); key("\r");
-  await visible("↩ 20261007_member");
-  await toSidebar(); await sidebar("Independent"); key("\r"); await settle(); await settle();
-  assert.doesNotMatch(h.screen(), /New conversation/, "the empty conversation is no longer the way back, so it is not listed");
-  assert.equal(team.name, "Product");
-});
-
-// Nothing keeps a conversation that never got a message once no window holds
-// it: not the Runtime's table, not the worker. A saved one is kept.
-test("the Runtime forgets an empty conversation when its last window lets go of it", { timeout: 60000 }, async t => {
-  const home = await mkdtemp(path.join(os.tmpdir(), "rind-forget-"));
+// A window is only a folder and an input box until its first message: the
+// Runtime lists nothing for it, and the message creates the conversation.
+test("a window before its first message is listed nowhere; the message creates its conversation", { timeout: 60000 }, async t => {
+  const home = await mkdtemp(path.join(os.tmpdir(), "rind-first-message-"));
   const repoRoot = fileURLToPath(new URL("../..", import.meta.url));
   const folder = path.join(home, "notes"); await mkdir(folder);
   await writeFile(path.join(home, "settings.json"), JSON.stringify({ provider: "openai-compatible", model: "fixture", apiKey: "fixture", baseUrl: "http://127.0.0.1:1/v1" }));
-  const open = (args = []) => createSharedRuntimeClient({ rindHome: home, python: process.env.RIND_PYTHON || "python", repoRoot, cliArgs: ["--cwd", folder, ...args], onMessage() {} });
-  const first = open(), second = open(), probe = open();
-  t.after(async () => { await first.shutdown(); await second.shutdown(); await probe.shutdown(); await removeRindHome(home); });
-  const draft = (await first.request("initialize")).session_id;
+  const open = () => createSharedRuntimeClient({ rindHome: home, python: process.env.RIND_PYTHON || "python", repoRoot, cliArgs: ["--cwd", folder], onMessage() {} });
+  const window = open(), probe = open();
+  t.after(async () => { await window.shutdown(); await probe.shutdown(); await removeRindHome(home); });
+  const info = await window.request("initialize");
+  assert.equal(info.session_id, "");
+  assert.ok(info.model && info.workspace_root, "it still knows its folder and settings");
   await probe.request("initialize");
   const table = async () => (await probe.request("runtime/sessions")).sessions;
-  const until = async (check, label) => {
-    for (let i = 0; i < 100; i++) { if (check(await table())) return; await new Promise(resolve => setTimeout(resolve, 50)); }
-    assert.fail(label + " " + JSON.stringify(await table()));
-  };
-  await until(list => list.some(item => item.id === draft && item.draft), "the empty conversation is a draft");
-
-  // Another window holding it keeps it alive.
-  await second.request("initialize");
-  await second.request("session/subscribe", { session_id: draft });
-  await first.request("session/unsubscribe", { session_id: draft });
   await new Promise(resolve => setTimeout(resolve, 200));
-  assert.ok((await table()).some(item => item.id === draft), "still held by the second window");
-
-  await second.request("session/unsubscribe", { session_id: draft });
-  await until(list => !list.some(item => item.id === draft), "forgotten once nobody holds it");
-  await assert.rejects(probe.request("session/subscribe", { session_id: draft }), /not found|SessionNotFound|No session/i, "the worker no longer knows it");
-
-  // Closing the window that has a draft open forgets it the same way.
-  const closing = open();
-  const other = (await closing.request("initialize")).session_id;
-  await until(list => list.some(item => item.id === other), "the second draft is listed");
-  await closing.shutdown();
-  await until(list => !list.some(item => item.id === other), "a closed window's draft is forgotten");
-  // A saved conversation is never forgotten: see test_runtime_forget_draft.py.
+  assert.deepEqual(await table(), [], "nothing exists to list");
+  const created = await window.request("session/create", { model_id: "chosen" });
+  assert.equal(created.model, "chosen", "the settings chosen before the message are kept");
+  for (let i = 0; i < 100 && !(await table()).some(item => item.id === created.session_id); i++) await new Promise(resolve => setTimeout(resolve, 50));
+  assert.deepEqual((await table()).map(item => [item.id, item.watchers]), [[created.session_id, 1]]);
+  assert.equal("draft" in (await table())[0], false);
+  await window.shutdown();
 });
 
-test("going back to an empty conversation that was forgotten starts a new one in the same place", { timeout: 30000 }, async t => {
+test("going back to a window left before its first message starts a new conversation there", { timeout: 30000 }, async t => {
   const h = await harness({ prefix: "rind-agents-gone-" });
   const { team, lead } = await teamWithConversations(h, ["20261007_saved"]);
   const opened = [];
   const abort = new AbortController();
-  // The child window ends on a draft that no longer exists anywhere.
+  // The child window was left before its first message: it has no conversation.
   const running = runAgentsPage({ launch: h.launch, input: h.input, output: h.output.output, manageInput: false, signal: abort.signal, initialTeamId: team.id,
-    openChat: async chat => { opened.push(chat); return { action: "agents", chat, from: { runtimeSessionId: "20261007_000000_deadbeef", workspace: lead.canonicalWorkspace } }; } });
+    openChat: async chat => { opened.push(chat); return { action: "agents", chat, from: { runtimeSessionId: "", workspace: lead.canonicalWorkspace } }; } });
   t.after(async () => { abort.abort(); await running; await h.cleanup(); });
   await select(h, "20261007_saved"); h.key("\r");
   for (let i = 0; i < 100 && opened.length < 1; i++) await h.settle();
@@ -197,7 +149,7 @@ test("going back to an empty conversation that was forgotten starts a new one in
   h.key("\x1b");
   for (let i = 0; i < 100 && opened.length < 2; i++) await h.settle();
   assert.equal(opened.length, 2);
-  assert.equal(opened[1].runtimeSessionId, undefined, "a new conversation, not a missing one");
+  assert.equal(opened[1].runtimeSessionId, undefined, "a new conversation, since none was created");
   assert.equal(opened[1].teamId, team.id);
   assert.equal(opened[1].agent.id, lead.id, "in the same member's folder");
 });
