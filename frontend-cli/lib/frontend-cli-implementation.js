@@ -4,8 +4,13 @@ import { createInterface } from "node:readline";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { createRequire } from "node:module";
+import { runAgentsCommand, followConversation, leaveSummary, returnTarget } from "./agents-commands.js";
+import { takeHandoffPath, writeHandoff, writeHandoffSync } from "./agents-handoff.js";
+import { runAgentsPage } from "./agents-page.js";
+import { prepareManagement, observeRuntime } from "./agents-session.js";
 
 import { createCompactContextState } from "./compact-context-state.js";
+import { createSharedRuntimeClient } from "../../rind-runtime-client/shared-runtime.js";
 import { createRuntimeClient, runHelpVersion } from "./runtime-client.js";
 import {
   requireRuntimeInitialization,
@@ -24,7 +29,7 @@ import { createTaskMonitorController } from "./task-monitor-controller.js";
 import { createEventController } from "./event-controller.js";
 import { createInputController } from "./input-controller.js";
 import { isInputClosed } from "./input-errors.js";
-import { sigintAction } from "./interrupt-state.js";
+import { sigintAction, createLeaveLatch } from "./interrupt-state.js";
 import { CUSTOM_ANSWER_LABEL } from "./question-menu-state.js";
 import { createCliState } from "./cli-state.js";
 import { createCliRuntimeController } from "./cli-runtime-controller.js";
@@ -53,10 +58,20 @@ import {
 } from "./rendering.js";
 
 export async function runFrontendCliApp(cliArgs = process.argv.slice(2)) {
+// A conversation opened from Agents hands navigation back to the window that
+// opened it instead of nesting another window inside itself.
+const handoffFile = takeHandoffPath();
+const handoffWindow = Boolean(handoffFile);
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(scriptDir, "..", "..");
 const python = process.env.RIND_PYTHON || "python";
 const runtimePath = process.env.RIND_RUNTIME_PATH || resolveInstalledRuntime();
+const managementLaunch = { python, repoRoot, runtimePath };
+if (cliArgs[0] === "agents") {
+  try { await runAgentsCommand(cliArgs.slice(1), managementLaunch); }
+  catch (error) { process.stderr.write(error.message + "\n"); process.exitCode = 2; }
+  return;
+}
 
 function resolveInstalledRuntime() {
   const packageNames = {
@@ -139,11 +154,20 @@ if (cliArgs[0] === "run") {
   return;
 }
 
+let management;
+try { management = await prepareManagement(cliArgs, managementLaunch); cliArgs = management.args; }
+catch (error) {
+  // A window opened from Agents tells its opener why it could not start.
+  if (handoffWindow) await writeHandoff({ action: "failed", error: error.message }, handoffFile);
+  process.stderr.write(error.message + "\n"); process.exitCode = 2; return;
+}
 const cliState = createCliState();
 const runtimeState = cliState.runtime;
 const sessionState = cliState.session;
 const turnStateData = cliState.turn;
 const inputStateData = cliState.input;
+// Created before any handler can run: SIGINT may arrive during startup.
+const leaveLatch = createLeaveLatch({ onChange: () => { cliState.display.leaveArmed = leaveLatch.armed; redrawInput(); } });
 const displayState = cliState.display;
 const promptHistory = loadPromptHistory();
 let input = null;
@@ -169,6 +193,7 @@ if (tui) {
 }
 let inputActions;
 let inputController;
+let agentsPageAbort = null;
 let eventProcessing = Promise.resolve();
 
 tui?.onData((sequence) => inputActions?.handleTerminalInput(sequence));
@@ -191,12 +216,18 @@ const {
   setTurnContext,
 } = outputController;
 
-const runtimeClient = createRuntimeClient({
+const runtimeClient = observeRuntime((management.shared ? createSharedRuntimeClient : createRuntimeClient)({
   python,
   repoRoot,
   runtimePath,
   cliArgs,
+  externalTools: management.externalTools,
+  // `rind send` input, routed here by the shared Runtime because this window shows the session.
+  onDeliver: ({ session_id: target, input }) => { if (target === sessionState.info.session_id) inputActions.dispatchExternal(input); },
   onMessage: (message) => {
+    // Events are rendered one at a time, and an open question holds that queue
+    // until it is answered; an answer from another window must jump the queue.
+    if (message?.event?.type === "user_question_answered") { inputActions.questionAnswered(message.event); return; }
     eventProcessing = eventProcessing
       .then(() => message?.method === runtimeMethods.authUpdate ? renderAuthUpdate(message) : renderEvent(message))
       .catch((error) => {
@@ -209,7 +240,7 @@ const runtimeClient = createRuntimeClient({
   onStderr: (chunk) => writeErrorOutput(chunk),
   onExit: (code, signal, { error }) => {
     const wasClosing = runtimeState.status === "closing";
-    runtimeState.status = "failed";
+    runtimeState.status = wasClosing ? "closing" : "failed";
     runtimeState.initialization = null;
     turnStateData.id = "";
     displayState.lastEventSequence = 0;
@@ -221,14 +252,12 @@ const runtimeClient = createRuntimeClient({
     clearActivityTimer();
     inputActions?.clearPendingInputs();
     if (!wasClosing) {
+      void management.close?.().catch(error => writeErrorOutput(error.message + "\n"));
       runtimeState.failure = error;
       writeErrorOutput(`Runtime stopped (${signal || (code ?? "startup failure")}): ${error.message}. Runtime commands are unavailable until it restarts.\n`);
-    } else {
-      process.exitCode = 0;
-      scheduleProcessExit(0, 0);
     }
   },
-});
+}), management);
 const turnState = {
   get activeTurn() {
     return turnStateData.active || displayState.activeCompact;
@@ -263,11 +292,11 @@ const runtimeController = createCliRuntimeController({
   askEffortMenu: (...args) => inputActions.askEffortMenu(...args),
   askSessionMenu: (...args) => inputActions.askSessionMenu(...args),
   askForkPointMenu: (...args) => inputActions.askForkPointMenu(...args),
-  askTeamBlueprint: (...args) => inputActions.askTeamBlueprint(...args),
   askContextBoard: (...args) => inputActions.askContextBoard(...args),
   restoreLiveTurn,
   renderHistory,
   onSessionRestored: rebindSendEndpoint,
+  openManagedSession: management.chatContext ? (runtimeSessionId, prefill) => enterManagement({ ...management.chatContext, runtimeSessionId, prefill }) : null,
   clearPendingInputs: (...args) => inputActions.clearPendingInputs(...args),
   closeAssistant,
   refreshInputState,
@@ -299,6 +328,7 @@ commandController = createCommandController({
   input: {
     isTerminal: Boolean(tui),
     runGoalCommand: runtimeController.runGoalCommand,
+    runRename: (argument) => runtimeController.runRename(argument),
     runModelSelector: runtimeController.runModelSelector,
     runEffortCommand: (value) => runtimeController.runEffortCommand(value),
     runLogin: (providerId) => runLogin(providerId),
@@ -341,8 +371,9 @@ commandController = createCommandController({
     setInputPrefill: (value) => {
       inputStateData.prefill = String(value || "");
     },
-    shutdown: shutdownRuntime,
-    exit: () => process.exit(0),
+    // /exit leaves Rind from any window; background agents keep running.
+    shutdown: () => leaveRind(),
+    exit: () => process.exit(process.exitCode ?? 0),
   },
 });
 taskMonitorController = createTaskMonitorController({
@@ -419,9 +450,11 @@ inputActions = createCliInputActions({
   getTaskMonitor: () => taskMonitorController,
   getLineInput: () => input,
   getEffortLevels: () => runtimeController.currentModelEfforts(),
-  pausePrompt: () => inputController.pause(),
+  pausePrompt: () => { agentsPageAbort?.abort(); inputController.pause(); },
   resumePrompt: () => inputController.resume(),
   handleSigint,
+  openAgents: () => enterManagement(),
+  disarmLeave: () => leaveLatch.disarm(),
 });
 inputController = createInputController({
   terminalUi: tui,
@@ -453,17 +486,20 @@ try {
   if (persistedState.theme) {
     setTheme(persistedState.theme);
   }
-  sessionState.info = { cwd: process.cwd() };
+  sessionState.info = { cwd: process.cwd(), management_label: management.label };
   sessionState.commands = commandController.localCommands();
   await runtimeController.ensureRuntime();
   const startupInfo = { ...sessionState.info, resume_preview: "" };
+  if (management.label) logOutput(management.label);
   const tourHint = persistedState.tourSeen ? [] : ["new to Rind? /tour walks you through it"];
   if (tui) {
     outputController.showStartup(startupInfo, tourHint);
   } else {
     logOutput(startupText(startupInfo));
   }
-  await runtimeController.restoreSession();
+  // A window opened on an existing conversation shows its history; a new one has none yet.
+  if (sessionState.info.session_id) await runtimeController.restoreSession();
+  if (management.prefill) inputStateData.prefill = management.prefill;
   if (tui) {
     inputController.start();
   } else {
@@ -475,6 +511,7 @@ try {
     });
     process.stdin.on("data", handleStdinData);
   }
+  if (sessionState.info.live_turn?.question) void inputActions.answerQuestion({ ...sessionState.info.live_turn.question, type: "user_question_requested" });
   await inputController.promptLoop();
 } catch (error) {
   closeAssistant();
@@ -483,7 +520,8 @@ try {
     process.exitCode = 1;
   }
 } finally {
-  closeRuntime();
+  if (!tui && management.shared) await turnController.waitForIdle();
+  void shutdownRuntime();
 }
 
 function updateGoalState(goal) {
@@ -491,7 +529,9 @@ function updateGoalState(goal) {
   refreshInputState();
 }
 
+// A private worker has no shared Runtime to route `rind send`; it listens itself.
 async function rebindSendEndpoint() {
+  if (management.shared && runtimeClient.child?.acceptsInput) return;
   try {
     await ipcServer?.close();
     ipcServer = null;
@@ -535,6 +575,55 @@ async function enterInSessionTour(pageId) {
     tui.replayAll();
     inputController.resume();
   }
+}
+
+async function enterManagement(chat) {
+  if (!tui) { await runAgentsCommand(["list"], managementLaunch); return; }
+  if (handoffWindow) {
+    // A shared conversation keeps running after this window closes; one that
+    // runs in this window's own worker would be killed with it.
+    if (!management.shared && (turnStateData.active || displayState.activeCompact)) {
+      logOutput("This conversation runs in this window. Wait for it, or press ctrl+c to stop it, before leaving.");
+      return;
+    }
+    const from = { runtimeSessionId: sessionState.info.session_id || "", workspace: sessionState.info.workspace_root || sessionState.info.cwd || "" };
+    await writeHandoff(chat ? { action: "open", chat: { ...chat, agent: chat.agent && { id: chat.agent.id, canonicalWorkspace: chat.agent.canonicalWorkspace } } } : { action: "agents", from }, handoffFile);
+    await shutdownRuntime();
+    return;
+  }
+  if (agentsPageAbort) return;
+  const abort = new AbortController(); agentsPageAbort = abort;
+  const draft = inputStateData.session?.mode === "prompt" ? inputStateData.session.editor.input() : inputStateData.prefill;
+  inputController.pause();
+  tui.stop({ releaseInput: false });
+  process.off("SIGINT", handleSigint);
+  // This window's conversation stays here but is no longer on screen.
+  void runtimeClient.setVisible?.(false);
+  let next = { action: "agents" };
+  try {
+    if (chat) next = await followConversation(chat, { launch: managementLaunch, input: process.stdin });
+    if (next.action === "agents") {
+      const page = await runAgentsPage({ launch: managementLaunch, manageInput: false, signal: abort.signal, initialTeamId: management.chatContext?.teamId, currentSessionId: sessionState.info.session_id, returnTo: chat ? returnTarget(next) : undefined });
+      if (page.leave) next = { action: "leave", working: page.working, notice: page.notice };
+    }
+  } finally {
+    agentsPageAbort = null;
+    if (next.action !== "leave") void runtimeClient.setVisible?.(true);
+    process.on("SIGINT", handleSigint);
+    tui.start({ acquireInput: false });
+    tui.replayAll();
+    if (!inputStateData.session) { inputStateData.prefill = draft || ""; inputController.resume(); }
+  }
+  if (next.action === "leave") await leaveRind(next.working, next.notice);
+}
+
+// Leaving closes this window and every window it was opened from. It only
+// detaches: background agents, tasks and the shared Runtime keep running.
+async function leaveRind(working = 0, notice = "") {
+  leaveLatch.disarm();
+  if (handoffWindow) await writeHandoff({ action: "leave" }, handoffFile);
+  else logOutput(leaveSummary({ working, notice }));
+  await shutdownRuntime();
 }
 
 async function runLogin(providerId = "") {
@@ -677,7 +766,7 @@ function composeFrame(width = process.stdout.columns || 80) {
   if (!session) {
     return null;
   }
-  const choiceMenu = ["model", "theme", "sessions", "team-blueprints", "fork", "auth-choice"].includes(session.mode);
+  const choiceMenu = ["model", "theme", "sessions", "fork", "auth-choice"].includes(session.mode);
   if (session.mode === "prompt" && session.menuState) {
     session.menuState.setInput(session.editor.input());
   }
@@ -759,7 +848,7 @@ function composeFrame(width = process.stdout.columns || 80) {
       menuCursor: editing ? menu.cursor : null,
     };
   }
-  if (session.mode === "sessions" || session.mode === "team-blueprints" || session.mode === "fork") {
+  if (session.mode === "sessions" || session.mode === "fork") {
     return {
       showCaret,
       prompt: mainPromptText(width),
@@ -796,16 +885,26 @@ function composeFrame(width = process.stdout.columns || 80) {
 }
 
 function handleSigint() {
+  const idle = !(turnStateData.active || displayState.activeCompact);
+  // Like a shell, Ctrl+C first clears what is being typed.
+  const editor = inputStateData.session?.mode === "prompt" ? inputStateData.session.editor : null;
+  if (idle && editor?.input() && runtimeState.status !== "closing") {
+    editor.setInput("");
+    leaveLatch.disarm();
+    redrawInput();
+    return;
+  }
   const action = sigintAction({
-    activeTurn: turnStateData.active || displayState.activeCompact,
+    activeTurn: !idle,
     interruptRequested: turnStateData.interruptRequested,
     runtimeClosing: runtimeState.status === "closing",
+    // Without a terminal there is no hint to see, so a single signal leaves (as scripts expect).
+    leaveArmed: leaveLatch.armed || !tui,
   });
-  if (action === "interrupt") {
-    interruptTurn();
-  } else {
-    exitFromSignal();
-  }
+  if (action === "interrupt") interruptTurn();
+  else if (action === "arm-leave") leaveLatch.arm();
+  else if (action === "leave") void leaveRind().catch(error => { writeErrorOutput(error.message + "\n"); exitFromSignal(); });
+  else exitFromSignal();
 }
 
 function interruptTurn() {
@@ -819,24 +918,15 @@ function handleStdinData(chunk) {
 }
 
 function exitFromSignal() {
+  // ctrl+c only ever leaves. A forced close says so too, or the window that
+  // opened this one would read "no decision" and show Agents again.
+  if (handoffWindow) writeHandoffSync({ action: "leave" }, handoffFile);
   if (runtimeState.status === "closing") {
     forceCloseRuntime();
     scheduleProcessExit(0, 0);
     return;
   }
   void shutdownRuntime();
-}
-
-function closeRuntime() {
-  if (runtimeState.status === "closing") {
-    return;
-  }
-  runtimeState.status = "closing";
-  clearActivityTimer();
-  taskMonitorController.stop();
-  void ipcServer?.close();
-  void runtimeClient.shutdown();
-  closeInput();
 }
 
 function forceCloseRuntime() {
@@ -859,13 +949,15 @@ async function shutdownRuntime() {
   runtimeState.status = "closing";
   clearActivityTimer();
   taskMonitorController.stop();
+  void ipcServer?.close();
   try {
     await runtimeClient.shutdown();
-  } catch {
-    runtimeClient.forceShutdown();
+  } catch (error) {
+    writeErrorOutput(`Runtime shutdown failed: ${error instanceof Error ? error.message : String(error)}\n`);
+    process.exitCode = 1;
   } finally {
-    runtimeClient.closeInput();
     closeInput();
+    scheduleProcessExit(process.exitCode ?? 0, 0);
   }
 }
 
@@ -874,7 +966,9 @@ function scheduleProcessExit(code, delayMs) {
     return;
   }
   process.exitCode = code;
-  displayState.processExitTimer = setTimeout(() => {
+  displayState.processExitTimer = setTimeout(async () => {
+    // Read a terminal answer that is still on its way, or the shell would print it.
+    await tui?.drainKeyboardQuery?.();
     try {
       closeInput();
     } finally {

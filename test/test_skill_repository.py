@@ -23,6 +23,15 @@ def _write_skill(root: Path, name: str, description: str, body: str = "Body") ->
     return skill_file
 
 
+def test_host_attached_skill_is_discoverable_without_copying_its_references(tmp_path):
+    file = _write_skill(tmp_path / "legacy" / "skills", "finance", "Invoice reconciliation", "Read references/taxes.md")
+    repository = SkillRepository(project_root=str(tmp_path / "workspace"), skill_files=(str(file),))
+    loaded = repository.load_skill("finance")
+    assert loaded.path == str(file.resolve())
+    assert loaded.body == "Read references/taxes.md"
+    assert repository.get_skill("finance").scope == "agent"
+
+
 def test_skill_repository_scans_metadata_and_applies_scope_overrides(tmp_path: Path, monkeypatch) -> None:
     user = tmp_path / "user"
     project = tmp_path / "project"

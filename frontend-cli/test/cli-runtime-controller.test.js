@@ -35,6 +35,7 @@ function createHarness({
   switchMismatch = false,
   switchGate = null,
   taskMonitor = null,
+  openManagedSession = null,
 } = {}) {
   const state = createCliState();
   state.session.info = { session_id: "session-a", model: "model-a" };
@@ -133,6 +134,7 @@ function createHarness({
     restoreLiveTurn() {},
     renderHistory: (messages) => history.push(messages),
     onSessionRestored: () => restored.push(state.session.info.session_id),
+    openManagedSession,
     clearPendingInputs() {},
     closeAssistant() {},
     refreshInputState() {},
@@ -143,6 +145,24 @@ function createHarness({
   });
   return { state, client, requests, history, logs, restored, controller };
 }
+
+test("managed history opens separately and leaves the current conversation intact", async () => {
+  const opened = [];
+  const harness = createHarness({ selectedSession: { id: "session-b" }, openManagedSession: async (...args) => opened.push(args) });
+  await harness.controller.runSessionsSelector();
+  assert.deepEqual(opened, [["session-b"]]);
+  assert.equal(harness.state.session.info.session_id, "session-a");
+  assert.equal(harness.requests.some(request => request.method === methods.sessionSwitch), false);
+});
+
+test("managed forks open separately with editable input and preserve the source session", async () => {
+  const opened = [];
+  const harness = createHarness({ selectedFork: { id: "u2", text: "Revise this request" }, openManagedSession: async (...args) => opened.push(args) });
+  await harness.controller.runForkSelector();
+  assert.deepEqual(opened, [["session-fork-1", "Revise this request"]]);
+  assert.equal(harness.state.session.info.session_id, "session-a");
+  assert.equal(harness.requests.some(request => request.method === methods.sessionSwitch), false);
+});
 
 test("runtime controller shares initialization and injects session and turn IDs", async () => {
   const harness = createHarness();
@@ -432,3 +452,24 @@ async function waitForRequests(requests, method, count) {
     await new Promise((resolve) => setImmediate(resolve));
   }
 }
+
+test("a name chosen before the first message goes with the conversation it creates", async () => {
+  const harness = createHarness();
+  await harness.controller.ensureRuntime();
+  harness.state.session.info = { ...harness.state.session.info, session_id: "" };
+  const original = harness.client.request.bind(harness.client);
+  harness.client.request = (method, params) => method === methods.sessionCreate
+    ? (harness.requests.push({ method, params }), Promise.resolve({ session_id: "created-1", model: "model-a" }))
+    : original(method, params);
+  assert.match((await harness.controller.runRename("")).text, /first message/);
+  assert.match((await harness.controller.runRename("Release   notes")).text, /Will be named: Release notes/);
+  assert.equal(harness.requests.some(item => item.method === methods.commandExecute), false, "nothing to rename in the Runtime yet");
+  await harness.controller.request(methods.sessionPrompt, { input: "hello" });
+  const create = harness.requests.find(item => item.method === methods.sessionCreate);
+  assert.equal(create.params.name, "Release notes");
+  assert.equal(harness.state.session.info.session_id, "created-1", "later requests use the created conversation");
+  assert.equal(harness.requests.at(-1).method, methods.sessionPrompt, "the prompt follows its creation");
+
+  await harness.controller.runRename("Shipped");
+  assert.deepEqual(harness.requests.at(-1), { method: methods.commandExecute, params: { input: "/rename Shipped" } }, "once it exists, the conversation renames itself");
+});

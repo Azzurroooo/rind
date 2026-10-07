@@ -954,8 +954,8 @@ def test_app_server_process_serves_git_backed_commands_and_exits_after_shutdown(
         process.stdin.flush()
         initialize = read_response(timeout=15)
         assert initialize.get("kind") == "response", initialize
-        session_id = initialize["result"]["session_id"]
-        assert isinstance(session_id, str) and session_id
+        # A window has no conversation before its first message; reading commands still work.
+        assert initialize["result"]["session_id"] == ""
 
         process.stdin.write(
             json.dumps(
@@ -963,7 +963,7 @@ def test_app_server_process_serves_git_backed_commands_and_exits_after_shutdown(
                     "kind": "request",
                     "request_id": "status",
                     "method": "rind/command/execute",
-                    "params": {"session_id": session_id, "input": "/status"},
+                    "params": {"input": "/status"},
                 }
             )
             + "\n"
@@ -1062,3 +1062,26 @@ def test_schedule_ingest_drops_delivery_after_loop_close():
         raise AssertionError("dropped delivery must never run")
 
     assert _schedule_ingest(loop, ingest) is None
+
+
+def test_only_local_host_may_configure_session_tools():
+    from unittest.mock import AsyncMock
+
+    worker = FakeWorker()
+    worker.open_session = AsyncMock(return_value={"session_id": "s1"})
+    server, payloads = make_server(worker)
+    request = {"kind": "request", "request_id": "open", "method": RuntimeMethod.SESSION_OPEN,
+               "params": {"workspace_root": ".", "external_tools": {"command": "tool"}}}
+
+    async def run():
+        assert RuntimeMethod.SESSION_OPEN not in server._methods()
+        await server._dispatch(request)
+        worker.open_session.assert_not_called()
+        assert "local execution host" in _response(payloads, "open")["error"]["message"]
+        server._allow_session_configuration = True
+        assert RuntimeMethod.SESSION_OPEN in server._methods()
+        await server._dispatch({**request, "request_id": "local-open"})
+        worker.open_session.assert_awaited_once_with(request["params"])
+        assert _response(payloads, "local-open")["result"]["session_id"] == "s1"
+
+    asyncio.run(run())

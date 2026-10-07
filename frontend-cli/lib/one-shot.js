@@ -1,10 +1,12 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 
+import { createSharedRuntimeClient } from "../../rind-runtime-client/shared-runtime.js";
 import { createRuntimeClient } from "./runtime-client.js";
 import { requireRuntimeInitialization, runtimeMethods } from "./runtime-protocol.js";
 import { createOneShotProgress } from "./one-shot-progress.js";
 import { sendHelp } from "./send.js";
+import { prepareManagement, observeRuntime } from "./agents-session.js";
 
 export const oneShotHelp = [
   "Usage: rind run --prompt <text> [--dir <absolute-path>] [--session <id>]",
@@ -30,6 +32,8 @@ export const cliHelp = [
   "Usage: rind [options]",
   "",
   "Start the interactive CLI.",
+  "  Empty prompt: press Left to manage agents. Manager opens from that page.",
+  "  --team <id> | --standalone: choose a shared workspace's session scope.",
   "",
   oneShotHelp,
   "",
@@ -51,7 +55,8 @@ export function parseOneShotArgs(args) {
       result.traceLlm = true;
       continue;
     }
-    if (!["--dir", "--session", "--prompt"].includes(flag)) {
+    if (flag === "--standalone") { result.standalone = true; continue; }
+    if (!["--dir", "--session", "--prompt", "--team"].includes(flag)) {
       throw new Error(`Unknown run option: ${flag}`);
     }
     const value = args[index + 1];
@@ -59,8 +64,8 @@ export function parseOneShotArgs(args) {
       throw new Error(`${flag} requires a value.`);
     }
     index += 1;
-    const key = { "--dir": "dir", "--session": "session", "--prompt": "prompt" }[flag];
-    if (result[key] !== null) throw new Error(`${flag} may only be specified once.`);
+    const key = { "--dir": "dir", "--session": "session", "--prompt": "prompt", "--team": "team" }[flag];
+    if (result[key] != null) throw new Error(`${flag} may only be specified once.`);
     result[key] = value;
   }
   if (!result.prompt?.trim()) throw new Error("--prompt requires a non-empty value.");
@@ -146,14 +151,19 @@ export async function runOneShot({ args, python, repoRoot, runtimePath, cwd = pr
   const progress = createOneShotProgress({ stderr, stream: process.stderr });
   let anonymousToolCounter = 0;
   let client;
+  let management;
   try {
+    management = clientFactory === createRuntimeClient
+      ? await prepareManagement([...runtimeArgs, ...(options.team ? ["--team", options.team] : []), ...(options.standalone ? ["--standalone"] : [])], { python, repoRoot, runtimePath }, { interactive: false })
+      : { args: runtimeArgs };
     progress.begin();
-    client = clientFactory({
+    client = observeRuntime((management.shared && clientFactory === createRuntimeClient ? createSharedRuntimeClient : clientFactory)({
       python,
       repoRoot,
       runtimePath,
       cwd: options.dir || cwd,
-      cliArgs: runtimeArgs,
+      cliArgs: management.args,
+      externalTools: management.externalTools,
       onMessage: (message) => {
         const event = message?.event;
         const type = event?.type;
@@ -177,9 +187,11 @@ export async function runOneShot({ args, python, repoRoot, runtimePath, cwd = pr
       onStderr: (text) => {
         if (options.debug) stderr(`${String(text).trimEnd()}\n`);
       },
-    });
+    }), management);
     client.start();
     sessionInfo = requireRuntimeInitialization(await client.request(runtimeMethods.initialize));
+    // Without --session the prompt below is a new conversation's first message.
+    if (!sessionInfo.session_id && !options.session) sessionInfo = { ...sessionInfo, ...await client.request(runtimeMethods.sessionCreate, {}) };
     const sessionId = String(sessionInfo.session_id || options.session || "").trim();
     if (!sessionId) throw new Error("Runtime initialization did not return a session_id.");
     progress.session({
@@ -242,7 +254,11 @@ export async function runOneShot({ args, python, repoRoot, runtimePath, cwd = pr
     process.exitCode = 1;
     return true;
   } finally {
-    if (client) await client.shutdown().catch(() => client.forceShutdown());
+    if (client) await client.shutdown().catch((error) => {
+      stderr(`Runtime shutdown failed: ${error instanceof Error ? error.message : String(error)}\n`);
+      process.exitCode = 1;
+    });
+    else await management?.close?.();
   }
 }
 

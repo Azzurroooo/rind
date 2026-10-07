@@ -96,6 +96,8 @@ async def async_main(argv: list[str] | None = None, *, server_class: type[Any]) 
     worker = None
     server_started = False
     try:
+        from agent.infrastructure.tools.external import ExternalTool
+        external_tool = ExternalTool.from_json(os.environ.pop("RIND_EXTERNAL_TOOLS", ""))
         worker = RuntimeWorker(
             workspace_root=workspace_root,
             session_id=args.session,
@@ -104,6 +106,7 @@ async def async_main(argv: list[str] | None = None, *, server_class: type[Any]) 
             debug=args.debug,
             enable_goal=True,
             enable_user_question=not args.no_user_question,
+            external_tool=external_tool,
         )
         network_kwargs: dict[str, Any] = {}
         if getattr(server_class, "network_mode", False):

@@ -106,45 +106,6 @@ test("event controller emits tool result and resets turn state", async () => {
   assert.equal(completed.length, 1);
 });
 
-test("event controller forwards delegate lifecycle to the task monitor", async () => {
-  const requests = [];
-  const results = [];
-  let clears = 0;
-  const controller = createEventController({
-    monitor: {
-      recordDelegateRequest: (event) => requests.push(event),
-      recordDelegateResult: (event) => results.push(event),
-      clearDelegates: () => { clears += 1; },
-    },
-    output: {
-      log() {},
-      closeAssistant() {},
-      clearCompactContext() {},
-    },
-  });
-
-  await controller.handle({ kind: "event", event: {
-    type: "tool_requested",
-    tool_name: "delegate",
-    tool_call_id: "delegate-1",
-    args_preview: '{"agent_id":"builder-agent","task":"build it"}',
-  } });
-  await controller.handle({ kind: "event", event: {
-    type: "tool_result",
-    tool_name: "delegate",
-    tool_call_id: "delegate-1",
-    status: "completed",
-    result: '{"data":{"status":"completed","summary":"done"}}',
-  } });
-  await controller.handle({ kind: "event", event: {
-    type: "turn_completed",
-  } });
-
-  assert.equal(requests.length, 1);
-  assert.equal(results.length, 1);
-  assert.equal(clears, 1);
-});
-
 test("event controller delivers queued input and clears pending input on terminal events", async () => {
   const delivered = [];
   let clears = 0;
@@ -189,19 +150,47 @@ test("event controller ignores legacy goal continuation events", async () => {
   assert.deepEqual(chasing, []);
 });
 
-test("event controller exposes stream recovery as a working status", async () => {
+test("retry status clears when output resumes without requiring assistant text", async (t) => {
+  for (const event of [
+    { type: "assistant_delta", text: "continued" },
+    { type: "assistant_message_completed", content: "continued" },
+    { type: "tool_input_started", tool_call_id: "call-1", tool_name: "bash" },
+    { type: "tool_input_delta", tool_call_id: "call-1", tool_name: "bash", delta: "{}" },
+    { type: "tool_requested", tool_call_id: "call-1", tool_name: "bash", args_preview: "{}" },
+    { type: "tool_call_started", tool_call_id: "call-1", tool_name: "bash" },
+  ]) {
+    await t.test(event.type, async () => {
+      const labels = [];
+      const controller = createEventController({
+        output: { setActivityLabel: (label) => labels.push(label) },
+      });
+      await controller.handle({ event: { type: "turn_step_retry", attempt: 1 } });
+      await controller.handle({ event });
+      await controller.handle({ event: { type: "turn_step_retry", attempt: 2 } });
+      await controller.handle({ event });
+      assert.deepEqual(labels, ["Retrying 1", "Working", "Retrying 2", "Working"]);
+    });
+  }
+});
+
+test("background activity does not clear retry status; tool recovery stays working through the next step", async () => {
   const labels = [];
   const controller = createEventController({
-    output: {
-      setActivityLabel: (label) => labels.push(label),
-      assistantAppend() {},
-    },
+    output: { setActivityLabel: (label) => labels.push(label) },
   });
-
-  await controller.handle({ kind: "event", event: { type: "turn_step_retry", attempt: 2 } });
-  await controller.handle({ kind: "event", event: { type: "assistant_delta", text: "continued" } });
-
-  assert.deepEqual(labels, ["Retrying 2", "Working"]);
+  const send = (event) => controller.handle({ event });
+  await send({ type: "turn_step_retry", attempt: 2 });
+  await send({ type: "task_output", task_id: "background-1" });
+  await send({ type: "task_updated", task_id: "background-1", status: "completed" });
+  await send({ type: "token_stats_updated", stats: {} });
+  assert.deepEqual(labels, ["Retrying 2"]);
+  await send({ type: "tool_input_started", tool_call_id: "call-1", tool_name: "bash" });
+  await send({ type: "tool_requested", tool_call_id: "call-1", tool_name: "bash", args_preview: "{}" });
+  await send({ type: "tool_call_started", tool_call_id: "call-1", tool_name: "bash" });
+  await send({ type: "tool_result", tool_call_id: "call-1", tool_name: "bash", status: "completed" });
+  await send({ type: "context_built" });
+  assert.equal(labels.at(-1), "Working");
+  assert.ok(labels.slice(1).every((label) => label === "Working"));
 });
 
 

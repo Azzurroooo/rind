@@ -10,7 +10,12 @@ const SHOW_CURSOR = "\x1b[?25h";
 const HIDE_CURSOR = "\x1b[?25l";
 const PASTE_ENABLE = "\x1b[?2004h";
 const PASTE_DISABLE = "\x1b[?2004l";
-const KITTY_KEYBOARD_ENABLE = "\x1b[>7u\x1b[?u\x1b[c";
+const ALTERNATE_SCREEN_ENABLE = "\x1b[?1049h";
+const ALTERNATE_SCREEN_DISABLE = "\x1b[?1049l";
+// Push Kitty flags, ask which flags are active, then ask for device attributes.
+// Every terminal answers the last question, so its answer ends the negotiation.
+const KITTY_KEYBOARD_PUSH = "\x1b[>7u";
+const KITTY_KEYBOARD_QUERY = KITTY_KEYBOARD_PUSH + "\x1b[?u\x1b[c";
 const KITTY_KEYBOARD_DISABLE = "\x1b[<u";
 const MODIFY_OTHER_KEYS_ENABLE = "\x1b[>4;2m";
 const MODIFY_OTHER_KEYS_DISABLE = "\x1b[>4;0m";
@@ -19,12 +24,21 @@ const DEFAULT_COLUMNS = 80;
 const DEFAULT_ROWS = 24;
 const DEFAULT_RENDER_INTERVAL_MS = 33;
 
+// The terminal does not change while Rind runs, so its keyboard protocol is
+// negotiated once per process (and handed to windows started from it) instead
+// of on every screen switch. A query that is still unanswered when the process
+// exits would otherwise land in the shell as text such as "[?61;4;6;7…c".
+export const TERMINAL_KEYBOARD_ENV = "RIND_TERMINAL_KEYBOARD";
+let negotiatedKeyboard = ["kitty", "modify"].includes(process.env[TERMINAL_KEYBOARD_ENV]) ? process.env[TERMINAL_KEYBOARD_ENV] : "";
+export const terminalKeyboard = () => negotiatedKeyboard;
+
 export function createTui(options = {}) {
   const input = options.input || process.stdin;
   const output = options.output || process.stdout;
   const schedule = options.setTimeout || setTimeout;
   const cancelSchedule = options.clearTimeout || clearTimeout;
   const now = options.now || Date.now;
+  const alternateScreen = options.alternateScreen === true;
   const minRenderIntervalMs = Number.isFinite(options.renderIntervalMs)
     ? Math.max(0, options.renderIntervalMs)
     : DEFAULT_RENDER_INTERVAL_MS;
@@ -132,6 +146,17 @@ export function createTui(options = {}) {
       output.on("resize", handleResize);
       output.on("drain", handleDrain);
     }
+    if (alternateScreen) {
+      write(ALTERNATE_SCREEN_ENABLE);
+      previousLines = [];
+      previousWidth = 0;
+      previousHeight = 0;
+      cursorRow = 0;
+      hardwareCursorRow = 0;
+      hardwareCursorCol = 0;
+      maxLinesRendered = 0;
+      previousViewportTop = 0;
+    }
     write(PASTE_ENABLE);
     enableKeyboardProtocol();
     hideCursor();
@@ -148,7 +173,7 @@ export function createTui(options = {}) {
       cancelSchedule(renderTimer);
       renderTimer = null;
     }
-    if (previousLines.length > 0) {
+    if (!alternateScreen && previousLines.length > 0) {
       const targetRow = previousLines.length;
       const delta = targetRow - hardwareCursorRow;
       let tail = "";
@@ -178,6 +203,7 @@ export function createTui(options = {}) {
     }
     write(PASTE_DISABLE);
     disableKeyboardProtocol();
+    if (alternateScreen) write(ALTERNATE_SCREEN_DISABLE);
     inputBuffer.clear();
   }
 
@@ -185,33 +211,50 @@ export function createTui(options = {}) {
     inputBuffer.feed(data);
   }
 
+  // Negotiation answers are never keystrokes, even when they arrive late.
   function handleInputSequence(sequence) {
-    const kittyFlags = keyboardQueryActive ? kittyKeyboardFlags(sequence) : null;
+    const kittyFlags = kittyKeyboardFlags(sequence);
     if (kittyFlags !== null) {
-      clearKeyboardQuery();
-      if (kittyFlags > 0) {
-        kittyKeyboardActive = true;
-      } else {
-        enableModifyOtherKeys();
-      }
+      if (keyboardQueryActive && kittyFlags > 0) kittyKeyboardActive = true;
       return;
     }
-    if (keyboardQueryActive && isDeviceAttributesResponse(sequence)) {
-      clearKeyboardQuery();
-      enableModifyOtherKeys();
+    if (isDeviceAttributesResponse(sequence)) {
+      if (keyboardQueryActive) {
+        clearKeyboardQuery();
+        negotiatedKeyboard = kittyKeyboardActive ? "kitty" : "modify";
+        enableModifyOtherKeys();
+      }
       return;
     }
     inputHandler?.(sequence);
   }
 
   function enableKeyboardProtocol() {
+    if (negotiatedKeyboard === "kitty") {
+      write(KITTY_KEYBOARD_PUSH);
+      keyboardProtocolPushed = true;
+      kittyKeyboardActive = true;
+      return;
+    }
+    if (negotiatedKeyboard === "modify") {
+      enableModifyOtherKeys();
+      return;
+    }
     keyboardQueryActive = true;
     keyboardProtocolPushed = true;
     keyboardQueryTimer = schedule(() => {
       keyboardQueryTimer = null;
       keyboardQueryActive = false;
+      settleQuery();
     }, KEYBOARD_QUERY_TIMEOUT_MS);
-    write(KITTY_KEYBOARD_ENABLE);
+    write(KITTY_KEYBOARD_QUERY);
+  }
+
+  let querySettled = [];
+  function settleQuery() { for (const resolve of querySettled.splice(0)) resolve(); }
+  // Resolves once no negotiation answer is outstanding, at most after the query timeout.
+  function drainKeyboardQuery() {
+    return keyboardQueryActive ? new Promise(resolve => querySettled.push(resolve)) : Promise.resolve();
   }
 
   function clearKeyboardQuery() {
@@ -220,6 +263,7 @@ export function createTui(options = {}) {
       cancelSchedule(keyboardQueryTimer);
       keyboardQueryTimer = null;
     }
+    settleQuery();
   }
 
   function disableKeyboardProtocol() {
@@ -631,6 +675,7 @@ export function createTui(options = {}) {
   return {
     start,
     stop,
+    drainKeyboardQuery,
     requestRender,
     replayAll,
     addChild,

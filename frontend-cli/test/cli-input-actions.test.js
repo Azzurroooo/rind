@@ -28,6 +28,38 @@ test("manual compact keeps Enter and Tab input editable without premature echo",
   assert.deepEqual(echoes, []);
 });
 
+test("empty prompt left arrow opens agents management without dispatching text", async () => {
+  const state = createCliState();
+  state.runtime.status = "ready";
+  const opened = [];
+  const actions = createCliInputActions({
+    state, request: async () => ({}), output: { terminalUi: {}, redraw() {}, writeError() {} },
+    getTurnController: () => ({ submit() { throw new Error("must not submit"); } }),
+    getTaskMonitor: () => null, getLineInput: () => null,
+    pausePrompt() {}, resumePrompt() {}, handleSigint() {}, openAgents: async () => opened.push(true),
+  });
+  actions.ask("", "Ask Rind to do anything");
+  await Promise.resolve();
+  actions.handleTerminalInput("\x1b[D");
+  await new Promise(resolve => setImmediate(resolve));
+  assert.deepEqual(opened, [true]);
+  state.input.session.editor.setInput("draft");
+  actions.handleTerminalInput("\x1b[D");
+  assert.equal(state.input.session.editor.cursorPosition().column, 4);
+  actions.handleTerminalInput("\x1b[1;5D");
+  await new Promise(resolve => setImmediate(resolve));
+  assert.deepEqual(opened, [true]);
+  state.input.session.editor.setInput(" ");
+  actions.handleTerminalInput("\x1b[D");
+  await new Promise(resolve => setImmediate(resolve));
+  assert.deepEqual(opened, [true]);
+  state.input.session.editor.setInput(""); state.turn.active = true;
+  actions.handleTerminalInput("\x1b[D");
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(opened.length, 2);
+  actions.cancel();
+});
+
 test("question arrows leave custom editing and discard its draft", async () => {
   const state = createCliState();
   state.runtime.status = "ready";
@@ -84,6 +116,40 @@ test("question arrows leave custom editing and discard its draft", async () => {
 
   actions.cancel();
   await pending;
+});
+
+test("a question answered in another window closes here without answering twice", async () => {
+  const state = createCliState();
+  state.runtime.status = "ready";
+  state.session.commands = [];
+  const requests = [], finished = [];
+  const actions = createCliInputActions({
+    state, request: async (method, params) => { requests.push([method, params]); return {}; },
+    output: { terminalUi: {}, writeUserInput() {}, closeAssistant() {}, beginQuestion() {}, finishQuestion: (event, answer) => finished.push(answer), redraw() {}, writeError() {} },
+    getTurnController: () => null, getTaskMonitor: () => null, getLineInput: () => null,
+    pausePrompt() {}, resumePrompt() {}, handleSigint() {},
+  });
+  const question = { tool_call_id: "q-1", question: "Ship it?", options: [{ label: "Yes" }, { label: "No" }] };
+  const pending = actions.answerQuestion(question);
+  await Promise.resolve();
+  actions.questionAnswered({ tool_call_id: "other", answer: "ignored" });
+  assert.equal(state.input.session.mode, "question", "an answer to another question changes nothing");
+  actions.questionAnswered({ tool_call_id: "q-1", answer: "Yes" });
+  await pending;
+  assert.equal(state.input.session, null, "the question menu is closed");
+  assert.deepEqual(requests, [], "the answer is not sent a second time");
+  assert.deepEqual(finished, ["Yes (answered in another window)"]);
+
+  // Answering here: this window's own broadcast arrives while the answer is being sent.
+  const local = actions.answerQuestion({ ...question, tool_call_id: "q-2" });
+  await Promise.resolve();
+  actions.handleTerminalInput("\r");
+  // The Runtime broadcasts only after it received this window's answer.
+  await new Promise(resolve => setImmediate(resolve));
+  actions.questionAnswered({ tool_call_id: "q-2", answer: "Yes" });
+  await local;
+  assert.deepEqual(requests.map(([, params]) => params), [{ tool_call_id: "q-2", answer: "Yes" }]);
+  assert.deepEqual(finished.at(-1), "Yes");
 });
 
 test("prompt input restores persisted history and saves natural prompts only", async () => {

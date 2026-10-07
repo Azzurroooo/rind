@@ -5,7 +5,6 @@ from __future__ import annotations
 import sys
 import tempfile
 from pathlib import Path
-import shutil
 
 import pytest
 
@@ -17,7 +16,6 @@ from agent.application.context import CompactionService
 from agent.application.tools import ToolResultNormalizer
 from agent.bootstrap import AgentContainer, SharedRuntimeResources, build_agent_container
 from agent.infrastructure.settings import AppSettings
-from agent.infrastructure.team import initialize_team_project
 from agent.runtime.core import MessageStreamParser
 
 
@@ -181,167 +179,14 @@ def test_container_rejects_unknown_enabled_tools() -> None:
             )
 
 
-def test_container_does_not_resolve_team_agent_outside_an_agent_directory(tmp_path, monkeypatch) -> None:
-    initialize_team_project(tmp_path, project_id="quant-project")
-    monkeypatch.chdir(tmp_path)
-    settings = AppSettings(
-        settings_path=tmp_path / "settings.json",
-        settings_exists=True,
-        model="test-model",
-        api_key="test-key",
-        base_url="https://example.com/v1",
-        reasoning_effort="high",
-        user_agent="test-agent",
-    )
-
-    container = build_agent_container(
-        settings=settings,
-        chat_client=FakeChatClient(),
-        session_dir=str(tmp_path / "sessions"),
-    )
-
-    assert Path.cwd() == tmp_path.resolve()
-    assert container.session_store._workspace_root is None
-    assert container.session_store._project_id is None
-    assert container.session_store._owner_agent_id is None
-    assert container.session_store._session_type is None
-
-    # A subdirectory of an agent is a plain session, not that agent.
-    for index, cwd in enumerate((tmp_path / "agents", tmp_path / "agents" / "main-agent" / "work")):
-        monkeypatch.chdir(cwd)
-        container = build_agent_container(
-            settings=settings,
-            chat_client=FakeChatClient(),
-            session_dir=str(tmp_path / f"sessions-outside-{index}"),
-        )
-
-        assert Path.cwd() == cwd.resolve()
-        assert container.session_store._workspace_root is None
-        assert container.session_store._project_id is None
-        assert container.session_store._owner_agent_id is None
-        assert container.session_store._session_type is None
 
 
-def test_container_resolves_team_agent_capsule_context_from_workspace(tmp_path, monkeypatch) -> None:
-    monkeypatch.setenv("RIND_HOME", str(tmp_path / "rind_home"))
-    initialize_team_project(tmp_path, project_id="quant-project")
-    workspace = tmp_path / "agents" / "main-agent"
-    monkeypatch.chdir(workspace)
-    settings = AppSettings(
-        settings_path=tmp_path / "settings.json",
-        settings_exists=True,
-        model="test-model",
-        api_key="test-key",
-        base_url="https://example.com/v1",
-        reasoning_effort="high",
-        user_agent="test-agent",
-    )
-
-    container = build_agent_container(
-        settings=settings,
-        chat_client=FakeChatClient(),
-        session_dir=str(tmp_path / "sessions"),
-    )
-
-    assert Path.cwd() == workspace.resolve()
-    assert container.session_store._workspace_root == str(workspace.resolve())
-    assert container.session_store._project_id == "quant-project"
-    assert container.session_store._owner_agent_id == "main-agent"
-    assert container.session_store._session_type == "direct_agent_chat"
-    assert container.skill_repository._project_skill_dir == (tmp_path / ".rind" / "skills").resolve()
-    assert container.skill_repository._agent_skill_dir == (workspace / ".aiteam" / "skills").resolve()
-    assert "main agent" in container.session_store.system_prompt.lower()
-    assert container.tool_registry.has("delegate") is True
-    assert container.tool_registry.has("agent_create") is True
-    assert "Use delegate for specialized Team work" in container.runtime._runtime_system_messages[0]["content"]
-    assert "They share that Agent's workspace" in container.runtime._runtime_system_messages[0]["content"]
-    assert "shared/<file>" in container.runtime._runtime_system_messages[0]["content"]
-    (tmp_path / "shared" / "result.md").write_text("published", encoding="utf-8")
-    shared_result = container.tool_registry.call("read_file", {"path": "shared/result.md"})
-    assert "published" in shared_result
-    assert not (tmp_path / "rind_home" / "teams").exists()
 
 
-def test_explicit_team_workspace_does_not_change_process_cwd(tmp_path, monkeypatch) -> None:
-    initialize_team_project(tmp_path, project_id="quant-project")
-    workspace = tmp_path / "agents" / "main-agent"
-    monkeypatch.chdir(tmp_path)
-    settings = AppSettings(
-        settings_path=tmp_path / "settings.json",
-        settings_exists=True,
-        model="test-model",
-        api_key="test-key",
-        base_url="https://example.com/v1",
-        reasoning_effort="high",
-        user_agent="test-agent",
-    )
-
-    container = build_agent_container(
-        settings=settings,
-        chat_client=FakeChatClient(),
-        session_dir=str(tmp_path / "sessions"),
-        workspace_root=str(workspace),
-    )
-
-    assert Path.cwd() == tmp_path.resolve()
-    assert container.session_store._workspace_root == str(workspace.resolve())
 
 
-def test_secondary_team_agent_cannot_delegate_or_create_agents(tmp_path) -> None:
-    initialize_team_project(tmp_path, project_id="quant-project")
-    main_workspace = tmp_path / "agents" / "main-agent"
-    secondary_workspace = tmp_path / "agents" / "researcher"
-    shutil.copytree(main_workspace, secondary_workspace)
-    manifest = secondary_workspace / ".aiteam" / "agent.yaml"
-    manifest.write_text(
-        manifest.read_text(encoding="utf-8")
-        .replace("id: main-agent", "id: researcher")
-        .replace("name: Main Agent", "name: Researcher"),
-        encoding="utf-8",
-    )
-    settings = AppSettings(
-        settings_path=tmp_path / "settings.json",
-        settings_exists=True,
-        model="test-model",
-        api_key="test-key",
-        base_url="https://example.com/v1",
-        reasoning_effort="high",
-        user_agent="test-agent",
-    )
-
-    container = build_agent_container(
-        settings=settings,
-        chat_client=FakeChatClient(),
-        session_dir=str(tmp_path / "sessions"),
-        workspace_root=str(secondary_workspace),
-    )
-
-    assert container.tool_registry.has("delegate") is False
-    assert container.tool_registry.has("agent_create") is False
 
 
-def test_container_rejects_invalid_team_agent_capsule(tmp_path, monkeypatch) -> None:
-    initialize_team_project(tmp_path, project_id="quant-project")
-    source = tmp_path / "agents" / "main-agent" / ".aiteam"
-    scratch = tmp_path / "scratch"
-    shutil.copytree(source, scratch / ".aiteam")
-    monkeypatch.chdir(scratch)
-    settings = AppSettings(
-        settings_path=tmp_path / "settings.json",
-        settings_exists=True,
-        model="test-model",
-        api_key="test-key",
-        base_url="https://example.com/v1",
-        reasoning_effort="high",
-        user_agent="test-agent",
-    )
-
-    with pytest.raises(ValueError, match="must be located directly"):
-        build_agent_container(
-            settings=settings,
-            chat_client=FakeChatClient(),
-            session_dir=str(tmp_path / "sessions"),
-        )
 
 
 def test_container_rind_doc_provider_injects_workspace_doc(tmp_path, monkeypatch) -> None:

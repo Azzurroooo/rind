@@ -344,12 +344,25 @@ test("background monitor preserves preview, Unicode input and caret through resi
     assert.match(virtual.getViewport().join("\n"), /output-79/);
     assert.deepEqual(virtual.getCursorPosition(), caret);
     assert.deepEqual(reads, ["task-119"], "scroll and resize use only the selected bounded preview");
+    monitor.recordTask({ task: { task_id: "waiting", command: "waiting command", status: "running", handoff: false } });
+    input.send("\x1b[A");
+    await settle(virtual);
+    assert.match(virtual.getViewport().join("\n"), /› Waiting 1\/1/);
+    assert.doesNotMatch(virtual.getViewport().join("\n"), /output-79/);
+    input.send("\x1b[B");
+    await settle(virtual);
+    assert.match(virtual.getViewport().join("\n"), /› task-119/);
+    assert.match(virtual.getViewport().join("\n"), /output-79/);
+    assert.equal(editor.input(), originalInput);
+    assert.deepEqual(editor.cursorPosition(), savedCursor);
+    assert.deepEqual(virtual.getCursorPosition(), caret);
+    assert.deepEqual(reads, ["task-119", "task-119"]);
     input.send("\x02");
     await settle(virtual);
     assert.equal(monitor.isMonitoring(), false);
     monitor.recordTask({ task: { task_id: "new", status: "running", handoff: true } });
     await settle(virtual);
-    assert.deepEqual(reads, ["task-119"]);
+    assert.deepEqual(reads, ["task-119", "task-119"]);
     assert.equal(editor.input(), originalInput);
   } finally {
     monitor.stop();

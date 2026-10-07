@@ -31,10 +31,13 @@ from agent.infrastructure.persistence.message_projector import (
     project_messages,
 )
 from agent.infrastructure.persistence.session_meta import (
+    automatic_title,
     default_auto_compact_window,
+    display_title,
     new_session_id,
     new_session_meta,
     normalize_auto_compact_window,
+    normalize_name,
     normalize_skill_catalog,
     session_index_entry,
     sync_session_counts,
@@ -220,6 +223,7 @@ class JsonlSessionStore(SessionStore):
         session_dir: str | None = None,
         limit: int = 20,
         workspace_root: str | None = None,
+        exclude_workspace_roots: list[str] | None = None,
     ) -> list[dict[str, Any]]:
         root = cls.resolve_session_root(session_dir)
         index_path = cls.index_path_for(session_dir)
@@ -228,9 +232,12 @@ class JsonlSessionStore(SessionStore):
         entries = index.get("sessions") if isinstance(index, dict) else []
         if not isinstance(entries, list):
             return []
-        expected_root = None
-        if workspace_root:
-            expected_root = os.path.normcase(os.path.realpath(os.path.abspath(os.path.expanduser(workspace_root))))
+        def normalize(value: str) -> str:
+            return os.path.normcase(os.path.realpath(os.path.abspath(os.path.expanduser(value))))
+
+        expected_root = normalize(workspace_root) if workspace_root else None
+        # Excluded before the limit applies, so callers can page past busy folders.
+        excluded = {normalize(value) for value in exclude_workspace_roots or [] if isinstance(value, str) and value}
         result = []
         for entry in entries:
             if not isinstance(entry, dict) or not _valid_session_id_value(entry.get("id")):
@@ -238,6 +245,8 @@ class JsonlSessionStore(SessionStore):
             if entry.get("has_user_message") is False:
                 continue
             entry_root = entry.get("workspace_root")
+            if excluded and isinstance(entry_root, str) and normalize(entry_root) in excluded:
+                continue
             if expected_root is not None:
                 if not isinstance(entry_root, str):
                     continue
@@ -688,6 +697,21 @@ class JsonlSessionStore(SessionStore):
 
             await asyncio.to_thread(_persist)
 
+    async def set_name(self, name: str | None) -> dict[str, Any]:
+        """Name the conversation, or with None go back to its first message."""
+        clean = normalize_name(name) if name is not None else None
+        async with self._write_lock:
+            def _persist() -> dict[str, Any]:
+                meta = self._session_meta if isinstance(self._session_meta, dict) else {}
+                if clean is None:
+                    meta.pop("name", None)
+                else:
+                    meta["name"] = clean
+                self._session_meta = meta
+                self._persist_meta_sync()
+                return {"name": meta.get("name"), "title": display_title(meta)}
+            return await asyncio.to_thread(_persist)
+
     async def update_selection(self, provider: str, model: str) -> None:
         clean_provider = str(provider or "").strip()
         clean_model = str(model or "").strip()
@@ -839,7 +863,7 @@ class JsonlSessionStore(SessionStore):
             and self._session_meta
             and self._session_meta.get("title") in {None, "", "Untitled"}
         ):
-            self._session_meta["title"] = (content or "")[:40]
+            self._session_meta["title"] = automatic_title(content)
         self._persist_meta_sync()
 
     async def persist_tool_call(

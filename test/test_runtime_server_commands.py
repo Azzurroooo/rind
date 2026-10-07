@@ -16,7 +16,6 @@ from agent.runtime.server.commands.catalog import build_command_infos
 from agent.infrastructure.settings import AppSettings
 from agent.infrastructure.persistence.jsonl_session_store import JsonlSessionStore
 from agent.infrastructure.skills import SkillRepository
-from agent.infrastructure.team import initialize_team_project
 
 
 class FakeSession:
@@ -135,7 +134,7 @@ def test_router_exposes_sorted_command_names() -> None:
     assert "help" in names
     assert "status" in names
     assert "sessions" in names
-    assert "team" in names
+    assert "team" not in names
     assert "config" not in names
 
 
@@ -149,10 +148,10 @@ def test_router_exposes_command_descriptions() -> None:
     assert descriptions["model"] == "Show or change the active model"
     assert "clear" not in descriptions
     assert "exit" not in descriptions
-    assert descriptions["team"] == "Manage the current Team"
+    assert "team" not in descriptions
     assert usages["sessions"] == "/sessions [limit]"
     assert usages["init"] == "/init [project|user]"
-    assert usages["team"].startswith("/team create")
+    assert "team" not in usages
 
 
 def test_router_accepts_a_custom_command_catalog() -> None:
@@ -281,62 +280,10 @@ async def test_unknown_command_returns_friendly_error() -> None:
     assert "/help" in result.text
 
 
-@pytest.mark.asyncio
-async def test_team_create_initializes_project_without_handoff(tmp_path, monkeypatch) -> None:
-    monkeypatch.chdir(tmp_path)
-    session = JsonlSessionStore(session_dir=str(tmp_path / "sessions"), session_id="bootstrap", system_prompt="sys")
-    await session.initialize()
-
-    result = await SlashCommandRouter(build_command_infos()).execute("/team create quant-project", _context(session=session))
-
-    workspace = tmp_path / "agents" / "main-agent"
-    meta = json.loads((tmp_path / "sessions" / "bootstrap" / "meta.json").read_text(encoding="utf-8"))
-    assert result.display["type"] == "team_create"
-    assert result.display["project_id"] == "quant-project"
-    assert result.display["main_agent"] == "main-agent"
-    assert "session_id" not in result.display
-    assert "Switched to" not in result.text
-    assert session.session_id == "bootstrap"
-    assert Path.cwd() == tmp_path.resolve()
-    assert (tmp_path / ".aiteam" / "project.yaml").is_file()
-    assert not (tmp_path / ".aiteam" / "organization.yaml").exists()
-    assert (workspace / ".aiteam" / "agent.yaml").is_file()
-    assert meta["session_type"] == "standalone_project"
-    assert "successor_session_id" not in meta
-    assert "project_id" not in meta
-    assert "owner_agent_id" not in meta
 
 
-@pytest.mark.asyncio
-async def test_team_management_lists_and_initializes_agents(tmp_path, monkeypatch) -> None:
-    initialize_team_project(tmp_path, project_id="quant-project")
-    (tmp_path / "agents" / "weather-agent").mkdir()
-    session = JsonlSessionStore(session_dir=str(tmp_path / "sessions"), session_id="bootstrap", system_prompt="sys")
-    await session.initialize()
-    context = _context(session=session)
-    context.workspace_root = str(tmp_path / "agents" / "main-agent")
-
-    initialized = await SlashCommandRouter(build_command_infos()).execute("/team init", context)
-    listed = await SlashCommandRouter(build_command_infos()).execute("/team list", context)
-
-    assert initialized.display["type"] == "team_init"
-    assert "weather-agent" in initialized.display["created"]
-    assert listed.display["type"] == "team_agents"
-    assert any(agent["id"] == "weather-agent" for agent in listed.display["agents"])
 
 
-@pytest.mark.asyncio
-async def test_team_add_returns_main_agent_creation_prompt(tmp_path) -> None:
-    initialize_team_project(tmp_path, project_id="quant-project")
-    session = JsonlSessionStore(session_dir=str(tmp_path / "sessions"), session_id="bootstrap", system_prompt="sys")
-    await session.initialize()
-    context = _context(session=session)
-    context.workspace_root = str(tmp_path / "agents" / "main-agent")
-
-    result = await SlashCommandRouter(build_command_infos()).execute("/team add Weather reports", context)
-
-    assert result.next_prompt["input"].startswith("Create a Team Agent")
-    assert result.next_prompt["transient_system_messages"]
 
 
 @pytest.mark.asyncio

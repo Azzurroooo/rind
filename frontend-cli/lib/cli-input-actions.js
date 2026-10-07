@@ -25,11 +25,14 @@ export function createCliInputActions({
   pausePrompt,
   resumePrompt,
   handleSigint,
+  disarmLeave = null,
+  openAgents = null,
   promptHistory = [],
   onPromptHistory = () => {},
 }) {
   let cancelActiveInput = null;
   const promptEditor = createLineEditor("", { history: promptHistory });
+  let openingAgents = false;
 
   function restoreInputText(text) {
     state.input.prefill = String(text || "");
@@ -124,6 +127,10 @@ export function createCliInputActions({
     output.redraw();
   }
 
+  // The question this window is asking. Another window watching the same
+  // session may answer it first; the Runtime then broadcasts the answer.
+  let openQuestion = null;
+
   async function answerQuestion(event) {
     pausePrompt();
     output.closeAssistant();
@@ -132,26 +139,38 @@ export function createCliInputActions({
     } else {
       output.log(() => questionText(event));
     }
+    const question = { toolCallId: String(event.tool_call_id || ""), answeredElsewhere: null };
+    openQuestion = question;
     try {
       const options = Array.isArray(event.options) ? event.options : [];
-      const answer = output.terminalUi
+      const typed = output.terminalUi
         ? await askQuestionMenu(event)
         : selectAnswer((await ask(answerPromptText(), answerPlaceholderText())).trim(), options);
-      if (state.turn.interruptRequested || state.runtime.status === "closing") {
+      // From here this window's own broadcast must not dismiss anything.
+      openQuestion = null;
+      const elsewhere = question.answeredElsewhere !== null;
+      if (!elsewhere && (state.turn.interruptRequested || state.runtime.status === "closing")) {
         return;
       }
-      await request(runtimeMethods.userQuestionRespond, {
-        tool_call_id: event.tool_call_id,
-        answer,
-      });
+      const answer = elsewhere ? question.answeredElsewhere : typed;
+      if (!elsewhere) await request(runtimeMethods.userQuestionRespond, { tool_call_id: event.tool_call_id, answer });
+      const shown = elsewhere ? answer + " (answered in another window)" : answer;
       if (output.finishQuestion) {
-        output.finishQuestion(event, answer);
+        output.finishQuestion(event, shown);
       } else {
-        output.log(() => questionAnswerText(event, answer));
+        output.log(() => questionAnswerText(event, shown));
       }
     } finally {
+      if (openQuestion === question) openQuestion = null;
       resumePrompt();
     }
+  }
+
+  function questionAnswered(event) {
+    const question = openQuestion;
+    if (!question || question.toolCallId !== String(event.tool_call_id || "")) return;
+    question.answeredElsewhere = String(event.answer ?? "");
+    cancelActiveInput?.();
   }
 
   function selectAnswer(raw, options) {
@@ -283,6 +302,7 @@ export function createCliInputActions({
       handleSigint();
       return;
     }
+    disarmLeave?.();
     if (event.ctrl && !event.alt && !event.shift && event.name === "o") {
       state.display.toolDetailsExpanded = !state.display.toolDetailsExpanded;
       output.setToolsExpanded?.(state.display.toolDetailsExpanded);
@@ -329,10 +349,6 @@ export function createCliInputActions({
       handleSessionInput(session, event);
       return;
     }
-    if (session.mode === "team-blueprints") {
-      handleTeamBlueprintInput(session, event);
-      return;
-    }
     if (session.mode === "fork") {
       handleForkInput(session, event);
       return;
@@ -342,6 +358,15 @@ export function createCliInputActions({
       return;
     }
     const key = event;
+    if (openAgents && session.mode === "prompt" && session.editor.input() === ""
+      && key.name === "left" && !key.ctrl && !key.alt && !key.shift) {
+      if (!openingAgents) {
+        openingAgents = true;
+        Promise.resolve().then(openAgents).catch(error => output.writeError(error.message + "\n"))
+          .finally(() => { openingAgents = false; });
+      }
+      return;
+    }
     const matches = session.menuState ? syncSlashMenu(session) : [];
     const menuKey = !key.ctrl && !key.alt && !key.shift && ["escape", "up", "down"].includes(key.name);
     if (session.menuState && matches.length && menuKey && session.menuState.handleKey("", key)) {
@@ -549,25 +574,6 @@ export function createCliInputActions({
     });
   }
 
-  function askTeamBlueprint(blueprints) {
-    return new Promise((resolve) => {
-      const items = (Array.isArray(blueprints) ? blueprints : []).map((item) => ({
-        id: String(item?.id || ""),
-        label: [item?.id, item?.name, item?.description].filter(Boolean).join(" · "),
-      })).filter((item) => item.id);
-      if (!items.length) {
-        resolve(null);
-        return;
-      }
-      const choiceState = createChoiceMenuState(items.map((item) => item.label), items[0].label);
-      const session = { mode: "team-blueprints", inputText: "/team blueprint", choiceState, items, resolve };
-      state.input.session = session;
-      state.input.active = true;
-      cancelActiveInput = () => completeTtyInput(session, null, false);
-      output.redraw(true);
-    });
-  }
-
   function handleQuestionInput(session, key) {
     const modified = key.ctrl || key.alt || key.shift;
     if (session.questionState.isEditing()) {
@@ -638,16 +644,6 @@ export function createCliInputActions({
     const modified = key.ctrl || key.alt || key.shift;
     if (!modified && (key.name === "enter" || key.name === "return")) {
       completeTtyInput(session, session.sessions[session.choiceState.selectedIndex()] || null, false);
-      return;
-    }
-    if (!modified && key.name === "escape") return completeTtyInput(session, null, false);
-    if (!modified && session.choiceState.handleKey(key)) output.redraw();
-  }
-
-  function handleTeamBlueprintInput(session, key) {
-    const modified = key.ctrl || key.alt || key.shift;
-    if (!modified && (key.name === "enter" || key.name === "return")) {
-      completeTtyInput(session, session.items[session.choiceState.selectedIndex()] || null, false);
       return;
     }
     if (!modified && key.name === "escape") return completeTtyInput(session, null, false);
@@ -741,6 +737,7 @@ export function createCliInputActions({
     handleAuthPrompt,
     askAuthChoice,
     answerQuestion,
+    questionAnswered,
     restoreInputText,
     addPendingInput,
     deliverQueuedInput,
@@ -752,7 +749,6 @@ export function createCliInputActions({
     askEffortMenu,
     askThemeMenu,
     askSessionMenu,
-    askTeamBlueprint,
     askForkPointMenu,
     askContextBoard,
     cancel: () => cancelActiveInput?.(),

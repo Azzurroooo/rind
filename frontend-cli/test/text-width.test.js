@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { clipCells, graphemes, middleClipCells, textWidth, wrapTextCells } from "../lib/text-width.js";
+import { clipCells, graphemes, middleClipCells, stripAnsi, textWidth, truncateToWidth, wrapTextCells } from "../lib/text-width.js";
 
 test("printable ASCII bypasses segmentation; Unicode and controls retain their semantics", (t) => {
   const segment = t.mock.method(Intl.Segmenter.prototype, "segment");
@@ -43,4 +43,44 @@ test("wrapTextCells preserves cursor ownership before wide characters", () => {
       { text: "d", startColumn: 5, allowsEnd: true },
     ],
   );
+});
+
+test("truncateToWidth measures styled text by visible cells and closes open styles", () => {
+  const styled = "\x1b[1mfe-state\x1b[0m\x1b[2m · Sub-agent | Frontend/State\x1b[0m";
+  for (const width of [4, 10, 20, 33]) {
+    const cut = truncateToWidth(styled, width, "…");
+    assert.equal(textWidth(cut), width);
+    assert.match(stripAnsi(cut), /^fe-/);
+    assert.ok(cut.endsWith("\x1b[0m"));
+    assert.doesNotMatch(cut, /\x1b(?!\[[0-?]*[ -/]*[@-~])/, "escape sequences stay whole");
+  }
+  assert.equal(truncateToWidth("plain text", 6, "…"), "plain…");
+});
+
+test("middleClipCells keeps escape sequences whole and closes styles", () => {
+  const styled = "\x1b[31mabcdefghijklmnop\x1b[0m";
+  const cut = middleClipCells(styled, 9);
+  assert.equal(textWidth(cut), 9);
+  assert.equal(stripAnsi(cut), "abc...nop");
+  assert.doesNotMatch(cut.replace(/\x1b\[[0-9;]*m/g, ""), /\x1b|\[\d/);
+  assert.ok(cut.endsWith("\x1b[0m"));
+});
+
+// Symbols that default to text presentation take one cell in a terminal, even
+// though they are pictographic; only emoji presentation takes two.
+test("text-presentation symbols take one cell, as a terminal draws them", async () => {
+  const { Terminal } = (await import("@xterm/headless")).default;
+  const samples = ["↩", "▶", "✔", "©", "☀", "↔", "😀", "✅", "⌚", "↩\ufe0f", "你"];
+  const terminal = new Terminal({ cols: 80, rows: 2, allowProposedApi: true });
+  await new Promise(resolve => terminal.write(samples.join("|"), resolve));
+  const line = terminal.buffer.active.getLine(0);
+  const drawn = [];
+  for (let x = 0, width = 0; x < 80; x++) {
+    const cell = line.getCell(x);
+    if (cell.getChars() === "|") { drawn.push(width); width = 0; } else width += cell.getWidth();
+  }
+  const expected = { "↩": 1, "▶": 1, "✔": 1, "©": 1, "☀": 1, "↔": 1, "😀": 2, "✅": 2, "⌚": 2, "↩\ufe0f": 2, "你": 2 };
+  assert.deepEqual(samples.map(text => [text, textWidth(text)]), samples.map(text => [text, expected[text]]));
+  assert.deepEqual(drawn.slice(0, 6), [1, 1, 1, 1, 1, 1], "the terminal draws text-presentation symbols in one cell");
+  terminal.dispose();
 });

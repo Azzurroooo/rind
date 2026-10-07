@@ -18,6 +18,7 @@ export function createCliRuntimeController({
   restoreLiveTurn,
   renderHistory = () => {},
   onSessionRestored = () => {},
+  openManagedSession = null,
   clearPendingInputs,
   closeAssistant,
   refreshInputState,
@@ -31,16 +32,57 @@ export function createCliRuntimeController({
 
   async function request(method, params = {}) {
     await ensureRuntime();
+    // A window's first message creates its conversation; until then it has none.
+    if (method === methods.sessionPrompt && !params.session_id && !state.session.info.session_id) await createConversation();
     const requestParams = { ...params };
     const sessionScoped = sessionScopedMethods.has(method) || method === methods.modelList;
-    if (sessionScoped && state.session.info.session_id && !requestParams.session_id) {
-      requestParams.session_id = state.session.info.session_id;
+    if (sessionScoped && !requestParams.session_id) {
+      if (state.session.info.session_id) requestParams.session_id = state.session.info.session_id;
+      // Listing and models work before the first message, for this window's folder.
+      else if (state.session.info.workspace_root) requestParams.workspace_root = state.session.info.workspace_root;
     }
     if (turnScopedMethods.has(method) && state.turn.id && !requestParams.turn_id) {
       requestParams.turn_id = state.turn.id;
     }
     return client.request(method, requestParams);
   }
+
+  // Created with the settings chosen so far (/model, /effort, /login). A retry
+  // after a first prompt that failed keeps the same identity, so a team window
+  // stays bound to one conversation.
+  async function createConversation() {
+    const info = state.session.info;
+    const created = await client.request(methods.sessionCreate, {
+      ...(state.session.reservedId ? { session_id: state.session.reservedId } : {}),
+      ...(info.provider ? { provider_id: info.provider } : {}),
+      ...(info.model ? { model_id: info.model } : {}),
+      ...(info.reasoning_effort ? { reasoning_effort: info.reasoning_effort } : {}),
+      ...(state.session.pendingName ? { name: state.session.pendingName } : {}),
+    });
+    if (!created?.session_id) throw new Error("The Runtime did not create a conversation.");
+    state.session.pendingName = "";
+    state.session.reservedId = String(created.session_id);
+    state.session.info = {
+      ...state.session.info, session_id: String(created.session_id),
+      workspace_root: created.workspace_root || info.workspace_root, model: created.model || info.model,
+      provider: created.provider || info.provider, reasoning_effort: created.reasoning_effort ?? info.reasoning_effort,
+    };
+    redraw();
+    await onSessionRestored();
+  }
+  const hasConversation = () => Boolean(state.session.info.session_id);
+
+  // /rename: the conversation's own command once it exists. Before the first
+  // message the window keeps the name and creates the conversation with it.
+  async function runRename(argument) {
+    if (hasConversation()) return request(methods.commandExecute, { input: ("/rename " + argument).trim() });
+    const name = argument.split(/\s+/).filter(Boolean).join(" ");
+    if (!name) return { text: state.session.pendingName ? `Will be named: ${state.session.pendingName}` : "Shown by its first message once you send it.\nUsage: /rename <name> · /rename --reset" };
+    if (name === "--reset") { state.session.pendingName = ""; return { text: "Name cleared; it will be shown by its first message." }; }
+    state.session.pendingName = name;
+    return { text: `Will be named: ${name} (when your first message starts the conversation)` };
+  }
+  const needsConversation = what => { log(what + " needs a conversation. Send your first message to start one."); };
 
   async function ensureRuntime() {
     if (state.runtime.status === "ready") {
@@ -66,7 +108,7 @@ export function createCliRuntimeController({
         commandController.localCommands(),
       );
       redraw(true);
-      void getTaskMonitor()?.refresh().catch(() => {});
+      if (state.session.info.session_id) void getTaskMonitor()?.refresh().catch(() => {});
       return state.session.info;
     })().catch((error) => {
       state.runtime.status = client.child ? "starting" : "failed";
@@ -77,6 +119,7 @@ export function createCliRuntimeController({
   }
 
   async function runGoalCommand(command) {
+    if (!hasConversation()) return needsConversation("/goal");
     if (command.action === "set" && state.turn.active) {
       log(() => commandResultText("Goal not started", "pause or finish the active turn first"));
       return;
@@ -109,7 +152,7 @@ export function createCliRuntimeController({
   }
 
   async function refreshGoalState() {
-    if (state.runtime.status !== "ready" || !Array.isArray(state.session.info.capabilities) || !state.session.info.capabilities.includes("rind/goals")) {
+    if (!hasConversation() || state.runtime.status !== "ready" || !Array.isArray(state.session.info.capabilities) || !state.session.info.capabilities.includes("rind/goals")) {
       return;
     }
     try {
@@ -166,7 +209,6 @@ export function createCliRuntimeController({
       turn_state: turnState,
       usage,
       background_count: 0,
-      delegate_count: 0,
     };
     state.turn.id = "";
     state.turn.active = false;
@@ -213,6 +255,7 @@ export function createCliRuntimeController({
       return;
     }
     try {
+      if (openManagedSession) { await openManagedSession(selectedId); return; }
       await restoreSession(selectedId, {
         switchSession: true,
         workspaceRoot: selected?.workspace_root,
@@ -224,6 +267,7 @@ export function createCliRuntimeController({
   }
 
   async function runForkSelector() {
+    if (!hasConversation()) return needsConversation("/fork");
     if (state.turn.active || state.display.activeCompact) {
       log("Cannot fork while a turn is running. Wait for it to finish or stop it first.");
       return;
@@ -269,6 +313,11 @@ export function createCliRuntimeController({
       log("Fork failed: the runtime returned no session id.");
       return;
     }
+    if (openManagedSession) {
+      try { await openManagedSession(newId, selected.text || ""); }
+      catch (error) { log(`Forked to ${newId}, but opening failed: ${error instanceof Error ? error.message : String(error)}`); }
+      return;
+    }
     try {
       const switched = await restoreSession(newId, {
         switchSession: true,
@@ -291,6 +340,7 @@ export function createCliRuntimeController({
   }
 
   async function runContextBoard() {
+    if (!hasConversation()) return needsConversation("/context");
     if (state.turn.active || state.display.activeCompact) {
       log("Cannot open the context board while a turn is running. Wait for it to finish or stop it first.");
       return;
@@ -348,6 +398,7 @@ export function createCliRuntimeController({
   }
 
   function startCompactCommand() {
+    if (!hasConversation()) return needsConversation("/compact");
     if (state.turn.active || state.display.activeCompact || compactRequest) {
       log("Wait for the current task to finish or interrupt it before compacting.");
       return;
@@ -399,6 +450,12 @@ export function createCliRuntimeController({
     );
     const selected = await askModelMenu(models, currentModel, providerNames);
     if (!selected || state.runtime.status === "closing") {
+      return;
+    }
+    if (!hasConversation()) {
+      // Kept with the window and used when its first message creates the conversation.
+      state.session.info = { ...state.session.info, provider: selected.providerId || state.session.info.provider, model: selected.modelId };
+      log(() => modelSetResultText({ provider_id: state.session.info.provider, model_id: selected.modelId }, selected.modelId));
       return;
     }
     try {
@@ -458,6 +515,11 @@ export function createCliRuntimeController({
   }
 
   async function applyReasoningEffort(effort) {
+    if (!hasConversation()) {
+      state.session.info = { ...state.session.info, reasoning_effort: effort };
+      log(() => commandResultText("Reasoning effort updated.", `- session effort: ${effort}`));
+      return;
+    }
     try {
       await request(methods.modelEffortSet, { reasoning_effort: effort });
       state.session.info = { ...state.session.info, reasoning_effort: effort };
@@ -472,6 +534,7 @@ export function createCliRuntimeController({
     ensureRuntime,
     restoreSession,
     runGoalCommand,
+    runRename,
     refreshGoalState,
     runSessionsSelector,
     runForkSelector,

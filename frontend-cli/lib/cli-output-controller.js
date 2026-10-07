@@ -53,6 +53,8 @@ export function createCliOutputController({ state, terminalUi, transcript, anima
       pendingInputs: state.input.pending,
       inputMode: inputSession?.mode || "prompt",
       menuOpen: Boolean(inputSession?.menuState?.matches?.()?.length),
+      emptyInput: inputSession?.mode === "prompt" && inputSession.editor?.input() === "",
+      leaveArmed: Boolean(state.display.leaveArmed),
     };
   }
 

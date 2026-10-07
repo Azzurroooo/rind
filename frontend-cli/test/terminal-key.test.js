@@ -84,3 +84,9 @@ test("parses Kitty printable keys, special keys, and ignores releases", () => {
   assert.equal(parseTerminalKey("\x1b[97;1:3u"), null);
   assert.equal(parseTerminalKey("\x1b[1;1:3A"), null);
 });
+
+test("stray mouse reports are ignored instead of being treated as text", () => {
+  assert.equal(parseTerminalKey("\x1b[<0;12;4M"), null);
+  assert.equal(parseTerminalKey("\x1b[<64;12;4M"), null);
+  assert.equal(parseTerminalKey("\x1b[M" + String.fromCharCode(32, 44, 36)), null);
+});

@@ -120,8 +120,7 @@ test("interactive CLI journey: empty startup, login, send, chat, logout", async 
   const cli = spawnCli(workspace, rindHome);
   try {
     await cli.waitFor("fake-model-a");
-    const sessionId = cli.stdout.match(/session\s+(\d{8}_\d{6}_[a-f0-9]+)/)?.[1];
-    assert.ok(sessionId, cli.stdout);
+    assert.match(cli.stdout, /session\s+new/, "nothing exists before the first message");
     await assert.rejects(stat(path.join(rindHome, "sessions")), { code: "ENOENT" });
     cli.send("/login openai-compatible");
     await cli.waitFor("OpenAI compatible (chat completions) API key");
@@ -129,11 +128,11 @@ test("interactive CLI journey: empty startup, login, send, chat, logout", async 
     await cli.waitFor("Logged in to openai-compatible");
     await assert.rejects(stat(path.join(rindHome, "sessions")), { code: "ENOENT" });
 
-    const sent = await promisify(execFile)(process.execPath, [
-      path.join(repoRoot, "frontend-cli", "bin", "rind.js"), "send", "--session", sessionId, "hello there",
-    ], { cwd: workspace, env: { ...process.env, RIND_HOME: rindHome, NO_COLOR: "1" }, timeout: 10000 });
-    assert.ok(sent.stdout.includes(sessionId), sent.stdout);
+    // The first message, typed in the window, creates and saves the conversation.
+    cli.send("hello there");
     const replyAt = await cli.waitFor("hi from fixture");
+    const [sessionId] = await readdir(path.join(rindHome, "sessions"));
+    assert.match(sessionId, /^\d{8}_\d{6}_[a-f0-9]+$/);
     const meta = JSON.parse(await readFile(path.join(rindHome, "sessions", sessionId, "meta.json"), "utf8"));
     assert.equal(meta.session_id, sessionId);
     assert.equal(fixture.requests.at(-1).reasoning_effort, undefined);
@@ -248,12 +247,13 @@ test("session lifecycle: run, send, empty sessions, compact and resume", { timeo
       return { code: error.code, stdout: error.stdout, stderr: error.stderr };
     }
   }
+  // A window opened on a conversation reports its id; a new one has none until its first message.
   async function open(...args) {
     const cli = spawnCli(workspace, home, {}, args);
     clients.push(cli);
     await cli.waitFor("fake-model-a");
-    const id = cli.stdout.match(/session\s+(\d{8}_\d{6}_[a-f0-9]+)/)?.[1];
-    assert.ok(id, cli.stdout);
+    const id = cli.stdout.match(/session\s+(\d{8}_\d{6}_[a-f0-9]+)/)?.[1] || "";
+    if (!id) { await cli.waitFor("session new"); return { cli, id }; }
     // A successful status reply also establishes that the IPC listener is ready.
     for (let attempt = 0; ; attempt += 1) {
       const reply = await command("send", "--session", id, "/status");
@@ -264,9 +264,11 @@ test("session lifecycle: run, send, empty sessions, compact and resume", { timeo
     return { cli, id };
   }
   async function close({ cli, id }) {
-    assert.equal((await command("send", "--session", id, "/exit")).code, 0);
+    if (id) assert.equal((await command("send", "--session", id, "/exit")).code, 0);
+    else cli.send("/exit");
     assert.equal(await cli.exited, 0);
   }
+  const saved = async () => (await readdir(path.join(home, "sessions")).catch(() => [])).sort();
   async function rejectsRun(id) {
     const before = fixture.requests.length;
     const result = await command("run", "--session", id, "--prompt", "must not run");
@@ -295,34 +297,36 @@ test("session lifecycle: run, send, empty sessions, compact and resume", { timeo
       assert.ok(fixture.requests.at(-1).messages.some((m) => m.content === "matrix first task"));
       assert.deepEqual(await readdir(path.join(home, "sessions")), [historyId]);
     });
-    await t.test("3. run rejects a closed unpersisted empty session", async () => {
-      empty = await open();
-      await close(empty);
-      await rejectsRun(empty.id);
+    await t.test("3. a window closed before its first message leaves nothing behind", async () => {
+      const before = await saved();
+      const window = await open();
+      assert.equal(window.id, "");
+      await close(window);
+      assert.deepEqual(await saved(), before);
     });
-    await t.test("7a. send rejects a closed empty session", async () => {
-      const result = await command("send", "--session", empty.id, "must not run");
+    await t.test("7a. send rejects a conversation that does not exist", async () => {
+      const result = await command("send", "--session", "20261007_000000_deadbeef", "must not run");
       assert.notEqual(result.code, 0);
       assert.match(result.stderr, /not running/);
-      await absent(empty.id);
+      await absent("20261007_000000_deadbeef");
     });
     empty = await open();
-    await t.test("4. run rejects another worker's live empty draft without changing it", async () => {
-      await rejectsRun(empty.id);
-      assert.equal(empty.cli.child.exitCode, null);
-    });
-    await t.test("8. compact refuses an empty session without model calls or files", async () => {
-      const before = fixture.requests.length;
+    await t.test("8. compact before the first message needs a conversation, without model calls or files", async () => {
+      const before = { requests: fixture.requests.length, saved: await saved() };
       empty.cli.send("/compact");
-      await empty.cli.waitFor("Not enough messages to compact. Send a message first.", 10000, 0, "stderr");
-      assert.equal(fixture.requests.length, before);
-      await absent(empty.id);
+      await empty.cli.waitFor("/compact needs a conversation. Send your first message to start one.");
+      assert.equal(fixture.requests.length, before.requests);
+      assert.deepEqual(await saved(), before.saved);
     });
-    await t.test("5. send starts the first turn in a live empty session", async () => {
+    await t.test("5. the first message typed in a window creates its conversation", async () => {
+      const before = await saved();
       fixture.script.push({ chunks: ["matrix sent first reply"] });
-      assert.equal((await command("send", "--session", empty.id, "matrix sent first task")).code, 0);
+      empty.cli.send("matrix sent first task");
       await empty.cli.waitFor("matrix sent first reply");
-      assert.equal(JSON.parse(await readFile(path.join(base(empty.id), "meta.json"), "utf8")).session_id, empty.id);
+      const [id] = (await saved()).filter((entry) => !before.includes(entry));
+      assert.ok(id, "exactly one conversation was created");
+      empty = { ...empty, id };
+      assert.equal(JSON.parse(await readFile(path.join(base(id), "meta.json"), "utf8")).session_id, id);
     });
     await close(empty);
     empty = await open("--session", empty.id);
@@ -394,7 +398,8 @@ test("session lifecycle: run, send, empty sessions, compact and resume", { timeo
         await writeFile(path.join(base(id), "meta.json"), meta);
         const result = await command("run", "--session", id, "--prompt", "must not run");
         assert.notEqual(result.code, 0);
-        assert.deepEqual(await readdir(base(id)), ["meta.json"]);
+        // filelock leaves its .lock file on POSIX (Windows removes it); it is not session content.
+        assert.deepEqual((await readdir(base(id))).filter((entry) => !entry.endsWith(".lock")), ["meta.json"]);
         assert.equal(await readFile(path.join(base(id), "meta.json"), "utf8"), meta);
       }
       assert.equal(fixture.requests.length, before);

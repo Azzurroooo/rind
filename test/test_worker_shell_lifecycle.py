@@ -1,3 +1,4 @@
+import asyncio
 import json
 import shlex
 import sys
@@ -6,6 +7,7 @@ from types import SimpleNamespace
 import pytest
 
 from agent.runtime.server.worker import RuntimeWorker
+from agent.infrastructure.tools.shell.session_pool import ShellState
 
 
 @pytest.mark.asyncio
@@ -49,3 +51,32 @@ async def test_workers_own_shells_and_idle_preserves_backgrounds(tmp_path, monke
         for worker in workers:
             await worker.close()
             await worker.close()
+
+
+@pytest.mark.asyncio
+async def test_worker_stops_shells_while_execution_cleanup_is_blocked(tmp_path, monkeypatch):
+    monkeypatch.setenv("RIND_HOME", str(tmp_path / "home"))
+    worker = RuntimeWorker(workspace_root=str(tmp_path), session_dir=str(tmp_path / "sessions"))
+    state = ShellState(cwd=str(tmp_path), env={}, shell_executable=sys.executable)
+    release = asyncio.Event()
+    close_execution = worker.execution.close
+
+    async def slow_close():
+        await release.wait()
+        await close_execution()
+
+    monkeypatch.setattr(worker.execution, "close", slow_close)
+    closing = None
+    try:
+        result = await worker.shell_tools.supervisor.run("import time; time.sleep(60)", state, "owned", yield_time_ms=0)
+        record = worker.shell_tools.supervisor._processes[json.loads(result.result_str)["data"]["task_id"]]
+        closing = asyncio.create_task(worker.close())
+        await asyncio.wait_for(record.finished.wait(), 5)
+        assert record.process.returncode is not None
+        assert record.status == "cancelled"
+        assert not closing.done()
+    finally:
+        release.set()
+        if closing is not None:
+            await closing
+        await worker.close()

@@ -174,8 +174,10 @@ class RuntimeDispatcher:
         background_output: Callable[..., Any] | None = None,
         goal_enabled: bool = True,
         writer: Any,
+        allow_session_configuration: bool = False,
     ):
         self._worker = worker
+        self._allow_session_configuration = allow_session_configuration
         self._debug = debug
         self._background_list = background_list
         self._background_output = background_output
@@ -223,8 +225,14 @@ class RuntimeDispatcher:
                     self._stopping = True
                     for session_id in self._worker.execution.active_session_ids():
                         self._worker.execution.interrupt(session_id, "Worker shutting down")
-                await self._drain_dispatch_tasks()
-                await self._worker.close()
+                try:
+                    try:
+                        await self._drain_dispatch_tasks()
+                    finally:
+                        await self._worker.close()
+                except Exception as exc:
+                    await self._respond_to_shutdown(exc)
+                    raise
                 await self._respond_to_shutdown()
                 return 0
             if str(request.get("method") or "") == RuntimeMethod.SHUTDOWN:
@@ -271,11 +279,14 @@ class RuntimeDispatcher:
         self._requests.put_nowait(None)
         return True
 
-    async def _respond_to_shutdown(self) -> None:
+    async def _respond_to_shutdown(self, error: Exception | None = None) -> None:
         if self._shutdown_request is None or self._shutdown_response_sent:
             return
         self._shutdown_response_sent = True
-        await self._respond(self._shutdown_request, {"ok": True})
+        if error is not None:
+            await self._respond_error(self._shutdown_request, str(error), "ShutdownFailed")
+        else:
+            await self._respond(self._shutdown_request, {"ok": True})
 
     async def _dispatch(self, request: dict[str, Any]) -> None:
         method = str(request.get("method") or "")
@@ -295,6 +306,13 @@ class RuntimeDispatcher:
             if not self._initialized:
                 await self._respond_error(request, "Runtime worker is not initialized.", "ServerNotReady")
                 return
+            if method == RuntimeMethod.SESSION_OPEN:
+                if not self._allow_session_configuration:
+                    raise ValueError("Session configuration requires the local execution host.")
+                result = await self._worker.open_session(request.get("params") or {})
+                self._subscribed.add(result["session_id"])
+                await self._respond(request, result)
+                return
             if method == RuntimeMethod.SESSION_LIST:
                 await self._list_sessions(request)
                 return
@@ -306,6 +324,9 @@ class RuntimeDispatcher:
                 return
             if method == RuntimeMethod.SESSION_DELETE:
                 await self._delete_session(request)
+                return
+            if method == RuntimeMethod.SESSION_CREATE:
+                await self._create_conversation(request)
                 return
             if method == RuntimeMethod.SESSION_FORK:
                 await self._fork_session(request)
@@ -381,21 +402,34 @@ class RuntimeDispatcher:
         except Exception as exc:
             await self._respond_error(request, str(exc), type(exc).__name__)
 
+    async def _execute_without_conversation(self, request: dict[str, Any], command: str, raw_input: str, params: dict[str, Any]) -> None:
+        """Before the first message only reading commands work; others say how to start."""
+        if command not in {"sessions", "status"}:
+            await self._respond_slash_result(request, SlashCommandResult(
+                f"/{command} needs a conversation. Send your first message to start one." if command else "Send your first message to start a conversation."))
+            return
+        root = str(params.get("workspace_root") or self._worker.workspace_root)
+        store = self._worker.repository.listing_store(root)
+        result = await self._slash_router.execute(raw_input, SlashCommandContext(
+            runtime=None, session=store, debug=self._debug, workspace_root=root, compact_context=None))
+        await self._respond_slash_result(request, result)
+
     async def _auth_list(self, request: dict[str, Any]) -> None:
         await self._respond(request, {"providers": self._worker.list_providers()})
 
     async def _auth_login(self, request: dict[str, Any]) -> None:
-        session_id = await self._required_session_id(request)
+        params = request.get("params") if isinstance(request.get("params"), dict) else {}
+        # Before the first message there is no conversation to switch; the window keeps the choice.
+        session_id = await self._required_session_id(request) if params.get("session_id") else ""
         if session_id is None:
             return
-        params = request.get("params") if isinstance(request.get("params"), dict) else {}
         provider_id = str(params.get("provider_id") or "").strip()
         method = str(params.get("method") or "api_key").strip()
         if not provider_id:
             await self._respond_error(request, "provider_id is required.", "InvalidRequest")
             return
         await self._worker.login(provider_id, method, _ProtocolAuthInteraction(self))
-        info = await self._worker.session(session_id)
+        info = await self._worker.session(session_id) if session_id else await self._worker.blank_info(params.get("workspace_root"))
         listing = await self._worker.list_models(info.get("workspace_root"))
         selection = await self._adopt_login_default(session_id, info, provider_id, listing["models"])
         await self._respond(
@@ -413,8 +447,9 @@ class RuntimeDispatcher:
         if not provider_models:
             return None
         chosen = next((m for m in provider_models if m.get("id") == current_model), provider_models[0])
-        store = await self._worker.repository.open_store(session_id, persist_system_prompt=False)
-        await store.update_selection(provider_id, str(chosen["id"]))
+        if session_id:
+            store = await self._worker.repository.open_store(session_id, persist_system_prompt=False)
+            await store.update_selection(provider_id, str(chosen["id"]))
         return {"provider_id": provider_id, "model_id": str(chosen["id"])}
 
     async def _auth_logout(self, request: dict[str, Any]) -> None:
@@ -441,8 +476,8 @@ class RuntimeDispatcher:
         if session_id:
             self._subscribed.add(session_id)
         result = {
-            "session_id": info["session_id"],
-            "draft": bool(info.get("draft")),
+            # Empty until the window's first message creates its conversation.
+            "session_id": session_id,
             "model": info.get("model"),
             "provider": info.get("provider"),
             "reasoning_effort": info.get("reasoning_effort"),
@@ -468,7 +503,10 @@ class RuntimeDispatcher:
         return protocol_capabilities(background_enabled(self._background_list, self._background_output), self._goal_enabled)
 
     def _methods(self) -> list[str]:
-        return protocol_methods(background_enabled(self._background_list, self._background_output), self._goal_enabled)
+        methods = protocol_methods(background_enabled(self._background_list, self._background_output), self._goal_enabled)
+        if self._allow_session_configuration:
+            methods.append(RuntimeMethod.SESSION_OPEN)
+        return methods
 
     def _slash_command_infos(self) -> list[dict[str, Any]]:
         return slash_command_infos(self._slash_router)
@@ -508,6 +546,13 @@ class RuntimeDispatcher:
                 await self._send_event(event)
             if completion_scope == "request":
                 request_result = await self._worker.execution.wait_request(session_id)
+        except Exception:
+            if completion_scope == "request":
+                self._worker.execution.abandon_request(session_id)
+            # A turn that failed to start never saved its message: that
+            # conversation never existed. The worker decides; a saved one stays.
+            await self._discard_if_unsaved(session_id)
+            raise
         except BaseException:
             if completion_scope == "request":
                 self._worker.execution.abandon_request(session_id)
@@ -590,12 +635,16 @@ class RuntimeDispatcher:
             if not isinstance(workspace_root, str) or not workspace_root.strip():
                 await self._respond_error(request, "workspace_root must be a non-empty string.", "InvalidRequest")
                 return
-        sessions = await self._worker.repository.list(limit=limit, workspace_root=workspace_root)
+        excluded = params.get("exclude_workspace_roots")
+        if excluded is not None and (not isinstance(excluded, list) or not all(isinstance(item, str) for item in excluded)):
+            await self._respond_error(request, "exclude_workspace_roots must be a list of strings.", "InvalidRequest")
+            return
+        sessions = await self._worker.repository.list(limit=limit, workspace_root=workspace_root, exclude_workspace_roots=excluded)
         await self._respond(
             request,
             {
                 "sessions": sessions,
-                "current_session_id": self._worker.session_id,
+                "current_session_id": self._worker.session_id or "",
             },
         )
 
@@ -632,6 +681,21 @@ class RuntimeDispatcher:
         await self._worker.delete_session(session_id)
         self._subscribed.discard(session_id)
         await self._respond(request, {"ok": True, "deleted": session_id})
+
+    async def _create_conversation(self, request: dict[str, Any]) -> None:
+        """A window's first message creates its conversation; nothing exists before."""
+        params = request.get("params") if isinstance(request.get("params"), dict) else {}
+        if ("external_tools" in params or "enable_user_question" in params) and not self._allow_session_configuration:
+            raise ValueError("Session configuration requires the local execution host.")
+        info = await self._worker.create_conversation(params)
+        self._subscribed.add(info["session_id"])
+        await self._respond(request, info)
+
+    async def _discard_if_unsaved(self, session_id: str) -> None:
+        """A first prompt that failed before its message was saved leaves nothing behind."""
+        if await self._worker.discard_unsaved(session_id):
+            await self._send_event({"type": "session_discarded", "session_id": session_id, "turn_id": ""})
+            self._subscribed.discard(session_id)
 
     async def _fork_session(self, request: dict[str, Any]) -> None:
         session_id = await self._required_session_id(request)
@@ -708,7 +772,8 @@ class RuntimeDispatcher:
                 return
         else:
             session_id = (await self._worker.initialize())["session_id"]
-        info = await self._worker.session(session_id)
+        # Before its first message a window has settings but no conversation.
+        info = await self._worker.session(session_id) if session_id else await self._worker.blank_info(params.get("workspace_root"))
         refresh = bool(params.get("refresh", False))
         listing = await self._worker.list_models(info.get("workspace_root"), refresh=refresh)
         current_model = str(info.get("model") or "")
@@ -784,11 +849,11 @@ class RuntimeDispatcher:
         session_id = params.get("session_id")
         if not isinstance(session_id, str) or not session_id.strip():
             session_id = self._worker.session_id
-        if not isinstance(session_id, str) or not session_id.strip():
-            await self._respond_error(request, "session_id is required for this command.", "InvalidRequest")
-            return
         raw_input = str(params.get("input") or "").strip()
         command = raw_input.split(maxsplit=1)[0].lstrip("/").lower() if raw_input else ""
+        if not isinstance(session_id, str) or not session_id.strip():
+            await self._execute_without_conversation(request, command, raw_input, params)
+            return
         needs_execution = command == "team"
         if command == "compact":
             self._subscribed.add(session_id)
@@ -812,6 +877,10 @@ class RuntimeDispatcher:
                 ),
             )
             await self._respond_slash_result(request, result)
+            renamed = result.display if isinstance(result.display, dict) and result.display.get("type") == "session_renamed" else None
+            if renamed:
+                # Every window showing it, and the lists, follow the new name.
+                await self._send_event({"type": "session_renamed", "session_id": session_id, "turn_id": "", "name": renamed["name"], "title": renamed["title"]})
         finally:
             if owns_execution:
                 await self._worker.release_execution(session_id)

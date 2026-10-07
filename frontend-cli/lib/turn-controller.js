@@ -6,6 +6,7 @@ export function createTurnController({
   output,
   onTurnStart = () => {},
 }) {
+  let activeSubmission = Promise.resolve();
   function submit(text, extra = {}) {
     if (state.activeTurn) {
       void submitQueuedInput(runtimeMethods.sessionSteer, text, text, "steering");
@@ -42,7 +43,7 @@ export function createTurnController({
     state.interruptRequested = false;
     onTurnStart();
     output.refreshInputState();
-    void run(text, extra).catch((error) => handleSubmissionError(error, text));
+    activeSubmission = run(text, extra).catch((error) => handleSubmissionError(error, text));
   }
 
   async function run(text, extra = {}) {
@@ -74,5 +75,6 @@ export function createTurnController({
     submit,
     submitFollowUp,
     interrupt,
+    waitForIdle: () => activeSubmission,
   };
 }

@@ -1,0 +1,122 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import { mkdtemp, rm, readFile, mkdir } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+import { startServer } from "../dist/ipc.js";
+import { connectClient } from "../dist/client.js";
+import { managementBuildId } from "../dist/build.js";
+
+test("direct host can reconcile after restart while its model cannot revive an expired session", async t => {
+  const home = await mkdtemp(path.join(os.tmpdir(), "rind-ipc-restart-"));
+  const options = { home, repoRoot: fileURLToPath(new URL("../..", import.meta.url)) };
+  let server = await startServer(options);
+  const clients = [];
+  t.after(async () => { clients.forEach(c => c.close()); await server.close(); await rm(home, { recursive: true, force: true }); });
+  const token = (await readFile(server.paths.token, "utf8")).trim();
+  const connect = async (credential = token, runtimeSessionId) => {
+    const client = await connectClient({ endpoint: server.paths.endpoint, token: credential, runtimeSessionId }); clients.push(client); return client;
+  };
+  const a = await connect();
+  const workspace = path.join(home, "workspace"); await mkdir(workspace);
+  const agent = await a.request("registerAgent", { workspace });
+  const session = await a.request("attachSession", { agentId: agent.id });
+  await a.request("bindSession", { sessionId: session.id, runtimeSessionId: "live" });
+  const config = await a.request("sessionTools", { sessionId: session.id });
+  await a.request("beginRun", { sessionId: session.id });
+  await server.close(); server = await startServer(options);
+  const model = await connect(config.env.RIND_MANAGEMENT_TOKEN, "live");
+  await assert.rejects(model.request("snapshot"), { code: "SESSION_EXPIRED" });
+  const b = await connect();
+  assert.equal((await b.request("snapshot")).runs[0].status, "unknown");
+  await b.request("reattachSession", { sessionId: session.id, runtimeSessionId: "live", active: true });
+  assert.ok((await model.request("snapshot")).sessions.some(s => s.id === session.id));
+  const host = await connect(config.lifecycle.env.RIND_MANAGEMENT_TOKEN, "live");
+  await host.request("hostTurnEnd", { outcome: "turn_completed", pending: false });
+  assert.equal((await b.request("snapshot")).runs[0].status, "succeeded");
+});
+
+test("local service has one writer, scoped credentials, subscription and disconnect reconciliation", async t => {
+  const home = await mkdtemp(path.join(os.tmpdir(), "rind-ipc-"));
+  const options = { home, repoRoot: fileURLToPath(new URL("../..", import.meta.url)) };
+  const server = await startServer(options);
+  const clients = [];
+  t.after(async () => { for (const c of clients) c.close(); await server.close(); await rm(home, { recursive: true, force: true }); });
+  await assert.rejects(startServer(options));
+  const token = (await readFile(server.paths.token, "utf8")).trim();
+  const snapshots = [];
+  const a = await connectClient({ endpoint: server.paths.endpoint, token, onSnapshot: snapshot => snapshots.push(snapshot) });
+  const b = await connectClient({ endpoint: server.paths.endpoint, token });
+  clients.push(a, b);
+  await a.request("subscribe", { afterSeq: 0 });
+  await Promise.all([a.request("createTeam", { name: "A" }), b.request("createTeam", { name: "B" })]);
+  assert.equal((await a.request("snapshot")).teams.length, 2);
+  assert.ok(snapshots.length);
+  const workspace = path.join(home, "workspace"); await mkdir(workspace);
+  const agent = await a.request("registerAgent", { workspace });
+  const team = (await a.request("listTeams"))[0];
+  await a.request("addMember", { teamId: team.id, agentId: agent.id });
+  await a.request("setLeader", { teamId: team.id, agentId: agent.id });
+  const session = await a.request("attachSession", { agentId: agent.id, teamId: team.id });
+  await a.request("bindSession", { sessionId: session.id, runtimeSessionId: "runtime-1" });
+  const config = await a.request("sessionTools", { sessionId: session.id });
+  const runtime = await connectClient({ endpoint: server.paths.endpoint, token: config.env.RIND_MANAGEMENT_TOKEN, runtimeSessionId: "runtime-1" });
+  clients.push(runtime);
+  assert.equal((await runtime.request("listTeams")).length, 1);
+  await assert.rejects(runtime.request("hostTurnEnd", { outcome: "turn_completed" }), { code: "FORBIDDEN" });
+  const host = await connectClient({ endpoint: server.paths.endpoint, token: config.lifecycle.env.RIND_MANAGEMENT_TOKEN, runtimeSessionId: "runtime-1" });
+  clients.push(host);
+  await assert.rejects(host.request("createTeam", { name: "bad-host" }), { code: "FORBIDDEN" });
+  await assert.rejects(runtime.request("createTeam", { name: "bad" }), { code: "FORBIDDEN" });
+  const impostor = await connectClient({ endpoint: server.paths.endpoint, token: config.env.RIND_MANAGEMENT_TOKEN, runtimeSessionId: "runtime-2" });
+  clients.push(impostor);
+  await assert.rejects(impostor.request("snapshot"), { code: "UNAUTHORIZED" });
+  const run = await a.request("beginRun", { sessionId: session.id });
+  a.close();
+  for (let i = 0; i < 30; i++) {
+    const current = (await b.request("snapshot")).runs.find(r => r.id === run.id);
+    if (current.status === "unknown") return;
+    await new Promise(resolve => setTimeout(resolve, 10));
+  }
+  assert.fail("disconnected host must not remain live");
+});
+
+test("the service reports its build and refuses to stop while an agent is working", async t => {
+  const home = await mkdtemp(path.join(os.tmpdir(), "rind-ipc-lifecycle-"));
+  let shutdowns = 0;
+  const server = await startServer({ home, repoRoot: fileURLToPath(new URL("../..", import.meta.url)), onShutdown: () => { shutdowns++; } });
+  t.after(async () => { await server.close(); await rm(home, { recursive: true, force: true }); });
+  const client = await connectClient({ endpoint: server.paths.endpoint, token: (await readFile(server.paths.token, "utf8")).trim() });
+  const info = await client.request("serviceInfo");
+  assert.equal(info.buildId, await managementBuildId());
+  assert.equal(info.pid, process.pid);
+  assert.equal(info.working, 0);
+  const workspace = path.join(home, "workspace"); await mkdir(workspace);
+  const agent = await client.request("registerAgent", { workspace });
+  const session = await client.request("attachSession", { agentId: agent.id });
+  await client.request("bindSession", { sessionId: session.id, runtimeSessionId: "live" });
+  await client.request("beginRun", { sessionId: session.id });
+  assert.equal((await client.request("serviceInfo")).conversations, 1);
+  await assert.rejects(client.request("serviceShutdown"), { code: "SERVICE_BUSY", message: /1 agent is still working/ });
+  assert.equal(shutdowns, 0, "a busy service keeps running");
+});
+
+test("stopping with stopAgents ends a busy service, and the next client starts a fresh one", async t => {
+  const home = await mkdtemp(path.join(os.tmpdir(), "rind-ipc-stop-"));
+  const options = { home, repoRoot: fileURLToPath(new URL("../..", import.meta.url)) };
+  let stopped;
+  const exited = new Promise(resolve => { stopped = resolve; });
+  const server = await startServer({ ...options, onShutdown: stopped });
+  t.after(async () => { await server.close(); await rm(home, { recursive: true, force: true }); });
+  const client = await connectClient({ endpoint: server.paths.endpoint, token: (await readFile(server.paths.token, "utf8")).trim() });
+  const workspace = path.join(home, "workspace"); await mkdir(workspace);
+  const agent = await client.request("registerAgent", { workspace });
+  const session = await client.request("attachSession", { agentId: agent.id });
+  await client.request("bindSession", { sessionId: session.id, runtimeSessionId: "live" });
+  await client.request("beginRun", { sessionId: session.id });
+  const result = await client.request("serviceShutdown", { stopAgents: true });
+  assert.deepEqual([result.stopping, result.working], [true, 1]);
+  await exited;
+  await assert.rejects(connectClient({ endpoint: server.paths.endpoint, token: "x" }), "the endpoint is closed after stopping");
+});

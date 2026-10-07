@@ -30,10 +30,11 @@ class SlashCommandRouter:
             invocations = self._skill_invocation_parser.parse(raw_input or "")
             if invocations and invocations[0].syntax == "slash":
                 return SlashCommandResult(next_prompt={"input": raw_input})
-            name, args = self._parse(raw_input)
+            name, rest = self._split(raw_input)
             info = self._commands_by_name.get(name)
             if info is None:
                 return SlashCommandResult(f"Unknown command: /{name}\nRun /help to see available commands.")
+            args = [rest] if info.raw_args else self._parse(raw_input)[1]
             result = info.handler(context, args)
             if inspect.isawaitable(result):
                 result = await result
@@ -66,6 +67,13 @@ class SlashCommandRouter:
                     raise ValueError(f"Duplicate command alias: {normalized_alias}")
                 aliases.add(normalized_alias)
                 self._commands_by_name[normalized_alias] = info
+
+    def _split(self, raw_input: str) -> tuple[str, str]:
+        text = raw_input.strip()
+        if not text.startswith("/") or len(text) == 1:
+            raise ValueError("Slash command must start with '/'.")
+        name, _, rest = text[1:].partition(" ")
+        return name.lower(), rest
 
     def _parse(self, raw_input: str) -> tuple[str, list[str]]:
         text = raw_input.strip()

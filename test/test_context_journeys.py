@@ -143,7 +143,7 @@ def _summarize_breakdown(result: dict) -> dict:
 def test_jc1_fresh_exchange_shows_board_rows_with_small_deviation(context_worker, model_server):
     client = context_worker.client
     info = client.request("initialize", {})
-    session_id = info["session_id"]
+    session_id = client.request("session/create", {})["session_id"]
     model_server.script_text(["Hello", ", nice to meet you."], delay_ms=1)
     client.run_prompt(session_id, "say hello")
 
@@ -190,7 +190,7 @@ def test_jc1_fresh_exchange_shows_board_rows_with_small_deviation(context_worker
 def test_jc2_bash_calls_widen_the_tool_segment(context_worker, model_server):
     client = context_worker.client
     info = client.request("initialize", {})
-    session_id = info["session_id"]
+    session_id = client.request("session/create", {})["session_id"]
     model_server.script_tool_call("bash", {"command": "echo journey-context"}, then_text=["done"])
     client.run_prompt(session_id, "run echo via bash")
 
@@ -207,7 +207,7 @@ def test_jc2_bash_calls_widen_the_tool_segment(context_worker, model_server):
 def test_jc3_compact_replaces_history_and_counts_compactions(context_worker, model_server):
     client = context_worker.client
     info = client.request("initialize", {})
-    session_id = info["session_id"]
+    session_id = client.request("session/create", {})["session_id"]
     model_server.script_text(["first answer"], delay_ms=1)
     client.run_prompt(session_id, "first question")
 
@@ -232,7 +232,7 @@ def test_jc3_compact_replaces_history_and_counts_compactions(context_worker, mod
 def test_jc4_fork_inherits_snapshot_and_ledger_records_new_session(context_worker, model_server):
     client = context_worker.client
     info = client.request("initialize", {})
-    session_id = info["session_id"]
+    session_id = client.request("session/create", {})["session_id"]
     model_server.script_text(["before fork"], delay_ms=1)
     client.run_prompt(session_id, "question before fork")
 

@@ -15,7 +15,6 @@ import {
   commandResultText,
   contextBuiltLine,
   systemNoticeLine,
-  delegateMonitorText,
   errorLine,
   goalCommandText,
   goalText,
@@ -304,9 +303,9 @@ test("helpText renders compact shortcuts and commands", () => {
       "  enter        send / steer         tab            queue follow-up",
       "  ↑ / ↓        history              ← / →          move cursor",
       "  home / end   line edges           del / backspace edit text",
-      "  ctrl+c       interrupt or quit    ?              show shortcuts",
+      "  ctrl+c       stop · clear · leave ?              show shortcuts",
             "  ctrl+b       task monitor         esc            close monitor",
-      "  ctrl+o       toggle tool detail",
+      "  ctrl+o       toggle tool detail   ← empty        agents",
     ].join("\n"),
   );
   assert.equal(
@@ -322,9 +321,9 @@ test("helpText renders compact shortcuts and commands", () => {
       "  enter        send / steer         tab            queue follow-up",
       "  ↑ / ↓        history              ← / →          move cursor",
       "  home / end   line edges           del / backspace edit text",
-      "  ctrl+c       interrupt or quit    ?              show shortcuts",
+      "  ctrl+c       stop · clear · leave ?              show shortcuts",
             "  ctrl+b       task monitor         esc            close monitor",
-      "  ctrl+o       toggle tool detail",
+      "  ctrl+o       toggle tool detail   ← empty        agents",
       "",
       `  ── Commands · 5 available ${"─".repeat(68)}`,
       "  /status",
@@ -699,16 +698,6 @@ test("toolRequestedLine shows bash command", () => {
   );
 });
 
-test("toolRequestedLine shows delegate agent", () => {
-  assert.equal(
-    toolRequestedLine({
-      tool_name: "delegate",
-      args_preview: '{"agent_id":"weather-agent","task":"check the forecast"}',
-    }),
-    "  ◌ Tool · Calling delegate\n    ↳ agent: weather-agent",
-  );
-});
-
 test("toolRequestedLine clips long details", () => {
   const line = toolRequestedLine({
     tool_name: "bash",
@@ -745,13 +734,6 @@ test("prompt shows background task count after cwd with monitor hint", () => {
   assert.match(text, /m1 · E:\\project · \[bg:2\] \(ctrl\+b monitor\)/);
 });
 
-test("prompt shows delegate count after background count", () => {
-  const text = promptText({ model: "m1", cwd: "E:\\project", background_count: 2, delegate_count: 1 });
-  assert.match(text, /m1 · E:\\project · \[bg:2\] \[delegate:1\] \(ctrl\+b monitor\)/);
-  const delegateOnly = promptText({ model: "m1", cwd: "E:\\project", delegate_count: 1 });
-  assert.match(delegateOnly, /m1 · E:\\project · \[delegate:1\] \(ctrl\+b monitor\)/);
-});
-
 test("themeMenuText renders flavor swatches with current marker", () => {
   const text = themeMenuText([
     { name: "latte", label: "Latte", current: false },
@@ -766,11 +748,10 @@ test("themeMenuText renders flavor swatches with current marker", () => {
   assert.match(plain, /enter use · esc cancel/);
 });
 
-test("task monitor tabs mark the active page and fit narrow widths", () => {
-  const tabs = taskMonitorTabs("delegates", 2, 1, 80);
-  assert.match(tabs, /› Delegates \[1\]/);
-  assert.match(tabs, /Background \[2\]/);
-  assert.equal(taskMonitorTabs("background", 2, 1, 20).split("\n").length, 2);
+test("task monitor header directs background work without obsolete delegate tabs", () => {
+  const tabs = taskMonitorTabs("background", 2);
+  assert.match(tabs, /› Background \[2\]/);
+  assert.doesNotMatch(tabs, /Delegates/);
 });
 
 test("background monitor renders selection and latest output", () => {
@@ -784,18 +765,6 @@ test("background monitor renders selection and latest output", () => {
   assert.match(text, /› bg_1/);
   assert.match(text, /tick-2/);
   assert.match(text, /bg_2/);
-});
-
-test("delegate monitor renders the selected task and summary", () => {
-  const text = delegateMonitorText(
-    [{ agent_id: "builder-agent", status: "completed", task: "build it", summary: "created dist" }],
-    0,
-  );
-  assert.match(text, /↑↓\/j\/k select/);
-  assert.doesNotMatch(text, /^Delegates$/m);
-  assert.match(text, /builder-agent/);
-  assert.match(text, /task: build it/);
-  assert.match(text, /created dist/);
 });
 
 test("toolRequestedLine keeps large file content out of the status", () => {

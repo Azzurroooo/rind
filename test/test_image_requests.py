@@ -237,7 +237,7 @@ async def test_runtime_read_image_reaches_next_request(tmp_path, monkeypatch, ca
     settings = AppSettings(tmp_path / "settings.json", True, "fake", "fake", "http://localhost/v1", "")
     container = build_agent_container(settings=settings, chat_client=Client(), image_input=capability,
                                       session_dir=str(tmp_path / "sessions"), workspace_root=str(tmp_path),
-                                      enabled_tools={"read_file"}, lock_workspace=False)
+                                      enabled_tools={"read_file"})
     try:
         events = [event async for event in container.runtime.run_turn(query="Read chart.png")]
         assert events[-1].type == "turn_completed", events
@@ -349,7 +349,7 @@ async def test_queued_upload_captures_at_delivery(tmp_path, monkeypatch, mode):
             yield ModelStreamEvent("completed", stop_reason="stop")
     settings = AppSettings(tmp_path / "settings.json", True, "fake", "fake", "http://localhost/v1", "")
     container = build_agent_container(settings=settings, chat_client=Client(), image_input=True,
-        session_dir=str(tmp_path / "sessions"), workspace_root=str(tmp_path), enabled_tools={"read_file"}, lock_workspace=False)
+        session_dir=str(tmp_path / "sessions"), workspace_root=str(tmp_path), enabled_tools={"read_file"})
     async def consume():
         return [event async for event in container.runtime.run_turn(query="start")]
     task = asyncio.create_task(consume())
@@ -389,7 +389,7 @@ async def test_old_image_budget_compacts_once_and_oversized_tool_group_fails(tmp
     client = Client()
     settings = AppSettings(tmp_path / "settings.json", True, "fake", "fake", "http://localhost/v1", "")
     container = build_agent_container(settings=settings, chat_client=client, image_input=True,
-        session_dir=str(tmp_path / "sessions"), workspace_root=str(tmp_path), enabled_tools={"read_file"}, lock_workspace=False)
+        session_dir=str(tmp_path / "sessions"), workspace_root=str(tmp_path), enabled_tools={"read_file"})
     try:
         await container.runtime.initialize()
         store = container.session_store

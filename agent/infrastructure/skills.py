@@ -18,6 +18,7 @@ class SkillRepository:
         project_skill_dir: str | None = None,
         user_skill_dir: str | None = None,
         agent_skill_dir: str | None = None,
+        skill_files: tuple[str, ...] = (),
     ):
         project_base = Path(project_root).expanduser().resolve() if project_root else resolve_project_root()
         user_base = Path(user_home).expanduser().resolve() / ".rind" if user_home else resolve_rind_home()
@@ -32,6 +33,7 @@ class SkillRepository:
             else user_base / "skills"
         )
         self._agent_skill_dir = Path(agent_skill_dir).expanduser().resolve() if agent_skill_dir else None
+        self._skill_files = tuple(Path(file).resolve() for file in skill_files)
 
     def list_skills(self) -> list[SkillMetadata]:
         """Return effective metadata without loading Skill bodies."""
@@ -43,6 +45,9 @@ class SkillRepository:
         ):
             for skill in self._scan_dir(root, scope):
                 skills_by_name[skill.name.lower()] = skill
+        for file in self._skill_files:
+            metadata = parse_skill_metadata(_read_frontmatter(file), str(file), file.parent.name, "agent")
+            skills_by_name[metadata.name.lower()] = metadata
         return sorted(skills_by_name.values(), key=lambda item: item.name.lower())
 
     def get_skill(self, name: str) -> SkillMetadata | None:
@@ -59,7 +64,7 @@ class SkillRepository:
         declared_file = Path(metadata.path)
         if declared_file.is_symlink():
             raise ValueError("SKILL.md must remain inside its Skill scope root.")
-        root = self.skill_root(metadata.scope)
+        root = declared_file.parent if declared_file in self._skill_files else self.skill_root(metadata.scope)
         skill_file = _ensure_within_root(declared_file, root)
         if skill_file.is_symlink() or not skill_file.is_file():
             raise ValueError("SKILL.md must remain inside its Skill scope root.")

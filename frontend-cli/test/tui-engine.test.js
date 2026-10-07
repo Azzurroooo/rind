@@ -82,6 +82,26 @@ test("first render writes lines to the screen", async () => {
   tui.stop();
 });
 
+test("alternate page restores the original terminal without capturing the mouse", async () => {
+  const virtual = createVirtualOutput({ columns: 40, rows: 8 });
+  virtual.output.write("Original conversation");
+  const writes = [];
+  const output = { ...virtual.output, write(value) { writes.push(value); return virtual.output.write(value); } };
+  const input = createVirtualInput();
+  const tui = createTui({ input, output, alternateScreen: true, renderIntervalMs: 0 });
+  tui.addChild(new StaticText("Agents overview"));
+  tui.start();
+  await settle(virtual);
+  assert.match(virtual.getViewport().join("\n"), /Agents overview/);
+  assert.ok(writes.join("").includes("\x1b[?1049h"));
+  tui.stop();
+  await virtual.flush();
+  assert.match(virtual.getViewport().join("\n"), /Original conversation/);
+  assert.ok(writes.join("").includes("\x1b[?1049l"));
+  assert.doesNotMatch(writes.join(""), /\x1b\[\?100[06]h/);
+  assert.equal(input.isRaw, false);
+});
+
 test("appending lines extends the frame without erasing previous rows", async () => {
   const { tui, virtual } = createHarness();
   const list = new Container();
@@ -267,6 +287,37 @@ test("terminal consumes Kitty negotiation responses and restores the protocol on
   writes.length = 0;
   tui.stop();
   assert.ok(writes.some((write) => write.includes("\x1b[<u")), "restores the terminal keyboard protocol");
+});
+
+test("keyboard negotiation completes once, swallows late answers and can be drained", async () => {
+  const { createTui: freshTui } = await import("../lib/tui/tui.js?negotiation=" + Date.now());
+  const recording = () => {
+    const virtual = createVirtualOutput({ columns: 20, rows: 6 });
+    const writes = [];
+    return { virtual, writes, output: Object.assign(Object.create(virtual.output), { write(chunk) { writes.push(String(chunk)); return virtual.output.write(chunk); } }) };
+  };
+  const first = recording(), input = createVirtualInput(), received = [];
+  const tui = freshTui({ input, output: first.output, renderIntervalMs: 0, setTimeout: (fn, delay) => setTimeout(fn, delay), clearTimeout });
+  tui.onData(sequence => received.push(sequence));
+  tui.start();
+  await settle(first.virtual);
+  const drained = tui.drainKeyboardQuery();
+  input.send("\x1b[?7u");
+  input.send("\x1b[?61;4;6;7;14;21;22;23;24;28;32;42;52c");
+  await drained;
+  input.send("\x1b[?61;4;6c");
+  input.send("z");
+  await settle(first.virtual);
+  assert.deepEqual(received, ["z"], "negotiation answers, even late ones, never reach the input");
+  tui.stop();
+
+  const second = recording();
+  const again = freshTui({ input, output: second.output, renderIntervalMs: 0 });
+  again.start();
+  await settle(second.virtual);
+  assert.ok(!second.writes.join("").includes("\x1b[c"), "a later screen does not query the terminal again");
+  assert.ok(second.writes.join("").includes("\x1b[>7u"), "it applies the negotiated protocol directly");
+  again.stop();
 });
 
 test("terminal falls back to modifyOtherKeys after a non-Kitty response", async () => {

@@ -83,56 +83,22 @@ The tour is available on `main`, after v0.8.0; use the [source setup](docs/getti
 
 ## Persistent multi-agent teams
 
-**Give recurring work to a specialist with a place to keep it.** A test specialist can maintain fixtures and testing notes; a researcher can preserve findings and source material. Their workspaces remain available for the next assignment.
+**Connect any folders into a team, then let its leader coordinate delivery.** A finance member keeps its invoices; a developer works in a feature worktree. Workspaces, skills and files persist between assignments.
 
-A Team lives in ordinary directories. The main agent coordinates specialists, and `shared/` holds the files they exchange:
+Press **← from an empty prompt** for the team overview, member chats, tasks and reports. Select **Manager** on this page to assemble and schedule teams. Ordinary member chats remain ordinary Rind sessions, with their team shown in the status bar.
 
-```text
-my-project/
-├── .aiteam/project.yaml         # Team identity and main-agent selection
-├── agents/
-│   ├── main-agent/              # Coordinator workspace
-│   └── test-specialist/
-│       ├── .aiteam/agent.yaml   # Specialist identity
-│       ├── .aiteam/prompts/     # Role instructions
-│       ├── memory/             # Notes worth keeping
-│       ├── work/               # Working files
-│       └── outputs/            # Local deliverables
-└── shared/                     # Inputs and published handoffs
+```sh
+rind agents team create product
+rind agents team add product /path/to/project
+rind agents team add product /path/to/reviewer --position Reviewer
+rind agents task product project "Ask the reviewer to inspect the changes and deliver a concise report with evidence."
 ```
 
-Each execution creates a separate, persisted session. **Continuity comes from the specialist's role and files**: new tasks can inspect previous work, while old conversations remain separate records. The main agent gets a concise result and paths to published artifacts it can verify.
+The first member becomes leader; use `rind agents team leader <team> <agent>` to change it. Team members need no manifest or prescribed directory tree. Add a shared folder only after explicitly choosing a copy or sharing. Shared directories run serially; separate worktrees can run in parallel. Child reports resume the leader automatically, while blockers name the person or member who must respond.
 
-Independent assignments can run concurrently. A specialist works within its own workspace and the shared area through the file tools, keeping private working material separate from published handoffs.
+Delivery requires a report and confirmed execution completion. Uncertain runs stay marked **Unconfirmed** until reconciled. Private conversations stay private; files are shared through explicit artifact publication.
 
-### Try your first team
-
-In a Rind session at your project root:
-
-```text
-/team create
-/exit
-```
-
-Creation leaves the current session in place. Start a new one in the coordinator's workspace:
-
-```bash
-cd agents/main-agent
-rind
-```
-
-Then, inside Rind:
-
-```text
-/team add A test specialist that writes regression tests and maintains testing notes
-/team list
-```
-
-Put the material to work on in the project's `shared/` directory, then ask the main agent:
-
-> Delegate to the test specialist: inspect shared/parser/, write Unicode regression tests, and publish the tests and a short handoff under shared/.
-
-Use the agent ID shown by `/team list` when naming a specialist. **Ctrl+B** opens the delegate monitor. For future projects, `/team blueprint` creates specialists from templates you install under `~/.rind/blueprints/`.
+See [Agents Management](docs/agents-management.md) for source setup, worktrees, migration and recovery. `rind agents --help` lists the scriptable commands (`--json` supported).
 
 ---
 
@@ -152,7 +118,7 @@ rind send --session <id> "The integration tests failed; investigate before conti
 
 With a current Worker, `run` waits for its managed background tasks and necessary follow-up turns, including tasks started during those turns, then prints one final answer. Long commands automatically release their initial waiting window and report completion without polling. Services started with `notify="manual"` do not hold the request open and stop when the Worker exits. Older Workers report that automatic background continuation is unavailable.
 
-`send` addresses a running CLI session on the same machine: it starts a turn when idle and steers the current turn when busy. Find the session ID in the startup banner or `/status`. Delivery is acknowledged immediately; the answer appears in the target session. This lets a test watcher or local script contribute findings without taking over your terminal.
+`send` addresses a session on the same machine through the shared Runtime. The window that most recently showed the session receives the prompt as if typed there: it starts a turn when idle and steers the current turn when busy. With no window open, a turn that is still running takes it as a follow-up, and `send` says so. Find the session ID in the startup banner or `/status`. Delivery is acknowledged immediately. This lets a test watcher or local script contribute findings without taking over your terminal.
 
 ---
 
@@ -160,7 +126,7 @@ With a current Worker, `run` waits for its managed background tasks and necessar
 
 **The interface handles interaction. The worker runs the agent.** In the CLI, these are two separate processes: a Node.js surface and a Python worker, connected by JSONL requests and streamed events. The desktop app also launches the worker separately from its UI; Web and gateway clients connect to a long-lived worker over WebSocket.
 
-This boundary keeps rendering and input handling out of the execution loop. A new client implements the protocol and reuses the engine's model calls, tools, delegation, and cancellation.
+This boundary keeps rendering and input handling out of the execution loop. A new client implements the protocol and reuses the engine's model calls, tools and cancellation.
 
 **The worker is stateless with respect to durable session history.** Disk is the source of truth; active execution and coordination live in memory:
 

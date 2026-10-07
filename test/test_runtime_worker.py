@@ -2,6 +2,7 @@ from __future__ import annotations
 from agent.runtime.server.stdio import JsonlWriter
 
 import asyncio
+import pytest
 import json
 import shutil
 import tempfile
@@ -10,7 +11,6 @@ from unittest.mock import AsyncMock
 from pathlib import Path
 
 from agent.infrastructure.settings import AppSettings
-from agent.infrastructure.team import initialize_team_agent, initialize_team_project
 from agent.runtime.server.worker import RuntimeWorker
 from agent.runtime.server.execution import ExecutionCoordinator
 from agent.runtime.server.protocol import RuntimeMethod
@@ -24,7 +24,8 @@ def test_execution_reads_configuration_once_and_refreshes_between_turns(tmp_path
     async def run():
         monkeypatch.setenv("RIND_HOME", str(tmp_path / "home"))
         worker = RuntimeWorker(workspace_root=str(tmp_path), session_dir=str(tmp_path / "sessions"))
-        info = await worker.initialize()
+        await worker.initialize()
+        info = await worker.create_conversation({})
         settings_loader = worker_module.load_settings
         reads = []
 
@@ -396,7 +397,7 @@ def test_replay_does_not_create_active_execution():
 
             server._writer.send = send
             await server._dispatch({"request_id": "init", "method": RuntimeMethod.INITIALIZE, "params": {}})
-            session_id = worker.session_id
+            session_id = (await worker.create_conversation({}))["session_id"]
             await server._dispatch({
                 "request_id": "replay",
                 "method": RuntimeMethod.SESSION_REPLAY,
@@ -457,120 +458,10 @@ def test_worker_create_session_uses_workspace_settings_model_and_effort():
     assert meta["reasoning_effort"] == "xhigh"
 
 
-def test_worker_team_session_binding_matches_execution_context():
-    async def run():
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            initialize_team_project(root, project_id="quant-project")
-            workspace = root / "agents" / "main-agent"
-            settings = AppSettings(
-                settings_path=root / "settings.json",
-                settings_exists=True,
-                model="test-model",
-                api_key="test-key",
-                base_url="https://example.com/v1",
-                reasoning_effort="",
-            )
-            session_dir = root / "sessions"
-            worker = RuntimeWorker(
-                workspace_root=str(workspace),
-                session_dir=str(session_dir),
-                enable_goal=False,
-            )
-            try:
-                info = await worker.initialize()
-                session_id = str(info["session_id"])
-                assert not (session_dir / session_id).exists()
-                container = await worker.start_execution(session_id)
-                assert not (session_dir / session_id).exists()
-                await container.session_store.persist_message("user", "hello team")
-                meta = json.loads((session_dir / session_id / "meta.json").read_text(encoding="utf-8"))
-                messages = (session_dir / session_id / "messages.jsonl").read_text(encoding="utf-8")
-                return meta, messages
-            finally:
-                await worker.close()
-
-    meta, messages = asyncio.run(run())
-    assert meta["project_id"] == "quant-project"
-    assert meta["owner_agent_id"] == "main-agent"
-    assert meta["session_type"] == "direct_agent_chat"
-    assert "main agent for this Team project" in messages
 
 
-def test_team_display_identity_follows_manifests_and_session_workspace(tmp_path):
-    async def run():
-        project = initialize_team_project(tmp_path, name="研究项目", main_agent_id="coordinator")
-        member = initialize_team_agent(project, agent_id="main-agent", description="A member, despite its name")
-        main = tmp_path / "agents" / "coordinator"
-        ordinary = tmp_path / "ordinary"
-        ordinary.mkdir()
-        worker = RuntimeWorker(workspace_root=str(main), session_dir=str(tmp_path / "sessions"), enable_goal=False)
-        expected = {"agent_id": "coordinator", "project_name": "研究项目"}
-        try:
-            initial = await worker.initialize()
-            assert initial["team_main"] == expected
-            for workspace, identity in [(main, expected), (member.workspace_root, None), (ordinary, None), (tmp_path, None)]:
-                created = await worker.create_session(str(workspace))
-                assert created["team_main"] == identity
-                restored = await worker.session(created["session_id"])
-                assert restored["team_main"] == identity
-            manifest = tmp_path / ".aiteam" / "project.yaml"
-            manifest.write_text("kind: Invalid\n", encoding="utf-8")
-            assert (await worker.session(initial["session_id"]))["team_main"] is None
-        finally:
-            await worker.close()
-
-    asyncio.run(run())
 
 
-def test_worker_reopens_delegated_session_with_original_binding():
-    async def run():
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            project = initialize_team_project(root, project_id="quant-project")
-            source = root / "agents" / "main-agent"
-            target = root / "agents" / "weather-agent"
-            shutil.copytree(source, target)
-            manifest = target / ".aiteam" / "agent.yaml"
-            manifest.write_text(
-                manifest.read_text(encoding="utf-8")
-                .replace("id: main-agent", "id: weather-agent")
-                .replace("name: Main Agent", "name: Weather Agent"),
-                encoding="utf-8",
-            )
-            settings = AppSettings(
-                settings_path=root / "settings.json",
-                settings_exists=True,
-                model="test-model",
-                api_key="test-key",
-                base_url="https://example.com/v1",
-                reasoning_effort="",
-            )
-            worker = RuntimeWorker(
-                workspace_root=str(source),
-                session_dir=str(root / "sessions"),
-                enable_goal=False,
-            )
-            try:
-                info = await worker.repository.create(
-                    str(target),
-                    project_id=project.project_id,
-                    owner_agent_id="weather-agent",
-                    session_type="delegated_task",
-                    parent_session_id="parent-session",
-                )
-                container = await worker.execution.start_with_options(
-                    info["session_id"],
-                    enable_user_question=False,
-                    lock_workspace=False,
-                )
-                return container
-            finally:
-                await worker.close()
-
-    container = asyncio.run(run())
-    assert container.session_store._session_type == "delegated_task"
-    assert container.tool_registry.has("ask_user_question") is False
 
 
 def test_worker_replay_includes_active_live_turn_without_creating_execution():
@@ -593,7 +484,7 @@ def test_worker_replay_includes_active_live_turn_without_creating_execution():
                 enable_goal=False,
             )
             await worker.initialize()
-            session_id = worker.session_id
+            session_id = (await worker.create_conversation({}))["session_id"]
             worker.execution.update_live_event({
                 "type": "turn_started",
                 "session_id": session_id,
@@ -652,11 +543,18 @@ def test_worker_replays_answer_received_before_question_responder_waits():
         active = SimpleNamespace(container=container, pending_answers={})
         execution._active["session-a"] = active
         execution._prepare_user_question("session-a", "call-early")
+        broadcast = []
+        execution.add_event_sink(broadcast.append)
         await execution.answer_user_question("session-a", "call-early", "yes")
+        with pytest.raises(LookupError, match="No pending user question"):
+            await execution.answer_user_question("session-a", "call-early", "second answer")
         event = SimpleNamespace(tool_call_id="call-early")
-        return await execution._answer_user_question("session-a", event)
+        return await execution._answer_user_question("session-a", event), broadcast
 
-    assert asyncio.run(run()) == "yes"
+    answer, broadcast = asyncio.run(run())
+    assert answer == "yes"
+    # Every window showing the session learns the question is settled, exactly once.
+    assert broadcast == [{"type": "user_question_answered", "session_id": "session-a", "tool_call_id": "call-early", "answer": "yes"}]
 
 
 def test_worker_goal_continuation_persists_distinct_checkpoints():

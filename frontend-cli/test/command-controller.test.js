@@ -79,41 +79,6 @@ test("slash result can prefill input and start a follow-up turn", async () => {
   ]);
 });
 
-test("team blueprint menu selection reuses the slash command path", async () => {
-  const calls = [];
-  const controller = createCommandController({
-    request: async (method, params) => {
-      calls.push({ method, params });
-      return { text: "created" };
-    },
-    turn: { submit() {} },
-    input: {
-      askTeamBlueprint: async (blueprints) => blueprints[1],
-    },
-    output: { log: (text) => calls.push({ log: typeof text === "function" ? text() : text }) },
-  });
-
-  await controller.applyResult({
-    text: "Available Team blueprints:",
-    display: {
-      type: "team_blueprints",
-      blueprints: [
-        { id: "research", name: "Research" },
-        { id: "weather", name: "Weather" },
-      ],
-    },
-  });
-
-  assert.deepEqual(calls, [
-    { log: "Available Team blueprints:" },
-    {
-      method: "rind/command/execute",
-      params: { input: "/team blueprint weather" },
-    },
-    { log: "created" },
-  ]);
-});
-
 test("slash result ignores malformed next prompts", async () => {
   let submitted = false;
   const controller = createCommandController({
@@ -217,14 +182,14 @@ test("local command catalog stays complete before the runtime starts", async () 
     "login",
     "logout",
     "model",
+    "rename",
     "sessions",
     "skill",
     "status",
-    "team",
     "theme",
     "tour",
   ]);
-  for (const name of ["compact", "fork", "init", "sessions", "skill", "team"]) {
+  for (const name of ["compact", "fork", "init", "sessions", "skill"]) {
     const result = await executeLocalSlashCommand(`/${name}`, {
       settings: { model: "m" },
       sessionInfo: {},
@@ -267,4 +232,17 @@ test("/tour without a terminal explains the requirement", async () => {
 
   assert.equal(await controller.handle("/tour"), true);
   assert.deepEqual(logs, ["/tour requires an interactive terminal."]);
+});
+
+test("/rename goes to the conversation, with the name taken as typed", async () => {
+  const renamed = [];
+  const controller = createCommandController({
+    request: async () => ({}),
+    turn: { submit() {} },
+    input: { runRename: async (argument) => { renamed.push(argument); return { text: "ok" }; } },
+  });
+  for (const text of ["/rename Bob's notes", "/rename", "/rename --reset", "/RENAME  spaced  "]) assert.equal(await controller.handle(text), true);
+  assert.deepEqual(renamed, ["Bob's notes", "", "--reset", "spaced"]);
+  assert.equal(await controller.handle("/renamed"), true);
+  assert.equal(renamed.length, 4, "a different command is not /rename");
 });

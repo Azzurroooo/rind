@@ -119,16 +119,18 @@ def test_provider_login_model_and_tool_turn_journey(tmp_path: Path):
     try:
         server.send("init", "initialize")
         initialize = server.response("init")
+        server.send("create", "session/create")
+        sid = server.response("create")["result"]["session_id"]
         assert initialize["result"]["provider"] == "openai-compatible"
         providers = {item["id"]: item for item in initialize["result"]["providers"]}
         assert providers["openai-compatible"]["configured"] is False
 
-        server.send("auth", "rind/auth/list", {"session_id": initialize["result"]["session_id"]})
+        server.send("auth", "rind/auth/list", {"session_id": sid})
         auth_list = server.response("auth")
         assert auth_list["result"]["providers"][0]["source"] == "none"
 
         server.send("login", "rind/auth/login", {
-            "session_id": initialize["result"]["session_id"],
+            "session_id": sid,
             "provider_id": "openai-compatible",
             "method": "api_key",
         })
@@ -146,7 +148,7 @@ def test_provider_login_model_and_tool_turn_journey(tmp_path: Path):
         assert stored["openai-compatible"]["type"] == "api_key"
         assert stored["openai-compatible"]["key"] == "e2e-secret-key"
 
-        server.send("models", "model/list", {"session_id": initialize["result"]["session_id"]})
+        server.send("models", "model/list", {"session_id": sid})
         models = server.response("models")["result"]
         assert [model["id"] for model in models["models"]] == ["fake-model-a", "fake-model-b"]
         # Refreshed /models entries carry no effort metadata, so the dialect default applies.
@@ -155,7 +157,7 @@ def test_provider_login_model_and_tool_turn_journey(tmp_path: Path):
         assert models["warning"] is None
 
         server.send("turn", "session/prompt", {
-            "session_id": initialize["result"]["session_id"],
+            "session_id": sid,
             "input": "read the note and summarize",
         })
         turn = server.response("turn")
@@ -163,7 +165,7 @@ def test_provider_login_model_and_tool_turn_journey(tmp_path: Path):
         events = [
             message for message in server.lines
             if message.get("kind") == "event"
-            and message.get("session_id") == initialize["result"]["session_id"]
+            and message.get("session_id") == sid
         ]
         types = [message["event"]["type"] for message in events]
         assert "tool_requested" in types and "tool_result" in types and "turn_completed" in types
@@ -174,13 +176,13 @@ def test_provider_login_model_and_tool_turn_journey(tmp_path: Path):
         assert "note says: hello journey" in final
 
         server.send("set", "model/set", {
-            "session_id": initialize["result"]["session_id"],
+            "session_id": sid,
             "provider_id": "openai-compatible",
             "model_id": "fake-model-b",
         })
         assert server.response("set")["result"]["model_id"] == "fake-model-b"
 
-        server.send("logout", "rind/auth/logout", {"session_id": initialize["result"]["session_id"], "provider_id": "openai-compatible"})
+        server.send("logout", "rind/auth/logout", {"session_id": sid, "provider_id": "openai-compatible"})
         logout = server.response("logout")["result"]
         assert logout == {"ok": True, "provider_id": "openai-compatible", "deleted": True, "source": "none"}
 
@@ -211,10 +213,12 @@ def test_google_login_static_catalog_and_tool_turn_journey(tmp_path: Path):
     try:
         server.send("init", "initialize")
         initialize = server.response("init")
+        server.send("create", "session/create")
+        sid = server.response("create")["result"]["session_id"]
         assert initialize["result"]["provider"] == "google"
 
         server.send("login", "rind/auth/login", {
-            "session_id": initialize["result"]["session_id"],
+            "session_id": sid,
             "provider_id": "google",
             "method": "api_key",
         })
@@ -231,14 +235,14 @@ def test_google_login_static_catalog_and_tool_turn_journey(tmp_path: Path):
         assert login["result"]["models_count"] == len(expected_ids)
         assert login["result"]["selection"] is None
 
-        server.send("models", "model/list", {"session_id": initialize["result"]["session_id"]})
+        server.send("models", "model/list", {"session_id": sid})
         models = server.response("models")["result"]
         assert {model["id"] for model in models["models"]} == expected_ids
         assert {"gemini-3.1-pro-preview", "gemini-3.8-flash", "gemini-2.5-pro"} <= {model["id"] for model in models["models"]}
         assert all(model["image_input"] is None for model in models["models"])  # local fake endpoint
 
         server.send("turn", "session/prompt", {
-            "session_id": initialize["result"]["session_id"],
+            "session_id": sid,
             "input": "read the note and summarize",
         })
         turn = server.response("turn")
@@ -246,7 +250,7 @@ def test_google_login_static_catalog_and_tool_turn_journey(tmp_path: Path):
         events = [
             message for message in server.lines
             if message.get("kind") == "event"
-            and message.get("session_id") == initialize["result"]["session_id"]
+            and message.get("session_id") == sid
         ]
         types = [message["event"]["type"] for message in events]
         assert "tool_requested" in types and "tool_result" in types and "turn_completed" in types
@@ -390,7 +394,9 @@ def test_responses_and_anthropic_stream_and_offline_tokens(tmp_path, provider, m
     server = _AppServerProcess(workspace, tmp_path / "home")
     try:
         server.send("init", "initialize")
-        sid = server.response("init")["result"]["session_id"]
+        server.response("init")
+        server.send("create", "session/create")
+        sid = server.response("create")["result"]["session_id"]
         server.send("turn", "session/prompt", {"session_id": sid, "input": query})
         assert server.response("turn")["result"]["ok"]
         assert any(message.get("event", {}).get("content") == "frozen protocol works" for message in server.lines)
@@ -444,7 +450,9 @@ def test_web_extraction_through_worker_and_http_proxy(tmp_path, monkeypatch):
     server = _AppServerProcess(workspace, tmp_path / "home")
     try:
         server.send("init", "initialize")
-        sid = server.response("init")["result"]["session_id"]
+        server.response("init")
+        server.send("create", "session/create")
+        sid = server.response("create")["result"]["session_id"]
         server.send("turn", "session/prompt", {"session_id": sid, "input": "fetch the article"})
         assert server.response("turn")["result"]["ok"]
         messages = fixture.last_request()["messages"]

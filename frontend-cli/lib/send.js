@@ -1,12 +1,14 @@
 import { sendIpc } from "./ipc.js";
 import { paint } from "./theme.js";
+import { connectSharedRuntime } from "../../rind-runtime-client/shared-runtime.js";
 
 export const sendHelp = [
   "Usage: rind send --session <id> \"<prompt>\"",
   "",
-  "Sends a prompt to the running rind session with that id. Find the id in",
-  "the target session's startup banner or /status. Delivery is acknowledged",
-  "immediately; the reply appears in that session.",
+  "Sends a prompt to the rind session with that id. Find the id in its startup",
+  "banner or /status. A window showing the session takes it as if typed there;",
+  "with none, a turn that is still running takes it as a follow-up.",
+  "Delivery is acknowledged immediately.",
 ].join("\n");
 
 export function parseSendArgs(args) {
@@ -41,13 +43,32 @@ export function parseSendArgs(args) {
   return result;
 }
 
-export async function runSend({ args, stdout = process.stdout, stderr = process.stderr }) {
+const DELIVERED = { window: "sent to rind", queued: "queued for the running turn", ipc: "sent to rind" };
+
+// The shared Runtime knows every interactive window. A window with its own
+// private worker (--trace-llm, --session-dir), or one on a Runtime from before
+// this routing, still listens on its own endpoint.
+async function deliver(session, input, connect) {
+  let refused;
+  const host = await connect().catch(() => null);
+  if (host) {
+    try { return { ok: true, delivered: (await host.request("runtime/send", { session_id: session, input })).delivered }; }
+    catch (error) {
+      if (error.code === "INVALID_INPUT") return { ok: false, message: error.message };
+      if (error.code === "SESSION_NOT_OPEN") refused = error.message;
+    } finally { host.close(); }
+  }
+  const result = await sendIpc({ session, input });
+  return result.ok ? { ok: true, delivered: "ipc" } : { ok: false, message: refused || result.message };
+}
+
+export async function runSend({ args, stdout = process.stdout, stderr = process.stderr, connect = () => connectSharedRuntime({ start: false }) }) {
   const options = parseSendArgs(args);
-  const result = await sendIpc({ session: options.session, input: options.prompt });
+  const result = await deliver(options.session, options.prompt, connect);
   if (!result.ok) {
     stderr.write(`${result.message}\n`);
     return 1;
   }
-  stdout.write(`${paint.success("✓")} sent to rind · session ${options.session}\n`);
+  stdout.write(`${paint.success("✓")} ${DELIVERED[result.delivered] || DELIVERED.window} · session ${options.session}\n`);
   return 0;
 }

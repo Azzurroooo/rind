@@ -395,7 +395,25 @@ def test_stdio_transport_matches_ws_semantics_over_fake_worker():
                 client.request("session/replay", {"session_id": session_id, "after_cursor": 0}), 10)
             assert replay == {"events": [], "cursor": 0}
         finally:
-            await client.stop()  # terminates the subprocess
+            await client.stop()
             assert transport._process is None
 
     asyncio.run(scenario())
+
+
+@pytest.mark.asyncio
+async def test_stopping_remote_client_preserves_shared_worker():
+    worker = _RecordingWorker()
+    server = await _WsServer(worker).start()
+    first, second = WorkerClient(server.url), WorkerClient(server.url)
+    try:
+        await first.start()
+        await second.start()
+        await first.stop()
+        assert second.connected
+        assert (await second.request("session/new", {}))["session_id"]
+        assert "shutdown" not in worker.methods
+    finally:
+        await first.stop()
+        await second.stop()
+        await server.stop()

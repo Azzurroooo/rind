@@ -34,6 +34,7 @@ class RuntimeMethod:
     INITIALIZE = "initialize"
     SHUTDOWN = "shutdown"
     SESSION_NEW = "session/new"
+    SESSION_OPEN = "session/open"
     SESSION_LIST = "session/list"
     SESSION_SWITCH = "session/switch"
     SESSION_FORK = "session/fork"
@@ -61,6 +62,7 @@ class RuntimeMethod:
     RIND_SESSION_UNSTEER = "rind/session/unsteer"
     RIND_SESSION_DEQUEUE_FOLLOW_UP = "rind/session/dequeue_follow_up"
     RIND_SESSION_COMPACT = "rind/session/compact"
+    SESSION_CREATE = "session/create"
     RIND_COMMAND_EXECUTE = "rind/command/execute"
     RIND_USER_QUESTION_RESPOND = "rind/user-question/respond"
     RIND_BACKGROUND_LIST = "rind/background/list"
@@ -153,6 +155,7 @@ CORE_METHODS = (
     RuntimeMethod.RIND_SESSION_UNSTEER,
     RuntimeMethod.RIND_SESSION_DEQUEUE_FOLLOW_UP,
     RuntimeMethod.RIND_SESSION_COMPACT,
+    RuntimeMethod.SESSION_CREATE,
     RuntimeMethod.RIND_COMMAND_EXECUTE,
     RuntimeMethod.RIND_USER_QUESTION_RESPOND,
     RuntimeMethod.RIND_CONTEXT_INSPECT,

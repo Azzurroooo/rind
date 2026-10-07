@@ -6,6 +6,8 @@ import sys
 import threading
 from pathlib import Path
 
+import pytest
+
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
@@ -204,3 +206,24 @@ def test_app_server_rejects_a_missing_workspace(capsys, tmp_path):
 
     assert exit_code == 1
     assert "Workspace directory does not exist" in capsys.readouterr().err
+
+
+def test_shutdown_failure_returns_an_error_without_success_ack(capsys):
+    class FailingWorker(_Worker):
+        async def close(self):
+            raise RuntimeError("termination not confirmed")
+
+    async def run():
+        server = RuntimeDispatcher(FailingWorker(), writer=JsonlWriter())
+        try:
+            server._begin_shutdown({"request_id": "shutdown", "method": "shutdown", "params": {}})
+            with pytest.raises(RuntimeError, match="termination not confirmed"):
+                await server.serve()
+        finally:
+            server.close()
+
+    asyncio.run(run())
+    assert _messages(capsys) == [{
+        "kind": "response", "request_id": "shutdown",
+        "error": {"type": "ShutdownFailed", "message": "termination not confirmed"},
+    }]

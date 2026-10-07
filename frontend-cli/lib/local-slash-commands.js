@@ -11,10 +11,10 @@ export const LOCAL_SLASH_COMMANDS = Object.freeze([
   { name: "login", description: "Configure a provider", usage: "/login [provider]" },
   { name: "logout", description: "Remove a stored provider credential", usage: "/logout [provider]" },
   { name: "model", description: "Show or change the active model", usage: "/model | /model set <model>" },
+  { name: "rename", description: "Name this conversation (otherwise it is shown by its first message)", usage: "/rename <name> | /rename --reset" },
   { name: "sessions", description: "List recent sessions", usage: "/sessions [limit]" },
   { name: "skill", description: "List skills", usage: "/skill [list]" },
   { name: "status", description: "Show session and provider status", usage: "/status" },
-  { name: "team", description: "Manage the current Team", usage: "/team create [project-id] | /team init | /team list | /team blueprint [id] | /team add <description>" },
   { name: "theme", description: "Switch the CLI color theme", usage: `/theme [${themeNames().join(" | ")}]` },
   { name: "tour", description: "Interactive feature walkthrough", usage: "/tour [page]" },
 ]);

@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { spawn, execFile } from "node:child_process";
-import { mkdtemp, mkdir, writeFile, rm } from "node:fs/promises";
+import { mkdtemp, mkdir, writeFile, rm, readdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import http from "node:http";
@@ -71,10 +71,13 @@ test("CLI compact accepts rind send, resumes work and accepts the next turn", {t
   }
   const send = (text) => child.stdin.write(`${text}\n`);
   try {
-    await waitFor(() => /session\s+(\d{8}_\d{6}_[a-f0-9]+)/.test(stdout));
-    const session = stdout.match(/session\s+(\d{8}_\d{6}_[a-f0-9]+)/)[1];
+    // A window shows "session new" until its first message creates the conversation.
+    await waitFor(() => /session\s+new/.test(stdout));
     send("original task");
     await waitFor(() => stdout.includes("INITIAL_REPLY"));
+    // The first message created and saved the conversation.
+    const [session] = (await readdir(path.join(home, "sessions"), { withFileTypes: true })).filter((entry) => entry.isDirectory() && /^\d{8}_/.test(entry.name)).map((entry) => entry.name);
+    assert.ok(session, "the first message saved a conversation");
     await waitFor(() => /INITIAL_REPLY[\s\S]*Worked for/.test(stdout));
     await new Promise((resolve) => setTimeout(resolve, 100));
     send("/compact");

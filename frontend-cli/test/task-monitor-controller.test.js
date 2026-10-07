@@ -103,131 +103,6 @@ test("task monitor ignores malformed events and handles monitor keys", async () 
   controller.stop();
 });
 
-test("task monitor tracks delegate status and renders its page", () => {
-  const state = {
-    runtimeClosing: false,
-    sessionInfo: {},
-    inputActive: false,
-  };
-  const redraws = [];
-  const controller = createTaskMonitorController({
-    request: async () => ({ tasks: [] }),
-    terminalUi: true,
-    state,
-    redraw: (force) => redraws.push(Boolean(force)),
-  });
-
-  controller.recordDelegateRequest({
-    tool_name: "delegate",
-    tool_call_id: "delegate-1",
-    args_preview: JSON.stringify({ agent_id: "weather-agent", task: "check the forecast" }),
-  });
-  assert.equal(state.sessionInfo.delegate_count, 1);
-  assert.equal(redraws.at(-1), false);
-  controller.recordDelegateResult({
-    tool_name: "delegate",
-    tool_call_id: "delegate-1",
-    status: "completed",
-    result: JSON.stringify({ data: { status: "completed", summary: "sunny" } }),
-  });
-  assert.equal(state.sessionInfo.delegate_count, 0);
-
-  const frame = controller.frame(80);
-  assert.match(frame.lines.join("\n"), /Delegates/);
-  assert.match(frame.lines.join("\n"), /weather-agent/);
-  assert.match(frame.lines.join("\n"), /sunny/);
-  controller.clearDelegates();
-  assert.doesNotMatch(controller.frame(80).lines.join("\n"), /weather-agent/);
-  controller.stop();
-});
-
-test("task monitor switches pages with horizontal keys", async () => {
-  const state = {
-    runtimeClosing: false,
-    sessionInfo: {},
-    inputActive: false,
-  };
-  const controller = createTaskMonitorController({
-    request: async (method) => method === "rind/background/list"
-      ? { tasks: [{ bg_id: "bg-1", status: "running", command: "server" }] }
-      : {},
-    terminalUi: true,
-    state,
-  });
-  controller.recordDelegateRequest({
-    tool_name: "delegate",
-    tool_call_id: "delegate-2",
-    args_preview: '{"agent_id":"builder-agent","task":"build it"}',
-  });
-
-  controller.enterMonitor();
-  await new Promise((resolve) => setImmediate(resolve));
-  assert.match(controller.frame(80).lines.join("\n"), /Background \[1\]/);
-  assert.match(controller.frame(80).lines[0], /› Background \[1\]/);
-  assert.match(controller.frame(80).lines[0], /Delegates \[1\]/);
-  controller.handleInput({ name: "right", ctrl: false, alt: false, shift: false });
-  assert.match(controller.frame(80).lines.join("\n"), /Delegates/);
-  assert.match(controller.frame(80).lines[0], /› Delegates \[1\]/);
-  controller.handleInput({ name: "left", ctrl: false, alt: false, shift: false });
-  assert.match(controller.frame(80).lines.join("\n"), /Background \[1\]/);
-  controller.stop();
-});
-
-test("task monitor keeps Delegates selected when Background appears during refresh", async () => {
-  const state = {
-    runtimeClosing: false,
-    sessionInfo: {},
-    inputActive: false,
-  };
-  let listed = [];
-  const controller = createTaskMonitorController({
-    request: async () => ({ tasks: listed }),
-    terminalUi: true,
-    state,
-  });
-  controller.recordDelegateRequest({
-    tool_name: "delegate",
-    tool_call_id: "delegate-live",
-    args_preview: '{"agent_id":"researcher","task":"inspect"}',
-  });
-
-  controller.enterMonitor();
-  await new Promise((resolve) => setImmediate(resolve));
-  listed = [{ bg_id: "bg-1", status: "running", command: "server" }];
-  await controller.refresh();
-
-  assert.match(controller.frame(80).lines[0], /› Delegates/);
-  controller.stop();
-});
-
-test("task monitor keeps Background selected when Delegates changes during refresh", async () => {
-  const state = {
-    runtimeClosing: false,
-    sessionInfo: {},
-    inputActive: false,
-  };
-  let listed = [{ bg_id: "bg-1", status: "running", command: "server" }];
-  const controller = createTaskMonitorController({
-    request: async () => ({ tasks: listed }),
-    terminalUi: true,
-    state,
-  });
-  controller.recordDelegateRequest({
-    tool_name: "delegate",
-    tool_call_id: "delegate-live",
-    args_preview: '{"agent_id":"researcher","task":"inspect"}',
-  });
-
-  controller.enterMonitor();
-  await new Promise((resolve) => setImmediate(resolve));
-  assert.match(controller.frame(80).lines[0], /› Background/);
-  controller.clearDelegates();
-  await controller.refresh();
-
-  assert.match(controller.frame(80).lines[0], /› Background/);
-  controller.stop();
-});
-
 test("task monitor ignores responses from a cleared session", async () => {
   const state = {
     runtimeClosing: false,
@@ -318,6 +193,47 @@ test("foreground selection releases only the chosen task", async () => {
   await new Promise((resolve) => setImmediate(resolve));
   assert.deepEqual(releases, ["front-2"]);
   assert.match(controller.frame(80).lines.join("\n"), /› front-2/);
+  controller.stop();
+});
+
+test("arrow navigation crosses waiting and handed-off background tasks", async () => {
+  const state = { sessionInfo: { capabilities: ["rind/tasks"] }, inputActive: false };
+  const controller = createTaskMonitorController({ state, terminalUi: true,
+    request: async (method) => method === "rind/task/list" ? { tasks: [] } : {} });
+  controller.recordTask({ task: { task_id: "waiting-1", command: "wait one", status: "running", handoff: false, started_at: 2 } });
+  controller.recordTask({ task: { task_id: "waiting-2", command: "wait two", status: "running", handoff: false, started_at: 1 } });
+  controller.recordTask({ task: { task_id: "background-1", command: "background one", status: "running", handoff: true, started_at: 3 } });
+  controller.recordTask({ task: { task_id: "finished", status: "completed", handoff: true } });
+  controller.enterMonitor();
+  await settled();
+  assert.match(controller.frame(100).lines.join("\n"), /Waiting 1\/2.*wait one/);
+  controller.handleInput({ name: "down" });
+  assert.match(controller.frame(100).lines.join("\n"), /Waiting 2\/2.*wait two/);
+  controller.handleInput({ name: "down" });
+  assert.match(controller.frame(100).lines.join("\n"), /› background-1/);
+  controller.handleInput({ name: "up" });
+  assert.match(controller.frame(100).lines.join("\n"), /› Waiting 2\/2.*wait two/);
+  controller.handleInput({ name: "up" });
+  controller.handleInput({ name: "up" });
+  assert.match(controller.frame(100).lines.join("\n"), /› finished/);
+  controller.handleInput({ name: "down" });
+  assert.match(controller.frame(100).lines.join("\n"), /› Waiting 1\/2.*wait one/);
+  controller.stop();
+});
+
+test("opening refresh does not reset a task selected with arrows", async () => {
+  let finishList;
+  const state = { sessionInfo: { capabilities: ["rind/tasks"] } };
+  const controller = createTaskMonitorController({ state, terminalUi: true,
+    request: async (method) => method === "rind/task/list"
+      ? new Promise((resolve) => { finishList = resolve; }) : {} });
+  controller.recordTask({ task: { task_id: "waiting", status: "running" } });
+  controller.recordTask({ task: { task_id: "background", status: "running", handoff: true } });
+  controller.enterMonitor();
+  controller.handleInput({ name: "down" });
+  finishList({ tasks: [] });
+  await settled();
+  assert.match(controller.frame(100).lines.join("\n"), /› background/);
   controller.stop();
 });
 
@@ -476,21 +392,6 @@ test("natural completion leaves no foreground row and automatic yield loads its 
   await settled();
   assert.deepEqual(reads, ["slow"]);
   assert.match(controller.frame(80).lines.join("\n"), /auto yielded/);
-  controller.stop();
-});
-
-test("delegate selection survives insertion and detail matches the selected row", async () => {
-  const state = { sessionInfo: { capabilities: ["rind/tasks"] } };
-  const controller = createTaskMonitorController({ state, terminalUi: true, request: async () => ({ tasks: [] }) });
-  for (let i = 0; i < 8; i += 1) controller.recordDelegateRequest({ tool_name: "delegate", tool_call_id: `d${i}`,
-    args_preview: JSON.stringify({ agent_id: `worker-${i}`, task: `task-${i}` }) });
-  controller.enterMonitor();
-  await settled();
-  controller.moveSelection(6);
-  controller.recordDelegateRequest({ tool_name: "delegate", tool_call_id: "new", args_preview: '{"agent_id":"new"}' });
-  assert.match(controller.frame(80).lines.join("\n"), /7\/9/);
-  assert.match(controller.frame(80).lines.join("\n"), /› worker-6/);
-  assert.match(controller.frame(80).lines.join("\n"), /task: task-6/);
   controller.stop();
 });
 

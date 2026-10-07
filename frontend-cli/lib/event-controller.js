@@ -9,6 +9,15 @@ import {
   backgroundWaitingLine,
 } from "./rendering.js";
 
+const WORKING_EVENTS = new Set([
+  "assistant_delta",
+  "assistant_message_completed",
+  "tool_input_started",
+  "tool_input_delta",
+  "tool_requested",
+  "tool_call_started",
+]);
+
 export function createEventController({
   state = {},
   input = {},
@@ -32,9 +41,21 @@ export function createEventController({
       }
       return;
     }
+    if (WORKING_EVENTS.has(eventType)) {
+      output.setActivityLabel?.("Working");
+    }
     switch (eventType) {
       case "background_wait_changed":
         output.setBackgroundWait?.(event.background_wait);
+        return;
+      case "session_renamed":
+        // Renamed here or in another window: lists and banners use the new title.
+        if (state.sessionInfo && event.session_id === state.sessionInfo.session_id) { state.sessionInfo.name = event.name || null; state.sessionInfo.title = event.title || ""; }
+        return;
+      case "session_discarded":
+        // The first prompt failed before its message saved the conversation:
+        // this window is new again, and its next message creates it.
+        if (state.sessionInfo && event.session_id === state.sessionInfo.session_id) { state.sessionInfo.session_id = ""; output.redraw?.(); }
         return;
       case "task_updated":
       case "task_output":
@@ -48,9 +69,9 @@ export function createEventController({
         output.setBackgroundWait?.(null);
         return;
       case "context_compacted":
+      case "assistant_message_completed":
         return;
       case "assistant_delta":
-        output.setActivityLabel?.("Working");
         output.assistantAppend?.(event.text || "");
         return;
       case "turn_step_retry": {
@@ -96,7 +117,6 @@ export function createEventController({
       case "tool_requested":
         output.closeAssistant?.();
         rememberPlanInputPreview(event);
-        monitor.recordDelegateRequest?.(event);
         output.beginTool?.(event);
         return;
       case "tool_call_started":
@@ -109,7 +129,6 @@ export function createEventController({
         pendingFileChanges.delete(event.tool_call_id);
         const planInput = takePlanInput(event);
         monitor.recordResult?.(event);
-        monitor.recordDelegateResult?.(event);
         recordToolResult(event);
         const plan = event.tool_name === "update_plan" && event.status === "completed"
           ? parsePlanInput(planInput)
@@ -204,7 +223,6 @@ export function createEventController({
     toolStats = { completed: 0, failed: 0 };
     pendingFileChanges.clear();
     pendingPlanInputs.clear();
-    monitor.clearDelegates?.();
   }
 
   function recordToolResult(event) {

@@ -6,7 +6,6 @@ import asyncio
 import logging
 import uuid
 from collections import deque
-from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from typing import AsyncIterator
 
@@ -51,7 +50,6 @@ class AgentRuntime:
         goal_enabled: bool = False,
         skill_repository=None,
         runtime_system_messages: list[dict] | None = None,
-        workspace_lock=None,
     ):
         self._turn_runner = turn_runner
         self._session_store = session_store
@@ -65,7 +63,6 @@ class AgentRuntime:
         self._goal_enabled = bool(goal_enabled)
         self._skill_repository = skill_repository
         self._runtime_system_messages = tuple(dict(message) for message in (runtime_system_messages or []))
-        self._workspace_lock = workspace_lock
         self._skill_turn_coordinator = (
             SkillTurnCoordinator(skill_repository) if skill_repository is not None else None
         )
@@ -172,7 +169,7 @@ class AgentRuntime:
         await self._require_goal_enabled()
         if self._accepting_inputs or self._active_turn_id:
             raise RuntimeError("Cannot replace a goal while a turn is active.")
-        async with self._workspace_lock_guard(), self._turn_lock:
+        async with self._turn_lock:
             if self._accepting_inputs or self._active_turn_id:
                 raise RuntimeError("Cannot replace a goal while a turn is active.")
             goal = await self._session_store.set_goal(objective)
@@ -266,7 +263,7 @@ class AgentRuntime:
         await self.initialize()
         if compact and (self.turn_active or self._turn_lock.locked()):
             raise RuntimeError("Cannot compact context while a turn is active.")
-        async with self._workspace_lock_guard(), self._turn_lock:
+        async with self._turn_lock:
             if compact:
                 messages = await self._session_store.get_messages_slice()
                 if not any(message.get("role") != "system" for message in messages):
@@ -467,14 +464,6 @@ class AgentRuntime:
 
     def _is_cancelled(self, cancellation_token: CancellationToken | None) -> bool:
         return bool(cancellation_token and cancellation_token.is_cancelled)
-
-    @asynccontextmanager
-    async def _workspace_lock_guard(self):
-        if self._workspace_lock is None:
-            yield
-            return
-        async with self._workspace_lock:
-            yield
 
     async def _persist_user_input(self, content: str) -> None:
         if self._skill_turn_coordinator is not None:

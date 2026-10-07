@@ -1,44 +1,13 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="640" viewBox="0 0 1280 640" role="img" aria-labelledby="title desc">
-  <title id="title">Rind</title>
-  <desc id="desc">Rind, a lightweight AI coding agent.</desc>
-  <defs>
-    <filter id="coreBlur" x="-40%" y="-40%" width="180%" height="180%">
-      <feGaussianBlur stdDeviation="6" />
-    </filter>
-    <clipPath id="tile">
-      <rect x="10" y="10" width="100" height="100" rx="22" />
-    </clipPath>
-  </defs>
-
-  <rect width="1280" height="640" fill="#0b1115" />
-  <path d="M72 74H1208" stroke="#1f3d4a" />
-  <path d="M72 566H1208" stroke="#1f3d4a" />
-  <path d="M504 142V498" stroke="#1f3d4a" />
-  <path d="M504 142V218" stroke="#5fd7ff" stroke-width="2" />
-  <path d="M504 422V498" stroke="#f5c451" stroke-width="2" />
-
-  <g transform="translate(108 158) scale(2.7)">
-    <rect x="10" y="10" width="100" height="100" rx="22" fill="#0b1115" stroke="#5fd7ff" stroke-width="2.5" />
-    <g clip-path="url(#tile)">
-      <rect x="10" y="10" width="100" height="100" fill="#13242b" />
-      <polygon points="75,10 110,10 110,110 10,110 10,75" fill="#f5c451" />
-      <polygon points="75,10 110,10 110,110 10,110 10,75" fill="#f5c451" filter="url(#coreBlur)" opacity="0.5" />
-      <line x1="75" y1="10" x2="10" y2="75" stroke="#5fd7ff" stroke-width="3.5" stroke-linecap="round" />
-    </g>
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="640" viewBox="0 0 1280 640" role="img" aria-label="Rind — a lightweight AI coding agent">
+  <rect width="1280" height="640" fill="#f7f6f0"/>
+  <path d="M72 80H1208M72 560H1208" stroke="#243d2e" stroke-opacity=".2"/>
+  <g transform="translate(96 184) scale(8.5)"><rect width="32" height="32" rx="8" fill="#243d2e"/><path d="M22 4h2a4 4 0 0 1 4 4v16a4 4 0 0 1-4 4H8a4 4 0 0 1-4-4v-2Z" fill="#d6df9a"/></g>
+  <g fill="#243d2e" font-family="Segoe UI, Arial, sans-serif">
+    <text x="456" y="202" font-family="Consolas, monospace" font-size="19" letter-spacing="2">OPEN SOURCE · LOCAL FIRST</text>
+    <text x="446" y="361" font-size="148" font-weight="600" letter-spacing="-6">Rind</text>
+    <text x="456" y="420" font-size="32">A lightweight AI coding agent</text>
+    <text x="456" y="480" font-family="Consolas, monospace" font-size="18">CLI · Desktop · Web · Mobile · Gateway</text>
+    <text x="72" y="118" font-family="Consolas, monospace" font-size="16">A SMALL CORE. ROOM TO GROW.</text>
+    <text x="1208" y="604" text-anchor="end" font-size="18">rindai.dev</text>
   </g>
-
-  <text x="578" y="190" fill="#5fd7ff" font-family="Consolas, monospace" font-size="20" font-weight="700">OPEN-SOURCE · LOCAL-FIRST</text>
-  <text x="568" y="354" fill="#e6f0f2" font-family="Segoe UI, Arial, sans-serif" font-size="154" font-weight="700">Rind</text>
-  <text x="578" y="413" fill="#8ca1aa" font-family="Segoe UI, Arial, sans-serif" font-size="32" font-weight="400">A lightweight AI coding agent</text>
-
-  <g font-family="Consolas, monospace" font-size="18" font-weight="700">
-    <text x="578" y="480" fill="#f5c451">AUTOMATE</text>
-    <circle cx="695" cy="474" r="3" fill="#1f3d4a" />
-    <text x="720" y="480" fill="#e6f0f2">DELEGATE</text>
-    <circle cx="838" cy="474" r="3" fill="#1f3d4a" />
-    <text x="863" y="480" fill="#5fd7ff">EXTEND</text>
-  </g>
-
-  <text x="72" y="112" fill="#607984" font-family="Consolas, monospace" font-size="15">RIND / AGENT SYSTEM</text>
-  <text x="1208" y="112" fill="#607984" font-family="Consolas, monospace" font-size="15" text-anchor="end">TERMINAL · ONE-SHOT · TEAMS · KERNEL</text>
 </svg>

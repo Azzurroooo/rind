@@ -16,7 +16,6 @@ from agent.domain import ParsedToolCall
 from agent.domain.cancellation import CancellationTokenSource
 from agent.domain.events import ToolResultEvent
 from agent.infrastructure.persistence import JsonlSessionStore
-from agent.infrastructure.team import initialize_team_agent, initialize_team_project
 from agent.infrastructure.tools import DefaultToolRegistry
 from agent.infrastructure.tools.files import build_file_tool_specs, mutations
 from agent.infrastructure.tools.files.mutation_queue import FileMutationQueue
@@ -202,21 +201,21 @@ async def test_failure_releases_queue(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_worker_team_sessions_share_file_queue(tmp_path, monkeypatch, blocked_stage):
+async def test_worker_sessions_share_file_queue(tmp_path, monkeypatch, blocked_stage):
     started, release, staged = blocked_stage
     monkeypatch.setenv("RIND_HOME", str(tmp_path / "home"))
-    (tmp_path / "team").mkdir()
-    project = initialize_team_project(tmp_path / "team", project_id="queue-test")
-    child = initialize_team_agent(project, agent_id="editor", description="Edit shared files")
-    worker = RuntimeWorker(workspace_root=str(project.project_root / "agents" / "main-agent"))
+    workspace = tmp_path / "workspace"
+    (workspace / "shared").mkdir(parents=True)
+    worker = RuntimeWorker(workspace_root=str(workspace))
     monkeypatch.setattr(worker.provider_service, "create_chat_client", AsyncMock(
         side_effect=lambda *args, **kwargs: SimpleNamespace(close=AsyncMock()),
     ))
     tasks = []
     try:
-        parent_info = await worker.initialize()
+        await worker.initialize()
+        parent_info = await worker.create_conversation({})
         child_info = await worker.repository.create(
-            str(child.workspace_root), parent_session_id=parent_info["session_id"], session_type="delegated_task",
+            str(workspace), parent_session_id=parent_info["session_id"],
         )
         parent_tools = (await worker.start_execution(parent_info["session_id"])).tool_registry
         child_tools = (await worker.start_execution(child_info["session_id"])).tool_registry
@@ -231,4 +230,4 @@ async def test_worker_team_sessions_share_file_queue(tmp_path, monkeypatch, bloc
             await asyncio.gather(*tasks)
         finally:
             await worker.close()
-    assert (project.shared_root / "target.txt").read_text() == "child"
+    assert (workspace / "shared" / "target.txt").read_text() == "child"

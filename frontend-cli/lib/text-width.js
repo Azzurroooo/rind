@@ -1,4 +1,6 @@
 const ANSI_RE = /\x1b\[[0-?]*[ -/]*[@-~]/g;
+const ANSI_SPLIT_RE = /(\x1b\[[0-?]*[ -/]*[@-~])/;
+const ANSI_WHOLE_RE = /^\x1b\[[0-?]*[ -/]*[@-~]$/;
 const LINE_BREAK_RE = /\r\n|\r|\n/;
 const PRINTABLE_ASCII_RE = /^[\x20-\x7e]*$/;
 const segmenter = typeof Intl?.Segmenter === "function"
@@ -73,7 +75,7 @@ export function clipCells(value, maxWidth) {
   if (maxWidth <= suffixWidth) {
     return suffix.slice(0, Math.max(0, maxWidth));
   }
-  return `${takeStartCells(text, maxWidth - suffixWidth)}${suffix}`;
+  return closeAnsi(`${takeStartCells(text, maxWidth - suffixWidth)}${suffix}`);
 }
 
 export function truncateToWidth(value, maxWidth, ellipsis = "...") {
@@ -85,7 +87,7 @@ export function truncateToWidth(value, maxWidth, ellipsis = "...") {
   if (maxWidth <= suffixWidth) {
     return ellipsis.slice(0, Math.max(0, maxWidth));
   }
-  return `${takeStartCells(text, maxWidth - suffixWidth)}${ellipsis}`;
+  return closeAnsi(`${takeStartCells(text, maxWidth - suffixWidth)}${ellipsis}`);
 }
 
 
@@ -249,33 +251,55 @@ export function middleClipCells(value, maxWidth) {
   const available = Math.max(0, maxWidth - textWidth(suffix));
   const headWidth = Math.ceil(available / 2);
   const tailWidth = Math.floor(available / 2);
-  return `${takeStartCells(text, headWidth)}${suffix}${takeEndCells(text, tailWidth)}`;
+  return closeAnsi(`${closeAnsi(takeStartCells(text, headWidth))}${suffix}${takeEndCells(text, tailWidth)}`);
 }
 
+// Escape sequences are kept whole and take no cells, so styled text is cut
+// at its visible width instead of at its raw length.
 function takeStartCells(value, maxWidth) {
   let output = "";
   let width = 0;
-  for (const segment of graphemes(value)) {
-    const nextWidth = segmentWidth(segment);
-    if (width + nextWidth > maxWidth) {
-      break;
+  for (const part of String(value).split(ANSI_SPLIT_RE)) {
+    if (!part) continue;
+    if (ANSI_WHOLE_RE.test(part)) {
+      output += part;
+      continue;
     }
-    output += segment;
-    width += nextWidth;
+    for (const segment of graphemes(part)) {
+      const nextWidth = segmentWidth(segment);
+      if (width + nextWidth > maxWidth) {
+        return output;
+      }
+      output += segment;
+      width += nextWidth;
+    }
   }
   return output;
 }
 
+// A cut can leave a style open; reset it so it cannot bleed into padding.
+function closeAnsi(text) {
+  return text.includes("\x1b[") && !text.endsWith("\x1b[0m") ? text + "\x1b[0m" : text;
+}
+
+// Mirrors takeStartCells: escape sequences stay whole and take no cells.
 function takeEndCells(value, maxWidth) {
   let output = "";
   let width = 0;
-  for (const segment of graphemes(value).reverse()) {
-    const nextWidth = segmentWidth(segment);
-    if (width + nextWidth > maxWidth) {
-      break;
+  for (const part of String(value).split(ANSI_SPLIT_RE).reverse()) {
+    if (!part) continue;
+    if (ANSI_WHOLE_RE.test(part)) {
+      output = part + output;
+      continue;
     }
-    output = `${segment}${output}`;
-    width += nextWidth;
+    for (const segment of graphemes(part).reverse()) {
+      const nextWidth = segmentWidth(segment);
+      if (width + nextWidth > maxWidth) {
+        return output;
+      }
+      output = `${segment}${output}`;
+      width += nextWidth;
+    }
   }
   return output;
 }
@@ -301,11 +325,13 @@ function isZeroWidth(text) {
   return /^[\u0300-\u036f\u0483-\u0489\u200b-\u200f\u20d0-\u20ff\ufe00-\ufe0f]+$/u.test(text);
 }
 
+// Two cells only for emoji presentation. Pictographic symbols such as \u21a9 \u25b6 \u2714 \u00a9
+// default to text presentation and take one cell, unless FE0F asks for emoji.
 function isEmoji(text) {
   return /^[0-9#*]\ufe0f?\u20e3$/u.test(text)
     || /[\u{1f1e6}-\u{1f1ff}]/u.test(text)
-    || /\p{Extended_Pictographic}/u.test(text)
-    || text.includes("\u200d")
+    || /\p{Emoji_Presentation}/u.test(text)
+    || (text.includes("\u200d") && /\p{Extended_Pictographic}/u.test(text))
     || text.includes("\ufe0f");
 }
 

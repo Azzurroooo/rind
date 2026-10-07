@@ -64,7 +64,7 @@ Every step is plain data. Kinds: `shell`, `shell-out`, `startup`, `type`,
 - `menu(spec)` opens an interactive-menu beat rendered with the real menu
   renderers (`slashMenuText`, `modelMenuText`, `themeMenuText`,
   `sessionMenuText`, `choiceMenuText`, `backgroundMonitorText`,
-  `delegateMonitorText`, `contextBoardText`/`usageBoardText`,
+  `contextBoardText`/`usageBoardText`,
   `authChoiceFrame`, `authSecretFrame`); `selected` animates toward `target`,
   one step per tick. Menus close when a `result`/`submit`/`turn-done`/
   `exit`/`startup` step settles.
@@ -73,7 +73,7 @@ Every step is plain data. Kinds: `shell`, `shell-out`, `startup`, `type`,
   takeaway; it remains visible instead of being replaced by a generic end card.
 - `info` updates displayed model/session/theme state; `close-menu` explicitly
   demonstrates Enter confirmation or Esc cancellation. `turn-start` represents
-  commands such as `/init` and `/team add` that launch a model turn.
+  commands such as `/init` that launch a model turn.
 - `consume` moves queued/steering input into the transcript. `turn-done` does
   not discard pending input. `prefill` demonstrates the editable user message
   restored by `/fork`, which branches **before** the selected user message.
@@ -142,9 +142,9 @@ page, Enter returns to the catalog.
   never shifts the columns. Only the selected or completed row has a marker.
   When fewer than 18 cells remain for descriptions, rows show full feature
   names and a `Selected:` summary below the list follows the current selection.
-  For example, the wide catalog shows `/team add · Add a specialist`;
-  the introduction and demo headers keep `TOUR · /team add` and
-  `Demo · /team add`. The description stays in the introduction body. Full
+  For example, the wide catalog shows `← Agents · Add a specialist`;
+  the introduction and demo headers keep `TOUR · ← Agents` and
+  `Demo · ← Agents`. The description stays in the introduction body. Full
   feature names and page positions remain visible down to 36 columns.
 - With no visible simulated content (including prior session history), use a
   `TOUR` card with the lesson title, introduction and start action inside it.
@@ -188,11 +188,6 @@ at 80×24, 60×20, 40×16 and 36×14. Content tests compare animated and rebuilt
 states for all pages and reject unfinished turns, lost pending input, or typing
 through an open menu.
 Playback tests run every lesson at 0.5×, 1× and 4× to verify countdown transitions.
-Team content uses the runtime's default `agents/<id>/` workspaces, `.aiteam/`
-configuration directories and `shared/` files for handoffs between agents.
-The create lesson explicitly waits after creation, before changing directories,
-before restarting Rind and at the new workspace banner. It explains that creation
-does not move the current session, then verifies the new main-agent session with
-`/team list`. Each explanation requires a keypress, with no reading deadline.
+Team lessons demonstrate arbitrary folders, explicit cross-team sharing, feature worktrees and tracked task delivery through the empty-prompt Left shortcut. They use ordinary member chat and a Manager entry inside the Agents page. Each explanation requires a keypress, with no reading deadline.
 Introduction tests cover every lesson in monochrome, content-based layout
 selection, overflow, help, resizing, start, rewind and replay in a virtual terminal.
