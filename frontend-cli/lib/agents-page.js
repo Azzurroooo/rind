@@ -9,7 +9,7 @@ import { openAgentChat, managerWorkspace, followConversation, returnTarget } fro
 import { createLeaveLatch, LEAVE_HINT } from "./interrupt-state.js";
 import { actionFor } from "./agents-keys.js";
 import { sessionWorkspace } from "./agents-session.js";
-import { emptyAgentsSnapshot, withoutDrafts, clean, sidebarRows, inboxRows, organizationRows, taskRows, memberSessionRows, managerRows, teamSessions, independentSessions, independentRows, folderRows, backgroundRows, archiveRows, workspaceKey, selectable } from "./agents-model.js";
+import { emptyAgentsSnapshot, withoutDrafts, runningCount, clean, sidebarRows, inboxRows, organizationRows, taskRows, memberSessionRows, managerRows, teamSessions, independentSessions, independentRows, folderRows, backgroundRows, archiveRows, workspaceKey, selectable } from "./agents-model.js";
 import { renderAgents } from "./agents-view.js";
 import { createActions } from "./agents-actions.js";
 
@@ -387,7 +387,7 @@ export async function runAgentsPage({ launch, input = process.stdin, output = pr
       case "approval": return actions.approval(row.approvalId);
       case "run": { const run = view.snapshot.runs.find(r => r.id === row.runId); return run && actions.resolveRun(run); }
       case "live": return row.taskId ? perform(() => actions.delivery(row.taskId), null, "Loading report…") : row.sessionId ? ui.join(row) : undefined;
-      case "stop-all": return actions.stopAll(row.working);
+      case "stop-all": return actions.stopAll(view.entries.filter(r => r.kind === "live"));
       case "service": return perform(() => actions.serviceActions(row), null, "Loading…");
       case "team": return openTeam(row.teamId);
       case "new-team": return actions.createTeam();
@@ -591,7 +591,7 @@ export async function runAgentsPage({ launch, input = process.stdin, output = pr
       case "foldAll": return toggleFold(true);
       case "group": return jumpGroup(key.text === "]" ? 1 : -1);
       case "refresh": return refresh();
-      case "stop": return actions.stopAll(view.entries.filter(r => r.kind === "live").length);
+      case "stop": return actions.stopAll(view.entries.filter(r => r.kind === "live"));
       case "help": view.help = true; return undefined;
       default: return undefined;
     }
@@ -620,7 +620,8 @@ export async function runAgentsPage({ launch, input = process.stdin, output = pr
     if (signal?.aborted) return { leave: false, working: 0 };
     realpath(managerWorkspace(launch)).then(value => { view.managerPath = process.platform === "win32" ? value.toLowerCase() : value; project(); }, () => {});
     project(); tui.start(); void connect(); await finished;
-    return { leave: leaving, notice: leaveNotice, working: view.snapshot.runs.filter(run => ["starting", "running"].includes(run.status)).length };
+    // Everything that carries on after the windows close, jobs included.
+    return { leave: leaving, notice: leaveNotice, working: runningCount(view.snapshot) };
   } finally {
     closed = true; leaveLatch.disarm(); clearInterval(clock); clearInterval(spinner); clearTimeout(noticeTimer); client?.close(); tui.stop();
     input.off?.("end", close); input.off?.("close", close); signal?.removeEventListener("abort", close);

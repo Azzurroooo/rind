@@ -167,7 +167,10 @@ class ExecutionCoordinator:
                  and (scope is None or record.get("request_id") == scope.request_id)]
         if not tasks:
             return None
-        return {"count": len(tasks), "started_at": min(record["started_at"] for record in tasks)}
+        # What runs, so a status can name it ("Running job · npm test"); oldest first.
+        ordered = sorted(tasks, key=lambda record: record["started_at"])
+        commands = [" ".join(str(record.get("command") or "").split())[:120] for record in ordered[:3]]
+        return {"count": len(tasks), "started_at": ordered[0]["started_at"], "commands": commands}
 
     def refresh_background_wait(self, session_id: str) -> None:
         if self._closed:

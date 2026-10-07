@@ -1,5 +1,6 @@
 // What every session in the shared Runtime is doing right now: whether a turn
-// runs or waits for an answer, and how many windows show it on screen. A
+// runs or waits for an answer, which background jobs it will resume after, and
+// how many windows show it on screen. A
 // window covered by the Agents page still holds its session but shows nothing. The host already
 // sees every request and event, so this costs no polling; observers get the
 // whole (small) table pushed when it changes, coalesced per tick.
@@ -21,7 +22,7 @@ export function createLiveSessions({ onChange = () => {}, now = () => Date.now()
 
   const entry = id => {
     let item = sessions.get(id);
-    if (!item) { item = { id, workspace: "", turn: "idle", draft: false, startedAt: "", updatedAt: new Date(now()).toISOString() }; sessions.set(id, item); }
+    if (!item) { item = { id, workspace: "", turn: "idle", draft: false, background: null, startedAt: "", updatedAt: new Date(now()).toISOString() }; sessions.set(id, item); }
     return item;
   };
   const changed = () => {
@@ -36,7 +37,7 @@ export function createLiveSessions({ onChange = () => {}, now = () => Date.now()
     const out = [];
     for (const item of sessions.values()) {
       const count = watchers.get(item.id) || 0;
-      if (!count && item.turn === "idle" && Date.parse(item.updatedAt) < cutoff) { sessions.delete(item.id); continue; }
+      if (!count && item.turn === "idle" && !item.background && Date.parse(item.updatedAt) < cutoff) { sessions.delete(item.id); continue; }
       out.push({ ...item, watchers: count });
     }
     return out;
@@ -99,13 +100,24 @@ export function createLiveSessions({ onChange = () => {}, now = () => Date.now()
     reset() {
       let any = false;
       for (const item of sessions.values()) {
-        if (item.turn === "idle" && !item.draft) continue;
-        item.turn = "idle"; item.draft = false; item.updatedAt = new Date(now()).toISOString(); any = true;
+        if (item.turn === "idle" && !item.draft && !item.background) continue;
+        item.turn = "idle"; item.draft = false; item.background = null; item.updatedAt = new Date(now()).toISOString(); any = true;
       }
       if (any) changed();
     },
     event(message) {
       const id = message?.session_id;
+      // The turn ended but jobs it started still run; it resumes when they finish.
+      if (id && message?.event?.type === "background_wait_changed") {
+        const wait = message.event.background_wait;
+        const background = wait?.count > 0 ? { count: wait.count, commands: Array.isArray(wait.commands) ? wait.commands.map(String) : [], startedAt: new Date(Number(wait.started_at) * 1000 || now()).toISOString() } : null;
+        const item = entry(id);
+        if (JSON.stringify(item.background) === JSON.stringify(background)) return;
+        item.background = background;
+        item.updatedAt = new Date(now()).toISOString();
+        changed();
+        return;
+      }
       const turn = TURN_EVENTS[message?.event?.type] || (message?.event?.type === "tool_result" && message.event.tool_name === "ask_user_question" ? "running" : undefined);
       if (!id || !turn) return;
       const item = entry(id);

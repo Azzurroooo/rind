@@ -73,7 +73,7 @@ The reporting tree, rooted at the leader; members without a supervisor report to
 - A **member** row is the name in bold, its role in an aligned column, and a summary on the right in words about the person: `● working`, `! needs you`, `○ 1 open`, or a dim `idle`. A member has no status glyph of its own in the tree.
 - A **conversation** sits under its member, inside the tree guides, with its own glyph, status and age: `├─ ● Plan the release   Working   now`. The three most urgent are shown inline; the rest collapse into a "+N more" row.
 
-Statuses use one glyph set everywhere: `!` Needs input, `?` Unconfirmed, `●` Working, `…` Waiting on members, `◦` Queued, `○` Open, `✓` Done, `·` Idle. A member's summary also counts its open tasks (`○ 1 open · 2 tasks`).
+Statuses use one glyph set everywhere: `!` Needs input, `?` Unconfirmed, `●` Working, `↻` Running job, `⋯` Delegated, `◦` Queued, `○` Open, `✓` Done, `·` Idle. Only `!` asks for you; the `?` overlay lists them all. A member's summary also counts its open tasks (`○ 1 open · 2 tasks`).
 
 ### What a status means
 
@@ -82,6 +82,8 @@ The shared Runtime hosts the conversation of every interactive Rind window and e
 | Status | Meaning |
 | --- | --- |
 | `●` Working | A turn or task is running, whether or not any window shows it. |
+| `↻` Running job | The turn ended, but a job it started (a build, a test run) still runs; it resumes by itself when the job finishes. Rows name the job (`↻ Running job · npm test +1`); the detail says it in full. Nothing for you to do. |
+| `⋯` Delegated | A task handed work to its members and resumes by itself when they deliver. Nothing for you to do. |
 | `!` Needs input | It stopped to ask a question, or a task is blocked on you. |
 | `?` Unconfirmed | A run's outcome could not be confirmed after a service was lost; confirm the old process stopped before retrying. |
 | `○` Open | Nothing runs, and a Rind window shows it on screen right now. Several terminals can each have one open. |
@@ -105,7 +107,7 @@ Enter on a member opens its page: every conversation it has in this team, newest
 
 ### Tasks
 
-Tasks are grouped by what you do first: Needs you, In progress, Queued, Waiting on members, Delivered and Cancelled. Each row shows the owner and priority; wide terminals add the blocker, queue reason or delivery summary. Priority only reorders waiting work; it never interrupts a running task.
+Tasks are grouped by what you do first: Needs you, In progress, Queued, Delegated to members, Delivered and Cancelled. Each row shows the owner and priority; wide terminals add the blocker, queue reason or delivery summary. Priority only reorders waiting work; it never interrupts a running task.
 
 Enter opens the task's **report**:
 
@@ -186,7 +188,7 @@ Rind is not one process: agents, tasks and the shared Runtime run in the backgro
 
 Conversations opened from Agents never nest. When you move to Agents or to another conversation from inside one, it hands the move back to the window that opened it, says which conversation it was on, and closes. A forced close (a second `ctrl+c` while a turn is being interrupted) also says "leave", so the window that opened it closes too instead of showing Agents again. The window you started Rind in keeps its own conversation loaded behind the page; choosing that conversation again, or `esc` while it is the one marked `↩`, returns to it without a second window. The handoff goes through a private file named by `RIND_AGENTS_HANDOFF`; the window removes that variable from its environment at startup, so services and tools it starts never inherit it. There is at most one conversation on screen, and leaving from anywhere closes everything. A conversation in an unregistered folder runs in the window's own worker; while it is working, moving away is refused instead of killing it.
 
-The **Background** page shows what keeps running after you leave. **Running now** lists every running turn and task in the shared Runtime, from any Rind window, in a team or not, with where it runs and for how long. Below are runs whose stop could not be confirmed, and both background services with their process ID and uptime. Enter on a service shows its recent log; when a newer Rind is installed, the management service offers **Restart to load the update**, which keeps every conversation running while windows reconnect. The shared Runtime keeps old code while windows use it and updates once they are all closed. Stop is a quiet `[ Stop all agents… ]` button at the end, also on `S`. Its dialog selects Cancel first, lists what is running and says what is kept. Its single action is **Stop all agents and leave Rind**. Every open conversation depends on these services, so stopping always closes the windows too, rather than leaving them on a stopped Runtime.
+The **Background** page shows what keeps running after you leave. **Running now** lists every running turn and task in the shared Runtime, from any Rind window, in a team or not, with where it runs and for how long, including conversations running a job. They count as still working when you leave Rind, and Stop all names them, since stopping ends their jobs too. Below are runs whose stop could not be confirmed, and both background services with their process ID and uptime. Enter on a service shows its recent log; when a newer Rind is installed, the management service offers **Restart to load the update**, which keeps every conversation running while windows reconnect. The shared Runtime keeps old code while windows use it and updates once they are all closed. Stop is a quiet `[ Stop all agents… ]` button at the end, also on `S`. Its dialog selects Cancel first, lists what is running and says what is kept. Its single action is **Stop all agents and leave Rind**. Every open conversation depends on these services, so stopping always closes the windows too, rather than leaving them on a stopped Runtime.
 
 `rind agents stop` stops both background services, but only when nothing is running; otherwise it lists the running work and exits with status 1. `--all` also stops running agents. It never starts a service just to stop it. Conversations still open elsewhere notice the stop, reattach if the service comes back on its own, and otherwise continue untracked; nothing restarts a service you stopped except opening Agents or pressing `r`.
 

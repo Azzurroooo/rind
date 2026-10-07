@@ -216,16 +216,14 @@ export function createActions(ui) {
 
   // Stop is destructive and separate from leaving: Cancel is the default, the
   // dialog says what keeps existing, and the button names what it does.
-  function stopAll(working) {
-    const live = snap().runs.filter(run => ["starting", "running"].includes(run.status));
-    const names = live.slice(0, 5).map(run => {
-      const session = snap().sessions.find(s => s.id === run.sessionId);
-      const task = snap().tasks.find(t => t.id === run.taskId);
-      return "• " + agentName(session?.agentId) + " — " + (task ? single(task.brief) : "conversation");
-    });
+  // `running`: the Background page's Running now rows, jobs included.
+  function stopAll(running = []) {
+    const working = running.length;
+    const names = running.slice(0, 5).map(row => "• " + single(row.context) + " — " + single(row.title) + (row.status === "Running job" ? " (running " + single(row.note) + ")" : ""));
+    const jobs = running.filter(row => row.status === "Running job").length;
     const description = [
-      ...(working ? [working + (working === 1 ? " agent is" : " agents are") + " working:", ...names, ...(live.length > 5 ? ["  and " + (live.length - 5) + " more"] : []), ""] : ["Nothing is running."]),
-      "Running work is cancelled now and cannot be resumed where it stopped. Teams, members, tasks and conversation history are kept.",
+      ...(working ? [working + (working === 1 ? " agent is" : " agents are") + " working:", ...names, ...(working > 5 ? ["  and " + (working - 5) + " more"] : []), ""] : ["Nothing is running."]),
+      "Running work is cancelled now and cannot be resumed where it stopped." + (jobs ? " Jobs they started are stopped too." : "") + " Teams, members, tasks and conversation history are kept.",
     ];
     // Every open conversation depends on these services, so stopping them
     // also leaves Rind rather than stranding windows on a stopped Runtime.

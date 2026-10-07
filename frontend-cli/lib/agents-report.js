@@ -28,7 +28,8 @@ function standing(report, width, now) {
   if (task.status === "done" && task.review?.decision === "rework") return [paint.warning("↺ Sent back for rework " + ago(task.review.at, now)), ...block("Feedback", [task.review.feedback], width)];
   if (task.status === "done" && report.decide) return [paint.accent("New delivery · " + report.decide)];
   if (needsUser(task) && task.blockedOn) return block("Needs you", [task.blockedOn.action], width, paint.warning);
-  if (task.blockedOn) return block("Waiting on", [report.name(task.blockedOn.responder) + ": " + task.blockedOn.action], width);
+  if (task.blockedOn?.responder === "children") return block("Delegated", ["to its members. " + task.blockedOn.action], width);
+  if (task.blockedOn) return block("Asked", [report.name(task.blockedOn.responder) + ": " + task.blockedOn.action], width);
   if (task.error) return block("Problem", [task.error], width, paint.warning);
   return [];
 }

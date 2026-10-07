@@ -106,3 +106,20 @@ test("report keys accept a delivery or send it back with feedback", async () => 
   await review.delivery("a");
   assert.deepEqual(shown.actions.map(action => action.key), ["a", "n", "space", "r"], "no rework once the owner left the team");
 });
+
+test("Stop all names jobs that will stop, and a running job is explained in words", async () => {
+  const { createActions } = await import("../lib/agents-actions.js");
+  const { detailFor } = await import("../lib/agents-detail.js");
+  let dialog;
+  const ui = { view: { snapshot: snapshot() }, choose: (title, items, options) => { dialog = { title, items, ...options }; } };
+  const actions = createActions(ui);
+  actions.stopAll([{ kind: "live", status: "Running job", title: "Conversation", context: "notes", note: "npm test" }]);
+  assert.equal(dialog.title, "Stop all agents?");
+  assert.match(dialog.description.join("\n"), /notes — Conversation \(running npm test\)/);
+  assert.match(dialog.description.join("\n"), /Jobs they started are stopped too/);
+
+  const s = snapshot();
+  s.live = [{ id: "r", turn: "idle", watchers: 0, background: { count: 3, commands: ["npm test", "cargo build"], startedAt: "x" } }];
+  const lines = detailFor({ snapshot: s }, { kind: "live", title: "Conversation", context: "notes", status: "Running job", sessionId: "r", time: "2m" }).map(strip).join("\n");
+  assert.match(lines, /Running npm test, cargo build and 1 more\. It continues by itself when they finish\./);
+});

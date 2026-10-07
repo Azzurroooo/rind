@@ -683,7 +683,7 @@ export function createService({ store, paths, adapters, toolConfig }: {
         else if (task.status === "queued" && task.dispatch) { /* A routed answer arrived before this run ended. */ }
         else if (task.status === "blocked") { /* Preserve explicitly routed blockers. */ }
         else if (children.some(awaitingDelivery)) {
-          task.status = "blocked"; task.blockedOn = { responder: "children", action: "Waiting for assigned members to return." }; delete task.report;
+          task.status = "blocked"; task.blockedOn = { responder: "children", action: "Continues when its members deliver." }; delete task.report;
         } else if (task.report) deliver(task);
         else if (children.some(t => !observedChildren.has(t.id))) {
           task.status = "queued"; task.dispatch = true; note(next, task.id, "system", "Child tasks have returned. Review and integrate their reports.");

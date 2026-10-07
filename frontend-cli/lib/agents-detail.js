@@ -8,6 +8,14 @@ function memberLine(row) {
   return (paint[statusMeta(status).tone] || paint.dim)(statusMeta(status).glyph + " " + label[0].toUpperCase() + label.slice(1));
 }
 const byId = (items, id) => items.find(item => item.id === id);
+// Running job, said in full: what runs and that it carries on by itself.
+function jobLine(snapshot, runtimeSessionId) {
+  const background = (snapshot.live || []).find(item => item.id === runtimeSessionId)?.background;
+  if (!background?.count) return "";
+  const names = (background.commands || []).map(single).filter(Boolean);
+  const what = names.length ? names.join(", ") + (background.count > names.length ? " and " + (background.count - names.length) + " more" : "") : background.count + (background.count === 1 ? " job" : " jobs");
+  return "Running " + what + ". It continues by itself when " + (background.count === 1 ? "it finishes." : "they finish.");
+}
 
 // Lines describing the selected row: what it is, its state, and what Enter does.
 export function detailFor(view, row) {
@@ -40,6 +48,7 @@ export function detailFor(view, row) {
     case "new-session": {
       if (row.independent) return [paint.bold(row.title), paint.dim(row.workspace), "",
         tone(row.status) + (row.time ? paint.dim(" · " + row.time) : ""), "",
+        ...(row.status === "Running job" ? [jobLine(snapshot, row.sessionId), ""] : []),
         ...field("Session", paint.dim(row.sessionId)),
         "Enter continues this conversation in its folder. It stays outside every team."];
       if (row.manager) return [paint.bold("Manager"), paint.dim("Coordinates every team"), "", "Assembles teams, delegates to leaders and reviews published reports. Members' private conversations stay with them.", "", ...(row.kind === "session" ? field("Conversation", row.title) : [])];
@@ -50,6 +59,7 @@ export function detailFor(view, row) {
       return [paint.bold(row.title), owner, "", tone(row.status) + (row.time ? paint.dim(" · " + row.time) : ""), "",
         ...(task ? field("Task", single(task.brief)) : []),
         ...field("Session", paint.dim(row.sessionId)),
+        ...(row.status === "Running job" ? [jobLine(snapshot, row.sessionId), ""] : []),
         row.status === "Needs input" ? paint.warning("Waiting for your answer. Enter joins the conversation.") : "Enter joins this conversation in its workspace."];
     }
     case "approval": {
@@ -65,7 +75,7 @@ export function detailFor(view, row) {
       if (!task) return [];
       return [paint.bold(single(task.brief)), paint.dim("Owner: " + row.owner + (task.priority ? " · " + task.priority + " priority" : "") + (task.parentTaskId ? " · subtask" : "")), "", tone(row.status), "",
         ...(task.queueReason && task.status === "queued" ? field("Queue", task.queueReason) : []),
-        ...(task.blockedOn ? field(needsUser(task) ? "Needs your answer" : "Waiting on", single(task.blockedOn.action)) : []),
+        ...(task.blockedOn ? field(needsUser(task) ? "Needs your answer" : task.blockedOn.responder === "children" ? "Delegated to its members" : "Asked " + (single(byId(snapshot.agents, task.blockedOn.responder)?.name) || "a member"), single(task.blockedOn.action)) : []),
         ...(task.error ? field("Problem", single(task.error)) : []),
         ...(task.report ? field("Delivery · " + task.report.outcome, single(task.report.summary)) : field("Delivery", paint.dim("No report yet"))),
         ...(row.fresh ? [paint.accent("● New delivery. Open it to accept it or send it back."), ""] : task.review?.decision === "accepted" ? [paint.success("✓ Accepted"), ""] : task.review?.decision === "rework" ? [paint.warning("↺ Sent back for rework"), ""] : []),
@@ -85,6 +95,7 @@ export function detailFor(view, row) {
       "Leaving Rind (ctrl+c twice, or /exit) only closes windows. Agents, tasks and the shared Runtime keep working.", "",
       "Stop them here when you want everything to end."];
     case "live": return [paint.bold(row.title), paint.dim(row.context), "", tone(row.status) + paint.dim(" · started " + (row.time || "now") + " ago"), "",
+      ...(row.status === "Running job" ? [jobLine(snapshot, row.sessionId), ""] : []),
       row.taskId ? "Enter opens the task report." : "Enter joins this conversation.", "",
       paint.dim("It keeps running if you leave Rind.")];
     case "service": return [paint.bold(row.title), paint.dim(row.note), "",

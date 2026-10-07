@@ -248,6 +248,12 @@ Rind 不是单进程：Agent、任务与共享 Runtime 在后台运行，窗口�
 - 会话文件夹：`agents-session.js#sessionWorkspace` 先问 Runtime（`runtime/sessions`），再读保存的元数据；子窗口启动失败经 handoff `{ action: "failed", error }` 回传原因。
 - 选择：选中行存在时从不自动移动（实时数据重排也不会改变 Enter 的目标）；行消失时就近回退。
 
+### 8.2.6 状态词表：Running job 与 Delegated（已冻结）
+
+- 每个状态回答"现在该谁动"：`!` Needs input（你）、`●` Working（它）、`↻` Running job（它启动的后台任务在跑，结束后自动继续）、`⋯` Delegated（交给成员，交付后自动继续；替代原 Waiting，避免被读成"等你"）、`◦` Queued、`○` Open、`·` Idle。只有 `!` 需要用户。
+- 数据：worker 的 `background_wait` 带 `count/started_at/commands`；共享 Runtime 实时表据 `background_wait_changed` 记录 `background`（崩溃重置清零，有任务时不被 10 分钟遗忘）；`liveStatus` / `projection.ts#runningJob` 在 turn 空闲且有任务时给 Running job，优先于 Open，Team 运行保持活动（占用工作区）但显示 Running job。
+- 宽列显示符号+命令（`jobSummary`："npm test +1"），窄列只显示符号与数量，详情给出整句（`jobLine`）；`?` 帮助含状态图例。Background › Running now、离开提示计数（`runningCount`）、Stop all 确认框都包含它们。
+
 ### 8.2.5 窗口扁平化与 Open 语义（已冻结）
 
 - Open = 此刻在屏幕上显示。被 Agents 页盖住的窗口通过 `runtime/visibility { visible:false }` 报告（`live-sessions.js#hide/show`），其会话显示 Idle（运行中则 Working）；多个终端可各有一个 Open。被盖住的窗口不接收 `rind send`。

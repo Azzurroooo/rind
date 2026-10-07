@@ -245,7 +245,7 @@ test("leader resumes after children return without a human polling every agent",
   const briefing = (await f.call("getTeam", { teamId: f.team.id })).briefing;
   assert.equal(briefing.needsAttention.length, 0);
   assert.equal(briefing.waiting[0].taskId, parent.id);
-  assert.equal((await f.call("snapshot")).memberships.find(m => m.agentId === f.leader.id).status, "Waiting");
+  assert.equal((await f.call("snapshot")).memberships.find(m => m.agentId === f.leader.id).status, "Delegated");
   await f.call("updateTask", { taskId: child.id, report: { outcome: "done", summary: "Implemented", evidence: [], artifacts: [] } });
   f.starts[1].finish({ content: "done" });
   await eventually(() => f.starts.length === 3);

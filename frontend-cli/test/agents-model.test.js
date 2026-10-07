@@ -84,9 +84,9 @@ test("tasks are grouped into sections a human acts on first", () => {
     { id: "t3", teamId: "team", assigneeAgentId: "lead", brief: "Coordinate", status: "blocked", blockedOn: { responder: "children", action: "Wait" } },
   );
   const rows = taskRows(snapshot, "team");
-  assert.deepEqual(rows.map(r => r.kind === "section" ? "#" + r.title : r.title), ["Assign a task", "#Needs you", "Decide", "#Waiting on members", "Coordinate", "#Delivered", "Ship"]);
+  assert.deepEqual(rows.map(r => r.kind === "section" ? "#" + r.title : r.title), ["Assign a task", "#Needs you", "Decide", "#Delegated to members", "Coordinate", "#Delivered", "Ship"]);
   assert.equal(rows.find(r => r.title === "Decide").note, "Pick a date");
-  assert.equal(rows.find(r => r.title === "Coordinate").status, "Waiting");
+  assert.equal(rows.find(r => r.title === "Coordinate").status, "Delegated");
 });
 
 test("inbox and sidebar only count team-scoped attention", () => {
@@ -210,4 +210,28 @@ test("the inbox shows recent deliveries instead of repeating the team list", () 
   assert.deepEqual([delivered.title, delivered.note, delivered.status], ["Ship login", "Merged and released", "Done"]);
   assert.match(delivered.context, /^Product › API · /);
   assert.equal(organizationRows(snapshot, "team", []).find(r => r.agentId === "api").tasks, 0, "delivered work is not an open task");
+});
+
+test("a conversation running a job reads Running job everywhere, and delegated work reads Delegated", async () => {
+  const { liveStatus, statusMeta, memberState, taskStatus, jobSummary } = await import("../lib/agents-model.js");
+  const job = { id: "r", workspace: "/w/notes", turn: "idle", watchers: 0, updatedAt: "2026-10-06T11:59:00Z", startedAt: "", background: { count: 2, commands: ["npm test", "cargo build"], startedAt: "2026-10-06T11:57:00Z" } };
+  assert.equal(liveStatus(job), "Running job");
+  assert.equal(liveStatus({ ...job, watchers: 1 }), "Running job", "a job outranks Open");
+  assert.equal(liveStatus({ ...job, turn: "running" }), "Working");
+  assert.equal(statusMeta("Running job").glyph, "↻");
+  assert.equal(statusMeta("Delegated").glyph, "⋯");
+  assert.ok(statusMeta("Working").rank < statusMeta("Running job").rank && statusMeta("Running job").rank < statusMeta("Delegated").rank);
+  assert.equal(memberState("Running job").label, "running a job");
+  assert.equal(memberState("Delegated").label, "delegated");
+  assert.equal(taskStatus({ status: "blocked", blockedOn: { responder: "children" } }), "Delegated");
+  assert.equal(jobSummary(job.background), "npm test +1");
+  assert.equal(jobSummary({ count: 1, commands: ["npm   run\n build"] }), "npm run build");
+
+  const snapshot = emptyAgentsSnapshot();
+  snapshot.live = [job];
+  const rows = backgroundRows(snapshot, null, { now: NOW });
+  const row = rows.find(r => r.kind === "live");
+  assert.deepEqual([row.status, row.note, row.time], ["Running job", "npm test +1", "3m"], "Background lists it: it keeps running after you leave");
+  const { runningCount } = await import("../lib/agents-model.js");
+  assert.equal(runningCount(snapshot), 1);
 });

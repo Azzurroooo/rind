@@ -3,7 +3,11 @@ import { activeRun, memberKey, type Run, type Session, type State, type Task } f
 // Lookups shared by one snapshot. Built once, so projecting every member,
 // session and queued task is linear in the state instead of quadratic.
 // What the shared Runtime reports for one session right now.
-export interface LiveSession { id: string; workspace: string; turn: "idle" | "running" | "question"; startedAt: string; updatedAt: string; watchers: number }
+// background: jobs a session started that still run; it resumes when they finish.
+export interface LiveSession { id: string; workspace: string; turn: "idle" | "running" | "question"; startedAt: string; updatedAt: string; watchers: number; background?: { count: number; commands: string[]; startedAt: string } | null }
+
+// Not thinking, but not stopped: the turn ended and its jobs still run.
+const runningJob = (live?: LiveSession) => live?.turn === "idle" && (live.background?.count || 0) > 0;
 
 export interface ProjectionIndex {
   state: State;
@@ -39,13 +43,16 @@ function isOpen(index: ProjectionIndex, session: Session) {
 export function memberStatus(index: ProjectionIndex, agentId: string, teamId: string) {
   const sessions = index.sessionsByMember.get(memberKey(teamId, agentId)) || [];
   const runs = sessions.flatMap(s => index.runsBySession.get(s.id) || []);
-  const turns = sessions.map(s => index.live.get(s.runtimeSessionId)?.turn);
+  const lives = sessions.map(s => index.live.get(s.runtimeSessionId));
+  const turns = lives.map(live => live?.turn);
   if (runs.some(r => r.status === "unknown")) return "Unconfirmed";
   if (turns.includes("question") || runs.some(r => r.status === "running" && r.needsInput)) return "Needs input";
-  if (turns.includes("running") || runs.some(r => ["starting", "running"].includes(r.status))) return "Working";
+  if (turns.includes("running")) return "Working";
+  if (lives.some(runningJob)) return "Running job";
+  if (runs.some(r => ["starting", "running"].includes(r.status))) return "Working";
   const tasks = index.tasksByMember.get(memberKey(teamId, agentId)) || [];
   if (tasks.some(t => t.status === "needs_attention" || (t.status === "blocked" && t.blockedOn?.responder !== "children"))) return "Needs input";
-  if (tasks.some(t => t.status === "blocked" && t.blockedOn?.responder === "children")) return "Waiting";
+  if (tasks.some(t => t.status === "blocked" && t.blockedOn?.responder === "children")) return "Delegated";
   if (tasks.some(t => t.status === "queued" && t.dispatch)) return "Queued";
   return sessions.some(s => isOpen(index, s)) ? "Open" : "Idle";
 }
@@ -80,7 +87,9 @@ export function sessionStatus(index: ProjectionIndex, sessionId: string) {
   const live = session && index.live.get(session.runtimeSessionId);
   const status = active?.status === "unknown" ? "Unconfirmed"
     : live?.turn === "question" || active?.needsInput ? "Needs input"
-    : live?.turn === "running" || active ? "Working"
+    : live?.turn === "running" ? "Working"
+    : runningJob(live) ? "Running job"
+    : active ? "Working"
     : session && isOpen(index, session) ? "Open" : "Idle";
   const lastActivity = [last?.lastObservedAt, live?.updatedAt].filter(Boolean).sort().at(-1);
   return { status, ...(lastActivity ? { lastActivity } : {}), ...(last?.taskId ? { taskId: last.taskId } : {}), ...(live ? { watchers: live.watchers } : {}) };

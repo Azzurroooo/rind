@@ -20,18 +20,21 @@ const STATUS = {
   "Needs input": { glyph: "!", tone: "warning", rank: 0, attention: true },
   Unconfirmed: { glyph: "?", tone: "danger", rank: 1, attention: true },
   Working: { glyph: "●", tone: "accent", rank: 2 },
-  Waiting: { glyph: "…", tone: "notice", rank: 3 },
-  Queued: { glyph: "◦", tone: "notice", rank: 4 },
-  Open: { glyph: "○", tone: "success", rank: 5 },
-  Done: { glyph: "✓", tone: "success", rank: 6 },
-  Idle: { glyph: "·", tone: "dim", rank: 7 },
-  Cancelled: { glyph: "×", tone: "dim", rank: 8 },
+  // Not your move: a job it started still runs, or its members work for it.
+  // Both resume by themselves, so neither says "waiting".
+  "Running job": { glyph: "↻", tone: "accent", rank: 3 },
+  Delegated: { glyph: "⋯", tone: "notice", rank: 4 },
+  Queued: { glyph: "◦", tone: "notice", rank: 5 },
+  Open: { glyph: "○", tone: "success", rank: 6 },
+  Done: { glyph: "✓", tone: "success", rank: 7 },
+  Idle: { glyph: "·", tone: "dim", rank: 8 },
+  Cancelled: { glyph: "×", tone: "dim", rank: 9 },
 };
 export const STATUS_FILTERS = ["All", ...Object.keys(STATUS)];
 
 // A member's state is described in terms of the person, so a member whose
 // conversation is open in a window reads "1 open" instead of repeating the child status.
-const MEMBER_STATE = { "Needs input": "needs you", Unconfirmed: "unconfirmed", Working: "working", Waiting: "waiting on team", Queued: "task queued" };
+const MEMBER_STATE = { "Needs input": "needs you", Unconfirmed: "unconfirmed", Working: "working", "Running job": "running a job", Delegated: "delegated", Queued: "task queued" };
 export function memberState(status, open = 0) {
   if (MEMBER_STATE[status]) return { tone: status, label: MEMBER_STATE[status] };
   if (open) return { tone: "Open", label: open + " open" };
@@ -40,12 +43,19 @@ export function memberState(status, open = 0) {
 export const statusMeta = status => STATUS[status] || STATUS.Idle;
 
 // A conversation's state as the shared Runtime reports it.
-export const liveStatus = live => live.turn === "question" ? "Needs input" : live.turn === "running" ? "Working" : live.watchers > 0 ? "Open" : "Idle";
+export const liveStatus = live => live.turn === "question" ? "Needs input" : live.turn === "running" ? "Working" : live.background?.count > 0 ? "Running job" : live.watchers > 0 ? "Open" : "Idle";
+// The jobs a conversation resumes after, in a few words: "npm test +1".
+export function jobSummary(background) {
+  if (!background?.count) return "";
+  const first = single(background.commands?.[0]);
+  const more = background.count - (first ? 1 : 0);
+  return first ? first + (more > 0 ? " +" + more : "") : background.count + (background.count === 1 ? " job" : " jobs");
+}
 
 const TASK_STATUS = { running: "Working", queued: "Queued", blocked: "Needs input", needs_attention: "Needs input", done: "Done", cancelled: "Cancelled" };
 export const needsUser = task => task.status === "needs_attention" || (task.status === "blocked" && task.blockedOn?.responder === "user");
 export function taskStatus(task) {
-  if (task.status === "blocked" && !needsUser(task)) return "Waiting";
+  if (task.status === "blocked" && !needsUser(task)) return "Delegated";
   return TASK_STATUS[task.status] || "Idle";
 }
 
@@ -162,7 +172,7 @@ const TASK_SECTIONS = [
   { id: "needs", title: "Needs you", test: task => needsUser(task) },
   { id: "working", title: "In progress", test: task => task.status === "running" },
   { id: "queued", title: "Queued", test: task => task.status === "queued" },
-  { id: "waiting", title: "Waiting on members", test: task => task.status === "blocked" && !needsUser(task) },
+  { id: "delegated", title: "Delegated to members", test: task => task.status === "blocked" && !needsUser(task) },
   { id: "done", title: "Delivered", test: task => task.status === "done" },
   { id: "cancelled", title: "Cancelled", test: task => task.status === "cancelled" },
 ];
@@ -382,8 +392,9 @@ export function folderRows(group, { query = "", filter = "All", now = Date.now()
 }
 
 // Conversations with a turn in the shared Runtime, plus managed runs it has not reported yet.
+const keepsRunning = item => item.turn !== "idle" || item.background?.count > 0;
 export function runningCount(snapshot) {
-  const live = new Set((snapshot.live || []).filter(item => item.turn !== "idle").map(item => item.id));
+  const live = new Set((snapshot.live || []).filter(keepsRunning).map(item => item.id));
   const pending = snapshot.runs.filter(run => ["starting", "running"].includes(run.status))
     .filter(run => !live.has(snapshot.sessions.find(s => s.id === run.sessionId)?.runtimeSessionId)).length;
   return live.size + pending;
@@ -399,14 +410,16 @@ export function backgroundRows(snapshot, service, { now = Date.now() } = {}) {
   const running = [];
   const seen = new Set();
   for (const item of snapshot.live || []) {
-    if (item.turn === "idle") continue;
+    if (!keepsRunning(item)) continue;
     const session = snapshot.sessions.find(s => s.runtimeSessionId === item.id);
+    const job = item.turn === "idle" ? item.background : null;
     const run = session && snapshot.runs.find(r => r.sessionId === session.id && ["starting", "running"].includes(r.status));
     const task = run?.taskId && snapshot.tasks.find(t => t.id === run.taskId);
     seen.add(item.id);
     running.push({ id: "live:" + item.id, kind: "live", title: task ? single(task.brief) : "Conversation", status: liveStatus(item),
       context: session ? [teamName(session.teamId), name(session.agentId)].filter(Boolean).join(" › ") : folder(item.workspace),
-      time: relativeTime(item.startedAt || item.updatedAt, now), taskId: task?.id, agentId: session?.agentId, teamId: session?.teamId, sessionId: item.id, workspace: item.workspace });
+      time: relativeTime(job?.startedAt || item.startedAt || item.updatedAt, now), ...(job ? { note: jobSummary(job) } : {}),
+      taskId: task?.id, agentId: session?.agentId, teamId: session?.teamId, sessionId: item.id, workspace: item.workspace });
   }
   for (const run of snapshot.runs.filter(r => ["starting", "running"].includes(r.status))) {
     const session = snapshot.sessions.find(s => s.id === run.sessionId);

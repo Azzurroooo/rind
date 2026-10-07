@@ -31,6 +31,12 @@ const NAVIGATION = [
   ["→", "open · unfold"], ["esc", "back; from the sidebar, to ↩"], ["ctrl+c ×2", "leave Rind · agents keep running"],
 ];
 
+// What each status glyph means, for the ? overlay. Only "!" asks for you.
+const STATUS_LEGEND = [
+  ["!", "needs you"], ["●", "working"], ["↻", "running a job; resumes by itself"], ["⋯", "delegated to its members"],
+  ["◦", "queued"], ["?", "unconfirmed: check it stopped"], ["○", "open on a screen"], ["·", "idle"],
+];
+
 const act = (name, label) => ({ id: name, label: label || ACTIONS[name].label });
 
 // What Enter does on the selected row, in plain words.
@@ -99,6 +105,7 @@ export function helpGroups() {
   return [
     { title: "Navigate", items: NAVIGATION },
     { title: "Selected item", items: pick(["open", "actions", "chat", "edit"]) },
+    { title: "Status", items: STATUS_LEGEND },
     { title: "Teams", items: pick(["task", "add", "tabs", "newTeam"]) },
     { title: "Lists", items: pick(["search", "filter", "fold", "foldAll", "group", "refresh", "help"]) },
     { title: "Background", items: [...pick(["stop"]), ["", "leaving Rind never stops agents"]] },

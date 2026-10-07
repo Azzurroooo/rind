@@ -63,6 +63,7 @@ async def test_idle_task_completion_reopens_client_and_finishes_request(tmp_path
         assert events[-1]["type"] == "turn_completed", events[-1]
         summary = events[-1]["background_wait"]
         assert summary["count"] == 1
+        assert summary["commands"] == ["work"], "it says what is running"
         assert (await worker.replay(sid))["background_wait"] == summary
         assert len(calls) == 2 and clients[0].closed
         assert not worker.execution.active_session_ids()

@@ -316,7 +316,7 @@ function helpBox(width, maxHeight) {
   const widest = Math.max(...groups.flatMap(group => group.items.map(([, label]) => 1 + keyWidth + textWidth(label))));
   let lines;
   if (half >= widest) {
-    const left = groups.slice(0, 2).flatMap(group), right = groups.slice(2).flatMap(group);
+    const left = groups.slice(0, 3).flatMap(group), right = groups.slice(3).flatMap(group);
     lines = Array.from({ length: Math.max(left.length, right.length) }, (_, i) => fitLine(left[i] || "", half) + "  " + (right[i] || ""));
   } else lines = groups.flatMap(group);
   lines.push("", paint.dim("Shortcuts never fire while you are typing in a field."));

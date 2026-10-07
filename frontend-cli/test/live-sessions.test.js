@@ -116,3 +116,23 @@ test("a forgotten conversation leaves the table and every window that pointed at
   live.show(a);
   assert.deepEqual(live.list().map(s => [s.id, s.watchers]), [["kept", 1]], "a window that held it shows nothing");
 });
+
+test("background jobs a session waits on are part of its live state", () => {
+  const { live, flush, pushes, advance } = setup();
+  const viewer = {};
+  live.view(viewer, "s1");
+  live.event({ session_id: "s1", event: { type: "turn_started" } });
+  live.event({ session_id: "s1", event: { type: "turn_completed" } });
+  live.event({ session_id: "s1", event: { type: "background_wait_changed", background_wait: { count: 2, started_at: 1791374400, commands: ["npm test", "cargo build"] } } });
+  flush();
+  assert.deepEqual(live.list()[0].background, { count: 2, commands: ["npm test", "cargo build"], startedAt: "2026-10-07T12:00:00.000Z" });
+  assert.equal(pushes.length, 1, "one push for the burst");
+  live.leave(viewer);
+  advance(11 * 60 * 1000);
+  assert.equal(live.list().length, 1, "a session running jobs is never forgotten as idle");
+  live.event({ session_id: "s1", event: { type: "background_wait_changed", background_wait: null } });
+  assert.equal(live.list()[0]?.background ?? null, null);
+  live.event({ session_id: "s2", event: { type: "background_wait_changed", background_wait: { count: 1, started_at: 1791374400, commands: ["make"] } } });
+  live.reset();
+  assert.equal(live.list().find(s => s.id === "s2").background, null, "a crashed worker runs no jobs");
+});
