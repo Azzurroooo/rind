@@ -182,6 +182,7 @@ test("local command catalog stays complete before the runtime starts", async () 
     "login",
     "logout",
     "model",
+    "rename",
     "sessions",
     "skill",
     "status",
@@ -231,4 +232,17 @@ test("/tour without a terminal explains the requirement", async () => {
 
   assert.equal(await controller.handle("/tour"), true);
   assert.deepEqual(logs, ["/tour requires an interactive terminal."]);
+});
+
+test("/rename goes to the conversation, with the name taken as typed", async () => {
+  const renamed = [];
+  const controller = createCommandController({
+    request: async () => ({}),
+    turn: { submit() {} },
+    input: { runRename: async (argument) => { renamed.push(argument); return { text: "ok" }; } },
+  });
+  for (const text of ["/rename Bob's notes", "/rename", "/rename --reset", "/RENAME  spaced  "]) assert.equal(await controller.handle(text), true);
+  assert.deepEqual(renamed, ["Bob's notes", "", "--reset", "spaced"]);
+  assert.equal(await controller.handle("/renamed"), true);
+  assert.equal(renamed.length, 4, "a different command is not /rename");
 });

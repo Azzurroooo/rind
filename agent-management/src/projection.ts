@@ -4,7 +4,8 @@ import { activeRun, memberKey, type Run, type Session, type State, type Task } f
 // session and queued task is linear in the state instead of quadratic.
 // What the shared Runtime reports for one session right now.
 // background: jobs a session started that still run; it resumes when they finish.
-export interface LiveSession { id: string; workspace: string; turn: "idle" | "running" | "question"; startedAt: string; updatedAt: string; watchers: number; background?: { count: number; commands: string[]; startedAt: string } | null }
+// title: set when the conversation was renamed since its history was read.
+export interface LiveSession { id: string; workspace: string; turn: "idle" | "running" | "question"; startedAt: string; updatedAt: string; watchers: number; background?: { count: number; commands: string[]; startedAt: string } | null; title?: string }
 
 // Not thinking, but not stopped: the turn ended and its jobs still run.
 const runningJob = (live?: LiveSession) => live?.turn === "idle" && (live.background?.count || 0) > 0;

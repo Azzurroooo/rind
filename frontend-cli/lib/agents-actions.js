@@ -170,12 +170,23 @@ export function createActions(ui) {
     ]);
   }
 
+  // Empty restores the first message as its title.
+  function rename(row) {
+    ui.form("Rename conversation", [{ key: "name", label: "Name", optional: true, hint: "Leave empty to show it by its first message again." }],
+      async ({ name }) => {
+        const renamed = await ui.rename(row.sessionId, name);
+        ui.notify(renamed.name ? "Named " + single(renamed.name) + "." : "Shown by its first message again.", "success");
+      }, { description: ["Now shown as: " + single(row.title)] });
+  }
+  const renameItem = row => ({ label: "Rename…", key: "r", description: "A name of your own; otherwise its first message", action: () => rename(row) });
+
   function sessionActions(row) {
     const task = snap().tasks.find(t => t.id === row.taskId);
     if (row.independent) {
       ui.choose(row.title, [
         { label: "Continue conversation", key: "enter", description: "Outside any team", action: () => ui.join(row) },
         { label: "New conversation in this folder", key: "c", action: () => ui.startNew(row) },
+        renameItem(row),
       ], { description: [row.workspace] });
       return;
     }
@@ -186,6 +197,7 @@ export function createActions(ui) {
         { label: "New conversation", key: "c", action: () => ui.startNew(row) },
       ]),
       ...(task ? [{ label: "Task report", description: single(task.brief), action: () => delivery(task.id) }] : []),
+      renameItem(row),
     ]);
   }
 

@@ -133,3 +133,14 @@ test("background jobs a session waits on are part of its live state", () => {
   live.reset();
   assert.equal(live.list().find(s => s.id === "s2").background, null, "a crashed worker runs no jobs");
 });
+
+test("a rename is part of a conversation's live state, pushed once", () => {
+  const { live, flush, pushes } = setup();
+  live.view({}, "s1");
+  flush(); pushes.length = 0;
+  live.event({ session_id: "s1", event: { type: "session_renamed", name: "Release", title: "Release" } });
+  live.event({ session_id: "s1", event: { type: "session_renamed", name: "Release", title: "Release" } });
+  flush();
+  assert.equal(live.list()[0].title, "Release");
+  assert.equal(pushes.length, 1, "the same title again is no change");
+});

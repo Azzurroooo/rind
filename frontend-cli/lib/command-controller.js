@@ -63,6 +63,10 @@ export function createCommandController({
   }
 
   async function runSlashCommand(text) {
+    if (isRenameCommand(text) && input.runRename) {
+      await applyResult(await input.runRename(renameArgument(text)));
+      return;
+    }
     if (isBareModelCommand(text) && input.isTerminal && input.runModelSelector) {
       await input.runModelSelector();
       return;
@@ -161,6 +165,14 @@ function parseAuthCommand(value) {
 function singleWord(value) {
   const text = String(value || "").trim().toLowerCase();
   return text && !/\s/.test(text) ? text : "";
+}
+
+function isRenameCommand(value) {
+  return /^\/rename(?:\s|$)/i.test(String(value || "").trim());
+}
+
+function renameArgument(value) {
+  return String(value || "").trim().replace(/^\/rename\s*/i, "");
 }
 
 function isBareModelCommand(value) {

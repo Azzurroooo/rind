@@ -877,6 +877,10 @@ class RuntimeDispatcher:
                 ),
             )
             await self._respond_slash_result(request, result)
+            renamed = result.display if isinstance(result.display, dict) and result.display.get("type") == "session_renamed" else None
+            if renamed:
+                # Every window showing it, and the lists, follow the new name.
+                await self._send_event({"type": "session_renamed", "session_id": session_id, "turn_id": "", "name": renamed["name"], "title": renamed["title"]})
         finally:
             if owns_execution:
                 await self._worker.release_execution(session_id)

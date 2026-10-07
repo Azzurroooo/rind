@@ -153,3 +153,28 @@ test("going back to a window left before its first message starts a new conversa
   assert.equal(opened[1].teamId, team.id);
   assert.equal(opened[1].agent.id, lead.id, "in the same member's folder");
 });
+
+// One write path for names: a window's /rename and the Agents page's Rename…
+// both run the conversation's own command; every list follows at once.
+test("a conversation renamed anywhere is shown by its name everywhere", { timeout: 60000 }, async t => {
+  const { renameConversation } = await import("../lib/agents-session.js");
+  const home = await mkdtemp(path.join(os.tmpdir(), "rind-rename-"));
+  const repoRoot = fileURLToPath(new URL("../..", import.meta.url));
+  const folder = path.join(home, "notes"); await mkdir(folder);
+  await writeFile(path.join(home, "settings.json"), JSON.stringify({ provider: "openai-compatible", model: "fixture", apiKey: "fixture", baseUrl: "http://127.0.0.1:1/v1" }));
+  const open = () => createSharedRuntimeClient({ rindHome: home, python: process.env.RIND_PYTHON || "python", repoRoot, cliArgs: ["--cwd", folder], onMessage() {} });
+  const window = open(), probe = open();
+  t.after(async () => { await window.shutdown(); await probe.shutdown(); await removeRindHome(home); });
+  await window.request("initialize"); await probe.request("initialize");
+  const { session_id: id } = await window.request("session/create", { name: "Planning" });
+  const live = async () => (await probe.request("runtime/sessions")).sessions.find(item => item.id === id);
+
+  const renamed = await window.request("rind/command/execute", { session_id: id, input: "/rename Release checks" });
+  assert.equal(renamed.display.title, "Release checks");
+  for (let i = 0; i < 100 && (await live())?.title !== "Release checks"; i++) await new Promise(resolve => setTimeout(resolve, 50));
+  assert.equal((await live())?.title, "Release checks", "the live table carries the new title to every list");
+
+  const reset = await renameConversation({ home, repoRoot, python: process.env.RIND_PYTHON || "python" }, id, "");
+  assert.deepEqual([reset.name, reset.title], [null, ""], "no first message yet, so nothing to show but its id");
+  await assert.rejects(renameConversation({ home, repoRoot, python: process.env.RIND_PYTHON || "python" }, "20261007_000000_deadbeef", "x"), /not|Session/i);
+});

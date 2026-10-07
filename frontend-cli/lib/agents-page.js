@@ -8,6 +8,7 @@ import { managementClient } from "./agents-client.js";
 import { openAgentChat, managerWorkspace, followConversation, returnTarget } from "./agents-commands.js";
 import { createLeaveLatch, LEAVE_HINT } from "./interrupt-state.js";
 import { actionFor } from "./agents-keys.js";
+import { renameConversation } from "./agents-session.js";
 import { emptyAgentsSnapshot, runningCount, clean, sidebarRows, inboxRows, organizationRows, taskRows, memberSessionRows, managerRows, teamSessions, independentSessions, independentRows, folderRows, backgroundRows, archiveRows, workspaceKey, selectable } from "./agents-model.js";
 import { renderAgents } from "./agents-view.js";
 import { createActions } from "./agents-actions.js";
@@ -353,7 +354,14 @@ export async function runAgentsPage({ launch, input = process.stdin, output = pr
   // Menu actions already run inside perform(); nesting would be refused as busy.
   const open = options => (view.busy ? chat(options) : perform(() => chat(options), null, "Opening conversation…"));
   const where = row => ({ agentId: row.agentId, teamId: row.teamId, workspace: row.workspace, manager: row.manager });
-  const ui = { view, request, choose, form, showReport, run: (action, label) => perform(action, null, label), restartService, launch, resolvePath: value => resolveInputPath(value), stopServices, leave, confirm, notify, showText, reopen, openTeam, openMember, setFilter,
+  // Titles come from history; after a rename every list reads it again.
+  async function rename(sessionId, name) {
+    const renamed = await renameConversation(launch, sessionId, name);
+    view.history = {}; view.managerHistory = null; view.independent = null;
+    project();
+    return renamed;
+  }
+  const ui = { view, request, choose, form, showReport, rename, run: (action, label) => perform(action, null, label), restartService, launch, resolvePath: value => resolveInputPath(value), stopServices, leave, confirm, notify, showText, reopen, openTeam, openMember, setFilter,
     join: row => open({ ...where(row), runtimeSessionId: row.sessionId }), startNew: target => open(where(target)) };
   const actions = createActions(ui);
   const currentRow = () => (view.focus === "sidebar" ? view.sidebar.find(r => r.id === view.navId) : view.entries.find(r => r.id === view.selectedId));

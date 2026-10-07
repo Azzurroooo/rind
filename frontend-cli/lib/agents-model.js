@@ -73,16 +73,19 @@ export function roleOf(snapshot, teamId, agentId) {
   return agentId === team?.leaderAgentId ? "Leader" : single(membership?.position) || "Member";
 }
 
+// A rename reaches the live table at once; history catches up on its next read.
+const liveTitle = (snapshot, id) => single((snapshot.live || []).find(item => item.id === id)?.title);
+
 // Saved history supplies titles; the snapshot supplies live status. Only
 // conversations registered to this team are kept.
 export function teamSessions(snapshot, teamId, history = []) {
   const sessions = new Map();
   for (const entry of history) if (entry.teamId === teamId && entry.runtimeSessionId) {
-    sessions.set(entry.runtimeSessionId, { id: entry.runtimeSessionId, agentId: entry.agentId, teamId, title: single(entry.title) || entry.runtimeSessionId, updatedAt: entry.updatedAt, status: "Idle" });
+    sessions.set(entry.runtimeSessionId, { id: entry.runtimeSessionId, agentId: entry.agentId, teamId, title: liveTitle(snapshot, entry.runtimeSessionId) || single(entry.title) || entry.runtimeSessionId, updatedAt: entry.updatedAt, status: "Idle" });
   }
   for (const live of snapshot.sessions) if (live.teamId === teamId && live.runtimeSessionId) {
     const saved = sessions.get(live.runtimeSessionId);
-    sessions.set(live.runtimeSessionId, { id: live.runtimeSessionId, agentId: live.agentId, teamId, title: saved?.title || live.runtimeSessionId,
+    sessions.set(live.runtimeSessionId, { id: live.runtimeSessionId, agentId: live.agentId, teamId, title: saved?.title || liveTitle(snapshot, live.runtimeSessionId) || live.runtimeSessionId,
       updatedAt: later(saved?.updatedAt, live.lastActivity), status: live.status || "Idle", ...(live.taskId ? { taskId: live.taskId } : {}) });
   }
   return [...sessions.values()];
@@ -194,7 +197,7 @@ export function memberSessionRows(sessions, agentId, { query = "", filter = "All
 const liveById = (live, id) => { const item = live.find(entry => entry.id === id); return item ? liveStatus(item) : "Idle"; };
 export function managerRows(history = [], { query = "", now = Date.now(), live = [] } = {}) {
   return [{ id: "new:manager", kind: "new-session", title: "New conversation with Manager", manager: true },
-    ...history.filter(entry => matches(query, entry.title)).map(entry => ({ id: "s:" + entry.runtimeSessionId, kind: "session", depth: 0, title: single(entry.title) || entry.runtimeSessionId,
+    ...history.filter(entry => matches(query, entry.title)).map(entry => ({ id: "s:" + entry.runtimeSessionId, kind: "session", depth: 0, title: single(live.find(item => item.id === entry.runtimeSessionId)?.title) || single(entry.title) || entry.runtimeSessionId,
       status: liveById(live, entry.runtimeSessionId), time: relativeTime(entry.updatedAt, now), sessionId: entry.runtimeSessionId, manager: true }))];
 }
 
@@ -309,12 +312,12 @@ export function independentSessions(snapshot, groups = [], managerWorkspace = ""
     const key = workspaceKey(item.workspace);
     let found;
     for (const group of byWorkspace.values()) found ||= group.sessions.find(s => s.runtimeSessionId === item.id);
-    if (found) { found.status = liveStatus(item); found.updatedAt = later(found.updatedAt, item.updatedAt); continue; }
+    if (found) { found.status = liveStatus(item); found.updatedAt = later(found.updatedAt, item.updatedAt); if (single(item.title)) found.title = single(item.title); continue; }
     // A conversation that started after the last history refresh.
     if (!item.workspace || key === manager) continue;
     const agent = snapshot.agents.find(a => workspaceKey(a.canonicalWorkspace) === key);
     const group = byWorkspace.get(key) || { workspace: agent?.canonicalWorkspace || item.workspace, ...(agent ? { agentId: agent.id } : {}), name: single(agent?.name) || item.workspace.split(/[\\/]/).filter(Boolean).at(-1) || item.workspace, teams: [], sessions: [] };
-    group.sessions.push({ runtimeSessionId: item.id, title: "New conversation", updatedAt: item.updatedAt, status: liveStatus(item) });
+    group.sessions.push({ runtimeSessionId: item.id, title: single(item.title) || "New conversation", updatedAt: item.updatedAt, status: liveStatus(item) });
     byWorkspace.set(key, group);
   }
   // Conversations management registered outside any team, in case history

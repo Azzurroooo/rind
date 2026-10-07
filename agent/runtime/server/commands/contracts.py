@@ -45,5 +45,8 @@ class SlashCommandInfo:
     usage: str = ""
     aliases: tuple[str, ...] = ()
     handler: Handler | None = None
+    # The handler receives the rest of the line as typed, as a single argument
+    # (e.g. a name with an apostrophe), instead of shell-style words.
+    raw_args: bool = False
 
 

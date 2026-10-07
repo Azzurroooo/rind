@@ -2,11 +2,42 @@
 
 from __future__ import annotations
 
+import re
 import uuid
 from datetime import datetime
 from typing import Any
 
 from agent.domain.skills import SKILL_NAME_PATTERN
+
+
+NAME_LIMIT = 80
+# The automatic title is the first message; long enough to recognise, and
+# every list clips it to its own width.
+TITLE_LIMIT = 80
+_CONTROL = re.compile(r"[\x00-\x08\x0b-\x1f\x7f]")
+
+
+def normalize_name(value: str) -> str:
+    """One clean line: control characters dropped, whitespace collapsed, bounded."""
+    clean = " ".join(_CONTROL.sub("", str(value or "")).split())
+    clean = "".join(char for char in clean if char.isprintable())
+    if not clean:
+        raise ValueError("A name cannot be empty.")
+    return clean[:NAME_LIMIT].rstrip()
+
+
+def automatic_title(first_message: str) -> str:
+    return " ".join(str(first_message or "").split())[:TITLE_LIMIT].rstrip()
+
+
+def display_title(meta: dict[str, Any]) -> str:
+    """What every list shows: the name the user gave, otherwise the first message."""
+    name = meta.get("name")
+    if isinstance(name, str) and name.strip():
+        return name
+    title = meta.get("title")
+    # "Untitled" is what older versions stored before the first message.
+    return title if isinstance(title, str) and title not in {"", "Untitled"} else ""
 
 
 def new_session_id() -> str:
@@ -23,7 +54,8 @@ def session_index_entry(
 ) -> dict[str, Any]:
     return {
         "id": session_id,
-        "title": meta.get("title", "Untitled"),
+        "title": display_title(meta),
+        "name": meta.get("name") or None,
         "updated_at": meta.get("updated_at", ""),
         "size": {"messages": message_count, "tool_calls": tool_call_count},
         "preview": preview,
@@ -100,7 +132,7 @@ def new_session_meta(
     meta = {
         "schema_version": "2.0",
         "session_id": session_id,
-        "title": "Untitled",
+        "title": "",
         "created_at": now,
         "updated_at": now,
         "model": model,

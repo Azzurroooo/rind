@@ -17,7 +17,7 @@ function fixture() {
   state.sessions.s3 = { id: "s3", agentId: "dev", teamId: "a", runtimeSessionId: "r-unsaved", origin: "managed" };
   state.sessions.s4 = { id: "s4", agentId: "dev", teamId: "a", runtimeSessionId: "", origin: "direct" };
   const histories = {
-    "/w/lead": [{ id: "r-team", title: "Untitled", first_user_message: "Plan release", updated_at: "2026-10-06T02:00:00Z" }, { id: "r-private", title: "Private notes", updated_at: "2026-10-06T03:00:00Z" }],
+    "/w/lead": [{ id: "r-team", title: "Plan release", updated_at: "2026-10-06T02:00:00Z" }, { id: "r-private", title: "Private notes", updated_at: "2026-10-06T03:00:00Z" }],
     "/w/dev": [{ session_id: "r-other-team", title: "Other team", updated_at: "2026-10-06T04:00:00Z" }],
   };
   return { state, list: async workspace => histories[workspace] };
@@ -53,7 +53,7 @@ test("independent history groups non-team conversations by workspace and skips t
   state.sessions.s5 = { id: "s5", agentId: "lead", runtimeSessionId: "r-standalone", origin: "direct" };
   const all = [
     { id: "r-team", workspace_root: "/w/lead", title: "Team work", updated_at: "2026-10-06T05:00:00Z" },
-    { id: "r-standalone", workspace_root: "/w/lead/", title: "Untitled", first_user_message: "Quick fix", updated_at: "2026-10-06T04:00:00Z" },
+    { id: "r-standalone", workspace_root: "/w/lead/", title: "Quick fix", updated_at: "2026-10-06T04:00:00Z" },
     { id: "r-loose", workspace_root: "/home/me/scratch", title: "Try an idea", updated_at: "2026-10-06T06:00:00Z" },
     { id: "r-manager", workspace_root: "/rind/manager", title: "Coordinate" },
     { id: "r-loose", workspace_root: "/home/me/scratch", title: "duplicate" },

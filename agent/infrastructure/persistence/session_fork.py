@@ -13,7 +13,7 @@ from agent.infrastructure.persistence.jsonl_session_store import JsonlSessionSto
 from agent.infrastructure.persistence.message_projector import INTERNAL_MESSAGE_KINDS
 from agent.infrastructure.persistence.session_files import SessionFiles
 from agent.infrastructure.persistence.session_index_repository import SessionIndexRepository
-from agent.infrastructure.persistence.session_meta import new_session_id, session_index_entry
+from agent.infrastructure.persistence.session_meta import display_title, new_session_id, session_index_entry
 
 FORK_TITLE_SUFFIX = " (fork)"
 CONTEXT_RECORD_KINDS = frozenset({"skill_snapshot", "skill_catalog"}) | INTERNAL_MESSAGE_KINDS
@@ -150,9 +150,11 @@ def _forked_meta(
     tool_call_count: int,
 ) -> dict[str, Any]:
     now = datetime.now(timezone.utc).isoformat()
-    title = str(meta.get("title") or "Untitled")
+    # A fork is told apart from its source, and never shares its name.
+    title = display_title(meta) or "Untitled"
     while title.endswith(FORK_TITLE_SUFFIX):
         title = title[: -len(FORK_TITLE_SUFFIX)]
+    meta.pop("name", None)
     meta.update(
         {
             "session_id": new_id,

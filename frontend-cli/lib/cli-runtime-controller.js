@@ -57,7 +57,10 @@ export function createCliRuntimeController({
       ...(info.provider ? { provider_id: info.provider } : {}),
       ...(info.model ? { model_id: info.model } : {}),
       ...(info.reasoning_effort ? { reasoning_effort: info.reasoning_effort } : {}),
+      ...(state.session.pendingName ? { name: state.session.pendingName } : {}),
     });
+    if (!created?.session_id) throw new Error("The Runtime did not create a conversation.");
+    state.session.pendingName = "";
     state.session.reservedId = String(created.session_id);
     state.session.info = {
       ...state.session.info, session_id: String(created.session_id),
@@ -68,6 +71,17 @@ export function createCliRuntimeController({
     await onSessionRestored();
   }
   const hasConversation = () => Boolean(state.session.info.session_id);
+
+  // /rename: the conversation's own command once it exists. Before the first
+  // message the window keeps the name and creates the conversation with it.
+  async function runRename(argument) {
+    if (hasConversation()) return request(methods.commandExecute, { input: ("/rename " + argument).trim() });
+    const name = argument.split(/\s+/).filter(Boolean).join(" ");
+    if (!name) return { text: state.session.pendingName ? `Will be named: ${state.session.pendingName}` : "Shown by its first message once you send it.\nUsage: /rename <name> · /rename --reset" };
+    if (name === "--reset") { state.session.pendingName = ""; return { text: "Name cleared; it will be shown by its first message." }; }
+    state.session.pendingName = name;
+    return { text: `Will be named: ${name} (when your first message starts the conversation)` };
+  }
   const needsConversation = what => { log(what + " needs a conversation. Send your first message to start one."); };
 
   async function ensureRuntime() {
@@ -520,6 +534,7 @@ export function createCliRuntimeController({
     ensureRuntime,
     restoreSession,
     runGoalCommand,
+    runRename,
     refreshGoalState,
     runSessionsSelector,
     runForkSelector,

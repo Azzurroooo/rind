@@ -248,6 +248,12 @@ Rind 不是单进程：Agent、任务与共享 Runtime 在后台运行，窗口�
 - 会话文件夹：`agents-session.js#sessionWorkspace` 先问 Runtime（`runtime/sessions`），再读保存的元数据；子窗口启动失败经 handoff `{ action: "failed", error }` 回传原因。
 - 选择：选中行存在时从不自动移动（实时数据重排也不会改变 Enter 的目标）；行消失时就近回退。
 
+### 8.2.8 会话名称（已冻结）
+
+- 存储：`meta.json` 的 `title`（首条消息，自动、生成后不变，80 字符）与 `name`（用户设置，可无）。显示规则只在 `session_meta.display_title` 一处：name，否则 title，否则空（列表回退到 ID）；旧值 "Untitled" 视为空。索引的 `title` 即显示名并附带 `name`，所有读取方无需改动。
+- 写入：唯一路径 `JsonlSessionStore.set_name`（与消息同锁）。`/rename` 是 worker 命令（`commands/rename.py`，`raw_args` 让名字按原样接收）；`/rename` 无参只显示，`--reset` 清除。首条消息前由窗口暂存（`cli-runtime-controller#runRename`），`session/create { name }` 时带上。Agents 页 Space › Rename… 经 `agents-session#renameConversation` 调同一命令。
+- 同步：dispatcher 广播 `session_renamed`；窗口更新自身，共享 Runtime 实时表记录 `title` 推给管理页（`agents-model#liveTitle` 优先于历史）。fork 不继承 name。
+
 ### 8.2.7 会话在首条消息时才存在（已冻结）
 
 - 打开窗口：`initialize` / `session/open`（无 --session）只返回文件夹与设置，`session_id` 为空；worker、共享 Runtime、管理服务、Agents 页都看不到它。横幅显示 `session new`。
@@ -392,6 +398,7 @@ npm --prefix agent-management test
 - `frontend-cli/test/tui-integration.test.js`：完整 CLI TUI/Runtime 交互。
 - `agent-management/test/*.test.js`：权限、组织树、任务调度、共享 Workspace、恢复、报告和 Session scope；`stewardship.test.js` 覆盖审阅/返工、删除归档、Agent 注销与 Manager 审批。
 - `frontend-cli/test/agents-keys.test.js`：footer 提示与按键分发一致、未提供的键无效。
+- `test/test_session_names.py`：显示规则、名字清洗、/rename 显示/设置/重置与广播、首条消息前的名字、fork 不继承。
 - `test/test_startup_session.py`：打开窗口不创建会话；首条消息创建并保存；首个 prompt 启动失败不留痕迹并广播 `session_discarded`；重试复用身份；未 prompt 的被清理。
 - `frontend-cli/test/agents-flat.test.js`：首条消息前任何地方都不列出（真实 Runtime）、回到首条消息前离开的窗口时在原处新开会话；被盖住窗口不算 Open（真实 Runtime）、esc 只回到刚离开的会话、回到起始窗口自己的会话不另开窗口；`agents-lifecycle.test.js` 中"ctrl+c only ever leaves"复现并覆盖强制关闭时的 handoff。
 - `frontend-cli/test/agents-report.test.js`、`agents-teams.test.js`：报告渲染与按键、Inbox/Archive 投影、从侧栏删除 Team、Manager 审批端到端。

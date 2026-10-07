@@ -328,6 +328,7 @@ commandController = createCommandController({
   input: {
     isTerminal: Boolean(tui),
     runGoalCommand: runtimeController.runGoalCommand,
+    runRename: (argument) => runtimeController.runRename(argument),
     runModelSelector: runtimeController.runModelSelector,
     runEffortCommand: (value) => runtimeController.runEffortCommand(value),
     runLogin: (providerId) => runLogin(providerId),

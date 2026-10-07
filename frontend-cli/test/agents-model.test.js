@@ -216,3 +216,12 @@ test("a conversation running a job reads Running job everywhere, and delegated w
   const { runningCount } = await import("../lib/agents-model.js");
   assert.equal(runningCount(snapshot), 1);
 });
+
+test("lists show a conversation's new name before history is read again", () => {
+  const { snapshot } = fixture();
+  snapshot.live = [{ id: "r-lead", workspace: "/w/lead", turn: "idle", watchers: 0, title: "Release checks" }];
+  const history = [{ runtimeSessionId: "r-lead", agentId: "lead", teamId: "team", title: "Plan release", updatedAt: "2026-10-06T10:00:00Z" }];
+  assert.equal(teamSessions(snapshot, "team", history).find(s => s.id === "r-lead").title, "Release checks");
+  snapshot.live = [];
+  assert.equal(teamSessions(snapshot, "team", history).find(s => s.id === "r-lead").title, "Plan release", "without a rename, history decides");
+});

@@ -48,6 +48,10 @@ export function createEventController({
       case "background_wait_changed":
         output.setBackgroundWait?.(event.background_wait);
         return;
+      case "session_renamed":
+        // Renamed here or in another window: lists and banners use the new title.
+        if (state.sessionInfo && event.session_id === state.sessionInfo.session_id) { state.sessionInfo.name = event.name || null; state.sessionInfo.title = event.title || ""; }
+        return;
       case "session_discarded":
         // The first prompt failed before its message saved the conversation:
         // this window is new again, and its next message creates it.

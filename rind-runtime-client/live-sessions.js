@@ -103,6 +103,15 @@ export function createLiveSessions({ onChange = () => {}, now = () => Date.now()
     },
     event(message) {
       const id = message?.session_id;
+      // Renamed in some window: every list shows the new title at once.
+      if (id && message?.event?.type === "session_renamed") {
+        const item = entry(id);
+        const title = String(message.event.title || "");
+        if (item.title === title) return;
+        item.title = title;
+        changed();
+        return;
+      }
       // The turn ended but jobs it started still run; it resumes when they finish.
       if (id && message?.event?.type === "background_wait_changed") {
         const wait = message.event.background_wait;

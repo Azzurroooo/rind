@@ -5,6 +5,8 @@ export interface HistoryScope { agentId?: string; teamId?: string }
 type ListWorkspace = (workspace: string) => Promise<Array<Record<string, unknown>>>;
 
 const string = (value: unknown) => typeof value === "string" && value.trim() ? value.trim() : undefined;
+// "Untitled" is what older versions stored for a conversation without a first message.
+const shownTitle = (raw: Record<string, unknown>) => { const title = string(raw.title); return title === "Untitled" ? undefined : title; };
 
 // A team scope only returns conversations registered to that team; independent
 // history in the same workspace is never surfaced through Agents management.
@@ -29,8 +31,8 @@ export async function sessionHistory(state: State, scope: HistoryScope, list: Li
       const owner = registered.find(s => s.runtimeSessionId === runtimeSessionId);
       if (scope.teamId && owner?.teamId !== scope.teamId) continue;
       seen.add(runtimeSessionId);
-      const named = string(raw.title);
-      const title = (named !== "Untitled" ? named : undefined) || string(raw.first_user_message) || runtimeSessionId;
+      // History reports what to show: the name, otherwise the first message.
+      const title = shownTitle(raw) || runtimeSessionId;
       entries.push({ runtimeSessionId, agentId, ...(owner?.teamId ? { teamId: owner.teamId } : {}), title,
         ...(string(raw.updated_at) ? { updatedAt: string(raw.updated_at) } : {}),
         ...(Number.isInteger(raw.message_count) ? { messageCount: raw.message_count as number } : {}) });
@@ -86,8 +88,7 @@ export async function independentHistory(state: State, managerWorkspace: string,
       groups.set(key, group);
     }
     if (group.sessions.some(s => s.runtimeSessionId === runtimeSessionId)) continue;
-    const named = string(raw.title);
-    group.sessions.push({ runtimeSessionId, title: (named !== "Untitled" ? named : undefined) || string(raw.first_user_message) || runtimeSessionId,
+    group.sessions.push({ runtimeSessionId, title: shownTitle(raw) || runtimeSessionId,
       ...(string(raw.updated_at) ? { updatedAt: string(raw.updated_at) } : {}), ...(owner ? { sessionId: owner.id } : {}) });
   }
   const latest = (group: WorkspaceGroup) => group.sessions.reduce((max, s) => (s.updatedAt || "") > max ? s.updatedAt || "" : max, "");

@@ -31,10 +31,13 @@ from agent.infrastructure.persistence.message_projector import (
     project_messages,
 )
 from agent.infrastructure.persistence.session_meta import (
+    automatic_title,
     default_auto_compact_window,
+    display_title,
     new_session_id,
     new_session_meta,
     normalize_auto_compact_window,
+    normalize_name,
     normalize_skill_catalog,
     session_index_entry,
     sync_session_counts,
@@ -694,6 +697,21 @@ class JsonlSessionStore(SessionStore):
 
             await asyncio.to_thread(_persist)
 
+    async def set_name(self, name: str | None) -> dict[str, Any]:
+        """Name the conversation, or with None go back to its first message."""
+        clean = normalize_name(name) if name is not None else None
+        async with self._write_lock:
+            def _persist() -> dict[str, Any]:
+                meta = self._session_meta if isinstance(self._session_meta, dict) else {}
+                if clean is None:
+                    meta.pop("name", None)
+                else:
+                    meta["name"] = clean
+                self._session_meta = meta
+                self._persist_meta_sync()
+                return {"name": meta.get("name"), "title": display_title(meta)}
+            return await asyncio.to_thread(_persist)
+
     async def update_selection(self, provider: str, model: str) -> None:
         clean_provider = str(provider or "").strip()
         clean_model = str(model or "").strip()
@@ -845,7 +863,7 @@ class JsonlSessionStore(SessionStore):
             and self._session_meta
             and self._session_meta.get("title") in {None, "", "Untitled"}
         ):
-            self._session_meta["title"] = (content or "")[:40]
+            self._session_meta["title"] = automatic_title(content)
         self._persist_meta_sync()
 
     async def persist_tool_call(
