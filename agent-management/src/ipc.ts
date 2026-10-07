@@ -248,7 +248,7 @@ export async function startServer(options: { home?: string; python?: string; rep
       }
     }
     socket.on("error", () => {});
-    socket.on("close", () => { sockets.delete(socket); if (unsubscribe) watchRuntime(false); unsubscribe?.(); if (service) void service.disconnect(attached).catch(() => {}); });
+    socket.on("close", () => { sockets.delete(socket); if (unsubscribe) watchRuntime(false); unsubscribe?.(); if (service && !closing) void service.disconnect(attached).catch(() => {}); });
   });
   await new Promise<void>((resolve, reject) => { server.once("error", reject); server.listen(paths.endpoint, () => { server.off("error", reject); resolve(); }); });
   const reportError = (error: unknown) => process.stderr.write("agents management: " + String((error as Error)?.stack || error) + "\n");
@@ -266,8 +266,8 @@ export async function startServer(options: { home?: string; python?: string; rep
   //   4. this service closes.
   async function stopEverything() {
     const conversations = Object.values(store.state.runs).filter(r => activeRun(r) && !r.taskId).map(r => store.state.sessions[r.sessionId]?.runtimeSessionId).filter(Boolean);
-    await service.stop();
     closing = true;
+    await service.stop();
     const host = runtime || await executionHost(false).catch(() => undefined);
     if (host) {
       await Promise.allSettled(conversations.map(sessionId => host.request("session/cancel", { session_id: sessionId })));

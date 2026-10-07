@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, mkdir, writeFile, readFile } from "node:fs/promises";
+import { mkdtemp, mkdir, writeFile, readFile, realpath } from "node:fs/promises";
 import path from "node:path";
 import os from "node:os";
 import http from "node:http";
@@ -38,7 +38,7 @@ test("a plain window's turn is visible to management while it runs, and its pres
   const info = await window.request("session/create", {});
   // A new conversation has no saved history yet; the Runtime still knows its folder,
   // so another window can open it instead of failing on missing metadata.
-  assert.equal(path.resolve(await sessionWorkspace(home, info.session_id)).toLowerCase(), path.resolve(folder).toLowerCase());
+  assert.equal(await realpath(await sessionWorkspace(home, info.session_id)), await realpath(folder));
   assert.equal(await sessionWorkspace(home, "20990101_unknown"), "");
   // The Agents page subscribes; management then attaches to the window's Runtime by itself.
   let latest;
@@ -70,7 +70,7 @@ test("a plain window's turn is visible to management while it runs, and its pres
   abort.abort(); await page;
   assert.equal(opened.length, 1, "the running conversation opens instead of failing");
   assert.equal(opened[0].runtimeSessionId, info.session_id);
-  assert.equal(path.resolve(opened[0].agent.canonicalWorkspace).toLowerCase(), path.resolve(folder).toLowerCase());
+  assert.equal(await realpath(opened[0].agent.canonicalWorkspace), await realpath(folder));
   assert.equal(opened[0].teamId, undefined);
   // Leaving while the turn runs: the window closes, the turn goes on, and the
   // conversation must not stay "open" once its request finishes later.

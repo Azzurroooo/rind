@@ -42,7 +42,7 @@ test("shutdown allows slow cleanup, joins repeated calls, and waits for process 
       }, 10);
     } else if (r.method === "release") { reply(shutdownRequest); reply(r); }
   `);
-  t.mock.timers.enable({ apis: ["setTimeout"] });
+  t.mock.timers.enable(["setTimeout"]);
   const shutdown = client.shutdown();
   assert.equal(client.shutdown(), shutdown);
   t.mock.timers.tick(1501);
@@ -75,7 +75,7 @@ test("shutdown preserves cleanup errors and lets the worker finish exiting", { t
 
 test("shutdown timeout forces exit and rejects instead of reporting success", { timeout: 10000 }, async (t) => {
   const { client } = await shutdownFixture(t, `if (r.method === "shutdown") setInterval(() => {}, 1000);`);
-  t.mock.timers.enable({ apis: ["setTimeout"] });
+  t.mock.timers.enable(["setTimeout"]);
   const shutdown = client.shutdown();
   const rejected = assert.rejects(shutdown, /shutdown timed out after 30s; forced termination/);
   t.mock.timers.tick(30000);
@@ -101,7 +101,7 @@ require("readline").createInterface({input: process.stdin}).on("line", (line) =>
   try {
     client.start();
     await client.request("initialize");
-    t.mock.timers.enable({ apis: ["setTimeout"] });
+    t.mock.timers.enable(["setTimeout"]);
     let settled = false;
     const compacts = Promise.all([
       client.request("rind/session/compact"),

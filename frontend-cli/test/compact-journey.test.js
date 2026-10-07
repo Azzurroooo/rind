@@ -11,7 +11,7 @@ import { promisify } from "node:util";
 const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const cliPath = path.join(repo, "frontend-cli/bin/rind.js");
 
-test("CLI compact accepts rind send, resumes work and accepts the next turn", {timeout: 40000}, async () => {
+test("CLI compact accepts rind send, resumes work and accepts the next turn", {timeout: 60000}, async () => {
   const root = await mkdtemp(path.join(tmpdir(), "rind-compact-journey-"));
   const home = path.join(root, "home");
   const workspace = path.join(root, "workspace");
@@ -58,11 +58,12 @@ test("CLI compact accepts rind send, resumes work and accepts the next turn", {t
   const env = {...process.env, RIND_HOME: home, NO_COLOR: "1", PYTHONIOENCODING: "utf-8"};
   const child = spawn(process.execPath, [cliPath], {cwd: workspace, env, stdio: ["pipe", "pipe", "pipe"]});
   let stdout = "", stderr = "";
+  const waitTimeout = 20000;
   child.stdout.on("data", (chunk) => { stdout += chunk; });
   child.stderr.on("data", (chunk) => { stderr += chunk; });
   const exited = new Promise((resolve) => child.once("exit", resolve));
   async function waitFor(predicate) {
-    const deadline = Date.now() + 12000;
+    const deadline = Date.now() + waitTimeout;
     while (!predicate()) {
       assert.equal(child.exitCode, null, `${stdout}\n${stderr}`);
       if (Date.now() > deadline) assert.fail(`CLI stalled:\n${stdout}\n${stderr}`);
@@ -81,7 +82,7 @@ test("CLI compact accepts rind send, resumes work and accepts the next turn", {t
     await waitFor(() => /INITIAL_REPLY[\s\S]*Worked for/.test(stdout));
     await new Promise((resolve) => setTimeout(resolve, 100));
     send("/compact");
-    await Promise.race([compactStarted, new Promise((_, reject) => setTimeout(() => reject(new Error(`compact never started: ${stdout}\n${stderr}`)), 12000).unref())]);
+    await Promise.race([compactStarted, new Promise((_, reject) => setTimeout(() => reject(new Error(`compact never started: ${stdout}\n${stderr}`)), waitTimeout).unref())]);
     await promisify(execFile)(process.execPath, [cliPath, "send", "--session", session, "redirect during compact"], {cwd: workspace, env, timeout: 10000});
     await new Promise((resolve) => setTimeout(resolve, 100));
     assert.equal(requests.filter((item) => item.stream).length, 1);

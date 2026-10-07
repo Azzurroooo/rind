@@ -25,6 +25,7 @@ export function createService({ store, paths, adapters, toolConfig }: {
   let serial: Promise<unknown> = Promise.resolve();
   let stopped = false;
   let scheduling = false;
+  let scheduleRequested = false;
   const live = new Map<string, AdapterHandle>();
   const executions = new Set<Promise<void>>();
   const listeners = new Set<() => void>();
@@ -699,35 +700,45 @@ export function createService({ store, paths, adapters, toolConfig }: {
     finally { live.delete(runId); void schedule().catch(reportServiceError); }
   }
   async function schedule() {
-    if (scheduling || stopped) return;
+    if (stopped) return;
+    if (scheduling) { scheduleRequested = true; return; }
     scheduling = true;
     try {
-      const starts = await transaction(async state => {
-        const starts: { taskId: string; runId: string }[] = [];
-        for (const task of Object.values(state.tasks).sort((a, b) => priorityRank(a) - priorityRank(b))) {
-          if (task.status !== "queued" || !task.dispatch) continue;
-          const team = state.teams[task.teamId];
-          const agent = state.agents[task.assigneeAgentId];
-          if (!team?.leaderAgentId || !state.memberships[memberKey(task.teamId, task.assigneeAgentId)] || (!["user", "manager", "system"].includes(task.createdBy) && !state.memberships[memberKey(task.teamId, task.createdBy)])) { task.status = "needs_attention"; task.error = "Team leadership or membership changed."; delete task.dispatch; continue; }
-          if (workspaceBusy(state, agent.canonicalWorkspace)) continue;
-          try { await canonicalDirectory(agent.canonicalWorkspace); }
-          catch (error) { task.status = "needs_attention"; task.error = String(error); delete task.dispatch; continue; }
-          const previous = Object.values(state.runs).filter(r => r.taskId === task.id).map(r => state.sessions[r.sessionId]).filter(Boolean).at(-1);
-          const session: Session = previous || { id: randomUUID(), agentId: agent.id, teamId: task.teamId, runtimeSessionId: "", origin: "managed", shared: true };
-          session.shared = true;
-          state.sessions[session.id] = session;
-          const run = newRun(state, session.id, task.id);
-          task.status = "running"; delete task.report; delete task.error;
-          starts.push({ taskId: task.id, runId: run.id });
+      do {
+        scheduleRequested = false;
+        const starts = await transaction(async state => {
+          if (stopped) return [];
+          const starts: { taskId: string; runId: string }[] = [];
+          for (const task of Object.values(state.tasks).sort((a, b) => priorityRank(a) - priorityRank(b))) {
+            if (task.status !== "queued" || !task.dispatch) continue;
+            const team = state.teams[task.teamId];
+            const agent = state.agents[task.assigneeAgentId];
+            if (!team?.leaderAgentId || !state.memberships[memberKey(task.teamId, task.assigneeAgentId)] || (!["user", "manager", "system"].includes(task.createdBy) && !state.memberships[memberKey(task.teamId, task.createdBy)])) { task.status = "needs_attention"; task.error = "Team leadership or membership changed."; delete task.dispatch; continue; }
+            if (workspaceBusy(state, agent.canonicalWorkspace)) continue;
+            try { await canonicalDirectory(agent.canonicalWorkspace); }
+            catch (error) { task.status = "needs_attention"; task.error = String(error); delete task.dispatch; continue; }
+            const previous = Object.values(state.runs).filter(r => r.taskId === task.id).map(r => state.sessions[r.sessionId]).filter(Boolean).at(-1);
+            const session: Session = previous || { id: randomUUID(), agentId: agent.id, teamId: task.teamId, runtimeSessionId: "", origin: "managed", shared: true };
+            session.shared = true;
+            state.sessions[session.id] = session;
+            const run = newRun(state, session.id, task.id);
+            task.status = "running"; delete task.report; delete task.error;
+            starts.push({ taskId: task.id, runId: run.id });
+          }
+          return starts;
+        });
+        if (!stopped) {
+          for (const start of starts) {
+            const execution = execute(start.taskId, start.runId);
+            executions.add(execution);
+            void execution.finally(() => executions.delete(execution)).catch(() => {});
+          }
         }
-        return starts;
-      });
-      for (const start of starts) {
-        const execution = execute(start.taskId, start.runId);
-        executions.add(execution);
-        void execution.finally(() => executions.delete(execution)).catch(() => {});
-      }
-    } finally { scheduling = false; }
+      } while (scheduleRequested && !stopped);
+    } finally {
+      scheduling = false;
+      if (scheduleRequested && !stopped) void schedule().catch(reportServiceError);
+    }
   }
   return {
     request, snapshot: (actor: Principal) => filtered(store.state, actor),
@@ -745,6 +756,7 @@ export function createService({ store, paths, adapters, toolConfig }: {
       for (const listener of listeners) listener();
     },
     async disconnect(sessionIds: string[]) {
+      if (stopped) return;
       sessionIds = sessionIds.filter(id => !store.state.sessions[id]?.shared);
       for (const id of sessionIds) connected.delete(id);
       await transaction(state => { for (const run of Object.values(state.runs)) if (sessionIds.includes(run.sessionId) && activeRun(run)) run.status = "unknown"; });

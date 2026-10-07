@@ -11,6 +11,17 @@ import { openStore } from "../dist/store.js";
 import { managementPaths } from "../dist/paths.js";
 import { fixture, eventually, user } from "./fixture.js";
 
+test("disconnecting a client after stop cannot write to the closed service", async t => {
+  const f = await fixture(t);
+  const session = await f.call("attachSession", { agentId: f.leader.id, teamId: f.team.id });
+  await f.call("beginRun", { sessionId: session.id });
+  await f.service.stop();
+  const state = structuredClone(f.store.state);
+  await f.service.disconnect([session.id]);
+  assert.deepEqual(f.store.state, state, "socket teardown must not enqueue another state commit");
+  await assert.rejects(f.call("createTeam", { name: "Too late" }), { code: "SERVICE_STOPPING" });
+});
+
 test("a named member receives a blocker and its report resumes the blocked owner", async t => {
   const f = await fixture(t);
   const author = await f.member("author"), reviewer = await f.member("reviewer");

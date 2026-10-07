@@ -19,10 +19,11 @@ const repoRoot = fileURLToPath(new URL("../..", import.meta.url));
 test("direct session remains observable after detach and management restart, and reopens without a duplicate run", { timeout: 25000 }, async t => {
   const home = await mkdtemp(path.join(os.tmpdir(), "rind-session-observe-"));
   const workspace = path.join(home, "member"); await mkdir(workspace);
-  let response, calls = 0;
+  let response, resolveResponse, calls = 0;
+  const responseArrived = new Promise(resolve => { resolveResponse = resolve; });
   const provider = http.createServer((request, res) => {
     if (request.method === "GET") { res.end(JSON.stringify({ data: [{ id: "fixture" }] })); return; }
-    request.resume(); request.on("end", () => { calls++; response = res; });
+    request.resume(); request.on("end", () => { calls++; response = res; resolveResponse(); });
   });
   await new Promise(resolve => provider.listen(0, "127.0.0.1", resolve));
   await writeFile(path.join(home, "settings.json"), JSON.stringify({ provider: "openai-compatible", apiKey: "fixture", model: "fixture", baseUrl: "http://127.0.0.1:" + provider.address().port + "/v1" }));
@@ -42,7 +43,10 @@ test("direct session remains observable after detach and management restart, and
   const info = await first.request("session/create", {});
   await user.request("bindSession", { sessionId: session.id, runtimeSessionId: info.session_id });
   const pending = first.request("session/prompt", { session_id: info.session_id, input: "Work in background" }).catch(error => error);
-  for (let i = 0; !response && i < 200; i++) await new Promise(resolve => setTimeout(resolve, 20));
+  await Promise.race([
+    responseArrived,
+    new Promise((_, reject) => { const timer = setTimeout(() => reject(new Error("fixture provider did not receive the request")), 10000); timer.unref?.(); })
+  ]);
   assert.ok(response);
   await first.shutdown(); await pending;
   await user.request("detachSession", { sessionId: session.id });

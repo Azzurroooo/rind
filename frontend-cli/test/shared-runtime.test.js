@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, mkdir, writeFile, rm } from "node:fs/promises";
+import { mkdtemp, mkdir, writeFile, rm, realpath } from "node:fs/promises";
 import path from "node:path";
 import os from "node:os";
 import http from "node:http";
@@ -33,8 +33,8 @@ test("one host isolates workspaces and tools, runs sessions concurrently and sur
   await first.request("initialize"); await second.request("initialize");
   const infoA = await first.request("session/create", {}), infoB = await second.request("session/create", {});
   assert.notEqual(infoA.session_id, infoB.session_id);
-  assert.equal(path.resolve(infoA.workspace_root).toLowerCase(), a.toLowerCase());
-  assert.equal(path.resolve(infoB.workspace_root).toLowerCase(), b.toLowerCase());
+  assert.equal(await realpath(infoA.workspace_root), await realpath(a));
+  assert.equal(await realpath(infoB.workspace_root), await realpath(b));
   const pidA = await first.request("runtime/observe"), pidB = await second.request("runtime/observe");
   assert.equal(pidA.pid, pidB.pid);
   // Use separate ordinary connections to test event filtering, without observe-all.
