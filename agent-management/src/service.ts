@@ -670,6 +670,9 @@ export function createService({ store, paths, adapters, toolConfig }: {
           run.status = "running"; run.hostSequence = event.sequence; run.needsInput = event.type === "needs_input"; run.lastObservedAt = new Date().toISOString();
         }).catch(reportServiceError);
       });
+      // Observed at once: a run can fail before this execution reaches its await,
+      // and an unobserved rejection would end the service process.
+      handle.completion.catch(() => {});
       live.set(runId, handle);
       connected.add(session.id);
       await transaction(next => { next.sessions[session.id].runtimeSessionId = handle.runtimeSessionId; next.runs[runId].status = "running"; });

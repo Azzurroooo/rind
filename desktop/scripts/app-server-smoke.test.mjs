@@ -66,9 +66,9 @@ test("real app-server supports desktop and remote browser session lifecycles", a
     assert.equal(initialize.result.protocol_version, "2")
     assert.ok(initialize.result.capabilities.includes("sessions"))
     assert.ok(initialize.result.methods.includes("session/new"))
-    assert.equal(typeof initialize.result.session_id, "string")
-    assert.equal(initialize.result.draft, true)
-    await assert.rejects(access(join(rindHome, "sessions", initialize.result.session_id)), { code: "ENOENT" })
+    // A window has no conversation before its first message; nothing is created or saved.
+    assert.equal(initialize.result.session_id, "")
+    await assert.rejects(access(join(rindHome, "sessions")), { code: "ENOENT" })
     assert.ok(initialize.result.methods.includes("rind/background/list"))
 
     const listed = await request("sessions", "session/list", { limit: 10 })
@@ -76,8 +76,7 @@ test("real app-server supports desktop and remote browser session lifecycles", a
     assert.ok(Array.isArray(listed.result.sessions))
 
     const created = await request("new", "session/new")
-    assert.equal(typeof created.result.session_id, "string")
-    assert.equal(created.result.draft, false)
+    assert.match(created.result.session_id, /^\d{8}_\d{6}_[0-9a-f]+$/)
 
     const replay = await request("replay", "session/replay", { session_id: created.result.session_id })
     assert.equal(replay.error, undefined)

@@ -10,7 +10,7 @@
   },
   "scripts": {
     "build": "npm --prefix ../agent-management run build",
-    "test": "node --test \"test/*.test.js\""
+    "test": "node scripts/run-tests.mjs"
   },
   "devDependencies": {
     "@xterm/headless": "^6.0.0"

@@ -219,3 +219,26 @@ test("a window that leaves before its first message leaves no conversation behin
   await f.call("detachSession", { sessionId: bound.id });
   assert.ok(f.store.state.sessions[bound.id], "a conversation that exists keeps its registration");
 });
+
+test("a run that fails before the service awaits it is recorded, not an unhandled rejection", async t => {
+  const { mkdtemp, rm } = await import("node:fs/promises");
+  const os = await import("node:os");
+  const { createService } = await import("../dist/service.js");
+  const { openStore } = await import("../dist/store.js");
+  const { managementPaths } = await import("../dist/paths.js");
+  const home = await mkdtemp(path.join(os.tmpdir(), "rind-early-failure-"));
+  const paths = managementPaths(home);
+  const store = await openStore(paths.state, 5);
+  // The adapter's run has already failed when start returns.
+  const adapter = { async start() { return { runtimeSessionId: "r", completion: Promise.reject(new Error("lost connection")), async cancel() {} }; } };
+  const service = createService({ store, paths, adapters: { rind: adapter }, toolConfig: () => ({}) });
+  t.after(async () => { await service.stop(); await rm(home, { recursive: true, force: true }); });
+  const call = (method, params = {}) => service.request({ kind: "user" }, method, { requestId: crypto.randomUUID(), ...params });
+  const team = await call("createTeam", { name: "Product" });
+  await mkdir(path.join(home, "lead"));
+  const lead = await call("registerAgent", { workspace: path.join(home, "lead"), name: "lead" });
+  await call("addMember", { teamId: team.id, agentId: lead.id });
+  const task = await call("assignTask", { teamId: team.id, assigneeAgentId: lead.id, brief: "write" });
+  await eventually(() => store.state.tasks[task.id].status === "needs_attention");
+  assert.match(store.state.tasks[task.id].error, /lost connection/);
+});

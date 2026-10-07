@@ -398,7 +398,8 @@ test("session lifecycle: run, send, empty sessions, compact and resume", { timeo
         await writeFile(path.join(base(id), "meta.json"), meta);
         const result = await command("run", "--session", id, "--prompt", "must not run");
         assert.notEqual(result.code, 0);
-        assert.deepEqual(await readdir(base(id)), ["meta.json"]);
+        // filelock leaves its .lock file on POSIX (Windows removes it); it is not session content.
+        assert.deepEqual((await readdir(base(id))).filter((entry) => !entry.endsWith(".lock")), ["meta.json"]);
         assert.equal(await readFile(path.join(base(id), "meta.json"), "utf8"), meta);
       }
       assert.equal(fixture.requests.length, before);

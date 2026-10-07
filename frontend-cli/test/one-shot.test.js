@@ -10,8 +10,10 @@ import { paintRaw } from "../lib/theme.js";
 import { parseOneShotArgs, promptSlug, runOneShot } from "../lib/one-shot.js";
 
 test("one-shot parser requires run prompt and accepts explicit workspace/session", () => {
-  assert.deepEqual(parseOneShotArgs(["run", "--dir", "C:/work", "--session", "s1", "--prompt", "hello"]), {
-    dir: "C:/work",
+  // Absolute on whichever platform runs the test.
+  const work = path.resolve(os.tmpdir(), "work");
+  assert.deepEqual(parseOneShotArgs(["run", "--dir", work, "--session", "s1", "--prompt", "hello"]), {
+    dir: work,
     session: "s1",
     prompt: "hello",
     debug: false,
