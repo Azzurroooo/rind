@@ -141,10 +141,11 @@ forgetting. The page uses Android's `http://rind.local` origin; only native HTTP
 transport is substituted. It does not prove camera, keychain, OS keyboard or
 signing behavior. Temporary workspace/servers are cleaned in `finally`.
 
-`npm run icons` regenerates native artwork from the existing Web SVG. Architecture,
-reference study and validation results live in `../docs/mobile-app.md`.
+`npm run icons` regenerates native artwork from the existing Web SVG. See the
+[Web and Mobile architecture](../docs/internals/07-surfaces/web-and-mobile.md)
+for the shared Surface, native capability injection, and connection lifecycle.
 
-The [Android device acceptance record](../docs/mobile-device-qa.md) documents the
-October 2–3, 2026 wireless-ADB run, fixes and remaining platform limits. It uses
-real native transport, Gateway and Python Worker with an isolated scripted model,
-and includes physical camera, system picker, keyboard and sharing checks.
+Physical-device acceptance is separate from the fake-Worker browser smoke test;
+see [verification boundaries](../docs/internals/08-engineering/verification.md).
+Camera, system picker, keyboard, sharing and signing require explicit device
+scenarios and must not be inferred from simulated browser results.

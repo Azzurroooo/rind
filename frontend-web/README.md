@@ -11,11 +11,12 @@ Manual address and access-code entry is available in the desktop dialog as a fal
 
 Remote access is off by default. Keep Desktop running. **Generate new code** disconnects
 previous devices; **Turn off remote access** stops sharing without stopping local tasks.
-See `../docs/surface-upgrade.md` for HTTPS/private-network setup and validation boundaries.
+See [Desktop remote access](../docs/internals/07-surfaces/desktop.md#构建与远程访问) for HTTPS/private-network setup
+and [verification](../docs/internals/08-engineering/verification.md) for validation boundaries.
 
 ## One-command deployment
 
-Install Docker Desktop or Docker Engine with Compose v2, then run from the repository root:
+Install Docker Desktop or Docker Engine with Compose v2. Set `RIND_SERVER_TOKEN` to a long random value in the repository-root `.env` file, then run from that directory:
 
 ```bash
 docker compose up -d --build
@@ -31,7 +32,7 @@ docker compose down
 
 ## Local development
 
-Start the worker from the repository root:
+Set `RIND_SERVER_TOKEN` in the worker terminal to a long random value, then start the worker from the repository root:
 
 ```bash
 python main.py app-server --web --host 127.0.0.1 --port 8765 --cwd <workspace>
@@ -83,4 +84,3 @@ Codified from the shipped UI (`src/styles.css`). New components must follow thes
 - Message body 15px/1.8; compact UI text 12–14px; code blocks 12px/1.6; metadata mono 10–11px/1.4.
 - Headings use negative letter-spacing (`-.02em` to `-.035em`) and `text-wrap: balance`; body copy uses `text-wrap: pretty`; all text uses `overflow-wrap: anywhere` where user-generated content can appear.
 - Motion respects `prefers-reduced-motion: reduce` (global override); durations stay within `--t-fast/base/slow` (≤280ms).
-
