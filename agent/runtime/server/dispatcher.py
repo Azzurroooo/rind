@@ -35,6 +35,7 @@ FOLDER_DEFAULT_METHODS = frozenset({
     RuntimeMethod.RIND_FOLDER_DEFAULTS_GET,
     RuntimeMethod.RIND_FOLDER_DEFAULTS_SET,
     RuntimeMethod.RIND_FOLDER_DEFAULTS_UNSET,
+    RuntimeMethod.RIND_FOLDER_DEFAULTS_RESOLVE,
 })
 
 
@@ -951,10 +952,16 @@ class RuntimeDispatcher:
         params = request.get("params") if isinstance(request.get("params"), dict) else {}
         if method == RuntimeMethod.RIND_FOLDER_DEFAULTS_GET:
             result = await folder_defaults.describe(self._worker, str(params.get("workspace_root") or self._worker.workspace_root))
-        elif method == RuntimeMethod.RIND_FOLDER_DEFAULTS_SET:
-            result = await folder_defaults.set_defaults(self._worker, params)
+        elif method == RuntimeMethod.RIND_FOLDER_DEFAULTS_RESOLVE:
+            roots = params.get("workspace_roots")
+            if not isinstance(roots, list) or not all(isinstance(root, str) for root in roots):
+                raise ValueError("workspace_roots must be a list of folder paths.")
+            result = {"folders": await folder_defaults.resolve_many(self._worker, roots)}
         else:
-            result = await folder_defaults.unset_defaults(self._worker, params)
+            change = folder_defaults.set_defaults if method == RuntimeMethod.RIND_FOLDER_DEFAULTS_SET else folder_defaults.unset_defaults
+            result = await change(self._worker, params)
+            # Not a session's event: every observer (the Agents page) refreshes what it shows for folders.
+            await self._send_event({"type": "folder_defaults_changed", "turn_id": "", "workspace_root": result["workspace_root"]})
         await self._respond(request, result)
 
     async def _apply_folder_defaults(self, request: dict[str, Any]) -> None:

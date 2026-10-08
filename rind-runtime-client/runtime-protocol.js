@@ -46,6 +46,7 @@ export const runtimeMethods = Object.freeze({
   folderDefaultsSet: "rind/folder_defaults/set",
   folderDefaultsUnset: "rind/folder_defaults/unset",
   folderDefaultsApply: "rind/folder_defaults/apply",
+  folderDefaultsResolve: "rind/folder_defaults/resolve",
 });
 
 export const sessionScopedMethods = new Set([

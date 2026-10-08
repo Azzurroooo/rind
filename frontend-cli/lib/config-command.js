@@ -3,7 +3,7 @@
 // is edited by hand.
 import path from "node:path";
 
-import { createRuntimeClient } from "./runtime-client.js";
+import { createSharedRuntimeClient } from "../../rind-runtime-client/shared-runtime.js";
 import { requireRuntimeInitialization, runtimeMethods } from "./runtime-protocol.js";
 
 export const configHelp = [
@@ -41,7 +41,8 @@ export function parseConfigArgs(args, cwd = process.cwd()) {
   return { action, group: GROUPS[name], value: values[0] || "", folder, connection };
 }
 
-export async function runConfig({ args, launch, cwd = process.cwd(), write = text => process.stdout.write(text), clientFactory = createRuntimeClient }) {
+// Through the shared Runtime, so an open Agents page hears the change.
+export async function runConfig({ args, launch, cwd = process.cwd(), write = text => process.stdout.write(text), clientFactory = createSharedRuntimeClient }) {
   const options = parseConfigArgs(args, cwd);
   const client = clientFactory({ ...launch, cwd: options.folder, cliArgs: ["--cwd", options.folder] });
   client.start();

@@ -33,7 +33,7 @@ export interface State {
 }
 export const emptyState = (): State => ({ seq: 0, agents: {}, teams: {}, memberships: {}, tasks: {}, sessions: {}, runs: {}, notes: {}, artifacts: {}, approvals: {}, notices: {}, receipts: {} });
 // A member's model is its workspace's folder default, kept by the Rind runtime.
-export type FolderDefaults = (method: "get" | "set" | "unset" | "models", params?: Record<string, unknown>) => Promise<any>;
+export type FolderDefaults = (method: "get" | "set" | "unset" | "resolve" | "models", params?: Record<string, unknown>) => Promise<any>;
 export class ManagementError extends Error {
   constructor(public code: string, message: string, public details?: unknown) { super(message); }
 }

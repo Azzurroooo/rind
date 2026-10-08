@@ -9,6 +9,17 @@ function memberLine(row) {
 }
 const byId = (items, id) => items.find(item => item.id === id);
 const SOURCES = { session: "this conversation", folder: "folder default", main_repository: "main repository default", settings: "settings.json" };
+const FOLDER_SOURCES = { folder: "this folder", main_repository: "main repository", settings: "settings.json" };
+// What new conversations in a folder start with (a member runs on it), always
+// the value in effect, each part with its source. Empty until loaded.
+export function folderLines(resolved, label) {
+  if (!resolved) return [];
+  const { provider, model, reasoning_effort: effort, model_source: modelSource, effort_source: effortSource, connection_ready: ready } = resolved;
+  return [paint.dim(label),
+    single(provider) + " / " + single(model) + paint.dim(" · " + FOLDER_SOURCES[modelSource]),
+    "effort " + (single(effort) || "unset") + paint.dim(" · " + FOLDER_SOURCES[effortSource]),
+    ...(ready === false ? [paint.warning("! " + single(provider) + " is not configured · new conversations fail · /login")] : []), ""];
+}
 // "deepseek / deepseek-flash · high", where each part came from, and a warning
 // when its connection cannot run (its next turn would fail).
 export function selectionLines(selection) {
@@ -45,6 +56,7 @@ export function detailFor(view, row) {
       return [paint.bold(row.title), paint.dim(role + (parent ? " · reports to " + single(parent.name) : row.leader ? " · reports to you" : "")), "",
         memberLine(row), "",
         ...field("Workspace", paint.path(agent?.canonicalWorkspace || "Unavailable")),
+        ...folderLines(view.folderDefaults?.[agent?.canonicalWorkspace], "Runs on · Space › Model and effort"),
         ...field("Responsibility", single(membership?.responsibility) || paint.dim("Not assigned · press e")),
         ...(current ? field("Current task", single(current.brief) + "\n" + paint.dim(taskStatus(current) + (current.blockedOn ? " · " + single(current.blockedOn.action) : ""))) : []),
         ...field("Conversations", row.sessionCount ? row.sessionCount + " in this team" : paint.dim("None yet · press c to start one")),
@@ -52,6 +64,7 @@ export function detailFor(view, row) {
     }
     case "workspace": return [paint.bold(row.title), paint.dim(row.agentId ? "Registered folder" + (row.teams.length ? " · member of " + row.teams.join(", ") : "") : "Folder not in any team"), "",
       ...field("Folder", paint.path(row.workspace)),
+      ...folderLines(view.folderDefaults?.[row.workspace], "New conversations start with"),
       ...field("Conversations", row.sessionCount + (row.working ? " · " + row.working + " working" : "")),
       "Enter shows every conversation here; c starts a new one."];
     case "session":

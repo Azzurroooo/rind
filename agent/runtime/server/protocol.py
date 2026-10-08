@@ -82,6 +82,7 @@ class RuntimeMethod:
     RIND_FOLDER_DEFAULTS_SET = "rind/folder_defaults/set"
     RIND_FOLDER_DEFAULTS_UNSET = "rind/folder_defaults/unset"
     RIND_FOLDER_DEFAULTS_APPLY = "rind/folder_defaults/apply"
+    RIND_FOLDER_DEFAULTS_RESOLVE = "rind/folder_defaults/resolve"
     SESSION_UPDATE = "session/update"
 
 
@@ -173,6 +174,7 @@ CORE_METHODS = (
     RuntimeMethod.RIND_FOLDER_DEFAULTS_SET,
     RuntimeMethod.RIND_FOLDER_DEFAULTS_UNSET,
     RuntimeMethod.RIND_FOLDER_DEFAULTS_APPLY,
+    RuntimeMethod.RIND_FOLDER_DEFAULTS_RESOLVE,
 )
 
 CAPABILITIES = (

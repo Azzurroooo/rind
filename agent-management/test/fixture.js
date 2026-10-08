@@ -27,6 +27,7 @@ export async function fixture(t) {
     if (method === "set" && params.model_id === "missing") throw new Error(params.provider_id + " / missing is not available.");
     if (method === "set") folders.set(params.workspace_root, { ...folders.get(params.workspace_root), ...params });
     if (method === "unset") folders.delete(params.workspace_root);
+    if (method === "resolve") return { folders: Object.fromEntries(params.workspace_roots.map(root => [root, { model: folders.get(root)?.model_id || "settings-model" }])) };
     return { workspace_root: params.workspace_root, folder: folders.get(params.workspace_root) || {} };
   };
   const service = createService({ store, paths, adapters: { rind: adapter }, toolConfig: () => ({}), folderDefaults });

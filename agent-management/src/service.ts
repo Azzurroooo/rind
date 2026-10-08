@@ -19,7 +19,7 @@ type Params = Record<string, any>;
 // Teams are picked by name in the sidebar and in `rind agents`; two live teams never share one.
 const teamNameTaken = (state: State, name: string) => Object.values(state.teams).some(t => !t.archive && t.name.trim().toLowerCase() === name.trim().toLowerCase());
 const awaitingDelivery = (task: Task) => ["queued", "running"].includes(task.status) || (task.status === "blocked" && task.blockedOn?.responder === "children");
-const reads = new Set(["snapshot", "listTeams", "getTeam", "listAgents", "getTask", "previewCopy", "previewImport", "readArtifact", "listArchive", "listModels", "getMemberModel"]);
+const reads = new Set(["snapshot", "listTeams", "getTeam", "listAgents", "getTask", "previewCopy", "previewImport", "readArtifact", "listArchive", "listModels", "getMemberModel", "listFolderDefaults"]);
 const MEMBER_MODEL_PARTS = { model: "model", reasoningEffort: "reasoning_effort" } as const;
 export function createService({ store, paths, adapters, toolConfig, folderDefaults }: {
   store: Store; paths: Paths; adapters: Record<string, Adapter>;
@@ -36,6 +36,8 @@ export function createService({ store, paths, adapters, toolConfig, folderDefaul
   const connected = new Set<string>();
   // Pushed by the shared Runtime; not persisted, since it only describes now.
   let runtimeSessions = new Map<string, LiveSession>();
+  // Bumped when the Runtime reports a changed folder default; pages refetch what they show.
+  let folderDefaultsVersion = 0;
   function transaction<T>(work: (state: State) => Promise<T> | T): Promise<T> {
     const result = serial.then(async () => {
       const next = structuredClone(store.state);
@@ -230,7 +232,7 @@ export function createService({ store, paths, adapters, toolConfig, folderDefaul
       tasks: tasks.map(task => ({ ...task, ...(task.status === "queued" ? { queueReason: queuedReason(index, task) } : {}) })), sessions: sessions.map(s => ({ ...(actor.kind === "user" ? s : { id: s.id, agentId: s.agentId, teamId: s.teamId, origin: s.origin }), ...sessionStatus(index, s.id) })),
       connectedSessions: sessions.filter(s => connected.has(s.id)).map(s => s.id),
       // Every conversation in the shared Runtime, including plain ones outside any team.
-      ...(actor.kind === "user" ? { live: [...runtimeSessions.values()] } : {}),
+      ...(actor.kind === "user" ? { live: [...runtimeSessions.values()], folderDefaultsVersion } : {}),
       // Archived work is read on demand (listArchive) so it never weighs on live pushes.
       ...(actor.kind === "user" ? { notices: Object.values(state.notices) } : {}),
       ...(actor.kind !== "agent" ? { approvals: Object.values(state.approvals), archivedTeams: Object.values(state.teams).filter(t => t.archive).map(t => ({ id: t.id, name: t.name, archivedAt: t.archive!.at })) } : {}),
@@ -654,6 +656,11 @@ export function createService({ store, paths, adapters, toolConfig, folderDefaul
         noticeFromManager(state, actor, p.teamId, p.agentId, "Manager cleared " + state.agents[p.agentId].name + "'s " + (group === "model" ? "model" : "effort") + "; the default applies");
         return result;
       }
+      case "listFolderDefaults": {
+        userOnly(actor);
+        requireValue(Array.isArray(p.workspaces) && p.workspaces.every((w: unknown) => typeof w === "string"), "INVALID_INPUT", "workspaces must be a list of folder paths.");
+        return (await folderDefaults("resolve", { workspace_roots: p.workspaces })).folders;
+      }
       case "dismissNotice": {
         userOnly(actor);
         delete state.notices[p.noticeId];
@@ -802,6 +809,10 @@ export function createService({ store, paths, adapters, toolConfig, folderDefaul
       for (const task of Object.values(state.tasks)) if (task.dispatch) { delete task.dispatch; if (task.status === "queued") { task.status = "needs_attention"; task.error = "Service restarted before dispatch. Start explicitly to continue."; } }
     }); },
     isConnected: (sessionId: string) => connected.has(sessionId),
+    folderDefaultsChanged() {
+      folderDefaultsVersion += 1;
+      for (const listener of listeners) listener();
+    },
     setLive(sessions: LiveSession[]) {
       runtimeSessions = new Map(sessions.map(session => [session.id, session]));
       for (const listener of listeners) listener();

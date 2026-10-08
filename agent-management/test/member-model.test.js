@@ -69,3 +69,17 @@ test("a notice goes when its member leaves the team", async t => {
   await f.call("removeMember", { teamId: f.team.id, agentId: worker.id });
   assert.equal(Object.keys(f.store.state.notices).length, 0);
 });
+
+test("the user reads every folder's defaults at once, and a reported change bumps the snapshot", async t => {
+  const f = await fixture(t);
+  const workspace = f.store.state.agents[f.leader.id].canonicalWorkspace;
+  await f.call("setMemberModel", { teamId: f.team.id, agentId: f.leader.id, provider: "deepseek", model: "deepseek-flash" });
+  const folders = await f.call("listFolderDefaults", { workspaces: [workspace, "/elsewhere"] });
+  assert.deepEqual([folders[workspace].model, folders["/elsewhere"].model], ["deepseek-flash", "settings-model"]);
+  const managerSession = await f.call("attachSession", { manager: true });
+  await assert.rejects(f.call("listFolderDefaults", { workspaces: [workspace] }, { kind: "manager", sessionId: managerSession.id }), { code: "USER_CONFIRMATION_REQUIRED" });
+  await assert.rejects(f.call("listFolderDefaults", { workspaces: "x" }), { code: "INVALID_INPUT" });
+  const before = (await f.call("snapshot")).folderDefaultsVersion;
+  f.service.folderDefaultsChanged();
+  assert.equal((await f.call("snapshot")).folderDefaultsVersion, before + 1);
+});

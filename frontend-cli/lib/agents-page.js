@@ -30,7 +30,7 @@ export async function runAgentsPage({ launch, input = process.stdin, output = pr
   const view = {
     snapshot: emptyAgentsSnapshot(), connection: "connecting…", busy: false, busyLabel: "", notice: null, help: false,
     sidebar: [], navId: "inbox", focus: "sidebar", member: null, folder: null, page: { kind: "inbox" }, pageKey: "inbox", entries: [], selectedId: "",
-    selections: {}, scroll: {}, tabs: {}, collapsed: {}, history: {}, managerHistory: null, independent: null, managerPath: "", service: null, stopped: false,
+    selections: {}, scroll: {}, tabs: {}, collapsed: {}, history: {}, managerHistory: null, independent: null, folderDefaults: {}, managerPath: "", service: null, stopped: false,
     query: "", filter: "All", searching: false, searchEditor: createLineEditor(), dialog: null, detail: null, standalone, leaveArmed: false,
     // The conversation Esc goes back to: the one just left. `own` is this
     // window's own conversation, which is still loaded behind the page.
@@ -157,12 +157,25 @@ export async function runAgentsPage({ launch, input = process.stdin, output = pr
     try { view.independent = { workspaces: (await client.request("listSessions", { independent: true })).workspaces, at: Date.now() }; }
     catch (error) { view.independent = { workspaces: view.independent?.workspaces || [], at: Date.now() }; notify("Could not load independent conversations: " + error.message, "error"); }
     project();
+    void loadFolderDefaults();
   }
   async function loadHistory(teamId, key = view.history[teamId]?.key) {
     view.history[teamId] = { ...view.history[teamId], key, loading: true };
     try { view.history[teamId] = { key, entries: (await client.request("listSessions", { teamId })).sessions }; }
     catch (error) { view.history[teamId] = { key, entries: view.history[teamId]?.entries || [] }; notify("Could not load conversations: " + error.message, "error"); }
     project();
+  }
+  // What new conversations start with in every folder the page shows; read
+  // again when the set of folders changes or the Runtime reports a change.
+  let folderDefaultsKey = "";
+  async function loadFolderDefaults() {
+    const workspaces = [...new Set([...view.snapshot.agents.map(agent => agent.canonicalWorkspace), ...(view.independent?.workspaces || []).map(group => group.workspace)].filter(Boolean))];
+    const key = view.snapshot.folderDefaultsVersion + "|" + workspaces.join("\n");
+    if (!client || !workspaces.length || key === folderDefaultsKey) return;
+    folderDefaultsKey = key;
+    try { view.folderDefaults = await client.request("listFolderDefaults", { workspaces }); }
+    catch { folderDefaultsKey = ""; }
+    redraw();
   }
   async function loadManagerHistory() {
     view.managerHistory = { entries: view.managerHistory?.entries || [] };
@@ -179,6 +192,7 @@ export async function runAgentsPage({ launch, input = process.stdin, output = pr
       if (snapshot.teams.some(t => t.id === initialTeamId)) { view.navId = initialTeamId; view.focus = "main"; }
     }
     project();
+    void loadFolderDefaults();
   };
   // Opening the page or pressing r may start the service; a lost connection
   // only reattaches, so a page never restarts services someone else stopped.

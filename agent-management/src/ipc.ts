@@ -60,6 +60,7 @@ export async function startServer(options: { home?: string; python?: string; rep
     return connectSharedRuntime({ ...options, rindHome: options.home, start,
       onMessage(message: any) {
         if (message?.kind === "runtime" && message.type === "sessions_changed") { service.setLive(message.sessions || []); return; }
+        if (message.event?.type === "folder_defaults_changed") { service.folderDefaultsChanged(); return; }
         if (!["turn_started", "turn_completed", "turn_failed", "turn_cancelled", "user_question_requested", "task_updated"].includes(message.event?.type) && !(message.event?.type === "tool_result" && message.event.tool_name === "ask_user_question")) return;
         const session = Object.values(store.state.sessions).find(s => s.runtimeSessionId === message.session_id);
         if (session) void reconcile(session);
@@ -118,7 +119,7 @@ export async function startServer(options: { home?: string; python?: string; rep
     return JSON.parse(Buffer.from(payload, "base64url").toString());
   }
   // A member's model lives with its folder in the Rind runtime, which also checks it can run.
-  async function folderDefaults(method: "get" | "set" | "unset" | "models", params: Record<string, unknown> = {}) {
+  async function folderDefaults(method: "get" | "set" | "unset" | "resolve" | "models", params: Record<string, unknown> = {}) {
     const host = await executionHost();
     if (method === "models") return (await host.request("model/list", {})).models;
     return host.request("rind/folder_defaults/" + method, params);

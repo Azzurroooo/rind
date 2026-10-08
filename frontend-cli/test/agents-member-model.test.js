@@ -104,3 +104,17 @@ test("a selected conversation says what it runs on and warns when its connection
   s.live = [{ id: "r1", provider: "openai", model: "gpt-5.5", reasoningEffort: "", selectionSource: { model: "session" }, connectionReady: true }];
   assert.match(text({ kind: "session", sessionId: "r1", agentId: "lead", teamId: "team", title: "Plan", status: "Open" }), /openai \/ gpt-5\.5\n.*model this conversation/, "a change in some window shows at once");
 });
+
+test("a member or folder says what new conversations there start with, always the value in effect", () => {
+  const s = snapshot();
+  const view = { snapshot: s, page: { kind: "team" }, folderDefaults: {
+    "/w/lead": { provider: "deepseek", model: "deepseek-flash", reasoning_effort: "", model_source: "main_repository", effort_source: "settings", connection_ready: false },
+    "/w/free": { provider: "openai", model: "gpt-5.5", reasoning_effort: "high", model_source: "settings", effort_source: "folder", connection_ready: true } } };
+  const text = row => detailFor(view, row).join("\n").replace(/\x1b\[[0-9;]*m/g, "");
+  const member = text({ kind: "member", teamId: "team", agentId: "lead", title: "Lead", status: "Idle", leader: true });
+  assert.match(member, /Runs on · Space › Model and effort\ndeepseek \/ deepseek-flash · main repository\neffort unset · settings\.json/);
+  assert.match(member, /! deepseek is not configured · new conversations fail/);
+  const folder = text({ kind: "workspace", title: "free", workspace: "/w/free", teams: [], sessionCount: 1 });
+  assert.match(folder, /New conversations start with\nopenai \/ gpt-5\.5 · settings\.json\neffort high · this folder/);
+  assert.doesNotMatch(text({ kind: "workspace", title: "x", workspace: "/w/unknown", teams: [], sessionCount: 0 }), /start with/, "nothing until loaded");
+});

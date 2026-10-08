@@ -32,6 +32,23 @@ async def describe(worker, workspace_root: str) -> dict[str, Any]:
     return {"workspace_root": root, "folder": own, "resolved": _selection(resolved), "inherited": _selection(inherited)}
 
 
+async def resolve_many(worker, workspace_roots: list[str]) -> dict[str, dict[str, Any]]:
+    """What new conversations start with in each folder, keyed as asked; a missing folder is left out."""
+    ready = {provider["id"] for provider in worker.list_providers() if provider["configured"]}
+
+    def resolve() -> dict[str, dict[str, Any]]:
+        result = {}
+        for root in dict.fromkeys(workspace_roots):
+            try:
+                resolved = _selection(worker.repository.folder_selection(validate_workspace_root(root)))
+            except ValueError:
+                continue
+            result[root] = resolved | {"connection_ready": resolved["provider"] in ready}
+        return result
+
+    return await asyncio.to_thread(resolve)
+
+
 def _selection(folder: FolderSelection) -> dict[str, str]:
     return {
         "provider": folder.selection.provider_id,

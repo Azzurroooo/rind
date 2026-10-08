@@ -140,3 +140,23 @@ async def test_unsetting_a_folder_default_falls_back_to_settings(worker, tmp_pat
         assert result["resolved"]["model_source"] == "settings"
     finally:
         await worker.close()
+
+
+@pytest.mark.asyncio
+async def test_many_folders_resolve_at_once_and_a_change_is_announced(worker, tmp_path):
+    request, call, messages = _server(worker)
+    other = tmp_path / "other"
+    other.mkdir()
+    try:
+        await request("initialize")
+        await request("rind/folder_defaults/set", workspace_root=str(tmp_path), provider_id="deepseek", model_id="deepseek-flash")
+        announced = [m["event"] for m in messages if m.get("event", {}).get("type") == "folder_defaults_changed"]
+        assert len(announced) == 1 and "session_id" not in announced[0], "for every observer, not one conversation"
+        folders = (await request("rind/folder_defaults/resolve", workspace_roots=[str(tmp_path), str(other), str(tmp_path / "gone")]))["folders"]
+        assert set(folders) == {str(tmp_path), str(other)}, "keyed as asked; a missing folder is left out"
+        assert (folders[str(tmp_path)]["model"], folders[str(tmp_path)]["model_source"], folders[str(tmp_path)]["connection_ready"]) == ("deepseek-flash", "folder", True)
+        assert folders[str(other)]["model_source"] == "settings"
+        bad = await call("rind/folder_defaults/resolve", workspace_roots="nope")
+        assert bad["error"]["type"] == "ValueError"
+    finally:
+        await worker.close()

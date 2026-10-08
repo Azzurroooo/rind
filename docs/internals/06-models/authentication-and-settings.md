@@ -33,7 +33,7 @@ RIND_HOME 默认是 ~/.rind，统一改变设置、凭证、会话等用户数�
 2. 若此文件夹是 Git worktree：主仓库文件夹的默认（从 .git 文件的 gitdir 找到主仓库，不启动 git）；
 3. settings.json。
 
-模型组是连接加模型，总是一起设置；effort 单独设置。文件夹默认只影响之后新建的对话，已有对话保持自己的选择。会话 meta 的 selection_source 记录两部分各自来自 session、folder、main_repository 还是 settings，/status 据此标注来源。设置文件夹默认时会校验：连接已配置、模型在它的列表里、effort 是该模型支持的级别。协议方法为 rind/folder_defaults/get、set、unset，以及把一个已有对话同步到文件夹当前默认的 rind/folder_defaults/apply。
+模型组是连接加模型，总是一起设置；effort 单独设置。文件夹默认只影响之后新建的对话，已有对话保持自己的选择。会话 meta 的 selection_source 记录两部分各自来自 session、folder、main_repository 还是 settings，/status 据此标注来源。设置文件夹默认时会校验：连接已配置、模型在它的列表里、effort 是该模型支持的级别。协议方法为 rind/folder_defaults/get（含清除自身设置后会继承的值 inherited）、set、unset、一次解析多个文件夹的 resolve，以及把一个已有对话同步到文件夹当前默认的 apply。set 与 unset 会广播 folder_defaults_changed，Agents 页据此重新读取它显示的文件夹默认。
 
 ## 最小配置与登录
 
