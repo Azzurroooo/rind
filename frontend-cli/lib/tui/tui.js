@@ -47,6 +47,8 @@ export function createTui(options = {}) {
   let stopped = false;
   const manageInput = options.manageInput !== false;
   let rawModeBeforeStart = false;
+  // Input acquired by start() and not yet given back, even across a stop that kept it.
+  let holdingInput = false;
   let inputHandler = null;
   let pasteHandler = null;
 
@@ -128,6 +130,7 @@ export function createTui(options = {}) {
     stopped = false;
     outputBlocked = Boolean(output.writableNeedDrain);
     if (acquireInput) {
+      holdingInput = true;
       rawModeBeforeStart = Boolean(input.isRaw);
       if (typeof input.setRawMode === "function") {
         input.setRawMode(true);
@@ -163,8 +166,20 @@ export function createTui(options = {}) {
     requestRender();
   }
 
+  function giveBackInput() {
+    holdingInput = false;
+    if (typeof input.pause === "function") {
+      input.pause();
+    }
+    if (typeof input.setRawMode === "function") {
+      input.setRawMode(rawModeBeforeStart);
+    }
+  }
+
   function stop({ releaseInput = manageInput } = {}) {
     if (!started) {
+      // Stopped earlier with the input kept: it still has to be given back.
+      if (releaseInput && holdingInput) giveBackInput();
       return;
     }
     started = false;
@@ -194,12 +209,7 @@ export function createTui(options = {}) {
       input.off("data", handleInputData);
     }
     if (releaseInput) {
-      if (typeof input.pause === "function") {
-        input.pause();
-      }
-      if (typeof input.setRawMode === "function") {
-        input.setRawMode(rawModeBeforeStart);
-      }
+      giveBackInput();
     }
     write(PASTE_DISABLE);
     disableKeyboardProtocol();

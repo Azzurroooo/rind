@@ -557,3 +557,21 @@ test("wide characters are measured correctly on screen", async () => {
   assert.equal(textWidth(viewport[0]), 4);
   tui.stop();
 });
+
+test("a TUI stopped while it kept the input still gives the input back when it stops for good", () => {
+  const input = createVirtualInput();
+  let flowing = false;
+  const resume = input.resume, pause = input.pause;
+  input.resume = () => { flowing = true; return resume(); };
+  input.pause = () => { flowing = false; return pause(); };
+  const output = createVirtualOutput({ columns: 40, rows: 5 }).output;
+  const tui = createTui({ input, output, alternateScreen: true });
+  tui.start();
+  // A conversation window takes the terminal; the page keeps the input for later.
+  tui.stop({ releaseInput: false });
+  input.resume();
+  // Leaving from that window closes the page without starting it again.
+  tui.stop();
+  assert.equal(flowing, false, "a flowing stdin keeps the process alive after leaving");
+  assert.equal(input.isRaw, false);
+});
