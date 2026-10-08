@@ -546,6 +546,11 @@ export function inputHintText(placeholder) {
   return text ? dim(text) : "";
 }
 
+// Shown in place of the deck when the typed command word matches nothing.
+export function slashNoMatchText(input) {
+  return dim(`  No command matches ${clipSingleLine(input, 40)} · backspace to edit · /help lists them`);
+}
+
 export function slashMenuText(items, selectedIndex = 0) {
   const visible = menuWindow(items, selectedIndex);
   if (!visible.items.length) {

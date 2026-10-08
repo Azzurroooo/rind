@@ -9,6 +9,10 @@ export function createSlashMenuState(commands) {
     matches() {
       return dismissed ? [] : matchingCommands(commands, text);
     },
+    // A command word is being typed, but nothing starts with it.
+    unmatched() {
+      return !dismissed && /^\/\S+$/.test(text) && this.matches().length === 0;
+    },
     selectedIndex() {
       return selected;
     },

@@ -54,6 +54,7 @@ import {
   sessionMenuText,
   promptPlaceholderText,
   slashMenuText,
+  slashNoMatchText,
   startupText,
 } from "./rendering.js";
 
@@ -881,7 +882,7 @@ function composeFrame(width = process.stdout.columns || 80) {
     inputText: session.editor.input(),
     cursor: session.editor.cursorPosition(),
     placeholder: session.mode === "prompt" ? inputHintText(session.placeholder) : "",
-    menuText: session.menuState ? slashMenuText(matches, session.menuState.selectedIndex()).trimEnd() : "",
+    menuText: !session.menuState ? "" : session.menuState.unmatched() ? slashNoMatchText(session.editor.input()) : slashMenuText(matches, session.menuState.selectedIndex()).trimEnd(),
   };
 }
 

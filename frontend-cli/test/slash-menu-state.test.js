@@ -138,3 +138,19 @@ test("slash menu returns later selected commands for submission", () => {
 
   assert.equal(submitted, "/status");
 });
+
+test("a slash word that matches no command says so instead of closing silently", () => {
+  const state = createSlashMenuState(commands);
+  state.setInput("//");
+  assert.deepEqual(state.matches(), []);
+  assert.equal(state.unmatched(), true);
+  state.setInput("/sta");
+  assert.equal(state.unmatched(), false);
+  state.setInput("/status now");
+  assert.equal(state.unmatched(), false, "arguments are being typed; nothing to suggest");
+  state.setInput("hello");
+  assert.equal(state.unmatched(), false);
+  state.setInput("/zzz");
+  state.handleKey("", { name: "escape" });
+  assert.equal(state.unmatched(), false, "esc hides the note too");
+});

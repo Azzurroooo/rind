@@ -1358,3 +1358,10 @@ test("system notices use two-space indentation and theme warning only on the pre
     }
   } finally { resetTheme(); }
 });
+
+test("the unmatched slash note names the way back", async () => {
+  const { slashNoMatchText } = await import("../lib/rendering.js");
+  const text = slashNoMatchText("//").replace(/\x1b\[[0-9;]*m/g, "");
+  assert.match(text, /No command matches \/\//);
+  assert.match(text, /backspace/);
+});
