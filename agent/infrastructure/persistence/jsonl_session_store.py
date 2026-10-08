@@ -108,6 +108,7 @@ class JsonlSessionStore(SessionStore):
         parent_session_id: str | None = None,
         reasoning_effort: str = "",
         provider: str = "openai-compatible",
+        selection_source: dict[str, str] | None = None,
     ):
         self._session_dir = session_dir
         self._session_id = session_id
@@ -117,6 +118,7 @@ class JsonlSessionStore(SessionStore):
         from agent.infrastructure.settings import normalize_reasoning_effort
 
         self._reasoning_effort = normalize_reasoning_effort(reasoning_effort)
+        self._selection_source = dict(selection_source or {})
         self._system_prompt = system_prompt
         self._workspace_root = workspace_root
         self._project_id = project_id
@@ -161,6 +163,11 @@ class JsonlSessionStore(SessionStore):
     @property
     def reasoning_effort(self) -> str:
         return self._reasoning_effort
+
+    @property
+    def selection_source(self) -> dict[str, str]:
+        """Where the model and the effort came from: session, folder, main_repository or settings."""
+        return dict(self._selection_source)
 
     @property
     def system_prompt(self) -> str:
@@ -330,6 +337,7 @@ class JsonlSessionStore(SessionStore):
             parent_session_id=self._parent_session_id,
             reasoning_effort=self._reasoning_effort,
             provider=self._provider,
+            selection_source=self._selection_source,
         ) if session_id else None
 
     def _load_session(self, session_id: str) -> list[dict[str, Any]]:
@@ -358,6 +366,8 @@ class JsonlSessionStore(SessionStore):
         except ValueError:
             configured_effort = ""
         self._reasoning_effort = configured_effort or self._reasoning_effort
+        source = meta.get("selection_source")
+        self._selection_source = {key: str(value) for key, value in source.items()} if isinstance(source, dict) else {}
         original_window = self._session_meta.get("auto_compact_window")
         normalized_window = normalize_auto_compact_window(original_window)
         self._session_meta["auto_compact_window"] = normalized_window
@@ -413,6 +423,7 @@ class JsonlSessionStore(SessionStore):
             "model": self._model,
             "provider": self._provider,
             "reasoning_effort": self._reasoning_effort,
+            "selection_source": self._selection_source,
             "msg_repo": self._msg_repo,
             "tool_repo": self._tool_repo,
             "compaction_repo": self._compaction_repo,
@@ -427,7 +438,9 @@ class JsonlSessionStore(SessionStore):
             self._last_preview = previous["last_preview"]
             self._projected_caches = previous["projected_caches"]
             self._model = previous["model"]
+            self._provider = previous["provider"]
             self._reasoning_effort = previous["reasoning_effort"]
+            self._selection_source = previous["selection_source"]
             self._msg_repo = previous["msg_repo"]
             self._tool_repo = previous["tool_repo"]
             self._compaction_repo = previous["compaction_repo"]
@@ -712,7 +725,7 @@ class JsonlSessionStore(SessionStore):
                 return {"name": meta.get("name"), "title": display_title(meta)}
             return await asyncio.to_thread(_persist)
 
-    async def update_selection(self, provider: str, model: str) -> None:
+    async def update_selection(self, provider: str, model: str, *, source: str = "session") -> None:
         clean_provider = str(provider or "").strip()
         clean_model = str(model or "").strip()
         if not clean_provider or not clean_model:
@@ -721,13 +734,15 @@ class JsonlSessionStore(SessionStore):
             def _persist() -> None:
                 self._provider = clean_provider
                 self._model = clean_model
+                self._selection_source = self._selection_source | {"model": source}
                 if self._session_meta and self._session_paths:
                     self._session_meta["provider"] = clean_provider
                     self._session_meta["model"] = clean_model
+                    self._session_meta["selection_source"] = self._selection_source
                     self._persist_meta_sync()
             await asyncio.to_thread(_persist)
 
-    async def update_reasoning_effort(self, effort: str) -> None:
+    async def update_reasoning_effort(self, effort: str, *, source: str = "session") -> None:
         from agent.infrastructure.settings import normalize_reasoning_effort
 
         clean = normalize_reasoning_effort(effort)
@@ -737,9 +752,11 @@ class JsonlSessionStore(SessionStore):
         async with self._write_lock:
             def _persist():
                 self._reasoning_effort = clean
+                self._selection_source = self._selection_source | {"effort": source}
                 if not self._session_meta or not self._session_paths:
                     return
                 self._session_meta["reasoning_effort"] = clean
+                self._session_meta["selection_source"] = self._selection_source
                 self._persist_meta_sync()
 
             await asyncio.to_thread(_persist)

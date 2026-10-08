@@ -132,6 +132,7 @@ def new_session_meta(
     parent_session_id: str | None = None,
     reasoning_effort: str = "",
     provider: str = "openai-compatible",
+    selection_source: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     meta = {
         "schema_version": "2.0",
@@ -149,6 +150,8 @@ def new_session_meta(
     }
     if reasoning_effort:
         meta["reasoning_effort"] = reasoning_effort
+    if selection_source:
+        meta["selection_source"] = dict(selection_source)
     for key, value in {
         "project_id": project_id,
         "owner_agent_id": owner_agent_id,

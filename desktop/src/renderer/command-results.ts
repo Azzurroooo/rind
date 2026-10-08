@@ -96,7 +96,7 @@ function renderSkillsDisplay(display: Record<string, unknown>) {
 }
 
 function renderStatusDisplay(display: Record<string, unknown>) {
-  const labels: Record<string, string> = { session: "Session", settings: "Settings", apiKey: "API key", baseUrl: "Endpoint", model: "Model", reasoningEffort: "Reasoning effort", runtime: "Runtime", workspace: "Workspace" }
+  const labels: Record<string, string> = { session: "Session", name: "Name", settings: "Settings", connection: "Connection", endpoint: "Endpoint", key: "Key", model: "Model", reasoningEffort: "Reasoning effort", runtime: "Runtime", workspace: "Workspace" }
   const entries = recordList(display.entries)
   const config = entries.map((entry) => {
     const label = displayText(entry.label)

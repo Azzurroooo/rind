@@ -42,6 +42,10 @@ export const runtimeMethods = Object.freeze({
   goalClear: "rind/goal/clear",
   contextInspect: "rind/context/inspect",
   usageSummary: "rind/usage/summary",
+  folderDefaultsGet: "rind/folder_defaults/get",
+  folderDefaultsSet: "rind/folder_defaults/set",
+  folderDefaultsUnset: "rind/folder_defaults/unset",
+  folderDefaultsApply: "rind/folder_defaults/apply",
 });
 
 export const sessionScopedMethods = new Set([

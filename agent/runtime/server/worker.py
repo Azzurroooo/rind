@@ -12,7 +12,6 @@ from agent.application.context import CompactionService
 from agent.application.context.token_usage import positive_int
 from agent.application.tools import ToolResultNormalizer
 from agent.application.usage_summary import summarize_usage
-from agent.domain.models import ModelSelection
 from agent.bootstrap import AgentContainer, SharedRuntimeResources
 from agent.infrastructure.llm import ProviderServiceImpl
 from agent.infrastructure.paths import validate_session_id, validate_workspace_root
@@ -85,12 +84,7 @@ class RuntimeWorker:
         async with self._initialize_lock:
             if not self._initialized:
                 await self._tool_output_store.cleanup()
-                info = await self.repository.initial(
-                    self.workspace_root,
-                    self.session_id,
-                    self._resume_latest,
-                    self.provider_service.default_selection(),
-                )
+                info = await self.repository.initial(self.workspace_root, self.session_id, self._resume_latest)
                 self.session_id = str(info["session_id"]) or None
                 self._initialized = True
                 self._model_refresh_task = asyncio.create_task(
@@ -141,17 +135,15 @@ class RuntimeWorker:
         for abandoned in self.repository.abandoned():
             await self.discard_unsaved(abandoned)
         root = validate_workspace_root(params.get("workspace_root") or self.workspace_root)
-        default = self.provider_service.default_selection()
-        selection = ModelSelection(
-            provider_id=str(params.get("provider_id") or default.provider_id),
-            model_id=str(params.get("model_id") or default.model_id),
-            reasoning_effort=str(params["reasoning_effort"]) if params.get("reasoning_effort") is not None else default.reasoning_effort,
+        selection, source = await asyncio.to_thread(
+            self.repository.choose_selection, root, str(params.get("provider_id") or ""), str(params.get("model_id") or ""),
+            str(params["reasoning_effort"]) if params.get("reasoning_effort") is not None else None,
         )
         # A window may propose the identity it was given before a failed first prompt.
         proposed = validate_session_id(params["session_id"]) if params.get("session_id") else None
         if proposed and (self.repository.draft_store(proposed) is not None or await self.repository.exists(proposed)):
             raise ValueError("This conversation already exists.")
-        info = await self.repository.create(str(root), selection=selection, defer_persistence=True, session_id=proposed)
+        info = await self.repository.create(str(root), selection=selection, selection_source=source, defer_persistence=True, session_id=proposed)
         session_id = info["session_id"]
         if params.get("name"):
             # A name chosen before the first message; that message saves it with the conversation.

@@ -13,6 +13,7 @@ import uuid
 from agent.infrastructure.paths import validate_session_id
 from agent.runtime.core import InputQueueError
 from agent.runtime.server.commands import SlashCommandContext, SlashCommandResult, SlashCommandRouter
+from agent.runtime.server import folder_defaults
 from agent.runtime.server.commands.catalog import build_command_infos
 from agent.runtime.server.protocol import (
     CAPABILITIES,
@@ -29,6 +30,12 @@ from agent.runtime.server.replay_events import iter_durable_events
 from agent.runtime.server.resume_preview import render_resume_preview
 from agent.runtime.server.workspace_files import FileMethodError, file_list, file_read, file_write
 from agent.version import __version__
+
+FOLDER_DEFAULT_METHODS = frozenset({
+    RuntimeMethod.RIND_FOLDER_DEFAULTS_GET,
+    RuntimeMethod.RIND_FOLDER_DEFAULTS_SET,
+    RuntimeMethod.RIND_FOLDER_DEFAULTS_UNSET,
+})
 
 
 def protocol_capabilities(background_enabled: bool, goal_enabled: bool) -> list[str]:
@@ -364,6 +371,12 @@ class RuntimeDispatcher:
             if method == RuntimeMethod.MODEL_EFFORT:
                 await self._set_reasoning_effort(request)
                 return
+            if method in FOLDER_DEFAULT_METHODS:
+                await self._folder_defaults(method, request)
+                return
+            if method == RuntimeMethod.RIND_FOLDER_DEFAULTS_APPLY:
+                await self._apply_folder_defaults(request)
+                return
             if method in {
                 RuntimeMethod.RIND_GOAL_GET,
                 RuntimeMethod.RIND_GOAL_SET,
@@ -417,7 +430,8 @@ class RuntimeDispatcher:
         raw_draft = params.get("draft")
         draft = {key: str(raw_draft[key]) for key in ("name", "provider", "model", "reasoning_effort") if raw_draft.get(key)} if isinstance(raw_draft, dict) else None
         result = await self._slash_router.execute(raw_input, SlashCommandContext(
-            runtime=None, session=store, debug=self._debug, workspace_root=root, compact_context=None, draft=draft))
+            runtime=None, session=store, debug=self._debug, workspace_root=root, compact_context=None, draft=draft,
+            explain_selection=lambda selection, source: folder_defaults.explain_selection(self._worker, root, selection, source)))
         await self._respond_slash_result(request, result)
 
     async def _auth_list(self, request: dict[str, Any]) -> None:
@@ -879,6 +893,8 @@ class RuntimeDispatcher:
                 debug=self._debug,
                 workspace_root=getattr(store, "workspace_root", None),
                 compact_context=lambda: self._worker.execution.compact_context(session_id),
+                explain_selection=lambda selection, source: folder_defaults.explain_selection(
+                    self._worker, str(getattr(store, "workspace_root", "") or self._worker.workspace_root), selection, source),
             ),
         )
         await self._respond_slash_result(request, result)
@@ -925,6 +941,37 @@ class RuntimeDispatcher:
         await store.update_reasoning_effort(effort)
         applies = await self._settings_changed(session_id, store)
         await self._respond(request, {"reasoning_effort": effort, "session": True, "applies": applies})
+
+    async def _folder_defaults(self, method: str, request: dict[str, Any]) -> None:
+        params = request.get("params") if isinstance(request.get("params"), dict) else {}
+        if method == RuntimeMethod.RIND_FOLDER_DEFAULTS_GET:
+            result = await folder_defaults.describe(self._worker, str(params.get("workspace_root") or self._worker.workspace_root))
+        elif method == RuntimeMethod.RIND_FOLDER_DEFAULTS_SET:
+            result = await folder_defaults.set_defaults(self._worker, params)
+        else:
+            result = await folder_defaults.unset_defaults(self._worker, params)
+        await self._respond(request, result)
+
+    async def _apply_folder_defaults(self, request: dict[str, Any]) -> None:
+        """Bring a conversation to its folder's current defaults (a team member's reopened task)."""
+        session_id = await self._required_session_id(request)
+        if session_id is None:
+            return
+        store = await self._session_store(session_id)
+        folder = await asyncio.to_thread(self._worker.repository.folder_selection, str(store.workspace_root))
+        wanted = folder.selection
+        changed = False
+        if (store.provider, store.model) != (wanted.provider_id, wanted.model_id):
+            await store.update_selection(wanted.provider_id, wanted.model_id, source=folder.model_source)
+            changed = True
+        if wanted.reasoning_effort and store.reasoning_effort != wanted.reasoning_effort:
+            await store.update_reasoning_effort(wanted.reasoning_effort, source=folder.effort_source)
+            changed = True
+        applies = await self._settings_changed(session_id, store) if changed else None
+        await self._respond(request, {
+            "provider_id": store.provider, "model_id": store.model, "reasoning_effort": store.reasoning_effort,
+            "changed": changed, "applies": applies,
+        })
 
     async def _settings_changed(self, session_id: str, store) -> str:
         """Tell every window showing the conversation; say when the change applies.

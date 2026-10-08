@@ -16,6 +16,7 @@ from agent.infrastructure.persistence.session_files import SessionFiles
 from agent.infrastructure.persistence.session_index_repository import SessionIndexRepository
 from agent.infrastructure.persistence.session_meta import display_title, new_session_id
 from agent.infrastructure.rind_docs import resolve_project_doc_path
+from agent.infrastructure.workspace_defaults import FolderSelection, WorkspaceDefaults
 from agent.prompts import build_system_prompt
 
 
@@ -28,9 +29,10 @@ UNSAVED_LIMIT_SECONDS = 60
 class SessionService:
     """Access sessions by ID. A created conversation stays in memory until its first message saves it."""
 
-    def __init__(self, *, session_dir: str | None, provider_service: ProviderServiceImpl):
+    def __init__(self, *, session_dir: str | None, provider_service: ProviderServiceImpl, workspace_defaults: WorkspaceDefaults | None = None):
         self.session_dir = session_dir
         self.provider_service = provider_service
+        self.workspace_defaults = workspace_defaults or WorkspaceDefaults()
         self._drafts: dict[str, JsonlSessionStore] = {}
         self._created: dict[str, float] = {}
         self.now = time.monotonic
@@ -70,11 +72,33 @@ class SessionService:
         """A read-only handle for listing this folder's history; it never creates a session."""
         return JsonlSessionStore(session_dir=self.session_dir, workspace_root=validate_workspace_root(workspace_root))
 
-    async def blank(self, workspace_root: str, selection: ModelSelection | None = None) -> dict[str, Any]:
+    def folder_selection(self, workspace_root: str) -> FolderSelection:
+        """What a new conversation in this folder starts with: its defaults, else settings.json."""
+        return self.workspace_defaults.resolve(workspace_root, self.provider_service.default_selection())
+
+    def choose_selection(self, workspace_root: str, provider: str = "", model: str = "", effort: str | None = None) -> tuple[ModelSelection, dict[str, str]]:
+        """The selection a new conversation is created with, and where each part came from.
+
+        Whatever the window does not choose, or chooses the same as the folder
+        default, is that default; anything else is the conversation's own.
+        """
+        folder = self.folder_selection(workspace_root)
+        default = folder.selection
+        selection = ModelSelection(
+            provider or default.provider_id,
+            model or default.model_id,
+            default.reasoning_effort if effort is None else effort,
+        )
+        same_model = (selection.provider_id, selection.model_id) == (default.provider_id, default.model_id)
+        return selection, {
+            "model": folder.model_source if same_model else "session",
+            "effort": folder.effort_source if selection.reasoning_effort == default.reasoning_effort else "session",
+        }
+
+    async def blank(self, workspace_root: str) -> dict[str, Any]:
         """What a window shows before its first message: a folder and its settings, no session."""
         root = validate_workspace_root(workspace_root)
-        if selection is None:
-            selection = self.provider_service.default_selection()
+        selection = (await asyncio.to_thread(self.folder_selection, root)).selection
         # Enough for the window to greet: whether the folder has a RIND.md.
         has_rind_doc = await asyncio.to_thread(resolve_project_doc_path(root).is_file)
         return {
@@ -147,12 +171,13 @@ class SessionService:
         session_type: str | None = None,
         parent_session_id: str | None = None,
         selection: ModelSelection | None = None,
+        selection_source: dict[str, str] | None = None,
         defer_persistence: bool = False,
         session_id: str | None = None,
     ) -> dict[str, Any]:
         root = validate_workspace_root(workspace_root)
         if selection is None:
-            selection = self.provider_service.default_selection()
+            selection, selection_source = await asyncio.to_thread(self.choose_selection, root)
         model, reasoning_effort, provider = selection.model_id, selection.reasoning_effort, selection.provider_id
         system_prompt = build_system_prompt(str(root), environment=get_system_info(root))
         store = JsonlSessionStore(
@@ -167,6 +192,7 @@ class SessionService:
             parent_session_id=parent_session_id,
             reasoning_effort=reasoning_effort,
             provider=provider,
+            selection_source=selection_source,
         )
         if defer_persistence:
             await store.create_session(session_id=store.session_id)
@@ -189,7 +215,6 @@ class SessionService:
         workspace_root: str,
         session_id: str | None = None,
         resume_latest: bool = False,
-        selection: ModelSelection | None = None,
     ) -> dict[str, Any]:
         if session_id:
             return await self.info(session_id)
@@ -198,7 +223,7 @@ class SessionService:
             if not sessions:
                 raise ValueError("No existing session found to resume.")
             return await self.info(str(sessions[0]["id"]))
-        return await self.blank(workspace_root, selection)
+        return await self.blank(workspace_root)
 
     async def info(self, session_id: str) -> dict[str, Any]:
         meta = await self.metadata(session_id)

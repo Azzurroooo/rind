@@ -6,6 +6,7 @@ import { createRuntimeClient } from "./runtime-client.js";
 import { requireRuntimeInitialization, runtimeMethods } from "./runtime-protocol.js";
 import { createOneShotProgress } from "./one-shot-progress.js";
 import { sendHelp } from "./send.js";
+import { configHelp } from "./config-command.js";
 import { prepareManagement, observeRuntime } from "./agents-session.js";
 
 export const oneShotHelp = [
@@ -38,6 +39,8 @@ export const cliHelp = [
   oneShotHelp,
   "",
   sendHelp,
+  "",
+  configHelp,
   "",
   tourHelp,
 ].join("\n");
@@ -194,11 +197,7 @@ export async function runOneShot({ args, python, repoRoot, runtimePath, cwd = pr
     if (!sessionInfo.session_id && !options.session) sessionInfo = { ...sessionInfo, ...await client.request(runtimeMethods.sessionCreate, {}) };
     const sessionId = String(sessionInfo.session_id || options.session || "").trim();
     if (!sessionId) throw new Error("Runtime initialization did not return a session_id.");
-    progress.session({
-      sessionId,
-      model: String(sessionInfo.model || ""),
-      baseUrl: String(sessionInfo.base_url || ""),
-    });
+    progress.session({ sessionId, model: String(sessionInfo.model || "") });
     const requestCompletion = sessionInfo.capabilities.includes("rind/request-completion");
     if (!requestCompletion) progress.note("This Worker completes one turn only; automatic background continuation is unavailable.");
     const result = await client.request(runtimeMethods.sessionPrompt, {

@@ -287,7 +287,8 @@ async def test_status_before_the_first_message_reports_what_the_window_chose(wor
         result = await request("rind/command/execute", input="/status", draft=draft)
         entries = {entry["label"]: entry["value"] for entry in result["display"]["entries"]}
         assert entries["name"] == "Spike · applies when the conversation starts"
-        assert entries["model"] == "longcat-flash"
+        assert entries["model"] == "longcat-flash · this conversation", "the window chose it, not a default"
+        assert entries["connection"] == "longcat · LongCat", "built-in connections are named even before a login"
         # A draft that is not a mapping is ignored rather than trusted.
         plain = await request("rind/command/execute", input="/status", draft="nonsense")
         assert {entry["label"]: entry["value"] for entry in plain["display"]["entries"]}["name"] == "unset · shown by its first message"

@@ -78,6 +78,10 @@ class RuntimeMethod:
     RIND_GOAL_CLEAR = "rind/goal/clear"
     RIND_CONTEXT_INSPECT = "rind/context/inspect"
     RIND_USAGE_SUMMARY = "rind/usage/summary"
+    RIND_FOLDER_DEFAULTS_GET = "rind/folder_defaults/get"
+    RIND_FOLDER_DEFAULTS_SET = "rind/folder_defaults/set"
+    RIND_FOLDER_DEFAULTS_UNSET = "rind/folder_defaults/unset"
+    RIND_FOLDER_DEFAULTS_APPLY = "rind/folder_defaults/apply"
     SESSION_UPDATE = "session/update"
 
 
@@ -165,6 +169,10 @@ CORE_METHODS = (
     RuntimeMethod.RIND_TASK_WAIT,
     RuntimeMethod.RIND_TASK_CANCEL,
     RuntimeMethod.RIND_TASK_RELEASE_WAIT,
+    RuntimeMethod.RIND_FOLDER_DEFAULTS_GET,
+    RuntimeMethod.RIND_FOLDER_DEFAULTS_SET,
+    RuntimeMethod.RIND_FOLDER_DEFAULTS_UNSET,
+    RuntimeMethod.RIND_FOLDER_DEFAULTS_APPLY,
 )
 
 CAPABILITIES = (

@@ -37,6 +37,7 @@ import { createCliOutputController } from "./cli-output-controller.js";
 import { createCliInputActions } from "./cli-input-actions.js";
 import { cliHelp, oneShotHelp, runOneShot, tourHelp } from "./one-shot.js";
 import { runSend, sendHelp } from "./send.js";
+import { configHelp, runConfig } from "./config-command.js";
 import { listenIpc } from "./ipc.js";
 import { runTour } from "./tour/run-tour.js";
 import { createTui } from "./tui/tui.js";
@@ -98,6 +99,15 @@ function resolveInstalledRuntime() {
 
 if (cliArgs[0] === "run" && cliArgs.some((arg) => arg === "--help" || arg === "-h")) {
   process.stdout.write(`${oneShotHelp}\n`);
+  return;
+}
+if (cliArgs[0] === "config") {
+  if (cliArgs.length === 1 || cliArgs.some((arg) => arg === "--help" || arg === "-h")) {
+    process.stdout.write(`${configHelp}\n`);
+    return;
+  }
+  try { await runConfig({ args: cliArgs.slice(1), launch: managementLaunch }); }
+  catch (error) { process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`); process.exitCode = 2; }
   return;
 }
 if (cliArgs[0] === "send" && cliArgs.some((arg) => arg === "--help" || arg === "-h")) {

@@ -88,10 +88,9 @@ export function createOneShotProgress({ stderr, stream = null } = {}) {
       return tools.size;
     },
 
-    session({ sessionId, model, baseUrl }) {
+    session({ sessionId, model }) {
       const parts = [`session ${sessionId}`];
       if (model) parts.push(`model ${model}`);
-      if (baseUrl) parts.push(`api ${baseUrl}`);
       emit(`${c.dim}·${c.reset} ${parts.join(`${c.dim} · ${c.reset}`)}\n`);
       startSpinner("working");
     },

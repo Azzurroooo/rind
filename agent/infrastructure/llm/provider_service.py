@@ -69,6 +69,19 @@ class ProviderServiceImpl:
         settings = settings if settings is not None else load_settings()
         return self._resolve_model(settings, definition, selection.model_id, self._read_cache().get(definition.id))
 
+    def describe_connection(self, provider_id: str) -> dict[str, str] | None:
+        """Name, endpoint and key source of a connection; None when it is not configured here."""
+        settings = load_settings()
+        try:
+            definition = self._provider(provider_id)
+        except ProviderError:
+            return None
+        return {
+            "name": definition.name,
+            "endpoint": self._endpoint(settings, definition),
+            "credential": self._credential_source(settings, definition),
+        }
+
     def list_providers(self) -> list[ProviderStatus]:
         try:
             settings: AppSettings | None = load_settings()

@@ -73,8 +73,15 @@ class EmptyStream:
         return None
 
 
+async def _explain(selection, source):
+    """What the dispatcher answers for /status: a stored-login DeepSeek connection."""
+    return {**selection, "connection": {"name": "DeepSeek", "endpoint": "https://api.deepseek.com/v1", "credential": "stored"},
+            "model_source": (source or {}).get("model", "session"), "effort_source": (source or {}).get("effort", "session")}
+
+
 def _context(session=None, runtime=None):
-    return SlashCommandContext(runtime=runtime or FakeRuntime(), session=session or FakeSession(), debug=True, workspace_root=getattr(session, "workspace_root", None))
+    return SlashCommandContext(runtime=runtime or FakeRuntime(), session=session or FakeSession(), debug=True,
+                               workspace_root=getattr(session, "workspace_root", None), explain_selection=_explain)
 
 
 @pytest.mark.asyncio
@@ -298,7 +305,7 @@ async def test_status_shows_config_and_empty_assistant_sampling() -> None:
     assert result.display is not None
     assert result.display["type"] == "status"
     assert [entry["label"] for entry in result.display["entries"]] == [
-        "session", "name", "settings", "apiKey", "baseUrl", "provider", "model", "reasoningEffort",
+        "session", "name", "settings", "connection", "endpoint", "key", "model", "reasoningEffort",
     ]
 
 
@@ -433,13 +440,10 @@ async def test_status_does_not_leak_api_key(monkeypatch) -> None:
 
     result = await SlashCommandRouter(build_command_infos()).execute("/status", _context())
 
-    assert "apiKey: set" in result.text
-    assert "baseUrl: https://example.com/v1" in result.text
-    assert "model: model_a" in result.text
+    assert "key: stored login" in result.text, "the key's source is shown, never the key"
     assert "secret-value" not in result.text
     assert result.display is not None
     assert result.display["type"] == "status"
-    assert {"label": "apiKey", "value": "set"} in result.display["entries"]
 
 
 @pytest.mark.asyncio
@@ -740,8 +744,29 @@ async def test_status_shows_the_conversation_name_and_provider() -> None:
     named = await SlashCommandRouter(build_command_infos()).execute("/status", _context(session=NamedSession({"name": "Release notes", "title": "write the notes"})))
     entries = _status_entries(named)
     assert entries["name"] == "Release notes"
-    assert entries["provider"] == "deepseek"
+    assert entries["connection"] == "deepseek · DeepSeek"
     assert "name: Release notes" in named.text
+
+
+@pytest.mark.asyncio
+async def test_status_says_where_the_model_and_the_effort_came_from() -> None:
+    session = NamedSession({})
+    session.selection_source = {"model": "folder", "effort": "main_repository"}
+    entries = _status_entries(await SlashCommandRouter(build_command_infos()).execute("/status", _context(session=session)))
+    assert entries["model"].endswith("· folder default")
+    assert entries["reasoningEffort"].endswith("· main repository default")
+
+
+@pytest.mark.asyncio
+async def test_status_names_a_connection_that_is_not_configured() -> None:
+    async def missing(selection, source):
+        return {**selection, "connection": None, "model_source": "settings", "effort_source": "settings"}
+
+    context = _context(session=NamedSession({}))
+    context.explain_selection = missing
+    entries = _status_entries(await SlashCommandRouter(build_command_infos()).execute("/status", context))
+    assert entries["connection"] == "deepseek · not configured · /login or /model"
+    assert "endpoint" not in entries and "key" not in entries
 
 
 @pytest.mark.asyncio
@@ -757,9 +782,9 @@ async def test_status_before_the_first_message_shows_the_window_choices() -> Non
     draft = {"name": "Spike", "provider": "longcat", "model": "longcat-flash", "reasoning_effort": "low"}
     session = NamedSession({})
     session.session_id = None
-    entries = _status_entries(await SlashCommandRouter(build_command_infos()).execute("/status", SlashCommandContext(runtime=None, session=session, draft=draft)))
+    entries = _status_entries(await SlashCommandRouter(build_command_infos()).execute("/status", SlashCommandContext(runtime=None, session=session, draft=draft, explain_selection=_explain)))
     assert entries["session"] == "none · the first message starts it"
     assert entries["name"] == "Spike · applies when the conversation starts"
-    assert (entries["provider"], entries["model"], entries["reasoningEffort"]) == ("longcat", "longcat-flash", "low")
-    unnamed = SlashCommandContext(runtime=None, session=session, draft={})
+    assert (entries["connection"], entries["model"], entries["reasoningEffort"]) == ("longcat · DeepSeek", "longcat-flash · this conversation", "low · this conversation")
+    unnamed = SlashCommandContext(runtime=None, session=session, draft={}, explain_selection=_explain)
     assert _status_entries(await SlashCommandRouter(build_command_infos()).execute("/status", unnamed))["name"] == "unset · shown by its first message"

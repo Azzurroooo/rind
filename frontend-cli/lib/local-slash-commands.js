@@ -54,7 +54,7 @@ function statusResult(context, argument) {
     { label: "session", value: info.session_id || "none · the first message starts it" },
     // The Runtime's /status reads the saved name; this one runs before the Runtime is reachable.
     { label: "name", value: !info.session_id && context.pendingName ? `${context.pendingName} · applies when the conversation starts` : "unset · shown by its first message" },
-    { label: "provider", value: info.provider || "unknown" },
+    { label: "connection", value: info.provider || "unknown" },
     { label: "model", value: info.model || "unknown" },
     { label: "reasoningEffort", value: info.reasoning_effort || "unset" },
     { label: "configured", value: configured.join(", ") || "none — run /login" },

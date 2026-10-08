@@ -37,41 +37,62 @@ def render_status_display(display: dict) -> str:
     return "\n".join(lines)
 
 
+# Where a conversation's model or effort came from (see /model, /effort and folder defaults).
+SOURCE_LABELS = {
+    "session": "this conversation",
+    "folder": "folder default",
+    "main_repository": "main repository default",
+    "settings": "settings.json",
+}
+KEY_LABELS = {"settings": "settings.json", "stored": "stored login", "environment": "environment variable", "none": "not set · /login"}
+
+
 async def build_status_display(context: SlashCommandContext) -> dict:
     session = context.session
     session_id = getattr(session, "session_id", None)
-    # Before the first message the window's own choices are what the
-    # conversation will be created with.
-    chosen = (context.draft or {}) if not session_id else {
-        "provider": getattr(session, "provider", None),
-        "model": getattr(session, "model", None),
-        "reasoning_effort": getattr(session, "reasoning_effort", None),
-    }
     entries = [
         {"label": "session", "value": display_value(session_id) if session_id else "none · the first message starts it"},
         {"label": "name", "value": await _name_value(session, session_id, context.draft)},
     ]
     try:
         settings = load_settings()
-        entries.extend([
-            {
-                "label": "settings",
-                "value": str(settings.settings_path),
-                "state": "found" if settings.settings_exists else "missing",
-            },
-            {"label": "apiKey", "value": "set" if settings.api_key else "unset"},
-            {"label": "baseUrl", "value": str(settings.base_url)},
-            {"label": "provider", "value": display_value(chosen.get("provider") or settings.provider)},
-            {"label": "model", "value": display_value(chosen.get("model") or settings.model)},
-            {
-                "label": "reasoningEffort",
-                "value": display_value(chosen.get("reasoning_effort") or settings.reasoning_effort or "unset"),
-            },
-        ])
+        entries.append({"label": "settings", "value": str(settings.settings_path), "state": "found" if settings.settings_exists else "missing"})
+        if context.explain_selection is not None:
+            entries.extend(_selection_entries(await _explained(context, session, session_id)))
     except (OSError, ValueError) as exc:
         entries.append({"label": "settings", "value": f"unavailable: {exc}"})
     usage = await _latest_assistant_sampling_usage(session)
     return {"type": "status", "entries": entries, "usage": [_usage_display(usage)] if usage else []}
+
+
+async def _explained(context: SlashCommandContext, session, session_id) -> dict:
+    # Before the first message the window's own choices are what the
+    # conversation will be created with.
+    if not session_id:
+        return await context.explain_selection(dict(context.draft or {}), None)
+    selection = {key: str(getattr(session, key, "") or "") for key in ("provider", "model", "reasoning_effort")}
+    return await context.explain_selection(selection, getattr(session, "selection_source", None) or {})
+
+
+def _selection_entries(explained: dict) -> list[dict]:
+    connection = explained.get("connection")
+    provider = display_value(explained.get("provider"))
+    entries = [{"label": "connection", "value": f"{provider} · {connection['name']}" if connection else f"{provider} · not configured · /login or /model"}]
+    if connection:
+        entries.extend([
+            {"label": "endpoint", "value": display_value(connection.get("endpoint"))},
+            {"label": "key", "value": KEY_LABELS.get(str(connection.get("credential")), "not set · /login")},
+        ])
+    entries.extend([
+        {"label": "model", "value": _with_source(display_value(explained.get("model")), explained.get("model_source"))},
+        {"label": "reasoningEffort", "value": _with_source(display_value(explained.get("reasoning_effort") or "unset"), explained.get("effort_source"))},
+    ])
+    return entries
+
+
+def _with_source(value: str, source: object) -> str:
+    label = SOURCE_LABELS.get(str(source or ""))
+    return f"{value} · {label}" if label else value
 
 
 async def _name_value(session, session_id, draft: dict | None) -> str:

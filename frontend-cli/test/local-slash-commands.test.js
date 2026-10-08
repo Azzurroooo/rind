@@ -25,7 +25,7 @@ test("local status renders session and provider state", async () => {
     entries: [
       { label: "session", value: "session_1" },
       { label: "name", value: "unset · shown by its first message" },
-      { label: "provider", value: "openai" },
+      { label: "connection", value: "openai" },
       { label: "model", value: "gpt-5.5" },
       { label: "reasoningEffort", value: "high" },
       { label: "configured", value: "openai" },

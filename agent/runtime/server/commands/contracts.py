@@ -16,6 +16,8 @@ class SlashCommandContext:
     # Before the first message: what the window has chosen so far (name,
     # provider, model, reasoning_effort); the conversation is created with it.
     draft: dict[str, Any] | None = None
+    # For /status: the selection's connection and where its parts came from.
+    explain_selection: Callable[[dict[str, str], dict[str, str] | None], Awaitable[dict]] | None = None
 
 
 @dataclass(slots=True)
