@@ -64,6 +64,10 @@ def session_index_entry(
         "owner_agent_id": meta.get("owner_agent_id"),
         "session_type": meta.get("session_type"),
         "parent_session_id": meta.get("parent_session_id"),
+        # So lists can show what each conversation runs on without opening it.
+        "provider": meta.get("provider") or None,
+        "model": meta.get("model") or None,
+        "reasoning_effort": meta.get("reasoning_effort") or None,
         "has_user_message": True,
     }
 

@@ -13,6 +13,9 @@ class SlashCommandContext:
     debug: bool = False
     workspace_root: str | None = None
     compact_context: Callable[[], Awaitable[dict]] | None = None
+    # Before the first message: what the window has chosen so far (name,
+    # provider, model, reasoning_effort); the conversation is created with it.
+    draft: dict[str, Any] | None = None
 
 
 @dataclass(slots=True)

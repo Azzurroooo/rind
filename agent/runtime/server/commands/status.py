@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from agent.infrastructure.persistence.session_meta import display_title
 from agent.infrastructure.settings import load_settings
 from agent.runtime.server.commands.contracts import SlashCommandContext, SlashCommandInfo, SlashCommandResult
 from agent.runtime.server.commands.formatting import display_value, nonnegative_int
@@ -38,7 +39,18 @@ def render_status_display(display: dict) -> str:
 
 async def build_status_display(context: SlashCommandContext) -> dict:
     session = context.session
-    entries = [{"label": "session", "value": display_value(getattr(session, "session_id", None))}]
+    session_id = getattr(session, "session_id", None)
+    # Before the first message the window's own choices are what the
+    # conversation will be created with.
+    chosen = (context.draft or {}) if not session_id else {
+        "provider": getattr(session, "provider", None),
+        "model": getattr(session, "model", None),
+        "reasoning_effort": getattr(session, "reasoning_effort", None),
+    }
+    entries = [
+        {"label": "session", "value": display_value(session_id) if session_id else "none · the first message starts it"},
+        {"label": "name", "value": await _name_value(session, session_id, context.draft)},
+    ]
     try:
         settings = load_settings(context.workspace_root)
         entries.extend([
@@ -49,21 +61,31 @@ async def build_status_display(context: SlashCommandContext) -> dict:
             },
             {"label": "apiKey", "value": "set" if settings.api_key else "unset"},
             {"label": "baseUrl", "value": str(settings.base_url)},
-            {
-                "label": "model",
-                "value": display_value(getattr(session, "model", None) or settings.model),
-            },
+            {"label": "provider", "value": display_value(chosen.get("provider") or settings.provider)},
+            {"label": "model", "value": display_value(chosen.get("model") or settings.model)},
             {
                 "label": "reasoningEffort",
-                "value": display_value(
-                    getattr(session, "reasoning_effort", None) or settings.reasoning_effort or "unset"
-                ),
+                "value": display_value(chosen.get("reasoning_effort") or settings.reasoning_effort or "unset"),
             },
         ])
     except (OSError, ValueError) as exc:
         entries.append({"label": "settings", "value": f"unavailable: {exc}"})
     usage = await _latest_assistant_sampling_usage(session)
     return {"type": "status", "entries": entries, "usage": [_usage_display(usage)] if usage else []}
+
+
+async def _name_value(session, session_id, draft: dict | None) -> str:
+    """The name, or what the conversation is shown as without one (see /rename)."""
+    if not session_id:
+        pending = str((draft or {}).get("name") or "").strip()
+        return f"{pending} · applies when the conversation starts" if pending else "unset · shown by its first message"
+    get_metadata = getattr(session, "get_metadata", None)
+    meta = await get_metadata() if callable(get_metadata) else {}
+    name = meta.get("name") if isinstance(meta, dict) else None
+    if isinstance(name, str) and name.strip():
+        return name
+    title = display_title(meta) if isinstance(meta, dict) else ""
+    return f'unset · shown as "{title}"' if title else "unset · shown by its first message"
 
 
 async def _latest_assistant_sampling_usage(session) -> dict | None:

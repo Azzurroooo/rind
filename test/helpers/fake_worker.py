@@ -68,6 +68,9 @@ class FakeExecution:
     def active_turn_id(self, session_id: str) -> str:
         return self.active_turn_ids.get(session_id, "")
 
+    def turn_running(self, session_id: str) -> bool:
+        return bool(self.active_turn_ids.get(session_id))
+
     def interrupt(self, session_id: str, reason: str = "interrupted") -> bool:
         self.interrupted.append(session_id)
         self.release.set()

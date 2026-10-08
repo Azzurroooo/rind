@@ -414,8 +414,10 @@ class RuntimeDispatcher:
             return
         root = str(params.get("workspace_root") or self._worker.workspace_root)
         store = self._worker.repository.listing_store(root)
+        raw_draft = params.get("draft")
+        draft = {key: str(raw_draft[key]) for key in ("name", "provider", "model", "reasoning_effort") if raw_draft.get(key)} if isinstance(raw_draft, dict) else None
         result = await self._slash_router.execute(raw_input, SlashCommandContext(
-            runtime=None, session=store, debug=self._debug, workspace_root=root, compact_context=None))
+            runtime=None, session=store, debug=self._debug, workspace_root=root, compact_context=None, draft=draft))
         await self._respond_slash_result(request, result)
 
     async def _auth_list(self, request: dict[str, Any]) -> None:
@@ -454,6 +456,7 @@ class RuntimeDispatcher:
         if session_id:
             store = await self._worker.repository.open_store(session_id, persist_system_prompt=False)
             await store.update_selection(provider_id, str(chosen["id"]))
+            await self._settings_changed(session_id, store)
         return {"provider_id": provider_id, "model_id": str(chosen["id"])}
 
     async def _auth_logout(self, request: dict[str, Any]) -> None:
@@ -493,6 +496,11 @@ class RuntimeDispatcher:
             "capabilities": self._capabilities(),
             "methods": self._methods(),
             "resume_preview": "" if info.get("message_count", 0) <= 1 else await self._resume_preview(info["session_id"]),
+            # For the window's welcome (new) or resume line (existing).
+            "has_rind_doc": bool(info.get("has_rind_doc")),
+            "title": info.get("title", ""),
+            "updated_at": info.get("updated_at", ""),
+            "message_count": info.get("message_count", 0),
             "turn_state": info.get("turn_state"),
             "live_turn": info.get("live_turn"),
             "commands": self._slash_command_infos(),
@@ -869,6 +877,7 @@ class RuntimeDispatcher:
             session_id,
             persist_system_prompt=False,
         )
+        model_before = getattr(store, "model", None)
         try:
             result = await self._slash_router.execute(
                 raw_input,
@@ -882,6 +891,8 @@ class RuntimeDispatcher:
             )
             await self._respond_slash_result(request, result)
             renamed = result.display if isinstance(result.display, dict) and result.display.get("type") == "session_renamed" else None
+            if command == "model" and getattr(store, "model", None) != model_before:
+                await self._settings_changed(session_id, store)
             if renamed:
                 # Every window showing it, and the lists, follow the new name.
                 await self._send_event({"type": "session_renamed", "session_id": session_id, "turn_id": "", "name": renamed["name"], "title": renamed["title"]})
@@ -903,7 +914,8 @@ class RuntimeDispatcher:
         store = active.session_store if active is not None else await self._worker.repository.open_store(session_id, persist_system_prompt=False)
         provider_id = provider_id or str(getattr(store, "provider", "openai-compatible") or "openai-compatible")
         await store.update_selection(provider_id, model)
-        await self._respond(request, {"provider_id": provider_id, "model_id": model, "model": model, "session": True, "runtime": False})
+        applies = await self._settings_changed(session_id, store)
+        await self._respond(request, {"provider_id": provider_id, "model_id": model, "model": model, "session": True, "runtime": False, "applies": applies})
 
     async def _set_reasoning_effort(self, request: dict[str, Any]) -> None:
         params = request.get("params") if isinstance(request.get("params"), dict) else {}
@@ -919,7 +931,21 @@ class RuntimeDispatcher:
             session_id, persist_system_prompt=False
         )
         await store.update_reasoning_effort(effort)
-        await self._respond(request, {"reasoning_effort": effort, "session": True})
+        applies = await self._settings_changed(session_id, store)
+        await self._respond(request, {"reasoning_effort": effort, "session": True, "applies": applies})
+
+    async def _settings_changed(self, session_id: str, store) -> str:
+        """Tell every window showing the conversation; say when the change applies.
+
+        "next_turn" while a turn runs or waits (it keeps its model), otherwise "now".
+        """
+        applies = "next_turn" if self._worker.execution.turn_running(session_id) else "now"
+        await self._send_event({
+            "type": "session_settings_changed", "session_id": session_id, "turn_id": "",
+            "provider": str(getattr(store, "provider", "") or ""), "model": str(getattr(store, "model", "") or ""),
+            "reasoning_effort": str(getattr(store, "reasoning_effort", "") or ""), "applies": applies,
+        })
+        return applies
 
     async def _goal_request(self, request: dict[str, Any]) -> None:
         session_id = await self._required_session_id(request)

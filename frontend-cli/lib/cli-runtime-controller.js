@@ -41,6 +41,12 @@ export function createCliRuntimeController({
       // Listing and models work before the first message, for this window's folder.
       else if (state.session.info.workspace_root) requestParams.workspace_root = state.session.info.workspace_root;
     }
+    // Before the first message, commands (/status) report what this window
+    // has chosen; the conversation will be created with it.
+    if (method === methods.commandExecute && !requestParams.session_id && !state.session.info.session_id) {
+      const { provider, model, reasoning_effort } = state.session.info;
+      requestParams.draft = Object.fromEntries(Object.entries({ name: state.session.pendingName, provider, model, reasoning_effort }).filter(([, value]) => value));
+    }
     if (turnScopedMethods.has(method) && state.turn.id && !requestParams.turn_id) {
       requestParams.turn_id = state.turn.id;
     }
@@ -521,9 +527,9 @@ export function createCliRuntimeController({
       return;
     }
     try {
-      await request(methods.modelEffortSet, { reasoning_effort: effort });
+      const update = await request(methods.modelEffortSet, { reasoning_effort: effort });
       state.session.info = { ...state.session.info, reasoning_effort: effort };
-      log(() => commandResultText("Reasoning effort updated.", `- session effort: ${effort}`));
+      log(() => commandResultText("Reasoning effort updated.", `- session effort: ${effort} · ${appliesNote(update)}`));
     } catch (error) {
       log(`Command failed: ${error instanceof Error ? error.message : String(error)}`);
     }
@@ -585,15 +591,18 @@ function sessionMenuOption(session) {
   return values.filter(Boolean).join(" · ");
 }
 
+// A turn that is running keeps its model; the change applies from the next turn.
+export function appliesNote(result) {
+  return result?.applies === "next_turn" ? "applies from the next turn; this turn keeps its model" : "applies to your next message";
+}
+
 function modelSetResultText(result, model) {
   const sessionModel = singleLineText(result?.session_model || result?.model || model);
   const defaultModel = singleLineText(result?.default_model);
   const lines = ["Session model updated."];
   if (sessionModel) lines.push(`- session model: ${sessionModel}`);
   if (defaultModel) lines.push(`- default model: ${defaultModel} (unchanged)`);
-  lines.push(result?.active_updated || result?.runtime
-    ? "- active session: updated"
-    : "- active turn: unchanged; the new model applies to the next turn");
+  lines.push(`- ${appliesNote(result)}`);
   return commandResultText(lines[0], lines.slice(1).join(" · "));
 }
 

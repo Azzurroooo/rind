@@ -298,7 +298,7 @@ async def test_status_shows_config_and_empty_assistant_sampling() -> None:
     assert result.display is not None
     assert result.display["type"] == "status"
     assert [entry["label"] for entry in result.display["entries"]] == [
-        "session", "settings", "apiKey", "baseUrl", "model", "reasoningEffort",
+        "session", "name", "settings", "apiKey", "baseUrl", "provider", "model", "reasoningEffort",
     ]
 
 
@@ -468,6 +468,7 @@ async def test_model_set_updates_session_selection_without_changing_settings(tmp
     assert "Session model updated." in result.text
     assert "session model: model_b" in result.text
     assert "default model: model_a (unchanged)" in result.text
+    assert "applies from the next turn; a turn that is running keeps its model" in result.text
     assert data["model"] == "model_a"
     assert data["apiKey"] == "secret-value"
     assert (session.provider, session.model) == ("openai", "model_b")
@@ -718,3 +719,47 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
+
+
+class NamedSession(FakeSession):
+    provider = "deepseek"
+
+    def __init__(self, meta):
+        self._meta = meta
+
+    async def get_metadata(self):
+        return dict(self._meta)
+
+
+def _status_entries(result):
+    return {entry["label"]: entry["value"] for entry in result.display["entries"]}
+
+
+@pytest.mark.asyncio
+async def test_status_shows_the_conversation_name_and_provider() -> None:
+    named = await SlashCommandRouter(build_command_infos()).execute("/status", _context(session=NamedSession({"name": "Release notes", "title": "write the notes"})))
+    entries = _status_entries(named)
+    assert entries["name"] == "Release notes"
+    assert entries["provider"] == "deepseek"
+    assert "name: Release notes" in named.text
+
+
+@pytest.mark.asyncio
+async def test_status_says_an_unnamed_conversation_is_shown_by_its_first_message() -> None:
+    unnamed = await SlashCommandRouter(build_command_infos()).execute("/status", _context(session=NamedSession({"title": "fix the login page"})))
+    assert _status_entries(unnamed)["name"] == 'unset · shown as "fix the login page"'
+    empty = await SlashCommandRouter(build_command_infos()).execute("/status", _context(session=NamedSession({})))
+    assert _status_entries(empty)["name"] == "unset · shown by its first message"
+
+
+@pytest.mark.asyncio
+async def test_status_before_the_first_message_shows_the_window_choices() -> None:
+    draft = {"name": "Spike", "provider": "longcat", "model": "longcat-flash", "reasoning_effort": "low"}
+    session = NamedSession({})
+    session.session_id = None
+    entries = _status_entries(await SlashCommandRouter(build_command_infos()).execute("/status", SlashCommandContext(runtime=None, session=session, draft=draft)))
+    assert entries["session"] == "none · the first message starts it"
+    assert entries["name"] == "Spike · applies when the conversation starts"
+    assert (entries["provider"], entries["model"], entries["reasoningEffort"]) == ("longcat", "longcat-flash", "low")
+    unnamed = SlashCommandContext(runtime=None, session=session, draft={})
+    assert _status_entries(await SlashCommandRouter(build_command_infos()).execute("/status", unnamed))["name"] == "unset · shown by its first message"

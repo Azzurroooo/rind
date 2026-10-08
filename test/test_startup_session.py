@@ -276,3 +276,20 @@ async def test_before_the_first_message_an_unknown_command_is_reported_as_unknow
         assert "/compact needs a conversation" in known["text"]
     finally:
         await worker.close()
+
+
+@pytest.mark.asyncio
+async def test_status_before_the_first_message_reports_what_the_window_chose(worker, tmp_path):
+    _, request, _ = _server(worker)
+    try:
+        await request("initialize")
+        draft = {"name": "Spike", "provider": "longcat", "model": "longcat-flash", "reasoning_effort": "low"}
+        result = await request("rind/command/execute", input="/status", draft=draft)
+        entries = {entry["label"]: entry["value"] for entry in result["display"]["entries"]}
+        assert entries["name"] == "Spike · applies when the conversation starts"
+        assert entries["model"] == "longcat-flash"
+        # A draft that is not a mapping is ignored rather than trusted.
+        plain = await request("rind/command/execute", input="/status", draft="nonsense")
+        assert {entry["label"]: entry["value"] for entry in plain["display"]["entries"]}["name"] == "unset · shown by its first message"
+    finally:
+        await worker.close()

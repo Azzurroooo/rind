@@ -29,6 +29,10 @@ from agent.runtime.server.session_service import SessionService
 @dataclass(slots=True)
 class _ActiveExecution:
     container: AgentContainer
+    # The model client in use and the selection it was made for; a turn that
+    # starts with another saved selection gets a new client (see _apply_selection).
+    chat_client: Any = None
+    selection: ModelSelection | None = None
     turn_slot: asyncio.Lock = field(default_factory=asyncio.Lock)
     current_cancel: CancellationTokenSource | None = None
     pending_answers: dict[str, asyncio.Future[str]] = field(default_factory=dict)
@@ -309,6 +313,11 @@ class ExecutionCoordinator:
     def active_session_ids(self) -> set[str]:
         return set(self._active)
 
+    def turn_running(self, session_id: str) -> bool:
+        """A turn runs or waits in line; a settings change applies from the next one."""
+        execution = self._active.get(validate_session_id(session_id))
+        return bool(execution and (execution.queued_turn_starts or execution.container.runtime.turn_active))
+
     def active_container(self, session_id: str) -> AgentContainer | None:
         clean = validate_session_id(session_id)
         execution = self._active.get(clean)
@@ -457,6 +466,7 @@ class ExecutionCoordinator:
                         return
                     if not pending and (not checkpoint or not goal or goal.get("status") != "active"):
                         return
+                await self._apply_selection(execution)
                 if checkpoint:
                     await execution.container.session_store.persist_message("user", build_goal_checkpoint_prompt(checkpoint), meta={"kind": "goal_checkpoint"})
                 if self.external_tool(clean) and not compact:
@@ -664,12 +674,7 @@ class ExecutionCoordinator:
             str(metadata.get("model") or settings.model),
             str(metadata.get("reasoning_effort") or settings.reasoning_effort),
         )
-        try:
-            chat_client = await self._provider_service.create_chat_client(settings, selection, workspace_root=root)
-        except Exception as exc:
-            if getattr(exc, "code", "") != "provider_not_configured":
-                raise
-            chat_client = self._provider_service.unavailable_client(selection, str(exc))
+        chat_client = await self._chat_client_for(settings, selection, root)
         container = None
         try:
             container = build_agent_container(
@@ -707,8 +712,38 @@ class ExecutionCoordinator:
         if self._closed or clean in self._closed_sessions:
             await _close_container(container)
             raise RuntimeError("Worker is shutting down.")
-        self._active[clean] = _ActiveExecution(container=container)
+        self._active[clean] = _ActiveExecution(container=container, chat_client=chat_client, selection=selection)
         return container
+
+    async def _chat_client_for(self, settings, selection: ModelSelection, root):
+        try:
+            return await self._provider_service.create_chat_client(settings, selection, workspace_root=root)
+        except Exception as exc:
+            if getattr(exc, "code", "") != "provider_not_configured":
+                raise
+            return self._provider_service.unavailable_client(selection, str(exc))
+
+    async def _apply_selection(self, execution: _ActiveExecution) -> None:
+        """At the start of a turn: use the saved provider, model and effort.
+
+        /model and /effort save at once; a running turn keeps its client, and the
+        next turn picks the change up here, even when it was queued behind the
+        running one (the execution is not rebuilt in between).
+        """
+        store = getattr(execution.container, "session_store", None)
+        if store is None or execution.selection is None:
+            return
+        selection = ModelSelection(str(store.provider or ""), str(store.model or ""), str(store.reasoning_effort or ""))
+        if not selection.model_id or selection == execution.selection:
+            return
+        root = str(getattr(store, "workspace_root", "") or "")
+        settings = await asyncio.to_thread(load_settings, root or None)
+        replacement = await self._chat_client_for(settings, selection, root or None)
+        previous = execution.chat_client
+        execution.container.turn_runner.replace_chat_client(replacement)
+        execution.chat_client, execution.selection = replacement, selection
+        if previous is not None:
+            await previous.close()
 
 
 
@@ -726,7 +761,7 @@ class ExecutionCoordinator:
         if released is not None:
             self._repository.release_persisted_draft()
             self._shell_tools.pool.close(session_id)
-            await _close_container(released.container)
+            await _close_execution(released)
 
     async def release(self, session_id: str, *, permanent: bool = False) -> None:
         clean = validate_session_id(session_id)
@@ -746,7 +781,7 @@ class ExecutionCoordinator:
         if released is not None:
             self._repository.release_persisted_draft()
             self._shell_tools.pool.close(session_id)
-            await _close_container(released.container)
+            await _close_execution(released)
 
     async def close(self) -> None:
         async with self._lock:
@@ -777,13 +812,18 @@ class ExecutionCoordinator:
             self._active.clear()
             self._live.clear()
         if executions:
-            await asyncio.gather(*(_close_container(item.container) for item in executions))
+            await asyncio.gather(*(_close_execution(item) for item in executions))
         self._repository.release_persisted_draft()
         self._event_sinks.clear()
 
 
 async def _close_container(container: AgentContainer) -> None:
     await container.chat_client.close()
+
+
+async def _close_execution(execution: _ActiveExecution) -> None:
+    # The client may have been replaced since the container was built.
+    await (getattr(execution, "chat_client", None) or execution.container.chat_client).close()
 
 
 def _new_live_turn(turn_id: str) -> dict[str, Any]:

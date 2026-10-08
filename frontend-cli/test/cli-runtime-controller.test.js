@@ -473,3 +473,24 @@ test("a name chosen before the first message goes with the conversation it creat
   await harness.controller.runRename("Shipped");
   assert.deepEqual(harness.requests.at(-1), { method: methods.commandExecute, params: { input: "/rename Shipped" } }, "once it exists, the conversation renames itself");
 });
+
+test("commands sent before the first message carry what the window has chosen", async () => {
+  const harness = createHarness();
+  await harness.controller.ensureRuntime();
+  harness.state.session.info = { workspace_root: "/w", provider: "longcat", model: "longcat-flash", reasoning_effort: "low" };
+  harness.state.session.pendingName = "Spike";
+  await harness.controller.request(methods.commandExecute, { input: "/status" });
+  const sent = harness.requests.find(item => item.method === methods.commandExecute).params;
+  assert.deepEqual(sent.draft, { name: "Spike", provider: "longcat", model: "longcat-flash", reasoning_effort: "low" });
+  // Once the conversation exists it is the source of truth.
+  harness.state.session.info = { session_id: "session-a" };
+  await harness.controller.request(methods.commandExecute, { input: "/status" });
+  assert.equal(harness.requests.filter(item => item.method === methods.commandExecute).at(-1).params.draft, undefined);
+});
+
+test("model and effort results say when the change applies", async () => {
+  const { appliesNote } = await import("../lib/cli-runtime-controller.js");
+  assert.equal(appliesNote({ applies: "next_turn" }), "applies from the next turn; this turn keeps its model");
+  assert.equal(appliesNote({ applies: "now" }), "applies to your next message");
+  assert.equal(appliesNote({}), "applies to your next message", "older hosts do not say; nothing runs then");
+});

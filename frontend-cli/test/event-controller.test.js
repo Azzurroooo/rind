@@ -221,3 +221,16 @@ test("image notices deduplicate by session, model, severity and newly seen image
   await send(["a"], "warning");
   assert.equal(lines.length, 6);
 });
+
+test("a settings change follows in every window showing the conversation", async () => {
+  const lines = [];
+  let redraws = 0;
+  const state = { sessionInfo: { session_id: "s1", provider: "deepseek", model: "deepseek-flash", reasoning_effort: "low" } };
+  const controller = createEventController({ state, output: { log: line => lines.push(typeof line === "function" ? line() : line), redraw: () => { redraws += 1; } } });
+  await controller.handle({ event: { type: "session_settings_changed", session_id: "other", provider: "x", model: "y", reasoning_effort: "z", applies: "now" } });
+  assert.equal(state.sessionInfo.model, "deepseek-flash", "another conversation's change is not this one's");
+  await controller.handle({ event: { type: "session_settings_changed", session_id: "s1", provider: "deepseek", model: "deepseek-pro", reasoning_effort: "high", applies: "next_turn" } });
+  assert.deepEqual([state.sessionInfo.provider, state.sessionInfo.model, state.sessionInfo.reasoning_effort], ["deepseek", "deepseek-pro", "high"]);
+  assert.equal(redraws, 1);
+  assert.equal(lines.length, 0, "the window that made the change says so itself; others only update the status bar");
+});

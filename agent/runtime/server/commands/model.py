@@ -37,7 +37,7 @@ async def handle_model(context: SlashCommandContext, args: list[str]) -> str:
         "Session model updated.",
         f"- session model: {session_model}",
         f"- default model: {default_model} (unchanged)",
-        "- active turn: unchanged; the new model applies to the next turn",
+        "- applies from the next turn; a turn that is running keeps its model",
     ])
 
 

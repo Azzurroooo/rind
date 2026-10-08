@@ -112,6 +112,15 @@ export function createLiveSessions({ onChange = () => {}, now = () => Date.now()
         changed();
         return;
       }
+      // What it runs on, changed in some window: lists show it at once.
+      if (id && message?.event?.type === "session_settings_changed") {
+        const item = entry(id);
+        const { provider = "", model = "", reasoning_effort: reasoningEffort = "" } = message.event;
+        if (item.provider === provider && item.model === model && item.reasoningEffort === reasoningEffort) return;
+        Object.assign(item, { provider, model, reasoningEffort });
+        changed();
+        return;
+      }
       // The turn ended but jobs it started still run; it resumes when they finish.
       if (id && message?.event?.type === "background_wait_changed") {
         const wait = message.event.background_wait;

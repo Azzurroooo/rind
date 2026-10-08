@@ -24,6 +24,7 @@ test("local status renders session and provider state", async () => {
     type: "status",
     entries: [
       { label: "session", value: "session_1" },
+      { label: "name", value: "unset · shown by its first message" },
       { label: "provider", value: "openai" },
       { label: "model", value: "gpt-5.5" },
       { label: "reasoningEffort", value: "high" },
@@ -35,4 +36,11 @@ test("local status renders session and provider state", async () => {
 
 test("config is no longer a local slash command", async () => {
   assert.equal(await executeLocalSlashCommand("/config", {}), null);
+});
+
+test("local status before the first message shows the pending name", async () => {
+  const result = await executeLocalSlashCommand("/status", { sessionInfo: {}, pendingName: "Spike", runtimeInitialized: false });
+  const entries = Object.fromEntries(result.display.entries.map(entry => [entry.label, entry.value]));
+  assert.equal(entries.session, "none · the first message starts it");
+  assert.equal(entries.name, "Spike · applies when the conversation starts");
 });

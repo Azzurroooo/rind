@@ -14,7 +14,8 @@ from agent.infrastructure.paths import resolve_session_base, validate_session_id
 from agent.infrastructure.persistence import JsonlSessionStore, fork_session
 from agent.infrastructure.persistence.session_files import SessionFiles
 from agent.infrastructure.persistence.session_index_repository import SessionIndexRepository
-from agent.infrastructure.persistence.session_meta import new_session_id
+from agent.infrastructure.persistence.session_meta import display_title, new_session_id
+from agent.infrastructure.rind_docs import resolve_project_doc_path
 from agent.infrastructure.settings import workspace_defaults
 from agent.prompts import build_system_prompt
 
@@ -76,6 +77,8 @@ class SessionService:
         default_model, default_effort, _, default_provider = await asyncio.to_thread(workspace_defaults, str(root))
         if selection is None:
             selection = self.provider_service.default_selection(root)
+        # Enough for the window to greet: whether the folder has a RIND.md.
+        has_rind_doc = await asyncio.to_thread(resolve_project_doc_path(root).is_file)
         return {
             "session_id": "",
             "model": str(selection.model_id or default_model),
@@ -87,6 +90,7 @@ class SessionService:
             "goal": None,
             "usage": None,
             "message_count": 0,
+            "has_rind_doc": has_rind_doc,
         }
 
     async def metadata(self, session_id: str) -> dict[str, Any]:
@@ -217,6 +221,8 @@ class SessionService:
             "goal": meta.get("goal") if isinstance(meta.get("goal"), dict) else None,
             "usage": meta.get("latest_sampling_usage") if isinstance(meta.get("latest_sampling_usage"), dict) else None,
             "message_count": int(meta.get("message_count") or 0),
+            "title": display_title(meta),
+            "updated_at": str(meta.get("updated_at") or ""),
         }
 
     async def replay(self, session_id: str, start: int | None = None, end: int | None = None) -> dict[str, Any]:

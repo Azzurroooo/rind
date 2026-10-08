@@ -52,6 +52,13 @@ export function createEventController({
         // Renamed here or in another window: lists and banners use the new title.
         if (state.sessionInfo && event.session_id === state.sessionInfo.session_id) { state.sessionInfo.name = event.name || null; state.sessionInfo.title = event.title || ""; }
         return;
+      case "session_settings_changed":
+        // /model or /effort here or in another window: the status bar follows.
+        if (state.sessionInfo && event.session_id === state.sessionInfo.session_id) {
+          Object.assign(state.sessionInfo, { provider: event.provider || state.sessionInfo.provider, model: event.model || state.sessionInfo.model, reasoning_effort: event.reasoning_effort ?? state.sessionInfo.reasoning_effort });
+          output.redraw?.();
+        }
+        return;
       case "session_discarded":
         // The first prompt failed before its message saved the conversation:
         // this window is new again, and its next message creates it.

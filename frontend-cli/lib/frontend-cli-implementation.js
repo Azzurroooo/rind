@@ -55,6 +55,8 @@ import {
   promptPlaceholderText,
   slashMenuText,
   slashNoMatchText,
+  welcomeText,
+  resumeLineText,
   startupText,
 } from "./rendering.js";
 
@@ -350,6 +352,7 @@ commandController = createCommandController({
     runLocalCommand: async (text) => {
       const result = await executeLocalSlashCommand(text, {
         sessionInfo: sessionState.info,
+        pendingName: sessionState.pendingName,
         cwd: sessionState.info.workspace_root || sessionState.info.cwd || process.cwd(),
         runtimeStarted: runtimeState.status === "starting" || runtimeState.status === "ready",
         runtimeInitialized: runtimeState.status === "ready",
@@ -493,11 +496,14 @@ try {
   await runtimeController.ensureRuntime();
   const startupInfo = { ...sessionState.info, resume_preview: "" };
   if (management.label) logOutput(management.label);
-  const tourHint = persistedState.tourSeen ? [] : ["new to Rind? /tour walks you through it"];
+  // A new conversation is greeted; one opened again says what it resumes.
+  const opening = (width) => sessionState.info.session_id
+    ? resumeLineText(sessionState.info, Date.now(), width)
+    : welcomeText(sessionState.info, persistedState, width);
   if (tui) {
-    outputController.showStartup(startupInfo, tourHint);
+    outputController.showStartup(startupInfo, opening);
   } else {
-    logOutput(startupText(startupInfo));
+    logOutput([startupText(startupInfo), opening()].filter(Boolean).join("\n\n"));
   }
   // A window opened on an existing conversation shows its history; a new one has none yet.
   if (sessionState.info.session_id) await runtimeController.restoreSession();

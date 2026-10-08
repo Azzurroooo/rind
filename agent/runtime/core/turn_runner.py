@@ -92,6 +92,10 @@ class TurnRunner:
             SkillTurnCoordinator(skill_repository) if skill_repository is not None else None
         )
 
+    def replace_chat_client(self, chat_client: ChatClient) -> None:
+        """Use another model client from now on. Only between turns: a turn keeps its client."""
+        self._chat_client = chat_client
+
     def set_user_question_responder(self, responder) -> None:
         """Set the callback used when ask_user_question needs a user answer."""
         self._tool_processor.set_user_question_responder(responder)
