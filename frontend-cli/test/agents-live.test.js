@@ -53,7 +53,7 @@ test("a plain window's turn is visible to management while it runs, and its pres
   const prompt = window.request("session/prompt", { session_id: info.session_id, input: "hello" }).catch(() => {});
   const running = await until(snapshot => mine(snapshot)?.turn === "running", "the running turn is reported");
   const rows = backgroundRows(running, null);
-  assert.deepEqual(rows.filter(r => r.kind === "live").map(r => [r.status, r.context]), [["Working", "notes"]], "RUNNING NOW lists the plain window's turn");
+  assert.deepEqual(rows.filter(r => r.kind === "live").map(r => [r.status, r.title, r.context]), [["Working", "notes", "Independent"]], "RUNNING NOW lists the plain window's turn");
   assert.equal(independentSessions(running, [], "").find(g => g.name === "notes").sessions[0].status, "Working");
   assert.equal(running.agents.length, 0, "a plain session never becomes an agent");
 

@@ -59,7 +59,7 @@ function enterLabel(view, row) {
     case "notice": return "dismiss";
     case "service": return "actions";
     case "stop-all": return "stop…";
-    case "live": return row.taskId ? "open report" : row.sessionId ? "join" : "";
+    case "live": return row.sessionId ? "join" : row.taskId ? "open report" : "";
     case "task": return row.answer ? "answer" : row.status === "Done" ? "open report" : "open task";
     default: return "";
   }
@@ -73,7 +73,7 @@ export function available(view, row) {
   const enter = enterLabel(view, row);
   if (enter) list.push(act("open", enter));
   if (view.focus === "sidebar") return [...list, ...(row?.kind === "team" ? [act("actions")] : []), act("newTeam"), act("refresh"), act("help")];
-  if (["member", "session", "task", "service"].includes(row?.kind) && !(row.kind === "task" && (row.answer || row.archived))) list.push(act("actions"));
+  if (["member", "session", "task", "service", "live"].includes(row?.kind) && !(row.kind === "task" && (row.answer || row.archived))) list.push(act("actions"));
   const folder = ["independent", "folder"].includes(page) && (row?.workspace || view.page.workspace);
   if ((org && ["member", "session", "more"].includes(row?.kind)) || page === "member" || folder) list.push(act("chat"));
   if (row?.kind === "member" || page === "member") list.push(act("edit"));

@@ -398,7 +398,7 @@ export async function runAgentsPage({ launch, input = process.stdin, output = pr
       case "approval": return actions.approval(row.approvalId);
       case "notice": return perform(async () => { await request("dismissNotice", { noticeId: row.noticeId }); }, null, "Dismissing…");
       case "run": { const run = view.snapshot.runs.find(r => r.id === row.runId); return run && actions.resolveRun(run); }
-      case "live": return row.taskId ? perform(() => actions.delivery(row.taskId), null, "Loading report…") : row.sessionId ? ui.join(row) : undefined;
+      case "live": return row.sessionId ? ui.join(row) : row.taskId ? perform(() => actions.delivery(row.taskId), null, "Loading report…") : undefined;
       case "stop-all": return actions.stopAll(view.entries.filter(r => r.kind === "live"));
       case "service": return perform(() => actions.serviceActions(row), null, "Loading…");
       case "team": return openTeam(row.teamId);
@@ -411,6 +411,7 @@ export async function runAgentsPage({ launch, input = process.stdin, output = pr
     else if (row?.kind === "member") actions.memberActions(row.teamId, row.agentId);
     else if (row?.kind === "session") actions.sessionActions(row);
     else if (row?.kind === "task") actions.taskActions(row.taskId);
+    else if (row?.kind === "live") actions.liveActions(row);
     else if (row?.kind === "service") activate(row);
   }
   // The member a contextual shortcut (c, t, a, e) applies to.

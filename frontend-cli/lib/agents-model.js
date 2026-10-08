@@ -422,25 +422,29 @@ export function backgroundRows(snapshot, service, { now = Date.now() } = {}) {
   const folder = value => String(value || "").split(/[\\/]/).filter(Boolean).at(-1) || "Conversation";
   const running = [];
   const seen = new Set();
+  // One row per running conversation, named after who runs it; what it works
+  // on (its task, or the conversation itself) and any job follow as its note.
+  const row = ({ id, session, item, run, status, startedAt, job }) => {
+    const task = run?.taskId && snapshot.tasks.find(t => t.id === run.taskId);
+    const doing = task ? "Task: " + single(task.brief) : single(item?.title) || "Conversation";
+    return { id, kind: "live", title: session ? name(session.agentId) : folder(item?.workspace), status,
+      context: session ? teamName(session.teamId) || "" : "Independent", note: [doing, job ? jobSummary(job) : ""].filter(Boolean).join(" · "),
+      time: relativeTime(startedAt, now), taskId: task?.id, runId: run?.id, agentId: session?.agentId, teamId: session?.teamId,
+      sessionId: item?.id || session?.runtimeSessionId, workspace: item?.workspace };
+  };
+  const activeRunOf = session => session && snapshot.runs.find(r => r.sessionId === session.id && ["starting", "running"].includes(r.status));
   for (const item of snapshot.live || []) {
     if (!keepsRunning(item)) continue;
     const session = snapshot.sessions.find(s => s.runtimeSessionId === item.id);
     const job = item.turn === "idle" ? item.background : null;
-    const run = session && snapshot.runs.find(r => r.sessionId === session.id && ["starting", "running"].includes(r.status));
-    const task = run?.taskId && snapshot.tasks.find(t => t.id === run.taskId);
     seen.add(item.id);
-    running.push({ id: "live:" + item.id, kind: "live", title: task ? single(task.brief) : "Conversation", status: liveStatus(item),
-      context: session ? [teamName(session.teamId), name(session.agentId)].filter(Boolean).join(" › ") : folder(item.workspace),
-      time: relativeTime(job?.startedAt || item.startedAt || item.updatedAt, now), ...(job ? { note: jobSummary(job) } : {}),
-      taskId: task?.id, agentId: session?.agentId, teamId: session?.teamId, sessionId: item.id, workspace: item.workspace });
+    running.push(row({ id: "live:" + item.id, session, item, run: activeRunOf(session), status: liveStatus(item), startedAt: job?.startedAt || item.startedAt || item.updatedAt, job }));
   }
+  // A task run whose conversation the Runtime has not reported yet.
   for (const run of snapshot.runs.filter(r => ["starting", "running"].includes(r.status))) {
     const session = snapshot.sessions.find(s => s.id === run.sessionId);
     if (session?.runtimeSessionId && seen.has(session.runtimeSessionId)) continue;
-    const task = snapshot.tasks.find(t => t.id === run.taskId);
-    running.push({ id: "run:" + run.id, kind: "live", title: task ? single(task.brief) : "Conversation", status: run.needsInput ? "Needs input" : "Working",
-      context: [teamName(session?.teamId), name(session?.agentId)].filter(Boolean).join(" › "), time: relativeTime(run.startedAt, now), taskId: task?.id,
-      agentId: session?.agentId, teamId: session?.teamId, sessionId: session?.runtimeSessionId });
+    running.push(row({ id: "run:" + run.id, session, run, status: run.needsInput ? "Needs input" : "Working", startedAt: run.startedAt }));
   }
   const unconfirmed = snapshot.runs.filter(run => run.status === "unknown");
   const rows = [{ id: "section:running", kind: "section", title: "Running now", count: running.length }];

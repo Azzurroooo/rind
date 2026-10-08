@@ -254,12 +254,23 @@ export function createActions(ui) {
     ], { description: [single(task.brief)] });
   }
 
+  // A running conversation: join it, read the task it works on, or stop that task.
+  function liveActions(row) {
+    const task = snap().tasks.find(t => t.id === row.taskId);
+    ui.choose(row.title, [
+      ...(row.sessionId ? [{ label: "Join conversation", key: "enter", description: "Watch it work, or step in", action: () => ui.join(row) }] : []),
+      ...(task ? [{ label: "Task report", key: "r", description: single(task.brief), action: () => delivery(task.id) }] : []),
+      ...(task && row.runId ? [{ label: "Stop this task", key: "x", danger: true, action: () => ui.confirm("Stop this task?", [single(task.brief), "Its conversation is kept."], "Stop execution",
+        async () => { await ui.request("cancelRun", { runId: row.runId }); ui.notify("Stopping the task.", "success"); }) }] : []),
+    ], { description: [[row.context, row.note].filter(Boolean).join(" · ")] });
+  }
+
   // Stop is destructive and separate from leaving: Cancel is the default, the
   // dialog says what keeps existing, and the button names what it does.
   // `running`: the Background page's Running now rows, jobs included.
   function stopAll(running = []) {
     const working = running.length;
-    const names = running.slice(0, 5).map(row => "• " + single(row.context) + " — " + single(row.title) + (row.status === "Running job" ? " (running " + single(row.note) + ")" : ""));
+    const names = running.slice(0, 5).map(row => "• " + [row.title, row.context].filter(Boolean).map(single).join(" · ") + " — " + single(row.note));
     const jobs = running.filter(row => row.status === "Running job").length;
     const description = [
       ...(working ? [working + (working === 1 ? " agent is" : " agents are") + " working:", ...names, ...(working > 5 ? ["  and " + (working - 5) + " more"] : []), ""] : ["Nothing is running."]),
@@ -295,5 +306,5 @@ export function createActions(ui) {
     ui.choose("Show only", STATUS_FILTERS.map(status => ({ label: status, description: status === "All" ? "Everything in this view" : undefined, action() { ui.setFilter(status); } })), { selected: ui.view.filter, searchable: true });
   }
 
-  return { ...review, createTeam, addMember, assignTask, editMember, memberActions, sessionActions, taskActions, answer, resolveRun, chooseFilter, stopAll, serviceActions };
+  return { ...review, createTeam, addMember, assignTask, editMember, memberActions, sessionActions, taskActions, liveActions, answer, resolveRun, chooseFilter, stopAll, serviceActions };
 }

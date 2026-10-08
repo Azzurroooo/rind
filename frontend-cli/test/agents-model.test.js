@@ -168,8 +168,13 @@ test("background lists every running conversation, services and one stop action"
   ];
   const rows = backgroundRows(snapshot, { pid: 7, startedAt: "2026-10-06T09:00:00Z", runtime: { pid: 8, startedAt: "2026-10-06T09:00:00Z", busy: 2 }, stale: { reason: "busy" } }, { now: NOW });
   const live = rows.filter(r => r.kind === "live");
-  assert.deepEqual(live.map(r => [r.title, r.status, r.context, r.time]), [["Conversation", "Needs input", "notes", "2m"], ["Migrate schema", "Working", "Product › API", "10m"], ["Conversation", "Working", "Product › Lead", "1m"]],
-    "a plain window's turn is listed, a managed task once, and a run the Runtime has not reported yet");
+  assert.deepEqual(live.map(r => [r.title, r.status, r.context, r.note, r.time]), [
+    ["notes", "Needs input", "Independent", "Conversation", "2m"],
+    ["API", "Working", "Product", "Task: Migrate schema", "10m"],
+    ["Lead", "Working", "Product", "Conversation", "1m"],
+  ], "named after who runs it; a plain window's turn, a managed task once, and a run the Runtime has not reported yet");
+  const task = live.find(r => r.taskId === "t-run");
+  assert.deepEqual([task.sessionId, task.runId], ["r-task", "w1"], "Enter joins its conversation; the run is there to stop");
   assert.equal(rows.find(r => r.kind === "run").runId, "w3");
   assert.match(rows.find(r => r.id === "svc:management").note, /pid 7 · up 3h · update waiting/);
   assert.match(rows.find(r => r.id === "svc:runtime").note, /2 running/);
@@ -212,7 +217,7 @@ test("a conversation running a job reads Running job everywhere, and delegated w
   snapshot.live = [job];
   const rows = backgroundRows(snapshot, null, { now: NOW });
   const row = rows.find(r => r.kind === "live");
-  assert.deepEqual([row.status, row.note, row.time], ["Running job", "npm test +1", "3m"], "Background lists it: it keeps running after you leave");
+  assert.deepEqual([row.status, row.note, row.time], ["Running job", "Conversation · npm test +1", "3m"], "Background lists it: it keeps running after you leave");
   const { runningCount } = await import("../lib/agents-model.js");
   assert.equal(runningCount(snapshot), 1);
 });
