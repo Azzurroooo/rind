@@ -15,7 +15,7 @@ import { TextBlock } from "./components/text-block.js";
 import { DynamicBlock } from "./components/dynamic-block.js";
 import { AssistantMessage } from "./components/assistant-message.js";
 import { ToolBlock } from "./components/tool-block.js";
-import { paint, colorEnabled } from "./theme.js";
+import { colorEnabled } from "./theme.js";
 
 export function createCliOutputController({ state, terminalUi, transcript, animateTools = true,
   now = Date.now, schedule = setTimeout, cancelSchedule = clearTimeout, hasColor = colorEnabled }) {
@@ -281,15 +281,15 @@ export function createCliOutputController({ state, terminalUi, transcript, anima
     redraw();
   }
 
-  function showStartup(info, footerLines = []) {
+  // opening(width): the welcome or resume line under the banner, laid out per width.
+  function showStartup(info, opening = () => "") {
     if (!terminalUi) {
       return;
     }
     const source = { ...info };
     appendBlock(new DynamicBlock((width) => {
-      const rendered = startupText(source, width);
-      const lines = rendered ? rendered.split("\n") : [];
-      return footerLines.length ? [...lines, ...footerLines.map((line) => paint.dim(line))] : lines;
+      const rendered = [startupText(source, width), opening(width)].filter(Boolean).join("\n\n");
+      return rendered ? rendered.split("\n") : [];
     }));
   }
 

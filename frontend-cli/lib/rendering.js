@@ -409,6 +409,49 @@ function boardCompact(value) {
 const BOARD_BAR_CELL = "█";
 const BOARD_REMAINDER_CELL = "░";
 
+// Shown under the banner of a new conversation, and scrolls away with the first
+// message. What it runs on, and the few next steps that apply here.
+export function welcomeText(info = {}, cli = {}, frameWidth) {
+  const width = Math.max(10, composerWidth(frameWidth));
+  const folder = singleLine(String(info.workspace_root || info.cwd || "").split(/[\\/]/).filter(Boolean).pop() || "this folder");
+  const runsOn = [info.provider, info.model, info.reasoning_effort].map(singleLine).filter(Boolean).join(" · ");
+  const tips = [
+    info.has_rind_doc === false && ["/init", "write a RIND.md with notes for every conversation"],
+    !cli.tourSeen && ["/tour", "a two-minute walkthrough"],
+  ].filter(Boolean).slice(0, 3);
+  if (!tips.length) tips.push(["/help", "commands · ← agents"]);
+  const fit = text => clipCells(text, width);
+  return [
+    fit(`${accent("✦")} ${bold(`New conversation in ${folder}`)}`),
+    ...(info.management_label ? [fit(`  ${dim(singleLine(info.management_label))}`)] : []),
+    ...(runsOn ? [fit(`  ${dim(runsOn)}`)] : []),
+    "",
+    ...tips.map(([command, what]) => fit(`  ${accent(command)} ${dim(what)}`)),
+  ].join("\n");
+}
+
+// A conversation opened again: one line about what it is, instead of a welcome.
+export function resumeLineText(info = {}, now = Date.now(), frameWidth) {
+  if (!info.session_id) return "";
+  const count = Number(info.message_count) || 0;
+  const parts = [
+    singleLine(info.title) || singleLine(info.session_id),
+    count ? `${count} message${count === 1 ? "" : "s"}` : "",
+    ageText(info.updated_at, now),
+  ].filter(Boolean);
+  return clipCells(`${accent("↩")} ${bold("Resuming:")} ${dim(parts.join(" · "))}`, Math.max(10, composerWidth(frameWidth)));
+}
+
+function ageText(value, now) {
+  const time = Date.parse(value || "");
+  if (!Number.isFinite(time)) return "";
+  const minutes = Math.max(0, Math.round((now - time) / 60000));
+  if (minutes < 1) return "just now";
+  if (minutes < 60) return `${minutes}m ago`;
+  if (minutes < 24 * 60) return `${Math.floor(minutes / 60)}h ago`;
+  return `${Math.floor(minutes / (24 * 60))}d ago`;
+}
+
 export function startupText(info = {}, width) {
   const header = startupBannerText(info, width);
   const goal = goalText(info.goal, true);

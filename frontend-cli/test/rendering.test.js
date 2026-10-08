@@ -40,6 +40,8 @@ import {
   slashMenuText,
   slashResultText,
   startupText,
+  welcomeText,
+  resumeLineText,
   taskMonitorTabs,
   themeMenuText,
   toolRequestedLine,
@@ -1364,4 +1366,41 @@ test("the unmatched slash note names the way back", async () => {
   const text = slashNoMatchText("//").replace(/\x1b\[[0-9;]*m/g, "");
   assert.match(text, /No command matches \/\//);
   assert.match(text, /backspace/);
+});
+
+const plain = text => text.replace(/\x1b\[[0-9;]*m/g, "");
+
+test("a new conversation is greeted with what it runs on and what to try", () => {
+  const text = plain(welcomeText({ provider: "deepseek", model: "deepseek-flash", reasoning_effort: "high", workspace_root: "/w/notes-app", has_rind_doc: false }, { tourSeen: false }, 100));
+  const lines = text.split("\n");
+  assert.ok(lines.length <= 8, "quiet: a few lines, not a page");
+  assert.match(text, /New conversation in notes-app/);
+  assert.match(text, /deepseek · deepseek-flash · high/);
+  // Every tip is something typed into this input box; a shell command there would mislead.
+  assert.doesNotMatch(text, /rind -c|\s-c\b/);
+  assert.match(text, /\/init/, "no RIND.md yet");
+  assert.match(text, /\/tour/, "first time");
+  assert.ok(lines.every(line => line.length <= 100));
+});
+
+test("the welcome offers only what applies", () => {
+  const text = plain(welcomeText({ model: "m", workspace_root: "/w/p", has_rind_doc: true }, { tourSeen: true }, 100));
+  assert.doesNotMatch(text, /-c|\/init|\/tour/);
+  assert.match(text, /\/help/, "always one way forward");
+});
+
+test("a team member's welcome says who it is in the team", () => {
+  const text = plain(welcomeText({ model: "m", workspace_root: "/w/docs", management_label: "Team: notes" }, { tourSeen: true }, 100));
+  assert.match(text, /Team: notes/);
+});
+
+test("a resumed conversation gets one line instead of a welcome", () => {
+  const text = plain(resumeLineText({ session_id: "s1", title: "fix the login page", message_count: 12, updated_at: "2026-10-08T10:00:00Z" }, Date.parse("2026-10-08T12:00:00Z"), 100));
+  assert.equal(text, "↩ Resuming: fix the login page · 12 messages · 2h ago");
+  assert.equal(resumeLineText({ session_id: "" }), "", "a new conversation has nothing to resume");
+});
+
+test("the welcome stays within narrow terminals", () => {
+  const text = plain(welcomeText({ provider: "deepseek", model: "deepseek-flash", reasoning_effort: "high", workspace_root: "/a/very/long/path/to/a/project-with-a-long-name" }, { tourSeen: false }, 40));
+  assert.ok(text.split("\n").every(line => line.length <= 40), text);
 });
