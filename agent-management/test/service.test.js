@@ -335,3 +335,14 @@ test("snapshot rotation recovers before or after the previous journal is truncat
   await writeFile(path.join(home, "events.jsonl"), "");
   assert.equal((await openStore(home)).state.teams.t.name, "Second");
 });
+
+test("team names are unique among live teams, ignoring case and spaces", async t => {
+  const f = await fixture(t);
+  await f.call("createTeam", { name: "Notes" });
+  await assert.rejects(f.call("createTeam", { name: " notes " }), { code: "TEAM_NAME_TAKEN" });
+  assert.equal((await f.call("snapshot")).teams.filter(team => team.name.toLowerCase().trim() === "notes").length, 1);
+  // A deleted team no longer holds its name.
+  const archived = await f.call("createTeam", { name: "Old" });
+  await f.call("deleteTeam", { teamId: archived.id, confirmName: "Old" });
+  await f.call("createTeam", { name: "Old" });
+});

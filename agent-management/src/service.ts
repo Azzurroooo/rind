@@ -16,6 +16,8 @@ import { dissolveTeam, dropSession, expireApprovals, pruneAgents, unbindSessions
 
 const git = promisify(execFile);
 type Params = Record<string, any>;
+// Teams are picked by name in the sidebar and in `rind agents`; two live teams never share one.
+const teamNameTaken = (state: State, name: string) => Object.values(state.teams).some(t => !t.archive && t.name.trim().toLowerCase() === name.trim().toLowerCase());
 const awaitingDelivery = (task: Task) => ["queued", "running"].includes(task.status) || (task.status === "blocked" && task.blockedOn?.responder === "children");
 const reads = new Set(["snapshot", "listTeams", "getTeam", "listAgents", "getTask", "previewCopy", "previewImport", "readArtifact", "listArchive"]);
 export function createService({ store, paths, adapters, toolConfig }: {
@@ -237,7 +239,9 @@ export function createService({ store, paths, adapters, toolConfig }: {
         requireValue(actor.kind !== "agent", "FORBIDDEN", "Only the user or manager can create teams.");
         const id = randomUUID();
         const createRoot = p.createRoot ? await canonicalDirectory(text(p.createRoot, "Creation root")) : path.join(paths.workspaces, id);
-        const team = { id, name: text(p.name, "Team name", 200), createRoot };
+        const name = text(p.name, "Team name", 200);
+        requireValue(!teamNameTaken(state, name), "TEAM_NAME_TAKEN", "A team named \"" + name.trim() + "\" already exists. Choose another name.");
+        const team = { id, name, createRoot };
         state.teams[id] = team; return team;
       }
       case "registerAgent": {
@@ -353,7 +357,10 @@ export function createService({ store, paths, adapters, toolConfig }: {
         const existing = Object.values(state.teams).find(t => (t.id === base || t.id.startsWith(base + "-")) && !t.archive);
         if (existing) return existing;
         const id = state.teams[base] ? base + "-" + randomUUID().slice(0, 8) : base;
-        state.teams[id] = { id, name: preview.name, createRoot: path.join(paths.workspaces, id) };
+        // The name comes from the old files, not from the user: keep it free of clashes.
+        let name = preview.name;
+        for (let n = 2; teamNameTaken(state, name); n++) name = preview.name + " (" + n + ")";
+        state.teams[id] = { id, name, createRoot: path.join(paths.workspaces, id) };
         for (const source of preview.agents) {
           const agent = await register(state, source);
           await addMember(state, actor, { teamId: id, agentId: agent.id, responsibility: source.responsibility, share: p.share === true });
