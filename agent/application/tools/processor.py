@@ -78,15 +78,6 @@ class ToolCallProcessor:
         Execute multiple tool calls asynchronously.
         Async tools (like bash) are awaited directly; sync tools run in a thread.
         """
-        if self._can_run_delegates_in_parallel(tool_calls):
-            async for event in self._execute_parallel_delegates(
-                session=session,
-                tool_calls=tool_calls,
-                cancellation_token=cancellation_token,
-                turn_id=turn_id,
-            ):
-                yield event
-            return
         for call in tool_calls:
             if cancellation_token and cancellation_token.is_cancelled:
                 break
@@ -171,64 +162,6 @@ class ToolCallProcessor:
                                 execution.cancel()
                                 await asyncio.gather(execution, return_exceptions=True)
 
-            async for event in self._finish_tool_call(
-                session=session, turn_id=turn_id, call=call, parsed_args=parsed_args,
-                outcome=outcome, reused=reused, ts_start=ts_start, started_at=started_at,
-            ):
-                yield event
-
-    def _can_run_delegates_in_parallel(self, tool_calls: list[ParsedToolCall]) -> bool:
-        if len(tool_calls) < 2 or any(call.name != "delegate" for call in tool_calls):
-            return False
-        return all(parse_tool_args(call.raw_args)[1] is None for call in tool_calls)
-
-    async def _execute_parallel_delegates(
-        self,
-        *,
-        session: SessionStore,
-        tool_calls: list[ParsedToolCall],
-        cancellation_token: CancellationToken | None,
-        turn_id: str,
-    ) -> AsyncIterator[RuntimeEvent]:
-        prepared: list[tuple[ParsedToolCall, dict, str, float]] = []
-        for call in tool_calls:
-            parsed_args, _ = parse_tool_args(call.raw_args)
-            started_at = time.perf_counter()
-            prepared.append((call, parsed_args, session.now_iso(), started_at))
-            yield ToolCallStartedEvent(
-                **event_meta(session, turn_id),
-                tool_call_id=call.call_id,
-                tool_name=call.name,
-            )
-
-        async def _run_or_reuse(call: ParsedToolCall, parsed_args: dict) -> tuple[_ToolCallOutcome, bool]:
-            existing = await self._load_tool_record(session, call)
-            if existing is not None:
-                return self._outcome_from_record(existing), True
-            return (
-                await self._run_tool_call(
-                    call=call,
-                    parsed_args=parsed_args,
-                    session_id=session.session_id or "default",
-                    cancellation_token=cancellation_token,
-                    turn_id=turn_id,
-                ),
-                False,
-            )
-
-        tasks = [
-            asyncio.create_task(_run_or_reuse(call, parsed_args))
-            for call, parsed_args, _, _ in prepared
-        ]
-        try:
-            outcomes = await asyncio.gather(*tasks)
-        except asyncio.CancelledError:
-            for task in tasks:
-                task.cancel()
-            await asyncio.gather(*tasks, return_exceptions=True)
-            raise
-
-        for (call, parsed_args, ts_start, started_at), (outcome, reused) in zip(prepared, outcomes, strict=True):
             async for event in self._finish_tool_call(
                 session=session, turn_id=turn_id, call=call, parsed_args=parsed_args,
                 outcome=outcome, reused=reused, ts_start=ts_start, started_at=started_at,

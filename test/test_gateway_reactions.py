@@ -85,7 +85,7 @@ def test_tool_emoji_mapping():
     assert tool_emoji("bash") == "💻" and tool_emoji("edit") == "💻"
     assert tool_emoji("read") == "💻" and tool_emoji("write") == "💻"
     assert tool_emoji("web_search") == "🌐" and tool_emoji("web_fetch") == "🌐"
-    assert tool_emoji("delegate") == "🧵" and tool_emoji("plan") == "📋"
+    assert tool_emoji("plan") == "📋"
     assert tool_emoji("unknown_tool") == "🛠️" and tool_emoji("") == "🛠️"
 
 

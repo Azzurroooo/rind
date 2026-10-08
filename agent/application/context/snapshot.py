@@ -21,8 +21,6 @@ RIND_DOC_PROJECT_MARKER = "--- project-doc ---"
 _CONTEXT_KIND_LABELS = {
     "skill_catalog": "Skill catalog",
     "goal_policy": "Goal policy",
-    "delegate": "Delegate instruction",
-    "team_agent_catalog": "Team agent catalog",
     "rind_init": "RIND init",
 }
 

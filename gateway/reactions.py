@@ -32,7 +32,6 @@ TERMINAL_EMOJI = {"turn_completed": "✅", "turn_failed": "❌", "turn_cancelled
 TOOL_EMOJI: tuple[tuple[frozenset[str], str], ...] = (
     (frozenset({"bash", "edit", "read", "write"}), "💻"),
     (frozenset({"web_search", "web_fetch"}), "🌐"),
-    (frozenset({"delegate"}), "🧵"),
     (frozenset({"plan"}), "📋"),
 )
 DEFAULT_TOOL_EMOJI = "🛠️"
