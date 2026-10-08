@@ -3,6 +3,7 @@ import { createTui } from "./tui/tui.js";
 import { parseTerminalKey } from "./terminal-key.js";
 import { createLineEditor } from "./line-editor.js";
 import { createForm } from "./agents-form.js";
+import { createChoice } from "./agents-choice.js";
 import { resolveInputPath } from "./path-input.js";
 import { managementClient } from "./agents-client.js";
 import { openAgentChat, managerWorkspace, followConversation, returnTarget } from "./agents-commands.js";
@@ -245,9 +246,8 @@ export async function runAgentsPage({ launch, input = process.stdin, output = pr
     }
   }
 
-  function choose(title, items, { description = [], selected, danger = false } = {}) {
-    const index = Math.max(0, items.findIndex(item => (item.id ?? item.label) === selected));
-    view.dialog = { kind: "choice", title, items, description, index, danger, error: "" }; redraw();
+  function choose(title, items, options = {}) {
+    view.dialog = createChoice({ title, items, ...options }); redraw();
   }
   function form(title, fields, submit, { description = [], danger = false } = {}) {
     view.dialog = createForm({ title, fields, submit, description, danger, onChange: redraw }); redraw();
@@ -508,17 +508,9 @@ export async function runAgentsPage({ launch, input = process.stdin, output = pr
   function dialogKey(key) {
     const dialog = view.dialog;
     if (dialog.kind === "form") { if (!dialog.handleKey(key, perform)) view.dialog = null; return; }
-    if (key.name === "escape") { view.dialog = null; return; }
-    if (dialog.kind === "choice") {
-      const pick = index => { const item = dialog.items[index]; if (item) { dialog.index = index; void perform(item.action, dialog); } };
-      if (key.name === "enter" || key.name === "return") pick(dialog.index);
-      else if (key.name === "up" || key.text === "k") dialog.index = (dialog.index - 1 + dialog.items.length) % dialog.items.length;
-      else if (key.name === "down" || key.text === "j") dialog.index = (dialog.index + 1) % dialog.items.length;
-      else if (key.name === "home") dialog.index = 0;
-      else if (key.name === "end") dialog.index = dialog.items.length - 1;
-      else if (/^[1-9]$/.test(key.text || "")) pick(Number(key.text) - 1);
-      else if (key.text) { const index = dialog.items.findIndex(item => item.key === key.text.toLowerCase()); if (index >= 0) pick(index); }
-    }
+    const result = dialog.handleKey(key);
+    if (result === "close") view.dialog = null;
+    else if (result?.pick) void perform(result.pick.action, dialog);
   }
   function detailKey(key) {
     const detail = view.detail;
@@ -613,7 +605,7 @@ export async function runAgentsPage({ launch, input = process.stdin, output = pr
   tui.onData(raw => keyInput(parseTerminalKey(raw)));
   tui.onPaste(value => {
     if (view.busy) return;
-    if (view.dialog?.kind === "form") { view.dialog.paste(clean(value)); redraw(); return; }
+    if (view.dialog) { view.dialog.paste(clean(value)); redraw(); return; }
     if (!view.searching) return;
     view.searchEditor.handleInput({ kind: "paste", text: clean(value) });
     view.query = view.searchEditor.input(); project();

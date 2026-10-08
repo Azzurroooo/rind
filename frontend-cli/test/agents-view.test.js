@@ -4,6 +4,7 @@ import { renderAgents, shortPath } from "../lib/agents-view.js";
 import { emptyAgentsSnapshot, sidebarRows, organizationRows, teamSessions, taskRows } from "../lib/agents-model.js";
 import { formatHints, hintsFor } from "../lib/agents-keys.js";
 import { createLineEditor } from "../lib/line-editor.js";
+import { createChoice } from "../lib/agents-choice.js";
 import { textWidth, stripAnsi } from "../lib/text-width.js";
 import { CURSOR_MARKER } from "../lib/tui/frame.js";
 
@@ -80,7 +81,7 @@ test("form keeps one cursor in the active field and wraps CJK input", () => {
 
 test("long choice lists keep the selected item visible and untrusted text cannot emit control sequences", () => {
   const view = fixture();
-  view.dialog = { kind: "choice", title: "Actions", index: 14, description: ["A very long workspace path ".repeat(30)], items: Array.from({ length: 15 }, (_, i) => ({ label: "Action " + i, description: "Description " + i })) };
+  view.dialog = createChoice({ title: "Actions", selected: "Action 14", description: ["A very long workspace path ".repeat(30)], items: Array.from({ length: 15 }, (_, i) => ({ label: "Action " + i, description: "Description " + i })) });
   assert.match(text(renderAgents(view, 40, 16)), /Action 14/);
   view.dialog = null;
   view.detail = { title: "Receipt", offset: 0, lines: ["\x1b[2Jsecret\x1b]52;c;bad\x07", "Result " + "很长的证据".repeat(30)] };

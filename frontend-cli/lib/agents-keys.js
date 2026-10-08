@@ -124,7 +124,11 @@ export function helpGroups() {
 export function hintsFor(view, row) {
   const hint = (key, label) => ({ key, label });
   if (view.help) return [hint("esc", "close")];
-  if (view.dialog?.kind === "choice") return [hint("↑↓", "choose"), hint("enter", "confirm"), ...(view.dialog.items.length > 1 ? [hint("1-9", "pick")] : []), hint("esc", "cancel")];
+  if (view.dialog?.kind === "choice") {
+    const { searchable, query } = view.dialog;
+    if (searchable) return [hint("type", "filter"), hint("↑↓", "choose"), hint("enter", "confirm"), hint("esc", query ? "clear" : "cancel")];
+    return [hint("↑↓", "choose"), hint("enter", "confirm"), ...(view.dialog.numbered() ? [hint("1-9", "pick")] : []), hint("esc", "cancel")];
+  }
   if (view.dialog) {
     const field = view.dialog.fields[view.dialog.index];
     if (field?.suggestions?.length) return [hint("tab", "complete"), hint("↑↓", "choose"), hint("enter", field.pick >= 0 ? "use folder" : "next"), hint("esc", "hide list")];

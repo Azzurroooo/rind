@@ -260,23 +260,29 @@ function dialogBox(dialog, width, maxHeight, busy) {
   const inner = width - 4;
   // Descriptions quote paths, errors and names: untrusted text is cleaned before painting.
   const described = wrap((dialog.description || []).map(clean), inner);
+  const items = dialog.kind === "choice" ? dialog.visible() : [];
+  // A searchable list adds its filter line and its position line.
+  const chrome = dialog.searchable ? 2 : 0;
   // Choices always keep room for a few options; the description is clipped instead.
-  const limit = dialog.kind === "choice" ? Math.max(1, maxHeight - 4 - Math.min(dialog.items.length, 5)) : described.length;
+  const limit = dialog.kind === "choice" ? Math.max(1, maxHeight - 4 - chrome - Math.min(Math.max(items.length, 1), 5)) : described.length;
   const lines = described.slice(0, limit).map((line, i) => paint.dim(i === limit - 1 && described.length > limit ? truncateToWidth(line + "…", inner, "…") : line));
   if (lines.length) lines.push("");
   if (dialog.kind === "choice") {
-    const capacity = Math.max(1, maxHeight - 2 - lines.length - (dialog.error ? 2 : 0));
-    const offset = Math.max(0, Math.min(dialog.index - capacity + 1, dialog.items.length - capacity));
-    dialog.items.slice(offset, offset + capacity).forEach((item, i) => {
+    if (dialog.searchable) lines.push(paint.accent("/ ") + clean(dialog.query) + CURSOR_MARKER + (dialog.query ? "" : paint.dim("type to filter")));
+    const capacity = Math.max(1, maxHeight - 2 - lines.length - (dialog.searchable ? 1 : 0) - (dialog.error ? 2 : 0));
+    const offset = Math.max(0, Math.min(dialog.index - capacity + 1, items.length - capacity));
+    const numbered = dialog.numbered();
+    items.slice(offset, offset + capacity).forEach((item, i) => {
+      if (item.header) { lines.push(paint.dim(truncateToWidth(single(item.label), inner, "…"))); return; }
       const index = offset + i, selected = index === dialog.index;
-      const number = dialog.items.length > 1 && index < 9 ? String(index + 1) : " ";
       const label = item.danger ? paint.danger(item.label) : selected ? paint.bold(item.label) : item.label;
       const key = item.key ? paint.dim(item.key) : "";
       const room = inner - textWidth(key) - 1;
-      const body = (selected ? paint.accent("›") : " ") + " " + paint.dim(number) + "  " + label + (item.description ? paint.dim("  " + single(item.description)) : "");
+      const body = (selected ? paint.accent("›") : " ") + " " + (numbered ? paint.dim(String(index + 1)) + "  " : "") + label + (item.description ? paint.dim("  " + single(item.description)) : "");
       const line = fitLine(truncateToWidth(body, room, "…"), room) + " " + key;
       lines.push(selected ? paintBackground(line, "selection") : line);
     });
+    if (dialog.searchable) lines.push(paint.dim(dialog.position()));
   } else {
     const checkLine = check => ({ ok: paint.success("✓ "), error: paint.danger("✕ "), hint: paint.dim("  ") }[check.tone] || "") + (check.tone === "error" ? paint.danger : paint.dim)(shortPath(single(check.text), inner - 4));
     dialog.fields.forEach((item, index) => {

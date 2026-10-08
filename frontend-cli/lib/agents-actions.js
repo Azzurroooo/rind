@@ -122,7 +122,7 @@ export function createActions(ui) {
       const leader = teamOf(teamId)?.leaderAgentId;
       const ordered = [...members].sort((a, b) => Number(b.agentId === leader) - Number(a.agentId === leader));
       ui.choose("Who owns this task?", ordered.map(m => ({ label: agentName(m.agentId), description: roleOf(snap(), teamId, m.agentId) + (m.responsibility ? " · " + single(m.responsibility) : ""), action: () => assignTask(teamId, m.agentId) })),
-        { description: ["The leader can split work across the team."] });
+        { description: ["The leader can split work across the team."], searchable: true });
       return;
     }
     ui.form("Assign task", [{ key: "brief", label: "Task and expected delivery", hint: "Shift+Enter adds a line. The owner reports back with a summary and evidence." }], async values => {
@@ -151,7 +151,7 @@ export function createActions(ui) {
       { label: "Model", key: "m", description: resolved.provider + " / " + resolved.model + " · " + MODEL_SOURCES[resolved.model_source], action: () => ui.choose("Model · " + name, [
         ...models.map(m => ({ id: m.provider_id + "/" + m.id, label: m.provider_id + " / " + m.id, action: set({ provider: m.provider_id, model: m.id }, m.id) })),
         ...(folder.model ? [{ ...fallback, action: clear("model") }] : []),
-      ], { selected: resolved.provider + "/" + resolved.model, description: ["Only connections you are logged in to are listed."] }) },
+      ], { selected: resolved.provider + "/" + resolved.model, description: ["Only connections you are logged in to are listed."], searchable: true }) },
       ...(levels.length ? [{ label: "Effort", key: "e", description: (resolved.reasoning_effort || "unset") + " · " + MODEL_SOURCES[resolved.effort_source], action: () => ui.choose("Effort · " + name, [
         ...levels.map(level => ({ id: level, label: level, action: set({ reasoningEffort: level }, "effort " + level) })),
         ...(folder.reasoning_effort ? [{ ...fallback, action: clear("reasoningEffort") }] : []),
@@ -163,7 +163,7 @@ export function createActions(ui) {
     const candidates = snap().memberships.filter(m => m.teamId === teamId && m.agentId !== agentId);
     ui.choose("Reports to", candidates.map(m => ({ id: m.agentId, label: agentName(m.agentId), description: roleOf(snap(), teamId, m.agentId),
       action: async () => { await ui.request("setSupervisor", { teamId, agentId, reportsToAgentId: m.agentId }); ui.notify(agentName(agentId) + " now reports to " + agentName(m.agentId) + ".", "success"); } })),
-    { description: [agentName(agentId) + " and everyone below them move together."], selected: membership(teamId, agentId)?.reportsToAgentId });
+    { description: [agentName(agentId) + " and everyone below them move together."], selected: membership(teamId, agentId)?.reportsToAgentId, searchable: true });
   }
 
   function unknownRun(teamId, agentId) {
@@ -287,7 +287,7 @@ export function createActions(ui) {
   }
 
   function chooseFilter() {
-    ui.choose("Show only", STATUS_FILTERS.map(status => ({ label: status, description: status === "All" ? "Everything in this view" : undefined, action() { ui.setFilter(status); } })), { selected: ui.view.filter });
+    ui.choose("Show only", STATUS_FILTERS.map(status => ({ label: status, description: status === "All" ? "Everything in this view" : undefined, action() { ui.setFilter(status); } })), { selected: ui.view.filter, searchable: true });
   }
 
   return { ...review, createTeam, addMember, assignTask, editMember, memberActions, sessionActions, taskActions, answer, resolveRun, chooseFilter, stopAll, serviceActions };
