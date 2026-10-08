@@ -22,7 +22,7 @@ sequenceDiagram
     R->>R: 下一次采样
 ~~~
 
-普通一批工具按顺序执行，异步 handler 直接 await，同步 handler 在线程里运行。只有整批至少两项且全部是参数可解析的 delegate 调用，才走并行委派路径；结果仍按原调用顺序提交。不能把“支持并行”泛化为任意工具都并发执行。
+一批工具按顺序执行，异步 handler 直接 await，同步 handler 在线程里运行；结果按原调用顺序提交。
 
 处理器发出开始、心跳、结果等事件。结果持久化失败会产生 PersistenceError 并阻止正常继续，避免 UI 显示成功而后续模型却没有结果。恢复时先检查已有 call ID，不重复执行已记录的结果；没有记录则不能仅凭 UI 曾显示过进度就假定操作成功。
 
@@ -32,6 +32,6 @@ sequenceDiagram
 
 同样，“找到已有结果”表示复用已提交事实，不限于成功结果。恢复需要保留一次失败的信息，而不能把失败当作从未执行并自动重试副作用。并行委派也遵守原调用顺序提交，保证下一次模型请求看到稳定的配对关系。
 
-代码入口：[processor](../../../agent/application/tools/processor.py)、[executor](../../../agent/application/tools/executor.py)、[工具记录](../../../agent/infrastructure/persistence/tool_call_repository.py)。验证：[工具处理器](../../../test/test_async_tool_call_processor.py)、[并行委派](../../../test/test_parallel_delegate_calls.py)。
+代码入口：[processor](../../../agent/application/tools/processor.py)、[executor](../../../agent/application/tools/executor.py)、[工具记录](../../../agent/infrastructure/persistence/tool_call_repository.py)。验证：[工具处理器](../../../test/test_async_tool_call_processor.py)、[持久化失败](../../../test/test_tool_persistence_failure.py)。
 
 [返回系列地图](../README.md)

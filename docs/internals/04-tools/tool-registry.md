@@ -15,7 +15,7 @@ ToolSpec 从函数签名生成参数结构，记录是否异步，以及允许�
 
 参数先过 normalize_arguments，再检查 required 和 unknown。公共参数错误返回 InvalidArguments，并列出 missing、unknown、allowed；运行时注入的 _session_id、_cancellation_token 等不成为模型 schema。这个顺序让旧 file_path 等别名能在校验前转换，又不让未知字段悄悄穿过。
 
-工具是否存在取决于装配：Goal 工具只在启用时注册，delegate 和 agent_create 只给 Team 主 Agent，one-shot 可以关闭用户问答。添加一个工具的正常路径是定义 ToolSpec、在 catalog 中显式装配、覆盖参数和结果契约测试；无需在 TurnRunner 添加同名分支。
+工具是否存在取决于装配：Goal 工具只在启用时注册，受管运行由适配器限定可用工具，one-shot 可以关闭用户问答。添加一个工具的正常路径是定义 ToolSpec、在 catalog 中显式装配、覆盖参数和结果契约测试；无需在 TurnRunner 添加同名分支。
 
 ## 扩展点同时承担约束
 

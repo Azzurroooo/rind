@@ -117,8 +117,7 @@ flowchart LR
 | [后台任务状态机](05-autonomy/managed-tasks.md) | 命令返回、进程继续、手动读取、等待释放与最终状态如何分离？ | 任务状态图 |
 | [自动续接](05-autonomy/task-notifications.md) | 工具结果先提交、任务完成再投递通知、模型消费后再确认，如何避免丢失或重复？ | 提交—通知—消费时序图 |
 | [持久 Goal](05-autonomy/goals.md) | active/paused/blocked/complete、检查点、完成证据与续接门控怎样工作？ | Goal 状态图 |
-| [Team 与 Agent Capsule](05-autonomy/teams.md) | project、专家工作区、shared 发布区、身份与权限边界如何组织？ | 工作区结构图 |
-| [委派执行](05-autonomy/delegation.md) | 独立子会话、并发任务、共享工作区协调、结果与发布文件如何回到主 Agent？ | 委派时序图 |
+| [Team](05-autonomy/teams.md) | Team 如何作为注册表关系存在，Worker 与控制面如何分工？ | 控制面结构图 |
 
 ## 06 · 模型与供应商（3 篇）
 

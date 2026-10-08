@@ -113,7 +113,7 @@ test("page frame titles the page and wraps every content line", () => {
     { kind: "startup", info: INFO },
     { kind: "type", text: "/team create" },
     { kind: "submit", mode: "send" },
-    { kind: "result", text: "Team created", detail: ".aiteam ready" },
+    { kind: "result", text: "Team created", detail: "members registered" },
   ]);
   for (const width of [120, 80, 60]) {
     const { lines } = render(width);
@@ -130,7 +130,7 @@ test("page frame titles the page and wraps every content line", () => {
     assert.ok(text.includes("You"), "user echo rendered");
     assert.ok(text.includes("/team create"), "submitted text rendered");
     assert.ok(text.includes("✓ Team created"), "result line rendered with the check prefix");
-    assert.ok(text.includes("— .aiteam ready"), "result detail rendered");
+    assert.ok(text.includes("— members registered"), "result detail rendered");
     assert.ok(!text.includes("Working"), "a slash command never shows the activity line");
   }
 });
@@ -235,11 +235,11 @@ test("plain runtime outputs stay verbatim while check results get the prefix", (
   const view = playPage([
     { kind: "startup", info: INFO },
     { kind: "slash-result", text: "Team Agents:\n- main-agent | Main | Coordinates", detail: "", display: null },
-    { kind: "result", text: "Team created", detail: ".aiteam ready" },
+    { kind: "result", text: "Team created", detail: "members registered" },
   ]);
   const text = view.render().lines.map(stripAnsi).join("\n");
   assert.ok(text.includes("Team Agents:"), "multi-line runtime output keeps its own lines");
-  assert.ok(text.includes("✓ Team created — .aiteam ready"), "check result carries prefix and detail");
+  assert.ok(text.includes("✓ Team created — members registered"), "check result carries prefix and detail");
 });
 
 test("pending queue and steering entries appear in the composer", () => {

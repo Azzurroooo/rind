@@ -1,27 +1,20 @@
-# Team：用目录保存专家职责与工作积累
+# Team：注册表关系，而不是目录结构
 
-Team 的长期状态是目录、身份清单和成果文件。一个专家可以多次执行任务；复用的是职责和文件，每次 execute 委派仍产生新的子会话。
+Team 由独立的 TypeScript 控制面 Agents Management 管理，Python Runtime 不再识别任何 Team 目录约定。任意现有目录都可以注册为 Agent；Team、成员、汇报关系和任务都保存在 `RIND_HOME/agents-management` 下的原子 JSONL 日志与快照中。
 
 ~~~mermaid
 flowchart TB
-    P["项目根目录"] --> MAN[".aiteam/project.yaml<br/>项目与 main_agent"]
-    P --> AG["agents/"]
-    P --> SH["shared/<br/>共享输入与交付物"]
-    AG --> MAIN["main-agent/"]
-    AG --> SPEC["specialist/"]
-    SPEC --> ID[".aiteam/agent.yaml"]
-    SPEC --> PROMPT[".aiteam/prompts/"]
-    SPEC --> FILES["memory / work / outputs"]
-    MAIN -->|"delegate"| SPEC
-    SPEC -->|"发布文件"| SH
+    U["用户 / Manager"] --> S["Agents Management 服务"]
+    S --> R["注册表<br/>Team · Agent · 成员关系 · 任务"]
+    S --> A["Rind 适配器"]
+    A -->|"external tools · skill files"| W["Python Worker 会话"]
+    W --> D["Agent 的真实工作目录"]
 ~~~
 
-initialize_team_project 建立项目与主 Agent；initialize_team_agent 创建标准 Capsule，Blueprint 可以从用户目录复制专家配置。目录本身就是注册结果，不另建常驻组织服务。discover_agent 从当前工作区找清单，让同一执行内核获得 workspace_root、project_id、owner_agent_id 与系统提示。
+同一目录可以加入多个 Team；共享工作区的写入型运行按规范化路径串行，Git worktree 注册为独立成员即可并行。Leader 向直接下属分派任务，汇报沿任务树逐级唤醒上级。Worker 只看到适配器为本次运行装配的工具、说明和 Skill 文件（只读的 agent 作用域），不负责组织关系。
 
-主 Agent 获得专家目录以及 delegate、agent_create 工具。文件工具解析 shared/ 为项目共享目录，限制 Team Agent 访问自己的工作区和 shared；其会话输出与图片有明确读取例外。这个限制是文件工具边界，**不是 OS 沙箱**，不能推广为 Shell 也受同样目录隔离。
+旧 `.aiteam` 项目只能通过 `rind agents import <legacy-root>` 只读预览后导入，导入从不修改旧文件。
 
-直接进入 Agent 工作区执行可用 WorkspaceLock 防止并发占用；Worker 内的委派特意关闭这把工作区锁以支持并发。多个委派可能共享同一专家目录，需要协调输出路径；逐文件修改队列只防止同 Worker 文件工具写入交错。
-
-代码入口：[Team 项目](../../../agent/infrastructure/team/project.py)、[清单](../../../agent/infrastructure/team/manifests.py)、[装配](../../../agent/bootstrap/container.py)。验证：[Team 项目](../../../test/test_team_project.py)、[委派](../../../test/test_team_delegation.py)。
+代码入口：[服务](../../../agent-management/src/service.ts)、[Team](../../../agent-management/src/teams.ts)、[Rind 适配器](../../../agent-management/src/adapters/rind.ts)、[旧项目导入](../../../agent-management/src/legacy.ts)。验证：[服务](../../../agent-management/test/service.test.js)、[适配器](../../../agent-management/test/rind.test.js)。使用说明：[Agents Management](../../agents-management.md)。
 
 [返回系列地图](../README.md)
