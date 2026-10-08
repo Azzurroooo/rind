@@ -69,7 +69,11 @@ export async function connectManagement(options: {
   onSnapshot?: (snapshot: any) => void; onDisconnect?: () => void;
 } = {}) {
   const paths = managementPaths(options.home);
-  const connect = async () => connectClient({ endpoint: paths.endpoint, token: (await readFile(paths.token, "utf8")).trim(), onSnapshot: options.onSnapshot, onDisconnect: options.onDisconnect });
+  const connect = async () => {
+    const token = (await readFile(paths.token, "utf8")).trim();
+    if (!token) throw new Error("The agents management credentials are not written yet.");
+    return connectClient({ endpoint: paths.endpoint, token, onSnapshot: options.onSnapshot, onDisconnect: options.onDisconnect });
+  };
   // A service started from older code keeps serving it after an update. It is
   // replaced only while no agent is working; otherwise the client keeps using
   // it and reports the pending update.
@@ -104,7 +108,12 @@ export async function connectManagement(options: {
   child.on("error", () => {}); child.unref(); await log.close();
   let last: unknown;
   for (let i = 0; i < 40; i++) {
-    try { const client = await connect(); return Object.assign(client, { service: await client.request("serviceInfo").catch(() => null) }); } catch (error) { last = error; }
+    // Only a service that accepts these credentials counts as started.
+    try {
+      const client = await connect();
+      const service = await client.request("serviceInfo").catch(error => { if (error.code === "UNKNOWN_METHOD") return null; client.close(); throw error; });
+      return Object.assign(client, { service });
+    } catch (error) { last = error; }
     await new Promise(resolve => setTimeout(resolve, 100));
   }
   throw new Error("Unable to start agents management. See " + path.join(paths.state, "service.log") + ": " + String(last));

@@ -1,6 +1,6 @@
 import net from "node:net";
 import { randomBytes, createHmac, timingSafeEqual } from "node:crypto";
-import { readFile, writeFile, unlink, chmod } from "node:fs/promises";
+import { readFile, writeFile, unlink, chmod, link } from "node:fs/promises";
 import type { Principal } from "./model.js";
 import { requireValue } from "./model.js";
 import { managementPaths, privateDirectory } from "./paths.js";
@@ -283,7 +283,13 @@ export async function startServer(options: { home?: string; python?: string; rep
     if (process.platform !== "win32") await chmod(paths.endpoint, 0o600);
     try { userToken = (await readFile(paths.token, "utf8")).trim(); }
     catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
-    if (!userToken) { userToken = randomBytes(32).toString("hex"); await writeFile(paths.token, userToken, { mode: 0o600, flag: "wx" }); }
+    if (!userToken) {
+      // Published whole: a client starting this service reads the file while it is created.
+      userToken = randomBytes(32).toString("hex");
+      const draft = paths.token + "." + randomBytes(6).toString("hex") + ".tmp";
+      await writeFile(draft, userToken, { mode: 0o600, flag: "wx" });
+      try { await link(draft, paths.token); } finally { await unlink(draft).catch(() => {}); }
+    }
     store = await openStore(paths.state);
     const rind = createRindAdapter(options);
     service = createService({ store, paths, adapters: { rind: { async start(input, emit) { await executionHost(); return rind.start(input, emit); } } }, toolConfig });
@@ -299,6 +305,9 @@ export async function startServer(options: { home?: string; python?: string; rep
       await service.stop();
       // The Manager folder may still be being secured; finish before reporting closed.
       await realManager.catch(() => {});
+      // A Runtime still starting comes up after this; wait so that whoever
+      // cleans up next (tests, `rind agents stop`) can see and stop it.
+      await runtimeConnecting?.catch(() => {});
       runtime?.close();
       for (const socket of sockets) socket.destroy();
       await new Promise<void>(resolve => server.close(() => resolve()));
