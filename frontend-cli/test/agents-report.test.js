@@ -109,7 +109,7 @@ test("report keys accept a delivery or send it back with feedback", async () => 
 
 test("Stop all names jobs that will stop, and a running job is explained in words", async () => {
   const { createActions } = await import("../lib/agents-actions.js");
-  const { detailFor } = await import("../lib/agents-detail.js");
+  const { detailLines } = await import("../lib/agents-detail.js");
   let dialog;
   const ui = { view: { snapshot: snapshot() }, choose: (title, items, options) => { dialog = { title, items, ...options }; } };
   const actions = createActions(ui);
@@ -120,8 +120,8 @@ test("Stop all names jobs that will stop, and a running job is explained in word
 
   const s = snapshot();
   s.live = [{ id: "r", turn: "idle", watchers: 0, background: { count: 3, commands: ["npm test", "cargo build"], startedAt: "x" } }];
-  const lines = detailFor({ snapshot: s }, { kind: "live", title: "Conversation", context: "notes", status: "Running job", sessionId: "r", time: "2m" }).map(strip).join("\n");
-  assert.match(lines, /Running npm test, cargo build and 1 more\. It continues by itself when they finish\./);
+  const lines = detailLines({ snapshot: s }, { kind: "live", title: "notes", context: "Independent", note: "Conversation · npm test", status: "Running job", sessionId: "r", time: "2m" }, 46).map(strip).join("\n");
+  assert.match(lines, /Job {6}npm test \+2 · continues by itself/);
 });
 
 test("a long brief reads in full under Task, folds past six lines, and titles the page with its first line", () => {

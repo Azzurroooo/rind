@@ -5,7 +5,7 @@ import { insertCursorMarker } from "./tui/cursor.js";
 import { CURSOR_MARKER } from "./tui/frame.js";
 import { prepareComposerFrame } from "./composer-terminal.js";
 import { statusMeta, single, clean, selectable, memberState } from "./agents-model.js";
-import { detailFor } from "./agents-detail.js";
+import { detailLines } from "./agents-detail.js";
 import { helpGroups, hintsFor, formatHints } from "./agents-keys.js";
 
 export const MIN_WIDTH = 40, MIN_ROWS = 12;
@@ -224,17 +224,18 @@ function mainLines(view, width, height) {
 
 function renderMain(view, width, height) {
   const { top, list, listHeight, row } = mainLines(view, width, height);
-  const detail = detailFor(view, row);
   const lay = view.layout;
   if (lay.side && width === lay.mainWidth) {
     const listWidth = width - lay.side - 3;
     const left = list(listWidth, listHeight);
-    const right = fill(wrap(detail, lay.side), listHeight);
+    const right = fill(detailLines(view, row, lay.side, listHeight), listHeight);
     return [...top.map(line => fitLine(line, width)), ...left.map((line, i) => fitLine(line, listWidth) + paint.dim(" │ ") + fitLine(right[i], lay.side))];
   }
-  const below = listHeight >= 14 && detail.length ? Math.min(6, Math.floor(listHeight / 3)) : 0;
+  const room = listHeight >= 14 ? Math.min(6, Math.floor(listHeight / 3)) : 0;
+  const detail = room ? detailLines(view, row, width, room) : [];
+  const below = detail.length ? room : 0;
   const lines = list(width, listHeight - (below ? below + 1 : 0));
-  const extra = below ? [paint.dim("─".repeat(width)), ...fill(wrap(detail, width).slice(0, below), below)] : [];
+  const extra = below ? [paint.dim("─".repeat(width)), ...fill(detail, below)] : [];
   return [...top, ...lines, ...extra].map(line => fitLine(line, width));
 }
 

@@ -40,7 +40,7 @@ test("organization keeps the selection, its status and contextual keys visible a
     assert.match(screen, /esc back/);
     if (width >= 52) assert.match(screen, /Unconfirmed/);
     if (width >= 84) assert.match(screen, /Inbox/);
-    if (width >= 120) assert.match(screen, /Responsibility/, "wide layouts show the selection's details");
+    if (width >= 120) assert.match(screen, /Owns/, "wide layouts show the selection's details");
   }
 });
 
