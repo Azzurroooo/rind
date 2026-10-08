@@ -185,3 +185,16 @@ test("runtime client stays stopped until explicit start", async () => {
   client.forceShutdown();
   assert.equal(client.child, null);
 });
+
+test("the Worker never opens a console window of its own", async () => {
+  const spawned = [];
+  const fakeSpawn = (command, args, options) => {
+    spawned.push(options);
+    throw Object.assign(new Error("spawn recorded"), { code: "ENOENT" });
+  };
+  const client = createRuntimeClient({ python: "python", repoRoot: tmpdir(), spawnProcess: fakeSpawn });
+  assert.throws(() => client.start(), /spawn recorded/);
+  assert.equal(spawned.length, 1);
+  // A detached shared Runtime has no console; without this Windows gives the Worker a visible one.
+  assert.equal(spawned[0].windowsHide, true);
+});

@@ -62,6 +62,7 @@ export function createRuntimeClient({
   onRequest = null,
   onStderr = () => {},
   onExit = () => {},
+  spawnProcess = spawn,
 }) {
   const handleEvent = onMessage;
   const launch = resolveRuntimeLaunch({ python, repoRoot, runtimePath, cliArgs });
@@ -86,8 +87,11 @@ export function createRuntimeClient({
     stdoutBuffer = "";
     stderrBuffer = "";
     exitHandled = false;
-    child = spawn(launch.command, launch.args, {
+    child = spawnProcess(launch.command, launch.args, {
       cwd,
+      // The shared Runtime runs detached without a console; Windows would
+      // otherwise open a visible one for the Worker.
+      windowsHide: true,
       env: buildRuntimeEnv(repoRoot, { ...process.env, RIND_EXTERNAL_TOOLS: externalTools ? JSON.stringify(externalTools) : "" }, {
         sourceRuntime: !runtimePath,
         rindHome,
