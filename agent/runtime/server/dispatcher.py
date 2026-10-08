@@ -403,8 +403,12 @@ class RuntimeDispatcher:
             await self._respond_error(request, str(exc), type(exc).__name__)
 
     async def _execute_without_conversation(self, request: dict[str, Any], command: str, raw_input: str, params: dict[str, Any]) -> None:
-        """Before the first message only reading commands work; others say how to start."""
-        if command not in {"sessions", "status"}:
+        """Before the first message only reading commands work; others say how to start.
+
+        A name that is no command goes to the router too, which reports it as
+        unknown (or, for a skill, turns it into the first message).
+        """
+        if not command or (command not in {"sessions", "status"} and self._slash_router.knows(command)):
             await self._respond_slash_result(request, SlashCommandResult(
                 f"/{command} needs a conversation. Send your first message to start one." if command else "Send your first message to start a conversation."))
             return

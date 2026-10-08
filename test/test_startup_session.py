@@ -262,3 +262,17 @@ async def test_a_window_retries_its_first_message_under_the_same_identity(worker
     finally:
         server.close()
         await worker.close()
+
+
+@pytest.mark.asyncio
+async def test_before_the_first_message_an_unknown_command_is_reported_as_unknown(worker, tmp_path):
+    _, request, _ = _server(worker)
+    try:
+        await request("initialize")
+        unknown = await request("rind/command/execute", input="/nosuchcommand")
+        assert "Unknown command: /nosuchcommand" in unknown["text"]
+        assert "needs a conversation" not in unknown["text"]
+        known = await request("rind/command/execute", input="/compact")
+        assert "/compact needs a conversation" in known["text"]
+    finally:
+        await worker.close()

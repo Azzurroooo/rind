@@ -25,6 +25,10 @@ class SlashCommandRouter:
     def command_infos(self) -> list[SlashCommandInfo]:
         return sorted(self._command_infos, key=lambda info: info.name)
 
+    def knows(self, name: str) -> bool:
+        """Whether ``name`` is a command or alias (without the leading slash)."""
+        return name.strip().lower() in self._commands_by_name
+
     async def execute(self, raw_input: str, context: SlashCommandContext) -> SlashCommandResult:
         try:
             invocations = self._skill_invocation_parser.parse(raw_input or "")
