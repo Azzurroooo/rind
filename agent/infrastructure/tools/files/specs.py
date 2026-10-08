@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Collection
+from collections.abc import Callable, Collection
 from pathlib import Path
 
 from agent.domain import tool_error
@@ -37,7 +37,7 @@ def build_file_tool_specs(
     *,
     mutation_queue: FileMutationQueue | None = None,
     capture_image=None,
-    image_input: bool | None = None,
+    image_input: Callable[[], bool | None] = lambda: None,
     session_base_provider=None,
 ) -> tuple[ToolSpec, ...]:
     mutation_queue = mutation_queue if mutation_queue is not None else FileMutationQueue()
@@ -80,7 +80,7 @@ def build_file_tool_specs(
         _cancellation_token: CancellationToken | None = None,
     ) -> str:
         resolved, error = resolve_path("read_file", path, allow_session_output=True)
-        return error or read_file(resolved, offset, limit, _cancellation_token, capture_image=capture_image, image_input=image_input)
+        return error or read_file(resolved, offset, limit, _cancellation_token, capture_image=capture_image, image_input=image_input())
 
     async def scoped_write_file(
         path: str, content: str, _cancellation_token: CancellationToken | None = None,

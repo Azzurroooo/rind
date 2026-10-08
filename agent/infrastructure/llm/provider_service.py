@@ -1,4 +1,9 @@
-"""Single service for provider definitions, credentials and model clients."""
+"""Single service for connections, credentials and model clients.
+
+A connection is what a selection names: a built-in provider (its id is the
+provider id) or a named endpoint the user added with /login. Sessions store the
+connection id; its endpoint and key are resolved again at every client build.
+"""
 
 from __future__ import annotations
 
@@ -7,11 +12,13 @@ import json
 import logging
 import math
 import os
+import re
 import time
 from dataclasses import replace
 from pathlib import Path
 import tempfile
 from typing import Any
+from urllib.parse import urlparse
 
 import openai
 
@@ -21,6 +28,7 @@ from agent.domain.models import (
     ModelCatalog,
     ModelDefinition,
     ModelSelection,
+    ProviderDefinition,
     ProviderStatus,
 )
 from agent.infrastructure.credentials import CredentialStore
@@ -32,6 +40,7 @@ from agent.infrastructure.settings import AppSettings, load_settings
 logger = logging.getLogger(__name__)
 MODEL_CACHE_TTL = 24 * 60 * 60
 MODEL_LIST_TIMEOUT = 10
+CONNECTION_ID_PATTERN = re.compile(r"[a-z0-9][a-z0-9-]{0,39}")
 
 
 def build_async_client(api_key: str, base_url: str, *, max_retries: int = 2) -> openai.AsyncOpenAI:
@@ -66,23 +75,26 @@ class ProviderServiceImpl:
         except (OSError, ValueError):
             settings = None
         result = []
-        for definition in self.providers.values():
-            source = self._credential_source(settings, definition.id)
+        for definition in self._connections().values():
+            source = self._credential_source(settings, definition)
             result.append(ProviderStatus(definition.id, definition.name, definition.auth_methods, source != "none", source))
         return result
 
     async def list_models(self, *, refresh: bool = False) -> ModelCatalog:
         settings = load_settings()
         failures: list[str] = []
-        for definition in self.providers.values():
-            if self._credential_source(settings, definition.id) == "none":
+        for definition in self._connections().values():
+            if self._credential_source(settings, definition) == "none":
                 continue
             if refresh and not await self._fetch_models(settings, definition):
                 failures.append(f"failed to refresh {definition.name} models, showing saved models")
         models = self._catalog(settings)
         return ModelCatalog(models, "; ".join(failures) or None)
 
-    async def login(self, provider_id: str, method: str, interaction) -> None:
+    async def login(self, provider_id: str, method: str, interaction) -> str:
+        """Save a key for a connection, or add a named connection; returns its id."""
+        if method == "connection":
+            return await self._add_connection(interaction)
         definition = self._provider(provider_id)
         if method not in definition.auth_methods:
             raise ValueError(f"{definition.name} does not support {method} login.")
@@ -93,16 +105,38 @@ class ProviderServiceImpl:
             raise ValueError("Login canceled.")
         self.credentials.set(provider_id, Credential(type="api_key", key=key))
         await self._fetch_models(load_settings(), definition)
+        return provider_id
+
+    async def _add_connection(self, interaction) -> str:
+        name = (await interaction.prompt("text", "Connection name")).strip()
+        if not name:
+            raise ValueError("Login canceled.")
+        connection_id = re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")[:40]
+        if not CONNECTION_ID_PATTERN.fullmatch(connection_id):
+            raise ValueError("A connection name needs at least one letter or digit.")
+        if connection_id in self.providers:
+            raise ValueError(f"{connection_id} is a built-in provider; log in to it directly or choose another name.")
+        base_url = (await interaction.prompt("text", "Base URL (OpenAI-compatible, e.g. https://host/v1)")).strip()
+        parsed = urlparse(base_url)
+        if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+            raise ValueError("Base URL must be an http(s) URL.")
+        model = (await interaction.prompt("text", "Model id (empty: use the endpoint model list)")).strip()
+        key = (await interaction.prompt("secret", f"{name} API key")).strip()
+        if not key:
+            raise ValueError("Login canceled.")
+        self.credentials.set_connection(connection_id, name, base_url, model, Credential(type="api_key", key=key))
+        await self._fetch_models(load_settings(), self._provider(connection_id))
+        return connection_id
 
     async def refresh_stale_models(self) -> None:
         """Refresh each configured provider once; ordinary reads remain offline."""
         try:
             settings = load_settings()
             cache = self._read_cache()
-            for definition in self.providers.values():
+            for definition in self._connections().values():
                 if not refreshable_models_api(_effective_api(settings, definition)):
                     continue
-                if self._resolve_credential(settings, definition.id) is None:
+                if self._resolve_credential(settings, definition) is None:
                     continue
                 entry = cache.get(definition.id)
                 if isinstance(entry, dict) and entry.get("base_url") == self._endpoint(settings, definition):
@@ -123,7 +157,7 @@ class ProviderServiceImpl:
 
     async def create_chat_client(self, settings: AppSettings, selection: ModelSelection, *, workspace_root: str | None):
         definition = self._provider(selection.provider_id)
-        credential = self._resolve_credential(settings, definition.id)
+        credential = self._resolve_credential(settings, definition)
         if credential is None:
             raise ProviderError(
                 f"{definition.name} is not configured. Run /login or set {definition.environment_key}.",
@@ -160,14 +194,14 @@ class ProviderServiceImpl:
         raise ProviderError(f"Unsupported provider API: {definition.api}", status="rejected", code="unsupported_api")
 
     @staticmethod
-    def unavailable_client(selection: ModelSelection, message: str):
-        return _UnavailableChatClient(selection.model_id, message)
+    def unavailable_client(selection: ModelSelection, error: ProviderError):
+        return _UnavailableChatClient(selection.model_id, error)
 
     def _catalog(self, settings: AppSettings) -> list[ModelDefinition]:
         cache = self._read_cache()
         result: list[ModelDefinition] = []
-        for definition in self.providers.values():
-            if self._credential_source(settings, definition.id) == "none":
+        for definition in self._connections().values():
+            if self._credential_source(settings, definition) == "none":
                 continue
             entry = cache.get(definition.id)
             items = self._cached_models(entry, settings, definition)
@@ -213,7 +247,7 @@ class ProviderServiceImpl:
     async def _fetch_models(self, settings: AppSettings, definition) -> bool:
         if not refreshable_models_api(_effective_api(settings, definition)):
             return True
-        credential = self._resolve_credential(settings, definition.id)
+        credential = self._resolve_credential(settings, definition)
         if credential is None:
             return False
 
@@ -275,21 +309,28 @@ class ProviderServiceImpl:
             entry = entry.get("models")
         return [item for item in entry if _item_id(item)] if isinstance(entry, list) else []
 
-    def _provider(self, provider_id: str):
-        try:
-            return self.providers[provider_id]
-        except KeyError:
-            return self.providers["openai-compatible"]
+    def _connections(self) -> dict[str, ProviderDefinition]:
+        return self.providers | {item.id: item for item in self.credentials.connections() if item.id not in self.providers}
 
-    def _credential_source(self, settings: AppSettings | None, provider_id: str) -> str:
-        if settings is not None and settings.provider == provider_id and settings.api_key:
+    def _provider(self, provider_id: str) -> ProviderDefinition:
+        definition = self._connections().get(provider_id)
+        if definition is None:
+            raise ProviderError(
+                f"Connection {provider_id or '(none)'} is not configured. Run /login, or choose another model with /model.",
+                status="rejected", code="connection_missing",
+            )
+        return definition
+
+    def _credential_source(self, settings: AppSettings | None, definition: ProviderDefinition) -> str:
+        if settings is not None and settings.provider == definition.id and settings.api_key:
             return "settings"
-        if self.credentials.get(provider_id) is not None:
+        if self.credentials.get(definition.id) is not None:
             return "stored"
-        env_name = self._provider(provider_id).environment_key
+        env_name = definition.environment_key
         return "environment" if env_name and os.getenv(env_name, "").strip() else "none"
 
-    def _resolve_credential(self, settings: AppSettings, provider_id: str) -> Credential | None:
+    def _resolve_credential(self, settings: AppSettings, definition: ProviderDefinition) -> Credential | None:
+        provider_id = definition.id
         if settings.provider == provider_id and settings.api_key:
             value = settings.api_key
             if value.startswith("$"):
@@ -299,7 +340,7 @@ class ProviderServiceImpl:
         stored = self.credentials.get(provider_id)
         if stored is not None:
             return stored
-        env_name = self._provider(provider_id).environment_key
+        env_name = definition.environment_key
         value = os.getenv(env_name, "").strip() if env_name else ""
         return Credential(type="api_key", key=value) if value else None
 
@@ -332,15 +373,17 @@ class ProviderServiceImpl:
 
 
 class _UnavailableChatClient:
-    def __init__(self, model: str, message: str) -> None:
+    """Stands in for a connection that cannot be used; every request says why."""
+
+    def __init__(self, model: str, error: ProviderError) -> None:
         self.model = model
-        self.message = message
+        self.error = error
 
     async def create(self, *args, **kwargs):
-        raise ProviderError(self.message, status="rejected", code="provider_not_configured")
+        raise ProviderError(str(self.error), status="rejected", code=self.error.code)
 
     async def stream(self, *args, **kwargs):
-        raise ProviderError(self.message, status="rejected", code="provider_not_configured")
+        raise ProviderError(str(self.error), status="rejected", code=self.error.code)
         yield  # unreachable; keeps stream an async iterator so turns see the ProviderError
 
     async def close(self) -> None:

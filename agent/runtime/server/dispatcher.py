@@ -431,10 +431,11 @@ class RuntimeDispatcher:
             return
         provider_id = str(params.get("provider_id") or "").strip()
         method = str(params.get("method") or "api_key").strip()
-        if not provider_id:
+        # "connection" adds a named endpoint; its id comes from the name the user gives.
+        if not provider_id and method != "connection":
             await self._respond_error(request, "provider_id is required.", "InvalidRequest")
             return
-        await self._worker.login(provider_id, method, _ProtocolAuthInteraction(self))
+        provider_id = await self._worker.login(provider_id, method, _ProtocolAuthInteraction(self))
         info = await self._worker.session(session_id) if session_id else await self._worker.blank_info(params.get("workspace_root"))
         listing = await self._worker.list_models()
         selection = await self._adopt_login_default(session_id, info, provider_id, listing["models"])
@@ -454,7 +455,7 @@ class RuntimeDispatcher:
             return None
         chosen = next((m for m in provider_models if m.get("id") == current_model), provider_models[0])
         if session_id:
-            store = await self._worker.repository.open_store(session_id, persist_system_prompt=False)
+            store = await self._session_store(session_id)
             await store.update_selection(provider_id, str(chosen["id"]))
             await self._settings_changed(session_id, store)
         return {"provider_id": provider_id, "model_id": str(chosen["id"])}
@@ -865,39 +866,35 @@ class RuntimeDispatcher:
         if not isinstance(session_id, str) or not session_id.strip():
             await self._execute_without_conversation(request, command, raw_input, params)
             return
-        needs_execution = command == "team"
         if command == "compact":
             self._subscribed.add(session_id)
         active = self._worker.execution.active_container(session_id)
-        owns_execution = active is None and needs_execution
-        if needs_execution:
-            active = await self._worker.start_execution(session_id)
-        store = active.session_store if active is not None else await self._worker.repository.open_store(
-            session_id,
-            persist_system_prompt=False,
-        )
+        store = await self._session_store(session_id)
         model_before = getattr(store, "model", None)
-        try:
-            result = await self._slash_router.execute(
-                raw_input,
-                SlashCommandContext(
-                    runtime=active.runtime if active is not None else None,
-                    session=store,
-                    debug=self._debug,
-                    workspace_root=getattr(store, "workspace_root", None),
-                    compact_context=lambda: self._worker.execution.compact_context(session_id),
-                ),
-            )
-            await self._respond_slash_result(request, result)
-            renamed = result.display if isinstance(result.display, dict) and result.display.get("type") == "session_renamed" else None
-            if command == "model" and getattr(store, "model", None) != model_before:
-                await self._settings_changed(session_id, store)
-            if renamed:
-                # Every window showing it, and the lists, follow the new name.
-                await self._send_event({"type": "session_renamed", "session_id": session_id, "turn_id": "", "name": renamed["name"], "title": renamed["title"]})
-        finally:
-            if owns_execution:
-                await self._worker.release_execution(session_id)
+        result = await self._slash_router.execute(
+            raw_input,
+            SlashCommandContext(
+                runtime=active.runtime if active is not None else None,
+                session=store,
+                debug=self._debug,
+                workspace_root=getattr(store, "workspace_root", None),
+                compact_context=lambda: self._worker.execution.compact_context(session_id),
+            ),
+        )
+        await self._respond_slash_result(request, result)
+        renamed = result.display if isinstance(result.display, dict) and result.display.get("type") == "session_renamed" else None
+        if command == "model" and getattr(store, "model", None) != model_before:
+            await self._settings_changed(session_id, store)
+        if renamed:
+            # Every window showing it, and the lists, follow the new name.
+            await self._send_event({"type": "session_renamed", "session_id": session_id, "turn_id": "", "name": renamed["name"], "title": renamed["title"]})
+
+    async def _session_store(self, session_id: str):
+        """The store a running execution holds, so its next turn sees a change; else one opened for it."""
+        active = self._worker.execution.active_container(session_id)
+        if active is not None:
+            return active.session_store
+        return await self._worker.repository.open_store(session_id, persist_system_prompt=False)
 
     async def _set_model(self, request: dict[str, Any]) -> None:
         params = request.get("params") if isinstance(request.get("params"), dict) else {}
@@ -909,8 +906,7 @@ class RuntimeDispatcher:
         if not model:
             await self._respond_error(request, "model/set requires model.", "InvalidRequest")
             return
-        active = self._worker.execution.active_container(session_id)
-        store = active.session_store if active is not None else await self._worker.repository.open_store(session_id, persist_system_prompt=False)
+        store = await self._session_store(session_id)
         provider_id = provider_id or str(getattr(store, "provider", "openai-compatible") or "openai-compatible")
         await store.update_selection(provider_id, model)
         applies = await self._settings_changed(session_id, store)
@@ -925,10 +921,7 @@ class RuntimeDispatcher:
         if not effort:
             await self._respond_error(request, "model/effort requires reasoning_effort.", "InvalidRequest")
             return
-        active = self._worker.execution.active_container(session_id)
-        store = active.session_store if active is not None else await self._worker.repository.open_store(
-            session_id, persist_system_prompt=False
-        )
+        store = await self._session_store(session_id)
         await store.update_reasoning_effort(effort)
         applies = await self._settings_changed(session_id, store)
         await self._respond(request, {"reasoning_effort": effort, "session": True, "applies": applies})

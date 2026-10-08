@@ -211,8 +211,8 @@ class RuntimeWorker:
             for status in self.provider_service.list_providers()
         ]
 
-    async def login(self, provider_id: str, method: str, interaction) -> None:
-        await self.provider_service.login(provider_id, method, interaction)
+    async def login(self, provider_id: str, method: str, interaction) -> str:
+        return await self.provider_service.login(provider_id, method, interaction)
 
     def logout(self, provider_id: str) -> bool:
         return self.provider_service.logout(provider_id)

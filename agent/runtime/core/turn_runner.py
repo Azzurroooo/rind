@@ -92,9 +92,19 @@ class TurnRunner:
             SkillTurnCoordinator(skill_repository) if skill_repository is not None else None
         )
 
-    def replace_chat_client(self, chat_client: ChatClient) -> None:
-        """Use another model client from now on. Only between turns: a turn keeps its client."""
+    @property
+    def image_input(self) -> bool | None:
+        """Whether the current model accepts images; None when unknown."""
+        return self._image_input
+
+    def replace_chat_client(self, chat_client: ChatClient, *, image_input: bool | None) -> None:
+        """Use another model from now on. Only between turns: a turn keeps its client."""
         self._chat_client = chat_client
+        self._image_input = image_input
+
+    async def _prepare_for_model(self, messages: list[dict], **options) -> list[dict]:
+        """Images go in or are replaced by a note, by what the current model accepts."""
+        return await self._prepare_messages(messages, image_input=self._image_input, **options)
 
     def set_user_question_responder(self, responder) -> None:
         """Set the callback used when ask_user_question needs a user answer."""
@@ -190,7 +200,7 @@ class TurnRunner:
                                             })
                     image_notice_sent = True
                 request_messages = (
-                    await self._prepare_messages(context.messages) if self._prepare_messages else context.messages
+                    await self._prepare_for_model(context.messages) if self._prepare_messages else context.messages
                 )
 
                 try:
@@ -467,7 +477,7 @@ class TurnRunner:
             reason=reason,
             phase=phase,
             diagnostics=_compact_diagnostics(phase_detail),
-            prepare_messages=self._prepare_messages,
+            prepare_messages=self._prepare_for_model if self._prepare_messages else None,
             task_references=await self._task_notifications.references(session.session_id) if self._task_notifications else None,
             context_stats=context.stats if context is not None else compaction_context.stats,
             cancellation_token=cancellation_token,

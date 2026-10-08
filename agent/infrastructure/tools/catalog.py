@@ -32,7 +32,7 @@ def build_builtin_tool_specs(
     session_output_root: str | None = None,
     session_base_provider: Callable[[], str | None] | None = None,
     capture_image=None,
-    image_input: bool | None = None,
+    image_input: Callable[[], bool | None] = lambda: None,
 ) -> tuple[ToolSpec, ...]:
     specs = list(build_file_tool_specs(
         workspace_root, allowed_roots, shared_root, session_output_root, mutation_queue=mutation_queue,

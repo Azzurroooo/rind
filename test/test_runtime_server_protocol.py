@@ -627,6 +627,23 @@ def test_auth_login_adopts_provider_default_when_session_model_unusable():
     assert worker.stores["s1"].updates == [("deepseek", "deepseek-chat")]
 
 
+def test_adding_a_named_connection_needs_no_provider_and_answers_with_its_id():
+    worker = FakeWorker()
+    server, payloads = make_server(worker)
+
+    async def run():
+        login = asyncio.create_task(server._dispatch(
+            {"kind": "request", "request_id": 75, "method": "rind/auth/login", "params": {"method": "connection"}}))
+        while not server._auth_waiters:
+            await asyncio.sleep(0.01)
+        prompt_id = next(iter(server._auth_waiters))
+        await server._dispatch({"kind": "request", "request_id": prompt_id, "method": RuntimeMethod.RIND_AUTH_PROMPT, "params": {"value": "k"}})
+        await login
+
+    asyncio.run(run())
+    assert _response(payloads, 75)["result"]["provider_id"] == "added-connection"
+
+
 def test_auth_logout_reports_deletion_and_remaining_source():
     worker = FakeWorker()
     worker.providers = [{"id": "deepseek", "configured": True, "source": "environment"}]

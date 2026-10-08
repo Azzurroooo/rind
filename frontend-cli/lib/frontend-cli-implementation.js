@@ -60,6 +60,9 @@ import {
   startupText,
 } from "./rendering.js";
 
+// The /login choice that adds a named OpenAI-compatible endpoint with its own key.
+const ADD_CONNECTION = "+ Add a named endpoint · OpenAI-compatible URL and key";
+
 export async function runFrontendCliApp(cliArgs = process.argv.slice(2)) {
 // A conversation opened from Agents hands navigation back to the window that
 // opened it instead of nesting another window inside itself.
@@ -640,12 +643,14 @@ async function runLogin(providerId = "") {
     const providers = Array.isArray(providersResult?.providers) ? providersResult.providers : [];
     let selected = String(providerId || "").trim();
     if (!selected) {
-      const options = providers.map((item) => `${item.id} · ${item.name} · ${item.configured ? item.source : "not configured"}`);
+      const options = [...providers.map((item) => `${item.id} · ${item.name} · ${item.configured ? item.source : "not configured"}`), ADD_CONNECTION];
       const choice = await inputActions.askAuthChoice("Provider", options);
-      selected = String(choice || "").split(" · ")[0].trim();
+      selected = choice === ADD_CONNECTION ? ADD_CONNECTION : String(choice || "").split(" · ")[0].trim();
     }
     if (!selected) return;
-    const result = await request(runtimeMethods.authLogin, { provider_id: selected, method: "api_key" });
+    const result = await request(runtimeMethods.authLogin, selected === ADD_CONNECTION
+      ? { method: "connection" }
+      : { provider_id: selected, method: "api_key" });
     const selection = result?.selection && typeof result.selection === "object" ? result.selection : null;
     if (selection?.provider_id && selection.model_id) {
       sessionState.info = { ...sessionState.info, provider: selection.provider_id, model: selection.model_id };

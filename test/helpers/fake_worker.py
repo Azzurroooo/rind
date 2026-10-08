@@ -199,6 +199,9 @@ class FakeWorker:
     async def session(self, session_id: str) -> dict:
         return await self.repository.info(session_id)
 
+    async def blank_info(self, workspace_root=None) -> dict:
+        return {"session_id": "", "model": "m1", "provider": "p1", "reasoning_effort": "", "workspace_root": workspace_root or self.workspace_root}
+
     async def create_session(self, workspace_root=None) -> dict:
         return {"session_id": "new-session", "model": "m2", "provider": "p1", "workspace_root": workspace_root or self.workspace_root}
 
@@ -211,8 +214,9 @@ class FakeWorker:
     async def usage_summary(self, days=7) -> dict:
         return {"days": days}
 
-    async def login(self, provider_id, method, interaction) -> None:
+    async def login(self, provider_id, method, interaction) -> str:
         self.login_prompt = await interaction.prompt("secret", f"{provider_id} API key")
+        return "added-connection" if method == "connection" else provider_id
 
     def logout(self, provider_id) -> bool:
         return True

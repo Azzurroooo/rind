@@ -148,7 +148,8 @@ def build_agent_container(
         mutation_queue=shared_resources.file_mutation_queue if shared_resources else None,
         session_base_provider=lambda: session_store.session_base_path,
         capture_image=session_store.capture_image,
-        image_input=image_input,
+        # Read at call time: a model change between turns changes the answer.
+        image_input=lambda: turn_runner.image_input,
     )
     if external_tool:
         catalog = (*catalog, external_tool.spec(session_store.session_id))
@@ -185,7 +186,7 @@ def build_agent_container(
         tool_processor=tool_processor,
         stream_parser=stream_parser,
         tool_schemas=tool_registry.schemas,
-        prepare_messages=partial(prepare_image_messages, load_image=session_store.load_image, image_input=image_input),
+        prepare_messages=partial(prepare_image_messages, load_image=session_store.load_image),
         image_input=image_input,
         context_manager=context_manager,
         task_notifications=task_notifications,

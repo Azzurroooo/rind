@@ -15,6 +15,7 @@ from agent.application.task_notifications import TaskNotifications, pending_noti
 from agent.bootstrap import AgentContainer, SharedRuntimeResources, build_agent_container
 from agent.domain.tasks import TERMINAL_STATES, public_task
 from agent.domain.cancellation import CancellationTokenSource
+from agent.domain.errors import ProviderError
 from agent.domain.events import UserQuestionRequestedEvent
 from agent.domain.models import ModelSelection
 from agent.infrastructure.llm import ProviderServiceImpl
@@ -24,6 +25,11 @@ from agent.infrastructure.tools.shell.tool import ShellTools
 from agent.infrastructure.tools.web.session_pool import WebSessions
 from agent.prompts import build_goal_checkpoint_prompt
 from agent.runtime.server.session_service import SessionService
+
+
+# A selection whose connection cannot be used still builds an execution; its
+# turns then fail with the reason instead of the worker failing to start.
+UNUSABLE_CONNECTION_CODES = frozenset({"provider_not_configured", "connection_missing"})
 
 
 @dataclass(slots=True)
@@ -685,7 +691,7 @@ class ExecutionCoordinator:
                     reasoning_effort=selection.reasoning_effort,
                 ),
                 chat_client=chat_client,
-                image_input=self._provider_service.resolve_selection(selection, settings=settings).image_input,
+                image_input=self._image_input(selection, settings),
                 session_dir=self.session_dir,
                 session_id=clean,
                 session_store=self._repository.draft_store(clean),
@@ -716,12 +722,21 @@ class ExecutionCoordinator:
         return container
 
     async def _chat_client_for(self, settings, selection: ModelSelection, root):
+        """A client, or one whose every request reports why the connection cannot be used."""
         try:
             return await self._provider_service.create_chat_client(settings, selection, workspace_root=root)
-        except Exception as exc:
-            if getattr(exc, "code", "") != "provider_not_configured":
+        except ProviderError as exc:
+            if exc.code not in UNUSABLE_CONNECTION_CODES:
                 raise
-            return self._provider_service.unavailable_client(selection, str(exc))
+            return self._provider_service.unavailable_client(selection, exc)
+
+    def _image_input(self, selection: ModelSelection, settings) -> bool | None:
+        try:
+            return self._provider_service.resolve_selection(selection, settings=settings).image_input
+        except ProviderError as exc:
+            if exc.code not in UNUSABLE_CONNECTION_CODES:
+                raise
+            return None
 
     async def _apply_selection(self, execution: _ActiveExecution) -> None:
         """At the start of a turn: use the saved provider, model and effort.
@@ -740,7 +755,7 @@ class ExecutionCoordinator:
         settings = await asyncio.to_thread(load_settings)
         replacement = await self._chat_client_for(settings, selection, root or None)
         previous = execution.chat_client
-        execution.container.turn_runner.replace_chat_client(replacement)
+        execution.container.turn_runner.replace_chat_client(replacement, image_input=self._image_input(selection, settings))
         execution.chat_client, execution.selection = replacement, selection
         if previous is not None:
             await previous.close()

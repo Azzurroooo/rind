@@ -1,4 +1,8 @@
-"""Small, process-safe credential store for user-level provider secrets."""
+"""Small, process-safe credential store for user-level provider secrets.
+
+An entry may also carry a named connection: an OpenAI-compatible endpoint the
+user added with /login, kept beside its key so a project folder never holds it.
+"""
 
 from __future__ import annotations
 
@@ -10,8 +14,9 @@ from typing import Any
 
 from filelock import FileLock
 
-from agent.domain.models import Credential
+from agent.domain.models import Credential, ModelDefinition, ProviderDefinition
 from agent.infrastructure.paths import resolve_rind_home
+from agent.infrastructure.settings import REASONING_EFFORTS
 
 
 class CredentialStore:
@@ -34,7 +39,23 @@ class CredentialStore:
         if not provider_id.strip():
             raise ValueError("Provider id is required.")
         data = self._read()
-        data[provider_id] = _credential_dict(credential)
+        previous = data.get(provider_id)
+        connection = previous.get("connection") if isinstance(previous, dict) else None
+        data[provider_id] = _credential_dict(credential) | ({"connection": connection} if isinstance(connection, dict) else {})
+        self._write(data)
+
+    def connections(self) -> list[ProviderDefinition]:
+        """Named connections the user added, as OpenAI-compatible chat providers."""
+        return [
+            definition
+            for connection_id, value in sorted(self._read().items())
+            if isinstance(value, dict) and (definition := _connection(connection_id, value.get("connection"))) is not None
+        ]
+
+    def set_connection(self, connection_id: str, name: str, base_url: str, model: str, credential: Credential) -> None:
+        data = self._read()
+        connection = {"name": name, "base_url": base_url} | ({"model": model} if model else {})
+        data[connection_id] = _credential_dict(credential) | {"connection": connection}
         self._write(data)
 
     def delete(self, provider_id: str) -> bool:
@@ -88,6 +109,15 @@ def _credential(value: dict[str, Any]) -> Credential | None:
             expires_at=int(expires) if isinstance(expires, (int, float)) else None,
         )
     return None
+
+
+def _connection(connection_id: str, value: Any) -> ProviderDefinition | None:
+    if not isinstance(value, dict) or not isinstance(value.get("base_url"), str) or not value["base_url"]:
+        return None
+    name = str(value.get("name") or connection_id)
+    model = str(value.get("model") or "")
+    fallback = (ModelDefinition(connection_id, model, "openai-chat", REASONING_EFFORTS),) if model else ()
+    return ProviderDefinition(connection_id, name, "openai-chat", value["base_url"], fallback_models=fallback)
 
 
 def _credential_dict(credential: Credential) -> dict[str, Any]:

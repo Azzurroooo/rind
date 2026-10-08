@@ -12,6 +12,7 @@ from agent.infrastructure.credentials import CredentialStore
 from agent.infrastructure.settings import AppSettings
 from agent.infrastructure.llm.openai_chat import OpenAIChatCompletionsClient
 from agent.infrastructure.llm.provider_service import build_async_client
+from agent.infrastructure.llm.catalog import PROVIDERS
 from agent.infrastructure.llm.provider_service import ProviderServiceImpl
 
 
@@ -193,23 +194,23 @@ def test_credential_resolution_prefers_settings_then_stored_then_environment(tmp
     settings = _settings(tmp_path)
     service = _service(tmp_path, settings, monkeypatch)
 
-    assert service._credential_source(settings, "deepseek") == "none"
-    assert service._resolve_credential(settings, "deepseek") is None
+    assert service._credential_source(settings, PROVIDERS["deepseek"]) == "none"
+    assert service._resolve_credential(settings, PROVIDERS["deepseek"]) is None
 
     monkeypatch.setenv("DEEPSEEK_API_KEY", "env-key")
-    assert service._credential_source(settings, "deepseek") == "environment"
-    assert service._resolve_credential(settings, "deepseek").key == "env-key"
+    assert service._credential_source(settings, PROVIDERS["deepseek"]) == "environment"
+    assert service._resolve_credential(settings, PROVIDERS["deepseek"]).key == "env-key"
 
     service.credentials.set("deepseek", Credential(type="api_key", key="stored-key"))
-    assert service._credential_source(settings, "deepseek") == "stored"
-    assert service._resolve_credential(settings, "deepseek").key == "stored-key"
+    assert service._credential_source(settings, PROVIDERS["deepseek"]) == "stored"
+    assert service._resolve_credential(settings, PROVIDERS["deepseek"]).key == "stored-key"
 
     configured = _settings(tmp_path, api_key="settings-key")
-    assert service._credential_source(configured, "deepseek") == "settings"
-    assert service._resolve_credential(configured, "deepseek").key == "settings-key"
+    assert service._credential_source(configured, PROVIDERS["deepseek"]) == "settings"
+    assert service._resolve_credential(configured, PROVIDERS["deepseek"]).key == "settings-key"
 
     env_settings = _settings(tmp_path, api_key="$DEEPSEEK_API_KEY")
-    assert service._resolve_credential(env_settings, "deepseek").key == "env-key"
+    assert service._resolve_credential(env_settings, PROVIDERS["deepseek"]).key == "env-key"
 
 
 def test_model_refresh_endpoint_stays_per_provider(tmp_path: Path, monkeypatch) -> None:
@@ -394,7 +395,8 @@ def test_build_async_client_sets_rind_user_agent() -> None:
 async def test_unavailable_client_stream_raises_provider_error_for_turns() -> None:
     from agent.infrastructure.llm.provider_service import _UnavailableChatClient
 
-    client = _UnavailableChatClient("deepseek-chat", "DeepSeek is not configured. Run /login or set DEEPSEEK_API_KEY.")
+    client = _UnavailableChatClient("deepseek-chat", ProviderError(
+        "DeepSeek is not configured. Run /login or set DEEPSEEK_API_KEY.", status="rejected", code="provider_not_configured"))
 
     with pytest.raises(ProviderError) as exc:
         async for _event in client.stream([], None):
