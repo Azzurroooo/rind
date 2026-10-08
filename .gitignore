@@ -73,3 +73,6 @@ figs/
 /.tmp_crops/
 /.feishu_oauth_code
 /preview_themes.py
+
+# Local exploratory QA harness and runs; never tracked
+/qa/
