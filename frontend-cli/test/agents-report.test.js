@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { emptyAgentsSnapshot, inboxRows, sidebarRows, archiveRows } from "../lib/agents-model.js";
-import { renderReport } from "../lib/agents-report.js";
+import { renderReport, briefTitle, mayFoldBrief } from "../lib/agents-report.js";
 import { actionFor, available } from "../lib/agents-keys.js";
 import { textWidth } from "../lib/text-width.js";
 
@@ -59,7 +59,7 @@ test("a report aligns its blocks, says what needs deciding and folds its history
   assert.match(lines[at("Summary") + 1], /^ {10}\S/, "wrapped lines hang under the value");
   assert.match(lines[at("Evidence") + 1], /^ {10}• screenshot attached/);
   assert.ok(lines.every(line => textWidth(line) <= 60));
-  assert.match(lines.at(-1), /▸ Notes 1 · Runs 1 {3}z to show/);
+  assert.match(lines.at(-1), /▸ History · Notes 1 · Runs 1 {3}z to show/);
   assert.doesNotMatch(lines.join("\n"), /Started/);
   assert.match(renderReport(report, 60, { now: NOW, expanded: true }).map(strip).join("\n"), /Lead: Started/);
 
@@ -113,13 +113,31 @@ test("Stop all names jobs that will stop, and a running job is explained in word
   let dialog;
   const ui = { view: { snapshot: snapshot() }, choose: (title, items, options) => { dialog = { title, items, ...options }; } };
   const actions = createActions(ui);
-  actions.stopAll([{ kind: "live", status: "Running job", title: "Conversation", context: "notes", note: "npm test" }]);
+  actions.stopAll([{ kind: "live", status: "Running job", title: "notes", context: "Independent", note: "Conversation · npm test" }]);
   assert.equal(dialog.title, "Stop all agents?");
-  assert.match(dialog.description.join("\n"), /notes — Conversation \(running npm test\)/);
+  assert.match(dialog.description.join("\n"), /• notes · Independent — Conversation · npm test/);
   assert.match(dialog.description.join("\n"), /Jobs they started are stopped too/);
 
   const s = snapshot();
   s.live = [{ id: "r", turn: "idle", watchers: 0, background: { count: 3, commands: ["npm test", "cargo build"], startedAt: "x" } }];
   const lines = detailFor({ snapshot: s }, { kind: "live", title: "Conversation", context: "notes", status: "Running job", sessionId: "r", time: "2m" }).map(strip).join("\n");
   assert.match(lines, /Running npm test, cargo build and 1 more\. It continues by itself when they finish\./);
+});
+
+test("a long brief reads in full under Task, folds past six lines, and titles the page with its first line", () => {
+  const brief = "Write the launch notes for v2\n" + "Cover every change in the changelog and link each one to its pull request. ".repeat(8) + "\nThen post a summary.";
+  const task = { ...done("a"), brief, notes: [] };
+  const report = { task, team: "Product", owner: "Lead", artifacts: [], runs: [], subtasks: [], archived: false, decide: "", name: id => id };
+  assert.equal(briefTitle(brief), "Write the launch notes for v2");
+  assert.equal(mayFoldBrief(brief), true);
+  assert.equal(mayFoldBrief("Fix the typo"), false);
+  const folded = renderReport(report, 60, { now: NOW }).map(strip);
+  const at = folded.findIndex(line => line.startsWith("Task"));
+  assert.equal(at, 2, "the brief comes right after the status line");
+  assert.match(folded[at], /^Task {6}Write the launch notes for v2/);
+  assert.match(folded[at + 6], /^ {10}▸ \d+ more lines · z to show/);
+  assert.ok(folded.every(line => textWidth(line) <= 60), "every line wraps within the width");
+  const full = renderReport(report, 60, { now: NOW, expanded: true }).map(strip).join("\n");
+  assert.match(full, /Then post a summary\./);
+  assert.doesNotMatch(full, /more lines/);
 });

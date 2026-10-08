@@ -1,6 +1,6 @@
 import { readFile } from "node:fs/promises";
 import { single } from "./agents-model.js";
-import { renderReport } from "./agents-report.js";
+import { briefTitle, mayFoldBrief, renderReport } from "./agents-report.js";
 
 const PREVIEW_BYTES = 256 * 1024;
 
@@ -44,11 +44,12 @@ export function createReviewActions(ui, { agentName, display, teamOf, assignTask
       ...review,
       ...(!archived ? [{ key: "n", label: blocked ? "answer" : "add note", run: () => answer(taskId) }] : []),
       ...(artifacts.length || owner ? [{ key: "o", label: artifacts.length ? "open files" : "conversations", run: () => openFrom(task, artifacts, owner) }] : []),
-      ...(task.notes.length || report.runs.length || report.subtasks.length ? [{ key: "z", label: "history", run: detail => { detail.expanded = !detail.expanded; } }] : []),
+      // z unfolds what is folded: a long brief and the history.
+      ...(mayFoldBrief(task.brief) || task.notes.length || report.runs.length || report.subtasks.length ? [{ key: "z", label: "show all", run: detail => { detail.expanded = !detail.expanded; } }] : []),
       ...(!archived ? [{ key: "space", label: "more actions", run: () => taskActions(taskId) }] : []),
       { key: "r", label: "refresh", run: () => ui.run(() => delivery(taskId), "Refreshing…") },
     ];
-    ui.showReport(single(task.brief), { render: (width, detail) => renderReport(report, width, { expanded: detail.expanded }), actions, refresh: () => delivery(taskId) });
+    ui.showReport(briefTitle(task.brief), { render: (width, detail) => renderReport(report, width, { expanded: detail.expanded }), actions, refresh: () => delivery(taskId) });
   }
 
   async function accept(task) {
