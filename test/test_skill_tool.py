@@ -18,11 +18,10 @@ def _payload(result: str) -> dict:
     return json.loads(result)
 
 
-def _repository(tmp_path: Path, *, agent: bool = False) -> SkillRepository:
+def _repository(tmp_path: Path) -> SkillRepository:
     return SkillRepository(
         user_skill_dir=str(tmp_path / "user" / "skills"),
         project_skill_dir=str(tmp_path / "project" / ".rind" / "skills"),
-        agent_skill_dir=str(tmp_path / "agent" / ".aiteam" / "skills") if agent else None,
     )
 
 
@@ -64,14 +63,11 @@ def test_skill_tool_loads_effective_skill_and_returns_package_location(tmp_path:
     assert "Use this workflow." in data["content"]
 
 
-def test_skill_create_agent_scope_requires_team_agent_root(tmp_path: Path) -> None:
-    unavailable = _payload(skill_create("demo", "Demo", "Body", scope="agent", _repository=_repository(tmp_path)))
-    available = _payload(skill_create("demo", "Demo", "Body", scope="agent", _repository=_repository(tmp_path, agent=True)))
+def test_skill_create_rejects_the_agent_scope(tmp_path: Path) -> None:
+    result = _payload(skill_create("demo", "Demo", "Body", scope="agent", _repository=_repository(tmp_path)))
 
-    assert unavailable["ok"] is False
-    assert unavailable["error_type"] == "InvalidScope"
-    assert available["ok"] is True
-    assert available["data"]["scope"] == "agent"
+    assert result["ok"] is False
+    assert result["error_type"] == "InvalidScope"
 
 
 def test_skill_create_rejects_invalid_names_and_preserves_overwrite_policy(tmp_path: Path) -> None:
@@ -87,7 +83,7 @@ def test_skill_create_rejects_invalid_names_and_preserves_overwrite_policy(tmp_p
     assert overwritten["ok"] is True
 
 
-def test_skill_tools_are_registered_with_agent_scope(build_builtin_tool_specs) -> None:
+def test_skill_tools_are_registered_with_writable_scopes(build_builtin_tool_specs) -> None:
     registry = DefaultToolRegistry(build_builtin_tool_specs())
     assert registry.has("skill")
     assert registry.has("skill_create")
@@ -95,5 +91,4 @@ def test_skill_tools_are_registered_with_agent_scope(build_builtin_tool_specs) -
     assert create_schema["function"]["parameters"]["properties"]["scope"]["enum"] == [
         "project",
         "user",
-        "agent",
     ]

@@ -35,16 +35,13 @@ def test_host_attached_skill_is_discoverable_without_copying_its_references(tmp_
 def test_skill_repository_scans_metadata_and_applies_scope_overrides(tmp_path: Path, monkeypatch) -> None:
     user = tmp_path / "user"
     project = tmp_path / "project"
-    agent = tmp_path / "agent"
     _write_skill(user, "shared", "user version", "user body")
     _write_skill(project, "shared", "project version", "project body")
-    _write_skill(agent, "shared", "agent version", "agent body")
     _write_skill(project, "project-only", "project only")
 
     repository = SkillRepository(
         user_skill_dir=str(user),
         project_skill_dir=str(project),
-        agent_skill_dir=str(agent),
     )
     monkeypatch.setattr(
         "agent.infrastructure.skills.parse_skill_markdown",
@@ -55,7 +52,7 @@ def test_skill_repository_scans_metadata_and_applies_scope_overrides(tmp_path: P
 
     assert [(skill.name, skill.scope, skill.description) for skill in skills] == [
         ("project-only", "project", "project only"),
-        ("shared", "agent", "agent version"),
+        ("shared", "project", "project version"),
     ]
 
 

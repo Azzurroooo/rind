@@ -52,10 +52,10 @@ def skill_create(
             meta={"name": name},
         )
     normalized_scope = str(scope or "").strip().lower()
-    if normalized_scope not in {"project", "user", "agent"}:
+    if normalized_scope not in {"project", "user"}:
         return tool_error(
             "skill_create",
-            "Invalid scope. Expected 'project', 'user', or 'agent'.",
+            "Invalid scope. Expected 'project' or 'user'.",
             "InvalidScope",
             meta={"scope": scope},
         )
@@ -156,8 +156,8 @@ def _build_skill_tool_specs(repository: SkillRepository | None) -> tuple[ToolSpe
                 "description": "One-line summary of the Skill, used in the session Skill catalog.",
                 "body": "Instruction content of the SKILL.md body.",
                 "scope": {
-                    "description": "Write scope. agent is available only inside the current Agent workspace. Default project.",
-                    "enum": ["project", "user", "agent"],
+                    "description": "Write scope. Default project.",
+                    "enum": ["project", "user"],
                 },
                 "overwrite": "Whether to overwrite an existing SKILL.md. Default False.",
             },

@@ -17,7 +17,6 @@ class SkillRepository:
         user_home: str | None = None,
         project_skill_dir: str | None = None,
         user_skill_dir: str | None = None,
-        agent_skill_dir: str | None = None,
         skill_files: tuple[str, ...] = (),
     ):
         project_base = Path(project_root).expanduser().resolve() if project_root else resolve_project_root()
@@ -32,7 +31,6 @@ class SkillRepository:
             if user_skill_dir
             else user_base / "skills"
         )
-        self._agent_skill_dir = Path(agent_skill_dir).expanduser().resolve() if agent_skill_dir else None
         self._skill_files = tuple(Path(file).resolve() for file in skill_files)
 
     def list_skills(self) -> list[SkillMetadata]:
@@ -41,7 +39,6 @@ class SkillRepository:
         for root, scope in (
             (self._user_skill_dir, "user"),
             (self._project_skill_dir, "project"),
-            (self._agent_skill_dir, "agent"),
         ):
             for skill in self._scan_dir(root, scope):
                 skills_by_name[skill.name.lower()] = skill
@@ -81,13 +78,10 @@ class SkillRepository:
         roots = {
             "user": self._user_skill_dir,
             "project": self._project_skill_dir,
-            "agent": self._agent_skill_dir,
         }
         root = roots.get(normalized)
         if root is None:
-            if normalized == "agent":
-                raise ValueError("Agent Skill scope requires an active Agent workspace.")
-            raise ValueError("Skill scope must be user, project, or agent.")
+            raise ValueError("Skill scope must be user or project.")
         return root
 
     def _scan_dir(self, root: Path | None, scope: str) -> list[SkillMetadata]:
