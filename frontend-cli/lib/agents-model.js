@@ -257,6 +257,11 @@ export function inboxRows(snapshot) {
   const done = snapshot.tasks.filter(task => task.status === "done").map(task => ({ task, at: finished(task) })).sort((a, b) => b.at.localeCompare(a.at));
   const fresh = done.filter(({ task }) => unreviewed(task));
   const delivered = [...fresh.slice(0, FRESH_LIMIT), ...done.filter(({ task }) => !unreviewed(task)).slice(0, Math.max(0, 8 - fresh.length))];
+  // What the Manager changed on its own, until the user dismisses it.
+  const notices = [...(snapshot.notices || [])].reverse();
+  if (notices.length) rows.push({ id: "section:notices", kind: "section", title: "Changed by the Manager", count: notices.length },
+    ...notices.map(notice => ({ id: "n:" + notice.id, kind: "notice", title: single(notice.title), noticeId: notice.id, teamId: notice.teamId, agentId: notice.agentId,
+      context: (single(byId(snapshot.teams, notice.teamId)?.name) || "Team") + " › " + (single(byId(snapshot.agents, notice.agentId)?.name) || "Member") + " · " + relativeTime(notice.createdAt) })));
   if (delivered.length) rows.push({ id: "section:delivered", kind: "section", title: "Recently delivered" + (fresh.length ? " · " + fresh.length + " new" : ""), count: undefined },
     ...delivered.map(({ task, at }) => ({ id: "d:" + task.id, kind: "task", status: "Done", fresh: unreviewed(task), reworked: task.review?.decision === "rework", title: single(task.brief), note: single(task.report?.summary),
       context: (single(byId(snapshot.teams, task.teamId)?.name) || "Team") + " › " + (single(byId(snapshot.agents, task.assigneeAgentId)?.name) || "Removed member") + (at ? " · " + relativeTime(at) : ""),

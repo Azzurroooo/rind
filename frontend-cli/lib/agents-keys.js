@@ -56,6 +56,7 @@ function enterLabel(view, row) {
     case "new-team": return "create team";
     case "run": return "resolve";
     case "approval": return "decide";
+    case "notice": return "dismiss";
     case "service": return "actions";
     case "stop-all": return "stop…";
     case "live": return row.taskId ? "open report" : row.sessionId ? "join" : "";

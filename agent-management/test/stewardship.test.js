@@ -232,7 +232,7 @@ test("a run that fails before the service awaits it is recorded, not an unhandle
   const store = await openStore(paths.state, 5);
   // The adapter's run has already failed when start returns.
   const adapter = { async start() { return { runtimeSessionId: "r", completion: Promise.reject(new Error("lost connection")), async cancel() {} }; } };
-  const service = createService({ store, paths, adapters: { rind: adapter }, toolConfig: () => ({}) });
+  const service = createService({ store, paths, adapters: { rind: adapter }, toolConfig: () => ({}), folderDefaults: async () => ({}) });
   t.after(async () => { await service.stop(); await rm(home, { recursive: true, force: true }); });
   const call = (method, params = {}) => service.request({ kind: "user" }, method, { requestId: randomUUID(), ...params });
   const team = await call("createTeam", { name: "Product" });

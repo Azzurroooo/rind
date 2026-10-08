@@ -14,6 +14,8 @@ export interface Task {
   review?: { decision: "accepted" | "rework"; at: string; feedback?: string; reworkTaskId?: string };
 }
 // Destructive requests from the Manager wait in the user's Inbox.
+// What the Manager changed on its own (a member's model), shown in the user's Inbox until dismissed.
+export interface Notice { id: string; teamId: string; agentId: string; title: string; createdAt: string }
 export interface Approval { id: string; kind: "deleteTeam" | "cancelRun"; teamId: string; runId?: string; taskId?: string; title: string; requestedBy: string; createdAt: string }
 // released: the session's team or membership ended while a window showed it; it is dropped on detach.
 export interface Session { id: string; agentId: string; teamId?: string; runtimeSessionId: string; origin: "managed" | "direct"; shared?: boolean; released?: boolean }
@@ -26,10 +28,12 @@ export interface Artifact { id: string; taskId: string; name: string; size: numb
 export interface State {
   seq: number; agents: Record<string, Agent>; teams: Record<string, Team>; memberships: Record<string, Membership>;
   tasks: Record<string, Task>; sessions: Record<string, Session>; runs: Record<string, Run>;
-  notes: Record<string, Note>; artifacts: Record<string, Artifact>; approvals: Record<string, Approval>;
+  notes: Record<string, Note>; artifacts: Record<string, Artifact>; approvals: Record<string, Approval>; notices: Record<string, Notice>;
   receipts: Record<string, { input: string; result: unknown; at?: number }>;
 }
-export const emptyState = (): State => ({ seq: 0, agents: {}, teams: {}, memberships: {}, tasks: {}, sessions: {}, runs: {}, notes: {}, artifacts: {}, approvals: {}, receipts: {} });
+export const emptyState = (): State => ({ seq: 0, agents: {}, teams: {}, memberships: {}, tasks: {}, sessions: {}, runs: {}, notes: {}, artifacts: {}, approvals: {}, notices: {}, receipts: {} });
+// A member's model is its workspace's folder default, kept by the Rind runtime.
+export type FolderDefaults = (method: "get" | "set" | "unset" | "models", params?: Record<string, unknown>) => Promise<any>;
 export class ManagementError extends Error {
   constructor(public code: string, message: string, public details?: unknown) { super(message); }
 }

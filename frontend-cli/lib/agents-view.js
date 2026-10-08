@@ -85,6 +85,7 @@ function leadIcon(row) {
   if (row.fresh) return paint.accent("●");
   if (row.reworked) return paint.warning("↺");
   if (row.kind === "approval") return glyph(row.status);
+  if (row.kind === "notice") return paint.notice("◆");
   if (row.kind === "archive") return paint.dim("▤");
   if (row.kind === "member" || row.kind === "session" || row.kind === "task" || row.kind === "run") return glyph(row.status);
   if (["add-member", "new-session", "assign", "new-team"].includes(row.kind)) return paint.accent("+");

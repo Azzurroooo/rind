@@ -39,12 +39,16 @@ export function pruneAgents(state: State, candidates: Iterable<string>) {
   }
 }
 
-// A request the user has not decided yet disappears once it no longer applies.
+// A request the user has not decided yet disappears once it no longer applies,
+// and so does a notice about a team or member that is gone.
 export function expireApprovals(state: State) {
   for (const approval of Object.values(state.approvals)) {
     const team = state.teams[approval.teamId];
     const run = approval.runId ? state.runs[approval.runId] : undefined;
     if (!team || team.archive || (approval.kind === "cancelRun" && !(run && activeRun(run)))) delete state.approvals[approval.id];
+  }
+  for (const notice of Object.values(state.notices)) {
+    if (!state.teams[notice.teamId] || state.teams[notice.teamId].archive || !state.memberships[memberKey(notice.teamId, notice.agentId)]) delete state.notices[notice.id];
   }
 }
 

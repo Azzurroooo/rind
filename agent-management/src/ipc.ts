@@ -117,6 +117,12 @@ export async function startServer(options: { home?: string; python?: string; rep
     if (!timingSafeEqual(expected, Buffer.from(signature, "hex"))) return;
     return JSON.parse(Buffer.from(payload, "base64url").toString());
   }
+  // A member's model lives with its folder in the Rind runtime, which also checks it can run.
+  async function folderDefaults(method: "get" | "set" | "unset" | "models", params: Record<string, unknown> = {}) {
+    const host = await executionHost();
+    if (method === "models") return (await host.request("model/list", {})).models;
+    return host.request("rind/folder_defaults/" + method, params);
+  }
   function toolConfig(principal: Principal) {
     const token = issue(principal);
     const hostToken = issue(principal, true);
@@ -129,7 +135,7 @@ export async function startServer(options: { home?: string; python?: string; rep
       command: process.execPath, args: [bridge], env: { RIND_MANAGEMENT_ENDPOINT: paths.endpoint, RIND_MANAGEMENT_TOKEN: token },
       lifecycle: { before: "hostTurnStart", after: "hostTurnEnd", env: { RIND_MANAGEMENT_ENDPOINT: paths.endpoint, RIND_MANAGEMENT_TOKEN: hostToken } },
       name: "agent_management",
-      description: "Manage registered teams and tasks. Call snapshot to discover IDs. Actions: getTeam(teamId) returns a concise team briefing; createTeam(name), addMember(teamId,workspace,position?,responsibility?), removeMember(teamId,agentId), deleteTeam(teamId) (user and Manager only), setLeader(teamId,agentId), setSupervisor(teamId,agentId,reportsToAgentId), updateMember(teamId,agentId,position?,responsibility?), createWorkspace(teamId,name), createWorktree(teamId,name,repository,branch,base?), assignTask(teamId,assigneeAgentId,brief), getTask(taskId), updateTask(taskId,report:{outcome,summary,evidence:[],artifacts:[]}) or updateTask(taskId,status:blocked,blockedOn:{responder,action}), postTaskNote(taskId,text), publishArtifact(taskId,path), readArtifact(artifactId), startTask(taskId), setTaskPriority(taskId,priority:high|normal|low), cancelTask(taskId), cancelRun(runId). Only registered members may run. For the Manager, deleting a team with history or stopping a running task becomes a request the user approves in their Inbox; it leaves snapshot.approvals once the user decides. Share/copy choices require the user interface.",
+      description: "Manage registered teams and tasks. Call snapshot to discover IDs. Actions: getTeam(teamId) returns a concise team briefing; listModels(), getMemberModel(teamId,agentId), setMemberModel(teamId,agentId,provider?,model?,reasoningEffort?) and clearMemberModel(teamId,agentId,part:model|reasoningEffort) (user and Manager only; a member's model is its workspace's default and applies from its next task); createTeam(name), addMember(teamId,workspace,position?,responsibility?), removeMember(teamId,agentId), deleteTeam(teamId) (user and Manager only), setLeader(teamId,agentId), setSupervisor(teamId,agentId,reportsToAgentId), updateMember(teamId,agentId,position?,responsibility?), createWorkspace(teamId,name), createWorktree(teamId,name,repository,branch,base?), assignTask(teamId,assigneeAgentId,brief), getTask(taskId), updateTask(taskId,report:{outcome,summary,evidence:[],artifacts:[]}) or updateTask(taskId,status:blocked,blockedOn:{responder,action}), postTaskNote(taskId,text), publishArtifact(taskId,path), readArtifact(artifactId), startTask(taskId), setTaskPriority(taskId,priority:high|normal|low), cancelTask(taskId), cancelRun(runId). Only registered members may run. For the Manager, deleting a team with history or stopping a running task becomes a request the user approves in their Inbox; it leaves snapshot.approvals once the user decides. Share/copy choices require the user interface.",
       ...(principal.kind !== "manager" ? { instructions: [agent?.hint, role?.responsibility,
         session?.teamId ? "Team ID: " + session.teamId + "; Agent ID: " + session.agentId + ". Use snapshot for the organization tree. Delegate only to direct reports; integrate their delivery before reporting to your supervisor. Private conversations stay in their session." : "This conversation has no team authority.",
         skills.length ? "Assigned skills: " + skills.join(", ") : ""].filter(Boolean).join("\n") } : {}),
@@ -292,7 +298,7 @@ export async function startServer(options: { home?: string; python?: string; rep
     }
     store = await openStore(paths.state);
     const rind = createRindAdapter(options);
-    service = createService({ store, paths, adapters: { rind: { async start(input, emit) { await executionHost(); return rind.start(input, emit); } } }, toolConfig });
+    service = createService({ store, paths, adapters: { rind: { async start(input, emit) { await executionHost(); return rind.start(input, emit); } } }, toolConfig, folderDefaults });
     await service.recover();
     readyResolve!();
     if (Object.values(store.state.sessions).some(s => s.shared && s.runtimeSessionId)) void executionHost().catch(() => {});

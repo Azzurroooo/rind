@@ -4,7 +4,7 @@ import { mkdir, realpath, stat, copyFile, readFile, readdir, lstat, chmod } from
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import path from "node:path";
-import { activeRun, memberKey, requireValue, text, type State, type Principal, type Session, type Run, type Task, type Report, type Adapter, type AdapterHandle, type Approval } from "./model.js";
+import { activeRun, memberKey, requireValue, text, type State, type Principal, type Session, type Run, type Task, type Report, type Adapter, type AdapterHandle, type Approval, type FolderDefaults } from "./model.js";
 import { canonicalDirectory, inside, privateDirectory, type Paths } from "./paths.js";
 import type { Store } from "./store.js";
 import { previewLegacyTeam } from "./legacy.js";
@@ -19,10 +19,12 @@ type Params = Record<string, any>;
 // Teams are picked by name in the sidebar and in `rind agents`; two live teams never share one.
 const teamNameTaken = (state: State, name: string) => Object.values(state.teams).some(t => !t.archive && t.name.trim().toLowerCase() === name.trim().toLowerCase());
 const awaitingDelivery = (task: Task) => ["queued", "running"].includes(task.status) || (task.status === "blocked" && task.blockedOn?.responder === "children");
-const reads = new Set(["snapshot", "listTeams", "getTeam", "listAgents", "getTask", "previewCopy", "previewImport", "readArtifact", "listArchive"]);
-export function createService({ store, paths, adapters, toolConfig }: {
+const reads = new Set(["snapshot", "listTeams", "getTeam", "listAgents", "getTask", "previewCopy", "previewImport", "readArtifact", "listArchive", "listModels", "getMemberModel"]);
+const MEMBER_MODEL_PARTS = { model: "model", reasoningEffort: "reasoning_effort" } as const;
+export function createService({ store, paths, adapters, toolConfig, folderDefaults }: {
   store: Store; paths: Paths; adapters: Record<string, Adapter>;
   toolConfig: (principal: Principal, session: Session) => object;
+  folderDefaults: FolderDefaults;
 }) {
   let serial: Promise<unknown> = Promise.resolve();
   let stopped = false;
@@ -94,6 +96,19 @@ export function createService({ store, paths, adapters, toolConfig }: {
   function author(state: State, actor: Principal) { return actor.kind === "user" ? "user" : actor.kind === "manager" ? "manager" : sessionOf(state, actor)!.agentId; }
   function requireMember(state: State, teamId: string, agentId: string) {
     requireValue(state.memberships[memberKey(teamId, agentId)], "NOT_TEAM_MEMBER", "The target is not registered in this team. Add it before starting work.");
+  }
+  // Only the user and the Manager choose which model a member runs on; leaders and members cannot.
+  function memberWorkspace(state: State, actor: Principal, teamId: string, agentId: string) {
+    requireValue(actor.kind !== "agent", "FORBIDDEN", "Only the user and the Manager choose a member's model.");
+    teamAccess(state, actor, teamId);
+    requireMember(state, teamId, agentId);
+    return state.agents[agentId].canonicalWorkspace;
+  }
+  // The user sees in the Inbox what the Manager changed; the user's own changes need no notice.
+  function noticeFromManager(state: State, actor: Principal, teamId: string, agentId: string, title: string) {
+    if (actor.kind !== "manager") return;
+    const id = randomUUID();
+    state.notices[id] = { id, teamId, agentId, title, createdAt: new Date().toISOString() };
   }
   async function addMember(state: State, actor: Principal, p: Params) {
     teamAccess(state, actor, p.teamId);
@@ -217,6 +232,7 @@ export function createService({ store, paths, adapters, toolConfig }: {
       // Every conversation in the shared Runtime, including plain ones outside any team.
       ...(actor.kind === "user" ? { live: [...runtimeSessions.values()] } : {}),
       // Archived work is read on demand (listArchive) so it never weighs on live pushes.
+      ...(actor.kind === "user" ? { notices: Object.values(state.notices) } : {}),
       ...(actor.kind !== "agent" ? { approvals: Object.values(state.approvals), archivedTeams: Object.values(state.teams).filter(t => t.archive).map(t => ({ id: t.id, name: t.name, archivedAt: t.archive!.at })) } : {}),
       runs: Object.values(state.runs).filter(r => sessionIds.has(r.sessionId)),
       notes: Object.values(state.notes).filter(n => taskIds.has(n.taskId)),
@@ -614,6 +630,34 @@ export function createService({ store, paths, adapters, toolConfig }: {
         const run = state.runs[approval.runId!];
         if (!run?.taskId || !live.has(run.id) || !activeRun(run)) return { expired: true };
         return stopRun(state, "user", run, state.tasks[run.taskId]);
+      }
+      case "listModels": {
+        requireValue(actor.kind !== "agent", "FORBIDDEN", "Only the user and the Manager choose a member's model.");
+        return { models: await folderDefaults("models") };
+      }
+      case "getMemberModel":
+        return folderDefaults("get", { workspace_root: memberWorkspace(state, actor, p.teamId, p.agentId) });
+      case "setMemberModel": {
+        const workspace = memberWorkspace(state, actor, p.teamId, p.agentId);
+        requireValue(Boolean(p.provider) === Boolean(p.model), "INVALID_INPUT", "Give provider and model together.");
+        requireValue(p.model || p.reasoningEffort, "INVALID_INPUT", "Give provider and model, a reasoningEffort, or both.");
+        const result = await folderDefaults("set", { workspace_root: workspace, provider_id: p.provider || "", model_id: p.model || "", reasoning_effort: p.reasoningEffort || "" });
+        const parts = [p.model ? "model " + p.provider + " / " + p.model : "", p.reasoningEffort ? "effort " + p.reasoningEffort : ""].filter(Boolean);
+        noticeFromManager(state, actor, p.teamId, p.agentId, "Manager set " + state.agents[p.agentId].name + "'s " + parts.join(" and "));
+        return result;
+      }
+      case "clearMemberModel": {
+        const workspace = memberWorkspace(state, actor, p.teamId, p.agentId);
+        const group = MEMBER_MODEL_PARTS[p.part as keyof typeof MEMBER_MODEL_PARTS];
+        requireValue(group, "INVALID_INPUT", "part must be model or reasoningEffort.");
+        const result = await folderDefaults("unset", { workspace_root: workspace, group });
+        noticeFromManager(state, actor, p.teamId, p.agentId, "Manager cleared " + state.agents[p.agentId].name + "'s " + (group === "model" ? "model" : "effort") + "; the default applies");
+        return result;
+      }
+      case "dismissNotice": {
+        userOnly(actor);
+        delete state.notices[p.noticeId];
+        return { dismissed: true };
       }
       default: requireValue(false, "UNKNOWN_METHOD", "Unknown management operation: " + method);
     }

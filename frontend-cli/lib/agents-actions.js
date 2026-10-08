@@ -137,6 +137,28 @@ export function createActions(ui) {
     ui.form("Role and responsibility", roleFields(current), async values => { await ui.request("updateMember", { teamId, agentId, ...values }); ui.notify("Updated " + agentName(agentId) + ".", "success"); }, { description: [agentName(agentId)] });
   }
 
+  // A member runs on its folder's defaults; the user and the Manager choose them.
+  const MODEL_SOURCES = { folder: "chosen for this member", main_repository: "from its main repository", settings: "from settings.json" };
+  async function memberModel(teamId, agentId) {
+    const name = agentName(agentId);
+    const [{ models }, current] = await Promise.all([ui.request("listModels"), ui.request("getMemberModel", { teamId, agentId })]);
+    const { resolved, folder } = current;
+    const levels = models.find(m => m.provider_id === resolved.provider && m.id === resolved.model)?.reasoning_efforts || [];
+    const set = (values, text) => async () => { await ui.request("setMemberModel", { teamId, agentId, ...values }); ui.notify(name + " now uses " + text + " from its next task.", "success"); };
+    const clear = part => async () => { await ui.request("clearMemberModel", { teamId, agentId, part }); ui.notify(name + " uses the default " + (part === "model" ? "model" : "effort") + " from its next task.", "success"); };
+    const fallback = { id: "default", label: "Use the default", description: "settings.json, or its main repository's choice" };
+    ui.choose("Model and effort", [
+      { label: "Model", key: "m", description: resolved.provider + " / " + resolved.model + " · " + MODEL_SOURCES[resolved.model_source], action: () => ui.choose("Model · " + name, [
+        ...models.map(m => ({ id: m.provider_id + "/" + m.id, label: m.provider_id + " / " + m.id, action: set({ provider: m.provider_id, model: m.id }, m.id) })),
+        ...(folder.model ? [{ ...fallback, action: clear("model") }] : []),
+      ], { selected: resolved.provider + "/" + resolved.model, description: ["Only connections you are logged in to are listed."] }) },
+      ...(levels.length ? [{ label: "Effort", key: "e", description: (resolved.reasoning_effort || "unset") + " · " + MODEL_SOURCES[resolved.effort_source], action: () => ui.choose("Effort · " + name, [
+        ...levels.map(level => ({ id: level, label: level, action: set({ reasoningEffort: level }, "effort " + level) })),
+        ...(folder.reasoning_effort ? [{ ...fallback, action: clear("reasoningEffort") }] : []),
+      ], { selected: resolved.reasoning_effort }) }] : []),
+    ], { description: [name + " · applies from its next task; running work keeps its model.", "New conversations in its folder start with it too."] });
+  }
+
   function changeSupervisor(teamId, agentId) {
     const candidates = snap().memberships.filter(m => m.teamId === teamId && m.agentId !== agentId);
     ui.choose("Reports to", candidates.map(m => ({ id: m.agentId, label: agentName(m.agentId), description: roleOf(snap(), teamId, m.agentId),
@@ -160,6 +182,7 @@ export function createActions(ui) {
       { label: "Assign task", key: "t", description: "Tracked work with a delivery report", action: () => assignTask(teamId, agentId) },
       { label: "Add member below", key: "a", description: "Add a member below " + agentName(agentId), action: () => addMember(teamId, agentId) },
       { label: "Edit role and responsibility", key: "e", action: () => editMember(teamId, agentId) },
+      { label: "Model and effort", key: "m", description: "What this member runs on", action: () => memberModel(teamId, agentId) },
       ...(team?.leaderAgentId !== agentId ? [
         { label: "Change supervisor", key: "s", action: () => changeSupervisor(teamId, agentId) },
         { label: "Make team leader", key: "l", action: async () => { await ui.request("setLeader", { teamId, agentId }); ui.notify(agentName(agentId) + " now leads the team.", "success"); } },

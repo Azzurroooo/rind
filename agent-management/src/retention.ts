@@ -8,6 +8,8 @@ export const RECEIPT_LIMIT = 512;
 // A client retries a timed-out request within minutes; younger receipts always stay.
 export const RECEIPT_MIN_AGE_MS = 10 * 60 * 1000;
 export const TASK_RUN_LIMIT = 10;
+// The user reads and dismisses notices; ones never dismissed stop at the newest few.
+export const NOTICE_LIMIT = 50;
 
 export function retain(state: State, now = Date.now()) {
   // Receipts only make retries idempotent. Beyond the newest few hundred, old
@@ -18,6 +20,9 @@ export function retain(state: State, now = Date.now()) {
     if (now - (state.receipts[key].at ?? 0) < RECEIPT_MIN_AGE_MS) break;
     delete state.receipts[key];
   }
+
+  const notices = Object.keys(state.notices);
+  for (const key of notices.slice(0, Math.max(0, notices.length - NOTICE_LIMIT))) delete state.notices[key];
 
   const groups = new Map<string, Run[]>();
   for (const run of Object.values(state.runs)) {

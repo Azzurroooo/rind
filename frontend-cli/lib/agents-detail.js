@@ -68,6 +68,8 @@ export function detailFor(view, row) {
         approval?.kind === "deleteTeam" ? "Deleting keeps delivered work readable under Archive; folders and history are never touched." : "Stopping cancels the running task; its conversation is kept.", "",
         "Enter to approve or decline. Nothing happens until you decide."];
     }
+    case "notice": return [paint.bold(row.title), paint.dim(row.context), "", "The Manager changed this member's folder default. It applies from the member's next task; running work keeps its model.", "",
+      "Space on the member › Model and effort changes it again. Enter dismisses this notice."];
     case "archive": return [paint.bold("Archive"), paint.dim("Deleted teams, read-only"), "", "What deleted teams delivered: reports, evidence and files. Nothing here can run or change.", "", "Enter lists them."];
     case "task": {
       if (row.archived) return [paint.bold(row.title), paint.dim("Owner: " + row.owner), "", tone(row.status), "", ...field("Delivery", row.note || paint.dim("No report")), paint.dim("Read-only: the team was deleted."), "", "Enter opens the report."];

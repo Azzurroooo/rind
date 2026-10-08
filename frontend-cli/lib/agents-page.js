@@ -382,6 +382,7 @@ export async function runAgentsPage({ launch, input = process.stdin, output = pr
       case "assign": return actions.assignTask(row.teamId);
       case "task": return view.page.kind === "inbox" && row.answer ? actions.answer(row.taskId) : perform(() => actions.delivery(row.taskId), null, "Loading report…");
       case "approval": return actions.approval(row.approvalId);
+      case "notice": return perform(async () => { await request("dismissNotice", { noticeId: row.noticeId }); }, null, "Dismissing…");
       case "run": { const run = view.snapshot.runs.find(r => r.id === row.runId); return run && actions.resolveRun(run); }
       case "live": return row.taskId ? perform(() => actions.delivery(row.taskId), null, "Loading report…") : row.sessionId ? ui.join(row) : undefined;
       case "stop-all": return actions.stopAll(view.entries.filter(r => r.kind === "live"));
