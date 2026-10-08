@@ -130,6 +130,9 @@ async def test_unsetting_a_folder_default_falls_back_to_settings(worker, tmp_pat
         await request("initialize")
         await request("rind/folder_defaults/set", workspace_root=str(tmp_path),
                       provider_id="deepseek", model_id="deepseek-flash", reasoning_effort="high")
+        set_both = await request("rind/folder_defaults/get", workspace_root=str(tmp_path))
+        assert set_both["inherited"]["model_source"] == "settings", "what clearing would fall back to"
+        assert set_both["inherited"]["effort_source"] == "settings"
         result = await request("rind/folder_defaults/unset", workspace_root=str(tmp_path), group="model")
         assert result["folder"] == {"reasoning_effort": "high"}
         assert result["resolved"]["model_source"] == "settings"

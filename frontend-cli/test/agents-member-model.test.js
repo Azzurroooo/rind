@@ -22,7 +22,9 @@ function fakeUi({ folder = {}, effortSource = "settings" } = {}) {
     async request(method, params) {
       requests.push([method, params]);
       if (method === "listModels") return { models: [{ provider_id: "deepseek", id: "deepseek-flash", reasoning_efforts: ["low", "high"] }, { provider_id: "openai", id: "gpt-5.5", reasoning_efforts: [] }] };
-      if (method === "getMemberModel") return { folder, resolved: { provider: "deepseek", model: "deepseek-flash", reasoning_effort: "low", model_source: folder.model ? "folder" : "settings", effort_source: effortSource } };
+      if (method === "getMemberModel") return { folder,
+        resolved: { provider: "deepseek", model: "deepseek-flash", reasoning_effort: "low", model_source: folder.model ? "folder" : "settings", effort_source: effortSource },
+        inherited: { provider: "openai", model: "gpt-5.5", reasoning_effort: "high", model_source: "main_repository", effort_source: "settings" } };
       return {};
     },
     choose: (title, items, options = {}) => dialogs.push({ title, items, options }),
@@ -43,9 +45,13 @@ test("the member menu sets a model and an effort for the member's next task", as
   assert.match(menu.options.description[0], /applies from its next task; running work keeps its model/);
 
   item(menu, "Model").action();
-  assert.equal(dialogs[2].options.selected, "deepseek/deepseek-flash");
-  assert.ok(!dialogs[2].items.some(entry => entry.label === "Use the default"), "nothing to clear when the member has no own model");
-  await item(dialogs[2], "openai / gpt-5.5").action();
+  const models = dialogs[2];
+  assert.equal(models.options.selected, "deepseek/deepseek-flash");
+  assert.equal(models.options.searchable, true);
+  assert.deepEqual(models.items.map(entry => (entry.header ? "# " : "") + entry.label), ["# deepseek", "deepseek-flash", "# openai", "gpt-5.5"], "grouped by connection, as /model is");
+  assert.equal(item(models, "deepseek-flash").description, "current");
+  assert.ok(!models.items.some(entry => entry.label === "Use the default"), "nothing to clear when the member has no own model");
+  await item(models, "gpt-5.5").action();
   assert.deepEqual(requests.at(-1), ["setMemberModel", { teamId: "team", agentId: "lead", provider: "openai", model: "gpt-5.5" }]);
   assert.match(notices.at(-1)[0], /Lead now uses gpt-5\.5 from its next task/);
 
@@ -60,8 +66,12 @@ test("an own model or effort can be cleared back to the default", async () => {
   actions.memberActions("team", "lead");
   await item(dialogs[0], "Model and effort").action();
   assert.match(item(dialogs[1], "Effort").description, /low · chosen for this member/);
+  item(dialogs[1], "Model").action();
+  assert.equal(dialogs[2].items[0].label, "Use the default", "first, and says what it falls back to");
+  assert.equal(dialogs[2].items[0].description, "openai / gpt-5.5 · from its main repository");
   item(dialogs[1], "Effort").action();
-  await item(dialogs[2], "Use the default").action();
+  assert.equal(dialogs[3].items[0].description, "high · from settings.json");
+  await item(dialogs[3], "Use the default").action();
   assert.deepEqual(requests.at(-1), ["clearMemberModel", { teamId: "team", agentId: "lead", part: "reasoningEffort" }]);
 });
 

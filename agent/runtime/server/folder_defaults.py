@@ -14,28 +14,31 @@ from typing import Any
 from agent.domain.models import ModelSelection
 from agent.infrastructure.paths import validate_workspace_root
 from agent.infrastructure.settings import normalize_reasoning_effort
+from agent.infrastructure.workspace_defaults import FolderSelection
 
 GROUPS = ("model", "reasoning_effort")
 
 
 async def describe(worker, workspace_root: str) -> dict[str, Any]:
-    """What the folder sets itself, and what a new conversation there starts with."""
+    """What the folder sets itself, what a new conversation there starts with,
+    and what it would start with were the folder's own values cleared."""
     root = validate_workspace_root(workspace_root)
     repository = worker.repository
-    own, resolved = await asyncio.gather(
+    own, resolved, inherited = await asyncio.gather(
         asyncio.to_thread(repository.workspace_defaults.get, root),
         asyncio.to_thread(repository.folder_selection, root),
+        asyncio.to_thread(repository.folder_selection, root, own=False),
     )
+    return {"workspace_root": root, "folder": own, "resolved": _selection(resolved), "inherited": _selection(inherited)}
+
+
+def _selection(folder: FolderSelection) -> dict[str, str]:
     return {
-        "workspace_root": root,
-        "folder": own,
-        "resolved": {
-            "provider": resolved.selection.provider_id,
-            "model": resolved.selection.model_id,
-            "reasoning_effort": resolved.selection.reasoning_effort,
-            "model_source": resolved.model_source,
-            "effort_source": resolved.effort_source,
-        },
+        "provider": folder.selection.provider_id,
+        "model": folder.selection.model_id,
+        "reasoning_effort": folder.selection.reasoning_effort,
+        "model_source": folder.model_source,
+        "effort_source": folder.effort_source,
     }
 
 

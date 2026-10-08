@@ -16,6 +16,7 @@ async function tail(file, bytes = 16384) {
 }
 import { single, roleOf, STATUS_FILTERS } from "./agents-model.js";
 import { createReviewActions } from "./agents-review.js";
+import { groupModels } from "./model-menu-state.js";
 
 // Multi-step management flows. Each flow only talks to the page through the
 // small `ui` surface, so the key handling and the service calls stay separate.
@@ -142,19 +143,23 @@ export function createActions(ui) {
   async function memberModel(teamId, agentId) {
     const name = agentName(agentId);
     const [{ models }, current] = await Promise.all([ui.request("listModels"), ui.request("getMemberModel", { teamId, agentId })]);
-    const { resolved, folder } = current;
+    const { resolved, inherited, folder } = current;
     const levels = models.find(m => m.provider_id === resolved.provider && m.id === resolved.model)?.reasoning_efforts || [];
     const set = (values, text) => async () => { await ui.request("setMemberModel", { teamId, agentId, ...values }); ui.notify(name + " now uses " + text + " from its next task.", "success"); };
     const clear = part => async () => { await ui.request("clearMemberModel", { teamId, agentId, part }); ui.notify(name + " uses the default " + (part === "model" ? "model" : "effort") + " from its next task.", "success"); };
-    const fallback = { id: "default", label: "Use the default", description: "settings.json, or its main repository's choice" };
+    // First, and only when the member chose its own: what clearing it falls back to.
+    const fallback = (own, value, source, part) => (own ? [{ id: "default", label: "Use the default", description: value + " · " + MODEL_SOURCES[source], action: clear(part) }] : []);
+    const modelItems = groupModels(models, { provider_id: resolved.provider, model_id: resolved.model }).map(entry => (entry.header
+      ? { header: true, label: entry.name }
+      : { id: entry.providerId + "/" + entry.modelId, label: entry.modelId, description: entry.current ? "current" : "", action: set({ provider: entry.providerId, model: entry.modelId }, entry.modelId) }));
     ui.choose("Model and effort", [
       { label: "Model", key: "m", description: resolved.provider + " / " + resolved.model + " · " + MODEL_SOURCES[resolved.model_source], action: () => ui.choose("Model · " + name, [
-        ...models.map(m => ({ id: m.provider_id + "/" + m.id, label: m.provider_id + " / " + m.id, action: set({ provider: m.provider_id, model: m.id }, m.id) })),
-        ...(folder.model ? [{ ...fallback, action: clear("model") }] : []),
+        ...fallback(folder.model, inherited.provider + " / " + inherited.model, inherited.model_source, "model"),
+        ...modelItems,
       ], { selected: resolved.provider + "/" + resolved.model, description: ["Only connections you are logged in to are listed."], searchable: true }) },
       ...(levels.length ? [{ label: "Effort", key: "e", description: (resolved.reasoning_effort || "unset") + " · " + MODEL_SOURCES[resolved.effort_source], action: () => ui.choose("Effort · " + name, [
+        ...fallback(folder.reasoning_effort, inherited.reasoning_effort || "unset", inherited.effort_source, "reasoningEffort"),
         ...levels.map(level => ({ id: level, label: level, action: set({ reasoningEffort: level }, "effort " + level) })),
-        ...(folder.reasoning_effort ? [{ ...fallback, action: clear("reasoningEffort") }] : []),
       ], { selected: resolved.reasoning_effort }) }] : []),
     ], { description: [name + " · applies from its next task; running work keeps its model.", "New conversations in its folder start with it too."] });
   }

@@ -68,9 +68,12 @@ class WorkspaceDefaults:
             self._write({name: value for name, value in data.items() if name != key} | ({key: entry} if entry else {}))
             return True
 
-    def resolve(self, workspace_root: str, fallback: ModelSelection) -> FolderSelection:
-        """The folder's values, else its main repository's (a worktree), else `fallback` (settings.json)."""
-        layers: list[tuple[dict[str, str], Source]] = [(self.get(workspace_root), "folder")]
+    def resolve(self, workspace_root: str, fallback: ModelSelection, *, own: bool = True) -> FolderSelection:
+        """The folder's values, else its main repository's (a worktree), else `fallback` (settings.json).
+
+        With own=False the folder's own values are skipped: what it falls back to once they are cleared.
+        """
+        layers: list[tuple[dict[str, str], Source]] = [(self.get(workspace_root), "folder")] if own else []
         main = main_repository(workspace_root)
         if main is not None:
             layers.append((self.get(str(main)), "main_repository"))

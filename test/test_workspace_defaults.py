@@ -101,3 +101,5 @@ def test_a_worktree_uses_the_main_repository_defaults_until_it_sets_its_own(defa
     own = defaults.resolve(str(feature), SETTINGS)
     assert own.selection.reasoning_effort == "low" and own.effort_source == "folder"
     assert own.model_source == "main_repository"
+    cleared = defaults.resolve(str(feature), SETTINGS, own=False)
+    assert (cleared.selection.reasoning_effort, cleared.effort_source) == ("high", "main_repository")

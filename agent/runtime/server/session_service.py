@@ -72,9 +72,9 @@ class SessionService:
         """A read-only handle for listing this folder's history; it never creates a session."""
         return JsonlSessionStore(session_dir=self.session_dir, workspace_root=validate_workspace_root(workspace_root))
 
-    def folder_selection(self, workspace_root: str) -> FolderSelection:
+    def folder_selection(self, workspace_root: str, *, own: bool = True) -> FolderSelection:
         """What a new conversation in this folder starts with: its defaults, else settings.json."""
-        return self.workspace_defaults.resolve(workspace_root, self.provider_service.default_selection())
+        return self.workspace_defaults.resolve(workspace_root, self.provider_service.default_selection(), own=own)
 
     def choose_selection(self, workspace_root: str, provider: str = "", model: str = "", effort: str | None = None) -> tuple[ModelSelection, dict[str, str]]:
         """The selection a new conversation is created with, and where each part came from.

@@ -1,5 +1,5 @@
 export function createModelMenuState(models, currentModel = "", providerNames = new Map()) {
-  const items = normalizeModels(models, currentModel, providerNames);
+  const items = groupModels(models, currentModel, providerNames);
   let selected = initialSelection(items);
   return {
     items() {
@@ -28,7 +28,9 @@ export function createModelMenuState(models, currentModel = "", providerNames = 
   };
 }
 
-function normalizeModels(models, currentModel, providerNames) {
+// Models under a header per connection, the current one marked (and kept even
+// when its connection lists it no more). Shared by /model and the Agents page.
+export function groupModels(models, currentModel = "", providerNames = new Map()) {
   const current = typeof currentModel === "object"
     ? { providerId: String(currentModel.provider_id || "").trim(), modelId: String(currentModel.model_id || "").trim() }
     : { providerId: "", modelId: String(currentModel || "").trim() };
