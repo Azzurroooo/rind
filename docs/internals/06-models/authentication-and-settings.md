@@ -37,7 +37,7 @@ RIND_HOME 默认是 ~/.rind，统一改变设置、凭证、会话等用户数�
 
 ## 最小配置与登录
 
-CLI 中用 /login 保存供应商 API key，用 /model 选择模型，/effort 调整支持的推理级别。目前交互式登录只实现 api_key；凭证数据类型能表示 OAuth，不等于已有 OAuth 登录流程。
+CLI 中用 /login 保存供应商 API key，用 /model 选择模型，/effort 调整支持的推理级别。/model 与 /effort 先改当前对话（下一轮生效），随后只追加一个问题：是否也作为此文件夹新对话的默认（文件夹已是该值时不问；没有终端 UI 时不问）。Ctrl+T 只切换当前对话的 effort，从不询问。没有"所有新对话"的选项：其余文件夹的默认只来自手动编辑的 settings.json。非交互时用 rind config set model|effort <值> --folder [目录]、rind config unset model|effort --folder [目录]。目前交互式登录只实现 api_key；凭证数据类型能表示 OAuth，不等于已有 OAuth 登录流程。
 
 通用 Chat Completions 端点可使用以下 settings.json；将 MY_MODEL_KEY 设置为本机环境变量：
 

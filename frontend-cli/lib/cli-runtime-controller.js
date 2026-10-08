@@ -12,6 +12,8 @@ export function createCliRuntimeController({
   getCompactContextState,
   askModelMenu,
   askEffortMenu = null,
+  // A yes/no menu, or null without a terminal UI (a script is never asked).
+  askChoice = null,
   askSessionMenu,
   askForkPointMenu,
   askContextBoard = null,
@@ -462,14 +464,35 @@ export function createCliRuntimeController({
       // Kept with the window and used when its first message creates the conversation.
       state.session.info = { ...state.session.info, provider: selected.providerId || state.session.info.provider, model: selected.modelId };
       log(() => modelSetResultText({ provider_id: state.session.info.provider, model_id: selected.modelId }, selected.modelId));
-      return;
+    } else {
+      try {
+        const update = await request(methods.modelSet, { provider_id: selected.providerId || undefined, model_id: selected.modelId });
+        state.session.info = { ...state.session.info, provider: update?.provider_id || selected.providerId, model: update?.model_id || selected.modelId };
+        log(() => modelSetResultText(update, selected.modelId));
+      } catch (error) {
+        log(`Command failed: ${error instanceof Error ? error.message : String(error)}`);
+        return;
+      }
     }
+    await offerFolderDefault({ provider_id: state.session.info.provider, model_id: state.session.info.model },
+      own => own.provider === state.session.info.provider && own.model === state.session.info.model,
+      `${state.session.info.provider} / ${state.session.info.model}`);
+  }
+
+  // After /model or /effort: also make the choice what new conversations in
+  // this folder start with? Not asked when the folder already has it.
+  async function offerFolderDefault(values, alreadySet, label) {
+    const folder = state.session.info.workspace_root;
+    if (!askChoice || !folder || state.runtime.status === "closing") return;
     try {
-      const update = await request(methods.modelSet, { provider_id: selected.providerId || undefined, model_id: selected.modelId });
-      state.session.info = { ...state.session.info, provider: update?.provider_id || selected.providerId, model: update?.model_id || selected.modelId };
-      log(() => modelSetResultText(update, selected.modelId));
+      const current = await request(methods.folderDefaultsGet, { workspace_root: folder });
+      if (alreadySet(current?.folder || {})) return;
+      const answer = await askChoice("Also the default for new conversations in this folder?", ["No · only this conversation", "Yes · new conversations here start with " + label]);
+      if (!String(answer || "").startsWith("Yes")) return;
+      await request(methods.folderDefaultsSet, { workspace_root: folder, ...values });
+      log(() => commandResultText("Folder default updated.", `new conversations here: ${label} · open ones keep theirs`));
     } catch (error) {
-      log(`Command failed: ${error instanceof Error ? error.message : String(error)}`);
+      log(`Folder default not changed: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
 
@@ -524,15 +547,17 @@ export function createCliRuntimeController({
     if (!hasConversation()) {
       state.session.info = { ...state.session.info, reasoning_effort: effort };
       log(() => commandResultText("Reasoning effort updated.", `- session effort: ${effort}`));
-      return;
+    } else {
+      try {
+        const update = await request(methods.modelEffortSet, { reasoning_effort: effort });
+        state.session.info = { ...state.session.info, reasoning_effort: effort };
+        log(() => commandResultText("Reasoning effort updated.", `- session effort: ${effort} · ${appliesNote(update)}`));
+      } catch (error) {
+        log(`Command failed: ${error instanceof Error ? error.message : String(error)}`);
+        return;
+      }
     }
-    try {
-      const update = await request(methods.modelEffortSet, { reasoning_effort: effort });
-      state.session.info = { ...state.session.info, reasoning_effort: effort };
-      log(() => commandResultText("Reasoning effort updated.", `- session effort: ${effort} · ${appliesNote(update)}`));
-    } catch (error) {
-      log(`Command failed: ${error instanceof Error ? error.message : String(error)}`);
-    }
+    await offerFolderDefault({ reasoning_effort: effort }, own => own.reasoning_effort === effort, `effort ${effort}`);
   }
 
   return {

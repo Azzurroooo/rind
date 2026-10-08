@@ -307,6 +307,7 @@ const runtimeController = createCliRuntimeController({
   getCompactContextState: () => compactContextState,
   askModelMenu: (...args) => inputActions.askModelMenu(...args),
   askEffortMenu: (...args) => inputActions.askEffortMenu(...args),
+  askChoice: tui ? (...args) => inputActions.askAuthChoice(...args) : null,
   askSessionMenu: (...args) => inputActions.askSessionMenu(...args),
   askForkPointMenu: (...args) => inputActions.askForkPointMenu(...args),
   askContextBoard: (...args) => inputActions.askContextBoard(...args),

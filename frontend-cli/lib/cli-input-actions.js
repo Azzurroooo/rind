@@ -534,7 +534,9 @@ export function createCliInputActions({
       }
       const index = levels.indexOf(String(state.session.info.reasoning_effort || "").toLowerCase());
       const next = levels[(index + 1 + levels.length) % levels.length];
-      await request(runtimeMethods.modelEffortSet, { reasoning_effort: next });
+      // Only this conversation, never a folder default. Before the first
+      // message the window keeps it for the conversation it creates.
+      if (state.session.info.session_id) await request(runtimeMethods.modelEffortSet, { reasoning_effort: next });
       state.session.info = { ...state.session.info, reasoning_effort: next };
       output.writeError(`Reasoning effort: ${next}\n`);
     } catch (error) {
