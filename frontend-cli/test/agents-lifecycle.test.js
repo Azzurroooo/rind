@@ -7,7 +7,7 @@ import path from "node:path";
 import os from "node:os";
 import { fileURLToPath } from "node:url";
 import { createHandoff, writeHandoff, takeHandoffPath, HANDOFF_ENV } from "../lib/agents-handoff.js";
-import { followConversation, returnTarget } from "../lib/agents-commands.js";
+import { clearForConversation, followConversation, openAgentChat, returnTarget } from "../lib/agents-commands.js";
 import { runAgentsPage } from "../lib/agents-page.js";
 import { plainSession } from "../lib/agents-session.js";
 import { startServer } from "../../agent-management/dist/ipc.js";
@@ -53,6 +53,33 @@ test("moving between conversations replaces the window instead of nesting it", a
   assert.deepEqual(opened, ["a", "b", "c"]);
   assert.deepEqual(next, { action: "agents", chat: { runtimeSessionId: "c" } }, "it reports the last conversation opened");
   assert.deepEqual(await followConversation({}, { launch: {}, open: async () => undefined }), { action: "return", chat: {} });
+});
+
+test("a conversation window starts on a clear screen, so the one it replaces leaves nothing behind", async () => {
+  const terminal = createVirtualOutput({ columns: 40, rows: 6 });
+  terminal.output.isTTY = true;
+  terminal.output.write("Team: notes\r\n| work/docs-writer |\r\n");
+  clearForConversation(terminal.output);
+  terminal.output.write("| work/notes-app |");
+  const screen = await terminal.flushAndGetViewport();
+  assert.doesNotMatch(screen.join("\n"), /docs-writer/);
+  assert.match(screen[0], /notes-app/);
+  const piped = { isTTY: false, written: "", write(chunk) { this.written += chunk; } };
+  clearForConversation(piped);
+  assert.equal(piped.written, "", "redirected output gets no control sequences");
+});
+
+test("a conversation window's decision reaches the window that opened it", { timeout: 20000 }, async t => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), "rind-window-decision-"));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const handoffModule = new URL("../lib/agents-handoff.js", import.meta.url).href;
+  const decide = async (decision, name) => {
+    const script = path.join(dir, name + ".mjs");
+    await writeFile(script, `import { takeHandoffPath, writeHandoff } from ${JSON.stringify(handoffModule)};\nawait writeHandoff(${JSON.stringify(decision)}, takeHandoffPath());\n`);
+    return openAgentChat({ agent: { canonicalWorkspace: dir }, teamId: "t", launch: {}, input: { setRawMode() {}, pause() {}, resume() {}, isRaw: false }, windowScript: script });
+  };
+  assert.deepEqual(await decide({ action: "leave" }, "leave"), { action: "leave" });
+  assert.equal((await decide({ action: "agents", from: { runtimeSessionId: "s1", workspace: dir } }, "agents")).from.runtimeSessionId, "s1");
 });
 
 test("Esc goes back to the conversation just left, never further", () => {
