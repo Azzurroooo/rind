@@ -98,7 +98,9 @@ async def test_a_reopened_conversation_can_be_brought_to_the_folder_defaults(wor
         applied = await request("rind/folder_defaults/apply", session_id=session_id)
         assert applied["changed"] is True and applied["applies"] == "now"
         assert (applied["model_id"], applied["reasoning_effort"]) == ("deepseek-flash", "max")
-        assert any(m.get("event", {}).get("type") == "session_settings_changed" for m in messages)
+        changed = next(m["event"] for m in messages if m.get("event", {}).get("type") == "session_settings_changed")
+        assert changed["selection_source"] == {"model": "folder", "effort": "folder"}
+        assert changed["connection_ready"] is True
         status = _entries(await request("rind/command/execute", session_id=session_id, input="/status"))
         assert status["model"] == "deepseek-flash · folder default"
         assert (await request("rind/folder_defaults/apply", session_id=session_id))["changed"] is False

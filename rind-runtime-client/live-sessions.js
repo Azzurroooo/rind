@@ -115,9 +115,10 @@ export function createLiveSessions({ onChange = () => {}, now = () => Date.now()
       // What it runs on, changed in some window: lists show it at once.
       if (id && message?.event?.type === "session_settings_changed") {
         const item = entry(id);
-        const { provider = "", model = "", reasoning_effort: reasoningEffort = "" } = message.event;
-        if (item.provider === provider && item.model === model && item.reasoningEffort === reasoningEffort) return;
-        Object.assign(item, { provider, model, reasoningEffort });
+        const { provider = "", model = "", reasoning_effort: reasoningEffort = "", selection_source: selectionSource = {}, connection_ready: connectionReady } = message.event;
+        const next = { provider, model, reasoningEffort, selectionSource, connectionReady: connectionReady !== false };
+        if (Object.entries(next).every(([key, value]) => JSON.stringify(item[key]) === JSON.stringify(value))) return;
+        Object.assign(item, next);
         changed();
         return;
       }

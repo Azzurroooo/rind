@@ -666,13 +666,18 @@ class RuntimeDispatcher:
             await self._respond_error(request, "exclude_workspace_roots must be a list of strings.", "InvalidRequest")
             return
         sessions = await self._worker.repository.list(limit=limit, workspace_root=workspace_root, exclude_workspace_roots=excluded)
+        ready = self._ready_connections()
         await self._respond(
             request,
             {
-                "sessions": sessions,
+                # Whether each conversation's connection can run, so lists can warn before its next turn fails.
+                "sessions": [session | {"connection_ready": session.get("provider") in ready} for session in sessions],
                 "current_session_id": self._worker.session_id or "",
             },
         )
+
+    def _ready_connections(self) -> set[str]:
+        return {provider["id"] for provider in self._worker.list_providers() if provider["configured"]}
 
     async def _new_session(self, request: dict[str, Any]) -> None:
         params = request.get("params") if isinstance(request.get("params"), dict) else {}
@@ -979,10 +984,13 @@ class RuntimeDispatcher:
         "next_turn" while a turn runs or waits (it keeps its model), otherwise "now".
         """
         applies = "next_turn" if self._worker.execution.turn_running(session_id) else "now"
+        provider = str(getattr(store, "provider", "") or "")
         await self._send_event({
             "type": "session_settings_changed", "session_id": session_id, "turn_id": "",
-            "provider": str(getattr(store, "provider", "") or ""), "model": str(getattr(store, "model", "") or ""),
+            "provider": provider, "model": str(getattr(store, "model", "") or ""),
             "reasoning_effort": str(getattr(store, "reasoning_effort", "") or ""), "applies": applies,
+            "selection_source": dict(getattr(store, "selection_source", {}) or {}),
+            "connection_ready": provider in self._ready_connections(),
         })
         return applies
 

@@ -68,6 +68,7 @@ def session_index_entry(
         "provider": meta.get("provider") or None,
         "model": meta.get("model") or None,
         "reasoning_effort": meta.get("reasoning_effort") or None,
+        "selection_source": meta.get("selection_source") if isinstance(meta.get("selection_source"), dict) else None,
         "has_user_message": True,
     }
 

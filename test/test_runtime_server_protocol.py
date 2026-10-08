@@ -460,7 +460,7 @@ def test_session_list_returns_recent_sessions_and_current_id():
 
     result = _response(payloads, 27)["result"]
     assert result["current_session_id"] == "s1"
-    assert result["sessions"] == [{"id": "s1", "title": "session s1"}]
+    assert result["sessions"] == [{"id": "s1", "title": "session s1", "connection_ready": False}]
 
 
 def test_session_new_returns_created_metadata():

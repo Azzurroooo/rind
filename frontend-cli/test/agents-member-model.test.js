@@ -87,3 +87,20 @@ test("the Manager's changes wait in the Inbox, apart from what needs the user", 
   assert.equal(available({ focus: "main", page: { kind: "inbox" } }, notice)[0].label, "dismiss");
   assert.match(detailFor({ page: { kind: "inbox" }, snapshot: s }, notice).join("\n"), /applies from the member's next task/);
 });
+
+test("a selected conversation says what it runs on and warns when its connection cannot run", () => {
+  const s = snapshot();
+  const view = { snapshot: s, page: { kind: "team" },
+    history: { team: { entries: [{ runtimeSessionId: "r1", agentId: "lead", teamId: "team", title: "Plan", provider: "deepseek", model: "deepseek-flash", reasoningEffort: "high", selectionSource: { model: "folder", effort: "session" }, connectionReady: true }] } },
+    independent: { workspaces: [{ workspace: "/w/free", sessions: [{ runtimeSessionId: "r2", title: "Free", provider: "gone", model: "m", connectionReady: false }] }] } };
+  const text = row => detailFor(view, row).join("\n").replace(/\x1b\[[0-9;]*m/g, "");
+  const team = text({ kind: "session", sessionId: "r1", agentId: "lead", teamId: "team", title: "Plan", status: "Idle" });
+  assert.match(team, /deepseek \/ deepseek-flash · high/);
+  assert.match(team, /model folder default · effort this conversation/);
+  assert.doesNotMatch(team, /not configured/);
+  const free = text({ kind: "session", independent: true, sessionId: "r2", title: "Free", workspace: "/w/free", status: "Idle" });
+  assert.match(free, /gone \/ m\n/);
+  assert.match(free, /! gone is not configured · its next turn fails/);
+  s.live = [{ id: "r1", provider: "openai", model: "gpt-5.5", reasoningEffort: "", selectionSource: { model: "session" }, connectionReady: true }];
+  assert.match(text({ kind: "session", sessionId: "r1", agentId: "lead", teamId: "team", title: "Plan", status: "Open" }), /openai \/ gpt-5\.5\n.*model this conversation/, "a change in some window shows at once");
+});

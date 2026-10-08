@@ -166,6 +166,8 @@ async def test_the_session_list_carries_each_conversation_settings(worker, tmp_p
         await request("model/effort", session_id=session_id, reasoning_effort="high")
         listed = next(entry for entry in (await request("session/list", workspace_root=str(tmp_path)))["sessions"] if entry["id"] == session_id)
         assert (listed["provider"], listed["model"], listed["reasoning_effort"]) == ("openai-compatible", "model-b", "high")
+        assert listed["selection_source"] == {"model": "session", "effort": "session"}
+        assert listed["connection_ready"] is False, "openai-compatible has no key here; lists can warn"
     finally:
         await worker.close()
 

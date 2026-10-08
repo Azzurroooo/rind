@@ -149,11 +149,11 @@ test("a conversation's model and effort are part of its live state", () => {
   const { live, flush, pushes } = setup();
   live.view({}, "s1");
   flush(); pushes.length = 0;
-  const changed = { type: "session_settings_changed", provider: "deepseek", model: "deepseek-pro", reasoning_effort: "high" };
+  const changed = { type: "session_settings_changed", provider: "deepseek", model: "deepseek-pro", reasoning_effort: "high", selection_source: { model: "folder", effort: "session" }, connection_ready: false };
   live.event({ session_id: "s1", event: changed });
-  live.event({ session_id: "s1", event: changed });
+  live.event({ session_id: "s1", event: { ...changed, selection_source: { model: "folder", effort: "session" } } });
   flush();
   const [item] = live.list();
-  assert.deepEqual([item.provider, item.model, item.reasoningEffort], ["deepseek", "deepseek-pro", "high"]);
+  assert.deepEqual([item.provider, item.model, item.reasoningEffort, item.selectionSource.model, item.connectionReady], ["deepseek", "deepseek-pro", "high", "folder", false]);
   assert.equal(pushes.length, 1, "the same settings again are no change");
 });

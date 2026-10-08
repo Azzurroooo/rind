@@ -76,6 +76,21 @@ export function roleOf(snapshot, teamId, agentId) {
 // A rename reaches the live table at once; history catches up on its next read.
 const liveTitle = (snapshot, id) => single((snapshot.live || []).find(item => item.id === id)?.title);
 
+const SELECTION_FIELDS = ["provider", "model", "reasoningEffort", "selectionSource", "connectionReady"];
+// What a conversation runs on: its live state once some window changed it,
+// otherwise what its saved history says. Undefined while neither knows.
+export function sessionSelection(view, runtimeSessionId) {
+  const live = (view.snapshot.live || []).find(item => item.id === runtimeSessionId);
+  if (live?.model) return pick(live);
+  const saved = [
+    ...Object.values(view.history || {}).flatMap(history => history?.entries || []),
+    ...(view.managerHistory?.entries || []),
+    ...(view.independent?.workspaces || []).flatMap(group => group.sessions),
+  ].find(entry => entry.runtimeSessionId === runtimeSessionId);
+  return saved?.model ? pick(saved) : undefined;
+}
+const pick = item => Object.fromEntries(SELECTION_FIELDS.filter(key => item[key] !== undefined).map(key => [key, item[key]]));
+
 // Saved history supplies titles; the snapshot supplies live status. Only
 // conversations registered to this team are kept.
 export function teamSessions(snapshot, teamId, history = []) {

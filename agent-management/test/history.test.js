@@ -72,3 +72,12 @@ test("independent history groups non-team conversations by workspace and skips t
   assert.deepEqual(groups[1].teams, ["A"]);
   assert.deepEqual(groups[1].sessions, [{ runtimeSessionId: "r-standalone", title: "Quick fix", updatedAt: "2026-10-06T04:00:00Z", sessionId: "s5" }]);
 });
+
+test("history carries what each conversation runs on, and whether its connection can run", async () => {
+  const { state } = fixture();
+  const list = async () => [{ id: "r-team", title: "Plan", provider: "deepseek", model: "deepseek-flash", reasoning_effort: "high", selection_source: { model: "folder", effort: "session" }, connection_ready: false }];
+  const [row] = await sessionHistory(state, { teamId: "a", agentId: "lead" }, list);
+  assert.deepEqual([row.provider, row.model, row.reasoningEffort, row.selectionSource.model, row.connectionReady], ["deepseek", "deepseek-flash", "high", "folder", false]);
+  const [group] = await independentHistory(state, "/w/manager", async () => [{ id: "r-free", title: "Free", workspace_root: "/w/free", provider: "openai", model: "gpt-5.5" }]);
+  assert.deepEqual([group.sessions[0].provider, group.sessions[0].model, group.sessions[0].reasoningEffort], ["openai", "gpt-5.5", undefined]);
+});

@@ -1,5 +1,5 @@
 import { paint } from "./theme.js";
-import { single, statusMeta, roleOf, needsUser, taskStatus, memberState } from "./agents-model.js";
+import { single, statusMeta, roleOf, needsUser, taskStatus, memberState, sessionSelection } from "./agents-model.js";
 
 const tone = status => (paint[statusMeta(status).tone] || paint.dim)(statusMeta(status).glyph + " " + status);
 const field = (label, value) => [paint.dim(label), value || paint.dim("—"), ""];
@@ -8,6 +8,17 @@ function memberLine(row) {
   return (paint[statusMeta(status).tone] || paint.dim)(statusMeta(status).glyph + " " + label[0].toUpperCase() + label.slice(1));
 }
 const byId = (items, id) => items.find(item => item.id === id);
+const SOURCES = { session: "this conversation", folder: "folder default", main_repository: "main repository default", settings: "settings.json" };
+// "deepseek / deepseek-flash · high", where each part came from, and a warning
+// when its connection cannot run (its next turn would fail).
+export function selectionLines(selection) {
+  if (!selection) return [];
+  const { provider, model, reasoningEffort, selectionSource = {}, connectionReady } = selection;
+  const sources = [selectionSource.model && "model " + SOURCES[selectionSource.model], selectionSource.effort && reasoningEffort && "effort " + SOURCES[selectionSource.effort]].filter(Boolean);
+  return [single(provider) + " / " + single(model) + (reasoningEffort ? " · " + single(reasoningEffort) : ""),
+    ...(sources.length ? [paint.dim(sources.join(" · "))] : []),
+    ...(connectionReady === false ? [paint.warning("! " + single(provider) + " is not configured · its next turn fails · /login")] : []), ""];
+}
 // Running job, said in full: what runs and that it carries on by itself.
 function jobLine(snapshot, runtimeSessionId) {
   const background = (snapshot.live || []).find(item => item.id === runtimeSessionId)?.background;
@@ -46,17 +57,20 @@ export function detailFor(view, row) {
     case "session":
     case "more":
     case "new-session": {
+      const runsOn = row.kind === "session" ? selectionLines(sessionSelection(view, row.sessionId)) : [];
       if (row.independent) return [paint.bold(row.title), paint.dim(row.workspace), "",
         tone(row.status) + (row.time ? paint.dim(" · " + row.time) : ""), "",
+        ...runsOn,
         ...(row.status === "Running job" ? [jobLine(snapshot, row.sessionId), ""] : []),
         ...field("Session", paint.dim(row.sessionId)),
         "Enter continues this conversation in its folder. It stays outside every team."];
-      if (row.manager) return [paint.bold("Manager"), paint.dim("Coordinates every team"), "", "Assembles teams, delegates to leaders and reviews published reports. Members' private conversations stay with them.", "", ...(row.kind === "session" ? field("Conversation", row.title) : [])];
+      if (row.manager) return [paint.bold("Manager"), paint.dim("Coordinates every team"), "", "Assembles teams, delegates to leaders and reviews published reports. Members' private conversations stay with them.", "", ...(row.kind === "session" ? [...field("Conversation", row.title), ...runsOn] : [])];
       const task = byId(snapshot.tasks, row.taskId);
       const owner = paint.dim((single(agent?.name) || "Member") + " · " + (single(team?.name) || "Team"));
       if (row.kind === "more") return [paint.bold(row.title), owner, "", "Enter lists every conversation this member has in the team."];
       if (row.kind === "new-session") return [paint.bold(row.title), owner, "", "Opens a new conversation in this member's workspace. It stays attached to this team."];
       return [paint.bold(row.title), owner, "", tone(row.status) + (row.time ? paint.dim(" · " + row.time) : ""), "",
+        ...runsOn,
         ...(task ? field("Task", single(task.brief)) : []),
         ...field("Session", paint.dim(row.sessionId)),
         ...(row.status === "Running job" ? [jobLine(snapshot, row.sessionId), ""] : []),

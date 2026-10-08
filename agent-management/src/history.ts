@@ -1,12 +1,21 @@
 import { memberKey, requireValue, type State } from "./model.js";
 
-export interface HistoryEntry { runtimeSessionId: string; agentId: string; teamId?: string; title: string; updatedAt?: string; messageCount?: number }
+// What a conversation runs on, as its saved history reports it.
+export interface Selection { provider?: string; model?: string; reasoningEffort?: string; selectionSource?: Record<string, string>; connectionReady?: boolean }
+export interface HistoryEntry extends Selection { runtimeSessionId: string; agentId: string; teamId?: string; title: string; updatedAt?: string; messageCount?: number }
 export interface HistoryScope { agentId?: string; teamId?: string }
 type ListWorkspace = (workspace: string) => Promise<Array<Record<string, unknown>>>;
 
 const string = (value: unknown) => typeof value === "string" && value.trim() ? value.trim() : undefined;
 // "Untitled" is what older versions stored for a conversation without a first message.
 const shownTitle = (raw: Record<string, unknown>) => { const title = string(raw.title); return title === "Untitled" ? undefined : title; };
+const selectionOf = (raw: Record<string, unknown>): Selection => ({
+  ...(string(raw.provider) ? { provider: string(raw.provider) } : {}),
+  ...(string(raw.model) ? { model: string(raw.model) } : {}),
+  ...(string(raw.reasoning_effort) ? { reasoningEffort: string(raw.reasoning_effort) } : {}),
+  ...(raw.selection_source && typeof raw.selection_source === "object" ? { selectionSource: raw.selection_source as Record<string, string> } : {}),
+  ...(typeof raw.connection_ready === "boolean" ? { connectionReady: raw.connection_ready } : {}),
+});
 
 // A team scope only returns conversations registered to that team; independent
 // history in the same workspace is never surfaced through Agents management.
@@ -35,7 +44,7 @@ export async function sessionHistory(state: State, scope: HistoryScope, list: Li
       const title = shownTitle(raw) || runtimeSessionId;
       entries.push({ runtimeSessionId, agentId, ...(owner?.teamId ? { teamId: owner.teamId } : {}), title,
         ...(string(raw.updated_at) ? { updatedAt: string(raw.updated_at) } : {}),
-        ...(Number.isInteger(raw.message_count) ? { messageCount: raw.message_count as number } : {}) });
+        ...(Number.isInteger(raw.message_count) ? { messageCount: raw.message_count as number } : {}), ...selectionOf(raw) });
     }
     // Registered conversations that have not been written to history yet still belong to the scope.
     for (const session of scoped) if (!seen.has(session.runtimeSessionId)) {
@@ -47,7 +56,7 @@ export async function sessionHistory(state: State, scope: HistoryScope, list: Li
   return groups.flat().sort((a, b) => (b.updatedAt || "").localeCompare(a.updatedAt || ""));
 }
 
-export interface WorkspaceSession { runtimeSessionId: string; title: string; updatedAt?: string; sessionId?: string }
+export interface WorkspaceSession extends Selection { runtimeSessionId: string; title: string; updatedAt?: string; sessionId?: string }
 export interface WorkspaceGroup { workspace: string; agentId?: string; name: string; teams: string[]; sessions: WorkspaceSession[] }
 type ListQuery = { workspace_root?: string; exclude_workspace_roots?: string[] };
 type ListAll = (query: ListQuery) => Promise<Array<Record<string, unknown>>>;
@@ -89,7 +98,7 @@ export async function independentHistory(state: State, managerWorkspace: string,
     }
     if (group.sessions.some(s => s.runtimeSessionId === runtimeSessionId)) continue;
     group.sessions.push({ runtimeSessionId, title: shownTitle(raw) || runtimeSessionId,
-      ...(string(raw.updated_at) ? { updatedAt: string(raw.updated_at) } : {}), ...(owner ? { sessionId: owner.id } : {}) });
+      ...(string(raw.updated_at) ? { updatedAt: string(raw.updated_at) } : {}), ...(owner ? { sessionId: owner.id } : {}), ...selectionOf(raw) });
   }
   const latest = (group: WorkspaceGroup) => group.sessions.reduce((max, s) => (s.updatedAt || "") > max ? s.updatedAt || "" : max, "");
   for (const group of groups.values()) group.sessions.sort((a, b) => (b.updatedAt || "").localeCompare(a.updatedAt || ""));
