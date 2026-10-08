@@ -20,7 +20,7 @@ import {
   isRuntimeEventForTurn,
 } from "./runtime-protocol.js";
 import { executeLocalSlashCommand } from "./local-slash-commands.js";
-import { loadCliState, saveCliState } from "./cli-state-store.js";
+import { applySavedTheme, loadCliState, saveCliState } from "./cli-state-store.js";
 import { loadPromptHistory, savePromptHistory } from "./prompt-history-store.js";
 import { setTheme } from "./theme.js";
 import { createTurnController } from "./turn-controller.js";
@@ -68,6 +68,7 @@ const python = process.env.RIND_PYTHON || "python";
 const runtimePath = process.env.RIND_RUNTIME_PATH || resolveInstalledRuntime();
 const managementLaunch = { python, repoRoot, runtimePath };
 if (cliArgs[0] === "agents") {
+  applySavedTheme();
   try { await runAgentsCommand(cliArgs.slice(1), managementLaunch); }
   catch (error) { process.stderr.write(error.message + "\n"); process.exitCode = 2; }
   return;

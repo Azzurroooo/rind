@@ -160,3 +160,16 @@ test("cli state store merges patches atomically and tolerates corruption", async
     await rm(root, { recursive: true, force: true });
   }
 });
+
+test("the saved theme applies to every surface, Agents included", async () => {
+  const { applySavedTheme } = await import("../lib/cli-state-store.js");
+  const { mkdtempSync, writeFileSync } = await import("node:fs");
+  const { tmpdir } = await import("node:os");
+  const pathModule = await import("node:path");
+  const home = mkdtempSync(pathModule.join(tmpdir(), "rind-theme-"));
+  writeFileSync(pathModule.join(home, "cli-state.json"), JSON.stringify({ theme: "gruvbox-dark" }));
+  try {
+    applySavedTheme(home);
+    assert.equal(currentTheme().name, "gruvbox-dark");
+  } finally { resetTheme(); }
+});

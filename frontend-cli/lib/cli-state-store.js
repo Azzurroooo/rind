@@ -1,6 +1,7 @@
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
+import { setTheme } from "./theme.js";
 
 // CLI-owned runtime preferences, separate from the shared ~/.rind/settings.json
 // that the Python runtime manages (apiKey/model/baseUrl).
@@ -29,4 +30,10 @@ export function saveCliState(patch, rindHome) {
   } catch {
     return false;
   }
+}
+
+// Every surface (chat and `rind agents`) draws with the theme chosen by /theme.
+export function applySavedTheme(rindHome) {
+  const { theme } = loadCliState(rindHome);
+  if (theme) setTheme(theme);
 }
