@@ -54,3 +54,17 @@ test("help is built from the same table and never mentions direct reports", () =
   for (const action of Object.values(ACTIONS)) assert.ok(text.includes(action.help), action.help);
   assert.doesNotMatch(text, /direct report/);
 });
+
+test("fold is offered only where something can fold", () => {
+  const org = main({ kind: "team", teamId: "t", tab: "org" });
+  const offers = (view, row) => available(view, row).some(action => action.id === "fold");
+  assert.equal(offers(org, { kind: "add-member" }), false, "the add row has no branch");
+  assert.equal(offers(org, { kind: "member", agentId: "a", expandable: false }), false, "a member with nothing below");
+  assert.equal(offers(org, { kind: "member", agentId: "a", expandable: true }), true);
+  assert.equal(offers(org, { kind: "session", sessionId: "s" }), true, "folds the member it sits under");
+  const independent = main({ kind: "independent" });
+  assert.equal(offers(independent, { kind: "workspace", workspace: "/w" }), true);
+  assert.equal(offers(independent, { kind: "session", sessionId: "s", workspace: "/w" }), true);
+  // Fold all stays: it acts on the whole list, not the selected row.
+  assert.ok(available(org, { kind: "add-member" }).some(action => action.id === "foldAll"));
+});

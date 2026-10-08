@@ -193,3 +193,19 @@ test("a new team flows straight into adding its first member, who becomes the le
   key("\x1b"); await h.settle(); await visible("back to chat"); key("\x1b"); await running;
   assert.equal(h.input.isRaw, false);
 });
+
+test("refreshing says so even when nothing changed, and a duplicate team name is refused in the form", { timeout: 20000 }, async t => {
+  const h = await harness({ columns: 100, rows: 24, prefix: "rind-agents-refresh-" });
+  const running = runAgentsPage({ launch: h.launch, input: h.input, output: h.output.output });
+  // A dialog stays open at the end, so ctrl+c twice: the first only arms leaving.
+  t.after(async () => { h.input.send("\x03"); h.input.send("\x03"); await running; await h.cleanup(); });
+  const { key, paste, visible } = h;
+  await visible("Create your first team");
+  key("r"); await visible("Up to date");
+  key("n"); await visible("Team name"); paste("Notes"); key("\r"); await visible("Existing folder");
+  // Esc and the next key sent together read as alt+key; let Esc land first.
+  key("\x1b"); await h.settle();
+  key("n"); await visible("Team name"); paste("notes"); key("\r");
+  await visible("already exists");
+  assert.equal((await h.client.request("snapshot")).teams.length, 1);
+});

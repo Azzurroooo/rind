@@ -79,7 +79,13 @@ export function available(view, row) {
   if (page === "team" || page === "member") list.push(act("task"));
   if (org) list.push(act("add", row?.kind === "member" ? "add member below" : undefined));
   if (page === "team") list.push(act("tabs"));
-  if (org || page === "independent") list.push(act("fold"), act("foldAll"));
+  // z folds the selected branch: a member with something below it, a folder, or
+  // the one a conversation row sits in. Z acts on the whole list.
+  const foldable = org
+    ? (row?.kind === "member" && row.expandable) || ["session", "more"].includes(row?.kind)
+    : page === "independent" && ["workspace", "session", "more"].includes(row?.kind);
+  if (foldable) list.push(act("fold"));
+  if (org || page === "independent") list.push(act("foldAll"));
   if (["independent", "folder", "inbox", "background", "archive"].includes(page) || (page === "team" && view.page.tab === "tasks")) list.push(act("group"));
   if (page === "background") list.push(act("stop"));
   if (page !== "new-team") list.push(act("search"));

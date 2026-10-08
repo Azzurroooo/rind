@@ -594,13 +594,18 @@ export async function runAgentsPage({ launch, input = process.stdin, output = pr
     }
   }
   function refresh() {
-    if (view.connection !== "connected") { void connect(); return; }
+    // Not connected yet (or offline): connecting is the refresh; say how it went.
+    if (view.connection !== "connected") {
+      void connect()?.then(() => { if (view.connection === "connected") notify("Up to date", "success"); });
+      return;
+    }
     if (view.page.teamId) delete view.history[view.page.teamId];
     if (view.page.kind === "manager") view.managerHistory = null;
     if (["independent", "folder"].includes(view.page.kind)) view.independent = null;
     if (view.page.kind === "background") view.serviceAt = 0;
     if (view.page.kind === "archive") view.archive = null;
-    void perform(async () => acceptSnapshot(await client.request("snapshot")), null, "Refreshing…");
+    // A refresh that changes nothing still says it happened.
+    void perform(async () => { acceptSnapshot(await client.request("snapshot")); notify("Up to date", "success"); }, null, "Refreshing…");
   }
 
   tui.addChild({ render: width => renderAgents(view, width, tui.rows) });
