@@ -38,6 +38,7 @@ import { createCliInputActions } from "./cli-input-actions.js";
 import { cliHelp, oneShotHelp, runOneShot, tourHelp } from "./one-shot.js";
 import { runSend, sendHelp } from "./send.js";
 import { configHelp, runConfig } from "./config-command.js";
+import { createWindowLog, guardStartup } from "./window-startup.js";
 import { listenIpc } from "./ipc.js";
 import { runTour } from "./tour/run-tour.js";
 import { createTui } from "./tui/tui.js";
@@ -171,9 +172,21 @@ if (cliArgs[0] === "run") {
   return;
 }
 
+const windowLog = createWindowLog();
+windowLog.step("start " + JSON.stringify(cliArgs));
+// A window opened from Agents is still starting until it reads keys itself:
+// Esc or Ctrl+C gives up and goes back to Agents. (A window started from a
+// shell may still ask which team to use, so it reads its own keys.)
+const startupGuard = handoffWindow ? guardStartup({ onCancel(key) {
+  windowLog.step("cancelled with " + key);
+  writeHandoffSync({ action: "agents" }, handoffFile);
+  process.exit(0);
+} }) : { stop() {} };
 let management;
-try { management = await prepareManagement(cliArgs, managementLaunch); cliArgs = management.args; }
+try { management = await prepareManagement(cliArgs, managementLaunch); cliArgs = management.args; windowLog.step("management ready"); }
 catch (error) {
+  startupGuard.stop();
+  windowLog.step("failed: " + error.message);
   // A window opened from Agents tells its opener why it could not start.
   if (handoffWindow) await writeHandoff({ action: "failed", error: error.message }, handoffFile);
   process.stderr.write(error.message + "\n"); process.exitCode = 2; return;
@@ -508,6 +521,7 @@ try {
   sessionState.info = { cwd: process.cwd(), management_label: management.label };
   sessionState.commands = commandController.localCommands();
   await runtimeController.ensureRuntime();
+  windowLog.step("runtime ready");
   const startupInfo = { ...sessionState.info, resume_preview: "" };
   if (management.label) logOutput(management.label);
   // A new conversation is greeted; one opened again says what it resumes.
@@ -520,8 +534,10 @@ try {
     logOutput([startupText(startupInfo), opening()].filter(Boolean).join("\n\n"));
   }
   // A window opened on an existing conversation shows its history; a new one has none yet.
-  if (sessionState.info.session_id) await runtimeController.restoreSession();
+  if (sessionState.info.session_id) { await runtimeController.restoreSession(); windowLog.step("history restored"); }
   if (management.prefill) inputStateData.prefill = management.prefill;
+  startupGuard.stop();
+  windowLog.step("reading keys");
   if (tui) {
     inputController.start();
   } else {
@@ -536,6 +552,8 @@ try {
   if (sessionState.info.live_turn?.question) void inputActions.answerQuestion({ ...sessionState.info.live_turn.question, type: "user_question_requested" });
   await inputController.promptLoop();
 } catch (error) {
+  startupGuard.stop();
+  windowLog.step("ended: " + (error instanceof Error ? error.message : String(error)));
   closeAssistant();
   if (!isInputClosed(error)) {
     writeErrorOutput(`${error instanceof Error ? error.message : String(error)}\n`);

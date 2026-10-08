@@ -39,8 +39,10 @@ export function clearForConversation(output = process.stdout) {
 
 export async function openAgentChat({ agent, teamId, manager = false, runtimeSessionId, prefill, launch, input = process.stdin, windowScript = fileURLToPath(new URL("../bin/rind.js", import.meta.url)) }) {
   const raw = input.isRaw;
-  input.setRawMode?.(false);
+  // Paused before it leaves raw mode: on Windows a read left pending across
+  // the switch would take the keys typed into the conversation.
   input.pause?.();
+  input.setRawMode?.(false);
   // The conversation owns the terminal and handles ctrl+c itself. A signal that
   // reaches this window too (while the child is between terminal modes) must
   // not end it, or the child would be left without its opener.

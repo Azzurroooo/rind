@@ -2,7 +2,7 @@ import net from "node:net";
 import { randomBytes, createHmac, timingSafeEqual } from "node:crypto";
 import { readFile, writeFile, unlink, chmod, link } from "node:fs/promises";
 import type { Principal } from "./model.js";
-import { requireValue } from "./model.js";
+import { ManagementError, requireValue } from "./model.js";
 import { managementPaths, privateDirectory } from "./paths.js";
 import { openStore } from "./store.js";
 import { createService } from "./service.js";
@@ -13,6 +13,14 @@ import { activeRun } from "./model.js";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import { connectSharedRuntime } from "../../rind-runtime-client/shared-runtime.js";
+
+const RUNTIME_START_MS = 30000;
+// The work keeps going; only the caller stops waiting for it.
+function within<T>(work: Promise<T>, ms: number, message: string): Promise<T> {
+  let timer: NodeJS.Timeout | undefined;
+  const late = new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new ManagementError("RUNTIME_UNAVAILABLE", message)), ms); });
+  return Promise.race([work, late]).finally(() => clearTimeout(timer));
+}
 
 export async function startServer(options: { home?: string; python?: string; repoRoot: string; runtimePath?: string; onShutdown?: () => void }) {
   const startedAt = new Date().toISOString();
@@ -205,7 +213,8 @@ export async function startServer(options: { home?: string; python?: string; rep
           const session = store.state.sessions[message.params.sessionId];
           requireValue(session, "NOT_FOUND", "Session not found.");
           const manager = store.state.agents[session.agentId].canonicalWorkspace === await realManager;
-          if (session.shared) await executionHost();
+          // A window waits on this before it reads keys: a Runtime that cannot start says so.
+          if (session.shared) await within(executionHost(), RUNTIME_START_MS, "The shared Runtime did not start within " + RUNTIME_START_MS / 1000 + "s. Check `rind agents` › Background › Shared Runtime, then try again.");
           result = toolConfig({ kind: manager ? "manager" : "agent", sessionId: session.id });
         } else if (message.method === "serviceInfo") {
           requireValue(principal.kind === "user", "FORBIDDEN", "Only the user can inspect the service.");
