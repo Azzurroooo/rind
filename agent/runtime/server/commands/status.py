@@ -52,7 +52,7 @@ async def build_status_display(context: SlashCommandContext) -> dict:
         {"label": "name", "value": await _name_value(session, session_id, context.draft)},
     ]
     try:
-        settings = load_settings(context.workspace_root)
+        settings = load_settings()
         entries.extend([
             {
                 "label": "settings",

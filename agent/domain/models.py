@@ -42,7 +42,7 @@ class ProviderStatus:
     name: str
     methods: tuple[str, ...]
     configured: bool
-    source: Literal["workspace", "stored", "environment", "none"]
+    source: Literal["settings", "stored", "environment", "none"]
 
 
 @dataclass(frozen=True, slots=True)

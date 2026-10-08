@@ -59,8 +59,7 @@ def normalize_model_name(value: object) -> str | None:
 
 
 def _default_model(session: Any) -> str:
-    workspace_root = getattr(session, "workspace_root", None)
     try:
-        return load_settings(workspace_root).model
+        return load_settings().model
     except (OSError, ValueError):
         return DEFAULT_MODEL

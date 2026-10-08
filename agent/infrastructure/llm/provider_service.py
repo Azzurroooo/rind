@@ -51,18 +51,18 @@ class ProviderServiceImpl:
         self.providers = dict(providers or PROVIDERS)
         self.cache_path = self.credentials.path.with_name("model-cache.json")
 
-    def default_selection(self, workspace_root: str | None = None) -> ModelSelection:
-        settings = load_settings(workspace_root)
+    def default_selection(self) -> ModelSelection:
+        settings = load_settings()
         return ModelSelection(settings.provider, settings.model, settings.reasoning_effort)
 
-    def resolve_selection(self, workspace_root: str | None, selection: ModelSelection, *, settings: AppSettings | None = None) -> ModelDefinition:
+    def resolve_selection(self, selection: ModelSelection, *, settings: AppSettings | None = None) -> ModelDefinition:
         definition = self._provider(selection.provider_id)
-        settings = settings if settings is not None else load_settings(workspace_root)
+        settings = settings if settings is not None else load_settings()
         return self._resolve_model(settings, definition, selection.model_id, self._read_cache().get(definition.id))
 
-    def list_providers(self, workspace_root: str | None = None) -> list[ProviderStatus]:
+    def list_providers(self) -> list[ProviderStatus]:
         try:
-            settings: AppSettings | None = load_settings(workspace_root)
+            settings: AppSettings | None = load_settings()
         except (OSError, ValueError):
             settings = None
         result = []
@@ -71,8 +71,8 @@ class ProviderServiceImpl:
             result.append(ProviderStatus(definition.id, definition.name, definition.auth_methods, source != "none", source))
         return result
 
-    async def list_models(self, workspace_root: str | None = None, *, refresh: bool = False) -> ModelCatalog:
-        settings = load_settings(workspace_root)
+    async def list_models(self, *, refresh: bool = False) -> ModelCatalog:
+        settings = load_settings()
         failures: list[str] = []
         for definition in self.providers.values():
             if self._credential_source(settings, definition.id) == "none":
@@ -82,7 +82,7 @@ class ProviderServiceImpl:
         models = self._catalog(settings)
         return ModelCatalog(models, "; ".join(failures) or None)
 
-    async def login(self, workspace_root: str | None, provider_id: str, method: str, interaction) -> None:
+    async def login(self, provider_id: str, method: str, interaction) -> None:
         definition = self._provider(provider_id)
         if method not in definition.auth_methods:
             raise ValueError(f"{definition.name} does not support {method} login.")
@@ -92,12 +92,12 @@ class ProviderServiceImpl:
         if not key:
             raise ValueError("Login canceled.")
         self.credentials.set(provider_id, Credential(type="api_key", key=key))
-        await self._fetch_models(load_settings(workspace_root), definition)
+        await self._fetch_models(load_settings(), definition)
 
-    async def refresh_stale_models(self, workspace_root: str | None = None) -> None:
+    async def refresh_stale_models(self) -> None:
         """Refresh each configured provider once; ordinary reads remain offline."""
         try:
-            settings = load_settings(workspace_root)
+            settings = load_settings()
             cache = self._read_cache()
             for definition in self.providers.values():
                 if not refreshable_models_api(_effective_api(settings, definition)):
@@ -283,7 +283,7 @@ class ProviderServiceImpl:
 
     def _credential_source(self, settings: AppSettings | None, provider_id: str) -> str:
         if settings is not None and settings.provider == provider_id and settings.api_key:
-            return "workspace"
+            return "settings"
         if self.credentials.get(provider_id) is not None:
             return "stored"
         env_name = self._provider(provider_id).environment_key

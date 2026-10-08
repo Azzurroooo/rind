@@ -9,7 +9,7 @@ export const loginPages = [
     steps: [
       note([
         "Before your first task, use /login to configure a provider.",
-        "Custom endpoint? Set model, apiKey and baseUrl in .rind/settings.json, or ~/.rind/settings.json as a fallback.",
+        "Custom endpoint? Set provider, model, apiKey and baseUrl in ~/.rind/settings.json.",
       ]),
       shell("rind"),
       startup(demoInfo({ session: "20260917_101530_ab12cd34" })),

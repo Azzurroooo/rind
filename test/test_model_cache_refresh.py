@@ -18,7 +18,7 @@ def service(tmp_path, monkeypatch):
         if definition.environment_key:
             monkeypatch.delenv(definition.environment_key, raising=False)
     settings = AppSettings(tmp_path / "settings.json", True, "deepseek-chat", "key", "", "", provider="deepseek")
-    monkeypatch.setattr(module, "load_settings", lambda root=None: settings)
+    monkeypatch.setattr(module, "load_settings", lambda: settings)
     monkeypatch.setattr(module.time, "time", lambda: 200000)
     instance = module.ProviderServiceImpl(CredentialStore(tmp_path / "auth.json"))
     return instance
@@ -57,7 +57,7 @@ async def test_each_provider_and_supported_api(service, monkeypatch):
 @pytest.mark.asyncio
 async def test_missing_environment_reference_and_unsupported_custom_api(service, monkeypatch):
     settings = module.load_settings()
-    monkeypatch.setattr(module, "load_settings", lambda root=None: AppSettings(
+    monkeypatch.setattr(module, "load_settings", lambda: AppSettings(
         settings.settings_path, True, "custom", "$ABSENT_MODEL_TEST_KEY", "https://local.example/v1", "",
         provider="openai-compatible", api="anthropic-messages",
     ))
@@ -116,7 +116,7 @@ async def test_explicit_refresh_and_login_ignore_fresh_timestamp(service, monkey
     fetch = AsyncMock(return_value=True)
     monkeypatch.setattr(service, "_fetch_models", fetch)
     await service.list_models(refresh=True)
-    await service.login(None, "deepseek", "api_key", SimpleNamespace(prompt=AsyncMock(return_value="new-key")))
+    await service.login("deepseek", "api_key", SimpleNamespace(prompt=AsyncMock(return_value="new-key")))
     assert fetch.await_count == 2
 
 

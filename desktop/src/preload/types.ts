@@ -295,11 +295,11 @@ export type DesktopApi = {
     onUpdate: (listener: (update: DesktopAuthUpdate) => void) => () => void
   }
   settings: {
-    get: (workspace?: string) => Promise<DesktopSettings>
-    save: (patch: DesktopSettingsPatch, workspace?: string) => Promise<DesktopSettings>
+    get: () => Promise<DesktopSettings>
+    save: (patch: DesktopSettingsPatch) => Promise<DesktopSettings>
   }
   models: {
-    list: (workspace?: string) => Promise<string[]>
+    list: () => Promise<string[]>
     setEffort: (sessionId: string, effort: string) => Promise<unknown>
   }
   sessions: {

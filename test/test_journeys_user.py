@@ -155,10 +155,10 @@ async def _run_prompt_turn(client: JourneyClient, session_id: str, text: str, ti
 
 @pytest.fixture()
 def model_server(worker_journey):
-    """A journey-private model server; workspace settings point the worker at it."""
+    """A journey-private model server; the user settings point the worker at it."""
     server = FakeOpenAIServer()
     server.start()
-    settings_path = worker_journey.workspace / ".rind" / "settings.json"
+    settings_path = worker_journey.home / "settings.json"
     settings_path.write_text(
         json.dumps({"model": "fake-model", "apiKey": "test-key", "baseUrl": server.base_url}),
         encoding="utf-8",
@@ -173,18 +173,18 @@ def worker_journey(tmp_path_factory):
     """One real worker subprocess for the whole module; journeys use own sessions.
 
     Each journey gets its OWN model server (the `model_server` fixture) — the
-    worker re-reads workspace settings per session start, so journeys never
+    worker re-reads the user settings per session start, so journeys never
     share or mis-consume each other's scripted model responses (cancelled
     turns make the OpenAI SDK auto-retry, which burns script entries)."""
     root = tmp_path_factory.mktemp("journey")
     workspace = root / "workspace"
-    (workspace / ".rind").mkdir(parents=True)
-    (workspace / ".rind" / "settings.json").write_text(
+    workspace.mkdir(parents=True)
+    home = root / "home"
+    (home / ".rind").mkdir(parents=True)
+    (home / "settings.json").write_text(
         json.dumps({"model": "fake-model", "apiKey": "test-key", "baseUrl": "http://127.0.0.1:9/v1"}),
         encoding="utf-8",
     )
-    home = root / "home"
-    (home / ".rind").mkdir(parents=True)
     port = _free_port()
     env = dict(os.environ)
     env.update({"RIND_SERVER_TOKEN": TOKEN, "RIND_HOME": str(home), "PYTHONUTF8": "1", "PYTHONIOENCODING": "utf-8"})

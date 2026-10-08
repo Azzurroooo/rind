@@ -129,7 +129,7 @@ test("direct CLI captures activity, rejects ambiguous teams, and manager exposes
 test("real Rind executes the scoped external tool and returns a durable report", { timeout: 30000 }, async t => {
   const home = await mkdtemp(path.join(os.tmpdir(), "rind-managed-e2e-"));
   const workspace = path.join(home, "workspace");
-  await mkdir(path.join(workspace, ".rind"), { recursive: true });
+  await mkdir(workspace, { recursive: true });
   let taskId, calls = 0;
   const provider = http.createServer((request, response) => {
     if (request.method === "GET") { response.end(JSON.stringify({ data: [{ id: "fixture" }] })); return; }
@@ -145,7 +145,7 @@ test("real Rind executes the scoped external tool and returns a durable report",
     });
   });
   await new Promise(resolve => provider.listen(0, "127.0.0.1", resolve));
-  await writeFile(path.join(workspace, ".rind", "settings.json"), JSON.stringify({ provider: "openai-compatible", baseUrl: "http://127.0.0.1:" + provider.address().port + "/v1", apiKey: "fixture-key", model: "fixture" }));
+  await writeFile(path.join(home, "settings.json"), JSON.stringify({ provider: "openai-compatible", baseUrl: "http://127.0.0.1:" + provider.address().port + "/v1", apiKey: "fixture-key", model: "fixture" }));
   const server = await startServer({ home, repoRoot, python: process.env.RIND_PYTHON || "python" });
   const token = (await readFile(server.paths.token, "utf8")).trim();
   const client = await connectClient({ endpoint: server.paths.endpoint, token });

@@ -61,10 +61,10 @@ def _write_startup_error(label: str, exc: Exception, debug: bool) -> None:
         traceback.print_exception(exc, file=sys.stderr)
 
 
-def _worker_server_token(workspace_root: str) -> str:
+def _worker_server_token() -> str:
     """Resolve serverToken without strict settings validation; worker mode must still start."""
     try:
-        return load_settings(workspace_root).server_token.strip()
+        return load_settings().server_token.strip()
     except Exception:
         return ""
 
@@ -111,7 +111,7 @@ async def async_main(argv: list[str] | None = None, *, server_class: type[Any]) 
         network_kwargs: dict[str, Any] = {}
         if getattr(server_class, "network_mode", False):
             network_kwargs.update({"host": args.host, "port": args.port})
-            token = os.environ.get("RIND_SERVER_TOKEN") or _worker_server_token(workspace_root)
+            token = os.environ.get("RIND_SERVER_TOKEN") or _worker_server_token()
             if token.strip():
                 network_kwargs["server_token"] = token.strip()
         server = server_class(

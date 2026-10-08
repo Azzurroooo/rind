@@ -20,7 +20,7 @@ def service(tmp_path, monkeypatch):
         if provider.environment_key:
             monkeypatch.delenv(provider.environment_key, raising=False)
     settings = AppSettings(tmp_path / 'settings.json', True, 'LongCat-2.5-Preview', '', '', '', provider='longcat')
-    monkeypatch.setattr(module, 'load_settings', lambda root=None: settings)
+    monkeypatch.setattr(module, 'load_settings', lambda: settings)
     return module.ProviderServiceImpl(CredentialStore(tmp_path / 'auth.json')), settings
 
 
@@ -38,11 +38,11 @@ async def test_context_metadata_is_validated_and_endpoint_scoped(service, monkey
     instance, settings = service
     from dataclasses import replace
     settings = replace(settings, base_url=endpoint, api_key='test')
-    monkeypatch.setattr(module, 'load_settings', lambda root=None: settings)
+    monkeypatch.setattr(module, 'load_settings', lambda: settings)
     instance._write_cache({'longcat': {'base_url': endpoint, 'models': [
         {'id': settings.model, 'context_window': cached}]}})
     monkeypatch.setattr(module, 'build_async_client', lambda *a, **k: pytest.fail('Offline catalog read used network'))
-    selected = instance.resolve_selection(None, ModelSelection('longcat', settings.model))
+    selected = instance.resolve_selection(ModelSelection('longcat', settings.model))
     listed = next(m for m in (await instance.list_models()).models if m.id == settings.model)
     assert listed.context_window == selected.context_window == expected
 
@@ -51,19 +51,19 @@ def test_custom_endpoint_does_not_inherit_legacy_or_other_host_context(service, 
     instance, settings = service
     from dataclasses import replace
     settings = replace(settings, base_url='https://proxy.example/v1')
-    monkeypatch.setattr(module, 'load_settings', lambda root=None: settings)
+    monkeypatch.setattr(module, 'load_settings', lambda: settings)
     model = {'id': settings.model, 'context_window': 65536}
     for cached in ([model], {'base_url': 'https://other.example/v1', 'models': [model]}):
         instance._write_cache({'longcat': cached})
-        assert instance.resolve_selection(None, ModelSelection('longcat', settings.model)).context_window is None
+        assert instance.resolve_selection(ModelSelection('longcat', settings.model)).context_window is None
 
 
 def test_compatible_endpoint_inherits_metadata_without_changing_api(service, monkeypatch):
     instance, settings = service
     from dataclasses import replace
     settings = replace(settings, provider='openai-compatible', base_url='https://api.longcat.chat/openai/v1')
-    monkeypatch.setattr(module, 'load_settings', lambda root=None: settings)
-    selected = instance.resolve_selection(None, ModelSelection('openai-compatible', settings.model))
+    monkeypatch.setattr(module, 'load_settings', lambda: settings)
+    selected = instance.resolve_selection(ModelSelection('openai-compatible', settings.model))
     assert selected.provider_id == 'openai-compatible'
     assert selected.api == 'openai-chat'
     assert selected.image_input is True
@@ -91,7 +91,7 @@ async def test_context_refresh_merges_only_same_endpoint(service, monkeypatch, s
     instance, settings = service
     from dataclasses import replace
     settings = replace(settings, provider='openrouter', model='new', api_key='test', base_url='https://openrouter.ai/api/v1')
-    monkeypatch.setattr(module, 'load_settings', lambda root=None: settings)
+    monkeypatch.setattr(module, 'load_settings', lambda: settings)
     instance._write_cache({'openrouter': {
         'base_url': settings.base_url if same_endpoint else 'https://other.example/v1',
         'models': [{'id': 'updated', 'context_window': 1}, {'id': 'keep', 'context_window': 2048}, {'id': 'removed'}],
@@ -106,7 +106,7 @@ async def test_context_refresh_merges_only_same_endpoint(service, monkeypatch, s
     assert cached['new']['context_window'] == 32768
     assert cached['keep'].get('context_window') == (2048 if same_endpoint else None)
     assert 'removed' not in cached
-    selected = instance.resolve_selection(None, ModelSelection('openrouter', 'new'))
+    selected = instance.resolve_selection(ModelSelection('openrouter', 'new'))
     assert selected.context_window == 32768
     client.close.assert_awaited_once()
 
@@ -152,7 +152,7 @@ async def test_longcat_login_discovery_and_streamed_tool_round_trip(service, mon
                                  http_client=httpx.AsyncClient(transport=httpx.MockTransport(handle)))
 
     monkeypatch.setattr(module, 'build_async_client', build)
-    await instance.login(None, 'longcat', 'api_key', SimpleNamespace(prompt=AsyncMock(return_value='isolated-longcat-key')))
+    await instance.login('longcat', 'api_key', SimpleNamespace(prompt=AsyncMock(return_value='isolated-longcat-key')))
     assert instance.credentials.get('longcat').key == 'isolated-longcat-key'
     assert instance.credentials.get('openai') is None
     catalog = await instance.list_models()

@@ -22,8 +22,8 @@ test("manager keeps its dedicated workspace and rejects mixed session scopes", (
 test("real CLI empty-prompt entry returns to an editable conversation repeatedly", { timeout: 30000 }, async t => {
   const home = await mkdtemp(path.join(os.tmpdir(), "rind-agents-entry-"));
   const workspace = path.join(home, "workspace");
-  await mkdir(path.join(workspace, ".rind"), { recursive: true });
-  await writeFile(path.join(workspace, ".rind", "settings.json"), JSON.stringify({ provider: "openai-compatible", model: "fixture-model", baseUrl: "http://127.0.0.1:1/v1" }));
+  await mkdir(workspace, { recursive: true });
+  await writeFile(path.join(home, "settings.json"), JSON.stringify({ provider: "openai-compatible", model: "fixture-model", baseUrl: "http://127.0.0.1:1/v1" }));
   const server = await startServer({ home, repoRoot: fileURLToPath(new URL("../..", import.meta.url)) });
   const script = `
     Object.defineProperty(process.stdin, 'isTTY', { value: true });

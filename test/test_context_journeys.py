@@ -88,13 +88,13 @@ def context_worker(tmp_path_factory):
     """One real worker subprocess; a scratch workspace plus scratch RIND_HOME."""
     root = tmp_path_factory.mktemp("context-journey")
     workspace = root / "workspace"
-    (workspace / ".rind").mkdir(parents=True)
-    (workspace / ".rind" / "settings.json").write_text(
+    workspace.mkdir(parents=True)
+    home = root / "home"
+    (home / ".rind").mkdir(parents=True)
+    (home / "settings.json").write_text(
         json.dumps({"model": "fake-model", "apiKey": "test-key", "baseUrl": "http://127.0.0.1:9/v1"}),
         encoding="utf-8",
     )
-    home = root / "home"
-    (home / ".rind").mkdir(parents=True)
     env = dict(os.environ)
     env.update({"RIND_HOME": str(home), "PYTHONUTF8": "1", "PYTHONIOENCODING": "utf-8"})
     env.pop("RIND_WORKSPACE", None)
@@ -123,7 +123,7 @@ def context_worker(tmp_path_factory):
 def model_server(context_worker):
     server = FakeOpenAIServer()
     server.start()
-    settings_path = context_worker.workspace / ".rind" / "settings.json"
+    settings_path = context_worker.home / "settings.json"
     settings_path.write_text(
         json.dumps({"model": "fake-model", "apiKey": "test-key", "baseUrl": server.base_url}),
         encoding="utf-8",

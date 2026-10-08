@@ -14,7 +14,7 @@ DETAIL_LIMIT = 120
 
 TIMEOUT_LINE = "⏱️ Worker response timed out; the task did not finish. Resend it later; if it recurs, check the network."
 RATE_LIMIT_LINE = "🚦 Model rate-limited. Wait a moment and retry, or lower concurrency."
-AUTH_LINE = "🔑 API auth/quota failed: check the apiKey in .rind/settings.json or the provider console."
+AUTH_LINE = "🔑 API auth/quota failed: check the apiKey in ~/.rind/settings.json, /login, or the provider console."
 OVERFLOW_LINE = "📚 Context limit exceeded: reply /compact to shrink it and retry, or send /new for a fresh session."
 CANCELLED_LINE = "Stopped."
 UNKNOWN_TEMPLATE = "⚠️ Task failed ({detail}). Reply /status to check state, or retry."

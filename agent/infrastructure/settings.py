@@ -8,7 +8,6 @@ import os
 import platform
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlparse
 
 from agent.infrastructure.paths import resolve_rind_home
 from agent.version import __version__
@@ -109,17 +108,8 @@ def ensure_user_settings() -> Path:
     return path
 
 
-def project_settings_path(workspace_root: str | Path) -> Path:
-    return Path(workspace_root).expanduser().resolve() / ".rind" / "settings.json"
-
-
-def load_settings(workspace_root: str | Path | None = None) -> AppSettings:
-    if workspace_root:
-        project_path = project_settings_path(workspace_root)
-        project_data = _read_optional_json_object(project_path)
-        if _has_complete_project_settings(project_data):
-            return _build_settings(project_path, project_data)
-
+def load_settings() -> AppSettings:
+    """The user's own settings. A project folder never supplies model, endpoint, key or token."""
     settings_path = default_settings_path()
     data = _read_json_object(settings_path) if settings_path.exists() else {}
     return _build_settings(settings_path, data)
@@ -150,27 +140,6 @@ def _build_settings(settings_path: Path, data: dict[str, Any]) -> AppSettings:
     )
 
 
-def _read_optional_json_object(path: Path) -> dict[str, Any]:
-    if not path.exists():
-        return {}
-    try:
-        return _read_json_object(path)
-    except ValueError:
-        return {}
-
-
-def _has_complete_project_settings(data: dict[str, Any]) -> bool:
-    provider = _string(data, "provider")
-    model = _string(data, "model")
-    if provider and model and (provider != "openai-compatible" or _string(data, "baseUrl")):
-        return True
-    api_key = _string(data, "apiKey")
-    base_url = _string(data, "baseUrl")
-    model = _string(data, "model")
-    parsed = urlparse(base_url)
-    return bool(api_key and model and parsed.scheme in {"http", "https"} and parsed.netloc)
-
-
 def _read_json_object(path: Path) -> dict[str, Any]:
     try:
         value = json.loads(path.read_text(encoding="utf-8"))
@@ -187,10 +156,3 @@ def _string(data: dict[str, Any], key: str) -> str:
         return ""
     return str(value).strip()
 
-
-def workspace_defaults(workspace_root: str) -> tuple[str, str, str, str]:
-    try:
-        settings = load_settings(workspace_root)
-    except (OSError, ValueError):
-        return DEFAULT_MODEL, "", "https://api.openai.com/v1", "openai-compatible"
-    return settings.model, settings.reasoning_effort, settings.base_url, settings.provider

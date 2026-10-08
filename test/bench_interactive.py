@@ -46,8 +46,9 @@ def main() -> None:
         with tempfile.TemporaryDirectory(prefix="rind-bench-") as directory:
             temporary = Path(directory)
             workspace = temporary / "workspace"
-            settings = workspace / ".rind" / "settings.json"
-            settings.parent.mkdir(parents=True)
+            workspace.mkdir()
+            settings = temporary / "home" / "settings.json"
+            settings.parent.mkdir()
             settings.write_text(json.dumps({
                 "provider": "openai-compatible", "model": "fake-model",
                 "apiKey": "local-fixture-only", "baseUrl": server.base_url,

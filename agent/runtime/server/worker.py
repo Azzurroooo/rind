@@ -23,7 +23,6 @@ from agent.infrastructure.persistence.usage_ledger import (
     default_usage_ledger_path,
     load_usage_records,
 )
-from agent.infrastructure.settings import workspace_defaults
 from agent.infrastructure.tools.shell.tool import ShellTools
 from agent.infrastructure.tools.external import ExternalTool
 from agent.infrastructure.tools.web.session_pool import WebSessions
@@ -90,25 +89,23 @@ class RuntimeWorker:
                     self.workspace_root,
                     self.session_id,
                     self._resume_latest,
-                    self.provider_service.default_selection(self.workspace_root),
+                    self.provider_service.default_selection(),
                 )
                 self.session_id = str(info["session_id"]) or None
                 self._initialized = True
                 self._model_refresh_task = asyncio.create_task(
-                    self.provider_service.refresh_stale_models(self.workspace_root),
+                    self.provider_service.refresh_stale_models(),
                     name="refresh-stale-models",
                 )
         if self.session_id:
             info = await self.repository.info(self.session_id)
             info["live_turn"] = self.execution.live_turn(self.session_id)
-        else:
-            info = await self.blank_info()
-        info["base_url"] = workspace_defaults(info["workspace_root"])[2]
-        return info
+            return info
+        return await self.blank_info()
 
     async def blank_info(self, workspace_root: str | None = None) -> dict[str, Any]:
         root = workspace_root or self.workspace_root
-        info = await self.repository.blank(root, self.provider_service.default_selection(root))
+        info = await self.repository.blank(root)
         info["live_turn"] = None
         return info
 
@@ -128,14 +125,10 @@ class RuntimeWorker:
         session_id = info["session_id"]
         if not session_id:
             # Nothing exists yet; session/create configures the conversation on its first message.
-            result = await self.blank_info(str(root))
-            result["base_url"] = workspace_defaults(root)[2]
-            return result
+            return await self.blank_info(str(root))
         tool = ExternalTool.from_json(json.dumps(params["external_tools"])) if params.get("external_tools") else None
         await self.execution.configure_session(session_id, tool, params.get("enable_user_question") is not False)
-        result = await self.session(session_id)
-        result["base_url"] = workspace_defaults(root)[2]
-        return result
+        return await self.session(session_id)
 
     async def start_execution(self, session_id: str) -> AgentContainer:
         return await self.execution.start(session_id)
@@ -148,7 +141,7 @@ class RuntimeWorker:
         for abandoned in self.repository.abandoned():
             await self.discard_unsaved(abandoned)
         root = validate_workspace_root(params.get("workspace_root") or self.workspace_root)
-        default = self.provider_service.default_selection(root)
+        default = self.provider_service.default_selection()
         selection = ModelSelection(
             provider_id=str(params.get("provider_id") or default.provider_id),
             model_id=str(params.get("model_id") or default.model_id),
@@ -166,9 +159,7 @@ class RuntimeWorker:
         if "external_tools" in params or "enable_user_question" in params:
             tool = ExternalTool.from_json(json.dumps(params["external_tools"])) if params.get("external_tools") else None
             await self.execution.configure_session(session_id, tool, params.get("enable_user_question") is not False)
-        result = await self.session(session_id)
-        result["base_url"] = workspace_defaults(root)[2]
-        return result
+        return await self.session(session_id)
 
     async def discard_unsaved(self, session_id: str) -> bool:
         """Drop a conversation that no message saved; it never existed on disk."""
@@ -208,7 +199,7 @@ class RuntimeWorker:
         records = await asyncio.to_thread(load_usage_records, default_usage_ledger_path())
         return summarize_usage(records, window)
 
-    def list_providers(self, workspace_root: str | None = None) -> list[dict[str, Any]]:
+    def list_providers(self) -> list[dict[str, Any]]:
         return [
             {
                 "id": status.id,
@@ -217,17 +208,17 @@ class RuntimeWorker:
                 "configured": status.configured,
                 "source": status.source,
             }
-            for status in self.provider_service.list_providers(workspace_root or self.workspace_root)
+            for status in self.provider_service.list_providers()
         ]
 
-    async def login(self, provider_id: str, method: str, interaction, workspace_root: str | None = None) -> None:
-        await self.provider_service.login(workspace_root or self.workspace_root, provider_id, method, interaction)
+    async def login(self, provider_id: str, method: str, interaction) -> None:
+        await self.provider_service.login(provider_id, method, interaction)
 
     def logout(self, provider_id: str) -> bool:
         return self.provider_service.logout(provider_id)
 
-    async def list_models(self, workspace_root: str | None = None, *, refresh: bool = False) -> dict[str, Any]:
-        catalog = await self.provider_service.list_models(workspace_root or self.workspace_root, refresh=refresh)
+    async def list_models(self, *, refresh: bool = False) -> dict[str, Any]:
+        catalog = await self.provider_service.list_models(refresh=refresh)
         return {
             "models": [
                 {

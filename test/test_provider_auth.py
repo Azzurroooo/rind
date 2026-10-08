@@ -30,7 +30,7 @@ def _settings(tmp_path: Path, **overrides) -> AppSettings:
 
 
 def _service(tmp_path: Path, settings: AppSettings, monkeypatch) -> ProviderServiceImpl:
-    monkeypatch.setattr("agent.infrastructure.llm.provider_service.load_settings", lambda _root=None: settings)
+    monkeypatch.setattr("agent.infrastructure.llm.provider_service.load_settings", lambda: settings)
     return ProviderServiceImpl(CredentialStore(tmp_path / "auth.json"))
 
 
@@ -62,7 +62,7 @@ async def test_image_capability_cache_builtin_unknown_agree_in_list_and_selectio
                                      "base_url": endpoint, "refreshed_at": 1}})
     monkeypatch.setattr("agent.infrastructure.llm.provider_service.build_async_client", lambda *a, **k: pytest.fail("Local reads must not use network"))
     catalog = await service.list_models()
-    selected = service.resolve_selection(None, ModelSelection("openai", "gpt-4o-mini"))
+    selected = service.resolve_selection(ModelSelection("openai", "gpt-4o-mini"))
     assert selected.image_input is expected
     assert next(m for m in catalog.models if m.provider_id == "openai" and m.id == selected.id).image_input is expected
 
@@ -74,7 +74,7 @@ async def test_image_capability_does_not_inherit_another_endpoint_or_legacy_meta
     for entry in ([{"id": "custom", "image_input": True}],
                   {"models": [{"id": "custom", "image_input": True}], "base_url": "https://other.example/v1", "refreshed_at": 1}):
         service._write_cache({"openai": entry})
-        assert service.resolve_selection(None, ModelSelection("openai", "custom")).image_input is None
+        assert service.resolve_selection(ModelSelection("openai", "custom")).image_input is None
 
 
 @pytest.mark.asyncio
@@ -99,7 +99,7 @@ async def test_image_catalog_matches_official_endpoint_and_model(tmp_path, monke
     settings = _settings(tmp_path, provider=provider, model=model, api_key="test", base_url=endpoint)
     service = _service(tmp_path, settings, monkeypatch)
     monkeypatch.setattr("agent.infrastructure.llm.provider_service.build_async_client", lambda *a, **k: pytest.fail("Catalog reads must stay offline"))
-    selected = service.resolve_selection(None, ModelSelection(provider, model))
+    selected = service.resolve_selection(ModelSelection(provider, model))
     listed = next(m for m in (await service.list_models()).models if m.provider_id == provider and m.id == model)
     assert selected.image_input is listed.image_input is expected
     assert selected.provider_id == provider
@@ -112,7 +112,7 @@ async def test_compatible_endpoint_cache_false_overrides_official_catalog(tmp_pa
     service = _service(tmp_path, settings, monkeypatch)
     service._write_cache({"openai-compatible": {"base_url": endpoint, "refreshed_at": 1,
         "models": [{"id": "deepseek-flash", "image_input": False}]}})
-    assert service.resolve_selection(None, ModelSelection("openai-compatible", "deepseek-flash")).image_input is False
+    assert service.resolve_selection(ModelSelection("openai-compatible", "deepseek-flash")).image_input is False
     assert (await service.list_models()).models[0].image_input is False
     assert service._read_cache()["openai-compatible"]["refreshed_at"] == 1
 
@@ -139,7 +139,7 @@ async def test_all_refresh_entries_merge_capabilities_by_endpoint(tmp_path, monk
     if trigger == "background":
         await service.refresh_stale_models()
     elif trigger == "login":
-        await service.login(None, "openrouter", "api_key", _PromptInteraction("stored-test"))
+        await service.login("openrouter", "api_key", _PromptInteraction("stored-test"))
     else:
         await service.list_models(refresh=True)
     assert build.call_args.kwargs["max_retries"] == 0
@@ -182,14 +182,14 @@ def test_credential_list_redacts_secret(tmp_path: Path) -> None:
 def test_provider_service_resolves_legacy_settings_to_compatible_provider(tmp_path: Path, monkeypatch) -> None:
     settings_path = tmp_path / "settings.json"
     settings = AppSettings(settings_path, True, "deepseek-flash", "test-key", "https://api.deepseek.com", "high")
-    monkeypatch.setattr("agent.infrastructure.llm.provider_service.load_settings", lambda _root=None: settings)
+    monkeypatch.setattr("agent.infrastructure.llm.provider_service.load_settings", lambda: settings)
 
     service = ProviderServiceImpl(CredentialStore(tmp_path / "auth.json"))
 
-    assert service.default_selection(str(tmp_path)) == ModelSelection("openai-compatible", "deepseek-flash", "high")
+    assert service.default_selection() == ModelSelection("openai-compatible", "deepseek-flash", "high")
 
 
-def test_credential_resolution_prefers_workspace_then_stored_then_environment(tmp_path: Path, monkeypatch) -> None:
+def test_credential_resolution_prefers_settings_then_stored_then_environment(tmp_path: Path, monkeypatch) -> None:
     settings = _settings(tmp_path)
     service = _service(tmp_path, settings, monkeypatch)
 
@@ -204,9 +204,9 @@ def test_credential_resolution_prefers_workspace_then_stored_then_environment(tm
     assert service._credential_source(settings, "deepseek") == "stored"
     assert service._resolve_credential(settings, "deepseek").key == "stored-key"
 
-    workspace = _settings(tmp_path, api_key="workspace-key")
-    assert service._credential_source(workspace, "deepseek") == "workspace"
-    assert service._resolve_credential(workspace, "deepseek").key == "workspace-key"
+    configured = _settings(tmp_path, api_key="settings-key")
+    assert service._credential_source(configured, "deepseek") == "settings"
+    assert service._resolve_credential(configured, "deepseek").key == "settings-key"
 
     env_settings = _settings(tmp_path, api_key="$DEEPSEEK_API_KEY")
     assert service._resolve_credential(env_settings, "deepseek").key == "env-key"
@@ -237,7 +237,7 @@ async def test_login_saves_key_and_refreshes_only_that_provider(tmp_path: Path, 
     monkeypatch.setattr(service, "_fetch_models", _fetch)
     interaction = _PromptInteraction("secret-key")
 
-    await service.login(str(tmp_path), "deepseek", "api_key", interaction)
+    await service.login("deepseek", "api_key", interaction)
 
     assert interaction.prompts == [("secret", "DeepSeek API key")]
     assert service.credentials.get("deepseek").key == "secret-key"
@@ -249,7 +249,7 @@ async def test_login_with_empty_key_cancels(tmp_path: Path, monkeypatch) -> None
     service = _service(tmp_path, _settings(tmp_path), monkeypatch)
 
     with pytest.raises(ValueError, match="canceled"):
-        await service.login(str(tmp_path), "deepseek", "api_key", _PromptInteraction("  "))
+        await service.login("deepseek", "api_key", _PromptInteraction("  "))
 
     assert service.credentials.get("deepseek") is None
 
@@ -259,7 +259,7 @@ async def test_login_rejects_unsupported_method(tmp_path: Path, monkeypatch) -> 
     service = _service(tmp_path, _settings(tmp_path), monkeypatch)
 
     with pytest.raises(ValueError, match="does not support"):
-        await service.login(str(tmp_path), "deepseek", "oauth", _PromptInteraction("token"))
+        await service.login("deepseek", "oauth", _PromptInteraction("token"))
 
 
 @pytest.mark.asyncio
@@ -271,7 +271,7 @@ async def test_list_models_uses_cache_fallback_and_reports_refresh_warning(tmp_p
     service.credentials.set("deepseek", Credential(type="api_key", key="deepseek-key"))
     service._write_cache({"deepseek": [{"id": "cached-chat", "name": "Cached Chat"}]})
 
-    catalog = await service.list_models(str(tmp_path))
+    catalog = await service.list_models()
     assert [model.id for model in catalog.models] == ["cached-chat", "deepseek-chat"]
     assert catalog.warning is None
     assert all(not hasattr(model, "name") for model in catalog.models)
@@ -282,7 +282,7 @@ async def test_list_models_uses_cache_fallback_and_reports_refresh_warning(tmp_p
         return False
 
     monkeypatch.setattr(service, "_fetch_models", _failing_fetch)
-    catalog = await service.list_models(str(tmp_path), refresh=True)
+    catalog = await service.list_models(refresh=True)
 
     assert catalog.warning is not None and "DeepSeek" in catalog.warning
     assert [model.id for model in catalog.models] == ["cached-chat", "deepseek-chat"]
@@ -307,7 +307,7 @@ async def test_list_models_keeps_other_providers_when_one_refresh_fails(tmp_path
         return True
 
     monkeypatch.setattr(service, "_fetch_models", _refetch)
-    catalog = await service.list_models(str(tmp_path), refresh=True)
+    catalog = await service.list_models(refresh=True)
 
     by_provider = {(model.provider_id, model.id) for model in catalog.models}
     assert ("deepseek", "deepseek-live") in by_provider
@@ -323,7 +323,7 @@ async def test_list_models_refreshed_entries_keep_verified_efforts(tmp_path: Pat
     service.credentials.set("zhipu", Credential(type="api_key", key="zhipu-key"))
     service._write_cache({"zhipu": [{"id": "glm-5.3", "name": "GLM-5.3"}, {"id": "glm-4.5", "name": "GLM-4.5"}]})
 
-    catalog = await service.list_models(str(tmp_path))
+    catalog = await service.list_models()
     efforts = {model.id: model.reasoning_efforts for model in catalog.models}
     assert efforts["glm-5.3"] == ("low", "high", "max")
     assert efforts["glm-4.5"] == default_reasoning_efforts("openai-chat")
@@ -334,7 +334,7 @@ async def test_list_models_falls_back_to_builtin_catalog_without_cache(tmp_path:
     service = _service(tmp_path, _settings(tmp_path), monkeypatch)
     service.credentials.set("deepseek", Credential(type="api_key", key="deepseek-key"))
 
-    catalog = await service.list_models(str(tmp_path))
+    catalog = await service.list_models()
     assert [model.id for model in catalog.models] == [
         "deepseek-flash", "deepseek-v4-pro", "deepseek-v4-flash", "deepseek-v4-flash-vision-exp",
         "deepseek-chat",  # Explicit current selection survives removal from the fallback.
@@ -348,7 +348,7 @@ async def test_list_models_hides_unconfigured_providers_and_appends_current(tmp_
     service = _service(tmp_path, settings, monkeypatch)
     service.credentials.set("openai", Credential(type="api_key", key="openai-key"))
 
-    catalog = await service.list_models(str(tmp_path))
+    catalog = await service.list_models()
     assert {model.provider_id for model in catalog.models} == {"openai"}
     assert {"gpt-5.5", "gpt-4o-mini", "gpt-6-astra"} <= {model.id for model in catalog.models}
 
@@ -775,7 +775,7 @@ async def test_provider_service_creates_google_client_from_environment(tmp_path:
 
 def test_resolve_selection_uses_configured_model_definition(tmp_path, monkeypatch):
     service = _service(tmp_path, _settings(tmp_path), monkeypatch)
-    model = service.resolve_selection(str(tmp_path), ModelSelection("deepseek", "deepseek-chat", ""))
+    model = service.resolve_selection(ModelSelection("deepseek", "deepseek-chat", ""))
     assert model.id == "deepseek-chat"
     assert model.provider_id == "deepseek"
 
@@ -833,9 +833,9 @@ async def test_added_providers_login_and_send_sdk_requests(tmp_path, monkeypatch
     monkeypatch.setattr(transport_http.AsyncClient, "send", send)
     from unittest.mock import AsyncMock
     monkeypatch.setattr(service, "_fetch_models", AsyncMock(return_value=False))
-    await service.login(str(tmp_path), provider_id, "api_key", _PromptInteraction("test-key"))
-    assert {item.id for item in service.list_providers(str(tmp_path)) if item.configured} == {provider_id}
-    model = (await service.list_models(str(tmp_path))).models[0]
+    await service.login(provider_id, "api_key", _PromptInteraction("test-key"))
+    assert {item.id for item in service.list_providers() if item.configured} == {provider_id}
+    model = (await service.list_models()).models[0]
     assert model.provider_id == provider_id
     client = await service.create_chat_client(settings, ModelSelection(provider_id, model.id), workspace_root=None)
     try:

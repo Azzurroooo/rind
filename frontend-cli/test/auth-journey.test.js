@@ -98,11 +98,13 @@ function spawnCli(workspace, rindHome, env = {}, args = []) {
   return { child, exited, waitFor, send, get stdout() { return stdout; }, get stderr() { return stderr; } };
 }
 
+// The user's settings live in RIND_HOME (parent/home); the folder holds none.
 async function makeWorkspace(parent, baseUrl) {
   const workspace = path.join(parent, "workspace");
-  await mkdir(path.join(workspace, ".rind"), { recursive: true });
+  await mkdir(workspace, { recursive: true });
+  await mkdir(path.join(parent, "home"), { recursive: true });
   await writeFile(
-    path.join(workspace, ".rind", "settings.json"),
+    path.join(parent, "home", "settings.json"),
     JSON.stringify({ provider: "openai-compatible", baseUrl, model: "fake-model-a" }),
     "utf8",
   );
@@ -190,9 +192,9 @@ test("one-shot run works against a configured endpoint", async () => {
   const rindHome = path.join(parent, "home");
   await mkdir(rindHome, { recursive: true });
   const workspace = path.join(parent, "workspace");
-  await mkdir(path.join(workspace, ".rind"), { recursive: true });
+  await mkdir(workspace, { recursive: true });
   await writeFile(
-    path.join(workspace, ".rind", "settings.json"),
+    path.join(rindHome, "settings.json"),
     JSON.stringify({ provider: "openai-compatible", baseUrl: `http://127.0.0.1:${fixture.port}/v1`, apiKey: "one-shot-key", model: "fake-model-a" }),
     "utf8",
   );
@@ -229,7 +231,7 @@ test("session lifecycle: run, send, empty sessions, compact and resume", { timeo
   const workspace = await makeWorkspace(parent, `http://127.0.0.1:${fixture.port}/v1`);
   // A provider-specific environment key would also enable that remote provider's
   // startup catalog refresh. Scope this fake credential to the local endpoint.
-  await writeFile(path.join(workspace, ".rind", "settings.json"), JSON.stringify({
+  await writeFile(path.join(home, "settings.json"), JSON.stringify({
     provider: "openai-compatible", baseUrl: `http://127.0.0.1:${fixture.port}/v1`,
     model: "fake-model-a", apiKey: "matrix-key",
   }));

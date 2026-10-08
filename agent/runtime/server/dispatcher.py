@@ -436,7 +436,7 @@ class RuntimeDispatcher:
             return
         await self._worker.login(provider_id, method, _ProtocolAuthInteraction(self))
         info = await self._worker.session(session_id) if session_id else await self._worker.blank_info(params.get("workspace_root"))
-        listing = await self._worker.list_models(info.get("workspace_root"))
+        listing = await self._worker.list_models()
         selection = await self._adopt_login_default(session_id, info, provider_id, listing["models"])
         await self._respond(
             request,
@@ -488,7 +488,6 @@ class RuntimeDispatcher:
             "model": info.get("model"),
             "provider": info.get("provider"),
             "reasoning_effort": info.get("reasoning_effort"),
-            "base_url": info.get("base_url"),
             "workspace_root": info.get("workspace_root"),
             "team_main": info.get("team_main"),
             "version": __version__,
@@ -787,7 +786,7 @@ class RuntimeDispatcher:
         # Before its first message a window has settings but no conversation.
         info = await self._worker.session(session_id) if session_id else await self._worker.blank_info(params.get("workspace_root"))
         refresh = bool(params.get("refresh", False))
-        listing = await self._worker.list_models(info.get("workspace_root"), refresh=refresh)
+        listing = await self._worker.list_models(refresh=refresh)
         current_model = str(info.get("model") or "")
         current_provider = str(info.get("provider") or "")
         await self._respond(

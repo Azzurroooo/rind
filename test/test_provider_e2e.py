@@ -108,9 +108,10 @@ def test_provider_login_model_and_tool_turn_journey(tmp_path: Path):
     rind_home = tmp_path / "home"
     rind_home.mkdir()
     workspace = tmp_path / "workspace"
-    (workspace / ".rind").mkdir(parents=True)
+    workspace.mkdir(parents=True, exist_ok=True)
+    (tmp_path / "home").mkdir(exist_ok=True)
     (workspace / "note.txt").write_text("hello journey", encoding="utf-8")
-    (workspace / ".rind" / "settings.json").write_text(
+    (tmp_path / "home" / "settings.json").write_text(
         json.dumps({"provider": "openai-compatible", "baseUrl": fixture.base_url, "model": "fake-model-a"}),
         encoding="utf-8",
     )
@@ -202,9 +203,10 @@ def test_google_login_static_catalog_and_tool_turn_journey(tmp_path: Path):
     rind_home = tmp_path / "home"
     rind_home.mkdir()
     workspace = tmp_path / "workspace"
-    (workspace / ".rind").mkdir(parents=True)
+    workspace.mkdir(parents=True, exist_ok=True)
+    (tmp_path / "home").mkdir(exist_ok=True)
     (workspace / "note.txt").write_text("gemini works", encoding="utf-8")
-    (workspace / ".rind" / "settings.json").write_text(
+    (tmp_path / "home" / "settings.json").write_text(
         json.dumps({"provider": "google", "baseUrl": fixture.base_url, "model": "gemini-3-flash"}),
         encoding="utf-8",
     )
@@ -288,8 +290,9 @@ def test_resume_latest_repairs_interrupted_tool_call_journey(tmp_path: Path, mon
         encoding="utf-8",
     )
     workspace = tmp_path / "workspace"
-    (workspace / ".rind").mkdir(parents=True)
-    (workspace / ".rind" / "settings.json").write_text(
+    workspace.mkdir(parents=True, exist_ok=True)
+    (tmp_path / "home").mkdir(exist_ok=True)
+    (tmp_path / "home" / "settings.json").write_text(
         json.dumps({"provider": "openai-compatible", "baseUrl": fixture.base_url, "model": "fake-model-a"}),
         encoding="utf-8",
     )
@@ -381,8 +384,9 @@ def test_responses_and_anthropic_stream_and_offline_tokens(tmp_path, provider, m
     thread = threading.Thread(target=http.serve_forever, daemon=True)
     thread.start()
     workspace = tmp_path / "workspace"
-    (workspace / ".rind").mkdir(parents=True)
-    (workspace / ".rind" / "settings.json").write_text(json.dumps({
+    workspace.mkdir(parents=True, exist_ok=True)
+    (tmp_path / "home").mkdir(exist_ok=True)
+    (tmp_path / "home" / "settings.json").write_text(json.dumps({
         "provider": provider, "apiKey": "fixture-key", "model": "fixture",
         "baseUrl": f"http://127.0.0.1:{http.server_port}/v1",
     }), encoding="utf-8")
@@ -438,8 +442,9 @@ def test_web_extraction_through_worker_and_http_proxy(tmp_path, monkeypatch):
     fixture.script_tool_call("fetch_web_page", {"url": "http://rind-fixture.invalid/article"}, then_text=["page extracted"])
     fixture.start()
     workspace = tmp_path / "workspace"
-    (workspace / ".rind").mkdir(parents=True)
-    (workspace / ".rind" / "settings.json").write_text(json.dumps({
+    workspace.mkdir(parents=True, exist_ok=True)
+    (tmp_path / "home").mkdir(exist_ok=True)
+    (tmp_path / "home" / "settings.json").write_text(json.dumps({
         "provider": "openai-compatible", "baseUrl": fixture.base_url,
         "model": "fixture", "apiKey": "fixture-key",
     }), encoding="utf-8")

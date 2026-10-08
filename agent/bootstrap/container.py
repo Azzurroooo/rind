@@ -87,7 +87,7 @@ def build_agent_container(
 ) -> AgentContainer:
     """Build the production runtime dependency graph explicitly."""
     prompt_workspace = str(Path(workspace_root or Path.cwd()).expanduser().resolve())
-    settings = settings or load_settings(workspace_root)
+    settings = settings or load_settings()
     tool_output_store = shared_resources.tool_output_store if shared_resources else ToolOutputStore(session_dir)
     shell_tools = shell_tools or ShellTools(tool_output_store)
     task_notifications = task_notifications or TaskNotifications(shell_tools.supervisor.journal)

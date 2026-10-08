@@ -195,7 +195,7 @@ test("background activity does not clear retry status; tool recovery stays worki
 
 
 test("image notices deduplicate by session, model, severity and newly seen images", async () => {
-  const state = { sessionInfo: { model: "unknown", provider: "fake", base_url: "local" } };
+  const state = { sessionInfo: { model: "unknown", provider: "fake" } };
   const lines = [];
   const controller = createEventController({ state, output: { log: (line) => lines.push(line()) } });
   const send = (images, level = "info", session = "s1") => controller.handle({ session_id: session,
@@ -217,7 +217,7 @@ test("image notices deduplicate by session, model, severity and newly seen image
   state.sessionInfo.model = "unknown";
   await send(["a"], "warning");
   assert.equal(lines.length, 5);
-  state.sessionInfo.base_url = "another";
+  state.sessionInfo.provider = "another";
   await send(["a"], "warning");
   assert.equal(lines.length, 6);
 });

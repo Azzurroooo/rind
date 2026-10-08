@@ -96,8 +96,8 @@ test("Esc goes back to the conversation just left, never further", () => {
 async function cli(t, { handoff, columns = 100, rows = 26, tty = true, baseUrl = "http://127.0.0.1:1/v1" } = {}) {
   const home = await mkdtemp(path.join(os.tmpdir(), "rind-lifecycle-"));
   const workspace = path.join(home, "workspace");
-  await mkdir(path.join(workspace, ".rind"), { recursive: true });
-  await writeFile(path.join(workspace, ".rind", "settings.json"), JSON.stringify({ provider: "openai-compatible", model: "fixture-model", apiKey: "fixture", baseUrl }));
+  await mkdir(workspace, { recursive: true });
+  await writeFile(path.join(home, "settings.json"), JSON.stringify({ provider: "openai-compatible", model: "fixture-model", apiKey: "fixture", baseUrl }));
   const script = `
     if (${tty}) {
       Object.defineProperty(process.stdin, 'isTTY', { value: true });

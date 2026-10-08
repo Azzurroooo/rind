@@ -668,7 +668,7 @@ class ExecutionCoordinator:
         external_tool, question_enabled = self._session_options.get(clean, (self._external_tool, self._enable_user_question))
         metadata = await self._repository.metadata(clean)
         root = validate_workspace_root(str(metadata.get("workspace_root") or metadata.get("cwd") or ""))
-        settings = await asyncio.to_thread(load_settings, root)
+        settings = await asyncio.to_thread(load_settings)
         selection = ModelSelection(
             str(metadata.get("provider") or settings.provider),
             str(metadata.get("model") or settings.model),
@@ -685,7 +685,7 @@ class ExecutionCoordinator:
                     reasoning_effort=selection.reasoning_effort,
                 ),
                 chat_client=chat_client,
-                image_input=self._provider_service.resolve_selection(root, selection, settings=settings).image_input,
+                image_input=self._provider_service.resolve_selection(selection, settings=settings).image_input,
                 session_dir=self.session_dir,
                 session_id=clean,
                 session_store=self._repository.draft_store(clean),
@@ -737,7 +737,7 @@ class ExecutionCoordinator:
         if not selection.model_id or selection == execution.selection:
             return
         root = str(getattr(store, "workspace_root", "") or "")
-        settings = await asyncio.to_thread(load_settings, root or None)
+        settings = await asyncio.to_thread(load_settings)
         replacement = await self._chat_client_for(settings, selection, root or None)
         previous = execution.chat_client
         execution.container.turn_runner.replace_chat_client(replacement)

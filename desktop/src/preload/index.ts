@@ -59,11 +59,11 @@ const api: DesktopApi = {
     },
   },
   settings: {
-    get: (workspace) => ipcRenderer.invoke("settings-get", workspace),
-    save: (patch, workspace) => ipcRenderer.invoke("settings-save", patch, workspace),
+    get: () => ipcRenderer.invoke("settings-get"),
+    save: (patch) => ipcRenderer.invoke("settings-save", patch),
   },
   models: {
-    list: (workspace) => ipcRenderer.invoke("models-list", workspace),
+    list: () => ipcRenderer.invoke("models-list"),
     setEffort: (sessionId, effort) => runtimeRequest(runtimeMethods.modelEffort, { session_id: sessionId, reasoning_effort: effort }),
   },
   sessions: {

@@ -429,7 +429,7 @@ async def test_status_does_not_leak_api_key(monkeypatch) -> None:
         base_url="https://example.com/v1",
         reasoning_effort="xhigh",
     )
-    monkeypatch.setattr("agent.runtime.server.commands.status.load_settings", lambda _: settings)
+    monkeypatch.setattr("agent.runtime.server.commands.status.load_settings", lambda: settings)
 
     result = await SlashCommandRouter(build_command_infos()).execute("/status", _context())
 

@@ -70,12 +70,12 @@ export async function loadAvailableModels() {
     }
     return
   }
-  state.models = stringModelOptions(await window.api.models.list(state.chatProjectPath || state.fallbackProjectPath))
+  state.models = stringModelOptions(await window.api.models.list())
 }
 
 export async function loadSettings() {
   try {
-    state.settings = await window.api.settings.get(state.chatProjectPath || state.fallbackProjectPath)
+    state.settings = await window.api.settings.get()
     if (!state.model) state.model = state.settings.model
     if (!state.settings.hasApiKey && !state.settingsAutoOpened) {
       state.settingsAutoOpened = true
@@ -124,7 +124,7 @@ export async function saveSettings() {
       model: settingsModel.value.trim(),
       baseUrl: settingsBaseUrl.value.trim(),
       reasoningEffort: settingsReasoning.value.trim(),
-    }, state.chatProjectPath || state.fallbackProjectPath)
+    })
     state.settingsOpen = false
     state.settingsAutoOpened = true
     state.notice = runtimeConfigChanged && hasRunningRuntime

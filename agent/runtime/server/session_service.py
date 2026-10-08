@@ -16,7 +16,6 @@ from agent.infrastructure.persistence.session_files import SessionFiles
 from agent.infrastructure.persistence.session_index_repository import SessionIndexRepository
 from agent.infrastructure.persistence.session_meta import display_title, new_session_id
 from agent.infrastructure.rind_docs import resolve_project_doc_path
-from agent.infrastructure.settings import workspace_defaults
 from agent.prompts import build_system_prompt
 
 
@@ -74,16 +73,15 @@ class SessionService:
     async def blank(self, workspace_root: str, selection: ModelSelection | None = None) -> dict[str, Any]:
         """What a window shows before its first message: a folder and its settings, no session."""
         root = validate_workspace_root(workspace_root)
-        default_model, default_effort, _, default_provider = await asyncio.to_thread(workspace_defaults, str(root))
         if selection is None:
-            selection = self.provider_service.default_selection(root)
+            selection = self.provider_service.default_selection()
         # Enough for the window to greet: whether the folder has a RIND.md.
         has_rind_doc = await asyncio.to_thread(resolve_project_doc_path(root).is_file)
         return {
             "session_id": "",
-            "model": str(selection.model_id or default_model),
-            "provider": str(selection.provider_id or default_provider),
-            "reasoning_effort": str(selection.reasoning_effort or default_effort or ""),
+            "model": selection.model_id,
+            "provider": selection.provider_id,
+            "reasoning_effort": selection.reasoning_effort,
             "workspace_root": str(root),
             "team_main": None,
             "turn_state": None,
@@ -154,7 +152,7 @@ class SessionService:
     ) -> dict[str, Any]:
         root = validate_workspace_root(workspace_root)
         if selection is None:
-            selection = self.provider_service.default_selection(root)
+            selection = self.provider_service.default_selection()
         model, reasoning_effort, provider = selection.model_id, selection.reasoning_effort, selection.provider_id
         system_prompt = build_system_prompt(str(root), environment=get_system_info(root))
         store = JsonlSessionStore(
@@ -205,12 +203,12 @@ class SessionService:
     async def info(self, session_id: str) -> dict[str, Any]:
         meta = await self.metadata(session_id)
         workspace_root = str(meta.get("workspace_root") or meta.get("cwd") or "")
-        default_model, default_effort, _, default_provider = await asyncio.to_thread(workspace_defaults, workspace_root)
+        default = self.provider_service.default_selection()
         return {
             "session_id": str(meta.get("session_id") or session_id),
-            "model": str(meta.get("model") or default_model),
-            "provider": str(meta.get("provider") or default_provider),
-            "reasoning_effort": str(meta.get("reasoning_effort") or default_effort or ""),
+            "model": str(meta.get("model") or default.model_id),
+            "provider": str(meta.get("provider") or default.provider_id),
+            "reasoning_effort": str(meta.get("reasoning_effort") or default.reasoning_effort),
             "workspace_root": workspace_root,
             "team_main": None,
             "project_id": meta.get("project_id"),

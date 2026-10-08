@@ -40,7 +40,7 @@ def test_run_waits_for_continuation_created_tasks_and_prints_final_once(tmp_path
         provider.script_tool_call("bash", {"command": command, "yield_time_ms": 0},
                                   then_text=[f"Waiting for task {number}"], call_id=f"call_task_{number}")
     provider.script_text(["FINAL RESULT"])
-    settings = tmp_path / ".rind" / "settings.json"
+    settings = tmp_path / "home" / "settings.json"
     settings.parent.mkdir()
     settings.write_text(json.dumps({"provider": "openai-compatible", "model": "fake-model",
                                     "apiKey": "local-test", "baseUrl": provider.base_url}), encoding="utf-8")

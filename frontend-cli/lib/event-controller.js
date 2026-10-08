@@ -88,7 +88,7 @@ export function createEventController({
       }
       case "context_built": {
         const session = message.session_id || event.session_id || state.sessionInfo?.session_id || "";
-        const model = JSON.stringify([state.sessionInfo?.provider, state.sessionInfo?.model, state.sessionInfo?.base_url]);
+        const model = JSON.stringify([state.sessionInfo?.provider, state.sessionInfo?.model]);
         if (imageNotices.get(session)?.model !== model) imageNotices.delete(session);
         const decisions = event.decisions;
         if (decisions?.image_notice) {
