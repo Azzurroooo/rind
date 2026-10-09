@@ -230,3 +230,11 @@ test("lists show a conversation's new name before history is read again", () => 
   snapshot.live = [];
   assert.equal(teamSessions(snapshot, "team", history).find(s => s.id === "r-lead").title, "Plan release", "without a rename, history decides");
 });
+
+test("folders whose conversations have no recorded activity still sort", () => {
+  const workspaces = [
+    { workspace: "/home/me/a", name: "a", teams: [], sessions: [{ runtimeSessionId: "r1", title: "r1", updatedAt: undefined, status: "Idle" }] },
+    { workspace: "/home/me/b", name: "b", teams: [], sessions: [{ runtimeSessionId: "r2", title: "r2", updatedAt: "2026-10-09T10:00:00Z", status: "Idle" }] },
+  ];
+  assert.deepEqual(independentRows(workspaces).filter(r => r.kind === "workspace").map(r => r.title), ["b", "a"]);
+});

@@ -62,7 +62,8 @@ export function relativeTime(value, now = Date.now()) {
 }
 
 const byId = (items, id) => items.find(item => item.id === id);
-const later = (a, b) => ((a || "") > (b || "") ? a : b);
+// The later of two timestamps; one never recorded counts as earliest, and the result is always a string.
+const later = (a, b) => ((a || "") > (b || "") ? a : b || "");
 const matches = (query, ...values) => !query || values.some(value => single(value).toLowerCase().includes(query.toLowerCase()));
 const statusOk = (filter, status) => filter === "All" || status === filter;
 const bySessionPriority = (a, b) => statusMeta(a.status).rank - statusMeta(b.status).rank || (b.updatedAt || "").localeCompare(a.updatedAt || "");
