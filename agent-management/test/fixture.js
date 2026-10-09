@@ -30,7 +30,10 @@ export async function fixture(t) {
     if (method === "resolve") return { folders: Object.fromEntries(params.workspace_roots.map(root => [root, { model: folders.get(root)?.model_id || "settings-model" }])) };
     return { workspace_root: params.workspace_root, folder: folders.get(params.workspace_root) || {} };
   };
-  const service = createService({ store, paths, adapters: { rind: adapter }, toolConfig: () => ({}), folderDefaults });
+  // Stands in for the Runtime taking a delivery into a conversation.
+  const delivered = [];
+  const deliver = async (runtimeSessionId, text) => { delivered.push({ runtimeSessionId, text }); };
+  const service = createService({ store, paths, adapters: { rind: adapter }, toolConfig: () => ({}), folderDefaults, deliver });
   t.after(async () => { await service.stop(); await rm(home, { recursive: true, force: true }); });
   const call = (method, params = {}, actor = user) => service.request(actor, method, { requestId: randomUUID(), ...params });
   const team = await call("createTeam", { name: "Product" });
@@ -43,7 +46,9 @@ export async function fixture(t) {
   }
   const leader = await member("leader");
   await call("setLeader", { teamId: team.id, agentId: leader.id });
-  return { home, paths, store, service, call, team, leader, member, starts, folderCalls };
+  // The member running a started task, as its tool calls reach the service.
+  const runner = start => ({ kind: "agent", sessionId: start.input.session.id });
+  return { home, paths, store, service, call, team, leader, member, starts, folderCalls, delivered, runner };
 }
 export async function eventually(check) {
   for (let i = 0; i < 100; i++) { if (check()) return; await new Promise(resolve => setTimeout(resolve, 10)); }

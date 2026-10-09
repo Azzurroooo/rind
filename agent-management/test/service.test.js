@@ -25,29 +25,29 @@ test("disconnecting a client after stop cannot write to the closed service", asy
 test("a named member receives a blocker and its report resumes the blocked owner", async t => {
   const f = await fixture(t);
   const author = await f.member("author"), reviewer = await f.member("reviewer");
+  await f.call("setSupervisor", { teamId: f.team.id, agentId: reviewer.id, reportsToAgentId: author.id });
   const task = await f.call("assignTask", { teamId: f.team.id, assigneeAgentId: author.id, brief: "Need a review" });
   await eventually(() => f.starts.length === 1);
-  await f.call("updateTask", { taskId: task.id, status: "blocked", blockedOn: { responder: reviewer.id, action: "Confirm the proposed tax category" } });
+  await f.call("report", { blocked: { responder: reviewer.id, action: "Confirm the proposed tax category" } }, f.runner(f.starts[0]));
   f.starts[0].finish({ content: "waiting for review" });
   await eventually(() => f.starts.length === 2);
   const response = f.starts[1];
   assert.equal(response.input.agent.id, reviewer.id);
-  await f.call("updateTask", { taskId: response.input.task.id, report: { outcome: "completed", summary: "Category confirmed", evidence: [], artifacts: [] } });
+  await f.call("report", { outcome: "completed", summary: "Category confirmed", evidence: [] }, f.runner(response));
   response.finish({ content: "confirmed" });
   await eventually(() => f.starts.length === 3);
   assert.equal(f.starts[2].input.task.id, task.id);
-  assert.match(f.starts[2].input.instructions, /Category confirmed/);
+  assert.match(f.starts[2].input.input, /Category confirmed/, "the owner is told the answer, not its brief again");
 });
-
 test("an answer received before the blocked run exits still resumes its owner", async t => {
   const f = await fixture(t);
   const task = await f.call("assignTask", { teamId: f.team.id, assigneeAgentId: f.leader.id, brief: "Need a decision" });
   await eventually(() => f.starts.length === 1);
-  await f.call("updateTask", { taskId: task.id, status: "blocked", blockedOn: { responder: "user", action: "Choose A or B" } });
+  await f.call("report", { blocked: { responder: "user", action: "Choose A or B" } }, f.runner(f.starts[0]));
   await f.call("postTaskNote", { taskId: task.id, text: "Use A", answer: true });
   f.starts[0].finish({ content: "waiting" });
   await eventually(() => f.starts.length === 2);
-  assert.match(f.starts[1].input.instructions, /Use A/);
+  assert.match(f.starts[1].input.input, /the user answered your blocker: Use A/);
 });
 test("changing team scope cannot reuse private conversation history", async t => {
   const f = await fixture(t);
@@ -77,24 +77,28 @@ test("three levels of delegation wait for grandchildren and deliver back through
   await f.call("setSupervisor", { teamId: f.team.id, agentId: a1.id, reportsToAgentId: a.id });
   const root = await f.call("assignTask", { teamId: f.team.id, assigneeAgentId: f.leader.id, brief: "Integrate" });
   await eventually(() => f.starts.length === 1);
-  const mid = await f.call("assignTask", { teamId: f.team.id, assigneeAgentId: a.id, brief: "Build" }, { kind: "agent", sessionId: f.starts[0].input.session.id });
+  const mid = await f.call("delegate", { to: a.id, brief: "Build" }, f.runner(f.starts[0]));
   await eventually(() => f.starts.length === 2);
-  const leaf = await f.call("assignTask", { teamId: f.team.id, assigneeAgentId: a1.id, brief: "Implement" }, { kind: "agent", sessionId: f.starts[1].input.session.id });
+  const leaf = await f.call("delegate", { to: a1.id, brief: "Implement" }, f.runner(f.starts[1]));
   await eventually(() => f.starts.length === 3);
+  await assert.rejects(f.call("report", { outcome: "done", summary: "Too early", evidence: [] }, f.runner(f.starts[1])), { code: "WORK_OUTSTANDING" });
   f.starts[1].finish({ content: "Waiting for a1" });
-  await eventually(() => f.store.state.tasks[mid.id].status === "blocked");
+  await eventually(() => f.store.state.tasks[mid.taskId].status === "blocked");
   f.starts[0].finish({ content: "Waiting for a" });
   await eventually(() => f.store.state.tasks[root.id].status === "blocked");
   assert.equal(f.starts.length, 3);
-  await f.call("updateTask", { taskId: leaf.id, report: { outcome: "done", summary: "Leaf delivery", evidence: [], artifacts: [] } });
+  await f.call("report", { outcome: "done", summary: "Leaf delivery", evidence: [] }, f.runner(f.starts[2]));
   f.starts[2].finish({ content: "Done" });
   await eventually(() => f.starts.length === 4);
-  assert.equal(f.starts[3].input.task.id, mid.id);
+  assert.equal(f.starts[3].input.task.id, mid.taskId);
   assert.equal(f.starts[3].input.session.id, f.starts[1].input.session.id, "continuations preserve session identity");
-  await f.call("updateTask", { taskId: mid.id, report: { outcome: "done", summary: "Integrated child", evidence: [], artifacts: [] } });
+  assert.match(f.starts[3].input.input, new RegExp("a1 · task " + leaf.taskId + " · delivered: done\\n  Leaf delivery"));
+  await f.call("report", { outcome: "done", summary: "Integrated child", evidence: [] }, f.runner(f.starts[3]));
   f.starts[3].finish({ content: "Done" });
   await eventually(() => f.starts.length === 5);
   assert.equal(f.starts[4].input.task.id, root.id);
+  assert.match(f.starts[4].input.input, /Integrated child/);
+  assert.doesNotMatch(f.starts[4].input.input, /Leaf delivery/, "each delegator hears from its own reports");
 });
 test("adding the first member establishes the root without a separate UI mutation", async t => {
   const f = await fixture(t);
@@ -106,22 +110,26 @@ test("adding the first member establishes the root without a separate UI mutatio
   assert.equal(snapshot.memberships.find(m => m.agentId === second.id).reportsToAgentId, first.id);
 });
 
-test("organization enforces direct delegation, subtree visibility and acyclic reassignment", async t => {
+test("members delegate only to direct reports and reach nothing beyond delegate and report", async t => {
   const f = await fixture(t);
-  const a = await f.member("a"), a1 = await f.member("a1"), a11 = await f.member("a11"), b = await f.member("b");
+  const a = await f.member("a"), a1 = await f.member("a1"), a11 = await f.member("a11");
   await f.call("setSupervisor", { teamId: f.team.id, agentId: a1.id, reportsToAgentId: a.id });
   await f.call("setSupervisor", { teamId: f.team.id, agentId: a11.id, reportsToAgentId: a1.id });
   const as = async agent => ({ kind: "agent", sessionId: (await f.call("attachSession", { teamId: f.team.id, agentId: agent.id })).id });
-  const aActor = await as(a), a1Actor = await as(a1), bActor = await as(b);
-  const own = await f.call("assignTask", { teamId: f.team.id, assigneeAgentId: a1.id, brief: "Coordinate", start: false }, aActor);
-  const child = await f.call("assignTask", { teamId: f.team.id, assigneeAgentId: a11.id, brief: "Implement", start: false }, a1Actor);
-  await assert.rejects(f.call("assignTask", { teamId: f.team.id, assigneeAgentId: a11.id, brief: "Skip level" }, aActor), { code: "FORBIDDEN" });
-  await assert.rejects(f.call("getTask", { taskId: child.id }, bActor), { code: "FORBIDDEN" });
-  assert.deepEqual((await f.call("getTeam", { teamId: f.team.id }, aActor)).tasks.map(t => t.id), [own.id, child.id]);
+  const aActor = await as(a), a1Actor = await as(a1);
+  await f.call("delegate", { to: a1.id, brief: "Coordinate" }, aActor);
+  const child = await f.call("delegate", { to: a11.id, brief: "Implement" }, a1Actor);
+  const skipped = f.call("delegate", { to: a11.id, brief: "Skip level" }, aActor);
+  await assert.rejects(skipped, { code: "NOT_DIRECT_REPORT" });
+  await assert.rejects(skipped, error => error.message.includes(a1.id), "the refusal names the direct reports");
+  await assert.rejects(f.call("delegate", { to: a1.id, task: child.taskId, brief: "Both" }, aActor), { code: "INVALID_INPUT" });
+  for (const method of ["getTask", "assignTask", "snapshot", "createWorkspace", "setMemberModel"]) {
+    await assert.rejects(f.call(method, { taskId: child.taskId }, aActor), { code: "FORBIDDEN" }, method);
+  }
+  await assert.rejects(f.call("delegate", { to: a1.id, brief: "Not a member's tool" }, { kind: "manager", sessionId: aActor.sessionId }), { code: "FORBIDDEN" });
+  await assert.rejects(f.call("report", { outcome: "done", summary: "No task", evidence: [] }, aActor), { code: "NO_TASK" });
   await assert.rejects(f.call("setSupervisor", { teamId: f.team.id, agentId: a.id, reportsToAgentId: a11.id }), { code: "ORGANIZATION_CYCLE" });
   await assert.rejects(f.call("removeMember", { teamId: f.team.id, agentId: a.id }), { code: "HAS_REPORTS" });
-  const added = await f.call("createWorkspace", { teamId: f.team.id, name: "a-new" }, aActor);
-  assert.equal((await f.call("snapshot")).memberships.find(m => m.agentId === added.id).reportsToAgentId, a.id);
   await f.call("setLeader", { teamId: f.team.id, agentId: a11.id });
   const roster = (await f.call("snapshot")).memberships;
   assert.equal(roster.filter(m => !m.reportsToAgentId).length, 1);
@@ -176,7 +184,7 @@ test("host admission covers automatic continuations and only replay reconciliati
   await assert.rejects(f.call("hostTurnStart", { sessionId: direct.id, runtimeSessionId: "live" }), { code: "WORKSPACE_BUSY" });
 });
 
-test("registration, explicit sharing, scoped roles and durable idempotency", async t => {
+test("registration, explicit sharing and durable idempotency", async t => {
   const f = await fixture(t);
   const again = await f.call("registerAgent", { workspace: f.leader.canonicalWorkspace });
   assert.equal(again.id, f.leader.id);
@@ -184,9 +192,7 @@ test("registration, explicit sharing, scoped roles and durable idempotency", asy
   await assert.rejects(f.call("addMember", { teamId: other.id, agentId: f.leader.id }), { code: "WORKSPACE_SHARED" });
   await f.call("addMember", { teamId: other.id, agentId: f.leader.id, share: true });
   const session = await f.call("attachSession", { agentId: f.leader.id, teamId: f.team.id });
-  const actor = { kind: "agent", sessionId: session.id };
-  await assert.rejects(f.call("getTeam", { teamId: other.id }, actor), { code: "FORBIDDEN" });
-  await assert.rejects(f.call("assignTask", { teamId: f.team.id, assigneeAgentId: "invented", brief: "bad" }, actor), { code: "NOT_TEAM_MEMBER" });
+  await assert.rejects(f.call("delegate", { to: "invented", brief: "bad" }, { kind: "agent", sessionId: session.id }), { code: "NOT_DIRECT_REPORT" });
   assert.equal(f.starts.length, 0);
   const params = { name: "Idempotent", requestId: "same" };
   const team = await f.call("createTeam", params);
@@ -204,14 +210,14 @@ test("same workspace queues while distinct worktrees run independently; reports 
   await f.call("assignTask", { teamId: f.team.id, assigneeAgentId: b.id, brief: "parallel" });
   await eventually(() => f.starts.length === 2);
   assert.equal(f.store.state.tasks[second.id].status, "queued");
-  await f.call("updateTask", { taskId: first.id, report: { outcome: "completed", summary: "Delivered", evidence: ["test passed"], artifacts: [] } });
-  f.starts.find(s => s.input.task.id === first.id).finish({ content: "done" });
+  const running = f.starts.find(s => s.input.task.id === first.id);
+  await f.call("report", { outcome: "completed", summary: "Delivered", evidence: ["test passed"] }, f.runner(running));
+  running.finish({ content: "done" });
   await eventually(() => f.starts.length === 3);
   assert.equal(f.store.state.tasks[first.id].status, "done");
   f.starts.find(s => s.input.task.id === second.id).finish({ content: "no report" });
   await eventually(() => f.store.state.tasks[second.id].status === "needs_attention");
 });
-
 test("priority affects only queued work, cancellation is durable and status comes from the service", async t => {
   const f = await fixture(t);
   const first = await f.call("assignTask", { teamId: f.team.id, assigneeAgentId: f.leader.id, brief: "First" });
@@ -248,8 +254,7 @@ test("leader resumes after children return without a human polling every agent",
   const specialist = await f.member("specialist");
   const parent = await f.call("assignTask", { teamId: f.team.id, assigneeAgentId: f.leader.id, brief: "Deliver a feature" });
   await eventually(() => f.starts.length === 1);
-  const actor = { kind: "agent", sessionId: f.starts[0].input.session.id };
-  const child = await f.call("assignTask", { teamId: f.team.id, assigneeAgentId: specialist.id, brief: "Implement" }, actor);
+  await f.call("delegate", { to: specialist.id, brief: "Implement" }, f.runner(f.starts[0]));
   f.starts[0].finish({ content: "waiting" });
   await eventually(() => f.store.state.tasks[parent.id].status === "blocked");
   await eventually(() => f.starts.length === 2);
@@ -257,25 +262,22 @@ test("leader resumes after children return without a human polling every agent",
   assert.equal(briefing.needsAttention.length, 0);
   assert.equal(briefing.waiting[0].taskId, parent.id);
   assert.equal((await f.call("snapshot")).memberships.find(m => m.agentId === f.leader.id).status, "Delegated");
-  await f.call("updateTask", { taskId: child.id, report: { outcome: "done", summary: "Implemented", evidence: [], artifacts: [] } });
+  await f.call("report", { outcome: "done", summary: "Implemented", evidence: [] }, f.runner(f.starts[1]));
   f.starts[1].finish({ content: "done" });
   await eventually(() => f.starts.length === 3);
   assert.equal(f.starts[2].input.task.id, parent.id);
-  assert.match(f.starts[2].input.instructions, /Implemented/);
+  assert.match(f.starts[2].input.input, /Implemented/);
+  assert.doesNotMatch(f.starts[2].input.instructions, /Implemented/, "results arrive as the input, not in the instructions");
   assert.equal((await f.call("getTeam", { teamId: f.team.id })).briefing.delivered[0].summary, "Implemented");
 });
-
-test("team briefings preserve task visibility and members cannot reorder or cancel team work", async t => {
+test("members cannot reorder or cancel team work, and the Manager reads every briefing", async t => {
   const f = await fixture(t), specialist = await f.member("specialist");
   const own = await f.call("assignTask", { teamId: f.team.id, assigneeAgentId: specialist.id, brief: "Visible task", start: false });
-  const privateTask = await f.call("assignTask", { teamId: f.team.id, assigneeAgentId: f.leader.id, brief: "Leader's confidential context", start: false });
+  const other = await f.call("assignTask", { teamId: f.team.id, assigneeAgentId: f.leader.id, brief: "Leader's work", start: false });
   const session = await f.call("attachSession", { teamId: f.team.id, agentId: specialist.id });
   const actor = { kind: "agent", sessionId: session.id };
-  const result = await f.call("getTeam", { teamId: f.team.id }, actor);
-  assert.deepEqual(result.briefing.inProgress.map(task => task.taskId), [own.id]);
-  assert.doesNotMatch(JSON.stringify(result), /confidential/);
-  await assert.rejects(f.call("cancelTask", { taskId: own.id }, actor), { code: "FORBIDDEN" });
-  await assert.rejects(f.call("setTaskPriority", { taskId: privateTask.id, priority: "high" }, actor), { code: "FORBIDDEN" });
+  await assert.rejects(f.call("delegate", { task: own.id, cancel: true }, actor), { code: "FORBIDDEN" });
+  await assert.rejects(f.call("setTaskPriority", { taskId: other.id, priority: "high" }, actor), { code: "FORBIDDEN" });
   const manager = await f.call("attachSession", { manager: true });
   assert.equal((await f.call("getTeam", { teamId: f.team.id }, { kind: "manager", sessionId: manager.id })).briefing.inProgress.length, 2);
 });
@@ -292,19 +294,23 @@ test("crash recovery retains workspace ownership and never repeats uncertain wor
   await f.call("startTask", { taskId: task.id });
   await eventually(() => f.starts.length === 2);
 });
-test("published files require owner scope and cannot escape through a symlink or traversal", async t => {
+test("delivered files are copied for the delegator and cannot escape through a symlink or traversal", async t => {
   const f = await fixture(t);
   const agent = await f.member("finance");
-  const task = await f.call("assignTask", { teamId: f.team.id, assigneeAgentId: agent.id, brief: "Report", start: false });
+  const task = await f.call("assignTask", { teamId: f.team.id, assigneeAgentId: agent.id, brief: "Report" });
+  await eventually(() => f.starts.length === 1);
+  const runner = f.runner(f.starts[0]);
   await writeFile(path.join(agent.canonicalWorkspace, "report.txt"), "result");
-  await assert.rejects(f.call("publishArtifact", { taskId: task.id, path: "../leader" }), { code: "INVALID_ARTIFACT" });
-  const published = await f.call("publishArtifact", { taskId: task.id, path: "report.txt" });
-  assert.equal(published.size, 6);
-  const preview = await f.call("readArtifact", { artifactId: published.id });
-  assert.ok(preview.path);
+  await assert.rejects(f.call("report", { outcome: "done", summary: "s", evidence: [], artifacts: ["../leader"] }, runner), { code: "INVALID_ARTIFACT" });
   await symlink(f.leader.canonicalWorkspace, path.join(agent.canonicalWorkspace, "outside"), process.platform === "win32" ? "junction" : "dir");
   await writeFile(path.join(f.leader.canonicalWorkspace, "private.txt"), "private");
-  await assert.rejects(f.call("publishArtifact", { taskId: task.id, path: "outside/private.txt" }), { code: "INVALID_ARTIFACT" });
+  await assert.rejects(f.call("report", { outcome: "done", summary: "s", evidence: [], artifacts: ["outside/private.txt"] }, runner), { code: "INVALID_ARTIFACT" });
+  await f.call("report", { outcome: "done", summary: "s", evidence: [], artifacts: ["report.txt"] }, runner);
+  const [artifactId] = f.store.state.tasks[task.id].report.artifacts;
+  const preview = await f.call("readArtifact", { artifactId });
+  assert.equal(preview.size, 6);
+  assert.equal(path.relative(f.paths.artifacts, preview.path), path.join(f.team.id, "user", task.id, artifactId, "report.txt"));
+  assert.equal(await readFile(preview.path, "utf8"), "result");
 });
 test("store discards only an incomplete tail and rejects earlier corrupt records", async t => {
   const home = await mkdtemp(path.join(os.tmpdir(), "rind-store-"));

@@ -26,7 +26,7 @@ export function createRindAdapter(options: { home?: string; python?: string; rep
         await client.request("session/subscribe", { session_id: runtimeSessionId });
         let cancelled = false;
         const completion = client.request("session/prompt", {
-          session_id: runtimeSessionId, input: input.task.brief, completion_scope: "request",
+          session_id: runtimeSessionId, input: input.input, completion_scope: "request",
           transient_system_messages: [{ role: "system", content: input.instructions, _context_kind: "external_tools" }],
         }).then(result => {
           if (cancelled) return { content: "" };

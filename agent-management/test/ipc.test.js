@@ -31,7 +31,7 @@ test("direct host can reconcile after restart while its model cannot revive an e
   const b = await connect();
   assert.equal((await b.request("snapshot")).runs[0].status, "unknown");
   await b.request("reattachSession", { sessionId: session.id, runtimeSessionId: "live", active: true });
-  assert.ok((await model.request("snapshot")).sessions.some(s => s.id === session.id));
+  await assert.rejects(model.request("report", { outcome: "done", summary: "s", evidence: [] }), { code: "NO_TASK" }, "the revived credential reaches the service again");
   const host = await connect(config.lifecycle.env.RIND_MANAGEMENT_TOKEN, "live");
   await host.request("hostTurnEnd", { outcome: "turn_completed", pending: false });
   assert.equal((await b.request("snapshot")).runs[0].status, "succeeded");
@@ -63,7 +63,10 @@ test("local service has one writer, scoped credentials, subscription and disconn
   const config = await a.request("sessionTools", { sessionId: session.id });
   const runtime = await connectClient({ endpoint: server.paths.endpoint, token: config.env.RIND_MANAGEMENT_TOKEN, runtimeSessionId: "runtime-1" });
   clients.push(runtime);
-  assert.equal((await runtime.request("listTeams")).length, 1);
+  assert.deepEqual(config.tools.map(tool => tool.name), ["delegate"], "a leader's conversation can delegate; only a task run reports");
+  assert.match(config.instructions, /Your direct reports: none\./);
+  await assert.rejects(runtime.request("delegate", { to: agent.id, brief: "Myself" }), { code: "NOT_DIRECT_REPORT" });
+  await assert.rejects(runtime.request("listTeams"), { code: "FORBIDDEN" });
   await assert.rejects(runtime.request("hostTurnEnd", { outcome: "turn_completed" }), { code: "FORBIDDEN" });
   const host = await connectClient({ endpoint: server.paths.endpoint, token: config.lifecycle.env.RIND_MANAGEMENT_TOKEN, runtimeSessionId: "runtime-1" });
   clients.push(host);

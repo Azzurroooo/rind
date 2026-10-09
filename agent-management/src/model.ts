@@ -1,5 +1,6 @@
 export type Principal = { kind: "user" } | { kind: "manager"; sessionId: string } | { kind: "agent"; sessionId: string };
-export interface Agent { id: string; name: string; canonicalWorkspace: string; adapter: string; hint?: string; skillRefs?: string[] }
+// addedBy: the member that added this one with delegate; worktreeOf: the repository its folder is a worktree of.
+export interface Agent { id: string; name: string; canonicalWorkspace: string; adapter: string; hint?: string; skillRefs?: string[]; addedBy?: string; worktreeOf?: string }
 // A deleted team with history keeps its record as a read-only archive.
 export interface Team { id: string; name: string; leaderAgentId?: string; createRoot: string; archive?: { at: string; members: Record<string, string> } }
 export interface Membership { teamId: string; agentId: string; reportsToAgentId?: string; position?: string; responsibility?: string }
@@ -11,6 +12,12 @@ export interface Task {
   report?: Report; error?: string; dispatch?: boolean;
   priority?: "high" | "low";
   deliveredAt?: string; reworkOf?: string;
+  // Delegated from a conversation rather than a task: its result goes back to that conversation.
+  originSessionId?: string;
+  // What the next run is told; the first run is told the brief.
+  resume?: string;
+  // Its result was handed to whoever delegated it.
+  returned?: boolean;
   review?: { decision: "accepted" | "rework"; at: string; feedback?: string; reworkTaskId?: string };
 }
 // Destructive requests from the Manager wait in the user's Inbox.
@@ -24,14 +31,18 @@ export interface Run {
   startedAt: string; lastObservedAt: string; hostSequence: number; needsInput?: boolean;
 }
 export interface Note { id: string; taskId: string; author: string; text: string; createdAt: string }
-export interface Artifact { id: string; taskId: string; name: string; size: number; sha256: string }
+// file: where the copy lives, relative to the artifacts directory.
+export interface Artifact { id: string; taskId: string; name: string; file: string; size: number; sha256: string }
+// Results waiting for a conversation to be open, keyed by its session ID.
+export interface Delivery { texts: string[] }
 export interface State {
   seq: number; agents: Record<string, Agent>; teams: Record<string, Team>; memberships: Record<string, Membership>;
   tasks: Record<string, Task>; sessions: Record<string, Session>; runs: Record<string, Run>;
   notes: Record<string, Note>; artifacts: Record<string, Artifact>; approvals: Record<string, Approval>; notices: Record<string, Notice>;
+  deliveries: Record<string, Delivery>;
   receipts: Record<string, { input: string; result: unknown; at?: number }>;
 }
-export const emptyState = (): State => ({ seq: 0, agents: {}, teams: {}, memberships: {}, tasks: {}, sessions: {}, runs: {}, notes: {}, artifacts: {}, approvals: {}, notices: {}, receipts: {} });
+export const emptyState = (): State => ({ seq: 0, agents: {}, teams: {}, memberships: {}, tasks: {}, sessions: {}, runs: {}, notes: {}, artifacts: {}, approvals: {}, notices: {}, deliveries: {}, receipts: {} });
 // A member's model is its workspace's folder default, kept by the Rind runtime.
 export type FolderDefaults = (method: "get" | "set" | "unset" | "resolve" | "models", params?: Record<string, unknown>) => Promise<any>;
 export class ManagementError extends Error {
@@ -46,7 +57,7 @@ export function text(value: unknown, label: string, limit = 16000): string {
 }
 export const memberKey = (teamId: string, agentId: string) => teamId + "/" + agentId;
 export const activeRun = (run: Run) => ["starting", "running", "unknown"].includes(run.status);
-export interface AdapterInput { agent: Agent; session: Session; task: Task; instructions: string; externalTools: object }
+export interface AdapterInput { agent: Agent; session: Session; task: Task; input: string; instructions: string; externalTools: object }
 export interface AdapterEvent { type: "working" | "needs_input"; sequence: number }
 export interface AdapterHandle { runtimeSessionId: string; completion: Promise<{ content: string }>; cancel(): Promise<void> }
 export interface Adapter { start(input: AdapterInput, emit: (event: AdapterEvent) => void): Promise<AdapterHandle> }

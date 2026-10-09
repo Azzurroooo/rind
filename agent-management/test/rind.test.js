@@ -126,7 +126,7 @@ test("direct CLI captures activity, rejects ambiguous teams, and manager exposes
   assert.equal(view.runs.at(-1).status, "succeeded");
 });
 
-test("real Rind executes the scoped external tool and returns a durable report", { timeout: 30000 }, async t => {
+test("real Rind reports through the declared tool and the task is delivered", { timeout: 30000 }, async t => {
   const home = await mkdtemp(path.join(os.tmpdir(), "rind-managed-e2e-"));
   const workspace = path.join(home, "workspace");
   await mkdir(workspace, { recursive: true });
@@ -135,10 +135,11 @@ test("real Rind executes the scoped external tool and returns a durable report",
     if (request.method === "GET") { response.end(JSON.stringify({ data: [{ id: "fixture" }] })); return; }
     let raw = ""; request.on("data", chunk => raw += chunk); request.on("end", () => {
       const body = JSON.parse(raw);
-      assert.ok(body.tools.some(t => t.function.name === "agent_management"));
-      assert.ok(!body.tools.some(t => t.function.name === "delegate"));
+      const names = body.tools.map(t => t.function.name);
+      assert.ok(names.includes("report") && names.includes("delegate"), "a leader's task run delivers and delegates");
+      assert.ok(!names.includes("agent_management") && !names.includes("ask_user_question"), "a task run neither manages nor asks the user");
       response.writeHead(200, { "Content-Type": "text/event-stream", Connection: "close" });
-      const delta = calls++ === 0 ? { tool_calls: [{ index: 0, id: "report-1", type: "function", function: { name: "agent_management", arguments: JSON.stringify({ action: "updateTask", parameters: { taskId, report: { outcome: "completed", summary: "Fixture delivery", evidence: ["Local provider verified tool roundtrip"], artifacts: [] } } }) } }] } : { content: "Delivery complete." };
+      const delta = calls++ === 0 ? { tool_calls: [{ index: 0, id: "report-1", type: "function", function: { name: "report", arguments: JSON.stringify({ outcome: "completed", summary: "Fixture delivery", evidence: ["Local provider verified tool roundtrip"] }) } }] } : { content: "Delivery complete." };
       response.write("data: " + JSON.stringify({ id: "fixture", object: "chat.completion.chunk", choices: [{ index: 0, delta, finish_reason: null }] }) + "\n\n");
       response.write("data: " + JSON.stringify({ id: "fixture", object: "chat.completion.chunk", choices: [{ index: 0, delta: {}, finish_reason: calls === 1 ? "tool_calls" : "stop" }] }) + "\n\n");
       response.end("data: [DONE]\n\n");

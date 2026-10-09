@@ -13,9 +13,10 @@ import { activeRun } from "./model.js";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import { connectSharedRuntime } from "../../rind-runtime-client/shared-runtime.js";
+import { memberInstructions, supervises, toolsFor } from "./tools.js";
+import type { Task } from "./model.js";
 
 const RUNTIME_START_MS = 30000;
-const MANAGEMENT_DESCRIPTION = "Manage registered teams and tasks. Call snapshot to discover IDs. Actions: getTeam(teamId) returns a concise team briefing; listModels(), getMemberModel(teamId,agentId), setMemberModel(teamId,agentId,provider?,model?,reasoningEffort?) and clearMemberModel(teamId,agentId,part:model|reasoningEffort) (user and Manager only; a member's model is its workspace's default and applies from its next task); createTeam(name), addMember(teamId,workspace,position?,responsibility?), removeMember(teamId,agentId), deleteTeam(teamId) (user and Manager only), setLeader(teamId,agentId), setSupervisor(teamId,agentId,reportsToAgentId), updateMember(teamId,agentId,position?,responsibility?), createWorkspace(teamId,name), createWorktree(teamId,name,repository,branch,base?), assignTask(teamId,assigneeAgentId,brief), getTask(taskId), updateTask(taskId,report:{outcome,summary,evidence:[],artifacts:[]}) or updateTask(taskId,status:blocked,blockedOn:{responder,action}), postTaskNote(taskId,text), publishArtifact(taskId,path), readArtifact(artifactId), startTask(taskId), setTaskPriority(taskId,priority:high|normal|low), cancelTask(taskId), cancelRun(runId). Only registered members may run. For the Manager, deleting a team with history or stopping a running task becomes a request the user approves in their Inbox; it leaves snapshot.approvals once the user decides. Share/copy choices require the user interface.";
 // The work keeps going; only the caller stops waiting for it.
 function within<T>(work: Promise<T>, ms: number, message: string): Promise<T> {
   let timer: NodeJS.Timeout | undefined;
@@ -133,22 +134,22 @@ export async function startServer(options: { home?: string; python?: string; rep
     if (method === "models") return (await host.request("model/list", {})).models;
     return host.request("rind/folder_defaults/" + method, params);
   }
-  function toolConfig(principal: Principal) {
+  // A task run is told who it is with each prompt; a conversation, once, here.
+  function toolConfig(principal: Principal, task?: Task) {
     const token = issue(principal);
     const hostToken = issue(principal, true);
     const session = principal.kind === "user" ? undefined : store.state.sessions[principal.sessionId];
     const agent = session ? store.state.agents[session.agentId] : undefined;
     const skills = agent?.skillRefs || [];
-    const role = session?.teamId ? store.state.memberships[session.teamId + "/" + session.agentId] : undefined;
+    const manager = principal.kind === "manager";
+    const tools = toolsFor(manager ? "manager" : "agent", { supervises: Boolean(session?.teamId && supervises(store.state, session.teamId, session.agentId)), task: Boolean(task) });
     return {
       skill_files: principal.kind === "manager" ? [] : skills.filter(ref => path.isAbsolute(ref)),
       command: process.execPath, args: [bridge], env: { RIND_MANAGEMENT_ENDPOINT: paths.endpoint, RIND_MANAGEMENT_TOKEN: token },
       lifecycle: { before: "hostTurnStart", after: "hostTurnEnd", env: { RIND_MANAGEMENT_ENDPOINT: paths.endpoint, RIND_MANAGEMENT_TOKEN: hostToken } },
-      tools: [{ name: "agent_management", description: MANAGEMENT_DESCRIPTION, parameters: { type: "object", properties: { action: { type: "string", description: "Operation name." }, parameters: { type: "object", description: "Operation parameters." } }, required: ["action"] } }],
-      ...(principal.kind !== "manager" ? { instructions: [agent?.hint, role?.responsibility,
-        session?.teamId ? "Team ID: " + session.teamId + "; Agent ID: " + session.agentId + ". Use snapshot for the organization tree. Delegate only to direct reports; integrate their delivery before reporting to your supervisor. Private conversations stay in their session." : "This conversation has no team authority.",
-        skills.length ? "Assigned skills: " + skills.join(", ") : ""].filter(Boolean).join("\n") } : {}),
-      ...(principal.kind === "manager" ? { enabled_tools: ["agent_management"], instructions: "You are the user's agents manager. Use agent_management to inspect all teams, assemble teams and assign work to their leaders. Keep delivery concise: progress, blockers needing the user, and links to tasks. You cannot browse members' private files. Sharing/copying workspaces requires the user's explicit choice." } : {}),
+      tools,
+      ...(manager ? { enabled_tools: tools.map(tool => tool.name), instructions: "You are the user's agents manager. Use agent_management to inspect all teams, assemble teams and assign work to their leaders. Results of work you assign are delivered to you when it settles. Keep delivery concise: progress, blockers needing the user, and links to tasks. You cannot browse members' private files. Sharing/copying workspaces requires the user's explicit choice." }
+        : task || !session ? {} : { instructions: memberInstructions(store.state, session) }),
     };
   }
   const server = net.createServer(socket => {
@@ -308,7 +309,8 @@ export async function startServer(options: { home?: string; python?: string; rep
     }
     store = await openStore(paths.state);
     const rind = createRindAdapter(options);
-    service = createService({ store, paths, adapters: { rind: { async start(input, emit) { await executionHost(); return rind.start(input, emit); } } }, toolConfig, folderDefaults });
+    const deliver = async (runtimeSessionId: string, text: string) => { await (await executionHost(false)).request("rind/session/deliver", { session_id: runtimeSessionId, text }); };
+    service = createService({ store, paths, adapters: { rind: { async start(input, emit) { await executionHost(); return rind.start(input, emit); } } }, toolConfig, folderDefaults, deliver });
     await service.recover();
     readyResolve!();
     if (Object.values(store.state.sessions).some(s => s.shared && s.runtimeSessionId)) void executionHost().catch(() => {});

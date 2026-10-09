@@ -5,13 +5,14 @@ import { randomUUID } from "node:crypto";
 import path from "node:path";
 import { fixture, eventually } from "./fixture.js";
 
-const report = summary => ({ outcome: "completed", summary, evidence: ["tests pass"], artifacts: [] });
+const report = summary => ({ outcome: "completed", summary, evidence: ["tests pass"] });
 
 async function deliver(f, assigneeAgentId, brief, teamId = f.team.id) {
   const task = await f.call("assignTask", { teamId, assigneeAgentId, brief });
   await eventually(() => f.starts.some(s => s.input.task.id === task.id));
-  await f.call("updateTask", { taskId: task.id, report: report(brief + " delivered") });
-  f.starts.find(s => s.input.task.id === task.id).finish({ content: "done" });
+  const start = f.starts.find(s => s.input.task.id === task.id);
+  await f.call("report", report(brief + " delivered"), f.runner(start));
+  start.finish({ content: "done" });
   await eventually(() => f.store.state.tasks[task.id].status === "done");
   return f.store.state.tasks[task.id];
 }
@@ -34,9 +35,9 @@ test("accepting a delivery records the review and rework goes back to the same o
   assert.equal(sent.rework.assigneeAgentId, f.leader.id);
   assert.equal(sent.rework.reworkOf, second.id);
   await eventually(() => f.starts.some(s => s.input.task.id === sent.rework.id));
-  const instructions = f.starts.find(s => s.input.task.id === sent.rework.id).input.instructions;
-  assert.match(instructions, /Mention the migration steps/);
-  assert.match(instructions, /Draft the release notes delivered/, "the owner sees the delivery being reworked");
+  const told = f.starts.find(s => s.input.task.id === sent.rework.id).input.input;
+  assert.match(told, /Mention the migration steps/);
+  assert.match(told, /Draft the release notes delivered/, "the owner sees the delivery being reworked");
 });
 
 test("only the user reviews, and only finished deliveries", async t => {
@@ -45,7 +46,9 @@ test("only the user reviews, and only finished deliveries", async t => {
   await eventually(() => f.starts.length === 1);
   await assert.rejects(f.call("reviewTask", { taskId: running.id, decision: "accept" }), { code: "TASK_NOT_DELIVERED" });
   const session = await f.call("attachSession", { agentId: f.leader.id, teamId: f.team.id });
-  await assert.rejects(f.call("reviewTask", { taskId: running.id, decision: "accept" }, { kind: "agent", sessionId: session.id }), { code: "USER_CONFIRMATION_REQUIRED" });
+  await assert.rejects(f.call("reviewTask", { taskId: running.id, decision: "accept" }, { kind: "agent", sessionId: session.id }), { code: "FORBIDDEN" });
+  const managerSession = await f.call("attachSession", { manager: true });
+  await assert.rejects(f.call("reviewTask", { taskId: running.id, decision: "accept" }, { kind: "manager", sessionId: managerSession.id }), { code: "USER_CONFIRMATION_REQUIRED" });
 });
 
 test("deleting a team keeps its deliveries read-only and releases its members and conversations", async t => {
