@@ -30,22 +30,34 @@ class Browser:
         self.url = ""
         monkeypatch.setattr(chatgpt_oauth.webbrowser, "open", lambda url: setattr(self, "url", url) or True)
 
+    async def state(self) -> str:
+        while not self.url:
+            await asyncio.sleep(0.01)
+        return parse_qs(urlsplit(self.url).query)["state"][0]
+
     def params(self) -> dict[str, str]:
         return {key: values[0] for key, values in parse_qs(urlsplit(self.url).query).items()}
 
 
 class Interaction:
-    def __init__(self, answer):
+    """Answers the prompt with `answer` (a coroutine function), or waits until the flow closes it."""
+
+    def __init__(self, answer=None):
         self.answer = answer
         self.notices: list[dict] = []
-        self.prompts: list[tuple[str, str]] = []
+        self.closed = False
 
     def notify(self, event):
         self.notices.append(event)
 
     async def prompt(self, kind, message, options=None):
-        self.prompts.append((kind, message))
-        return await self.answer() if callable(self.answer) else self.answer
+        try:
+            if self.answer is None:
+                await asyncio.Event().wait()
+            return await self.answer()
+        except asyncio.CancelledError:
+            self.closed = True
+            raise
 
 
 @pytest.fixture
@@ -71,24 +83,21 @@ async def _callback(query: str) -> tuple[int, str]:
 
 
 @pytest.mark.asyncio
-async def test_the_browser_callback_signs_in_and_the_token_is_exchanged_with_pkce(monkeypatch, token_endpoint):
+async def test_the_browser_callback_signs_in_by_itself_and_closes_the_prompt(monkeypatch, token_endpoint):
     browser = Browser(monkeypatch)
-    pages = []
+    interaction = Interaction()
+    login = asyncio.create_task(chatgpt_oauth.login(interaction))
+    state = await browser.state()
+    rejected = await _callback("state=wrong&code=c&client_id=x")
+    accepted = await _callback(f"code=the-code&state={state}&client_id=issued-client")
+    credential = await login
 
-    async def press_enter():
-        state = browser.params()["state"]
-        pages.append(await _callback(f"state=wrong&code=c&client_id=x"))
-        pages.append(await _callback(f"code=the-code&state={state}&client_id=issued-client"))
-        return ""
-
-    interaction = Interaction(press_enter)
-    credential = await chatgpt_oauth.login(interaction)
-
+    assert interaction.closed, "nothing to press: the prompt closes once the browser is done"
     params = browser.params()
     assert (params["client_id"], params["code_challenge_method"], params["redirect_uri"]) == ("dynamic_agent_client", "S256", chatgpt_oauth.REDIRECT_URI)
     assert "chatgpt.tokens.use.direct" in params["scope"] and params["ext_agent_host_id"].startswith("urn:uuid:")
     assert interaction.notices[0]["type"] == "auth_url" and browser.url in interaction.notices[0]["message"], "the URL is shown in case no browser opened"
-    assert pages[0][0] == 400 and pages[1][0] == 200 and "Return to Rind" in pages[1][1]
+    assert rejected[0] == 400 and accepted[0] == 200 and "return to Rind" in accepted[1]
     exchange = token_endpoint[0]
     assert (exchange["grant_type"], exchange["code"], exchange["client_id"]) == ("authorization_code", "the-code", "issued-client")
     assert len(exchange["code_verifier"]) >= 43
@@ -101,7 +110,7 @@ async def test_a_pasted_redirect_url_signs_in_without_the_callback(monkeypatch, 
     browser = Browser(monkeypatch)
 
     async def paste():
-        return f"{chatgpt_oauth.REDIRECT_URI}?code=pasted&state={browser.params()['state']}&client_id=c2"
+        return f"{chatgpt_oauth.REDIRECT_URI}?code=pasted&state={await browser.state()}&client_id=c2"
 
     credential = await chatgpt_oauth.login(Interaction(paste))
     assert (token_endpoint[0]["code"], credential.client_id) == ("pasted", "c2")
@@ -109,7 +118,7 @@ async def test_a_pasted_redirect_url_signs_in_without_the_callback(monkeypatch, 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("answer, message", [
-    (lambda state: "", "did not finish in the browser"),
+    (lambda state: "", "Login canceled"),
     (lambda state: "https://example.com/elsewhere?code=x", "starts with http://127.0.0.1:1455/auth/callback"),
     (lambda state: f"{chatgpt_oauth.REDIRECT_URI}?error=access_denied&error_description=No+thanks", "No thanks"),
     (lambda state: f"{chatgpt_oauth.REDIRECT_URI}?code=x&state=other&client_id=c", "another sign-in"),
@@ -118,7 +127,7 @@ async def test_a_sign_in_that_did_not_finish_says_why_and_frees_the_port(monkeyp
     browser = Browser(monkeypatch)
 
     async def respond():
-        return answer(browser.params()["state"])
+        return answer(await browser.state())
 
     with pytest.raises(ValueError, match=message):
         await chatgpt_oauth.login(Interaction(respond))
@@ -133,7 +142,7 @@ async def test_a_busy_callback_port_is_explained(monkeypatch):
     server = await asyncio.start_server(lambda r, w: None, chatgpt_oauth.CALLBACK_HOST, chatgpt_oauth.CALLBACK_PORT)
     try:
         with pytest.raises(ValueError, match="Port 1455 is in use"):
-            await chatgpt_oauth.login(Interaction(""))
+            await chatgpt_oauth.login(Interaction())
     finally:
         server.close()
 
@@ -202,3 +211,9 @@ async def test_signing_out_while_a_client_is_open_says_so(tmp_path, monkeypatch)
 def test_an_api_key_client_is_unchanged():
     client = OpenAIResponsesClient(None, "gpt-5.5")
     assert "store" not in client._payload([{"role": "user", "content": "hi"}], None, stream=True)
+
+
+def test_a_refused_token_request_names_the_reason(monkeypatch):
+    monkeypatch.setattr(chatgpt_oauth.httpx, "post", lambda url, data, headers, timeout: httpx.Response(400, json={"error": "invalid_grant"}, request=httpx.Request("POST", url)))
+    with pytest.raises(ValueError, match=r"failed \(400: invalid_grant\)\. Run /login again\."):
+        chatgpt_oauth._exchange("c", "client", "verifier")

@@ -736,7 +736,9 @@ async function runLogout(providerId = "") {
 }
 
 async function renderAuthUpdate(message) {
-  const text = String(message?.event?.message || "").trim();
+  const event = message?.event || {};
+  if (event.type === "prompt_closed") { inputActions.closeAuthPrompt(event.request_id); return; }
+  const text = String(event.message || "").trim();
   if (text) logOutput(text);
 }
 

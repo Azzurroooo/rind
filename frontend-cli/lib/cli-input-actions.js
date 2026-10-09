@@ -192,16 +192,24 @@ export function createCliInputActions({
     return askTtyInput(prompt, placeholder);
   }
 
+  // The Runtime may close a prompt it no longer needs (a sign-in finished in the browser).
+  let authPromptId = null;
+  function closeAuthPrompt(requestId) {
+    if (requestId && requestId === authPromptId) cancelActiveInput?.();
+  }
+
   async function handleAuthPrompt(request) {
     pausePrompt();
     output.closeAssistant();
     const params = request?.params || {};
+    authPromptId = request?.request_id || null;
     try {
       if (String(params.kind || "") === "select") {
         return await askAuthChoice(params.message, params.options);
       }
       return await askAuthText(params.message, String(params.kind || "text"));
     } finally {
+      authPromptId = null;
       resumePrompt();
     }
   }
@@ -737,6 +745,7 @@ export function createCliInputActions({
   return {
     ask,
     handleAuthPrompt,
+    closeAuthPrompt,
     askAuthChoice,
     answerQuestion,
     questionAnswered,

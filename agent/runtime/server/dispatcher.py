@@ -138,6 +138,10 @@ class _ProtocolAuthInteraction:
         })
         try:
             return await future
+        except asyncio.CancelledError:
+            # The flow went on without an answer: the window closes the prompt.
+            self.notify({"type": "prompt_closed", "request_id": request_id})
+            raise
         finally:
             self._server._auth_waiters.pop(request_id, None)
 
@@ -298,10 +302,11 @@ class RuntimeDispatcher:
 
     async def _dispatch(self, request: dict[str, Any]) -> None:
         method = str(request.get("method") or "")
-        if method == RuntimeMethod.RIND_AUTH_PROMPT and str(request.get("request_id")) in self._auth_waiters:
-            future = self._auth_waiters[str(request["request_id"])]
+        if method == RuntimeMethod.RIND_AUTH_PROMPT:
+            # An answer to a prompt the flow no longer waits for (it closed it) is dropped.
+            future = self._auth_waiters.get(str(request.get("request_id")))
             params = request.get("params") if isinstance(request.get("params"), dict) else {}
-            if not future.done():
+            if future is not None and not future.done():
                 future.set_result(str(params.get("value") or ""))
             return
         try:

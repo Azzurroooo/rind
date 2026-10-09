@@ -34,7 +34,7 @@ DIRECT_TOKEN_SCOPE = "chatgpt.tokens.use.direct"
 SCOPE = f"openid profile email offline_access resource.invoke {DIRECT_TOKEN_SCOPE}"
 REFRESH_BEFORE_SECONDS = 5 * 60
 TOKEN_TIMEOUT_SECONDS = 15
-SIGNED_IN_PAGE = "Signed in to ChatGPT. Return to Rind and press Enter."
+SIGNED_IN_PAGE = "Signed in to ChatGPT. You can close this page and return to Rind."
 
 
 async def login(interaction) -> Credential:
@@ -46,18 +46,23 @@ async def login(interaction) -> Credential:
     except OSError as exc:
         raise ValueError(f"Port {CALLBACK_PORT} is in use, probably by another unfinished sign-in or the Codex CLI. Finish or cancel it, then try again.") from exc
     url = _authorize_url(verifier, state)
+    # Whichever comes first: the browser's callback (the prompt then closes by
+    # itself) or a redirect URL pasted into it. The code is exchanged at once:
+    # it expires quickly.
+    interaction.notify({"type": "auth_url", "message": "Sign in with ChatGPT in your browser. If it did not open, visit: " + url})
+    pasted = asyncio.ensure_future(interaction.prompt("text", "Waiting for your browser… or paste the redirect URL here"))
     try:
         await asyncio.to_thread(webbrowser.open, url)
-        interaction.notify({"type": "auth_url", "message": "Sign in with ChatGPT in your browser. If it did not open, visit: " + url})
-        answer = (await interaction.prompt("text", "Press Enter once signed in, or paste the redirect URL")).strip()
-        if answer:
-            code, client_id = _authorization(urlsplit(answer), state)
-        elif callback.done():
+        await asyncio.wait({pasted, callback}, return_when=asyncio.FIRST_COMPLETED)
+        if callback.done():
             code, client_id = callback.result()
+        elif answer := pasted.result().strip():
+            code, client_id = _authorization(urlsplit(answer), state)
         else:
-            raise ValueError("Sign-in did not finish in the browser. Run /login again.")
+            raise ValueError("Login canceled.")
     finally:
         server.close()
+        pasted.cancel()
     return await asyncio.to_thread(_exchange, code, client_id, verifier)
 
 
@@ -129,7 +134,12 @@ def _exchange(code: str, client_id: str, verifier: str) -> Credential:
 def _token(form: dict[str, str], client_id: str) -> Credential:
     response = httpx.post(TOKEN_URL, data=form, headers={"Accept": "application/json"}, timeout=TOKEN_TIMEOUT_SECONDS)
     if response.status_code != 200:
-        raise ValueError(f"ChatGPT sign-in failed ({response.status_code}): {response.text[:300]}. Run /login again.")
+        try:
+            error = response.json()
+            reason = str(error.get("error_description") or error.get("error") or "") if isinstance(error, dict) else ""
+        except ValueError:
+            reason = ""
+        raise ValueError(f"ChatGPT sign-in failed ({response.status_code}{': ' + reason if reason else ''}). Run /login again.")
     token = response.json()
     if DIRECT_TOKEN_SCOPE not in str(token.get("scope") or "").split():
         raise ValueError("This ChatGPT account cannot use its subscription with Rind (no API access was granted).")

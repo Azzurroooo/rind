@@ -232,3 +232,21 @@ test("alt+right promotes a queued follow-up to steering", async () => {
   assert.deepEqual(requests[0].params, { input_id: "input-9" });
   assert.equal(state.input.pending[0].mode, "steering");
 });
+
+test("the Runtime closes a sign-in prompt it no longer waits for, and only that prompt", async () => {
+  const state = createCliState();
+  const actions = createCliInputActions({
+    state, request: async () => ({}), output: { terminalUi: {}, redraw() {}, closeAssistant() {} },
+    getTurnController: () => ({}), getTaskMonitor: () => null, getLineInput: () => null,
+    pausePrompt() {}, resumePrompt() {}, handleSigint() {},
+  });
+  const answer = actions.handleAuthPrompt({ request_id: "auth-1", params: { kind: "text", message: "Waiting for your browser… or paste the redirect URL here" } });
+  await Promise.resolve();
+  assert.equal(state.input.session.mode, "auth");
+  actions.closeAuthPrompt("auth-other");
+  assert.equal(state.input.session?.mode, "auth", "another prompt's close leaves this one open");
+  actions.closeAuthPrompt("auth-1");
+  assert.equal(await answer, "");
+  assert.notEqual(state.input.session?.mode, "auth");
+  actions.closeAuthPrompt("auth-1");
+});

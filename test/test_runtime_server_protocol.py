@@ -1102,3 +1102,27 @@ def test_only_local_host_may_configure_session_tools():
         assert _response(payloads, "local-open")["result"]["session_id"] == "s1"
 
     asyncio.run(run())
+
+
+def test_a_prompt_the_flow_stops_waiting_for_is_closed_in_the_window_and_a_late_answer_dropped():
+    from agent.runtime.server.dispatcher import _ProtocolAuthInteraction
+
+    worker = FakeWorker()
+    server, payloads = make_server(worker)
+
+    async def run():
+        waiting = asyncio.create_task(_ProtocolAuthInteraction(server).prompt("text", "Waiting for your browser"))
+        while not server._auth_waiters:
+            await asyncio.sleep(0.01)
+        request_id = next(iter(server._auth_waiters))
+        waiting.cancel()
+        await asyncio.gather(waiting, return_exceptions=True)
+        await asyncio.sleep(0)
+        await server._dispatch({"kind": "request", "request_id": request_id, "method": RuntimeMethod.RIND_AUTH_PROMPT, "params": {"value": "late"}})
+        return request_id
+
+    request_id = asyncio.run(run())
+    closed = [m for m in payloads if m.get("method") == RuntimeMethod.RIND_AUTH_UPDATE]
+    assert closed and closed[-1]["event"] == {"type": "prompt_closed", "request_id": request_id}
+    assert not server._auth_waiters
+    assert not any(m.get("request_id") == request_id and m.get("kind") == "response" for m in payloads), "the late answer is not treated as a request"
