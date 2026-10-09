@@ -130,10 +130,13 @@ test("real Rind reports through the declared tool and the task is delivered", { 
   const home = await mkdtemp(path.join(os.tmpdir(), "rind-managed-e2e-"));
   const workspace = path.join(home, "workspace");
   await mkdir(workspace, { recursive: true });
-  let taskId, calls = 0;
+  let taskId, calls = 0, release, arrived;
+  const joined = new Promise(resolve => { release = resolve; });
+  const firstRequest = new Promise(resolve => { arrived = resolve; });
   const provider = http.createServer((request, response) => {
     if (request.method === "GET") { response.end(JSON.stringify({ data: [{ id: "fixture" }] })); return; }
-    let raw = ""; request.on("data", chunk => raw += chunk); request.on("end", () => {
+    let raw = ""; request.on("data", chunk => raw += chunk); request.on("end", async () => {
+      if (calls === 0) { arrived(); await joined; }
       const body = JSON.parse(raw);
       const names = body.tools.map(t => t.function.name);
       assert.ok(names.includes("report") && names.includes("delegate"), "a leader's task run delivers and delegates");
@@ -158,6 +161,14 @@ test("real Rind reports through the declared tool and the task is delivered", { 
   const task = await client.request("assignTask", { teamId: team.id, assigneeAgentId: agent.id, brief: "Submit the fixture report.", start: false });
   taskId = task.id;
   await client.request("startTask", { taskId });
+  // A window joins the task's conversation while it runs: it opens the same session, configured the same way.
+  await firstRequest;
+  const view = await client.request("snapshot");
+  const managed = view.sessions.find(s => s.origin === "managed");
+  const { runtimeSessionId } = managed;
+  const window = createSharedRuntimeClient({ home, rindHome: home, repoRoot, python: process.env.RIND_PYTHON || "python", cliArgs: ["--cwd", workspace, "--session", runtimeSessionId], externalTools: await client.request("sessionTools", { sessionId: managed.id }) });
+  try { assert.equal((await window.request("initialize")).session_id, runtimeSessionId); }
+  finally { await window.shutdown(); release(); }
   let current;
   for (let i = 0; i < 100; i++) {
     current = await client.request("getTask", { taskId });

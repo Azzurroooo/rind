@@ -23,7 +23,7 @@ const reads = new Set(["snapshot", "listTeams", "getTeam", "listAgents", "getTas
 const MEMBER_MODEL_PARTS = { model: "model", reasoningEffort: "reasoning_effort" } as const;
 export function createService({ store, paths, adapters, toolConfig, folderDefaults, deliver }: {
   store: Store; paths: Paths; adapters: Record<string, Adapter>;
-  toolConfig: (principal: Principal, task?: Task) => object;
+  toolConfig: (principal: Principal) => object;
   folderDefaults: FolderDefaults;
   // Runs a message as the next turn of a Runtime conversation.
   deliver: (runtimeSessionId: string, text: string) => Promise<void>;
@@ -813,7 +813,7 @@ export function createService({ store, paths, adapters, toolConfig, folderDefaul
       const session = state.sessions[state.runs[runId].sessionId];
       const agent = state.agents[session.agentId];
       const instructions = memberInstructions(state, session, task);
-      const handle = await adapters[agent.adapter].start({ agent, session, task, input, instructions, externalTools: toolConfig({ kind: "agent", sessionId: session.id }, task) }, event => {
+      const handle = await adapters[agent.adapter].start({ agent, session, task, input, instructions, externalTools: toolConfig({ kind: "agent", sessionId: session.id }) }, event => {
         void transaction(next => {
           const run = next.runs[runId];
           if (!activeRun(run) || event.sequence <= run.hostSequence) return;

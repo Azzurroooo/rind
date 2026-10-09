@@ -14,7 +14,6 @@ import { fileURLToPath } from "node:url";
 import path from "node:path";
 import { connectSharedRuntime } from "../../rind-runtime-client/shared-runtime.js";
 import { memberInstructions, supervises, toolsFor } from "./tools.js";
-import type { Task } from "./model.js";
 
 const RUNTIME_START_MS = 30000;
 // The work keeps going; only the caller stops waiting for it.
@@ -134,15 +133,18 @@ export async function startServer(options: { home?: string; python?: string; rep
     if (method === "models") return (await host.request("model/list", {})).models;
     return host.request("rind/folder_defaults/" + method, params);
   }
-  // A task run is told who it is with each prompt; a conversation, once, here.
-  function toolConfig(principal: Principal, task?: Task) {
+  // A session has one configuration, whoever opens it: a task run and a window
+  // joining the task's conversation must agree, or the Runtime refuses the second.
+  // A task's conversation is told who it is with each prompt; any other, once, here.
+  function toolConfig(principal: Principal) {
     const token = issue(principal);
     const hostToken = issue(principal, true);
     const session = principal.kind === "user" ? undefined : store.state.sessions[principal.sessionId];
     const agent = session ? store.state.agents[session.agentId] : undefined;
     const skills = agent?.skillRefs || [];
     const manager = principal.kind === "manager";
-    const tools = toolsFor(manager ? "manager" : "agent", { supervises: Boolean(session?.teamId && supervises(store.state, session.teamId, session.agentId)), task: Boolean(task) });
+    const task = session?.origin === "managed";
+    const tools = toolsFor(manager ? "manager" : "agent", { supervises: Boolean(session?.teamId && supervises(store.state, session.teamId, session.agentId)), task });
     return {
       skill_files: principal.kind === "manager" ? [] : skills.filter(ref => path.isAbsolute(ref)),
       command: process.execPath, args: [bridge], env: { RIND_MANAGEMENT_ENDPOINT: paths.endpoint, RIND_MANAGEMENT_TOKEN: token },
