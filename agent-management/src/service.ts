@@ -1,7 +1,7 @@
 import { randomUUID, createHash } from "node:crypto";
 import { mkdir, stat, copyFile, readFile, readdir } from "node:fs/promises";
 import path from "node:path";
-import { activeRun, memberKey, requireValue, text, type State, type Principal, type Session, type Run, type Task, type Report, type Adapter, type AdapterHandle, type Approval, type FolderDefaults } from "./model.js";
+import { activeRun, memberKey, requireValue, text, type State, type Agent, type Principal, type Session, type Run, type Task, type Report, type Adapter, type AdapterHandle, type Approval, type FolderDefaults } from "./model.js";
 import { canonicalDirectory, inside, privateDirectory, type Paths } from "./paths.js";
 import type { Store } from "./store.js";
 import { previewLegacyTeam } from "./legacy.js";
@@ -10,9 +10,9 @@ import { retain } from "./retention.js";
 
 import { supervisor, manages, setSupervisor } from "./organization.js";
 import { dissolveTeam, dropSession, expireApprovals, pruneAgents, unbindSessions } from "./teams.js";
-import { MEMBER_OPERATIONS, directReports, memberInstructions } from "./tools.js";
+import { MEMBER_OPERATIONS, directReports, memberInstructions, supervises } from "./tools.js";
 import { publishArtifact } from "./artifacts.js";
-import { newWorkspacePath, addWorktree } from "./workspaces.js";
+import { newWorkspacePath, addWorktree, removeWorktree } from "./workspaces.js";
 
 type Params = Record<string, any>;
 const END_TURN = "End your turn now; the results are delivered to you when your delegated work settles.";
@@ -159,7 +159,7 @@ export function createService({ store, paths, adapters, toolConfig, folderDefaul
     if (parentId) setSupervisor(state, p.teamId, agent.id, parentId);
     return membership;
   }
-  async function register(state: State, p: Params) {
+  async function register(state: State, p: Params): Promise<Agent> {
     const canonicalWorkspace = await canonicalDirectory(text(p.workspace, "Workspace"));
     requireValue(!inside(await canonicalDirectory(paths.state), canonicalWorkspace), "FORBIDDEN", "The management state directory cannot be an agent workspace.");
     const adapter = p.adapter || "rind";
@@ -275,15 +275,68 @@ export function createService({ store, paths, adapters, toolConfig, folderDefaul
   }
   async function delegate(state: State, actor: Principal, p: Params) {
     const session = sessionOf(state, actor)!;
-    const teamId = session.teamId;
-    requireValue(teamId && state.memberships[memberKey(teamId, session.agentId)], "FORBIDDEN", "This conversation has no team.");
-    const forms = ["to", "task"].filter(key => p[key] !== undefined);
-    requireValue(forms.length === 1, "INVALID_INPUT", "Use exactly one form: {to, brief}, {task, message} or {task, cancel: true}.");
+    const teamId = session.teamId, me = session.agentId;
+    requireValue(teamId && state.memberships[memberKey(teamId, me)], "FORBIDDEN", "This conversation has no team.");
+    const forms = ["to", "new", "task", "retire"].filter(key => p[key] !== undefined);
+    requireValue(forms.length === 1, "INVALID_INPUT", "Use exactly one form: {to, brief}, {new, brief}, {task, message}, {task, cancel: true} or {retire}.");
     if (p.task !== undefined) return followUp(state, actor, taskAccess(state, actor, text(p.task, "Task")), p);
-    const to = text(p.to, "to", 200);
-    requireValue(state.memberships[memberKey(teamId, to)] && supervisor(state, teamId, to) === session.agentId, "NOT_DIRECT_REPORT", "Delegate only to your direct reports: " + JSON.stringify(directReports(state, teamId, session.agentId)));
-    const task = newTask(state, actor, teamId, to, text(p.brief, "Brief"), true);
-    return { taskId: task.id, assignee: nameOf(state, to), next: END_TURN };
+    if (p.retire !== undefined) return retire(state, teamId, me, text(p.retire, "retire", 200));
+    const brief = text(p.brief, "Brief");
+    let to: string;
+    if (p.new !== undefined) to = (await addReport(state, actor, teamId, me, p.new)).id;
+    else {
+      to = text(p.to, "to", 200);
+      requireValue(state.memberships[memberKey(teamId, to)] && supervisor(state, teamId, to) === me, "NOT_DIRECT_REPORT", "Delegate only to your direct reports: " + JSON.stringify(directReports(state, teamId, me)));
+    }
+    const task = newTask(state, actor, teamId, to, brief, true);
+    return { taskId: task.id, assignee: nameOf(state, to), ...(p.new !== undefined ? { agentId: to, workspace: state.agents[to].canonicalWorkspace } : {}), next: END_TURN };
+  }
+  // A new direct report: a worktree on its own branch of a team repository, or an empty folder
+  // that starts with its creator's chosen model, as a worktree starts with its repository's.
+  async function addReport(state: State, actor: Principal, teamId: string, me: string, spec: Params) {
+    requireValue(spec && typeof spec === "object", "INVALID_INPUT", "new needs a name.");
+    requireValue(supervises(state, teamId, me), "FORBIDDEN", "Only the team leader or a member with direct reports adds members.");
+    const target = await newWorkspacePath(state.teams[teamId].createRoot, spec.name);
+    const own = state.agents[me].canonicalWorkspace;
+    const worktreeOf = spec.branch === undefined ? undefined : spec.repository ? await canonicalDirectory(text(spec.repository, "Repository")) : own;
+    if (worktreeOf) {
+      requireValue(Object.values(state.memberships).some(m => m.teamId === teamId && state.agents[m.agentId].canonicalWorkspace === worktreeOf), "FORBIDDEN", "Branch a repository registered in this team.");
+      await addWorktree(worktreeOf, target, spec.branch, spec.base);
+    } else {
+      await mkdir(target);
+      await inheritModel(own, target);
+    }
+    const agent = await register(state, { workspace: target, name: spec.name });
+    agent.addedBy = me;
+    if (worktreeOf) agent.worktreeOf = worktreeOf;
+    await addMember(state, actor, { teamId, agentId: agent.id, ...(spec.responsibility ? { responsibility: spec.responsibility } : {}) });
+    return agent;
+  }
+  // Only what was chosen for the creator's folder is copied; settings.json stays the default for both.
+  async function inheritModel(from: string, to: string) {
+    const resolved = (await folderDefaults("resolve", { workspace_roots: [from] })).folders[from];
+    const model = resolved && resolved.model_source !== "settings", effort = resolved && resolved.effort_source !== "settings";
+    if (model || effort) await folderDefaults("set", { workspace_root: to, provider_id: model ? resolved.provider : "", model_id: model ? resolved.model : "", reasoning_effort: effort ? resolved.reasoning_effort : "" });
+  }
+  async function retire(state: State, teamId: string, me: string, agentId: string) {
+    const agent = state.agents[agentId];
+    requireValue(agent?.addedBy === me && state.memberships[memberKey(teamId, agentId)], "FORBIDDEN", "Retire only a direct report you added.");
+    requireValue(!Object.values(state.tasks).some(t => t.teamId === teamId && t.assigneeAgentId === agentId && !["done", "cancelled"].includes(t.status)), "MEMBER_BUSY", "This member still has open work. Cancel it or let it finish first.");
+    requireRemovable(state, teamId, agentId);
+    if (agent.worktreeOf) await removeWorktree(agent.worktreeOf, agent.canonicalWorkspace);
+    dropMember(state, teamId, agentId);
+    return agent.worktreeOf ? { retired: agentId, kept: "its branch" } : { retired: agentId, kept: agent.canonicalWorkspace };
+  }
+  function requireRemovable(state: State, teamId: string, agentId: string) {
+    requireValue(!Object.values(state.memberships).some(m => m.teamId === teamId && supervisor(state, teamId, m.agentId) === agentId), "HAS_REPORTS", "Move this member's direct reports before removing it.");
+    requireValue(state.teams[teamId].leaderAgentId !== agentId, "LEADER_REQUIRED", "Choose another leader before removing this member.");
+    requireValue(!Object.values(state.runs).some(r => activeRun(r) && state.sessions[r.sessionId].teamId === teamId && state.sessions[r.sessionId].agentId === agentId), "MEMBER_BUSY", "Stop or resolve this member's run first.");
+  }
+  function dropMember(state: State, teamId: string, agentId: string) {
+    delete state.memberships[memberKey(teamId, agentId)];
+    for (const task of Object.values(state.tasks)) if (task.teamId === teamId && task.assigneeAgentId === agentId && !["done", "cancelled"].includes(task.status)) { task.status = "needs_attention"; delete task.dispatch; task.error = "Member removed from team."; }
+    const released = unbindSessions(state, s => s.teamId === teamId && s.agentId === agentId, openInWindow);
+    pruneAgents(state, new Set([agentId, ...released]));
   }
   function followUp(state: State, actor: Principal, task: Task, p: Params) {
     taskControl(state, actor, task);
@@ -407,13 +460,8 @@ export function createService({ store, paths, adapters, toolConfig, folderDefaul
       }
       case "removeMember": {
         coordinate(state, actor, p.teamId, p.agentId);
-        requireValue(!Object.values(state.memberships).some(m => m.teamId === p.teamId && supervisor(state, p.teamId, m.agentId) === p.agentId), "HAS_REPORTS", "Move this member's direct reports before removing it.");
-        requireValue(state.teams[p.teamId].leaderAgentId !== p.agentId, "LEADER_REQUIRED", "Choose another leader before removing this member.");
-        requireValue(!Object.values(state.runs).some(r => activeRun(r) && state.sessions[r.sessionId].teamId === p.teamId && state.sessions[r.sessionId].agentId === p.agentId), "MEMBER_BUSY", "Stop or resolve this member's run first.");
-        delete state.memberships[memberKey(p.teamId, p.agentId)];
-        for (const task of Object.values(state.tasks)) if (task.teamId === p.teamId && task.assigneeAgentId === p.agentId && !["done", "cancelled"].includes(task.status)) { task.status = "needs_attention"; delete task.dispatch; task.error = "Member removed from team."; }
-        const released = unbindSessions(state, s => s.teamId === p.teamId && s.agentId === p.agentId, openInWindow);
-        pruneAgents(state, new Set([p.agentId, ...released]));
+        requireRemovable(state, p.teamId, p.agentId);
+        dropMember(state, p.teamId, p.agentId);
         return { removed: true };
       }
       case "deleteTeam": {

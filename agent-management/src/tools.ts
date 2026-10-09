@@ -13,15 +13,27 @@ const MANAGEMENT: ToolDeclaration = {
 
 const DELEGATE: ToolDeclaration = {
   name: "delegate",
-  description: "Give work to your direct reports. Use exactly one form: {to, brief} assigns a task to a direct report; {task, message} sends a finished or blocked task back with more to do; {task, cancel: true} cancels a task. After delegating, end your turn: the results are delivered to you when your delegated work settles. Do not wait or poll.",
+  description: "Give work to your direct reports. Use exactly one form: {to, brief} assigns a task to a direct report; {new, brief} first adds a direct report and then assigns it the task: with new.branch, a Git worktree on that new branch of your repository (or of the member workspace new.repository names), for parallel features; otherwise an empty workspace; {task, message} sends a finished or blocked task back with more to do; {task, cancel: true} cancels a task; {retire} removes a direct report you added once its work is finished and its worktree has no uncommitted changes (its branch is kept). After delegating, end your turn: the results are delivered to you when your delegated work settles. Do not wait or poll.",
   parameters: {
     type: "object",
     properties: {
       to: { type: "string", description: "Agent ID of a direct report." },
       brief: { type: "string", description: "What to do and what to deliver." },
+      new: {
+        type: "object", description: "The direct report to add.",
+        properties: {
+          name: { type: "string", description: "Simple folder name, also the member's name." },
+          responsibility: { type: "string" },
+          branch: { type: "string", description: "New branch: makes the member a Git worktree." },
+          base: { type: "string", description: "Commit the branch starts from (default HEAD)." },
+          repository: { type: "string", description: "Workspace path of the member whose repository to branch (default yours)." },
+        },
+        required: ["name"],
+      },
       task: { type: "string", description: "Task ID of work you delegated." },
       message: { type: "string", description: "What to change or add." },
       cancel: { type: "boolean" },
+      retire: { type: "string", description: "Agent ID of a direct report you added." },
     },
   },
 };

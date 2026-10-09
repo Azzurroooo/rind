@@ -27,7 +27,11 @@ export async function fixture(t) {
     if (method === "set" && params.model_id === "missing") throw new Error(params.provider_id + " / missing is not available.");
     if (method === "set") folders.set(params.workspace_root, { ...folders.get(params.workspace_root), ...params });
     if (method === "unset") folders.delete(params.workspace_root);
-    if (method === "resolve") return { folders: Object.fromEntries(params.workspace_roots.map(root => [root, { model: folders.get(root)?.model_id || "settings-model" }])) };
+    if (method === "resolve") return { folders: Object.fromEntries(params.workspace_roots.map(root => {
+      const own = folders.get(root) || {};
+      return [root, { provider: own.provider_id || "settings-provider", model: own.model_id || "settings-model", reasoning_effort: own.reasoning_effort || "medium",
+        model_source: own.model_id ? "folder" : "settings", effort_source: own.reasoning_effort ? "folder" : "settings" }];
+    })) };
     return { workspace_root: params.workspace_root, folder: folders.get(params.workspace_root) || {} };
   };
   // Stands in for the Runtime taking a delivery into a conversation.
