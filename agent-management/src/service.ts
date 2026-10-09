@@ -67,6 +67,8 @@ export function createService({ store, paths, adapters, toolConfig, folderDefaul
           if (stopped) return;
           const session = store.state.sessions[sessionId];
           if (session && !(session.runtimeSessionId && connected.has(sessionId))) continue;
+          // Another run owns the folder: the turn would be refused, so the delivery waits for that run to end.
+          if (session && Object.values(store.state.runs).some(r => activeRun(r) && r.sessionId !== sessionId && store.state.sessions[r.sessionId]?.agentId === session.agentId)) continue;
           try { if (session) await deliver(session.runtimeSessionId, texts.join("\n\n")); }
           catch (error) {
             // A conversation that is gone will never take it; anything else is retried on the next change.

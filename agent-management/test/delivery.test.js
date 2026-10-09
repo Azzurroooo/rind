@@ -90,3 +90,19 @@ test("the Manager's conversation hears back from work it assigned", async t => {
   await eventually(() => f.delivered.length === 1);
   assert.equal(f.delivered[0].runtimeSessionId, "manager-chat");
 });
+
+test("a delivery waits while another run owns the delegator's folder, then arrives", async t => {
+  const f = await fixture(t);
+  const ui = await f.member("ui");
+  const { actor } = await leaderConversation(f);
+  const delegated = await f.call("delegate", { to: ui.id, brief: "Build" }, actor);
+  const busy = await f.call("assignTask", { teamId: f.team.id, assigneeAgentId: f.leader.id, brief: "Leader's own task" });
+  await eventually(() => f.store.state.tasks[busy.id].status === "running");
+  await deliverTask(f, delegated.taskId, "Built");
+  await eventually(() => f.store.state.tasks[delegated.taskId].status === "done");
+  await new Promise(resolve => setTimeout(resolve, 50));
+  assert.deepEqual(f.delivered, [], "the leader's task run owns its folder");
+  f.starts.find(s => s.input.task.id === busy.id).finish({ content: "no report" });
+  await eventually(() => f.delivered.length === 1);
+  assert.match(f.delivered[0].text, /Built/);
+});

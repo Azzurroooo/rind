@@ -207,7 +207,7 @@ export function createRuntimeClient({
     pending.delete(id);
     clearRequestTimer(callbacks);
     if (message.error) {
-      callbacks.reject(new Error(message.error.message || "Runtime request failed"));
+      callbacks.reject(Object.assign(new Error(message.error.message || "Runtime request failed"), { code: message.error.type }));
     } else {
       callbacks.resolve(message.result);
     }
