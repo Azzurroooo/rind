@@ -152,7 +152,7 @@ def build_agent_container(
         image_input=lambda: turn_runner.image_input,
     )
     if external_tool:
-        catalog = (*catalog, external_tool.spec(session_store.session_id))
+        catalog = (*catalog, *external_tool.specs(session_store.session_id))
     if enabled_tools is None:
         tool_specs = catalog
     else:

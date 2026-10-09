@@ -32,9 +32,11 @@ class ToolSpec:
         handler: Callable[..., Any],
         description: str,
         param_descriptions: dict[str, str | dict[str, Any]] | None = None,
+        parameters: dict[str, Any] | None = None,
         normalize_arguments: Callable[[dict], dict] | None = None,
         advertised: bool = True,
     ) -> None:
+        """`parameters` declares the JSON schema directly instead of deriving it from the handler."""
         if not isinstance(name, str) or not _TOOL_NAME_PATTERN.fullmatch(name):
             raise ValueError(f"Invalid tool name: {name!r}")
         if not callable(handler):
@@ -52,6 +54,8 @@ class ToolSpec:
         object.__setattr__(
             self,
             "schema",
+            {"type": "function", "function": {"name": name, "description": description, "parameters": parameters}}
+            if parameters is not None else
             build_function_schema(
                 name=name,
                 func=handler,

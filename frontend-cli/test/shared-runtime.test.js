@@ -24,7 +24,7 @@ test("one host isolates workspaces and tools, runs sessions concurrently and sur
   const options = { rindHome: home, python: process.env.RIND_PYTHON || "python", repoRoot: fileURLToPath(new URL("../..", import.meta.url)) };
   const host = await startSharedServer(options);
   const eventsA = [], eventsB = [];
-  const tool = { command: process.execPath, args: [], env: {}, name: "restricted", description: "Fixture", enabled_tools: ["restricted"] };
+  const tool = { command: process.execPath, args: [], env: {}, tools: [{ name: "restricted", description: "Fixture", parameters: { type: "object", properties: {} } }], enabled_tools: ["restricted"] };
   const first = createSharedRuntimeClient({ ...options, cliArgs: ["--cwd", a], externalTools: tool, onMessage: event => eventsA.push(event) });
   const second = createSharedRuntimeClient({ ...options, cliArgs: ["--cwd", b], onMessage: event => eventsB.push(event) });
   const admin = await connectSharedRuntime({ ...options, start: false });
