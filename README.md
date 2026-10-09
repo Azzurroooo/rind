@@ -74,10 +74,12 @@ Inside Rind, run `/login` to connect a provider, then `/model` to choose a model
 **Explore before spending tokens.** The interactive tour demonstrates real CLI layouts with simulated tasks: pause, rewind, and jump straight to a feature. It makes no model calls and needs no API key.
 
 ```bash
-rind tour team.create
+rind tour agents.create
+rind tour agents.tasks
+rind tour login.account
 ```
 
-The tour is available on `main`, after v0.8.0; use the [source setup](docs/internals/07-surfaces/interactive-cli.md#从源码运行) to try it today. Run `rind tour` for the catalog, or `/tour` inside a session.
+Run `rind tour` for the catalog, or `/tour` inside a session. Use the [source setup](docs/internals/07-surfaces/interactive-cli.md#从源码运行) to preview the tutorials on your current development branch.
 
 ---
 

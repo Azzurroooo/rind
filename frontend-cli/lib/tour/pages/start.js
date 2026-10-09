@@ -12,6 +12,7 @@ import {
   submit,
   tool,
   turnDone,
+  turnStart,
   type,
 } from "./steps.js";
 
@@ -124,31 +125,35 @@ export const startPages = [
     steps: [
       note([
         "Commands that outlast their wait limit can continue in the background.",
-        "ctrl+b opens a live monitor for background tasks. Left from an empty prompt shows teams.",
+        "Ctrl+B monitors shell jobs; Left from an empty prompt opens Agents Management.",
       ]),
       shell("rind"),
       startup(demoInfo({ session: "20260917_104512_31cc09de" })),
       type("Run the whole test suite, then audit production dependencies"),
       submit(),
-      tool("bash", "npm test", { status: "ok", output: "", durationMs: 1000, data: { status: "running", bg_id: "bg-1", stdout: "Tests started" } }),
+      tool("bash", "npm test", { status: "ok", output: "Tests started", durationMs: 1000, data: { status: "running", task_id: "task-demo", notify: "on_exit" } },
+        { command: "npm test", yield_time_ms: 1000, notify: "on_exit" }),
       menu({
         kind: "monitor",
         tasks: [TEST_TASK],
         task: TEST_TASK,
       }, [
-        "The monitor streams task output live, under the composer, while the",
-        "turn keeps working. ←→ switch between Background and Delegates.",
+        "The Background monitor shows live shell output. ↑↓ selects a job; c cancels it; r releases its current wait without killing it.",
       ]),
       note([
         "In Rind, Esc closes this monitor without stopping the command.",
-        "The demo will close it and collect the finished task's output.",
+        "These shell jobs are separate from the team tasks and reports in Agents.",
       ]),
       closeMenu(),
-      tool("bash_output", "bg-1", { status: "ok", output: "312 tests passed", durationMs: 9600 }),
+      assistant("The test job is still running. Its on_exit notification will let me continue after it finishes."),
+      turnDone(2500, 1, 0),
+      note(["notify=on_exit lets an idle session continue when the job finishes, without repeated polling.", "Use notify=manual for services or watchers; inspect them explicitly with task_control."]),
+      turnStart(),
+      tool("task_control", "read task-demo", { status: "ok", output: "312 tests passed", durationMs: 120 }, { action: "read", task_id: "task-demo" }),
       assistant("All 312 tests passed. I can now audit the production dependencies."),
-      turnDone(21400, 2, 0),
+      turnDone(1800, 1, 0),
       note([
-        "Try Ctrl+B during a real task. Use ←→ for Background/Delegates and ↑↓ to select a task.",
+        "Try Ctrl+B during a real shell job. task_control supports list, read, bounded wait and cancel.",
         "Closing the monitor only hides it; it does not stop background work.",
       ]),
     ],

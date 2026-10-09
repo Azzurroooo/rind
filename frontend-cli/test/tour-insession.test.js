@@ -61,7 +61,7 @@ test("in-session recovery: stop main tui, run tour, replay main tui", async () =
     "Rind v0.8.0",
     "model deepseek-flash · session 20260917_024116_91240551",
     "▷ You",
-    "  /tour team.work",
+    "  /tour agents.tasks",
   ];
   main.addChild(new StaticBlock(transcript));
   main.start();

@@ -104,7 +104,7 @@ test("deep links jump straight into a page", async () => {
   const running = runTour({
     input,
     output: output.output,
-    startPageId: "team.work",
+    startPageId: "agents.tasks",
     schedule: clock.schedule,
     cancel: clock.cancel,
   });
@@ -112,7 +112,7 @@ test("deep links jump straight into a page", async () => {
   clock.advance(1200);
   await settle();
   const screen = (await output.flushAndGetViewport()).join("\n");
-  assert.ok(screen.includes("TOUR · Team tasks"), "deep-linked introduction opens directly");
+  assert.ok(screen.includes("TOUR · Tasks & reports"), "deep-linked introduction opens directly");
   input.send("q");
   await settle();
   input.send("\x1b");
@@ -140,7 +140,7 @@ test("unknown page ids report the catalog on stderr without rendering", async ()
   });
   assert.equal(await started, false);
   assert.ok(chunks.join("").includes("Unknown tour page: nope.nope"));
-  assert.ok(chunks.join("").includes("team.work"));
+  assert.ok(chunks.join("").includes("agents.tasks"));
   assert.equal(output.getScrollBuffer().join("").trim(), "", "nothing rendered");
 });
 
@@ -150,7 +150,7 @@ test("pasted example text cannot navigate or quit the tour", async () => {
   const running = runTour({
     input,
     output: output.output,
-    startPageId: "team.work",
+    startPageId: "agents.tasks",
     schedule: clock.schedule,
     cancel: clock.cancel,
   });
@@ -158,7 +158,7 @@ test("pasted example text cannot navigate or quit the tour", async () => {
   input.send("\x1b[200~q\x1b[201~");
   await settle();
   let screen = (await output.flushAndGetViewport()).join("\n");
-  assert.ok(screen.includes("TOUR · Team tasks"), "pasted q leaves the introduction intact");
+  assert.ok(screen.includes("TOUR · Tasks & reports"), "pasted q leaves the introduction intact");
   input.send("\x03");
   await running;
 });
@@ -325,7 +325,7 @@ test("introduction survives resize and help, and returns on rewind or replay", a
   const input = createVirtualInput();
   const output = createVirtualOutput({ columns: 80, rows: 24 });
   const clock = fakeClock();
-  const running = runTour({ input, output: output.output, startPageId: "team.add", schedule: clock.schedule, cancel: clock.cancel, now: clock.now });
+  const running = runTour({ input, output: output.output, startPageId: "agents.add", schedule: clock.schedule, cancel: clock.cancel, now: clock.now });
   const assertReady = async () => {
     await settle();
     const screen = (await output.flushAndGetViewport()).join("\n");
@@ -370,4 +370,47 @@ test("introduction survives resize and help, and returns on rewind or replay", a
     input.send("\x03");
     await running;
   }
+});
+
+test("Agents tour plays task and report screens, resizes and releases terminal input on exit", async () => {
+  const input = createVirtualInput();
+  const output = createVirtualOutput({ columns: 80, rows: 24 });
+  const clock = fakeClock();
+  const page = findTourPage("agents.tasks");
+  const queued = page.steps.findIndex(step => step.screen?.snapshot.tasks[0]?.status === "queued");
+  const report = page.steps.findIndex(step => step.screen?.reportTaskId);
+  const running = runTour({ input, output: output.output, startPageId: page.id,
+    schedule: clock.schedule, cancel: clock.cancel, now: clock.now });
+  try {
+    await settle();
+    for (let index = 0; index < queued; index++) input.send("\x1b[C");
+    await settle();
+    let screen = (await output.flushAndGetViewport()).join("\n");
+    assert.match(screen, /Agents › product › Tasks/);
+    assert.match(screen, /QUEUED/);
+    assert.match(screen, /Review the Unicode parser/);
+    assert.doesNotMatch(screen, /Rind v|Ask Rind to do anything/);
+
+    output.resize(40, 16);
+    await settle();
+    screen = (await output.flushAndGetViewport()).join("\n");
+    assert.match(screen, /Needs 40×12/);
+    assert.match(screen, /TOUR GUIDE/);
+    output.resize(80, 24);
+    for (let index = queued; index < report; index++) input.send("\x1b[C");
+    await settle();
+    screen = (await output.flushAndGetViewport()).join("\n");
+    assert.match(screen, /Summary\s+Unicode review complete/);
+    input.send("\x1b[C");
+    await settle();
+    screen = (await output.flushAndGetViewport()).join("\n");
+    assert.match(screen, /Evidence/);
+    assert.match(screen, /unicode\.md/);
+  } finally {
+    input.send("\x03");
+    await running;
+  }
+  assert.equal(input.isRaw, false);
+  assert.equal(input.listenerCount("data"), 0);
+  assert.equal(clock.pendingCount, 0);
 });

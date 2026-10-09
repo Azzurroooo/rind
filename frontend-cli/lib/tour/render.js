@@ -19,6 +19,7 @@ import { paint, currentTheme, setTheme } from "../theme.js";
 import { clipCells, graphemes, stripAnsi, textWidth, wrapTextWithAnsi } from "../text-width.js";
 import { insertCursorMarker } from "../tui/cursor.js";
 import { renderTourTranscript } from "./transcript.js";
+import { renderTourAgents } from "./agents-view.js";
 
 const MIN_INNER = 1;
 
@@ -125,6 +126,15 @@ function renderPage(snapshot, state, width, height) {
   if (width < 36 || height < 14) return smallTerminal(width, height);
   const inner = Math.max(MIN_INNER, width - 4);
   const rows = [];
+  const captions = [];
+  appendCaption(captions, snapshot, { ...state, inner });
+  const captionRows = captions.flatMap((row) => wrapTextWithAnsi(row, inner, inner));
+  const footer = [
+    paint.bold(clipCells(statusKeys(state, width).join(" · "), width)),
+    progressLine(state, width),
+  ];
+  const guideGap = height >= 20 ? [""] : [];
+  const budget = Math.max(1, height - captionRows.length - footer.length - 4 - guideGap.length);
   let cursor = null;
   const write = (row) => {
     rows.push(row);
@@ -132,13 +142,19 @@ function renderPage(snapshot, state, width, height) {
   const point = (row, column) => {
     cursor = { row, column };
   };
-  for (const past of snapshot.history || []) {
-    appendShell(rows, past.shell, write, () => {});
-    appendRind(rows, past.rind, { ...state, inner, expanded: snapshot.expanded }, write, () => {});
+  if (!snapshot.agents) {
+    for (const past of snapshot.history || []) {
+      appendShell(rows, past.shell, write, () => {});
+      appendRind(rows, past.rind, { ...state, inner, expanded: snapshot.expanded }, write, () => {});
+    }
+    appendShell(rows, snapshot.shell, write, point);
   }
-  appendShell(rows, snapshot.shell, write, point);
   const menuStart = rows.length;
-  appendRind(rows, snapshot.rind, { ...state, inner, expanded: snapshot.expanded }, write, point);
+  if (snapshot.agents) {
+    rows.push(...renderTourAgents(snapshot.agents, inner, Number.isFinite(budget) ? Math.max(12, budget + 1) : 24));
+  } else {
+    appendRind(rows, snapshot.rind, { ...state, inner, expanded: snapshot.expanded }, write, point);
+  }
   // An explanation without terminal content is a tour card, wherever it
   // occurs in the lesson. Rewind/replay naturally restores this introduction.
   if (!rows.some((row) => stripAnsi(row).trim())) {
@@ -160,19 +176,10 @@ function renderPage(snapshot, state, width, height) {
     }
     wrapped.push(...segments);
   });
-  const captions = [];
-  appendCaption(captions, snapshot, { ...state, inner });
-  const captionRows = captions.flatMap((row) => wrapTextWithAnsi(row, inner, inner));
-  const footer = [
-    paint.bold(clipCells(statusKeys(state, width).join(" · "), width)),
-    progressLine(state, width),
-  ];
-  const guideGap = height >= 20 ? [""] : [];
-  const budget = Math.max(1, height - captionRows.length - footer.length - 4 - guideGap.length);
   const maxScroll = Math.max(0, wrapped.length - budget);
   const menu = snapshot.rind?.composer.menu;
   const menuTop = rows.slice(0, menuStart).flatMap((row) => wrapTextWithAnsi(row, inner, inner)).length;
-  const automaticOffset = menu ? Math.max(0, maxScroll - menuTop) : 0;
+  const automaticOffset = snapshot.agents ? maxScroll : menu ? Math.max(0, maxScroll - menuTop) : 0;
   const offset = Math.min(state.scrollOffset ?? automaticOffset, maxScroll);
   const start = Math.max(0, wrapped.length - budget - offset);
   const visible = wrapped.slice(start, start + budget);
@@ -234,7 +241,8 @@ function demoAction(step) {
   if (step.kind === "shell") return "typing in the shell";
   if (step.kind === "close-menu") return step.key === "Enter" ? "Enter confirms selection" : "Esc closes menu";
   if (step.kind === "expand-tools") return "Ctrl+O toggles tool output";
-  if (step.kind === "menu") return step.menu.kind === "monitor" || step.menu.kind === "delegates" ? "Ctrl+B opens monitor" : "menu preview";
+  if (step.kind === "menu") return step.menu.kind === "monitor" ? "Ctrl+B opens monitor" : "menu preview";
+  if (step.kind === "agents") return "Agents page preview";
   return "watch only";
 }
 
@@ -340,12 +348,14 @@ function menuFrame(menu, inner) {
     }
     case "auth-choice":
       return { text: authChoiceFrame({ title: menu.title, options: menu.options, selectedIndex: selected, width: inner }) };
-    case "auth-secret": {
+    case "auth-secret":
+    case "auth-input": {
       const frame = authSecretFrame({
         title: menu.title,
         message: menu.message,
-        kind: "secret",
+        kind: menu.kind === "auth-secret" ? "secret" : "text",
         value: menu.value,
+        cursor: { line: 0, column: graphemes(menu.value || "").length },
         width: inner,
       });
       return { text: frame.text, cursor: frame.cursor };

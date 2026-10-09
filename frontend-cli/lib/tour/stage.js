@@ -10,6 +10,7 @@ export function createTourStage({ version } = {}) {
   let active = null;
   let history = [];
   let expanded = false;
+  let agents = null;
 
   function emptyComposer() {
     return { text: "", running: false, hidden: false, pending: [], menu: null };
@@ -34,6 +35,7 @@ export function createTourStage({ version } = {}) {
     active = null;
     history = [];
     expanded = false;
+    agents = null;
   }
 
   function beginStep(step) {
@@ -76,7 +78,8 @@ export function createTourStage({ version } = {}) {
         break;
       }
       case "tool":
-        ensureRind().blocks.push({ kind: "tool", name: step.name, detail: step.detail, outcome: step.outcome, running: true });
+        ensureRind().blocks.push({ kind: "tool", name: step.name, detail: step.detail, outcome: step.outcome, running: true,
+          ...(step.arguments ? { arguments: step.arguments } : {}) });
         break;
       case "assistant":
         ensureRind().blocks.push({ kind: "assistant", text: step.text, reveal: 0, complete: false });
@@ -93,9 +96,12 @@ export function createTourStage({ version } = {}) {
         const composer = ensureRind().composer;
         composer.hidden = false;
         composer.menu = { ...step.menu };
-        if (step.menu.kind === "auth-secret") composer.menu.value = "";
+        if (["auth-secret", "auth-input"].includes(step.menu.kind)) composer.menu.value = "";
         break;
       }
+      case "agents":
+        agents = structuredClone(step.screen);
+        break;
       case "submit":
       case "exit":
         break;
@@ -138,7 +144,7 @@ export function createTourStage({ version } = {}) {
       }
       case "menu": {
         const menu = rind?.composer.menu;
-        if (menu?.kind === "auth-secret") {
+        if (["auth-secret", "auth-input"].includes(menu?.kind)) {
           const chars = graphemes(active.menu.value || "");
           const shown = Math.min(chars.length, graphemes(menu.value).length + 1);
           menu.value = chars.slice(0, shown).join("");
@@ -210,7 +216,7 @@ export function createTourStage({ version } = {}) {
       }
       case "menu": {
         const menu = rind?.composer.menu;
-        if (menu?.kind === "auth-secret") menu.value = step.menu.value;
+        if (["auth-secret", "auth-input"].includes(menu?.kind)) menu.value = step.menu.value;
         if (menu && typeof menu.target === "number") {
           menu.selected = menu.target;
         }
@@ -278,6 +284,7 @@ export function createTourStage({ version } = {}) {
     return {
       history: structuredClone(history),
       expanded,
+      agents: structuredClone(agents),
       shell: {
         blocks: shell.blocks.map((block) => ({ ...block })),
         typing: shell.typing ? { ...shell.typing } : null,

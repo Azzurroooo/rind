@@ -88,13 +88,13 @@ test("submitting a slash command echoes it without starting the turn", () => {
   const stage = createTourStage();
   stage.beginStep({ kind: "startup", info: INFO });
   stage.settleStep({ kind: "startup", info: INFO });
-  stage.beginStep({ kind: "type", text: "/team create" });
-  stage.settleStep({ kind: "type", text: "/team create" });
+  stage.beginStep({ kind: "type", text: "/status" });
+  stage.settleStep({ kind: "type", text: "/status" });
   stage.beginStep({ kind: "submit", mode: "send" });
   stage.settleStep({ kind: "submit", mode: "send" });
 
   const snapshot = stage.snapshot();
-  assert.deepEqual(snapshot.rind.blocks[0], { kind: "user", text: "/team create" });
+  assert.deepEqual(snapshot.rind.blocks[0], { kind: "user", text: "/status" });
   assert.equal(snapshot.rind.composer.running, false, "slash commands never run a turn");
 });
 
@@ -212,6 +212,7 @@ test("rebuildTo with -1 resets to an empty stage", () => {
   assert.deepEqual(stage.snapshot(), {
     history: [],
     expanded: false,
+    agents: null,
     shell: { blocks: [], typing: null },
     rind: null,
     caption: null,

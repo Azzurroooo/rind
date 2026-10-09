@@ -29,7 +29,7 @@ const TOPICS = [
       { id: "start.steer", title: "Steer", steps: [{ kind: "startup", info: INFO }, { kind: "exit" }] },
     ],
   },
-  { id: "team", title: "Team", pages: [{ id: "team.create", title: "Create", steps: [{ kind: "shell", command: "rind" }] }] },
+  { id: "agents", title: "Agents Management", pages: [{ id: "agents.create", title: "Create", steps: [{ kind: "shell", command: "rind" }] }] },
 ];
 
 function fakeClock() {
@@ -224,7 +224,7 @@ test("catalog navigation opens pages and quits", async () => {
   player.key(key("enter"));
   assert.equal(player.state().view, "page");
   assert.equal(player.state().pageIndex, 2);
-  assert.equal(player.state().page.id, "team.create");
+  assert.equal(player.state().page.id, "agents.create");
   player.key(key("q"));
   assert.equal(player.state().view, "catalog");
   assert.equal(player.state().selected, 2, "catalog reselects the visited page");
@@ -240,7 +240,7 @@ test("deep link starts on the requested page; end navigation walks pages", async
   assert.equal(player.state().phase, "end");
   player.key(key("enter"));
   assert.equal(player.state().pageIndex, 2);
-  assert.equal(player.state().page.id, "team.create");
+  assert.equal(player.state().page.id, "agents.create");
   clock.advance(3000);
   assert.equal(player.state().phase, "end");
   player.key(key("enter"));
@@ -494,10 +494,36 @@ test("every lesson countdown leads to playback, never an explanation pause", () 
 });
 
 test("team creation explains registration before opening ordinary chat", () => {
-  const { player, clock, stage } = makePlayer({ topics: TOUR_TOPICS, startPageId: "team.create" });
+  const { player, clock, stage } = makePlayer({ topics: TOUR_TOPICS, startPageId: "agents.create" });
   player.start(); player.key(key("space")); clock.advance(60000);
   assert.equal(player.state().phase, "waiting");
   assert.match(stage.snapshot().caption.join(" "), /does not move/);
   assert.equal(clock.pendingCount, 0);
   player.dispose();
+});
+
+test("automatic playback presents every management screen instead of skipping to the next note", () => {
+  const page = tourPages().find(page => page.id === "agents.tasks");
+  const stage = createTourStage();
+  const clock = fakeClock();
+  const seen = new Set();
+  let player;
+  player = createTourPlayer({ topics: TOUR_TOPICS, startPageId: page.id, stage,
+    schedule: clock.schedule, cancel: clock.cancel, now: clock.now,
+    onRender: () => {
+      const state = player.state();
+      if (page.steps[state.stepIndex]?.kind === "agents" && stage.snapshot().agents) seen.add(state.stepIndex);
+    } });
+  try {
+    player.start();
+    let transitions = 0;
+    while (player.state().phase !== "end") {
+      assert.ok(transitions++ < 1000, "playback finishes");
+      const state = player.state();
+      if (state.phase === "waiting") player.key(key("space"));
+      else clock.advance(state.remainingMs);
+    }
+    assert.deepEqual([...seen], page.steps.flatMap((step, index) => step.kind === "agents" ? [index] : []));
+    assert.equal(clock.pendingCount, 0);
+  } finally { player.dispose(); }
 });

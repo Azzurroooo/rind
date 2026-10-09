@@ -4,7 +4,7 @@ import { loginPages } from "./login.js";
 import { modelPages } from "./model.js";
 import { sessionsPages } from "./sessions.js";
 import { startPages } from "./start.js";
-import { teamPages } from "./team.js";
+import { agentsPages } from "./agents.js";
 
 export const TOUR_TOPICS = [
   { id: "start", title: "Start", pages: startPages },
@@ -12,7 +12,7 @@ export const TOUR_TOPICS = [
   { id: "model", title: "Model", pages: modelPages },
   { id: "sessions", title: "Sessions", pages: sessionsPages },
   { id: "config", title: "Config", pages: configPages },
-  { id: "team", title: "Team", pages: teamPages },
+  { id: "agents", title: "Agents Management", pages: agentsPages },
   { id: "automation", title: "Automation", pages: automationPages },
 ];
 

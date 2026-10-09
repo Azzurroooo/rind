@@ -216,9 +216,9 @@ test("/tour routes to the tour runner with its page argument", async () => {
   });
 
   assert.equal(await controller.handle("/tour"), true);
-  assert.equal(await controller.handle("/tour team.create"), true);
+  assert.equal(await controller.handle("/tour agents.create"), true);
   assert.equal(await controller.handle("/TOUR start.hello"), true);
-  assert.deepEqual(calls, ["", "team.create", "start.hello"]);
+  assert.deepEqual(calls, ["", "agents.create", "start.hello"]);
 });
 
 test("/tour without a terminal explains the requirement", async () => {

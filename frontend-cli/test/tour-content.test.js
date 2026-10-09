@@ -8,10 +8,11 @@ const STEP_KINDS = new Set([
   "shell", "shell-out", "startup", "type", "submit", "result", "slash-result",
   "tool", "assistant", "menu", "turn-done", "exit", "note",
   "info", "close-menu", "consume", "turn-start", "expand-tools", "prefill",
+  "agents",
 ]);
 const MENU_KINDS = new Set([
   "slash", "model", "theme", "sessions", "choice",
-  "monitor", "delegates", "board", "auth-choice", "auth-secret",
+  "monitor", "board", "auth-choice", "auth-secret", "auth-input",
 ]);
 const CLOSING_KINDS = new Set(["turn-done", "result", "exit", "note", "assistant"]);
 const SUBMIT_MODES = new Set(["send", "queue", "steer"]);
@@ -61,6 +62,10 @@ function validateStep(step, where) {
       assert.ok(step.menu.items.length > 0, `${where}: menu items required`);
     }
   }
+  if (step.kind === "agents") {
+    assert.ok(step.screen?.snapshot && step.screen?.page, `${where}: management scene required`);
+    assert.deepEqual(JSON.parse(JSON.stringify(step.screen)), step.screen, `${where}: scene must be plain data`);
+  }
   if (step.kind === "turn-done") {
     assert.equal(typeof step.durationMs, "number", `${where}: durationMs required`);
   }
@@ -92,6 +97,19 @@ test("tour pages are well-formed and uniquely identified", () => {
     validatePage(page, seen);
   }
   assert.ok(seen.size >= 16, `expected the full catalog, found ${seen.size} pages`);
+});
+
+test("background lesson uses managed shell tasks and no removed delegate monitor", () => {
+  const page = tourPages().find(page => page.id === "start.monitor");
+  const launch = page.steps.find(step => step.kind === "tool" && step.name === "bash");
+  assert.equal(launch.arguments.notify, "on_exit");
+  assert.equal(launch.outcome.data.task_id, "task-demo");
+  const control = page.steps.find(step => step.name === "task_control");
+  assert.deepEqual(control.arguments, { action: "read", task_id: "task-demo" });
+  const monitor = page.steps.find(step => step.menu?.kind === "monitor").menu;
+  assert.equal(monitor.task.bg_id, monitor.task.task_id);
+  assert.doesNotMatch(JSON.stringify(page), /Delegates|bash_output|bg-1/);
+  assert.match(JSON.stringify(page), /separate from the team tasks/);
 });
 
 test("every scene replays deterministically and ends without lost input or a running turn", () => {
@@ -130,12 +148,15 @@ test("fork demonstrates user-message boundary and editable prefill", () => {
   assert.ok(choices.every((choice) => !choice.includes("Assistant")));
 });
 
-test("team lessons cover arbitrary folders, explicit sharing and tracked delivery", () => {
-  const pages = tourPages().filter(page => page.id.startsWith("team."));
+test("agents lessons cover arbitrary folders, explicit sharing and tracked delivery", () => {
+  const pages = tourPages().filter(page => page.id.startsWith("agents."));
   const text = JSON.stringify(pages);
   assert.doesNotMatch(text, /agent_create|team blueprint|agents\/main-agent/);
   assert.match(text, /explicitly share/);
   assert.match(text, /assignTask/);
   assert.match(text, /worktree/);
   assert.match(text, /Unconfirmed/);
+  assert.match(text, /does not automatically resume an ordinary direct chat/);
+  assert.match(text, /after the parent's turn ends/);
+  assert.doesNotMatch(JSON.stringify(tourPages()), /Delegates|team blueprint|\/team\b|bash_output/);
 });

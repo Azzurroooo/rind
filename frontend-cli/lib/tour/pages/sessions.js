@@ -28,14 +28,14 @@ export const sessionsPages = [
         selected: 1,
         target: 2,
       }, [
-        "Choose a saved conversation with ↑↓. Enter switches; Esc cancels.",
+        "Choose a saved conversation with ↑↓. Enter opens it in another CLI window; Esc cancels.",
       ]),
-      note(["The demo selected the tour-docs session. Switching loads that session's history, not the old session's messages."]),
+      note(["The demo now previews the selected tour-docs window. Your original window keeps its conversation loaded behind it."]),
       closeMenu("Enter"),
       info({ session_id: "20260915_090412_a10f5c02", resume_preview: "- user: Draft the tour documentation\n- assistant: The outline is ready for review." }, true),
-      result("Session switched", "20260915_090412_a10f5c02"),
+      result("Selected session", "20260915_090412_a10f5c02 · simulated window preview"),
       note([
-        "Try /sessions between turns to switch tasks. The previous conversation remains saved.",
+        "Try /sessions between turns. Leave the selected session to return to your previous window.",
         "Session history is separate from project files: switching does not undo file changes.",
       ]),
     ],

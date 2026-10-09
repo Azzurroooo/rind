@@ -14,18 +14,8 @@ export const MODELS = [
   { header: true, name: "zai" },
   { modelId: "glm-4.7", current: true },
   { modelId: "glm-4.6" },
-  { header: true, name: "openai-compatible" },
-  { modelId: "local-llama" },
-];
-
-export const SLASH_MATCHES = [
-  { name: "team", description: "Manage the current Team" },
-  { name: "theme", description: "Switch the CLI color theme" },
-];
-
-export const BLUEPRINTS = [
-  { id: "reviewer", name: "Code Reviewer", description: "Reviews diffs against the project rules" },
-  { id: "documenter", name: "Documenter", description: "Keeps README and RIND.md current" },
+  { header: true, name: "demo-endpoint" },
+  { modelId: "demo-model" },
 ];
 
 export const SESSIONS = [
@@ -41,20 +31,14 @@ export const FORK_POINTS = [
 ];
 
 export const TEST_TASK = {
-  bg_id: "bg-1",
+  task_id: "task-demo",
+  bg_id: "task-demo",
   status: "running",
+  notify: "on_exit",
+  elapsed_ms: 1000,
   command: "npm test",
   stdout: "▶ tour-stage.test.js (21/21)\n▶ tour-render.test.js (11/11)",
 };
-
-export const DELEGATES = [
-  {
-    agent_id: "test-specialist",
-    status: "running",
-    task: "Cover the unicode parser cases",
-    summary: "",
-  },
-];
 
 export const DEMO_CONTEXT_WINDOW_TOKENS = 256000;
 
@@ -98,17 +82,10 @@ export const BOARD_PAGES = [
 export const PROVIDERS = [
   "zai · Z.ai · not configured",
   "openai · OpenAI · not configured",
-  "local · Local endpoint · configured (settings)",
+  "+ Add a named endpoint · OpenAI-compatible URL and key",
 ];
 
 export const SKILLS = [
   { name: "release-notes", scope: "project", description: "Draft release notes from the JSONL log", path: "~/demo/.rind/skills/release-notes/SKILL.md" },
   { name: "commit-lint", scope: "user", description: "Check commit messages against the repo style", path: "~/.rind/skills/commit-lint/SKILL.md" },
-];
-
-export const HELP_DECK = [
-  { name: "compact", description: "Compact current session context" },
-  { name: "context", description: "Show context composition and token usage" },
-  { name: "fork", description: "Fork the current session" },
-  { name: "team", description: "Manage the current Team" },
 ];

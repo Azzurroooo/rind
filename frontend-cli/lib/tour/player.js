@@ -15,6 +15,8 @@ const TIMING = {
   tool: { settleMs: 700, afterMs: 400 },
   assistant: { tickMs: 30, afterMs: 1800 },
   menu: { tickMs: 650, afterMs: 1800 },
+  // Keep complete management screens observable before the next explanation.
+  agents: { settleMs: 120, afterMs: 1800 },
   "turn-done": { afterMs: 500 },
   exit: { afterMs: 400 },
   note: { waitKey: true },
@@ -67,7 +69,7 @@ export function createTourPlayer({ topics, startPageId = "", stage, schedule = s
   }
 
   function timing(kind, step = current()) {
-    if (kind === "menu" && step?.menu.kind === "auth-secret") return { tickMs: 80, afterMs: 1800 };
+    if (kind === "menu" && ["auth-secret", "auth-input"].includes(step?.menu.kind)) return { tickMs: 80, afterMs: 1800 };
     return TIMING[kind] || { afterMs: 300 };
   }
 

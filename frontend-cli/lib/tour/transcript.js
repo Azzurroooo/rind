@@ -53,9 +53,8 @@ export function renderTourTranscript(rind, width, expanded = false) {
 }
 
 function toolArgs(block) {
+  if (block.arguments) return block.arguments;
   if (block.name === "bash") return { command: block.detail };
-  if (block.name === "bash_output") return { bg_id: block.detail };
-  if (block.name === "delegate" || block.name === "agent_create") return { agent_id: block.detail };
   return { file_path: block.detail };
 }
 
@@ -63,7 +62,6 @@ function toolResult(block) {
   const failed = block.outcome.status === "failed";
   const data = block.outcome.data ?? (block.name === "read_file" ? block.outcome.output : {
     status: "completed", exit_code: failed ? 1 : 0, stdout: block.outcome.output || "",
-    agent_id: block.detail, summary: block.outcome.output || "",
   });
   return {
     status: failed ? "failed" : "completed",

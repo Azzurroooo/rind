@@ -45,8 +45,8 @@ export function slashResult(displayResult) {
   };
 }
 
-export function tool(name, detail, outcome) {
-  return { kind: "tool", name: String(name), detail: String(detail || ""), outcome };
+export function tool(name, detail, outcome, args = null) {
+  return { kind: "tool", name: String(name), detail: String(detail || ""), outcome, ...(args ? { arguments: args } : {}) };
 }
 
 export function assistant(text, note = null) {
@@ -67,6 +67,11 @@ export function note(lines) {
 
 export function menu(spec, note = null) {
   return { kind: "menu", menu: spec, note: noteLines(note) };
+}
+
+// A plain snapshot, not a connection to the management service.
+export function agents(screen, note = null) {
+  return { kind: "agents", screen, note: noteLines(note) };
 }
 
 export const info = (value, clear = false) => ({ kind: "info", info: value, clear });

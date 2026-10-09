@@ -16,7 +16,7 @@ export const automationPages = [
         "appends, and the parser tokenizer walks grapheme clusters.",
       ]),
       note([
-        "Check progress.log for progress and errors, and logs/ in the workspace for the markdown run log.",
+        "Check progress.log for progress and errors. Session history is saved separately from the final stdout reply.",
         "Try rind run --prompt with a small task; use --session <id> to continue a saved session.",
       ]),
     ],
@@ -38,8 +38,9 @@ export const automationPages = [
       ]),
       note([
         "Try it from a second terminal while the target CLI session is still open on this machine.",
-        "Copy its id from /status. The confirmation means delivered, not finished; a closed session cannot receive rind send.",
+        "Copy its id from /status. The confirmation means delivered, not finished.",
       ]),
+      note(["Without a window, a turn still running in the shared Runtime can receive send as a follow-up.", "For a closed, idle session, resume with rind --session <id> or rind run --session <id> instead."]),
     ],
   },
 ];

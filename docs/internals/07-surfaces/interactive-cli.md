@@ -24,6 +24,12 @@ TUI 的 render(width) 生成逻辑行，根组件负责 diff；默认最小绘�
 
 `rind tour` 和会话内 `/tour` 演示 CLI 布局，但不启动 Worker，不调用模型。pages 保存步骤数据，player 管播放，stage 管模拟状态，render 生成画面，run-tour 才持有 TUI。虚构事件通过现有 transcript/output controller，因此示例和真实会话能复用工具块、流式 Markdown 与菜单排版。
 
+Agents Management 教学用可序列化的虚构快照，复用真实管理页的行投影、任务表单和交付报告渲染器，不连接管理服务。`agents.tasks` 演示受管理父任务结束回合后等待子任务交付、再于同一会话启动新 run；`agents.sessions` 区分普通直接聊天：派发仅创建接收成员的任务，不补建父任务，也不承诺交付后自动续聊。
+
+可用 `/tour agents.create`、`/tour agents.tasks`、`/tour agents.sessions` 查看管理教学；`/tour login.account` 演示 OpenAI 账号授权，`/tour login.endpoint` 演示命名端点，`/tour config.folder` 演示文件夹默认。导览中的表单、凭证、任务与测试结果均为模拟，不打开授权页、不写配置、不创建文件。
+
+管理页本身最小宽度是 40 列，导览边框另占 4 列；观看其完整画面时使用至少 44 列的终端。更窄时仍可阅读教学说明，并显示管理页的尺寸提示。
+
 会话内进入导览时暂停主 TUI；退出后 replayAll 恢复原会话显示。播放时钟可注入，测试无需真实等待动画。它验证的是界面教学和渲染，不是模型完成某项工作的能力。
 
 ## 从源码运行
@@ -41,7 +47,7 @@ python -m pip install -r requirements-runtime.txt
 node frontend-cli/bin/rind.js
 ~~~
 
-从其他工作区启动时使用 CLI 脚本的绝对路径；示例中的 rind 可替换成 `node /absolute/path/to/rind/frontend-cli/bin/rind.js`。登录和端点设置见[配置与凭证](../06-models/authentication-and-settings.md)。只想看操作方式，可运行 `node frontend-cli/bin/rind.js tour team.create`，需要交互终端。
+从其他工作区启动时使用 CLI 脚本的绝对路径；示例中的 rind 可替换成 `node /absolute/path/to/rind/frontend-cli/bin/rind.js`。登录和端点设置见[配置与凭证](../06-models/authentication-and-settings.md)。只想看操作方式，可运行 `node frontend-cli/bin/rind.js tour agents.create`，需要交互终端。
 
 源码：[CLI 实现](../../../frontend-cli/lib/frontend-cli-implementation.js)、[输入动作](../../../frontend-cli/lib/cli-input-actions.js)、[TUI](../../../frontend-cli/lib/tui/tui.js)、[运行时客户端](../../../frontend-cli/lib/runtime-client.js)、[Tour](../../../frontend-cli/lib/tour/run-tour.js)。验证：[TUI 引擎](../../../frontend-cli/test/tui-engine.test.js)、[虚拟终端集成](../../../frontend-cli/test/tui-integration.test.js)、[输入缓冲](../../../frontend-cli/test/tui-input-buffer.test.js)、[Tour](../../../frontend-cli/test/tour-tui.test.js)。
 
