@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import { managementClient, overviewText, selectRecord } from "./agents-client.js";
 import { createHandoff, HANDOFF_ENV } from "./agents-handoff.js";
 import { terminalKeyboard, TERMINAL_KEYBOARD_ENV } from "./tui/tui.js";
+import { releaseInput, takeInput } from "./tui/console-input.js";
 
 export const agentsHelp = [
   "Usage: rind agents [list | team | task | open | manager | import] [--json]",
@@ -39,10 +40,9 @@ export function clearForConversation(output = process.stdout) {
 
 export async function openAgentChat({ agent, teamId, manager = false, runtimeSessionId, prefill, launch, input = process.stdin, windowScript = fileURLToPath(new URL("../bin/rind.js", import.meta.url)) }) {
   const raw = input.isRaw;
-  // Paused before it leaves raw mode: on Windows a read left pending across
-  // the switch would take the keys typed into the conversation.
-  input.pause?.();
-  input.setRawMode?.(false);
+  // Stopped before it leaves raw mode, or a read left pending would take the
+  // keys typed into the conversation.
+  releaseInput(input);
   // The conversation owns the terminal and handles ctrl+c itself. A signal that
   // reaches this window too (while the child is between terminal modes) must
   // not end it, or the child would be left without its opener.
@@ -69,7 +69,7 @@ export async function openAgentChat({ agent, teamId, manager = false, runtimeSes
       if (code !== 0 && next.action === "return") throw new Error("The conversation window closed unexpectedly (exit " + code + ").");
       return next;
     });
-  } finally { process.off("SIGINT", ignore); await handoff.dispose(); input.setRawMode?.(!!raw); input.resume?.(); }
+  } finally { process.off("SIGINT", ignore); await handoff.dispose(); if (raw) takeInput(input); }
 }
 
 // The last line Rind prints when its windows close.

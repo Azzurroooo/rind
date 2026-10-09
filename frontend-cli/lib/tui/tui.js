@@ -1,5 +1,6 @@
 import { textWidth, truncateToWidth } from "../text-width.js";
 import { createInputBuffer } from "./input-buffer.js";
+import { releaseInput, takeInput } from "./console-input.js";
 import { renderFrame } from "./frame.js";
 
 export { CURSOR_MARKER } from "./frame.js";
@@ -132,15 +133,10 @@ export function createTui(options = {}) {
     if (acquireInput) {
       holdingInput = true;
       rawModeBeforeStart = Boolean(input.isRaw);
-      if (typeof input.setRawMode === "function") {
-        input.setRawMode(true);
-      }
       if (typeof input.setEncoding === "function") {
         input.setEncoding("utf8");
       }
-      if (typeof input.resume === "function") {
-        input.resume();
-      }
+      takeInput(input);
     }
     if (typeof input.on === "function") {
       input.on("data", handleInputData);
@@ -168,12 +164,7 @@ export function createTui(options = {}) {
 
   function giveBackInput() {
     holdingInput = false;
-    if (typeof input.pause === "function") {
-      input.pause();
-    }
-    if (typeof input.setRawMode === "function") {
-      input.setRawMode(rawModeBeforeStart);
-    }
+    releaseInput(input, rawModeBeforeStart);
   }
 
   function stop({ releaseInput = manageInput } = {}) {

@@ -9,6 +9,7 @@ import { appendFileSync, mkdirSync, readdirSync, statSync, unlinkSync } from "no
 import os from "node:os";
 import path from "node:path";
 import { monitorEventLoopDelay } from "node:perf_hooks";
+import { releaseInput, takeInput } from "./tui/console-input.js";
 
 const KEEP_LOGS = 20;
 const BLOCKED_MS = 500;
@@ -66,13 +67,11 @@ export function guardStartup({ input = process.stdin, output = process.stdout, o
     if (!active) return;
     active = false;
     input.off("data", onData);
-    input.pause();
-    input.setRawMode(raw);
+    releaseInput(input, raw);
     output.write("\r\x1b[2K");
   }
-  input.setRawMode(true);
   input.on("data", onData);
-  input.resume();
+  takeInput(input);
   output.write("\x1b[2m" + label + "\x1b[0m");
   return { stop };
 }
