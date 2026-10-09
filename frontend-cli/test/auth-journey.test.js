@@ -126,11 +126,18 @@ test("interactive CLI journey: empty startup, login, send, chat, logout", async 
     await assert.rejects(stat(path.join(rindHome, "sessions")), { code: "ENOENT" });
     // OpenAI offers two ways in; choosing the API key asks for it as before.
     cli.send("/login openai");
-    await cli.waitFor("Sign in [API key, Sign in with ChatGPT]");
-    cli.send("API key");
+    await cli.waitFor("Sign in [Sign in with an account, Sign in with an API key]");
+    cli.send("Sign in with an API key");
     await cli.waitFor("OpenAI API key");
     cli.send("");
-    await cli.waitFor("Login canceled.");
+    const canceledAt = await cli.waitFor("Login canceled.");
+    // A bare /login asks how first, then lists only the providers signed in to that way.
+    cli.send("/login");
+    await cli.waitFor("Sign in [Sign in with an account, Sign in with an API key]", 45000, canceledAt);
+    cli.send("Sign in with an account");
+    const providersAt = await cli.waitFor("Provider [openai]", 45000, canceledAt);
+    cli.send("");
+    await cli.waitFor("Login canceled.", 45000, providersAt);
     cli.send("/login openai-compatible");
     await cli.waitFor("OpenAI compatible (chat completions) API key");
     cli.send("e2e-cli-secret");

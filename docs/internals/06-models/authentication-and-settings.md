@@ -37,7 +37,7 @@ RIND_HOME 默认是 ~/.rind，统一改变设置、凭证、会话等用户数�
 
 ## 用 ChatGPT 账号登录
 
-OpenAI 除 API key 外还可以 "Sign in with ChatGPT"（/login openai 后选择），用 ChatGPT 订阅调用 OpenAI Responses API。流程是公开客户端的 PKCE：Rind 在 127.0.0.1:1455 接收浏览器回调并打开授权页；授权页地址也会显示出来，浏览器无法回调时可以粘贴最终的重定向地址。浏览器回调到达后，授权码立即兑换（它很快过期），终端里的等待提示随之自动关闭，无需按键。令牌以 oauth 类型存入 auth.json，连同签发的 client_id；每次请求前若五分钟内到期，就在 auth.json 的锁内刷新并保存新的 refresh token。订阅令牌的请求带 store:false，不发送 max_output_tokens。端口被占用时（例如另一个未完成的登录或 Codex CLI）登录直接说明原因。
+/login 先问登录方式："Sign in with an account" 或 "Sign in with an API key"，再列出支持该方式的供应商（命名连接只在 API key 一侧）；/login <provider> 只在该供应商有两种方式时才问。OpenAI 除 API key 外还可以用 ChatGPT 账号登录，用 ChatGPT 订阅调用 OpenAI Responses API。流程是公开客户端的 PKCE：Rind 在 127.0.0.1:1455 接收浏览器回调并打开授权页；授权页地址也会显示出来，浏览器无法回调时可以粘贴最终的重定向地址。浏览器回调到达后，授权码立即兑换（它很快过期），终端里的等待提示随之自动关闭，无需按键。令牌以 oauth 类型存入 auth.json，连同签发的 client_id；每次请求前若五分钟内到期，就在 auth.json 的锁内刷新并保存新的 refresh token。订阅令牌的请求带 store:false，不发送 max_output_tokens。端口被占用时（例如另一个未完成的登录或 Codex CLI）登录直接说明原因。
 
 ## 最小配置与登录
 

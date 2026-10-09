@@ -64,8 +64,9 @@ import {
 
 // The /login choice that adds a named OpenAI-compatible endpoint with its own key.
 const ADD_CONNECTION = "+ Add a named endpoint · OpenAI-compatible URL and key";
-// How a provider that offers more than an API key is signed in to.
-const LOGIN_METHODS = { oauth: "Sign in with ChatGPT", api_key: "API key" };
+// The ways /login signs in, in the order it offers them.
+const LOGIN_METHODS = { oauth: "Sign in with an account", api_key: "Sign in with an API key" };
+const LOGIN_CANCELED = "Login canceled.";
 
 export async function runFrontendCliApp(cliArgs = process.argv.slice(2)) {
 // A conversation opened from Agents hands navigation back to the window that
@@ -668,9 +669,11 @@ async function leaveRind(working = 0, notice = "") {
   await shutdownRuntime();
 }
 
-async function chooseLoginMethod(methods) {
-  const choice = await inputActions.askAuthChoice("Sign in", methods.map((key) => LOGIN_METHODS[key] || key));
-  return methods.find((key) => (LOGIN_METHODS[key] || key) === choice) || "";
+async function chooseLoginMethod(offered) {
+  const methods = Object.keys(LOGIN_METHODS).filter((key) => offered.includes(key));
+  if (methods.length < 2) return methods[0] || "api_key";
+  const labels = methods.map((key) => LOGIN_METHODS[key]);
+  return methods[labels.indexOf(await inputActions.askAuthChoice("Sign in", labels))] || "";
 }
 
 async function runLogin(providerId = "") {
@@ -678,17 +681,24 @@ async function runLogin(providerId = "") {
     const providersResult = await request(runtimeMethods.authList);
     const providers = Array.isArray(providersResult?.providers) ? providersResult.providers : [];
     let selected = String(providerId || "").trim();
-    if (!selected) {
-      const options = [...providers.map((item) => `${item.id} · ${item.name} · ${item.configured ? item.source : "not configured"}`), ADD_CONNECTION];
-      const choice = await inputActions.askAuthChoice("Provider", options);
-      selected = choice === ADD_CONNECTION ? ADD_CONNECTION : String(choice || "").split(" · ")[0].trim();
+    const method = await chooseLoginMethod(selected
+      ? providers.find((item) => item.id === selected)?.methods || []
+      : providers.flatMap((item) => item.methods || []));
+    if (!method) {
+      logOutput(LOGIN_CANCELED);
+      return;
     }
-    if (!selected) return;
-    const methods = providers.find((item) => item.id === selected)?.methods || [];
-    const method = methods.length > 1
-      ? await chooseLoginMethod(methods)
-      : "api_key";
-    if (!method) return;
+    if (!selected) {
+      const options = providers
+        .filter((item) => item.methods?.includes(method))
+        .map((item) => `${item.id} · ${item.name} · ${item.configured ? item.source : "not configured"}`);
+      const choice = await inputActions.askAuthChoice("Provider", method === "api_key" ? [...options, ADD_CONNECTION] : options);
+      selected = choice === ADD_CONNECTION ? ADD_CONNECTION : String(choice || "").split(" · ")[0].trim();
+      if (!selected) {
+        logOutput(LOGIN_CANCELED);
+        return;
+      }
+    }
     const result = await request(runtimeMethods.authLogin, selected === ADD_CONNECTION
       ? { method: "connection" }
       : { provider_id: selected, method });
@@ -701,7 +711,7 @@ async function runLogin(providerId = "") {
     }
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    logOutput(/cancel/i.test(message) ? "Login canceled." : `Login failed: ${message}`);
+    logOutput(/cancel/i.test(message) ? LOGIN_CANCELED : `Login failed: ${message}`);
   }
 }
 

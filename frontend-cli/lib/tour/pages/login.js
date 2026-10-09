@@ -17,12 +17,21 @@ export const loginPages = [
       submit(),
       menu({
         kind: "auth-choice",
+        title: "Sign in",
+        options: ["Sign in with an account", "Sign in with an API key"],
+        selected: 0,
+        target: 1,
+      }, [
+        "/login first asks how: with an account, such as ChatGPT, or with an API key.",
+      ]),
+      menu({
+        kind: "auth-choice",
         title: "Provider",
         options: PROVIDERS,
         selected: 0,
         target: 0,
       }, [
-        "/login lists providers discovered from settings and environment.",
+        "Then it lists the providers that sign in that way.",
         "Configured entries already show their source.",
       ]),
       note(["The demo selects Z.ai. In Rind, choose your provider and press Enter; its available login flow determines the next prompts."]),
