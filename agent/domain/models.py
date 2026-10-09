@@ -52,6 +52,8 @@ class Credential:
     access: str = ""
     refresh: str = ""
     expires_at: int | None = None
+    # OAuth: the client the token was issued to; refreshing needs it.
+    client_id: str = ""
 
 
 class ModelCatalog(NamedTuple):

@@ -124,6 +124,13 @@ test("interactive CLI journey: empty startup, login, send, chat, logout", async 
     await cli.waitFor("fake-model-a");
     assert.match(cli.stdout, /session\s+new/, "nothing exists before the first message");
     await assert.rejects(stat(path.join(rindHome, "sessions")), { code: "ENOENT" });
+    // OpenAI offers two ways in; choosing the API key asks for it as before.
+    cli.send("/login openai");
+    await cli.waitFor("Sign in [API key, Sign in with ChatGPT]");
+    cli.send("API key");
+    await cli.waitFor("OpenAI API key");
+    cli.send("");
+    await cli.waitFor("Login canceled.");
     cli.send("/login openai-compatible");
     await cli.waitFor("OpenAI compatible (chat completions) API key");
     cli.send("e2e-cli-secret");

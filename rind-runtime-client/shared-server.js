@@ -22,6 +22,8 @@ export async function startSharedServer(options) {
   const live = createLiveSessions({ onChange(sessions) { for (const peer of peers) if (peer.observe) peer.send({ event: { kind: "runtime", type: "sessions_changed", sessions } }); } });
   const client = createRuntimeClient({ ...options, python: options.python || "python", cwd: paths.directory, cliArgs: [],
     onMessage(event) {
+      // Sign-in progress (the URL to open) is for the window signing in.
+      if (event?.method === "rind/auth/update") { authOwner?.send({ event }); return; }
       live.event(event);
       for (const peer of peers) if (peer.observe || peer.sessions.has(event.session_id)) peer.send({ event });
       // A first prompt failed before its message saved the conversation: it never existed.

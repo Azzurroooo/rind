@@ -48,7 +48,7 @@ _MINIMAX_MODELS = (
 
 PROVIDERS: dict[str, ProviderDefinition] = {
     "openai": ProviderDefinition(
-        "openai", "OpenAI", "openai-responses", "https://api.openai.com/v1", environment_key="OPENAI_API_KEY",
+        "openai", "OpenAI", "openai-responses", "https://api.openai.com/v1", ("api_key", "oauth"), environment_key="OPENAI_API_KEY",
         fallback_models=_models("openai", "openai-responses", (
             ("gpt-6-astra", ("low", "medium", "high", "xhigh", "max"), True, 1050000),
             ("gpt-6.1-sol", ("low", "medium", "high", "xhigh", "max"), True, 1050000),

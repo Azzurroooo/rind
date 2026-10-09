@@ -17,6 +17,7 @@ import time
 from dataclasses import replace
 from pathlib import Path
 import tempfile
+from collections.abc import Awaitable, Callable
 from typing import Any
 from urllib.parse import urlparse
 
@@ -32,6 +33,7 @@ from agent.domain.models import (
     ProviderStatus,
 )
 from agent.infrastructure.credentials import CredentialStore
+import agent.infrastructure.llm.chatgpt_oauth as chatgpt_oauth
 from agent.infrastructure.llm.cancellation import close_resource
 from agent.infrastructure.llm.catalog import PROVIDERS, default_reasoning_efforts, refreshable_models_api
 from agent.infrastructure.settings import AppSettings, load_settings
@@ -41,9 +43,16 @@ logger = logging.getLogger(__name__)
 MODEL_CACHE_TTL = 24 * 60 * 60
 MODEL_LIST_TIMEOUT = 10
 CONNECTION_ID_PATTERN = re.compile(r"[a-z0-9][a-z0-9-]{0,39}")
+# Providers that sign in with an account; each flow offers login(interaction),
+# expiring(credential) and fresh(credential).
+OAUTH_FLOWS = {"openai": chatgpt_oauth}
 
 
-def build_async_client(api_key: str, base_url: str, *, max_retries: int = 2) -> openai.AsyncOpenAI:
+# A key, or for a signed-in account a provider of its current access token.
+ApiKey = str | Callable[[], Awaitable[str]]
+
+
+def build_async_client(api_key: ApiKey, base_url: str, *, max_retries: int = 2) -> openai.AsyncOpenAI:
     from agent.infrastructure.settings import DEFAULT_USER_AGENT
 
     return openai.AsyncOpenAI(
@@ -111,12 +120,14 @@ class ProviderServiceImpl:
         definition = self._provider(provider_id)
         if method not in definition.auth_methods:
             raise ValueError(f"{definition.name} does not support {method} login.")
-        if method != "api_key":
-            raise ValueError(f"{method} login is not implemented.")
-        key = (await interaction.prompt("secret", f"{definition.name} API key")).strip()
-        if not key:
-            raise ValueError("Login canceled.")
-        self.credentials.set(provider_id, Credential(type="api_key", key=key))
+        if method == "oauth":
+            credential = await OAUTH_FLOWS[provider_id].login(interaction)
+        else:
+            key = (await interaction.prompt("secret", f"{definition.name} API key")).strip()
+            if not key:
+                raise ValueError("Login canceled.")
+            credential = Credential(type="api_key", key=key)
+        self.credentials.set(provider_id, credential)
         await self._fetch_models(load_settings(), definition)
         return provider_id
 
@@ -177,7 +188,7 @@ class ProviderServiceImpl:
                 status="rejected", code="provider_not_configured",
             )
         endpoint = self._endpoint(settings, definition)
-        key = credential.key or credential.access
+        key = self._api_key(definition, credential)
         efforts = next((model.reasoning_efforts for model in definition.fallback_models if model.id == selection.model_id), ())
         # LongCat documents a thinking toggle, not OpenAI reasoning_effort.
         # A saved effort from a previous model must not become an unsupported field.
@@ -194,16 +205,16 @@ class ProviderServiceImpl:
 
             return OpenAIResponsesClient(
                 build_async_client(key, endpoint), selection.model_id, selection.reasoning_effort,
-                workspace_root=workspace_root, reasoning_efforts=efforts,
+                workspace_root=workspace_root, reasoning_efforts=efforts, subscription=credential.type == "oauth",
             )
         if definition.api == "anthropic-messages":
             from agent.infrastructure.llm.anthropic_messages import AnthropicMessagesClient
 
-            return AnthropicMessagesClient(api_key=key, model=selection.model_id, base_url=endpoint)
+            return AnthropicMessagesClient(api_key=credential.key, model=selection.model_id, base_url=endpoint)
         if definition.api == "google-generative-ai":
             from agent.infrastructure.llm.google_generative_ai import GoogleGenerativeAIClient
 
-            return GoogleGenerativeAIClient(api_key=key, model=selection.model_id, base_url=endpoint)
+            return GoogleGenerativeAIClient(api_key=credential.key, model=selection.model_id, base_url=endpoint)
         raise ProviderError(f"Unsupported provider API: {definition.api}", status="rejected", code="unsupported_api")
 
     @staticmethod
@@ -267,7 +278,7 @@ class ProviderServiceImpl:
         client = None
         try:
             endpoint = self._endpoint(settings, definition)
-            client = build_async_client(credential.key or credential.access, endpoint, max_retries=0)
+            client = build_async_client(self._api_key(definition, credential), endpoint, max_retries=0)
             async with asyncio.timeout(MODEL_LIST_TIMEOUT):
                 response = await client.models.list(timeout=MODEL_LIST_TIMEOUT)
                 data = getattr(response, "data", response)
@@ -321,6 +332,24 @@ class ProviderServiceImpl:
                 return []
             entry = entry.get("models")
         return [item for item in entry if _item_id(item)] if isinstance(entry, list) else []
+
+    def _api_key(self, definition: ProviderDefinition, credential: Credential) -> ApiKey:
+        """The key; for a signed-in account its token, refreshed before each request that needs it."""
+        if credential.type != "oauth":
+            return credential.key
+        flow = OAUTH_FLOWS[definition.id]
+        current = credential
+
+        async def access() -> str:
+            nonlocal current
+            if flow.expiring(current):
+                renewed = await asyncio.to_thread(self.credentials.renew, definition.id, flow.fresh)
+                if renewed is None:
+                    raise ProviderError(f"Signed out of {definition.name}. Run /login.", status="rejected", code="provider_not_configured")
+                current = renewed
+            return current.access
+
+        return access
 
     def _connections(self) -> dict[str, ProviderDefinition]:
         return self.providers | {item.id: item for item in self.credentials.connections() if item.id not in self.providers}

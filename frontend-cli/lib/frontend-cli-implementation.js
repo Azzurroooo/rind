@@ -64,6 +64,8 @@ import {
 
 // The /login choice that adds a named OpenAI-compatible endpoint with its own key.
 const ADD_CONNECTION = "+ Add a named endpoint · OpenAI-compatible URL and key";
+// How a provider that offers more than an API key is signed in to.
+const LOGIN_METHODS = { oauth: "Sign in with ChatGPT", api_key: "API key" };
 
 export async function runFrontendCliApp(cliArgs = process.argv.slice(2)) {
 // A conversation opened from Agents hands navigation back to the window that
@@ -666,6 +668,11 @@ async function leaveRind(working = 0, notice = "") {
   await shutdownRuntime();
 }
 
+async function chooseLoginMethod(methods) {
+  const choice = await inputActions.askAuthChoice("Sign in", methods.map((key) => LOGIN_METHODS[key] || key));
+  return methods.find((key) => (LOGIN_METHODS[key] || key) === choice) || "";
+}
+
 async function runLogin(providerId = "") {
   try {
     const providersResult = await request(runtimeMethods.authList);
@@ -677,9 +684,14 @@ async function runLogin(providerId = "") {
       selected = choice === ADD_CONNECTION ? ADD_CONNECTION : String(choice || "").split(" · ")[0].trim();
     }
     if (!selected) return;
+    const methods = providers.find((item) => item.id === selected)?.methods || [];
+    const method = methods.length > 1
+      ? await chooseLoginMethod(methods)
+      : "api_key";
+    if (!method) return;
     const result = await request(runtimeMethods.authLogin, selected === ADD_CONNECTION
       ? { method: "connection" }
-      : { provider_id: selected, method: "api_key" });
+      : { provider_id: selected, method });
     const selection = result?.selection && typeof result.selection === "object" ? result.selection : null;
     if (selection?.provider_id && selection.model_id) {
       sessionState.info = { ...sessionState.info, provider: selection.provider_id, model: selection.model_id };
@@ -724,10 +736,8 @@ async function runLogout(providerId = "") {
 }
 
 async function renderAuthUpdate(message) {
-  const event = message?.event || {};
-  const type = String(event.type || "info");
-  const value = String(event.message || event.text || event.url || event.code || "").trim();
-  if (value) logOutput(`[${type}] ${value}`);
+  const text = String(message?.event?.message || "").trim();
+  if (text) logOutput(text);
 }
 
 async function renderEvent(message) {

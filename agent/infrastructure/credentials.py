@@ -10,7 +10,7 @@ import json
 import os
 import tempfile
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from filelock import FileLock
 
@@ -43,6 +43,18 @@ class CredentialStore:
         connection = previous.get("connection") if isinstance(previous, dict) else None
         data[provider_id] = _credential_dict(credential) | ({"connection": connection} if isinstance(connection, dict) else {})
         self._write(data)
+
+    def renew(self, provider_id: str, refresh: Callable[[Credential], Credential]) -> Credential | None:
+        """Replace the stored credential with refresh(it) under the lock, so a
+        rotated refresh token is never lost to another process; None once signed out."""
+        with self.lock:
+            current = self.get(provider_id)
+            if current is None:
+                return None
+            renewed = refresh(current)
+            if renewed != current:
+                self.set(provider_id, renewed)
+            return renewed
 
     def connections(self) -> list[ProviderDefinition]:
         """Named connections the user added, as OpenAI-compatible chat providers."""
@@ -107,6 +119,7 @@ def _credential(value: dict[str, Any]) -> Credential | None:
             access=value["access"],
             refresh=str(value.get("refresh") or ""),
             expires_at=int(expires) if isinstance(expires, (int, float)) else None,
+            client_id=str(value.get("client_id") or ""),
         )
     return None
 
@@ -132,4 +145,6 @@ def _credential_dict(credential: Credential) -> dict[str, Any]:
         value["refresh"] = credential.refresh
     if credential.expires_at is not None:
         value["expires_at"] = credential.expires_at
+    if credential.client_id:
+        value["client_id"] = credential.client_id
     return value

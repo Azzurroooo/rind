@@ -19,15 +19,18 @@ from agent.infrastructure.llm.images import image_data_url
 
 
 class OpenAIResponsesClient(ChatClient):
-    def __init__(self, async_client: Any, model: str, reasoning_effort: str = "", workspace_root: str | None = None, *, reasoning_efforts: tuple[str, ...] = ()) -> None:
+    """`subscription`: a ChatGPT sign-in token, which stores nothing and takes no output cap."""
+
+    def __init__(self, async_client: Any, model: str, reasoning_effort: str = "", workspace_root: str | None = None, *, reasoning_efforts: tuple[str, ...] = (), subscription: bool = False) -> None:
         self._client = async_client
         self._model = model
         self._reasoning_effort = reasoning_effort or ""
         self._reasoning_efforts = reasoning_efforts
+        self._subscription = subscription
 
     async def create(self, messages, tools=None, cancellation_token: CancellationToken | None = None, *, max_output_tokens: int | None = None, reasoning_effort: str | None = None) -> ModelCompletion:
         payload = self._payload(messages, tools, stream=False)
-        if max_output_tokens is not None:
+        if max_output_tokens is not None and not self._subscription:
             payload["max_output_tokens"] = max_output_tokens
         effort = resolve_reasoning_effort(self._reasoning_effort, reasoning_effort, self._reasoning_efforts)
         if effort:
@@ -62,6 +65,8 @@ class OpenAIResponsesClient(ChatClient):
 
     def _payload(self, messages, tools, *, stream: bool) -> dict[str, Any]:
         payload: dict[str, Any] = {"model": self._model, "input": _input_items(messages), "stream": stream}
+        if self._subscription:
+            payload["store"] = False
         if tools:
             payload["tools"] = [_response_tool(tool) for tool in tools]
         if self._reasoning_effort:
